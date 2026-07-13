@@ -16,6 +16,7 @@ tmp
 # v2.1.2 T2：assets/ 下的银行对账单 + Pending 数据管理是模块**模板文件**，必须入库
 !assets/银行对账单.xlsx
 !assets/Pending数据管理.xlsx
+!assets/资金对账导出不平.xlsx
 # Excel 临时锁文件（打开 xlsx 时 Office 自动产生 .~filename.xlsx，永远不入 git）
 .~*.xlsx
 

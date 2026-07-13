@@ -1,6 +1,6 @@
 // 功能1「异常说明并入命中场景」集成测试（🔴 资金红线·只读检测端到端契约）
 //   覆盖：
-//     ① 编排器 runReconciliation 产出 manyToManyReviewRows / stats.manyToManyReviewCount（NvM 命中、1v1/1vN/Nv1 不命中）
+//     ① 编排器只对实际改值行产出 manyToManyReviewRows；note-only NvM 不提升为命中
 //     ② 🔴 回填行为不变 + 纯只读：full orchestrator 与「直调 R5s2-recon 引擎」对同一夹具的 modifications /
 //        银行行最终态逐字节一致（检测器不改任何 bankRow / modifications / 行数守恒）
 //     ③ 跨接缝透传：经 io 层 writeBankStatementMainOutput（= main.js export handler 同款调用，
@@ -99,7 +99,7 @@ function r5s2Scenario() {
 // 夹具分组：
 //   A 1v1（ACC_A，50）：1 银行 + 1 调拨 → 回填、不命中检测
 //   B NvM-recon（ACC_B，100）：2 银行 + 2 调拨 → 回填 cand[0]、检测命中（note=调拨）
-//   C NvM-gateway（ACC_C，200）：2 银行 + 2 网关、无调拨 → 不回填（recon 路）、检测命中（note=网关）
+//   C NvM-gateway（ACC_C，200）：2 银行 + 2 网关、无调拨 → 不回填，因此 3.0.14 不检测、不提升
 //   D 1vN（ACC_D，300）：1 银行 + 2 调拨 → 回填、不命中
 //   E Nv1（ACC_E，400）：2 银行 + 1 调拨 → 回填 cand[0]、不命中
 function buildFixture() {
@@ -150,16 +150,16 @@ async function run() {
 
   // ② manyToManyReviewRows / stats
   const reviewIds = result.manyToManyReviewRows.map((r) => r.row._rowId).sort();
-  assertEq(JSON.stringify(reviewIds), JSON.stringify(['bB1', 'bB2', 'bC1', 'bC2']), 'reviewRows 命中 = NvM 银行行（B+C 各2）');
-  assertEq(result.stats.manyToManyReviewCount, 4, 'stats.manyToManyReviewCount=4');
+  assertEq(JSON.stringify(reviewIds), JSON.stringify(['bB1', 'bB2']), 'reviewRows 只含实际回填的 NvM 银行行（B 两行）');
+  assertEq(result.stats.manyToManyReviewCount, 2, 'stats.manyToManyReviewCount=2');
   // 1v1 / 1vN / Nv1 不进
   assertTrue(!reviewIds.includes('bA1'), '1v1(bA1) 不进 reviewRows');
   assertTrue(!reviewIds.includes('bD1'), '1vN(bD1) 不进 reviewRows');
   assertTrue(!reviewIds.includes('bE1') && !reviewIds.includes('bE2'), 'Nv1(bE) 不进 reviewRows');
-  // note 对手方正确（B=调拨、C=网关）
+  // B 实际回填，保留调拨多对多说明；C 未改字段，不执行异常说明检测。
   const noteById = new Map(result.manyToManyReviewRows.map((r) => [r.row._rowId, r.note]));
   assertTrue(/调拨/.test(noteById.get('bB1')) && /多对多/.test(noteById.get('bB1')), 'bB1 note 标注调拨多对多');
-  assertTrue(/网关/.test(noteById.get('bC1')) && /多对多/.test(noteById.get('bC1')), 'bC1 note 标注网关多对多');
+  assertTrue(!noteById.has('bC1') && !noteById.has('bC2'), 'bC 未改字段，不生成网关多对多异常说明');
 
   // ③ 🔴 回填行为不变：orchestrator 的 ReconciliationId modifications == baseline 引擎；银行行最终态逐字节一致
   const backfillMap = (mods) => {
@@ -233,13 +233,13 @@ async function run() {
         }
       }
       const midsInSheet = noteRows.map((r) => r.merchantId).sort();
-      assertEq(JSON.stringify(midsInSheet), JSON.stringify(['ACC_B', 'ACC_B', 'ACC_C', 'ACC_C']), '异常说明行 MerchantId = B/B/C/C');
+      assertEq(JSON.stringify(midsInSheet), JSON.stringify(['ACC_B', 'ACC_B']), '异常说明行 MerchantId 仅 B/B');
       assertTrue(noteRows.every((r) => r.note.includes('多对多')), '每条异常说明非空且含「多对多」');
       // 银行行内部字段（_rowId/_modifiedColumns 等）不在表头（headers 投影，不暴露诊断列）
       const headerHasInternal = headerCells.some((h) => typeof h === 'string' && h.startsWith('_'));
       assertTrue(!headerHasInternal, '命中 sheet 表头不含 _ 内部诊断列');
-      // 回填后的 ReconciliationId 忠实写出（bB 行非空 / bC 行空）
-      assertTrue(noteRows.filter((r) => r.reconId !== '').length === 2, '异常说明行内 2 行(B)带回填 ReconciliationId、2 行(C)为空');
+      // 回填后的 ReconciliationId 忠实写出；未回填 C 行不应靠异常说明进入命中 sheet。
+      assertTrue(noteRows.every((r) => r.reconId !== ''), '异常说明两行均为已回填 ReconciliationId 的 B 行');
     }
 
     // ===== Step 3：条件生成 —— 无 NvM → 不加 sheet =====

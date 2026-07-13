@@ -23,7 +23,6 @@ const {
   runReconciliation,
   bucketScenarios,
   buildOutputRows,
-  buildReviewRowIdSet,
   buildChannelRegionHits
 } = require('../../../src/main-process/reconciliation-orchestrator');
 const { runAllScenarios } = require('../../../src/main-process/scenario-dispatcher');
@@ -464,9 +463,9 @@ test.describe('R2 锁定但未改值的命中行', () => {
   const mkRows = () => [
     // 对照行：BillTag 用中文 '普通'，绝不含字母 L/R（'包含' 匹配大小写敏感、按子串）→ 不入 type1/type2
     makeBankRow({ _rowId: 'b0', BillTag: '普通' }),                   // 不含 L/R → 不命中
-    makeBankRow({ _rowId: 'L1', BillTag: 'L', PairKey: 'K1', 'Transaction Description': '' }),
+    makeBankRow({ _rowId: 'L1', BillTag: 'L', PairKey: 'K1', 'Transaction Description': '', 'Credit Amount': 100, 'Debit Amount': 0 }),
     // R1 的标记字段已等于 markValue.value → 配对锁定但不 record
-    makeBankRow({ _rowId: 'R1', BillTag: 'R', PairKey: 'K1', 'Transaction Description': '已对账' })
+    makeBankRow({ _rowId: 'R1', BillTag: 'R', PairKey: 'K1', 'Transaction Description': '已对账', 'Credit Amount': 100, 'Debit Amount': 0 })
   ];
 
   test('前置：dispatcher 确认 L1/R1 被锁定进 modifiedRows 但 modifications 为空（_modifiedColumns 空 Set）', async () => {
@@ -486,7 +485,12 @@ test.describe('R2 锁定但未改值的命中行', () => {
   test('编排器：R2 锁定未改值行不进 modifiedRows，进入 unmatchedRows，行数守恒', async () => {
     const bankRows = mkRows();
     const total = bankRows.length;
-    const result = await runReconciliation({ bankRows, gwRows: [], scenarios: [makeR2PairLockNoChangeScenario()] });
+    // L1/R1 与两条网关构成 2×2 多对多候选；旧逻辑会生成异常说明并把它们提升为命中行。
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'GW-1', merchantid: 'M001', currency: 'USD', amount: 100, Billdate: '2026-06-01' }),
+      makeGwRow({ reconciliationid: 'GW-2', merchantid: 'M001', currency: 'USD', amount: 100, Billdate: '2026-06-01' })
+    ];
+    const result = await runReconciliation({ bankRows, gwRows, scenarios: [makeR2PairLockNoChangeScenario()] });
 
     const modIds = result.modifiedRows.map((r) => r._rowId).sort();
     // ① 没有实际 modification → 不进入导出「命中场景」
@@ -496,12 +500,43 @@ test.describe('R2 锁定但未改值的命中行', () => {
     const unmatchedIds = result.unmatchedRows.map((r) => r._rowId).sort();
     assert.deepEqual(unmatchedIds, ['L1', 'R1', 'b0'], '未改字段的行应留在 unmatchedRows');
 
-    // ③ 行数守恒
+    // ③ 未实际改值行不传给异常说明检测器，不能靠 note-only 提升为命中。
+    assert.deepEqual(result.manyToManyReviewRows, [], '锁定 no-op 行不执行多对多异常说明检测');
+    assert.equal(result.stats.manyToManyReviewCount, 0, '锁定 no-op 行不计异常说明');
+
+    // ④ 行数守恒
     assert.equal(
       result.modifiedRows.length + result.unmatchedRows.length,
       total,
       'modifiedRows + unmatchedRows === bankRows.length'
     );
+  });
+
+  test('编排器：实际改值行可继续带多对多异常说明，改值列与行数守恒不变', async () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'b1', BillTag: 'OFFSET-A', 'Credit Amount': 100, 'Debit Amount': 0 }),
+      makeBankRow({ _rowId: 'b2', BillTag: 'OFFSET-B', 'Credit Amount': 100, 'Debit Amount': 0 })
+    ];
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'GW-1', merchantid: 'M001', currency: 'USD', amount: 100, Billdate: '2026-06-01' }),
+      makeGwRow({ reconciliationid: 'GW-2', merchantid: 'M001', currency: 'USD', amount: 100, Billdate: '2026-06-01' })
+    ];
+
+    const result = await runReconciliation({ bankRows, gwRows, scenarios: [makeR2OffsetScenario()] });
+
+    assert.deepEqual(result.modifiedRows.map((r) => r._rowId), ['b1', 'b2'], '两条实际改值行进入命中结果');
+    assert.ok(
+      result.modifiedRows.every((r) => r._modifiedColumns.has('Transaction Description')),
+      '实际改值列继续保留，供 writer 标黄'
+    );
+    assert.deepEqual(
+      result.manyToManyReviewRows.map((rv) => rv.row._rowId),
+      ['b1', 'b2'],
+      '实际改值行仍执行多对多检测'
+    );
+    assert.ok(result.manyToManyReviewRows.every((rv) => rv.note.trim() !== ''), '实际改值行保留非空异常说明');
+    assert.equal(result.stats.manyToManyReviewCount, 2, '异常说明统计只计实际改值行');
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length, '行数守恒');
   });
 
   test('编排器：C3 匹配成功但 assign 同值时不进 modifiedRows', async () => {
@@ -543,48 +578,32 @@ test.describe('R2 锁定但未改值的命中行', () => {
 });
 
 // ---------------------------------------------------------------------------
-// v3.0.13：命中场景 = 实际字段修改行 ∪ 有异常说明行
+// v3.0.14：命中场景只认至少一个字段实际变化；异常说明不能提升未改值行。
 // ---------------------------------------------------------------------------
-test.describe('buildOutputRows — 异常说明行可见性', () => {
-  test('有异常说明但无字段修改的行进入 modifiedRows，_modifiedColumns 为空 Set，行数守恒', () => {
+test.describe('buildOutputRows — 仅实际改值行进入命中结果', () => {
+  test('空修改列集合不算改值，note-only/R2 锁定元数据不能提升为 modifiedRows', () => {
     const bankRows = [
       makeBankRow({ _rowId: 'changed', FundType: 'outbound' }),
       makeBankRow({ _rowId: 'review-only', FundType: 'Charge' }),
       makeBankRow({ _rowId: 'clean', FundType: 'Inbound' })
     ];
     const modColsByRowId = new Map([
-      ['changed', new Set(['FundType'])]
+      ['changed', new Set(['FundType'])],
+      ['review-only', new Set()]
     ]);
     const r2HitByRowId = new Map([
       ['review-only', { _rowId: 'review-only', _hitScenarioId: 9, _hitScenarioName: 'R2命中但未改' }]
     ]);
-    const visibleReviewRowIds = buildReviewRowIdSet([
-      { row: bankRows[1], note: '调拨多对多，请人工判断' },
-      { row: bankRows[2], note: '   ' }
-    ]);
 
-    const result = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, visibleReviewRowIds);
+    const result = buildOutputRows(bankRows, modColsByRowId, r2HitByRowId);
 
-    assert.deepEqual(result.modifiedRows.map((r) => r._rowId).sort(), ['changed', 'review-only']);
-    const reviewOnly = result.modifiedRows.find((r) => r._rowId === 'review-only');
-    assert.ok(reviewOnly._modifiedColumns instanceof Set, 'review-only _modifiedColumns 仍是 Set');
-    assert.equal(reviewOnly._modifiedColumns.size, 0, 'review-only 无字段修改 → 空 Set');
-    assert.equal(reviewOnly._hitScenarioName, 'R2命中但未改', '有异常说明时仍嫁接 R2 命中元数据');
-    assert.deepEqual(result.unmatchedRows.map((r) => r._rowId), ['clean'], '空 note 不应触发命中可见性');
+    assert.deepEqual(result.modifiedRows.map((r) => r._rowId), ['changed'], '只有非空修改列集合对应行进入 modifiedRows');
+    assert.deepEqual(
+      result.unmatchedRows.map((r) => r._rowId),
+      ['review-only', 'clean'],
+      '空 Set 的锁定/note-only 行与普通未命中行都留在 unmatchedRows'
+    );
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length, '行数守恒');
-  });
-
-  test('buildReviewRowIdSet 忽略空 note、空 row、空 rowId，并按 rowId 去重', () => {
-    const row = makeBankRow({ _rowId: 'b1' });
-    const ids = buildReviewRowIdSet([
-      { row, note: '说明1' },
-      { row, note: '说明2' },
-      { row: makeBankRow({ _rowId: 'b2' }), note: '' },
-      { row: makeBankRow({ _rowId: null }), note: '无 rowId' },
-      { row: null, note: '无 row' }
-    ]);
-
-    assert.deepEqual(Array.from(ids), ['b1']);
   });
 });
 
@@ -1016,7 +1035,7 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
       dispatchReconContext: { dispatchReconRows: dispRows },
       onProgress: (ev) => { if (ev && ev.round) rounds.push(ev.round); }
     });
-    // 轮次边界顺序钉死（编排器各轮「执行之后」让出一次）。v3.0.12 性能优化：在 R5s4 退款回填后、M2M 异常-人工
+    // 轮次边界顺序钉死（编排器各轮「执行之后」让出一次）。v3.0.12 性能优化：在 R5s4 退款回填后、M2M 异常说明
     //   判断检测后各补一次让出，使「R5s4 + detector + buildOutputRows」不再挤成不让出的同步块；M2M 是末轮，
     //   其后只剩只读输出构造（buildOutputRows），无 yield。
     assert.deepStrictEqual(

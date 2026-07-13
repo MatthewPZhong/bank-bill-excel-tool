@@ -84,7 +84,7 @@ function ensureUiStyleDefault(db) {
   return UI_STYLE_DEFAULT;
 }
 
-// v2.1.4：9 个主模块的 ID 全集（renderer 端 MODULES 常量必须与此一致；新增模块时两边都要加）
+// v2.1.4：主模块 ID 全集（renderer 端 MODULES 常量必须与此一致；新增模块时两边都要加）
 //   修复历史 bug — v2.1.2 新增 bank-bu-recon、v2.1.3 新增 biz-op-recon 时忘了同步 CURRENT_MODULE_VALID 枚举，
 //   导致用户切到这两个模块时 setCurrentModule 抛 "Invalid current_module"
 //   v2.1.12 需求1 新增 vcc-op-calc 时再次踩同一坑（dev d2050b0 漏注册），前端开工前补回（spec §8.1）
@@ -97,7 +97,8 @@ const ALL_MODULE_IDS = Object.freeze([
   'bank-bu-recon',           // v2.1.2 新增
   'biz-op-recon',            // v2.1.3 新增
   'acquiring-bill-currency', // v2.1.6 新增
-  'vcc-op-calc'              // v2.1.12 需求1 新增
+  'vcc-op-calc',             // v2.1.12 需求1 新增
+  'pre-fund-reconciliation'  // v3.0.14 前置资金对账
 ]);
 
 const CURRENT_MODULE_KEY = 'current_module';

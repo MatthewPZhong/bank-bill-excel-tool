@@ -32,6 +32,10 @@ const runCheckWorkerPool = require('./main-process/run-check-worker-pool');
 // v3.0.5 PR-3（Part B Phase 1）：收单 per-月侧库编排层（import/run/status/listMonths/孤儿/retention 路由侧库）
 const acquiringRunData = require('./main-process/acquiring-bill-currency-run-data');
 const runDataStore = require('./backend/run-data-store');
+// v3.0.14：前置资金对账 session/service（临时 MPT + 严格1:1 + 5-sheet 导出）。
+const {
+  createPreFundReconciliationService
+} = require('./main-process/pre-fund-reconciliation/service');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -335,8 +339,23 @@ if (process.platform === 'win32') {
 }
 
 let mainWindow = null;
+// 运行结果 side DB 会在启动和新 run 时整库回收，必须阻止两个正式应用实例并发操作同一 userData。
+// preview/startup:measure 使用隔离临时目录，允许并行启动，避免开发工具争抢正式实例锁。
+const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH;
+const hasSingleInstanceLock = !requireSingleInstanceLock || app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else if (requireSingleInstanceLock) {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
 let database = null;
 let pendingDb = null;
+let preFundReconciliationService = null;
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
   getStorageRoot: () => ensureStorageRoot()
@@ -13304,6 +13323,222 @@ function registerNewAccountHandlers() {
   });
 }
 
+function getPreFundReconciliationService() {
+  if (!database || !database.db) {
+    throw new Error('数据库尚未初始化，请稍后重试');
+  }
+  if (!preFundReconciliationService) {
+    preFundReconciliationService = createPreFundReconciliationService({
+      userDataDir: path.dirname(database.dbPath),
+      database,
+      templatePath: path.join(__dirname, '..', 'assets', '资金对账导出不平.xlsx')
+    });
+  }
+  return preFundReconciliationService;
+}
+
+function schedulePreFundReconciliationStartupCleanup() {
+  setImmediate(() => {
+    try {
+      getPreFundReconciliationService();
+    } catch (error) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'pre-fund-reconciliation',
+        message: '前置资金对账启动结果回收失败',
+        details: [error && error.message ? error.message : String(error)],
+        stack: error && error.stack ? error.stack : undefined
+      });
+    }
+  });
+}
+
+function preFundFailureResult(error) {
+  return {
+    status: 'failed',
+    code: error && error.code ? String(error.code) : 'pre-fund-reconciliation-failed',
+    message: error && error.message ? String(error.message) : String(error),
+    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+  };
+}
+
+function sendPreFundProgress(event, channel, payload) {
+  try {
+    if (event && event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload);
+  } catch (_error) { /* renderer 已关闭时忽略进度 */ }
+}
+
+// v3.0.14：前置资金对账 IPC。所有写/运行/导出与现有资金模块共用 bankStatementOperationLock，
+// 避免 linked_gateway_bill 变更与快照构建交错。
+function registerPreFundReconciliationHandlers() {
+  trackedIpcHandle('pre-fund-reconciliation:session-status', '前置资金对账', '查看状态', async () => {
+    try {
+      return getPreFundReconciliationService().status();
+    } catch (error) {
+      return preFundFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:import-bank', '前置资金对账', '导入银行对账单', async () => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-import-bank');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const choice = await showImportOpenDialog('pre-fund-reconciliation', {
+        title: '导入标准银行对账单',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPreFundReconciliationService().importBank(choice.filePaths[0]);
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:import-mpt', '前置资金对账', '导入临时网关账单', async (event) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-import-mpt');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const choice = await showImportOpenDialog('pre-fund-reconciliation', {
+        title: '导入 MPT 网关账单（可多选）',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'MPT 网关账单', extensions: ['txt', 'gz'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return await getPreFundReconciliationService().importMptFiles(
+        choice.filePaths,
+        (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
+      );
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:temp:list', '前置资金对账', '查看临时链接表', async () => {
+    try {
+      return { status: 'ok', batches: getPreFundReconciliationService().listTempBatches() };
+    } catch (error) {
+      return preFundFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:temp:delete', '前置资金对账', '删除临时批次', async (_event, payload = {}) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-delete-temp');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return { status: 'ok', ...await getPreFundReconciliationService().deleteTempBatch(payload) };
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  ipcMain.handle('pre-fund-reconciliation:temp:count-by-date-range', async (_event, payload = {}) => {
+    try {
+      const result = getPreFundReconciliationService().countTempByDateRange(payload);
+      return { status: 'ok', count: result.rowCount, batchCount: result.batchCount };
+    } catch (error) {
+      return preFundFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'pre-fund-reconciliation:temp:delete-by-date-range',
+    '前置资金对账',
+    '按日期删除临时链接表',
+    async (_event, payload = {}) => {
+      const lock = tryAcquireBankStatementOpLock('pre-fund-delete-temp-by-date-range');
+      if (!lock.acquired) return { status: 'busy', message: lock.message };
+      try {
+        const result = await getPreFundReconciliationService().deleteTempByDateRange(payload);
+        return { status: 'ok', deleted: result.deletedRows, ...result };
+      } catch (error) {
+        return preFundFailureResult(error);
+      } finally {
+        releaseBankStatementOpLock();
+      }
+    }
+  );
+
+  trackedIpcHandle('pre-fund-reconciliation:temp:clear', '前置资金对账', '清空临时链接表', async () => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-clear-temp');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return { status: 'ok', ...await getPreFundReconciliationService().clearTemp() };
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:run', '前置资金对账', '开始运行', async (event, payload = {}) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-run');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return await getPreFundReconciliationService().run({
+        scenario: payload && payload.scenario,
+        onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:run-progress', progress)
+      });
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:export', '前置资金对账', '导出文件', async (event) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-export');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const choice = await showImportOpenDialog('pre-fund-reconciliation-export', {
+        title: '选择前置资金对账导出目录',
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const service = getPreFundReconciliationService();
+      const options = {
+        outputDirectory: choice.filePaths[0],
+        overwrite: false,
+        onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:export-progress', progress)
+      };
+      let result = await service.export(options);
+      if (result && result.status === 'conflict') {
+        const conflictNames = result.conflicts.map((item) => item.fileName).join('\n');
+        const confirm = await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: '文件已存在',
+          message: `以下文件已存在：\n${conflictNames}`,
+          detail: '是否覆盖本次全部冲突文件？取消后不会写入任何文件。',
+          buttons: ['取消', '覆盖全部'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true
+        });
+        if (confirm.response !== 1) return { status: 'cancelled' };
+        result = await service.export({ ...options, overwrite: true });
+      }
+      return result;
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+}
+
 // v3.0.8 需求1：工具箱🧰（合表 / 拆表）3 个 IPC handler。
 //   纯数据变换委托 src/main-process/toolbox.js；本处只做 dialog（show{Open,Save}Dialog）+ file-service IO
 //   （extractHeaders / readRows / writeWorkbookRows）+ copyFileSync 落盘。
@@ -13702,6 +13937,7 @@ function registerAllIpcHandlers() {
   registerBigAccountOrderHandlers();
   registerFileHandlers();
   registerNewAccountHandlers();
+  registerPreFundReconciliationHandlers();
   registerToolboxHandlers();
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
@@ -13720,6 +13956,8 @@ function runBackgroundInitChain() {
     database = new AppDatabase(dataPath);
     database.init();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+    // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
+    schedulePreFundReconciliationStartupCleanup();
 
     // v2.0.0-beta.2 F4 / v2.1.15 W4：ui_style 收敛迁移 —— 老库存了 'General'/非法值就地迁移为 'Clear'，未写则 seed 'Clear'。
     //   General 风格已弃用，setUiStyle 写链路移除，APP_PREVIEW_STYLE 强制风格随之去除（风格恒 Clear）。
@@ -13786,7 +14024,7 @@ function markAppInitDone() {
   } catch (_e) { /* swallow — 窗口已销毁等 */ }
 }
 
-app.whenReady()
+if (hasSingleInstanceLock) app.whenReady()
   .then(() => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();

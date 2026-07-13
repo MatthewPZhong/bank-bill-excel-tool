@@ -896,6 +896,56 @@
       }, 120);
     }
 
+    // v3.0.14：临时链接表管理首页 preview。复用正式入口，并填入稳定样例日期避免依赖本机临时库。
+    function applyPreFundTempManagerPreviewState() {
+      setCurrentModule(MODULES.preFundReconciliation.id);
+      setTimeout(() => {
+        if (!elements.preFundReconciliationTempManagerBtn) return;
+        elements.preFundReconciliationTempManagerBtn.click();
+        setTimeout(() => {
+          const root = elements.modalRoot;
+          if (!root) return;
+          const rows = root.querySelectorAll('tbody tr[data-source-type]');
+          const previewValues = [
+            ['2026-07-08 ~ 2026-07-09', '2026-07-10'],
+            ['2026-07-07 ~ 2026-07-08', '2026-07-11']
+          ];
+          rows.forEach((row, index) => {
+            const values = previewValues[index];
+            if (!values) return;
+            const rangeCell = row.querySelector('.linked-table-col-range');
+            const updatedCell = row.querySelector('.linked-table-col-updated');
+            if (rangeCell) rangeCell.textContent = values[0];
+            if (updatedCell) updatedCell.textContent = values[1];
+          });
+        }, 160);
+      }, 120);
+    }
+
+    // v3.0.14：临时链接表按日期删除框 preview，使用与既有链接表删除框相同的已填日期状态。
+    function applyPreFundTempDeleteRangePreviewState() {
+      setCurrentModule(MODULES.preFundReconciliation.id);
+      setTimeout(() => {
+        if (!elements.preFundReconciliationTempManagerBtn) return;
+        elements.preFundReconciliationTempManagerBtn.click();
+        setTimeout(() => {
+          const deleteBtn = elements.modalRoot && elements.modalRoot.querySelector('[data-action="delete"]');
+          if (!deleteBtn) return;
+          deleteBtn.click();
+          setTimeout(() => {
+            const root = elements.modalRoot;
+            if (!root) return;
+            const startInput = root.querySelector('[data-role="start"]');
+            const endInput = root.querySelector('[data-role="end"]');
+            const confirmBtn = root.querySelector('[data-action="confirm-delete"]');
+            if (startInput) startInput.value = '2026-07-01';
+            if (endInput) endInput.value = '2026-07-31';
+            if (confirmBtn) confirmBtn.disabled = false;
+          }, 120);
+        }, 120);
+      }, 120);
+    }
+
     // v3.0.1 需求1（D4）：删除网关对账单弹框 preview（🔴 资金红线）。
     //   直接 openModal 删除弹框，填入示例日期范围并启用「删除」，截图体现「已填日期 → 删除可点」交互态。
     //   注：弹框的红色警告框 + 「将删约 N 行」计数显示已按用户 UI 迭代去掉（见 createLinkedTableDeleteRangeDialog），
@@ -1388,6 +1438,10 @@
       applyScenarioCategorySelectPreviewState,
       // v2.1.14 C：链接表管理弹窗 preview
       applyLinkedTableManagerPreviewState,
+      // v3.0.14：临时链接表管理首页 preview
+      applyPreFundTempManagerPreviewState,
+      // v3.0.14：临时链接表按日期删除框 preview
+      applyPreFundTempDeleteRangePreviewState,
       // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
       applyLinkedTableDeleteRangePreviewState,
       // v3.0.1 需求3：网关对账单修复场景单选框 preview

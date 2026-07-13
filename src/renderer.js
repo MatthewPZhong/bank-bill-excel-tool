@@ -56,6 +56,10 @@ const MODULES = Object.freeze({
     //   数十处引用 + DB module schema + settings-repository ALL_MODULE_IDS + usage-stats key 不变）
     name: '资金对账数据处理'
   },
+  preFundReconciliation: {
+    id: 'pre-fund-reconciliation',
+    name: '前置资金对账'
+  },
   // v2.1.0-beta.1 PR-A：对账单ReconID修复模块（C4 / business + gateway 两个子模式）
   // v2.1.0-beta.3 T4：模块下挂 business（单据对账单）+ gateway（网关对账单）两个子模式，按主面板「账单类别」下拉切换
   //   ⚠️ module.id 保留 'recon-id-fix'（数十处引用 + DB schema CHECK 约束）；
@@ -177,6 +181,11 @@ const state = {
   //   叠加进《开始运行》《导出文件》按钮的 disabled 计算（updateBankStatementRunBtnDisabled /
   //   updateBankStatementExportButtonsDisabled）；三入口最外层设 true、最内层 finally 清。
   bankStatementInflight: false,
+  // v3.0.14：前置资金对账 renderer 只缓存轻量状态，明细和结果保留在 main/side DB。
+  preFundReconciliation: {
+    session: null,
+    inflight: false
+  },
   // v2.1.16-beta.5 需求1（PR-4 修订）🔴 资金红线：资金对账面板 row1《开始运行》的智能路由模式。
   //   'bank'（默认/最近一次导入对账单成功）→ bankStatementRunBtn 走 handleBankStatementRun()（R1-R5 核心引擎）；
   //   'gateway'（最近一次导入不平表成功）   → bankStatementRunBtn 走 handleBankStatementGatewayReconRun()（网关场景）。
@@ -314,6 +323,14 @@ const elements = {
   //   导出文件 bankStatementGatewayReconExportBtn）已随面板删除——DOM 缓存、事件绑定、导出 disabled 网关分支一并清理。
   //   网关 ReconID 修复仍由「对账单 ReconID 修复」面板入口承载（handleReconIdFixExport 等保留）。
   bankStatementLinkedTableBtn: document.getElementById('bankStatementLinkedTableBtn'),
+  // v3.0.14：前置资金对账模块。
+  preFundReconciliationModulePanel: document.getElementById('preFundReconciliationModulePanel'),
+  preFundReconciliationImportBankBtn: document.getElementById('preFundReconciliationImportBankBtn'),
+  preFundReconciliationExportBtn: document.getElementById('preFundReconciliationExportBtn'),
+  preFundReconciliationRunBtn: document.getElementById('preFundReconciliationRunBtn'),
+  preFundReconciliationScenarioSelect: document.getElementById('preFundReconciliationScenarioSelect'),
+  preFundReconciliationTempManagerBtn: document.getElementById('preFundReconciliationTempManagerBtn'),
+  preFundReconciliationStatusBox: document.getElementById('preFundReconciliationStatusBox'),
   // v2.1.2 T2：月度银行对账单BU回填校验模块（5 项 DOM 缓存；月份选择改为对话框，无 select）
   bankBuReconModulePanel: document.getElementById('bankBuReconModulePanel'),
   bankBuReconImportBtn: document.getElementById('bankBuReconImportBtn'),
@@ -400,6 +417,8 @@ const {
   createScenarioCategorySelectDialog,
   // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
   createLinkedTableManagerDialog,
+  // v3.0.14：前置资金对账临时 MPT 批次管理。
+  createPreFundTempManagerDialog,
   // v3.0.1 需求1（D4）：按日期范围删除网关对账单弹框（preview 直接调用）
   createLinkedTableDeleteRangeDialog,
   // v2.0.0-beta.3 PR #32b：4 dialog factory（C1/C2/C3 配置 + 确认场景详情）
@@ -528,6 +547,10 @@ const {
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
+  // v3.0.14：临时链接表管理首页 preview
+  applyPreFundTempManagerPreviewState,
+  // v3.0.14：临时链接表按日期删除框 preview
+  applyPreFundTempDeleteRangePreviewState,
   // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
   applyLinkedTableDeleteRangePreviewState,
   // v3.0.1 需求3：网关对账单修复场景单选框 preview
@@ -1437,6 +1460,15 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   }
   if (elements.bankStatementModulePanel) {
     elements.bankStatementModulePanel.hidden = moduleId !== MODULES.bankStatementProcess.id;
+  }
+  if (elements.preFundReconciliationModulePanel) {
+    elements.preFundReconciliationModulePanel.hidden = moduleId !== MODULES.preFundReconciliation.id;
+    if (moduleId === MODULES.preFundReconciliation.id
+      && typeof refreshPreFundReconciliationStatus === 'function') {
+      refreshPreFundReconciliationStatus().catch((error) => {
+        console.warn('refreshPreFundReconciliationStatus failed:', error);
+      });
+    }
   }
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板隐藏控制
   if (elements.reconIdFixModulePanel) {
@@ -4303,6 +4335,231 @@ async function handleBankStatementExport() {
   }
 }
 
+// ===== v3.0.14：前置资金对账 =====
+
+function updatePreFundReconciliationUi() {
+  const uiState = state.preFundReconciliation;
+  const status = uiState.session;
+  const busy = uiState.inflight;
+  const bank = status && status.bank;
+  const temp = status && status.temporaryGateway;
+  const linked = status && status.linkedGateway;
+  const run = status && status.run;
+
+  if (elements.preFundReconciliationImportBankBtn) elements.preFundReconciliationImportBankBtn.disabled = busy;
+  if (elements.preFundReconciliationTempManagerBtn) elements.preFundReconciliationTempManagerBtn.disabled = busy;
+  if (elements.preFundReconciliationScenarioSelect) elements.preFundReconciliationScenarioSelect.disabled = busy;
+  if (elements.preFundReconciliationRunBtn) {
+    elements.preFundReconciliationRunBtn.disabled = busy || !(status && status.canRun);
+  }
+  if (elements.preFundReconciliationExportBtn) {
+    elements.preFundReconciliationExportBtn.disabled = busy || !(status && status.canExport);
+  }
+  if (!elements.preFundReconciliationStatusBox || busy) return;
+
+  const tempBatchCount = Number(temp && temp.batchCount) || 0;
+  const tempRowCount = Number(temp && temp.rowCount) || 0;
+  const linkedRowCount = Number(linked && linked.rowCount) || 0;
+  let text = '欢迎使用小助手';
+  let tone = 'neutral';
+  if (bank) {
+    text = `已导入：${bank.fileName}（${Number(bank.inputRows) || 0} 行，可参与 ${Number(bank.participatingRows) || 0} 行）\n`
+      + `网关数据：临时 ${tempBatchCount} 批/${tempRowCount} 行，链接表 ${linkedRowCount} 行`;
+    tone = 'info';
+  }
+  if (run) {
+    if (run.unavailable) {
+      text = `结果已失效：${run.unavailableMessage || '运行结果不可用，请重新运行'}`;
+      tone = 'error';
+    } else if (run.stale) {
+      text = '结果已失效：数据来源发生变化，请重新运行';
+      tone = 'error';
+    } else {
+      const summary = run.summary || {};
+      text = `已完成：平账 ${Number(summary.matchedPairs) || 0} 行，不平 ${Number(summary.unmatchedBankRows) || 0} 行\n`
+        + `银行排除：空ID ${Number(summary.bankExcludedEmptyIdRows) || 0} 行、零金额 ${Number(summary.bankSkippedZeroRows) || 0} 行、空渠道 ${Number(summary.bankEmptyChannelRows) || 0} 行\n`
+        + `网关排除：空ID ${Number(summary.gatewayExcludedEmptyIdRows) || 0} 行、无效 ${Number(summary.gatewayInvalidRows) || 0} 行、重复折叠 ${Number(summary.gatewayCollapsedDuplicateRows) || 0} 行；未使用 ${Number(summary.unusedGatewayRows) || 0} 行、多候选ID组 ${Number(summary.gatewayConflictingSameIdGroups) || 0} 组`;
+      tone = 'success';
+    }
+  }
+  updateStatusBox(elements.preFundReconciliationStatusBox, text, tone);
+}
+
+async function refreshPreFundReconciliationStatus() {
+  try {
+    const status = await window.desktopApi.preFundReconciliation.sessionStatus();
+    if (!status || status.status !== 'ok') {
+      state.preFundReconciliation.session = null;
+      updatePreFundReconciliationUi();
+      if (elements.preFundReconciliationStatusBox) {
+        updateStatusBox(
+          elements.preFundReconciliationStatusBox,
+          status && status.message ? status.message : '状态读取失败',
+          'error'
+        );
+      }
+      return;
+    }
+    state.preFundReconciliation.session = status;
+  } catch (error) {
+    state.preFundReconciliation.session = null;
+    if (elements.preFundReconciliationStatusBox) {
+      updateStatusBox(elements.preFundReconciliationStatusBox, error.message || String(error), 'error');
+    }
+  }
+  updatePreFundReconciliationUi();
+}
+
+function beginPreFundReconciliationAction(message) {
+  state.preFundReconciliation.inflight = true;
+  updatePreFundReconciliationUi();
+  if (elements.preFundReconciliationStatusBox) {
+    updateStatusBox(elements.preFundReconciliationStatusBox, message, 'info');
+  }
+}
+
+async function finishPreFundReconciliationAction() {
+  state.preFundReconciliation.inflight = false;
+  await refreshPreFundReconciliationStatus();
+}
+
+function showPreFundFailure(action, result) {
+  const message = result && result.message ? result.message : '未知错误';
+  const detailLines = result && Array.isArray(result.detailLines) ? result.detailLines : [];
+  const details = detailLines.length > 0
+    ? `<br/><br/>${detailLines.slice(0, 10).map((line) => escapeHtml(line)).join('<br/>')}`
+    : '';
+  openModal(createAlertDialog(`${escapeHtml(action)}失败：${escapeHtml(message)}${details}`));
+}
+
+async function handlePreFundImportBank() {
+  beginPreFundReconciliationAction('正在导入银行对账单…');
+  try {
+    const result = await window.desktopApi.preFundReconciliation.importBank();
+    if (!result || result.status === 'cancelled') return;
+    if (result.status !== 'ok') showPreFundFailure('导入', result);
+  } catch (error) {
+    showPreFundFailure('导入', error);
+  } finally {
+    await finishPreFundReconciliationAction();
+  }
+}
+
+async function handlePreFundImportMpt({ showFailures = true } = {}) {
+  beginPreFundReconciliationAction('正在导入 MPT 网关账单…');
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi.preFundReconciliation;
+    if (typeof api.onImportProgress === 'function') {
+      unsubscribe = api.onImportProgress((progress) => {
+        const current = Number(progress && progress.current) || 0;
+        const total = Number(progress && progress.total) || 0;
+        const fileName = progress && progress.fileName ? `：${progress.fileName}` : '';
+        updateStatusBox(elements.preFundReconciliationStatusBox, `正在导入账单 ${current}/${total}${fileName}`, 'info');
+      });
+    }
+    const result = await api.importMpt();
+    if (!result || result.status === 'cancelled') return result;
+    if (result.status !== 'ok') {
+      if (showFailures) showPreFundFailure('导入账单', result);
+      return result;
+    }
+    const failures = Array.isArray(result.results)
+      ? result.results.filter((item) => item.status !== 'ok')
+      : [];
+    if (showFailures && failures.length > 0) {
+      const details = failures.map((item) => (
+        `${escapeHtml(item.fileName || '文件')}：${escapeHtml(item.message || '导入失败')}`
+      )).join('<br/>');
+      openModal(createAlertDialog(`部分文件导入失败（${failures.length} 个）：<br/>${details}`));
+    }
+    return result;
+  } catch (error) {
+    if (showFailures) showPreFundFailure('导入账单', error);
+    return { status: 'failed', message: error && error.message ? error.message : String(error) };
+  } finally {
+    if (typeof unsubscribe === 'function') unsubscribe();
+    await finishPreFundReconciliationAction();
+  }
+}
+
+async function handlePreFundRun() {
+  beginPreFundReconciliationAction('正在构建网关候选池…');
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi.preFundReconciliation;
+    if (typeof api.onRunProgress === 'function') {
+      unsubscribe = api.onRunProgress((progress) => {
+        let text = '正在运行前置资金对账…';
+        if (progress && progress.stage === 'gateway-pool') text = `正在构建网关候选池：${Number(progress.current) || 0} 行`;
+        if (progress && progress.stage === 'bank-match') text = `正在匹配银行账单：${Number(progress.current) || 0}/${Number(progress.total) || 0}`;
+        if (progress && progress.stage === 'done') text = '正在汇总对账结果…';
+        updateStatusBox(elements.preFundReconciliationStatusBox, text, 'info');
+      });
+    }
+    const result = await api.run({ scenario: elements.preFundReconciliationScenarioSelect.value });
+    if (!result || result.status !== 'ok') showPreFundFailure('运行', result);
+  } catch (error) {
+    showPreFundFailure('运行', error);
+  } finally {
+    if (typeof unsubscribe === 'function') unsubscribe();
+    await finishPreFundReconciliationAction();
+  }
+}
+
+async function handlePreFundExport() {
+  beginPreFundReconciliationAction('正在准备导出…');
+  let unsubscribe = null;
+  try {
+    const api = window.desktopApi.preFundReconciliation;
+    if (typeof api.onExportProgress === 'function') {
+      unsubscribe = api.onExportProgress((progress) => {
+        const text = progress && progress.stage === 'export-done'
+          ? '正在校验导出文件…'
+          : '正在按渠道导出文件…';
+        updateStatusBox(elements.preFundReconciliationStatusBox, text, 'info');
+      });
+    }
+    const result = await api.export();
+    if (!result || result.status === 'cancelled') return;
+    if (result.status !== 'ok') {
+      showPreFundFailure('导出', result);
+      return;
+    }
+    await finishPreFundReconciliationAction();
+    const names = (result.files || []).map((file) => file.fileName).join('\n');
+    const warnings = Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+    updateStatusBox(
+      elements.preFundReconciliationStatusBox,
+      `已导出 ${Number(result.files && result.files.length) || 0} 个文件${names ? `\n${names}` : ''}`
+        + `${warnings.length ? `\n提醒：${warnings.join('\n')}` : ''}`,
+      warnings.length ? 'info' : 'success'
+    );
+    return;
+  } catch (error) {
+    showPreFundFailure('导出', error);
+  } finally {
+    if (typeof unsubscribe === 'function') unsubscribe();
+    if (state.preFundReconciliation.inflight) await finishPreFundReconciliationAction();
+  }
+}
+
+function applyPreFundReconciliationPanelPreviewState() {
+  setCurrentModule(MODULES.preFundReconciliation.id, { persist: false });
+  setTimeout(() => {
+    state.preFundReconciliation.session = {
+      status: 'ok',
+      bank: null,
+      temporaryGateway: { batchCount: 3, rowCount: 142202 },
+      linkedGateway: { rowCount: 978430 },
+      run: null,
+      canRun: false,
+      canExport: false
+    };
+    updatePreFundReconciliationUi();
+  }, 200);
+}
+
 // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §六 / §七 / Q4 决策） =====
 // PR-A 仅做骨架：sessionStatus 同步 + 主面板下拉 reload + 4 按钮 binding（导入/运行/导出 PR-B 落地）
 
@@ -5984,6 +6241,23 @@ async function applyFullInfo(info) {
   if (elements.bankStatementLinkedTableBtn) {
     elements.bankStatementLinkedTableBtn.addEventListener('click', () => openModal(createLinkedTableManagerDialog()));
   }
+  if (elements.preFundReconciliationImportBankBtn) {
+    elements.preFundReconciliationImportBankBtn.addEventListener('click', handlePreFundImportBank);
+  }
+  if (elements.preFundReconciliationRunBtn) {
+    elements.preFundReconciliationRunBtn.addEventListener('click', handlePreFundRun);
+  }
+  if (elements.preFundReconciliationExportBtn) {
+    elements.preFundReconciliationExportBtn.addEventListener('click', handlePreFundExport);
+  }
+  if (elements.preFundReconciliationTempManagerBtn) {
+    elements.preFundReconciliationTempManagerBtn.addEventListener('click', () => {
+      openModal(createPreFundTempManagerDialog({
+        onChanged: () => refreshPreFundReconciliationStatus(),
+        onImport: handlePreFundImportMpt
+      }));
+    });
+  }
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块按钮 binding（spec §一.1 + Q4 决策）
   // v2.1.0-beta.3 T5：场景管理白名单按当前账单类别动态决定
   if (elements.reconIdFixManageScenariosBtn) {
@@ -6432,6 +6706,10 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       applyBankStatementPanelPreviewState();
     }, 120);
+  } else if (info.previewModal === 'pre-fund-reconciliation-panel') {
+    setTimeout(() => {
+      applyPreFundReconciliationPanelPreviewState();
+    }, 120);
   } else if (info.previewModal === 'scenarios-manager') {
     setTimeout(() => {
       applyScenariosManagerPreviewState();
@@ -6450,6 +6728,14 @@ async function applyFullInfo(info) {
     // v2.1.14 C：链接表管理弹窗 preview
     setTimeout(() => {
       applyLinkedTableManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pre-fund-temp-manager') {
+    setTimeout(() => {
+      applyPreFundTempManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pre-fund-temp-delete-range') {
+    setTimeout(() => {
+      applyPreFundTempDeleteRangePreviewState();
     }, 120);
   } else if (info.previewModal === 'linked-table-delete-range') {
     // v3.0.1 需求1（D4）：删除网关对账单弹框 preview

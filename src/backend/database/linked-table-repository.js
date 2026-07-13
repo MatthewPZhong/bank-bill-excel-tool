@@ -929,6 +929,65 @@ function readLinkedTableRows(db, tableKey) {
   return out;
 }
 
+// v3.0.14 前置资金对账：按物理 id 稳定顺序逐行读取持久化网关账单。
+// 与 readLinkedTableRows('gateway-bill') 不同，本接口不调用 .all()、不构造全量数组；
+// caller 可边迭代边写匹配侧库，避免百万级链接表产生 raw_json + 对象数组双份内存。
+// 损坏 JSON 不中断剩余游标，但必须交给对账引擎计入无效行，
+// 避免链接表行在资金对账时无可观测地消失。
+function* iterateGatewayBillRows(db) {
+  const def = getDef('gateway-bill');
+  if (!def.supported) return;
+  const cursor = db.prepare(`
+    SELECT id, reconciliation_id, bill_date, recon_bill_biz_id, raw_json
+    FROM ${def.table}
+    ORDER BY id ASC
+  `).iterate();
+  for (const record of cursor) {
+    try {
+      const row = JSON.parse(record.raw_json);
+      if (!row || typeof row !== 'object' || Array.isArray(row)) {
+        yield {
+          id: record.id,
+          reconciliationId: record.reconciliation_id,
+          billDate: record.bill_date,
+          reconBillBizId: record.recon_bill_biz_id,
+          row: null,
+          rawJsonInvalid: true
+        };
+        continue;
+      }
+      yield {
+        id: record.id,
+        reconciliationId: record.reconciliation_id,
+        billDate: record.bill_date,
+        reconBillBizId: record.recon_bill_biz_id,
+        rawJson: record.raw_json,
+        row
+      };
+    } catch (_error) {
+      yield {
+        id: record.id,
+        reconciliationId: record.reconciliation_id,
+        billDate: record.bill_date,
+        reconBillBizId: record.recon_bill_biz_id,
+        row: null,
+        rawJsonInvalid: true
+      };
+    }
+  }
+}
+
+function getGatewayBillRawJsonById(db, rowId) {
+  const id = Number(rowId);
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    throw new TypeError('持久网关原始行 id 必须为正整数');
+  }
+  const def = getDef('gateway-bill');
+  if (!def.supported) return null;
+  const row = db.prepare(`SELECT raw_json FROM ${def.table} WHERE id = ?`).get(id);
+  return row ? row.raw_json : null;
+}
+
 // v3.0.0 块 B / PR-3（R-3/O-3）：ADM 派生只需 bank-deposit 里 Channel=ADM 的候选子集。
 //   现状 readLinkedTableRows('bank-deposit') 把整表（实测 65.7 万行 → ~1.2GB RSS 尖峰）全量读回内存，
 //   仅为筛出极小的 Channel=ADM 子集（实测真实样本该子集=0 行）。本函数把 Channel='ADM' 过滤下推到 SQL
@@ -1611,6 +1670,8 @@ module.exports = {
   deleteFxByDateRange,
   deleteBankDepositByDateRange,
   readLinkedTableRows,
+  iterateGatewayBillRows,
+  getGatewayBillRawJsonById,
   // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
   readBankDepositAdmCandidates,
   // v3.0.7 需求6：网关账单表按 Channel 集合下推过滤读（业务不变量=对账同渠道；防 300 万行全量尖峰）

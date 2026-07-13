@@ -3572,6 +3572,32 @@ function ensureFundTransferAccountMappingSupport(db) {
   `);
 }
 
+// v3.0.14：前置资金对账 run 元数据镜像。
+// 明细、候选池和结果保存在 per-month side DB；主库只保留轻量状态、汇总和侧库相对路径，
+// 供运行审计与侧库丢失检测使用。side_run_id 属于侧库内部命名空间。
+function ensurePreFundReconciliationRunMetadataSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_run_mirrors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month_key TEXT NOT NULL,
+      side_run_id INTEGER NOT NULL,
+      scenario TEXT NOT NULL,
+      status TEXT NOT NULL,
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      snapshot_hash TEXT NOT NULL,
+      bank_files_json TEXT NOT NULL DEFAULT '[]',
+      side_db_rel_path TEXT NOT NULL,
+      error_message TEXT,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pre_fund_run_mirrors_status
+      ON pre_fund_reconciliation_run_mirrors(status, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_pre_fund_run_mirrors_side_run
+      ON pre_fund_reconciliation_run_mirrors(month_key, side_run_id);
+  `);
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -3648,6 +3674,7 @@ module.exports = {
   ensureChannelEnumSupport,
   // v3.0.12 功能2（批A）：账户映射管理全局表（中台调拨单账户号 → 清结算系统银行账号；幂等建表，不进 ALL_TABLE_KEYS）
   ensureFundTransferAccountMappingSupport,
+  ensurePreFundReconciliationRunMetadataSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

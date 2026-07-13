@@ -38,7 +38,7 @@ const { runRound5RefundOrderBackfill } = require('./scenario-engines/r5-refund-o
 const { runRound5PaymentOfflineAllocationBackfill } = require('./scenario-engines/r5-payment-offline-allocation-backfill');
 // v3.0.6 需求3：DBS-Charge 资金校验（R3.5，R3 后 R4 前；🔴 改 ReconciliationId + FundType；替换原全渠道 charge→outbound）
 const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
-// v3.0.12 功能1：异常-人工判断 sheet 检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
+// v3.0.12 功能1：多对多异常说明检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
 const { detectFundTransferManyToMany } = require('./scenario-engines/many-to-many-detector');
 const { runAllScenarios } = require('./scenario-dispatcher');
 
@@ -185,34 +185,35 @@ function bucketScenarios(scenarios) {
 /**
  * 从「当前最新 bankRows」重建 modifiedRows / unmatchedRows（🔴 关键：不用 dispatcher 的过时浅拷贝）。
  *
- *   - modifiedRows：bankRows 中「被任一轮实际改过列，或有非空异常说明」的行，数据列取当前最新值（经全部轮次）。
+ *   - modifiedRows：bankRows 中「被任一轮实际改过至少一列」的行，数据列取当前最新值（经全部轮次）。
  *     · 若该行也被 R2 命中过：把 dispatcher 浅拷贝里的 `_` 前缀命中元数据嫁接过来（排除 _rowId/_modifiedColumns）。
  *     · R4/R5 改的非 R2 命中行：进 modifiedRows、标黄对应列，但不带 R2 命中元数据
  *       （符合「不进 N5 命中场景行报表」——N5 报表只认 R2 元数据行）。
  *     · _modifiedColumns：跨轮合并后的 Set（标黄来源；必须是 Set，见文件头说明）。
- *   - unmatchedRows：bankRows 中「未被任何轮实际改过列、且无非空异常说明」的行（保留原始顺序 + 原始字段）。
+ *   - unmatchedRows：bankRows 中「未被任何轮实际改过列」的行（保留原始顺序 + 原始字段）。
  *
  * R2 dispatcher 内部仍可「锁定但不改值」（用于 first-match-wins 防止后续 R2 场景重复消费），
- * 但导出层的「命中场景」sheet 只展示实际发生字段变更或有异常说明的行。同值 no-op 行不进入 modifiedRows；
- * 若同一行后续被 R4/R5 改写，或被 M2M 检测器标出非空异常说明，仍会进入 modifiedRows；
- * 若该行同时带 R2 命中元数据，也会继续嫁接。
+ * 但导出层的「命中场景」sheet 只展示实际发生字段变更的行。同值 no-op 或仅有异常说明的行不进入 modifiedRows；
+ * 若同一行后续被 R4/R5 实际改写，且该行同时带 R2 命中元数据，仍会进入 modifiedRows 并继续嫁接元数据。
  *
- * 行数守恒：shouldGoToHitSheet 与 !shouldGoToHitSheet 互否且全覆盖 → modifiedRows.length + unmatchedRows.length === bankRows.length。
+ * 行数守恒：hasChangedColumns 与 !hasChangedColumns 互否且全覆盖 → modifiedRows.length + unmatchedRows.length === bankRows.length。
  *
  * @param {Array<Object>} bankRows 经全部轮次原地演化后的银行行
  * @param {Map<string|number, Set<string>>} modColsByRowId rowId → 被改列集合
  * @param {Map<string|number, Object>} r2HitByRowId rowId → R2 dispatcher 浅拷贝命中行（含 `_` 元数据）
- * @param {Set<string|number>} visibleReviewRowIds 有非空异常说明、需在命中 sheet 可见的银行行 rowId
  * @returns {{ modifiedRows: Array<Object>, unmatchedRows: Array<Object> }}
  */
-function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, visibleReviewRowIds = new Set()) {
-  const hasChangedColumns = (r) => modColsByRowId.has(r._rowId);
-  const hasReviewNote = (r) => visibleReviewRowIds.has(r._rowId);
-  // 导出判定：「命中场景」只保留用户可看见结果的行：实际字段变更，或有非空异常说明。
-  const shouldGoToHitSheet = (r) => hasChangedColumns(r) || hasReviewNote(r);
+function hasActualFieldChanges(modColsByRowId, row) {
+  const columns = modColsByRowId.get(row._rowId);
+  return !!(columns && columns.size > 0);
+}
+
+function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
+  // v3.0.14：导出判定只认至少一个字段实际变化；空 Set、锁定 no-op、仅异常说明均不算命中。
+  const hasChangedColumns = (r) => hasActualFieldChanges(modColsByRowId, r);
 
   const modifiedRows = bankRows
-    .filter(shouldGoToHitSheet)
+    .filter(hasChangedColumns)
     .map((r) => {
       const out = { ...r }; // 当前最新行数据（经全部轮次）
       const r2hit = r2HitByRowId.get(r._rowId);
@@ -229,21 +230,9 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId, visibleReviewRo
       return out;
     });
 
-  const unmatchedRows = bankRows.filter((r) => !shouldGoToHitSheet(r));
+  const unmatchedRows = bankRows.filter((r) => !hasChangedColumns(r));
 
   return { modifiedRows, unmatchedRows };
-}
-
-function buildReviewRowIdSet(reviewRows) {
-  const ids = new Set();
-  for (const rv of Array.isArray(reviewRows) ? reviewRows : []) {
-    const row = rv && rv.row;
-    if (!row || row._rowId === undefined || row._rowId === null) continue;
-    const note = rv.note === null || rv.note === undefined ? '' : String(rv.note);
-    if (note.trim() === '') continue;
-    ids.add(row._rowId);
-  }
-  return ids;
 }
 
 /**
@@ -487,14 +476,16 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
     refundUnmatchedRows = r5d.unmatchedRows || [];
     refundHitDepositBizIds = r5d.hitDepositBizIds || []; // OPEN-7（T5b-1）透传
   }
-  await yieldTick('R5s4'); // 轮次边界让出（R5 场景4 退款回填已完成，进 M2M 异常-人工判断检测前）
+  await yieldTick('R5s4'); // 轮次边界让出（R5 场景4 退款回填已完成，进 M2M 异常说明检测前）
 
-  // ===== v3.0.12 功能1：异常-人工判断检测（🔴 资金红线·纯只读）=====
-  //   R5 全部跑完、bankRows 定稿后，只读检测「银行 ↔ 网关 / 调拨」多对多的银行行（现有引擎遇多对多
-  //   只发 multi-bank-match-backfill 警告就静默取 cand[0] 回填，人工无从感知）→ 汇总进结果文件新 sheet。
-  //   🔴 不 mergeMods、不进 modColsByRowId、不改任何 bankRow 字段 → modifiedRows + unmatchedRows
-  //   === bankRows.length 行数守恒不受影响（属审计/展示增强，与 R1-R5 回填值/派生口径完全解耦）。
-  //   bankRows = 最终态；gwRows = safeGwRows（恒可用）；reconRows 取 fundTransferReconContext.reconRows
+  // ===== v3.0.12 功能1 / v3.0.14 收窄：多对多异常说明检测（🔴 资金红线·纯只读）=====
+  //   R5 全部跑完、bankRows 定稿后，只对「至少一个字段实际变化」的银行行检测「银行 ↔ 网关 / 调拨」多对多
+  //   （现有引擎遇多对多
+  //   只发 multi-bank-match-backfill 警告就静默取 cand[0] 回填，人工无从感知）→ 汇总进「命中场景」异常说明列。
+  //   锁定 no-op / 未改值行不进入检测器，不能因异常说明被提升为命中；实际改值行的异常说明仍保留。
+  //   🔴 检测器不 mergeMods、不进 modColsByRowId、不改任何 bankRow 字段 → modifiedRows + unmatchedRows
+  //   === bankRows.length 行数守恒不受影响（属只读审计增强，与 R1-R5 回填值/派生口径完全解耦）。
+  //   actuallyModifiedBankRows = 最终态实际改值行；gwRows = safeGwRows（恒可用）；reconRows 取 fundTransferReconContext.reconRows
   //   （需求2 取消路 / 缺省 → [] → 调拨检测自然 no-op）。
   const detectorReconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
   // v3.0.12 PR#82 codex-P2-1（🔴 资金红线）：检测器日期容差必须 = R5s2 回填引擎**实际用值**，否则容差≠1 时
@@ -506,18 +497,17 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   const fundTransferDateToleranceDays = r5s2Bucket.length
     ? (r5s2Bucket[0].config || {}).dateToleranceDays
     : undefined;
-  const manyToManyReviewRows = detectFundTransferManyToMany(bankRows, safeGwRows, detectorReconRows, {
+  const actuallyModifiedBankRows = bankRows.filter((row) => hasActualFieldChanges(modColsByRowId, row));
+  const manyToManyReviewRows = detectFundTransferManyToMany(actuallyModifiedBankRows, safeGwRows, detectorReconRows, {
     dateToleranceDays: fundTransferDateToleranceDays
   }).reviewRows;
-  await yieldTick('M2M'); // 轮次边界让出（M2M 异常-人工判断检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
+  await yieldTick('M2M'); // 轮次边界让出（M2M 异常说明检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
   // ===== 构造输出：从「当前最新 bankRows」重建（不用 dispatcher 过时浅拷贝）=====
-  const visibleReviewRowIds = buildReviewRowIdSet(manyToManyReviewRows);
   const { modifiedRows, unmatchedRows } = buildOutputRows(
     bankRows,
     modColsByRowId,
-    r2HitByRowId,
-    visibleReviewRowIds
+    r2HitByRowId
   );
 
   // v3.0.7 需求1a：按「渠道-地区」聚合命中行（行数 + 去重场景名），供 renderer 状态框「已处理」分支展示。
@@ -554,7 +544,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       //   🔴 纯只读标志位，不参与任何对账/匹配/派生/金额判定。
       r5s3Enabled: r5s3Bucket.length > 0,
       r5s4Enabled: r5s4Bucket.length > 0,
-      // v3.0.12 功能1：异常-人工判断命中银行行数（🔴 只读统计，不参与对账/匹配/派生）
+      // v3.0.12 功能1 / v3.0.14 收窄：实际改值行中的多对多异常说明数（🔴 只读统计，不参与对账/匹配/派生）
       manyToManyReviewCount: manyToManyReviewRows.length
     },
     platformCleanupRows,
@@ -564,7 +554,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
     refundHitDepositBizIds,
     // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对（导出 3 核对 sheet 数据源；未勾选/无命中时 []）
     paymentOfflineMatchedPairs,
-    // v3.0.12 功能1：异常-人工判断命中银行行（{ row, note }；导出阶段写「异常-人工判断」sheet；空 → []）
+    // v3.0.12 功能1 / v3.0.14 收窄：实际改值行中的多对多异常说明（{ row, note }；导出阶段并入「命中场景」；空 → []）
     manyToManyReviewRows,
     rounds: {
       r1: { matched: r1.matchedGwRows.length },
@@ -588,7 +578,6 @@ module.exports = {
   runReconciliation,
   bucketScenarios,
   buildOutputRows,
-  buildReviewRowIdSet,
   // v3.0.7 需求1a：渠道-地区 命中聚合（供单测直接断言；状态框「已处理」分支数据源）
   buildChannelRegionHits
 };

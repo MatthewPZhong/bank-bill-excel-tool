@@ -18,7 +18,13 @@ const {
   RECON_RESULT_SHEET_NAME,
   BUSINESS_BILL_SHEET_NAME,
   OPPONENT_BILL_SHEET_NAME,
-  ORDER_REPAIR_SHEET_NAME
+  ORDER_REPAIR_SHEET_NAME,
+  PRE_FUND_UNBALANCED_SHEET_NAME,
+  PRE_FUND_BALANCED_SHEET_NAME,
+  PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
+  PRE_FUND_UNBALANCED_FIELDS,
+  PRE_FUND_BALANCED_FIELDS,
+  DUPLICATE_GATEWAY_HEADERS
 } = require('../../src/main-process/recon-id-fix-io');
 const {
   RECON_RESULT_FIELDS,
@@ -26,6 +32,15 @@ const {
   OPPONENT_BILL_FIELDS,
   ORDER_REPAIR_FIELDS
 } = require('../../src/constants/recon-id-fix-fields');
+const {
+  GATEWAY_BILL_FIELDS,
+  CHANNEL_BILL_FIELDS,
+  ORDER_REPAIR_FIELDS_GATEWAY,
+  RECON_RESULT_FIELDS_GATEWAY,
+  GATEWAY_BILL_SHEET_NAME,
+  CHANNEL_BILL_SHEET_NAME,
+  ORDER_REPAIR_SHEET_NAME_GATEWAY
+} = require('../../src/constants/gateway-bill-recon-fields');
 const { FileValidationError } = require('../../src/backend/file-service/common');
 
 function makeMultiSheetXlsx(sheets, savePath) {
@@ -261,7 +276,60 @@ async function runReconIdFixIoSmokeTests() {
     assert.strictEqual(nNull, nOld, 'R13 第 3 参 null = 不传');
   }
 
-  console.log('  recon-id-fix-io smoke: 13 / 13 PASS');
+  // ===== R14（v3.0.14）：C4 兼容 6-sheet，校验后忽略重复审计数据 =====
+  {
+    const filePath = path.join(tmpDir, 'pre-fund-six-sheets.xlsx');
+    const resultValues = RECON_RESULT_FIELDS_GATEWAY.map((field) => `result-${field}`);
+    makeMultiSheetXlsx([
+      {
+        name: PRE_FUND_UNBALANCED_SHEET_NAME,
+        headers: PRE_FUND_UNBALANCED_FIELDS.slice(),
+        rows: [['导入银行对账单', ...resultValues]]
+      },
+      {
+        name: PRE_FUND_BALANCED_SHEET_NAME,
+        headers: PRE_FUND_BALANCED_FIELDS.slice(),
+        rows: []
+      },
+      { name: GATEWAY_BILL_SHEET_NAME, headers: GATEWAY_BILL_FIELDS.slice(), rows: [] },
+      { name: CHANNEL_BILL_SHEET_NAME, headers: CHANNEL_BILL_FIELDS.slice(), rows: [] },
+      {
+        name: ORDER_REPAIR_SHEET_NAME_GATEWAY,
+        headers: ORDER_REPAIR_FIELDS_GATEWAY.slice(),
+        rows: []
+      },
+      {
+        name: PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
+        headers: DUPLICATE_GATEWAY_HEADERS.slice(),
+        rows: [[
+          'PF-1-1', '被折叠记录', 1, 1, 'reconciliationId+10字段指纹完全重复',
+          'fp-1', '网关对账单', 'linked_gateway_bill#2', '2026-07-01', 'CIT',
+          'M1', 'O1', 'B1', 'R1', 'USD', '10', 'PAY', 'Alice', '1234',
+          'CIT', 'SWIFT', '{"id":2}'
+        ]]
+      }
+    ], filePath);
+
+    const result = readReconIdFixFile(filePath, 'gateway');
+    assert.strictEqual(result.sheets.reconResult.length, 1, 'R14 读取不平结果 1 行');
+    assert.strictEqual(
+      result.sheets.reconResult[0]['账单日期'],
+      'result-账单日期',
+      'R14 去除来源列后字段位置不偏移'
+    );
+    assert.strictEqual(
+      Object.hasOwn(result.sheets.reconResult[0], '对账数据来源'),
+      false,
+      'R14 C4 不透传前置资金对账来源列'
+    );
+    assert.deepStrictEqual(
+      Object.keys(result.sheets),
+      ['reconResult', 'businessBills', 'opponentBills', 'fixTemplate'],
+      'R14 重复审计 sheet 不进入 C4 业务数据'
+    );
+  }
+
+  console.log('  recon-id-fix-io smoke: 14 / 14 PASS');
 }
 
 module.exports = { runReconIdFixIoSmokeTests };

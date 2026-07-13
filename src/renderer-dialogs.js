@@ -6538,6 +6538,271 @@
       return null; // O1：补回填成功静默
     }
 
+    const PRE_FUND_TEMP_TABLES = Object.freeze([
+      Object.freeze({
+        sourceType: 'MPT_INBOUND_GATEWAY',
+        label: '临时中台入金网关账单',
+        tableLabel: '临时中台入金网关账单表库'
+      }),
+      Object.freeze({
+        sourceType: 'MPT_OUTBOUND_GATEWAY',
+        label: '临时中台出金网关账单',
+        tableLabel: '临时中台出金网关账单表库'
+      })
+    ]);
+
+    // v3.0.14：前置资金对账临时链接表管理首页。
+    // 页面骨架与资金对账数据处理的「链接表管理」保持一致，仅移除不适用的账户映射入口。
+    function createPreFundTempManagerDialog({ onChanged, onImport } = {}) {
+      const PLACEHOLDER = '—';
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card manager-card linked-table-manager-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">链接表管理</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table linked-table-table">
+            <thead>
+              <tr>
+                <th class="linked-table-col-name" style="width: 40%; text-align: left;">表库名</th>
+                <th class="linked-table-col-range" style="width: 35%; text-align: left;">数据日期范围</th>
+                <th class="linked-table-col-updated" style="width: 25%; text-align: left;">表库更新日期</th>
+              </tr>
+            </thead>
+            <tbody>${PRE_FUND_TEMP_TABLES.map((table) => `
+              <tr data-source-type="${table.sourceType}">
+                <td class="linked-table-col-name">${table.tableLabel}</td>
+                <td class="linked-table-col-range">${PLACEHOLDER}</td>
+                <td class="linked-table-col-updated">${PLACEHOLDER}</td>
+              </tr>
+            `).join('')}</tbody>
+          </table>
+        </div>
+        <div class="dialog-actions linked-table-manager-footer">
+          <div class="linked-table-footer-spacer" style="flex: 1 1 auto;"></div>
+          <button class="secondary-btn small" type="button" data-action="delete">删除</button>
+          <button class="primary-btn small" type="button" data-action="import">导入</button>
+          <button class="secondary-btn small" type="button" data-action="exit">退出</button>
+        </div>
+      `;
+      overlay.appendChild(dialog);
+
+      const deleteBtn = dialog.querySelector('[data-action="delete"]');
+      const importBtn = dialog.querySelector('[data-action="import"]');
+
+      function formatDateOnly(value) {
+        const match = String(value || '').match(/^(\d{4}-\d{2}-\d{2})/);
+        return match ? match[1] : '';
+      }
+
+      function renderSummary(batches) {
+        const list = Array.isArray(batches) ? batches : [];
+        for (const table of PRE_FUND_TEMP_TABLES) {
+          const row = dialog.querySelector(`tr[data-source-type="${table.sourceType}"]`);
+          if (!row) continue;
+          const tableBatches = list.filter((batch) => batch && batch.sourceType === table.sourceType);
+          const sourceDates = tableBatches
+            .map((batch) => formatDateOnly(batch.sourceDate))
+            .filter(Boolean)
+            .sort();
+          const importedDates = tableBatches
+            .map((batch) => formatDateOnly(batch.importedAt))
+            .filter(Boolean)
+            .sort();
+          row.querySelector('.linked-table-col-range').textContent = sourceDates.length > 0
+            ? `${sourceDates[0]} ~ ${sourceDates[sourceDates.length - 1]}`
+            : PLACEHOLDER;
+          row.querySelector('.linked-table-col-updated').textContent = importedDates.length > 0
+            ? importedDates[importedDates.length - 1]
+            : PLACEHOLDER;
+        }
+      }
+
+      async function refreshList() {
+        try {
+          const result = await desktopApi.preFundReconciliation.listTempBatches();
+          renderSummary(result && result.status === 'ok' ? result.batches : []);
+        } catch (_error) {
+          renderSummary([]);
+        }
+      }
+
+      function reopenManager() {
+        openModal(createPreFundTempManagerDialog({ onChanged, onImport }));
+      }
+
+      function buildImportSummaryHtml(result) {
+        const list = result && Array.isArray(result.results) ? result.results : [];
+        const ok = list.filter((item) => item && item.status === 'ok');
+        const failed = list.filter((item) => !item || item.status !== 'ok');
+        const lines = [`成功导入 <b>${ok.length}</b> 张，失败 <b>${failed.length}</b> 张`];
+        if (ok.length > 0) {
+          lines.push(`成功：<br/>${ok.map((item) => {
+            const rowCount = Number(item.rowCount) || 0;
+            return `• ${escapeHtml(item.fileName || '文件')}（${rowCount} 行）`;
+          }).join('<br/>')}`);
+        }
+        if (failed.length > 0) {
+          lines.push(`失败：<br/>${failed.map((item) => (
+            `• ${escapeHtml((item && item.fileName) || '文件')}：${escapeHtml((item && item.message) || '导入失败')}`
+          )).join('<br/>')}`);
+        }
+        return lines.join('<br/><br/>');
+      }
+
+      dialog.querySelector('.icon-close').addEventListener('click', closeModal);
+      dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
+      deleteBtn.addEventListener('click', () => {
+        openModal(createPreFundTempDeleteRangeDialog({ onChanged, onImport }));
+      });
+      importBtn.addEventListener('click', async () => {
+        importBtn.disabled = true;
+        deleteBtn.disabled = true;
+        let result;
+        try {
+          result = typeof onImport === 'function'
+            ? await onImport({ showFailures: false })
+            : await desktopApi.preFundReconciliation.importMpt();
+        } catch (error) {
+          result = { status: 'failed', message: error && error.message ? error.message : String(error) };
+        }
+        importBtn.disabled = false;
+        deleteBtn.disabled = false;
+        if (!result || result.status === 'cancelled') return;
+        if (result.status !== 'ok') {
+          openModal(createAlertDialog(`导入失败：${escapeHtml(result.message || '未知错误')}`, {
+            onConfirm: reopenManager
+          }));
+          return;
+        }
+        if (onChanged) await onChanged(result);
+        openModal(createAlertDialog(buildImportSummaryHtml(result), {
+          skipLogReport: true,
+          onConfirm: reopenManager
+        }));
+      });
+
+      refreshList();
+      return overlay;
+    }
+
+    // 临时网关对账单按来源和日期范围删除。页面骨架与链接表管理的删除框保持一致。
+    function createPreFundTempDeleteRangeDialog({ onChanged, onImport } = {}) {
+      const defaultTable = PRE_FUND_TEMP_TABLES[0];
+      const overlay = createOverlay();
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card linked-table-delete-range-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title" data-role="title">删除${defaultTable.label}数据</div>
+          <button class="icon-close" type="button">×</button>
+        </div>
+        <div class="dialog-body" style="padding: 4px 28px 8px;">
+          <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px; margin-bottom: 14px;">
+            目标表
+            <select data-role="table-key">${PRE_FUND_TEMP_TABLES.map((table) => (
+              `<option value="${table.sourceType}">${table.label}</option>`
+            )).join('')}</select>
+          </label>
+          <div style="display: flex; gap: 16px; margin-bottom: 14px;">
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+              起始日期
+              <input type="date" data-role="start" />
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 4px; font-size: 13px;">
+              结束日期
+              <input type="date" data-role="end" />
+            </label>
+          </div>
+        </div>
+        <div class="dialog-actions">
+          <div style="flex: 1 1 auto;"></div>
+          <button class="danger-btn small" type="button" data-action="confirm-delete" disabled>删除</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `;
+      const tableSelect = dialog.querySelector('[data-role="table-key"]');
+      const titleEl = dialog.querySelector('[data-role="title"]');
+      const startInput = dialog.querySelector('[data-role="start"]');
+      const endInput = dialog.querySelector('[data-role="end"]');
+      const confirmBtn = dialog.querySelector('[data-action="confirm-delete"]');
+
+      const reopenManager = () => openModal(createPreFundTempManagerDialog({ onChanged, onImport }));
+      const reopenDelete = () => openModal(createPreFundTempDeleteRangeDialog({ onChanged, onImport }));
+      const rangeValid = () => Boolean(startInput.value) && Boolean(endInput.value)
+        && startInput.value <= endInput.value;
+      const selectedTable = () => PRE_FUND_TEMP_TABLES.find(
+        (table) => table.sourceType === tableSelect.value
+      ) || defaultTable;
+      let countToken = 0;
+
+      async function refreshState() {
+        if (!rangeValid()) {
+          confirmBtn.disabled = true;
+          return;
+        }
+        const token = ++countToken;
+        try {
+          const result = await desktopApi.preFundReconciliation.countTempByDateRange(
+            startInput.value,
+            endInput.value,
+            selectedTable().sourceType
+          );
+          if (token !== countToken) return;
+          confirmBtn.disabled = !(result && result.status === 'ok');
+        } catch (_error) {
+          if (token !== countToken) return;
+          confirmBtn.disabled = true;
+        }
+      }
+
+      tableSelect.addEventListener('change', () => {
+        titleEl.textContent = `删除${selectedTable().label}数据`;
+        confirmBtn.disabled = true;
+        countToken += 1;
+        refreshState();
+      });
+      startInput.addEventListener('change', refreshState);
+      startInput.addEventListener('input', refreshState);
+      endInput.addEventListener('change', refreshState);
+      endInput.addEventListener('input', refreshState);
+      dialog.querySelector('.icon-close').addEventListener('click', reopenManager);
+      dialog.querySelector('[data-action="cancel"]').addEventListener('click', reopenManager);
+
+      confirmBtn.addEventListener('click', async () => {
+        if (!rangeValid()) return;
+        confirmBtn.disabled = true;
+        const targetTable = selectedTable();
+        let result;
+        try {
+          result = await desktopApi.preFundReconciliation.deleteTempByDateRange(
+            startInput.value,
+            endInput.value,
+            targetTable.sourceType
+          );
+        } catch (error) {
+          result = { status: 'failed', message: error && error.message ? error.message : String(error) };
+        }
+        if (!result || result.status !== 'ok') {
+          openModal(createAlertDialog(`删除失败：${escapeHtml((result && result.message) || '未知错误')}`, {
+            onConfirm: reopenDelete
+          }));
+          return;
+        }
+        if (onChanged) await onChanged(result);
+        openModal(createAlertDialog(`已删除 ${Number(result.deleted) || 0} 行${targetTable.label}数据。`, {
+          skipLogReport: true,
+          onConfirm: reopenManager
+        }));
+      });
+
+      overlay.appendChild(dialog);
+      return overlay;
+    }
+
     // v2.1.16 A4：链接表管理弹窗（导入 + 列表渲染，前后端联调）
     //   - 复用场景管理弹窗的 header/table/footer class 风格（.manager-card / .dialog-header / .table-wrapper / .dialog-actions）
     //   - 打开后调 desktopApi.linkedTable.list() 渲染 4 行：「数据日期范围」(min~max) + 「表库更新日期」(updatedAt)；空显示「—」
@@ -11618,6 +11883,7 @@
       createScenarioCategorySelectDialog,
       // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
       createLinkedTableManagerDialog,
+      createPreFundTempManagerDialog,
       // v3.0.1 需求1（D4）：按日期范围删除网关对账单数据弹框（🔴 资金红线，供 preview 调用）
       createLinkedTableDeleteRangeDialog,
       // v2.1.9 N5：银行渠道管理弹框（spec §4.2）

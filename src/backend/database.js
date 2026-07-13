@@ -72,6 +72,7 @@ const {
   ensureChannelEnumSupport,
   // v3.0.12 功能2（批A）：账户映射管理全局表建表（中台调拨单账户号 → 清结算系统银行账号）
   ensureFundTransferAccountMappingSupport,
+  ensurePreFundReconciliationRunMetadataSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -91,6 +92,7 @@ const linkedTableRepository = require('./database/linked-table-repository');
 const channelEnumRepository = require('./database/channel-enum-repository');
 // v3.0.12 功能2（批A）：账户映射管理仓储（全局：中台调拨单账户号 → 清结算系统银行账号）
 const fundTransferAccountMappingRepository = require('./database/fund-transfer-account-mapping-repository');
+const preFundReconciliationRunRepository = require('./database/pre-fund-reconciliation-run-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -566,6 +568,7 @@ class AppDatabase {
     this.ensureChannelEnumSupport();
     // v3.0.12 功能2（批A）：账户映射管理全局表（幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS；批B 才接对账）
     this.ensureFundTransferAccountMappingSupport();
+    this.ensurePreFundReconciliationRunMetadataSupport();
     // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
     //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
     //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
@@ -1331,6 +1334,15 @@ class AppDatabase {
     return linkedTableRepository.readLinkedTableRows(this.db, tableKey);
   }
 
+  // v3.0.14 前置资金对账：持久化网关账单游标，避免全表对象数组常驻内存。
+  iterateGatewayBillRows() {
+    return linkedTableRepository.iterateGatewayBillRows(this.db);
+  }
+
+  getGatewayBillRawJsonById(rowId) {
+    return linkedTableRepository.getGatewayBillRawJsonById(this.db, rowId);
+  }
+
   // v3.0.0 块 B / PR-3：ADM 派生内存优化 facade（Channel=ADM 下推过滤 / 轻量存在性探测）
   readBankDepositAdmCandidates() {
     return linkedTableRepository.readBankDepositAdmCandidates(this.db);
@@ -1450,6 +1462,39 @@ class AppDatabase {
   //   全局对照表「中台调拨单账户号 → 清结算系统银行账号」；批B 才把 getFundTransferAccountMappingMap 喂给调拨派生。
   ensureFundTransferAccountMappingSupport() {
     return ensureFundTransferAccountMappingSupport(this.db);
+  }
+
+  ensurePreFundReconciliationRunMetadataSupport() {
+    return ensurePreFundReconciliationRunMetadataSupport(this.db);
+  }
+
+  createPreFundReconciliationRunMirror(payload) {
+    return preFundReconciliationRunRepository.createRunMirror(this.db, payload);
+  }
+
+  finishPreFundReconciliationRunMirror(mirrorId, summary) {
+    return preFundReconciliationRunRepository.finishRunMirror(this.db, mirrorId, summary);
+  }
+
+  failPreFundReconciliationRunMirror(mirrorId, error) {
+    return preFundReconciliationRunRepository.failRunMirror(this.db, mirrorId, error);
+  }
+
+  markPreFundReconciliationRunMirrorUnavailable(mirrorId, status, message) {
+    return preFundReconciliationRunRepository.markRunMirrorUnavailable(
+      this.db,
+      mirrorId,
+      status,
+      message
+    );
+  }
+
+  getPreFundReconciliationRunMirror(mirrorId) {
+    return preFundReconciliationRunRepository.getRunMirror(this.db, mirrorId);
+  }
+
+  listPreFundReconciliationRunMirrors() {
+    return preFundReconciliationRunRepository.listRunMirrors(this.db);
   }
 
   listFundTransferAccountMappings() {
