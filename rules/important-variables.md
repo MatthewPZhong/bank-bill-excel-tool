@@ -9,11 +9,13 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v19（app v3.0.14 — 2026-07-12 收尾复核：**前置资金对账**严格按非空 ID + 渠道 + 金额 + 币种精确 1:1、10 字段重复折叠、临时 MPT/运行结果双 side DB 生命周期、主库 run 镜像、按渠道动态 5/6-sheet 导出；**命中/异常说明口径**收紧为仅实际改值行检测并进入命中；`ALL_MODULE_IDS` 扩为 10；per-月侧库体系扩为 4 个业务模块/5 个存储模块） |
-| v19 本轮 review | 2026-07-12（自动验证：unit 3483/3483、integration 39/39 脚本/1842 断言、smoke、ESLint、Electron 预览；前置资金 parity 62/62；新增 INBOUND/OUTBOUND 双向逻辑表库隔离删除、10 万行 MPT、百万候选有界处理、SHA-256 原文身份校验、C4 4/5/6 兼容、Excel 行数上限和 no-clobber 文件发布回归；人工资金复核已完成） |
-| v19 基线数据 | `docs/analysis/var-reference-stats.md`（183 个 JS 文件 / 1986 顶层声明；A-share 320 / A-pair 539 / A-local 995 / B 859；报告版本 3.0.14） |
+| 当前清单版本 | v20（app v3.0.15 — 2026-07-14 收尾自动复核：新增独立**重复入金匹配**，严格 1R+2I 七元组、全保留月份 INBOUND MPT 批量候选、全局不复用与身份一致裁决、当前周期 side DB、主库轻量镜像及固定双 sheet 原子导出；`ALL_MODULE_IDS` 扩为 11；per-月侧库体系扩为 5 个业务模块/6 个存储模块） |
+| v20 本轮 review | 2026-07-14（自动验证：unit 3544/3544、integration 40/40 脚本/1870 断言、smoke、ESLint、Electron 预览；6 个月/15 万 MPT/6000 键批量查询基准；9 万行真实单据流读；启动性能；side DB 重启物理回收、主库敏感数据扫描、Excel 行数上限与 no-clobber 回滚；真实样本自动回放 9 个成功组 + 1 个人工组；**资金负责人复核及 Windows Excel/WPS 人工打开仍待完成，不得据此发布**） |
+| v20 基线数据 | `docs/analysis/var-reference-stats.md`（189 个 JS 文件 / 2080 顶层声明；A-share 335 / A-pair 547 / A-local 1065 / B 882；报告版本 3.0.15） |
+| v19 历史版本 | app v3.0.14 — 2026-07-12：前置资金对账严格 1:1、重复网关审计、双 side DB、按渠道 5/6-sheet；`ALL_MODULE_IDS` 为 10，per-月侧库为 4 个业务模块/5 个存储模块；自动门禁和人工资金复核均已完成。 |
 | 清单版本 | v18（对应 app v3.0.13 — 2026-07-04 收尾复核 4 条：**大账号识别阻断**（`matchMerchantIds` 子串 fuzzy 不再作为自动放行依据 + `normalizeMaintainedBigAccounts` 单一展平器 + 识别优先读文件头部）；**调拨状态过滤可观测性**（`buildFundTransferReconRows` 仅派生 `付款成功` + `fundTransferReconDerive.warning` 提醒全过滤）；**`detectFundTransferManyToMany` / `manyToManyReviewRows` 输出口径**（异常说明并入「命中场景」第 2 列，note-only 行可见，独立异常 sheet 停用）；**C3 同值候选优先**（同值候选优先减少无意义覆盖）；触发：v3.0.13 收尾 check-vars 硬节点）；v17（对应 app v3.0.12 — 2026-06-28 v3.0.12 收尾升格 2 条 Risk-sensitive ⚠️🔴 资金红线：**账户映射 → 调拨对账单 `big_account` 派生**（`fund_transfer_account_mappings` 全局表 + 仓储三函数 + `database.js` facade 四方法 + `buildFundTransferReconRows` accountMappingMap 第 2 参 + `linked-derive-rebuild` 单点注入 run/导入两链 + IPC/preload/`createFundTransferAccountMappingDialog`；改「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 匹配大账号口径）+ **`detectFundTransferManyToMany` / `manyToManyReviewRows`**（异常-人工判断 sheet 检测器，纯只读不改回填/行数守恒 + writer `appendManyToManyReviewSheet`/`SHEET_MANY_TO_MANY_NAME` + orchestrator `manyToManyReviewCount` + writer 第 8 参透传）；触发：v3.0.12 收尾 check-vars 硬节点；v16（对应 app v3.0.5 — 2026-06-15 size-startup-optimization Part B 升格 2 条：**per-月侧库体系**（Risk-sensitive ⚠️🔴🔴 资金红线 — run-data-store/MODULE_*/SIDE_DB_DDL_*/三编排层/reconcileOrphans/side_db_rel_path + 三 parity 锁；Phase 1/2 三对账模块 run 级批量数据迁出主库）+ **`DEFERRED_WINDOW_STARTUP`**（Runtime-state ⚠️ 启动时序回退开关 + appInitDone/两段式 getInfo/init-done；Phase 3 启动窗口先行）；触发：v3.0.5 Phase 4 守卫固化 check-vars 节点；v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
 | 上次人工 review | 2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
+| v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（173 个 JS 文件 / 1781 顶层声明 — v3.0.13 `scan:vars` 重跑后；A-share 300 / A-pair 495 / A-local 861 / B 795） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -412,14 +414,14 @@
   - 与 BIZ_OP_HEADERS 同步管理（配套常量）
   - 必跑：smoke biz-op-recon Case D（流水累加 + 出入方向）+ 真实流水文件回放
 
-### `ALL_MODULE_IDS`（v2.1.4 建立；v3.0.14 扩为 10 个主模块 ID 全集 anchor）
+### `ALL_MODULE_IDS`（v2.1.4 建立；v3.0.15 扩为 11 个主模块 ID 全集 anchor）
 - 定义：`src/backend/database/settings-repository.js`
 - 关联功能：单文件定义，但被 `CURRENT_MODULE_VALID`（`setCurrentModule` 校验）+ `setEnabledModules`（启用列表校验）共用；renderer 端 `MODULES` 常量必须与之一致；新增模块时两边都要加
 - 变更 review 要点：
   - 新增模块 → 必须同步加到 `ALL_MODULE_IDS` + renderer 端 `src/renderer.js` 的 `MODULES` 常量（两边定义必须完全一致）
   - 如忘了同步 → 用户切到新模块会抛 `Invalid current_module`（v2.1.2/v2.1.3 即遗留过此 bug，v2.1.4 修复）
   - 修改 ID 字符串 → DB 内已持久化的 `current_module` / `enabled_modules` 会因 sanitize 被回退到默认值
-  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 10 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
+  - 必跑：`npm run smoke`（settings-repository 内部测试）+ 手动验证 11 个模块逐一切换 + 收纳弹窗启用各模块后切换；新模块默认关闭时还要验证旧用户启用列表不被扩写
 
 ### `enabled_modules`（v2.1.4 — 左上角模块切换菜单的启用列表全链路）
 - 定义：
@@ -986,13 +988,14 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - 改派发口径（移到 UI 自算 / dispatcher 入参时算）→ 编号体系再次分裂，N3-1 修复失效
   - 必跑：smoke N3-1（main 端 displayIndex 与 UI 列表 displayIndex 字段值逐项相等）+ 手测对比场景管理 dialog 与状态框
 
-### per-月侧库体系（v3.0.5 建立；v3.0.14 接入前置资金对账，Risk-sensitive ⚠️🔴🔴 资金红线）
+### per-月侧库体系（v3.0.5 建立；v3.0.15 接入重复入金匹配，Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
   - `src/backend/run-data-store.js`：`KNOWN_MODULES` 新增 `MODULE_PRE_FUND_RECONCILIATION`（跨重启临时 MPT）和 `MODULE_PRE_FUND_RECONCILIATION_RESULTS`（当前 run 可回收结果）；`SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS` 分别是两套 DDL 唯一真相。
+  - v3.0.15 新增 `MODULE_DUPLICATE_INBOUND_MATCH` / `SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH`，只保存当前启动周期的银行 46 列、运行结果和组级血缘；主库 `duplicate_inbound_match_run_mirrors` 只保存轻量状态/摘要/hash/side path。
   - 既有三模块编排层不变；前置资金对账由 `src/main-process/pre-fund-reconciliation/service.js` 统一编排 import/run/mirror/export，`pre-fund-reconciliation-run-store.js` 只操作 side DB。
   - 主库新增轻量 `pre_fund_reconciliation_run_mirrors`，保存 `side_db_rel_path + side_run_id + status + summary`；不保存任何 MPT/候选/结果 bulk 行。
 - `MODULE_PRE_FUND_RECONCILIATION` / `MODULE_PRE_FUND_RECONCILIATION_RESULTS` / `SIDE_DB_DDL_PRE_FUND_GATEWAY` / `SIDE_DB_DDL_PRE_FUND_RUNS` / `PreFundReconciliationRunStore` — 前置资金对账双生命周期侧库入口、两套 DDL 单一真相和结果游标。
-- 关联功能：四个对账模块的 run 级批量数据位于 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`；前置资金对账还把跨重启临时 MPT 批次放侧库，主库 `linked_gateway_bill` 绝不被临时导入覆盖。
+- 关联功能：五个对账模块、六个存储模块的 run 级批量数据位于 `{userData}/run-data/{module}/month-{YYYY-MM}.sqlite`；前置资金对账还把跨重启临时 MPT 批次放侧库，主库 `linked_gateway_bill` 绝不被临时导入覆盖。
 - 🔴 变更 review 要点（资金红线，改动前必读）：
   - **算法零改动不变量**：`runCheckCore`（acquiring）/ `runReconciliation`（biz-op/bank-bu）/ 4 步算法 / diff JOIN / epsilon **一字不改** —— 它们在「侧库 db 句柄」上跑 = 在主库上跑（同库自洽）。改动算法须重跑 `acquiring-side-db-parity` / `biz-op-recon-side-db-parity` / `bank-bu-recon-side-db-parity` 三 parity（byte-for-byte + 主库表恒 0 行 + 冻结 golden）。
   - **DDL 单一真相**：既有三模块仍要求 side/main schema byte-for-byte；前置资金对账从未在主库建 bulk 表，side DDL 只在 `run-data-store.js` 定义，主库镜像 schema 有意不同。改 side DDL 后必须跑 store/run-store 两层测试和 parity。
@@ -1000,7 +1003,8 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **biz-op per-month 跨月边界**（单库自洽命门）：月末 D 导入时编排层补清下月侧库 (D,BU)+(D+1,BU) 旧 run + 写 D 的 T-2 冗余副本到下月侧库；月初对账 date 的 T-2(上月末) 由该冗余副本在当月侧库保证单库自洽。改 `handleMonthEndCrossMonth` / `runViaSideDb` / 双源去重逻辑须重跑 biz-op parity 的跨月用例。
   - **双源过渡（B-D2）**：side_db_rel_path 非空读侧库、NULL 读主库旧表。双源移除 + 二次 VACUUM 顺延 v3.0.5 之后版本——届时删双源分支前确认历史主库 run 已迁清。
   - **前置资金对账生命周期**：临时批次按账单月保存在 MPT 模块，run 结果按运行月保存在 results 模块。新 run 删除旧 results 文件并标镜像 superseded；重启标 expired 并回收 results；清临时批次只删 MPT 模块，绝不能碰独立 results。启动时 running 镜像标 interrupted，镜像有而侧库无则标 missing-side-db。
-- 必跑：`npm run release-check`（含四 parity）+ `pre-fund-reconciliation-side-db-parity.js` + 同月 MPT/import/run/export/删除来源后 stale 回归。
+  - **重复入金当前周期生命周期**：选中新银行文件立即清旧银行/结果侧库；新 run 清旧结果；重启物理删除本模块 side DB 并将镜像标 interrupted/expired。删除失败必须显式阻断，不能在含姓名/卡号的文件仍存在时报告回收成功；临时 MPT 模块继续跨重启保留。
+- 必跑：`npm run release-check`（含四 parity）+ `pre-fund-reconciliation-side-db-parity.js` + 重复入金 store/service/端到端测试 + 同月 MPT/import/run/export/删除来源后 stale 回归。
 
 ### `DEFERRED_WINDOW_STARTUP`（v3.0.5 Part B Phase 3 新增 Runtime-state ⚠️ 启动时序回退开关）
 - 定义：`src/main.js` 模块级 `const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true`（默认 true=新时序：窗口先行）。配套 `appInitDone`（app:get-info 两段式判定）+ `runBackgroundInitChain`/`registerAllIpcHandlers`/`markAppInitDone`/`runStartupPostSetup` + IPC `app:init-done`/`app:init-progress` + preload `app.onInitDone`/`onInitProgress` + renderer `initialize`/`applyFullInfo` 两段式。
@@ -1047,6 +1051,27 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **结果守恒**：银行参与行 = 平账 + 不平；网关候选 = 已消费 + 未使用；不平结果和渠道账单行数一致，按渠道不得串数据。
   - **模板契约**：前 5 个 sheet 名/顺序和表头固定；本渠道无重复时保持 5-sheet，有重复时只在末尾追加固定 22 列第 6 sheet；0 不平及重复专属渠道仍导出；来源枚举必须区分 `临时网关对账单` / `网关对账单` / `导入银行对账单`。
   - 必跑：pre-fund 全部 unit + side-db parity + 真实 5/6-sheet 导出；⚠️ ID/渠道/金额/币种匹配键、候选顺序、指纹、重复双方原文、金额/姓名/卡号和按渠道拆分必须人工资金复核。
+
+### `buildDuplicateInboundGroups` / `resolveDuplicateInboundMptMatches` / `resolveDuplicateInboundDocumentMatches` / `lookupInboundRows` / `DuplicateInboundMatchService`（v3.0.15 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+- `buildDuplicateInboundGroups` / `resolveDuplicateInboundMptMatches` / `resolveDuplicateInboundDocumentMatches` / `lookupInboundRows` / `DuplicateInboundMatchService` — 银行分组、MPT 批量候选查询、单据唯一回填和当前周期编排五个契约入口。
+- 定义：
+  - `src/main-process/duplicate-inbound-match/matching-engine.js`：银行方向金额规范化、七元组分组、严格 1 Reversal + 2 Inbound 分类，MPT 唯一/互异/全局不复用/oppBu 裁决，以及单据 orderId 唯一/互异/身份字段裁决。
+  - `src/backend/pre-fund-reconciliation-store.js:lookupInboundRows`：把银行候选键放入每个月库的 TEMP ID 集合，每月份单次 JOIN 查询全部保留的 `MPT_INBOUND_GATEWAY + Inbound-VA` 行；不读 OUTBOUND 或主链接表。
+  - `src/main-process/duplicate-inbound-match/document-statement-reader.js` / `src/backend/duplicate-inbound-match-store.js`：标准 26 列单据流式读取、非唯一业务订单号索引、有限候选回读和当前周期三方审计。
+  - `src/main-process/duplicate-inbound-match/service.js`：银行+单据双文件原子导入、BizId 强校验、当前周期 side DB、INBOUND MPT snapshot、主库轻量镜像、守恒、导出资格和两 sheet writer 总编排。
+  - `src/main-process/duplicate-inbound-match/excel-writer.js`：固定 `邮件模板` 10 列与 `匹配不成功需人工判定` 46+1 列，临时文件发布及已有目标回滚。
+- 关联功能：`重复入金匹配` 把银行 Reversal/Inbound 分组与跨全部保留月份的临时中台入金 MPT、当前导入单据三方关联；成功组生成召回邮件数据，任何银行计数、MPT 候选或单据字段不确定性整组进入人工判定。
+- 🔴 变更 review 要点（资金红线，改动前必读）：
+  - **金额与银行组唯一口径**：FundType 只 trim 后大小写敏感识别；Reversal 只读 `Debit Amount`、Inbound 只读 `Credit Amount`；金额用十进制字符串规范化，禁止 JS 浮点计算。分组键固定为金额 + 双方姓名/卡号 + Channel + Currency，六个文本字段保持原值、不 trim、不改大小写；BizId/MerchantId/ReconciliationId 不进银行分组键。
+  - **自动候选门槛**：只有 1R+2I 进入 MPT；其它所有含 Reversal 的组将组内全部相关行送人工，纯 Inbound 只统计。相关金额非法必须整次 fail closed，不得降级忽略或人工。
+  - **MPT 精确查询**：每条银行 Inbound 仅按 trim 后、大小写敏感的 Channel + MerchantId + ReconciliationId，再附加 `sourceType=MPT_INBOUND_GATEWAY` 与 `tradeType=Inbound-VA` 精确匹配；禁止 includes、金额/日期 fallback、OUTBOUND 或 linked pool 旁路。每个月库只能做一次批量候选 SELECT，不能恢复“月份 × 银行 ID”逐条查询。
+  - **唯一与全局不复用**：两条 Inbound 必须各唯一命中一条不同 MPT；同一 MPT 在全运行只能使用一次。组内同候选、0/多候选或跨组共享候选时，所有相关组整组人工，禁止 first-wins/贪心消费。
+  - **MPT 身份**：两 MPT 的 `oppBu` trim 后必须非空且一致；MPT `business/clientId/accId` 不参与成功判定或客户/账户输出。MPT raw JSON 损坏整次阻断。
+  - **单据唯一回填**：两 MPT `orderId` trim 后必须非空，分别大小写敏感精确命中一条不同单据；单据用户编号/账户号/业务部门 trim 后须非空且组内一致，业务部门还须等于 `oppBu`。失败仅当前组人工，禁止回退 MPT clientId/accId。
+  - **守恒与血缘**：全部相关银行行必须唯一落到成功/人工/纯 Inbound；全部 Reversal 必须为成功或人工；成功组选用的 MPT ID 数 = 成功组×2 且全局唯一。每组 side DB 审计必须保留银行 BizId/源行、MPT 月份/行 ID 和单据文件/源行/匹配单号，主库不得保存银行 raw、姓名、卡号或单据客户/账户值。
+  - **snapshot 与生命周期**：结果绑定同一银行+单据 import 和全部 INBOUND 批次 identity/hash/行数；INBOUND 导入、替换或删除后 stale，OUTBOUND-only 变化不 stale。选新双文件、开始新 run、失败和重启都不得恢复旧可导出结果；启动必须物理回收含个人信息的 side DB。
+  - **Excel 契约**：只允许最新成功且 snapshot 有效、邮件或人工至少一类非空的结果导出；两个 sheet 名/顺序/表头固定，邮件业务来源取 MPT oppBu、客户号/账户号取单据，Debit Amount 数据行显式使用“常规”格式，人工组保留全部原 46 列；超 Excel 上限写前失败，发布失败恢复原目标且不留下伪成功文件。
+  - 必跑：duplicate-inbound matching/store/service/reader/writer/wiring 全部 unit + `duplicate-inbound-match-end-to-end.js` + 真实 9 万行单据有界内存回放 + `npm run benchmark:duplicate-inbound` + `npm run release-check`；⚠️ 金额方向、七元组空格/大小写、跨月 MPT、候选复用、姓名卡号、orderId、三方回填血缘、守恒和 Excel/WPS 必须用脱敏真实样本人工复核。
 
 ### `detectFundTransferManyToMany` / `manyToManyReviewRows`（v3.0.12 新增；v3.0.14 收紧为仅实际改值行检测/输出）
 - 定义：

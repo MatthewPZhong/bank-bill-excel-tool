@@ -10,6 +10,7 @@ const {
   MPT_SCHEMAS,
   normalizeDate,
   parseMptFileName,
+  SOURCE_TYPE_INBOUND,
 } = require('../main-process/pre-fund-reconciliation/mpt-schema');
 
 const MODULE = runDataStore.MODULE_PRE_FUND_RECONCILIATION;
@@ -404,6 +405,95 @@ class PreFundReconciliationStore {
         db.close();
       }
     }
+  }
+
+  // v3.0.15 重复入金匹配：按所需 reconId 批量查全部保留月份的临时入金网关账单。
+  // 每个月库用 TEMP ID 集合做一次 JOIN；不按银行行重复查询、不扫描 OUTBOUND，也不读主链接表。
+  lookupInboundRows(criteriaList) {
+    if (!Array.isArray(criteriaList)) {
+      throw new TypeError('临时入金网关查询条件必须是数组');
+    }
+    const normalize = (value) => value == null ? '' : String(value).trim();
+    const lookupIdsByTuple = new Map();
+    const reconciliationIds = new Set();
+    const result = new Map();
+    const seenLookupIds = new Set();
+    for (const item of criteriaList) {
+      const lookupId = String(item && item.lookupId != null ? item.lookupId : '');
+      if (!lookupId || seenLookupIds.has(lookupId)) {
+        throw new TypeError('临时入金网关查询 lookupId 必须非空且唯一');
+      }
+      seenLookupIds.add(lookupId);
+      const normalized = {
+        lookupId,
+        reconciliationId: normalize(item.reconciliationId),
+        channel: normalize(item.channel),
+        merchantId: normalize(item.merchantId)
+      };
+      const tupleKey = JSON.stringify([
+        normalized.reconciliationId,
+        normalized.channel,
+        normalized.merchantId
+      ]);
+      const lookupIds = lookupIdsByTuple.get(tupleKey) || [];
+      lookupIds.push(lookupId);
+      lookupIdsByTuple.set(tupleKey, lookupIds);
+      reconciliationIds.add(normalized.reconciliationId);
+      result.set(lookupId, []);
+    }
+    if (reconciliationIds.size === 0) return result;
+
+    for (const file of this._listTargetFiles()) {
+      const db = runDataStore.openExistingSideDb(file.path);
+      let transactionStarted = false;
+      try {
+        db.exec(`
+          CREATE TEMP TABLE duplicate_inbound_match_lookup_ids (
+            reconciliation_id TEXT PRIMARY KEY
+          ) WITHOUT ROWID
+        `);
+        db.exec('BEGIN');
+        transactionStarted = true;
+        const insertLookupId = db.prepare(`
+          INSERT INTO duplicate_inbound_match_lookup_ids (reconciliation_id) VALUES (?)
+        `);
+        for (const reconciliationId of reconciliationIds) insertLookupId.run(reconciliationId);
+
+        const statement = db.prepare(`
+          SELECT r.*
+          FROM pre_fund_reconciliation_gateway_rows r
+          JOIN pre_fund_reconciliation_gateway_batches b ON b.id = r.batch_id
+          JOIN duplicate_inbound_match_lookup_ids wanted
+            ON wanted.reconciliation_id = r.reconciliation_id
+          WHERE r.source_type = ? AND r.trade_type = ?
+          ORDER BY b.id ASC, r.source_row_number ASC, r.id ASC
+        `);
+        for (const row of statement.iterate(SOURCE_TYPE_INBOUND, 'Inbound-VA')) {
+          const match = mapGatewayRow(row, file.monthKey);
+          const tupleKey = JSON.stringify([
+            match.reconciliationId,
+            match.channel,
+            match.merchantId
+          ]);
+          const lookupIds = lookupIdsByTuple.get(tupleKey);
+          if (!lookupIds) continue;
+          for (const lookupId of lookupIds) {
+            result.get(lookupId).push({
+              ...match,
+              candidateId: `${file.monthKey}:${match.id}`
+            });
+          }
+        }
+        db.exec('COMMIT');
+        transactionStarted = false;
+      } catch (error) {
+        if (transactionStarted) rollbackQuietly(db);
+        throw error;
+      } finally {
+        db.close();
+      }
+    }
+    return result;
   }
 
   getRawJsonById(monthKey, rowId) {

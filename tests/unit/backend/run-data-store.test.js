@@ -154,17 +154,19 @@ test.describe('孤儿扫描列表', () => {
 
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu 两模块侧库 DDL + KNOWN_MODULES 扩展。
 test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
-  test('KNOWN_MODULES 含三个既有模块和前置对账两个生命周期模块', () => {
+  test('KNOWN_MODULES 含既有模块、前置对账双生命周期模块和重复入金结果模块', () => {
     assert.deepEqual([...rds.KNOWN_MODULES].sort(), [
       'acquiring-bill-currency',
       'bank-bu-recon',
       'biz-op-recon',
+      'duplicate-inbound-match',
       'pre-fund-reconciliation',
       'pre-fund-reconciliation-results'
     ]);
     assert.equal(rds.MODULE_BIZ_OP, 'biz-op-recon');
     assert.equal(rds.MODULE_BANK_BU, 'bank-bu-recon');
     assert.equal(rds.MODULE_PRE_FUND_RECONCILIATION_RESULTS, 'pre-fund-reconciliation-results');
+    assert.equal(rds.MODULE_DUPLICATE_INBOUND_MATCH, 'duplicate-inbound-match');
   });
 
   test('biz-op 侧库 DDL 建 4 表（imports/flow_imports/runs/diff_rows）', () => {

@@ -242,6 +242,32 @@
             </div>
           </section>
 
+          <!-- v3.0.15：重复入金匹配模块（布局与月度银行对账单BU回填校验一致）-->
+          <section id="duplicateInboundMatchModulePanel" class="control-board module-panel pending-board layout-mirrored" hidden>
+            <div class="control-row">
+              <div class="cell left"></div>
+              <div class="cell right">
+                <div class="pending-action-pair">
+                  <button id="duplicateInboundMatchImportBtn" class="primary-btn" type="button">导入文件</button>
+                  <button id="duplicateInboundMatchRunBtn" class="primary-btn" type="button" disabled>开始运行</button>
+                </div>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <button id="duplicateInboundMatchExportBtn" class="secondary-btn" type="button" disabled>导出文件</button>
+              </div>
+              <div class="cell right">
+                <div id="duplicateInboundMatchStatusBox" class="status-box">
+                  <span class="status-spark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusDuplicateInboundMatch" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusDuplicateInboundMatch)"/></svg>
+                  </span>
+                  <span class="status-box-text">欢迎使用小助手</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
           <!-- v2.1.12 需求1：VCC业务OP计算模块面板（仿 bank-bu-recon；「导出差异」位 →「显示余额」）-->
           <section id="vccOpCalcModulePanel" class="control-board module-panel pending-board layout-mirrored" hidden>
             <div class="control-row">

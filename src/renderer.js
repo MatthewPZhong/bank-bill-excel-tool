@@ -60,6 +60,10 @@ const MODULES = Object.freeze({
     id: 'pre-fund-reconciliation',
     name: '前置资金对账'
   },
+  duplicateInboundMatch: {
+    id: 'duplicate-inbound-match',
+    name: '重复入金匹配'
+  },
   // v2.1.0-beta.1 PR-A：对账单ReconID修复模块（C4 / business + gateway 两个子模式）
   // v2.1.0-beta.3 T4：模块下挂 business（单据对账单）+ gateway（网关对账单）两个子模式，按主面板「账单类别」下拉切换
   //   ⚠️ module.id 保留 'recon-id-fix'（数十处引用 + DB schema CHECK 约束）；
@@ -337,6 +341,12 @@ const elements = {
   bankBuReconRunBtn: document.getElementById('bankBuReconRunBtn'),
   bankBuReconExportBtn: document.getElementById('bankBuReconExportBtn'),
   bankBuReconStatusBox: document.getElementById('bankBuReconStatusBox'),
+  // v3.0.15：重复入金匹配模块。
+  duplicateInboundMatchModulePanel: document.getElementById('duplicateInboundMatchModulePanel'),
+  duplicateInboundMatchImportBtn: document.getElementById('duplicateInboundMatchImportBtn'),
+  duplicateInboundMatchRunBtn: document.getElementById('duplicateInboundMatchRunBtn'),
+  duplicateInboundMatchExportBtn: document.getElementById('duplicateInboundMatchExportBtn'),
+  duplicateInboundMatchStatusBox: document.getElementById('duplicateInboundMatchStatusBox'),
   // v2.1.3：业务OP数据核对模块（spec §7.3 — 7 项 DOM 缓存）
   bizOpReconModulePanel: document.getElementById('bizOpReconModulePanel'),
   bizOpReconImportBtn: document.getElementById('bizOpReconImportBtn'),
@@ -1479,6 +1489,12 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
     elements.bankBuReconModulePanel.hidden = moduleId !== MODULES.bankBuRecon.id;
     if (moduleId === MODULES.bankBuRecon.id) {
       restoreBankBuReconPanelState();
+    }
+  }
+  if (elements.duplicateInboundMatchModulePanel) {
+    elements.duplicateInboundMatchModulePanel.hidden = moduleId !== MODULES.duplicateInboundMatch.id;
+    if (moduleId === MODULES.duplicateInboundMatch.id) {
+      restoreDuplicateInboundMatchPanelState();
     }
   }
   // v2.1.3：业务OP数据核对模块面板隐藏控制
@@ -5228,6 +5244,195 @@ function formatBbrTimestampForFilename() {
 }
 
 // ============================================================
+// v3.0.15：重复入金匹配 — 当前启动周期银行+单据双文件导入 / 运行 / 另存为。
+// ============================================================
+
+const duplicateInboundMatchState = {
+  busy: false,
+  backend: null
+};
+
+function setDuplicateInboundMatchStatus(message, tone = 'info') {
+  if (!elements.duplicateInboundMatchStatusBox) return;
+  updateStatusBox(elements.duplicateInboundMatchStatusBox, message, tone, {
+    idleTitle: '欢迎使用小助手'
+  });
+}
+
+function applyDuplicateInboundMatchButtonState() {
+  const status = duplicateInboundMatchState.backend || {};
+  if (elements.duplicateInboundMatchImportBtn) {
+    elements.duplicateInboundMatchImportBtn.disabled = duplicateInboundMatchState.busy;
+  }
+  if (elements.duplicateInboundMatchRunBtn) {
+    elements.duplicateInboundMatchRunBtn.disabled = duplicateInboundMatchState.busy || !status.canRun;
+  }
+  if (elements.duplicateInboundMatchExportBtn) {
+    elements.duplicateInboundMatchExportBtn.disabled = duplicateInboundMatchState.busy || !status.canExport;
+  }
+}
+
+function renderDuplicateInboundMatchBackendStatus(status) {
+  if (!status || status.status !== 'ok') {
+    setDuplicateInboundMatchStatus('欢迎使用小助手', 'info');
+    return;
+  }
+  if (status.run) {
+    if (status.run.stale || status.run.unavailable) {
+      setDuplicateInboundMatchStatus(
+        status.run.unavailableMessage || '临时中台入金网关账单已变化，请重新运行',
+        'warning'
+      );
+      return;
+    }
+    const s = status.run.summary || {};
+    const reasonCounts = s.reasonCounts || {};
+    const mptZeroCount = Number(reasonCounts['duplicate-inbound-mpt-candidate-count-zero'] || 0);
+    const mptMultipleCount = Number(reasonCounts['duplicate-inbound-mpt-candidate-count-multiple'] || 0);
+    const mptReuseCount = Number(reasonCounts['duplicate-inbound-mpt-candidate-reused-across-groups'] || 0);
+    const mptOppBuCount = Number(reasonCounts['duplicate-inbound-mpt-opp-bu-empty'] || 0)
+      + Number(reasonCounts['duplicate-inbound-mpt-opp-bu-conflict'] || 0);
+    const documentZeroCount = Number(reasonCounts['duplicate-inbound-document-candidate-count-zero'] || 0);
+    const documentMultipleCount = Number(reasonCounts['duplicate-inbound-document-candidate-count-multiple'] || 0);
+    const documentIdentityCount = Number(reasonCounts['duplicate-inbound-document-identity-field-empty'] || 0)
+      + Number(reasonCounts['duplicate-inbound-document-identity-fields-conflict'] || 0);
+    const documentBuMismatchCount = Number(
+      reasonCounts['duplicate-inbound-document-business-department-mismatch'] || 0
+    );
+    setDuplicateInboundMatchStatus(
+      `匹配完成：共 ${s.inputRowCount || 0} 行（Reversal ${s.reversalRowCount || 0} / Inbound ${s.inboundRowCount || 0} / 忽略 ${s.ignoredFundTypeRowCount || 0}）；分组 ${s.bankGroupCount || 0} 个（1+2 候选 ${s.bankCandidateGroupCount || 0} / 成功 ${s.finalSuccessGroupCount || 0} / 人工 ${s.manualGroupCount || 0} 组 ${s.manualRowCount || 0} 行 / 纯 Inbound ${s.pureInboundGroupCount || 0} 组 ${s.pureInboundRowCount || 0} 行）；MPT 异常：零候选 ${mptZeroCount} / 多候选 ${mptMultipleCount} / 复用 ${mptReuseCount} / oppBu ${mptOppBuCount}；单据异常：零候选 ${documentZeroCount} / 多候选 ${documentMultipleCount} / 身份字段 ${documentIdentityCount} / 业务部门 ${documentBuMismatchCount}`,
+      (s.manualRowCount || 0) > 0 ? 'info' : 'success'
+    );
+    return;
+  }
+  if (status.bank && status.document) {
+    setDuplicateInboundMatchStatus(
+      `已导入银行对账单 ${status.bank.fileName}：共 ${status.bank.rowCount} 行，Reversal ${status.bank.reversalCount} 行，Inbound ${status.bank.inboundCount} 行；单据对账单 ${status.document.fileName}：共 ${status.document.rowCount} 行，可匹配 ${status.document.matchableRowCount} 行`,
+      'success'
+    );
+    return;
+  }
+  setDuplicateInboundMatchStatus('欢迎使用小助手', 'info');
+}
+
+async function refreshDuplicateInboundMatchStatus({ updateStatus = true } = {}) {
+  try {
+    const result = await window.desktopApi.duplicateInboundMatch.sessionStatus();
+    duplicateInboundMatchState.backend = result && result.status === 'ok' ? result : null;
+    if (updateStatus) renderDuplicateInboundMatchBackendStatus(result);
+  } catch (_error) {
+    duplicateInboundMatchState.backend = null;
+    if (updateStatus) setDuplicateInboundMatchStatus('状态读取失败，请重试', 'error');
+  }
+  applyDuplicateInboundMatchButtonState();
+}
+
+function restoreDuplicateInboundMatchPanelState() {
+  setDuplicateInboundMatchStatus('欢迎使用小助手', 'info');
+  refreshDuplicateInboundMatchStatus().catch(() => {});
+}
+
+function subscribeDuplicateInboundMatchProgress(kind, fallbackText) {
+  const api = window.desktopApi && window.desktopApi.duplicateInboundMatch;
+  const method = kind === 'import'
+    ? 'onImportProgress'
+    : kind === 'run' ? 'onRunProgress' : 'onExportProgress';
+  if (!api || typeof api[method] !== 'function') return () => {};
+  return api[method]((progress) => {
+    const message = progress && progress.message ? progress.message : fallbackText;
+    setDuplicateInboundMatchStatus(message, 'info');
+  });
+}
+
+async function handleDuplicateInboundMatchImport() {
+  duplicateInboundMatchState.busy = true;
+  applyDuplicateInboundMatchButtonState();
+  setDuplicateInboundMatchStatus('正在导入银行对账单和单据对账单...', 'info');
+  const unsubscribe = subscribeDuplicateInboundMatchProgress('import', '正在导入银行对账单和单据对账单...');
+  try {
+    const result = await window.desktopApi.duplicateInboundMatch.importFiles();
+    if (!result || result.status === 'cancelled') {
+      await refreshDuplicateInboundMatchStatus();
+      return;
+    }
+    if (result.status !== 'ok') {
+      await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+      setDuplicateInboundMatchStatus(`导入失败：${result.message || '未知错误'}`, 'error');
+      return;
+    }
+    await refreshDuplicateInboundMatchStatus();
+  } catch (error) {
+    await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+    setDuplicateInboundMatchStatus(`导入失败：${error && error.message ? error.message : error}`, 'error');
+  } finally {
+    unsubscribe();
+    duplicateInboundMatchState.busy = false;
+    applyDuplicateInboundMatchButtonState();
+  }
+}
+
+async function handleDuplicateInboundMatchRun() {
+  duplicateInboundMatchState.busy = true;
+  applyDuplicateInboundMatchButtonState();
+  setDuplicateInboundMatchStatus('正在匹配重复入金...', 'info');
+  const unsubscribe = subscribeDuplicateInboundMatchProgress('run', '正在匹配重复入金...');
+  try {
+    const result = await window.desktopApi.duplicateInboundMatch.run();
+    if (!result || result.status !== 'success') {
+      await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+      setDuplicateInboundMatchStatus(`运行失败：${result && result.message ? result.message : '未知错误'}`, 'error');
+      return;
+    }
+    await refreshDuplicateInboundMatchStatus();
+  } catch (error) {
+    await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+    setDuplicateInboundMatchStatus(`运行失败：${error && error.message ? error.message : error}`, 'error');
+  } finally {
+    unsubscribe();
+    duplicateInboundMatchState.busy = false;
+    applyDuplicateInboundMatchButtonState();
+  }
+}
+
+async function handleDuplicateInboundMatchExport() {
+  duplicateInboundMatchState.busy = true;
+  applyDuplicateInboundMatchButtonState();
+  setDuplicateInboundMatchStatus('正在生成导出文件...', 'info');
+  const unsubscribe = subscribeDuplicateInboundMatchProgress('export', '正在生成导出文件...');
+  try {
+    const result = await window.desktopApi.duplicateInboundMatch.export();
+    if (!result || result.status === 'cancelled') {
+      await refreshDuplicateInboundMatchStatus();
+      return;
+    }
+    if (result.status !== 'success') {
+      await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+      setDuplicateInboundMatchStatus(`导出失败：${result.message || '未知错误'}`, 'error');
+      return;
+    }
+    setDuplicateInboundMatchStatus(`文件已生成：${result.filePath}`, 'success');
+    await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+  } catch (error) {
+    await refreshDuplicateInboundMatchStatus({ updateStatus: false });
+    setDuplicateInboundMatchStatus(`导出失败：${error && error.message ? error.message : error}`, 'error');
+  } finally {
+    unsubscribe();
+    duplicateInboundMatchState.busy = false;
+    applyDuplicateInboundMatchButtonState();
+  }
+}
+
+function applyDuplicateInboundMatchPanelPreviewState() {
+  document.querySelectorAll('.module-panel').forEach((panel) => { panel.hidden = true; });
+  if (elements.duplicateInboundMatchModulePanel) elements.duplicateInboundMatchModulePanel.hidden = false;
+  if (elements.currentModuleName) elements.currentModuleName.textContent = '重复入金匹配';
+  duplicateInboundMatchState.busy = false;
+  duplicateInboundMatchState.backend = { canRun: false, canExport: false };
+  applyDuplicateInboundMatchButtonState();
+  setDuplicateInboundMatchStatus('欢迎使用小助手', 'info');
+}
+
+// ============================================================
 // v2.1.12 需求1：VCC业务OP计算 — UI 状态机 + IPC 调用（spec §2 状态机 + §8 真实契约）
 // 数据流：导入(pickFiles→scan→F1确认→computeAmounts) → 开始运行(F2 输入期初OP→save 落库) → 显示余额(F3)
 // 资金红线🔴：金额计算全在后端（整数分）；前端仅透传 beginOp + 展示后端返回的金额字符串，绝不自行算钱。
@@ -6363,6 +6568,16 @@ async function applyFullInfo(info) {
     elements.bankBuReconExportBtn.addEventListener('click', handleBankBuReconExport);
   }
 
+  if (elements.duplicateInboundMatchImportBtn) {
+    elements.duplicateInboundMatchImportBtn.addEventListener('click', handleDuplicateInboundMatchImport);
+  }
+  if (elements.duplicateInboundMatchRunBtn) {
+    elements.duplicateInboundMatchRunBtn.addEventListener('click', handleDuplicateInboundMatchRun);
+  }
+  if (elements.duplicateInboundMatchExportBtn) {
+    elements.duplicateInboundMatchExportBtn.addEventListener('click', handleDuplicateInboundMatchExport);
+  }
+
   // v2.1.12 需求1：VCC业务OP计算模块事件绑定（导入 / 开始运行 / 显示余额）
   if (elements.vccOpCalcImportBtn) {
     elements.vccOpCalcImportBtn.addEventListener('click', handleVccOpCalcImport);
@@ -6808,6 +7023,8 @@ async function applyFullInfo(info) {
     setTimeout(() => { applyBankBuReconPanelImportingPreviewState(); }, 120);
   } else if (info.previewModal === 'bank-bu-recon-panel-result') {
     setTimeout(() => { applyBankBuReconPanelResultPreviewState(); }, 120);
+  } else if (info.previewModal === 'duplicate-inbound-match-panel') {
+    setTimeout(() => { applyDuplicateInboundMatchPanelPreviewState(); }, 120);
   } else if (info.previewModal === 'biz-op-recon-panel-initial') {
     setTimeout(() => { applyBizOpReconPanelInitialPreviewState(); }, 120);
   } else if (info.previewModal === 'biz-op-recon-panel-importing') {

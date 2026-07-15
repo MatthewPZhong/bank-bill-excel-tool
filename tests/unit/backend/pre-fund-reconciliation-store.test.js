@@ -124,6 +124,70 @@ test('不同 sourceType+sourceBatch 追加，跨实例可 list，规范行按稳
   assert.equal(reopened.getRawJsonById(outRow.monthKey, 999999), null);
 });
 
+test('重复入金查询跨全部月份只返回精确 INBOUND-VA 条件且每月份一次批量读取', async () => {
+  const store = new PreFundReconciliationStore(tmpdir);
+  await store.importFile(writeFixture(
+    'MPT_INBOUND_GATEWAY_20260708_110.txt',
+    ['20260708', 'MPT_INBOUND_20260708', '2'],
+    [
+      inboundRow({ reconId: 'R-LOOKUP', business: 'BIZ-1', clientId: 'C1', accId: 'A1' }),
+      inboundRow({ reconId: 'R-LOOKUP', tradeType: 'Inbound-OTHER', orderId: 'WRONG-TRADE' })
+    ]
+  ));
+  await store.importFile(writeFixture(
+    'MPT_INBOUND_GATEWAY_20260801_111.txt',
+    ['20260801', 'MPT_INBOUND_20260801', '1'],
+    [inboundRow({
+      batchNo: 'MPT_INBOUND_20260801',
+      billDate: '2026-08-01',
+      valueDate: '2026-08-01',
+      bookDate: '2026-08-01',
+      businessDate: '2026-08-01',
+      reconId: 'R-LOOKUP',
+      orderId: 'OI-AUG'
+    })]
+  ));
+  await store.importFile(writeFixture(
+    'MPT_OUTBOUND_GATEWAY_20260707112.txt',
+    ['20260707', 'MPT_OUTBOUND_20260707', '1'],
+    [outboundRow({ reconId: 'R-LOOKUP', channel: 'CITI', merchantId: 'M1' })]
+  ));
+
+  const originalOpenExistingSideDb = runDataStore.openExistingSideDb;
+  let bulkSelectCount = 0;
+  runDataStore.openExistingSideDb = (...args) => {
+    const db = originalOpenExistingSideDb(...args);
+    return new Proxy(db, {
+      get(target, property) {
+        if (property === 'prepare') {
+          return (sql) => {
+            if (String(sql).includes('JOIN duplicate_inbound_match_lookup_ids wanted')) {
+              bulkSelectCount += 1;
+            }
+            return target.prepare(sql);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      }
+    });
+  };
+  let found;
+  try {
+    found = store.lookupInboundRows([
+      { lookupId: 'bank-1', channel: ' CITI ', merchantId: 'M1', reconciliationId: 'R-LOOKUP' },
+      { lookupId: 'bank-2', channel: 'DBS', merchantId: 'M1', reconciliationId: 'R-LOOKUP' }
+    ]);
+  } finally {
+    runDataStore.openExistingSideDb = originalOpenExistingSideDb;
+  }
+  assert.deepEqual(found.get('bank-1').map((row) => row.orderId), ['OI-1', 'OI-AUG']);
+  assert.deepEqual(found.get('bank-1').map((row) => row.monthKey), ['2026-07', '2026-08']);
+  assert.deepEqual(found.get('bank-2'), []);
+  assert.equal(new Set(found.get('bank-1').map((row) => row.candidateId)).size, 2);
+  assert.equal(bulkSelectCount, 2, '两个保留月份各执行一次候选批量 SELECT');
+});
+
 test('同文件同 hash 为 no-op；同文件名不同 hash 拒绝且旧数据不变', async () => {
   const store = new PreFundReconciliationStore(tmpdir);
   const fileName = 'MPT_INBOUND_GATEWAY_20260708_200.txt';

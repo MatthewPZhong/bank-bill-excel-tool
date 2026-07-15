@@ -3598,6 +3598,39 @@ function ensurePreFundReconciliationRunMetadataSupport(db) {
   `);
 }
 
+// v3.0.15：重复入金匹配主库仅保存运行镜像，不保存银行明细、姓名或卡号。
+// side_run_id 与 side_db_rel_path 指向当前启动周期的独立侧库；重启后镜像会标记 expired。
+function ensureDuplicateInboundMatchRunMetadataSupport(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS duplicate_inbound_match_run_mirrors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      month_key TEXT NOT NULL,
+      side_run_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      summary_json TEXT NOT NULL DEFAULT '{}',
+      snapshot_hash TEXT NOT NULL,
+      bank_file_name TEXT NOT NULL,
+      bank_file_hash TEXT NOT NULL,
+      document_file_name TEXT NOT NULL DEFAULT '',
+      document_file_hash TEXT NOT NULL DEFAULT '',
+      side_db_rel_path TEXT NOT NULL,
+      error_message TEXT,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_run_mirrors_status
+      ON duplicate_inbound_match_run_mirrors(status, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_run_mirrors_side_run
+      ON duplicate_inbound_match_run_mirrors(month_key, side_run_id);
+  `);
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'document_file_name')) {
+    db.exec("ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN document_file_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!hasColumn(db, 'duplicate_inbound_match_run_mirrors', 'document_file_hash')) {
+    db.exec("ALTER TABLE duplicate_inbound_match_run_mirrors ADD COLUMN document_file_hash TEXT NOT NULL DEFAULT ''");
+  }
+}
+
 module.exports = {
   ensureAccountMappingCurrencySupport,
   ensureAccountMappingTemplateSupport,
@@ -3675,6 +3708,7 @@ module.exports = {
   // v3.0.12 功能2（批A）：账户映射管理全局表（中台调拨单账户号 → 清结算系统银行账号；幂等建表，不进 ALL_TABLE_KEYS）
   ensureFundTransferAccountMappingSupport,
   ensurePreFundReconciliationRunMetadataSupport,
+  ensureDuplicateInboundMatchRunMetadataSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,

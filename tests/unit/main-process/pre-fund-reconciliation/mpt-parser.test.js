@@ -149,10 +149,10 @@ test.describe('文件身份与十进制字符串', () => {
     assert.equal(outbound.sourceFileSequence, '20260708062049405');
   });
 
-  test('CHANNEL_OTHERS 明确拒绝并提示 3.0.15', () => {
+  test('CHANNEL_OTHERS 明确拒绝并提示 3.0.16', () => {
     assert.throws(
       () => parseMptFileName('/x/MPT_CHANNEL_OTHERS_20260708_1.gz'),
-      (error) => error.code === 'MPT_CHANNEL_OTHERS_UNSUPPORTED' && /3\.0\.15/.test(error.message)
+      (error) => error.code === 'MPT_CHANNEL_OTHERS_UNSUPPORTED' && /3\.0\.16/.test(error.message)
     );
   });
 

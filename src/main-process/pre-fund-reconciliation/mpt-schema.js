@@ -130,7 +130,7 @@ function parseMptFileName(filePath) {
   if (/^MPT_CHANNEL_OTHERS(?:_|[.])/.test(sourceFileName)) {
     throw validationError(
       'MPT_CHANNEL_OTHERS_UNSUPPORTED',
-      'MPT_CHANNEL_OTHERS 将在 3.0.15 支持，3.0.14 不接受该文件类型',
+      'MPT_CHANNEL_OTHERS 将在 3.0.16 支持，当前版本不接受该文件类型',
       { fileName: sourceFileName }
     );
   }
