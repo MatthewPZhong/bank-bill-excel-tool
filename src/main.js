@@ -36,6 +36,10 @@ const runDataStore = require('./backend/run-data-store');
 const {
   createPreFundReconciliationService
 } = require('./main-process/pre-fund-reconciliation/service');
+// v3.0.15：重复入金匹配（银行 Reversal/Inbound 分组 + 临时入金 MPT 回填 + 双 sheet 导出）。
+const {
+  createDuplicateInboundMatchService
+} = require('./main-process/duplicate-inbound-match/service');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -356,6 +360,7 @@ if (!hasSingleInstanceLock) {
 let database = null;
 let pendingDb = null;
 let preFundReconciliationService = null;
+let duplicateInboundMatchService = null;
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
   getStorageRoot: () => ensureStorageRoot()
@@ -13539,6 +13544,135 @@ function registerPreFundReconciliationHandlers() {
   });
 }
 
+function getDuplicateInboundMatchService() {
+  if (!database || !database.db) {
+    throw new Error('数据库尚未初始化，请稍后重试');
+  }
+  if (!duplicateInboundMatchService) {
+    duplicateInboundMatchService = createDuplicateInboundMatchService({
+      userDataDir: path.dirname(database.dbPath),
+      database,
+      mailTemplatePath: path.join(__dirname, '..', 'assets', '重复入金召回邮件模板.xlsx'),
+      bankTemplatePath: path.join(__dirname, '..', 'assets', '银行对账单.xlsx')
+    });
+  }
+  return duplicateInboundMatchService;
+}
+
+function scheduleDuplicateInboundMatchStartupCleanup() {
+  setImmediate(() => {
+    try {
+      getDuplicateInboundMatchService();
+    } catch (error) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'duplicate-inbound-match',
+        message: '重复入金匹配启动结果回收失败',
+        details: [error && error.message ? error.message : String(error)],
+        stack: error && error.stack ? error.stack : undefined
+      });
+    }
+  });
+}
+
+function duplicateInboundMatchFailureResult(error) {
+  return {
+    status: 'failed',
+    code: error && error.code ? String(error.code) : 'duplicate-inbound-match-failed',
+    message: error && error.message ? String(error.message) : String(error),
+    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+  };
+}
+
+function sendDuplicateInboundMatchProgress(event, channel, payload) {
+  try {
+    if (event && event.sender && !event.sender.isDestroyed()) event.sender.send(channel, payload);
+  } catch (_error) { /* renderer 已关闭时忽略进度 */ }
+}
+
+// v3.0.15：重复入金匹配与临时 MPT 导入/删除共用资金模块锁，确保运行快照稳定。
+function registerDuplicateInboundMatchHandlers() {
+  trackedIpcHandle('duplicate-inbound-match:session-status', '重复入金匹配', '查看状态', async () => {
+    try {
+      return getDuplicateInboundMatchService().status();
+    } catch (error) {
+      return duplicateInboundMatchFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle('duplicate-inbound-match:import-files', '重复入金匹配', '导入文件', async (event) => {
+    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-import-files');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const choice = await showImportOpenDialog('duplicate-inbound-match', {
+        title: '同时选择银行对账单和单据对账单',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return await getDuplicateInboundMatchService().importFiles(
+        choice.filePaths,
+        (progress) => sendDuplicateInboundMatchProgress(
+          event,
+          'duplicate-inbound-match:import-progress',
+          progress
+        )
+      );
+    } catch (error) {
+      return duplicateInboundMatchFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('duplicate-inbound-match:run', '重复入金匹配', '开始运行', async (event) => {
+    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-run');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return await getDuplicateInboundMatchService().run({
+        onProgress: (progress) => sendDuplicateInboundMatchProgress(
+          event,
+          'duplicate-inbound-match:run-progress',
+          progress
+        )
+      });
+    } catch (error) {
+      return duplicateInboundMatchFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('duplicate-inbound-match:export', '重复入金匹配', '导出文件', async (event) => {
+    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-export');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const service = getDuplicateInboundMatchService();
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出重复入金匹配结果',
+        defaultPath: service.buildDefaultFileName(),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return await service.export({
+        savePath: choice.filePath,
+        onProgress: (progress) => sendDuplicateInboundMatchProgress(
+          event,
+          'duplicate-inbound-match:export-progress',
+          progress
+        )
+      });
+    } catch (error) {
+      return duplicateInboundMatchFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+}
+
 // v3.0.8 需求1：工具箱🧰（合表 / 拆表）3 个 IPC handler。
 //   纯数据变换委托 src/main-process/toolbox.js；本处只做 dialog（show{Open,Save}Dialog）+ file-service IO
 //   （extractHeaders / readRows / writeWorkbookRows）+ copyFileSync 落盘。
@@ -13938,6 +14072,7 @@ function registerAllIpcHandlers() {
   registerFileHandlers();
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
+  registerDuplicateInboundMatchHandlers();
   registerToolboxHandlers();
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
@@ -13958,6 +14093,7 @@ function runBackgroundInitChain() {
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
+    scheduleDuplicateInboundMatchStartupCleanup();
 
     // v2.0.0-beta.2 F4 / v2.1.15 W4：ui_style 收敛迁移 —— 老库存了 'General'/非法值就地迁移为 'Clear'，未写则 seed 'Clear'。
     //   General 风格已弃用，setUiStyle 写链路移除，APP_PREVIEW_STYLE 强制风格随之去除（风格恒 Clear）。

@@ -36,9 +36,12 @@ const PRE_FUND_OPS = [
   'pre-fund-import-bank', 'pre-fund-import-mpt', 'pre-fund-delete-temp',
   'pre-fund-delete-temp-by-date-range', 'pre-fund-clear-temp', 'pre-fund-run', 'pre-fund-export'
 ];
-const ALL_LOCKED_OPS = [...EXISTING_OPS, ...PRE_FUND_OPS];
+const DUPLICATE_INBOUND_OPS = [
+  'duplicate-inbound-import-files', 'duplicate-inbound-run', 'duplicate-inbound-export'
+];
+const ALL_LOCKED_OPS = [...EXISTING_OPS, ...PRE_FUND_OPS, ...DUPLICATE_INBOUND_OPS];
 
-describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14)', () => {
+describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15)', () => {
   test('统一互斥锁定义存在（一把锁，含 inFlight/operation）', () => {
     assert.ok(
       source.includes('const bankStatementOperationLock = { inFlight: false, operation: null };'),
@@ -50,7 +53,7 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14)', () => {
       'releaseBankStatementOpLock 释放函数应存在');
   });
 
-  test('既有 6 动作与前置资金对账 7 动作均 acquire 同一把锁', () => {
+  test('既有 6 动作、前置资金对账 7 动作与重复入金 3 动作均 acquire 同一把锁', () => {
     assert.ok(source.includes("tryAcquireBankStatementOpLock('run')"), 'run handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('export')"), 'export handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('import')"), 'batch-import handler 应 acquire');
@@ -66,6 +69,12 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14)', () => {
         `${operation} handler 应 acquire`
       );
     }
+    for (const operation of DUPLICATE_INBOUND_OPS) {
+      assert.ok(
+        source.includes(`tryAcquireBankStatementOpLock('${operation}')`),
+        `${operation} handler 应 acquire`
+      );
+    }
   });
 
   test('争用返回 { status:"failed", message:"正在处理中…" }', () => {
@@ -74,12 +83,20 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14)', () => {
     const contention = source.match(/return \{ status: 'failed', message: opLock\.message \};/g) || [];
     assert.strictEqual(contention.length, 6, '六 handler（run/export/import + linked-import/linked-delete + account-mapping-save）各有一处「争用即返回失败」短路');
     const preFundContention = source.match(/return \{ status: 'busy', message: lock\.message \};/g) || [];
-    assert.strictEqual(preFundContention.length, 7, '前置资金对账七个写/运行/导出 handler 各有一处 busy 短路');
+    assert.strictEqual(
+      preFundContention.length,
+      PRE_FUND_OPS.length + DUPLICATE_INBOUND_OPS.length,
+      '前置资金对账 7 个与重复入金 3 个 handler 各有一处 busy 短路'
+    );
   });
 
-  test('13 个 handler 各在 finally 释放锁（恰 13 处 release）', () => {
+  test('16 个 handler 各在 finally 释放锁（恰 16 处 release）', () => {
     const releases = source.match(/releaseBankStatementOpLock\(\);/g) || [];
-    assert.strictEqual(releases.length, ALL_LOCKED_OPS.length, '既有 6 动作 + 前置资金对账 7 动作各释放一次');
+    assert.strictEqual(
+      releases.length,
+      ALL_LOCKED_OPS.length,
+      '既有 6 动作 + 前置资金对账 7 动作 + 重复入金 3 动作各释放一次'
+    );
   });
 });
 
@@ -102,7 +119,7 @@ describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () =
     assert.strictEqual(tryAcquireBankStatementOpLock('export').acquired, true, '释放后 → 导出可获取');
   });
 
-  test('全部 13 动作两两互斥（共享同一把锁）', () => {
+  test('全部 16 动作两两互斥（共享同一把锁）', () => {
     for (const first of ALL_LOCKED_OPS) {
       const { tryAcquireBankStatementOpLock, releaseBankStatementOpLock } = loadRealLock();
       assert.strictEqual(tryAcquireBankStatementOpLock(first).acquired, true, `${first} 应可获取`);

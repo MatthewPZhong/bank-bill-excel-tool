@@ -61,6 +61,23 @@ for (const line of diff.split('\n')) {
   else if (line.startsWith('-') && !line.startsWith('---')) changedLines.push(line.slice(1));
 }
 
+// git diff 不包含未跟踪文件；新模块恰好最常以 untracked src/*.js 出现，硬节点不能漏扫。
+// 这里把未跟踪 JS 的全部源码视为新增 diff 行，行为与文件首次加入 git 后的 diff 一致。
+try {
+  const untracked = execSync('git ls-files --others --exclude-standard -- src', {
+    cwd: REPO_ROOT,
+    encoding: 'utf8'
+  });
+  for (const relativePath of untracked.split('\n').filter((file) => file.endsWith('.js'))) {
+    const absolutePath = path.resolve(REPO_ROOT, relativePath);
+    changedFiles.add(relativePath);
+    changedLines.push(...fs.readFileSync(absolutePath, 'utf8').split('\n'));
+  }
+} catch (e) {
+  console.error('[check-vars] 未跟踪 src 文件扫描失败：', e.message);
+  process.exit(1);
+}
+
 if (!changedLines.length) {
   console.log('[check-vars] src/ 下无改动（' + (opt.since ? `since ${opt.since}` : 'HEAD + working tree') + '）。跳过。');
   process.exit(0);

@@ -55,12 +55,16 @@ const MODULE_PRE_FUND_RECONCILIATION = 'pre-fund-reconciliation';
 // 运行候选池/结果与跨重启临时 MPT 的生命周期不同：结果只服务当前进程最后一次 run，
 // 单独放可整文件删除的 results 模块，避免反复 run 让保留临时批次的月库永久膨胀。
 const MODULE_PRE_FUND_RECONCILIATION_RESULTS = 'pre-fund-reconciliation-results';
+// v3.0.15：重复入金匹配的银行导入与运行结果仅服务当前启动周期，
+// 独立侧库保存含姓名/卡号的批量明细，主库只保留轻量运行镜像。
+const MODULE_DUPLICATE_INBOUND_MATCH = 'duplicate-inbound-match';
 const KNOWN_MODULES = Object.freeze([
   MODULE_ACQUIRING,
   MODULE_BIZ_OP,
   MODULE_BANK_BU,
   MODULE_PRE_FUND_RECONCILIATION,
   MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+  MODULE_DUPLICATE_INBOUND_MATCH,
 ]);
 
 // run-data 根目录名（{userData}/run-data/）。
@@ -602,12 +606,112 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
     ON pre_fund_reconciliation_unbalanced_rows(run_id, channel, bank_ordinal);
 `;
 
+// 重复入金匹配当前会话侧库。一个导入会话对应一组银行+单据输入；每次 run 只保留最新结果。
+// 银行原始 46 列、单据身份字段和人工判定行均只存在本侧库，不进入 tool-data.sqlite。
+const SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH = `
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bank_file_name TEXT NOT NULL,
+    bank_content_hash TEXT NOT NULL,
+    bank_row_count INTEGER NOT NULL,
+    document_file_name TEXT NOT NULL,
+    document_content_hash TEXT NOT NULL,
+    document_row_count INTEGER NOT NULL,
+    document_matchable_row_count INTEGER NOT NULL,
+    document_empty_order_count INTEGER NOT NULL,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_bank_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id INTEGER NOT NULL,
+    source_ordinal INTEGER NOT NULL,
+    excel_row_number INTEGER NOT NULL,
+    biz_id TEXT NOT NULL,
+    fund_type TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    FOREIGN KEY (import_id) REFERENCES duplicate_inbound_match_imports(id) ON DELETE CASCADE,
+    UNIQUE (import_id, source_ordinal),
+    UNIQUE (import_id, biz_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_bank_fund_type
+    ON duplicate_inbound_match_bank_rows(import_id, fund_type, source_ordinal);
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_document_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id INTEGER NOT NULL,
+    source_ordinal INTEGER NOT NULL,
+    excel_row_number INTEGER NOT NULL,
+    business_order_no TEXT NOT NULL,
+    business_order_key TEXT NOT NULL,
+    user_no TEXT NOT NULL,
+    account_no TEXT NOT NULL,
+    business_department TEXT NOT NULL,
+    FOREIGN KEY (import_id) REFERENCES duplicate_inbound_match_imports(id) ON DELETE CASCADE,
+    UNIQUE (import_id, source_ordinal)
+  );
+  CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_document_order
+    ON duplicate_inbound_match_document_rows(import_id, business_order_key, source_ordinal);
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    import_id INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    snapshot_hash TEXT NOT NULL,
+    status TEXT NOT NULL,
+    summary_json TEXT NOT NULL DEFAULT '{}',
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT,
+    FOREIGN KEY (import_id) REFERENCES duplicate_inbound_match_imports(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_mail_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    source_ordinal INTEGER NOT NULL,
+    output_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES duplicate_inbound_match_runs(id) ON DELETE CASCADE,
+    UNIQUE (run_id, source_ordinal)
+  );
+  CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_mail_order
+    ON duplicate_inbound_match_mail_rows(run_id, source_ordinal);
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_manual_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    group_order INTEGER NOT NULL,
+    row_order INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    raw_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES duplicate_inbound_match_runs(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_manual_order
+    ON duplicate_inbound_match_manual_rows(run_id, group_order, row_order, id);
+
+  CREATE TABLE IF NOT EXISTS duplicate_inbound_match_group_audits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    group_order INTEGER NOT NULL,
+    disposition TEXT NOT NULL,
+      reason_codes_json TEXT NOT NULL,
+      bank_lineage_json TEXT NOT NULL,
+      mpt_lineage_json TEXT NOT NULL,
+      document_lineage_json TEXT NOT NULL,
+      FOREIGN KEY (run_id) REFERENCES duplicate_inbound_match_runs(id) ON DELETE CASCADE,
+    UNIQUE (run_id, group_order)
+  );
+  CREATE INDEX IF NOT EXISTS idx_duplicate_inbound_audit_order
+    ON duplicate_inbound_match_group_audits(run_id, group_order);
+`;
+
 const MODULE_DDL = Object.freeze({
   [MODULE_ACQUIRING]: SIDE_DB_DDL_ACQUIRING,
   [MODULE_BIZ_OP]: SIDE_DB_DDL_BIZ_OP,
   [MODULE_BANK_BU]: SIDE_DB_DDL_BANK_BU,
   [MODULE_PRE_FUND_RECONCILIATION]: SIDE_DB_DDL_PRE_FUND_GATEWAY,
   [MODULE_PRE_FUND_RECONCILIATION_RESULTS]: SIDE_DB_DDL_PRE_FUND_RUNS,
+  [MODULE_DUPLICATE_INBOUND_MATCH]: SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH,
 });
 
 // 打开（必要时建库）侧库连接。
@@ -698,6 +802,7 @@ module.exports = {
   MODULE_BANK_BU,
   MODULE_PRE_FUND_RECONCILIATION,
   MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+  MODULE_DUPLICATE_INBOUND_MATCH,
   KNOWN_MODULES,
   RUN_DATA_DIRNAME,
   SIDE_DB_PRAGMA_STATEMENTS,
@@ -721,4 +826,5 @@ module.exports = {
   SIDE_DB_DDL_BANK_BU,
   SIDE_DB_DDL_PRE_FUND_GATEWAY,
   SIDE_DB_DDL_PRE_FUND_RUNS,
+  SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH,
 };

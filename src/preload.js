@@ -230,6 +230,28 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('pre-fund-reconciliation:export-progress', wrapped);
     }
   },
+  // v3.0.15：重复入金匹配。银行+单据导入和结果仅当前启动周期有效；临时 MPT 复用前置资金对账侧库。
+  duplicateInboundMatch: {
+    importFiles: () => ipcRenderer.invoke('duplicate-inbound-match:import-files'),
+    sessionStatus: () => ipcRenderer.invoke('duplicate-inbound-match:session-status'),
+    run: () => ipcRenderer.invoke('duplicate-inbound-match:run'),
+    export: () => ipcRenderer.invoke('duplicate-inbound-match:export'),
+    onImportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('duplicate-inbound-match:import-progress', wrapped);
+      return () => ipcRenderer.removeListener('duplicate-inbound-match:import-progress', wrapped);
+    },
+    onRunProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('duplicate-inbound-match:run-progress', wrapped);
+      return () => ipcRenderer.removeListener('duplicate-inbound-match:run-progress', wrapped);
+    },
+    onExportProgress: (listener) => {
+      const wrapped = (_event, ev) => listener(ev);
+      ipcRenderer.on('duplicate-inbound-match:export-progress', wrapped);
+      return () => ipcRenderer.removeListener('duplicate-inbound-match:export-progress', wrapped);
+    }
+  },
   // v3.0.8 需求1：工具箱🧰（合表 / 拆表）—— 脱离主对账流程的轻量 Excel 行级搬运小工具
   //   merge()       合表：main 内多选 → 表头校验 → 合并 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
   //   splitRead()   拆表第一步：main 内单选 → 读表头 + 各字段去重值；返回 {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message}

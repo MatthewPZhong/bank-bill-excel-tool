@@ -73,6 +73,7 @@ const {
   // v3.0.12 功能2（批A）：账户映射管理全局表建表（中台调拨单账户号 → 清结算系统银行账号）
   ensureFundTransferAccountMappingSupport,
   ensurePreFundReconciliationRunMetadataSupport,
+  ensureDuplicateInboundMatchRunMetadataSupport,
   ensureBuiltinScenarioNamesUpdate,
   ensureTemplateBigAccountNatureSupport,
   ensureTemplateDateFormatSupport,
@@ -93,6 +94,7 @@ const channelEnumRepository = require('./database/channel-enum-repository');
 // v3.0.12 功能2（批A）：账户映射管理仓储（全局：中台调拨单账户号 → 清结算系统银行账号）
 const fundTransferAccountMappingRepository = require('./database/fund-transfer-account-mapping-repository');
 const preFundReconciliationRunRepository = require('./database/pre-fund-reconciliation-run-repository');
+const duplicateInboundMatchRunRepository = require('./database/duplicate-inbound-match-run-repository');
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
@@ -569,6 +571,7 @@ class AppDatabase {
     // v3.0.12 功能2（批A）：账户映射管理全局表（幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS；批B 才接对账）
     this.ensureFundTransferAccountMappingSupport();
     this.ensurePreFundReconciliationRunMetadataSupport();
+    this.ensureDuplicateInboundMatchRunMetadataSupport();
     // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
     //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
     //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
@@ -1468,6 +1471,10 @@ class AppDatabase {
     return ensurePreFundReconciliationRunMetadataSupport(this.db);
   }
 
+  ensureDuplicateInboundMatchRunMetadataSupport() {
+    return ensureDuplicateInboundMatchRunMetadataSupport(this.db);
+  }
+
   createPreFundReconciliationRunMirror(payload) {
     return preFundReconciliationRunRepository.createRunMirror(this.db, payload);
   }
@@ -1495,6 +1502,35 @@ class AppDatabase {
 
   listPreFundReconciliationRunMirrors() {
     return preFundReconciliationRunRepository.listRunMirrors(this.db);
+  }
+
+  createDuplicateInboundMatchRunMirror(payload) {
+    return duplicateInboundMatchRunRepository.createRunMirror(this.db, payload);
+  }
+
+  finishDuplicateInboundMatchRunMirror(mirrorId, summary) {
+    return duplicateInboundMatchRunRepository.finishRunMirror(this.db, mirrorId, summary);
+  }
+
+  failDuplicateInboundMatchRunMirror(mirrorId, error) {
+    return duplicateInboundMatchRunRepository.failRunMirror(this.db, mirrorId, error);
+  }
+
+  markDuplicateInboundMatchRunMirrorUnavailable(mirrorId, status, message) {
+    return duplicateInboundMatchRunRepository.markRunMirrorUnavailable(
+      this.db,
+      mirrorId,
+      status,
+      message
+    );
+  }
+
+  getDuplicateInboundMatchRunMirror(mirrorId) {
+    return duplicateInboundMatchRunRepository.getRunMirror(this.db, mirrorId);
+  }
+
+  listDuplicateInboundMatchRunMirrors() {
+    return duplicateInboundMatchRunRepository.listRunMirrors(this.db);
   }
 
   listFundTransferAccountMappings() {
