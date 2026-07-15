@@ -1,7 +1,7 @@
 # 3.0.15 Tasks — 重复入金匹配
 
 > 每个 task 尽量小、可验证、可独立完成。
-> 状态基线：2026-07-14 实施完成并通过自动化门禁；Windows Excel/WPS 与真实脱敏样本资金复核仍是发布阻塞项。
+> 状态基线：2026-07-15 PR #88 已合入 main；Windows Excel/WPS 与真实脱敏样本资金复核仍是发布阻塞项。
 > 实施约束：不得顺带实现 3.0.16 范围；不得静默修改 spec。
 
 ## Task 0 — 规格与未知门禁
@@ -171,7 +171,7 @@
   - 版本 bump/合并受保护分支/提 PR 前运行 `npm run scan:vars`、`npm run check:vars`。
   - 发布时三份版本文档与 package version 同步，且明确三项顺延 3.0.16。
 - 验证：check-vars 报告、PR body 的关联功能 review、发布文档 diff 与版本一致。
-- 状态：in progress（版本与三份文档已同步；PR #88 已建立并完成一次 check-vars；合并前硬节点待最终重跑）
+- 状态：done（版本与三份文档已同步；全 PR check-vars、PR body 关联 review、本地 release-check 与 GitHub smoke-test 均完成；PR #88 已合并）
 
 ## Task 13 — 资金人工复核与 Dev 交接
 
@@ -190,4 +190,4 @@
 - [ ] AC-01 ～ AC-27 全部有证据：AC-01 ～ AC-26 自动证据已完成，AC-27 待人工签字。
 - [x] 无 `MPT_CHANNEL_OTHERS`、临时银行对账单、缺渠道账单的 3.0.15 可见实现。
 - [ ] 银行行守恒、MPT 候选全局唯一、金额/币种/血缘的自动断言已通过，仍待真实脱敏样本人工复核。
-- [x] Dev 实施与自动化证据已回填本文档；PR #88 已创建并进入 self-review。
+- [x] Dev 实施与自动化证据已回填本文档；PR #88 已在 P0-P4 Finding 为 0 后合入 `main`。

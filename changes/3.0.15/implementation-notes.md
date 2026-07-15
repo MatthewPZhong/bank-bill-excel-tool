@@ -2,7 +2,7 @@
 
 > owner: PM / Dev 共用
 > created: 2026-07-14
-> status: implementation and PR #88 self-review complete; merge and human release gates pending
+> status: PR #88 merged; human release gates pending
 > rule: 只记录可验证事实；并行草稿代码不自动等于完成证据
 
 ## Original request
@@ -90,7 +90,8 @@
 | 2026-07-15 | PR #88 self-review：侧库缺行/损坏、目标文件覆盖失败、启动/新导入/新运行失效失败注入 | 运行摘要与邮件/人工/审计行数必须守恒；临时文件回读通过后才能发布，覆盖失败先恢复原目标；主库镜像或侧库任一回收失败均显式失败且旧结果不可导出。 | 已关闭结果静默缺行、原文件恢复顺序和失效处理可观测性 Finding。 |
 | 2026-07-15 | PR #88 self-review 最终结论 | 对 `origin/main...HEAD` 按资金、数据生命周期、导出、IPC/UI、测试与文档六个角度复核；已发现项均修复并有回归测试。 | P0/P1/P2/P3/P4 Finding 均为 0；人工资金复核仍是发布门禁。 |
 | 2026-07-15 | `npm run scan:vars` | 版本 3.0.15；189 个 JS / 2093 顶层声明；A-share 334 / A-pair 548 / A-local 1078 / B 882。 | v20 合并前变量基线已刷新。 |
-| 2026-07-14 | `npm run check:vars -- --include-minor` | 命中 Critical `FileValidationError`；Important `ipcRenderer`；Runtime `MODULES/dialog/elements/state/updateStatusBox`；Risk-sensitive `DuplicateInboundMatchService/buildDuplicateInboundGroups/hasColumn/lookupInboundRows/resolveDuplicateInboundDocumentMatches/resolveDuplicateInboundMptMatches`。命中项已逐项 review；命令以 exit 2 表示“发现命中”，不是测试失败。 | 硬节点扫描和关联功能 review 证据。 |
+| 2026-07-15 | `npm run check:vars -- --since origin/main --include-minor` | 命中 Critical `FileValidationError`；Important `ipcRenderer`；Runtime `MODULES/dialog/elements/state/updateStatusBox`；Risk-sensitive `DuplicateInboundMatchService/buildDuplicateInboundGroups/hasColumn/lookupInboundRows/resolveDuplicateInboundDocumentMatches/resolveDuplicateInboundMptMatches`。命中项已逐项 review；命令以 exit 2 表示“发现命中”，不是测试失败。 | 合并前全 PR 硬节点扫描和关联功能 review 证据。 |
+| 2026-07-15 | PR #88 GitHub CI 与合并状态 | `smoke-test=success`，Windows `build=skipped`；head `66bc7fa` 以 merge commit `f9265a8` 合入 `main`，远程开发分支删除。 | 代码合并门禁完成；不代表人工发布门禁完成。 |
 
 ### 尚待人工证据
 
@@ -202,6 +203,13 @@
 - 真实样本反馈：修复 Debit Amount 继承日期格式和业务来源误取 business；匹配公共字段、邮件映射、writer 格式及 spec/test/docs 已同步到 oppBu 口径。
 - 未完成：Windows Excel/WPS 人工打开，以及业务负责人使用真实脱敏样本完成资金复核签字；两项均阻塞发布，不阻塞代码实现。
 
+### 2026-07-15 — PR review, merge and archive
+
+- 动作：完成全 PR check-vars、覆盖率、完整 release-check、Electron 预览与 P0-P4 self-review；修复审查发现项后更新 PR body。
+- 合并：PR #88 在 GitHub smoke-test 成功后，以 merge commit `f9265a8` 合入 `main`；远程开发分支删除。
+- 归档：新增 `docs/prs/PR88-v3.0.15.md` 与 `docs/iterations/v3.0.15/PRD-v3.0.15.md`；不创建 tag 或 GitHub Release。
+- 剩余：Windows Excel/WPS 和资金负责人签字仍是发布硬门禁。
+
 ### 可沉淀知识
 
 - [ ] 若该需求验证通过，可将“资金匹配必须先构建全局候选关系、禁止 first-wins”沉淀到资金匹配通用规则。
@@ -211,6 +219,6 @@
 ## Handoff / Completion
 
 - 代码实现、版本 bump、三份版本文档、自动化回归、性能/启动探针、macOS Electron 预览和 check-vars 关联 review 已完成。
-- 当前分支：`codex/v3.0.15-duplicate-inbound-match`；PR #88 已创建，self-review 已达到 P0-P4 Finding 为 0，等待最终门禁与合并。
+- 合并状态：PR #88 已于 2026-07-15 以 merge commit `f9265a8` 合入 `main`；开发分支已删除，P0-P4 Finding 为 0。
 - 发布阻塞：U-02 Windows Excel/WPS 人工打开；U-04 真实脱敏样本资金复核与签字。完成前 AC-27 不通过，不得把 v3.0.15 标记为可发布。
 - 回滚边界：关闭/移除新模块 UI、IPC、side DB 和轻量 mirror 即可；不得删除或改写 v3.0.14 已保留的 MPT INBOUND 批次。

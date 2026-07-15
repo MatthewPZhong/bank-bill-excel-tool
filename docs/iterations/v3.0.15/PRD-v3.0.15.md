@@ -1,6 +1,7 @@
-# bank-bill-excel-tool 3.0.15 Spec — 重复入金匹配
+# bank-bill-excel-tool 3.0.15 PRD — 重复入金匹配
 
 > status: merged（PR #88 已合入 main；发布人工门禁待完成）
+> archive: PR #88 merge commit `f9265a8`；源规格 `changes/3.0.15/spec.md`
 > owner: PM
 > created: 2026-07-14
 > updated: 2026-07-15

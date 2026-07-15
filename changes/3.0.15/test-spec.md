@@ -1,6 +1,6 @@
 # 3.0.15 Test Spec — 重复入金匹配
 
-> status: implementation complete; PR #88 self-review and merge gates in progress
+> status: implementation merged via PR #88; human release gates pending
 > created: 2026-07-14
 > source of truth: `changes/3.0.15/spec.md`（AC-01 ～ AC-27）
 > release gate: 自动化完整通过 + 资金人工复核签字
