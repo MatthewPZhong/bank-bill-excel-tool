@@ -1,9 +1,9 @@
 # bank-bill-excel-tool 3.0.15 Spec — 重复入金匹配
 
-> status: implementing（单据对账单取数与业务部门校验增补中）
+> status: implemented（PR #88 self-review 已完成，合并与发布人工门禁待完成）
 > owner: PM
 > created: 2026-07-14
-> updated: 2026-07-14
+> updated: 2026-07-15
 > version: v3.0.15
 > module: 重复入金匹配（`duplicate-inbound-match`）
 > dependency: v3.0.14 已保留的 MPT INBOUND 月份侧库、标准银行对账单读取能力、`assets/重复入金召回邮件模板.xlsx`
@@ -52,7 +52,7 @@
 - 不读取持久“已链接网关账单”作为本需求候选池，不写回或删除 MPT 批次。
 - 不自动发送邮件、不接入邮箱、不生成邮件正文；本版只输出 Excel。
 - 不支持多银行文件合并、不支持非标准表头、不支持手工编辑匹配结果后回写。
-- 不自动创建 PR、合并、打 tag 或发布；这些动作需用户另行指示。
+- PR #88 按用户指示在自动门禁全绿且 P0-P4 Finding 归零后合并；本次不打 tag、不创建 GitHub Release。
 
 ## 3. 代码现状（必须有出处）
 
@@ -65,7 +65,7 @@
 | 运行级数据政策 | `rules/run-scoped-data-policy.md`、`src/backend/run-data-store.js` | 批量运行数据进入模块侧库；主库只保存轻量运行镜像。 | 银行原行、姓名、卡号和结果明细不得进入主库。 |
 | 模块开关 | `src/backend/database/settings-repository.js`、`src/renderer.js` | 功能柜按 module id 控制可见模块。 | 新模块使用 `duplicate-inbound-match`，默认不加入既有用户启用列表。 |
 | 输出模板 | `assets/重复入金召回邮件模板.xlsx` | 模板数据列为 10 列：`BillDate`、`Channel`、`MerchantId`、`Currency`、`Debit Amount`、`加款单号`、`业务来源`、`客户号`、`账户号`、`备注`。 | 导出保留这 10 列含义，移除模板说明行，只写业务结果。 |
-| 当前版本 | `package.json` | 已更新为 3.0.15。 | 三份版本文档与本 change 已同步；尚未创建 PR、合并或发布。 |
+| 当前版本 | `package.json` | 已更新为 3.0.15。 | 三份版本文档与本 change 已同步；PR #88 已创建，合并与发布人工门禁待完成。 |
 
 ## 4. 术语与规范化规则
 
@@ -78,7 +78,7 @@
 | 分组文本 | `null`/`undefined` 归为 `""`，其它值使用 `String(value)` 原值；**不 trim、大小写敏感**。 |
 | 银行分组键 | 结构化七元组：`[规范方向金额, Payee Name, Payee CardNo, Drawee Name, Drawee CardNo, Channel, Currency]`。 |
 | 1+2 候选组 | 分组内恰好 1 条 Reversal 且恰好 2 条 Inbound。 |
-| MPT 查询键 | 对每条银行 Inbound，将 `Channel`、`MerchantId`、`ReconciliationId` 分别转字符串并 trim 后，与 MPT 同名语义字段精确、大小写敏感比较，同时 `tradeType` 必须严格为 `Inbound-VA`。 |
+| MPT 查询键 | 对每条银行 Inbound，将 `Channel`、`MerchantId`、`ReconciliationId` 分别转字符串并 trim 后，与 MPT 同名语义字段精确、大小写敏感比较，同时 `tradeType` 必须严格为 `Inbound-VA`；`ReconciliationId` 为空时不进入候选池，按零候选转人工。 |
 | MPT 候选 ID | 至少由“保留月份标识 + 该月份侧库行 ID”组成的全局稳定 ID；同一持久行在任何查询中必须得到同一 ID。 |
 | MPT 业务来源字段 | 只使用 `oppBu`；trim 后必须非空，且两条 MPT 候选大小写敏感一致。MPT `clientId`、`accId`、`business` 不参与成功判定或客户/账户输出。 |
 | 单据匹配键 | MPT `orderId` 与单据 `业务订单号` 分别转字符串并 trim 后大小写敏感精确匹配；不做模糊匹配或 fallback。 |
@@ -155,6 +155,7 @@
 - 对 1+2 组内的每条银行 Inbound，按第 4 节 MPT 查询键检索。
 - 不按月份新旧、导入时间或行顺序择优，不去重 MPT 重复行；每条持久行都是独立候选。
 - 单条 Inbound 的候选数必须恰好为 1：0 条或多于 1 条均使整个 1+2 组进入人工判定。
+- 查询结果必须保留精确候选数；为保持大批量内存有界，候选数大于 1 时只需物化稳定排序后的前 2 条审计样本。零/一/多裁决必须使用精确候选数，不得把样本数当成总数。
 - 查询实现应批量收集银行 `ReconciliationId`，每个保留月份只打开/扫描一次，避免“银行行数 × 月份数”的重复全表扫描。
 - MPT 原始 JSON 无法解析或顶层不是对象属于存储完整性错误，整次运行失败，不降级为人工匹配。
 
@@ -265,7 +266,7 @@
 
 - 银行/单据导入、当前结果和详细血缘只存本模块侧库，服务当前启动周期。
 - 主库只允许保存轻量运行镜像：状态、时间、两份文件名/hash、输入/MPT 快照摘要、计数、侧库路径与错误摘要；不得保存原始银行/MPT/单据业务字段。
-- 应用启动时清理上次启动周期的本模块侧库，将遗留 `running` 标记为 `interrupted`，其它不可用镜像标为 `expired`/`missing-side-db`，不得恢复可导出状态。
+- 应用启动时清理上次启动周期的本模块侧库及孤立 `-wal/-shm` 旁文件；目录扫描或删除失败必须显式阻断。遗留 `running` 标记为 `interrupted`，其它不可用镜像标为 `expired`/`missing-side-db`/`invalid-side-db`，不得恢复可导出状态。
 - 确认选择新的银行+单据文件即删除旧导入和旧结果；开始新运行即使旧结果曾成功，也先使其不可导出。导入或运行失败均不回退到旧结果。
 - 运行结果必须绑定同一双文件 import（银行/单据文件名与 hash）以及所有保留月份 INBOUND 批次的月份、批次 ID/hash/行数。相关 INBOUND 导入、替换、删除后旧结果变为 stale；仅 OUTBOUND 变化不应使结果 stale。
 - 运行/导出与 MPT INBOUND 导入、替换、删除使用同一互斥边界或等效事务快照，避免“查询一半时批次变化”。
@@ -279,7 +280,7 @@
 | 运行硬错误 | 方向金额非法、MPT 原始 JSON 损坏、守恒断言失败、侧库不可用 | 本次运行失败；不可导出旧结果；显示可定位但脱敏的错误。 |
 | 业务不确定 | 非 1+2、MPT 0/多候选/复用/oppBu 异常、单据 0/多候选或身份字段异常 | 相关整组进入人工判定；运行本身可成功。 |
 | 统计处置 | 纯 Inbound、忽略 FundType | 仅计数，不进入结果 sheet。 |
-| 导出硬错误 | 结果 stale、行数超限、写盘失败、目标替换失败 | 不发布目标文件；保留当前成功结果供重试。 |
+| 导出硬错误 | 结果 stale、行数超限、写盘失败、临时文件回读契约失败、目标替换失败 | 不发布目标文件；保留当前成功结果供重试。 |
 
 ## 6. 影响范围与对外接口
 
@@ -441,7 +442,7 @@
 
 | ID | 等级 | 未知 | 处理 / 收敛标准 | 状态 |
 |----|------|------|-----------------|------|
-| U-01 | PROBE | 生产保留月份数、最大 MPT 行数与银行行数分布 | 6 月份、15 万 MPT、6000 查询键基准；每月 TEMP ID 集合 + 单次 JOIN。 | 已收敛：查询 78.1 ms，RSS 增量约 22.7 MiB |
+| U-01 | PROBE | 生产保留月份数、最大 MPT 行数与银行行数分布 | 6 月份、15 万 MPT、6000 查询键基准；每月 TEMP ID 集合 + 单次 JOIN。 | 已收敛：最终复跑查询 80.3 ms，RSS 增量约 27.6 MiB |
 | U-02 | PROBE | 两份模板在 Windows Excel/WPS 中的最终视觉表现 | 生成含长卡号、长原因、空值和中文的样本，人工打开核对列宽、文本格式和换行。 | 实施阶段待验证 |
 | U-03 | ASSUME | 新模块是否默认展示 | 遵循现有功能柜兼容策略，默认关闭；用户可启用，属于可逆低影响设置。 | 已决策 |
 
@@ -477,7 +478,7 @@
 - 完整测试矩阵和 AC 映射见 `changes/3.0.15/test-spec.md`。
 - 决策、偏差、证据、盲区扫描和剩余未知见 `changes/3.0.15/implementation-notes.md`。
 
-建议 commit 粒度（仅供 Dev 实施；本 PM 文档任务不提交代码、不创建 PR）：
+实施采用以下逻辑提交粒度；最终由 PR #88 汇总交付：
 
 | 序号 | Commit message | 范围 |
 |------|----------------|------|
@@ -500,10 +501,11 @@
 | 2026-07-14 | Reverse Sync：实现按月 TEMP ID 集合 + 单次 JOIN 批量查询；完成 current-cycle side DB、轻量镜像、IPC/UI、双 sheet 原子导出、版本 bump 和自动化门禁。 |
 | 2026-07-14 | Reverse Sync：根据真实样本反馈，将“业务来源”由 MPT `business` 改为 `oppBu`；MPT 一致性只保留非空 `oppBu`，客户号/账户号改由单据提供；`Debit Amount` 数据行显式使用“常规”格式。 |
 | 2026-07-14 | Reverse Sync：按用户更新后的模板，一次导入银行+单据文件；客户号/账户号改取单据，MPT 仅校验非空一致 `oppBu`，新增单据唯一匹配及业务部门校验。真实样本验收口径为 9 组成功、1 组人工。 |
+| 2026-07-15 | PR #88 self-review：空 `ReconciliationId` 固定不进 MPT 候选池；多候选精确计数且仅保留 2 条有界审计样本；导入、运行结果侧库和 Excel 发布失败路径全部 fail closed，并补齐真实 IPC/UI 行为测试。 |
 
 ## 17. 实施记录
 
 - 2026-07-14：PM 完成仓库规则、模板、v3.0.14 文档、标准字段、MPT 存储和输出模板证据核对。
-- 2026-07-14：Dev 完成实现；`release-check` 为 unit 3544/3544、integration 40 脚本/1870 断言、smoke 与 ESLint 全通过；真实样本自动回放为 9 个成功组、1 个人工组，性能、启动、预览、隐私和 check-vars 证据见 `implementation-notes.md`。
+- 2026-07-15：Dev 完成实现与 PR #88 self-review；最新 unit 为 3563/3563，最终 `release-check`、性能、启动、预览、隐私和 check-vars 证据见 `implementation-notes.md`。
 - 当前状态：代码和自动化验收完成；Windows Excel/WPS 视觉检查及真实脱敏样本资金复核仍阻塞发布。
-- PR merged / 发布归档记录：无（未创建 PR、未合并、未发布）。
+- PR / 发布归档记录：PR #88 已创建；合并记录待 CI 完成后回填。本次不打 tag、不发布 GitHub Release。

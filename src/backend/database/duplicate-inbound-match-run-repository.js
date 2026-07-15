@@ -65,7 +65,7 @@ function failRunMirror(db, mirrorId, error) {
 }
 
 function markRunMirrorUnavailable(db, mirrorId, status, message) {
-  if (!['interrupted', 'missing-side-db', 'superseded', 'expired'].includes(status)) {
+  if (!['interrupted', 'missing-side-db', 'invalid-side-db', 'superseded', 'expired'].includes(status)) {
     throw new TypeError(`重复入金匹配 run 镜像失效状态非法：${status}`);
   }
   const result = db.prepare(`

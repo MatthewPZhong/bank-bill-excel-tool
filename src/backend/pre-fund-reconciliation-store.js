@@ -162,6 +162,38 @@ function mapGatewayRow(row, monthKey) {
   };
 }
 
+function assertDuplicateInboundRawJson(match) {
+  let parsed;
+  try {
+    parsed = JSON.parse(match.rawJson);
+  } catch (_error) {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new FileValidationError(
+      'duplicate-inbound-invalid-mpt-raw-json',
+      '重复入金候选的 MPT 原始 JSON 已损坏',
+      {
+        detailLines: [
+          `文件：${match.sourceFileName}`,
+          `行号：${match.sourceRowNumber}`,
+          `月份：${match.monthKey}`
+        ],
+        context: {
+          sourceFileName: match.sourceFileName,
+          sourceRowNumber: match.sourceRowNumber,
+          monthKey: match.monthKey
+        }
+      }
+    );
+  }
+}
+
+const EMPTY_DUPLICATE_INBOUND_CANDIDATES = Object.freeze({
+  candidateCount: 0,
+  candidates: Object.freeze([])
+});
+
 class PreFundReconciliationStore {
   constructor(userDataDir, options = {}) {
     if (!userDataDir || typeof userDataDir !== 'string') {
@@ -415,6 +447,7 @@ class PreFundReconciliationStore {
     }
     const normalize = (value) => value == null ? '' : String(value).trim();
     const lookupIdsByTuple = new Map();
+    const candidatesByTuple = new Map();
     const reconciliationIds = new Set();
     const result = new Map();
     const seenLookupIds = new Set();
@@ -430,6 +463,8 @@ class PreFundReconciliationStore {
         channel: normalize(item.channel),
         merchantId: normalize(item.merchantId)
       };
+      result.set(lookupId, EMPTY_DUPLICATE_INBOUND_CANDIDATES);
+      if (normalized.reconciliationId === '') continue;
       const tupleKey = JSON.stringify([
         normalized.reconciliationId,
         normalized.channel,
@@ -438,8 +473,10 @@ class PreFundReconciliationStore {
       const lookupIds = lookupIdsByTuple.get(tupleKey) || [];
       lookupIds.push(lookupId);
       lookupIdsByTuple.set(tupleKey, lookupIds);
+      if (!candidatesByTuple.has(tupleKey)) {
+        candidatesByTuple.set(tupleKey, { candidateCount: 0, candidates: [] });
+      }
       reconciliationIds.add(normalized.reconciliationId);
-      result.set(lookupId, []);
     }
     if (reconciliationIds.size === 0) return result;
 
@@ -477,8 +514,11 @@ class PreFundReconciliationStore {
           ]);
           const lookupIds = lookupIdsByTuple.get(tupleKey);
           if (!lookupIds) continue;
-          for (const lookupId of lookupIds) {
-            result.get(lookupId).push({
+          assertDuplicateInboundRawJson(match);
+          const collection = candidatesByTuple.get(tupleKey);
+          collection.candidateCount += 1;
+          if (collection.candidates.length < 2) {
+            collection.candidates.push({
               ...match,
               candidateId: `${file.monthKey}:${match.id}`
             });
@@ -492,6 +532,14 @@ class PreFundReconciliationStore {
       } finally {
         db.close();
       }
+    }
+    for (const [tupleKey, lookupIds] of lookupIdsByTuple) {
+      const mutable = candidatesByTuple.get(tupleKey);
+      const collection = Object.freeze({
+        candidateCount: mutable.candidateCount,
+        candidates: Object.freeze(mutable.candidates.slice())
+      });
+      for (const lookupId of lookupIds) result.set(lookupId, collection);
     }
     return result;
   }

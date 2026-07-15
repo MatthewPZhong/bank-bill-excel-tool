@@ -94,11 +94,31 @@ test('重复入金侧库保存双文件导入与结果，保持稳定顺序并�
     store.finishRun({
       monthKey: '2026-07',
       runId,
-      summary: { mailRowCount: 1, manualRowCount: 2 },
+      summary: {
+        mailRowCount: 1,
+        manualRowCount: 2,
+        auditGroupCount: 3,
+        finalSuccessGroupCount: 1,
+        manualGroupCount: 2
+      },
       mailRows: [{ sourceOrdinal: 0, output: { BillDate: '2026-07-01' } }],
       manualRows: [
         { groupOrder: 1, rowOrder: 1, reason: 'R2', raw: { BizId: 'B2' } },
         { groupOrder: 0, rowOrder: 0, reason: 'R1', raw: { BizId: 'B1' } }
+      ],
+      auditRows: [
+        {
+          groupOrder: 0, disposition: 'success', reasonCodes: [],
+          bankLineage: [], mptLineage: [], documentLineage: []
+        },
+        {
+          groupOrder: 1, disposition: 'manual', reasonCodes: ['R1'],
+          bankLineage: [], mptLineage: [], documentLineage: []
+        },
+        {
+          groupOrder: 2, disposition: 'manual', reasonCodes: ['R2'],
+          bankLineage: [], mptLineage: [], documentLineage: []
+        }
       ]
     });
 
@@ -234,6 +254,88 @@ test('重复入金侧库删除失败时显式阻断清理', async () => {
     )) {
       runDataStore.deleteSideDbByPath(file.path);
     }
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('重复入金侧库删除后无法校验文件状态时显式阻断清理', async () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  const originalLstatSync = fs.lstatSync;
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir);
+    await createImportBundle(store, {
+      bankRows: [{
+        sourceOrdinal: 0,
+        excelRowNumber: 2,
+        bizId: 'B1',
+        fundType: 'Reversal',
+        raw: { BizId: 'B1' }
+      }],
+      documentRows: []
+    });
+    const sideDbPath = runDataStore.listSideDbFiles(
+      userDataDir,
+      runDataStore.MODULE_DUPLICATE_INBOUND_MATCH
+    )[0].path;
+    fs.lstatSync = (target, ...args) => {
+      if (path.resolve(target) === path.resolve(sideDbPath)) {
+        const error = new Error('permission denied');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return originalLstatSync(target, ...args);
+    };
+
+    assert.throws(() => store.clearAll(), /重复入金侧库回收校验失败.*permission denied/);
+  } finally {
+    fs.lstatSync = originalLstatSync;
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('重复入金启动回收会删除失去主库文件的 WAL/SHM 旁文件', () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir);
+    const dir = runDataStore.moduleDir(
+      userDataDir,
+      runDataStore.MODULE_DUPLICATE_INBOUND_MATCH
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    const basePath = path.join(dir, 'month-2026-07.sqlite');
+    fs.writeFileSync(`${basePath}-wal`, 'orphan wal');
+    fs.writeFileSync(`${basePath}-shm`, 'orphan shm');
+
+    assert.deepEqual(store.clearAll(), { deletedFiles: 1 });
+    assert.equal(fs.existsSync(`${basePath}-wal`), false);
+    assert.equal(fs.existsSync(`${basePath}-shm`), false);
+  } finally {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
+});
+
+test('重复入金启动回收遇到侧库目录读取失败时显式阻断', () => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-store-'));
+  const originalReaddirSync = fs.readdirSync;
+  try {
+    const store = createDuplicateInboundMatchStore(userDataDir);
+    const dir = runDataStore.moduleDir(
+      userDataDir,
+      runDataStore.MODULE_DUPLICATE_INBOUND_MATCH
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    fs.readdirSync = (target, ...args) => {
+      if (path.resolve(target) === path.resolve(dir)) {
+        const error = new Error('permission denied');
+        error.code = 'EACCES';
+        throw error;
+      }
+      return originalReaddirSync(target, ...args);
+    };
+
+    assert.throws(() => store.clearAll(), /重复入金侧库目录扫描失败.*permission denied/);
+  } finally {
+    fs.readdirSync = originalReaddirSync;
     fs.rmSync(userDataDir, { recursive: true, force: true });
   }
 });

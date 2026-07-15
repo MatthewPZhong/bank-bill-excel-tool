@@ -25,7 +25,7 @@ const MANUAL_REASON_CODES = Object.freeze({
   MPT_CANDIDATE_REUSED_ACROSS_GROUPS: 'duplicate-inbound-mpt-candidate-reused-across-groups',
   MPT_OPP_BU_EMPTY: 'duplicate-inbound-mpt-opp-bu-empty',
   MPT_OPP_BU_CONFLICT: 'duplicate-inbound-mpt-opp-bu-conflict',
-  DOCUMENT_ORDER_ID_EMPTY: 'duplicate-inbound-document-order-id-empty',
+  MPT_ORDER_ID_EMPTY: 'duplicate-inbound-mpt-order-id-empty',
   DOCUMENT_CANDIDATE_COUNT_ZERO: 'duplicate-inbound-document-candidate-count-zero',
   DOCUMENT_CANDIDATE_COUNT_MULTIPLE: 'duplicate-inbound-document-candidate-count-multiple',
   DOCUMENT_CANDIDATES_NOT_DISTINCT: 'duplicate-inbound-document-candidates-not-distinct',
@@ -33,6 +33,25 @@ const MANUAL_REASON_CODES = Object.freeze({
   DOCUMENT_IDENTITY_FIELDS_CONFLICT: 'duplicate-inbound-document-identity-fields-conflict',
   DOCUMENT_BUSINESS_DEPARTMENT_MISMATCH: 'duplicate-inbound-document-business-department-mismatch'
 });
+
+const MANUAL_REASON_ORDER = Object.freeze([
+  MANUAL_REASON_CODES.BANK_REVERSAL_COUNT_NOT_ONE,
+  MANUAL_REASON_CODES.BANK_INBOUND_COUNT_NOT_TWO,
+  MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_ZERO,
+  MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_MULTIPLE,
+  MANUAL_REASON_CODES.MPT_CANDIDATES_NOT_DISTINCT,
+  MANUAL_REASON_CODES.MPT_CANDIDATE_REUSED_ACROSS_GROUPS,
+  MANUAL_REASON_CODES.MPT_OPP_BU_EMPTY,
+  MANUAL_REASON_CODES.MPT_OPP_BU_CONFLICT,
+  MANUAL_REASON_CODES.MPT_ORDER_ID_EMPTY,
+  MANUAL_REASON_CODES.DOCUMENT_CANDIDATE_COUNT_ZERO,
+  MANUAL_REASON_CODES.DOCUMENT_CANDIDATE_COUNT_MULTIPLE,
+  MANUAL_REASON_CODES.DOCUMENT_CANDIDATES_NOT_DISTINCT,
+  MANUAL_REASON_CODES.DOCUMENT_IDENTITY_FIELD_EMPTY,
+  MANUAL_REASON_CODES.DOCUMENT_IDENTITY_FIELDS_CONFLICT,
+  MANUAL_REASON_CODES.DOCUMENT_BUSINESS_DEPARTMENT_MISMATCH
+]);
+const MANUAL_REASON_PRIORITY = new Map(MANUAL_REASON_ORDER.map((code, index) => [code, index]));
 
 const ERROR_CODES = Object.freeze({
   EMPTY_AMOUNT: 'duplicate-inbound-empty-amount',
@@ -212,6 +231,13 @@ function addReasonCount(reasonCounts, codes) {
   }
 }
 
+function sortReasons(reasons) {
+  return (reasons || []).slice().sort((left, right) => (
+    (MANUAL_REASON_PRIORITY.get(left && left.code) ?? Number.MAX_SAFE_INTEGER)
+    - (MANUAL_REASON_PRIORITY.get(right && right.code) ?? Number.MAX_SAFE_INTEGER)
+  ));
+}
+
 function buildBankManualReasons(reversalCount, inboundCount) {
   const reasons = [];
   if (reversalCount !== 1) {
@@ -234,6 +260,7 @@ function buildBankManualReasons(reversalCount, inboundCount) {
 }
 
 function materializeBankGroup(group, stage, reasons = []) {
+  const orderedReasons = sortReasons(reasons);
   const reversalRows = group.reversalRows.slice().sort(compareBankRecords);
   const inboundRows = group.inboundRows.slice().sort(compareBankRecords);
   const relatedRows = [...reversalRows, ...inboundRows].sort(compareBankRecords);
@@ -252,8 +279,8 @@ function materializeBankGroup(group, stage, reasons = []) {
     firstSourceOrdinal: relatedRows[0].sourceOrdinal,
     firstInputIndex: relatedRows[0].inputIndex,
     stage,
-    reasonCodes: [...new Set(reasons.map((reason) => reason.code))],
-    reasons
+    reasonCodes: [...new Set(orderedReasons.map((reason) => reason.code))],
+    reasons: orderedReasons
   };
 }
 
@@ -423,11 +450,23 @@ function lookupInboundCandidates(mapping, inboundRow, group) {
   );
 }
 
-function candidateArray(value, inboundRow) {
-  if (value === null || value === undefined) return [];
-  if (Array.isArray(value)) return value.slice();
+function mptCandidateCollection(value, inboundRow) {
+  if (value === null || value === undefined) return { candidateCount: 0, candidates: [] };
+  if (isObjectRecord(value) && Array.isArray(value.candidates)) {
+    const candidateCount = Number(value.candidateCount);
+    if (!Number.isSafeInteger(candidateCount) || candidateCount < value.candidates.length) {
+      throw new DuplicateInboundMatchError(
+        ERROR_CODES.INVALID_MPT_CANDIDATE_COLLECTION,
+        `BizId=${inboundRow.bizId} 的 MPT candidateCount 无效`,
+        { bankRowKey: inboundRow.bankRowKey, bizId: inboundRow.bizId }
+      );
+    }
+    return { candidateCount, candidates: value.candidates.slice() };
+  }
+  if (Array.isArray(value)) return { candidateCount: value.length, candidates: value.slice() };
   if (typeof value !== 'string' && typeof value[Symbol.iterator] === 'function') {
-    return Array.from(value);
+    const candidates = Array.from(value);
+    return { candidateCount: candidates.length, candidates };
   }
   throw new DuplicateInboundMatchError(
     ERROR_CODES.INVALID_MPT_CANDIDATE_COLLECTION,
@@ -625,11 +664,11 @@ function resolveDuplicateInboundMptMatches(options = {}) {
     validateCandidateGroup(group);
     const inboundRows = group.inboundRows.slice().sort(compareBankRecords);
     const inboundCandidateSets = inboundRows.map((inboundRow) => {
-      const rawCandidates = candidateArray(
+      const collection = mptCandidateCollection(
         lookupInboundCandidates(options.mptCandidatesByInbound, inboundRow, group),
         inboundRow
       );
-      const candidates = rawCandidates.map((candidate, candidateIndex) => normalizeMptCandidate(
+      const candidates = collection.candidates.map((candidate, candidateIndex) => normalizeMptCandidate(
         candidate,
         identityState,
         {
@@ -639,13 +678,19 @@ function resolveDuplicateInboundMptMatches(options = {}) {
           candidateIndex
         }
       ));
-      for (const candidate of candidates) {
+      if (collection.candidateCount === 1 && candidates.length !== 1) {
+        throw new DuplicateInboundMatchError(
+          ERROR_CODES.INVALID_MPT_CANDIDATE_COLLECTION,
+          `BizId=${inboundRow.bizId} 的唯一 MPT candidate 未携带候选行`
+        );
+      }
+      for (const candidate of collection.candidateCount === 1 ? candidates : []) {
         if (!ownersByCandidateKey.has(candidate.candidateKey)) {
           ownersByCandidateKey.set(candidate.candidateKey, new Set());
         }
         ownersByCandidateKey.get(candidate.candidateKey).add(groupIndex);
       }
-      return { inboundRow, candidates };
+      return { inboundRow, candidateCount: collection.candidateCount, candidates };
     });
     return {
       group,
@@ -666,25 +711,26 @@ function resolveDuplicateInboundMptMatches(options = {}) {
 
   for (const state of groupStates) {
     for (const set of state.inboundCandidateSets) {
-      if (set.candidates.length === 0) {
+      if (set.candidateCount === 0) {
         pushReason(state, MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_ZERO, {
           bankRowKey: set.inboundRow.bankRowKey,
           bizId: set.inboundRow.bizId,
           candidateCount: 0,
           message: `Inbound BizId=${set.inboundRow.bizId} 未找到 MPT candidate`
         });
-      } else if (set.candidates.length > 1) {
+      } else if (set.candidateCount > 1) {
         pushReason(state, MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_MULTIPLE, {
           bankRowKey: set.inboundRow.bankRowKey,
           bizId: set.inboundRow.bizId,
-          candidateCount: set.candidates.length,
-          message: `Inbound BizId=${set.inboundRow.bizId} 找到${set.candidates.length}条 MPT candidates`
+          candidateCount: set.candidateCount,
+          message: `Inbound BizId=${set.inboundRow.bizId} 找到${set.candidateCount}条 MPT candidates`
         });
       }
     }
 
     const sharedInGroup = [...new Set(
       state.inboundCandidateSets
+        .filter((set) => set.candidateCount === 1)
         .flatMap((set) => set.candidates)
         .map((candidate) => candidate.candidateKey)
         .filter((candidateKey) => sharedCandidateKeys.has(candidateKey))
@@ -696,7 +742,7 @@ function resolveDuplicateInboundMptMatches(options = {}) {
       });
     }
 
-    const exactlyOneEach = state.inboundCandidateSets.every((set) => set.candidates.length === 1);
+    const exactlyOneEach = state.inboundCandidateSets.every((set) => set.candidateCount === 1);
     if (exactlyOneEach) {
       const first = state.inboundCandidateSets[0].candidates[0];
       const second = state.inboundCandidateSets[1].candidates[0];
@@ -720,15 +766,23 @@ function resolveDuplicateInboundMptMatches(options = {}) {
           message: '两条 MPT candidate 的 oppBu 不一致'
         });
       }
+      if (first.orderId === '' || second.orderId === '') {
+        pushReason(state, MANUAL_REASON_CODES.MPT_ORDER_ID_EMPTY, {
+          firstOrderId: first.orderId,
+          secondOrderId: second.orderId,
+          message: '两条 MPT candidate 的 orderId 均须非空'
+        });
+      }
     }
 
-    const reasonCodes = [...state.reasonCodeSet];
+    const reasons = sortReasons(state.reasons);
+    const reasonCodes = [...new Set(reasons.map((reason) => reason.code))];
     if (reasonCodes.length > 0) {
       mptManualGroups.push({
         ...state.group,
         stage: 'mpt-manual',
         reasonCodes,
-        reasons: state.reasons,
+        reasons,
         inboundCandidateSets: state.inboundCandidateSets
       });
       continue;
@@ -891,6 +945,13 @@ function validateMptSuccessGroup(group) {
       { groupKey: group.groupKey }
     );
   }
+  if (group.inboundMatches.some((match) => trimmedText(match.mptCandidate && match.mptCandidate.orderId) === '')) {
+    throw new DuplicateInboundMatchError(
+      ERROR_CODES.INVALID_CANDIDATE_GROUP,
+      '单据阶段只接受含两个非空 MPT orderId 的成功组',
+      { groupKey: group.groupKey }
+    );
+  }
 }
 
 /**
@@ -920,14 +981,6 @@ function resolveDuplicateInboundDocumentMatches(options = {}) {
       .sort((left, right) => compareBankRecords(left.inboundRow, right.inboundRow));
     const documentCandidateSets = inboundMatches.map((inboundMatch, matchIndex) => {
       const orderId = trimmedText(inboundMatch.mptCandidate.orderId);
-      if (orderId === '') {
-        pushReason(state, MANUAL_REASON_CODES.DOCUMENT_ORDER_ID_EMPTY, {
-          matchIndex,
-          bizId: inboundMatch.inboundRow.bizId,
-          message: `Inbound BizId=${inboundMatch.inboundRow.bizId} 对应的 MPT 加款单号为空`
-        });
-        return { inboundMatch, orderId, candidateCount: 0, candidates: [] };
-      }
       const collection = normalizeDocumentCandidateCollection(
         lookupDocumentCandidateValue(options.documentCandidatesByOrderId, orderId, inboundMatch, group),
         orderId
@@ -1003,13 +1056,14 @@ function resolveDuplicateInboundDocumentMatches(options = {}) {
       }
     }
 
-    const reasonCodes = [...state.reasonCodeSet];
+    const reasons = sortReasons(state.reasons);
+    const reasonCodes = [...new Set(reasons.map((reason) => reason.code))];
     if (reasonCodes.length > 0) {
       documentManualGroups.push({
         ...group,
         stage: 'document-manual',
         reasonCodes,
-        reasons: state.reasons,
+        reasons,
         inboundMatches,
         documentCandidateSets
       });
@@ -1088,6 +1142,7 @@ module.exports = {
   FUND_TYPES,
   GROUP_TEXT_FIELDS,
   DOCUMENT_IDENTITY_FIELDS,
+  MANUAL_REASON_ORDER,
   MANUAL_REASON_CODES,
   ERROR_CODES,
   DuplicateInboundMatchError,

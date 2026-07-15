@@ -217,13 +217,34 @@ function countManualReversals(groups) {
   );
 }
 
-function toMptLineage(inboundRow, candidate) {
+function runInvalidationActions(label, actions) {
+  const errors = [];
+  for (const action of actions) {
+    try {
+      action();
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    const error = new Error(
+      `${label}存在多项失败：${errors.map((item) => item && item.message ? item.message : item).join('；')}`,
+      { cause: errors[0] }
+    );
+    error.errors = errors;
+    throw error;
+  }
+}
+
+function toMptLineage(inboundRow, candidate, candidateCount) {
   const source = candidate && candidate.sourceCandidate ? candidate.sourceCandidate : {};
   return {
     bankBizId: inboundRow.bizId,
     bankSourceOrdinal: inboundRow.sourceOrdinal,
+    candidateCount: Number(candidateCount) || 0,
     candidateKey: candidate ? candidate.candidateKey : '',
-    candidateId: source.candidateId ?? candidate.candidateId ?? '',
+    candidateId: source.candidateId ?? (candidate ? candidate.candidateId : '') ?? '',
     monthKey: source.monthKey ?? '',
     rowId: source.id ?? '',
     sourceType: source.sourceType ?? '',
@@ -252,6 +273,8 @@ class DuplicateInboundMatchService {
     database,
     mailTemplatePath,
     bankTemplatePath,
+    fileHasher = hashFile,
+    bankReader = readBankStatement,
     now = () => new Date()
   }) {
     if (!userDataDir || typeof userDataDir !== 'string') {
@@ -274,6 +297,8 @@ class DuplicateInboundMatchService {
     this.database = database;
     this.mailTemplatePath = mailTemplatePath;
     this.bankTemplatePath = bankTemplatePath;
+    this.fileHasher = fileHasher;
+    this.bankReader = bankReader;
     this.now = now;
     this.store = createDuplicateInboundMatchStore(this.userDataDir);
     this.tempStore = createPreFundReconciliationStore(this.userDataDir);
@@ -284,32 +309,39 @@ class DuplicateInboundMatchService {
   }
 
   reconcilePersistedRunMirrors() {
-    for (const mirror of this.database.listDuplicateInboundMatchRunMirrors()) {
-      if (mirror.status === 'running') {
-        this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-          mirror.id,
-          'interrupted',
-          '应用已重启，上一轮重复入金匹配未完整结束'
-        );
-      } else if (mirror.status === 'success') {
-        this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-          mirror.id,
-          'expired',
-          '应用已重启，银行与单据导入会话和运行结果已回收'
-        );
-      }
-    }
-    this.store.clearAll();
+    runInvalidationActions('重复入金启动回收', [
+      () => {
+        for (const mirror of this.database.listDuplicateInboundMatchRunMirrors()) {
+          let updated = true;
+          if (mirror.status === 'running') {
+            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
+              mirror.id,
+              'interrupted',
+              '应用已重启，上一轮重复入金匹配未完整结束'
+            );
+          } else if (mirror.status === 'success') {
+            updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
+              mirror.id,
+              'expired',
+              '应用已重启，银行与单据导入会话和运行结果已回收'
+            );
+          }
+          if (!updated) throw new Error(`重复入金主库运行镜像启动失效写入失败：${mirror.id}`);
+        }
+      },
+      () => this.store.clearAll()
+    ]);
   }
 
   revokeSuccessfulMirrors(message) {
     for (const mirror of this.database.listDuplicateInboundMatchRunMirrors()) {
       if (mirror.status !== 'success') continue;
-      this.database.markDuplicateInboundMatchRunMirrorUnavailable(
+      const updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
         mirror.id,
         'superseded',
         message
       );
+      if (!updated) throw new Error(`重复入金主库运行镜像失效写入失败：${mirror.id}`);
     }
   }
 
@@ -318,8 +350,10 @@ class DuplicateInboundMatchService {
     this.bankSession = null;
     this.documentSession = null;
     this.lastRun = null;
-    this.revokeSuccessfulMirrors('已选择新的银行与单据对账单，旧运行结果已失效');
-    this.store.clearAll();
+    runInvalidationActions('重复入金新导入失效处理', [
+      () => this.revokeSuccessfulMirrors('已选择新的银行与单据对账单，旧运行结果已失效'),
+      () => this.store.clearAll()
+    ]);
   }
 
   buildMptSnapshot() {
@@ -338,32 +372,53 @@ class DuplicateInboundMatchService {
     return { snapshot, snapshotHash: stableHash(snapshot) };
   }
 
+  unavailableLastRun(status, mirrorMessage, userMessage) {
+    const updated = this.database.markDuplicateInboundMatchRunMirrorUnavailable(
+      this.lastRun.mirrorRunId,
+      status,
+      mirrorMessage
+    );
+    if (!updated) {
+      throw new Error(`重复入金主库运行镜像失效写入失败：${this.lastRun.mirrorRunId}`);
+    }
+    return {
+      available: false,
+      unavailable: true,
+      stale: false,
+      message: userMessage
+    };
+  }
+
   inspectLastRun() {
     if (!this.lastRun) return { available: false, unavailable: false, stale: false };
     const sidePath = runDataStore.sideDbPath(this.userDataDir, MODULE, this.lastRun.monthKey);
     if (!fs.existsSync(sidePath)) {
-      try {
-        this.database.markDuplicateInboundMatchRunMirrorUnavailable(
-          this.lastRun.mirrorRunId,
-          'missing-side-db',
-          '重复入金运行结果侧库不存在'
-        );
-      } catch (_error) { /* 状态展示仍以侧库事实为准 */ }
-      return {
-        available: false,
-        unavailable: true,
-        stale: false,
-        message: '重复入金运行结果侧库不存在，请重新导入并运行'
-      };
+      return this.unavailableLastRun(
+        'missing-side-db',
+        '重复入金运行结果侧库不存在',
+        '重复入金运行结果侧库不存在，请重新导入并运行'
+      );
     }
-    const run = this.store.getRun(this.lastRun.monthKey, this.lastRun.sideRunId);
+    let run;
+    try {
+      const validated = this.store.validateRunResult(
+        this.lastRun.monthKey,
+        this.lastRun.sideRunId
+      );
+      run = validated && validated.run;
+    } catch (_error) {
+      return this.unavailableLastRun(
+        'invalid-side-db',
+        '重复入金运行结果侧库不可读',
+        '重复入金运行结果不可读，请重新导入并运行'
+      );
+    }
     if (!run || run.status !== 'success') {
-      return {
-        available: false,
-        unavailable: true,
-        stale: false,
-        message: '重复入金运行结果不可用，请重新运行'
-      };
+      return this.unavailableLastRun(
+        'invalid-side-db',
+        '重复入金运行结果记录缺失或状态非法',
+        '重复入金运行结果不可用，请重新运行'
+      );
     }
     const current = this.currentMptSnapshot();
     const stale = current.snapshotHash !== this.lastRun.snapshotHash;
@@ -418,18 +473,45 @@ class DuplicateInboundMatchService {
 
   async importFiles(filePaths, onProgress) {
     this.invalidateForNewImport();
+    try {
+      return await this.importFilesAfterInvalidation(filePaths, onProgress);
+    } catch (error) {
+      this.bankSession = null;
+      this.documentSession = null;
+      this.lastRun = null;
+      try {
+        this.store.clearAll();
+      } catch (cleanupError) {
+        throw new DuplicateInboundMatchServiceError(
+          'duplicate-inbound-import-rollback-failed',
+          `导入失败且临时数据回收失败：${cleanupError.message || cleanupError}`,
+          { cause: error, cleanupError }
+        );
+      }
+      throw error;
+    }
+  }
+
+  async importFilesAfterInvalidation(filePaths, onProgress) {
     if (onProgress) onProgress({ stage: 'classify', message: '正在识别银行对账单和单据对账单...' });
     await yieldToEventLoop();
 
     const inputs = await identifyInputFiles(filePaths);
     if (onProgress) onProgress({ stage: 'read-bank', message: '正在校验银行对账单...' });
     await yieldToEventLoop();
-    const parsed = readBankStatement(inputs.bank.filePath);
-    validateBizIds(parsed.rows);
     const [bankFileHash, documentFileHash] = await Promise.all([
-      hashFile(inputs.bank.filePath),
-      hashFile(inputs.document.filePath)
+      this.fileHasher(inputs.bank.filePath),
+      this.fileHasher(inputs.document.filePath)
     ]);
+    const parsed = this.bankReader(inputs.bank.filePath);
+    validateBizIds(parsed.rows);
+    const bankHashAfterRead = await this.fileHasher(inputs.bank.filePath);
+    if (bankHashAfterRead !== bankFileHash) {
+      throw new DuplicateInboundMatchServiceError(
+        'duplicate-inbound-input-changed-during-import',
+        '读取银行对账单期间文件发生变化，请重新选择文件'
+      );
+    }
     const { reversalCount, inboundCount } = countFundTypes(parsed.rows);
     const monthKey = localMonthKey(this.now());
     const storedRows = parsed.rows.map((row, index) => ({
@@ -460,11 +542,10 @@ class DuplicateInboundMatchService {
       })
     });
     const [bankHashAfter, documentHashAfter] = await Promise.all([
-      hashFile(inputs.bank.filePath),
-      hashFile(inputs.document.filePath)
+      this.fileHasher(inputs.bank.filePath),
+      this.fileHasher(inputs.document.filePath)
     ]);
     if (bankHashAfter !== bankFileHash || documentHashAfter !== documentFileHash) {
-      this.store.clearAll();
       throw new DuplicateInboundMatchServiceError(
         'duplicate-inbound-input-changed-during-import',
         '导入期间输入文件发生变化，请重新选择文件'
@@ -512,8 +593,12 @@ class DuplicateInboundMatchService {
   clearPreviousRun() {
     // 新 run 一经请求，旧结果立即失效；即使侧库删除失败也不能继续导出旧结果。
     this.lastRun = null;
-    this.revokeSuccessfulMirrors('已开始新的重复入金匹配运行，旧结果已回收');
-    if (this.bankSession) this.store.clearRuns(this.bankSession.monthKey);
+    runInvalidationActions('重复入金新运行失效处理', [
+      () => this.revokeSuccessfulMirrors('已开始新的重复入金匹配运行，旧结果已回收'),
+      () => {
+        if (this.bankSession) this.store.clearRuns(this.bankSession.monthKey);
+      }
+    ]);
   }
 
   buildMailRows(successGroups) {
@@ -574,9 +659,15 @@ class DuplicateInboundMatchService {
         excelRowNumber: record.excelRowNumber
       }));
       const mptLineage = Array.isArray(group.inboundMatches)
-        ? group.inboundMatches.map((match) => toMptLineage(match.inboundRow, match.mptCandidate))
+        ? group.inboundMatches.map((match) => toMptLineage(match.inboundRow, match.mptCandidate, 1))
         : (group.inboundCandidateSets || []).flatMap((set) => (
-          set.candidates.map((candidate) => toMptLineage(set.inboundRow, candidate))
+          set.candidates.length > 0
+            ? set.candidates.map((candidate) => toMptLineage(
+              set.inboundRow,
+              candidate,
+              set.candidateCount
+            ))
+            : [toMptLineage(set.inboundRow, null, set.candidateCount)]
         ));
       const documentLineage = Array.isArray(group.documentMatches)
         ? group.documentMatches.map((match) => toDocumentLineage(
@@ -765,7 +856,21 @@ class DuplicateInboundMatchService {
         availability.message || '运行结果不可用，请重新运行'
       );
     }
-    const result = this.store.readResult(this.lastRun.monthKey, this.lastRun.sideRunId);
+    let result;
+    try {
+      result = this.store.readResult(this.lastRun.monthKey, this.lastRun.sideRunId);
+    } catch (error) {
+      this.unavailableLastRun(
+        'invalid-side-db',
+        '重复入金运行结果明细不可读或行数不守恒',
+        '重复入金运行结果不可用，请重新导入并运行'
+      );
+      throw new DuplicateInboundMatchServiceError(
+        'duplicate-inbound-run-unavailable',
+        '重复入金运行结果不可用，请重新导入并运行',
+        { cause: error }
+      );
+    }
     if (!result) {
       throw new DuplicateInboundMatchServiceError(
         'duplicate-inbound-run-unavailable',

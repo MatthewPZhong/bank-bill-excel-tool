@@ -52,6 +52,12 @@ test('重复入金 run 镜像从旧表幂等补齐单据文件列', () => {
     const mirror = repository.getRunMirror(db, id);
     assert.equal(mirror.documentFileName, 'document.xlsx');
     assert.equal(mirror.documentFileHash, 'document-hash');
+    assert.equal(repository.markRunMirrorUnavailable(db, id, 'invalid-side-db', '侧库不可读'), true);
+    assert.equal(repository.getRunMirror(db, id).status, 'invalid-side-db');
+    assert.throws(
+      () => repository.markRunMirrorUnavailable(db, id, 'unknown-status', '非法'),
+      /失效状态非法/
+    );
   } finally {
     db.close();
   }

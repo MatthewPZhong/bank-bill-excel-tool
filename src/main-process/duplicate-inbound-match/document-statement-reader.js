@@ -2,16 +2,18 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const sax = require('sax');
 
 const { FileValidationError } = require('../../backend/file-service/common');
 const { BILL_HEADERS } = require('../../backend/acquiring-bill-currency-db/columns');
 const {
   openZipWithEntries,
   loadSharedStrings,
-  SHEET_ENTRY_NAME,
   SHARED_STRINGS_ENTRY_NAME
 } = require('../../backend/acquiring-bill-currency-import/reader');
+const {
+  locateSheets,
+  WORKBOOK_ENTRY_NAME
+} = require('../../backend/big-table-import/zip-reader');
 const {
   streamSheetRowsHandRolled
 } = require('../../backend/acquiring-bill-currency-import/reader-handrolled');
@@ -28,8 +30,6 @@ const DOCUMENT_FIELD_INDICES = Object.freeze(Object.fromEntries(
 const DOCUMENT_VALUE_COLUMN_WHITELIST = Object.freeze(
   new Set(Object.values(DOCUMENT_FIELD_INDICES))
 );
-const WORKBOOK_ENTRY_NAME = 'xl/workbook.xml';
-
 function toText(value) {
   return value === null || value === undefined ? '' : String(value);
 }
@@ -73,33 +73,10 @@ async function readXlsxSheetNames(filePath) {
         `${fileName}：xlsx 缺少 ${WORKBOOK_ENTRY_NAME}`
       );
     }
-    return await new Promise((resolve, reject) => {
-      zip.openReadStream(workbookEntry, (openError, stream) => {
-        if (openError) {
-          reject(openError);
-          return;
-        }
-        const parser = sax.createStream(false, { lowercase: true });
-        const sheetNames = [];
-        let settled = false;
-        const finish = (error) => {
-          if (settled) return;
-          settled = true;
-          if (error) reject(error);
-          else resolve(sheetNames);
-        };
-        parser.on('opentag', (node) => {
-          if (node.name !== 'sheet') return;
-          sheetNames.push(toText(node.attributes.name));
-        });
-        parser.on('end', () => finish());
-        parser.on('error', finish);
-        stream.on('error', finish);
-        stream.pipe(parser);
-      });
-    });
+    const sheets = await locateSheets(zip, entries);
+    return sheets.map((sheet) => toText(sheet.name));
   } finally {
-    try { zip.close(); } catch (_error) { /* best effort */ }
+    try { zip.close(); } catch (_error) { /* 关闭失败不覆盖原结果 */ }
   }
 }
 
@@ -134,11 +111,15 @@ async function streamDocumentStatement(filePath, { onRow, onProgress } = {}) {
   let matchableRowCount = 0;
   let emptyBusinessOrderCount = 0;
   try {
-    const sheetEntry = entries.get(SHEET_ENTRY_NAME);
+    const sheets = await locateSheets(zip, entries);
+    const firstSheet = sheets[0];
+    const sheetEntry = firstSheet && firstSheet.entryPath
+      ? entries.get(firstSheet.entryPath)
+      : null;
     if (!sheetEntry) {
       throw new FileValidationError(
         'duplicate-inbound-document-sheet-missing',
-        `${fileName}：单据对账单缺少第一工作表`
+        `${fileName}：无法定位单据对账单第一工作表`
       );
     }
     let sharedStrings = [];
@@ -195,7 +176,7 @@ async function streamDocumentStatement(filePath, { onRow, onProgress } = {}) {
     }
     return { fileName, rowCount, matchableRowCount, emptyBusinessOrderCount };
   } finally {
-    try { zip.close(); } catch (_error) { /* best effort */ }
+    try { zip.close(); } catch (_error) { /* 关闭失败不覆盖原结果 */ }
   }
 }
 

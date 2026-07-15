@@ -6,9 +6,20 @@ const path = require('node:path');
 const runDataStore = require('./run-data-store');
 
 const MODULE = runDataStore.MODULE_DUPLICATE_INBOUND_MATCH;
+const SIDE_DB_FAMILY_RE = /^(month-\d{4}-\d{2}\.sqlite)(?:-wal|-shm)?$/;
 
 function rollbackQuietly(db) {
-  try { db.exec('ROLLBACK'); } catch (_error) { /* no active transaction */ }
+  try { db.exec('ROLLBACK'); } catch (_error) { /* 当前无活动事务时忽略 */ }
+}
+
+function pathExistsStrict(filePath) {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    throw error;
+  }
 }
 
 function parseObjectJson(value, label) {
@@ -61,6 +72,65 @@ function mapRun(row, monthKey) {
   };
 }
 
+function resultCounts(db, runId) {
+  const id = Number(runId);
+  return {
+    mailRowCount: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM duplicate_inbound_match_mail_rows WHERE run_id = ?
+    `).get(id).count),
+    manualRowCount: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM duplicate_inbound_match_manual_rows WHERE run_id = ?
+    `).get(id).count),
+    auditGroupCount: Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM duplicate_inbound_match_group_audits WHERE run_id = ?
+    `).get(id).count),
+    successAuditCount: Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM duplicate_inbound_match_group_audits
+      WHERE run_id = ? AND disposition = 'success'
+    `).get(id).count),
+    manualAuditCount: Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM duplicate_inbound_match_group_audits
+      WHERE run_id = ? AND disposition = 'manual'
+    `).get(id).count)
+  };
+}
+
+function assertResultCounts(run, counts) {
+  const expected = {
+    mailRowCount: Number(run.summary.mailRowCount),
+    manualRowCount: Number(run.summary.manualRowCount),
+    auditGroupCount: Number(run.summary.auditGroupCount),
+    successAuditCount: Number(run.summary.finalSuccessGroupCount),
+    manualAuditCount: Number(run.summary.manualGroupCount)
+  };
+  const invalidExpected = Object.values(expected).some(
+    (value) => !Number.isSafeInteger(value) || value < 0
+  );
+  const invalidSummary = expected.mailRowCount !== expected.successAuditCount
+    || expected.auditGroupCount !== expected.successAuditCount + expected.manualAuditCount;
+  const mismatches = Object.keys(expected).filter((key) => expected[key] !== counts[key]);
+  if (invalidExpected || invalidSummary || mismatches.length > 0) {
+    const error = new Error(
+      `重复入金运行结果行数不守恒：期望 ${JSON.stringify(expected)}，实际 ${JSON.stringify(counts)}`
+    );
+    error.code = 'duplicate-inbound-side-result-count-mismatch';
+    throw error;
+  }
+}
+
+function loadValidatedRun(db, monthKey, runId) {
+  const run = mapRun(
+    db.prepare('SELECT * FROM duplicate_inbound_match_runs WHERE id = ?').get(Number(runId)),
+    monthKey
+  );
+  if (!run) return null;
+  const counts = resultCounts(db, runId);
+  assertResultCounts(run, counts);
+  return { run, counts };
+}
+
 class DuplicateInboundMatchStore {
   constructor(userDataDir) {
     if (!userDataDir || typeof userDataDir !== 'string') {
@@ -71,12 +141,39 @@ class DuplicateInboundMatchStore {
   }
 
   clearAll() {
+    const dir = runDataStore.moduleDir(this.userDataDir, MODULE);
+    let entries;
+    try {
+      entries = fs.readdirSync(dir);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return { deletedFiles: 0 };
+      throw new Error(`重复入金侧库目录扫描失败：${error && error.message ? error.message : error}`);
+    }
+
+    const basePaths = new Set();
+    for (const entry of entries) {
+      const match = SIDE_DB_FAMILY_RE.exec(entry);
+      if (match) basePaths.add(path.join(dir, match[1]));
+    }
+
     let deletedFiles = 0;
     const failedPaths = [];
-    for (const file of runDataStore.listSideDbFiles(this.userDataDir, MODULE)) {
-      if (runDataStore.deleteSideDbByPath(file.path).deleted) deletedFiles += 1;
-      if (['', '-wal', '-shm'].some((suffix) => fs.existsSync(file.path + suffix))) {
-        failedPaths.push(file.path);
+    for (const basePath of basePaths) {
+      runDataStore.deleteSideDbByPath(basePath);
+      let hasRemainingFile;
+      try {
+        hasRemainingFile = ['', '-wal', '-shm'].some(
+          (suffix) => pathExistsStrict(basePath + suffix)
+        );
+      } catch (error) {
+        throw new Error(
+          `重复入金侧库回收校验失败：${basePath}（${error && error.message ? error.message : error}）`
+        );
+      }
+      if (hasRemainingFile) {
+        failedPaths.push(basePath);
+      } else {
+        deletedFiles += 1;
       }
     }
     if (failedPaths.length > 0) {
@@ -417,15 +514,25 @@ class DuplicateInboundMatchStore {
     }
   }
 
+  validateRunResult(monthKey, runId) {
+    if (!runDataStore.sideDbExists(this.userDataDir, MODULE, monthKey)) return null;
+    const db = runDataStore.openExistingSideDb(
+      runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
+    );
+    try {
+      return loadValidatedRun(db, monthKey, runId);
+    } finally {
+      db.close();
+    }
+  }
+
   readResult(monthKey, runId) {
     const db = runDataStore.openExistingSideDb(
       runDataStore.sideDbPath(this.userDataDir, MODULE, monthKey)
     );
     try {
-      const run = mapRun(
-        db.prepare('SELECT * FROM duplicate_inbound_match_runs WHERE id = ?').get(Number(runId)),
-        monthKey
-      );
+      const validated = loadValidatedRun(db, monthKey, runId);
+      const run = validated && validated.run;
       if (!run || run.status !== 'success') return null;
       const mailRows = db.prepare(`
         SELECT source_ordinal, output_json

@@ -181,7 +181,6 @@ function moveTempIntoPlace(tempPath, targetPath) {
     }
     fs.renameSync(tempPath, targetPath);
   } catch (error) {
-    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
     if (backupCreated && !fs.existsSync(targetPath) && fs.existsSync(backupPath)) {
       try {
         fs.renameSync(backupPath, targetPath);
@@ -204,6 +203,70 @@ function moveTempIntoPlace(tempPath, targetPath) {
   return warnings;
 }
 
+function outputVerificationError(message, cause) {
+  const error = new DuplicateInboundExportError(
+    'duplicate-inbound-output-verification-failed',
+    `重复入金导出文件回读校验失败：${message}`
+  );
+  if (cause) error.cause = cause;
+  return error;
+}
+
+async function validateWrittenWorkbook(filePath, { mailRowCount, manualRowCount }) {
+  const expectedMailRows = Number(mailRowCount) + 1;
+  const expectedManualRows = Number(manualRowCount) + 1;
+  let workbook;
+  try {
+    workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+  } catch (error) {
+    throw outputVerificationError(error && error.message ? error.message : String(error), error);
+  }
+
+  const expectedSheetNames = [MAIL_SHEET_NAME, MANUAL_SHEET_NAME];
+  const actualSheetNames = workbook.worksheets.map((sheet) => sheet.name);
+  if (
+    actualSheetNames.length !== expectedSheetNames.length
+    || actualSheetNames.some((name, index) => name !== expectedSheetNames[index])
+  ) {
+    throw outputVerificationError(
+      `sheet 应为 ${expectedSheetNames.join(' / ')}，实际为 ${actualSheetNames.join(' / ') || '(无)'}`
+    );
+  }
+
+  const mailSheet = workbook.worksheets[0];
+  const manualSheet = workbook.worksheets[1];
+  const manualHeaders = [...BANK_STATEMENT_FIELDS, MANUAL_REASON_HEADER];
+  const checks = [
+    {
+      sheet: mailSheet,
+      headers: MAIL_HEADERS,
+      expectedRows: expectedMailRows
+    },
+    {
+      sheet: manualSheet,
+      headers: manualHeaders,
+      expectedRows: expectedManualRows
+    }
+  ];
+  for (const check of checks) {
+    const actualHeaders = rowValues(check.sheet, 1, check.headers.length);
+    if (
+      check.sheet.columnCount !== check.headers.length
+      || actualHeaders.some((value, index) => value !== check.headers[index])
+    ) {
+      throw outputVerificationError(
+        `${check.sheet.name} 表头不符合约定：期望 ${check.headers.join(' / ')}，实际 ${actualHeaders.join(' / ')}`
+      );
+    }
+    if (check.sheet.rowCount !== check.expectedRows) {
+      throw outputVerificationError(
+        `${check.sheet.name} 应为 ${check.expectedRows} 行，实际为 ${check.sheet.rowCount} 行`
+      );
+    }
+  }
+}
+
 async function writeDuplicateInboundWorkbook({
   mailTemplatePath,
   bankTemplatePath,
@@ -223,6 +286,10 @@ async function writeDuplicateInboundWorkbook({
   );
   try {
     await workbook.xlsx.writeFile(tempPath);
+    await validateWrittenWorkbook(tempPath, {
+      mailRowCount: mailRows.length,
+      manualRowCount: manualRows.length
+    });
     const warnings = moveTempIntoPlace(tempPath, targetPath);
     return {
       status: 'success',
@@ -233,7 +300,16 @@ async function writeDuplicateInboundWorkbook({
       warnings
     };
   } catch (error) {
-    if (fs.existsSync(tempPath)) fs.rmSync(tempPath, { force: true });
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.rmSync(tempPath, { force: true });
+      } catch (cleanupError) {
+        throw new Error(
+          `${error.message || error}；临时文件清理失败：${tempPath}（${cleanupError.message || cleanupError}）`,
+          { cause: error }
+        );
+      }
+    }
     throw error;
   }
 }
@@ -246,5 +322,6 @@ module.exports = {
   DuplicateInboundExportError,
   buildDefaultFileName,
   buildWorkbook,
+  validateWrittenWorkbook,
   writeDuplicateInboundWorkbook
 };

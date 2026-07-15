@@ -5259,6 +5259,24 @@ function setDuplicateInboundMatchStatus(message, tone = 'info') {
   });
 }
 
+function formatDuplicateInboundMatchFailure(prefix, value, fallback = '未知错误') {
+  const message = value && value.message ? value.message : fallback;
+  const detailLines = value && Array.isArray(value.detailLines)
+    ? value.detailLines.map((line) => String(line)).filter(Boolean)
+    : [];
+  return [`${prefix}：${message}`, ...detailLines].join('\n');
+}
+
+function formatDuplicateInboundMatchExportSuccess(result) {
+  const warnings = Array.isArray(result && result.warnings)
+    ? result.warnings.map((warning) => String(warning)).filter(Boolean)
+    : [];
+  return {
+    message: [`文件已生成：${result.filePath}`, ...warnings.map((warning) => `警告：${warning}`)].join('\n'),
+    tone: warnings.length > 0 ? 'warning' : 'success'
+  };
+}
+
 function applyDuplicateInboundMatchButtonState() {
   const status = duplicateInboundMatchState.backend || {};
   if (elements.duplicateInboundMatchImportBtn) {
@@ -5273,8 +5291,15 @@ function applyDuplicateInboundMatchButtonState() {
 }
 
 function renderDuplicateInboundMatchBackendStatus(status) {
-  if (!status || status.status !== 'ok') {
+  if (!status) {
     setDuplicateInboundMatchStatus('欢迎使用小助手', 'info');
+    return;
+  }
+  if (status.status !== 'ok') {
+    setDuplicateInboundMatchStatus(
+      formatDuplicateInboundMatchFailure('状态读取失败', status),
+      'error'
+    );
     return;
   }
   if (status.run) {
@@ -5292,6 +5317,7 @@ function renderDuplicateInboundMatchBackendStatus(status) {
     const mptReuseCount = Number(reasonCounts['duplicate-inbound-mpt-candidate-reused-across-groups'] || 0);
     const mptOppBuCount = Number(reasonCounts['duplicate-inbound-mpt-opp-bu-empty'] || 0)
       + Number(reasonCounts['duplicate-inbound-mpt-opp-bu-conflict'] || 0);
+    const mptOrderIdCount = Number(reasonCounts['duplicate-inbound-mpt-order-id-empty'] || 0);
     const documentZeroCount = Number(reasonCounts['duplicate-inbound-document-candidate-count-zero'] || 0);
     const documentMultipleCount = Number(reasonCounts['duplicate-inbound-document-candidate-count-multiple'] || 0);
     const documentIdentityCount = Number(reasonCounts['duplicate-inbound-document-identity-field-empty'] || 0)
@@ -5300,7 +5326,7 @@ function renderDuplicateInboundMatchBackendStatus(status) {
       reasonCounts['duplicate-inbound-document-business-department-mismatch'] || 0
     );
     setDuplicateInboundMatchStatus(
-      `匹配完成：共 ${s.inputRowCount || 0} 行（Reversal ${s.reversalRowCount || 0} / Inbound ${s.inboundRowCount || 0} / 忽略 ${s.ignoredFundTypeRowCount || 0}）；分组 ${s.bankGroupCount || 0} 个（1+2 候选 ${s.bankCandidateGroupCount || 0} / 成功 ${s.finalSuccessGroupCount || 0} / 人工 ${s.manualGroupCount || 0} 组 ${s.manualRowCount || 0} 行 / 纯 Inbound ${s.pureInboundGroupCount || 0} 组 ${s.pureInboundRowCount || 0} 行）；MPT 异常：零候选 ${mptZeroCount} / 多候选 ${mptMultipleCount} / 复用 ${mptReuseCount} / oppBu ${mptOppBuCount}；单据异常：零候选 ${documentZeroCount} / 多候选 ${documentMultipleCount} / 身份字段 ${documentIdentityCount} / 业务部门 ${documentBuMismatchCount}`,
+      `匹配完成：共 ${s.inputRowCount || 0} 行（Reversal ${s.reversalRowCount || 0} / Inbound ${s.inboundRowCount || 0} / 忽略 ${s.ignoredFundTypeRowCount || 0}）；分组 ${s.bankGroupCount || 0} 个（1+2 候选 ${s.bankCandidateGroupCount || 0} / 成功 ${s.finalSuccessGroupCount || 0} / 人工 ${s.manualGroupCount || 0} 组 ${s.manualRowCount || 0} 行 / 纯 Inbound ${s.pureInboundGroupCount || 0} 组 ${s.pureInboundRowCount || 0} 行）；MPT 异常：零候选 ${mptZeroCount} / 多候选 ${mptMultipleCount} / 复用 ${mptReuseCount} / oppBu ${mptOppBuCount} / orderId ${mptOrderIdCount}；单据异常：零候选 ${documentZeroCount} / 多候选 ${documentMultipleCount} / 身份字段 ${documentIdentityCount} / 业务部门 ${documentBuMismatchCount}`,
       (s.manualRowCount || 0) > 0 ? 'info' : 'success'
     );
     return;
@@ -5357,13 +5383,13 @@ async function handleDuplicateInboundMatchImport() {
     }
     if (result.status !== 'ok') {
       await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-      setDuplicateInboundMatchStatus(`导入失败：${result.message || '未知错误'}`, 'error');
+      setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('导入失败', result), 'error');
       return;
     }
     await refreshDuplicateInboundMatchStatus();
   } catch (error) {
     await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-    setDuplicateInboundMatchStatus(`导入失败：${error && error.message ? error.message : error}`, 'error');
+    setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('导入失败', error, String(error)), 'error');
   } finally {
     unsubscribe();
     duplicateInboundMatchState.busy = false;
@@ -5380,13 +5406,13 @@ async function handleDuplicateInboundMatchRun() {
     const result = await window.desktopApi.duplicateInboundMatch.run();
     if (!result || result.status !== 'success') {
       await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-      setDuplicateInboundMatchStatus(`运行失败：${result && result.message ? result.message : '未知错误'}`, 'error');
+      setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('运行失败', result), 'error');
       return;
     }
     await refreshDuplicateInboundMatchStatus();
   } catch (error) {
     await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-    setDuplicateInboundMatchStatus(`运行失败：${error && error.message ? error.message : error}`, 'error');
+    setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('运行失败', error, String(error)), 'error');
   } finally {
     unsubscribe();
     duplicateInboundMatchState.busy = false;
@@ -5407,14 +5433,15 @@ async function handleDuplicateInboundMatchExport() {
     }
     if (result.status !== 'success') {
       await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-      setDuplicateInboundMatchStatus(`导出失败：${result.message || '未知错误'}`, 'error');
+      setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('导出失败', result), 'error');
       return;
     }
-    setDuplicateInboundMatchStatus(`文件已生成：${result.filePath}`, 'success');
+    const exportStatus = formatDuplicateInboundMatchExportSuccess(result);
+    setDuplicateInboundMatchStatus(exportStatus.message, exportStatus.tone);
     await refreshDuplicateInboundMatchStatus({ updateStatus: false });
   } catch (error) {
     await refreshDuplicateInboundMatchStatus({ updateStatus: false });
-    setDuplicateInboundMatchStatus(`导出失败：${error && error.message ? error.message : error}`, 'error');
+    setDuplicateInboundMatchStatus(formatDuplicateInboundMatchFailure('导出失败', error, String(error)), 'error');
   } finally {
     unsubscribe();
     duplicateInboundMatchState.busy = false;

@@ -348,6 +348,10 @@ test.describe('DuplicateInboundMatchService', () => {
       persisted.auditRows[0].documentLineage.map((lineage) => lineage.candidateCount),
       [1, 0]
     );
+    assert.deepEqual(
+      persisted.auditRows[0].mptLineage.map((lineage) => lineage.candidateCount),
+      [1, 1]
+    );
   });
 
   test('BizId 为空或 trim 后重复会拒绝导入并清空旧会话', async () => {
@@ -368,6 +372,46 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(service.status().bank, null);
     assert.equal(service.status().document, null);
     assert.equal(service.status().canRun, false);
+  });
+
+  test('双文件落库后源文件读取失败会物理回收整个新会话', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'HASH-FAIL', amount: '10' }));
+    const originalCreateImportBundle = service.store.createImportBundle.bind(service.store);
+    service.store.createImportBundle = async (payload) => {
+      const imported = await originalCreateImportBundle(payload);
+      fs.rmSync(documentFile, { force: true });
+      return imported;
+    };
+
+    await assert.rejects(
+      () => service.importFiles([bankFile, documentFile]),
+      (error) => error && error.code === 'ENOENT'
+    );
+    assert.equal(service.status().bank, null);
+    assert.equal(service.status().document, null);
+    assert.equal(service.status().canRun, false);
+    assert.deepEqual(service.store.clearAll(), { deletedFiles: 0 });
+  });
+
+  test('银行解析前后 hash 不一致时拒绝绑定错误版本', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'HASH-RACE', amount: '10' }));
+    const originalFileHasher = service.fileHasher;
+    let bankHashCallCount = 0;
+    service.fileHasher = async (filePath) => {
+      if (filePath === bankFile) {
+        bankHashCallCount += 1;
+        return bankHashCallCount === 1 ? 'bank-version-a' : 'bank-version-b';
+      }
+      return originalFileHasher(filePath);
+    };
+
+    await assert.rejects(
+      () => service.importFiles([bankFile, documentFile]),
+      (error) => error && error.code === 'duplicate-inbound-input-changed-during-import'
+    );
+    assert.equal(bankHashCallCount, 2);
+    assert.equal(service.status().canRun, false);
+    assert.deepEqual(service.store.clearAll(), { deletedFiles: 0 });
   });
 
   test('双文件数量、类型和单据严格表头不符时整批拒绝', async () => {
@@ -458,6 +502,78 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(status.canExport, false);
   });
 
+  test('新导入镜像失效失败时仍继续物理回收旧侧库', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'MIRROR-IMPORT', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'MIRROR-IMPORT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'MIRROR-IMPORT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importFile(mptFile);
+    await service.importFiles([bankFile, documentFile]);
+    await service.run();
+
+    const originalMarkUnavailable = service.database.markDuplicateInboundMatchRunMirrorUnavailable;
+    let clearAllCalls = 0;
+    const originalClearAll = service.store.clearAll.bind(service.store);
+    service.database.markDuplicateInboundMatchRunMirrorUnavailable = () => {
+      throw new Error('injected mirror invalidation failure');
+    };
+    service.store.clearAll = () => {
+      clearAllCalls += 1;
+      return originalClearAll();
+    };
+    try {
+      await assert.rejects(
+        () => service.importFiles([bankFile, documentFile]),
+        /injected mirror invalidation failure/
+      );
+      assert.equal(clearAllCalls, 1);
+      assert.deepEqual(originalClearAll(), { deletedFiles: 0 });
+      assert.equal(service.status().canRun, false);
+      assert.equal(service.status().canExport, false);
+    } finally {
+      service.database.markDuplicateInboundMatchRunMirrorUnavailable = originalMarkUnavailable;
+      service.store.clearAll = originalClearAll;
+    }
+  });
+
+  test('新运行镜像失效失败时仍继续删除旧侧库结果', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'MIRROR-RUN', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'MIRROR-RUN-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'MIRROR-RUN-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importFile(mptFile);
+    await service.importFiles([bankFile, documentFile]);
+    const completed = await service.run();
+    const oldSideRunId = service.lastRun.sideRunId;
+
+    const originalMarkUnavailable = service.database.markDuplicateInboundMatchRunMirrorUnavailable;
+    const originalClearRuns = service.store.clearRuns.bind(service.store);
+    let clearRunsCalls = 0;
+    service.database.markDuplicateInboundMatchRunMirrorUnavailable = () => false;
+    service.store.clearRuns = (monthKey) => {
+      clearRunsCalls += 1;
+      return originalClearRuns(monthKey);
+    };
+    try {
+      await assert.rejects(
+        () => service.run(),
+        /主库运行镜像失效写入失败/
+      );
+      assert.equal(clearRunsCalls, 1);
+      assert.equal(service.store.getRun(service.bankSession.monthKey, oldSideRunId), null);
+      assert.equal(service.status().canRun, true);
+      assert.equal(service.status().canExport, false);
+      assert.equal(mirrorRepository.getRunMirror(mirror.db, completed.runId).status, 'success');
+    } finally {
+      service.database.markDuplicateInboundMatchRunMirrorUnavailable = originalMarkUnavailable;
+      service.store.clearRuns = originalClearRuns;
+    }
+  });
+
   test('运行硬错误在主库镜像中只保存脱敏 code', async () => {
     writeBankFile(bankFile, [bankRow({
       BizId: 'PRIVATE-BIZ-ID', FundType: 'Reversal', 'Debit Amount': 'not-an-amount',
@@ -511,6 +627,98 @@ test.describe('DuplicateInboundMatchService', () => {
     );
   });
 
+  test('侧库 run 记录缺失或损坏时禁止导出并同步主库镜像失效', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'SIDE-RUN', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'SIDE-RUN-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'SIDE-RUN-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importFile(mptFile);
+    await service.importFiles([bankFile, documentFile]);
+    const completed = await service.run();
+
+    const sidePath = path.join(
+      userDataDir,
+      'run-data',
+      'duplicate-inbound-match',
+      `month-${service.lastRun.monthKey}.sqlite`
+    );
+    const sideDb = new DatabaseSync(sidePath);
+    try {
+      sideDb.prepare(`
+        UPDATE duplicate_inbound_match_runs SET summary_json = '{'
+        WHERE id = ?
+      `).run(service.lastRun.sideRunId);
+    } finally {
+      sideDb.close();
+    }
+
+    const originalMarkUnavailable = service.database.markDuplicateInboundMatchRunMirrorUnavailable;
+    service.database.markDuplicateInboundMatchRunMirrorUnavailable = () => {
+      throw new Error('injected mirror write failure');
+    };
+    assert.throws(() => service.status(), /injected mirror write failure/);
+    assert.equal(
+      mirrorRepository.getRunMirror(mirror.db, completed.runId).status,
+      'success',
+      '镜像写失败不得伪报已同步失效'
+    );
+    service.database.markDuplicateInboundMatchRunMirrorUnavailable = originalMarkUnavailable;
+
+    const status = service.status();
+    assert.equal(status.run.unavailable, true);
+    assert.equal(status.canExport, false);
+    assert.equal(
+      mirrorRepository.getRunMirror(mirror.db, completed.runId).status,
+      'invalid-side-db'
+    );
+    await assert.rejects(
+      () => service.export({ savePath: path.join(userDataDir, 'invalid-side-run.xlsx') }),
+      (error) => error.code === 'duplicate-inbound-run-unavailable'
+    );
+  });
+
+  test('成功 run 的结果明细少行时标记侧库失效并禁止发布不完整 Excel', async () => {
+    writeBankFile(bankFile, duplicateGroup({ prefix: 'MISSING-RESULT', amount: '100' }));
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
+    writeMptFile(mptFile, '20260714', [
+      inboundMptRow({ reconId: 'MISSING-RESULT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
+      inboundMptRow({ reconId: 'MISSING-RESULT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
+    ]);
+    await service.tempStore.importFile(mptFile);
+    await service.importFiles([bankFile, documentFile]);
+    const completed = await service.run();
+
+    const sidePath = path.join(
+      userDataDir,
+      'run-data',
+      'duplicate-inbound-match',
+      `month-${service.lastRun.monthKey}.sqlite`
+    );
+    const sideDb = new DatabaseSync(sidePath);
+    try {
+      sideDb.prepare(`
+        DELETE FROM duplicate_inbound_match_mail_rows WHERE run_id = ?
+      `).run(service.lastRun.sideRunId);
+    } finally {
+      sideDb.close();
+    }
+
+    const status = service.status();
+    assert.equal(status.run.unavailable, true);
+    assert.equal(status.canExport, false);
+    assert.equal(
+      mirrorRepository.getRunMirror(mirror.db, completed.runId).status,
+      'invalid-side-db'
+    );
+    await assert.rejects(
+      () => service.export({ savePath: path.join(userDataDir, 'missing-result.xlsx') }),
+      (error) => error.code === 'duplicate-inbound-run-unavailable'
+    );
+    assert.equal(fs.existsSync(path.join(userDataDir, 'missing-result.xlsx')), false);
+  });
+
   test('INBOUND 批次替换和删除都会使旧结果过期', async () => {
     writeBankFile(bankFile, duplicateGroup({ prefix: 'SUCCESS', amount: '100' }));
     const firstMpt = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260714001.txt');
@@ -545,6 +753,10 @@ test.describe('DuplicateInboundMatchService', () => {
   });
 
   test('纯 Inbound 只统计且没有可导出结果', async () => {
+    await assert.rejects(
+      () => service.export({ savePath: path.join(userDataDir, 'before-run.xlsx') }),
+      (error) => error.code === 'duplicate-inbound-run-missing'
+    );
     writeBankFile(bankFile, [bankRow({
       BizId: 'PURE-I', FundType: 'Inbound', 'Credit Amount': '10', Channel: 'CIT',
       Currency: 'USD', 'Payee Name': 'P', 'Payee CardNo': '1', 'Drawee Name': 'D',
@@ -556,5 +768,10 @@ test.describe('DuplicateInboundMatchService', () => {
     assert.equal(result.summary.mailRowCount, 0);
     assert.equal(result.summary.manualRowCount, 0);
     assert.equal(service.status().canExport, false);
+    await assert.rejects(
+      () => service.export({ savePath: path.join(userDataDir, 'pure-inbound.xlsx') }),
+      (error) => error.code === 'duplicate-inbound-export-empty'
+    );
+    assert.equal(fs.existsSync(path.join(userDataDir, 'pure-inbound.xlsx')), false);
   });
 });

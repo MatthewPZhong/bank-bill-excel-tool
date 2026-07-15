@@ -12,6 +12,7 @@ const {
   MAIL_HEADERS,
   buildWorkbook,
   buildDefaultFileName,
+  validateWrittenWorkbook,
   writeDuplicateInboundWorkbook
 } = require('../../../../src/main-process/duplicate-inbound-match/excel-writer');
 
@@ -121,6 +122,78 @@ test('覆盖已有文件时发布失败会恢复原文件且清理临时文件',
   }
 });
 
+test('发布与临时文件清理同时失败时优先恢复原文件并报告残留路径', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-writer-'));
+  const savePath = path.join(dir, 'result.xlsx');
+  fs.writeFileSync(savePath, 'original-content', 'utf8');
+  const originalRenameSync = fs.renameSync;
+  const originalRmSync = fs.rmSync;
+  let renameCount = 0;
+  try {
+    fs.renameSync = (fromPath, toPath) => {
+      renameCount += 1;
+      if (renameCount === 2) throw new Error('simulated publish failure');
+      return originalRenameSync(fromPath, toPath);
+    };
+    fs.rmSync = (target, options) => {
+      if (path.basename(target).startsWith('.result.xlsx.tmp-')) {
+        throw new Error('simulated temp cleanup failure');
+      }
+      return originalRmSync(target, options);
+    };
+
+    await assert.rejects(
+      () => writeDuplicateInboundWorkbook({
+        mailTemplatePath: MAIL_TEMPLATE,
+        bankTemplatePath: BANK_TEMPLATE,
+        savePath,
+        mailRows: [],
+        manualRows: [{ row: { BizId: 'B1' }, reason: 'MPT未命中' }]
+      }),
+      (error) => /simulated publish failure/.test(error.message)
+        && /simulated temp cleanup failure/.test(error.message)
+    );
+    assert.equal(fs.readFileSync(savePath, 'utf8'), 'original-content');
+    const entries = fs.readdirSync(dir);
+    assert.equal(entries.some((name) => name.includes('.backup-')), false);
+    assert.equal(entries.some((name) => name.startsWith('.result.xlsx.tmp-')), true);
+  } finally {
+    fs.renameSync = originalRenameSync;
+    fs.rmSync = originalRmSync;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('新文件发布成功但旧备份删除失败时返回可见告警', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-writer-'));
+  const savePath = path.join(dir, 'result.xlsx');
+  fs.writeFileSync(savePath, 'original-content', 'utf8');
+  const originalRmSync = fs.rmSync;
+  try {
+    fs.rmSync = (target, options) => {
+      if (String(target).includes('.backup-')) throw new Error('simulated backup cleanup failure');
+      return originalRmSync(target, options);
+    };
+    const result = await writeDuplicateInboundWorkbook({
+      mailTemplatePath: MAIL_TEMPLATE,
+      bankTemplatePath: BANK_TEMPLATE,
+      savePath,
+      mailRows: [],
+      manualRows: [{ row: { BizId: 'B1' }, reason: 'MPT未命中' }]
+    });
+
+    assert.equal(result.status, 'success');
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0], /旧文件备份未能删除.*simulated backup cleanup failure/);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(savePath);
+    assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['邮件模板', '匹配不成功需人工判定']);
+  } finally {
+    fs.rmSync = originalRmSync;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('写入前拒绝超过 Excel 单 sheet 行数上限的结果', async () => {
   await assert.rejects(
     () => buildWorkbook({
@@ -140,4 +213,21 @@ test('写入前拒绝超过 Excel 单 sheet 行数上限的结果', async () => 
     }),
     (error) => error.code === 'duplicate-inbound-manual-row-limit'
   );
+});
+
+test('发布前回读校验拒绝 sheet 契约或结果行数损坏的临时文件', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'duplicate-inbound-writer-'));
+  const malformedPath = path.join(dir, 'malformed.xlsx');
+  try {
+    const workbook = new ExcelJS.Workbook();
+    workbook.addWorksheet('错误 sheet').addRow(['错误表头']);
+    await workbook.xlsx.writeFile(malformedPath);
+
+    await assert.rejects(
+      () => validateWrittenWorkbook(malformedPath, { mailRowCount: 0, manualRowCount: 0 }),
+      (error) => error.code === 'duplicate-inbound-output-verification-failed'
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

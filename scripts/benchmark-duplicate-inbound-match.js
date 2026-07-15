@@ -112,7 +112,7 @@ function insertMonth(userDataDir, monthIndex, criteria) {
     }
     db.exec('COMMIT');
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* no active transaction */ }
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 当前无活动事务时忽略 */ }
     throw error;
   } finally {
     db.close();
@@ -148,9 +148,10 @@ function main() {
 
     assert.equal(result.size, criteria.length);
     for (const criterion of criteria) {
-      const candidates = result.get(criterion.lookupId);
-      assert.equal(candidates.length, 1, `${criterion.lookupId} 应唯一命中`);
-      assert.equal(candidates[0].reconciliationId, criterion.reconciliationId);
+      const collection = result.get(criterion.lookupId);
+      assert.equal(collection.candidateCount, 1, `${criterion.lookupId} 应唯一命中`);
+      assert.equal(collection.candidates.length, 1, `${criterion.lookupId} 应保留唯一候选`);
+      assert.equal(collection.candidates[0].reconciliationId, criterion.reconciliationId);
     }
 
     console.log('==== 重复入金 MPT 批量查询基准 ====');

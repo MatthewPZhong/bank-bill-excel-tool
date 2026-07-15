@@ -364,7 +364,7 @@ test('MPT 每条 Inbound 恰好一条、两条候选不同且 oppBu 一致时成
       oppBu: ' OPP-BU ',
       clientId: 'CLIENT ',
       accId: ' ACCOUNT',
-      orderId: ''
+      orderId: inboundRow.bizId.endsWith('I1') ? 'ORDER-1' : 'ORDER-2'
     })
   ]);
 
@@ -376,12 +376,12 @@ test('MPT 每条 Inbound 恰好一条、两条候选不同且 oppBu 一致时成
   });
   assert.deepEqual(
     result.finalSuccessGroups[0].inboundMatches.map((match) => match.mptCandidate.orderId),
-    ['', '']
+    ['ORDER-1', 'ORDER-2']
   );
   assert.equal(result.stats.conservation.isBalanced, true);
 });
 
-test('MPT oppBu 任一为空时整组转人工，orderId 留给单据阶段校验', () => {
+test('MPT oppBu 和 orderId 为空时均在 MPT 阶段按固定顺序转人工', () => {
   const groupingResult = buildDuplicateInboundGroups(groupRows('EMPTY', 1));
   const candidates = candidateMapFor(groupingResult, (inboundRow) => [
     mptCandidate(inboundRow.bizId, {
@@ -394,7 +394,10 @@ test('MPT oppBu 任一为空时整组转人工，orderId 留给单据阶段校�
   const result = resolveDuplicateInboundMptMatches({ groupingResult, mptCandidatesByInbound: candidates });
   assert.equal(result.finalSuccessGroups.length, 0);
   assert.equal(result.manualGroups.length, 1);
-  assert.ok(result.manualGroups[0].reasonCodes.includes(MANUAL_REASON_CODES.MPT_OPP_BU_EMPTY));
+  assert.deepEqual(result.manualGroups[0].reasonCodes, [
+    MANUAL_REASON_CODES.MPT_OPP_BU_EMPTY,
+    MANUAL_REASON_CODES.MPT_ORDER_ID_EMPTY
+  ]);
 });
 
 test('任一 Inbound 的 MPT 候选为 0 条时整组转人工', () => {
@@ -455,6 +458,42 @@ test('跨组共享 MPT 候选时所有受影响组都转人工，不做贪心占
     result.stats.reasonCounts[MANUAL_REASON_CODES.MPT_CANDIDATE_REUSED_ACROSS_GROUPS],
     3
   );
+});
+
+test('多候选失败组不会占用候选并误伤其它唯一候选组', () => {
+  const groupingResult = buildDuplicateInboundGroups([
+    ...groupRows('UNIQUE', 1, { channel: 'UNIQUE' }),
+    ...groupRows('MULTIPLE', 10, { channel: 'MULTIPLE' })
+  ]);
+  const shared = mptCandidate('SHARED');
+  const candidates = candidateMapFor(groupingResult, (inboundRow) => {
+    if (inboundRow.bizId === 'UNIQUE-I1') return [shared];
+    if (inboundRow.bizId === 'UNIQUE-I2') return [mptCandidate('UNIQUE-I2')];
+    if (inboundRow.bizId === 'MULTIPLE-I1') return [shared, mptCandidate('ALTERNATIVE')];
+    return [mptCandidate('MULTIPLE-I2')];
+  });
+
+  const result = resolveDuplicateInboundMptMatches({ groupingResult, mptCandidatesByInbound: candidates });
+  assert.equal(result.finalSuccessGroups.length, 1);
+  assert.equal(result.finalSuccessGroups[0].channel, 'UNIQUE');
+  assert.equal(result.manualGroups.length, 1);
+  assert.deepEqual(result.manualGroups[0].reasonCodes, [
+    MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_MULTIPLE
+  ]);
+});
+
+test('MPT 零候选原因始终排在多候选之前，不受 Inbound 顺序影响', () => {
+  const groupingResult = buildDuplicateInboundGroups(groupRows('REASON-ORDER', 1));
+  const candidates = candidateMapFor(groupingResult, (inboundRow) => (
+    inboundRow.bizId.endsWith('I1')
+      ? [mptCandidate('A'), mptCandidate('B')]
+      : []
+  ));
+  const result = resolveDuplicateInboundMptMatches({ groupingResult, mptCandidatesByInbound: candidates });
+  assert.deepEqual(result.manualGroups[0].reasonCodes, [
+    MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_ZERO,
+    MANUAL_REASON_CODES.MPT_CANDIDATE_COUNT_MULTIPLE
+  ]);
 });
 
 test('显式相同 candidate id 即使包装对象不同也视为全运行复用', () => {
@@ -524,7 +563,7 @@ test('单据按两条 MPT orderId 唯一命中不同记录并提供最终客户�
   assert.equal(result.stats.conservation.isBalanced, true);
 });
 
-test('MPT orderId 为空时仅对应银行组转人工', () => {
+test('MPT orderId 为空时在进入单据匹配前转人工', () => {
   const groupingResult = buildDuplicateInboundGroups(groupRows('EMPTY-ORDER', 1));
   const candidates = candidateMapFor(groupingResult, (inboundRow) => [
     mptCandidate(inboundRow.bizId, {
@@ -536,18 +575,10 @@ test('MPT orderId 为空时仅对应银行组转人工', () => {
     groupingResult,
     mptCandidatesByInbound: candidates
   });
-  const result = resolveDuplicateInboundDocumentMatches({
-    mptResult,
-    bankStats: groupingResult.stats,
-    documentCandidatesByOrderId: new Map([
-      ['ORDER-2', [documentCandidate(2, 'ORDER-2')]]
-    ])
-  });
-
-  assert.equal(result.finalSuccessGroups.length, 0);
-  assert.equal(result.documentManualGroups.length, 1);
-  assert.ok(result.manualGroups[0].reasonCodes.includes(MANUAL_REASON_CODES.DOCUMENT_ORDER_ID_EMPTY));
-  assert.equal(result.stats.conservation.isBalanced, true);
+  assert.equal(mptResult.finalSuccessGroups.length, 0);
+  assert.equal(mptResult.stats.mptManualGroupCount, 1);
+  assert.ok(mptResult.manualGroups[0].reasonCodes.includes(MANUAL_REASON_CODES.MPT_ORDER_ID_EMPTY));
+  assert.equal(mptResult.stats.conservation.isBalanced, true);
 });
 
 test('单据零候选、多候选或两个单号命中同一行时整组转人工', async (t) => {
@@ -599,6 +630,22 @@ test('单据零候选、多候选或两个单号命中同一行时整组转人�
       MANUAL_REASON_CODES.DOCUMENT_CANDIDATES_NOT_DISTINCT
     ));
   });
+});
+
+test('单据人工原因按固定优先级输出，不受两条 orderId 顺序影响', () => {
+  const { groupingResult, mptResult } = buildSuccessfulMptResult('DOCUMENT-REASON-ORDER');
+  const result = resolveDuplicateInboundDocumentMatches({
+    mptResult,
+    bankStats: groupingResult.stats,
+    documentCandidatesByOrderId: new Map([
+      ['ORDER-1', [documentCandidate(1, 'ORDER-1'), documentCandidate(3, 'ORDER-1')]],
+      ['ORDER-2', []]
+    ])
+  });
+  assert.deepEqual(result.manualGroups[0].reasonCodes, [
+    MANUAL_REASON_CODES.DOCUMENT_CANDIDATE_COUNT_ZERO,
+    MANUAL_REASON_CODES.DOCUMENT_CANDIDATE_COUNT_MULTIPLE
+  ]);
 });
 
 test('单据身份字段为空、冲突或业务部门与 oppBu 不一致时整组转人工', async (t) => {

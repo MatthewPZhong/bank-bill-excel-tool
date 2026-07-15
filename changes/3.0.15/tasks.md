@@ -2,7 +2,7 @@
 
 > 每个 task 尽量小、可验证、可独立完成。
 > 状态基线：2026-07-14 实施完成并通过自动化门禁；Windows Excel/WPS 与真实脱敏样本资金复核仍是发布阻塞项。
-> 实施约束：不得顺带实现 3.0.16 范围；不得创建 PR；不得静默修改 spec。
+> 实施约束：不得顺带实现 3.0.16 范围；不得静默修改 spec。
 
 ## Task 0 — 规格与未知门禁
 
@@ -66,7 +66,7 @@
 - 目标：同一入口原子导入银行账单和标准 26 列单据对账单，单据采用流式有界内存落库。
 - 操作：严格识别一份银行文件和一份单据文件；保存单据业务订单号、用户编号、账户号、业务部门及来源行；主库只镜像文件名/hash；失败整批回滚。
 - 验证：双文件识别、错误组合、取消、回滚、9 万行流式导入、重启回收和主库隐私测试。
-- 状态：in progress
+- 状态：done（双文件识别、原子回滚、逻辑首 sheet、9 万行流式读取、side DB 生命周期和主库隐私均有自动化/真实样本证据）
 
 ## Task 5 — 纯分组引擎
 
@@ -99,7 +99,7 @@
 - 目标：实现唯一、不复用、字段一致且顺序无关的资金裁决。
 - 涉及文件：`src/main-process/duplicate-inbound-match/matching-engine.js`、模块 service、对应 tests
 - 操作：
-  - 第一阶段为两条 Inbound 保留完整候选集合并判 0/1/多。
+  - 第一阶段为两条 Inbound 保留精确候选数并判 0/1/多；多候选只物化稳定前 2 条审计样本，避免重复查询键形成 N×K 对象。
   - 第二阶段检测组内同 ID 和跨组复用；所有共享组人工，不 first-wins。
   - 解析 raw object；非法 raw 硬失败。
   - 只比较 trim 后非空的 `oppBu`；MPT `clientId/accId/business` 不参与；`orderId` 必须非空。
@@ -148,7 +148,7 @@
   - 增加至少一个完整端到端合成 fixture 和一个输入顺序置换 fixture。
   - 对所有硬错误验证“无成功 run/无半文件”，对业务不确定验证“整组人工”。
 - 验证：focused tests、`npm run test:unit`、`npm run test:integration` 全 PASS；覆盖率无新增关键分支空洞。
-- 状态：done（unit 3544/3544；integration 40 脚本、1870/1870；smoke 与完整 release-check 通过）
+- 状态：done（unit 3563/3563；integration 40 脚本、1870/1870；smoke 与完整 release-check 通过）
 
 ## Task 11 — 回归、性能与视觉验证
 
@@ -164,14 +164,14 @@
 
 ## Task 12 — 重要变量与发布准备
 
-- 目标：在硬节点完成变量关联 review 和发布文档一致性；不在当前 PM 写入任务中提前执行。
+- 目标：在 PR 与合并硬节点完成变量关联 review 和发布文档一致性。
 - 涉及文件：`rules/important-variables.md`、扫描报告；发布阶段的 `package.json`、`CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`
 - 操作：
   - 每次改 `src/**/*.js` 后汇报命中的 Minor 以上变量和关联功能 review。
   - 版本 bump/合并受保护分支/提 PR 前运行 `npm run scan:vars`、`npm run check:vars`。
   - 发布时三份版本文档与 package version 同步，且明确三项顺延 3.0.16。
-- 验证：check-vars 报告、发布文档 diff 与版本一致；当前任务不得创建 PR。
-- 状态：done（版本为 3.0.15，三份版本文档已同步；scan-vars 已刷新，check-vars 命中项已 review；未触发 PR/合并硬节点）
+- 验证：check-vars 报告、PR body 的关联功能 review、发布文档 diff 与版本一致。
+- 状态：in progress（版本与三份文档已同步；PR #88 已建立并完成一次 check-vars；合并前硬节点待最终重跑）
 
 ## Task 13 — 资金人工复核与 Dev 交接
 
@@ -190,4 +190,4 @@
 - [ ] AC-01 ～ AC-27 全部有证据：AC-01 ～ AC-26 自动证据已完成，AC-27 待人工签字。
 - [x] 无 `MPT_CHANNEL_OTHERS`、临时银行对账单、缺渠道账单的 3.0.15 可见实现。
 - [ ] 银行行守恒、MPT 候选全局唯一、金额/币种/血缘的自动断言已通过，仍待真实脱敏样本人工复核。
-- [x] Dev 实施与自动化证据已回填本文档；未创建 PR。
+- [x] Dev 实施与自动化证据已回填本文档；PR #88 已创建并进入 self-review。

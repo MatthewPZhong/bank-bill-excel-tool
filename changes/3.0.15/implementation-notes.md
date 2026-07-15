@@ -2,7 +2,7 @@
 
 > owner: PM / Dev 共用
 > created: 2026-07-14
-> status: document-statement enrichment implemented; final release gates and human fund review pending
+> status: implementation and PR #88 self-review complete; merge and human release gates pending
 > rule: 只记录可验证事实；并行草稿代码不自动等于完成证据
 
 ## Original request
@@ -44,6 +44,7 @@
 | D-26 | 两个 MPT orderId 均须非空、各唯一命中不同单据；单据三字段非空且一致，业务部门还须等于 oppBu。 | 新模板明确取数和校验来源；失败仅转当前组人工，不阻断其它组。 | §5.5.1 |
 | D-27 | 单据流式写入当前周期 side DB，主库只镜像文件名/hash。 | 真实单据约 9 万行，需有界内存并避免个人信息进入主库。 | §5.2, §5.8 |
 | D-28 | `.xlsx` 文件类型识别只流读 `xl/workbook.xml`，不使用 SheetJS 解压整份工作表；`.xls` 银行仍走兼容路径。 | 真实单据的 sheet XML 解压后约 138 MB，SheetJS `bookSheets` 仍造成高峰内存，违背流式导入目标。 | §5.2, AC-26 |
+| D-29 | MPT 查询为每个唯一三元组保留精确 `candidateCount`，多候选只物化稳定前 2 条审计样本，并让相同查询键共享同一只读结果。 | 零/一/多裁决只需要精确计数；完整展开会在 N 个相同银行查询键、K 个 MPT 候选时制造 N×K 对象。 | §5.4, AC-12/26 |
 
 ## Assumptions
 
@@ -62,6 +63,8 @@
 | DV-02 | 工程门禁 | 原 `scripts/check-vars.js` 只读取 Git 已跟踪改动，会漏掉本次尚未暂存的新建 `src/**/*.js`。 | 扫描器纳入未跟踪源码；新增回归，确保新模块在提 PR 前也能命中重要变量。业务行为不变。 | 已修复 |
 | DV-03 | 真实样本复核 | 初版把“业务来源”取自 MPT `business`，且完整复制模板说明行样式使数字型 Debit Amount 被 Excel 按日期显示。 | Reverse Sync 为 `业务来源=oppBu`，只校验 MPT `oppBu` 非空一致；Debit Amount 数据行覆盖为“常规”格式。 | 用户已确认字段来源；已修复 |
 | DV-04 | 用户更新输出模板 | 客户号/账户号不再取 MPT clientId/accId，并新增单据业务部门与 oppBu 校验。 | 改为双文件原子导入、单据唯一匹配和分组级人工；真实样本最终回放为 9 成功 + 1 人工。 | 用户已确认；已修复 |
+| DV-05 | PR #88 self-review | 初版将同一查询三元组的全部 MPT 候选复制给每个银行 lookupId，最坏形成 N×K 内存放大。 | Reverse Sync §5.4；保留精确总数、最多 2 条稳定样本并共享集合，资金裁决和候选独立性不变。 | 已修复 |
+| DV-06 | PR #88 self-review | 重复入金批量查询初版未沿用 3.0.14 网关候选池的“空 reconciliationId 排除”规则，特定不同 MerchantId 组合可能把两侧空 ID 当作精确命中。 | Reverse Sync §4 / P0-19；空银行对账 ID 固定返回零候选并转人工，不查询或消费空 ID MPT。 | 已修复 |
 
 ## Evidence
 
@@ -74,16 +77,19 @@
 | 2026-07-14 | `src/main-process/pre-fund-reconciliation/mpt-schema.js`、`src/backend/pre-fund-reconciliation-store.js` | MPT INBOUND 按月份侧库保留，含本需求所需字段。 | 全月份只读方案可行。 |
 | 2026-07-14 | 解包只读检查 `assets/重复入金召回邮件模板.xlsx` | 原模板有 10 个业务列；说明要求两 orderId 用 `、`，备注固定 `重复入账后被Reverse`。 | 输出映射依据；未改资产。 |
 | 2026-07-14 | duplicate-inbound matching/store/service/reader/writer/migration focused tests **59/59** | 覆盖双文件类型识别、单据中途失败原子回滚、MPT `oppBu`、单据 orderId 唯一匹配、字段空/冲突/业务部门校验、三方血缘、MPT 旧 clientId/accId 旁路、生命周期和 Excel 取数。 | 本次增补核心分支实现证据。 |
-| 2026-07-14 | 最终重跑 `npm run release-check`；unit 日志 `logs/unit-tests/unit-20260714-101517.log` | ESLint、smoke、unit **3544/3544**、integration **40 个脚本 / 1870/1870** 全部 PASS；新增端到端脚本 **28/28**；集成总耗时 85060 ms。 | AC-26 / P0-44 自动门禁通过。 |
-| 2026-07-14 | `npm run benchmark:duplicate-inbound` | 6 个保留月份、150000 条 MPT、6000 个银行查询键：fixture 472.0 ms，查询 78.1 ms；RSS 81.7→104.4 MiB，heap 9.2→25.2 MiB；每月一次批量 SELECT，全部唯一命中。 | U-01 收敛；证明查询次数随月份而非银行行逐条增长。 |
-| 2026-07-14 | `npm run startup:measure` | process 平均 643.737 ms、ready-to-show 170.652 ms、window-to-visible 101.382 ms、renderer init 50.06 ms。 | 新模块默认关闭时无明显启动回归证据。 |
+| 2026-07-15 | 最终 `npm run release-check`；unit 日志 `logs/unit-tests/unit-20260715-015403.log` | ESLint、smoke、unit **3563/3563**、integration **40 个脚本 / 1870/1870** 全部 PASS；重复入金端到端 **28/28**；集成总耗时 85942 ms。新增覆盖空对账 ID、多候选有界物化、结果行数守恒、导出回读/回滚、导入失效与 IPC/UI 真实行为。 | AC-26 / P0-44 及 self-review 修复的最终自动门禁证据。 |
+| 2026-07-15 | `npm run benchmark:duplicate-inbound` | 6 个保留月份、150000 条 MPT、6000 个银行查询键：fixture 473.9 ms，查询 80.3 ms；RSS 91.8→119.4 MiB，heap 9.2→28.5 MiB；每月一次批量 SELECT，全部唯一命中。 | U-01 收敛；证明查询次数随月份而非银行行逐条增长。 |
+| 2026-07-15 | `npm run startup:measure` | process 平均 752.765 ms、ready-to-show 164.253 ms、window-to-visible 95.939 ms、renderer init 43.36 ms。 | 新模块默认关闭时无明显启动回归证据。 |
 | 2026-07-14 | `npm run preview:duplicate-inbound-match` + `docs/previews/duplicate-inbound-match-panel.png` | 3.0.15 面板布局、三个按钮、初始“欢迎使用小助手”、状态区和模块可见性无重叠。 | macOS Electron 视觉证据；不替代 Windows Excel/WPS。 |
 | 2026-07-14 | `duplicate-inbound-match-end-to-end.js` **28/28** 的主库/侧库检查 | 主库无银行姓名卡号或单据客户/账户值；重启后当前周期 side DB 物理回收；银行/MPT/单据血缘在有效周期内可反查。 | AC-23/25、P0-37/42 隐私与生命周期证据。 |
 | 2026-07-14 | 用户真实银行输入与首次导出只读复核 | 首次导出 10 行 Debit Amount 均为金额数值但继承 `mm-dd-yy`；业务来源均为 business=`MPT`。20 条命中 MPT 的 oppBu 为 SMB/B2B，且 10 个成功组内均一致。 | 复现两个问题，并证明按 oppBu 输出不会改变该样本的成功/人工分组。 |
 | 2026-07-14 | 在隔离 userData 中重放用户提供的 32814 行银行文件及现有只读 MPT 月份库 | 成功组仍为 10、人工组 0；10 行 Debit Amount 均为数值且回读为 General；业务来源为 SMB 9 行、B2B 1 行。 | 两项修复在真实样本上成立，且该样本分组结果未改变。 |
 | 2026-07-14 | 在全新隔离 userData 中导入 3 份真实 INBOUND MPT、32814 行银行和 90885 行单据，并导出回读 | 最终 **9 个邮件组、1 个人工组（3 行）**；人工原因为单据零候选；Reversal 守恒；邮件/人工回读 9/3；主库未出现成功邮件中的客户号或账户号值。 | 用户要求的最终真实样本计数与三方取数链路成立；仍须资金负责人看样签字。 |
 | 2026-07-14 | 独立进程流读真实 90885 行单据 | sheet 识别 + 全文件读取峰值 RSS **80.7 MiB**；RSS 54.7→80.7 MiB，heapUsed 5.1→5.9 MiB；90885 行全部回调。完整银行+MPT+单据进程峰值约 1.3 GiB，既有 MPT/46 列银行解析仍是剩余性能风险。 | 证明新增单据读取器有界内存；不把整体链路既有高峰伪报为已解决。 |
-| 2026-07-14 | `npm run scan:vars` | 版本 3.0.15；189 个 JS / 2080 顶层声明；A-share 335 / A-pair 547 / A-local 1065 / B 882。 | v20 变量基线已刷新。 |
+| 2026-07-15 | PR #88 self-review：故障注入“side DB 已提交后源单据消失” | 修复二次文件哈希读取抛错时未物理回收新会话的问题；所有导入失败统一清空银行/单据 session 和 side DB，回收本身失败则显式阻断。 | P2 Finding 已关闭，补充原子回滚与敏感数据生命周期证据。 |
+| 2026-07-15 | PR #88 self-review：侧库缺行/损坏、目标文件覆盖失败、启动/新导入/新运行失效失败注入 | 运行摘要与邮件/人工/审计行数必须守恒；临时文件回读通过后才能发布，覆盖失败先恢复原目标；主库镜像或侧库任一回收失败均显式失败且旧结果不可导出。 | 已关闭结果静默缺行、原文件恢复顺序和失效处理可观测性 Finding。 |
+| 2026-07-15 | PR #88 self-review 最终结论 | 对 `origin/main...HEAD` 按资金、数据生命周期、导出、IPC/UI、测试与文档六个角度复核；已发现项均修复并有回归测试。 | P0/P1/P2/P3/P4 Finding 均为 0；人工资金复核仍是发布门禁。 |
+| 2026-07-15 | `npm run scan:vars` | 版本 3.0.15；189 个 JS / 2093 顶层声明；A-share 334 / A-pair 548 / A-local 1078 / B 882。 | v20 合并前变量基线已刷新。 |
 | 2026-07-14 | `npm run check:vars -- --include-minor` | 命中 Critical `FileValidationError`；Important `ipcRenderer`；Runtime `MODULES/dialog/elements/state/updateStatusBox`；Risk-sensitive `DuplicateInboundMatchService/buildDuplicateInboundGroups/hasColumn/lookupInboundRows/resolveDuplicateInboundDocumentMatches/resolveDuplicateInboundMptMatches`。命中项已逐项 review；命令以 exit 2 表示“发现命中”，不是测试失败。 | 硬节点扫描和关联功能 review 证据。 |
 
 ### 尚待人工证据
@@ -161,7 +167,7 @@
 
 | ID | 等级 | 内容 | Owner | 下一证据 | 状态 |
 |----|------|------|-------|----------|------|
-| U-01 | PROBE | 生产规模下各月份批量查询和 side DB 写入性能。 | Dev | 6 月份 / 15 万 MPT / 6000 查询键基准。 | resolved（查询 78.1 ms；RSS 增量约 22.7 MiB） |
+| U-01 | PROBE | 生产规模下各月份批量查询和 side DB 写入性能。 | Dev | 6 月份 / 15 万 MPT / 6000 查询键基准。 | resolved（最终复跑查询 80.3 ms；RSS 增量约 27.6 MiB） |
 | U-02 | PROBE | Windows Excel/WPS 对模板样式、长卡号/单号、长原因的显示。 | Dev + QA | 截图/人工核对记录。 | open |
 | U-03 | PROBE | 实施是否完整接通 main-process service/IPC/lifecycle。 | Dev | wiring tests + 28/28 端到端集成。 | resolved |
 | U-04 | BLOCK（发布） | 资金负责人尚未完成全月份、唯一不复用、守恒和血缘人工复核。 | 业务负责人 | `test-spec.md` §8 签字记录。 | blocks release, not implementation |
@@ -205,6 +211,6 @@
 ## Handoff / Completion
 
 - 代码实现、版本 bump、三份版本文档、自动化回归、性能/启动探针、macOS Electron 预览和 check-vars 关联 review 已完成。
-- 当前分支：`codex/v3.0.15-duplicate-inbound-match`；未创建 commit、未推送、未创建 PR。
+- 当前分支：`codex/v3.0.15-duplicate-inbound-match`；PR #88 已创建，self-review 已达到 P0-P4 Finding 为 0，等待最终门禁与合并。
 - 发布阻塞：U-02 Windows Excel/WPS 人工打开；U-04 真实脱敏样本资金复核与签字。完成前 AC-27 不通过，不得把 v3.0.15 标记为可发布。
 - 回滚边界：关闭/移除新模块 UI、IPC、side DB 和轻量 mirror 即可；不得删除或改写 v3.0.14 已保留的 MPT INBOUND 批次。
