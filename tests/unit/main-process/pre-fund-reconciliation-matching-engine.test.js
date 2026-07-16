@@ -32,7 +32,7 @@ function gateway(overrides = {}) {
     billReconId: 'B-1',
     currency: 'USD',
     amount: '1.00',
-    tradeType: 'PAY',
+    tradeType: 'Inbound-VA',
     realChannel: 'RC',
     clearingNetwork: 'CN',
     name: 'Alice',
@@ -53,6 +53,7 @@ function bank(reconciliationId, overrides = {}) {
     ReconciliationId: reconciliationId,
     'Drawee Name': 'Alice',
     'Drawee CardNo': 'CARD',
+    FundType: 'Inbound',
     ...overrides
   };
 }
@@ -205,7 +206,7 @@ test('匹配仅 trim 后精确且大小写敏感，不做子串兜底', () => {
   assert.equal(result.unbalancedBankRows.length, 2);
 });
 
-test('只有对账ID、渠道、十进制金额和币种四项全部相同才平账', () => {
+test('类型规则已满足时，对账ID、渠道、十进制金额和币种四个基础字段必须全部相同', () => {
   const result = reconcilePreFundRows({
     bankRows: [
       bank(' R-OK ', { Channel: ' MPT ', Currency: ' USD ', 'Credit Amount': '1.000' }),
@@ -242,7 +243,7 @@ test('同ID前候选要素不符时不消费，后续完整匹配候选仍可平
   assert.equal(result.stats.gatewayUnconsumedRows, 1);
 });
 
-test('银行四字段条件与规范网关候选使用同一严格比较口径', () => {
+test('类型规则已满足时，银行四个基础字段与规范网关候选使用同一严格比较口径', () => {
   const classified = reconcilePreFundRows({
     bankRows: [bank('R-1', { Channel: ' MPT ', Currency: ' USD ', 'Credit Amount': '1e0' })],
     bankContext: { fileName: 'bank.xlsx' },
@@ -250,12 +251,17 @@ test('银行四字段条件与规范网关候选使用同一严格比较口径',
   }).balancedPairs[0].bankRow;
   const criteria = buildBankMatchCriteria(classified);
   const candidate = normalizeGatewayCandidate(gateway(), GATEWAY_SOURCE.TEMPORARY, 0);
-  assert.deepEqual(criteria, {
-    reconciliationId: 'R-1',
-    channel: 'MPT',
-    amount: '1',
-    currency: 'USD'
-  });
+  assert.deepEqual(
+    {
+      reconciliationId: criteria.reconciliationId,
+      channel: criteria.channel,
+      amount: criteria.amount,
+      currency: criteria.currency
+    },
+    { reconciliationId: 'R-1', channel: 'MPT', amount: '1', currency: 'USD' }
+  );
+  assert.equal(criteria.ruleEligibility.eligible, true);
+  assert.ok(criteria.allowedGatewayTradeTypes.includes('Inbound-VA'));
   assert.equal(gatewayCandidateMatches(candidate, criteria), true);
   assert.equal(gatewayCandidateMatches(candidate, { ...criteria, currency: 'usd' }), false);
 });
@@ -323,7 +329,7 @@ test('持久网关游标 wrapper 的 envelope 字段和 raw row 正确合并规�
       OrderId: 'O',
       Currency: 'USD',
       Amount: '2.00',
-      tradeType: 'PAY',
+      tradeType: 'Inbound-VA',
       '真实渠道': 'REAL',
       '清算网络': 'CLEAR'
     }
@@ -337,7 +343,7 @@ test('持久网关游标 wrapper 的 envelope 字段和 raw row 正确合并规�
     billReconId: 'WRAP-BIZ',
     currency: 'USD',
     amount: '2',
-    tradeType: 'PAY',
+    tradeType: 'Inbound-VA',
     realChannel: 'REAL',
     clearingNetwork: 'CLEAR'
   });

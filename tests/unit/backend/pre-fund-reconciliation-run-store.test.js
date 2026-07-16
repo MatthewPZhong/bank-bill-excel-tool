@@ -37,7 +37,9 @@ test.describe('PreFundReconciliationRunStore', () => {
       source: '临时网关对账单',
       reconciliationId: 'R-1',
       fingerprint: '["2026-07-01"]',
-      fields: { date: '2026-07-01', channel: 'CIT', amount: '10', currency: 'USD' },
+      fields: {
+        date: '2026-07-01', channel: 'CIT', amount: '10', currency: 'USD', tradeType: 'Inbound-VA'
+      },
       name: 'A',
       cardNo: '1',
       location: { sourceFileName: 'mpt.gz', sourceRowNumber: 2 },
@@ -60,7 +62,16 @@ test.describe('PreFundReconciliationRunStore', () => {
     }, {
       resolveKeptRawJson: () => '{"raw":"kept"}'
     }), false);
-    const criteria = { reconciliationId: 'R-1', channel: 'CIT', amount: '10', currency: 'USD' };
+    const criteria = {
+      reconciliationId: 'R-1',
+      channel: 'CIT',
+      amount: '10',
+      currency: 'USD',
+      allowedGatewayTradeTypes: ['Inbound-VA']
+    };
+    const preparedConsumer = store.createGatewayConsumer(db, runId);
+    assert.equal(preparedConsumer({ ...criteria, allowedGatewayTradeTypes: [] }, -2), null);
+    assert.equal(preparedConsumer({ ...criteria, allowedGatewayTradeTypes: ['payout'] }, -1), null);
     const consumed = store.consumeGatewayCandidate(db, runId, criteria, 0);
     assert.equal(consumed.source, '临时网关对账单');
     assert.equal(consumed.fields.amount, '10');

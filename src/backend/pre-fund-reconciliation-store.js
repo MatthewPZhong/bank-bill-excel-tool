@@ -57,6 +57,13 @@ const INSERT_ROW = `
   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `;
 
+const INSERT_EXCLUDED_ROW = `
+  INSERT INTO pre_fund_reconciliation_gateway_excluded_rows (
+    batch_id, source_type, source_file_name, source_row_number, error_code,
+    error_message, field_name, fields_json, raw_line
+  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`;
+
 function storeError(code, message, context = {}) {
   const detailLines = [];
   if (context.fileName) detailLines.push(`文件：${context.fileName}`);
@@ -67,6 +74,82 @@ function storeError(code, message, context = {}) {
 
 function rollbackQuietly(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* 当前没有活动事务时忽略 */ }
+}
+
+function ensureRepairSchema(db) {
+  const columns = db.prepare('PRAGMA table_info(pre_fund_reconciliation_gateway_batches)').all();
+  if (!columns.some((column) => column.name === 'excluded_row_count')) {
+    db.exec(`
+      ALTER TABLE pre_fund_reconciliation_gateway_batches
+      ADD COLUMN excluded_row_count INTEGER NOT NULL DEFAULT 0
+    `);
+  }
+  if (!columns.some((column) => column.name === 'import_mode')) {
+    db.exec(`
+      ALTER TABLE pre_fund_reconciliation_gateway_batches
+      ADD COLUMN import_mode TEXT NOT NULL DEFAULT 'strict'
+    `);
+  }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_excluded_rows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      batch_id INTEGER NOT NULL,
+      source_type TEXT NOT NULL,
+      source_file_name TEXT NOT NULL,
+      source_row_number INTEGER NOT NULL,
+      error_code TEXT NOT NULL,
+      error_message TEXT NOT NULL,
+      field_name TEXT,
+      fields_json TEXT NOT NULL,
+      raw_line TEXT NOT NULL,
+      FOREIGN KEY (batch_id) REFERENCES pre_fund_reconciliation_gateway_batches(id) ON DELETE CASCADE,
+      UNIQUE (batch_id, source_row_number)
+    );
+    CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_excluded_batch
+      ON pre_fund_reconciliation_gateway_excluded_rows(batch_id, source_row_number);
+  `);
+}
+
+function normalizeImportOptions(options = {}) {
+  const skipInvalidRows = options.skipInvalidRows === true;
+  const expectedContentHash = options.expectedContentHash == null
+    ? ''
+    : String(options.expectedContentHash).trim().toLowerCase();
+  if (skipInvalidRows && !/^[a-f0-9]{64}$/.test(expectedContentHash)) {
+    throw new TypeError('逻辑删除重跑必须提供原文件 SHA-256');
+  }
+  return { skipInvalidRows, expectedContentHash };
+}
+
+function rowAggregateError(parsed) {
+  const samples = Array.isArray(parsed.rowErrorSamples) ? parsed.rowErrorSamples : [];
+  const detailLines = samples.map((issue) => (
+    `第${issue.sourceRowNumber}行：${issue.message}`
+  ));
+  if (Number(parsed.rowErrorCount) > samples.length) {
+    detailLines.push(`另有 ${Number(parsed.rowErrorCount) - samples.length} 条错误未在页面展开`);
+  }
+  const error = new FileValidationError(
+    'MPT_ROW_ERRORS',
+    `MPT 文件包含 ${Number(parsed.rowErrorCount) || 0} 条可定位明细错误，严格导入已整文件回滚`,
+    {
+      context: {
+        fileName: parsed.sourceFileName,
+        sourceType: parsed.sourceType,
+        sourceBatch: parsed.sourceBatch,
+        rowErrorCount: parsed.rowErrorCount,
+        contentHash: parsed.contentHash
+      },
+      detailLines
+    }
+  );
+  error.canRepair = true;
+  error.rowErrorCount = Number(parsed.rowErrorCount) || 0;
+  error.rowErrorSamples = samples;
+  error.contentHash = parsed.contentHash;
+  error.sourceType = parsed.sourceType;
+  error.sourceBatch = parsed.sourceBatch;
+  return error;
 }
 
 function normalizeDateRange(startDate, endDate) {
@@ -128,6 +211,8 @@ function mapBatchRow(row, monthKey) {
     contentHash: row.content_hash,
     declaredRowCount: row.declared_row_count,
     rowCount: row.row_count,
+    excludedRowCount: Number(row.excluded_row_count) || 0,
+    importMode: row.import_mode || 'strict',
     importedAt: row.imported_at,
   };
 }
@@ -210,22 +295,29 @@ class PreFundReconciliationStore {
     runDataStore.moduleDir(this.userDataDir, MODULE);
   }
 
-  async importFile(filePath) {
+  async importFile(filePath, options = {}) {
     const fileMetadata = parseMptFileName(filePath);
-    return withMutationLock(this.userDataDir, () => this._importFileUnlocked(filePath, fileMetadata));
+    const importOptions = normalizeImportOptions(options);
+    return withMutationLock(
+      this.userDataDir,
+      () => this._importFileUnlocked(filePath, fileMetadata, importOptions)
+    );
   }
 
-  async _importFileUnlocked(filePath, fileMetadata) {
+  async _importFileUnlocked(filePath, fileMetadata, importOptions) {
     const db = runDataStore.openSideDb(this.userDataDir, MODULE, fileMetadata.monthKey);
+    ensureRepairSchema(db);
     let transactionStarted = false;
     let verifyExistingFile = null;
     let replacedBatch = null;
     let incomingBatchId = null;
     let insertRowStatement = null;
+    let insertExcludedRowStatement = null;
 
     try {
       const parsed = await parseMptFile(filePath, {
         batchSize: this.writeBatchSize,
+        collectRowErrors: true,
         onHeader: async (header) => {
           // 先拿写锁再查身份/序号，避免两个并发导入都在锁外读到“尚不存在”后竞态插入。
           db.exec('BEGIN IMMEDIATE');
@@ -259,10 +351,13 @@ class PreFundReconciliationStore {
             // 保留 batch.id，避免同批次重推后跑到其它临时批次末尾，改变严格1:1候选顺序。
             db.prepare('DELETE FROM pre_fund_reconciliation_gateway_rows WHERE batch_id = ?')
               .run(replacedBatch.id);
+            db.prepare('DELETE FROM pre_fund_reconciliation_gateway_excluded_rows WHERE batch_id = ?')
+              .run(replacedBatch.id);
             db.prepare(`
               UPDATE pre_fund_reconciliation_gateway_batches
               SET source_date = ?, source_file_name = ?, source_file_sequence = ?,
                   content_hash = '', declared_row_count = ?, row_count = 0,
+                  excluded_row_count = 0, import_mode = 'strict',
                   imported_at = CURRENT_TIMESTAMP
               WHERE id = ?
             `).run(
@@ -285,6 +380,7 @@ class PreFundReconciliationStore {
             incomingBatchId = lastInsertId(db);
           }
           insertRowStatement = db.prepare(INSERT_ROW);
+          insertExcludedRowStatement = db.prepare(INSERT_EXCLUDED_ROW);
         },
         onRows: async (rows) => {
           if (verifyExistingFile) return;
@@ -326,6 +422,20 @@ class PreFundReconciliationStore {
             throw error;
           }
         },
+        onRowError: async (issue) => {
+          if (verifyExistingFile || !importOptions.skipInvalidRows) return;
+          insertExcludedRowStatement.run(
+            incomingBatchId,
+            fileMetadata.sourceType,
+            fileMetadata.sourceFileName,
+            issue.sourceRowNumber,
+            issue.code,
+            issue.message,
+            issue.fieldName || '',
+            JSON.stringify(issue.fields || []),
+            issue.rawLine || ''
+          );
+        }
       });
 
       if (verifyExistingFile) {
@@ -349,11 +459,32 @@ class PreFundReconciliationStore {
         );
       }
 
+      if (importOptions.expectedContentHash && parsed.contentHash !== importOptions.expectedContentHash) {
+        throw storeError(
+          'MPT_REPAIR_SOURCE_CHANGED',
+          '原始 MPT 文件内容已变化，不能继续导出错误数据或删除错误数据并重跑',
+          {
+            fileName: parsed.sourceFileName,
+            sourceType: parsed.sourceType,
+            sourceBatch: parsed.sourceBatch
+          }
+        );
+      }
+      if (parsed.rowErrorCount > 0 && !importOptions.skipInvalidRows) {
+        throw rowAggregateError(parsed);
+      }
+
       db.prepare(`
         UPDATE pre_fund_reconciliation_gateway_batches
-        SET content_hash = ?, row_count = ?
+        SET content_hash = ?, row_count = ?, excluded_row_count = ?, import_mode = ?
         WHERE id = ?
-      `).run(parsed.contentHash, parsed.parsedRowCount, incomingBatchId);
+      `).run(
+        parsed.contentHash,
+        parsed.validRowCount,
+        parsed.rowErrorCount,
+        importOptions.skipInvalidRows ? 'exclude-invalid-rows' : 'strict',
+        incomingBatchId
+      );
       db.exec('COMMIT');
       transactionStarted = false;
 
@@ -364,6 +495,7 @@ class PreFundReconciliationStore {
         monthKey: fileMetadata.monthKey,
         replacedFileName: replacedBatch ? replacedBatch.source_file_name : null,
         batch: mapBatchRow(saved, fileMetadata.monthKey),
+        excludedRowCount: Number(parsed.rowErrorCount) || 0
       };
     } catch (error) {
       if (transactionStarted) rollbackQuietly(db);
@@ -562,6 +694,57 @@ class PreFundReconciliationStore {
       return row ? row.raw_json : null;
     } finally {
       db.close();
+    }
+  }
+
+  *iterateExcludedRows(options = {}) {
+    const sourceType = normalizeSourceTypeFilter(options);
+    for (const file of this._listTargetFiles(options.monthKey)) {
+      const db = runDataStore.openExistingSideDb(file.path);
+      try {
+        const hasAuditTable = db.prepare(`
+          SELECT 1 AS found
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'pre_fund_reconciliation_gateway_excluded_rows'
+        `).get();
+        if (!hasAuditTable) continue;
+        const clauses = [];
+        const params = [];
+        if (sourceType) {
+          clauses.push('e.source_type = ?');
+          params.push(sourceType);
+        }
+        if (options.sourceBatch) {
+          clauses.push('b.source_batch = ?');
+          params.push(String(options.sourceBatch));
+        }
+        const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+        const rows = db.prepare(`
+          SELECT e.*, b.source_batch
+          FROM pre_fund_reconciliation_gateway_excluded_rows e
+          JOIN pre_fund_reconciliation_gateway_batches b ON b.id = e.batch_id
+          ${where}
+          ORDER BY b.id ASC, e.source_row_number ASC, e.id ASC
+        `).iterate(...params);
+        for (const row of rows) {
+          yield {
+            id: row.id,
+            batchId: row.batch_id,
+            monthKey: file.monthKey,
+            sourceType: row.source_type,
+            sourceBatch: row.source_batch,
+            sourceFileName: row.source_file_name,
+            sourceRowNumber: row.source_row_number,
+            errorCode: row.error_code,
+            errorMessage: row.error_message,
+            fieldName: row.field_name || '',
+            fields: JSON.parse(row.fields_json),
+            rawLine: row.raw_line
+          };
+        }
+      } finally {
+        db.close();
+      }
     }
   }
 

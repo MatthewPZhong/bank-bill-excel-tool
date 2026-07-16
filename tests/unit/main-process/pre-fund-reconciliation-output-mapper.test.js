@@ -55,8 +55,8 @@ function gateway(reconciliationId, overrides = {}) {
     orderId: 'GW-ORDER',
     billReconId: 'GW-BIZ',
     currency: 'USD',
-    amount: '10.5000',
-    tradeType: 'PAY',
+    amount: '10.6000',
+    tradeType: 'Inbound-VA',
     name: 'Gateway Name',
     cardNo: 'GW-CARD',
     realChannel: 'GW-REAL',
@@ -179,7 +179,7 @@ test('平账结果完整映射网关14列、结果列和银行16列', () => {
   assert.equal(mapped['网关-Channel'], 'CHANNEL-A');
   assert.equal(mapped['网关-ReconBillBizId'], 'GW-BIZ');
   assert.equal(mapped['网关-reconciliationId'], 'MATCH');
-  assert.equal(mapped['网关-Amount'], '10.5');
+  assert.equal(mapped['网关-Amount'], '10.6');
   assert.equal(mapped['网关-name'], 'Gateway Name');
   assert.equal(mapped['网关-cardNo'], 'GW-CARD');
   assert.equal(mapped['对账结果'], '平账');

@@ -134,6 +134,47 @@ function absoluteDecimal(value, options = {}) {
   return canonical.startsWith('-') ? canonical.slice(1) : canonical;
 }
 
+function canonicalDecimalParts(value, options = {}) {
+  const canonical = canonicalizeDecimal(value, options);
+  const negative = canonical.startsWith('-');
+  const unsigned = negative ? canonical.slice(1) : canonical;
+  const [integerPart, fractionPart = ''] = unsigned.split('.');
+  return { canonical, negative, integerPart, fractionPart };
+}
+
+function addCanonicalDecimals(left, right, options = {}) {
+  const leftParts = canonicalDecimalParts(left, {
+    label: options.leftLabel || '左侧金额',
+    context: options.context
+  });
+  const rightParts = canonicalDecimalParts(right, {
+    label: options.rightLabel || '右侧金额',
+    context: options.context
+  });
+  const scale = Math.max(leftParts.fractionPart.length, rightParts.fractionPart.length);
+  const toScaledInteger = (parts) => {
+    const digits = `${parts.integerPart}${parts.fractionPart.padEnd(scale, '0')}`;
+    const integer = BigInt(digits || '0');
+    return parts.negative ? -integer : integer;
+  };
+  const sum = toScaledInteger(leftParts) + toScaledInteger(rightParts);
+  if (sum === 0n) return '0';
+
+  const negative = sum < 0n;
+  let digits = (negative ? -sum : sum).toString();
+  let rendered;
+  if (scale === 0) {
+    rendered = digits;
+  } else {
+    digits = digits.padStart(scale + 1, '0');
+    rendered = `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+  }
+  return canonicalizeDecimal(`${negative ? '-' : ''}${rendered}`, {
+    label: options.label || '金额加总',
+    context: options.context
+  });
+}
+
 function resolveBankRowContext(row, context = {}) {
   const inputIndex = context.inputIndex;
   const inferredExcelRow = Number.isInteger(inputIndex)
@@ -192,6 +233,11 @@ function classifyBankRow(row, context = {}) {
     label: 'Debit Amount',
     context: resolvedContext
   });
+  const extraFee = canonicalizeDecimal(row['Extra Fee'], {
+    emptyAsZero: true,
+    label: 'Extra Fee',
+    context: resolvedContext
+  });
   const creditNonzero = credit !== '0';
   const debitNonzero = debit !== '0';
 
@@ -201,7 +247,8 @@ function classifyBankRow(row, context = {}) {
     excelRowNumber: resolvedContext.excelRowNumber,
     inputIndex: resolvedContext.inputIndex,
     creditAmountCanonical: credit,
-    debitAmountCanonical: debit
+    debitAmountCanonical: debit,
+    extraFeeCanonical: extraFee
   };
 
   if (creditNonzero && debitNonzero) {
@@ -221,6 +268,13 @@ function classifyBankRow(row, context = {}) {
   const reconciliationId = trimCell(row.ReconciliationId);
   const originBillId = trimCell(row.OriginBillId)
     || buildStableTraceId(resolvedContext.fileName, resolvedContext.excelRowNumber);
+  const directionAmount = absoluteDecimal(isCredit ? credit : debit);
+  const matchingAmount = addCanonicalDecimals(directionAmount, extraFee, {
+    leftLabel: isCredit ? 'Credit Amount' : 'Debit Amount',
+    rightLabel: 'Extra Fee',
+    label: '银行对账金额',
+    context: resolvedContext
+  });
   const derived = {
     ...base,
     classification: reconciliationId === ''
@@ -238,7 +292,9 @@ function classifyBankRow(row, context = {}) {
         ? ['Drawee Account', 'Drawee CardNo']
         : ['Payee Account', 'Payee CardNo']
     )),
-    amount: absoluteDecimal(isCredit ? credit : debit),
+    amount: directionAmount,
+    directionAmount,
+    matchingAmount,
     originBillId,
     channel: trimCell(row.Channel),
     currency: trimCell(row.Currency)
@@ -279,6 +335,7 @@ module.exports = {
   BankRowValidationError,
   canonicalizeDecimal,
   absoluteDecimal,
+  addCanonicalDecimals,
   trimCell,
   buildStableTraceId,
   classifyBankRow,

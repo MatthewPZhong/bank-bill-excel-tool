@@ -149,10 +149,12 @@ test.describe('文件身份与十进制字符串', () => {
     assert.equal(outbound.sourceFileSequence, '20260708062049405');
   });
 
-  test('CHANNEL_OTHERS 明确拒绝并提示 3.0.16', () => {
+  test('CHANNEL_OTHERS 明确拒绝且不承诺后续版本', () => {
     assert.throws(
       () => parseMptFileName('/x/MPT_CHANNEL_OTHERS_20260708_1.gz'),
-      (error) => error.code === 'MPT_CHANNEL_OTHERS_UNSUPPORTED' && /3\.0\.16/.test(error.message)
+      (error) => error.code === 'MPT_CHANNEL_OTHERS_UNSUPPORTED'
+        && /当前版本不支持/.test(error.message)
+        && !/3\.0\.16/.test(error.message)
     );
   });
 
@@ -282,6 +284,38 @@ test.describe('强校验错误', () => {
       rows: [inboundRow({ amount: '1e3' })],
     });
     await expectCode(filePath, 'MPT_DECIMAL_INVALID');
+  });
+
+  test('错误收集模式跳过明细错误、保留有界样本并继续流式交付有效行', async () => {
+    const filePath = writeFixture({
+      fileName: 'MPT_INBOUND_GATEWAY_20260708_2031.txt',
+      header: ['20260708', 'MPT_INBOUND_20260708', '4'],
+      rows: [
+        inboundRow({ reconId: 'VALID-1' }),
+        inboundRow({ reconId: 'BAD-1', amount: 'bad' }),
+        inboundRow({ reconId: 'BAD-2', billDate: '2026-02-30' }),
+        inboundRow({ reconId: 'VALID-2' })
+      ]
+    });
+    const delivered = [];
+    const errors = [];
+    const result = await parseMptFile(filePath, {
+      batchSize: 1,
+      collectRowErrors: true,
+      rowErrorSampleLimit: 1,
+      onRows(rows) { delivered.push(...rows); },
+      onRowError(issue) { errors.push(issue); }
+    });
+
+    assert.equal(result.parsedRowCount, 4);
+    assert.equal(result.validRowCount, 2);
+    assert.equal(result.rowErrorCount, 2);
+    assert.equal(result.rowErrorSamples.length, 1);
+    assert.deepEqual(delivered.map((row) => row.reconciliationId), ['VALID-1', 'VALID-2']);
+    assert.deepEqual(errors.map((issue) => [issue.sourceRowNumber, issue.code]), [
+      [3, 'MPT_DECIMAL_INVALID'],
+      [4, 'MPT_ROW_DATE_MISMATCH']
+    ]);
   });
 
   test('日期错误', async () => {

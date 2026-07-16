@@ -7,6 +7,7 @@ const {
   BANK_ROW_CLASSIFICATION,
   BankRowValidationError,
   canonicalizeDecimal,
+  addCanonicalDecimals,
   buildStableTraceId,
   classifyBankRow,
   deriveBankRow
@@ -31,6 +32,56 @@ test('十进制 canonicalizer 拒绝非法格式且中文错误包含字段名',
       && error.message.includes('千分位')
   );
   assert.throws(() => canonicalizeDecimal('Infinity'), /有效十进制数/);
+});
+
+test('有符号十进制加法不使用浮点，支持正负手续费和超安全整数', () => {
+  assert.equal(addCanonicalDecimals('9999980', '20'), '10000000');
+  assert.equal(addCanonicalDecimals('3300254.4', '-254.4'), '3300000');
+  assert.equal(addCanonicalDecimals('9007199254740993.01', '0.09'), '9007199254740993.1');
+  assert.equal(addCanonicalDecimals('1e-3', '-0.001'), '0');
+  assert.equal(addCanonicalDecimals('1', '-2'), '-1');
+});
+
+test('Extra Fee 进入银行匹配金额但不改变原方向金额，零发生额仍跳过', () => {
+  const credit = deriveBankRow({
+    Channel: 'CIT', Currency: 'USD', ReconciliationId: 'R-CREDIT',
+    'Credit Amount': '9999980', 'Debit Amount': '', 'Extra Fee': '20'
+  });
+  assert.equal(credit.amount, '9999980');
+  assert.equal(credit.directionAmount, '9999980');
+  assert.equal(credit.extraFeeCanonical, '20');
+  assert.equal(credit.matchingAmount, '10000000');
+
+  const debit = deriveBankRow({
+    Channel: 'CIT', Currency: 'USD', ReconciliationId: 'R-DEBIT',
+    'Credit Amount': '', 'Debit Amount': '3300254.4', 'Extra Fee': '-254.4'
+  });
+  assert.equal(debit.amount, '3300254.4');
+  assert.equal(debit.matchingAmount, '3300000');
+
+  const negative = deriveBankRow({
+    Channel: 'CIT', Currency: 'USD', ReconciliationId: 'R-NEGATIVE',
+    'Credit Amount': '1', 'Debit Amount': '', 'Extra Fee': '-2'
+  });
+  assert.equal(negative.directionAmount, '1');
+  assert.equal(negative.matchingAmount, '-1');
+
+  const zero = classifyBankRow({
+    'Credit Amount': '0', 'Debit Amount': '', 'Extra Fee': '99'
+  });
+  assert.equal(zero.classification, BANK_ROW_CLASSIFICATION.ZERO_AMOUNT);
+});
+
+test('非法 Extra Fee 即使发生额为零也定位并阻断', () => {
+  assert.throws(
+    () => classifyBankRow({
+      'Credit Amount': '0', 'Debit Amount': '', 'Extra Fee': 'bad'
+    }, { fileName: 'fee.xlsx', excelRowNumber: 8 }),
+    (error) => error.code === 'pre-fund-invalid-decimal'
+      && error.field === 'Extra Fee'
+      && error.fileName === 'fee.xlsx'
+      && error.excelRowNumber === 8
+  );
 });
 
 test('Credit 非零派生 CREDIT、Drawee/name/cardNo、金额绝对值和稳定追溯ID', () => {

@@ -36,10 +36,16 @@ const {
   moveFileNoClobber,
   writeChannelWorkbooks
 } = require('./excel-writer');
+const { writeMptErrorReport } = require('./mpt-error-report-writer');
 const { MPT_SCHEMAS } = require('./mpt-schema');
 
 const SCENARIO_MISSING_GATEWAY = 'missing-gateway';
 const PROGRESS_INTERVAL = 5000;
+const TERMINAL_MPT_REPAIR_CODES = new Set([
+  'MPT_REPAIR_SOURCE_CHANGED',
+  'MPT_BATCH_SEQUENCE_STALE',
+  'MPT_FILE_IDENTITY_CONFLICT'
+]);
 
 class PreFundReconciliationError extends Error {
   constructor(code, message, details = {}) {
@@ -60,13 +66,14 @@ function stableHash(value) {
   return crypto.createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 }
 
-function errorResult(filePath, error) {
+function errorResult(filePath, error, extra = {}) {
   return {
     status: 'failed',
     fileName: path.basename(filePath || ''),
     code: error && error.code ? error.code : 'pre-fund-import-failed',
     message: error && error.message ? error.message : String(error),
-    detailLines: Array.isArray(error && error.detailLines) ? error.detailLines : []
+    detailLines: Array.isArray(error && error.detailLines) ? error.detailLines : [],
+    ...extra
   };
 }
 
@@ -121,6 +128,7 @@ class PreFundReconciliationService {
     this.bankSession = null;
     this.bankRevision = 0;
     this.lastRun = null;
+    this.mptImportFailures = new Map();
     this.reconcilePersistedRunMirrors();
   }
 
@@ -222,6 +230,7 @@ class PreFundReconciliationService {
 
   async importMptFiles(filePaths, onProgress) {
     const paths = Array.isArray(filePaths) ? filePaths : [];
+    this.mptImportFailures.clear();
     const results = [];
     for (let index = 0; index < paths.length; index += 1) {
       const filePath = paths[index];
@@ -237,7 +246,32 @@ class PreFundReconciliationService {
           rowCount: imported.batch ? imported.batch.rowCount : 0
         });
       } catch (error) {
-        results.push(errorResult(filePath, error));
+        let repair = {};
+        if (
+          error
+          && error.canRepair === true
+          && error.code === 'MPT_ROW_ERRORS'
+          && /^[a-f0-9]{64}$/.test(String(error.contentHash || ''))
+          && Object.prototype.hasOwnProperty.call(MPT_SCHEMAS, error.sourceType)
+        ) {
+          const repairToken = crypto.randomUUID();
+          const failure = {
+            failureId: repairToken,
+            filePath: path.resolve(filePath),
+            sourceType: error.sourceType,
+            sourceBatch: error.sourceBatch || '',
+            contentHash: error.contentHash,
+            rowErrorCount: Number(error.rowErrorCount) || 0
+          };
+          this.mptImportFailures.set(repairToken, failure);
+          repair = {
+            canRepair: true,
+            repairToken,
+            sourceType: failure.sourceType,
+            rowErrorCount: failure.rowErrorCount
+          };
+        }
+        results.push(errorResult(filePath, error, repair));
       }
       await yieldToEventLoop();
     }
@@ -246,6 +280,88 @@ class PreFundReconciliationService {
       results,
       successCount: results.filter((result) => result.status === 'ok').length,
       failedCount: results.filter((result) => result.status !== 'ok').length
+    };
+  }
+
+  resolveMptImportFailures(repairTokens) {
+    if (!Array.isArray(repairTokens) || repairTokens.length === 0) {
+      throw new TypeError('错误数据操作至少需要一个有效失败令牌');
+    }
+    if (repairTokens.length > Math.max(1, this.mptImportFailures.size)) {
+      throw new TypeError('错误数据操作包含超出本轮失败会话的令牌');
+    }
+    const failures = [];
+    const seen = new Set();
+    for (const value of repairTokens) {
+      const token = value == null ? '' : String(value).trim();
+      if (!/^[a-f0-9-]{36}$/i.test(token) || seen.has(token)) {
+        throw new TypeError('失败令牌格式非法或重复');
+      }
+      seen.add(token);
+      const failure = this.mptImportFailures.get(token);
+      if (!failure) {
+        throw new PreFundReconciliationError(
+          'pre-fund-mpt-failure-token-expired',
+          '错误数据操作已失效，请重新导入原文件'
+        );
+      }
+      failures.push(failure);
+    }
+    return failures;
+  }
+
+  async exportMptErrorData(repairTokens, outputPath) {
+    const failures = this.resolveMptImportFailures(repairTokens);
+    const result = await writeMptErrorReport({ failureRecords: failures, outputPath });
+    return { status: 'ok', ...result };
+  }
+
+  async retryMptImportFailures(repairTokens, onProgress) {
+    const failures = this.resolveMptImportFailures(repairTokens);
+    const results = [];
+    for (let index = 0; index < failures.length; index += 1) {
+      const failure = failures[index];
+      if (onProgress) {
+        onProgress({
+          stage: 'mpt-repair',
+          current: index + 1,
+          total: failures.length,
+          fileName: path.basename(failure.filePath)
+        });
+      }
+      try {
+        const imported = await this.tempStore.importFile(failure.filePath, {
+          skipInvalidRows: true,
+          expectedContentHash: failure.contentHash
+        });
+        this.mptImportFailures.delete(failure.failureId);
+        results.push({
+          status: 'ok',
+          fileName: path.basename(failure.filePath),
+          sourceType: imported.batch.sourceType,
+          importStatus: imported.status,
+          rowCount: imported.batch.rowCount,
+          excludedRowCount: imported.batch.excludedRowCount
+        });
+      } catch (error) {
+        const terminalFailure = TERMINAL_MPT_REPAIR_CODES.has(error && error.code);
+        if (terminalFailure) this.mptImportFailures.delete(failure.failureId);
+        results.push(errorResult(failure.filePath, error, terminalFailure ? {} : {
+          canRepair: true,
+          repairToken: failure.failureId,
+          sourceType: failure.sourceType,
+          rowErrorCount: failure.rowErrorCount
+        }));
+      }
+      await yieldToEventLoop();
+    }
+    return {
+      status: 'ok',
+      results,
+      successCount: results.filter((result) => result.status === 'ok').length,
+      failedCount: results.filter((result) => result.status !== 'ok').length,
+      importedRowCount: results.reduce((sum, result) => sum + (Number(result.rowCount) || 0), 0),
+      excludedRowCount: results.reduce((sum, result) => sum + (Number(result.excludedRowCount) || 0), 0)
     };
   }
 
@@ -423,6 +539,9 @@ class PreFundReconciliationService {
       bankSkippedZeroRows: 0,
       bankExcludedEmptyIdRows: 0,
       bankEmptyChannelRows: 0,
+      bankRuleUnmappedRows: 0,
+      bankRuleDirectionMismatchRows: 0,
+      bankRuleNoGatewayTradeTypeRows: 0,
       tempGatewayRawRows: 0,
       linkedGatewayRawRows: 0,
       gatewayExcludedEmptyIdRows: 0,
@@ -532,7 +651,14 @@ class PreFundReconciliationService {
 
         stats.bankValidRows += 1;
         if (classified.channel === '') stats.bankEmptyChannelRows += 1;
-        const gatewayRow = consumeGateway(buildBankMatchCriteria(classified), index);
+        const criteria = buildBankMatchCriteria(classified);
+        const eligibility = criteria.ruleEligibility;
+        if (!eligibility.eligible) {
+          if (eligibility.code === 'bank-fund-type-unmapped') stats.bankRuleUnmappedRows += 1;
+          if (eligibility.code === 'bank-rule-direction-mismatch') stats.bankRuleDirectionMismatchRows += 1;
+          if (eligibility.code === 'bank-rule-no-gateway-trade-type') stats.bankRuleNoGatewayTradeTypeRows += 1;
+        }
+        const gatewayRow = eligibility.eligible ? consumeGateway(criteria, index) : null;
         if (gatewayRow) {
           const outputRow = mapBalancedRow({ bankRow: classified, gatewayRow });
           insertBalanced({ channel: classified.channel, bankOrdinal: index, outputRow });
@@ -541,7 +667,11 @@ class PreFundReconciliationService {
           insertUnbalanced({
             channel: classified.channel,
             bankOrdinal: index,
-            outputRow: mapUnbalancedRow(classified),
+            outputRow: mapUnbalancedRow(classified, {
+              reason: eligibility.eligible
+                ? '未找到同时满足对账ID、渠道、金额、币种和类型规则的网关账单'
+                : eligibility.reason
+            }),
             channelOutputRow: mapChannelBillRow(classified)
           });
           stats.unmatchedBankRows += 1;

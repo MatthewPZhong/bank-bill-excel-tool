@@ -77,6 +77,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-temp-manager'"));
     assert.ok(renderer.includes("info.previewModal === 'pre-fund-temp-delete-range'"));
     assert.ok(rendererPreviews.includes('function applyPreFundTempManagerPreviewState('));
+    assert.ok(rendererPreviews.includes('function applyPreFundTempImportFailurePreviewState('));
     assert.ok(rendererPreviews.includes('function applyPreFundTempDeleteRangePreviewState('));
     assert.ok(renderer.includes("if (typeof unsubscribe === 'function') unsubscribe();"));
     assert.match(renderer, /showPreFundFailure[\s\S]*escapeHtml\(message\)/);
@@ -85,13 +86,16 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     const updateUi = renderer.slice(uiStart, uiEnd);
     assert.match(updateUi, /let text = '欢迎使用小助手'/);
     assert.match(updateUi, /if \(run\.unavailable\)[\s\S]*unavailableMessage/);
+    assert.match(updateUi, /bankRuleUnmappedRows[\s\S]*bankRuleDirectionMismatchRows[\s\S]*bankRuleNoGatewayTradeTypeRows/);
     assert.doesNotMatch(updateUi, /请导入银行对账单|tempBatchCount > 0 \|\| linkedRowCount > 0/);
   });
 
-  test('preload 的 10 个 invoke 与 3 个进度通道和 main handler 对齐', () => {
+  test('preload 的 12 个 invoke 与 3 个进度通道和 main handler 对齐', () => {
     const invokeChannels = [
       'pre-fund-reconciliation:import-bank',
       'pre-fund-reconciliation:import-mpt',
+      'pre-fund-reconciliation:mpt-errors:export',
+      'pre-fund-reconciliation:mpt-errors:repair',
       'pre-fund-reconciliation:temp:list',
       'pre-fund-reconciliation:temp:delete',
       'pre-fund-reconciliation:temp:count-by-date-range',
@@ -111,6 +115,10 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(main, /database\.init\(\);[\s\S]*schedulePreFundReconciliationStartupCleanup\(\)/);
     assert.match(preload, /countTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
     assert.match(preload, /deleteTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
+    assert.match(preload, /exportMptErrors:\s*\(repairTokens\)[\s\S]*mpt-errors:export/);
+    assert.match(preload, /repairMptErrors:\s*\(repairTokens\)[\s\S]*mpt-errors:repair/);
+    assert.match(main, /mpt-errors:export'[\s\S]*dialog\.showSaveDialog[\s\S]*exportMptErrorData/);
+    assert.match(main, /mpt-errors:repair'[\s\S]*retryMptImportFailures/);
     for (const channel of [
       'pre-fund-reconciliation:import-progress',
       'pre-fund-reconciliation:run-progress',
@@ -143,6 +151,15 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(manager, /data-action="exit">退出/);
     assert.doesNotMatch(manager, /account-mapping|账户映射管理/);
     assert.match(manager, /onImport\(\{ showFailures: false \}\)/);
+    assert.match(manager, /canRepair === true[\s\S]*repairToken/);
+    assert.match(manager, /confirmText: '删除错误数据并重跑'/);
+    assert.match(manager, /middleText: '导出错误数据'/);
+    assert.match(manager, /cancelText: '关闭'/);
+    assert.match(manager, /repairMptErrors\(repairTokens\)/);
+    assert.match(manager, /exportMptErrors\(repairTokens\)/);
+    assert.match(manager, /exported\.warnings[\s\S]*warningHtml/);
+    assert.match(manager, /hasRetryableFailure[\s\S]*showImportResult\(repaired\)/);
+    assert.match(manager, /repairable\.length === 0[\s\S]*createAlertDialog/);
   });
 
   test('临时删除框复用标准删除框结构，并改走临时表日期范围接口', () => {

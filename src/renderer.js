@@ -559,6 +559,8 @@ const {
   applyLinkedTableManagerPreviewState,
   // v3.0.14：临时链接表管理首页 preview
   applyPreFundTempManagerPreviewState,
+  // v3.0.16：临时 MPT 明细错误失败页 preview
+  applyPreFundTempImportFailurePreviewState,
   // v3.0.14：临时链接表按日期删除框 preview
   applyPreFundTempDeleteRangePreviewState,
   // v3.0.1 需求1（D4）：删除网关对账单弹框 preview
@@ -4394,6 +4396,7 @@ function updatePreFundReconciliationUi() {
       const summary = run.summary || {};
       text = `已完成：平账 ${Number(summary.matchedPairs) || 0} 行，不平 ${Number(summary.unmatchedBankRows) || 0} 行\n`
         + `银行排除：空ID ${Number(summary.bankExcludedEmptyIdRows) || 0} 行、零金额 ${Number(summary.bankSkippedZeroRows) || 0} 行、空渠道 ${Number(summary.bankEmptyChannelRows) || 0} 行\n`
+        + `规则不匹配：未配置 ${Number(summary.bankRuleUnmappedRows) || 0} 行、方向不符 ${Number(summary.bankRuleDirectionMismatchRows) || 0} 行、无网关类型 ${Number(summary.bankRuleNoGatewayTradeTypeRows) || 0} 行\n`
         + `网关排除：空ID ${Number(summary.gatewayExcludedEmptyIdRows) || 0} 行、无效 ${Number(summary.gatewayInvalidRows) || 0} 行、重复折叠 ${Number(summary.gatewayCollapsedDuplicateRows) || 0} 行；未使用 ${Number(summary.unusedGatewayRows) || 0} 行、多候选ID组 ${Number(summary.gatewayConflictingSameIdGroups) || 0} 组`;
       tone = 'success';
     }
@@ -4565,12 +4568,34 @@ function applyPreFundReconciliationPanelPreviewState() {
   setTimeout(() => {
     state.preFundReconciliation.session = {
       status: 'ok',
-      bank: null,
+      bank: {
+        fileName: '渠道账单_2026-07-15_160000.xlsx',
+        inputRows: 128604,
+        participatingRows: 127998
+      },
       temporaryGateway: { batchCount: 3, rowCount: 142202 },
       linkedGateway: { rowCount: 978430 },
-      run: null,
-      canRun: false,
-      canExport: false
+      run: {
+        stale: false,
+        unavailable: false,
+        summary: {
+          matchedPairs: 126789,
+          unmatchedBankRows: 1209,
+          bankExcludedEmptyIdRows: 314,
+          bankSkippedZeroRows: 292,
+          bankEmptyChannelRows: 7,
+          bankRuleUnmappedRows: 21,
+          bankRuleDirectionMismatchRows: 8,
+          bankRuleNoGatewayTradeTypeRows: 5,
+          gatewayExcludedEmptyIdRows: 16,
+          gatewayInvalidRows: 0,
+          gatewayCollapsedDuplicateRows: 37,
+          unusedGatewayRows: 993806,
+          gatewayConflictingSameIdGroups: 12
+        }
+      },
+      canRun: true,
+      canExport: true
     };
     updatePreFundReconciliationUi();
   }, 200);
@@ -6974,6 +6999,10 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'pre-fund-temp-manager') {
     setTimeout(() => {
       applyPreFundTempManagerPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'pre-fund-temp-import-failure') {
+    setTimeout(() => {
+      applyPreFundTempImportFailurePreviewState();
     }, 120);
   } else if (info.previewModal === 'pre-fund-temp-delete-range') {
     setTimeout(() => {

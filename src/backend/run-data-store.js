@@ -457,6 +457,8 @@ const SIDE_DB_DDL_PRE_FUND_GATEWAY = `
     content_hash TEXT NOT NULL,
     declared_row_count INTEGER NOT NULL,
     row_count INTEGER NOT NULL,
+    excluded_row_count INTEGER NOT NULL DEFAULT 0,
+    import_mode TEXT NOT NULL DEFAULT 'strict',
     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (source_type, source_batch),
     UNIQUE (source_file_name)
@@ -496,6 +498,23 @@ const SIDE_DB_DDL_PRE_FUND_GATEWAY = `
     ON pre_fund_reconciliation_gateway_rows(reconciliation_id, batch_id, source_row_number);
   CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_rows_fingerprint
     ON pre_fund_reconciliation_gateway_rows(reconciliation_id, fingerprint);
+
+  CREATE TABLE IF NOT EXISTS pre_fund_reconciliation_gateway_excluded_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    source_file_name TEXT NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    error_code TEXT NOT NULL,
+    error_message TEXT NOT NULL,
+    field_name TEXT,
+    fields_json TEXT NOT NULL,
+    raw_line TEXT NOT NULL,
+    FOREIGN KEY (batch_id) REFERENCES pre_fund_reconciliation_gateway_batches(id) ON DELETE CASCADE,
+    UNIQUE (batch_id, source_row_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_pre_fund_gateway_excluded_batch
+    ON pre_fund_reconciliation_gateway_excluded_rows(batch_id, source_row_number);
 `;
 
 // 前置资金对账 run 级数据：候选池和结果均为 bulk，放独立 results 月侧库，主库不落明细。

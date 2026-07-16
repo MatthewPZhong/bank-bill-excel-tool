@@ -922,6 +922,22 @@
       }, 120);
     }
 
+    // v3.0.16：临时 MPT 明细错误失败页 preview，验证三操作按钮及长文案布局。
+    function applyPreFundTempImportFailurePreviewState() {
+      setCurrentModule(MODULES.preFundReconciliation.id);
+      setTimeout(() => {
+        openModal(createConfirmDialog({
+          message: '成功导入 <b>1</b> 张，失败 <b>2</b> 张<br/><br/>'
+            + '失败：<br/>• MPT_INBOUND_GATEWAY_20260708_001.gz：包含 3 条可定位明细错误<br/>'
+            + '• MPT_OUTBOUND_GATEWAY_20260708_002.gz：包含 1 条可定位明细错误<br/><br/>'
+            + '其中 <b>2</b> 张文件可导出错误数据，或逻辑删除错误行后重跑。',
+          confirmText: '删除错误数据并重跑',
+          middleText: '导出错误数据',
+          cancelText: '关闭'
+        }));
+      }, 120);
+    }
+
     // v3.0.14：临时链接表按日期删除框 preview，使用与既有链接表删除框相同的已填日期状态。
     function applyPreFundTempDeleteRangePreviewState() {
       setCurrentModule(MODULES.preFundReconciliation.id);
@@ -1440,6 +1456,8 @@
       applyLinkedTableManagerPreviewState,
       // v3.0.14：临时链接表管理首页 preview
       applyPreFundTempManagerPreviewState,
+      // v3.0.16：临时 MPT 明细错误失败页 preview
+      applyPreFundTempImportFailurePreviewState,
       // v3.0.14：临时链接表按日期删除框 preview
       applyPreFundTempDeleteRangePreviewState,
       // v3.0.1 需求1（D4）：删除网关对账单弹框 preview

@@ -260,7 +260,7 @@ function mapGatewayPoolRow(row) {
 
 function gatewayMatchValues(criteria) {
   if (!criteria || typeof criteria !== 'object' || Array.isArray(criteria)) {
-    throw new TypeError('网关候选消费必须提供四字段匹配条件');
+    throw new TypeError('网关候选消费必须提供四个基础字段和类型规则匹配条件');
   }
   const fields = ['reconciliationId', 'channel', 'amount', 'currency'];
   for (const field of fields) {
@@ -268,7 +268,11 @@ function gatewayMatchValues(criteria) {
       throw new TypeError(`网关候选匹配条件 ${field} 必须为字符串`);
     }
   }
-  return fields.map((field) => criteria[field]);
+  if (!Array.isArray(criteria.allowedGatewayTradeTypes)
+    || criteria.allowedGatewayTradeTypes.some((value) => typeof value !== 'string')) {
+    throw new TypeError('网关候选匹配条件 allowedGatewayTradeTypes 必须为字符串数组');
+  }
+  return [...fields.map((field) => criteria[field]), criteria.allowedGatewayTradeTypes];
 }
 
 class PreFundReconciliationRunStore {
@@ -339,7 +343,8 @@ class PreFundReconciliationRunStore {
   }
 
   consumeGatewayCandidate(db, runId, criteria, bankOrdinal) {
-    const [reconciliationId, channel, amount, currency] = gatewayMatchValues(criteria);
+    const [reconciliationId, channel, amount, currency, allowedGatewayTradeTypes] = gatewayMatchValues(criteria);
+    if (allowedGatewayTradeTypes.length === 0) return null;
     const row = db.prepare(`
       SELECT id, source_label, reconciliation_id, fingerprint, fields_json,
              name, card_no, source_location_json
@@ -348,9 +353,13 @@ class PreFundReconciliationRunStore {
         AND json_extract(fields_json, '$.channel') = ?
         AND json_extract(fields_json, '$.amount') = ?
         AND json_extract(fields_json, '$.currency') = ?
+        AND EXISTS (
+          SELECT 1 FROM json_each(?) allowed
+          WHERE allowed.value = json_extract(fields_json, '$.tradeType')
+        )
       ORDER BY source_priority ASC, source_order ASC, id ASC
       LIMIT 1
-    `).get(runId, reconciliationId, channel, amount, currency);
+    `).get(runId, reconciliationId, channel, amount, currency, JSON.stringify(allowedGatewayTradeTypes));
     if (!row) return null;
     const update = db.prepare(`
       UPDATE pre_fund_reconciliation_gateway_pool
@@ -372,6 +381,10 @@ class PreFundReconciliationRunStore {
         AND json_extract(fields_json, '$.channel') = ?
         AND json_extract(fields_json, '$.amount') = ?
         AND json_extract(fields_json, '$.currency') = ?
+        AND EXISTS (
+          SELECT 1 FROM json_each(?) allowed
+          WHERE allowed.value = json_extract(fields_json, '$.tradeType')
+        )
       ORDER BY source_priority ASC, source_order ASC, id ASC
       LIMIT 1
     `);
@@ -381,8 +394,16 @@ class PreFundReconciliationRunStore {
       WHERE id = ? AND consumed_bank_ordinal IS NULL
     `);
     return (criteria, bankOrdinal) => {
-      const [reconciliationId, channel, amount, currency] = gatewayMatchValues(criteria);
-      const row = select.get(runId, reconciliationId, channel, amount, currency);
+      const [reconciliationId, channel, amount, currency, allowedGatewayTradeTypes] = gatewayMatchValues(criteria);
+      if (allowedGatewayTradeTypes.length === 0) return null;
+      const row = select.get(
+        runId,
+        reconciliationId,
+        channel,
+        amount,
+        currency,
+        JSON.stringify(allowedGatewayTradeTypes)
+      );
       if (!row) return null;
       if (update.run(bankOrdinal, row.id).changes !== 1) {
         throw new Error(`前置资金对账网关候选消费冲突：poolId=${row.id}`);

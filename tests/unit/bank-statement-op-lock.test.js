@@ -34,6 +34,7 @@ const EXISTING_OPS = [
 ];
 const PRE_FUND_OPS = [
   'pre-fund-import-bank', 'pre-fund-import-mpt', 'pre-fund-delete-temp',
+  'pre-fund-export-mpt-errors', 'pre-fund-repair-mpt-errors',
   'pre-fund-delete-temp-by-date-range', 'pre-fund-clear-temp', 'pre-fund-run', 'pre-fund-export'
 ];
 const DUPLICATE_INBOUND_OPS = [
@@ -41,7 +42,7 @@ const DUPLICATE_INBOUND_OPS = [
 ];
 const ALL_LOCKED_OPS = [...EXISTING_OPS, ...PRE_FUND_OPS, ...DUPLICATE_INBOUND_OPS];
 
-describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15)', () => {
+describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15 + v3.0.16)', () => {
   test('统一互斥锁定义存在（一把锁，含 inFlight/operation）', () => {
     assert.ok(
       source.includes('const bankStatementOperationLock = { inFlight: false, operation: null };'),
@@ -53,7 +54,7 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15)'
       'releaseBankStatementOpLock 释放函数应存在');
   });
 
-  test('既有 6 动作、前置资金对账 7 动作与重复入金 3 动作均 acquire 同一把锁', () => {
+  test('既有 6 动作、前置资金对账 9 动作与重复入金 3 动作均 acquire 同一把锁', () => {
     assert.ok(source.includes("tryAcquireBankStatementOpLock('run')"), 'run handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('export')"), 'export handler 应 acquire');
     assert.ok(source.includes("tryAcquireBankStatementOpLock('import')"), 'batch-import handler 应 acquire');
@@ -86,16 +87,16 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15)'
     assert.strictEqual(
       preFundContention.length,
       PRE_FUND_OPS.length + DUPLICATE_INBOUND_OPS.length,
-      '前置资金对账 7 个与重复入金 3 个 handler 各有一处 busy 短路'
+      '前置资金对账 9 个与重复入金 3 个 handler 各有一处 busy 短路'
     );
   });
 
-  test('16 个 handler 各在 finally 释放锁（恰 16 处 release）', () => {
+  test('18 个 handler 各在 finally 释放锁（恰 18 处 release）', () => {
     const releases = source.match(/releaseBankStatementOpLock\(\);/g) || [];
     assert.strictEqual(
       releases.length,
       ALL_LOCKED_OPS.length,
-      '既有 6 动作 + 前置资金对账 7 动作 + 重复入金 3 动作各释放一次'
+      '既有 6 动作 + 前置资金对账 9 动作 + 重复入金 3 动作各释放一次'
     );
   });
 });
@@ -119,7 +120,7 @@ describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () =
     assert.strictEqual(tryAcquireBankStatementOpLock('export').acquired, true, '释放后 → 导出可获取');
   });
 
-  test('全部 16 动作两两互斥（共享同一把锁）', () => {
+  test('全部 18 动作两两互斥（共享同一把锁）', () => {
     for (const first of ALL_LOCKED_OPS) {
       const { tryAcquireBankStatementOpLock, releaseBankStatementOpLock } = loadRealLock();
       assert.strictEqual(tryAcquireBankStatementOpLock(first).acquired, true, `${first} 应可获取`);

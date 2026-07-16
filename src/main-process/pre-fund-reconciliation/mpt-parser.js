@@ -16,6 +16,7 @@ const {
 } = require('./mpt-schema');
 
 const DEFAULT_BATCH_SIZE = 1000;
+const DEFAULT_ROW_ERROR_SAMPLE_LIMIT = 20;
 const MAX_LINE_LENGTH = 4 * 1024 * 1024;
 
 function createHashingTransform(hash) {
@@ -102,6 +103,27 @@ function normalizeBatchSize(value) {
   return value;
 }
 
+function normalizeRowErrorSampleLimit(value) {
+  if (value === undefined) return DEFAULT_ROW_ERROR_SAMPLE_LIMIT;
+  if (!Number.isSafeInteger(value) || value < 0 || value > 1000) {
+    throw new TypeError('MPT rowErrorSampleLimit 必须为 0 到 1000 的安全整数');
+  }
+  return value;
+}
+
+function buildRowIssue(error, fields, rawLine, sourceRowNumber) {
+  return {
+    code: error.code || 'MPT_ROW_INVALID',
+    message: error.message || String(error),
+    detailLines: Array.isArray(error.detailLines) ? error.detailLines.slice() : [],
+    context: error.context && typeof error.context === 'object' ? { ...error.context } : {},
+    sourceRowNumber,
+    fieldName: error.context && error.context.fieldName ? String(error.context.fieldName) : '',
+    fields: Array.isArray(fields) ? fields.slice() : [],
+    rawLine: String(rawLine || '')
+  };
+}
+
 function mapStreamError(error, fileMetadata) {
   if (error instanceof FileValidationError) return error;
   if (error && typeof error.code === 'string' && error.code.startsWith('Z_')) {
@@ -129,10 +151,16 @@ async function parseMptFile(filePath, options = {}) {
   const batchSize = normalizeBatchSize(options.batchSize);
   const onHeader = typeof options.onHeader === 'function' ? options.onHeader : null;
   const onRows = typeof options.onRows === 'function' ? options.onRows : null;
+  const collectRowErrors = options.collectRowErrors === true;
+  const onRowError = typeof options.onRowError === 'function' ? options.onRowError : null;
+  const rowErrorSampleLimit = normalizeRowErrorSampleLimit(options.rowErrorSampleLimit);
   const hash = crypto.createHash('sha256');
   let headerMetadata = null;
   let sourceRowNumber = 0;
   let parsedRowCount = 0;
+  let validRowCount = 0;
+  let rowErrorCount = 0;
+  const rowErrorSamples = [];
   let pendingRows = [];
 
   try {
@@ -153,8 +181,20 @@ async function parseMptFile(filePath, options = {}) {
           rowNumber: 1,
         });
       }
-      pendingRows.push(normalizeMptRow(fields, headerMetadata, sourceRowNumber));
       parsedRowCount += 1;
+      let normalizedRow;
+      try {
+        normalizedRow = normalizeMptRow(fields, headerMetadata, sourceRowNumber);
+      } catch (error) {
+        if (!collectRowErrors || !(error instanceof FileValidationError)) throw error;
+        const issue = buildRowIssue(error, fields, line, sourceRowNumber);
+        rowErrorCount += 1;
+        if (rowErrorSamples.length < rowErrorSampleLimit) rowErrorSamples.push(issue);
+        if (onRowError) await onRowError(issue);
+        continue;
+      }
+      pendingRows.push(normalizedRow);
+      validRowCount += 1;
       if (pendingRows.length >= batchSize) {
         if (onRows) await onRows(pendingRows);
         pendingRows = [];
@@ -179,6 +219,9 @@ async function parseMptFile(filePath, options = {}) {
     return {
       ...headerMetadata,
       parsedRowCount,
+      validRowCount,
+      rowErrorCount,
+      rowErrorSamples,
       contentHash: hash.digest('hex'),
     };
   } catch (error) {
@@ -188,6 +231,7 @@ async function parseMptFile(filePath, options = {}) {
 
 module.exports = {
   DEFAULT_BATCH_SIZE,
+  DEFAULT_ROW_ERROR_SAMPLE_LIMIT,
   MAX_LINE_LENGTH,
   parseMptFile,
 };

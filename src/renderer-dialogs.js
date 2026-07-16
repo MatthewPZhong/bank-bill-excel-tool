@@ -6653,6 +6653,99 @@
         return lines.join('<br/><br/>');
       }
 
+      function showImportResult(result) {
+        const list = result && Array.isArray(result.results) ? result.results : [];
+        const failures = list.filter((item) => !item || item.status !== 'ok');
+        const repairable = failures.filter((item) => (
+          item && item.canRepair === true && item.repairToken
+        ));
+        const summaryHtml = buildImportSummaryHtml(result);
+        if (repairable.length === 0) {
+          openModal(createAlertDialog(summaryHtml, {
+            skipLogReport: true,
+            onConfirm: reopenManager
+          }));
+          return;
+        }
+
+        const repairTokens = repairable.map((item) => item.repairToken);
+        const structuralFailures = failures.filter((item) => !repairable.includes(item));
+        const actionHint = `<br/><br/>其中 <b>${repairable.length}</b> 张文件可导出错误数据，或逻辑删除错误行后重跑。`
+          + (structuralFailures.length > 0
+            ? `<br/>另有 <b>${structuralFailures.length}</b> 张属于结构或身份错误，不能自动删除。`
+            : '');
+        openModal(createConfirmDialog({
+          message: `${summaryHtml}${actionHint}`,
+          confirmText: '删除错误数据并重跑',
+          middleText: '导出错误数据',
+          cancelText: '关闭',
+          onConfirm: async () => {
+            closeModal();
+            let repaired;
+            try {
+              repaired = await desktopApi.preFundReconciliation.repairMptErrors(repairTokens);
+            } catch (error) {
+              repaired = { status: 'failed', message: error && error.message ? error.message : String(error) };
+            }
+            if (!repaired || repaired.status !== 'ok') {
+              openModal(createAlertDialog(
+                `删除错误数据并重跑失败：${escapeHtml((repaired && repaired.message) || '未知错误')}`,
+                { onConfirm: () => showImportResult(result) }
+              ));
+              return;
+            }
+            if (onChanged) await onChanged(repaired);
+            const repairedSummary = `有效导入 <b>${Number(repaired.importedRowCount) || 0}</b> 行，逻辑删除错误数据 <b>${Number(repaired.excludedRowCount) || 0}</b> 行。`;
+            const retryFailures = Array.isArray(repaired.results)
+              ? repaired.results.filter((item) => !item || item.status !== 'ok')
+              : [];
+            const remaining = structuralFailures.length + retryFailures.length;
+            const remainingHtml = remaining > 0
+              ? `<br/><br/>仍有 <b>${remaining}</b> 张文件未导入，请修复源文件后重新导入。`
+              : '';
+            const retryFailureHtml = retryFailures.length > 0
+              ? `<br/><br/>重跑失败：<br/>${retryFailures.map((item) => (
+                `• ${escapeHtml((item && item.fileName) || '文件')}：${escapeHtml((item && item.message) || '重跑失败')}`
+              )).join('<br/>')}`
+              : '';
+            const hasRetryableFailure = retryFailures.some((item) => (
+              item && item.canRepair === true && item.repairToken
+            ));
+            openModal(createAlertDialog(`${repairedSummary}${remainingHtml}${retryFailureHtml}`, {
+              skipLogReport: true,
+              onConfirm: hasRetryableFailure ? () => showImportResult(repaired) : reopenManager
+            }));
+          },
+          onMiddle: async () => {
+            closeModal();
+            let exported;
+            try {
+              exported = await desktopApi.preFundReconciliation.exportMptErrors(repairTokens);
+            } catch (error) {
+              exported = { status: 'failed', message: error && error.message ? error.message : String(error) };
+            }
+            if (exported && exported.status === 'cancelled') {
+              showImportResult(result);
+              return;
+            }
+            if (!exported || exported.status !== 'ok') {
+              openModal(createAlertDialog(
+                `导出错误数据失败：${escapeHtml((exported && exported.message) || '未知错误')}`,
+                { onConfirm: () => showImportResult(result) }
+              ));
+              return;
+            }
+            const warningHtml = Array.isArray(exported.warnings) && exported.warnings.length > 0
+              ? `<br/><br/>提醒：<br/>${exported.warnings.map((warning) => `• ${escapeHtml(warning)}`).join('<br/>')}`
+              : '';
+            openModal(createAlertDialog(
+              `已导出 <b>${Number(exported.errorRowCount) || 0}</b> 条错误数据：<br/>${escapeHtml(exported.filePath || exported.fileName || '')}${warningHtml}`,
+              { skipLogReport: true, onConfirm: () => showImportResult(result) }
+            ));
+          }
+        }));
+      }
+
       dialog.querySelector('.icon-close').addEventListener('click', closeModal);
       dialog.querySelector('[data-action="exit"]').addEventListener('click', closeModal);
       deleteBtn.addEventListener('click', () => {
@@ -6679,10 +6772,7 @@
           return;
         }
         if (onChanged) await onChanged(result);
-        openModal(createAlertDialog(buildImportSummaryHtml(result), {
-          skipLogReport: true,
-          onConfirm: reopenManager
-        }));
+        showImportResult(result);
       });
 
       refreshList();
