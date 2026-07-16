@@ -206,6 +206,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
   preFundReconciliation: {
     importBank: () => ipcRenderer.invoke('pre-fund-reconciliation:import-bank'),
     importMpt: () => ipcRenderer.invoke('pre-fund-reconciliation:import-mpt'),
+    exportMptErrors: (repairTokens) => ipcRenderer.invoke('pre-fund-reconciliation:mpt-errors:export', repairTokens),
+    repairMptErrors: (repairTokens) => ipcRenderer.invoke('pre-fund-reconciliation:mpt-errors:repair', repairTokens),
     listTempBatches: () => ipcRenderer.invoke('pre-fund-reconciliation:temp:list'),
     deleteTempBatch: (payload) => ipcRenderer.invoke('pre-fund-reconciliation:temp:delete', payload),
     countTempByDateRange: (start, end, sourceType) => ipcRenderer.invoke('pre-fund-reconciliation:temp:count-by-date-range', { start, end, sourceType }),

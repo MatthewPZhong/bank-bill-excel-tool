@@ -242,7 +242,7 @@ function* iterateDuplicateGroupRecords(groups, channel) {
   }
 }
 
-function mapUnbalancedRow(bankRow) {
+function mapUnbalancedRow(bankRow, options = {}) {
   if (!bankRow || typeof bankRow !== 'object') {
     throw new TypeError('不平结果映射需要派生后的银行行对象');
   }
@@ -264,7 +264,7 @@ function mapUnbalancedRow(bankRow) {
     '业务订单交易完成时间': '',
     '渠道订单交易完成时间': bankValue(bankRow, 'ValueDate'),
     '差错类型': '右单边账',
-    '备注': '',
+    '备注': trimCell(options.reason || bankRow.unbalancedReason),
     '业务方原始账单ID': '',
     '渠道方原始账单ID': bankRow.originBillId || ''
   };

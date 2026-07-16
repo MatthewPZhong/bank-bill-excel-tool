@@ -27,7 +27,8 @@ const {
 } = require('../../../src/main-process/pre-fund-reconciliation/service');
 
 function bankRow(values = {}) {
-  return BANK_STATEMENT_FIELDS.map((field) => values[field] ?? '');
+  const normalized = { FundType: 'Inbound', ...values };
+  return BANK_STATEMENT_FIELDS.map((field) => normalized[field] ?? '');
 }
 
 function writeBankFile(filePath, rows) {
@@ -134,7 +135,7 @@ test.describe('PreFundReconciliationService', () => {
         row: {
           Billdate: '2026-07-01', Channel: 'CIT', merchantid: 'M-1', orderid: 'G-1',
           ReconBillBizId: 'RB-1', reconciliationid: 'R-1', currency: 'USD', amount: '10.00',
-          TradeType: 'INBOUND', name: 'Gateway Name', cardNo: 'Gateway Card',
+          TradeType: 'Inbound-VA', name: 'Gateway Name', cardNo: 'Gateway Card',
           '真实渠道': 'CIT', '清算网络': 'VISA'
         }
       }
@@ -217,7 +218,8 @@ test.describe('PreFundReconciliationService', () => {
         reconciliationid: item.id,
         currency: item.currency,
         amount: item.amount,
-        OrderId: `G-${index + 1}`
+        OrderId: `G-${index + 1}`,
+        TradeType: 'Inbound-VA'
       }
     }));
     const database = attachRunMirrorRepository({
@@ -241,6 +243,46 @@ test.describe('PreFundReconciliationService', () => {
     assert.equal([...exports[0].unbalancedRows].length, 3);
   });
 
+  test('production side-DB path uses direction amount plus Extra Fee and only consumes rule-allowed tradeType', async () => {
+    writeBankFile(bankFile, [
+      bankRow({
+        BillDate: '2026-07-01', ValueDate: '2026-07-02', Channel: 'CIT',
+        Currency: 'USD', 'Credit Amount': '9.50', 'Extra Fee': '0.50',
+        ReconciliationId: 'R-FEE', FundType: 'Inbound'
+      })
+    ]);
+    const persistentRows = [
+      { id: 1, tradeType: 'Withdraw' },
+      { id: 2, tradeType: 'Inbound-VA' }
+    ].map((item) => ({
+      id: item.id,
+      reconciliationId: 'R-FEE',
+      row: {
+        Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-FEE',
+        currency: 'USD', amount: '10', OrderId: `G-${item.id}`, TradeType: item.tradeType
+      }
+    }));
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 2, updatedAt: 'x' }),
+      iterateGatewayBillRows: () => persistentRows.values()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx')
+    });
+    service.importBank(bankFile);
+
+    const result = await service.run();
+    assert.equal(result.summary.matchedPairs, 1);
+    assert.equal(result.summary.unusedGatewayRows, 1);
+    const exports = [...service.runStore.iterateChannelExports(result.monthKey, service.lastRun.sideRunId)];
+    const balanced = [...exports[0].balancedRows];
+    assert.equal(balanced[0]['网关-TradeType'], 'Inbound-VA');
+    assert.equal(balanced[0]['网关-Amount'], '10');
+    assert.equal([...exports[0].unbalancedRows].length, 0);
+  });
+
   test('does not enable export when a successful run has no channel output', async () => {
     writeBankFile(bankFile, [
       bankRow({ Channel: 'CIT', Currency: 'USD', 'Credit Amount': '0', ReconciliationId: 'R-ZERO' })
@@ -252,7 +294,7 @@ test.describe('PreFundReconciliationService', () => {
         reconciliationId: 'R-GATEWAY',
         row: {
           Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-GATEWAY',
-          currency: 'USD', amount: '10'
+          currency: 'USD', amount: '10', TradeType: 'Inbound-VA'
         }
       }].values()
     });
@@ -286,7 +328,7 @@ test.describe('PreFundReconciliationService', () => {
             Billdate: '2026-07-01', Channel: 'CIT', merchantid: 'M-1',
             orderid: `O-${index}`, ReconBillBizId: `B-${index}`,
             reconciliationid: `R-${index}`, currency: 'USD', amount: '10',
-            TradeType: 'INBOUND'
+            TradeType: 'Inbound-VA'
           }
         };
       }
@@ -476,6 +518,151 @@ test.describe('PreFundReconciliationService', () => {
     );
   });
 
+  test('MPT 明细失败签发轻量令牌，支持错误导出和逻辑删除重跑且令牌一次性失效', async () => {
+    const mptFile = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260708_905.txt');
+    writeMptFile(mptFile, [
+      inboundMptRow({ reconId: 'VALID-ROW' }),
+      inboundMptRow({ reconId: 'INVALID-ROW', amount: 'bad' })
+    ]);
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({
+        tableKey: 'gateway-bill', rowCount: 0, dataDateMin: null, dataDateMax: null,
+        sourceFileName: null, updatedAt: null
+      }),
+      iterateGatewayBillRows: () => [][Symbol.iterator]()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
+    });
+
+    const imported = await service.importMptFiles([mptFile]);
+    assert.equal(imported.successCount, 0);
+    assert.equal(imported.failedCount, 1);
+    assert.equal(imported.results[0].code, 'MPT_ROW_ERRORS');
+    assert.equal(imported.results[0].canRepair, true);
+    assert.equal(imported.results[0].rowErrorCount, 1);
+    assert.match(imported.results[0].repairToken, /^[a-f0-9-]{36}$/i);
+    assert.deepEqual(service.listTempBatches(), [], '严格失败不得留下半批数据');
+
+    const repairToken = imported.results[0].repairToken;
+    const errorReportPath = path.join(userDataDir, 'mpt-errors.xlsx');
+    const exported = await service.exportMptErrorData([repairToken], errorReportPath);
+    assert.equal(exported.status, 'ok');
+    assert.equal(exported.errorRowCount, 1);
+    assert.deepEqual(XLSX.readFile(errorReportPath).SheetNames, ['INBOUND错误数据']);
+
+    const repaired = await service.retryMptImportFailures([repairToken]);
+    assert.equal(repaired.status, 'ok');
+    assert.equal(repaired.successCount, 1);
+    assert.equal(repaired.importedRowCount, 1);
+    assert.equal(repaired.excludedRowCount, 1);
+    assert.deepEqual(service.listTempBatches().map((batch) => ({
+      rowCount: batch.rowCount,
+      declaredRowCount: batch.declaredRowCount,
+      excludedRowCount: batch.excludedRowCount,
+      importMode: batch.importMode
+    })), [{
+      rowCount: 1,
+      declaredRowCount: 2,
+      excludedRowCount: 1,
+      importMode: 'exclude-invalid-rows'
+    }]);
+    assert.deepEqual([...service.tempStore.iterateRows()].map((row) => row.reconciliationId), [
+      'VALID-ROW'
+    ]);
+    assert.deepEqual([...service.tempStore.iterateExcludedRows()].map((row) => row.errorCode), [
+      'MPT_DECIMAL_INVALID'
+    ]);
+    await assert.rejects(
+      () => service.retryMptImportFailures([repairToken]),
+      (error) => error.code === 'pre-fund-mpt-failure-token-expired'
+    );
+  });
+
+  test('重新选择 MPT 文件后旧错误令牌失效', async () => {
+    const broken = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260708_906.txt');
+    writeMptFile(broken, [inboundMptRow({ amount: 'bad' })]);
+    const valid = path.join(userDataDir, 'MPT_OUTBOUND_GATEWAY_20260708_907.txt');
+    writeMptFile(valid, [outboundMptRow()]);
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ rowCount: 0 }),
+      iterateGatewayBillRows: () => [][Symbol.iterator]()
+    });
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
+    });
+    const first = await service.importMptFiles([broken]);
+    const oldToken = first.results[0].repairToken;
+    assert.ok(oldToken);
+
+    const second = await service.importMptFiles([valid]);
+    assert.equal(second.successCount, 1);
+    await assert.rejects(
+      () => service.exportMptErrorData([oldToken], path.join(userDataDir, 'expired.xlsx')),
+      (error) => error.code === 'pre-fund-mpt-failure-token-expired'
+    );
+  });
+
+  test('逻辑删除重跑发现源文件变化时作废旧令牌且不反复提供修复操作', async () => {
+    const broken = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260708_908.txt');
+    writeMptFile(broken, [inboundMptRow({ amount: 'bad' })]);
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database: attachRunMirrorRepository({
+        getLinkedTableMeta: () => ({ rowCount: 0 }),
+        iterateGatewayBillRows: () => [][Symbol.iterator]()
+      }),
+      templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
+    });
+    const imported = await service.importMptFiles([broken]);
+    const repairToken = imported.results[0].repairToken;
+    fs.writeFileSync(broken, fs.readFileSync(broken, 'utf8').replace('bad', 'changed'), 'utf8');
+
+    const retried = await service.retryMptImportFailures([repairToken]);
+    assert.equal(retried.successCount, 0);
+    assert.equal(retried.failedCount, 1);
+    assert.equal(retried.results[0].code, 'MPT_REPAIR_SOURCE_CHANGED');
+    assert.equal(retried.results[0].canRepair, undefined);
+    assert.equal(retried.results[0].repairToken, undefined);
+    await assert.rejects(
+      () => service.retryMptImportFailures([repairToken]),
+      (error) => error.code === 'pre-fund-mpt-failure-token-expired'
+    );
+  });
+
+  test('逻辑删除重跑遇到旧批次序号时终止失败令牌', async () => {
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database: attachRunMirrorRepository({
+        getLinkedTableMeta: () => ({ rowCount: 0 }),
+        iterateGatewayBillRows: () => [][Symbol.iterator]()
+      }),
+      templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
+    });
+    const repairToken = '11111111-1111-4111-8111-111111111111';
+    service.mptImportFailures.set(repairToken, {
+      failureId: repairToken,
+      filePath: path.join(userDataDir, 'stale.txt'),
+      sourceType: 'MPT_INBOUND_GATEWAY',
+      contentHash: 'a'.repeat(64),
+      rowErrorCount: 1
+    });
+    service.tempStore.importFile = async () => {
+      const error = new Error('同一批次只接受更高文件序号');
+      error.code = 'MPT_BATCH_SEQUENCE_STALE';
+      throw error;
+    };
+
+    const retried = await service.retryMptImportFailures([repairToken]);
+    assert.equal(retried.results[0].code, 'MPT_BATCH_SEQUENCE_STALE');
+    assert.equal(retried.results[0].canRepair, undefined);
+    assert.equal(service.mptImportFailures.has(repairToken), false);
+  });
+
   test('bank re-import and persistent gateway metadata changes both invalidate the previous result', async () => {
     writeBankFile(bankFile, [
       bankRow({
@@ -612,7 +799,7 @@ test.describe('PreFundReconciliationService', () => {
         rawJson: '{"reconciliationid":"R-1"}',
         row: {
           Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-1',
-          currency: 'USD', amount: '10'
+          currency: 'USD', amount: '10', TradeType: 'Inbound-VA'
         }
       }][Symbol.iterator]()
     });
@@ -716,7 +903,8 @@ test.describe('PreFundReconciliationService', () => {
       reconciliationId: 'R-1',
       row: {
         Billdate: '2026-07-01', reconciliationid: 'R-1', currency: 'USD', amount: '10',
-        Channel: 'CIT', MerchantId: 'M-1', OrderId: 'G-1', ReconBillBizId: 'B-1'
+        Channel: 'CIT', MerchantId: 'M-1', OrderId: 'G-1', ReconBillBizId: 'B-1',
+        TradeType: 'Inbound-VA'
       }
     }];
     const database = attachRunMirrorRepository({
@@ -762,7 +950,7 @@ test.describe('PreFundReconciliationService', () => {
         reconciliationId: 'R-1',
         row: {
           Billdate: '2026-07-01', Channel: 'CIT', reconciliationid: 'R-1',
-          currency: 'USD', amount: '10'
+          currency: 'USD', amount: '10', TradeType: 'Inbound-VA'
         }
       }].values()
     });

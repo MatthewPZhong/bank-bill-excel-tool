@@ -25,6 +25,9 @@ const {
   writeChannelWorkbooks
 } = require('../../src/main-process/pre-fund-reconciliation/excel-writer');
 const {
+  writeMptErrorReport
+} = require('../../src/main-process/pre-fund-reconciliation/mpt-error-report-writer');
+const {
   readReconIdFixFile
 } = require('../../src/main-process/recon-id-fix-io');
 const {
@@ -136,7 +139,10 @@ async function run() {
       name: '',
       cardNo: '',
       location: {},
-      fields: { date: '2026-07-01', channel: 'CITI', amount: '10', currency: 'USD' },
+      fields: {
+        date: '2026-07-01', channel: 'CITI', amount: '10', currency: 'USD',
+        tradeType: 'Inbound-VA'
+      },
       rawJson: '{"match":true}'
     };
     const matchCandidates = [
@@ -145,15 +151,17 @@ async function run() {
       { ...candidateBase, source: '临时网关对账单', sourcePriority: 0, sourceOrder: 2, fingerprint: 'wrong-currency', fields: { ...candidateBase.fields, currency: 'EUR' } },
       { ...candidateBase, source: '网关对账单', sourcePriority: 1, sourceOrder: 3, fingerprint: 'exact' }
     ];
-    assertTrue(matchCandidates.every((candidate) => insertCandidate(candidate)), '四字段匹配候选全部入池');
+    assertTrue(matchCandidates.every((candidate) => insertCandidate(candidate)), '五条件匹配候选全部入池');
     const consumeCandidate = resultStore.createGatewayConsumer(resultDb, 1);
     const exact = consumeCandidate({
-      reconciliationId: 'MATCH-1', channel: 'CITI', amount: '10', currency: 'USD'
+      reconciliationId: 'MATCH-1', channel: 'CITI', amount: '10', currency: 'USD',
+      allowedGatewayTradeTypes: ['Inbound-VA']
     }, 0);
     assertEq(exact && exact.source, '网关对账单', 'SQL 跳过要素不符的临时候选并消费完整匹配候选');
     assertEq(exact && exact.fields.amount, '10', 'SQL 匹配金额使用规范十进制值');
     assertEq(consumeCandidate({
-      reconciliationId: 'MATCH-1', channel: 'CITI', amount: '10', currency: 'USD'
+      reconciliationId: 'MATCH-1', channel: 'CITI', amount: '10', currency: 'USD',
+      allowedGatewayTradeTypes: ['Inbound-VA']
     }, 1), null, '完整匹配候选只消费一次');
     assertEq(resultStore.gatewayStats(resultDb, 1).unusedCount, 3, '三条要素不符候选保持未消费');
 
@@ -354,12 +362,38 @@ async function run() {
       ['20260708', 'MPT_INBOUND_20260708', '2'],
       [inboundRow({ reconId: 'PARTIAL' }), inboundRow({ reconId: 'BROKEN', amount: 'bad' })]
     );
-    await expectErrorCode(
-      () => reopened.importFile(broken),
-      'MPT_DECIMAL_INVALID',
-      '替换文件中途失败'
-    );
+    let brokenError = null;
+    try {
+      await reopened.importFile(broken);
+    } catch (error) {
+      brokenError = error;
+    }
+    assertEq(brokenError && brokenError.code, 'MPT_ROW_ERRORS', '替换文件中途失败');
+    assertEq(brokenError && brokenError.rowErrorCount, 1, '严格导入汇总可定位错误行数');
     assertEq([...reopened.iterateRows({ sourceBatch: 'MPT_INBOUND_20260708' })][0].reconciliationId, 'I-NEW', '失败后旧批次完整恢复');
+
+    const errorReportPath = path.join(tmpdir, 'mpt-error-report.xlsx');
+    const errorReport = await writeMptErrorReport({
+      failureRecords: [{
+        failureId: 'integration-broken',
+        filePath: broken,
+        sourceType: SOURCE_TYPE_INBOUND,
+        contentHash: brokenError.contentHash,
+        rowErrorCount: brokenError.rowErrorCount
+      }],
+      outputPath: errorReportPath
+    });
+    assertEq(errorReport.errorRowCount, 1, '错误报告导出全部错误行');
+    assertEq(XLSX.readFile(errorReportPath).SheetNames.join(','), 'INBOUND错误数据', '错误报告按来源建立 sheet');
+
+    const repaired = await reopened.importFile(broken, {
+      skipInvalidRows: true,
+      expectedContentHash: brokenError.contentHash
+    });
+    assertEq(repaired.status, 'replaced', '逻辑删除错误行后原子替换旧批次');
+    assertEq(repaired.batch.rowCount, 1, '逻辑删除重跑只导入有效行');
+    assertEq(repaired.batch.excludedRowCount, 1, '逻辑删除重跑记录排除行数');
+    assertEq([...reopened.iterateExcludedRows()].length, 1, '逻辑删除重跑持久化逐行审计');
 
     const rangeCount = reopened.countByDateRange('2026-07-07', '2026-07-08', {
       sourceType: SOURCE_TYPE_INBOUND

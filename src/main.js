@@ -13374,6 +13374,11 @@ function sendPreFundProgress(event, channel, payload) {
   } catch (_error) { /* renderer 已关闭时忽略进度 */ }
 }
 
+function preFundErrorReportFileName(value = new Date()) {
+  const pad = (number) => String(number).padStart(2, '0');
+  return `MPT临时链接表错误数据_${value.getFullYear()}${pad(value.getMonth() + 1)}${pad(value.getDate())}_${pad(value.getHours())}${pad(value.getMinutes())}${pad(value.getSeconds())}.xlsx`;
+}
+
 // v3.0.14：前置资金对账 IPC。所有写/运行/导出与现有资金模块共用 bankStatementOperationLock，
 // 避免 linked_gateway_bill 变更与快照构建交错。
 function registerPreFundReconciliationHandlers() {
@@ -13419,6 +13424,42 @@ function registerPreFundReconciliationHandlers() {
       }
       return await getPreFundReconciliationService().importMptFiles(
         choice.filePaths,
+        (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
+      );
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:export', '前置资金对账', '导出临时网关错误数据', async (_event, repairTokens = []) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-export-mpt-errors');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出临时网关账单错误数据',
+        defaultPath: path.join(app.getPath('documents'), preFundErrorReportFileName()),
+        filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return await getPreFundReconciliationService().exportMptErrorData(
+        repairTokens,
+        choice.filePath
+      );
+    } catch (error) {
+      return preFundFailureResult(error);
+    } finally {
+      releaseBankStatementOpLock();
+    }
+  });
+
+  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:repair', '前置资金对账', '删除临时网关错误数据并重跑', async (event, repairTokens = []) => {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-repair-mpt-errors');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return await getPreFundReconciliationService().retryMptImportFailures(
+        repairTokens,
         (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
       );
     } catch (error) {

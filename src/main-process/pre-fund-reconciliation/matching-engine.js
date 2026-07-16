@@ -10,6 +10,7 @@ const {
   classifyBankRow,
   toInvalidBothNonzeroError
 } = require('./bank-row');
+const { resolveBankRuleEligibility } = require('./reconciliation-rules');
 
 const GATEWAY_SOURCE = Object.freeze({
   TEMPORARY: '临时网关对账单',
@@ -301,11 +302,15 @@ function buildBankMatchCriteria(bankRow) {
   if (!isPlainObject(bankRow)) {
     throw new TypeError('银行匹配条件必须来自派生后的银行行对象');
   }
+  const rawRow = isPlainObject(bankRow.rawRow) ? bankRow.rawRow : bankRow;
+  const ruleEligibility = resolveBankRuleEligibility(rawRow.FundType, bankRow.transactionType);
   return {
     reconciliationId: trimCell(bankRow.reconciliationId),
     channel: trimCell(bankRow.channel),
-    amount: canonicalizeDecimal(bankRow.amount, { label: '银行对账金额' }),
-    currency: trimCell(bankRow.currency)
+    amount: canonicalizeDecimal(bankRow.matchingAmount ?? bankRow.amount, { label: '银行对账金额' }),
+    currency: trimCell(bankRow.currency),
+    allowedGatewayTradeTypes: ruleEligibility.allowedGatewayTradeTypes,
+    ruleEligibility
   };
 }
 
@@ -315,7 +320,8 @@ function gatewayCandidateMatches(candidate, criteria) {
   return candidate.reconciliationId === criteria.reconciliationId
     && fields.channel === criteria.channel
     && fields.amount === criteria.amount
-    && fields.currency === criteria.currency;
+    && fields.currency === criteria.currency
+    && criteria.allowedGatewayTradeTypes.includes(fields.tradeType);
 }
 
 function assertSyncIterable(value, label) {
@@ -339,7 +345,10 @@ function createStats() {
     gatewayEmptyReconciliationIdRows: 0,
     gatewayDuplicateFoldedRows: 0,
     gatewayCandidateRows: 0,
-    gatewayUnconsumedRows: 0
+    gatewayUnconsumedRows: 0,
+    bankRuleUnmappedRows: 0,
+    bankRuleDirectionMismatchRows: 0,
+    bankRuleNoGatewayTradeTypeRows: 0
   };
 }
 
@@ -509,7 +518,7 @@ function assertConservation(stats) {
 }
 
 /**
- * 大数据生产路径：银行行逐条分类，并通过 consumeGatewayCandidate 从 side DB 严格消费一个四字段候选。
+ * 大数据生产路径：银行行逐条分类，并通过 consumeGatewayCandidate 从 side DB 严格消费一个五条件候选。
  * onBalanced/onUnbalanced 可直接映射并写结果表；函数自身不保留全量结果数组。
  */
 function reconcileBankRowsIterative(options = {}) {
@@ -565,7 +574,15 @@ function reconcileBankRowsIterative(options = {}) {
 
     stats.bankParticipatingRows += 1;
     const criteria = buildBankMatchCriteria(classified);
-    const gatewayRow = options.consumeGatewayCandidate(criteria, bankOrdinal);
+    const eligibility = criteria.ruleEligibility;
+    if (!eligibility.eligible) {
+      if (eligibility.code === 'bank-fund-type-unmapped') stats.bankRuleUnmappedRows += 1;
+      if (eligibility.code === 'bank-rule-direction-mismatch') stats.bankRuleDirectionMismatchRows += 1;
+      if (eligibility.code === 'bank-rule-no-gateway-trade-type') stats.bankRuleNoGatewayTradeTypeRows += 1;
+    }
+    const gatewayRow = eligibility.eligible
+      ? options.consumeGatewayCandidate(criteria, bankOrdinal)
+      : null;
     if (gatewayRow) {
       stats.bankMatchedRows += 1;
       onBalanced({
@@ -575,7 +592,9 @@ function reconcileBankRowsIterative(options = {}) {
       });
     } else {
       stats.bankMissingGatewayRows += 1;
-      onUnbalanced(classified);
+      onUnbalanced(classified, eligibility.eligible
+        ? '未找到同时满足对账ID、渠道、金额、币种和类型规则的网关账单'
+        : eligibility.reason);
     }
   }
 
@@ -653,8 +672,14 @@ function reconcilePreFundRows(options = {}) {
     stats.bankParticipatingRows += 1;
     const pool = pools.get(classified.reconciliationId);
     const criteria = buildBankMatchCriteria(classified);
+    const eligibility = criteria.ruleEligibility;
+    if (!eligibility.eligible) {
+      if (eligibility.code === 'bank-fund-type-unmapped') stats.bankRuleUnmappedRows += 1;
+      if (eligibility.code === 'bank-rule-direction-mismatch') stats.bankRuleDirectionMismatchRows += 1;
+      if (eligibility.code === 'bank-rule-no-gateway-trade-type') stats.bankRuleNoGatewayTradeTypeRows += 1;
+    }
     let matchedIndex = -1;
-    if (pool) {
+    if (pool && eligibility.eligible) {
       matchedIndex = pool.candidates.findIndex((candidate, candidateIndex) => (
         !pool.consumedIndexes.has(candidateIndex)
         && gatewayCandidateMatches(candidate, criteria)
@@ -670,7 +695,12 @@ function reconcilePreFundRows(options = {}) {
       });
       stats.bankMatchedRows += 1;
     } else {
-      unbalancedBankRows.push(classified);
+      unbalancedBankRows.push({
+        ...classified,
+        unbalancedReason: eligibility.eligible
+          ? '未找到同时满足对账ID、渠道、金额、币种和类型规则的网关账单'
+          : eligibility.reason
+      });
       stats.bankMissingGatewayRows += 1;
     }
   }
