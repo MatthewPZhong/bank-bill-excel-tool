@@ -43,6 +43,8 @@
 - `npm run scan:vars`：191 个 JS 文件、2122 个顶层声明；A-share 335 / A-pair 554 / A-local 1100 / B 889。
 - `npm run check:vars -- --include-minor`：命中 `FileValidationError`、`ipcRenderer`、`MODULES/app/dialog/state` 和前置资金对账风险符号；已逐项确认错误 schema、IPC 对称、取消分支、状态生命周期和资金不变量。
 - 最终 self-review：P0/P1/P2/P3/P4 Finding 均为 0；`git diff --check` 及新增文本尾随空白检查通过。
+- PR #89：GitHub Actions `smoke-test` 通过；head `e6a939f` 以 merge commit `e09a18c` 合入 `main`，远程开发分支删除。
+- 归档：`docs/prs/PR89-v3.0.16.md`、`docs/iterations/v3.0.16/PRD-v3.0.16.md`。
 
 ## Remaining Unknowns
 

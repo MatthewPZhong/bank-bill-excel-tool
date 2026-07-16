@@ -1,7 +1,8 @@
-# bank-bill-excel-tool 3.0.16 Spec
+# bank-bill-excel-tool 3.0.16 PRD
 
 > 目标版本：`3.0.16`
 > 状态：merged（PR #89 已合入 `main`；真实脱敏样本人工复核仍是发布门禁）
+> 归档：PR #89 merge commit `e09a18c`；源规格 `changes/3.0.16/spec.md`
 > 更新时间：2026-07-16
 > 适用仓库：`bank-bill-excel-tool`
 
@@ -148,5 +149,4 @@ AND trim(gateway.tradeType) 属于该 bank.FundType + bank.direction 的允许�
 
 - 2026-07-16：本地 `release-check` 全绿，unit 3585/3585、integration 1877/1877，GitHub Actions `smoke-test` 通过。
 - 2026-07-16：PR #89 在 P0-P4 Finding 为 0 后，以 merge commit `e09a18c` 合入 `main`，远程开发分支删除。
-- 归档见 `docs/prs/PR89-v3.0.16.md` 与 `docs/iterations/v3.0.16/PRD-v3.0.16.md`。
 - 真实脱敏样本业务复核仍为发布门禁；本次合并不创建 tag 或 GitHub Release。

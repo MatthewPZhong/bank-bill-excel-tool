@@ -22,4 +22,4 @@
 ## Task 5：验证与发布收尾
 - 补齐单元/集成/预览测试，执行 release-check、check-vars 和人工资金复核。
 - 更新版本号、CHANGELOG、VERSION_FEATURE_HISTORY、USER_GUIDE。
-- 状态：doing（自动验证完成；人工资金复核待完成）
+- 状态：done（代码、自动验证、PR #89 合并与归档完成；人工资金复核继续作为发布门禁）

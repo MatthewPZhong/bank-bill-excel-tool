@@ -1,6 +1,6 @@
 # Test Spec — v3.0.16 前置资金对账规则与错误行重跑
 
-> status: apply
+> status: implementation merged via PR #89; human fund review gate pending
 > created: 2026-07-15
 
 ## 1. 测试目标
