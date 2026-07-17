@@ -193,6 +193,28 @@ test.describe('getBackgroundConfig / setBackgroundConfig', () => {
   });
 });
 
+test.describe('自动更新设置', () => {
+  test('缺失或非法值默认关闭', () => {
+    assert.equal(settingsRepo.getAutoUpdateEnabled(db), false);
+    settingsRepo.setSetting(db, settingsRepo.AUTO_UPDATE_ENABLED_KEY, 'true');
+    assert.equal(settingsRepo.getAutoUpdateEnabled(db), false);
+  });
+
+  test('布尔值按 1/0 持久化', () => {
+    settingsRepo.setAutoUpdateEnabled(db, true);
+    assert.equal(settingsRepo.getAutoUpdateEnabled(db), true);
+    assert.equal(settingsRepo.getSetting(db, settingsRepo.AUTO_UPDATE_ENABLED_KEY), '1');
+
+    settingsRepo.setAutoUpdateEnabled(db, false);
+    assert.equal(settingsRepo.getAutoUpdateEnabled(db), false);
+    assert.equal(settingsRepo.getSetting(db, settingsRepo.AUTO_UPDATE_ENABLED_KEY), '0');
+  });
+
+  test('拒绝非布尔输入', () => {
+    assert.throws(() => settingsRepo.setAutoUpdateEnabled(db, 1), /必须是布尔值/);
+  });
+});
+
 // ========================================================================
 // UI Style
 // ========================================================================

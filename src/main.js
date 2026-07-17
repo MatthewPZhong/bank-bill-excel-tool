@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
 const { AppDatabase } = require('./backend/database');
 const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
@@ -18,6 +18,14 @@ const pendingRemovedReader = require('./backend/pending-import/removed-reader');
 const pendingRemovedRepo = require('./backend/pending-db/removed-repository');
 const pendingRemovalMatch = require('./backend/pending-reconcile/removal-match');
 const { createPendingSession } = require('./main-process/pending-session');
+const {
+  createAppUpdaterService,
+  detectDistribution
+} = require('./main-process/app-updater');
+const {
+  createBusinessOperationRegistry,
+  INSTALL_BUSY_MESSAGE
+} = require('./main-process/business-operation-registry');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
@@ -371,6 +379,9 @@ let database = null;
 let pendingDb = null;
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
+let appUpdaterService = null;
+let appUpdaterStartupScheduled = false;
+const businessOperationRegistry = createBusinessOperationRegistry();
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
   getStorageRoot: () => ensureStorageRoot()
@@ -445,6 +456,9 @@ function showImportOpenDialog(scope, options) {
 // 也需要 acquire lock，避免和 IPC handler 并发；register 函数内部仍可访问（JS 闭包向外查找）
 const acquiringBillCurrencyOperationLock = { inFlight: false, operation: null, monthKey: null };
 function tryAcquireAcquiringBillCurrencyOpLock(operation, monthKey) {
+  if (businessOperationRegistry.isInstallTransitionActive()) {
+    return { acquired: false, message: INSTALL_BUSY_MESSAGE };
+  }
   if (acquiringBillCurrencyOperationLock.inFlight) {
     const lock = acquiringBillCurrencyOperationLock;
     const opLabel = { import: '导入', run: '对账', export: '导出', cleanup: '上一次对账后清理' }[lock.operation] || lock.operation;
@@ -471,6 +485,9 @@ function releaseAcquiringBillCurrencyOpLock() {
 //   争用即返回 { status:'failed', message:'正在处理中…' }；handler finally 释放（仿收单 acquiringBillCurrencyOperationLock）。
 const bankStatementOperationLock = { inFlight: false, operation: null };
 function tryAcquireBankStatementOpLock(operation) {
+  if (businessOperationRegistry.isInstallTransitionActive()) {
+    return { acquired: false, message: INSTALL_BUSY_MESSAGE };
+  }
   if (bankStatementOperationLock.inFlight) {
     return { acquired: false, message: '正在处理中…' };
   }
@@ -3147,6 +3164,11 @@ function createWindow() {
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
   });
+  mainWindow.on('close', (event) => {
+    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+      event.preventDefault();
+    }
+  });
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
 }
@@ -3187,6 +3209,233 @@ function registerWindowHandlers() {
 
   ipcMain.handle('window:close', () => {
     mainWindow.close();
+  });
+}
+
+const APP_UPDATE_RELEASE_URL = 'https://github.com/MatthewPZhong/bank-bill-excel-tool/releases';
+
+function sendAppUpdateStatus(status) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send('app-update:status-changed', status);
+    }
+  } catch (_error) {
+    // 窗口关闭过程中忽略状态广播失败。
+  }
+}
+
+function createAppUpdateLogger() {
+  function write(level, message) {
+    try {
+      appendActivityLogEntry({
+        level: level === 'warn' ? 'warning' : level,
+        source: 'main',
+        domain: 'app-update',
+        message: String(message || '')
+      });
+    } catch (_error) {
+      // electron-updater 的日志适配器不得反向打断检查或下载。
+    }
+  }
+  return {
+    debug: (message) => write('info', message),
+    info: (message) => write('info', message),
+    warn: (message) => write('warning', message),
+    error: (message) => write('error', message)
+  };
+}
+
+function listUpdateRestartBusyOperations() {
+  const gate = businessOperationRegistry.beginInstallTransition();
+  if (!gate.acquired) {
+    const labels = Array.isArray(gate.operations)
+      ? gate.operations.map((operation) => operation.label).filter(Boolean)
+      : [];
+    return labels.length > 0 ? labels : ['升级准备中'];
+  }
+
+  const busy = [];
+  if (bankStatementOperationLock.inFlight) busy.push('资金对账数据处理');
+  if (acquiringBillCurrencyOperationLock.inFlight) busy.push('收单单据币种校验');
+  try {
+    if (runCheckWorkerPool && typeof runCheckWorkerPool.isBusy === 'function' && runCheckWorkerPool.isBusy()) {
+      busy.push('收单校验 worker');
+    }
+  } catch (_error) {
+    busy.push('收单校验 worker 状态检查');
+  }
+
+  if (busy.length > 0) businessOperationRegistry.cancelInstallTransition();
+  return busy;
+}
+
+function getFallbackAppUpdateStatus() {
+  const distribution = detectDistribution({ app });
+  return {
+    enabled: false,
+    supported: distribution === 'nsis',
+    distribution,
+    state: 'disabled',
+    currentVersion: app.getVersion(),
+    targetVersion: null,
+    percent: 0,
+    lastCheckedAt: null,
+    canRestart: false,
+    busyOperations: [],
+    error: null
+  };
+}
+
+function initializeAppUpdaterService() {
+  if (appUpdaterService) return appUpdaterService;
+  const distribution = detectDistribution({ app });
+  const persistedEnabled = Boolean(database && database.getAutoUpdateEnabled());
+  const enabled = distribution === 'nsis' && persistedEnabled;
+  appUpdaterService = createAppUpdaterService({
+    app,
+    distribution,
+    enabled,
+    logger: createAppUpdateLogger(),
+    callbacks: {
+      onStatusChange: sendAppUpdateStatus,
+      getBusyOperations: listUpdateRestartBusyOperations,
+      cleanupBeforeRestart: prepareApplicationForQuit,
+      resumeAfterFailedRestart: resumeApplicationAfterFailedRestart,
+      cancelInstallTransition: () => businessOperationRegistry.cancelInstallTransition()
+    }
+  });
+  appUpdaterService.initialize().catch((error) => {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'app-update',
+      message: '在线升级服务初始化失败',
+      details: [error && error.message ? error.message : String(error)]
+    });
+  });
+  return appUpdaterService;
+}
+
+async function checkAndDownloadAppUpdate(kind) {
+  const service = initializeAppUpdaterService();
+  const checked = kind === 'startup'
+    ? await service.checkForUpdatesOnStartup()
+    : (kind === 'toggle'
+      ? await service.checkForUpdates('toggle')
+      : await service.checkForUpdatesManually());
+  if (checked && checked.state === 'available') {
+    const completedKind = service.getLastCompletedCheckKind();
+    return service.downloadUpdate({ source: completedKind === 'manual' ? 'manual' : 'automatic' });
+  }
+  return checked;
+}
+
+function scheduleAppUpdaterStartupCheck() {
+  if (appUpdaterStartupScheduled) return;
+  appUpdaterStartupScheduled = true;
+  setImmediate(async () => {
+    const service = initializeAppUpdaterService();
+    const status = service.getStatus();
+    if (!status.enabled || !status.supported) return;
+    try {
+      await checkAndDownloadAppUpdate('startup');
+    } catch (error) {
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'app-update',
+        message: '启动后台检查更新失败',
+        details: [error && error.message ? error.message : String(error)]
+      });
+    }
+  });
+}
+
+function registerAppUpdateHandlers() {
+  ipcMain.handle('app-update:get-status', () => {
+    return appUpdaterService ? appUpdaterService.getStatus() : getFallbackAppUpdateStatus();
+  });
+
+  ipcMain.handle('app-update:set-enabled', async (_event, enabled) => {
+    if (typeof enabled !== 'boolean') {
+      return { status: 'error', message: '自动更新开关值无效', updateStatus: appUpdaterService?.getStatus() || getFallbackAppUpdateStatus() };
+    }
+    const service = initializeAppUpdaterService();
+    const before = service.getStatus();
+    if (!database || !database.db) {
+      return { status: 'error', message: '应用尚未初始化完成', updateStatus: before };
+    }
+    if (!before.supported) {
+      return { status: 'error', message: '当前安装类型不支持自动更新', updateStatus: before };
+    }
+    try {
+      database.setAutoUpdateEnabled(enabled);
+      let updateStatus = await service.setEnabled(enabled);
+      const alreadyUpdating = ['checking', 'available', 'downloading', 'downloaded'].includes(before.state);
+      if (enabled && !before.enabled && !alreadyUpdating) {
+        updateStatus = await checkAndDownloadAppUpdate('toggle');
+      }
+      return { status: 'success', updateStatus };
+    } catch (_error) {
+      return {
+        status: 'error',
+        message: '自动更新设置失败，请稍后重试',
+        updateStatus: service.getStatus()
+      };
+    }
+  });
+
+  ipcMain.handle('app-update:check-now', async () => {
+    const service = initializeAppUpdaterService();
+    const status = service.getStatus();
+    if (status.distribution === 'portable') {
+      try {
+        await shell.openExternal(APP_UPDATE_RELEASE_URL);
+        return { status: 'success', updateStatus: status };
+      } catch (error) {
+        return { status: 'error', message: '无法打开更新下载页面', updateStatus: status };
+      }
+    }
+    if (!status.supported) {
+      return { status: 'error', message: '当前环境不支持在线升级', updateStatus: status };
+    }
+    try {
+      return { status: 'success', updateStatus: await checkAndDownloadAppUpdate('manual') };
+    } catch (_error) {
+      const failedStatus = service.getStatus();
+      return {
+        status: 'error',
+        message: failedStatus.error?.message || '检查失败，请稍后重试',
+        updateStatus: failedStatus
+      };
+    }
+  });
+
+  ipcMain.handle('app-update:restart-and-install', async () => {
+    const service = initializeAppUpdaterService();
+    try {
+      const result = await service.restartAndInstall();
+      const updateStatus = result.status;
+      if (result.restarted) return { status: 'success', updateStatus };
+      const messages = {
+        busy: '当前有业务正在处理，暂时不能重启升级',
+        unsupported: '当前安装类型不支持自动安装更新',
+        'not-downloaded': '更新尚未下载完成'
+      };
+      return {
+        status: result.reason === 'busy' ? 'busy' : 'error',
+        message: messages[result.reason] || '暂时无法重启升级',
+        busyOperations: result.busyOperations || [],
+        updateStatus
+      };
+    } catch (_error) {
+      businessOperationRegistry.cancelInstallTransition();
+      return {
+        status: 'error',
+        message: '重启升级失败，请稍后重试',
+        updateStatus: service.getStatus()
+      };
+    }
   });
 }
 
@@ -4728,7 +4977,7 @@ function registerAppHandlers() {
     };
   });
 
-  ipcMain.handle('app:save-user-guide', async () => {
+  businessIpcHandle('app:save-user-guide', '导出使用手册', async () => {
     try {
       // v2.0.0 GA：默认 HTML（filters 第一项被 saveDialog 当默认；同时 defaultPath 带 .html 后缀加固）
       const result = await dialog.showSaveDialog(mainWindow, {
@@ -4852,7 +5101,7 @@ function registerAppHandlers() {
 }
 
 function registerErrorHandlers() {
-  ipcMain.handle('error:export-last', async () => {
+  businessIpcHandle('error:export-last', '导出错误报告', async () => {
     if (!lastErrorReport || !lastErrorReport.filePath || !fs.existsSync(lastErrorReport.filePath)) {
       return {
         status: 'empty',
@@ -8441,7 +8690,7 @@ async function exportStatementByScope(kind, scope = 'auto') {
 }
 
 function registerBigAccountHandlers() {
-  ipcMain.handle('big-account:import-bank-info', async (_event, templateId) => {
+  businessIpcHandle('big-account:import-bank-info', '导入银行账号信息', async (_event, templateId) => {
     const template = database.getTemplate(templateId);
 
     if (!template) {
@@ -9985,7 +10234,7 @@ function registerFileHandlers() {
     return { status: 'success' };
   });
 
-  ipcMain.handle('file:complete-big-account-selection', async (_event, payload = {}) => {
+  businessIpcHandle('file:complete-big-account-selection', '生成账单', async (_event, payload = {}) => {
     const pendingContext = lastPendingBigAccountSelection;
 
     if (!pendingContext) {
@@ -10187,7 +10436,7 @@ function registerFileHandlers() {
   });
 
 
-  ipcMain.handle('file:extract-big-account-order', (_event, payload = {}) => {
+  businessIpcHandle('file:extract-big-account-order', '识别大账号顺序', (_event, payload = {}) => {
     const pendingContext = lastPendingBigAccountSelection;
     const mode = payload?.mode || 'unfixed';
     const frontendFileRows = Array.isArray(payload?.fileRows) ? payload.fileRows : [];
@@ -10450,7 +10699,7 @@ function registerFileHandlers() {
     }
   });
 
-  ipcMain.handle('file:save-balance-seed', (_event, payload = {}) => {
+  businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', (_event, payload = {}) => {
     const pendingPrompt = lastManualBalancePrompt;
     const importContext = lastFileImportContext;
 
@@ -10622,7 +10871,7 @@ function registerFileHandlers() {
   //   { status: 'empty', message }
   //   { status: 'error', errorCode, message }
   // 注意：校验类错误（E1/E2/E3/E4）不走 createErrorResult 避免误触发错误报告；前端通过 createAlertDialog 弹窗
-  ipcMain.handle('monthly-balance:assemble', async (_event, payload = {}) => {
+  businessIpcHandle('monthly-balance:assemble', '装配月度余额', async (_event, payload = {}) => {
     try {
       const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
       const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';
@@ -11104,7 +11353,7 @@ function registerNewAccountHandlers() {
     });
   });
 
-  ipcMain.handle('pending:error:export-report', async () => {
+  businessIpcHandle('pending:error:export-report', '导出 Pending 错误报告', async () => {
     if (!pendingSession.hasPendingErrorReport()) {
       return { status: 'error', message: '无错误报告' };
     }
@@ -13315,7 +13564,7 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('acquiringBillCurrency:clearMonth', (_event, payload = {}) => {
+  businessIpcHandle('acquiringBillCurrency:clearMonth', '清空月份数据', (_event, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -14149,14 +14398,35 @@ function tickUsageStats(moduleKey, functionKey) {
 //   `status: 'success'`，导致统计偏低 → 同时接受两种方言（不接受 ready / empty 中间态）
 const SUCCESS_STATUSES = new Set(['ok', 'success']);
 
+function runRegisteredBusinessOperation(meta, handler) {
+  return async (event, ...args) => {
+    const operation = businessOperationRegistry.begin(meta);
+    if (!operation.accepted) {
+      return {
+        status: 'busy',
+        message: operation.message || INSTALL_BUSY_MESSAGE
+      };
+    }
+    try {
+      return await handler(event, ...args);
+    } finally {
+      businessOperationRegistry.end(operation.token);
+    }
+  };
+}
+
+function businessIpcHandle(channel, label, handler) {
+  ipcMain.handle(channel, runRegisteredBusinessOperation({ channel, functionKey: label }, handler));
+}
+
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
-  ipcMain.handle(channel, async (event, ...args) => {
+  ipcMain.handle(channel, runRegisteredBusinessOperation({ channel, moduleKey, functionKey }, async (event, ...args) => {
     const result = await handler(event, ...args);
     if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }
     return result;
-  });
+  }));
 }
 
 function flushUsageStats() {
@@ -14236,6 +14506,7 @@ function maybeSendVacuumLoadingNotice(dbPath) {
 function registerAllIpcHandlers() {
   registerWindowHandlers();
   registerAppHandlers();
+  registerAppUpdateHandlers();
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();
@@ -14265,6 +14536,7 @@ function runBackgroundInitChain() {
     maybeSendVacuumLoadingNotice(dataPath);
     database = new AppDatabase(dataPath);
     database.init();
+    initializeAppUpdaterService();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
@@ -14333,6 +14605,7 @@ function markAppInitDone() {
       mainWindow.webContents.send('app:init-done');
     }
   } catch (_e) { /* swallow — 窗口已销毁等 */ }
+  scheduleAppUpdaterStartupCheck();
 }
 
 if (hasSingleInstanceLock) app.whenReady()
@@ -14858,6 +15131,12 @@ function setupIdleCleanupTimer() {
   // v2.1.9 N1-settings：启动期从 settings 读阈值（默认 30）
   loadIdleCleanupMsFromSettings();
   idleCleanupTimer = setInterval(async () => {
+    const operation = businessOperationRegistry.begin({
+      channel: 'background:idle-cleanup',
+      moduleKey: '收单单据币种校验',
+      functionKey: '后台清理'
+    });
+    if (!operation.accepted) return;
     try {
       const elapsed = Date.now() - lastUserActivityTs;
       if (elapsed < IDLE_CLEANUP_MS) return;
@@ -14937,6 +15216,8 @@ function setupIdleCleanupTimer() {
         details: [err && err.message ? err.message : String(err)],
         stack: err && err.stack ? err.stack : undefined
       });
+    } finally {
+      businessOperationRegistry.end(operation.token);
     }
   }, IDLE_CHECK_INTERVAL_MS);
   if (idleCleanupTimer.unref) idleCleanupTimer.unref(); // 不阻塞退出
@@ -14952,7 +15233,12 @@ function setupIdleCleanupTimer() {
 //     4. 无 → 直接退出（不阻塞）
 //     5. 退出失败 → console.error + 仍 quit（spec N1''-D13 静默 + 进入模块兜底 + 启动 cleanupOrphanData 三重保险）
 //     6. cleanupAfterRunBackground 默认 includeDiff=false → 只清 flow + bill，保留 diff
-let cleanupQuitInProgress = false; // 防重入
+let quitPreparationPromise = null;
+let quitPreparationComplete = false;
+let normalQuitInProgress = false;
+let normalQuitContinuation = false;
+let usageStatsSessionEnded = false;
+let quitPreparationPreviousLastClosedAt = null;
 
 // v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown 辅助（spec §2.1.3 — 主进程退出 graceful close）
 //   - workerInstance 不存在（worker 从未启动 / 已退出）→ 立即返回 / 不 preventDefault
@@ -14985,23 +15271,28 @@ async function shutdownWorkerPoolGracefully() {
         stack: shutdownErr && shutdownErr.stack ? shutdownErr.stack : undefined
       });
     } catch (_e) { /* swallow — 日志失败不阻塞 quit */ }
+    throw shutdownErr;
   }
 }
 
-app.on('before-quit', (event) => {
-  // usage-stats flush（不变）
+function flushUsageStatsForQuit() {
+  let failure = null;
+  const previousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
   try {
     if (usageStats) {
-      usageStatsModule.recordSessionEnd(usageStats);
-      usageStatsDirty = true;
-      flushUsageStats();
-    }
-    if (usageStatsAutoFlushTimer) {
-      clearInterval(usageStatsAutoFlushTimer);
-      usageStatsAutoFlushTimer = null;
+      if (!usageStatsSessionEnded) {
+        usageStatsModule.recordSessionEnd(usageStats);
+        usageStatsSessionEnded = true;
+        usageStatsDirty = true;
+      }
+      if (usageStatsDirty) flushUsageStats();
+      if (usageStatsDirty) throw new Error('usage-stats 退出统计落盘失败');
     }
   } catch (err) {
-    // v2.1.9 SR-log-1：替换 console.warn → 日志上报
+    failure = err;
+    if (usageStats) usageStats.lastClosedAt = previousLastClosedAt;
+    usageStatsSessionEnded = false;
+    usageStatsDirty = Boolean(usageStats);
     appendActivityLogEntry({
       level: 'warning',
       source: 'main',
@@ -15011,22 +15302,25 @@ app.on('before-quit', (event) => {
       stack: err && err.stack ? err.stack : undefined
     });
   }
+  if (!failure) {
+    if (usageStatsAutoFlushTimer) {
+      clearInterval(usageStatsAutoFlushTimer);
+      usageStatsAutoFlushTimer = null;
+    }
+    if (idleCleanupTimer) {
+      clearInterval(idleCleanupTimer);
+      idleCleanupTimer = null;
+    }
+  }
+  if (failure) throw failure;
+}
 
-  // v2.1.8 N1' (v0.7)：cleanup 退出兜底（静默）
-  if (cleanupQuitInProgress) return; // 重入保护（cleanup 完成 app.quit 时会再次触发 before-quit）
-
-  // v2.1.10 SR-FIX-1 round 2 P0-3：worker pool shutdown（spec §2.1.3 — 主进程退出 graceful close）
-  //   决策：保守路径 — workerAlive=true 时 preventDefault + 异步 shutdown，避免 WAL/shm 残留
-  //   优先级：先 shutdown worker（防 DB 写锁残留）→ 再跑 pendingRuns cleanup → 最后 app.quit
-  const needWorker = needsWorkerShutdown();
-
-  let pendingRuns;
+function listPendingCleanupRunsForQuit() {
+  if (!database || !database.db) return [];
   if (database && database.db) {
     try {
-      pendingRuns = runRepo.listPendingCleanupRuns(database.db);
+      return runRepo.listPendingCleanupRuns(database.db) || [];
     } catch (listErr) {
-      // listPending 失败 → 不阻塞退出（启动期 cleanupOrphanData 会兜底）
-      // v2.1.9 SR-log-1：替换 console.error → 日志上报
       appendActivityLogEntry({
         level: 'error',
         source: 'main',
@@ -15035,26 +15329,22 @@ app.on('before-quit', (event) => {
         details: [listErr && listErr.message ? listErr.message : String(listErr)],
         stack: listErr && listErr.stack ? listErr.stack : undefined
       });
-      pendingRuns = null; // 走 worker-only 分支或 fast-quit
+      throw listErr;
     }
   }
-  const hasPending = pendingRuns && pendingRuns.length > 0;
+  return [];
+}
 
-  // Fast path：无 worker + 无 pending → 直接退出（既有行为不变）
-  if (!needWorker && !hasPending) return;
+async function prepareApplicationForQuit() {
+  if (quitPreparationComplete) return;
+  if (quitPreparationPromise) return quitPreparationPromise;
 
-  event.preventDefault();
-  cleanupQuitInProgress = true;
+  quitPreparationPromise = (async () => {
+    if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
-  // 异步串行：① shutdown worker → ② cleanup pending runs → ③ app.quit
-  (async () => {
-    // ① worker shutdown（spec §2.1.3）— 在 cleanup 之前，避免 worker 写锁与 main cleanup 冲突
-    if (needWorker) {
-      await shutdownWorkerPoolGracefully();
-    }
-
-    // ② cleanup pending runs（v2.1.8 N1' 原逻辑保留 — N1''-D9 内部 setImmediate 让出；N1''-D13 静默）
-    if (hasPending && database && database.db) {
+    const pendingRuns = listPendingCleanupRunsForQuit();
+    const failures = [];
+    if (pendingRuns.length > 0 && database && database.db) {
       for (const run of pendingRuns) {
         try {
           await acquiringBillCurrencySession.cleanupAfterRunBackground({
@@ -15074,12 +15364,68 @@ app.on('before-quit', (event) => {
             details: [cleanErr && cleanErr.message ? cleanErr.message : String(cleanErr)],
             stack: cleanErr && cleanErr.stack ? cleanErr.stack : undefined
           });
+          failures.push(cleanErr);
         }
       }
     }
-    // ③ 失败也 quit（启动期 cleanupOrphanData 兜底；N1''-D13 静默）
-    app.quit();
-  })();
+
+    if (failures.length > 0) {
+      throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
+    }
+    quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
+    flushUsageStatsForQuit();
+    quitPreparationComplete = true;
+  })().finally(() => {
+    if (!quitPreparationComplete) quitPreparationPromise = null;
+  });
+
+  return quitPreparationPromise;
+}
+
+function resumeApplicationAfterFailedRestart() {
+  if (!quitPreparationComplete) return;
+
+  quitPreparationComplete = false;
+  quitPreparationPromise = null;
+  usageStatsSessionEnded = false;
+  if (usageStats) {
+    usageStats.lastClosedAt = quitPreparationPreviousLastClosedAt;
+    usageStatsDirty = true;
+    flushUsageStats();
+  }
+  quitPreparationPreviousLastClosedAt = null;
+
+  if (!usageStatsAutoFlushTimer) {
+    usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
+  }
+  if (!idleCleanupTimer && database && database.db) setupIdleCleanupTimer();
+}
+
+app.on('before-quit', (event) => {
+  if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+    event.preventDefault();
+    return;
+  }
+  if (normalQuitContinuation || quitPreparationComplete) return;
+  event.preventDefault();
+  if (normalQuitInProgress) return;
+  normalQuitInProgress = true;
+
+  prepareApplicationForQuit()
+    .catch((error) => {
+      // 普通退出维持历史容错语义；升级重启由调用方直接 await 并阻断安装。
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'app-quit',
+        message: '退出清理未全部完成，普通退出继续执行',
+        details: [error && error.message ? error.message : String(error)]
+      });
+    })
+    .finally(() => {
+      normalQuitContinuation = true;
+      app.quit();
+    });
 });
 
 app.on('window-all-closed', () => {

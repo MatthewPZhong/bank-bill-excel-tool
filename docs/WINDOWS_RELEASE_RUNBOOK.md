@@ -1,0 +1,55 @@
+# Windows 在线升级发布 Runbook
+
+适用于 v3.0.18 及后续 Windows stable Release。发布流程定义在
+`.github/workflows/release-windows.yml`，客户端只消费公开 GitHub Releases 的 `latest` 通道。
+
+## 一次性仓库配置
+
+由仓库管理员在 GitHub 完成，仓库文件不能替代这些服务端保护：
+
+1. 创建名为 `production-release` 的 GitHub Environment，只允许受保护 tag 部署，并限制可审批人员。
+2. 保护 `main`：禁止 force push 和删除，要求 PR 与必需检查通过后才能合并。
+3. 建立 `v*` tag protection / repository ruleset：禁止非发布负责人创建、更新或删除发布 tag。
+4. 确认 Actions 的 `GITHUB_TOKEN` 对 Release 具有 `contents: write`，除此之外不配置 PAT 或客户端凭据。
+5. 保持仓库公开；若改为 private，立即停止 stable 在线升级并重新评审分发方案。
+
+## 发布前
+
+1. 确认 `main` 可发布、tracked worktree 干净，`package.json.version` 为目标版本。
+2. 执行 `npm ci`、`npm run release-check`、`npm run scan:vars` 和
+   `npm run check:vars -- --include-minor`。
+3. 在 Windows 10/11 验证 setup 与 portable；无签名版本需记录 SmartScreen 实际提示。
+4. 对升级器版本执行真实 `N -> N+1`：检查、下载、稍后、业务忙阻断、重启安装，并核对 SQLite、用户设置和导出文件。
+5. v3.0.18 是引导版本：从 v3.0.17 手动覆盖安装验证，不能宣称 v3.0.17 可在线升级。
+
+## 创建发布
+
+仅在上述门禁通过后创建一次 tag：
+
+```bash
+git switch main
+git pull --ff-only
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+workflow 会拒绝以下情况：tag 不等于 `v${package.json.version}`、tag 不指向当前
+`main`、同名 Release 已存在、测试/构建失败、`latest.yml` 与 Setup SHA-512 不匹配，
+或缺少 Setup、portable、blockmap、metadata 任一资产。
+
+workflow 直接创建 published、non-draft、non-prerelease Release。不要手动替换或覆盖
+已发布资产；故障必须发布更高补丁版本。
+
+## 发布后
+
+1. 核对 Release 为公开 stable latest，四类资产齐全且可匿名下载。
+2. 用上一 stable NSIS 从生产 `latest` 做一次 canary，确认版本升级和用户数据保留。
+3. canary 通过后再公告；失败时停止公告，不删除或替换同版本资产，修复后发布更高版本。
+4. 保存 workflow URL、资产名和哈希、升级前后版本截图、数据保留证据和复核人。
+
+## v3.0.18 当前状态
+
+- workflow、应用状态机、设置 UI、发布资产 staging 和 Windows x64 构建契约已实现。
+- 本迭代不创建 `v3.0.18` tag，也不发布 GitHub Release。
+- GitHub Environment、branch/tag protection 仍需仓库管理员在有效认证会话中配置。
+- 真实 Windows `3.0.18 -> 后继 stable` 必须等后继版本资产存在后执行。

@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.0.17",
+  "version": "3.0.18",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -8,13 +8,18 @@
     "email": "pzhong1212@gmail.com"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MatthewPZhong/bank-bill-excel-tool.git"
+  },
   "scripts": {
     "start": "electron .",
     "icon:sync": "node scripts/sync-app-icon.js",
     "prebuild:meta": "node scripts/gen-build-info.js",
-    "dist:win": "npm run prebuild:meta && electron-builder --win && node scripts/check-dist-size.js",
-    "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis && node scripts/check-dist-size.js",
-    "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable && node scripts/check-dist-size.js",
+    "stage:update-artifacts": "node scripts/stage-update-artifacts.js",
+    "dist:win": "npm run prebuild:meta && electron-builder --win --publish never && node scripts/check-dist-size.js",
+    "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis --publish never && node scripts/check-dist-size.js",
+    "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable --publish never && node scripts/check-dist-size.js",
     "check:dist": "node scripts/check-dist-size.js",
     "preview": "node scripts/render-preview.js",
     "preview:account": "node scripts/render-account-mapping-preview.js",
@@ -26,6 +31,7 @@
     "preview:big-account-selection": "node scripts/render-modal-preview.js big-account-selection big-account-selection.png",
     "preview:new-account": "node scripts/render-modal-preview.js new-account new-account.png",
     "preview:statement-palette": "node scripts/render-modal-preview.js background-palette statement-palette.png",
+    "preview:app-update-settings": "node scripts/render-modal-preview.js app-update-settings app-update-settings.png",
     "preview:module-cabinet": "node scripts/render-modal-preview.js module-cabinet module-cabinet.png",
     "preview:new-account-palette": "node scripts/render-modal-preview.js new-account-palette new-account-palette.png",
     "preview:monthly-balance-export": "node scripts/render-modal-preview.js monthly-balance-export-dialog monthly-balance-export.png",
@@ -101,7 +107,7 @@
     "preview:toolbox": "node scripts/render-modal-preview.js toolbox toolbox.png",
     "preview:toolbox-split-field-picker": "node scripts/render-modal-preview.js toolbox-split-field-picker toolbox-split-field-picker.png",
     "preview:toolbox-split-field-picker-multiple": "node scripts/render-modal-preview.js toolbox-split-field-picker-multiple toolbox-split-field-picker-multiple.png",
-    "preview:all": "npm run preview && npm run preview:account && npm run preview:template-manager && npm run preview:mapping-dialog && npm run preview:template-rename && npm run preview:big-account-manager && npm run preview:big-account-manager-dropdown && npm run preview:big-account-selection && npm run preview:new-account && npm run preview:statement-palette && npm run preview:new-account-palette && npm run preview:monthly-balance-export && npm run preview:manual-balance-seed && npm run preview:balance-addon-manager && npm run preview:export-scope && npm run preview:amount-split-rules && npm run preview:bill-split-rows && npm run preview:bill-split-mappings && npm run preview:remember-order-mismatch && npm run preview:account-mapping-migration && npm run preview:pending-panel && npm run preview:pending-rule-dialog && npm run preview:pending-rule-confirm && npm run preview:pending-import-month && npm run preview:pending-reconcile && npm run preview:pending-export-runs && npm run preview:pending-panel-initial && npm run preview:pending-panel-importing && npm run preview:pending-panel-error && npm run preview:module-switcher-open && npm run preview:new-account-multi && npm run preview:new-account-currency-dropdown && npm run preview:big-account-selection-multi && npm run preview:extract-order && npm run preview:account-mapping-editing && npm run preview:fund-transfer-account-mapping && npm run preview:bank-statement-panel && npm run preview:scenarios-manager && npm run preview:builtin-fixed-channel-manage && npm run preview:builtin-fixed-channel-manage-payment && npm run preview:builtin-fixed-channel-manage-refund && npm run preview:linked-table-manager && npm run preview:linked-table-delete-range && npm run preview:scenario-category-select && npm run preview:scenario-config-c1 && npm run preview:scenario-config-c1-and && npm run preview:scenario-config-c2 && npm run preview:scenario-config-c3 && npm run preview:scenario-confirm-detail && npm run preview:recon-id-fix-panel && npm run preview:scenario-config-c4 && npm run preview:scenario-config-c4-both && npm run preview:recon-id-fix-panel-business && npm run preview:recon-id-fix-panel-gateway && npm run preview:scenario-config-c4-gateway && npm run preview:scenario-config-c4-gateway-1vN && npm run preview:bank-bu-recon-panel-initial && npm run preview:bank-bu-recon-panel-importing && npm run preview:bank-bu-recon-panel-result && npm run preview:duplicate-inbound-match && npm run preview:biz-op-recon-panel-initial && npm run preview:biz-op-recon-panel-importing && npm run preview:biz-op-recon-panel-result && npm run preview:biz-op-recon-panel-export-dialog && npm run preview:acquiring-bill-currency-panel-initial && npm run preview:acquiring-bill-currency-panel-importing && npm run preview:acquiring-bill-currency-panel-result && npm run preview:vcc-op-calc-panel-initial && npm run preview:vcc-op-calc-panel-result && npm run preview:vcc-op-calc-compute && npm run preview:vcc-op-calc-show-balance && npm run preview:module-cabinet && npm run preview:gateway-recon-scenario-picker && npm run preview:toolbox && npm run preview:toolbox-split-field-picker && npm run preview:toolbox-split-field-picker-multiple",
+    "preview:all": "npm run preview && npm run preview:account && npm run preview:template-manager && npm run preview:mapping-dialog && npm run preview:template-rename && npm run preview:big-account-manager && npm run preview:big-account-manager-dropdown && npm run preview:big-account-selection && npm run preview:new-account && npm run preview:statement-palette && npm run preview:app-update-settings && npm run preview:new-account-palette && npm run preview:monthly-balance-export && npm run preview:manual-balance-seed && npm run preview:balance-addon-manager && npm run preview:export-scope && npm run preview:amount-split-rules && npm run preview:bill-split-rows && npm run preview:bill-split-mappings && npm run preview:remember-order-mismatch && npm run preview:account-mapping-migration && npm run preview:pending-panel && npm run preview:pending-rule-dialog && npm run preview:pending-rule-confirm && npm run preview:pending-import-month && npm run preview:pending-reconcile && npm run preview:pending-export-runs && npm run preview:pending-panel-initial && npm run preview:pending-panel-importing && npm run preview:pending-panel-error && npm run preview:module-switcher-open && npm run preview:new-account-multi && npm run preview:new-account-currency-dropdown && npm run preview:big-account-selection-multi && npm run preview:extract-order && npm run preview:account-mapping-editing && npm run preview:fund-transfer-account-mapping && npm run preview:bank-statement-panel && npm run preview:scenarios-manager && npm run preview:builtin-fixed-channel-manage && npm run preview:builtin-fixed-channel-manage-payment && npm run preview:builtin-fixed-channel-manage-refund && npm run preview:linked-table-manager && npm run preview:linked-table-delete-range && npm run preview:scenario-category-select && npm run preview:scenario-config-c1 && npm run preview:scenario-config-c1-and && npm run preview:scenario-config-c2 && npm run preview:scenario-config-c3 && npm run preview:scenario-confirm-detail && npm run preview:recon-id-fix-panel && npm run preview:scenario-config-c4 && npm run preview:scenario-config-c4-both && npm run preview:recon-id-fix-panel-business && npm run preview:recon-id-fix-panel-gateway && npm run preview:scenario-config-c4-gateway && npm run preview:scenario-config-c4-gateway-1vN && npm run preview:bank-bu-recon-panel-initial && npm run preview:bank-bu-recon-panel-importing && npm run preview:bank-bu-recon-panel-result && npm run preview:duplicate-inbound-match && npm run preview:biz-op-recon-panel-initial && npm run preview:biz-op-recon-panel-importing && npm run preview:biz-op-recon-panel-result && npm run preview:biz-op-recon-panel-export-dialog && npm run preview:acquiring-bill-currency-panel-initial && npm run preview:acquiring-bill-currency-panel-importing && npm run preview:acquiring-bill-currency-panel-result && npm run preview:vcc-op-calc-panel-initial && npm run preview:vcc-op-calc-panel-result && npm run preview:vcc-op-calc-compute && npm run preview:vcc-op-calc-show-balance && npm run preview:module-cabinet && npm run preview:gateway-recon-scenario-picker && npm run preview:toolbox && npm run preview:toolbox-split-field-picker && npm run preview:toolbox-split-field-picker-multiple",
     "lint": "eslint src/",
     "smoke": "node scripts/smoke-test.js",
     "test:unit": "node scripts/run-unit-tests.js",
@@ -140,9 +146,7 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "signtoolOptions": {
-        "publisherName": "pzhong"
-      },
+      "verifyUpdateCodeSignature": false,
       "target": [
         "nsis",
         "portable"
@@ -160,9 +164,20 @@
     },
     "portable": {
       "artifactName": "${productName}-${version}-portable.${ext}"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "MatthewPZhong",
+        "repo": "bank-bill-excel-tool",
+        "channel": "latest",
+        "publishAutoUpdate": true,
+        "releaseType": "release"
+      }
+    ]
   },
   "dependencies": {
+    "electron-updater": "^6.8.5",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "marked": "^18.0.0",

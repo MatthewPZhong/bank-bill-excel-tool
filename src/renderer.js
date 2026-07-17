@@ -5,6 +5,19 @@ const DEFAULT_BACKGROUND_SETTINGS = Object.freeze({
   sourceFileName: '',
   sourcePath: ''
 });
+const DEFAULT_APP_UPDATE_STATUS = Object.freeze({
+  enabled: false,
+  supported: false,
+  distribution: 'unsupported',
+  state: 'disabled',
+  currentVersion: '',
+  targetVersion: '',
+  percent: 0,
+  lastCheckedAt: '',
+  canRestart: false,
+  busyOperations: [],
+  error: ''
+});
 const DEFAULT_SPECTRUM_PICK_COLOR = '#ffffff';
 const BACKGROUND_FILE_HINT = '支持 PNG/JPG/JPEG/WEBP，大小不超过 5MB，建议使用横版高清图片';
 const BALANCE_DISABLED_OPTION = '无';
@@ -137,6 +150,11 @@ const state = {
   backgroundSettings: { ...DEFAULT_BACKGROUND_SETTINGS },
   backgroundDraft: { ...DEFAULT_BACKGROUND_SETTINGS },
   isBackgroundPaletteOpen: false,
+  appUpdateStatus: { ...DEFAULT_APP_UPDATE_STATUS },
+  appUpdateListenerReady: false,
+  appUpdatePromptedVersion: '',
+  appUpdatePromptPending: false,
+  appUpdatePromptObserver: null,
   currentModule: MODULES.statementGenerator.id,
   // v2.1.4 T3：左上角模块切换按钮的启用列表（启动时由 info.enabledModules 注入）
   enabledModules: [],
@@ -383,6 +401,8 @@ const elements = {
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
+  settingsBtn: document.getElementById('settingsBtn'),
+  appUpdateStatusDot: document.getElementById('appUpdateStatusDot'),
   // v2.1.4 T3：小助手功能收纳触发按钮（紧贴 saveUserGuideBtn 右侧）
   moduleCabinetBtn: document.getElementById('moduleCabinetBtn'),
   // v3.0.8 需求1：工具箱🧰 触发按钮（紧贴 moduleCabinetBtn 右侧）
@@ -1939,6 +1959,319 @@ function handleBackgroundReset() {
       }
     })
   );
+}
+
+function normalizeAppUpdateStatus(value) {
+  const source = value && typeof value === 'object' ? value : {};
+  const percent = Number(source.percent);
+  return {
+    ...DEFAULT_APP_UPDATE_STATUS,
+    ...source,
+    enabled: source.enabled === true,
+    supported: source.supported === true,
+    currentVersion: String(source.currentVersion || elements.appVersion?.textContent || ''),
+    targetVersion: String(source.targetVersion || ''),
+    percent: Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0,
+    canRestart: source.canRestart === true,
+    busyOperations: Array.isArray(source.busyOperations) ? source.busyOperations.map(String) : [],
+    error: source.error && typeof source.error === 'object'
+      ? String(source.error.message || '')
+      : String(source.error || '')
+  };
+}
+
+function appUpdateDistributionText(distribution) {
+  if (distribution === 'nsis') return 'Windows 安装版';
+  if (distribution === 'portable') return 'Windows 便携版';
+  if (distribution === 'development') return '开发环境';
+  return '当前环境';
+}
+
+function formatAppUpdateVersion(value) {
+  const version = String(value || '').trim();
+  if (!version) return '-';
+  return version.startsWith('v') ? version : `v${version}`;
+}
+
+function formatAppUpdateCheckedAt(value) {
+  if (!value) return '尚未检查';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '尚未检查';
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function appUpdateStateText(status) {
+  if (status.error) return status.error;
+  if (!status.supported) {
+    return status.distribution === 'portable'
+      ? '便携版仅支持手动下载更新'
+      : '当前环境不支持在线升级';
+  }
+
+  switch (status.state) {
+    case 'disabled': return '自动更新已关闭';
+    case 'idle': return '等待检查';
+    case 'checking': return '正在检查更新';
+    case 'available': return status.targetVersion ? `发现新版本 ${status.targetVersion}` : '发现新版本';
+    case 'downloading': return `正在下载更新 ${status.percent.toFixed(0)}%`;
+    case 'downloaded': return status.targetVersion ? `版本 ${status.targetVersion} 已下载` : '更新已下载';
+    case 'up-to-date': return '当前已是最新版本';
+    case 'error': return status.error || '检查更新失败';
+    default: return '等待检查';
+  }
+}
+
+function extractAppUpdateStatus(result) {
+  if (result && typeof result === 'object' && typeof result.state === 'string') return result;
+  if (result && typeof result === 'object' && result.updateStatus) return result.updateStatus;
+  return null;
+}
+
+function applyAppUpdateActionResult(result, fallbackMessage) {
+  const nextStatus = extractAppUpdateStatus(result) || state.appUpdateStatus;
+  if (result && result.status !== 'success' && result.status !== 'ok') {
+    applyAppUpdateStatus({
+      ...nextStatus,
+      state: 'error',
+      error: result.message || fallbackMessage
+    }, { prompt: false });
+    return false;
+  }
+  applyAppUpdateStatus(nextStatus, { prompt: true });
+  return true;
+}
+
+function renderAppUpdateIndicator() {
+  const downloaded = state.appUpdateStatus.state === 'downloaded';
+  if (elements.appUpdateStatusDot) elements.appUpdateStatusDot.hidden = !downloaded;
+  if (elements.settingsBtn) {
+    const label = downloaded ? '设置，更新已下载' : '设置';
+    elements.settingsBtn.setAttribute('aria-label', label);
+    elements.settingsBtn.title = label;
+  }
+}
+
+function refreshOpenAppUpdateDialog() {
+  const dialog = elements.modalRoot?.querySelector('.app-update-settings-card');
+  if (!dialog) return;
+
+  const status = state.appUpdateStatus;
+  const toggle = dialog.querySelector('[data-role="auto-update-toggle"]');
+  const toggleText = dialog.querySelector('[data-role="auto-update-toggle-text"]');
+  const stateText = dialog.querySelector('[data-role="update-state"]');
+  const versionText = dialog.querySelector('[data-role="current-version"]');
+  const lastCheckedText = dialog.querySelector('[data-role="last-checked"]');
+  const distributionText = dialog.querySelector('[data-role="distribution"]');
+  const targetRow = dialog.querySelector('[data-role="target-row"]');
+  const targetText = dialog.querySelector('[data-role="target-version"]');
+  const progress = dialog.querySelector('[data-role="download-progress"]');
+  const note = dialog.querySelector('[data-role="update-note"]');
+  const checkButton = dialog.querySelector('[data-action="check-update"]');
+  const restartButton = dialog.querySelector('[data-action="restart-update"]');
+  const closeButton = dialog.querySelector('[data-role="close-update-dialog"]');
+
+  if (toggle) {
+    toggle.checked = status.enabled;
+    toggle.disabled = !status.supported || status.state === 'checking';
+  }
+  if (toggleText) toggleText.textContent = status.enabled ? '已开启' : '已关闭';
+  if (stateText) stateText.textContent = appUpdateStateText(status);
+  if (versionText) versionText.textContent = formatAppUpdateVersion(status.currentVersion);
+  if (lastCheckedText) lastCheckedText.textContent = formatAppUpdateCheckedAt(status.lastCheckedAt);
+  if (distributionText) distributionText.textContent = appUpdateDistributionText(status.distribution);
+  if (targetRow) targetRow.hidden = !status.targetVersion;
+  if (targetText) targetText.textContent = status.targetVersion || '-';
+  if (progress) {
+    progress.hidden = status.state !== 'downloading';
+    progress.value = status.percent;
+  }
+  if (note) {
+    note.textContent = status.distribution === 'portable'
+      ? '便携版不会自动安装更新。点击“前往下载”可打开稳定版下载页面。'
+      : '开启后每次启动仅在后台检查一次，不会定时检查。';
+  }
+  if (checkButton) {
+    checkButton.textContent = status.distribution === 'portable' ? '前往下载' : '立即检查';
+    checkButton.disabled = ['checking', 'downloading', 'downloaded'].includes(status.state);
+  }
+  if (restartButton) restartButton.hidden = !status.canRestart;
+  if (closeButton) closeButton.textContent = status.canRestart ? '稍后' : '完成';
+}
+
+async function restartAndInstallAppUpdate() {
+  const result = await window.desktopApi.appUpdate.restartAndInstall();
+  const nextStatus = extractAppUpdateStatus(result);
+  if (nextStatus) applyAppUpdateStatus(nextStatus, { prompt: false });
+
+  if (result && result.status !== 'success' && result.status !== 'ok') {
+    const busy = Array.isArray(result.busyOperations) && result.busyOperations.length > 0
+      ? `\n正在处理：${result.busyOperations.join('、')}`
+      : '';
+    openModal(createAlertDialog(`${result.message || '暂时无法重启升级'}${busy}`, {
+      logDomain: 'app-update'
+    }));
+  }
+}
+
+function showDownloadedUpdatePrompt(status) {
+  const promptKey = status.targetVersion || 'downloaded';
+  if (state.appUpdatePromptedVersion === promptKey) return;
+  const activeModal = elements.modalRoot?.firstElementChild;
+  if (activeModal) {
+    if (activeModal.querySelector?.('.app-update-settings-card')) {
+      state.appUpdatePromptedVersion = promptKey;
+      state.appUpdatePromptPending = false;
+    } else {
+      state.appUpdatePromptPending = true;
+    }
+    return;
+  }
+  state.appUpdatePromptPending = false;
+  state.appUpdatePromptedVersion = promptKey;
+  openModal(createConfirmDialog({
+    message: status.targetVersion
+      ? `版本 ${status.targetVersion} 已下载完成，是否立即重启升级？`
+      : '更新已下载完成，是否立即重启升级？',
+    confirmText: '立即重启升级',
+    cancelText: '稍后',
+    onConfirm: async () => {
+      closeModal();
+      await restartAndInstallAppUpdate();
+    }
+  }));
+}
+
+function setupAppUpdatePromptObserver() {
+  if (state.appUpdatePromptObserver || !elements.modalRoot || typeof MutationObserver !== 'function') return;
+  state.appUpdatePromptObserver = new MutationObserver(() => {
+    if (!state.appUpdatePromptPending || elements.modalRoot.childElementCount > 0) return;
+    if (state.appUpdateStatus.state !== 'downloaded') {
+      state.appUpdatePromptPending = false;
+      return;
+    }
+    queueMicrotask(() => showDownloadedUpdatePrompt(state.appUpdateStatus));
+  });
+  state.appUpdatePromptObserver.observe(elements.modalRoot, { childList: true });
+}
+
+function applyAppUpdateStatus(value, { prompt = true } = {}) {
+  state.appUpdateStatus = normalizeAppUpdateStatus(value);
+  if (state.appUpdateStatus.state !== 'downloaded') state.appUpdatePromptPending = false;
+  renderAppUpdateIndicator();
+  refreshOpenAppUpdateDialog();
+  if (prompt && state.appUpdateStatus.state === 'downloaded') {
+    showDownloadedUpdatePrompt(state.appUpdateStatus);
+  }
+}
+
+function createAppUpdateSettingsDialog() {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  const dialog = document.createElement('section');
+  dialog.className = 'modal-card app-update-settings-card';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'appUpdateSettingsTitle');
+  dialog.innerHTML = `
+    <div class="dialog-header">
+      <div id="appUpdateSettingsTitle" class="dialog-title">设置</div>
+      <button class="icon-close" type="button" data-action="close" aria-label="关闭">×</button>
+    </div>
+    <div class="app-update-settings-body">
+      <div class="app-update-settings-row">
+        <span class="app-update-settings-label">当前版本</span>
+        <span class="app-update-settings-value" data-role="current-version">-</span>
+      </div>
+      <div class="app-update-settings-row">
+        <span class="app-update-settings-label">安装类型</span>
+        <span class="app-update-settings-value" data-role="distribution">-</span>
+      </div>
+      <div class="app-update-settings-row">
+        <span class="app-update-settings-label">自动更新</span>
+        <label class="app-update-toggle">
+          <input type="checkbox" data-role="auto-update-toggle" aria-label="自动更新" />
+          <span data-role="auto-update-toggle-text">已关闭</span>
+        </label>
+      </div>
+      <div class="app-update-settings-row">
+        <span class="app-update-settings-label">更新状态</span>
+        <span class="app-update-settings-value" data-role="update-state">-</span>
+      </div>
+      <div class="app-update-settings-row">
+        <span class="app-update-settings-label">最近检查</span>
+        <span class="app-update-settings-value" data-role="last-checked">尚未检查</span>
+      </div>
+      <div class="app-update-settings-row" data-role="target-row" hidden>
+        <span class="app-update-settings-label">目标版本</span>
+        <span class="app-update-settings-value" data-role="target-version">-</span>
+      </div>
+      <progress class="app-update-progress" data-role="download-progress" max="100" value="0" aria-label="更新下载进度" hidden></progress>
+    </div>
+    <p class="app-update-settings-note" data-role="update-note"></p>
+    <div class="dialog-actions right">
+      <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
+      <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
+      <button class="secondary-btn small" type="button" data-action="close" data-role="close-update-dialog">完成</button>
+    </div>
+  `;
+
+  dialog.querySelectorAll('[data-action="close"]').forEach((button) => {
+    button.addEventListener('click', closeModal);
+  });
+  dialog.querySelector('[data-role="auto-update-toggle"]').addEventListener('change', async (event) => {
+    const toggle = event.currentTarget;
+    toggle.disabled = true;
+    try {
+      const result = await window.desktopApi.appUpdate.setEnabled(toggle.checked);
+      applyAppUpdateActionResult(result, '自动更新设置失败');
+    } catch (error) {
+      applyAppUpdateStatus({
+        ...state.appUpdateStatus,
+        state: 'error',
+        error: error && error.message ? error.message : '更新设置保存失败'
+      }, { prompt: false });
+    } finally {
+      refreshOpenAppUpdateDialog();
+    }
+  });
+  dialog.querySelector('[data-action="check-update"]').addEventListener('click', async (event) => {
+    event.currentTarget.disabled = true;
+    try {
+      const result = await window.desktopApi.appUpdate.checkNow();
+      applyAppUpdateActionResult(result, '检查更新失败');
+    } catch (error) {
+      applyAppUpdateStatus({
+        ...state.appUpdateStatus,
+        state: 'error',
+        error: error && error.message ? error.message : '检查更新失败'
+      }, { prompt: false });
+    } finally {
+      refreshOpenAppUpdateDialog();
+    }
+  });
+  dialog.querySelector('[data-action="restart-update"]').addEventListener('click', async () => {
+    await restartAndInstallAppUpdate();
+  });
+  overlay.appendChild(dialog);
+  requestAnimationFrame(refreshOpenAppUpdateDialog);
+  return overlay;
+}
+
+async function initializeAppUpdateStatus() {
+  if (!window.desktopApi?.appUpdate) return;
+  setupAppUpdatePromptObserver();
+  if (!state.appUpdateListenerReady) {
+    state.appUpdateListenerReady = true;
+    window.desktopApi.appUpdate.onStatusChanged((status) => {
+      applyAppUpdateStatus(status, { prompt: true });
+    });
+  }
+  try {
+    applyAppUpdateStatus(await window.desktopApi.appUpdate.getStatus(), { prompt: true });
+  } catch (error) {
+    console.warn('load app update status failed:', error);
+  }
 }
 
 function legacyCloseModal() {
@@ -6401,6 +6734,9 @@ async function applyFullInfo(info) {
   drawBackgroundSpectrum();
   resetBackgroundPickerSelection();
   elements.appVersion.textContent = info.version;
+  initializeAppUpdateStatus().catch((error) => {
+    console.warn('initialize app update status failed:', error);
+  });
   state.hasEnum = info.hasEnum;
   state.enumFileName = info.enumFileName || '';
   state.accountMappingCount = info.accountMappingCount || 0;
@@ -6691,6 +7027,11 @@ async function applyFullInfo(info) {
 
     setStatus(result.message, result.status === 'success' ? 'success' : 'error');
   });
+  if (elements.settingsBtn) {
+    elements.settingsBtn.addEventListener('click', () => {
+      openModal(createAppUpdateSettingsDialog());
+    });
+  }
   // v2.1.4 T3：小助手功能收纳触发按钮
   if (elements.moduleCabinetBtn) {
     elements.moduleCabinetBtn.addEventListener('click', () => {
@@ -6862,6 +7203,21 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'background-palette') {
     setTimeout(() => {
       openBackgroundPalette();
+    }, 120);
+  } else if (info.previewModal === 'app-update-settings') {
+    setTimeout(() => {
+      applyAppUpdateStatus({
+        ...state.appUpdateStatus,
+        enabled: true,
+        supported: true,
+        distribution: 'nsis',
+        state: 'downloading',
+        currentVersion: info.version,
+        targetVersion: '3.0.19',
+        percent: 42,
+        lastCheckedAt: '2026-07-16T12:34:56.000Z'
+      }, { prompt: false });
+      openModal(createAppUpdateSettingsDialog());
     }, 120);
   } else if (info.previewModal === 'new-account-palette') {
     setTimeout(() => {

@@ -50,10 +50,15 @@ jobs:
         run: npm ci
 
       - name: Build Windows installer
-        run: npx electron-builder --win --publish never
+        run: |
+          npm run prebuild:meta
+          npx electron-builder --win --publish never
 
       - name: Check dist size
         run: node scripts/check-dist-size.js
+
+      - name: Stage updater-compatible assets
+        run: npm run stage:update-artifacts
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
@@ -61,8 +66,9 @@ jobs:
           name: windows-installer
           retention-days: 1
           path: |
-            dist/*-setup.exe
-            dist/latest*.yml
+            dist/bank-bill-excel-tool-setup-*.exe
+            dist/bank-bill-excel-tool-setup-*.exe.blockmap
+            dist/latest.yml
           if-no-files-found: error
 
       - name: Upload portable exe artifact

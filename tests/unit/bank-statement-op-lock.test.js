@@ -15,18 +15,23 @@ const path = require('node:path');
 const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js');
 const source = fs.readFileSync(MAIN_PATH, 'utf8');
 
-// 从真实源码抽出 op-lock 实现块（自包含：仅引用块内 bankStatementOperationLock，无外部依赖）。
+// 从真实源码抽出 op-lock 实现块，并注入安装过渡闸门依赖。
 //   每次调用返回一份全新闭包实例（独立锁状态）→ 各用例互不干扰。
-function loadRealLock() {
+function loadRealLock({ installTransitionActive = false } = {}) {
   const block = source.match(
     /const bankStatementOperationLock = \{[\s\S]*?\nfunction releaseBankStatementOpLock\(\) \{[\s\S]*?\n\}/
   );
   assert.ok(block, '应能从 src/main.js 抽出 bankStatementOperationLock 实现块');
   // eslint-disable-next-line no-new-func
   const factory = new Function(
+    'businessOperationRegistry',
+    'INSTALL_BUSY_MESSAGE',
     `${block[0]}\nreturn { tryAcquireBankStatementOpLock, releaseBankStatementOpLock, bankStatementOperationLock };`
   );
-  return factory();
+  return factory(
+    { isInstallTransitionActive: () => installTransitionActive },
+    '正在准备升级，暂时不能开始新的任务。'
+  );
 }
 
 const EXISTING_OPS = [
@@ -102,6 +107,18 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 + v3.0.14 + v3.0.15 +
 });
 
 describe('bank-statement op-lock — 互斥语义 (三动作并发被挡)', () => {
+  test('安装过渡开始后拒绝新动作且不占用业务锁', () => {
+    const { tryAcquireBankStatementOpLock, bankStatementOperationLock } = loadRealLock({
+      installTransitionActive: true
+    });
+
+    assert.deepStrictEqual(tryAcquireBankStatementOpLock('run'), {
+      acquired: false,
+      message: '正在准备升级，暂时不能开始新的任务。'
+    });
+    assert.strictEqual(bankStatementOperationLock.inFlight, false);
+  });
+
   test('import 持锁时 run / export 并发被挡', () => {
     const { tryAcquireBankStatementOpLock } = loadRealLock();
     assert.deepStrictEqual(tryAcquireBankStatementOpLock('import'), { acquired: true });

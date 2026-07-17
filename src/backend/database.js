@@ -980,6 +980,14 @@ class AppDatabase {
     return settingsRepository.setBackgroundConfig(this.db, backgroundConfig);
   }
 
+  getAutoUpdateEnabled() {
+    return settingsRepository.getAutoUpdateEnabled(this.db);
+  }
+
+  setAutoUpdateEnabled(enabled) {
+    return settingsRepository.setAutoUpdateEnabled(this.db, enabled);
+  }
+
   getUiStyle() {
     return settingsRepository.getUiStyle(this.db);
   }

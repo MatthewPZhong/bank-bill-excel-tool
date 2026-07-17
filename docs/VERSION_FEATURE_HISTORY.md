@@ -9,6 +9,28 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.18（2026-07-16）
+
+v3.0.18 为 Windows NSIS 安装版加入 GitHub Releases stable 在线升级基础能力，并增加设置入口、升级状态展示、业务繁忙重启闸门和不可变 tag 发布流水线。
+
+**关键行为**
+
+- 自动更新默认关闭。开启时立即检查，此后每次应用启动只后台检查一次；不设周期定时器。关闭会使尚未开始的启动检查失效并取消由启动/开启触发的自动下载；手动“立即检查”及其下载不受开关取消。
+- 设置弹窗显示当前版本、安装类型、自动更新开关、最近检查时间、目标版本和下载进度；已下载状态同时通过文字与设置按钮状态点表达。
+- 只在已打包 Windows NSIS 中加载 `electron-updater`，并显式关闭自动下载和普通退出自动安装。Windows portable 只打开 Releases 下载页，开发环境和其他平台不联网。
+- 只接收 stable latest，不接收预发布、不允许降级、不使用 Web Installer。下载完成由用户选择立即重启或稍后，稍后时设置齿轮显示状态点。
+- 安装前原子关闭新业务入口，再复查活跃业务、两把资金操作锁和 worker；繁忙时不退出。空闲后等待 worker、运行数据和使用统计清理完成，才调用安装器。
+- 发布 tag 必须等于 `v${package.json.version}` 且指向当前 `main`。完整测试和更新资产校验通过后创建非 Draft Release；同名 Release 已存在时拒绝替换。
+- 发布保护与 Windows 实机 canary 步骤记录在 `docs/WINDOWS_RELEASE_RUNBOOK.md`；GitHub Environment 和 branch/tag ruleset 需仓库管理员在远端配置。
+
+**兼容与风险**
+
+- 3.0.18 是引导版本，3.0.17 及更早用户必须手动覆盖安装一次；应用内升级从后继稳定版开始生效。
+- 本版本无代码签名并设置 `verifyUpdateCodeSignature=false`，Windows 可能显示 SmartScreen。HTTPS 和 SHA-512 完整性校验仍保留，但不能替代发布者签名。
+- 不包含 macOS/Linux 在线升级、定时检查、强制更新、灰度和测试版通道；本迭代不创建 tag 或 Release。
+
+---
+
 ## v3.0.17（2026-07-16）
 
 v3.0.17 为「中台退款订单回填」增加可选的银行打款流水号模糊匹配，并把工具箱按字段拆分扩展为最多 8 组的一次读取、多文件原子导出。
