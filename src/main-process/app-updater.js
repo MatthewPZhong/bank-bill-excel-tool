@@ -346,11 +346,14 @@ class AppUpdaterService {
       throw new TypeError('enabled 必须是 boolean');
     }
     if (enabled) {
+      const activeState = this._activeCheck || this._activeDownload
+        ? this._status.state
+        : null;
       this._setStatus({
         enabled: true,
         state: this._downloadReady
           ? 'downloaded'
-          : (this._status.supported ? 'idle' : 'disabled'),
+          : (activeState || (this._status.supported ? 'idle' : 'disabled')),
         canRestart: this._status.supported && this._downloadReady,
         error: null
       });

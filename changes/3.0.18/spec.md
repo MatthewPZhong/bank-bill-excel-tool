@@ -99,6 +99,7 @@
   5. 已开始但无法物理取消的自动检查只允许结束底层请求，结果被 epoch 判旧，禁止调用 `downloadUpdate`，也禁止其 `update-available`、progress、downloaded、error 等迟到事件覆盖 `disabled`。
 - 取消属于正常控制流，不展示“检查失败”。取消后的临时下载由 updater 清理/复用，但不得暴露“立即重启”；以后重新开启或手动检查必须重新确认当前 stable 元数据。
 - “立即检查”是 `manual` 请求，无论开关开/关都真正检查 NSIS stable feed，且不隐式改变开关。由 manual 请求启动的下载不受自动开关取消；即使 `enabled=false`，其手动 checking/downloading/downloaded 状态仍可显示。
+- 自动更新关闭期间若 manual 检查或下载仍在进行，随后开启开关只持久化 true 并复用当前操作；必须保留 checking/downloading 状态和进度，不重复检查、不误报 busy。当前 manual 操作结束后，新的开关值用于后续启动检查。
 - 同一时刻只允许一个底层 NSIS 检查。操作来源在创建时固定；手动点击若加入已有自动请求，不把它改成 manual，随后关闭开关仍会取消该自动请求，用户可在 disabled 后再次点击“立即检查”。
 - disabled 后若旧 automatic 检查仍在底层收尾，新的“立即检查”不得加入该 stale Promise；协调器至多排队一个 manual 请求，在旧 Promise settle 后立即创建新的 manual operation。该排队是用户主动请求，不受自动开关限制。
 - disabled 后若旧 automatic 仍在收尾而用户快速重新开启，协调器排队一个 `toggle` 检查；旧操作 settle 且开关仍开启、automatic epoch 未再次变化时才真正执行。执行前再次关闭则丢弃该排队自动检查；期间若用户主动点击“立即检查”，尚未创建的排队请求升级为 manual 并在旧操作 settle 后执行。
@@ -159,6 +160,7 @@ NSIS 触发矩阵：
   4. 标记 update install intent，调用 `quitAndInstall` 并允许安装完成后重新启动；
   5. 与现有 `before-quit` 清理链协作，确保 usage flush、worker shutdown、pending cleanup 只执行一次且不会递归阻断安装。
 - 忙时不自动排队、不在业务结束后突然重启。用户结束业务后必须再次点击“立即重启”。若启动安装前同步失败，释放 install transition，保留 `downloaded` 并显示错误。
+- install transition 已取得但退出清理尚未完成时，窗口关闭请求必须被阻止，避免普通退出链与安装退出链同时接管；清理完成后由 `quitAndInstall` 发起的窗口关闭正常放行。清理或安装启动失败时释放 transition，原窗口继续可用。
 - 验收标准：见 AC-12～AC-14、AC-20。
 
 ### 4.7 状态模型与 IPC 契约

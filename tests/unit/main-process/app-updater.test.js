@@ -664,6 +664,29 @@ test.describe('AppUpdaterService', () => {
     assert.equal(downloadedStatus.canRestart, true);
   });
 
+  test('手动下载期间开启自动更新保留下载状态且不重复检查', async () => {
+    const downloadGate = deferred();
+    const { service, updater } = createHarness({ enabled: false });
+    updater.checkImpl = async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: '3.0.18' }
+    });
+    updater.downloadImpl = () => downloadGate.promise;
+    await service.checkForUpdatesManually();
+
+    const downloadPromise = service.downloadUpdate({ source: 'manual' });
+    await flushMicrotasks();
+    const enabledStatus = await service.enable();
+
+    assert.equal(enabledStatus.enabled, true);
+    assert.equal(enabledStatus.state, 'downloading');
+    assert.equal(updater.checkCalls, 1);
+    assert.equal(updater.downloadCalls, 1);
+
+    downloadGate.resolve(['/tmp/update.exe']);
+    assert.equal((await downloadPromise).state, 'downloaded');
+  });
+
   test('关闭后尚未开始的自动下载不会启动', async () => {
     const { service, updater } = createHarness();
     updater.checkImpl = async () => ({

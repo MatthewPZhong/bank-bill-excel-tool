@@ -63,6 +63,8 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(renderer, /activeModal\.querySelector\?\.\('\.app-update-settings-card'\)/);
     assert.match(renderer, /设置，更新已下载/);
     assert.match(renderer, /aria-label="更新下载进度"/);
+    assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
+    assert.match(renderer, /closeButton\.textContent = status\.canRestart \? '稍后' : '完成'/);
   });
 
   test('preload 仅暴露约定的升级 IPC 能力', () => {
@@ -99,6 +101,16 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     );
     assert.match(main, /resumeAfterFailedRestart: resumeApplicationAfterFailedRestart/);
     assert.match(main, /function resumeApplicationAfterFailedRestart\(\)/);
+    assert.match(
+      main,
+      /mainWindow\.on\('close',[\s\S]*?isInstallTransitionActive\(\) && !quitPreparationComplete[\s\S]*?event\.preventDefault\(\)/,
+      '安装退出清理完成前必须阻止用户关闭窗口抢占退出链'
+    );
+    assert.match(
+      main,
+      /app\.on\('before-quit',[\s\S]*?isInstallTransitionActive\(\) && !quitPreparationComplete[\s\S]*?event\.preventDefault\(\);[\s\S]*?return;/,
+      '安装退出清理完成前必须阻止普通 app.quit 抢占退出链'
+    );
     const checkHandler = main.slice(
       main.indexOf("ipcMain.handle('app-update:check-now'"),
       main.indexOf("ipcMain.handle('app-update:restart-and-install'")
@@ -112,7 +124,15 @@ test.describe('v3.0.18 在线升级静态契约', () => {
       settingHandler.indexOf('if (!before.supported)') < settingHandler.indexOf('database.setAutoUpdateEnabled(enabled)'),
       'portable/development 必须在持久化前被拒绝'
     );
-    assert.match(checkHandler, /message: '检查失败，请稍后重试'/);
+    assert.match(
+      settingHandler,
+      /alreadyUpdating = \['checking', 'available', 'downloading', 'downloaded'\]\.includes\(before\.state\)/,
+      '手动检查或下载中开启开关不得重复发起检查'
+    );
+    assert.match(
+      checkHandler,
+      /message: failedStatus\.error\?\.message \|\| '检查失败，请稍后重试'/
+    );
     assert.doesNotMatch(checkHandler, /error\.message/);
   });
 

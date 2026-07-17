@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "3.0.18",
-    "scannedAt": "2026-07-17T04:30:33.518Z",
+    "scannedAt": "2026-07-17T09:57:05.324Z",
     "root": "src",
     "totalFiles": 195,
     "totalTopLevelNames": 2187,
@@ -1843,7 +1843,7 @@
           },
           {
             "file": "src/main-process/app-updater.js",
-            "count": 29
+            "count": 30
           },
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
@@ -1878,7 +1878,7 @@
             "count": 209
           }
         ],
-        "totalHits": 434,
+        "totalHits": 435,
         "fileSpan": 11
       },
       {
@@ -3433,10 +3433,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 96
+            "count": 97
           }
         ],
-        "totalHits": 569,
+        "totalHits": 570,
         "fileSpan": 6
       },
       {
@@ -38954,7 +38954,7 @@
         },
         {
           "file": "src/main-process/app-updater.js",
-          "count": 29
+          "count": 30
         },
         {
           "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
@@ -38989,7 +38989,7 @@
           "count": 209
         }
       ],
-      "totalHits": 434,
+      "totalHits": 435,
       "fileSpan": 11
     },
     {
@@ -40544,10 +40544,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 96
+          "count": 97
         }
       ],
-      "totalHits": 569,
+      "totalHits": 570,
       "fileSpan": 6
     },
     {

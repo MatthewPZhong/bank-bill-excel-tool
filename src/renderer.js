@@ -2069,6 +2069,7 @@ function refreshOpenAppUpdateDialog() {
   const note = dialog.querySelector('[data-role="update-note"]');
   const checkButton = dialog.querySelector('[data-action="check-update"]');
   const restartButton = dialog.querySelector('[data-action="restart-update"]');
+  const closeButton = dialog.querySelector('[data-role="close-update-dialog"]');
 
   if (toggle) {
     toggle.checked = status.enabled;
@@ -2095,6 +2096,7 @@ function refreshOpenAppUpdateDialog() {
     checkButton.disabled = ['checking', 'downloading', 'downloaded'].includes(status.state);
   }
   if (restartButton) restartButton.hidden = !status.canRestart;
+  if (closeButton) closeButton.textContent = status.canRestart ? '稍后' : '完成';
 }
 
 async function restartAndInstallAppUpdate() {
@@ -2188,7 +2190,7 @@ function createAppUpdateSettingsDialog() {
       <div class="app-update-settings-row">
         <span class="app-update-settings-label">自动更新</span>
         <label class="app-update-toggle">
-          <input type="checkbox" data-role="auto-update-toggle" />
+          <input type="checkbox" data-role="auto-update-toggle" aria-label="自动更新" />
           <span data-role="auto-update-toggle-text">已关闭</span>
         </label>
       </div>
@@ -2210,7 +2212,7 @@ function createAppUpdateSettingsDialog() {
     <div class="dialog-actions right">
       <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
       <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
-      <button class="secondary-btn small" type="button" data-action="close">完成</button>
+      <button class="secondary-btn small" type="button" data-action="close" data-role="close-update-dialog">完成</button>
     </div>
   `;
 

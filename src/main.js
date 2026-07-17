@@ -3164,6 +3164,11 @@ function createWindow() {
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
   });
+  mainWindow.on('close', (event) => {
+    if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+      event.preventDefault();
+    }
+  });
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
 }
@@ -3366,7 +3371,10 @@ function registerAppUpdateHandlers() {
     try {
       database.setAutoUpdateEnabled(enabled);
       let updateStatus = await service.setEnabled(enabled);
-      if (enabled && !before.enabled) updateStatus = await checkAndDownloadAppUpdate('toggle');
+      const alreadyUpdating = ['checking', 'available', 'downloading', 'downloaded'].includes(before.state);
+      if (enabled && !before.enabled && !alreadyUpdating) {
+        updateStatus = await checkAndDownloadAppUpdate('toggle');
+      }
       return { status: 'success', updateStatus };
     } catch (_error) {
       return {
@@ -3394,10 +3402,11 @@ function registerAppUpdateHandlers() {
     try {
       return { status: 'success', updateStatus: await checkAndDownloadAppUpdate('manual') };
     } catch (_error) {
+      const failedStatus = service.getStatus();
       return {
         status: 'error',
-        message: '检查失败，请稍后重试',
-        updateStatus: service.getStatus()
+        message: failedStatus.error?.message || '检查失败，请稍后重试',
+        updateStatus: failedStatus
       };
     }
   });
@@ -15393,6 +15402,10 @@ function resumeApplicationAfterFailedRestart() {
 }
 
 app.on('before-quit', (event) => {
+  if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
+    event.preventDefault();
+    return;
+  }
   if (normalQuitContinuation || quitPreparationComplete) return;
   event.preventDefault();
   if (normalQuitInProgress) return;

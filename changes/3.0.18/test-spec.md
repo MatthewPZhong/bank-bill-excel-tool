@@ -50,6 +50,7 @@
 | P0-07D manual 不被取消 | 由“立即检查”启动下载时 true→false | operation source=manual | 开关写为 false，但 manual 检查/下载继续并可进入 downloaded；对应 AC-06 |
 | P0-07E disabled 后立即手动 | 取消仍在收尾的 automatic 后连续点击“立即检查” | 旧 updater check Promise 未 settle | 不加入 stale Promise；只排队一个 manual，旧 Promise settle 后新建 manual check 并可显式下载；对应 AC-06、AC-07 |
 | P0-07F 快速重新开启 | automatic 检查失效收尾期间 false→true；再覆盖执行前再次 false | 旧 updater check Promise 未 settle | 第一次重开排队一个 toggle 并在旧 Promise settle 后真正检查；再次关闭使排队 toggle 失效；期间 manual 请求仍被保留；对应 AC-05～AC-07 |
+| P0-07G manual 运行中开启 | 开关 false 时手动检查进入 checking/downloading，再切 true | manual operation 尚未完成 | 持久化 true，保留原状态和进度，底层 check/download 均不重复，也不返回 busy；对应 AC-05～AC-07 |
 | P0-08 稳定版本筛选 | draft、prerelease、当前版、低版本、高版本 stable | 当前 `3.0.18` | 仅高版本 stable 进入 available/download；对应 AC-08 |
 | P0-09 NSIS 显式下载成功 | stable `3.0.19` + 匹配 feed/Setup/blockmap | 打包 NSIS `3.0.18`，`autoDownload=false` | check 只返回 available 且无隐式 downloadPromise；服务以返回的 cancellationToken 显式调用 downloadUpdate 恰好一次，进度 0～100，校验后 downloaded，提示仅一次；对应 AC-09、AC-12 |
 | P0-10 NSIS 稍后 | downloaded 后点“稍后”，再普通退出 | `autoInstallOnAppQuit=false` | 当前会话不重启，普通退出不安装；状态在本会话保持 downloaded；对应 AC-14 |
@@ -57,6 +58,7 @@
 | P0-12 业务忙阻断 | 分别在导入、解析、对账/匹配/计算、生成/导出、拆分合并、worker、定时/后台清理运行时点击立即重启 | downloaded | 每类都返回 blocked-busy；不退出、不安装、业务结果不丢、状态仍 downloaded；对应 AC-13 |
 | P0-13 忙结束不偷重启 | P0-12 后让业务结束 | 不再点击重启 | 不自动安装或重启；再次点击才进入 install transition |
 | P0-14 原子竞态 | 无业务时点击立即重启，同时尝试启动业务 | 精确控制两个调用交错 | 只能有一方获准：install transition 成功后新业务返回 busy，不存在安装与新业务同时开始 |
+| P0-14B 关闭窗口竞态 | install transition 已取得、退出清理 Promise 未完成时点击窗口关闭；随后分别让清理成功/失败 | 精确控制 close 与 cleanup 交错 | 清理未完成时阻止窗口关闭和普通退出抢占；成功后只由安装器退出，失败后释放 transition 且原窗口继续可用 |
 | P0-15 安装启动失败 | `quitAndInstall` 前置/同步失败 | downloaded、无业务 | 释放 install transition，应用可继续使用，状态仍 downloaded，错误可重试 |
 | P0-16 portable 纯手动模式 | 启动 portable 并打开设置 | `PORTABLE_EXECUTABLE_FILE` 存在；监控模块加载和网络 | `distribution=portable/supported=false/state=disabled`，开关禁用；`electron-updater` 从未 import/require/初始化，feed/API 请求为 0，所有 updater API 为 0；对应 AC-10、AC-19 |
 | P0-17 portable 外链 | 分别点击共享“立即检查”和“前往下载” | P0-16 | 两者都只由主进程打开固定 `https://github.com/MatthewPZhong/bank-bill-excel-tool/releases`；Renderer 不能注入 URL；不显示 latest 版本；对应 AC-10、AC-18 |

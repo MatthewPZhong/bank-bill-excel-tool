@@ -102,6 +102,9 @@
 - 检查结果与下载完成只由各自 Promise 落定，升级器事件只承担当前下载进度；无活跃操作的迟到 available/downloaded/error 不得改状态。快速关闭再开启会排队新的 toggle，执行前再次关闭即失效，manual 请求可升级尚未创建的排队操作。
 - 设置页补齐 `v` 前缀和最近检查时间；下载完成时若其它业务弹窗仍打开则延后提示，避免替换未保存输入。安装器同步启动失败时恢复已停止的统计/idle 定时器和退出准备状态，同时保留 downloaded 重试入口。
 - 最终自审发现三个本地 Windows 构建脚本在新增 GitHub provider 后仍缺少显式发布禁令；已统一补 `--publish never`，并在静态契约测试中锁定，防止本地或普通构建绕过受控 Release workflow。
+- PR #91 自审发现 install transition 清理期间仍可由用户窗口关闭触发普通退出链；已在窗口 `close` 事件阻止清理完成前的关闭，清理完成后的 `quitAndInstall` 正常放行，并补 P0-14B 契约。
+- PR #91 UI 自审补齐 downloaded 设置页的显式“稍后”动作和自动更新开关无障碍名称；手动检查进入下载后失败时保留“下载失败”语义，不再降级成笼统的“检查失败”。
+- PR #91 状态机自审补齐“自动更新关闭时手动下载、随后开启开关”的并发边界：保留 downloading 状态并复用当前操作，不重复检查或误报 busy。
 - `src/main.js` 的源码抽取测试因新增 registry 依赖需注入 stub；已只调整测试 harness，不改变既有银行对账 operation lock 语义。
 - Dev 若改变 provider、开关默认值、检查频率、稍后语义、portable 能力、业务忙范围、签名策略、发布资产或 IPC 行为，必须先更新 spec/test 并由 PM 复核，不能仅在代码中静默偏离。
 
@@ -119,7 +122,7 @@
 | 2026-07-16 | 本地依赖 | `node_modules/app-builder-lib/.../winOptions.d.ts`、`node_modules/electron-updater/out/AppUpdater.{d.ts,js}`、`node_modules/builder-util-runtime/out/CancellationToken.*` | 签名配置层级、`autoDownload=false` 手动下载、CancellationToken、安装退出与事件实现 |
 | 2026-07-16 | 用户最终计划 | 本 change 四条纠偏指令 | 显式可取消下载、disabled stale 隔离、portable 零 updater/feed、直接 non-draft 发布为最终优先契约 |
 
-| 2026-07-16 | 自动化 | 最终 `npm run release-check` 通过：lint/smoke 全绿、unit 3672/3672、integration 41 个脚本及 1939/1939 断言全绿；unit 日志 `logs/unit-tests/unit-20260717-003820.log` | 升级专项与现有业务、资金和 Excel 契约均未回归 |
+| 2026-07-17 | 自动化 | PR #91 全部自审修复后重新执行 `npm run release-check`：lint/smoke 全绿、unit 3673/3673、integration 41 个脚本及 1939/1939 断言全绿；unit 日志 `logs/unit-tests/unit-20260717-055507.log` | 升级专项与现有业务、资金和 Excel 契约均未回归 |
 | 2026-07-16 | 升级专项 | 默认关闭、取消、stale 隔离、SemVer、错误脱敏、业务闸门和 metadata staging 均有自动化覆盖 | 更新状态机和发布资产脚本受回归测试保护 |
 | 2026-07-16 | 启动性能 | `npm run startup:measure`：平均 total 774.268ms、ready-to-show 176.721ms、window visible 103.157ms | 后台启动检查未回退首屏门槛 |
 | 2026-07-16 | UI | `docs/previews/app-update-settings.png` 人工检查 | 设置弹窗、按钮顺序、状态/进度和布局无重叠 |
