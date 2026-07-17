@@ -62,6 +62,19 @@ function setBackgroundConfig(db, backgroundConfig) {
   setSetting(db, 'background_config', JSON.stringify(backgroundConfig));
 }
 
+const AUTO_UPDATE_ENABLED_KEY = 'auto_update_enabled';
+
+function getAutoUpdateEnabled(db) {
+  return getSetting(db, AUTO_UPDATE_ENABLED_KEY) === '1';
+}
+
+function setAutoUpdateEnabled(db, enabled) {
+  if (typeof enabled !== 'boolean') {
+    throw new Error(`auto_update_enabled 必须是布尔值，收到：${JSON.stringify(enabled)}`);
+  }
+  setSetting(db, AUTO_UPDATE_ENABLED_KEY, enabled ? '1' : '0');
+}
+
 // v2.1.15 W4：弃用 General 风格，UI 风格恒为 'Clear'。
 //   - 移除「切换页面风格」入口与 setUiStyle 写链路（不再有任何路径写入 'General'）。
 //   - 持久化兼容：老库 ui_style 可能存了 'General'（或其它历史/非法值），
@@ -482,6 +495,7 @@ module.exports = {
   DEFAULT_ENABLED_MODULES,
   ensureUiStyleDefault,
   getBackgroundConfig,
+  getAutoUpdateEnabled,
   getCurrentModule,
   getEnabledModules,
   getEnumConfig,
@@ -491,6 +505,7 @@ module.exports = {
   listAccountMappings,
   saveAccountMappings,
   setBackgroundConfig,
+  setAutoUpdateEnabled,
   setCurrentModule,
   setEnabledModules,
   setEnumConfig,
@@ -534,4 +549,5 @@ module.exports = {
   setLastImportDirectory,
   LAST_IMPORT_DIRECTORY_GLOBAL_KEY,
   LAST_IMPORT_DIRECTORY_PREFIX,
+  AUTO_UPDATE_ENABLED_KEY,
 };

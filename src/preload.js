@@ -107,6 +107,19 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('app:init-progress', listener);
     }
   },
+  appUpdate: {
+    getStatus: () => ipcRenderer.invoke('app-update:get-status'),
+    setEnabled: (enabled) => ipcRenderer.invoke('app-update:set-enabled', enabled),
+    checkNow: () => ipcRenderer.invoke('app-update:check-now'),
+    restartAndInstall: () => ipcRenderer.invoke('app-update:restart-and-install'),
+    onStatusChanged: (listener) => {
+      const wrapped = (_event, status) => {
+        try { listener(status); } catch (_error) { /* renderer listener errors must not break IPC */ }
+      };
+      ipcRenderer.on('app-update:status-changed', wrapped);
+      return () => ipcRenderer.removeListener('app-update:status-changed', wrapped);
+    }
+  },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
   },

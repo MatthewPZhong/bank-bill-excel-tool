@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.17",
-    "scannedAt": "2026-07-17T01:46:29.652Z",
+    "version": "3.0.18",
+    "scannedAt": "2026-07-17T04:30:33.518Z",
     "root": "src",
-    "totalFiles": 193,
-    "totalTopLevelNames": 2144,
+    "totalFiles": 195,
+    "totalTopLevelNames": 2187,
     "buckets": {
-      "shared": 338,
-      "paired": 557,
-      "local": 1115,
-      "crossFile": 895
+      "shared": 340,
+      "paired": 563,
+      "local": 1146,
+      "crossFile": 903
     }
   },
   "A": {
@@ -1638,6 +1638,65 @@
         "fileSpan": 13
       },
       {
+        "name": "pad",
+        "defFiles": [
+          "src/backend/logger.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/backup.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/logger.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 14
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 10
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-hit-rows-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 76,
+        "fileSpan": 12
+      },
+      {
         "name": "BANK_STATEMENT_FIELDS",
         "defFiles": [
           "src/backend/database/linked-table-repository.js",
@@ -1769,58 +1828,57 @@
         "fileSpan": 12
       },
       {
-        "name": "pad",
+        "name": "state",
         "defFiles": [
-          "src/backend/logger.js",
-          "src/main.js"
+          "src/renderer.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/database/backup.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/logger.js",
-            "count": 11
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-writer.js",
+            "file": "src/backend/big-table-import/row-scanner.js",
             "count": 4
           },
           {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 14
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 26
           },
           {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 10
+            "file": "src/main-process/app-updater.js",
+            "count": 29
           },
           {
-            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 4
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 29
           },
           {
-            "file": "src/main-process/pending-session.js",
-            "count": 6
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 2
           },
           {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/scenario-hit-rows-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main.js",
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
             "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 8
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 30
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 55
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 41
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 209
           }
         ],
-        "totalHits": 70,
+        "totalHits": 434,
         "fileSpan": 11
       },
       {
@@ -1886,56 +1944,6 @@
         ],
         "totalHits": 31,
         "fileSpan": 11
-      },
-      {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 26
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 29
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 8
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 30
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 55
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 41
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 171
-          }
-        ],
-        "totalHits": 367,
-        "fileSpan": 10
       },
       {
         "name": "PENDING_COLUMNS",
@@ -2811,6 +2819,45 @@
         "fileSpan": 7
       },
       {
+        "name": "serializeError",
+        "defFiles": [
+          "src/main-process/app-updater.js",
+          "src/main-process/serialize-error.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/engine-worker-entry.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/big-table-import/import-worker.js",
+            "count": 5
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/run-check-multiworker-worker.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/serialize-error.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 36,
+        "fileSpan": 7
+      },
+      {
         "name": "openSideDb",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -3004,6 +3051,44 @@
           }
         ],
         "totalHits": 22,
+        "fileSpan": 7
+      },
+      {
+        "name": "cancel",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/pipeline.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/toolbox-large-split-dispatch.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 19,
         "fileSpan": 7
       },
       {
@@ -3348,10 +3433,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 71
+            "count": 96
           }
         ],
-        "totalHits": 544,
+        "totalHits": 569,
         "fileSpan": 6
       },
       {
@@ -3387,40 +3472,6 @@
           }
         ],
         "totalHits": 32,
-        "fileSpan": 6
-      },
-      {
-        "name": "serializeError",
-        "defFiles": [
-          "src/main-process/serialize-error.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/engine-worker-entry.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/big-table-import/import-worker.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/run-check-multiworker-worker.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/run-check-worker.js",
-            "count": 7
-          },
-          {
-            "file": "src/main-process/serialize-error.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 31,
         "fileSpan": 6
       },
       {
@@ -3532,40 +3583,6 @@
           }
         ],
         "totalHits": 18,
-        "fileSpan": 6
-      },
-      {
-        "name": "cancel",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/pipeline.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/run-check-worker.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/toolbox-large-split-dispatch.js",
-            "count": 2
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 16,
         "fileSpan": 6
       },
       {
@@ -3887,6 +3904,36 @@
         "fileSpan": 5
       },
       {
+        "name": "app",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 16
+          },
+          {
+            "file": "src/main.js",
+            "count": 7
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 36,
+        "fileSpan": 5
+      },
+      {
         "name": "parentPort",
         "defFiles": [
           "src/backend/big-table-import/engine-worker-entry.js",
@@ -3950,6 +3997,38 @@
           }
         ],
         "totalHits": 31,
+        "fileSpan": 5
+      },
+      {
+        "name": "logger",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js",
+          "src/main-process/biz-op-recon-writer.js",
+          "src/main-process/scenario-engines/c4-recon-id-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/biz-op-recon-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/run-check-worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 19,
         "fileSpan": 5
       },
       {
@@ -4894,10 +4973,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 133
+            "count": 144
           }
         ],
-        "totalHits": 207,
+        "totalHits": 218,
         "fileSpan": 4
       },
       {
@@ -5012,6 +5091,32 @@
         "fileSpan": 4
       },
       {
+        "name": "getStatus",
+        "defFiles": [
+          "src/main-process/run-check-worker-pool.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 22
+          },
+          {
+            "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 26,
+        "fileSpan": 4
+      },
+      {
         "name": "pad2",
         "defFiles": [
           "src/backend/usage-stats.js",
@@ -5120,32 +5225,6 @@
           }
         ],
         "totalHits": 21,
-        "fileSpan": 4
-      },
-      {
-        "name": "app",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 7
-          },
-          {
-            "file": "src/preload.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 20,
         "fileSpan": 4
       },
       {
@@ -5443,34 +5522,6 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 3
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 4
-      },
-      {
-        "name": "logger",
-        "defFiles": [
-          "src/main-process/biz-op-recon-session.js",
-          "src/main-process/biz-op-recon-writer.js",
-          "src/main-process/scenario-engines/c4-recon-id-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/biz-op-recon-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/run-check-worker.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-            "count": 2
           }
         ],
         "totalHits": 12,
@@ -6938,7 +6989,7 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 29
+            "count": 31
           },
           {
             "file": "src/backend/database/own-accounts-migration.js",
@@ -6949,7 +7000,7 @@
             "count": 5
           }
         ],
-        "totalHits": 38,
+        "totalHits": 40,
         "fileSpan": 3
       },
       {
@@ -6976,6 +7027,28 @@
         "fileSpan": 3
       },
       {
+        "name": "setSetting",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 20
+          }
+        ],
+        "totalHits": 25,
+        "fileSpan": 3
+      },
+      {
         "name": "lastGeneratedExports",
         "defFiles": [
           "src/main.js"
@@ -6992,28 +7065,6 @@
           {
             "file": "src/main.js",
             "count": 1
-          }
-        ],
-        "totalHits": 24,
-        "fileSpan": 3
-      },
-      {
-        "name": "setSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 19
           }
         ],
         "totalHits": 24,
@@ -7081,10 +7132,10 @@
           },
           {
             "file": "src/backend/database/settings-repository.js",
-            "count": 16
+            "count": 17
           }
         ],
-        "totalHits": 20,
+        "totalHits": 21,
         "fileSpan": 3
       },
       {
@@ -7222,6 +7273,28 @@
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 3
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 3
+      },
+      {
+        "name": "shell",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 9
           }
         ],
         "totalHits": 12,
@@ -13511,6 +13584,24 @@
         "fileSpan": 2
       },
       {
+        "name": "INSTALL_BUSY_MESSAGE",
+        "defFiles": [
+          "src/main-process/business-operation-registry.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/business-operation-registry.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "listImportedDateBuPairs",
         "defFiles": [
           "src/backend/biz-op-recon-db/imports-repository.js"
@@ -15882,6 +15973,24 @@
         "fileSpan": 2
       },
       {
+        "name": "createBusinessOperationRegistry",
+        "defFiles": [
+          "src/main-process/business-operation-registry.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/business-operation-registry.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "createCancelToken",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-session.js"
@@ -16076,6 +16185,24 @@
           {
             "file": "src/backend/database/scenarios-repository.js",
             "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "detectDistribution",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
           }
         ],
         "totalHits": 4,
@@ -16393,6 +16520,24 @@
       },
       {
         "name": "getAcquiringBillWorkerCount",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "getAutoUpdateEnabled",
         "defFiles": [
           "src/backend/database/settings-repository.js"
         ],
@@ -18179,6 +18324,24 @@
         "fileSpan": 2
       },
       {
+        "name": "setAutoUpdateEnabled",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "setBackgroundConfig",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -19047,6 +19210,24 @@
           },
           {
             "file": "src/main-process/pending-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "createAppUpdaterService",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -20905,10 +21086,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 212
+            "count": 218
           }
         ],
-        "totalHits": 212,
+        "totalHits": 218,
         "fileSpan": 1
       },
       {
@@ -21724,6 +21905,20 @@
         "fileSpan": 1
       },
       {
+        "name": "applyAppUpdateStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "billDateMatches",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -22109,6 +22304,20 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "DISTRIBUTIONS",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 7
           }
         ],
@@ -23138,6 +23347,20 @@
         "fileSpan": 1
       },
       {
+        "name": "createServiceError",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "createStats",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -23614,6 +23837,20 @@
         "fileSpan": 1
       },
       {
+        "name": "refreshOpenAppUpdateDialog",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "REFUND_BACKFILL_SCENARIO",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -23887,6 +24124,20 @@
         "refFiles": [
           {
             "file": "src/backend/pending-reconcile/engine.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "AUTO_UPDATE_ENABLED_KEY",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/settings-repository.js",
             "count": 4
           }
         ],
@@ -25840,6 +26091,20 @@
         "fileSpan": 1
       },
       {
+        "name": "applyAppUpdateActionResult",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "applyBalanceFieldFormats",
         "defFiles": [
           "src/backend/file-service/writers.js"
@@ -25889,6 +26154,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "AppUpdaterService",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 3
           }
         ],
@@ -26694,6 +26973,20 @@
         "fileSpan": 1
       },
       {
+        "name": "businessOperationRegistry",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "bytesToGb",
         "defFiles": [
           "src/backend/pending-import/xlsx-size-preflight.js"
@@ -27170,6 +27463,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DEFAULT_APP_UPDATE_STATUS",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "DEFAULT_BATCH_SIZE",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-parser.js"
@@ -27590,6 +27897,20 @@
         "fileSpan": 1
       },
       {
+        "name": "extractAppUpdateStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "extractChannelLocation",
         "defFiles": [
           "src/main-process/scenario-dispatcher.js"
@@ -27625,6 +27946,20 @@
         "refFiles": [
           {
             "file": "src/main-process/boc-fx-link-builder.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "extractVersion",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 3
           }
         ],
@@ -28276,6 +28611,20 @@
         "fileSpan": 1
       },
       {
+        "name": "isCancellationError",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "isExplainedError",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/large-split-worker.js"
@@ -28353,6 +28702,20 @@
         "refFiles": [
           {
             "file": "src/main-process/monthly-balance.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "isStrictStableUpgrade",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 3
           }
         ],
@@ -29438,6 +29801,20 @@
         "fileSpan": 1
       },
       {
+        "name": "parseStableSemver",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "PENDING_MAX_COLLECTED_ERRORS",
         "defFiles": [
           "src/backend/pending-import/contract-pending.js"
@@ -29585,6 +29962,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "PRODUCTION_UPDATER_CONFIG",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 3
           }
         ],
@@ -30110,6 +30501,20 @@
         "fileSpan": 1
       },
       {
+        "name": "restartAndInstallAppUpdate",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "roundAmountHighPrecision",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -30502,6 +30907,20 @@
         "fileSpan": 1
       },
       {
+        "name": "showDownloadedUpdatePrompt",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "SIDE_DB_DDL_ACQUIRING",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -30859,6 +31278,20 @@
         "refFiles": [
           {
             "file": "src/main-process/refund-backfill-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "UPDATE_STATES",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 3
           }
         ],
@@ -31371,6 +31804,34 @@
       },
       {
         "name": "applyStatementModeSideEffects",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "appUpdateDistributionText",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "appUpdateStateText",
         "defFiles": [
           "src/renderer.js"
         ],
@@ -32126,6 +32587,20 @@
         "fileSpan": 1
       },
       {
+        "name": "cloneStatus",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "closeWorkbookOutputStream",
         "defFiles": [
           "src/main-process/toolbox-stream-io.js"
@@ -32427,6 +32902,20 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "defaultUpdaterLoader",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 2
           }
         ],
@@ -32840,6 +33329,34 @@
         "fileSpan": 1
       },
       {
+        "name": "formatAppUpdateCheckedAt",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "formatAppUpdateVersion",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "formatBankStatementImportProgress",
         "defFiles": [
           "src/renderer.js"
@@ -32987,6 +33504,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "getCurrentVersion",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 2
           }
         ],
@@ -33155,20 +33686,6 @@
         "refFiles": [
           {
             "file": "src/main-process/recon-id-fix-io.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "getStatus",
-        "defFiles": [
-          "src/main-process/run-check-worker-pool.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/run-check-worker-pool.js",
             "count": 2
           }
         ],
@@ -34366,6 +34883,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeAppUpdateStatus",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeBatchSize",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-parser.js"
@@ -34373,6 +34904,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeBusyOperations",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 2
           }
         ],
@@ -34485,6 +35030,34 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeOperation",
+        "defFiles": [
+          "src/main-process/business-operation-registry.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/business-operation-registry.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizePercent",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
             "count": 2
           }
         ],
@@ -35178,6 +35751,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readIsPackaged",
+        "defFiles": [
+          "src/main-process/app-updater.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "readRemovedPendingFile",
         "defFiles": [
           "src/backend/pending-import/removed-reader.js"
@@ -35325,6 +35912,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-stream-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "renderAppUpdateIndicator",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 2
           }
         ],
@@ -35899,6 +36500,20 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "setupAppUpdatePromptObserver",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 2
           }
         ],
@@ -38134,6 +38749,65 @@
       "fileSpan": 13
     },
     {
+      "name": "pad",
+      "defFiles": [
+        "src/backend/logger.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/backup.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/logger.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 14
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 10
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-hit-rows-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 76,
+      "fileSpan": 12
+    },
+    {
       "name": "BANK_STATEMENT_FIELDS",
       "defFiles": [
         "src/backend/database/linked-table-repository.js",
@@ -38265,58 +38939,57 @@
       "fileSpan": 12
     },
     {
-      "name": "pad",
+      "name": "state",
       "defFiles": [
-        "src/backend/logger.js",
-        "src/main.js"
+        "src/renderer.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/database/backup.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/logger.js",
-          "count": 11
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-writer.js",
+          "file": "src/backend/big-table-import/row-scanner.js",
           "count": 4
         },
         {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 14
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 26
         },
         {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 10
+          "file": "src/main-process/app-updater.js",
+          "count": 29
         },
         {
-          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "count": 4
+          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "count": 29
         },
         {
-          "file": "src/main-process/pending-session.js",
-          "count": 6
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 2
         },
         {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/scenario-hit-rows-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main.js",
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
           "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 8
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 30
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 55
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 41
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 209
         }
       ],
-      "totalHits": 70,
+      "totalHits": 434,
       "fileSpan": 11
     },
     {
@@ -38382,56 +39055,6 @@
       ],
       "totalHits": 31,
       "fileSpan": 11
-    },
-    {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/row-scanner.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 26
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-          "count": 29
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 8
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 30
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 55
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 41
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 171
-        }
-      ],
-      "totalHits": 367,
-      "fileSpan": 10
     },
     {
       "name": "PENDING_COLUMNS",
@@ -39307,6 +39930,45 @@
       "fileSpan": 7
     },
     {
+      "name": "serializeError",
+      "defFiles": [
+        "src/main-process/app-updater.js",
+        "src/main-process/serialize-error.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/engine-worker-entry.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/big-table-import/import-worker.js",
+          "count": 5
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/run-check-multiworker-worker.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/serialize-error.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 36,
+      "fileSpan": 7
+    },
+    {
       "name": "openSideDb",
       "defFiles": [
         "src/backend/run-data-store.js"
@@ -39500,6 +40162,44 @@
         }
       ],
       "totalHits": 22,
+      "fileSpan": 7
+    },
+    {
+      "name": "cancel",
+      "defFiles": [
+        "src/main-process/run-check-worker-pool.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/pipeline.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/run-check-worker-pool.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/toolbox-large-split-dispatch.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 19,
       "fileSpan": 7
     },
     {
@@ -39844,10 +40544,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 71
+          "count": 96
         }
       ],
-      "totalHits": 544,
+      "totalHits": 569,
       "fileSpan": 6
     },
     {
@@ -39883,40 +40583,6 @@
         }
       ],
       "totalHits": 32,
-      "fileSpan": 6
-    },
-    {
-      "name": "serializeError",
-      "defFiles": [
-        "src/main-process/serialize-error.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/engine-worker-entry.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/big-table-import/import-worker.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/run-check-multiworker-worker.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/run-check-worker.js",
-          "count": 7
-        },
-        {
-          "file": "src/main-process/serialize-error.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 31,
       "fileSpan": 6
     },
     {
@@ -40028,40 +40694,6 @@
         }
       ],
       "totalHits": 18,
-      "fileSpan": 6
-    },
-    {
-      "name": "cancel",
-      "defFiles": [
-        "src/main-process/run-check-worker-pool.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/pipeline.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-session.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/run-check-worker-pool.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/run-check-worker.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/toolbox-large-split-dispatch.js",
-          "count": 2
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 16,
       "fileSpan": 6
     },
     {
@@ -40383,6 +41015,36 @@
       "fileSpan": 5
     },
     {
+      "name": "app",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 16
+        },
+        {
+          "file": "src/main.js",
+          "count": 7
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 8
+        }
+      ],
+      "totalHits": 36,
+      "fileSpan": 5
+    },
+    {
       "name": "parentPort",
       "defFiles": [
         "src/backend/big-table-import/engine-worker-entry.js",
@@ -40446,6 +41108,38 @@
         }
       ],
       "totalHits": 31,
+      "fileSpan": 5
+    },
+    {
+      "name": "logger",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js",
+        "src/main-process/biz-op-recon-writer.js",
+        "src/main-process/scenario-engines/c4-recon-id-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/biz-op-recon-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/run-check-worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 19,
       "fileSpan": 5
     },
     {
@@ -41390,10 +42084,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 133
+          "count": 144
         }
       ],
-      "totalHits": 207,
+      "totalHits": 218,
       "fileSpan": 4
     },
     {
@@ -41508,6 +42202,32 @@
       "fileSpan": 4
     },
     {
+      "name": "getStatus",
+      "defFiles": [
+        "src/main-process/run-check-worker-pool.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 22
+        },
+        {
+          "file": "src/main-process/run-check-worker-pool.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 26,
+      "fileSpan": 4
+    },
+    {
       "name": "pad2",
       "defFiles": [
         "src/backend/usage-stats.js",
@@ -41616,32 +42336,6 @@
         }
       ],
       "totalHits": 21,
-      "fileSpan": 4
-    },
-    {
-      "name": "app",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 7
-        },
-        {
-          "file": "src/preload.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 8
-        }
-      ],
-      "totalHits": 20,
       "fileSpan": 4
     },
     {
@@ -41939,34 +42633,6 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 3
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 4
-    },
-    {
-      "name": "logger",
-      "defFiles": [
-        "src/main-process/biz-op-recon-session.js",
-        "src/main-process/biz-op-recon-writer.js",
-        "src/main-process/scenario-engines/c4-recon-id-fix.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/biz-op-recon-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/run-check-worker.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
-          "count": 2
         }
       ],
       "totalHits": 12,
@@ -43434,7 +44100,7 @@
       "refFiles": [
         {
           "file": "src/backend/database.js",
-          "count": 29
+          "count": 31
         },
         {
           "file": "src/backend/database/own-accounts-migration.js",
@@ -43445,7 +44111,7 @@
           "count": 5
         }
       ],
-      "totalHits": 38,
+      "totalHits": 40,
       "fileSpan": 3
     },
     {
@@ -43472,6 +44138,28 @@
       "fileSpan": 3
     },
     {
+      "name": "setSetting",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 20
+        }
+      ],
+      "totalHits": 25,
+      "fileSpan": 3
+    },
+    {
       "name": "lastGeneratedExports",
       "defFiles": [
         "src/main.js"
@@ -43488,28 +44176,6 @@
         {
           "file": "src/main.js",
           "count": 1
-        }
-      ],
-      "totalHits": 24,
-      "fileSpan": 3
-    },
-    {
-      "name": "setSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 19
         }
       ],
       "totalHits": 24,
@@ -43577,10 +44243,10 @@
         },
         {
           "file": "src/backend/database/settings-repository.js",
-          "count": 16
+          "count": 17
         }
       ],
-      "totalHits": 20,
+      "totalHits": 21,
       "fileSpan": 3
     },
     {
@@ -43718,6 +44384,28 @@
         {
           "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 3
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 3
+    },
+    {
+      "name": "shell",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 9
         }
       ],
       "totalHits": 12,
@@ -50005,6 +50693,24 @@
       "fileSpan": 2
     },
     {
+      "name": "INSTALL_BUSY_MESSAGE",
+      "defFiles": [
+        "src/main-process/business-operation-registry.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/business-operation-registry.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "listImportedDateBuPairs",
       "defFiles": [
         "src/backend/biz-op-recon-db/imports-repository.js"
@@ -52376,6 +53082,24 @@
       "fileSpan": 2
     },
     {
+      "name": "createBusinessOperationRegistry",
+      "defFiles": [
+        "src/main-process/business-operation-registry.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/business-operation-registry.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "createCancelToken",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-session.js"
@@ -52570,6 +53294,24 @@
         {
           "file": "src/backend/database/scenarios-repository.js",
           "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "detectDistribution",
+      "defFiles": [
+        "src/main-process/app-updater.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
         }
       ],
       "totalHits": 4,
@@ -52887,6 +53629,24 @@
     },
     {
       "name": "getAcquiringBillWorkerCount",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "getAutoUpdateEnabled",
       "defFiles": [
         "src/backend/database/settings-repository.js"
       ],
@@ -54673,6 +55433,24 @@
       "fileSpan": 2
     },
     {
+      "name": "setAutoUpdateEnabled",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "setBackgroundConfig",
       "defFiles": [
         "src/backend/database/settings-repository.js"
@@ -55541,6 +56319,24 @@
         },
         {
           "file": "src/main-process/pending-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "createAppUpdaterService",
+      "defFiles": [
+        "src/main-process/app-updater.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

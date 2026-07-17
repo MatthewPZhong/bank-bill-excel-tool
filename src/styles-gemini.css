@@ -313,6 +313,7 @@ button, select { font: inherit; }
   display: flex; align-items: center; gap: 10px;
 }
 .palette-trigger {
+  position: relative;
   width: 36px; height: 36px;
   border-radius: 50%;
   border: 1px solid var(--line);
@@ -322,6 +323,16 @@ button, select { font: inherit; }
   box-shadow: var(--shadow-sm);
 }
 .palette-trigger:hover { background: var(--chip-bg); }
+.app-update-status-dot {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--danger);
+}
 .text-action {
   background: none; border: none;
   color: var(--muted); font-size: 13px; cursor: pointer;

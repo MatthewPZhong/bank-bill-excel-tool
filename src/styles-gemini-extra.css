@@ -183,6 +183,12 @@ td .muted { color: var(--muted); }
 .manual-balance-card { width: min(100%, 560px); }
 .template-rename-card { width: min(100%, 520px); }
 .remember-order-mismatch-card { width: min(100%, 460px); }
+.app-update-settings-card {
+  width: min(100%, 520px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.app-update-settings-card .dialog-actions { flex-wrap: wrap; }
 .account-mapping-migration-card { width: min(100%, 900px); }
 .amount-split-rules-card { width: min(100%, 880px); }
 .bill-split-mappings-card { width: 80vw; max-width: 1280px; }
@@ -190,6 +196,58 @@ td .muted { color: var(--muted); }
 /* v2.1.7 round 2 R6a 方案 C：弹窗 1080 → 1200（spec §8.7.3 — 给文件名 + 后缀 ' → MERCHANT USD' 多 120px 横向空间） */
 .big-account-selection-card { width: min(100%, 1200px); min-height: 540px; }
 .big-account-selection-split { min-height: 600px; }
+
+.app-update-settings-body {
+  display: grid;
+  gap: 0;
+  padding: 8px 28px 18px;
+}
+.app-update-settings-row {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.app-update-settings-row:last-child { border-bottom: 0; }
+.app-update-settings-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.app-update-settings-value {
+  min-width: 0;
+  color: var(--text);
+  font-size: 14px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.app-update-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  cursor: pointer;
+}
+.app-update-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+.app-update-progress {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 8px;
+  margin: 0 0 14px;
+  accent-color: var(--primary);
+}
+.app-update-settings-note {
+  margin: 0;
+  padding: 0 28px 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
 
 /* =================== Export-scope vertical buttons =================== */
 .export-scope-card .dialog-actions.vertical .export-scope-btn {

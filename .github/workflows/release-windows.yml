@@ -1,0 +1,125 @@
+name: Release Windows Packages
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    environment: production-release
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag and main
+        shell: pwsh
+        run: |
+          git fetch origin main --force
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$') {
+            throw "Package version $version is not a stable semantic version"
+          }
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $expectedTag"
+          }
+          $mainSha = (git rev-parse origin/main).Trim()
+          $tagCommit = (git rev-list -n 1 $env:GITHUB_REF_NAME).Trim()
+          if ($tagCommit -ne $mainSha) {
+            throw "Release tag must point to the current main commit ($mainSha)"
+          }
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run release checks
+        run: npm run release-check
+
+      - name: Generate build information
+        run: npm run prebuild:meta
+
+      - name: Build Windows packages
+        run: npx electron-builder --win --publish never
+
+      - name: Check packaged application
+        run: npm run check:dist
+
+      - name: Stage updater-compatible assets
+        run: npm run stage:update-artifacts
+
+      - name: Verify update artifacts
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $setup = @(Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe")
+          $portable = @(Get-ChildItem dist -Filter '*-portable.exe')
+          $metadata = @(Get-ChildItem dist -Filter 'latest.yml')
+          if ($setup.Count -ne 1) { throw "Expected one setup executable, found $($setup.Count)" }
+          if ($portable.Count -ne 1) { throw "Expected one portable executable, found $($portable.Count)" }
+          if ($metadata.Count -ne 1) { throw "Expected latest.yml, found $($metadata.Count)" }
+          $setupBlockmap = @(Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe.blockmap")
+          if ($setupBlockmap.Count -ne 1) {
+            throw "Expected one setup blockmap, found $($setupBlockmap.Count)"
+          }
+          $latest = Get-Content $metadata[0].FullName -Raw
+          if ($latest -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
+            throw "latest.yml version does not match $version"
+          }
+          if ($latest -notmatch [regex]::Escape($setup[0].Name)) {
+            throw 'latest.yml does not reference the setup executable'
+          }
+          $setupHashHex = (Get-FileHash $setup[0].FullName -Algorithm SHA512).Hash
+          $setupHashBase64 = [Convert]::ToBase64String([Convert]::FromHexString($setupHashHex))
+          if ($latest -notmatch [regex]::Escape($setupHashBase64)) {
+            throw 'latest.yml SHA512 does not match the setup executable'
+          }
+
+      - name: Publish immutable GitHub Release
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if (gh release view $env:GITHUB_REF_NAME 2>$null) {
+            throw "Release $env:GITHUB_REF_NAME already exists and must not be replaced"
+          }
+          $assets = @(
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe").FullName
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe.blockmap").FullName
+            (Get-ChildItem dist -Filter '*-portable.exe').FullName
+            (Get-ChildItem dist -Filter 'latest.yml').FullName
+          )
+          gh release create $env:GITHUB_REF_NAME $assets --verify-tag --title $env:GITHUB_REF_NAME --generate-notes --latest
+
+      - name: Verify published release
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $release = gh release view $env:GITHUB_REF_NAME --json tagName,isDraft,isPrerelease,assets | ConvertFrom-Json
+          if ($release.tagName -ne $env:GITHUB_REF_NAME) { throw 'Published release tag mismatch' }
+          if ($release.isDraft) { throw 'Published release must not be a draft' }
+          if ($release.isPrerelease) { throw 'Published release must not be a prerelease' }
+          $assetNames = @($release.assets | ForEach-Object { $_.name })
+          $expectedNames = @(
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe").Name
+            (Get-ChildItem dist -Filter '*-portable.exe').Name
+            (Get-ChildItem dist -Filter 'latest.yml').Name
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe.blockmap").Name
+          )
+          foreach ($name in $expectedNames) {
+            if ($assetNames -notcontains $name) { throw "Published release is missing asset $name" }
+          }
