@@ -97,7 +97,8 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
   test('无独立「导出文件」按钮（split-export）；splitExport 在 onComplete 内触发', () => {
     assert.ok(!fn.includes('data-action="split-export"'), '不应再有独立「导出文件」按钮');
     assert.ok(!fn.includes('splitExportBtn'), '不应再引用 splitExportBtn（按钮已删）');
-    const completeIdx = fn.indexOf('onComplete: async ({ field, values })');
+    const completeMatch = fn.match(/onComplete:\s*async \(\{ field, values(?:, mode, groups)? \}(?: = \{\})?\)/);
+    const completeIdx = completeMatch ? completeMatch.index : -1;
     const exportIdx = fn.indexOf('desktopApi.toolbox.splitExport(');
     assert.ok(completeIdx >= 0, 'onComplete 应为 async（内部一气呵成导出）');
     assert.ok(exportIdx > completeIdx, 'splitExport 应在 onComplete 回调内触发（完成即导出）');
@@ -110,7 +111,7 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
   });
 
   test('缺源文件/字段/值 → 应用内弹框提示 + return 不调 IPC', () => {
-    const guardIdx = fn.indexOf('!result.sourceFilePath || !field || selectedValues.length === 0');
+    const guardIdx = fn.indexOf('!result.sourceFilePath ||');
     const exportIdx = fn.indexOf('desktopApi.toolbox.splitExport(');
     assert.ok(guardIdx >= 0, '导出应有「缺源文件/字段/值」前置守卫');
     assert.ok(exportIdx >= 0, '应存在 splitExport 调用');
@@ -118,6 +119,35 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
     const guardBlock = fn.slice(guardIdx, exportIdx);
     assert.ok(/showToolboxAlert\([^)]*选择/.test(guardBlock), '守卫命中应用内弹框提示选择字段与值');
     assert.ok(/return;/.test(guardBlock), '守卫命中应 return（不调 IPC）');
+  });
+});
+
+describe('v3.0.17 多文件拆分契约', () => {
+  const toolboxFn = sliceFunction(source, 'createToolboxDialog');
+  const pickerFn = sliceFunction(source, 'createSplitFieldPickerDialog');
+  const multiFn = sliceFunction(source, 'createMultipleSplitFieldPickerDialog');
+
+  test('单文件旧请求保持 sourceFilePath/field/values，多文件请求使用 mode/groups', () => {
+    assert.match(toolboxFn, /sourceFilePath:\s*result\.sourceFilePath,[\s\S]*?field,[\s\S]*?values:\s*selectedValues/);
+    assert.match(toolboxFn, /mode:\s*'multiple',[\s\S]*?groups:\s*multipleGroups/);
+  });
+
+  test('入口默认不勾选，多文件视图支持新增、删除和最多 8 组', () => {
+    assert.ok(pickerFn.includes('需要拆分成多个文件'));
+    assert.ok(multiFn.includes('data-action="add-group"'));
+    assert.ok(multiFn.includes('toolbox-split-delete-group'));
+    assert.ok(multiFn.includes('groups.length >= 8'));
+  });
+
+  test('新组继承字段但文件名和值为空，完成回传多文件分组', () => {
+    assert.match(multiFn, /fileName:\s*'',\s*fieldIndex:\s*previous \? previous\.fieldIndex : 0,\s*selectedValues:\s*new Set\(\)/);
+    assert.ok(multiFn.includes("onComplete({ mode: 'multiple', groups: normalizedGroups })"));
+  });
+
+  test('文件名校验覆盖非法字符、系统保留名及大小写不敏感重复', () => {
+    assert.ok(multiFn.includes('文件名包含系统不允许的字符'));
+    assert.ok(multiFn.includes('文件名是系统保留名称'));
+    assert.ok(multiFn.includes("toLocaleLowerCase('en-US')"));
   });
 });
 

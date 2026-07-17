@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.16",
-    "scannedAt": "2026-07-16T10:55:45.728Z",
+    "version": "3.0.17",
+    "scannedAt": "2026-07-16T12:15:12.966Z",
     "root": "src",
-    "totalFiles": 191,
-    "totalTopLevelNames": 2122,
+    "totalFiles": 193,
+    "totalTopLevelNames": 2144,
     "buckets": {
-      "shared": 335,
-      "paired": 554,
-      "local": 1100,
-      "crossFile": 889
+      "shared": 338,
+      "paired": 557,
+      "local": 1115,
+      "crossFile": 895
     }
   },
   "A": {
@@ -76,6 +76,7 @@
           "src/main-process/statement-generation.js",
           "src/main-process/statement-session.js",
           "src/main-process/table-type-detector.js",
+          "src/main-process/toolbox-multi-split.js",
           "src/main-process/toolbox-stream-io.js",
           "src/main-process/vcc-op-calc-session.js",
           "src/main.js"
@@ -342,6 +343,10 @@
             "count": 2
           },
           {
+            "file": "src/main-process/toolbox-multi-split.js",
+            "count": 1
+          },
+          {
             "file": "src/main-process/toolbox-stream-io.js",
             "count": 3
           },
@@ -358,8 +363,8 @@
             "count": 2
           }
         ],
-        "totalHits": 251,
-        "fileSpan": 69
+        "totalHits": 252,
+        "fileSpan": 70
       },
       {
         "name": "fs",
@@ -411,6 +416,7 @@
           "src/main-process/run-check-multiworker-worker.js",
           "src/main-process/run-check-multiworker.js",
           "src/main-process/scenario-hit-rows-writer.js",
+          "src/main-process/toolbox-multi-split.js",
           "src/main-process/toolbox-stream-io.js",
           "src/main.js"
         ],
@@ -608,16 +614,20 @@
             "count": 5
           },
           {
+            "file": "src/main-process/toolbox-multi-split.js",
+            "count": 1
+          },
+          {
             "file": "src/main-process/toolbox-stream-io.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/main.js",
             "count": 1
           }
         ],
-        "totalHits": 180,
-        "fileSpan": 50
+        "totalHits": 182,
+        "fileSpan": 51
       },
       {
         "name": "parse",
@@ -776,6 +786,7 @@
           "src/main-process/big-account-recognition.js",
           "src/main-process/linked-table-stream-source.js",
           "src/main-process/table-type-detector.js",
+          "src/main-process/toolbox-multi-split.js",
           "src/main-process/toolbox.js"
         ],
         "refFiles": [
@@ -872,6 +883,10 @@
             "count": 5
           },
           {
+            "file": "src/main-process/toolbox-multi-split.js",
+            "count": 1
+          },
+          {
             "file": "src/main-process/toolbox-stream-io.js",
             "count": 2
           },
@@ -884,8 +899,8 @@
             "count": 2
           }
         ],
-        "totalHits": 143,
-        "fileSpan": 26
+        "totalHits": 144,
+        "fileSpan": 27
       },
       {
         "name": "FileValidationError",
@@ -1100,14 +1115,14 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 45
+            "count": 57
           },
           {
             "file": "src/main.js",
             "count": 1
           }
         ],
-        "totalHits": 212,
+        "totalHits": 224,
         "fileSpan": 21
       },
       {
@@ -1873,6 +1888,56 @@
         "fileSpan": 11
       },
       {
+        "name": "state",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 26
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 29
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 8
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 30
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 55
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 41
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 171
+          }
+        ],
+        "totalHits": 367,
+        "fileSpan": 10
+      },
+      {
         "name": "PENDING_COLUMNS",
         "defFiles": [
           "src/backend/pending-db/migrations.js",
@@ -2097,52 +2162,6 @@
         ],
         "totalHits": 20,
         "fileSpan": 10
-      },
-      {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 26
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 29
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 30
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 55
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 41
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 171
-          }
-        ],
-        "totalHits": 359,
-        "fileSpan": 9
       },
       {
         "name": "runDataStore",
@@ -3317,7 +3336,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 423
+            "count": 437
           },
           {
             "file": "src/renderer-pending.js",
@@ -3332,7 +3351,7 @@
             "count": 71
           }
         ],
-        "totalHits": 530,
+        "totalHits": 544,
         "fileSpan": 6
       },
       {
@@ -3857,14 +3876,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 58
+            "count": 60
           },
           {
             "file": "src/renderer.js",
             "count": 4
           }
         ],
-        "totalHits": 67,
+        "totalHits": 69,
         "fileSpan": 5
       },
       {
@@ -3919,7 +3938,7 @@
           },
           {
             "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-            "count": 2
+            "count": 4
           },
           {
             "file": "src/main-process/pending-archive-worker.js",
@@ -3927,10 +3946,10 @@
           },
           {
             "file": "src/main-process/toolbox-stream-io.js",
-            "count": 2
+            "count": 4
           }
         ],
-        "totalHits": 27,
+        "totalHits": 31,
         "fileSpan": 5
       },
       {
@@ -4542,6 +4561,36 @@
         "fileSpan": 5
       },
       {
+        "name": "trimTrailingEmptyCells",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 5
+      },
+      {
         "name": "formatTimestamp",
         "defFiles": [
           "src/backend/database/backup.js",
@@ -4638,6 +4687,38 @@
           }
         ],
         "totalHits": 9,
+        "fileSpan": 5
+      },
+      {
+        "name": "createRowFilter",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "src/main-process/toolbox-multi-split.js",
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/toolbox-multi-split.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 8,
         "fileSpan": 5
       },
       {
@@ -4809,14 +4890,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 46
+            "count": 51
           },
           {
             "file": "src/renderer.js",
             "count": 133
           }
         ],
-        "totalHits": 202,
+        "totalHits": 207,
         "fileSpan": 4
       },
       {
@@ -5065,6 +5146,33 @@
           }
         ],
         "totalHits": 20,
+        "fileSpan": 4
+      },
+      {
+        "name": "canonicalizeDecimal",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 19,
         "fileSpan": 4
       },
       {
@@ -5812,32 +5920,6 @@
         "fileSpan": 4
       },
       {
-        "name": "trimTrailingEmptyCells",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
         "name": "BUSINESS_BILL_FIELDS",
         "defFiles": [
           "src/constants/recon-id-fix-fields.js",
@@ -6378,33 +6460,6 @@
         "fileSpan": 4
       },
       {
-        "name": "createRowFilter",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "src/main-process/toolbox.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 4
-      },
-      {
         "name": "deleteBillSplitRow",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -6837,7 +6892,7 @@
         "refFiles": [
           {
             "file": "src/renderer-dialogs.js",
-            "count": 162
+            "count": 160
           },
           {
             "file": "src/renderer-previews.js",
@@ -6848,7 +6903,7 @@
             "count": 34
           }
         ],
-        "totalHits": 197,
+        "totalHits": 195,
         "fileSpan": 3
       },
       {
@@ -7288,6 +7343,29 @@
           }
         ],
         "totalHits": 10,
+        "fileSpan": 3
+      },
+      {
+        "name": "absoluteDecimal",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 9,
         "fileSpan": 3
       },
       {
@@ -8117,6 +8195,30 @@
         "fileSpan": 3
       },
       {
+        "name": "streamLogicalTableRows",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
         "name": "ZHONGTAI_DISPATCH_ORDER_SIGNATURE",
         "defFiles": [
           "src/constants/fund-transfer-recon-fields.js",
@@ -8361,30 +8463,6 @@
           {
             "file": "src/backend/pending-import/removed-reader.js",
             "count": 3
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 3
-      },
-      {
-        "name": "streamLogicalTableRows",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
-            "count": 2
           }
         ],
         "totalHits": 7,
@@ -10116,7 +10194,28 @@
       {
         "name": "writeRowsStreamed",
         "defFiles": [
-          "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
+        "name": "writeRowsToMultipleFilesStreamed",
+        "defFiles": [
           "src/main-process/toolbox-stream-io.js"
         ],
         "refFiles": [
@@ -10612,14 +10711,14 @@
         "refFiles": [
           {
             "file": "src/renderer-previews.js",
-            "count": 59
+            "count": 61
           },
           {
             "file": "src/renderer.js",
             "count": 27
           }
         ],
-        "totalHits": 86,
+        "totalHits": 88,
         "fileSpan": 2
       },
       {
@@ -11126,24 +11225,6 @@
         "fileSpan": 2
       },
       {
-        "name": "canonicalizeDecimal",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 2
-      },
-      {
         "name": "GATEWAY_SOURCE",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -11432,6 +11513,25 @@
           {
             "file": "src/backend/file-service/normalizers.js",
             "count": 2
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 2
+      },
+      {
+        "name": "MAX_DATA_ROWS_PER_SHEET",
+        "defFiles": [
+          "src/main-process/acquiring-bill-currency-writer.js",
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/acquiring-bill-currency-writer.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 5
           }
         ],
         "totalHits": 9,
@@ -12012,25 +12112,6 @@
         "fileSpan": 2
       },
       {
-        "name": "MAX_DATA_ROWS_PER_SHEET",
-        "defFiles": [
-          "src/main-process/acquiring-bill-currency-writer.js",
-          "src/main-process/toolbox-stream-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/acquiring-bill-currency-writer.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
         "name": "processingResult",
         "defFiles": [
           "src/main.js"
@@ -12173,6 +12254,25 @@
           {
             "file": "src/constants/refund-backfill-fields.js",
             "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "addCanonicalDecimals",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -15085,6 +15185,24 @@
         "fileSpan": 2
       },
       {
+        "name": "subtractCanonicalDecimals",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "TEMPLATE_BILL_KEY_INDICES",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -15581,6 +15699,24 @@
         "fileSpan": 2
       },
       {
+        "name": "compareCanonicalDecimals",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "compareFileSequences",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-schema.js"
@@ -15984,6 +16120,24 @@
       },
       {
         "name": "exportFilter",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/split-export-filter.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "exportMultiFilters",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/split-export-filter.js"
         ],
@@ -21444,13 +21598,13 @@
         "fileSpan": 1
       },
       {
-        "name": "decimalError",
+        "name": "createDecimalError",
         "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
+          "src/main-process/financial-decimal.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "file": "src/main-process/financial-decimal.js",
             "count": 9
           }
         ],
@@ -21493,6 +21647,20 @@
         "refFiles": [
           {
             "file": "src/main-process/table-type-detector.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
+        "name": "RESULT_ERROR",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 9
           }
         ],
@@ -22284,20 +22452,6 @@
         "fileSpan": 1
       },
       {
-        "name": "buildUnmatchedBankRow",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
         "name": "closeNewAccountCurrencyDropdown",
         "defFiles": [
           "src/renderer.js"
@@ -22928,6 +23082,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildUnmatchedBankRow",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "cellValueFromBody",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -23005,6 +23173,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "DEFAULT_FORMATTERS",
+        "defFiles": [
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
             "count": 5
           }
         ],
@@ -23215,6 +23397,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "HIT_TYPE_FUZZY",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 5
           }
         ],
@@ -23453,34 +23649,6 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "RESULT_ERROR",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "RESULT_NOTICE",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 5
           }
         ],
@@ -23992,6 +24160,20 @@
         "fileSpan": 1
       },
       {
+        "name": "consumeAndBackfill",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "countLinkedByDateRange",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -23999,6 +24181,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "createRowsStreamWriter",
+        "defFiles": [
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
             "count": 4
           }
         ],
@@ -24027,6 +24223,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/migrations.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "decimalError",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
             "count": 4
           }
         ],
@@ -24097,6 +24307,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "financialDecimal",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
             "count": 4
           }
         ],
@@ -24279,20 +24503,6 @@
         "refFiles": [
           {
             "file": "src/main-process/run-check-worker-pool.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "HIT_TYPE_FUZZY",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 4
           }
         ],
@@ -24503,6 +24713,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "MAX_CANONICAL_DECIMAL_LENGTH",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
             "count": 4
           }
         ],
@@ -24748,6 +24972,20 @@
         "fileSpan": 1
       },
       {
+        "name": "peekNormalizedHeaders",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/split-export-filter.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "pickBestByTieBreak",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -24923,6 +25161,34 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "replaceUnmatchedOutcome",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "RESULT_NOTICE",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 4
           }
         ],
@@ -25175,6 +25441,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "ToolboxSplitFieldNotFoundError",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/split-export-filter.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
             "count": 4
           }
         ],
@@ -25455,34 +25735,6 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "absoluteDecimal",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "addCanonicalDecimals",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
             "count": 3
           }
         ],
@@ -25819,6 +26071,34 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "BANK_PAYMENT_SERIAL_FUZZY_AMOUNT_LIMIT",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "BANK_PAYMENT_SERIAL_FUZZY_DETAIL_PREFIX",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 3
           }
         ],
@@ -26456,6 +26736,20 @@
         "fileSpan": 1
       },
       {
+        "name": "calculateBankPaymentSerialAmountDifference",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "calculateNextScenarioId",
         "defFiles": [
           "src/backend/database/scenarios-repository.js"
@@ -26472,11 +26766,11 @@
       {
         "name": "canonicalDecimalParts",
         "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
+          "src/main-process/financial-decimal.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "file": "src/main-process/financial-decimal.js",
             "count": 3
           }
         ],
@@ -26680,6 +26974,20 @@
         "fileSpan": 1
       },
       {
+        "name": "combineCanonicalDecimals",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "computeChangedFields",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -26729,20 +27037,6 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/pipeline.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "consumeAndBackfill",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 3
           }
         ],
@@ -26883,20 +27177,6 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "DEFAULT_FORMATTERS",
-        "defFiles": [
-          "src/main-process/toolbox-stream-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
             "count": 3
           }
         ],
@@ -27408,6 +27688,20 @@
         "fileSpan": 1
       },
       {
+        "name": "FinancialDecimalError",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "FINGERPRINT_FIELDS",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -27499,6 +27793,20 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/pipeline.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "fuzzyLookupKey",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 3
           }
         ],
@@ -28472,6 +28780,20 @@
         "fileSpan": 1
       },
       {
+        "name": "matchBankPaymentSerialFuzzy",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "matchBocToMidAllocation",
         "defFiles": [
           "src/main-process/boc-fx-link-builder.js"
@@ -28633,20 +28955,6 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "MAX_CANONICAL_DECIMAL_LENGTH",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
             "count": 3
           }
         ],
@@ -29046,6 +29354,20 @@
         "fileSpan": 1
       },
       {
+        "name": "pairToScaledIntegers",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "parseCellColumn",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -29109,20 +29431,6 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "peekNormalizedHeaders",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/split-export-filter.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
             "count": 3
           }
         ],
@@ -29858,6 +30166,20 @@
         "fileSpan": 1
       },
       {
+        "name": "runBankPaymentSerialFuzzyFallback",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "runBankStatementInternal",
         "defFiles": [
           "src/renderer.js"
@@ -30523,20 +30845,6 @@
         "refFiles": [
           {
             "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "ToolboxSplitFieldNotFoundError",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/split-export-filter.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
             "count": 3
           }
         ],
@@ -31811,6 +32119,20 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-db/run-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "closeWorkbookOutputStream",
+        "defFiles": [
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
             "count": 2
           }
         ],
@@ -34074,11 +34396,11 @@
       {
         "name": "normalizeDecimalToken",
         "defFiles": [
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
+          "src/main-process/financial-decimal.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "file": "src/main-process/financial-decimal.js",
             "count": 2
           }
         ],
@@ -34996,6 +35318,20 @@
         "fileSpan": 1
       },
       {
+        "name": "removeOutputFileWithRetry",
+        "defFiles": [
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "renderErrorValue",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/matching-engine.js"
@@ -35017,6 +35353,20 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "renderScaledInteger",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
             "count": 2
           }
         ],
@@ -35808,6 +36158,20 @@
         "fileSpan": 1
       },
       {
+        "name": "trimLabel",
+        "defFiles": [
+          "src/main-process/financial-decimal.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "trimMonthSideDbKeepDiff",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-run-data.js"
@@ -36208,6 +36572,7 @@
         "src/main-process/statement-generation.js",
         "src/main-process/statement-session.js",
         "src/main-process/table-type-detector.js",
+        "src/main-process/toolbox-multi-split.js",
         "src/main-process/toolbox-stream-io.js",
         "src/main-process/vcc-op-calc-session.js",
         "src/main.js"
@@ -36474,6 +36839,10 @@
           "count": 2
         },
         {
+          "file": "src/main-process/toolbox-multi-split.js",
+          "count": 1
+        },
+        {
           "file": "src/main-process/toolbox-stream-io.js",
           "count": 3
         },
@@ -36490,8 +36859,8 @@
           "count": 2
         }
       ],
-      "totalHits": 251,
-      "fileSpan": 69
+      "totalHits": 252,
+      "fileSpan": 70
     },
     {
       "name": "fs",
@@ -36543,6 +36912,7 @@
         "src/main-process/run-check-multiworker-worker.js",
         "src/main-process/run-check-multiworker.js",
         "src/main-process/scenario-hit-rows-writer.js",
+        "src/main-process/toolbox-multi-split.js",
         "src/main-process/toolbox-stream-io.js",
         "src/main.js"
       ],
@@ -36740,16 +37110,20 @@
           "count": 5
         },
         {
+          "file": "src/main-process/toolbox-multi-split.js",
+          "count": 1
+        },
+        {
           "file": "src/main-process/toolbox-stream-io.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/main.js",
           "count": 1
         }
       ],
-      "totalHits": 180,
-      "fileSpan": 50
+      "totalHits": 182,
+      "fileSpan": 51
     },
     {
       "name": "parse",
@@ -36908,6 +37282,7 @@
         "src/main-process/big-account-recognition.js",
         "src/main-process/linked-table-stream-source.js",
         "src/main-process/table-type-detector.js",
+        "src/main-process/toolbox-multi-split.js",
         "src/main-process/toolbox.js"
       ],
       "refFiles": [
@@ -37004,6 +37379,10 @@
           "count": 5
         },
         {
+          "file": "src/main-process/toolbox-multi-split.js",
+          "count": 1
+        },
+        {
           "file": "src/main-process/toolbox-stream-io.js",
           "count": 2
         },
@@ -37016,8 +37395,8 @@
           "count": 2
         }
       ],
-      "totalHits": 143,
-      "fileSpan": 26
+      "totalHits": 144,
+      "fileSpan": 27
     },
     {
       "name": "FileValidationError",
@@ -37232,14 +37611,14 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 45
+          "count": 57
         },
         {
           "file": "src/main.js",
           "count": 1
         }
       ],
-      "totalHits": 212,
+      "totalHits": 224,
       "fileSpan": 21
     },
     {
@@ -38005,6 +38384,56 @@
       "fileSpan": 11
     },
     {
+      "name": "state",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/row-scanner.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 26
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "count": 29
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 8
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 30
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 55
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 41
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 171
+        }
+      ],
+      "totalHits": 367,
+      "fileSpan": 10
+    },
+    {
       "name": "PENDING_COLUMNS",
       "defFiles": [
         "src/backend/pending-db/migrations.js",
@@ -38229,52 +38658,6 @@
       ],
       "totalHits": 20,
       "fileSpan": 10
-    },
-    {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/row-scanner.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 26
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-          "count": 29
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 30
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 55
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 41
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 171
-        }
-      ],
-      "totalHits": 359,
-      "fileSpan": 9
     },
     {
       "name": "runDataStore",
@@ -39449,7 +39832,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 423
+          "count": 437
         },
         {
           "file": "src/renderer-pending.js",
@@ -39464,7 +39847,7 @@
           "count": 71
         }
       ],
-      "totalHits": 530,
+      "totalHits": 544,
       "fileSpan": 6
     },
     {
@@ -39989,14 +40372,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 58
+          "count": 60
         },
         {
           "file": "src/renderer.js",
           "count": 4
         }
       ],
-      "totalHits": 67,
+      "totalHits": 69,
       "fileSpan": 5
     },
     {
@@ -40051,7 +40434,7 @@
         },
         {
           "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "count": 2
+          "count": 4
         },
         {
           "file": "src/main-process/pending-archive-worker.js",
@@ -40059,10 +40442,10 @@
         },
         {
           "file": "src/main-process/toolbox-stream-io.js",
-          "count": 2
+          "count": 4
         }
       ],
-      "totalHits": 27,
+      "totalHits": 31,
       "fileSpan": 5
     },
     {
@@ -40674,6 +41057,36 @@
       "fileSpan": 5
     },
     {
+      "name": "trimTrailingEmptyCells",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 5
+    },
+    {
       "name": "formatTimestamp",
       "defFiles": [
         "src/backend/database/backup.js",
@@ -40770,6 +41183,38 @@
         }
       ],
       "totalHits": 9,
+      "fileSpan": 5
+    },
+    {
+      "name": "createRowFilter",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+        "src/main-process/toolbox-multi-split.js",
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/toolbox-multi-split.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 8,
       "fileSpan": 5
     },
     {
@@ -40941,14 +41386,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 46
+          "count": 51
         },
         {
           "file": "src/renderer.js",
           "count": 133
         }
       ],
-      "totalHits": 202,
+      "totalHits": 207,
       "fileSpan": 4
     },
     {
@@ -41197,6 +41642,33 @@
         }
       ],
       "totalHits": 20,
+      "fileSpan": 4
+    },
+    {
+      "name": "canonicalizeDecimal",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 19,
       "fileSpan": 4
     },
     {
@@ -41944,32 +42416,6 @@
       "fileSpan": 4
     },
     {
-      "name": "trimTrailingEmptyCells",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
       "name": "BUSINESS_BILL_FIELDS",
       "defFiles": [
         "src/constants/recon-id-fix-fields.js",
@@ -42510,33 +42956,6 @@
       "fileSpan": 4
     },
     {
-      "name": "createRowFilter",
-      "defFiles": [
-        "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-        "src/main-process/toolbox.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 4
-    },
-    {
       "name": "deleteBillSplitRow",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -42969,7 +43388,7 @@
       "refFiles": [
         {
           "file": "src/renderer-dialogs.js",
-          "count": 162
+          "count": 160
         },
         {
           "file": "src/renderer-previews.js",
@@ -42980,7 +43399,7 @@
           "count": 34
         }
       ],
-      "totalHits": 197,
+      "totalHits": 195,
       "fileSpan": 3
     },
     {
@@ -43420,6 +43839,29 @@
         }
       ],
       "totalHits": 10,
+      "fileSpan": 3
+    },
+    {
+      "name": "absoluteDecimal",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 9,
       "fileSpan": 3
     },
     {
@@ -44249,6 +44691,30 @@
       "fileSpan": 3
     },
     {
+      "name": "streamLogicalTableRows",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+        "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+        "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
       "name": "ZHONGTAI_DISPATCH_ORDER_SIGNATURE",
       "defFiles": [
         "src/constants/fund-transfer-recon-fields.js",
@@ -44493,30 +44959,6 @@
         {
           "file": "src/backend/pending-import/removed-reader.js",
           "count": 3
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 3
-    },
-    {
-      "name": "streamLogicalTableRows",
-      "defFiles": [
-        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-        "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-        "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
-          "count": 2
         }
       ],
       "totalHits": 7,
@@ -46248,7 +46690,28 @@
     {
       "name": "writeRowsStreamed",
       "defFiles": [
-        "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+        "src/main-process/toolbox-stream-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
+      "name": "writeRowsToMultipleFilesStreamed",
+      "defFiles": [
         "src/main-process/toolbox-stream-io.js"
       ],
       "refFiles": [
@@ -46742,14 +47205,14 @@
       "refFiles": [
         {
           "file": "src/renderer-previews.js",
-          "count": 59
+          "count": 61
         },
         {
           "file": "src/renderer.js",
           "count": 27
         }
       ],
-      "totalHits": 86,
+      "totalHits": 88,
       "fileSpan": 2
     },
     {
@@ -47256,24 +47719,6 @@
       "fileSpan": 2
     },
     {
-      "name": "canonicalizeDecimal",
-      "defFiles": [
-        "src/main-process/pre-fund-reconciliation/bank-row.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 2
-    },
-    {
       "name": "GATEWAY_SOURCE",
       "defFiles": [
         "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -47562,6 +48007,25 @@
         {
           "file": "src/backend/file-service/normalizers.js",
           "count": 2
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 2
+    },
+    {
+      "name": "MAX_DATA_ROWS_PER_SHEET",
+      "defFiles": [
+        "src/main-process/acquiring-bill-currency-writer.js",
+        "src/main-process/toolbox-stream-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/acquiring-bill-currency-writer.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 5
         }
       ],
       "totalHits": 9,
@@ -48142,25 +48606,6 @@
       "fileSpan": 2
     },
     {
-      "name": "MAX_DATA_ROWS_PER_SHEET",
-      "defFiles": [
-        "src/main-process/acquiring-bill-currency-writer.js",
-        "src/main-process/toolbox-stream-io.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/acquiring-bill-currency-writer.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
       "name": "processingResult",
       "defFiles": [
         "src/main.js"
@@ -48303,6 +48748,25 @@
         {
           "file": "src/constants/refund-backfill-fields.js",
           "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "addCanonicalDecimals",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -51215,6 +51679,24 @@
       "fileSpan": 2
     },
     {
+      "name": "subtractCanonicalDecimals",
+      "defFiles": [
+        "src/main-process/financial-decimal.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "TEMPLATE_BILL_KEY_INDICES",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -51711,6 +52193,24 @@
       "fileSpan": 2
     },
     {
+      "name": "compareCanonicalDecimals",
+      "defFiles": [
+        "src/main-process/financial-decimal.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "compareFileSequences",
       "defFiles": [
         "src/main-process/pre-fund-reconciliation/mpt-schema.js"
@@ -52114,6 +52614,24 @@
     },
     {
       "name": "exportFilter",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/split-export-filter.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "exportMultiFilters",
       "defFiles": [
         "src/backend/toolbox-xlsx-stream/split-export-filter.js"
       ],

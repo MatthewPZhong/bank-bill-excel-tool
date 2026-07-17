@@ -9,9 +9,9 @@
 //
 // 与 big-table-import-dispatch 的差异：
 //   - worker 入口换成 toolbox 大文件拆分 worker（large-split-worker.js）。
-//   - payload 扁平化为 { op, filePath, field?, values?, savePath? }（拆分作业无 dbPath / 契约模块）。
+//   - payload 扁平化为 { op, filePath, field?, values?, savePath?, groups? }（拆分作业无 dbPath / 契约模块）。
 //   - resourceLimits 固定 maxOldGenerationSizeMb=4096（与 pending dispatch 同口径，TechDoc §8.3 / R-5）。
-//   - 返回 dispatch 的 result：scanFields {headers,valuesByField} / exportFilter {matchedCount}。
+//   - 返回 dispatch 的 result：scanFields / 单文件过滤 / 多文件过滤各自的结果对象。
 //
 // 约束：纯 Node，不访问 Electron API；只 require worker_threads + serialize-error（通用工具）。
 
@@ -19,7 +19,7 @@
 
 const { Worker } = require('node:worker_threads');
 
-// 工具箱大文件拆分薄 worker 入口（new Worker 拉起 → 内部跑 scanFields / exportFilter）。
+// 工具箱大文件拆分薄 worker 入口（new Worker 拉起 → 内部跑三种拆分作业）。
 //   解析方式与 big-table-import-dispatch.js 一致（require.resolve 相对本文件定位 backend 下 worker entry）。
 const DEFAULT_WORKER_ENTRY = require.resolve('../backend/toolbox-xlsx-stream/large-split-worker');
 
@@ -31,13 +31,14 @@ let workerScriptPath = DEFAULT_WORKER_ENTRY;
 // worker 堆上限（TechDoc §8.3 / R-5）：sharedStrings 全量 + 写批缓冲需显式放大 V8 老生代堆上限。
 const WORKER_MAX_OLD_GEN_MB = 4096;
 
-// dispatch 一次大文件拆分作业（scanFields / exportFilter 通用）。
+// dispatch 一次大文件拆分作业（scanFields / exportFilter / exportMultiFilters 通用）。
 //   入参（对象）：
-//     op           'scanFields' | 'exportFilter'    作业类型（worker 内分派到对应 T3 纯逻辑）
+//     op           string                            作业类型（worker 内分派到对应 T3 纯逻辑）
 //     filePath     string                           源 .xlsx 绝对路径
 //     field        string?                          exportFilter 的拆分字段（scanFields 不需要）
 //     values       string[]?                        exportFilter 的选中值集合
 //     savePath     string?                          exportFilter 的输出临时 .xlsx 路径
+//     groups       Object[]?                        exportMultiFilters 的 1-8 个输出分组
 //     onProgress   ((payload) => void)?             进度回调（v1 无 UI，最终接 activity log；OPEN-3）
 //     onLog        ((entry) => void)?               日志条目透传（调用方决定落库 domain）
 //   返回：{ promise, cancel }
@@ -46,7 +47,7 @@ const WORKER_MAX_OLD_GEN_MB = 4096;
 //
 //   错误：worker postMessage 'error' → deserializeError 还原 → reject；未 settled 的非零 exit → reject（兜底）。
 //   清理：done / error / exit 任一 settle 后 postMessage close + terminate worker（不泄漏 worker）。
-function dispatchLargeSplit({ op, filePath, field, values, savePath, onProgress, onLog }) {
+function dispatchLargeSplit({ op, filePath, field, values, savePath, groups, onProgress, onLog }) {
   let worker = null;
   let settled = false;
   let jobId = null;
@@ -119,7 +120,8 @@ function dispatchLargeSplit({ op, filePath, field, values, savePath, onProgress,
       filePath,
       field,
       values,
-      savePath
+      savePath,
+      groups
     });
   });
 

@@ -61,6 +61,7 @@
       // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框工厂（preview 直接调用）
       createToolboxDialog,
       createSplitFieldPickerDialog,
+      createMultipleSplitFieldPickerDialog,
       // v3.0.1 需求1（D4）：删除网关对账单弹框（🔴 资金红线）preview 直接调用
       createLinkedTableDeleteRangeDialog,
       // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
@@ -886,6 +887,34 @@
       }, 120);
     }
 
+    // v3.0.17：中台退款订单回填管理页，展示银行打款流水号模糊匹配开关。
+    function applyBuiltinFixedChannelManageRefundPreviewState() {
+      setCurrentModule(MODULES.bankStatementProcess.id);
+      setTimeout(() => {
+        if (!elements.bankStatementScenarioBtn) return;
+        elements.bankStatementScenarioBtn.click();
+        setTimeout(() => {
+          const root = elements.modalRoot;
+          if (!root) return;
+          let targetManageBtn = null;
+          root.querySelectorAll('tr[data-category="builtin-fixed"]').forEach((tr) => {
+            const nameCell = tr.querySelector('.scenarios-col-name');
+            if (nameCell && nameCell.textContent.includes('中台退款订单回填')) {
+              targetManageBtn = tr.querySelector('[data-row-action="manage"]');
+            }
+          });
+          if (!targetManageBtn) return;
+          targetManageBtn.click();
+          setTimeout(() => {
+            const check = elements.modalRoot
+              ? elements.modalRoot.querySelector('input[data-field="bank-payment-serial-fuzzy-enabled"]')
+              : null;
+            if (check) check.checked = true;
+          }, 360);
+        }, 280);
+      }, 120);
+    }
+
     // v2.1.14 C：链接表管理弹窗 preview（切到资金对账数据处理模块 → 点「链接表管理」按钮打开弹窗）
     function applyLinkedTableManagerPreviewState() {
       setCurrentModule(MODULES.bankStatementProcess.id);
@@ -1405,6 +1434,30 @@
       }, 120);
     }
 
+    function applyToolboxSplitFieldPickerMultiplePreviewState() {
+      setCurrentModule(MODULES.statementGenerator.id);
+      setTimeout(() => {
+        const overlay = createMultipleSplitFieldPickerDialog({
+          headers: ['交易日期', '币种', '对手账号', '摘要'],
+          valuesByField: {
+            交易日期: ['2026-06-01', '2026-06-02', '2026-06-03'],
+            币种: ['USD', 'HKD', 'CNY'],
+            对手账号: ['6222000000000001', '6222000000000002'],
+            摘要: ['退款', '入金', '手续费']
+          },
+          initialGroup: { field: '币种', values: ['USD'] },
+          onComplete: () => {},
+          onCancel: () => {}
+        });
+        openModal(overlay);
+        setTimeout(() => {
+          const addButton = overlay.querySelector('[data-action="add-group"]');
+          for (let index = 1; index < 8; index += 1) addButton?.click();
+          overlay.querySelector('.toolbox-split-values-dropdown-btn')?.click();
+        }, 80);
+      }, 120);
+    }
+
     return {
       applyNewAccountPreviewState,
       applyTemplateManagerPreviewState,
@@ -1451,6 +1504,8 @@
       applyBuiltinFixedChannelManagePreviewState,
       // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
       applyBuiltinFixedChannelManagePaymentPreviewState,
+      // v3.0.17：退款流水号模糊匹配管理页 preview
+      applyBuiltinFixedChannelManageRefundPreviewState,
       applyScenarioCategorySelectPreviewState,
       // v2.1.14 C：链接表管理弹窗 preview
       applyLinkedTableManagerPreviewState,
@@ -1485,7 +1540,8 @@
       applyModuleCabinetPreviewState,
       // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框 preview
       applyToolboxPreviewState,
-      applyToolboxSplitFieldPickerPreviewState
+      applyToolboxSplitFieldPickerPreviewState,
+      applyToolboxSplitFieldPickerMultiplePreviewState
     };
   }
 

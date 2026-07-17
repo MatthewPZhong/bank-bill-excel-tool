@@ -461,6 +461,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   // OPEN-7（T5b-1）：R5 退款引擎冒泡的「以入金表为来源、回填成功」命中 BizId 去重数组（T5b-2 export 阶段消费）。
   let refundHitDepositBizIds = [];
   if (r5s4Bucket.length) {
+    const refundScenarioConfig = r5s4Bucket[0].config || {};
     const isFundTypeChanged = (rowId) => {
       const cols = modColsByRowId.get(rowId);
       return !!(cols && cols.has('FundType'));
@@ -469,7 +470,11 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       bankRows,
       (refundContext && refundContext.refundOrderRows) || [],
       (refundContext && refundContext.depositRows) || [],
-      { isFundTypeChanged, gwRows: safeGwRows } // v3.0.10 需求2：传网关全量行，供退款引擎做 reconid 前置过滤（safeGwRows 在上文已就绪）
+      {
+        isFundTypeChanged,
+        gwRows: safeGwRows,
+        bankPaymentSerialFuzzyMatchEnabled: refundScenarioConfig.bankPaymentSerialFuzzyMatchEnabled === true
+      }
     );
     allWarnings.push(...(r5d.warnings || [])); // 不 mergeMods（场景4 不改 bankRows，modifications 恒空）
     refundBackfillRows = r5d.backfillRows || [];

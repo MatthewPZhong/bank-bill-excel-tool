@@ -22,6 +22,7 @@ const streamIO = require('../../../src/main-process/toolbox-stream-io');
 const {
   readHeaderRowStreamed,
   streamDataRows,
+  writeRowsToMultipleFilesStreamed,
   writeRowsStreamed,
   buildColumnFormatPlan,
   buildNumericCellSpec,
@@ -570,6 +571,86 @@ test.describe('computeKeepWidth（裁到 max(headerWidth, 最末非 padding 列+
     const padded = new Array(1024).fill('');
     ['a', 'b', 'c', 'd'].forEach((v, i) => { padded[i] = v; });
     assert.equal(computeKeepWidth(padded, 2), 4, '4 列真实内容 + 表头 2 → 取 4');
+  });
+});
+
+test.describe('writeRowsToMultipleFilesStreamed（一次源遍历，多输出）', () => {
+  test('交叉过滤允许同一行进入多个文件，零命中仍生成表头', async () => {
+    const outA = path.join(tmpRoot, 'multi-a.xlsx');
+    const outUsd = path.join(tmpRoot, 'multi-usd.xlsx');
+    const outEmpty = path.join(tmpRoot, 'multi-empty.xlsx');
+    const rows = [
+      ['A', 'USD', '1'],
+      ['A', 'CNY', '2'],
+      ['B', 'USD', '3']
+    ];
+    let sourceScanCount = 0;
+    const results = await writeRowsToMultipleFilesStreamed({
+      normalizedHeaders: ['Channel', 'Currency', 'Value'],
+      outputs: [
+        { savePath: outA, matches: (row) => row[0] === 'A' },
+        { savePath: outUsd, matches: (row) => row[1] === 'USD' },
+        { savePath: outEmpty, matches: () => false }
+      ],
+      writeDataRows: async (emit) => {
+        sourceScanCount += 1;
+        rows.forEach(emit);
+      }
+    });
+
+    assert.equal(sourceScanCount, 1, '源数据只遍历一次');
+    assert.deepEqual(results.map((result) => result.dataRowCount), [2, 2, 0]);
+    const read = (file) => XLSX.utils.sheet_to_json(XLSX.readFile(file).Sheets.COMMON, {
+      header: 1,
+      blankrows: false,
+      defval: ''
+    });
+    assert.deepEqual(read(outA), [
+      ['Channel', 'Currency', 'Value'],
+      ['A', 'USD', '1'],
+      ['A', 'CNY', '2']
+    ]);
+    assert.deepEqual(read(outUsd), [
+      ['Channel', 'Currency', 'Value'],
+      ['A', 'USD', '1'],
+      ['B', 'USD', '3']
+    ]);
+    assert.deepEqual(read(outEmpty), [['Channel', 'Currency', 'Value']]);
+  });
+
+  test('源遍历失败会清理全部临时输出', async () => {
+    const outA = path.join(tmpRoot, 'multi-fail-a.xlsx');
+    const outB = path.join(tmpRoot, 'multi-fail-b.xlsx');
+    await assert.rejects(() => writeRowsToMultipleFilesStreamed({
+      normalizedHeaders: ['Channel'],
+      outputs: [
+        { savePath: outA, matches: () => true },
+        { savePath: outB, matches: () => true }
+      ],
+      writeDataRows: async (emit) => {
+        emit(['A']);
+        throw new Error('read failed');
+      }
+    }), /read failed/);
+    assert.equal(fs.existsSync(outA), false);
+    assert.equal(fs.existsSync(outB), false);
+  });
+
+  test('后续 writer 初始化失败会关闭并清理已创建的输出', async () => {
+    const outA = path.join(tmpRoot, 'multi-init-fail-a.xlsx');
+    const blockedParent = path.join(tmpRoot, 'not-a-directory');
+    fs.writeFileSync(blockedParent, 'block directory creation');
+
+    await assert.rejects(() => writeRowsToMultipleFilesStreamed({
+      normalizedHeaders: ['Channel'],
+      outputs: [
+        { savePath: outA, matches: () => true },
+        { savePath: path.join(blockedParent, 'multi-init-fail-b.xlsx'), matches: () => true }
+      ],
+      writeDataRows: async () => {}
+    }));
+
+    assert.equal(fs.existsSync(outA), false);
   });
 });
 

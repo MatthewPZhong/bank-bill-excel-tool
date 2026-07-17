@@ -180,6 +180,7 @@ test.describe('v2.1.16-beta.4 ③ ensureRefundBackfillScenarioSeed', () => {
     const cfg = JSON.parse(refundRows[0].config_json);
     assert.strictEqual(cfg.funcCategory, 'platform-order');
     assert.strictEqual(cfg.subCategory, 'refund-order-backfill');
+    assert.strictEqual(cfg.bankPaymentSerialFuzzyMatchEnabled, false, '退款流水号模糊匹配默认关闭');
     assert.strictEqual(cfg.directions, undefined, '退款场景无 directions');
   });
 
