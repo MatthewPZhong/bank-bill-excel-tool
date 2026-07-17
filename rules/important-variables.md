@@ -9,16 +9,18 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v21（app v3.0.16 — 前置资金对账纳入 `Extra Fee` 和 14 条 FundType/方向/tradeType 规则；临时 MPT 明细错误支持审计导出与逻辑排除重跑；`MPT_CHANNEL_OTHERS` 明确取消） |
-| v21 本轮 review | 2026-07-15（自动 review 已覆盖精确十进制手续费、规则资格、严格 1:1、严格导入整批回滚、错误文件写后回读、源文件哈希防篡改、Excel 行限 fail closed、逻辑排除审计、旧 side DB 兼容、双主题页面预览、启动性能及完整 release-check；P0-P4 Finding 为 0，资金负责人真实样本复核仍为发布硬门禁） |
-| v21 基线数据 | `docs/analysis/var-reference-stats.md`（191 个 JS 文件 / 2122 顶层声明；A-share 335 / A-pair 554 / A-local 1100 / B 889；报告版本 3.0.16） |
+| 当前清单版本 | v22（app v3.0.17 — 退款订单银行流水号模糊匹配 + 工具箱最多 8 组一次扫描、多文件原子拆分） |
+| v22 本轮 review | 2026-07-16（自动 review 已覆盖开关缺省兼容、S1-S4 优先、普通未命中救回、精确十进制 `<10`、双向严格 1:1、退款行去向与标黄、多格式一次数据遍历、旧单文件契约、冲突取消、覆盖发布回滚和备份保留；完整 release-check、双预览与启动性能均通过，资金负责人真实退款样本复核仍为发布硬门禁） |
+| v22 基线数据 | `docs/analysis/var-reference-stats.md`（193 个 JS 文件 / 2144 顶层声明；A-share 338 / A-pair 557 / A-local 1115 / B 895；报告版本 3.0.17） |
+| v21 历史版本 | app v3.0.16 — 前置资金对账纳入 `Extra Fee` 和 14 条 FundType/方向/tradeType 规则；临时 MPT 明细错误支持审计导出与逻辑排除重跑；`MPT_CHANNEL_OTHERS` 明确取消。 |
 | v20 历史版本 | app v3.0.15 — 独立重复入金匹配，严格 1R+2I 七元组、全保留月份 INBOUND MPT 批量候选、全局不复用与身份一致裁决、当前周期 side DB、主库轻量镜像及固定双 sheet 原子导出；自动门禁已通过，资金负责人复核及 Windows Excel/WPS 人工打开待完成。 |
 | v19 历史版本 | app v3.0.14 — 2026-07-12：前置资金对账严格 1:1、重复网关审计、双 side DB、按渠道 5/6-sheet；`ALL_MODULE_IDS` 为 10，per-月侧库为 4 个业务模块/5 个存储模块；自动门禁和人工资金复核均已完成。 |
 | 清单版本 | v18（对应 app v3.0.13 — 2026-07-04 收尾复核 4 条：**大账号识别阻断**（`matchMerchantIds` 子串 fuzzy 不再作为自动放行依据 + `normalizeMaintainedBigAccounts` 单一展平器 + 识别优先读文件头部）；**调拨状态过滤可观测性**（`buildFundTransferReconRows` 仅派生 `付款成功` + `fundTransferReconDerive.warning` 提醒全过滤）；**`detectFundTransferManyToMany` / `manyToManyReviewRows` 输出口径**（异常说明并入「命中场景」第 2 列，note-only 行可见，独立异常 sheet 停用）；**C3 同值候选优先**（同值候选优先减少无意义覆盖）；触发：v3.0.13 收尾 check-vars 硬节点）；v17（对应 app v3.0.12 — 2026-06-28 v3.0.12 收尾升格 2 条 Risk-sensitive ⚠️🔴 资金红线：**账户映射 → 调拨对账单 `big_account` 派生**（`fund_transfer_account_mappings` 全局表 + 仓储三函数 + `database.js` facade 四方法 + `buildFundTransferReconRows` accountMappingMap 第 2 参 + `linked-derive-rebuild` 单点注入 run/导入两链 + IPC/preload/`createFundTransferAccountMappingDialog`；改「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 匹配大账号口径）+ **`detectFundTransferManyToMany` / `manyToManyReviewRows`**（异常-人工判断 sheet 检测器，纯只读不改回填/行数守恒 + writer `appendManyToManyReviewSheet`/`SHEET_MANY_TO_MANY_NAME` + orchestrator `manyToManyReviewCount` + writer 第 8 参透传）；触发：v3.0.12 收尾 check-vars 硬节点；v16（对应 app v3.0.5 — 2026-06-15 size-startup-optimization Part B 升格 2 条：**per-月侧库体系**（Risk-sensitive ⚠️🔴🔴 资金红线 — run-data-store/MODULE_*/SIDE_DB_DDL_*/三编排层/reconcileOrphans/side_db_rel_path + 三 parity 锁；Phase 1/2 三对账模块 run 级批量数据迁出主库）+ **`DEFERRED_WINDOW_STARTUP`**（Runtime-state ⚠️ 启动时序回退开关 + appInitDone/两段式 getInfo/init-done；Phase 3 启动窗口先行）；触发：v3.0.5 Phase 4 守卫固化 check-vars 节点；v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
 | 上次人工 review | 2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | v3.0.16 人工资金 review | 待业务负责人逐笔确认 `abs(方向金额) + Extra Fee`、14 条规则映射及错误行逻辑排除结果；自动化 review 不替代该发布硬门禁。 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（173 个 JS 文件 / 1781 顶层声明 — v3.0.13 `scan:vars` 重跑后；A-share 300 / A-pair 495 / A-local 861 / B 795） |
+| v3.0.17 人工资金 review | 待业务负责人用真实脱敏退款样本逐笔确认新增模糊命中的流水号、金额差、大账号、币种和双向 1:1；自动化 review 不替代该发布硬门禁。 |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（193 个 JS 文件 / 2144 顶层声明；A-share 338 / A-pair 557 / A-local 1115 / B 895；报告版本 3.0.17） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -1079,6 +1081,34 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **snapshot 与生命周期**：结果绑定同一银行+单据 import 和全部 INBOUND 批次 identity/hash/行数；INBOUND 导入、替换或删除后 stale，OUTBOUND-only 变化不 stale。选新双文件、开始新 run、失败和重启都不得恢复旧可导出结果；启动必须物理回收含个人信息的 side DB。
   - **Excel 契约**：只允许最新成功且 snapshot 有效、邮件或人工至少一类非空的结果导出；两个 sheet 名/顺序/表头固定，邮件业务来源取 MPT oppBu、客户号/账户号取单据，Debit Amount 数据行显式使用“常规”格式，人工组保留全部原 46 列；超 Excel 上限写前失败，临时文件必须回读校验 sheet/表头/行数后才能发布，发布失败恢复原目标且不留下伪成功文件。
   - 必跑：duplicate-inbound matching/store/service/reader/writer/wiring 全部 unit + `duplicate-inbound-match-end-to-end.js` + 真实 9 万行单据有界内存回放 + `npm run benchmark:duplicate-inbound` + `npm run release-check`；⚠️ 金额方向、七元组空格/大小写、跨月 MPT、候选复用、姓名卡号、orderId、三方回填血缘、守恒和 Excel/WPS 必须用脱敏真实样本人工复核。
+
+### `bankPaymentSerialFuzzyMatchEnabled` / `runBankPaymentSerialFuzzyFallback` / `financial-decimal`（v3.0.17 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+- 定义：
+  - `src/main-process/scenario-engines/r5-refund-order-backfill.js`：在既有 S1-S4 后构建普通未命中银行行与未消费退款单的流水号候选图，按大账号、币种、流水号和精确金额差做双向 1:1 裁决。
+  - `src/main-process/financial-decimal.js`：十进制字符串规范化、绝对值、加减和比较的共享实现；`pre-fund-reconciliation/bank-row.js` 通过错误工厂保持原 `BankRowValidationError` 契约。
+  - `src/main-process/reconciliation-orchestrator.js` / `renderer-dialogs.js` / `migrations.js`：开关从自带退款场景完整 config 浅合并保存、随 bundle 透传，旧配置缺字段时为 `false`。
+- 关联功能：「中台退款订单回填」可选救回普通未命中行，并改变回填模板与人工 sheet 的行去向。
+- 🔴 变更 review 要点（资金红线，改动前必读）：
+  - **旧流程隔离**：必须先执行 S1-S4，只允许最终文案为“未能关联到任何退款订单”的普通未命中进入新规则；已消费退款单和被多候选、日期异常等人工结论锁定的退款单不得重新入池。开关关闭或旧 config 缺字段时结果必须保持旧行为。
+  - **四锚点口径**：`MerchantId=银行大账号`、`Currency=币种`、退款「银行打款流水号」等于银行 `ChannelOrderNo` 或 `CustomerRef`，均只 trim 且大小写敏感；流水号必须非空，禁止 includes、大小写折叠或其它兜底。
+  - **精确金额**：固定计算 `abs(abs(Credit Amount - Debit Amount) - 退款金额) < 10`，等于 10 不命中；银行空发生额侧按 0，非空非法金额和空/非法退款金额不得降级为 0。运算只能走共享字符串/BigInt helper，不得使用 JS 浮点加减比较。
+  - **双向严格 1:1**：先建立全局候选关系再裁决；一对多、多对一和非法金额产生的未决关系均转人工，禁止 first-wins、按金额差最小抢占或复用退款单。
+  - **去向与审计**：成功行必须从 `unmatchedRows` 精确移除并进入既有回填模板，银行候选行仍满足单一去向；详情写实际金额差，标黄只投影实际参与且存在于模板的流水号、金额、大账号和币种列。
+  - 必跑：financial-decimal、退款 fuzzy、orchestrator、config/bundle/wiring unit + `refund-backfill-yellow-fill-e2e.js` + 开关前后真实脱敏退款样本逐笔人工复核。
+
+### `normalizeMultiSplitGroups` / `writeRowsToMultipleFilesStreamed` / `publishPreparedSplitFiles`（v3.0.17 新增 Risk-sensitive ⚠️ 过滤与原子发布）
+- 定义：
+  - `src/main-process/toolbox-multi-split.js`：1-8 组契约、文件名规范化、过滤器编译和批量发布/回滚。
+  - `src/main-process/toolbox-stream-io.js` / `toolbox-xlsx-stream/split-export-filter.js`：一次数据区遍历向多个 ExcelJS writer 分流，允许重叠和零命中表头文件。
+  - `src/main.js` / `toolbox-large-split-dispatch.js` / `large-split-worker.js`：兼容式 IPC 分支、一次目录选择/覆盖确认和普通、大文件、多 sheet、CSV/XLS 路由。
+- 关联功能：工具箱「拆分表格」旧单文件流程和新增最多 8 个文件的批量输出。
+- 变更 review 要点：
+  - **兼容分支**：只有 `mode==='multiple'` 进入新契约；旧 `{sourceFilePath,field,values}` 请求、另存为对话框、零命中行为和 `{status,filePath}` 返回不得变化。
+  - **分组边界**：1-8 组，每组文件名/字段/值完整；文件名统一一个 `.xlsx`，拒绝非法字符、系统保留名、尾点/空格及大小写不敏感重复名。分组可重叠，零命中也必须生成合法表头文件。
+  - **一次数据遍历**：普通 XLSX、大文件/多 sheet worker、CSV/XLS 的数据行只能遍历一次并同时判断全部过滤器；输出保持源行顺序，不得为每组重新读取源数据。
+  - **全批原子性**：目标冲突只确认一次；取消必须零写入。全部结果先写同目录临时批次，发布失败删除本批新文件并恢复旧文件；恢复失败时必须保留唯一备份路径并阻止上层 finally 删除恢复目录。
+  - **资源清理**：writer 初始化、源读取或任一 commit 失败时须关闭全部句柄并清理已提交/未提交临时文件；Windows 文件锁使用有界重试，清理失败必须可见。
+  - 必跑：toolbox multi-split/stream/dispatch/renderer unit + `toolbox-multi-split-roundtrip.js` + 既有 large-file/multi-sheet/toolbox roundtrip 集成。
 
 ### `detectFundTransferManyToMany` / `manyToManyReviewRows`（v3.0.12 新增；v3.0.14 收紧为仅实际改值行检测/输出）
 - 定义：

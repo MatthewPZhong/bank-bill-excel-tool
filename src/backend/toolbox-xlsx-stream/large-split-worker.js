@@ -1,7 +1,7 @@
 // v3.0.9 子任务 T4：工具箱「按字段值拆分」大文件隔离 worker —— worker_threads 入口（薄壳）。
 //
 // 职责（TechDoc v3.0.9 §六 T4 + §四 4.3 worker 消息协议 + §三② sharedStrings 护栏）：
-//   让 scanFields / exportFilter（T3 纯逻辑）在「隔离 worker 进程域」内执行，使 700 万行级
+//   让 scanFields / exportFilter / exportMultiFilters（T3 纯逻辑）在「隔离 worker 进程域」内执行，使 700 万行级
 //   大文件按字段拆分不在主进程 / 渲染进程内 OOM，主进程仅通过 message pipe 收 done/error。
 //   本文件是被 new Worker(...) 直接拉起的薄壳；主侧 dispatch 接线见
 //   src/main-process/toolbox-large-split-dispatch.js（照搬 big-table-import-dispatch.js 范式）。
@@ -16,13 +16,13 @@
 //
 // Message 协议（TechDoc §4.3，照搬 engine-worker-entry.js 范式）：
 //   主 → worker：
-//     { type:'run', jobId, op:'scanFields'|'exportFilter', filePath, field?, values?, savePath? }
+//     { type:'run', jobId, op:'scanFields'|'exportFilter'|'exportMultiFilters', filePath, field?, values?, savePath?, groups? }
 //     { type:'cancel', jobId }   — 置 activeCancelToken.cancelled（T1 reader 每行检查 → __stopParsing 早退）
 //     { type:'close' }           — process.exit(0)（dispatch finish 时主动发，与 big-table-import 一致）
 //   worker → 主：
 //     { type:'progress', jobId, payload }   — 进度（v1 无 UI，最终接 activity log；OPEN-3）
 //     { type:'log', jobId, entry }          — 日志透传
-//     { type:'done', jobId, result }        — scanFields {headers,valuesByField} / exportFilter {matchedCount}
+//     { type:'done', jobId, result }        — scanFields / 单文件过滤 / 多文件过滤结果
 //     { type:'error', jobId, error: serializeError(err) }  — 主侧 deserializeError 还原（保 name/message/detailLines）
 //
 // 约束：本文件不写业务逻辑（全部委托 T3）；只做「收消息 → 护栏 → 调 T3 → 回 done/error」+ cancelToken 维护。
@@ -133,9 +133,9 @@ if (!isMainThread && parentPort) {
   }
 
   const { scanFields } = require('./split-scan-fields');
-  const { exportFilter } = require('./split-export-filter');
+  const { exportFilter, exportMultiFilters } = require('./split-export-filter');
 
-  // 当前 job 的取消令牌（透传给 scanFields / exportFilter → T1 reader 每行检查）；cancel message 置位。
+  // 当前 job 的取消令牌（透传给三种作业 → T1 reader 每行检查）；cancel message 置位。
   let activeCancelToken = null;
   let activeJobId = null;
 
@@ -179,7 +179,7 @@ if (!isMainThread && parentPort) {
 
     if (msg.type !== 'run') return;
 
-    const { jobId, op, filePath, field, values, savePath } = msg;
+    const { jobId, op, filePath, field, values, savePath, groups } = msg;
     activeJobId = jobId;
     activeCancelToken = { cancelled: false };
 
@@ -192,7 +192,7 @@ if (!isMainThread && parentPort) {
     });
 
     try {
-      // 🔴 sharedStrings 护栏：在调 scanFields / exportFilter 之前先查（超阈值不进解析）。
+      // 🔴 sharedStrings 护栏：在调拆分作业之前先查（超阈值不进解析）。
       await assertSharedStringsUnderLimit(filePath);
 
       let result;
@@ -204,6 +204,12 @@ if (!isMainThread && parentPort) {
           field,
           values,
           savePath,
+          cancelToken: activeCancelToken
+        });
+      } else if (op === 'exportMultiFilters') {
+        result = await exportMultiFilters({
+          filePath,
+          groups,
           cancelToken: activeCancelToken
         });
       } else {

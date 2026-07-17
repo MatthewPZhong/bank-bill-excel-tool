@@ -40,7 +40,7 @@ const {
 const { readRows, extractHeaders, readXlsxSheetMetaLite } = require('../backend/file-service/readers');
 const { WATERMARK_AUTHOR } = require('./workbook-watermark');
 // toolbox 纯逻辑（合表表头校验 / 全量合并 / 全量去重 / 全量过滤 + 流式增量去重/过滤）——
-//   去 dialog 化的三个核心组装函数（mergeFilesStreamed / readSplitFieldsStreamed / exportSplitStreamed）共用，
+//   去 dialog 化的流式组装函数与单/多文件拆分共用，
 //   使 main.js handler 与集成脚本走「同一份流式组装逻辑」（单一真理来源，消除平行复刻）。
 //   toolbox.js 不 require 本模块 → 无循环依赖。
 const {
@@ -333,6 +333,53 @@ function buildFormattedRow(rawCells, formatPlan, formatters) {
   return { values, patches };
 }
 
+async function closeWorkbookOutputStream(writer) {
+  const outputStream = writer && writer.stream;
+  try {
+    if (writer && writer.zip && typeof writer.zip.abort === 'function') {
+      await writer.zip.abort();
+    }
+  } catch (_e) { /* abort continues by closing the output stream */ }
+
+  if (!outputStream || outputStream.closed) return;
+  await new Promise((resolve) => {
+    let finished = false;
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      outputStream.removeListener('close', done);
+      outputStream.removeListener('error', done);
+      resolve();
+    };
+    const timer = setTimeout(done, 2000);
+    outputStream.once('close', done);
+    outputStream.once('error', done);
+    try {
+      outputStream.destroy();
+      if (outputStream.closed) done();
+    } catch (_e) {
+      done();
+    }
+  });
+}
+
+async function removeOutputFileWithRetry(filePath) {
+  const retryableCodes = new Set(['EBUSY', 'EACCES', 'EPERM']);
+  let lastError = null;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      await fs.promises.rm(filePath, { force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!retryableCodes.has(error && error.code) || attempt === 5) break;
+      await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
+    }
+  }
+  throw new Error(`清理临时输出失败：${filePath}（${lastError && lastError.message ? lastError.message : String(lastError)}）`);
+}
+
 // 把表头行 + 数据行逐行流式写入 ExcelJS WorkbookWriter，超 MAX_DATA_ROWS_PER_SHEET 自动开 sub-sheet (2)(3)。
 //   - 决策①：useStyles:true + by-name 格式（数字/日期/文本）+ 表头 Courier New 10pt。
 //   - 决策②：自动分 sheet（照搬 acquiring-bill-currency-writer.js:171-180）。
@@ -345,11 +392,10 @@ function buildFormattedRow(rawCells, formatPlan, formatters) {
 //   formatters         { parseDateValue, parseNumericValue, toExcelSerial, inferDateCellFormat }
 //   maxRowsPerSheet    分 sheet 阈值（缺省 = MAX_DATA_ROWS_PER_SHEET；仅单测传小值确定性验证分 sheet）
 // 返回：{ filePath, dataRowCount, sheetCount }
-async function writeRowsStreamed({
+function createRowsStreamWriter({
   savePath,
   normalizedHeaders,
   sheetBaseName = 'COMMON',
-  writeDataRows,
   formatters = DEFAULT_FORMATTERS,
   // 分 sheet 阈值——缺省 = Excel 单 sheet 数据行硬上限。仅单测用极小值确定性验证分 sheet 逻辑（生产恒用缺省）。
   maxRowsPerSheet = MAX_DATA_ROWS_PER_SHEET
@@ -428,12 +474,132 @@ async function writeRowsStreamed({
     dataRowCount += 1;
   };
 
-  await writeDataRows(emit);
+  let state = 'open';
+  return {
+    emit,
+    get dataRowCount() {
+      return dataRowCount;
+    },
+    get sheetCount() {
+      return sheetCount;
+    },
+    async commit() {
+      if (state !== 'open') {
+        throw new Error(`工具箱流式输出已结束：${savePath}`);
+      }
+      state = 'committing';
+      try {
+        await sheet.commit();
+        await writer.commit();
+        state = 'committed';
+        return { filePath: savePath, dataRowCount, sheetCount };
+      } catch (error) {
+        state = 'failed';
+        throw error;
+      }
+    },
+    async abort() {
+      if (state === 'aborted') return;
+      const previousState = state;
+      state = 'aborted';
+      if (previousState !== 'committed') {
+        await closeWorkbookOutputStream(writer);
+      }
+      await removeOutputFileWithRetry(savePath);
+    }
+  };
+}
 
-  await sheet.commit();
-  await writer.commit();
+async function writeRowsStreamed({
+  savePath,
+  normalizedHeaders,
+  sheetBaseName = 'COMMON',
+  writeDataRows,
+  formatters = DEFAULT_FORMATTERS,
+  maxRowsPerSheet = MAX_DATA_ROWS_PER_SHEET
+}) {
+  const streamWriter = createRowsStreamWriter({
+    savePath,
+    normalizedHeaders,
+    sheetBaseName,
+    formatters,
+    maxRowsPerSheet
+  });
+  try {
+    await writeDataRows(streamWriter.emit);
+    return await streamWriter.commit();
+  } catch (error) {
+    try {
+      await streamWriter.abort();
+    } catch (cleanupError) {
+      if (error && typeof error === 'object') {
+        error.detailLines = [
+          ...(Array.isArray(error.detailLines) ? error.detailLines : []),
+          cleanupError.message || String(cleanupError)
+        ];
+      }
+    }
+    throw error;
+  }
+}
 
-  return { filePath: savePath, dataRowCount, sheetCount };
+// 多文件拆分写侧：所有输出 writer 同时接收一次源数据遍历，允许同一行进入多个文件。
+// outputs: [{ savePath, matches(cells), sheetBaseName? }]
+async function writeRowsToMultipleFilesStreamed({
+  outputs,
+  normalizedHeaders,
+  writeDataRows,
+  formatters = DEFAULT_FORMATTERS,
+  maxRowsPerSheet = MAX_DATA_ROWS_PER_SHEET
+}) {
+  const safeOutputs = Array.isArray(outputs) ? outputs : [];
+  if (safeOutputs.length === 0) {
+    throw new Error('未提供多文件拆分输出');
+  }
+  const writers = [];
+
+  try {
+    for (const output of safeOutputs) {
+      writers.push({
+        output,
+        writer: createRowsStreamWriter({
+          savePath: output.savePath,
+          normalizedHeaders,
+          sheetBaseName: output.sheetBaseName || 'COMMON',
+          formatters,
+          maxRowsPerSheet
+        })
+      });
+    }
+
+    await writeDataRows((rawCells) => {
+      for (const entry of writers) {
+        if (typeof entry.output.matches === 'function' && entry.output.matches(rawCells)) {
+          entry.writer.emit(rawCells);
+        }
+      }
+    });
+
+    const results = [];
+    for (const entry of writers) {
+      results.push(await entry.writer.commit());
+    }
+    return results;
+  } catch (error) {
+    const cleanupResults = await Promise.allSettled(writers.map((entry) => entry.writer.abort()));
+    const cleanupErrors = cleanupResults
+      .filter((result) => result.status === 'rejected')
+      .map((result) => result.reason && result.reason.message ? result.reason.message : String(result.reason));
+    const finalError = error && typeof error === 'object' ? error : new Error(String(error));
+    if (cleanupErrors.length > 0) {
+      finalError.detailLines = [
+        ...(Array.isArray(finalError.detailLines) ? finalError.detailLines : []),
+        ...cleanupErrors
+      ];
+      finalError.preserveTemporaryFiles = true;
+    }
+    throw finalError;
+  }
 }
 
 // 防御性 sanitize sheet 名（Excel 禁用 / \ * ? [ ] :，长度 ≤ 31）——与 acquiring-bill-currency-writer.js:110 同源。
@@ -474,7 +640,9 @@ module.exports = {
   isPhysicallySingleSheetXlsx,
   streamDataRows,
   readHeaderRowStreamed,
+  createRowsStreamWriter,
   writeRowsStreamed,
+  writeRowsToMultipleFilesStreamed,
   // 导出纯函数供单测
   buildColumnFormatPlan,
   buildFormattedRow,

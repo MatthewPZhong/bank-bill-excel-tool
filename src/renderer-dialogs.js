@@ -8262,6 +8262,12 @@
             </div>
             <div class="builtin-fixed-payment-error" data-role="payment-error" hidden></div>
           </div>
+          <div class="builtin-fixed-refund-fuzzy-row" data-role="refund-fuzzy-row" hidden>
+            <label class="builtin-fixed-payment-check">
+              <input type="checkbox" data-field="bank-payment-serial-fuzzy-enabled">
+              银行打款流水号模糊匹配
+            </label>
+          </div>
         </div>
         <div class="dialog-actions right">
           <button class="primary-btn small" type="button" data-action="save">保存</button>
@@ -8285,6 +8291,8 @@
       const paymentRegionInput = dialog.querySelector('input[data-field="payment-region"]');
       const paymentBigAccountInput = dialog.querySelector('input[data-field="payment-big-account"]');
       const paymentError = dialog.querySelector('[data-role="payment-error"]');
+      const refundFuzzyRow = dialog.querySelector('[data-role="refund-fuzzy-row"]');
+      const refundFuzzyCheck = dialog.querySelector('input[data-field="bank-payment-serial-fuzzy-enabled"]');
       const saveButton = dialog.querySelector('[data-action="save"]');
       const floatingPanel = document.createElement('div');
       floatingPanel.className = 'new-account-currency-dropdown-panel builtin-fixed-channel-floating-panel';
@@ -8297,6 +8305,7 @@
       // v3.0.4 块 F · F2：缓存当前场景完整 config（供保存时读-改-写浅合并；加载完成前禁用保存防竞态写空）
       let cachedConfig = null;       // scenarios.get 返回的 config（已 JSON.parse）
       let isPaymentScenario = false; // config.subCategory==='fund-transfer-backfill' 才显示 payment 控件
+      let isRefundScenario = false;  // config.subCategory==='refund-order-backfill' 才显示退款模糊匹配开关
       let configLoaded = false;      // 加载 IIFE 完成标记；未完成禁用保存
 
       // F1：勾选/取消勾选 → 展开区显隐（取消勾选保留输入值，照 C3 extraFee 范式）
@@ -8407,6 +8416,7 @@
               ? scResult.scenario.config
               : {};
             isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
+            isRefundScenario = cachedConfig.subCategory === 'refund-order-backfill';
             if (isPaymentScenario && checksRow) checksRow.hidden = false;
             if (isPaymentScenario && reconSourceRow) {
               // v3.0.6 需求2（T6）：对账数据来源勾选行与 payment 行同 gating 显示；
@@ -8426,6 +8436,12 @@
               if (paymentRegionInput) paymentRegionInput.value = String(backfill.region ?? '');
               if (paymentBigAccountInput) paymentBigAccountInput.value = String(backfill.bigAccount ?? '');
               syncPaymentFieldsVisibility();
+            }
+            if (isRefundScenario && refundFuzzyRow) {
+              refundFuzzyRow.hidden = false;
+              if (refundFuzzyCheck) {
+                refundFuzzyCheck.checked = cachedConfig.bankPaymentSerialFuzzyMatchEnabled === true;
+              }
             }
           }
           // 加载完成 → 允许保存
@@ -8495,6 +8511,10 @@
         if (isPaymentScenario && reconSourceCheck) {
           reconSourceMid = reconSourceCheck.checked === true;
         }
+        let bankPaymentSerialFuzzyMatchEnabled = null;
+        if (isRefundScenario && refundFuzzyCheck) {
+          bankPaymentSerialFuzzyMatchEnabled = refundFuzzyCheck.checked === true;
+        }
         // 全选 → 存空数组（= 适用全部，新增渠道自动适用）；否则存选中 ids
         const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
           ? []
@@ -8516,6 +8536,10 @@
           updateFields.config = { ...(cachedConfig || {}) };
           if (reconSourceMid !== null) updateFields.config.reconSourceMid = reconSourceMid;
           if (paymentOfflineBackfill) updateFields.config.paymentOfflineBackfill = paymentOfflineBackfill;
+        }
+        if (isRefundScenario && bankPaymentSerialFuzzyMatchEnabled !== null) {
+          updateFields.config = { ...(cachedConfig || {}) };
+          updateFields.config.bankPaymentSerialFuzzyMatchEnabled = bankPaymentSerialFuzzyMatchEnabled;
         }
         const priorityResult = await desktopApi.scenarios.update(scenarioId, updateFields);
         if (!priorityResult || priorityResult.status !== 'ok') {
@@ -11559,8 +11583,8 @@
     //   IPC 契约（preload desktopApi.toolbox → main.js trackedIpcHandle）：
     //     merge()       → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
     //     splitRead()   → {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message,detailLines}
-    //     splitExport({sourceFilePath,field,values}) → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
-    //   合表「导入文件」一气呵成（多选 → 校验 → 合并 → 另存为，无独立导出）；拆表两步（导入选字段 → 导出文件）。
+    //     splitExport({sourceFilePath,field,values} | {sourceFilePath,mode:'multiple',groups}) → 单文件或多文件结果契约
+    //   合表「导入文件」一气呵成；拆表在选字段弹框完成后直接进入单文件另存为或多文件目录导出。
     function createToolboxDialog() {
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
@@ -11662,25 +11686,41 @@
           openModal(createSplitFieldPickerDialog({
             headers,
             valuesByField,
-            onComplete: async ({ field, values }) => {
+            onComplete: async ({ field, values, mode, groups } = {}) => {
               // v3.0.8：选字段「完成」→ 直接过滤命中行另存为（一气呵成，无独立导出按钮）。
               openModal(overlay); // 先回工具箱主弹框，随后弹系统保存框
               const selectedValues = Array.isArray(values) ? values : [];
-              if (!result.sourceFilePath || !field || selectedValues.length === 0) {
+              const multipleGroups = Array.isArray(groups) ? groups : [];
+              const isMultiple = mode === 'multiple';
+              if (!result.sourceFilePath || (!isMultiple && (!field || selectedValues.length === 0))
+                || (isMultiple && multipleGroups.length === 0)) {
                 showToolboxAlert('请选择拆分字段与至少一个值', { isError: true });
                 return;
               }
               if (splitExportInFlight) return;
               splitExportInFlight = true;
               try {
-                const exportResult = await desktopApi.toolbox.splitExport({
-                  sourceFilePath: result.sourceFilePath,
-                  field,
-                  values: selectedValues
-                });
+                const exportResult = await desktopApi.toolbox.splitExport(isMultiple
+                  ? {
+                    sourceFilePath: result.sourceFilePath,
+                    mode: 'multiple',
+                    groups: multipleGroups
+                  }
+                  : {
+                    sourceFilePath: result.sourceFilePath,
+                    field,
+                    values: selectedValues
+                  });
                 if (!exportResult || exportResult.status === 'cancelled') return;
                 if (exportResult.status === 'success') {
-                  showToolboxAlert('拆分完成，已保存到：', { lines: [exportResult.filePath] });
+                  if (isMultiple) {
+                    const files = Array.isArray(exportResult.files) ? exportResult.files : [];
+                    showToolboxAlert('拆分完成：', {
+                      lines: files.map((file) => `${file.fileName}（${Number(file.matchedCount) || 0} 行）：${file.filePath}`)
+                    });
+                  } else {
+                    showToolboxAlert('拆分完成，已保存到：', { lines: [exportResult.filePath] });
+                  }
                   return;
                 }
                 showToolboxAlert(exportResult.message || '拆分失败', { isError: true, lines: exportResult.detailLines });
@@ -11743,9 +11783,15 @@
           </div>
           <div class="toolbox-split-picker-hint"></div>
         </div>
-        <div class="dialog-actions right">
-          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-          <button class="primary-btn small" type="button" data-action="complete" disabled>完成</button>
+        <div class="dialog-actions toolbox-split-picker-actions">
+          <label class="toolbox-split-multiple-toggle">
+            <input type="checkbox" data-field="multiple-files-enabled">
+            需要拆分成多个文件
+          </label>
+          <div class="toolbox-split-picker-action-buttons">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="complete" disabled>完成</button>
+          </div>
         </div>
       `;
       overlay.appendChild(dialog);
@@ -11756,6 +11802,7 @@
       const hintEl = dialog.querySelector('.toolbox-split-picker-hint');
       const cancelBtn = dialog.querySelector('[data-action="cancel"]');
       const completeBtn = dialog.querySelector('[data-action="complete"]');
+      const multipleFilesCheck = dialog.querySelector('input[data-field="multiple-files-enabled"]');
 
       // v3.0.8（用户要求）：值多选框改用「按钮 + 浮动勾选面板」控件，与场景管理「资金性质校验」管理页的
       //   「适用银行渠道」多选下拉同款（复用 new-account-currency-* class）。面板挂本弹框 overlay、position:fixed 定位。
@@ -11866,6 +11913,17 @@
       }
 
       fieldSelect.addEventListener('change', refreshValues);
+      multipleFilesCheck.addEventListener('change', () => {
+        if (!multipleFilesCheck.checked) return;
+        closeValuesPanel();
+        openModal(createMultipleSplitFieldPickerDialog({
+          headers: safeHeaders,
+          valuesByField: safeValuesByField,
+          initialGroup: { field: currentFieldName(), values: getSelectedValues() },
+          onComplete,
+          onCancel
+        }));
+      });
 
       function cancelAndClose() {
         closeValuesPanel();
@@ -11898,6 +11956,347 @@
 
       // 初始渲染：默认选中首个字段并刷新其值列表。
       refreshValues();
+      return overlay;
+    }
+
+    function createMultipleSplitFieldPickerDialog({
+      headers = [],
+      valuesByField = {},
+      initialGroup = null,
+      onComplete = null,
+      onCancel = null
+    } = {}) {
+      const safeHeaders = Array.isArray(headers) ? headers : [];
+      const safeValuesByField = (valuesByField && typeof valuesByField === 'object') ? valuesByField : {};
+      const initialFieldIndex = initialGroup && safeHeaders.includes(initialGroup.field)
+        ? safeHeaders.indexOf(initialGroup.field)
+        : 0;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay';
+      overlay.dataset.previewModal = 'toolbox-split-field-picker-multiple';
+
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-card toolbox-split-picker-card toolbox-split-multiple-card';
+      dialog.innerHTML = `
+        <div class="dialog-header">
+          <div class="dialog-title">选择拆分字段</div>
+          <button class="icon-close" type="button" aria-label="关闭">×</button>
+        </div>
+        <div class="dialog-body toolbox-split-picker-body toolbox-split-multiple-body">
+          <div class="toolbox-split-groups" data-role="split-groups"></div>
+          <button class="text-action toolbox-split-add-btn" type="button" data-action="add-group">新增</button>
+          <div class="toolbox-split-picker-hint" data-role="multiple-hint"></div>
+        </div>
+        <div class="dialog-actions toolbox-split-picker-actions">
+          <label class="toolbox-split-multiple-toggle">
+            <input type="checkbox" data-field="multiple-files-enabled" checked>
+            需要拆分成多个文件
+          </label>
+          <div class="toolbox-split-picker-action-buttons">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="complete" disabled>完成</button>
+          </div>
+        </div>
+      `;
+      overlay.appendChild(dialog);
+
+      const groupsRoot = dialog.querySelector('[data-role="split-groups"]');
+      const addButton = dialog.querySelector('[data-action="add-group"]');
+      const hintEl = dialog.querySelector('[data-role="multiple-hint"]');
+      const completeButton = dialog.querySelector('[data-action="complete"]');
+      const cancelButton = dialog.querySelector('[data-action="cancel"]');
+      const multiCheck = dialog.querySelector('input[data-field="multiple-files-enabled"]');
+      const valuesPanel = document.createElement('div');
+      valuesPanel.className = 'new-account-currency-dropdown-panel toolbox-split-values-floating-panel';
+      valuesPanel.hidden = true;
+      overlay.appendChild(valuesPanel);
+
+      let nextGroupId = 1;
+      let panelGroupId = null;
+      let panelOpen = false;
+      const initialValues = new Set(
+        (initialGroup && Array.isArray(initialGroup.values) ? initialGroup.values : [])
+          .filter((value) => (safeValuesByField[safeHeaders[initialFieldIndex]] || []).includes(value))
+      );
+      const groups = [{
+        id: nextGroupId++,
+        fileName: '',
+        fieldIndex: initialFieldIndex,
+        selectedValues: initialValues
+      }];
+
+      function fieldNameOf(group) {
+        return Number.isInteger(group.fieldIndex) && group.fieldIndex >= 0 && group.fieldIndex < safeHeaders.length
+          ? safeHeaders[group.fieldIndex]
+          : '';
+      }
+
+      function valuesOf(group) {
+        const field = fieldNameOf(group);
+        return Array.isArray(safeValuesByField[field]) ? safeValuesByField[field] : [];
+      }
+
+      function selectedValuesOf(group) {
+        return valuesOf(group).filter((value) => group.selectedValues.has(value));
+      }
+
+      function valuesLabelOf(group) {
+        const values = valuesOf(group);
+        const selected = selectedValuesOf(group);
+        if (selected.length === 0) return ' ';
+        if (values.length > 0 && selected.length === values.length) return '全部';
+        return selected.join('、') || ' ';
+      }
+
+      function normalizeFileName(rawValue) {
+        let value = String(rawValue || '');
+        if (!value.trim()) return { valid: false, message: '文件名不能为空' };
+        if (value !== value.trim()) return { valid: false, message: '文件名不能以空格开头或结尾' };
+        if (/[<>:"/\\|?*\u0000-\u001f]/.test(value)) {
+          return { valid: false, message: '文件名包含系统不允许的字符' };
+        }
+        while (/\.xlsx$/i.test(value)) value = value.slice(0, -5);
+        if (!value || /[.\s]$/.test(value)) return { valid: false, message: '文件名不能以空格或句点结尾' };
+        if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i.test(value)) {
+          return { valid: false, message: '文件名是系统保留名称' };
+        }
+        return { valid: true, fileName: `${value}.xlsx` };
+      }
+
+      function closeValuesPanel() {
+        panelOpen = false;
+        panelGroupId = null;
+        valuesPanel.hidden = true;
+        dialog.querySelectorAll('.toolbox-split-values-dropdown-btn').forEach((button) => {
+          button.classList.remove('is-open');
+          button.setAttribute('aria-expanded', 'false');
+        });
+      }
+
+      function updateCompleteState() {
+        completeButton.disabled = groups.some((group) => (
+          String(group.fileName || '').trim() === ''
+          || fieldNameOf(group) === ''
+          || selectedValuesOf(group).length === 0
+        ));
+      }
+
+      function positionValuesPanel(button) {
+        const rect = button.getBoundingClientRect();
+        const margin = 12;
+        valuesPanel.style.position = 'fixed';
+        valuesPanel.style.minWidth = `${Math.max(rect.width, 188)}px`;
+        valuesPanel.style.maxWidth = `${Math.max(220, Math.min(280, window.innerWidth - margin * 2))}px`;
+        valuesPanel.hidden = false;
+        const panelHeight = valuesPanel.offsetHeight || 216;
+        const panelWidth = valuesPanel.offsetWidth || 200;
+        valuesPanel.style.left = `${Math.min(Math.max(margin, rect.left), Math.max(margin, window.innerWidth - panelWidth - margin))}px`;
+        valuesPanel.style.top = `${rect.bottom + 6 + panelHeight > window.innerHeight - margin
+          ? Math.max(margin, rect.top - panelHeight - 6)
+          : rect.bottom + 6}px`;
+      }
+
+      function refreshGroupValuesButton(group) {
+        const section = groupsRoot.querySelector(`[data-group-id="${group.id}"]`);
+        const button = section && section.querySelector('[data-role="values-button"]');
+        if (!button) return;
+        button.textContent = valuesLabelOf(group);
+        button.title = button.textContent;
+        button.disabled = valuesOf(group).length === 0;
+      }
+
+      function openValuesPanel(group, button) {
+        closeValuesPanel();
+        panelGroupId = group.id;
+        valuesPanel.replaceChildren();
+        for (const value of valuesOf(group)) {
+          const option = document.createElement('label');
+          option.className = 'new-account-currency-option';
+          const text = document.createElement('span');
+          text.className = 'new-account-currency-option-text';
+          text.textContent = value;
+          const checkbox = document.createElement('input');
+          checkbox.className = 'new-account-checkbox';
+          checkbox.type = 'checkbox';
+          checkbox.checked = group.selectedValues.has(value);
+          checkbox.addEventListener('change', () => {
+            if (checkbox.checked) group.selectedValues.add(value);
+            else group.selectedValues.delete(value);
+            refreshGroupValuesButton(group);
+            updateCompleteState();
+          });
+          option.append(text, checkbox);
+          valuesPanel.appendChild(option);
+        }
+        panelOpen = true;
+        button.classList.add('is-open');
+        button.setAttribute('aria-expanded', 'true');
+        positionValuesPanel(button);
+      }
+
+      function renderGroups() {
+        closeValuesPanel();
+        groupsRoot.replaceChildren();
+        groups.forEach((group, index) => {
+          const section = document.createElement('section');
+          section.className = 'toolbox-split-group';
+          section.dataset.groupId = String(group.id);
+
+          const sequence = document.createElement('span');
+          sequence.className = 'toolbox-split-group-sequence';
+          sequence.textContent = `文件${index + 1}`;
+
+          const fileLabel = document.createElement('span');
+          fileLabel.className = 'toolbox-split-group-label';
+          fileLabel.textContent = '文件名';
+          const fileInput = document.createElement('input');
+          fileInput.className = 'scenario-config-input toolbox-split-file-name-input';
+          fileInput.type = 'text';
+          fileInput.value = group.fileName;
+          fileInput.addEventListener('input', () => {
+            group.fileName = fileInput.value;
+            hintEl.textContent = '';
+            updateCompleteState();
+          });
+
+          const fieldLabel = document.createElement('span');
+          fieldLabel.className = 'toolbox-split-group-label';
+          fieldLabel.textContent = '字段';
+          const fieldSelect = document.createElement('select');
+          fieldSelect.className = 'toolbox-split-picker-field';
+          safeHeaders.forEach((header, headerIndex) => {
+            const option = document.createElement('option');
+            option.value = String(headerIndex);
+            option.textContent = header;
+            fieldSelect.appendChild(option);
+          });
+          fieldSelect.value = String(group.fieldIndex);
+          fieldSelect.addEventListener('change', () => {
+            group.fieldIndex = Number.parseInt(fieldSelect.value, 10);
+            group.selectedValues = new Set();
+            hintEl.textContent = valuesOf(group).length === 0
+              ? `文件${index + 1}所选字段无可选值，请改选其他字段`
+              : '';
+            renderGroups();
+          });
+
+          const valuesLabel = document.createElement('span');
+          valuesLabel.className = 'toolbox-split-group-label';
+          valuesLabel.textContent = '值';
+          const valuesWrap = document.createElement('div');
+          valuesWrap.className = 'new-account-currency-dropdown-wrap toolbox-split-values-dropdown-wrap';
+          const valuesButton = document.createElement('button');
+          valuesButton.className = 'new-account-currency-dropdown-btn toolbox-split-values-dropdown-btn';
+          valuesButton.type = 'button';
+          valuesButton.dataset.role = 'values-button';
+          valuesButton.setAttribute('aria-expanded', 'false');
+          valuesButton.textContent = valuesLabelOf(group);
+          valuesButton.title = valuesButton.textContent;
+          valuesButton.disabled = valuesOf(group).length === 0;
+          valuesButton.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (panelOpen && panelGroupId === group.id) closeValuesPanel();
+            else openValuesPanel(group, valuesButton);
+          });
+          valuesWrap.appendChild(valuesButton);
+
+          const deleteButton = document.createElement('button');
+          deleteButton.className = 'icon-close toolbox-split-delete-group';
+          deleteButton.type = 'button';
+          deleteButton.textContent = '×';
+          deleteButton.title = `删除文件${index + 1}`;
+          deleteButton.setAttribute('aria-label', deleteButton.title);
+          deleteButton.disabled = groups.length === 1;
+          deleteButton.addEventListener('click', () => {
+            if (groups.length === 1) return;
+            groups.splice(index, 1);
+            hintEl.textContent = '';
+            renderGroups();
+          });
+
+          sequence.style.gridRow = '1 / 4';
+          deleteButton.style.gridRow = '1 / 4';
+          section.append(
+            sequence,
+            fileLabel, fileInput, deleteButton,
+            fieldLabel, fieldSelect,
+            valuesLabel, valuesWrap
+          );
+          groupsRoot.appendChild(section);
+        });
+        addButton.disabled = groups.length >= 8;
+        addButton.hidden = groups.length >= 8;
+        updateCompleteState();
+      }
+
+      addButton.addEventListener('click', () => {
+        if (groups.length >= 8) return;
+        const previous = groups[groups.length - 1];
+        groups.push({
+          id: nextGroupId++,
+          fileName: '',
+          fieldIndex: previous ? previous.fieldIndex : 0,
+          selectedValues: new Set()
+        });
+        hintEl.textContent = '';
+        renderGroups();
+      });
+
+      function cancelAndClose() {
+        closeValuesPanel();
+        if (typeof onCancel === 'function') onCancel();
+        else closeModal();
+      }
+      dialog.querySelector('.icon-close').addEventListener('click', cancelAndClose);
+      cancelButton.addEventListener('click', cancelAndClose);
+      multiCheck.addEventListener('change', () => {
+        if (multiCheck.checked) return;
+        closeValuesPanel();
+        openModal(createSplitFieldPickerDialog({
+          headers: safeHeaders,
+          valuesByField: safeValuesByField,
+          onComplete,
+          onCancel
+        }));
+      });
+      overlay.addEventListener('click', (event) => {
+        if (event.target !== overlay) return;
+        if (panelOpen) { closeValuesPanel(); return; }
+        cancelAndClose();
+      });
+
+      completeButton.addEventListener('click', () => {
+        const normalizedGroups = [];
+        const seenNames = new Set();
+        for (let index = 0; index < groups.length; index += 1) {
+          const group = groups[index];
+          const normalizedName = normalizeFileName(group.fileName);
+          if (!normalizedName.valid) {
+            hintEl.textContent = `文件${index + 1}：${normalizedName.message}`;
+            return;
+          }
+          const duplicateKey = normalizedName.fileName.toLocaleLowerCase('en-US');
+          if (seenNames.has(duplicateKey)) {
+            hintEl.textContent = `文件${index + 1}：文件名与其他分组重复`;
+            return;
+          }
+          seenNames.add(duplicateKey);
+          const field = fieldNameOf(group);
+          const selectedValues = selectedValuesOf(group);
+          if (!field || selectedValues.length === 0) {
+            hintEl.textContent = `文件${index + 1}：请选择字段和至少一个值`;
+            return;
+          }
+          normalizedGroups.push({ fileName: normalizedName.fileName, field, values: selectedValues });
+        }
+        closeValuesPanel();
+        if (typeof onComplete === 'function') {
+          onComplete({ mode: 'multiple', groups: normalizedGroups });
+        }
+      });
+
+      renderGroups();
       return overlay;
     }
 
@@ -12017,6 +12416,7 @@
       // v3.0.8 需求1：工具箱🧰（合表 / 拆表）主弹框 + 拆表选字段弹框
       createToolboxDialog,
       createSplitFieldPickerDialog,
+      createMultipleSplitFieldPickerDialog,
       // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
       createVccOpCalcConfirmDialog,
       createVccOpCalcComputeDialog,

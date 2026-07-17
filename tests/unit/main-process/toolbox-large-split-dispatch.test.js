@@ -189,4 +189,28 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     // 表头 1 行 + 命中 2 行 = 3 行。
     assert.equal(ws.rowCount, 3, '产物应有表头 + 2 命中行');
   });
+
+  test('B3. 真 worker 拓扑跑通 exportMultiFilters：多个结果共用一次作业', async () => {
+    const srcPath = path.join(tmpdir, 'two-sheet-multi-src.xlsx');
+    await makeTwoSheetXlsx(srcPath);
+    const channelPath = path.join(tmpdir, 'multi-alipay.xlsx');
+    const currencyPath = path.join(tmpdir, 'multi-usd.xlsx');
+    const emptyPath = path.join(tmpdir, 'multi-empty.xlsx');
+
+    const { promise } = dispatchLargeSplit({
+      op: 'exportMultiFilters',
+      filePath: srcPath,
+      groups: [
+        { fileName: 'ALIPAY.xlsx', field: '渠道', values: ['ALIPAY'], savePath: channelPath },
+        { fileName: 'USD.xlsx', field: '币种', values: ['USD'], savePath: currencyPath },
+        { fileName: 'EMPTY.xlsx', field: '渠道', values: ['NONE'], savePath: emptyPath }
+      ]
+    });
+    const result = await promise;
+
+    assert.deepEqual(result.files.map((file) => file.matchedCount), [2, 2, 0]);
+    for (const filePath of [channelPath, currencyPath, emptyPath]) {
+      assert.equal(fs.existsSync(filePath), true, `${filePath} 应生成`);
+    }
+  });
 });

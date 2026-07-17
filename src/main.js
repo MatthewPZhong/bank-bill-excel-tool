@@ -118,7 +118,11 @@ const {
 const { buildFundTransferReconRows } = require('./main-process/fund-transfer-recon-builder');
 const { streamLinkedRowsToInsert } = require('./main-process/linked-table-stream-source');
 const linkedTableReaders = require('./backend/file-service/readers');
-const { normalizeCell: normalizeLinkedCell, FileValidationError: LinkedFileValidationError } = require('./backend/file-service/common');
+const {
+  normalizeCell: normalizeLinkedCell,
+  trimTrailingEmptyCells: trimToolboxTrailingEmptyCells,
+  FileValidationError: LinkedFileValidationError
+} = require('./backend/file-service/common');
 // v2.1.2 T2：月度银行对账单BU回填校验模块
 const { createBankBuReconSession, runReconciliation: runBankBuRecon } = require('./main-process/bank-bu-recon-session');
 const {
@@ -221,8 +225,14 @@ const {
   streamDataRows: toolboxStreamDataRows,
   readHeaderRowStreamed: toolboxReadHeaderRowStreamed,
   writeRowsStreamed: toolboxWriteRowsStreamed,
+  writeRowsToMultipleFilesStreamed: toolboxWriteRowsToMultipleFilesStreamed,
   ToolboxStreamEmptyError
 } = require('./main-process/toolbox-stream-io');
+const {
+  normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups,
+  createMultipleRowFilters: toolboxCreateMultipleRowFilters,
+  publishPreparedSplitFiles: toolboxPublishPreparedSplitFiles
+} = require('./main-process/toolbox-multi-split');
 // v3.0.9 T6：工具箱「按字段值拆分」大文件隔离 worker 通道——路由判定 + 主侧 dispatch。
 //   两个 toolbox:split handler（read/export）在现有小文件分支「之前」加 if (await shouldUseLargeChannel(...)) {大通道}，
 //   现有小文件分支原样不动（🔴 小文件零回归）。回传契约逐字节一致（前端零改动）。
@@ -13719,7 +13729,8 @@ function registerDuplicateInboundMatchHandlers() {
 //   （extractHeaders / readRows / writeWorkbookRows）+ copyFileSync 落盘。
 //
 //   返回口径（前端对接契约，与现有 monthly-balance:export / bank-statement:import 范式一致）：
-//     成功     { status:'success', filePath }
+//     单文件成功 { status:'success', filePath }
+//     多文件成功 { status:'success', files:[{filePath,fileName,matchedCount}] }
 //     取消另存为 { status:'cancelled' }
 //     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
 //   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
@@ -13868,6 +13879,129 @@ function registerToolboxHandlers() {
       const { sourceFilePath, field, values } = payload || {};
       if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
         return { status: 'failed', message: '源文件不存在或已被移动，请重新导入', detailLines: [] };
+      }
+      if (payload && payload.mode === 'multiple') {
+        const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
+        const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
+          title: '选择拆分文件保存目录',
+          properties: ['openDirectory', 'createDirectory']
+        });
+        if (directoryChoice.canceled || !directoryChoice.filePaths || directoryChoice.filePaths.length === 0) {
+          return { status: 'cancelled' };
+        }
+
+        const outputDirectory = directoryChoice.filePaths[0];
+        const targetPlans = groups.map((group) => ({
+          ...group,
+          targetPath: path.join(outputDirectory, group.fileName)
+        }));
+        const invalidTargets = targetPlans.filter((plan) => (
+          fs.existsSync(plan.targetPath) && !fs.lstatSync(plan.targetPath).isFile()
+        ));
+        if (invalidTargets.length > 0) {
+          return {
+            status: 'failed',
+            message: '以下目标路径不是可覆盖的普通文件，请修改文件名后重试',
+            detailLines: invalidTargets.map((plan) => plan.targetPath)
+          };
+        }
+        const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
+        if (conflicts.length > 0) {
+          const overwriteChoice = await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            buttons: ['取消', '覆盖全部'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true,
+            title: '文件已存在',
+            message: `有 ${conflicts.length} 个目标文件已存在，是否覆盖全部？`,
+            detail: conflicts.map((plan) => plan.fileName).join('\n')
+          });
+          if (!overwriteChoice || overwriteChoice.response !== 1) {
+            return { status: 'cancelled' };
+          }
+        }
+
+        const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));
+        let preserveTempDir = false;
+        try {
+          const preparedPlans = targetPlans.map((plan, index) => ({
+            ...plan,
+            temporaryPath: path.join(tempDir, `${String(index + 1).padStart(2, '0')}.xlsx`),
+            matchedCount: 0
+          }));
+
+          if (await shouldUseLargeChannel(sourceFilePath)) {
+            const workerResult = await dispatchLargeSplit({
+              op: 'exportMultiFilters',
+              filePath: sourceFilePath,
+              groups: preparedPlans.map((plan) => ({
+                fileName: plan.fileName,
+                field: plan.field,
+                values: plan.values,
+                savePath: plan.temporaryPath
+              }))
+            }).promise;
+            const workerFiles = workerResult && Array.isArray(workerResult.files) ? workerResult.files : [];
+            if (workerFiles.length !== preparedPlans.length) {
+              throw new Error('大文件拆分结果数量与请求分组不一致');
+            }
+            workerFiles.forEach((file, index) => {
+              preparedPlans[index].matchedCount = Number(file.matchedCount) || 0;
+            });
+          } else {
+            let normalizedHeaders;
+            let writeDataRows;
+            if (toolboxIsStreamableXlsx(sourceFilePath)) {
+              normalizedHeaders = await toolboxReadHeaderRowStreamed(sourceFilePath);
+              writeDataRows = async (emit) => {
+                await toolboxStreamDataRows(sourceFilePath, emit);
+              };
+            } else {
+              const sourceRows = readRows(sourceFilePath);
+              const headerRow = Array.isArray(sourceRows[0]) ? sourceRows[0] : null;
+              if (!headerRow) {
+                throw new ToolboxStreamEmptyError('文件为空或不可读，请重新导入');
+              }
+              normalizedHeaders = trimToolboxTrailingEmptyCells(headerRow).map((cell) => normalizeLinkedCell(cell));
+              writeDataRows = async (emit) => {
+                for (let rowIndex = 1; rowIndex < sourceRows.length; rowIndex += 1) {
+                  if (Array.isArray(sourceRows[rowIndex])) emit(sourceRows[rowIndex]);
+                }
+              };
+            }
+
+            const filters = toolboxCreateMultipleRowFilters(normalizedHeaders, preparedPlans);
+            const writeResults = await toolboxWriteRowsToMultipleFilesStreamed({
+              normalizedHeaders,
+              outputs: filters.map((filter, index) => ({
+                savePath: preparedPlans[index].temporaryPath,
+                matches: filter.matches
+              })),
+              writeDataRows
+            });
+            writeResults.forEach((result, index) => {
+              preparedPlans[index].matchedCount = result.dataRowCount;
+            });
+          }
+
+          const files = toolboxPublishPreparedSplitFiles(preparedPlans);
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'toolbox',
+            message: '工具箱多文件拆分成功',
+            details: files.map((file) => `${file.fileName}：${file.matchedCount} 行，${file.filePath}`)
+          });
+          return { status: 'success', files };
+        } catch (error) {
+          preserveTempDir = error && error.preserveTemporaryFiles === true;
+          throw error;
+        } finally {
+          if (!preserveTempDir) {
+            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+          }
+        }
       }
       if (!field) {
         return { status: 'failed', message: '未选择拆分字段', detailLines: [] };

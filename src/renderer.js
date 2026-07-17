@@ -468,6 +468,7 @@ const {
   // v3.0.8 需求1：工具箱🧰 主弹框（按钮 click 用）；拆表选字段弹框（preview 直接调用需在 renderer.js 取得引用）
   createToolboxDialog,
   createSplitFieldPickerDialog,
+  createMultipleSplitFieldPickerDialog,
   // v2.1.12 需求1：VCC业务OP计算 dialog factory（F1 确认 / F2 计算 / F3 显示余额）
   createVccOpCalcConfirmDialog,
   createVccOpCalcComputeDialog,
@@ -554,6 +555,8 @@ const {
   applyBuiltinFixedChannelManagePreviewState,
   // v3.0.4 块 F · F1：Payment 线下调拨订单回填处理展开态 preview
   applyBuiltinFixedChannelManagePaymentPreviewState,
+  // v3.0.17：退款流水号模糊匹配管理页 preview
+  applyBuiltinFixedChannelManageRefundPreviewState,
   applyScenarioCategorySelectPreviewState,
   // v2.1.14 C：链接表管理弹窗 preview
   applyLinkedTableManagerPreviewState,
@@ -588,7 +591,8 @@ const {
   applyModuleCabinetPreviewState,
   // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框 preview
   applyToolboxPreviewState,
-  applyToolboxSplitFieldPickerPreviewState
+  applyToolboxSplitFieldPickerPreviewState,
+  applyToolboxSplitFieldPickerMultiplePreviewState
 } = window.__rendererPreviews.createRendererPreviews({
   state,
   elements,
@@ -649,6 +653,7 @@ const {
   // v3.0.8 需求1：工具箱🧰 主弹框 + 拆表选字段弹框工厂（preview 直接调用）
   createToolboxDialog,
   createSplitFieldPickerDialog,
+  createMultipleSplitFieldPickerDialog,
   // v3.0.1 需求1（D4）：删除网关对账单弹框 preview 直接调用
   createLinkedTableDeleteRangeDialog,
   // v3.0.1 需求3：网关对账单修复场景单选框 preview 直接调用
@@ -6991,6 +6996,10 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       applyBuiltinFixedChannelManagePaymentPreviewState();
     }, 120);
+  } else if (info.previewModal === 'builtin-fixed-channel-manage-refund') {
+    setTimeout(() => {
+      applyBuiltinFixedChannelManageRefundPreviewState();
+    }, 120);
   } else if (info.previewModal === 'linked-table-manager') {
     // v2.1.14 C：链接表管理弹窗 preview
     setTimeout(() => {
@@ -7109,6 +7118,8 @@ async function applyFullInfo(info) {
     setTimeout(() => { applyToolboxPreviewState(); }, 120);
   } else if (info.previewModal === 'toolbox-split-field-picker') {
     setTimeout(() => { applyToolboxSplitFieldPickerPreviewState(); }, 120);
+  } else if (info.previewModal === 'toolbox-split-field-picker-multiple') {
+    setTimeout(() => { applyToolboxSplitFieldPickerMultiplePreviewState(); }, 120);
   }
 
   markRendererStartup(RENDERER_STARTUP_MARKS.initComplete);

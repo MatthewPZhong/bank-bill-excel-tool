@@ -61,7 +61,7 @@ function makeRefundRow(overrides = {}) {
 }
 
 // R5 场景4 退款回填场景（默认休眠，但单测里手动 enabled=true 强制启用以测编排管道）
-function makeR5RefundScenario({ enabled = true } = {}) {
+function makeR5RefundScenario({ enabled = true, fuzzyEnabled = false } = {}) {
   return {
     id: 504,
     name: '中台退款订单回填',
@@ -71,7 +71,8 @@ function makeR5RefundScenario({ enabled = true } = {}) {
     config: {
       funcCategory: 'platform-order',
       subCategory: 'refund-order-backfill',
-      roundPhase: 5
+      roundPhase: 5,
+      bankPaymentSerialFuzzyMatchEnabled: fuzzyEnabled
     }
   };
 }
@@ -161,6 +162,49 @@ test.describe('runReconciliation R5 场景4 集成', () => {
     );
     assert.ok(result.rounds.r5s4 && typeof result.rounds.r5s4 === 'object', 'rounds.r5s4 存在');
     assert.equal(result.rounds.r5s4.backfilled, 1, 'rounds.r5s4.backfilled = 回填行数');
+  });
+
+  test('场景开关透传到引擎：关闭保持未命中，开启救回差额小于10的流水号候选', async () => {
+    const buildInput = () => ({
+      bankRows: [makeBankRow({
+        _rowId: 'fuzzy-bank',
+        FundType: 'Ach Return',
+        MerchantId: 'M001',
+        Currency: 'USD',
+        'Debit Amount': '109.99',
+        'Credit Amount': '0',
+        ChannelOrderNo: 'FUZZY-PAY',
+        BillDate: '2026-07-16'
+      })],
+      refundContext: {
+        refundOrderRows: [makeRefundRow({
+          流水号: 'FUZZY-REFUND',
+          银行大账号: 'M001',
+          退款金额: '100',
+          币种: 'USD',
+          银行打款流水号: 'FUZZY-PAY',
+          valueDate: '2026-01-01'
+        })],
+        depositRows: []
+      }
+    });
+
+    const disabledInput = buildInput();
+    const disabled = await runReconciliation({
+      ...disabledInput,
+      gwRows: [],
+      scenarios: [makeR5RefundScenario({ fuzzyEnabled: false })]
+    });
+    assert.equal(disabled.refundBackfillRows.length, 0);
+
+    const enabledInput = buildInput();
+    const enabled = await runReconciliation({
+      ...enabledInput,
+      gwRows: [],
+      scenarios: [makeR5RefundScenario({ fuzzyEnabled: true })]
+    });
+    assert.equal(enabled.refundBackfillRows.length, 1);
+    assert.equal(enabled.refundBackfillRows[0]['命中类型'], '模糊命中');
   });
 
   test('🔴 数据隔离：场景4 不改 bankRows、不进 modifiedRows、行数守恒不变', async () => {

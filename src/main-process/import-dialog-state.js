@@ -14,6 +14,7 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'template-bundle',              // 模板 JSON 包导入，与 xlsx/csv 模板目录分开记忆
   'big-account',
   'toolbox',
+  'toolbox-split-export-directory',
   'linked-table',
   'pre-fund-reconciliation-export',
   'bank-statement-process-bundle' // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆

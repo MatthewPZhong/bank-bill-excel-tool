@@ -87,6 +87,25 @@ test.describe('serializeScenarioBundle', () => {
     assert.deepStrictEqual(parsed.channels[0].scenarios[0].configJson, { foo: 'bar', n: 42 });
   });
 
+  test('退款流水号模糊匹配开关随场景 bundle 原样导出', () => {
+    const channels = [{ id: 1, name: '通用', ownerLocation: '通用', isBuiltin: true }];
+    const config = {
+      funcCategory: 'platform-order',
+      subCategory: 'refund-order-backfill',
+      roundPhase: 5,
+      bankPaymentSerialFuzzyMatchEnabled: true
+    };
+    const map = new Map([[1, [{
+      category: 'builtin-fixed',
+      name: '中台退款订单回填',
+      priority: 0,
+      enabled: 1,
+      config
+    }]]]);
+    const parsed = JSON.parse(serializeScenarioBundle(channels, map, '3.0.17'));
+    assert.deepStrictEqual(parsed.channels[0].scenarios[0].configJson, config);
+  });
+
   test('enabled 字段归一化（boolean / 0 / 1 都接受）', () => {
     const channels = [{ id: 2, name: '工商', ownerLocation: '上海', isBuiltin: false }];
     const map = new Map([[2, [

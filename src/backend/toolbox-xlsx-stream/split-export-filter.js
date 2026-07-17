@@ -25,7 +25,10 @@
 
 const { streamLogicalTableRows } = require('./multi-sheet-reader');
 const { createRowFilter } = require('../../main-process/toolbox');
-const { writeRowsStreamed } = require('../../main-process/toolbox-stream-io');
+const {
+  writeRowsStreamed,
+  writeRowsToMultipleFilesStreamed
+} = require('../../main-process/toolbox-stream-io');
 
 // 字段不存在错误——上层 handler 据 name 归一为 { status:'failed' }（不产文件）。
 //   与现状全量路径 filterRowsByFieldValues 的 fieldFound=false 分支同语义。
@@ -131,8 +134,57 @@ async function exportFilter({ filePath, field, values, savePath, cancelToken, ma
   return { matchedCount: writeResult.dataRowCount };
 }
 
+// 多文件模式：peek 表头后编译 1-8 个过滤器，数据区只流式扫描一次；同一行可写入多个输出。
+// 0 命中输出仍保留表头，由主进程和其他结果一起原子发布。
+async function exportMultiFilters({ filePath, groups, cancelToken, maxRowsPerSheet }) {
+  const normalizedHeaders = await peekNormalizedHeaders(filePath, cancelToken);
+  if (normalizedHeaders === null) {
+    const err = new Error('文件为空或不可读，请重新导入');
+    err.name = 'ToolboxStreamEmptyError';
+    throw err;
+  }
+
+  const safeGroups = Array.isArray(groups) ? groups : [];
+  if (safeGroups.length === 0) {
+    throw new Error('未提供多文件拆分分组');
+  }
+  const outputs = safeGroups.map((group, index) => {
+    const filter = createRowFilter(normalizedHeaders, group.field, group.values);
+    if (!filter.fieldFound) {
+      throw new ToolboxSplitFieldNotFoundError(
+        `字段「${group.field}」不在表头中，无法按该字段拆分`,
+        [
+          `文件${index + 1}：${group.fileName || group.savePath || ''}`,
+          `表头（${normalizedHeaders.length} 列）：${normalizedHeaders.join(' | ') || '（空）'}`
+        ]
+      );
+    }
+    return { savePath: group.savePath, matches: filter.matches };
+  });
+
+  const writeResults = await writeRowsToMultipleFilesStreamed({
+    outputs,
+    normalizedHeaders,
+    writeDataRows: async (emit) => {
+      await streamLogicalTableRows(filePath, {
+        onDataRow: emit,
+        cancelToken: cancelToken || null
+      });
+    },
+    ...(typeof maxRowsPerSheet === 'number' ? { maxRowsPerSheet } : {})
+  });
+
+  return {
+    files: writeResults.map((result, index) => ({
+      savePath: safeGroups[index].savePath,
+      matchedCount: result.dataRowCount
+    }))
+  };
+}
+
 module.exports = {
   exportFilter,
+  exportMultiFilters,
   ToolboxSplitFieldNotFoundError,
   // 导出供单测
   peekNormalizedHeaders

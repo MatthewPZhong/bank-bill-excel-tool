@@ -127,6 +127,13 @@ const STRATEGY_CASES = [
     // v3.0.10 Change B：S4 标黄按固定文案口径展开为 8 列（bank 4 + ro 4，全∈sheet1）；
     //   Debit Amount 仅作 sheet1 银行金额展示列（实际匹配口径是 |Credit−Debit| 绝对值）。
     expectMarked: ['BillDate', 'MerchantId', 'Debit Amount', 'Currency', 'valueDate', '银行大账号', '退款金额', '币种']
+  },
+  {
+    name: '银行打款流水号模糊匹配',
+    bank: bank({ _rowId: 'fuzzyb', MerchantId: 'A6', 'Debit Amount': '116.99', ChannelOrderNo: 'PAY-FUZZY' }),
+    refund: refund({ '流水号': 'SN-FUZZY', '银行大账号': 'A6', '退款金额': '107', '银行打款流水号': 'PAY-FUZZY' }),
+    deposits: [],
+    expectMarked: ['ChannelOrderNo', '银行打款流水号', 'Debit Amount', '退款金额', 'MerchantId', '银行大账号', 'Currency', '币种']
   }
 ];
 
@@ -142,10 +149,12 @@ async function run() {
     // 外加 1 条 bank-only（不同唯一值、无 refund）→ sheet2 银行未匹配-提示行（验证需求3.2 前缀 + 13 列）。
     allBank.push(bank({ _rowId: 'bankonly', MerchantId: 'ZZ', 'Debit Amount': 999 }));
 
-    const res = runRound5RefundOrderBackfill(allBank, allRefund, allDeposits);
+    const res = runRound5RefundOrderBackfill(allBank, allRefund, allDeposits, {
+      bankPaymentSerialFuzzyMatchEnabled: true
+    });
 
     // ① 引擎产物：每策略命中 1 行回填，且带正确 _matchedColumns。
-    assertEq(res.backfillRows.length, STRATEGY_CASES.length, '①引擎产 5 条回填行（每策略 1 条）');
+    assertEq(res.backfillRows.length, STRATEGY_CASES.length, '①引擎产 6 条回填行（每策略 1 条）');
     for (const c of STRATEGY_CASES) {
       const row = res.backfillRows.find((r) => r['退款单号'] === c.refund['流水号']);
       assertTrue(!!row, `①策略 ${c.name} 应有回填行`);

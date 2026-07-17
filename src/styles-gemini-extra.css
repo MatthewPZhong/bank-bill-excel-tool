@@ -3415,6 +3415,117 @@ select.mapping-text-input {
   color: #d32f2f;
   line-height: 1.4;
 }
+.toolbox-split-picker-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.toolbox-split-multiple-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text, #1c1f29);
+}
+.toolbox-split-picker-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+.toolbox-split-multiple-card {
+  width: min(94vw, 640px);
+}
+.toolbox-split-multiple-body {
+  max-height: min(64vh, 620px);
+  overflow-y: auto;
+  padding-bottom: 10px;
+}
+.toolbox-split-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.toolbox-split-group {
+  display: grid;
+  grid-template-columns: 58px 52px minmax(0, 1fr) 32px;
+  grid-template-rows: repeat(3, 36px);
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 8px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line-soft, rgba(104, 79, 39, 0.14));
+}
+.toolbox-split-group-sequence {
+  grid-column: 1;
+  align-self: start;
+  padding-top: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #1c1f29);
+  white-space: nowrap;
+}
+.toolbox-split-group-label {
+  width: 100%;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text, #1c1f29);
+  white-space: nowrap;
+}
+.toolbox-split-file-name-input,
+.toolbox-split-group .toolbox-split-picker-field,
+.toolbox-split-group .toolbox-split-values-dropdown-wrap {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.toolbox-split-file-name-input {
+  height: 36px;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+.toolbox-split-delete-group {
+  grid-column: 4;
+  align-self: start;
+  width: 28px;
+  height: 28px;
+  margin-top: 4px;
+}
+.toolbox-split-delete-group:disabled {
+  visibility: hidden;
+}
+.toolbox-split-add-btn {
+  align-self: flex-start;
+  margin-left: 122px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent, #3264a8);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.toolbox-split-add-btn:hover {
+  text-decoration: underline;
+}
+@media (max-width: 560px) {
+  .toolbox-split-multiple-card {
+    width: 96vw;
+  }
+  .toolbox-split-group {
+    grid-template-columns: 48px 46px minmax(0, 1fr) 28px;
+    column-gap: 8px;
+  }
+  .toolbox-split-add-btn {
+    margin-left: 102px;
+  }
+  .toolbox-split-picker-actions {
+    align-items: flex-start;
+  }
+}
 
 /* v2.1.13 D-3：自带写死场景「适用银行渠道」管理弹窗（多选下拉复用 .new-account-currency-dropdown-* 浮动面板） */
 .builtin-fixed-channel-manage-card {
@@ -3514,6 +3625,14 @@ select.mapping-text-input {
   font-size: 13px;
   cursor: pointer;
   white-space: nowrap;
+}
+.builtin-fixed-refund-fuzzy-row {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-start;
+}
+.builtin-fixed-refund-fuzzy-row[hidden] {
+  display: none;
 }
 .builtin-fixed-payment-fields {
   margin-top: 12px;

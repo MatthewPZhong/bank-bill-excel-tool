@@ -1614,6 +1614,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       funcCategory: 'platform-order',
       subCategory: 'refund-order-backfill',
       roundPhase: 5,
+      bankPaymentSerialFuzzyMatchEnabled: false,
       function: '银行 FundType=Ach Return（未改写）行与中台退款订单 SUBMITTED 行按渠道大账号/金额/币种唯一值分组，按4基数×4策略(渠道流水号/附言MTX/付款人卡号虚拟卡号/金额币种日期)+JPM(HK/US)匹配回填，产出双sheet模板，不改银行行。',
       involvedFiles: ['中台退款订单', '中台退款订单回填模板', '银行对账单入金表']
     }

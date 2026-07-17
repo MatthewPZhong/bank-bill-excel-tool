@@ -24,6 +24,7 @@ const yazl = require('yazl');
 
 const {
   exportFilter,
+  exportMultiFilters,
   peekNormalizedHeaders,
   ToolboxSplitFieldNotFoundError
 } = require('../../../../src/backend/toolbox-xlsx-stream/split-export-filter');
@@ -188,6 +189,37 @@ test.describe('toolbox-xlsx-stream split-export-filter exportFilter', () => {
     const back = await readback(save);
     assert.deepEqual(back.headers, ['渠道', 'v'], '产物仍有表头');
     assert.deepEqual(back.dataRows, [], '产物无数据行');
+  });
+
+  test('多文件过滤一次生成交叉子集和零命中表头文件', async () => {
+    const fp = await writeMultiSheetXlsx({
+      sheets: [
+        {
+          name: 'S1', target: 'worksheets/sheet1.xml',
+          body: rowsToSheetBody([
+            ['渠道', '币种'],
+            ['A', 'USD'],
+            ['A', 'CNY'],
+            ['B', 'USD']
+          ])
+        }
+      ]
+    });
+    const byChannel = outPath();
+    const byCurrency = outPath();
+    const empty = outPath();
+    const result = await exportMultiFilters({
+      filePath: fp,
+      groups: [
+        { fileName: 'A.xlsx', field: '渠道', values: ['A'], savePath: byChannel },
+        { fileName: 'USD.xlsx', field: '币种', values: ['USD'], savePath: byCurrency },
+        { fileName: '空.xlsx', field: '渠道', values: ['C'], savePath: empty }
+      ]
+    });
+    assert.deepEqual(result.files.map((file) => file.matchedCount), [2, 2, 0]);
+    assert.deepEqual((await readback(byChannel)).dataRows, [['A', 'USD'], ['A', 'CNY']]);
+    assert.deepEqual((await readback(byCurrency)).dataRows, [['A', 'USD'], ['B', 'USD']]);
+    assert.deepEqual((await readback(empty)).dataRows, []);
   });
 
   test('字段不存在 → 抛 ToolboxSplitFieldNotFoundError（带 name + detailLines）', async () => {

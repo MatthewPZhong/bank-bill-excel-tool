@@ -49,6 +49,12 @@ const {
 const { toDate, sameDay, signedDayDiff } = require('./engine-date-utils');
 const { buildFeatureRegex } = require('./c1-extract-recon-id');
 const {
+  canonicalizeDecimal,
+  absoluteDecimal,
+  subtractCanonicalDecimals,
+  compareCanonicalDecimals
+} = require('../financial-decimal');
+const {
   REFUND_BACKFILL_FIELD_MAP: M,
   REFUND_BANK_COLUMNS,
   REFUND_RO_COLUMNS,
@@ -76,6 +82,8 @@ const HIT_TYPE_FUZZY = '模糊命中';
 
 // S4 命中详情固定文案（O2：✅ 2026-06-15 用户拍板；底层比对字段仍为 ro.valueDate，文案为业务展示叫法「退款提交日期」）。
 const S4_DETAIL_TEXT = '命中唯一值:退款提交日期+大账号+金额+币种';
+const BANK_PAYMENT_SERIAL_FUZZY_DETAIL_PREFIX = '银行对账单ChannelOrderNo/CustomerRef等于退款订单的银行打款流水号，金额差额=';
+const BANK_PAYMENT_SERIAL_FUZZY_AMOUNT_LIMIT = '10';
 
 // 银行发生额绝对值 = |（Credit Amount || 0） − （Debit Amount || 0）|（与场景2 口径一致）
 //   任一非数值按 0；两者皆非数值 → 返回 0（非 null）
@@ -606,6 +614,207 @@ function matchS4(bankRow, refundCands) {
   return hits;
 }
 
+function fuzzyLookupKey(account, currency, paymentSerial) {
+  return JSON.stringify([account, currency, paymentSerial]);
+}
+
+function calculateBankPaymentSerialAmountDifference(bankRow, refundRow) {
+  const credit = canonicalizeDecimal(bankRow && bankRow['Credit Amount'], {
+    emptyAsZero: true,
+    label: '银行对账单Credit Amount'
+  });
+  const debit = canonicalizeDecimal(bankRow && bankRow['Debit Amount'], {
+    emptyAsZero: true,
+    label: '银行对账单Debit Amount'
+  });
+  const bankAmount = absoluteDecimal(subtractCanonicalDecimals(credit, debit, {
+    leftLabel: '银行对账单Credit Amount',
+    rightLabel: '银行对账单Debit Amount',
+    label: '银行发生额'
+  }));
+  const refundAmount = canonicalizeDecimal(refundRow && refundRow[M.uniqueKey.roAmount], {
+    label: `退款订单${M.uniqueKey.roAmount}`
+  });
+  return absoluteDecimal(subtractCanonicalDecimals(bankAmount, refundAmount, {
+    leftLabel: '银行发生额绝对值',
+    rightLabel: `退款订单${M.uniqueKey.roAmount}`,
+    label: '模糊匹配金额差额'
+  }));
+}
+
+function matchBankPaymentSerialFuzzy(bankRow, refundRow) {
+  const bankAccount = normalizeCellValue(bankRow && bankRow[M.uniqueKey.bankAccount]);
+  const refundAccount = normalizeCellValue(refundRow && refundRow[M.uniqueKey.roAccount]);
+  if (bankAccount !== refundAccount) return null;
+
+  const bankCurrency = normalizeCellValue(bankRow && bankRow[M.uniqueKey.bankCurrency]);
+  const refundCurrency = normalizeCellValue(refundRow && refundRow[M.uniqueKey.roCurrency]);
+  if (bankCurrency !== refundCurrency) return null;
+
+  const paymentSerial = normalizeCellValue(refundRow && refundRow[M.s1.roKey]);
+  if (paymentSerial === '') return null;
+  const matchedBankSerialFields = M.s1.bankFields.filter((field) => (
+    normalizeCellValue(bankRow && bankRow[field]) === paymentSerial
+  ));
+  if (matchedBankSerialFields.length === 0) return null;
+
+  const amountDifference = calculateBankPaymentSerialAmountDifference(bankRow, refundRow);
+  if (compareCanonicalDecimals(amountDifference, BANK_PAYMENT_SERIAL_FUZZY_AMOUNT_LIMIT) >= 0) {
+    return null;
+  }
+
+  return {
+    refundRow,
+    amountDifference,
+    detail: `${BANK_PAYMENT_SERIAL_FUZZY_DETAIL_PREFIX}${amountDifference}`,
+    _matchedColumns: [
+      ...matchedBankSerialFields,
+      M.s1.roKey,
+      'Credit Amount',
+      'Debit Amount',
+      M.uniqueKey.roAmount,
+      M.uniqueKey.bankAccount,
+      M.uniqueKey.roAccount,
+      M.uniqueKey.bankCurrency,
+      M.uniqueKey.roCurrency
+    ]
+  };
+}
+
+function replaceUnmatchedOutcome(outputRow, resultType, info) {
+  outputRow['结果类型'] = resultType;
+  outputRow['报错/提示信息'] = (resultType === RESULT_ERROR ? '【报错】' : '【提示】') + info;
+}
+
+function runBankPaymentSerialFuzzyFallback(options) {
+  const {
+    ordinaryUnmatchedEntries,
+    refundPool,
+    usedRefundIdx,
+    blockedRefundIds,
+    refundIdOf,
+    usedBankRowId,
+    backfillRows,
+    unmatchedRows,
+    warn,
+    hitDepositBizIdSet
+  } = options;
+  if (!Array.isArray(ordinaryUnmatchedEntries) || ordinaryUnmatchedEntries.length === 0) return;
+
+  const availableRefunds = refundPool.filter((refundRow) => {
+    const refundId = refundIdOf(refundRow);
+    return !usedRefundIdx.has(refundId) && !(blockedRefundIds && blockedRefundIds.has(refundId));
+  });
+  if (availableRefunds.length === 0) return;
+
+  const refundsByLookupKey = new Map();
+  for (const refundRow of availableRefunds) {
+    const paymentSerial = normalizeCellValue(refundRow[M.s1.roKey]);
+    if (paymentSerial === '') continue;
+    const key = fuzzyLookupKey(
+      normalizeCellValue(refundRow[M.uniqueKey.roAccount]),
+      normalizeCellValue(refundRow[M.uniqueKey.roCurrency]),
+      paymentSerial
+    );
+    if (!refundsByLookupKey.has(key)) refundsByLookupKey.set(key, []);
+    refundsByLookupKey.get(key).push(refundRow);
+  }
+
+  const hitsByEntry = new Map();
+  const errorsByEntry = new Map();
+  const entriesByRefundId = new Map();
+  for (const entry of ordinaryUnmatchedEntries) {
+    const bankRow = entry.bankRow;
+    const account = normalizeCellValue(bankRow[M.uniqueKey.bankAccount]);
+    const currency = normalizeCellValue(bankRow[M.uniqueKey.bankCurrency]);
+    const relevantRefunds = new Map();
+    for (const bankField of M.s1.bankFields) {
+      const serial = normalizeCellValue(bankRow[bankField]);
+      if (serial === '') continue;
+      const candidates = refundsByLookupKey.get(fuzzyLookupKey(account, currency, serial)) || [];
+      for (const refundRow of candidates) relevantRefunds.set(refundIdOf(refundRow), refundRow);
+    }
+
+    const hits = [];
+    const errors = [];
+    for (const refundRow of relevantRefunds.values()) {
+      try {
+        const hit = matchBankPaymentSerialFuzzy(bankRow, refundRow);
+        if (!hit) continue;
+        hits.push(hit);
+        const refundId = refundIdOf(refundRow);
+        if (!entriesByRefundId.has(refundId)) entriesByRefundId.set(refundId, new Set());
+        entriesByRefundId.get(refundId).add(entry);
+      } catch (error) {
+        errors.push(error);
+        // 金额非法时，账号/币种/流水号三锚点已把该银行行与退款单建立为未决关系。
+        // 将其纳入反向关系图，避免另一条金额正常的银行行静默抢走同一退款单。
+        const refundId = refundIdOf(refundRow);
+        if (!entriesByRefundId.has(refundId)) entriesByRefundId.set(refundId, new Set());
+        entriesByRefundId.get(refundId).add(entry);
+      }
+    }
+    hitsByEntry.set(entry, hits);
+    errorsByEntry.set(entry, errors);
+  }
+
+  const resolvedOutputRows = new Set();
+  for (const entry of ordinaryUnmatchedEntries) {
+    const errors = errorsByEntry.get(entry) || [];
+    if (errors.length > 0) {
+      const message = `银行打款流水号模糊匹配金额非法：${errors[0].message || errors[0]}`;
+      replaceUnmatchedOutcome(entry.outputRow, RESULT_ERROR, message);
+      warn.push({
+        rowId: entry.bankRow._rowId,
+        code: 'refund-backfill-payment-serial-fuzzy-invalid-amount',
+        message
+      });
+      continue;
+    }
+
+    const hits = hitsByEntry.get(entry) || [];
+    if (hits.length === 0) continue;
+    if (hits.length > 1) {
+      const message = `银行打款流水号模糊匹配关联到 ${hits.length} 条退款订单，无法满足严格1:1，请人工介入`;
+      replaceUnmatchedOutcome(entry.outputRow, RESULT_ERROR, message);
+      warn.push({
+        rowId: entry.bankRow._rowId,
+        code: 'refund-backfill-payment-serial-fuzzy-multi-match',
+        message
+      });
+      continue;
+    }
+
+    const refundId = refundIdOf(hits[0].refundRow);
+    const reverseEntries = entriesByRefundId.get(refundId) || new Set();
+    if (reverseEntries.size > 1) {
+      const message = '银行打款流水号模糊匹配与其他银行行同时关联到同一退款订单，无法满足严格1:1，请人工介入';
+      replaceUnmatchedOutcome(entry.outputRow, RESULT_ERROR, message);
+      warn.push({
+        rowId: entry.bankRow._rowId,
+        code: 'refund-backfill-payment-serial-fuzzy-reverse-multi-match',
+        message
+      });
+      continue;
+    }
+
+    consumeAndBackfill(entry.bankRow, hits[0], HIT_TYPE_FUZZY, {
+      usedBankRowId,
+      usedRefundIdx,
+      refundIdOf,
+      backfillRows,
+      hitDepositBizIdSet
+    });
+    resolvedOutputRows.add(entry.outputRow);
+  }
+
+  if (resolvedOutputRows.size > 0) {
+    for (let i = unmatchedRows.length - 1; i >= 0; i -= 1) {
+      if (resolvedOutputRows.has(unmatchedRows[i])) unmatchedRows.splice(i, 1);
+    }
+  }
+}
+
 // ============================================================================
 // 结果分类（PRD §5.2 16 格 + §5.3 三类输出的统一收敛）
 //   对一条 bank 行在某策略下的命中集合 hits（已去消费）：
@@ -638,6 +847,14 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
   const isFundTypeChanged = typeof options.isFundTypeChanged === 'function'
     ? options.isFundTypeChanged
     : () => false;
+  const paymentSerialFuzzyEnabled = options.bankPaymentSerialFuzzyMatchEnabled === true;
+  const ordinaryUnmatchedEntries = paymentSerialFuzzyEnabled ? [] : null;
+  const blockedRefundIds = paymentSerialFuzzyEnabled ? new Set() : null;
+  const pushOrdinaryUnmatched = (bankRow) => {
+    const outputRow = buildUnmatchedBankRow(bankRow, RESULT_NOTICE, '未能关联到任何退款订单');
+    unmatchedRows.push(outputRow);
+    if (ordinaryUnmatchedEntries) ordinaryUnmatchedEntries.push({ bankRow, outputRow });
+  };
 
   // v3.0.10 需求2：网关前置过滤——建网关 reconid 集合（网关侧小写 reconciliationid；空键不入，与下方银行空键对称）。
   //   缺省退化：options.gwRows 未传（旧调用方/测试）→ safeGwRows=[] → 集合空 → 道3 永不命中 → 等同无前置过滤（与现状一致）。
@@ -720,7 +937,7 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     //   → 每条银行行产「未匹配-提示」（PRD §5.1.5 sheet2 放未匹配上的银行对账单数据），不再静默 continue
     if (refundGroup.length === 0) {
       for (const bankRow of bankGroup) {
-        unmatchedRows.push(buildUnmatchedBankRow(bankRow, RESULT_NOTICE, '未能关联到任何退款订单'));
+        pushOrdinaryUnmatched(bankRow);
       }
       continue;
     }
@@ -739,12 +956,29 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
       backfillRows,
       unmatchedRows,
       warn,
-      hitDepositBizIdSet // OPEN-7（T5b-1）：透传命中 BizId 收集集合（consumeAndBackfill 收集桥接 BizId）
+      hitDepositBizIdSet, // OPEN-7（T5b-1）：透传命中 BizId 收集集合（consumeAndBackfill 收集桥接 BizId）
+      blockedRefundIds,
+      pushOrdinaryUnmatched
     });
   }
 
   // 4) v3.0.10 需求3.2：删除原 refund-only 组收尾循环——某唯一值下有 SUBMITTED refund 但无银行 Ach Return 行时，
   //   不再为这些 refund 产「未匹配-提示」notice 行（完全静默，已确认）。审计不变量收窄为「银行侧全覆盖」（见上方注释）。
+
+  if (paymentSerialFuzzyEnabled) {
+    runBankPaymentSerialFuzzyFallback({
+      ordinaryUnmatchedEntries,
+      refundPool,
+      usedRefundIdx,
+      blockedRefundIds,
+      refundIdOf,
+      usedBankRowId,
+      backfillRows,
+      unmatchedRows,
+      warn,
+      hitDepositBizIdSet
+    });
+  }
 
   // OPEN-7（T5b-1）：去重数组冒泡给 orchestrator → T5b-2 在 export 阶段查标记/注入提醒。
   return {
@@ -762,7 +996,9 @@ function runStrategiesForGroup(ctx) {
     bankGroup, refundGroup, depositRows, depIndex,
     usedBankRowId, usedRefundIdx, refundIdOf,
     backfillRows, unmatchedRows, warn,
-    hitDepositBizIdSet // OPEN-7（T5b-1）：命中 BizId 收集集合，透传给 consumeAndBackfill
+    hitDepositBizIdSet, // OPEN-7（T5b-1）：命中 BizId 收集集合，透传给 consumeAndBackfill
+    blockedRefundIds,
+    pushOrdinaryUnmatched
   } = ctx;
 
   // bank 行按 BillDate 升序（早→晚；无法解析日期排最后，保持原序稳定）。
@@ -862,7 +1098,10 @@ function runStrategiesForGroup(ctx) {
     }
 
     // 3) 锁定本策略待锁定 refund（Q15：退出后续策略 + S4）。
-    for (const [rid] of toLockRefunds) lockedRefundIdx.add(rid);
+    for (const [rid] of toLockRefunds) {
+      lockedRefundIdx.add(rid);
+      if (blockedRefundIds) blockedRefundIds.add(rid);
+    }
   }
 
   // —— S4：金额币种日期兜底（SPEC §7.3 + R4：冻结快照 + 单向窗判据，去顺序依赖）——
@@ -886,6 +1125,9 @@ function runStrategiesForGroup(ctx) {
     //   - 有窗内候选但被抢光 → 提示（多出 bank 抢不到，非脏数据）
     const s4win = classifyS4Window(bankRow, refundsForS4);
     if (refundsForS4.length > 0 && s4win.hasComparablePair && !s4win.hasInWindowCandidate) {
+      if (blockedRefundIds) {
+        for (const refundRow of refundsForS4) blockedRefundIds.add(refundIdOf(refundRow));
+      }
       // 真·时序矛盾/超容差：有可比较日期对但无窗内候选（含 bank 早于全部退款的负 diff）→ 报错人工介入。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_ERROR,
@@ -897,6 +1139,9 @@ function runStrategiesForGroup(ctx) {
         message: `银行行（${bankRow._rowId}）S4 日期早于退款提交日期或超 ${M.s4.toleranceDays} 天容差，报错人工介入`
       });
     } else if (refundsForS4.length > 0 && !s4win.hasComparablePair) {
+      if (blockedRefundIds) {
+        for (const refundRow of refundsForS4) blockedRefundIds.add(refundIdOf(refundRow));
+      }
       // Fix#5：全无可比较日期对（bank/ro 日期均不可解析）→ 提示而非报错（非脏数据时序矛盾，避免误导文案）。
       unmatchedRows.push(buildUnmatchedBankRow(
         bankRow, RESULT_NOTICE,
@@ -904,9 +1149,7 @@ function runStrategiesForGroup(ctx) {
       ));
     } else {
       // 被抢光（有窗内候选但已被其他 bank 消费）/ 冻结全集空 → 提示。
-      unmatchedRows.push(buildUnmatchedBankRow(
-        bankRow, RESULT_NOTICE, '未能关联到任何退款订单'
-      ));
+      pushOrdinaryUnmatched(bankRow);
     }
   }
 
@@ -1003,6 +1246,9 @@ module.exports = {
   extractFirstCapture,
   yymmddToDateStr,
   matchS4,
+  calculateBankPaymentSerialAmountDifference,
+  matchBankPaymentSerialFuzzy,
+  runBankPaymentSerialFuzzyFallback,
   // Fix#4/#5（codex 复审）：DTD DMY 明确解析 + S4 窗三态判定（单测精确覆盖）
   parseDtdDateToken,
   classifyS4Window,
@@ -1019,5 +1265,7 @@ module.exports = {
   // O1/O2：命中类型常量 + S4 固定详情文案（单测精确断言）
   HIT_TYPE_PRECISE,
   HIT_TYPE_FUZZY,
-  S4_DETAIL_TEXT
+  S4_DETAIL_TEXT,
+  BANK_PAYMENT_SERIAL_FUZZY_DETAIL_PREFIX,
+  BANK_PAYMENT_SERIAL_FUZZY_AMOUNT_LIMIT
 };
