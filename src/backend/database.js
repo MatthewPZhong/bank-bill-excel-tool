@@ -635,6 +635,13 @@ class AppDatabase {
     this.db.exec('ANALYZE;');
   }
 
+  close() {
+    const db = this.db;
+    if (!db) return;
+    db.close();
+    if (this.db === db) this.db = null;
+  }
+
   hasColumn(tableName, columnName) {
     return hasColumn(this.db, tableName, columnName);
   }

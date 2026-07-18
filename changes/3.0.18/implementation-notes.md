@@ -2,7 +2,7 @@
 
 > status: implementation complete / external release validation pending
 > owner: Dev / 发布负责人
-> updated: 2026-07-16
+> updated: 2026-07-17
 
 ## Baseline
 
@@ -106,6 +106,7 @@
 - PR #91 UI 自审补齐 downloaded 设置页的显式“稍后”动作和自动更新开关无障碍名称；手动检查进入下载后失败时保留“下载失败”语义，不再降级成笼统的“检查失败”。
 - PR #91 状态机自审补齐“自动更新关闭时手动下载、随后开启开关”的并发边界：保留 downloading 状态并复用当前操作，不重复检查或误报 busy。
 - `src/main.js` 的源码抽取测试因新增 registry 依赖需注入 stub；已只调整测试 harness，不改变既有银行对账 operation lock 语义。
+- 首次正式 `v3.0.18` tag workflow 在 Windows `release-check` 阶段暴露 12 组 SQLite 单测清理失败：测试已调用 `AppDatabase.close()`，但门面缺少该生命周期接口，macOS 允许删除已打开文件而掩盖问题，Windows 则以 `EBUSY` 阻断发布。新增幂等 `close()` 并清空已关闭句柄，不改变 schema 或业务读写契约；失败 workflow 未进入构建和 Release 创建阶段，不存在半发布资产。
 - Dev 若改变 provider、开关默认值、检查频率、稍后语义、portable 能力、业务忙范围、签名策略、发布资产或 IPC 行为，必须先更新 spec/test 并由 PM 复核，不能仅在代码中静默偏离。
 
 ## Evidence
@@ -129,6 +130,8 @@
 | 2026-07-16 | 重要变量 | `npm run scan:vars` 完成；`npm run check:vars -- --include-minor` 按约定以退出码 2 提醒命中 | 4 个 Important-skeleton、4 个 Runtime-state、2 个 Minor 已逐项复核；无 Critical/Risk-sensitive 命中 |
 | 2026-07-16 | Windows 构建 | Windows x64 交叉构建产出 NSIS、portable、latest.yml、blockmap；`stage:update-artifacts` 后 metadata path/SHA-512 与发布 Setup 完全匹配，`app-update.yml` 为 GitHub latest | 构建与匿名 updater 资产契约成立 |
 | 2026-07-16 | 发布交接 | `docs/WINDOWS_RELEASE_RUNBOOK.md` | 远端 environment/branch/tag 保护、不可变资产与 Windows canary 门禁有明确执行清单 |
+| 2026-07-17 | Windows CI | 首次 `v3.0.18` Release workflow run `29622101428` 在 unit teardown 阶段失败：115 个失败均源于 12 个测试文件删除未关闭 SQLite 时的 `EBUSY`；build/release steps 均未执行 | 失败属于跨平台测试资源生命周期缺口，不是业务断言失败；必须先修复并重新走 PR、tag 和发布门禁 |
+| 2026-07-17 | 发布修复回归 | 受影响的 12 组测试加生命周期测试共 137/137 通过；`npm run release-check` 为 unit 3674/3674、integration 41 个脚本及 1939/1939 断言全绿；`scan:vars` 完成且 `check:vars -- --include-minor` 未命中重要变量 | `AppDatabase.close()` 修复在本地无业务回归，待 PR Windows CI 证明 `EBUSY` 已消除 |
 
 以上为本地和交叉构建证据。真实 Windows 安装/重启与远端 GitHub 保护仍见 Remaining Unknowns。
 
