@@ -122,7 +122,7 @@ NSIS 触发矩阵：
 - `allowPrerelease=false`、`allowDowngrade=false`；只有已发布、非 draft、非 prerelease 且 SemVer 严格高于当前版本的 Release 才是更新。
 - 不在运行时调用 `setFeedURL`，不在应用中打包 `GH_TOKEN`、PAT 或其他发布凭据；Feed 由 electron-builder 生成的 `app-update.yml` 提供。
 - 目标仓库必须保持公开。若改为 private，客户端匿名更新契约失效，必须停止发布并重新评审分发与凭据方案。
-- 稳定 Release 必须包含并相互匹配：`latest.yml`、NSIS Setup `.exe`、对应 `.blockmap`；portable `.exe` 作为手动下载资产同时上传。构建目录保留中文品牌产物；发布前按 `latest.yml.path` 复制一份 ASCII 安全名的 Setup 及 blockmap，Release 只上传该元数据实际引用的 Setup，避免 GitHub 资产名与 updater URL 不一致。
+- 稳定 Release 必须包含并相互匹配：`latest.yml`、NSIS Setup `.exe`、对应 `.blockmap`；portable `.exe` 作为手动下载资产同时上传。构建目录保留中文品牌产物；发布前按 `latest.yml.path` 复制一份 ASCII 安全名的 Setup 及 blockmap，并将 portable 复制为 `bank-bill-excel-tool-portable-<version>.exe`。Release 只上传这些 ASCII staging 产物，避免 GitHub 对非字母数字资产名自动改名后导致验证失败或下载名不可读。
 - 所有构建步骤（包括 release workflow 的构建）都显式使用 `--publish never`。受控 workflow 先在尚未创建 Release 的阶段完成测试、构建、资产文件名/版本/hash 清单校验；全部通过后，再由独立 release step 自动创建 published、non-draft、non-prerelease Release 并上传同一批已校验资产。流程不采用草稿暂存，也没有人工发布步骤。
 - Tag 采用 `v<semver>`，Release title 可同名；不可覆盖同版本资产来“热修”，修复必须发布更高 SemVer。
 - 验收标准：见 AC-08、AC-16、AC-18。
@@ -276,7 +276,7 @@ Preload 固定暴露 `window.desktopApi.appUpdate` 的以下能力：
 ## 10. 待澄清问题
 
 - 无阻塞问题。用户已确认核心产品契约。
-- 发布前待验证而非需求待定：v3.0.18 发布前用 adapter 加隔离公开 GitHub 测试仓库验证状态机与真实安装链；生产 feed 只有发布后才对匿名 stable 客户端可见，因此首个后继版本须在发布后立即 canary，未通过不得公告或继续放量。
+- 发布后仍待人工补证而非需求待定：v3.0.18 Release 已创建，但 Windows 10/11 手动覆盖安装、SmartScreen、取消下载和数据保留仍须在公告或推广前验证；首个后继版本须在发布后立即从生产 feed canary，未通过不得公告或继续放量。
 - 仓库若从 public 改为 private、Release tag 规范变化或启用代码签名，属于契约变化，必须先回到 spec 评审。
 
 ## 11. 变更记录
@@ -285,3 +285,4 @@ Preload 固定暴露 `window.desktopApi.appUpdate` 的以下能力：
 |---|---|
 | 2026-07-16 | 固化 GitHub stable、NSIS/portable 分流、默认关闭、启动/开关/手动触发、无签名、业务忙重启门禁和 v3.0.18 引导版本契约。 |
 | 2026-07-16 | 按最终计划改为 NSIS `autoDownload=false` + 显式可取消下载、关闭后 stale fail-closed；portable 纯 Releases 外链且不加载 updater；发布 workflow 直接创建 non-draft Release。 |
+| 2026-07-17 | 根据真实 GitHub Release 证据，portable 发布前增加 ASCII staging 名并统一上传后复核契约；v3.0.18 已发布，保留 Windows 实机与首个后继 stable canary 门禁。 |

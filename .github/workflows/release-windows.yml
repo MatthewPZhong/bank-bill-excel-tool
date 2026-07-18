@@ -68,7 +68,7 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $setup = @(Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe")
-          $portable = @(Get-ChildItem dist -Filter '*-portable.exe')
+          $portable = @(Get-ChildItem dist -Filter "bank-bill-excel-tool-portable-$version.exe")
           $metadata = @(Get-ChildItem dist -Filter 'latest.yml')
           if ($setup.Count -ne 1) { throw "Expected one setup executable, found $($setup.Count)" }
           if ($portable.Count -ne 1) { throw "Expected one portable executable, found $($portable.Count)" }
@@ -100,7 +100,7 @@ jobs:
           $assets = @(
             (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe").FullName
             (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe.blockmap").FullName
-            (Get-ChildItem dist -Filter '*-portable.exe').FullName
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-portable-$version.exe").FullName
             (Get-ChildItem dist -Filter 'latest.yml').FullName
           )
           gh release create $env:GITHUB_REF_NAME $assets --verify-tag --title $env:GITHUB_REF_NAME --generate-notes --latest
@@ -116,7 +116,7 @@ jobs:
           $assetNames = @($release.assets | ForEach-Object { $_.name })
           $expectedNames = @(
             (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe").Name
-            (Get-ChildItem dist -Filter '*-portable.exe').Name
+            (Get-ChildItem dist -Filter "bank-bill-excel-tool-portable-$version.exe").Name
             (Get-ChildItem dist -Filter 'latest.yml').Name
             (Get-ChildItem dist -Filter "bank-bill-excel-tool-setup-$version.exe.blockmap").Name
           )

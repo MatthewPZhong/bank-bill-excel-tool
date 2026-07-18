@@ -23,9 +23,13 @@ function stageUpdateArtifacts(outputDirectory) {
   const outputDir = path.resolve(outputDirectory || 'dist');
   const metadataPath = path.join(outputDir, 'latest.yml');
   const metadata = fs.readFileSync(metadataPath, 'utf8');
+  const releaseVersion = readYamlScalar(metadata, 'version');
   const releaseSetupName = readYamlScalar(metadata, 'path');
   const expectedSha512 = readYamlScalar(metadata, 'sha512');
 
+  if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(releaseVersion)) {
+    throw new Error(`latest.yml version 非法：${releaseVersion}`);
+  }
   if (path.basename(releaseSetupName) !== releaseSetupName
     || !/^[A-Za-z0-9._-]+\.exe$/.test(releaseSetupName)) {
     throw new Error(`latest.yml path 非法：${releaseSetupName}`);
@@ -48,8 +52,18 @@ function stageUpdateArtifacts(outputDirectory) {
 
   const releaseSetupPath = path.join(outputDir, releaseSetupName);
   const releaseBlockmapPath = `${releaseSetupPath}.blockmap`;
+  const releasePortableName = `bank-bill-excel-tool-portable-${releaseVersion}.exe`;
+  const sourcePortableNames = fs.readdirSync(outputDir)
+    .filter((name) => name.endsWith('-portable.exe') && name !== releasePortableName);
+  if (sourcePortableNames.length !== 1) {
+    throw new Error(`应有且仅有一个原始 portable，实际 ${sourcePortableNames.length} 个`);
+  }
+  const sourcePortablePath = path.join(outputDir, sourcePortableNames[0]);
+  const releasePortablePath = path.join(outputDir, releasePortableName);
+
   fs.copyFileSync(sourceSetupPath, releaseSetupPath);
   fs.copyFileSync(sourceBlockmapPath, releaseBlockmapPath);
+  fs.copyFileSync(sourcePortablePath, releasePortablePath);
 
   return {
     metadataPath,
@@ -57,7 +71,10 @@ function stageUpdateArtifacts(outputDirectory) {
     sourceBlockmapPath,
     releaseSetupPath,
     releaseBlockmapPath,
-    releaseSetupName
+    releaseSetupName,
+    sourcePortablePath,
+    releasePortablePath,
+    releasePortableName
   };
 }
 

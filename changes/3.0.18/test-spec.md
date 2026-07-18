@@ -2,7 +2,7 @@
 
 > status: apply
 > created: 2026-07-16
-> updated: 2026-07-16
+> updated: 2026-07-17
 > source: `changes/3.0.18/spec.md` AC-01～AC-20
 
 ## 1. 测试目标
@@ -67,7 +67,7 @@
 | P0-20 NSIS 网络/feed/资产错误 | 离线、超时、403/限流、404、坏 YAML、缺 Setup/blockmap；打包 NSIS 缺 `app-update.yml` | 各执行一次启动检查和手动检查 | 业务可继续；启动失败回到 idle 且只写日志，手动显示脱敏中文错误；配置缺失为 release-blocking error；CancellationError 不走本场景；无 token/本地路径泄露；对应 AC-15、AC-18 |
 | P0-21 UI 契约 | 打开主界面和设置弹窗 | 各 update state | 按钮顺序 `🎨 📕 ⚙️ 🔄 🧰`；版本、包型、开关、状态、检查按钮和动作正确；重复开关弹窗无监听泄漏；对应 AC-01、AC-02 |
 | P0-22 构建配置 | 检查最终 `package.json` 与 unpacked resources | Windows build | 无 publisherName，`verifyUpdateCodeSignature=false`，provider/latest/release 正确，无 token；electron-updater 为 runtime dependency；普通构建不发布；对应 AC-11、AC-18 |
-| P0-23 直接 non-draft 发布 | 运行 release workflow；分别注入前置校验失败和成功 | 尚无同 tag Release | build 阶段固定 `--publish never`；失败时 Release 创建为 0；成功时独立 release step 自动创建一次 published/non-draft/non-prerelease Release 并上传已校验资产；不存在草稿或人工发布步骤；对应 AC-18 |
+| P0-23 直接 non-draft 发布 | 运行 release workflow；分别注入前置校验失败和成功 | 尚无同 tag Release | build 阶段固定 `--publish never`；失败时 Release 创建为 0；成功时独立 release step 自动创建一次 published/non-draft/non-prerelease Release，并上传 ASCII staging 的 Setup、blockmap、portable 与 metadata；GitHub 列出的 portable 名称必须精确为 `bank-bill-excel-tool-portable-<version>.exe`；不存在草稿或人工发布步骤；对应 AC-18 |
 | P0-24 引导版本 | 在仅装 v3.0.17 的 Windows VM 安装 v3.0.18 | 用户手动下载安装 | 覆盖安装成功，原 SQLite/模板/导出数据可用；不宣称 v3.0.17 可在线升级；对应 AC-16 |
 | P0-25 两阶段真实闭环 | 测试仓库 `3.0.18→3.0.19`；随后生产仓库 v3.0.18→首个后继 stable | 隔离公开测试 repo 已发布；生产后继 stable 已发布但未公告 | 发布前测试仓库证明匿名检查/下载/安装链；生产发布后立即 canary 证明相同闭环、版本更新和用户数据保留，失败则停止公告/放量；对应 AC-16 |
 | P0-26 退出回归 | 普通退出、业务退出、更新退出各一次 | worker/pending cleanup 可观测 | usage flush/worker shutdown/pending cleanup 每次至多一次，无递归退出、挂死或遗留锁；对应 AC-20 |
