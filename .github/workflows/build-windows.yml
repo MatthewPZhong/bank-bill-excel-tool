@@ -77,5 +77,5 @@ jobs:
           name: windows-portable-exe
           retention-days: 1
           path: |
-            dist/*-portable.exe
+            dist/bank-bill-excel-tool-portable-*.exe
           if-no-files-found: error

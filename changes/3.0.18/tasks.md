@@ -29,7 +29,7 @@
   - 在 `build.publish[0]` 配置 GitHub `provider/owner/repo/channel=latest/publishAutoUpdate=true/releaseType=release`；
   - 移除 `build.win.signtoolOptions.publisherName`，若对象为空则移除空对象；
   - 设置 `build.win.verifyUpdateCodeSignature=false`；
-  - 保持现有 NSIS/portable artifactName 兼容；包括 release workflow 在内的 build 步骤全部 `--publish never`；Release 不存在时先完成测试、构建、版本/文件名/hash 校验，再由独立 step 自动创建 published、non-draft、non-prerelease Release 并上传同一批资产；不设置人工发布 gate。
+  - 保持现有 NSIS/portable artifactName 兼容；发布前额外 staging ASCII 安全名的 Setup、blockmap 和 portable；包括 release workflow 在内的 build 步骤全部 `--publish never`；Release 不存在时先完成测试、构建、版本/文件名/hash 校验，再由独立 step 自动创建 published、non-draft、non-prerelease Release 并上传同一批资产；不设置人工发布 gate。
 - 验证：P0-22、P0-23；unpacked `app-update.yml`/资源配置正确且包内无 token；不调用运行时 `setFeedURL`；前置校验失败时 Release 创建调用为 0，成功流程无 draft/人工发布步骤。
 - 依赖：Task 1。
 - 状态：done（代码、workflow、真实 Windows x64 交叉构建和资产校验已完成）
@@ -126,4 +126,4 @@
 - 验证：P0-23～P0-27；确认无 draft/人工发布阶段；任何真实升级、业务忙保护或数据保留失败均阻止公告/继续放量。
 - 依赖：Task 10，且首个后继 stable 资产已构建并通过前置校验。
 - 已完成交接：`docs/WINDOWS_RELEASE_RUNBOOK.md` 已记录远端保护、发布前后门禁与不可替换资产规则。
-- 状态：todo
+- 状态：partial（v3.0.18 Windows workflow 已完成测试、构建、资产校验和 Release 创建；线上 Setup/latest.yml 与 portable 内容已回读校验。Windows 10/11 手动覆盖安装、取消下载实机验证及首个后继 stable canary 仍待发布负责人完成）

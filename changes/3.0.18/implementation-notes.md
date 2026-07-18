@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.18 Windows 在线升级
 
-> status: implementation complete / external release validation pending
+> status: v3.0.18 released / Windows manual validation and successor canary pending
 > owner: Dev / 发布负责人
 > updated: 2026-07-17
 
@@ -10,7 +10,7 @@
 - 规格取证基线：`4375f29`，`package.json.version=3.0.17`。
 - 范围：`changes/3.0.18/spec.md`；测试契约：`changes/3.0.18/test-spec.md`。
 - v3.0.18 定位：用户手动安装的在线升级引导版本；在线路径首个真实目标是高于 `3.0.18` 的后继稳定 Release。
-- 当前实现版本：`package.json.version=3.0.18`；本任务未创建 tag、GitHub Release、提交或 PR。
+- 当前发布版本：`package.json.version=3.0.18`；tag 与 GitHub Release 已创建，线上资产回读结果见 Evidence；真实 Windows 安装链仍列在 Remaining Unknowns。
 
 ## Task Brief
 
@@ -107,6 +107,7 @@
 - PR #91 状态机自审补齐“自动更新关闭时手动下载、随后开启开关”的并发边界：保留 downloading 状态并复用当前操作，不重复检查或误报 busy。
 - `src/main.js` 的源码抽取测试因新增 registry 依赖需注入 stub；已只调整测试 harness，不改变既有银行对账 operation lock 语义。
 - 首次正式 `v3.0.18` tag workflow 在 Windows `release-check` 阶段暴露 12 组 SQLite 单测清理失败：测试已调用 `AppDatabase.close()`，但门面缺少该生命周期接口，macOS 允许删除已打开文件而掩盖问题，Windows 则以 `EBUSY` 阻断发布。新增幂等 `close()` 并清空已关闭句柄，不改变 schema 或业务读写契约；失败 workflow 未进入构建和 Release 创建阶段，不存在半发布资产。
+- 修复后的 workflow 完成测试、构建、应用检查、staging、哈希校验和 Release 创建后，最终复核因 GitHub 自动把中文 portable 资产名规范化为 `-3.0.18-portable.exe` 而误报缺失。线上四个二进制/元数据资产实际完整，portable PE 头与 GitHub SHA-256 digest 一致，Setup SHA-512 与线上 `latest.yml` 一致。按不可变发布原则不修改 v3.0.18 已发布资产；后续发布预先 staging `bank-bill-excel-tool-portable-<version>.exe`，上传和复核统一使用该 ASCII 名称。
 - Dev 若改变 provider、开关默认值、检查频率、稍后语义、portable 能力、业务忙范围、签名策略、发布资产或 IPC 行为，必须先更新 spec/test 并由 PM 复核，不能仅在代码中静默偏离。
 
 ## Evidence
@@ -132,18 +133,21 @@
 | 2026-07-16 | 发布交接 | `docs/WINDOWS_RELEASE_RUNBOOK.md` | 远端 environment/branch/tag 保护、不可变资产与 Windows canary 门禁有明确执行清单 |
 | 2026-07-17 | Windows CI | 首次 `v3.0.18` Release workflow run `29622101428` 在 unit teardown 阶段失败：115 个失败均源于 12 个测试文件删除未关闭 SQLite 时的 `EBUSY`；build/release steps 均未执行 | 失败属于跨平台测试资源生命周期缺口，不是业务断言失败；必须先修复并重新走 PR、tag 和发布门禁 |
 | 2026-07-17 | 发布修复回归 | 受影响的 12 组测试加生命周期测试共 137/137 通过；`npm run release-check` 为 unit 3674/3674、integration 41 个脚本及 1939/1939 断言全绿；`scan:vars` 完成且 `check:vars -- --include-minor` 未命中重要变量 | `AppDatabase.close()` 修复在本地无业务回归，待 PR Windows CI 证明 `EBUSY` 已消除 |
+| 2026-07-17 | v3.0.18 正式发布 | workflow run `29622809519` 的 Windows `release-check`、构建、应用检查、staging、更新资产校验和 Release 创建均成功；Release `https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.18` 为 published/non-draft/non-prerelease，四个资产均可匿名读取 | Windows 文件锁修复生效；在线更新所需 Setup、blockmap、latest.yml 完整，portable 仅发生 GitHub 官方文件名规范化 |
+| 2026-07-17 | 线上资产回读 | 无认证请求 `latest.yml` 返回 HTTP 200；下载线上 metadata 与 Setup 后计算 SHA-512 完全一致；portable 下载后为 99,221,741 bytes、`MZ` PE 头、SHA-256 `ad24c753cc47248bad5c946d53a43646de65c78e37eebcf172a974a99dbb41a5`，与 GitHub asset digest 一致；GitHub [Release assets 官方文档](https://docs.github.com/en/rest/releases/assets)说明会重命名含特殊/非字母数字字符的资产名 | v3.0.18 Release 可由公开客户端匿名读取且二进制内容无缺失；最终 workflow 红灯是名称复核假阴性，后续改用 ASCII staging 名 |
+| 2026-07-17 | 发布命名修复回归 | `npm run release-check`：unit 3675/3675、integration 41 个脚本及 1939/1939 断言全绿；`scan:vars` 完成，`check:vars -- --include-minor` 因无 `src/` 改动跳过 | ASCII portable staging、上传和发布后复核契约不影响应用运行时或既有资金/Excel 行为 |
 
 以上为本地和交叉构建证据。真实 Windows 安装/重启与远端 GitHub 保护仍见 Remaining Unknowns。
 
 ## Remaining Unknowns
 
-- Windows 10/11 无签名 NSIS 的真实下载、SmartScreen、v3.0.17 覆盖安装、`quitAndInstall` 重启和用户数据保留尚未执行；Owner：发布负责人；截止：v3.0.18 发布前。
-- Windows 实包中 `CancellationToken.cancel()` 对 full/differential automatic 下载的中断、缓存处置和迟到事件顺序仍需实机复核；Owner：发布负责人；截止：v3.0.18 发布前。
-- GitHub CLI 当前认证失效，无法在本次任务中实际创建/核对 `production-release` environment、`main` 保护和 `v*` tag 保护。workflow 已引用该环境；Owner：仓库管理员；截止：创建发布 tag 前。
+- Windows 10/11 无签名 NSIS 的真实下载、SmartScreen、v3.0.17 覆盖安装、`quitAndInstall` 重启和用户数据保留尚未执行；v3.0.18 已发布，公告或推广前仍须补证；Owner：发布负责人。
+- Windows 实包中 `CancellationToken.cancel()` 对 full/differential automatic 下载的中断、缓存处置和迟到事件顺序仍需实机复核；Owner：发布负责人；截止：首个后继 stable 公告前。
+- `production-release` environment 已允许本次受控 tag workflow 执行；`main` 与 `v*` 的服务端保护规则细节仍未独立核验；Owner：仓库管理员；截止：下一个发布 tag 前。
 - 隔离公开测试仓库的真实 `3.0.18 → 3.0.19` 链和生产 `3.0.18 → 后继 stable` canary 尚未执行；Owner：首个后继版本发布负责人；截止：对应 Release 公告前。
 
 ## Handoff
 
-- Dev 实施入口：`changes/3.0.18/tasks.md`，按 Task 2 的风险测试纵切开始，不从 UI 先行猜状态。
-- Dev 每完成一个行为块，回填对应 P0/P1 证据与本文件 Evidence；发现行为偏差先暂停并反向同步 spec。
-- PM 在实现完成后复核 AC-01～AC-20、Remaining Unknowns 和用户可见 Release notes；发布负责人执行 Windows 与首个后继版本门禁。
+- v3.0.18 Release 和线上资产已完成自动与回读校验，不得替换同版本资产。
+- 发布负责人补齐 Remaining Unknowns 中的 Windows 安装、取消下载和数据保留证据。
+- 首个后继 stable 创建后、公告前，必须由 v3.0.18 NSIS 从生产 `latest` 完成 canary；失败则停止公告并发布更高补丁版本。

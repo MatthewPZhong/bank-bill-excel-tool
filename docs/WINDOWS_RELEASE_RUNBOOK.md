@@ -37,6 +37,11 @@ workflow 会拒绝以下情况：tag 不等于 `v${package.json.version}`、tag 
 `main`、同名 Release 已存在、测试/构建失败、`latest.yml` 与 Setup SHA-512 不匹配，
 或缺少 Setup、portable、blockmap、metadata 任一资产。
 
+发布前会保留本地中文品牌构建产物，并额外 staging ASCII 文件名：Setup 使用
+`latest.yml.path`，portable 使用 `bank-bill-excel-tool-portable-<version>.exe`。Release
+只能上传 staging 产物；GitHub 会自动改写含特殊或非字母数字字符的资产名，不能直接
+用中文构建文件名作为发布后精确校验契约。
+
 workflow 直接创建 published、non-draft、non-prerelease Release。不要手动替换或覆盖
 已发布资产；故障必须发布更高补丁版本。
 
@@ -47,9 +52,10 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 3. canary 通过后再公告；失败时停止公告，不删除或替换同版本资产，修复后发布更高版本。
 4. 保存 workflow URL、资产名和哈希、升级前后版本截图、数据保留证据和复核人。
 
-## v3.0.18 当前状态
+## v3.0.18 发布记录
 
-- workflow、应用状态机、设置 UI、发布资产 staging 和 Windows x64 构建契约已实现。
-- 本迭代不创建 `v3.0.18` tag，也不发布 GitHub Release。
-- GitHub Environment、branch/tag protection 仍需仓库管理员在有效认证会话中配置。
+- Release：`https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.18`，tag 指向 `854460d1fc7da96c512ec13c9b9088971562f739`。
+- Windows workflow `29622809519` 已通过 release-check、构建、应用检查、staging、哈希校验和 Release 创建；最后复核因 GitHub 将中文 portable 名规范化为 `-3.0.18-portable.exe` 而误报缺失。
+- 线上 `latest.yml` 与 Setup SHA-512 已回读确认一致；portable 的大小、PE 头和 SHA-256 与 GitHub asset digest 一致。按不可变发布规则不修改 v3.0.18 已发布资产。
+- 后续版本必须使用 ASCII portable staging 名，避免重复出现发布后名称漂移。
 - 真实 Windows `3.0.18 -> 后继 stable` 必须等后继版本资产存在后执行。
