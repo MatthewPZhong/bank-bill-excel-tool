@@ -32,4 +32,4 @@
 - bump `package.json` / lockfile 至 3.0.19。
 - 同步三份版本文档、重要变量清单与统计报告。
 - 执行 release-check、check-vars、startup measure及最终 diff review。
-- 状态：done（自动化门禁全部通过；Excel/WPS 人工打开检查待业务验收）
+- 状态：done（自动化门禁、PR #94 合并与归档完成；Excel/WPS 人工打开检查待业务验收）

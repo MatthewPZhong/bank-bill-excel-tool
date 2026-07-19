@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.19 工具箱多 Sheet 合并
 
-> status: implemented
+> status: merged
 > owner: Dev
 > updated: 2026-07-19
 
@@ -48,6 +48,8 @@
 - `npm run scan:vars`：196 个 JS 文件 / 2200 个顶层声明；`check:vars -- --include-minor` 命中项已逐项复核，Critical/Risk-sensitive 要求的 smoke 已通过。
 - `npm run startup:measure`：进程总耗时中位数 767.835ms，ready-to-show 中位数 174.316ms。
 - PR #94 self-review 第一轮修复陈旧路径注释，并补 OLE2 XLS 伪装 CSV 的显式路由用例；复核后 P0-P4 Finding 为 0。
+- GitHub Actions `smoke-test` 通过；PR #94 head `a850e40` 以 merge commit `0822ad4` 合入 `main`，远程开发分支删除。
+- 归档：`docs/prs/PR94-v3.0.19.md`、`docs/iterations/v3.0.19/PRD-v3.0.19.md`。
 
 ## Remaining Unknowns
 

@@ -1,6 +1,6 @@
 # Spec — v3.0.19 工具箱多 Sheet 合并
 
-> status: implemented
+> status: merged（PR #94 已合入 `main`；Excel/WPS 人工打开检查仍待业务验收）
 > owner: PM / Dev
 > created: 2026-07-19
 > updated: 2026-07-19
@@ -55,7 +55,7 @@
 - 不改变工具箱拆分表格及其“后续 sheet 可省略重复表头”的续页规则。
 - 不支持按相似列名对齐、重排列、来源列、去重、筛选、公式重算或源样式复制。
 - 不修改任何对账、金额、币种、数据库或在线升级业务。
-- 本 change 不包含 PR、合并、tag 或 GitHub Release。
+- 本迭代不创建 tag 或 GitHub Release。
 
 ## 4. 验收标准
 
@@ -73,3 +73,11 @@
 - AC-12：现有多 sheet 拆分续页语义和大文件 worker 路径不回归。
 - AC-13：成功、取消与失败路径均无工具箱临时目录残留。
 - AC-14：IPC、默认文件名、输出格式、状态反馈和启动性能不回归。
+
+## 5. 实施与归档
+
+- 2026-07-19：本地 `release-check` 全绿，unit 3694/3694、integration 1955/1955，GitHub Actions `smoke-test` 通过。
+- 2026-07-19：PR #94 在第二轮 self-review 确认 P0-P4 Finding 为 0 后，以 merge commit `0822ad4` 合入 `main`，远程开发分支删除。
+- 归档见 `docs/prs/PR94-v3.0.19.md` 与 `docs/iterations/v3.0.19/PRD-v3.0.19.md`。
+- 自动化 Excel 回读已通过；Excel/WPS 真实客户端人工打开仍为业务验收项，不阻塞代码归档。
+- 本次不创建 `v3.0.19` tag，不发布 GitHub Release。

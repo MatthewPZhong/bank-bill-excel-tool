@@ -1,6 +1,6 @@
 # Test Spec — v3.0.19 工具箱多 Sheet 合并
 
-> status: automated-verified
+> status: implementation merged via PR #94; Excel/WPS manual verification pending
 > created: 2026-07-19
 > updated: 2026-07-19
 > source: `changes/3.0.19/spec.md` AC-01～AC-14
