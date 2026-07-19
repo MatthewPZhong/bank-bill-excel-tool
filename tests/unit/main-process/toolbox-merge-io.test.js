@@ -233,6 +233,22 @@ test.describe('toolbox merge io', () => {
     assert.deepEqual(readWorkbookAoa(output).sheets[0], [['H'], ['a'], ['b']]);
   });
 
+  test('扩展名为 CSV 但实际为 OLE2 XLS 时按工作簿读取全部可见 sheet', async () => {
+    const dir = makeTempDir();
+    const actual = writeXls(path.join(dir, 'actual.xls'), [
+      { name: 'S1', rows: [['H'], ['a']] },
+      { name: 'S2', rows: [['H'], ['b']] }
+    ]);
+    const disguised = path.join(dir, 'disguised-legacy.csv');
+    fs.copyFileSync(actual, disguised);
+    const output = path.join(dir, 'disguised-legacy-output.xlsx');
+
+    assert.equal(detectMergeInputKind(disguised), 'xls');
+    const result = await mergeToolboxFilesToXlsx({ filePaths: [disguised], savePath: output });
+    assert.equal(result.inputSheetCount, 2);
+    assert.deepEqual(readWorkbookAoa(output).sheets[0], [['H'], ['a'], ['b']]);
+  });
+
   test('writer commit 失败会调用 abort，不保留可导出结果', async () => {
     const dir = makeTempDir();
     const input = await writeXlsx(path.join(dir, 'writer-failure.xlsx'), [

@@ -4,7 +4,8 @@
 //   通过 onHeaderRow(headers)（一次）+ onDataRow(values)（每数据行）回调透传，内存恒定。
 //
 //   streamLogicalTableRows(filePath, { onHeaderRow, onDataRow, cancelToken }):
-//     ① openZipWithEntries（autoClose:false，caller 显式 close）+ locateSheets 拿按显示序的 [{name,entryPath}]。
+//     ① openZipWithEntries（autoClose:false，caller 显式 close）+ locateSheets 拿按显示序的
+//        [{name,entryPath,state}]；既有续页入口保持原行为，严格合并入口才按 state 过滤隐藏页。
 //     ② loadSharedStrings 在「逐 sheet 循环外」加载一次（不每 sheet 重载）。
 //     ③ 逐 sheet openReadStream + scanSheetRows 流式扫行；本模块按「多 sheet 续页语义」识别表头/数据/重复表头。
 //

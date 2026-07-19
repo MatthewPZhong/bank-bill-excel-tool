@@ -41,12 +41,13 @@
 
 ## Evidence
 
-- strict reader、merge orchestrator、原子发布和 renderer/handler 定向 unit：61/61 PASS。
+- strict reader、merge orchestrator、原子发布和 renderer/handler 定向 unit：62/62 PASS。
 - 新增 `toolbox-multi-sheet-merge.js`：16/16 PASS；多 Sheet 流式段为 3 × 10 万行，RSS 增量低于 384MB 门槛。
 - 既有 `toolbox-roundtrip.js`：30/30 PASS；既有大文件合并 15/15、multi-sheet split 31/31 PASS。
-- `npm run release-check`：PASS；unit 3693/3693，integration 42 个脚本 / 1955/1955，smoke 与 ESLint 均通过。
+- `npm run release-check`：PASS；unit 3694/3694，integration 42 个脚本 / 1955/1955，smoke 与 ESLint 均通过。
 - `npm run scan:vars`：196 个 JS 文件 / 2200 个顶层声明；`check:vars -- --include-minor` 命中项已逐项复核，Critical/Risk-sensitive 要求的 smoke 已通过。
 - `npm run startup:measure`：进程总耗时中位数 767.835ms，ready-to-show 中位数 174.316ms。
+- PR #94 self-review 第一轮修复陈旧路径注释，并补 OLE2 XLS 伪装 CSV 的显式路由用例；复核后 P0-P4 Finding 为 0。
 
 ## Remaining Unknowns
 

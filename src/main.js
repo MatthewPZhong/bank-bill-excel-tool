@@ -13974,9 +13974,8 @@ function registerDuplicateInboundMatchHandlers() {
   });
 }
 
-// v3.0.8 需求1：工具箱🧰（合表 / 拆表）3 个 IPC handler。
-//   纯数据变换委托 src/main-process/toolbox.js；本处只做 dialog（show{Open,Save}Dialog）+ file-service IO
-//   （extractHeaders / readRows / writeWorkbookRows）+ copyFileSync 落盘。
+// 工具箱🧰（合表 / 拆表）3 个 IPC handler。
+//   行级变换、流式读写和原子发布委托 main-process/toolbox* 模块；本处负责 dialog、IPC 编排、状态反馈和日志。
 //
 //   返回口径（前端对接契约，与现有 monthly-balance:export / bank-statement:import 范式一致）：
 //     单文件成功 { status:'success', filePath }
