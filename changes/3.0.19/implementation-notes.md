@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.19 工具箱多 Sheet 合并
 
-> status: release-pending
+> status: released / Windows installed-app canary pending
 > owner: Dev
 > updated: 2026-07-19
 
@@ -51,7 +51,13 @@
 - PR #94 self-review 第一轮修复陈旧路径注释，并补 OLE2 XLS 伪装 CSV 的显式路由用例；复核后 P0-P4 Finding 为 0。
 - GitHub Actions `smoke-test` 通过；PR #94 head `a850e40` 以 merge commit `0822ad4` 合入 `main`，远程开发分支删除。
 - 归档：`docs/prs/PR94-v3.0.19.md`、`docs/iterations/v3.0.19/PRD-v3.0.19.md`。
+- 发布快照：annotated tag `v3.0.19` 指向 `7e69698`，与 tag 推送时的 `origin/main` 一致。
+- Release workflow run `29684771136` 用时 12m40s；tag/main/version、完整 `release-check`、Windows 构建、应用检查、ASCII staging、metadata/SHA-512、发布及发布后资产复核全部通过。
+- Release `https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.19` 为 published、non-draft、non-prerelease，并成为 GitHub Latest。
+- 线上资产：Setup 99,721,805 bytes，SHA-256 `1393b5cc9e41e10efe496b7858fc68f682098ee87baf40dc79a4ac2583362793`；portable 99,225,035 bytes，SHA-256 `a92f744a5729e1dc66c5205fc4ac61d108c9347819c5a6b8dfda595d2ead9947`；另含 Setup blockmap 与 `latest.yml`。
+- 匿名 `releases/latest/download/latest.yml` 回读为 `version=3.0.19`、`path=bank-bill-excel-tool-setup-3.0.19.exe`；实际下载 Setup 的 `MZ` 头、大小和 SHA-512 `YoeYyh4Nt57m9iwMKLWhYXNHnR3+dkwhNzOuSRmRU/0y1froi2C54meJrSJsQX6djCmI0jakZIKiKYfkRvtySw==` 与 metadata 一致，blockmap/portable HTTP 200。
 
 ## Remaining Unknowns
 
 - 无产品或自动化阻塞项；仍需业务方用真实 Excel/WPS 文件人工确认隐藏状态、表头、行序、总行数和分页结果。
+- 仍需在真实 Windows 已安装的 v3.0.18 NSIS 上执行“立即检查 → 下载 → 重启安装 → 数据保留”canary；生产 feed 与更新资产已验证，但 macOS 环境不能替代该实机链路。

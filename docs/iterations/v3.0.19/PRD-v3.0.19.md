@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.19 PRD
 
 > 目标版本：`3.0.19`
-> 状态：release-pending（PR #94 已合入 `main`；用户已追加授权 v3.0.19 发布收尾）
+> 状态：released（PR #94 已合入 `main`；v3.0.19 已发布为 GitHub Latest）
 > 归档：PR #94 merge commit `0822ad4`；源规格 `changes/3.0.19/spec.md`
 > 更新时间：2026-07-19
 > 适用仓库：`bank-bill-excel-tool`
@@ -67,3 +67,7 @@
 - GitHub Actions `smoke-test` 通过；PR #94 以 merge commit `0822ad4` 合入 `main`，远程开发分支删除。
 - 自动化 Excel 回读已通过；Excel/WPS 真实客户端人工打开检查仍为业务验收项。
 - 原实施范围不包含 tag 或 GitHub Release；用户于 2026-07-19 追加授权发布收尾，采用指向当前 `main` 的 `v3.0.19` tag 触发受控稳定版 workflow。
+- annotated tag `v3.0.19` 指向 `7e69698`；Release workflow run `29684771136` 的完整测试、Windows 构建、应用检查、资产 staging、hash 校验、发布与发布后复核全部通过。
+- [v3.0.19 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.19) 为 published、non-draft、non-prerelease，并成为 GitHub Latest。
+- 线上 `latest.yml` 匿名回读为 3.0.19，指向 ASCII Setup；实际下载 Setup 为 99,721,805 bytes、`MZ` PE 头且 SHA-512 与 metadata 一致，blockmap 和 portable 均可匿名访问。
+- 生产 feed 已具备 3.0.18 NSIS 发现 3.0.19 的条件；真实 Windows 安装、重启和用户数据保留仍需人工 canary。

@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.18 Windows 在线升级
 
-> status: v3.0.18 released / Windows manual validation and successor canary pending
+> status: v3.0.18 released / v3.0.19 successor feed verified / Windows installed-app canary pending
 > owner: Dev / 发布负责人
 > updated: 2026-07-17
 
@@ -136,6 +136,7 @@
 | 2026-07-17 | v3.0.18 正式发布 | workflow run `29622809519` 的 Windows `release-check`、构建、应用检查、staging、更新资产校验和 Release 创建均成功；Release `https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.18` 为 published/non-draft/non-prerelease，四个资产均可匿名读取 | Windows 文件锁修复生效；在线更新所需 Setup、blockmap、latest.yml 完整，portable 仅发生 GitHub 官方文件名规范化 |
 | 2026-07-17 | 线上资产回读 | 无认证请求 `latest.yml` 返回 HTTP 200；下载线上 metadata 与 Setup 后计算 SHA-512 完全一致；portable 下载后为 99,221,741 bytes、`MZ` PE 头、SHA-256 `ad24c753cc47248bad5c946d53a43646de65c78e37eebcf172a974a99dbb41a5`，与 GitHub asset digest 一致；GitHub [Release assets 官方文档](https://docs.github.com/en/rest/releases/assets)说明会重命名含特殊/非字母数字字符的资产名 | v3.0.18 Release 可由公开客户端匿名读取且二进制内容无缺失；最终 workflow 红灯是名称复核假阴性，后续改用 ASCII staging 名 |
 | 2026-07-17 | 发布命名修复回归 | `npm run release-check`：unit 3675/3675、integration 41 个脚本及 1939/1939 断言全绿；`scan:vars` 完成，`check:vars -- --include-minor` 因无 `src/` 改动跳过 | ASCII portable staging、上传和发布后复核契约不影响应用运行时或既有资金/Excel 行为 |
+| 2026-07-19 | 首个后继 stable feed | v3.0.19 workflow run `29684771136` 全绿并发布为 GitHub Latest；匿名 `latest.yml` 为 3.0.19，Setup 路径/大小/SHA-512 与线上文件一致，blockmap/portable HTTP 200 | v3.0.18 的生产 GitHub provider 已有严格更高、published/non-draft/non-prerelease 后继版本；仍需 Windows 已安装客户端完成实际检查、下载、重启和数据保留 canary |
 
 以上为本地和交叉构建证据。真实 Windows 安装/重启与远端 GitHub 保护仍见 Remaining Unknowns。
 
@@ -144,10 +145,10 @@
 - Windows 10/11 无签名 NSIS 的真实下载、SmartScreen、v3.0.17 覆盖安装、`quitAndInstall` 重启和用户数据保留尚未执行；v3.0.18 已发布，公告或推广前仍须补证；Owner：发布负责人。
 - Windows 实包中 `CancellationToken.cancel()` 对 full/differential automatic 下载的中断、缓存处置和迟到事件顺序仍需实机复核；Owner：发布负责人；截止：首个后继 stable 公告前。
 - `production-release` environment 已允许本次受控 tag workflow 执行；`main` 与 `v*` 的服务端保护规则细节仍未独立核验；Owner：仓库管理员；截止：下一个发布 tag 前。
-- 隔离公开测试仓库的真实 `3.0.18 → 3.0.19` 链和生产 `3.0.18 → 后继 stable` canary 尚未执行；Owner：首个后继版本发布负责人；截止：对应 Release 公告前。
+- 生产 `3.0.19` feed 与资产已验证；真实 Windows 已安装客户端的 `3.0.18 → 3.0.19` 检查、下载、重启和数据保留 canary 尚未执行；Owner：发布负责人；截止：Release 公告前。
 
 ## Handoff
 
 - v3.0.18 Release 和线上资产已完成自动与回读校验，不得替换同版本资产。
 - 发布负责人补齐 Remaining Unknowns 中的 Windows 安装、取消下载和数据保留证据。
-- 首个后继 stable 创建后、公告前，必须由 v3.0.18 NSIS 从生产 `latest` 完成 canary；失败则停止公告并发布更高补丁版本。
+- v3.0.19 已成为首个后继 stable；公告前必须由 v3.0.18 NSIS 从生产 `latest` 完成 canary，失败则停止公告并发布更高补丁版本。

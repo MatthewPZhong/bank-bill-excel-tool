@@ -1,6 +1,6 @@
 # Spec — v3.0.19 工具箱多 Sheet 合并
 
-> status: release-pending（PR #94 已合入 `main`；用户已追加授权 v3.0.19 发布收尾）
+> status: released（PR #94 已合入 `main`；v3.0.19 已发布为 GitHub Latest）
 > owner: PM / Dev
 > created: 2026-07-19
 > updated: 2026-07-19
@@ -81,3 +81,7 @@
 - 归档见 `docs/prs/PR94-v3.0.19.md` 与 `docs/iterations/v3.0.19/PRD-v3.0.19.md`。
 - 自动化 Excel 回读已通过；Excel/WPS 真实客户端人工打开仍为业务验收项，不阻塞代码归档。
 - 2026-07-19：用户在合并归档后追加发布收尾；发布必须由指向当前 `main` 的 annotated tag `v3.0.19` 触发，完整通过 Windows release workflow 后才算完成。
+- 2026-07-19：annotated tag `v3.0.19` 指向 `7e69698`；Release workflow run `29684771136` 全部通过并发布为 published、non-draft、non-prerelease GitHub Latest。
+- 线上四项资产为 `bank-bill-excel-tool-setup-3.0.19.exe`、对应 blockmap、`bank-bill-excel-tool-portable-3.0.19.exe` 和 `latest.yml`。
+- 匿名回读 `latest.yml` 得到 `version=3.0.19`；Setup 为 99,721,805 bytes、`MZ` PE 头，实算 SHA-512 与 metadata 完全一致；blockmap 与 portable 均返回 HTTP 200。
+- 生产 feed 已具备让 3.0.18 NSIS 发现严格更高稳定版本的条件；真实 Windows `3.0.18 → 3.0.19` 安装重启与用户数据保留仍需人工 canary。
