@@ -22,7 +22,11 @@ const os = require('node:os');
 const path = require('node:path');
 const yazl = require('yazl');
 
-const { streamLogicalTableRows } = require('../../../../src/backend/toolbox-xlsx-stream/multi-sheet-reader');
+const {
+  streamLogicalTableRows,
+  streamStrictWorkbookSheetTables,
+  ToolboxSheetReadError
+} = require('../../../../src/backend/toolbox-xlsx-stream/multi-sheet-reader');
 const { ToolboxHeaderMismatchError } = require('../../../../src/main-process/toolbox');
 
 // ---- tmp 管理 ----
@@ -89,12 +93,17 @@ function writeMultiSheetXlsxAdvanced({ sheets }) {
     name: s.name,
     rid: `rId${i + 1}`,
     target: s.target,                 // 显式物理 target（可乱序）
-    body: s.body || ''                // 已渲染的 <row> 序列
+    body: s.body || '',               // 已渲染的 <row> 序列
+    state: s.state || 'visible',
+    omitEntry: !!s.omitEntry
   }));
   const wbXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
     + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
-    + entries.map((s, i) => `<sheet name="${escXml(s.name)}" sheetId="${i + 1}" r:id="${s.rid}"/>`).join('')
+    + entries.map((s, i) => {
+      const stateAttr = s.state === 'visible' ? '' : ` state="${s.state}"`;
+      return `<sheet name="${escXml(s.name)}" sheetId="${i + 1}"${stateAttr} r:id="${s.rid}"/>`;
+    }).join('')
     + '</sheets></workbook>';
   const relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -110,6 +119,7 @@ function writeMultiSheetXlsxAdvanced({ sheets }) {
     zf.addBuffer(Buffer.from(relsXml, 'utf8'), 'xl/_rels/workbook.xml.rels');
     // 物理 entry 名归一为 xl/ 前缀（与 normalizeWorksheetTarget 一致）。body 已是渲染好的 <row> 序列。
     for (const s of entries) {
+      if (s.omitEntry) continue;
       const physical = s.target.startsWith('xl/') ? s.target : `xl/${s.target}`;
       zf.addBuffer(Buffer.from(sheetXml(s.body), 'utf8'), physical);
     }
@@ -496,5 +506,78 @@ test.describe('toolbox-xlsx-stream multi-sheet-reader', () => {
     const { headers, dataRows } = await collect(fp);
     assert.deepEqual(headers, ['名称', '渠道'], 'SST 表头解码');
     assert.deepEqual(dataRows.map(trimRow), [['店A', '支付宝'], ['店B', '微信']], 'SST 跨 sheet 值解码正确');
+  });
+});
+
+test.describe('toolbox-xlsx-stream strict workbook sheet tables', () => {
+  test('每张可见非空 sheet 都回调独立表头，数据按 workbook 显示序透传', async () => {
+    const fp = await writeMultiSheetXlsxAdvanced({
+      sheets: [
+        { name: '显示一', target: 'worksheets/sheet3.xml', body: rowsToSheetBody([['H1', 'H2'], ['a', '1']]) },
+        { name: '显示二', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([['H1', 'H2'], ['b', '2']]) },
+        { name: '显示三', target: 'worksheets/sheet2.xml', body: rowsToSheetBody([['H1', 'H2'], ['c', '3']]) }
+      ]
+    });
+    const headers = [];
+    const rows = [];
+    const summary = await streamStrictWorkbookSheetTables(fp, {
+      onSheetHeader: (info) => headers.push({ name: info.sheetName, headers: info.headers }),
+      onDataRow: (values, info) => rows.push({ name: info.sheetName, values: trimRow(values) })
+    });
+
+    assert.deepEqual(headers, [
+      { name: '显示一', headers: ['H1', 'H2'] },
+      { name: '显示二', headers: ['H1', 'H2'] },
+      { name: '显示三', headers: ['H1', 'H2'] }
+    ]);
+    assert.deepEqual(rows, [
+      { name: '显示一', values: ['a', '1'] },
+      { name: '显示二', values: ['b', '2'] },
+      { name: '显示三', values: ['c', '3'] }
+    ]);
+    assert.equal(summary.nonEmptySheetCount, 3);
+    assert.equal(summary.dataRowCount, 3);
+  });
+
+  test('隐藏、深度隐藏和空 sheet 跳过；前导空行忽略；仅表头 sheet 仍参与', async () => {
+    const fp = await writeMultiSheetXlsxAdvanced({
+      sheets: [
+        { name: '隐藏', state: 'hidden', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([['H'], ['secret']]) },
+        { name: '深藏', state: 'veryHidden', target: 'worksheets/sheet2.xml', body: rowsToSheetBody([['H'], ['secret2']]) },
+        { name: '空白', target: 'worksheets/sheet3.xml', body: rowsToSheetBody([{ selfClose: true }, ['   ']]) },
+        { name: '只有表头', target: 'worksheets/sheet4.xml', body: rowsToSheetBody([{ selfClose: true }, [' H ']]) },
+        { name: '数据', target: 'worksheets/sheet5.xml', body: rowsToSheetBody([['H'], ['H'], ['v']]) }
+      ]
+    });
+    const headers = [];
+    const rows = [];
+    const summary = await streamStrictWorkbookSheetTables(fp, {
+      onSheetHeader: (info) => headers.push([info.sheetName, info.headers]),
+      onDataRow: (values, info) => rows.push([info.sheetName, trimRow(values)])
+    });
+
+    assert.deepEqual(headers, [['只有表头', ['H']], ['数据', ['H']]]);
+    assert.deepEqual(rows, [['数据', ['H']], ['数据', ['v']]], '数据区再次出现表头内容仍保留');
+    assert.equal(summary.hiddenSheetCount, 2);
+    assert.equal(summary.emptySheetCount, 1);
+    assert.equal(summary.nonEmptySheetCount, 2);
+    assert.equal(summary.dataRowCount, 2);
+  });
+
+  test('可见 sheet 关系缺失时 fail closed，不静默跳过', async () => {
+    const fp = await writeMultiSheetXlsxAdvanced({
+      sheets: [
+        { name: '损坏页', target: 'worksheets/sheet7.xml', body: '', omitEntry: true }
+      ]
+    });
+    await assert.rejects(
+      () => streamStrictWorkbookSheetTables(fp),
+      (error) => {
+        assert.ok(error instanceof ToolboxSheetReadError);
+        assert.match(error.message, /损坏页/);
+        assert.ok(error.detailLines.some((line) => line.includes('关系缺失')));
+        return true;
+      }
+    );
   });
 });

@@ -106,8 +106,9 @@ function readEntryAsString(zip, entry) {
   });
 }
 
-// 解析 workbook.xml + workbook.xml.rels，返回所有 <sheet> 的 { name, entryPath }（按 workbook 出现顺序）。
+// 解析 workbook.xml + workbook.xml.rels，返回所有 <sheet> 的 { name, entryPath, state }（按 workbook 出现顺序）。
 //   entryPath 经 rels 正解（r:id → Target）；缺 r:id / rels 找不到 → entryPath=null（由调用方决定兜底/报错）。
+//   state 缺省为 visible；hidden / veryHidden 由工具箱多 sheet 合并用于排除辅助工作表。
 async function locateSheets(zip, entries) {
   const wbEntry = entries.get(WORKBOOK_ENTRY_NAME);
   if (!wbEntry) return [];
@@ -136,13 +137,15 @@ async function locateSheets(zip, entries) {
     const tag = sm[0];
     const nameM = tag.match(/\bname="([^"]*)"/);
     const ridM = tag.match(/\br:id="([^"]*)"/);
+    const stateM = tag.match(/\bstate="([^"]*)"/);
     const name = nameM ? xmlAttrUnescape(nameM[1]) : '';
+    const state = stateM ? xmlAttrUnescape(stateM[1]) : 'visible';
     let entryPath = null;
     if (ridM && ridToTarget.has(ridM[1])) {
       const candidate = ridToTarget.get(ridM[1]);
       if (entries.has(candidate)) entryPath = candidate;
     }
-    sheets.push({ name, entryPath });
+    sheets.push({ name, entryPath, state });
   }
   return sheets;
 }

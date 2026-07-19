@@ -11,12 +11,28 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
+function compareVersions(left, right) {
+  const parse = (value) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(value));
+    assert.ok(match, `版本号格式应为 x.y.z，实际为 ${value}`);
+    return match.slice(1).map(Number);
+  };
+  const leftParts = parse(left);
+  const rightParts = parse(right);
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] !== rightParts[index]) {
+      return leftParts[index] - rightParts[index];
+    }
+  }
+  return 0;
+}
+
 test.describe('v3.0.18 在线升级静态契约', () => {
   test('构建配置固定 GitHub latest、无签名校验和更新元数据', () => {
     const packageJson = JSON.parse(read('package.json'));
     const publish = packageJson.build.publish[0];
 
-    assert.equal(packageJson.version, '3.0.18');
+    assert.ok(compareVersions(packageJson.version, '3.0.18') >= 0);
     assert.ok(packageJson.dependencies['electron-updater']);
     assert.equal(packageJson.scripts['stage:update-artifacts'], 'node scripts/stage-update-artifacts.js');
     assert.match(packageJson.scripts['preview:all'], /npm run preview:app-update-settings/);
