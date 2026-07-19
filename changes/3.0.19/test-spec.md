@@ -1,6 +1,6 @@
 # Test Spec — v3.0.19 工具箱多 Sheet 合并
 
-> status: implementation merged via PR #94; Excel/WPS manual verification pending
+> status: release-pending; implementation merged via PR #94
 > created: 2026-07-19
 > updated: 2026-07-19
 > source: `changes/3.0.19/spec.md` AC-01～AC-14
@@ -48,3 +48,4 @@
 - 变量：`npm run scan:vars`、`npm run check:vars -- --include-minor`。
 - 性能：`npm run startup:measure`。
 - 人工：用 Excel/WPS 打开单文件多 sheet、多文件多 sheet和分页结果，核对 sheet 名、表头、行序和总行数。
+- 发布：`v3.0.19` tag 必须指向当前 `main`；Windows release workflow 重跑 `release-check`，并验证 published/non-draft/non-prerelease Release、Setup、portable、blockmap、`latest.yml` 及 metadata SHA-512。

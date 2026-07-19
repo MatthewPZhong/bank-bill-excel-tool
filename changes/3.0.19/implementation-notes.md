@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.19 工具箱多 Sheet 合并
 
-> status: merged
+> status: release-pending
 > owner: Dev
 > updated: 2026-07-19
 
@@ -38,6 +38,7 @@
 ## Deviations
 
 - 无产品契约偏差。最终审查发现直接复制到用户目标可能在失败时留下半成品，因此按既有原子发布原则补充 D07；该调整落实了 spec 的失败清理要求。
+- 原计划明确不创建 tag 或 GitHub Release；PR #94 合并归档后，用户于 2026-07-19 追加授权发布收尾。发布沿用 v3.0.18 建立的受控稳定通道，不改变应用代码或更新契约。
 
 ## Evidence
 

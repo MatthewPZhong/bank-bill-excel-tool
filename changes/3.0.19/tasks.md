@@ -33,3 +33,10 @@
 - 同步三份版本文档、重要变量清单与统计报告。
 - 执行 release-check、check-vars、startup measure及最终 diff review。
 - 状态：done（自动化门禁、PR #94 合并与归档完成；Excel/WPS 人工打开检查待业务验收）
+
+## Task 6：在线更新发布收尾
+
+- 反向同步用户追加的发布范围，创建指向当前 `main` 的 annotated tag `v3.0.19`。
+- 等待受控 Windows release workflow 完成测试、构建、资产校验与稳定 Release 发布。
+- 匿名回读 `latest.yml`，核对版本、Setup 路径、SHA-512、blockmap 和 portable 资产，并确认 v3.0.18 可发现严格更高版本。
+- 状态：doing

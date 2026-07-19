@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.19 PRD
 
 > 目标版本：`3.0.19`
-> 状态：merged（PR #94 已合入 `main`；Excel/WPS 人工打开检查仍待业务验收）
+> 状态：release-pending（PR #94 已合入 `main`；用户已追加授权 v3.0.19 发布收尾）
 > 归档：PR #94 merge commit `0822ad4`；源规格 `changes/3.0.19/spec.md`
 > 更新时间：2026-07-19
 > 适用仓库：`bank-bill-excel-tool`
@@ -66,4 +66,4 @@
 - PR #94 第一轮 self-review 修复 2 个 P4，第二轮确认 P0-P4 Finding 为 0。
 - GitHub Actions `smoke-test` 通过；PR #94 以 merge commit `0822ad4` 合入 `main`，远程开发分支删除。
 - 自动化 Excel 回读已通过；Excel/WPS 真实客户端人工打开检查仍为业务验收项。
-- 本次不创建 `v3.0.19` tag，不发布 GitHub Release。
+- 原实施范围不包含 tag 或 GitHub Release；用户于 2026-07-19 追加授权发布收尾，采用指向当前 `main` 的 `v3.0.19` tag 触发受控稳定版 workflow。
