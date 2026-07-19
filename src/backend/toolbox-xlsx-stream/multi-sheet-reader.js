@@ -52,6 +52,14 @@ const { ToolboxHeaderMismatchError } = require('../../main-process/toolbox');
 //   与 toolbox-stream-io.js TOOLBOX_MAX_COL_COUNT=1024 同口径（工具箱面向任意 Excel/CSV，非定列银行专表）。
 const TOOLBOX_MAX_COL_COUNT = 1024;
 
+class ToolboxSheetReadError extends Error {
+  constructor(message, detailLines = []) {
+    super(message);
+    this.name = 'ToolboxSheetReadError';
+    this.detailLines = Array.isArray(detailLines) ? detailLines.slice() : [];
+  }
+}
+
 // 把一行 raw values（scanSheetRows 透传的「按列索引数组」）归一为「逻辑行」：切尾部空 cell + 逐格 normalizeCell。
 //   用于表头识别 / 列序比对（与 toolbox.js / common.js 同口径）。返回 string[]。
 function normalizeLogicalRow(values) {
@@ -200,8 +208,130 @@ async function streamLogicalTableRows(filePath, options = {}) {
   };
 }
 
+// 工具箱「合并表格」专用严格模式：每个可见非空 sheet 都是独立表，首个有意义行必须作为该 sheet 表头。
+// 本函数只负责按 workbook 显示序逐 sheet 识别表头和透传数据；跨文件/跨 sheet 的表头全等校验由上层
+// merge orchestrator 在 onSheetHeader 中完成。与 streamLogicalTableRows 的「后续 sheet 可省略表头」续页
+// 语义严格隔离，避免工具箱拆分链路行为漂移。
+async function streamStrictWorkbookSheetTables(filePath, options = {}) {
+  const onSheetHeader = typeof options.onSheetHeader === 'function' ? options.onSheetHeader : null;
+  const onDataRow = typeof options.onDataRow === 'function' ? options.onDataRow : null;
+  const cancelToken = options.cancelToken && typeof options.cancelToken === 'object' ? options.cancelToken : null;
+
+  const sourceFile = path.basename(filePath);
+  const { zip, entries } = await openZipWithEntries(sourceFile, filePath);
+  let physicalSheetCount = 0;
+  let visibleSheetCount = 0;
+  let hiddenSheetCount = 0;
+  let nonEmptySheetCount = 0;
+  let emptySheetCount = 0;
+  let dataRowCount = 0;
+
+  const placeholderExpectedHeaders = new Array(TOOLBOX_MAX_COL_COUNT).fill('');
+  const isCancelled = () => !!(cancelToken && cancelToken.cancelled);
+  const isHidden = (sheet) => {
+    const state = String(sheet && sheet.state ? sheet.state : 'visible').toLowerCase();
+    return state === 'hidden' || state === 'veryhidden';
+  };
+
+  try {
+    const sheets = await locateSheets(zip, entries);
+    physicalSheetCount = sheets.length;
+    const hasVisibleSheet = sheets.some((sheet) => !isHidden(sheet));
+    const sharedStrings = hasVisibleSheet
+      ? await loadSharedStrings(zip, entries.get('xl/sharedStrings.xml') || null)
+      : [];
+
+    for (let s = 0; s < sheets.length; s += 1) {
+      if (isCancelled()) break;
+      const sheet = sheets[s];
+      const sheetName = sheet && sheet.name ? sheet.name : `(未命名 sheet ${s + 1})`;
+
+      if (isHidden(sheet)) {
+        hiddenSheetCount += 1;
+        continue;
+      }
+      visibleSheetCount += 1;
+
+      if (!sheet || !sheet.entryPath || !entries.get(sheet.entryPath)) {
+        throw new ToolboxSheetReadError(
+          `文件「${sourceFile}」的工作表「${sheetName}」无法读取`,
+          [
+            `文件：${sourceFile}`,
+            `工作表：${sheetName}`,
+            '工作簿中的工作表关系缺失或已损坏，请修复文件后重试。'
+          ]
+        );
+      }
+
+      const sheetEntry = entries.get(sheet.entryPath);
+      let headerFound = false;
+      const stream = await new Promise((resolve, reject) => {
+        zip.openReadStream(sheetEntry, (error, openedStream) => {
+          if (error) return reject(error);
+          resolve(openedStream);
+        });
+      });
+
+      await scanSheetRows({
+        stream,
+        expectedHeaders: placeholderExpectedHeaders,
+        sharedStrings,
+        valueColumnWhitelist: null,
+        onRow: ({ rowR, values }) => {
+          if (isCancelled()) throw makeStopSignal();
+
+          if (!headerFound) {
+            if (!isRowMeaningful(values)) return;
+            headerFound = true;
+            if (onSheetHeader) {
+              onSheetHeader({
+                headers: normalizeLogicalRow(values),
+                sourceFile,
+                sheetName,
+                sheetIndex: s,
+                rowNumber: rowR
+              });
+            }
+            return;
+          }
+
+          dataRowCount += 1;
+          if (onDataRow) {
+            onDataRow(values, {
+              sourceFile,
+              sheetName,
+              sheetIndex: s,
+              rowNumber: rowR
+            });
+          }
+        }
+      });
+
+      if (headerFound) {
+        nonEmptySheetCount += 1;
+      } else {
+        emptySheetCount += 1;
+      }
+    }
+  } finally {
+    try { zip.close(); } catch (_e) { /* ignore */ }
+  }
+
+  return {
+    physicalSheetCount,
+    visibleSheetCount,
+    hiddenSheetCount,
+    nonEmptySheetCount,
+    emptySheetCount,
+    dataRowCount,
+    cancelled: isCancelled()
+  };
+}
+
 module.exports = {
   streamLogicalTableRows,
+  streamStrictWorkbookSheetTables,
+  ToolboxSheetReadError,
   // 导出供单测 / 复用
   TOOLBOX_MAX_COL_COUNT,
   normalizeLogicalRow

@@ -208,3 +208,38 @@ describe('T7 入口按钮与 preview 注册（renderer 侧静态校验）', () =
     assert.ok(rendererSrc.includes("previewModal === 'toolbox-split-field-picker'"), '应有 toolbox-split-field-picker preview 分支');
   });
 });
+
+describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', () => {
+  const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js');
+  const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
+  const mergeStart = mainSource.indexOf("trackedIpcHandle('toolbox:merge'");
+  const splitStart = mainSource.indexOf("trackedIpcHandle('toolbox:split:read'", mergeStart);
+  const mergeHandler = mainSource.slice(mergeStart, splitStart);
+
+  test('合并入口委托 strict multi-sheet orchestrator，IPC 名保持不变', () => {
+    assert.ok(mergeStart >= 0 && splitStart > mergeStart, '应定位 toolbox:merge handler');
+    assert.ok(mergeHandler.includes('toolboxMergeFilesToXlsx({'));
+    assert.ok(mergeHandler.includes('filePaths,'));
+    assert.ok(mergeHandler.includes("sheetBaseName: 'COMMON'"));
+  });
+
+  test('临时目录由 try/finally 在成功、取消保存和失败路径统一清理', () => {
+    const tempIdx = mergeHandler.indexOf("fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'))");
+    const tryIdx = mergeHandler.indexOf('try {', tempIdx);
+    const finallyIdx = mergeHandler.indexOf('} finally {', tryIdx);
+    const cleanupIdx = mergeHandler.indexOf("fs.rmSync(tempDir, { recursive: true, force: true });", finallyIdx);
+    assert.ok(tempIdx >= 0 && tryIdx > tempIdx && finallyIdx > tryIdx && cleanupIdx > finallyIdx);
+  });
+
+  test('用户目标文件通过原子发布 helper 落盘，不直接复制覆盖', () => {
+    assert.ok(mergeHandler.includes('toolboxPublishMergedWorkbook(tempPath, saveResult.filePath)'));
+    assert.ok(!mergeHandler.includes('fs.copyFileSync(tempPath, saveResult.filePath)'));
+  });
+
+  test('成功日志包含文件、输入 sheet、数据行和输出 sheet 四类计数', () => {
+    assert.ok(mergeHandler.includes('writeRes.fileCount'));
+    assert.ok(mergeHandler.includes('writeRes.inputSheetCount'));
+    assert.ok(mergeHandler.includes('writeRes.dataRowCount'));
+    assert.ok(mergeHandler.includes('writeRes.sheetCount'));
+  });
+});

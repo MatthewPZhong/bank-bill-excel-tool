@@ -214,9 +214,6 @@ const {
 //   合表表头一致性校验 / 多文件 aoa 合并 / 字段去重值计算 / 按字段值过滤 / 文件名模板（YYYYMMDDHHmm 时间戳）
 //   IPC handler（toolbox:merge / toolbox:split:read / toolbox:split:export）做 dialog + file-service IO，纯变换委托本模块
 const {
-  ToolboxHeaderMismatchError,
-  assertHeadersIdentical: toolboxAssertHeadersIdentical,
-  mergeAoaRows: toolboxMergeAoaRows,
   computeValuesByField: toolboxComputeValuesByField,
   filterRowsByFieldValues: toolboxFilterRowsByFieldValues,
   buildMergeFileName: toolboxBuildMergeFileName,
@@ -236,6 +233,10 @@ const {
   writeRowsToMultipleFilesStreamed: toolboxWriteRowsToMultipleFilesStreamed,
   ToolboxStreamEmptyError
 } = require('./main-process/toolbox-stream-io');
+const {
+  mergeToolboxFilesToXlsx: toolboxMergeFilesToXlsx,
+  publishMergedWorkbook: toolboxPublishMergedWorkbook
+} = require('./main-process/toolbox-merge-io');
 const {
   normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups,
   createMultipleRowFilters: toolboxCreateMultipleRowFilters,
@@ -13984,7 +13985,7 @@ function registerDuplicateInboundMatchHandlers() {
 //     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
 //   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
 //
-// 工具箱临时产物先写 OS 临时目录，再 showSaveDialog → copyFileSync 到用户选定位置（取消则不落用户目录，temp 文件由 OS 回收）。
+// 工具箱旧全量写入辅助函数；合并链路另由 try/finally 清理 OS 临时目录，并在目标目录原子发布。
 function writeToolboxTempWorkbook(rows, sheetName = 'COMMON') {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
   const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
@@ -14000,9 +14001,9 @@ function toolboxFailureResult(error) {
 }
 
 function registerToolboxHandlers() {
-  // IPC 1 —— 合表：多选 → 各文件取表头校验全相同 → 流式逐行合并（首表头 + 各文件数据行）→ 写临时 → 另存为
-  //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头 + streamDataRows 逐行喂 + writeRowsStreamed 逐行写，内存常数），
-  //   .csv/.xls 回退全量 readRows（不撞 OOM 的纯文本/小二进制路径，且流式引擎不支持二者）。不再 readRows 全量物化 + writeToolboxTempWorkbook。
+  // IPC 1 —— 合表：单/多文件 → 每个可见非空 sheet 严格表头校验 → 按文件/标签/行顺序流式写临时 → 另存为。
+  //   v3.0.19：.xlsx 逐 sheet 流式，.xls 一次加载工作簿后遍历可见 sheet，CSV 作为单表；隐藏/空 sheet 跳过。
+  //   writer 沿用 by-name 格式与超 104 万行自动分页；IPC、默认文件名和前端流程不变。
   trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', async () => {
     try {
       const choice = await showImportOpenDialog('toolbox', {
@@ -14014,59 +14015,41 @@ function registerToolboxHandlers() {
         return { status: 'cancelled' };
       }
       const filePaths = choice.filePaths;
-      const fileNames = filePaths.map((p) => path.basename(p));
-
-      // 各文件表头（.xlsx 流式读首个有意义行；.csv/.xls 全量 extractHeaders；二者均已 normalizeCell/trim）
-      //   → 校验全部完全一致（列名 + 列序，大小写敏感）。表头不一致直接抛错（不弹保存框、不产文件）。
-      const headersList = await Promise.all(
-        filePaths.map(async (p) => (toolboxIsStreamableXlsx(p) ? await toolboxReadHeaderRowStreamed(p) : extractHeaders(p)))
-      );
-      const baseHeaders = toolboxAssertHeadersIdentical(headersList, fileNames);
-
-      // 流式逐行合并写入临时文件：首文件表头 + 各文件数据行（切掉各自表头行）。
-      //   writeRowsStreamed 内部 ExcelJS WorkbookWriter 逐行 addRow().commit()，超 104 万行自动分 sheet（by-name 格式与现状一致）。
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
       const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
-      const writeRes = await toolboxWriteRowsStreamed({
-        savePath: tempPath,
-        normalizedHeaders: baseHeaders,
-        sheetBaseName: 'COMMON',
-        writeDataRows: async (emit) => {
-          for (const p of filePaths) {
-            if (toolboxIsStreamableXlsx(p)) {
-              // eslint-disable-next-line no-await-in-loop
-              await toolboxStreamDataRows(p, (cells) => emit(cells));
-            } else {
-              // .csv/.xls 回退：全量 readRows 后切表头行（slice(1)）逐行喂——与流式「切首行透传其余」口径一致。
-              const rows = readRows(p);
-              for (let r = 1; r < rows.length; r += 1) {
-                emit(Array.isArray(rows[r]) ? rows[r] : []);
-              }
-            }
-          }
-        }
-      });
+      try {
+        const writeRes = await toolboxMergeFilesToXlsx({
+          filePaths,
+          savePath: tempPath,
+          sheetBaseName: 'COMMON'
+        });
 
-      const saveResult = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: toolboxBuildMergeFileName(),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          defaultPath: toolboxBuildMergeFileName(),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { status: 'cancelled' };
+        }
+        const publishResult = toolboxPublishMergedWorkbook(tempPath, saveResult.filePath);
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'toolbox',
+          message: '工具箱合并表格成功',
+          details: [
+            `合并文件数：${writeRes.fileCount}`,
+            `参与合并 sheet 数：${writeRes.inputSheetCount}`,
+            `数据行数：${writeRes.dataRowCount}`,
+            `输出 sheet 数：${writeRes.sheetCount}`,
+            `导出路径：${saveResult.filePath}`,
+            ...(publishResult.warnings || [])
+          ]
+        });
+        return { status: 'success', filePath: saveResult.filePath };
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
       }
-      fs.copyFileSync(tempPath, saveResult.filePath);
-      appendActivityLogEntry({
-        level: 'info',
-        source: 'main',
-        domain: 'toolbox',
-        message: '工具箱合并表格成功',
-        details: [
-          `合并文件数：${filePaths.length}`,
-          `数据行数：${writeRes.dataRowCount}`,
-          `导出路径：${saveResult.filePath}`
-        ]
-      });
-      return { status: 'success', filePath: saveResult.filePath };
     } catch (error) {
       return toolboxFailureResult(error);
     }

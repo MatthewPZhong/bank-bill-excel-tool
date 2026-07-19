@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.18",
-    "scannedAt": "2026-07-17T09:57:05.324Z",
+    "version": "3.0.19",
+    "scannedAt": "2026-07-19T10:42:32.639Z",
     "root": "src",
-    "totalFiles": 195,
-    "totalTopLevelNames": 2187,
+    "totalFiles": 196,
+    "totalTopLevelNames": 2200,
     "buckets": {
-      "shared": 340,
-      "paired": 563,
-      "local": 1146,
-      "crossFile": 903
+      "shared": 338,
+      "paired": 570,
+      "local": 1154,
+      "crossFile": 908
     }
   },
   "A": {
@@ -76,6 +76,7 @@
           "src/main-process/statement-generation.js",
           "src/main-process/statement-session.js",
           "src/main-process/table-type-detector.js",
+          "src/main-process/toolbox-merge-io.js",
           "src/main-process/toolbox-multi-split.js",
           "src/main-process/toolbox-stream-io.js",
           "src/main-process/vcc-op-calc-session.js",
@@ -121,10 +122,6 @@
           {
             "file": "src/backend/big-table-import/pipeline.js",
             "count": 4
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 2
           },
           {
             "file": "src/backend/biz-op-recon-import/import-worker.js",
@@ -208,7 +205,7 @@
           },
           {
             "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/backend/usage-stats.js",
@@ -343,6 +340,10 @@
             "count": 2
           },
           {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 8
+          },
+          {
             "file": "src/main-process/toolbox-multi-split.js",
             "count": 1
           },
@@ -363,7 +364,7 @@
             "count": 2
           }
         ],
-        "totalHits": 252,
+        "totalHits": 259,
         "fileSpan": 70
       },
       {
@@ -416,6 +417,7 @@
           "src/main-process/run-check-multiworker-worker.js",
           "src/main-process/run-check-multiworker.js",
           "src/main-process/scenario-hit-rows-writer.js",
+          "src/main-process/toolbox-merge-io.js",
           "src/main-process/toolbox-multi-split.js",
           "src/main-process/toolbox-stream-io.js",
           "src/main.js"
@@ -614,6 +616,10 @@
             "count": 5
           },
           {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 8
+          },
+          {
             "file": "src/main-process/toolbox-multi-split.js",
             "count": 1
           },
@@ -626,8 +632,8 @@
             "count": 1
           }
         ],
-        "totalHits": 182,
-        "fileSpan": 51
+        "totalHits": 190,
+        "fileSpan": 52
       },
       {
         "name": "parse",
@@ -883,6 +889,10 @@
             "count": 5
           },
           {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
             "file": "src/main-process/toolbox-multi-split.js",
             "count": 1
           },
@@ -899,8 +909,8 @@
             "count": 2
           }
         ],
-        "totalHits": 144,
-        "fileSpan": 27
+        "totalHits": 146,
+        "fileSpan": 28
       },
       {
         "name": "FileValidationError",
@@ -1015,12 +1025,16 @@
             "count": 2
           },
           {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 8
+          },
+          {
             "file": "src/main.js",
             "count": 2
           }
         ],
-        "totalHits": 114,
-        "fileSpan": 24
+        "totalHits": 122,
+        "fileSpan": 25
       },
       {
         "name": "normalizeCellValue",
@@ -1124,6 +1138,90 @@
         ],
         "totalHits": 224,
         "fileSpan": 21
+      },
+      {
+        "name": "XLSX",
+        "defFiles": [
+          "src/backend/bank-bu-recon-import/reader.js",
+          "src/backend/biz-op-recon-import/reader.js",
+          "src/backend/file-service/normalizers.js",
+          "src/backend/file-service/readers.js",
+          "src/backend/file-service/writers.js",
+          "src/backend/pending-export/writer.js",
+          "src/backend/pending-import/removed-reader.js",
+          "src/constants/fund-type-enum.js",
+          "src/constants/gateway-recon-headers-loader.js",
+          "src/main-process/bank-statement-io.js",
+          "src/main-process/duplicate-inbound-match/service.js",
+          "src/main-process/pending-session.js",
+          "src/main-process/recon-id-fix-io.js",
+          "src/main-process/toolbox-merge-io.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/writers.js",
+            "count": 20
+          },
+          {
+            "file": "src/backend/pending-export/writer.js",
+            "count": 9
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/constants/fund-type-enum.js",
+            "count": 3
+          },
+          {
+            "file": "src/constants/gateway-recon-headers-loader.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/bank-statement-io.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pending-session.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/recon-id-fix-io.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 79,
+        "fileSpan": 15
       },
       {
         "name": "appendModuleLog",
@@ -1277,85 +1375,6 @@
         ],
         "totalHits": 30,
         "fileSpan": 15
-      },
-      {
-        "name": "XLSX",
-        "defFiles": [
-          "src/backend/bank-bu-recon-import/reader.js",
-          "src/backend/biz-op-recon-import/reader.js",
-          "src/backend/file-service/normalizers.js",
-          "src/backend/file-service/readers.js",
-          "src/backend/file-service/writers.js",
-          "src/backend/pending-export/writer.js",
-          "src/backend/pending-import/removed-reader.js",
-          "src/constants/fund-type-enum.js",
-          "src/constants/gateway-recon-headers-loader.js",
-          "src/main-process/bank-statement-io.js",
-          "src/main-process/duplicate-inbound-match/service.js",
-          "src/main-process/pending-session.js",
-          "src/main-process/recon-id-fix-io.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/writers.js",
-            "count": 20
-          },
-          {
-            "file": "src/backend/pending-export/writer.js",
-            "count": 9
-          },
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/constants/fund-type-enum.js",
-            "count": 3
-          },
-          {
-            "file": "src/constants/gateway-recon-headers-loader.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/bank-statement-io.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/service.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pending-session.js",
-            "count": 11
-          },
-          {
-            "file": "src/main-process/recon-id-fix-io.js",
-            "count": 8
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 76,
-        "fileSpan": 14
       },
       {
         "name": "FLOW_HEADERS",
@@ -1638,6 +1657,64 @@
         "fileSpan": 13
       },
       {
+        "name": "state",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 26
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 30
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 29
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 8
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 30
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 55
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 41
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 209
+          }
+        ],
+        "totalHits": 440,
+        "fileSpan": 12
+      },
+      {
         "name": "pad",
         "defFiles": [
           "src/backend/logger.js",
@@ -1828,60 +1905,6 @@
         "fileSpan": 12
       },
       {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 26
-          },
-          {
-            "file": "src/main-process/app-updater.js",
-            "count": 30
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 29
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 8
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 30
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 55
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 41
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 209
-          }
-        ],
-        "totalHits": 435,
-        "fileSpan": 11
-      },
-      {
         "name": "ExcelJS",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-writer.js",
@@ -1946,6 +1969,125 @@
         "fileSpan": 11
       },
       {
+        "name": "isRowMeaningful",
+        "defFiles": [
+          "src/backend/file-service/common.js",
+          "src/main-process/linked-table-stream-source.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-bu-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-import/removed-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-op-calc-import/reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/linked-table-stream-source.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 30,
+        "fileSpan": 11
+      },
+      {
+        "name": "crypto",
+        "defFiles": [
+          "src/backend/pending-import/validator.js",
+          "src/backend/pending-reconcile/engine.js",
+          "src/backend/pre-fund-reconciliation-run-store.js",
+          "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "src/main-process/duplicate-inbound-match/service.js",
+          "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+          "src/main-process/pre-fund-reconciliation/service.js",
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-import/validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pending-reconcile/engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 28,
+        "fileSpan": 11
+      },
+      {
         "name": "PENDING_COLUMNS",
         "defFiles": [
           "src/backend/pending-db/migrations.js",
@@ -2002,116 +2144,6 @@
           }
         ],
         "totalHits": 39,
-        "fileSpan": 10
-      },
-      {
-        "name": "crypto",
-        "defFiles": [
-          "src/backend/pending-import/validator.js",
-          "src/backend/pending-reconcile/engine.js",
-          "src/backend/pre-fund-reconciliation-run-store.js",
-          "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "src/main-process/duplicate-inbound-match/service.js",
-          "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-          "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-          "src/main-process/pre-fund-reconciliation/service.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-import/validator.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pending-reconcile/engine.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/service.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 26,
-        "fileSpan": 10
-      },
-      {
-        "name": "isRowMeaningful",
-        "defFiles": [
-          "src/backend/file-service/common.js",
-          "src/main-process/linked-table-stream-source.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/bank-bu-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 6
-          },
-          {
-            "file": "src/backend/pending-import/removed-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-op-calc-import/reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/linked-table-stream-source.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 26,
         "fileSpan": 10
       },
       {
@@ -3210,6 +3242,46 @@
         "fileSpan": 7
       },
       {
+        "name": "readRows",
+        "defFiles": [
+          "src/backend/bank-account-import.js",
+          "src/backend/file-service/readers.js",
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/bank-account-import.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/file-service/normalizers.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 7
+      },
+      {
         "name": "createContract",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/contract-bill.js",
@@ -3245,45 +3317,6 @@
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
             "count": 1
-          }
-        ],
-        "totalHits": 13,
-        "fileSpan": 7
-      },
-      {
-        "name": "loadSharedStrings",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/big-table-import/engine.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/import-worker.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-            "count": 2
           }
         ],
         "totalHits": 13,
@@ -3437,6 +3470,42 @@
           }
         ],
         "totalHits": 570,
+        "fileSpan": 6
+      },
+      {
+        "name": "emit",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/import-worker.js",
+          "src/backend/pending-import/worker.js",
+          "src/main-process/pending-archive-worker.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pending-import/worker.js",
+            "count": 10
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pending-archive-worker.js",
+            "count": 10
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 32,
         "fileSpan": 6
       },
       {
@@ -3657,36 +3726,34 @@
         "fileSpan": 6
       },
       {
-        "name": "readRows",
+        "name": "loadSharedStrings",
         "defFiles": [
-          "src/backend/bank-account-import.js",
-          "src/backend/file-service/readers.js",
-          "src/main-process/toolbox-stream-io.js"
+          "src/backend/acquiring-bill-currency-import/reader.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/bank-account-import.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/file-service/normalizers.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
             "count": 1
           },
           {
-            "file": "src/main-process/toolbox-stream-io.js",
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/big-table-import/engine.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/big-table-import/import-worker.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
             "count": 3
           },
           {
-            "file": "src/main.js",
-            "count": 1
+            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+            "count": 2
           }
         ],
         "totalHits": 12,
@@ -3721,6 +3788,40 @@
           },
           {
             "file": "src/renderer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 6
+      },
+      {
+        "name": "trimTrailingEmptyCells",
+        "defFiles": [
+          "src/backend/file-service/common.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/common.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -3794,6 +3895,41 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 6
+      },
+      {
+        "name": "randomUUID",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/template-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/template-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 1
           }
         ],
@@ -3965,38 +4101,6 @@
           }
         ],
         "totalHits": 35,
-        "fileSpan": 5
-      },
-      {
-        "name": "emit",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/import-worker.js",
-          "src/backend/pending-import/worker.js",
-          "src/main-process/pending-archive-worker.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/pending-import/worker.js",
-            "count": 10
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/pending-archive-worker.js",
-            "count": 10
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 31,
         "fileSpan": 5
       },
       {
@@ -4194,38 +4298,6 @@
         "fileSpan": 5
       },
       {
-        "name": "SHARED_STRINGS_ENTRY_NAME",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/big-table-import/zip-reader.js",
-          "src/backend/pending-import/xlsx-size-preflight.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/pending-import/xlsx-size-preflight.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 5
-      },
-      {
         "name": "VALID_DIRECTION_IN",
         "defFiles": [
           "src/backend/biz-op-recon-import/validator.js",
@@ -4354,37 +4426,6 @@
         "fileSpan": 5
       },
       {
-        "name": "openZipWithEntries",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 13,
-        "fileSpan": 5
-      },
-      {
         "name": "bankAmountAbs",
         "defFiles": [
           "src/main-process/scenario-engines/many-to-many-detector.js",
@@ -4412,6 +4453,69 @@
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
             "count": 3
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 5
+      },
+      {
+        "name": "openZipWithEntries",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 5
+      },
+      {
+        "name": "SHARED_STRINGS_ENTRY_NAME",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/big-table-import/zip-reader.js",
+          "src/backend/pending-import/xlsx-size-preflight.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pending-import/xlsx-size-preflight.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+            "count": 2
           }
         ],
         "totalHits": 12,
@@ -4640,36 +4744,6 @@
         "fileSpan": 5
       },
       {
-        "name": "trimTrailingEmptyCells",
-        "defFiles": [
-          "src/backend/file-service/common.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/common.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 5
-      },
-      {
         "name": "formatTimestamp",
         "defFiles": [
           "src/backend/database/backup.js",
@@ -4732,37 +4806,6 @@
           {
             "file": "src/backend/vcc-op-calc-import/reader.js",
             "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 5
-      },
-      {
-        "name": "randomUUID",
-        "defFiles": [
-          "src/backend/database/migrations.js",
-          "src/backend/database/template-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/migrations.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/template-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 1
           }
         ],
         "totalHits": 9,
@@ -6432,6 +6475,33 @@
         "fileSpan": 4
       },
       {
+        "name": "scanSheetRows",
+        "defFiles": [
+          "src/backend/big-table-import/row-scanner.js",
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/engine.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/big-table-import/import-worker.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 4
+      },
+      {
         "name": "setChildParent",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -6743,33 +6813,6 @@
           {
             "file": "src/renderer-dialogs.js",
             "count": 1
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 4
-      },
-      {
-        "name": "scanSheetRows",
-        "defFiles": [
-          "src/backend/big-table-import/row-scanner.js",
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/engine.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/import-worker.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
           }
         ],
         "totalHits": 6,
@@ -8177,28 +8220,6 @@
         "fileSpan": 3
       },
       {
-        "name": "locateSheets",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
         "name": "normalizeCurrency",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -8286,6 +8307,30 @@
           {
             "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
             "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
+        "name": "ToolboxHeaderMismatchError",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "src/main-process/toolbox-merge-io.js",
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 4
           }
         ],
         "totalHits": 8,
@@ -8450,6 +8495,50 @@
         "fileSpan": 3
       },
       {
+        "name": "ensureSupportedFile",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
+        "name": "locateSheets",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
         "name": "normalizeInputFilePaths",
         "defFiles": [
           "src/main-process/statement-session.js"
@@ -8536,29 +8625,6 @@
           {
             "file": "src/backend/pending-import/removed-reader.js",
             "count": 3
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 3
-      },
-      {
-        "name": "ToolboxHeaderMismatchError",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "src/main-process/toolbox.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox.js",
-            "count": 4
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
           }
         ],
         "totalHits": 7,
@@ -10309,28 +10375,6 @@
         "fileSpan": 3
       },
       {
-        "name": "assertHeadersIdentical",
-        "defFiles": [
-          "src/main-process/toolbox.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 3
-      },
-      {
         "name": "clearByDate",
         "defFiles": [
           "src/backend/biz-op-recon-db/flow-imports-repository.js"
@@ -10611,50 +10655,6 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 1
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 3
-      },
-      {
-        "name": "mergeAoaRows",
-        "defFiles": [
-          "src/main-process/toolbox.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 3
-      },
-      {
-        "name": "openWorkbook",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/engine.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/import-worker.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 2
           }
         ],
         "totalHits": 4,
@@ -11186,24 +11186,6 @@
         "fileSpan": 2
       },
       {
-        "name": "BigTableImportError",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/engine.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 13,
-        "fileSpan": 2
-      },
-      {
         "name": "ERROR_CODE",
         "defFiles": [
           "src/backend/pending-import/removed-reader.js",
@@ -11441,6 +11423,24 @@
           }
         ],
         "totalHits": 11,
+        "fileSpan": 2
+      },
+      {
+        "name": "BigTableImportError",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/engine.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 10,
         "fileSpan": 2
       },
       {
@@ -11983,6 +11983,25 @@
         "fileSpan": 2
       },
       {
+        "name": "TOOLBOX_MAX_COL_COUNT",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
         "name": "wrapReadError",
         "defFiles": [
           "src/backend/biz-op-recon-import/reader-streamed.js",
@@ -12257,25 +12276,6 @@
         "fileSpan": 2
       },
       {
-        "name": "TOOLBOX_MAX_COL_COUNT",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "src/main-process/toolbox-stream-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
         "name": "VALID_CATEGORIES",
         "defFiles": [
           "src/backend/database/scenarios-repository.js",
@@ -12494,6 +12494,25 @@
           {
             "file": "src/main-process/platform-cleanup-writer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "createRowsStreamWriter",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js",
+          "src/main-process/toolbox-stream-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 4
           }
         ],
         "totalHits": 6,
@@ -13802,25 +13821,6 @@
         "fileSpan": 2
       },
       {
-        "name": "normalizeWorksheetTarget",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js",
-          "src/backend/biz-op-recon-import/reader-streamed.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "PART_TABLE",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -14055,24 +14055,6 @@
           {
             "file": "src/main-process/vcc-op-calc-session.js",
             "count": 4
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
-        "name": "WORKBOOK_ENTRY_NAME",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-            "count": 3
           }
         ],
         "totalHits": 6,
@@ -14443,24 +14425,6 @@
           },
           {
             "file": "src/main-process/big-table-import-dispatch.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "ensureSupportedFile",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/file-service/readers.js",
             "count": 3
           }
         ],
@@ -14850,6 +14814,25 @@
         "fileSpan": 2
       },
       {
+        "name": "normalizeWorksheetTarget",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js",
+          "src/backend/biz-op-recon-import/reader-streamed.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "openDb",
         "defFiles": [
           "src/backend/biz-op-recon-import/import-worker.js"
@@ -15110,25 +15093,6 @@
         "fileSpan": 2
       },
       {
-        "name": "sax",
-        "defFiles": [
-          "src/backend/acquiring-bill-currency-import/reader.js",
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/acquiring-bill-currency-import/reader.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "scan",
         "defFiles": [
           "src/main-process/vcc-op-calc-session.js"
@@ -15313,6 +15277,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ToolboxSheetReadError",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "UNBALANCED_HEADERS",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/output-mapper.js"
@@ -15416,6 +15398,24 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "WORKBOOK_ENTRY_NAME",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
             "count": 3
           }
         ],
@@ -16973,6 +16973,24 @@
         "fileSpan": 2
       },
       {
+        "name": "isMemoryLimitError",
+        "defFiles": [
+          "src/backend/file-service/readers.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/file-service/readers.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "isStreamableXlsx",
         "defFiles": [
           "src/main-process/toolbox-stream-io.js"
@@ -18234,6 +18252,25 @@
         "fileSpan": 2
       },
       {
+        "name": "sax",
+        "defFiles": [
+          "src/backend/acquiring-bill-currency-import/reader.js",
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "scanFields",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
@@ -18481,6 +18518,24 @@
           },
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "streamStrictWorkbookSheetTables",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 2
           }
         ],
@@ -18888,25 +18943,6 @@
         "fileSpan": 2
       },
       {
-        "name": "xmlAttrUnescape",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js",
-          "src/backend/biz-op-recon-import/reader-streamed.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "AppDatabase",
         "defFiles": [
           "src/backend/database.js",
@@ -18974,6 +19010,24 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "assertHeadersIdentical",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
           }
         ],
         "totalHits": 3,
@@ -20032,6 +20086,24 @@
         "fileSpan": 2
       },
       {
+        "name": "mergeAoaRows",
+        "defFiles": [
+          "src/main-process/toolbox.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "mergeBankStatementRows",
         "defFiles": [
           "src/main-process/bank-statement-merge.js"
@@ -20039,6 +20111,24 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-statement-merge.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "mergeToolboxFilesToXlsx",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 2
           },
           {
@@ -20208,6 +20298,24 @@
           },
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "publishMergedWorkbook",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -20942,6 +21050,25 @@
           {
             "file": "src/main.js",
             "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "xmlAttrUnescape",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js",
+          "src/backend/biz-op-recon-import/reader-streamed.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+            "count": 2
           }
         ],
         "totalHits": 3,
@@ -23739,6 +23866,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeLogicalRow",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeOrderValue",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/matching-engine.js"
@@ -24439,20 +24580,6 @@
         "fileSpan": 1
       },
       {
-        "name": "createRowsStreamWriter",
-        "defFiles": [
-          "src/main-process/toolbox-stream-io.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "CURRENT_MODULE_VALID",
         "defFiles": [
           "src/backend/database/settings-repository.js"
@@ -25139,13 +25266,13 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeLogicalRow",
+        "name": "normalizeHeaderRow",
         "defFiles": [
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+          "src/main-process/toolbox-merge-io.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 4
           }
         ],
@@ -25286,20 +25413,6 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "readEntryAsString",
-        "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/zip-reader.js",
             "count": 4
           }
         ],
@@ -26210,6 +26323,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertMergeHeadersIdentical",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 3
           }
         ],
@@ -27554,6 +27681,20 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "detectMergeInputKind",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 3
           }
         ],
@@ -29017,6 +29158,20 @@
         "fileSpan": 1
       },
       {
+        "name": "makeStopSignal",
+        "defFiles": [
+          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "MANUAL_REASON_ORDER",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/matching-engine.js"
@@ -30109,6 +30264,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readEntryAsString",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "readOwnValue",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -30879,6 +31048,20 @@
         "fileSpan": 1
       },
       {
+        "name": "sheetSourceLabel",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "SHORT_TABLE_COLUMN_THRESHOLD",
         "defFiles": [
           "src/main-process/table-type-detector.js"
@@ -31131,6 +31314,20 @@
         "fileSpan": 1
       },
       {
+        "name": "streamCsvTable",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "streamImportOneFile",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js"
@@ -31138,6 +31335,34 @@
         "refFiles": [
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "streamLegacyWorkbookSheetTables",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "streamMergeInputFile",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 3
           }
         ],
@@ -31250,6 +31475,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-stream-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "ToolboxMergePublishError",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 3
           }
         ],
@@ -31411,13 +31650,13 @@
         "fileSpan": 1
       },
       {
-        "name": "WORKBOOK_RELS_ENTRY_NAME",
+        "name": "workbookSheetHidden",
         "defFiles": [
-          "src/backend/big-table-import/zip-reader.js"
+          "src/main-process/toolbox-merge-io.js"
         ],
         "refFiles": [
           {
-            "file": "src/backend/big-table-import/zip-reader.js",
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 3
           }
         ],
@@ -34127,20 +34366,6 @@
         "fileSpan": 1
       },
       {
-        "name": "isMemoryLimitError",
-        "defFiles": [
-          "src/backend/file-service/readers.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/file-service/readers.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "isNewAccountFormComplete",
         "defFiles": [
           "src/renderer.js"
@@ -34540,20 +34765,6 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "makeStopSignal",
-        "defFiles": [
-          "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
             "count": 2
           }
         ],
@@ -35702,6 +35913,20 @@
         "refFiles": [
           {
             "file": "src/constants/fund-type-enum.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "readFileMagic",
+        "defFiles": [
+          "src/main-process/toolbox-merge-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
             "count": 2
           }
         ],
@@ -37039,6 +37264,20 @@
         "fileSpan": 1
       },
       {
+        "name": "WORKBOOK_RELS_ENTRY_NAME",
+        "defFiles": [
+          "src/backend/big-table-import/zip-reader.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/zip-reader.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "WORKBOOK_RELS_XML",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js"
@@ -37187,6 +37426,7 @@
         "src/main-process/statement-generation.js",
         "src/main-process/statement-session.js",
         "src/main-process/table-type-detector.js",
+        "src/main-process/toolbox-merge-io.js",
         "src/main-process/toolbox-multi-split.js",
         "src/main-process/toolbox-stream-io.js",
         "src/main-process/vcc-op-calc-session.js",
@@ -37232,10 +37472,6 @@
         {
           "file": "src/backend/big-table-import/pipeline.js",
           "count": 4
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 2
         },
         {
           "file": "src/backend/biz-op-recon-import/import-worker.js",
@@ -37319,7 +37555,7 @@
         },
         {
           "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/backend/usage-stats.js",
@@ -37454,6 +37690,10 @@
           "count": 2
         },
         {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 8
+        },
+        {
           "file": "src/main-process/toolbox-multi-split.js",
           "count": 1
         },
@@ -37474,7 +37714,7 @@
           "count": 2
         }
       ],
-      "totalHits": 252,
+      "totalHits": 259,
       "fileSpan": 70
     },
     {
@@ -37527,6 +37767,7 @@
         "src/main-process/run-check-multiworker-worker.js",
         "src/main-process/run-check-multiworker.js",
         "src/main-process/scenario-hit-rows-writer.js",
+        "src/main-process/toolbox-merge-io.js",
         "src/main-process/toolbox-multi-split.js",
         "src/main-process/toolbox-stream-io.js",
         "src/main.js"
@@ -37725,6 +37966,10 @@
           "count": 5
         },
         {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 8
+        },
+        {
           "file": "src/main-process/toolbox-multi-split.js",
           "count": 1
         },
@@ -37737,8 +37982,8 @@
           "count": 1
         }
       ],
-      "totalHits": 182,
-      "fileSpan": 51
+      "totalHits": 190,
+      "fileSpan": 52
     },
     {
       "name": "parse",
@@ -37994,6 +38239,10 @@
           "count": 5
         },
         {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
           "file": "src/main-process/toolbox-multi-split.js",
           "count": 1
         },
@@ -38010,8 +38259,8 @@
           "count": 2
         }
       ],
-      "totalHits": 144,
-      "fileSpan": 27
+      "totalHits": 146,
+      "fileSpan": 28
     },
     {
       "name": "FileValidationError",
@@ -38126,12 +38375,16 @@
           "count": 2
         },
         {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 8
+        },
+        {
           "file": "src/main.js",
           "count": 2
         }
       ],
-      "totalHits": 114,
-      "fileSpan": 24
+      "totalHits": 122,
+      "fileSpan": 25
     },
     {
       "name": "normalizeCellValue",
@@ -38235,6 +38488,90 @@
       ],
       "totalHits": 224,
       "fileSpan": 21
+    },
+    {
+      "name": "XLSX",
+      "defFiles": [
+        "src/backend/bank-bu-recon-import/reader.js",
+        "src/backend/biz-op-recon-import/reader.js",
+        "src/backend/file-service/normalizers.js",
+        "src/backend/file-service/readers.js",
+        "src/backend/file-service/writers.js",
+        "src/backend/pending-export/writer.js",
+        "src/backend/pending-import/removed-reader.js",
+        "src/constants/fund-type-enum.js",
+        "src/constants/gateway-recon-headers-loader.js",
+        "src/main-process/bank-statement-io.js",
+        "src/main-process/duplicate-inbound-match/service.js",
+        "src/main-process/pending-session.js",
+        "src/main-process/recon-id-fix-io.js",
+        "src/main-process/toolbox-merge-io.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/writers.js",
+          "count": 20
+        },
+        {
+          "file": "src/backend/pending-export/writer.js",
+          "count": 9
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/constants/fund-type-enum.js",
+          "count": 3
+        },
+        {
+          "file": "src/constants/gateway-recon-headers-loader.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/bank-statement-io.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/service.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pending-session.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/recon-id-fix-io.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 79,
+      "fileSpan": 15
     },
     {
       "name": "appendModuleLog",
@@ -38388,85 +38725,6 @@
       ],
       "totalHits": 30,
       "fileSpan": 15
-    },
-    {
-      "name": "XLSX",
-      "defFiles": [
-        "src/backend/bank-bu-recon-import/reader.js",
-        "src/backend/biz-op-recon-import/reader.js",
-        "src/backend/file-service/normalizers.js",
-        "src/backend/file-service/readers.js",
-        "src/backend/file-service/writers.js",
-        "src/backend/pending-export/writer.js",
-        "src/backend/pending-import/removed-reader.js",
-        "src/constants/fund-type-enum.js",
-        "src/constants/gateway-recon-headers-loader.js",
-        "src/main-process/bank-statement-io.js",
-        "src/main-process/duplicate-inbound-match/service.js",
-        "src/main-process/pending-session.js",
-        "src/main-process/recon-id-fix-io.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/writers.js",
-          "count": 20
-        },
-        {
-          "file": "src/backend/pending-export/writer.js",
-          "count": 9
-        },
-        {
-          "file": "src/backend/pending-import/removed-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/constants/fund-type-enum.js",
-          "count": 3
-        },
-        {
-          "file": "src/constants/gateway-recon-headers-loader.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/bank-statement-io.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/service.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pending-session.js",
-          "count": 11
-        },
-        {
-          "file": "src/main-process/recon-id-fix-io.js",
-          "count": 8
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 76,
-      "fileSpan": 14
     },
     {
       "name": "FLOW_HEADERS",
@@ -38749,6 +39007,64 @@
       "fileSpan": 13
     },
     {
+      "name": "state",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/row-scanner.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 26
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 30
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "count": 29
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 8
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 30
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 55
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 41
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 209
+        }
+      ],
+      "totalHits": 440,
+      "fileSpan": 12
+    },
+    {
       "name": "pad",
       "defFiles": [
         "src/backend/logger.js",
@@ -38939,60 +39255,6 @@
       "fileSpan": 12
     },
     {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/row-scanner.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 26
-        },
-        {
-          "file": "src/main-process/app-updater.js",
-          "count": 30
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-          "count": 29
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 8
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 30
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 55
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 41
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 209
-        }
-      ],
-      "totalHits": 435,
-      "fileSpan": 11
-    },
-    {
       "name": "ExcelJS",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-writer.js",
@@ -39057,6 +39319,125 @@
       "fileSpan": 11
     },
     {
+      "name": "isRowMeaningful",
+      "defFiles": [
+        "src/backend/file-service/common.js",
+        "src/main-process/linked-table-stream-source.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-bu-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-import/removed-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-op-calc-import/reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/linked-table-stream-source.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 30,
+      "fileSpan": 11
+    },
+    {
+      "name": "crypto",
+      "defFiles": [
+        "src/backend/pending-import/validator.js",
+        "src/backend/pending-reconcile/engine.js",
+        "src/backend/pre-fund-reconciliation-run-store.js",
+        "src/main-process/duplicate-inbound-match/excel-writer.js",
+        "src/main-process/duplicate-inbound-match/service.js",
+        "src/main-process/pre-fund-reconciliation/matching-engine.js",
+        "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+        "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+        "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+        "src/main-process/pre-fund-reconciliation/service.js",
+        "src/main-process/toolbox-merge-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-import/validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pending-reconcile/engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/service.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 28,
+      "fileSpan": 11
+    },
+    {
       "name": "PENDING_COLUMNS",
       "defFiles": [
         "src/backend/pending-db/migrations.js",
@@ -39113,116 +39494,6 @@
         }
       ],
       "totalHits": 39,
-      "fileSpan": 10
-    },
-    {
-      "name": "crypto",
-      "defFiles": [
-        "src/backend/pending-import/validator.js",
-        "src/backend/pending-reconcile/engine.js",
-        "src/backend/pre-fund-reconciliation-run-store.js",
-        "src/main-process/duplicate-inbound-match/excel-writer.js",
-        "src/main-process/duplicate-inbound-match/service.js",
-        "src/main-process/pre-fund-reconciliation/matching-engine.js",
-        "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-        "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-        "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-        "src/main-process/pre-fund-reconciliation/service.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-import/validator.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pending-reconcile/engine.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/service.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 26,
-      "fileSpan": 10
-    },
-    {
-      "name": "isRowMeaningful",
-      "defFiles": [
-        "src/backend/file-service/common.js",
-        "src/main-process/linked-table-stream-source.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/bank-bu-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 6
-        },
-        {
-          "file": "src/backend/pending-import/removed-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-op-calc-import/reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/linked-table-stream-source.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 26,
       "fileSpan": 10
     },
     {
@@ -40321,6 +40592,46 @@
       "fileSpan": 7
     },
     {
+      "name": "readRows",
+      "defFiles": [
+        "src/backend/bank-account-import.js",
+        "src/backend/file-service/readers.js",
+        "src/main-process/toolbox-stream-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/bank-account-import.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/file-service/normalizers.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 7
+    },
+    {
       "name": "createContract",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/contract-bill.js",
@@ -40356,45 +40667,6 @@
         {
           "file": "src/main-process/acquiring-bill-currency-session.js",
           "count": 1
-        }
-      ],
-      "totalHits": 13,
-      "fileSpan": 7
-    },
-    {
-      "name": "loadSharedStrings",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/big-table-import/engine.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/import-worker.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-          "count": 2
         }
       ],
       "totalHits": 13,
@@ -40548,6 +40820,42 @@
         }
       ],
       "totalHits": 570,
+      "fileSpan": 6
+    },
+    {
+      "name": "emit",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/backend/pending-import/worker.js",
+        "src/main-process/pending-archive-worker.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pending-import/worker.js",
+          "count": 10
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pending-archive-worker.js",
+          "count": 10
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 32,
       "fileSpan": 6
     },
     {
@@ -40768,36 +41076,34 @@
       "fileSpan": 6
     },
     {
-      "name": "readRows",
+      "name": "loadSharedStrings",
       "defFiles": [
-        "src/backend/bank-account-import.js",
-        "src/backend/file-service/readers.js",
-        "src/main-process/toolbox-stream-io.js"
+        "src/backend/acquiring-bill-currency-import/reader.js"
       ],
       "refFiles": [
         {
-          "file": "src/backend/bank-account-import.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/file-service/normalizers.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
           "count": 1
         },
         {
-          "file": "src/main-process/toolbox-stream-io.js",
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/big-table-import/engine.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/big-table-import/import-worker.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
           "count": 3
         },
         {
-          "file": "src/main.js",
-          "count": 1
+          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "count": 2
         }
       ],
       "totalHits": 12,
@@ -40832,6 +41138,40 @@
         },
         {
           "file": "src/renderer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 6
+    },
+    {
+      "name": "trimTrailingEmptyCells",
+      "defFiles": [
+        "src/backend/file-service/common.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/common.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -40905,6 +41245,41 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 6
+    },
+    {
+      "name": "randomUUID",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/template-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/template-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
           "count": 1
         }
       ],
@@ -41076,38 +41451,6 @@
         }
       ],
       "totalHits": 35,
-      "fileSpan": 5
-    },
-    {
-      "name": "emit",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/import-worker.js",
-        "src/backend/pending-import/worker.js",
-        "src/main-process/pending-archive-worker.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/import-worker.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/pending-import/worker.js",
-          "count": 10
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/split-export-filter.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/pending-archive-worker.js",
-          "count": 10
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 31,
       "fileSpan": 5
     },
     {
@@ -41305,38 +41648,6 @@
       "fileSpan": 5
     },
     {
-      "name": "SHARED_STRINGS_ENTRY_NAME",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/big-table-import/zip-reader.js",
-        "src/backend/pending-import/xlsx-size-preflight.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/pending-import/xlsx-size-preflight.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 14,
-      "fileSpan": 5
-    },
-    {
       "name": "VALID_DIRECTION_IN",
       "defFiles": [
         "src/backend/biz-op-recon-import/validator.js",
@@ -41465,37 +41776,6 @@
       "fileSpan": 5
     },
     {
-      "name": "openZipWithEntries",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 13,
-      "fileSpan": 5
-    },
-    {
       "name": "bankAmountAbs",
       "defFiles": [
         "src/main-process/scenario-engines/many-to-many-detector.js",
@@ -41523,6 +41803,69 @@
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
           "count": 3
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 5
+    },
+    {
+      "name": "openZipWithEntries",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/big-table-import/zip-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 5
+    },
+    {
+      "name": "SHARED_STRINGS_ENTRY_NAME",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/big-table-import/zip-reader.js",
+        "src/backend/pending-import/xlsx-size-preflight.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pending-import/xlsx-size-preflight.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "count": 2
         }
       ],
       "totalHits": 12,
@@ -41751,36 +42094,6 @@
       "fileSpan": 5
     },
     {
-      "name": "trimTrailingEmptyCells",
-      "defFiles": [
-        "src/backend/file-service/common.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service/common.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 5
-    },
-    {
       "name": "formatTimestamp",
       "defFiles": [
         "src/backend/database/backup.js",
@@ -41843,37 +42156,6 @@
         {
           "file": "src/backend/vcc-op-calc-import/reader.js",
           "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 5
-    },
-    {
-      "name": "randomUUID",
-      "defFiles": [
-        "src/backend/database/migrations.js",
-        "src/backend/database/template-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/migrations.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/template-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 1
         }
       ],
       "totalHits": 9,
@@ -43543,6 +43825,33 @@
       "fileSpan": 4
     },
     {
+      "name": "scanSheetRows",
+      "defFiles": [
+        "src/backend/big-table-import/row-scanner.js",
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/engine.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/big-table-import/import-worker.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/big-table-import/row-scanner.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 4
+    },
+    {
       "name": "setChildParent",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -43854,33 +44163,6 @@
         {
           "file": "src/renderer-dialogs.js",
           "count": 1
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 4
-    },
-    {
-      "name": "scanSheetRows",
-      "defFiles": [
-        "src/backend/big-table-import/row-scanner.js",
-        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/engine.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/import-worker.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/row-scanner.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
         }
       ],
       "totalHits": 6,
@@ -45288,28 +45570,6 @@
       "fileSpan": 3
     },
     {
-      "name": "locateSheets",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
       "name": "normalizeCurrency",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/import-repository.js",
@@ -45397,6 +45657,30 @@
         {
           "file": "src/backend/toolbox-xlsx-stream/split-scan-fields.js",
           "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
+      "name": "ToolboxHeaderMismatchError",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+        "src/main-process/toolbox-merge-io.js",
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 4
         }
       ],
       "totalHits": 8,
@@ -45561,6 +45845,50 @@
       "fileSpan": 3
     },
     {
+      "name": "ensureSupportedFile",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
+      "name": "locateSheets",
+      "defFiles": [
+        "src/backend/big-table-import/zip-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
       "name": "normalizeInputFilePaths",
       "defFiles": [
         "src/main-process/statement-session.js"
@@ -45647,29 +45975,6 @@
         {
           "file": "src/backend/pending-import/removed-reader.js",
           "count": 3
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 3
-    },
-    {
-      "name": "ToolboxHeaderMismatchError",
-      "defFiles": [
-        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-        "src/main-process/toolbox.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox.js",
-          "count": 4
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
         }
       ],
       "totalHits": 7,
@@ -47420,28 +47725,6 @@
       "fileSpan": 3
     },
     {
-      "name": "assertHeadersIdentical",
-      "defFiles": [
-        "src/main-process/toolbox.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 3
-    },
-    {
       "name": "clearByDate",
       "defFiles": [
         "src/backend/biz-op-recon-db/flow-imports-repository.js"
@@ -47722,50 +48005,6 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 1
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 3
-    },
-    {
-      "name": "mergeAoaRows",
-      "defFiles": [
-        "src/main-process/toolbox.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 3
-    },
-    {
-      "name": "openWorkbook",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/engine.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/import-worker.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 2
         }
       ],
       "totalHits": 4,
@@ -48295,24 +48534,6 @@
       "fileSpan": 2
     },
     {
-      "name": "BigTableImportError",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/engine.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 13,
-      "fileSpan": 2
-    },
-    {
       "name": "ERROR_CODE",
       "defFiles": [
         "src/backend/pending-import/removed-reader.js",
@@ -48550,6 +48771,24 @@
         }
       ],
       "totalHits": 11,
+      "fileSpan": 2
+    },
+    {
+      "name": "BigTableImportError",
+      "defFiles": [
+        "src/backend/big-table-import/zip-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/engine.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 10,
       "fileSpan": 2
     },
     {
@@ -49092,6 +49331,25 @@
       "fileSpan": 2
     },
     {
+      "name": "TOOLBOX_MAX_COL_COUNT",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+        "src/main-process/toolbox-stream-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
       "name": "wrapReadError",
       "defFiles": [
         "src/backend/biz-op-recon-import/reader-streamed.js",
@@ -49366,25 +49624,6 @@
       "fileSpan": 2
     },
     {
-      "name": "TOOLBOX_MAX_COL_COUNT",
-      "defFiles": [
-        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-        "src/main-process/toolbox-stream-io.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
       "name": "VALID_CATEGORIES",
       "defFiles": [
         "src/backend/database/scenarios-repository.js",
@@ -49603,6 +49842,25 @@
         {
           "file": "src/main-process/platform-cleanup-writer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "createRowsStreamWriter",
+      "defFiles": [
+        "src/main-process/toolbox-merge-io.js",
+        "src/main-process/toolbox-stream-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 4
         }
       ],
       "totalHits": 6,
@@ -50911,25 +51169,6 @@
       "fileSpan": 2
     },
     {
-      "name": "normalizeWorksheetTarget",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js",
-        "src/backend/biz-op-recon-import/reader-streamed.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "PART_TABLE",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -51164,24 +51403,6 @@
         {
           "file": "src/main-process/vcc-op-calc-session.js",
           "count": 4
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
-      "name": "WORKBOOK_ENTRY_NAME",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
-          "count": 3
         }
       ],
       "totalHits": 6,
@@ -51552,24 +51773,6 @@
         },
         {
           "file": "src/main-process/big-table-import-dispatch.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "ensureSupportedFile",
-      "defFiles": [
-        "src/backend/file-service/readers.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/file-service.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/file-service/readers.js",
           "count": 3
         }
       ],
@@ -51959,6 +52162,25 @@
       "fileSpan": 2
     },
     {
+      "name": "normalizeWorksheetTarget",
+      "defFiles": [
+        "src/backend/big-table-import/zip-reader.js",
+        "src/backend/biz-op-recon-import/reader-streamed.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "openDb",
       "defFiles": [
         "src/backend/biz-op-recon-import/import-worker.js"
@@ -52219,25 +52441,6 @@
       "fileSpan": 2
     },
     {
-      "name": "sax",
-      "defFiles": [
-        "src/backend/acquiring-bill-currency-import/reader.js",
-        "src/backend/big-table-import/zip-reader.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/acquiring-bill-currency-import/reader.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "scan",
       "defFiles": [
         "src/main-process/vcc-op-calc-session.js"
@@ -52422,6 +52625,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ToolboxSheetReadError",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "UNBALANCED_HEADERS",
       "defFiles": [
         "src/main-process/pre-fund-reconciliation/output-mapper.js"
@@ -52525,6 +52746,24 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "WORKBOOK_ENTRY_NAME",
+      "defFiles": [
+        "src/backend/big-table-import/zip-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/document-statement-reader.js",
           "count": 3
         }
       ],
@@ -54082,6 +54321,24 @@
       "fileSpan": 2
     },
     {
+      "name": "isMemoryLimitError",
+      "defFiles": [
+        "src/backend/file-service/readers.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/file-service/readers.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "isStreamableXlsx",
       "defFiles": [
         "src/main-process/toolbox-stream-io.js"
@@ -55343,6 +55600,25 @@
       "fileSpan": 2
     },
     {
+      "name": "sax",
+      "defFiles": [
+        "src/backend/acquiring-bill-currency-import/reader.js",
+        "src/backend/big-table-import/zip-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "scanFields",
       "defFiles": [
         "src/backend/toolbox-xlsx-stream/split-scan-fields.js"
@@ -55590,6 +55866,24 @@
         },
         {
           "file": "src/main-process/duplicate-inbound-match/service.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "streamStrictWorkbookSheetTables",
+      "defFiles": [
+        "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
           "count": 2
         }
       ],
@@ -55997,25 +56291,6 @@
       "fileSpan": 2
     },
     {
-      "name": "xmlAttrUnescape",
-      "defFiles": [
-        "src/backend/big-table-import/zip-reader.js",
-        "src/backend/biz-op-recon-import/reader-streamed.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/zip-reader.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
       "name": "AppDatabase",
       "defFiles": [
         "src/backend/database.js",
@@ -56083,6 +56358,24 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "assertHeadersIdentical",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
         }
       ],
       "totalHits": 3,
@@ -57141,6 +57434,24 @@
       "fileSpan": 2
     },
     {
+      "name": "mergeAoaRows",
+      "defFiles": [
+        "src/main-process/toolbox.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
       "name": "mergeBankStatementRows",
       "defFiles": [
         "src/main-process/bank-statement-merge.js"
@@ -57148,6 +57459,24 @@
       "refFiles": [
         {
           "file": "src/main-process/bank-statement-merge.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "mergeToolboxFilesToXlsx",
+      "defFiles": [
+        "src/main-process/toolbox-merge-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
           "count": 2
         },
         {
@@ -57317,6 +57646,24 @@
         },
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "publishMergedWorkbook",
+      "defFiles": [
+        "src/main-process/toolbox-merge-io.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],
@@ -58051,6 +58398,25 @@
         {
           "file": "src/main.js",
           "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "xmlAttrUnescape",
+      "defFiles": [
+        "src/backend/big-table-import/zip-reader.js",
+        "src/backend/biz-op-recon-import/reader-streamed.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/zip-reader.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/reader-streamed.js",
+          "count": 2
         }
       ],
       "totalHits": 3,
