@@ -38,6 +38,6 @@
 ## Task 6：合并归档与在线发布
 
 - 归档 PR #95 与 v3.0.20 迭代 PRD。
-- 创建指向当前 `main` 的 annotated tag `v3.0.20`，等待 Windows Release workflow 完成。
+- 创建指向发布提交的 annotated tag `v3.0.20`，并完成 Windows Release workflow。
 - 回读 GitHub Release、`latest.yml`、Setup、blockmap 和 portable 资产并保存证据。
-- 状态：in-progress（合并、归档与最终发布前门禁完成，tag/Release 待执行）
+- 状态：done（tag 指向 `9b02fd1`；Release workflow `29733820343` 通过；四个资产与匿名 feed/Setup SHA-512 已校验）

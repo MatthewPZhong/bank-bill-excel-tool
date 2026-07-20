@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.20 PRD
 
 > 目标版本：`3.0.20`
-> 状态：release-ready（PR #95 已合入 `main`；最终发布前门禁通过）
+> 状态：released（PR #95 已合入 `main`；GitHub Release `v3.0.20` 已发布）
 > 归档：PR #95 merge commit `1142f7e`；源规格 `changes/3.0.20/spec.md`
 > 更新时间：2026-07-20
 > 适用仓库：`bank-bill-excel-tool`
@@ -50,5 +50,8 @@
 - 10 个主模块 preview 已生成并逐张复核，重复入金默认文案另由运行时脚本断言。
 - 第一轮 self-review 暴露不可复跑几何证据和失败日志假阳性；补齐脚本、Windows 门禁并修复日志后，最终 PM/Development 复审均确认无 P0-P4 Finding。
 - GitHub Windows PR workflow run `29733232198` 通过；PR #95 以 merge commit `1142f7e` 合入 `main`，远程与本地开发分支删除。
-- PR 归档见 `docs/prs/PR95-v3.0.20.md`；Release tag、workflow 与资产证据待发布完成后补录。
 - 合并归档后的最终 `main` 已重新通过 `npm ci`、完整 release-check、六组合几何门禁和变量门禁，可进入受控 tag 发布。
+- annotated tag `v3.0.20` 指向 `9b02fd1f8f9be9c615be8dce31b40292a0b993c3`；Windows Release workflow run [`29733820343`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29733820343) 全部通过。
+- GitHub Release [`v3.0.20`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.20) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml`。
+- 匿名 feed 返回 `version=3.0.20`；Setup 大小 `99,722,015` 字节、文件头 `MZ`，SHA-512 与 `latest.yml` 完全一致；blockmap 与 portable 的公开地址可匿名访问。
+- Windows 安装版三档缩放字形观感及旧版到 3.0.20 的升级数据保留，保留为发布后实机 canary。

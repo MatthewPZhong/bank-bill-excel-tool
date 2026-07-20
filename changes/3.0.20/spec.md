@@ -1,6 +1,6 @@
 # Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: release-ready（PR #95 已合入 `main`；最终发布前门禁通过）
+> status: released（PR #95 已合入 `main`；GitHub Release `v3.0.20` 已发布）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -86,5 +86,7 @@
 - 2026-07-20：Windows PR workflow run `29733232198` 通过；最终 PM/Development self-review 均为 P0-P4 Finding 0。
 - 2026-07-20：PR #95 以 merge commit `1142f7e` 合入 `main`，远程与本地开发分支删除。
 - 归档见 `docs/prs/PR95-v3.0.20.md` 与 `docs/iterations/v3.0.20/PRD-v3.0.20.md`。
-- 用户已授权发布收尾；`v3.0.20` tag、Release workflow 和线上资产证据待完成后补录。
 - 2026-07-20：最终 `main` 重新执行 `npm ci`、release-check、六组合 Electron 几何门禁、scan-vars 与 check-vars，全部通过；可创建发布 tag。
+- 2026-07-20：annotated tag `v3.0.20` 指向 `9b02fd1f8f9be9c615be8dce31b40292a0b993c3`；Windows Release workflow run [`29733820343`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29733820343) 全部通过。
+- 2026-07-20：GitHub Release [`v3.0.20`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.20) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 2026-07-20：匿名下载 `latest.yml` 显示 `version=3.0.20`、Setup 大小 `99,722,015` 字节；下载文件头为 `MZ`，SHA-512 与 feed 的 `ttrde0bfZnHmZT5prt/gQ+wUIiRbzyNkWlyKk5CY3yHrR7HeMw2qsqFao++VCIibDva2KEatXdEh1OwKmxb+Qw==` 完全一致；blockmap 与 portable 公开地址返回 HTTP 200。

@@ -1,6 +1,6 @@
 # Test Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
+> status: released-pass（最终 `main`、Release workflow 与匿名更新资产校验通过）
 > created: 2026-07-20
 > updated: 2026-07-20
 > source: `changes/3.0.20/spec.md` AC-01～AC-09
@@ -56,6 +56,8 @@
 - 资金对账 24 行状态文案：状态框可视高度 `174px`、内容高度 `531px`、底部可滚至 `scrollTop=357`，跨行单元格保持 `176px`。
 - 全量门禁：unit `3702/3702 PASS`，integration `1955/1955 PASS`，lint、smoke 均通过。
 - 变量门禁：`scan:vars` 与 `check:vars -- --include-minor` 均通过，无重要变量命中。
-- Windows PR workflow run `29733232198`：PASS；Release workflow 待 tag 触发。
+- Windows PR workflow run `29733232198`：PASS；Windows Release workflow run `29733820343`：PASS，包含同一六组合几何门禁、打包应用检查、更新资产检查和发布后检查。
 - 最终 PM/Development self-review：P0-P4 Finding 均为 0；review threads 为 0。
 - 合并归档后的最终 `main` 再次执行 `npm ci`、release-check、六组合几何与变量门禁，结果保持全绿。
+- 匿名更新链路：`latest.yml` 返回 `3.0.20` 并指向 Setup；Setup 匿名下载大小 `99,722,015` 字节、文件头 `MZ`、SHA-512 与 feed 一致；blockmap 下载成功，portable 公开地址返回 HTTP 200。
+- GitHub Release `v3.0.20` 为 latest、非 draft、非 prerelease，四个资产名称与发布契约一致。

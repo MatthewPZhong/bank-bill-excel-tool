@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.20 主页面同类要素垂直对齐
 
-> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
+> status: released（GitHub Release `v3.0.20` 已发布并完成线上资产校验）
 > owner: Dev
 > updated: 2026-07-20
 
@@ -45,8 +45,11 @@
 - 最终 PM/Development self-review：P0-P4 Finding 均为 0。
 - PR #95 以 merge commit `1142f7e` 合入 `main`；远程与本地开发分支已删除。
 - 合并归档后的最终 `main`：`npm ci` 完成；release-check 3702/3702 unit、1955/1955 integration，六组合几何门禁与变量门禁再次通过。
+- annotated tag `v3.0.20` 指向 `9b02fd1f8f9be9c615be8dce31b40292a0b993c3`；Windows Release workflow run `29733820343` 全部通过。
+- GitHub Release `v3.0.20` 已成为 latest，状态为非 draft、非 prerelease；资产为 Setup `99,722,015` 字节、Setup blockmap `105,267` 字节、portable `99,225,259` 字节和 `latest.yml` `371` 字节。
+- 匿名更新校验：`latest.yml` 的版本、路径和大小正确；Setup 文件头为 `MZ`，计算所得 SHA-512 与 feed 完全一致；blockmap 下载成功，portable 公开地址返回 HTTP 200。
 
 ## Remaining Unknowns
 
-- Windows Release workflow 尚待 tag 触发并执行同一几何脚本。
 - Windows 安装版 100%、125%、150% 显示缩放下的最终字形观感需发布后实机 canary。
+- Windows 实机从旧安装版执行 `N -> N+1` 在线升级及 SQLite、用户配置和导出文件保留仍需人工 canary。
