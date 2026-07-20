@@ -11,7 +11,7 @@
 |---|---|
 | 当前清单版本 | v24（app v3.0.19 — 工具箱单/多文件严格多 Sheet 合并、可见性过滤、顺序与表头守恒、流式写出和临时资源清理） |
 | v24 本轮 review | 2026-07-19（已覆盖 XLSX workbook 显示序与 hidden/veryHidden 状态、XLS SheetJS 隐藏元数据、CSV/伪 CSV 路由、每文件至少一张有效 sheet、跨文件严格表头、文件/sheet/行顺序、数据区重复表头保留、单页上限分页、writer/zip/临时目录清理、目标文件原子发布与失败回滚，以及拆分续页入口隔离） |
-| v24 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.19） |
+| v24 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.20） |
 | v23 历史版本 | app v3.0.18 — Windows NSIS GitHub stable 在线升级、设置状态页、原子业务忙闸门、可等待退出清理与 tag 发布流水线。 |
 | v22 历史版本 | app v3.0.17 — 退款订单银行流水号模糊匹配 + 工具箱最多 8 组一次扫描、多文件原子拆分；自动门禁通过，资金负责人真实退款样本复核仍为发布硬门禁。 |
 | v21 历史版本 | app v3.0.16 — 前置资金对账纳入 `Extra Fee` 和 14 条 FundType/方向/tradeType 规则；临时 MPT 明细错误支持审计导出与逻辑排除重跑；`MPT_CHANNEL_OTHERS` 明确取消。 |
@@ -22,7 +22,7 @@
 | v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | v3.0.16 人工资金 review | 待业务负责人逐笔确认 `abs(方向金额) + Extra Fee`、14 条规则映射及错误行逻辑排除结果；自动化 review 不替代该发布硬门禁。 |
 | v3.0.17 人工资金 review | 待业务负责人用真实脱敏退款样本逐笔确认新增模糊命中的流水号、金额差、大账号、币种和双向 1:1；自动化 review 不替代该发布硬门禁。 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.19） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.20） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 

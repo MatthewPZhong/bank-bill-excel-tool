@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.0.19",
+  "version": "3.0.20",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -21,6 +21,7 @@
     "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis --publish never && node scripts/check-dist-size.js",
     "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable --publish never && node scripts/check-dist-size.js",
     "check:dist": "node scripts/check-dist-size.js",
+    "verify:main-panel-alignment": "node scripts/verify-main-panel-alignment.js",
     "preview": "node scripts/render-preview.js",
     "preview:account": "node scripts/render-account-mapping-preview.js",
     "preview:template-manager": "node scripts/render-template-manager-preview.js",

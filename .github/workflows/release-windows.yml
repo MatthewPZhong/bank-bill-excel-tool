@@ -51,6 +51,9 @@ jobs:
       - name: Run release checks
         run: npm run release-check
 
+      - name: Verify main panel alignment
+        run: npm run verify:main-panel-alignment
+
       - name: Generate build information
         run: npm run prebuild:meta
 

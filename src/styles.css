@@ -318,6 +318,12 @@ select {
   font-size: 16px;
   color: var(--muted);
 }
+.main-panel-select-label {
+  display: inline-flex;
+  align-items: center;
+  height: 48px;
+  line-height: 20px;
+}
 
 .template-select,
 .mapping-select {
@@ -329,6 +335,10 @@ select {
   background: #fffdf8;
   padding: 0 14px;
   color: var(--text);
+}
+.main-panel-select-control {
+  height: 48px;
+  line-height: 20px;
 }
 
 .mapping-text-input {
@@ -357,6 +367,26 @@ select {
   cursor: default;
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
+.status-box-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+.status-box-content .status-spark {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  line-height: 0;
+}
+.status-box-content .status-spark svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.status-box-content .status-box-text { min-width: 0; }
 
 .status-box.is-clickable {
   cursor: pointer;
@@ -2702,15 +2732,20 @@ select {
 .bank-statement-board .cell.left .primary-btn { min-width: 180px; }
 
 /* v3.0.7（General 镜像，disabled）：原 row2(场景管理)+row3(链接表管理/状态框)合并为单 control-row。
-   2 列(沿用 1fr 1.4fr)×2 行(auto 110px，row-gap:18px=原 .control-row 间距)：场景管理 grid-row1 / 链接表管理 grid-row2（位置同原 row2/row3）；
+   2 列(沿用 1fr 1.4fr)×2 行(48px 110px，row-gap:18px=原 .control-row 间距)：场景管理 grid-row1 / 链接表管理 grid-row2（位置同原 row2/row3）；
    状态框单元格 grid-row:1/3 + align-self:stretch → 撑满跨两行(≈176px)、状态框垂直增高（上沿对齐场景管理上沿、下沿对齐原状态框下沿）。 */
 #bankStatementModulePanel .bank-statement-board-merged-row {
-  grid-template-rows: auto 110px;
+  grid-template-rows: 48px 110px;
   row-gap: 18px;
 }
 #bankStatementModulePanel .bsb-merged-scenario { grid-column: 1; grid-row: 1; }
 #bankStatementModulePanel .bsb-merged-linked   { grid-column: 1; grid-row: 2; }
-#bankStatementModulePanel .bsb-merged-status   { grid-column: 2; grid-row: 1 / 3; align-self: stretch; }
+#bankStatementModulePanel .bsb-merged-status {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: stretch;
+  min-height: 0;
+}
 
 /* v3.0.14：前置资金对账复用资金对账数据处理五槽位；下拉框占原导入槽位。 */
 #preFundReconciliationModulePanel .pre-fund-scenario-slot {
@@ -2721,9 +2756,10 @@ select {
 }
 #preFundReconciliationModulePanel .pre-fund-scenario-label {
   position: absolute;
-  top: 50%;
+  top: 0;
   right: calc(100% + 8px);
-  transform: translateY(-50%);
+  height: 48px;
+  transform: none;
   white-space: nowrap;
 }
 #preFundReconciliationModulePanel .pre-fund-scenario-select-shell,
@@ -2772,14 +2808,15 @@ select {
   font-size: 16px;
   color: var(--muted);
   text-align: right;
+  justify-content: flex-end;
   white-space: nowrap;
 }
-/* select 同模式 .template-select（44px 高 / 14px 圆角 / #fffdf8 背景 / var(--line-strong) 边 / 14px padding）；
+/* select 同主页面统一控件轨道（48px 高 / 14px 圆角 / #fffdf8 背景 / var(--line-strong) 边 / 14px padding）；
    仅 width 改成 grid 列 2 = 220px（mode 下拉框 260px 在窄左 cell 里溢出） */
 .recon-id-fix-board .recon-id-fix-bill-category-select,
 .recon-id-fix-board .recon-id-fix-scenario-select {
   width: 220px;
-  height: 44px;
+  height: 48px;
   border-radius: 14px;
   border: 1px solid var(--line-strong);
   background: #fffdf8;
@@ -2806,6 +2843,17 @@ select {
 /* PR #32b 多行状态框：导入两文件 / 已导出含 error-report 时换行展示 */
 #bankStatementStatusBox .status-box-text {
   white-space: pre-line;
+}
+#bankStatementStatusBox {
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  align-items: flex-start;
+}
+#bankStatementStatusBox .status-box-content {
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 /* === v2.0.0-beta.2 F1: 调色板"切换页面风格"下拉框样式（D11 自补）=== */

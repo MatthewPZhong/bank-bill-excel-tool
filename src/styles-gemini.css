@@ -247,6 +247,12 @@ button, select { font: inherit; }
 
 /* Select */
 .select-label { font-size: 13px; color: var(--muted); font-weight: 500; }
+.main-panel-select-label {
+  display: inline-flex;
+  align-items: center;
+  height: 48px;
+  line-height: 20px;
+}
 .select-shell { flex: 1; }
 .template-select,
 .mapping-select {
@@ -263,6 +269,7 @@ button, select { font: inherit; }
   background-repeat: no-repeat;
   background-position: right 16px center;
 }
+.main-panel-select-control { line-height: 20px; }
 .template-select:focus,
 .mapping-select:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(11,87,208,.15); }
 
@@ -291,6 +298,26 @@ button, select { font: inherit; }
   transition: background 160ms ease, border-color 160ms ease;
 }
 .status-spark { display: inline-flex; }
+.status-box-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: 100%;
+  min-width: 0;
+}
+.status-box-content .status-spark {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  line-height: 0;
+}
+.status-box-content .status-spark svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+.status-box-content .status-box-text { min-width: 0; }
 .status-box.is-clickable { cursor: pointer; }
 .status-box:hover { background: #f2f5fa; }
 .status-box[data-tone="success"] { color: var(--success); border-color: rgba(30,142,62,.3); background: #e6f4ea; }
