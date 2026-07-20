@@ -30,6 +30,9 @@ jobs:
       - name: Run smoke test
         run: npm run smoke
 
+      - name: Verify main panel alignment
+        run: npm run verify:main-panel-alignment
+
   build:
     if: github.event_name != 'pull_request'
     needs: smoke-test

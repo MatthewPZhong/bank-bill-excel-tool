@@ -49,9 +49,9 @@
                 <button id="importFileBtn" class="primary-btn" type="button">导入文件</button>
               </div>
               <div class="cell center">
-                <label class="select-label" for="templateSelect">模式</label>
+                <label class="select-label main-panel-select-label" for="templateSelect">模式</label>
                 <div class="select-shell">
-                  <select id="templateSelect" class="template-select">
+                  <select id="templateSelect" class="template-select main-panel-select-control">
                     <option value="create-statement">制作网银账单</option>
                     <option value="export-monthly-balance">导出月度余额账单</option>
                   </select>
@@ -78,10 +78,12 @@
               </div>
               <div class="cell right">
                 <div id="statusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatus" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatus)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatus" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatus)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -171,10 +173,12 @@
               </div>
               <div class="cell right">
                 <div id="pendingStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPending" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPending)"/></svg>
+                    </span>
+                    <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
                   </span>
-                  <span class="status-box-text">初次使用请确认用来筛选的字段~</span>
                 </div>
               </div>
             </div>
@@ -186,9 +190,9 @@
             <div class="control-row">
               <div class="cell left">
                 <div id="bizOpReconBuRow" class="biz-op-recon-bu-row">
-                  <label class="select-label" for="bizOpReconBuSelect">BU</label>
+                  <label class="select-label main-panel-select-label" for="bizOpReconBuSelect">BU</label>
                   <div class="select-shell">
-                    <select id="bizOpReconBuSelect" class="template-select">
+                    <select id="bizOpReconBuSelect" class="template-select main-panel-select-control">
                       <option value=""></option>
                     </select>
                   </div>
@@ -207,10 +211,12 @@
               </div>
               <div class="cell right">
                 <div id="bizOpReconStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBizOpRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBizOpRecon)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBizOpRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBizOpRecon)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -233,10 +239,12 @@
               </div>
               <div class="cell right">
                 <div id="bankBuReconStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankBuRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankBuRecon)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankBuRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankBuRecon)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -259,10 +267,12 @@
               </div>
               <div class="cell right">
                 <div id="duplicateInboundMatchStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusDuplicateInboundMatch" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusDuplicateInboundMatch)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusDuplicateInboundMatch" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusDuplicateInboundMatch)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -285,10 +295,12 @@
               </div>
               <div class="cell right">
                 <div id="vccOpCalcStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusVccOpCalc" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusVccOpCalc)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusVccOpCalc" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusVccOpCalc)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -337,10 +349,12 @@
               </div>
               <div class="cell right bsb-merged-status">
                 <div id="bankStatementStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankStatement" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankStatement)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusBankStatement" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusBankStatement)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -357,9 +371,9 @@
               <div class="cell right">
                 <div class="pending-action-pair pre-fund-action-pair">
                   <div class="pre-fund-scenario-slot">
-                    <label class="select-label pre-fund-scenario-label" for="preFundReconciliationScenarioSelect">对账场景</label>
+                    <label class="select-label main-panel-select-label pre-fund-scenario-label" for="preFundReconciliationScenarioSelect">对账场景</label>
                     <div class="select-shell pre-fund-scenario-select-shell">
-                      <select id="preFundReconciliationScenarioSelect" class="template-select">
+                      <select id="preFundReconciliationScenarioSelect" class="template-select main-panel-select-control">
                         <option value="missing-gateway" selected>缺网关账单</option>
                       </select>
                     </div>
@@ -377,10 +391,12 @@
               </div>
               <div class="cell right pre-fund-merged-status">
                 <div id="preFundReconciliationStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPreFundRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPreFundRecon)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusPreFundRecon" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusPreFundRecon)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -393,8 +409,8 @@
             <div class="control-row">
               <div class="cell left">
                 <div class="recon-id-fix-bill-category-row">
-                  <label class="recon-id-fix-bill-category-label" for="reconIdFixBillCategorySelect">账单类别</label>
-                  <select id="reconIdFixBillCategorySelect" class="recon-id-fix-bill-category-select">
+                  <label class="recon-id-fix-bill-category-label main-panel-select-label" for="reconIdFixBillCategorySelect">账单类别</label>
+                  <select id="reconIdFixBillCategorySelect" class="recon-id-fix-bill-category-select main-panel-select-control">
                     <option value="gateway" selected>网关对账单</option>
                     <option value="business">单据对账单</option>
                   </select>
@@ -412,8 +428,8 @@
               <div class="cell left">
                 <!-- 行 2 左 cell：[场景 label + 场景下拉 + 导出文件]（场景与导出文件平行）；按钮 disabled 由 updateReconIdFixPanelVisibility 控制 -->
                 <div id="reconIdFixScenarioRow" class="recon-id-fix-scenario-row">
-                  <label class="recon-id-fix-scenario-label" for="reconIdFixScenarioSelect">场景</label>
-                  <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select" disabled>
+                  <label class="recon-id-fix-scenario-label main-panel-select-label" for="reconIdFixScenarioSelect">场景</label>
+                  <select id="reconIdFixScenarioSelect" class="recon-id-fix-scenario-select main-panel-select-control" disabled>
                     <!-- v2.1.0-beta.3 修订（用户反馈）：初始空白 option，待 state 加载后由 renderReconIdFixScenarioSelect 重写 -->
                     <option value=""></option>
                   </select>
@@ -422,10 +438,12 @@
               </div>
               <div class="cell right">
                 <div id="reconIdFixStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusReconIdFix" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusReconIdFix)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusReconIdFix" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusReconIdFix)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
             </div>
@@ -451,10 +469,12 @@
             <div class="control-row">
               <div class="cell left">
                 <div id="acquiringBillCurrencyStatusBox" class="status-box">
-                  <span class="status-spark" aria-hidden="true">
-                    <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusAcquiringBillCurrency" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusAcquiringBillCurrency)"/></svg>
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusAcquiringBillCurrency" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusAcquiringBillCurrency)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
                   </span>
-                  <span class="status-box-text">欢迎使用小助手</span>
                 </div>
               </div>
               <div class="cell right">

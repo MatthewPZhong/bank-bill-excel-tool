@@ -47,7 +47,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
       assert.ok(start > 0 && end > start);
       const layout = styles.slice(start, end);
       assert.match(layout, /\.pre-fund-scenario-slot\s*\{[\s\S]*position:\s*relative[\s\S]*flex:\s*1 1 0/);
-      assert.match(layout, /\.pre-fund-scenario-label[\s\S]*position:\s*absolute[\s\S]*top:\s*50%[\s\S]*right:\s*calc\(100% \+ 8px\)[\s\S]*translateY\(-50%\)/);
+      assert.match(layout, /\.pre-fund-scenario-label[\s\S]*position:\s*absolute[\s\S]*top:\s*0[\s\S]*right:\s*calc\(100% \+ 8px\)[\s\S]*height:\s*48px[\s\S]*transform:\s*none/);
       assert.match(layout, /\.pre-fund-scenario-slot \.template-select[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%/);
       assert.match(layout, /\.pre-fund-action-pair > :first-child\s*\{\s*transform:\s*translateX\(-14px\)/);
       assert.match(layout, /\.pre-fund-action-pair > :last-child\s*\{\s*transform:\s*translateX\(14px\)/);
