@@ -51,9 +51,10 @@ function runParent() {
       }
 
       const result = JSON.parse(resultLine.slice(RESULT_PREFIX.length));
+      const outcome = result.ok ? 'PASS' : 'FAIL';
       console.log(
         `[main-panel-alignment] ${viewport.width}x${viewport.height} @ ${scaleFactor * 100}% ` +
-        `PASS (single=${result.metrics.maxSingleDelta.toFixed(4)}px, ` +
+        `${outcome} (single=${result.metrics.maxSingleDelta.toFixed(4)}px, ` +
         `multi=${result.metrics.maxMultiDelta.toFixed(4)}px, ` +
         `control=${result.metrics.maxControlDelta.toFixed(4)}px, ` +
         `dpr=${result.metrics.devicePixelRatio})`
@@ -261,7 +262,8 @@ async function runElectronChild() {
 if (process.versions.electron && process.env.MAIN_PANEL_ALIGNMENT_CHILD === '1') {
   runElectronChild().catch((error) => {
     console.error(error && error.stack ? error.stack : error);
-    process.exitCode = 1;
+    const { app } = require('electron');
+    app.exit(1);
   });
 } else {
   runParent();
