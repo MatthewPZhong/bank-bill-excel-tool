@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.20 主页面同类要素垂直对齐
 
-> status: merged（Release workflow 待执行）
+> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
 > owner: Dev
 > updated: 2026-07-20
 
@@ -44,6 +44,7 @@
 - Windows PR workflow run `29733232198`：PASS；review threads 为 0。
 - 最终 PM/Development self-review：P0-P4 Finding 均为 0。
 - PR #95 以 merge commit `1142f7e` 合入 `main`；远程与本地开发分支已删除。
+- 合并归档后的最终 `main`：`npm ci` 完成；release-check 3702/3702 unit、1955/1955 integration，六组合几何门禁与变量门禁再次通过。
 
 ## Remaining Unknowns
 

@@ -1,6 +1,6 @@
 # Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: merged（PR #95 已合入 `main`；v3.0.20 Release 待发布）
+> status: release-ready（PR #95 已合入 `main`；最终发布前门禁通过）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -87,3 +87,4 @@
 - 2026-07-20：PR #95 以 merge commit `1142f7e` 合入 `main`，远程与本地开发分支删除。
 - 归档见 `docs/prs/PR95-v3.0.20.md` 与 `docs/iterations/v3.0.20/PRD-v3.0.20.md`。
 - 用户已授权发布收尾；`v3.0.20` tag、Release workflow 和线上资产证据待完成后补录。
+- 2026-07-20：最终 `main` 重新执行 `npm ci`、release-check、六组合 Electron 几何门禁、scan-vars 与 check-vars，全部通过；可创建发布 tag。

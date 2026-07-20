@@ -1,6 +1,6 @@
 # Test Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: merged-pass（Release workflow 待执行）
+> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
 > created: 2026-07-20
 > updated: 2026-07-20
 > source: `changes/3.0.20/spec.md` AC-01～AC-09
@@ -58,3 +58,4 @@
 - 变量门禁：`scan:vars` 与 `check:vars -- --include-minor` 均通过，无重要变量命中。
 - Windows PR workflow run `29733232198`：PASS；Release workflow 待 tag 触发。
 - 最终 PM/Development self-review：P0-P4 Finding 均为 0；review threads 为 0。
+- 合并归档后的最终 `main` 再次执行 `npm ci`、release-check、六组合几何与变量门禁，结果保持全绿。
