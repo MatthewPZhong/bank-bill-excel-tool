@@ -33,4 +33,11 @@
 - bump `package.json` / lockfile 至 3.0.20。
 - 同步 `CHANGELOG.md`、版本历史和用户指南。
 - 执行 release-check、scan-vars、check-vars 和最终 diff review。
-- 状态：done（Windows workflow 待 PR 执行；安装版人工观感为发布后 canary）
+- 状态：done（PR #95 已合并；安装版人工观感为发布后 canary）
+
+## Task 6：合并归档与在线发布
+
+- 归档 PR #95 与 v3.0.20 迭代 PRD。
+- 创建指向当前 `main` 的 annotated tag `v3.0.20`，等待 Windows Release workflow 完成。
+- 回读 GitHub Release、`latest.yml`、Setup、blockmap 和 portable 资产并保存证据。
+- 状态：in-progress（合并与归档完成，tag/Release 待执行）

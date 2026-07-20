@@ -1,6 +1,6 @@
 # Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: pr-ready（本机自动化完成，Windows workflow 待 PR 执行）
+> status: merged（PR #95 已合入 `main`；v3.0.20 Release 待发布）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -79,3 +79,11 @@
 - “平行显示”定义为元素视觉垂直中心一致，不要求不同字体的文字基线完全一致。
 - 状态内容继续水平居中；多行状态图标对齐整段文字中心。
 - Electron 设备缩放自动门禁验证几何不变量；真实 Windows 字形观感仍需安装版 canary，自动测量不能替代人工观感确认。
+
+## 7. 合并与发布记录
+
+- 2026-07-20：本地 `release-check` 全绿，unit 3702/3702、integration 1955/1955；Electron 双尺寸 x 三档缩放 6/6 PASS。
+- 2026-07-20：Windows PR workflow run `29733232198` 通过；最终 PM/Development self-review 均为 P0-P4 Finding 0。
+- 2026-07-20：PR #95 以 merge commit `1142f7e` 合入 `main`，远程与本地开发分支删除。
+- 归档见 `docs/prs/PR95-v3.0.20.md` 与 `docs/iterations/v3.0.20/PRD-v3.0.20.md`。
+- 用户已授权发布收尾；`v3.0.20` tag、Release workflow 和线上资产证据待完成后补录。

@@ -1,6 +1,6 @@
 # Test Spec — v3.0.20 主页面同类要素垂直对齐
 
-> status: local-pass（Windows workflow 待 PR 执行）
+> status: merged-pass（Release workflow 待执行）
 > created: 2026-07-20
 > updated: 2026-07-20
 > source: `changes/3.0.20/spec.md` AC-01～AC-09
@@ -50,10 +50,11 @@
 
 ## 6. 执行结果
 
-- DOM/样式定向测试：`14/14 PASS`。
+- DOM/样式定向测试：`15/15 PASS`。
 - 可复跑 Electron 几何门禁：本机双尺寸 × 三档设备缩放 `6/6 PASS`，实际 `devicePixelRatio=1/1.25/1.5`。
 - 双尺寸几何测量：10 个状态框单行/三行中心差最大约 `0.004 CSS px`；5 组标签/控件顶部、高度和中心差均为 `0`。
 - 资金对账 24 行状态文案：状态框可视高度 `174px`、内容高度 `531px`、底部可滚至 `scrollTop=357`，跨行单元格保持 `176px`。
-- 全量门禁：unit `3701/3701 PASS`，integration `1955/1955 PASS`，lint、smoke 均通过。
+- 全量门禁：unit `3702/3702 PASS`，integration `1955/1955 PASS`，lint、smoke 均通过。
 - 变量门禁：`scan:vars` 与 `check:vars -- --include-minor` 均通过，无重要变量命中。
-- Windows PR workflow：待分支推送后执行。
+- Windows PR workflow run `29733232198`：PASS；Release workflow 待 tag 触发。
+- 最终 PM/Development self-review：P0-P4 Finding 均为 0；review threads 为 0。

@@ -1,6 +1,6 @@
 # Implementation Notes — v3.0.20 主页面同类要素垂直对齐
 
-> status: implemented（Windows workflow 待 PR 执行）
+> status: merged（Release workflow 待执行）
 > owner: Dev
 > updated: 2026-07-20
 
@@ -34,15 +34,18 @@
 
 ## Evidence
 
-- 定向 unit：`14/14 PASS`。
+- 定向 unit：`15/15 PASS`。
 - `npm run verify:main-panel-alignment`：双尺寸 × 三档设备缩放 `6/6 PASS`，实际 DPR 为 `1 / 1.25 / 1.5`。
 - 双尺寸 DOM 几何：`1240×860`、`1080×760` 下 10 个状态框单行/三行中心差最大约 `0.004 CSS px`；5 组标签/下拉框顶部、高度、中心差均为 `0`。
 - 长文案滚动：24 行内容下 `clientHeight=174`、`scrollHeight=531`、`bottomScrollTop=357`、父单元格高度 `176`。
 - 10 个目标模块 preview 已生成并逐张检查；新开账户结构未改变。
-- `npm run release-check`：unit `3701/3701 PASS`、integration `1955/1955 PASS`，lint、smoke 通过。
+- `npm run release-check`：unit `3702/3702 PASS`、integration `1955/1955 PASS`，lint、smoke 通过。
 - `npm run scan:vars`、`npm run check:vars -- --include-minor`：通过，无重要变量命中。
+- Windows PR workflow run `29733232198`：PASS；review threads 为 0。
+- 最终 PM/Development self-review：P0-P4 Finding 均为 0。
+- PR #95 以 merge commit `1142f7e` 合入 `main`；远程与本地开发分支已删除。
 
 ## Remaining Unknowns
 
-- Windows PR/Release workflow 尚待远端执行同一几何脚本。
+- Windows Release workflow 尚待 tag 触发并执行同一几何脚本。
 - Windows 安装版 100%、125%、150% 显示缩放下的最终字形观感需发布后实机 canary。
