@@ -58,7 +58,7 @@ function makeGwRow(o = {}) {
     reconciliationid: o.reconciliationid ?? 'DISP-RECON-1',
     amount: o.amount ?? 100,
     currency: o.currency ?? 'USD',
-    TradeType: o.TradeType ?? ''
+    TradeType: o.TradeType ?? 'PUBLIC_PAY'
   };
 }
 
@@ -206,6 +206,30 @@ test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedR
     assert.ok(result.stats.dbsChargeChangedCount >= 1);
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
+
+  test('步骤2 Credit 方向不符 warning 汇总进 errorReport，银行行保持原值且不进 modifiedRows', async () => {
+    const bankRows = [makeBankRow({
+      _rowId: 'direction-bad',
+      FundType: 'Charge',
+      ReconciliationId: 'RID-DIRECTION',
+      'Credit Amount': 100,
+      'Debit Amount': 0
+    })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [makeGwRow({ reconciliationid: 'RID-DIRECTION', TradeType: 'PUBLIC_PAY', amount: 100 })],
+      scenarios: [makeDbsChargeScenario()],
+      dispatchReconContext: { dispatchReconRows: [] }
+    });
+
+    assert.equal(bankRows[0].FundType, 'Charge');
+    assert.equal(result.stats.dbsChargeChangedCount, 0);
+    assert.equal(result.modifiedRows.length, 0);
+    assert.equal(result.unmatchedRows.length, 1);
+    assert.equal(result.errorReport.length, 1);
+    assert.equal(result.errorReport[0].code, 'dbs-charge-fund-direction-mismatch');
+    assert.equal(result.stats.warningCount, 1);
+  });
 });
 
 // ---- 3. 缺省 / 空 / 无场景 → R3.5 no-op 不抛 -----------------------------
@@ -280,13 +304,15 @@ test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX
       ReconciliationId: 'DISP-RECON-1', // 导入时已带 → R1 可 1v1 匹配网关 → R4 hx-out 有料；步骤2 桶键
       'Debit Amount': 100
     })];
-    // 同一网关行既供 R3.5 步骤2（amount/currency 判 outbound）又供 R4 hx-out（reconciliationid + TradeType=HX_OUTBOUND）
-    const gwRows = [makeGwRow({
-      reconciliationid: 'DISP-RECON-1',
-      amount: 100,
-      currency: 'USD',
-      TradeType: 'HX_OUTBOUND'
-    })];
+    // 第一条 HX_OUTBOUND 供 R1/R4；第二条白名单 PUBLIC_PAY 供 R3.5 步骤2。R1 只消费第一条，R4 仍拿到 HX 行。
+    const gwRows = [
+      makeGwRow({
+        reconciliationid: 'DISP-RECON-1', amount: 100, currency: 'USD', TradeType: 'HX_OUTBOUND'
+      }),
+      makeGwRow({
+        reconciliationid: 'DISP-RECON-1', amount: 100, currency: 'USD', TradeType: 'PUBLIC_PAY'
+      })
+    ];
     const result = await runReconciliation({
       bankRows,
       gwRows,

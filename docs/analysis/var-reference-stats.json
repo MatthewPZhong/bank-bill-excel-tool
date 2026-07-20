@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.20",
-    "scannedAt": "2026-07-20T10:03:38.398Z",
+    "version": "3.0.21",
+    "scannedAt": "2026-07-20T13:36:23.285Z",
     "root": "src",
     "totalFiles": 196,
-    "totalTopLevelNames": 2200,
+    "totalTopLevelNames": 2202,
     "buckets": {
       "shared": 338,
-      "paired": 570,
-      "local": 1154,
-      "crossFile": 908
+      "paired": 571,
+      "local": 1155,
+      "crossFile": 909
     }
   },
   "A": {
@@ -1089,7 +1089,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 13
+            "count": 14
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -1129,7 +1129,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 57
+            "count": 56
           },
           {
             "file": "src/main.js",
@@ -1544,7 +1544,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -1579,7 +1579,7 @@
             "count": 6
           }
         ],
-        "totalHits": 42,
+        "totalHits": 43,
         "fileSpan": 13
       },
       {
@@ -5737,35 +5737,6 @@
         "fileSpan": 4
       },
       {
-        "name": "GW_RECON_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 4
-      },
-      {
         "name": "PENDING_GUANLI_DB_COLUMNS",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -8192,6 +8163,30 @@
           {
             "file": "src/main-process/monthly-balance.js",
             "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
+        "name": "GW_RECON_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
           }
         ],
         "totalHits": 8,
@@ -14607,6 +14602,25 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "GW_TRADE_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 3
           }
         ],
@@ -21864,6 +21878,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BANK_ROW_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
         "name": "BOC_KEY_MATURITY_ISO",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -22361,20 +22389,6 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 1
-      },
-      {
-        "name": "BANK_ROW_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 7
           }
         ],
@@ -26470,6 +26484,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BANK_CREDIT_AMOUNT_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "BANK_CURRENCY_FIELD",
         "defFiles": [
           "src/main-process/scenario-engines/dbs-charge-fund-check.js"
@@ -28549,20 +28577,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-dispatcher.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "GW_TRADE_TYPE_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 3
           }
         ],
@@ -36872,6 +36886,20 @@
         "fileSpan": 1
       },
       {
+        "name": "STEP2_GW_TRADE_TYPE_WHITELIST",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "T54_RE",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -38439,7 +38467,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 13
+          "count": 14
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -38479,7 +38507,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 57
+          "count": 56
         },
         {
           "file": "src/main.js",
@@ -38894,7 +38922,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -38929,7 +38957,7 @@
           "count": 6
         }
       ],
-      "totalHits": 42,
+      "totalHits": 43,
       "fileSpan": 13
     },
     {
@@ -43087,35 +43115,6 @@
       "fileSpan": 4
     },
     {
-      "name": "GW_RECON_ID_FIELD",
-      "defFiles": [
-        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-        "src/main-process/scenario-engines/r1-recon-id-match.js",
-        "src/main-process/scenario-engines/r4-fund-nature-check.js",
-        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 4
-    },
-    {
       "name": "PENDING_GUANLI_DB_COLUMNS",
       "defFiles": [
         "src/backend/bank-bu-recon-db/columns.js"
@@ -45542,6 +45541,30 @@
         {
           "file": "src/main-process/monthly-balance.js",
           "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
+      "name": "GW_RECON_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 3
         }
       ],
       "totalHits": 8,
@@ -51955,6 +51978,25 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "GW_TRADE_TYPE_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 3
         }
       ],

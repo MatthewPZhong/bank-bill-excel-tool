@@ -456,6 +456,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   //   → 行数守恒 modifiedRows + unmatchedRows === bankRows.length 不受影响。
   //   isFundTypeChanged：判定某银行行 FundType 是否已被 R4 改写（✅PRD Q2，被改写的 Ach Return 不再入回填池）。
   //     来源是跨轮累积的 modColsByRowId（R4 record('FundType') 后该行 rowId 的列集合含 'FundType'）。
+  //   r1Pairs：R1 真实 1v1 配对；退款引擎只移出 TradeType=AchReturn 的具体 pair.bankRow，不按 reconid 扩散。
   let refundBackfillRows = [];
   let refundUnmatchedRows = [];
   // OPEN-7（T5b-1）：R5 退款引擎冒泡的「以入金表为来源、回填成功」命中 BizId 去重数组（T5b-2 export 阶段消费）。
@@ -472,7 +473,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       (refundContext && refundContext.depositRows) || [],
       {
         isFundTypeChanged,
-        gwRows: safeGwRows,
+        r1Pairs: r1.pairs,
         bankPaymentSerialFuzzyMatchEnabled: refundScenarioConfig.bankPaymentSerialFuzzyMatchEnabled === true
       }
     );

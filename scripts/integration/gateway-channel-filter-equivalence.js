@@ -200,7 +200,7 @@ function buildAllGwRows() {
     // —— JPM 命中 —— R4 HX_OUTBOUND（reconid 1v1 → matchedGwRows）
     gwRaw({ reconciliationid: 'RID-JPM-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-JPM', Channel: 'JPM' }),
     // —— DBS 命中 —— R3.5 步骤2 amount/currency 判 outbound
-    gwRaw({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS-001', currency: 'USD', amount: '100', Channel: 'DBS' }),
+    gwRaw({ reconciliationid: 'DISP-RECON-1', TradeType: 'PUBLIC_PAY', merchantid: 'M-DBS-001', currency: 'USD', amount: '100', Channel: 'DBS' }),
     // —— 空 Channel 命中 —— R5s3 Inbound-VA 剔除（reconid 关联 B-BLANK-1）
     gwRaw({ reconciliationid: 'RID-BLANK-1', TradeType: 'Inbound-VA', merchantid: 'M-BLANK', Channel: '' }),
     // —— 缺 Channel 字段 的命中网关行（边界：空值集应回它）—— 关联同一空 Channel 银行行的另一面（无害 reconid）

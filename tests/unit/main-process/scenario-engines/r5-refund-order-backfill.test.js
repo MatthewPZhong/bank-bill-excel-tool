@@ -1238,67 +1238,111 @@ test.describe('⑩ 审计不变量（v3.0.10 需求3.2 收窄：银行侧全覆�
 });
 
 // ======================================================================
-// ⑪ v3.0.10 需求2：网关前置过滤（命中网关 reconid 的 Ach Return 行静默移出退款池）
-//   网关行用真实小写表头 reconciliationid；银行行驼峰 ReconciliationId（= M.backfill.fromBankReconId）。
+// ⑪ v3.0.21：R1 AchReturn pair 前置过滤（只移出 pair.bankRow，不按 reconid 扩散）
 // ======================================================================
-test.describe('⑪ v3.0.10 需求2：网关前置过滤', () => {
-  // 网关行（仅 reconciliationid 字段对本特性有意义）
-  const gw = (reconId) => ({ reconciliationid: reconId });
+test.describe('⑪ v3.0.21：R1 AchReturn pair 前置过滤', () => {
+  const r1Pair = (bankRow, tradeType = 'AchReturn') => ({
+    gwRow: { TradeType: tradeType },
+    bankRow
+  });
 
-  test('命中网关 reconid → 银行行静默移出退款池（不回填/不进任何输出）', () => {
-    // b1.ReconciliationId='RECON-HIT' 命中网关 → 被 drop；本可经 S1 命中 SN-A，但因前置过滤不参与。
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'RECON-HIT', ChannelOrderNo: 'PAY1' })];
+  test('R1 pair 的 TradeType=AchReturn → 只将该银行行静默移出退款池', () => {
+    const pairedBank = bank({ _rowId: 'b1', ReconciliationId: 'RECON-HIT', ChannelOrderNo: 'PAY1' });
     const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [gw('RECON-HIT')] });
-    assert.equal(res.backfillRows.length, 0, '命中网关 → 不回填');
-    // 静默移出：被 drop 的行不进 bankPool → 该唯一值组无银行行 → 不产 bank-only 提示
+    const res = run([pairedBank], r, [], { r1Pairs: [r1Pair(pairedBank)] });
+    assert.equal(res.backfillRows.length, 0, 'AchReturn pair 的 bankRow 不回填');
     assert.equal(res.unmatchedRows.filter(isBankUnmatched).length, 0, '被 drop 的行不进任何输出（静默）');
     assert.equal(res.unmatchedRows.length, 0, '完全静默：无任何输出行');
   });
 
-  test('未命中网关 reconid → 银行行正常参与退款回填', () => {
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'RECON-OTHER', ChannelOrderNo: 'PAY1' })];
+  test('未传 r1Pairs → 不拦，即使仍传旧 gwRows 也正常参与退款回填', () => {
+    const b = [bank({ _rowId: 'b1', ReconciliationId: 'RECON-HIT', ChannelOrderNo: 'PAY1' })];
     const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [gw('RECON-XXX')] }); // 网关集合不含 RECON-OTHER
-    assert.equal(res.backfillRows.length, 1, '未命中网关 → 正常回填');
+    const res = run(b, r, [], { gwRows: [{ reconciliationid: 'RECON-HIT', TradeType: 'AchReturn' }] });
+    assert.equal(res.backfillRows.length, 1, '没有 r1Pairs → 不做前置过滤');
     assert.equal(res.backfillRows[0]['退款单号'], 'SN-A');
   });
 
-  test('大小写敏感：同字符不同大小写不命中（normalizeCellValue 仅 trim 不改大小写）', () => {
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'Recon-Hit', ChannelOrderNo: 'PAY1' })];
-    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [gw('RECON-HIT')] }); // 网关全大写，银行混合大小写
-    assert.equal(res.backfillRows.length, 1, '大小写不同 → 不命中前置过滤 → 正常回填');
+  test('r1Pairs 非数组、空数组或含畸形 pair → 安全跳过且不前置过滤', () => {
+    const variants = [
+      null,
+      'not-an-array',
+      [],
+      [null, {}, { bankRow: null }, { gwRow: { TradeType: 'AchReturn' } }]
+    ];
+
+    for (const [index, r1Pairs] of variants.entries()) {
+      const b = bank({ _rowId: `malformed-${index}`, ChannelOrderNo: `PAY-${index}` });
+      const res = run(
+        [b],
+        [refund({ '流水号': `SN-${index}`, '银行打款流水号': `PAY-${index}` })],
+        [],
+        { r1Pairs }
+      );
+      assert.equal(res.backfillRows.length, 1, `variant ${index} 不得阻断退款回填`);
+      assert.equal(res.backfillRows[0]['退款单号'], `SN-${index}`);
+    }
   });
 
-  test('空键不参与：银行 reconid 为空 → 不被网关空键命中（即便网关也有空 reconid）', () => {
-    const b = [bank({ _rowId: 'b1', ReconciliationId: '', ChannelOrderNo: 'PAY1' })];
-    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [gw(''), gw('  '), gw('RECON-X')] }); // 网关含空/空白键
-    assert.equal(res.backfillRows.length, 1, '银行空 reconid 不参与命中 → 正常回填');
-  });
+  test('pair.bankRow 有效但 gwRow 缺失 → 安全跳过且不前置过滤', () => {
+    const b = bank({ _rowId: 'missing-gw', ChannelOrderNo: 'PAY-MISSING-GW' });
+    const res = run(
+      [b],
+      [refund({ '流水号': 'SN-MISSING-GW', '银行打款流水号': 'PAY-MISSING-GW' })],
+      [],
+      { r1Pairs: [{ bankRow: b }] }
+    );
 
-  test('gwRows 缺省退化：未传 gwRows → 无前置过滤（与现状一致）', () => {
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'ANY', ChannelOrderNo: 'PAY1' })];
-    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r); // 不传 options.gwRows
-    assert.equal(res.backfillRows.length, 1, '缺省 gwRows → 集合空 → 道3 永不命中 → 正常回填');
-  });
-
-  test('被 drop 致三元组只剩 refund：唯一组银行行全被网关移出 → 该组退化 refund-only → 静默无行（联动需求3.2）', () => {
-    // b1 命中网关被 drop → M1/USD/100 组无银行行 → 退化为 refund-only → 需求3.2 已删 refund-only 收尾 → 不产 notice。
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'RECON-HIT', ChannelOrderNo: 'PAY1' })];
-    const r = [refund({ '流水号': 'SN-A', '银行大账号': 'M1', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [gw('RECON-HIT')] });
-    assert.equal(res.backfillRows.length, 0);
-    assert.equal(res.unmatchedRows.length, 0, '退化 refund-only 且 refund-only 静默 → 无任何输出行');
-  });
-
-  test('网关空 gwRows 数组 → 集合空 → 无前置过滤', () => {
-    const b = [bank({ _rowId: 'b1', ReconciliationId: 'ANY', ChannelOrderNo: 'PAY1' })];
-    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
-    const res = run(b, r, [], { gwRows: [] });
     assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-MISSING-GW');
+  });
+
+  test('对象身份守卫：pair.bankRow 克隆即使 rowId 和 reconid 相同，也不得过滤实际银行行', () => {
+    const actualBank = bank({
+      _rowId: 'same-row-id',
+      ReconciliationId: 'RECON-SAME-IDENTITY',
+      ChannelOrderNo: 'PAY-ACTUAL'
+    });
+    const clonedBank = { ...actualBank };
+    const res = run(
+      [actualBank],
+      [refund({ '流水号': 'SN-ACTUAL', '银行打款流水号': 'PAY-ACTUAL' })],
+      [],
+      { r1Pairs: [r1Pair(clonedBank)] }
+    );
+
+    assert.equal(res.backfillRows.length, 1, '不同对象引用不得按 rowId 或 reconid 扩散过滤');
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-ACTUAL');
+  });
+
+  test('TradeType trim 后严格匹配：两侧空白可命中，大小写或字面不同不命中', () => {
+    const makeResult = (tradeType) => {
+      const b = bank({ _rowId: `b-${tradeType}`, ChannelOrderNo: 'PAY1' });
+      return run(
+        [b],
+        [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })],
+        [],
+        { r1Pairs: [r1Pair(b, tradeType)] }
+      );
+    };
+
+    assert.equal(makeResult('  AchReturn  ').backfillRows.length, 0, 'trim 后 AchReturn → 拦截');
+    assert.equal(makeResult('Inbound-VA').backfillRows.length, 1, '无关网关类型 → 不拦截');
+    assert.equal(makeResult('').backfillRows.length, 1, '空网关类型 → 不拦截');
+    assert.equal(makeResult('achreturn').backfillRows.length, 1, '大小写不同 → 不拦截');
+    assert.equal(makeResult('Ach Return').backfillRows.length, 1, '字面不同 → 不拦截');
+  });
+
+  test('同 reconid 不扩散：只拦 pair.bankRow，另一条同 ID 银行行仍可回填', () => {
+    const pairedBank = bank({ _rowId: 'b1', ReconciliationId: 'RECON-SAME', ChannelOrderNo: 'PAY1' });
+    const unpairedBank = bank({ _rowId: 'b2', ReconciliationId: 'RECON-SAME', ChannelOrderNo: 'PAY2' });
+    const r = [refund({ '流水号': 'SN-A', '银行打款流水号': 'PAY1' })];
+    r.push(refund({ '流水号': 'SN-B', '银行打款流水号': 'PAY2' }));
+
+    const res = run([pairedBank, unpairedBank], r, [], { r1Pairs: [r1Pair(pairedBank)] });
+    assert.equal(res.backfillRows.length, 1, '同 reconid 的未配对银行行仍参与');
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-B');
+    assert.equal(res.backfillRows[0].ChannelOrderNo, 'PAY2');
   });
 });
 

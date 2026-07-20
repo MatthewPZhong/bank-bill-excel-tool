@@ -9,9 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v24（app v3.0.19 — 工具箱单/多文件严格多 Sheet 合并、可见性过滤、顺序与表头守恒、流式写出和临时资源清理） |
-| v24 本轮 review | 2026-07-19（已覆盖 XLSX workbook 显示序与 hidden/veryHidden 状态、XLS SheetJS 隐藏元数据、CSV/伪 CSV 路由、每文件至少一张有效 sheet、跨文件严格表头、文件/sheet/行顺序、数据区重复表头保留、单页上限分页、writer/zip/临时目录清理、目标文件原子发布与失败回滚，以及拆分续页入口隔离） |
-| v24 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.20） |
+| 当前清单版本 | v25（app v3.0.21 — Ach Return 退款过滤改用 R1 具体配对；DBS-Charge 步骤2增加固定 TradeType 白名单和优先银行方向守卫） |
+| v25 本轮 review | 2026-07-20（覆盖 R1 pair 对象血缘、AchReturn 严格值、同 ID 不扩散、缺省兼容、DBS 12 类白名单、非白名单-only 保持、混合桶隔离、Credit 方向优先、warning 可见性、步骤1与金额币种回归；真实 DBS 人工资金复核待完成，用户知悉后授权发布并转发布后跟进） |
+| v25 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2202 顶层声明；A-share 338 / A-pair 571 / A-local 1155 / B 909；报告版本 3.0.21） |
+| v24 历史版本 | app v3.0.19 — 工具箱单/多文件严格多 Sheet 合并、可见性过滤、顺序与表头守恒、流式写出和临时资源清理。 |
 | v23 历史版本 | app v3.0.18 — Windows NSIS GitHub stable 在线升级、设置状态页、原子业务忙闸门、可等待退出清理与 tag 发布流水线。 |
 | v22 历史版本 | app v3.0.17 — 退款订单银行流水号模糊匹配 + 工具箱最多 8 组一次扫描、多文件原子拆分；自动门禁通过，资金负责人真实退款样本复核仍为发布硬门禁。 |
 | v21 历史版本 | app v3.0.16 — 前置资金对账纳入 `Extra Fee` 和 14 条 FundType/方向/tradeType 规则；临时 MPT 明细错误支持审计导出与逻辑排除重跑；`MPT_CHANNEL_OTHERS` 明确取消。 |
@@ -22,7 +23,8 @@
 | v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | v3.0.16 人工资金 review | 待业务负责人逐笔确认 `abs(方向金额) + Extra Fee`、14 条规则映射及错误行逻辑排除结果；自动化 review 不替代该发布硬门禁。 |
 | v3.0.17 人工资金 review | 待业务负责人用真实脱敏退款样本逐笔确认新增模糊命中的流水号、金额差、大账号、币种和双向 1:1；自动化 review 不替代该发布硬门禁。 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2200 顶层声明；A-share 338 / A-pair 570 / A-local 1154 / B 908；报告版本 3.0.20） |
+| v3.0.21 人工资金 review | 待业务负责人逐笔确认真实退款精准命中、DBS 12 类白名单、金额币种、Credit 方向 warning 和改值/未改值去向；用户已在知悉未完成后授权发布，该项转发布后 follow-up，自动化 review 不等于人工验收。 |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2202 顶层声明；A-share 338 / A-pair 571 / A-local 1155 / B 909；报告版本 3.0.21） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -1083,6 +1085,34 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **snapshot 与生命周期**：结果绑定同一银行+单据 import 和全部 INBOUND 批次 identity/hash/行数；INBOUND 导入、替换或删除后 stale，OUTBOUND-only 变化不 stale。选新双文件、开始新 run、失败和重启都不得恢复旧可导出结果；启动必须物理回收含个人信息的 side DB。
   - **Excel 契约**：只允许最新成功且 snapshot 有效、邮件或人工至少一类非空的结果导出；两个 sheet 名/顺序/表头固定，邮件业务来源取 MPT oppBu、客户号/账户号取单据，Debit Amount 数据行显式使用“常规”格式，人工组保留全部原 46 列；超 Excel 上限写前失败，临时文件必须回读校验 sheet/表头/行数后才能发布，发布失败恢复原目标且不留下伪成功文件。
   - 必跑：duplicate-inbound matching/store/service/reader/writer/wiring 全部 unit + `duplicate-inbound-match-end-to-end.js` + 真实 9 万行单据有界内存回放 + `npm run benchmark:duplicate-inbound` + `npm run release-check`；⚠️ 金额方向、七元组空格/大小写、跨月 MPT、候选复用、姓名卡号、orderId、三方回填血缘、守恒和 Excel/WPS 必须用脱敏真实样本人工复核。
+
+### `runRound5RefundOrderBackfill` / `r1Pairs`（v3.0.21 收紧 Risk-sensitive ⚠️🔴🔴 资金红线）
+- 定义：
+  - `src/main-process/scenario-engines/r1-recon-id-match.js`：`runRound1ReconIdMatch` 返回原引用 `pairs: [{gwRow, bankRow}]`，同 reconid 多银行候选仍按原序取第一条并 warning。
+  - `src/main-process/reconciliation-orchestrator.js`：R1 后把 `r1.pairs` 作为 `r1Pairs` 传给 R5 退款引擎。
+  - `src/main-process/scenario-engines/r5-refund-order-backfill.js`：只把 `pair.gwRow.TradeType` trim 后严格等于 `AchReturn` 的具体 `pair.bankRow` 对象加入退款前置排除集。
+- 关联功能：「资金对账数据处理 > 中台退款订单回填」Ach Return 银行池准入；会决定某银行行进入退款回填、人工结果还是静默排除。
+- 🔴 变更 review 要点（资金红线，改动前必读）：
+  - **具体配对，不按 ID 扩散**：过滤身份必须是 R1 选中的 `pair.bankRow` 原对象；禁止重新构造全量 reconid Set，禁止把同 ID 其它银行行连带排除。
+  - **TradeType 严格值**：只去首尾空格、大小写敏感严格等于 `AchReturn`；`Inbound-VA`、空值、`achreturn`、`Ach Return` 均不得触发。
+  - **缺省兼容**：未传/非数组/空 `r1Pairs` 时不做前置过滤；旧 `options.gwRows` 不得恢复旁路过滤。
+  - **轮次血缘**：生产编排器各轮复用同一组 `bankRows` 对象引用；若未来改成 clone，必须同步设计稳定行 ID 身份，否则 Set 对象判断会静默失效。
+  - **R4 与审计边界**：本规则不改变 R1 取第一条和 R4 同 ID 扩散；合法 AchReturn pair 仍静默排除。不得借修复之名改变这些已明确非目标。
+  - 必跑：`r5-refund-order-backfill.test.js` + `reconciliation-orchestrator-refund.test.js` + 合成同构回归 + 受控本地问题样本精准命中回放（业务标识不得入库）+ 资金负责人逐笔人工复核。
+
+### `STEP2_GW_TRADE_TYPE_WHITELIST` / `runDbsChargeFundCheck` / `dbs-charge-fund-direction-mismatch`（v3.0.21 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+- 定义：
+  - `src/main-process/scenario-engines/dbs-charge-fund-check.js`：步骤2只索引固定白名单网关，再对 DBS 的 Charge/outbound 行先做 Credit 方向守卫，方向通过后执行金额币种判断。
+  - `src/backend/file-service/error-causes.js`：方向不符 warning 的固定中文“可能原因”，经编排器 `errorReport` 输出。
+- 关联功能：「资金性质校验 > DBS-Charge资金校验」步骤2 FundType 改写；决定 DBS 银行行保持 Charge/outbound、改成 outbound、回落 Charge 或进入方向人工告警。
+- 🔴 变更 review 要点（资金红线，改动前必读）：
+  - **固定 12 类白名单**：只能包含 `AchReturn / ACQ_WITHDRAW / B2B_FLOW_GOLD / B2B_FLOW_GOLD_SUPPLIER / B2B_SUPPLIER / B2B_WITHDRAW / CUR_PAY / FX_WITHDRAW / HX_WITHDRAW / MPT_SUPPLIER / MPT_WITHDRAW / PUBLIC_PAY`；仅 trim、仍区分大小写。权威来源为 `DBS-Charge网关TradeType白名单.xlsx` `Sheet1!A2:A13`，当前 SHA-256 `78fbffcd9d2dcca8755124fc92b6aa2c58fc53bd60f945668203d685225160f0`；附件口径变化必须同步常量、spec、版本文档和枚举测试。
+  - **非白名单隔离**：只有非白名单网关行的 reconid 桶必须完全跳过、保持原 FundType且不告警；混合桶只允许白名单候选参与，非白名单金额命中不得影响结果。
+  - **方向先于金额币种**：同 ID 存在白名单候选时先执行 `(parseNumber(Credit Amount) || 0) === 0`。正/负非零必须保持进入步骤2前的 FundType、步骤2不新增 modification、有 warning；即使金额币种不匹配，进入步骤2时的 outbound 也不得回落 Charge。步骤1此前产生的 sibling→Charge modification 保留，不得由步骤2回滚。
+  - **R4 兼容口径**：Credit 为 0、`0.00`、空、null 或非法文本都按 0 放行；若要收紧非法值，必须先独立评审资金边界，不得在普通重构中改变。
+  - **方向通过后的旧语义**：金额币种命中→outbound；未命中时 outbound→Charge、Charge no-op；FundTransfer-in/out 不进候选。DBS 步骤1、调拨方向、大账号、ReconciliationId 回填和“只修改 DBS 银行目标行”的渠道门控必须不变；不要把它误写成网关 Channel 隔离。
+  - **明确残余**：步骤2仍不检查网关 MerchantId/Channel，也不严格 1:1 消费网关候选；不得把自动测试结果解释为这些风险已消除。
+  - 必跑：`dbs-charge-fund-check.test.js` + `reconciliation-orchestrator-dbs-charge.test.js` + `error-causes.test.js` + `gateway-channel-filter-equivalence.js` + 真实脱敏 DBS 白名单/方向人工复核。
 
 ### `bankPaymentSerialFuzzyMatchEnabled` / `runBankPaymentSerialFuzzyFallback` / `financial-decimal`（v3.0.17 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
