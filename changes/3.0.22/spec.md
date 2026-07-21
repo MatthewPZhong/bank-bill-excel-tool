@@ -1,7 +1,7 @@
 # Spec - v3.0.22 设置页内存档中心
 
-> status: pr-ready
-> updated: 2026-07-20
+> status: merged（PR #97 已合入 `main`；v3.0.22 Release 待发布）
+> updated: 2026-07-21
 > branch: `codex/v3.0.22-archive-center`
 > prototype: `changes/3.0.22/archive-center-settings-prototype.html`
 
@@ -161,3 +161,13 @@
 - 从存档恢复数据、重新导入、重新运行、预览 Excel 内容、全文搜索或文件名搜索。
 - 扫描和补录旧版本历史文件。
 - 修改任何金额、币种、匹配、回填、Excel 内容或既有业务保存路径。
+
+## 12. 合并与发布记录
+
+- 2026-07-21：最终 self-review 为 P0-P4 Finding 0；存档专项测试 `64/64` 通过。
+- 2026-07-21：`npm run release-check` 通过，unit `3780/3780`、integration `1955/1955`、Smoke 全通过。
+- 2026-07-21：PR #97 的 Windows workflow 通过，并以 merge commit `116eee1` 合入 `main`。
+- 2026-07-21：开发分支已删除，本地 `main` 与 `origin/main` 同步。
+- 归档见 `docs/prs/PR97-v3.0.22.md` 与 `docs/iterations/v3.0.22/PRD-v3.0.22.md`。
+- `v3.0.22` tag、Release workflow 和公开升级资产证据待发布完成后补录。
+- 用户已在知悉真实文件血缘抽查及 Windows Excel/WPS 只读表现仍为人工 follow-up 的情况下授权继续发布；不得宣称上述人工验收已完成。

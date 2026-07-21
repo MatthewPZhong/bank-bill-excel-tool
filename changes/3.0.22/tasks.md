@@ -1,6 +1,6 @@
 # Tasks - v3.0.22 设置页内存档中心
 
-> updated: 2026-07-20
+> updated: 2026-07-21
 
 ## 状态
 
@@ -16,7 +16,8 @@
 | 8. 同步版本号和三份版本文档 | done | package/changelog/history/user guide |
 | 9. 完整发布检查和预览 | done | release-check、变量检查、启动性能和设置页预览均通过 |
 | 10. 真实文件人工血缘抽查 | pending | 由资金负责人完成 |
-| 11. PR、自审与合并 | in_progress | PR 前门禁与 P0-P4 自审已完成；等待 CI 与 merge commit |
+| 11. PR、自审与合并 | done | PR #97 已由 merge commit `116eee1` 合入 `main` |
+| 12. 发布归档与在线发布 | in_progress | PR/PRD 归档中；tag、Release workflow 和公开资产验证待执行 |
 
 ## 实施检查清单
 
@@ -70,4 +71,4 @@
 - 跨重启 receipt、旧数据回填和历史 run 绑定。
 - 失败运行批次、业务恢复和一键重跑。
 - 文件名/全文搜索、Excel 内容预览和云同步。
-- tag、GitHub Release 和 Windows 安装包发布；本轮只按用户指令提 PR 并合并。
+- 云同步、旧批次回填和存档内容恢复仍不进入发布范围。

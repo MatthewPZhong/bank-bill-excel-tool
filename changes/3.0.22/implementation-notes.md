@@ -76,6 +76,8 @@
 - `npm run startup:measure`：进程总耗时平均 `789.075 ms`，`ready-to-show` 平均 `174.48 ms`。
 - `scan:vars` 已刷新至 app v3.0.22：201 个 JS 文件、2313 个顶层声明。
 - `check:vars -- --include-minor` 已完成；命中的模板仓储、IPC、全局状态和应用生命周期均按清单复核，未命中既有资金计算/匹配规则。
+- GitHub PR #97 Windows workflow 通过；最终 self-review 为 P0-P4 Finding 0。
+- PR #97 已于 2026-07-21 以 merge commit `116eee1` 合入 `main`，开发分支已删除。
 
 ## Remaining Unknowns
 
