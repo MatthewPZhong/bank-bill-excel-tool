@@ -47,6 +47,11 @@
 | GitHub PR #98 Windows workflow | PASS | 远端 Windows 门禁 |
 | 最终 self-review | P0-P4 Finding 0 | 合并质量门 |
 | PR #98 | merge commit `0171b2b` 合入 `main`；远程与本地开发分支删除 | 合并和分支收口 |
+| 最终 `main` release-check | 干净 `npm ci` 后 lint、smoke、unit `3791/3791`、integration `1963/1963` 全绿 | tag 前发布门禁 |
+| 主页面几何门禁 | 2 个窗口尺寸 × 3 个缩放比例，`6/6 PASS` | Windows 发布工作流同款 UI 门禁 |
+| `npm run startup:measure` | 平均总耗时 `941.452 ms`，平均 ready-to-show `236.08 ms` | tag 前启动性能检查 |
+| 最终变量门禁 | `scan:vars` 仍为 201/2323；归档后 HEAD/工作区无 `src/` 差异，`check-vars` 安全跳过 | 硬节点已执行，PR 关联变量 review 继续有效 |
+| `npm audit --omit=dev` | 既有 7 条生产依赖告警（2 moderate、5 high） | v3.0.23 未改生产依赖，继续作为依赖治理 follow-up |
 
 ## Remaining Unknowns
 

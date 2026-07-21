@@ -1,6 +1,6 @@
 # Spec — v3.0.23 C3 渠道预筛与 R4 资金性质校验收紧
 
-> status: merged（PR #98 已合入 `main`；v3.0.23 Release 待发布；human-fund-review-pending）
+> status: release-ready（PR #98 已合入 `main`；最终发布前门禁通过；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-21
 > updated: 2026-07-21
@@ -162,5 +162,7 @@ AND 相反方向金额为空或规范值为 0
 - 2026-07-21：最终 self-review 为 P0-P4 Finding 0；PR #98 的 Windows workflow 通过。
 - 2026-07-21：PR #98 以 merge commit `0171b2b` 合入 `main`，远程与本地开发分支均已删除。
 - 归档见 `docs/prs/PR98-v3.0.23.md` 与 `docs/iterations/v3.0.23/PRD-v3.0.23.md`。
+- 2026-07-21：归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过完整 release-check、主页面几何门禁 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
+- 2026-07-21：`npm audit --omit=dev` 仍报告既有 7 条生产依赖告警（2 moderate、5 high）；v3.0.23 未新增或升级生产依赖，该基线继续作为依赖治理 follow-up。
 - `v3.0.23` tag、Release workflow 和公开在线升级资产证据待发布完成后补录。
 - 真实 Ach Return、Wire Return、HX 及重复 ReconID 冲突样本仍须资金负责人逐笔复核；发布授权不等于人工资金验收通过。

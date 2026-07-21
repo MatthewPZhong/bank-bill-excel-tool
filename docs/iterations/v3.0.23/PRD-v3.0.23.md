@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.23 PRD
 
 > 目标版本：`3.0.23`
-> 状态：merged（PR #98 已合入 `main`；GitHub Release 待发布）
+> 状态：release-ready（PR #98 已合入 `main`；最终发布前门禁通过）
 > 归档：PR #98 merge commit `0171b2b`；源规格 `changes/3.0.23/spec.md`
 > 更新时间：2026-07-21
 > 适用仓库：`bank-bill-excel-tool`
@@ -53,4 +53,6 @@ R4 已确认的 Ach Return 银行行，包括 FundType 原值已正确的同值�
 
 - PR #98 于 2026-07-21 以 merge commit `0171b2b` 合入 `main`，远程与本地开发分支删除。
 - PR 归档见 `docs/prs/PR98-v3.0.23.md`；tag、Release workflow 和公开资产证据待发布完成后补录。
-- 合并后的最终 `main` 将重新执行发布门禁、变量扫描与重要变量复核后，才允许创建 `v3.0.23` tag。
+- 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、主页面几何门禁 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
+- 既有生产依赖仍有 7 条 audit 告警（2 moderate、5 high）；本迭代未改变生产依赖，该问题继续作为依赖治理 follow-up。
+- `v3.0.23` tag、Release workflow 和公开在线升级资产证据待发布完成后补录。
