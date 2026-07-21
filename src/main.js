@@ -4281,12 +4281,14 @@ function registerAppHandlers() {
       //   （旧 readLinkedTableRows('gateway-bill') 全量读 + structuredClone 深拷，实测 65.7万行 ~1.2GB 尖峰先例）。
       //   业务不变量（已确认）：对账永远同 Channel → 只读本批银行单出现过的 Channel 子集，绝不漏合法匹配
       //   （任一银行行 B 的合法网关对手 G 必有 G.Channel===B.Channel∈bankChannels → 必在子集内）。
-      //   仓储 readGatewayBillRowsByChannels 内已处理三陷阱（空/缺 Channel、归一化口径、跨轮无越界，见其注释）。
+      //   仓储一次 SQL 生成 exactRows + c3Rows：前者保持旧大小写敏感口径，后者仅供 C3 trim+NOCASE 预筛。
       //   ⚠️ 删 structuredClone：gwRows 全程只读（R1/R2/R3.5/R5s2/R5s3 仅建索引/比对，modifications 只写 bankRows）
       //     + 每次新解析 → 深拷无保护意义；银行行 structuredClone(bankStatementSession.rows)（上方 workingBankRows）
       //     必须保留（常驻 session、引擎原地改它）。
       const bankChannels = bankStatementSession.rows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
-      const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);
+      const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(bankChannels);
+      const workingGwRows = gatewayRowPools.exactRows;
+      const workingC3GwRows = gatewayRowPools.c3Rows;
       // v3.0.11 需求3（批2）：网关账单大表读完（步骤边界）→ 让出一次，再读入金/调拨等链接表。
       //   🔴 原子性前提（codex-P2 → 补强）：linked-table:import / delete-by-date-range 已纳入 bankStatementOperationLock，
       //   run 全程持锁 → 此让出窗口内并发链接表改动被锁挡住（返回「正在处理中…」）→ gw 与后续 deposit/mid/recon 仍是一致快照。
@@ -4397,6 +4399,7 @@ function registerAppHandlers() {
       const result = await runReconciliation({
         bankRows: workingBankRows,
         gwRows: workingGwRows,
+        c3GwRows: workingC3GwRows,
         scenarios: dispatchScenarios,
         deps: { channelsRepo: channelsRepository, db: database.db },
         // v2.1.16-beta.4 R5 场景4：退款回填引擎入参（refundOrderRows 非空时引擎产出回填/未匹配行；空则该路径 no-op）

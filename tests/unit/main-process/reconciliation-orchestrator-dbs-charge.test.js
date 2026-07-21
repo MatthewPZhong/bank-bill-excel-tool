@@ -58,6 +58,7 @@ function makeGwRow(o = {}) {
     reconciliationid: o.reconciliationid ?? 'DISP-RECON-1',
     amount: o.amount ?? 100,
     currency: o.currency ?? 'USD',
+    merchantid: o.merchantid ?? 'M-DBS-001',
     TradeType: o.TradeType ?? 'PUBLIC_PAY'
   };
 }
@@ -291,8 +292,7 @@ test.describe('runReconciliation R3.5 —— 缺省/空/无场景 no-op（不抛
 test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX-out）', () => {
   test('🔴 R3.5 把 DBS 行 Charge→outbound（步骤2 网关确认）后，R4 hx-out 续改 outbound→HX-out（次序正确）', async () => {
     // 对称模型：R3.5 步骤2 网关确认的 outbound 落在「未被调拨命中」的桶内行（调拨命中行会被标 FundTransfer 且步骤2 不碰）。
-    // ⚠️ R4 只作用于 R1（reconid 1v1）匹配到的网关行：R1 在 R3.5【之前】跑，按银行行**导入时**的
-    //   ReconciliationId 建索引。故 b1 须预置与网关同值的 ReconciliationId，R1 才能匹配 → matchedGwRows 非空 → R4 才有料。
+    // v3.0.23 起 R4 读取完整 exactRows；b1 仍预置 ReconciliationId 以同时覆盖 R1 统计。
     // b1：DBS 银行行，FundType=Charge、ReconciliationId=DISP-RECON-1（导入时已带，供 R1 匹配；不被调拨命中——调拨 big_account 另设）。
     //   R3.5 步骤1：调拨行 big_account=OTHER-CARD 不匹配 b1（MerchantId=M-DBS-001）→ b1 不被标 FundTransfer、不被赋值；
     //              步骤2 网关 amount/currency 命中 → b1（候选 Charge）Charge→outbound（1 条 FundType modification）。
@@ -304,7 +304,7 @@ test.describe('runReconciliation —— R3.5 先于 R4（跨轮链 outbound→HX
       ReconciliationId: 'DISP-RECON-1', // 导入时已带 → R1 可 1v1 匹配网关 → R4 hx-out 有料；步骤2 桶键
       'Debit Amount': 100
     })];
-    // 第一条 HX_OUTBOUND 供 R1/R4；第二条白名单 PUBLIC_PAY 供 R3.5 步骤2。R1 只消费第一条，R4 仍拿到 HX 行。
+    // 第一条 HX_OUTBOUND 供 R4；第二条白名单 PUBLIC_PAY 供 R3.5 步骤2。
     const gwRows = [
       makeGwRow({
         reconciliationid: 'DISP-RECON-1', amount: 100, currency: 'USD', TradeType: 'HX_OUTBOUND'

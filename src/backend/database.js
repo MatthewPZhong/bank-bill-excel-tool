@@ -59,6 +59,8 @@ const {
   ensureFundTypeAchReturnConfigMigration,
   // v3.0.10 需求1：R4 方向守卫 config 字段补种（无 marker 幂等补缺失 requireBankZeroField，绝不覆盖用户值）
   ensureR4DirectionGuardConfigMigration,
+  // v3.0.23：四个内置 R4 场景严格匹配说明幂等刷新
+  ensureR4StrictDescriptionMigration,
   // v2.1.10 N4-cont-2 T30：diff_rows FK ON DELETE CASCADE 改造
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化建表（v2.1.16-beta.3 ②：含入金表 linked_bank_deposit）
@@ -392,10 +394,12 @@ class AppDatabase {
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置场景已 seed）。
     //   幂等：执行一次后 config 不再含 'Ach Ruturn'；绝大多数库无引用 → no-op（精确性防护）。
     this.ensureFundTypeAchReturnConfigMigration();
-    // v3.0.10 需求1：R4 方向守卫 config 字段补种（🔴 资金红线 — 老库 4 个 R4 场景缺 requireBankZeroField 则守卫静默失效）。
+    // v3.0.10 需求1：R4 方向字段历史兼容补种；v3.0.23 当前引擎已改为 subCategory 固定口径。
     //   必须在 scenarios 相关迁移之后（依赖 scenarios 表已存在、内置 R4 场景已 seed）。
     //   无 marker：每次启动幂等补回缺失的 requireBankZeroField；绝不覆盖用户已改的值（已存在则跳过）。
     this.ensureR4DirectionGuardConfigMigration();
+    // v3.0.23：只刷新四个内置 R4 场景的固定严格匹配说明，不改其它配置。
+    this.ensureR4StrictDescriptionMigration();
     // v2.1.2 T2：月度银行对账单BU回填校验模块 3 张表
     // 与其他迁移完全独立，调用顺序无依赖；放在最末尾即可
     this.ensureBankBuReconTablesSupport();
@@ -1107,9 +1111,14 @@ class AppDatabase {
     return ensureFundTypeAchReturnConfigMigration(this.db);
   }
 
-  // v3.0.10 需求1：R4 方向守卫 config 字段补种（无 marker 幂等补缺失 requireBankZeroField，绝不覆盖用户值；🔴 资金红线）
+  // v3.0.10 方向字段历史兼容补种（无 marker 幂等补缺失，绝不覆盖用户值）。
   ensureR4DirectionGuardConfigMigration() {
     return ensureR4DirectionGuardConfigMigration(this.db);
+  }
+
+  // v3.0.23：只刷新四个内置 R4 场景 config.function，其它字段保持。
+  ensureR4StrictDescriptionMigration() {
+    return ensureR4StrictDescriptionMigration(this.db);
   }
 
   migrateGatewayReconIdFixFieldPairs() {
@@ -1370,6 +1379,11 @@ class AppDatabase {
   //   供 bank-statement:run 取网关数据源（替代 readLinkedTableRows('gateway-bill') 全量读 + 深拷）。
   readGatewayBillRowsByChannels(channels) {
     return linkedTableRepository.readGatewayBillRowsByChannels(this.db, channels);
+  }
+
+  // v3.0.23：银行对账运行一次读取 exactRows + C3 大小写不敏感候选池。
+  readGatewayBillRowPoolsByChannels(channels) {
+    return linkedTableRepository.readGatewayBillRowPoolsByChannels(this.db, channels);
   }
 
   hasLinkedTableRows(tableKey) {

@@ -5,7 +5,7 @@
 //   - R1 reconid 1v1 匹配      → 得 matchedGwRows（不改字段、不标黄、不参与 first-match-wins 锁）
 //   - R2 现有 dispatcher       → C1/C2/C3 + 现有「提取调拨ID」builtin-fixed，first-match-wins
 //   - R3 占位 no-op            → 透传全量银行行（r3BankRows = 全量 bankRows）
-//   - R4 资金性质校验（🔴）     → matchedGwRows × 全量 bank 按 reconid 关联，改写 FundType（唯一允许二次改）
+//   - R4 资金性质校验（🔴）     → exactRows × 全量 bank 按固定四要素、金额和方向严格 1:1，改写 FundType
 //   - R5 场景2（FundTransfer）  → 同日/±1day 金额绝对值匹配 → 回填 ReconciliationId
 //   - R5 场景3（Inbound-VA）    → reconid 1v1 → FundType≠Inbound 生成剔除行
 //   - R5 场景4（退款订单回填）   → Ach Return（未改写）行 × 退款订单 SUBMITTED 行唯一值分组 + 4基数×4策略匹配
@@ -240,7 +240,8 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *
  * @param {Object} params
  * @param {Array<Object>} params.bankRows 银行对账单行（含 _rowId 全局唯一键；R1→R5 原地演化）
- * @param {Array<Object>} params.gwRows   网关对账单行（链接表读回，真实小写表头）
+ * @param {Array<Object>} params.gwRows   大小写敏感 Channel 预筛的网关行（供 C3 外全部轮次）
+ * @param {Array<Object>} [params.c3GwRows] C3 专用网关候选；缺省回退到 gwRows
  * @param {Array<Object>} params.scenarios 已 enabled 过的场景集合（caller 过滤）
  * @param {Object} [params.deps] dispatcher 双维调度可选依赖（{ channelsRepo, db }）；不传 → R2 走单维 first-match-wins
  * @param {Object} [params.refundContext] R5 场景4 退款回填引擎入参（{ refundOrderRows, depositRows }）；
@@ -272,11 +273,13 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
 //   `await yieldTick(round)` 让出事件循环 + 上报进度。**轮次顺序、各引擎入参、数据匹配/派生逻辑零改动**——
 //   仅在 R1→R2(dispatcher)→R3.5→R4→R5(s2/s2b/s3/s4) 各轮 *执行之后* 让出一次（结果 golden 字节不变）。
 //   onProgress 为可选回调（main.js handler 注入 forwarder；测试/脚本不传 → yieldTick 仅 setImmediate 让出、不上报）。
-async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext, onProgress } = {}) {
+async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext, onProgress } = {}) {
   if (!Array.isArray(bankRows)) {
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
+  // v3.0.23：仅 R2/C3 使用 trim+NOCASE 的候选预筛池；旧调用缺省时保持原 gwRows 行为。
+  const safeC3GwRows = Array.isArray(c3GwRows) ? c3GwRows : safeGwRows;
   // v3.0.8 需求3：轮次边界让出 + 进度上报。onProgress 异常吞掉（绝不影响对账结果）；
   //   只 await setImmediate（事件循环让出，使渲染进程消息循环得以处理 → 窗口不再「未响应」）。
   //   🔴 不在引擎内部调用、不在数据准备中途调用——只在「整轮完成」的安全点让出，无并发改写 bankRows 风险。
@@ -312,7 +315,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   //   只取它的 modifications / errorReport / stats + modifiedRows 的命中元数据；忽略其数据列浅拷贝（R4/R5 后会过时）。
   let r2 = { modifiedRows: [], unmatchedRows: [], modifications: [], errorReport: [], stats: {} };
   if (r2Bucket.length) {
-    r2 = runAllScenarios(bankRows, safeGwRows, r2Bucket, deps);
+    r2 = runAllScenarios(bankRows, safeC3GwRows, r2Bucket, deps);
   }
   mergeMods(r2.modifications);
   allWarnings.push(...(r2.errorReport || []));
@@ -341,14 +344,19 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   }
   await yieldTick('R3.5'); // 轮次边界让出（R3.5 DBS-Charge 已完成，进 R4 前）
 
-  // ===== R4：资金性质校验（🔴，matchedGwRows × 全量 bank 按 reconid 关联，改 FundType）=====
+  // ===== R4：资金性质校验（🔴，完整 exactRows × 全量 bank 严格 1:1，改 FundType）=====
   let r4ChangedCount = 0;
+  // v3.0.23 增补：保留全部严格匹配关系（含 FundType 同值 no-op），供 R5 精确识别已由 R4
+  // AchReturn 网关确认的具体银行行；与 modifications 分离，避免伪造改值和标黄。
+  let r4MatchedPairs = [];
   if (r4Bucket.length) {
-    const r4 = runRound4FundNatureCheck(r1.matchedGwRows, bankRows, r4Bucket);
+    // v3.0.23：R4 自己按固定 TradeType + 账号/币种/金额/方向筛选，不再受 R1 仅 ReconID 预配对结果限制。
+    const r4 = runRound4FundNatureCheck(safeGwRows, bankRows, r4Bucket);
     mergeMods(r4.modifications);
     allWarnings.push(...(r4.warnings || []));
     for (const m of r4.modifications || []) allMods.push({ ...m, _round: 'R4' });
     r4ChangedCount = (r4.modifications || []).length;
+    r4MatchedPairs = Array.isArray(r4.matchedPairs) ? r4.matchedPairs : [];
   }
   await yieldTick('R4'); // 轮次边界让出（R4 资金性质校验已完成，进 R5 前）
 
@@ -457,6 +465,8 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
   //   isFundTypeChanged：判定某银行行 FundType 是否已被 R4 改写（✅PRD Q2，被改写的 Ach Return 不再入回填池）。
   //     来源是跨轮累积的 modColsByRowId（R4 record('FundType') 后该行 rowId 的列集合含 'FundType'）。
   //   r1Pairs：R1 真实 1v1 配对；退款引擎只移出 TradeType=AchReturn 的具体 pair.bankRow，不按 reconid 扩散。
+  //   r4MatchedPairs：R4 完整严格配对（含同值 no-op）；退款引擎只移出 subCategory=ach-return 的
+  //     具体 pair.bankRow，关闭“R4 已匹配但未改值，R5 不知情”的血缘缺口。
   let refundBackfillRows = [];
   let refundUnmatchedRows = [];
   // OPEN-7（T5b-1）：R5 退款引擎冒泡的「以入金表为来源、回填成功」命中 BizId 去重数组（T5b-2 export 阶段消费）。
@@ -474,6 +484,7 @@ async function runReconciliation({ bankRows, gwRows, scenarios, deps, refundCont
       {
         isFundTypeChanged,
         r1Pairs: r1.pairs,
+        r4MatchedPairs,
         bankPaymentSerialFuzzyMatchEnabled: refundScenarioConfig.bankPaymentSerialFuzzyMatchEnabled === true
       }
     );

@@ -111,11 +111,14 @@ describe('需求6 修复2（🔴 资金红线）：gateway 账单按 Channel 过
     );
   });
 
-  test('handler 走 readGatewayBillRowsByChannels(bankChannels)（按 Channel 子集读，非全表）', () => {
+  test('handler 一次读取 exactRows/c3Rows 双池并分别注入编排器', () => {
     assert.ok(
-      mainSrc.includes('const workingGwRows = database.readGatewayBillRowsByChannels(bankChannels);'),
-      'gwRows 必须经 readGatewayBillRowsByChannels(bankChannels) 读取（业务不变量：对账永远同 Channel）'
+      mainSrc.includes('const gatewayRowPools = database.readGatewayBillRowPoolsByChannels(bankChannels);'),
+      '网关数据必须经双池 facade 单次读取'
     );
+    assert.ok(mainSrc.includes('const workingGwRows = gatewayRowPools.exactRows;'), '其它轮次必须使用 exactRows');
+    assert.ok(mainSrc.includes('const workingC3GwRows = gatewayRowPools.c3Rows;'), 'C3 必须使用 c3Rows');
+    assert.ok(mainSrc.includes('c3GwRows: workingC3GwRows,'), 'handler 必须显式注入 C3 专用候选池');
     // 注：不断言 readLinkedTableRows('gateway-bill') 全局缺席——该字面仍存在于 handler 上方注释（记录旧实现）。
   });
 });

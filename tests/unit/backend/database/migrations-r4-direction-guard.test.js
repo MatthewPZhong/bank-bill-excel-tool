@@ -18,6 +18,8 @@ const { DatabaseSync } = require('node:sqlite');
 
 const {
   ensureR4DirectionGuardConfigMigration,
+  ensureR4StrictDescriptionMigration,
+  R4_STRICT_FUNCTION_BY_SUBCATEGORY,
 } = require('../../../../src/backend/database/migrations');
 
 let tmpDir;
@@ -268,5 +270,70 @@ test.describe('v3.0.10 需求1 ensureR4DirectionGuardConfigMigration', () => {
     assert.strictEqual(res.updated, 0, '非法 JSON 跳过 → 不补种');
     // 原始 config_json 不变
     assert.strictEqual(getByName(db, '坏JSON-ach').config_json, '{"subCategory":"ach-return", BROKEN');
+  });
+});
+
+test.describe('v3.0.23 ensureR4StrictDescriptionMigration', () => {
+  test('老库四个内置场景只刷新 function，保留其它配置并保持幂等', () => {
+    createScenariosTable(db);
+    seedAllFourR4Old(db);
+    const before = JSON.parse(getByName(db, '资金性质校验-Ach Return').config_json);
+
+    const first = ensureR4StrictDescriptionMigration(db);
+    assert.deepStrictEqual(first, { status: 'migrated', scanned: 4, updated: 4 });
+
+    const names = {
+      'ach-return': '资金性质校验-Ach Return',
+      'wire-return': '资金性质校验-Wire Return',
+      'hx-out': '资金性质校验-HX-out',
+      'hx-in': '资金性质校验-HX-in'
+    };
+    for (const [subCategory, name] of Object.entries(names)) {
+      const config = JSON.parse(getByName(db, name).config_json);
+      assert.strictEqual(config.function, R4_STRICT_FUNCTION_BY_SUBCATEGORY[subCategory]);
+      assert.strictEqual(config.subCategory, subCategory);
+      assert.strictEqual(config.funcCategory, 'fund-nature-check');
+    }
+    const after = JSON.parse(getByName(db, '资金性质校验-Ach Return').config_json);
+    assert.strictEqual(after.gwTradeType, before.gwTradeType, '历史展示字段保留');
+    assert.strictEqual(after.setFundType, before.setFundType, '历史展示字段保留');
+    assert.deepStrictEqual(after.involvedFiles, before.involvedFiles, '其它配置保留');
+
+    const second = ensureR4StrictDescriptionMigration(db);
+    assert.deepStrictEqual(second, { status: 'no-op', scanned: 4, updated: 0 });
+  });
+
+  test('不修改非内置、非 fund-nature-check、非法 JSON 或其它 subCategory', () => {
+    createScenariosTable(db);
+    insertScenario(db, {
+      name: '用户Ach场景',
+      isBuiltin: 0,
+      config: r4Config('ach-return', 'Ach Return', 'AchReturn')
+    });
+    insertScenario(db, {
+      name: '伪R4场景',
+      config: { funcCategory: 'platform-order', subCategory: 'ach-return', function: '原说明' }
+    });
+    insertScenario(db, {
+      name: '其它内置场景',
+      config: { funcCategory: 'fund-nature-check', subCategory: 'other', function: '原说明' }
+    });
+    insertScenario(db, {
+      name: '坏JSON内置场景',
+      rawConfigJson: '{"funcCategory":"fund-nature-check","subCategory":"ach-return",broken'
+    });
+
+    const before = db.prepare('SELECT name, config_json, updated_at FROM scenarios ORDER BY id').all();
+    const result = ensureR4StrictDescriptionMigration(db);
+    const after = db.prepare('SELECT name, config_json, updated_at FROM scenarios ORDER BY id').all();
+    assert.strictEqual(result.updated, 0);
+    assert.deepStrictEqual(after, before);
+  });
+
+  test('scenarios 表不存在时 no-op', () => {
+    assert.deepStrictEqual(
+      ensureR4StrictDescriptionMigration(db),
+      { status: 'no-op', scanned: 0, updated: 0 }
+    );
   });
 });

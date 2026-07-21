@@ -1474,13 +1474,12 @@ function ensureScenarioApplicableChannelsTable(db) {
 //     - R4         : category==='builtin-fixed' && config.funcCategory==='fund-nature-check'
 //     - R5 场景2   : config.funcCategory==='platform-order' && config.subCategory==='fund-transfer-backfill'
 //     - R5 场景3   : config.funcCategory==='platform-order' && config.subCategory==='platform-inbound-cleanup'
-//   R4 handler（r4-fund-nature-check.js applyHandler 读）：gwTradeType? / requireBankFundType? / setFundType
+//   R4 引擎按 subCategory 读取固定规则；历史 gwTradeType/setFundType/requireBankZeroField 字段仅保留兼容展示。
 //   R5 场景2（r5-fund-transfer-backfill.js 读）：directions[] / dateToleranceDays
 //   R5 场景3（r5-platform-inbound-cleanup.js 读）：gwTradeType / excludeFundType
 //
-// 🔴 TradeType / FundType 真实取值（来自 PRD §八 Q1 默认值 / §五判定表）——【待用户核对真实网关取值】，
-//    已全部 config 化（改值不动代码）：AchReturn / WireReturn / HX_OUTBOUND / HX_INBOUND / Inbound-VA /
-//    FundTransfer-out / FundTransfer-in，以及目标 FundType：Ach Return / Wire Return / outbound / HX-out / HX-in。
+// 🔴 v3.0.23 起 R4 四类 TradeType / 目标 FundType 由 subCategory 在引擎中固定；seed 中同名历史字段只用于
+//    配置展示和旧版本兼容。R5 的 Inbound-VA / FundTransfer-out / FundTransfer-in 仍按各自 config 契约读取。
 //
 // 幂等（仿 ensureBuiltinFixedScenarioMigration / ensureScenariosSupport seed 范式）：
 //   - 定位键：is_builtin=1 AND category='builtin-fixed' AND config_json LIKE '%"subCategory":"<X>"%'。
@@ -1510,7 +1509,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       setFundType: 'Ach Return',
       // v3.0.10 需求1：方向守卫——出账性质要求银行行 Credit Amount=0（命中后若 Credit Amount 非0=方向录反则不改写并记 warning）
       requireBankZeroField: 'Credit Amount',
-      function: '网关交易类型为 AchReturn 时，将关联银行行的资金性质 FundType 改写为「Ach Return」（退票）。命中后若银行行 Credit Amount 非0（方向录反）则不改写并记 warning。',
+      function: '严格匹配 TradeType=AchReturn，且对账ID、银行大账号、币种一致，abs(Debit Amount)+Extra Fee 等于网关 amount、Credit Amount 为空或0时，将 FundType 改为「Ach Return」。',
       involvedFiles: ['银行对账单']
     }
   },
@@ -1526,7 +1525,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       setFundType: 'Wire Return',
       // v3.0.10 需求1：方向守卫——入账性质要求银行行 Debit Amount=0（命中后若 Debit Amount 非0=方向录反则不改写并记 warning）
       requireBankZeroField: 'Debit Amount',
-      function: '网关交易类型为 WireReturn 时，将关联银行行的资金性质 FundType 改写为「Wire Return」（电汇退回）。命中后若银行行 Debit Amount 非0（方向录反）则不改写并记 warning。',
+      function: '严格匹配 TradeType=WireReturn，且对账ID、银行大账号、币种一致，abs(Credit Amount)+Extra Fee 等于网关 amount、Debit Amount 为空或0时，将 FundType 改为「Wire Return」。',
       involvedFiles: ['银行对账单']
     }
   },
@@ -1547,7 +1546,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       setFundType: 'HX-out',
       // v3.0.10 需求1：方向守卫——出账性质要求银行行 Credit Amount=0（命中后若 Credit Amount 非0=方向录反则不改写并记 warning）
       requireBankZeroField: 'Credit Amount',
-      function: '网关交易类型为 HX_OUTBOUND 时，将关联银行行的资金性质 FundType 改写为「HX-out」（划汇出账）。命中后若银行行 Credit Amount 非0（方向录反）则不改写并记 warning。',
+      function: '严格匹配 TradeType=HX_OUTBOUND，且对账ID、银行大账号、币种一致，abs(Debit Amount)+Extra Fee 等于网关 amount、Credit Amount 为空或0时，将 FundType 改为「HX-out」。',
       involvedFiles: ['银行对账单']
     }
   },
@@ -1563,7 +1562,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
       setFundType: 'HX-in',
       // v3.0.10 需求1：方向守卫——入账性质要求银行行 Debit Amount=0（命中后若 Debit Amount 非0=方向录反则不改写并记 warning）
       requireBankZeroField: 'Debit Amount',
-      function: '网关交易类型为 HX_INBOUND 时，将关联银行行的资金性质 FundType 改写为「HX-in」（划汇入账）。命中后若银行行 Debit Amount 非0（方向录反）则不改写并记 warning。',
+      function: '严格匹配 TradeType=HX_INBOUND，且对账ID、银行大账号、币种一致，abs(Credit Amount)+Extra Fee 等于网关 amount、Debit Amount 为空或0时，将 FundType 改为「HX-in」。',
       involvedFiles: ['银行对账单']
     }
   },
@@ -2395,14 +2394,15 @@ function ensureFundTypeAchReturnConfigMigration(db) {
   return { status: updated > 0 ? 'migrated' : 'no-op', scanned: rows.length, updated };
 }
 
-// v3.0.10 需求1：R4 方向守卫 config 字段补种（🔴 资金红线 — 老库 4 个 R4 场景缺 requireBankZeroField 则守卫静默失效）。
+// v3.0.10 需求1：R4 方向守卫 config 字段补种（历史兼容迁移）。
 //
 // 背景：
-//   - v3.0.10 给 R4 资金性质校验加「银行行借贷方向守卫」——命中网关 TradeType 后，再判银行行「应为0」的
-//     金额列是否非0（方向录反）；非0 则不改写 FundType + 记 warning（见 r4-fund-nature-check.js 主循环）。
+//   - v3.0.10 时 R4 从 config.requireBankZeroField 读取方向列；v3.0.23 起四类核心口径已按 subCategory 固定，
+//     当前引擎不再依赖该字段。
 //   - 守卫读 config.requireBankZeroField（4 个 R4 子场景各对应一列）。本字段已加进 RECON_ROUND_BUILTIN_SCENARIOS
 //     seed，但老库的 4 个 R4 场景早已 seed 过、且 ensureReconRoundBuiltinScenariosSeed 凭全局 marker 短路 →
 //     老库拿不到新字段 → 守卫读到 undefined → 整层方向守卫静默不生效。这是资金红线必须堵的缝。
+//   - 迁移继续保留，保证配置导出/回滚到旧版本时仍完整；不得把该字段重新作为 v3.0.23 当前资金规则来源。
 //
 // 安全策略（范式同 ensureFundTypeAchReturnConfigMigration：精确定位 scenarios.config_json + JSON.parse + 事务 + 幂等）：
 //   - ⚠️ 无 marker：每次启动幂等补回缺失的 requireBankZeroField（不依赖任何 marker，老库也能补上）。
@@ -2459,6 +2459,66 @@ function ensureR4DirectionGuardConfigMigration(db) {
   } catch (e) {
     db.exec('ROLLBACK');
     throw e;
+  }
+
+  return { status: updated > 0 ? 'migrated' : 'no-op', scanned, updated };
+}
+
+// v3.0.23：R4 核心规则改为 subCategory 固定严格匹配后，幂等刷新四个内置场景的功能说明。
+// 只覆盖 is_builtin=1、category=builtin-fixed、funcCategory=fund-nature-check 的 function 字段；
+// 启停、名称、优先级及其它 config 字段全部保留。无 marker，每次启动内容相同即 no-op。
+const R4_STRICT_FUNCTION_BY_SUBCATEGORY = Object.freeze({
+  'ach-return': '严格匹配 TradeType=AchReturn，且对账ID、银行大账号、币种一致，abs(Debit Amount)+Extra Fee 等于网关 amount、Credit Amount 为空或0时，将 FundType 改为「Ach Return」。',
+  'wire-return': '严格匹配 TradeType=WireReturn，且对账ID、银行大账号、币种一致，abs(Credit Amount)+Extra Fee 等于网关 amount、Debit Amount 为空或0时，将 FundType 改为「Wire Return」。',
+  'hx-out': '严格匹配 TradeType=HX_OUTBOUND，且对账ID、银行大账号、币种一致，abs(Debit Amount)+Extra Fee 等于网关 amount、Credit Amount 为空或0时，将 FundType 改为「HX-out」。',
+  'hx-in': '严格匹配 TradeType=HX_INBOUND，且对账ID、银行大账号、币种一致，abs(Credit Amount)+Extra Fee 等于网关 amount、Debit Amount 为空或0时，将 FundType 改为「HX-in」。'
+});
+
+function ensureR4StrictDescriptionMigration(db) {
+  let select;
+  try {
+    select = db.prepare(`
+      SELECT id, config_json
+        FROM scenarios
+       WHERE is_builtin = 1
+         AND category = 'builtin-fixed'
+         AND config_json LIKE ?
+    `);
+  } catch (_error) {
+    return { status: 'no-op', scanned: 0, updated: 0 };
+  }
+
+  const update = db.prepare(`UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?`);
+  const now = new Date().toISOString();
+  let scanned = 0;
+  let updated = 0;
+
+  db.exec('BEGIN');
+  try {
+    for (const [subCategory, description] of Object.entries(R4_STRICT_FUNCTION_BY_SUBCATEGORY)) {
+      for (const row of select.all(`%"subCategory":"${subCategory}"%`)) {
+        scanned += 1;
+        let config;
+        try {
+          config = JSON.parse(row.config_json);
+        } catch (_error) {
+          continue;
+        }
+        if (!config
+          || config.funcCategory !== 'fund-nature-check'
+          || config.subCategory !== subCategory
+          || config.function === description) {
+          continue;
+        }
+        config.function = description;
+        update.run(JSON.stringify(config), now, row.id);
+        updated += 1;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
   }
 
   return { status: updated > 0 ? 'migrated' : 'no-op', scanned, updated };
@@ -3693,6 +3753,9 @@ module.exports = {
   ensureFundTypeAchReturnConfigMigration,
   // v3.0.10 需求1：R4 方向守卫 config 字段补种（无 marker 每次启动幂等补缺失 requireBankZeroField，绝不覆盖用户值；🔴 资金红线）
   ensureR4DirectionGuardConfigMigration,
+  // v3.0.23：幂等刷新四个内置 R4 场景固定严格匹配说明（只改 config.function）
+  ensureR4StrictDescriptionMigration,
+  R4_STRICT_FUNCTION_BY_SUBCATEGORY,
   // v2.1.10 N4-cont-2：diff_rows 2 FK 加 ON DELETE CASCADE（🔴 资金红线 + 不可逆 DB schema）
   ensureDiffRowsCascadeMigration_v2_1_10,
   // v2.1.16 阶段一 A3：链接表持久化（meta + 3 张数据表，期权表模板缺失暂不建）

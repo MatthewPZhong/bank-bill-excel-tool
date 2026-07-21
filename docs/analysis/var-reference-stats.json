@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.22",
-    "scannedAt": "2026-07-21T08:22:30.412Z",
+    "version": "3.0.23",
+    "scannedAt": "2026-07-21T16:49:42.703Z",
     "root": "src",
     "totalFiles": 201,
-    "totalTopLevelNames": 2313,
+    "totalTopLevelNames": 2323,
     "buckets": {
-      "shared": 339,
-      "paired": 588,
-      "local": 1245,
-      "crossFile": 927
+      "shared": 340,
+      "paired": 592,
+      "local": 1250,
+      "crossFile": 932
     }
   },
   "A": {
@@ -697,11 +697,11 @@
           },
           {
             "file": "src/backend/database/linked-table-repository.js",
-            "count": 11
+            "count": 12
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 8
+            "count": 9
           },
           {
             "file": "src/backend/database/own-accounts-migration.js",
@@ -812,7 +812,7 @@
             "count": 3
           }
         ],
-        "totalHits": 74,
+        "totalHits": 76,
         "fileSpan": 35
       },
       {
@@ -1147,7 +1147,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 6
+            "count": 13
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
@@ -1167,14 +1167,14 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 56
+            "count": 57
           },
           {
             "file": "src/main.js",
             "count": 1
           }
         ],
-        "totalHits": 224,
+        "totalHits": 232,
         "fileSpan": 21
       },
       {
@@ -1619,71 +1619,6 @@
         "fileSpan": 13
       },
       {
-        "name": "parseNumber",
-        "defFiles": [
-          "src/backend/pending-reconcile/removal-match.js",
-          "src/main-process/boc-fx-link-builder.js",
-          "src/main-process/scenario-engines/engine-utils.js",
-          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pending-reconcile/removal-match.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/boc-fx-link-builder.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/exceljs-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 43,
-        "fileSpan": 13
-      },
-      {
         "name": "crypto",
         "defFiles": [
           "src/backend/pending-import/validator.js",
@@ -1955,6 +1890,67 @@
           }
         ],
         "totalHits": 44,
+        "fileSpan": 12
+      },
+      {
+        "name": "parseNumber",
+        "defFiles": [
+          "src/backend/pending-reconcile/removal-match.js",
+          "src/main-process/boc-fx-link-builder.js",
+          "src/main-process/scenario-engines/engine-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pending-reconcile/removal-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/boc-fx-link-builder.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 41,
         "fileSpan": 12
       },
       {
@@ -4202,6 +4198,37 @@
         "fileSpan": 5
       },
       {
+        "name": "canonicalizeDecimal",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 5
+      },
+      {
         "name": "logger",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js",
@@ -4742,6 +4769,36 @@
           }
         ],
         "totalHits": 11,
+        "fileSpan": 5
+      },
+      {
+        "name": "ensureRowId",
+        "defFiles": [
+          "src/main-process/scenario-engines/engine-utils.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 10,
         "fileSpan": 5
       },
       {
@@ -5425,33 +5482,6 @@
         "fileSpan": 4
       },
       {
-        "name": "canonicalizeDecimal",
-        "defFiles": [
-          "src/main-process/financial-decimal.js",
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/financial-decimal.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 19,
-        "fileSpan": 4
-      },
-      {
         "name": "importRepo",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -5722,6 +5752,33 @@
           }
         ],
         "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
+        "name": "absoluteDecimal",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 11,
         "fileSpan": 4
       },
       {
@@ -6214,32 +6271,6 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
-        "name": "ensureRowId",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
             "count": 2
           }
         ],
@@ -7352,6 +7383,30 @@
         "fileSpan": 3
       },
       {
+        "name": "BANK_RECON_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 3
+      },
+      {
         "name": "diffRepo",
         "defFiles": [
           "src/backend/pending-export/writer.js",
@@ -7373,30 +7428,6 @@
           }
         ],
         "totalHits": 13,
-        "fileSpan": 3
-      },
-      {
-        "name": "BANK_RECON_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 12,
         "fileSpan": 3
       },
       {
@@ -7537,29 +7568,6 @@
           }
         ],
         "totalHits": 10,
-        "fileSpan": 3
-      },
-      {
-        "name": "absoluteDecimal",
-        "defFiles": [
-          "src/main-process/financial-decimal.js",
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/financial-decimal.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 9,
         "fileSpan": 3
       },
       {
@@ -7740,6 +7748,30 @@
           {
             "file": "src/main-process/scenario-dispatcher.js",
             "count": 1
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "GW_RECON_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 4
           }
         ],
         "totalHits": 9,
@@ -7974,6 +8006,29 @@
           }
         ],
         "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "addCanonicalDecimals",
+        "defFiles": [
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/financial-decimal.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
         "fileSpan": 3
       },
       {
@@ -8270,30 +8325,6 @@
           {
             "file": "src/main-process/monthly-balance.js",
             "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 3
-      },
-      {
-        "name": "GW_RECON_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 3
           }
         ],
         "totalHits": 8,
@@ -10990,25 +11021,6 @@
         "fileSpan": 2
       },
       {
-        "name": "BANK_FUND_TYPE_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 13
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 19,
-        "fileSpan": 2
-      },
-      {
         "name": "bankRowKey",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/matching-engine.js"
@@ -11061,6 +11073,25 @@
           }
         ],
         "totalHits": 19,
+        "fileSpan": 2
+      },
+      {
+        "name": "BANK_FUND_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 13
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 18,
         "fileSpan": 2
       },
       {
@@ -12528,25 +12559,6 @@
         "fileSpan": 2
       },
       {
-        "name": "addCanonicalDecimals",
-        "defFiles": [
-          "src/main-process/financial-decimal.js",
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/financial-decimal.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 2
-      },
-      {
         "name": "BANK_DEPOSIT_FIELDS",
         "defFiles": [
           "src/backend/database/linked-table-repository.js",
@@ -13381,6 +13393,24 @@
       },
       {
         "name": "ensureR4DirectionGuardConfigMigration",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "ensureR4StrictDescriptionMigration",
         "defFiles": [
           "src/backend/database/migrations.js"
         ],
@@ -14341,6 +14371,25 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "BANK_CURRENCY_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 2
           }
         ],
@@ -15858,6 +15907,25 @@
         "fileSpan": 2
       },
       {
+        "name": "BANK_MERCHANT_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "BankStatementMergeError",
         "defFiles": [
           "src/main-process/bank-statement-merge.js"
@@ -17096,6 +17164,25 @@
         "fileSpan": 2
       },
       {
+        "name": "GW_CURRENCY_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "hasLinkedTableRows",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -17932,6 +18019,24 @@
       },
       {
         "name": "readFundTransferReconRows",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "readGatewayBillRowPoolsByChannels",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
         ],
@@ -21661,10 +21766,10 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 41
+            "count": 42
           }
         ],
-        "totalHits": 41,
+        "totalHits": 42,
         "fileSpan": 1
       },
       {
@@ -21808,6 +21913,20 @@
         "fileSpan": 1
       },
       {
+        "name": "getDef",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 19
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 1
+      },
+      {
         "name": "getNewAccountRowElements",
         "defFiles": [
           "src/renderer.js"
@@ -21871,20 +21990,6 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 18
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 1
-      },
-      {
-        "name": "getDef",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
             "count": 18
           }
         ],
@@ -21959,6 +22064,20 @@
           }
         ],
         "totalHits": 16,
+        "fileSpan": 1
+      },
+      {
+        "name": "addReason",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 15
+          }
+        ],
+        "totalHits": 15,
         "fileSpan": 1
       },
       {
@@ -24104,6 +24223,20 @@
         "fileSpan": 1
       },
       {
+        "name": "BANK_EXTRA_FEE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "BATCH_DATE_RANGE_WHERE",
         "defFiles": [
           "src/backend/pre-fund-reconciliation-store.js"
@@ -25399,6 +25532,20 @@
         "refFiles": [
           {
             "file": "src/backend/usage-stats.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "canonicalAmount",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 4
           }
         ],
@@ -27282,20 +27429,6 @@
         "fileSpan": 1
       },
       {
-        "name": "applyHandler",
-        "defFiles": [
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "AppUpdaterService",
         "defFiles": [
           "src/main-process/app-updater.js"
@@ -27563,20 +27696,6 @@
       },
       {
         "name": "BANK_CREDIT_AMOUNT_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "BANK_CURRENCY_FIELD",
         "defFiles": [
           "src/main-process/scenario-engines/dbs-charge-fund-check.js"
         ],
@@ -29151,6 +29270,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "evaluateR4Candidate",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 3
           }
         ],
@@ -31482,6 +31615,34 @@
         "fileSpan": 1
       },
       {
+        "name": "R4_RULES_BY_SUBCATEGORY",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "R4_STRICT_FUNCTION_BY_SUBCATEGORY",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "RAW_LINE_HEADER",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
@@ -33708,20 +33869,6 @@
         "fileSpan": 1
       },
       {
-        "name": "BANK_MERCHANT_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "BANK_SOURCE_SHEET_HINT",
         "defFiles": [
           "src/backend/bank-bu-recon-db/columns.js"
@@ -34842,6 +34989,20 @@
         "fileSpan": 1
       },
       {
+        "name": "enabledR4Rules",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "ENGINE_RESOURCE_LIMITS",
         "defFiles": [
           "src/main-process/pending-session.js"
@@ -35458,13 +35619,27 @@
         "fileSpan": 1
       },
       {
-        "name": "GW_CURRENCY_FIELD",
+        "name": "GW_AMOUNT_FIELD",
         "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "GW_MERCHANT_ID_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 2
           }
         ],
@@ -39755,11 +39930,11 @@
         },
         {
           "file": "src/backend/database/linked-table-repository.js",
-          "count": 11
+          "count": 12
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 8
+          "count": 9
         },
         {
           "file": "src/backend/database/own-accounts-migration.js",
@@ -39870,7 +40045,7 @@
           "count": 3
         }
       ],
-      "totalHits": 74,
+      "totalHits": 76,
       "fileSpan": 35
     },
     {
@@ -40205,7 +40380,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 6
+          "count": 13
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
@@ -40225,14 +40400,14 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 56
+          "count": 57
         },
         {
           "file": "src/main.js",
           "count": 1
         }
       ],
-      "totalHits": 224,
+      "totalHits": 232,
       "fileSpan": 21
     },
     {
@@ -40677,71 +40852,6 @@
       "fileSpan": 13
     },
     {
-      "name": "parseNumber",
-      "defFiles": [
-        "src/backend/pending-reconcile/removal-match.js",
-        "src/main-process/boc-fx-link-builder.js",
-        "src/main-process/scenario-engines/engine-utils.js",
-        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pending-reconcile/removal-match.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/boc-fx-link-builder.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/exceljs-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 43,
-      "fileSpan": 13
-    },
-    {
       "name": "crypto",
       "defFiles": [
         "src/backend/pending-import/validator.js",
@@ -41013,6 +41123,67 @@
         }
       ],
       "totalHits": 44,
+      "fileSpan": 12
+    },
+    {
+      "name": "parseNumber",
+      "defFiles": [
+        "src/backend/pending-reconcile/removal-match.js",
+        "src/main-process/boc-fx-link-builder.js",
+        "src/main-process/scenario-engines/engine-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pending-reconcile/removal-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/boc-fx-link-builder.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 41,
       "fileSpan": 12
     },
     {
@@ -43260,6 +43431,37 @@
       "fileSpan": 5
     },
     {
+      "name": "canonicalizeDecimal",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 21,
+      "fileSpan": 5
+    },
+    {
       "name": "logger",
       "defFiles": [
         "src/main-process/biz-op-recon-session.js",
@@ -43800,6 +44002,36 @@
         }
       ],
       "totalHits": 11,
+      "fileSpan": 5
+    },
+    {
+      "name": "ensureRowId",
+      "defFiles": [
+        "src/main-process/scenario-engines/engine-utils.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 10,
       "fileSpan": 5
     },
     {
@@ -44483,33 +44715,6 @@
       "fileSpan": 4
     },
     {
-      "name": "canonicalizeDecimal",
-      "defFiles": [
-        "src/main-process/financial-decimal.js",
-        "src/main-process/pre-fund-reconciliation/bank-row.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/financial-decimal.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 19,
-      "fileSpan": 4
-    },
-    {
       "name": "importRepo",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -44780,6 +44985,33 @@
         }
       ],
       "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
+      "name": "absoluteDecimal",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 11,
       "fileSpan": 4
     },
     {
@@ -45272,32 +45504,6 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
-      "name": "ensureRowId",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
           "count": 2
         }
       ],
@@ -46410,6 +46616,30 @@
       "fileSpan": 3
     },
     {
+      "name": "BANK_RECON_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 3
+    },
+    {
       "name": "diffRepo",
       "defFiles": [
         "src/backend/pending-export/writer.js",
@@ -46431,30 +46661,6 @@
         }
       ],
       "totalHits": 13,
-      "fileSpan": 3
-    },
-    {
-      "name": "BANK_RECON_ID_FIELD",
-      "defFiles": [
-        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-        "src/main-process/scenario-engines/r1-recon-id-match.js",
-        "src/main-process/scenario-engines/r4-fund-nature-check.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 12,
       "fileSpan": 3
     },
     {
@@ -46595,29 +46801,6 @@
         }
       ],
       "totalHits": 10,
-      "fileSpan": 3
-    },
-    {
-      "name": "absoluteDecimal",
-      "defFiles": [
-        "src/main-process/financial-decimal.js",
-        "src/main-process/pre-fund-reconciliation/bank-row.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/financial-decimal.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 9,
       "fileSpan": 3
     },
     {
@@ -46798,6 +46981,30 @@
         {
           "file": "src/main-process/scenario-dispatcher.js",
           "count": 1
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "GW_RECON_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r1-recon-id-match.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 4
         }
       ],
       "totalHits": 9,
@@ -47032,6 +47239,29 @@
         }
       ],
       "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "addCanonicalDecimals",
+      "defFiles": [
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/financial-decimal.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
       "fileSpan": 3
     },
     {
@@ -47328,30 +47558,6 @@
         {
           "file": "src/main-process/monthly-balance.js",
           "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 3
-    },
-    {
-      "name": "GW_RECON_ID_FIELD",
-      "defFiles": [
-        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-        "src/main-process/scenario-engines/r1-recon-id-match.js",
-        "src/main-process/scenario-engines/r4-fund-nature-check.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 3
         }
       ],
       "totalHits": 8,
@@ -50046,25 +50252,6 @@
       "fileSpan": 2
     },
     {
-      "name": "BANK_FUND_TYPE_FIELD",
-      "defFiles": [
-        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-        "src/main-process/scenario-engines/r4-fund-nature-check.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 13
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 6
-        }
-      ],
-      "totalHits": 19,
-      "fileSpan": 2
-    },
-    {
       "name": "bankRowKey",
       "defFiles": [
         "src/main-process/duplicate-inbound-match/matching-engine.js"
@@ -50117,6 +50304,25 @@
         }
       ],
       "totalHits": 19,
+      "fileSpan": 2
+    },
+    {
+      "name": "BANK_FUND_TYPE_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 13
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 18,
       "fileSpan": 2
     },
     {
@@ -51584,25 +51790,6 @@
       "fileSpan": 2
     },
     {
-      "name": "addCanonicalDecimals",
-      "defFiles": [
-        "src/main-process/financial-decimal.js",
-        "src/main-process/pre-fund-reconciliation/bank-row.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/financial-decimal.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 6,
-      "fileSpan": 2
-    },
-    {
       "name": "BANK_DEPOSIT_FIELDS",
       "defFiles": [
         "src/backend/database/linked-table-repository.js",
@@ -52437,6 +52624,24 @@
     },
     {
       "name": "ensureR4DirectionGuardConfigMigration",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "ensureR4StrictDescriptionMigration",
       "defFiles": [
         "src/backend/database/migrations.js"
       ],
@@ -53397,6 +53602,25 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "BANK_CURRENCY_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 2
         }
       ],
@@ -54914,6 +55138,25 @@
       "fileSpan": 2
     },
     {
+      "name": "BANK_MERCHANT_ID_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "BankStatementMergeError",
       "defFiles": [
         "src/main-process/bank-statement-merge.js"
@@ -56152,6 +56395,25 @@
       "fileSpan": 2
     },
     {
+      "name": "GW_CURRENCY_FIELD",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "hasLinkedTableRows",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -56988,6 +57250,24 @@
     },
     {
       "name": "readFundTransferReconRows",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "readGatewayBillRowPoolsByChannels",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
       ],

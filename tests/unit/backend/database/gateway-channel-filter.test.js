@@ -150,3 +150,62 @@ test.describe('readGatewayBillRowsByChannels（v3.0.7 需求6）', () => {
     assert.deepEqual(reconIds(viaFacade), ['G1'], 'facade 与仓储同口径');
   });
 });
+
+test.describe('readGatewayBillRowPoolsByChannels（v3.0.23 C3 专用大小写不敏感预筛）', () => {
+  test('一次查询返回 exactRows 与 C3 trim+NOCASE 池，近似渠道不误入', () => {
+    insertGwRaw({ reconciliationid: 'EXACT', Channel: 'Maybank' });
+    insertGwRaw({ reconciliationid: 'UPPER', Channel: 'MAYBANK' });
+    insertGwRaw({ reconciliationid: 'LOWER', Channel: 'maybank' });
+    insertGwRaw({ reconciliationid: 'SPACED', Channel: '  Maybank  ' });
+    insertGwRaw({ reconciliationid: 'NEAR', Channel: 'MAYBANK2' });
+
+    let prepareCount = 0;
+    const countingDb = {
+      prepare(sql) {
+        prepareCount += 1;
+        return db.prepare(sql);
+      }
+    };
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(countingDb, [' Maybank ']);
+
+    assert.equal(prepareCount, 1, '双池必须由一次 SQL 查询生成');
+    assert.deepEqual(pools.exactRows.map((r) => r.reconciliationid), ['EXACT']);
+    assert.deepEqual(
+      pools.c3Rows.map((r) => r.reconciliationid),
+      ['EXACT', 'UPPER', 'LOWER', 'SPACED'],
+      'C3 接受大小写/首尾空格差异，但不接受 MAYBANK2'
+    );
+    assert.strictEqual(pools.exactRows[0], pools.c3Rows[0], '同行在两个池中共享对象引用');
+  });
+
+  test('exactRows 保留旧空值口径，C3 额外接受网关空白字符串', () => {
+    insertGwRaw({ reconciliationid: 'EMPTY', Channel: '' });
+    insertGwRaw({ reconciliationid: 'SPACES', Channel: '   ' });
+    insertGwRaw({ reconciliationid: 'MISSING' });
+    insertGwRaw({ reconciliationid: 'OTHER', Channel: 'JPM' });
+
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(db, ['']);
+    assert.deepEqual(pools.exactRows.map((r) => r.reconciliationid), ['EMPTY', 'MISSING']);
+    assert.deepEqual(pools.c3Rows.map((r) => r.reconciliationid), ['EMPTY', 'SPACES', 'MISSING']);
+  });
+
+  test('坏 JSON 跳过且空入参返回两个空池', () => {
+    insertGwRaw({ reconciliationid: 'GOOD', Channel: 'MAYBANK' });
+    db.prepare(
+      `INSERT INTO linked_gateway_bill (reconciliation_id, bill_date, raw_json, imported_at) VALUES (?, ?, ?, ?)`
+    ).run('', '', '{broken-json', '2026-07-21T00:00:00.000Z');
+
+    const pools = linkedRepo.readGatewayBillRowPoolsByChannels(db, ['Maybank']);
+    assert.deepEqual(pools.exactRows, []);
+    assert.deepEqual(pools.c3Rows.map((r) => r.reconciliationid), ['GOOD']);
+    assert.deepEqual(linkedRepo.readGatewayBillRowPoolsByChannels(db, []), { exactRows: [], c3Rows: [] });
+    assert.deepEqual(linkedRepo.readGatewayBillRowPoolsByChannels(db, null), { exactRows: [], c3Rows: [] });
+  });
+
+  test('facade 转发双池结果', () => {
+    insertGwRaw({ reconciliationid: 'MIXED', Channel: 'MAYBANK' });
+    const pools = appDb.readGatewayBillRowPoolsByChannels(['Maybank']);
+    assert.deepEqual(pools.exactRows, []);
+    assert.deepEqual(pools.c3Rows.map((r) => r.reconciliationid), ['MIXED']);
+  });
+});
