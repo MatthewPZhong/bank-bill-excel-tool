@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.22 PRD
 
 > 目标版本：`3.0.22`
-> 状态：release-ready（PR #97 已合入 `main`；最终发布前门禁通过）
+> 状态：released（PR #97 已合入 `main`；`v3.0.22` 已发布）
 > 归档：PR #97 merge commit `116eee1`；源规格 `changes/3.0.22/spec.md`
 > 更新时间：2026-07-21
 > 适用仓库：`bank-bill-excel-tool`
@@ -58,5 +58,8 @@
 - 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、六组合主页面几何门禁、变量扫描和重要变量复核。
 - 首次发布 workflow run `29814335578` 在打包前因 Windows 测试可移植性假设失败，未创建 Release 或资产；修复后定向测试 `34/34` 与完整 release-check 再次通过。
 - 既有生产依赖仍有 7 条 audit 告警（2 moderate、5 high）；本迭代未改变生产依赖，该问题继续作为依赖治理 follow-up。
-- PR 归档见 `docs/prs/PR97-v3.0.22.md`；tag、Release workflow 和公开资产证据待发布完成后补录。
+- PR 归档见 `docs/prs/PR97-v3.0.22.md`。
 - 真实文件 SHA-256、11 模块归属和 Windows Excel/WPS 只读表现仍为发布后人工 follow-up；用户已知悉并授权继续发布。
+- annotated tag `v3.0.22` 指向 `9e40a298f2f85fa82ce10b5eed941a0b4716a48a`；Windows Release workflow run [`29816044492`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29816044492) 全部通过。
+- GitHub Release [`v3.0.22`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.22) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 匿名回读确认 Setup/portable 总大小分别为 `99,758,793` / `99,262,027` 字节且文件头均为 `MZ`；公开 `latest.yml` 为版本 `3.0.22`，Setup 大小匹配 GitHub 资产元数据，完整 SHA-512 由 workflow 验证。

@@ -1,6 +1,6 @@
 # Spec - v3.0.22 设置页内存档中心
 
-> status: release-ready（PR #97 已合入 `main`；最终发布前门禁通过）
+> status: released（PR #97 已合入 `main`；`v3.0.22` 已发布）
 > updated: 2026-07-21
 > branch: `codex/v3.0.22-archive-center`
 > prototype: `changes/3.0.22/archive-center-settings-prototype.html`
@@ -172,5 +172,7 @@
 - 2026-07-21：`npm audit --omit=dev` 仍报告既有 7 条生产依赖告警（2 moderate、5 high）；3.0.22 未新增或升级生产依赖，该基线继续作为后续依赖治理项披露。
 - 2026-07-21：首次 `v3.0.22` 发布 workflow（run `29814335578`）在打包前因两条 Windows 测试可移植性假设失败，未创建 GitHub Release 或发布资产；修复测试路径规范化和 CRLF/LF 源码断言后，定向测试 `34/34` 与完整 release-check 再次通过。
 - 归档见 `docs/prs/PR97-v3.0.22.md` 与 `docs/iterations/v3.0.22/PRD-v3.0.22.md`。
-- `v3.0.22` tag 将在测试修复提交上重新创建；成功 workflow 和公开升级资产证据待发布完成后补录。
+- 2026-07-21：annotated tag `v3.0.22` 指向 `9e40a298f2f85fa82ce10b5eed941a0b4716a48a`；Windows Release workflow run [`29816044492`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29816044492) 全部通过。
+- GitHub Release [`v3.0.22`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.22) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 匿名回读确认 Setup/portable 总大小分别为 `99,758,793` / `99,262,027` 字节且文件头均为 `MZ`；`latest.yml` 公布版本 `3.0.22`、Setup 路径及 SHA-512，完整资产校验由发布 workflow 通过。
 - 用户已在知悉真实文件血缘抽查及 Windows Excel/WPS 只读表现仍为人工 follow-up 的情况下授权继续发布；不得宣称上述人工验收已完成。

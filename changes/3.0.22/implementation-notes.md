@@ -1,6 +1,6 @@
 # Implementation Notes - v3.0.22 设置页内存档中心
 
-> updated: 2026-07-20
+> updated: 2026-07-21
 > branch: `codex/v3.0.22-archive-center`
 
 ## Baseline
@@ -88,6 +88,8 @@
 - 合并归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过 release-check、主页面几何门禁 `6/6`、变量扫描和重要变量复核。
 - `npm audit --omit=dev` 为既有 7 条生产依赖告警（2 moderate、5 high）；本迭代未改生产依赖，继续作为依赖治理 follow-up。
 - 首次发布 workflow run `29814335578` 在打包前安全失败，未创建 Release 或资产；Windows 可移植性测试修复后定向测试 `34/34` 和完整 release-check 再次通过。
+- annotated tag `v3.0.22` 指向 `9e40a298f2f85fa82ce10b5eed941a0b4716a48a`；Windows Release workflow run `29816044492` 在 `13m41s` 内完成测试、打包、资产校验、发布和发布后验证。
+- GitHub Release `v3.0.22` 为 latest、非 draft、非 prerelease；四个资产均已上传。匿名回读确认 Setup/portable 文件头为 `MZ`，公开 `latest.yml` 的版本、路径、大小和 SHA-512 契约有效。
 
 ## Remaining Unknowns
 
@@ -95,7 +97,7 @@
 |---|---|---|
 | Windows 只读副本在 Excel/WPS 下是否始终以只读方式打开 | PROBE | 使用 Windows 安装版人工验证；另存副本始终可用作兜底。 |
 | 大文件复制叠加杀毒/OneDrive 时的实际吞吐 | PROBE | Windows 用真实脱敏大文件记录业务返回时刻、归档完成时刻和峰值内存。 |
-| 11 模块真实文件的来源/结果摘要是否全部一一对应 | BLOCK 发布 | 资金负责人按 `test-spec.md` §4 抽查；自动策略测试不能替代。 |
+| 11 模块真实文件的来源/结果摘要是否全部一一对应 | BLOCK 人工验收 | 资金负责人按 `test-spec.md` §4 抽查；发布授权不等于人工验收通过。 |
 
 ## Rollback
 
