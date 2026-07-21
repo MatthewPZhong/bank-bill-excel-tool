@@ -44,6 +44,9 @@
 | `npm run scan:vars` | 通过；v3.0.23 共扫描 201 个文件、2323 个顶层变量 | 重要变量统计刷新 |
 | `npm run check:vars -- --include-minor` | 按设计以 code 2 报告 2 个 Critical、4 个 Risk-sensitive 命中；要求的 smoke 已由 `release-check` 验证通过 | `runAllScenarios`、`runReconciliation`、`readGatewayBillRowPoolsByChannels`、`runRound4FundNatureCheck`、`runRound5RefundOrderBackfill` 关联功能 review |
 | reconciliation blindspot pass | 已完成；R4→R5 no-op 自动化血缘缺口已关闭，真实重复 ReconID 与资金人工门禁继续记录 | 对账主键、金额币种、方向、消费守恒、可观测性 |
+| GitHub PR #98 Windows workflow | PASS | 远端 Windows 门禁 |
+| 最终 self-review | P0-P4 Finding 0 | 合并质量门 |
+| PR #98 | merge commit `0171b2b` 合入 `main`；远程与本地开发分支删除 | 合并和分支收口 |
 
 ## Remaining Unknowns
 

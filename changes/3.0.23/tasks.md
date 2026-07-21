@@ -34,3 +34,8 @@
 - 目标：逐笔核对真实 Ach/Wire/HX 的金额、手续费、方向、1:1 和告警。
 - 验证：资金负责人留下明确结论；缺少 HX 样本时保留验收缺口，并用真实重复 ReconID 样本复核 R4 no-op → R5 排除。
 - 状态：pending（⚠️ 不能由自动测试替代）
+
+## Task 8 — 合并归档与在线发布
+- 目标：归档 PR #98 与 v3.0.23 PRD，创建受控 tag，并验证 Windows Release 与在线升级资产。
+- 验证：PR 为 MERGED、开发分支删除、tag 指向发布准备 commit、Release workflow 成功、公开资产与 `latest.yml` 一致。
+- 状态：in-progress（PR 合并与首轮归档进行中，tag/Release 待执行）

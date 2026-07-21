@@ -1,6 +1,6 @@
 # Test Spec — v3.0.23 C3 渠道预筛与 R4 资金性质校验收紧
 
-> status: automatic-verification-passed / human-fund-review-pending
+> status: merged-pass（PR #98 已合入 `main`；Release workflow 待执行；human-fund-review-pending）
 > created: 2026-07-21
 > updated: 2026-07-21
 
@@ -94,3 +94,6 @@
 - `npm run release-check`：lint、smoke、`3791/3791` 单测及 42 个集成脚本 `1963/1963` 断言全部通过。
 - `npm run scan:vars`：201 个 JS 文件、2323 个顶层声明。
 - `npm run check:vars -- --include-minor`：按设计命中 2 个 Critical、4 个 Risk-sensitive，退出码 2；关联功能 review 已同步到重要变量清单。
+- GitHub PR #98 Windows workflow：PASS；最终 self-review 为 P0-P4 Finding 0。
+- PR #98 已由 merge commit `0171b2b` 合入 `main`；最终发布前门禁、tag workflow 与公开资产验证待完成后补录。
+- 真实 Ach Return、Wire Return、HX 与重复 ReconID 样本人工逐笔复核仍为 follow-up，不得宣称人工验收通过。

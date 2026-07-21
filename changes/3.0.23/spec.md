@@ -1,6 +1,6 @@
 # Spec — v3.0.23 C3 渠道预筛与 R4 资金性质校验收紧
 
-> status: implemented / automatic-verification-passed / human-fund-review-pending
+> status: merged（PR #98 已合入 `main`；v3.0.23 Release 待发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-21
 > updated: 2026-07-21
@@ -153,3 +153,14 @@ AND 相反方向金额为空或规范值为 0
 | R4 同值匹配与 R1 退款过滤血缘不同 | 已确认缺口 / 本增补关闭 | R4 返回包含 no-op 的具体 `matchedPairs`，R5 精确排除其中 AchReturn 配对银行行；真实重复 ReconID 样本仍须人工复核 |
 
 ⚠️ 资金红线：R4 改变 FundType 认定主键、金额、手续费、方向和重复消费语义。自动测试不能替代真实 Ach Return、Wire Return、HX-out、HX-in 的人工逐笔复核。
+
+## 8. 合并与发布记录
+
+- 2026-07-21：R4/R5/编排器定向单测 `205/205 PASS`；完整链路回放 `23/23 PASS`。
+- 2026-07-21：`npm run release-check` 通过，lint、smoke、unit `3791/3791`、42 个 integration 脚本 `1963/1963` 全绿。
+- 2026-07-21：`scan:vars` 扫描 201 个 JS 文件、2323 个顶层声明；`check-vars` 按设计命中 2 个 Critical 与 4 个 Risk-sensitive，关联资金回归已完成。
+- 2026-07-21：最终 self-review 为 P0-P4 Finding 0；PR #98 的 Windows workflow 通过。
+- 2026-07-21：PR #98 以 merge commit `0171b2b` 合入 `main`，远程与本地开发分支均已删除。
+- 归档见 `docs/prs/PR98-v3.0.23.md` 与 `docs/iterations/v3.0.23/PRD-v3.0.23.md`。
+- `v3.0.23` tag、Release workflow 和公开在线升级资产证据待发布完成后补录。
+- 真实 Ach Return、Wire Return、HX 及重复 ReconID 冲突样本仍须资金负责人逐笔复核；发布授权不等于人工资金验收通过。
