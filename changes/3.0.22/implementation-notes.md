@@ -64,6 +64,13 @@
 - 影响：大文件存档时正常退出可能多等待一段时间；强制结束进程仍由“复制前整批登记 + 启动一致性修复”兜底。
 - 已反向同步：`spec.md`、`test-spec.md`、`tasks.md` 和三份版本文档。
 
+### DEV-04 首次发布暴露 Windows 测试可移植性假设
+
+- 原状态：两条单测分别写死 POSIX 路径和 LF 换行，在 macOS 与 PR workflow 中通过。
+- 实际：首次 `v3.0.22` Windows 发布 workflow run `29814335578` 在打包前的 release-check 失败，未生成 Release 或发布资产。
+- 修复：路径快照与输入统一使用 `path.resolve`，源码契约断言读取后先将 CRLF/LF 统一为 LF；不修改业务实现或发布契约。
+- 证据：相关定向测试 `34/34` 通过，完整 release-check 再次通过 unit `3780/3780`、integration `1955/1955` 和 Smoke。
+
 ## Evidence
 
 - Repository/service/controller/tracker/UI 定向测试：64/64 通过。
@@ -80,6 +87,7 @@
 - PR #97 已于 2026-07-21 以 merge commit `116eee1` 合入 `main`，开发分支已删除。
 - 合并归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过 release-check、主页面几何门禁 `6/6`、变量扫描和重要变量复核。
 - `npm audit --omit=dev` 为既有 7 条生产依赖告警（2 moderate、5 high）；本迭代未改生产依赖，继续作为依赖治理 follow-up。
+- 首次发布 workflow run `29814335578` 在打包前安全失败，未创建 Release 或资产；Windows 可移植性测试修复后定向测试 `34/34` 和完整 release-check 再次通过。
 
 ## Remaining Unknowns
 

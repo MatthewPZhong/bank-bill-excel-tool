@@ -56,6 +56,7 @@
 - GitHub PR workflow 通过；最终 self-review 为 P0-P4 Finding 0。
 - PR #97 以 merge commit `116eee1` 合入 `main`，开发分支已删除。
 - 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、六组合主页面几何门禁、变量扫描和重要变量复核。
+- 首次发布 workflow run `29814335578` 在打包前因 Windows 测试可移植性假设失败，未创建 Release 或资产；修复后定向测试 `34/34` 与完整 release-check 再次通过。
 - 既有生产依赖仍有 7 条 audit 告警（2 moderate、5 high）；本迭代未改变生产依赖，该问题继续作为依赖治理 follow-up。
 - PR 归档见 `docs/prs/PR97-v3.0.22.md`；tag、Release workflow 和公开资产证据待发布完成后补录。
 - 真实文件 SHA-256、11 模块归属和 Windows Excel/WPS 只读表现仍为发布后人工 follow-up；用户已知悉并授权继续发布。

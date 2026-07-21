@@ -20,9 +20,12 @@ const path = require('node:path');
 
 const SRC_DIR = path.join(__dirname, '..', '..', '..', 'src');
 // 🔴 main.js 含 NUL 字节（见 memory reference_mainjs_nul_grep）——读后剥除 \u0000，避免 NUL 落在子串中段导致 includes 漏配。
-const mainSrc = fs.readFileSync(path.join(SRC_DIR, 'main.js'), 'utf8').replace(/\u0000/g, '');
+const mainSrc = fs.readFileSync(path.join(SRC_DIR, 'main.js'), 'utf8')
+  .replace(/\r\n?/g, '\n')
+  .replace(/\u0000/g, '');
 const orchSrc = fs
   .readFileSync(path.join(SRC_DIR, 'main-process', 'reconciliation-orchestrator.js'), 'utf8')
+  .replace(/\r\n?/g, '\n')
   .replace(/\u0000/g, '');
 
 describe('需求3：bank-statement:run handler 进度转发器内联（not-defined 事故回归）', () => {

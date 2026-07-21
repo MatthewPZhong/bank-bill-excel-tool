@@ -170,6 +170,7 @@
 - 2026-07-21：开发分支已删除，本地 `main` 与 `origin/main` 同步。
 - 2026-07-21：合并归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过完整 release-check、六组合主页面几何门禁、变量扫描和重要变量复核。
 - 2026-07-21：`npm audit --omit=dev` 仍报告既有 7 条生产依赖告警（2 moderate、5 high）；3.0.22 未新增或升级生产依赖，该基线继续作为后续依赖治理项披露。
+- 2026-07-21：首次 `v3.0.22` 发布 workflow（run `29814335578`）在打包前因两条 Windows 测试可移植性假设失败，未创建 GitHub Release 或发布资产；修复测试路径规范化和 CRLF/LF 源码断言后，定向测试 `34/34` 与完整 release-check 再次通过。
 - 归档见 `docs/prs/PR97-v3.0.22.md` 与 `docs/iterations/v3.0.22/PRD-v3.0.22.md`。
-- `v3.0.22` tag、Release workflow 和公开升级资产证据待发布完成后补录。
+- `v3.0.22` tag 将在测试修复提交上重新创建；成功 workflow 和公开升级资产证据待发布完成后补录。
 - 用户已在知悉真实文件血缘抽查及 Windows Excel/WPS 只读表现仍为人工 follow-up 的情况下授权继续发布；不得宣称上述人工验收已完成。

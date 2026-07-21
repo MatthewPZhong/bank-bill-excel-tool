@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -223,11 +224,12 @@ test.describe('archive operation tracker', () => {
   test('导入成功时的源文件身份快照会跟随待办进入运行批次', async () => {
     const { tracker, calls } = createHarness();
     const sourceSnapshot = { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 };
+    const inputPath = path.resolve('/tmp/input.xlsx');
     await tracker.handleOperation({
       channel: 'recon-id-fix:import',
       result: { status: 'ok' },
-      selectedPaths: ['/tmp/input.xlsx'],
-      runtime: { sourceSnapshots: new Map([['/tmp/input.xlsx', sourceSnapshot]]) }
+      selectedPaths: [inputPath],
+      runtime: { sourceSnapshots: new Map([[inputPath, sourceSnapshot]]) }
     });
     await tracker.handleOperation({
       channel: 'recon-id-fix:run',

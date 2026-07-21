@@ -17,7 +17,7 @@
 | 9. 完整发布检查和预览 | done | release-check、变量检查、启动性能和设置页预览均通过 |
 | 10. 真实文件人工血缘抽查 | pending | 由资金负责人完成 |
 | 11. PR、自审与合并 | done | PR #97 已由 merge commit `116eee1` 合入 `main` |
-| 12. 发布归档与在线发布 | in_progress | PR/PRD 已归档且最终门禁通过；tag、Release workflow 和公开资产验证待执行 |
+| 12. 发布归档与在线发布 | in_progress | 首轮 workflow 在打包前因 Windows 测试可移植性失败且未生成资产；修复后完整门禁通过，待重新创建 tag 并验证公开资产 |
 
 ## 实施检查清单
 
