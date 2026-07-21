@@ -1,0 +1,1650 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>v3.0.22 设置与存档中心原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --page: #fbfcfe;
+        --surface: #ffffff;
+        --surface-muted: #f6f8fb;
+        --surface-hover: #eef3fb;
+        --text: #1f2328;
+        --muted: #667085;
+        --faint: #98a2b3;
+        --line: #dfe3e8;
+        --line-soft: #edf0f3;
+        --primary: #0b57d0;
+        --primary-soft: #e8f0fe;
+        --success: #137333;
+        --warning: #a15c00;
+        --danger: #b3261e;
+        --danger-soft: #fce8e6;
+        --shadow: 0 22px 60px rgba(28, 39, 56, 0.2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        min-width: 900px;
+        background: var(--page);
+        color: var(--text);
+        font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+        font-size: 14px;
+        letter-spacing: 0;
+      }
+
+      button,
+      input,
+      select {
+        font: inherit;
+        letter-spacing: 0;
+      }
+
+      button {
+        color: inherit;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible {
+        outline: 2px solid rgba(11, 87, 208, 0.35);
+        outline-offset: 2px;
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      .app-frame {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: var(--page);
+      }
+
+      .window-bar {
+        height: 44px;
+        border-bottom: 1px solid #e5e7eb;
+        background: rgba(255, 255, 255, 0.96);
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        padding: 0 12px;
+        gap: 2px;
+      }
+
+      .window-button {
+        width: 38px;
+        height: 30px;
+        border: 0;
+        background: transparent;
+        color: #515761;
+        cursor: default;
+      }
+
+      .app-logo {
+        position: absolute;
+        top: 56px;
+        left: 20px;
+        width: 42px;
+        height: 42px;
+        object-fit: cover;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(31, 35, 40, 0.12);
+      }
+
+      .page-title {
+        margin: 56px 0 26px;
+        text-align: center;
+        font-size: 42px;
+        font-weight: 500;
+        color: #111827;
+      }
+
+      .background-workspace {
+        width: min(880px, calc(100vw - 160px));
+        margin: 0 auto;
+      }
+
+      .module-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 42px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #e3edff;
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .module-chip::before {
+        content: "✦";
+        color: #8b5cf6;
+      }
+
+      .workspace-board {
+        height: 300px;
+        margin-top: 16px;
+        border: 1px solid #e2e6eb;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 10px 28px rgba(41, 52, 70, 0.08);
+        display: grid;
+        grid-template-columns: 1fr 220px;
+        gap: 36px;
+        padding: 28px 44px;
+      }
+
+      .board-fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 18px;
+        align-content: start;
+      }
+
+      .skeleton-line,
+      .skeleton-panel,
+      .skeleton-button {
+        border: 1px solid #e5e7eb;
+        background: #f7f9fc;
+      }
+
+      .skeleton-line {
+        height: 48px;
+        border-radius: 6px;
+      }
+
+      .skeleton-panel {
+        grid-column: 1 / -1;
+        height: 150px;
+        border-radius: 8px;
+      }
+
+      .board-actions {
+        display: grid;
+        gap: 16px;
+        align-content: start;
+      }
+
+      .skeleton-button {
+        height: 48px;
+        border-radius: 6px;
+      }
+
+      .skeleton-button.primary {
+        border-color: #0b57d0;
+        background: #0b57d0;
+      }
+
+      .bottom-tools {
+        position: absolute;
+        left: 16px;
+        bottom: 12px;
+        display: flex;
+        gap: 10px;
+      }
+
+      .round-tool {
+        position: relative;
+        width: 38px;
+        height: 38px;
+        border: 1px solid #d9dee5;
+        border-radius: 50%;
+        background: #fff;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 2px 8px rgba(31, 35, 40, 0.08);
+        cursor: pointer;
+      }
+
+      .round-tool:hover {
+        background: #f3f6fa;
+      }
+
+      .round-tool.is-active {
+        border-color: #aac6f5;
+        background: #edf4ff;
+      }
+
+      .notification-dot {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 9px;
+        height: 9px;
+        border: 2px solid #fff;
+        border-radius: 50%;
+        background: var(--danger);
+      }
+
+      .version {
+        position: absolute;
+        right: 20px;
+        bottom: 16px;
+        color: #8a929e;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 28px;
+        background: rgba(30, 38, 50, 0.34);
+        backdrop-filter: blur(6px);
+      }
+
+      .settings-dialog {
+        width: min(1088px, calc(100vw - 56px));
+        height: min(704px, calc(100vh - 56px));
+        min-height: 620px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--surface);
+        box-shadow: var(--shadow);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .settings-header {
+        flex: 0 0 66px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 22px 0 26px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .settings-title {
+        margin: 0;
+        font-size: 22px;
+        font-weight: 600;
+      }
+
+      .icon-button {
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        display: inline-grid;
+        place-items: center;
+        cursor: pointer;
+        color: #5e6672;
+        font-size: 18px;
+      }
+
+      .icon-button:hover {
+        border-color: var(--line);
+        background: var(--surface-muted);
+        color: var(--text);
+      }
+
+      .settings-close {
+        margin-left: auto;
+        font-size: 22px;
+      }
+
+      .settings-layout {
+        min-height: 0;
+        flex: 1;
+        display: grid;
+        grid-template-columns: 176px minmax(0, 1fr);
+      }
+
+      .settings-nav {
+        min-height: 0;
+        border-right: 1px solid var(--line-soft);
+        background: var(--surface-muted);
+        padding: 16px 10px;
+      }
+
+      .nav-item {
+        position: relative;
+        width: 100%;
+        height: 44px;
+        border: 0;
+        border-radius: 6px;
+        background: transparent;
+        color: #4d5562;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 14px;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .nav-item + .nav-item {
+        margin-top: 4px;
+      }
+
+      .nav-item:hover {
+        background: #edf1f6;
+      }
+
+      .nav-item.is-active {
+        background: var(--primary-soft);
+        color: var(--primary);
+        font-weight: 600;
+      }
+
+      .nav-icon {
+        width: 20px;
+        text-align: center;
+        font-size: 16px;
+      }
+
+      .nav-status-dot {
+        width: 8px;
+        height: 8px;
+        margin-left: auto;
+        border-radius: 50%;
+        background: var(--danger);
+      }
+
+      .settings-right {
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+      }
+
+      .settings-pane {
+        min-width: 0;
+        min-height: 0;
+        flex: 1;
+      }
+
+      .settings-footer {
+        flex: 0 0 66px;
+        border-top: 1px solid var(--line-soft);
+        background: #fbfcfd;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 10px;
+        padding: 0 24px;
+      }
+
+      .button {
+        min-width: 96px;
+        height: 38px;
+        padding: 0 16px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #fff;
+        color: #343b45;
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      .button:hover {
+        border-color: #b8c0ca;
+        background: #f7f9fb;
+      }
+
+      .button.primary {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .button.primary:hover {
+        background: #0848ad;
+      }
+
+      .button.danger {
+        border-color: #efc4c0;
+        color: var(--danger);
+      }
+
+      .button.danger:hover {
+        background: var(--danger-soft);
+      }
+
+      .button:disabled {
+        opacity: 0.48;
+        cursor: not-allowed;
+      }
+
+      .auto-update-pane {
+        height: 100%;
+        overflow: auto;
+        padding: 30px 36px;
+      }
+
+      .pane-heading {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+      }
+
+      .pane-subtitle {
+        margin: 7px 0 0;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .update-content {
+        width: min(620px, 100%);
+        margin-top: 24px;
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .setting-row {
+        min-height: 58px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .setting-label {
+        color: var(--muted);
+      }
+
+      .setting-value {
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+
+      .toggle-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+      }
+
+      .toggle-label input {
+        width: 18px;
+        height: 18px;
+        accent-color: var(--primary);
+      }
+
+      .update-progress {
+        width: 100%;
+        height: 8px;
+        margin-top: 18px;
+        accent-color: var(--primary);
+      }
+
+      .update-note {
+        width: min(620px, 100%);
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.7;
+      }
+
+      .archive-pane {
+        height: 100%;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .archive-header {
+        flex: 0 0 70px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 24px;
+      }
+
+      .archive-header-copy {
+        min-width: 0;
+      }
+
+      .archive-header-copy .pane-subtitle {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .storage-summary {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+
+      .storage-summary strong {
+        color: var(--text);
+      }
+
+      .archive-filters {
+        flex: 0 0 76px;
+        padding: 10px 24px 14px;
+        display: grid;
+        grid-template-columns: 168px 190px minmax(220px, 1fr);
+        gap: 12px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .field {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .field-label {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .field-control {
+        width: 100%;
+        height: 36px;
+        border: 1px solid #cfd5dc;
+        border-radius: 6px;
+        background: #fff;
+        color: var(--text);
+        padding: 0 10px;
+      }
+
+      .archive-workspace {
+        min-width: 0;
+        min-height: 0;
+        flex: 1;
+        display: grid;
+        grid-template-columns: 286px minmax(0, 1fr);
+      }
+
+      .batch-panel {
+        min-height: 0;
+        border-right: 1px solid var(--line-soft);
+        background: #fbfcfd;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .panel-caption {
+        flex: 0 0 38px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 14px;
+        color: var(--muted);
+        font-size: 12px;
+        border-bottom: 1px solid var(--line-soft);
+      }
+
+      .batch-list {
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      .batch-item {
+        position: relative;
+        width: 100%;
+        min-height: 82px;
+        border: 0;
+        border-bottom: 1px solid var(--line-soft);
+        background: transparent;
+        padding: 12px 14px 11px 17px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .batch-item:hover {
+        background: #f1f5fa;
+      }
+
+      .batch-item.is-active {
+        background: #edf4ff;
+      }
+
+      .batch-item.is-active::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--primary);
+      }
+
+      .batch-item-top,
+      .batch-item-bottom {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .batch-number {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      .batch-item-middle {
+        margin: 7px 0;
+        color: #4d5562;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+      }
+
+      .batch-item-bottom {
+        color: var(--faint);
+        font-size: 11px;
+      }
+
+      .batch-item-bottom span:last-child {
+        margin-left: auto;
+      }
+
+      .status-text {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        white-space: nowrap;
+        font-size: 12px;
+      }
+
+      .status-text::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .status-success {
+        color: var(--success);
+      }
+
+      .status-incomplete {
+        color: var(--warning);
+      }
+
+      .status-failed {
+        color: var(--danger);
+      }
+
+      .detail-panel {
+        min-width: 0;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 18px 20px 22px;
+      }
+
+      .detail-empty {
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+      }
+
+      .detail-heading {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .detail-title {
+        margin: 0;
+        font-size: 17px;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
+      .detail-module {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .detail-actions {
+        margin-left: auto;
+        display: flex;
+        gap: 4px;
+      }
+
+      .metadata-strip {
+        margin: 16px 0 15px;
+        padding: 12px 0;
+        border-top: 1px solid var(--line-soft);
+        border-bottom: 1px solid var(--line-soft);
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .metadata-item span {
+        display: block;
+      }
+
+      .metadata-label {
+        color: var(--muted);
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+
+      .metadata-value {
+        color: var(--text);
+        font-size: 12px;
+        overflow-wrap: anywhere;
+      }
+
+      .file-table-wrap {
+        overflow-x: auto;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+
+      .file-table {
+        width: 100%;
+        min-width: 540px;
+        border-collapse: collapse;
+        table-layout: fixed;
+        font-size: 12px;
+      }
+
+      .file-table th {
+        height: 36px;
+        padding: 0 10px;
+        background: #f7f9fb;
+        color: var(--muted);
+        text-align: left;
+        font-weight: 600;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .file-table td {
+        height: 48px;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--line-soft);
+        vertical-align: middle;
+      }
+
+      .file-table tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .file-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .file-role {
+        color: #344054;
+        font-weight: 600;
+      }
+
+      .row-actions {
+        display: flex;
+        gap: 2px;
+      }
+
+      .row-actions .icon-button {
+        width: 30px;
+        height: 30px;
+        font-size: 15px;
+      }
+
+      .archive-warning {
+        margin-top: 12px;
+        border-left: 3px solid #d97706;
+        background: #fff8e7;
+        color: #7a4a00;
+        padding: 10px 12px;
+        line-height: 1.6;
+        font-size: 12px;
+      }
+
+      .archive-settings-view {
+        height: 100%;
+        overflow-y: auto;
+        padding: 24px 28px 28px;
+      }
+
+      .subview-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 20px;
+      }
+
+      .subview-header .pane-heading {
+        font-size: 18px;
+      }
+
+      .settings-section {
+        border-top: 1px solid var(--line-soft);
+      }
+
+      .settings-section-title {
+        margin: 22px 0 10px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+
+      .settings-section-note {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.6;
+      }
+
+      .storage-meter {
+        width: 100%;
+        height: 8px;
+        overflow: hidden;
+        border-radius: 4px;
+        background: #e9edf2;
+      }
+
+      .storage-meter-fill {
+        width: 32%;
+        height: 100%;
+        background: var(--primary);
+      }
+
+      .storage-meter-labels {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 7px;
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .template-list {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+
+      .template-row {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 0 12px;
+        border-bottom: 1px solid var(--line-soft);
+        cursor: pointer;
+      }
+
+      .template-row:last-child {
+        border-bottom: 0;
+      }
+
+      .template-row:hover {
+        background: #f8fafc;
+      }
+
+      .template-row input {
+        width: 16px;
+        height: 16px;
+        accent-color: var(--primary);
+      }
+
+      .confirm-layer {
+        position: absolute;
+        inset: 0;
+        z-index: 4;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: rgba(30, 38, 50, 0.28);
+      }
+
+      .confirm-dialog {
+        width: min(430px, 100%);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 18px 44px rgba(31, 35, 40, 0.2);
+        padding: 22px;
+      }
+
+      .confirm-dialog h3 {
+        margin: 0 0 10px;
+        font-size: 17px;
+      }
+
+      .confirm-dialog p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .confirm-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 20px;
+      }
+
+      .toast {
+        position: absolute;
+        z-index: 8;
+        left: 50%;
+        bottom: 22px;
+        transform: translateX(-50%);
+        max-width: 560px;
+        border: 1px solid #313843;
+        border-radius: 6px;
+        background: #313843;
+        color: #fff;
+        padding: 10px 14px;
+        box-shadow: 0 8px 24px rgba(31, 35, 40, 0.22);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+
+      .empty-list {
+        padding: 30px 18px;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.7;
+      }
+
+      @media (max-width: 1120px) {
+        .settings-layout {
+          grid-template-columns: 164px minmax(0, 1fr);
+        }
+
+        .archive-workspace {
+          grid-template-columns: 254px minmax(0, 1fr);
+        }
+
+        .metadata-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-height: 700px) {
+        .settings-dialog {
+          min-height: 600px;
+        }
+
+        .settings-header,
+        .settings-footer {
+          flex-basis: 58px;
+        }
+
+        .archive-header {
+          flex-basis: 62px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-frame">
+      <div class="window-bar" aria-hidden="true">
+        <button class="window-button" type="button">−</button>
+        <button class="window-button" type="button">□</button>
+        <button class="window-button" type="button">×</button>
+      </div>
+
+      <img class="app-logo" src="../../assets/cat-meme.gif" alt="" />
+      <h1 class="page-title">清结算小助手</h1>
+
+      <main class="background-workspace" aria-hidden="true">
+        <button class="module-chip" type="button">资金对账数据处理　⌄</button>
+        <section class="workspace-board">
+          <div class="board-fields">
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-panel"></div>
+          </div>
+          <div class="board-actions">
+            <div class="skeleton-button primary"></div>
+            <div class="skeleton-button"></div>
+            <div class="skeleton-button"></div>
+          </div>
+        </section>
+      </main>
+
+      <div class="bottom-tools">
+        <button class="round-tool" type="button" title="页面背景">🎨</button>
+        <button class="round-tool" type="button" title="使用手册">📕</button>
+        <button id="settingsLauncher" class="round-tool is-active" type="button" title="设置">
+          ⚙️
+          <span class="notification-dot" aria-label="更新已下载"></span>
+        </button>
+        <button class="round-tool" type="button" title="模块管理">🔄</button>
+        <button class="round-tool" type="button" title="工具箱">🧰</button>
+      </div>
+      <div class="version">Version 3.0.22</div>
+
+      <div id="settingsOverlay" class="modal-overlay">
+        <section class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+          <header class="settings-header">
+            <h2 id="settingsTitle" class="settings-title">设置</h2>
+            <button class="icon-button settings-close" type="button" data-action="close-settings" title="关闭" aria-label="关闭">×</button>
+          </header>
+
+          <div class="settings-layout">
+            <nav class="settings-nav" aria-label="设置导航">
+              <button class="nav-item is-active" type="button" data-tab="update">
+                <span class="nav-icon" aria-hidden="true">↻</span>
+                <span>自动更新</span>
+                <span class="nav-status-dot" data-role="update-nav-dot" aria-label="更新已下载"></span>
+              </button>
+              <button class="nav-item" type="button" data-tab="archive">
+                <span class="nav-icon" aria-hidden="true">▤</span>
+                <span>存档中心</span>
+              </button>
+            </nav>
+
+            <div class="settings-right">
+              <section id="updatePane" class="settings-pane auto-update-pane" aria-labelledby="updateHeading">
+                <h3 id="updateHeading" class="pane-heading">自动更新</h3>
+                <p class="pane-subtitle">管理软件版本检查、下载与安装。</p>
+
+                <div class="update-content">
+                  <div class="setting-row">
+                    <span class="setting-label">当前版本</span>
+                    <span class="setting-value">v3.0.22</span>
+                  </div>
+                  <div class="setting-row">
+                    <span class="setting-label">安装类型</span>
+                    <span class="setting-value">Windows 安装版</span>
+                  </div>
+                  <div class="setting-row">
+                    <span class="setting-label">自动更新</span>
+                    <label class="toggle-label">
+                      <input id="autoUpdateToggle" type="checkbox" checked />
+                      <span id="autoUpdateText">已开启</span>
+                    </label>
+                  </div>
+                  <div class="setting-row">
+                    <span class="setting-label">更新状态</span>
+                    <span id="updateStateText" class="setting-value">版本 v3.0.23 已下载</span>
+                  </div>
+                  <div class="setting-row">
+                    <span class="setting-label">最近检查</span>
+                    <span class="setting-value">2026-07-20 14:32:18</span>
+                  </div>
+                  <div class="setting-row">
+                    <span class="setting-label">目标版本</span>
+                    <span class="setting-value">v3.0.23</span>
+                  </div>
+                </div>
+                <progress id="updateProgress" class="update-progress" max="100" value="100" hidden></progress>
+                <p class="update-note">开启后每次启动仅在后台检查一次，不会定时检查。</p>
+              </section>
+
+              <section id="archivePane" class="settings-pane archive-pane" aria-labelledby="archiveHeading" hidden>
+                <div id="archiveBrowser" class="archive-pane">
+                  <header class="archive-header">
+                    <div class="archive-header-copy">
+                      <h3 id="archiveHeading" class="pane-heading">存档中心</h3>
+                      <p class="pane-subtitle">按日期和批次查看已参与处理的输入文件与结果表。</p>
+                    </div>
+                    <div class="storage-summary" aria-label="存档容量">
+                      <span>唯一文件</span>
+                      <strong>8.6 GB</strong>
+                      <button id="openArchiveSettings" class="icon-button" type="button" title="存档设置" aria-label="存档设置">⚙</button>
+                    </div>
+                  </header>
+
+                  <div class="archive-filters">
+                    <label class="field">
+                      <span class="field-label">日期</span>
+                      <input id="dateFilter" class="field-control" type="date" value="2026-07-20" />
+                    </label>
+                    <label class="field">
+                      <span class="field-label">模块</span>
+                      <select id="moduleFilter" class="field-control">
+                        <option value="">全部模块</option>
+                        <option value="pre-fund-reconciliation">前置资金对账</option>
+                        <option value="bank-statement-process">资金对账数据处理</option>
+                        <option value="duplicate-inbound-match">重复入金匹配</option>
+                        <option value="pending-reconciliation">月度Pending数据核对</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span class="field-label">批次号</span>
+                      <select id="batchFilter" class="field-control"></select>
+                    </label>
+                  </div>
+
+                  <div class="archive-workspace">
+                    <aside class="batch-panel" aria-label="批次列表">
+                      <div class="panel-caption">
+                        <span>当日批次</span>
+                        <span id="batchCount">0</span>
+                      </div>
+                      <div id="batchList" class="batch-list"></div>
+                    </aside>
+
+                    <section id="detailPanel" class="detail-panel" aria-live="polite"></section>
+                  </div>
+                </div>
+
+                <section id="archiveSettingsView" class="archive-settings-view" aria-labelledby="archiveSettingsHeading" hidden>
+                  <header class="subview-header">
+                    <button id="backToArchive" class="icon-button" type="button" title="返回存档列表" aria-label="返回存档列表">←</button>
+                    <h3 id="archiveSettingsHeading" class="pane-heading">存档设置</h3>
+                  </header>
+
+                  <div class="settings-section">
+                    <h4 class="settings-section-title">存储空间</h4>
+                    <p class="settings-section-note">文档 / 网银账单生成小助手 / 存档中心</p>
+                    <div class="storage-meter" aria-label="存档空间占用 32%">
+                      <div class="storage-meter-fill"></div>
+                    </div>
+                    <div class="storage-meter-labels">
+                      <span>唯一文件 8.6 GB</span>
+                      <span>逻辑文件 13.4 GB</span>
+                    </div>
+                  </div>
+
+                  <div class="settings-section">
+                    <h4 class="settings-section-title">保留期限</h4>
+                    <p class="settings-section-note">锁定批次不参与自动清理。缩短期限时会先展示受影响批次。</p>
+                    <label class="field" style="width: 220px">
+                      <span class="field-label">默认保留</span>
+                      <select id="retentionSelect" class="field-control">
+                        <option value="30">30 天</option>
+                        <option value="90" selected>90 天</option>
+                        <option value="180">180 天</option>
+                        <option value="365">365 天</option>
+                        <option value="permanent">永久</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div class="settings-section">
+                    <h4 class="settings-section-title">不存档模板</h4>
+                    <p class="settings-section-note">使用已勾选模板的整个批次均不保存，包括输入文件和结果表。</p>
+                    <div class="template-list">
+                      <label class="template-row">
+                        <input type="checkbox" />
+                        <span>DBS 银行账单模板</span>
+                      </label>
+                      <label class="template-row">
+                        <input type="checkbox" checked />
+                        <span>内部测试账单模板</span>
+                      </label>
+                      <label class="template-row">
+                        <input type="checkbox" />
+                        <span>花旗银行账单模板</span>
+                      </label>
+                    </div>
+                  </div>
+
+                </section>
+              </section>
+
+              <footer class="settings-footer">
+                <div id="updateFooterActions">
+                  <button id="checkUpdateButton" class="button" type="button">立即检查</button>
+                  <button id="restartUpdateButton" class="button primary" type="button">立即重启升级</button>
+                </div>
+                <div id="archiveSettingsFooterActions" hidden>
+                  <button id="cancelArchiveSettings" class="button" type="button">取消</button>
+                  <button id="saveArchiveSettings" class="button primary" type="button">保存</button>
+                </div>
+                <button class="button" type="button" data-action="close-settings">完成</button>
+              </footer>
+            </div>
+          </div>
+
+          <div id="confirmLayer" class="confirm-layer" hidden>
+            <div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle">
+              <h3 id="confirmTitle">永久删除该批次？</h3>
+              <p id="confirmMessage"></p>
+              <div class="confirm-actions">
+                <button id="cancelDelete" class="button" type="button">取消</button>
+                <button id="confirmDelete" class="button danger" type="button">永久删除</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="toast" class="toast" role="status" hidden></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const batches = [
+        {
+          id: "PREFUND-20260720-003",
+          date: "2026-07-20",
+          time: "14:26:08",
+          moduleId: "pre-fund-reconciliation",
+          moduleName: "前置资金对账",
+          status: "success",
+          statusText: "存档完成",
+          locked: false,
+          retention: "2026-10-18",
+          totalSize: "33.2 MB",
+          files: [
+            { id: "f-1", direction: "输入", role: "临时网关账单", name: "MPT_OUTBOUND_GATEWAY_2026072020260720062049405.gz", size: "17.8 MB", status: "ready" },
+            { id: "f-2", direction: "输入", role: "对账规则", name: "资金对账规则.xlsx", size: "22 KB", status: "ready" },
+            { id: "f-3", direction: "输出", role: "资金对账结果", name: "资金对账不平_DBS_2026年07月20日.xlsx", size: "15.4 MB", status: "ready" }
+          ]
+        },
+        {
+          id: "BANKREC-20260720-002",
+          date: "2026-07-20",
+          time: "11:08:42",
+          moduleId: "bank-statement-process",
+          moduleName: "资金对账数据处理",
+          status: "incomplete",
+          statusText: "存档不完整",
+          locked: false,
+          retention: "2026-10-18",
+          totalSize: "68.5 MB",
+          warning: "结果表已正常生成，但存档副本写入失败。原业务结果未受影响，可重试存档。",
+          files: [
+            { id: "f-4", direction: "输入", role: "银行对账单", name: "渠道账单_2026-07-20_110406.xlsx", size: "42.1 MB", status: "ready" },
+            { id: "f-5", direction: "输入", role: "退款订单", name: "Refund_order_1784273871783.xls", size: "26.4 MB", status: "ready" },
+            { id: "f-6", direction: "输出", role: "处理结果", name: "渠道账单_处理结果_20260720.xlsx", size: "-", status: "failed" }
+          ]
+        },
+        {
+          id: "DUPIN-20260720-001",
+          date: "2026-07-20",
+          time: "09:35:17",
+          moduleId: "duplicate-inbound-match",
+          moduleName: "重复入金匹配",
+          status: "success",
+          statusText: "存档完成",
+          locked: true,
+          retention: "永久保留",
+          totalSize: "21.7 MB",
+          files: [
+            { id: "f-7", direction: "输入", role: "银行对账单", name: "渠道账单_2026-07-20_091503.xlsx", size: "12.8 MB", status: "ready" },
+            { id: "f-8", direction: "输入", role: "单据对账单", name: "单据对账单_20260720.xlsx", size: "8.7 MB", status: "ready" },
+            { id: "f-9", direction: "输出", role: "重复入金结果", name: "260720_重复入金召回邮件模板.xlsx", size: "214 KB", status: "ready" }
+          ]
+        },
+        {
+          id: "PENDING-20260719-004",
+          date: "2026-07-19",
+          time: "17:48:02",
+          moduleId: "pending-reconciliation",
+          moduleName: "月度Pending数据核对",
+          status: "success",
+          statusText: "存档完成",
+          locked: false,
+          retention: "2026-10-17",
+          totalSize: "9.3 MB",
+          files: [
+            { id: "f-10", direction: "输入", role: "Pending数据", name: "Pending_2026-06.xlsx", size: "6.4 MB", status: "ready" },
+            { id: "f-11", direction: "输出", role: "差异结果", name: "月度Pending差异-2026-06.xlsx", size: "2.9 MB", status: "ready" }
+          ]
+        }
+      ];
+
+      const moduleNames = {
+        "pre-fund-reconciliation": "前置资金对账",
+        "bank-statement-process": "资金对账数据处理",
+        "duplicate-inbound-match": "重复入金匹配",
+        "pending-reconciliation": "月度Pending数据核对"
+      };
+
+      const overlay = document.getElementById("settingsOverlay");
+      const updatePane = document.getElementById("updatePane");
+      const archivePane = document.getElementById("archivePane");
+      const updateFooterActions = document.getElementById("updateFooterActions");
+      const archiveBrowser = document.getElementById("archiveBrowser");
+      const archiveSettingsView = document.getElementById("archiveSettingsView");
+      const archiveSettingsFooterActions = document.getElementById("archiveSettingsFooterActions");
+      const batchList = document.getElementById("batchList");
+      const batchFilter = document.getElementById("batchFilter");
+      const batchCount = document.getElementById("batchCount");
+      const detailPanel = document.getElementById("detailPanel");
+      const confirmLayer = document.getElementById("confirmLayer");
+      const confirmMessage = document.getElementById("confirmMessage");
+      const toast = document.getElementById("toast");
+      let activeTab = "update";
+      let selectedBatchId = null;
+      let pendingDeleteId = null;
+      let toastTimer = null;
+
+      function escapeHtml(value) {
+        return String(value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      function showToast(message) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.hidden = false;
+        toastTimer = setTimeout(() => {
+          toast.hidden = true;
+        }, 2200);
+      }
+
+      function setActiveTab(tab) {
+        activeTab = tab === "archive" ? "archive" : "update";
+        document.querySelectorAll(".nav-item[data-tab]").forEach((button) => {
+          const isActive = button.dataset.tab === activeTab;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-current", isActive ? "page" : "false");
+        });
+        updatePane.hidden = activeTab !== "update";
+        archivePane.hidden = activeTab !== "archive";
+        updateFooterActions.hidden = activeTab !== "update";
+        archiveSettingsFooterActions.hidden = true;
+        if (activeTab === "archive") {
+          archiveBrowser.hidden = false;
+          archiveSettingsView.hidden = true;
+          renderBatchList();
+        }
+        const hash = activeTab === "archive" ? "#archive" : "#update";
+        if (location.hash !== hash) history.replaceState(null, "", hash);
+      }
+
+      function statusClass(status) {
+        if (status === "success") return "status-success";
+        if (status === "incomplete") return "status-incomplete";
+        return "status-failed";
+      }
+
+      function filteredBatches() {
+        const date = document.getElementById("dateFilter").value;
+        const moduleId = document.getElementById("moduleFilter").value;
+        return batches.filter((batch) => batch.date === date && (!moduleId || batch.moduleId === moduleId));
+      }
+
+      function renderBatchList() {
+        const visibleBatches = filteredBatches();
+        batchCount.textContent = `${visibleBatches.length} 个`;
+
+        if (!visibleBatches.some((batch) => batch.id === selectedBatchId)) {
+          selectedBatchId = visibleBatches[0]?.id || null;
+        }
+
+        batchFilter.innerHTML = "";
+        if (visibleBatches.length === 0) {
+          const option = document.createElement("option");
+          option.textContent = "当日无批次";
+          option.value = "";
+          batchFilter.appendChild(option);
+          batchFilter.disabled = true;
+          batchList.innerHTML = '<div class="empty-list">当前日期和模块下没有存档批次</div>';
+          renderBatchDetail();
+          return;
+        }
+
+        batchFilter.disabled = false;
+        visibleBatches.forEach((batch) => {
+          const option = document.createElement("option");
+          option.value = batch.id;
+          option.textContent = batch.id;
+          option.selected = batch.id === selectedBatchId;
+          batchFilter.appendChild(option);
+        });
+
+        batchList.innerHTML = visibleBatches.map((batch) => `
+          <button class="batch-item${batch.id === selectedBatchId ? " is-active" : ""}" type="button" data-batch-id="${escapeHtml(batch.id)}">
+            <div class="batch-item-top">
+              <span class="batch-number">${escapeHtml(batch.id)}</span>
+              ${batch.locked ? '<span title="已锁定" aria-label="已锁定">🔒</span>' : ""}
+            </div>
+            <div class="batch-item-middle">${escapeHtml(batch.moduleName)}</div>
+            <div class="batch-item-bottom">
+              <span class="status-text ${statusClass(batch.status)}">${escapeHtml(batch.statusText)}</span>
+              <span>${escapeHtml(batch.time)}</span>
+            </div>
+          </button>
+        `).join("");
+
+        renderBatchDetail();
+      }
+
+      function renderBatchDetail() {
+        const batch = batches.find((item) => item.id === selectedBatchId);
+        if (!batch) {
+          detailPanel.innerHTML = '<div class="detail-empty">请选择一个存档批次</div>';
+          return;
+        }
+
+        const readyCount = batch.files.filter((file) => file.status === "ready").length;
+        const fileRows = batch.files.map((file) => {
+          const failed = file.status === "failed";
+          return `
+            <tr>
+              <td class="file-role">${escapeHtml(file.direction)}</td>
+              <td class="file-name" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</td>
+              <td>${escapeHtml(file.size)}</td>
+              <td><span class="status-text ${failed ? "status-incomplete" : "status-success"}">${failed ? "待重试" : "已存档"}</span></td>
+              <td>
+                <div class="row-actions">
+                  ${failed
+                    ? `<button class="icon-button" type="button" data-file-action="retry" data-file-id="${escapeHtml(file.id)}" title="重试存档" aria-label="重试存档">↻</button>`
+                    : `<button class="icon-button" type="button" data-file-action="open" data-file-id="${escapeHtml(file.id)}" title="打开只读副本" aria-label="打开只读副本">↗</button>
+                       <button class="icon-button" type="button" data-file-action="save" data-file-id="${escapeHtml(file.id)}" title="另存副本" aria-label="另存副本">↓</button>`}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join("");
+
+        detailPanel.innerHTML = `
+          <div class="detail-heading">
+            <div>
+              <h4 class="detail-title">${escapeHtml(batch.id)}</h4>
+              <div class="detail-module">${escapeHtml(batch.moduleName)}</div>
+            </div>
+            <div class="detail-actions">
+              <button class="icon-button" type="button" data-batch-action="lock" title="${batch.locked ? "解除锁定" : "锁定批次"}" aria-label="${batch.locked ? "解除锁定" : "锁定批次"}">${batch.locked ? "🔓" : "🔒"}</button>
+              <button class="icon-button" type="button" data-batch-action="delete" title="永久删除批次" aria-label="永久删除批次">×</button>
+            </div>
+          </div>
+          <div class="metadata-strip">
+            <div class="metadata-item"><span class="metadata-label">业务状态</span><span class="metadata-value">运行成功</span></div>
+            <div class="metadata-item"><span class="metadata-label">存档状态</span><span class="metadata-value status-text ${statusClass(batch.status)}">${escapeHtml(batch.statusText)}</span></div>
+            <div class="metadata-item"><span class="metadata-label">文件</span><span class="metadata-value">${readyCount}/${batch.files.length} 个完成</span></div>
+            <div class="metadata-item"><span class="metadata-label">保留至</span><span class="metadata-value">${escapeHtml(batch.locked ? "永久保留" : batch.retention)}</span></div>
+          </div>
+          <div class="file-table-wrap">
+            <table class="file-table">
+              <colgroup>
+                <col style="width: 64px" />
+                <col />
+                <col style="width: 92px" />
+                <col style="width: 90px" />
+                <col style="width: 76px" />
+              </colgroup>
+              <thead><tr><th>类型</th><th>文件</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+              <tbody>${fileRows}</tbody>
+            </table>
+          </div>
+          ${batch.warning ? `<div class="archive-warning">${escapeHtml(batch.warning)}</div>` : ""}
+        `;
+      }
+
+      document.querySelectorAll(".nav-item[data-tab]").forEach((button) => {
+        button.addEventListener("click", () => setActiveTab(button.dataset.tab));
+      });
+
+      document.querySelectorAll('[data-action="close-settings"]').forEach((button) => {
+        button.addEventListener("click", () => {
+          overlay.hidden = true;
+          document.getElementById("settingsLauncher").classList.remove("is-active");
+        });
+      });
+
+      document.getElementById("settingsLauncher").addEventListener("click", () => {
+        overlay.hidden = false;
+        document.getElementById("settingsLauncher").classList.add("is-active");
+        setActiveTab("update");
+      });
+
+      document.getElementById("autoUpdateToggle").addEventListener("change", (event) => {
+        document.getElementById("autoUpdateText").textContent = event.target.checked ? "已开启" : "已关闭";
+        showToast(event.target.checked ? "自动更新已开启" : "自动更新已关闭");
+      });
+
+      document.getElementById("checkUpdateButton").addEventListener("click", (event) => {
+        const button = event.currentTarget;
+        const stateText = document.getElementById("updateStateText");
+        const progress = document.getElementById("updateProgress");
+        button.disabled = true;
+        stateText.textContent = "正在检查更新";
+        progress.hidden = false;
+        progress.value = 45;
+        setTimeout(() => {
+          progress.value = 100;
+          progress.hidden = true;
+          stateText.textContent = "版本 v3.0.23 已下载";
+          button.disabled = false;
+          showToast("更新检查完成");
+        }, 900);
+      });
+
+      document.getElementById("restartUpdateButton").addEventListener("click", () => {
+        showToast("原型不会真正重启软件");
+      });
+
+      document.getElementById("dateFilter").addEventListener("change", renderBatchList);
+      document.getElementById("moduleFilter").addEventListener("change", renderBatchList);
+      batchFilter.addEventListener("change", () => {
+        selectedBatchId = batchFilter.value || null;
+        renderBatchList();
+      });
+
+      batchList.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-batch-id]");
+        if (!button) return;
+        selectedBatchId = button.dataset.batchId;
+        renderBatchList();
+      });
+
+      detailPanel.addEventListener("click", (event) => {
+        const fileButton = event.target.closest("[data-file-action]");
+        if (fileButton) {
+          const batch = batches.find((item) => item.id === selectedBatchId);
+          const file = batch?.files.find((item) => item.id === fileButton.dataset.fileId);
+          if (!batch || !file) return;
+          const action = fileButton.dataset.fileAction;
+          if (action === "retry") {
+            fileButton.disabled = true;
+            showToast("正在重试存档…");
+            setTimeout(() => {
+              file.status = "ready";
+              file.size = "13.9 MB";
+              batch.status = "success";
+              batch.statusText = "存档完成";
+              batch.warning = "";
+              renderBatchList();
+              showToast("存档重试成功");
+            }, 850);
+          } else if (action === "open") {
+            showToast(`已打开只读副本：${file.name}`);
+          } else if (action === "save") {
+            showToast(`已进入另存副本流程：${file.name}`);
+          }
+          return;
+        }
+
+        const batchButton = event.target.closest("[data-batch-action]");
+        if (!batchButton) return;
+        const batch = batches.find((item) => item.id === selectedBatchId);
+        if (!batch) return;
+
+        if (batchButton.dataset.batchAction === "lock") {
+          batch.locked = !batch.locked;
+          renderBatchList();
+          showToast(batch.locked ? "批次已锁定，不参与自动清理" : "批次已解除锁定");
+          return;
+        }
+
+        if (batchButton.dataset.batchAction === "delete") {
+          if (batch.locked) {
+            showToast("请先解除锁定，再删除该批次");
+            return;
+          }
+          pendingDeleteId = batch.id;
+          confirmMessage.textContent = `批次 ${batch.id} 将立即永久删除。该操作不会删除原始文件和用户已另存的结果。`;
+          confirmLayer.hidden = false;
+        }
+      });
+
+      document.getElementById("cancelDelete").addEventListener("click", () => {
+        pendingDeleteId = null;
+        confirmLayer.hidden = true;
+      });
+
+      document.getElementById("confirmDelete").addEventListener("click", () => {
+        const index = batches.findIndex((batch) => batch.id === pendingDeleteId);
+        if (index >= 0) batches.splice(index, 1);
+        pendingDeleteId = null;
+        selectedBatchId = null;
+        confirmLayer.hidden = true;
+        renderBatchList();
+        showToast("存档批次已永久删除");
+      });
+
+      function showArchiveSettings() {
+        archiveBrowser.hidden = true;
+        archiveSettingsView.hidden = false;
+        archiveSettingsFooterActions.hidden = false;
+      }
+
+      function hideArchiveSettings() {
+        archiveSettingsView.hidden = true;
+        archiveBrowser.hidden = false;
+        archiveSettingsFooterActions.hidden = true;
+      }
+
+      document.getElementById("openArchiveSettings").addEventListener("click", showArchiveSettings);
+      document.getElementById("backToArchive").addEventListener("click", hideArchiveSettings);
+      document.getElementById("cancelArchiveSettings").addEventListener("click", hideArchiveSettings);
+      document.getElementById("saveArchiveSettings").addEventListener("click", () => {
+        const retention = document.getElementById("retentionSelect").selectedOptions[0].textContent;
+        hideArchiveSettings();
+        showToast(`存档设置已保存，默认保留 ${retention}`);
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (!confirmLayer.hidden) {
+          pendingDeleteId = null;
+          confirmLayer.hidden = true;
+          return;
+        }
+        if (!archiveSettingsView.hidden) {
+          hideArchiveSettings();
+          return;
+        }
+        overlay.hidden = true;
+      });
+
+      setActiveTab(location.hash === "#archive" ? "archive" : "update");
+    </script>
+  </body>
+</html>

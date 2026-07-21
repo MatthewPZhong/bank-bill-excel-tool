@@ -9,9 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v25（app v3.0.21 — Ach Return 退款过滤改用 R1 具体配对；DBS-Charge 步骤2增加固定 TradeType 白名单和优先银行方向守卫） |
-| v25 本轮 review | 2026-07-20（覆盖 R1 pair 对象血缘、AchReturn 严格值、同 ID 不扩散、缺省兼容、DBS 12 类白名单、非白名单-only 保持、混合桶隔离、Credit 方向优先、warning 可见性、步骤1与金额币种回归；真实 DBS 人工资金复核待完成，用户知悉后授权发布并转发布后跟进） |
-| v25 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2202 顶层声明；A-share 338 / A-pair 571 / A-local 1155 / B 909；报告版本 3.0.21） |
+| 当前清单版本 | v26（app v3.0.22 — 设置页存档中心：轻量元数据、SHA-256 Blob 去重、不可复用批次流水、11 模块首次结果绑定与后台归档队列） |
+| v26 本轮 review | 2026-07-20（覆盖 archive 四表、批次流水不复用、Blob 原子发布/引用删除、当前周期输入血缘、39 个 IPC 白名单、首次结果冻结、链接表与临时 MPT 活动域隔离、归档失败不改变业务结果、退出等待和设置页 IPC/状态同步；真实文件 SHA-256 与 Windows 只读打开待人工复核） |
+| v26 基线数据 | `docs/analysis/var-reference-stats.md`（201 个 JS 文件 / 2313 顶层声明；A-share 339 / A-pair 588 / A-local 1245 / B 927；报告版本 3.0.22） |
+| v25 历史版本 | app v3.0.21 — Ach Return 退款过滤改用 R1 具体配对；DBS-Charge 步骤2增加固定 TradeType 白名单和优先银行方向守卫。 |
 | v24 历史版本 | app v3.0.19 — 工具箱单/多文件严格多 Sheet 合并、可见性过滤、顺序与表头守恒、流式写出和临时资源清理。 |
 | v23 历史版本 | app v3.0.18 — Windows NSIS GitHub stable 在线升级、设置状态页、原子业务忙闸门、可等待退出清理与 tag 发布流水线。 |
 | v22 历史版本 | app v3.0.17 — 退款订单银行流水号模糊匹配 + 工具箱最多 8 组一次扫描、多文件原子拆分；自动门禁通过，资金负责人真实退款样本复核仍为发布硬门禁。 |
@@ -19,12 +20,12 @@
 | v20 历史版本 | app v3.0.15 — 独立重复入金匹配，严格 1R+2I 七元组、全保留月份 INBOUND MPT 批量候选、全局不复用与身份一致裁决、当前周期 side DB、主库轻量镜像及固定双 sheet 原子导出；自动门禁已通过，资金负责人复核及 Windows Excel/WPS 人工打开待完成。 |
 | v19 历史版本 | app v3.0.14 — 2026-07-12：前置资金对账严格 1:1、重复网关审计、双 side DB、按渠道 5/6-sheet；`ALL_MODULE_IDS` 为 10，per-月侧库为 4 个业务模块/5 个存储模块；自动门禁和人工资金复核均已完成。 |
 | 清单版本 | v18（对应 app v3.0.13 — 2026-07-04 收尾复核 4 条：**大账号识别阻断**（`matchMerchantIds` 子串 fuzzy 不再作为自动放行依据 + `normalizeMaintainedBigAccounts` 单一展平器 + 识别优先读文件头部）；**调拨状态过滤可观测性**（`buildFundTransferReconRows` 仅派生 `付款成功` + `fundTransferReconDerive.warning` 提醒全过滤）；**`detectFundTransferManyToMany` / `manyToManyReviewRows` 输出口径**（异常说明并入「命中场景」第 2 列，note-only 行可见，独立异常 sheet 停用）；**C3 同值候选优先**（同值候选优先减少无意义覆盖）；触发：v3.0.13 收尾 check-vars 硬节点）；v17（对应 app v3.0.12 — 2026-06-28 v3.0.12 收尾升格 2 条 Risk-sensitive ⚠️🔴 资金红线：**账户映射 → 调拨对账单 `big_account` 派生**（`fund_transfer_account_mappings` 全局表 + 仓储三函数 + `database.js` facade 四方法 + `buildFundTransferReconRows` accountMappingMap 第 2 参 + `linked-derive-rebuild` 单点注入 run/导入两链 + IPC/preload/`createFundTransferAccountMappingDialog`；改「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 匹配大账号口径）+ **`detectFundTransferManyToMany` / `manyToManyReviewRows`**（异常-人工判断 sheet 检测器，纯只读不改回填/行数守恒 + writer `appendManyToManyReviewSheet`/`SHEET_MANY_TO_MANY_NAME` + orchestrator `manyToManyReviewCount` + writer 第 8 参透传）；触发：v3.0.12 收尾 check-vars 硬节点；v16（对应 app v3.0.5 — 2026-06-15 size-startup-optimization Part B 升格 2 条：**per-月侧库体系**（Risk-sensitive ⚠️🔴🔴 资金红线 — run-data-store/MODULE_*/SIDE_DB_DDL_*/三编排层/reconcileOrphans/side_db_rel_path + 三 parity 锁；Phase 1/2 三对账模块 run 级批量数据迁出主库）+ **`DEFERRED_WINDOW_STARTUP`**（Runtime-state ⚠️ 启动时序回退开关 + appInitDone/两段式 getInfo/init-done；Phase 3 启动窗口先行）；触发：v3.0.5 Phase 4 守卫固化 check-vars 节点；v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-07-19（v3.0.19 工具箱严格多 Sheet 合并 — 可见性/表头/顺序/分页/资源生命周期/拆分隔离）；2026-07-16（v3.0.18 在线升级 — IPC/设置仓储/升级状态机/业务闸门/退出清理/发布配置）；2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
+| 上次人工 review | 2026-07-20（v3.0.22 存档中心 — 元数据/Blob/流水游标/运行绑定/失败隔离/IPC/UI）；2026-07-19（v3.0.19 工具箱严格多 Sheet 合并 — 可见性/表头/顺序/分页/资源生命周期/拆分隔离）；2026-07-16（v3.0.18 在线升级 — IPC/设置仓储/升级状态机/业务闸门/退出清理/发布配置）；2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | v3.0.16 人工资金 review | 待业务负责人逐笔确认 `abs(方向金额) + Extra Fee`、14 条规则映射及错误行逻辑排除结果；自动化 review 不替代该发布硬门禁。 |
 | v3.0.17 人工资金 review | 待业务负责人用真实脱敏退款样本逐笔确认新增模糊命中的流水号、金额差、大账号、币种和双向 1:1；自动化 review 不替代该发布硬门禁。 |
 | v3.0.21 人工资金 review | 待业务负责人逐笔确认真实退款精准命中、DBS 12 类白名单、金额币种、Credit 方向 warning 和改值/未改值去向；用户已在知悉未完成后授权发布，该项转发布后 follow-up，自动化 review 不等于人工验收。 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（196 个 JS 文件 / 2202 顶层声明；A-share 338 / A-pair 571 / A-local 1155 / B 909；报告版本 3.0.21） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（201 个 JS 文件 / 2313 顶层声明；A-share 339 / A-pair 588 / A-local 1245 / B 927；报告版本 3.0.22） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -386,6 +387,16 @@
 - 关联功能：主/渲染进程通讯唯一桥；整个 `window.desktopApi` 的底座
 - 变更 review 要点：新增/删除 IPC channel 必须同步 main 端 `ipcMain.handle`
 
+### `ArchiveCenterController` / `archiveCenter` IPC（v3.0.22 新增 Important-skeleton）
+- 定义：`src/main-process/archive-center/controller.js`；preload 门面为 `src/preload.js` 的 `window.desktopApi.archiveCenter`
+- 关联功能：存档批次查询、详情、统计、保留期、模板排除、锁定、删除、重试、打开只读副本和另存为的唯一跨进程入口；renderer 只能传批次/文件 ID
+- 变更 review 要点：
+  - controller / main IPC / preload 12 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径或原始源路径
+  - `archive_center_retention_days` 只接受 30/90/180/365/永久；非法值按 90，改枚举必须同步 UI、controller 和既有设置兼容
+  - `archive_center_excluded_template_ids` 损坏时按隐私优先排除全部当前网银模板；改恢复策略需复核模板新增、删除和保存后的集合收敛
+  - 删除元数据成功但物理清理失败是部分成功，UI 必须刷新批次并保留残留清理提示
+  - 必跑：archive controller/UI contract 单测 + 设置页预览 + `npm run smoke`
+
 ### `normalizeBu`（v2.1.3 业务OP / v2.1.2 月度BU回填校验共用）
 - 定义：`src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-import/validator.js`（v2.1.3）；v2.1.2 月度BU回填校验也有同名实现
 - 实现：`String(v).trim().toLowerCase()`
@@ -571,6 +582,18 @@
 - 关联功能：Electron app 生命周期
 - 变更 review 要点：改启动 / 退出钩子要考虑未保存状态
 
+### `archiveOperationTracker` / `archiveOperationContext` / `archiveOperationTail`（v3.0.22 新增 Runtime-state）
+- 定义：`src/main.js:395-398`；策略实现为 `src/main-process/archive-center/operation-tracker.js`
+- 关联功能：当前启动周期内捕获 11 个模块的文件选择、成功运行和第一次结果，把业务调用与存档批次绑定，并串行执行后台文件复制
+- 变更 review 要点：
+  - 活动键必须包含 `moduleId + moduleCode + runKey`；不能把链接表、临时 MPT、资金对账和对账单修复串到同一批次
+  - 仅 `ARCHIVE_CHANNELS` 白名单进入 AsyncLocalStorage；不能让无关 IPC 参数被闭包或队列长期持有
+  - 业务 handler 返回值必须先返回，归档失败只能告警；后台任务只保存轻量文件路径/结果快照，不持有银行行数组
+  - 首次结果冻结和当前周期边界不可放宽；无活动批次的历史导出不得建立 output-only 批次
+  - 业务成功时必须先固化源文件身份；后台复制前若文件已变化，应标记失败并要求重新执行业务，不能归档变化后的内容
+  - 正常退出和在线升级退出必须等待归档队列完整排空；5 秒只用于慢退出告警，不能作为放弃尚未登记任务的上限
+  - 必跑：archive operation tracker 全策略测试 + 11 模块关键集成路径 + 启动性能检查
+
 ### `AppDatabase` / `AppDatabase.init`（v2.1.7 F7-A1 升格 Important-skeleton ⚠️ 全局影响）
 - 定义：`src/backend/database.js:33` `class AppDatabase`（门面）；`init()` 方法在 `database.js:42` 附近设全局 PRAGMA
 - 关联功能：项目唯一 SQLite DB 入口；CLAUDE.md State Management § SQLite 唯一持久化层；**v2.1.7 F7-A1 在 init() 内设全局 PRAGMA**（`journal_mode=WAL` / `synchronous=NORMAL` / `cache_size=-65536` 即 64 MB / `mmap_size=268435456` 即 256 MB）
@@ -696,6 +719,19 @@
   - 必跑：空库启动 + 老版本库启动（可用之前的 `tool-data.sqlite` 备份）
   - 不允许 DROP / 破坏性 ALTER
   - **N4 例外（v2.1.8 破坏性 raw_json rewrite）**：`ensureBillRawJsonV2Slim` 是已立项的破坏性 migration，强制配套 DB 备份 + 事务回滚 + 标志位
+
+### `ArchiveRepository` / `ArchiveService` / `archive_*` 四表（v3.0.22 新增 Risk-sensitive ⚠️ 审计血缘）
+- 定义：`src/backend/database/archive-repository.js`、`src/main-process/archive-center/archive-service.js`
+- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_artifacts` / `archive_blobs` 保存轻量索引，Documents 下 SHA-256 内容寻址 Blob 保存 11 个模块的输入与首次结果字节
+- 变更 review 要点：
+  - 四表 schema 必须幂等；主库只存元数据，禁止把银行明细、Excel 字节或个人信息写入 SQLite
+  - 批次号由独立 sequence 游标原子递增，删除批次不得回退或复用已展示号码；模块代码和本地日期必须隔离
+  - Blob 发布必须先在同文件系统 staging 流式写入并计算 SHA-256，再原子 rename；不得整文件读入内存或仅按文件名/大小去重
+  - 删除顺序必须先移除逻辑引用，最后引用才允许删物理 Blob；部分失败要可修复，不能误删仍被其它批次引用的文件
+  - 打开只能暴露只读副本，另存为覆盖失败必须恢复原目标；renderer 不得取得内部相对路径
+  - 归档失败不能回滚或改写业务成功状态；日志不得输出源文件绝对路径或表格内容
+  - 必跑：archive repository/service 真实 SQLite + 临时文件测试、共享引用删除、启动修复、失败重试、`npm run smoke`
+  - ⚠️ 人工复核：真实输入/结果与 Blob 的 SHA-256、模块归属和首次结果集合；自动测试不能替代
 
 ### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）
 - 定义：`src/backend/database/migrations.js:803` `function ensureBillRawJsonV2Slim(db, dbPath)`

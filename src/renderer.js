@@ -2070,6 +2070,7 @@ function refreshOpenAppUpdateDialog() {
   const checkButton = dialog.querySelector('[data-action="check-update"]');
   const restartButton = dialog.querySelector('[data-action="restart-update"]');
   const closeButton = dialog.querySelector('[data-role="close-update-dialog"]');
+  const navDot = dialog.querySelector('[data-role="update-nav-dot"]');
 
   if (toggle) {
     toggle.checked = status.enabled;
@@ -2097,10 +2098,25 @@ function refreshOpenAppUpdateDialog() {
   }
   if (restartButton) restartButton.hidden = !status.canRestart;
   if (closeButton) closeButton.textContent = status.canRestart ? '稍后' : '完成';
+  if (navDot) navDot.hidden = status.state !== 'downloaded';
 }
 
-async function restartAndInstallAppUpdate() {
-  const result = await window.desktopApi.appUpdate.restartAndInstall();
+async function restartAndInstallAppUpdate({ inline = false } = {}) {
+  let result;
+  try {
+    result = await window.desktopApi.appUpdate.restartAndInstall();
+  } catch (error) {
+    const message = error && error.message ? error.message : '暂时无法重启升级';
+    applyAppUpdateStatus({
+      ...state.appUpdateStatus,
+      state: 'error',
+      error: message
+    }, { prompt: false });
+    if (!inline) {
+      openModal(createAlertDialog(message, { logDomain: 'app-update' }));
+    }
+    return false;
+  }
   const nextStatus = extractAppUpdateStatus(result);
   if (nextStatus) applyAppUpdateStatus(nextStatus, { prompt: false });
 
@@ -2108,10 +2124,20 @@ async function restartAndInstallAppUpdate() {
     const busy = Array.isArray(result.busyOperations) && result.busyOperations.length > 0
       ? `\n正在处理：${result.busyOperations.join('、')}`
       : '';
-    openModal(createAlertDialog(`${result.message || '暂时无法重启升级'}${busy}`, {
-      logDomain: 'app-update'
-    }));
+    if (inline) {
+      applyAppUpdateStatus({
+        ...state.appUpdateStatus,
+        state: 'error',
+        error: `${result.message || '暂时无法重启升级'}${busy}`
+      }, { prompt: false });
+    } else {
+      openModal(createAlertDialog(`${result.message || '暂时无法重启升级'}${busy}`, {
+        logDomain: 'app-update'
+      }));
+    }
+    return false;
   }
+  return true;
 }
 
 function showDownloadedUpdatePrompt(status) {
@@ -2165,6 +2191,157 @@ function applyAppUpdateStatus(value, { prompt = true } = {}) {
   }
 }
 
+function archiveCenterDateInputValue(date = new Date()) {
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function archiveCenterBatchId(batch) {
+  return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
+}
+
+function archiveCenterBatchNumber(batch) {
+  return String(batch?.batchNumber ?? batch?.number ?? archiveCenterBatchId(batch));
+}
+
+function archiveCenterFileRefId(file) {
+  return String(file?.fileRefId ?? file?.id ?? '');
+}
+
+function archiveCenterErrorText(error, fallback) {
+  if (error && typeof error === 'object' && error.message) return String(error.message);
+  const text = String(error || '').trim();
+  return text || fallback;
+}
+
+function readArchiveCenterPayload(result, key, fallback, {
+  allowDirectObject = false,
+  directObjectTest = null
+} = {}) {
+  if (result === null || result === undefined) {
+    throw new Error('存档中心未返回有效结果');
+  }
+  const isObject = result && typeof result === 'object' && !Array.isArray(result);
+  if (isObject && result.ok === false) {
+    throw new Error(result.message || '存档中心请求失败');
+  }
+  if (isObject && Object.prototype.hasOwnProperty.call(result, key)) {
+    const status = String(result.status || '').toLowerCase();
+    if (status === 'failed' || status === 'error') {
+      throw new Error(result.message || '存档中心请求失败');
+    }
+    return result[key];
+  }
+  if (Array.isArray(result)) return result;
+  if (isObject) {
+    const status = String(result.status || '').toLowerCase();
+    const isDirectDomainObject = typeof directObjectTest === 'function'
+      && directObjectTest(result) === true;
+    if ((status === 'failed' || status === 'error') && !isDirectDomainObject) {
+      throw new Error(result.message || '存档中心请求失败');
+    }
+    if (allowDirectObject || isDirectDomainObject) return result;
+  }
+  return fallback;
+}
+
+function verifyArchiveCenterAction(result, fallbackMessage) {
+  if (!result || typeof result !== 'object') {
+    throw new Error(fallbackMessage);
+  }
+  if (result.ok === false) {
+    throw new Error(result.message || fallbackMessage);
+  }
+  const status = String(result.status || '').toLowerCase();
+  if (status === 'failed' || status === 'error') {
+    throw new Error(result.message || fallbackMessage);
+  }
+  return status !== 'cancelled' && status !== 'canceled';
+}
+
+function formatArchiveCenterBytes(value) {
+  if (typeof value === 'string' && value.trim() && !/^-?\d+(?:\.\d+)?$/.test(value.trim())) {
+    return value.trim();
+  }
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes < 0) return '-';
+  if (bytes < 1024) return `${bytes.toFixed(0)} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let size = bytes / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function archiveCenterStatusKey(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (['success', 'completed', 'complete', 'archived', 'ready'].includes(status)) return 'success';
+  if (['incomplete', 'partial', 'retryable'].includes(status)) return 'incomplete';
+  if (['failed', 'error'].includes(status)) return 'failed';
+  if (['running', 'retrying', 'pending'].includes(status)) return 'pending';
+  return 'neutral';
+}
+
+function archiveCenterStatusText(item) {
+  const explicit = item?.archiveStatusText ?? item?.statusText;
+  if (explicit) return String(explicit);
+  const status = archiveCenterStatusKey(item?.archiveStatus ?? item?.status);
+  if (status === 'success') return '存档完成';
+  if (status === 'incomplete') return '存档不完整';
+  if (status === 'failed') return '存档失败';
+  if (status === 'pending') return '处理中';
+  return '状态未知';
+}
+
+function archiveCenterFileStatusText(file) {
+  if (file?.statusText) return String(file.statusText);
+  const status = archiveCenterStatusKey(file?.archiveStatus ?? file?.status);
+  if (status === 'success') return '已存档';
+  if (status === 'failed' || status === 'incomplete') return '存档失败';
+  if (status === 'pending') return '处理中';
+  return '状态未知';
+}
+
+function archiveCenterModuleName(batch) {
+  if (batch?.moduleName) return String(batch.moduleName);
+  const moduleId = String(batch?.moduleId || '');
+  return Object.values(MODULES).find((module) => module.id === moduleId)?.name || moduleId || '未知模块';
+}
+
+function archiveCenterBatchTime(batch) {
+  if (batch?.time) return String(batch.time);
+  const value = batch?.createdAt ?? batch?.archivedAt;
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function archiveCenterDirectionText(value) {
+  const direction = String(value || '').trim().toLowerCase();
+  if (direction === 'input') return '输入';
+  if (direction === 'output') return '输出';
+  return value ? String(value) : '-';
+}
+
+function archiveCenterRoleText(value) {
+  const role = String(value || '').trim().toLowerCase();
+  if (role === 'input') return '业务输入';
+  if (role === 'output') return '首次结果';
+  return value ? String(value) : '-';
+}
+
+function archiveCenterRetentionText(batch) {
+  const value = batch?.retentionUntil ?? batch?.retention;
+  if (value === null || value === 'permanent') return '永久';
+  if (!value) return batch?.locked === true ? '已锁定' : '-';
+  return batch?.locked === true ? `${String(value)}（已锁定）` : String(value);
+}
+
 function createAppUpdateSettingsDialog() {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -2173,51 +2350,838 @@ function createAppUpdateSettingsDialog() {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', 'appUpdateSettingsTitle');
+
+  const archiveModules = new Map(
+    Object.values(MODULES).map((module) => [module.id, module.name])
+  );
+  const archiveState = {
+    activeTab: 'update',
+    archiveSettingsOpen: false,
+    loaded: false,
+    loading: false,
+    listRequestId: 0,
+    detailRequestId: 0,
+    selectedBatchId: '',
+    batches: [],
+    detail: null,
+    stats: null,
+    settings: { retentionDays: 90 },
+    templatePolicies: [],
+    savedRetentionValue: '90',
+    savedTemplatePolicies: new Map(),
+    batchFilterTimer: null
+  };
+
+  const initialModuleOptions = [
+    '<option value="">全部模块</option>',
+    ...Array.from(archiveModules, ([id, name]) => (
+      `<option value="${escapeHtml(id)}">${escapeHtml(name)}</option>`
+    ))
+  ].join('');
+
   dialog.innerHTML = `
-    <div class="dialog-header">
+    <div class="dialog-header app-settings-header">
       <div id="appUpdateSettingsTitle" class="dialog-title">设置</div>
-      <button class="icon-close" type="button" data-action="close" aria-label="关闭">×</button>
+      <button class="icon-close" type="button" data-action="close" title="关闭" aria-label="关闭">×</button>
     </div>
-    <div class="app-update-settings-body">
-      <div class="app-update-settings-row">
-        <span class="app-update-settings-label">当前版本</span>
-        <span class="app-update-settings-value" data-role="current-version">-</span>
+    <div class="app-settings-layout">
+      <nav class="app-settings-nav" aria-label="设置导航">
+        <button class="app-settings-nav-item is-active" type="button" data-tab="update" aria-controls="appUpdatePane" aria-current="page">
+          <span class="app-settings-nav-icon" aria-hidden="true">↻</span>
+          <span>自动更新</span>
+          <span class="app-settings-nav-dot" data-role="update-nav-dot" aria-label="更新已下载" hidden></span>
+        </button>
+        <button class="app-settings-nav-item" type="button" data-tab="archive" aria-controls="archiveCenterPane" aria-current="false">
+          <span class="app-settings-nav-icon" aria-hidden="true">▤</span>
+          <span>存档中心</span>
+        </button>
+      </nav>
+
+      <div class="app-settings-main">
+        <section id="appUpdatePane" class="app-settings-pane app-update-pane" data-pane="update" aria-labelledby="appUpdatePaneHeading">
+          <div class="app-update-pane-scroll">
+            <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">自动更新</h3>
+            <p class="app-settings-pane-subtitle">管理软件版本检查、下载与安装。</p>
+            <div class="app-update-settings-body">
+              <div class="app-update-settings-row">
+                <span class="app-update-settings-label">当前版本</span>
+                <span class="app-update-settings-value" data-role="current-version">-</span>
+              </div>
+              <div class="app-update-settings-row">
+                <span class="app-update-settings-label">安装类型</span>
+                <span class="app-update-settings-value" data-role="distribution">-</span>
+              </div>
+              <div class="app-update-settings-row">
+                <span class="app-update-settings-label">自动更新</span>
+                <label class="app-update-toggle">
+                  <input type="checkbox" data-role="auto-update-toggle" aria-label="自动更新" />
+                  <span data-role="auto-update-toggle-text">已关闭</span>
+                </label>
+              </div>
+              <div class="app-update-settings-row">
+                <span class="app-update-settings-label">更新状态</span>
+                <span class="app-update-settings-value" data-role="update-state">-</span>
+              </div>
+              <div class="app-update-settings-row">
+                <span class="app-update-settings-label">最近检查</span>
+                <span class="app-update-settings-value" data-role="last-checked">尚未检查</span>
+              </div>
+              <div class="app-update-settings-row" data-role="target-row" hidden>
+                <span class="app-update-settings-label">目标版本</span>
+                <span class="app-update-settings-value" data-role="target-version">-</span>
+              </div>
+              <progress class="app-update-progress" data-role="download-progress" max="100" value="0" aria-label="更新下载进度" hidden></progress>
+            </div>
+            <p class="app-update-settings-note" data-role="update-note"></p>
+          </div>
+        </section>
+
+        <section id="archiveCenterPane" class="app-settings-pane archive-center-pane" data-pane="archive" aria-labelledby="archiveCenterHeading" hidden>
+          <div class="archive-center-feedback" data-role="archive-feedback" role="status" aria-live="polite" hidden></div>
+
+          <div class="archive-center-browser" data-archive-view="browser">
+            <header class="archive-center-header">
+              <div class="archive-center-header-copy">
+                <h3 id="archiveCenterHeading" class="app-settings-pane-heading">存档中心</h3>
+                <p class="app-settings-pane-subtitle">按日期、模块和批次号查看已参与处理的输入文件与结果表。</p>
+              </div>
+              <div class="archive-center-storage-summary" aria-label="存档容量">
+                <span>唯一文件</span>
+                <strong data-role="archive-unique-size">-</strong>
+                <button class="archive-center-icon-button" type="button" data-action="open-archive-settings" title="存档设置" aria-label="存档设置">⚙</button>
+              </div>
+            </header>
+
+            <div class="archive-center-filters" aria-label="存档筛选">
+              <label class="archive-center-field">
+                <span>日期</span>
+                <input type="date" data-filter="date" value="${archiveCenterDateInputValue()}" />
+              </label>
+              <label class="archive-center-field">
+                <span>模块</span>
+                <select data-filter="module">${initialModuleOptions}</select>
+              </label>
+              <label class="archive-center-field">
+                <span>批次号</span>
+                <input type="text" data-filter="batch-id" autocomplete="off" placeholder="输入批次号" />
+              </label>
+            </div>
+
+            <div class="archive-center-workspace">
+              <aside class="archive-center-batch-panel" aria-label="批次列表">
+                <div class="archive-center-panel-caption">
+                  <span>批次列表</span>
+                  <span data-role="archive-batch-count">0 个</span>
+                </div>
+                <div class="archive-center-batch-list" data-role="archive-batch-list">
+                  <div class="archive-center-empty">切换到存档中心后加载批次</div>
+                </div>
+              </aside>
+              <section class="archive-center-detail" data-role="archive-batch-detail" aria-live="polite">
+                <div class="archive-center-detail-empty">请选择一个存档批次</div>
+              </section>
+            </div>
+          </div>
+
+          <section class="archive-center-settings-view" data-archive-view="settings" aria-labelledby="archiveSettingsHeading" hidden>
+            <header class="archive-center-subview-header">
+              <button class="archive-center-icon-button" type="button" data-action="back-to-archive" title="返回存档列表" aria-label="返回存档列表">←</button>
+              <h3 id="archiveSettingsHeading" class="app-settings-pane-heading">存档设置</h3>
+            </header>
+
+            <div class="archive-center-settings-section">
+              <h4>存储统计</h4>
+              <p class="archive-center-settings-note" data-role="archive-storage-path">存档位置：-</p>
+              <div class="archive-center-storage-meter" aria-label="唯一文件占逻辑文件比例">
+                <div data-role="archive-storage-meter-fill"></div>
+              </div>
+              <div class="archive-center-storage-labels">
+                <span>唯一文件 <strong data-role="archive-settings-unique-size">-</strong></span>
+                <span>逻辑文件 <strong data-role="archive-logical-size">-</strong></span>
+              </div>
+              <div class="archive-center-stat-grid">
+                <span>批次 <strong data-role="archive-stat-batches">-</strong></span>
+                <span>文件引用 <strong data-role="archive-stat-files">-</strong></span>
+              </div>
+            </div>
+
+            <div class="archive-center-settings-section">
+              <h4>保留期限</h4>
+              <p class="archive-center-settings-note">锁定批次不参与自动清理。默认保留期为 90 天。</p>
+              <label class="archive-center-field archive-center-retention-field">
+                <span>默认保留</span>
+                <select data-role="archive-retention-days">
+                  <option value="30">30 天</option>
+                  <option value="90" selected>90 天</option>
+                  <option value="180">180 天</option>
+                  <option value="365">365 天</option>
+                  <option value="permanent">永久</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="archive-center-settings-section">
+              <h4>网银账单生成模板</h4>
+              <p class="archive-center-settings-note">勾选“不存档”后，使用该模板生成的整个批次不保存输入文件和结果表。</p>
+              <div class="archive-center-template-list" data-role="archive-template-policies">
+                <div class="archive-center-empty">正在加载模板策略…</div>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <footer class="dialog-actions right app-settings-footer">
+          <div class="app-settings-footer-group" data-footer="update">
+            <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
+            <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
+          </div>
+          <div class="app-settings-footer-group" data-footer="archive-settings" hidden>
+            <button class="secondary-btn small" type="button" data-action="cancel-archive-settings">取消</button>
+            <button class="primary-btn small" type="button" data-action="save-archive-settings">保存</button>
+          </div>
+          <button class="secondary-btn small" type="button" data-action="close" data-role="close-update-dialog">完成</button>
+        </footer>
       </div>
-      <div class="app-update-settings-row">
-        <span class="app-update-settings-label">安装类型</span>
-        <span class="app-update-settings-value" data-role="distribution">-</span>
-      </div>
-      <div class="app-update-settings-row">
-        <span class="app-update-settings-label">自动更新</span>
-        <label class="app-update-toggle">
-          <input type="checkbox" data-role="auto-update-toggle" aria-label="自动更新" />
-          <span data-role="auto-update-toggle-text">已关闭</span>
-        </label>
-      </div>
-      <div class="app-update-settings-row">
-        <span class="app-update-settings-label">更新状态</span>
-        <span class="app-update-settings-value" data-role="update-state">-</span>
-      </div>
-      <div class="app-update-settings-row">
-        <span class="app-update-settings-label">最近检查</span>
-        <span class="app-update-settings-value" data-role="last-checked">尚未检查</span>
-      </div>
-      <div class="app-update-settings-row" data-role="target-row" hidden>
-        <span class="app-update-settings-label">目标版本</span>
-        <span class="app-update-settings-value" data-role="target-version">-</span>
-      </div>
-      <progress class="app-update-progress" data-role="download-progress" max="100" value="0" aria-label="更新下载进度" hidden></progress>
-    </div>
-    <p class="app-update-settings-note" data-role="update-note"></p>
-    <div class="dialog-actions right">
-      <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
-      <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
-      <button class="secondary-btn small" type="button" data-action="close" data-role="close-update-dialog">完成</button>
     </div>
   `;
 
+  const updatePane = dialog.querySelector('[data-pane="update"]');
+  const archivePane = dialog.querySelector('[data-pane="archive"]');
+  const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
+  const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
+  const updateFooter = dialog.querySelector('[data-footer="update"]');
+  const archiveSettingsFooter = dialog.querySelector('[data-footer="archive-settings"]');
+  const archiveFeedback = dialog.querySelector('[data-role="archive-feedback"]');
+  const batchList = dialog.querySelector('[data-role="archive-batch-list"]');
+  const batchCount = dialog.querySelector('[data-role="archive-batch-count"]');
+  const detailPanel = dialog.querySelector('[data-role="archive-batch-detail"]');
+  const dateFilter = dialog.querySelector('[data-filter="date"]');
+  const moduleFilter = dialog.querySelector('[data-filter="module"]');
+  const batchIdFilter = dialog.querySelector('[data-filter="batch-id"]');
+  const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
+  const templatePolicyList = dialog.querySelector('[data-role="archive-template-policies"]');
+
+  function getArchiveCenterApi() {
+    const api = window.desktopApi?.archiveCenter;
+    if (!api) throw new Error('存档中心服务暂不可用');
+    return api;
+  }
+
+  function showArchiveFeedback(message, tone = 'error') {
+    const text = String(message || '').trim();
+    archiveFeedback.hidden = !text;
+    archiveFeedback.textContent = text;
+    archiveFeedback.dataset.tone = tone;
+    archiveFeedback.setAttribute('role', tone === 'error' ? 'alert' : 'status');
+  }
+
+  function currentArchiveFilters() {
+    const batchNumber = batchIdFilter.value.trim();
+    return {
+      localDate: dateFilter.value,
+      moduleId: moduleFilter.value,
+      batchNumber
+    };
+  }
+
+  function renderArchiveModuleOptions() {
+    const selected = moduleFilter.value;
+    moduleFilter.innerHTML = [
+      '<option value="">全部模块</option>',
+      ...Array.from(archiveModules, ([id, name]) => (
+        `<option value="${escapeHtml(id)}"${id === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`
+      ))
+    ].join('');
+  }
+
+  function renderArchiveBatches() {
+    batchCount.textContent = `${archiveState.batches.length} 个`;
+    if (archiveState.batches.length === 0) {
+      batchList.innerHTML = '<div class="archive-center-empty">当前筛选条件下没有存档批次</div>';
+      return;
+    }
+    batchList.innerHTML = archiveState.batches.map((batch) => {
+      const batchId = archiveCenterBatchId(batch);
+      const batchNumber = archiveCenterBatchNumber(batch);
+      const status = archiveCenterStatusKey(batch.archiveStatus ?? batch.status);
+      const active = batchId === archiveState.selectedBatchId;
+      return `
+        <button class="archive-center-batch-item${active ? ' is-active' : ''}" type="button" data-batch-id="${escapeHtml(batchId)}" aria-current="${active ? 'true' : 'false'}">
+          <span class="archive-center-batch-item-top">
+            <strong>${escapeHtml(batchNumber || '未命名批次')}</strong>
+            ${batch.locked === true ? '<span class="archive-center-lock-mark" title="已锁定" aria-label="已锁定">◆</span>' : ''}
+          </span>
+          <span class="archive-center-batch-module">${escapeHtml(archiveCenterModuleName(batch))}</span>
+          <span class="archive-center-batch-meta">
+            <span class="archive-center-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</span>
+            <span>${escapeHtml(archiveCenterBatchTime(batch))}</span>
+          </span>
+        </button>
+      `;
+    }).join('');
+  }
+
+  function renderArchiveDetail() {
+    const batch = archiveState.detail;
+    if (!batch || archiveCenterBatchId(batch) !== archiveState.selectedBatchId) {
+      detailPanel.innerHTML = '<div class="archive-center-detail-empty">请选择一个存档批次</div>';
+      return;
+    }
+
+    const batchId = archiveCenterBatchId(batch);
+    const batchNumber = archiveCenterBatchNumber(batch);
+    const files = Array.isArray(batch.files)
+      ? batch.files
+      : (Array.isArray(batch.fileRefs)
+        ? batch.fileRefs
+        : (Array.isArray(batch.artifacts) ? batch.artifacts : []));
+    const readyCount = files.filter((file) => archiveCenterStatusKey(file.archiveStatus ?? file.status) === 'success').length;
+    const status = archiveCenterStatusKey(batch.archiveStatus ?? batch.status);
+    const canRetry = typeof batch.canRetry === 'boolean'
+      ? batch.canRetry
+      : Number(batch.failedArtifactCount || 0) > 0
+        || status === 'failed'
+        || status === 'incomplete';
+    const locked = batch.locked === true;
+    const deleteTitle = locked ? '请先解除锁定，再永久删除批次' : '永久删除批次';
+    const warning = batch.warning
+      ?? batch.warningMessage
+      ?? batch.errorMessage
+      ?? batch.lastErrorMessage
+      ?? '';
+
+    const fileRows = files.length > 0
+      ? files.map((file) => {
+        const fileRefId = archiveCenterFileRefId(file);
+        const fileStatus = archiveCenterStatusKey(file.archiveStatus ?? file.status);
+        const ready = fileStatus === 'success';
+        const fileName = String(file.fileName ?? file.name ?? file.originalName ?? '未命名文件');
+        const direction = archiveCenterDirectionText(file.direction ?? file.kind);
+        const role = archiveCenterRoleText(file.role ?? file.fileRole);
+        const size = formatArchiveCenterBytes(file.sizeBytes ?? file.size ?? file.blob?.sizeBytes);
+        return `
+          <tr>
+            <td><span class="archive-center-file-direction">${escapeHtml(direction)}</span></td>
+            <td>
+              <div class="archive-center-file-name" title="${escapeHtml(fileName)}">${escapeHtml(fileName)}</div>
+              <div class="archive-center-file-role">${escapeHtml(role)}</div>
+            </td>
+            <td>${escapeHtml(size)}</td>
+            <td><span class="archive-center-status" data-status="${fileStatus}">${escapeHtml(archiveCenterFileStatusText(file))}</span></td>
+            <td>
+              <div class="archive-center-row-actions">
+                ${ready && fileRefId
+                  ? `<button class="archive-center-icon-button" type="button" data-action="open-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="打开只读副本" aria-label="打开只读副本">↗</button>
+                     <button class="archive-center-icon-button" type="button" data-action="save-as-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="另存为" aria-label="另存为">↓</button>`
+                  : '<span class="archive-center-no-action">—</span>'}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('')
+      : '<tr><td colspan="5" class="archive-center-table-empty">该批次没有文件记录</td></tr>';
+
+    detailPanel.innerHTML = `
+      <div class="archive-center-detail-heading">
+        <div>
+          <h4>${escapeHtml(batchNumber)}</h4>
+          <p>${escapeHtml(archiveCenterModuleName(batch))}</p>
+        </div>
+        <div class="archive-center-detail-actions">
+          ${canRetry
+            ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="重试失败存档" aria-label="重试失败存档">↻</button>`
+            : ''}
+          <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '◇' : '◆'}</button>
+          <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${locked ? ' disabled' : ''}>×</button>
+        </div>
+      </div>
+      <div class="archive-center-metadata">
+        <div><span>业务状态</span><strong>${escapeHtml(batch.businessStatusText ?? batch.businessStatus ?? '-')}</strong></div>
+        <div><span>存档状态</span><strong class="archive-center-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</strong></div>
+        <div><span>文件</span><strong>${readyCount}/${files.length} 个完成</strong></div>
+        <div><span>保留至</span><strong>${escapeHtml(archiveCenterRetentionText(batch))}</strong></div>
+      </div>
+      <div class="archive-center-file-table-wrap">
+        <table class="archive-center-file-table">
+          <colgroup>
+            <col style="width: 72px" />
+            <col />
+            <col style="width: 94px" />
+            <col style="width: 98px" />
+            <col style="width: 82px" />
+          </colgroup>
+          <thead><tr><th>类型</th><th>文件</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>${fileRows}</tbody>
+        </table>
+      </div>
+      ${warning ? `<div class="archive-center-warning">${escapeHtml(warning)}</div>` : ''}
+    `;
+  }
+
+  function renderArchiveStats() {
+    const stats = archiveState.stats && typeof archiveState.stats === 'object'
+      ? archiveState.stats
+      : {};
+    const uniqueValue = stats.uniqueBytes ?? stats.uniqueSizeBytes ?? stats.uniqueSize;
+    const logicalValue = stats.logicalBytes ?? stats.logicalSizeBytes ?? stats.logicalSize;
+    const uniqueText = formatArchiveCenterBytes(uniqueValue);
+    const logicalText = formatArchiveCenterBytes(logicalValue);
+    const uniqueNumber = Number(uniqueValue);
+    const logicalNumber = Number(logicalValue);
+    const ratio = Number.isFinite(uniqueNumber) && Number.isFinite(logicalNumber) && logicalNumber > 0
+      ? Math.max(0, Math.min(100, (uniqueNumber / logicalNumber) * 100))
+      : 0;
+
+    dialog.querySelector('[data-role="archive-unique-size"]').textContent = uniqueText;
+    dialog.querySelector('[data-role="archive-settings-unique-size"]').textContent = uniqueText;
+    dialog.querySelector('[data-role="archive-logical-size"]').textContent = logicalText;
+    dialog.querySelector('[data-role="archive-stat-batches"]').textContent = String(stats.batchCount ?? '-');
+    dialog.querySelector('[data-role="archive-stat-files"]').textContent = String(
+      stats.fileRefCount ?? stats.fileCount ?? stats.logicalFileCount ?? '-'
+    );
+    dialog.querySelector('[data-role="archive-storage-path"]').textContent = stats.storagePath
+      ? `存档位置：${stats.storagePath}`
+      : '存档位置：-';
+    dialog.querySelector('[data-role="archive-storage-meter-fill"]').style.width = `${ratio}%`;
+  }
+
+  function renderArchiveSettings() {
+    const retentionDays = archiveState.settings?.retentionDays
+      ?? archiveState.settings?.defaultRetentionDays;
+    const retentionValue = retentionDays === null || retentionDays === 'permanent'
+      ? 'permanent'
+      : String(retentionDays ?? 90);
+    const allowedRetentionValues = new Set(['30', '90', '180', '365', 'permanent']);
+    archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue) ? retentionValue : '90';
+    retentionSelect.value = archiveState.savedRetentionValue;
+
+    archiveState.savedTemplatePolicies = new Map();
+    if (archiveState.templatePolicies.length === 0) {
+      templatePolicyList.innerHTML = '<div class="archive-center-empty">没有可配置的网银账单生成模板</div>';
+      return;
+    }
+    templatePolicyList.innerHTML = archiveState.templatePolicies.map((policy) => {
+      const templateId = String(policy.templateId ?? policy.id ?? '');
+      const templateName = String(
+        policy.templateName ?? policy.name ?? (templateId || '未命名模板')
+      );
+      const excluded = policy.excluded === true
+        || policy.archiveExcluded === true
+        || policy.isExcluded === true;
+      archiveState.savedTemplatePolicies.set(templateId, excluded);
+      return `
+        <label class="archive-center-template-row">
+          <input type="checkbox" data-template-id="${escapeHtml(templateId)}"${excluded ? ' checked' : ''} />
+          <span>${escapeHtml(templateName)}</span>
+          <em>不存档</em>
+        </label>
+      `;
+    }).join('');
+  }
+
+  async function loadArchiveStats() {
+    try {
+      const result = await getArchiveCenterApi().getStats();
+      archiveState.stats = readArchiveCenterPayload(result, 'stats', {}, { allowDirectObject: true });
+      renderArchiveStats();
+      return true;
+    } catch (error) {
+      showArchiveFeedback(`存储统计加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    }
+  }
+
+  async function loadArchiveDetail(batchId) {
+    if (!batchId) {
+      archiveState.detail = null;
+      renderArchiveDetail();
+      return false;
+    }
+    const requestId = ++archiveState.detailRequestId;
+    detailPanel.innerHTML = '<div class="archive-center-detail-empty">正在加载批次详情…</div>';
+    try {
+      const result = await getArchiveCenterApi().getBatch(batchId);
+      const batch = readArchiveCenterPayload(result, 'batch', null, {
+        directObjectTest: (value) => Boolean(archiveCenterBatchId(value))
+      });
+      if (!batch || typeof batch !== 'object') throw new Error('批次详情格式无效');
+      if (requestId !== archiveState.detailRequestId) return false;
+      archiveState.detail = batch;
+      renderArchiveDetail();
+      return true;
+    } catch (error) {
+      if (requestId !== archiveState.detailRequestId) return false;
+      archiveState.detail = null;
+      detailPanel.innerHTML = `<div class="archive-center-detail-empty archive-center-detail-error">${escapeHtml(archiveCenterErrorText(error, '批次详情加载失败'))}</div>`;
+      showArchiveFeedback(`批次详情加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    }
+  }
+
+  async function loadArchiveBatches({ clearFeedback = true } = {}) {
+    const requestId = ++archiveState.listRequestId;
+    const filters = currentArchiveFilters();
+    if (clearFeedback) showArchiveFeedback('', 'info');
+    batchList.setAttribute('aria-busy', 'true');
+    batchList.innerHTML = '<div class="archive-center-empty">正在加载批次…</div>';
+    try {
+      const result = await getArchiveCenterApi().listBatches(filters);
+      const receivedBatches = readArchiveCenterPayload(result, 'batches', []);
+      if (!Array.isArray(receivedBatches)) throw new Error('批次列表格式无效');
+      if (requestId !== archiveState.listRequestId) return false;
+
+      const requestedBatchNumber = String(filters.batchNumber || '').toLowerCase();
+      const batches = requestedBatchNumber
+        ? receivedBatches.filter((batch) => (
+          archiveCenterBatchNumber(batch).toLowerCase().includes(requestedBatchNumber)
+        ))
+        : receivedBatches;
+
+      archiveState.batches = batches;
+      for (const batch of batches) {
+        const moduleId = String(batch?.moduleId || '');
+        if (moduleId && !archiveModules.has(moduleId)) {
+          archiveModules.set(moduleId, archiveCenterModuleName(batch));
+        }
+      }
+      renderArchiveModuleOptions();
+
+      const selectedStillVisible = batches.some(
+        (batch) => archiveCenterBatchId(batch) === archiveState.selectedBatchId
+      );
+      archiveState.selectedBatchId = selectedStillVisible
+        ? archiveState.selectedBatchId
+        : archiveCenterBatchId(batches[0]);
+      archiveState.detail = null;
+      renderArchiveBatches();
+      if (archiveState.selectedBatchId) {
+        await loadArchiveDetail(archiveState.selectedBatchId);
+      } else {
+        renderArchiveDetail();
+      }
+      return true;
+    } catch (error) {
+      if (requestId !== archiveState.listRequestId) return false;
+      archiveState.batches = [];
+      archiveState.detail = null;
+      renderArchiveBatches();
+      renderArchiveDetail();
+      showArchiveFeedback(`批次列表加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    } finally {
+      if (requestId === archiveState.listRequestId) {
+        batchList.removeAttribute('aria-busy');
+      }
+    }
+  }
+
+  async function loadArchiveSettings() {
+    showArchiveFeedback('', 'info');
+    archiveSettingsView.setAttribute('aria-busy', 'true');
+    const api = getArchiveCenterApi();
+    const [settingsResult, policiesResult, statsResult] = await Promise.allSettled([
+      api.getSettings(),
+      api.listTemplatePolicies(),
+      api.getStats()
+    ]);
+    const failures = [];
+
+    if (settingsResult.status === 'fulfilled') {
+      try {
+        archiveState.settings = readArchiveCenterPayload(
+          settingsResult.value,
+          'settings',
+          { retentionDays: 90 },
+          { allowDirectObject: true }
+        );
+      } catch (error) {
+        failures.push(`保留设置：${archiveCenterErrorText(error, '加载失败')}`);
+      }
+    } else {
+      failures.push(`保留设置：${archiveCenterErrorText(settingsResult.reason, '加载失败')}`);
+    }
+
+    if (policiesResult.status === 'fulfilled') {
+      try {
+        const policies = readArchiveCenterPayload(policiesResult.value, 'policies', []);
+        if (!Array.isArray(policies)) throw new Error('模板策略格式无效');
+        archiveState.templatePolicies = policies;
+      } catch (error) {
+        failures.push(`模板策略：${archiveCenterErrorText(error, '加载失败')}`);
+      }
+    } else {
+      failures.push(`模板策略：${archiveCenterErrorText(policiesResult.reason, '加载失败')}`);
+    }
+
+    if (statsResult.status === 'fulfilled') {
+      try {
+        archiveState.stats = readArchiveCenterPayload(
+          statsResult.value,
+          'stats',
+          {},
+          { allowDirectObject: true }
+        );
+      } catch (error) {
+        failures.push(`存储统计：${archiveCenterErrorText(error, '加载失败')}`);
+      }
+    } else {
+      failures.push(`存储统计：${archiveCenterErrorText(statsResult.reason, '加载失败')}`);
+    }
+
+    renderArchiveSettings();
+    renderArchiveStats();
+    archiveSettingsView.removeAttribute('aria-busy');
+    if (failures.length > 0) {
+      showArchiveFeedback(`部分存档设置加载失败：${failures.join('；')}`);
+      return false;
+    }
+    return true;
+  }
+
+  async function ensureArchiveLoaded() {
+    if (archiveState.loaded || archiveState.loading) return;
+    archiveState.loading = true;
+    try {
+      const [batchesLoaded] = await Promise.all([loadArchiveBatches(), loadArchiveStats()]);
+      archiveState.loaded = batchesLoaded === true;
+    } finally {
+      archiveState.loading = false;
+    }
+  }
+
+  function setArchiveSettingsOpen(open) {
+    archiveState.archiveSettingsOpen = open === true;
+    archiveBrowser.hidden = archiveState.archiveSettingsOpen;
+    archiveSettingsView.hidden = !archiveState.archiveSettingsOpen;
+    archiveSettingsFooter.hidden = !archiveState.archiveSettingsOpen || archiveState.activeTab !== 'archive';
+  }
+
+  function setSettingsTab(tab) {
+    archiveState.activeTab = tab === 'archive' ? 'archive' : 'update';
+    dialog.querySelectorAll('[data-tab]').forEach((button) => {
+      const active = button.dataset.tab === archiveState.activeTab;
+      button.classList.toggle('is-active', active);
+      button.setAttribute('aria-current', active ? 'page' : 'false');
+    });
+    updatePane.hidden = archiveState.activeTab !== 'update';
+    archivePane.hidden = archiveState.activeTab !== 'archive';
+    updateFooter.hidden = archiveState.activeTab !== 'update';
+    if (archiveState.activeTab !== 'archive') {
+      setArchiveSettingsOpen(false);
+    } else {
+      archiveSettingsFooter.hidden = !archiveState.archiveSettingsOpen;
+      ensureArchiveLoaded();
+    }
+  }
+
+  async function runArchiveFileAction(button, actionName) {
+    const fileRefId = button.dataset.fileRefId;
+    const isOpen = actionName === 'open';
+    button.disabled = true;
+    showArchiveFeedback('', 'info');
+    try {
+      const api = getArchiveCenterApi();
+      const result = isOpen
+        ? await api.openFile(fileRefId)
+        : await api.saveAs(fileRefId);
+      const completed = verifyArchiveCenterAction(
+        result,
+        isOpen ? '打开存档文件失败' : '另存存档文件失败'
+      );
+      if (completed) {
+        showArchiveFeedback(
+          result?.message || (isOpen ? '已打开只读副本' : '已完成另存为'),
+          'success'
+        );
+      }
+    } catch (error) {
+      showArchiveFeedback(
+        `${isOpen ? '打开只读副本' : '另存为'}失败：${archiveCenterErrorText(error, '未知错误')}`
+      );
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function toggleArchiveBatchLock(button) {
+    const batchId = button.dataset.batchId;
+    const batch = archiveState.detail;
+    const nextLocked = !(batch?.locked === true);
+    button.disabled = true;
+    showArchiveFeedback('', 'info');
+    try {
+      const result = await getArchiveCenterApi().setLocked(batchId, nextLocked);
+      if (!verifyArchiveCenterAction(result, nextLocked ? '锁定批次失败' : '解除锁定失败')) {
+        return;
+      }
+      showArchiveFeedback(nextLocked ? '批次已锁定，不参与自动清理' : '批次已解除锁定', 'success');
+      await loadArchiveBatches({ clearFeedback: false });
+      await loadArchiveStats();
+    } catch (error) {
+      showArchiveFeedback(`${nextLocked ? '锁定批次' : '解除锁定'}失败：${archiveCenterErrorText(error, '未知错误')}`);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
+  }
+
+  async function retryArchiveBatch(button) {
+    const batchId = button.dataset.batchId;
+    button.disabled = true;
+    showArchiveFeedback('正在重试失败存档…', 'info');
+    try {
+      const result = await getArchiveCenterApi().retryBatch(batchId);
+      if (!verifyArchiveCenterAction(result, '重试存档失败')) {
+        showArchiveFeedback('', 'info');
+        return;
+      }
+      showArchiveFeedback(result?.message || '已提交存档重试', 'success');
+      await loadArchiveBatches({ clearFeedback: false });
+      await loadArchiveStats();
+    } catch (error) {
+      showArchiveFeedback(`重试存档失败：${archiveCenterErrorText(error, '未知错误')}`);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
+  }
+
+  function confirmArchiveBatchDelete(button) {
+    const batchId = button.dataset.batchId;
+    const batchNumber = button.dataset.batchNumber || batchId;
+    let confirmOverlay = null;
+    const restoreSettingsDialog = () => {
+      queueMicrotask(() => {
+        openModal(overlay);
+        requestAnimationFrame(refreshOpenAppUpdateDialog);
+      });
+    };
+    confirmOverlay = createConfirmDialog({
+      message: `批次 <strong>${escapeHtml(batchNumber)}</strong> 将立即永久删除。该操作不会删除原始文件和用户已另存的副本。`,
+      confirmText: '永久删除',
+      cancelText: '取消',
+      onCancel: restoreSettingsDialog,
+      onConfirm: async () => {
+        const confirmButton = confirmOverlay.querySelector('[data-action="confirm"]');
+        confirmButton.disabled = true;
+        try {
+          const result = await getArchiveCenterApi().deleteBatch(batchId);
+          const metadataDeleted = result?.metadataDeleted === true;
+          if (!metadataDeleted && !verifyArchiveCenterAction(result, '永久删除批次失败')) {
+            confirmButton.disabled = false;
+            return;
+          }
+          archiveState.selectedBatchId = '';
+          archiveState.detail = null;
+          openModal(overlay);
+          const cleanupPending = metadataDeleted && result?.ok === false;
+          showArchiveFeedback(
+            cleanupPending
+              ? '批次记录已删除，但部分物理副本清理待后台重试'
+              : (result?.message || '存档批次已永久删除'),
+            cleanupPending ? 'error' : 'success'
+          );
+          await loadArchiveBatches({ clearFeedback: false });
+          await loadArchiveStats();
+        } catch (error) {
+          let feedback = confirmOverlay.querySelector('[data-role="archive-delete-error"]');
+          if (!feedback) {
+            feedback = document.createElement('div');
+            feedback.className = 'archive-delete-confirm-error';
+            feedback.dataset.role = 'archive-delete-error';
+            feedback.setAttribute('role', 'alert');
+            confirmOverlay.querySelector('.alert-body')?.appendChild(feedback);
+          }
+          feedback.textContent = `永久删除失败：${archiveCenterErrorText(error, '未知错误')}`;
+          confirmButton.disabled = false;
+        }
+      }
+    });
+    openModal(confirmOverlay);
+  }
+
+  async function saveArchiveSettings(button) {
+    let api;
+    try {
+      api = getArchiveCenterApi();
+    } catch (error) {
+      showArchiveFeedback(`存档设置保存失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return;
+    }
+    const retentionValue = retentionSelect.value;
+    const policyInputs = Array.from(templatePolicyList.querySelectorAll('[data-template-id]'));
+    const operations = [];
+
+    if (retentionValue !== archiveState.savedRetentionValue) {
+      operations.push({
+        label: '保留期限',
+        run: () => api.setRetentionDays(retentionValue === 'permanent' ? null : Number(retentionValue)),
+        commit: () => {
+          archiveState.savedRetentionValue = retentionValue;
+          archiveState.settings = {
+            ...archiveState.settings,
+            retentionDays: retentionValue === 'permanent' ? null : Number(retentionValue)
+          };
+        }
+      });
+    }
+
+    for (const input of policyInputs) {
+      const templateId = input.dataset.templateId;
+      const saved = archiveState.savedTemplatePolicies.get(templateId) === true;
+      if (input.checked === saved) continue;
+      operations.push({
+        label: `模板 ${templateId}`,
+        run: () => api.setTemplateExcluded(templateId, input.checked),
+        commit: () => archiveState.savedTemplatePolicies.set(templateId, input.checked)
+      });
+    }
+
+    if (operations.length === 0) {
+      setArchiveSettingsOpen(false);
+      showArchiveFeedback('存档设置没有变化', 'info');
+      return;
+    }
+
+    button.disabled = true;
+    showArchiveFeedback('正在保存存档设置…', 'info');
+    const failures = [];
+    for (const operation of operations) {
+      try {
+        const result = await operation.run();
+        if (!verifyArchiveCenterAction(result, `${operation.label}保存失败`)) {
+          throw new Error('操作已取消');
+        }
+        operation.commit();
+      } catch (error) {
+        failures.push(`${operation.label}：${archiveCenterErrorText(error, '保存失败')}`);
+      }
+    }
+    button.disabled = false;
+
+    if (failures.length > 0) {
+      showArchiveFeedback(`部分设置未保存：${failures.join('；')}`);
+      return;
+    }
+
+    setArchiveSettingsOpen(false);
+    showArchiveFeedback('存档设置已保存', 'success');
+    await Promise.all([
+      loadArchiveStats(),
+      loadArchiveBatches({ clearFeedback: false })
+    ]);
+  }
+
+  function closeSettingsDialog() {
+    clearTimeout(archiveState.batchFilterTimer);
+    archiveState.listRequestId += 1;
+    archiveState.detailRequestId += 1;
+    closeModal();
+  }
+
   dialog.querySelectorAll('[data-action="close"]').forEach((button) => {
-    button.addEventListener('click', closeModal);
+    button.addEventListener('click', closeSettingsDialog);
+  });
+  dialog.querySelectorAll('[data-tab]').forEach((button) => {
+    button.addEventListener('click', () => setSettingsTab(button.dataset.tab));
   });
   dialog.querySelector('[data-role="auto-update-toggle"]').addEventListener('change', async (event) => {
     const toggle = event.currentTarget;
@@ -2251,8 +3215,67 @@ function createAppUpdateSettingsDialog() {
     }
   });
   dialog.querySelector('[data-action="restart-update"]').addEventListener('click', async () => {
-    await restartAndInstallAppUpdate();
+    await restartAndInstallAppUpdate({ inline: true });
   });
+
+  dateFilter.addEventListener('change', () => {
+    archiveState.selectedBatchId = '';
+    loadArchiveBatches();
+  });
+  moduleFilter.addEventListener('change', () => {
+    archiveState.selectedBatchId = '';
+    loadArchiveBatches();
+  });
+  batchIdFilter.addEventListener('input', () => {
+    clearTimeout(archiveState.batchFilterTimer);
+    archiveState.batchFilterTimer = setTimeout(() => {
+      archiveState.selectedBatchId = '';
+      loadArchiveBatches();
+    }, 250);
+  });
+  batchIdFilter.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    clearTimeout(archiveState.batchFilterTimer);
+    archiveState.selectedBatchId = '';
+    loadArchiveBatches();
+  });
+
+  batchList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-batch-id]');
+    if (!button) return;
+    archiveState.selectedBatchId = button.dataset.batchId;
+    archiveState.detail = null;
+    renderArchiveBatches();
+    loadArchiveDetail(archiveState.selectedBatchId);
+  });
+
+  archivePane.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const action = button.dataset.action;
+    if (action === 'open-archive-settings') {
+      setArchiveSettingsOpen(true);
+      loadArchiveSettings().catch((error) => {
+        archiveSettingsView.removeAttribute('aria-busy');
+        showArchiveFeedback(`存档设置加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      });
+    } else if (action === 'back-to-archive' || action === 'cancel-archive-settings') {
+      setArchiveSettingsOpen(false);
+    } else if (action === 'save-archive-settings') {
+      saveArchiveSettings(button);
+    } else if (action === 'open-archive-file') {
+      runArchiveFileAction(button, 'open');
+    } else if (action === 'save-as-archive-file') {
+      runArchiveFileAction(button, 'save-as');
+    } else if (action === 'toggle-archive-lock') {
+      toggleArchiveBatchLock(button);
+    } else if (action === 'delete-archive-batch') {
+      confirmArchiveBatchDelete(button);
+    } else if (action === 'retry-archive-batch') {
+      retryArchiveBatch(button);
+    }
+  });
+
   overlay.appendChild(dialog);
   requestAnimationFrame(refreshOpenAppUpdateDialog);
   return overlay;
@@ -5239,7 +6262,8 @@ async function handleReconIdFixRun() {
   }
   try {
     const result = await window.desktopApi.reconIdFix.run({
-      scenarioId: state.reconIdFixSelectedScenarioId
+      scenarioId: state.reconIdFixSelectedScenarioId,
+      originModuleId: 'recon-id-fix'
     });
     if (!result || result.status !== 'ok') {
       openModal(createAlertDialog(`运行失败：${(result && result.message) || '未知错误'}`));
@@ -5343,7 +6367,10 @@ async function handleBankStatementGatewayReconRun() {
 //   成功后 refreshReconIdFixStatus() 同步 result → renderer state（导出按钮亮 + 状态框反馈）。
 async function runGatewayReconScenario(scenarioId) {
   try {
-    const result = await window.desktopApi.reconIdFix.run({ scenarioId });
+    const result = await window.desktopApi.reconIdFix.run({
+      scenarioId,
+      originModuleId: 'bank-statement-process'
+    });
     if (!result || result.status !== 'ok') {
       openModal(createAlertDialog(`运行失败：${(result && result.message) || '未知错误'}`));
       // run 失败可能清了 main 端 result（stale 等），同步一次状态
@@ -7218,6 +8245,15 @@ async function applyFullInfo(info) {
         lastCheckedAt: '2026-07-16T12:34:56.000Z'
       }, { prompt: false });
       openModal(createAppUpdateSettingsDialog());
+    }, 120);
+  } else if (info.previewModal === 'archive-center-settings') {
+    setTimeout(() => {
+      openModal(createAppUpdateSettingsDialog());
+      requestAnimationFrame(() => {
+        elements.modalRoot
+          ?.querySelector('.app-settings-nav-item[data-tab="archive"]')
+          ?.click();
+      });
     }, 120);
   } else if (info.previewModal === 'new-account-palette') {
     setTimeout(() => {

@@ -120,6 +120,20 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('app-update:status-changed', wrapped);
     }
   },
+  archiveCenter: {
+    listBatches: (filters) => ipcRenderer.invoke('archive-center:list-batches', filters),
+    getBatch: (batchId) => ipcRenderer.invoke('archive-center:get-batch', batchId),
+    openFile: (fileRefId) => ipcRenderer.invoke('archive-center:open-file', fileRefId),
+    saveAs: (fileRefId) => ipcRenderer.invoke('archive-center:save-as', fileRefId),
+    setLocked: (batchId, locked) => ipcRenderer.invoke('archive-center:set-locked', batchId, locked),
+    deleteBatch: (batchId) => ipcRenderer.invoke('archive-center:delete-batch', batchId),
+    retryBatch: (batchId) => ipcRenderer.invoke('archive-center:retry-batch', batchId),
+    getSettings: () => ipcRenderer.invoke('archive-center:get-settings'),
+    setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
+    listTemplatePolicies: () => ipcRenderer.invoke('archive-center:list-template-policies'),
+    setTemplateExcluded: (templateId, excluded) => ipcRenderer.invoke('archive-center:set-template-excluded', templateId, excluded),
+    getStats: () => ipcRenderer.invoke('archive-center:get-stats')
+  },
   errors: {
     exportLast: () => ipcRenderer.invoke('error:export-last')
   },
