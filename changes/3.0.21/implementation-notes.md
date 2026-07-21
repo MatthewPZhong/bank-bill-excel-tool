@@ -52,6 +52,9 @@
 | 最终 self-review | P0-P4 Finding 0 | 合并质量门 |
 | PR #96 | merge commit `3c44420e` 合入 `main`；远程与本地 3.0.21 开发分支删除 | 合并和分支收口 |
 | 最终发布前门禁 | 干净 `npm ci` 后 release-check 再次通过：unit `3716/3716`、integration `1955/1955`；Electron 几何 `6/6 PASS`，scan-vars 与 check-vars 结果稳定 | tag 前可复现性确认 |
+| Windows Release | annotated tag `v3.0.21` 指向 `d438ac6`；workflow run `29796190599` success，耗时 12m28s | tag/main、测试、构建、哈希与不可变发布链路 |
+| GitHub Release | `v3.0.21` 为 latest、非 draft、非 prerelease；Setup `99,724,013`、portable `99,227,248`、blockmap `105,178`、`latest.yml` `371` 字节 | 在线升级资产契约 |
+| 公开资产回读 | Setup/portable 匿名 Range 均返回 206、正确总大小与 `MZ`；`latest.yml`/blockmap SHA-256 分别为 `7fcb77b3...` / `776fd44f...`，与 GitHub 摘要一致；完整 Setup SHA-512 由 workflow 校验 | 公开可访问性与元数据一致性 |
 
 ## Remaining Unknowns
 
@@ -61,3 +64,4 @@
 | 合法 AchReturn 静默过滤是否需要审计 | 已知非目标 | 后续建议4迭代 | 不阻断本轮实现 |
 | R4 扩散、网关侧 DBS MerchantId/Channel、候选1:1是否需收紧 | 已知非目标 | 单独资金规则评审；当前其它渠道/商户同 ID 白名单候选仍可能参与步骤2 | 不阻断本轮实现，已在用户文档披露 |
 | `npm audit --omit=dev` 报告 7 个既有生产依赖告警（2 moderate、5 high） | 已知技术债 | 单独依赖升级评审；本迭代未变更依赖，现有 Release workflow 不以 audit 为门禁 | 不阻断本次资金规则修复发布，但需后续处理，尤其 `xlsx` 无 npm 自动修复版本 |
+| 当前网络到 GitHub Release CDN 的 Setup 全量下载吞吐偏低 | 已知运维风险 | Range 访问与资产完整性已验证；后续评估镜像/CDN 或下载可观测性 | 不影响资产正确性，但可能继续影响客户端升级速度 |

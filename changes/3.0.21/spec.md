@@ -1,6 +1,6 @@
 # Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: release-ready（PR #96 已合入 `main`；最终发布前门禁通过）
+> status: released（PR #96 已合入 `main`；GitHub Release `v3.0.21` 已发布）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -126,3 +126,6 @@
 - 归档见 `docs/prs/PR96-v3.0.21.md` 与 `docs/iterations/v3.0.21/PRD-v3.0.21.md`。
 - `v3.0.21` tag、Release workflow 和公开升级资产证据待发布完成后补录。
 - 2026-07-20：合并归档后的最终 `main` 完成干净 `npm ci`，重新通过 release-check、六组合 Electron 几何门禁、scan-vars 与 check-vars；可创建发布 tag。
+- 2026-07-20：annotated tag `v3.0.21` 指向发布准备 commit `d438ac6`；Windows Release workflow run [`29796190599`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29796190599) 以 success 完成。
+- GitHub Release [`v3.0.21`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.21) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 与 `latest.yml` 四个资产。
+- 匿名 Range 回读确认 Setup/portable 总大小分别为 `99,724,013` / `99,227,248` 字节且文件头均为 `MZ`；`latest.yml` 和 blockmap 的 SHA-256 与 GitHub 资产摘要一致，完整 Setup SHA-512 由 Release workflow 校验通过。

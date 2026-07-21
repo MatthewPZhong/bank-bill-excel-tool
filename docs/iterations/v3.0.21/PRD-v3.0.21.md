@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.21 PRD
 
 > 目标版本：`3.0.21`
-> 状态：release-ready（PR #96 已合入 `main`；最终发布前门禁通过）
+> 状态：released（PR #96 已合入 `main`；GitHub Release `v3.0.21` 已发布）
 > 归档：PR #96 merge commit `3c44420e`；源规格 `changes/3.0.21/spec.md`
 > 更新时间：2026-07-20
 > 适用仓库：`bank-bill-excel-tool`
@@ -49,3 +49,7 @@ v3.0.21 修复两处资金性质判断边界：
 - PR 归档见 `docs/prs/PR96-v3.0.21.md`；tag、Release workflow 和公开资产校验证据待发布完成后补录。
 - 真实脱敏资金数据逐笔复核仍为发布后 follow-up，发布授权不等于人工验收通过。
 - 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、六组合 Electron 几何门禁和变量门禁，可进入受控 tag 发布。
+- annotated tag `v3.0.21` 指向 `d438ac6040525926cb9ceb24ebf11526597b0292`；Windows Release workflow run [`29796190599`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29796190599) 全部通过。
+- GitHub Release [`v3.0.21`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.21) 已发布为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml`。
+- 匿名 Range 回读确认 Setup/portable 总大小分别为 `99,724,013` / `99,227,248` 字节且文件头均为 `MZ`；`latest.yml` 与 blockmap 摘要匹配 GitHub 资产元数据，完整 Setup SHA-512 由 workflow 验证。
+- 当前网络到 GitHub Release CDN 的全量下载吞吐仍偏低，属于升级速度运维风险，不影响本次资产正确性结论。

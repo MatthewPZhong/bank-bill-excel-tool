@@ -1,6 +1,6 @@
 # Test Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
+> status: released-pass（本地、Windows workflow 与公开资产门禁通过）
 > created: 2026-07-20
 > updated: 2026-07-20
 
@@ -74,3 +74,6 @@
 - PR #96 已以 merge commit `3c44420e` 合入 `main`；Release workflow 待 tag 触发。
 - 真实脱敏资金数据逐笔复核仍为发布后 follow-up，不得宣称人工验收通过。
 - 合并归档后的最终 `main` 在干净 `npm ci` 依赖上再次通过 release-check、六组合 Electron 几何门禁与变量门禁。
+- Windows Release workflow run `29796190599`：PASS；tag/main、release-check、几何、构建、产物和发布后回读步骤全部成功。
+- GitHub Release `v3.0.21` 为 latest、非 draft、非 prerelease，四个约定资产齐全。
+- 匿名 Range 回读 Setup/portable 均返回 `206`、正确总大小和 `MZ` 文件头；`latest.yml` 与 blockmap 摘要匹配 GitHub 资产元数据。
