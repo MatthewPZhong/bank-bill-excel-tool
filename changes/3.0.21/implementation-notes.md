@@ -51,6 +51,7 @@
 | GitHub PR workflow | run `29747527965` PASS | 远端 Windows smoke 门禁 |
 | 最终 self-review | P0-P4 Finding 0 | 合并质量门 |
 | PR #96 | merge commit `3c44420e` 合入 `main`；远程与本地 3.0.21 开发分支删除 | 合并和分支收口 |
+| 最终发布前门禁 | 干净 `npm ci` 后 release-check 再次通过：unit `3716/3716`、integration `1955/1955`；Electron 几何 `6/6 PASS`，scan-vars 与 check-vars 结果稳定 | tag 前可复现性确认 |
 
 ## Remaining Unknowns
 
@@ -59,3 +60,4 @@
 | 真实 DBS 数据中 12 类白名单与方向结果是否符合业务预期 | PROBE | 资金负责人发布后逐笔复核；用户已在知悉未完成后授权发布 | 不阻断此次发布，但不得宣称人工验收通过 |
 | 合法 AchReturn 静默过滤是否需要审计 | 已知非目标 | 后续建议4迭代 | 不阻断本轮实现 |
 | R4 扩散、网关侧 DBS MerchantId/Channel、候选1:1是否需收紧 | 已知非目标 | 单独资金规则评审；当前其它渠道/商户同 ID 白名单候选仍可能参与步骤2 | 不阻断本轮实现，已在用户文档披露 |
+| `npm audit --omit=dev` 报告 7 个既有生产依赖告警（2 moderate、5 high） | 已知技术债 | 单独依赖升级评审；本迭代未变更依赖，现有 Release workflow 不以 audit 为门禁 | 不阻断本次资金规则修复发布，但需后续处理，尤其 `xlsx` 无 npm 自动修复版本 |

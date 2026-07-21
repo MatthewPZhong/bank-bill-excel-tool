@@ -42,4 +42,4 @@
 - 目标：归档 PR #96 与 v3.0.21 PRD，创建受控 tag，并验证 Windows Release 与在线升级资产。
 - 涉及文件：`docs/prs/PR96-v3.0.21.md`、`docs/iterations/v3.0.21/PRD-v3.0.21.md` 及本迭代四份文档。
 - 验证：PR 为 MERGED、开发分支删除、tag 指向发布准备 commit、Release workflow 成功、公开资产与 `latest.yml` 一致。
-- 状态：in-progress（PR 合并与首轮归档完成，tag/Release 待执行）
+- 状态：in-progress（合并、归档与最终发布前门禁完成，tag/Release 待执行）

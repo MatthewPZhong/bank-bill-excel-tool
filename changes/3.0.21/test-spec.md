@@ -1,6 +1,6 @@
 # Test Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: merged-pass（Release workflow 待执行）
+> status: release-ready（最终 `main` 门禁通过；Release workflow 待执行）
 > created: 2026-07-20
 > updated: 2026-07-20
 
@@ -73,3 +73,4 @@
 - GitHub PR workflow run `29747527965`：PASS；最终 self-review 为 P0-P4 Finding 0。
 - PR #96 已以 merge commit `3c44420e` 合入 `main`；Release workflow 待 tag 触发。
 - 真实脱敏资金数据逐笔复核仍为发布后 follow-up，不得宣称人工验收通过。
+- 合并归档后的最终 `main` 在干净 `npm ci` 依赖上再次通过 release-check、六组合 Electron 几何门禁与变量门禁。

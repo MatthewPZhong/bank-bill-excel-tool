@@ -1,6 +1,6 @@
 # Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: merged（PR #96 已合入 `main`；v3.0.21 Release 待发布）
+> status: release-ready（PR #96 已合入 `main`；最终发布前门禁通过）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -125,3 +125,4 @@
 - 2026-07-20：PR #96 以 merge commit `3c44420e` 合入 `main`，远程与本地 3.0.21 开发分支删除。
 - 归档见 `docs/prs/PR96-v3.0.21.md` 与 `docs/iterations/v3.0.21/PRD-v3.0.21.md`。
 - `v3.0.21` tag、Release workflow 和公开升级资产证据待发布完成后补录。
+- 2026-07-20：合并归档后的最终 `main` 完成干净 `npm ci`，重新通过 release-check、六组合 Electron 几何门禁、scan-vars 与 check-vars；可创建发布 tag。
