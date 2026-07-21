@@ -38,4 +38,4 @@
 ## Task 8 — 合并归档与在线发布
 - 目标：归档 PR #98 与 v3.0.23 PRD，创建受控 tag，并验证 Windows Release 与在线升级资产。
 - 验证：PR 为 MERGED、开发分支删除、tag 指向发布准备 commit、Release workflow 成功、公开资产与 `latest.yml` 一致。
-- 状态：in-progress（PR/PRD 已归档，最终发布前门禁通过；tag、Release workflow 与公开资产验证待执行）
+- 状态：completed（tag `v3.0.23` 指向 `e0c370b`；workflow `29853035917` 通过，latest Release 与四个公开资产已验证）

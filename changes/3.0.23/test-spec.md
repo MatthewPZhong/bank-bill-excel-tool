@@ -1,6 +1,6 @@
 # Test Spec — v3.0.23 C3 渠道预筛与 R4 资金性质校验收紧
 
-> status: release-ready-pass（最终发布前门禁通过；Release workflow 待执行；human-fund-review-pending）
+> status: released-pass（`v3.0.23` Release 与公开升级资产验证通过；human-fund-review-pending）
 > created: 2026-07-21
 > updated: 2026-07-21
 
@@ -100,4 +100,7 @@
 - `npm run verify:main-panel-alignment` 为 `6/6 PASS`；`npm run startup:measure` 平均总耗时 `941.452 ms`、平均 ready-to-show `236.08 ms`。
 - `scan:vars` 仍为 201 个 JS 文件、2323 个顶层声明；合并归档后 `check-vars` 因 HEAD/工作区无 `src/` 差异安全跳过，PR 资金变量 review 证据保持有效。
 - `npm audit --omit=dev` 为既有 7 条生产依赖告警（2 moderate、5 high），本迭代未改变生产依赖。
+- annotated tag `v3.0.23` 指向 `e0c370b3b9f270600cf21e80cd0ff5aa3233963a`；Windows Release workflow run `29853035917` 全部通过。
+- GitHub Release `v3.0.23` 为 latest、非 draft、非 prerelease；Setup、portable、blockmap 和 `latest.yml` 四个资产齐全。
+- 匿名 Range 回读确认两个 EXE 文件头均为 `MZ`；`latest.yml` 的版本、Setup 路径、大小和 SHA-512 契约通过独立复核。
 - 真实 Ach Return、Wire Return、HX 与重复 ReconID 样本人工逐笔复核仍为 follow-up，不得宣称人工验收通过。

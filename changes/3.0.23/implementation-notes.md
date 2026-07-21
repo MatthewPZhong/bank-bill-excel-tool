@@ -52,6 +52,10 @@
 | `npm run startup:measure` | 平均总耗时 `941.452 ms`，平均 ready-to-show `236.08 ms` | tag 前启动性能检查 |
 | 最终变量门禁 | `scan:vars` 仍为 201/2323；归档后 HEAD/工作区无 `src/` 差异，`check-vars` 安全跳过 | 硬节点已执行，PR 关联变量 review 继续有效 |
 | `npm audit --omit=dev` | 既有 7 条生产依赖告警（2 moderate、5 high） | v3.0.23 未改生产依赖，继续作为依赖治理 follow-up |
+| annotated tag `v3.0.23` | tag object `7a888c5`，指向发布准备 commit `e0c370b` | 版本与最终 `main` 一致 |
+| Windows Release workflow | run `29853035917` 在 `15m04s` 内完成测试、打包、资产校验、发布和发布后验证 | 正式 Windows 发布证据 |
+| GitHub Release `v3.0.23` | latest、非 draft、非 prerelease；四个资产 uploaded | 在线升级发布完成 |
+| 公开资产独立复核 | Setup/portable 匿名 Range 文件头均为 `MZ`；`latest.yml` 版本、路径、大小、SHA-512 与 SHA-256 元数据一致 | 公开下载与更新 feed 可用 |
 
 ## Remaining Unknowns
 
