@@ -118,25 +118,23 @@ function makeR2PairLockNoChangeScenario({ id = 210 } = {}) {
   };
 }
 
-// R4：五子场景之一 Charge→outbound（requireBankFundType='Charge'，setFundType='outbound'，无 gwTradeType）
-function makeR4ChargeScenario({ priority = 1 } = {}) {
+// R4：v3.0.23 固定 Ach Return 场景（严格账号/币种/金额/方向匹配）。
+function makeR4AchReturnScenario({ priority = 3 } = {}) {
   return {
     id: 401,
-    name: 'R4-Charge转outbound',
+    name: 'R4-Ach Return',
     category: 'builtin-fixed',
     priority,
     enabled: true,
     config: {
       funcCategory: 'fund-nature-check',
-      subCategory: 'charge-to-outbound',
-      priority,
-      requireBankFundType: 'Charge',
-      setFundType: 'outbound'
+      subCategory: 'ach-return',
+      priority
     }
   };
 }
 
-// R4：HX-out（gwTradeType='HX_OUTBOUND'，setFundType='HX-out'，priority 高于 charge 用于验证叠加链）
+// R4：v3.0.23 固定 HX-out 场景。
 function makeR4HxOutScenario({ priority = 3 } = {}) {
   return {
     id: 402,
@@ -204,7 +202,7 @@ test.describe('bucketScenarios 分桶', () => {
       { id: 1, category: 'builtin-fixed', config: { extractByFeature: { enabled: true } } }, // 无 funcCategory builtin-fixed → R2
       { id: 2, category: 'extract-recon-id', config: {} },                                   // C1 → R2
       { id: 3, category: 'gateway-recon-join', config: {} },                                 // C3 → R2
-      makeR4ChargeScenario(),                 // R4
+      makeR4AchReturnScenario(),              // R4
       makeR4HxOutScenario(),                  // R4
       makeR5BackfillScenario(),              // R5s2
       makeR5CleanupScenario()                // R5s3
@@ -297,9 +295,12 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
   // 构造一份覆盖 R2/R4/R5s2/R5s3 的银行 + 网关数据。
   function buildFullScenarioData() {
     const bankRows = [
-      // b1：R2 命中（BillTag 含 OFFSET）+ R4 改 FundType（FundType=Charge → outbound，reconid 与 R1 匹配）
+      // b1：R2 命中（BillTag 含 OFFSET）+ R4 严格 Ach Return 命中
       //     → 验断言 3「跨轮合并 _modifiedColumns = {Transaction Description, FundType}」
-      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A' }),
+      makeBankRow({
+        _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A',
+        MerchantId: 'M001', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0
+      }),
       // b2：R5 场景2 回填目标（FundType=FundTransfer-out，无 reconid，靠 merchant/currency/金额绝对值/同日 匹配网关）
       makeBankRow({
         _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out',
@@ -312,8 +313,8 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     ];
 
     const gwRows = [
-      // g1：reconid=RC-CHG → R1 匹配 b1 → R4 Charge→outbound 命中（无 gwTradeType 要求）
-      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      // g1：R4 按 AchReturn + 账号/币种/金额/方向严格命中 b1
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'AchReturn', merchantid: 'M001', currency: 'USD', amount: 100, orderid: 'ORD-CHG' }),
       // g2：FundTransfer-out，merchant/currency/金额绝对值/同日 与 b2 对上 → R5s2 回填 b2.ReconciliationId='RC-FT'
       makeGwRow({
         reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out',
@@ -325,7 +326,7 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
 
     const scenarios = [
       makeR2OffsetScenario(),
-      makeR4ChargeScenario(),
+      makeR4AchReturnScenario(),
       makeR5BackfillScenario(),
       makeR5CleanupScenario()
     ];
@@ -380,8 +381,8 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     const b1 = result.modifiedRows.find((r) => r._rowId === 'b1');
     assert.ok(b1, 'b1 应在 modifiedRows（既被 R2 命中又被 R4 改）');
 
-    // FundType 被 R4 从 Charge 改成 outbound（当前最新值，非 dispatcher 过时浅拷贝）
-    assert.equal(b1.FundType, 'outbound', 'b1.FundType 应为 R4 改写后的 outbound');
+    // FundType 被 R4 从 Charge 改成 Ach Return（当前最新值，非 dispatcher 过时浅拷贝）
+    assert.equal(b1.FundType, 'Ach Return', 'b1.FundType 应为 R4 改写后的 Ach Return');
     // Transaction Description 被 R2 改成 '已对账'
     assert.equal(b1['Transaction Description'], '已对账', 'b1 Transaction Description 应为 R2 写入值');
 
@@ -397,7 +398,7 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     // modifications 同时含 b1 的 R2(Transaction Description) + R4(FundType) 记录
     const b1Mods = result.modifications.filter((m) => m.rowId === 'b1');
     assert.ok(b1Mods.some((m) => m.column === 'Transaction Description' && m._round === 'R2'), 'b1 有 R2 改 Transaction Description');
-    assert.ok(b1Mods.some((m) => m.column === 'FundType' && m._round === 'R4' && m.newValue === 'outbound'), 'b1 有 R4 改 FundType→outbound');
+    assert.ok(b1Mods.some((m) => m.column === 'FundType' && m._round === 'R4' && m.newValue === 'Ach Return'), 'b1 有 R4 改 FundType→Ach Return');
   });
 
   test('断言4：R5 场景2 回填 → 对应行 _modifiedColumns 含 ReconciliationId', async () => {
@@ -436,20 +437,82 @@ test.describe('runReconciliation 全链路 R1→R5', () => {
     }
   });
 
-  test('叠加链：R4 多 handler 顺序（HX-out priority 高于 charge）对同一行二次改 FundType', async () => {
-    // b1 reconid=RC-HX，网关 g 同 reconid + TradeType=HX_OUTBOUND；FundType 初始=Charge
-    //   两个 R4 子场景：charge(priority1, requireBankFundType=Charge→outbound) + HX-out(priority3, gwTradeType=HX_OUTBOUND→HX-out)
-    //   priority 高先跑：先 HX-out（Charge→HX-out），再 charge（requireBankFundType=Charge 已不满足 → 不再改）
-    //   → 最终 FundType=HX-out，_modifiedColumns 含 FundType
-    const bankRows = [makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-HX', FundType: 'Charge' })];
-    const gwRows = [makeGwRow({ reconciliationid: 'RC-HX', TradeType: 'HX_OUTBOUND' })];
-    const scenarios = [makeR4ChargeScenario({ priority: 1 }), makeR4HxOutScenario({ priority: 3 })];
+  test('v3.0.23：R1 先选非目标网关时，R4 仍从完整 exactRows 命中后续正确网关', async () => {
+    const bankRows = [makeBankRow({
+      _rowId: 'b1', ReconciliationId: 'RC-HX', FundType: 'Charge',
+      MerchantId: 'M001', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0
+    })];
+    const gwRows = [
+      makeGwRow({ reconciliationid: 'RC-HX', TradeType: 'Inbound-VA', merchantid: 'M001', currency: 'USD', amount: 100 }),
+      makeGwRow({ reconciliationid: 'RC-HX', TradeType: 'HX_OUTBOUND', merchantid: 'M001', currency: 'USD', amount: 100 })
+    ];
+    const scenarios = [makeR4HxOutScenario({ priority: 3 })];
     const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const b1 = result.modifiedRows.find((r) => r._rowId === 'b1');
     assert.ok(b1);
-    assert.equal(b1.FundType, 'HX-out', '高优先级 HX-out 先跑改成 HX-out，charge 不再满足 Charge 条件');
+    assert.equal(result.stats.r1Matched, 1, 'R1 只配到原序第一条 Inbound-VA');
+    assert.equal(b1.FundType, 'HX-out', 'R4 不依赖 R1 matchedGwRows，后续 HX_OUTBOUND 仍命中');
     assert.ok(b1._modifiedColumns.has('FundType'));
+  });
+
+  test('v3.0.23 增补：R4 AchReturn no-op 关系传给 R5，关闭重复 ReconID 退款池漏过滤', async () => {
+    const bankRow = makeBankRow({
+      _rowId: 'r4-r5-noop',
+      ReconciliationId: 'RC-R4-R5-NOOP',
+      FundType: 'Ach Return',
+      MerchantId: 'M001',
+      Currency: 'USD',
+      'Debit Amount': 100,
+      'Credit Amount': 0
+    });
+    bankRow.ChannelOrderNo = 'PAY-R4-R5';
+    bankRow.CustomerRef = '';
+    bankRow['Extra Fee'] = '';
+
+    const gwRows = [
+      makeGwRow({
+        reconciliationid: 'RC-R4-R5-NOOP',
+        TradeType: 'Inbound-VA',
+        merchantid: 'M001',
+        currency: 'USD',
+        amount: 100
+      }),
+      makeGwRow({
+        reconciliationid: 'RC-R4-R5-NOOP',
+        TradeType: 'AchReturn',
+        merchantid: 'M001',
+        currency: 'USD',
+        amount: 100
+      })
+    ];
+    const refundRows = [{
+      '流水号': 'SN-R4-R5',
+      '状态': 'SUBMITTED',
+      '银行大账号': 'M001',
+      '币种': 'USD',
+      '退款金额': 100,
+      '银行打款流水号': 'PAY-R4-R5',
+      '附言': '',
+      '付款人名称': '',
+      '付款卡号': '',
+      '虚拟卡号': '',
+      valueDate: '2026-06-01'
+    }];
+
+    const result = await runReconciliation({
+      bankRows: [bankRow],
+      gwRows,
+      scenarios: [makeR4AchReturnScenario(), makeR5RefundEnabledScenario()],
+      refundContext: { refundOrderRows: refundRows, depositRows: [] }
+    });
+
+    assert.equal(result.stats.r1Matched, 1, 'R1 按网关原序先配到 Inbound-VA');
+    assert.equal(result.stats.r4ChangedCount, 0, '银行原值已是 Ach Return，R4 不得伪造 modification');
+    assert.deepEqual(result.modifications, [], 'no-op 不产生修改或标黄证据');
+    assert.deepEqual(result.refundBackfillRows, [], 'R4 AchReturn 具体配对行不得再次进入退款回填');
+    assert.deepEqual(result.refundUnmatchedRows, [], '被确认行保持静默排除，不进入退款人工结果');
+    assert.deepEqual(result.unmatchedRows.map((row) => row._rowId), ['r4-r5-noop'], '未改值行仍遵守主结果分区口径');
   });
 });
 
@@ -574,6 +637,77 @@ test.describe('R2 锁定但未改值的命中行', () => {
     assert.deepEqual(result.modifiedRows.map((r) => r._rowId), [], '未实际改字段 → 不进 modifiedRows');
     assert.deepEqual(result.unmatchedRows.map((r) => r._rowId), ['b1'], '未实际改字段 → 留在 unmatchedRows');
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, 1, '行数守恒');
+  });
+
+  test('v3.0.23：C3 使用专用候选池，未传时回退 gwRows', async () => {
+    const scenario = {
+      id: 223,
+      name: 'R2-C3双池隔离',
+      category: 'gateway-recon-join',
+      priority: 5,
+      enabled: true,
+      displayIndex: 1,
+      config: {
+        conditions: [],
+        reconFields: [{ seq: 1, gwField: 'currency', bankField: 'Currency' }],
+        assign: { gwField: 'reconciliationid', bankField: 'ReconciliationId', mode: 'direct' }
+      }
+    };
+    const c3OnlyGw = makeGwRow({
+      reconciliationid: 'C3-UPPER',
+      TradeType: 'HX_OUTBOUND',
+      merchantid: 'M001',
+      currency: 'USD',
+      amount: '100'
+    });
+    const bankWithDedicatedPool = makeBankRow({
+      _rowId: 'c3-dedicated',
+      ReconciliationId: '',
+      FundType: 'outbound',
+      Currency: 'USD',
+      'Debit Amount': '100',
+      'Credit Amount': '0'
+    });
+
+    const dedicated = await runReconciliation({
+      bankRows: [bankWithDedicatedPool],
+      gwRows: [],
+      c3GwRows: [c3OnlyGw],
+      scenarios: [scenario, makeR4HxOutScenario()]
+    });
+    assert.equal(bankWithDedicatedPool.ReconciliationId, 'C3-UPPER', 'C3 必须读取 c3GwRows');
+    assert.equal(dedicated.rounds.r1.matched, 0, 'R1 仍读取 exact gwRows，不得看到 C3-only 候选');
+    assert.equal(bankWithDedicatedPool.FundType, 'outbound', 'R4 仍读取 exact gwRows，不得看到 C3-only 候选');
+
+    const fallbackBank = makeBankRow({ _rowId: 'c3-fallback', ReconciliationId: '', Currency: 'USD' });
+    await runReconciliation({ bankRows: [fallbackBank], gwRows: [c3OnlyGw], scenarios: [scenario] });
+    assert.equal(fallbackBank.ReconciliationId, 'C3-UPPER', '旧调用未传 c3GwRows 时回退 gwRows');
+  });
+
+  test('v3.0.23：C3 网关侧显式 Channel 条件仍区分大小写', async () => {
+    const scenario = {
+      id: 224,
+      name: 'R2-C3内部Channel精确条件',
+      category: 'gateway-recon-join',
+      priority: 5,
+      enabled: true,
+      displayIndex: 1,
+      config: {
+        conditions: [{ side: '网关', field: 'Channel', op: '等于', value: 'Maybank' }],
+        reconFields: [{ seq: 1, gwField: 'currency', bankField: 'Currency' }],
+        assign: { gwField: 'reconciliationid', bankField: 'ReconciliationId', mode: 'direct' }
+      }
+    };
+    const bankRow = makeBankRow({ _rowId: 'c3-condition', ReconciliationId: '', Currency: 'USD' });
+    const result = await runReconciliation({
+      bankRows: [bankRow],
+      gwRows: [],
+      c3GwRows: [{ ...makeGwRow({ reconciliationid: 'SHOULD-NOT-HIT', currency: 'USD' }), Channel: 'MAYBANK' }],
+      scenarios: [scenario]
+    });
+
+    assert.equal(bankRow.ReconciliationId, '', '预筛放宽不能改变 C3 内部显式条件');
+    assert.equal(result.modifications.length, 0);
   });
 });
 
@@ -873,7 +1007,10 @@ test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）
     // b2：R5s2 网关回填（reconSourceMid:false 取消路）；Channel/地区 → JPM/US
     // b4：完全不命中 → 不进 channelRegionHits
     const bankRows = [
-      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'US' }),
+      makeBankRow({
+        _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A', Channel: 'JPM', 地区: 'US',
+        MerchantId: 'M001', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0
+      }),
       makeBankRow({
         _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out',
         MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10',
@@ -882,10 +1019,10 @@ test.describe('runReconciliation stats.channelRegionHits 端到端（需求1a）
       makeBankRow({ _rowId: 'b4', ReconciliationId: '', FundType: 'Settlement', BillTag: 'NORMAL', Channel: 'JPM', 地区: 'US' })
     ];
     const gwRows = [
-      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'AchReturn', merchantid: 'M001', currency: 'USD', amount: 100, orderid: 'ORD-CHG' }),
       makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' })
     ];
-    const scenarios = [makeR2OffsetScenario(), makeR4ChargeScenario(), makeR5BackfillScenario()];
+    const scenarios = [makeR2OffsetScenario(), makeR4AchReturnScenario(), makeR5BackfillScenario()];
     const result = await runReconciliation({ bankRows, gwRows, scenarios });
 
     const hits = result.stats.channelRegionHits;
@@ -954,13 +1091,16 @@ test.describe('v3.0.7 需求6：gwRows 全程只读不变量（删 structuredClo
 
   test('run 前后 gwRows 逐字节不变（structuredClone 快照 deepStrictEqual）', async () => {
     const bankRows = [
-      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A' }),
+      makeBankRow({
+        _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A',
+        MerchantId: 'M001', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0
+      }),
       makeBankRow({ _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out', MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10' }),
       makeBankRow({ _rowId: 'b3', ReconciliationId: 'RC-INB', FundType: 'Refund', MerchantId: 'M003' }),
       makeBankRow({ _rowId: 'b-dbs', Channel: 'DBS', ReconciliationId: '', MerchantId: 'M-DBS', Currency: 'USD', 'Debit Amount': 100, FundType: 'Charge' })
     ];
     const gwRows = [
-      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'AchReturn', merchantid: 'M001', currency: 'USD', amount: 100, orderid: 'ORD-CHG' }),
       makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' }),
       makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
       makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
@@ -969,7 +1109,7 @@ test.describe('v3.0.7 需求6：gwRows 全程只读不变量（删 structuredClo
     const scenarios = [
       makeR2OffsetScenario(),
       makeDbsChargeScenario(),
-      makeR4ChargeScenario(),
+      makeR4AchReturnScenario(),
       makeR5BackfillScenario(),
       makeR5CleanupScenario()
     ];
@@ -1005,13 +1145,16 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
   // 构造能驱动 R1/R2/R3.5/R4/R5s2/R5s3 全轮真命中的输入（与需求6 gwRows 只读套件同源数据）。
   function buildFullRoundInput() {
     const bankRows = [
-      makeBankRow({ _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A' }),
+      makeBankRow({
+        _rowId: 'b1', ReconciliationId: 'RC-CHG', FundType: 'Charge', BillTag: 'OFFSET-A',
+        MerchantId: 'M001', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0
+      }),
       makeBankRow({ _rowId: 'b2', ReconciliationId: '', FundType: 'FundTransfer-out', MerchantId: 'M002', Currency: 'USD', 'Debit Amount': 100, 'Credit Amount': 0, BillDate: '2026-06-10' }),
       makeBankRow({ _rowId: 'b3', ReconciliationId: 'RC-INB', FundType: 'Refund', MerchantId: 'M003' }),
       makeBankRow({ _rowId: 'b-dbs', Channel: 'DBS', ReconciliationId: '', MerchantId: 'M-DBS', Currency: 'USD', 'Debit Amount': 100, FundType: 'Charge' })
     ];
     const gwRows = [
-      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'Charge', orderid: 'ORD-CHG' }),
+      makeGwRow({ reconciliationid: 'RC-CHG', TradeType: 'AchReturn', merchantid: 'M001', currency: 'USD', amount: 100, orderid: 'ORD-CHG' }),
       makeGwRow({ reconciliationid: 'RC-FT', TradeType: 'FundTransfer-out', merchantid: 'M002', currency: 'USD', amount: -100, Billdate: '2026-06-10' }),
       makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
       makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
@@ -1020,7 +1163,7 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
     const scenarios = [
       makeR2OffsetScenario(),
       makeDbsChargeScenario(),
-      makeR4ChargeScenario(),
+      makeR4AchReturnScenario(),
       makeR5BackfillScenario(),
       makeR5CleanupScenario()
     ];

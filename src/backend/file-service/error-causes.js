@@ -28,8 +28,10 @@ const CAUSE_MAP = Object.freeze({
   'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
   'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
 
-  // v3.0.10 需求1：R4 资金性质校验方向守卫（🔴 资金红线）—— 命中网关但银行行借贷方向不符
-  'r4-fund-direction-mismatch': '资金性质命中但银行行借贷方向不符（应为0的金额列非0），已跳过该行资金性质改写，请人工核对方向',
+  // v3.0.23：R4 四类资金性质严格 1:1 匹配（🔴 资金红线）
+  'r4-fund-direction-mismatch': '同对账ID存在目标网关行，但银行借贷方向金额非0或格式非法，已跳过资金性质改写，请人工核对方向',
+  'r4-fund-match-mismatch': '同对账ID存在银行行，但账号、币种、金额、手续费或候选消费状态不满足完整匹配条件',
+  'r4-fund-multi-candidate': '同一网关行匹配到多条完整银行候选，已按银行账单原始顺序取第一条，请人工核对重复数据',
 
   // v3.0.21：DBS-Charge step2 outbound 方向守卫（🔴 资金红线）
   'dbs-charge-fund-direction-mismatch': 'DBS-Charge 同对账ID存在白名单网关候选，但银行行 Credit Amount 非0，借贷方向不符，已跳过步骤2资金性质改写，请人工核对方向',

@@ -1,192 +1,273 @@
-// v2.1.16-beta.2：R4 资金性质校验引擎（🔴 资金红线）
-// TECH_DESIGN §5.2 / §10（五子场景判定表）/ §4（跨表字段映射）；PRD §五 / 需求5 R5.1~R5.4
-//
-// 性质：5 轮对账编排器的第 4 轮，且是**唯一允许二次改写银行 FundType 的轮次**。
-//       按 reconciliationid 关联「R1 匹配成功的网关行 × 全量银行行」，跑可插拔 handler 改写 FundType。
-//       改错直接改资金性质 —— 五子场景判定条件 / 叠加链顺序须人工复核（见结尾「关联功能 review」）。
-//
-// ⚠️ 跨表字段名不同，必须显式映射，绝不假设同名（TECH_DESIGN §4）：
-//   - 网关行（matchedGwRows，来自 R1 产出 = 网关行原引用，真实表头小写）：
-//       对账ID = row.reconciliationid（小写）；交易类型 = row.TradeType
-//   - 银行行（bankRows，全量，R3 透传）：
-//       对账ID = row.ReconciliationId（驼峰）；资金性质 = row.FundType；行唯一键 = row._rowId（上游注入）
-//
-// 关联口径（TECH_DESIGN §11 Q6 默认 + 本任务点3 确认）：
-//   - R4 **重新**按 reconciliationid 关联，不直接复用 R1 的 pairs（R1 只给 matchedGwRows）。
-//   - reconciliationid === ReconciliationId，大小写敏感（沿用 normalizeCellValue 仅 trim，不改大小写）。
-//   - 空键（reconid 为空）→ 跳过不参与关联。
-//
-// 改写规则（与 C1/C3 一致）：
-//   - 旧值 !== 目标值 才改、才 record（no-op 不产 modification、不标黄）。
-//   - record 后**不 break** —— 允许后续 handler 在已改值基础上再次改写（叠加链，R4 唯一）。
-//
-// 可插拔 handler（判定全部 config 化，存 seed config_json）：
-//   config = { subCategory, gwTradeType?, requireBankFundType?, setFundType, requireBankZeroField? }
-//     - gwTradeType        在 → 需 normalizeCellValue(gw.TradeType) === gwTradeType，否则不命中
-//     - requireBankFundType 在 → 需 normalizeCellValue(bank.FundType) === requireBankFundType，否则不命中
-//     - 两者都不在 → 仅凭「有 R1 匹配（即进入本关联）」即命中（如 Charge→outbound 仅看 FundType=Charge）
-//   命中 → 返回 setFundType；不命中 → 返回 null。
-//
-// v3.0.10 需求1：银行行借贷方向守卫（🔴 资金红线）
-//   - config.requireBankZeroField（'Debit Amount' | 'Credit Amount'）：命中本子场景后再判一层方向——
-//     该「应为0」金额列若实际非0（方向录反）→ 不改写 + 记 warning（B 决策：warning 进主错误报告文件）。
-//   - 口径 (parseNumber(x) || 0) === 0：空/garbage 当 0 = 满足、不拦截（与全仓口径一致）。
-//   - 🔴 守卫放主循环、**不放 applyHandler**：applyHandler 是纯函数无 warningCollector 权，且 return null 无法
-//     区分「gwTradeType 没匹配（不该 warn）」与「命中但方向不符（才该 warn）」；故 applyHandler 不读金额、
-//     职责不变，方向守卫由主循环在 applyHandler 返回非空（确实命中）之后执行。
-//
-// 子场景（v3.0.6 起 4 个）：ach-return / wire-return / hx-out / hx-in，同桶逐条全转。
-//   ⚠️ 原 charge-outbound 子场景（全渠道 Charge→outbound + v3.0.4 块 G「仅转 Debit Amount 最大行」边界口径）
-//      已于 v3.0.6 迁出至 R3.5 DBS-Charge（src/main-process/scenario-engines/dbs-charge-fund-check.js），
-//      仅对 Channel=DBS 生效；本引擎不再有 charge-outbound 特殊分支，退化为纯叠加链（四子场景行为零变化）。
+'use strict';
+
+// v3.0.23：R4 四类资金性质严格匹配。
+// 网关原序优先；银行原序次之；四类场景共享银行行 1:1 消费集合。
 
 const {
-  normalizeCellValue,
+  ensureRowId,
   makeModificationCollector,
   makeWarningCollector,
-  parseNumber // v3.0.10 需求1：方向守卫判「应为0」金额列用（与全仓 (parseNumber(x)||0)===0 口径一致）
+  normalizeCellValue
 } = require('./engine-utils');
+const {
+  canonicalizeDecimal,
+  absoluteDecimal,
+  addCanonicalDecimals
+} = require('../financial-decimal');
 
-// R4 跨表字段名常量（显式映射，绝不假设同名 —— TECH_DESIGN §4）
-const GW_RECON_ID_FIELD = 'reconciliationid'; // 网关行：真实表头小写
-const GW_TRADE_TYPE_FIELD = 'TradeType';       // 网关行：交易类型
-const BANK_RECON_ID_FIELD = 'ReconciliationId'; // 银行行：驼峰
-const BANK_FUND_TYPE_FIELD = 'FundType';        // 银行行：资金性质（🔴 改写目标列）
+const GW_RECON_ID_FIELD = 'reconciliationid';
+const GW_TRADE_TYPE_FIELD = 'TradeType';
+const GW_MERCHANT_ID_FIELD = 'merchantid';
+const GW_CURRENCY_FIELD = 'currency';
+const GW_AMOUNT_FIELD = 'amount';
+const BANK_RECON_ID_FIELD = 'ReconciliationId';
+const BANK_MERCHANT_ID_FIELD = 'MerchantId';
+const BANK_CURRENCY_FIELD = 'Currency';
+const BANK_FUND_TYPE_FIELD = 'FundType';
+const BANK_EXTRA_FEE_FIELD = 'Extra Fee';
 
-/**
- * 可插拔 handler：依 config 判定一条「网关行 × 银行行」是否命中本子场景。
- *
- * @param {Object} gwRow   网关行（含 reconciliationid / TradeType）
- * @param {Object} bankRow 银行行（含 FundType）
- * @param {{ subCategory?:string, gwTradeType?:string, requireBankFundType?:string, setFundType:string }} config
- * @returns {string|null} 命中 → config.setFundType（要改成的 FundType）；不命中 → null
- */
-function applyHandler(gwRow, bankRow, config) {
-  if (!config) return null;
+const R4_RULES_BY_SUBCATEGORY = Object.freeze({
+  'ach-return': Object.freeze({
+    subCategory: 'ach-return',
+    tradeType: 'AchReturn',
+    targetFundType: 'Ach Return',
+    amountField: 'Debit Amount',
+    oppositeAmountField: 'Credit Amount'
+  }),
+  'wire-return': Object.freeze({
+    subCategory: 'wire-return',
+    tradeType: 'WireReturn',
+    targetFundType: 'Wire Return',
+    amountField: 'Credit Amount',
+    oppositeAmountField: 'Debit Amount'
+  }),
+  'hx-out': Object.freeze({
+    subCategory: 'hx-out',
+    tradeType: 'HX_OUTBOUND',
+    targetFundType: 'HX-out',
+    amountField: 'Debit Amount',
+    oppositeAmountField: 'Credit Amount'
+  }),
+  'hx-in': Object.freeze({
+    subCategory: 'hx-in',
+    tradeType: 'HX_INBOUND',
+    targetFundType: 'HX-in',
+    amountField: 'Credit Amount',
+    oppositeAmountField: 'Debit Amount'
+  })
+});
 
-  // 条件 1：网关 TradeType 过滤（config.gwTradeType 存在才校验）
-  if (config.gwTradeType !== undefined && config.gwTradeType !== null && config.gwTradeType !== '') {
-    if (normalizeCellValue(gwRow && gwRow[GW_TRADE_TYPE_FIELD]) !== config.gwTradeType) {
-      return null;
-    }
-  }
+function addReason(reasons, reason) {
+  if (reason) reasons.add(reason);
+}
 
-  // 条件 2：银行 FundType（改写前）过滤（config.requireBankFundType 存在才校验）
-  if (
-    config.requireBankFundType !== undefined &&
-    config.requireBankFundType !== null &&
-    config.requireBankFundType !== ''
-  ) {
-    if (normalizeCellValue(bankRow && bankRow[BANK_FUND_TYPE_FIELD]) !== config.requireBankFundType) {
-      return null;
-    }
-  }
-
-  // 命中 → 返回要改成的 FundType（叠加链由主循环驱动）
-  return config.setFundType;
+function canonicalAmount(value, label, options = {}) {
+  return canonicalizeDecimal(value, { label, ...options });
 }
 
 /**
- * R4：资金性质校验（🔴）。按 reconciliationid 关联 matchedGwRows × 全量 bankRows，
- * 跑可插拔 handler（按 priority 降序、同 priority 保持数组原序）改写银行 FundType，允许多次改。
- *
- * @param {Array<Object>} matchedGwRows R1 产出：reconid 1v1 命中的网关行（原引用，含 reconciliationid / TradeType）
- * @param {Array<Object>} bankRows      R3 透传：全量银行行（原引用，含 ReconciliationId / FundType / _rowId）
- * @param {Array<{ priority?:number, config:{ subCategory?:string, gwTradeType?:string, requireBankFundType?:string, setFundType:string } }>} r4Scenarios
- *        R4 五子场景配置；引擎内按 priority 降序排序后执行（同 priority 保持数组原序，deterministic）
- * @returns {{ modifications: Array<{rowId,column,oldValue,newValue}>, warnings: Array }}
+ * 评估一条固定类型网关行与银行行是否完整匹配。错误被折叠为可审计原因，不抛出中断整轮。
  */
-function runRound4FundNatureCheck(matchedGwRows, bankRows, r4Scenarios) {
-  const warningCollector = makeWarningCollector('R4', '资金性质校验');
-  const modCollector = makeModificationCollector();
+function evaluateR4Candidate(gwRow, bankRow, rule) {
+  const reasons = new Set();
+  let directionMismatch = false;
 
-  // ===== Step 0：空入参防御（任一为空/非数组 → 无可改写，返回空 modifications）=====
-  const safeGwRows = Array.isArray(matchedGwRows) ? matchedGwRows : [];
-  const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
-  const safeScenarios = Array.isArray(r4Scenarios) ? r4Scenarios : [];
-  if (safeGwRows.length === 0 || safeBankRows.length === 0 || safeScenarios.length === 0) {
-    return {
-      modifications: modCollector.listModifications(),
-      warnings: warningCollector.list()
-    };
-  }
+  const gwReconId = normalizeCellValue(gwRow && gwRow[GW_RECON_ID_FIELD]);
+  const bankReconId = normalizeCellValue(bankRow && bankRow[BANK_RECON_ID_FIELD]);
+  if (gwReconId === '' || bankReconId === '') addReason(reasons, '对账ID为空');
+  else if (gwReconId !== bankReconId) addReason(reasons, '对账ID不一致');
 
-  // ===== Step 1：场景排序 —— priority 降序，同 priority 保持数组原序（稳定排序，deterministic）=====
-  // 用 (originalIndex) 作为同 priority 的次序键，避免 Array.sort 在部分引擎下不稳定的问题。
-  const scenariosSorted = safeScenarios
-    .map((scenario, originalIndex) => ({ scenario, originalIndex }))
-    .filter((x) => x.scenario && x.scenario.config) // 无 config 的条目跳过（防御）
-    .sort((a, b) => {
-      const pa = Number.isFinite(a.scenario.priority) ? a.scenario.priority : 0;
-      const pb = Number.isFinite(b.scenario.priority) ? b.scenario.priority : 0;
-      if (pb !== pa) return pb - pa;        // priority 降序（高优先级先跑）
-      return a.originalIndex - b.originalIndex; // 同 priority → 数组原序
-    })
-    .map((x) => x.scenario);
+  const gwMerchantId = normalizeCellValue(gwRow && gwRow[GW_MERCHANT_ID_FIELD]);
+  const bankMerchantId = normalizeCellValue(bankRow && bankRow[BANK_MERCHANT_ID_FIELD]);
+  if (gwMerchantId === '' || bankMerchantId === '') addReason(reasons, '银行大账号为空');
+  else if (gwMerchantId !== bankMerchantId) addReason(reasons, '银行大账号不一致');
 
-  // ===== Step 2：建银行索引 bankByReconId: Map<key, bankRow[]> =====
-  //   - key = normalizeCellValue(bank.ReconciliationId)（仅 trim，大小写敏感）
-  //   - key === '' 的银行行不入索引（空 reconid 不参与关联）
-  //   - 同 key 多条银行行 → 同一桶按原序追加（一个 reconid 关联多条银行行时逐条都跑 handler）
-  const bankByReconId = new Map();
-  for (const bankRow of safeBankRows) {
-    const key = normalizeCellValue(bankRow && bankRow[BANK_RECON_ID_FIELD]);
-    if (key === '') continue;
-    if (!bankByReconId.has(key)) bankByReconId.set(key, []);
-    bankByReconId.get(key).push(bankRow);
-  }
+  const gwCurrency = normalizeCellValue(gwRow && gwRow[GW_CURRENCY_FIELD]);
+  const bankCurrency = normalizeCellValue(bankRow && bankRow[BANK_CURRENCY_FIELD]);
+  if (gwCurrency === '' || bankCurrency === '') addReason(reasons, '币种为空');
+  else if (gwCurrency !== bankCurrency) addReason(reasons, '币种不一致');
 
-  // ===== Step 3：按 matchedGwRows 原序关联并改写（deterministic）=====
-  for (const gwRow of safeGwRows) {
-    const key = normalizeCellValue(gwRow && gwRow[GW_RECON_ID_FIELD]);
-    if (key === '') continue; // 网关行空 reconid → 不参与关联
-
-    const relatedBankRows = bankByReconId.get(key) || [];
-    if (relatedBankRows.length === 0) continue; // 该网关行在银行侧无对应 → 跳过无改动
-
-    for (const bankRow of relatedBankRows) {
-      // 同一银行行逐 handler 跑：允许多次改 FundType（叠加链），故**不 break**
-      for (const scenario of scenariosSorted) {
-        const decision = applyHandler(gwRow, bankRow, scenario.config); // 命中 → 目标 FundType；否则 null
-        if (decision === null || decision === undefined) continue; // gwTradeType 没匹配 → 静默不 warn（R-2）
-
-        // ===== v3.0.10 需求1：银行行借贷方向守卫（🔴 资金红线）=====
-        //   命中本子场景后，若「应为0」的金额列实际非0（方向录反）→ 不改写 + 记 warning（B 决策）。
-        //   口径 (parseNumber(x) || 0) === 0：空/garbage 当 0 = 满足、不拦截（与全仓一致）。
-        //   守卫放主循环不放 applyHandler：此处才有「确实命中」事实 + warningCollector 在手，且能区分「没命中」。
-        const zf = scenario.config.requireBankZeroField; // 'Debit Amount' | 'Credit Amount' | undefined
-        if (zf === 'Debit Amount' || zf === 'Credit Amount') {
-          if ((parseNumber(bankRow[zf]) || 0) !== 0) {
-            warningCollector.push({
-              rowId: bankRow._rowId,
-              code: 'r4-fund-direction-mismatch',
-              message: `银行行(${bankRow._rowId}) 命中资金性质「${decision}」(${scenario.config.subCategory}) 但 ${zf} 非0，方向不符，跳过改写`
-            });
-            continue; // 不改写；叠加链下每 handler 各判各的（本 handler 跳过，不影响其它 handler）
-          }
-        }
-
-        const oldValue = normalizeCellValue(bankRow[BANK_FUND_TYPE_FIELD]);
-        // 旧 !== 新 才改、才 record（no-op 不产 modification、不标黄；与 C1/C3 一致）
-        if (oldValue !== decision) {
-          bankRow[BANK_FUND_TYPE_FIELD] = decision; // 🔴 原地改写银行行 FundType
-          modCollector.record(bankRow._rowId, BANK_FUND_TYPE_FIELD, oldValue, decision);
-        }
-        // 不 break —— 后续 handler 可在已改值基础上再改（R4 唯一允许二次改 FundType）
+  const oppositeRaw = normalizeCellValue(bankRow && bankRow[rule.oppositeAmountField]);
+  if (oppositeRaw !== '') {
+    try {
+      const opposite = canonicalAmount(oppositeRaw, rule.oppositeAmountField);
+      if (opposite !== '0') {
+        directionMismatch = true;
+        addReason(reasons, `${rule.oppositeAmountField}非0`);
       }
+    } catch (_error) {
+      directionMismatch = true;
+      addReason(reasons, `${rule.oppositeAmountField}不是合法金额`);
     }
   }
 
-  // ===== Step 4：返回（本引擎只取 modifications，不喂 first-match-wins 锁集）=====
+  let baseAmount = null;
+  try {
+    baseAmount = absoluteDecimal(bankRow && bankRow[rule.amountField], { label: rule.amountField });
+    if (baseAmount === '0') addReason(reasons, `${rule.amountField}为0`);
+  } catch (_error) {
+    addReason(reasons, `${rule.amountField}为空或不是合法金额`);
+  }
+
+  let extraFee = null;
+  try {
+    extraFee = canonicalAmount(bankRow && bankRow[BANK_EXTRA_FEE_FIELD], BANK_EXTRA_FEE_FIELD, { emptyAsZero: true });
+  } catch (_error) {
+    addReason(reasons, `${BANK_EXTRA_FEE_FIELD}不是合法金额`);
+  }
+
+  let gwAmount = null;
+  try {
+    gwAmount = canonicalAmount(gwRow && gwRow[GW_AMOUNT_FIELD], '网关 amount');
+  } catch (_error) {
+    addReason(reasons, '网关 amount 为空或不是合法金额');
+  }
+
+  if (baseAmount !== null && baseAmount !== '0' && extraFee !== null && gwAmount !== null) {
+    try {
+      const bankTotal = addCanonicalDecimals(baseAmount, extraFee, {
+        leftLabel: rule.amountField,
+        rightLabel: BANK_EXTRA_FEE_FIELD,
+        label: '银行方向金额与手续费合计'
+      });
+      if (bankTotal !== gwAmount) addReason(reasons, '金额与手续费合计不一致');
+    } catch (_error) {
+      addReason(reasons, '金额与手续费合计无法计算');
+    }
+  }
+
+  return {
+    matched: reasons.size === 0,
+    directionMismatch,
+    reasons: Array.from(reasons)
+  };
+}
+
+function enabledR4Rules(r4Scenarios) {
+  const enabled = new Map();
+  for (const scenario of Array.isArray(r4Scenarios) ? r4Scenarios : []) {
+    const subCategory = normalizeCellValue(scenario && scenario.config && scenario.config.subCategory);
+    const rule = R4_RULES_BY_SUBCATEGORY[subCategory];
+    if (rule) enabled.set(rule.tradeType, rule);
+  }
+  return enabled;
+}
+
+/**
+ * @param {Array<Object>} gwRows 本次运行的完整 exactRows，保持链接表 id ASC 原序
+ * @param {Array<Object>} bankRows 全量银行行，保持 Excel 原序
+ * @param {Array<Object>} r4Scenarios 已启用 R4 场景
+ * @returns {{ modifications:Array, warnings:Array, matchedPairs:Array }}
+ */
+function runRound4FundNatureCheck(gwRows, bankRows, r4Scenarios) {
+  const warningCollector = makeWarningCollector('R4', '资金性质校验');
+  const modCollector = makeModificationCollector();
+  const matchedPairs = [];
+  const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
+  const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
+  const rulesByTradeType = enabledR4Rules(r4Scenarios);
+
+  if (safeGwRows.length === 0 || safeBankRows.length === 0 || rulesByTradeType.size === 0) {
+    return {
+      modifications: modCollector.listModifications(),
+      warnings: warningCollector.list(),
+      matchedPairs
+    };
+  }
+
+  const bankByReconId = new Map();
+  safeBankRows.forEach((bankRow, index) => {
+    ensureRowId(bankRow, index);
+    const reconId = normalizeCellValue(bankRow && bankRow[BANK_RECON_ID_FIELD]);
+    if (reconId === '') return;
+    if (!bankByReconId.has(reconId)) bankByReconId.set(reconId, []);
+    bankByReconId.get(reconId).push(bankRow);
+  });
+
+  const consumedBankRows = new Set();
+
+  for (const gwRow of safeGwRows) {
+    const tradeType = normalizeCellValue(gwRow && gwRow[GW_TRADE_TYPE_FIELD]);
+    const rule = rulesByTradeType.get(tradeType);
+    if (!rule) continue;
+
+    const reconId = normalizeCellValue(gwRow && gwRow[GW_RECON_ID_FIELD]);
+    if (reconId === '') continue;
+    const relatedBankRows = bankByReconId.get(reconId) || [];
+    if (relatedBankRows.length === 0) continue;
+
+    const unconsumedRows = relatedBankRows.filter((row) => !consumedBankRows.has(row));
+    const evaluated = unconsumedRows.map((bankRow) => ({
+      bankRow,
+      result: evaluateR4Candidate(gwRow, bankRow, rule)
+    }));
+    const matched = evaluated.filter((item) => item.result.matched);
+
+    if (matched.length === 0) {
+      const reasons = new Set();
+      if (unconsumedRows.length === 0) reasons.add('同对账ID候选已被前序网关消费');
+      for (const item of evaluated) {
+        for (const reason of item.result.reasons) reasons.add(reason);
+      }
+      const linkedRow = unconsumedRows[0] || relatedBankRows[0];
+      warningCollector.push({
+        rowId: linkedRow ? linkedRow._rowId : null,
+        code: 'r4-fund-match-mismatch',
+        reconId,
+        message: `R4「${rule.targetFundType}」对账ID「${reconId}」存在银行行，但没有未消费的完整候选（${Array.from(reasons).join('、') || '候选不完整'}）`
+      });
+
+      const directionItem = evaluated.find((item) => item.result.directionMismatch);
+      if (directionItem) {
+        warningCollector.push({
+          rowId: directionItem.bankRow._rowId,
+          code: 'r4-fund-direction-mismatch',
+          reconId,
+          message: `R4「${rule.targetFundType}」对账ID「${reconId}」的 ${rule.oppositeAmountField} 非0或不是合法金额，方向不符，跳过改写`
+        });
+      }
+      continue;
+    }
+
+    const chosen = matched[0].bankRow;
+    if (matched.length > 1) {
+      warningCollector.push({
+        rowId: chosen._rowId,
+        code: 'r4-fund-multi-candidate',
+        reconId,
+        message: `R4「${rule.targetFundType}」对账ID「${reconId}」匹配到 ${matched.length} 条完整银行候选，按银行原序取第一条`
+      });
+    }
+
+    consumedBankRows.add(chosen);
+    const oldValue = normalizeCellValue(chosen[BANK_FUND_TYPE_FIELD]);
+    const changed = oldValue !== rule.targetFundType;
+    // v3.0.23 增补：匹配关系与字段修改分离。no-op 也必须向 R5 传递具体 AchReturn 配对，
+    // 但不得伪造 modification 或标黄；bankRow/gwRow 保留原对象身份，禁止按 ReconID 扩散。
+    matchedPairs.push({
+      gwRow,
+      bankRow: chosen,
+      subCategory: rule.subCategory,
+      targetFundType: rule.targetFundType,
+      changed
+    });
+    if (changed) {
+      chosen[BANK_FUND_TYPE_FIELD] = rule.targetFundType;
+      modCollector.record(chosen._rowId, BANK_FUND_TYPE_FIELD, oldValue, rule.targetFundType);
+    }
+  }
+
   return {
     modifications: modCollector.listModifications(),
-    warnings: warningCollector.list()
+    warnings: warningCollector.list(),
+    matchedPairs
   };
 }
 
 module.exports = {
   runRound4FundNatureCheck,
-  applyHandler,
+  evaluateR4Candidate,
+  R4_RULES_BY_SUBCATEGORY,
   GW_RECON_ID_FIELD,
   GW_TRADE_TYPE_FIELD,
   BANK_RECON_ID_FIELD,

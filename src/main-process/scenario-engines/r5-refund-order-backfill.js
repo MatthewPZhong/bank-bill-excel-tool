@@ -21,6 +21,8 @@
 //   需求2（网关前置过滤）：银行 Ach Return 行入池前先与网关单做 reconid 匹配，命中网关 reconid 的静默移出退款池。
 // v3.0.21 收窄：前置过滤只认 R1 已建立的 1v1 pair，且 pair.gwRow.TradeType trim 后必须严格等于 AchReturn；
 //   只移出该 pair.bankRow 对象，不按 reconid 扩散到同 ID 的其它银行行。未传 r1Pairs 时不做前置过滤。
+// v3.0.23 增补：同时接收 R4 严格匹配返回的 r4MatchedPairs（包含 FundType 同值 no-op），只移出
+//   subCategory=ach-return 的具体 pair.bankRow；不按 _rowId/ReconID 扩散，也不把 Wire/HX 关系混入退款过滤。
 //   需求3.1（sheet1 标黄）：各 matcher 命中时附 `_matchedColumns`（实际参与比对的候选列，诚实列出），
 //     buildBackfillRow 单点收口过滤为「∈ sheet1 列」非空才挂 row._matchedColumns，供 writer 标黄。
 //   需求3.2（sheet2 改造）：报错/提示并入「报错/提示信息」前缀（【报错】/【提示】，单点加在 buildUnmatchedBankRow）；
@@ -33,7 +35,7 @@
 // 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。4 条二跳路径共用入金表双 Map 索引(depIndex)。
 //
 // 纯函数：入参 rows 数组，不读 DB/session（由 main.js 注入）；与场景2/3 独立 usedBankRowId，不串池。
-//   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={ r1Pairs, ... })
+//   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={ r1Pairs, r4MatchedPairs, ... })
 //   返回 { backfillRows, unmatchedRows, modifications:[], warnings, hitDepositBizIds }
 //     backfillRows  —— sheet1 回填模板行（v3.0.10：33 列 = 固定 6 列含「命中类型」+ 银行 12 字段 + 中台 15 字段）
 //     unmatchedRows —— sheet2 行（含「结果类型」= 报错-人工介入 / 未匹配-提示 + 信息列）
@@ -866,16 +868,27 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     achReturnPairedBankRows.add(pair.bankRow);
   }
 
+  // v3.0.23 增补：R4 的成功消费关系独立于 modifications，故 FundType 原本已是 Ach Return 的
+  // no-op 也能被识别。仍使用 bankRow 对象身份，只排实际 R4 配对行，不连带同 ReconID 其它银行行。
+  const safeR4MatchedPairs = Array.isArray(options.r4MatchedPairs) ? options.r4MatchedPairs : [];
+  const r4AchReturnMatchedBankRows = new Set();
+  for (const pair of safeR4MatchedPairs) {
+    if (!pair || !pair.bankRow) continue;
+    if (normalizeCellValue(pair.subCategory) !== 'ach-return') continue;
+    r4AchReturnMatchedBankRows.add(pair.bankRow);
+  }
+
   // 1) 数据筛选（§5.1.2）
   //   refund：状态 === SUBMITTED
   const refundPool = safeRefundRows.filter(
     (r) => normalizeCellValue(r[M.filter.roStatusField]) === M.filter.roSubmitted
   );
-  //   bank：FundType === Ach Return 且未被 R4 改写 FundType；且未被 R1 的 AchReturn pair 具体选中
+  //   bank：FundType === Ach Return，且未被既有改值守卫、R1 AchReturn pair 或 R4 AchReturn pair 精确排除
   const bankPool = safeBankRows.filter((b) => {
     if (normalizeCellValue(b[M.filter.bankFundType]) !== M.filter.achReturn) return false; // 道1：FundType=Ach Return
     if (isFundTypeChanged(b._rowId)) return false;                                      // 道2：未被 R4 改写 FundType
     if (achReturnPairedBankRows.has(b)) return false;                                   // 道3：R1 AchReturn pair 的具体 bankRow
+    if (r4AchReturnMatchedBankRows.has(b)) return false;                                 // 道4：R4 AchReturn pair（含 no-op）的具体 bankRow
     return true;
   });
 

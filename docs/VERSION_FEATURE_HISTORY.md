@@ -9,6 +9,32 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.0.23（2026-07-21）
+
+v3.0.23 修复 C3 因网关 Channel 英文大小写不同而在场景执行前丢失候选的问题，并把四类 R4 资金性质判断从“R1 对账 ID 配对后整桶改写”收紧为完整条件下的全局严格 1:1。
+
+### C3 专用候选池
+
+- 一次数据库读取同时生成原大小写敏感 `exactRows` 和 C3 专用 `c3Rows`；相同行只解析一次并共享对象，不重复查询或深拷百万级数据。
+- `c3Rows` 对银行和网关 Channel 先 trim，再按 SQLite `NOCASE` 忽略英文大小写精确匹配。`Maybank` 可候选 `MAYBANK`，但不能候选 `MAYBANK2`。
+- 只有 C3 使用放宽池；R1、DBS-Charge、R4、R5 继续使用 `exactRows`。C3 场景内部显式 Channel 条件和对账字段仍区分大小写。
+
+### R4 四类严格 1:1
+
+- Ach Return、Wire Return、HX-out、HX-in 直接读取完整 `exactRows`，按固定 TradeType、ReconID、MerchantId、Currency、方向金额和 Extra Fee 执行完整匹配，不再受 R1 仅按对账 ID 预选候选的限制。
+- 金额使用字符串十进制精确计算 `abs(主金额) + signed Extra Fee`；主金额必须合法且非 0，Extra Fee 空值按 0，相反方向空值按 0，非 0 或非法文本阻断。
+- 四类共享银行消费集合。网关链接表原序优先，多个完整银行候选按 Excel 原序取第一条；重复候选、完整条件不符和方向异常均进入现有主错误报告。
+- 匹配成功但 FundType 已是目标值时仍消费关系，不产生修改或标黄；没有同 ReconID 银行行时保持静默。
+- R4 额外保留全部成功匹配关系，包括 FundType 同值的 no-op。退款引擎会精确排除其中 `ach-return` 实际配对的银行对象，避免该行再次参与退款匹配；不按 ReconID 或行号扩散到其它银行行。
+- 匹配关系和字段修改保持分离：no-op 不会伪造 modification、标黄或改值统计，Wire Return、HX-out、HX-in 关系也不会触发 Ach Return 退款过滤。
+
+### 范围与验收
+
+- R1 及其既有退款过滤、DBS-Charge、R5 退款匹配规则、Excel 输出和高亮结构不变；数据库只幂等刷新四个内置场景的说明文案。
+- HX 暂无真实样本；真实 Ach Return、Wire Return 和冲突候选逐笔资金复核仍为人工门禁，自动测试不得表述为业务验收完成。
+
+---
+
 ## v3.0.22（2026-07-20）
 
 v3.0.22 把“存档中心”加入设置页，为 11 个主模块保存当前启动周期内可证明来源的输入文件和第一次成功结果，同时保持业务处理与存档失败互相隔离。

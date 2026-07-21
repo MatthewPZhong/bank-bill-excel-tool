@@ -4,6 +4,8 @@
 //   「按本批银行单 Channel 集合过滤读 readGatewayBillRowsByChannels」后，喂同一 runReconciliation
 //   的两路产物（modifiedRows / unmatchedRows / modifications / stats / platformCleanupRows /
 //   refundBackfillRows / refundUnmatchedRows / rounds）**逐字节相等**（deepStrictEqual，含 Set/Map）。
+// v3.0.23 扩展：生产路径改为一次读取 `{ exactRows, c3Rows }`；本脚本同时证明 exactRows 与旧接口等价，
+//   且只有大小写不同的 Channel 行只进入 c3Rows、不泄漏到其它轮次。
 //
 // 业务不变量（已确认）：对账永远同 Channel —— Channel=X 银行行只匹配 Channel=X 网关行。
 //   故全表读里「Channel∉本批银行单」的网关行是纯噪声：它们与任一银行行的匹配键（reconid 等）不相交，
@@ -15,7 +17,7 @@
 //          ⚠️ 原 C3 gateway-recon-join 退役（需求2）且其 fixture schema 过时 → R2 dead round；改用
 //             不会退役、确定 fire 的 offset-bill-mark builtin，并加 rounds.r2 命中守卫防复发。
 //   - R3.5 DBS-Charge 资金校验命中（DBS 行：调拨对账单赋 ReconciliationId/FundType + 网关 amount 判 outbound）
-//   - R4   fund-nature-check 命中（HX-out：matchedGwRows TradeType=HX_OUTBOUND）
+//   - R4   fund-nature-check 命中（HX-out：完整 exactRows 按账号/币种/金额/方向严格匹配）
 //   - R5s2 FundTransfer 网关回填命中（reconSourceMid:false 走网关引擎）
 //   - R5s3 Inbound-VA 剔除命中
 //   - 多 Channel：BOSH / JPM / DBS / 空 Channel 银行行并存
@@ -126,11 +128,19 @@ function makeR2OffsetScenario() {
   };
 }
 
-// R4 fund-nature-check（HX-out）：matchedGwRows TradeType=HX_OUTBOUND → 银行 FundType=HX-out
+// R4 fund-nature-check（HX-out）：完整严格条件命中 → 银行 FundType=HX-out
 function makeR4HxOutScenario() {
   return {
     id: 402, name: 'R4-HX-out', category: 'builtin-fixed', priority: 3, enabled: true,
     config: { funcCategory: 'fund-nature-check', subCategory: 'hx-out', priority: 3, gwTradeType: 'HX_OUTBOUND', setFundType: 'HX-out' }
+  };
+}
+
+// R4 fund-nature-check（Ach Return）：用于验证同值匹配关系仍能传递给 R5。
+function makeR4AchReturnScenario() {
+  return {
+    id: 401, name: 'R4-Ach Return', category: 'builtin-fixed', priority: 3, enabled: true,
+    config: { funcCategory: 'fund-nature-check', subCategory: 'ach-return', priority: 3 }
   };
 }
 
@@ -157,6 +167,14 @@ function makeR5CleanupScenario() {
   };
 }
 
+// R5s4 中台退款订单回填。
+function makeR5RefundScenario() {
+  return {
+    id: 504, name: '中台退款订单回填', category: 'builtin-fixed', priority: 0, enabled: true,
+    config: { funcCategory: 'platform-order', subCategory: 'refund-order-backfill', roundPhase: 5 }
+  };
+}
+
 // R3.5 DBS-Charge 资金校验
 function makeDbsChargeScenario() {
   return {
@@ -178,8 +196,17 @@ function buildBankRows() {
     makeBankRow({ _rowId: 'B-BOSH-1', Channel: 'BOSH', MerchantId: 'M-BOSH', 'Credit Amount': '100', ReconciliationId: 'RID-BOSH-1', BillTag: 'OFFSET-1' }),
     // BOSH：R5s2 FundTransfer-out 回填（reconid 空，等网关回填）
     makeBankRow({ _rowId: 'B-BOSH-2', Channel: 'BOSH', MerchantId: 'M-BOSH', FundType: 'FundTransfer-out', 'Debit Amount': '50', BillDate: '2026-06-01' }),
-    // JPM：R4 HX-out（reconid 命中网关 HX_OUTBOUND → FundType=HX-out）
-    makeBankRow({ _rowId: 'B-JPM-1', Channel: 'JPM', MerchantId: 'M-JPM', ReconciliationId: 'RID-JPM-1', FundType: 'X' }),
+    // JPM：R4 HX-out（ReconID/账号/币种/金额/方向完整命中 → FundType=HX-out）
+    makeBankRow({
+      _rowId: 'B-JPM-1',
+      Channel: 'JPM',
+      MerchantId: 'M-JPM',
+      Currency: 'USD',
+      ReconciliationId: 'RID-JPM-1',
+      FundType: 'X',
+      'Debit Amount': '100',
+      'Credit Amount': '0'
+    }),
     // DBS：R3.5 Charge → outbound
     makeBankRow({ _rowId: 'B-DBS-1', Channel: 'DBS', MerchantId: 'M-DBS-001', Currency: 'USD', 'Debit Amount': '100', FundType: 'Charge' }),
     // 空 Channel 银行行：验空值进 Channel 集合（其合法网关对手 Channel 也空）；
@@ -197,8 +224,10 @@ function buildAllGwRows() {
     gwRaw({ reconciliationid: 'RID-BOSH-1', merchantid: 'M-BOSH', amount: '100', Channel: 'BOSH' }),
     // —— BOSH 命中 —— R5s2 FundTransfer-out（网关 TradeType + merchantid + 日期容差）
     gwRaw({ reconciliationid: 'RID-FT-BOSH', TradeType: 'FundTransfer-out', merchantid: 'M-BOSH', amount: '50', Billdate: '2026-06-01', Channel: 'BOSH' }),
-    // —— JPM 命中 —— R4 HX_OUTBOUND（reconid 1v1 → matchedGwRows）
-    gwRaw({ reconciliationid: 'RID-JPM-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-JPM', Channel: 'JPM' }),
+    // —— JPM 命中 —— R4 HX_OUTBOUND（v3.0.23 严格四要素 + 金额 + 方向）
+    gwRaw({ reconciliationid: 'RID-JPM-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-JPM', currency: 'USD', amount: '100', Channel: 'JPM' }),
+    // —— C3-only 大小写变体 —— 只应进入 c3Rows；ReconID 不相交，不能影响其它轮次等价结果
+    gwRaw({ reconciliationid: 'RID-JPM-C3-ONLY', TradeType: 'Misc', merchantid: 'M-JPM', currency: 'USD', amount: '1', Channel: 'jpm' }),
     // —— DBS 命中 —— R3.5 步骤2 amount/currency 判 outbound
     gwRaw({ reconciliationid: 'DISP-RECON-1', TradeType: 'PUBLIC_PAY', merchantid: 'M-DBS-001', currency: 'USD', amount: '100', Channel: 'DBS' }),
     // —— 空 Channel 命中 —— R5s3 Inbound-VA 剔除（reconid 关联 B-BLANK-1）
@@ -287,7 +316,14 @@ async function run() {
     // —— 路 B：按银行单 Channel 集合过滤读（新路径）——
     const bankRows = buildBankRows();
     const bankChannels = bankRows.map((r) => (r && r.Channel != null ? String(r.Channel).trim() : ''));
-    const filteredGw = linkedRepo.readGatewayBillRowsByChannels(db, bankChannels);
+    const oldFilteredGw = linkedRepo.readGatewayBillRowsByChannels(db, bankChannels);
+    const gatewayPools = linkedRepo.readGatewayBillRowPoolsByChannels(db, bankChannels);
+    const filteredGw = gatewayPools.exactRows;
+    const c3Gw = gatewayPools.c3Rows;
+
+    assertDeepStrict(filteredGw, oldFilteredGw, 'v3.0.23 exactRows 与旧大小写敏感过滤接口逐字节相等');
+    assertTrue(!filteredGw.some((g) => g.reconciliationid === 'RID-JPM-C3-ONLY'), 'exactRows 不含仅 Channel 大小写不同的网关行');
+    assertTrue(c3Gw.some((g) => g.reconciliationid === 'RID-JPM-C3-ONLY'), 'c3Rows 包含仅 Channel 大小写不同的网关行');
 
     // 过滤读必须严格少于全表读（噪声行被排除）且不含任何 Channel∉银行单 的行
     const bankChannelSet = new Set(bankChannels);
@@ -319,6 +355,65 @@ async function run() {
       resFull.modifiedRows.length + resFull.unmatchedRows.length === buildBankRows().length,
       '行数守恒 modifiedRows + unmatchedRows === bankRows.length'
     );
+
+    // v3.0.23 增补：R1 先配到同 ReconID 的非 AchReturn 网关；R4 再与另一条 AchReturn
+    // 网关完成同值匹配。R4 不应伪造 modification，但必须把具体银行对象传给 R5 并排除。
+    const noOpBank = makeBankRow({
+      _rowId: 'B-R4-R5-NOOP',
+      Channel: 'JPM',
+      MerchantId: 'M-R4-R5',
+      Currency: 'USD',
+      ReconciliationId: 'RID-R4-R5-NOOP',
+      FundType: 'Ach Return',
+      'Debit Amount': '100',
+      'Credit Amount': '0'
+    });
+    noOpBank.ChannelOrderNo = 'PAY-R4-R5-NOOP';
+    noOpBank.CustomerRef = '';
+    noOpBank['Extra Fee'] = '';
+    const noOpResult = await runReconciliation({
+      bankRows: [noOpBank],
+      gwRows: [
+        gwRaw({
+          reconciliationid: 'RID-R4-R5-NOOP',
+          TradeType: 'Inbound-VA',
+          merchantid: 'M-R4-R5',
+          currency: 'USD',
+          amount: '100',
+          Channel: 'JPM'
+        }),
+        gwRaw({
+          reconciliationid: 'RID-R4-R5-NOOP',
+          TradeType: 'AchReturn',
+          merchantid: 'M-R4-R5',
+          currency: 'USD',
+          amount: '100',
+          Channel: 'JPM'
+        })
+      ],
+      scenarios: [makeR4AchReturnScenario(), makeR5RefundScenario()],
+      refundContext: {
+        refundOrderRows: [{
+          '流水号': 'SN-R4-R5-NOOP',
+          '状态': 'SUBMITTED',
+          '银行大账号': 'M-R4-R5',
+          '币种': 'USD',
+          '退款金额': '100',
+          '银行打款流水号': 'PAY-R4-R5-NOOP',
+          '附言': '',
+          '付款人名称': '',
+          '付款卡号': '',
+          '虚拟卡号': '',
+          valueDate: '2026-06-01'
+        }],
+        depositRows: []
+      }
+    });
+    assertTrue(noOpResult.stats.r1Matched === 1, 'R4→R5 回放中 R1 先配到 Inbound-VA');
+    assertTrue(noOpResult.stats.r4ChangedCount === 0, 'R4 Ach Return 同值匹配不伪造字段修改');
+    assertTrue(noOpResult.modifications.length === 0, 'R4 Ach Return 同值匹配不产生标黄证据');
+    assertTrue(noOpResult.refundBackfillRows.length === 0, 'R4 Ach Return 具体匹配行不再进入退款回填');
+    assertTrue(noOpResult.refundUnmatchedRows.length === 0, 'R4 Ach Return 具体匹配行不进入退款人工结果');
   } finally {
     if (appDb && appDb.db) { try { appDb.db.close(); } catch (_e) { /* ignore */ } }
     try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* ignore */ }

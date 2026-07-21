@@ -1065,6 +1065,64 @@ function readGatewayBillRowsByChannels(db, channels) {
   return out;
 }
 
+// v3.0.23：一次查询生成银行对账运行所需的两个网关候选池。
+//   exactRows：完整保留 readGatewayBillRowsByChannels 的大小写敏感语义，供 R1/R3.5/R4/R5 使用。
+//   c3Rows：仅供 C3 候选预筛；两侧 Channel trim 后按 SQLite NOCASE 做英文大小写不敏感精确匹配。
+// 相同行只 JSON.parse 一次，两个数组共享对象引用，避免百万行表重复查询、解析或深拷。
+function readGatewayBillRowPoolsByChannels(db, channels) {
+  const def = getDef('gateway-bill');
+  if (!def.supported) return { exactRows: [], c3Rows: [] };
+
+  const set = Array.from(new Set((channels || []).map((c) => (c == null ? '' : String(c).trim()))));
+  if (set.length === 0) return { exactRows: [], c3Rows: [] };
+
+  const hasBlank = set.includes('');
+  const nonBlank = set.filter((c) => c !== '');
+  const exactConds = [];
+  const exactParams = [];
+  const c3Conds = [];
+  const c3Params = [];
+
+  if (nonBlank.length) {
+    const placeholders = nonBlank.map(() => '?').join(',');
+    exactConds.push(`json_extract(raw_json, '$.Channel') IN (${placeholders})`);
+    exactParams.push(...nonBlank);
+    c3Conds.push(`TRIM(json_extract(raw_json, '$.Channel')) COLLATE NOCASE IN (${placeholders})`);
+    c3Params.push(...nonBlank);
+  }
+  if (hasBlank) {
+    // exactRows 保留旧口径：只认缺字段/NULL 和真正空串；不把网关空白字符串扩进其它轮次。
+    exactConds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
+    exactConds.push(`json_extract(raw_json, '$.Channel') = ''`);
+    // C3 两侧 trim：网关空白字符串也属于空 Channel 候选。
+    c3Conds.push(`json_extract(raw_json, '$.Channel') IS NULL`);
+    c3Conds.push(`TRIM(json_extract(raw_json, '$.Channel')) = ''`);
+  }
+
+  const rows = db.prepare(`
+    SELECT raw_json,
+           CASE WHEN (${exactConds.join(' OR ')}) THEN 1 ELSE 0 END AS exact_match
+      FROM ${def.table}
+     WHERE json_valid(raw_json)
+       AND (${c3Conds.join(' OR ')})
+     ORDER BY id ASC
+  `).all(...exactParams, ...c3Params);
+
+  const exactRows = [];
+  const c3Rows = [];
+  for (const row of rows) {
+    try {
+      const parsed = JSON.parse(row.raw_json);
+      if (!parsed || typeof parsed !== 'object') continue;
+      c3Rows.push(parsed);
+      if (row.exact_match === 1) exactRows.push(parsed);
+    } catch (_e) {
+      /* 损坏行跳过，不抛错（与现有网关读取容错一致） */
+    }
+  }
+  return { exactRows, c3Rows };
+}
+
 // v3.0.0 块 B / PR-3：轻量探测某链接表是否有任意数据行（EXISTS，命中首行即停，不物化整表）。
 //   替代「readLinkedTableRows(tableKey).length > 0」——后者为判存在性把整表读回内存（大文件同样撞尖峰）。
 function hasLinkedTableRows(db, tableKey) {
@@ -1676,6 +1734,8 @@ module.exports = {
   readBankDepositAdmCandidates,
   // v3.0.7 需求6：网关账单表按 Channel 集合下推过滤读（业务不变量=对账同渠道；防 300 万行全量尖峰）
   readGatewayBillRowsByChannels,
+  // v3.0.23：同一次 SQL 生成旧精确池和 C3 trim+NOCASE 池，同行共享对象引用。
+  readGatewayBillRowPoolsByChannels,
   hasLinkedTableRows,
   // v2.1.16-beta.5 需求3：ADM 银行对账单隐藏表专用仓储（6 列 INSERT / 整批幂等重写）
   replaceAdmBankDeposit,

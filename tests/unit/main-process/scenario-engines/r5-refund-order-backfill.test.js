@@ -11,6 +11,7 @@
 //   ⑥ 命中详情两句式文案
 //   ⑦ 空入参防御
 //   ⑧ 回填行结构（E 列详情 + F~N 9 字段、含 Debit 不含 Credit）
+//   ⑪b R4 AchReturn matchedPairs 前置过滤（包含同值 no-op，按具体对象身份）
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -1343,6 +1344,104 @@ test.describe('⑪ v3.0.21：R1 AchReturn pair 前置过滤', () => {
     assert.equal(res.backfillRows.length, 1, '同 reconid 的未配对银行行仍参与');
     assert.equal(res.backfillRows[0]['退款单号'], 'SN-B');
     assert.equal(res.backfillRows[0].ChannelOrderNo, 'PAY2');
+  });
+});
+
+// ======================================================================
+// ⑪b v3.0.23 增补：R4 AchReturn matchedPairs 前置过滤（含 no-op）
+// ======================================================================
+test.describe('⑪b v3.0.23：R4 AchReturn matchedPairs 前置过滤', () => {
+  const r4Pair = (bankRow, overrides = {}) => ({
+    gwRow: { TradeType: 'AchReturn' },
+    bankRow,
+    subCategory: 'ach-return',
+    targetFundType: 'Ach Return',
+    changed: false,
+    ...overrides
+  });
+
+  test('R4 AchReturn no-op pair 仍将具体银行行静默移出退款池', () => {
+    const pairedBank = bank({ _rowId: 'r4-noop', ChannelOrderNo: 'PAY-R4' });
+    const res = run(
+      [pairedBank],
+      [refund({ '流水号': 'SN-R4', '银行打款流水号': 'PAY-R4' })],
+      [],
+      { r4MatchedPairs: [r4Pair(pairedBank)] }
+    );
+
+    assert.equal(res.backfillRows.length, 0);
+    assert.equal(res.unmatchedRows.length, 0, '被 R4 确认的行保持现有静默排除语义');
+  });
+
+  test('对象身份守卫：同 rowId/ReconID 的克隆对象不得过滤实际银行行', () => {
+    const actualBank = bank({
+      _rowId: 'r4-same-row',
+      ReconciliationId: 'R4-SAME-RECON',
+      ChannelOrderNo: 'PAY-ACTUAL'
+    });
+    const clonedBank = { ...actualBank };
+    const res = run(
+      [actualBank],
+      [refund({ '流水号': 'SN-ACTUAL', '银行打款流水号': 'PAY-ACTUAL' })],
+      [],
+      { r4MatchedPairs: [r4Pair(clonedBank)] }
+    );
+
+    assert.equal(res.backfillRows.length, 1, 'R4 过滤不得按 rowId 或 ReconID 扩散');
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-ACTUAL');
+  });
+
+  test('同 ReconID 两条银行行只过滤 pair.bankRow，另一条继续参与退款匹配', () => {
+    const pairedBank = bank({ _rowId: 'r4-paired', ReconciliationId: 'R4-DUP', ChannelOrderNo: 'PAY-1' });
+    const otherBank = bank({ _rowId: 'r4-other', ReconciliationId: 'R4-DUP', ChannelOrderNo: 'PAY-2' });
+    const res = run(
+      [pairedBank, otherBank],
+      [
+        refund({ '流水号': 'SN-1', '银行打款流水号': 'PAY-1' }),
+        refund({ '流水号': 'SN-2', '银行打款流水号': 'PAY-2' })
+      ],
+      [],
+      { r4MatchedPairs: [r4Pair(pairedBank)] }
+    );
+
+    assert.equal(res.backfillRows.length, 1);
+    assert.equal(res.backfillRows[0]['退款单号'], 'SN-2');
+    assert.equal(res.backfillRows[0].ChannelOrderNo, 'PAY-2');
+  });
+
+  test('非 AchReturn、缺失或畸形 R4 关系不触发前置过滤', () => {
+    const variants = [
+      undefined,
+      null,
+      'bad',
+      [null, {}, { bankRow: null }, r4Pair(bank({ _rowId: 'wire-clone' }), { subCategory: 'wire-return' })]
+    ];
+
+    for (const [index, r4MatchedPairs] of variants.entries()) {
+      const bankRow = bank({ _rowId: `r4-malformed-${index}`, ChannelOrderNo: `PAY-${index}` });
+      const res = run(
+        [bankRow],
+        [refund({ '流水号': `SN-${index}`, '银行打款流水号': `PAY-${index}` })],
+        [],
+        { r4MatchedPairs }
+      );
+      assert.equal(res.backfillRows.length, 1, `variant ${index} 不得误过滤`);
+    }
+  });
+
+  test('R1 与 R4 同时指向同一银行行时仍只静默排除一次', () => {
+    const bankRow = bank({ _rowId: 'r1-r4-overlap', ChannelOrderNo: 'PAY-OVERLAP' });
+    const res = run(
+      [bankRow],
+      [refund({ '流水号': 'SN-OVERLAP', '银行打款流水号': 'PAY-OVERLAP' })],
+      [],
+      {
+        r1Pairs: [{ gwRow: { TradeType: 'AchReturn' }, bankRow }],
+        r4MatchedPairs: [r4Pair(bankRow)]
+      }
+    );
+    assert.deepEqual(res.backfillRows, []);
+    assert.deepEqual(res.unmatchedRows, []);
   });
 });
 
