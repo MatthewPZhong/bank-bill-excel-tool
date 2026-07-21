@@ -78,6 +78,8 @@
 - `check:vars -- --include-minor` 已完成；命中的模板仓储、IPC、全局状态和应用生命周期均按清单复核，未命中既有资金计算/匹配规则。
 - GitHub PR #97 Windows workflow 通过；最终 self-review 为 P0-P4 Finding 0。
 - PR #97 已于 2026-07-21 以 merge commit `116eee1` 合入 `main`，开发分支已删除。
+- 合并归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过 release-check、主页面几何门禁 `6/6`、变量扫描和重要变量复核。
+- `npm audit --omit=dev` 为既有 7 条生产依赖告警（2 moderate、5 high）；本迭代未改生产依赖，继续作为依赖治理 follow-up。
 
 ## Remaining Unknowns
 

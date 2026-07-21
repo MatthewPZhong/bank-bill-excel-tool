@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.22 PRD
 
 > 目标版本：`3.0.22`
-> 状态：merged（PR #97 已合入 `main`；GitHub Release 待发布）
+> 状态：release-ready（PR #97 已合入 `main`；最终发布前门禁通过）
 > 归档：PR #97 merge commit `116eee1`；源规格 `changes/3.0.22/spec.md`
 > 更新时间：2026-07-21
 > 适用仓库：`bank-bill-excel-tool`
@@ -55,5 +55,7 @@
 - `scan:vars` 为 201 个 JS 文件、2313 个顶层名称；重要变量复核未发现既有资金计算或匹配口径变化。
 - GitHub PR workflow 通过；最终 self-review 为 P0-P4 Finding 0。
 - PR #97 以 merge commit `116eee1` 合入 `main`，开发分支已删除。
+- 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、六组合主页面几何门禁、变量扫描和重要变量复核。
+- 既有生产依赖仍有 7 条 audit 告警（2 moderate、5 high）；本迭代未改变生产依赖，该问题继续作为依赖治理 follow-up。
 - PR 归档见 `docs/prs/PR97-v3.0.22.md`；tag、Release workflow 和公开资产证据待发布完成后补录。
 - 真实文件 SHA-256、11 模块归属和 Windows Excel/WPS 只读表现仍为发布后人工 follow-up；用户已知悉并授权继续发布。

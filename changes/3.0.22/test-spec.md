@@ -121,4 +121,5 @@ npm run startup:measure
 - 存档专项测试 `64/64 PASS`；最终 `npm run release-check` 为 unit `3780/3780`、integration `1955/1955`、Smoke 全通过。
 - GitHub PR #97 Windows workflow 通过；最终 self-review 为 P0-P4 Finding 0。
 - PR #97 已由 merge commit `116eee1` 合入 `main`；最终发布前门禁、tag workflow 与公开资产验证待完成后补录。
+- 合并归档后的最终 `main` 已在干净 `npm ci` 依赖上重新通过 release-check、主页面几何门禁 `6/6`、变量扫描和重要变量复核。
 - 真实文件 SHA-256、11 模块归属和 Windows Excel/WPS 只读表现继续保留为人工 follow-up。

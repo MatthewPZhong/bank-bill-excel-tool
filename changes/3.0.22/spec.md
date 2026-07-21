@@ -1,6 +1,6 @@
 # Spec - v3.0.22 设置页内存档中心
 
-> status: merged（PR #97 已合入 `main`；v3.0.22 Release 待发布）
+> status: release-ready（PR #97 已合入 `main`；最终发布前门禁通过）
 > updated: 2026-07-21
 > branch: `codex/v3.0.22-archive-center`
 > prototype: `changes/3.0.22/archive-center-settings-prototype.html`
@@ -168,6 +168,8 @@
 - 2026-07-21：`npm run release-check` 通过，unit `3780/3780`、integration `1955/1955`、Smoke 全通过。
 - 2026-07-21：PR #97 的 Windows workflow 通过，并以 merge commit `116eee1` 合入 `main`。
 - 2026-07-21：开发分支已删除，本地 `main` 与 `origin/main` 同步。
+- 2026-07-21：合并归档后的最终 `main` 在干净 `npm ci` 依赖上重新通过完整 release-check、六组合主页面几何门禁、变量扫描和重要变量复核。
+- 2026-07-21：`npm audit --omit=dev` 仍报告既有 7 条生产依赖告警（2 moderate、5 high）；3.0.22 未新增或升级生产依赖，该基线继续作为后续依赖治理项披露。
 - 归档见 `docs/prs/PR97-v3.0.22.md` 与 `docs/iterations/v3.0.22/PRD-v3.0.22.md`。
 - `v3.0.22` tag、Release workflow 和公开升级资产证据待发布完成后补录。
 - 用户已在知悉真实文件血缘抽查及 Windows Excel/WPS 只读表现仍为人工 follow-up 的情况下授权继续发布；不得宣称上述人工验收已完成。
