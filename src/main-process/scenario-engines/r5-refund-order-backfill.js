@@ -18,8 +18,9 @@
 //   产出独立的回填模板行集合 + 未匹配/报错行集合（不改 bankRows）。
 //
 // v3.0.10 变更：
-//   需求2（网关前置过滤）：银行 Ach Return 行入池前先与网关单做 reconid 匹配，命中网关 reconid 的静默移出退款池
-//     （这些行已能与网关对账，不该再走退款回填，顺手闭合已知 no-op 缝隙）。
+//   需求2（网关前置过滤）：银行 Ach Return 行入池前先与网关单做 reconid 匹配，命中网关 reconid 的静默移出退款池。
+// v3.0.21 收窄：前置过滤只认 R1 已建立的 1v1 pair，且 pair.gwRow.TradeType trim 后必须严格等于 AchReturn；
+//   只移出该 pair.bankRow 对象，不按 reconid 扩散到同 ID 的其它银行行。未传 r1Pairs 时不做前置过滤。
 //   需求3.1（sheet1 标黄）：各 matcher 命中时附 `_matchedColumns`（实际参与比对的候选列，诚实列出），
 //     buildBackfillRow 单点收口过滤为「∈ sheet1 列」非空才挂 row._matchedColumns，供 writer 标黄。
 //   需求3.2（sheet2 改造）：报错/提示并入「报错/提示信息」前缀（【报错】/【提示】，单点加在 buildUnmatchedBankRow）；
@@ -32,7 +33,7 @@
 // 跨表字段映射全部走 refund-backfill-fields.js（显式映射，绝不假设同名）。4 条二跳路径共用入金表双 Map 索引(depIndex)。
 //
 // 纯函数：入参 rows 数组，不读 DB/session（由 main.js 注入）；与场景2/3 独立 usedBankRowId，不串池。
-//   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={})
+//   签名 runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, options={ r1Pairs, ... })
 //   返回 { backfillRows, unmatchedRows, modifications:[], warnings, hitDepositBizIds }
 //     backfillRows  —— sheet1 回填模板行（v3.0.10：33 列 = 固定 6 列含「命中类型」+ 银行 12 字段 + 中台 15 字段）
 //     unmatchedRows —— sheet2 行（含「结果类型」= 报错-人工介入 / 未匹配-提示 + 信息列）
@@ -62,9 +63,6 @@ const {
   MTX_FEATURE,
   T54_REFUND_RE
 } = require('../../constants/refund-backfill-fields');
-
-// v3.0.10 需求2：网关行 reconid 字段名（真实表头小写；与 r4 引擎同名常量同值——网关侧小写、银行侧驼峰，绝不假设同名）。
-const GW_RECON_ID_FIELD = 'reconciliationid';
 
 // 提取 regex 模板（仅当模板用，每次提取前 new RegExp(source,'g') 重建，避免 lastIndex 副作用 —— 同 C1）
 const MTX_RE = buildFeatureRegex(MTX_FEATURE);          // /MTX\d{19}/g
@@ -856,28 +854,28 @@ function runRound5RefundOrderBackfill(bankRows, refundOrderRows, depositRows, op
     if (ordinaryUnmatchedEntries) ordinaryUnmatchedEntries.push({ bankRow, outputRow });
   };
 
-  // v3.0.10 需求2：网关前置过滤——建网关 reconid 集合（网关侧小写 reconciliationid；空键不入，与下方银行空键对称）。
-  //   缺省退化：options.gwRows 未传（旧调用方/测试）→ safeGwRows=[] → 集合空 → 道3 永不命中 → 等同无前置过滤（与现状一致）。
-  const safeGwRows = Array.isArray(options.gwRows) ? options.gwRows : [];
-  const gwReconidSet = new Set(
-    safeGwRows
-      .map((g) => normalizeCellValue(g && g[GW_RECON_ID_FIELD]))
-      .filter((k) => k !== '')
-  );
+  // v3.0.21：网关前置过滤收窄到 R1 真实 1v1 配对。
+  //   - 只认 pair.gwRow.TradeType trim 后严格等于 AchReturn（大小写敏感）；
+  //   - Set 存 pair.bankRow 对象引用，只移出 R1 实际选中的那条银行行，同 reconid 其它行不扩散；
+  //   - options.r1Pairs 缺省/非数组 → 空集合 → 不做前置过滤。
+  const safeR1Pairs = Array.isArray(options.r1Pairs) ? options.r1Pairs : [];
+  const achReturnPairedBankRows = new Set();
+  for (const pair of safeR1Pairs) {
+    if (!pair || !pair.bankRow) continue;
+    if (normalizeCellValue(pair.gwRow && pair.gwRow.TradeType) !== 'AchReturn') continue;
+    achReturnPairedBankRows.add(pair.bankRow);
+  }
 
   // 1) 数据筛选（§5.1.2）
   //   refund：状态 === SUBMITTED
   const refundPool = safeRefundRows.filter(
     (r) => normalizeCellValue(r[M.filter.roStatusField]) === M.filter.roSubmitted
   );
-  //   bank：FundType === Ach Return 且未被 R4 改写 FundType；且（v3.0.10 需求2）未命中网关 reconid
+  //   bank：FundType === Ach Return 且未被 R4 改写 FundType；且未被 R1 的 AchReturn pair 具体选中
   const bankPool = safeBankRows.filter((b) => {
     if (normalizeCellValue(b[M.filter.bankFundType]) !== M.filter.achReturn) return false; // 道1：FundType=Ach Return
-    if (isFundTypeChanged(b._rowId)) return false;                                          // 道2：未被 R4 改写 FundType
-    // 道3（v3.0.10 需求2）：命中网关 reconid → 静默移出退款池（已能与网关对账，不走退款回填）。
-    //   银行侧驼峰 ReconciliationId（= M.backfill.fromBankReconId，复用单一真相，不新增别名）；空键不参与命中判定（与网关空键 filter 对称）。
-    const bankRecon = normalizeCellValue(b[M.backfill.fromBankReconId]);
-    if (bankRecon !== '' && gwReconidSet.has(bankRecon)) return false;
+    if (isFundTypeChanged(b._rowId)) return false;                                      // 道2：未被 R4 改写 FundType
+    if (achReturnPairedBankRows.has(b)) return false;                                   // 道3：R1 AchReturn pair 的具体 bankRow
     return true;
   });
 

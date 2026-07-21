@@ -77,6 +77,22 @@ test.describe('CAUSE_MAP — v3.0.10 R4 资金性质校验方向守卫', () => {
   });
 });
 
+test.describe('CAUSE_MAP — v3.0.21 DBS-Charge outbound 方向守卫', () => {
+  test('dbs-charge-fund-direction-mismatch 已定义且说明跳过步骤2改写', () => {
+    assert.ok(CAUSE_MAP['dbs-charge-fund-direction-mismatch']);
+    assert.match(CAUSE_MAP['dbs-charge-fund-direction-mismatch'], /Credit Amount/);
+    assert.match(CAUSE_MAP['dbs-charge-fund-direction-mismatch'], /方向/);
+    assert.match(CAUSE_MAP['dbs-charge-fund-direction-mismatch'], /步骤2/);
+  });
+
+  test('errorCodeToCause 返回完整中文原因', () => {
+    assert.equal(
+      errorCodeToCause('dbs-charge-fund-direction-mismatch'),
+      'DBS-Charge 同对账ID存在白名单网关候选，但银行行 Credit Amount 非0，借贷方向不符，已跳过步骤2资金性质改写，请人工核对方向'
+    );
+  });
+});
+
 test.describe('CAUSE_MAP — 主模块粗粒度', () => {
   test('FILE_READ / FILE_TYPE 已定义', () => {
     assert.ok(CAUSE_MAP['FILE_READ']);

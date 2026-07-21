@@ -31,6 +31,9 @@ const CAUSE_MAP = Object.freeze({
   // v3.0.10 需求1：R4 资金性质校验方向守卫（🔴 资金红线）—— 命中网关但银行行借贷方向不符
   'r4-fund-direction-mismatch': '资金性质命中但银行行借贷方向不符（应为0的金额列非0），已跳过该行资金性质改写，请人工核对方向',
 
+  // v3.0.21：DBS-Charge step2 outbound 方向守卫（🔴 资金红线）
+  'dbs-charge-fund-direction-mismatch': 'DBS-Charge 同对账ID存在白名单网关候选，但银行行 Credit Amount 非0，借贷方向不符，已跳过步骤2资金性质改写，请人工核对方向',
+
   // 主模块（FileValidationError code 粗粒度）
   'FILE_READ': '文件读取失败，可能损坏或格式不对',
   'FILE_TYPE': '文件类型不支持',

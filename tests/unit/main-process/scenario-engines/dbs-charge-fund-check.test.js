@@ -67,12 +67,13 @@ function bankRow({
   };
 }
 
-// 网关行（真实小写表头）：reconciliationid / amount(单列) / currency。
-function gwRow({ reconId = 'RC-1', amount = 100, currency = 'USD' } = {}) {
+// 网关行：reconciliationid / amount / currency 为真实小写表头，TradeType 用步骤2固定白名单默认值。
+function gwRow({ reconId = 'RC-1', amount = 100, currency = 'USD', tradeType = 'PUBLIC_PAY' } = {}) {
   return {
     reconciliationid: reconId,
     amount,
-    currency
+    currency,
+    TradeType: tradeType
   };
 }
 
@@ -538,6 +539,193 @@ test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', (
     const { modifications } = runDbsChargeFundCheck([gw], [bank], [], OPTIONS);
     assert.equal(findMod(modifications, 'b1', 'FundType'), undefined);
     assert.equal(bank.FundType, 'Charge');
+  });
+});
+
+// ========================================================================
+// v3.0.21：步骤2 固定网关白名单 + outbound Credit 方向守卫
+// ========================================================================
+
+test.describe('DBS-Charge — 步骤2 网关白名单', () => {
+  const whitelist = [
+    'AchReturn',
+    'ACQ_WITHDRAW',
+    'B2B_FLOW_GOLD',
+    'B2B_FLOW_GOLD_SUPPLIER',
+    'B2B_SUPPLIER',
+    'B2B_WITHDRAW',
+    'CUR_PAY',
+    'FX_WITHDRAW',
+    'HX_WITHDRAW',
+    'MPT_SUPPLIER',
+    'MPT_WITHDRAW',
+    'PUBLIC_PAY'
+  ];
+
+  test('固定 12 类 TradeType 均可进入步骤2索引并命中 outbound', () => {
+    for (const [index, tradeType] of whitelist.entries()) {
+      const reconId = `RC-WL-${index}`;
+      const bank = bankRow({ rowId: `b-${index}`, fundType: 'Charge', reconId, credit: 0, debit: 100 });
+      const result = runDbsChargeFundCheck(
+        [gwRow({ reconId, tradeType, amount: 100, currency: 'USD' })],
+        [bank],
+        [],
+        OPTIONS
+      );
+      assert.equal(bank.FundType, 'outbound', `${tradeType} 应命中 outbound`);
+      assert.ok(findMod(result.modifications, `b-${index}`, 'FundType'), `${tradeType} 应记录 FundType modification`);
+    }
+  });
+
+  test('TradeType 先 trim 再严格匹配：外侧空白接受，大小写不同拒绝', () => {
+    const trimmed = bankRow({ rowId: 'trimmed', fundType: 'Charge', reconId: 'RC-TRIM', credit: 0, debit: 100 });
+    runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-TRIM', tradeType: '  PUBLIC_PAY  ' })],
+      [trimmed],
+      [],
+      OPTIONS
+    );
+    assert.equal(trimmed.FundType, 'outbound', 'trim 后白名单值应进入索引');
+
+    const wrongCase = bankRow({ rowId: 'wrong-case', fundType: 'Charge', reconId: 'RC-CASE', credit: 0, debit: 100 });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-CASE', tradeType: 'public_pay' })],
+      [wrongCase],
+      [],
+      OPTIONS
+    );
+    assert.equal(wrongCase.FundType, 'Charge', '大小写不同不是白名单值');
+    assert.equal(result.modifications.length, 0);
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('非白名单-only 桶保持原 FundType，不触发 outbound→Charge，也不告警', () => {
+    const bank = bankRow({ rowId: 'non-white', fundType: 'outbound', reconId: 'RC-NON-WHITE', credit: 0, debit: 200 });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-NON-WHITE', tradeType: 'NOT_ALLOWED', amount: 100 })],
+      [bank],
+      [],
+      OPTIONS
+    );
+
+    assert.equal(bank.FundType, 'outbound', '只有非白名单行时整个桶不处理');
+    assert.equal(result.modifications.length, 0);
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('混合桶只看白名单候选：非白名单金额命中不算 hit，既有 outbound 按现有规则回落 Charge', () => {
+    const bank = bankRow({ rowId: 'mixed', fundType: 'outbound', reconId: 'RC-MIXED', credit: 0, debit: 100 });
+    const result = runDbsChargeFundCheck(
+      [
+        gwRow({ reconId: 'RC-MIXED', tradeType: 'NOT_ALLOWED', amount: 100 }),
+        gwRow({ reconId: 'RC-MIXED', tradeType: 'PUBLIC_PAY', amount: 999 })
+      ],
+      [bank],
+      [],
+      OPTIONS
+    );
+
+    assert.equal(bank.FundType, 'Charge');
+    const mod = findMod(result.modifications, 'mixed', 'FundType');
+    assert.ok(mod);
+    assert.equal(mod.oldValue, 'outbound');
+    assert.equal(mod.newValue, 'Charge');
+    assert.equal(result.warnings.length, 0);
+  });
+});
+
+test.describe('DBS-Charge — 步骤2 outbound Credit 方向守卫', () => {
+  test('白名单金额币种命中但 Credit Amount 非0：Charge 保持原值、不 modification、新增 warning', () => {
+    const bank = bankRow({ rowId: 'credit-bad', fundType: 'Charge', reconId: 'RC-CREDIT', credit: 100, debit: 0 });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-CREDIT', tradeType: 'PUBLIC_PAY', amount: 100 })],
+      [bank],
+      [],
+      OPTIONS
+    );
+
+    assert.equal(bank.FundType, 'Charge', '方向不符保持进入步骤2前的原值');
+    assert.equal(findMod(result.modifications, 'credit-bad', 'FundType'), undefined);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
+    assert.equal(result.warnings[0].rowId, 'credit-bad');
+    assert.match(result.warnings[0].message, /Credit Amount 非0/);
+  });
+
+  test('方向不符时既有 outbound 也保持原值，但仍产生 warning', () => {
+    const bank = bankRow({ rowId: 'outbound-bad', fundType: 'outbound', reconId: 'RC-OUT-BAD', credit: -100, debit: 0 });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-OUT-BAD', tradeType: 'AchReturn', amount: 100 })],
+      [bank],
+      [],
+      OPTIONS
+    );
+
+    assert.equal(bank.FundType, 'outbound');
+    assert.equal(findMod(result.modifications, 'outbound-bad', 'FundType'), undefined);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
+  });
+
+  test('方向守卫先于金额币种：白名单金额不匹配时，非0 Credit 的 outbound 仍保持原值', () => {
+    const bank = bankRow({ rowId: 'direction-before-amount', fundType: 'outbound', reconId: 'RC-DIR-FIRST', credit: 5, debit: 100 });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-DIR-FIRST', tradeType: 'PUBLIC_PAY', amount: 999, currency: 'USD' })],
+      [bank],
+      [],
+      OPTIONS
+    );
+
+    assert.equal(bank.FundType, 'outbound', '方向不符不得继续执行既有 outbound→Charge 回落');
+    assert.equal(findMod(result.modifications, 'direction-before-amount', 'FundType'), undefined);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
+  });
+
+  test('步骤1既有改写保留：sibling 先归 Charge 后方向不符，步骤2不新增 modification', () => {
+    const transfer = bankRow({
+      rowId: 'step1-transfer', merchantId: 'CARD-OUT', credit: 0, debit: 500,
+      fundType: 'Outbound', reconId: ''
+    });
+    const sibling = bankRow({
+      rowId: 'step1-sibling', merchantId: 'OTHER', credit: 100, debit: 0,
+      fundType: 'outbound', reconId: 'RC-STEP1-DIRECTION'
+    });
+    const result = runDbsChargeFundCheck(
+      [gwRow({ reconId: 'RC-STEP1-DIRECTION', tradeType: 'PUBLIC_PAY', amount: 100 })],
+      [transfer, sibling],
+      [dispRow({
+        bigAccount: 'CARD-OUT', amount: 500, reconId: 'RC-STEP1-DIRECTION', fundType: FT_OUT
+      })],
+      OPTIONS
+    );
+
+    assert.equal(sibling.FundType, 'Charge', '步骤1 sibling 归并结果必须保留');
+    const siblingMods = result.modifications.filter(
+      (modification) => modification.rowId === 'step1-sibling' && modification.column === 'FundType'
+    );
+    assert.deepEqual(siblingMods.map(({ oldValue, newValue }) => ({ oldValue, newValue })), [
+      { oldValue: 'outbound', newValue: 'Charge' }
+    ]);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
+  });
+
+  test('Credit Amount 为0、空或非法均按0：允许 Charge→outbound 且不告警', () => {
+    for (const [index, credit] of [0, '0.00', '', null, 'not-a-number'].entries()) {
+      const reconId = `RC-CREDIT-ZERO-${index}`;
+      const bank = bankRow({ rowId: `credit-zero-${index}`, fundType: 'Charge', reconId, credit, debit: 100 });
+      const result = runDbsChargeFundCheck(
+        [gwRow({ reconId, tradeType: 'MPT_WITHDRAW', amount: 100 })],
+        [bank],
+        [],
+        OPTIONS
+      );
+
+      assert.equal(bank.FundType, 'outbound', `Credit=${String(credit)} 应按0放行`);
+      assert.equal(result.warnings.length, 0);
+      assert.ok(findMod(result.modifications, `credit-zero-${index}`, 'FundType'));
+    }
   });
 });
 

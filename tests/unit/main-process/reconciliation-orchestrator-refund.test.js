@@ -164,6 +164,75 @@ test.describe('runReconciliation R5 场景4 集成', () => {
     assert.equal(result.rounds.r5s4.backfilled, 1, 'rounds.r5s4.backfilled = 回填行数');
   });
 
+  test('编排器传 r1.pairs：同 reconid 仅 R1 选中的 AchReturn 银行行被拦，未配对行仍回填', async () => {
+    const pairedBank = makeBankRow({
+      _rowId: 'paired', ReconciliationId: 'RID-SAME', FundType: 'Ach Return',
+      'Debit Amount': 100, 'Credit Amount': 0, ChannelOrderNo: 'PAY-PAIRED'
+    });
+    const unpairedBank = makeBankRow({
+      _rowId: 'unpaired', ReconciliationId: 'RID-SAME', FundType: 'Ach Return',
+      'Debit Amount': 100, 'Credit Amount': 0, ChannelOrderNo: 'PAY-UNPAIRED'
+    });
+    const result = await runReconciliation({
+      bankRows: [pairedBank, unpairedBank],
+      gwRows: [{ reconciliationid: 'RID-SAME', TradeType: '  AchReturn  ' }],
+      scenarios: [makeR5RefundScenario()],
+      refundContext: {
+        refundOrderRows: [
+          makeRefundRow({ 流水号: 'REF-PAIRED', 银行打款流水号: 'PAY-PAIRED' }),
+          makeRefundRow({ 流水号: 'REF-UNPAIRED', 银行打款流水号: 'PAY-UNPAIRED' })
+        ],
+        depositRows: []
+      }
+    });
+
+    assert.equal(result.stats.r1Matched, 1, 'R1 只建立一组 1v1 pair');
+    assert.equal(result.refundBackfillRows.length, 1, '只拦 R1 具体 pair.bankRow');
+    assert.equal(result.refundBackfillRows[0]['退款单号'], 'REF-UNPAIRED');
+    assert.equal(result.refundBackfillRows[0].ChannelOrderNo, 'PAY-UNPAIRED');
+  });
+
+  test('合成最小回归：Inbound-VA 配对不阻断精准退款命中', async () => {
+    const bankRows = [makeBankRow({
+      _rowId: 'synthetic-refund-bank',
+      ReconciliationId: 'SYNTH-REFUND-RECON-001',
+      FundType: 'Ach Return',
+      MerchantId: 'SYNTH-MERCHANT-001',
+      Currency: 'USD',
+      'Credit Amount': 0,
+      'Debit Amount': 11000,
+      CustomerRef: 'SYNTH-REFUND-RECON-001',
+      ChannelOrderNo: 'SYNTH-CHANNEL-ORDER-001',
+      Channel: 'DBS'
+    })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [{
+        reconciliationid: 'SYNTH-REFUND-RECON-001',
+        TradeType: 'Inbound-VA',
+        merchantid: 'SYNTH-MERCHANT-001',
+        currency: 'USD',
+        amount: 11000
+      }],
+      scenarios: [makeR5RefundScenario()],
+      refundContext: {
+        refundOrderRows: [makeRefundRow({
+          流水号: 'SYNTH-REFUND-ORDER-001',
+          银行大账号: 'SYNTH-MERCHANT-001',
+          退款金额: 11000,
+          币种: 'USD',
+          银行打款流水号: 'SYNTH-REFUND-RECON-001'
+        })],
+        depositRows: []
+      }
+    });
+
+    assert.equal(result.refundBackfillRows.length, 1);
+    assert.equal(result.refundBackfillRows[0]['退款单号'], 'SYNTH-REFUND-ORDER-001');
+    assert.equal(result.refundBackfillRows[0]['命中类型'], '精准命中');
+    assert.match(result.refundBackfillRows[0]['匹配命中详情'], /CustomerRef/);
+  });
+
   test('场景开关透传到引擎：关闭保持未命中，开启救回差额小于10的流水号候选', async () => {
     const buildInput = () => ({
       bankRows: [makeBankRow({

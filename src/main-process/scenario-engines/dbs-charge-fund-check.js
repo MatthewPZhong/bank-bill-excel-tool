@@ -5,9 +5,10 @@
 //       仅对 Channel=DBS 生效。采用【对称模型】（用户最终拍板）：
 //         步骤1：用「调拨对账单」找出真正的 FundTransfer-in/out 行 —— 命中行 FundType 标为该调拨行的
 //                fund_type（'FundTransfer-in' 或 '-out'，按调拨方向）并赋 ReconciliationId；同 ReconID 其他行归 Charge。
-//         步骤2：用「网关对账单」amount/currency 找出真正的 outbound 行 —— 命中转 outbound；同 ID 其他
-//                未命中行（候选 Charge/outbound 内）归 Charge（不再「保持原值」）。
-//       最终每个 ReconID 桶 = 1 条 FundTransfer-in/out（步1命中） + 网关确认的 outbound（步2命中） + 其余全 Charge。
+//         步骤2：只索引固定 TradeType 白名单内的「网关对账单」；同 ID 存在白名单候选时先检查 Credit Amount，
+//                方向通过后再用 amount/currency 找出真正的 outbound 行；方向不符则保持原值并告警；同 ID 其他未命中行
+//                （候选 Charge/outbound 内）归 Charge。只有非白名单网关行的桶完全不处理。
+//       最终每个进入步骤2的 ReconID 桶 = FundTransfer-in/out（步1命中）+ 方向合规的 outbound（步2命中）+ 其余 Charge。
 //       改写 ReconciliationId + FundType 两列 —— 每一改都 record 留痕标黄。
 //
 // ⚠️ 跨表字段名不同，必须显式映射，绝不假设同名（一律经常量取，绝不手敲）：
@@ -16,8 +17,8 @@
 //       发生额 = row['Credit Amount'] + row['Debit Amount']（双列，绝对值=|credit-debit|）；
 //       资金性质 = row.FundType（🔴 改写目标列之一）；对账ID = row.ReconciliationId（🔴 改写目标列之一）；
 //       行唯一键 = row._rowId（上游注入，全局唯一）。
-//   - 网关行（gwRows，全量；本引擎按 reconciliationid 自建索引，不复用 R1 matchedGwRows）：
-//       对账ID = row.reconciliationid（小写）；金额 = row.amount（小写单列，绝对值）；币种 = row.currency（小写）。
+//   - 网关行（gwRows，全量入参；步骤2 仅对白名单 TradeType 按 reconciliationid 自建索引，不复用 R1）：
+//       对账ID = row.reconciliationid（小写）；金额 = row.amount（小写单列，绝对值）；币种 = row.currency（小写）；类型 = row.TradeType。
 //   - 调拨对账单行（dispatchReconRows，需求1 派生表读回，字段经 FT_RECON_FIELD_MAP.recon.* 取）：
 //       付款渠道 / 收款渠道 / big_account（D1 按方向固化的大账号）/ 币种 / 金额 / ReconID / fund_type（FundTransfer-in/out）。
 //
@@ -43,16 +44,17 @@
 //     对 b∉matchedBankRows（所有 FundTransfer 命中行都被保护，不被归并）且 normalize(b.ReconciliationId)===键
 //     且 normalize(b.FundType)!==Charge → b.FundType=Charge + record('FundType')。
 //
-// 步骤2（网关 amount/currency 找真正 outbound 行；同 ID 未命中行归 Charge）：
-//   gwByReconId = index(gwRows by normalize(reconciliationid))      // 用步骤1改后的新 ReconciliationId 关联
+// 步骤2（白名单网关 amount/currency 找真正 outbound 行；同 ID 未命中行归 Charge）：
+//   gwByReconId = index(白名单 gwRows by normalize(reconciliationid)) // 用步骤1改后的新 ReconciliationId 关联
 //   bankByReconId = index(DBS bankRows by normalize(ReconciliationId))
 //   for [reconId, bucket] in bankByReconId:
 //     gwForKey = gwByReconId.get(reconId); if 空 → continue
 //     candidates = bucket.filter(normalize(FundType) ∈ {Charge, outbound})  // ⚠️ 两类「值」，非方向过滤
 //       —— FundTransfer-in/out 命中行（步1标）不在内，不被步骤2 碰，保持 FundTransfer。
 //     for b in candidates:
-//       if gwForKey.some(amountEqual(g,b) && valuesEqual(g.currency,b.Currency)):
-//         b.FundType='outbound'（old!==目标才 record）                       // 命中 → outbound
+//       if (parseNumber(b.Credit Amount)||0)!==0: warning + 保持原值            // 出账方向守卫优先
+//       else if gwForKey.some(amountEqual(g,b) && valuesEqual(g.currency,b.Currency)):
+//         b.FundType='outbound'（old!==目标才 record）                          // 命中 → outbound
 //       else:
 //         b.FundType='Charge'（old!==Charge 才 record；已 Charge no-op）       // 未命中 → Charge（语义翻转）
 //
@@ -60,7 +62,8 @@
 //   - 步骤1 命中行标 FundTransfer-in/out（按调拨方向）；两阶段化保护所有命中行不被同 ReconID 归并覆盖。
 //   - 步骤1 归并仅【同 reconId + 不在命中行 Set + 非 Charge】+ 每改 record（review 点1）。
 //   - ReconciliationId 命中即覆盖（含非空原值，normalize 后非空才写）；usedBankRowIds 严格 1v1（review 点2）。
-//   - 步骤2 候选 = FundType ∈ {Charge, outbound}（两类值，非方向过滤）；命中→outbound、未命中→Charge（review 点3 新语义）。
+//   - 步骤2 仅索引固定 TradeType 白名单；非白名单-only 桶保持原值且不告警。
+//   - 步骤2 候选 = FundType ∈ {Charge, outbound}；先要求 Credit Amount=0，非0保持原值并告警；方向通过后命中→outbound、未命中→Charge。
 //   - 步骤2 用步骤1改后的新 ReconciliationId 自建网关索引（不复用 R1）。
 //   - 全 config 化（bankChannel / dispatchChannelValue / setFundTypeCharge / setFundTypeOutbound /
 //     chargeSiblingsScope）。chargeSiblingsScope='dbs-only'（默认，仅对 Channel=DBS 同 reconId 行置 Charge，
@@ -89,6 +92,7 @@ const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fiel
 const BANK_CHANNEL_FIELD = 'Channel';
 const BANK_MERCHANT_ID_FIELD = 'MerchantId';
 const BANK_CURRENCY_FIELD = 'Currency';
+const BANK_CREDIT_AMOUNT_FIELD = 'Credit Amount';
 const BANK_FUND_TYPE_FIELD = 'FundType';        // 🔴 改写目标列
 const BANK_RECON_ID_FIELD = 'ReconciliationId'; // 🔴 改写目标列
 const BANK_ROW_ID_FIELD = '_rowId';
@@ -96,6 +100,23 @@ const BANK_ROW_ID_FIELD = '_rowId';
 // —— 网关行字段名（真实小写表头）——
 const GW_RECON_ID_FIELD = 'reconciliationid';
 const GW_CURRENCY_FIELD = 'currency';
+const GW_TRADE_TYPE_FIELD = 'TradeType';
+
+// v3.0.21：步骤2 网关固定白名单。trim 后大小写敏感，非白名单行不进入 reconid 索引。
+const STEP2_GW_TRADE_TYPE_WHITELIST = new Set([
+  'AchReturn',
+  'ACQ_WITHDRAW',
+  'B2B_FLOW_GOLD',
+  'B2B_FLOW_GOLD_SUPPLIER',
+  'B2B_SUPPLIER',
+  'B2B_WITHDRAW',
+  'CUR_PAY',
+  'FX_WITHDRAW',
+  'HX_WITHDRAW',
+  'MPT_SUPPLIER',
+  'MPT_WITHDRAW',
+  'PUBLIC_PAY'
+]);
 
 // —— 调拨对账单字段名（经 FT_RECON_FIELD_MAP.recon.* 取，绝不手敲）——
 const DISP = FT_RECON_FIELD_MAP.recon;
@@ -143,11 +164,11 @@ function dispatchBankAmountEqual(dispRow, bankRow) {
  * R3.5：DBS-Charge 资金校验（🔴🔴）。对称模型两步：
  *   步骤1：调拨对账单 ↔ DBS 银行行严格 1v1（两阶段，防 in/out 同 ReconID 互相覆盖）—— 命中行 FundType 标为该调拨行
  *          fund_type（FundTransfer-in/out）+ 赋 ReconciliationId；同 ReconID 非命中行归并为 Charge。
- *   步骤2：用步骤1改后的新 ReconciliationId 关联网关行，对候选（FundType∈{Charge,outbound}）按 amount/currency 精确判定：
- *          命中 → outbound；未命中 → Charge（语义翻转，不再保持原值）。FundTransfer 命中行不在候选内、不被步骤2 碰。
+ *   步骤2：用步骤1改后的新 ReconciliationId 关联白名单网关行，对候选（FundType∈{Charge,outbound}）按 amount/currency 精确判定：
+ *          命中且 Credit Amount=0 → outbound；方向不符保持原值并告警；未命中 → Charge。FundTransfer 命中行不参与。
  *
- * @param {Array<Object>} gwRows             网关对账单行（全量，原引用，含 reconciliationid / amount / currency）。
- *                                            本引擎自建 reconciliationid 索引，不复用 R1 matchedGwRows。
+ * @param {Array<Object>} gwRows             网关对账单行（全量，原引用，含 reconciliationid / TradeType / amount / currency）。
+ *                                            步骤2 仅索引固定 TradeType 白名单，不复用 R1 matchedGwRows。
  * @param {Array<Object>} bankRows           R3 透传：全量银行行（原引用，含 Channel / MerchantId / Currency /
  *                                            Credit Amount / Debit Amount / FundType / ReconciliationId / _rowId）。
  * @param {Array<Object>} dispatchReconRows  需求1 调拨对账单派生行（含 付款渠道/收款渠道/big_account/币种/金额/ReconID）。
@@ -289,15 +310,17 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
   }
 
   // ============================================================
-  // 步骤2（对称模型）：网关 amount/currency 找真正 outbound 行；同 ID 未命中候选行归 Charge
+  // 步骤2（对称模型）：白名单网关 amount/currency 找真正 outbound 行；同 ID 未命中候选行归 Charge
   // ============================================================
-  //   gwByReconId：全量网关行按 normalize(reconciliationid) 分桶（空键跳过）。
+  //   gwByReconId：仅固定 TradeType 白名单网关行按 normalize(reconciliationid) 分桶（空键跳过）。
   //   bankByReconId：DBS 银行行按 normalize(ReconciliationId)【步骤1改后的新值】分桶（空键跳过）。
   //   ⚠️ 用步骤1改后的新 ReconciliationId 自建网关索引（不复用 R1 matchedGwRows）。
-  //   候选命中 → outbound；候选未命中 → Charge（语义翻转：不再保持原值）。
+  //   候选命中且 Credit Amount=0 → outbound；方向不符保持原值并告警；候选未命中 → Charge。
   //   FundTransfer-in/out 命中行（步骤1标）不在候选内（候选仅 {Charge,outbound}），不被步骤2 碰，保持 FundTransfer。
   const gwByReconId = new Map();
   for (const g of safeGwRows) {
+    const tradeType = normalizeCellValue(g && g[GW_TRADE_TYPE_FIELD]);
+    if (!STEP2_GW_TRADE_TYPE_WHITELIST.has(tradeType)) continue;
     const key = normalizeCellValue(g && g[GW_RECON_ID_FIELD]);
     if (key === '') continue; // 空键跳过
     if (!gwByReconId.has(key)) gwByReconId.set(key, []);
@@ -314,7 +337,7 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
 
   for (const [reconId, bucket] of bankByReconId) {
     const gwForKey = gwByReconId.get(reconId) || [];
-    if (gwForKey.length === 0) continue; // 该 reconId 网关侧无行 → 不动（保持步骤1 的 ReconciliationId/Charge）
+    if (gwForKey.length === 0) continue; // 该 reconId 无白名单网关行 → 不动（保持步骤1 后的 FundType）
 
     // candidates = FundType ∈ {setFundTypeCharge, setFundTypeOutbound}（⚠️ 两类「值」，非方向过滤）。
     const candidates = bucket.filter((b) => {
@@ -323,13 +346,25 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
     });
 
     for (const b of candidates) {
-      // 命中条件：网关桶内存在某行 amount 精确到分相等（复用 r5 amountEqual，读 gw.amount）且币种相等。
+      const oldFundType = normalizeCellValue(b[BANK_FUND_TYPE_FIELD]);
+
+      // v3.0.21：沿 R4 出账方向守卫口径，且先于金额/币种判定。
+      // 空/非法 Credit Amount 按0；非0时保持进入步骤2前的原值，不允许后续 outbound→Charge 回落。
+      if ((parseNumber(b[BANK_CREDIT_AMOUNT_FIELD]) || 0) !== 0) {
+        warningCollector.push({
+          rowId: b[BANK_ROW_ID_FIELD],
+          code: 'dbs-charge-fund-direction-mismatch',
+          message: `DBS 银行行(${b[BANK_ROW_ID_FIELD]}) 存在同对账ID白名单网关候选，但 ${BANK_CREDIT_AMOUNT_FIELD} 非0，方向不符，跳过步骤2 FundType 改写`
+        });
+        continue;
+      }
+
+      // 方向通过后再判命中：网关桶内存在某行 amount 精确到分相等且币种相等。
       const hit = gwForKey.some(
         (g) =>
           gwBankAmountEqual(g, b) &&
           valuesEqual(g && g[GW_CURRENCY_FIELD], b && b[BANK_CURRENCY_FIELD])
       );
-      const oldFundType = normalizeCellValue(b[BANK_FUND_TYPE_FIELD]);
 
       if (hit) {
         // 命中 → outbound（old!==目标才 record；已 outbound → no-op，步骤2 多笔幂等）。
