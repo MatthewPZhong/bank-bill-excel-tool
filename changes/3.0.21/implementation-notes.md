@@ -46,8 +46,11 @@
 | 完整单元测试 | `3716/3716 PASS`，227 个测试文件，0 失败 | 全模块单元回归 |
 | 完整集成测试 | 42 个脚本，`1955/1955 PASS` | 编排器、Excel 链路及既有资金流程回归 |
 | `npm run release-check` | PASS；lint、smoke、unit、integration 全部通过 | 发布自动门禁 |
-| `npm run scan:vars` | PASS；v3.0.21、196 个 JS 文件、2202 个顶层名称 | 重要变量统计刷新 |
+| `npm run scan:vars` | PASS；纯 v3.0.21 树为 195 个 JS 文件、2202 个顶层名称 | 重要变量统计刷新；排除后续 v3.0.22 未提交文件干扰 |
 | `npm run check:vars -- --include-minor` | 按设计返回退出码 2，命中 Risk-sensitive：`runRound5RefundOrderBackfill`、`STEP2_GW_TRADE_TYPE_WHITELIST`；无更高层级命中 | 要求关联功能 review，不代表测试失败 |
+| GitHub PR workflow | run `29747527965` PASS | 远端 Windows smoke 门禁 |
+| 最终 self-review | P0-P4 Finding 0 | 合并质量门 |
+| PR #96 | merge commit `3c44420e` 合入 `main`；远程与本地 3.0.21 开发分支删除 | 合并和分支收口 |
 
 ## Remaining Unknowns
 

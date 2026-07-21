@@ -1,8 +1,8 @@
 # bank-bill-excel-tool 3.0.21 PRD
 
 > 目标版本：`3.0.21`
-> 状态：review（PR #96）
-> 源规格：[`changes/3.0.21/spec.md`](../../../changes/3.0.21/spec.md)
+> 状态：merged（PR #96 已合入 `main`；GitHub Release 待发布）
+> 归档：PR #96 merge commit `3c44420e`；源规格 `changes/3.0.21/spec.md`
 > 更新时间：2026-07-20
 > 适用仓库：`bank-bill-excel-tool`
 
@@ -42,4 +42,9 @@ v3.0.21 修复两处资金性质判断边界：
 
 ## 4. 发布归档
 
-PR、merge commit、tag、Release workflow 和公开资产校验证据在完成后回写本节及 `docs/prs/PR96-v3.0.21.md`。
+- 隔离工作区最终 `npm run release-check` 通过：unit `3716/3716`、integration `1955/1955`，lint 与 smoke 全绿。
+- 纯 3.0.21 树 `scan:vars` 为 `195` 个 JS 文件、`2202` 个顶层名称；`check-vars` 只命中两个预期 Risk-sensitive 变量。
+- GitHub PR workflow run `29747527965` 通过；最终 self-review 为 P0-P4 Finding 0。
+- PR #96 于 2026-07-20 以 merge commit `3c44420e` 合入 `main`，远程与本地 3.0.21 开发分支删除。
+- PR 归档见 `docs/prs/PR96-v3.0.21.md`；tag、Release workflow 和公开资产校验证据待发布完成后补录。
+- 真实脱敏资金数据逐笔复核仍为发布后 follow-up，发布授权不等于人工验收通过。

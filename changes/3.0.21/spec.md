@@ -1,6 +1,6 @@
 # Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: review
+> status: merged（PR #96 已合入 `main`；v3.0.21 Release 待发布）
 > owner: PM / Dev
 > created: 2026-07-20
 > updated: 2026-07-20
@@ -116,3 +116,12 @@
 - 本迭代改变退款行和 DBS FundType 的处理去向，命中主键、网关类型和借贷方向均属于资金红线。
 - 自动测试、只读样本回放和代码 review 不能替代业务负责人对真实退款、DBS 白名单、金额币种及方向告警的人工确认。
 - 用户已明确授权在上述人工复核仍为待办的情况下执行本次发布；归档和发布说明必须继续披露该剩余风险，不得写成“人工验收通过”。
+
+## 8. 合并与发布记录
+
+- 2026-07-20：隔离工作区完整 `release-check` 通过，unit `3716/3716`、integration `1955/1955`，lint 与 smoke 全绿。
+- 2026-07-20：`scan:vars` 在纯 3.0.21 树中扫描 `195` 个 JS 文件、`2202` 个顶层名称；`check-vars` 仅命中两个预期 Risk-sensitive 变量。
+- 2026-07-20：最终 self-review 为 P0-P4 Finding 0；GitHub PR workflow run `29747527965` 通过。
+- 2026-07-20：PR #96 以 merge commit `3c44420e` 合入 `main`，远程与本地 3.0.21 开发分支删除。
+- 归档见 `docs/prs/PR96-v3.0.21.md` 与 `docs/iterations/v3.0.21/PRD-v3.0.21.md`。
+- `v3.0.21` tag、Release workflow 和公开升级资产证据待发布完成后补录。

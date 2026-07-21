@@ -1,6 +1,6 @@
 # Test Spec — v3.0.21 Ach Return 与 DBS-Charge 校验修复
 
-> status: review
+> status: merged-pass（Release workflow 待执行）
 > created: 2026-07-20
 > updated: 2026-07-20
 
@@ -63,3 +63,13 @@
 4. 运行 `npm run release-check`。
 5. 运行 `npm run scan:vars` 与 `npm run check:vars -- --include-minor`。
 6. 真实脱敏 DBS 与退款样本人工资金复核作为发布后跟进；用户已在知悉该项未完成后明确授权本次发布。
+
+## 7. 执行结果
+
+- 定向单元测试：`220/220 PASS`。
+- 完整门禁：unit `3716/3716 PASS`，42 个 integration 脚本 `1955/1955 PASS`，lint 与 smoke 均通过。
+- 变量门禁：纯 3.0.21 树扫描 `195` 个 JS 文件、`2202` 个顶层名称；仅命中 `runRound5RefundOrderBackfill` 与 `STEP2_GW_TRADE_TYPE_WHITELIST` 两个预期 Risk-sensitive 变量。
+- 受控本地问题样本只读回放：`Inbound-VA` 不再阻断退款，后续输出“精准命中”；业务标识未进入仓库。
+- GitHub PR workflow run `29747527965`：PASS；最终 self-review 为 P0-P4 Finding 0。
+- PR #96 已以 merge commit `3c44420e` 合入 `main`；Release workflow 待 tag 触发。
+- 真实脱敏资金数据逐笔复核仍为发布后 follow-up，不得宣称人工验收通过。

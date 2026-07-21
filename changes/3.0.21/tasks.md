@@ -37,3 +37,9 @@
 - 涉及文件：真实脱敏输入和导出结果。
 - 验证：资金负责人留下明确验收结论。
 - 状态：follow-up（用户于 2026-07-20 在知悉未完成人工逐笔复核后明确授权执行发布；不得宣称人工验收已通过）
+
+## Task 7 — 合并归档与在线发布
+- 目标：归档 PR #96 与 v3.0.21 PRD，创建受控 tag，并验证 Windows Release 与在线升级资产。
+- 涉及文件：`docs/prs/PR96-v3.0.21.md`、`docs/iterations/v3.0.21/PRD-v3.0.21.md` 及本迭代四份文档。
+- 验证：PR 为 MERGED、开发分支删除、tag 指向发布准备 commit、Release workflow 成功、公开资产与 `latest.yml` 一致。
+- 状态：in-progress（PR 合并与首轮归档完成，tag/Release 待执行）
