@@ -1,0 +1,307 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { DatabaseSync } = require('node:sqlite');
+
+const {
+  createArchiveRepository,
+  ensureArchiveMetadataSupport,
+  formatBatchNumber
+} = require('../../../../src/backend/database/archive-repository');
+
+const HASH_A = 'a'.repeat(64);
+const HASH_B = 'b'.repeat(64);
+
+function createFixture() {
+  let currentTime = new Date('2026-07-20T12:00:00.000Z');
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const repository = createArchiveRepository(db, {
+    now: () => currentTime
+  });
+  repository.ensureSchema();
+  return {
+    db,
+    repository,
+    setTime(value) {
+      currentTime = new Date(value);
+    }
+  };
+}
+
+function createBatch(repository, overrides = {}) {
+  return repository.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '网银账单',
+    operationKey: `operation-${Math.random()}`,
+    localDate: '2026-07-20',
+    retentionUntil: '2026-10-18',
+    ...overrides
+  });
+}
+
+function addArtifact(repository, batchId, overrides = {}) {
+  return repository.addArtifact(batchId, {
+    artifactKey: `artifact-${Math.random()}`,
+    direction: 'input',
+    role: 'source-file',
+    sourceOperation: 'import',
+    originalName: 'source.xlsx',
+    sourcePath: '/private/source.xlsx',
+    ...overrides
+  });
+}
+
+test('建表幂等，批次按模块代码和本地日期生成独立流水号', () => {
+  const fixture = createFixture();
+  const { db, repository } = fixture;
+  try {
+    const first = createBatch(repository, { operationKey: 'same-operation' });
+    const second = createBatch(repository, { operationKey: 'second-operation' });
+    const idempotent = createBatch(repository, { operationKey: 'same-operation' });
+    const otherModule = createBatch(repository, {
+      moduleId: 'duplicate-inbound',
+      moduleCode: 'DUP',
+      moduleName: '重复入金',
+      operationKey: 'duplicate-operation'
+    });
+    const nextDate = createBatch(repository, {
+      operationKey: 'next-date-operation',
+      localDate: '2026-07-21',
+      retentionUntil: '2026-10-19'
+    });
+
+    assert.equal(first.created, true);
+    assert.equal(first.batch.batchNumber, 'BANK-20260720-001');
+    assert.equal(first.batch.dailySequence, 1);
+    assert.equal(second.batch.batchNumber, 'BANK-20260720-002');
+    assert.equal(otherModule.batch.batchNumber, 'DUP-20260720-001');
+    assert.equal(nextDate.batch.batchNumber, 'BANK-20260721-001');
+    assert.equal(idempotent.created, false);
+    assert.equal(idempotent.batch.id, first.batch.id);
+    assert.equal(repository.listBatches().length, 4);
+
+    assert.doesNotThrow(() => ensureArchiveMetadataSupport(db));
+    assert.equal(repository.getBatch(first.batch.id).batchNumber, 'BANK-20260720-001');
+    assert.equal(formatBatchNumber('mpt', '2026-07-20', 12), 'MPT-20260720-012');
+
+    const tables = new Set(db.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name LIKE 'archive_%'
+    `).all().map((row) => row.name));
+    assert.deepEqual(
+      [...tables].sort(),
+      ['archive_artifacts', 'archive_batch_sequences', 'archive_batches', 'archive_blobs']
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('删除当天最大批次后流水号不复用，跨模块列表按建批先后倒序', () => {
+  const { db, repository } = createFixture();
+  try {
+    const first = repository.createBatch({
+      moduleId: 'module-a',
+      moduleCode: 'A',
+      moduleName: '模块 A',
+      localDate: '2026-07-20'
+    }).batch;
+    const second = repository.createBatch({
+      moduleId: 'module-b',
+      moduleCode: 'B',
+      moduleName: '模块 B',
+      localDate: '2026-07-20'
+    }).batch;
+    const third = repository.createBatch({
+      moduleId: 'module-a',
+      moduleCode: 'A',
+      moduleName: '模块 A',
+      localDate: '2026-07-20'
+    }).batch;
+
+    assert.equal(first.batchNumber, 'A-20260720-001');
+    assert.equal(second.batchNumber, 'B-20260720-001');
+    assert.equal(third.batchNumber, 'A-20260720-002');
+    assert.equal(repository.deleteBatch(third.id).status, 'deleted');
+
+    const fourth = repository.createBatch({
+      moduleId: 'module-a',
+      moduleCode: 'A',
+      moduleName: '模块 A',
+      localDate: '2026-07-20'
+    }).batch;
+    assert.equal(fourth.batchNumber, 'A-20260720-003');
+    assert.deepEqual(
+      repository.listBatches({ localDate: '2026-07-20' }).map((batch) => batch.id),
+      [fourth.id, second.id, first.id]
+    );
+    assert.deepEqual(
+      repository.listBatches({ batchNumberContains: '20260720-003' }).map((batch) => batch.id),
+      [fourth.id]
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 blob', () => {
+  const { db, repository } = createFixture();
+  try {
+    const firstBatch = createBatch(repository, { operationKey: 'dedup-first' }).batch;
+    const secondBatch = createBatch(repository, { operationKey: 'dedup-second' }).batch;
+    const firstArtifact = addArtifact(repository, firstBatch.id, { artifactKey: 'input-1' });
+    const secondArtifact = addArtifact(repository, secondBatch.id, { artifactKey: 'input-2' });
+
+    assert.equal(repository.getArtifactByKey(firstBatch.id, 'input-1').id, firstArtifact.id);
+    assert.equal(repository.getArtifactByKey(firstBatch.id, 'missing'), null);
+
+    repository.startArtifactAttempt(firstArtifact.id);
+    const firstComplete = repository.completeArtifact(firstArtifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    });
+    repository.startArtifactAttempt(secondArtifact.id);
+    const secondComplete = repository.completeArtifact(secondArtifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    });
+
+    assert.equal(firstComplete.deduplicated, false);
+    assert.equal(secondComplete.deduplicated, true);
+    assert.equal(repository.getBatch(firstBatch.id).archiveStatus, 'complete');
+    assert.equal(repository.findBlobByHash(HASH_A).referenceCount, 2);
+    assert.deepEqual(repository.getStats(), {
+      batchCount: 2,
+      lockedBatchCount: 0,
+      logicalFileCount: 2,
+      failedFileCount: 0,
+      uniqueFileCount: 1,
+      uniqueBytes: 5,
+      logicalBytes: 10
+    });
+
+    const firstDelete = repository.deleteBatch(firstBatch.id);
+    assert.equal(firstDelete.status, 'deleted');
+    assert.equal(firstDelete.releasedBlobs.length, 0);
+    assert.equal(repository.findBlobByHash(HASH_A).referenceCount, 1);
+
+    repository.setLocked(secondBatch.id, true);
+    const lockedDelete = repository.deleteBatch(secondBatch.id);
+    assert.equal(lockedDelete.status, 'locked');
+    assert.ok(repository.getBatch(secondBatch.id));
+
+    repository.setLocked(secondBatch.id, false);
+    const finalDelete = repository.deleteBatch(secondBatch.id);
+    assert.equal(finalDelete.status, 'deleted');
+    assert.equal(finalDelete.releasedBlobs.length, 1);
+    assert.equal(finalDelete.releasedBlobs[0].sha256, HASH_A);
+    assert.equal(repository.findBlobByHash(HASH_A), null);
+  } finally {
+    db.close();
+  }
+});
+
+test('失败和重试保留累计元数据，最终完成后恢复批次完成态', () => {
+  const fixture = createFixture();
+  const { db, repository, setTime } = fixture;
+  try {
+    const batch = createBatch(repository, { operationKey: 'retry-operation' }).batch;
+    const artifact = addArtifact(repository, batch.id, { artifactKey: 'retry-file' });
+
+    const interrupted = repository.markInterruptedArtifacts();
+    assert.equal(interrupted.artifactCount, 1);
+    assert.equal(repository.getArtifact(artifact.id).status, 'failed');
+    assert.equal(repository.getBatch(batch.id).failureCount, 1);
+
+    setTime('2026-07-20T12:01:00.000Z');
+    repository.beginBatchRetry(batch.id);
+    repository.startArtifactAttempt(artifact.id, { sourcePath: '/private/retry.xlsx' });
+    const failed = repository.failArtifact(artifact.id, {
+      code: 'ARCHIVE_EBUSY',
+      message: '文件暂时被占用',
+      sourceOperation: 'export'
+    });
+    assert.equal(failed.artifact.attemptCount, 1);
+    assert.equal(failed.batch.failureCount, 2);
+    assert.equal(failed.batch.retryCount, 1);
+    assert.equal(failed.batch.archiveStatus, 'incomplete');
+    assert.equal(failed.batch.lastFailedOperation, 'export');
+
+    setTime('2026-07-20T12:02:00.000Z');
+    repository.beginBatchRetry(batch.id);
+    repository.startArtifactAttempt(artifact.id);
+    const completed = repository.completeArtifact(artifact.id, {
+      sha256: HASH_B,
+      sizeBytes: 8,
+      relativePath: `blobs/sha256/bb/${HASH_B}`
+    });
+
+    assert.equal(completed.artifact.status, 'ready');
+    assert.equal(completed.artifact.attemptCount, 2);
+    assert.equal(completed.batch.archiveStatus, 'complete');
+    assert.equal(completed.batch.failureCount, 2);
+    assert.equal(completed.batch.retryCount, 2);
+    assert.equal(completed.batch.lastErrorCode, '');
+  } finally {
+    db.close();
+  }
+});
+
+test('过期清理只选中保留日早于当前日且未锁定的批次', () => {
+  const { db, repository } = createFixture();
+  try {
+    const expired = createBatch(repository, {
+      operationKey: 'expired',
+      localDate: '2026-07-01',
+      retentionUntil: '2026-07-19'
+    }).batch;
+    createBatch(repository, {
+      operationKey: 'inclusive-boundary',
+      localDate: '2026-07-01',
+      retentionUntil: '2026-07-20'
+    });
+    createBatch(repository, {
+      operationKey: 'locked-expired',
+      localDate: '2026-07-01',
+      retentionUntil: '2026-07-10',
+      locked: true
+    });
+    createBatch(repository, {
+      operationKey: 'permanent',
+      localDate: '2026-07-01',
+      retentionUntil: null
+    });
+
+    const candidates = repository.listExpiredBatches('2026-07-20');
+    assert.deepEqual(candidates.map((batch) => batch.id), [expired.id]);
+  } finally {
+    db.close();
+  }
+});
+
+test('启动修复将断裂 ready 引用改为可重试失败态', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'dangling' }).batch;
+    const artifact = addArtifact(repository, batch.id, { artifactKey: 'dangling-file' });
+    db.prepare(`
+      UPDATE archive_artifacts
+      SET status = 'ready', blob_id = NULL, archived_at = updated_at
+      WHERE id = ?
+    `).run(artifact.id);
+
+    const repaired = repository.repairDanglingArtifactReferences();
+    assert.equal(repaired.artifactCount, 1);
+    assert.deepEqual(repaired.batchIds, [batch.id]);
+    assert.equal(repository.getArtifact(artifact.id).status, 'failed');
+    assert.equal(repository.getArtifact(artifact.id).lastErrorCode, 'ARCHIVE_REFERENCE_INVALID');
+    assert.equal(repository.getBatch(batch.id).archiveStatus, 'incomplete');
+  } finally {
+    db.close();
+  }
+});

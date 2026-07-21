@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
+const { AsyncLocalStorage } = require('node:async_hooks');
 const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
@@ -26,6 +27,19 @@ const {
   createBusinessOperationRegistry,
   INSTALL_BUSY_MESSAGE
 } = require('./main-process/business-operation-registry');
+const {
+  createArchiveOperationTracker,
+  selectSuccessfulPathsByResultIndex
+} = require('./main-process/archive-center/operation-tracker');
+const {
+  captureArchiveSourceSnapshots
+} = require('./main-process/archive-center/source-snapshot');
+const {
+  createArchiveService
+} = require('./main-process/archive-center/archive-service');
+const {
+  createArchiveCenterController
+} = require('./main-process/archive-center/controller');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
@@ -382,6 +396,10 @@ let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
+let archiveCenterService = null;
+let archiveOperationTracker = null;
+let archiveOperationTail = Promise.resolve();
+const archiveOperationContext = new AsyncLocalStorage();
 const businessOperationRegistry = createBusinessOperationRegistry();
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
@@ -442,14 +460,23 @@ let startupMetricsReported = false;
 // renderer 首次 app:get-info 时读取并用 error tone 显示状态栏告警
 let lastOwnAccountsMigrationError = null;
 
-function showImportOpenDialog(scope, options) {
-  return showRememberedImportOpenDialog({
+async function showImportOpenDialog(scope, options) {
+  const result = await showRememberedImportOpenDialog({
     dialog,
     browserWindow: mainWindow,
     db: database && database.db,
     scope,
     options
   });
+  const context = archiveOperationContext.getStore();
+  if (context && result && !result.canceled && Array.isArray(result.filePaths)) {
+    context.dialogSelections.push({
+      scope,
+      filePaths: result.filePaths.slice(),
+      properties: Array.isArray(options && options.properties) ? options.properties.slice() : []
+    });
+  }
+  return result;
 }
 
 // v2.1.6 fix3 → fix9 → fix10：收单单据币种校验模块的通用 operation lock
@@ -3440,6 +3467,97 @@ function registerAppUpdateHandlers() {
   });
 }
 
+function archiveCenterUnavailableResult() {
+  return {
+    status: 'failed',
+    code: 'ARCHIVE_CENTER_NOT_READY',
+    message: '存档中心正在初始化，请稍后重试'
+  };
+}
+
+function callArchiveCenter(method, ...args) {
+  if (!archiveCenterService || typeof archiveCenterService[method] !== 'function') {
+    return archiveCenterUnavailableResult();
+  }
+  return archiveCenterService[method](...args);
+}
+
+function registerArchiveCenterHandlers() {
+  ipcMain.handle('archive-center:list-batches', (_event, filters) => {
+    return callArchiveCenter('listBatches', filters || {});
+  });
+  ipcMain.handle('archive-center:get-batch', (_event, batchId) => {
+    return callArchiveCenter('getBatch', batchId);
+  });
+  ipcMain.handle('archive-center:open-file', (_event, fileRefId) => {
+    return callArchiveCenter('openFile', fileRefId);
+  });
+  ipcMain.handle('archive-center:save-as', (_event, fileRefId) => {
+    return callArchiveCenter('saveAs', fileRefId);
+  });
+  ipcMain.handle('archive-center:set-locked', (_event, batchId, locked) => {
+    if (typeof locked !== 'boolean') {
+      return { status: 'failed', message: '批次锁定状态无效' };
+    }
+    return callArchiveCenter('setLocked', batchId, locked);
+  });
+  ipcMain.handle('archive-center:delete-batch', (_event, batchId) => {
+    return callArchiveCenter('deleteBatch', batchId);
+  });
+  ipcMain.handle('archive-center:retry-batch', (_event, batchId) => {
+    return callArchiveCenter('retryBatch', batchId);
+  });
+  ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
+  ipcMain.handle('archive-center:set-retention-days', (_event, retentionDays) => {
+    return callArchiveCenter('setRetentionDays', retentionDays);
+  });
+  ipcMain.handle('archive-center:list-template-policies', () => {
+    return callArchiveCenter('listTemplatePolicies');
+  });
+  ipcMain.handle('archive-center:set-template-excluded', (_event, templateId, excluded) => {
+    if (typeof excluded !== 'boolean') {
+      return { status: 'failed', message: '模板存档策略无效' };
+    }
+    return callArchiveCenter('setTemplateExcluded', templateId, excluded);
+  });
+  ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
+}
+
+function initializeArchiveCenter() {
+  if (archiveCenterService || !database || !database.db) return archiveCenterService;
+  const archiveRoot = path.join(ensureStorageRoot(), '存档中心');
+  const service = createArchiveService({
+    database: database.db,
+    rootDir: archiveRoot,
+    opener: (filePath) => shell.openPath(filePath)
+  });
+  archiveCenterService = createArchiveCenterController({
+    database,
+    service,
+    showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
+    logWarning: (message, detail) => {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'archive-center',
+        message,
+        details: detail ? [String(detail)] : []
+      });
+    }
+  });
+  archiveOperationTracker = createArchiveOperationTracker({ sink: archiveCenterService.sink });
+  archiveCenterService.initialize().catch((error) => {
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'archive-center',
+      message: '存档中心初始化失败，业务功能继续可用',
+      details: [error && error.message ? error.message : String(error)]
+    });
+  });
+  return archiveCenterService;
+}
+
 function registerAppHandlers() {
   ipcMain.handle('app:get-info', () => {
     // v3.0.5 PR-5（Part B Phase 3）：两段式——init 未完（新时序窗口先行，database 尚未 init）→ 返回 loading 骨架。
@@ -3923,12 +4041,12 @@ function registerAppHandlers() {
       // 扫描缺失渠道（非 builtin 且库内不存在）— 二阶段确认核心数据
       const allChannels = database.listChannels();
       const channelKeyToRecord = new Map(
-        allChannels.map((c) => [`${c.name} ${c.ownerLocation}`, c])
+        allChannels.map((c) => [`${c.name}\u0000${c.ownerLocation}`, c])
       );
       const missingChannels = [];
       for (const ch of bundle.channels) {
         if (ch.isBuiltin) continue;
-        const key = `${ch.name} ${ch.ownerLocation}`;
+        const key = `${ch.name}\u0000${ch.ownerLocation}`;
         if (!channelKeyToRecord.has(key)) {
           missingChannels.push({ name: ch.name, ownerLocation: ch.ownerLocation });
         }
@@ -4819,6 +4937,9 @@ function registerAppHandlers() {
       reconIdFixResult = {
         scenarioId: scenario.id,
         scenarioName: scenario.name,
+        originModuleId: payload && payload.originModuleId === 'bank-statement-process'
+          ? 'bank-statement-process'
+          : 'recon-id-fix',
         fixedRows: result.fixedRows,
         warnings: result.warnings,
         unmatchedRows: result.unmatchedRows || [],   // Round 3：落 unmatched
@@ -10970,6 +11091,12 @@ function registerFileHandlers() {
         fileName: publicFileName,
         templateScope: assembleScope,
         templateLabel,
+        templateIds: Array.from(new Set(
+          assembled.records.map((record) => {
+            const matched = assembled.templates.find((template) => template.name === record.templateName);
+            return matched ? Number(matched.id) : 0;
+          }).filter((templateId) => Number.isInteger(templateId) && templateId > 0)
+        )),
         year: yearRaw,
         month: monthRaw,
         recordCount: assembled.records.length
@@ -13718,10 +13845,17 @@ function registerPreFundReconciliationHandlers() {
     const lock = tryAcquireBankStatementOpLock('pre-fund-repair-mpt-errors');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return await getPreFundReconciliationService().retryMptImportFailures(
+      const service = getPreFundReconciliationService();
+      const sourcePaths = service.resolveMptImportFailures(repairTokens).map((failure) => failure.filePath);
+      const result = await service.retryMptImportFailures(
         repairTokens,
         (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
       );
+      Object.defineProperty(result, 'archivedSourcePaths', {
+        value: selectSuccessfulPathsByResultIndex(sourcePaths, result.results),
+        enumerable: false
+      });
+      return result;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
@@ -14380,6 +14514,197 @@ function tickUsageStats(moduleKey, functionKey) {
 //   `status: 'success'`，导致统计偏低 → 同时接受两种方言（不接受 ready / empty 中间态）
 const SUCCESS_STATUSES = new Set(['ok', 'success']);
 
+function archiveOutputPaths(files) {
+  const values = Array.isArray(files) ? files : [];
+  const seen = new Set();
+  const output = [];
+  for (const item of values) {
+    const filePath = typeof item === 'string' ? item : item && item.filePath;
+    const normalized = String(filePath || '').trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(normalized);
+  }
+  return output;
+}
+
+function archiveResultSnapshot(result) {
+  if (!result || typeof result !== 'object') return result;
+  const snapshot = {};
+  const scalarKeys = [
+    'status', 'detailReady', 'balanceReady', 'runId', 'mirrorId', 'id',
+    'filePath', 'savedPath', 'savePath', 'mainFilePath', 'hitRowsReportPath',
+    'platformCleanupPath', 'refundBackfillPath', 'unmatchedFilePath',
+    'diffFilePath', 'reportFilePath'
+  ];
+  for (const key of scalarKeys) {
+    const value = result[key];
+    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
+      snapshot[key] = value;
+    }
+  }
+  if (Array.isArray(result.results)) {
+    snapshot.results = result.results.map((item) => {
+      if (!item || typeof item !== 'object') return {};
+      return {
+        fileName: item.fileName,
+        status: item.status,
+        tableKey: item.tableKey,
+        outcome: item.outcome,
+        rowCount: item.rowCount,
+        alsoLinked: item.alsoLinked && typeof item.alsoLinked === 'object'
+          ? { error: item.alsoLinked.error || '', rowCount: item.alsoLinked.rowCount }
+          : item.alsoLinked
+      };
+    });
+  }
+  if (Array.isArray(result.files)) {
+    snapshot.files = result.files.map((item) => (
+      typeof item === 'string'
+        ? item
+        : { filePath: item && (item.filePath || item.savedPath || item.path) }
+    ));
+  }
+  return snapshot;
+}
+
+function statementArchiveRuntime() {
+  const session = getCurrentStatementSession();
+  const fileEntries = session ? getStatementSessionEntries(session, 'current') : [];
+  const inputPaths = lastFileImportContext && Array.isArray(lastFileImportContext.inputFilePaths)
+    ? lastFileImportContext.inputFilePaths.slice()
+    : fileEntries.map((entry) => entry && entry.filePath).filter(Boolean);
+  const templateIds = new Set();
+  const contextTemplateId = Number(lastFileImportContext && lastFileImportContext.templateId);
+  if (Number.isInteger(contextTemplateId) && contextTemplateId > 0) templateIds.add(contextTemplateId);
+  for (const entry of fileEntries) {
+    const templateId = Number(entry && entry.matchedTemplateId);
+    if (Number.isInteger(templateId) && templateId > 0) templateIds.add(templateId);
+  }
+  const detail = getGeneratedStatementExport('detail', 'current') || lastGeneratedExports.detail;
+  const balance = getGeneratedStatementExport('balance', 'current') || lastGeneratedExports.balance;
+  const ids = Array.from(templateIds);
+  return {
+    inputPaths,
+    outputPaths: archiveOutputPaths([detail, balance]),
+    templateIds: ids,
+    templateNames: ids.map((templateId) => database && database.getTemplate(templateId))
+      .filter(Boolean)
+      .map((template) => template.name),
+    skipArchive: Boolean(
+      archiveCenterService
+      && typeof archiveCenterService.hasExcludedTemplate === 'function'
+      && archiveCenterService.hasExcludedTemplate(ids)
+    )
+  };
+}
+
+async function buildArchiveRuntimeSnapshot(channel, args, result) {
+  if (channel === 'file:import'
+      || channel === 'file:complete-big-account-selection'
+      || channel === 'file:save-balance-seed') {
+    return statementArchiveRuntime();
+  }
+  if (channel === 'monthly-balance:assemble') {
+    const pending = lastGeneratedExports.monthlyBalance;
+    const templateIds = pending && Array.isArray(pending.templateIds) ? pending.templateIds : [];
+    return {
+      outputPaths: archiveOutputPaths([pending]),
+      templateIds,
+      skipArchive: Boolean(
+        archiveCenterService
+        && typeof archiveCenterService.hasExcludedTemplate === 'function'
+        && archiveCenterService.hasExcludedTemplate(templateIds)
+      ),
+      metadata: pending ? {
+        year: pending.year,
+        month: pending.month,
+        templateScope: pending.templateScope
+      } : {}
+    };
+  }
+  if (channel === 'new-account:generate') {
+    return { outputPaths: archiveOutputPaths([lastGeneratedExports.newAccount]) };
+  }
+  if (channel === 'bank-statement:run' || channel === 'bank-statement:export') {
+    return { runKey: processingResult && processingResult.runId };
+  }
+  if (channel === 'recon-id-fix:run' || channel === 'recon-id-fix:export') {
+    return {
+      runKey: reconIdFixResult && reconIdFixResult.ranAt,
+      originModuleId: reconIdFixResult && reconIdFixResult.originModuleId
+    };
+  }
+  if (channel === 'pre-fund-reconciliation:mpt-errors:repair') {
+    const paths = result && Array.isArray(result.archivedSourcePaths) ? result.archivedSourcePaths : [];
+    return { inputPaths: paths };
+  }
+  return {};
+}
+
+function reportArchiveFailure(warning) {
+  const message = warning && warning.message ? warning.message : '存档副本写入失败';
+  appendActivityLogEntry({
+    level: 'warning',
+    source: 'main',
+    domain: 'archive-center',
+    message: '业务已成功，但存档失败，可在存档中心重试',
+    details: [message]
+  });
+  try {
+    if (Notification && typeof Notification.isSupported === 'function' && Notification.isSupported()) {
+      new Notification({
+        title: '存档中心',
+        body: '业务文件已正常生成，但存档失败，请打开存档中心重试。'
+      }).show();
+    }
+  } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
+}
+
+async function runArchiveAwareOperation(meta, event, args, handler) {
+  if (!archiveOperationTracker || !archiveOperationTracker.supportsChannel(meta.channel)) {
+    return handler(event, ...args);
+  }
+  const context = { dialogSelections: [] };
+  return archiveOperationContext.run(context, async () => {
+    const result = await handler(event, ...args);
+
+    const selectedPaths = context.dialogSelections.flatMap((selection) => selection.filePaths || []);
+    let runtime;
+    try {
+      runtime = await buildArchiveRuntimeSnapshot(meta.channel, args, result);
+      runtime.sourceSnapshots = captureArchiveSourceSnapshots({
+        args,
+        result,
+        selectedPaths,
+        runtime
+      });
+    } catch (error) {
+      reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
+      return result;
+    }
+
+    archiveOperationTail = archiveOperationTail
+      .then(() => archiveOperationTracker.handleOperation({
+        channel: meta.channel,
+        args,
+        result: archiveResultSnapshot(result),
+        selectedPaths,
+        runtime
+      }))
+      .then((archiveResult) => {
+        if (archiveResult && archiveResult.archiveFailed === true) {
+          reportArchiveFailure(archiveResult.warning);
+        }
+      })
+      .catch((error) => {
+        reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
+      });
+
+    return result;
+  });
+}
+
 function runRegisteredBusinessOperation(meta, handler) {
   return async (event, ...args) => {
     const operation = businessOperationRegistry.begin(meta);
@@ -14398,12 +14723,16 @@ function runRegisteredBusinessOperation(meta, handler) {
 }
 
 function businessIpcHandle(channel, label, handler) {
-  ipcMain.handle(channel, runRegisteredBusinessOperation({ channel, functionKey: label }, handler));
+  const meta = { channel, functionKey: label };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, (event, ...args) => {
+    return runArchiveAwareOperation(meta, event, args, handler);
+  }));
 }
 
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
-  ipcMain.handle(channel, runRegisteredBusinessOperation({ channel, moduleKey, functionKey }, async (event, ...args) => {
-    const result = await handler(event, ...args);
+  const meta = { channel, moduleKey, functionKey };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
+    const result = await runArchiveAwareOperation(meta, event, args, handler);
     if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }
@@ -14489,6 +14818,7 @@ function registerAllIpcHandlers() {
   registerWindowHandlers();
   registerAppHandlers();
   registerAppUpdateHandlers();
+  registerArchiveCenterHandlers();
   registerErrorHandlers();
   registerBackgroundHandlers();
   registerAccountMappingHandlers();
@@ -14519,6 +14849,7 @@ function runBackgroundInitChain() {
     database = new AppDatabase(dataPath);
     database.init();
     initializeAppUpdaterService();
+    initializeArchiveCenter();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
@@ -15323,6 +15654,21 @@ async function prepareApplicationForQuit() {
 
   quitPreparationPromise = (async () => {
     if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
+
+    const archiveDrainTimer = setTimeout(() => {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'archive-center',
+        message: '退出等待存档任务已超过 5 秒，完成后将继续退出'
+      });
+    }, 5000);
+    if (archiveDrainTimer.unref) archiveDrainTimer.unref();
+    try {
+      await archiveOperationTail;
+    } finally {
+      clearTimeout(archiveDrainTimer);
+    }
 
     const pendingRuns = listPendingCleanupRunsForQuit();
     const failures = [];
