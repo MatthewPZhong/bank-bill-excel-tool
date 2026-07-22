@@ -51,6 +51,10 @@
 | 发布前启动性能 | PASS | 5 次建窗到可见平均 `99.058ms`，ready-to-show 平均 `170.467ms` |
 | 发布前变量硬节点 | PASS | `scan:vars` 为 202/2324；`check:vars -- --include-minor` 因 `src` 无改动安全跳过 |
 | 生产依赖审计 | 7 条既有告警 | 2 moderate、5 high；v3.0.24 未新增生产依赖，保留为依赖治理 follow-up |
+| annotated tag | `v3.0.24` → `f516a9f` | tag 精确指向已推送 `main` 的发布准备提交 |
+| Windows Release workflow | run `29938081301` PASS | 15m54s；远端 release-check、几何、构建、包检查、更新资产校验及发布后验证全部通过 |
+| GitHub Release | `v3.0.24` latest | 非 draft、非 prerelease；Setup、blockmap、portable、`latest.yml` 四资产 uploaded |
+| 公开更新资产回读 | PASS | `latest.yml` SHA-256 `3c162df0...e9130` 与元数据一致；Setup/portable 匿名 Range 文件头均为 `MZ` |
 
 ## Remaining Unknowns
 

@@ -1,6 +1,6 @@
 # Spec — v3.0.24 平盘对账前端与 Payment 多大账号支持
 
-> status: release-ready（PR #99 已合入 main；发布门禁通过；Release 待发布；human-fund-review-pending）
+> status: released（PR #99 已合入 main；GitHub Release v3.0.24 已发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-22
 > updated: 2026-07-22
@@ -119,5 +119,7 @@
 - 合并归档后的 `main` 已在干净 `npm ci` 依赖上重新通过 release-check、主页面几何 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
 - 发布门禁启动建窗到可见平均 `99.058ms`；变量扫描仍为 202 个 JS 文件、2324 个顶层声明。
 - 生产依赖审计仍有既有 7 条告警（2 moderate、5 high）；本迭代未新增生产依赖，保留为依赖治理 follow-up。
-- `v3.0.24` tag、Windows Release 和公开资产验证待补充。
+- annotated tag `v3.0.24` 指向 `f516a9fd288b5be1a553ddc8e9935ca7a4670d8d`；Windows Release workflow run `29938081301` 全部通过。
+- GitHub Release `v3.0.24` 已成为 latest、非 draft、非 prerelease，并发布 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 匿名 Range 回读确认 Setup/portable 文件头均为 `MZ`；`latest.yml` 版本、路径、Setup 大小与 SHA-512 契约有效，SHA-256 与 GitHub 元数据一致。
 - 真实或脱敏双大账号逐笔复核继续标记为 `human-fund-review-pending`，不因合并或发布自动关闭。

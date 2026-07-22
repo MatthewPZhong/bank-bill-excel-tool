@@ -1,6 +1,6 @@
 # Test Spec — v3.0.24 平盘对账前端与 Payment 多大账号支持
 
-> status: release-ready-pass（PR #99 已合并；发布门禁通过；Release 待发布；人工资金复核待完成）
+> status: released-pass（PR #99 已合并；GitHub Release v3.0.24 已发布；人工资金复核待完成）
 > created: 2026-07-22
 > updated: 2026-07-22
 
@@ -77,4 +77,6 @@
 - 干净 `npm ci` 后重新执行 release-check：unit `3813/3813`、integration `1963/1963`，lint 与 smoke PASS。
 - 发布前主页面几何 `6/6 PASS`；启动建窗到可见平均 `99.058ms`；`scan:vars` 与 `check:vars -- --include-minor` PASS。
 - `npm audit --omit=dev` 报告既有 7 条生产依赖告警（2 moderate、5 high）；本迭代无生产依赖变更。
-- tag、Release workflow 和公开资产证据待补充。
+- annotated tag `v3.0.24` 指向发布准备提交 `f516a9f`；Windows Release workflow run `29938081301` PASS。
+- Release 为 latest、非 draft、非 prerelease；四个约定资产均已上传。
+- 匿名 `latest.yml` 回读为 371 字节，SHA-256 与 GitHub 元数据一致；Setup/portable Range 回读均为 `MZ`。
