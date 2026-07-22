@@ -83,6 +83,7 @@ function measurePage(expectedScaleFactor) {
     ['bankStatementModulePanel', 'bankStatementStatusBox'],
     ['preFundReconciliationModulePanel', 'preFundReconciliationStatusBox'],
     ['reconIdFixModulePanel', 'reconIdFixStatusBox'],
+    ['positionReconciliationModulePanel', 'positionReconciliationStatusBox'],
     ['acquiringBillCurrencyModulePanel', 'acquiringBillCurrencyStatusBox']
   ];
   const controlIds = [
@@ -90,7 +91,8 @@ function measurePage(expectedScaleFactor) {
     'bizOpReconBuSelect',
     'preFundReconciliationScenarioSelect',
     'reconIdFixBillCategorySelect',
-    'reconIdFixScenarioSelect'
+    'reconIdFixScenarioSelect',
+    'positionReconciliationFunctionSelect'
   ];
   const failures = [];
   const metrics = {
@@ -176,6 +178,41 @@ function measurePage(expectedScaleFactor) {
     const controlDelta = Math.max(...deltas);
     metrics.maxControlDelta = Math.max(metrics.maxControlDelta, controlDelta);
     if (controlDelta > tolerance) failures.push(`${controlId}: control delta ${controlDelta}`);
+  }
+
+  showPanel('positionReconciliationModulePanel');
+  const positionPanel = document.getElementById('positionReconciliationModulePanel');
+  const positionControlIds = [
+    'positionReconciliationFunctionSelect',
+    'positionReconciliationRunBtn',
+    'positionReconciliationTableManagerBtn',
+    'positionReconciliationLinkedTableManagerBtn',
+    'positionReconciliationConfigBtn',
+    'positionReconciliationExportBtn',
+    'positionReconciliationStatusBox'
+  ];
+  const positionRects = positionControlIds.map((id) => {
+    const element = document.getElementById(id);
+    if (!element) {
+      failures.push(`${id}: missing position reconciliation control`);
+      return null;
+    }
+    const rect = element.getBoundingClientRect();
+    if (!inside(rect, positionPanel.getBoundingClientRect())) {
+      failures.push(`${id}: outside position reconciliation panel`);
+    }
+    return { id, rect };
+  }).filter(Boolean);
+  for (let leftIndex = 0; leftIndex < positionRects.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < positionRects.length; rightIndex += 1) {
+      const left = positionRects[leftIndex];
+      const right = positionRects[rightIndex];
+      const overlapWidth = Math.min(left.rect.right, right.rect.right) - Math.max(left.rect.left, right.rect.left);
+      const overlapHeight = Math.min(left.rect.bottom, right.rect.bottom) - Math.max(left.rect.top, right.rect.top);
+      if (overlapWidth > tolerance && overlapHeight > tolerance) {
+        failures.push(`${left.id}/${right.id}: controls overlap`);
+      }
+    }
   }
 
   showPanel('bankStatementModulePanel');

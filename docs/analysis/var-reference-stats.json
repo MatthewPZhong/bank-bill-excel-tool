@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.0.23",
-    "scannedAt": "2026-07-21T17:25:30.970Z",
+    "version": "3.0.24",
+    "scannedAt": "2026-07-22T11:02:33.958Z",
     "root": "src",
-    "totalFiles": 201,
-    "totalTopLevelNames": 2323,
+    "totalFiles": 202,
+    "totalTopLevelNames": 2324,
     "buckets": {
-      "shared": 340,
+      "shared": 341,
       "paired": 592,
       "local": 1250,
-      "crossFile": 932
+      "crossFile": 933
     }
   },
   "A": {
@@ -1159,7 +1159,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 13
+            "count": 12
           },
           {
             "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
@@ -1174,7 +1174,7 @@
             "count": 1
           }
         ],
-        "totalHits": 232,
+        "totalHits": 231,
         "fileSpan": 21
       },
       {
@@ -4123,14 +4123,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 60
+            "count": 61
           },
           {
             "file": "src/renderer.js",
             "count": 4
           }
         ],
-        "totalHits": 69,
+        "totalHits": 70,
         "fileSpan": 5
       },
       {
@@ -5201,10 +5201,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 144
+            "count": 146
           }
         ],
-        "totalHits": 218,
+        "totalHits": 220,
         "fileSpan": 4
       },
       {
@@ -7143,14 +7143,14 @@
           },
           {
             "file": "src/renderer-previews.js",
-            "count": 61
+            "count": 62
           },
           {
             "file": "src/renderer.js",
-            "count": 29
+            "count": 30
           }
         ],
-        "totalHits": 136,
+        "totalHits": 138,
         "fileSpan": 3
       },
       {
@@ -8711,6 +8711,28 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 3
+      },
+      {
+        "name": "parsePaymentBigAccounts",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 3
+          },
+          {
+            "file": "src/shared/payment-big-accounts.js",
             "count": 2
           }
         ],
@@ -40392,7 +40414,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 13
+          "count": 12
         },
         {
           "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
@@ -40407,7 +40429,7 @@
           "count": 1
         }
       ],
-      "totalHits": 232,
+      "totalHits": 231,
       "fileSpan": 21
     },
     {
@@ -43356,14 +43378,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 60
+          "count": 61
         },
         {
           "file": "src/renderer.js",
           "count": 4
         }
       ],
-      "totalHits": 69,
+      "totalHits": 70,
       "fileSpan": 5
     },
     {
@@ -44434,10 +44456,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 144
+          "count": 146
         }
       ],
-      "totalHits": 218,
+      "totalHits": 220,
       "fileSpan": 4
     },
     {
@@ -46376,14 +46398,14 @@
         },
         {
           "file": "src/renderer-previews.js",
-          "count": 61
+          "count": 62
         },
         {
           "file": "src/renderer.js",
-          "count": 29
+          "count": 30
         }
       ],
-      "totalHits": 136,
+      "totalHits": 138,
       "fileSpan": 3
     },
     {
@@ -47944,6 +47966,28 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/mpt-parser.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 3
+    },
+    {
+      "name": "parsePaymentBigAccounts",
+      "defFiles": [
+        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 3
+        },
+        {
+          "file": "src/shared/payment-big-accounts.js",
           "count": 2
         }
       ],

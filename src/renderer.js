@@ -77,6 +77,10 @@ const MODULES = Object.freeze({
     id: 'duplicate-inbound-match',
     name: '重复入金匹配'
   },
+  positionReconciliation: {
+    id: 'position-reconciliation-process',
+    name: '平盘对账数据处理'
+  },
   // v2.1.0-beta.1 PR-A：对账单ReconID修复模块（C4 / business + gateway 两个子模式）
   // v2.1.0-beta.3 T4：模块下挂 business（单据对账单）+ gateway（网关对账单）两个子模式，按主面板「账单类别」下拉切换
   //   ⚠️ module.id 保留 'recon-id-fix'（数十处引用 + DB schema CHECK 约束）；
@@ -398,6 +402,15 @@ const elements = {
   reconIdFixRunBtn: document.getElementById('reconIdFixRunBtn'),
   reconIdFixExportBtn: document.getElementById('reconIdFixExportBtn'),
   reconIdFixStatusBox: document.getElementById('reconIdFixStatusBox'),
+  // v3.0.24：平盘对账数据处理前端占位模块。
+  positionReconciliationModulePanel: document.getElementById('positionReconciliationModulePanel'),
+  positionReconciliationFunctionSelect: document.getElementById('positionReconciliationFunctionSelect'),
+  positionReconciliationRunBtn: document.getElementById('positionReconciliationRunBtn'),
+  positionReconciliationTableManagerBtn: document.getElementById('positionReconciliationTableManagerBtn'),
+  positionReconciliationLinkedTableManagerBtn: document.getElementById('positionReconciliationLinkedTableManagerBtn'),
+  positionReconciliationConfigBtn: document.getElementById('positionReconciliationConfigBtn'),
+  positionReconciliationExportBtn: document.getElementById('positionReconciliationExportBtn'),
+  positionReconciliationStatusBox: document.getElementById('positionReconciliationStatusBox'),
   backgroundTool: document.getElementById('backgroundTool'),
   backgroundPaletteBtn: document.getElementById('backgroundPaletteBtn'),
   saveUserGuideBtn: document.getElementById('saveUserGuideBtn'),
@@ -605,6 +618,7 @@ const {
   // v2.1.0-beta.3 T11：网关子模式 preview（4 张）
   applyReconIdFixPanelBusinessPreviewState,
   applyReconIdFixPanelGatewayPreviewState,
+  applyPositionReconciliationPanelPreviewState,
   applyScenarioConfigC4GatewayPreviewState,
   applyScenarioConfigC4Gateway1vNPreviewState,
   // v2.1.4 T3：小助手功能收纳弹窗 preview
@@ -1510,6 +1524,9 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块面板隐藏控制
   if (elements.reconIdFixModulePanel) {
     elements.reconIdFixModulePanel.hidden = moduleId !== MODULES.reconIdFix.id;
+  }
+  if (elements.positionReconciliationModulePanel) {
+    elements.positionReconciliationModulePanel.hidden = moduleId !== MODULES.positionReconciliation.id;
   }
   // v2.1.2 T2：月度银行对账单BU回填校验模块面板隐藏控制
   if (elements.bankBuReconModulePanel) {
@@ -7919,6 +7936,16 @@ async function applyFullInfo(info) {
       updateReconIdFixUi();
     });
   }
+  // v3.0.24：仅前端占位，所有业务按钮禁止接真实 IPC。
+  [
+    [elements.positionReconciliationRunBtn, '开始运行'],
+    [elements.positionReconciliationTableManagerBtn, '对账表管理'],
+    [elements.positionReconciliationLinkedTableManagerBtn, '链接表管理'],
+    [elements.positionReconciliationConfigBtn, '对账配置管理'],
+    [elements.positionReconciliationExportBtn, '导出文件']
+  ].forEach(([button, featureName]) => {
+    if (button) button.addEventListener('click', () => showComingSoon(featureName));
+  });
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -8465,6 +8492,10 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'recon-id-fix-panel-gateway') {
     setTimeout(() => {
       applyReconIdFixPanelGatewayPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-panel') {
+    setTimeout(() => {
+      applyPositionReconciliationPanelPreviewState();
     }, 120);
   } else if (info.previewModal === 'scenario-config-c4-gateway') {
     setTimeout(() => {

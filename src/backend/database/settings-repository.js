@@ -112,7 +112,8 @@ const ALL_MODULE_IDS = Object.freeze([
   'acquiring-bill-currency', // v2.1.6 新增
   'vcc-op-calc',             // v2.1.12 需求1 新增
   'pre-fund-reconciliation', // v3.0.14 前置资金对账
-  'duplicate-inbound-match'  // v3.0.15 重复入金匹配
+  'duplicate-inbound-match', // v3.0.15 重复入金匹配
+  'position-reconciliation-process' // v3.0.24 平盘对账数据处理（前端占位）
 ]);
 
 const CURRENT_MODULE_KEY = 'current_module';

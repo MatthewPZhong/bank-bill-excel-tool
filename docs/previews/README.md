@@ -10,9 +10,9 @@ npm run preview:all
 
 > 注：`preview:all` 串行调 35 个独立 Electron 窗口，全跑约 3 分钟。如只更新某一张，使用对应的子命令（见下方表格）。
 
-## 全部 35 张图
+## 全部 36 张图
 
-### 主页面 / 模块首屏（6 张）
+### 主页面 / 模块首屏（7 张）
 
 | 截图 | 说明 | render 命令 |
 |------|------|------|
@@ -22,6 +22,7 @@ npm run preview:all
 | ![new-account-multi](new-account-multi.png) | 新开账户模块 — 多行模式（3 条不同银行 / 币种） | `npm run preview:new-account-multi` |
 | ![new-account-currency-dropdown](new-account-currency-dropdown.png) | 新开账户模块 — 币种下拉展开态 | `npm run preview:new-account-currency-dropdown` |
 | ![statement-palette](statement-palette.png) | 制作网银账单模块的背景调色板 | `npm run preview:statement-palette` |
+| ![position-reconciliation-panel](position-reconciliation-panel.png) | 平盘对账数据处理 — v3.0.24 前端占位首屏 | `npm run preview:position-reconciliation-panel` |
 
 ### 模板 / 映射管理（5 张）
 

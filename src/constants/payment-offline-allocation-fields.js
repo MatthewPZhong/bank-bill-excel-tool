@@ -10,12 +10,12 @@
 //     mid['付款方式']               idx2  —— 订单池筛选 === OFFLINE_PAY_METHOD（'线下'；过滤线上 CFT 单）
 //     mid['渠道流水号']             idx3  —— 命中后回填进 bank.ReconciliationId 的来源值
 //     mid['交易时间']               idx4  —— 与 bank.BillDate 比对（Q6 同日算晚于，日粒度）
-//     mid['收款账户（卡号）']        idx6  —— ⚠️【全角括号】订单池筛选 === bigAccount；勿与 idx23「收款账号」混拿
+//     mid['收款账户（卡号）']        idx6  —— ⚠️【全角括号】订单池筛选属于 bigAccount 配置集合；勿与 idx23「收款账号」混拿
 //     mid['收款金额']               idx9  —— 与 bank['Credit Amount'] 比对（Math.round(*100) 分级精度）
 //     mid['收款币种']               idx10 —— 与 bank.Currency 比对（valuesEqual）
 //     mid['收款渠道']               idx25 —— ⚠️【26 列签名最后一列】订单池筛选 === bankChannel（账单所属渠道）
 //   银行对账单（bank statement，驼峰，BANK_STATEMENT_FIELDS 44 列）：
-//     bank.MerchantId               商户 ID —— 银行池筛选 === bigAccount
+//     bank.MerchantId               商户 ID —— 银行池筛选属于 bigAccount 配置集合，且匹配时须等于订单收款账户
 //     bank.FundType                 资金性质 —— 银行池筛选 === 'FundTransfer-in'（⚠️【大写 T】，资产表实证）
 //     bank['地区']                  地区 —— 银行池筛选 === region（Q1 拍板：地区参与银行侧筛选）
 //     bank.BillDate                 账单日期 —— 派生「银行对账周数号」+ 与 mid.交易时间 比对
@@ -35,14 +35,14 @@ const PAYMENT_OFFLINE_FIELD_MAP = Object.freeze({
     payMethod: '付款方式',           // 订单池 === OFFLINE_PAY_METHOD（'线下'；过滤线上 CFT 单）—— 修订 R2
     channelSerialNo: '渠道流水号',   // → 回填 bank.ReconciliationId 的来源
     txTime: '交易时间',              // 与 bank.BillDate 比对
-    payeeAccountCard: '收款账户（卡号）', // ⚠️ 全角括号；订单池 === bigAccount（勿与「收款账号」混）
+    payeeAccountCard: '收款账户（卡号）', // ⚠️ 全角括号；订单池属于 bigAccount 集合（勿与「收款账号」混）
     payeeAmount: '收款金额',         // 与 bank['Credit Amount'] 比对
     payeeCurrency: '收款币种',       // 与 bank.Currency 比对
     receiveChannel: '收款渠道'       // 订单池 === bankChannel（账单所属渠道，非「付款渠道」出款行）—— 修订 R2
   }),
   // —— 银行对账单侧（bank statement）——
   bank: Object.freeze({
-    merchantId: 'MerchantId',        // 银行池 === bigAccount
+    merchantId: 'MerchantId',        // 银行池属于 bigAccount 集合，配对时与订单账号严格相等
     fundType: 'FundType',            // 银行池 === FUND_TYPE_IN（大写 T）
     region: '地区',                  // 银行池 === region
     billDate: 'BillDate',            // → 银行对账周数号 + 比对

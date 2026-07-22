@@ -78,6 +78,16 @@ test.describe('CAUSE_MAP — v3.0.23 R4 严格匹配', () => {
   });
 });
 
+test.describe('CAUSE_MAP — v3.0.24 Payment 多大账号', () => {
+  test('非法大账号配置错误码有明确中文原因', () => {
+    assert.ok(CAUSE_MAP['payment-offline-invalid-big-account-config']);
+    assert.match(
+      errorCodeToCause('payment-offline-invalid-big-account-config'),
+      /大账号配置无效/
+    );
+  });
+});
+
 test.describe('CAUSE_MAP — v3.0.21 DBS-Charge outbound 方向守卫', () => {
   test('dbs-charge-fund-direction-mismatch 已定义且说明跳过步骤2改写', () => {
     assert.ok(CAUSE_MAP['dbs-charge-fund-direction-mismatch']);

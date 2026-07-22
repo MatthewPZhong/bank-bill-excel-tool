@@ -37,6 +37,8 @@
     // v2.1.0-beta.3 T7：网关对账单 ReconID 修复模块字段常量（gateway 子模式）
     const GATEWAY_BILL_FIELDS = (appConstants && appConstants.gatewayBillFields) || [];
     const CHANNEL_BILL_FIELDS = (appConstants && appConstants.channelBillFields) || [];
+    const parsePaymentBigAccounts = window.__paymentBigAccounts
+      && window.__paymentBigAccounts.parsePaymentBigAccounts;
 
     // 条件操作枚举（C1 行 3 + C2 行 3 共用）
     const SCENARIO_CONDITION_OPS = ['等于', '不等于', '包含', '不包含', '空值', '非空值', '开头为'];
@@ -8258,7 +8260,7 @@
             </div>
             <div class="builtin-fixed-payment-field">
               <span class="builtin-fixed-channel-label">大账号</span>
-              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-big-account" placeholder="如 202782001">
+              <input class="scenario-config-input builtin-fixed-payment-input" type="text" data-field="payment-big-account" placeholder="如 202782001、202782002">
             </div>
             <div class="builtin-fixed-payment-error" data-role="payment-error" hidden></div>
           </div>
@@ -8493,16 +8495,31 @@
           const enabled = paymentCheck.checked === true;
           const bankChannel = paymentBankChannelInput ? paymentBankChannelInput.value.trim() : '';
           const region = paymentRegionInput ? paymentRegionInput.value.trim() : '';
-          const bigAccount = paymentBigAccountInput ? paymentBigAccountInput.value.trim() : '';
-          if (enabled && (!bankChannel || !region || !bigAccount)) {
+          const bigAccountRaw = paymentBigAccountInput ? paymentBigAccountInput.value : '';
+          const parsedBigAccounts = bigAccountRaw.trim() === '' && !enabled
+            ? { ok: true, normalized: '' }
+            : parsePaymentBigAccounts(bigAccountRaw);
+          if (enabled && (!bankChannel || !region || bigAccountRaw.trim() === '')) {
             if (paymentError) {
               paymentError.textContent = '勾选「Payment线下调拨订单回填处理」后，银行渠道、地区、大账号三项均必填';
               paymentError.hidden = false;
             }
             return; // inline 校验失败：不关弹窗、不调任何保存 IPC
           }
+          if (!parsedBigAccounts || !parsedBigAccounts.ok) {
+            if (paymentError) {
+              paymentError.textContent = parsedBigAccounts?.message || '大账号格式无效，请使用中文顿号“、”分隔';
+              paymentError.hidden = false;
+            }
+            return;
+          }
           if (paymentError) paymentError.hidden = true;
-          paymentOfflineBackfill = { enabled, bankChannel, region, bigAccount };
+          paymentOfflineBackfill = {
+            enabled,
+            bankChannel,
+            region,
+            bigAccount: parsedBigAccounts.normalized
+          };
         }
         // v3.0.6 需求2（T6）：对账数据来源二选一勾选值（仅 payment 场景显示本控件）。
         //   checked === true 才记 true；否则（含未勾选/控件缺失）记 false。

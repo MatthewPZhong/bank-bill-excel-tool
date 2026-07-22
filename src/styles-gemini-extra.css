@@ -1838,6 +1838,21 @@ tr.add-row .text-action:hover { background: #c2d7fa; }
 .recon-id-fix-board #reconIdFixStatusBox {
   transform: translateX(59px);
 }
+.position-reconciliation-board #positionReconciliationConfigBtn {
+  width: 165px;
+  min-width: 165px;
+}
+.position-reconciliation-board #positionReconciliationRunBtn,
+.position-reconciliation-board #positionReconciliationExportBtn {
+  width: 140px;
+  min-width: 140px;
+  transform: translateX(80px);
+}
+.position-reconciliation-board #positionReconciliationStatusBox {
+  width: 292px;
+  max-width: 292px;
+  transform: translateX(59px);
+}
 .pending-board .pending-status {
   width: 100%;
   max-width: 360px;
