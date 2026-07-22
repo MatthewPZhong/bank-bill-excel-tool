@@ -1,6 +1,6 @@
 # Spec — v3.0.24 平盘对账前端与 Payment 多大账号支持
 
-> status: implemented（自动门禁通过，真实双账号人工复核待完成）
+> status: merged（PR #99 已合入 main；Release 待发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-22
 > updated: 2026-07-22
@@ -108,3 +108,13 @@
 ## 6. 资金红线
 
 ⚠️ 多账号扩大候选范围，必须确保账号先隔离再执行金额、币种和日期匹配。自动测试不能替代至少两个真实或脱敏大账号的逐笔人工复核。
+
+## 7. 合并与发布记录
+
+- PR #99 于 2026-07-22 以 merge commit `a965c48` 合入 `main`，远程开发分支已删除。
+- Payment 定向测试 `89/89 PASS`；模块与设置定向测试 `68/68 PASS`。
+- 合并前 `release-check` 通过：unit `3813/3813`、42 个 integration 脚本 `1963/1963`，lint 与 smoke 全绿。
+- 主页面几何门禁 `6/6 PASS`；`scan:vars` 为 202 个 JS 文件、2324 个顶层声明；重要变量关联功能已复核。
+- GitHub PR #99 smoke workflow 通过；最终 self-review 为 P0-P4 Finding 0。
+- `v3.0.24` tag、Windows Release 和公开资产验证待发布前干净依赖门禁完成后补充。
+- 真实或脱敏双大账号逐笔复核继续标记为 `human-fund-review-pending`，不因合并或发布自动关闭。

@@ -24,3 +24,8 @@
 - 目标：定向测试、release-check、主页面几何、启动性能和资金盲区复核。
 - 验证：test-spec §4 全部通过；真实/脱敏双账号人工结论单独记录。
 - 状态：completed（自动门禁）；真实/脱敏双账号人工复核保留为资金负责人 follow-up
+
+## Task 6 — 合并归档与在线发布
+- 目标：归档 PR/PRD，在干净依赖上重跑发布门禁，创建 annotated tag，验证 Windows Release 与公开更新资产。
+- 验证：PR、tag、workflow、Release、`latest.yml`、Setup/portable 文件头和最终 tracked worktree 状态。
+- 状态：in_progress（PR #99 已合并；发布门禁、tag 与 Release 待完成）

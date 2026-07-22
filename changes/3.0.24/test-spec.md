@@ -1,6 +1,6 @@
 # Test Spec — v3.0.24 平盘对账前端与 Payment 多大账号支持
 
-> status: verified（自动验证完成，人工资金复核待完成）
+> status: merged-pass（PR #99 已合并；Release 待发布；人工资金复核待完成）
 > created: 2026-07-22
 > updated: 2026-07-22
 
@@ -65,3 +65,12 @@
 - 使用至少两个真实或脱敏大账号，逐笔核对银行 MerchantId、订单收款账户、金额、币种、日期和最终 ReconciliationId。
 - 特别构造两个账号金额币种日期完全相同的样本，确认不发生跨账号回填。
 - 未完成人工复核时只能报告自动门禁结果，不得宣称资金业务验收完成。
+
+## 6. 合并验收结果
+
+- Payment 定向测试：`89/89 PASS`。
+- 模块与设置定向测试：`68/68 PASS`。
+- `npm run release-check`：unit `3813/3813`、42 个 integration 脚本 `1963/1963`，lint 与 smoke PASS。
+- `npm run verify:main-panel-alignment`：`6/6 PASS`。
+- GitHub PR #99 smoke workflow PASS；最终 self-review P0-P4 Finding 0。
+- PR #99 已以 `a965c48` 合入 `main`；发布前门禁、tag 和 Release 证据待补充。

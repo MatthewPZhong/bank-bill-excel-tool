@@ -43,6 +43,9 @@
 | `check:vars -- --include-minor` | PASS | 命中 Runtime-state `MODULES` / `elements`；已核模块 ID 两端同步、默认列表不扩写、占位按钮无业务入口 |
 | `startup:measure` | PASS | 5 次建窗到可见平均 `100.039ms`，ready-to-show 平均 `173.88ms` |
 | 资金盲区复核 | 自动部分 PASS | R1/R2 使用账号×周桶，R3 显式同账号，三轮共享全局消费；非法配置进入 error-report；真实双账号逐笔复核待完成 |
+| GitHub PR #99 workflow | PASS | smoke-test 通过；Windows build job 按 PR 工作流约定跳过 |
+| 最终 self-review | P0-P4 Finding 0 | 合并前无存活 P0-P4 Finding |
+| PR #99 合并 | `a965c48` | 2026-07-22 merge commit 合入 `main`；远程开发分支已删除 |
 
 ## Remaining Unknowns
 
