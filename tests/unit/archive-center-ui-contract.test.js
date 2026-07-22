@@ -48,7 +48,7 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
     const modulesStart = renderer.indexOf('const MODULES = Object.freeze({');
     const modulesEnd = renderer.indexOf('const RENDERER_STARTUP_MARKS', modulesStart);
     const modulesSource = renderer.slice(modulesStart, modulesEnd);
-    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 11);
+    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 12);
     assert.doesNotMatch(modulesSource, /id:\s*'archive-center'/);
     assert.match(renderer, /const archiveModules = new Map\([\s\S]*?Object\.values\(MODULES\)/);
   });

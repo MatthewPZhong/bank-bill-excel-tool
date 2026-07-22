@@ -140,6 +140,98 @@ test.describe('R5场景2b — ① 主轮命中回填', () => {
   });
 });
 
+test.describe('R5场景2b — v3.0.24 多大账号隔离', () => {
+  const MULTI_OPT = { ...OPT, bigAccount: 'A、B' };
+
+  test('两个账号各自命中同账号订单，配置顺序不影响结果', () => {
+    const mid = [
+      midRow({ payeeAccountCard: 'B', channelSerialNo: 'CH-B', txTime: '2026-05-26' }),
+      midRow({ payeeAccountCard: 'A', channelSerialNo: 'CH-A', txTime: '2026-05-26' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'bank-a', merchantId: 'A' }),
+      bankRow({ rowId: 'bank-b', merchantId: 'B' })
+    ];
+    const result = runRound5PaymentOfflineAllocationBackfill(banks, mid, {
+      ...MULTI_OPT,
+      bigAccount: 'B、A'
+    });
+
+    assert.equal(banks[0].ReconciliationId, 'CH-A');
+    assert.equal(banks[1].ReconciliationId, 'CH-B');
+    assert.equal(result.matchedPairs.length, 2);
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('双方账号都在配置集合中，也禁止 A 银行行借用 B 订单', () => {
+    const mid = [midRow({ payeeAccountCard: 'B', channelSerialNo: 'CH-B', txTime: '2026-05-26' })];
+    const banks = [bankRow({ rowId: 'bank-a', merchantId: 'A' })];
+    const result = runRound5PaymentOfflineAllocationBackfill(banks, mid, MULTI_OPT);
+
+    assert.equal(banks[0].ReconciliationId, '');
+    assert.equal(result.modifications.length, 0);
+    assert.equal(result.matchedPairs.length, 0);
+    assert.ok(result.warnings.some((warning) => (
+      warning.code === 'payment-offline-no-order-match' && warning.rowId === 'bank-a'
+    )));
+  });
+
+  test('R2 日期容差轮仍按账号隔离', () => {
+    const mid = [midRow({
+      payeeAccountCard: 'B',
+      channelSerialNo: 'CH-B',
+      txTime: '2026-05-28'
+    })];
+    const banks = [bankRow({
+      rowId: 'bank-a-r2',
+      merchantId: 'A',
+      billDate: '2026-05-26'
+    })];
+    const result = runRound5PaymentOfflineAllocationBackfill(banks, mid, MULTI_OPT);
+
+    assert.equal(banks[0].ReconciliationId, '');
+    assert.equal(result.modifications.length, 0, '即使日期落入 R2 两天容差也不得跨账号');
+    assert.equal(result.matchedPairs.length, 0);
+  });
+
+  test('R3 跨周兜底仍按账号隔离', () => {
+    const mid = [midRow({
+      dispatchNo: 'FTA202606161000477',
+      payeeAccountCard: 'B',
+      channelSerialNo: 'CH-B',
+      txTime: '2026-05-29'
+    })];
+    const banks = [bankRow({ rowId: 'bank-a', merchantId: 'A', billDate: '2026-05-26' })];
+    const result = runRound5PaymentOfflineAllocationBackfill(banks, mid, MULTI_OPT);
+
+    assert.equal(result.modifications.length, 0, '即使日期落入 R3 窗口也不得跨账号');
+    assert.equal(result.matchedPairs.length, 0);
+  });
+
+  test('账号 trim 后精确且区分大小写', () => {
+    const trimmedBanks = [bankRow({ rowId: 'trim', merchantId: ' A ' })];
+    const trimmedMid = [midRow({ payeeAccountCard: ' A ', channelSerialNo: 'CH-A', txTime: '2026-05-26' })];
+    const trimmed = runRound5PaymentOfflineAllocationBackfill(trimmedBanks, trimmedMid, MULTI_OPT);
+    assert.equal(trimmed.modifications.length, 1);
+
+    const caseBanks = [bankRow({ rowId: 'case', merchantId: 'a' })];
+    const caseMid = [midRow({ payeeAccountCard: 'A', channelSerialNo: 'CH-A', txTime: '2026-05-26' })];
+    const caseResult = runRound5PaymentOfflineAllocationBackfill(caseBanks, caseMid, MULTI_OPT);
+    assert.equal(caseResult.modifications.length, 0);
+  });
+
+  test('非法持久化配置安全 no-op 并输出可见 warning', () => {
+    const banks = [bankRow()];
+    const result = runRound5PaymentOfflineAllocationBackfill(banks, [midRow()], {
+      ...OPT,
+      bigAccount: 'A、、B'
+    });
+    assert.equal(result.modifications.length, 0);
+    assert.equal(result.matchedPairs.length, 0);
+    assert.ok(result.warnings.some((warning) => warning.code === 'payment-offline-invalid-big-account-config'));
+  });
+});
+
 // ---- ② 银行池三条件 ---------------------------------------------------
 
 test.describe('R5场景2b — ② 银行池三条件筛选', () => {

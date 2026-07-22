@@ -27,6 +27,7 @@ const TARGET_STATUS_IDS = [
   'bankStatementStatusBox',
   'preFundReconciliationStatusBox',
   'reconIdFixStatusBox',
+  'positionReconciliationStatusBox',
   'acquiringBillCurrencyStatusBox'
 ];
 
@@ -35,7 +36,8 @@ const ALIGNED_CONTROL_IDS = [
   'bizOpReconBuSelect',
   'preFundReconciliationScenarioSelect',
   'reconIdFixBillCategorySelect',
-  'reconIdFixScenarioSelect'
+  'reconIdFixScenarioSelect',
+  'positionReconciliationFunctionSelect'
 ];
 
 function elementSourceById(id) {
@@ -47,7 +49,7 @@ function elementSourceById(id) {
 }
 
 test.describe('v3.0.20 主页面垂直对齐契约', () => {
-  test('10 个目标状态框共享内容层，新开账户状态框保持原结构', () => {
+  test('11 个目标状态框共享内容层，新开账户状态框保持原结构', () => {
     assert.equal((html.match(/class="status-box-content"/g) || []).length, TARGET_STATUS_IDS.length);
 
     for (const id of TARGET_STATUS_IDS) {
@@ -71,7 +73,7 @@ test.describe('v3.0.20 主页面垂直对齐契约', () => {
     assert.doesNotMatch(renderer, /box\s*>\s*\.status-box-text/);
   });
 
-  test('五组标签和下拉框使用统一 48px 轨道类', () => {
+  test('六组标签和下拉框使用统一 48px 轨道类', () => {
     for (const selectId of ALIGNED_CONTROL_IDS) {
       const selectPattern = new RegExp(`<select[^>]*id="${selectId}"[^>]*class="[^"]*main-panel-select-control[^"]*"`);
       const labelPattern = new RegExp(`<label[^>]*class="[^"]*main-panel-select-label[^"]*"[^>]*for="${selectId}"`);

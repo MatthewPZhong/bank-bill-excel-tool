@@ -123,6 +123,51 @@ test.describe('runReconciliation R5s2b 集成', () => {
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 
+  test('v3.0.24 多账号经 config 原字符串接线，并保持同账号隔离与行数守恒', async () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'bank-a', MerchantId: 'A', 'Credit Amount': 100 }),
+      makeBankRow({ _rowId: 'bank-b', MerchantId: 'B', 'Credit Amount': 100 })
+    ];
+    const midRows = [
+      makeMidRow({ '收款账户（卡号）': 'B', 渠道流水号: 'CH-B' }),
+      makeMidRow({ '收款账户（卡号）': 'A', 渠道流水号: 'CH-A' })
+    ];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({
+        paymentOfflineBackfill: { ...POB_ON, bigAccount: 'A、B' }
+      })],
+      midAllocationContext: { midAllocationRows: midRows }
+    });
+
+    assert.equal(bankRows[0].ReconciliationId, 'CH-A');
+    assert.equal(bankRows[1].ReconciliationId, 'CH-B');
+    assert.equal(result.stats.r5s2bBackfilledCount, 2);
+    assert.equal(result.paymentOfflineMatchedPairs.length, 2);
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
+  });
+
+  test('v3.0.24 非法历史多账号配置安全 no-op，warning 透传到主错误报告', async () => {
+    const bankRows = [makeBankRow({ _rowId: 'invalid-config', 'Credit Amount': 100 })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({
+        paymentOfflineBackfill: { ...POB_ON, bigAccount: 'A、、B' }
+      })],
+      midAllocationContext: { midAllocationRows: [makeMidRow()] }
+    });
+
+    assert.equal(bankRows[0].ReconciliationId, '');
+    assert.equal(result.stats.r5s2bBackfilledCount, 0);
+    assert.equal(result.paymentOfflineMatchedPairs.length, 0);
+    assert.ok(result.errorReport.some((warning) => (
+      warning.code === 'payment-offline-invalid-big-account-config'
+    )));
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
+  });
+
   test('gating：paymentOfflineBackfill.enabled !== true → R5s2b no-op', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
     const result = await runReconciliation({

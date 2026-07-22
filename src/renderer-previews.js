@@ -881,7 +881,7 @@
             const bigAccountInput = dialogRoot.querySelector('input[data-field="payment-big-account"]');
             if (bankInput) bankInput.value = 'BGL';
             if (regionInput) regionInput.value = 'CN';
-            if (bigAccountInput) bigAccountInput.value = '202782001';
+            if (bigAccountInput) bigAccountInput.value = '202782001、202782002';
           }, 360);
         }, 280);
       }, 120);
@@ -1233,6 +1233,10 @@
       setCurrentModule(MODULES.reconIdFix.id);
     }
 
+    function applyPositionReconciliationPanelPreviewState() {
+      setCurrentModule(MODULES.positionReconciliation.id);
+    }
+
     // v2.1.0-beta.3 T11：主面板 preview — 账单类别选定 gateway（行 2 wrapper 显示）
     function applyReconIdFixPanelGatewayPreviewState() {
       setCurrentModule(MODULES.reconIdFix.id);
@@ -1534,6 +1538,7 @@
       // v2.1.0-beta.3 T11：网关子模式 preview（5 张 — 主面板 business/gateway + dialog gateway 默认/1v多 禁用）
       applyReconIdFixPanelBusinessPreviewState,
       applyReconIdFixPanelGatewayPreviewState,
+      applyPositionReconciliationPanelPreviewState,
       applyScenarioConfigC4GatewayPreviewState,
       applyScenarioConfigC4Gateway1vNPreviewState,
       // v2.1.4 T3：小助手功能收纳弹窗 preview

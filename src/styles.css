@@ -2840,6 +2840,19 @@ select {
   width: 292px;
 }
 
+.position-reconciliation-board #positionReconciliationConfigBtn {
+  width: 165px;
+  min-width: 165px;
+}
+.position-reconciliation-board #positionReconciliationRunBtn,
+.position-reconciliation-board #positionReconciliationExportBtn {
+  width: 140px;
+  min-width: 140px;
+}
+.position-reconciliation-board #positionReconciliationStatusBox {
+  width: 292px;
+}
+
 /* PR #32b 多行状态框：导入两文件 / 已导出含 error-report 时换行展示 */
 #bankStatementStatusBox .status-box-text {
   white-space: pre-line;

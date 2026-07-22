@@ -38,8 +38,8 @@ test.afterEach(() => {
 // ========================================================================
 
 test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
-  test('ALL_MODULE_IDS 包含 11 个模块', () => {
-    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 11);
+  test('ALL_MODULE_IDS 包含 12 个模块', () => {
+    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 12);
     assert.ok(Object.isFrozen(settingsRepo.ALL_MODULE_IDS));
   });
 
@@ -50,6 +50,7 @@ test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-op-calc'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('pre-fund-reconciliation'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('duplicate-inbound-match'));
+    assert.ok(settingsRepo.ALL_MODULE_IDS.includes('position-reconciliation-process'));
   });
 
   test('前置资金对账默认不启用，由用户从功能收纳中打开', () => {
@@ -58,6 +59,10 @@ test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
 
   test('重复入金匹配默认不启用，由用户从功能收纳中打开', () => {
     assert.equal(settingsRepo.DEFAULT_ENABLED_MODULES.includes('duplicate-inbound-match'), false);
+  });
+
+  test('平盘对账数据处理默认不启用，由用户从功能收纳中打开', () => {
+    assert.equal(settingsRepo.DEFAULT_ENABLED_MODULES.includes('position-reconciliation-process'), false);
   });
 
   test('DEFAULT_ENABLED_MODULES 是 ALL_MODULE_IDS 子集', () => {

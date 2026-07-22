@@ -25,6 +25,7 @@ const CAUSE_MAP = Object.freeze({
 
   // v3.0.4 块 F：Payment线下调拨订单回填（R5 场景2b）—— 新引擎 warning code
   'payment-offline-invalid-fta': '调拨单号不是合法的 FTA+8位日期，算不出订单周数，已跳过',
+  'payment-offline-invalid-big-account-config': 'Payment线下调拨大账号配置无效，请使用中文顿号分隔且不要填写空项或重复账号',
   'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
   'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
 

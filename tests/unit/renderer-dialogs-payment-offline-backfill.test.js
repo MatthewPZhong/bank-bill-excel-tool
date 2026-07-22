@@ -40,11 +40,11 @@ describe('F1：Payment 勾选行 + 条件展开三输入框', () => {
     assert.ok(dialogBody.includes('data-field="payment-big-account"'), '应有大账号输入框');
   });
 
-  test('输入框不预填生产值，仅 placeholder 示例（如 CITI / 如 CN / 如 202782001）', () => {
+  test('输入框不预填生产值，仅 placeholder 示例（含顿号分隔的多账号）', () => {
     // 修订 R2：银行渠道语义 = 账单所属渠道 = 收款渠道，placeholder「如 BGL」→「如 CITI」（renderer-dialogs.js:7385）
     assert.ok(dialogBody.includes('placeholder="如 CITI"'), '银行渠道 placeholder 示例（修订 R2：账单所属渠道）');
     assert.ok(dialogBody.includes('placeholder="如 CN"'), '地区 placeholder 示例');
-    assert.ok(dialogBody.includes('placeholder="如 202782001"'), '大账号 placeholder 示例');
+    assert.ok(dialogBody.includes('placeholder="如 202782001、202782002"'), '大账号 placeholder 应展示顿号分隔示例');
   });
 
   test('gating：仅 config.subCategory===fund-transfer-backfill 场景显示 payment 控件', () => {
@@ -76,15 +76,15 @@ describe('F1：Payment 勾选行 + 条件展开三输入框', () => {
   });
 
   test('校验：勾选时三项全必填，inline 校验不关弹窗（return 无 reopen/createAlertDialog）', () => {
-    // 关键校验分支：enabled && (!bankChannel || !region || !bigAccount)
+    // 关键校验分支：enabled 时渠道、地区、大账号原始值任一为空均拦截。
     assert.ok(
-      /if\s*\(enabled\s*&&\s*\(!bankChannel\s*\|\|\s*!region\s*\|\|\s*!bigAccount\)\)/.test(dialogBody),
+      /if\s*\(enabled\s*&&\s*\(!bankChannel\s*\|\|\s*!region\s*\|\|\s*bigAccountRaw\.trim\(\)\s*===\s*''\)\)/.test(dialogBody),
       '勾选时三项任一为空应拦截'
     );
     // inline：写 paymentError 文案 + return，不调 createBuiltinFixedChannelManageDialog reopen
     const validationBlock = dialogBody.slice(
       dialogBody.indexOf('if (enabled && (!bankChannel'),
-      dialogBody.indexOf('paymentOfflineBackfill = { enabled')
+      dialogBody.indexOf('paymentOfflineBackfill = {')
     );
     assert.ok(validationBlock.includes('paymentError.hidden = false'), '校验失败应显示 inline 错误');
     assert.ok(validationBlock.includes('return;'), '校验失败应 return 不继续保存');
@@ -128,11 +128,20 @@ describe('F2：config 读-改-写浅合并保存 + 加载守卫', () => {
       /if\s*\(paymentOfflineBackfill\)\s*updateFields\.config\.paymentOfflineBackfill\s*=\s*paymentOfflineBackfill/.test(dialogBody),
       'paymentOfflineBackfill 在浅合并基底上逐键覆盖'
     );
-    // paymentOfflineBackfill 四字段 schema 锁定
+    // paymentOfflineBackfill 四字段 schema 锁定，bigAccount 取规范化顿号字符串。
     assert.ok(
-      /paymentOfflineBackfill\s*=\s*\{\s*enabled,\s*bankChannel,\s*region,\s*bigAccount\s*\}/.test(dialogBody),
+      /paymentOfflineBackfill\s*=\s*\{\s*enabled,\s*bankChannel,\s*region,\s*bigAccount:\s*parsedBigAccounts\.normalized\s*\}/.test(dialogBody),
       'paymentOfflineBackfill 应含 enabled/bankChannel/region/bigAccount 四字段'
     );
+  });
+
+  test('多账号使用共享严格解析器，格式错误 inline 提示并禁止保存', () => {
+    assert.ok(dialogBody.includes('parsePaymentBigAccounts(bigAccountRaw)'), '保存前应调用共享大账号解析器');
+    assert.ok(
+      /if\s*\(!parsedBigAccounts\s*\|\|\s*!parsedBigAccounts\.ok\)/.test(dialogBody),
+      '解析失败应进入 inline 校验分支'
+    );
+    assert.ok(dialogBody.includes('paymentError.textContent = parsedBigAccounts?.message'), '应展示解析器返回的具体原因');
   });
 
   test('非 payment 场景维持原行为：update 不携带 config（仅 priority）', () => {

@@ -6,11 +6,12 @@
 //   故周数 join 方向为「银行周 + 1 = 订单周」（weekTagPlusOne 挪到银行侧，日期语义，禁 YYWW 数字加法）。
 //
 //   订单池 = 中台调拨订单中三条件全真的行（修订 R2 Q10）：
-//     收款账户（卡号）===bigAccount ∧ 付款方式===OFFLINE_PAY_METHOD('线下') ∧ 收款渠道===bankChannel。
+//     收款账户（卡号）属于 bigAccount 配置集合 ∧ 付款方式===OFFLINE_PAY_METHOD('线下') ∧ 收款渠道===bankChannel。
 //     （初版筛「付款渠道」===bankChannel 在线下场景命中的全是线上 CFT 单——付款渠道=出款行 BGL，
 //      收款渠道才是账单所属渠道 CITI；故翻转为「收款渠道」并加「付款方式=线下」剔线上单。）
 //     取调拨单号 FTA+8位日期派生订单判断日期（weekTag）；FTA 不合规的【筛中行】计 warning（不静默，三态不变量）。
-//   银行池 = 银行对账单中 MerchantId===bigAccount ∧ FundType==='FundTransfer-in' ∧ 地区===region 的行，
+//   银行池 = 银行对账单中 MerchantId 属于同一 bigAccount 配置集合 ∧ FundType==='FundTransfer-in' ∧ 地区===region 的行，
+//   三轮匹配均要求银行 MerchantId === 订单收款账户（卡号），禁止跨账号配对。
 //     按 BillDate 派生「银行对账周数号」。构池前先剔除 excludeBankRowIds（🔴 Q3 网关回填优先不变量）。
 //   join：银行周 = 订单周 + 1 —— 订单按 weekTagToNumber(weekTag(ftaDate)) 分桶，
 //     银行行用 weekTagToNumber(weekTagPlusOne(BillDate)) 查桶（weekTagPlusOne 在银行侧，日期语义）。
@@ -51,6 +52,7 @@ const { toDate } = require('./engine-date-utils');
 const { weekTag, weekTagPlusOne, weekTagToNumber } = require('./engine-week-utils');
 const { parseFtaDate } = require('./engine-week-utils');
 const { PAYMENT_OFFLINE_FIELD_MAP: F } = require('../../constants/payment-offline-allocation-fields');
+const { parsePaymentBigAccounts } = require('../../shared/payment-big-accounts');
 
 const MS_PER_DAY = 86400000;
 const { txLagToleranceDays: TX_LAG_TOLERANCE_DAYS, relaxedWindowDays: RELAXED_WINDOW_DAYS } = F.MATCH_RULES;
@@ -140,7 +142,7 @@ function dayDiffSigned(bankRow, midRow) {
  * @param {Array<Object>} bankRows          银行对账单行（带 _rowId；R1~R5s2 后的当前值）
  * @param {Array<Object>} midAllocationRows 中台调拨订单行（链接表读回，中文 26 列）
  * @param {Object} [options]
- * @param {string} [options.bigAccount]   大账号（订单池 收款账户（卡号） + 银行池 MerchantId）
+ * @param {string} [options.bigAccount]   一个或多个大账号，使用中文顿号分隔
  * @param {string} [options.bankChannel]  银行渠道 / 账单所属渠道（订单池 收款渠道）
  * @param {string} [options.region]       地区（银行池 地区列）
  * @param {Set|Array} [options.excludeBankRowIds] R5s2 已消费/已回填 bank _rowId（🔴 Q3 剔除）
@@ -156,7 +158,6 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeMidRows = Array.isArray(midAllocationRows) ? midAllocationRows : [];
 
-  const bigAccount = normalizeCellValue(options.bigAccount);
   const bankChannel = normalizeCellValue(options.bankChannel);
   const region = normalizeCellValue(options.region);
   const excludeSet = options.excludeBankRowIds instanceof Set
@@ -169,8 +170,19 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
     matchedPairs
   });
 
-  // 配置缺失（三项任一空）→ 无法构池，安全 no-op（编排器 gating 已挡，这里再兜底）
-  if (bigAccount === '' || bankChannel === '' || region === '') {
+  const parsedBigAccounts = parsePaymentBigAccounts(options.bigAccount);
+  if (!parsedBigAccounts.ok) {
+    warn.push({
+      rowId: null,
+      code: 'payment-offline-invalid-big-account-config',
+      message: `Payment线下调拨大账号配置无效：${parsedBigAccounts.message}`
+    });
+    return emptyResult();
+  }
+  const bigAccountSet = new Set(parsedBigAccounts.accounts);
+
+  // 配置缺失（渠道/地区任一空）→ 无法构池，安全 no-op（编排器 gating 已挡，这里再兜底）
+  if (bankChannel === '' || region === '') {
     return emptyResult();
   }
   if (safeBankRows.length === 0 || safeMidRows.length === 0) {
@@ -178,11 +190,12 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
   }
 
   // ===== ① 订单池（修订 R2 Q10 三条件）=====
-  //   收款账户（卡号）===bigAccount ∧ 付款方式===OFFLINE_PAY_METHOD ∧ 收款渠道===bankChannel。
+  //   收款账户（卡号）属于 bigAccountSet ∧ 付款方式===OFFLINE_PAY_METHOD ∧ 收款渠道===bankChannel。
   //   逐行 parseFtaDate → 订单判断日期；FTA 不合规的【筛中行】计 warning（不静默，三态不变量），未筛中行跳过。
   const orderPool = [];
   for (const mid of safeMidRows) {
-    if (normalizeCellValue(mid && mid[F.mid.payeeAccountCard]) !== bigAccount) continue;
+    const account = normalizeCellValue(mid && mid[F.mid.payeeAccountCard]);
+    if (!bigAccountSet.has(account)) continue;
     if (normalizeCellValue(mid && mid[F.mid.payMethod]) !== F.OFFLINE_PAY_METHOD) continue;
     if (normalizeCellValue(mid && mid[F.mid.receiveChannel]) !== bankChannel) continue;
     const ftaDate = parseFtaDate(mid && mid[F.mid.dispatchNo]);
@@ -197,20 +210,21 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
       continue;
     }
     // 存已解析的 ftaDate（步骤③ weekTag/weekTagPlusOne 直接复用，免二次 parseFtaDate）。
-    orderPool.push({ row: mid, ftaDate });
+    orderPool.push({ row: mid, ftaDate, account });
   }
 
-  // ===== ② 银行池：MerchantId===bigAccount ∧ FundType===FundTransfer-in ∧ 地区===region =====
+  // ===== ② 银行池：MerchantId 属于 bigAccountSet ∧ FundType===FundTransfer-in ∧ 地区===region =====
   //   构池前先剔除 excludeBankRowIds（🔴 Q3 网关回填优先不变量）；BillDate → 银行周数号。
   const bankPool = [];
   for (const bank of safeBankRows) {
     if (excludeSet.has(bank && bank._rowId)) continue;
-    if (normalizeCellValue(bank && bank[F.bank.merchantId]) !== bigAccount) continue;
+    const account = normalizeCellValue(bank && bank[F.bank.merchantId]);
+    if (!bigAccountSet.has(account)) continue;
     if (normalizeCellValue(bank && bank[F.bank.fundType]) !== F.FUND_TYPE_IN) continue;
     if (normalizeCellValue(bank && bank[F.bank.region]) !== region) continue;
     // 银行周 = weekTagPlusOne(BillDate)（修订 R2：+1 挪到银行侧，日期语义）→ 直接落「订单周 + 1」桶
     const bankWeek = weekTagPlusOne(bank && bank[F.bank.billDate]);
-    bankPool.push({ row: bank, bankWeekNum: weekTagToNumber(bankWeek) });
+    bankPool.push({ row: bank, bankWeekNum: weekTagToNumber(bankWeek), account });
   }
 
   if (orderPool.length === 0 || bankPool.length === 0) {
@@ -220,12 +234,14 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
   // ===== ③ 周数 join（修订 R2：银行周 + 1 = 订单周）=====
   //   订单按 weekTagToNumber(weekTag(ftaDate)) 分桶（订单本周）；银行行用 weekTagToNumber(weekTagPlusOne(BillDate))
   //   查桶（银行 +1 周 = 订单周）。weekTagPlusOne 在银行侧（②已算入 bankWeekNum）。
-  const ordersByWeek = new Map();
+  const ordersByAccountAndWeek = new Map();
   for (const ord of orderPool) {
     const key = weekTagToNumber(weekTag(ord.ftaDate)); // 复用步骤① 已解析的 ftaDate
     if (key === null) continue;
-    if (!ordersByWeek.has(key)) ordersByWeek.set(key, []);
-    ordersByWeek.get(key).push(ord);
+    if (!ordersByAccountAndWeek.has(ord.account)) ordersByAccountAndWeek.set(ord.account, new Map());
+    const accountWeeks = ordersByAccountAndWeek.get(ord.account);
+    if (!accountWeeks.has(key)) accountWeeks.set(key, []);
+    accountWeeks.get(key).push(ord);
   }
 
   const usedBankRowId = new Set();  // 严格 1v1（三轮共享）
@@ -287,7 +303,7 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
 
   // ===== ④ R1 主轮：周桶 ∧ 金额币种相等 ∧ BillDate ≥ 交易时间（Q6 同日算晚于）=====
   runRound('main', (bankEntry) => {
-    const bucket = ordersByWeek.get(bankEntry.bankWeekNum) || [];
+    const bucket = ordersByAccountAndWeek.get(bankEntry.account)?.get(bankEntry.bankWeekNum) || [];
     return bucket.filter(
       (ord) => amountCurrencyEqual(ord.row, bankEntry.row) && billDateNotEarlier(bankEntry.row, ord.row)
     );
@@ -295,7 +311,7 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
 
   // ===== ⑤ R2 容差轮：周桶 ∧ 金额币种相等 ∧ BillDate ≥ 交易时间 − txLagToleranceDays =====
   runRound('date-tolerance', (bankEntry) => {
-    const bucket = ordersByWeek.get(bankEntry.bankWeekNum) || [];
+    const bucket = ordersByAccountAndWeek.get(bankEntry.account)?.get(bankEntry.bankWeekNum) || [];
     return bucket.filter(
       (ord) => amountCurrencyEqual(ord.row, bankEntry.row)
         && billDateWithinLag(bankEntry.row, ord.row, TX_LAG_TOLERANCE_DAYS)
@@ -304,7 +320,8 @@ function runRound5PaymentOfflineAllocationBackfill(bankRows, midAllocationRows, 
 
   // ===== ⑥ R3 兜底轮：全部未消费订单（不限周）∧ 金额币种相等 ∧ |BillDate − 交易时间| ≤ relaxedWindowDays =====
   runRound('relaxed-week', (bankEntry) => orderPool.filter(
-    (ord) => amountCurrencyEqual(ord.row, bankEntry.row)
+    (ord) => ord.account === bankEntry.account
+      && amountCurrencyEqual(ord.row, bankEntry.row)
       && billDateWithinWindow(bankEntry.row, ord.row, RELAXED_WINDOW_DAYS)
   ));
 
