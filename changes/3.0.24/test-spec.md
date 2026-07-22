@@ -1,6 +1,6 @@
 # Test Spec — v3.0.24 平盘对账前端与 Payment 多大账号支持
 
-> status: merged-pass（PR #99 已合并；Release 待发布；人工资金复核待完成）
+> status: release-ready-pass（PR #99 已合并；发布门禁通过；Release 待发布；人工资金复核待完成）
 > created: 2026-07-22
 > updated: 2026-07-22
 
@@ -73,4 +73,8 @@
 - `npm run release-check`：unit `3813/3813`、42 个 integration 脚本 `1963/1963`，lint 与 smoke PASS。
 - `npm run verify:main-panel-alignment`：`6/6 PASS`。
 - GitHub PR #99 smoke workflow PASS；最终 self-review P0-P4 Finding 0。
-- PR #99 已以 `a965c48` 合入 `main`；发布前门禁、tag 和 Release 证据待补充。
+- PR #99 已以 `a965c48` 合入 `main`。
+- 干净 `npm ci` 后重新执行 release-check：unit `3813/3813`、integration `1963/1963`，lint 与 smoke PASS。
+- 发布前主页面几何 `6/6 PASS`；启动建窗到可见平均 `99.058ms`；`scan:vars` 与 `check:vars -- --include-minor` PASS。
+- `npm audit --omit=dev` 报告既有 7 条生产依赖告警（2 moderate、5 high）；本迭代无生产依赖变更。
+- tag、Release workflow 和公开资产证据待补充。

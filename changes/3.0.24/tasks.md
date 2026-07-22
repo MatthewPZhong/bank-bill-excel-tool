@@ -28,4 +28,4 @@
 ## Task 6 — 合并归档与在线发布
 - 目标：归档 PR/PRD，在干净依赖上重跑发布门禁，创建 annotated tag，验证 Windows Release 与公开更新资产。
 - 验证：PR、tag、workflow、Release、`latest.yml`、Setup/portable 文件头和最终 tracked worktree 状态。
-- 状态：in_progress（PR #99 已合并；发布门禁、tag 与 Release 待完成）
+- 状态：in_progress（PR #99 已合并，干净依赖发布门禁已通过；tag 与 Release 待完成）

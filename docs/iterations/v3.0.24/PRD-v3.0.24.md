@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.24 PRD
 
 > 目标版本：`3.0.24`
-> 状态：merged（PR #99 已合入 `main`；GitHub Release 待发布）
+> 状态：release-ready（PR #99 已合入 `main`；发布门禁通过；GitHub Release 待发布）
 > 归档：PR #99 merge commit `a965c48`；源规格 `changes/3.0.24/spec.md`
 > 更新时间：2026-07-22
 > 适用仓库：`bank-bill-excel-tool`
@@ -54,4 +54,7 @@ v3.0.24 新增「平盘对账数据处理」前端占位模块，并将 Payment 
 
 - PR #99 于 2026-07-22 以 merge commit `a965c48` 合入 `main`，远程开发分支已删除。
 - PR 归档见 `docs/prs/PR99-v3.0.24.md`。
-- annotated tag、Windows Release workflow 和公开资产验证待发布门禁完成后补充。
+- 合并归档后的 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、主页面几何门禁 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
+- 启动建窗到可见平均 `99.058ms`；变量扫描为 202 个 JS 文件、2324 个顶层声明。
+- 生产依赖仍有既有 7 条 audit 告警（2 moderate、5 high）；本迭代未新增生产依赖，该问题继续作为依赖治理 follow-up。
+- annotated tag、Windows Release workflow 和公开资产验证待 tag 推送后补充。

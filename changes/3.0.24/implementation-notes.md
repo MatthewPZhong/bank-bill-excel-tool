@@ -46,6 +46,11 @@
 | GitHub PR #99 workflow | PASS | smoke-test 通过；Windows build job 按 PR 工作流约定跳过 |
 | 最终 self-review | P0-P4 Finding 0 | 合并前无存活 P0-P4 Finding |
 | PR #99 合并 | `a965c48` | 2026-07-22 merge commit 合入 `main`；远程开发分支已删除 |
+| 发布前 `npm ci` + `release-check` | PASS | unit `3813/3813`、42 个 integration 脚本 `1963/1963`，lint 与 smoke 全绿 |
+| 发布前主页面几何 | `6/6 PASS` | 两种窗口尺寸 × Windows 100%/125%/150% |
+| 发布前启动性能 | PASS | 5 次建窗到可见平均 `99.058ms`，ready-to-show 平均 `170.467ms` |
+| 发布前变量硬节点 | PASS | `scan:vars` 为 202/2324；`check:vars -- --include-minor` 因 `src` 无改动安全跳过 |
+| 生产依赖审计 | 7 条既有告警 | 2 moderate、5 high；v3.0.24 未新增生产依赖，保留为依赖治理 follow-up |
 
 ## Remaining Unknowns
 
