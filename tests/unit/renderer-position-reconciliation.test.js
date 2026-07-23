@@ -21,7 +21,7 @@ function extractPanel() {
 
 const panel = extractPanel();
 
-test.describe('v3.0.24 平盘对账数据处理前端契约', () => {
+test.describe('v3.0.25 平盘对账数据处理前端契约', () => {
   test('模块 ID、显示名和面板显隐接线完整', () => {
     assert.match(renderer, /positionReconciliation:\s*\{\s*id:\s*'position-reconciliation-process',\s*name:\s*'平盘对账数据处理'/);
     assert.match(renderer, /positionReconciliationModulePanel\.hidden\s*=\s*moduleId\s*!==\s*MODULES\.positionReconciliation\.id/);
@@ -35,7 +35,7 @@ test.describe('v3.0.24 平盘对账数据处理前端契约', () => {
       .map((match) => ({ value: match[1], attrs: match[2], label: match[3] }));
     assert.deepEqual(options, [
       { value: 'position-fund-nature-check', attrs: ' selected', label: '平盘资金性质校验' },
-      { value: 'position-data-info-backfill', attrs: '', label: '平盘数据信息回填' },
+      { value: 'position-data-info-backfill', attrs: '', label: '平盘对账数据处理' },
       { value: 'position-order-writeoff', attrs: '', label: '平盘订单销账处理' }
     ]);
   });

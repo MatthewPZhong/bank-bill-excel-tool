@@ -160,6 +160,7 @@ test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的�
     assert.equal(created.attempted, 2);
     assert.equal(created.succeeded, 2);
     assert.equal(created.batch.archiveStatus, 'complete');
+    assert.equal(created.batch.retentionUntil, '2026-09-18');
 
     const appended = await fixture.service.appendFiles({
       batchId: created.batchId,

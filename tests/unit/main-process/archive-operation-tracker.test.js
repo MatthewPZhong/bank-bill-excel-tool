@@ -129,7 +129,7 @@ test.describe('archive operation tracker', () => {
     ]);
   });
 
-  test('网银账单生成任一模板排除时整批跳过', async () => {
+  test('operation-tracker 保留通用 skipArchive 跳过能力', async () => {
     const { tracker, calls } = createHarness();
     const result = await tracker.handleOperation({
       channel: 'file:import',
@@ -137,13 +137,43 @@ test.describe('archive operation tracker', () => {
       runtime: {
         inputPaths: ['/tmp/source.xlsx'],
         outputPaths: ['/tmp/detail.xlsx'],
-        templateIds: [1, 2],
         skipArchive: true
       }
     });
 
     assert.equal(result.skipped, true);
     assert.equal(calls.length, 0);
+  });
+
+  test('网银与月度余额携带模板元数据时均正常存档', async () => {
+    const { tracker, calls } = createHarness();
+    await tracker.handleOperation({
+      channel: 'file:import',
+      result: { status: 'success', detailReady: true },
+      runtime: {
+        inputPaths: ['/tmp/source.xlsx'],
+        outputPaths: ['/tmp/detail.xlsx'],
+        templateIds: [1, 2]
+      }
+    });
+    await tracker.handleOperation({
+      channel: 'monthly-balance:assemble',
+      result: { status: 'ready' },
+      runtime: {
+        outputPaths: ['/tmp/monthly.xlsx'],
+        templateIds: [1, 2]
+      }
+    });
+
+    const creates = calls.filter((call) => call.type === 'create');
+    assert.equal(creates.length, 2);
+    assert.deepEqual(creates[0].payload.files.map((item) => item.filePath), [
+      '/tmp/source.xlsx',
+      '/tmp/detail.xlsx'
+    ]);
+    assert.deepEqual(creates[1].payload.files.map((item) => item.filePath), [
+      '/tmp/monthly.xlsx'
+    ]);
   });
 
   test('大账号选择续接成功后才建立网银存档批次', async () => {

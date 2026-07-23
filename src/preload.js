@@ -130,8 +130,6 @@ contextBridge.exposeInMainWorld('desktopApi', {
     retryBatch: (batchId) => ipcRenderer.invoke('archive-center:retry-batch', batchId),
     getSettings: () => ipcRenderer.invoke('archive-center:get-settings'),
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
-    listTemplatePolicies: () => ipcRenderer.invoke('archive-center:list-template-policies'),
-    setTemplateExcluded: (templateId, excluded) => ipcRenderer.invoke('archive-center:set-template-excluded', templateId, excluded),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },
   errors: {

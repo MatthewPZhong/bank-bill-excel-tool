@@ -19,7 +19,7 @@ const {
 const STAGING_DIR_NAME = '.staging';
 const READONLY_DIR_NAME = '.readonly';
 const BLOB_ROOT_PARTS = Object.freeze(['blobs', 'sha256']);
-const DEFAULT_RETENTION_DAYS = 90;
+const DEFAULT_RETENTION_DAYS = 60;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const ROOT_MUTATION_TAILS = new Map();
 

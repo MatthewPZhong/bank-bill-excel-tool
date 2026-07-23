@@ -9,9 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v28（app v3.0.24 — 12 个主模块 ID 全集；平盘对账纯前端占位；Payment `bigAccount` 严格顿号列表及按账号隔离的三轮 1:1） |
-| v28 本轮 review | 2026-07-22（覆盖 `ALL_MODULE_IDS`/renderer `MODULES` 同步、默认闲置与模块切换、五按钮无业务 IPC、状态/缩放几何；Payment 共享解析器、旧单账号兼容、保存阻断、非法历史配置 warning、银行/订单同账号门控、账号×周分桶、R3 同账号兜底、全局消费与核对 sheet 回归；真实双账号资金复核待人工完成） |
-| v28 基线数据 | `docs/analysis/var-reference-stats.md`（202 个 JS 文件 / 2324 顶层声明；A-share 341 / A-pair 592 / A-local 1250 / B 933；报告版本 3.0.24） |
+| 当前清单版本 | v29（app v3.0.25 — 设置全局【确认】保存存档保留期；模板“不存档”退役并归零历史配置；archiveCenter IPC 由 12 个收敛为 10 个） |
+| v29 本轮 review | 2026-07-23（覆盖 `ArchiveCenterController` / main IPC / preload / renderer 四层同步退役模板策略；旧 `archive_center_excluded_template_ids` 启动归一化；网银/月度余额恢复存档；通用 `skipArchive`、保留期、Blob、批次、打开/另存/锁定/删除/重试回归；设置确认保存成功/失败/放弃语义及六组合几何） |
+| v29 基线数据 | `docs/analysis/var-reference-stats.md`（202 个 JS 文件 / 2320 顶层声明；A-share 341 / A-pair 592 / A-local 1246 / B 933；报告版本 3.0.25） |
+| v28 历史版本 | app v3.0.24 — 12 个主模块 ID 全集；平盘对账纯前端占位；Payment `bigAccount` 严格顿号列表及按账号隔离的三轮 1:1。 |
 | v27 历史版本 | app v3.0.23 — C3 专用 Channel trim+NOCASE 候选池；R4 四类固定资金口径、完整 exactRows、全局银行行 1:1 消费与 R4→R5 no-op 匹配血缘。 |
 | v26 历史版本 | app v3.0.22 — 设置页存档中心：轻量元数据、SHA-256 Blob 去重、不可复用批次流水、11 模块首次结果绑定与后台归档队列。 |
 | v25 历史版本 | app v3.0.21 — Ach Return 退款过滤改用 R1 具体配对；DBS-Charge 步骤2增加固定 TradeType 白名单和优先银行方向守卫。 |
@@ -22,7 +23,7 @@
 | v20 历史版本 | app v3.0.15 — 独立重复入金匹配，严格 1R+2I 七元组、全保留月份 INBOUND MPT 批量候选、全局不复用与身份一致裁决、当前周期 side DB、主库轻量镜像及固定双 sheet 原子导出；自动门禁已通过，资金负责人复核及 Windows Excel/WPS 人工打开待完成。 |
 | v19 历史版本 | app v3.0.14 — 2026-07-12：前置资金对账严格 1:1、重复网关审计、双 side DB、按渠道 5/6-sheet；`ALL_MODULE_IDS` 为 10，per-月侧库为 4 个业务模块/5 个存储模块；自动门禁和人工资金复核均已完成。 |
 | 清单版本 | v18（对应 app v3.0.13 — 2026-07-04 收尾复核 4 条：**大账号识别阻断**（`matchMerchantIds` 子串 fuzzy 不再作为自动放行依据 + `normalizeMaintainedBigAccounts` 单一展平器 + 识别优先读文件头部）；**调拨状态过滤可观测性**（`buildFundTransferReconRows` 仅派生 `付款成功` + `fundTransferReconDerive.warning` 提醒全过滤）；**`detectFundTransferManyToMany` / `manyToManyReviewRows` 输出口径**（异常说明并入「命中场景」第 2 列，note-only 行可见，独立异常 sheet 停用）；**C3 同值候选优先**（同值候选优先减少无意义覆盖）；触发：v3.0.13 收尾 check-vars 硬节点）；v17（对应 app v3.0.12 — 2026-06-28 v3.0.12 收尾升格 2 条 Risk-sensitive ⚠️🔴 资金红线：**账户映射 → 调拨对账单 `big_account` 派生**（`fund_transfer_account_mappings` 全局表 + 仓储三函数 + `database.js` facade 四方法 + `buildFundTransferReconRows` accountMappingMap 第 2 参 + `linked-derive-rebuild` 单点注入 run/导入两链 + IPC/preload/`createFundTransferAccountMappingDialog`；改「中台调拨订单对账ID回填」R5s2-recon + DBS-Charge R3.5 匹配大账号口径）+ **`detectFundTransferManyToMany` / `manyToManyReviewRows`**（异常-人工判断 sheet 检测器，纯只读不改回填/行数守恒 + writer `appendManyToManyReviewSheet`/`SHEET_MANY_TO_MANY_NAME` + orchestrator `manyToManyReviewCount` + writer 第 8 参透传）；触发：v3.0.12 收尾 check-vars 硬节点；v16（对应 app v3.0.5 — 2026-06-15 size-startup-optimization Part B 升格 2 条：**per-月侧库体系**（Risk-sensitive ⚠️🔴🔴 资金红线 — run-data-store/MODULE_*/SIDE_DB_DDL_*/三编排层/reconcileOrphans/side_db_rel_path + 三 parity 锁；Phase 1/2 三对账模块 run 级批量数据迁出主库）+ **`DEFERRED_WINDOW_STARTUP`**（Runtime-state ⚠️ 启动时序回退开关 + appInitDone/两段式 getInfo/init-done；Phase 3 启动窗口先行）；触发：v3.0.5 Phase 4 守卫固化 check-vars 节点；v15（对应 app v3.0.4 — 2026-06-11 收尾文档批升格 5 条 Critical/Risk-sensitive：`USE_BIG_TABLE_IMPORT_ENGINE_PENDING`/`USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW` + 共享 dispatch（Critical 🔴🔴 pending/biz-op flow 换引擎）/ `BANK_DEPOSIT_FIELDS` 13→14（Risk-sensitive 🔴）/ BOC调拨订单修复链（Risk-sensitive 🔴）/ R5s2b Payment线下调拨回填（Risk-sensitive 🔴 + weekTag/excludeBankRowIds）；顺带修陈旧行号（`runC3Scenario`:81 / `writeBankStatementOutput`:106 5 参 / `processingResult`:311 结构补 unmatchedRows 等）+ `acquiring-engine-migration` 34→45 断言；触发：v3.0.4 收尾 check-vars 硬节点；v14（对应 app v3.0.0 — 2026-06-08 PR-4 升格 1 条 Runtime-state：`refundOrderSession`（R5 中台退款订单回填引擎入参源 + run 阶段注入 + 🔴 PR#65 收紧生命周期：单文件导入清 main.js:3494 / batch 本批未导退款表清 :11460 严格绑定「本批有效导入」；v3.0.0 需求3 经 session-status 透出 hasRefundOrder 供运行点 shouldPromptRefundAtRun 判就绪，本迭代只读不改写入/清空时机）；触发：v3.0.0 PR-4（退款提醒对齐 C3 + 候选预检 + 运行点编排）提 PR 前 check-vars 节点；v13（对应 app v2.1.16-beta.1）= 2026-06-07 阶段一 A0 收尾升格 3 条 Runtime-state：`bankStatementSession`（资金对账数据处理银行对账单进程级 session + v2.1.16 A5 多文件合并对账语义 + 🔴 `_rowId` 全局唯一不变量）/ `gatewayReconSession`（C3 网关账单数据源 + 导入银行对账单时清空）/ `processingResult`（5 轮对账运行结果缓存 + scenarios 变更/重导入时清空）；触发：v2.1.16 阶段一提 PR 前 check-vars 节点；v12 = 2026-05-28 Phase 6 T33 升格 5 条 v2.1.10 4 主线变量（Critical 4：`runCheckCore` / `clearStaleSuccessfulRawJson` / `ensureDiffRowsCascadeMigration_v2_1_10` / `acquiring_bill_currency_diff_rows` FK CASCADE schema + Important-skeleton 1：`serializeError`/`deserializeError` + 更新 `bill_imports.raw_json` 内容契约）；v11 = 2026-05-26 N1' + N4 升格 7 条；v10 = 2026-05-22 Phase 0 T02 升格 11 条；v9 = 2026-05-21 v2.1.7 T14 收口升格 10 条；v8 = 2026-05-19 v2.1.6 v0.7 fix4 收单流水侧对账字段切换 + DB 重命名 settle_*；v7 = 2026-05-18 acquiring-bill-currency 模块初版；v6 = v2.1.4 dev round 7 新增 2 条 Important-skeleton；v5 = v2.1.3 round 4 自 review 新增 2 条；v4 = v2.1.3 round 3 新增 3 条；v3 = v2.1.3 round 2 新增 1 条；round 1 已升格 13 条 v2.1.3 新符号保持） |
-| 上次人工 review | 2026-07-22（v3.0.24 平盘前端占位 / Payment 多账号自动化与代码 review，真实双账号逐笔复核待业务负责人）；2026-07-21（v3.0.23 C3 双候选池 / R4 四类严格 1:1 自动化与代码 review，真实资金逐笔复核待业务负责人）；2026-07-20（v3.0.22 存档中心 — 元数据/Blob/流水游标/运行绑定/失败隔离/IPC/UI）；2026-07-19（v3.0.19 工具箱严格多 Sheet 合并 — 可见性/表头/顺序/分页/资源生命周期/拆分隔离）；2026-07-16（v3.0.18 在线升级 — IPC/设置仓储/升级状态机/业务闸门/退出清理/发布配置）；2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
+| 上次人工 review | 2026-07-23（v3.0.25 设置确认保存 / 模板排除退役 / archiveCenter 10 API 自动化与代码 review）；2026-07-22（v3.0.24 平盘前端占位 / Payment 多账号自动化与代码 review，真实双账号逐笔复核待业务负责人）；2026-07-21（v3.0.23 C3 双候选池 / R4 四类严格 1:1 自动化与代码 review，真实资金逐笔复核待业务负责人）；2026-07-20（v3.0.22 存档中心 — 元数据/Blob/流水游标/运行绑定/失败隔离/IPC/UI）；2026-07-19（v3.0.19 工具箱严格多 Sheet 合并 — 可见性/表头/顺序/分页/资源生命周期/拆分隔离）；2026-07-16（v3.0.18 在线升级 — IPC/设置仓储/升级状态机/业务闸门/退出清理/发布配置）；2026-07-04（v3.0.13 收尾复核 — 大账号识别阻断 / 调拨状态过滤 / 命中场景异常说明并入 / C3 同值候选优先）；2026-06-28（v3.0.12 收尾升格 2 条 — 账户映射→调拨对账单 `big_account` 派生 / `detectFundTransferManyToMany` 异常-人工判断 sheet）；2026-06-15（v3.0.5 Part B 升格 2 条 — per-月侧库体系 / DEFERRED_WINDOW_STARTUP）；2026-06-11（v3.0.4 收尾文档批升格 5 条 + 修陈旧行号）；2026-06-08（v3.0.0 PR-4 升格 1 条 Runtime-state — refundOrderSession）；2026-06-07（v2.1.16 阶段一 A0 收尾升格 3 条 Runtime-state — bankStatementSession / gatewayReconSession / processingResult）|
 | v3.0.15 人工资金 review | 待业务负责人使用脱敏真实样本完成；当前自动化 review 不替代该发布硬门禁。 |
 | v3.0.16 人工资金 review | 待业务负责人逐笔确认 `abs(方向金额) + Extra Fee`、14 条规则映射及错误行逻辑排除结果；自动化 review 不替代该发布硬门禁。 |
 | v3.0.17 人工资金 review | 待业务负责人用真实脱敏退款样本逐笔确认新增模糊命中的流水号、金额差、大账号、币种和双向 1:1；自动化 review 不替代该发布硬门禁。 |
@@ -393,13 +394,14 @@
 
 ### `ArchiveCenterController` / `archiveCenter` IPC（v3.0.22 新增 Important-skeleton）
 - 定义：`src/main-process/archive-center/controller.js`；preload 门面为 `src/preload.js` 的 `window.desktopApi.archiveCenter`
-- 关联功能：存档批次查询、详情、统计、保留期、模板排除、锁定、删除、重试、打开只读副本和另存为的唯一跨进程入口；renderer 只能传批次/文件 ID
+- 关联功能：存档批次查询、详情、统计、保留期、锁定、删除、重试、打开只读副本和另存为的唯一跨进程入口；renderer 只能传批次/文件 ID
 - 变更 review 要点：
-  - controller / main IPC / preload 12 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径或原始源路径
-  - `archive_center_retention_days` 只接受 30/90/180/365/永久；非法值按 90，改枚举必须同步 UI、controller 和既有设置兼容
-  - `archive_center_excluded_template_ids` 损坏时按隐私优先排除全部当前网银模板；改恢复策略需复核模板新增、删除和保存后的集合收敛
+  - controller / main IPC / preload 10 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径或原始源路径
+  - `archive_center_retention_days` 只接受 30/60/90/180/365/永久；缺失或非法值按 60，改枚举必须同步 UI、controller、ArchiveService 和既有设置兼容
+  - `archive_center_excluded_template_ids` 自 v3.0.25 起为退役兼容 key，控制器启动时必须规范化为 `[]`；不得恢复隐藏的模板级跳过
+  - 网银账单与月度余额不得再由模板元数据产生 `skipArchive`；operation tracker 通用 `skipArchive` 能力仍需回归
   - 删除元数据成功但物理清理失败是部分成功，UI 必须刷新批次并保留残留清理提示
-  - 必跑：archive controller/UI contract 单测 + 设置页预览 + `npm run smoke`
+  - 必跑：archive controller/UI contract 单测 + 设置页预览 + `npm run verify:app-settings-layout` + `npm run smoke`
 
 ### `normalizeBu`（v2.1.3 业务OP / v2.1.2 月度BU回填校验共用）
 - 定义：`src/main-process/biz-op-recon-session.js` + `src/backend/biz-op-recon-import/validator.js`（v2.1.3）；v2.1.2 月度BU回填校验也有同名实现

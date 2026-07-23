@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -9,8 +11,8 @@ const {
   createArchiveCenterController
 } = require('../../../src/main-process/archive-center/controller');
 
-function createHarness() {
-  const settings = new Map();
+function createHarness(options = {}) {
+  const settings = new Map(options.initialSettings || []);
   const batches = [];
   const artifacts = new Map();
   const templates = [{ id: 1, name: 'DBS' }, { id: 2, name: 'BOC' }];
@@ -106,19 +108,58 @@ test('tracker sink 建批次、归档文件并向 UI 映射批次号与文件字
   assert.equal(detail.batch.files[0].sizeBytes, 12);
 });
 
-test('保留期与模板排除持久化，任一参与模板排除即命中', () => {
+test('保留期默认 60 天并支持新增枚举，既有合法值保持兼容', () => {
   const { controller, settings } = createHarness();
+  assert.equal(controller.getSettings().settings.retentionDays, 60);
+  assert.equal(controller.setRetentionDays(60).status, 'success');
+  assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), '60');
+  assert.equal(controller.setRetentionDays(90).status, 'success');
   assert.equal(controller.getSettings().settings.retentionDays, 90);
+  assert.equal(controller.setRetentionDays(45).status, 'failed');
   assert.equal(controller.setRetentionDays(null).status, 'success');
   assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), 'permanent');
+});
 
-  assert.equal(controller.setTemplateExcluded('2', true).status, 'success');
-  assert.equal(controller.hasExcludedTemplate([1, 2]), true);
-  assert.equal(settings.get(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY), '["2"]');
-  assert.deepEqual(controller.listTemplatePolicies().policies, [
-    { templateId: '1', templateName: 'DBS', excluded: false },
-    { templateId: '2', templateName: 'BOC', excluded: true }
-  ]);
+test('控制器启动时将有效、损坏和空模板排除设置统一归一化为空数组', () => {
+  const cases = [
+    ['有效设置', '["2"]'],
+    ['损坏设置', '{broken-json'],
+    ['空设置', '']
+  ];
+  for (const [label, storedValue] of cases) {
+    const { controller, settings } = createHarness({
+      initialSettings: [[ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, storedValue]]
+    });
+    assert.equal(
+      settings.get(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY),
+      '[]',
+      label
+    );
+    assert.deepEqual(controller.getSettings().settings, { retentionDays: 60 }, label);
+  }
+
+  const missing = createHarness();
+  assert.equal(
+    missing.settings.get(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY),
+    '[]',
+    '缺失设置'
+  );
+});
+
+test('模板排除控制器方法与 main/preload IPC 桥接已移除', () => {
+  const { controller } = createHarness();
+  assert.equal(controller.listTemplatePolicies, undefined);
+  assert.equal(controller.setTemplateExcluded, undefined);
+  assert.equal(controller.hasExcludedTemplate, undefined);
+
+  const repositoryRoot = path.resolve(__dirname, '../../..');
+  const mainSource = fs.readFileSync(path.join(repositoryRoot, 'src/main.js'), 'utf8');
+  const preloadSource = fs.readFileSync(path.join(repositoryRoot, 'src/preload.js'), 'utf8');
+  for (const source of [mainSource, preloadSource]) {
+    assert.doesNotMatch(source, /archive-center:list-template-policies/);
+    assert.doesNotMatch(source, /archive-center:set-template-excluded/);
+  }
+  assert.doesNotMatch(mainSource, /hasExcludedTemplate/);
 });
 
 test('单个文件归档失败保留批次并返回可见告警，不抛业务异常', async () => {
@@ -159,39 +200,6 @@ test('另存为取消不写文件，成功时使用原文件名作为默认名',
   controller.showSaveDialog = async () => ({ canceled: false, filePath: '/tmp/copy.xlsx' });
   service.saveAs = async (_id, targetPath) => ({ ok: true, filePath: targetPath });
   assert.equal((await controller.saveAs(fileRefId)).filePath, '/tmp/copy.xlsx');
-});
-
-test('模板排除设置损坏时按隐私优先排除全部模板', () => {
-  const { database, service, settings, templates } = createHarness();
-  settings.set(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '{broken-json');
-  const controller = createArchiveCenterController({ database, service });
-
-  templates.push({ id: 3, name: 'JPM' });
-
-  assert.equal(controller.hasExcludedTemplate([1]), true);
-  assert.equal(controller.hasExcludedTemplate([2]), true);
-  assert.equal(controller.hasExcludedTemplate([3]), true);
-  assert.equal(controller.hasExcludedTemplate([]), true);
-  assert.equal(controller.getSettings().settings.templatePolicyRecovered, true);
-  assert.deepEqual(
-    controller.listTemplatePolicies().policies.map((policy) => policy.excluded),
-    [true, true, true]
-  );
-
-  assert.equal(controller.setTemplateExcluded('1', false).status, 'success');
-  assert.deepEqual(controller.listTemplatePolicies().policies.map((policy) => policy.excluded), [false, true, true]);
-});
-
-test('模板排除设置虽为合法 JSON 但含非法 ID 类型时仍按损坏处理', () => {
-  const { database, service, settings } = createHarness();
-  settings.set(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[{"id":1}]');
-  const controller = createArchiveCenterController({ database, service });
-
-  assert.equal(controller.getSettings().settings.templatePolicyRecovered, true);
-  assert.deepEqual(
-    controller.listTemplatePolicies().policies.map((policy) => policy.excluded),
-    [true, true]
-  );
 });
 
 test('批次元数据已删除但物理清理失败时保留部分成功语义', async () => {
