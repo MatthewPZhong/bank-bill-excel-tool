@@ -48,7 +48,13 @@
 - [x] PR #100 self-review 清零并以 merge commit 合入 `main`
 - [x] 建立 PR 归档与版本 PRD
 - [x] 在合并后的 `main` 上重跑干净依赖发布门禁
-- [ ] 创建并推送 annotated tag `v3.0.25`
-- [ ] 验证 Windows Release workflow 与 GitHub Release
-- [ ] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产
-- [ ] 回写最终发布证据并确认 tracked worktree 干净
+- [x] 创建并推送 annotated tag `v3.0.25`
+- [x] 验证 Windows Release workflow 与 GitHub Release
+- [x] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产
+- [x] 回写最终发布证据并确认 tracked worktree 干净
+
+## 7. 公告前人工门禁
+
+- [ ] Windows 10/11 setup 与 portable 实机打开验证，并记录 SmartScreen 表现
+- [ ] 使用上一 stable 完成 `v3.0.24 → v3.0.25` 生产在线升级 canary
+- [ ] 核对升级后的 SQLite、用户设置与导出文件保留

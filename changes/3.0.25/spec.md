@@ -1,6 +1,6 @@
 # Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
-> status: release-ready（PR #100 已合入 main；发布门禁通过；Release 待发布）
+> status: released（PR #100 已合入 main；GitHub Release v3.0.25 已发布）
 > owner: PM / Dev
 > created: 2026-07-23
 > updated: 2026-07-23
@@ -126,5 +126,9 @@
 - 发布前设置布局与主页面布局均为 `6/6 PASS`；启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`。
 - 发布前 `scan:vars` 仍为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
 - 生产依赖审计仍有既有 7 条告警（2 moderate、5 high、0 critical）；本迭代未新增生产依赖，继续作为依赖治理 follow-up。
-- `v3.0.25` tag、Windows Release workflow 和公开更新资产验证待补充。
+- annotated tag `v3.0.25` 指向 `588eaeb9ab6a209ad810f0d722b1eaee4c01230a`；Windows Release workflow run `29993821247` 全部通过。
+- GitHub Release `v3.0.25` 已成为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 公开 `latest.yml` 版本为 `3.0.25`，Setup 路径与大小 `99,763,759` 正确；文件 SHA-256 `942e1181...cb83` 与 GitHub 元数据一致。
+- Setup 与 portable 匿名 Range 回读均返回 HTTP 206，文件头均为 `MZ`。
 - Windows 安装版实机字体与缩放复核仍是人工 follow-up，不得因自动几何验证通过而宣称实机视觉验收完成。
+- 按 Windows 发布 Runbook，真实 `v3.0.24 → v3.0.25` 在线升级、setup/portable、SmartScreen、SQLite/设置/导出文件保留仍是公告前人工门禁；Release 已发布不等于 canary 已通过。

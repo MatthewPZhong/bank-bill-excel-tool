@@ -1,6 +1,6 @@
 # Test Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
-> status: release-ready-pass（PR #100 已合并；发布门禁通过；Release 待发布）
+> status: released-pass（PR #100 已合并；GitHub Release v3.0.25 已发布）
 > created: 2026-07-23
 > updated: 2026-07-23
 
@@ -72,4 +72,8 @@
 - 发布前启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`。
 - `scan:vars` 为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
 - `npm audit --omit=dev` 报告 7 条既有生产依赖告警（2 moderate、5 high、0 critical）；本迭代无生产依赖变更。
-- tag、Release workflow 和公开资产证据待补充。
+- annotated tag `v3.0.25` 指向 `588eaeb9ab6a209ad810f0d722b1eaee4c01230a`。
+- Windows Release workflow run `29993821247` PASS，远端 release-check、主页面布局、构建、更新资产校验和发布后验证全部通过。
+- GitHub Release 为 latest、非 draft、非 prerelease，四个预期资产均存在。
+- 公开 `latest.yml` SHA-256 与 GitHub 元数据一致；Setup 与 portable 匿名 Range 回读均为 HTTP 206 且文件头为 `MZ`。
+- 真实 Windows `v3.0.24 → v3.0.25` canary、SmartScreen、安装版/便携版及用户数据保留尚待人工验证；完成前不得公告为已完成生产 canary。

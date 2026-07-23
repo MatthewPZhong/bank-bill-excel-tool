@@ -57,9 +57,15 @@
 | 发布前启动性能 | PASS | 5 次建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms` |
 | 发布前变量硬节点 | PASS | `scan:vars` 为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过 |
 | 生产依赖审计 | 7 条既有告警 | 2 moderate、5 high、0 critical；v3.0.25 未新增生产依赖，保留为依赖治理 follow-up |
+| annotated tag | `v3.0.25` → `588eaeb` | tag 精确指向已推送 `main` 的发布准备提交 |
+| Windows Release workflow | run `29993821247` PASS | 14m55s；远端 release-check、几何、构建、包检查、更新资产校验及发布后验证全部通过 |
+| GitHub Release | `v3.0.25` latest | 非 draft、非 prerelease；Setup、blockmap、portable、`latest.yml` 四资产 uploaded |
+| 公开更新资产回读 | PASS | `latest.yml` SHA-256 `942e1181...cb83` 与元数据一致；Setup/portable 匿名 Range 文件头均为 `MZ` |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 交付影响 |
 |---|---|---|---|
 | Windows 实机字体渲染与 macOS Electron 强制缩放是否完全一致 | PROBE | 自动六组合几何已通过；发布前可在 Windows 安装版复核 | 不阻断本地实施，不得表述为 Windows 实机已验收 |
+| Windows 生产升级 canary | BLOCK-ANNOUNCEMENT | 在 Windows 10/11 使用上一 stable 验证 setup/portable、SmartScreen、下载、稍后、重启安装与用户数据保留 | 不阻断已经完成的技术发布，但阻断发布公告 |
+| GitHub 发布保护未配置 | FOLLOW-UP | `production-release` 当前无 protection rules，`main` 未启用 branch protection；仓库管理员应按 Runbook 配置 Environment、main 与 tag ruleset | 不改变本次已发布资产，但未来 tag 推送缺少服务端审批与保护 |

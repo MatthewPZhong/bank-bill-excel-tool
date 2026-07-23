@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.25 PRD
 
 > 目标版本：`3.0.25`
-> 状态：release-ready（PR #100 已合入 `main`；发布门禁通过；GitHub Release 待发布）
+> 状态：released（PR #100 已合入 `main`；GitHub Release `v3.0.25` 已发布）
 > 归档：PR #100 merge commit `047275f`；源规格 `changes/3.0.25/spec.md`
 > 更新时间：2026-07-23
 > 适用仓库：`bank-bill-excel-tool`
@@ -52,6 +52,7 @@ v3.0.25 修复存档设置无法保存的问题，统一设置弹窗确认操作
 - 启动建窗到可见平均 `98.202ms`，ready-to-show 平均 `167.323ms`。
 - GitHub PR #100 workflow 通过；最终 self-review 为 P0-P4 Finding 0。
 - Windows 安装版实机字体与缩放尚未人工复核。自动化几何证据不能表述为 Windows 实机视觉验收完成。
+- 真实 Windows `v3.0.24 → v3.0.25` 在线升级、SmartScreen、setup/portable 以及 SQLite/设置/导出文件保留尚待人工 canary；完成前不得公告 canary 已通过。
 
 ## 6. 发布归档
 
@@ -60,4 +61,7 @@ v3.0.25 修复存档设置无法保存的问题，统一设置弹窗确认操作
 - 合并归档后的 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、设置布局 `6/6`、主页面布局 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
 - 启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`；变量扫描为 202 个 JS 文件、2320 个顶层声明。
 - 生产依赖仍有既有 7 条 audit 告警（2 moderate、5 high、0 critical）；本迭代未新增生产依赖，该问题继续作为依赖治理 follow-up。
-- annotated tag、Windows Release workflow 和公开更新资产验证待 tag 推送后补充。
+- annotated tag `v3.0.25` 指向 `588eaeb9ab6a209ad810f0d722b1eaee4c01230a`；Windows Release workflow run [`29993821247`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/29993821247) 全部通过。
+- GitHub Release [`v3.0.25`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.25) 已成为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml`。
+- 匿名 Range 回读确认 Setup/portable 总大小分别为 `99,763,759` / `99,266,991` 字节且文件头均为 `MZ`；公开 `latest.yml` 的版本、路径、大小和 SHA-512 契约有效。
+- GitHub `production-release` Environment 当前没有审批保护规则，`main` 未启用 branch protection；本次 Release 事实有效，但后续发布治理需按 Windows Runbook 补齐。
