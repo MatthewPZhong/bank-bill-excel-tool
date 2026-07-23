@@ -184,6 +184,9 @@ td .muted { color: var(--muted); }
 .template-rename-card { width: min(100%, 520px); }
 .remember-order-mismatch-card { width: min(100%, 460px); }
 .app-update-settings-card {
+  --app-settings-footer-inline-padding: 24px;
+  --app-settings-confirm-width: 72px;
+  --app-update-pane-inline-padding: 36px;
   width: min(1088px, calc(100vw - 56px));
   height: min(704px, calc(100vh - 56px));
   min-height: 0;
@@ -275,8 +278,12 @@ td .muted { color: var(--muted); }
 .app-settings-footer {
   flex: 0 0 66px;
   min-height: 66px;
-  padding: 0 24px;
+  padding: 0 var(--app-settings-footer-inline-padding);
   flex-wrap: nowrap;
+}
+.app-settings-footer [data-role="close-update-dialog"] {
+  width: var(--app-settings-confirm-width);
+  min-width: var(--app-settings-confirm-width);
 }
 .app-settings-footer-group {
   display: inline-flex;
@@ -290,12 +297,17 @@ td .muted { color: var(--muted); }
 .app-update-pane-scroll {
   height: 100%;
   overflow-y: auto;
-  padding: 30px 36px;
+  padding: 30px var(--app-update-pane-inline-padding);
 }
 .app-update-settings-body {
   display: grid;
   gap: 0;
-  width: min(620px, 100%);
+  width: calc(
+    100%
+    - var(--app-settings-footer-inline-padding)
+    - var(--app-settings-confirm-width)
+    + var(--app-update-pane-inline-padding)
+  );
   margin-top: 24px;
   padding: 0 0 18px;
   border-top: 1px solid var(--line-soft);
@@ -325,6 +337,7 @@ td .muted { color: var(--muted); }
   align-items: center;
   gap: 10px;
   color: var(--text);
+  font-size: 14px;
   cursor: pointer;
 }
 .app-update-toggle input {
@@ -340,7 +353,12 @@ td .muted { color: var(--muted); }
   accent-color: var(--primary);
 }
 .app-update-settings-note {
-  width: min(620px, 100%);
+  width: calc(
+    100%
+    - var(--app-settings-footer-inline-padding)
+    - var(--app-settings-confirm-width)
+    + var(--app-update-pane-inline-padding)
+  );
   margin: 0;
   padding: 0;
   color: var(--muted);
@@ -778,37 +796,6 @@ td .muted { color: var(--muted); }
   margin-top: 12px;
 }
 .archive-center-retention-field { width: 220px; }
-.archive-center-template-list {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.archive-center-template-row {
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  border-bottom: 1px solid var(--line-soft);
-  cursor: pointer;
-}
-.archive-center-template-row:last-child { border-bottom: 0; }
-.archive-center-template-row:hover { background: #f8fafc; }
-.archive-center-template-row input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--primary);
-}
-.archive-center-template-row span {
-  min-width: 0;
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-.archive-center-template-row em {
-  color: var(--muted);
-  font-size: 12px;
-  font-style: normal;
-}
 .archive-delete-confirm-error {
   width: 100%;
   margin-top: 12px;

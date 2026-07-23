@@ -3511,15 +3511,6 @@ function registerArchiveCenterHandlers() {
   ipcMain.handle('archive-center:set-retention-days', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
-  ipcMain.handle('archive-center:list-template-policies', () => {
-    return callArchiveCenter('listTemplatePolicies');
-  });
-  ipcMain.handle('archive-center:set-template-excluded', (_event, templateId, excluded) => {
-    if (typeof excluded !== 'boolean') {
-      return { status: 'failed', message: '模板存档策略无效' };
-    }
-    return callArchiveCenter('setTemplateExcluded', templateId, excluded);
-  });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
 }
 
@@ -14593,12 +14584,7 @@ function statementArchiveRuntime() {
     templateIds: ids,
     templateNames: ids.map((templateId) => database && database.getTemplate(templateId))
       .filter(Boolean)
-      .map((template) => template.name),
-    skipArchive: Boolean(
-      archiveCenterService
-      && typeof archiveCenterService.hasExcludedTemplate === 'function'
-      && archiveCenterService.hasExcludedTemplate(ids)
-    )
+      .map((template) => template.name)
   };
 }
 
@@ -14614,11 +14600,6 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
     return {
       outputPaths: archiveOutputPaths([pending]),
       templateIds,
-      skipArchive: Boolean(
-        archiveCenterService
-        && typeof archiveCenterService.hasExcludedTemplate === 'function'
-        && archiveCenterService.hasExcludedTemplate(templateIds)
-      ),
       metadata: pending ? {
         year: pending.year,
         month: pending.month,

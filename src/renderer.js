@@ -2107,14 +2107,20 @@ function refreshOpenAppUpdateDialog() {
   if (note) {
     note.textContent = status.distribution === 'portable'
       ? '便携版不会自动安装更新。点击“前往下载”可打开稳定版下载页面。'
-      : '开启后每次启动仅在后台检查一次，不会定时检查。';
+      : '';
+    note.hidden = note.textContent === '';
   }
   if (checkButton) {
     checkButton.textContent = status.distribution === 'portable' ? '前往下载' : '立即检查';
     checkButton.disabled = ['checking', 'downloading', 'downloaded'].includes(status.state);
   }
   if (restartButton) restartButton.hidden = !status.canRestart;
-  if (closeButton) closeButton.textContent = status.canRestart ? '稍后' : '完成';
+  if (closeButton) {
+    const archiveVisible = !dialog.querySelector('[data-pane="archive"]')?.hidden;
+    closeButton.textContent = archiveVisible
+      ? '确认'
+      : (status.canRestart ? '稍后' : '确认');
+  }
   if (navDot) navDot.hidden = status.state !== 'downloaded';
 }
 
@@ -2378,14 +2384,14 @@ function createAppUpdateSettingsDialog() {
     loading: false,
     listRequestId: 0,
     detailRequestId: 0,
+    settingsRequestId: 0,
+    settingsLoading: false,
     selectedBatchId: '',
     batches: [],
     detail: null,
     stats: null,
-    settings: { retentionDays: 90 },
-    templatePolicies: [],
-    savedRetentionValue: '90',
-    savedTemplatePolicies: new Map(),
+    settings: { retentionDays: 60 },
+    savedRetentionValue: '60',
     batchFilterTimer: null
   };
 
@@ -2418,7 +2424,6 @@ function createAppUpdateSettingsDialog() {
         <section id="appUpdatePane" class="app-settings-pane app-update-pane" data-pane="update" aria-labelledby="appUpdatePaneHeading">
           <div class="app-update-pane-scroll">
             <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">自动更新</h3>
-            <p class="app-settings-pane-subtitle">管理软件版本检查、下载与安装。</p>
             <div class="app-update-settings-body">
               <div class="app-update-settings-row">
                 <span class="app-update-settings-label">当前版本</span>
@@ -2460,7 +2465,6 @@ function createAppUpdateSettingsDialog() {
             <header class="archive-center-header">
               <div class="archive-center-header-copy">
                 <h3 id="archiveCenterHeading" class="app-settings-pane-heading">存档中心</h3>
-                <p class="app-settings-pane-subtitle">按日期、模块和批次号查看已参与处理的输入文件与结果表。</p>
               </div>
               <div class="archive-center-storage-summary" aria-label="存档容量">
                 <span>唯一文件</span>
@@ -2524,25 +2528,16 @@ function createAppUpdateSettingsDialog() {
 
             <div class="archive-center-settings-section">
               <h4>保留期限</h4>
-              <p class="archive-center-settings-note">锁定批次不参与自动清理。默认保留期为 90 天。</p>
               <label class="archive-center-field archive-center-retention-field">
-                <span>默认保留</span>
-                <select data-role="archive-retention-days">
+                <select data-role="archive-retention-days" aria-label="保留期限">
                   <option value="30">30 天</option>
-                  <option value="90" selected>90 天</option>
+                  <option value="60" selected>60 天</option>
+                  <option value="90">90 天</option>
                   <option value="180">180 天</option>
                   <option value="365">365 天</option>
                   <option value="permanent">永久</option>
                 </select>
               </label>
-            </div>
-
-            <div class="archive-center-settings-section">
-              <h4>网银账单生成模板</h4>
-              <p class="archive-center-settings-note">勾选“不存档”后，使用该模板生成的整个批次不保存输入文件和结果表。</p>
-              <div class="archive-center-template-list" data-role="archive-template-policies">
-                <div class="archive-center-empty">正在加载模板策略…</div>
-              </div>
             </div>
           </section>
         </section>
@@ -2552,11 +2547,7 @@ function createAppUpdateSettingsDialog() {
             <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
             <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
           </div>
-          <div class="app-settings-footer-group" data-footer="archive-settings" hidden>
-            <button class="secondary-btn small" type="button" data-action="cancel-archive-settings">取消</button>
-            <button class="primary-btn small" type="button" data-action="save-archive-settings">保存</button>
-          </div>
-          <button class="secondary-btn small" type="button" data-action="close" data-role="close-update-dialog">完成</button>
+          <button class="secondary-btn small" type="button" data-action="confirm-settings" data-role="close-update-dialog">确认</button>
         </footer>
       </div>
     </div>
@@ -2567,7 +2558,6 @@ function createAppUpdateSettingsDialog() {
   const archiveBrowser = dialog.querySelector('[data-archive-view="browser"]');
   const archiveSettingsView = dialog.querySelector('[data-archive-view="settings"]');
   const updateFooter = dialog.querySelector('[data-footer="update"]');
-  const archiveSettingsFooter = dialog.querySelector('[data-footer="archive-settings"]');
   const archiveFeedback = dialog.querySelector('[data-role="archive-feedback"]');
   const batchList = dialog.querySelector('[data-role="archive-batch-list"]');
   const batchCount = dialog.querySelector('[data-role="archive-batch-count"]');
@@ -2576,7 +2566,6 @@ function createAppUpdateSettingsDialog() {
   const moduleFilter = dialog.querySelector('[data-filter="module"]');
   const batchIdFilter = dialog.querySelector('[data-filter="batch-id"]');
   const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
-  const templatePolicyList = dialog.querySelector('[data-role="archive-template-policies"]');
 
   function getArchiveCenterApi() {
     const api = window.desktopApi?.archiveCenter;
@@ -2763,37 +2752,18 @@ function createAppUpdateSettingsDialog() {
   }
 
   function renderArchiveSettings() {
-    const retentionDays = archiveState.settings?.retentionDays
-      ?? archiveState.settings?.defaultRetentionDays;
+    const settings = archiveState.settings && typeof archiveState.settings === 'object'
+      ? archiveState.settings
+      : {};
+    const retentionDays = Object.prototype.hasOwnProperty.call(settings, 'retentionDays')
+      ? settings.retentionDays
+      : settings.defaultRetentionDays;
     const retentionValue = retentionDays === null || retentionDays === 'permanent'
       ? 'permanent'
-      : String(retentionDays ?? 90);
-    const allowedRetentionValues = new Set(['30', '90', '180', '365', 'permanent']);
-    archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue) ? retentionValue : '90';
+      : String(retentionDays ?? 60);
+    const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent']);
+    archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue) ? retentionValue : '60';
     retentionSelect.value = archiveState.savedRetentionValue;
-
-    archiveState.savedTemplatePolicies = new Map();
-    if (archiveState.templatePolicies.length === 0) {
-      templatePolicyList.innerHTML = '<div class="archive-center-empty">没有可配置的网银账单生成模板</div>';
-      return;
-    }
-    templatePolicyList.innerHTML = archiveState.templatePolicies.map((policy) => {
-      const templateId = String(policy.templateId ?? policy.id ?? '');
-      const templateName = String(
-        policy.templateName ?? policy.name ?? (templateId || '未命名模板')
-      );
-      const excluded = policy.excluded === true
-        || policy.archiveExcluded === true
-        || policy.isExcluded === true;
-      archiveState.savedTemplatePolicies.set(templateId, excluded);
-      return `
-        <label class="archive-center-template-row">
-          <input type="checkbox" data-template-id="${escapeHtml(templateId)}"${excluded ? ' checked' : ''} />
-          <span>${escapeHtml(templateName)}</span>
-          <em>不存档</em>
-        </label>
-      `;
-    }).join('');
   }
 
   async function loadArchiveStats() {
@@ -2892,67 +2862,68 @@ function createAppUpdateSettingsDialog() {
     }
   }
 
+  function setArchiveSettingsLoading(loading) {
+    archiveState.settingsLoading = loading === true;
+    archiveSettingsView.toggleAttribute('aria-busy', archiveState.settingsLoading);
+    const confirmButton = dialog.querySelector('[data-action="confirm-settings"]');
+    if (confirmButton) confirmButton.disabled = archiveState.settingsLoading;
+  }
+
   async function loadArchiveSettings() {
+    const requestId = ++archiveState.settingsRequestId;
     showArchiveFeedback('', 'info');
-    archiveSettingsView.setAttribute('aria-busy', 'true');
-    const api = getArchiveCenterApi();
-    const [settingsResult, policiesResult, statsResult] = await Promise.allSettled([
-      api.getSettings(),
-      api.listTemplatePolicies(),
-      api.getStats()
-    ]);
-    const failures = [];
+    setArchiveSettingsLoading(true);
+    try {
+      const api = getArchiveCenterApi();
+      const [settingsResult, statsResult] = await Promise.allSettled([
+        api.getSettings(),
+        api.getStats()
+      ]);
+      if (requestId !== archiveState.settingsRequestId) return false;
 
-    if (settingsResult.status === 'fulfilled') {
-      try {
-        archiveState.settings = readArchiveCenterPayload(
-          settingsResult.value,
-          'settings',
-          { retentionDays: 90 },
-          { allowDirectObject: true }
-        );
-      } catch (error) {
-        failures.push(`保留设置：${archiveCenterErrorText(error, '加载失败')}`);
+      const failures = [];
+      if (settingsResult.status === 'fulfilled') {
+        try {
+          archiveState.settings = readArchiveCenterPayload(
+            settingsResult.value,
+            'settings',
+            { retentionDays: 60 },
+            { allowDirectObject: true }
+          );
+        } catch (error) {
+          failures.push(`保留设置：${archiveCenterErrorText(error, '加载失败')}`);
+        }
+      } else {
+        failures.push(`保留设置：${archiveCenterErrorText(settingsResult.reason, '加载失败')}`);
       }
-    } else {
-      failures.push(`保留设置：${archiveCenterErrorText(settingsResult.reason, '加载失败')}`);
-    }
 
-    if (policiesResult.status === 'fulfilled') {
-      try {
-        const policies = readArchiveCenterPayload(policiesResult.value, 'policies', []);
-        if (!Array.isArray(policies)) throw new Error('模板策略格式无效');
-        archiveState.templatePolicies = policies;
-      } catch (error) {
-        failures.push(`模板策略：${archiveCenterErrorText(error, '加载失败')}`);
+      if (statsResult.status === 'fulfilled') {
+        try {
+          archiveState.stats = readArchiveCenterPayload(
+            statsResult.value,
+            'stats',
+            {},
+            { allowDirectObject: true }
+          );
+        } catch (error) {
+          failures.push(`存储统计：${archiveCenterErrorText(error, '加载失败')}`);
+        }
+      } else {
+        failures.push(`存储统计：${archiveCenterErrorText(statsResult.reason, '加载失败')}`);
       }
-    } else {
-      failures.push(`模板策略：${archiveCenterErrorText(policiesResult.reason, '加载失败')}`);
-    }
 
-    if (statsResult.status === 'fulfilled') {
-      try {
-        archiveState.stats = readArchiveCenterPayload(
-          statsResult.value,
-          'stats',
-          {},
-          { allowDirectObject: true }
-        );
-      } catch (error) {
-        failures.push(`存储统计：${archiveCenterErrorText(error, '加载失败')}`);
+      renderArchiveSettings();
+      renderArchiveStats();
+      if (failures.length > 0) {
+        showArchiveFeedback(`部分存档设置加载失败：${failures.join('；')}`);
+        return false;
       }
-    } else {
-      failures.push(`存储统计：${archiveCenterErrorText(statsResult.reason, '加载失败')}`);
+      return true;
+    } finally {
+      if (requestId === archiveState.settingsRequestId) {
+        setArchiveSettingsLoading(false);
+      }
     }
-
-    renderArchiveSettings();
-    renderArchiveStats();
-    archiveSettingsView.removeAttribute('aria-busy');
-    if (failures.length > 0) {
-      showArchiveFeedback(`部分存档设置加载失败：${failures.join('；')}`);
-      return false;
-    }
-    return true;
   }
 
   async function ensureArchiveLoaded() {
@@ -2967,10 +2938,15 @@ function createAppUpdateSettingsDialog() {
   }
 
   function setArchiveSettingsOpen(open) {
-    archiveState.archiveSettingsOpen = open === true;
+    const nextOpen = open === true;
+    if (!nextOpen) {
+      archiveState.settingsRequestId += 1;
+      setArchiveSettingsLoading(false);
+      retentionSelect.value = archiveState.savedRetentionValue;
+    }
+    archiveState.archiveSettingsOpen = nextOpen;
     archiveBrowser.hidden = archiveState.archiveSettingsOpen;
     archiveSettingsView.hidden = !archiveState.archiveSettingsOpen;
-    archiveSettingsFooter.hidden = !archiveState.archiveSettingsOpen || archiveState.activeTab !== 'archive';
   }
 
   function setSettingsTab(tab) {
@@ -2986,9 +2962,9 @@ function createAppUpdateSettingsDialog() {
     if (archiveState.activeTab !== 'archive') {
       setArchiveSettingsOpen(false);
     } else {
-      archiveSettingsFooter.hidden = !archiveState.archiveSettingsOpen;
       ensureArchiveLoaded();
     }
+    refreshOpenAppUpdateDialog();
   }
 
   async function runArchiveFileAction(button, actionName) {
@@ -3116,86 +3092,60 @@ function createAppUpdateSettingsDialog() {
   }
 
   async function saveArchiveSettings(button) {
+    if (archiveState.settingsLoading) return false;
     let api;
     try {
       api = getArchiveCenterApi();
     } catch (error) {
       showArchiveFeedback(`存档设置保存失败：${archiveCenterErrorText(error, '未知错误')}`);
-      return;
+      return false;
     }
     const retentionValue = retentionSelect.value;
-    const policyInputs = Array.from(templatePolicyList.querySelectorAll('[data-template-id]'));
-    const operations = [];
-
-    if (retentionValue !== archiveState.savedRetentionValue) {
-      operations.push({
-        label: '保留期限',
-        run: () => api.setRetentionDays(retentionValue === 'permanent' ? null : Number(retentionValue)),
-        commit: () => {
-          archiveState.savedRetentionValue = retentionValue;
-          archiveState.settings = {
-            ...archiveState.settings,
-            retentionDays: retentionValue === 'permanent' ? null : Number(retentionValue)
-          };
-        }
-      });
-    }
-
-    for (const input of policyInputs) {
-      const templateId = input.dataset.templateId;
-      const saved = archiveState.savedTemplatePolicies.get(templateId) === true;
-      if (input.checked === saved) continue;
-      operations.push({
-        label: `模板 ${templateId}`,
-        run: () => api.setTemplateExcluded(templateId, input.checked),
-        commit: () => archiveState.savedTemplatePolicies.set(templateId, input.checked)
-      });
-    }
-
-    if (operations.length === 0) {
-      setArchiveSettingsOpen(false);
-      showArchiveFeedback('存档设置没有变化', 'info');
-      return;
+    if (retentionValue === archiveState.savedRetentionValue) {
+      closeSettingsDialog();
+      return true;
     }
 
     button.disabled = true;
     showArchiveFeedback('正在保存存档设置…', 'info');
-    const failures = [];
-    for (const operation of operations) {
-      try {
-        const result = await operation.run();
-        if (!verifyArchiveCenterAction(result, `${operation.label}保存失败`)) {
-          throw new Error('操作已取消');
-        }
-        operation.commit();
-      } catch (error) {
-        failures.push(`${operation.label}：${archiveCenterErrorText(error, '保存失败')}`);
+    try {
+      const result = await api.setRetentionDays(
+        retentionValue === 'permanent' ? null : Number(retentionValue)
+      );
+      if (!verifyArchiveCenterAction(result, '保留期限保存失败')) {
+        throw new Error('保留期限保存已取消');
       }
+      archiveState.savedRetentionValue = retentionValue;
+      archiveState.settings = {
+        ...archiveState.settings,
+        retentionDays: retentionValue === 'permanent' ? null : Number(retentionValue)
+      };
+      closeSettingsDialog();
+      return true;
+    } catch (error) {
+      showArchiveFeedback(`存档设置保存失败：${archiveCenterErrorText(error, '未知错误')}`);
+      return false;
+    } finally {
+      if (button.isConnected) button.disabled = false;
     }
-    button.disabled = false;
-
-    if (failures.length > 0) {
-      showArchiveFeedback(`部分设置未保存：${failures.join('；')}`);
-      return;
-    }
-
-    setArchiveSettingsOpen(false);
-    showArchiveFeedback('存档设置已保存', 'success');
-    await Promise.all([
-      loadArchiveStats(),
-      loadArchiveBatches({ clearFeedback: false })
-    ]);
   }
 
   function closeSettingsDialog() {
     clearTimeout(archiveState.batchFilterTimer);
     archiveState.listRequestId += 1;
     archiveState.detailRequestId += 1;
+    archiveState.settingsRequestId += 1;
+    setArchiveSettingsLoading(false);
     closeModal();
   }
 
-  dialog.querySelectorAll('[data-action="close"]').forEach((button) => {
-    button.addEventListener('click', closeSettingsDialog);
+  dialog.querySelector('[data-action="close"]').addEventListener('click', closeSettingsDialog);
+  dialog.querySelector('[data-action="confirm-settings"]').addEventListener('click', async (event) => {
+    if (archiveState.activeTab === 'archive' && archiveState.archiveSettingsOpen) {
+      await saveArchiveSettings(event.currentTarget);
+      return;
+    }
+    closeSettingsDialog();
   });
   dialog.querySelectorAll('[data-tab]').forEach((button) => {
     button.addEventListener('click', () => setSettingsTab(button.dataset.tab));
@@ -3273,13 +3223,10 @@ function createAppUpdateSettingsDialog() {
     if (action === 'open-archive-settings') {
       setArchiveSettingsOpen(true);
       loadArchiveSettings().catch((error) => {
-        archiveSettingsView.removeAttribute('aria-busy');
         showArchiveFeedback(`存档设置加载失败：${archiveCenterErrorText(error, '未知错误')}`);
       });
-    } else if (action === 'back-to-archive' || action === 'cancel-archive-settings') {
+    } else if (action === 'back-to-archive') {
       setArchiveSettingsOpen(false);
-    } else if (action === 'save-archive-settings') {
-      saveArchiveSettings(button);
     } else if (action === 'open-archive-file') {
       runArchiveFileAction(button, 'open');
     } else if (action === 'save-as-archive-file') {
@@ -8277,9 +8224,14 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       openModal(createAppUpdateSettingsDialog());
       requestAnimationFrame(() => {
-        elements.modalRoot
+        const archiveTab = elements.modalRoot
           ?.querySelector('.app-settings-nav-item[data-tab="archive"]')
-          ?.click();
+        archiveTab?.click();
+        setTimeout(() => {
+          elements.modalRoot
+            ?.querySelector('[data-action="open-archive-settings"]')
+            ?.click();
+        }, 80);
       });
     }, 120);
   } else if (info.previewModal === 'new-account-palette') {

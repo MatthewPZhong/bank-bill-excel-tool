@@ -11,7 +11,7 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
-test.describe('v3.0.22 设置与存档中心静态契约', () => {
+test.describe('v3.0.25 设置与存档中心静态契约', () => {
   const renderer = read('src/renderer.js');
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
@@ -74,7 +74,7 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
     assert.match(renderer, /restartAndInstallAppUpdate\(\{ inline: true \}\)/);
   });
 
-  test('preload 完整暴露 archiveCenter API 与约定 IPC 通道', () => {
+  test('preload 仅暴露保留中的 archiveCenter API 与约定 IPC 通道', () => {
     const contracts = [
       ['listBatches', 'archive-center:list-batches'],
       ['getBatch', 'archive-center:get-batch'],
@@ -85,8 +85,6 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
       ['retryBatch', 'archive-center:retry-batch'],
       ['getSettings', 'archive-center:get-settings'],
       ['setRetentionDays', 'archive-center:set-retention-days'],
-      ['listTemplatePolicies', 'archive-center:list-template-policies'],
-      ['setTemplateExcluded', 'archive-center:set-template-excluded'],
       ['getStats', 'archive-center:get-stats']
     ];
 
@@ -99,7 +97,8 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
       );
     }
     assert.match(preload, /setLocked:\s*\(batchId, locked\)/);
-    assert.match(preload, /setTemplateExcluded:\s*\(templateId, excluded\)/);
+    assert.doesNotMatch(preload, /listTemplatePolicies|setTemplateExcluded/);
+    assert.doesNotMatch(main, /archive-center:(?:list-template-policies|set-template-excluded)/);
   });
 
   test('筛选仅包含日期、模块、批次号，不提供文件名搜索', () => {
@@ -119,7 +118,7 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
     assert.match(renderer, /archiveCenterBatchNumber\(batch\)[\s\S]*?includes\(requestedBatchNumber\)/);
   });
 
-  test('批次、文件、失败重试和设置动作均接入 archiveCenter', () => {
+  test('批次、文件、失败重试和全局确认均接入 archiveCenter', () => {
     for (const action of [
       'open-archive-file',
       'save-as-archive-file',
@@ -127,7 +126,7 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
       'delete-archive-batch',
       'retry-archive-batch',
       'open-archive-settings',
-      'save-archive-settings'
+      'confirm-settings'
     ]) {
       assert.ok(renderer.includes(`data-action="${action}"`), `${action} 应存在`);
     }
@@ -145,23 +144,88 @@ test.describe('v3.0.22 设置与存档中心静态契约', () => {
     assert.match(renderer, /data-role="archive-feedback"/);
     assert.match(renderer, /if \(isObject && result\.ok === false\)/);
     assert.match(renderer, /showArchiveFeedback\(`存档设置保存失败：/);
-    assert.doesNotMatch(
+    assert.match(
       renderer,
-      /querySelector\('\[data-action="save-archive-settings"\]'\)\.addEventListener/,
-      '存档设置保存只应由 archive pane 的委托监听处理一次'
+      /archiveState\.activeTab === 'archive' && archiveState\.archiveSettingsOpen[\s\S]*?saveArchiveSettings\(event\.currentTarget\)/
     );
+    assert.doesNotMatch(renderer, /data-action="(?:save|cancel)-archive-settings"/);
   });
 
-  test('存档设置覆盖保留期、模板不存档与存储统计', () => {
-    for (const value of ['30', '90', '180', '365', 'permanent']) {
+  test('存档设置仅保留期限与存储统计，模板不存档完全退役', () => {
+    for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
-    assert.match(renderer, /<option value="90" selected>90 天<\/option>/);
+    assert.match(renderer, /<option value="60" selected>60 天<\/option>/);
+    assert.match(renderer, /<option value="90">90 天<\/option>/);
     assert.match(renderer, /data-role="archive-retention-days"/);
-    assert.match(renderer, /data-role="archive-template-policies"/);
-    assert.match(renderer, /api\.setRetentionDays\(retentionValue === 'permanent' \? null : Number\(retentionValue\)\)/);
-    assert.match(renderer, /api\.setTemplateExcluded\(templateId, input\.checked\)/);
+    assert.match(renderer, /data-role="archive-retention-days" aria-label="保留期限"/);
+    assert.match(
+      renderer,
+      /api\.setRetentionDays\(\s*retentionValue === 'permanent' \? null : Number\(retentionValue\)\s*\)/
+    );
     assert.match(renderer, /getArchiveCenterApi\(\)\.getStats\(\)/);
+    assert.doesNotMatch(renderer, /archive-template-policies|setTemplateExcluded|listTemplatePolicies/);
+    assert.doesNotMatch(renderer, /网银账单生成模板|不存档/);
+    assert.doesNotMatch(renderer, /锁定批次不参与自动清理。默认保留期为 90 天。|默认保留/);
+  });
+
+  test('永久保留值保持为 permanent，返回时丢弃草稿且加载期间禁用确认', () => {
+    assert.match(
+      renderer,
+      /Object\.prototype\.hasOwnProperty\.call\(settings, 'retentionDays'\)[\s\S]*?\? settings\.retentionDays/
+    );
+    assert.match(
+      renderer,
+      /retentionDays === null \|\| retentionDays === 'permanent'[\s\S]*?\? 'permanent'/
+    );
+    const openStateStart = renderer.indexOf('function setArchiveSettingsOpen');
+    const tabStateStart = renderer.indexOf('function setSettingsTab', openStateStart);
+    const openStateSource = renderer.slice(openStateStart, tabStateStart);
+    assert.match(openStateSource, /archiveState\.settingsRequestId \+= 1/);
+    assert.match(openStateSource, /retentionSelect\.value = archiveState\.savedRetentionValue/);
+    assert.match(renderer, /confirmButton\.disabled = archiveState\.settingsLoading/);
+    assert.match(renderer, /if \(archiveState\.settingsLoading\) return false/);
+  });
+
+  test('确认按钮保存并关闭，失败时保留弹窗且恢复按钮', () => {
+    const saveStart = renderer.indexOf('async function saveArchiveSettings');
+    const saveEnd = renderer.indexOf('function closeSettingsDialog', saveStart);
+    const saveSource = renderer.slice(saveStart, saveEnd);
+    assert.match(saveSource, /retentionValue === archiveState\.savedRetentionValue[\s\S]*?closeSettingsDialog\(\)/);
+    assert.match(saveSource, /button\.disabled = true/);
+    assert.match(saveSource, /await api\.setRetentionDays/);
+    assert.match(saveSource, /closeSettingsDialog\(\);[\s\S]*?return true/);
+    assert.match(saveSource, /catch \(error\)[\s\S]*?存档设置保存失败/);
+    assert.match(saveSource, /finally \{[\s\S]*?button\.isConnected[\s\S]*?button\.disabled = false/);
+    assert.match(renderer, /data-action="confirm-settings"[^>]*data-role="close-update-dialog">确认<\/button>/);
+    assert.doesNotMatch(renderer, /data-role="close-update-dialog">完成<\/button>/);
+  });
+
+  test('指定说明被删除，portable 下载提示保留且安装版空说明收起', () => {
+    for (const removedText of [
+      '管理软件版本检查、下载与安装。',
+      '开启后每次启动仅在后台检查一次，不会定时检查。',
+      '按日期、模块和批次号查看已参与处理的输入文件与结果表。'
+    ]) {
+      assert.doesNotMatch(renderer, new RegExp(removedText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    }
+    assert.match(renderer, /便携版不会自动安装更新。点击“前往下载”可打开稳定版下载页面。/);
+    assert.match(renderer, /note\.hidden = note\.textContent === ''/);
+  });
+
+  test('自动更新文字字号和右边界由共享尺寸变量约束', () => {
+    assert.match(styles, /--app-settings-footer-inline-padding:\s*24px/);
+    assert.match(styles, /--app-settings-confirm-width:\s*72px/);
+    assert.match(styles, /--app-update-pane-inline-padding:\s*36px/);
+    assert.match(styles, /\.app-update-toggle\s*\{[\s\S]*?font-size:\s*14px/);
+    assert.match(
+      styles,
+      /\.app-settings-footer \[data-role="close-update-dialog"\]\s*\{[\s\S]*?width:\s*var\(--app-settings-confirm-width\)/
+    );
+    assert.match(
+      styles,
+      /\.app-update-settings-body\s*\{[\s\S]*?var\(--app-settings-footer-inline-padding\)[\s\S]*?var\(--app-settings-confirm-width\)[\s\S]*?var\(--app-update-pane-inline-padding\)/
+    );
   });
 
   test('锁定批次仍显示原到期日，不误写成永久保留', () => {

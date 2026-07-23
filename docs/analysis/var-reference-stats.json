@@ -1,14 +1,14 @@
 {
   "meta": {
-    "version": "3.0.24",
-    "scannedAt": "2026-07-22T16:25:05.258Z",
+    "version": "3.0.25",
+    "scannedAt": "2026-07-23T07:52:13.696Z",
     "root": "src",
     "totalFiles": 202,
-    "totalTopLevelNames": 2324,
+    "totalTopLevelNames": 2320,
     "buckets": {
       "shared": 341,
       "paired": 592,
-      "local": 1250,
+      "local": 1246,
       "crossFile": 933
     }
   },
@@ -772,10 +772,6 @@
             "count": 1
           },
           {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 2
-          },
-          {
             "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           },
@@ -812,8 +808,8 @@
             "count": 3
           }
         ],
-        "totalHits": 76,
-        "fileSpan": 35
+        "totalHits": 74,
+        "fileSpan": 34
       },
       {
         "name": "normalizeCell",
@@ -3561,10 +3557,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 122
+            "count": 123
           }
         ],
-        "totalHits": 595,
+        "totalHits": 596,
         "fileSpan": 6
       },
       {
@@ -3579,7 +3575,7 @@
           },
           {
             "file": "src/main-process/archive-center/controller.js",
-            "count": 12
+            "count": 8
           },
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
@@ -3598,7 +3594,7 @@
             "count": 9
           }
         ],
-        "totalHits": 81,
+        "totalHits": 77,
         "fileSpan": 6
       },
       {
@@ -4584,36 +4580,6 @@
         "fileSpan": 5
       },
       {
-        "name": "listTemplates",
-        "defFiles": [
-          "src/backend/database/template-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/database/template-repository.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/monthly-balance.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 5
-      },
-      {
         "name": "openZipWithEntries",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js",
@@ -5312,10 +5278,10 @@
           },
           {
             "file": "src/main-process/archive-center/controller.js",
-            "count": 2
+            "count": 3
           }
         ],
-        "totalHits": 27,
+        "totalHits": 28,
         "fileSpan": 4
       },
       {
@@ -5374,32 +5340,6 @@
         "fileSpan": 4
       },
       {
-        "name": "getSetting",
-        "defFiles": [
-          "src/backend/database/settings-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/database/own-accounts-migration.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/database/settings-repository.js",
-            "count": 17
-          },
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 24,
-        "fileSpan": 4
-      },
-      {
         "name": "openExistingSideDb",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -5423,6 +5363,32 @@
           }
         ],
         "totalHits": 24,
+        "fileSpan": 4
+      },
+      {
+        "name": "getSetting",
+        "defFiles": [
+          "src/backend/database/settings-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/database/settings-repository.js",
+            "count": 17
+          },
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 23,
         "fileSpan": 4
       },
       {
@@ -6305,6 +6271,32 @@
         "fileSpan": 4
       },
       {
+        "name": "listTemplates",
+        "defFiles": [
+          "src/backend/database/template-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/own-accounts-migration.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/database/template-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/monthly-balance.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "OPPONENT_BILL_FIELDS",
         "defFiles": [
           "src/constants/recon-id-fix-fields.js",
@@ -7124,10 +7116,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 67
+            "count": 65
           }
         ],
-        "totalHits": 228,
+        "totalHits": 226,
         "fileSpan": 3
       },
       {
@@ -21774,10 +21766,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 230
+            "count": 228
           }
         ],
-        "totalHits": 230,
+        "totalHits": 228,
         "fileSpan": 1
       },
       {
@@ -21977,20 +21969,6 @@
         "fileSpan": 1
       },
       {
-        "name": "archiveCenterErrorText",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 18
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 1
-      },
-      {
         "name": "buildDateObject",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -22019,17 +21997,17 @@
         "fileSpan": 1
       },
       {
-        "name": "publicFailure",
+        "name": "archiveCenterErrorText",
         "defFiles": [
-          "src/main-process/archive-center/controller.js"
+          "src/renderer.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 17
+            "file": "src/renderer.js",
+            "count": 16
           }
         ],
-        "totalHits": 17,
+        "totalHits": 16,
         "fileSpan": 1
       },
       {
@@ -22082,6 +22060,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 16
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 1
+      },
+      {
+        "name": "publicFailure",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
             "count": 16
           }
         ],
@@ -23433,20 +23425,6 @@
         "fileSpan": 1
       },
       {
-        "name": "readArchiveCenterPayload",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 7
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 1
-      },
-      {
         "name": "recomputeLinkedMeta",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -23454,6 +23432,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/linked-table-repository.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "refreshOpenAppUpdateDialog",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 7
           }
         ],
@@ -23909,13 +23901,13 @@
         "fileSpan": 1
       },
       {
-        "name": "readSheetOrThrow",
+        "name": "readArchiveCenterPayload",
         "defFiles": [
-          "src/main-process/recon-id-fix-io.js"
+          "src/renderer.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/recon-id-fix-io.js",
+            "file": "src/renderer.js",
             "count": 6
           }
         ],
@@ -23923,13 +23915,13 @@
         "fileSpan": 1
       },
       {
-        "name": "refreshOpenAppUpdateDialog",
+        "name": "readSheetOrThrow",
         "defFiles": [
-          "src/renderer.js"
+          "src/main-process/recon-id-fix-io.js"
         ],
         "refFiles": [
           {
-            "file": "src/renderer.js",
+            "file": "src/main-process/recon-id-fix-io.js",
             "count": 6
           }
         ],
@@ -25254,20 +25246,6 @@
       },
       {
         "name": "ARCHIVE_RETENTION_SETTING_KEY",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY",
         "defFiles": [
           "src/main-process/archive-center/controller.js"
         ],
@@ -27458,6 +27436,20 @@
         "refFiles": [
           {
             "file": "src/main-process/app-updater.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
             "count": 3
           }
         ],
@@ -30209,20 +30201,6 @@
         "fileSpan": 1
       },
       {
-        "name": "isValidExcludedTemplateSetting",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "isWordByte",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -31189,20 +31167,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeStoredTemplateId",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "notifyLinkedTableImportFailures",
         "defFiles": [
           "src/renderer.js"
@@ -31322,20 +31286,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "parseExcludedTemplateIds",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
             "count": 3
           }
         ],
@@ -37097,20 +37047,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeTemplate",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "NUMERIC_FIELDS",
         "defFiles": [
           "src/main-process/toolbox-stream-io.js"
@@ -40027,10 +39963,6 @@
           "count": 1
         },
         {
-          "file": "src/main-process/archive-center/controller.js",
-          "count": 2
-        },
-        {
           "file": "src/main-process/biz-op-recon-session.js",
           "count": 2
         },
@@ -40067,8 +39999,8 @@
           "count": 3
         }
       ],
-      "totalHits": 76,
-      "fileSpan": 35
+      "totalHits": 74,
+      "fileSpan": 34
     },
     {
       "name": "normalizeCell",
@@ -42816,10 +42748,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 122
+          "count": 123
         }
       ],
-      "totalHits": 595,
+      "totalHits": 596,
       "fileSpan": 6
     },
     {
@@ -42834,7 +42766,7 @@
         },
         {
           "file": "src/main-process/archive-center/controller.js",
-          "count": 12
+          "count": 8
         },
         {
           "file": "src/main-process/duplicate-inbound-match/service.js",
@@ -42853,7 +42785,7 @@
           "count": 9
         }
       ],
-      "totalHits": 81,
+      "totalHits": 77,
       "fileSpan": 6
     },
     {
@@ -43839,36 +43771,6 @@
       "fileSpan": 5
     },
     {
-      "name": "listTemplates",
-      "defFiles": [
-        "src/backend/database/template-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/database/template-repository.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/archive-center/controller.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/monthly-balance.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 5
-    },
-    {
       "name": "openZipWithEntries",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader.js",
@@ -44567,10 +44469,10 @@
         },
         {
           "file": "src/main-process/archive-center/controller.js",
-          "count": 2
+          "count": 3
         }
       ],
-      "totalHits": 27,
+      "totalHits": 28,
       "fileSpan": 4
     },
     {
@@ -44629,32 +44531,6 @@
       "fileSpan": 4
     },
     {
-      "name": "getSetting",
-      "defFiles": [
-        "src/backend/database/settings-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/database/own-accounts-migration.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/database/settings-repository.js",
-          "count": 17
-        },
-        {
-          "file": "src/main-process/archive-center/controller.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 24,
-      "fileSpan": 4
-    },
-    {
       "name": "openExistingSideDb",
       "defFiles": [
         "src/backend/run-data-store.js"
@@ -44678,6 +44554,32 @@
         }
       ],
       "totalHits": 24,
+      "fileSpan": 4
+    },
+    {
+      "name": "getSetting",
+      "defFiles": [
+        "src/backend/database/settings-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/database/settings-repository.js",
+          "count": 17
+        },
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 23,
       "fileSpan": 4
     },
     {
@@ -45560,6 +45462,32 @@
       "fileSpan": 4
     },
     {
+      "name": "listTemplates",
+      "defFiles": [
+        "src/backend/database/template-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/own-accounts-migration.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/database/template-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/monthly-balance.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "OPPONENT_BILL_FIELDS",
       "defFiles": [
         "src/constants/recon-id-fix-fields.js",
@@ -46379,10 +46307,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 67
+          "count": 65
         }
       ],
-      "totalHits": 228,
+      "totalHits": 226,
       "fileSpan": 3
     },
     {
