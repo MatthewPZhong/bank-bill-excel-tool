@@ -47,7 +47,7 @@
 
 - [x] PR #100 self-review 清零并以 merge commit 合入 `main`
 - [x] 建立 PR 归档与版本 PRD
-- [ ] 在合并后的 `main` 上重跑干净依赖发布门禁
+- [x] 在合并后的 `main` 上重跑干净依赖发布门禁
 - [ ] 创建并推送 annotated tag `v3.0.25`
 - [ ] 验证 Windows Release workflow 与 GitHub Release
 - [ ] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产

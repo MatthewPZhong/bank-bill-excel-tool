@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.25 PRD
 
 > 目标版本：`3.0.25`
-> 状态：merged（PR #100 已合入 `main`；GitHub Release 待发布）
+> 状态：release-ready（PR #100 已合入 `main`；发布门禁通过；GitHub Release 待发布）
 > 归档：PR #100 merge commit `047275f`；源规格 `changes/3.0.25/spec.md`
 > 更新时间：2026-07-23
 > 适用仓库：`bank-bill-excel-tool`
@@ -57,4 +57,7 @@ v3.0.25 修复存档设置无法保存的问题，统一设置弹窗确认操作
 
 - PR #100 于 2026-07-23 以 merge commit `047275f` 合入 `main`。
 - PR 归档见 `docs/prs/PR100-v3.0.25.md`。
-- annotated tag、Windows Release workflow 和公开更新资产验证待合并后发布门禁完成再补充。
+- 合并归档后的 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check、设置布局 `6/6`、主页面布局 `6/6`、启动性能、变量扫描和重要变量硬节点复核。
+- 启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`；变量扫描为 202 个 JS 文件、2320 个顶层声明。
+- 生产依赖仍有既有 7 条 audit 告警（2 moderate、5 high、0 critical）；本迭代未新增生产依赖，该问题继续作为依赖治理 follow-up。
+- annotated tag、Windows Release workflow 和公开更新资产验证待 tag 推送后补充。

@@ -1,6 +1,6 @@
 # Test Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
-> status: merged-pass（PR #100 已合并；Release 待发布）
+> status: release-ready-pass（PR #100 已合并；发布门禁通过；Release 待发布）
 > created: 2026-07-23
 > updated: 2026-07-23
 
@@ -66,4 +66,10 @@
 - `npm run verify:app-settings-layout`：`6/6 PASS`，右边界误差 `0px`，开关状态文字 `14px`。
 - `npm run startup:measure`：建窗到可见平均 `98.202ms`，ready-to-show 平均 `167.323ms`。
 - GitHub PR #100 workflow run `29991926713` PASS；最终 self-review P0-P4 Finding 0。
-- PR #100 已以 `047275f` 合入 `main`；合并后的干净依赖门禁、tag、Release workflow 与公开资产证据待补充。
+- PR #100 已以 `047275f` 合入 `main`。
+- 合并归档后的干净 `npm ci` + `release-check` 再次通过：unit `3818/3818`、integration `1963/1963`，lint 与 smoke PASS。
+- 发布前 `verify:app-settings-layout` 与 `verify:main-panel-alignment` 均为 `6/6 PASS`。
+- 发布前启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`。
+- `scan:vars` 为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
+- `npm audit --omit=dev` 报告 7 条既有生产依赖告警（2 moderate、5 high、0 critical）；本迭代无生产依赖变更。
+- tag、Release workflow 和公开资产证据待补充。

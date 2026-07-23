@@ -1,6 +1,6 @@
 # Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
-> status: merged（PR #100 已合入 main；Release 待发布）
+> status: release-ready（PR #100 已合入 main；发布门禁通过；Release 待发布）
 > owner: PM / Dev
 > created: 2026-07-23
 > updated: 2026-07-23
@@ -122,5 +122,9 @@
 - 合并前 `release-check` 通过：unit `3818/3818`、42 个 integration 脚本 `1963/1963`，lint 与 smoke 全绿。
 - 设置布局六组合验证 `6/6 PASS`，右边界误差均为 `0px`，自动更新开关状态文字为 `14px`。
 - `scan:vars` 为 202 个 JS 文件、2320 个顶层声明；重要变量关联功能已复核。
-- `v3.0.25` tag、Windows Release workflow 和公开更新资产验证待合并后发布门禁完成再补充。
+- 合并归档后的 `main` 已在干净 `npm ci` 依赖上重新通过 release-check：unit `3818/3818`、integration `1963/1963`，lint 与 smoke 全绿。
+- 发布前设置布局与主页面布局均为 `6/6 PASS`；启动建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms`。
+- 发布前 `scan:vars` 仍为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
+- 生产依赖审计仍有既有 7 条告警（2 moderate、5 high、0 critical）；本迭代未新增生产依赖，继续作为依赖治理 follow-up。
+- `v3.0.25` tag、Windows Release workflow 和公开更新资产验证待补充。
 - Windows 安装版实机字体与缩放复核仍是人工 follow-up，不得因自动几何验证通过而宣称实机视觉验收完成。

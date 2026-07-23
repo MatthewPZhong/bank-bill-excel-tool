@@ -51,6 +51,12 @@
 | GitHub PR #100 workflow | PASS | Windows smoke-test 与主页面对齐检查通过；run `29991926713` |
 | 最终 self-review | P0-P4 Finding 0 | PR 实际 patch 无存活 P0-P4 Finding |
 | PR #100 合并 | `047275f` | 2026-07-23 merge commit 合入 `main` |
+| 发布前 `npm ci` + `release-check` | PASS | unit `3818/3818`、42 个 integration 脚本 `1963/1963`，lint 与 smoke 全绿 |
+| 发布前设置布局 | `6/6 PASS` | 两种窗口尺寸 × Windows 100%/125%/150%，右边界误差 `0px`，开关文字 `14px` |
+| 发布前主页面布局 | `6/6 PASS` | 两种窗口尺寸 × Windows 100%/125%/150% |
+| 发布前启动性能 | PASS | 5 次建窗到可见平均 `100.985ms`，ready-to-show 平均 `170.123ms` |
+| 发布前变量硬节点 | PASS | `scan:vars` 为 202/2320；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过 |
+| 生产依赖审计 | 7 条既有告警 | 2 moderate、5 high、0 critical；v3.0.25 未新增生产依赖，保留为依赖治理 follow-up |
 
 ## Remaining Unknowns
 
