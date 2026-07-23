@@ -48,6 +48,9 @@
 | `startup:measure` | PASS | 5 次建窗到可见平均 `98.202ms`，ready-to-show 平均 `167.323ms` |
 | 独立代码审查 | 初审发现 P1 1 条、P2 1 条；修复后复审无 P0-P4 | 修复永久值被 90 覆盖，以及返回草稿/异步加载竞态 |
 | team-lead 三层门禁 | PASS | UI、Controller、ArchiveService 均使用 60 天默认值；旧 30/90/180/365/永久配置兼容，存档其它契约不变 |
+| GitHub PR #100 workflow | PASS | Windows smoke-test 与主页面对齐检查通过；run `29991926713` |
+| 最终 self-review | P0-P4 Finding 0 | PR 实际 patch 无存活 P0-P4 Finding |
+| PR #100 合并 | `047275f` | 2026-07-23 merge commit 合入 `main` |
 
 ## Remaining Unknowns
 

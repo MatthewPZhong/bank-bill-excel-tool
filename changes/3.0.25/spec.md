@@ -1,6 +1,6 @@
 # Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
-> status: completed
+> status: merged（PR #100 已合入 main；Release 待发布）
 > owner: PM / Dev
 > created: 2026-07-23
 > updated: 2026-07-23
@@ -114,3 +114,13 @@
 - AC-15：平盘第二项显示新名称，value、默认项及占位行为不变。
 - AC-16：存档另存为、锁定、删除、重试及自动更新动作不回归。
 - AC-17：版本、三份文档、重要变量、release-check 与启动性能门禁完成。
+
+## 8. 合并与发布记录
+
+- PR #100 于 2026-07-23 以 merge commit `047275f` 合入 `main`。
+- GitHub PR workflow run `29991926713` 通过；最终 self-review 为 P0-P4 Finding 0。
+- 合并前 `release-check` 通过：unit `3818/3818`、42 个 integration 脚本 `1963/1963`，lint 与 smoke 全绿。
+- 设置布局六组合验证 `6/6 PASS`，右边界误差均为 `0px`，自动更新开关状态文字为 `14px`。
+- `scan:vars` 为 202 个 JS 文件、2320 个顶层声明；重要变量关联功能已复核。
+- `v3.0.25` tag、Windows Release workflow 和公开更新资产验证待合并后发布门禁完成再补充。
+- Windows 安装版实机字体与缩放复核仍是人工 follow-up，不得因自动几何验证通过而宣称实机视觉验收完成。

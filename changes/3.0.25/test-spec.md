@@ -1,5 +1,9 @@
 # Test Spec — v3.0.25 设置弹窗与平盘功能文案调整
 
+> status: merged-pass（PR #100 已合并；Release 待发布）
+> created: 2026-07-23
+> updated: 2026-07-23
+
 ## 1. 设置提交
 
 - 存档设置修改保留期限后点击全局【确认】，断言只调用一次 `setRetentionDays`，成功关闭弹窗。
@@ -54,3 +58,12 @@
 - `npm run scan:vars`
 - `npm run check:vars -- --include-minor`
 - `npm run startup:measure`
+
+## 6. 合并验收结果
+
+- 存档相关定向测试：`36/36 PASS`。
+- `npm run release-check`：unit `3818/3818`、42 个 integration 脚本 `1963/1963`，lint 与 smoke PASS。
+- `npm run verify:app-settings-layout`：`6/6 PASS`，右边界误差 `0px`，开关状态文字 `14px`。
+- `npm run startup:measure`：建窗到可见平均 `98.202ms`，ready-to-show 平均 `167.323ms`。
+- GitHub PR #100 workflow run `29991926713` PASS；最终 self-review P0-P4 Finding 0。
+- PR #100 已以 `047275f` 合入 `main`；合并后的干净依赖门禁、tag、Release workflow 与公开资产证据待补充。
