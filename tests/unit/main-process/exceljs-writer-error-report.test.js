@@ -106,3 +106,23 @@ test('F3 writeErrorReport：reconId（R1 专用字段）在 reconciliationId 空
   const sheet = wb.getWorksheet('error-report');
   assert.strictEqual(sheet.getCell(2, 3).value, 'AFT999', 'R1 reconId 兜底显示');
 });
+
+test('v3.0.26 writeErrorReport：R5 非法 Extra Fee 的行血缘、原始值和可能原因均可见', async () => {
+  const out = tmpFile('r5-invalid-extra-fee.xlsx');
+  await writeErrorReport([
+    {
+      scenarioName: '中台调拨订单对账ID回填',
+      rowId: 'bank-row-26',
+      code: 'r5-invalid-extra-fee',
+      message: '银行行 Extra Fee 原始值「abc」不是合法金额，已退出 R5 候选'
+    }
+  ], out);
+
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(out);
+  const sheet = wb.getWorksheet('error-report');
+  assert.strictEqual(sheet.getCell(2, 3).value, 'bank-row-26');
+  assert.match(sheet.getCell(2, 4).value, /abc/);
+  assert.match(sheet.getCell(2, 5).value, /Extra Fee/);
+  assert.notStrictEqual(sheet.getCell(2, 5).value, '未知错误');
+});

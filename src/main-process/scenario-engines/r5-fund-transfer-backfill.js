@@ -18,16 +18,18 @@
 //     bank.FundType                  资金性质（R4 后的当前值，用于按 direction 过滤）
 //     bank.MerchantId（驼峰）        商户 ID
 //     bank.Currency                  币种
-//     bank['Credit Amount'] + bank['Debit Amount']（双列） 发生额（绝对值 = |credit - debit|）
+//     bank['Credit Amount'] + bank['Debit Amount']（双列） 发生额
+//     bank['Extra Fee']             有符号手续费（空值按 0）
 //     bank.BillDate                  账单日期
 //     bank.ReconciliationId          对账 ID（回填的目标）
 //     bank._rowId                    行唯一键（上游注入，全局唯一）
 //
-// 金额比对口径（🔴 决策 D2，PRD R2.5）：
-//   银行发生额绝对值 = |（Credit Amount || 0） − （Debit Amount || 0）|
+// 金额比对口径（🔴 v3.0.26 Extra Fee）：
+//   银行匹配金额     = |（Credit Amount || 0） − （Debit Amount || 0）| + signed Extra Fee
 //   网关金额绝对值   = |amount|
-//   amountEqual = 两者都是有限数 且 Math.round(银行*100) === Math.round(网关*100)  // 精确到分，容差 0
-//   —— 方向已由 FundType 过滤（out / in 分别匹配），此处只比绝对值。
+//   amountEqual = 先加总，再 Math.round(金额*100) 精确到分比较，容差 0；合计后不再取绝对值。
+//   Extra Fee 空值按 0；非空非法值使该银行行退出 R5，并产生一次可见 warning。
+//   —— bankAmountAbs 保留旧口径，只供 DBS-Charge 等旧调用方继续复用，不得并入 Extra Fee。
 //
 // 日期两阶段（🔴 PRD R2.4「优先同日」是硬约束）：
 //   Phase1：严格同日（sameDay）。先把所有 gw 跑完，消费掉同日命中的银行行。
@@ -58,6 +60,8 @@ const DEFAULT_DIRECTIONS = [
 ];
 
 const DEFAULT_DATE_TOLERANCE_DAYS = 1;
+const BANK_EXTRA_FEE_FIELD = 'Extra Fee';
+const INVALID_EXTRA_FEE_WARNING_CODE = 'r5-invalid-extra-fee';
 
 // 银行发生额绝对值 = |（Credit Amount || 0） − （Debit Amount || 0）|
 //   credit / debit 任一非数值按 0 计（与 C3 getBankRowValueForC3 一致）；两者皆非数值 → 仍返回 0（非 null）
@@ -68,19 +72,83 @@ function bankAmountAbs(bankRow) {
   return Math.abs(credit - debit);
 }
 
+function isEmptyAmountValue(value) {
+  return value === null || value === undefined || (typeof value === 'string' && value.trim() === '');
+}
+
+// R5 银行匹配金额 = 旧发生额绝对值 + signed Extra Fee。
+//   🔴 顺序固定：先加总，调用方再按现有分精度比较；合计后不得再次 Math.abs。
+//   空 fee=0；非空非法 fee 返回 NaN，供 R5 两种来源和多对多审计统一 fail closed。
+function bankAmountWithExtraFee(bankRow) {
+  const rawExtraFee = bankRow && bankRow[BANK_EXTRA_FEE_FIELD];
+  if (isEmptyAmountValue(rawExtraFee)) return bankAmountAbs(bankRow);
+  const extraFee = parseNumber(rawExtraFee);
+  if (extraFee === null) return NaN;
+  return bankAmountAbs(bankRow) + extraFee;
+}
+
+function hasInvalidExtraFee(bankRow) {
+  const rawExtraFee = bankRow && bankRow[BANK_EXTRA_FEE_FIELD];
+  return !isEmptyAmountValue(rawExtraFee) && parseNumber(rawExtraFee) === null;
+}
+
+function createInvalidExtraFeeWarning(bankRow) {
+  const rowId = bankRow && bankRow._rowId;
+  const rawValue = bankRow && bankRow[BANK_EXTRA_FEE_FIELD];
+  return {
+    rowId,
+    code: INVALID_EXTRA_FEE_WARNING_CODE,
+    field: BANK_EXTRA_FEE_FIELD,
+    rawValue,
+    context: {
+      rowId,
+      field: BANK_EXTRA_FEE_FIELD,
+      rawValue
+    },
+    message: `银行行 Extra Fee 原始值「${String(rawValue)}」不是合法金额，已退出 R5 调拨回填与多对多审计，请人工核对`
+  };
+}
+
+// 非法 Extra Fee warning 去重：稳定 _rowId 优先；无有效 _rowId 时才按银行对象身份。
+// 返回函数仅在首次看到该行时返回 true，供两条 R5 来源共享相同的“一行一次”口径。
+function makeInvalidExtraFeeWarningDeduper() {
+  const warnedRowIds = new Set();
+  const warnedRowsWithoutId = new Set();
+  return (bankRow) => {
+    const rowId = normalizeCellValue(bankRow && bankRow._rowId);
+    if (rowId !== '') {
+      if (warnedRowIds.has(rowId)) return false;
+      warnedRowIds.add(rowId);
+      return true;
+    }
+    if (warnedRowsWithoutId.has(bankRow)) return false;
+    warnedRowsWithoutId.add(bankRow);
+    return true;
+  };
+}
+
 // 网关金额绝对值 = |amount|；amount 非数值 → NaN（→ amountEqual 判非有限数 → 不命中）
 function gwAmountAbs(gwRow) {
   const n = parseNumber(gwRow && gwRow.amount);
   return Math.abs(n ?? NaN);
 }
 
-// 金额发生额绝对值精确到分比对（🔴 D2，容差 0）
-//   两侧都必须是有限数；否则不命中（防 NaN 误判相等）
-function amountEqual(gwRow, bankRow) {
+// DBS-Charge 兼容口径：银行 |Credit-Debit| ↔ 网关 |amount|，精确到分；明确忽略 Extra Fee。
+//   🔴 DBS step2 必须使用本函数，不能复用 R5 含手续费的 amountEqual。
+function bankAmountEqualWithoutExtraFee(gwRow, bankRow) {
   const bankAbs = bankAmountAbs(bankRow);
   const gwAbs = gwAmountAbs(gwRow);
   if (!Number.isFinite(bankAbs) || !Number.isFinite(gwAbs)) return false;
   return Math.round(bankAbs * 100) === Math.round(gwAbs * 100);
+}
+
+// R5 银行匹配金额与网关金额精确到分比对（🔴 v3.0.26，容差 0）
+//   两侧都必须是有限数；否则不命中（防 NaN 误判相等）
+function amountEqual(gwRow, bankRow) {
+  const bankAmount = bankAmountWithExtraFee(bankRow);
+  const gwAbs = gwAmountAbs(gwRow);
+  if (!Number.isFinite(bankAmount) || !Number.isFinite(gwAbs)) return false;
+  return Math.round(bankAmount * 100) === Math.round(gwAbs * 100);
 }
 
 /**
@@ -93,7 +161,7 @@ function amountEqual(gwRow, bankRow) {
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
  * @returns {{ modifications: Array, warnings: Array, usedBankRowIds: Set }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }），用于标黄
- *   warnings：multi-bank-match-backfill
+ *   warnings：multi-bank-match-backfill / r5-invalid-extra-fee
  *   usedBankRowIds：引擎内 1v1 消费的全部 bank _rowId 集合（🔴 v3.0.4 块 F 新增 additive 字段）——
  *     **含「消费但未写」行**（nv 空 / 与原值相同 → 不 record 不标黄，但仍 usedBankRowId.add 占用）。
  *     用于编排器把已被 R5s2 消费的银行行经 excludeBankRowIds 传 R5s2b 剔除（网关回填优先互斥）。
@@ -104,6 +172,8 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
   const modCollector = makeModificationCollector();
   // 🔴 v3.0.4 块 F：跨 direction 聚合的消费集合（含同值未写行），作为新返回字段供 R5s2b 剔除。
   const consumedBankRowIds = new Set();
+  // v3.0.26：稳定 _rowId 优先去重；无 _rowId 才按对象身份，保证非法 fee 银行行只告警一次。
+  const shouldEmitInvalidExtraFeeWarning = makeInvalidExtraFeeWarningDeduper();
 
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
@@ -115,8 +185,8 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
     ? options.dateToleranceDays
     : DEFAULT_DATE_TOLERANCE_DAYS;
 
-  // 空入参防御：无网关行 / 无银行行 → 直接返回空结果（无需 warning，编排器自有空数据提示）
-  if (safeGwRows.length === 0 || safeBankRows.length === 0) {
+  // 无银行行 → 直接返回；无网关行时仍遍历方向银行池，以保证非法 Extra Fee warning 不被早退吞掉。
+  if (safeBankRows.length === 0) {
     return {
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list(),
@@ -124,7 +194,8 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
     };
   }
 
-  // 对账字段全等：merchantid↔MerchantId、currency↔Currency（字符串 valuesEqual）+ 金额发生额绝对值精确到分
+  // 对账字段全等：merchantid↔MerchantId、currency↔Currency（字符串 valuesEqual）
+  //   + (|Credit-Debit| + signed Extra Fee) 先加总后精确到分。
   const fieldEq = (gw, bank) =>
     valuesEqual(gw && gw.merchantid, bank && bank.MerchantId) &&
     valuesEqual(gw && gw.currency, bank && bank.Currency) &&
@@ -166,7 +237,14 @@ function runRound5FundTransferBackfill(gwRows, bankRows, options = {}) {
         normalizeCellValue(g && g.TradeType) === dir.gwTradeType &&
         normalizeCellValue(g && g.reconciliationid) !== ''
     );
-    const bankPool = safeBankRows.filter((b) => normalizeCellValue(b && b.FundType) === dir.bankFundType);
+    const bankPool = safeBankRows.filter((b) => {
+      if (normalizeCellValue(b && b.FundType) !== dir.bankFundType) return false;
+      if (!hasInvalidExtraFee(b)) return true;
+      if (shouldEmitInvalidExtraFeeWarning(b)) {
+        warningCollector.push(createInvalidExtraFeeWarning(b));
+      }
+      return false;
+    });
     const usedBankRowId = new Set();
 
     // ===== Phase1：严格同日 —— 先把所有 gw 跑完，消费掉同日命中（保证「优先同日」硬约束）=====
@@ -220,5 +298,10 @@ module.exports = {
   runRound5FundTransferBackfill,
   amountEqual,
   bankAmountAbs,
-  gwAmountAbs
+  bankAmountEqualWithoutExtraFee,
+  bankAmountWithExtraFee,
+  createInvalidExtraFeeWarning,
+  gwAmountAbs,
+  hasInvalidExtraFee,
+  makeInvalidExtraFeeWarningDeduper
 };

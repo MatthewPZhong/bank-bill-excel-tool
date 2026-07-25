@@ -7886,7 +7886,7 @@ async function applyFullInfo(info) {
   // v3.0.24：仅前端占位，所有业务按钮禁止接真实 IPC。
   [
     [elements.positionReconciliationRunBtn, '开始运行'],
-    [elements.positionReconciliationTableManagerBtn, '对账表管理'],
+    [elements.positionReconciliationTableManagerBtn, '对账数据管理'],
     [elements.positionReconciliationLinkedTableManagerBtn, '链接表管理'],
     [elements.positionReconciliationConfigBtn, '对账配置管理'],
     [elements.positionReconciliationExportBtn, '导出文件']

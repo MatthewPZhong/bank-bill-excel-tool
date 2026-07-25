@@ -33,7 +33,7 @@
 //   ── 阶段A（先匹配 + 标记，不归并）：用 Set 收集所有命中行（对象引用）──
 //   for d in dispRows:                                       // 按 big_account+金额+币种 严格 1v1
 //     cand = dbsBankRows.filter(!used && valuesEqual(MerchantId,d.big_account)
-//                               && valuesEqual(Currency,d.币种) && amountEqual(d,b))
+//                               && valuesEqual(Currency,d.币种) && dispatchBankAmountEqual(d,b))
 //     chosen = cand[0]（多候选→原序首行+warning）；used.add(chosen)；matchedBankRows.add(chosen)
 //     if normalize(d.ReconID) 非空 && !== chosen.ReconciliationId: 覆盖 + record('ReconciliationId')
 //     // 命中行 FundType 标为该调拨行 fund_type（FundTransfer-in/out），旧值≠新值才 record('FundType')
@@ -53,7 +53,7 @@
 //       —— FundTransfer-in/out 命中行（步1标）不在内，不被步骤2 碰，保持 FundTransfer。
 //     for b in candidates:
 //       if (parseNumber(b.Credit Amount)||0)!==0: warning + 保持原值            // 出账方向守卫优先
-//       else if gwForKey.some(amountEqual(g,b) && valuesEqual(g.currency,b.Currency)):
+//       else if gwForKey.some(bankAmountEqualWithoutExtraFee(g,b) && valuesEqual(g.currency,b.Currency)):
 //         b.FundType='outbound'（old!==目标才 record）                          // 命中 → outbound
 //       else:
 //         b.FundType='Charge'（old!==Charge 才 record；已 Charge no-op）       // 未命中 → Charge（语义翻转）
@@ -77,12 +77,12 @@ const {
   valuesEqual
 } = require('./engine-utils');
 
-// 🔴 复用件（禁重写）：银行发生额绝对值 = |Credit-Debit| + 网关侧 amountEqual（读 gw.amount 小写单列）。
-//   amountEqual 仅用于【步骤2】网关行 × 银行行（网关行有 .amount，签名匹配）。
+// 🔴 复用件（禁重写）：银行发生额绝对值 = |Credit-Debit| + 显式旧口径网关比较器（读 gw.amount 小写单列）。
+//   bankAmountEqualWithoutExtraFee 仅用于【步骤2】网关行 × 银行行，明确忽略 Extra Fee。
 //   步骤1 调拨行金额在「金额」列（FT_RECON_FIELD_MAP.recon.amount），不是 .amount —— 故步骤1
-//   不能直接复用 r5 的 amountEqual（它读 gwRow.amount），改用 dispatchAmountEqual（复用 bankAmountAbs 处理银行侧）。
+//   不能直接复用 r5 的 amountEqual（它读 gwRow.amount），改用 dispatchBankAmountEqual（复用 bankAmountAbs 处理银行侧）。
 const {
-  amountEqual: gwBankAmountEqual,
+  bankAmountEqualWithoutExtraFee,
   bankAmountAbs
 } = require('./r5-fund-transfer-backfill');
 
@@ -362,7 +362,7 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
       // 方向通过后再判命中：网关桶内存在某行 amount 精确到分相等且币种相等。
       const hit = gwForKey.some(
         (g) =>
-          gwBankAmountEqual(g, b) &&
+          bankAmountEqualWithoutExtraFee(g, b) &&
           valuesEqual(g && g[GW_CURRENCY_FIELD], b && b[BANK_CURRENCY_FIELD])
       );
 

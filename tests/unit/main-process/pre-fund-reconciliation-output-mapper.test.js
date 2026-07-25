@@ -88,12 +88,12 @@ function buildResult() {
   });
 }
 
-test('固定输出表头严格为20列不平、31列平账、16列渠道账单', () => {
-  assert.equal(UNBALANCED_HEADERS.length, 20);
+test('固定输出表头严格为21列不平、31列平账、16列渠道账单', () => {
+  assert.equal(UNBALANCED_HEADERS.length, 21);
   assert.equal(BALANCED_HEADERS.length, 31);
   assert.equal(CHANNEL_BILL_HEADERS.length, 16);
   assert.deepEqual(UNBALANCED_HEADERS, [
-    '对账数据来源', '账单日期', '支付渠道', '业务类型', '交易类型', '对账结果', 'reconId',
+    '对账数据来源', '账单日期', '支付渠道', '业务类型', '交易类型', 'FundType', '对账结果', 'reconId',
     '业务订单号', '业务订单金额', '业务方币种', '渠道账号', '渠道订单号', '渠道订单金额',
     '渠道币种', '业务订单交易完成时间', '渠道订单交易完成时间', '差错类型', '备注',
     '业务方原始账单ID', '渠道方原始账单ID'
@@ -161,6 +161,7 @@ test('不平结果只映射银行右单边，固定值和稳定追溯ID正确', 
   assert.equal(mapped['支付渠道'], 'CHANNEL-B');
   assert.equal(mapped['业务类型'], 'null');
   assert.equal(mapped['交易类型'], 'CREDIT');
+  assert.equal(mapped.FundType, 'Inbound');
   assert.equal(mapped['对账结果'], '不平账');
   assert.equal(mapped.reconId, 'MISS');
   assert.equal(mapped['业务订单金额'], '0.000000000000');
@@ -168,7 +169,31 @@ test('不平结果只映射银行右单边，固定值和稳定追溯ID正确', 
   assert.equal(mapped['差错类型'], '右单边账');
   assert.equal(mapped['业务方原始账单ID'], '');
   assert.equal(mapped['渠道方原始账单ID'], '银行.xlsx#3');
-  assert.equal(projectOutputRow(UNBALANCED_HEADERS, mapped).length, 20);
+  assert.equal(projectOutputRow(UNBALANCED_HEADERS, mapped).length, 21);
+});
+
+test('不平结果 FundType 缺失或空值时保持空，不根据交易方向推导', () => {
+  const withoutFundType = mapUnbalancedRow({
+    rawRow: {
+      ValueDate: '2026-07-02',
+      Channel: 'CHANNEL-A',
+      'Credit Amount': '10'
+    },
+    transactionType: 'CREDIT',
+    amount: '10'
+  });
+  const nullFundType = mapUnbalancedRow({
+    rawRow: {
+      ValueDate: '2026-07-02',
+      Channel: 'CHANNEL-A',
+      FundType: null,
+      'Debit Amount': '10'
+    },
+    transactionType: 'DEBIT',
+    amount: '10'
+  });
+  assert.equal(withoutFundType.FundType, '');
+  assert.equal(nullFundType.FundType, '');
 });
 
 test('平账结果完整映射网关14列、结果列和银行16列', () => {
@@ -302,7 +327,7 @@ test('重复专属渠道按首次被折叠事件顺序追加，不按保留候�
 });
 
 test('数组行投影也必须严格匹配固定列数', () => {
-  assert.throws(() => projectOutputRow(UNBALANCED_HEADERS, ['too-short']), /应为20列/);
+  assert.throws(() => projectOutputRow(UNBALANCED_HEADERS, ['too-short']), /应为21列/);
   assert.deepEqual(
     projectOutputRow(['A', 'B'], { A: 0, B: null }),
     [0, '']

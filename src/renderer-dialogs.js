@@ -7172,7 +7172,8 @@
     }
 
     // v3.0.1 需求1（D4 / OPEN-6 用户拍板）：🔴 资金红线 — 按日期范围删除链接表数据。
-    //   v3.0.5 OPEN-4（T6c）：加「目标表」下拉（三表：网关对账单/外汇交割表/银行对账单表），默认网关；标题随选择切换。
+    //   v3.0.5 OPEN-4（T6c）：加「目标表」下拉（三表：网关对账单/外汇交割表/银行对账单表），默认网关；
+    //     v3.0.26 起标题固定为「删除数据」，实际目标仍以目标表下拉和成功提示为准。
     //     count/delete 调用带 tableKey；切表后 🔴 必须重新 count 成功才启用删除（防拿旧表 count 删新表）。
     //     删除成功文案随表名；fx/bank-deposit 删除联动重建派生（bocDerive/admDerive/bocBankDerive），结果框复用导入完成框范式。
     //   闭区间（含起止两端）；直接删、无二次确认 → 本弹框即唯一一道确认，警告须做足。
@@ -7194,7 +7195,7 @@
       }).join('');
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title" data-role="title">删除${escapeHtml(LINKED_DELETE_TABLE_LABELS[defaultTableKey])}数据</div>
+          <div class="dialog-title" data-role="title">删除数据</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body" style="padding: 4px 28px 8px;">
@@ -7220,7 +7221,6 @@
         </div>
       `;
       const tableSelect = dialog.querySelector('[data-role="table-key"]');
-      const titleEl = dialog.querySelector('[data-role="title"]');
       const startInput = dialog.querySelector('[data-role="start"]');
       const endInput = dialog.querySelector('[data-role="end"]');
       const confirmBtn = dialog.querySelector('[data-action="confirm-delete"]');
@@ -7267,9 +7267,8 @@
         }
       }
 
-      // 切表：① 标题随表名切换；② 🔴 立即禁用删除（防切表瞬间用旧表 count 结果删新表）；③ 重新对新表 count（成功才解禁）。
+      // 切表：① 标题保持固定；② 🔴 立即禁用删除（防切表瞬间用旧表 count 结果删新表）；③ 重新对新表 count（成功才解禁）。
       tableSelect.addEventListener('change', () => {
-        titleEl.textContent = `删除${currentLabel()}数据`;
         confirmBtn.disabled = true; // 先禁用：refreshState 异步 count 期间保持禁用，count 成功回填才解禁
         countToken += 1; // 作废可能在途的旧表 count 回填
         refreshState();
@@ -12390,7 +12389,7 @@
       // v2.1.14 C：链接表管理弹窗（UI 骨架占位）
       createLinkedTableManagerDialog,
       createPreFundTempManagerDialog,
-      // v3.0.1 需求1（D4）：按日期范围删除网关对账单数据弹框（🔴 资金红线，供 preview 调用）
+      // v3.0.1 需求1（D4）：按日期范围删除链接表数据弹框（🔴 资金红线，供 preview 调用）
       createLinkedTableDeleteRangeDialog,
       // v2.1.9 N5：银行渠道管理弹框（spec §4.2）
       createChannelManagerDialog,

@@ -21,7 +21,7 @@ function extractPanel() {
 
 const panel = extractPanel();
 
-test.describe('v3.0.25 平盘对账数据处理前端契约', () => {
+test.describe('v3.0.26 平盘对账数据处理前端契约', () => {
   test('模块 ID、显示名和面板显隐接线完整', () => {
     assert.match(renderer, /positionReconciliation:\s*\{\s*id:\s*'position-reconciliation-process',\s*name:\s*'平盘对账数据处理'/);
     assert.match(renderer, /positionReconciliationModulePanel\.hidden\s*=\s*moduleId\s*!==\s*MODULES\.positionReconciliation\.id/);
@@ -43,7 +43,7 @@ test.describe('v3.0.25 平盘对账数据处理前端契约', () => {
   test('五个按钮文本和原槽位结构固定，页面不显示场景标签', () => {
     for (const [id, label] of [
       ['positionReconciliationRunBtn', '开始运行'],
-      ['positionReconciliationTableManagerBtn', '对账表管理'],
+      ['positionReconciliationTableManagerBtn', '对账数据管理'],
       ['positionReconciliationLinkedTableManagerBtn', '链接表管理'],
       ['positionReconciliationConfigBtn', '对账配置管理'],
       ['positionReconciliationExportBtn', '导出文件']

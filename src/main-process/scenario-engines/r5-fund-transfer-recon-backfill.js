@@ -18,13 +18,15 @@
 //     rc[recon.fundType]     方向标记（FundTransfer-in/out，用于按 direction 过滤 + 必须非空进池）
 //   银行（bank statement，驼峰，与 R5s2 完全一致）：
 //     bank.FundType / bank.MerchantId / bank.Currency
-//     bank['Credit Amount'] + bank['Debit Amount']（双列，绝对值 = |credit - debit|，复用 bankAmountAbs）
+//     bank['Credit Amount'] + bank['Debit Amount']（双列）
+//     bank['Extra Fee']（有符号手续费，空值按 0）
 //     bank.BillDate / bank.ReconciliationId / bank._rowId
 //
-// 金额比对口径（🔴 与 R5s2 同口径，容差 0，精确到分）：
-//   银行发生额绝对值 = bankAmountAbs(bank)（复用 r5-fund-transfer-backfill，禁重写）
+// 金额比对口径（🔴 v3.0.26，与 R5s2 同口径，容差 0，精确到分）：
+//   银行匹配金额     = |Credit-Debit| + signed Extra Fee（复用 bankAmountWithExtraFee，禁重写）
 //   调拨金额绝对值   = |rc[recon.amount]|
-//   amountEqual = 两侧都有限数 且 Math.round(银行*100) === Math.round(调拨*100)
+//   amountEqual = 先加总，再 Math.round(金额*100) 比较；合计后不再取绝对值。
+//   Extra Fee 空值按 0；非空非法值使该银行行退出 R5，并产生一次可见 warning。
 //
 // 日期两阶段（🔴 「优先同日」硬约束，照搬 R5s2）：
 //   Phase1：严格同日（sameDay）。先把所有 recon 跑完，消费掉同日命中的银行行。
@@ -47,8 +49,13 @@ const {
 
 const { sameDay, dayDiffWithin, toDate } = require('./engine-date-utils');
 
-// 🔴 复用 R5s2 的银行发生额绝对值（|Credit-Debit|）——禁重写（plan 复用件清单）。
-const { bankAmountAbs } = require('./r5-fund-transfer-backfill');
+// 🔴 复用 R5s2 的含手续费银行匹配金额与非法 fee 判定——禁重写，防两种来源口径漂移。
+const {
+  bankAmountWithExtraFee,
+  createInvalidExtraFeeWarning,
+  hasInvalidExtraFee,
+  makeInvalidExtraFeeWarningDeduper
+} = require('./r5-fund-transfer-backfill');
 
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
 
@@ -71,13 +78,13 @@ function reconAmountAbs(reconRow) {
   return Math.abs(n ?? NaN);
 }
 
-// 金额发生额绝对值精确到分比对（🔴 容差 0，与 R5s2 amountEqual 同口径）。
+// R5 银行匹配金额与调拨金额精确到分比对（🔴 容差 0，与 R5s2 amountEqual 同口径）。
 //   两侧都必须是有限数；否则不命中（防 NaN 误判相等）。
 function amountEqual(reconRow, bankRow) {
-  const bankAbs = bankAmountAbs(bankRow);
+  const bankAmount = bankAmountWithExtraFee(bankRow);
   const reconAbs = reconAmountAbs(reconRow);
-  if (!Number.isFinite(bankAbs) || !Number.isFinite(reconAbs)) return false;
-  return Math.round(bankAbs * 100) === Math.round(reconAbs * 100);
+  if (!Number.isFinite(bankAmount) || !Number.isFinite(reconAbs)) return false;
+  return Math.round(bankAmount * 100) === Math.round(reconAbs * 100);
 }
 
 /**
@@ -89,7 +96,7 @@ function amountEqual(reconRow, bankRow) {
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
  * @returns {{ modifications: Array, warnings: Array, usedBankRowIds: Set }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }）
- *   warnings：multi-bank-match-backfill
+ *   warnings：multi-bank-match-backfill / r5-invalid-extra-fee
  *   usedBankRowIds：引擎内 1v1 消费的全部 bank _rowId 集合（含「消费但未写」行）——
  *     与 R5s2 同语义，供编排器并入 r5s2ConsumedBankRowIds 传 R5s2b 剔除（互斥防二次覆盖）。
  */
@@ -101,6 +108,8 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
   const modCollector = makeModificationCollector();
   // 跨 direction 聚合的消费集合（含同值未写行），作为返回字段供 R5s2b 剔除。
   const consumedBankRowIds = new Set();
+  // v3.0.26：稳定 _rowId 优先去重；无 _rowId 才按对象身份，保证非法 fee 银行行只告警一次。
+  const shouldEmitInvalidExtraFeeWarning = makeInvalidExtraFeeWarningDeduper();
 
   const safeReconRows = Array.isArray(reconRows) ? reconRows : [];
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
@@ -109,8 +118,8 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
     ? options.dateToleranceDays
     : DEFAULT_DATE_TOLERANCE_DAYS;
 
-  // 空入参防御：无调拨对账单行 / 无银行行 → 直接返回空结果（no-op）。
-  if (safeReconRows.length === 0 || safeBankRows.length === 0) {
+  // 无银行行 → 直接返回；无调拨行时仍遍历方向银行池，以保证非法 Extra Fee warning 不被早退吞掉。
+  if (safeBankRows.length === 0) {
     return {
       modifications: modCollector.listModifications(),
       warnings: warningCollector.list(),
@@ -118,7 +127,8 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
     };
   }
 
-  // 对账字段全等：big_account↔MerchantId、币种↔Currency（valuesEqual）+ 金额发生额绝对值精确到分。
+  // 对账字段全等：big_account↔MerchantId、币种↔Currency（valuesEqual）
+  //   + (|Credit-Debit| + signed Extra Fee) 先加总后精确到分。
   //   ⚠️ 大账号方向已在派生固化（D1），引擎零方向分支——此处不区分收/付，直接 big_account 比 MerchantId。
   const fieldEq = (rc, bank) =>
     valuesEqual(rc && rc[RECON.bigAccount], bank && bank.MerchantId) &&
@@ -161,9 +171,14 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
         normalizeCellValue(rc && rc[RECON.reconId]) !== '' &&
         normalizeCellValue(rc && rc[RECON.bigAccount]) !== ''
     );
-    const bankPool = safeBankRows.filter(
-      (b) => normalizeCellValue(b && b.FundType) === dir.fundType
-    );
+    const bankPool = safeBankRows.filter((b) => {
+      if (normalizeCellValue(b && b.FundType) !== dir.fundType) return false;
+      if (!hasInvalidExtraFee(b)) return true;
+      if (shouldEmitInvalidExtraFeeWarning(b)) {
+        warningCollector.push(createInvalidExtraFeeWarning(b));
+      }
+      return false;
+    });
     const usedBankRowId = new Set();
 
     // ===== Phase1：严格同日 —— 先把所有 recon 跑完，消费掉同日命中（保证「优先同日」硬约束）=====
