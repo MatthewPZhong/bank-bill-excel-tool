@@ -1,6 +1,6 @@
 # Spec — v3.0.26 平盘文案、前置资金导出与 R5 手续费迭代
 
-> status: implemented（PR #101；按追加授权完成 self-review 后合并；未创建 tag、未发布；human-fund-review-pending）
+> status: release-ready（PR #101 已合入 main；发布门禁通过；Release 待发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-25
 > updated: 2026-07-25
@@ -120,5 +120,15 @@ abs(Credit Amount - Debit Amount) + signed Extra Fee
 
 - 不实现平盘模块实际管理、运行或导出后端。
 - 不改变 DBS-Charge、Payment、退款、R4 或前置资金对账匹配金额。
-- 原实施计划不包含 PR 与合并；用户后续追加授权创建 PR #101，并在 self-review 无 P4 Finding 后合并。
-- 不创建 tag，不发布 GitHub Release。
+- 原实施计划不包含 PR、合并与发布；用户后续分别追加授权 PR #101 合并及 v3.0.26 发布收尾。
+- 不在发布收尾中升级生产依赖；现有 advisory 进入安全治理 follow-up。
+
+## 10. 交付与发布状态
+
+- PR #101 最终 self-review 无 P0-P4 Finding，GitHub Windows smoke-test 与主页面对齐检查通过。
+- PR #101 于 2026-07-25 以 merge commit `fa416aa` 合入 `main`，远程与本地开发分支均已删除。
+- 合并后的 `main` 在干净 `npm ci` 依赖上重新通过 release-check：unit `3855/3855`、43 个 integration 脚本 `1978/1978`，lint 与 smoke 全绿。
+- 发布前主页面布局为 `6/6 PASS`；启动建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
+- `scan:vars` 为 202 个 JS 文件、2329 个顶层声明；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
+- `npm audit --omit=dev` 报告 9 条生产依赖 advisory（2 moderate、7 high、0 critical）；v3.0.26 与 v3.0.25 的依赖图一致，新增计数来自 advisory 数据更新，继续作为安全治理 follow-up。
+- 仓库仍为 PUBLIC；annotated tag、Windows Release workflow、GitHub Release 和公开更新资产验证待完成。

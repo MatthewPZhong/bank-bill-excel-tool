@@ -50,6 +50,13 @@
 | 重要变量门禁 | `scan:vars` → 202 文件 / 2329 顶层声明；`check:vars -- --include-minor` 命中 `bankAmountWithExtraFee`，`dialog/elements` 为局部或既有引用 | R5/DBS/多对多资金边界已按 v30 清单逐项复核 |
 | 启动性能 | `startup:measure` 5 次：总耗时平均 778.135ms，ready-to-show 平均 171.222ms | 低于日常启动门槛，无可见启动回退 |
 | Team-lead 最终 review | 代码、测试、模板、spec、版本文档、重要变量与 PR #101 最终 patch 三层复核，无新增 P0-P4 Finding | 自动化范围内可合并；未替代下述人工资金和 Windows 实机验收 |
+| PR #101 合并 | merge commit `fa416aa` | 2026-07-25 合入 `main`；远程与本地开发分支已删除 |
+| 合并后 `npm ci` + `release-check` | PASS | unit `3855/3855`、43 个 integration 脚本 `1978/1978`，lint 与 smoke 全绿 |
+| 发布前主页面布局 | `6/6 PASS` | 两种窗口尺寸 × Windows 100%/125%/150%，单行、多行和控件垂直中心误差均低于 `0.004px` |
+| 发布前启动性能 | PASS | 5 次建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms` |
+| 发布前变量硬节点 | PASS | `scan:vars` 为 202/2329；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过 |
+| 生产依赖审计 | 9 条 advisory | 2 moderate、7 high、0 critical；相对 v3.0.25 未改依赖图，新增计数来自 advisory 数据更新，保留为安全治理 follow-up |
+| 发布仓库门控 | PASS | GitHub 仓库为 PUBLIC；`v3.0.26` tag 与 Release 均不存在 |
 
 ## Remaining Unknowns
 
@@ -57,3 +64,5 @@
 |---|---|---|---|
 | 真实正负手续费与两种 R5 来源 | PROBE | 使用真实或脱敏样本逐笔人工复核 | ⚠️ 资金红线；自动测试不能替代 |
 | Windows Excel/WPS 模板显示 | PROBE | Windows 实机打开新 21 列结果 | 不阻断代码完成，但不得宣称实机已验收 |
+| Windows 生产升级 canary | BLOCK-ANNOUNCEMENT | 使用 v3.0.25 安装版验证 v3.0.26 在线升级、SmartScreen 与用户数据保留 | 不阻断技术发布，但阻断发布公告 |
+| 生产依赖安全升级 | FOLLOW-UP | 单独升级并回归 `electron-updater`、`marked` 等可修复 advisory | 不在发布收尾中静默改变依赖；当前公开 GitHub updater 不携带私有仓库凭据 |

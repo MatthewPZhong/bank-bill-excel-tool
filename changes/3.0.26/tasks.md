@@ -47,4 +47,16 @@
 ## 6. 交付边界
 
 - [x] 创建 PR #101，并完成合并前 self-review
-- [x] 不创建 tag、不发布 Release
+- [x] PR #101 以 merge commit `fa416aa` 合入 `main`
+- [x] 建立 PR 归档与版本 PRD
+- [x] 在合并后的 `main` 上重跑干净依赖发布门禁
+- [ ] 创建并推送 annotated tag `v3.0.26`
+- [ ] 验证 Windows Release workflow 与 GitHub Release
+- [ ] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产
+- [ ] 回写最终发布证据并确认 tracked worktree 干净
+
+## 7. 公告前人工门禁
+
+- [ ] 使用真实或脱敏数据逐笔核对两种 R5 来源、正负手续费、ReconciliationId、1:1 去向和多对多异常
+- [ ] 在 Windows Excel/WPS 打开 21 列“不平结果”，核对 `FundType` 列位、样式和原始血缘
+- [ ] 使用上一 stable 完成 `v3.0.25 → v3.0.26` Windows 在线升级 canary，并核对 SmartScreen、SQLite、设置和导出文件保留

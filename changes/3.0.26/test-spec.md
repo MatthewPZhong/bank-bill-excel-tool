@@ -1,6 +1,6 @@
 # Test Spec — v3.0.26 平盘文案、前置资金导出与 R5 手续费迭代
 
-> status: implemented-pass（自动门禁通过；真实资金与 Windows Excel/WPS 人工验收待完成）
+> status: release-ready-pass（PR #101 已合并；发布门禁通过；Release 待发布）
 > created: 2026-07-25
 > updated: 2026-07-25
 
@@ -80,3 +80,13 @@
   - 1:1 去向和多对多异常；
   - DBS-Charge 不受影响；
   - 新导出列与原银行 `FundType` 血缘。
+
+## 6. 合并后发布门禁
+
+- PR #101 于 2026-07-25 以 merge commit `fa416aa` 合入 `main`；最终 self-review 无 P0-P4 Finding。
+- 干净 `npm ci` 后 `npm run release-check` 再次通过：unit `3855/3855`、43 个 integration 脚本 `1978/1978`，lint 与 smoke PASS。
+- `npm run verify:main-panel-alignment` 为 `6/6 PASS`。
+- `npm run startup:measure`：建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
+- `scan:vars` 为 202/2329；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
+- `npm audit --omit=dev` 为 2 moderate、7 high、0 critical；依赖图相对 v3.0.25 仅版本号变化，安全依赖升级不在本次发布收尾范围。
+- annotated tag、Release workflow、四个公开更新资产及匿名回读证据待补充。

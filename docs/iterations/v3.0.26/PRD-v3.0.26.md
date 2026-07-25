@@ -1,8 +1,8 @@
 # bank-bill-excel-tool 3.0.26 PRD
 
 > 目标版本：`3.0.26`
-> 状态：implemented（PR #101；按追加授权完成 self-review 后合并；未创建 tag、未发布）
-> 源规格：`changes/3.0.26/spec.md`
+> 状态：release-ready（PR #101 已合入 `main`；发布门禁通过；GitHub Release 待发布）
+> 归档：PR #101 merge commit `fa416aa`；源规格 `changes/3.0.26/spec.md`
 > 更新时间：2026-07-25
 > 适用仓库：`bank-bill-excel-tool`
 
@@ -52,3 +52,13 @@ abs(Credit Amount - Debit Amount) + signed Extra Fee
 - Payment 线下调拨、退款回填、R4 和前置资金对账匹配口径不变。
 - 自动验证覆盖模板回读、三代 C4、两种 R5 来源、正负/空/非法手续费、多对多和 DBS 回归。
 - ⚠️ 真实或脱敏样本仍须逐笔核对正负手续费、两种来源、回填 ReconciliationId、1:1 去向、多对多异常、新导出列和 DBS 不变性；自动测试不能替代资金验收。
+
+## 6. 合并与发布归档
+
+- PR #101 于 2026-07-25 以 merge commit `fa416aa` 合入 `main`；PR 归档见 `docs/prs/PR101-v3.0.26.md`。
+- 合并后的 `main` 已在干净 `npm ci` 依赖上重新通过完整 release-check：unit `3855/3855`、43 个 integration 脚本 `1978/1978`，lint 与 smoke 全绿。
+- 主页面六组合布局为 `6/6 PASS`；启动建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
+- 变量扫描为 202 个 JS 文件、2329 个顶层声明；重要变量硬节点因 `src` 无新改动安全跳过。
+- 生产依赖审计为 2 moderate、7 high、0 critical；v3.0.26 与 v3.0.25 的依赖图一致，安全升级留作独立 follow-up。
+- GitHub 仓库仍为 PUBLIC；annotated tag、Windows Release workflow 和公开更新资产验证待 tag 推送后补充。
+- Windows Excel/WPS 模板显示、真实资金样本和 `v3.0.25 → v3.0.26` 生产在线升级 canary 均是公告前人工门禁。
