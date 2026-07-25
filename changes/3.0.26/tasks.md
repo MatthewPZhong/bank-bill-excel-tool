@@ -44,6 +44,7 @@
 - [x] team-lead 三层质量门禁
 - [x] 记录真实资金样本人工复核缺口
 
-## 6. 非目标
+## 6. 交付边界
 
-- [x] 不提 PR、不合并、不创建 tag、不发布 Release
+- [x] 创建 PR #101，并完成合并前 self-review
+- [x] 不创建 tag、不发布 Release

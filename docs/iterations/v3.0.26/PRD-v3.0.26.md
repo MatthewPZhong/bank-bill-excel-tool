@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.26 PRD
 
 > 目标版本：`3.0.26`
-> 状态：implemented（未提 PR、未合并、未创建 tag、未发布）
+> 状态：implemented（PR #101；按追加授权完成 self-review 后合并；未创建 tag、未发布）
 > 源规格：`changes/3.0.26/spec.md`
 > 更新时间：2026-07-25
 > 适用仓库：`bank-bill-excel-tool`

@@ -1,6 +1,6 @@
 # Spec — v3.0.26 平盘文案、前置资金导出与 R5 手续费迭代
 
-> status: implemented（未提 PR、未合并、未创建 tag、未发布；human-fund-review-pending）
+> status: implemented（PR #101；按追加授权完成 self-review 后合并；未创建 tag、未发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-25
 > updated: 2026-07-25
@@ -120,4 +120,5 @@ abs(Credit Amount - Debit Amount) + signed Extra Fee
 
 - 不实现平盘模块实际管理、运行或导出后端。
 - 不改变 DBS-Charge、Payment、退款、R4 或前置资金对账匹配金额。
-- 不创建 PR、不合并、不创建 tag、不发布 GitHub Release。
+- 原实施计划不包含 PR 与合并；用户后续追加授权创建 PR #101，并在 self-review 无 P4 Finding 后合并。
+- 不创建 tag，不发布 GitHub Release。

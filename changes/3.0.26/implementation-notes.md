@@ -40,7 +40,8 @@
 |---|---|---|
 | 仓库基线 | `main` / package `3.0.25` / tracked clean | 无既有 tracked 改动被覆盖 |
 | PM 规格与资金盲区复核 | 发现 DBS 步骤2比较器污染、负合计预期冲突、warning 血缘和模板描述缺口 | 已反向同步 spec/test-spec，并转交 Dev 修复 |
-| 分支承接 | `codex/v3.0.26` | 未提交 WIP 已离开 `main` 工作分支；未推送、未提 PR |
+| 分支承接 | `codex/v3.0.26` | 未提交 WIP 已离开 `main` 工作分支，随后形成提交 `99af71a` 并推送 |
+| PR 交付 | PR #101 | 用户追加授权后创建；合并前按最终 PR patch 执行 self-review |
 | 全部单元测试 | `npm run test:unit` → `3855/3855 PASS` | 本次定向测试与全仓回归均通过 |
 | 前置资金输出集成 | `pre-fund-reconciliation-output-contract.js` → `15/15 PASS` | 真实模板 21 列、FundType 血缘、5/6-sheet 与 C4 回读 |
 | 多对多输出集成 | `bank-statement-many-to-many-review-sheet.js` → `33/33 PASS` | 含手续费金额不改变只读审计与命中行输出边界 |
@@ -48,7 +49,7 @@
 | UI 几何与预览 | `verify:main-panel-alignment` → `6/6 PASS`；已回读平盘主页面与链接表删除弹框 preview | 文案、按钮尺寸/样式及双尺寸三档缩放不漂移 |
 | 重要变量门禁 | `scan:vars` → 202 文件 / 2329 顶层声明；`check:vars -- --include-minor` 命中 `bankAmountWithExtraFee`，`dialog/elements` 为局部或既有引用 | R5/DBS/多对多资金边界已按 v30 清单逐项复核 |
 | 启动性能 | `startup:measure` 5 次：总耗时平均 778.135ms，ready-to-show 平均 171.222ms | 低于日常启动门槛，无可见启动回退 |
-| Team-lead 最终 review | 代码、测试、模板、spec、版本文档与重要变量三层复核，无新增 P0-P4 Finding | 自动化范围内可交付；未替代下述人工资金和 Windows 实机验收 |
+| Team-lead 最终 review | 代码、测试、模板、spec、版本文档、重要变量与 PR #101 最终 patch 三层复核，无新增 P0-P4 Finding | 自动化范围内可合并；未替代下述人工资金和 Windows 实机验收 |
 
 ## Remaining Unknowns
 
