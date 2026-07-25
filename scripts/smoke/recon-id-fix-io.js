@@ -279,12 +279,16 @@ async function runReconIdFixIoSmokeTests() {
   // ===== R14（v3.0.14）：C4 兼容 6-sheet，校验后忽略重复审计数据 =====
   {
     const filePath = path.join(tmpDir, 'pre-fund-six-sheets.xlsx');
-    const resultValues = RECON_RESULT_FIELDS_GATEWAY.map((field) => `result-${field}`);
+    const unbalancedValues = PRE_FUND_UNBALANCED_FIELDS.map((field) => {
+      if (field === '对账数据来源') return '导入银行对账单';
+      if (field === 'FundType') return 'Charge';
+      return `result-${field}`;
+    });
     makeMultiSheetXlsx([
       {
         name: PRE_FUND_UNBALANCED_SHEET_NAME,
         headers: PRE_FUND_UNBALANCED_FIELDS.slice(),
-        rows: [['导入银行对账单', ...resultValues]]
+        rows: [unbalancedValues]
       },
       {
         name: PRE_FUND_BALANCED_SHEET_NAME,

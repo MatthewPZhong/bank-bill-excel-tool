@@ -34,6 +34,7 @@ function makeBankRow(o = {}) {
     Currency: o.Currency ?? 'USD',
     'Credit Amount': o['Credit Amount'] ?? '',
     'Debit Amount': o['Debit Amount'] ?? '',
+    'Extra Fee': o['Extra Fee'] ?? '',
     BillDate: o.BillDate ?? '2026-05-26'
   };
 }
@@ -135,6 +136,26 @@ test.describe('runReconciliation R5s2 二选一 —— 勾选路（reconSourceMi
     assert.ok(!result.modifications.some((m) => m._round === 'R5s2'), '勾选路不产 _round=R5s2（旧网关路）');
   });
 
+  test('v3.0.26 勾选路按含 Extra Fee 的银行金额匹配', async () => {
+    const bankRows = [makeBankRow({
+      _rowId: 'fee-recon',
+      'Credit Amount': 100,
+      'Extra Fee': 5
+    })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
+      fundTransferReconContext: {
+        reconRows: [makeReconRow({ 金额: 105, ReconID: 'RECON-WITH-FEE' })]
+      }
+    });
+
+    assert.equal(bankRows[0].ReconciliationId, 'RECON-WITH-FEE');
+    assert.equal(result.stats.r5s2BackfilledCount, 1);
+    assert.ok(result.modifications.some((m) => m._round === 'R5s2-recon'));
+  });
+
   test('勾选路 fundTransferReconContext 缺省 → 新引擎空入参 no-op、不抛、行数守恒', async () => {
     const bankRows = [makeBankRow({ _rowId: 'b1', 'Credit Amount': 100 })];
     let result;
@@ -185,6 +206,23 @@ test.describe('runReconciliation R5s2 二选一 —— 取消路（reconSourceMi
     });
     assert.equal(result.stats.r5s2BackfilledCount, 0);
     assert.equal(bankRows[0].ReconciliationId, '');
+  });
+
+  test('v3.0.26 取消路按含 Extra Fee 的银行金额匹配', async () => {
+    const bankRows = [makeBankRow({
+      _rowId: 'fee-gateway',
+      'Credit Amount': 100,
+      'Extra Fee': -5
+    })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [makeGwRow({ amount: 95, reconciliationid: 'GW-WITH-FEE' })],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: false })]
+    });
+
+    assert.equal(bankRows[0].ReconciliationId, 'GW-WITH-FEE');
+    assert.equal(result.stats.r5s2BackfilledCount, 1);
+    assert.ok(result.modifications.some((m) => m._round === 'R5s2'));
   });
 });
 

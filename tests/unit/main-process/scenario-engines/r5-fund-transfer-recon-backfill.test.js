@@ -4,7 +4,7 @@
 // 覆盖（task 清单）：
 //   ① 同日命中回填 ReconciliationId（断言写入调拨 ReconID + modification + 银行行原地改写）
 //   ② 同日无候选 → ±1day 兜底命中；差 2 天不命中
-//   ③ 金额发生额绝对值精确到分：相差 1 分（0.01）不命中、相等命中
+//   ③ 金额 = |Credit-Debit| + signed Extra Fee，先加总再按分精度比较，合计后不再 abs
 //   ④ 币种不等不命中
 //   ⑤ big_account ≠ MerchantId 不命中（大账号方向已固化，引擎零分支）
 //   ⑥ in/out 方向隔离（out 调拨不命中 in 银行行）
@@ -62,6 +62,7 @@ function bankRow({
   currency = 'USD',
   credit = 0,
   debit = 100,
+  extraFee = '',
   billDate = '2026-06-07',
   reconId = ''
 } = {}) {
@@ -72,6 +73,7 @@ function bankRow({
     Currency: currency,
     'Credit Amount': credit,
     'Debit Amount': debit,
+    'Extra Fee': extraFee,
     BillDate: billDate,
     ReconciliationId: reconId
   };
@@ -94,8 +96,151 @@ test.describe('R5场景2(调拨对账单) — 金额发生额绝对值口径', (
     assert.equal(amountEqual({ [RECON.amount]: 0.3 }, { 'Credit Amount': 0.1, 'Debit Amount': -0.2 }), true);
   });
 
+  test('amountEqual 纳入 signed Extra Fee：正/负/空值分别按 105/95/100 比较', () => {
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 105 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 5 }
+      ),
+      true
+    );
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 95 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': -5 }
+      ),
+      true
+    );
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 100 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': ' ' }
+      ),
+      true
+    );
+  });
+
+  test('先加总再归分，且合计后不再 abs', () => {
+    const sumBeforeRounding = {
+      'Credit Amount': 0,
+      'Debit Amount': '100.004',
+      'Extra Fee': '0.004'
+    };
+    assert.equal(amountEqual({ [RECON.amount]: '100.01' }, sumBeforeRounding), true);
+    assert.equal(amountEqual({ [RECON.amount]: '100.00' }, sumBeforeRounding), false);
+    const negativeTotal = { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': -150 };
+    assert.equal(amountEqual({ [RECON.amount]: 50 }, negativeTotal), false);
+    assert.equal(
+      amountEqual({ [RECON.amount]: -50 }, negativeTotal),
+      false,
+      '对手仍取绝对值，正负 50 都不得命中银行合计 -50'
+    );
+  });
+
+  test('科学计数法手续费参与计算，主金额与负手续费抵消为 0 时按合计值匹配', () => {
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 100.5 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': '5e-1' }
+      ),
+      true
+    );
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 0 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': -100 }
+      ),
+      true
+    );
+  });
+
   test('amountEqual 两侧任一非有限数 → false（不误判相等）', () => {
     assert.equal(amountEqual({ [RECON.amount]: 'x' }, { 'Credit Amount': 0, 'Debit Amount': 100 }), false);
+    assert.equal(
+      amountEqual(
+        { [RECON.amount]: 100 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 'bad-fee' }
+      ),
+      false
+    );
+  });
+});
+
+// ---- v3.0.26 Extra Fee 端到端 -----------------------------------------
+
+test.describe('R5场景2(调拨对账单) — Extra Fee 端到端匹配与非法值退出', () => {
+  test('正/负/空 fee 分别按 105/95/100 匹配调拨金额', () => {
+    const cases = [
+      { rowId: 'positive', extraFee: 5, reconAmount: 105, reconId: 'RC-POS' },
+      { rowId: 'negative', extraFee: -5, reconAmount: 95, reconId: 'RC-NEG' },
+      { rowId: 'empty', extraFee: ' ', reconAmount: 100, reconId: 'RC-EMPTY' }
+    ];
+
+    for (const item of cases) {
+      const banks = [bankRow({ rowId: item.rowId, debit: 100, extraFee: item.extraFee })];
+      const result = runRound5FundTransferReconBackfill(
+        [reconRow({ amount: item.reconAmount, reconId: item.reconId })],
+        banks
+      );
+      assert.equal(result.modifications.length, 1, `${item.rowId} fee 应命中`);
+      assert.equal(banks[0].ReconciliationId, item.reconId);
+      assert.deepEqual(result.warnings, []);
+    }
+  });
+
+  test('非空非法 fee 的银行行退出 R5、不占候选，并且一行只产生一次可见 warning', () => {
+    const recons = [
+      reconRow({ amount: 100, reconId: 'RC-FIRST' }),
+      reconRow({ amount: 100, reconId: 'RC-SECOND' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'bad-fee', debit: 100, extraFee: 'oops' }),
+      bankRow({ rowId: 'valid', debit: 100, extraFee: '' })
+    ];
+
+    const result = runRound5FundTransferReconBackfill(recons, banks);
+
+    assert.equal(banks[0].ReconciliationId, '', '非法 fee 行退出 R5，不得被回填');
+    assert.equal(banks[1].ReconciliationId, 'RC-FIRST', '非法行不占用候选，后续合法行仍可命中');
+    assert.deepEqual(result.modifications.map((m) => m.rowId), ['valid']);
+    assert.ok(!result.usedBankRowIds.has('bad-fee'), '非法 fee 行不得进入消费集');
+    const feeWarnings = result.warnings.filter((warning) => warning.code === 'r5-invalid-extra-fee');
+    assert.equal(feeWarnings.length, 1, '同一银行行面对多条调拨行也只告警一次');
+    assert.equal(feeWarnings[0].rowId, 'bad-fee');
+    assert.equal(feeWarnings[0].field, 'Extra Fee');
+    assert.equal(feeWarnings[0].rawValue, 'oops', 'warning 顶层保留原始手续费值');
+    assert.deepEqual(
+      feeWarnings[0].context,
+      { rowId: 'bad-fee', field: 'Extra Fee', rawValue: 'oops' },
+      'warning context 带银行行血缘、字段与原始手续费值'
+    );
+    assert.match(feeWarnings[0].message, /原始值「oops」/, '可见 message 必须展示原始手续费值');
+    assert.match(feeWarnings[0].message, /退出 R5/);
+  });
+
+  test('对手池为空也不吞非法 fee warning', () => {
+    const result = runRound5FundTransferReconBackfill(
+      [],
+      [bankRow({ rowId: 'bad-without-recon', extraFee: 'oops' })]
+    );
+    assert.deepEqual(result.modifications, []);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'r5-invalid-extra-fee');
+    assert.equal(result.warnings[0].rowId, 'bad-without-recon');
+  });
+
+  test('非法 fee warning 在调拨来源同样按稳定 _rowId 去重', () => {
+    const result = runRound5FundTransferReconBackfill(
+      [],
+      [
+        bankRow({ rowId: 'same-id', extraFee: 'first-bad' }),
+        bankRow({ rowId: 'same-id', extraFee: 'second-bad' })
+      ]
+    );
+    const feeWarnings = result.warnings.filter((warning) => warning.code === 'r5-invalid-extra-fee');
+    assert.equal(feeWarnings.length, 1);
+    assert.equal(feeWarnings[0].rowId, 'same-id');
+    assert.equal(feeWarnings[0].rawValue, 'first-bad');
   });
 });
 

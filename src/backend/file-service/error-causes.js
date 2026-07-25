@@ -29,6 +29,9 @@ const CAUSE_MAP = Object.freeze({
   'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
   'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
 
+  // v3.0.26：R5 中台调拨订单回填 Extra Fee 校验（🔴 资金红线）
+  'r5-invalid-extra-fee': '银行行 Extra Fee 非空但不是合法金额，已跳过中台调拨订单对账ID回填与调拨多对多审计，请人工核对手续费原值',
+
   // v3.0.23：R4 四类资金性质严格 1:1 匹配（🔴 资金红线）
   'r4-fund-direction-mismatch': '同对账ID存在目标网关行，但银行借贷方向金额非0或格式非法，已跳过资金性质改写，请人工核对方向',
   'r4-fund-match-mismatch': '同对账ID存在银行行，但账号、币种、金额、手续费或候选消费状态不满足完整匹配条件',

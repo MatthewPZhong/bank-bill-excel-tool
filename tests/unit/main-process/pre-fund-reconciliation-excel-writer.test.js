@@ -122,10 +122,10 @@ test.afterEach(() => {
   tempDir = null;
 });
 
-test('最终模板必须严格为固定5-sheet顺序和20/31/31/16/14表头', async () => {
+test('最终模板必须严格为固定5-sheet顺序和21/31/31/16/14表头', async () => {
   const workbook = await loadTemplateWorkbook(templatePath);
   assert.deepEqual(workbook.worksheets.map((worksheet) => worksheet.name), SHEET_NAMES);
-  assert.deepEqual(TEMPLATE_SHEETS.map((item) => item.headers.length), [20, 31, 31, 16, 14]);
+  assert.deepEqual(TEMPLATE_SHEETS.map((item) => item.headers.length), [21, 31, 31, 16, 14]);
 });
 
 test('真实 asset 已升级为最终5-sheet契约', async () => {
@@ -134,7 +134,19 @@ test('真实 asset 已升级为最终5-sheet契约', async () => {
   assert.deepEqual(workbook.worksheets.map((worksheet) => worksheet.name), SHEET_NAMES);
   assert.deepEqual(
     workbook.worksheets.map((worksheet) => worksheet.getRow(1).cellCount),
-    [20, 31, 31, 16, 14]
+    [21, 31, 31, 16, 14]
+  );
+  const unbalancedSheet = workbook.getWorksheet('不平结果');
+  assert.equal(unbalancedSheet.getCell('F1').value, 'FundType');
+  assert.equal(unbalancedSheet.getColumn('F').width, unbalancedSheet.getColumn('E').width);
+  assert.equal(unbalancedSheet.getColumn('F').width, unbalancedSheet.getColumn('G').width);
+  assert.deepEqual(unbalancedSheet.getCell('F1').style, unbalancedSheet.getCell('E1').style);
+  assert.deepEqual(unbalancedSheet.getCell('F1').style, unbalancedSheet.getCell('G1').style);
+  assert.equal(unbalancedSheet.autoFilter, undefined, '原模板没有自动筛选，新增列不得擅自增加');
+  assert.equal(
+    unbalancedSheet.views.some((view) => view.state === 'frozen'),
+    false,
+    '原模板没有冻结视图，新增列不得擅自增加'
   );
 });
 
@@ -180,7 +192,7 @@ test('按单渠道逐行写5-sheet：数据列固定、网关账单/订单修复
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(result.filePath);
   assert.deepEqual(workbook.worksheets.map((worksheet) => worksheet.name), SHEET_NAMES);
-  assert.deepEqual(rowValues(workbook.getWorksheet('不平结果'), 2, 20), projectValues(TEMPLATE_SHEETS[0].headers, unbalanced));
+  assert.deepEqual(rowValues(workbook.getWorksheet('不平结果'), 2, 21), projectValues(TEMPLATE_SHEETS[0].headers, unbalanced));
   assert.deepEqual(rowValues(workbook.getWorksheet('平账结果'), 2, 31), projectValues(TEMPLATE_SHEETS[1].headers, balanced));
   assert.deepEqual(rowValues(workbook.getWorksheet('渠道账单'), 2, 16), projectValues(TEMPLATE_SHEETS[3].headers, channelBill));
   assert.equal(workbook.getWorksheet('网关账单').rowCount, 1);

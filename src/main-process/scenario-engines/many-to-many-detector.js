@@ -9,7 +9,8 @@
 //   🔴 绝不修改任何 bankRow 字段 / modifications / 回填逻辑 / 行数守恒——只返回命中行的**引用**与说明文本。
 //
 // 复用既有引擎访问器（禁自写解析/归一化，防字段漂移 —— 跨表字段绝不假设同名）：
-//   银行金额 bankAmountAbs（|Credit-Debit|）/ 网关金额 gwAmountAbs（|amount|）—— r5-fund-transfer-backfill 已 export；
+//   银行金额 bankAmountWithExtraFee（|Credit-Debit| + signed Extra Fee）/
+//   网关金额 gwAmountAbs（|amount|）—— r5-fund-transfer-backfill 已 export；
 //   调拨金额 reconAmountAbs（|金额|）—— r5-fund-transfer-recon-backfill 已 export；
 //   normalizeCellValue（engine-utils）；dayDiffWithin（engine-date-utils，含同日）。
 //
@@ -20,7 +21,8 @@
 //
 // 算法（不限 FundType、不分 in/out 方向 —— 用户已确认放宽到全部银行行）：
 //   1. 银行池 = 全部 bankRows（取 R5 后最终值）；对手池：网关=全部 gwRows、调拨=全部 reconRows（两类分别跑）。
-//   2. 分组键 = 归一化账号 + ' ' + 归一化币种 + ' ' + round(金额绝对值*100)（精确到分）。
+//   2. 分组键 = 归一化账号 + ' ' + 归一化币种 + ' ' + round(金额*100)（精确到分）。
+//      银行金额先计算 |Credit-Debit| + signed Extra Fee，合计后不再取绝对值；空 fee=0。
 //   3. 🔴 空值护栏：账号或币种归一化后为空、或金额非有限数（!Number.isFinite）的行**不进池**
 //      （否则空账号会被 normalizeCellValue('')==='' 全并成一个巨型假组）。
 //   4. 用 Map<key, {banks, cps}> 哈希分组（O(n+m)）；对两侧都非空的 key，在该小组内构二部图
@@ -28,8 +30,8 @@
 //      连通分量内 银行≥2 且 对手≥2 → 该分量所有银行行命中（1v1 / 1vN / Nv1 不算）。
 //   5. 网关、调拨各跑一遍，命中银行行按 _rowId 去重合并；每条命中带 note（中文说明：对手方 + 键 + 银行N×对手M）。
 //
-// ⚠️ 放宽副作用（接受）：金额取绝对值、不分方向 → 同 |金额| 的 credit/debit 行、in/out 对手会并入同组，
-//   可能多标；属「供人工判断」可接受的偏全（plan §1.1）。
+// ⚠️ 放宽副作用（接受）：银行基础发生额取绝对值且不分方向，Extra Fee 再保留符号参与合计；
+//   相同最终金额的 credit/debit、in/out 对手仍可能并组多标，属「供人工判断」可接受的偏全（plan §1.1）。
 //
 // 性能（v3.0.12，输出逐字节不变）：detectOneSide 改「银行优先门控」——先只用银行行建组（仅银行行能
 //   创建 group）；若无任何组 银行≥2 则直接返回、**完全不遍历对手池**；对手行「探测即丢」（只并入已存在
@@ -38,7 +40,7 @@
 
 const { normalizeCellValue } = require('./engine-utils');
 const { dayDiffWithin } = require('./engine-date-utils');
-const { bankAmountAbs, gwAmountAbs } = require('./r5-fund-transfer-backfill');
+const { bankAmountWithExtraFee, gwAmountAbs } = require('./r5-fund-transfer-backfill');
 const { reconAmountAbs } = require('./r5-fund-transfer-recon-backfill');
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
 
@@ -96,12 +98,12 @@ function buildNote(cpLabel, group, nBank, nCp) {
 
 // 计算一行的分组键「账号 + 币种 + 金额分」（空值护栏：任一无效返回 null，不进池）。
 //   amount 由调用方传入访问器结果；银行/对手两侧共用，护栏口径与原 pushIntoGroups 逐条一致：
-//   normalizeCellValue 后 acc/cur 为空、或 !Number.isFinite(amountAbs) → 返回 null。
-function computeKey(account, currency, amountAbs) {
+//   normalizeCellValue 后 acc/cur 为空、或 !Number.isFinite(amount) → 返回 null。
+function computeKey(account, currency, amount) {
   const acc = normalizeCellValue(account);
   const cur = normalizeCellValue(currency);
-  if (acc === '' || cur === '' || !Number.isFinite(amountAbs)) return null; // 🔴 空值护栏
-  const cents = Math.round(amountAbs * 100);
+  if (acc === '' || cur === '' || !Number.isFinite(amount)) return null; // 🔴 空值护栏
+  const cents = Math.round(amount * 100);
   return { acc, cur, cents, key: acc + ' ' + cur + ' ' + cents };
 }
 
@@ -110,9 +112,10 @@ function computeKey(account, currency, amountAbs) {
 function detectOneSide(bankRows, cpRows, cpAccessors, tolerance) {
   const groups = new Map(); // key -> { account, currency, cents, banks:[], cps:[] }
 
-  // 银行 loop：只有银行行能创建 group（账号=MerchantId、币种=Currency、金额=bankAmountAbs）。
+  // 银行 loop：只有银行行能创建 group（账号=MerchantId、币种=Currency、
+  //   金额=|Credit-Debit| + signed Extra Fee；非法 fee → NaN → 退出审计池）。
   for (const b of bankRows) {
-    const k = computeKey(b && b.MerchantId, b && b.Currency, bankAmountAbs(b));
+    const k = computeKey(b && b.MerchantId, b && b.Currency, bankAmountWithExtraFee(b));
     if (!k) continue; // 🔴 空值护栏
     let g = groups.get(k.key);
     if (!g) {

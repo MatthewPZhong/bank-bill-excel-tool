@@ -5,7 +5,7 @@
 //   ① NvM 命中（网关）：2 银行 × 2 网关 同账号同币种同金额同日 → 两条银行行均命中
 //   ② 1v1 / 1vN / Nv1 不命中
 //   ③ 非 FundTransfer 银行行也能命中（验证不限 FundType）
-//   ④ 空账号 / 空币种 / 非有限金额 被空值护栏排除（不误并大组）
+//   ④ 空账号 / 空币种 / 非有限金额 / 非法 Extra Fee 被空值护栏排除（不误并大组）
 //   ⑤ 日期：±1 边界成边（命中）、差 2 天不成边（不命中）
 //   ⑥ 网关 + 调拨同一银行行命中 → 去重为一条、note 合并两侧
 //   ⑦ 调拨侧单独命中（网关空）
@@ -33,11 +33,12 @@ const FUND_OUT = FT_RECON_FIELD_MAP.FUND_TYPE_OUT;
 
 let rowCounter = 0;
 
-// 银行行（驼峰；金额 = bankAmountAbs = |Credit-Debit|，默认 Credit=amount / Debit=0）
+// 银行行（驼峰；金额 = |Credit-Debit| + signed Extra Fee，默认 Credit=amount / Debit=0 / fee 空）
 function bankRow({
   merchantId = 'M1',
   currency = 'USD',
   amount = 100,
+  extraFee = '',
   billDate = '2026-06-07',
   fundType = 'FundTransfer-out',
   rowId
@@ -48,6 +49,7 @@ function bankRow({
     Currency: currency,
     'Credit Amount': amount,
     'Debit Amount': 0,
+    'Extra Fee': extraFee,
     BillDate: billDate,
     FundType: fundType,
     ReconciliationId: '',
@@ -137,6 +139,16 @@ test('非有限金额被护栏排除（网关 amount 非数值 → NaN 不进池
   const gws = [gwRow({ amount: 'abc' }), gwRow({ amount: 'abc' })];
   const { reviewRows } = detectFundTransferManyToMany(banks, gws, []);
   assert.equal(reviewRows.length, 0);
+});
+
+test('非空非法 Extra Fee 使银行行退出多对多审计池', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', extraFee: 'bad-fee' }),
+    bankRow({ rowId: 'b2', extraFee: 'bad-fee' })
+  ];
+  const gws = [gwRow({ amount: 100 }), gwRow({ amount: 100 })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, []);
+  assert.equal(reviewRows.length, 0, '非法 fee 返回 NaN，经非有限金额护栏排除');
 });
 
 // ---- ⑤ 日期边界 ------------------------------------------------------
@@ -234,6 +246,76 @@ test('金额相差 1 分（0.01）→ 不同组 → 不命中', () => {
   const gws = [gwRow({ amount: 100.01 }), gwRow({ amount: 100.01 })];
   const { reviewRows } = detectFundTransferManyToMany(banks, gws, []);
   assert.equal(reviewRows.length, 0);
+});
+
+test('Extra Fee 先加总再按分分组：100.004+0.004 与对手 100.01 同组命中', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', amount: '100.004', extraFee: '0.004' }),
+    bankRow({ rowId: 'b2', amount: '100.004', extraFee: '0.004' })
+  ];
+  const gws = [gwRow({ amount: '100.01' }), gwRow({ amount: '100.01' })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, []);
+  assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2']);
+});
+
+test('signed Extra Fee 在网关与调拨两侧统一参与多对多分组', () => {
+  const positiveBanks = [
+    bankRow({ rowId: 'bp1', amount: 100, extraFee: 5 }),
+    bankRow({ rowId: 'bp2', amount: 100, extraFee: 5 })
+  ];
+  const negativeBanks = [
+    bankRow({ rowId: 'bn1', amount: 100, extraFee: -5 }),
+    bankRow({ rowId: 'bn2', amount: 100, extraFee: -5 })
+  ];
+
+  const gatewayResult = detectFundTransferManyToMany(
+    positiveBanks,
+    [gwRow({ amount: 105 }), gwRow({ amount: 105 })],
+    []
+  );
+  assert.deepEqual(hitRowIds(gatewayResult), ['bp1', 'bp2'], '网关侧按 100+5=105 分组');
+
+  const reconResult = detectFundTransferManyToMany(
+    negativeBanks,
+    [],
+    [reconRow({ amount: 95 }), reconRow({ amount: 95 })]
+  );
+  assert.deepEqual(hitRowIds(reconResult), ['bn1', 'bn2'], '调拨侧按 100-5=95 分组');
+});
+
+test('科学计数法与合计为 0 在多对多审计中沿用同一含手续费金额口径', () => {
+  const scientificBanks = [
+    bankRow({ rowId: 'bs1', amount: 100, extraFee: '5e-1' }),
+    bankRow({ rowId: 'bs2', amount: 100, extraFee: '5e-1' })
+  ];
+  const scientificResult = detectFundTransferManyToMany(
+    scientificBanks,
+    [gwRow({ amount: 100.5 }), gwRow({ amount: 100.5 })],
+    []
+  );
+  assert.deepEqual(hitRowIds(scientificResult), ['bs1', 'bs2']);
+
+  const zeroBanks = [
+    bankRow({ rowId: 'bz1', amount: 100, extraFee: -100 }),
+    bankRow({ rowId: 'bz2', amount: 100, extraFee: -100 })
+  ];
+  const zeroResult = detectFundTransferManyToMany(
+    zeroBanks,
+    [],
+    [reconRow({ amount: 0 }), reconRow({ amount: 0 })]
+  );
+  assert.deepEqual(hitRowIds(zeroResult), ['bz1', 'bz2']);
+});
+
+test('合计后不再 abs：100+(-150)=-50，不得与绝对值为 50 的对手并组', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', amount: 100, extraFee: -150 }),
+    bankRow({ rowId: 'b2', amount: 100, extraFee: -150 })
+  ];
+  const gws = [gwRow({ amount: 50 }), gwRow({ amount: -50 })];
+  const recons = [reconRow({ amount: 50 }), reconRow({ amount: -50 })];
+  const { reviewRows } = detectFundTransferManyToMany(banks, gws, recons);
+  assert.equal(reviewRows.length, 0, '银行 -50 键不得被重新 abs 成 50');
 });
 
 test('金额取绝对值：银行 Debit 行（负方向）与网关正金额同 |金额| 并组命中', () => {

@@ -46,9 +46,16 @@ const PRE_FUND_UNBALANCED_SHEET_NAME = '不平结果';
 const PRE_FUND_BALANCED_SHEET_NAME = '平账结果';
 const PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME = '重复网关账单';
 const PRE_FUND_SOURCE_FIELD = '对账数据来源';
-const PRE_FUND_UNBALANCED_FIELDS = Object.freeze([
+const PRE_FUND_FUND_TYPE_FIELD = 'FundType';
+const PRE_FUND_UNBALANCED_FIELDS_LEGACY = Object.freeze([
   PRE_FUND_SOURCE_FIELD,
   ...RECON_RESULT_FIELDS_GATEWAY
+]);
+const PRE_FUND_UNBALANCED_FIELDS = Object.freeze([
+  PRE_FUND_SOURCE_FIELD,
+  ...RECON_RESULT_FIELDS_GATEWAY.slice(0, 4),
+  PRE_FUND_FUND_TYPE_FIELD,
+  ...RECON_RESULT_FIELDS_GATEWAY.slice(4)
 ]);
 const PRE_FUND_BALANCED_FIELDS = Object.freeze([
   '网关-数据来源', '网关-BillDate', '网关-Channel', '网关-MerchantId', '网关-OrderId',
@@ -186,9 +193,18 @@ function readGatewayReconResult(wb, cfg) {
     );
   }
 
+  const headerRows = XLSX.utils.sheet_to_json(unbalancedSheet, { header: 1, raw: true });
+  const actualHeaders = headerRows.length > 0
+    ? headerRows[0].map((header) => (
+      header === undefined || header === null ? '' : String(header)
+    ))
+    : [];
+  const supportedFields = actualHeaders.length === PRE_FUND_UNBALANCED_FIELDS_LEGACY.length
+    ? PRE_FUND_UNBALANCED_FIELDS_LEGACY
+    : PRE_FUND_UNBALANCED_FIELDS;
   const parsed = sheetToObjects(
     unbalancedSheet,
-    PRE_FUND_UNBALANCED_FIELDS,
+    supportedFields,
     PRE_FUND_UNBALANCED_SHEET_NAME
   );
   const balancedSheet = readSheetOrThrow(wb, PRE_FUND_BALANCED_SHEET_NAME);
@@ -198,7 +214,7 @@ function readGatewayReconResult(wb, cfg) {
     PRE_FUND_BALANCED_SHEET_NAME
   );
 
-  // C4 既有内部契约仍是旧 19 列；新增来源列只用于前置资金对账审计。
+  // C4 既有内部契约仍是旧 19 列；来源列和 FundType 只用于前置资金对账审计。
   return parsed.rows.map((row) => {
     const legacyRow = {};
     for (const field of cfg.reconResultFields) legacyRow[field] = row[field];
@@ -455,6 +471,7 @@ module.exports = {
   PRE_FUND_BALANCED_SHEET_NAME,
   PRE_FUND_DUPLICATE_GATEWAY_SHEET_NAME,
   PRE_FUND_UNBALANCED_FIELDS,
+  PRE_FUND_UNBALANCED_FIELDS_LEGACY,
   PRE_FUND_BALANCED_FIELDS,
   DUPLICATE_GATEWAY_HEADERS
 };

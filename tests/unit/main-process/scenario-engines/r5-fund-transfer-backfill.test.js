@@ -6,7 +6,7 @@
 //   ② 同日无候选、±1day 命中
 //   ③ 同日与 ±1day 都有候选 → 同日优先（Phase 分离）
 //   ④ 严格 1v1（两条 gw 抢一条 bank → 第二条不命中）
-//   ⑤ 金额发生额绝对值精确到分：相差 1 分（0.01）不命中、相等命中
+//   ⑤ 金额 = |Credit-Debit| + signed Extra Fee，先加总再按分精度比较，合计后不再 abs
 //   ⑥ 借贷方向：FundTransfer-out 用 Debit 侧、FundTransfer-in 用 Credit 侧的行通过 |credit-debit| 命中（双方向造数据）
 //   ⑦ ReconciliationId 原值非空被覆盖 → 不发 warning 但仍写入（reconid-overwrite-backfill 已移除）
 //   ⑧ 多候选 tie-break 取 bankPool 原序最前 + multi-bank-match-backfill warning
@@ -20,6 +20,8 @@ const {
   runRound5FundTransferBackfill,
   amountEqual,
   bankAmountAbs,
+  bankAmountEqualWithoutExtraFee,
+  bankAmountWithExtraFee,
   gwAmountAbs
 } = require('../../../../src/main-process/scenario-engines/r5-fund-transfer-backfill');
 
@@ -55,6 +57,7 @@ function bankRow({
   currency = 'USD',
   credit = 0,
   debit = 100,
+  extraFee = '',
   billDate = '2026-06-07',
   reconId = ''
 } = {}) {
@@ -65,24 +68,71 @@ function bankRow({
     Currency: currency,
     'Credit Amount': credit,
     'Debit Amount': debit,
+    'Extra Fee': extraFee,
     BillDate: billDate,
     ReconciliationId: reconId
   };
 }
 
-// ---- 金额口径单元（amountEqual / bankAmountAbs / gwAmountAbs）-----------
+// ---- 金额口径单元（旧 bankAmountAbs / R5 含手续费金额 / amountEqual）----
 
-test.describe('R5场景2 — 金额发生额绝对值口径', () => {
-  test('bankAmountAbs = |credit - debit|（debit 侧 / credit 侧均取绝对值）', () => {
+test.describe('R5场景2 — Extra Fee 金额口径', () => {
+  test('旧 bankAmountAbs 继续只算 |credit-debit|，不纳入 Extra Fee（DBS-Charge 兼容锁）', () => {
     assert.equal(bankAmountAbs({ 'Credit Amount': 0, 'Debit Amount': 100 }), 100); // 出账
     assert.equal(bankAmountAbs({ 'Credit Amount': 100, 'Debit Amount': 0 }), 100); // 入账
     assert.equal(bankAmountAbs({ 'Credit Amount': 30, 'Debit Amount': 80 }), 50);  // 混合 → |30-80|
+    assert.equal(
+      bankAmountAbs({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 25 }),
+      100,
+      '旧 helper 不得因 R5 Extra Fee 改造而改变'
+    );
   });
 
   test('credit/debit 任一空/非数值按 0 计', () => {
     assert.equal(bankAmountAbs({ 'Credit Amount': '', 'Debit Amount': 100 }), 100);
     assert.equal(bankAmountAbs({ 'Debit Amount': 100 }), 100); // 缺 credit
     assert.equal(bankAmountAbs({}), 0); // 都缺 → 0（非 NaN）
+  });
+
+  test('DBS 旧口径比较器只比两侧绝对值到分，显式忽略 Extra Fee', () => {
+    const bank = { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 25 };
+    assert.equal(bankAmountEqualWithoutExtraFee({ amount: -100 }, bank), true);
+    assert.equal(
+      bankAmountEqualWithoutExtraFee({ amount: 125 }, bank),
+      false,
+      '不得因 Extra Fee=25 把 DBS 银行金额从 100 改成 125'
+    );
+  });
+
+  test('bankAmountWithExtraFee = |credit-debit| + signed fee；空 fee=0，正负号原样参与', () => {
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': '5' }),
+      105
+    );
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': '-5' }),
+      95
+    );
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': '   ' }),
+      100
+    );
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': null }),
+      100
+    );
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100 }),
+      100
+    );
+    assert.equal(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': '5e-1' }),
+      100.5,
+      '科学计数法手续费按数值参与'
+    );
+    assert.ok(Number.isNaN(
+      bankAmountWithExtraFee({ 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 'bad-fee' })
+    ));
   });
 
   test('gwAmountAbs = |amount|；非数值 → NaN', () => {
@@ -99,8 +149,126 @@ test.describe('R5场景2 — 金额发生额绝对值口径', () => {
     assert.equal(amountEqual({ amount: 0.3 }, { 'Credit Amount': 0.1, 'Debit Amount': -0.2 }), true);
   });
 
+  test('amountEqual 先加总再按分精度比较，不分别归分', () => {
+    const bank = {
+      'Credit Amount': 0,
+      'Debit Amount': '100.004',
+      'Extra Fee': '0.004'
+    };
+    assert.equal(amountEqual({ amount: '100.01' }, bank), true, '100.004+0.004=100.008 → 合计归分 100.01');
+    assert.equal(amountEqual({ amount: '100.00' }, bank), false, '不得先把两项分别归分后再相加');
+  });
+
+  test('合计后不再 abs：银行合计 -50 时，对手金额正负都不命中', () => {
+    const bank = { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': -150 };
+    assert.equal(amountEqual({ amount: 50 }, bank), false);
+    assert.equal(amountEqual({ amount: -50 }, bank), false, '对手仍取绝对值，负数也不得命中银行 -50');
+  });
+
+  test('主金额与负手续费抵消为 0 时按合计值匹配', () => {
+    assert.equal(
+      amountEqual(
+        { amount: 0 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': -100 }
+      ),
+      true
+    );
+  });
+
   test('amountEqual 两侧任一非有限数 → false（不误判相等）', () => {
     assert.equal(amountEqual({ amount: 'x' }, { 'Credit Amount': 0, 'Debit Amount': 100 }), false);
+    assert.equal(
+      amountEqual(
+        { amount: 100 },
+        { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 'bad-fee' }
+      ),
+      false
+    );
+  });
+});
+
+// ---- v3.0.26 Extra Fee 端到端 -----------------------------------------
+
+test.describe('R5场景2 — Extra Fee 端到端匹配与非法值退出', () => {
+  test('正/负/空 fee 分别按 105/95/100 匹配', () => {
+    const cases = [
+      { rowId: 'positive', extraFee: 5, gwAmount: 105, reconId: 'GW-POS' },
+      { rowId: 'negative', extraFee: -5, gwAmount: 95, reconId: 'GW-NEG' },
+      { rowId: 'empty', extraFee: ' ', gwAmount: 100, reconId: 'GW-EMPTY' }
+    ];
+
+    for (const item of cases) {
+      const banks = [bankRow({ rowId: item.rowId, debit: 100, extraFee: item.extraFee })];
+      const result = runRound5FundTransferBackfill(
+        [gwRow({ amount: item.gwAmount, reconId: item.reconId })],
+        banks
+      );
+      assert.equal(result.modifications.length, 1, `${item.rowId} fee 应命中`);
+      assert.equal(banks[0].ReconciliationId, item.reconId);
+      assert.deepEqual(result.warnings, []);
+    }
+  });
+
+  test('非空非法 fee 的银行行退出 R5、不占候选，并且一行只产生一次可见 warning', () => {
+    const gws = [
+      gwRow({ amount: 100, reconId: 'GW-FIRST' }),
+      gwRow({ amount: 100, reconId: 'GW-SECOND' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'bad-fee', debit: 100, extraFee: 'oops' }),
+      bankRow({ rowId: 'valid', debit: 100, extraFee: '' })
+    ];
+
+    const result = runRound5FundTransferBackfill(gws, banks);
+
+    assert.equal(banks[0].ReconciliationId, '', '非法 fee 行退出 R5，不得被回填');
+    assert.equal(banks[1].ReconciliationId, 'GW-FIRST', '非法行不占用候选，后续合法行仍可命中');
+    assert.deepEqual(result.modifications.map((m) => m.rowId), ['valid']);
+    assert.ok(!result.usedBankRowIds.has('bad-fee'), '非法 fee 行不得进入消费集');
+    const feeWarnings = result.warnings.filter((warning) => warning.code === 'r5-invalid-extra-fee');
+    assert.equal(feeWarnings.length, 1, '同一银行行面对多条网关行也只告警一次');
+    assert.equal(feeWarnings[0].rowId, 'bad-fee');
+    assert.equal(feeWarnings[0].field, 'Extra Fee');
+    assert.equal(feeWarnings[0].rawValue, 'oops', 'warning 顶层保留原始手续费值');
+    assert.deepEqual(
+      feeWarnings[0].context,
+      { rowId: 'bad-fee', field: 'Extra Fee', rawValue: 'oops' },
+      'warning context 带银行行血缘、字段与原始手续费值'
+    );
+    assert.match(feeWarnings[0].message, /原始值「oops」/, '可见 message 必须展示原始手续费值');
+    assert.match(feeWarnings[0].message, /退出 R5/);
+  });
+
+  test('对手池为空也不吞非法 fee warning', () => {
+    const result = runRound5FundTransferBackfill(
+      [],
+      [bankRow({ rowId: 'bad-without-gateway', extraFee: 'oops' })]
+    );
+    assert.deepEqual(result.modifications, []);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'r5-invalid-extra-fee');
+    assert.equal(result.warnings[0].rowId, 'bad-without-gateway');
+  });
+
+  test('非法 fee warning 按稳定 _rowId 优先去重；无 _rowId 才按对象身份', () => {
+    const sameIdFirst = bankRow({ rowId: 'same-id', extraFee: 'first-bad' });
+    const sameIdClone = bankRow({ rowId: 'same-id', extraFee: 'second-bad' });
+    const anonymousShared = bankRow({ rowId: 'remove-me-1', extraFee: 'anonymous-shared' });
+    const anonymousDistinct = bankRow({ rowId: 'remove-me-2', extraFee: 'anonymous-distinct' });
+    delete anonymousShared._rowId;
+    delete anonymousDistinct._rowId;
+
+    const result = runRound5FundTransferBackfill(
+      [],
+      [sameIdFirst, sameIdClone, anonymousShared, anonymousShared, anonymousDistinct]
+    );
+    const feeWarnings = result.warnings.filter((warning) => warning.code === 'r5-invalid-extra-fee');
+
+    assert.deepEqual(
+      feeWarnings.map((warning) => warning.rawValue),
+      ['first-bad', 'anonymous-shared', 'anonymous-distinct'],
+      '同 _rowId 的不同对象只告警一次；无 _rowId 的同对象去重、不同对象分别告警'
+    );
   });
 });
 

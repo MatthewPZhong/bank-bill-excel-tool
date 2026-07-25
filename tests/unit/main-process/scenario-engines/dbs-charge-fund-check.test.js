@@ -52,6 +52,7 @@ function bankRow({
   currency = 'USD',
   credit = 0,
   debit = 100,
+  extraFee = '',
   fundType = 'Inbound',
   reconId = ''
 } = {}) {
@@ -62,6 +63,7 @@ function bankRow({
     Currency: currency,
     'Credit Amount': credit,
     'Debit Amount': debit,
+    'Extra Fee': extraFee,
     FundType: fundType,
     ReconciliationId: reconId
   };
@@ -132,6 +134,12 @@ test.describe('DBS-Charge — 步骤1 金额口径', () => {
     // 调拨金额非数值 → false（防 NaN 误判相等）
     assert.equal(dispatchBankAmountEqual({ [R.amount]: 'x' }, { 'Credit Amount': 0, 'Debit Amount': 100 }), false);
   });
+
+  test('步骤1 金额比较完全忽略非零 Extra Fee', () => {
+    const bank = { 'Credit Amount': 0, 'Debit Amount': 100, 'Extra Fee': 25 };
+    assert.equal(dispatchBankAmountEqual({ [R.amount]: 100 }, bank), true);
+    assert.equal(dispatchBankAmountEqual({ [R.amount]: 125 }, bank), false);
+  });
 });
 
 // ========================================================================
@@ -149,6 +157,23 @@ test.describe('DBS-Charge — 步骤1 匹配赋值', () => {
     assert.equal(mod.oldValue, '');
     assert.equal(mod.newValue, 'RC-IN');
     assert.equal(bank.ReconciliationId, 'RC-IN'); // 原地改写
+  });
+
+  test('步骤1 端到端：非零 Extra Fee 不改变调拨金额命中', () => {
+    const bank = bankRow({
+      rowId: 'step1-fee',
+      merchantId: 'CARD-FEE',
+      credit: 0,
+      debit: 100,
+      extraFee: 25,
+      fundType: FT_IN
+    });
+    const disp = dispRow({ bigAccount: 'CARD-FEE', amount: 100, reconId: 'RC-FEE', fundType: FT_IN });
+
+    const result = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
+
+    assert.equal(bank.ReconciliationId, 'RC-FEE');
+    assert.ok(findMod(result.modifications, 'step1-fee', 'ReconciliationId'));
   });
 
   test('① 取反：big_account 与银行 MerchantId 不等 → 不命中（零改动）', () => {
@@ -415,6 +440,23 @@ test.describe('DBS-Charge — 步骤2 命中→outbound / 未命中→Charge', (
     assert.equal(ftMod.oldValue, 'Charge');
     assert.equal(ftMod.newValue, 'outbound');
     assert.equal(bank.FundType, 'outbound');
+  });
+
+  test('步骤2 端到端：非零 Extra Fee 不污染网关金额命中', () => {
+    const bank = bankRow({
+      rowId: 'step2-fee',
+      credit: 0,
+      debit: 100,
+      extraFee: 25,
+      fundType: 'Charge',
+      reconId: 'RC-FEE'
+    });
+    const gw = gwRow({ reconId: 'RC-FEE', amount: 100, currency: 'USD' });
+
+    const result = runDbsChargeFundCheck([gw], [bank], [], OPTIONS);
+
+    assert.equal(bank.FundType, 'outbound', 'DBS step2 必须按基础金额 100 命中，忽略 fee=25');
+    assert.ok(findMod(result.modifications, 'step2-fee', 'FundType'));
   });
 
   test('⑤ 网关币种不等 → 未命中 → Charge（候选已是 Charge，no-op 不 record）', () => {

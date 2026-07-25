@@ -88,6 +88,15 @@ test.describe('CAUSE_MAP — v3.0.24 Payment 多大账号', () => {
   });
 });
 
+test.describe('CAUSE_MAP — v3.0.26 R5 Extra Fee 校验', () => {
+  test('非法手续费错误码有明确中文原因', () => {
+    assert.ok(CAUSE_MAP['r5-invalid-extra-fee']);
+    assert.match(errorCodeToCause('r5-invalid-extra-fee'), /Extra Fee/);
+    assert.match(errorCodeToCause('r5-invalid-extra-fee'), /调拨订单对账ID回填/);
+    assert.match(errorCodeToCause('r5-invalid-extra-fee'), /手续费原值/);
+  });
+});
+
 test.describe('CAUSE_MAP — v3.0.21 DBS-Charge outbound 方向守卫', () => {
   test('dbs-charge-fund-direction-mismatch 已定义且说明跳过步骤2改写', () => {
     assert.ok(CAUSE_MAP['dbs-charge-fund-direction-mismatch']);
