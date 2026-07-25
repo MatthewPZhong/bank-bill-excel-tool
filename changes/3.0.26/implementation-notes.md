@@ -57,6 +57,10 @@
 | 发布前变量硬节点 | PASS | `scan:vars` 为 202/2329；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过 |
 | 生产依赖审计 | 9 条 advisory | 2 moderate、7 high、0 critical；相对 v3.0.25 未改依赖图，新增计数来自 advisory 数据更新，保留为安全治理 follow-up |
 | 发布仓库门控 | PASS | GitHub 仓库为 PUBLIC；`v3.0.26` tag 与 Release 均不存在 |
+| annotated tag | `v3.0.26` → `f229c2c` | annotated tag object `5cbd4b4`，peeled commit 精确指向已推送 `main` 的发布准备提交 |
+| Windows Release workflow | run `30156308464` PASS | 17m21s；远端 release-check、几何、构建、包检查、更新资产校验及发布后验证全部通过 |
+| GitHub Release | `v3.0.26` latest | 非 draft、非 prerelease；Setup、blockmap、portable、`latest.yml` 四资产 uploaded |
+| 公开更新资产回读 | PASS | `latest.yml` SHA-256 `07f3af5...ec1e5` 与元数据一致；Setup/portable 匿名 Range 均为 HTTP 206，文件头均为 `MZ` |
 
 ## Remaining Unknowns
 
@@ -66,3 +70,5 @@
 | Windows Excel/WPS 模板显示 | PROBE | Windows 实机打开新 21 列结果 | 不阻断代码完成，但不得宣称实机已验收 |
 | Windows 生产升级 canary | BLOCK-ANNOUNCEMENT | 使用 v3.0.25 安装版验证 v3.0.26 在线升级、SmartScreen 与用户数据保留 | 不阻断技术发布，但阻断发布公告 |
 | 生产依赖安全升级 | FOLLOW-UP | 单独升级并回归 `electron-updater`、`marked` 等可修复 advisory | 不在发布收尾中静默改变依赖；当前公开 GitHub updater 不携带私有仓库凭据 |
+| GitHub 发布保护 | FOLLOW-UP | 为 `production-release`、`main` 和 `v*` tag 配置服务端保护 | 当前 environment 无 protection rules、`main` 未保护，发布事实有效但审批治理不足 |
+| `check:dist` 版本核验 | FOLLOW-UP | 增加 asar 内 `package.json.version` 与仓库版本一致性断言 | hosted runner 先干净构建，故不影响本次资产；单独运行 `check:dist` 仍可能误验旧本地产物 |

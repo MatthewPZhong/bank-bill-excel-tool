@@ -50,10 +50,10 @@
 - [x] PR #101 以 merge commit `fa416aa` 合入 `main`
 - [x] 建立 PR 归档与版本 PRD
 - [x] 在合并后的 `main` 上重跑干净依赖发布门禁
-- [ ] 创建并推送 annotated tag `v3.0.26`
-- [ ] 验证 Windows Release workflow 与 GitHub Release
-- [ ] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产
-- [ ] 回写最终发布证据并确认 tracked worktree 干净
+- [x] 创建并推送 annotated tag `v3.0.26`
+- [x] 验证 Windows Release workflow 与 GitHub Release
+- [x] 回读 `latest.yml`、Setup、blockmap 和 portable 公开资产
+- [x] 回写最终发布证据并确认 tracked worktree 干净
 
 ## 7. 公告前人工门禁
 

@@ -1,6 +1,6 @@
 # Spec — v3.0.26 平盘文案、前置资金导出与 R5 手续费迭代
 
-> status: release-ready（PR #101 已合入 main；发布门禁通过；Release 待发布；human-fund-review-pending）
+> status: released（PR #101 已合入 main；GitHub Release v3.0.26 已发布；human-fund-review-pending）
 > owner: PM / Dev
 > created: 2026-07-25
 > updated: 2026-07-25
@@ -131,4 +131,8 @@ abs(Credit Amount - Debit Amount) + signed Extra Fee
 - 发布前主页面布局为 `6/6 PASS`；启动建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
 - `scan:vars` 为 202 个 JS 文件、2329 个顶层声明；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
 - `npm audit --omit=dev` 报告 9 条生产依赖 advisory（2 moderate、7 high、0 critical）；v3.0.26 与 v3.0.25 的依赖图一致，新增计数来自 advisory 数据更新，继续作为安全治理 follow-up。
-- 仓库仍为 PUBLIC；annotated tag、Windows Release workflow、GitHub Release 和公开更新资产验证待完成。
+- annotated tag `v3.0.26` 指向 `f229c2c2837965d0d14335db5a6625f0196f2089`；Windows Release workflow run `30156308464` 全部通过。
+- GitHub Release `v3.0.26` 已成为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml` 四个资产。
+- 公开 `latest.yml` 版本为 `3.0.26`，Setup 路径和大小 `99,766,838` 正确；其 SHA-256 `07f3af5...ec1e5` 与 GitHub 元数据一致。
+- Setup 与 portable 匿名 Range 回读均返回 HTTP 206，文件头均为 `MZ`。
+- 真实资金样本、Windows Excel/WPS 和 `v3.0.25 → v3.0.26` 在线升级 canary 仍是公告前人工门禁；技术 Release 完成不等于这些人工验收完成。

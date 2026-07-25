@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.0.26 PRD
 
 > 目标版本：`3.0.26`
-> 状态：release-ready（PR #101 已合入 `main`；发布门禁通过；GitHub Release 待发布）
+> 状态：released（PR #101 已合入 `main`；GitHub Release `v3.0.26` 已发布）
 > 归档：PR #101 merge commit `fa416aa`；源规格 `changes/3.0.26/spec.md`
 > 更新时间：2026-07-25
 > 适用仓库：`bank-bill-excel-tool`
@@ -60,5 +60,10 @@ abs(Credit Amount - Debit Amount) + signed Extra Fee
 - 主页面六组合布局为 `6/6 PASS`；启动建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
 - 变量扫描为 202 个 JS 文件、2329 个顶层声明；重要变量硬节点因 `src` 无新改动安全跳过。
 - 生产依赖审计为 2 moderate、7 high、0 critical；v3.0.26 与 v3.0.25 的依赖图一致，安全升级留作独立 follow-up。
-- GitHub 仓库仍为 PUBLIC；annotated tag、Windows Release workflow 和公开更新资产验证待 tag 推送后补充。
+- GitHub 仓库仍为 PUBLIC；annotated tag `v3.0.26` 指向 `f229c2c2837965d0d14335db5a6625f0196f2089`。
+- Windows Release workflow run [`30156308464`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30156308464) 用时 17m21s，完整门禁、构建、包检查、发布和发布后验证全部通过。
+- GitHub Release [`v3.0.26`](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.0.26) 已成为 latest、非 draft、非 prerelease，包含 Setup、Setup blockmap、portable 和 `latest.yml`。
+- 资产大小分别为 Setup `99,766,838`、portable `99,270,063`、blockmap `105,452`、`latest.yml` `371` 字节。
+- `latest.yml` 的版本、Setup 路径、大小和 SHA-512 契约有效；匿名 Range 回读确认 Setup/portable 均为 HTTP 206 且文件头为 `MZ`。
 - Windows Excel/WPS 模板显示、真实资金样本和 `v3.0.25 → v3.0.26` 生产在线升级 canary 均是公告前人工门禁。
+- GitHub 发布环境、`main` 与 tag 仍缺服务端保护；`check:dist` 仍缺 asar 内版本断言，均列为后续发布治理项。

@@ -1,6 +1,6 @@
 # Test Spec — v3.0.26 平盘文案、前置资金导出与 R5 手续费迭代
 
-> status: release-ready-pass（PR #101 已合并；发布门禁通过；Release 待发布）
+> status: released-pass（PR #101 已合并；GitHub Release v3.0.26 已发布）
 > created: 2026-07-25
 > updated: 2026-07-25
 
@@ -89,4 +89,8 @@
 - `npm run startup:measure`：建窗到可见平均 `102.107ms`，ready-to-show 平均 `173.357ms`。
 - `scan:vars` 为 202/2329；`check:vars -- --include-minor` 因 `src` 无新改动安全跳过。
 - `npm audit --omit=dev` 为 2 moderate、7 high、0 critical；依赖图相对 v3.0.25 仅版本号变化，安全依赖升级不在本次发布收尾范围。
-- annotated tag、Release workflow、四个公开更新资产及匿名回读证据待补充。
+- annotated tag `v3.0.26` 指向 `f229c2c2837965d0d14335db5a6625f0196f2089`。
+- Windows Release workflow run `30156308464` PASS，远端 release-check、主页面布局、构建、包检查、更新资产校验和发布后验证全部通过。
+- GitHub Release 为 latest、非 draft、非 prerelease，四个预期资产均存在。
+- 公开 `latest.yml` SHA-256 与 GitHub 元数据一致；Setup 与 portable 匿名 Range 回读均为 HTTP 206，文件头为 `MZ`。
+- 真实资金、Windows Excel/WPS 和生产在线升级 canary 尚未人工验证；完成前不得表述为已完成人工资金或生产 canary 验收。
