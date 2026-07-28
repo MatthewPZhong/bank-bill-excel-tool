@@ -363,6 +363,10 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(operationLifecycle, /persistedPending\.archiveState !== 'durable'/);
     assert.match(operationLifecycle, /pendingBeforeClear\.operationToken !== operationToken/);
     assert.match(mainProcess, /archiveCenterService\.persistOperationIntent\(\{/);
+    assert.match(
+      mainProcess,
+      /const files = requirePositionPendingArchiveFiles\(pending\);[\s\S]*positionArchiveIntentEvidence\(pending, currentCheckpoint\)/
+    );
     assert.match(mainProcess, /businessState:\s*'running'/);
     assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
     assert.match(mainProcess, /positionBusinessStateForResult\(result, SUCCESS_STATUSES\)/);

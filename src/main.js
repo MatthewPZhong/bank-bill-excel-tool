@@ -80,6 +80,7 @@ const {
   POSITION_SIDE_DB_BOOTSTRAP_SETTING
 } = require('./main-process/position-reconciliation/constants');
 const {
+  requirePositionPendingArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,
@@ -14262,9 +14263,9 @@ function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
       && archiveOperationTracker.supportsChannel(pending.channel)
     );
   if (!archiveRequired || pending.archiveState === 'durable') return null;
+  const files = requirePositionPendingArchiveFiles(pending);
   const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
   if (!evidence.requiresPersistence) return null;
-  const files = Array.isArray(pending.archiveFiles) ? pending.archiveFiles : [];
   if (files.length === 0 || !archiveCenterService
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
     throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');

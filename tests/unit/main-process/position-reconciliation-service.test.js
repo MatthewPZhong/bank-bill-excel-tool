@@ -13,6 +13,9 @@ const {
   assertEngineResultSet
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
+  requirePositionPendingArchiveFiles
+} = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
+const {
   STAGING_RELATIVE_PATH,
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
@@ -1483,25 +1486,85 @@ test('pending archiveFiles 缺失或损坏时保守跳过全部过期暂存清�
 
     const pending = {
       operationToken: `pending-${label}`,
-      baseCheckpoint: expectedCheckpoint
+      baseCheckpoint: expectedCheckpoint,
+      archiveRequired: true,
+      archiveState: 'intent-recorded',
+      businessState: 'success'
     };
     if (!omitField) pending.archiveFiles = archiveFiles;
+    const serializedPending = JSON.stringify(pending);
     const recovered = createPositionReconciliationService({
       userDataDir,
       templatePath: TEMPLATE_PATH,
       requireExistingSideDb: true,
       expectedSideDbCheckpoint: expectedCheckpoint,
-      expectedPendingOperation: JSON.stringify(pending),
+      expectedPendingOperation: serializedPending,
       protectedStagingPaths: () => []
     });
     recovered.close();
 
+    assert.throws(
+      () => requirePositionPendingArchiveFiles(pending),
+      /存档文件清单损坏/,
+      `${label} 必须阻断恢复登记`
+    );
     assert.equal(
       fs.existsSync(staleFile),
       true,
       `${label} 不得把 pending 当成空保护集`
     );
+
+    const restarted = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: expectedCheckpoint,
+      expectedPendingOperation: serializedPending,
+      protectedStagingPaths: () => []
+    });
+    restarted.close();
+    assert.equal(
+      fs.existsSync(staleFile),
+      true,
+      `${label} 第二次启动仍须保留真实暂存文件`
+    );
   }
+});
+
+test('pending 合法空 archiveFiles 允许清理无保护的过期暂存', (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-pending-empty-archive-files-')
+  );
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const bootstrap = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  const expectedCheckpoint = bootstrap.persistenceCheckpoint();
+  bootstrap.close();
+
+  const staleRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, 'stale-batch');
+  const staleFile = path.join(staleRoot, '1', 'stale.xlsx');
+  fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+  fs.writeFileSync(staleFile, 'stale');
+  const oldDate = new Date(Date.now() - (8 * 24 * 60 * 60 * 1000));
+  fs.utimesSync(staleRoot, oldDate, oldDate);
+
+  const recovered = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: expectedCheckpoint,
+    expectedPendingOperation: JSON.stringify({
+      operationToken: 'pending-empty-archive-files',
+      baseCheckpoint: expectedCheckpoint,
+      archiveFiles: []
+    }),
+    protectedStagingPaths: () => []
+  });
+  recovered.close();
+
+  assert.equal(fs.existsSync(staleFile), false);
 });
 
 test('业务后置清理只返回没有未完成存档引用的暂存目录', () => {

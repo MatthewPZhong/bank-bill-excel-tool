@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T13:50:31.928Z",
+    "scannedAt": "2026-07-28T14:08:03.188Z",
     "root": "src",
     "totalFiles": 218,
-    "totalTopLevelNames": 2532,
+    "totalTopLevelNames": 2533,
     "buckets": {
       "shared": 373,
-      "paired": 633,
-      "local": 1382,
-      "crossFile": 1006
+      "paired": 635,
+      "local": 1381,
+      "crossFile": 1008
     }
   },
   "A": {
@@ -851,7 +851,7 @@
             "count": 3
           },
           {
-            "file": "src/main-process/position-reconciliation/service.js",
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 1
           },
           {
@@ -16581,6 +16581,24 @@
         "fileSpan": 2
       },
       {
+        "name": "parsePositionPendingArchiveFiles",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "peekImportTarget",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-run-data.js",
@@ -22972,6 +22990,24 @@
         "refFiles": [
           {
             "file": "src/backend/startup-failure.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "requirePositionPendingArchiveFiles",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 2
           },
           {
@@ -41070,20 +41106,6 @@
         "fileSpan": 1
       },
       {
-        "name": "pendingArchivePaths",
-        "defFiles": [
-          "src/main-process/position-reconciliation/service.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/service.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "pendingDb",
         "defFiles": [
           "src/main.js"
@@ -43869,7 +43891,7 @@
           "count": 3
         },
         {
-          "file": "src/main-process/position-reconciliation/service.js",
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
           "count": 1
         },
         {
@@ -59597,6 +59619,24 @@
       "fileSpan": 2
     },
     {
+      "name": "parsePositionPendingArchiveFiles",
+      "defFiles": [
+        "src/main-process/position-reconciliation/operation-lifecycle.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "peekImportTarget",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-run-data.js",
@@ -65988,6 +66028,24 @@
       "refFiles": [
         {
           "file": "src/backend/startup-failure.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "requirePositionPendingArchiveFiles",
+      "defFiles": [
+        "src/main-process/position-reconciliation/operation-lifecycle.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
           "count": 2
         },
         {

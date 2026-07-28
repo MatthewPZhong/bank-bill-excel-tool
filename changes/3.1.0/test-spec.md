@@ -76,7 +76,7 @@
 - 对正式同步建批、向正式批次追加文件及 outbox 重放分别注入附件元数据登记失败；结果中没有正整数 artifact ID 时必须写入或保留同一 operation key 的 outbox 和源文件，后续重放补齐 artifact 后才删除任务。正式批次与 outbox 同时失败时不得宣称可重试。
 - 单独导入清结算银行账户表时，prepare 仅返回待确认状态，不建立空存档意图且必须清除本次 pending；随后 apply 可正常写库并存档，取消或重启后可重新选择文件。
 - 使用主进程可注入生命周期 helper 贯穿验证 prepare/apply、结果已发布后状态落库失败、正式存档成功、outbox 恢复和正式存档/outbox 双失败；不得只用 service、tracker 分层测试或源码正则代替。
-- 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项、空路径或非字符串路径，以及其它保护来源读取失败时，均不得执行清理。
+- 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项、空路径或非字符串路径，以及其它保护来源读取失败时，均不得执行清理。业务已提交且文件清单损坏时，验证恢复登记被阻断、pending 不清除、错误 outbox 不产生，第二次启动仍保留真实暂存；合法 `archiveFiles: []` 继续允许清理无保护旧目录。outbox 单独覆盖非字符串和空白路径拒绝。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。
 - `scripts/integration/position-reconciliation-side-db-parity.js` 验证主库零 bulk、原子替换、重启和回收。

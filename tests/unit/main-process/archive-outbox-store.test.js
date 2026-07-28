@@ -62,3 +62,20 @@ test('存档 outbox 内容被改写但未同步完整性哈希时必须 fail-clo
     /存档 outbox 完整性校验失败/
   );
 });
+
+test('存档 outbox 拒绝非字符串及空白文件路径', (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-outbox-invalid-path-'));
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const store = createArchiveOutboxStore(rootDir);
+
+  for (const filePath of [undefined, null, 123, '   ']) {
+    assert.throws(
+      () => store.enqueue({
+        operationKey: 'position:invalid-path',
+        files: [{ filePath, role: 'input' }]
+      }),
+      /文件路径为空或格式非法/
+    );
+  }
+  assert.deepEqual(store.list(), []);
+});

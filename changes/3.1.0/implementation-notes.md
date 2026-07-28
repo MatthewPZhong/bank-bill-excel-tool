@@ -97,7 +97,7 @@
 - 正式建批、正式追加及 outbox 重放共享 artifact 完整性门禁；任一文件缺少正整数 artifact ID 时写入或保留同一 operation key 的 outbox，后续可在原正式批次补齐。正式批次与 outbox 同时失败时不得宣称可重试，也不推进 checkpoint。
 - 清结算银行账户表单独导入的 prepare 结果显式标记 `archiveDeferred`；待用户确认期间不视为已提交业务，不建立空存档批次，apply 后再按正式输入存档。
 - 将平盘 pending/checkpoint 完成步骤、存档结果结算和输出发布证据判定抽为可注入 helper，行为测试覆盖 prepare、apply、已发布输出 outbox 恢复及正式存档/outbox 双失败。
-- service 初始化清理暂存前合并主库 pending `archiveFiles` 与存档中心保护集；pending 存在但文件数组缺失、非数组或任一 `filePath` 非空字符串校验失败时，不再降级为空保护集。保护 provider 返回非数组或抛异常时同样保守不清理。
+- service 初始化清理暂存前合并主库 pending `archiveFiles` 与存档中心保护集；pending 存在但文件数组缺失、非数组或任一 `filePath` 非空字符串校验失败时，不再降级为空保护集。恢复登记复用同一解析器，损坏清单会保留 pending、阻断 checkpoint 且不产生错误 outbox；outbox 也拒绝非字符串和空白路径。保护 provider 返回非数组或抛异常时同样保守不清理。
 - 业务错误页透传 `detailLines`；Excel 文本列补齐 `Account Reference`、`大额行号` 和 `VA`。
 
 ## Evidence
@@ -110,8 +110,9 @@
 - 新增差异页独立 preview，人工检查筛选项横向排列、五列表头和最新月份默认值无重叠或截断。
 - 链接表汇总定向测试覆盖派生 0 行仍保留更新日期；链接管理 preview 验证月份范围和更新日期列。
 - 链接管理前端契约覆盖三列表头、底部按钮顺序/颜色及目标链接表导出路由。
-- 全量单测：3983/3983；44 个集成脚本 2016/2016；smoke 与 lint 通过。
+- 全量单测：3985/3985；44 个集成脚本 2016/2016；smoke 与 lint 通过。
 - 存档生命周期定向测试覆盖失败保留、重试成功释放、删除批次释放、跨批次共用源路径保护、释放回调失败隔离、未完成源路径查询和启动清理保护。
+- pending 损坏测试覆盖恢复校验阻断及连续两次启动保留真实暂存；合法空文件数组仍清理无保护旧目录，outbox 非字符串/空白路径 fail-closed。
 - 真实 SQLite 故障注入覆盖正式建批与追加在 artifact INSERT 失败后转入 outbox、原 operation key 重放补齐，以及 artifact/outbox 双失败不可重试。
 - 侧库防丢测试覆盖文件缺失、空库替换、首次 bootstrap、旧 marker 拒绝接管、旧主库单独恢复、合法旧库回滚、同 generation 分叉、更高 generation 分叉、待完成 operation token 证明的领先恢复和完整同批恢复；草稿测试覆盖运行行 hash、来源集合、结果/差异/消费/血缘及当前引用篡改；零数据 Excel 测试覆盖链接表、原始表和结果表列级文本格式。
 - 启动性能 5 次中位数：进程总耗时 734.657ms，ready-to-show 155.096ms。

@@ -38,6 +38,9 @@ const {
   cleanupStagingPaths,
   pruneStagingRoot
 } = require('./input-staging');
+const {
+  parsePositionPendingArchiveFiles
+} = require('./operation-lifecycle');
 
 const FUND_TYPE_PAIR_BY_VALUE = new Map();
 const SOURCE_BY_FUND_TYPE = new Map(Object.entries(SOURCE_TYPE_BY_FUND_TYPE));
@@ -196,27 +199,6 @@ function sameCellValue(left, right, header = '') {
   return leftValue === rightValue;
 }
 
-function pendingArchivePaths(value) {
-  if (value === null || value === undefined || value === '') return [];
-  let payload = value;
-  if (typeof value === 'string') {
-    try {
-      payload = JSON.parse(value);
-    } catch (_error) {
-      return null;
-    }
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  if (!Array.isArray(payload.archiveFiles)) return null;
-  const paths = [];
-  for (const file of payload.archiveFiles) {
-    if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
-    if (typeof file.filePath !== 'string' || file.filePath.trim() === '') return null;
-    paths.push(file.filePath);
-  }
-  return paths;
-}
-
 class PositionReconciliationService {
   constructor({
     userDataDir,
@@ -248,9 +230,11 @@ class PositionReconciliationService {
     });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();
-    const pendingProtectedPaths = pendingArchivePaths(expectedPendingOperation);
-    const protectedPaths = pendingProtectedPaths || [];
-    let stagingProtectionComplete = pendingProtectedPaths !== null;
+    const pendingArchiveFiles = parsePositionPendingArchiveFiles(expectedPendingOperation);
+    const protectedPaths = pendingArchiveFiles
+      ? pendingArchiveFiles.map((file) => file.filePath)
+      : [];
+    let stagingProtectionComplete = pendingArchiveFiles !== null;
     if (typeof protectedStagingPaths === 'function') {
       try {
         const archiveProtectedPaths = protectedStagingPaths();

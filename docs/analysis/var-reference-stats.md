@@ -5,15 +5,15 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 09:50:31 |
+| 扫描时间 | 2026-7-28 10:08:03 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 218 |
-| 顶层声明总数 | 2532 |
-| ≥2 次引用 | 2388 |
+| 顶层声明总数 | 2533 |
+| ≥2 次引用 | 2389 |
 | 跨 ≥3 文件 (A-share) | 373 |
-| 跨 2 文件 (A-pair) | 633 |
-| 单文件 (A-local) | 1382 |
-| 跨文件合计 (B) | 1006 |
+| 跨 2 文件 (A-pair) | 635 |
+| 单文件 (A-local) | 1381 |
+| 跨文件合计 (B) | 1008 |
 
 ---
 
@@ -643,6 +643,7 @@
 | `openDb` | 5 | src/backend/biz-op-recon-import/import-worker.js |
 | `OUTBOUND_FIELDS` | 5 | src/main-process/pre-fund-reconciliation/mpt-schema.js |
 | `parseAmountAbs` | 5 | src/backend/acquiring-bill-currency-db/import-repository.js |
+| `parsePositionPendingArchiveFiles` | 5 | src/main-process/position-reconciliation/operation-lifecycle.js |
 | `peekImportTarget` | 5 | src/main-process/acquiring-bill-currency-run-data.js |
 | `PENDING_INSERT_SQL` | 5 | src/backend/bank-bu-recon-db/month-repository.js |
 | `performance` | 5 | src/main.js |
@@ -994,6 +995,7 @@
 | `REFUND_BACKFILL_FIELD_MAP` | 3 | src/constants/refund-backfill-fields.js |
 | `removeStatementSessionEntriesByFilePath` | 3 | src/main-process/statement-session.js |
 | `reportStartupFailure` | 3 | src/backend/startup-failure.js |
+| `requirePositionPendingArchiveFiles` | 3 | src/main-process/position-reconciliation/operation-lifecycle.js |
 | `resolveFromRel` | 3 | src/backend/run-data-store.js |
 | `resolveRecognizedBigAccount` | 3 | src/main-process/big-account-recognition.js |
 | `runOwnAccountsMigration` | 3 | src/backend/database/own-accounts-migration.js |
@@ -3282,6 +3284,7 @@
 | `openDb` | 2 | 5 | 1 | src/backend/duplicate-inbound-match-store.js(3), src/backend/biz-op-recon-import/import-worker.js(2) |
 | `OUTBOUND_FIELDS` | 2 | 5 | 1 | src/main-process/pre-fund-reconciliation/mpt-schema.js(3), src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js(2) |
 | `parseAmountAbs` | 2 | 5 | 2 | src/backend/acquiring-bill-currency-db/import-repository.js(3), src/backend/acquiring-bill-currency-import/contract-flow.js(2) |
+| `parsePositionPendingArchiveFiles` | 2 | 5 | 1 | src/main-process/position-reconciliation/operation-lifecycle.js(3), src/main-process/position-reconciliation/service.js(2) |
 | `peekImportTarget` | 2 | 5 | 2 | src/main-process/acquiring-bill-currency-run-data.js(3), src/main-process/acquiring-bill-currency-session.js(2) |
 | `PENDING_INSERT_SQL` | 2 | 5 | 2 | src/backend/pending-import/contract-pending.js(3), src/backend/bank-bu-recon-db/month-repository.js(2) |
 | `performance` | 2 | 5 | 1 | src/renderer.js(3), src/main.js(2) |
@@ -3633,6 +3636,7 @@
 | `REFUND_BACKFILL_FIELD_MAP` | 2 | 3 | 1 | src/constants/refund-backfill-fields.js(2), src/main-process/scenario-engines/r5-refund-order-backfill.js(1) |
 | `removeStatementSessionEntriesByFilePath` | 2 | 3 | 1 | src/main-process/statement-session.js(2), src/main.js(1) |
 | `reportStartupFailure` | 2 | 3 | 1 | src/backend/startup-failure.js(2), src/main.js(1) |
+| `requirePositionPendingArchiveFiles` | 2 | 3 | 1 | src/main-process/position-reconciliation/operation-lifecycle.js(2), src/main.js(1) |
 | `resolveFromRel` | 2 | 3 | 1 | src/backend/run-data-store.js(2), src/main-process/pre-fund-reconciliation/service.js(1) |
 | `resolveRecognizedBigAccount` | 2 | 3 | 1 | src/main-process/big-account-recognition.js(2), src/main.js(1) |
 | `runOwnAccountsMigration` | 2 | 3 | 2 | src/backend/database/own-accounts-migration.js(2), src/main.js(1) |

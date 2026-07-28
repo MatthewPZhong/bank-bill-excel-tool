@@ -34,8 +34,10 @@ function normalizeFiles(files) {
     if (!file || typeof file !== 'object' || Array.isArray(file)) {
       throw new TypeError('存档 outbox 文件记录格式非法');
     }
-    const filePath = path.resolve(String(file.filePath || ''));
-    if (!file.filePath) throw new TypeError('存档 outbox 文件路径为空');
+    if (typeof file.filePath !== 'string' || file.filePath.trim() === '') {
+      throw new TypeError('存档 outbox 文件路径为空或格式非法');
+    }
+    const filePath = path.resolve(file.filePath);
     return { ...file, filePath };
   });
 }

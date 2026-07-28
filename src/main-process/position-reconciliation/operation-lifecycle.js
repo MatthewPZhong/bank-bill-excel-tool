@@ -1,5 +1,34 @@
 'use strict';
 
+function parsePositionPendingArchiveFiles(value) {
+  if (value === null || value === undefined || value === '') return [];
+  let payload = value;
+  if (typeof value === 'string') {
+    try {
+      payload = JSON.parse(value);
+    } catch (_error) {
+      return null;
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  if (!Array.isArray(payload.archiveFiles)) return null;
+  const files = [];
+  for (const file of payload.archiveFiles) {
+    if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
+    if (typeof file.filePath !== 'string' || file.filePath.trim() === '') return null;
+    files.push(file);
+  }
+  return files;
+}
+
+function requirePositionPendingArchiveFiles(value) {
+  const files = parsePositionPendingArchiveFiles(value);
+  if (files === null) {
+    throw new Error('平盘待完成操作的存档文件清单损坏');
+  }
+  return files;
+}
+
 function positionBusinessStateForResult(result, successStatuses) {
   if (result && result.archiveDeferred === true) return 'awaiting-confirmation';
   return result && successStatuses.has(result.status) ? 'success' : 'not-success';
@@ -125,6 +154,8 @@ async function runPositionOperationLifecycle({
 }
 
 module.exports = {
+  parsePositionPendingArchiveFiles,
+  requirePositionPendingArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,
