@@ -122,10 +122,25 @@ class ArchiveCenterController {
       this.outboxStore.remove(record.id);
       flushed += 1;
       if (this.onOutboxFlushed) {
+        let releasablePaths;
         try {
-          await this.onOutboxFlushed(record.payload.files.map((file) => file.filePath));
+          const unresolvedPaths = new Set(
+            this.listUnresolvedSourcePaths()
+              .filter(Boolean)
+              .map((value) => path.resolve(String(value)))
+          );
+          releasablePaths = record.payload.files
+            .map((file) => file.filePath)
+            .filter(Boolean)
+            .map((value) => path.resolve(String(value)))
+            .filter((filePath) => !unresolvedPaths.has(filePath));
         } catch (_error) {
-          // outbox 已转成正式批次；源暂存清理失败留待后续回收。
+          releasablePaths = [];
+        }
+        try {
+          if (releasablePaths.length > 0) await this.onOutboxFlushed(releasablePaths);
+        } catch (_error) {
+          // outbox 已转成正式批次；已解决源暂存清理失败留待后续回收。
         }
       }
     }

@@ -356,6 +356,10 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
     assert.match(mainProcess, /const outputPublished = files\.some/);
     assert.match(mainProcess, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
+    assert.match(mainProcess, /archiveResult && archiveResult\.handled === false/);
+    assert.match(mainProcess, /persistCurrentPositionArchiveIntentIfNeeded\(\)/);
+    assert.match(mainProcess, /markPositionArchiveDurable\(recoveryIntent \|\| archiveResult\)/);
+    assert.match(mainProcess, /if \(!recoveryIntent\) cleanupPositionArchiveStaging\(runtime\)/);
     assert.match(mainProcess, /archiveResult\.persistentRetryAvailable !== true/);
     assert.match(mainProcess, /code:\s*'archive-retry-registration-failed'/);
   });

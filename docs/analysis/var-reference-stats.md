@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 06:39:57 |
+| 扫描时间 | 2026-7-28 07:14:44 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 217 |
-| 顶层声明总数 | 2522 |
-| ≥2 次引用 | 2378 |
+| 顶层声明总数 | 2524 |
+| ≥2 次引用 | 2380 |
 | 跨 ≥3 文件 (A-share) | 373 |
 | 跨 2 文件 (A-pair) | 629 |
-| 单文件 (A-local) | 1376 |
+| 单文件 (A-local) | 1378 |
 | 跨文件合计 (B) | 1002 |
 
 ---
@@ -21,13 +21,13 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 声明位置（首个） |
 |---|---:|---:|---:|---|
-| `path` | 80 | 353 | 74 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
+| `path` | 80 | 355 | 74 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
 | `fs` | 59 | 288 | 58 | src/backend/balance-adjustment-store.js |
 | `parse` | 36 | 80 | 1 | src/backend/usage-stats.js |
 | `normalizeCell` | 28 | 146 | 14 | src/backend/balance-adjustment-store.js |
 | `FileValidationError` | 25 | 122 | 15 | src/backend/balance-seed-store.js |
 | `normalizeCellValue` | 23 | 278 | 12 | src/backend/database/fund-transfer-account-mapping-repository.js |
-| `text` | 21 | 386 | 2 | src/main-process/position-reconciliation/common.js |
+| `text` | 21 | 391 | 2 | src/main-process/position-reconciliation/common.js |
 | `crypto` | 18 | 57 | 18 | src/backend/pending-import/validator.js |
 | `XLSX` | 17 | 85 | 17 | src/backend/bank-bu-recon-import/reader.js |
 | `pad` | 16 | 97 | 2 | src/backend/logger.js |
@@ -51,7 +51,7 @@
 | `toDate` | 9 | 30 | 8 | src/main-process/position-reconciliation/matching-engine.js |
 | `FLOW_DB_COLUMNS` | 9 | 27 | 3 | src/backend/biz-op-recon-db/columns.js |
 | `bankChannel` | 9 | 26 | 1 | src/main-process/pre-fund-reconciliation/output-mapper.js |
-| `getRun` | 9 | 21 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
+| `getRun` | 9 | 23 | 2 | src/backend/bank-bu-recon-db/run-repository.js |
 | `listMonths` | 9 | 20 | 4 | src/backend/acquiring-bill-currency-db/import-repository.js |
 | `makeModificationCollector` | 9 | 18 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `saveMappings` | 9 | 17 | 2 | src/backend/database/fund-transfer-account-mapping-repository.js |
@@ -2100,7 +2100,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `throwInvalidSideData` | 42 |
+| `throwInvalidSideData` | 46 |
 | `serializeJson` | 18 |
 | `checkpointMismatch` | 15 |
 | `assertPayloadFields` | 8 |
@@ -2109,6 +2109,7 @@
 | `assertBankPayload` | 7 |
 | `assertStoredCounter` | 7 |
 | `assertStoredTextList` | 5 |
+| `consumptionRelationKey` | 5 |
 | `normalizeCheckpoint` | 5 |
 | `POSITION_DB_CHECKPOINT_TOKEN_KEY` | 5 |
 | `POSITION_DB_GENERATION_KEY` | 5 |
@@ -2658,13 +2659,13 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 前三引用位置 |
 |---|---:|---:|---:|---|
-| `path` | 80 | 353 | 74 | src/main-process/archive-center/archive-service.js(28), src/main-process/position-reconciliation/input-staging.js(24), src/backend/pre-fund-reconciliation-store.js(17) |
+| `path` | 80 | 355 | 74 | src/main-process/archive-center/archive-service.js(28), src/main-process/position-reconciliation/input-staging.js(24), src/backend/pre-fund-reconciliation-store.js(17) |
 | `fs` | 59 | 288 | 58 | src/main-process/archive-center/archive-service.js(46), src/main-process/archive-center/outbox-store.js(20), src/main-process/position-reconciliation/excel-io.js(14) |
 | `parse` | 36 | 80 | 1 | src/backend/database/linked-table-repository.js(12), src/backend/database/migrations.js(9), src/backend/duplicate-inbound-match-store.js(5) |
 | `normalizeCell` | 28 | 146 | 14 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/big-account-recognition.js(12) |
 | `FileValidationError` | 25 | 122 | 15 | src/backend/file-service/readers.js(15), src/main-process/duplicate-inbound-match/document-statement-reader.js(10), src/main-process/duplicate-inbound-match/service.js(8) |
 | `normalizeCellValue` | 23 | 278 | 12 | src/main-process/scenario-engines/r5-refund-order-backfill.js(57), src/main-process/position-reconciliation/matching-engine.js(39), src/main-process/scenario-engines/c4-recon-id-fix.js(21) |
-| `text` | 21 | 386 | 2 | src/main-process/position-reconciliation/store.js(91), src/renderer.js(62), src/renderer-dialogs.js(53) |
+| `text` | 21 | 391 | 2 | src/main-process/position-reconciliation/store.js(96), src/renderer.js(62), src/renderer-dialogs.js(53) |
 | `crypto` | 18 | 57 | 18 | src/main-process/archive-center/archive-service.js(8), src/main-process/position-reconciliation/service.js(6), src/main-process/position-reconciliation/store.js(5) |
 | `XLSX` | 17 | 85 | 17 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
 | `pad` | 16 | 97 | 2 | src/main-process/bank-statement-io.js(14), src/renderer.js(13), src/backend/logger.js(11) |
@@ -2688,7 +2689,7 @@
 | `toDate` | 9 | 30 | 8 | src/main-process/scenario-engines/engine-date-utils.js(8), src/main-process/scenario-engines/engine-week-utils.js(4), src/main-process/position-reconciliation/matching-engine.js(3) |
 | `FLOW_DB_COLUMNS` | 9 | 27 | 3 | src/backend/biz-op-recon-import/contract-flow.js(6), src/backend/biz-op-recon-db/flow-imports-repository.js(5), src/backend/biz-op-recon-db/columns.js(4) |
 | `bankChannel` | 9 | 26 | 1 | src/main-process/pre-fund-reconciliation/output-mapper.js(5), src/main-process/scenario-engines/dbs-charge-fund-check.js(5), src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js(4) |
-| `getRun` | 9 | 21 | 2 | src/main-process/position-reconciliation/store.js(5), src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/run-repository.js(2) |
+| `getRun` | 9 | 23 | 2 | src/main-process/position-reconciliation/store.js(7), src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/run-repository.js(2) |
 | `listMonths` | 9 | 20 | 4 | src/main-process/bank-bu-recon-session.js(4), src/main-process/acquiring-bill-currency-session.js(3), src/preload.js(3) |
 | `makeModificationCollector` | 9 | 18 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `saveMappings` | 9 | 17 | 2 | src/backend/database.js(3), src/renderer-dialogs.js(3), src/backend/database/fund-transfer-account-mapping-repository.js(2) |

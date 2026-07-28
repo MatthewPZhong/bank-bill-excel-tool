@@ -14241,15 +14241,15 @@ function positionArchiveModule(channel) {
   };
 }
 
-function recoverPositionArchiveIntent(pending, currentCheckpoint) {
-  if (!pending) return;
-  const archiveRequired = pending.archiveRequired === true
-    || (
-      pending.archiveRequired === undefined
-      && archiveOperationTracker
-      && archiveOperationTracker.supportsChannel(pending.channel)
-    );
-  if (!archiveRequired || pending.archiveState === 'durable') return;
+function positionArchiveIntentEvidence(pending, currentCheckpoint) {
+  if (!pending) {
+    return {
+      sideAdvanced: false,
+      businessCompleted: false,
+      outputPublished: false,
+      requiresPersistence: false
+    };
+  }
   const base = pending.baseCheckpoint || {};
   const sideAdvanced = String(currentCheckpoint.identity || '') !== String(base.identity || '')
     || Number(currentCheckpoint.generation) !== Number(base.generation)
@@ -14269,7 +14269,26 @@ function recoverPositionArchiveIntent(pending, currentCheckpoint) {
       || !sourceSnapshotMatchesStat(file.beforeSnapshot, stat);
   });
   const businessCompleted = pending.businessState === 'success';
-  if (!sideAdvanced && !businessCompleted && !outputPublished) return;
+  return {
+    sideAdvanced,
+    businessCompleted,
+    outputPublished,
+    requiresPersistence: sideAdvanced || businessCompleted || outputPublished
+  };
+}
+
+function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
+  if (!pending) return null;
+  const archiveRequired = pending.archiveRequired === true
+    || (
+      pending.archiveRequired === undefined
+      && archiveOperationTracker
+      && archiveOperationTracker.supportsChannel(pending.channel)
+    );
+  if (!archiveRequired || pending.archiveState === 'durable') return null;
+  const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
+  if (!evidence.requiresPersistence) return null;
+  const files = Array.isArray(pending.archiveFiles) ? pending.archiveFiles : [];
   if (files.length === 0 || !archiveCenterService
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
     throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
@@ -14279,13 +14298,30 @@ function recoverPositionArchiveIntent(pending, currentCheckpoint) {
     role: file.role,
     sourceSnapshot: capturePositionArchiveFileSnapshot(file.filePath)
   }));
-  archiveCenterService.persistOperationIntent({
+  return archiveCenterService.persistOperationIntent({
     ...positionArchiveModule(String(pending.channel || '')),
     sourceOperation: String(pending.channel || ''),
     operationKey: `position:${pending.operationToken}:${pending.channel}`,
     metadata: { positionOperationToken: pending.operationToken, recovered: true },
     files: recoveryFiles
   });
+}
+
+function recoverPositionArchiveIntent(pending, currentCheckpoint) {
+  persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint);
+}
+
+function persistCurrentPositionArchiveIntentIfNeeded() {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context) return null;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken) {
+    throw new Error('平盘待完成操作所有权已变化，无法登记存档恢复任务');
+  }
+  const currentCheckpoint = positionReconciliationService
+    ? positionReconciliationService.persistenceCheckpoint()
+    : pending.baseCheckpoint || {};
+  return persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint);
 }
 
 function getPositionReconciliationService() {
@@ -15312,7 +15348,11 @@ function cleanupPositionArchiveStagingDirectories(targets) {
 
 function cleanupPositionArchiveSourcePaths(sourcePaths) {
   const root = positionArchiveStagingRoot();
-  if (!root) return;
+  if (!root
+      || !archiveCenterService
+      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+    return;
+  }
   const directories = [];
   for (const value of Array.isArray(sourcePaths) ? sourcePaths : []) {
     const sourcePath = path.resolve(String(value || ''));
@@ -15326,7 +15366,15 @@ function cleanupPositionArchiveSourcePaths(sourcePaths) {
     }
     directories.push(path.dirname(sourcePath));
   }
-  cleanupPositionArchiveStagingDirectories(directories);
+  let unresolvedSourcePaths;
+  try {
+    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
+  } catch (_error) {
+    return;
+  }
+  cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(directories, unresolvedSourcePaths)
+  );
 }
 
 function cleanupPositionArchiveStaging(runtime) {
@@ -15421,7 +15469,11 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     archiveOperationTail = archiveTask.catch(() => undefined);
     try {
       const archiveResult = await archiveTask;
-      if (archiveResult && archiveResult.archiveFailed === true) {
+      if (archiveResult && archiveResult.handled === false) {
+        const recoveryIntent = persistCurrentPositionArchiveIntentIfNeeded();
+        markPositionArchiveDurable(recoveryIntent || archiveResult);
+        if (!recoveryIntent) cleanupPositionArchiveStaging(runtime);
+      } else if (archiveResult && archiveResult.archiveFailed === true) {
         reportArchiveFailure(archiveResult.warning);
         if (archiveResult.persistentRetryAvailable !== true) {
           return archiveRegistrationFailureResult(result, archiveResult.warning);

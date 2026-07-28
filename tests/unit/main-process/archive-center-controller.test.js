@@ -295,6 +295,57 @@ test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文�
   assert.deepEqual(releasedPaths.sort(), [inputPath, outputPath].sort());
 });
 
+test('outbox 重放为部分失败正式批次时不得释放失败文件源路径', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-outbox-partial-'));
+  const inputPath = path.join(rootDir, 'bank.xlsx');
+  const outputPath = path.join(rootDir, 'result.xlsx');
+  const releasedPaths = [];
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const { controller, service } = createHarness({
+    outboxStore,
+    onOutboxFlushed: (paths) => releasedPaths.push(...paths)
+  });
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  service.createBatch = async () => ({ ok: false, message: 'archive database busy' });
+  const created = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:bank:apply-import',
+    metadata: { positionOperationToken: 'operation-partial' },
+    files: [
+      { filePath: inputPath, role: 'input' },
+      { filePath: outputPath, role: 'output' }
+    ]
+  });
+  assert.match(created.batchId, /^outbox:/);
+
+  service.createBatch = async () => ({
+    ok: false,
+    batch: {
+      id: 1,
+      batchNumber: 'POSITION-20260720-001',
+      archiveStatus: 'failed',
+      failedArtifactCount: 1
+    },
+    attempted: 2,
+    succeeded: 1,
+    failed: 1,
+    results: [
+      { ok: false, status: 'failed' },
+      { ok: true, status: 'ready' }
+    ]
+  });
+  service.listUnresolvedSourcePaths = () => [inputPath];
+
+  const initialized = await controller.initialize();
+  assert.equal(initialized.ok, true);
+  assert.deepEqual(outboxStore.list(), []);
+  assert.deepEqual(releasedPaths, [outputPath]);
+  assert.deepEqual(controller.listUnresolvedSourcePaths(), [inputPath]);
+});
+
 test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-intent-'));
   const inputPath = path.join(rootDir, 'input.xlsx');

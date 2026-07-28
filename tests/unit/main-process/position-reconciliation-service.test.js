@@ -203,6 +203,39 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
   assert.equal(fs.existsSync(differenceOutputPath), true);
 });
 
+test('结果文件发布后导出状态落库失败时保留已发布文件', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-export-state-failure-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const outputPath = path.join(userDataDir, 'result.xlsx');
+  writeWorkbook(
+    bankPath,
+    BANK_SHEET_NAME,
+    BANK_STATEMENT_FIELDS,
+    [bankRow({ FundType: 'Charge' })]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  service.store.markRunExported = () => {
+    throw new Error('injected markRunExported failure');
+  };
+
+  await assert.rejects(
+    service.exportRun(run.runId, outputPath),
+    /injected markRunExported failure/
+  );
+  assert.equal(fs.existsSync(outputPath), true);
+  assert.equal(service.store.getRun(run.runId).exported_at, null);
+});
+
 test('差异页隐藏失效和被替换草稿，并保留当前草稿批次', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-difference-lifecycle-'));
   const bankPath = path.join(userDataDir, 'bank.xlsx');
@@ -956,6 +989,47 @@ test('同一银行 BizId 重导后可幂等复核同一链接记录', async (t) 
   await service.exportRun(secondRun.runId, secondResultPath);
   assert.doesNotThrow(() => service.confirmRun(secondRun.runId));
   assert.equal(service.store.listConsumedSources().length, 1);
+});
+
+test('已确认来源消费表与运行血缘必须保持双向一致', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-consumption-integrity-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+  const resultPath = path.join(userDataDir, 'result.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow()]);
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(run.runId, resultPath);
+  service.confirmRun(run.runId);
+  assert.equal(service.store.listConsumedSources().length, 1);
+
+  service.store.db.prepare(
+    'DELETE FROM position_consumed_sources WHERE run_id = ?'
+  ).run(run.runId);
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+  assert.throws(
+    () => service.store.listConsumedSources(),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
 });
 
 test('同一银行 BizId 已确认后禁止改配到另一条链接记录', async (t) => {

@@ -801,6 +801,65 @@ function assertRunDifferenceSet(db, run, envelopeRows) {
   }
 }
 
+function consumptionRelationKey({
+  sourceType,
+  businessKey,
+  legIndex,
+  bankBizId
+}) {
+  return JSON.stringify([
+    text(sourceType),
+    text(businessKey),
+    Number(legIndex),
+    text(bankBizId)
+  ]);
+}
+
+function assertRunConsumptionSet(db, run, expectedConsumptions) {
+  const ownedConsumptions = db.prepare(`
+    SELECT run_id AS runId, source_type AS sourceType, business_key AS businessKey,
+           leg_index AS legIndex, bank_biz_id AS bankBizId
+    FROM position_consumed_sources
+    WHERE run_id = ?
+    ORDER BY id
+  `).all(run.id);
+  if (run.status !== 'confirmed') {
+    if (ownedConsumptions.length > 0) {
+      throwInvalidSideData(`平盘侧库未确认运行 ID=${run.id}存在来源消费关系`);
+    }
+    return;
+  }
+
+  const expectedKeys = new Set(expectedConsumptions.map(consumptionRelationKey));
+  for (const owned of ownedConsumptions) {
+    if (!expectedKeys.has(consumptionRelationKey(owned))) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}持有不属于该运行的来源消费关系`);
+    }
+  }
+
+  const findConsumption = db.prepare(`
+    SELECT run_id AS runId, source_type AS sourceType, business_key AS businessKey,
+           leg_index AS legIndex, bank_biz_id AS bankBizId
+    FROM position_consumed_sources
+    WHERE source_type = ? AND business_key = ? AND leg_index = ?
+  `);
+  for (const expected of expectedConsumptions) {
+    const actual = findConsumption.get(
+      text(expected.sourceType),
+      text(expected.businessKey),
+      Number(expected.legIndex)
+    );
+    if (
+      !actual
+      || consumptionRelationKey(actual) !== consumptionRelationKey(expected)
+      || !Number.isSafeInteger(Number(actual.runId))
+      || Number(actual.runId) > Number(run.id)
+    ) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}缺少对应的来源消费关系`);
+    }
+  }
+}
+
 function assertRunEnvelope(db, run, scope, snapshot, summary) {
   const runLabel = `运行 ID=${run.id}`;
   const envelopeRows = db.prepare(`
@@ -810,6 +869,7 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
     ORDER BY id
   `).all(run.id);
   const derivedSourceTypes = [];
+  const expectedConsumptions = [];
   let confirmedConsumptionConflicts = 0;
   for (const row of envelopeRows) {
     const originalRow = assertBankPayload(
@@ -832,11 +892,21 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
       row
     );
     assertRunRowContract(row, originalRow, resultRow, lineage);
+    if (Number(row.consumes_source) === 1) {
+      expectedConsumptions.push({
+        runId: run.id,
+        sourceType: lineage.sourceType,
+        businessKey: lineage.sourceBusinessKey,
+        legIndex: lineage.sourceLegIndex,
+        bankBizId: row.biz_id
+      });
+    }
     if (lineage.reasonCode === 'position-bank-counterparty-reassigned') {
       confirmedConsumptionConflicts += 1;
     }
   }
   assertRunDifferenceSet(db, run, envelopeRows);
+  assertRunConsumptionSet(db, run, expectedConsumptions);
   assertSameTextSet(
     Object.keys(snapshot.bankScopes),
     scope.scopes,
@@ -1726,6 +1796,21 @@ class PositionReconciliationStore {
   }
 
   listConsumedSources() {
+    const relatedRunIds = this.db.prepare(`
+      SELECT DISTINCT rr.run_id AS runId
+      FROM position_run_rows rr
+      INNER JOIN position_runs r ON r.id = rr.run_id
+      WHERE r.status = 'confirmed' AND rr.consumes_source = 1
+      UNION
+      SELECT DISTINCT run_id AS runId
+      FROM position_consumed_sources
+      ORDER BY runId
+    `).all().map((row) => Number(row.runId));
+    for (const runId of relatedRunIds) {
+      if (!this.getRun(runId)) {
+        throwInvalidSideData(`平盘侧库来源消费关系指向不存在的运行 ID=${runId}`);
+      }
+    }
     return this.db.prepare(`
       SELECT source_type AS sourceType, business_key AS businessKey,
              leg_index AS legIndex, run_id AS runId, bank_biz_id AS bankBizId
@@ -2236,6 +2321,7 @@ class PositionReconciliationStore {
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(runId);
+      this.getRun(runId);
       for (const key of Object.keys(run.snapshot.bankScopes || {})) this.bumpRevision('bank', key);
       this.bumpRevision('bank-global', 'all');
       return { confirmedRows: rows.length, runId };
