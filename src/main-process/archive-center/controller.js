@@ -181,6 +181,8 @@ class ArchiveCenterController {
       sourceOperation: file.sourceOperation || sourceOperation || '',
       originalName: file.originalName || path.basename(file.filePath),
       sourceSnapshot: file.sourceSnapshot,
+      expectedSha256: file.expectedSha256,
+      sizeBytes: file.sizeBytes,
       metadata: file.metadata || {}
     };
   }

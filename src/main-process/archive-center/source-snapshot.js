@@ -78,6 +78,7 @@ function collectArchiveCandidatePaths({ args = [], result, selectedPaths = [], r
   const candidates = new Set();
   addPathValues(candidates, selectedPaths);
   addPathValues(candidates, runtime.inputPaths);
+  addPathValues(candidates, runtime.inputFiles);
   addPathValues(candidates, runtime.outputPaths);
 
   const payload = Array.isArray(args) && args[0] && typeof args[0] === 'object'

@@ -82,7 +82,11 @@ function publicArtifact(artifact) {
   if (!artifact) return null;
   const { sourcePath: _sourcePath, blob, ...visible } = artifact;
   if (visible.metadata && typeof visible.metadata === 'object') {
-    const { sourceSnapshot: _sourceSnapshot, ...metadata } = visible.metadata;
+    const {
+      sourceSnapshot: _sourceSnapshot,
+      expectedSha256: _expectedSha256,
+      ...metadata
+    } = visible.metadata;
     visible.metadata = metadata;
   }
   if (!blob) return { ...visible, blob: null };
@@ -429,7 +433,12 @@ class ArchiveService {
     return stat;
   }
 
-  async _stageSourceFile(filePath, originalName, expectedSnapshot = null) {
+  async _stageSourceFile(
+    filePath,
+    originalName,
+    expectedSnapshot = null,
+    expectedSha256 = ''
+  ) {
     const before = await this._statRegularFile(filePath, originalName);
     if (expectedSnapshot && !sourceSnapshotMatchesStat(expectedSnapshot, before)) {
       throw new ArchiveOperationError(
@@ -466,9 +475,17 @@ class ArchiveService {
           { retryable: true }
         );
       }
+      const sha256 = hash.digest('hex');
+      if (expectedSha256 && sha256 !== expectedSha256) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_SOURCE_CHANGED',
+          `文件“${safeName(originalName)}”内容与业务解析时版本不一致，未写入存档`,
+          { retryable: true }
+        );
+      }
       return {
         stagedPath,
-        sha256: hash.digest('hex'),
+        sha256,
         sizeBytes
       };
     } catch (error) {
@@ -553,7 +570,8 @@ class ArchiveService {
       staged = await this._stageSourceFile(
         archivedSourcePath,
         originalName,
-        artifact.metadata && artifact.metadata.sourceSnapshot
+        artifact.metadata && artifact.metadata.sourceSnapshot,
+        artifact.metadata && artifact.metadata.expectedSha256
       );
       const published = await this._publishStagedBlob(staged);
       staged = null;
@@ -634,6 +652,16 @@ class ArchiveService {
         : {};
       const sourceSnapshot = normalizeSourceSnapshot(payload.sourceSnapshot);
       if (sourceSnapshot) metadata.sourceSnapshot = sourceSnapshot;
+      const rawExpectedSha256 = payload.expectedSha256 == null
+        ? ''
+        : String(payload.expectedSha256).trim().toLowerCase();
+      if (rawExpectedSha256 && !SHA256_RE.test(rawExpectedSha256)) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_EXPECTED_SHA_INVALID',
+          `文件“${originalName}”缺少合法的业务解析摘要`
+        );
+      }
+      if (rawExpectedSha256) metadata.expectedSha256 = rawExpectedSha256;
       artifact = this.repository.addArtifact(batch.id, {
         artifactKey,
         direction: payload.direction || 'input',

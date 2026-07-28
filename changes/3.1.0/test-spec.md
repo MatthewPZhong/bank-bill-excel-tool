@@ -8,7 +8,8 @@
 - 银行 46/49 列、XLSX/XLS、BizId 空/重复、Channel 空、BillDate 非法。
 - 多文件整批校验、Channel+月份替换确认、失败/取消零写入。
 - BizId 与其它既有 Channel+月份冲突时整批拒绝并保留旧数据；同批替换多个范围也禁止 BizId 跨范围迁移；实际无行的导出范围拒绝。
-- 银行、账户快照和结果回导在用户确认前复制到私有不可变暂存区；原路径随后被覆盖时，写库与存档仍使用同一份已解析内容。
+- 银行、账户快照、普通链接原始表和结果回导复制到私有不可变暂存区后记录解析时 `sourceSnapshot + sizeBytes + SHA-256`；解析后及写 side DB 前重新校验，原路径随后被覆盖时仍使用同一份已解析内容。
+- 分别在银行 prepare/apply、账户快照确认、普通来源自动落库和结果回导解析/写库之间修改暂存字节；必须返回 `position-staged-input-changed`，side DB、generation、旧账户快照及回导时间不变化，失效 token/暂存按契约回收。
 - 存档失败时暂存副本保留并可跨重启重试；重试成功或删除失败批次后，仅在全库不存在其它 pending/failed artifact 引用同一路径时释放；使用替代源重试时旧、新路径均完成引用检查，主进程业务后置清理和启动过期清理同样跳过仍被引用的副本，保护集查询失败时不清理。
 - 五类原始表严格识别、逐文件原子、同文件重复折叠/冲突拒绝、不同 Excel 日期不得误折叠、跨文件后续文件拒绝。
 - 混合成功/失败文件的返回顺序与选择顺序一致，存档文件血缘不串位。
@@ -53,7 +54,7 @@
 
 - 49 列写出、BizId 全集、稳定排序、实际修改高亮。
 - 回导允许行序变化，拒绝缺/多/重复 BizId、错表头、越组 FundType、仅改详情和其它字段篡改。
-- BillDate/ValueDate 日历往返、其它日期时间的 Excel 时区往返可回导；真实时分秒修改拒绝。
+- BillDate/ValueDate 纯日期文本与等价 Excel 日期单元格可回导；原值含时间时，ExcelJS→SheetJS 固定时区往返及最多 2ms 浮点误差可接受。同日不同小时、分钟、秒、跨日、非法文本和 Invalid Date 均拒绝，两个字段分别覆盖。
 - 合法回导后结果行 outcome、最终统计和确认页数据同步刷新。
 - 成功导出/合法回导确认门控；回导后保持待确认，最终确认时流转为人工确认保留或人工修改后确认。未解决差异不写来源消费；由唯一成功匹配转为人工修改的行保留原来源血缘并继续消费。
 - 失效/被替换草稿不出现在差异列表；差异按运行、Channel、地区、月份和状态隔离，已确认差异仍可导出 49 列文件。
@@ -76,7 +77,8 @@
 - 对正式同步建批、向正式批次追加文件及 outbox 重放分别注入附件元数据登记失败；结果中没有正整数 artifact ID 时必须写入或保留同一 operation key 的 outbox 和源文件，后续重放补齐 artifact 后才删除任务。正式批次与 outbox 同时失败时不得宣称可重试。
 - 单独导入清结算银行账户表时，prepare 仅返回待确认状态，不建立空存档意图且必须清除本次 pending；随后 apply 可正常写库并存档，取消或重启后可重新选择文件。
 - 使用主进程可注入生命周期 helper 贯穿验证 prepare/apply、结果已发布后状态落库失败、正式存档成功、outbox 恢复和正式存档/outbox 双失败；不得只用 service、tracker 分层测试或源码正则代替。
-- 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项、空路径或非字符串路径，以及其它保护来源读取失败时，均不得执行清理。业务已提交且文件清单损坏时，验证恢复登记被阻断、pending 不清除、错误 outbox 不产生，第二次启动仍保留真实暂存；另覆盖 `archiveRequired=false/缺失` 和 `archiveState=durable`，确认恢复与同进程 lifecycle 都不得同步 checkpoint 或清 pending。合法 `archiveFiles: []` 继续允许清理无保护旧目录。outbox 单独覆盖非字符串和空白路径拒绝。
+- 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项，input 缺合法路径/snapshot/size/SHA，output 缺 `beforeSnapshot` 字段，以及其它保护来源读取失败时，均不得执行清理。业务已提交且文件清单损坏时，验证恢复登记被阻断、pending 不清除、错误 outbox 不产生，第二次启动仍保留真实暂存；另覆盖 `archiveRequired=false/缺失` 和 `archiveState=durable`，确认恢复与同进程 lifecycle 都不得同步 checkpoint 或清 pending。合法 `archiveFiles: []` 继续允许清理无保护旧目录。outbox 单独覆盖非字符串和空白路径拒绝。
+- pending input 缺解析时 snapshot/SHA/size 或 output 缺 `beforeSnapshot` 字段时一律损坏；恢复 input 不调用当前快照捕获器。暂存内容变化时恢复在 outbox 登记前 fail closed，pending 与文件保留、checkpoint 不同步；即使当前 stat 被当作预期值，相同长度但 SHA 不同的内容也必须由 ArchiveService 拒绝。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。
 - `scripts/integration/position-reconciliation-side-db-parity.js` 验证主库零 bulk、原子替换、重启和回收。

@@ -17,9 +17,13 @@ const {
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
 const {
   STAGING_RELATIVE_PATH,
+  hashFileSha256Sync,
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 } = require('../../../src/main-process/position-reconciliation/input-staging');
+const {
+  sourceSnapshotFromStat
+} = require('../../../src/main-process/archive-center/source-snapshot');
 const {
   BANK_SHEET_NAME,
   POSITION_DB_RELATIVE_PATH,
@@ -43,6 +47,15 @@ function writeWorkbook(filePath, sheetName, headers, rows) {
   ]);
   XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
   XLSX.writeFile(workbook, filePath);
+}
+
+function mutateFileSameLength(filePath) {
+  const before = fs.statSync(filePath);
+  const content = fs.readFileSync(filePath);
+  assert.ok(content.length > 0, '故障注入文件不能为空');
+  content[content.length - 1] ^= 0x01;
+  fs.writeFileSync(filePath, content);
+  fs.utimesSync(filePath, before.atime, before.mtime);
 }
 
 function bankRow(overrides = {}) {
@@ -894,6 +907,145 @@ test('银行 Excel 日期单元格经过侧库后仍以日期类型导出', asyn
   );
 });
 
+test('结果回导在解析后、写侧库前暂存发生变化时拒绝更新草稿', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-result-staged-change-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const resultPath = path.join(userDataDir, 'result.xlsx');
+  writeWorkbook(
+    bankPath,
+    BANK_SHEET_NAME,
+    BANK_STATEMENT_FIELDS,
+    [bankRow({ FundType: 'Charge' })]
+  );
+  let mutateResult = false;
+  let stagedResultPath = '';
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    beforeStagedInputCommit: ({ phase, files }) => {
+      if (phase !== 'result-apply' || !mutateResult) return;
+      stagedResultPath = files[0].filePath;
+      mutateFileSameLength(stagedResultPath);
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(run.runId, resultPath);
+  const checkpointBefore = service.persistenceCheckpoint();
+  const rowBefore = service.store.listRunRows(run.runId)[0];
+  mutateResult = true;
+
+  assert.throws(
+    () => service.importRunResult(run.runId, resultPath),
+    (error) => error && error.code === 'position-staged-input-changed'
+  );
+  const storedRun = service.store.getRun(run.runId);
+  assert.equal(storedRun.reimported_at, null);
+  assert.deepEqual(service.store.listRunRows(run.runId)[0].resultRow, rowBefore.resultRow);
+  assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore);
+  assert.equal(fs.existsSync(stagedResultPath), false);
+});
+
+test('结果回导拒绝 BillDate/ValueDate 同日时分秒、跨日和非法文本篡改', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-result-date-tamper-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const resultPath = path.join(userDataDir, 'result.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({
+    FundType: 'Charge',
+    BillDate: new Date(2026, 6, 20, 9, 30, 15),
+    ValueDate: new Date(2026, 6, 21, 10, 45, 20)
+  })]);
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(run.runId, resultPath);
+  assert.doesNotThrow(
+    () => service.importRunResult(run.runId, resultPath),
+    'ExcelJS → SheetJS 的已知时区往返必须继续接受'
+  );
+
+  const cases = [
+    ['BillDate', (value) => new Date(value.getTime() + (60 * 60 * 1000))],
+    ['BillDate', (value) => new Date(value.getTime() + (60 * 1000))],
+    ['BillDate', (value) => new Date(value.getTime() + 1000)],
+    ['ValueDate', (value) => new Date(value.getTime() + (60 * 60 * 1000))],
+    ['ValueDate', (value) => new Date(value.getTime() + (60 * 1000))],
+    ['ValueDate', (value) => new Date(value.getTime() + 1000)],
+    ['BillDate', (value) => new Date(value.getTime() + (24 * 60 * 60 * 1000))],
+    ['ValueDate', (value) => new Date(value.getTime() + (24 * 60 * 60 * 1000))],
+    ['BillDate', () => 'Invalid Date'],
+    ['ValueDate', () => '不是日期']
+  ];
+  for (const [header, mutate] of cases) {
+    await service.exportRun(run.runId, resultPath);
+    const workbook = XLSX.readFile(resultPath, { cellDates: true, raw: true });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[BANK_SHEET_NAME], {
+      header: 1,
+      defval: '',
+      raw: true
+    });
+    const column = POSITION_BANK_HEADERS.indexOf(header);
+    rows[1][column] = mutate(rows[1][column]);
+    const tampered = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(tampered, XLSX.utils.aoa_to_sheet(rows), BANK_SHEET_NAME);
+    XLSX.writeFile(tampered, resultPath);
+    assert.throws(
+      () => service.importRunResult(run.runId, resultPath),
+      (error) => error && error.code === 'position-result-field-tampered',
+      `${header} 篡改应被拒绝`
+    );
+  }
+});
+
+test('结果回导接受纯日期文本与等价 Excel 日期单元格', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-result-pure-date-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const resultPath = path.join(userDataDir, 'result.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({
+    FundType: 'Charge',
+    BillDate: '2026-07-20',
+    ValueDate: '2026/07/21'
+  })]);
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(run.runId, resultPath);
+  const workbook = XLSX.readFile(resultPath, { cellDates: true, raw: true });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[BANK_SHEET_NAME], {
+    header: 1,
+    defval: '',
+    raw: true
+  });
+  rows[1][POSITION_BANK_HEADERS.indexOf('BillDate')] = new Date(2026, 6, 20);
+  rows[1][POSITION_BANK_HEADERS.indexOf('ValueDate')] = new Date(2026, 6, 21);
+  const equivalent = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(equivalent, XLSX.utils.aoa_to_sheet(rows), BANK_SHEET_NAME);
+  XLSX.writeFile(equivalent, resultPath);
+
+  assert.doesNotThrow(() => service.importRunResult(run.runId, resultPath));
+});
+
 test('已确认订单链接记录跨月份及原始表重建后仍禁止重复消费', async (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-consumption-'));
   const julyBankPath = path.join(userDataDir, 'bank-july.xlsx');
@@ -1334,6 +1486,106 @@ test('银行导入确认使用不可变暂存副本，原路径被覆盖不改�
   assert.equal(values[1][BANK_STATEMENT_FIELDS.indexOf('BizId')], 'STAGED-A');
 });
 
+test('银行 prepare 后暂存字节变化时 apply 拒绝写库并回收失效 token', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-bank-staged-change-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow()]);
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const checkpointBefore = service.persistenceCheckpoint();
+  const prepared = service.prepareBankImport([bankPath]);
+  const [archiveFile] = service.bankImportArchiveIntent(prepared.token);
+  assert.equal(archiveFile.expectedSha256.length, 64);
+  assert.equal(archiveFile.sourceSnapshot.sizeBytes, archiveFile.sizeBytes);
+  mutateFileSameLength(archiveFile.filePath);
+
+  assert.throws(
+    () => service.applyBankImport(prepared.token),
+    (error) => error && error.code === 'position-staged-input-changed'
+  );
+  assert.equal(service.store.getBankRows().length, 0);
+  assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore);
+  assert.equal(fs.existsSync(archiveFile.filePath), false);
+  assert.throws(
+    () => service.applyBankImport(prepared.token),
+    (error) => error && error.code === 'position-bank-import-token-expired'
+  );
+});
+
+test('账户表确认前暂存字节变化时拒绝覆盖旧快照', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-account-staged-change-'));
+  const accountPath = path.join(userDataDir, 'accounts.xlsx');
+  const headers = SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT].headers;
+  writeWorkbook(accountPath, 'Sheet1', headers, [{
+    账户状态: '正常',
+    账户性质: '自有',
+    币种: 'USD',
+    银行账号: 'OWN-001'
+  }]);
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const checkpointBefore = service.persistenceCheckpoint();
+  const prepared = service.prepareSourceImport([accountPath]);
+  const confirmation = prepared.results.find((item) => item.status === 'needs-confirmation');
+  const [archiveFile] = service.sourceImportArchiveIntent(confirmation.token);
+  mutateFileSameLength(archiveFile.filePath);
+
+  assert.throws(
+    () => service.applySourceImport(confirmation.token),
+    (error) => error && error.code === 'position-staged-input-changed'
+  );
+  assert.equal(service.store.sourceRecords(SOURCE_TYPES.BANK_ACCOUNT).length, 0);
+  assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore);
+  assert.equal(fs.existsSync(archiveFile.filePath), false);
+});
+
+test('普通链接表在解析与自动落库之间发生暂存变化时整份失败', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-staged-change-'));
+  const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+  writeWorkbook(
+    sourcePath,
+    'Sheet1',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+  let stagedPath = '';
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    recordArchiveIntent: (files) => {
+      stagedPath = files[0].filePath;
+      mutateFileSameLength(stagedPath);
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const checkpointBefore = service.persistenceCheckpoint();
+  const result = service.prepareSourceImport([sourcePath]);
+  assert.equal(result.successCount, 0);
+  assert.equal(result.failedCount, 1);
+  assert.equal(result.results[0].code, 'position-staged-input-changed');
+  assert.equal(service.store.sourceRecords(SOURCE_TYPES.GATEWAY_INBOUND).length, 0);
+  assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore);
+  assert.equal(fs.existsSync(stagedPath), false);
+});
+
 test('启动暂存清理跳过仍被存档失败批次引用的文件', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-staging-prune-'));
   t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
@@ -1392,7 +1644,13 @@ test('主库 pending 单独引用的过期暂存文件必须在恢复前保留',
     expectedPendingOperation: JSON.stringify({
       operationToken: 'pending-operation',
       baseCheckpoint: expectedCheckpoint,
-      archiveFiles: [{ filePath: protectedFile, role: 'input' }]
+      archiveFiles: [{
+        filePath: protectedFile,
+        role: 'input',
+        sourceSnapshot: sourceSnapshotFromStat(fs.statSync(protectedFile)),
+        sha256: hashFileSha256Sync(protectedFile).sha256,
+        sizeBytes: fs.statSync(protectedFile).size
+      }]
     }),
     protectedStagingPaths: () => []
   });

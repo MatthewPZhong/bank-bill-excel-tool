@@ -1,31 +1,98 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const {
+  normalizeSourceSnapshot,
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
+} = require('../archive-center/source-snapshot');
+
 const STAGING_RELATIVE_PATH = 'run-data/position-reconciliation/import-staging';
 const DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const HASH_BUFFER_SIZE = 1024 * 1024;
+const SHA256_RE = /^[a-f0-9]{64}$/;
 
 function sourceStat(filePath) {
   const stat = fs.statSync(filePath);
   if (!stat.isFile()) throw new Error(`不是普通文件：${filePath}`);
-  return {
-    size: Number(stat.size),
-    mtimeMs: Number(stat.mtimeMs),
-    ctimeMs: Number(stat.ctimeMs),
-    ino: Number(stat.ino)
-  };
+  return stat;
 }
 
 function sameSourceStat(left, right) {
-  return left.size === right.size
-    && left.mtimeMs === right.mtimeMs
-    && left.ctimeMs === right.ctimeMs
-    && (
-      !Number.isSafeInteger(left.ino)
-      || !Number.isSafeInteger(right.ino)
-      || left.ino === right.ino
-    );
+  const snapshot = sourceSnapshotFromStat(left);
+  return Boolean(snapshot && sourceSnapshotMatchesStat(snapshot, right));
+}
+
+function hashFileSha256Sync(filePath) {
+  const handle = fs.openSync(filePath, 'r');
+  const hash = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(HASH_BUFFER_SIZE);
+  let sizeBytes = 0;
+  try {
+    while (true) {
+      const bytesRead = fs.readSync(handle, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+      sizeBytes += bytesRead;
+    }
+  } finally {
+    fs.closeSync(handle);
+  }
+  return { sha256: hash.digest('hex'), sizeBytes };
+}
+
+function captureStagedInputEvidence(filePath) {
+  const before = sourceStat(filePath);
+  const hashed = hashFileSha256Sync(filePath);
+  const after = sourceStat(filePath);
+  if (!sameSourceStat(before, after) || hashed.sizeBytes !== Number(after.size)) {
+    throw new Error(`计算摘要期间暂存文件发生变化：${path.basename(filePath)}`);
+  }
+  return {
+    stagedSnapshot: sourceSnapshotFromStat(after),
+    stagedSha256: hashed.sha256,
+    stagedSizeBytes: hashed.sizeBytes
+  };
+}
+
+function assertStagedInputUnchanged(descriptor) {
+  const input = descriptor && typeof descriptor === 'object' ? descriptor : {};
+  const filePath = path.resolve(String(input.archivePath || input.filePath || ''));
+  const expectedSnapshot = normalizeSourceSnapshot(input.stagedSnapshot);
+  const expectedSha256 = String(input.stagedSha256 || '').trim().toLowerCase();
+  const expectedSizeBytes = Number(input.stagedSizeBytes);
+  if (!expectedSnapshot
+      || !SHA256_RE.test(expectedSha256)
+      || !Number.isSafeInteger(expectedSizeBytes)
+      || expectedSizeBytes < 0
+      || expectedSnapshot.sizeBytes !== expectedSizeBytes) {
+    const error = new Error(`暂存输入缺少完整内容证据：${path.basename(filePath)}`);
+    error.code = 'position-staged-input-evidence-invalid';
+    throw error;
+  }
+
+  try {
+    const before = sourceStat(filePath);
+    if (!sourceSnapshotMatchesStat(expectedSnapshot, before)) {
+      throw new Error('文件身份快照不一致');
+    }
+    const actual = hashFileSha256Sync(filePath);
+    const after = sourceStat(filePath);
+    if (!sourceSnapshotMatchesStat(expectedSnapshot, after)
+        || actual.sizeBytes !== expectedSizeBytes
+        || actual.sha256 !== expectedSha256) {
+      throw new Error('文件内容摘要不一致');
+    }
+  } catch (cause) {
+    const error = new Error(`导入暂存文件在确认前发生变化：${path.basename(filePath)}`);
+    error.code = 'position-staged-input-changed';
+    error.cause = cause;
+    throw error;
+  }
+  return true;
 }
 
 function stageInputFiles(userDataDir, filePaths, batchId) {
@@ -49,12 +116,14 @@ function stageInputFiles(userDataDir, filePaths, batchId) {
       if (!sameSourceStat(before, after) || stagedStat.size !== before.size) {
         throw new Error(`复制期间源文件发生变化：${path.basename(originalPath)}`);
       }
+      const evidence = captureStagedInputEvidence(stagedPath);
       staged.push({
         filePath: stagedPath,
         sourceFilePath: originalPath,
         sourceFileName: path.basename(originalPath),
         archivePath: stagedPath,
-        stagingDir
+        stagingDir,
+        ...evidence
       });
     });
     return staged;
@@ -131,6 +200,8 @@ function pruneStagingRoot(userDataDir, {
 module.exports = {
   STAGING_RELATIVE_PATH,
   stageInputFiles,
+  hashFileSha256Sync,
+  assertStagedInputUnchanged,
   cleanupStagingPaths,
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot

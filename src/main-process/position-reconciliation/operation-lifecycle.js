@@ -1,5 +1,11 @@
 'use strict';
 
+const {
+  normalizeSourceSnapshot
+} = require('../archive-center/source-snapshot');
+
+const SHA256_RE = /^[a-f0-9]{64}$/;
+
 function parsePositionPendingArchiveFiles(value) {
   if (value === null || value === undefined || value === '') return [];
   let payload = value;
@@ -16,7 +22,43 @@ function parsePositionPendingArchiveFiles(value) {
   for (const file of payload.archiveFiles) {
     if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
     if (typeof file.filePath !== 'string' || file.filePath.trim() === '') return null;
-    files.push(file);
+    const role = String(file.role || '').trim();
+    if (role === 'input') {
+      const sourceSnapshot = normalizeSourceSnapshot(file.sourceSnapshot);
+      const sha256 = String(file.sha256 || '').trim().toLowerCase();
+      const sizeBytes = Number(file.sizeBytes);
+      if (!sourceSnapshot
+          || !SHA256_RE.test(sha256)
+          || !Number.isSafeInteger(sizeBytes)
+          || sizeBytes < 0
+          || sourceSnapshot.sizeBytes !== sizeBytes) {
+        return null;
+      }
+      files.push({
+        ...file,
+        filePath: file.filePath.trim(),
+        role,
+        sourceSnapshot,
+        sha256,
+        sizeBytes
+      });
+      continue;
+    }
+    if (role === 'output') {
+      if (!Object.prototype.hasOwnProperty.call(file, 'beforeSnapshot')) return null;
+      const beforeSnapshot = file.beforeSnapshot === null
+        ? null
+        : normalizeSourceSnapshot(file.beforeSnapshot);
+      if (file.beforeSnapshot !== null && !beforeSnapshot) return null;
+      files.push({
+        ...file,
+        filePath: file.filePath.trim(),
+        role,
+        beforeSnapshot
+      });
+      continue;
+    }
+    return null;
   }
   return files;
 }
@@ -27,6 +69,48 @@ function requirePositionPendingArchiveFiles(value) {
     throw new Error('平盘待完成操作的存档文件清单损坏');
   }
   return files;
+}
+
+function positionRecoveryArchiveFiles(value, { captureOutputSnapshot }) {
+  const files = requirePositionPendingArchiveFiles(value);
+  return files.map((file) => {
+    if (file.role === 'input') {
+      return {
+        filePath: file.filePath,
+        role: 'input',
+        sourceSnapshot: file.sourceSnapshot,
+        expectedSha256: file.sha256,
+        sizeBytes: file.sizeBytes
+      };
+    }
+    const sourceSnapshot = typeof captureOutputSnapshot === 'function'
+      ? captureOutputSnapshot(file.filePath)
+      : null;
+    if (!sourceSnapshot) {
+      throw new Error(`平盘输出文件尚未发布或无法读取：${file.filePath}`);
+    }
+    return {
+      filePath: file.filePath,
+      role: 'output',
+      sourceSnapshot
+    };
+  });
+}
+
+function assertPositionRecoveryInputsUnchanged(value, assertInput) {
+  if (typeof assertInput !== 'function') {
+    throw new TypeError('平盘恢复输入校验器缺失');
+  }
+  const files = requirePositionPendingArchiveFiles(value);
+  for (const file of files) {
+    if (file.role !== 'input') continue;
+    assertInput({
+      archivePath: file.filePath,
+      stagedSnapshot: file.sourceSnapshot,
+      stagedSha256: file.sha256,
+      stagedSizeBytes: file.sizeBytes
+    });
+  }
 }
 
 function positionBusinessStateForResult(result, successStatuses) {
@@ -157,6 +241,8 @@ async function runPositionOperationLifecycle({
 module.exports = {
   parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
+  positionRecoveryArchiveFiles,
+  assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,

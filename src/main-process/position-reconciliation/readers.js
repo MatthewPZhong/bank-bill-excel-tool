@@ -35,7 +35,10 @@ function normalizeFileInput(input) {
     sourceFilePath,
     sourceFileName: text(descriptor.sourceFileName) || path.basename(sourceFilePath),
     archivePath: descriptor.archivePath ? path.resolve(descriptor.archivePath) : filePath,
-    stagingDir: descriptor.stagingDir ? path.resolve(descriptor.stagingDir) : ''
+    stagingDir: descriptor.stagingDir ? path.resolve(descriptor.stagingDir) : '',
+    stagedSnapshot: descriptor.stagedSnapshot,
+    stagedSha256: descriptor.stagedSha256,
+    stagedSizeBytes: descriptor.stagedSizeBytes
   };
 }
 
@@ -190,6 +193,9 @@ function readBankFiles(filePaths) {
       filePath: descriptor.sourceFilePath,
       archivePath: descriptor.archivePath,
       stagingDir: descriptor.stagingDir,
+      stagedSnapshot: descriptor.stagedSnapshot,
+      stagedSha256: descriptor.stagedSha256,
+      stagedSizeBytes: descriptor.stagedSizeBytes,
       fileName,
       rowCount: parsedRows.length,
       scopes: [...scopes]
@@ -364,6 +370,9 @@ function readSourceFile(input) {
     filePath: descriptor.sourceFilePath,
     archivePath: descriptor.archivePath,
     stagingDir: descriptor.stagingDir,
+    stagedSnapshot: descriptor.stagedSnapshot,
+    stagedSha256: descriptor.stagedSha256,
+    stagedSizeBytes: descriptor.stagedSizeBytes,
     fileName,
     sheetName: detected.sheetName,
     records,
@@ -431,6 +440,9 @@ function readSourceFiles(filePaths) {
         filePath: descriptor.sourceFilePath,
         archivePath: descriptor.archivePath,
         stagingDir: descriptor.stagingDir,
+        stagedSnapshot: descriptor.stagedSnapshot,
+        stagedSha256: descriptor.stagedSha256,
+        stagedSizeBytes: descriptor.stagedSizeBytes,
         fileName: descriptor.sourceFileName,
         code: error && error.code ? error.code : 'position-source-import-failed',
         message: error && error.message ? error.message : String(error),

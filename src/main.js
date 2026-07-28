@@ -72,6 +72,7 @@ const {
   createPositionReconciliationService
 } = require('./main-process/position-reconciliation/service');
 const {
+  assertStagedInputUnchanged,
   filterStagingPathsWithoutProtectedSources
 } = require('./main-process/position-reconciliation/input-staging');
 const {
@@ -80,7 +81,9 @@ const {
   POSITION_SIDE_DB_BOOTSTRAP_SETTING
 } = require('./main-process/position-reconciliation/constants');
 const {
+  assertPositionRecoveryInputsUnchanged,
   requirePositionPendingArchiveFiles,
+  positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,
@@ -14192,16 +14195,32 @@ function recordPositionArchiveIntentFiles(filePaths, role) {
     ? pending.archiveFiles.slice()
     : [];
   for (const value of filePaths) {
-    const filePath = path.resolve(String(value || ''));
-    if (!value) continue;
+    const descriptor = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : { filePath: value };
+    const rawPath = String(descriptor.filePath || '').trim();
+    if (!rawPath) continue;
+    const filePath = path.resolve(rawPath);
     const key = `${role}\u0000${filePath}`;
     if (seen.has(key)) continue;
+    const archiveFile = role === 'input'
+      ? {
+          filePath,
+          role,
+          sourceSnapshot: descriptor.sourceSnapshot,
+          sha256: descriptor.expectedSha256 || descriptor.sha256,
+          sizeBytes: descriptor.sizeBytes
+        }
+      : {
+          filePath,
+          role,
+          beforeSnapshot: capturePositionArchiveFileSnapshot(filePath)
+        };
+    const normalized = requirePositionPendingArchiveFiles({
+      archiveFiles: [archiveFile]
+    })[0];
     seen.add(key);
-    archiveFiles.push({
-      filePath,
-      role,
-      beforeSnapshot: capturePositionArchiveFileSnapshot(filePath)
-    });
+    archiveFiles.push(normalized);
   }
   writePositionPendingOperation({
     ...pending,
@@ -14270,11 +14289,14 @@ function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
     throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
   }
-  const recoveryFiles = files.map((file) => ({
-    filePath: file.filePath,
-    role: file.role,
-    sourceSnapshot: capturePositionArchiveFileSnapshot(file.filePath)
-  }));
+  assertPositionRecoveryInputsUnchanged(
+    { archiveFiles: files },
+    assertStagedInputUnchanged
+  );
+  const recoveryFiles = positionRecoveryArchiveFiles(
+    { archiveFiles: files },
+    { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
+  );
   return archiveCenterService.persistOperationIntent({
     ...positionArchiveModule(String(pending.channel || '')),
     sourceOperation: String(pending.channel || ''),
@@ -15237,6 +15259,7 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
   if (channel === 'position-reconciliation:bank:apply-import') {
     return {
       inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
       cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : [],
       metadata: {
         scopes: result && Array.isArray(result.scopes) ? result.scopes : [],
@@ -15247,12 +15270,14 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
   if (channel === 'position-reconciliation:source:prepare-import') {
     return {
       inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
       cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
     };
   }
   if (channel === 'position-reconciliation:source:apply-import') {
     return {
       inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
       cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
     };
   }
@@ -15269,6 +15294,7 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
     return {
       runKey: result && result.runId,
       inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
       cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
     };
   }

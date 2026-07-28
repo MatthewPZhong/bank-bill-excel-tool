@@ -269,6 +269,32 @@ test.describe('archive operation tracker', () => {
     assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, sourceSnapshot);
   });
 
+  test('平盘输入优先携带解析时 snapshot 和 SHA，不被操作完成后的快照覆盖', async () => {
+    const { tracker, calls } = createHarness();
+    const inputPath = path.resolve('/tmp/position-input.xlsx');
+    const parsedSnapshot = { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 };
+    const laterSnapshot = { sizeBytes: 10, mtimeMs: 50, ctimeMs: 60, ino: 40 };
+    const expectedSha256 = 'b'.repeat(64);
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: [inputPath],
+        inputFiles: [{
+          filePath: inputPath,
+          sourceSnapshot: parsedSnapshot,
+          expectedSha256,
+          sizeBytes: 10
+        }],
+        sourceSnapshots: new Map([[inputPath, laterSnapshot]])
+      }
+    });
+
+    assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, parsedSnapshot);
+    assert.equal(calls[0].payload.files[0].expectedSha256, expectedSha256);
+    assert.equal(calls[0].payload.files[0].sizeBytes, 10);
+  });
+
   test('存档异常转成告警，不向业务调用方抛出', async () => {
     const warnings = [];
     const tracker = createArchiveOperationTracker({

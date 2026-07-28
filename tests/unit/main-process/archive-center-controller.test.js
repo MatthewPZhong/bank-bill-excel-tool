@@ -601,7 +601,13 @@ test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', 
 
   const first = controller.persistOperationIntent({
     ...shared,
-    files: [{ filePath: inputPath, role: 'input' }]
+    files: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceSnapshot: { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 },
+      expectedSha256: 'c'.repeat(64),
+      sizeBytes: 10
+    }]
   });
   const second = controller.persistOperationIntent({
     ...shared,
@@ -612,5 +618,13 @@ test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', 
   assert.deepEqual(
     outboxStore.list()[0].payload.files.map((file) => file.filePath).sort(),
     [inputPath, outputPath].sort()
+  );
+  const persistedInput = outboxStore.list()[0].payload.files.find(
+    (file) => file.filePath === inputPath
+  );
+  assert.equal(persistedInput.expectedSha256, 'c'.repeat(64));
+  assert.deepEqual(
+    persistedInput.sourceSnapshot,
+    { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 }
   );
 });

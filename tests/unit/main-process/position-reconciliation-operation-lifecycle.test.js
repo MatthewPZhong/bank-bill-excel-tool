@@ -7,17 +7,33 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  assertPositionRecoveryInputsUnchanged,
+  positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,
   settlePositionArchiveResult
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
 const {
+  assertStagedInputUnchanged,
+  hashFileSha256Sync
+} = require('../../../src/main-process/position-reconciliation/input-staging');
+const {
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('../../../src/main-process/archive-center/source-snapshot');
 
 const SUCCESS_STATUSES = new Set(['ok', 'success']);
+const INPUT_EVIDENCE = Object.freeze({
+  sourceSnapshot: Object.freeze({
+    sizeBytes: 10,
+    mtimeMs: 20,
+    ctimeMs: 30,
+    ino: 40
+  }),
+  sha256: 'a'.repeat(64),
+  sizeBytes: 10
+});
 
 function checkpoint(generation) {
   return {
@@ -153,7 +169,7 @@ test('账户表 prepare 不建空存档且清除 pending，apply 后正式存档
     archiveFiles: [{
       filePath: '/tmp/account-staged.xlsx',
       role: 'input',
-      beforeSnapshot: null
+      ...INPUT_EVIDENCE
     }],
     archiveResult: { batchId: 'archive-batch-1' }
   });
@@ -216,7 +232,7 @@ test('正式存档与持久重试都失败时保留 pending 并返回禁止重�
     archiveFiles: [{
       filePath: '/tmp/input.xlsx',
       role: 'input',
-      beforeSnapshot: null
+      ...INPUT_EVIDENCE
     }],
     archiveResult: {
       archiveFailed: true,
@@ -258,6 +274,24 @@ test('损坏存档文件清单在任何 archive 状态下都禁止同步 checkpo
         archiveState: 'durable',
         archiveFiles: [{ filePath: '   ' }]
       }
+    },
+    {
+      label: 'input 缺少解析时摘要',
+      pending: {
+        operationToken: 'invalid-input-evidence',
+        archiveRequired: true,
+        archiveState: 'intent-recorded',
+        archiveFiles: [{ filePath: '/tmp/input.xlsx', role: 'input' }]
+      }
+    },
+    {
+      label: 'output 缺少写出前快照字段',
+      pending: {
+        operationToken: 'invalid-output-evidence',
+        archiveRequired: true,
+        archiveState: 'intent-recorded',
+        archiveFiles: [{ filePath: '/tmp/output.xlsx', role: 'output' }]
+      }
     }
   ];
 
@@ -290,4 +324,63 @@ test('损坏存档文件清单在任何 archive 状态下都禁止同步 checkpo
     assert.equal(clearCount, 0, item.label);
     assert.notEqual(persistedPending, null, item.label);
   }
+});
+
+test('恢复 input 只复用 pending 的解析时证据，不重新抓取当前文件快照', () => {
+  let outputSnapshotCaptureCount = 0;
+  const files = positionRecoveryArchiveFiles({
+    archiveFiles: [{
+      filePath: '/tmp/staged-input.xlsx',
+      role: 'input',
+      ...INPUT_EVIDENCE
+    }]
+  }, {
+    captureOutputSnapshot: () => {
+      outputSnapshotCaptureCount += 1;
+      return {
+        sizeBytes: 999,
+        mtimeMs: 999,
+        ctimeMs: 999
+      };
+    }
+  });
+
+  assert.equal(outputSnapshotCaptureCount, 0);
+  assert.deepEqual(files, [{
+    filePath: '/tmp/staged-input.xlsx',
+    role: 'input',
+    sourceSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+    expectedSha256: INPUT_EVIDENCE.sha256,
+    sizeBytes: INPUT_EVIDENCE.sizeBytes
+  }]);
+});
+
+test('恢复前暂存输入字节变化时 fail closed，不允许继续登记恢复意图', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'position-recovery-input-change-'));
+  const inputPath = path.join(directory, 'input.xlsx');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(inputPath, 'version-A-contents');
+  const before = fs.statSync(inputPath);
+  const pending = {
+    archiveFiles: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceSnapshot: sourceSnapshotFromStat(before),
+      sha256: hashFileSha256Sync(inputPath).sha256,
+      sizeBytes: before.size
+    }]
+  };
+  fs.writeFileSync(inputPath, 'version-B-contents');
+  fs.utimesSync(inputPath, before.atime, before.mtime);
+  let recoveryIntentCount = 0;
+
+  assert.throws(
+    () => {
+      assertPositionRecoveryInputsUnchanged(pending, assertStagedInputUnchanged);
+      recoveryIntentCount += 1;
+    },
+    (error) => error && error.code === 'position-staged-input-changed'
+  );
+  assert.equal(recoveryIntentCount, 0);
+  assert.equal(fs.existsSync(inputPath), true);
 });

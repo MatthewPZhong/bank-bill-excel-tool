@@ -126,13 +126,26 @@ function outputPathsFromFiles(result) {
   return normalizePathList(result.files.map((item) => item && (item.filePath || item.savedPath || item.path)));
 }
 
-function buildFileSpecs(paths, role, sourceOperation) {
-  return normalizePathList(paths).map((filePath) => ({
-    filePath,
-    role,
-    sourceOperation,
-    originalName: path.basename(filePath)
-  }));
+function buildFileSpecs(values, role, sourceOperation) {
+  const source = Array.isArray(values) ? values : (values ? [values] : []);
+  const seen = new Set();
+  const files = [];
+  for (const value of source) {
+    const descriptor = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : { filePath: value };
+    const filePath = String(descriptor.filePath || '').trim();
+    if (!filePath || seen.has(filePath)) continue;
+    seen.add(filePath);
+    files.push({
+      ...descriptor,
+      filePath,
+      role: descriptor.role || role,
+      sourceOperation: descriptor.sourceOperation || sourceOperation,
+      originalName: descriptor.originalName || path.basename(filePath)
+    });
+  }
+  return files;
 }
 
 function dedupeFileSpecs(files) {
@@ -696,7 +709,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       return archiveImmediate(
         MODULES.position,
         channel,
-        runtime.inputPaths || [],
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
         [],
         runtime.metadata || {}
       );
@@ -706,7 +721,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       return archiveImmediate(
         MODULES.positionLink,
         channel,
-        runtime.inputPaths || [],
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
         [],
         runtime.metadata || {}
       );
@@ -716,7 +733,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       return archiveImmediate(
         MODULES.positionLink,
         channel,
-        runtime.inputPaths || [],
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
         [],
         runtime.metadata || {}
       );
@@ -736,7 +755,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       return archiveImmediate(
         MODULES.position,
         channel,
-        runtime.inputPaths || [],
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
         [],
         { ...(runtime.metadata || {}), runKey: runtime.runKey }
       );

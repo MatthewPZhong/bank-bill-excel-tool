@@ -30,6 +30,7 @@
 - [x] 已确认运行血缘与持久来源消费表双向完整性校验
 - [x] 消费 owner 运行状态、完整运行行血缘与幂等旧 owner 验真
 - [x] Excel 日期时间往返兼容、回导统计刷新和差异范围隔离
+- [x] BillDate/ValueDate 纯日期兼容与完整时分秒防篡改
 
 ## 4. UI 与接线
 
@@ -59,6 +60,8 @@
 - [x] outbox 拒绝非字符串和空白文件路径，并覆盖两次启动保留
 - [x] 所有 archive 状态在 checkpoint 前强制校验 pending 文件清单
 - [x] 管理页侧库恢复错误展示 detailLines
+- [x] 暂存输入解析时 snapshot/size/SHA-256 绑定并贯穿 token、pending、outbox 和正式存档
+- [x] 恢复 input 复用解析时证据并在 outbox 登记前校验，内容变化时 fail closed
 
 ## 5. 验证
 
@@ -71,5 +74,6 @@
 - [ ] team-lead 三层质量门禁（最终提交）
 - [ ] self-review P0-P4 Finding 清零（最终提交）
 - [x] 记录真实资金人工复核缺口
+- [x] 外部 final review P2/P3 故障注入回归
 
 > 自动化、预览和代码复核已完成；真实或脱敏资金数据逐笔验收仍是发布前人工门禁，不以本清单勾选代替。

@@ -424,6 +424,46 @@ test('业务完成后源文件发生变化时拒绝错存，并保留明确失�
   }
 });
 
+test('源 stat 与当前文件一致但 SHA 不等于业务解析摘要时仍拒绝存档', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'same-stat-different-bytes.xlsx', 'version-A-contents');
+    const expectedSha256 = crypto
+      .createHash('sha256')
+      .update('version-A-contents')
+      .digest('hex');
+    fs.writeFileSync(sourcePath, 'version-B-contents');
+    const currentSnapshot = sourceSnapshotFromStat(fs.statSync(sourcePath));
+
+    const rejected = await fixture.service.archiveFile({
+      ...batchPayload('source-sha-mismatch'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: currentSnapshot,
+      expectedSha256
+    });
+
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.code, 'ARCHIVE_SOURCE_CHANGED');
+    assert.equal(rejected.retryable, true);
+    assert.match(rejected.message, /业务解析时版本不一致/);
+    const detail = await fixture.service.getBatch(rejected.batch.id);
+    assert.equal('expectedSha256' in detail.batch.artifacts[0].metadata, false);
+
+    const validPath = writeSource(fixture, 'matching-sha.xlsx', 'matching-contents');
+    const valid = await fixture.service.archiveFile({
+      ...batchPayload('source-sha-match'),
+      filePath: validPath,
+      role: 'input',
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(validPath)),
+      expectedSha256: crypto.createHash('sha256').update('matching-contents').digest('hex')
+    });
+    assert.equal(valid.ok, true);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('cleanupExpired 按本地日清理，保留日当天不删且锁定批次跳过', async () => {
   const fixture = createFixture();
   try {

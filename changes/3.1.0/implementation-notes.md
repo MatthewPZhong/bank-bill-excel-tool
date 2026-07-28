@@ -26,7 +26,7 @@
 | 运行 envelope、明细和当前来源交叉校验 | 语法合法但共同伪造来源、结果或冲突计数可绕过 stale、审计及消费判断 | 每行保存完整性 hash；来源、结果、差异、消费和当前银行/链接记录逐项重算并 fail-closed |
 | 已确认订单来源持久消费 | 单次运行 1:1 不能阻止跨月份或来源重建后的重复消费 | 侧库保存来源三元组与银行 BizId 的双向唯一关系 |
 | 银行全局 revision | FundTransfer-in 会读取运行范围外的 out 银行行 | 任一银行导入、删除或确认都会使依赖历史 out 的草稿失效 |
-| 输入使用私有不可变暂存副本 | 选择文件到确认/存档之间，原路径可能被用户或外部程序覆盖 | 解析、写库与存档使用同一字节快照；业务失败或取消立即回收，存档失败保留到可重试状态结束 |
+| 输入使用带 SHA-256 证据的私有不可变暂存副本 | 仅复用同一路径或 stat 不能证明解析与存档是同一字节版本 | 复制后记录 snapshot/size/SHA，解析后、写库前、恢复前和正式存档时逐层复核 |
 | 草稿绑定规则版本 | 仅绑定数据 revision 无法发现代码口径升级 | 规则版本变化后旧草稿自动失效 |
 | 平盘存档采用独立即时批次 | 运行批次内存关联跨重启丢失，且重复导出只留首份 | 每次成功输入、导出和回导均独立可追溯 |
 | 存档建批增加持久文件 outbox | 主存档数据库不可用时，仅返回 warning 会丢失跨重启重试证据 | 业务返回前必须形成正式批次或原子 outbox；启动后重放成正式批次 |
@@ -97,12 +97,16 @@
 - 正式建批、正式追加及 outbox 重放共享 artifact 完整性门禁；任一文件缺少正整数 artifact ID 时写入或保留同一 operation key 的 outbox，后续可在原正式批次补齐。正式批次与 outbox 同时失败时不得宣称可重试，也不推进 checkpoint。
 - 清结算银行账户表单独导入的 prepare 结果显式标记 `archiveDeferred`；待用户确认期间不视为已提交业务，不建立空存档批次，apply 后再按正式输入存档。
 - 将平盘 pending/checkpoint 完成步骤、存档结果结算和输出发布证据判定抽为可注入 helper，行为测试覆盖 prepare、apply、已发布输出 outbox 恢复及正式存档/outbox 双失败。
-- service 初始化清理暂存前合并主库 pending `archiveFiles` 与存档中心保护集；pending 存在但文件数组缺失、非数组或任一 `filePath` 非空字符串校验失败时，不再降级为空保护集。恢复登记与同进程 lifecycle 在任何 archive 状态早退或 checkpoint 同步前都复用同一解析器；损坏清单会保留 pending、阻断 checkpoint 且不产生错误 outbox。outbox 也拒绝非字符串和空白路径。保护 provider 返回非数组或抛异常时同样保守不清理。
+- service 初始化清理暂存前合并主库 pending `archiveFiles` 与存档中心保护集；pending 存在但文件数组缺失、非数组，input 缺合法 `filePath/sourceSnapshot/sizeBytes/SHA-256`，或 output 缺 `beforeSnapshot` 字段时，不再降级为空保护集。恢复登记与同进程 lifecycle 在任何 archive 状态早退或 checkpoint 同步前都复用同一解析器；损坏清单会保留 pending、阻断 checkpoint 且不产生错误 outbox。outbox 也拒绝非字符串和空白路径。保护 provider 返回非数组或抛异常时同样保守不清理。
 - 业务错误页透传 `detailLines`；Excel 文本列补齐 `Account Reference`、`大额行号` 和 `VA`。
+- 外部 final review 复核确认：旧实现只绑定暂存路径/stat，可能出现 side DB 解析版本 A、存档凭证版本 B。现已将解析时 snapshot/size/SHA-256 贯穿银行/来源/回导 token、主库 pending、operation tracker、controller、outbox 和 ArchiveService；恢复不得重新信任当前 input 快照，内容变化在 outbox 登记前 fail closed。
+- BillDate/ValueDate 不再一律降为日历日比较；纯日期仍接受等价 Excel 日期，包含时分秒时执行完整比较，仅兼容固定库时区偏移和最多 2ms 的 Excel 浮点误差。
 
 ## Evidence
 
 - 平盘 service、Excel、UI、side DB 完整性、存档 outbox 与主进程生命周期定向回归全部通过。
+- final review 定向回归覆盖银行确认、账户确认、普通来源自动落库、结果回导四条暂存变化路径；覆盖 input pending 证据缺失、恢复不重拍 input 快照、恢复前变化不登记 outbox、相同长度内容 SHA 不同、正式存档 SHA 匹配/不匹配。
+- BillDate/ValueDate 回导覆盖小时、分钟、秒、跨日、非法文本、纯日期等价单元格及 ExcelJS→SheetJS 时区往返。
 - position side DB 集成回放：38/38 通过，覆盖原子拒绝、重启恢复、snapshot 失效、跨运行 1:1、重新运行、导出、确认、原始快照不变和主库零批量表。
 - 主页面、对账数据管理、差异页、链接表管理、链接原始表、来源删除、运行范围、结果确认、账户映射共 9 张 preview 已生成并人工检查无重叠或截断；结果确认统计改为三列两行，消除扩容后的空白网格。
 - 在隔离 userData 的 Electron 实例中真实点击“对账数据管理”和“链接表管理”，两页均成功读取空侧库并完整渲染。
@@ -110,7 +114,7 @@
 - 新增差异页独立 preview，人工检查筛选项横向排列、五列表头和最新月份默认值无重叠或截断。
 - 链接表汇总定向测试覆盖派生 0 行仍保留更新日期；链接管理 preview 验证月份范围和更新日期列。
 - 链接管理前端契约覆盖三列表头、底部按钮顺序/颜色及目标链接表导出路由。
-- 全量单测：3986/3986；44 个集成脚本 2016/2016；smoke 与 lint 通过。
+- 全量单测：3996/3996；44 个集成脚本 2016/2016；smoke 与 lint 通过。
 - 存档生命周期定向测试覆盖失败保留、重试成功释放、删除批次释放、跨批次共用源路径保护、释放回调失败隔离、未完成源路径查询和启动清理保护。
 - pending 损坏测试覆盖恢复校验阻断、`archiveRequired=false/缺失`、`archiveState=durable`、同进程 checkpoint 门禁及连续两次启动保留真实暂存；合法空文件数组仍清理无保护旧目录，outbox 非字符串/空白路径 fail-closed。
 - 真实 SQLite 故障注入覆盖正式建批与追加在 artifact INSERT 失败后转入 outbox、原 operation key 重放补齐，以及 artifact/outbox 双失败不可重试。
