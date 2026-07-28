@@ -561,6 +561,78 @@ test.describe('archive operation tracker', () => {
     ]);
   });
 
+  test('平盘输入、回导和每次结果导出都独立立即存档，不依赖进程内运行批次', async () => {
+    const { tracker, calls } = createHarness();
+
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:source:prepare-import',
+      result: {
+        status: 'ok',
+        results: [
+          { status: 'ok', fileName: 'transfer.xlsx' },
+          { status: 'failed', fileName: 'bad.xlsx' }
+        ]
+      },
+      runtime: { inputPaths: ['/tmp/transfer.xlsx'] }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: ['/tmp/position-bank.xlsx'],
+        metadata: { scopes: [{ channel: 'DBS', monthKey: '2026-07' }] }
+      }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:run:export',
+      result: { status: 'ok', runId: 31 },
+      runtime: { runKey: 31, outputPaths: ['/tmp/position-result.xlsx'] }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:run:import-result',
+      result: { status: 'ok', runId: 31 },
+      runtime: { runKey: 31, inputPaths: ['/tmp/position-edited.xlsx'] }
+    });
+
+    const creates = calls.filter((call) => call.type === 'create');
+    assert.equal(creates.length, 4);
+    assert.deepEqual(creates.map((call) => call.payload.files[0].filePath), [
+      '/tmp/transfer.xlsx',
+      '/tmp/position-bank.xlsx',
+      '/tmp/position-result.xlsx',
+      '/tmp/position-edited.xlsx'
+    ]);
+    assert.equal(calls.filter((call) => call.type === 'append').length, 0);
+  });
+
+  test('平盘银行批量导入立即存档全部成功输入，跨重启无需恢复范围内存', async () => {
+    const { tracker, calls } = createHarness();
+
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx'],
+        metadata: {
+          scopes: [
+            { channel: 'DBS', monthKey: '2026-07' },
+            { channel: 'MAYBANK', monthKey: '2026-08' }
+          ],
+          scopeInputs: [
+            { channel: 'DBS', monthKey: '2026-07', inputPaths: ['/tmp/dbs.xlsx'] },
+            { channel: 'MAYBANK', monthKey: '2026-08', inputPaths: ['/tmp/maybank.xlsx'] }
+          ]
+        }
+      }
+    });
+
+    const importedBatch = calls.find((call) => call.type === 'create');
+    assert.deepEqual(
+      importedBatch.payload.files.map((item) => item.filePath),
+      ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx']
+    );
+  });
+
   test('临时 MPT 修复不会抢占正式前置资金对账的首次结果', async () => {
     const { tracker, calls } = createHarness();
     await tracker.handleOperation({

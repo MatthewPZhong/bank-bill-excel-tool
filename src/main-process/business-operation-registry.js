@@ -13,6 +13,7 @@ function normalizeOperation(meta = {}) {
 
 function createBusinessOperationRegistry() {
   const activeOperations = new Map();
+  const idleWaiters = new Set();
   let nextToken = 1;
   let installTransitionActive = false;
 
@@ -33,6 +34,10 @@ function createBusinessOperationRegistry() {
 
   function end(token) {
     activeOperations.delete(token);
+    if (activeOperations.size === 0) {
+      for (const resolve of idleWaiters) resolve();
+      idleWaiters.clear();
+    }
   }
 
   function listActive() {
@@ -62,11 +67,23 @@ function createBusinessOperationRegistry() {
     installTransitionActive = false;
   }
 
+  function beginShutdownTransition() {
+    installTransitionActive = true;
+    return { operations: listActive() };
+  }
+
+  function waitForIdle() {
+    if (activeOperations.size === 0) return Promise.resolve();
+    return new Promise((resolve) => idleWaiters.add(resolve));
+  }
+
   return {
     begin,
     end,
     listActive,
     beginInstallTransition,
+    beginShutdownTransition,
+    waitForIdle,
     cancelInstallTransition,
     isInstallTransitionActive: () => installTransitionActive
   };

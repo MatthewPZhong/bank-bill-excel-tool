@@ -2908,6 +2908,315 @@ select.mapping-text-input {
   width: min(100%, 470px);
 }
 
+/* v3.1.0：平盘对账数据、链接表、差异和结果确认弹窗。 */
+.position-reconciliation-dialog {
+  width: min(1040px, calc(100vw - 56px));
+  min-height: 430px;
+  letter-spacing: 0;
+}
+
+.position-reconciliation-dialog .dialog-title {
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.position-dialog-content {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  background: #fff;
+}
+
+.position-manager-dialog {
+  height: min(650px, calc(100vh - 56px));
+}
+
+.position-manager-layout {
+  display: grid;
+  grid-template-columns: 156px minmax(0, 1fr);
+  min-height: 100%;
+}
+
+.position-manager-nav {
+  padding: 12px 8px;
+  border-right: 1px solid var(--line-soft);
+  background: #f8f9fa;
+}
+
+.position-nav-item {
+  width: 100%;
+  height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  text-align: left;
+  padding: 0 14px;
+}
+
+.position-nav-item:hover {
+  background: #eef1f5;
+  color: var(--text);
+}
+
+.position-nav-item.active {
+  background: #e8f0fe;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.position-manager-pane {
+  min-width: 0;
+  padding: 12px;
+}
+
+.position-manager-table {
+  max-height: 470px;
+  border-radius: 6px;
+}
+
+.position-manager-table .data-table {
+  table-layout: auto;
+}
+
+.position-manager-table .data-table th,
+.position-manager-table .data-table td {
+  padding: 11px 12px;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.position-manager-table .data-table th {
+  white-space: nowrap;
+}
+
+.position-manager-table .row-actions {
+  min-width: 96px;
+}
+
+.position-difference-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px 32px;
+  padding: 2px 0 14px;
+}
+
+.position-difference-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.position-difference-filter select {
+  width: 220px;
+  letter-spacing: 0;
+}
+
+.position-difference-month-filter select {
+  width: 150px;
+}
+
+.position-footer-left,
+.position-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.position-reconciliation-dialog .dialog-actions {
+  min-height: 72px;
+  margin: 0;
+}
+
+.position-scope-dialog,
+.position-delete-source-dialog {
+  width: min(620px, calc(100vw - 56px));
+  min-height: 0;
+}
+
+.position-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 24px 28px;
+}
+
+.position-scope-grid fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.position-scope-grid legend {
+  padding: 0 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.position-check-all,
+.position-check-list label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.position-check-all {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.position-check-list {
+  max-height: 210px;
+  overflow: auto;
+  padding-top: 6px;
+}
+
+.position-check-list input,
+.position-check-all input {
+  accent-color: var(--primary);
+}
+
+.position-result-dialog {
+  width: min(720px, calc(100vw - 56px));
+  min-height: 0;
+}
+
+.position-result-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  margin: 28px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--line-soft);
+}
+
+.position-result-metrics > div {
+  min-width: 0;
+  min-height: 96px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: #fff;
+  text-align: center;
+}
+
+.position-result-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.position-result-metrics strong {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.position-result-note {
+  margin: -14px 28px 24px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.position-mapping-dialog,
+.position-raw-dialog {
+  width: min(920px, calc(100vw - 56px));
+  min-height: 430px;
+}
+
+.position-mapping-table {
+  margin: 12px;
+  max-height: 440px;
+  border-radius: 6px;
+}
+
+.position-cell-input {
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.position-cell-input:focus {
+  outline: 2px solid rgba(26, 115, 232, 0.18);
+  border-color: var(--primary);
+}
+
+.position-linked-label {
+  padding: 16px 24px 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.position-form-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 8px 28px;
+}
+
+.position-form-row:first-child {
+  padding-top: 24px;
+}
+
+.position-form-row:last-child {
+  padding-bottom: 24px;
+}
+
+.position-form-row label {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.position-form-row select {
+  width: 100%;
+  min-height: 42px;
+}
+
+.position-form-row select[multiple] {
+  height: 150px;
+  padding: 8px;
+  background-image: none;
+}
+
+.position-danger-btn {
+  border-color: rgba(217, 48, 37, 0.35);
+  color: var(--danger);
+}
+
+@media (max-width: 760px) {
+  .position-manager-layout {
+    grid-template-columns: 126px minmax(0, 1fr);
+  }
+
+  .position-scope-grid,
+  .position-result-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* fix2-1 (2026-05-27)：渠道管理「执行操作」表头与「修改」按钮最左侧对齐
    .channels-action-cell 第一个 .text-action 去掉默认 margin-left + padding-left，
    与表头 .manager-action-header 起点对齐（同 row-actions / account-mapping-action-cell 范式）*/

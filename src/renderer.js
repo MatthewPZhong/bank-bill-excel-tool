@@ -543,6 +543,17 @@ const rendererPending = window.__rendererPending.createRendererPending({
   createConfirmDialog
 });
 
+const positionReconciliationUI = window.__positionReconciliation
+  ? window.__positionReconciliation.createPositionReconciliationUI({
+      api: window.desktopApi && window.desktopApi.positionReconciliation,
+      openModal,
+      closeModal,
+      createAlertDialog,
+      createConfirmDialog,
+      modalRoot: elements.modalRoot
+    })
+  : null;
+
 const {
   applyNewAccountPreviewState,
   applyTemplateManagerPreviewState,
@@ -1527,6 +1538,11 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   }
   if (elements.positionReconciliationModulePanel) {
     elements.positionReconciliationModulePanel.hidden = moduleId !== MODULES.positionReconciliation.id;
+    if (moduleId === MODULES.positionReconciliation.id && positionReconciliationUI) {
+      positionReconciliationUI.refresh().catch((error) => {
+        console.warn('refresh position reconciliation status failed:', error);
+      });
+    }
   }
   // v2.1.2 T2：月度银行对账单BU回填校验模块面板隐藏控制
   if (elements.bankBuReconModulePanel) {
@@ -7780,6 +7796,7 @@ async function applyFullInfo(info) {
   closeModuleMenu();
   await rendererPending.initialize();
   rendererPending.bindEvents();
+  if (positionReconciliationUI) await positionReconciliationUI.initialize();
   setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error', {
     errorReportReady: false
   });
@@ -7883,16 +7900,7 @@ async function applyFullInfo(info) {
       updateReconIdFixUi();
     });
   }
-  // v3.0.24：仅前端占位，所有业务按钮禁止接真实 IPC。
-  [
-    [elements.positionReconciliationRunBtn, '开始运行'],
-    [elements.positionReconciliationTableManagerBtn, '对账数据管理'],
-    [elements.positionReconciliationLinkedTableManagerBtn, '链接表管理'],
-    [elements.positionReconciliationConfigBtn, '对账配置管理'],
-    [elements.positionReconciliationExportBtn, '导出文件']
-  ].forEach(([button, featureName]) => {
-    if (button) button.addEventListener('click', () => showComingSoon(featureName));
-  });
+  // v3.1.0：平盘模块事件由 renderer-position-reconciliation.js 独立管理。
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -8448,6 +8456,38 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'position-reconciliation-panel') {
     setTimeout(() => {
       applyPositionReconciliationPanelPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-data-manager') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewDataManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-differences') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewDifferenceManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-linked-manager') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewLinkedManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-raw-sources') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewRawSourceDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-source-delete') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewSourceDeleteDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-run-scope') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewRunScopeDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-result') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewResultDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-account-mapping') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewMappingDialog();
     }, 120);
   } else if (info.previewModal === 'scenario-config-c4-gateway') {
     setTimeout(() => {

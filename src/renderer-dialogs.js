@@ -295,7 +295,12 @@
     }
 
     function createAlertDialog(message, options = {}) {
-      const { onConfirm = null } = options;
+      const {
+        onConfirm = null,
+        confirmText = '确认',
+        confirmSecondary = false,
+        closeOnConfirm = true
+      } = options;
       // v2.1.9 SR-log-1 (T32i)：wrapper hijack — createAlertDialog 默认告警弹框（spec §15.5）
       //   - 所有 createAlertDialog 调用方（误用 / 业务异常 / 校验失败）自动上报 error 级
       //   - try-catch graceful：desktopApi 不存在 → 不阻塞弹框渲染
@@ -329,11 +334,15 @@
           <div class="alert-message">${message}</div>
         </div>
         <div class="dialog-actions center">
-          <button class="primary-btn small" type="button">确认</button>
+          <button type="button"></button>
         </div>
       `;
-      dialog.querySelector('button').addEventListener('click', () => {
-        closeModal();
+      const confirmButton = dialog.querySelector('button');
+      confirmButton.className = confirmSecondary ? 'secondary-btn small' : 'primary-btn small';
+      confirmButton.textContent = String(confirmText || '确认');
+      confirmButton.addEventListener('click', () => {
+        if (closeOnConfirm) closeModal();
+        else overlay.remove();
         onConfirm?.();
       });
       overlay.appendChild(dialog);

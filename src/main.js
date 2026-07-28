@@ -62,6 +62,10 @@ const {
 const {
   createDuplicateInboundMatchService
 } = require('./main-process/duplicate-inbound-match/service');
+// v3.1.0：平盘资金性质校验（持久化银行/链接侧库 + 严格1:1匹配 + 结果回导确认）。
+const {
+  createPositionReconciliationService
+} = require('./main-process/position-reconciliation/service');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -394,6 +398,7 @@ let database = null;
 let pendingDb = null;
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
+let positionReconciliationService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
@@ -14102,6 +14107,289 @@ function registerDuplicateInboundMatchHandlers() {
   });
 }
 
+function getPositionReconciliationService() {
+  if (!database || !database.db) {
+    throw new Error('数据库尚未初始化，请稍后重试');
+  }
+  if (!positionReconciliationService) {
+    positionReconciliationService = createPositionReconciliationService({
+      userDataDir: path.dirname(database.dbPath),
+      templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx')
+    });
+  }
+  return positionReconciliationService;
+}
+
+function positionReconciliationFailureResult(error) {
+  return {
+    status: 'failed',
+    code: error && error.code ? String(error.code) : 'position-reconciliation-failed',
+    message: error && error.message ? String(error.message) : String(error),
+    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+  };
+}
+
+async function withPositionReconciliationLock(operation, task) {
+  const lock = tryAcquireBankStatementOpLock(`position-reconciliation-${operation}`);
+  if (!lock.acquired) return { status: 'busy', message: lock.message };
+  try {
+    return await task();
+  } catch (error) {
+    return positionReconciliationFailureResult(error);
+  } finally {
+    releaseBankStatementOpLock();
+  }
+}
+
+function positionReconciliationExportName(prefix) {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const stamp = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    pad(now.getHours()),
+    pad(now.getMinutes())
+  ].join('');
+  return `${stamp}_${sanitizeFileName(prefix)}.xlsx`;
+}
+
+function registerPositionReconciliationHandlers() {
+  ipcMain.handle('position-reconciliation:status', () => {
+    try {
+      return getPositionReconciliationService().status();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:data-manager', () => {
+    try {
+      return getPositionReconciliationService().dataManager();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:linked-manager', () => {
+    try {
+      return getPositionReconciliationService().linkedManager();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:mappings:list', () => {
+    try {
+      return getPositionReconciliationService().listMappings();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:prepare-import',
+    '平盘对账数据处理',
+    '导入银行对账单',
+    () => withPositionReconciliationLock('bank-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-bank', {
+        title: '导入平盘银行对账单',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().prepareBankImport(choice.filePaths);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:apply-import',
+    '平盘对账数据处理',
+    '导入银行对账单',
+    (_event, token) => withPositionReconciliationLock('bank-import-apply', () => (
+      getPositionReconciliationService().applyBankImport(token)
+    ))
+  );
+
+  ipcMain.handle('position-reconciliation:bank:cancel-import', () => {
+    try {
+      return getPositionReconciliationService().cancelBankImport();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:source:prepare-import',
+    '平盘对账数据处理',
+    '导入链接原始表',
+    () => withPositionReconciliationLock('source-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-linked-source', {
+        title: '导入链接原始表',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().prepareSourceImport(choice.filePaths);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:source:apply-import',
+    '平盘对账数据处理',
+    '导入链接原始表',
+    (_event, token) => withPositionReconciliationLock('source-import-apply', () => (
+      getPositionReconciliationService().applySourceImport(token)
+    ))
+  );
+
+  ipcMain.handle('position-reconciliation:source:cancel-import', (_event, token) => {
+    try {
+      return getPositionReconciliationService().cancelSourceImport(token);
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:mappings:save',
+    '平盘对账数据处理',
+    '账户映射管理',
+    (_event, mappings) => withPositionReconciliationLock('mapping-save', () => (
+      getPositionReconciliationService().saveMappings(mappings)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:delete',
+    '平盘对账数据处理',
+    '删除银行数据',
+    (_event, payload = {}) => withPositionReconciliationLock('bank-delete', () => (
+      getPositionReconciliationService().deleteBank(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:source:delete',
+    '平盘对账数据处理',
+    '删除链接原始表',
+    (_event, payload = {}) => withPositionReconciliationLock('source-delete', () => (
+      getPositionReconciliationService().deleteSource(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:export',
+    '平盘对账数据处理',
+    '导出银行数据',
+    (_event, payload = {}) => withPositionReconciliationLock('bank-export', async () => {
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出平盘银行对账单',
+        defaultPath: positionReconciliationExportName('平盘银行对账单'),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return getPositionReconciliationService().exportBank(payload, choice.filePath);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:linked:export',
+    '平盘对账数据处理',
+    '导出链接对账表',
+    (_event, sourceType, tableName = '平盘链接对账表') => (
+      withPositionReconciliationLock('linked-export', async () => {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出链接对账表',
+          defaultPath: positionReconciliationExportName(tableName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+        return getPositionReconciliationService().exportLinked(sourceType, choice.filePath);
+      })
+    )
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:raw:export',
+    '平盘对账数据处理',
+    '导出链接原始表',
+    (_event, sourceType, tableName = '链接原始表') => (
+      withPositionReconciliationLock('raw-export', async () => {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出链接原始表',
+          defaultPath: positionReconciliationExportName(tableName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+        return getPositionReconciliationService().exportRaw(sourceType, choice.filePath);
+      })
+    )
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run',
+    '平盘对账数据处理',
+    '开始运行',
+    (_event, payload = {}) => withPositionReconciliationLock('run', () => (
+      getPositionReconciliationService().run(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:export',
+    '平盘对账数据处理',
+    '导出文件',
+    (_event, payload = {}) => withPositionReconciliationLock('result-export', async () => {
+      const service = getPositionReconciliationService();
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: payload.differencesOnly ? '导出平盘差异数据' : '导出平盘资金性质校验结果',
+        defaultPath: payload.differencesOnly
+          ? positionReconciliationExportName('平盘资金性质校验差异数据')
+          : service.defaultResultFileName(),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return service.exportRun(payload.runId, choice.filePath, {
+        differencesOnly: payload.differencesOnly === true,
+        channels: Array.isArray(payload.channels) ? payload.channels : [],
+        regions: Array.isArray(payload.regions) ? payload.regions : [],
+        months: Array.isArray(payload.months) ? payload.months : [],
+        differenceStatuses: Array.isArray(payload.differenceStatuses)
+          ? payload.differenceStatuses
+          : []
+      });
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:import-result',
+    '平盘对账数据处理',
+    '导入修改结果',
+    (_event, runId) => withPositionReconciliationLock('result-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-result', {
+        title: '导入修改后的平盘资金性质校验结果',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().importRunResult(runId, choice.filePaths[0]);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:confirm',
+    '平盘对账数据处理',
+    '确认结果',
+    (_event, runId) => withPositionReconciliationLock('result-confirm', () => (
+      getPositionReconciliationService().confirmRun(runId)
+    ))
+  );
+}
+
 // 工具箱🧰（合表 / 拆表）3 个 IPC handler。
 //   行级变换、流式读写和原子发布委托 main-process/toolbox* 模块；本处负责 dialog、IPC 编排、状态反馈和日志。
 //
@@ -14623,7 +14911,65 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
     const paths = result && Array.isArray(result.archivedSourcePaths) ? result.archivedSourcePaths : [];
     return { inputPaths: paths };
   }
+  if (channel === 'position-reconciliation:bank:apply-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : [],
+      metadata: {
+        scopes: result && Array.isArray(result.scopes) ? result.scopes : [],
+        scopeInputs: result && Array.isArray(result.scopeInputs) ? result.scopeInputs : []
+      }
+    };
+  }
+  if (channel === 'position-reconciliation:source:prepare-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
+  if (channel === 'position-reconciliation:source:apply-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
+  if (channel === 'position-reconciliation:run:export'
+      || channel === 'position-reconciliation:bank:export'
+      || channel === 'position-reconciliation:linked:export'
+      || channel === 'position-reconciliation:raw:export') {
+    return {
+      runKey: result && result.runId,
+      outputPaths: archiveOutputPaths([result && result.filePath])
+    };
+  }
+  if (channel === 'position-reconciliation:run:import-result') {
+    return {
+      runKey: result && result.runId,
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
   return {};
+}
+
+function cleanupPositionArchiveStaging(runtime) {
+  const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
+  if (targets.length === 0 || !database || !database.dbPath) return;
+  const root = path.resolve(
+    path.dirname(database.dbPath),
+    'run-data',
+    'position-reconciliation',
+    'import-staging'
+  );
+  for (const value of targets) {
+    const target = path.resolve(String(value || ''));
+    if (target === root || !target.startsWith(`${root}${path.sep}`)) continue;
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+    } catch (_error) {
+      // 成功存档后的临时副本清理失败留待下次启动回收。
+    }
+  }
 }
 
 function reportArchiveFailure(warning) {
@@ -14679,7 +15025,9 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       .then((archiveResult) => {
         if (archiveResult && archiveResult.archiveFailed === true) {
           reportArchiveFailure(archiveResult.warning);
+          return;
         }
+        cleanupPositionArchiveStaging(runtime);
       })
       .catch((error) => {
         reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
@@ -14815,6 +15163,7 @@ function registerAllIpcHandlers() {
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
   registerDuplicateInboundMatchHandlers();
+  registerPositionReconciliationHandlers();
   registerToolboxHandlers();
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
@@ -15637,6 +15986,22 @@ async function prepareApplicationForQuit() {
   if (quitPreparationPromise) return quitPreparationPromise;
 
   quitPreparationPromise = (async () => {
+    businessOperationRegistry.beginShutdownTransition();
+    const businessDrainTimer = setTimeout(() => {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'app-quit',
+        message: '退出等待活动业务完成已超过 5 秒，完成后将继续退出'
+      });
+    }, 5000);
+    if (businessDrainTimer.unref) businessDrainTimer.unref();
+    try {
+      await businessOperationRegistry.waitForIdle();
+    } finally {
+      clearTimeout(businessDrainTimer);
+    }
+
     if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
     const archiveDrainTimer = setTimeout(() => {
@@ -15684,11 +16049,18 @@ async function prepareApplicationForQuit() {
     if (failures.length > 0) {
       throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
     }
+    if (positionReconciliationService) {
+      positionReconciliationService.close();
+      positionReconciliationService = null;
+    }
     quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
     flushUsageStatsForQuit();
     quitPreparationComplete = true;
   })().finally(() => {
-    if (!quitPreparationComplete) quitPreparationPromise = null;
+    if (!quitPreparationComplete) {
+      businessOperationRegistry.cancelInstallTransition();
+      quitPreparationPromise = null;
+    }
   });
 
   return quitPreparationPromise;

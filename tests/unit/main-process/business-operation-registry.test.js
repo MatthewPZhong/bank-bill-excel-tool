@@ -60,3 +60,24 @@ test('install transition reports current business operations without locking the
   registry.end(started.token);
   assert.equal(registry.beginInstallTransition().acquired, true);
 });
+
+test('shutdown transition blocks new work and resolves only after active operations drain', async () => {
+  const registry = createBusinessOperationRegistry();
+  const first = registry.begin({ channel: 'position-reconciliation:run:export' });
+  const second = registry.begin({ channel: 'position-reconciliation:source:prepare-import' });
+
+  const transition = registry.beginShutdownTransition();
+  assert.equal(transition.operations.length, 2);
+  assert.equal(registry.begin({ channel: 'file:import' }).accepted, false);
+
+  let drained = false;
+  const waiting = registry.waitForIdle().then(() => {
+    drained = true;
+  });
+  registry.end(first.token);
+  await Promise.resolve();
+  assert.equal(drained, false);
+  registry.end(second.token);
+  await waiting;
+  assert.equal(drained, true);
+});

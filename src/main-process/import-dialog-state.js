@@ -17,6 +17,9 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'toolbox-split-export-directory',
   'linked-table',
   'pre-fund-reconciliation-export',
+  'position-reconciliation-bank',
+  'position-reconciliation-linked-source',
+  'position-reconciliation-result',
   'bank-statement-process-bundle' // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
 ]);
 

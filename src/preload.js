@@ -279,6 +279,37 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('duplicate-inbound-match:export-progress', wrapped);
     }
   },
+  // v3.1.0：平盘资金性质校验。批量明细位于独立持久化 side DB。
+  positionReconciliation: {
+    status: () => ipcRenderer.invoke('position-reconciliation:status'),
+    dataManager: () => ipcRenderer.invoke('position-reconciliation:data-manager'),
+    linkedManager: () => ipcRenderer.invoke('position-reconciliation:linked-manager'),
+    prepareBankImport: () => ipcRenderer.invoke('position-reconciliation:bank:prepare-import'),
+    applyBankImport: (token) => ipcRenderer.invoke('position-reconciliation:bank:apply-import', token),
+    cancelBankImport: () => ipcRenderer.invoke('position-reconciliation:bank:cancel-import'),
+    prepareSourceImport: () => ipcRenderer.invoke('position-reconciliation:source:prepare-import'),
+    applySourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:apply-import', token),
+    cancelSourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:cancel-import', token),
+    listMappings: () => ipcRenderer.invoke('position-reconciliation:mappings:list'),
+    saveMappings: (mappings) => ipcRenderer.invoke('position-reconciliation:mappings:save', mappings),
+    deleteBank: (payload) => ipcRenderer.invoke('position-reconciliation:bank:delete', payload),
+    deleteSource: (payload) => ipcRenderer.invoke('position-reconciliation:source:delete', payload),
+    exportBank: (payload) => ipcRenderer.invoke('position-reconciliation:bank:export', payload),
+    exportLinked: (sourceType, tableName) => ipcRenderer.invoke(
+      'position-reconciliation:linked:export',
+      sourceType,
+      tableName
+    ),
+    exportRaw: (sourceType, tableName) => ipcRenderer.invoke(
+      'position-reconciliation:raw:export',
+      sourceType,
+      tableName
+    ),
+    run: (payload) => ipcRenderer.invoke('position-reconciliation:run', payload),
+    exportRun: (payload) => ipcRenderer.invoke('position-reconciliation:run:export', payload),
+    importRunResult: (runId) => ipcRenderer.invoke('position-reconciliation:run:import-result', runId),
+    confirmRun: (runId) => ipcRenderer.invoke('position-reconciliation:run:confirm', runId)
+  },
   // v3.0.8 需求1：工具箱🧰（合表 / 拆表）—— 脱离主对账流程的轻量 Excel 行级搬运小工具
   //   merge()       合表：main 内多选 → 表头校验 → 合并 → 另存为；返回 {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
   //   splitRead()   拆表第一步：main 内单选 → 读表头 + 各字段去重值；返回 {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message}

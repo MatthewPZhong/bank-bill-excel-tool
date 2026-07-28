@@ -449,7 +449,7 @@
             </div>
           </section>
 
-          <!-- v3.0.24：平盘对账数据处理仅交付前端占位，复用对账单修复两行结构。 -->
+          <!-- v3.1.0：平盘对账数据处理第一期交付资金性质校验，继续复用对账单修复两行结构。 -->
           <section id="positionReconciliationModulePanel" class="control-board module-panel bank-statement-board recon-id-fix-board position-reconciliation-board" hidden>
             <div class="control-row">
               <div class="cell left">
@@ -475,7 +475,7 @@
                 <div class="recon-id-fix-scenario-row position-reconciliation-config-row">
                   <span class="position-reconciliation-empty-label" aria-hidden="true"></span>
                   <button id="positionReconciliationConfigBtn" class="secondary-btn" type="button">对账配置管理</button>
-                  <button id="positionReconciliationExportBtn" class="secondary-btn" type="button">导出文件</button>
+                  <button id="positionReconciliationExportBtn" class="secondary-btn" type="button">结果确认</button>
                 </div>
               </div>
               <div class="cell right">
@@ -613,6 +613,7 @@
     <script src="./src/renderer-dialogs.js"></script>
     <script src="./src/renderer-previews.js"></script>
     <script src="./src/renderer-pending.js"></script>
+    <script src="./src/renderer-position-reconciliation.js"></script>
     <script src="./src/renderer.js"></script>
   </body>
 </html>

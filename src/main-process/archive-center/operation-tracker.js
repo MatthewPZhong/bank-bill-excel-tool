@@ -17,6 +17,8 @@ const MODULES = Object.freeze({
   vcc: Object.freeze({ id: 'vcc-op-calc', code: 'VCCOP', name: 'VCC业务OP计算' }),
   preFund: Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUND', name: '前置资金对账' }),
   duplicateInbound: Object.freeze({ id: 'duplicate-inbound-match', code: 'DUPINBOUND', name: '重复入金匹配' }),
+  position: Object.freeze({ id: 'position-reconciliation-process', code: 'POSITION', name: '平盘对账数据处理' }),
+  positionLink: Object.freeze({ id: 'position-reconciliation-process', code: 'POSITIONLINK', name: '平盘对账数据处理' }),
   linkedTable: Object.freeze({ id: 'bank-statement-process', code: 'LINKED', name: '资金对账数据处理' }),
   preFundTemp: Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUNDTEMP', name: '前置资金对账' })
 });
@@ -62,7 +64,15 @@ const ARCHIVE_CHANNELS = new Set([
   'pre-fund-reconciliation:export',
   'duplicate-inbound-match:import-files',
   'duplicate-inbound-match:run',
-  'duplicate-inbound-match:export'
+  'duplicate-inbound-match:export',
+  'position-reconciliation:bank:apply-import',
+  'position-reconciliation:source:prepare-import',
+  'position-reconciliation:source:apply-import',
+  'position-reconciliation:bank:export',
+  'position-reconciliation:linked:export',
+  'position-reconciliation:raw:export',
+  'position-reconciliation:run:export',
+  'position-reconciliation:run:import-result'
 ]);
 
 function normalizePathList(values) {
@@ -660,6 +670,78 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
         files: buildFileSpecs(outputPaths, 'output', channel),
         runKey: runtime.runKey
       });
+    }
+
+    if (channel === 'position-reconciliation:bank:apply-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        runtime.inputPaths || [],
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:source:prepare-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        runtime.inputPaths || [],
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:source:apply-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        runtime.inputPaths || [],
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:run:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        { ...(runtime.metadata || {}), runKey: runtime.runKey }
+      );
+    }
+    if (channel === 'position-reconciliation:run:import-result') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        runtime.inputPaths || [],
+        [],
+        { ...(runtime.metadata || {}), runKey: runtime.runKey }
+      );
+    }
+    if (channel === 'position-reconciliation:bank:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:linked:export'
+        || channel === 'position-reconciliation:raw:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        runtime.metadata || {}
+      );
     }
 
     return { handled: false };
