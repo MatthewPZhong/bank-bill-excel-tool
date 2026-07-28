@@ -92,13 +92,17 @@
 - 运行行增加完整性 hash 和显式来源消费标记；确认前验证 FundType 是唯一可变业务字段、差异精确集合、结果去向、血缘及当前银行/链接引用。
 - 存档控制器增加原子文件 outbox。正式建批失败时保留持久重试意图；启动恢复同时识别侧库推进、业务成功标记和已发布输出，纯导出也不会因异常退出漏档。
 - 已确认运行读取时由 `consumes_source + lineage` 反推完整消费关系，并与持久消费表双向校验；确认事务在提交前执行同一校验，消费缺失、额外或错配均阻断。
+- 消费关系由历史运行持有时，额外验真 owner 已确认且 owner 运行行的完整性 hash 与血缘确实对应同一银行 BizId、来源、业务主键和腿序号；保留同一银行 BizId 重导后的合法幂等。
 - 存档恢复判定复用于同一进程的失败返回；结果文件已发布但导出状态落库失败时先登记 outbox，再允许同步 checkpoint。outbox 重放形成部分失败正式批次时仅释放已解决且无其它引用的源文件，失败 artifact 的源文件继续受保护。
+- outbox 重放若批次已建但附件在元数据登记前失败，因结果缺少正式 artifact ID 而保留 outbox；后续重放可在同一 operation key 批次中补齐，不提前释放任何源文件。
 - 清结算银行账户表单独导入的 prepare 结果显式标记 `archiveDeferred`；待用户确认期间不视为已提交业务，不建立空存档批次，apply 后再按正式输入存档。
+- 将平盘 pending/checkpoint 完成步骤、存档结果结算和输出发布证据判定抽为可注入 helper，行为测试覆盖 prepare、apply、已发布输出 outbox 恢复及正式存档/outbox 双失败。
+- service 初始化清理暂存前合并主库 pending `archiveFiles` 与存档中心保护集；停机超过 7 天也不会先删恢复所需文件，保护集读取异常时保守不清理。
 - 业务错误页透传 `detailLines`；Excel 文本列补齐 `Account Reference`、`大额行号` 和 `VA`。
 
 ## Evidence
 
-- 平盘 service、Excel、UI、side DB 完整性与存档 outbox 最新定向回归 118/118 通过。
+- 平盘 service、Excel、UI、side DB 完整性、存档 outbox 与主进程生命周期定向回归全部通过。
 - position side DB 集成回放：38/38 通过，覆盖原子拒绝、重启恢复、snapshot 失效、跨运行 1:1、重新运行、导出、确认、原始快照不变和主库零批量表。
 - 主页面、对账数据管理、差异页、链接表管理、链接原始表、来源删除、运行范围、结果确认、账户映射共 9 张 preview 已生成并人工检查无重叠或截断；结果确认统计改为三列两行，消除扩容后的空白网格。
 - 在隔离 userData 的 Electron 实例中真实点击“对账数据管理”和“链接表管理”，两页均成功读取空侧库并完整渲染。
@@ -106,10 +110,10 @@
 - 新增差异页独立 preview，人工检查筛选项横向排列、五列表头和最新月份默认值无重叠或截断。
 - 链接表汇总定向测试覆盖派生 0 行仍保留更新日期；链接管理 preview 验证月份范围和更新日期列。
 - 链接管理前端契约覆盖三列表头、底部按钮顺序/颜色及目标链接表导出路由。
-- 全量单测：3973/3973；44 个集成脚本 2016/2016；smoke 与 lint 通过。
+- 全量单测：3979/3979；44 个集成脚本 2016/2016；smoke 与 lint 通过。
 - 存档生命周期定向测试覆盖失败保留、重试成功释放、删除批次释放、跨批次共用源路径保护、释放回调失败隔离、未完成源路径查询和启动清理保护。
 - 侧库防丢测试覆盖文件缺失、空库替换、首次 bootstrap、旧 marker 拒绝接管、旧主库单独恢复、合法旧库回滚、同 generation 分叉、更高 generation 分叉、待完成 operation token 证明的领先恢复和完整同批恢复；草稿测试覆盖运行行 hash、来源集合、结果/差异/消费/血缘及当前引用篡改；零数据 Excel 测试覆盖链接表、原始表和结果表列级文本格式。
-- 启动性能 5 次中位数：进程总耗时 755.11ms，ready-to-show 162.516ms。
+- 启动性能 5 次中位数：进程总耗时 734.657ms，ready-to-show 155.096ms。
 - `/check-vars -- --include-minor` 无 Critical 命中；命中项已逐条复核：
   - `ipcRenderer`：position preload 方法均有同名 main handler，renderer 未直接访问 Electron。
   - `saveMappings`：本次是平盘独立账户映射入口，不改变模板仓储同名方法；service/main/preload/renderer 契约和重建失效测试一致。
@@ -118,7 +122,7 @@
   - `archiveOperationTracker`：支持通道、批次归属和失败隔离不变；本次把成功返回移动到存档处理之后，并区分是否已建立持久重试记录。
   - `setStatus`：只扩展平盘错误详情文本，不改变其它模块状态；平盘 Renderer 契约通过。
   - `POSITION_BANK_HEADERS`：49 列名称和顺序未变；已按 side DB、匹配、跨运行 1:1、日期回导、文本列、存档和行去向清单完成资金复核。
-  - `getSetting/setSetting`：新增首次 bootstrap、checkpoint 和待完成 operation；恢复矩阵和主进程静态接线测试通过。
+  - `getSetting/setSetting`：沿用既有首次 bootstrap、checkpoint 和待完成 operation 设置键；恢复矩阵、operation token 所有权和行为级生命周期测试通过，未改变通用 settings 语义。
 
 ## Remaining Unknowns
 

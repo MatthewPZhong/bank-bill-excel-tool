@@ -815,6 +815,70 @@ function consumptionRelationKey({
   ]);
 }
 
+function assertConsumptionOwner(db, currentRun, consumption, ownerCache) {
+  const ownerRunId = Number(consumption.runId);
+  if (!Number.isSafeInteger(ownerRunId) || ownerRunId > Number(currentRun.id)) {
+    throwInvalidSideData(`平盘侧库运行 ID=${currentRun.id}的来源消费关系指向非法运行`);
+  }
+  let owner = ownerCache.get(ownerRunId);
+  if (!owner) {
+    const ownerRun = db.prepare(
+      'SELECT id, status FROM position_runs WHERE id = ?'
+    ).get(ownerRunId);
+    const rows = ownerRun ? db.prepare(`
+      SELECT *
+      FROM position_run_rows
+      WHERE run_id = ? AND consumes_source = 1
+    `).all(ownerRunId) : [];
+    owner = {
+      run: ownerRun,
+      rowsByBizId: new Map(rows.map((row) => [text(row.biz_id), row]))
+    };
+    ownerCache.set(ownerRunId, owner);
+  }
+  const ownerRun = owner.run;
+  if (!ownerRun || text(ownerRun.status) !== 'confirmed') {
+    throwInvalidSideData(`平盘侧库来源消费关系 owner 运行 ID=${ownerRunId}未确认或不存在`);
+  }
+  const ownerRow = owner.rowsByBizId.get(text(consumption.bankBizId));
+  if (!ownerRow) {
+    throwInvalidSideData(`平盘侧库来源消费关系 owner 运行 ID=${ownerRunId}缺少对应运行血缘`);
+  }
+  const originalRow = assertBankPayload(
+    parseJson(
+      ownerRow.original_json,
+      `来源消费 owner 原始行 ${ownerRunId}/${ownerRow.biz_id}`
+    ),
+    ownerRow,
+    `来源消费 owner 原始行 ${ownerRunId}/${ownerRow.biz_id}`
+  );
+  const resultRow = assertBankPayload(
+    parseJson(
+      ownerRow.result_json,
+      `来源消费 owner 结果行 ${ownerRunId}/${ownerRow.biz_id}`
+    ),
+    ownerRow,
+    `来源消费 owner 结果行 ${ownerRunId}/${ownerRow.biz_id}`
+  );
+  const lineage = assertRunLineage(
+    parseJson(
+      ownerRow.lineage_json,
+      `来源消费 owner 血缘 ${ownerRunId}/${ownerRow.biz_id}`
+    ),
+    ownerRow
+  );
+  assertRunRowContract(ownerRow, originalRow, resultRow, lineage);
+  const ownerRelation = {
+    sourceType: lineage.sourceType,
+    businessKey: lineage.sourceBusinessKey,
+    legIndex: lineage.sourceLegIndex,
+    bankBizId: ownerRow.biz_id
+  };
+  if (consumptionRelationKey(ownerRelation) !== consumptionRelationKey(consumption)) {
+    throwInvalidSideData(`平盘侧库来源消费关系 owner 运行 ID=${ownerRunId}的血缘不匹配`);
+  }
+}
+
 function assertRunConsumptionSet(db, run, expectedConsumptions) {
   const ownedConsumptions = db.prepare(`
     SELECT run_id AS runId, source_type AS sourceType, business_key AS businessKey,
@@ -843,6 +907,7 @@ function assertRunConsumptionSet(db, run, expectedConsumptions) {
     FROM position_consumed_sources
     WHERE source_type = ? AND business_key = ? AND leg_index = ?
   `);
+  const ownerCache = new Map();
   for (const expected of expectedConsumptions) {
     const actual = findConsumption.get(
       text(expected.sourceType),
@@ -857,6 +922,7 @@ function assertRunConsumptionSet(db, run, expectedConsumptions) {
     ) {
       throwInvalidSideData(`平盘侧库运行 ID=${run.id}缺少对应的来源消费关系`);
     }
+    assertConsumptionOwner(db, run, actual, ownerCache);
   }
 }
 

@@ -16,7 +16,7 @@
 - 主库无批量明细，持久侧库重启可恢复；首次 bootstrap 必须与 generation 0 侧库完全一致，已有现代侧库但主库无绑定、仅有旧 `initialized` 标记、文件缺失或空库均拒绝接管。
 - 主库 checkpoint、预登记 operation token 与侧库实例身份、generation、token、父链和历史 operation token 全部相容时才能继续。覆盖合法旧库回滚、仅恢复旧主库且无待完成操作、同 generation 分叉、更高 generation 分叉、完整同批恢复，以及待完成操作可证明的侧库领先窗口安全追平。
 - 平盘操作全局互斥，重叠调用不能覆盖待完成记录；checkpoint 同步和清理必须持有同一 operation token。
-- `Date` 类型可还原，损坏日期标记阻断；语法合法但缺字段的银行、来源、链接、运行范围、运行快照、运行汇总及各结果去向血缘 JSON 也必须 fail-closed。即使同时篡改 snapshot.sources 与 summary.sourceTypes，也必须由原始运行行识别；`confirmedConsumptionConflicts` 必须与逐行血缘一致。
+- `Date` 类型可还原，损坏日期标记阻断；语法合法但缺字段的银行、来源、链接、运行范围、运行快照、运行汇总及各结果去向血缘 JSON 也必须 fail-closed。即使同时篡改 snapshot.sources 与 summary.sourceTypes，也必须由原始运行行识别；`confirmedConsumptionConflicts` 必须与逐行血缘一致。来源消费 owner 改挂到无关更早运行、未来运行或额外关系时，当前运行读取必须立即阻断；同一银行 BizId 对同一来源的合法旧 owner 幂等复核继续通过。
 - 每条运行行完整性 hash、原始/结果行、唯一允许变更字段、结果去向、差异精确集合、来源消费标记、血缘及当前银行/链接引用分别覆盖篡改测试；已确认运行的消费表缺行、额外行或错配时，运行读取及后续消费池读取均必须 fail closed；旧非空草稿缺少新完整性字段时拒绝读取。
 - revision、规则版本与 stale 草稿正确；全局单一待确认草稿需显式替换。
 - FundTransfer-in 依赖的范围外银行 out 行变化会使草稿失效；订单类删除必须显式选月份，账户快照才允许整表删除。
@@ -73,7 +73,10 @@
 - 银行输入、成功链接原始表、每次结果导出和结果回导各自立即形成独立存档批次；业务 IPC 返回成功前完成本次存档处理或形成可重试失败记录，不能只进入内存队列；业务锁、活动日志、更新重启闸门和普通退出均先等待活动操作排空。
 - 覆盖正式存档建批失败后的持久 outbox、outbox 完整性校验与启动重放；异常退出发生在侧库提交、业务成功标记或输出文件发布之后时，必须恢复存档意图。故障注入“结果文件已发布、`markRunExported` 落库失败”时，同一进程内也必须登记 outbox 并保留已发布文件。正式批次和 outbox 都无法登记时返回“业务可能已完成、请勿直接重试”的明确错误。
 - outbox 重放若只建立部分失败的正式批次，失败 artifact 的源文件继续受保护；同批已成功 artifact 的源文件通过全局未完成引用保护集后可释放。
+- outbox 重放若已建批次但附件元数据登记失败、结果中没有 artifact ID，必须保留 outbox 和源文件；后续重放补齐 artifact 后才删除任务。
 - 单独导入清结算银行账户表时，prepare 仅返回待确认状态，不建立空存档意图且必须清除本次 pending；随后 apply 可正常写库并存档，取消或重启后可重新选择文件。
+- 使用主进程可注入生命周期 helper 贯穿验证 prepare/apply、结果已发布后状态落库失败、正式存档成功、outbox 恢复和正式存档/outbox 双失败；不得只用 service、tracker 分层测试或源码正则代替。
+- 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；保护来源读取失败时不得执行清理。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。
 - `scripts/integration/position-reconciliation-side-db-parity.js` 验证主库零 bulk、原子替换、重启和回收。

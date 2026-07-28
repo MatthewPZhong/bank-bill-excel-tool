@@ -16,6 +16,9 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
   const main = read('src/main.js');
+  const positionOperationLifecycle = read(
+    'src/main-process/position-reconciliation/operation-lifecycle.js'
+  );
 
   test('主进程源码不含真实 NUL 字节，保持 Git 文本差异可审查', () => {
     const mainBuffer = fs.readFileSync(path.join(ROOT, 'src', 'main.js'));
@@ -34,9 +37,18 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const start = main.indexOf('async function runArchiveAwareOperation');
     const end = main.indexOf('function runRegisteredBusinessOperation', start);
     const operationFlow = main.slice(start, end);
-    assert.match(operationFlow, /const archiveResult = await archiveTask/);
+    assert.match(operationFlow, /return settlePositionArchiveResult\(\{/);
+    const settlementStart = positionOperationLifecycle.indexOf(
+      'async function settlePositionArchiveResult'
+    );
+    const settlementEnd = positionOperationLifecycle.indexOf(
+      'async function runPositionOperationLifecycle',
+      settlementStart
+    );
+    const settlementFlow = positionOperationLifecycle.slice(settlementStart, settlementEnd);
+    assert.match(settlementFlow, /const archiveResult = await archiveTask/);
     assert.ok(
-      operationFlow.indexOf('await archiveTask') < operationFlow.lastIndexOf('return result'),
+      settlementFlow.indexOf('await archiveTask') < settlementFlow.lastIndexOf('return result'),
       '存档任务应在返回业务结果前完成'
     );
   });

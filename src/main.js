@@ -79,6 +79,12 @@ const {
   POSITION_SIDE_DB_PENDING_SETTING,
   POSITION_SIDE_DB_BOOTSTRAP_SETTING
 } = require('./main-process/position-reconciliation/constants');
+const {
+  positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
+  positionBusinessStateForResult,
+  runPositionOperationLifecycle,
+  settlePositionArchiveResult
+} = require('./main-process/position-reconciliation/operation-lifecycle');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -14210,13 +14216,7 @@ function markPositionBusinessOutcome(result) {
   if (!pending || pending.operationToken !== context.operationToken) return;
   writePositionPendingOperation({
     ...pending,
-    businessState: result && result.archiveDeferred === true
-      ? 'awaiting-confirmation'
-      : (
-        result && SUCCESS_STATUSES.has(result.status)
-          ? 'success'
-          : 'not-success'
-      )
+    businessState: positionBusinessStateForResult(result, SUCCESS_STATUSES)
   }, context.operationToken);
 }
 
@@ -14246,39 +14246,11 @@ function positionArchiveModule(channel) {
 }
 
 function positionArchiveIntentEvidence(pending, currentCheckpoint) {
-  if (!pending) {
-    return {
-      sideAdvanced: false,
-      businessCompleted: false,
-      outputPublished: false,
-      requiresPersistence: false
-    };
-  }
-  const base = pending.baseCheckpoint || {};
-  const sideAdvanced = String(currentCheckpoint.identity || '') !== String(base.identity || '')
-    || Number(currentCheckpoint.generation) !== Number(base.generation)
-    || String(currentCheckpoint.token || '') !== String(base.token || '');
-  const files = Array.isArray(pending.archiveFiles) ? pending.archiveFiles : [];
-  const outputPublished = files.some((file) => {
-    if (file.role !== 'output') return false;
-    let stat;
-    try {
-      stat = fs.statSync(file.filePath);
-    } catch (_error) {
-      return false;
-    }
-    const currentSnapshot = sourceSnapshotFromStat(stat);
-    if (!currentSnapshot) return false;
-    return !file.beforeSnapshot
-      || !sourceSnapshotMatchesStat(file.beforeSnapshot, stat);
+  return evaluatePositionArchiveIntentEvidence(pending, currentCheckpoint, {
+    statSync: fs.statSync,
+    sourceSnapshotFromStat,
+    sourceSnapshotMatchesStat
   });
-  const businessCompleted = pending.businessState === 'success';
-  return {
-    sideAdvanced,
-    businessCompleted,
-    outputPublished,
-    requiresPersistence: sideAdvanced || businessCompleted || outputPublished
-  };
 }
 
 function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
@@ -14424,49 +14396,33 @@ async function runPositionReconciliationOperation(channel, operation) {
     const archiveRequired = Boolean(
       archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
     );
-    database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify({
+    return await runPositionOperationLifecycle({
       operationToken,
-      channel,
-      baseCheckpoint,
-      archiveRequired,
-      archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
-      businessState: 'running',
-      archiveFiles: []
-    }));
-    return await positionReconciliationOperationContext.run({ operationToken }, async () => {
-      let result;
-      let operationError = null;
-      try {
-        result = await operation();
-      } catch (error) {
-        operationError = error;
-      }
-      try {
-        const persistedPending = JSON.parse(
-          database.getSetting(POSITION_SIDE_DB_PENDING_SETTING) || 'null'
-        );
-        if (!persistedPending || persistedPending.operationToken !== operationToken) {
-          throw new Error('平盘对账待完成操作所有权已变化，已停止同步 checkpoint');
-        }
-        if (persistedPending.archiveRequired && persistedPending.archiveState !== 'durable') {
-          throw new Error('平盘对账存档尚未完成或形成持久重试记录，已停止同步 checkpoint');
-        }
-        syncPositionReconciliationCheckpoint();
-        const pendingBeforeClear = JSON.parse(
-          database.getSetting(POSITION_SIDE_DB_PENDING_SETTING) || 'null'
-        );
-        if (!pendingBeforeClear || pendingBeforeClear.operationToken !== operationToken) {
-          throw new Error('平盘对账待完成操作所有权已变化，禁止清理其他操作记录');
-        }
+      pending: {
+        operationToken,
+        channel,
+        baseCheckpoint,
+        archiveRequired,
+        archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
+        businessState: 'running',
+        archiveFiles: []
+      },
+      writeInitialPending: (pending) => {
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify(pending));
+      },
+      runInContext: (task) => positionReconciliationOperationContext.run(
+        { operationToken },
+        task
+      ),
+      operation,
+      readPending: () => JSON.parse(
+        database.getSetting(POSITION_SIDE_DB_PENDING_SETTING) || 'null'
+      ),
+      syncCheckpoint: syncPositionReconciliationCheckpoint,
+      clearPending: () => {
         database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
-      } catch (checkpointError) {
-        if (result && result.code === 'archive-retry-registration-failed') {
-          return result;
-        }
-        return positionReconciliationFailureResult(checkpointError);
-      }
-      if (operationError) throw operationError;
-      return result;
+      },
+      failureResult: positionReconciliationFailureResult
     });
   } catch (error) {
     return positionReconciliationFailureResult(error);
@@ -15469,31 +15425,18 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         result: archiveResultSnapshot(result),
         selectedPaths,
         runtime
-      }));
+    }));
     archiveOperationTail = archiveTask.catch(() => undefined);
-    try {
-      const archiveResult = await archiveTask;
-      if (archiveResult && archiveResult.handled === false) {
-        const recoveryIntent = persistCurrentPositionArchiveIntentIfNeeded();
-        markPositionArchiveDurable(recoveryIntent || archiveResult);
-        if (!recoveryIntent) cleanupPositionArchiveStaging(runtime);
-      } else if (archiveResult && archiveResult.archiveFailed === true) {
-        reportArchiveFailure(archiveResult.warning);
-        if (archiveResult.persistentRetryAvailable !== true) {
-          return archiveRegistrationFailureResult(result, archiveResult.warning);
-        }
-        markPositionArchiveDurable(archiveResult);
-      } else {
-        markPositionArchiveDurable(archiveResult || {});
-        cleanupPositionArchiveStaging(runtime);
-      }
-    } catch (error) {
-      const warning = { message: error && error.message ? error.message : String(error) };
-      reportArchiveFailure(warning);
-      return archiveRegistrationFailureResult(result, warning);
-    }
-
-    return result;
+    return settlePositionArchiveResult({
+      result,
+      archiveTask,
+      runtime,
+      persistRecovery: persistCurrentPositionArchiveIntentIfNeeded,
+      markDurable: markPositionArchiveDurable,
+      cleanup: cleanupPositionArchiveStaging,
+      reportFailure: reportArchiveFailure,
+      registrationFailureResult: archiveRegistrationFailureResult
+    });
   });
 }
 

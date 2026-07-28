@@ -39,6 +39,17 @@ function operationFailureMessage(failures) {
     : '存档文件失败，可在存档中心重试';
 }
 
+function outboxFilesHaveDurableArtifacts(record, created) {
+  const files = record && record.payload && Array.isArray(record.payload.files)
+    ? record.payload.files
+    : [];
+  if (files.length === 0) return true;
+  const results = created && Array.isArray(created.results) ? created.results : [];
+  return results.length === files.length && results.every(
+    (result) => result && result.artifact && result.artifact.id != null
+  );
+}
+
 class ArchiveCenterController {
   constructor(options = {}) {
     if (!options.database
@@ -119,6 +130,13 @@ class ArchiveCenterController {
         continue;
       }
       if (!created || !created.batch) continue;
+      if (!outboxFilesHaveDurableArtifacts(record, created)) {
+        this._warn(
+          '存档 outbox 已建批次但附件登记不完整',
+          `outbox=${record.id}，已保留重放任务和源文件`
+        );
+        continue;
+      }
       this.outboxStore.remove(record.id);
       flushed += 1;
       if (this.onOutboxFlushed) {

@@ -61,7 +61,7 @@ function createHarness(options = {}) {
         status: 'ready',
         blob: { sizeBytes: 12 }
       });
-      return { ok: true };
+      return { ok: true, artifact: artifacts.get(id) };
     },
     async appendFiles(payload) {
       const results = [];
@@ -333,8 +333,8 @@ test('outbox 重放为部分失败正式批次时不得释放失败文件源路�
     succeeded: 1,
     failed: 1,
     results: [
-      { ok: false, status: 'failed' },
-      { ok: true, status: 'ready' }
+      { ok: false, status: 'failed', artifact: { id: 1 } },
+      { ok: true, status: 'ready', artifact: { id: 2 } }
     ]
   });
   service.listUnresolvedSourcePaths = () => [inputPath];
@@ -344,6 +344,73 @@ test('outbox 重放为部分失败正式批次时不得释放失败文件源路�
   assert.deepEqual(outboxStore.list(), []);
   assert.deepEqual(releasedPaths, [outputPath]);
   assert.deepEqual(controller.listUnresolvedSourcePaths(), [inputPath]);
+});
+
+test('outbox 重放在附件元数据登记前失败时保留任务和源文件', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-outbox-metadata-'));
+  const inputPath = path.join(rootDir, 'bank.xlsx');
+  const releasedPaths = [];
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const { controller, service } = createHarness({
+    outboxStore,
+    onOutboxFlushed: (paths) => releasedPaths.push(...paths)
+  });
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  service.createBatch = async () => ({ ok: false, message: 'archive database busy' });
+  const created = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:bank:apply-import',
+    metadata: { positionOperationToken: 'operation-metadata' },
+    files: [{ filePath: inputPath, role: 'input' }]
+  });
+  assert.match(created.batchId, /^outbox:/);
+
+  service.createBatch = async () => ({
+    ok: false,
+    batch: {
+      id: 1,
+      batchNumber: 'POSITION-20260720-001',
+      archiveStatus: 'failed',
+      failedArtifactCount: 1
+    },
+    attempted: 1,
+    succeeded: 0,
+    failed: 1,
+    results: [{
+      ok: false,
+      status: 'failed',
+      metadataRecorded: true,
+      message: 'artifact insert failed'
+    }]
+  });
+  service.listUnresolvedSourcePaths = () => [];
+
+  const initialized = await controller.initialize();
+  assert.equal(initialized.ok, true);
+  assert.equal(outboxStore.list().length, 1);
+  assert.deepEqual(controller.listUnresolvedSourcePaths(), [inputPath]);
+  assert.deepEqual(releasedPaths, []);
+
+  service.createBatch = async () => ({
+    ok: true,
+    batch: {
+      id: 1,
+      batchNumber: 'POSITION-20260720-001',
+      archiveStatus: 'complete',
+      failedArtifactCount: 0
+    },
+    attempted: 1,
+    succeeded: 1,
+    failed: 0,
+    results: [{ ok: true, status: 'ready', artifact: { id: 7 } }]
+  });
+  const flushed = await controller.flushOutbox();
+  assert.equal(flushed.flushed, 1);
+  assert.deepEqual(outboxStore.list(), []);
+  assert.deepEqual(releasedPaths, [inputPath]);
 });
 
 test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', (t) => {

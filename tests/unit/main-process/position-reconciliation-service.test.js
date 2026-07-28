@@ -989,6 +989,7 @@ test('同一银行 BizId 重导后可幂等复核同一链接记录', async (t) 
   assert.equal(secondRun.summary.differenceRows, 0);
   await service.exportRun(secondRun.runId, secondResultPath);
   assert.doesNotThrow(() => service.confirmRun(secondRun.runId));
+  assert.doesNotThrow(() => service.store.getRun(secondRun.runId));
   assert.equal(service.store.listConsumedSources().length, 1);
 });
 
@@ -1029,6 +1030,105 @@ test('已确认来源消费表与运行血缘必须保持双向一致', async (t
   );
   assert.throws(
     () => service.store.listConsumedSources(),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+});
+
+test('来源消费 owner 必须由对应 confirmed 运行血缘证明', async (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-consumption-owner-'));
+  const unrelatedBankPath = path.join(userDataDir, 'bank-unrelated.xlsx');
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+  writeWorkbook(
+    unrelatedBankPath,
+    BANK_SHEET_NAME,
+    BANK_STATEMENT_FIELDS,
+    [bankRow({
+      BizId: 'POSITION-BIZ-UNRELATED',
+      ReconciliationId: 'RID-UNRELATED',
+      FundType: 'Charge'
+    })]
+  );
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow()]);
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([unrelatedBankPath]).token);
+  const unrelatedRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(unrelatedRun.runId, path.join(userDataDir, 'unrelated.xlsx'));
+  service.confirmRun(unrelatedRun.runId);
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  const ownerRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(ownerRun.runId, path.join(userDataDir, 'owner.xlsx'));
+  service.confirmRun(ownerRun.runId);
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  const idempotentRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  await service.exportRun(idempotentRun.runId, path.join(userDataDir, 'idempotent.xlsx'));
+  service.confirmRun(idempotentRun.runId);
+  assert.doesNotThrow(() => service.store.getRun(idempotentRun.runId));
+
+  const updateOwner = service.store.db.prepare(`
+    UPDATE position_consumed_sources
+    SET run_id = ?
+    WHERE source_type = ? AND business_key = ? AND leg_index = ?
+  `);
+  updateOwner.run(
+    unrelatedRun.runId,
+    SOURCE_TYPES.GATEWAY_INBOUND,
+    'INBOUND-1',
+    0
+  );
+  assert.throws(
+    () => service.store.getRun(idempotentRun.runId),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+
+  updateOwner.run(
+    idempotentRun.runId,
+    SOURCE_TYPES.GATEWAY_INBOUND,
+    'INBOUND-1',
+    0
+  );
+  assert.throws(
+    () => service.store.getRun(ownerRun.runId),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+
+  updateOwner.run(
+    ownerRun.runId,
+    SOURCE_TYPES.GATEWAY_INBOUND,
+    'INBOUND-1',
+    0
+  );
+  assert.doesNotThrow(() => service.store.getRun(idempotentRun.runId));
+  service.store.db.prepare(`
+    INSERT INTO position_consumed_sources(
+      run_id, source_type, business_key, leg_index, bank_biz_id
+    ) VALUES (?, ?, ?, ?, ?)
+  `).run(
+    idempotentRun.runId,
+    SOURCE_TYPES.GATEWAY_INBOUND,
+    'UNRELATED-SOURCE',
+    0,
+    'UNRELATED-BANK-BIZ'
+  );
+  assert.throws(
+    () => service.store.getRun(idempotentRun.runId),
     (error) => error && error.code === 'position-side-data-invalid'
   );
 });
@@ -1254,6 +1354,47 @@ test('启动暂存清理跳过仍被存档失败批次引用的文件', (t) => {
   });
 
   assert.equal(removed, 1);
+  assert.equal(fs.existsSync(protectedFile), true);
+  assert.equal(fs.existsSync(staleRoot), false);
+});
+
+test('主库 pending 单独引用的过期暂存文件必须在恢复前保留', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-pending-staging-'));
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const bootstrap = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  const expectedCheckpoint = bootstrap.persistenceCheckpoint();
+  bootstrap.close();
+
+  const root = path.join(userDataDir, STAGING_RELATIVE_PATH);
+  const protectedRoot = path.join(root, 'pending-batch');
+  const staleRoot = path.join(root, 'stale-batch');
+  const protectedFile = path.join(protectedRoot, '1', 'pending.xlsx');
+  const staleFile = path.join(staleRoot, '1', 'stale.xlsx');
+  fs.mkdirSync(path.dirname(protectedFile), { recursive: true });
+  fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+  fs.writeFileSync(protectedFile, 'pending');
+  fs.writeFileSync(staleFile, 'stale');
+  const oldDate = new Date(Date.now() - (8 * 24 * 60 * 60 * 1000));
+  fs.utimesSync(protectedRoot, oldDate, oldDate);
+  fs.utimesSync(staleRoot, oldDate, oldDate);
+
+  const recovered = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: expectedCheckpoint,
+    expectedPendingOperation: JSON.stringify({
+      operationToken: 'pending-operation',
+      baseCheckpoint: expectedCheckpoint,
+      archiveFiles: [{ filePath: protectedFile, role: 'input' }]
+    }),
+    protectedStagingPaths: () => []
+  });
+  recovered.close();
+
   assert.equal(fs.existsSync(protectedFile), true);
   assert.equal(fs.existsSync(staleRoot), false);
 });

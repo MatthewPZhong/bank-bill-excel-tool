@@ -196,6 +196,22 @@ function sameCellValue(left, right, header = '') {
   return leftValue === rightValue;
 }
 
+function pendingArchivePaths(value) {
+  if (value === null || value === undefined || value === '') return [];
+  let payload = value;
+  if (typeof value === 'string') {
+    try {
+      payload = JSON.parse(value);
+    } catch (_error) {
+      return null;
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  return (Array.isArray(payload.archiveFiles) ? payload.archiveFiles : [])
+    .map((file) => file && file.filePath)
+    .filter(Boolean);
+}
+
 class PositionReconciliationService {
   constructor({
     userDataDir,
@@ -227,15 +243,22 @@ class PositionReconciliationService {
     });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();
+    const pendingProtectedPaths = pendingArchivePaths(expectedPendingOperation);
+    const protectedPaths = pendingProtectedPaths || [];
+    let stagingProtectionComplete = pendingProtectedPaths !== null;
     if (typeof protectedStagingPaths === 'function') {
       try {
-        const protectedPaths = protectedStagingPaths();
-        if (Array.isArray(protectedPaths)) {
-          pruneStagingRoot(this.userDataDir, { protectedPaths });
+        const archiveProtectedPaths = protectedStagingPaths();
+        if (Array.isArray(archiveProtectedPaths)) {
+          protectedPaths.push(...archiveProtectedPaths);
         }
       } catch (_error) {
         // 无法读取存档引用时宁可保留旧暂存，避免破坏失败批次的重试能力。
+        stagingProtectionComplete = false;
       }
+    }
+    if (stagingProtectionComplete) {
+      pruneStagingRoot(this.userDataDir, { protectedPaths });
     }
   }
 

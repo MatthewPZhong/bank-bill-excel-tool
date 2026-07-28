@@ -17,6 +17,16 @@ const rendererDialogs = fs.readFileSync(path.join(ROOT, 'src', 'renderer-dialogs
 const preload = fs.readFileSync(path.join(ROOT, 'src', 'preload.js'), 'utf8');
 const previews = fs.readFileSync(path.join(ROOT, 'src', 'renderer-previews.js'), 'utf8');
 const mainProcess = fs.readFileSync(path.join(ROOT, 'src', 'main.js'), 'utf8');
+const operationLifecycle = fs.readFileSync(
+  path.join(
+    ROOT,
+    'src',
+    'main-process',
+    'position-reconciliation',
+    'operation-lifecycle.js'
+  ),
+  'utf8'
+);
 
 function extractPanel() {
   const start = html.indexOf('id="positionReconciliationModulePanel"');
@@ -348,21 +358,24 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('平盘写操作独占执行，并在 checkpoint 同步前校验 token 与存档持久性', () => {
     assert.match(mainProcess, /if \(positionReconciliationOperationActive\)/);
     assert.match(mainProcess, /const unresolvedPending = database\.getSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
-    assert.match(mainProcess, /persistedPending\.operationToken !== operationToken/);
-    assert.match(mainProcess, /persistedPending\.archiveState !== 'durable'/);
-    assert.match(mainProcess, /pendingBeforeClear\.operationToken !== operationToken/);
+    assert.match(mainProcess, /runPositionOperationLifecycle\(\{/);
+    assert.match(operationLifecycle, /persistedPending\.operationToken !== operationToken/);
+    assert.match(operationLifecycle, /persistedPending\.archiveState !== 'durable'/);
+    assert.match(operationLifecycle, /pendingBeforeClear\.operationToken !== operationToken/);
     assert.match(mainProcess, /archiveCenterService\.persistOperationIntent\(\{/);
     assert.match(mainProcess, /businessState:\s*'running'/);
     assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
-    assert.match(mainProcess, /result && result\.archiveDeferred === true/);
-    assert.match(mainProcess, /'awaiting-confirmation'/);
-    assert.match(mainProcess, /const outputPublished = files\.some/);
-    assert.match(mainProcess, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
-    assert.match(mainProcess, /archiveResult && archiveResult\.handled === false/);
+    assert.match(mainProcess, /positionBusinessStateForResult\(result, SUCCESS_STATUSES\)/);
+    assert.match(operationLifecycle, /result && result\.archiveDeferred === true/);
+    assert.match(operationLifecycle, /'awaiting-confirmation'/);
+    assert.match(operationLifecycle, /const outputPublished = files\.some/);
+    assert.match(operationLifecycle, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
+    assert.match(operationLifecycle, /archiveResult && archiveResult\.handled === false/);
+    assert.match(mainProcess, /settlePositionArchiveResult\(\{/);
     assert.match(mainProcess, /persistCurrentPositionArchiveIntentIfNeeded\(\)/);
-    assert.match(mainProcess, /markPositionArchiveDurable\(recoveryIntent \|\| archiveResult\)/);
-    assert.match(mainProcess, /if \(!recoveryIntent\) cleanupPositionArchiveStaging\(runtime\)/);
-    assert.match(mainProcess, /archiveResult\.persistentRetryAvailable !== true/);
+    assert.match(operationLifecycle, /markDurable\(recoveryIntent \|\| archiveResult\)/);
+    assert.match(operationLifecycle, /if \(!recoveryIntent\) cleanup\(runtime\)/);
+    assert.match(operationLifecycle, /archiveResult\.persistentRetryAvailable !== true/);
     assert.match(mainProcess, /code:\s*'archive-retry-registration-failed'/);
   });
 

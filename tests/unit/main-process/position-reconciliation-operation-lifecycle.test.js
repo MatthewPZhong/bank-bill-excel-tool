@@ -1,0 +1,233 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const {
+  positionArchiveIntentEvidence,
+  positionBusinessStateForResult,
+  runPositionOperationLifecycle,
+  settlePositionArchiveResult
+} = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
+const {
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
+} = require('../../../src/main-process/archive-center/source-snapshot');
+
+const SUCCESS_STATUSES = new Set(['ok', 'success']);
+
+function checkpoint(generation) {
+  return {
+    identity: 'position-side-db',
+    generation,
+    token: `generation-${generation}`
+  };
+}
+
+function failureResult(error) {
+  return {
+    status: 'failed',
+    code: error && error.code ? error.code : 'position-reconciliation-failed',
+    message: error && error.message ? error.message : String(error)
+  };
+}
+
+async function runHarness({
+  operationToken,
+  baseCheckpoint,
+  currentCheckpoint,
+  businessResult,
+  archiveResult,
+  archiveFiles = [],
+  beforeArchive,
+  persistRecovery
+}) {
+  let pending = null;
+  let syncedCheckpoint = null;
+  let cleanupCount = 0;
+  const durableReferences = [];
+  const warnings = [];
+  const result = await runPositionOperationLifecycle({
+    operationToken,
+    pending: {
+      operationToken,
+      channel: 'position-reconciliation:source:prepare-import',
+      baseCheckpoint,
+      archiveRequired: true,
+      archiveState: 'awaiting-intent',
+      businessState: 'running',
+      archiveFiles
+    },
+    writeInitialPending: (value) => {
+      pending = structuredClone(value);
+    },
+    runInContext: (task) => task(),
+    operation: async () => {
+      if (beforeArchive) await beforeArchive();
+      pending = {
+        ...pending,
+        businessState: positionBusinessStateForResult(businessResult, SUCCESS_STATUSES)
+      };
+      return settlePositionArchiveResult({
+        result: businessResult,
+        archiveTask: Promise.resolve(archiveResult),
+        runtime: { stagingPaths: ['/tmp/position-staging'] },
+        persistRecovery: () => (
+          persistRecovery
+            ? persistRecovery({ pending, currentCheckpoint })
+            : null
+        ),
+        markDurable: (value) => {
+          durableReferences.push(value);
+          pending = {
+            ...pending,
+            archiveState: 'durable',
+            archiveReference: value.batchId || value.outboxId || ''
+          };
+        },
+        cleanup: () => {
+          cleanupCount += 1;
+        },
+        reportFailure: (warning) => {
+          warnings.push(warning);
+        },
+        registrationFailureResult: (_result, warning) => ({
+          status: 'failed',
+          code: 'archive-retry-registration-failed',
+          message: warning && warning.message ? warning.message : 'archive failed'
+        })
+      });
+    },
+    readPending: () => pending,
+    syncCheckpoint: () => {
+      syncedCheckpoint = structuredClone(currentCheckpoint);
+    },
+    clearPending: () => {
+      pending = null;
+    },
+    failureResult
+  });
+  return {
+    result,
+    pending,
+    syncedCheckpoint,
+    cleanupCount,
+    durableReferences,
+    warnings
+  };
+}
+
+test('账户表 prepare 不建空存档且清除 pending，apply 后正式存档并推进 checkpoint', async () => {
+  const prepared = await runHarness({
+    operationToken: 'prepare-account',
+    baseCheckpoint: checkpoint(0),
+    currentCheckpoint: checkpoint(0),
+    businessResult: {
+      status: 'ok',
+      successCount: 0,
+      confirmationCount: 1,
+      archiveDeferred: true,
+      inputPaths: []
+    },
+    archiveResult: { handled: false }
+  });
+  assert.equal(prepared.result.status, 'ok');
+  assert.equal(prepared.pending, null);
+  assert.deepEqual(prepared.syncedCheckpoint, checkpoint(0));
+  assert.equal(prepared.cleanupCount, 1);
+  assert.deepEqual(prepared.durableReferences, [{ handled: false }]);
+
+  const applied = await runHarness({
+    operationToken: 'apply-account',
+    baseCheckpoint: checkpoint(0),
+    currentCheckpoint: checkpoint(1),
+    businessResult: {
+      status: 'ok',
+      successCount: 1,
+      confirmationCount: 0,
+      inputPaths: ['/tmp/account-staged.xlsx']
+    },
+    archiveFiles: [{
+      filePath: '/tmp/account-staged.xlsx',
+      role: 'input',
+      beforeSnapshot: null
+    }],
+    archiveResult: { batchId: 'archive-batch-1' }
+  });
+  assert.equal(applied.result.status, 'ok');
+  assert.equal(applied.pending, null);
+  assert.deepEqual(applied.syncedCheckpoint, checkpoint(1));
+  assert.equal(applied.cleanupCount, 1);
+  assert.deepEqual(applied.durableReferences, [{ batchId: 'archive-batch-1' }]);
+});
+
+test('输出已发布但业务状态落库失败时登记 outbox、保留文件并清除 pending', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'position-output-recovery-'));
+  const outputPath = path.join(directory, 'result.xlsx');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outbox = [];
+  const recovered = await runHarness({
+    operationToken: 'export-state-failed',
+    baseCheckpoint: checkpoint(0),
+    currentCheckpoint: checkpoint(0),
+    businessResult: {
+      status: 'failed',
+      code: 'position-export-state-failed',
+      message: 'markRunExported failed'
+    },
+    archiveFiles: [{
+      filePath: outputPath,
+      role: 'output',
+      beforeSnapshot: null
+    }],
+    beforeArchive: () => {
+      fs.writeFileSync(outputPath, 'published-result');
+    },
+    archiveResult: { handled: false },
+    persistRecovery: ({ pending, currentCheckpoint }) => {
+      const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint, {
+        statSync: fs.statSync,
+        sourceSnapshotFromStat,
+        sourceSnapshotMatchesStat
+      });
+      if (!evidence.requiresPersistence) return null;
+      const intent = { outboxId: 'position-outbox-1' };
+      outbox.push(intent);
+      return intent;
+    }
+  });
+  assert.equal(recovered.result.code, 'position-export-state-failed');
+  assert.equal(recovered.pending, null);
+  assert.deepEqual(recovered.syncedCheckpoint, checkpoint(0));
+  assert.equal(recovered.cleanupCount, 0);
+  assert.deepEqual(outbox, [{ outboxId: 'position-outbox-1' }]);
+  assert.equal(fs.readFileSync(outputPath, 'utf8'), 'published-result');
+});
+
+test('正式存档与持久重试都失败时保留 pending 并返回禁止重试错误', async () => {
+  const failed = await runHarness({
+    operationToken: 'archive-double-failure',
+    baseCheckpoint: checkpoint(0),
+    currentCheckpoint: checkpoint(1),
+    businessResult: { status: 'ok', inputPaths: ['/tmp/input.xlsx'] },
+    archiveFiles: [{
+      filePath: '/tmp/input.xlsx',
+      role: 'input',
+      beforeSnapshot: null
+    }],
+    archiveResult: {
+      archiveFailed: true,
+      persistentRetryAvailable: false,
+      warning: { message: 'archive and outbox failed' }
+    }
+  });
+  assert.equal(failed.result.code, 'archive-retry-registration-failed');
+  assert.equal(failed.pending.operationToken, 'archive-double-failure');
+  assert.equal(failed.pending.archiveState, 'awaiting-intent');
+  assert.equal(failed.syncedCheckpoint, null);
+  assert.equal(failed.cleanupCount, 0);
+  assert.deepEqual(failed.warnings, [{ message: 'archive and outbox failed' }]);
+});
