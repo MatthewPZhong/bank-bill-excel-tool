@@ -322,14 +322,34 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       mainProcess,
       /const expectedSideDbCheckpoint = database\.getSetting\(\s*POSITION_SIDE_DB_CHECKPOINT_SETTING\s*\)/
     );
-    assert.match(mainProcess, /requireExistingSideDb:\s*Boolean\(expectedSideDbCheckpoint\)/);
+    assert.match(
+      mainProcess,
+      /requireExistingSideDb:\s*Boolean\(expectedSideDbCheckpoint\) \|\| legacySideDbInitialized/
+    );
     assert.match(mainProcess, /expectedSideDbCheckpoint,/);
+    assert.match(mainProcess, /expectedPendingOperation:\s*pendingSideDbOperation/);
+    assert.match(mainProcess, /allowLegacyCheckpointMigration:/);
+    assert.match(mainProcess, /POSITION_SIDE_DB_PENDING_SETTING/);
+    assert.match(mainProcess, /positionReconciliationOperationContext\.run/);
     assert.match(
       mainProcess,
       /JSON\.stringify\(service\.persistenceCheckpoint\(\)\)/
     );
     assert.match(mainProcess, /channel\.startsWith\('position-reconciliation:'\)/);
     assert.match(mainProcess, /syncPositionReconciliationCheckpoint\(\)/);
+  });
+
+  test('管理页侧库恢复失败时显示 detailLines，不只显示总标题', () => {
+    for (const fallback of [
+      '对账数据管理读取失败',
+      '链接原始表读取失败',
+      '链接表管理读取失败'
+    ]) {
+      assert.match(
+        positionRenderer,
+        new RegExp(`failureDetailsHtml\\(result, '${fallback}'\\)`)
+      );
+    }
   });
 
   test('差异导出携带汇总行范围，删除链接数据禁止空月份请求', () => {

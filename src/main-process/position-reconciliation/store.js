@@ -14,7 +14,8 @@ const {
   LINK_HEADERS,
   BANK_STATUSES,
   DIFFERENCE_STATUSES,
-  MATCH_TYPES
+  MATCH_TYPES,
+  sourceTypeForFundType
 } = require('./constants');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
 const {
@@ -29,6 +30,7 @@ const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
 const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
 const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
 const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
+const POSITION_DB_LEGACY_INITIALIZED_KEY = 'position_database_initialized_v1';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -40,6 +42,7 @@ const SCHEMA = `
     generation INTEGER PRIMARY KEY,
     token TEXT NOT NULL UNIQUE,
     parent_token TEXT,
+    operation_token TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -301,6 +304,38 @@ function normalizeCheckpoint(value, label = 'checkpoint') {
   };
 }
 
+function checkpointsEqual(left, right) {
+  return Boolean(left && right)
+    && left.identity === right.identity
+    && left.generation === right.generation
+    && left.token === right.token;
+}
+
+function normalizePendingOperation(value) {
+  if (value === null || value === undefined || value === '') return null;
+  let payload = value;
+  if (typeof value === 'string') {
+    try {
+      payload = JSON.parse(value);
+    } catch (_error) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '主库中的平盘侧库待完成操作记录损坏，请恢复完整软件数据目录'
+      );
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      '主库中的平盘侧库待完成操作记录格式非法，请恢复完整软件数据目录'
+    );
+  }
+  return {
+    operationToken: checkpointValue(payload.operationToken, 'operation token'),
+    baseCheckpoint: normalizeCheckpoint(payload.baseCheckpoint, '待完成操作基准 checkpoint')
+  };
+}
+
 function readDatabaseCheckpoint(db) {
   const rows = db.prepare(`
     SELECT key, value
@@ -344,7 +379,7 @@ function assertCurrentCheckpointHistory(db, actual) {
   }
 }
 
-function assertCheckpointCompatible(db, actual, expected) {
+function assertCheckpointCompatible(db, actual, expected, pendingOperation = null) {
   assertCurrentCheckpointHistory(db, actual);
   if (!expected) return;
   if (actual.identity !== expected.identity) {
@@ -359,9 +394,15 @@ function assertCheckpointCompatible(db, actual, expected) {
     }
     return;
   }
+  if (!pendingOperation) {
+    checkpointMismatch(actual, expected, '侧库领先主库，但主库没有对应的待完成操作记录');
+  }
+  if (!checkpointsEqual(pendingOperation.baseCheckpoint, expected)) {
+    checkpointMismatch(actual, expected, '待完成操作的基准 checkpoint 与主库当前 checkpoint 不一致');
+  }
 
   const history = db.prepare(`
-    SELECT generation, token, parent_token AS parentToken
+    SELECT generation, token, parent_token AS parentToken, operation_token AS operationToken
     FROM position_checkpoint_history
     WHERE generation BETWEEN ? AND ?
     ORDER BY generation ASC
@@ -383,6 +424,9 @@ function assertCheckpointCompatible(db, actual, expected) {
       }
     } else if (text(item.parentToken) !== previousToken) {
       checkpointMismatch(actual, expected, '侧库领先主库，但 checkpoint 父链不连续');
+    }
+    if (index > 0 && text(item.operationToken) !== pendingOperation.operationToken) {
+      checkpointMismatch(actual, expected, '侧库领先提交不属于主库登记的待完成操作');
     }
     previousToken = text(item.token);
   }
@@ -586,6 +630,33 @@ function assertSameTextSet(actualValues, expectedValues, label) {
 
 function assertRunEnvelope(db, run, scope, snapshot, summary) {
   const runLabel = `运行 ID=${run.id}`;
+  const envelopeRows = db.prepare(`
+    SELECT run_id, biz_id, channel, original_fund_type, original_json, lineage_json, outcome
+    FROM position_run_rows
+    WHERE run_id = ?
+    ORDER BY id
+  `).all(run.id);
+  const derivedSourceTypes = [];
+  let confirmedConsumptionConflicts = 0;
+  for (const row of envelopeRows) {
+    const originalRow = assertBankPayload(
+      parseJson(row.original_json, `${runLabel}原始行 BizId=${row.biz_id}`),
+      row,
+      `${runLabel}原始行 BizId=${row.biz_id}`
+    );
+    if (text(originalRow.FundType) !== text(row.original_fund_type)) {
+      throwInvalidSideData(`平盘侧库${runLabel}原始 FundType 与运行明细不一致`);
+    }
+    const sourceType = sourceTypeForFundType(originalRow.FundType);
+    if (sourceType) derivedSourceTypes.push(sourceType);
+    const lineage = assertRunLineage(
+      parseJson(row.lineage_json, `${runLabel}血缘 BizId=${row.biz_id}`),
+      row
+    );
+    if (lineage.reasonCode === 'position-bank-counterparty-reassigned') {
+      confirmedConsumptionConflicts += 1;
+    }
+  }
   assertSameTextSet(
     Object.keys(snapshot.bankScopes),
     scope.scopes,
@@ -593,10 +664,15 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
   );
   assertSameTextSet(
     Object.keys(snapshot.sources),
-    summary.sourceTypes,
+    derivedSourceTypes,
     `${runLabel}快照来源`
   );
-  const usesTransfer = summary.sourceTypes.includes(SOURCE_TYPES.FUND_TRANSFER);
+  assertSameTextSet(
+    summary.sourceTypes,
+    derivedSourceTypes,
+    `${runLabel}汇总来源`
+  );
+  const usesTransfer = derivedSourceTypes.includes(SOURCE_TYPES.FUND_TRANSFER);
   if ((usesTransfer && snapshot.mapping === null) || (!usesTransfer && snapshot.mapping !== null)) {
     throwInvalidSideData(`平盘侧库${runLabel}映射快照与来源类型不一致`);
   }
@@ -658,6 +734,11 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
     if (summary.engine[key] !== expected) {
       throwInvalidSideData(`平盘侧库${runLabel}引擎汇总字段 ${key} 与运行明细不一致`);
     }
+  }
+  if (summary.engine.confirmedConsumptionConflicts !== confirmedConsumptionConflicts) {
+    throwInvalidSideData(
+      `平盘侧库${runLabel}引擎汇总字段 confirmedConsumptionConflicts 与运行血缘不一致`
+    );
   }
 
   const actualScopes = db.prepare(`
@@ -742,12 +823,19 @@ function assertRunLineage(lineage, row) {
 class PositionReconciliationStore {
   constructor(userDataDir, {
     requireExisting = false,
-    expectedCheckpoint = null
+    expectedCheckpoint = null,
+    expectedPendingOperation = null,
+    allowLegacyCheckpointMigration = false,
+    operationTokenProvider = null
   } = {}) {
     this.userDataDir = path.resolve(userDataDir);
     this.dbPath = path.join(this.userDataDir, POSITION_DB_RELATIVE_PATH);
     this.db = null;
+    this.operationTokenProvider = typeof operationTokenProvider === 'function'
+      ? operationTokenProvider
+      : null;
     const expected = normalizeCheckpoint(expectedCheckpoint, 'checkpoint');
+    const pendingOperation = normalizePendingOperation(expectedPendingOperation);
     const mustExist = requireExisting || expected !== null;
     if (mustExist && !fs.existsSync(this.dbPath)) {
       throw new PositionReconciliationError(
@@ -762,6 +850,7 @@ class PositionReconciliationStore {
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     try {
       this.db = new DatabaseSync(this.dbPath);
+      let isLegacyDatabase = false;
       if (mustExist) {
         const hasMetaTable = this.db.prepare(`
           SELECT 1 AS present
@@ -770,14 +859,21 @@ class PositionReconciliationStore {
         `).get();
         const checkpoint = hasMetaTable ? readDatabaseCheckpoint(this.db) : null;
         if (!checkpoint) {
-          throw new PositionReconciliationError(
-            'position-side-db-missing',
-            '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
-            [
-              `异常文件：${this.dbPath}`,
-              '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
-            ]
-          );
+          const legacyMarker = hasMetaTable && allowLegacyCheckpointMigration
+            ? this.db.prepare('SELECT value FROM position_meta WHERE key = ?')
+                .get(POSITION_DB_LEGACY_INITIALIZED_KEY)
+            : null;
+          isLegacyDatabase = Boolean(legacyMarker && text(legacyMarker.value) === '1');
+          if (!isLegacyDatabase) {
+            throw new PositionReconciliationError(
+              'position-side-db-missing',
+              '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
+              [
+                `异常文件：${this.dbPath}`,
+                '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+              ]
+            );
+          }
         }
       }
       this.db.exec('PRAGMA foreign_keys = ON;');
@@ -785,6 +881,12 @@ class PositionReconciliationStore {
       this.db.exec('PRAGMA synchronous = NORMAL;');
       this.db.exec('PRAGMA busy_timeout = 30000;');
       this.db.exec(SCHEMA);
+      const checkpointHistoryColumns = this.db.prepare(
+        'PRAGMA table_info(position_checkpoint_history)'
+      ).all();
+      if (!checkpointHistoryColumns.some((column) => column.name === 'operation_token')) {
+        this.db.exec('ALTER TABLE position_checkpoint_history ADD COLUMN operation_token TEXT;');
+      }
       this.db.prepare(`
         INSERT INTO position_meta(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO NOTHING
@@ -805,11 +907,11 @@ class PositionReconciliationStore {
         );
       }
       this.db.prepare(`
-        INSERT INTO position_checkpoint_history(generation, token, parent_token)
-        VALUES (?, ?, NULL)
+        INSERT INTO position_checkpoint_history(generation, token, parent_token, operation_token)
+        VALUES (?, ?, NULL, NULL)
         ON CONFLICT(generation) DO NOTHING
       `).run(currentCheckpoint.generation, currentCheckpoint.token);
-      assertCheckpointCompatible(this.db, currentCheckpoint, expected);
+      assertCheckpointCompatible(this.db, currentCheckpoint, expected, pendingOperation);
     } catch (error) {
       if (this.db) {
         try {
@@ -864,6 +966,9 @@ class PositionReconciliationStore {
         );
       }
       const nextToken = crypto.randomUUID();
+      const operationToken = text(
+        this.operationTokenProvider ? this.operationTokenProvider() : ''
+      ) || crypto.randomUUID();
       const generationUpdate = this.db.prepare(`
         UPDATE position_meta
         SET value = ?
@@ -881,9 +986,11 @@ class PositionReconciliationStore {
         currentCheckpoint.token
       );
       const historyInsert = this.db.prepare(`
-        INSERT INTO position_checkpoint_history(generation, token, parent_token)
-        VALUES (?, ?, ?)
-      `).run(nextGeneration, nextToken, currentCheckpoint.token);
+        INSERT INTO position_checkpoint_history(
+          generation, token, parent_token, operation_token
+        )
+        VALUES (?, ?, ?, ?)
+      `).run(nextGeneration, nextToken, currentCheckpoint.token, operationToken);
       if (Number(generationUpdate.changes) !== 1
           || Number(tokenUpdate.changes) !== 1
           || Number(historyInsert.changes) !== 1) {

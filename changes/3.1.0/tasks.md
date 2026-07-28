@@ -9,7 +9,7 @@
 ## 2. 存储与导入
 
 - [x] 建立持久 position side DB 与 schema
-- [x] 增加主库/侧库 checkpoint 历史链、缺失及新旧 generation 分叉阻断和完整目录备份说明
+- [x] 增加主库预登记 operation token、侧库 checkpoint 历史链、旧标记迁移、缺失及新旧 generation 分叉阻断和完整目录备份说明
 - [x] 银行 46/49 列导入、范围替换和表库管理
 - [x] 五类原始表识别、校验、写入和派生
 - [x] 独立账户映射、重建和 revision
@@ -21,7 +21,7 @@
 - [x] 十组资金性质匹配和严格 1:1
 - [x] 账户逻辑分组与三类账户场景
 - [x] 持久草稿、差异和 stale 校验
-- [x] 运行范围、快照、汇总结构及明细一致性 fail-closed 校验
+- [x] 运行范围、来源集合、冲突计数、快照、汇总结构及明细一致性 fail-closed 校验
 - [x] 49 列导出、高亮、回导防篡改和确认事务
 - [x] 零数据导出的标识符列级文本格式
 - [x] 已确认运行间订单来源/银行 BizId 双向 1:1 消费审计
@@ -42,17 +42,19 @@
 - [x] 防止跨批次共用源路径在仍有未完成 artifact 时被提前释放
 - [x] 防止主进程后置目录清理绕过未完成 artifact 保护集
 - [x] 静态模板与运行时 writer 统一标识符文本列判定
+- [x] 存档业务成功返回前完成登记与处理，消除未持久内存尾队列窗口
+- [x] 管理页侧库恢复错误展示 detailLines
 
 ## 5. 验证
 
 - [x] 定向 unit / integration
 - [x] 全部相关 preview
-- [x] release-check
-- [x] scan:vars / check:vars
-- [x] startup:measure
+- [x] release-check（最终提交）
+- [x] scan:vars / check:vars（最终提交，命中项已进入关联功能 review）
+- [x] startup:measure（最终提交）
 - [x] reconciliation blindspot pass
-- [x] team-lead 三层质量门禁
-- [x] self-review P0-P4 Finding 清零
+- [ ] team-lead 三层质量门禁（最终提交）
+- [ ] self-review P0-P4 Finding 清零（最终提交）
 - [x] 记录真实资金人工复核缺口
 
 > 自动化、预览和代码复核已完成；真实或脱敏资金数据逐笔验收仍是发布前人工门禁，不以本清单勾选代替。

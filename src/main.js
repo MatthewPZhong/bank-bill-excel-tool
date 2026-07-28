@@ -1,4 +1,4 @@
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
@@ -70,7 +70,9 @@ const {
   filterStagingPathsWithoutProtectedSources
 } = require('./main-process/position-reconciliation/input-staging');
 const {
-  POSITION_SIDE_DB_CHECKPOINT_SETTING
+  POSITION_SIDE_DB_CHECKPOINT_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING,
+  POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING
 } = require('./main-process/position-reconciliation/constants');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
@@ -411,6 +413,7 @@ let archiveCenterService = null;
 let archiveOperationTracker = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
+const positionReconciliationOperationContext = new AsyncLocalStorage();
 const businessOperationRegistry = createBusinessOperationRegistry();
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
@@ -14127,11 +14130,23 @@ function getPositionReconciliationService() {
     const expectedSideDbCheckpoint = database.getSetting(
       POSITION_SIDE_DB_CHECKPOINT_SETTING
     );
+    const pendingSideDbOperation = database.getSetting(
+      POSITION_SIDE_DB_PENDING_SETTING
+    );
+    const legacySideDbInitialized = database.getSetting(
+      POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING
+    ) === '1';
     const service = createPositionReconciliationService({
       userDataDir: path.dirname(database.dbPath),
       templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
-      requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
+      requireExistingSideDb: Boolean(expectedSideDbCheckpoint) || legacySideDbInitialized,
       expectedSideDbCheckpoint,
+      expectedPendingOperation: pendingSideDbOperation,
+      allowLegacyCheckpointMigration: legacySideDbInitialized && !expectedSideDbCheckpoint,
+      operationTokenProvider: () => {
+        const operation = positionReconciliationOperationContext.getStore();
+        return operation && operation.operationToken;
+      },
       protectedStagingPaths: () => {
         if (!archiveCenterService
             || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
@@ -14145,6 +14160,8 @@ function getPositionReconciliationService() {
         POSITION_SIDE_DB_CHECKPOINT_SETTING,
         JSON.stringify(service.persistenceCheckpoint())
       );
+      database.setSetting(POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING, '1');
+      database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       positionReconciliationService = service;
     } catch (error) {
       service.close();
@@ -14160,6 +14177,41 @@ function syncPositionReconciliationCheckpoint() {
     POSITION_SIDE_DB_CHECKPOINT_SETTING,
     JSON.stringify(positionReconciliationService.persistenceCheckpoint())
   );
+}
+
+async function runPositionReconciliationOperation(channel, operation) {
+  let service;
+  let baseCheckpoint;
+  const operationToken = randomUUID();
+  try {
+    service = getPositionReconciliationService();
+    baseCheckpoint = service.persistenceCheckpoint();
+    database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify({
+      operationToken,
+      channel,
+      baseCheckpoint
+    }));
+  } catch (error) {
+    return positionReconciliationFailureResult(error);
+  }
+
+  return positionReconciliationOperationContext.run({ operationToken }, async () => {
+    let result;
+    let operationError = null;
+    try {
+      result = await operation();
+    } catch (error) {
+      operationError = error;
+    }
+    try {
+      syncPositionReconciliationCheckpoint();
+      database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+    } catch (checkpointError) {
+      if (!operationError) return positionReconciliationFailureResult(checkpointError);
+    }
+    if (operationError) throw operationError;
+    return result;
+  });
 }
 
 function positionReconciliationFailureResult(error) {
@@ -15105,24 +15157,24 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       return result;
     }
 
-    archiveOperationTail = archiveOperationTail
-      .then(() => archiveOperationTracker.handleOperation({
+    const archiveTask = archiveOperationTail.then(() => archiveOperationTracker.handleOperation({
         channel: meta.channel,
         args,
         result: archiveResultSnapshot(result),
         selectedPaths,
         runtime
-      }))
-      .then((archiveResult) => {
-        if (archiveResult && archiveResult.archiveFailed === true) {
-          reportArchiveFailure(archiveResult.warning);
-          return;
-        }
+      }));
+    archiveOperationTail = archiveTask.catch(() => undefined);
+    try {
+      const archiveResult = await archiveTask;
+      if (archiveResult && archiveResult.archiveFailed === true) {
+        reportArchiveFailure(archiveResult.warning);
+      } else {
         cleanupPositionArchiveStaging(runtime);
-      })
-      .catch((error) => {
-        reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
-      });
+      }
+    } catch (error) {
+      reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
+    }
 
     return result;
   });
@@ -15155,10 +15207,10 @@ function businessIpcHandle(channel, label, handler) {
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
-    const result = await runArchiveAwareOperation(meta, event, args, handler);
-    if (channel.startsWith('position-reconciliation:')) {
-      syncPositionReconciliationCheckpoint();
-    }
+    const execute = () => runArchiveAwareOperation(meta, event, args, handler);
+    const result = channel.startsWith('position-reconciliation:')
+      ? await runPositionReconciliationOperation(channel, execute)
+      : await execute();
     if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }

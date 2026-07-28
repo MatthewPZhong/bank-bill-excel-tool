@@ -53,6 +53,12 @@ function resultRow(bizId, fundType) {
   };
 }
 
+test('客户号和 accountReference 始终按标识符文本列处理', () => {
+  for (const header of ['客户号', 'accountReference', '客户编号', 'CustomerRef']) {
+    assert.equal(requiresTextFormat(header), true, `${header} 必须命中文本格式`);
+  }
+});
+
 test('五个链接模板严格使用正式字段、冻结首行和筛选范围', async () => {
   for (const [sourceType, fileName] of TEMPLATE_OUTPUTS) {
     const workbook = new ExcelJS.Workbook();

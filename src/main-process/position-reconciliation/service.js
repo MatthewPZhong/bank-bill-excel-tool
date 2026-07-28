@@ -9,7 +9,9 @@ const {
   BANK_STATUSES,
   MATCH_TYPES,
   FUND_TYPE_PAIRS,
-  POSITION_BANK_HEADERS
+  POSITION_BANK_HEADERS,
+  SOURCE_TYPE_BY_FUND_TYPE,
+  sourceTypeForFundType
 } = require('./constants');
 const {
   PositionReconciliationError,
@@ -37,30 +39,8 @@ const {
   pruneStagingRoot
 } = require('./input-staging');
 
-const SOURCE_BY_FUND_TYPE = new Map([
-  ['Inbound', SOURCE_TYPES.GATEWAY_INBOUND],
-  ['Inbound&FX', SOURCE_TYPES.GATEWAY_INBOUND],
-  ['Wire Return', SOURCE_TYPES.GATEWAY_INBOUND],
-  ['Wire Return&FX', SOURCE_TYPES.GATEWAY_INBOUND],
-  ['outbound', SOURCE_TYPES.GATEWAY_OUTBOUND],
-  ['Outbound&FX', SOURCE_TYPES.GATEWAY_OUTBOUND],
-  ['Ach Return', SOURCE_TYPES.GATEWAY_OUTBOUND],
-  ['Ach Return&FX', SOURCE_TYPES.GATEWAY_OUTBOUND],
-  ['FundTransfer-in', SOURCE_TYPES.FUND_TRANSFER],
-  ['FundTransfer-in&FX', SOURCE_TYPES.FUND_TRANSFER],
-  ['FundTransfer-out', SOURCE_TYPES.FUND_TRANSFER],
-  ['FundTransfer-out&FX', SOURCE_TYPES.FUND_TRANSFER],
-  ['Others', SOURCE_TYPES.BANK_ACCOUNT],
-  ['Others&FX', SOURCE_TYPES.BANK_ACCOUNT],
-  ['Revenue Clear', SOURCE_TYPES.BANK_ACCOUNT],
-  ['Revenue Clear&FX', SOURCE_TYPES.BANK_ACCOUNT],
-  ['From TREASURY FUND', SOURCE_TYPES.BANK_ACCOUNT],
-  ['From TREASURY FUND&FX', SOURCE_TYPES.BANK_ACCOUNT],
-  ['Test', SOURCE_TYPES.TEST_PAYMENT],
-  ['Test&FX', SOURCE_TYPES.TEST_PAYMENT]
-]);
-
 const FUND_TYPE_PAIR_BY_VALUE = new Map();
+const SOURCE_BY_FUND_TYPE = new Map(Object.entries(SOURCE_TYPE_BY_FUND_TYPE));
 for (const pair of FUND_TYPE_PAIRS) {
   FUND_TYPE_PAIR_BY_VALUE.set(pair[0], pair);
   FUND_TYPE_PAIR_BY_VALUE.set(pair[1], pair);
@@ -76,7 +56,7 @@ function runScopeOf(bankRows) {
 function requiredSourceTypes(bankRows) {
   return [...new Set(
     bankRows
-      .map((row) => SOURCE_BY_FUND_TYPE.get(text(row.working_fund_type)))
+      .map((row) => sourceTypeForFundType(row.working_fund_type))
       .filter(Boolean)
   )];
 }
@@ -224,6 +204,9 @@ class PositionReconciliationService {
     store = null,
     requireExistingSideDb = false,
     expectedSideDbCheckpoint = null,
+    expectedPendingOperation = null,
+    allowLegacyCheckpointMigration = false,
+    operationTokenProvider = null,
     protectedStagingPaths = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
@@ -233,7 +216,10 @@ class PositionReconciliationService {
     this.now = now;
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
       requireExisting: requireExistingSideDb,
-      expectedCheckpoint: expectedSideDbCheckpoint
+      expectedCheckpoint: expectedSideDbCheckpoint,
+      expectedPendingOperation,
+      allowLegacyCheckpointMigration,
+      operationTokenProvider
     });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();

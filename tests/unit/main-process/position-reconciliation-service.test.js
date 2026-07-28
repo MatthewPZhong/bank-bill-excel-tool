@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 const XLSX = require('xlsx');
 
 const {
@@ -1167,6 +1168,63 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
   );
 });
 
+test('旧版 initialized 标记只迁移真实旧侧库，缺失或空库继续阻断', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-legacy-'));
+  const missingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-legacy-missing-'));
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
+  const bankPath = path.join(userDataDir, 'legacy-bank.xlsx');
+  t.after(() => {
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+    fs.rmSync(missingDir, { recursive: true, force: true });
+  });
+
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({
+    BizId: 'LEGACY-SIDE-BANK'
+  })]);
+  const initialized = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  initialized.applyBankImport(initialized.prepareBankImport([bankPath]).token);
+  initialized.close();
+
+  const legacyDb = new DatabaseSync(dbPath);
+  legacyDb.prepare(`
+    DELETE FROM position_meta
+    WHERE key IN (?, ?, ?)
+  `).run(
+    'position_database_identity_v1',
+    'position_database_generation_v1',
+    'position_database_checkpoint_token_v1'
+  );
+  legacyDb.exec('DELETE FROM position_checkpoint_history;');
+  legacyDb.prepare(`
+    INSERT INTO position_meta(key, value) VALUES (?, '1')
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run('position_database_initialized_v1');
+  legacyDb.close();
+
+  const migrated = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    allowLegacyCheckpointMigration: true
+  });
+  assert.equal(migrated.store.getBankRows().length, 1);
+  assert.equal(migrated.persistenceCheckpoint().generation, 0);
+  migrated.close();
+
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir: missingDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      allowLegacyCheckpointMigration: true
+    }),
+    (error) => error && error.code === 'position-side-db-missing'
+  );
+});
+
 test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-checkpoint-'));
   const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
@@ -1191,7 +1249,8 @@ test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t)
     userDataDir,
     templatePath: TEMPLATE_PATH,
     requireExistingSideDb: true,
-    expectedSideDbCheckpoint: initialCheckpoint
+    expectedSideDbCheckpoint: initialCheckpoint,
+    operationTokenProvider: () => 'linear-operation'
   });
   const prepared = currentService.prepareBankImport([bankPath]);
   currentService.applyBankImport(prepared.token);
@@ -1201,11 +1260,25 @@ test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t)
   assert.equal(currentCheckpoint.identity, initialCheckpoint.identity);
   currentService.close();
 
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: initialCheckpoint
+    }),
+    (error) => error && error.code === 'position-side-db-mismatch',
+    '仅恢复旧主库、没有待完成操作记录时不得沿父链误追平'
+  );
   const recoveredAfterMainCheckpointLag = createPositionReconciliationService({
     userDataDir,
     templatePath: TEMPLATE_PATH,
     requireExistingSideDb: true,
-    expectedSideDbCheckpoint: initialCheckpoint
+    expectedSideDbCheckpoint: initialCheckpoint,
+    expectedPendingOperation: {
+      operationToken: 'linear-operation',
+      baseCheckpoint: initialCheckpoint
+    }
   });
   assert.deepEqual(recoveredAfterMainCheckpointLag.persistenceCheckpoint(), currentCheckpoint);
   recoveredAfterMainCheckpointLag.close();
@@ -1216,7 +1289,8 @@ test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t)
     userDataDir: divergedUserDataDir,
     templatePath: TEMPLATE_PATH,
     requireExistingSideDb: true,
-    expectedSideDbCheckpoint: initialCheckpoint
+    expectedSideDbCheckpoint: initialCheckpoint,
+    operationTokenProvider: () => 'diverged-operation'
   });
   divergedService.saveMappings([]);
   divergedService.saveMappings([{
@@ -1232,7 +1306,11 @@ test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t)
       userDataDir: divergedUserDataDir,
       templatePath: TEMPLATE_PATH,
       requireExistingSideDb: true,
-      expectedSideDbCheckpoint: currentCheckpoint
+      expectedSideDbCheckpoint: currentCheckpoint,
+      expectedPendingOperation: {
+        operationToken: 'diverged-operation',
+        baseCheckpoint: currentCheckpoint
+      }
     }),
     (error) => error && error.code === 'position-side-db-mismatch'
   );
@@ -1321,4 +1399,32 @@ test('运行范围、快照和汇总 JSON 语法合法但结构不完整时必�
       `UPDATE position_runs SET ${column} = ? WHERE id = ?`
     ).run(stored[column], run.runId);
   }
+
+  const jointlyTamperedSnapshot = JSON.parse(stored.snapshot_json);
+  const jointlyTamperedSummary = JSON.parse(stored.summary_json);
+  jointlyTamperedSnapshot.sources = {};
+  jointlyTamperedSummary.sourceTypes = [];
+  service.store.db.prepare(`
+    UPDATE position_runs SET snapshot_json = ?, summary_json = ? WHERE id = ?
+  `).run(
+    JSON.stringify(jointlyTamperedSnapshot),
+    JSON.stringify(jointlyTamperedSummary),
+    run.runId
+  );
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '快照和汇总共同篡改来源集合也必须由原始运行行识别'
+  );
+
+  const tamperedConflictSummary = JSON.parse(stored.summary_json);
+  tamperedConflictSummary.engine.confirmedConsumptionConflicts += 1;
+  service.store.db.prepare(`
+    UPDATE position_runs SET snapshot_json = ?, summary_json = ? WHERE id = ?
+  `).run(stored.snapshot_json, JSON.stringify(tamperedConflictSummary), run.runId);
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '已确认消费冲突计数必须与逐行血缘一致'
+  );
 });

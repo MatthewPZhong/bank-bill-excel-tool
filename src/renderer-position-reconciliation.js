@@ -36,6 +36,14 @@
     return details.length > 0 ? `${message}<br>${details.join('<br>')}` : message;
   }
 
+  function failureDetailsText(result, fallbackMessage) {
+    const message = String(result && result.message ? result.message : fallbackMessage);
+    const details = Array.isArray(result && result.detailLines)
+      ? result.detailLines.filter(Boolean).map(String)
+      : [];
+    return details.length > 0 ? `${message}；${details.join('；')}` : message;
+  }
+
   function createPositionReconciliationUI({
     api,
     openModal,
@@ -149,7 +157,7 @@
       const result = await api.status();
       if (!result || result.status !== 'ok') {
         state.status = null;
-        setStatus(result && result.message ? result.message : '平盘对账状态读取失败', 'error');
+        setStatus(failureDetailsText(result, '平盘对账状态读取失败'), 'error');
         updateControls();
         return result;
       }
@@ -414,7 +422,7 @@
       }
       const data = await api.dataManager();
       if (!data || data.status !== 'ok') {
-        showAlert(data && data.message ? data.message : '无法读取待运行范围');
+        showAlert(failureDetailsHtml(data, '无法读取待运行范围'), { html: true });
         return;
       }
       const scopes = (data.scopes || []).filter((row) => row.status === '未处理');
@@ -438,7 +446,7 @@
             }));
           }
           if (!result || result.status !== 'ok') {
-            showAlert(result && result.message ? result.message : '平盘资金性质校验失败');
+            showAlert(failureDetailsHtml(result, '平盘资金性质校验失败'), { html: true });
             return;
           }
           openResultDialog(result.runId);
@@ -457,7 +465,7 @@
       );
       if (!result || result.status === 'cancelled') return false;
       if (result.status !== 'ok') {
-        showAlert(result.message || '结果导出失败');
+        showAlert(failureDetailsHtml(result, '结果导出失败'), { html: true });
         return false;
       }
       setStatus(`已导出 ${result.rowCount} 行：${result.fileName}`, 'success');
@@ -486,7 +494,7 @@
       if (!accepted) return false;
       const result = await withInflight('正在确认平盘资金性质校验结果…', () => api.confirmRun(runId));
       if (!result || result.status !== 'ok') {
-        showAlert(result && result.message ? result.message : '结果确认失败');
+        showAlert(failureDetailsHtml(result, '结果确认失败'), { html: true });
         return false;
       }
       setStatus(result.message, 'success');
@@ -558,7 +566,7 @@
             const result = await withInflight('正在导出平盘银行对账单…', () => api.exportBank(selection));
             if (!result || result.status === 'cancelled') return;
             if (result.status !== 'ok') {
-              showAlert(result.message || '导出失败');
+              showAlert(failureDetailsHtml(result, '导出失败'), { html: true });
               return;
             }
             closeModal();
@@ -569,7 +577,7 @@
           if (!accepted) return;
           const result = await withInflight('正在删除平盘银行对账单…', () => api.deleteBank(selection));
           if (!result || result.status !== 'ok') {
-            showAlert(result && result.message ? result.message : '删除失败');
+            showAlert(failureDetailsHtml(result, '删除失败'), { html: true });
             return;
           }
           closeModal();
@@ -583,7 +591,7 @@
       if (!ensureAvailable()) return;
       const result = previewData || await api.dataManager();
       if (!result || result.status !== 'ok') {
-        showAlert(result && result.message ? result.message : '对账数据管理读取失败');
+        showAlert(failureDetailsHtml(result, '对账数据管理读取失败'), { html: true });
         return;
       }
       const shell = createDialogShell('对账数据管理', 'position-manager-dialog');
@@ -765,7 +773,7 @@
         }
       }
       if (!result || result.status !== 'ok') {
-        showAlert(result && result.message ? result.message : '账户映射读取失败');
+        showAlert(failureDetailsHtml(result, '账户映射读取失败'), { html: true });
         return;
       }
       let shell;
@@ -990,7 +998,7 @@
         ));
         if (!exported || exported.status === 'cancelled') return;
         if (exported.status !== 'ok') {
-          showAlert(exported.message || '导出失败');
+          showAlert(failureDetailsHtml(exported, '导出失败'), { html: true });
           return;
         }
         closeSelf();
@@ -1003,7 +1011,7 @@
     async function openRawSourceDialog(previewData = null) {
       const result = previewData || await api.linkedManager();
       if (!result || result.status !== 'ok') {
-        showAlert(result && result.message ? result.message : '链接原始表读取失败');
+        showAlert(failureDetailsHtml(result, '链接原始表读取失败'), { html: true });
         return;
       }
       const shell = createDialogShell('链接原始表', 'position-raw-dialog');
@@ -1104,7 +1112,7 @@
           wholeTable
         }));
         if (!deleted || deleted.status !== 'ok') {
-          showAlert(deleted && deleted.message ? deleted.message : '删除失败');
+          showAlert(failureDetailsHtml(deleted, '删除失败'), { html: true });
           return;
         }
         closeModal();
@@ -1156,7 +1164,7 @@
         ));
         if (!exported || exported.status === 'cancelled') return;
         if (exported.status !== 'ok') {
-          showAlert(exported.message || '导出失败');
+          showAlert(failureDetailsHtml(exported, '导出失败'), { html: true });
           return;
         }
         closeSelf();
@@ -1170,7 +1178,7 @@
       if (!ensureAvailable()) return;
       const result = previewData || await api.linkedManager();
       if (!result || result.status !== 'ok') {
-        showAlert(result && result.message ? result.message : '链接表管理读取失败');
+        showAlert(failureDetailsHtml(result, '链接表管理读取失败'), { html: true });
         return;
       }
       const shell = createDialogShell('链接表管理', 'position-manager-dialog');

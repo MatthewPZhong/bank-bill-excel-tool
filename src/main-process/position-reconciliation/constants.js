@@ -7,6 +7,8 @@ const MODULE_NAME = '平盘对账数据处理';
 const MODULE_CODE = 'POSITION';
 const POSITION_DB_RELATIVE_PATH = 'run-data/position-reconciliation/position-data.sqlite';
 const POSITION_SIDE_DB_CHECKPOINT_SETTING = 'position_reconciliation_side_db_checkpoint_v1';
+const POSITION_SIDE_DB_PENDING_SETTING = 'position_reconciliation_side_db_pending_v1';
+const POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING = 'position_reconciliation_side_db_initialized_v1';
 const POSITION_RULESET_VERSION = 1;
 
 const AUDIT_HEADERS = Object.freeze(['命中明细', '命中类型', '匹配命中详情']);
@@ -20,6 +22,33 @@ const SOURCE_TYPES = Object.freeze({
   GATEWAY_INBOUND: 'gateway-inbound',
   GATEWAY_OUTBOUND: 'gateway-outbound'
 });
+
+const SOURCE_TYPE_BY_FUND_TYPE = Object.freeze({
+  Inbound: SOURCE_TYPES.GATEWAY_INBOUND,
+  'Inbound&FX': SOURCE_TYPES.GATEWAY_INBOUND,
+  'Wire Return': SOURCE_TYPES.GATEWAY_INBOUND,
+  'Wire Return&FX': SOURCE_TYPES.GATEWAY_INBOUND,
+  outbound: SOURCE_TYPES.GATEWAY_OUTBOUND,
+  'Outbound&FX': SOURCE_TYPES.GATEWAY_OUTBOUND,
+  'Ach Return': SOURCE_TYPES.GATEWAY_OUTBOUND,
+  'Ach Return&FX': SOURCE_TYPES.GATEWAY_OUTBOUND,
+  'FundTransfer-in': SOURCE_TYPES.FUND_TRANSFER,
+  'FundTransfer-in&FX': SOURCE_TYPES.FUND_TRANSFER,
+  'FundTransfer-out': SOURCE_TYPES.FUND_TRANSFER,
+  'FundTransfer-out&FX': SOURCE_TYPES.FUND_TRANSFER,
+  Others: SOURCE_TYPES.BANK_ACCOUNT,
+  'Others&FX': SOURCE_TYPES.BANK_ACCOUNT,
+  'Revenue Clear': SOURCE_TYPES.BANK_ACCOUNT,
+  'Revenue Clear&FX': SOURCE_TYPES.BANK_ACCOUNT,
+  'From TREASURY FUND': SOURCE_TYPES.BANK_ACCOUNT,
+  'From TREASURY FUND&FX': SOURCE_TYPES.BANK_ACCOUNT,
+  Test: SOURCE_TYPES.TEST_PAYMENT,
+  'Test&FX': SOURCE_TYPES.TEST_PAYMENT
+});
+
+function sourceTypeForFundType(value) {
+  return SOURCE_TYPE_BY_FUND_TYPE[String(value == null ? '' : value).trim()] || null;
+}
 
 const SOURCE_DISPLAY_ORDER = Object.freeze([
   SOURCE_TYPES.FUND_TRANSFER,
@@ -164,11 +193,15 @@ module.exports = {
   MODULE_CODE,
   POSITION_DB_RELATIVE_PATH,
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING,
+  POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING,
   POSITION_RULESET_VERSION,
   AUDIT_HEADERS,
   POSITION_BANK_HEADERS,
   BANK_SHEET_NAME,
   SOURCE_TYPES,
+  SOURCE_TYPE_BY_FUND_TYPE,
+  sourceTypeForFundType,
   SOURCE_DISPLAY_ORDER,
   SOURCE_DEFINITIONS,
   LINK_HEADERS,

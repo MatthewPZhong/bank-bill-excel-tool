@@ -30,6 +30,17 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.doesNotMatch(quitFlow, /Promise\.race\(\[\s*archiveOperationTail/);
   });
 
+  test('业务 IPC 返回成功前等待本次存档登记与处理，不只写入内存尾队列', () => {
+    const start = main.indexOf('async function runArchiveAwareOperation');
+    const end = main.indexOf('function runRegisteredBusinessOperation', start);
+    const operationFlow = main.slice(start, end);
+    assert.match(operationFlow, /const archiveResult = await archiveTask/);
+    assert.ok(
+      operationFlow.indexOf('await archiveTask') < operationFlow.lastIndexOf('return result'),
+      '存档任务应在返回业务结果前完成'
+    );
+  });
+
   test('存档写操作纳入业务退出闸门，平盘失败源由存档状态驱动释放', () => {
     assert.match(
       main,

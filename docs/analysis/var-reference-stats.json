@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T06:37:47.626Z",
+    "scannedAt": "2026-07-28T08:18:40.235Z",
     "root": "src",
     "totalFiles": 216,
-    "totalTopLevelNames": 2498,
+    "totalTopLevelNames": 2506,
     "buckets": {
-      "shared": 370,
-      "paired": 625,
-      "local": 1361,
-      "crossFile": 995
+      "shared": 371,
+      "paired": 628,
+      "local": 1364,
+      "crossFile": 999
     }
   },
   "A": {
@@ -838,7 +838,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
@@ -857,7 +857,7 @@
             "count": 3
           }
         ],
-        "totalHits": 76,
+        "totalHits": 77,
         "fileSpan": 35
       },
       {
@@ -1281,11 +1281,11 @@
           },
           {
             "file": "src/main-process/position-reconciliation/service.js",
-            "count": 38
+            "count": 37
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 44
+            "count": 49
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1324,7 +1324,7 @@
             "count": 62
           }
         ],
-        "totalHits": 338,
+        "totalHits": 342,
         "fileSpan": 21
       },
       {
@@ -1485,7 +1485,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 4
+            "count": 5
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1512,7 +1512,7 @@
             "count": 2
           }
         ],
-        "totalHits": 52,
+        "totalHits": 53,
         "fileSpan": 17
       },
       {
@@ -2306,6 +2306,66 @@
         "fileSpan": 12
       },
       {
+        "name": "randomUUID",
+        "defFiles": [
+          "src/backend/database/migrations.js",
+          "src/backend/database/template-repository.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/template-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/archive-center/archive-service.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox-merge-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 26,
+        "fileSpan": 12
+      },
+      {
         "name": "isRowMeaningful",
         "defFiles": [
           "src/backend/file-service/common.js",
@@ -2358,61 +2418,6 @@
           }
         ],
         "totalHits": 30,
-        "fileSpan": 11
-      },
-      {
-        "name": "randomUUID",
-        "defFiles": [
-          "src/backend/database/migrations.js",
-          "src/backend/database/template-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/migrations.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/template-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/archive-center/archive-service.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/position-reconciliation/excel-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/position-reconciliation/service.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox-merge-io.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 24,
         "fileSpan": 11
       },
       {
@@ -3346,7 +3351,7 @@
         "refFiles": [
           {
             "file": "src/main-process/position-reconciliation/constants.js",
-            "count": 18
+            "count": 38
           },
           {
             "file": "src/main-process/position-reconciliation/contracts.js",
@@ -3366,7 +3371,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/service.js",
-            "count": 25
+            "count": 5
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
@@ -4751,10 +4756,10 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 26
+            "count": 28
           }
         ],
-        "totalHits": 76,
+        "totalHits": 78,
         "fileSpan": 5
       },
       {
@@ -5982,6 +5987,35 @@
         "fileSpan": 4
       },
       {
+        "name": "parseJson",
+        "defFiles": [
+          "src/backend/database/duplicate-inbound-match-run-repository.js",
+          "src/backend/database/pre-fund-reconciliation-run-repository.js",
+          "src/backend/pre-fund-reconciliation-run-store.js",
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/duplicate-inbound-match-run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/pre-fund-reconciliation-run-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 14
+          }
+        ],
+        "totalHits": 25,
+        "fileSpan": 4
+      },
+      {
         "name": "openExistingSideDb",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -6028,35 +6062,6 @@
           {
             "file": "src/main-process/archive-center/controller.js",
             "count": 2
-          }
-        ],
-        "totalHits": 23,
-        "fileSpan": 4
-      },
-      {
-        "name": "parseJson",
-        "defFiles": [
-          "src/backend/database/duplicate-inbound-match-run-repository.js",
-          "src/backend/database/pre-fund-reconciliation-run-repository.js",
-          "src/backend/pre-fund-reconciliation-run-store.js",
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/duplicate-inbound-match-run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/pre-fund-reconciliation-run-repository.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 12
           }
         ],
         "totalHits": 23,
@@ -10754,6 +10759,28 @@
           },
           {
             "file": "src/backend/pending-import/worker.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "sourceTypeForFundType",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 2
           }
         ],
@@ -15608,6 +15635,25 @@
         "fileSpan": 2
       },
       {
+        "name": "AsyncLocalStorage",
+        "defFiles": [
+          "src/main-process/archive-center/operation-tracker.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/operation-tracker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "BALANCED_HEADERS",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/output-mapper.js"
@@ -16766,6 +16812,24 @@
         "fileSpan": 2
       },
       {
+        "name": "SOURCE_TYPE_BY_FUND_TYPE",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "sourceSnapshotMatchesStat",
         "defFiles": [
           "src/main-process/archive-center/source-snapshot.js"
@@ -17183,25 +17247,6 @@
           {
             "file": "src/backend/database/scenarios-repository.js",
             "count": 3
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "AsyncLocalStorage",
-        "defFiles": [
-          "src/main-process/archive-center/operation-tracker.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/operation-tracker.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 2
           }
         ],
         "totalHits": 4,
@@ -22473,6 +22518,42 @@
         "fileSpan": 2
       },
       {
+        "name": "POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "POSITION_SIDE_DB_PENDING_SETTING",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "prepareBillInsert",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js"
@@ -23540,6 +23621,20 @@
         "fileSpan": 1
       },
       {
+        "name": "throwInvalidSideData",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 23
+          }
+        ],
+        "totalHits": 23,
+        "fileSpan": 1
+      },
+      {
         "name": "requiredText",
         "defFiles": [
           "src/backend/database/archive-repository.js"
@@ -23589,20 +23684,6 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 21
-          }
-        ],
-        "totalHits": 21,
-        "fileSpan": 1
-      },
-      {
-        "name": "throwInvalidSideData",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
             "count": 21
           }
         ],
@@ -23918,6 +23999,20 @@
         "fileSpan": 1
       },
       {
+        "name": "checkpointMismatch",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 1
+      },
+      {
         "name": "dayMs",
         "defFiles": [
           "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
@@ -24121,20 +24216,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 10
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 1
-      },
-      {
-        "name": "checkpointMismatch",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
             "count": 10
           }
         ],
@@ -24926,6 +25007,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertSameTextSet",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "assertStoredCounter",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
@@ -25290,13 +25385,13 @@
         "fileSpan": 1
       },
       {
-        "name": "assertIterable",
+        "name": "assertBankPayload",
         "defFiles": [
-          "src/main-process/duplicate-inbound-match/matching-engine.js"
+          "src/main-process/position-reconciliation/store.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 6
           }
         ],
@@ -25304,13 +25399,13 @@
         "fileSpan": 1
       },
       {
-        "name": "assertSameTextSet",
+        "name": "assertIterable",
         "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
+          "src/main-process/duplicate-inbound-match/matching-engine.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/position-reconciliation/store.js",
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
             "count": 6
           }
         ],
@@ -26011,20 +26106,6 @@
         "refFiles": [
           {
             "file": "src/backend/database/archive-repository.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "assertBankPayload",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
             "count": 5
           }
         ],
@@ -27586,6 +27667,20 @@
         "fileSpan": 1
       },
       {
+        "name": "checkpointValue",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "classifyRows",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -28433,6 +28528,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizeCheckpoint",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 4
           }
         ],
@@ -29896,6 +30005,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertRunLineage",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "assertSharedStringsUnderLimit",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/large-split-worker.js"
@@ -30757,20 +30880,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-dispatcher.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "checkpointValue",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
             "count": 3
           }
         ],
@@ -33522,20 +33631,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizeCheckpoint",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "normalizeDateRange",
         "defFiles": [
           "src/backend/pre-fund-reconciliation-store.js"
@@ -35328,20 +35423,6 @@
         "fileSpan": 1
       },
       {
-        "name": "SOURCE_BY_FUND_TYPE",
-        "defFiles": [
-          "src/main-process/position-reconciliation/service.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/service.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "spawnImportWorker",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -36602,20 +36683,6 @@
         "fileSpan": 1
       },
       {
-        "name": "assertRunLineage",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "assertRunScope",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
@@ -37261,6 +37328,20 @@
       },
       {
         "name": "checkpointGeneration",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "checkpointsEqual",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
         ],
@@ -40088,6 +40169,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizePendingOperation",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizePercent",
         "defFiles": [
           "src/main-process/app-updater.js"
@@ -40599,6 +40694,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "POSITION_DB_LEGACY_INITIALIZED_KEY",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 2
           }
         ],
@@ -41873,6 +41982,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-large-split-router.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "SOURCE_BY_FUND_TYPE",
+        "defFiles": [
+          "src/main-process/position-reconciliation/service.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
             "count": 2
           }
         ],
@@ -43308,7 +43431,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
@@ -43327,7 +43450,7 @@
           "count": 3
         }
       ],
-      "totalHits": 76,
+      "totalHits": 77,
       "fileSpan": 35
     },
     {
@@ -43751,11 +43874,11 @@
         },
         {
           "file": "src/main-process/position-reconciliation/service.js",
-          "count": 38
+          "count": 37
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 44
+          "count": 49
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -43794,7 +43917,7 @@
           "count": 62
         }
       ],
-      "totalHits": 338,
+      "totalHits": 342,
       "fileSpan": 21
     },
     {
@@ -43955,7 +44078,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 4
+          "count": 5
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -43982,7 +44105,7 @@
           "count": 2
         }
       ],
-      "totalHits": 52,
+      "totalHits": 53,
       "fileSpan": 17
     },
     {
@@ -44776,6 +44899,66 @@
       "fileSpan": 12
     },
     {
+      "name": "randomUUID",
+      "defFiles": [
+        "src/backend/database/migrations.js",
+        "src/backend/database/template-repository.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/template-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/archive-center/archive-service.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/excel-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox-merge-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 26,
+      "fileSpan": 12
+    },
+    {
       "name": "isRowMeaningful",
       "defFiles": [
         "src/backend/file-service/common.js",
@@ -44828,61 +45011,6 @@
         }
       ],
       "totalHits": 30,
-      "fileSpan": 11
-    },
-    {
-      "name": "randomUUID",
-      "defFiles": [
-        "src/backend/database/migrations.js",
-        "src/backend/database/template-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/migrations.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/template-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/archive-center/archive-service.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/archive-center/controller.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/position-reconciliation/excel-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/position-reconciliation/service.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox-merge-io.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 24,
       "fileSpan": 11
     },
     {
@@ -45816,7 +45944,7 @@
       "refFiles": [
         {
           "file": "src/main-process/position-reconciliation/constants.js",
-          "count": 18
+          "count": 38
         },
         {
           "file": "src/main-process/position-reconciliation/contracts.js",
@@ -45836,7 +45964,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/service.js",
-          "count": 25
+          "count": 5
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
@@ -47221,10 +47349,10 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 26
+          "count": 28
         }
       ],
-      "totalHits": 76,
+      "totalHits": 78,
       "fileSpan": 5
     },
     {
@@ -48452,6 +48580,35 @@
       "fileSpan": 4
     },
     {
+      "name": "parseJson",
+      "defFiles": [
+        "src/backend/database/duplicate-inbound-match-run-repository.js",
+        "src/backend/database/pre-fund-reconciliation-run-repository.js",
+        "src/backend/pre-fund-reconciliation-run-store.js",
+        "src/main-process/position-reconciliation/store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/duplicate-inbound-match-run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/pre-fund-reconciliation-run-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 14
+        }
+      ],
+      "totalHits": 25,
+      "fileSpan": 4
+    },
+    {
       "name": "openExistingSideDb",
       "defFiles": [
         "src/backend/run-data-store.js"
@@ -48498,35 +48655,6 @@
         {
           "file": "src/main-process/archive-center/controller.js",
           "count": 2
-        }
-      ],
-      "totalHits": 23,
-      "fileSpan": 4
-    },
-    {
-      "name": "parseJson",
-      "defFiles": [
-        "src/backend/database/duplicate-inbound-match-run-repository.js",
-        "src/backend/database/pre-fund-reconciliation-run-repository.js",
-        "src/backend/pre-fund-reconciliation-run-store.js",
-        "src/main-process/position-reconciliation/store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/duplicate-inbound-match-run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/pre-fund-reconciliation-run-repository.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 12
         }
       ],
       "totalHits": 23,
@@ -53224,6 +53352,28 @@
         },
         {
           "file": "src/backend/pending-import/worker.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "sourceTypeForFundType",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
           "count": 2
         }
       ],
@@ -58076,6 +58226,25 @@
       "fileSpan": 2
     },
     {
+      "name": "AsyncLocalStorage",
+      "defFiles": [
+        "src/main-process/archive-center/operation-tracker.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/archive-center/operation-tracker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "BALANCED_HEADERS",
       "defFiles": [
         "src/main-process/pre-fund-reconciliation/output-mapper.js"
@@ -59234,6 +59403,24 @@
       "fileSpan": 2
     },
     {
+      "name": "SOURCE_TYPE_BY_FUND_TYPE",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "sourceSnapshotMatchesStat",
       "defFiles": [
         "src/main-process/archive-center/source-snapshot.js"
@@ -59651,25 +59838,6 @@
         {
           "file": "src/backend/database/scenarios-repository.js",
           "count": 3
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "AsyncLocalStorage",
-      "defFiles": [
-        "src/main-process/archive-center/operation-tracker.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/archive-center/operation-tracker.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 2
         }
       ],
       "totalHits": 4,
@@ -64924,6 +65092,42 @@
     },
     {
       "name": "POSITION_SIDE_DB_CHECKPOINT_SETTING",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "POSITION_SIDE_DB_PENDING_SETTING",
       "defFiles": [
         "src/main-process/position-reconciliation/constants.js"
       ],
