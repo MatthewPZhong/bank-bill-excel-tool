@@ -133,6 +133,7 @@ async function runPositionOperationLifecycle({
       if (!persistedPending || persistedPending.operationToken !== operationToken) {
         throw new Error('平盘对账待完成操作所有权已变化，已停止同步 checkpoint');
       }
+      requirePositionPendingArchiveFiles(persistedPending);
       if (persistedPending.archiveRequired && persistedPending.archiveState !== 'durable') {
         throw new Error('平盘对账存档尚未完成或形成持久重试记录，已停止同步 checkpoint');
       }

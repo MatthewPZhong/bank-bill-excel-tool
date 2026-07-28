@@ -14256,6 +14256,7 @@ function positionArchiveIntentEvidence(pending, currentCheckpoint) {
 
 function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
   if (!pending) return null;
+  const files = requirePositionPendingArchiveFiles(pending);
   const archiveRequired = pending.archiveRequired === true
     || (
       pending.archiveRequired === undefined
@@ -14263,7 +14264,6 @@ function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
       && archiveOperationTracker.supportsChannel(pending.channel)
     );
   if (!archiveRequired || pending.archiveState === 'durable') return null;
-  const files = requirePositionPendingArchiveFiles(pending);
   const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
   if (!evidence.requiresPersistence) return null;
   if (files.length === 0 || !archiveCenterService

@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T14:08:03.188Z",
+    "scannedAt": "2026-07-28T14:22:10.956Z",
     "root": "src",
     "totalFiles": 218,
     "totalTopLevelNames": 2533,
@@ -19973,6 +19973,24 @@
         "fileSpan": 2
       },
       {
+        "name": "requirePositionPendingArchiveFiles",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 3
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "resolveBankRuleEligibility",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -22990,24 +23008,6 @@
         "refFiles": [
           {
             "file": "src/backend/startup-failure.js",
-            "count": 2
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
-        "name": "requirePositionPendingArchiveFiles",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 2
           },
           {
@@ -63011,6 +63011,24 @@
       "fileSpan": 2
     },
     {
+      "name": "requirePositionPendingArchiveFiles",
+      "defFiles": [
+        "src/main-process/position-reconciliation/operation-lifecycle.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "count": 3
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "resolveBankRuleEligibility",
       "defFiles": [
         "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -66028,24 +66046,6 @@
       "refFiles": [
         {
           "file": "src/backend/startup-failure.js",
-          "count": 2
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
-      "name": "requirePositionPendingArchiveFiles",
-      "defFiles": [
-        "src/main-process/position-reconciliation/operation-lifecycle.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
           "count": 2
         },
         {

@@ -57,6 +57,7 @@
 - [x] pending `archiveFiles` 缺失或结构损坏时禁止降级为空保护集
 - [x] 恢复流程复用 pending 文件校验，损坏清单不写 outbox、不清 pending
 - [x] outbox 拒绝非字符串和空白文件路径，并覆盖两次启动保留
+- [x] 所有 archive 状态在 checkpoint 前强制校验 pending 文件清单
 - [x] 管理页侧库恢复错误展示 detailLines
 
 ## 5. 验证

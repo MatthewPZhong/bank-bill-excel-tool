@@ -231,3 +231,63 @@ test('正式存档与持久重试都失败时保留 pending 并返回禁止重�
   assert.equal(failed.cleanupCount, 0);
   assert.deepEqual(failed.warnings, [{ message: 'archive and outbox failed' }]);
 });
+
+test('损坏存档文件清单在任何 archive 状态下都禁止同步 checkpoint 和清除 pending', async () => {
+  const cases = [
+    {
+      label: 'archiveRequired=false',
+      pending: {
+        operationToken: 'invalid-not-required',
+        archiveRequired: false,
+        archiveState: 'not-required',
+        archiveFiles: [{ filePath: 123 }]
+      }
+    },
+    {
+      label: 'archiveRequired 缺失',
+      pending: {
+        operationToken: 'invalid-legacy',
+        archiveState: 'awaiting-intent'
+      }
+    },
+    {
+      label: 'archiveState=durable',
+      pending: {
+        operationToken: 'invalid-durable',
+        archiveRequired: true,
+        archiveState: 'durable',
+        archiveFiles: [{ filePath: '   ' }]
+      }
+    }
+  ];
+
+  for (const item of cases) {
+    let persistedPending = null;
+    let syncCount = 0;
+    let clearCount = 0;
+    const result = await runPositionOperationLifecycle({
+      operationToken: item.pending.operationToken,
+      pending: item.pending,
+      writeInitialPending: (value) => {
+        persistedPending = structuredClone(value);
+      },
+      runInContext: (task) => task(),
+      operation: async () => ({ status: 'ok' }),
+      readPending: () => persistedPending,
+      syncCheckpoint: () => {
+        syncCount += 1;
+      },
+      clearPending: () => {
+        clearCount += 1;
+        persistedPending = null;
+      },
+      failureResult
+    });
+
+    assert.equal(result.status, 'failed', item.label);
+    assert.match(result.message, /存档文件清单损坏/, item.label);
+    assert.equal(syncCount, 0, item.label);
+    assert.equal(clearCount, 0, item.label);
+    assert.notEqual(persistedPending, null, item.label);
+  }
+});

@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 10:08:03 |
+| 扫描时间 | 2026-7-28 10:22:10 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 218 |
 | 顶层声明总数 | 2533 |
@@ -829,6 +829,7 @@
 | `replaceBocFxLink` | 4 | src/backend/database/linked-table-repository.js |
 | `replaceLinkedTable` | 4 | src/backend/database/linked-table-repository.js |
 | `replaceLinkedTableStreaming` | 4 | src/backend/database/linked-table-repository.js |
+| `requirePositionPendingArchiveFiles` | 4 | src/main-process/position-reconciliation/operation-lifecycle.js |
 | `resolveBankRuleEligibility` | 4 | src/main-process/pre-fund-reconciliation/matching-engine.js |
 | `resolveCurrencyValue` | 4 | src/backend/file-service/normalizers.js |
 | `resolveDuplicateInboundDocumentMatches` | 4 | src/main-process/duplicate-inbound-match/matching-engine.js |
@@ -995,7 +996,6 @@
 | `REFUND_BACKFILL_FIELD_MAP` | 3 | src/constants/refund-backfill-fields.js |
 | `removeStatementSessionEntriesByFilePath` | 3 | src/main-process/statement-session.js |
 | `reportStartupFailure` | 3 | src/backend/startup-failure.js |
-| `requirePositionPendingArchiveFiles` | 3 | src/main-process/position-reconciliation/operation-lifecycle.js |
 | `resolveFromRel` | 3 | src/backend/run-data-store.js |
 | `resolveRecognizedBigAccount` | 3 | src/main-process/big-account-recognition.js |
 | `runOwnAccountsMigration` | 3 | src/backend/database/own-accounts-migration.js |
@@ -3470,6 +3470,7 @@
 | `replaceBocFxLink` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/linked-table-repository.js(2) |
 | `replaceLinkedTable` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/linked-table-repository.js(2) |
 | `replaceLinkedTableStreaming` | 2 | 4 | 1 | src/backend/database.js(2), src/backend/database/linked-table-repository.js(2) |
+| `requirePositionPendingArchiveFiles` | 2 | 4 | 1 | src/main-process/position-reconciliation/operation-lifecycle.js(3), src/main.js(1) |
 | `resolveBankRuleEligibility` | 2 | 4 | 2 | src/main-process/pre-fund-reconciliation/matching-engine.js(2), src/main-process/pre-fund-reconciliation/reconciliation-rules.js(2) |
 | `resolveCurrencyValue` | 2 | 4 | 1 | src/backend/file-service.js(2), src/backend/file-service/normalizers.js(2) |
 | `resolveDuplicateInboundDocumentMatches` | 2 | 4 | 1 | src/main-process/duplicate-inbound-match/matching-engine.js(2), src/main-process/duplicate-inbound-match/service.js(2) |
@@ -3636,7 +3637,6 @@
 | `REFUND_BACKFILL_FIELD_MAP` | 2 | 3 | 1 | src/constants/refund-backfill-fields.js(2), src/main-process/scenario-engines/r5-refund-order-backfill.js(1) |
 | `removeStatementSessionEntriesByFilePath` | 2 | 3 | 1 | src/main-process/statement-session.js(2), src/main.js(1) |
 | `reportStartupFailure` | 2 | 3 | 1 | src/backend/startup-failure.js(2), src/main.js(1) |
-| `requirePositionPendingArchiveFiles` | 2 | 3 | 1 | src/main-process/position-reconciliation/operation-lifecycle.js(2), src/main.js(1) |
 | `resolveFromRel` | 2 | 3 | 1 | src/backend/run-data-store.js(2), src/main-process/pre-fund-reconciliation/service.js(1) |
 | `resolveRecognizedBigAccount` | 2 | 3 | 1 | src/main-process/big-account-recognition.js(2), src/main.js(1) |
 | `runOwnAccountsMigration` | 2 | 3 | 2 | src/backend/database/own-accounts-migration.js(2), src/main.js(1) |
