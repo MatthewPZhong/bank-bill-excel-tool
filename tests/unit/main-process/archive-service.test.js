@@ -314,6 +314,61 @@ test('源文件仅在存档成功或批次删除后释放，失败重试期间�
   }
 });
 
+test('同一源文件仍被其它未完成 artifact 引用时不得提前释放', async () => {
+  const releasedPaths = [];
+  const fixture = createFixture({
+    onSourceReleased: (paths) => releasedPaths.push(...paths)
+  });
+  try {
+    const sharedRetryPath = path.join(fixture.sourceDir, 'position-shared-retry.xlsx');
+    const failedBatch = await fixture.service.createBatch(batchPayload('position-shared-failed'));
+    const failed = await fixture.service.attachFile(failedBatch.batch.id, {
+      filePath: sharedRetryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(failed.ok, false);
+
+    fs.writeFileSync(sharedRetryPath, 'shared-retry-source');
+    const completedBatch = await fixture.service.createBatch(batchPayload('position-shared-complete'));
+    const completed = await fixture.service.attachFile(completedBatch.batch.id, {
+      filePath: sharedRetryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(completed.ok, true);
+    assert.deepEqual(releasedPaths, []);
+
+    const retried = await fixture.service.retryBatch(failedBatch.batch.id);
+    assert.equal(retried.ok, true);
+    assert.deepEqual(releasedPaths, [sharedRetryPath]);
+
+    const sharedDeletePath = path.join(fixture.sourceDir, 'position-shared-delete.xlsx');
+    const firstDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-first'));
+    const secondDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-second'));
+    const firstDeleteFailure = await fixture.service.attachFile(firstDeleteBatch.batch.id, {
+      filePath: sharedDeletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    const secondDeleteFailure = await fixture.service.attachFile(secondDeleteBatch.batch.id, {
+      filePath: sharedDeletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(firstDeleteFailure.ok, false);
+    assert.equal(secondDeleteFailure.ok, false);
+
+    await fixture.service.deleteBatch(firstDeleteBatch.batch.id);
+    assert.deepEqual(releasedPaths, [sharedRetryPath]);
+
+    await fixture.service.deleteBatch(secondDeleteBatch.batch.id);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, sharedDeletePath]);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('源释放回调失败不把已完成存档回滚为失败', async () => {
   const fixture = createFixture({
     onSourceReleased: () => {

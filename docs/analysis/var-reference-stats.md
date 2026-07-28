@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 01:21:02 |
+| 扫描时间 | 2026-7-28 01:29:31 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 216 |
 | 顶层声明总数 | 2488 |
@@ -21,7 +21,7 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 声明位置（首个） |
 |---|---:|---:|---:|---|
-| `path` | 79 | 341 | 73 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
+| `path` | 79 | 342 | 73 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
 | `fs` | 58 | 268 | 57 | src/backend/balance-adjustment-store.js |
 | `parse` | 35 | 75 | 1 | src/backend/usage-stats.js |
 | `normalizeCell` | 28 | 146 | 14 | src/backend/balance-adjustment-store.js |
@@ -2628,7 +2628,7 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 前三引用位置 |
 |---|---:|---:|---:|---|
-| `path` | 79 | 341 | 73 | src/main-process/archive-center/archive-service.js(27), src/main-process/position-reconciliation/input-staging.js(19), src/backend/pre-fund-reconciliation-store.js(17) |
+| `path` | 79 | 342 | 73 | src/main-process/archive-center/archive-service.js(28), src/main-process/position-reconciliation/input-staging.js(19), src/backend/pre-fund-reconciliation-store.js(17) |
 | `fs` | 58 | 268 | 57 | src/main-process/archive-center/archive-service.js(46), src/main-process/position-reconciliation/excel-io.js(14), src/main-process/duplicate-inbound-match/excel-writer.js(12) |
 | `parse` | 35 | 75 | 1 | src/backend/database/linked-table-repository.js(12), src/backend/database/migrations.js(9), src/backend/duplicate-inbound-match-store.js(5) |
 | `normalizeCell` | 28 | 146 | 14 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/big-account-recognition.js(12) |

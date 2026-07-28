@@ -195,8 +195,21 @@ class ArchiveService {
         .map((value) => path.resolve(String(value)))
     )];
     if (paths.length === 0) return;
+    let unresolvedPaths;
     try {
-      await this.onSourceReleased(paths);
+      unresolvedPaths = new Set(
+        this.listUnresolvedSourcePaths()
+          .filter(Boolean)
+          .map((value) => path.resolve(String(value)))
+      );
+    } catch (_error) {
+      // 无法证明源文件已无未完成引用时，保守保留以供后续重试。
+      return;
+    }
+    const releasablePaths = paths.filter((sourcePath) => !unresolvedPaths.has(sourcePath));
+    if (releasablePaths.length === 0) return;
+    try {
+      await this.onSourceReleased(releasablePaths);
     } catch (_error) {
       // 业务源暂存清理失败不得把已完成的存档回滚为失败。
     }

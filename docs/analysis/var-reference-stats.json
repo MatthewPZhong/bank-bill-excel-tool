@@ -1,7 +1,7 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T05:21:02.182Z",
+    "scannedAt": "2026-07-28T05:29:31.217Z",
     "root": "src",
     "totalFiles": 216,
     "totalTopLevelNames": 2488,
@@ -246,7 +246,7 @@
           },
           {
             "file": "src/main-process/archive-center/archive-service.js",
-            "count": 27
+            "count": 28
           },
           {
             "file": "src/main-process/archive-center/controller.js",
@@ -409,7 +409,7 @@
             "count": 2
           }
         ],
-        "totalHits": 341,
+        "totalHits": 342,
         "fileSpan": 79
       },
       {
@@ -42563,7 +42563,7 @@
         },
         {
           "file": "src/main-process/archive-center/archive-service.js",
-          "count": 27
+          "count": 28
         },
         {
           "file": "src/main-process/archive-center/controller.js",
@@ -42726,7 +42726,7 @@
           "count": 2
         }
       ],
-      "totalHits": 341,
+      "totalHits": 342,
       "fileSpan": 79
     },
     {
