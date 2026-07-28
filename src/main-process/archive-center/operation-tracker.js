@@ -151,6 +151,9 @@ function summarizeBatchResults(batches) {
   );
   return {
     archiveFailed: failed.length > 0,
+    persistentRetryAvailable: failed.every(
+      (batch) => batch.persistentRetryAvailable === true
+    ),
     warning: failed.length > 0
       ? { message: `${failed.length} 个存档批次存在失败文件，可在存档中心重试` }
       : null
@@ -280,7 +283,17 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       metadata
     });
     const batchId = batchIdFromResult(created);
-    if (!batchId) throw new Error(`存档服务未返回批次 ID：${operation}`);
+    if (!batchId) {
+      return {
+        batchId: null,
+        created,
+        archiveFailed: true,
+        persistentRetryAvailable: created && created.persistentRetryAvailable === true,
+        warning: created && created.warning
+          ? created.warning
+          : { message: `存档服务未返回批次 ID：${operation}` }
+      };
+    }
     if (rememberActive) rememberBatch(module, batchId, runKeys);
     attachedPaths.set(String(batchId), new Set(uniqueFiles.map(fileIdentity)));
     if (!keepOutputOpen && uniqueFiles.some((item) => item.role === 'output')) {
@@ -290,6 +303,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       batchId,
       created,
       archiveFailed: created.archiveFailed === true,
+      persistentRetryAvailable: created.archiveFailed === true
+        ? created.persistentRetryAvailable === true
+        : true,
       warning: created.warning || null
     };
   }
@@ -328,6 +344,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       batchId,
       appended,
       archiveFailed: appended && appended.archiveFailed === true,
+      persistentRetryAvailable: appended && appended.archiveFailed === true
+        ? appended.persistentRetryAvailable === true
+        : true,
       warning: appended && appended.warning ? appended.warning : null
     };
   }
@@ -762,7 +781,12 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       if (typeof onWarning === 'function') {
         try { onWarning(warning); } catch (_error) { /* 存档告警不得影响业务 */ }
       }
-      return { handled: true, archiveFailed: true, warning };
+      return {
+        handled: true,
+        archiveFailed: true,
+        persistentRetryAvailable: false,
+        warning
+      };
     }
   }
 

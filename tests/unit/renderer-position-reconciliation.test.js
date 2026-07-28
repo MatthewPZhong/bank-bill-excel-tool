@@ -286,7 +286,12 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
     assert.match(
       positionRenderer,
-      /showAlert\(summary \|\| escapeHtml\(result\.message \|\| '链接原始表导入失败'\), \{\s*html:\s*true\s*\}\)/
+      /showAlert\(summary \|\| failureDetailsHtml\(result, '链接原始表导入失败'\), \{\s*html:\s*true\s*\}\)/
+    );
+    assert.match(positionRenderer, /item\.detailLines = applied && Array\.isArray\(applied\.detailLines\)/);
+    assert.match(
+      positionRenderer,
+      /showAlert\(failureDetailsHtml\(applied, item\.message\), \{ html: true \}\)/
     );
   });
 
@@ -324,19 +329,35 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
     assert.match(
       mainProcess,
-      /requireExistingSideDb:\s*Boolean\(expectedSideDbCheckpoint\) \|\| legacySideDbInitialized/
+      /requireExistingSideDb:\s*Boolean\(expectedSideDbCheckpoint\)/
     );
     assert.match(mainProcess, /expectedSideDbCheckpoint,/);
     assert.match(mainProcess, /expectedPendingOperation:\s*pendingSideDbOperation/);
-    assert.match(mainProcess, /allowLegacyCheckpointMigration:/);
+    assert.match(mainProcess, /initialSideDbCheckpoint,/);
+    assert.match(mainProcess, /POSITION_SIDE_DB_BOOTSTRAP_SETTING/);
     assert.match(mainProcess, /POSITION_SIDE_DB_PENDING_SETTING/);
     assert.match(mainProcess, /positionReconciliationOperationContext\.run/);
     assert.match(
       mainProcess,
-      /JSON\.stringify\(service\.persistenceCheckpoint\(\)\)/
+      /JSON\.stringify\(checkpoint\)/
     );
     assert.match(mainProcess, /channel\.startsWith\('position-reconciliation:'\)/);
     assert.match(mainProcess, /syncPositionReconciliationCheckpoint\(\)/);
+  });
+
+  test('平盘写操作独占执行，并在 checkpoint 同步前校验 token 与存档持久性', () => {
+    assert.match(mainProcess, /if \(positionReconciliationOperationActive\)/);
+    assert.match(mainProcess, /const unresolvedPending = database\.getSetting\(POSITION_SIDE_DB_PENDING_SETTING\)/);
+    assert.match(mainProcess, /persistedPending\.operationToken !== operationToken/);
+    assert.match(mainProcess, /persistedPending\.archiveState !== 'durable'/);
+    assert.match(mainProcess, /pendingBeforeClear\.operationToken !== operationToken/);
+    assert.match(mainProcess, /archiveCenterService\.persistOperationIntent\(\{/);
+    assert.match(mainProcess, /businessState:\s*'running'/);
+    assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
+    assert.match(mainProcess, /const outputPublished = files\.some/);
+    assert.match(mainProcess, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
+    assert.match(mainProcess, /archiveResult\.persistentRetryAvailable !== true/);
+    assert.match(mainProcess, /code:\s*'archive-retry-registration-failed'/);
   });
 
   test('管理页侧库恢复失败时显示 detailLines，不只显示总标题', () => {

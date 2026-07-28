@@ -379,7 +379,7 @@
       if (!result || result.status === 'cancelled') return;
       if (result.status !== 'ok') {
         const summary = sourceImportSummary(result);
-        showAlert(summary || escapeHtml(result.message || '链接原始表导入失败'), {
+        showAlert(summary || failureDetailsHtml(result, '链接原始表导入失败'), {
           html: true
         });
         return;
@@ -400,7 +400,10 @@
         if (!applied || applied.status !== 'ok') {
           item.status = 'failed';
           item.message = applied && applied.message ? applied.message : '清结算银行账户表写入失败';
-          showAlert(item.message);
+          item.detailLines = applied && Array.isArray(applied.detailLines)
+            ? applied.detailLines
+            : [];
+          showAlert(failureDetailsHtml(applied, item.message), { html: true });
         } else {
           item.status = 'ok';
           item.rowCount = applied.rowCount;

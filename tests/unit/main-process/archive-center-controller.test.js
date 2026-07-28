@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
@@ -10,6 +11,9 @@ const {
   ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY,
   createArchiveCenterController
 } = require('../../../src/main-process/archive-center/controller');
+const {
+  createArchiveOutboxStore
+} = require('../../../src/main-process/archive-center/outbox-store');
 
 function createHarness(options = {}) {
   const settings = new Map(options.initialSettings || []);
@@ -78,11 +82,14 @@ function createHarness(options = {}) {
     async retryBatch(id) { return { ok: true, batch: repository.getBatch(id) }; },
     async openReadonlyCopy() { return { ok: true }; },
     async saveAs(_id, targetPath) { return { ok: true, filePath: targetPath }; },
+    listUnresolvedSourcePaths() { return []; },
     async getStats() { return { ok: true, stats: { batchCount: batches.length, logicalFileCount: artifacts.size } }; }
   };
   const controller = createArchiveCenterController({
     database,
     service,
+    outboxStore: options.outboxStore,
+    onOutboxFlushed: options.onOutboxFlushed,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
   return { controller, database, service, settings, templates };
@@ -242,4 +249,79 @@ test('业务完成后源文件已变化的批次要求重新执行业务，不�
   const listed = await controller.listBatches({});
   assert.equal(listed.batches[0].canRetry, false);
   assert.equal(listed.batches[0].requiresBusinessRerun, true);
+});
+
+test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文件保护', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-outbox-'));
+  const inputPath = path.join(rootDir, 'bank.xlsx');
+  const outputPath = path.join(rootDir, 'result.xlsx');
+  const releasedPaths = [];
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const { controller, service } = createHarness({
+    outboxStore,
+    onOutboxFlushed: (paths) => releasedPaths.push(...paths)
+  });
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  const workingCreateBatch = service.createBatch.bind(service);
+  service.createBatch = async () => ({ ok: false, message: 'archive database busy' });
+  const created = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:bank:apply-import',
+    metadata: { positionOperationToken: 'operation-1' },
+    files: [{ filePath: inputPath, role: 'input' }]
+  });
+  assert.match(created.batchId, /^outbox:/);
+  assert.equal(created.archiveFailed, true);
+  assert.equal(created.persistentRetryAvailable, true);
+
+  const appended = await controller.sink.appendFiles({
+    batchId: created.batchId,
+    sourceOperation: 'position-reconciliation:run:export',
+    files: [{ filePath: outputPath, role: 'output' }]
+  });
+  assert.equal(appended.persistentRetryAvailable, true);
+  assert.deepEqual(
+    controller.listUnresolvedSourcePaths().sort(),
+    [inputPath, outputPath].sort()
+  );
+
+  service.createBatch = workingCreateBatch;
+  const initialized = await controller.initialize();
+  assert.equal(initialized.ok, true);
+  assert.deepEqual(outboxStore.list(), []);
+  assert.deepEqual(releasedPaths.sort(), [inputPath, outputPath].sort());
+});
+
+test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-intent-'));
+  const inputPath = path.join(rootDir, 'input.xlsx');
+  const outputPath = path.join(rootDir, 'output.xlsx');
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const { controller } = createHarness({ outboxStore });
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const shared = {
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run:export',
+    operationKey: 'position:operation-2:position-reconciliation:run:export'
+  };
+
+  const first = controller.persistOperationIntent({
+    ...shared,
+    files: [{ filePath: inputPath, role: 'input' }]
+  });
+  const second = controller.persistOperationIntent({
+    ...shared,
+    files: [{ filePath: outputPath, role: 'output' }]
+  });
+
+  assert.equal(second.batchId, first.batchId);
+  assert.deepEqual(
+    outboxStore.list()[0].payload.files.map((file) => file.filePath).sort(),
+    [inputPath, outputPath].sort()
+  );
 });

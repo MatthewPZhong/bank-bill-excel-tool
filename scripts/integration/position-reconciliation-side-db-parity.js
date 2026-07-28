@@ -166,11 +166,13 @@ async function run() {
     assertEq(firstRun.summary.changedRows, 1, '首轮将错误 FX 性质修正为基础类型');
     assertEq(firstRun.summary.differenceRows, 0, '明确币种证据不进入差异');
     const firstRunId = firstRun.runId;
+    const firstCheckpoint = service.persistenceCheckpoint();
 
     service.close();
     service = createPositionReconciliationService({
       userDataDir,
-      templatePath: TEMPLATE_PATH
+      templatePath: TEMPLATE_PATH,
+      expectedSideDbCheckpoint: firstCheckpoint
     });
     const restored = service.status().pendingRun;
     assertEq(restored && restored.id, firstRunId, '应用重启后恢复待确认草稿');

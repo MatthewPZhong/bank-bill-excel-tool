@@ -53,8 +53,12 @@ function resultRow(bizId, fundType) {
   };
 }
 
-test('客户号和 accountReference 始终按标识符文本列处理', () => {
-  for (const header of ['客户号', 'accountReference', '客户编号', 'CustomerRef']) {
+test('规范标识符字段清单独立断言为文本列', () => {
+  const expectedTextHeaders = [
+    '客户号', 'accountReference', 'Account Reference', '客户编号', 'CustomerRef',
+    '大额行号', 'VA'
+  ];
+  for (const header of expectedTextHeaders) {
     assert.equal(requiresTextFormat(header), true, `${header} 必须命中文本格式`);
   }
 });

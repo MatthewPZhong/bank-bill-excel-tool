@@ -8,7 +8,7 @@ const MODULE_CODE = 'POSITION';
 const POSITION_DB_RELATIVE_PATH = 'run-data/position-reconciliation/position-data.sqlite';
 const POSITION_SIDE_DB_CHECKPOINT_SETTING = 'position_reconciliation_side_db_checkpoint_v1';
 const POSITION_SIDE_DB_PENDING_SETTING = 'position_reconciliation_side_db_pending_v1';
-const POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING = 'position_reconciliation_side_db_initialized_v1';
+const POSITION_SIDE_DB_BOOTSTRAP_SETTING = 'position_reconciliation_side_db_bootstrap_v1';
 const POSITION_RULESET_VERSION = 1;
 
 const AUDIT_HEADERS = Object.freeze(['命中明细', '命中类型', '匹配命中详情']);
@@ -194,7 +194,7 @@ module.exports = {
   POSITION_DB_RELATIVE_PATH,
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
   POSITION_SIDE_DB_PENDING_SETTING,
-  POSITION_SIDE_DB_LEGACY_INITIALIZED_SETTING,
+  POSITION_SIDE_DB_BOOTSTRAP_SETTING,
   POSITION_RULESET_VERSION,
   AUDIT_HEADERS,
   POSITION_BANK_HEADERS,

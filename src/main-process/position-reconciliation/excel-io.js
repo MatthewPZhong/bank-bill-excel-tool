@@ -25,7 +25,7 @@ const TEXT_HEADERS = new Set([
   'BizId', 'MerchantId', 'ReconciliationId', 'ChannelOrderNo', 'CustomerRef',
   'Payee CardNo', 'Drawee CardNo', 'ReconID', '调拨单号', '付款单号', '业务单号',
   'bizId', '银行账号', '系统账号', '银行卡号', '账户号', '客户编号', '客户号',
-  'accountReference'
+  'accountReference', 'Account Reference', '大额行号', 'VA'
 ]);
 const TEXT_HEADER_PATTERN = /id|no|code|账号|账户|卡号|单号|流水号|对账|批次号|清算号码|swift/i;
 

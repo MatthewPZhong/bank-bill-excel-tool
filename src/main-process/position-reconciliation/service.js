@@ -205,8 +205,9 @@ class PositionReconciliationService {
     requireExistingSideDb = false,
     expectedSideDbCheckpoint = null,
     expectedPendingOperation = null,
-    allowLegacyCheckpointMigration = false,
+    initialSideDbCheckpoint = null,
     operationTokenProvider = null,
+    recordArchiveIntent = null,
     protectedStagingPaths = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
@@ -214,11 +215,14 @@ class PositionReconciliationService {
     this.userDataDir = path.resolve(userDataDir);
     this.templatePath = path.resolve(templatePath);
     this.now = now;
+    this.recordArchiveIntent = typeof recordArchiveIntent === 'function'
+      ? recordArchiveIntent
+      : null;
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
       requireExisting: requireExistingSideDb,
       expectedCheckpoint: expectedSideDbCheckpoint,
       expectedPendingOperation,
-      allowLegacyCheckpointMigration,
+      initialCheckpoint: initialSideDbCheckpoint,
       operationTokenProvider
     });
     this.bankImportTokens = new Map();
@@ -345,6 +349,17 @@ class PositionReconciliationService {
     };
   }
 
+  bankImportArchiveIntent(token) {
+    const parsed = this.bankImportTokens.get(text(token));
+    if (!parsed) {
+      throw new PositionReconciliationError(
+        'position-bank-import-token-expired',
+        '银行导入确认已失效，请重新选择文件'
+      );
+    }
+    return parsed.files.map((file) => file.archivePath);
+  }
+
   cancelBankImport() {
     this.clearBankImportTokens();
     return { status: 'cancelled' };
@@ -377,6 +392,9 @@ class PositionReconciliationService {
         });
       } else {
         try {
+          if (this.recordArchiveIntent) {
+            this.recordArchiveIntent([result.archivePath], 'input');
+          }
           const applied = this.store.applySourceImport(result);
           output.push({
             status: 'ok',
@@ -447,6 +465,17 @@ class PositionReconciliationService {
       cleanupPaths: [parsed.stagingDir],
       ...result
     };
+  }
+
+  sourceImportArchiveIntent(token) {
+    const parsed = this.sourceImportTokens.get(text(token));
+    if (!parsed) {
+      throw new PositionReconciliationError(
+        'position-source-import-token-expired',
+        '账户表导入确认已失效，请重新选择文件'
+      );
+    }
+    return [parsed.archivePath];
   }
 
   cancelSourceImport(token) {
@@ -796,6 +825,9 @@ class PositionReconciliationService {
       [filePath],
       `result-${crypto.randomUUID()}`
     )[0];
+    if (this.recordArchiveIntent) {
+      this.recordArchiveIntent([staged.archivePath], 'input');
+    }
     let imported;
     try {
       imported = readResultWorkbook(staged.filePath);

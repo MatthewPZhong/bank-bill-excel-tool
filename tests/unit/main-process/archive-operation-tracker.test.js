@@ -286,6 +286,7 @@ test.describe('archive operation tracker', () => {
     });
 
     assert.equal(result.archiveFailed, true);
+    assert.equal(result.persistentRetryAvailable, false);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0].message, /disk full/);
   });

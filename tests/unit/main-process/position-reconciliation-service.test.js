@@ -179,6 +179,13 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
 
   const confirmed = service.confirmRun(run.runId);
   assert.equal(confirmed.confirmedRows, 1);
+  assert.equal(
+    service.store.db.prepare(
+      'SELECT COUNT(*) AS count FROM position_consumed_sources WHERE bank_biz_id = ?'
+    ).get('POSITION-BIZ-1').count,
+    1,
+    '人工回导保留原匹配关系时仍必须消费对应链接记录'
+  );
   const saved = service.store.getBankRows()[0];
   assert.equal(saved.status, '已校验性质');
   assert.equal(saved.workingRow.FundType, 'Inbound&FX');
@@ -503,6 +510,101 @@ test('不适用行的空对象血缘也必须 fail-closed', async (t) => {
   assert.throws(
     () => service.confirmRun(run.runId),
     (error) => error && error.code === 'position-side-data-invalid'
+  );
+});
+
+test('运行结果、血缘、差异集合及当前链接引用被改写时必须 fail-closed', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-run-integrity-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow()]);
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  const stored = service.store.db.prepare(`
+    SELECT result_json, lineage_json
+    FROM position_run_rows
+    WHERE run_id = ? AND biz_id = ?
+  `).get(run.runId, 'POSITION-BIZ-1');
+
+  const changedResult = JSON.parse(stored.result_json);
+  changedResult['Credit Amount'] = '999';
+  service.store.db.prepare(`
+    UPDATE position_run_rows SET result_json = ?
+    WHERE run_id = ? AND biz_id = ?
+  `).run(JSON.stringify(changedResult), run.runId, 'POSITION-BIZ-1');
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '非 FundType 结果字段被改写时必须阻断'
+  );
+  service.store.db.prepare(`
+    UPDATE position_run_rows SET result_json = ?
+    WHERE run_id = ? AND biz_id = ?
+  `).run(stored.result_json, run.runId, 'POSITION-BIZ-1');
+
+  const changedLineage = JSON.parse(stored.lineage_json);
+  changedLineage.pairKey = 'tampered-pair';
+  service.store.db.prepare(`
+    UPDATE position_run_rows SET lineage_json = ?
+    WHERE run_id = ? AND biz_id = ?
+  `).run(JSON.stringify(changedLineage), run.runId, 'POSITION-BIZ-1');
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '语法合法的血缘改写也必须通过完整性哈希识别'
+  );
+  service.store.db.prepare(`
+    UPDATE position_run_rows SET lineage_json = ?
+    WHERE run_id = ? AND biz_id = ?
+  `).run(stored.lineage_json, run.runId, 'POSITION-BIZ-1');
+
+  service.store.db.prepare(`
+    INSERT INTO position_differences(
+      run_id, biz_id, channel, month_key, status, reason, lineage_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    run.runId,
+    'POSITION-BIZ-1',
+    'DBS',
+    '2026-07',
+    '待确认',
+    '伪造差异',
+    stored.lineage_json
+  );
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '匹配行被额外写入差异表时必须阻断'
+  );
+  service.store.db.prepare(
+    'DELETE FROM position_differences WHERE run_id = ? AND biz_id = ?'
+  ).run(run.runId, 'POSITION-BIZ-1');
+
+  service.store.db.prepare(`
+    UPDATE position_link_rows
+    SET business_key = ?
+    WHERE source_type = ? AND business_key = ?
+  `).run('OTHER-BUSINESS-KEY', SOURCE_TYPES.GATEWAY_INBOUND, 'INBOUND-1');
+  assert.throws(
+    () => service.store.getRun(run.runId),
+    (error) => error && error.code === 'position-side-data-invalid',
+    '当前链接记录与运行血缘不一致时必须阻断'
   );
 });
 
@@ -1143,6 +1245,7 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
     userDataDir,
     templatePath: TEMPLATE_PATH
   });
+  const checkpoint = initialized.persistenceCheckpoint();
   initialized.close();
   assert.equal(fs.existsSync(dbPath), true);
 
@@ -1151,7 +1254,8 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
     () => createPositionReconciliationService({
       userDataDir,
       templatePath: TEMPLATE_PATH,
-      requireExistingSideDb: true
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: checkpoint
     }),
     (error) => error && error.code === 'position-side-db-missing'
   );
@@ -1162,66 +1266,86 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
     () => createPositionReconciliationService({
       userDataDir,
       templatePath: TEMPLATE_PATH,
-      requireExistingSideDb: true
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: checkpoint
     }),
     (error) => error && error.code === 'position-side-db-missing'
   );
 });
 
-test('旧版 initialized 标记只迁移真实旧侧库，缺失或空库继续阻断', (t) => {
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-legacy-'));
-  const missingDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-legacy-missing-'));
+test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和既有现代库均不得接管', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-bootstrap-'));
+  const unrelatedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-unrelated-'));
+  const markerOnlyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-marker-only-'));
   const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
-  const bankPath = path.join(userDataDir, 'legacy-bank.xlsx');
+  const markerOnlyPath = path.join(markerOnlyDir, POSITION_DB_RELATIVE_PATH);
+  const bootstrap = {
+    identity: 'bootstrap-identity',
+    generation: 0,
+    token: 'bootstrap-token'
+  };
   t.after(() => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
-    fs.rmSync(missingDir, { recursive: true, force: true });
+    fs.rmSync(unrelatedDir, { recursive: true, force: true });
+    fs.rmSync(markerOnlyDir, { recursive: true, force: true });
   });
 
-  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({
-    BizId: 'LEGACY-SIDE-BANK'
-  })]);
   const initialized = createPositionReconciliationService({
     userDataDir,
-    templatePath: TEMPLATE_PATH
+    templatePath: TEMPLATE_PATH,
+    initialSideDbCheckpoint: bootstrap
   });
-  initialized.applyBankImport(initialized.prepareBankImport([bankPath]).token);
+  assert.deepEqual(initialized.persistenceCheckpoint(), bootstrap);
   initialized.close();
 
-  const legacyDb = new DatabaseSync(dbPath);
-  legacyDb.prepare(`
-    DELETE FROM position_meta
-    WHERE key IN (?, ?, ?)
-  `).run(
-    'position_database_identity_v1',
-    'position_database_generation_v1',
-    'position_database_checkpoint_token_v1'
-  );
-  legacyDb.exec('DELETE FROM position_checkpoint_history;');
-  legacyDb.prepare(`
-    INSERT INTO position_meta(key, value) VALUES (?, '1')
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run('position_database_initialized_v1');
-  legacyDb.close();
-
-  const migrated = createPositionReconciliationService({
+  const recoveredBootstrap = createPositionReconciliationService({
     userDataDir,
     templatePath: TEMPLATE_PATH,
-    requireExistingSideDb: true,
-    allowLegacyCheckpointMigration: true
+    initialSideDbCheckpoint: bootstrap
   });
-  assert.equal(migrated.store.getBankRows().length, 1);
-  assert.equal(migrated.persistenceCheckpoint().generation, 0);
-  migrated.close();
+  assert.deepEqual(recoveredBootstrap.persistenceCheckpoint(), bootstrap);
+  recoveredBootstrap.close();
 
   assert.throws(
     () => createPositionReconciliationService({
-      userDataDir: missingDir,
-      templatePath: TEMPLATE_PATH,
-      requireExistingSideDb: true,
-      allowLegacyCheckpointMigration: true
+      userDataDir,
+      templatePath: TEMPLATE_PATH
     }),
-    (error) => error && error.code === 'position-side-db-missing'
+    (error) => error && error.code === 'position-side-db-mismatch',
+    '主库无 checkpoint/bootstrap 时不得接管已有现代侧库'
+  );
+
+  const unrelated = createPositionReconciliationService({
+    userDataDir: unrelatedDir,
+    templatePath: TEMPLATE_PATH
+  });
+  unrelated.close();
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir: unrelatedDir,
+      templatePath: TEMPLATE_PATH,
+      initialSideDbCheckpoint: bootstrap
+    }),
+    (error) => error && error.code === 'position-side-db-mismatch',
+    '另一份现代侧库不得被新的 bootstrap 接管'
+  );
+
+  fs.mkdirSync(path.dirname(markerOnlyPath), { recursive: true });
+  const markerOnly = new DatabaseSync(markerOnlyPath);
+  markerOnly.exec('CREATE TABLE position_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);');
+  markerOnly.prepare('INSERT INTO position_meta(key, value) VALUES (?, ?)').run(
+    'position_database_initialized_v1',
+    '1'
+  );
+  markerOnly.close();
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir: markerOnlyDir,
+      templatePath: TEMPLATE_PATH,
+      initialSideDbCheckpoint: bootstrap
+    }),
+    (error) => error && error.code === 'position-side-db-missing',
+    '仅有旧 marker 的残缺库不得被补成空库'
   );
 });
 

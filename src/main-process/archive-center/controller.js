@@ -2,6 +2,10 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const {
+  outboxBatchId,
+  parseOutboxBatchId
+} = require('./outbox-store');
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY = 'archive_center_excluded_template_ids';
@@ -51,6 +55,10 @@ class ArchiveCenterController {
     this.service = options.service;
     this.showSaveDialog = options.showSaveDialog || null;
     this.logWarning = options.logWarning || null;
+    this.outboxStore = options.outboxStore || null;
+    this.onOutboxFlushed = typeof options.onOutboxFlushed === 'function'
+      ? options.onOutboxFlushed
+      : null;
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
     this.sink = Object.freeze({
@@ -84,6 +92,7 @@ class ArchiveCenterController {
     if (initialized.ok === false) {
       this._warn('存档目录暂不可用，业务成功时仍会登记可重试批次', initialized.message);
     }
+    await this.flushOutbox();
     const cleanup = await this.service.cleanupExpired();
     if (cleanup && cleanup.ok === false) {
       this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
@@ -92,7 +101,35 @@ class ArchiveCenterController {
   }
 
   listUnresolvedSourcePaths() {
-    return this.service.listUnresolvedSourcePaths();
+    const servicePaths = this.service.listUnresolvedSourcePaths();
+    const outboxPaths = this.outboxStore ? this.outboxStore.listSourcePaths() : [];
+    return [...new Set([...servicePaths, ...outboxPaths])];
+  }
+
+  async flushOutbox() {
+    if (!this.outboxStore) return { flushed: 0, remaining: 0 };
+    const records = this.outboxStore.list();
+    let flushed = 0;
+    for (const record of records) {
+      let created;
+      try {
+        created = await this.service.createBatch(record.payload);
+      } catch (error) {
+        this._warn('存档 outbox 重放失败', error && error.message ? error.message : String(error));
+        continue;
+      }
+      if (!created || !created.batch) continue;
+      this.outboxStore.remove(record.id);
+      flushed += 1;
+      if (this.onOutboxFlushed) {
+        try {
+          await this.onOutboxFlushed(record.payload.files.map((file) => file.filePath));
+        } catch (_error) {
+          // outbox 已转成正式批次；源暂存清理失败留待后续回收。
+        }
+      }
+    }
+    return { flushed, remaining: this.outboxStore.list().length };
   }
 
   _trackedFilePayload(file, sourceOperation) {
@@ -137,27 +174,98 @@ class ArchiveCenterController {
     };
   }
 
+  _batchPayload(payload, files) {
+    const sourceOperation = payload.sourceOperation || 'archive';
+    const metadata = {
+      ...(payload.metadata || {}),
+      sourceOperation
+    };
+    const positionOperationToken = String(metadata.positionOperationToken || '').trim();
+    return {
+      moduleId: payload.moduleId,
+      moduleCode: payload.moduleCode,
+      moduleName: payload.moduleName,
+      operationKey: payload.operationKey || (
+        positionOperationToken
+          ? `position:${positionOperationToken}:${sourceOperation}`
+          : `${sourceOperation}:${crypto.randomUUID()}`
+      ),
+      businessStatus: 'success',
+      retentionDays: this.getRetentionDays(),
+      metadata,
+      sourceOperation,
+      files
+    };
+  }
+
+  persistOperationIntent(payload = {}) {
+    if (!this.outboxStore) {
+      throw new Error('存档持久 outbox 尚未初始化');
+    }
+    const files = (Array.isArray(payload.files) ? payload.files : []).map(
+      (file) => this._trackedFilePayload(file, payload.sourceOperation)
+    );
+    if (files.length === 0) throw new Error('存档恢复意图缺少文件');
+    const batchPayload = this._batchPayload(payload, files);
+    const existing = this.outboxStore.findByOperationKey(batchPayload.operationKey);
+    const record = existing
+      ? this.outboxStore.append(existing.id, files)
+      : this.outboxStore.enqueue(batchPayload);
+    return {
+      batchId: outboxBatchId(record.id),
+      operationKey: batchPayload.operationKey,
+      persisted: true
+    };
+  }
+
   async createTrackedBatch(payload = {}) {
     const files = (Array.isArray(payload.files) ? payload.files : []).map(
       (file) => this._trackedFilePayload(file, payload.sourceOperation)
     );
-    const created = await this.service.createBatch({
-      moduleId: payload.moduleId,
-      moduleCode: payload.moduleCode,
-      moduleName: payload.moduleName,
-      operationKey: `${payload.sourceOperation || 'archive'}:${crypto.randomUUID()}`,
-      businessStatus: 'success',
-      retentionDays: this.getRetentionDays(),
-      metadata: {
-        ...(payload.metadata || {}),
-        sourceOperation: payload.sourceOperation || ''
-      },
-      sourceOperation: payload.sourceOperation,
-      files
-    });
+    const batchPayload = this._batchPayload(payload, files);
+    let created;
+    try {
+      created = await this.service.createBatch(batchPayload);
+    } catch (error) {
+      created = {
+        ok: false,
+        message: error && error.message ? error.message : String(error)
+      };
+    }
     if (!created || !created.batch) {
+      if (this.outboxStore) {
+        try {
+          const record = this.outboxStore.enqueue(batchPayload);
+          return {
+            batchId: outboxBatchId(record.id),
+            archiveFailed: true,
+            persistentRetryAvailable: true,
+            failureRecorded: true,
+            warning: {
+              message: created && created.message
+                ? `${created.message}；已登记持久重试任务`
+                : '无法建立存档批次，已登记持久重试任务'
+            }
+          };
+        } catch (outboxError) {
+          return {
+            archiveFailed: true,
+            persistentRetryAvailable: false,
+            failureRecorded: false,
+            warning: {
+              message:
+                `${created && created.message ? created.message : '无法建立存档批次'}；` +
+                `持久重试任务登记失败：${
+                  outboxError && outboxError.message ? outboxError.message : String(outboxError)
+                }`
+            }
+          };
+        }
+      }
       return {
         archiveFailed: true,
+        persistentRetryAvailable: false,
+        failureRecorded: false,
         warning: { message: created && created.message ? created.message : '无法建立存档批次' }
       };
     }
@@ -167,11 +275,39 @@ class ArchiveCenterController {
       batchId: batch.id,
       batchNumber: batch.batchNumber,
       created: created.created,
+      persistentRetryAvailable: true,
+      failureRecorded: true,
       ...attached
     };
   }
 
   async appendTrackedFiles(payload = {}) {
+    const outboxId = parseOutboxBatchId(payload.batchId);
+    if (outboxId) {
+      const files = (Array.isArray(payload.files) ? payload.files : []).map(
+        (file) => this._trackedFilePayload(file, payload.sourceOperation)
+      );
+      try {
+        this.outboxStore.append(outboxId, files);
+        return {
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: { message: '存档中心暂不可用，追加文件已登记持久重试任务' }
+        };
+      } catch (error) {
+        return {
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            message: `存档持久重试任务追加失败：${
+              error && error.message ? error.message : String(error)
+            }`
+          }
+        };
+      }
+    }
     const resolvedBatchId = await this.resolveBatchId(payload.batchId);
     if (!resolvedBatchId) {
       return {
@@ -187,7 +323,11 @@ class ArchiveCenterController {
       sourceOperation: payload.sourceOperation,
       files
     });
-    return this._summarizeTrackedFiles(appended, files);
+    return {
+      persistentRetryAvailable: true,
+      failureRecorded: true,
+      ...this._summarizeTrackedFiles(appended, files)
+    };
   }
 
   async resolveBatchId(value) {

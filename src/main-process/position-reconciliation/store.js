@@ -30,7 +30,6 @@ const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
 const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
 const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
 const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
-const POSITION_DB_LEGACY_INITIALIZED_KEY = 'position_database_initialized_v1';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -164,9 +163,11 @@ const SCHEMA = `
     outcome TEXT NOT NULL,
     changed INTEGER NOT NULL DEFAULT 0,
     manual_modified INTEGER NOT NULL DEFAULT 0,
+    consumes_source INTEGER NOT NULL DEFAULT 0,
     original_json TEXT NOT NULL,
     result_json TEXT NOT NULL,
     lineage_json TEXT NOT NULL,
+    integrity_hash TEXT NOT NULL,
     FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE,
     UNIQUE(run_id, biz_id)
   );
@@ -247,6 +248,58 @@ function serializeJson(value) {
     }
     return item;
   });
+}
+
+function runRowIntegrityHash({
+  runId,
+  bizId,
+  channel,
+  monthKey,
+  sourceOrder,
+  originalFundType,
+  resultFundType,
+  hitSummary,
+  hitType,
+  matchDetail,
+  outcome,
+  changed,
+  manualModified,
+  consumesSource,
+  originalRow,
+  resultRow,
+  lineage
+}) {
+  const persistedOriginalRow = parseJson(serializeJson(originalRow), '运行完整性原始行');
+  const persistedResultRow = parseJson(serializeJson(resultRow), '运行完整性结果行');
+  const persistedLineage = parseJson(serializeJson(lineage), '运行完整性血缘');
+  return stableHash({
+    runId: Number(runId),
+    bizId: text(bizId),
+    channel: text(channel),
+    monthKey: text(monthKey),
+    sourceOrder: Number(sourceOrder),
+    originalFundType: text(originalFundType),
+    resultFundType: text(resultFundType),
+    hitSummary: String(hitSummary || ''),
+    hitType: String(hitType || ''),
+    matchDetail: String(matchDetail || ''),
+    outcome: text(outcome),
+    changed: Boolean(changed),
+    manualModified: Boolean(manualModified),
+    consumesSource: Boolean(consumesSource),
+    originalRow: persistedOriginalRow,
+    resultRow: persistedResultRow,
+    lineage: persistedLineage
+  });
+}
+
+function runRowConsumesSource(item) {
+  const lineage = item && item.lineage ? item.lineage : {};
+  const sourceType = text(lineage.sourceType);
+  return item
+    && item.outcome === 'matched'
+    && sourceType
+    && sourceType !== SOURCE_TYPES.BANK_ACCOUNT;
 }
 
 function checkpointValue(value, label) {
@@ -628,10 +681,130 @@ function assertSameTextSet(actualValues, expectedValues, label) {
   }
 }
 
+function sameStoredValue(left, right) {
+  return stableHash(left) === stableHash(right);
+}
+
+function assertRunRowContract(row, originalRow, resultRow, lineage) {
+  const label = `运行 ID=${row.run_id}，BizId=${row.biz_id}`;
+  if (text(originalRow.FundType) !== text(row.original_fund_type)) {
+    throwInvalidSideData(`平盘侧库${label}原始 FundType 与运行索引不一致`);
+  }
+  if (text(resultRow.FundType) !== text(row.result_fund_type)) {
+    throwInvalidSideData(`平盘侧库${label}结果 FundType 与运行索引不一致`);
+  }
+  for (const field of BANK_STATEMENT_FIELDS) {
+    if (field === 'FundType') continue;
+    if (!sameStoredValue(originalRow[field], resultRow[field])) {
+      throwInvalidSideData(`平盘侧库${label}结果行修改了非 FundType 字段：${field}`);
+    }
+  }
+
+  const changed = Number(row.changed) === 1;
+  const manualModified = Number(row.manual_modified) === 1;
+  const consumesSource = Number(row.consumes_source) === 1;
+  if (![0, 1].includes(Number(row.changed))
+      || ![0, 1].includes(Number(row.manual_modified))
+      || ![0, 1].includes(Number(row.consumes_source))) {
+    throwInvalidSideData(`平盘侧库${label}布尔标记非法`);
+  }
+  if (changed !== (text(row.original_fund_type) !== text(row.result_fund_type))) {
+    throwInvalidSideData(`平盘侧库${label} changed 与 FundType 变化不一致`);
+  }
+  if (!['matched', 'difference', 'not-applicable'].includes(text(row.outcome))) {
+    throwInvalidSideData(`平盘侧库${label}结果去向非法`);
+  }
+  if (manualModified && (row.outcome !== 'difference' || text(row.hit_type) !== MATCH_TYPES.USER_MODIFIED)) {
+    throwInvalidSideData(`平盘侧库${label}人工修改标记与结果去向不一致`);
+  }
+  if (!manualModified && text(row.hit_type) === MATCH_TYPES.USER_MODIFIED) {
+    throwInvalidSideData(`平盘侧库${label}人工修改命中类型缺少对应标记`);
+  }
+  if (row.outcome === 'not-applicable') {
+    if (text(row.hit_type) !== MATCH_TYPES.NOT_APPLICABLE || changed || consumesSource) {
+      throwInvalidSideData(`平盘侧库${label}不适用行契约不一致`);
+    }
+  }
+  const sourceType = text(lineage.sourceType);
+  const expectedSourceType = sourceTypeForFundType(row.original_fund_type);
+  if (row.outcome !== 'not-applicable' && sourceType !== expectedSourceType) {
+    throwInvalidSideData(`平盘侧库${label}来源类型与原始 FundType 不一致`);
+  }
+  if (row.outcome === 'matched') {
+    const expectedConsumption = sourceType !== SOURCE_TYPES.BANK_ACCOUNT;
+    if (consumesSource !== expectedConsumption) {
+      throwInvalidSideData(`平盘侧库${label}来源消费标记与匹配类型不一致`);
+    }
+  } else if (consumesSource && (!manualModified || sourceType === SOURCE_TYPES.BANK_ACCOUNT)) {
+    throwInvalidSideData(`平盘侧库${label}差异行不得声明新的来源消费关系`);
+  }
+
+  const expectedIntegrityHash = runRowIntegrityHash({
+    runId: row.run_id,
+    bizId: row.biz_id,
+    channel: row.channel,
+    monthKey: row.month_key,
+    sourceOrder: row.source_order,
+    originalFundType: row.original_fund_type,
+    resultFundType: row.result_fund_type,
+    hitSummary: row.hit_summary,
+    hitType: row.hit_type,
+    matchDetail: row.match_detail,
+    outcome: row.outcome,
+    changed,
+    manualModified,
+    consumesSource,
+    originalRow,
+    resultRow,
+    lineage
+  });
+  if (text(row.integrity_hash) !== expectedIntegrityHash) {
+    throwInvalidSideData(`平盘侧库${label}运行行完整性校验失败`);
+  }
+}
+
+function assertRunDifferenceSet(db, run, envelopeRows) {
+  const expectedRows = envelopeRows.filter((row) => row.outcome === 'difference');
+  const differences = db.prepare(`
+    SELECT *
+    FROM position_differences
+    WHERE run_id = ?
+    ORDER BY id
+  `).all(run.id);
+  assertSameTextSet(
+    differences.map((row) => text(row.biz_id)),
+    expectedRows.map((row) => text(row.biz_id)),
+    `运行 ID=${run.id}差异行集合`
+  );
+  const expectedByBizId = new Map(expectedRows.map((row) => [text(row.biz_id), row]));
+  for (const difference of differences) {
+    const expected = expectedByBizId.get(text(difference.biz_id));
+    if (
+      text(difference.channel) !== text(expected.channel)
+      || text(difference.month_key) !== text(expected.month_key)
+      || String(difference.reason || '') !== String(expected.match_detail || '')
+      || !sameStoredValue(
+        parseJson(difference.lineage_json, `差异血缘 ${run.id}/${difference.biz_id}`),
+        parseJson(expected.lineage_json, `运行血缘 ${run.id}/${expected.biz_id}`)
+      )
+    ) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}差异行与运行明细不一致`);
+    }
+    const expectedStatus = run.status === 'confirmed'
+      ? (Number(expected.manual_modified) === 1
+          ? DIFFERENCE_STATUSES.MODIFIED
+          : DIFFERENCE_STATUSES.ACCEPTED)
+      : DIFFERENCE_STATUSES.PENDING;
+    if (text(difference.status) !== expectedStatus) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}差异状态与运行状态不一致`);
+    }
+  }
+}
+
 function assertRunEnvelope(db, run, scope, snapshot, summary) {
   const runLabel = `运行 ID=${run.id}`;
   const envelopeRows = db.prepare(`
-    SELECT run_id, biz_id, channel, original_fund_type, original_json, lineage_json, outcome
+    SELECT *
     FROM position_run_rows
     WHERE run_id = ?
     ORDER BY id
@@ -647,16 +820,23 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
     if (text(originalRow.FundType) !== text(row.original_fund_type)) {
       throwInvalidSideData(`平盘侧库${runLabel}原始 FundType 与运行明细不一致`);
     }
+    const resultRow = assertBankPayload(
+      parseJson(row.result_json, `${runLabel}结果行 BizId=${row.biz_id}`),
+      row,
+      `${runLabel}结果行 BizId=${row.biz_id}`
+    );
     const sourceType = sourceTypeForFundType(originalRow.FundType);
     if (sourceType) derivedSourceTypes.push(sourceType);
     const lineage = assertRunLineage(
       parseJson(row.lineage_json, `${runLabel}血缘 BizId=${row.biz_id}`),
       row
     );
+    assertRunRowContract(row, originalRow, resultRow, lineage);
     if (lineage.reasonCode === 'position-bank-counterparty-reassigned') {
       confirmedConsumptionConflicts += 1;
     }
   }
+  assertRunDifferenceSet(db, run, envelopeRows);
   assertSameTextSet(
     Object.keys(snapshot.bankScopes),
     scope.scopes,
@@ -765,6 +945,9 @@ function assertBankPayload(payload, row, label) {
 }
 
 function assertRunLineage(lineage, row) {
+  if (!isPlainObject(lineage)) {
+    throwInvalidSideData(`平盘侧库运行血缘必须为对象：run=${row.run_id}，BizId=${row.biz_id}`);
+  }
   const sourceType = text(lineage.sourceType);
   if (row.outcome === 'not-applicable') {
     if (
@@ -780,15 +963,49 @@ function assertRunLineage(lineage, row) {
     }
     return lineage;
   }
-  if (row.outcome === 'difference') {
-    const legIndex = Number(lineage.sourceLegIndex);
-    const retainsMatchedSource = sourceType === SOURCE_TYPES.BANK_ACCOUNT || (
-      sourceType
-      && text(lineage.sourceBusinessKey)
-      && Number.isInteger(legIndex)
-      && legIndex >= 0
+  const expectedSourceType = sourceTypeForFundType(row.original_fund_type);
+  if (!expectedSourceType || sourceType !== expectedSourceType) {
+    throw new PositionReconciliationError(
+      'position-side-data-invalid',
+      `平盘侧库运行来源与 FundType 不一致：run=${row.run_id}，BizId=${row.biz_id}`
     );
-    if (retainsMatchedSource) return lineage;
+  }
+  if (row.outcome === 'difference') {
+    if (Number(row.consumes_source) === 1) {
+      const linkRowId = Number(lineage.sourceLinkRowId);
+      const legIndex = Number(lineage.sourceLegIndex);
+      if (
+        Number(row.manual_modified) !== 1
+        || !Number.isSafeInteger(linkRowId)
+        || linkRowId < 1
+        || !text(lineage.sourceBusinessKey)
+        || !Number.isInteger(legIndex)
+        || legIndex < 0
+      ) {
+        throw new PositionReconciliationError(
+          'position-side-data-invalid',
+          `平盘侧库人工修改行缺少原匹配血缘：run=${row.run_id}，BizId=${row.biz_id}`
+        );
+      }
+      return lineage;
+    }
+    if (
+      (
+        lineage.sourceLinkRowId !== null
+        && lineage.sourceLinkRowId !== undefined
+      )
+      || text(lineage.sourceBusinessKey)
+      || (
+        lineage.sourceLegIndex !== null
+        && lineage.sourceLegIndex !== undefined
+        && lineage.sourceLegIndex !== ''
+      )
+    ) {
+      throw new PositionReconciliationError(
+        'position-side-data-invalid',
+        `平盘侧库未解决差异行不得认领来源记录：run=${row.run_id}，BizId=${row.biz_id}`
+      );
+    }
     if (!text(lineage.reasonCode) || !Array.isArray(lineage.reasons)) {
       throw new PositionReconciliationError(
         'position-side-data-invalid',
@@ -809,9 +1026,15 @@ function assertRunLineage(lineage, row) {
       `平盘侧库匹配血缘缺少来源类型：run=${row.run_id}，BizId=${row.biz_id}`
     );
   }
-  if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) return lineage;
+  const linkRowId = Number(lineage.sourceLinkRowId);
   const legIndex = Number(lineage.sourceLegIndex);
-  if (!text(lineage.sourceBusinessKey) || !Number.isInteger(legIndex) || legIndex < 0) {
+  if (
+    !Number.isSafeInteger(linkRowId)
+    || linkRowId < 1
+    || !text(lineage.sourceBusinessKey)
+    || !Number.isInteger(legIndex)
+    || legIndex < 0
+  ) {
     throw new PositionReconciliationError(
       'position-side-data-invalid',
       `平盘侧库匹配血缘缺少来源主键：run=${row.run_id}，BizId=${row.biz_id}`
@@ -820,12 +1043,69 @@ function assertRunLineage(lineage, row) {
   return lineage;
 }
 
+function assertCurrentRunReferences(db, runId) {
+  const rows = db.prepare(`
+    SELECT *
+    FROM position_run_rows
+    WHERE run_id = ?
+    ORDER BY id
+  `).all(runId);
+  const getBank = db.prepare('SELECT * FROM position_bank_rows WHERE biz_id = ?');
+  const getLink = db.prepare('SELECT * FROM position_link_rows WHERE id = ?');
+  for (const row of rows) {
+    const originalRow = parseJson(
+      row.original_json,
+      `运行原始行 ${runId}/${row.biz_id}`
+    );
+    const bank = getBank.get(row.biz_id);
+    if (!bank) {
+      throwInvalidSideData(`平盘侧库运行 ${runId} 的银行 BizId 已不存在：${row.biz_id}`);
+    }
+    const bankOriginal = parseJson(
+      bank.original_json,
+      `银行原始行 ${row.biz_id}`
+    );
+    const bankWorking = parseJson(
+      bank.working_json,
+      `银行工作行 ${row.biz_id}`
+    );
+    if (
+      text(bank.channel) !== text(row.channel)
+      || text(bank.month_key) !== text(row.month_key)
+      || Number(bank.import_order) !== Number(row.source_order)
+      || text(bank.status) !== BANK_STATUSES.UNPROCESSED
+      || text(bank.working_fund_type) !== text(row.original_fund_type)
+      || !sameStoredValue(bankOriginal, originalRow)
+      || !sameStoredValue(bankWorking, originalRow)
+    ) {
+      throwInvalidSideData(`平盘侧库运行 ${runId} 与当前银行工作行不一致：${row.biz_id}`);
+    }
+
+    const lineage = parseJson(row.lineage_json, `运行血缘 ${runId}/${row.biz_id}`);
+    const needsLink = row.outcome === 'matched' || Number(row.consumes_source) === 1;
+    if (!needsLink) continue;
+    const linkRowId = Number(lineage.sourceLinkRowId);
+    const link = getLink.get(linkRowId);
+    if (
+      !link
+      || text(link.source_type) !== text(lineage.sourceType)
+      || text(link.business_key) !== text(lineage.sourceBusinessKey)
+      || Number(link.leg_index) !== Number(lineage.sourceLegIndex)
+      || Number(link.source_row_number) !== Number(lineage.sourceRowNumber)
+    ) {
+      throwInvalidSideData(
+        `平盘侧库运行 ${runId} 的来源血缘无法定位到唯一链接记录：${row.biz_id}`
+      );
+    }
+  }
+}
+
 class PositionReconciliationStore {
   constructor(userDataDir, {
     requireExisting = false,
     expectedCheckpoint = null,
     expectedPendingOperation = null,
-    allowLegacyCheckpointMigration = false,
+    initialCheckpoint = null,
     operationTokenProvider = null
   } = {}) {
     this.userDataDir = path.resolve(userDataDir);
@@ -835,9 +1115,17 @@ class PositionReconciliationStore {
       ? operationTokenProvider
       : null;
     const expected = normalizeCheckpoint(expectedCheckpoint, 'checkpoint');
+    const initial = normalizeCheckpoint(initialCheckpoint, '首次绑定 checkpoint');
     const pendingOperation = normalizePendingOperation(expectedPendingOperation);
+    if (expected && initial) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '主库中的平盘侧库 checkpoint 与首次绑定记录不能同时存在'
+      );
+    }
+    const databaseExisted = fs.existsSync(this.dbPath);
     const mustExist = requireExisting || expected !== null;
-    if (mustExist && !fs.existsSync(this.dbPath)) {
+    if (mustExist && !databaseExisted) {
       throw new PositionReconciliationError(
         'position-side-db-missing',
         '平盘对账侧库缺失，已停止创建空库以避免历史消费关系丢失',
@@ -847,33 +1135,52 @@ class PositionReconciliationStore {
         ]
       );
     }
+    if (databaseExisted && !expected && !initial) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '主库没有平盘侧库绑定记录，但磁盘上已存在侧库，已停止接管以避免跨备份混用',
+        [
+          `已有文件：${this.dbPath}`,
+          '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+        ]
+      );
+    }
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     try {
       this.db = new DatabaseSync(this.dbPath);
-      let isLegacyDatabase = false;
-      if (mustExist) {
+      let existingCheckpoint = null;
+      if (databaseExisted) {
         const hasMetaTable = this.db.prepare(`
           SELECT 1 AS present
           FROM sqlite_master
           WHERE type = 'table' AND name = 'position_meta'
         `).get();
-        const checkpoint = hasMetaTable ? readDatabaseCheckpoint(this.db) : null;
-        if (!checkpoint) {
-          const legacyMarker = hasMetaTable && allowLegacyCheckpointMigration
-            ? this.db.prepare('SELECT value FROM position_meta WHERE key = ?')
-                .get(POSITION_DB_LEGACY_INITIALIZED_KEY)
-            : null;
-          isLegacyDatabase = Boolean(legacyMarker && text(legacyMarker.value) === '1');
-          if (!isLegacyDatabase) {
-            throw new PositionReconciliationError(
-              'position-side-db-missing',
-              '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
-              [
-                `异常文件：${this.dbPath}`,
-                '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
-              ]
-            );
-          }
+        existingCheckpoint = hasMetaTable ? readDatabaseCheckpoint(this.db) : null;
+        const hasHistoryTable = this.db.prepare(`
+          SELECT 1 AS present
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'position_checkpoint_history'
+        `).get();
+        if (!existingCheckpoint || !hasHistoryTable) {
+          throw new PositionReconciliationError(
+            'position-side-db-missing',
+            '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
+            [
+              `异常文件：${this.dbPath}`,
+              '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+            ]
+          );
+        }
+        const historyRow = this.db.prepare(`
+          SELECT token
+          FROM position_checkpoint_history
+          WHERE generation = ?
+        `).get(existingCheckpoint.generation);
+        if (!historyRow || text(historyRow.token) !== existingCheckpoint.token) {
+          checkpointMismatch(existingCheckpoint, expected || initial, '侧库当前 checkpoint 历史缺失');
+        }
+        if (!expected && initial && !checkpointsEqual(existingCheckpoint, initial)) {
+          checkpointMismatch(existingCheckpoint, initial, '侧库与主库首次绑定 checkpoint 不一致');
         }
       }
       this.db.exec('PRAGMA foreign_keys = ON;');
@@ -887,18 +1194,41 @@ class PositionReconciliationStore {
       if (!checkpointHistoryColumns.some((column) => column.name === 'operation_token')) {
         this.db.exec('ALTER TABLE position_checkpoint_history ADD COLUMN operation_token TEXT;');
       }
+      const runRowColumns = this.db.prepare('PRAGMA table_info(position_run_rows)').all();
+      const missingRunRowColumns = [
+        ['consumes_source', "ALTER TABLE position_run_rows ADD COLUMN consumes_source INTEGER NOT NULL DEFAULT 0"],
+        ['integrity_hash', "ALTER TABLE position_run_rows ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''"]
+      ].filter(([name]) => !runRowColumns.some((column) => column.name === name));
+      if (missingRunRowColumns.length > 0) {
+        const existingRunRows = Number(
+          this.db.prepare('SELECT COUNT(*) AS count FROM position_run_rows').get().count
+        );
+        if (existingRunRows > 0) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            '旧版平盘运行草稿缺少完整性锚点，禁止自动接管',
+            ['请删除未正式发布版本的平盘侧库后重新导入，或恢复完整软件数据目录']
+          );
+        }
+        for (const [, statement] of missingRunRowColumns) this.db.exec(statement);
+      }
+      const seedCheckpoint = existingCheckpoint || initial || {
+        identity: crypto.randomUUID(),
+        generation: 0,
+        token: crypto.randomUUID()
+      };
       this.db.prepare(`
         INSERT INTO position_meta(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO NOTHING
-      `).run(POSITION_DB_IDENTITY_KEY, crypto.randomUUID());
-      this.db.prepare(`
-        INSERT INTO position_meta(key, value) VALUES (?, '0')
-        ON CONFLICT(key) DO NOTHING
-      `).run(POSITION_DB_GENERATION_KEY);
+      `).run(POSITION_DB_IDENTITY_KEY, seedCheckpoint.identity);
       this.db.prepare(`
         INSERT INTO position_meta(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO NOTHING
-      `).run(POSITION_DB_CHECKPOINT_TOKEN_KEY, crypto.randomUUID());
+      `).run(POSITION_DB_GENERATION_KEY, String(seedCheckpoint.generation));
+      this.db.prepare(`
+        INSERT INTO position_meta(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO NOTHING
+      `).run(POSITION_DB_CHECKPOINT_TOKEN_KEY, seedCheckpoint.token);
       const currentCheckpoint = readDatabaseCheckpoint(this.db);
       if (!currentCheckpoint) {
         throw new PositionReconciliationError(
@@ -911,7 +1241,12 @@ class PositionReconciliationStore {
         VALUES (?, ?, NULL, NULL)
         ON CONFLICT(generation) DO NOTHING
       `).run(currentCheckpoint.generation, currentCheckpoint.token);
-      assertCheckpointCompatible(this.db, currentCheckpoint, expected, pendingOperation);
+      assertCheckpointCompatible(
+        this.db,
+        currentCheckpoint,
+        expected || initial,
+        expected ? pendingOperation : null
+      );
     } catch (error) {
       if (this.db) {
         try {
@@ -1505,8 +1840,9 @@ class PositionReconciliationStore {
         INSERT INTO position_run_rows(
           run_id, biz_id, channel, month_key, source_order,
           original_fund_type, result_fund_type, hit_summary, hit_type, match_detail,
-          outcome, changed, manual_modified, original_json, result_json, lineage_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+          outcome, changed, manual_modified, consumes_source,
+          original_json, result_json, lineage_json, integrity_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
       `);
       const insertDiff = this.db.prepare(`
         INSERT INTO position_differences(
@@ -1514,6 +1850,26 @@ class PositionReconciliationStore {
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of rows) {
+        const consumesSource = runRowConsumesSource(item);
+        const integrityHash = runRowIntegrityHash({
+          runId,
+          bizId: item.bizId,
+          channel: item.channel,
+          monthKey: item.monthKey,
+          sourceOrder: item.sourceOrder,
+          originalFundType: item.originalFundType,
+          resultFundType: item.resultFundType,
+          hitSummary: item.hitSummary || '',
+          hitType: item.hitType || '',
+          matchDetail: item.matchDetail || '',
+          outcome: item.outcome,
+          changed: item.changed,
+          manualModified: false,
+          consumesSource,
+          originalRow: item.originalRow,
+          resultRow: item.resultRow,
+          lineage: item.lineage || {}
+        });
         insertRow.run(
           runId,
           item.bizId,
@@ -1527,9 +1883,11 @@ class PositionReconciliationStore {
           item.matchDetail || '',
           item.outcome,
           item.changed ? 1 : 0,
+          consumesSource ? 1 : 0,
           serializeJson(item.originalRow),
           serializeJson(item.resultRow),
-          serializeJson(item.lineage || {})
+          serializeJson(item.lineage || {}),
+          integrityHash
         );
         if (item.isDifference) {
           insertDiff.run(
@@ -1563,6 +1921,9 @@ class PositionReconciliationStore {
       `运行汇总 ID=${run.id}`
     );
     assertRunEnvelope(this.db, run, scope, snapshot, summary);
+    if (run.status === 'pending' && this.snapshotIsCurrent(snapshot)) {
+      assertCurrentRunReferences(this.db, run.id);
+    }
     return {
       ...run,
       id: Number(run.id),
@@ -1657,6 +2018,9 @@ class PositionReconciliationStore {
   replaceRunRowsFromReimport(runId, updates) {
     const run = this.getRun(runId);
     if (!run) throw new Error('运行草稿不存在');
+    const existingRows = new Map(
+      this.listRunRows(runId).map((row) => [text(row.biz_id), row])
+    );
     return this._mutation(() => {
       const update = this.db.prepare(`
         UPDATE position_run_rows SET
@@ -1667,7 +2031,8 @@ class PositionReconciliationStore {
           outcome = ?,
           changed = ?,
           manual_modified = ?,
-          result_json = ?
+          result_json = ?,
+          integrity_hash = ?
         WHERE run_id = ? AND biz_id = ?
       `);
       const upsertDiff = this.db.prepare(`
@@ -1684,6 +2049,32 @@ class PositionReconciliationStore {
           updated_at = CURRENT_TIMESTAMP
       `);
       for (const item of updates) {
+        const existing = existingRows.get(text(item.bizId));
+        if (!existing) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            `回导更新引用了未知运行行：${item.bizId}`
+          );
+        }
+        const integrityHash = runRowIntegrityHash({
+          runId,
+          bizId: existing.biz_id,
+          channel: existing.channel,
+          monthKey: existing.month_key,
+          sourceOrder: existing.source_order,
+          originalFundType: existing.original_fund_type,
+          resultFundType: item.resultFundType,
+          hitSummary: item.hitSummary,
+          hitType: item.hitType,
+          matchDetail: item.matchDetail,
+          outcome: item.outcome,
+          changed: item.changed,
+          manualModified: item.manualModified,
+          consumesSource: Number(existing.consumes_source) === 1,
+          originalRow: existing.originalRow,
+          resultRow: item.resultRow,
+          lineage: existing.lineage
+        });
         update.run(
           item.resultFundType,
           item.hitSummary,
@@ -1693,6 +2084,7 @@ class PositionReconciliationStore {
           item.changed ? 1 : 0,
           item.manualModified ? 1 : 0,
           serializeJson(item.resultRow),
+          integrityHash,
           runId,
           item.bizId
         );
@@ -1776,7 +2168,8 @@ class PositionReconciliationStore {
         const businessKey = text(lineage.sourceBusinessKey);
         const legIndex = Number(lineage.sourceLegIndex);
         if (
-          sourceType
+          Number(row.consumes_source) === 1
+          && sourceType
           && sourceType !== SOURCE_TYPES.BANK_ACCOUNT
           && businessKey
           && lineage.sourceLegIndex !== null
