@@ -33,6 +33,6 @@
 - 清结算银行账户表 prepare 阶段只有待确认 token 时标记为延迟存档，不算业务提交；用户确认后的 apply 才推进侧库并登记输入文件。
 - 历史 owner 只有在已确认运行的完整行血缘可证明同一消费关系时，才可为重导银行 BizId 提供幂等消费；无关 owner 立即阻断当前运行读取。
 - pending、存档结果和 checkpoint 清理由可注入生命周期 helper 编排，覆盖正式批次、outbox 和双失败行为级测试。
-- outbox 只有在全部文件完成正式 artifact 登记后才删除；附件登记前失败继续由 outbox 保护源文件并幂等重放。
-- 启动暂存清理合并正式失败 artifact、outbox 与主库 pending 文件保护集；保护集不完整时不执行过期清理。
+- 正式建批、追加和 outbox 重放共享 artifact 完整性门禁；全部文件取得正整数 artifact ID 才算有正式重试能力，否则写入或保留同一 operation key 的 outbox 并保护源文件。
+- 启动暂存清理合并正式失败 artifact、outbox 与主库 pending 文件保护集；provider 返回非数组、抛异常或其它保护集不完整场景均不执行过期清理。
 - 退出先禁止新业务并等待活动业务结束，再排空存档任务，最后关闭 side DB。

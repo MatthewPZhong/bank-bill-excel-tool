@@ -251,6 +251,8 @@ class PositionReconciliationService {
         const archiveProtectedPaths = protectedStagingPaths();
         if (Array.isArray(archiveProtectedPaths)) {
           protectedPaths.push(...archiveProtectedPaths);
+        } else {
+          stagingProtectionComplete = false;
         }
       } catch (_error) {
         // 无法读取存档引用时宁可保留旧暂存，避免破坏失败批次的重试能力。

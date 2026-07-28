@@ -1399,6 +1399,56 @@ test('主库 pending 单独引用的过期暂存文件必须在恢复前保留',
   assert.equal(fs.existsSync(staleRoot), false);
 });
 
+test('存档保护来源不可用时保守跳过全部过期暂存清理', (t) => {
+  const providers = [
+    ['null', () => null],
+    ['undefined', () => undefined],
+    ['非数组', () => ({})],
+    ['抛异常', () => {
+      throw new Error('archive center unavailable');
+    }]
+  ];
+
+  for (const [label, protectedStagingPaths] of providers) {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), `position-staging-protection-${label}-`)
+    );
+    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+    const bootstrap = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH
+    });
+    const expectedCheckpoint = bootstrap.persistenceCheckpoint();
+    bootstrap.close();
+
+    const staleRoot = path.join(
+      userDataDir,
+      STAGING_RELATIVE_PATH,
+      'stale-batch'
+    );
+    const staleFile = path.join(staleRoot, '1', 'stale.xlsx');
+    fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+    fs.writeFileSync(staleFile, 'stale');
+    const oldDate = new Date(Date.now() - (8 * 24 * 60 * 60 * 1000));
+    fs.utimesSync(staleRoot, oldDate, oldDate);
+
+    const recovered = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: expectedCheckpoint,
+      protectedStagingPaths
+    });
+    recovered.close();
+
+    assert.equal(
+      fs.existsSync(staleFile),
+      true,
+      `${label} 不得触发过期暂存清理`
+    );
+  }
+});
+
 test('业务后置清理只返回没有未完成存档引用的暂存目录', () => {
   const root = path.resolve('/tmp/position-staging-filter');
   const sharedDir = path.join(root, 'shared', '1');

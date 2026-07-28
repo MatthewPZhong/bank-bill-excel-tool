@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T12:15:42.763Z",
+    "scannedAt": "2026-07-28T12:44:50.986Z",
     "root": "src",
     "totalFiles": 218,
-    "totalTopLevelNames": 2531,
+    "totalTopLevelNames": 2532,
     "buckets": {
       "shared": 373,
       "paired": 633,
-      "local": 1381,
+      "local": 1382,
       "crossFile": 1006
     }
   },
@@ -15386,6 +15386,24 @@
         "fileSpan": 2
       },
       {
+        "name": "outboxBatchId",
+        "defFiles": [
+          "src/main-process/archive-center/outbox-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/outbox-store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "PART_TABLE",
         "defFiles": [
           "src/main-process/run-check-multiworker-worker.js",
@@ -16538,24 +16556,6 @@
           {
             "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
             "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "outboxBatchId",
-        "defFiles": [
-          "src/main-process/archive-center/outbox-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/archive-center/outbox-store.js",
-            "count": 2
           }
         ],
         "totalHits": 5,
@@ -28155,6 +28155,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "filesHaveDurableArtifacts",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
             "count": 4
           }
         ],
@@ -58388,6 +58402,24 @@
       "fileSpan": 2
     },
     {
+      "name": "outboxBatchId",
+      "defFiles": [
+        "src/main-process/archive-center/outbox-store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/outbox-store.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "PART_TABLE",
       "defFiles": [
         "src/main-process/run-check-multiworker-worker.js",
@@ -59540,24 +59572,6 @@
         {
           "file": "src/main-process/pre-fund-reconciliation/mpt-schema.js",
           "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "outboxBatchId",
-      "defFiles": [
-        "src/main-process/archive-center/outbox-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/archive-center/controller.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/archive-center/outbox-store.js",
-          "count": 2
         }
       ],
       "totalHits": 5,

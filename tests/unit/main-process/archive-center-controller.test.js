@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
 
 const {
   ARCHIVE_RETENTION_SETTING_KEY,
@@ -14,6 +15,12 @@ const {
 const {
   createArchiveOutboxStore
 } = require('../../../src/main-process/archive-center/outbox-store');
+const {
+  createArchiveService
+} = require('../../../src/main-process/archive-center/archive-service');
+const {
+  createArchiveRepository
+} = require('../../../src/backend/database/archive-repository');
 
 function createHarness(options = {}) {
   const settings = new Map(options.initialSettings || []);
@@ -39,7 +46,10 @@ function createHarness(options = {}) {
         id: batches.length + 1,
         batchNumber: `${payload.moduleCode}-20260720-001`,
         moduleId: payload.moduleId,
+        moduleCode: payload.moduleCode,
         moduleName: payload.moduleName,
+        operationKey: payload.operationKey,
+        metadata: payload.metadata,
         archiveStatus: 'complete',
         failedArtifactCount: 0
       };
@@ -411,6 +421,167 @@ test('outbox 重放在附件元数据登记前失败时保留任务和源文件'
   assert.equal(flushed.flushed, 1);
   assert.deepEqual(outboxStore.list(), []);
   assert.deepEqual(releasedPaths, [inputPath]);
+});
+
+test('正式建批和追加在 artifact 登记前失败时转入 outbox 并可重放', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-artifact-gap-'));
+  const archiveRoot = path.join(rootDir, 'archive');
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const now = () => new Date(2026, 6, 20, 12, 0, 0);
+  const repository = createArchiveRepository(db, { now });
+  const originalAddArtifact = repository.addArtifact.bind(repository);
+  let failNextArtifact = true;
+  repository.addArtifact = (...args) => {
+    if (failNextArtifact) {
+      failNextArtifact = false;
+      const error = new Error('injected artifact insert failure');
+      error.code = 'SQLITE_BUSY';
+      throw error;
+    }
+    return originalAddArtifact(...args);
+  };
+  const service = createArchiveService({ repository, rootDir: archiveRoot, now });
+  const settings = new Map();
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value)
+    },
+    service,
+    outboxStore
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+  await service.initialize();
+
+  const firstInput = path.join(rootDir, 'first.xlsx');
+  fs.writeFileSync(firstInput, 'first-input');
+  const first = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:bank:apply-import',
+    operationKey: 'position:artifact-gap:create',
+    files: [{ filePath: firstInput, role: 'input' }]
+  });
+  assert.match(first.batchId, /^outbox:/);
+  assert.equal(first.archiveFailed, true);
+  assert.equal(first.persistentRetryAvailable, true);
+  assert.equal(outboxStore.list().length, 1);
+  assert.deepEqual(controller.listUnresolvedSourcePaths(), [firstInput]);
+  const firstFormal = repository.listBatches({ limit: 10, offset: 0 })[0];
+  assert.equal(firstFormal.artifactCount, 0);
+
+  const firstReplay = await controller.flushOutbox();
+  assert.equal(firstReplay.flushed, 1);
+  assert.equal(outboxStore.list().length, 0);
+  assert.equal(repository.getBatch(firstFormal.id).artifactCount, 1);
+
+  const secondInput = path.join(rootDir, 'second.xlsx');
+  const secondOutput = path.join(rootDir, 'second-result.xlsx');
+  fs.writeFileSync(secondInput, 'second-input');
+  fs.writeFileSync(secondOutput, 'second-output');
+  const second = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run',
+    operationKey: 'position:artifact-gap:append',
+    files: [{ filePath: secondInput, role: 'input' }]
+  });
+  assert.equal(second.archiveFailed, false);
+  failNextArtifact = true;
+
+  const appended = await controller.sink.appendFiles({
+    batchId: second.batchId,
+    sourceOperation: 'position-reconciliation:run:export',
+    files: [{ filePath: secondOutput, role: 'output' }]
+  });
+  assert.equal(appended.archiveFailed, true);
+  assert.equal(appended.persistentRetryAvailable, true);
+  assert.equal(outboxStore.list().length, 1);
+  assert.deepEqual(controller.listUnresolvedSourcePaths(), [secondOutput]);
+
+  const secondReplay = await controller.flushOutbox();
+  assert.equal(secondReplay.flushed, 1);
+  assert.equal(outboxStore.list().length, 0);
+  assert.equal(repository.getBatch(second.batchId).artifactCount, 2);
+});
+
+test('正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试', async () => {
+  const brokenOutbox = {
+    findByOperationKey: () => null,
+    enqueue: () => {
+      throw new Error('outbox unavailable');
+    },
+    listSourcePaths: () => [],
+    list: () => []
+  };
+  const { controller, service } = createHarness({ outboxStore: brokenOutbox });
+  const workingCreateBatch = service.createBatch.bind(service);
+  service.createBatch = async () => ({
+    ok: false,
+    created: true,
+    batch: {
+      id: 1,
+      batchNumber: 'POSITION-20260720-001',
+      moduleId: 'position-reconciliation-process',
+      moduleCode: 'POSITION',
+      moduleName: '平盘对账数据处理',
+      operationKey: 'position:artifact-gap:double-failure',
+      archiveStatus: 'failed'
+    },
+    results: [{
+      ok: false,
+      status: 'failed',
+      message: 'artifact insert failed'
+    }]
+  });
+
+  const result = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run',
+    operationKey: 'position:artifact-gap:double-failure',
+    files: [{ filePath: '/tmp/missing-artifact.xlsx', role: 'input' }]
+  });
+  assert.equal(result.archiveFailed, true);
+  assert.equal(result.persistentRetryAvailable, false);
+  assert.equal(result.failureRecorded, false);
+  assert.match(result.warning.message, /持久重试任务登记失败/);
+
+  service.createBatch = workingCreateBatch;
+  const created = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run',
+    operationKey: 'position:artifact-gap:append-double-failure',
+    files: [{ filePath: '/tmp/ready-input.xlsx', role: 'input' }]
+  });
+  assert.equal(created.archiveFailed, false);
+  service.appendFiles = async () => ({
+    ok: false,
+    results: [{
+      ok: false,
+      status: 'failed',
+      message: 'artifact insert failed'
+    }]
+  });
+  const appended = await controller.sink.appendFiles({
+    batchId: created.batchId,
+    sourceOperation: 'position-reconciliation:run:export',
+    files: [{ filePath: '/tmp/missing-output-artifact.xlsx', role: 'output' }]
+  });
+  assert.equal(appended.archiveFailed, true);
+  assert.equal(appended.persistentRetryAvailable, false);
+  assert.equal(appended.failureRecorded, false);
+  assert.match(appended.warning.message, /持久重试任务登记失败/);
 });
 
 test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', (t) => {

@@ -50,6 +50,7 @@
 - [x] 增加持久存档 outbox、启动重放和纯导出异常退出恢复
 - [x] 覆盖同进程部分提交的 outbox 恢复及部分失败重放源文件保护
 - [x] outbox 附件登记完整后才删除任务，元数据登记前失败继续保护源文件
+- [x] 正式建批/追加附件缺少 artifact 时转同 operation key outbox，双失败不推进 checkpoint
 - [x] 区分账户表待确认 prepare 与已提交业务，避免空存档 pending
 - [x] 抽取 pending/存档/checkpoint 生命周期 helper 并覆盖正式批次、outbox、双失败
 - [x] 主库 pending 文件加入启动暂存保护集，保护集不可读时跳过清理

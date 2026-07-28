@@ -39,15 +39,22 @@ function operationFailureMessage(failures) {
     : '存档文件失败，可在存档中心重试';
 }
 
+function filesHaveDurableArtifacts(files, created) {
+  const specs = Array.isArray(files) ? files : [];
+  if (specs.length === 0) return true;
+  const results = created && Array.isArray(created.results) ? created.results : [];
+  return results.length === specs.length && results.every((result) => {
+    const artifactId = Number(result && result.artifact && result.artifact.id);
+    return Number.isSafeInteger(artifactId) && artifactId > 0;
+  });
+}
+
 function outboxFilesHaveDurableArtifacts(record, created) {
   const files = record && record.payload && Array.isArray(record.payload.files)
     ? record.payload.files
     : [];
   if (files.length === 0) return true;
-  const results = created && Array.isArray(created.results) ? created.results : [];
-  return results.length === files.length && results.every(
-    (result) => result && result.artifact && result.artifact.id != null
-  );
+  return filesHaveDurableArtifacts(files, created);
 }
 
 class ArchiveCenterController {
@@ -231,19 +238,23 @@ class ArchiveCenterController {
     };
   }
 
-  persistOperationIntent(payload = {}) {
+  _persistOutboxPayload(batchPayload) {
     if (!this.outboxStore) {
       throw new Error('存档持久 outbox 尚未初始化');
     }
+    const existing = this.outboxStore.findByOperationKey(batchPayload.operationKey);
+    return existing
+      ? this.outboxStore.append(existing.id, batchPayload.files)
+      : this.outboxStore.enqueue(batchPayload);
+  }
+
+  persistOperationIntent(payload = {}) {
     const files = (Array.isArray(payload.files) ? payload.files : []).map(
       (file) => this._trackedFilePayload(file, payload.sourceOperation)
     );
     if (files.length === 0) throw new Error('存档恢复意图缺少文件');
     const batchPayload = this._batchPayload(payload, files);
-    const existing = this.outboxStore.findByOperationKey(batchPayload.operationKey);
-    const record = existing
-      ? this.outboxStore.append(existing.id, files)
-      : this.outboxStore.enqueue(batchPayload);
+    const record = this._persistOutboxPayload(batchPayload);
     return {
       batchId: outboxBatchId(record.id),
       operationKey: batchPayload.operationKey,
@@ -268,7 +279,7 @@ class ArchiveCenterController {
     if (!created || !created.batch) {
       if (this.outboxStore) {
         try {
-          const record = this.outboxStore.enqueue(batchPayload);
+          const record = this._persistOutboxPayload(batchPayload);
           return {
             batchId: outboxBatchId(record.id),
             archiveFailed: true,
@@ -304,6 +315,44 @@ class ArchiveCenterController {
     }
     const batch = this._rememberBatch(created.batch);
     const attached = this._summarizeTrackedFiles(created, files);
+    if (!filesHaveDurableArtifacts(files, created)) {
+      const baseMessage = attached.warning && attached.warning.message
+        ? attached.warning.message
+        : '存档批次附件登记不完整';
+      try {
+        const record = this._persistOutboxPayload(batchPayload);
+        return {
+          ...attached,
+          batchId: outboxBatchId(record.id),
+          batchNumber: batch.batchNumber,
+          created: created.created,
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；已登记持久重试任务`
+          }
+        };
+      } catch (outboxError) {
+        return {
+          ...attached,
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          created: created.created,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message:
+              `${baseMessage}；持久重试任务登记失败：${
+                outboxError && outboxError.message ? outboxError.message : String(outboxError)
+              }`
+          }
+        };
+      }
+    }
     return {
       batchId: batch.id,
       batchNumber: batch.batchNumber,
@@ -356,10 +405,68 @@ class ArchiveCenterController {
       sourceOperation: payload.sourceOperation,
       files
     });
+    const attached = this._summarizeTrackedFiles(appended, files);
+    if (!filesHaveDurableArtifacts(files, appended)) {
+      const batch = (appended && appended.batch)
+        || this.service.repository.getBatch(resolvedBatchId);
+      const baseMessage = attached.warning && attached.warning.message
+        ? attached.warning.message
+        : '存档批次附件登记不完整';
+      if (!batch) {
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；无法读取正式批次，未能登记持久重试任务`
+          }
+        };
+      }
+      const retryPayload = this._batchPayload({
+        moduleId: batch.moduleId,
+        moduleCode: batch.moduleCode,
+        moduleName: batch.moduleName,
+        operationKey: batch.operationKey,
+        sourceOperation: payload.sourceOperation,
+        metadata: {
+          ...(batch.metadata || {}),
+          ...(payload.metadata || {})
+        }
+      }, files);
+      try {
+        this._persistOutboxPayload(retryPayload);
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；已登记持久重试任务`
+          }
+        };
+      } catch (outboxError) {
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message:
+              `${baseMessage}；持久重试任务登记失败：${
+                outboxError && outboxError.message ? outboxError.message : String(outboxError)
+              }`
+          }
+        };
+      }
+    }
     return {
       persistentRetryAvailable: true,
       failureRecorded: true,
-      ...this._summarizeTrackedFiles(appended, files)
+      ...attached
     };
   }
 

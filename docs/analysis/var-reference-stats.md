@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 08:15:42 |
+| 扫描时间 | 2026-7-28 08:44:50 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 218 |
-| 顶层声明总数 | 2531 |
-| ≥2 次引用 | 2387 |
+| 顶层声明总数 | 2532 |
+| ≥2 次引用 | 2388 |
 | 跨 ≥3 文件 (A-share) | 373 |
 | 跨 2 文件 (A-pair) | 633 |
-| 单文件 (A-local) | 1381 |
+| 单文件 (A-local) | 1382 |
 | 跨文件合计 (B) | 1006 |
 
 ---
@@ -578,6 +578,7 @@
 | `migrateC4ReconGroupsStructure` | 6 | src/backend/database/migrations.js |
 | `migrateGatewayReconIdFixFieldPairs` | 6 | src/backend/database/migrations.js |
 | `normalizeGatewayCandidate` | 6 | src/main-process/pre-fund-reconciliation/matching-engine.js |
+| `outboxBatchId` | 6 | src/main-process/archive-center/outbox-store.js |
 | `PART_TABLE` | 6 | src/main-process/run-check-multiworker-worker.js |
 | `PENDING_DIFF_FIELD_DB_COLUMN` | 6 | src/backend/bank-bu-recon-db/columns.js |
 | `REFUND_RO_COLUMNS` | 6 | src/constants/refund-backfill-fields.js |
@@ -641,7 +642,6 @@
 | `normalizeWorksheetTarget` | 5 | src/backend/big-table-import/zip-reader.js |
 | `openDb` | 5 | src/backend/biz-op-recon-import/import-worker.js |
 | `OUTBOUND_FIELDS` | 5 | src/main-process/pre-fund-reconciliation/mpt-schema.js |
-| `outboxBatchId` | 5 | src/main-process/archive-center/outbox-store.js |
 | `parseAmountAbs` | 5 | src/backend/acquiring-bill-currency-db/import-repository.js |
 | `peekImportTarget` | 5 | src/main-process/acquiring-bill-currency-run-data.js |
 | `PENDING_INSERT_SQL` | 5 | src/backend/bank-bu-recon-db/month-repository.js |
@@ -1764,6 +1764,7 @@
 | `publicFailure` | 16 |
 | `ALLOWED_RETENTION_DAYS` | 4 |
 | `ARCHIVE_RETENTION_SETTING_KEY` | 4 |
+| `filesHaveDurableArtifacts` | 4 |
 | `ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY` | 3 |
 | `ArchiveCenterController` | 3 |
 | `parseRetentionDays` | 3 |
@@ -3216,6 +3217,7 @@
 | `migrateC4ReconGroupsStructure` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `migrateGatewayReconIdFixFieldPairs` | 2 | 6 | 1 | src/backend/database.js(4), src/backend/database/migrations.js(2) |
 | `normalizeGatewayCandidate` | 2 | 6 | 1 | src/main-process/pre-fund-reconciliation/matching-engine.js(4), src/main-process/pre-fund-reconciliation/service.js(2) |
+| `outboxBatchId` | 2 | 6 | 1 | src/main-process/archive-center/controller.js(4), src/main-process/archive-center/outbox-store.js(2) |
 | `PART_TABLE` | 2 | 6 | 2 | src/main-process/run-check-multiworker-worker.js(4), src/main-process/run-check-multiworker.js(2) |
 | `PENDING_DIFF_FIELD_DB_COLUMN` | 2 | 6 | 1 | src/main-process/bank-bu-recon-session.js(4), src/backend/bank-bu-recon-db/columns.js(2) |
 | `REFUND_RO_COLUMNS` | 2 | 6 | 1 | src/constants/refund-backfill-fields.js(4), src/main-process/scenario-engines/r5-refund-order-backfill.js(2) |
@@ -3279,7 +3281,6 @@
 | `normalizeWorksheetTarget` | 2 | 5 | 2 | src/backend/biz-op-recon-import/reader-streamed.js(3), src/backend/big-table-import/zip-reader.js(2) |
 | `openDb` | 2 | 5 | 1 | src/backend/duplicate-inbound-match-store.js(3), src/backend/biz-op-recon-import/import-worker.js(2) |
 | `OUTBOUND_FIELDS` | 2 | 5 | 1 | src/main-process/pre-fund-reconciliation/mpt-schema.js(3), src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js(2) |
-| `outboxBatchId` | 2 | 5 | 1 | src/main-process/archive-center/controller.js(3), src/main-process/archive-center/outbox-store.js(2) |
 | `parseAmountAbs` | 2 | 5 | 2 | src/backend/acquiring-bill-currency-db/import-repository.js(3), src/backend/acquiring-bill-currency-import/contract-flow.js(2) |
 | `peekImportTarget` | 2 | 5 | 2 | src/main-process/acquiring-bill-currency-run-data.js(3), src/main-process/acquiring-bill-currency-session.js(2) |
 | `PENDING_INSERT_SQL` | 2 | 5 | 2 | src/backend/pending-import/contract-pending.js(3), src/backend/bank-bu-recon-db/month-repository.js(2) |
