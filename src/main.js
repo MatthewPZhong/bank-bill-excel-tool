@@ -66,6 +66,9 @@ const {
 const {
   createPositionReconciliationService
 } = require('./main-process/position-reconciliation/service');
+const {
+  POSITION_SIDE_DB_INITIALIZED_SETTING
+} = require('./main-process/position-reconciliation/constants');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -3497,26 +3500,31 @@ function registerArchiveCenterHandlers() {
   ipcMain.handle('archive-center:open-file', (_event, fileRefId) => {
     return callArchiveCenter('openFile', fileRefId);
   });
-  ipcMain.handle('archive-center:save-as', (_event, fileRefId) => {
+  archiveCenterMutationIpcHandle('archive-center:save-as', '另存为', (_event, fileRefId) => {
     return callArchiveCenter('saveAs', fileRefId);
   });
-  ipcMain.handle('archive-center:set-locked', (_event, batchId, locked) => {
+  archiveCenterMutationIpcHandle('archive-center:set-locked', '锁定批次', (_event, batchId, locked) => {
     if (typeof locked !== 'boolean') {
       return { status: 'failed', message: '批次锁定状态无效' };
     }
     return callArchiveCenter('setLocked', batchId, locked);
   });
-  ipcMain.handle('archive-center:delete-batch', (_event, batchId) => {
+  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (_event, batchId) => {
     return callArchiveCenter('deleteBatch', batchId);
   });
-  ipcMain.handle('archive-center:retry-batch', (_event, batchId) => {
+  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', (_event, batchId) => {
     return callArchiveCenter('retryBatch', batchId);
   });
   ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
-  ipcMain.handle('archive-center:set-retention-days', (_event, retentionDays) => {
+  archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
+}
+
+function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
+  const meta = { channel, moduleKey: '存档中心', functionKey };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
 function initializeArchiveCenter() {
@@ -3525,7 +3533,8 @@ function initializeArchiveCenter() {
   const service = createArchiveService({
     database: database.db,
     rootDir: archiveRoot,
-    opener: (filePath) => shell.openPath(filePath)
+    opener: (filePath) => shell.openPath(filePath),
+    onSourceReleased: cleanupPositionArchiveSourcePaths
   });
   archiveCenterService = createArchiveCenterController({
     database,
@@ -14112,10 +14121,28 @@ function getPositionReconciliationService() {
     throw new Error('数据库尚未初始化，请稍后重试');
   }
   if (!positionReconciliationService) {
-    positionReconciliationService = createPositionReconciliationService({
+    const sideDbInitialized = (
+      database.getSetting(POSITION_SIDE_DB_INITIALIZED_SETTING) === '1'
+    );
+    const service = createPositionReconciliationService({
       userDataDir: path.dirname(database.dbPath),
-      templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx')
+      templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
+      requireExistingSideDb: sideDbInitialized,
+      protectedStagingPaths: () => {
+        if (!archiveCenterService
+            || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+          return null;
+        }
+        return archiveCenterService.listUnresolvedSourcePaths();
+      }
     });
+    try {
+      database.setSetting(POSITION_SIDE_DB_INITIALIZED_SETTING, '1');
+      positionReconciliationService = service;
+    } catch (error) {
+      service.close();
+      throw error;
+    }
   }
   return positionReconciliationService;
 }
@@ -14952,24 +14979,60 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
   return {};
 }
 
-function cleanupPositionArchiveStaging(runtime) {
-  const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
-  if (targets.length === 0 || !database || !database.dbPath) return;
-  const root = path.resolve(
+function positionArchiveStagingRoot() {
+  if (!database || !database.dbPath) return '';
+  return path.resolve(
     path.dirname(database.dbPath),
     'run-data',
     'position-reconciliation',
     'import-staging'
   );
+}
+
+function cleanupPositionArchiveStagingDirectories(targets) {
+  if (!Array.isArray(targets) || targets.length === 0) return;
+  const root = positionArchiveStagingRoot();
+  if (!root) return;
   for (const value of targets) {
     const target = path.resolve(String(value || ''));
     if (target === root || !target.startsWith(`${root}${path.sep}`)) continue;
     try {
       fs.rmSync(target, { recursive: true, force: true });
+      const batchRoot = path.dirname(target);
+      if (batchRoot !== root
+          && batchRoot.startsWith(`${root}${path.sep}`)
+          && fs.existsSync(batchRoot)
+          && fs.readdirSync(batchRoot).length === 0) {
+        fs.rmdirSync(batchRoot);
+      }
     } catch (_error) {
       // 成功存档后的临时副本清理失败留待下次启动回收。
     }
   }
+}
+
+function cleanupPositionArchiveSourcePaths(sourcePaths) {
+  const root = positionArchiveStagingRoot();
+  if (!root) return;
+  const directories = [];
+  for (const value of Array.isArray(sourcePaths) ? sourcePaths : []) {
+    const sourcePath = path.resolve(String(value || ''));
+    const relative = path.relative(root, sourcePath);
+    const parts = relative.split(path.sep).filter(Boolean);
+    if (relative === '..'
+        || relative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relative)
+        || parts.length < 3) {
+      continue;
+    }
+    directories.push(path.dirname(sourcePath));
+  }
+  cleanupPositionArchiveStagingDirectories(directories);
+}
+
+function cleanupPositionArchiveStaging(runtime) {
+  const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
+  cleanupPositionArchiveStagingDirectories(targets);
 }
 
 function reportArchiveFailure(warning) {

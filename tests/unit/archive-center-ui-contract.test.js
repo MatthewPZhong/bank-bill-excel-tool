@@ -30,6 +30,27 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.doesNotMatch(quitFlow, /Promise\.race\(\[\s*archiveOperationTail/);
   });
 
+  test('存档写操作纳入业务退出闸门，平盘失败源由存档状态驱动释放', () => {
+    assert.match(
+      main,
+      /function archiveCenterMutationIpcHandle[\s\S]*?runRegisteredBusinessOperation\(meta, handler\)/
+    );
+    for (const channel of [
+      'archive-center:save-as',
+      'archive-center:set-locked',
+      'archive-center:delete-batch',
+      'archive-center:retry-batch',
+      'archive-center:set-retention-days'
+    ]) {
+      assert.ok(
+        main.includes(`archiveCenterMutationIpcHandle('${channel}'`),
+        `${channel} 应接入退出闸门`
+      );
+    }
+    assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
+    assert.match(main, /protectedStagingPaths:[\s\S]*?listUnresolvedSourcePaths\(\)/);
+  });
+
   test('设置弹窗为双栏导航且默认停留在自动更新', () => {
     assert.match(renderer, /function createAppUpdateSettingsDialog\(\)/);
     assert.match(renderer, /dialog\.className = 'modal-card app-update-settings-card'/);

@@ -221,17 +221,30 @@ class PositionReconciliationService {
     userDataDir,
     templatePath,
     now = () => new Date(),
-    store = null
+    store = null,
+    requireExistingSideDb = false,
+    protectedStagingPaths = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
     this.userDataDir = path.resolve(userDataDir);
     this.templatePath = path.resolve(templatePath);
     this.now = now;
-    this.store = store || createPositionReconciliationStore(this.userDataDir);
+    this.store = store || createPositionReconciliationStore(this.userDataDir, {
+      requireExisting: requireExistingSideDb
+    });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();
-    pruneStagingRoot(this.userDataDir);
+    if (typeof protectedStagingPaths === 'function') {
+      try {
+        const protectedPaths = protectedStagingPaths();
+        if (Array.isArray(protectedPaths)) {
+          pruneStagingRoot(this.userDataDir, { protectedPaths });
+        }
+      } catch (_error) {
+        // 无法读取存档引用时宁可保留旧暂存，避免破坏失败批次的重试能力。
+      }
+    }
   }
 
   close() {
@@ -685,6 +698,7 @@ class PositionReconciliationService {
       preciseRows: resultRows.filter((row) => row.hitType === MATCH_TYPES.PRECISE).length,
       fuzzyRows: resultRows.filter((row) => row.hitType === MATCH_TYPES.FUZZY).length,
       notApplicableRows: resultRows.filter((row) => row.hitType === MATCH_TYPES.NOT_APPLICABLE).length,
+      manualModifiedRows: 0,
       sourceTypes: sources,
       engine: {
         ...(engineResult.summary || {}),

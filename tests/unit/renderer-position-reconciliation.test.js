@@ -290,6 +290,21 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
   });
 
+  test('银行导入准备和写入失败时展示已转义的 detailLines', () => {
+    assert.match(
+      positionRenderer,
+      /function failureDetailsHtml[\s\S]*?detailLines[\s\S]*?map\(escapeHtml\)[\s\S]*?details\.join\('<br>'\)/
+    );
+    assert.match(
+      positionRenderer,
+      /showAlert\(failureDetailsHtml\(result, '平盘银行对账单导入失败'\), \{ html: true \}\)/
+    );
+    assert.match(
+      positionRenderer,
+      /showAlert\(failureDetailsHtml\(applied, '平盘银行对账单写入失败'\), \{ html: true \}\)/
+    );
+  });
+
   test('preload 仅暴露平盘命名空间，不向 renderer 泄露 Electron IPC', () => {
     for (const method of [
       'status', 'dataManager', 'linkedManager', 'prepareBankImport', 'applyBankImport',
@@ -300,6 +315,18 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       assert.match(preload, new RegExp(`${method}:\\s*\\(`));
     }
     assert.doesNotMatch(positionRenderer, /ipcRenderer|require\(['"]electron['"]\)/);
+  });
+
+  test('主进程以主库初始化标记防止平盘侧库丢失后静默重建', () => {
+    assert.match(
+      mainProcess,
+      /database\.getSetting\(POSITION_SIDE_DB_INITIALIZED_SETTING\)\s*===\s*'1'/
+    );
+    assert.match(mainProcess, /requireExistingSideDb:\s*sideDbInitialized/);
+    assert.match(
+      mainProcess,
+      /database\.setSetting\(POSITION_SIDE_DB_INITIALIZED_SETTING,\s*'1'\)/
+    );
   });
 
   test('差异导出携带汇总行范围，删除链接数据禁止空月份请求', () => {

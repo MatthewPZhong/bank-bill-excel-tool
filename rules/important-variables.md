@@ -9,10 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v31（app v3.1.0 — 平盘银行/五类链接表持久侧库、十组 FundType 资金性质判断、账户别名归并、严格 1:1、49 列结果、回导确认和 snapshot 失效门禁） |
-| v31 本轮 review | 2026-07-26（覆盖主库 bulk 禁令、原始/工作值隔离、Channel+月份替换、链接 revision、全局单一草稿、三字段 ReconID 候选冲突、调拨 signed `Extra Fee`、账户别名币种判断、49 列防篡改和确认事务） |
+| 当前清单版本 | v31（app v3.1.0 — 平盘银行/五类链接表持久侧库、侧库初始化一致性门禁、十组 FundType 资金性质判断、账户别名归并、严格 1:1、49 列结果、回导确认和 snapshot 失效门禁） |
+| v31 本轮 review | 2026-07-27（覆盖主库 bulk 禁令、主库/side DB 同批备份与缺失阻断、运行 envelope 与明细一致性、原始/工作值隔离、Channel+月份替换、链接 revision、全局单一草稿、三字段 ReconID 候选冲突、调拨 signed `Extra Fee`、账户别名币种判断、零数据文本列、49 列防篡改和确认事务） |
 | v30 历史版本 | app v3.0.26 — R5 两种调拨来源和多对多审计统一纳入 signed `Extra Fee`；DBS-Charge 显式保持旧无手续费口径；前置资金不平结果新增 `FundType` 并锁定 C4 三代列契约。 |
-| v31 基线数据 | `docs/analysis/var-reference-stats.md`（215 个 JS 文件 / 2461 顶层声明；A-share 369 / A-pair 618 / A-local 1332 / B 987；报告版本 3.1.0） |
+| v31 基线数据 | `docs/analysis/var-reference-stats.md`（216 个 JS 文件 / 2488 顶层声明；A-share 370 / A-pair 624 / A-local 1352 / B 994；报告版本 3.1.0） |
 | v29 历史版本 | app v3.0.25 — 设置全局【确认】保存存档保留期；模板“不存档”退役并归零历史配置；archiveCenter IPC 由 12 个收敛为 10 个。 |
 | v28 历史版本 | app v3.0.24 — 12 个主模块 ID 全集；平盘对账纯前端占位；Payment `bigAccount` 严格顿号列表及按账号隔离的三轮 1:1。 |
 | v27 历史版本 | app v3.0.23 — C3 专用 Channel trim+NOCASE 候选池；R4 四类固定资金口径、完整 exactRows、全局银行行 1:1 消费与 R4→R5 no-op 匹配血缘。 |
@@ -1277,9 +1277,9 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ---
 
-### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionFundNatureCheck`（v3.1.0 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_INITIALIZED_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionFundNatureCheck`（v3.1.0 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
-  - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、五类来源、十组基础/FX配对和状态枚举。
+  - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、side DB 初始化标记、五类来源、十组基础/FX配对和状态枚举。
   - `store.js` / `service.js` / `input-staging.js`：独立持久 side DB、原始/工作值、revision+规则版本 snapshot、不可变输入暂存、单一待确认草稿、回导和确认事务。
   - `matching-engine.js` / `logical-accounts.js` / `decimal.js`：ReconID 候选图、全局严格 1:1、方向/日期/手续费、账户别名归并和 FundType 判定。
 - 关联功能：「平盘对账数据处理 → 平盘资金性质校验」的银行/链接导入、十组性质判断、差异、49 列结果、人工回导和确认。
@@ -1291,8 +1291,8 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **金额/方向/日期**：调拨固定使用 `abs(方向金额)+signed Extra Fee`，空手续费按 0，非法或负合计 fail closed；入出账方向、Test 只校验 Debit、FundTransfer-in/out 日期门禁不可互相套用。
   - **币种和账户**：Inbound 仅在银行/订单/原始出金币种三者明确相同时移除 `&FX`；仅当银行币种=订单币种且不同于原始出金币种时增加 `&FX`，三币种互异必须转人工。三类账户场景先唯一识别自有账户，再从剩余银行字段唯一识别非自有逻辑账户。别名、多币种、多性质或多候选不得按表序取第一条。
   - **草稿与确认**：银行/来源/映射 revision 或 `POSITION_RULESET_VERSION` 变化后旧草稿禁止导出、回导和确认，范围外 FundTransfer-out 变化也必须通过银行全局 revision 失效；第一期全局只能有一个待确认草稿。回导只允许原 FundType 基础/FX二元组变化，禁止缺行、加行、仅改详情或其它字段篡改；Excel 日期时间只豁免已知时区往返；未成功导出/合法回导前不得确认。未解决人工差异不得消费来源，唯一成功匹配被人工修改时仍须保留原来源血缘。
-  - **输出与存档**：49 列名称和顺序固定，只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列固定文本格式。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，存档失败不能改变业务结果。
-  - **侧库结构完整性**：银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段；`{}` 等缺字段对象必须 fail closed。
+  - **输出与存档**：49 列名称和顺序固定，只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列使用列级文本格式，零数据文件也必须保留。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，存档失败不能改变业务结果。
+  - **侧库结构完整性**：主库标记侧库已初始化后，side DB 缺失或身份标记异常必须阻断，禁止静默重建；备份恢复必须同时包含主库和 `run-data/`。银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段，运行 scope/snapshot/summary 还须与明细一致；`{}` 等缺字段对象必须 fail closed。
   - **顺序与退出**：`SOURCE_DISPLAY_ORDER` 固定五张链接表的业务展示顺序；普通退出和更新重启都必须先阻止新业务并等待活动业务、worker 与存档队列排空，再关闭 side DB。
   - 必跑：position reconciliation unit、`position-reconciliation-side-db-parity.js`、archive operation tracker、9 张 preview、release-check、启动性能；⚠️ 真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
 

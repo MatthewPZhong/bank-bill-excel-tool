@@ -275,6 +275,65 @@ test('存档失败以明确结果返回且不泄露绝对路径，修复源文�
   }
 });
 
+test('源文件仅在存档成功或批次删除后释放，失败重试期间保持可用', async () => {
+  const releasedPaths = [];
+  const fixture = createFixture({
+    onSourceReleased: (paths) => releasedPaths.push(...paths)
+  });
+  try {
+    const retryPath = path.join(fixture.sourceDir, 'position-retry.xlsx');
+    const retryBatch = await fixture.service.createBatch(batchPayload('position-retry-source'));
+    const failed = await fixture.service.attachFile(retryBatch.batch.id, {
+      filePath: retryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(failed.ok, false);
+    assert.deepEqual(releasedPaths, []);
+
+    fs.writeFileSync(retryPath, 'retry-source');
+    const retried = await fixture.service.retryBatch(retryBatch.batch.id);
+    assert.equal(retried.ok, true);
+    assert.deepEqual(releasedPaths, [retryPath]);
+
+    const deletePath = path.join(fixture.sourceDir, 'position-delete.xlsx');
+    const deleteBatch = await fixture.service.createBatch(batchPayload('position-delete-source'));
+    const deleteFailure = await fixture.service.attachFile(deleteBatch.batch.id, {
+      filePath: deletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(deleteFailure.ok, false);
+    assert.deepEqual(releasedPaths, [retryPath]);
+
+    const deleted = await fixture.service.deleteBatch(deleteBatch.batch.id);
+    assert.equal(deleted.metadataDeleted, true);
+    assert.deepEqual(releasedPaths, [retryPath, deletePath]);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('源释放回调失败不把已完成存档回滚为失败', async () => {
+  const fixture = createFixture({
+    onSourceReleased: () => {
+      throw new Error('injected release failure');
+    }
+  });
+  try {
+    const sourcePath = writeSource(fixture, 'release-failure.xlsx', 'archived');
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('release-callback-failure'),
+      filePath: sourcePath,
+      role: 'input'
+    });
+    assert.equal(archived.ok, true);
+    assert.equal(archived.status, 'ready');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('业务完成后源文件发生变化时拒绝错存，并保留明确失败审计', async () => {
   const fixture = createFixture();
   try {

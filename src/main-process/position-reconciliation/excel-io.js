@@ -26,6 +26,7 @@ const TEXT_HEADERS = new Set([
   'Payee CardNo', 'Drawee CardNo', 'ReconID', '调拨单号', '付款单号', '业务单号',
   'bizId', '银行账号', '系统账号', '银行卡号', '账户号', '客户编号'
 ]);
+const TEXT_HEADER_PATTERN = /id|no|code|账号|账户|卡号|单号|流水号|对账|批次号|清算号码|swift/i;
 
 function ensureOutputPath(outputPath) {
   if (!outputPath || path.extname(outputPath).toLowerCase() !== '.xlsx') {
@@ -93,9 +94,19 @@ function assertHeaderRow(sheet, headers) {
   }
 }
 
+function requiresTextFormat(header) {
+  return TEXT_HEADERS.has(header) || TEXT_HEADER_PATTERN.test(String(header || ''));
+}
+
+function applyTextColumnFormats(sheet, headers) {
+  headers.forEach((header, index) => {
+    if (requiresTextFormat(header)) sheet.getColumn(index + 1).numFmt = '@';
+  });
+}
+
 function applyTextFormats(row, headers) {
   headers.forEach((header, index) => {
-    if (TEXT_HEADERS.has(header)) row.getCell(index + 1).numFmt = '@';
+    if (requiresTextFormat(header)) row.getCell(index + 1).numFmt = '@';
   });
 }
 
@@ -122,6 +133,7 @@ async function writeResultWorkbook({
   }
   assertHeaderRow(sheet, POSITION_BANK_HEADERS);
   if (sheet.rowCount > 1) sheet.spliceRows(2, sheet.rowCount - 1);
+  applyTextColumnFormats(sheet, POSITION_BANK_HEADERS);
   const fundTypeColumn = POSITION_BANK_HEADERS.indexOf('FundType') + 1;
   for (const item of rows) {
     const result = item.resultRow || item;
@@ -157,6 +169,7 @@ async function writeTableWorkbook({ outputPath, sheetName, headers, rows }) {
   headers.forEach((header, index) => {
     sheet.getColumn(index + 1).width = Math.min(36, Math.max(14, String(header).length * 2 + 4));
   });
+  applyTextColumnFormats(sheet, headers);
   for (const source of rows) {
     const values = headers.map((header) => source[header] ?? '');
     const row = sheet.addRow(values);

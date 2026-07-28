@@ -75,14 +75,26 @@ function cleanupStagingPaths(paths) {
 
 function pruneStagingRoot(userDataDir, {
   now = Date.now(),
-  maxAgeMs = DEFAULT_MAX_AGE_MS
+  maxAgeMs = DEFAULT_MAX_AGE_MS,
+  protectedPaths = []
 } = {}) {
   const root = path.join(path.resolve(userDataDir), STAGING_RELATIVE_PATH);
   if (!fs.existsSync(root)) return 0;
+  const protectedBatchRoots = new Set();
+  for (const value of Array.isArray(protectedPaths) ? protectedPaths : []) {
+    const candidate = path.resolve(String(value || ''));
+    const relative = path.relative(root, candidate);
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      continue;
+    }
+    const [batchName] = relative.split(path.sep);
+    if (batchName) protectedBatchRoots.add(path.join(root, batchName));
+  }
   let removed = 0;
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
     const target = path.join(root, entry.name);
+    if (protectedBatchRoots.has(target)) continue;
     try {
       const stat = fs.statSync(target);
       if (now - Number(stat.mtimeMs) < maxAgeMs) continue;

@@ -156,6 +156,9 @@ class ArchiveService {
     if (options.opener !== undefined && typeof options.opener !== 'function') {
       throw new TypeError('ArchiveService opener 必须是函数');
     }
+    if (options.onSourceReleased !== undefined && typeof options.onSourceReleased !== 'function') {
+      throw new TypeError('ArchiveService onSourceReleased 必须是函数');
+    }
     if (options.repository === undefined && !database) {
       throw new TypeError('ArchiveService 需要调用方注入 DatabaseSync 或 repository');
     }
@@ -176,11 +179,31 @@ class ArchiveService {
     this.now = options.now || (() => new Date());
     this.fs = options.fsImpl || fs;
     this.opener = options.opener || null;
+    this.onSourceReleased = options.onSourceReleased || null;
     this.defaultRetentionDays = defaultRetentionDays;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
     this.repository = options.repository || createArchiveRepository(database, { now: this.now });
     this.initialized = false;
     this.initialization = null;
+  }
+
+  async _releaseSourcePaths(sourcePaths) {
+    if (!this.onSourceReleased) return;
+    const paths = [...new Set(
+      (Array.isArray(sourcePaths) ? sourcePaths : [])
+        .filter(Boolean)
+        .map((value) => path.resolve(String(value)))
+    )];
+    if (paths.length === 0) return;
+    try {
+      await this.onSourceReleased(paths);
+    } catch (_error) {
+      // 业务源暂存清理失败不得把已完成的存档回滚为失败。
+    }
+  }
+
+  listUnresolvedSourcePaths() {
+    return this.repository.listUnresolvedArtifactSourcePaths();
   }
 
   _resolveManagedRelative(relativePath) {
@@ -512,8 +535,9 @@ class ArchiveService {
     let staged = null;
     try {
       const started = this.repository.startArtifactAttempt(artifact.id, { sourcePath });
+      const archivedSourcePath = sourcePath || started.sourcePath;
       staged = await this._stageSourceFile(
-        sourcePath || started.sourcePath,
+        archivedSourcePath,
         originalName,
         artifact.metadata && artifact.metadata.sourceSnapshot
       );
@@ -524,6 +548,7 @@ class ArchiveService {
         sizeBytes: Number((await this.fs.promises.stat(published.targetPath)).size),
         relativePath: published.relativePath
       });
+      await this._releaseSourcePaths([archivedSourcePath]);
       return {
         ok: true,
         status: 'ready',
@@ -822,6 +847,9 @@ class ArchiveService {
   }
 
   async _deleteBatchUnlocked(batchId, options = {}) {
+    const sourcePaths = this.repository.listArtifacts(batchId)
+      .map((artifact) => artifact.sourcePath)
+      .filter(Boolean);
     const deleted = this.repository.deleteBatch(batchId, {
       allowLocked: options.force === true
     });
@@ -842,6 +870,7 @@ class ArchiveService {
         batch: deleted.batch
       };
     }
+    await this._releaseSourcePaths(sourcePaths);
     const physical = await this._removeReleasedBlobs(deleted.releasedBlobs);
     return {
       ok: physical.failures.length === 0,

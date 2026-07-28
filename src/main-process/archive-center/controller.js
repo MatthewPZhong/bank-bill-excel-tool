@@ -91,6 +91,10 @@ class ArchiveCenterController {
     return initialized;
   }
 
+  listUnresolvedSourcePaths() {
+    return this.service.listUnresolvedSourcePaths();
+  }
+
   _trackedFilePayload(file, sourceOperation) {
     const direction = file.role === 'output' ? 'output' : 'input';
     return {

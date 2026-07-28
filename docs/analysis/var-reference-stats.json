@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T04:31:21.790Z",
+    "scannedAt": "2026-07-28T05:21:02.182Z",
     "root": "src",
     "totalFiles": 216,
-    "totalTopLevelNames": 2474,
+    "totalTopLevelNames": 2488,
     "buckets": {
       "shared": 370,
-      "paired": 622,
-      "local": 1340,
-      "crossFile": 992
+      "paired": 624,
+      "local": 1352,
+      "crossFile": 994
     }
   },
   "A": {
@@ -246,7 +246,7 @@
           },
           {
             "file": "src/main-process/archive-center/archive-service.js",
-            "count": 26
+            "count": 27
           },
           {
             "file": "src/main-process/archive-center/controller.js",
@@ -318,7 +318,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/input-staging.js",
-            "count": 13
+            "count": 19
           },
           {
             "file": "src/main-process/position-reconciliation/readers.js",
@@ -409,7 +409,7 @@
             "count": 2
           }
         ],
-        "totalHits": 334,
+        "totalHits": 341,
         "fileSpan": 79
       },
       {
@@ -652,7 +652,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 2
+            "count": 3
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
@@ -707,7 +707,7 @@
             "count": 1
           }
         ],
-        "totalHits": 267,
+        "totalHits": 268,
         "fileSpan": 58
       },
       {
@@ -1285,7 +1285,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 37
+            "count": 38
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1324,7 +1324,7 @@
             "count": 62
           }
         ],
-        "totalHits": 331,
+        "totalHits": 332,
         "fileSpan": 21
       },
       {
@@ -3361,10 +3361,10 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 10
+            "count": 13
           }
         ],
-        "totalHits": 98,
+        "totalHits": 101,
         "fileSpan": 7
       },
       {
@@ -4773,10 +4773,10 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 9
+            "count": 15
           }
         ],
-        "totalHits": 59,
+        "totalHits": 65,
         "fileSpan": 5
       },
       {
@@ -5740,7 +5740,7 @@
           },
           {
             "file": "src/renderer-position-reconciliation.js",
-            "count": 38
+            "count": 40
           },
           {
             "file": "src/renderer-previews.js",
@@ -5751,7 +5751,7 @@
             "count": 65
           }
         ],
-        "totalHits": 263,
+        "totalHits": 265,
         "fileSpan": 4
       },
       {
@@ -6110,6 +6110,32 @@
         "fileSpan": 4
       },
       {
+        "name": "MATCH_TYPES",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/contracts.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 9
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 4
+      },
+      {
         "name": "importRepo",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -6194,32 +6220,6 @@
         "fileSpan": 4
       },
       {
-        "name": "MATCH_TYPES",
-        "defFiles": [
-          "src/main-process/position-reconciliation/constants.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/constants.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/position-reconciliation/contracts.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/position-reconciliation/service.js",
-            "count": 9
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 4
-      },
-      {
         "name": "MERCHANT_ID_SELF_INPUT_OPTION",
         "defFiles": [
           "src/main.js",
@@ -6284,7 +6284,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/excel-io.js",
-            "count": 8
+            "count": 9
           },
           {
             "file": "src/main-process/position-reconciliation/readers.js",
@@ -6295,7 +6295,7 @@
             "count": 2
           }
         ],
-        "totalHits": 15,
+        "totalHits": 16,
         "fileSpan": 4
       },
       {
@@ -8049,6 +8049,28 @@
         "fileSpan": 3
       },
       {
+        "name": "scopeKey",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/operation-tracker.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/position-reconciliation/service.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 18,
+        "fileSpan": 3
+      },
+      {
         "name": "CONCAT_FIELDS_MAPPING_FIELD",
         "defFiles": [
           "src/main.js",
@@ -8089,28 +8111,6 @@
           {
             "file": "src/renderer.js",
             "count": 6
-          }
-        ],
-        "totalHits": 16,
-        "fileSpan": 3
-      },
-      {
-        "name": "scopeKey",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/operation-tracker.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/position-reconciliation/service.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 5
           }
         ],
         "totalHits": 16,
@@ -12256,6 +12256,25 @@
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
             "count": 15
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 2
+      },
+      {
+        "name": "isPlainObject",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js",
+          "src/main-process/pre-fund-reconciliation/matching-engine.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 10
           }
         ],
         "totalHits": 16,
@@ -22409,6 +22428,24 @@
         "fileSpan": 2
       },
       {
+        "name": "POSITION_SIDE_DB_INITIALIZED_SETTING",
+        "defFiles": [
+          "src/main-process/position-reconciliation/constants.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/constants.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "prepareBillInsert",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js"
@@ -23532,6 +23569,20 @@
         "fileSpan": 1
       },
       {
+        "name": "throwInvalidSideData",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 21
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 1
+      },
+      {
         "name": "getDef",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -24092,20 +24143,6 @@
         "fileSpan": 1
       },
       {
-        "name": "isPlainObject",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/matching-engine.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 10
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 1
-      },
-      {
         "name": "N4_CONT_2_DIFF_ROWS_TABLE",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -24414,6 +24451,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertPayloadFields",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
         "name": "billDateMatches",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -24477,6 +24528,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
+        "name": "decodeScopeKey",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 8
           }
         ],
@@ -24813,6 +24878,20 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertStoredCounter",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 7
           }
         ],
@@ -25177,6 +25256,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertSameTextSet",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 6
           }
         ],
@@ -25912,6 +26005,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertStoredTextList",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "assertSyncIterable",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -26115,20 +26222,6 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "decodeScopeKey",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
             "count": 5
           }
         ],
@@ -27102,7 +27195,7 @@
         "fileSpan": 1
       },
       {
-        "name": "assertPayloadFields",
+        "name": "assertRunSnapshot",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
         ],
@@ -29426,6 +29519,20 @@
         "fileSpan": 1
       },
       {
+        "name": "applyTextColumnFormats",
+        "defFiles": [
+          "src/main-process/position-reconciliation/excel-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "applyTextFormats",
         "defFiles": [
           "src/main-process/position-reconciliation/excel-io.js"
@@ -29629,6 +29736,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertRevisionMap",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 3
           }
         ],
@@ -33710,6 +33831,20 @@
         "fileSpan": 1
       },
       {
+        "name": "POSITION_DB_SENTINEL_KEY",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "PositionReconciliationService",
         "defFiles": [
           "src/main-process/position-reconciliation/service.js"
@@ -34389,6 +34524,20 @@
         "refFiles": [
           {
             "file": "src/main.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "requiresTextFormat",
+        "defFiles": [
+          "src/main-process/position-reconciliation/excel-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
             "count": 3
           }
         ],
@@ -36300,7 +36449,49 @@
         "fileSpan": 1
       },
       {
+        "name": "assertRunEnvelope",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "assertRunLineage",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertRunScope",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertRunSummary",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
         ],
@@ -41662,6 +41853,20 @@
         "fileSpan": 1
       },
       {
+        "name": "TEXT_HEADER_PATTERN",
+        "defFiles": [
+          "src/main-process/position-reconciliation/excel-io.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "TEXT_HEADERS",
         "defFiles": [
           "src/main-process/position-reconciliation/excel-io.js"
@@ -42358,7 +42563,7 @@
         },
         {
           "file": "src/main-process/archive-center/archive-service.js",
-          "count": 26
+          "count": 27
         },
         {
           "file": "src/main-process/archive-center/controller.js",
@@ -42430,7 +42635,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/input-staging.js",
-          "count": 13
+          "count": 19
         },
         {
           "file": "src/main-process/position-reconciliation/readers.js",
@@ -42521,7 +42726,7 @@
           "count": 2
         }
       ],
-      "totalHits": 334,
+      "totalHits": 341,
       "fileSpan": 79
     },
     {
@@ -42764,7 +42969,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 2
+          "count": 3
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
@@ -42819,7 +43024,7 @@
           "count": 1
         }
       ],
-      "totalHits": 267,
+      "totalHits": 268,
       "fileSpan": 58
     },
     {
@@ -43397,7 +43602,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 37
+          "count": 38
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -43436,7 +43641,7 @@
           "count": 62
         }
       ],
-      "totalHits": 331,
+      "totalHits": 332,
       "fileSpan": 21
     },
     {
@@ -45473,10 +45678,10 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 10
+          "count": 13
         }
       ],
-      "totalHits": 98,
+      "totalHits": 101,
       "fileSpan": 7
     },
     {
@@ -46885,10 +47090,10 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 9
+          "count": 15
         }
       ],
-      "totalHits": 59,
+      "totalHits": 65,
       "fileSpan": 5
     },
     {
@@ -47852,7 +48057,7 @@
         },
         {
           "file": "src/renderer-position-reconciliation.js",
-          "count": 38
+          "count": 40
         },
         {
           "file": "src/renderer-previews.js",
@@ -47863,7 +48068,7 @@
           "count": 65
         }
       ],
-      "totalHits": 263,
+      "totalHits": 265,
       "fileSpan": 4
     },
     {
@@ -48222,6 +48427,32 @@
       "fileSpan": 4
     },
     {
+      "name": "MATCH_TYPES",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/contracts.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 9
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 20,
+      "fileSpan": 4
+    },
+    {
       "name": "importRepo",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -48306,32 +48537,6 @@
       "fileSpan": 4
     },
     {
-      "name": "MATCH_TYPES",
-      "defFiles": [
-        "src/main-process/position-reconciliation/constants.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/position-reconciliation/constants.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/position-reconciliation/contracts.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/position-reconciliation/service.js",
-          "count": 9
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 17,
-      "fileSpan": 4
-    },
-    {
       "name": "MERCHANT_ID_SELF_INPUT_OPTION",
       "defFiles": [
         "src/main.js",
@@ -48396,7 +48601,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/excel-io.js",
-          "count": 8
+          "count": 9
         },
         {
           "file": "src/main-process/position-reconciliation/readers.js",
@@ -48407,7 +48612,7 @@
           "count": 2
         }
       ],
-      "totalHits": 15,
+      "totalHits": 16,
       "fileSpan": 4
     },
     {
@@ -50161,6 +50366,28 @@
       "fileSpan": 3
     },
     {
+      "name": "scopeKey",
+      "defFiles": [
+        "src/main-process/position-reconciliation/store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/archive-center/operation-tracker.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/position-reconciliation/service.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 18,
+      "fileSpan": 3
+    },
+    {
       "name": "CONCAT_FIELDS_MAPPING_FIELD",
       "defFiles": [
         "src/main.js",
@@ -50201,28 +50428,6 @@
         {
           "file": "src/renderer.js",
           "count": 6
-        }
-      ],
-      "totalHits": 16,
-      "fileSpan": 3
-    },
-    {
-      "name": "scopeKey",
-      "defFiles": [
-        "src/main-process/position-reconciliation/store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/archive-center/operation-tracker.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/position-reconciliation/service.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 5
         }
       ],
       "totalHits": 16,
@@ -54366,6 +54571,25 @@
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
           "count": 15
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 2
+    },
+    {
+      "name": "isPlainObject",
+      "defFiles": [
+        "src/main-process/position-reconciliation/store.js",
+        "src/main-process/pre-fund-reconciliation/matching-engine.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 10
         }
       ],
       "totalHits": 16,
@@ -64508,6 +64732,24 @@
       "refFiles": [
         {
           "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "POSITION_SIDE_DB_INITIALIZED_SETTING",
+      "defFiles": [
+        "src/main-process/position-reconciliation/constants.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/constants.js",
           "count": 2
         },
         {

@@ -25,6 +25,7 @@ const {
 const { deriveLinkedRows } = require('./derivation');
 
 const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
+const POSITION_DB_SENTINEL_KEY = 'position_database_initialized_v1';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -214,7 +215,10 @@ function parseJson(value, label) {
     }
     return parsed;
   } catch (error) {
-    throw new Error(`平盘侧库${label || '数据'} JSON 损坏：${error.message}`);
+    throw new PositionReconciliationError(
+      'position-side-data-invalid',
+      `平盘侧库${label || '数据'} JSON 损坏：${error.message}`
+    );
   }
 }
 
@@ -257,6 +261,256 @@ function assertPayloadFields(payload, requiredFields, label) {
     );
   }
   return payload;
+}
+
+function isPlainObject(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function throwInvalidSideData(message, detailLines = []) {
+  throw new PositionReconciliationError('position-side-data-invalid', message, detailLines);
+}
+
+function assertStoredTextList(value, label, { allowEmpty = false } = {}) {
+  if (!Array.isArray(value) || (!allowEmpty && value.length === 0)) {
+    throwInvalidSideData(`平盘侧库${label}必须为${allowEmpty ? '' : '非空'}数组`);
+  }
+  const normalized = value.map((item) => (
+    typeof item === 'string' && item === text(item) ? item : ''
+  ));
+  if (normalized.some((item) => !item) || new Set(normalized).size !== normalized.length) {
+    throwInvalidSideData(`平盘侧库${label}包含空值、重复值或未规范化文本`);
+  }
+  return normalized;
+}
+
+function assertStoredCounter(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throwInvalidSideData(`平盘侧库${label}必须为非负整数`);
+  }
+  return value;
+}
+
+function assertRevisionMap(value, label, { allowedKeys = null, allowEmpty = true } = {}) {
+  if (!isPlainObject(value)) {
+    throwInvalidSideData(`平盘侧库${label}必须为对象`);
+  }
+  const entries = Object.entries(value);
+  if (!allowEmpty && entries.length === 0) {
+    throwInvalidSideData(`平盘侧库${label}不得为空`);
+  }
+  for (const [key, revision] of entries) {
+    if (!key || (allowedKeys && !allowedKeys.has(key))) {
+      throwInvalidSideData(`平盘侧库${label}包含未知键：${key || '(空)'}`);
+    }
+    assertStoredCounter(revision, `${label}.${key}`);
+  }
+  return value;
+}
+
+function assertRunScope(payload, label) {
+  if (!isPlainObject(payload)) {
+    throwInvalidSideData(`平盘侧库${label}必须为对象`);
+  }
+  assertPayloadFields(payload, ['channels', 'months', 'scopes'], label);
+  const channels = assertStoredTextList(payload.channels, `${label}.channels`);
+  const months = assertStoredTextList(payload.months, `${label}.months`);
+  const scopes = assertStoredTextList(payload.scopes, `${label}.scopes`);
+  if (months.some((month) => !/^\d{4}-\d{2}$/.test(month))) {
+    throwInvalidSideData(`平盘侧库${label}.months包含无效月份`);
+  }
+  const channelSet = new Set(channels);
+  const monthSet = new Set(months);
+  for (const key of scopes) {
+    const decoded = decodeScopeKey(key);
+    if (
+      !decoded.channel
+      || !decoded.monthKey
+      || !channelSet.has(decoded.channel)
+      || !monthSet.has(decoded.monthKey)
+      || scopeKey(decoded.channel, decoded.monthKey) !== key
+    ) {
+      throwInvalidSideData(`平盘侧库${label}.scopes包含无效范围：${key}`);
+    }
+  }
+  assertSameTextSet(
+    scopes.map((key) => decodeScopeKey(key).channel),
+    channels,
+    `${label}.channels`
+  );
+  assertSameTextSet(
+    scopes.map((key) => decodeScopeKey(key).monthKey),
+    months,
+    `${label}.months`
+  );
+  return payload;
+}
+
+function assertRunSnapshot(payload, label) {
+  if (!isPlainObject(payload)) {
+    throwInvalidSideData(`平盘侧库${label}必须为对象`);
+  }
+  assertPayloadFields(
+    payload,
+    ['rulesetVersion', 'bankScopes', 'bankGlobal', 'sources', 'mapping'],
+    label
+  );
+  assertStoredCounter(payload.rulesetVersion, `${label}.rulesetVersion`);
+  assertRevisionMap(payload.bankScopes, `${label}.bankScopes`, { allowEmpty: false });
+  assertStoredCounter(payload.bankGlobal, `${label}.bankGlobal`);
+  assertRevisionMap(payload.sources, `${label}.sources`, {
+    allowedKeys: new Set(Object.values(SOURCE_TYPES))
+  });
+  if (payload.mapping !== null) {
+    assertStoredCounter(payload.mapping, `${label}.mapping`);
+  }
+  return payload;
+}
+
+function assertRunSummary(payload, label) {
+  if (!isPlainObject(payload)) {
+    throwInvalidSideData(`平盘侧库${label}必须为对象`);
+  }
+  const counters = [
+    'inputRows',
+    'changedRows',
+    'differenceRows',
+    'preciseRows',
+    'fuzzyRows',
+    'notApplicableRows',
+    'manualModifiedRows'
+  ];
+  assertPayloadFields(payload, [...counters, 'sourceTypes', 'engine'], label);
+  counters.forEach((key) => assertStoredCounter(payload[key], `${label}.${key}`));
+  assertStoredTextList(payload.sourceTypes, `${label}.sourceTypes`, { allowEmpty: true });
+  if (
+    payload.sourceTypes.some((sourceType) => !Object.values(SOURCE_TYPES).includes(sourceType))
+  ) {
+    throwInvalidSideData(`平盘侧库${label}.sourceTypes包含未知来源`);
+  }
+  if (!isPlainObject(payload.engine)) {
+    throwInvalidSideData(`平盘侧库${label}.engine必须为对象`);
+  }
+  const engineCounters = [
+    'total',
+    'matched',
+    'changed',
+    'differences',
+    'notApplicable',
+    'confirmedConsumptionConflicts'
+  ];
+  assertPayloadFields(payload.engine, engineCounters, `${label}.engine`);
+  engineCounters.forEach(
+    (key) => assertStoredCounter(payload.engine[key], `${label}.engine.${key}`)
+  );
+  if (
+    payload.changedRows > payload.inputRows
+    || payload.differenceRows > payload.inputRows
+    || payload.preciseRows > payload.inputRows
+    || payload.fuzzyRows > payload.inputRows
+    || payload.notApplicableRows > payload.inputRows
+    || payload.manualModifiedRows > payload.inputRows
+  ) {
+    throwInvalidSideData(`平盘侧库${label}计数超过输入行数`);
+  }
+  return payload;
+}
+
+function assertSameTextSet(actualValues, expectedValues, label) {
+  const actual = new Set(actualValues);
+  const expected = new Set(expectedValues);
+  if (
+    actual.size !== expected.size
+    || [...actual].some((value) => !expected.has(value))
+  ) {
+    throwInvalidSideData(`平盘侧库${label}与运行数据不一致`);
+  }
+}
+
+function assertRunEnvelope(db, run, scope, snapshot, summary) {
+  const runLabel = `运行 ID=${run.id}`;
+  assertSameTextSet(
+    Object.keys(snapshot.bankScopes),
+    scope.scopes,
+    `${runLabel}快照银行范围`
+  );
+  assertSameTextSet(
+    Object.keys(snapshot.sources),
+    summary.sourceTypes,
+    `${runLabel}快照来源`
+  );
+  const usesTransfer = summary.sourceTypes.includes(SOURCE_TYPES.FUND_TRANSFER);
+  if ((usesTransfer && snapshot.mapping === null) || (!usesTransfer && snapshot.mapping !== null)) {
+    throwInvalidSideData(`平盘侧库${runLabel}映射快照与来源类型不一致`);
+  }
+
+  const aggregate = db.prepare(`
+    SELECT COUNT(*) AS inputRows,
+           SUM(CASE WHEN changed = 1 THEN 1 ELSE 0 END) AS changedRows,
+           SUM(CASE WHEN manual_modified = 1 THEN 1 ELSE 0 END) AS manualModifiedRows,
+           SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS preciseRows,
+           SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS fuzzyRows,
+           SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS notApplicableRows,
+           SUM(CASE WHEN outcome = 'matched' THEN 1 ELSE 0 END) AS matchedRows
+    FROM position_run_rows
+    WHERE run_id = ?
+  `).get(
+    MATCH_TYPES.PRECISE,
+    MATCH_TYPES.FUZZY,
+    MATCH_TYPES.NOT_APPLICABLE,
+    run.id
+  );
+  const difference = db.prepare(
+    'SELECT COUNT(*) AS count FROM position_differences WHERE run_id = ?'
+  ).get(run.id);
+  const actual = {
+    inputRows: Number(aggregate.inputRows) || 0,
+    changedRows: Number(aggregate.changedRows) || 0,
+    manualModifiedRows: Number(aggregate.manualModifiedRows) || 0,
+    preciseRows: Number(aggregate.preciseRows) || 0,
+    fuzzyRows: Number(aggregate.fuzzyRows) || 0,
+    notApplicableRows: Number(aggregate.notApplicableRows) || 0,
+    matchedRows: Number(aggregate.matchedRows) || 0,
+    differenceRows: Number(difference.count) || 0
+  };
+  if (actual.inputRows === 0) {
+    throwInvalidSideData(`平盘侧库${runLabel}没有运行明细`);
+  }
+  for (const key of [
+    'inputRows',
+    'changedRows',
+    'differenceRows',
+    'preciseRows',
+    'fuzzyRows',
+    'notApplicableRows'
+  ]) {
+    if (summary[key] !== actual[key]) {
+      throwInvalidSideData(`平盘侧库${runLabel}汇总字段 ${key} 与运行明细不一致`);
+    }
+  }
+  if (summary.manualModifiedRows !== actual.manualModifiedRows) {
+    throwInvalidSideData(`平盘侧库${runLabel}汇总字段 manualModifiedRows 与运行明细不一致`);
+  }
+  for (const [key, expected] of [
+    ['total', actual.inputRows],
+    ['matched', actual.matchedRows],
+    ['changed', actual.changedRows],
+    ['differences', actual.differenceRows],
+    ['notApplicable', actual.notApplicableRows]
+  ]) {
+    if (summary.engine[key] !== expected) {
+      throwInvalidSideData(`平盘侧库${runLabel}引擎汇总字段 ${key} 与运行明细不一致`);
+    }
+  }
+
+  const actualScopes = db.prepare(`
+    SELECT DISTINCT channel, month_key AS monthKey
+    FROM position_run_rows
+    WHERE run_id = ?
+  `).all(run.id).map((row) => scopeKey(row.channel, row.monthKey));
+  assertSameTextSet(actualScopes, scope.scopes, `${runLabel}范围`);
 }
 
 function assertBankPayload(payload, row, label) {
@@ -331,16 +585,70 @@ function assertRunLineage(lineage, row) {
 }
 
 class PositionReconciliationStore {
-  constructor(userDataDir) {
+  constructor(userDataDir, { requireExisting = false } = {}) {
     this.userDataDir = path.resolve(userDataDir);
     this.dbPath = path.join(this.userDataDir, POSITION_DB_RELATIVE_PATH);
+    this.db = null;
+    if (requireExisting && !fs.existsSync(this.dbPath)) {
+      throw new PositionReconciliationError(
+        'position-side-db-missing',
+        '平盘对账侧库缺失，已停止创建空库以避免历史消费关系丢失',
+        [
+          `缺失文件：${this.dbPath}`,
+          '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+        ]
+      );
+    }
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-    this.db = new DatabaseSync(this.dbPath);
-    this.db.exec('PRAGMA foreign_keys = ON;');
-    this.db.exec('PRAGMA journal_mode = WAL;');
-    this.db.exec('PRAGMA synchronous = NORMAL;');
-    this.db.exec('PRAGMA busy_timeout = 30000;');
-    this.db.exec(SCHEMA);
+    try {
+      this.db = new DatabaseSync(this.dbPath);
+      if (requireExisting) {
+        const hasMetaTable = this.db.prepare(`
+          SELECT 1 AS present
+          FROM sqlite_master
+          WHERE type = 'table' AND name = 'position_meta'
+        `).get();
+        const sentinel = hasMetaTable
+          ? this.db.prepare('SELECT value FROM position_meta WHERE key = ?')
+            .get(POSITION_DB_SENTINEL_KEY)
+          : null;
+        if (!sentinel || sentinel.value !== '1') {
+          throw new PositionReconciliationError(
+            'position-side-db-missing',
+            '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
+            [
+              `异常文件：${this.dbPath}`,
+              '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+            ]
+          );
+        }
+      }
+      this.db.exec('PRAGMA foreign_keys = ON;');
+      this.db.exec('PRAGMA journal_mode = WAL;');
+      this.db.exec('PRAGMA synchronous = NORMAL;');
+      this.db.exec('PRAGMA busy_timeout = 30000;');
+      this.db.exec(SCHEMA);
+      this.db.prepare(`
+        INSERT INTO position_meta(key, value)
+        VALUES (?, '1')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(POSITION_DB_SENTINEL_KEY);
+    } catch (error) {
+      if (this.db) {
+        try {
+          this.db.close();
+        } catch (_closeError) {
+          // 保留原始打开或校验错误。
+        }
+        this.db = null;
+      }
+      if (error instanceof PositionReconciliationError) throw error;
+      throw new PositionReconciliationError(
+        'position-side-data-invalid',
+        '平盘对账侧库无法打开或校验失败',
+        [error && error.message ? error.message : String(error)]
+      );
+    }
   }
 
   close() {
@@ -378,26 +686,19 @@ class PositionReconciliationStore {
   }
 
   snapshotIsCurrent(snapshot) {
-    if (!snapshot || typeof snapshot !== 'object') return false;
+    assertRunSnapshot(snapshot, '运行快照');
     if (Number(snapshot.rulesetVersion) !== POSITION_RULESET_VERSION) return false;
-    for (const [key, revision] of Object.entries(snapshot.bankScopes || {})) {
+    for (const [key, revision] of Object.entries(snapshot.bankScopes)) {
       if (this.getRevision('bank', key) !== Number(revision)) return false;
     }
-    if (
-      snapshot.bankGlobal !== null
-      && snapshot.bankGlobal !== undefined
-      && this.getRevision('bank-global', 'all') !== Number(snapshot.bankGlobal)
-    ) {
+    if (this.getRevision('bank-global', 'all') !== Number(snapshot.bankGlobal)) {
       return false;
     }
-    for (const [type, revision] of Object.entries(snapshot.sources || {})) {
+    for (const [type, revision] of Object.entries(snapshot.sources)) {
       if (this.getRevision('source', type) !== Number(revision)) return false;
     }
-    if (
-      snapshot.mapping !== null
-      && snapshot.mapping !== undefined
-      && this.getRevision('mapping', 'global') !== Number(snapshot.mapping)
-    ) {
+    if (snapshot.mapping !== null
+        && this.getRevision('mapping', 'global') !== Number(snapshot.mapping)) {
       return false;
     }
     return true;
@@ -903,12 +1204,25 @@ class PositionReconciliationStore {
   getRun(runId) {
     const run = this.db.prepare('SELECT * FROM position_runs WHERE id = ?').get(runId);
     if (!run) return null;
+    const scope = assertRunScope(
+      parseJson(run.scope_json, `运行范围 ID=${run.id}`),
+      `运行范围 ID=${run.id}`
+    );
+    const snapshot = assertRunSnapshot(
+      parseJson(run.snapshot_json, `运行快照 ID=${run.id}`),
+      `运行快照 ID=${run.id}`
+    );
+    const summary = assertRunSummary(
+      parseJson(run.summary_json, `运行汇总 ID=${run.id}`),
+      `运行汇总 ID=${run.id}`
+    );
+    assertRunEnvelope(this.db, run, scope, snapshot, summary);
     return {
       ...run,
       id: Number(run.id),
-      scope: parseJson(run.scope_json, `运行范围 ID=${run.id}`),
-      snapshot: parseJson(run.snapshot_json, `运行快照 ID=${run.id}`),
-      summary: parseJson(run.summary_json, `运行汇总 ID=${run.id}`)
+      scope,
+      snapshot,
+      summary
     };
   }
 
@@ -1049,7 +1363,8 @@ class PositionReconciliationStore {
                SUM(CASE WHEN manual_modified = 1 THEN 1 ELSE 0 END) AS manualModifiedRows,
                SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS preciseRows,
                SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS fuzzyRows,
-               SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS notApplicableRows
+               SUM(CASE WHEN hit_type = ? THEN 1 ELSE 0 END) AS notApplicableRows,
+               SUM(CASE WHEN outcome = 'matched' THEN 1 ELSE 0 END) AS matchedRows
         FROM position_run_rows
         WHERE run_id = ?
       `).get(
@@ -1069,7 +1384,15 @@ class PositionReconciliationStore {
         preciseRows: Number(aggregate.preciseRows) || 0,
         fuzzyRows: Number(aggregate.fuzzyRows) || 0,
         notApplicableRows: Number(aggregate.notApplicableRows) || 0,
-        manualModifiedRows: Number(aggregate.manualModifiedRows) || 0
+        manualModifiedRows: Number(aggregate.manualModifiedRows) || 0,
+        engine: {
+          ...run.summary.engine,
+          total: Number(aggregate.inputRows) || 0,
+          matched: Number(aggregate.matchedRows) || 0,
+          changed: Number(aggregate.changedRows) || 0,
+          differences: Number(difference.count) || 0,
+          notApplicable: Number(aggregate.notApplicableRows) || 0
+        }
       };
       this.db.prepare(`
         UPDATE position_runs SET summary_json = ?, reimported_at = CURRENT_TIMESTAMP,
@@ -1195,11 +1518,18 @@ class PositionReconciliationStore {
       ORDER BY createdAt DESC, d.channel COLLATE NOCASE, region COLLATE NOCASE, d.month_key
     `).all();
     return rows
+      .map((row) => ({
+        ...row,
+        snapshot: assertRunSnapshot(
+          parseJson(row.snapshotJson, `差异运行快照 ID=${row.runId}`),
+          `差异运行快照 ID=${row.runId}`
+        )
+      }))
       .filter((row) => (
         row.runStatus === 'confirmed'
-        || this.snapshotIsCurrent(parseJson(row.snapshotJson, `差异运行快照 ID=${row.runId}`))
+        || this.snapshotIsCurrent(row.snapshot)
       ))
-      .map(({ snapshotJson: _snapshotJson, ...row }) => ({
+      .map(({ snapshotJson: _snapshotJson, snapshot: _snapshot, ...row }) => ({
         ...row,
         bankChannel: `${text(row.channel)}-${text(row.region)}`,
         differenceCount: Number(row.differenceCount)
@@ -1227,8 +1557,8 @@ class PositionReconciliationStore {
   }
 }
 
-function createPositionReconciliationStore(userDataDir) {
-  return new PositionReconciliationStore(userDataDir);
+function createPositionReconciliationStore(userDataDir, options) {
+  return new PositionReconciliationStore(userDataDir, options);
 }
 
 module.exports = {

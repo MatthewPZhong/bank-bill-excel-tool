@@ -28,6 +28,14 @@
     return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}`;
   }
 
+  function failureDetailsHtml(result, fallbackMessage) {
+    const message = escapeHtml(result && result.message ? result.message : fallbackMessage);
+    const details = Array.isArray(result && result.detailLines)
+      ? result.detailLines.filter(Boolean).map(escapeHtml)
+      : [];
+    return details.length > 0 ? `${message}<br>${details.join('<br>')}` : message;
+  }
+
   function createPositionReconciliationUI({
     api,
     openModal,
@@ -318,7 +326,7 @@
       const result = await withInflight('正在读取平盘银行对账单…', () => api.prepareBankImport());
       if (!result || result.status === 'cancelled') return;
       if (result.status !== 'needs-confirmation') {
-        showAlert(result.message || '平盘银行对账单导入失败');
+        showAlert(failureDetailsHtml(result, '平盘银行对账单导入失败'), { html: true });
         return;
       }
       const existing = Array.isArray(result.existing) ? result.existing : [];
@@ -335,7 +343,7 @@
       }
       const applied = await withInflight('正在写入平盘银行对账单…', () => api.applyBankImport(result.token));
       if (!applied || applied.status !== 'ok') {
-        showAlert(applied && applied.message ? applied.message : '平盘银行对账单写入失败');
+        showAlert(failureDetailsHtml(applied, '平盘银行对账单写入失败'), { html: true });
         return;
       }
       setStatus(applied.message, 'success');

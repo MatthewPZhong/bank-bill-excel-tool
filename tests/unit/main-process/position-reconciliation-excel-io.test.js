@@ -18,6 +18,7 @@ const {
 const {
   readResultWorkbook,
   writeLinkedWorkbook,
+  writeRawWorkbook,
   writeResultWorkbook
 } = require('../../../src/main-process/position-reconciliation/excel-io');
 
@@ -105,6 +106,19 @@ test('四个订单原始表模板使用规范文件名、sheet 和严格表头',
   }
 });
 
+test('49列结果模板的标识符列在零数据时也固定为文本格式', async () => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(RESULT_TEMPLATE);
+  const sheet = workbook.getWorksheet(BANK_SHEET_NAME);
+  assert.ok(sheet);
+  assert.equal(sheet.rowCount, 1);
+  POSITION_BANK_HEADERS.forEach((header, index) => {
+    if (requiresTextFormat(header)) {
+      assert.equal(sheet.getColumn(index + 1).numFmt, '@', `${header} 必须为文本列`);
+    }
+  });
+});
+
 test('49列结果只标黄实际改变的 FundType，并保持标识符文本格式', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-excel-'));
   const outputPath = path.join(root, 'result.xlsx');
@@ -186,6 +200,54 @@ test('链接表零数据仍导出合法表头，49列表头被篡改时回导拒
     () => readResultWorkbook(badResultPath),
     (error) => error && error.code === 'position-result-headers-invalid'
   );
+});
+
+test('运行时导出的零数据链接表、原始表和结果表仍保留文本列格式', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-excel-zero-format-'));
+  const linkedPath = path.join(root, 'linked.xlsx');
+  const rawPath = path.join(root, 'raw.xlsx');
+  const resultPath = path.join(root, 'result.xlsx');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  await writeLinkedWorkbook({
+    outputPath: linkedPath,
+    sourceType: SOURCE_TYPES.GATEWAY_INBOUND,
+    rows: []
+  });
+  await writeRawWorkbook({
+    outputPath: rawPath,
+    sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
+    rows: []
+  });
+  await writeResultWorkbook({
+    templatePath: RESULT_TEMPLATE,
+    outputPath: resultPath,
+    rows: []
+  });
+
+  for (const [filePath, sheetName, headers] of [
+    [
+      linkedPath,
+      SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].linkedName,
+      LINK_HEADERS[SOURCE_TYPES.GATEWAY_INBOUND]
+    ],
+    [
+      rawPath,
+      SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].sourceName,
+      SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].headers
+    ],
+    [resultPath, BANK_SHEET_NAME, POSITION_BANK_HEADERS]
+  ]) {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    const sheet = workbook.getWorksheet(sheetName);
+    assert.equal(sheet.rowCount, 1, `${sheetName} 应只有表头`);
+    headers.forEach((header, index) => {
+      if (requiresTextFormat(header)) {
+        assert.equal(sheet.getColumn(index + 1).numFmt, '@', `${sheetName}/${header} 必须为文本列`);
+      }
+    });
+  }
 });
 
 test('目标文件已发布后，旧备份清理失败不得把成功导出误报为失败', async (t) => {

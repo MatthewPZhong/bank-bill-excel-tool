@@ -472,6 +472,15 @@ class ArchiveRepository {
     `).all(Number(batchId)).map(mapArtifact);
   }
 
+  listUnresolvedArtifactSourcePaths() {
+    return this.db.prepare(`
+      SELECT source_path
+      FROM archive_artifacts
+      WHERE status IN ('pending', 'failed') AND source_path <> ''
+      ORDER BY id ASC
+    `).all().map((row) => String(row.source_path));
+  }
+
   getArtifact(artifactId) {
     return mapArtifact(this.db.prepare(`
       ${ARTIFACT_SELECT}

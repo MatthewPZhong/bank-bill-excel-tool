@@ -12,7 +12,12 @@ const {
   assertEngineResultSet
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
+  STAGING_RELATIVE_PATH,
+  pruneStagingRoot
+} = require('../../../src/main-process/position-reconciliation/input-staging');
+const {
   BANK_SHEET_NAME,
+  POSITION_DB_RELATIVE_PATH,
   POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS,
   SOURCE_TYPES,
@@ -1047,6 +1052,33 @@ test('银行导入确认使用不可变暂存副本，原路径被覆盖不改�
   assert.equal(values[1][BANK_STATEMENT_FIELDS.indexOf('BizId')], 'STAGED-A');
 });
 
+test('启动暂存清理跳过仍被存档失败批次引用的文件', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-staging-prune-'));
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const root = path.join(userDataDir, STAGING_RELATIVE_PATH);
+  const protectedRoot = path.join(root, 'protected-batch');
+  const staleRoot = path.join(root, 'stale-batch');
+  const protectedFile = path.join(protectedRoot, '1', 'protected.xlsx');
+  const staleFile = path.join(staleRoot, '1', 'stale.xlsx');
+  fs.mkdirSync(path.dirname(protectedFile), { recursive: true });
+  fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+  fs.writeFileSync(protectedFile, 'protected');
+  fs.writeFileSync(staleFile, 'stale');
+  const oldDate = new Date('2026-07-01T00:00:00.000Z');
+  fs.utimesSync(protectedRoot, oldDate, oldDate);
+  fs.utimesSync(staleRoot, oldDate, oldDate);
+
+  const removed = pruneStagingRoot(userDataDir, {
+    now: new Date('2026-07-20T00:00:00.000Z').getTime(),
+    maxAgeMs: 24 * 60 * 60 * 1000,
+    protectedPaths: [protectedFile]
+  });
+
+  assert.equal(removed, 1);
+  assert.equal(fs.existsSync(protectedFile), true);
+  assert.equal(fs.existsSync(staleRoot), false);
+});
+
 test('规则版本变化后持久草稿自动失效并禁止确认', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-ruleset-stale-'));
   const bankPath = path.join(userDataDir, 'bank.xlsx');
@@ -1081,4 +1113,87 @@ test('规则版本变化后持久草稿自动失效并禁止确认', (t) => {
     () => service.confirmRun(run.runId),
     (error) => error && error.code === 'position-run-stale'
   );
+});
+
+test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，不得静默重建', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-guard-'));
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  const initialized = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  initialized.close();
+  assert.equal(fs.existsSync(dbPath), true);
+
+  fs.rmSync(dbPath);
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true
+    }),
+    (error) => error && error.code === 'position-side-db-missing'
+  );
+
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, '');
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true
+    }),
+    (error) => error && error.code === 'position-side-db-missing'
+  );
+});
+
+test('运行范围、快照和汇总 JSON 语法合法但结构不完整时必须 fail-closed', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-run-envelope-'));
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow()]);
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  const stored = service.store.db.prepare(
+    'SELECT scope_json, snapshot_json, summary_json FROM position_runs WHERE id = ?'
+  ).get(run.runId);
+  const scopeWithUnusedChannel = JSON.parse(stored.scope_json);
+  scopeWithUnusedChannel.channels.push('UNUSED');
+  const summaryWithoutManualCount = JSON.parse(stored.summary_json);
+  delete summaryWithoutManualCount.manualModifiedRows;
+  for (const [column, invalidValue] of [
+    ['scope_json', JSON.stringify(scopeWithUnusedChannel)],
+    ['snapshot_json', '{"rulesetVersion":1}'],
+    ['summary_json', JSON.stringify(summaryWithoutManualCount)]
+  ]) {
+    service.store.db.prepare(
+      `UPDATE position_runs SET ${column} = ? WHERE id = ?`
+    ).run(invalidValue, run.runId);
+    assert.throws(
+      () => service.store.getRun(run.runId),
+      (error) => error && error.code === 'position-side-data-invalid',
+      `${column} 缺字段时必须阻断`
+    );
+    service.store.db.prepare(
+      `UPDATE position_runs SET ${column} = ? WHERE id = ?`
+    ).run(stored[column], run.runId);
+  }
 });
