@@ -5,10 +5,15 @@ const path = require('node:path');
 const ExcelJS = require('exceljs');
 
 const {
+  BANK_SHEET_NAME,
   LINK_HEADERS,
+  POSITION_BANK_HEADERS,
   SOURCE_DEFINITIONS,
   SOURCE_TYPES
 } = require('../src/main-process/position-reconciliation/constants');
+const {
+  requiresTextFormat
+} = require('../src/main-process/position-reconciliation/excel-io');
 
 const ROOT = path.resolve(__dirname, '..');
 const ASSETS = path.join(ROOT, 'assets');
@@ -28,12 +33,6 @@ const SOURCE_TEMPLATE_OUTPUTS = Object.freeze([
 
 function columnWidth(header) {
   return Math.min(36, Math.max(14, Array.from(String(header)).length * 2 + 4));
-}
-
-function requiresTextFormat(header) {
-  return /id|no|code|账号|账户|卡号|单号|流水号|对账|批次号|清算号码|swift/i.test(
-    String(header || '')
-  );
 }
 
 async function buildTemplate({ outputName, sheetName, headers }) {
@@ -79,6 +78,18 @@ async function buildTemplate({ outputName, sheetName, headers }) {
   await workbook.xlsx.writeFile(path.join(ASSETS, outputName));
 }
 
+async function updateExistingTemplateTextFormats({ outputName, sheetName, headers }) {
+  const outputPath = path.join(ASSETS, outputName);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(outputPath);
+  const sheet = workbook.getWorksheet(sheetName);
+  if (!sheet) throw new Error(`${outputName} 缺少 sheet「${sheetName}」`);
+  headers.forEach((header, index) => {
+    if (requiresTextFormat(header)) sheet.getColumn(index + 1).numFmt = '@';
+  });
+  await workbook.xlsx.writeFile(outputPath);
+}
+
 async function main() {
   fs.mkdirSync(ASSETS, { recursive: true });
   for (const [sourceType, outputName] of LINK_TEMPLATE_OUTPUTS) {
@@ -95,6 +106,11 @@ async function main() {
       headers: SOURCE_DEFINITIONS[sourceType].headers
     });
   }
+  await updateExistingTemplateTextFormats({
+    outputName: '平盘银行对账单.xlsx',
+    sheetName: BANK_SHEET_NAME,
+    headers: POSITION_BANK_HEADERS
+  });
 }
 
 main().catch((error) => {

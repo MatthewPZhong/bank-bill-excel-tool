@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
@@ -25,7 +26,9 @@ const {
 const { deriveLinkedRows } = require('./derivation');
 
 const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
-const POSITION_DB_SENTINEL_KEY = 'position_database_initialized_v1';
+const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
+const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
+const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -234,6 +237,100 @@ function serializeJson(value) {
     }
     return item;
   });
+}
+
+function checkpointValue(value, label) {
+  const normalized = text(value);
+  if (!normalized) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      `平盘对账侧库 ${label} 缺失，无法确认主库与侧库属于同一数据代次`
+    );
+  }
+  return normalized;
+}
+
+function checkpointGeneration(value) {
+  const normalized = text(value);
+  if (!/^(0|[1-9]\d*)$/.test(normalized)) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      '平盘对账侧库 generation 非法，无法确认主库与侧库属于同一数据代次'
+    );
+  }
+  const generation = Number(normalized);
+  if (!Number.isSafeInteger(generation)) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      '平盘对账侧库 generation 超出安全范围'
+    );
+  }
+  return generation;
+}
+
+function normalizeCheckpoint(value, label = 'checkpoint') {
+  if (value === null || value === undefined || value === '') return null;
+  let payload = value;
+  if (typeof value === 'string') {
+    try {
+      payload = JSON.parse(value);
+    } catch (_error) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        `主库中的平盘侧库 ${label} 损坏，请恢复完整软件数据目录`
+      );
+    }
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      `主库中的平盘侧库 ${label} 格式非法，请恢复完整软件数据目录`
+    );
+  }
+  return {
+    identity: checkpointValue(payload.identity, 'identity'),
+    generation: checkpointGeneration(payload.generation),
+    token: checkpointValue(payload.token, 'checkpoint token')
+  };
+}
+
+function readDatabaseCheckpoint(db) {
+  const rows = db.prepare(`
+    SELECT key, value
+    FROM position_meta
+    WHERE key IN (?, ?, ?)
+  `).all(
+    POSITION_DB_IDENTITY_KEY,
+    POSITION_DB_GENERATION_KEY,
+    POSITION_DB_CHECKPOINT_TOKEN_KEY
+  );
+  const values = new Map(rows.map((row) => [row.key, row.value]));
+  if (values.size !== 3) return null;
+  return normalizeCheckpoint({
+    identity: values.get(POSITION_DB_IDENTITY_KEY),
+    generation: values.get(POSITION_DB_GENERATION_KEY),
+    token: values.get(POSITION_DB_CHECKPOINT_TOKEN_KEY)
+  }, 'checkpoint');
+}
+
+function assertCheckpointCompatible(actual, expected) {
+  if (!expected) return;
+  if (actual.identity !== expected.identity
+      || actual.generation < expected.generation
+      || (
+        actual.generation === expected.generation
+        && actual.token !== expected.token
+      )) {
+    throw new PositionReconciliationError(
+      'position-side-db-mismatch',
+      '平盘对账主库与侧库不属于同一数据代次，已停止读取以避免历史消费关系回退',
+      [
+        `主库 checkpoint：generation=${expected.generation}`,
+        `侧库 checkpoint：generation=${actual.generation}`,
+        '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+      ]
+    );
+  }
 }
 
 function placeholders(values) {
@@ -585,11 +682,16 @@ function assertRunLineage(lineage, row) {
 }
 
 class PositionReconciliationStore {
-  constructor(userDataDir, { requireExisting = false } = {}) {
+  constructor(userDataDir, {
+    requireExisting = false,
+    expectedCheckpoint = null
+  } = {}) {
     this.userDataDir = path.resolve(userDataDir);
     this.dbPath = path.join(this.userDataDir, POSITION_DB_RELATIVE_PATH);
     this.db = null;
-    if (requireExisting && !fs.existsSync(this.dbPath)) {
+    const expected = normalizeCheckpoint(expectedCheckpoint, 'checkpoint');
+    const mustExist = requireExisting || expected !== null;
+    if (mustExist && !fs.existsSync(this.dbPath)) {
       throw new PositionReconciliationError(
         'position-side-db-missing',
         '平盘对账侧库缺失，已停止创建空库以避免历史消费关系丢失',
@@ -602,17 +704,14 @@ class PositionReconciliationStore {
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
     try {
       this.db = new DatabaseSync(this.dbPath);
-      if (requireExisting) {
+      if (mustExist) {
         const hasMetaTable = this.db.prepare(`
           SELECT 1 AS present
           FROM sqlite_master
           WHERE type = 'table' AND name = 'position_meta'
         `).get();
-        const sentinel = hasMetaTable
-          ? this.db.prepare('SELECT value FROM position_meta WHERE key = ?')
-            .get(POSITION_DB_SENTINEL_KEY)
-          : null;
-        if (!sentinel || sentinel.value !== '1') {
+        const checkpoint = hasMetaTable ? readDatabaseCheckpoint(this.db) : null;
+        if (!checkpoint) {
           throw new PositionReconciliationError(
             'position-side-db-missing',
             '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
@@ -622,6 +721,7 @@ class PositionReconciliationStore {
             ]
           );
         }
+        assertCheckpointCompatible(checkpoint, expected);
       }
       this.db.exec('PRAGMA foreign_keys = ON;');
       this.db.exec('PRAGMA journal_mode = WAL;');
@@ -629,10 +729,25 @@ class PositionReconciliationStore {
       this.db.exec('PRAGMA busy_timeout = 30000;');
       this.db.exec(SCHEMA);
       this.db.prepare(`
-        INSERT INTO position_meta(key, value)
-        VALUES (?, '1')
-        ON CONFLICT(key) DO UPDATE SET value = excluded.value
-      `).run(POSITION_DB_SENTINEL_KEY);
+        INSERT INTO position_meta(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO NOTHING
+      `).run(POSITION_DB_IDENTITY_KEY, crypto.randomUUID());
+      this.db.prepare(`
+        INSERT INTO position_meta(key, value) VALUES (?, '0')
+        ON CONFLICT(key) DO NOTHING
+      `).run(POSITION_DB_GENERATION_KEY);
+      this.db.prepare(`
+        INSERT INTO position_meta(key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO NOTHING
+      `).run(POSITION_DB_CHECKPOINT_TOKEN_KEY, crypto.randomUUID());
+      const currentCheckpoint = readDatabaseCheckpoint(this.db);
+      if (!currentCheckpoint) {
+        throw new PositionReconciliationError(
+          'position-side-db-missing',
+          '平盘对账侧库 checkpoint 初始化失败'
+        );
+      }
+      assertCheckpointCompatible(currentCheckpoint, expected);
     } catch (error) {
       if (this.db) {
         try {
@@ -655,6 +770,38 @@ class PositionReconciliationStore {
     if (!this.db) return;
     this.db.close();
     this.db = null;
+  }
+
+  persistenceCheckpoint() {
+    const checkpoint = readDatabaseCheckpoint(this.db);
+    if (!checkpoint) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '平盘对账侧库 checkpoint 缺失'
+      );
+    }
+    return checkpoint;
+  }
+
+  _mutation(operation) {
+    return transaction(this.db, () => {
+      const result = operation();
+      const generationUpdate = this.db.prepare(`
+        UPDATE position_meta
+        SET value = CAST(value AS INTEGER) + 1
+        WHERE key = ?
+      `).run(POSITION_DB_GENERATION_KEY);
+      const tokenUpdate = this.db.prepare(`
+        UPDATE position_meta SET value = ? WHERE key = ?
+      `).run(crypto.randomUUID(), POSITION_DB_CHECKPOINT_TOKEN_KEY);
+      if (Number(generationUpdate.changes) !== 1 || Number(tokenUpdate.changes) !== 1) {
+        throw new PositionReconciliationError(
+          'position-side-db-mismatch',
+          '平盘对账侧库 checkpoint 更新失败'
+        );
+      }
+      return result;
+    });
   }
 
   getRevision(kind, key) {
@@ -707,7 +854,7 @@ class PositionReconciliationStore {
   replaceBankScopes(parsed) {
     const records = Array.isArray(parsed.records) ? parsed.records : [];
     const scopes = Array.isArray(parsed.scopes) ? parsed.scopes : [];
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       const existingByBizId = new Map(this.db.prepare(`
         SELECT biz_id AS bizId, channel, month_key AS monthKey
         FROM position_bank_rows
@@ -845,7 +992,7 @@ class PositionReconciliationStore {
     const rows = this.getBankRows({ channels, months });
     const keys = [...new Set(rows.map((row) => scopeKey(row.channel, row.month_key)))];
     if (rows.length === 0) return { deletedCount: 0, scopes: [] };
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       const ids = rows.map((row) => row.id);
       this.db.prepare(
         `DELETE FROM position_bank_rows WHERE id IN (${placeholders(ids)})`
@@ -879,7 +1026,7 @@ class PositionReconciliationStore {
       }
       seen.add(mapping.midAccountId);
     }
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       this.db.exec('DELETE FROM position_account_mappings');
       const insert = this.db.prepare(
         'INSERT INTO position_account_mappings(mid_account_id, clearing_account_id) VALUES (?, ?)'
@@ -938,7 +1085,7 @@ class PositionReconciliationStore {
 
   applySourceImport(parsed) {
     const sourceType = parsed.sourceType;
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         this.db.prepare('DELETE FROM position_source_rows WHERE source_type = ?').run(sourceType);
       }
@@ -1121,7 +1268,7 @@ class PositionReconciliationStore {
     ) {
       throw new Error('请至少选择一个月份');
     }
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       let result;
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         if (!wholeTable) throw new Error('清结算银行账户表只能整表删除');
@@ -1139,7 +1286,7 @@ class PositionReconciliationStore {
   }
 
   createRun({ runUuid, scope, snapshot, summary, rows, supersedeRunId = null }) {
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       if (supersedeRunId !== null && supersedeRunId !== undefined) {
         const superseded = this.db.prepare(`
           UPDATE position_runs
@@ -1300,16 +1447,18 @@ class PositionReconciliationStore {
   }
 
   markRunExported(runId) {
-    this.db.prepare(`
-      UPDATE position_runs SET exported_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(runId);
+    return this._mutation(() => {
+      this.db.prepare(`
+        UPDATE position_runs SET exported_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(runId);
+    });
   }
 
   replaceRunRowsFromReimport(runId, updates) {
     const run = this.getRun(runId);
     if (!run) throw new Error('运行草稿不存在');
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       const update = this.db.prepare(`
         UPDATE position_run_rows SET
           result_fund_type = ?,
@@ -1406,7 +1555,7 @@ class PositionReconciliationStore {
     const run = this.getRun(runId);
     if (!run) throw new Error('运行草稿不存在');
     const rows = this.listRunRows(runId);
-    return transaction(this.db, () => {
+    return this._mutation(() => {
       const insertConsumption = this.db.prepare(`
         INSERT INTO position_consumed_sources(
           run_id, source_type, business_key, leg_index, bank_biz_id

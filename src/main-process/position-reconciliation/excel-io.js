@@ -248,5 +248,6 @@ module.exports = {
   writeLinkedWorkbook,
   writeRawWorkbook,
   readResultWorkbook,
-  atomicWorkbookWrite
+  atomicWorkbookWrite,
+  requiresTextFormat
 };

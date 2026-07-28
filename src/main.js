@@ -67,7 +67,10 @@ const {
   createPositionReconciliationService
 } = require('./main-process/position-reconciliation/service');
 const {
-  POSITION_SIDE_DB_INITIALIZED_SETTING
+  filterStagingPathsWithoutProtectedSources
+} = require('./main-process/position-reconciliation/input-staging');
+const {
+  POSITION_SIDE_DB_CHECKPOINT_SETTING
 } = require('./main-process/position-reconciliation/constants');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
@@ -14121,13 +14124,14 @@ function getPositionReconciliationService() {
     throw new Error('数据库尚未初始化，请稍后重试');
   }
   if (!positionReconciliationService) {
-    const sideDbInitialized = (
-      database.getSetting(POSITION_SIDE_DB_INITIALIZED_SETTING) === '1'
+    const expectedSideDbCheckpoint = database.getSetting(
+      POSITION_SIDE_DB_CHECKPOINT_SETTING
     );
     const service = createPositionReconciliationService({
       userDataDir: path.dirname(database.dbPath),
       templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
-      requireExistingSideDb: sideDbInitialized,
+      requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
+      expectedSideDbCheckpoint,
       protectedStagingPaths: () => {
         if (!archiveCenterService
             || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
@@ -14137,7 +14141,10 @@ function getPositionReconciliationService() {
       }
     });
     try {
-      database.setSetting(POSITION_SIDE_DB_INITIALIZED_SETTING, '1');
+      database.setSetting(
+        POSITION_SIDE_DB_CHECKPOINT_SETTING,
+        JSON.stringify(service.persistenceCheckpoint())
+      );
       positionReconciliationService = service;
     } catch (error) {
       service.close();
@@ -14145,6 +14152,14 @@ function getPositionReconciliationService() {
     }
   }
   return positionReconciliationService;
+}
+
+function syncPositionReconciliationCheckpoint() {
+  if (!database || !database.db || !positionReconciliationService) return;
+  database.setSetting(
+    POSITION_SIDE_DB_CHECKPOINT_SETTING,
+    JSON.stringify(positionReconciliationService.persistenceCheckpoint())
+  );
 }
 
 function positionReconciliationFailureResult(error) {
@@ -15032,7 +15047,20 @@ function cleanupPositionArchiveSourcePaths(sourcePaths) {
 
 function cleanupPositionArchiveStaging(runtime) {
   const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
-  cleanupPositionArchiveStagingDirectories(targets);
+  if (targets.length === 0
+      || !archiveCenterService
+      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+    return;
+  }
+  let unresolvedSourcePaths;
+  try {
+    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
+  } catch (_error) {
+    return;
+  }
+  cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(targets, unresolvedSourcePaths)
+  );
 }
 
 function reportArchiveFailure(warning) {
@@ -15128,6 +15156,9 @@ function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
     const result = await runArchiveAwareOperation(meta, event, args, handler);
+    if (channel.startsWith('position-reconciliation:')) {
+      syncPositionReconciliationCheckpoint();
+    }
     if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }
@@ -16113,6 +16144,7 @@ async function prepareApplicationForQuit() {
       throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
     }
     if (positionReconciliationService) {
+      syncPositionReconciliationCheckpoint();
       positionReconciliationService.close();
       positionReconciliationService = null;
     }

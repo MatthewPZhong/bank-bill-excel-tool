@@ -13,6 +13,7 @@ const {
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
   STAGING_RELATIVE_PATH,
+  filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 } = require('../../../src/main-process/position-reconciliation/input-staging');
 const {
@@ -1079,6 +1080,23 @@ test('启动暂存清理跳过仍被存档失败批次引用的文件', (t) => {
   assert.equal(fs.existsSync(staleRoot), false);
 });
 
+test('业务后置清理只返回没有未完成存档引用的暂存目录', () => {
+  const root = path.resolve('/tmp/position-staging-filter');
+  const sharedDir = path.join(root, 'shared', '1');
+  const freeDir = path.join(root, 'free', '1');
+  assert.deepEqual(
+    filterStagingPathsWithoutProtectedSources(
+      [sharedDir, freeDir],
+      [path.join(sharedDir, 'bank.xlsx')]
+    ),
+    [freeDir]
+  );
+  assert.deepEqual(
+    filterStagingPathsWithoutProtectedSources([sharedDir], [sharedDir]),
+    []
+  );
+});
+
 test('规则版本变化后持久草稿自动失效并禁止确认', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-ruleset-stale-'));
   const bankPath = path.join(userDataDir, 'bank.xlsx');
@@ -1147,6 +1165,84 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
     }),
     (error) => error && error.code === 'position-side-db-missing'
   );
+});
+
+test('恢复合法旧 side DB 时 checkpoint 必须阻断历史消费代次回退', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-checkpoint-'));
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
+  const backupPath = path.join(userDataDir, 'position-data-t1.sqlite');
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  const initialService = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  const initialCheckpoint = initialService.persistenceCheckpoint();
+  initialService.close();
+  fs.copyFileSync(dbPath, backupPath);
+
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [bankRow({
+    BizId: 'CHECKPOINT-T2'
+  })]);
+  const currentService = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: initialCheckpoint
+  });
+  const prepared = currentService.prepareBankImport([bankPath]);
+  currentService.applyBankImport(prepared.token);
+  const currentCheckpoint = currentService.persistenceCheckpoint();
+  assert.ok(currentCheckpoint.generation > initialCheckpoint.generation);
+  assert.notEqual(currentCheckpoint.token, initialCheckpoint.token);
+  assert.equal(currentCheckpoint.identity, initialCheckpoint.identity);
+  currentService.close();
+
+  const recoveredAfterMainCheckpointLag = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: initialCheckpoint
+  });
+  assert.deepEqual(recoveredAfterMainCheckpointLag.persistenceCheckpoint(), currentCheckpoint);
+  recoveredAfterMainCheckpointLag.close();
+
+  for (const suffix of ['', '-wal', '-shm']) {
+    fs.rmSync(`${dbPath}${suffix}`, { force: true });
+  }
+  fs.copyFileSync(backupPath, dbPath);
+
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: currentCheckpoint
+    }),
+    (error) => error && error.code === 'position-side-db-mismatch'
+  );
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: {
+        ...initialCheckpoint,
+        token: 'same-generation-different-history'
+      }
+    }),
+    (error) => error && error.code === 'position-side-db-mismatch'
+  );
+
+  const restoredTogether = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: initialCheckpoint
+  });
+  assert.deepEqual(restoredTogether.persistenceCheckpoint(), initialCheckpoint);
+  restoredTogether.close();
 });
 
 test('运行范围、快照和汇总 JSON 语法合法但结构不完整时必须 fail-closed', (t) => {

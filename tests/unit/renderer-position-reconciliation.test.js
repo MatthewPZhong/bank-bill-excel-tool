@@ -317,16 +317,19 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.doesNotMatch(positionRenderer, /ipcRenderer|require\(['"]electron['"]\)/);
   });
 
-  test('主进程以主库初始化标记防止平盘侧库丢失后静默重建', () => {
+  test('主进程以主库 checkpoint 防止平盘侧库缺失或回滚后静默继续', () => {
     assert.match(
       mainProcess,
-      /database\.getSetting\(POSITION_SIDE_DB_INITIALIZED_SETTING\)\s*===\s*'1'/
+      /const expectedSideDbCheckpoint = database\.getSetting\(\s*POSITION_SIDE_DB_CHECKPOINT_SETTING\s*\)/
     );
-    assert.match(mainProcess, /requireExistingSideDb:\s*sideDbInitialized/);
+    assert.match(mainProcess, /requireExistingSideDb:\s*Boolean\(expectedSideDbCheckpoint\)/);
+    assert.match(mainProcess, /expectedSideDbCheckpoint,/);
     assert.match(
       mainProcess,
-      /database\.setSetting\(POSITION_SIDE_DB_INITIALIZED_SETTING,\s*'1'\)/
+      /JSON\.stringify\(service\.persistenceCheckpoint\(\)\)/
     );
+    assert.match(mainProcess, /channel\.startsWith\('position-reconciliation:'\)/);
+    assert.match(mainProcess, /syncPositionReconciliationCheckpoint\(\)/);
   });
 
   test('差异导出携带汇总行范围，删除链接数据禁止空月份请求', () => {

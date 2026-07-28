@@ -17,6 +17,7 @@ const {
 } = require('../../../src/main-process/position-reconciliation/constants');
 const {
   readResultWorkbook,
+  requiresTextFormat,
   writeLinkedWorkbook,
   writeRawWorkbook,
   writeResultWorkbook
@@ -50,12 +51,6 @@ function resultRow(bizId, fundType) {
     ReconciliationId: `RID-${bizId}`,
     FundType: fundType
   };
-}
-
-function requiresTextFormat(header) {
-  return /id|no|code|账号|账户|卡号|单号|流水号|对账|批次号|清算号码|swift/i.test(
-    String(header || '')
-  );
 }
 
 test('五个链接模板严格使用正式字段、冻结首行和筛选范围', async () => {

@@ -6,7 +6,7 @@ const MODULE_ID = 'position-reconciliation-process';
 const MODULE_NAME = '平盘对账数据处理';
 const MODULE_CODE = 'POSITION';
 const POSITION_DB_RELATIVE_PATH = 'run-data/position-reconciliation/position-data.sqlite';
-const POSITION_SIDE_DB_INITIALIZED_SETTING = 'position_reconciliation_side_db_initialized_v1';
+const POSITION_SIDE_DB_CHECKPOINT_SETTING = 'position_reconciliation_side_db_checkpoint_v1';
 const POSITION_RULESET_VERSION = 1;
 
 const AUDIT_HEADERS = Object.freeze(['命中明细', '命中类型', '匹配命中详情']);
@@ -163,7 +163,7 @@ module.exports = {
   MODULE_NAME,
   MODULE_CODE,
   POSITION_DB_RELATIVE_PATH,
-  POSITION_SIDE_DB_INITIALIZED_SETTING,
+  POSITION_SIDE_DB_CHECKPOINT_SETTING,
   POSITION_RULESET_VERSION,
   AUDIT_HEADERS,
   POSITION_BANK_HEADERS,

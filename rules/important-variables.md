@@ -1277,9 +1277,9 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ---
 
-### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_INITIALIZED_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionFundNatureCheck`（v3.1.0 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_CHECKPOINT_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionFundNatureCheck`（v3.1.0 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
-  - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、side DB 初始化标记、五类来源、十组基础/FX配对和状态枚举。
+  - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、side DB 跨库 checkpoint、五类来源、十组基础/FX配对和状态枚举。
   - `store.js` / `service.js` / `input-staging.js`：独立持久 side DB、原始/工作值、revision+规则版本 snapshot、不可变输入暂存、单一待确认草稿、回导和确认事务。
   - `matching-engine.js` / `logical-accounts.js` / `decimal.js`：ReconID 候选图、全局严格 1:1、方向/日期/手续费、账户别名归并和 FundType 判定。
 - 关联功能：「平盘对账数据处理 → 平盘资金性质校验」的银行/链接导入、十组性质判断、差异、49 列结果、人工回导和确认。
@@ -1292,7 +1292,7 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
   - **币种和账户**：Inbound 仅在银行/订单/原始出金币种三者明确相同时移除 `&FX`；仅当银行币种=订单币种且不同于原始出金币种时增加 `&FX`，三币种互异必须转人工。三类账户场景先唯一识别自有账户，再从剩余银行字段唯一识别非自有逻辑账户。别名、多币种、多性质或多候选不得按表序取第一条。
   - **草稿与确认**：银行/来源/映射 revision 或 `POSITION_RULESET_VERSION` 变化后旧草稿禁止导出、回导和确认，范围外 FundTransfer-out 变化也必须通过银行全局 revision 失效；第一期全局只能有一个待确认草稿。回导只允许原 FundType 基础/FX二元组变化，禁止缺行、加行、仅改详情或其它字段篡改；Excel 日期时间只豁免已知时区往返；未成功导出/合法回导前不得确认。未解决人工差异不得消费来源，唯一成功匹配被人工修改时仍须保留原来源血缘。
   - **输出与存档**：49 列名称和顺序固定，只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列使用列级文本格式，零数据文件也必须保留。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，存档失败不能改变业务结果。
-  - **侧库结构完整性**：主库标记侧库已初始化后，side DB 缺失或身份标记异常必须阻断，禁止静默重建；备份恢复必须同时包含主库和 `run-data/`。银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段，运行 scope/snapshot/summary 还须与明细一致；`{}` 等缺字段对象必须 fail closed。
+  - **侧库结构完整性**：主库与 side DB 的实例身份、generation 和事务 token 必须满足 checkpoint 契约；缺失、旧库回滚或同代分叉必须阻断，禁止静默重建，侧库领先主库时才允许安全追平；备份恢复必须同时包含主库和 `run-data/`。银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段，运行 scope/snapshot/summary 还须与明细一致；`{}` 等缺字段对象必须 fail closed。
   - **顺序与退出**：`SOURCE_DISPLAY_ORDER` 固定五张链接表的业务展示顺序；普通退出和更新重启都必须先阻止新业务并等待活动业务、worker 与存档队列排空，再关闭 side DB。
   - 必跑：position reconciliation unit、`position-reconciliation-side-db-parity.js`、archive operation tracker、9 张 preview、release-check、启动性能；⚠️ 真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
 

@@ -73,6 +73,27 @@ function cleanupStagingPaths(paths) {
   }
 }
 
+function filterStagingPathsWithoutProtectedSources(paths, protectedSourcePaths) {
+  const targets = [...new Set(
+    (Array.isArray(paths) ? paths : [])
+      .filter(Boolean)
+      .map((value) => path.resolve(String(value)))
+  )];
+  const protectedPaths = [...new Set(
+    (Array.isArray(protectedSourcePaths) ? protectedSourcePaths : [])
+      .filter(Boolean)
+      .map((value) => path.resolve(String(value)))
+  )];
+  return targets.filter((target) => !protectedPaths.some((sourcePath) => {
+    const relative = path.relative(target, sourcePath);
+    return relative === '' || (
+      relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative)
+    );
+  }));
+}
+
 function pruneStagingRoot(userDataDir, {
   now = Date.now(),
   maxAgeMs = DEFAULT_MAX_AGE_MS,
@@ -111,5 +132,6 @@ module.exports = {
   STAGING_RELATIVE_PATH,
   stageInputFiles,
   cleanupStagingPaths,
+  filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 };

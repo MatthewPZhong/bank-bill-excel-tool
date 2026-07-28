@@ -223,6 +223,7 @@ class PositionReconciliationService {
     now = () => new Date(),
     store = null,
     requireExistingSideDb = false,
+    expectedSideDbCheckpoint = null,
     protectedStagingPaths = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
@@ -231,7 +232,8 @@ class PositionReconciliationService {
     this.templatePath = path.resolve(templatePath);
     this.now = now;
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
-      requireExisting: requireExistingSideDb
+      requireExisting: requireExistingSideDb,
+      expectedCheckpoint: expectedSideDbCheckpoint
     });
     this.bankImportTokens = new Map();
     this.sourceImportTokens = new Map();
@@ -929,6 +931,10 @@ class PositionReconciliationService {
 
   diagnostics() {
     return { status: 'ok', ...this.store.diagnosticSummary() };
+  }
+
+  persistenceCheckpoint() {
+    return this.store.persistenceCheckpoint();
   }
 }
 

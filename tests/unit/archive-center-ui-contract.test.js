@@ -49,6 +49,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     }
     assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
     assert.match(main, /protectedStagingPaths:[\s\S]*?listUnresolvedSourcePaths\(\)/);
+    assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*unresolvedSourcePaths\)/);
   });
 
   test('设置弹窗为双栏导航且默认停留在自动更新', () => {
