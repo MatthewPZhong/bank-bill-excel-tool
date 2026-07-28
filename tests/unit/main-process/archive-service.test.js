@@ -339,9 +339,14 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.equal(completed.ok, true);
     assert.deepEqual(releasedPaths, []);
 
-    const retried = await fixture.service.retryBatch(failedBatch.batch.id);
+    const replacementPath = writeSource(fixture, 'position-shared-replacement.xlsx', 'replacement-source');
+    const retried = await fixture.service.retryBatch(failedBatch.batch.id, {
+      sourcePaths: {
+        [failed.artifact.id]: replacementPath
+      }
+    });
     assert.equal(retried.ok, true);
-    assert.deepEqual(releasedPaths, [sharedRetryPath]);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
 
     const sharedDeletePath = path.join(fixture.sourceDir, 'position-shared-delete.xlsx');
     const firstDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-first'));
@@ -360,10 +365,10 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.equal(secondDeleteFailure.ok, false);
 
     await fixture.service.deleteBatch(firstDeleteBatch.batch.id);
-    assert.deepEqual(releasedPaths, [sharedRetryPath]);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
 
     await fixture.service.deleteBatch(secondDeleteBatch.batch.id);
-    assert.deepEqual(releasedPaths, [sharedRetryPath, sharedDeletePath]);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath, sharedDeletePath]);
   } finally {
     fixture.close();
   }

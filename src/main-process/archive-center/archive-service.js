@@ -545,6 +545,7 @@ class ArchiveService {
 
   async _archiveArtifactUnlocked(artifact, sourcePath) {
     const originalName = artifact.originalName;
+    const previouslyRegisteredSourcePath = artifact.sourcePath;
     let staged = null;
     try {
       const started = this.repository.startArtifactAttempt(artifact.id, { sourcePath });
@@ -561,7 +562,7 @@ class ArchiveService {
         sizeBytes: Number((await this.fs.promises.stat(published.targetPath)).size),
         relativePath: published.relativePath
       });
-      await this._releaseSourcePaths([archivedSourcePath]);
+      await this._releaseSourcePaths([previouslyRegisteredSourcePath, archivedSourcePath]);
       return {
         ok: true,
         status: 'ready',
