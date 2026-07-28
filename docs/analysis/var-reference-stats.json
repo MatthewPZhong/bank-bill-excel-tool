@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T06:06:43.688Z",
+    "scannedAt": "2026-07-28T06:37:47.626Z",
     "root": "src",
     "totalFiles": 216,
-    "totalTopLevelNames": 2496,
+    "totalTopLevelNames": 2498,
     "buckets": {
       "shared": 370,
       "paired": 625,
-      "local": 1359,
+      "local": 1361,
       "crossFile": 995
     }
   },
@@ -1285,7 +1285,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 40
+            "count": 44
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1324,7 +1324,7 @@
             "count": 62
           }
         ],
-        "totalHits": 334,
+        "totalHits": 338,
         "fileSpan": 21
       },
       {
@@ -4751,10 +4751,10 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 24
+            "count": 26
           }
         ],
-        "totalHits": 74,
+        "totalHits": 76,
         "fileSpan": 5
       },
       {
@@ -24128,6 +24128,20 @@
         "fileSpan": 1
       },
       {
+        "name": "checkpointMismatch",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
         "name": "cloneBackgroundSettings",
         "defFiles": [
           "src/renderer.js"
@@ -26816,6 +26830,20 @@
         "fileSpan": 1
       },
       {
+        "name": "readDatabaseCheckpoint",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "RECONCILIATION_ID_COLUMN",
         "defFiles": [
           "src/main-process/scenario-engines/c1-extract-recon-id.js"
@@ -28636,20 +28664,6 @@
         "fileSpan": 1
       },
       {
-        "name": "readDatabaseCheckpoint",
-        "defFiles": [
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "READONLY_DIR_NAME",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -29728,7 +29742,7 @@
         "fileSpan": 1
       },
       {
-        "name": "assertCheckpointCompatible",
+        "name": "assertCurrentCheckpointHistory",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
         ],
@@ -36469,6 +36483,20 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/archive-service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertCheckpointCompatible",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 2
           }
         ],
@@ -43727,7 +43755,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 40
+          "count": 44
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -43766,7 +43794,7 @@
           "count": 62
         }
       ],
-      "totalHits": 334,
+      "totalHits": 338,
       "fileSpan": 21
     },
     {
@@ -47193,10 +47221,10 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 24
+          "count": 26
         }
       ],
-      "totalHits": 74,
+      "totalHits": 76,
       "fileSpan": 5
     },
     {

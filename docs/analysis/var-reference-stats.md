@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 02:06:43 |
+| 扫描时间 | 2026-7-28 02:37:47 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 216 |
-| 顶层声明总数 | 2496 |
-| ≥2 次引用 | 2354 |
+| 顶层声明总数 | 2498 |
+| ≥2 次引用 | 2356 |
 | 跨 ≥3 文件 (A-share) | 370 |
 | 跨 2 文件 (A-pair) | 625 |
-| 单文件 (A-local) | 1359 |
+| 单文件 (A-local) | 1361 |
 | 跨文件合计 (B) | 995 |
 
 ---
@@ -27,7 +27,7 @@
 | `normalizeCell` | 28 | 146 | 14 | src/backend/balance-adjustment-store.js |
 | `FileValidationError` | 25 | 122 | 15 | src/backend/balance-seed-store.js |
 | `normalizeCellValue` | 23 | 278 | 12 | src/backend/database/fund-transfer-account-mapping-repository.js |
-| `text` | 21 | 334 | 2 | src/main-process/position-reconciliation/common.js |
+| `text` | 21 | 338 | 2 | src/main-process/position-reconciliation/common.js |
 | `XLSX` | 17 | 85 | 17 | src/backend/bank-bu-recon-import/reader.js |
 | `crypto` | 17 | 52 | 17 | src/backend/pending-import/validator.js |
 | `pad` | 16 | 97 | 2 | src/backend/logger.js |
@@ -99,7 +99,7 @@
 | `listMappings` | 6 | 9 | 1 | src/backend/database/fund-transfer-account-mapping-repository.js |
 | `sanitizeFileName` | 6 | 9 | 5 | src/backend/balance-seed-store.js |
 | `elements` | 5 | 250 | 1 | src/renderer.js |
-| `PositionReconciliationError` | 5 | 74 | 1 | src/main-process/position-reconciliation/common.js |
+| `PositionReconciliationError` | 5 | 76 | 1 | src/main-process/position-reconciliation/common.js |
 | `setCurrentModule` | 5 | 70 | 2 | src/backend/database/settings-repository.js |
 | `app` | 5 | 36 | 1 | src/main.js |
 | `parentPort` | 5 | 35 | 5 | src/backend/big-table-import/engine-worker-entry.js |
@@ -2084,6 +2084,7 @@
 |---|---:|
 | `throwInvalidSideData` | 21 |
 | `serializeJson` | 15 |
+| `checkpointMismatch` | 10 |
 | `assertPayloadFields` | 8 |
 | `decodeScopeKey` | 8 |
 | `assertStoredCounter` | 7 |
@@ -2092,10 +2093,10 @@
 | `assertStoredTextList` | 5 |
 | `POSITION_DB_CHECKPOINT_TOKEN_KEY` | 5 |
 | `POSITION_DB_GENERATION_KEY` | 5 |
+| `readDatabaseCheckpoint` | 5 |
 | `assertRunSnapshot` | 4 |
 | `POSITION_DB_IDENTITY_KEY` | 4 |
-| `readDatabaseCheckpoint` | 4 |
-| `assertCheckpointCompatible` | 3 |
+| `assertCurrentCheckpointHistory` | 3 |
 | `assertRevisionMap` | 3 |
 | `checkpointValue` | 3 |
 | `DATE_JSON_TYPE_KEY` | 3 |
@@ -2641,7 +2642,7 @@
 | `normalizeCell` | 28 | 146 | 14 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/big-account-recognition.js(12) |
 | `FileValidationError` | 25 | 122 | 15 | src/backend/file-service/readers.js(15), src/main-process/duplicate-inbound-match/document-statement-reader.js(10), src/main-process/duplicate-inbound-match/service.js(8) |
 | `normalizeCellValue` | 23 | 278 | 12 | src/main-process/scenario-engines/r5-refund-order-backfill.js(57), src/main-process/position-reconciliation/matching-engine.js(39), src/main-process/scenario-engines/c4-recon-id-fix.js(21) |
-| `text` | 21 | 334 | 2 | src/renderer.js(62), src/renderer-dialogs.js(53), src/main-process/position-reconciliation/store.js(40) |
+| `text` | 21 | 338 | 2 | src/renderer.js(62), src/renderer-dialogs.js(53), src/main-process/position-reconciliation/store.js(44) |
 | `XLSX` | 17 | 85 | 17 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
 | `crypto` | 17 | 52 | 17 | src/main-process/archive-center/archive-service.js(8), src/main-process/position-reconciliation/service.js(6), src/main-process/position-reconciliation/store.js(4) |
 | `pad` | 16 | 97 | 2 | src/main-process/bank-statement-io.js(14), src/renderer.js(13), src/backend/logger.js(11) |
@@ -2713,7 +2714,7 @@
 | `listMappings` | 6 | 9 | 1 | src/backend/database/fund-transfer-account-mapping-repository.js(2), src/main-process/position-reconciliation/service.js(2), src/main-process/position-reconciliation/store.js(2) |
 | `sanitizeFileName` | 6 | 9 | 5 | src/main-process/toolbox.js(3), src/main-process/pre-fund-reconciliation/excel-writer.js(2), src/backend/balance-seed-store.js(1) |
 | `elements` | 5 | 250 | 1 | src/renderer.js(147), src/renderer-previews.js(51), src/renderer-position-reconciliation.js(29) |
-| `PositionReconciliationError` | 5 | 74 | 1 | src/main-process/position-reconciliation/store.js(24), src/main-process/position-reconciliation/service.js(20), src/main-process/position-reconciliation/readers.js(18) |
+| `PositionReconciliationError` | 5 | 76 | 1 | src/main-process/position-reconciliation/store.js(26), src/main-process/position-reconciliation/service.js(20), src/main-process/position-reconciliation/readers.js(18) |
 | `setCurrentModule` | 5 | 70 | 2 | src/renderer-previews.js(61), src/renderer.js(4), src/backend/database.js(2) |
 | `app` | 5 | 36 | 1 | src/main-process/app-updater.js(16), src/renderer.js(8), src/main.js(7) |
 | `parentPort` | 5 | 35 | 5 | src/main-process/run-check-worker.js(10), src/backend/big-table-import/engine-worker-entry.js(7), src/main-process/run-check-multiworker-worker.js(7) |

@@ -36,6 +36,13 @@ const SCHEMA = `
     value TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS position_checkpoint_history (
+    generation INTEGER PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    parent_token TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS position_revisions (
     kind TEXT NOT NULL,
     scope_key TEXT NOT NULL,
@@ -313,23 +320,74 @@ function readDatabaseCheckpoint(db) {
   }, 'checkpoint');
 }
 
-function assertCheckpointCompatible(actual, expected) {
+function checkpointMismatch(actual, expected, reason) {
+  throw new PositionReconciliationError(
+    'position-side-db-mismatch',
+    '平盘对账主库与侧库不属于同一数据代次，已停止读取以避免历史消费关系回退',
+    [
+      ...(expected ? [`主库 checkpoint：generation=${expected.generation}`] : []),
+      `侧库 checkpoint：generation=${actual.generation}`,
+      reason,
+      '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+    ]
+  );
+}
+
+function assertCurrentCheckpointHistory(db, actual) {
+  const row = db.prepare(`
+    SELECT token
+    FROM position_checkpoint_history
+    WHERE generation = ?
+  `).get(actual.generation);
+  if (!row || text(row.token) !== actual.token) {
+    checkpointMismatch(actual, null, '侧库当前 checkpoint 缺少对应历史记录');
+  }
+}
+
+function assertCheckpointCompatible(db, actual, expected) {
+  assertCurrentCheckpointHistory(db, actual);
   if (!expected) return;
-  if (actual.identity !== expected.identity
-      || actual.generation < expected.generation
-      || (
-        actual.generation === expected.generation
-        && actual.token !== expected.token
-      )) {
-    throw new PositionReconciliationError(
-      'position-side-db-mismatch',
-      '平盘对账主库与侧库不属于同一数据代次，已停止读取以避免历史消费关系回退',
-      [
-        `主库 checkpoint：generation=${expected.generation}`,
-        `侧库 checkpoint：generation=${actual.generation}`,
-        '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
-      ]
-    );
+  if (actual.identity !== expected.identity) {
+    checkpointMismatch(actual, expected, '主库与侧库的实例身份不同');
+  }
+  if (actual.generation < expected.generation) {
+    checkpointMismatch(actual, expected, '侧库 generation 早于主库');
+  }
+  if (actual.generation === expected.generation) {
+    if (actual.token !== expected.token) {
+      checkpointMismatch(actual, expected, '同一 generation 的事务 token 不同');
+    }
+    return;
+  }
+
+  const history = db.prepare(`
+    SELECT generation, token, parent_token AS parentToken
+    FROM position_checkpoint_history
+    WHERE generation BETWEEN ? AND ?
+    ORDER BY generation ASC
+  `).all(expected.generation, actual.generation);
+  const expectedLength = actual.generation - expected.generation + 1;
+  if (history.length !== expectedLength) {
+    checkpointMismatch(actual, expected, '侧库领先主库，但 checkpoint 历史链不完整');
+  }
+  let previousToken = expected.token;
+  for (let index = 0; index < history.length; index += 1) {
+    const item = history[index];
+    const generation = Number(item.generation);
+    if (generation !== expected.generation + index) {
+      checkpointMismatch(actual, expected, '侧库领先主库，但 checkpoint generation 不连续');
+    }
+    if (index === 0) {
+      if (text(item.token) !== expected.token) {
+        checkpointMismatch(actual, expected, '主库 checkpoint 不在当前侧库的历史链上');
+      }
+    } else if (text(item.parentToken) !== previousToken) {
+      checkpointMismatch(actual, expected, '侧库领先主库，但 checkpoint 父链不连续');
+    }
+    previousToken = text(item.token);
+  }
+  if (previousToken !== actual.token) {
+    checkpointMismatch(actual, expected, '侧库当前 token 与 checkpoint 历史链末端不一致');
   }
 }
 
@@ -721,7 +779,6 @@ class PositionReconciliationStore {
             ]
           );
         }
-        assertCheckpointCompatible(checkpoint, expected);
       }
       this.db.exec('PRAGMA foreign_keys = ON;');
       this.db.exec('PRAGMA journal_mode = WAL;');
@@ -747,7 +804,12 @@ class PositionReconciliationStore {
           '平盘对账侧库 checkpoint 初始化失败'
         );
       }
-      assertCheckpointCompatible(currentCheckpoint, expected);
+      this.db.prepare(`
+        INSERT INTO position_checkpoint_history(generation, token, parent_token)
+        VALUES (?, ?, NULL)
+        ON CONFLICT(generation) DO NOTHING
+      `).run(currentCheckpoint.generation, currentCheckpoint.token);
+      assertCheckpointCompatible(this.db, currentCheckpoint, expected);
     } catch (error) {
       if (this.db) {
         try {
@@ -785,16 +847,46 @@ class PositionReconciliationStore {
 
   _mutation(operation) {
     return transaction(this.db, () => {
+      const currentCheckpoint = readDatabaseCheckpoint(this.db);
+      if (!currentCheckpoint) {
+        throw new PositionReconciliationError(
+          'position-side-db-mismatch',
+          '平盘对账侧库 checkpoint 缺失'
+        );
+      }
+      assertCurrentCheckpointHistory(this.db, currentCheckpoint);
       const result = operation();
+      const nextGeneration = currentCheckpoint.generation + 1;
+      if (!Number.isSafeInteger(nextGeneration)) {
+        throw new PositionReconciliationError(
+          'position-side-db-mismatch',
+          '平盘对账侧库 generation 超出安全范围'
+        );
+      }
+      const nextToken = crypto.randomUUID();
       const generationUpdate = this.db.prepare(`
         UPDATE position_meta
-        SET value = CAST(value AS INTEGER) + 1
-        WHERE key = ?
-      `).run(POSITION_DB_GENERATION_KEY);
+        SET value = ?
+        WHERE key = ? AND value = ?
+      `).run(
+        String(nextGeneration),
+        POSITION_DB_GENERATION_KEY,
+        String(currentCheckpoint.generation)
+      );
       const tokenUpdate = this.db.prepare(`
-        UPDATE position_meta SET value = ? WHERE key = ?
-      `).run(crypto.randomUUID(), POSITION_DB_CHECKPOINT_TOKEN_KEY);
-      if (Number(generationUpdate.changes) !== 1 || Number(tokenUpdate.changes) !== 1) {
+        UPDATE position_meta SET value = ? WHERE key = ? AND value = ?
+      `).run(
+        nextToken,
+        POSITION_DB_CHECKPOINT_TOKEN_KEY,
+        currentCheckpoint.token
+      );
+      const historyInsert = this.db.prepare(`
+        INSERT INTO position_checkpoint_history(generation, token, parent_token)
+        VALUES (?, ?, ?)
+      `).run(nextGeneration, nextToken, currentCheckpoint.token);
+      if (Number(generationUpdate.changes) !== 1
+          || Number(tokenUpdate.changes) !== 1
+          || Number(historyInsert.changes) !== 1) {
         throw new PositionReconciliationError(
           'position-side-db-mismatch',
           '平盘对账侧库 checkpoint 更新失败'

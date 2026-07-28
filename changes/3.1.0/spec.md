@@ -49,7 +49,7 @@
 - 批量业务数据写入 `{userData}/run-data/position-reconciliation/position-data.sqlite`，主库不得新增银行/订单/账户批量明细表。
 - 侧库持久保存银行批次/行、原始导入/行、链接行、账户映射、运行草稿/行、差异和 revision。
 - 侧库额外保存已确认的订单类链接记录消费关系，订单来源、来源业务主键、腿序号和银行 BizId 均可追溯。
-- 主库保存平盘侧库 checkpoint，包含实例身份、单调 generation 和事务随机 token；侧库每次业务写事务原子推进 generation/token。侧库缺失、身份不同、generation 回退，或同 generation 的 token 不同都必须阻断并提示恢复完整数据目录；侧库 generation 高于主库时视为主库 checkpoint 写入前异常退出，可安全追平。首次安装和已有侧库升级可正常初始化 checkpoint。
+- 主库保存平盘侧库 checkpoint，包含实例身份、单调 generation 和事务随机 token；侧库每次业务写事务原子推进 generation/token，并只追加保存 `generation/token/parentToken` 历史链。侧库缺失、身份不同、generation 回退、同 generation 的 token 不同，或侧库虽领先但无法证明主库 checkpoint 是其祖先时，都必须阻断并提示恢复完整数据目录；只有父链完整连续的侧库领先窗口才允许安全追平。首次安装和已有侧库升级可正常初始化 checkpoint。
 - 备份与恢复必须把主库及 `run-data/` 作为同一批次处理，禁止只恢复 `tool-data.sqlite` 后继续使用平盘功能。
 - 银行、链接表或映射变更递增对应 revision；运行绑定 snapshot，过期草稿禁止导出、回导和确认。银行任一范围导入、删除或确认还会递增全局银行 revision，确保 FundTransfer-in 引用的范围外 out 行变化后草稿失效。
 - 草稿跨重启保留。第一期全局只允许一个待确认草稿；任何范围的新运行都必须先确认使旧草稿失效，不按 Channel+月份并存多个草稿。

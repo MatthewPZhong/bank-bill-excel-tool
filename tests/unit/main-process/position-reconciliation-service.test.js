@@ -1167,10 +1167,12 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
   );
 });
 
-test('恢复合法旧 side DB 时 checkpoint 必须阻断历史消费代次回退', (t) => {
+test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-checkpoint-'));
   const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
   const backupPath = path.join(userDataDir, 'position-data-t1.sqlite');
+  const divergedUserDataDir = path.join(userDataDir, 'diverged');
+  const divergedDbPath = path.join(divergedUserDataDir, POSITION_DB_RELATIVE_PATH);
   const bankPath = path.join(userDataDir, 'bank.xlsx');
   t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
 
@@ -1207,6 +1209,33 @@ test('恢复合法旧 side DB 时 checkpoint 必须阻断历史消费代次回�
   });
   assert.deepEqual(recoveredAfterMainCheckpointLag.persistenceCheckpoint(), currentCheckpoint);
   recoveredAfterMainCheckpointLag.close();
+
+  fs.mkdirSync(path.dirname(divergedDbPath), { recursive: true });
+  fs.copyFileSync(backupPath, divergedDbPath);
+  const divergedService = createPositionReconciliationService({
+    userDataDir: divergedUserDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: initialCheckpoint
+  });
+  divergedService.saveMappings([]);
+  divergedService.saveMappings([{
+    midAccountId: 'DIVERGED-MID',
+    clearingAccountId: 'DIVERGED-CLEARING'
+  }]);
+  const divergedCheckpoint = divergedService.persistenceCheckpoint();
+  assert.equal(divergedCheckpoint.identity, currentCheckpoint.identity);
+  assert.ok(divergedCheckpoint.generation > currentCheckpoint.generation);
+  divergedService.close();
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir: divergedUserDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: currentCheckpoint
+    }),
+    (error) => error && error.code === 'position-side-db-mismatch'
+  );
 
   for (const suffix of ['', '-wal', '-shm']) {
     fs.rmSync(`${dbPath}${suffix}`, { force: true });
