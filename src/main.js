@@ -14210,9 +14210,13 @@ function markPositionBusinessOutcome(result) {
   if (!pending || pending.operationToken !== context.operationToken) return;
   writePositionPendingOperation({
     ...pending,
-    businessState: result && SUCCESS_STATUSES.has(result.status)
-      ? 'success'
-      : 'not-success'
+    businessState: result && result.archiveDeferred === true
+      ? 'awaiting-confirmation'
+      : (
+        result && SUCCESS_STATUSES.has(result.status)
+          ? 'success'
+          : 'not-success'
+      )
   }, context.operationToken);
 }
 

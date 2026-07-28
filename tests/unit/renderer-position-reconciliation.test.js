@@ -354,6 +354,8 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(mainProcess, /archiveCenterService\.persistOperationIntent\(\{/);
     assert.match(mainProcess, /businessState:\s*'running'/);
     assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
+    assert.match(mainProcess, /result && result\.archiveDeferred === true/);
+    assert.match(mainProcess, /'awaiting-confirmation'/);
     assert.match(mainProcess, /const outputPublished = files\.some/);
     assert.match(mainProcess, /sourceSnapshotMatchesStat\(file\.beforeSnapshot, stat\)/);
     assert.match(mainProcess, /archiveResult && archiveResult\.handled === false/);

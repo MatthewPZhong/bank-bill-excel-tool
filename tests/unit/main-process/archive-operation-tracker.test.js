@@ -606,6 +606,24 @@ test.describe('archive operation tracker', () => {
     assert.equal(calls.filter((call) => call.type === 'append').length, 0);
   });
 
+  test('仅待确认的账户表 prepare 阶段不建立空存档批次', async () => {
+    const { tracker, calls } = createHarness();
+    const result = await tracker.handleOperation({
+      channel: 'position-reconciliation:source:prepare-import',
+      result: {
+        status: 'ok',
+        successCount: 0,
+        confirmationCount: 1,
+        archiveDeferred: true,
+        inputPaths: []
+      },
+      runtime: { inputPaths: [] }
+    });
+
+    assert.deepEqual(result, { handled: false });
+    assert.deepEqual(calls, []);
+  });
+
   test('平盘银行批量导入立即存档全部成功输入，跨重启无需恢复范围内存', async () => {
     const { tracker, calls } = createHarness();
 

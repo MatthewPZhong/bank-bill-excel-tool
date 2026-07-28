@@ -423,6 +423,7 @@ class PositionReconciliationService {
     const successCount = output.filter((result) => result.status === 'ok').length;
     const failedCount = output.filter((result) => result.status === 'failed').length;
     const confirmationCount = output.filter((result) => result.status === 'needs-confirmation').length;
+    const archiveDeferred = successCount === 0 && confirmationCount > 0;
     return {
       status: successCount > 0 || confirmationCount > 0 ? 'ok' : 'failed',
       message: successCount > 0 || confirmationCount > 0
@@ -432,6 +433,7 @@ class PositionReconciliationService {
       successCount,
       failedCount,
       confirmationCount,
+      archiveDeferred,
       inputPaths: output
         .filter((item) => item.status === 'ok')
         .flatMap((item) => item.inputPaths || []),

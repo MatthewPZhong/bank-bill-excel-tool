@@ -336,6 +336,7 @@ test('清结算银行账户表只保存状态正常的行，零有效行不覆�
   });
 
   const prepared = service.prepareSourceImport([validPath]);
+  assert.equal(prepared.archiveDeferred, true);
   const confirmation = prepared.results.find((row) => row.status === 'needs-confirmation');
   assert.ok(confirmation);
   writeWorkbook(validPath, 'sheet1', headers, [{
