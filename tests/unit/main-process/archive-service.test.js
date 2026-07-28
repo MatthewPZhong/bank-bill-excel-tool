@@ -13,7 +13,8 @@ const {
   createArchiveService
 } = require('../../../src/main-process/archive-center/archive-service');
 const {
-  sourceSnapshotFromStat
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
 } = require('../../../src/main-process/archive-center/source-snapshot');
 const {
   createArchiveRepository
@@ -459,6 +460,117 @@ test('源 stat 与当前文件一致但 SHA 不等于业务解析摘要时仍拒
       expectedSha256: crypto.createHash('sha256').update('matching-contents').digest('hex')
     });
     assert.equal(valid.ok, true);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时，同字节文件即使 inode/ctime/mtime 变化仍可按原路径重试', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'same-bytes-new-stat.xlsx', 'same-business-bytes');
+    const originalSnapshot = sourceSnapshotFromStat(fs.statSync(sourcePath));
+    const expectedSha256 = crypto.createHash('sha256').update('same-business-bytes').digest('hex');
+    const expectedSizeBytes = Buffer.byteLength('same-business-bytes');
+    fs.rmSync(sourcePath);
+
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('same-bytes-new-stat'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: originalSnapshot,
+      expectedSha256,
+      expectedSizeBytes
+    });
+    assert.equal(failed.ok, false);
+    fs.writeFileSync(sourcePath, 'same-business-bytes');
+    assert.equal(sourceSnapshotMatchesStat(originalSnapshot, fs.statSync(sourcePath)), false);
+
+    const retried = await fixture.service.retryBatch(failed.batch.id);
+    assert.equal(retried.ok, true);
+    assert.equal(retried.succeeded, 1);
+    const internal = fixture.service.repository.getArtifact(failed.artifact.id);
+    assert.equal(internal.metadata.expectedSizeBytes, expectedSizeBytes);
+    const detail = await fixture.service.getBatch(failed.batch.id);
+    assert.equal('expectedSizeBytes' in detail.batch.artifacts[0].metadata, false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时允许同字节替代路径，仍拒绝同长度不同字节', async () => {
+  const fixture = createFixture();
+  try {
+    const originalPath = writeSource(fixture, 'original-for-override.xlsx', 'expected-version');
+    const originalSnapshot = sourceSnapshotFromStat(fs.statSync(originalPath));
+    const expectedSha256 = crypto.createHash('sha256').update('expected-version').digest('hex');
+    const expectedSizeBytes = Buffer.byteLength('expected-version');
+    fs.rmSync(originalPath);
+
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('replacement-path-same-sha'),
+      filePath: originalPath,
+      role: 'input',
+      sourceSnapshot: originalSnapshot,
+      expectedSha256,
+      expectedSizeBytes
+    });
+    const wrongPath = writeSource(fixture, 'wrong-same-size.xlsx', 'different-bytes!');
+    assert.equal(Buffer.byteLength('different-bytes!'), expectedSizeBytes);
+    const rejected = await fixture.service.retryBatch(failed.batch.id, {
+      sourcePaths: { [failed.artifact.id]: wrongPath }
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.results[0].code, 'ARCHIVE_SOURCE_CHANGED');
+
+    const replacementPath = writeSource(fixture, 'replacement.xlsx', 'expected-version');
+    const recovered = await fixture.service.retryBatch(failed.batch.id, {
+      sourcePaths: { [failed.artifact.id]: replacementPath }
+    });
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.succeeded, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时仍拒绝存档读取期间发生变化且不留下 part 或 blob', async () => {
+  let sourcePath = '';
+  let mutated = false;
+  const changingFs = {
+    ...fs,
+    createReadStream(filePath, options) {
+      const stream = fs.createReadStream(filePath, options);
+      if (path.resolve(filePath) === sourcePath) {
+        stream.once('data', () => {
+          if (mutated) return;
+          mutated = true;
+          fs.writeFileSync(filePath, 'changed-during-read');
+        });
+      }
+      return stream;
+    }
+  };
+  const fixture = createFixture({ fsImpl: changingFs });
+  try {
+    sourcePath = writeSource(fixture, 'changes-during-read.xlsx', 'original-read-bytes');
+    const expectedSha256 = crypto.createHash('sha256').update('original-read-bytes').digest('hex');
+    const result = await fixture.service.archiveFile({
+      ...batchPayload('source-changes-during-read'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(sourcePath)),
+      expectedSha256,
+      expectedSizeBytes: Buffer.byteLength('original-read-bytes')
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'ARCHIVE_SOURCE_CHANGED');
+    assert.deepEqual(fs.readdirSync(path.join(fixture.rootDir, '.staging')), []);
+    const blobFiles = fs.readdirSync(path.join(fixture.rootDir, 'blobs', 'sha256'), {
+      recursive: true
+    }).filter((entry) => /^[a-f0-9]{64}$/.test(entry));
+    assert.deepEqual(blobFiles, []);
   } finally {
     fixture.close();
   }

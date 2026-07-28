@@ -13,6 +13,7 @@ const {
   assertEngineResultSet
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
+  positionCommittedRecoveryArchiveFiles,
   requirePositionPendingArchiveFiles
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
 const {
@@ -135,9 +136,11 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
     [inboundRow()]
   );
 
+  let operationToken = 'position-bank-input-proof';
   const service = createPositionReconciliationService({
     userDataDir,
-    templatePath: TEMPLATE_PATH
+    templatePath: TEMPLATE_PATH,
+    operationTokenProvider: () => operationToken
   });
   t.after(() => {
     service.close();
@@ -147,15 +150,25 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
   const bankPrepared = service.prepareBankImport([bankPath]);
   const bankApplied = service.applyBankImport(bankPrepared.token);
   assert.equal(bankApplied.rowCount, 1);
+  assert.deepEqual(
+    service.listCommittedOperationInputs(operationToken).map((item) => item.sourceType),
+    ['position-bank']
+  );
 
+  operationToken = 'position-source-input-proof';
   const sourceApplied = service.prepareSourceImport([sourcePath]);
   assert.equal(sourceApplied.successCount, 1);
+  assert.deepEqual(
+    service.listCommittedOperationInputs(operationToken).map((item) => item.sourceType),
+    [SOURCE_TYPES.GATEWAY_INBOUND]
+  );
   const inboundSummary = service.linkedManager().linked.find(
     (row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND
   );
   assert.equal(inboundSummary.rowCount, 0, '非FX证据不应出现在管理页可见链接表');
   assert.match(inboundSummary.updatedAt, /^\d{4}-\d{2}-\d{2}/, '派生为0行仍应记录表库更新日期');
 
+  operationToken = 'position-run-proof';
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(run.status, 'ok');
   assert.equal(run.summary.changedRows, 1);
@@ -184,8 +197,13 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
   const edited = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(edited, XLSX.utils.aoa_to_sheet(rows), BANK_SHEET_NAME);
   XLSX.writeFile(edited, outputPath);
+  operationToken = 'position-result-input-proof';
   const reimported = service.importRunResult(run.runId, outputPath);
   assert.equal(reimported.modifiedCount, 1);
+  assert.deepEqual(
+    service.listCommittedOperationInputs(operationToken).map((item) => item.sourceType),
+    ['position-result-reimport']
+  );
   assert.equal(service.dataManager().differences[0].status, '待确认');
   const reimportedRun = service.store.getRun(run.runId);
   assert.equal(reimportedRun.summary.changedRows, 0);
@@ -419,6 +437,156 @@ test('链接原始表混合批次保持选择顺序，供存档中心准确关�
     ['valid-transfer.xlsx', 'invalid-source.xlsx']
   );
   assert.deepEqual(result.results.map((item) => item.status), ['ok', 'failed']);
+});
+
+test('多文件来源操作只为真正提交的文件写入凭证，失败文件不阻断恢复已提交文件', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-commit-proof-'));
+  const firstPath = path.join(userDataDir, 'first-inbound.xlsx');
+  const secondPath = path.join(userDataDir, 'second-inbound.xlsx');
+  writeWorkbook(
+    firstPath,
+    'Sheet1',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow({ bizId: 'COMMITTED-A', reconId: 'RID-A' })]
+  );
+  writeWorkbook(
+    secondPath,
+    'Sheet1',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow({ bizId: 'PREPARED-B', reconId: 'RID-B' })]
+  );
+  const pendingInputs = [];
+  let intentCount = 0;
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    operationTokenProvider: () => 'multi-source-commit-proof',
+    recordArchiveIntent: (files) => {
+      pendingInputs.push(...files);
+      intentCount += 1;
+      if (intentCount === 2) mutateFileSameLength(files[0].filePath);
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const result = service.prepareSourceImport([firstPath, secondPath]);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.failedCount, 1);
+  assert.equal(pendingInputs.length, 2);
+  const committed = service.listCommittedOperationInputs('multi-source-commit-proof');
+  assert.equal(committed.length, 1);
+  assert.equal(committed[0].filePath, pendingInputs[0].filePath);
+  assert.equal(fs.existsSync(pendingInputs[1].filePath), false, '失败文件暂存已删除');
+
+  const filtered = positionCommittedRecoveryArchiveFiles({
+    operationToken: 'multi-source-commit-proof',
+    archiveFiles: pendingInputs.map((file) => ({
+      filePath: file.filePath,
+      role: 'input',
+      sourceType: file.sourceType,
+      sourceSnapshot: file.sourceSnapshot,
+      sha256: file.expectedSha256,
+      sizeBytes: file.sizeBytes
+    }))
+  }, committed);
+  assert.deepEqual(filtered.map((file) => file.filePath), [pendingInputs[0].filePath]);
+});
+
+test('同一多文件操作全部提交时，每份输入都有独立 side DB 提交凭证', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-all-committed-'));
+  const firstPath = path.join(userDataDir, 'first-inbound.xlsx');
+  const secondPath = path.join(userDataDir, 'second-outbound.xlsx');
+  writeWorkbook(
+    firstPath,
+    'Sheet1',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow({ bizId: 'ALL-A', reconId: 'RID-ALL-A' })]
+  );
+  writeWorkbook(
+    secondPath,
+    'Sheet1',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].headers,
+    [{
+      业务单号: 'ALL-B',
+      主对账id: 'RID-ALL-B',
+      账单日期: '2026-07-20',
+      币种: 'USD',
+      原始币种: 'EUR',
+      原始金额: '100',
+      银行扣款币种: 'USD'
+    }]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    operationTokenProvider: () => 'multi-source-all-committed'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const result = service.prepareSourceImport([firstPath, secondPath]);
+  assert.equal(result.successCount, 2);
+  assert.equal(result.failedCount, 0);
+  const committed = service.listCommittedOperationInputs('multi-source-all-committed');
+  assert.equal(committed.length, 2);
+  assert.deepEqual(
+    committed.map((item) => item.sourceType).sort(),
+    [SOURCE_TYPES.GATEWAY_INBOUND, SOURCE_TYPES.GATEWAY_OUTBOUND].sort()
+  );
+});
+
+test('文件级提交凭证与业务写入共享事务，任一侧失败都整体回滚', (t) => {
+  const cases = [
+    {
+      label: 'journal-failure',
+      trigger: `
+        CREATE TRIGGER fail_position_operation_input
+        BEFORE INSERT ON position_operation_inputs
+        BEGIN SELECT RAISE(ABORT, 'injected journal failure'); END;
+      `
+    },
+    {
+      label: 'business-failure',
+      trigger: `
+        CREATE TRIGGER fail_position_source_row
+        BEFORE INSERT ON position_source_rows
+        BEGIN SELECT RAISE(ABORT, 'injected business failure'); END;
+      `
+    }
+  ];
+
+  for (const item of cases) {
+    const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), `position-proof-${item.label}-`));
+    const sourcePath = path.join(userDataDir, 'inbound.xlsx');
+    writeWorkbook(
+      sourcePath,
+      'Sheet1',
+      SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+      [inboundRow({ bizId: item.label, reconId: `RID-${item.label}` })]
+    );
+    const operationToken = `proof-${item.label}`;
+    const service = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      operationTokenProvider: () => operationToken
+    });
+    const checkpointBefore = service.persistenceCheckpoint();
+    service.store.db.exec(item.trigger);
+
+    const result = service.prepareSourceImport([sourcePath]);
+    assert.equal(result.successCount, 0, item.label);
+    assert.equal(result.failedCount, 1, item.label);
+    assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0, item.label);
+    assert.deepEqual(service.listCommittedOperationInputs(operationToken), [], item.label);
+    assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore, item.label);
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  }
 });
 
 test('持久侧库关键 JSON 损坏时阻断运行，不降级成普通未命中', (t) => {

@@ -9,6 +9,7 @@
 ## 2. 存储与导入
 
 - [x] 建立持久 position side DB 与 schema
+- [x] 增加 operation 级输入文件提交凭证，并与银行、普通来源、账户确认和结果回导业务事务原子写入
 - [x] 增加首次 bootstrap、主库预登记 operation token、侧库 checkpoint 历史链、未知/旧标记侧库拒绝接管、新旧 generation 分叉阻断和完整目录备份说明
 - [x] 增加平盘全局操作互斥、operation token 所有权校验和异常退出追平
 - [x] 银行 46/49 列导入、范围替换和表库管理
@@ -62,6 +63,8 @@
 - [x] 管理页侧库恢复错误展示 detailLines
 - [x] 暂存输入解析时 snapshot/size/SHA-256 绑定并贯穿 token、pending、outbox 和正式存档
 - [x] 恢复 input 复用解析时证据并在 outbox 登记前校验，内容变化时 fail closed
+- [x] 多文件部分提交恢复按 pending 与 side DB 提交凭证交集存档，未提交文件排除、证据不一致 fail closed
+- [x] 存档重试已有 SHA 时允许历史 stat 变化的同字节副本，并保留当前读取稳定性、大小和 SHA 门禁
 
 ## 5. 验证
 
@@ -72,7 +75,7 @@
 - [x] startup:measure（最终提交）
 - [x] reconciliation blindspot pass
 - [ ] team-lead 三层质量门禁（最终提交）
-- [ ] self-review P0-P4 Finding 清零（最终提交）
+- [x] second review P2/P3 修复及 self-review P0-P4 Finding 清零
 - [x] 记录真实资金人工复核缺口
 - [x] 外部 final review P2/P3 故障注入回归
 

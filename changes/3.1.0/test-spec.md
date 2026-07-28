@@ -13,6 +13,8 @@
 - 存档失败时暂存副本保留并可跨重启重试；重试成功或删除失败批次后，仅在全库不存在其它 pending/failed artifact 引用同一路径时释放；使用替代源重试时旧、新路径均完成引用检查，主进程业务后置清理和启动过期清理同样跳过仍被引用的副本，保护集查询失败时不清理。
 - 五类原始表严格识别、逐文件原子、同文件重复折叠/冲突拒绝、不同 Excel 日期不得误折叠、跨文件后续文件拒绝。
 - 混合成功/失败文件的返回顺序与选择顺序一致，存档文件血缘不串位。
+- 普通来源多文件逐个提交时，每个成功文件必须在同一 side DB 事务写入 operation 文件凭证。覆盖 A 已提交、B 仅 prepare 后失败且暂存被删除的恢复，只允许 A 进入存档；A/B 全部提交时两者均可恢复。
+- 恢复集合必须是 pending 与同 operation 已提交文件凭证的严格交集：pending 无凭证的文件排除；凭证无 pending、重复路径、sourceType/role/path/snapshot/size/SHA 任一不一致时 fail closed，不写 outbox、不推进 checkpoint。
 - 清结算银行账户表只保留正常状态；正常行关键字段不全拒绝；0 有效行保护旧快照。
 - 主库无批量明细，持久侧库重启可恢复；首次 bootstrap 必须与 generation 0 侧库完全一致，已有现代侧库但主库无绑定、仅有旧 `initialized` 标记、文件缺失或空库均拒绝接管。
 - 主库 checkpoint、预登记 operation token 与侧库实例身份、generation、token、父链和历史 operation token 全部相容时才能继续。覆盖合法旧库回滚、仅恢复旧主库且无待完成操作、同 generation 分叉、更高 generation 分叉、完整同批恢复，以及待完成操作可证明的侧库领先窗口安全追平。
@@ -79,6 +81,7 @@
 - 使用主进程可注入生命周期 helper 贯穿验证 prepare/apply、结果已发布后状态落库失败、正式存档成功、outbox 恢复和正式存档/outbox 双失败；不得只用 service、tracker 分层测试或源码正则代替。
 - 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项，input 缺合法路径/snapshot/size/SHA，output 缺 `beforeSnapshot` 字段，以及其它保护来源读取失败时，均不得执行清理。业务已提交且文件清单损坏时，验证恢复登记被阻断、pending 不清除、错误 outbox 不产生，第二次启动仍保留真实暂存；另覆盖 `archiveRequired=false/缺失` 和 `archiveState=durable`，确认恢复与同进程 lifecycle 都不得同步 checkpoint 或清 pending。合法 `archiveFiles: []` 继续允许清理无保护旧目录。outbox 单独覆盖非字符串和空白路径拒绝。
 - pending input 缺解析时 snapshot/SHA/size 或 output 缺 `beforeSnapshot` 字段时一律损坏；恢复 input 不调用当前快照捕获器。暂存内容变化时恢复在 outbox 登记前 fail closed，pending 与文件保留、checkpoint 不同步；即使当前 stat 被当作预期值，相同长度但 SHA 不同的内容也必须由 ArchiveService 拒绝。
+- ArchiveService 已有预期 SHA 时，原路径或替代源即使 inode/mtime/ctime 与历史 snapshot 不同，只要本次读取前后 stat 稳定、size 与 SHA 均一致就允许重试；相同大小但 SHA 不同、读取期间被改写或 size 不同必须拒绝且不得留下 `.part` 或正式 blob。无预期 SHA 的旧 artifact 继续严格校验历史 snapshot。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。
 - `scripts/integration/position-reconciliation-side-db-parity.js` 验证主库零 bulk、原子替换、重启和回收。

@@ -82,6 +82,7 @@ const {
 } = require('./main-process/position-reconciliation/constants');
 const {
   assertPositionRecoveryInputsUnchanged,
+  positionCommittedRecoveryArchiveFiles,
   requirePositionPendingArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
@@ -14207,6 +14208,7 @@ function recordPositionArchiveIntentFiles(filePaths, role) {
       ? {
           filePath,
           role,
+          sourceType: String(descriptor.sourceType || '').trim(),
           sourceSnapshot: descriptor.sourceSnapshot,
           sha256: descriptor.expectedSha256 || descriptor.sha256,
           sizeBytes: descriptor.sizeBytes
@@ -14273,7 +14275,11 @@ function positionArchiveIntentEvidence(pending, currentCheckpoint) {
   });
 }
 
-function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
+function persistPositionArchiveIntentIfNeeded(
+  pending,
+  currentCheckpoint,
+  service = positionReconciliationService
+) {
   if (!pending) return null;
   const files = requirePositionPendingArchiveFiles(pending);
   const archiveRequired = pending.archiveRequired === true
@@ -14285,16 +14291,24 @@ function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
   if (!archiveRequired || pending.archiveState === 'durable') return null;
   const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
   if (!evidence.requiresPersistence) return null;
-  if (files.length === 0 || !archiveCenterService
+  if (!service || typeof service.listCommittedOperationInputs !== 'function') {
+    throw new Error('平盘业务已提交但无法读取文件级提交凭证，已停止恢复');
+  }
+  const committedInputs = service.listCommittedOperationInputs(pending.operationToken);
+  const committedFiles = positionCommittedRecoveryArchiveFiles(
+    { ...pending, archiveFiles: files },
+    committedInputs
+  );
+  if (committedFiles.length === 0 || !archiveCenterService
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
     throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
   }
   assertPositionRecoveryInputsUnchanged(
-    { archiveFiles: files },
+    { archiveFiles: committedFiles },
     assertStagedInputUnchanged
   );
   const recoveryFiles = positionRecoveryArchiveFiles(
-    { archiveFiles: files },
+    { archiveFiles: committedFiles },
     { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
   );
   return archiveCenterService.persistOperationIntent({
@@ -14306,8 +14320,8 @@ function persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint) {
   });
 }
 
-function recoverPositionArchiveIntent(pending, currentCheckpoint) {
-  persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint);
+function recoverPositionArchiveIntent(pending, currentCheckpoint, service) {
+  persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint, service);
 }
 
 function persistCurrentPositionArchiveIntentIfNeeded() {
@@ -14320,7 +14334,11 @@ function persistCurrentPositionArchiveIntentIfNeeded() {
   const currentCheckpoint = positionReconciliationService
     ? positionReconciliationService.persistenceCheckpoint()
     : pending.baseCheckpoint || {};
-  return persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint);
+  return persistPositionArchiveIntentIfNeeded(
+    pending,
+    currentCheckpoint,
+    positionReconciliationService
+  );
 }
 
 function getPositionReconciliationService() {
@@ -14372,7 +14390,8 @@ function getPositionReconciliationService() {
       const checkpoint = service.persistenceCheckpoint();
       recoverPositionArchiveIntent(
         pendingSideDbOperation ? readPositionPendingOperation() : null,
-        checkpoint
+        checkpoint,
+        service
       );
       database.setSetting(
         POSITION_SIDE_DB_CHECKPOINT_SETTING,

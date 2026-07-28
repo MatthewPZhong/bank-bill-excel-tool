@@ -24,12 +24,16 @@ const {
   transaction,
   stableHash
 } = require('./common');
+const {
+  normalizeSourceSnapshot
+} = require('../archive-center/source-snapshot');
 const { deriveLinkedRows } = require('./derivation');
 
 const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
 const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
 const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
 const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
+const SHA256_RE = /^[a-f0-9]{64}$/;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -44,6 +48,22 @@ const SCHEMA = `
     operation_token TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS position_operation_inputs (
+    operation_token TEXT NOT NULL,
+    input_key TEXT NOT NULL,
+    source_type TEXT NOT NULL,
+    role TEXT NOT NULL,
+    file_path TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    source_snapshot_json TEXT NOT NULL,
+    committed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(operation_token, input_key)
+  );
+  CREATE INDEX IF NOT EXISTS idx_position_operation_inputs_token
+    ON position_operation_inputs(operation_token, committed_at, input_key);
 
   CREATE TABLE IF NOT EXISTS position_revisions (
     kind TEXT NOT NULL,
@@ -247,6 +267,57 @@ function serializeJson(value) {
       };
     }
     return item;
+  });
+}
+
+function operationInputKey(role, filePath) {
+  return stableHash({
+    role: text(role),
+    filePath: path.resolve(String(filePath || ''))
+  });
+}
+
+function normalizeOperationInputEvidence(value, fallbackSourceType = '') {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const role = text(input.role || 'input');
+  const filePath = path.resolve(String(input.filePath || ''));
+  const sourceType = text(input.sourceType || fallbackSourceType);
+  const originalName = text(input.originalName) || path.basename(filePath);
+  const sourceSnapshot = normalizeSourceSnapshot(input.sourceSnapshot);
+  const sha256 = text(input.expectedSha256 || input.sha256).toLowerCase();
+  const sizeBytes = Number(input.expectedSizeBytes ?? input.sizeBytes);
+  if (role !== 'input'
+      || !String(input.filePath || '').trim()
+      || !sourceType
+      || !sourceSnapshot
+      || !SHA256_RE.test(sha256)
+      || !Number.isSafeInteger(sizeBytes)
+      || sizeBytes < 0
+      || sourceSnapshot.sizeBytes !== sizeBytes) {
+    throwInvalidSideData('平盘输入缺少完整的文件级提交证据');
+  }
+  return {
+    inputKey: operationInputKey(role, filePath),
+    sourceType,
+    role,
+    filePath,
+    originalName,
+    sourceSnapshot,
+    sha256,
+    sizeBytes
+  };
+}
+
+function operationInputEvidenceHash(value) {
+  return stableHash({
+    inputKey: value.inputKey,
+    sourceType: value.sourceType,
+    role: value.role,
+    filePath: value.filePath,
+    originalName: value.originalName,
+    sourceSnapshot: value.sourceSnapshot,
+    sha256: value.sha256,
+    sizeBytes: value.sizeBytes
   });
 }
 
@@ -1428,7 +1499,10 @@ class PositionReconciliationStore {
         );
       }
       assertCurrentCheckpointHistory(this.db, currentCheckpoint);
-      const result = operation();
+      const operationToken = text(
+        this.operationTokenProvider ? this.operationTokenProvider() : ''
+      ) || crypto.randomUUID();
+      const result = operation({ operationToken });
       const nextGeneration = currentCheckpoint.generation + 1;
       if (!Number.isSafeInteger(nextGeneration)) {
         throw new PositionReconciliationError(
@@ -1437,9 +1511,6 @@ class PositionReconciliationStore {
         );
       }
       const nextToken = crypto.randomUUID();
-      const operationToken = text(
-        this.operationTokenProvider ? this.operationTokenProvider() : ''
-      ) || crypto.randomUUID();
       const generationUpdate = this.db.prepare(`
         UPDATE position_meta
         SET value = ?
@@ -1471,6 +1542,102 @@ class PositionReconciliationStore {
         );
       }
       return result;
+    });
+  }
+
+  _recordOperationInputs(operationToken, inputEvidence, fallbackSourceType = '') {
+    const token = text(operationToken);
+    if (!token) {
+      throwInvalidSideData('平盘文件级提交凭证缺少 operation token');
+    }
+    const inputs = Array.isArray(inputEvidence) ? inputEvidence : [];
+    if (inputs.length === 0) return [];
+    const insert = this.db.prepare(`
+      INSERT INTO position_operation_inputs(
+        operation_token, input_key, source_type, role, file_path, original_name,
+        sha256, size_bytes, source_snapshot_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(operation_token, input_key) DO NOTHING
+    `);
+    const find = this.db.prepare(`
+      SELECT operation_token AS operationToken, input_key AS inputKey,
+             source_type AS sourceType, role, file_path AS filePath,
+             original_name AS originalName, sha256, size_bytes AS sizeBytes,
+             source_snapshot_json AS sourceSnapshotJson
+      FROM position_operation_inputs
+      WHERE operation_token = ? AND input_key = ?
+    `);
+    const recorded = [];
+    for (const value of inputs) {
+      const normalized = normalizeOperationInputEvidence(value, fallbackSourceType);
+      insert.run(
+        token,
+        normalized.inputKey,
+        normalized.sourceType,
+        normalized.role,
+        normalized.filePath,
+        normalized.originalName,
+        normalized.sha256,
+        normalized.sizeBytes,
+        serializeJson(normalized.sourceSnapshot)
+      );
+      const stored = find.get(token, normalized.inputKey);
+      if (!stored) throwInvalidSideData('平盘文件级提交凭证写入失败');
+      const storedSnapshot = normalizeSourceSnapshot(
+        parseJson(stored.sourceSnapshotJson, '文件级提交凭证快照')
+      );
+      const storedEvidence = {
+        inputKey: text(stored.inputKey),
+        sourceType: text(stored.sourceType),
+        role: text(stored.role),
+        filePath: path.resolve(String(stored.filePath || '')),
+        originalName: text(stored.originalName),
+        sourceSnapshot: storedSnapshot,
+        sha256: text(stored.sha256).toLowerCase(),
+        sizeBytes: Number(stored.sizeBytes)
+      };
+      if (!storedSnapshot
+          || operationInputEvidenceHash(storedEvidence) !== operationInputEvidenceHash(normalized)) {
+        throwInvalidSideData('平盘文件级提交凭证与既有记录冲突');
+      }
+      recorded.push(storedEvidence);
+    }
+    return recorded;
+  }
+
+  listCommittedOperationInputs(operationToken) {
+    const token = text(operationToken);
+    if (!token) return [];
+    const rows = this.db.prepare(`
+      SELECT operation_token AS operationToken, input_key AS inputKey,
+             source_type AS sourceType, role, file_path AS filePath,
+             original_name AS originalName, sha256, size_bytes AS sizeBytes,
+             source_snapshot_json AS sourceSnapshotJson, committed_at AS committedAt
+      FROM position_operation_inputs
+      WHERE operation_token = ?
+      ORDER BY committed_at, input_key
+    `).all(token);
+    return rows.map((row) => {
+      const sourceSnapshot = normalizeSourceSnapshot(
+        parseJson(row.sourceSnapshotJson, '文件级提交凭证快照')
+      );
+      const normalized = normalizeOperationInputEvidence({
+        sourceType: row.sourceType,
+        role: row.role,
+        filePath: row.filePath,
+        originalName: row.originalName,
+        sourceSnapshot,
+        sha256: row.sha256,
+        sizeBytes: row.sizeBytes
+      });
+      if (text(row.inputKey) !== normalized.inputKey) {
+        throwInvalidSideData('平盘文件级提交凭证的 input key 不一致');
+      }
+      return {
+        operationToken: token,
+        ...normalized,
+        committedAt: text(row.committedAt)
+      };
     });
   }
 
@@ -1521,10 +1688,11 @@ class PositionReconciliationStore {
     return true;
   }
 
-  replaceBankScopes(parsed) {
+  replaceBankScopes(parsed, { inputEvidence = [] } = {}) {
     const records = Array.isArray(parsed.records) ? parsed.records : [];
     const scopes = Array.isArray(parsed.scopes) ? parsed.scopes : [];
-    return this._mutation(() => {
+    return this._mutation(({ operationToken }) => {
+      this._recordOperationInputs(operationToken, inputEvidence, 'position-bank');
       const existingByBizId = new Map(this.db.prepare(`
         SELECT biz_id AS bizId, channel, month_key AS monthKey
         FROM position_bank_rows
@@ -1753,9 +1921,10 @@ class PositionReconciliationStore {
     return result;
   }
 
-  applySourceImport(parsed) {
+  applySourceImport(parsed, { inputEvidence = [] } = {}) {
     const sourceType = parsed.sourceType;
-    return this._mutation(() => {
+    return this._mutation(({ operationToken }) => {
+      this._recordOperationInputs(operationToken, inputEvidence, sourceType);
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         this.db.prepare('DELETE FROM position_source_rows WHERE source_type = ?').run(sourceType);
       }
@@ -2166,13 +2335,14 @@ class PositionReconciliationStore {
     });
   }
 
-  replaceRunRowsFromReimport(runId, updates) {
+  replaceRunRowsFromReimport(runId, updates, { inputEvidence = [] } = {}) {
     const run = this.getRun(runId);
     if (!run) throw new Error('运行草稿不存在');
     const existingRows = new Map(
       this.listRunRows(runId).map((row) => [text(row.biz_id), row])
     );
-    return this._mutation(() => {
+    return this._mutation(({ operationToken }) => {
+      this._recordOperationInputs(operationToken, inputEvidence, 'position-result-reimport');
       const update = this.db.prepare(`
         UPDATE position_run_rows SET
           result_fund_type = ?,
@@ -2438,7 +2608,8 @@ class PositionReconciliationStore {
       'position_runs',
       'position_run_rows',
       'position_differences',
-      'position_consumed_sources'
+      'position_consumed_sources',
+      'position_operation_inputs'
     ]) {
       tableCounts[table] = Number(this.db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count);
     }

@@ -85,6 +85,7 @@ function publicArtifact(artifact) {
     const {
       sourceSnapshot: _sourceSnapshot,
       expectedSha256: _expectedSha256,
+      expectedSizeBytes: _expectedSizeBytes,
       ...metadata
     } = visible.metadata;
     visible.metadata = metadata;
@@ -437,10 +438,28 @@ class ArchiveService {
     filePath,
     originalName,
     expectedSnapshot = null,
-    expectedSha256 = ''
+    expectedSha256 = '',
+    expectedSizeBytes = null
   ) {
     const before = await this._statRegularFile(filePath, originalName);
-    if (expectedSnapshot && !sourceSnapshotMatchesStat(expectedSnapshot, before)) {
+    const normalizedExpectedSha = String(expectedSha256 || '').toLowerCase();
+    const hasExpectedSha = SHA256_RE.test(normalizedExpectedSha);
+    const normalizedExpectedSize = Number(expectedSizeBytes);
+    const hasExpectedSize = expectedSizeBytes !== null
+      && expectedSizeBytes !== undefined
+      && expectedSizeBytes !== ''
+      && Number.isSafeInteger(normalizedExpectedSize)
+      && normalizedExpectedSize >= 0;
+    if (hasExpectedSha && hasExpectedSize && Number(before.size) !== normalizedExpectedSize) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_SOURCE_CHANGED',
+        `文件“${safeName(originalName)}”大小与业务解析时版本不一致，未写入存档`,
+        { retryable: true }
+      );
+    }
+    if (!hasExpectedSha
+        && expectedSnapshot
+        && !sourceSnapshotMatchesStat(expectedSnapshot, before)) {
       throw new ArchiveOperationError(
         'ARCHIVE_SOURCE_CHANGED',
         `文件“${safeName(originalName)}”在业务完成后发生变化，未写入存档，请恢复原文件后重试`,
@@ -476,7 +495,7 @@ class ArchiveService {
         );
       }
       const sha256 = hash.digest('hex');
-      if (expectedSha256 && sha256 !== expectedSha256) {
+      if (hasExpectedSha && sha256 !== normalizedExpectedSha) {
         throw new ArchiveOperationError(
           'ARCHIVE_SOURCE_CHANGED',
           `文件“${safeName(originalName)}”内容与业务解析时版本不一致，未写入存档`,
@@ -571,7 +590,11 @@ class ArchiveService {
         archivedSourcePath,
         originalName,
         artifact.metadata && artifact.metadata.sourceSnapshot,
-        artifact.metadata && artifact.metadata.expectedSha256
+        artifact.metadata && artifact.metadata.expectedSha256,
+        artifact.metadata && (
+          artifact.metadata.expectedSizeBytes
+          ?? artifact.metadata.sourceSnapshot?.sizeBytes
+        )
       );
       const published = await this._publishStagedBlob(staged);
       staged = null;
@@ -662,6 +685,19 @@ class ArchiveService {
         );
       }
       if (rawExpectedSha256) metadata.expectedSha256 = rawExpectedSha256;
+      const rawExpectedSizeBytes = payload.expectedSizeBytes
+        ?? payload.sizeBytes
+        ?? (rawExpectedSha256 && sourceSnapshot ? sourceSnapshot.sizeBytes : undefined);
+      if (rawExpectedSizeBytes !== undefined && rawExpectedSizeBytes !== null) {
+        const expectedSizeBytes = Number(rawExpectedSizeBytes);
+        if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+          throw new ArchiveOperationError(
+            'ARCHIVE_EXPECTED_SIZE_INVALID',
+            `文件“${originalName}”缺少合法的业务解析大小`
+          );
+        }
+        metadata.expectedSizeBytes = expectedSizeBytes;
+      }
       artifact = this.repository.addArtifact(batch.id, {
         artifactKey,
         direction: payload.direction || 'input',

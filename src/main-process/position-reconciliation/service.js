@@ -176,9 +176,10 @@ function formatTimestamp(date = new Date()) {
   ].join('');
 }
 
-function stagedInputArchiveFile(file) {
+function stagedInputArchiveFile(file, sourceType = '') {
   return {
     filePath: path.resolve(String(file && (file.archivePath || file.filePath) || '')),
+    sourceType: text(sourceType || (file && file.sourceType)) || 'position-input',
     sourceSnapshot: file && file.stagedSnapshot,
     expectedSha256: file && file.stagedSha256,
     sizeBytes: file && file.stagedSizeBytes,
@@ -428,7 +429,9 @@ class PositionReconciliationService {
     let result;
     try {
       this.assertStagedInputs(parsed.files, 'bank-apply', { beforeCommit: true });
-      result = this.store.replaceBankScopes(parsed);
+      result = this.store.replaceBankScopes(parsed, {
+        inputEvidence: parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank'))
+      });
     } catch (error) {
       cleanupStagingPaths(parsed.stagingDirs);
       throw error;
@@ -442,14 +445,14 @@ class PositionReconciliationService {
           .map((file) => file.archivePath),
         inputFiles: parsed.files
           .filter((file) => Array.isArray(file.scopes) && file.scopes.includes(key))
-          .map(stagedInputArchiveFile)
+          .map((file) => stagedInputArchiveFile(file, 'position-bank'))
       };
     });
     return {
       status: 'ok',
       message: `已导入 ${result.rowCount} 行平盘银行对账单`,
       inputPaths: parsed.files.map((file) => file.archivePath),
-      inputFiles: parsed.files.map(stagedInputArchiveFile),
+      inputFiles: parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank')),
       originalInputPaths: parsed.files.map((file) => file.filePath),
       cleanupPaths: parsed.stagingDirs,
       scopeInputs,
@@ -465,7 +468,7 @@ class PositionReconciliationService {
         '银行导入确认已失效，请重新选择文件'
       );
     }
-    return parsed.files.map(stagedInputArchiveFile);
+    return parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank'));
   }
 
   cancelBankImport() {
@@ -514,11 +517,14 @@ class PositionReconciliationService {
         });
       } else {
         try {
+          const inputEvidence = stagedInputArchiveFile(result, result.sourceType);
           if (this.recordArchiveIntent) {
-            this.recordArchiveIntent([stagedInputArchiveFile(result)], 'input');
+            this.recordArchiveIntent([inputEvidence], 'input');
           }
           this.assertStagedInputs([result], 'source-auto-apply', { beforeCommit: true });
-          const applied = this.store.applySourceImport(result);
+          const applied = this.store.applySourceImport(result, {
+            inputEvidence: [inputEvidence]
+          });
           output.push({
             status: 'ok',
             filePath: result.filePath,
@@ -526,7 +532,7 @@ class PositionReconciliationService {
             archivePath: result.archivePath,
             stagingDir: result.stagingDir,
             inputPaths: [result.archivePath],
-            inputFiles: [stagedInputArchiveFile(result)],
+            inputFiles: [inputEvidence],
             originalInputPaths: [result.filePath],
             cleanupPaths: [result.stagingDir],
             ...applied
@@ -582,7 +588,9 @@ class PositionReconciliationService {
     let result;
     try {
       this.assertStagedInputs([parsed], 'source-apply', { beforeCommit: true });
-      result = this.store.applySourceImport(parsed);
+      result = this.store.applySourceImport(parsed, {
+        inputEvidence: [stagedInputArchiveFile(parsed, parsed.sourceType)]
+      });
     } catch (error) {
       cleanupStagingPaths([parsed.stagingDir]);
       throw error;
@@ -591,7 +599,7 @@ class PositionReconciliationService {
       status: 'ok',
       message: `已导入 ${result.rowCount} 行${result.sourceName}`,
       inputPaths: [parsed.archivePath],
-      inputFiles: [stagedInputArchiveFile(parsed)],
+      inputFiles: [stagedInputArchiveFile(parsed, parsed.sourceType)],
       originalInputPaths: [parsed.filePath],
       cleanupPaths: [parsed.stagingDir],
       ...result
@@ -606,7 +614,7 @@ class PositionReconciliationService {
         '账户表导入确认已失效，请重新选择文件'
       );
     }
-    return [stagedInputArchiveFile(parsed)];
+    return [stagedInputArchiveFile(parsed, parsed.sourceType)];
   }
 
   cancelSourceImport(token) {
@@ -956,9 +964,8 @@ class PositionReconciliationService {
       [filePath],
       `result-${crypto.randomUUID()}`
     )[0];
-    if (this.recordArchiveIntent) {
-      this.recordArchiveIntent([stagedInputArchiveFile(staged)], 'input');
-    }
+    const inputEvidence = stagedInputArchiveFile(staged, 'position-result-reimport');
+    if (this.recordArchiveIntent) this.recordArchiveIntent([inputEvidence], 'input');
     let imported;
     try {
       imported = readResultWorkbook(staged.filePath);
@@ -1044,14 +1051,16 @@ class PositionReconciliationService {
         });
       }
       this.assertStagedInputs([staged], 'result-apply', { beforeCommit: true });
-      this.store.replaceRunRowsFromReimport(run.id, updates);
+      this.store.replaceRunRowsFromReimport(run.id, updates, {
+        inputEvidence: [inputEvidence]
+      });
       return {
         status: 'ok',
         runId: run.id,
         rowCount: updates.length,
         modifiedCount: updates.filter((item) => item.manualModified).length,
         inputPaths: [staged.archivePath],
-        inputFiles: [stagedInputArchiveFile(staged)],
+        inputFiles: [inputEvidence],
         originalInputPaths: [staged.sourceFilePath],
         cleanupPaths: [staged.stagingDir]
       };
@@ -1087,6 +1096,10 @@ class PositionReconciliationService {
 
   persistenceCheckpoint() {
     return this.store.persistenceCheckpoint();
+  }
+
+  listCommittedOperationInputs(operationToken) {
+    return this.store.listCommittedOperationInputs(operationToken);
   }
 }
 

@@ -1,5 +1,7 @@
 'use strict';
 
+const path = require('node:path');
+
 const {
   normalizeSourceSnapshot
 } = require('../archive-center/source-snapshot');
@@ -69,6 +71,109 @@ function requirePositionPendingArchiveFiles(value) {
     throw new Error('平盘待完成操作的存档文件清单损坏');
   }
   return files;
+}
+
+function recoveryIntegrityError(message) {
+  const error = new Error(message);
+  error.code = 'position-side-data-invalid';
+  return error;
+}
+
+function recoveryInputKey(file) {
+  return `${String(file && file.role || '').trim()}\u0000${
+    path.resolve(String(file && file.filePath || ''))
+  }`;
+}
+
+function snapshotsEqual(left, right) {
+  const normalizedLeft = normalizeSourceSnapshot(left);
+  const normalizedRight = normalizeSourceSnapshot(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft.sizeBytes === normalizedRight.sizeBytes
+    && normalizedLeft.mtimeMs === normalizedRight.mtimeMs
+    && normalizedLeft.ctimeMs === normalizedRight.ctimeMs
+    && normalizedLeft.ino === normalizedRight.ino;
+}
+
+function normalizeCommittedInputProof(value, operationToken) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw recoveryIntegrityError('平盘侧库文件级提交凭证格式非法');
+  }
+  const proofOperationToken = String(value.operationToken || '').trim();
+  if (!proofOperationToken || proofOperationToken !== operationToken) {
+    throw recoveryIntegrityError('平盘侧库文件级提交凭证 operation token 不一致');
+  }
+  const role = String(value.role || '').trim();
+  const filePath = String(value.filePath || '').trim();
+  const sourceType = String(value.sourceType || '').trim();
+  const sourceSnapshot = normalizeSourceSnapshot(value.sourceSnapshot);
+  const sha256 = String(value.sha256 || value.expectedSha256 || '').trim().toLowerCase();
+  const sizeBytes = Number(value.sizeBytes ?? value.expectedSizeBytes);
+  if (role !== 'input'
+      || !filePath
+      || !sourceType
+      || !sourceSnapshot
+      || !SHA256_RE.test(sha256)
+      || !Number.isSafeInteger(sizeBytes)
+      || sizeBytes < 0
+      || sourceSnapshot.sizeBytes !== sizeBytes) {
+    throw recoveryIntegrityError('平盘侧库文件级提交凭证内容损坏');
+  }
+  return {
+    ...value,
+    operationToken: proofOperationToken,
+    role,
+    filePath: path.resolve(filePath),
+    sourceType,
+    sourceSnapshot,
+    sha256,
+    sizeBytes
+  };
+}
+
+function positionCommittedRecoveryArchiveFiles(value, committedInputs) {
+  const operationToken = String(value && value.operationToken || '').trim();
+  if (!operationToken) {
+    throw recoveryIntegrityError('平盘待完成操作缺少 operation token');
+  }
+  if (!Array.isArray(committedInputs)) {
+    throw recoveryIntegrityError('平盘侧库文件级提交凭证集合格式非法');
+  }
+  const files = requirePositionPendingArchiveFiles(value);
+  const pendingInputs = new Map();
+  for (const file of files) {
+    if (file.role !== 'input') continue;
+    const key = recoveryInputKey(file);
+    if (pendingInputs.has(key)) {
+      throw recoveryIntegrityError('平盘待完成操作存在重复输入文件');
+    }
+    pendingInputs.set(key, file);
+  }
+
+  const committedKeys = new Set();
+  for (const value of committedInputs) {
+    const proof = normalizeCommittedInputProof(value, operationToken);
+    const key = recoveryInputKey(proof);
+    if (committedKeys.has(key)) {
+      throw recoveryIntegrityError('平盘侧库存在重复文件级提交凭证');
+    }
+    const pending = pendingInputs.get(key);
+    if (!pending) {
+      throw recoveryIntegrityError('平盘侧库已提交输入在主库 pending 中缺失');
+    }
+    const pendingSourceType = String(pending.sourceType || '').trim();
+    if ((pendingSourceType && pendingSourceType !== proof.sourceType)
+        || pending.sha256 !== proof.sha256
+        || pending.sizeBytes !== proof.sizeBytes
+        || !snapshotsEqual(pending.sourceSnapshot, proof.sourceSnapshot)) {
+      throw recoveryIntegrityError('平盘输入的 pending 证据与 side DB 提交凭证不一致');
+    }
+    committedKeys.add(key);
+  }
+
+  return files.filter((file) => (
+    file.role !== 'input' || committedKeys.has(recoveryInputKey(file))
+  ));
 }
 
 function positionRecoveryArchiveFiles(value, { captureOutputSnapshot }) {
@@ -241,6 +346,7 @@ async function runPositionOperationLifecycle({
 module.exports = {
   parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
+  positionCommittedRecoveryArchiveFiles,
   positionRecoveryArchiveFiles,
   assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,

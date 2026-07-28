@@ -182,6 +182,7 @@ class ArchiveCenterController {
       originalName: file.originalName || path.basename(file.filePath),
       sourceSnapshot: file.sourceSnapshot,
       expectedSha256: file.expectedSha256,
+      expectedSizeBytes: file.expectedSizeBytes ?? file.sizeBytes,
       sizeBytes: file.sizeBytes,
       metadata: file.metadata || {}
     };

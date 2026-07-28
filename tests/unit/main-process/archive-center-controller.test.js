@@ -623,6 +623,7 @@ test('同一平盘恢复操作重复登记时复用 outbox 并补齐新文件', 
     (file) => file.filePath === inputPath
   );
   assert.equal(persistedInput.expectedSha256, 'c'.repeat(64));
+  assert.equal(persistedInput.expectedSizeBytes, 10);
   assert.deepEqual(
     persistedInput.sourceSnapshot,
     { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 }

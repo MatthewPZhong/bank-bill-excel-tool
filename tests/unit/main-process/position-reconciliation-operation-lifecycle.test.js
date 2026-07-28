@@ -8,6 +8,7 @@ const path = require('node:path');
 
 const {
   assertPositionRecoveryInputsUnchanged,
+  positionCommittedRecoveryArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
@@ -353,6 +354,100 @@ test('恢复 input 只复用 pending 的解析时证据，不重新抓取当前�
     expectedSha256: INPUT_EVIDENCE.sha256,
     sizeBytes: INPUT_EVIDENCE.sizeBytes
   }]);
+});
+
+test('恢复只保留 side DB 已提交的文件级输入，prepared 输入不存档也不阻断已提交输入', () => {
+  const firstPath = path.resolve('/tmp/position-committed-A.xlsx');
+  const secondPath = path.resolve('/tmp/position-prepared-B.xlsx');
+  const outputPath = path.resolve('/tmp/position-output.xlsx');
+  const firstPending = {
+    filePath: firstPath,
+    role: 'input',
+    sourceType: 'gateway-inbound',
+    ...INPUT_EVIDENCE
+  };
+  const secondPending = {
+    filePath: secondPath,
+    role: 'input',
+    sourceType: 'gateway-outbound',
+    sourceSnapshot: { ...INPUT_EVIDENCE.sourceSnapshot, ino: 41 },
+    sha256: 'b'.repeat(64),
+    sizeBytes: INPUT_EVIDENCE.sizeBytes
+  };
+  const outputPending = {
+    filePath: outputPath,
+    role: 'output',
+    beforeSnapshot: null
+  };
+
+  const filtered = positionCommittedRecoveryArchiveFiles({
+    operationToken: 'multi-file-operation',
+    archiveFiles: [firstPending, secondPending, outputPending]
+  }, [{
+    operationToken: 'multi-file-operation',
+    sourceType: firstPending.sourceType,
+    role: 'input',
+    filePath: firstPath,
+    sourceSnapshot: firstPending.sourceSnapshot,
+    sha256: firstPending.sha256,
+    sizeBytes: firstPending.sizeBytes
+  }]);
+
+  assert.deepEqual(filtered, [firstPending, outputPending]);
+});
+
+test('恢复文件级提交凭证与 pending 不一致时 fail closed', () => {
+  const pendingPath = path.resolve('/tmp/position-pending-input.xlsx');
+  const pending = {
+    operationToken: 'proof-mismatch-operation',
+    archiveFiles: [{
+      filePath: pendingPath,
+      role: 'input',
+      sourceType: 'gateway-inbound',
+      ...INPUT_EVIDENCE
+    }]
+  };
+  const baseProof = {
+    operationToken: pending.operationToken,
+    sourceType: 'gateway-inbound',
+    role: 'input',
+    filePath: pendingPath,
+    sourceSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+    sha256: INPUT_EVIDENCE.sha256,
+    sizeBytes: INPUT_EVIDENCE.sizeBytes
+  };
+
+  assert.deepEqual(
+    positionCommittedRecoveryArchiveFiles(pending, []),
+    [],
+    'pending 无提交凭证应视为 prepared，不得存档'
+  );
+  assert.throws(
+    () => positionCommittedRecoveryArchiveFiles(pending, [{
+      ...baseProof,
+      filePath: path.resolve('/tmp/position-journal-only.xlsx')
+    }]),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+  assert.throws(
+    () => positionCommittedRecoveryArchiveFiles(pending, [{
+      ...baseProof,
+      sha256: 'c'.repeat(64)
+    }]),
+    (error) => error && error.code === 'position-side-data-invalid'
+  );
+  assert.throws(
+    () => positionCommittedRecoveryArchiveFiles({
+      operationToken: pending.operationToken,
+      archiveFiles: [{
+        filePath: path.resolve('/tmp/position-output-only.xlsx'),
+        role: 'output',
+        beforeSnapshot: null
+      }]
+    }, [baseProof]),
+    (error) => error && error.code === 'position-side-data-invalid',
+    'journal 有输入但 pending 丢失输入时必须阻断'
+  );
 });
 
 test('恢复前暂存输入字节变化时 fail closed，不允许继续登记恢复意图', (t) => {
