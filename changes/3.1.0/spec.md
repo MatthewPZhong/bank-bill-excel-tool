@@ -64,7 +64,7 @@
 - 正式建批、向正式批次追加文件及 outbox 重放都只有在每个文件已形成带正整数 artifact ID 的正式记录后，才可认定存在正式持久重试能力。批次已创建但任一附件在元数据登记前失败时，必须将完整文件清单写入同一 operation key 的 outbox；outbox 写入也失败时保持 pending、禁止推进 checkpoint。正式失败 artifact 与 outbox 的未完成引用共同决定暂存文件是否可释放。
 - 单独识别清结算银行账户表但尚待用户确认时，只保存内存确认 token，不视为业务已提交，也不建立空存档批次；本次 prepare 的主库 pending 正常清理。用户确认后的 apply 操作才写侧库并存档不可变输入副本。
 - 平盘 pending、存档持久化和 checkpoint 清理使用同一可测试状态机；正式存档、持久 outbox 和二者同时失败三条分支必须保持确定行为，禁止仅靠源码接线断言。
-- 启动清理暂存目录前，保护集必须同时包含正式失败 artifact、outbox 以及主库平盘 pending 的 `archiveFiles`；任一保护来源无法可靠读取时，保守跳过本次过期清理。
+- 启动清理暂存目录前，保护集必须同时包含正式失败 artifact、outbox 以及主库平盘 pending 的 `archiveFiles`；pending 存在时，只有 `archiveFiles` 为数组且每项包含非空字符串 `filePath` 才视为可可靠读取。任一保护来源缺失、损坏或不可用时，保守跳过本次过期清理。
 
 ## 4. 导入
 

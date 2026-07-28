@@ -1449,6 +1449,61 @@ test('存档保护来源不可用时保守跳过全部过期暂存清理', (t) =
   }
 });
 
+test('pending archiveFiles 缺失或损坏时保守跳过全部过期暂存清理', (t) => {
+  const invalidArchiveFiles = [
+    ['缺失', undefined, true],
+    ['非数组', {}, false],
+    ['空项', [null], false],
+    ['空路径', [{ filePath: '   ' }], false],
+    ['非字符串路径', [{ filePath: 123 }], false]
+  ];
+
+  for (const [label, archiveFiles, omitField] of invalidArchiveFiles) {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), `position-pending-archive-files-${label}-`)
+    );
+    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+    const bootstrap = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH
+    });
+    const expectedCheckpoint = bootstrap.persistenceCheckpoint();
+    bootstrap.close();
+
+    const staleRoot = path.join(
+      userDataDir,
+      STAGING_RELATIVE_PATH,
+      'stale-batch'
+    );
+    const staleFile = path.join(staleRoot, '1', 'stale.xlsx');
+    fs.mkdirSync(path.dirname(staleFile), { recursive: true });
+    fs.writeFileSync(staleFile, 'stale');
+    const oldDate = new Date(Date.now() - (8 * 24 * 60 * 60 * 1000));
+    fs.utimesSync(staleRoot, oldDate, oldDate);
+
+    const pending = {
+      operationToken: `pending-${label}`,
+      baseCheckpoint: expectedCheckpoint
+    };
+    if (!omitField) pending.archiveFiles = archiveFiles;
+    const recovered = createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      requireExistingSideDb: true,
+      expectedSideDbCheckpoint: expectedCheckpoint,
+      expectedPendingOperation: JSON.stringify(pending),
+      protectedStagingPaths: () => []
+    });
+    recovered.close();
+
+    assert.equal(
+      fs.existsSync(staleFile),
+      true,
+      `${label} 不得把 pending 当成空保护集`
+    );
+  }
+});
+
 test('业务后置清理只返回没有未完成存档引用的暂存目录', () => {
   const root = path.resolve('/tmp/position-staging-filter');
   const sharedDir = path.join(root, 'shared', '1');

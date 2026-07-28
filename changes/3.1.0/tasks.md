@@ -54,6 +54,7 @@
 - [x] 区分账户表待确认 prepare 与已提交业务，避免空存档 pending
 - [x] 抽取 pending/存档/checkpoint 生命周期 helper 并覆盖正式批次、outbox、双失败
 - [x] 主库 pending 文件加入启动暂存保护集，保护集不可读时跳过清理
+- [x] pending `archiveFiles` 缺失或结构损坏时禁止降级为空保护集
 - [x] 管理页侧库恢复错误展示 detailLines
 
 ## 5. 验证

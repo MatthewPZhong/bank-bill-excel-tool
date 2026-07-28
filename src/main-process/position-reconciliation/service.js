@@ -207,9 +207,14 @@ function pendingArchivePaths(value) {
     }
   }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  return (Array.isArray(payload.archiveFiles) ? payload.archiveFiles : [])
-    .map((file) => file && file.filePath)
-    .filter(Boolean);
+  if (!Array.isArray(payload.archiveFiles)) return null;
+  const paths = [];
+  for (const file of payload.archiveFiles) {
+    if (!file || typeof file !== 'object' || Array.isArray(file)) return null;
+    if (typeof file.filePath !== 'string' || file.filePath.trim() === '') return null;
+    paths.push(file.filePath);
+  }
+  return paths;
 }
 
 class PositionReconciliationService {
