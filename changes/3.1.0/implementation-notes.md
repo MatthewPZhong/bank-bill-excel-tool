@@ -154,6 +154,7 @@
 - `scan:vars` 刷新至 218 个 JS 文件、2554 个顶层声明；`check:vars -- --include-minor` 确认 `src/` 无未提交改动。
 - 生产依赖审计保留既有 9 条告警：0 critical、7 high、2 moderate。
 - 发布准备开始时仓库为公开仓库，`v3.1.0` tag 与 GitHub Release 均不存在。
+- 首次 tag 工作流在 Windows 单测阶段发现 `archive-center-controller` 的替代文件测试硬编码 Unix `/tmp` 路径；生产控制器行为正确，测试改为使用 `path.resolve()` 构造平台绝对路径，防止 Windows 将其规范化为盘符路径后产生伪失败。
 
 ## Remaining Unknowns
 

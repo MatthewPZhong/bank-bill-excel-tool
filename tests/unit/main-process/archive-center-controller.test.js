@@ -270,7 +270,7 @@ test('业务完成后源文件已变化的批次要求重新执行业务，不�
 });
 
 test('源文件变化但保留业务摘要时允许选择等价副本，且不向页面暴露摘要', async () => {
-  const replacementPath = '/tmp/replacement-source.xlsx';
+  const replacementPath = path.resolve('/tmp/replacement-source.xlsx');
   const { controller, service } = createHarness({
     showOpenDialog: async (options) => {
       assert.match(options.title, /source\.xlsx/);

@@ -104,4 +104,5 @@
 - `npm run startup:measure`：五次中位数为进程总耗时 `766.383ms`、ready-to-show `175.031ms`；第一次进程启动 `5398.462ms` 为离群值。
 - `npm run scan:vars`：218 个 JS 文件、2554 个顶层声明；`npm run check:vars -- --include-minor` 确认 `src/` 无未提交改动。
 - `npm audit --omit=dev`：0 critical、7 high、2 moderate，与既有生产依赖基线一致。
+- 首次 Windows 发布工作流发现替代文件单测使用 Unix `/tmp` 期望值；测试已改用平台绝对路径，并要求在 Windows runner 重新通过。
 - Windows Excel/WPS 人工检查和真实或脱敏资金数据逐笔复核仍为发布后人工验收项。

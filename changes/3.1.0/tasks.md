@@ -93,6 +93,7 @@
 - [x] 合并后 `npm ci` 与 `npm run release-check`
 - [x] 合并后主页面几何校验与启动性能检查
 - [x] 合并后 `scan:vars`、`check:vars -- --include-minor` 与生产依赖审计
+- [x] 修复首次 Windows 发布门禁发现的替代文件路径跨平台测试
 - [x] 提交并推送发布准备记录
 - [ ] 创建并推送 annotated tag `v3.1.0`
 - [ ] Windows 发布工作流成功
