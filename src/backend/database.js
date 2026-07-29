@@ -45,6 +45,8 @@ const {
   ensureScenarioApplicableChannelsTable,
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5）
   ensureReconRoundBuiltinScenariosSeed,
+  // v3.1.1：canonical 调拨回填 owner 幂等恢复 + 全渠道归一
+  ensureFundTransferBackfillCanonicalOwner,
   // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0）
   ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，category=gateway-recon-id-fix）
@@ -365,6 +367,9 @@ class AppDatabase {
     //   幂等：凭 is_builtin + builtin-fixed + config.subCategory 定位，已存在跳过不覆盖；
     //         marker(recon_round_builtin_scenarios_seeded) 保证删除终态不复活。
     this.ensureReconRoundBuiltinScenariosSeed();
+    // v3.1.1：调拨回填场景同时承载全局日期策略，删除不再是终态。
+    // 已有单 owner 只清空历史适用渠道；缺失按完整 seed 恢复为 disabled；重复不自动合并。
+    this.ensureFundTransferBackfillCanonicalOwner();
     // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，🔴 资金红线）
     //   独立 marker(refund_backfill_scenario_seeded) 绕开全局 marker 短路 —— 旧库已 seed 既有 7 条且
     //   recon_round_builtin_scenarios_seeded=true 时本函数仍能补种退款场景；新库走幂等定位为已存在跳过。
@@ -1079,6 +1084,11 @@ class AppDatabase {
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
   ensureReconRoundBuiltinScenariosSeed() {
     return ensureReconRoundBuiltinScenariosSeed(this.db);
+  }
+
+  // v3.1.1：canonical 调拨回填 owner 修复迁移 facade。
+  ensureFundTransferBackfillCanonicalOwner() {
+    return ensureFundTransferBackfillCanonicalOwner(this.db);
   }
 
   // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，🔴 资金红线）

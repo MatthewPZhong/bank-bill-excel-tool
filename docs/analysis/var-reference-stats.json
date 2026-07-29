@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.1.0",
-    "scannedAt": "2026-07-29T03:26:35.691Z",
+    "version": "3.1.1",
+    "scannedAt": "2026-07-29T16:58:23.421Z",
     "root": "src",
-    "totalFiles": 218,
-    "totalTopLevelNames": 2554,
+    "totalFiles": 221,
+    "totalTopLevelNames": 2604,
     "buckets": {
-      "shared": 376,
-      "paired": 637,
-      "local": 1397,
-      "crossFile": 1013
+      "shared": 382,
+      "paired": 643,
+      "local": 1435,
+      "crossFile": 1025
     }
   },
   "A": {
@@ -761,7 +761,7 @@
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 9
+            "count": 11
           },
           {
             "file": "src/backend/database/own-accounts-migration.js",
@@ -880,7 +880,7 @@
             "count": 3
           }
         ],
-        "totalHits": 81,
+        "totalHits": 83,
         "fileSpan": 37
       },
       {
@@ -1205,7 +1205,7 @@
           },
           {
             "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 14
+            "count": 19
           },
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -1225,15 +1225,15 @@
           },
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 13
+            "count": 12
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 7
+            "count": 11
           },
           {
             "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 7
+            "count": 11
           },
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
@@ -1252,7 +1252,7 @@
             "count": 1
           }
         ],
-        "totalHits": 278,
+        "totalHits": 290,
         "fileSpan": 23
       },
       {
@@ -1308,7 +1308,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 113
+            "count": 116
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1347,7 +1347,7 @@
             "count": 62
           }
         ],
-        "totalHits": 410,
+        "totalHits": 413,
         "fileSpan": 21
       },
       {
@@ -1624,6 +1624,76 @@
         "fileSpan": 16
       },
       {
+        "name": "state",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 26
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/app-updater.js",
+            "count": 30
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 29
+          },
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+            "count": 7
+          },
+          {
+            "file": "src/main-process/toolbox-stream-io.js",
+            "count": 8
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 30
+          },
+          {
+            "file": "src/renderer-pending.js",
+            "count": 55
+          },
+          {
+            "file": "src/renderer-position-reconciliation.js",
+            "count": 15
+          },
+          {
+            "file": "src/renderer-previews.js",
+            "count": 41
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 214
+          }
+        ],
+        "totalHits": 468,
+        "fileSpan": 15
+      },
+      {
         "name": "appendModuleLog",
         "defFiles": [
           "src/backend/database.js",
@@ -1858,72 +1928,6 @@
         ],
         "totalHits": 30,
         "fileSpan": 15
-      },
-      {
-        "name": "state",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/big-table-import/row-scanner.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 26
-          },
-          {
-            "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/app-updater.js",
-            "count": 30
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 29
-          },
-          {
-            "file": "src/main-process/position-reconciliation/excel-io.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/toolbox-stream-io.js",
-            "count": 8
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 30
-          },
-          {
-            "file": "src/renderer-pending.js",
-            "count": 55
-          },
-          {
-            "file": "src/renderer-position-reconciliation.js",
-            "count": 15
-          },
-          {
-            "file": "src/renderer-previews.js",
-            "count": 41
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 214
-          }
-        ],
-        "totalHits": 461,
-        "fileSpan": 14
       },
       {
         "name": "FLOW_HEADERS",
@@ -2629,6 +2633,64 @@
         "fileSpan": 10
       },
       {
+        "name": "toDate",
+        "defFiles": [
+          "src/main-process/position-reconciliation/matching-engine.js",
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/engine-week-utils.js",
+          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/exceljs-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/matching-engine.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-week-utils.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 39,
+        "fileSpan": 10
+      },
+      {
         "name": "validateFlowHeaders",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/contract-flow.js",
@@ -2740,56 +2802,49 @@
         "fileSpan": 9
       },
       {
-        "name": "toDate",
+        "name": "bankChannel",
         "defFiles": [
-          "src/main-process/position-reconciliation/matching-engine.js",
-          "src/main-process/scenario-engines/engine-date-utils.js",
-          "src/main-process/scenario-engines/engine-week-utils.js",
-          "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+          "src/main-process/pre-fund-reconciliation/output-mapper.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/exceljs-writer.js",
+            "file": "src/backend/database/migrations.js",
             "count": 2
           },
           {
-            "file": "src/main-process/position-reconciliation/matching-engine.js",
-            "count": 3
+            "file": "src/constants/boc-fx-link-fields.js",
+            "count": 1
           },
           {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
-            "count": 8
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 1
           },
           {
-            "file": "src/main-process/scenario-engines/engine-week-utils.js",
-            "count": 4
+            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+            "count": 5
           },
           {
-            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "file": "src/main-process/reconciliation-orchestrator.js",
             "count": 2
           },
           {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 3
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 5
           },
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 2
+            "count": 4
           },
           {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "file": "src/renderer-dialogs.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer-position-reconciliation.js",
             "count": 3
           }
         ],
-        "totalHits": 30,
+        "totalHits": 27,
         "fileSpan": 9
       },
       {
@@ -2838,52 +2893,6 @@
           }
         ],
         "totalHits": 27,
-        "fileSpan": 9
-      },
-      {
-        "name": "bankChannel",
-        "defFiles": [
-          "src/main-process/pre-fund-reconciliation/output-mapper.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/migrations.js",
-            "count": 1
-          },
-          {
-            "file": "src/constants/boc-fx-link-fields.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/reconciliation-orchestrator.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer-dialogs.js",
-            "count": 4
-          },
-          {
-            "file": "src/renderer-position-reconciliation.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 26,
         "fileSpan": 9
       },
       {
@@ -3713,41 +3722,43 @@
         "fileSpan": 7
       },
       {
-        "name": "valuesEqual",
+        "name": "canonicalizeDecimal",
         "defFiles": [
-          "src/main-process/scenario-engines/engine-utils.js"
+          "src/main-process/financial-decimal.js",
+          "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "src/main-process/scenario-engines/bank-direction-validator.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "file": "src/main-process/financial-decimal.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/position-reconciliation/decimal.js",
             "count": 2
           },
           {
-            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-            "count": 3
+            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 6
           },
           {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 8
+            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 4
           },
           {
-            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "file": "src/main-process/scenario-engines/bank-direction-validator.js",
             "count": 2
           },
           {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 4
           }
         ],
-        "totalHits": 23,
+        "totalHits": 25,
         "fileSpan": 7
       },
       {
@@ -4084,7 +4095,7 @@
           },
           {
             "file": "src/renderer-dialogs.js",
-            "count": 436
+            "count": 442
           },
           {
             "file": "src/renderer-pending.js",
@@ -4099,7 +4110,7 @@
             "count": 123
           }
         ],
-        "totalHits": 595,
+        "totalHits": 601,
         "fileSpan": 6
       },
       {
@@ -4244,41 +4255,6 @@
         "fileSpan": 6
       },
       {
-        "name": "canonicalizeDecimal",
-        "defFiles": [
-          "src/main-process/financial-decimal.js",
-          "src/main-process/pre-fund-reconciliation/bank-row.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/financial-decimal.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/position-reconciliation/decimal.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-            "count": 6
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 23,
-        "fileSpan": 6
-      },
-      {
         "name": "normalizeDate",
         "defFiles": [
           "src/main-process/position-reconciliation/common.js",
@@ -4312,44 +4288,6 @@
           }
         ],
         "totalHits": 23,
-        "fileSpan": 6
-      },
-      {
-        "name": "FT_RECON_FIELD_MAP",
-        "defFiles": [
-          "src/backend/database/linked-table-repository.js",
-          "src/constants/fund-transfer-recon-fields.js",
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "src/main-process/scenario-engines/many-to-many-detector.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/linked-table-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/constants/fund-transfer-recon-fields.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/fund-transfer-recon-builder.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 21,
         "fileSpan": 6
       },
       {
@@ -4388,6 +4326,44 @@
           }
         ],
         "totalHits": 21,
+        "fileSpan": 6
+      },
+      {
+        "name": "FT_RECON_FIELD_MAP",
+        "defFiles": [
+          "src/backend/database/linked-table-repository.js",
+          "src/constants/fund-transfer-recon-fields.js",
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/many-to-many-detector.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/constants/fund-transfer-recon-fields.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/fund-transfer-recon-builder.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 20,
         "fileSpan": 6
       },
       {
@@ -4456,6 +4432,45 @@
           {
             "file": "src/renderer-dialogs.js",
             "count": 4
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 6
+      },
+      {
+        "name": "MS_PER_DAY",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/engine-week-utils.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-week-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 5
           }
         ],
         "totalHits": 16,
@@ -4840,10 +4855,10 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 35
+            "count": 37
           }
         ],
-        "totalHits": 88,
+        "totalHits": 90,
         "fileSpan": 5
       },
       {
@@ -5162,37 +5177,33 @@
         "fileSpan": 5
       },
       {
-        "name": "MS_PER_DAY",
+        "name": "valuesEqual",
         "defFiles": [
-          "src/main-process/scenario-engines/engine-date-utils.js",
-          "src/main-process/scenario-engines/engine-week-utils.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+          "src/main-process/scenario-engines/engine-utils.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
             "count": 3
           },
           {
-            "file": "src/main-process/scenario-engines/engine-week-utils.js",
-            "count": 2
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 6
           },
           {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "file": "src/main-process/scenario-engines/engine-utils.js",
             "count": 2
           },
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 5
+            "count": 2
           }
         ],
-        "totalHits": 14,
+        "totalHits": 15,
         "fileSpan": 5
       },
       {
@@ -5284,6 +5295,40 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 4
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 5
+      },
+      {
+        "name": "dayDiffWithin",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/many-to-many-detector.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 3
           }
         ],
         "totalHits": 13,
@@ -5511,6 +5556,39 @@
         "fileSpan": 5
       },
       {
+        "name": "validateBankDirection",
+        "defFiles": [
+          "src/main-process/scenario-engines/bank-direction-validator.js",
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 5
+      },
+      {
         "name": "evaluateCondition",
         "defFiles": [
           "src/main-process/scenario-engines/engine-utils.js"
@@ -5535,6 +5613,40 @@
           {
             "file": "src/main-process/scenario-engines/engine-utils.js",
             "count": 2
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 5
+      },
+      {
+        "name": "sameDay",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/engine-date-utils.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-date-utils.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 3
           }
         ],
         "totalHits": 11,
@@ -5660,6 +5772,38 @@
           {
             "file": "src/preload.js",
             "count": 1
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 5
+      },
+      {
+        "name": "normalizeFundTransferDatePolicy",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+          "src/main-process/scenario-engines/many-to-many-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
           }
         ],
         "totalHits": 10,
@@ -6324,6 +6468,32 @@
         "fileSpan": 4
       },
       {
+        "name": "isCanonicalFundTransferOwner",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/scenarios-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 4
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 4
+      },
+      {
         "name": "importRepo",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -6643,6 +6813,32 @@
           },
           {
             "file": "src/backend/acquiring-bill-currency-import/reader.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 4
+      },
+      {
+        "name": "dayDiffAbs",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
             "count": 3
           }
         ],
@@ -7057,35 +7253,6 @@
         "fileSpan": 4
       },
       {
-        "name": "sameDay",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-date-utils.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
         "name": "streamFlowFile",
         "defFiles": [
           "src/backend/biz-op-recon-import/import-worker.js",
@@ -7161,35 +7328,6 @@
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 4
-      },
-      {
-        "name": "dayDiffWithin",
-        "defFiles": [
-          "src/main-process/scenario-engines/engine-date-utils.js",
-          "src/main-process/scenario-engines/many-to-many-detector.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/engine-date-utils.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 2
           }
         ],
@@ -8139,10 +8277,10 @@
           },
           {
             "file": "src/backend/database/migrations.js",
-            "count": 31
+            "count": 32
           }
         ],
-        "totalHits": 36,
+        "totalHits": 37,
         "fileSpan": 3
       },
       {
@@ -8793,28 +8931,6 @@
         "fileSpan": 3
       },
       {
-        "name": "dayDiffAbs",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 3
-      },
-      {
         "name": "FLOW_TABLE",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -8879,6 +8995,28 @@
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 4
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 3
+      },
+      {
+        "name": "hasFundTransferReservedSignature",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenarios-bundle-import.js",
+            "count": 2
           }
         ],
         "totalHits": 9,
@@ -10282,15 +10420,15 @@
         "fileSpan": 3
       },
       {
-        "name": "DEFAULT_DATE_TOLERANCE_DAYS",
+        "name": "DATE_MISMATCH_WARNING_CODE",
         "defFiles": [
-          "src/main-process/scenario-engines/many-to-many-detector.js",
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
           "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
           "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 2
           },
           {
@@ -10323,6 +10461,30 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "DIRECTION_MISMATCH_WARNING_CODE",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 2
           }
         ],
@@ -11022,6 +11184,28 @@
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
+        "name": "validateFundTransferDirections",
+        "defFiles": [
+          "src/main-process/scenario-engines/fund-transfer-engine-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 2
           }
         ],
@@ -12327,6 +12511,25 @@
         "fileSpan": 2
       },
       {
+        "name": "isObjectRecord",
+        "defFiles": [
+          "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 16
+          },
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 2
+      },
+      {
         "name": "safeName",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -12457,6 +12660,25 @@
         "fileSpan": 2
       },
       {
+        "name": "RECON",
+        "defFiles": [
+          "src/main-process/scenario-engines/many-to-many-detector.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 2
+      },
+      {
         "name": "TABLE",
         "defFiles": [
           "src/backend/biz-op-recon-db/flow-imports-repository.js",
@@ -12529,25 +12751,6 @@
           }
         ],
         "totalHits": 16,
-        "fileSpan": 2
-      },
-      {
-        "name": "RECON",
-        "defFiles": [
-          "src/main-process/scenario-engines/many-to-many-detector.js",
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-            "count": 11
-          }
-        ],
-        "totalHits": 15,
         "fileSpan": 2
       },
       {
@@ -13012,6 +13215,24 @@
         "fileSpan": 2
       },
       {
+        "name": "getScenario",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/scenarios-repository.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 2
+      },
+      {
         "name": "getTemplate",
         "defFiles": [
           "src/backend/database/template-repository.js"
@@ -13064,25 +13285,6 @@
           }
         ],
         "totalHits": 10,
-        "fileSpan": 2
-      },
-      {
-        "name": "canonicalAmount",
-        "defFiles": [
-          "src/main-process/position-reconciliation/decimal.js",
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/decimal.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 9,
         "fileSpan": 2
       },
       {
@@ -13359,6 +13561,25 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 2
+      },
+      {
+        "name": "canonicalAmount",
+        "defFiles": [
+          "src/main-process/position-reconciliation/decimal.js",
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/decimal.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
             "count": 3
           }
         ],
@@ -14718,6 +14939,24 @@
         "fileSpan": 2
       },
       {
+        "name": "ensureFundTransferBackfillCanonicalOwner",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "ensureFundTransferReconSupport",
         "defFiles": [
           "src/backend/database/migrations.js"
@@ -15887,6 +16126,24 @@
         "fileSpan": 2
       },
       {
+        "name": "BANK_DIRECTION_FIELDS",
+        "defFiles": [
+          "src/main-process/scenario-engines/bank-direction-validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "BANK_STATEMENT_SHEET_NAME",
         "defFiles": [
           "src/main-process/bank-statement-io.js",
@@ -16303,24 +16560,6 @@
           },
           {
             "file": "src/backend/database/template-repository.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "getScenario",
-        "defFiles": [
-          "src/backend/database/scenarios-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/database/scenarios-repository.js",
             "count": 3
           }
         ],
@@ -18088,6 +18327,25 @@
         "fileSpan": 2
       },
       {
+        "name": "dateMismatchReason",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
         "name": "deleteBankDepositByDateRange",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -18972,6 +19230,25 @@
           },
           {
             "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "INVALID_DIRECTIONS_WARNING_CODE",
+        "defFiles": [
+          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 2
           }
         ],
@@ -23185,6 +23462,24 @@
         "fileSpan": 2
       },
       {
+        "name": "resolveFundTransferDatePolicy",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "resolveRecognizedBigAccount",
         "defFiles": [
           "src/main-process/big-account-recognition.js"
@@ -24160,6 +24455,20 @@
         "fileSpan": 1
       },
       {
+        "name": "addReason",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 17
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 1
+      },
+      {
         "name": "archiveCenterErrorText",
         "defFiles": [
           "src/renderer.js"
@@ -24202,27 +24511,13 @@
         "fileSpan": 1
       },
       {
-        "name": "isObjectRecord",
+        "name": "BANK_ROW_ID_FIELD",
         "defFiles": [
-          "src/main-process/duplicate-inbound-match/matching-engine.js"
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
         ],
         "refFiles": [
           {
-            "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 16
-          }
-        ],
-        "totalHits": 16,
-        "fileSpan": 1
-      },
-      {
-        "name": "addReason",
-        "defFiles": [
-          "src/main-process/scenario-engines/r4-fund-nature-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 15
           }
         ],
@@ -24405,6 +24700,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 1
+      },
+      {
+        "name": "incompleteSideDatabaseError",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 13
           }
         ],
@@ -24748,20 +25057,6 @@
         "fileSpan": 1
       },
       {
-        "name": "BANK_ROW_ID_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 1
-      },
-      {
         "name": "BOC_KEY_MATURITY_ISO",
         "defFiles": [
           "src/backend/database/linked-table-repository.js"
@@ -24811,6 +25106,20 @@
         "refFiles": [
           {
             "file": "src/main-process/financial-decimal.js",
+            "count": 9
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 1
+      },
+      {
+        "name": "DISP",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 9
           }
         ],
@@ -25098,20 +25407,6 @@
         "fileSpan": 1
       },
       {
-        "name": "DISP",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 8
-          }
-        ],
-        "totalHits": 8,
-        "fileSpan": 1
-      },
-      {
         "name": "excelSafeField",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
@@ -25189,6 +25484,20 @@
         "refFiles": [
           {
             "file": "src/main.js",
+            "count": 8
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 1
+      },
+      {
+        "name": "makeScenarioIdentityError",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
             "count": 8
           }
         ],
@@ -25539,6 +25848,20 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_BACKFILL_CANONICAL_SEED",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 7
           }
         ],
@@ -26001,6 +26324,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "DISP_BILL_DATE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 6
           }
         ],
@@ -26722,6 +27059,20 @@
         "fileSpan": 1
       },
       {
+        "name": "CANONICAL_FUND_TRANSFER_DIRECTIONS",
+        "defFiles": [
+          "src/main-process/scenario-engines/fund-transfer-engine-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
         "name": "cellValueFromBody",
         "defFiles": [
           "src/backend/big-table-import/row-scanner.js"
@@ -26743,6 +27094,20 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "cloneValue",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
             "count": 5
           }
         ],
@@ -26813,6 +27178,34 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "DEFAULT_DATE_MATCH_ENABLED",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "DEFAULT_DATE_TOLERANCE_DAYS",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
             "count": 5
           }
         ],
@@ -27339,6 +27732,20 @@
       },
       {
         "name": "POSITION_DB_GENERATION_KEY",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "POSITION_DB_INITIALIZATION_MODES",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
         ],
@@ -27898,6 +28305,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertScenarioNotCanonicalOwner",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "atomicWorkbookWrite",
         "defFiles": [
           "src/main-process/position-reconciliation/excel-io.js"
@@ -28360,6 +28781,20 @@
         "fileSpan": 1
       },
       {
+        "name": "DEFAULT_FUND_TRANSFER_DATE_POLICY",
+        "defFiles": [
+          "src/main-process/scenario-engines/fund-transfer-engine-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "DEFAULT_WORKER_ENTRY",
         "defFiles": [
           "src/main-process/toolbox-large-split-dispatch.js"
@@ -28381,6 +28816,20 @@
         "refFiles": [
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "DISP_FUND_TYPE_FIELD",
+        "defFiles": [
+          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
             "count": 4
           }
         ],
@@ -28640,6 +29089,20 @@
         "fileSpan": 1
       },
       {
+        "name": "FundTransferPolicyConfigError",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "getBankRowValueForC3",
         "defFiles": [
           "src/main-process/scenario-engines/c3-gateway-recon-join.js"
@@ -28857,6 +29320,20 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/import-worker.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "makeWarning",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
             "count": 4
           }
         ],
@@ -29130,6 +29607,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeForStableStringify",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeGatewayFingerprintFields",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/matching-engine.js"
@@ -29333,6 +29824,20 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "quoteSqlIdentifier",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 4
           }
         ],
@@ -30166,6 +30671,20 @@
         "fileSpan": 1
       },
       {
+        "name": "addR4DirectionReason",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "addTruncationNote",
         "defFiles": [
           "src/main-process/biz-op-recon-writer.js"
@@ -30635,6 +31154,20 @@
         "refFiles": [
           {
             "file": "src/backend/toolbox-xlsx-stream/large-split-worker.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertSupportedEmptyLegacyDatabase",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 3
           }
         ],
@@ -31181,6 +31714,20 @@
         "refFiles": [
           {
             "file": "src/main-process/exceljs-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "buildNote",
+        "defFiles": [
+          "src/main-process/scenario-engines/many-to-many-detector.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
             "count": 3
           }
         ],
@@ -31902,6 +32449,20 @@
         "fileSpan": 1
       },
       {
+        "name": "deepFreeze",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "DEFAULT_APP_UPDATE_STATUS",
         "defFiles": [
           "src/renderer.js"
@@ -32070,6 +32631,34 @@
         "fileSpan": 1
       },
       {
+        "name": "describeRawConfigValue",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "describeScenario",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "detectMergeInputKind",
         "defFiles": [
           "src/main-process/toolbox-merge-io.js"
@@ -32141,20 +32730,6 @@
       },
       {
         "name": "DISP_BIG_ACCOUNT_FIELD",
-        "defFiles": [
-          "src/main-process/scenario-engines/dbs-charge-fund-check.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
-        "name": "DISP_FUND_TYPE_FIELD",
         "defFiles": [
           "src/main-process/scenario-engines/dbs-charge-fund-check.js"
         ],
@@ -32763,6 +33338,90 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/pipeline.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_BACKFILL_CURRENT_FUNCTION",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_OWNER_CATEGORY",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_OWNER_FUNC_CATEGORY",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_OWNER_SUB_CATEGORY",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_POLICY_SCENARIO_NAME",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_POLICY_SCHEMA_VERSION",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
             "count": 3
           }
         ],
@@ -33694,6 +34353,20 @@
         "fileSpan": 1
       },
       {
+        "name": "makeSignature",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "makeStopSignal",
         "defFiles": [
           "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js"
@@ -34044,6 +34717,20 @@
         "fileSpan": 1
       },
       {
+        "name": "MAX_DATE_TOLERANCE_DAYS",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "midPayeeAmount",
         "defFiles": [
           "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
@@ -34065,6 +34752,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/own-accounts-migration.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "MIN_DATE_TOLERANCE_DAYS",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
             "count": 3
           }
         ],
@@ -34436,6 +35137,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeSchemaSql",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeSha256",
         "defFiles": [
           "src/backend/database/archive-repository.js"
@@ -34625,6 +35340,20 @@
         "refFiles": [
           {
             "file": "src/backend/big-table-import/import-worker.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "parseOptionalDecimal",
+        "defFiles": [
+          "src/main-process/scenario-engines/bank-direction-validator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/bank-direction-validator.js",
             "count": 3
           }
         ],
@@ -36172,6 +36901,20 @@
         "fileSpan": 1
       },
       {
+        "name": "stableStringify",
+        "defFiles": [
+          "src/main-process/fund-transfer-date-policy.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/fund-transfer-date-policy.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "startupMetrics",
         "defFiles": [
           "src/main.js"
@@ -36375,6 +37118,34 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/operation-tracker.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SUPPORTED_EMPTY_LEGACY_INDEX_INFO",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "SUPPORTED_EMPTY_LEGACY_TABLE_INFO",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 3
           }
         ],
@@ -37362,6 +38133,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertNewDatabaseHasNoUserSchema",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "assertOutputCapacity",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/excel-writer.js"
@@ -37369,6 +38154,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertPublicCreateCanUseIdentity",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
             "count": 2
           }
         ],
@@ -37453,6 +38252,20 @@
         "refFiles": [
           {
             "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertScenarioUpdatePreservesIdentity",
+        "defFiles": [
+          "src/backend/database/scenarios-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/scenarios-repository.js",
             "count": 2
           }
         ],
@@ -37887,20 +38700,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "buildNote",
-        "defFiles": [
-          "src/main-process/scenario-engines/many-to-many-detector.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/many-to-many-detector.js",
             "count": 2
           }
         ],
@@ -38510,20 +39309,6 @@
         "fileSpan": 1
       },
       {
-        "name": "DEFAULT_DIRECTIONS",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-fund-transfer-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "DEFAULT_MAX_AGE_MS",
         "defFiles": [
           "src/main-process/position-reconciliation/input-staging.js"
@@ -38657,20 +39442,6 @@
         "refFiles": [
           {
             "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "DIRECTIONS",
-        "defFiles": [
-          "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
             "count": 2
           }
         ],
@@ -39203,6 +39974,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/engine-week-utils.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "FUND_TRANSFER_BACKFILL_LEGACY_FUNCTION",
+        "defFiles": [
+          "src/backend/database/migrations.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/migrations.js",
             "count": 2
           }
         ],
@@ -41632,6 +42417,20 @@
         "fileSpan": 1
       },
       {
+        "name": "r4ExpectedDirection",
+        "defFiles": [
+          "src/main-process/scenario-engines/r4-fund-nature-check.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "RANGE_IMPORT_ID_STRIDE",
         "defFiles": [
           "src/main-process/biz-op-recon-run-data.js"
@@ -42892,6 +43691,20 @@
         "fileSpan": 1
       },
       {
+        "name": "SUPPORTED_EMPTY_LEGACY_TABLE_SQL",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "T54_RE",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -42899,6 +43712,20 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "tableInfoSignature",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 2
           }
         ],
@@ -44173,7 +45000,7 @@
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 9
+          "count": 11
         },
         {
           "file": "src/backend/database/own-accounts-migration.js",
@@ -44292,7 +45119,7 @@
           "count": 3
         }
       ],
-      "totalHits": 81,
+      "totalHits": 83,
       "fileSpan": 37
     },
     {
@@ -44617,7 +45444,7 @@
         },
         {
           "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 14
+          "count": 19
         },
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
@@ -44637,15 +45464,15 @@
         },
         {
           "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 13
+          "count": 12
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 7
+          "count": 11
         },
         {
           "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 7
+          "count": 11
         },
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
@@ -44664,7 +45491,7 @@
           "count": 1
         }
       ],
-      "totalHits": 278,
+      "totalHits": 290,
       "fileSpan": 23
     },
     {
@@ -44720,7 +45547,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 113
+          "count": 116
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -44759,7 +45586,7 @@
           "count": 62
         }
       ],
-      "totalHits": 410,
+      "totalHits": 413,
       "fileSpan": 21
     },
     {
@@ -45036,6 +45863,76 @@
       "fileSpan": 16
     },
     {
+      "name": "state",
+      "defFiles": [
+        "src/renderer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/row-scanner.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 26
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/app-updater.js",
+          "count": 30
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "count": 29
+        },
+        {
+          "file": "src/main-process/position-reconciliation/excel-io.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+          "count": 7
+        },
+        {
+          "file": "src/main-process/toolbox-stream-io.js",
+          "count": 8
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 30
+        },
+        {
+          "file": "src/renderer-pending.js",
+          "count": 55
+        },
+        {
+          "file": "src/renderer-position-reconciliation.js",
+          "count": 15
+        },
+        {
+          "file": "src/renderer-previews.js",
+          "count": 41
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 214
+        }
+      ],
+      "totalHits": 468,
+      "fileSpan": 15
+    },
+    {
       "name": "appendModuleLog",
       "defFiles": [
         "src/backend/database.js",
@@ -45270,72 +46167,6 @@
       ],
       "totalHits": 30,
       "fileSpan": 15
-    },
-    {
-      "name": "state",
-      "defFiles": [
-        "src/renderer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/big-table-import/row-scanner.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 26
-        },
-        {
-          "file": "src/backend/toolbox-xlsx-stream/multi-sheet-reader.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/app-updater.js",
-          "count": 30
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-          "count": 29
-        },
-        {
-          "file": "src/main-process/position-reconciliation/excel-io.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/toolbox-stream-io.js",
-          "count": 8
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 30
-        },
-        {
-          "file": "src/renderer-pending.js",
-          "count": 55
-        },
-        {
-          "file": "src/renderer-position-reconciliation.js",
-          "count": 15
-        },
-        {
-          "file": "src/renderer-previews.js",
-          "count": 41
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 214
-        }
-      ],
-      "totalHits": 461,
-      "fileSpan": 14
     },
     {
       "name": "FLOW_HEADERS",
@@ -46041,6 +46872,64 @@
       "fileSpan": 10
     },
     {
+      "name": "toDate",
+      "defFiles": [
+        "src/main-process/position-reconciliation/matching-engine.js",
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/engine-week-utils.js",
+        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/exceljs-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/matching-engine.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-week-utils.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 39,
+      "fileSpan": 10
+    },
+    {
       "name": "validateFlowHeaders",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/contract-flow.js",
@@ -46152,56 +47041,49 @@
       "fileSpan": 9
     },
     {
-      "name": "toDate",
+      "name": "bankChannel",
       "defFiles": [
-        "src/main-process/position-reconciliation/matching-engine.js",
-        "src/main-process/scenario-engines/engine-date-utils.js",
-        "src/main-process/scenario-engines/engine-week-utils.js",
-        "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+        "src/main-process/pre-fund-reconciliation/output-mapper.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/exceljs-writer.js",
+          "file": "src/backend/database/migrations.js",
           "count": 2
         },
         {
-          "file": "src/main-process/position-reconciliation/matching-engine.js",
-          "count": 3
+          "file": "src/constants/boc-fx-link-fields.js",
+          "count": 1
         },
         {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
-          "count": 8
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 1
         },
         {
-          "file": "src/main-process/scenario-engines/engine-week-utils.js",
-          "count": 4
+          "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
+          "count": 5
         },
         {
-          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "file": "src/main-process/reconciliation-orchestrator.js",
           "count": 2
         },
         {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 3
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 5
         },
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 2
+          "count": 4
         },
         {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "file": "src/renderer-dialogs.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer-position-reconciliation.js",
           "count": 3
         }
       ],
-      "totalHits": 30,
+      "totalHits": 27,
       "fileSpan": 9
     },
     {
@@ -46250,52 +47132,6 @@
         }
       ],
       "totalHits": 27,
-      "fileSpan": 9
-    },
-    {
-      "name": "bankChannel",
-      "defFiles": [
-        "src/main-process/pre-fund-reconciliation/output-mapper.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/migrations.js",
-          "count": 1
-        },
-        {
-          "file": "src/constants/boc-fx-link-fields.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/output-mapper.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/reconciliation-orchestrator.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer-dialogs.js",
-          "count": 4
-        },
-        {
-          "file": "src/renderer-position-reconciliation.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 26,
       "fileSpan": 9
     },
     {
@@ -47125,41 +47961,43 @@
       "fileSpan": 7
     },
     {
-      "name": "valuesEqual",
+      "name": "canonicalizeDecimal",
       "defFiles": [
-        "src/main-process/scenario-engines/engine-utils.js"
+        "src/main-process/financial-decimal.js",
+        "src/main-process/pre-fund-reconciliation/bank-row.js",
+        "src/main-process/scenario-engines/bank-direction-validator.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "file": "src/main-process/financial-decimal.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/position-reconciliation/decimal.js",
           "count": 2
         },
         {
-          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
-          "count": 3
+          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+          "count": 6
         },
         {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 8
+          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 4
         },
         {
-          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "file": "src/main-process/scenario-engines/bank-direction-validator.js",
           "count": 2
         },
         {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 4
         }
       ],
-      "totalHits": 23,
+      "totalHits": 25,
       "fileSpan": 7
     },
     {
@@ -47496,7 +48334,7 @@
         },
         {
           "file": "src/renderer-dialogs.js",
-          "count": 436
+          "count": 442
         },
         {
           "file": "src/renderer-pending.js",
@@ -47511,7 +48349,7 @@
           "count": 123
         }
       ],
-      "totalHits": 595,
+      "totalHits": 601,
       "fileSpan": 6
     },
     {
@@ -47656,41 +48494,6 @@
       "fileSpan": 6
     },
     {
-      "name": "canonicalizeDecimal",
-      "defFiles": [
-        "src/main-process/financial-decimal.js",
-        "src/main-process/pre-fund-reconciliation/bank-row.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/financial-decimal.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/position-reconciliation/decimal.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
-          "count": 6
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 23,
-      "fileSpan": 6
-    },
-    {
       "name": "normalizeDate",
       "defFiles": [
         "src/main-process/position-reconciliation/common.js",
@@ -47724,44 +48527,6 @@
         }
       ],
       "totalHits": 23,
-      "fileSpan": 6
-    },
-    {
-      "name": "FT_RECON_FIELD_MAP",
-      "defFiles": [
-        "src/backend/database/linked-table-repository.js",
-        "src/constants/fund-transfer-recon-fields.js",
-        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-        "src/main-process/scenario-engines/many-to-many-detector.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/linked-table-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/constants/fund-transfer-recon-fields.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/fund-transfer-recon-builder.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 21,
       "fileSpan": 6
     },
     {
@@ -47800,6 +48565,44 @@
         }
       ],
       "totalHits": 21,
+      "fileSpan": 6
+    },
+    {
+      "name": "FT_RECON_FIELD_MAP",
+      "defFiles": [
+        "src/backend/database/linked-table-repository.js",
+        "src/constants/fund-transfer-recon-fields.js",
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/many-to-many-detector.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/constants/fund-transfer-recon-fields.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/fund-transfer-recon-builder.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 20,
       "fileSpan": 6
     },
     {
@@ -47868,6 +48671,45 @@
         {
           "file": "src/renderer-dialogs.js",
           "count": 4
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 6
+    },
+    {
+      "name": "MS_PER_DAY",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/engine-week-utils.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-week-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 5
         }
       ],
       "totalHits": 16,
@@ -48252,10 +49094,10 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 35
+          "count": 37
         }
       ],
-      "totalHits": 88,
+      "totalHits": 90,
       "fileSpan": 5
     },
     {
@@ -48574,37 +49416,33 @@
       "fileSpan": 5
     },
     {
-      "name": "MS_PER_DAY",
+      "name": "valuesEqual",
       "defFiles": [
-        "src/main-process/scenario-engines/engine-date-utils.js",
-        "src/main-process/scenario-engines/engine-week-utils.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+        "src/main-process/scenario-engines/engine-utils.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
           "count": 3
         },
         {
-          "file": "src/main-process/scenario-engines/engine-week-utils.js",
-          "count": 2
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 6
         },
         {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "file": "src/main-process/scenario-engines/engine-utils.js",
           "count": 2
         },
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 5
+          "count": 2
         }
       ],
-      "totalHits": 14,
+      "totalHits": 15,
       "fileSpan": 5
     },
     {
@@ -48696,6 +49534,40 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 4
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 5
+    },
+    {
+      "name": "dayDiffWithin",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/many-to-many-detector.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 3
         }
       ],
       "totalHits": 13,
@@ -48923,6 +49795,39 @@
       "fileSpan": 5
     },
     {
+      "name": "validateBankDirection",
+      "defFiles": [
+        "src/main-process/scenario-engines/bank-direction-validator.js",
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 5
+    },
+    {
       "name": "evaluateCondition",
       "defFiles": [
         "src/main-process/scenario-engines/engine-utils.js"
@@ -48947,6 +49852,40 @@
         {
           "file": "src/main-process/scenario-engines/engine-utils.js",
           "count": 2
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 5
+    },
+    {
+      "name": "sameDay",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/engine-date-utils.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-date-utils.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 3
         }
       ],
       "totalHits": 11,
@@ -49072,6 +50011,38 @@
         {
           "file": "src/preload.js",
           "count": 1
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 5
+    },
+    {
+      "name": "normalizeFundTransferDatePolicy",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+        "src/main-process/scenario-engines/many-to-many-detector.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
         }
       ],
       "totalHits": 10,
@@ -49736,6 +50707,32 @@
       "fileSpan": 4
     },
     {
+      "name": "isCanonicalFundTransferOwner",
+      "defFiles": [
+        "src/main-process/fund-transfer-date-policy.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/scenarios-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/fund-transfer-date-policy.js",
+          "count": 4
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 19,
+      "fileSpan": 4
+    },
+    {
       "name": "importRepo",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader-handrolled.js",
@@ -50055,6 +51052,32 @@
         },
         {
           "file": "src/backend/acquiring-bill-currency-import/reader.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 4
+    },
+    {
+      "name": "dayDiffAbs",
+      "defFiles": [
+        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
           "count": 3
         }
       ],
@@ -50469,35 +51492,6 @@
       "fileSpan": 4
     },
     {
-      "name": "sameDay",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-date-utils.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-        "src/main-process/scenario-engines/r5-refund-order-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
       "name": "streamFlowFile",
       "defFiles": [
         "src/backend/biz-op-recon-import/import-worker.js",
@@ -50573,35 +51567,6 @@
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 8,
-      "fileSpan": 4
-    },
-    {
-      "name": "dayDiffWithin",
-      "defFiles": [
-        "src/main-process/scenario-engines/engine-date-utils.js",
-        "src/main-process/scenario-engines/many-to-many-detector.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/engine-date-utils.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
           "count": 2
         }
       ],
@@ -51551,10 +52516,10 @@
         },
         {
           "file": "src/backend/database/migrations.js",
-          "count": 31
+          "count": 32
         }
       ],
-      "totalHits": 36,
+      "totalHits": 37,
       "fileSpan": 3
     },
     {
@@ -52205,28 +53170,6 @@
       "fileSpan": 3
     },
     {
-      "name": "dayDiffAbs",
-      "defFiles": [
-        "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 3
-    },
-    {
       "name": "FLOW_TABLE",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js",
@@ -52291,6 +53234,28 @@
         {
           "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 4
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 3
+    },
+    {
+      "name": "hasFundTransferReservedSignature",
+      "defFiles": [
+        "src/main-process/fund-transfer-date-policy.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/scenarios-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/fund-transfer-date-policy.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenarios-bundle-import.js",
+          "count": 2
         }
       ],
       "totalHits": 9,
@@ -53694,15 +54659,15 @@
       "fileSpan": 3
     },
     {
-      "name": "DEFAULT_DATE_TOLERANCE_DAYS",
+      "name": "DATE_MISMATCH_WARNING_CODE",
       "defFiles": [
-        "src/main-process/scenario-engines/many-to-many-detector.js",
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
         "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
         "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
       ],
       "refFiles": [
         {
-          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
           "count": 2
         },
         {
@@ -53735,6 +54700,30 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "DIRECTION_MISMATCH_WARNING_CODE",
+      "defFiles": [
+        "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
           "count": 2
         }
       ],
@@ -54434,6 +55423,28 @@
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
+      "name": "validateFundTransferDirections",
+      "defFiles": [
+        "src/main-process/scenario-engines/fund-transfer-engine-policy.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/fund-transfer-engine-policy.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
           "count": 2
         }
       ],
@@ -55737,6 +56748,25 @@
       "fileSpan": 2
     },
     {
+      "name": "isObjectRecord",
+      "defFiles": [
+        "src/main-process/duplicate-inbound-match/matching-engine.js",
+        "src/main-process/fund-transfer-date-policy.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+          "count": 16
+        },
+        {
+          "file": "src/main-process/fund-transfer-date-policy.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 20,
+      "fileSpan": 2
+    },
+    {
       "name": "safeName",
       "defFiles": [
         "src/main-process/archive-center/archive-service.js"
@@ -55867,6 +56897,25 @@
       "fileSpan": 2
     },
     {
+      "name": "RECON",
+      "defFiles": [
+        "src/main-process/scenario-engines/many-to-many-detector.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 13
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 2
+    },
+    {
       "name": "TABLE",
       "defFiles": [
         "src/backend/biz-op-recon-db/flow-imports-repository.js",
@@ -55939,25 +56988,6 @@
         }
       ],
       "totalHits": 16,
-      "fileSpan": 2
-    },
-    {
-      "name": "RECON",
-      "defFiles": [
-        "src/main-process/scenario-engines/many-to-many-detector.js",
-        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/scenario-engines/many-to-many-detector.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
-          "count": 11
-        }
-      ],
-      "totalHits": 15,
       "fileSpan": 2
     },
     {
@@ -56422,6 +57452,24 @@
       "fileSpan": 2
     },
     {
+      "name": "getScenario",
+      "defFiles": [
+        "src/backend/database/scenarios-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/scenarios-repository.js",
+          "count": 8
+        }
+      ],
+      "totalHits": 10,
+      "fileSpan": 2
+    },
+    {
       "name": "getTemplate",
       "defFiles": [
         "src/backend/database/template-repository.js"
@@ -56474,25 +57522,6 @@
         }
       ],
       "totalHits": 10,
-      "fileSpan": 2
-    },
-    {
-      "name": "canonicalAmount",
-      "defFiles": [
-        "src/main-process/position-reconciliation/decimal.js",
-        "src/main-process/scenario-engines/r4-fund-nature-check.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/position-reconciliation/decimal.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-          "count": 4
-        }
-      ],
-      "totalHits": 9,
       "fileSpan": 2
     },
     {
@@ -56769,6 +57798,25 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 2
+    },
+    {
+      "name": "canonicalAmount",
+      "defFiles": [
+        "src/main-process/position-reconciliation/decimal.js",
+        "src/main-process/scenario-engines/r4-fund-nature-check.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/decimal.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
           "count": 3
         }
       ],
@@ -58128,6 +59176,24 @@
       "fileSpan": 2
     },
     {
+      "name": "ensureFundTransferBackfillCanonicalOwner",
+      "defFiles": [
+        "src/backend/database/migrations.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/database/migrations.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "ensureFundTransferReconSupport",
       "defFiles": [
         "src/backend/database/migrations.js"
@@ -59297,6 +60363,24 @@
       "fileSpan": 2
     },
     {
+      "name": "BANK_DIRECTION_FIELDS",
+      "defFiles": [
+        "src/main-process/scenario-engines/bank-direction-validator.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/bank-direction-validator.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "BANK_STATEMENT_SHEET_NAME",
       "defFiles": [
         "src/main-process/bank-statement-io.js",
@@ -59713,24 +60797,6 @@
         },
         {
           "file": "src/backend/database/template-repository.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "getScenario",
-      "defFiles": [
-        "src/backend/database/scenarios-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/database/scenarios-repository.js",
           "count": 3
         }
       ],
@@ -61498,6 +62564,25 @@
       "fileSpan": 2
     },
     {
+      "name": "dateMismatchReason",
+      "defFiles": [
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
       "name": "deleteBankDepositByDateRange",
       "defFiles": [
         "src/backend/database/linked-table-repository.js"
@@ -62382,6 +63467,25 @@
         },
         {
           "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "INVALID_DIRECTIONS_WARNING_CODE",
+      "defFiles": [
+        "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+        "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
           "count": 2
         }
       ],
@@ -66588,6 +67692,24 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "resolveFundTransferDatePolicy",
+      "defFiles": [
+        "src/main-process/fund-transfer-date-policy.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/fund-transfer-date-policy.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

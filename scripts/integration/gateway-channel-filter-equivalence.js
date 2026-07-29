@@ -98,6 +98,7 @@ function dispRow(o = {}) {
     big_account: o.big_account ?? 'M-DBS-001',
     币种: o['币种'] ?? 'USD',
     金额: o['金额'] ?? 100,
+    BillDate: o.BillDate ?? '2026-06-01',
     ReconID: o.ReconID ?? 'DISP-RECON-1',
     fund_type: o.fund_type ?? 'FundTransfer-out'
   };

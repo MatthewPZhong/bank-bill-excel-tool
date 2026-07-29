@@ -375,6 +375,28 @@ test.describe('R5场景2 — ③ 同日与 ±1day 都有候选时同日优先', 
     assert.equal(byRow['b_same'], 'GW-1', 'Phase1 同日：第一条 gw 消费同日行');
     assert.equal(byRow['b_diff'], 'GW-2', 'Phase2 ±1day：第二条 gw 消费剩余行');
   });
+
+  test('全局 Phase1：前序 gw 的 +1 候选必须先留给后序 gw 的同日匹配', () => {
+    const gws = [
+      gwRow({ reconId: 'GW-FIRST', billdate: '2026-07-10' }),
+      gwRow({ reconId: 'GW-SAME-DAY', billdate: '2026-07-11' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'b-0711', debit: 100, billDate: '2026-07-11', reconId: '' }),
+      bankRow({ rowId: 'b-0709', debit: 100, billDate: '2026-07-09', reconId: '' })
+    ];
+
+    const result = runRound5FundTransferBackfill(gws, banks, {
+      fundTransferDatePolicy: { enabled: true, toleranceDays: 1 }
+    });
+
+    assert.equal(banks[0].ReconciliationId, 'GW-SAME-DAY');
+    assert.equal(banks[1].ReconciliationId, 'GW-FIRST');
+    assert.deepEqual(
+      result.modifications.map((item) => [item.rowId, item.newValue]),
+      [['b-0711', 'GW-SAME-DAY'], ['b-0709', 'GW-FIRST']]
+    );
+  });
 });
 
 // ---- ④ 严格 1v1 -------------------------------------------------------
@@ -647,6 +669,281 @@ test.describe('R5场景2 — ⑧ 多候选 tie-break 取 bankPool 原序最前',
   });
 });
 
+test.describe('R5场景2 v3.1.1 — 严格真实方向与 eligibleCandidates', () => {
+  test('FundType 路由相同但真实方向相反：不计入 multi、不消费；后置正确方向行被选中', () => {
+    const gws = [gwRow({ tradeType: 'FundTransfer-out', amount: 100, reconId: 'GW-STRICT' })];
+    const wrong = bankRow({
+      rowId: 'wrong-credit',
+      fundType: 'FundTransfer-out',
+      credit: 100,
+      debit: 0,
+      reconId: ''
+    });
+    const correct = bankRow({
+      rowId: 'correct-debit',
+      fundType: 'FundTransfer-out',
+      credit: 0,
+      debit: 100,
+      reconId: ''
+    });
+
+    const result = runRound5FundTransferBackfill(gws, [wrong, correct]);
+
+    assert.deepEqual(result.modifications.map((item) => item.rowId), ['correct-debit']);
+    assert.deepEqual(Array.from(result.usedBankRowIds), ['correct-debit']);
+    assert.equal(wrong.ReconciliationId, '');
+    assert.equal(result.warnings.filter((item) => item.code === 'multi-bank-match-backfill').length, 0);
+    const directionWarning = result.warnings.find((item) => item.code === 'fund-transfer-direction-mismatch');
+    assert.ok(directionWarning);
+    assert.equal(directionWarning.rowId, 'wrong-credit');
+    assert.equal(directionWarning.expectedDirection, 'DEBIT');
+    assert.equal(directionWarning.reason, 'expected-zero');
+  });
+
+  test('只有方向失败近似候选时零消费、零改写，且告警不泄露账号', () => {
+    const result = runRound5FundTransferBackfill(
+      [gwRow({ tradeType: 'FundTransfer-in', amount: 100, reconId: 'GW-IN' })],
+      [bankRow({
+        rowId: 'wrong-debit',
+        fundType: 'FundTransfer-in',
+        credit: 0,
+        debit: 100,
+        reconId: ''
+      })]
+    );
+
+    assert.deepEqual(result.modifications, []);
+    assert.equal(result.usedBankRowIds.size, 0);
+    assert.equal(result.warnings.length, 1);
+    assert.equal(result.warnings[0].code, 'fund-transfer-direction-mismatch');
+    assert.equal(result.warnings[0].expectedDirection, 'CREDIT');
+    assert.ok(!result.warnings[0].message.includes('M001'));
+  });
+});
+
+test.describe('R5场景2 v3.1.1 — 日期策略启停与稳定排序', () => {
+  test('日期关闭完全跳过日期：来源/银行日期非法仍按其它严格条件命中', () => {
+    const gws = [gwRow({ reconId: 'GW-NO-DATE', billdate: 'not-a-date' })];
+    const banks = [bankRow({ rowId: 'b-no-date', debit: 100, billDate: '', reconId: '' })];
+    const result = runRound5FundTransferBackfill(gws, banks, {
+      fundTransferDatePolicy: { enabled: false, toleranceDays: 7 }
+    });
+
+    assert.deepEqual(result.modifications.map((item) => item.rowId), ['b-no-date']);
+    assert.deepEqual(result.warnings, []);
+  });
+
+  test('日期开启但近似候选日期非法：不降级、零消费并产可审计日期告警', () => {
+    const result = runRound5FundTransferBackfill(
+      [gwRow({ tradeType: 'FundTransfer-in', reconId: 'GW-BAD-DATE', billdate: 'not-a-date' })],
+      [bankRow({
+        rowId: 'b-date',
+        fundType: 'FundTransfer-in',
+        credit: 100,
+        debit: 0,
+        billDate: '2026-07-10',
+        reconId: ''
+      })],
+      { fundTransferDatePolicy: { enabled: true, toleranceDays: 7 } }
+    );
+
+    assert.deepEqual(result.modifications, []);
+    assert.equal(result.usedBankRowIds.size, 0);
+    const dateWarnings = result.warnings.filter((item) => item.code === 'fund-transfer-date-mismatch');
+    assert.equal(dateWarnings.length, 1, 'Phase1/Phase2 对同一失败候选只告警一次');
+    const warning = dateWarnings[0];
+    assert.equal(warning.rowId, 'b-date');
+    assert.equal(warning.expectedDirection, 'CREDIT');
+    assert.equal(warning.reason, 'counterpart-date-invalid');
+    assert.ok(!JSON.stringify(warning).includes('M001'));
+  });
+
+  test('同一来源已有同日合法候选时，日期非法 near-candidate 仍告警且不进入 multi/消费/改写', () => {
+    const valid = bankRow({
+      rowId: 'same-day-valid',
+      debit: 100,
+      billDate: '2026-07-10',
+      reconId: ''
+    });
+    const invalid = bankRow({
+      rowId: 'invalid-date-near',
+      debit: 100,
+      billDate: 'not-a-date',
+      reconId: ''
+    });
+    const outside = bankRow({
+      rowId: 'outside-date-near',
+      debit: 100,
+      billDate: '2026-07-12',
+      reconId: ''
+    });
+    const result = runRound5FundTransferBackfill(
+      [gwRow({ reconId: 'GW-AUDIT', billdate: '2026-07-10' })],
+      [valid, invalid, outside],
+      { fundTransferDatePolicy: { enabled: true, toleranceDays: 1 } }
+    );
+
+    assert.equal(valid.ReconciliationId, 'GW-AUDIT');
+    assert.equal(invalid.ReconciliationId, '');
+    assert.equal(outside.ReconciliationId, '');
+    assert.deepEqual(result.modifications.map((item) => item.rowId), ['same-day-valid']);
+    assert.deepEqual(Array.from(result.usedBankRowIds), ['same-day-valid']);
+    assert.equal(result.warnings.filter((item) => item.code === 'multi-bank-match-backfill').length, 0);
+    const dateWarnings = result.warnings.filter((item) => item.code === 'fund-transfer-date-mismatch');
+    assert.deepEqual(
+      dateWarnings.map((item) => [item.rowId, item.reason]),
+      [
+        ['invalid-date-near', 'bank-date-invalid'],
+        ['outside-date-near', 'outside-tolerance']
+      ]
+    );
+    assert.ok(!JSON.stringify(dateWarnings).includes('M001'));
+  });
+
+  test('25×25 日期失败密集组按银行行/方向/原因去重，Phase1/2 不放大为 625 条', () => {
+    const secretAccount = 'DENSE-SECRET-ACCOUNT';
+    const gateways = Array.from({ length: 25 }, (_, index) => gwRow({
+      merchantId: secretAccount,
+      reconId: `DENSE-GW-${index}`,
+      billdate: '2026-07-01'
+    }));
+    const banks = Array.from({ length: 25 }, (_, index) => bankRow({
+      rowId: `dense-bank-${index}`,
+      merchantId: secretAccount,
+      debit: 100,
+      reconId: '',
+      billDate: '2026-08-01'
+    }));
+    // 无稳定 _rowId 时仍必须按银行原始行序区分，不能把两条真实银行行误并成一条 warning。
+    delete banks[23]._rowId;
+    delete banks[24]._rowId;
+    const sourceBefore = structuredClone(gateways);
+    const banksBefore = structuredClone(banks);
+
+    const result = runRound5FundTransferBackfill(gateways, banks, {
+      fundTransferDatePolicy: { enabled: true, toleranceDays: 1 }
+    });
+    const dateWarnings = result.warnings.filter(
+      (warning) => warning.code === 'fund-transfer-date-mismatch'
+    );
+
+    assert.equal(dateWarnings.length, 25, '25×25 失败边应收敛为每条银行行 1 条，而非 625 条');
+    assert.ok(dateWarnings.every((warning) => warning.expectedDirection === 'DEBIT'));
+    assert.ok(dateWarnings.every((warning) => warning.reason === 'outside-tolerance'));
+    assert.equal(dateWarnings.filter((warning) => warning.rowId === undefined).length, 2);
+    assert.equal(JSON.stringify(dateWarnings).includes(secretAccount), false, '告警不得泄露完整账号');
+    assert.deepEqual(result.modifications, [], '日期失败不得产生改写');
+    assert.equal(result.usedBankRowIds.size, 0, '日期失败不得消费银行行');
+    assert.deepEqual(gateways, sourceBefore, '网关来源行保持只读');
+    assert.deepEqual(banks, banksBefore, '银行行保持未消费、未改写');
+  });
+
+  test('同一银行行的不同日期失败原因分别保留', () => {
+    const bank = bankRow({
+      rowId: 'multi-reason-bank',
+      merchantId: 'M001',
+      debit: 100,
+      billDate: '2026-08-01'
+    });
+    const result = runRound5FundTransferBackfill(
+      [
+        gwRow({ reconId: 'INVALID-SOURCE', billdate: 'not-a-date' }),
+        gwRow({ reconId: 'OUTSIDE-SOURCE', billdate: '2026-07-01' })
+      ],
+      [bank],
+      { fundTransferDatePolicy: { enabled: true, toleranceDays: 1 } }
+    );
+
+    assert.deepEqual(
+      result.warnings
+        .filter((warning) => warning.code === 'fund-transfer-date-mismatch')
+        .map((warning) => warning.reason)
+        .sort(),
+      ['counterpart-date-invalid', 'outside-tolerance']
+    );
+    assert.deepEqual(result.modifications, []);
+    assert.equal(result.usedBankRowIds.size, 0);
+  });
+
+  test('±7 边界包含、+8 排除', () => {
+    const gws = [gwRow({ reconId: 'GW-N7', billdate: '2026-07-01' })];
+    const banks = [
+      bankRow({ rowId: 'plus-8', debit: 100, billDate: '2026-07-09', reconId: '' }),
+      bankRow({ rowId: 'plus-7', debit: 100, billDate: '2026-07-08', reconId: '' })
+    ];
+    const result = runRound5FundTransferBackfill(gws, banks, {
+      fundTransferDatePolicy: { enabled: true, toleranceDays: 7 }
+    });
+
+    assert.deepEqual(result.modifications.map((item) => item.rowId), ['plus-7']);
+    assert.equal(banks[0].ReconciliationId, '');
+  });
+
+  test('绝对日期差相等时按银行原序；反转原序后选择随之反转，均保留多候选告警', () => {
+    const run = (ids) => {
+      const rowsById = {
+        past: bankRow({ rowId: 'past', debit: 100, billDate: '2026-07-09', reconId: '' }),
+        future: bankRow({ rowId: 'future', debit: 100, billDate: '2026-07-11', reconId: '' })
+      };
+      return runRound5FundTransferBackfill(
+        [gwRow({ reconId: 'GW-TIE', billdate: '2026-07-10' })],
+        ids.map((id) => rowsById[id]),
+        { fundTransferDatePolicy: { enabled: true, toleranceDays: 1 } }
+      );
+    };
+
+    const futureFirst = run(['future', 'past']);
+    const pastFirst = run(['past', 'future']);
+    assert.deepEqual(futureFirst.modifications.map((item) => item.rowId), ['future']);
+    assert.deepEqual(pastFirst.modifications.map((item) => item.rowId), ['past']);
+    assert.equal(futureFirst.warnings.filter((item) => item.code === 'multi-bank-match-backfill').length, 1);
+    assert.equal(pastFirst.warnings.filter((item) => item.code === 'multi-bank-match-backfill').length, 1);
+  });
+});
+
+test.describe('R5场景2 v3.1.1 — directions 配置整体失败关闭', () => {
+  const canonical = [
+    { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
+    { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
+  ];
+
+  test('重复、缺项、额外、错配、未知与显式缺失都只告警一次且不启动消费集', () => {
+    const invalidConfigs = [
+      undefined,
+      [canonical[0]],
+      [canonical[0], canonical[0]],
+      [...canonical, { gwTradeType: 'extra', bankFundType: 'extra' }],
+      [
+        { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-in' },
+        canonical[1]
+      ],
+      [canonical[0], { gwTradeType: 'UNKNOWN', bankFundType: 'UNKNOWN' }]
+    ];
+
+    for (const directions of invalidConfigs) {
+      const bank = bankRow({ rowId: 'b-config', debit: 100, reconId: '' });
+      const result = runRound5FundTransferBackfill([gwRow({ reconId: 'GW-CONFIG' })], [bank], {
+        directions
+      });
+      assert.deepEqual(result.modifications, []);
+      assert.equal(result.usedBankRowIds.size, 0);
+      assert.equal(result.warnings.length, 1);
+      assert.equal(result.warnings[0].code, 'r5-fund-transfer-directions-invalid');
+      assert.equal(bank.ReconciliationId, '');
+    }
+  });
+
+  test('两个 canonical 配对顺序反转仍完整执行', () => {
+    const result = runRound5FundTransferBackfill(
+      [gwRow({ tradeType: 'FundTransfer-out', reconId: 'GW-VALID' })],
+      [bankRow({ rowId: 'b-valid', fundType: 'FundTransfer-out', debit: 100, reconId: '' })],
+      { directions: [canonical[1], canonical[0]] }
+    );
+    assert.deepEqual(result.modifications.map((item) => item.rowId), ['b-valid']);
+    assert.equal(result.warnings.length, 0);
+  });
+});
+
 // ---- 边界兜底 ----------------------------------------------------------
 
 test.describe('R5场景2 — 边界兜底', () => {
@@ -658,7 +955,7 @@ test.describe('R5场景2 — 边界兜底', () => {
     assert.deepEqual(runRound5FundTransferBackfill([], [bankRow()]).modifications, []);
   });
 
-  test('directions 可 config 化：自定义单方向只跑该方向', () => {
+  test('directions 缺少一个方向时整轮失败关闭：零改写、零消费、只告警一次', () => {
     const gws = [
       gwRow({ tradeType: 'FundTransfer-out', amount: 500, reconId: 'GW-OUT' }),
       gwRow({ tradeType: 'FundTransfer-in', amount: 600, reconId: 'GW-IN' })
@@ -667,11 +964,15 @@ test.describe('R5场景2 — 边界兜底', () => {
       bankRow({ rowId: 'bo', fundType: 'FundTransfer-out', credit: 0, debit: 500, reconId: '' }),
       bankRow({ rowId: 'bi', fundType: 'FundTransfer-in', credit: 600, debit: 0, reconId: '' })
     ];
-    // 只配 out 方向 → in 那对不参与
-    const { modifications } = runRound5FundTransferBackfill(gws, banks, {
+    const { modifications, warnings, usedBankRowIds } = runRound5FundTransferBackfill(gws, banks, {
       directions: [{ gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' }]
     });
-    assert.equal(modifications.length, 1);
-    assert.equal(modifications[0].rowId, 'bo');
+    assert.deepEqual(modifications, []);
+    assert.equal(usedBankRowIds.size, 0);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].code, 'r5-fund-transfer-directions-invalid');
+    assert.equal(warnings[0].rowId, null);
+    assert.equal(banks[0].ReconciliationId, '');
+    assert.equal(banks[1].ReconciliationId, '');
   });
 });

@@ -5900,6 +5900,24 @@
       return getCategoryLabel(scenario ? scenario.category : '');
     }
 
+    function hasFundTransferReservedSignatureUi(scenario) {
+      const config = scenario && scenario.config;
+      return Boolean(
+        scenario
+        && scenario.category === 'builtin-fixed'
+        && config
+        && typeof config === 'object'
+        && !Array.isArray(config)
+        && config.funcCategory === 'platform-order'
+        && config.subCategory === 'fund-transfer-backfill'
+      );
+    }
+
+    function isCanonicalFundTransferOwnerUi(scenario) {
+      return hasFundTransferReservedSignatureUi(scenario)
+        && scenario.isBuiltin === true;
+    }
+
     async function loadScenariosOrAlert() {
       const result = await desktopApi.scenarios.list();
       if (result && result.status === 'ok') {
@@ -7572,6 +7590,8 @@
         // v2.1.13 D-2：自带写死场景（builtin-fixed）执行操作列仅「管理」按钮（无转移/删除）；
         //   「管理」点击分流到适用银行渠道弹窗（manage handler 按 tr.dataset.category 判定）
         const isBuiltinFixed = scenario.category === 'builtin-fixed';
+        const isFundTransferReservedConflict = hasFundTransferReservedSignatureUi(scenario)
+          && !isCanonicalFundTransferOwnerUi(scenario);
         // v2.1.16-beta.5 需求2（PR-4 修订）：网关对账单修复-场景管理列表里的内置场景（如「JPM调拨订单修复」，is_builtin=1
         //   且 category='gateway-recon-id-fix'）= 写死场景，不可编辑/删除/转移 → 执行操作列去掉全部文字按钮，渲只读提示。
         //   收窄到 category='gateway-recon-id-fix' 是为零回归：is_builtin=1 的 C2(offset-bill-mark)/C3(gateway-recon-join)/
@@ -7583,6 +7603,9 @@
         if (isBuiltinGatewayScenario) {
           // 写死场景：操作列只读，无任何可点按钮（参照渠道管理 is_builtin 保护范式）
           actionsInner = '<span class="text-action" style="opacity: 0.55; cursor: default;" title="系统内置场景，不可编辑 / 删除 / 转移">（内置场景）</span>';
+        } else if (isFundTransferReservedConflict) {
+          actionsInner = '<span class="text-action" style="opacity: 0.7; cursor: default;" title="该普通场景占用了系统保留签名，运行会被阻断">非系统冲突场景</span>'
+            + '<button class="text-action danger-text" type="button" data-row-action="delete">删除冲突</button>';
         } else if (isBuiltinFixed) {
           actionsInner = '<button class="text-action" type="button" data-row-action="manage">管理</button>';
         } else {
@@ -8215,14 +8238,25 @@
       dialog.className = 'modal-card builtin-fixed-channel-manage-card';
       dialog.innerHTML = `
         <div class="dialog-header">
-          <div class="dialog-title">请选择适用的银行渠道</div>
+          <div class="dialog-title" data-role="manager-title">请选择适用的银行渠道</div>
           <button class="icon-close" type="button">×</button>
         </div>
         <div class="dialog-body builtin-fixed-channel-body">
           <!-- v2.1.13 bug 修复：用 div 而非 label，避免点击行内文本/空白误触发内部下拉按钮 -->
-          <!-- v2.1.16 A1：「银行渠道」与「优先级」并列居中显示，两组之间保持间距（builtin-fixed-priority-row flex 容器） -->
-          <div class="builtin-fixed-channel-row builtin-fixed-priority-row">
-            <div class="builtin-fixed-channel-group">
+          <!-- 非调拨场景：「银行渠道」在左、「优先级」在右；canonical 调拨场景隐藏银行渠道，
+               改为「调拨单匹配日期」在左、「优先级」在右，始终共用这一行。 -->
+          <div class="builtin-fixed-channel-row builtin-fixed-priority-row" data-role="date-priority-row">
+            <div class="builtin-fixed-date-policy-group" data-role="date-policy-row" hidden>
+              <label class="builtin-fixed-payment-check">
+                <input type="checkbox" data-field="date-match-enabled">
+                调拨单匹配日期
+              </label>
+              <span class="builtin-fixed-channel-label">±</span>
+              <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input"
+                type="number" min="1" max="999" step="1" data-field="date-tolerance-days" value="1">
+              <span class="builtin-fixed-channel-label">天</span>
+            </div>
+            <div class="builtin-fixed-channel-group" data-role="applicable-channel-group">
               <span class="builtin-fixed-channel-label">银行渠道</span>
               <div class="new-account-currency-dropdown-wrap builtin-fixed-channel-dropdown-wrap">
                 <button class="new-account-currency-dropdown-btn builtin-fixed-channel-dropdown-btn" type="button" aria-expanded="false"> </button>
@@ -8232,7 +8266,8 @@
               <span class="builtin-fixed-channel-label">优先级 <span class="scenario-config-tooltip" title="3 = 最高，0 = 最低">ⓘ</span></span>
               <input class="scenario-config-input scenario-config-input-narrow builtin-fixed-priority-input" type="number" min="0" max="3" data-field="priority" value="0">
             </div>
-          </div>
+          </div><!-- /builtin-fixed-date-priority-row -->
+          <div class="builtin-fixed-payment-error builtin-fixed-date-policy-error" data-role="date-policy-error" hidden></div>
           <!-- v3.0.8（用户要求）：两个勾选框（对账数据来源 / Payment线下调拨）并排一行显示 → 外层 flex 容器包裹。
                与两勾选框同 gating（仅 fund-transfer-backfill 场景显示）：加载 IIFE 里 isPaymentScenario 时 unhide，
                避免非 payment 场景留空容器的多余间距。 -->
@@ -8286,8 +8321,14 @@
       `;
 
       const dropdownButton = dialog.querySelector('.builtin-fixed-channel-dropdown-btn');
+      const managerTitle = dialog.querySelector('[data-role="manager-title"]');
+      const applicableChannelGroup = dialog.querySelector('[data-role="applicable-channel-group"]');
       // v2.1.16 A1：优先级输入框（0-3 整数；回填当前场景 priority，保存时随适用渠道一并 update）
       const priorityInput = dialog.querySelector('input[data-field="priority"]');
+      const datePolicyRow = dialog.querySelector('[data-role="date-policy-row"]');
+      const dateMatchEnabledCheck = dialog.querySelector('input[data-field="date-match-enabled"]');
+      const dateToleranceDaysInput = dialog.querySelector('input[data-field="date-tolerance-days"]');
+      const datePolicyError = dialog.querySelector('[data-role="date-policy-error"]');
       // v3.0.6 需求2（T6）：对账数据来源二选一 —— 勾选行（默认勾选；仅 fund-transfer-backfill 场景显示，与 payment 行同 gating）
       const reconSourceRow = dialog.querySelector('[data-role="recon-source-row"]');
       const reconSourceCheck = dialog.querySelector('input[data-field="recon-source-mid"]');
@@ -8314,9 +8355,19 @@
       let panelOpen = false;
       // v3.0.4 块 F · F2：缓存当前场景完整 config（供保存时读-改-写浅合并；加载完成前禁用保存防竞态写空）
       let cachedConfig = null;       // scenarios.get 返回的 config（已 JSON.parse）
-      let isPaymentScenario = false; // config.subCategory==='fund-transfer-backfill' 才显示 payment 控件
+      let isPaymentScenario = false; // 仅完整 canonical fund-transfer owner 显示 Payment 子配置
       let isRefundScenario = false;  // config.subCategory==='refund-order-backfill' 才显示退款模糊匹配开关
+      let isCanonicalFundTransferOwner = false;
       let configLoaded = false;      // 加载 IIFE 完成标记；未完成禁用保存
+
+      function syncDatePolicyInputState() {
+        if (!dateMatchEnabledCheck || !dateToleranceDaysInput) return;
+        dateToleranceDaysInput.disabled = !dateMatchEnabledCheck.checked;
+        if (datePolicyError) datePolicyError.hidden = true;
+      }
+      if (dateMatchEnabledCheck) {
+        dateMatchEnabledCheck.addEventListener('change', syncDatePolicyInputState);
+      }
 
       // F1：勾选/取消勾选 → 展开区显隐（取消勾选保留输入值，照 C3 extraFee 范式）
       function syncPaymentFieldsVisibility() {
@@ -8400,65 +8451,85 @@
         if (panelOpen) closePanel(); else openPanel();
       });
 
-      // 异步加载渠道列表 + 当前适用渠道（空 = 适用全部 → 默认全选）
+      // 先加载完整场景，只有完整 canonical owner 才进入“调拨回填功能管理”。
+      // canonical owner 固定全渠道，因此不读取渠道列表/适用渠道；其它 builtin-fixed 保持原管理页行为。
       // v3.0.4 块 F · F2：加载完成前禁用保存（防 config 未就绪时点保存 → 浅合并基底 null 写空 config）
       if (saveButton) saveButton.disabled = true;
       (async () => {
         try {
-          const chResult = await desktopApi.channels.list();
-          if (chResult && chResult.status === 'ok' && Array.isArray(chResult.channels)) {
-            allChannels = chResult.channels.map((c) => ({ id: Number(c.id), label: c.label || c.name }));
-          }
-          const apResult = await desktopApi.scenarios.getApplicableChannels(scenarioId);
-          const applicable = (apResult && apResult.status === 'ok' && Array.isArray(apResult.channelIds)) ? apResult.channelIds : [];
-          selectedIds = applicable.length === 0
-            ? new Set(allChannels.map((c) => c.id))   // 空 = 全部 → 全选
-            : new Set(applicable.map(Number));
-          updateLabel();
-          // v2.1.16 A1：回填当前场景优先级（getScenario 返回 scenario.priority，0-3）
           const scResult = await desktopApi.scenarios.get(scenarioId);
-          if (scResult && scResult.status === 'ok' && scResult.scenario) {
-            if (priorityInput) {
-              priorityInput.value = String(scResult.scenario.priority ?? 0);
+          if (!scResult || scResult.status !== 'ok' || !scResult.scenario) {
+            throw new Error(scResult?.message || '场景不存在');
+          }
+          const scenarioDetail = scResult.scenario;
+          if (priorityInput) {
+            priorityInput.value = String(scenarioDetail.priority ?? 0);
+          }
+          cachedConfig = (scenarioDetail.config && typeof scenarioDetail.config === 'object')
+            ? scenarioDetail.config
+            : {};
+          isCanonicalFundTransferOwner = isCanonicalFundTransferOwnerUi(scenarioDetail);
+          isPaymentScenario = isCanonicalFundTransferOwner;
+          isRefundScenario = cachedConfig.subCategory === 'refund-order-backfill';
+
+          if (isCanonicalFundTransferOwner) {
+            if (managerTitle) managerTitle.textContent = '调拨回填功能管理';
+            if (applicableChannelGroup) applicableChannelGroup.hidden = true;
+            if (datePolicyRow) datePolicyRow.hidden = false;
+            if (dateMatchEnabledCheck) {
+              dateMatchEnabledCheck.checked = cachedConfig.dateMatchEnabled !== false;
             }
-            // v3.0.4 块 F · F2：缓存完整 config 供保存浅合并；按 subCategory gating 显示 payment 控件
-            cachedConfig = (scResult.scenario.config && typeof scResult.scenario.config === 'object')
-              ? scResult.scenario.config
+            const configuredDays = cachedConfig.dateToleranceDays;
+            if (dateToleranceDaysInput) {
+              dateToleranceDaysInput.value = String(
+                Number.isInteger(configuredDays) && configuredDays >= 1 && configuredDays <= 999
+                  ? configuredDays
+                  : 1
+              );
+            }
+            syncDatePolicyInputState();
+          } else {
+            const chResult = await desktopApi.channels.list();
+            if (chResult && chResult.status === 'ok' && Array.isArray(chResult.channels)) {
+              allChannels = chResult.channels.map((c) => ({ id: Number(c.id), label: c.label || c.name }));
+            }
+            const apResult = await desktopApi.scenarios.getApplicableChannels(scenarioId);
+            const applicable = (apResult && apResult.status === 'ok' && Array.isArray(apResult.channelIds))
+              ? apResult.channelIds
+              : [];
+            selectedIds = applicable.length === 0
+              ? new Set(allChannels.map((c) => c.id))
+              : new Set(applicable.map(Number));
+            updateLabel();
+          }
+
+          if (isPaymentScenario && checksRow) checksRow.hidden = false;
+          if (isPaymentScenario && reconSourceRow) {
+            reconSourceRow.hidden = false;
+            if (reconSourceCheck) reconSourceCheck.checked = cachedConfig.reconSourceMid !== false;
+          }
+          if (isPaymentScenario && paymentRow) {
+            paymentRow.hidden = false;
+            const backfill = (cachedConfig.paymentOfflineBackfill && typeof cachedConfig.paymentOfflineBackfill === 'object')
+              ? cachedConfig.paymentOfflineBackfill
               : {};
-            isPaymentScenario = cachedConfig.subCategory === 'fund-transfer-backfill';
-            isRefundScenario = cachedConfig.subCategory === 'refund-order-backfill';
-            if (isPaymentScenario && checksRow) checksRow.hidden = false;
-            if (isPaymentScenario && reconSourceRow) {
-              // v3.0.6 需求2（T6）：对账数据来源勾选行与 payment 行同 gating 显示；
-              //   默认勾选口径 reconSourceMid !== false（老库无字段 undefined !== false → true → 勾选），
-              //   与编排器 R5s2 二选一 gating 完全一致。
-              reconSourceRow.hidden = false;
-              if (reconSourceCheck) reconSourceCheck.checked = cachedConfig.reconSourceMid !== false;
-            }
-            if (isPaymentScenario && paymentRow) {
-              paymentRow.hidden = false;
-              // 回填已存配置（老库无字段 fallback enabled=false；输入框不预填生产值，仅回填用户已存值）
-              const backfill = (cachedConfig.paymentOfflineBackfill && typeof cachedConfig.paymentOfflineBackfill === 'object')
-                ? cachedConfig.paymentOfflineBackfill
-                : {};
-              if (paymentCheck) paymentCheck.checked = backfill.enabled === true;
-              if (paymentBankChannelInput) paymentBankChannelInput.value = String(backfill.bankChannel ?? '');
-              if (paymentRegionInput) paymentRegionInput.value = String(backfill.region ?? '');
-              if (paymentBigAccountInput) paymentBigAccountInput.value = String(backfill.bigAccount ?? '');
-              syncPaymentFieldsVisibility();
-            }
-            if (isRefundScenario && refundFuzzyRow) {
-              refundFuzzyRow.hidden = false;
-              if (refundFuzzyCheck) {
-                refundFuzzyCheck.checked = cachedConfig.bankPaymentSerialFuzzyMatchEnabled === true;
-              }
+            if (paymentCheck) paymentCheck.checked = backfill.enabled === true;
+            if (paymentBankChannelInput) paymentBankChannelInput.value = String(backfill.bankChannel ?? '');
+            if (paymentRegionInput) paymentRegionInput.value = String(backfill.region ?? '');
+            if (paymentBigAccountInput) paymentBigAccountInput.value = String(backfill.bigAccount ?? '');
+            syncPaymentFieldsVisibility();
+          }
+          if (isRefundScenario && refundFuzzyRow) {
+            refundFuzzyRow.hidden = false;
+            if (refundFuzzyCheck) {
+              refundFuzzyCheck.checked = cachedConfig.bankPaymentSerialFuzzyMatchEnabled === true;
             }
           }
           // 加载完成 → 允许保存
           configLoaded = true;
           if (saveButton) saveButton.disabled = false;
         } catch (err) {
-          openModal(createAlertDialog(`加载适用银行渠道失败：${err && err.message ? err.message : err}`));
+          openModal(createAlertDialog(`加载功能配置失败：${err && err.message ? err.message : err}`));
         }
       })();
 
@@ -8485,9 +8556,23 @@
           }));
           return;
         }
+        let dateMatchEnabled = null;
+        let dateToleranceDays = null;
+        if (isCanonicalFundTransferOwner) {
+          dateMatchEnabled = dateMatchEnabledCheck && dateMatchEnabledCheck.checked === true;
+          dateToleranceDays = Number(dateToleranceDaysInput ? dateToleranceDaysInput.value : '');
+          if (!Number.isInteger(dateToleranceDays) || dateToleranceDays < 1 || dateToleranceDays > 999) {
+            if (datePolicyError) {
+              datePolicyError.textContent = '调拨单匹配日期天数必须是 1–999 的整数';
+              datePolicyError.hidden = false;
+            }
+            return;
+          }
+          if (datePolicyError) datePolicyError.hidden = true;
+        }
         // v2.1.13 PR#58 review P2-C：阻止 0 选项保存。后端定义「空数组 = 适用全部」，
         //   若允许取消全部勾选后保存空数组，会与用户"不适用任何渠道"的直觉相反（反向变全渠道生效）。
-        if (selectedIds.size === 0) {
+        if (!isCanonicalFundTransferOwner && selectedIds.size === 0) {
           // v2.1.13 PR#58 review P3：openModal 替换当前弹窗 → 校验 alert 传 onConfirm reopen 适用渠道弹窗，
           //   避免用户点确认后回不到配置弹窗（否则需从场景列表重新点「管理」）。先移除浮动面板避免残留。
           if (floatingPanel.parentNode) floatingPanel.parentNode.removeChild(floatingPanel);
@@ -8544,10 +8629,13 @@
         const ids = (allChannels.length > 0 && selectedIds.size === allChannels.length)
           ? []
           : Array.from(selectedIds);
-        const result = await desktopApi.scenarios.setApplicableChannels(scenarioId, ids);
-        if (!result || result.status !== 'ok') {
-          openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`));
-          return;
+        // canonical owner 固定适用所有渠道：UI 不调用渠道写入；后端旁路也会强制归一为空。
+        if (!isCanonicalFundTransferOwner) {
+          const result = await desktopApi.scenarios.setApplicableChannels(scenarioId, ids);
+          if (!result || result.status !== 'ok') {
+            openModal(createAlertDialog(`保存失败：${result?.message || '未知错误'}`));
+            return;
+          }
         }
         // v2.1.16 A1：适用渠道保存成功后，追加更新场景优先级（updateScenario 仅改 priority，不动 category/is_builtin）。
         // v3.0.4 块 F · F2（🔴 资金红线）：payment 场景额外携带 config 浅合并 ——
@@ -8561,6 +8649,8 @@
           updateFields.config = { ...(cachedConfig || {}) };
           if (reconSourceMid !== null) updateFields.config.reconSourceMid = reconSourceMid;
           if (paymentOfflineBackfill) updateFields.config.paymentOfflineBackfill = paymentOfflineBackfill;
+          if (dateMatchEnabled !== null) updateFields.config.dateMatchEnabled = dateMatchEnabled;
+          if (dateToleranceDays !== null) updateFields.config.dateToleranceDays = dateToleranceDays;
         }
         if (isRefundScenario && bankPaymentSerialFuzzyMatchEnabled !== null) {
           updateFields.config = { ...(cachedConfig || {}) };

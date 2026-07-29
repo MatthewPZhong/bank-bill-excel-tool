@@ -23,6 +23,9 @@ const { writeBankStatementMainOutput } = require('../../src/main-process/bank-st
 const {
   runRound5FundTransferReconBackfill
 } = require('../../src/main-process/scenario-engines/r5-fund-transfer-recon-backfill');
+const {
+  CANONICAL_FUND_TRANSFER_DIRECTIONS
+} = require('../../src/main-process/scenario-engines/fund-transfer-engine-policy');
 const { BANK_STATEMENT_FIELDS } = require('../../src/constants/bank-statement-fields');
 const { FT_RECON_FIELD_MAP } = require('../../src/constants/fund-transfer-recon-fields');
 
@@ -90,9 +93,26 @@ function r5s2Scenario() {
     id: 502,
     name: '中台调拨订单对账ID回填',
     category: 'builtin-fixed',
+    isBuiltin: true,
     priority: 0,
     enabled: true,
-    config: { funcCategory: 'platform-order', subCategory: 'fund-transfer-backfill', roundPhase: 5, dateToleranceDays: 1 }
+    config: {
+      funcCategory: 'platform-order',
+      subCategory: 'fund-transfer-backfill',
+      roundPhase: 5,
+      dateMatchEnabled: true,
+      dateToleranceDays: 1,
+      directions: CANONICAL_FUND_TRANSFER_DIRECTIONS
+    }
+  };
+}
+
+function fundTransferDatePolicy(toleranceDays = 1) {
+  return {
+    enabled: true,
+    toleranceDays,
+    ownerScenarioId: 502,
+    signature: `integration-policy-${toleranceDays}`
   };
 }
 
@@ -136,13 +156,17 @@ async function run() {
 
   // baseline：直调 R5s2-recon 引擎（夹具无 R2/R3.5/R4 场景 → orchestrator 的唯一回填来源就是它）
   const baselineBank = clone(fx.bankRows);
-  const baseline = runRound5FundTransferReconBackfill(clone(fx.reconRows), baselineBank, { dateToleranceDays: 1 });
+  const baseline = runRound5FundTransferReconBackfill(clone(fx.reconRows), baselineBank, {
+    directions: CANONICAL_FUND_TRANSFER_DIRECTIONS,
+    fundTransferDatePolicy: fundTransferDatePolicy(1)
+  });
 
   const result = await runReconciliation({
     bankRows,
     gwRows,
     scenarios: [r5s2Scenario()],
-    fundTransferReconContext: { reconRows }
+    fundTransferReconContext: { reconRows },
+    fundTransferDatePolicy: fundTransferDatePolicy(1)
   });
 
   // ① 行数守恒（检测器只读，不破）
@@ -248,7 +272,8 @@ async function run() {
       bankRows: cleanBank,
       gwRows: [],
       scenarios: [r5s2Scenario()],
-      fundTransferReconContext: { reconRows: [reconRow('ZZ', 9, 'RC-Z')] } // 1v1，不命中检测
+      fundTransferReconContext: { reconRows: [reconRow('ZZ', 9, 'RC-Z')] }, // 1v1，不命中检测
+      fundTransferDatePolicy: fundTransferDatePolicy(1)
     });
     assertEq(cleanResult.manyToManyReviewRows.length, 0, '无 NvM → manyToManyReviewRows 空');
     assertEq(cleanResult.stats.manyToManyReviewCount, 0, '无 NvM → stats.manyToManyReviewCount=0');
@@ -283,7 +308,7 @@ async function run() {
   // ===== Step 4：检测器日期容差 = R5s2 场景配置（codex-P2-1 回归，无需写盘）=====
   //   编排器以 r5s2Bucket[0].config.dateToleranceDays 传检测器（须 = 回填引擎实际用值）。修复前编排器漏传
   //   options → 检测器固定回退默认 1 → 容差≠1 时复核表与回填口径不一致。走调拨侧（checked 路，与 Step1 同引擎）：
-  //     容差0：隔 1 天的 2×2 组本不该进表（旧实现按默认 1 误进 = 过报）；
+  //     容差1：隔 2 天的 2×2 组本不该进表；
   //     容差3：隔 2 天的 2×2 组本该进表（旧实现按默认 1 漏边 = 漏报）。
   const r5s2ScenarioTol = (dateToleranceDays) => {
     const s = r5s2Scenario();
@@ -296,17 +321,18 @@ async function run() {
     return rc;
   };
 
-  // 容差0：2 银行（同日 DATE=2026-06-07）× 2 调拨（DATE+1=06-08）→ 隔 1 天，容差 0 不成边 → 不命中
-  const tol0 = await runReconciliation({
-    bankRows: [bankRow('t0a', 'TOL0', 200), bankRow('t0b', 'TOL0', 200)],
+  // 容差1：2 银行（同日 DATE=2026-06-07）× 2 调拨（DATE+2=06-09）→ 隔 2 天，容差 1 不成边 → 不命中
+  const tol1 = await runReconciliation({
+    bankRows: [bankRow('t1a', 'TOL1', 200), bankRow('t1b', 'TOL1', 200)],
     gwRows: [],
-    scenarios: [r5s2ScenarioTol(0)],
+    scenarios: [r5s2ScenarioTol(1)],
     fundTransferReconContext: {
-      reconRows: [reconRowOn('TOL0', 200, 'RC-T0a', '2026-06-08'), reconRowOn('TOL0', 200, 'RC-T0b', '2026-06-08')]
-    }
+      reconRows: [reconRowOn('TOL1', 200, 'RC-T1a', '2026-06-09'), reconRowOn('TOL1', 200, 'RC-T1b', '2026-06-09')]
+    },
+    fundTransferDatePolicy: fundTransferDatePolicy(1)
   });
-  assertEq(tol0.manyToManyReviewRows.length, 0, '容差0：隔 1 天的 2×2 组不进 reviewRows（修复前按默认1误进=过报）');
-  assertEq(tol0.stats.manyToManyReviewCount, 0, '容差0：stats.manyToManyReviewCount=0');
+  assertEq(tol1.manyToManyReviewRows.length, 0, '容差1：隔 2 天的 2×2 组不进 reviewRows');
+  assertEq(tol1.stats.manyToManyReviewCount, 0, '容差1：stats.manyToManyReviewCount=0');
 
   // 容差3：2 银行（同日 DATE）× 2 调拨（DATE+2=06-09）→ 隔 2 天，容差 3 成边 → 命中
   const tol3 = await runReconciliation({
@@ -315,7 +341,8 @@ async function run() {
     scenarios: [r5s2ScenarioTol(3)],
     fundTransferReconContext: {
       reconRows: [reconRowOn('TOL3', 300, 'RC-T3a', '2026-06-09'), reconRowOn('TOL3', 300, 'RC-T3b', '2026-06-09')]
-    }
+    },
+    fundTransferDatePolicy: fundTransferDatePolicy(3)
   });
   const tol3Ids = tol3.manyToManyReviewRows.map((r) => r.row._rowId).sort();
   assertEq(JSON.stringify(tol3Ids), JSON.stringify(['t3a', 't3b']), '容差3：隔 2 天的 2×2 组进 reviewRows（修复前按默认1漏边=漏报）');

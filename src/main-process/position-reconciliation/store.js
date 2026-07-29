@@ -34,6 +34,11 @@ const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
 const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
 const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const POSITION_DB_INITIALIZATION_MODES = Object.freeze({
+  NEW: 'new',
+  EMPTY_LEGACY_UPGRADE: 'empty-legacy-upgrade',
+  EXISTING: 'existing'
+});
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS position_meta (
@@ -227,6 +232,230 @@ const SCHEMA = `
   CREATE UNIQUE INDEX IF NOT EXISTS idx_position_consumed_sources_bank
     ON position_consumed_sources(bank_biz_id);
 `;
+
+const SUPPORTED_EMPTY_LEGACY_TABLE_INFO = Object.freeze({
+  position_account_mappings:
+    '[["mid_account_id","TEXT",0,null,1],["clearing_account_id","TEXT",1,null,0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_bank_rows:
+    '[["id","INTEGER",0,null,1],["biz_id","TEXT",1,null,0],["channel","TEXT",1,null,0],["month_key","TEXT",1,null,0],["bill_date","TEXT",1,null,0],["status","TEXT",1,null,0],["source_file_path","TEXT",1,null,0],["source_file_name","TEXT",1,null,0],["source_sheet","TEXT",1,null,0],["source_row_number","INTEGER",1,null,0],["import_order","INTEGER",1,null,0],["original_fund_type","TEXT",0,null,0],["working_fund_type","TEXT",0,null,0],["hit_summary","TEXT",0,null,0],["hit_type","TEXT",0,null,0],["match_detail","TEXT",0,null,0],["original_json","TEXT",1,null,0],["working_json","TEXT",1,null,0],["imported_at","TEXT",1,"CURRENT_TIMESTAMP",0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_consumed_sources:
+    '[["id","INTEGER",0,null,1],["run_id","INTEGER",1,null,0],["source_type","TEXT",1,null,0],["business_key","TEXT",1,null,0],["leg_index","INTEGER",1,"0",0],["bank_biz_id","TEXT",1,null,0],["confirmed_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_differences:
+    '[["id","INTEGER",0,null,1],["run_id","INTEGER",1,null,0],["biz_id","TEXT",1,null,0],["channel","TEXT",1,null,0],["month_key","TEXT",1,null,0],["status","TEXT",1,null,0],["reason","TEXT",1,null,0],["lineage_json","TEXT",1,null,0],["created_at","TEXT",1,"CURRENT_TIMESTAMP",0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_link_rows:
+    '[["id","INTEGER",0,null,1],["source_type","TEXT",1,null,0],["business_key","TEXT",1,null,0],["source_row_id","INTEGER",1,null,0],["source_row_number","INTEGER",1,null,0],["ordinal","INTEGER",1,null,0],["leg_index","INTEGER",1,"0",0],["recon_id","TEXT",0,null,0],["merchant_id","TEXT",0,null,0],["currency","TEXT",0,null,0],["amount","TEXT",0,null,0],["fund_type","TEXT",0,null,0],["status","TEXT",0,null,0],["event_date","TEXT",0,null,0],["visible","INTEGER",1,"1",0],["linked_json","TEXT",1,null,0],["created_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_meta:
+    '[["key","TEXT",0,null,1],["value","TEXT",1,null,0]]',
+  position_revisions:
+    '[["kind","TEXT",1,null,1],["scope_key","TEXT",1,null,2],["revision","INTEGER",1,"0",0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_run_rows:
+    '[["id","INTEGER",0,null,1],["run_id","INTEGER",1,null,0],["biz_id","TEXT",1,null,0],["channel","TEXT",1,null,0],["month_key","TEXT",1,null,0],["source_order","INTEGER",1,null,0],["original_fund_type","TEXT",0,null,0],["result_fund_type","TEXT",0,null,0],["hit_summary","TEXT",0,null,0],["hit_type","TEXT",0,null,0],["match_detail","TEXT",0,null,0],["outcome","TEXT",1,null,0],["changed","INTEGER",1,"0",0],["manual_modified","INTEGER",1,"0",0],["original_json","TEXT",1,null,0],["result_json","TEXT",1,null,0],["lineage_json","TEXT",1,null,0]]',
+  position_runs:
+    '[["id","INTEGER",0,null,1],["run_uuid","TEXT",1,null,0],["status","TEXT",1,null,0],["scope_json","TEXT",1,null,0],["snapshot_json","TEXT",1,null,0],["summary_json","TEXT",1,null,0],["exported_at","TEXT",0,null,0],["reimported_at","TEXT",0,null,0],["confirmed_at","TEXT",0,null,0],["created_at","TEXT",1,"CURRENT_TIMESTAMP",0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]',
+  position_source_rows:
+    '[["id","INTEGER",0,null,1],["source_type","TEXT",1,null,0],["business_key","TEXT",1,null,0],["event_date","TEXT",0,null,0],["month_key","TEXT",0,null,0],["source_file_path","TEXT",1,null,0],["source_file_name","TEXT",1,null,0],["source_sheet","TEXT",1,null,0],["source_row_number","INTEGER",1,null,0],["row_hash","TEXT",1,null,0],["raw_json","TEXT",1,null,0],["imported_at","TEXT",1,"CURRENT_TIMESTAMP",0],["updated_at","TEXT",1,"CURRENT_TIMESTAMP",0]]'
+});
+
+const SUPPORTED_EMPTY_LEGACY_TABLE_SQL = Object.freeze({
+  position_account_mappings:
+    'CREATE TABLE position_account_mappings ( mid_account_id TEXT PRIMARY KEY, clearing_account_id TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP )',
+  position_bank_rows:
+    'CREATE TABLE position_bank_rows ( id INTEGER PRIMARY KEY AUTOINCREMENT, biz_id TEXT NOT NULL UNIQUE, channel TEXT NOT NULL, month_key TEXT NOT NULL, bill_date TEXT NOT NULL, status TEXT NOT NULL, source_file_path TEXT NOT NULL, source_file_name TEXT NOT NULL, source_sheet TEXT NOT NULL, source_row_number INTEGER NOT NULL, import_order INTEGER NOT NULL, original_fund_type TEXT, working_fund_type TEXT, hit_summary TEXT, hit_type TEXT, match_detail TEXT, original_json TEXT NOT NULL, working_json TEXT NOT NULL, imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP )',
+  position_consumed_sources:
+    'CREATE TABLE position_consumed_sources ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, source_type TEXT NOT NULL, business_key TEXT NOT NULL, leg_index INTEGER NOT NULL DEFAULT 0, bank_biz_id TEXT NOT NULL, confirmed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE, UNIQUE(source_type, business_key, leg_index) )',
+  position_differences:
+    'CREATE TABLE position_differences ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, biz_id TEXT NOT NULL, channel TEXT NOT NULL, month_key TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL, lineage_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE, UNIQUE(run_id, biz_id) )',
+  position_link_rows:
+    'CREATE TABLE position_link_rows ( id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT NOT NULL, business_key TEXT NOT NULL, source_row_id INTEGER NOT NULL, source_row_number INTEGER NOT NULL, ordinal INTEGER NOT NULL, leg_index INTEGER NOT NULL DEFAULT 0, recon_id TEXT, merchant_id TEXT, currency TEXT, amount TEXT, fund_type TEXT, status TEXT, event_date TEXT, visible INTEGER NOT NULL DEFAULT 1, linked_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(source_row_id) REFERENCES position_source_rows(id) ON DELETE CASCADE )',
+  position_meta:
+    'CREATE TABLE position_meta ( key TEXT PRIMARY KEY, value TEXT NOT NULL )',
+  position_revisions:
+    'CREATE TABLE position_revisions ( kind TEXT NOT NULL, scope_key TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(kind, scope_key) )',
+  position_run_rows:
+    'CREATE TABLE position_run_rows ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL, biz_id TEXT NOT NULL, channel TEXT NOT NULL, month_key TEXT NOT NULL, source_order INTEGER NOT NULL, original_fund_type TEXT, result_fund_type TEXT, hit_summary TEXT, hit_type TEXT, match_detail TEXT, outcome TEXT NOT NULL, changed INTEGER NOT NULL DEFAULT 0, manual_modified INTEGER NOT NULL DEFAULT 0, original_json TEXT NOT NULL, result_json TEXT NOT NULL, lineage_json TEXT NOT NULL, FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE, UNIQUE(run_id, biz_id) )',
+  position_runs:
+    'CREATE TABLE position_runs ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_uuid TEXT NOT NULL UNIQUE, status TEXT NOT NULL, scope_json TEXT NOT NULL, snapshot_json TEXT NOT NULL, summary_json TEXT NOT NULL, exported_at TEXT, reimported_at TEXT, confirmed_at TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP )',
+  position_source_rows:
+    'CREATE TABLE position_source_rows ( id INTEGER PRIMARY KEY AUTOINCREMENT, source_type TEXT NOT NULL, business_key TEXT NOT NULL, event_date TEXT, month_key TEXT, source_file_path TEXT NOT NULL, source_file_name TEXT NOT NULL, source_sheet TEXT NOT NULL, source_row_number INTEGER NOT NULL, row_hash TEXT NOT NULL, raw_json TEXT NOT NULL, imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE(source_type, business_key) )'
+});
+
+const SUPPORTED_EMPTY_LEGACY_INDEX_INFO = Object.freeze({
+  idx_position_bank_fund_type: Object.freeze({
+    sql: 'CREATE INDEX idx_position_bank_fund_type ON position_bank_rows(working_fund_type, status)',
+    columns: Object.freeze(['working_fund_type', 'status'])
+  }),
+  idx_position_bank_scope: Object.freeze({
+    sql: 'CREATE INDEX idx_position_bank_scope ON position_bank_rows(channel, month_key, status, import_order)',
+    columns: Object.freeze(['channel', 'month_key', 'status', 'import_order'])
+  }),
+  idx_position_consumed_sources_bank: Object.freeze({
+    sql: 'CREATE UNIQUE INDEX idx_position_consumed_sources_bank ON position_consumed_sources(bank_biz_id)',
+    columns: Object.freeze(['bank_biz_id'])
+  }),
+  idx_position_consumed_sources_run: Object.freeze({
+    sql: 'CREATE INDEX idx_position_consumed_sources_run ON position_consumed_sources(run_id, bank_biz_id)',
+    columns: Object.freeze(['run_id', 'bank_biz_id'])
+  }),
+  idx_position_differences_summary: Object.freeze({
+    sql: 'CREATE INDEX idx_position_differences_summary ON position_differences(channel, month_key, status, run_id)',
+    columns: Object.freeze(['channel', 'month_key', 'status', 'run_id'])
+  }),
+  idx_position_link_type_account_currency: Object.freeze({
+    sql: 'CREATE INDEX idx_position_link_type_account_currency ON position_link_rows(source_type, merchant_id, currency)',
+    columns: Object.freeze(['source_type', 'merchant_id', 'currency'])
+  }),
+  idx_position_link_type_recon: Object.freeze({
+    sql: 'CREATE INDEX idx_position_link_type_recon ON position_link_rows(source_type, recon_id)',
+    columns: Object.freeze(['source_type', 'recon_id'])
+  }),
+  idx_position_run_rows_scope: Object.freeze({
+    sql: 'CREATE INDEX idx_position_run_rows_scope ON position_run_rows(run_id, channel, month_key, source_order)',
+    columns: Object.freeze(['run_id', 'channel', 'month_key', 'source_order'])
+  }),
+  idx_position_runs_single_pending: Object.freeze({
+    sql: "CREATE UNIQUE INDEX idx_position_runs_single_pending ON position_runs(status) WHERE status = 'pending'",
+    columns: Object.freeze(['status'])
+  }),
+  idx_position_runs_status: Object.freeze({
+    sql: 'CREATE INDEX idx_position_runs_status ON position_runs(status, id DESC)',
+    columns: Object.freeze(['status', 'id'])
+  }),
+  idx_position_source_type_month: Object.freeze({
+    sql: 'CREATE INDEX idx_position_source_type_month ON position_source_rows(source_type, month_key)',
+    columns: Object.freeze(['source_type', 'month_key'])
+  })
+});
+
+function quoteSqlIdentifier(value) {
+  return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function normalizeSchemaSql(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function tableInfoSignature(column) {
+  return [
+    String(column.name ?? ''),
+    String(column.type ?? ''),
+    Number(column.notnull),
+    column.dflt_value === null ? null : String(column.dflt_value),
+    Number(column.pk)
+  ];
+}
+
+function incompleteSideDatabaseError(dbPath, reason = '') {
+  const error = new PositionReconciliationError(
+    'position-side-db-missing',
+    '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
+    [
+      `异常文件：${dbPath}`,
+      ...(reason ? [`校验结果：${reason}`] : []),
+      '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
+    ]
+  );
+  error.reason = reason || '平盘侧库结构或空表证明不完整';
+  return error;
+}
+
+function assertNewDatabaseHasNoUserSchema(db, dbPath) {
+  try {
+    const schemaObjects = db.prepare(`
+      SELECT type, name
+      FROM sqlite_master
+      WHERE type IN ('table', 'index', 'view', 'trigger')
+        AND name NOT LIKE 'sqlite_%'
+    `).all();
+    if (schemaObjects.length > 0) {
+      throw incompleteSideDatabaseError(dbPath, '新建候选已存在用户 schema 对象');
+    }
+  } catch (error) {
+    if (error instanceof PositionReconciliationError) throw error;
+    throw incompleteSideDatabaseError(dbPath, 'SQLite 新建候选结构校验失败');
+  }
+}
+
+function assertSupportedEmptyLegacyDatabase(db, dbPath) {
+  try {
+    const quickCheckRows = db.prepare('PRAGMA quick_check').all();
+    if (quickCheckRows.length !== 1
+        || text(Object.values(quickCheckRows[0] || {})[0]) !== 'ok') {
+      throw incompleteSideDatabaseError(dbPath, 'SQLite quick_check 未通过');
+    }
+
+    const schemaObjects = db.prepare(`
+      SELECT type, name, sql
+      FROM sqlite_master
+      WHERE type IN ('table', 'index', 'view', 'trigger')
+        AND name NOT LIKE 'sqlite_%'
+      ORDER BY type, name
+    `).all();
+    const expectedTables = Object.keys(SUPPORTED_EMPTY_LEGACY_TABLE_INFO).sort();
+    const actualTables = schemaObjects
+      .filter((item) => item.type === 'table')
+      .map((item) => text(item.name))
+      .sort();
+    if (JSON.stringify(actualTables) !== JSON.stringify(expectedTables)) {
+      throw incompleteSideDatabaseError(dbPath, '旧版用户表集合不匹配');
+    }
+    if (schemaObjects.some((item) => item.type === 'view' || item.type === 'trigger')) {
+      throw incompleteSideDatabaseError(dbPath, '存在未知视图或触发器');
+    }
+    const tableObjects = new Map(
+      schemaObjects
+        .filter((item) => item.type === 'table')
+        .map((item) => [String(item.name), item])
+    );
+    const actualIndexes = schemaObjects
+      .filter((item) => item.type === 'index')
+      .map((item) => text(item.name))
+      .sort();
+    const expectedIndexes = Object.keys(SUPPORTED_EMPTY_LEGACY_INDEX_INFO).sort();
+    if (JSON.stringify(actualIndexes) !== JSON.stringify(expectedIndexes)) {
+      throw incompleteSideDatabaseError(dbPath, '旧版索引集合不匹配');
+    }
+    const indexObjects = new Map(
+      schemaObjects
+        .filter((item) => item.type === 'index')
+        .map((item) => [String(item.name), item])
+    );
+    for (const indexName of expectedIndexes) {
+      const expectedIndex = SUPPORTED_EMPTY_LEGACY_INDEX_INFO[indexName];
+      const actualIndex = indexObjects.get(indexName);
+      const indexColumns = db.prepare(
+        `PRAGMA index_info(${quoteSqlIdentifier(indexName)})`
+      ).all().map((column) => String(column.name ?? ''));
+      if (normalizeSchemaSql(actualIndex && actualIndex.sql) !== expectedIndex.sql
+          || JSON.stringify(indexColumns) !== JSON.stringify(expectedIndex.columns)) {
+        throw incompleteSideDatabaseError(dbPath, `旧版索引结构不匹配：${indexName}`);
+      }
+    }
+
+    for (const table of expectedTables) {
+      if (normalizeSchemaSql(tableObjects.get(table) && tableObjects.get(table).sql)
+          !== SUPPORTED_EMPTY_LEGACY_TABLE_SQL[table]) {
+        throw incompleteSideDatabaseError(dbPath, `旧版表约束不匹配：${table}`);
+      }
+      const tableInfo = db.prepare(
+        `PRAGMA table_info(${quoteSqlIdentifier(table)})`
+      ).all().map(tableInfoSignature);
+      if (JSON.stringify(tableInfo) !== SUPPORTED_EMPTY_LEGACY_TABLE_INFO[table]) {
+        throw incompleteSideDatabaseError(dbPath, `旧版表结构不匹配：${table}`);
+      }
+      const count = Number(
+        db.prepare(
+          `SELECT COUNT(*) AS count FROM ${quoteSqlIdentifier(table)}`
+        ).get().count
+      );
+      if (!Number.isSafeInteger(count) || count !== 0) {
+        throw incompleteSideDatabaseError(dbPath, `旧版表不是空表：${table}`);
+      }
+    }
+  } catch (error) {
+    if (error instanceof PositionReconciliationError) throw error;
+    throw incompleteSideDatabaseError(dbPath, 'SQLite 结构或空表校验失败');
+  }
+}
 
 function parseJson(value, label) {
   try {
@@ -1318,6 +1547,7 @@ class PositionReconciliationStore {
     this.userDataDir = path.resolve(userDataDir);
     this.dbPath = path.join(this.userDataDir, POSITION_DB_RELATIVE_PATH);
     this.db = null;
+    this.initializationMode = null;
     this.operationTokenProvider = typeof operationTokenProvider === 'function'
       ? operationTokenProvider
       : null;
@@ -1353,9 +1583,11 @@ class PositionReconciliationStore {
       );
     }
     fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+    let guardedInitializationTransaction = false;
     try {
       this.db = new DatabaseSync(this.dbPath);
       let existingCheckpoint = null;
+      let emptyLegacyBootstrap = false;
       if (databaseExisted) {
         const hasMetaTable = this.db.prepare(`
           SELECT 1 AS present
@@ -1369,31 +1601,46 @@ class PositionReconciliationStore {
           WHERE type = 'table' AND name = 'position_checkpoint_history'
         `).get();
         if (!existingCheckpoint || !hasHistoryTable) {
-          throw new PositionReconciliationError(
-            'position-side-db-missing',
-            '平盘对账侧库不完整，已停止初始化以避免历史消费关系丢失',
-            [
-              `异常文件：${this.dbPath}`,
-              '请退出软件后恢复同一备份批次中的完整软件数据目录，再重新打开'
-            ]
-          );
+          const canBootstrapEmptyLegacy = !existingCheckpoint
+            && !hasHistoryTable
+            && !expected
+            && !pendingOperation
+            && initial
+            && initial.generation === 0;
+          if (!canBootstrapEmptyLegacy) {
+            throw incompleteSideDatabaseError(this.dbPath);
+          }
+          assertSupportedEmptyLegacyDatabase(this.db, this.dbPath);
+          emptyLegacyBootstrap = true;
         }
-        const historyRow = this.db.prepare(`
-          SELECT token
-          FROM position_checkpoint_history
-          WHERE generation = ?
-        `).get(existingCheckpoint.generation);
-        if (!historyRow || text(historyRow.token) !== existingCheckpoint.token) {
-          checkpointMismatch(existingCheckpoint, expected || initial, '侧库当前 checkpoint 历史缺失');
-        }
-        if (!expected && initial && !checkpointsEqual(existingCheckpoint, initial)) {
-          checkpointMismatch(existingCheckpoint, initial, '侧库与主库首次绑定 checkpoint 不一致');
+        if (existingCheckpoint) {
+          const historyRow = this.db.prepare(`
+            SELECT token
+            FROM position_checkpoint_history
+            WHERE generation = ?
+          `).get(existingCheckpoint.generation);
+          if (!historyRow || text(historyRow.token) !== existingCheckpoint.token) {
+            checkpointMismatch(existingCheckpoint, expected || initial, '侧库当前 checkpoint 历史缺失');
+          }
+          if (!expected && initial && !checkpointsEqual(existingCheckpoint, initial)) {
+            checkpointMismatch(existingCheckpoint, initial, '侧库与主库首次绑定 checkpoint 不一致');
+          }
         }
       }
       this.db.exec('PRAGMA foreign_keys = ON;');
-      this.db.exec('PRAGMA journal_mode = WAL;');
       this.db.exec('PRAGMA synchronous = NORMAL;');
       this.db.exec('PRAGMA busy_timeout = 30000;');
+      if (!databaseExisted || emptyLegacyBootstrap) {
+        this.db.exec('BEGIN IMMEDIATE');
+        guardedInitializationTransaction = true;
+        if (emptyLegacyBootstrap) {
+          assertSupportedEmptyLegacyDatabase(this.db, this.dbPath);
+        } else {
+          assertNewDatabaseHasNoUserSchema(this.db, this.dbPath);
+        }
+      } else {
+        this.db.exec('PRAGMA journal_mode = WAL;');
+      }
       this.db.exec(SCHEMA);
       const checkpointHistoryColumns = this.db.prepare(
         'PRAGMA table_info(position_checkpoint_history)'
@@ -1454,8 +1701,30 @@ class PositionReconciliationStore {
         expected || initial,
         expected ? pendingOperation : null
       );
+      if (guardedInitializationTransaction) {
+        this.db.exec('COMMIT');
+        guardedInitializationTransaction = false;
+        // 被拒绝的新建候选/空旧库不得在 proof 前被持久切换日志模式。
+        // 仅在锁内证明及 schema/checkpoint 事务成功后启用正式 WAL。
+        this.db.exec('PRAGMA journal_mode = WAL;');
+      }
+      this.initializationMode = emptyLegacyBootstrap
+        ? POSITION_DB_INITIALIZATION_MODES.EMPTY_LEGACY_UPGRADE
+        : (
+          databaseExisted
+            ? POSITION_DB_INITIALIZATION_MODES.EXISTING
+            : POSITION_DB_INITIALIZATION_MODES.NEW
+        );
     } catch (error) {
       if (this.db) {
+        if (guardedInitializationTransaction) {
+          try {
+            this.db.exec('ROLLBACK');
+          } catch (_rollbackError) {
+            // 保留原始初始化错误。
+          }
+          guardedInitializationTransaction = false;
+        }
         try {
           this.db.close();
         } catch (_closeError) {
@@ -1476,6 +1745,10 @@ class PositionReconciliationStore {
     if (!this.db) return;
     this.db.close();
     this.db = null;
+  }
+
+  initializationResult() {
+    return Object.freeze({ mode: this.initializationMode });
   }
 
   persistenceCheckpoint() {
@@ -2628,6 +2901,7 @@ function createPositionReconciliationStore(userDataDir, options) {
 module.exports = {
   PositionReconciliationStore,
   createPositionReconciliationStore,
+  POSITION_DB_INITIALIZATION_MODES,
   scopeKey,
   decodeScopeKey,
   serializeJson,

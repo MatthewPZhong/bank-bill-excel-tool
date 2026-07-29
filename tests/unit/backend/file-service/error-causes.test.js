@@ -97,6 +97,44 @@ test.describe('CAUSE_MAP — v3.0.26 R5 Extra Fee 校验', () => {
   });
 });
 
+test.describe('CAUSE_MAP — v3.1.1 调拨方向与日期防误匹配', () => {
+  test('方向、日期与 directions 配置错误码均有用户可读原因', () => {
+    for (const code of [
+      'fund-transfer-direction-mismatch',
+      'fund-transfer-date-mismatch',
+      'r5-fund-transfer-directions-invalid'
+    ]) {
+      assert.ok(CAUSE_MAP[code], `${code} 应已定义`);
+      assert.notEqual(errorCodeToCause(code), '未知错误');
+    }
+
+    assert.match(errorCodeToCause('fund-transfer-direction-mismatch'), /借贷方向/);
+    assert.match(errorCodeToCause('fund-transfer-direction-mismatch'), /未消费、未回填/);
+    assert.match(errorCodeToCause('fund-transfer-date-mismatch'), /日期范围/);
+    assert.match(errorCodeToCause('fund-transfer-date-mismatch'), /日期策略/);
+    assert.match(errorCodeToCause('r5-fund-transfer-directions-invalid'), /方向配置/);
+    assert.match(errorCodeToCause('r5-fund-transfer-directions-invalid'), /本轮已安全跳过/);
+  });
+
+  test('日期策略 resolver 的三个非致命告警均说明安全回退与修复方式', () => {
+    for (const code of [
+      'fund-transfer-policy-owner-missing',
+      'fund-transfer-policy-invalid-date-enabled',
+      'fund-transfer-policy-invalid-tolerance-days'
+    ]) {
+      assert.ok(CAUSE_MAP[code], `${code} 应已定义`);
+      assert.notEqual(errorCodeToCause(code), '未知错误');
+    }
+
+    assert.match(errorCodeToCause('fund-transfer-policy-owner-missing'), /安全默认值/);
+    assert.match(errorCodeToCause('fund-transfer-policy-owner-missing'), /修复本机配置/);
+    assert.match(errorCodeToCause('fund-transfer-policy-invalid-date-enabled'), /默认值“启用”/);
+    assert.match(errorCodeToCause('fund-transfer-policy-invalid-date-enabled'), /重新保存/);
+    assert.match(errorCodeToCause('fund-transfer-policy-invalid-tolerance-days'), /1–999/);
+    assert.match(errorCodeToCause('fund-transfer-policy-invalid-tolerance-days'), /默认值 ±1 天/);
+  });
+});
+
 test.describe('CAUSE_MAP — v3.0.21 DBS-Charge outbound 方向守卫', () => {
   test('dbs-charge-fund-direction-mismatch 已定义且说明跳过步骤2改写', () => {
     assert.ok(CAUSE_MAP['dbs-charge-fund-direction-mismatch']);

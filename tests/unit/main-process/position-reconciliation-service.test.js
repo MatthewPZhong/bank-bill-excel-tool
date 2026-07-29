@@ -13,6 +13,10 @@ const {
   assertEngineResultSet
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
+  SCHEMA: POSITION_RECONCILIATION_SCHEMA,
+  POSITION_DB_INITIALIZATION_MODES
+} = require('../../../src/main-process/position-reconciliation/store');
+const {
   positionCommittedRecoveryArchiveFiles,
   requirePositionPendingArchiveFiles
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
@@ -104,6 +108,52 @@ function transferRow(overrides = {}) {
     收款币种: 'EUR',
     ...overrides
   };
+}
+
+const LEGACY_POSITION_TABLES = Object.freeze([
+  'position_meta',
+  'position_revisions',
+  'position_bank_rows',
+  'position_source_rows',
+  'position_link_rows',
+  'position_account_mappings',
+  'position_runs',
+  'position_run_rows',
+  'position_differences',
+  'position_consumed_sources'
+]);
+
+function createEmptyLegacyPositionDatabase(userDataDir) {
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const db = new DatabaseSync(dbPath);
+  db.exec(POSITION_RECONCILIATION_SCHEMA);
+  db.exec(`
+    DROP TABLE position_operation_inputs;
+    DROP TABLE position_checkpoint_history;
+    ALTER TABLE position_run_rows DROP COLUMN integrity_hash;
+    ALTER TABLE position_run_rows DROP COLUMN consumes_source;
+  `);
+  db.close();
+  return dbPath;
+}
+
+function insertLegacyPlaceholderRow(db, table) {
+  db.exec('PRAGMA foreign_keys = OFF;');
+  const columns = db.prepare(`PRAGMA table_info("${table}")`).all().filter((column) => (
+    !(Number(column.pk) === 1 && String(column.type).toUpperCase() === 'INTEGER')
+    && column.dflt_value === null
+    && (Number(column.notnull) === 1 || Number(column.pk) > 0)
+  ));
+  const values = columns.map((column) => (
+    String(column.type).toUpperCase() === 'INTEGER'
+      ? 1
+      : `${table}-${column.name}`
+  ));
+  db.prepare(`
+    INSERT INTO "${table}"(${columns.map((column) => `"${column.name}"`).join(', ')})
+    VALUES (${columns.map(() => '?').join(', ')})
+  `).run(...values);
 }
 
 test('链接管理和原始表始终按业务规定顺序返回', (t) => {
@@ -2081,6 +2131,548 @@ test('已初始化的平盘侧库缺失或被替换为空库时必须阻断，�
     }),
     (error) => error && error.code === 'position-side-db-missing'
   );
+});
+
+test('侧库初始化结果只暴露 new 或 existing 模式', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-side-db-init-mode-'));
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  const created = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH
+  });
+  const checkpoint = created.persistenceCheckpoint();
+  const createdResult = created.store.initializationResult();
+  assert.deepEqual(createdResult, {
+    mode: POSITION_DB_INITIALIZATION_MODES.NEW
+  });
+  assert.deepEqual(Object.keys(createdResult), ['mode']);
+  assert.equal(
+    created.store.db.prepare('PRAGMA journal_mode').get().journal_mode,
+    'wal',
+    '新建初始化提交后必须进入正式 WAL 模式'
+  );
+  created.close();
+
+  const reopened = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: checkpoint
+  });
+  const reopenedResult = reopened.store.initializationResult();
+  assert.deepEqual(reopenedResult, {
+    mode: POSITION_DB_INITIALIZATION_MODES.EXISTING
+  });
+  assert.deepEqual(Object.keys(reopenedResult), ['mode']);
+  reopened.close();
+});
+
+test('新建侧库在 existsSync 后被第二连接抢先创建时必须锁内拒绝', {
+  concurrency: false
+}, (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-new-db-race-'));
+  const dbPath = path.join(userDataDir, POSITION_DB_RELATIVE_PATH);
+  const dbDir = path.dirname(dbPath);
+  const externalTable = 'sensitive_external_records';
+  const injectedValue = 'sensitive-business-value';
+  const originalMkdirSync = fs.mkdirSync;
+  let injected = false;
+  let injectedJournalMode = null;
+  let rejection = null;
+  let unexpectedService = null;
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  fs.mkdirSync = function mkdirWithNewDatabaseRace(target, options) {
+    const result = originalMkdirSync.call(fs, target, options);
+    if (!injected && path.resolve(String(target)) === dbDir) {
+      const competingDb = new DatabaseSync(dbPath);
+      try {
+        competingDb.exec(`
+          CREATE TABLE "${externalTable}" (
+            id TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+          )
+        `);
+        competingDb.prepare(`
+          INSERT INTO "${externalTable}"(id, value) VALUES (?, ?)
+        `).run('external-row', injectedValue);
+        injectedJournalMode = competingDb.prepare('PRAGMA journal_mode').get().journal_mode;
+        injected = true;
+      } finally {
+        competingDb.close();
+      }
+    }
+    return result;
+  };
+
+  try {
+    assert.throws(
+      () => {
+        unexpectedService = createPositionReconciliationService({
+          userDataDir,
+          templatePath: TEMPLATE_PATH
+        });
+      },
+      (error) => {
+        rejection = error;
+        return error
+          && error.code === 'position-side-db-missing'
+          && error.reason === '新建候选已存在用户 schema 对象';
+      }
+    );
+  } finally {
+    fs.mkdirSync = originalMkdirSync;
+    if (unexpectedService) unexpectedService.close();
+  }
+
+  assert.equal(injected, true, '第二连接必须在 existsSync=false 后、Store 打开数据库前写入');
+  assert.equal(rejection.code, 'position-side-db-missing');
+  assert.equal(rejection.reason, '新建候选已存在用户 schema 对象');
+  assert.doesNotMatch(
+    [
+      rejection.message,
+      rejection.reason,
+      ...(rejection.detailLines || [])
+    ].join('\n'),
+    new RegExp(`${externalTable}|${injectedValue}`),
+    '结构化拒绝错误不得泄露外部表名或业务值'
+  );
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const userSchemaObjects = db.prepare(`
+    SELECT type, name
+    FROM sqlite_master
+    WHERE type IN ('table', 'index', 'view', 'trigger')
+      AND name NOT LIKE 'sqlite_%'
+    ORDER BY type, name
+  `).all().map((row) => ({ ...row }));
+  assert.deepEqual(userSchemaObjects, [{ type: 'table', name: externalTable }]);
+  assert.deepEqual(
+    db.prepare(`SELECT id, value FROM "${externalTable}"`).all().map((row) => ({ ...row })),
+    [{ id: 'external-row', value: injectedValue }]
+  );
+  assert.equal(
+    db.prepare('PRAGMA journal_mode').get().journal_mode,
+    injectedJournalMode,
+    '拒绝接管不得持久修改外部数据库的日志模式'
+  );
+  assert.equal(
+    userSchemaObjects.some((item) => item.name.startsWith('position_')),
+    false,
+    '拒绝后不得残留现代侧库 schema 或 checkpoint'
+  );
+  db.close();
+});
+
+test('完整空旧侧库只在合法 generation 0 bootstrap 下原地升级', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-empty-legacy-upgrade-'));
+  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
+  const beforeStat = fs.statSync(dbPath);
+  const bootstrap = {
+    identity: 'empty-legacy-bootstrap-identity',
+    generation: 0,
+    token: 'empty-legacy-bootstrap-token'
+  };
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  const upgraded = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    initialSideDbCheckpoint: bootstrap
+  });
+  assert.deepEqual(upgraded.store.initializationResult(), {
+    mode: POSITION_DB_INITIALIZATION_MODES.EMPTY_LEGACY_UPGRADE
+  });
+  assert.deepEqual(upgraded.persistenceCheckpoint(), bootstrap);
+  assert.equal(
+    upgraded.store.db.prepare('PRAGMA journal_mode').get().journal_mode,
+    'wal',
+    '空旧库升级提交后必须进入正式 WAL 模式'
+  );
+  upgraded.close();
+
+  const afterStat = fs.statSync(dbPath);
+  assert.equal(afterStat.ino, beforeStat.ino, '兼容初始化必须保留原侧库文件');
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const modernTables = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+  `).all().map((row) => row.name);
+  assert.ok(modernTables.includes('position_checkpoint_history'));
+  assert.ok(modernTables.includes('position_operation_inputs'));
+  const runRowColumns = db.prepare('PRAGMA table_info(position_run_rows)')
+    .all().map((column) => column.name);
+  assert.ok(runRowColumns.includes('consumes_source'));
+  assert.ok(runRowColumns.includes('integrity_hash'));
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM position_checkpoint_history').get().count,
+    1
+  );
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM position_operation_inputs').get().count,
+    0
+  );
+  for (const table of LEGACY_POSITION_TABLES.filter((table) => table !== 'position_meta')) {
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) AS count FROM "${table}"`).get().count,
+      0,
+      `${table} 不得生成业务行`
+    );
+  }
+  assert.equal(
+    db.prepare('SELECT COUNT(*) AS count FROM position_meta').get().count,
+    3,
+    '只允许写入三项 checkpoint 元数据'
+  );
+  db.close();
+
+  const restarted = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    requireExistingSideDb: true,
+    expectedSideDbCheckpoint: bootstrap
+  });
+  assert.deepEqual(restarted.store.initializationResult(), {
+    mode: POSITION_DB_INITIALIZATION_MODES.EXISTING
+  });
+  assert.deepEqual(restarted.persistenceCheckpoint(), bootstrap);
+  restarted.close();
+});
+
+test('空旧侧库预检后被第二连接写入时，加锁后的复检必须阻断升级', {
+  concurrency: false
+}, (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-legacy-race-'));
+  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
+  const injectedValue = 'sensitive-business-race-value';
+  const bootstrap = {
+    identity: 'legacy-race-bootstrap-identity',
+    generation: 0,
+    token: 'legacy-race-bootstrap-token'
+  };
+  const originalPrepare = DatabaseSync.prototype.prepare;
+  let injected = false;
+  let rejection = null;
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+
+  DatabaseSync.prototype.prepare = function prepareWithLegacyRace(sql) {
+    const statement = originalPrepare.call(this, sql);
+    const normalizedSql = String(sql);
+    if (!injected
+        && normalizedSql.includes('COUNT(*)')
+        && normalizedSql.includes('FROM "position_source_rows"')) {
+      const originalGet = statement.get.bind(statement);
+      statement.get = (...args) => {
+        const row = originalGet(...args);
+        const competingDb = new DatabaseSync(dbPath);
+        try {
+          competingDb.prepare(
+            'INSERT INTO position_meta(key, value) VALUES (?, ?)'
+          ).run('race-row', injectedValue);
+          injected = true;
+        } finally {
+          competingDb.close();
+        }
+        return row;
+      };
+    }
+    return statement;
+  };
+
+  try {
+    assert.throws(
+      () => createPositionReconciliationService({
+        userDataDir,
+        templatePath: TEMPLATE_PATH,
+        initialSideDbCheckpoint: bootstrap
+      }),
+      (error) => {
+        rejection = error;
+        return error
+          && error.code === 'position-side-db-missing'
+          && error.reason === '旧版表不是空表：position_meta';
+      }
+    );
+  } finally {
+    DatabaseSync.prototype.prepare = originalPrepare;
+  }
+
+  assert.equal(injected, true, '故障注入必须发生在首次预检完成后');
+  assert.equal(rejection.code, 'position-side-db-missing');
+  assert.equal(rejection.reason, '旧版表不是空表：position_meta');
+  assert.doesNotMatch(
+    [rejection.message, ...(rejection.detailLines || [])].join('\n'),
+    new RegExp(injectedValue),
+    '拒绝错误不得泄露第二连接写入的业务值'
+  );
+
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const tables = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table'
+  `).all().map((row) => row.name);
+  assert.equal(tables.includes('position_checkpoint_history'), false);
+  assert.equal(tables.includes('position_operation_inputs'), false);
+  const runRowColumns = db.prepare('PRAGMA table_info(position_run_rows)')
+    .all().map((column) => column.name);
+  assert.equal(runRowColumns.includes('consumes_source'), false);
+  assert.equal(runRowColumns.includes('integrity_hash'), false);
+  assert.deepEqual(
+    db.prepare('SELECT key, value FROM position_meta').all().map((row) => ({ ...row })),
+    [{ key: 'race-row', value: injectedValue }]
+  );
+  db.close();
+});
+
+test('空旧侧库的 bootstrap 所有权或 generation 不合法时保持阻断', (t) => {
+  const bootstrap = {
+    identity: 'empty-legacy-guard-identity',
+    generation: 0,
+    token: 'empty-legacy-guard-token'
+  };
+  const cases = [
+    {
+      label: '主库已有 checkpoint',
+      options: {
+        requireExistingSideDb: true,
+        expectedSideDbCheckpoint: bootstrap
+      }
+    },
+    {
+      label: '主库仍有 pending',
+      options: {
+        initialSideDbCheckpoint: bootstrap,
+        expectedPendingOperation: {
+          operationToken: 'empty-legacy-pending',
+          baseCheckpoint: bootstrap
+        }
+      }
+    },
+    {
+      label: '首次 bootstrap 不是 generation 0',
+      options: {
+        initialSideDbCheckpoint: {
+          ...bootstrap,
+          generation: 1
+        }
+      }
+    }
+  ];
+
+  for (const item of cases) {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), `position-empty-legacy-${item.label}-`)
+    );
+    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+    createEmptyLegacyPositionDatabase(userDataDir);
+    assert.throws(
+      () => createPositionReconciliationService({
+        userDataDir,
+        templatePath: TEMPLATE_PATH,
+        ...item.options
+      }),
+      (error) => error && error.code === 'position-side-db-missing',
+      item.label
+    );
+  }
+});
+
+test('空旧侧库十张表任一非空都不得自动接管', (t) => {
+  const bootstrap = {
+    identity: 'non-empty-legacy-identity',
+    generation: 0,
+    token: 'non-empty-legacy-token'
+  };
+  for (const table of LEGACY_POSITION_TABLES) {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), `position-non-empty-legacy-${table}-`)
+    );
+    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+    const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
+    const db = new DatabaseSync(dbPath);
+    insertLegacyPlaceholderRow(db, table);
+    db.close();
+
+    assert.throws(
+      () => createPositionReconciliationService({
+        userDataDir,
+        templatePath: TEMPLATE_PATH,
+        initialSideDbCheckpoint: bootstrap
+      }),
+      (error) => error && error.code === 'position-side-db-missing',
+      `${table} 非空必须阻断`
+    );
+  }
+});
+
+test('空旧侧库缺表、错列或未知 schema 对象时保持阻断', (t) => {
+  const bootstrap = {
+    identity: 'legacy-schema-guard-identity',
+    generation: 0,
+    token: 'legacy-schema-guard-token'
+  };
+  const mutations = [
+    ['缺表', 'DROP TABLE position_account_mappings;'],
+    ['错列', 'ALTER TABLE position_bank_rows ADD COLUMN unexpected_column TEXT;'],
+    [
+      '列类型篡改',
+      `DROP TABLE position_meta;
+       CREATE TABLE position_meta (
+         key INTEGER PRIMARY KEY,
+         value TEXT NOT NULL
+       );`
+    ],
+    [
+      '非空约束篡改',
+      `DROP TABLE position_meta;
+       CREATE TABLE position_meta (
+         key TEXT PRIMARY KEY,
+         value TEXT
+       );`
+    ],
+    [
+      '默认值篡改',
+      `DROP TABLE position_revisions;
+       CREATE TABLE position_revisions (
+         kind TEXT NOT NULL,
+         scope_key TEXT NOT NULL,
+         revision INTEGER NOT NULL DEFAULT 1,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         PRIMARY KEY(kind, scope_key)
+       );`
+    ],
+    [
+      '主键篡改',
+      `DROP TABLE position_meta;
+       CREATE TABLE position_meta (
+         key TEXT NOT NULL,
+         value TEXT PRIMARY KEY
+       );`
+    ],
+    [
+      '同名索引定义篡改',
+      `DROP INDEX idx_position_bank_scope;
+       CREATE INDEX idx_position_bank_scope
+         ON position_bank_rows(channel, month_key, status);`
+    ],
+    [
+      'UNIQUE 约束缺失',
+      `DROP TABLE position_runs;
+       CREATE TABLE position_runs (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         run_uuid TEXT NOT NULL,
+         status TEXT NOT NULL,
+         scope_json TEXT NOT NULL,
+         snapshot_json TEXT NOT NULL,
+         summary_json TEXT NOT NULL,
+         exported_at TEXT,
+         reimported_at TEXT,
+         confirmed_at TEXT,
+         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+       );
+       CREATE INDEX idx_position_runs_status
+         ON position_runs(status, id DESC);
+       CREATE UNIQUE INDEX idx_position_runs_single_pending
+         ON position_runs(status) WHERE status = 'pending';`
+    ],
+    [
+      'FOREIGN KEY 约束缺失',
+      `DROP TABLE position_run_rows;
+       CREATE TABLE position_run_rows (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         run_id INTEGER NOT NULL,
+         biz_id TEXT NOT NULL,
+         channel TEXT NOT NULL,
+         month_key TEXT NOT NULL,
+         source_order INTEGER NOT NULL,
+         original_fund_type TEXT,
+         result_fund_type TEXT,
+         hit_summary TEXT,
+         hit_type TEXT,
+         match_detail TEXT,
+         outcome TEXT NOT NULL,
+         changed INTEGER NOT NULL DEFAULT 0,
+         manual_modified INTEGER NOT NULL DEFAULT 0,
+         original_json TEXT NOT NULL,
+         result_json TEXT NOT NULL,
+         lineage_json TEXT NOT NULL,
+         UNIQUE(run_id, biz_id)
+       );
+       CREATE INDEX idx_position_run_rows_scope
+         ON position_run_rows(run_id, channel, month_key, source_order);`
+    ],
+    ['未知表', 'CREATE TABLE unexpected_position_table (id INTEGER PRIMARY KEY);'],
+    ['未知视图', 'CREATE VIEW unexpected_position_view AS SELECT key FROM position_meta;'],
+    [
+      '未知触发器',
+      `CREATE TRIGGER unexpected_position_trigger
+       AFTER INSERT ON position_meta
+       BEGIN
+         SELECT 1;
+       END;`
+    ]
+  ];
+
+  for (const [label, statement] of mutations) {
+    const userDataDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), `position-legacy-schema-${label}-`)
+    );
+    t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+    const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
+    const db = new DatabaseSync(dbPath);
+    db.exec('PRAGMA foreign_keys = OFF;');
+    db.exec(statement);
+    db.close();
+
+    assert.throws(
+      () => createPositionReconciliationService({
+        userDataDir,
+        templatePath: TEMPLATE_PATH,
+        initialSideDbCheckpoint: bootstrap
+      }),
+      (error) => error && error.code === 'position-side-db-missing',
+      `${label} 必须阻断`
+    );
+  }
+});
+
+test('空旧侧库 quick_check 失败时不得修补或写入 checkpoint', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-legacy-corrupt-'));
+  const dbPath = createEmptyLegacyPositionDatabase(userDataDir);
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  const pageSize = Number(db.prepare('PRAGMA page_size').get().page_size);
+  const rootPage = Number(db.prepare(`
+    SELECT rootpage
+    FROM sqlite_master
+    WHERE type = 'index' AND name = 'idx_position_bank_scope'
+  `).get().rootpage);
+  db.close();
+  const fd = fs.openSync(dbPath, 'r+');
+  try {
+    fs.writeSync(fd, Buffer.alloc(16, 0xff), 0, 16, (rootPage - 1) * pageSize);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const before = fs.readFileSync(dbPath);
+
+  assert.throws(
+    () => createPositionReconciliationService({
+      userDataDir,
+      templatePath: TEMPLATE_PATH,
+      initialSideDbCheckpoint: {
+        identity: 'corrupt-legacy-identity',
+        generation: 0,
+        token: 'corrupt-legacy-token'
+      }
+    }),
+    (error) => error && error.code === 'position-side-db-missing'
+  );
+  assert.deepEqual(fs.readFileSync(dbPath), before, '失败校验不得改写异常侧库');
 });
 
 test('首次 bootstrap 只绑定同一份 generation 0 侧库，旧 marker 和既有现代库均不得接管', (t) => {

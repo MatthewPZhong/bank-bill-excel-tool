@@ -207,6 +207,10 @@ const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session')
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 // v2.1.16-beta.2 T1：5 轮对账编排器（R1→R5；bank-statement:run 接入，dispatcher 仅作 R2）
 const { runReconciliation } = require('./main-process/reconciliation-orchestrator');
+// v3.1.1：调拨日期策略由唯一 canonical 内置场景持有，但读取不依赖该场景 enabled。
+const {
+  resolveFundTransferDatePolicy
+} = require('./main-process/fund-transfer-date-policy');
 // v2.1.12 需求6：数据侧预检只读 helper（统计 C3 银行侧候选行，不触碰 runC3Scenario 资金逻辑）
 const { countC3BankCandidates } = require('./main-process/scenario-engines/c3-gateway-recon-join');
 // v3.0.0 需求3：退款候选预检只读 helper（统计银行侧 FundType=Ach Return 候选行，与 countC3BankCandidates 对称）
@@ -4254,11 +4258,15 @@ function registerAppHandlers() {
   // 即使 round 2 已在 scenarios:* 4 IPC 入口处清空 processingResult，
   // 仍在 run 时记录 snapshot、export 时再比对一次——让 export handler 自身可见显式校验。
   // snapshot key = id + name + priority + enabled + JSON.stringify(config)
-  function buildScenariosSnapshot(detailedEnabled) {
-    return detailedEnabled
+  function buildScenariosSnapshot(detailedEnabled, fundTransferDatePolicySignature = '') {
+    const scenarioSnapshot = detailedEnabled
       .map((s) => `${s.id}|${s.name}|${s.priority}|${s.enabled ? 1 : 0}|${JSON.stringify(s.config || {})}`)
       .sort()
       .join('\n');
+    return [
+      scenarioSnapshot,
+      `fund-transfer-date-policy|${String(fundTransferDatePolicySignature || '')}`
+    ].join('\n');
   }
 
   // v3.0.8 需求3（运行不阻塞，🔴 资金红线·只改控制流）：handler 改 async + 取 event 供进度转发器；
@@ -4289,11 +4297,10 @@ function registerAppHandlers() {
         await new Promise((r) => setImmediate(r));
       };
       const allScenarios = database.listScenarios();
-      const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
       // 2026-05-27 N5 fix：getScenario 不返 displayIndex / channelId（缺失）— 用 list item 的字段补
       //   listScenarios 已计算渠道内 1-based displayIndex（与 UI 渠道过滤序号一致）
       //   不补则 dispatcher 兜底 scenario.id（DB 自增）→ 状态框「场景 7、8、9」与 UI 序号不一致
-      const detailedEnabled = enabled.map((s) => {
+      const detailedAllScenarios = allScenarios.map((s) => {
         const detail = database.getScenario(s.id);
         if (!detail) return null;
         // v2.1.13 D-3：builtin-fixed 自带写死场景附「适用银行渠道」列表（空 = 适用全部，dispatcher 不过滤）
@@ -4303,6 +4310,11 @@ function registerAppHandlers() {
           : null;
         return { ...detail, displayIndex: s.displayIndex, channelId: s.channelId, _applicableChannelIds: applicableChannelIds };
       }).filter(Boolean);
+      const detailedEnabled = detailedAllScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
+      // v3.1.1：必须从含 disabled 的完整场景集合解析一次全局日期策略。owner 重复或伪内置保留
+      // 签名冲突会在这里 fail-closed；owner 缺失/旧字段非法的防御回退告警进入最终错误报告。
+      const fundTransferPolicyResolution = resolveFundTransferDatePolicy(detailedAllScenarios);
+      const fundTransferDatePolicy = fundTransferPolicyResolution.policy;
       // v2.1.0-beta.1 PR-A round 2 P1（资金红线）：C4 (`recon-id-fix`) 走独立模块
       // `recon-id-fix:run`，不应进入银行对账单 dispatcher（C4 没有对应的 case，
       // dispatcher 内 `runScenario` default 分支会 throw "未知 category"）。
@@ -4360,7 +4372,7 @@ function registerAppHandlers() {
       //   且 config.paymentOfflineBackfill.enabled===true 时才 structuredClone 读全表；否则注入 []（引擎 no-op）。
       //   dispatchScenarios 已是 enabled 过滤后集合，无须再判 enabled；按 funcCategory/subCategory 定位 R5s2 场景。
       const r5s2Scenario = dispatchScenarios.find(
-        (s) => s.config && s.config.funcCategory === 'platform-order' && s.config.subCategory === 'fund-transfer-backfill'
+        (s) => String(s.id) === String(fundTransferDatePolicy.ownerScenarioId)
       );
       const paymentOfflineEnabled = !!(
         r5s2Scenario && r5s2Scenario.config
@@ -4432,6 +4444,13 @@ function registerAppHandlers() {
       const workingDispatchReconRows = dbsChargeScenarioEnabled
         ? structuredClone(database.readFundTransferReconRows() || [])
         : [];
+      // v3.1.1 self-review：多对多检测是独立的只读审计消费者，不能继续只复用
+      // R5s2「调拨来源」的 workingReconRows。R5s2 关闭而 R3.5 开启时，R3.5 仍会用
+      // workingDispatchReconRows 改写银行行；审计必须看到同一批调拨行，才能报告 2×2/N×M。
+      // 这里只选择已经按真实消费者门控加载的副本，不额外读表，也绝不把该数组接回 R5 写入引擎。
+      const workingFundTransferAuditReconRows = dbsChargeScenarioEnabled
+        ? workingDispatchReconRows
+        : workingReconRows;
       // v3.0.8 需求3：进入 R1-R5 编排前让出一次（大表读已完成，下面是 CPU 密集的多轮对账）。
       await yieldRun('reconcile');
       // v2.1.16-beta.2 T1：改走 5 轮编排器 runReconciliation（R2 内部仍调 dispatcher，双维 first-match-wins 不变）。
@@ -4452,6 +4471,12 @@ function registerAppHandlers() {
         fundTransferReconContext: { reconRows: workingReconRows },
         // v3.0.6 需求3 R3.5：DBS-Charge 资金校验调拨对账单入参（语义独立于需求2，不受 reconSourceMid 控制；桶空→编排器 no-op）
         dispatchReconContext: { dispatchReconRows: workingDispatchReconRows },
+        // v3.1.1 self-review：调拨多对多只读审计入参独立于 R5 写入 gating。
+        // R5 关闭但 R3.5 开启时仍注入 R3.5 已使用的调拨副本；编排器不得把它交给 R5。
+        fundTransferAuditContext: { reconRows: workingFundTransferAuditReconRows },
+        // v3.1.1：R3.5、R5s2 两来源和 M2M 审计共享同一不可变日期策略；配置告警排在引擎告警之前。
+        fundTransferDatePolicy,
+        initialWarnings: fundTransferPolicyResolution.warnings,
         // v3.0.8 需求3：轮次边界进度上报（编排器在 R1→R2→R3.5→R4→R5 各轮完成后调；只读不写 processingResult）。
         onProgress
       });
@@ -4477,7 +4502,10 @@ function registerAppHandlers() {
         paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
         // v3.0.12 功能1：异常-人工判断命中银行行（🔴 只读）→ 导出阶段写「异常-人工判断」sheet（无命中时为 []）
         manyToManyReviewRows: result.manyToManyReviewRows || [],
-        scenariosSnapshot: buildScenariosSnapshot(dispatchScenarios),
+        scenariosSnapshot: buildScenariosSnapshot(
+          dispatchScenarios,
+          fundTransferDatePolicy.signature
+        ),
         ranAt: Date.now()
       };
       return {
@@ -4505,13 +4533,22 @@ function registerAppHandlers() {
       // round 3 P1 资金红线（defense in depth）：即使 scenarios:* 4 IPC 入口都清了缓存，
       // 这里再校验一次 snapshot；任何场景 CRUD/toggle 在 run 之后发生 → snapshot 不一致 → 拒绝
       const allScenarios = database.listScenarios();
-      const enabled = allScenarios.filter((s) => s.enabled === 1 || s.enabled === true);
-      const detailedEnabled = enabled.map((s) => database.getScenario(s.id)).filter(Boolean);
+      const detailedAllScenarios = allScenarios
+        .map((s) => database.getScenario(s.id))
+        .filter(Boolean);
+      const detailedEnabled = detailedAllScenarios
+        .filter((s) => s.enabled === 1 || s.enabled === true);
+      // 与 run 使用同一 resolver。fatal owner/保留签名冲突直接拒绝导出；非 fatal 回退的
+      // raw/effective signature 参与快照，因此非法原值变化也会使旧结果失效。
+      const fundTransferPolicyResolution = resolveFundTransferDatePolicy(detailedAllScenarios);
       // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
       // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
       // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category
       const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
-      const currentSnapshot = buildScenariosSnapshot(dispatchScenarios);
+      const currentSnapshot = buildScenariosSnapshot(
+        dispatchScenarios,
+        fundTransferPolicyResolution.policy.signature
+      );
       if (processingResult.scenariosSnapshot !== currentSnapshot) {
         processingResult = null;
         return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };
@@ -14401,29 +14438,30 @@ function getPositionReconciliationService() {
         database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, initialSideDbCheckpoint);
       }
     }
-    const service = createPositionReconciliationService({
-      userDataDir: path.dirname(database.dbPath),
-      templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
-      requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
-      expectedSideDbCheckpoint,
-      expectedPendingOperation: pendingSideDbOperation,
-      initialSideDbCheckpoint,
-      operationTokenProvider: () => {
-        const operation = positionReconciliationOperationContext.getStore();
-        return operation && operation.operationToken;
-      },
-      recordArchiveIntent: (filePaths, role) => {
-        recordPositionArchiveIntentFiles(filePaths, role);
-      },
-      protectedStagingPaths: () => {
-        if (!archiveCenterService
-            || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
-          return null;
-        }
-        return archiveCenterService.listUnresolvedSourcePaths();
-      }
-    });
+    let service = null;
     try {
+      service = createPositionReconciliationService({
+        userDataDir: path.dirname(database.dbPath),
+        templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
+        requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
+        expectedSideDbCheckpoint,
+        expectedPendingOperation: pendingSideDbOperation,
+        initialSideDbCheckpoint,
+        operationTokenProvider: () => {
+          const operation = positionReconciliationOperationContext.getStore();
+          return operation && operation.operationToken;
+        },
+        recordArchiveIntent: (filePaths, role) => {
+          recordPositionArchiveIntentFiles(filePaths, role);
+        },
+        protectedStagingPaths: () => {
+          if (!archiveCenterService
+              || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+            return null;
+          }
+          return archiveCenterService.listUnresolvedSourcePaths();
+        }
+      });
       const checkpoint = service.persistenceCheckpoint();
       const recovery = recoverPositionArchiveIntent(
         pendingSideDbOperation ? readPositionPendingOperation() : null,
@@ -14440,8 +14478,30 @@ function getPositionReconciliationService() {
       if (recovery && Array.isArray(recovery.uncommittedInputPaths)) {
         cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths);
       }
+      const initializationResult = service.store
+        && typeof service.store.initializationResult === 'function'
+        ? service.store.initializationResult()
+        : { mode: 'unknown' };
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'position-reconciliation-side-db-init',
+        message: '平盘侧库初始化完成',
+        details: [`mode=${String(initializationResult.mode || 'unknown')}`]
+      });
     } catch (error) {
-      service.close();
+      // 只记录结构化 code/reason，不写文件路径、账号、订单号或数据库明细。
+      appendActivityLogEntry({
+        level: 'error',
+        source: 'main',
+        domain: 'position-reconciliation-side-db-init',
+        message: '平盘侧库初始化被拒绝',
+        details: [
+          `code=${String(error && error.code ? error.code : 'unknown')}`,
+          `reason=${String(error && error.reason ? error.reason : '未提供结构化校验原因')}`
+        ]
+      });
+      if (service) service.close();
       throw error;
     }
   }

@@ -188,6 +188,37 @@ test('dateToleranceDays=3：隔 2 天的 2×2 组成边 → 命中（默认容�
   assert.deepEqual(hitRowIds({ reviewRows }), ['b1', 'b2'], '容差 3 下隔 2 天的 2×2 组进 reviewRows');
 });
 
+test('dateMatchEnabled=false：完全跳过日期，非法/空/跨年日期的宽方向 2×2 组仍直接命中', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', billDate: 'not-a-date', fundType: 'Charge' }),
+    bankRow({ rowId: 'b2', billDate: '', fundType: '' })
+  ];
+  const gws = [
+    gwRow({ billdate: '2025-01-01', tradeType: 'SomethingElse' }),
+    gwRow({ billdate: 'invalid', tradeType: '' })
+  ];
+  const before = JSON.stringify(banks);
+  const result = detectFundTransferManyToMany(banks, gws, [], {
+    fundTransferDatePolicy: { enabled: false, toleranceDays: 999 }
+  });
+
+  assert.deepEqual(hitRowIds(result), ['b1', 'b2']);
+  assert.ok(result.reviewRows.every((item) => /银行 2 行 × 网关 2 行/.test(item.note)));
+  assert.equal(JSON.stringify(banks), before, '日期关闭分支仍保持纯只读');
+});
+
+test('dateMatchEnabled=true：同一非法日期 2×2 组仍不成边', () => {
+  const banks = [
+    bankRow({ rowId: 'b1', billDate: 'not-a-date' }),
+    bankRow({ rowId: 'b2', billDate: '' })
+  ];
+  const gws = [gwRow({ billdate: 'invalid' }), gwRow({ billdate: null })];
+  const result = detectFundTransferManyToMany(banks, gws, [], {
+    fundTransferDatePolicy: { enabled: true, toleranceDays: 999 }
+  });
+  assert.deepEqual(result.reviewRows, []);
+});
+
 // ---- ⑥ 网关 + 调拨同行去重 -------------------------------------------
 
 test('网关 + 调拨同一银行行命中 → 去重为一条、note 合并两侧', () => {
