@@ -109,6 +109,8 @@
 - 第三轮 review 发现 controller 仍把所有 `ARCHIVE_SOURCE_CHANGED` 视为不可重试。现已接通文件选择、preload/IPC 参数和 service `sourcePaths`，有业务摘要时可安全恢复，无摘要仍要求重跑业务；错误副本返回明确提示。
 - 第三轮维护建议指出多文件恢复排除的 prepared 输入可能滞留。恢复现于存档意图持久化、checkpoint 同步和 pending 清除后，复用未完成引用保护清理差集 staging。
 - BillDate/ValueDate 不再一律降为日历日比较；纯日期仍接受等价 Excel 日期，包含时分秒时执行完整比较，仅兼容固定库时区偏移和最多 2ms 的 Excel 浮点误差。
+- Self-review 发现 SheetJS 数组模式会在跳过空白行后丢失物理行号；读取器改用非空行的 `__rowNum__` 元数据恢复真实 Excel 行号，避免保留大段空白行造成内存膨胀。
+- Self-review 发现混合存档重试可能部分成功但 Renderer 在整体失败时不刷新；controller 补充尝试/成功/失败计数，Renderer 对所有已发起重试统一在结束阶段刷新批次、详情和统计。
 
 ## Evidence
 
@@ -124,7 +126,7 @@
 - 新增差异页独立 preview，人工检查筛选项横向排列、五列表头和最新月份默认值无重叠或截断。
 - 链接表汇总定向测试覆盖派生 0 行仍保留更新日期；链接管理 preview 验证月份范围和更新日期列。
 - 链接管理前端契约覆盖三列表头、底部按钮顺序/颜色及目标链接表导出路由。
-- 全量单测：4008/4008；44 个集成脚本 2016/2016；smoke 与 lint 通过。
+- Self-review 修复定向回归：43/43；全量单测：4011/4011；44 个集成脚本 2016/2016；smoke 与 lint 通过。
 - second review 存档/平盘定向回归：120/120；position side DB parity 继续为 38/38。
 - third review 存档恢复、生命周期、UI/IPC 和文件选择 scope 定向回归：45/45。
 - 设置/存档中心布局在 1240×860、1080×760 和 100%/125%/150% 缩放下：6/6 通过。

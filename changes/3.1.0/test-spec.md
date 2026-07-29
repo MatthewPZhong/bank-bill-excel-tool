@@ -6,6 +6,7 @@
 ## 1. 导入与存储
 
 - 银行 46/49 列、XLSX/XLS、BizId 空/重复、Channel 空、BillDate 非法。
+- 银行和五类原始表在数据区插入空白行后，后续成功记录的 `sourceRowNumber` 及坏行错误仍等于原 Excel 物理行号。
 - 多文件整批校验、Channel+月份替换确认、失败/取消零写入。
 - BizId 与其它既有 Channel+月份冲突时整批拒绝并保留旧数据；同批替换多个范围也禁止 BizId 跨范围迁移；实际无行的导出范围拒绝。
 - 银行、账户快照、普通链接原始表和结果回导复制到私有不可变暂存区后记录解析时 `sourceSnapshot + sizeBytes + SHA-256`；解析后及写 side DB 前重新校验，原路径随后被覆盖时仍使用同一份已解析内容。
@@ -83,6 +84,7 @@
 - pending input 缺解析时 snapshot/SHA/size 或 output 缺 `beforeSnapshot` 字段时一律损坏；恢复 input 不调用当前快照捕获器。暂存内容变化时恢复在 outbox 登记前 fail closed，pending 与文件保留、checkpoint 不同步；即使当前 stat 被当作预期值，相同长度但 SHA 不同的内容也必须由 ArchiveService 拒绝。
 - ArchiveService 已有预期 SHA 时，原路径或替代源即使 inode/mtime/ctime 与历史 snapshot 不同，只要本次读取前后 stat 稳定、size 与 SHA 均一致就允许重试；相同大小但 SHA 不同、读取期间被改写或 size 不同必须拒绝且不得留下 `.part` 或正式 blob。无预期 SHA 的旧 artifact 继续严格校验历史 snapshot。
 - 存档中心 controller 必须把失败批次映射为 `same-source / select-source / rerun-business`。有摘要的 source changed 可选择原文件并透传 `artifactId -> path`，无摘要时不可重试；摘要不得进入 renderer。真实 ArchiveService 回放必须证明同字节副本成功、同大小不同 SHA 失败且提示重新选择。
+- 混合失败批次重试覆盖“一个附件成功、一个附件仍失败”：controller 返回 attempted/succeeded/failed，页面无论整体成功或失败都重新加载批次、详情和统计，并在刷新后保留部分失败提示。
 - 构造 A 已提交、B 仅 prepared 的崩溃恢复：只允许 A 进入正式批次/outbox；checkpoint 同步和 pending 清除后，B 的 staging 子目录立即通过全局保护集清理，A 及其它未完成引用继续保留，未知路径和 staging 根目录不得删除。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。

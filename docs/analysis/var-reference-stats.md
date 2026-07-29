@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.0 |
-| 扫描时间 | 2026-7-28 22:23:37 |
+| 扫描时间 | 2026-7-28 23:07:07 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 218 |
-| 顶层声明总数 | 2553 |
-| ≥2 次引用 | 2409 |
+| 顶层声明总数 | 2554 |
+| ≥2 次引用 | 2410 |
 | 跨 ≥3 文件 (A-share) | 376 |
 | 跨 2 文件 (A-pair) | 637 |
-| 单文件 (A-local) | 1396 |
+| 单文件 (A-local) | 1397 |
 | 跨文件合计 (B) | 1013 |
 
 ---
@@ -29,7 +29,7 @@
 | `normalizeCellValue` | 23 | 278 | 12 | src/backend/database/fund-transfer-account-mapping-repository.js |
 | `text` | 21 | 410 | 2 | src/main-process/position-reconciliation/common.js |
 | `crypto` | 19 | 59 | 19 | src/backend/pending-import/validator.js |
-| `XLSX` | 17 | 85 | 17 | src/backend/bank-bu-recon-import/reader.js |
+| `XLSX` | 17 | 86 | 17 | src/backend/bank-bu-recon-import/reader.js |
 | `pad` | 16 | 97 | 2 | src/backend/logger.js |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js |
 | `BANK_STATEMENT_FIELDS` | 15 | 53 | 14 | src/backend/database/linked-table-repository.js |
@@ -1768,7 +1768,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `publicFailure` | 21 |
+| `publicFailure` | 20 |
 | `artifactSupportsReplacementRetry` | 5 |
 | `ALLOWED_RETENTION_DAYS` | 4 |
 | `ARCHIVE_RETENTION_SETTING_KEY` | 4 |
@@ -1776,6 +1776,7 @@
 | `ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY` | 3 |
 | `ArchiveCenterController` | 3 |
 | `parseRetentionDays` | 3 |
+| `publicRetryFailure` | 3 |
 
 ### `src/main-process/archive-center/operation-tracker.js`
 
@@ -2695,7 +2696,7 @@
 | `normalizeCellValue` | 23 | 278 | 12 | src/main-process/scenario-engines/r5-refund-order-backfill.js(57), src/main-process/position-reconciliation/matching-engine.js(39), src/main-process/scenario-engines/c4-recon-id-fix.js(21) |
 | `text` | 21 | 410 | 2 | src/main-process/position-reconciliation/store.js(113), src/renderer.js(62), src/renderer-dialogs.js(53) |
 | `crypto` | 19 | 59 | 19 | src/main-process/archive-center/archive-service.js(8), src/main-process/position-reconciliation/service.js(6), src/main-process/position-reconciliation/store.js(5) |
-| `XLSX` | 17 | 85 | 17 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
+| `XLSX` | 17 | 86 | 17 | src/backend/file-service/writers.js(20), src/main-process/pending-session.js(11), src/backend/pending-export/writer.js(9) |
 | `pad` | 16 | 97 | 2 | src/main-process/bank-statement-io.js(14), src/renderer.js(13), src/backend/logger.js(11) |
 | `appendModuleLog` | 15 | 77 | 11 | src/backend/database.js(23), src/main-process/acquiring-bill-currency-session.js(13), src/backend/database/migrations.js(8) |
 | `BANK_STATEMENT_FIELDS` | 15 | 53 | 14 | src/main-process/duplicate-inbound-match/excel-writer.js(11), src/renderer-dialogs.js(9), src/main-process/position-reconciliation/readers.js(4) |

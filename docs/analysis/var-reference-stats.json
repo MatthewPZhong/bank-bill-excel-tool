@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-29T02:23:37.963Z",
+    "scannedAt": "2026-07-29T03:07:07.794Z",
     "root": "src",
     "totalFiles": 218,
-    "totalTopLevelNames": 2553,
+    "totalTopLevelNames": 2554,
     "buckets": {
       "shared": 376,
       "paired": 637,
-      "local": 1396,
+      "local": 1397,
       "crossFile": 1013
     }
   },
@@ -1530,7 +1530,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/readers.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/main-process/recon-id-fix-io.js",
@@ -1545,7 +1545,7 @@
             "count": 1
           }
         ],
-        "totalHits": 85,
+        "totalHits": 86,
         "fileSpan": 17
       },
       {
@@ -24048,20 +24048,6 @@
         "fileSpan": 1
       },
       {
-        "name": "publicFailure",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
-            "count": 21
-          }
-        ],
-        "totalHits": 21,
-        "fileSpan": 1
-      },
-      {
         "name": "ArchiveOperationError",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -24069,6 +24055,20 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/archive-service.js",
+            "count": 20
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 1
+      },
+      {
+        "name": "publicFailure",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
             "count": 20
           }
         ],
@@ -34982,6 +34982,20 @@
         "fileSpan": 1
       },
       {
+        "name": "publicRetryFailure",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "pushBankError",
         "defFiles": [
           "src/main-process/scenario-engines/r5-refund-order-backfill.js"
@@ -44928,7 +44942,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/readers.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/main-process/recon-id-fix-io.js",
@@ -44943,7 +44957,7 @@
           "count": 1
         }
       ],
-      "totalHits": 85,
+      "totalHits": 86,
       "fileSpan": 17
     },
     {

@@ -3044,6 +3044,8 @@ function createAppUpdateSettingsDialog() {
     const batchId = button.dataset.batchId;
     button.disabled = true;
     const selectSource = button.dataset.retryMode === 'select-source';
+    let retryAttempted = false;
+    let operationFeedback = null;
     showArchiveFeedback(selectSource ? '请选择业务处理时使用的原文件…' : '正在重试失败存档…', 'info');
     try {
       let sourcePaths = null;
@@ -3056,17 +3058,35 @@ function createAppUpdateSettingsDialog() {
         sourcePaths = selected.sourcePaths;
         showArchiveFeedback('正在校验原文件并重试存档…', 'info');
       }
+      retryAttempted = true;
       const result = await getArchiveCenterApi().retryBatch(batchId, sourcePaths);
       if (!verifyArchiveCenterAction(result, '重试存档失败')) {
-        showArchiveFeedback('', 'info');
+        operationFeedback = { message: '', type: 'info' };
         return;
       }
-      showArchiveFeedback(result?.message || '已提交存档重试', 'success');
-      await loadArchiveBatches({ clearFeedback: false });
-      await loadArchiveStats();
+      operationFeedback = {
+        message: result?.message || '已提交存档重试',
+        type: 'success'
+      };
     } catch (error) {
-      showArchiveFeedback(`重试存档失败：${archiveCenterErrorText(error, '未知错误')}`);
+      operationFeedback = {
+        message: `重试存档失败：${archiveCenterErrorText(error, '未知错误')}`,
+        type: 'error'
+      };
     } finally {
+      if (retryAttempted) {
+        const batchesLoaded = await loadArchiveBatches({ clearFeedback: false });
+        const statsLoaded = await loadArchiveStats();
+        if (operationFeedback) {
+          const refreshSuffix = batchesLoaded && statsLoaded
+            ? ''
+            : '；页面刷新失败，请重新打开存档中心查看最新状态';
+          showArchiveFeedback(
+            `${operationFeedback.message}${refreshSuffix}`,
+            refreshSuffix ? 'error' : operationFeedback.type
+          );
+        }
+      }
       if (button.isConnected) button.disabled = false;
     }
   }

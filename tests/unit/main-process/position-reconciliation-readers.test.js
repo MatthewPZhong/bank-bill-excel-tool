@@ -10,7 +10,8 @@ const XLSX = require('xlsx');
 const {
   readBankFiles,
   readSourceFile,
-  readSourceFiles
+  readSourceFiles,
+  rowValues
 } = require('../../../src/main-process/position-reconciliation/readers');
 const {
   AUDIT_HEADERS,
@@ -182,5 +183,66 @@ test.describe('平盘导入读取器', () => {
         && error.detailLines.includes('付款币种为空')
       )
     );
+  });
+
+  test('数据区空白行不压缩后续银行和原始表的物理行号', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-blank-row-lineage-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+    const bankPath = path.join(dir, 'bank-with-blank.xlsx');
+    const bankWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      bankWorkbook,
+      XLSX.utils.aoa_to_sheet([
+        BANK_STATEMENT_FIELDS,
+        BANK_STATEMENT_FIELDS.map((header) => bankRow()[header] ?? ''),
+        [],
+        BANK_STATEMENT_FIELDS.map((header) => (
+          bankRow({ BizId: 'BANK-BIZ-2', BillDate: '2026-07-21' })[header] ?? ''
+        ))
+      ]),
+      BANK_SHEET_NAME
+    );
+    XLSX.writeFile(bankWorkbook, bankPath);
+
+    const bankParsed = readBankFiles([bankPath]);
+    assert.equal(bankParsed.records[1].sourceRowNumber, 4);
+
+    const sourcePath = path.join(dir, 'source-with-blank.xlsx');
+    const sourceHeaders = SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers;
+    const sourceWorkbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(
+      sourceWorkbook,
+      XLSX.utils.aoa_to_sheet([
+        sourceHeaders,
+        sourceHeaders.map((header) => transferRow()[header] ?? ''),
+        [],
+        sourceHeaders.map((header) => (
+          transferRow({ 调拨单号: 'FT-2', 付款币种: '' })[header] ?? ''
+        ))
+      ]),
+      '资金数据'
+    );
+    XLSX.writeFile(sourceWorkbook, sourcePath);
+
+    assert.throws(
+      () => readSourceFile(sourcePath),
+      (error) => (
+        error.code === 'position-source-row-invalid'
+        && /source-with-blank\.xlsx \/ 资金数据 第 4 行/.test(error.message)
+        && error.detailLines.includes('付款币种为空')
+      )
+    );
+  });
+
+  test('稀疏工作表只返回非空行并保留物理行号', () => {
+    const rows = rowValues({
+      A1: { t: 's', v: '表头' },
+      A100000: { t: 's', v: '数据' },
+      '!ref': 'A1:A100000'
+    });
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].__rowNum__, 0);
+    assert.equal(rows[1].__rowNum__, 99999);
   });
 });

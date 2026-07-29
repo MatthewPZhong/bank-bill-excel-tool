@@ -320,8 +320,17 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const lockStart = renderer.indexOf('async function toggleArchiveBatchLock');
     const retryStart = renderer.indexOf('async function retryArchiveBatch', lockStart);
     const deleteStart = renderer.indexOf('function confirmArchiveBatchDelete', retryStart);
+    const retrySource = renderer.slice(retryStart, deleteStart);
     assert.match(renderer.slice(lockStart, retryStart), /finally \{[\s\S]*?button\.isConnected/);
-    assert.match(renderer.slice(retryStart, deleteStart), /finally \{[\s\S]*?button\.isConnected/);
+    assert.match(retrySource, /let retryAttempted = false/);
+    assert.match(
+      retrySource,
+      /retryAttempted = true;[\s\S]*?retryBatch\(batchId, sourcePaths\)/
+    );
+    assert.match(
+      retrySource,
+      /finally \{[\s\S]*?if \(retryAttempted\)[\s\S]*?loadArchiveBatches\(\{ clearFeedback: false \}\)[\s\S]*?loadArchiveStats\(\)[\s\S]*?showArchiveFeedback\([\s\S]*?button\.isConnected/
+    );
   });
 
   test('图标按钮具备可访问名称，尺寸覆盖两个目标窗口', () => {

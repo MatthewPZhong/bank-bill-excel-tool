@@ -359,6 +359,52 @@ test('普通可重试错误保持原路径重试模式', async () => {
   assert.deepEqual(service.lastRetryCall.options, { sourcePaths: {} });
 });
 
+test('混合重试部分成功时返回计数和明确提示', async () => {
+  const { controller, service } = createHarness();
+  const created = await controller.sink.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '资金对账数据处理',
+    sourceOperation: 'bank-statement:run',
+    files: [
+      { filePath: '/tmp/first.xlsx', role: 'input' },
+      { filePath: '/tmp/second.xlsx', role: 'input' }
+    ]
+  });
+  const batch = service.repository.getBatch(created.batchId);
+  Object.assign(batch, {
+    archiveStatus: 'incomplete',
+    failedArtifactCount: 2,
+    lastErrorCode: 'ARCHIVE_EACCES'
+  });
+  for (const artifactId of [1, 2]) {
+    Object.assign(service.repository.getArtifact(artifactId), {
+      status: 'failed',
+      lastErrorCode: 'ARCHIVE_EACCES'
+    });
+  }
+  service.retryBatch = async () => ({
+    ok: false,
+    status: 'incomplete',
+    batch,
+    attempted: 2,
+    succeeded: 1,
+    failed: 1,
+    results: [
+      { ok: true },
+      { ok: false, code: 'ARCHIVE_EACCES', message: '目标目录暂不可写' }
+    ]
+  });
+
+  const result = await controller.retryBatch(created.batchId);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'ARCHIVE_EACCES');
+  assert.equal(result.attempted, 2);
+  assert.equal(result.succeeded, 1);
+  assert.equal(result.failed, 1);
+  assert.equal(result.message, '目标目录暂不可写；本次已成功 1 个，仍失败 1 个');
+});
+
 test('controller 使用真实 ArchiveService 拒绝错误副本并接受同字节副本', async (t) => {
   const crypto = require('node:crypto');
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-replacement-'));

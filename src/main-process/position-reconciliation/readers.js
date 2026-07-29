@@ -65,11 +65,22 @@ function ensureReadableWorkbook(filePath) {
 }
 
 function rowValues(sheet) {
-  return XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
+  const records = XLSX.utils.sheet_to_json(sheet, {
+    header: 'A',
     defval: '',
     raw: true,
     blankrows: false
+  });
+  return records.map((record) => {
+    const values = [];
+    for (const [columnName, value] of Object.entries(record)) {
+      values[XLSX.utils.decode_col(columnName)] = value;
+    }
+    Object.defineProperty(values, '__rowNum__', {
+      value: record.__rowNum__,
+      enumerable: false
+    });
+    return values;
   });
 }
 
@@ -92,7 +103,10 @@ function objectsFromRows(rows, headers) {
       row[header] = values[columnIndex] ?? '';
     });
     if (isBlankRow(row, headers)) continue;
-    result.push({ row, excelRowNumber: index + 1 });
+    const physicalRowIndex = Number.isSafeInteger(values.__rowNum__)
+      ? values.__rowNum__
+      : index;
+    result.push({ row, excelRowNumber: physicalRowIndex + 1 });
   }
   return result;
 }

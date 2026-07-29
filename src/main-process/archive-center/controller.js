@@ -55,6 +55,19 @@ function publicFailure(result, fallbackMessage) {
   };
 }
 
+function publicRetryFailure(result, failure, fallbackMessage) {
+  const response = publicFailure(failure || result, fallbackMessage);
+  const counts = {};
+  for (const key of ['attempted', 'succeeded', 'failed']) {
+    const value = Number(result && result[key]);
+    if (Number.isSafeInteger(value) && value >= 0) counts[key] = value;
+  }
+  if (counts.succeeded > 0 && counts.failed > 0) {
+    response.message += `；本次已成功 ${counts.succeeded} 个，仍失败 ${counts.failed} 个`;
+  }
+  return { ...response, ...counts };
+}
+
 function operationFailureMessage(failures) {
   const count = Array.isArray(failures) ? failures.length : 0;
   return count > 0
@@ -758,14 +771,21 @@ class ArchiveCenterController {
         : null;
       if (failed && failed.code === 'ARCHIVE_SOURCE_CHANGED'
           && Object.keys(validated.sourcePaths).length > 0) {
-        return publicFailure({
+        return publicRetryFailure(result, {
           code: failed.code,
           message: '所选文件与业务处理时的原始内容不一致，请重新选择正确文件'
         }, '重试存档失败');
       }
-      return publicFailure(failed || result, '重试存档失败');
+      return publicRetryFailure(result, failed || result, '重试存档失败');
     }
-    return { status: 'success', message: '失败文件已重新存档', batch: this._mapBatch(result.batch) };
+    return {
+      status: 'success',
+      message: '失败文件已重新存档',
+      batch: this._mapBatch(result.batch),
+      attempted: Number(result.attempted) || 0,
+      succeeded: Number(result.succeeded) || 0,
+      failed: Number(result.failed) || 0
+    };
   }
 
   async openFile(fileRefId) {
