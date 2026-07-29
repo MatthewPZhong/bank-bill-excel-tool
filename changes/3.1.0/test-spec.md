@@ -82,6 +82,8 @@
 - 构造超过 7 天且只被主库 pending 引用的暂存文件，验证 service 初始化恢复前不删除该批次，同时删除无保护的同龄暂存；pending 的 `archiveFiles` 缺失、非数组、含空项，input 缺合法路径/snapshot/size/SHA，output 缺 `beforeSnapshot` 字段，以及其它保护来源读取失败时，均不得执行清理。业务已提交且文件清单损坏时，验证恢复登记被阻断、pending 不清除、错误 outbox 不产生，第二次启动仍保留真实暂存；另覆盖 `archiveRequired=false/缺失` 和 `archiveState=durable`，确认恢复与同进程 lifecycle 都不得同步 checkpoint 或清 pending。合法 `archiveFiles: []` 继续允许清理无保护旧目录。outbox 单独覆盖非字符串和空白路径拒绝。
 - pending input 缺解析时 snapshot/SHA/size 或 output 缺 `beforeSnapshot` 字段时一律损坏；恢复 input 不调用当前快照捕获器。暂存内容变化时恢复在 outbox 登记前 fail closed，pending 与文件保留、checkpoint 不同步；即使当前 stat 被当作预期值，相同长度但 SHA 不同的内容也必须由 ArchiveService 拒绝。
 - ArchiveService 已有预期 SHA 时，原路径或替代源即使 inode/mtime/ctime 与历史 snapshot 不同，只要本次读取前后 stat 稳定、size 与 SHA 均一致就允许重试；相同大小但 SHA 不同、读取期间被改写或 size 不同必须拒绝且不得留下 `.part` 或正式 blob。无预期 SHA 的旧 artifact 继续严格校验历史 snapshot。
+- 存档中心 controller 必须把失败批次映射为 `same-source / select-source / rerun-business`。有摘要的 source changed 可选择原文件并透传 `artifactId -> path`，无摘要时不可重试；摘要不得进入 renderer。真实 ArchiveService 回放必须证明同字节副本成功、同大小不同 SHA 失败且提示重新选择。
+- 构造 A 已提交、B 仅 prepared 的崩溃恢复：只允许 A 进入正式批次/outbox；checkpoint 同步和 pending 清除后，B 的 staging 子目录立即通过全局保护集清理，A 及其它未完成引用继续保留，未知路径和 staging 根目录不得删除。
 - 存档中心重试、删除、另存为、锁定和设置写操作同样登记为活动业务，退出或升级不得抢占进行中的文件复制。
 - 打包排除 Office/WPS 临时锁文件和 `.DS_Store`，五类正式模板名称与运行时契约一致，旧“中台调拨订单.xlsx”识别样本继续可用。
 - `scripts/integration/position-reconciliation-side-db-parity.js` 验证主库零 bulk、原子替换、重启和回收。

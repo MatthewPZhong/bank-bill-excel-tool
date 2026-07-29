@@ -34,7 +34,10 @@ function createHarness(options = {}) {
   };
   const repository = {
     getBatch: (id) => batches.find((batch) => batch.id === Number(id)) || null,
-    getArtifact: (id) => artifacts.get(Number(id)) || null
+    getArtifact: (id) => artifacts.get(Number(id)) || null,
+    listFailedArtifacts: (batchId) => [...artifacts.values()].filter((artifact) => (
+      artifact.batchId === Number(batchId) && artifact.status === 'failed'
+    ))
   };
   const service = {
     rootDir: '/tmp/archive-center',
@@ -89,7 +92,10 @@ function createHarness(options = {}) {
     },
     async setLocked(id, locked) { return { ok: true, batch: { ...repository.getBatch(id), locked } }; },
     async deleteBatch() { return { ok: true }; },
-    async retryBatch(id) { return { ok: true, batch: repository.getBatch(id) }; },
+    async retryBatch(id, retryOptions = {}) {
+      this.lastRetryCall = { id, options: retryOptions };
+      return { ok: true, batch: repository.getBatch(id) };
+    },
     async openReadonlyCopy() { return { ok: true }; },
     async saveAs(_id, targetPath) { return { ok: true, filePath: targetPath }; },
     listUnresolvedSourcePaths() { return []; },
@@ -100,6 +106,7 @@ function createHarness(options = {}) {
     service,
     outboxStore: options.outboxStore,
     onOutboxFlushed: options.onOutboxFlushed,
+    showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
   return { controller, database, service, settings, templates };
@@ -258,7 +265,177 @@ test('业务完成后源文件已变化的批次要求重新执行业务，不�
 
   const listed = await controller.listBatches({});
   assert.equal(listed.batches[0].canRetry, false);
+  assert.equal(listed.batches[0].retryMode, 'rerun-business');
   assert.equal(listed.batches[0].requiresBusinessRerun, true);
+});
+
+test('源文件变化但保留业务摘要时允许选择等价副本，且不向页面暴露摘要', async () => {
+  const replacementPath = '/tmp/replacement-source.xlsx';
+  const { controller, service } = createHarness({
+    showOpenDialog: async (options) => {
+      assert.match(options.title, /source\.xlsx/);
+      assert.deepEqual(options.properties, ['openFile']);
+      return { canceled: false, filePaths: [replacementPath] };
+    }
+  });
+  const created = await controller.sink.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '资金对账数据处理',
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/source.xlsx', role: 'input' }]
+  });
+  const batch = service.repository.getBatch(created.batchId);
+  const artifact = service.repository.getArtifact(1);
+  Object.assign(batch, {
+    archiveStatus: 'incomplete',
+    failedArtifactCount: 1,
+    lastErrorCode: 'ARCHIVE_SOURCE_CHANGED',
+    lastErrorMessage: '源文件已变化'
+  });
+  Object.assign(artifact, {
+    status: 'failed',
+    lastErrorCode: 'ARCHIVE_SOURCE_CHANGED',
+    lastErrorMessage: '源文件已变化',
+    metadata: {
+      expectedSha256: 'a'.repeat(64),
+      expectedSizeBytes: 12
+    }
+  });
+
+  const listed = await controller.listBatches({});
+  assert.equal(listed.batches[0].canRetry, true);
+  assert.equal(listed.batches[0].retryMode, 'select-source');
+  assert.equal(listed.batches[0].requiresBusinessRerun, false);
+  assert.equal(JSON.stringify(listed).includes('a'.repeat(64)), false);
+  const detail = await controller.getBatch(created.batchId);
+  assert.equal(detail.batch.files[0].canSelectReplacementSource, true);
+  assert.equal(JSON.stringify(detail).includes('a'.repeat(64)), false);
+
+  const successfulDialog = controller.showOpenDialog;
+  controller.showOpenDialog = async () => ({ canceled: true, filePaths: [] });
+  assert.equal((await controller.selectRetrySources(created.batchId)).status, 'cancelled');
+  controller.showOpenDialog = successfulDialog;
+  const selected = await controller.selectRetrySources(created.batchId);
+  assert.deepEqual(selected, {
+    status: 'success',
+    sourcePaths: { 1: replacementPath },
+    selectedCount: 1
+  });
+  const retried = await controller.retryBatch(created.batchId, selected.sourcePaths);
+  assert.equal(retried.status, 'success');
+  assert.deepEqual(service.lastRetryCall, {
+    id: created.batchId,
+    options: { sourcePaths: { 1: replacementPath } }
+  });
+});
+
+test('普通可重试错误保持原路径重试模式', async () => {
+  const { controller, service } = createHarness();
+  const created = await controller.sink.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '资金对账数据处理',
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/locked.xlsx', role: 'input' }]
+  });
+  const batch = service.repository.getBatch(created.batchId);
+  const artifact = service.repository.getArtifact(1);
+  Object.assign(batch, {
+    archiveStatus: 'incomplete',
+    failedArtifactCount: 1,
+    lastErrorCode: 'ARCHIVE_EACCES'
+  });
+  Object.assign(artifact, {
+    status: 'failed',
+    lastErrorCode: 'ARCHIVE_EACCES'
+  });
+
+  const listed = await controller.listBatches({});
+  assert.equal(listed.batches[0].canRetry, true);
+  assert.equal(listed.batches[0].retryMode, 'same-source');
+  assert.equal(listed.batches[0].requiresBusinessRerun, false);
+  assert.equal((await controller.retryBatch(created.batchId)).status, 'success');
+  assert.deepEqual(service.lastRetryCall.options, { sourcePaths: {} });
+});
+
+test('controller 使用真实 ArchiveService 拒绝错误副本并接受同字节副本', async (t) => {
+  const crypto = require('node:crypto');
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-replacement-'));
+  const archiveRoot = path.join(rootDir, 'archive');
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const service = createArchiveService({
+    database: db,
+    rootDir: archiveRoot,
+    now: () => new Date(2026, 6, 20, 12, 0, 0)
+  });
+  const settings = new Map();
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value)
+    },
+    service
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+  await service.initialize();
+
+  const originalPath = path.join(rootDir, 'original.xlsx');
+  fs.writeFileSync(originalPath, 'expected-version');
+  const originalStat = fs.statSync(originalPath);
+  const sourceSnapshot = {
+    sizeBytes: Number(originalStat.size),
+    mtimeMs: Number(originalStat.mtimeMs),
+    ctimeMs: Number(originalStat.ctimeMs),
+    ino: Number(originalStat.ino)
+  };
+  const expectedSha256 = crypto
+    .createHash('sha256')
+    .update('expected-version')
+    .digest('hex');
+  fs.writeFileSync(originalPath, 'different-bytes!');
+
+  const created = await controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:bank:apply-import',
+    files: [{
+      filePath: originalPath,
+      role: 'input',
+      sourceSnapshot,
+      expectedSha256,
+      expectedSizeBytes: Buffer.byteLength('expected-version')
+    }]
+  });
+  const failedArtifact = service.repository.listFailedArtifacts(created.batchId)[0];
+  assert.ok(failedArtifact);
+
+  const wrongPath = path.join(rootDir, 'wrong.xlsx');
+  fs.writeFileSync(wrongPath, 'different-bytes!');
+  const rejected = await controller.retryBatch(created.batchId, {
+    [failedArtifact.id]: wrongPath
+  });
+  assert.equal(rejected.status, 'failed');
+  assert.equal(rejected.code, 'ARCHIVE_SOURCE_CHANGED');
+  assert.equal(
+    rejected.message,
+    '所选文件与业务处理时的原始内容不一致，请重新选择正确文件'
+  );
+  assert.equal(service.repository.getArtifact(failedArtifact.id).status, 'failed');
+
+  const replacementPath = path.join(rootDir, 'replacement.xlsx');
+  fs.writeFileSync(replacementPath, 'expected-version');
+  const recovered = await controller.retryBatch(created.batchId, {
+    [failedArtifact.id]: replacementPath
+  });
+  assert.equal(recovered.status, 'success');
+  assert.equal(service.repository.getArtifact(failedArtifact.id).status, 'ready');
+  assert.equal(service.repository.getBatch(created.batchId).archiveStatus, 'complete');
 });
 
 test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文件保护', async (t) => {

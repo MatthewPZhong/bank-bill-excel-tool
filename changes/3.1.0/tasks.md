@@ -65,6 +65,8 @@
 - [x] 恢复 input 复用解析时证据并在 outbox 登记前校验，内容变化时 fail closed
 - [x] 多文件部分提交恢复按 pending 与 side DB 提交凭证交集存档，未提交文件排除、证据不一致 fail closed
 - [x] 存档重试已有 SHA 时允许历史 stat 变化的同字节副本，并保留当前读取稳定性、大小和 SHA 门禁
+- [x] 存档中心接通选择原文件重试，区分 same-source / select-source / rerun-business 且不暴露摘要
+- [x] 异常恢复完成后立即清理 prepared 未提交输入的受控 staging 子目录
 
 ## 5. 验证
 
@@ -78,5 +80,6 @@
 - [x] second review P2/P3 修复及 self-review P0-P4 Finding 清零
 - [x] 记录真实资金人工复核缺口
 - [x] 外部 final review P2/P3 故障注入回归
+- [x] 第三轮 review P3 与维护建议定向回归
 
 > 自动化、预览和代码复核已完成；真实或脱敏资金数据逐笔验收仍是发布前人工门禁，不以本清单勾选代替。

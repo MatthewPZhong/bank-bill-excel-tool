@@ -2665,12 +2665,19 @@ function createAppUpdateSettingsDialog() {
         || status === 'failed'
         || status === 'incomplete';
     const locked = batch.locked === true;
+    const selectRetrySource = batch.retryMode === 'select-source';
+    const retryTitle = selectRetrySource ? '选择原文件并重试' : '重试失败存档';
     const deleteTitle = locked ? '请先解除锁定，再永久删除批次' : '永久删除批次';
-    const warning = batch.warning
+    const baseWarning = batch.warning
       ?? batch.warningMessage
       ?? batch.errorMessage
       ?? batch.lastErrorMessage
       ?? '';
+    const warning = batch.requiresBusinessRerun === true
+      ? [baseWarning, '该批次缺少可验证的业务内容摘要，需要重新运行业务。']
+        .filter(Boolean)
+        .join('；')
+      : baseWarning;
 
     const fileRows = files.length > 0
       ? files.map((file) => {
@@ -2711,7 +2718,7 @@ function createAppUpdateSettingsDialog() {
         </div>
         <div class="archive-center-detail-actions">
           ${canRetry
-            ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="重试失败存档" aria-label="重试失败存档">↻</button>`
+            ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" data-retry-mode="${escapeHtml(batch.retryMode || 'same-source')}" title="${retryTitle}" aria-label="${retryTitle}">↻</button>`
             : ''}
           <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '◇' : '◆'}</button>
           <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${locked ? ' disabled' : ''}>×</button>
@@ -3036,9 +3043,20 @@ function createAppUpdateSettingsDialog() {
   async function retryArchiveBatch(button) {
     const batchId = button.dataset.batchId;
     button.disabled = true;
-    showArchiveFeedback('正在重试失败存档…', 'info');
+    const selectSource = button.dataset.retryMode === 'select-source';
+    showArchiveFeedback(selectSource ? '请选择业务处理时使用的原文件…' : '正在重试失败存档…', 'info');
     try {
-      const result = await getArchiveCenterApi().retryBatch(batchId);
+      let sourcePaths = null;
+      if (selectSource) {
+        const selected = await getArchiveCenterApi().selectRetrySources(batchId);
+        if (!verifyArchiveCenterAction(selected, '选择原文件失败')) {
+          showArchiveFeedback('', 'info');
+          return;
+        }
+        sourcePaths = selected.sourcePaths;
+        showArchiveFeedback('正在校验原文件并重试存档…', 'info');
+      }
+      const result = await getArchiveCenterApi().retryBatch(batchId, sourcePaths);
       if (!verifyArchiveCenterAction(result, '重试存档失败')) {
         showArchiveFeedback('', 'info');
         return;

@@ -176,6 +176,30 @@ function positionCommittedRecoveryArchiveFiles(value, committedInputs) {
   ));
 }
 
+function positionUncommittedRecoveryInputPaths(value, committedFiles) {
+  const pendingFiles = requirePositionPendingArchiveFiles(value);
+  const retainedFiles = requirePositionPendingArchiveFiles({
+    archiveFiles: Array.isArray(committedFiles) ? committedFiles : []
+  });
+  const pendingInputKeys = new Set(
+    pendingFiles
+      .filter((file) => file.role === 'input')
+      .map(recoveryInputKey)
+  );
+  const committedInputKeys = new Set();
+  for (const file of retainedFiles) {
+    if (file.role !== 'input') continue;
+    const key = recoveryInputKey(file);
+    if (!pendingInputKeys.has(key)) {
+      throw recoveryIntegrityError('平盘恢复保留输入在主库 pending 中缺失');
+    }
+    committedInputKeys.add(key);
+  }
+  return pendingFiles
+    .filter((file) => file.role === 'input' && !committedInputKeys.has(recoveryInputKey(file)))
+    .map((file) => path.resolve(file.filePath));
+}
+
 function positionRecoveryArchiveFiles(value, { captureOutputSnapshot }) {
   const files = requirePositionPendingArchiveFiles(value);
   return files.map((file) => {
@@ -347,6 +371,7 @@ module.exports = {
   parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
   positionCommittedRecoveryArchiveFiles,
+  positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
   assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,

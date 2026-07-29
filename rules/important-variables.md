@@ -10,9 +10,9 @@
 | 字段 | 值 |
 |---|---|
 | 当前清单版本 | v31（app v3.1.0 — 平盘银行/五类链接表持久侧库、侧库初始化一致性门禁、十组 FundType 资金性质判断、账户别名归并、严格 1:1、49 列结果、回导确认和 snapshot 失效门禁） |
-| v31 本轮 review | 2026-07-27（覆盖主库 bulk 禁令、主库/side DB 同批备份与缺失阻断、运行 envelope 与明细一致性、原始/工作值隔离、Channel+月份替换、链接 revision、全局单一草稿、三字段 ReconID 候选冲突、调拨 signed `Extra Fee`、账户别名币种判断、零数据文本列、49 列防篡改和确认事务） |
+| v31 本轮 review | 2026-07-28（覆盖主库 bulk 禁令、主库/side DB 同批备份与缺失阻断、运行 envelope 与明细一致性、原始/工作值隔离、Channel+月份替换、链接 revision、全局单一草稿、三字段 ReconID 候选冲突、调拨 signed `Extra Fee`、账户别名币种判断、零数据文本列、49 列防篡改和确认事务，以及存档替代源 SHA 恢复与 prepared staging 清理） |
 | v30 历史版本 | app v3.0.26 — R5 两种调拨来源和多对多审计统一纳入 signed `Extra Fee`；DBS-Charge 显式保持旧无手续费口径；前置资金不平结果新增 `FundType` 并锁定 C4 三代列契约。 |
-| v31 基线数据 | `docs/analysis/var-reference-stats.md`（216 个 JS 文件 / 2506 顶层声明；A-share 371 / A-pair 628 / A-local 1364 / B 999；报告版本 3.1.0） |
+| v31 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
 | v29 历史版本 | app v3.0.25 — 设置全局【确认】保存存档保留期；模板“不存档”退役并归零历史配置；archiveCenter IPC 由 12 个收敛为 10 个。 |
 | v28 历史版本 | app v3.0.24 — 12 个主模块 ID 全集；平盘对账纯前端占位；Payment `bigAccount` 严格顿号列表及按账号隔离的三轮 1:1。 |
 | v27 历史版本 | app v3.0.23 — C3 专用 Channel trim+NOCASE 候选池；R4 四类固定资金口径、完整 exactRows、全局银行行 1:1 消费与 R4→R5 no-op 匹配血缘。 |
@@ -34,7 +34,7 @@
 | v3.0.24 人工资金 review | 待业务负责人使用至少两个真实或脱敏大账号，逐笔确认银行 `MerchantId` 与订单“收款账户（卡号）”一致，尤其复核同金额、币种、日期碰撞及 R3 兜底；自动化 review 不替代人工验收。 |
 | v3.0.26 人工资金 review | 待业务负责人逐笔核对 R5 默认网关来源与调拨对账单来源的正/负/空手续费、回填 ReconciliationId、严格 1:1 去向和多对多异常说明；并人工打开新 21 列前置资金结果确认 FundType 血缘。自动化 review 不替代人工验收。 |
 | v3.1.0 人工资金 review | 待业务负责人使用真实或脱敏银行账单、五类链接原始表逐笔核对十组 FundType、自有/非自有账户别名、币种、方向、日期、signed Extra Fee、严格 1:1、差异和回导确认；Windows Excel/WPS 模板打开及大文件内存也需人工验收。 |
-| 基线数据 | `docs/analysis/var-reference-stats.md`（215 个 JS 文件 / 2461 顶层声明；A-share 369 / A-pair 618 / A-local 1332 / B 987；报告版本 3.1.0） |
+| 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
 
@@ -398,9 +398,10 @@
 
 ### `ArchiveCenterController` / `archiveCenter` IPC（v3.0.22 新增 Important-skeleton）
 - 定义：`src/main-process/archive-center/controller.js`；preload 门面为 `src/preload.js` 的 `window.desktopApi.archiveCenter`
-- 关联功能：存档批次查询、详情、统计、保留期、锁定、删除、重试、打开只读副本和另存为的唯一跨进程入口；renderer 只能传批次/文件 ID
+- 关联功能：存档批次查询、详情、统计、保留期、锁定、删除、重试、替代源选择、打开只读副本和另存为的唯一跨进程入口；renderer 通常只传批次/文件 ID，替代源重试仅允许额外传递本次原生对话框选择的文件路径
 - 变更 review 要点：
-  - controller / main IPC / preload 10 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径或原始源路径
+  - controller / main IPC / preload 11 个方法 / renderer 调用必须同步，禁止 renderer 取得 Blob 路径、已登记原始源路径、预期 SHA 或预期大小
+  - `selectRetrySources` 只能为具备不可变业务摘要的失败 artifact 选择替代路径；`retryBatch` 必须按 artifact ID 白名单透传，并由 ArchiveService 重新校验普通文件、大小、读取稳定性和 SHA
   - `archive_center_retention_days` 只接受 30/60/90/180/365/永久；缺失或非法值按 60，改枚举必须同步 UI、controller、ArchiveService 和既有设置兼容
   - `archive_center_excluded_template_ids` 自 v3.0.25 起为退役兼容 key，控制器启动时必须规范化为 `[]`；不得恢复隐藏的模板级跳过
   - 网银账单与月度余额不得再由模板元数据产生 `skipArchive`；operation tracker 通用 `skipArchive` 能力仍需回归

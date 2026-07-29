@@ -127,7 +127,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     saveAs: (fileRefId) => ipcRenderer.invoke('archive-center:save-as', fileRefId),
     setLocked: (batchId, locked) => ipcRenderer.invoke('archive-center:set-locked', batchId, locked),
     deleteBatch: (batchId) => ipcRenderer.invoke('archive-center:delete-batch', batchId),
-    retryBatch: (batchId) => ipcRenderer.invoke('archive-center:retry-batch', batchId),
+    selectRetrySources: (batchId) => ipcRenderer.invoke('archive-center:select-retry-sources', batchId),
+    retryBatch: (batchId, sourcePaths) => ipcRenderer.invoke('archive-center:retry-batch', batchId, sourcePaths),
     getSettings: () => ipcRenderer.invoke('archive-center:get-settings'),
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')

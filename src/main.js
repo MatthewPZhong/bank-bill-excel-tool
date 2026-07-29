@@ -83,6 +83,7 @@ const {
 const {
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
+  positionUncommittedRecoveryInputPaths,
   requirePositionPendingArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
@@ -3535,8 +3536,12 @@ function registerArchiveCenterHandlers() {
   archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (_event, batchId) => {
     return callArchiveCenter('deleteBatch', batchId);
   });
-  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', (_event, batchId) => {
-    return callArchiveCenter('retryBatch', batchId);
+  archiveCenterMutationIpcHandle('archive-center:select-retry-sources',
+    '选择存档恢复文件',
+    (_event, batchId) => callArchiveCenter('selectRetrySources', batchId)
+  );
+  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', (_event, batchId, sourcePaths) => {
+    return callArchiveCenter('retryBatch', batchId, sourcePaths);
   });
   ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
   archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
@@ -3570,6 +3575,7 @@ function initializeArchiveCenter() {
     service,
     outboxStore: archiveOutbox,
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
+    showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
       appendActivityLogEntry({
@@ -14278,7 +14284,8 @@ function positionArchiveIntentEvidence(pending, currentCheckpoint) {
 function persistPositionArchiveIntentIfNeeded(
   pending,
   currentCheckpoint,
-  service = positionReconciliationService
+  service = positionReconciliationService,
+  options = {}
 ) {
   if (!pending) return null;
   const files = requirePositionPendingArchiveFiles(pending);
@@ -14288,7 +14295,25 @@ function persistPositionArchiveIntentIfNeeded(
       && archiveOperationTracker
       && archiveOperationTracker.supportsChannel(pending.channel)
     );
-  if (!archiveRequired || pending.archiveState === 'durable') return null;
+  if (!archiveRequired) return null;
+  if (pending.archiveState === 'durable') {
+    if (options.includeCleanupCandidates !== true
+        || !service
+        || typeof service.listCommittedOperationInputs !== 'function') {
+      return null;
+    }
+    const committedFiles = positionCommittedRecoveryArchiveFiles(
+      { ...pending, archiveFiles: files },
+      service.listCommittedOperationInputs(pending.operationToken)
+    );
+    return {
+      archiveResult: null,
+      uncommittedInputPaths: positionUncommittedRecoveryInputPaths(
+        { ...pending, archiveFiles: files },
+        committedFiles
+      )
+    };
+  }
   const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
   if (!evidence.requiresPersistence) return null;
   if (!service || typeof service.listCommittedOperationInputs !== 'function') {
@@ -14298,6 +14323,10 @@ function persistPositionArchiveIntentIfNeeded(
   const committedFiles = positionCommittedRecoveryArchiveFiles(
     { ...pending, archiveFiles: files },
     committedInputs
+  );
+  const uncommittedInputPaths = positionUncommittedRecoveryInputPaths(
+    { ...pending, archiveFiles: files },
+    committedFiles
   );
   if (committedFiles.length === 0 || !archiveCenterService
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
@@ -14311,17 +14340,25 @@ function persistPositionArchiveIntentIfNeeded(
     { archiveFiles: committedFiles },
     { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
   );
-  return archiveCenterService.persistOperationIntent({
+  const archiveResult = archiveCenterService.persistOperationIntent({
     ...positionArchiveModule(String(pending.channel || '')),
     sourceOperation: String(pending.channel || ''),
     operationKey: `position:${pending.operationToken}:${pending.channel}`,
     metadata: { positionOperationToken: pending.operationToken, recovered: true },
     files: recoveryFiles
   });
+  return options.includeCleanupCandidates === true
+    ? { archiveResult, uncommittedInputPaths }
+    : archiveResult;
 }
 
 function recoverPositionArchiveIntent(pending, currentCheckpoint, service) {
-  persistPositionArchiveIntentIfNeeded(pending, currentCheckpoint, service);
+  return persistPositionArchiveIntentIfNeeded(
+    pending,
+    currentCheckpoint,
+    service,
+    { includeCleanupCandidates: true }
+  );
 }
 
 function persistCurrentPositionArchiveIntentIfNeeded() {
@@ -14388,7 +14425,7 @@ function getPositionReconciliationService() {
     });
     try {
       const checkpoint = service.persistenceCheckpoint();
-      recoverPositionArchiveIntent(
+      const recovery = recoverPositionArchiveIntent(
         pendingSideDbOperation ? readPositionPendingOperation() : null,
         checkpoint,
         service
@@ -14400,6 +14437,9 @@ function getPositionReconciliationService() {
       database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
       database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       positionReconciliationService = service;
+      if (recovery && Array.isArray(recovery.uncommittedInputPaths)) {
+        cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths);
+      }
     } catch (error) {
       service.close();
       throw error;

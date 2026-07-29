@@ -9,6 +9,7 @@ const path = require('node:path');
 const {
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
+  positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
@@ -394,6 +395,13 @@ test('恢复只保留 side DB 已提交的文件级输入，prepared 输入不�
   }]);
 
   assert.deepEqual(filtered, [firstPending, outputPending]);
+  assert.deepEqual(
+    positionUncommittedRecoveryInputPaths({
+      operationToken: 'multi-file-operation',
+      archiveFiles: [firstPending, secondPending, outputPending]
+    }, filtered),
+    [secondPath]
+  );
 });
 
 test('恢复文件级提交凭证与 pending 不一致时 fail closed', () => {

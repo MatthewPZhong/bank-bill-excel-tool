@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.0",
-    "scannedAt": "2026-07-28T17:13:52.604Z",
+    "scannedAt": "2026-07-29T02:23:37.963Z",
     "root": "src",
     "totalFiles": 218,
-    "totalTopLevelNames": 2550,
+    "totalTopLevelNames": 2553,
     "buckets": {
       "shared": 376,
-      "paired": 636,
-      "local": 1394,
-      "crossFile": 1012
+      "paired": 637,
+      "local": 1396,
+      "crossFile": 1013
     }
   },
   "A": {
@@ -252,7 +252,7 @@
           },
           {
             "file": "src/main-process/archive-center/controller.js",
-            "count": 6
+            "count": 9
           },
           {
             "file": "src/main-process/archive-center/operation-tracker.js",
@@ -328,7 +328,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-            "count": 3
+            "count": 4
           },
           {
             "file": "src/main-process/position-reconciliation/readers.js",
@@ -419,7 +419,7 @@
             "count": 2
           }
         ],
-        "totalHits": 368,
+        "totalHits": 372,
         "fileSpan": 81
       },
       {
@@ -4462,6 +4462,45 @@
         "fileSpan": 6
       },
       {
+        "name": "SHA256_RE",
+        "defFiles": [
+          "src/backend/database/archive-repository.js",
+          "src/main-process/archive-center/archive-service.js",
+          "src/main-process/archive-center/controller.js",
+          "src/main-process/position-reconciliation/input-staging.js",
+          "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/database/archive-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/archive-center/archive-service.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/input-staging.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 6
+      },
+      {
         "name": "listSideDbFiles",
         "defFiles": [
           "src/backend/run-data-store.js"
@@ -5151,40 +5190,6 @@
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
             "count": 5
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 5
-      },
-      {
-        "name": "SHA256_RE",
-        "defFiles": [
-          "src/backend/database/archive-repository.js",
-          "src/main-process/archive-center/archive-service.js",
-          "src/main-process/position-reconciliation/input-staging.js",
-          "src/main-process/position-reconciliation/operation-lifecycle.js",
-          "src/main-process/position-reconciliation/store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/database/archive-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/archive-center/archive-service.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/position-reconciliation/input-staging.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/position-reconciliation/store.js",
-            "count": 2
           }
         ],
         "totalHits": 14,
@@ -5931,10 +5936,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 65
+            "count": 66
           }
         ],
-        "totalHits": 264,
+        "totalHits": 265,
         "fileSpan": 4
       },
       {
@@ -13174,6 +13179,24 @@
         "fileSpan": 2
       },
       {
+        "name": "requirePositionPendingArchiveFiles",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 8
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 2
+      },
+      {
         "name": "SHEET_ENTRY_NAME",
         "defFiles": [
           "src/backend/acquiring-bill-currency-import/reader.js"
@@ -13835,24 +13858,6 @@
           {
             "file": "src/main-process/recon-id-fix-io.js",
             "count": 5
-          }
-        ],
-        "totalHits": 7,
-        "fileSpan": 2
-      },
-      {
-        "name": "requirePositionPendingArchiveFiles",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-            "count": 6
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
           }
         ],
         "totalHits": 7,
@@ -22852,6 +22857,24 @@
         "fileSpan": 2
       },
       {
+        "name": "positionUncommittedRecoveryInputPaths",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
         "name": "prepareBillInsert",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/import-repository.js"
@@ -23850,10 +23873,10 @@
         "refFiles": [
           {
             "file": "src/preload.js",
-            "count": 248
+            "count": 249
           }
         ],
-        "totalHits": 248,
+        "totalHits": 249,
         "fileSpan": 1
       },
       {
@@ -24025,6 +24048,20 @@
         "fileSpan": 1
       },
       {
+        "name": "publicFailure",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 21
+          }
+        ],
+        "totalHits": 21,
+        "fileSpan": 1
+      },
+      {
         "name": "ArchiveOperationError",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -24172,20 +24209,6 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
-            "count": 16
-          }
-        ],
-        "totalHits": 16,
-        "fileSpan": 1
-      },
-      {
-        "name": "publicFailure",
-        "defFiles": [
-          "src/main-process/archive-center/controller.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/archive-center/controller.js",
             "count": 16
           }
         ],
@@ -24487,6 +24510,20 @@
         "fileSpan": 1
       },
       {
+        "name": "recoveryIntegrityError",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 11
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 1
+      },
+      {
         "name": "RENDERER_STARTUP_MARKS",
         "defFiles": [
           "src/renderer.js"
@@ -24648,20 +24685,6 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/archive-service.js",
-            "count": 10
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 1
-      },
-      {
-        "name": "recoveryIntegrityError",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 10
           }
         ],
@@ -25705,6 +25728,20 @@
         "fileSpan": 1
       },
       {
+        "name": "recoveryInputKey",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "refreshOpenAppUpdateDialog",
         "defFiles": [
           "src/renderer.js"
@@ -25754,6 +25791,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
+        "name": "verifyArchiveCenterAction",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 7
           }
         ],
@@ -26307,20 +26358,6 @@
         "fileSpan": 1
       },
       {
-        "name": "verifyArchiveCenterAction",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
         "name": "XML_HEAD",
         "defFiles": [
           "src/backend/pending-import/streaming-xlsx-writer.js"
@@ -26496,6 +26533,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/archive-repository.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 1
+      },
+      {
+        "name": "artifactSupportsReplacementRetry",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
             "count": 5
           }
         ],
@@ -29394,20 +29445,6 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/outbox-store.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "recoveryInputKey",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 4
           }
         ],
@@ -41525,6 +41562,20 @@
         "fileSpan": 1
       },
       {
+        "name": "publicArtifactMetadata",
+        "defFiles": [
+          "src/main-process/archive-center/controller.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "publicBatchDetail",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -43599,7 +43650,7 @@
         },
         {
           "file": "src/main-process/archive-center/controller.js",
-          "count": 6
+          "count": 9
         },
         {
           "file": "src/main-process/archive-center/operation-tracker.js",
@@ -43675,7 +43726,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-          "count": 3
+          "count": 4
         },
         {
           "file": "src/main-process/position-reconciliation/readers.js",
@@ -43766,7 +43817,7 @@
           "count": 2
         }
       ],
-      "totalHits": 368,
+      "totalHits": 372,
       "fileSpan": 81
     },
     {
@@ -47809,6 +47860,45 @@
       "fileSpan": 6
     },
     {
+      "name": "SHA256_RE",
+      "defFiles": [
+        "src/backend/database/archive-repository.js",
+        "src/main-process/archive-center/archive-service.js",
+        "src/main-process/archive-center/controller.js",
+        "src/main-process/position-reconciliation/input-staging.js",
+        "src/main-process/position-reconciliation/operation-lifecycle.js",
+        "src/main-process/position-reconciliation/store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/database/archive-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/archive-center/archive-service.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/input-staging.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/store.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 6
+    },
+    {
       "name": "listSideDbFiles",
       "defFiles": [
         "src/backend/run-data-store.js"
@@ -48498,40 +48588,6 @@
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
           "count": 5
-        }
-      ],
-      "totalHits": 14,
-      "fileSpan": 5
-    },
-    {
-      "name": "SHA256_RE",
-      "defFiles": [
-        "src/backend/database/archive-repository.js",
-        "src/main-process/archive-center/archive-service.js",
-        "src/main-process/position-reconciliation/input-staging.js",
-        "src/main-process/position-reconciliation/operation-lifecycle.js",
-        "src/main-process/position-reconciliation/store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/database/archive-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/archive-center/archive-service.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/position-reconciliation/input-staging.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/position-reconciliation/store.js",
-          "count": 2
         }
       ],
       "totalHits": 14,
@@ -49278,10 +49334,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 65
+          "count": 66
         }
       ],
-      "totalHits": 264,
+      "totalHits": 265,
       "fileSpan": 4
     },
     {
@@ -56519,6 +56575,24 @@
       "fileSpan": 2
     },
     {
+      "name": "requirePositionPendingArchiveFiles",
+      "defFiles": [
+        "src/main-process/position-reconciliation/operation-lifecycle.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "count": 8
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 2
+    },
+    {
       "name": "SHEET_ENTRY_NAME",
       "defFiles": [
         "src/backend/acquiring-bill-currency-import/reader.js"
@@ -57180,24 +57254,6 @@
         {
           "file": "src/main-process/recon-id-fix-io.js",
           "count": 5
-        }
-      ],
-      "totalHits": 7,
-      "fileSpan": 2
-    },
-    {
-      "name": "requirePositionPendingArchiveFiles",
-      "defFiles": [
-        "src/main-process/position-reconciliation/operation-lifecycle.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-          "count": 6
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
         }
       ],
       "totalHits": 7,
@@ -66180,6 +66236,24 @@
     },
     {
       "name": "positionRecoveryArchiveFiles",
+      "defFiles": [
+        "src/main-process/position-reconciliation/operation-lifecycle.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "positionUncommittedRecoveryInputPaths",
       "defFiles": [
         "src/main-process/position-reconciliation/operation-lifecycle.js"
       ],

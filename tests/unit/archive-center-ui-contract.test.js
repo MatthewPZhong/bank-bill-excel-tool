@@ -62,6 +62,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       'archive-center:save-as',
       'archive-center:set-locked',
       'archive-center:delete-batch',
+      'archive-center:select-retry-sources',
       'archive-center:retry-batch',
       'archive-center:set-retention-days'
     ]) {
@@ -73,6 +74,22 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
     assert.match(main, /protectedStagingPaths:[\s\S]*?listUnresolvedSourcePaths\(\)/);
     assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*unresolvedSourcePaths\)/);
+  });
+
+  test('异常恢复完成后只清理未提交输入，并在清除 pending 后执行受保护目录清理', () => {
+    const serviceStart = main.indexOf('function getPositionReconciliationService');
+    const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
+    const recoveryFlow = main.slice(serviceStart, serviceEnd);
+    assert.match(recoveryFlow, /const recovery = recoverPositionArchiveIntent\(/);
+    assert.match(
+      recoveryFlow,
+      /cleanupPositionArchiveSourcePaths\(recovery\.uncommittedInputPaths\)/
+    );
+    assert.ok(
+      recoveryFlow.indexOf("database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '')")
+        < recoveryFlow.indexOf('cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths)'),
+      '未提交 staging 只能在 checkpoint 同步和 pending 清除后清理'
+    );
   });
 
   test('设置弹窗为双栏导航且默认停留在自动更新', () => {
@@ -127,6 +144,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       ['saveAs', 'archive-center:save-as'],
       ['setLocked', 'archive-center:set-locked'],
       ['deleteBatch', 'archive-center:delete-batch'],
+      ['selectRetrySources', 'archive-center:select-retry-sources'],
       ['retryBatch', 'archive-center:retry-batch'],
       ['getSettings', 'archive-center:get-settings'],
       ['setRetentionDays', 'archive-center:set-retention-days'],
@@ -180,7 +198,19 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /api\.saveAs\(fileRefId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.setLocked\(batchId, nextLocked\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.deleteBatch\(batchId\)/);
-    assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.selectRetrySources\(batchId\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId, sourcePaths\)/);
+    assert.match(renderer, /batch\.requiresBusinessRerun === true/);
+    assert.match(renderer, /需要重新运行业务/);
+    assert.match(preload, /retryBatch:\s*\(batchId, sourcePaths\)/);
+    assert.match(
+      main,
+      /archive-center:retry-batch'[\s\S]*?\(_event, batchId, sourcePaths\)[\s\S]*?retryBatch', batchId, sourcePaths/
+    );
+    assert.match(
+      main,
+      /showOpenDialog:\s*\(options\)\s*=>\s*showImportOpenDialog\('archive-center-retry-source', options\)/
+    );
     assert.match(renderer, /confirmOverlay = createConfirmDialog\(\{/);
     assert.match(renderer, /batch\?\.internalId \?\? batch\?\.batchId/);
     assert.match(renderer, /data-batch-number="\$\{escapeHtml\(batchNumber\)\}"/);
@@ -284,6 +314,8 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /if \(role === 'output'\) return '首次结果'/);
     assert.match(renderer, /const role = archiveCenterRoleText\(file\.role \?\? file\.fileRole\)/);
     assert.match(renderer, /const canRetry = typeof batch\.canRetry === 'boolean'/);
+    assert.match(renderer, /batch\.retryMode === 'select-source'/);
+    assert.match(renderer, /选择原文件并重试/);
 
     const lockStart = renderer.indexOf('async function toggleArchiveBatchLock');
     const retryStart = renderer.indexOf('async function retryArchiveBatch', lockStart);

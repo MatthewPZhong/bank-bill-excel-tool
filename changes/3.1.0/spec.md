@@ -3,7 +3,7 @@
 > status: implemented
 > owner: PM / Dev
 > created: 2026-07-26
-> updated: 2026-07-27
+> updated: 2026-07-28
 
 ## 0. 任务摘要
 
@@ -66,6 +66,8 @@
 - 单独识别清结算银行账户表但尚待用户确认时，只保存内存确认 token，不视为业务已提交，也不建立空存档批次；本次 prepare 的主库 pending 正常清理。用户确认后的 apply 操作才写侧库并存档不可变输入副本。
 - 平盘 pending、存档持久化和 checkpoint 清理使用同一可测试状态机；正式存档、持久 outbox 和二者同时失败三条分支必须保持确定行为，禁止仅靠源码接线断言。
 - 启动清理暂存目录前，保护集必须同时包含正式失败 artifact、outbox 以及主库平盘 pending 的 `archiveFiles`。input 项必须同时包含非空 `filePath`、合法解析时 `sourceSnapshot`、一致的 `sizeBytes` 和 64 位 SHA-256；output 项必须包含写出前 `beforeSnapshot` 字段。任一保护来源缺失、损坏或不可用时，保守跳过本次过期清理。恢复流程与同进程 checkpoint 完成流程必须复用同一校验；无论 `archiveRequired` 或 `archiveState` 为何，文件清单损坏都必须保留 pending、禁止写入错误 outbox、禁止推进 checkpoint。恢复 input 时必须复用 pending 中的解析时证据并重新校验当前暂存字节，禁止重新抓取当前文件快照作为可信基准；不一致时保留 pending、checkpoint 不推进且不登记错误 outbox。outbox 自身也必须拒绝非字符串及空白路径，并完整保存预期 SHA-256。
+- 存档中心按失败 artifact 的内部证据区分恢复方式：普通可重试错误沿用原路径；`ARCHIVE_SOURCE_CHANGED` 且存在合法预期 SHA-256/大小时显示“选择原文件并重试”；缺少该证据时只能提示重新运行业务。页面和 preload 不得获得摘要值，替代路径最终仍由 ArchiveService 校验普通文件、大小、读取前后稳定性、读取字节数和 SHA-256。
+- 多文件异常恢复中，pending 有但 side DB 无提交凭证的 prepared 输入不得进入存档。恢复意图持久化、checkpoint 同步且 pending 清除后，立即计算 `pending inputs - committed inputs`，再通过正式失败 artifact、outbox 和全局未完成引用保护集清理对应 staging 子目录；不得直接删除文件或越出平盘 staging 根目录。
 
 ## 4. 导入
 
