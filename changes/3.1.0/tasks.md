@@ -76,7 +76,7 @@
 - [x] scan:vars / check:vars（最终提交，命中项已进入关联功能 review）
 - [x] startup:measure（最终提交）
 - [x] reconciliation blindspot pass
-- [ ] team-lead 三层质量门禁（最终提交）
+- [x] team-lead 三层质量门禁（最终提交）
 - [x] second review P2/P3 修复及 self-review P0-P4 Finding 清零
 - [x] 记录真实资金人工复核缺口
 - [x] 外部 final review P2/P3 故障注入回归
@@ -85,3 +85,16 @@
 - [x] Self-review 修复存档混合重试部分成功后的计数与页面刷新
 
 > 自动化、预览和代码复核已完成；真实或脱敏资金数据逐笔验收仍是发布前人工门禁，不以本清单勾选代替。
+
+## 6. 合并与发布收尾
+
+- [x] PR #102 以 merge commit `40e822f` 合入 `main`
+- [x] PR 交付记录与最终 review 证据归档
+- [x] 合并后 `npm ci` 与 `npm run release-check`
+- [x] 合并后主页面几何校验与启动性能检查
+- [x] 合并后 `scan:vars`、`check:vars -- --include-minor` 与生产依赖审计
+- [x] 提交并推送发布准备记录
+- [ ] 创建并推送 annotated tag `v3.1.0`
+- [ ] Windows 发布工作流成功
+- [ ] GitHub Release 与 setup、portable、blockmap、`latest.yml` 四项资产核验
+- [ ] 回写最终发布证据并清理已合并开发分支

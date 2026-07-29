@@ -1,7 +1,8 @@
 # Test Spec — v3.1.0 平盘资金性质校验
 
-> status: verified
+> status: release-prepared-pass
 > created: 2026-07-26
+> updated: 2026-07-29
 
 ## 1. 导入与存储
 
@@ -94,3 +95,13 @@
 - `npm run check:vars -- --include-minor`
 - `npm run startup:measure`
 - ⚠️ 真实或脱敏资金数据逐笔人工复核，不能用自动测试替代。
+
+## 7. 合并后发布门禁证据
+
+- 合并后 `main`：`40e822f`。
+- `npm run release-check`：unit `4011/4011`、44 个 integration 脚本 `2016/2016`，lint 与 smoke 通过。
+- `npm run verify:main-panel-alignment`：6/6 通过，最大中心误差 `0.0039 CSS px`。
+- `npm run startup:measure`：五次中位数为进程总耗时 `766.383ms`、ready-to-show `175.031ms`；第一次进程启动 `5398.462ms` 为离群值。
+- `npm run scan:vars`：218 个 JS 文件、2554 个顶层声明；`npm run check:vars -- --include-minor` 确认 `src/` 无未提交改动。
+- `npm audit --omit=dev`：0 critical、7 high、2 moderate，与既有生产依赖基线一致。
+- Windows Excel/WPS 人工检查和真实或脱敏资金数据逐笔复核仍为发布后人工验收项。

@@ -1,9 +1,9 @@
 # Spec — v3.1.0 平盘资金性质校验
 
-> status: implemented
+> status: release-prepared
 > owner: PM / Dev
 > created: 2026-07-26
-> updated: 2026-07-28
+> updated: 2026-07-29
 
 ## 0. 任务摘要
 
@@ -175,3 +175,12 @@
 - HX 类似真实样本缺失不适用本模块；本模块必须使用真实或脱敏数据覆盖十组 FundType。
 - ⚠️ 人工逐笔核对账号别名、自有/非自有识别、币种比较、正负手续费、日期、1:1 冲突、回导和确认后表库状态。
 - Windows Excel/WPS 人工打开新链接模板和 49 列结果，核对样式、文本格式与高亮。
+
+## 11. 交付与发布状态
+
+- PR #102 已于 2026-07-29 以 merge commit `40e822f` 合入 `main`。
+- 合并后 `npm run release-check` 通过：unit `4011/4011`、44 个 integration 脚本 `2016/2016`，lint 与 smoke 通过。
+- 主页面几何校验 `6/6` 通过；启动性能五次中位数为进程总耗时 `766.383ms`、ready-to-show `175.031ms`。
+- `scan:vars` 已刷新至 218 个 JS 文件、2554 个顶层声明；`check:vars -- --include-minor` 确认 `src/` 无未提交改动。
+- 生产依赖审计保留既有 9 条告警（0 critical、7 high、2 moderate）；未在发布收尾阶段变更依赖。
+- 当前为发布准备状态，`v3.1.0` tag 与 GitHub Release 尚未创建。

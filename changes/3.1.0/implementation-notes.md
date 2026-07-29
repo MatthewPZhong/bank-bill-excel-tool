@@ -145,6 +145,16 @@
   - `POSITION_BANK_HEADERS`：49 列名称和顺序未变；已按 side DB、匹配、跨运行 1:1、日期回导、文本列、存档和行去向清单完成资金复核。
   - `getSetting/setSetting`：沿用既有首次 bootstrap、checkpoint 和待完成 operation 设置键；恢复矩阵、operation token 所有权和行为级生命周期测试通过，未改变通用 settings 语义。
 
+## Release Preparation
+
+- PR #102 已于 2026-07-29 以 merge commit `40e822f` 合入 `main`。
+- 合并后执行 `npm ci` 与 `npm run release-check`：unit `4011/4011`、44 个 integration 脚本 `2016/2016`，lint 与 smoke 通过。
+- 主页面几何校验 `6/6` 通过，最大中心误差 `0.0039 CSS px`。
+- 启动性能五次中位数：进程总耗时 `766.383ms`、ready-to-show `175.031ms`；第一次进程启动 `5398.462ms` 为离群值。
+- `scan:vars` 刷新至 218 个 JS 文件、2554 个顶层声明；`check:vars -- --include-minor` 确认 `src/` 无未提交改动。
+- 生产依赖审计保留既有 9 条告警：0 critical、7 high、2 moderate。
+- 发布准备开始时仓库为公开仓库，`v3.1.0` tag 与 GitHub Release 均不存在。
+
 ## Remaining Unknowns
 
 - 真实或脱敏账户表的别名冲突和多币种分布需人工确认。
@@ -152,3 +162,4 @@
 - 自动化已覆盖跨月份及来源重建后的严格 1:1；真实重复 ReconID 和同 BizId 重导样本仍需逐笔人工核对。
 - Windows Excel/WPS 的模板视觉与文本格式需人工确认。
 - SheetJS 读取 `.xlsx/.xls` 时仍会加载单个工作簿；超大原始表的峰值内存需用真实规模文件补充观察。
+- Windows 安装版从旧稳定版升级到 `v3.1.0` 的在线更新链路需在 Release 产物可用后执行人工 canary。
