@@ -58,6 +58,10 @@
 //     · applicableChannelNames 非空但**一个都 resolve 不到** → 不调 set([])（[] 会变成「适用全部」=反向 bug）；
 //       P3-2 起进一步**禁用该场景**（setScenarioEnabled false）+ 强 warning，避免限定场景误对所有渠道生效；
 //       caller 未提供 setScenarioEnabled 时退回「仅 warning」（向后兼容）。
+const {
+  hasFundTransferReservedSignature
+} = require('./fund-transfer-date-policy');
+
 function applyScenarioBundleImport(bundle, options, deps) {
   const opts = options || {};
   const confirmCreateMissingChannels = opts.confirmCreateMissingChannels === true;
@@ -133,6 +137,25 @@ function applyScenarioBundleImport(bundle, options, deps) {
       // v2.1.9 SR-FIX-1 round 2 F2（spec §16.3.3）：channel 内查重（findByChannelAndName）
       //   → 跨渠道同名场景可正常导入（原全表查重会让跨 channel 同名也匹配 → 错误跳过）
       for (const bundleScenario of bundleChannel.scenarios) {
+        // 先解析 config，确保保留签名校验发生在任何 create / 适用渠道恢复之前。
+        let configValue = bundleScenario.configJson;
+        if (typeof configValue === 'string') {
+          try { configValue = JSON.parse(configValue); } catch (_e) { /* 透传原值 */ }
+        }
+        // v3.1.1：配置包只能创建 isBuiltin=false 的普通场景，不能复制 canonical 调拨回填保留签名。
+        // 即使本机 owner 被改名，也不能通过“不同名”绕开同名冲突后生成一个伪内置执行场景。
+        if (hasFundTransferReservedSignature({
+          category: bundleScenario.category,
+          isBuiltin: false,
+          config: configValue
+        })) {
+          conflicts.push({
+            channel: channelLabel,
+            scenario: bundleScenario.name,
+            reason: 'reserved-signature'
+          });
+          continue;
+        }
         const existingInChannel = findScenarioByChannelAndName(
           targetChannel.id,
           bundleScenario.name
@@ -144,11 +167,6 @@ function applyScenarioBundleImport(bundle, options, deps) {
             reason: 'name-duplicate'
           });
           continue;
-        }
-        // 解析 configJson（已在 parseScenarioBundle 透传；apply 时再 serialize 到 DB）
-        let configValue = bundleScenario.configJson;
-        if (typeof configValue === 'string') {
-          try { configValue = JSON.parse(configValue); } catch (_e) { /* 透传原值 */ }
         }
         // v2.1.9 SR-FIX-1 round 3 F2-cont（spec §16.3.5）：
         //   createScenario 直接传 channelId（F1 已支持），不再 INSERT 后 UPDATE channel_id

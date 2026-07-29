@@ -14,6 +14,10 @@ const {
   absoluteDecimal,
   addCanonicalDecimals
 } = require('../financial-decimal');
+const {
+  BANK_DIRECTION_FIELDS,
+  validateBankDirection
+} = require('./bank-direction-validator');
 
 const GW_RECON_ID_FIELD = 'reconciliationid';
 const GW_TRADE_TYPE_FIELD = 'TradeType';
@@ -65,12 +69,40 @@ function canonicalAmount(value, label, options = {}) {
   return canonicalizeDecimal(value, { label, ...options });
 }
 
+function r4ExpectedDirection(rule) {
+  return rule && rule.amountField === 'Debit Amount' ? 'DEBIT' : 'CREDIT';
+}
+
+function addR4DirectionReason(reasons, code, rule) {
+  switch (code) {
+    case 'expected-empty':
+    case 'expected-invalid':
+      addReason(reasons, `${rule.amountField}为空或不是合法金额`);
+      break;
+    case 'expected-zero':
+      addReason(reasons, `${rule.amountField}为0`);
+      break;
+    case 'opposite-invalid':
+      addReason(reasons, `${rule.oppositeAmountField}不是合法金额`);
+      break;
+    case 'opposite-nonzero':
+      addReason(reasons, `${rule.oppositeAmountField}非0`);
+      break;
+    default:
+      break;
+  }
+}
+
 /**
  * 评估一条固定类型网关行与银行行是否完整匹配。错误被折叠为可审计原因，不抛出中断整轮。
  */
 function evaluateR4Candidate(gwRow, bankRow, rule) {
   const reasons = new Set();
-  let directionMismatch = false;
+  const expectedDirection = r4ExpectedDirection(rule);
+  const directionResult = validateBankDirection(bankRow, expectedDirection);
+  let directionMismatch =
+    directionResult.code === 'opposite-invalid' ||
+    directionResult.code === 'opposite-nonzero';
 
   const gwReconId = normalizeCellValue(gwRow && gwRow[GW_RECON_ID_FIELD]);
   const bankReconId = normalizeCellValue(bankRow && bankRow[BANK_RECON_ID_FIELD]);
@@ -87,19 +119,18 @@ function evaluateR4Candidate(gwRow, bankRow, rule) {
   if (gwCurrency === '' || bankCurrency === '') addReason(reasons, '币种为空');
   else if (gwCurrency !== bankCurrency) addReason(reasons, '币种不一致');
 
-  const oppositeRaw = normalizeCellValue(bankRow && bankRow[rule.oppositeAmountField]);
-  if (oppositeRaw !== '') {
-    try {
-      const opposite = canonicalAmount(oppositeRaw, rule.oppositeAmountField);
-      if (opposite !== '0') {
-        directionMismatch = true;
-        addReason(reasons, `${rule.oppositeAmountField}非0`);
-      }
-    } catch (_error) {
-      directionMismatch = true;
-      addReason(reasons, `${rule.oppositeAmountField}不是合法金额`);
-    }
+  // R4 既有报告会同时列出“另一侧错误”和“主侧错误”。共享校验器按主侧优先返回单一 code；
+  // 当主侧已失败时，用合法主侧探针再次调用同一校验器，仅补出另一侧诊断，保持旧 warning/reason golden。
+  const fields = BANK_DIRECTION_FIELDS[expectedDirection];
+  const oppositeProbe = validateBankDirection(
+    { ...(bankRow || {}), [fields.expectedField]: '1' },
+    expectedDirection
+  );
+  if (oppositeProbe.code === 'opposite-invalid' || oppositeProbe.code === 'opposite-nonzero') {
+    directionMismatch = true;
+    addR4DirectionReason(reasons, oppositeProbe.code, rule);
   }
+  addR4DirectionReason(reasons, directionResult.code, rule);
 
   let baseAmount = null;
   try {

@@ -9,6 +9,9 @@ const { ADM_MERCHANT_ID } = require('../../constants/adm-bank-deposit-fields');
 // v3.0.5 需求2：fx 主表幂等键回填用「交易编号归一」单一真相（与仓储 upsert / builder 派生同口径，防漂移）。
 //   ⚠️ engine-utils 是无依赖纯 JS 工具（零 require），不引入循环依赖。
 const { normalizeTransactionNo } = require('../../main-process/scenario-engines/engine-utils');
+const {
+  isCanonicalFundTransferOwner
+} = require('../../main-process/fund-transfer-date-policy');
 
 function hasColumn(db, tableName, columnName) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
@@ -1494,6 +1497,34 @@ function ensureScenarioApplicableChannelsTable(db) {
 //   - UNIQUE(channel_id, name) 冲突（用户已有同名场景）→ try/catch 单条跳过，不中断其余。
 //   调用顺序：必须在 ensureScenariosCategoryBuiltinFixed 之后（依赖 CHECK 已扩到含 'builtin-fixed'）。
 const RECON_ROUND_BUILTIN_SCENARIOS_SEEDED_MARKER = 'recon_round_builtin_scenarios_seeded';
+const FUND_TRANSFER_BACKFILL_LEGACY_FUNCTION =
+  '网关 FundTransfer-out/in 与 R4 后银行同向行按商户/币种/发生额绝对值/日期(同日优先,±1日兜底)1v1 匹配，命中后把网关 reconciliationid 回填进银行 ReconciliationId。';
+const FUND_TRANSFER_BACKFILL_CURRENT_FUNCTION =
+  '按配置选择网关对账单或调拨对账单作为来源，将 FundTransfer-out/in 与银行同向行按商户、币种、发生额绝对值和严格 1v1 匹配；调拨单匹配日期启用时同日优先、未命中再按 ±N 天，关闭时跳过日期；命中后回填银行 ReconciliationId。';
+const FUND_TRANSFER_BACKFILL_CANONICAL_SEED = {
+  name: '中台调拨订单对账ID回填',
+  priority: 0,
+  config: {
+    funcCategory: 'platform-order',
+    subCategory: 'fund-transfer-backfill',
+    roundPhase: 5,
+    directions: [
+      { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
+      { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
+    ],
+    dateMatchEnabled: true,
+    dateToleranceDays: 1,
+    reconSourceMid: true,
+    paymentOfflineBackfill: {
+      enabled: false,
+      bankChannel: '',
+      region: '',
+      bigAccount: ''
+    },
+    function: FUND_TRANSFER_BACKFILL_CURRENT_FUNCTION,
+    involvedFiles: ['银行对账单']
+  }
+};
 const RECON_ROUND_BUILTIN_SCENARIOS = [
   // ===== R4 资金性质校验（4 子场景，按 priority 降序执行；详见 r4-fund-nature-check.js）=====
   //   v3.0.6 需求3（T9）：原 charge-outbound 子场景退役（重写为 DBS-Charge / R3.5），R4 由 5 → 4。
@@ -1567,28 +1598,7 @@ const RECON_ROUND_BUILTIN_SCENARIOS = [
     }
   },
   // ===== R5 中台订单数据处理（2 场景；详见 r5-fund-transfer-backfill.js / r5-platform-inbound-cleanup.js）=====
-  {
-    name: '中台调拨订单对账ID回填',
-    priority: 0,
-    config: {
-      funcCategory: 'platform-order',
-      subCategory: 'fund-transfer-backfill',
-      roundPhase: 5,
-      // 🔴【待用户核对真实网关取值】FundTransfer-out / FundTransfer-in（两方向独立跑）
-      directions: [
-        { gwTradeType: 'FundTransfer-out', bankFundType: 'FundTransfer-out' },
-        { gwTradeType: 'FundTransfer-in', bankFundType: 'FundTransfer-in' }
-      ],
-      dateToleranceDays: 1,
-      // v3.0.6 需求2（T6）：对账数据来源二选一开关默认勾选「中台调拨单表」。
-      //   true → 编排器 R5s2 走调拨对账单派生表（linked_fund_transfer_recon）匹配回填 ReconciliationId；
-      //   false → 沿用旧网关对账单逻辑。口径统一 config.reconSourceMid !== false（与编排器/UI 一致），
-      //   seed 显式置 true 便于场景列表/管理弹窗回显默认勾选。
-      reconSourceMid: true,
-      function: '网关 FundTransfer-out/in 与 R4 后银行同向行按商户/币种/发生额绝对值/日期(同日优先,±1日兜底)1v1 匹配，命中后把网关 reconciliationid 回填进银行 ReconciliationId。',
-      involvedFiles: ['银行对账单']
-    }
-  },
+  FUND_TRANSFER_BACKFILL_CANONICAL_SEED,
   {
     name: '中台加款单脏数据处理',
     priority: 0,
@@ -1686,6 +1696,7 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
         continue;
       }
       // 退款回填场景默认休眠（enabled=0）；既有 R4/R5 场景仍启用（enabled=1）。
+      // v3.1.1 的“enabled=0”只用于 canonical owner 缺失后的修复插入，不改变 fresh seed 兼容口径。
       const enabledValue = subCategory === 'refund-order-backfill' ? 0 : 1;
       try {
         insert.run(
@@ -1723,6 +1734,163 @@ function ensureReconRoundBuiltinScenariosSeed(db) {
   }
 
   return { status: 'seeded', inserted, skippedExisting, skippedConflict };
+}
+
+// v3.1.1：canonical 调拨回填 owner 修复迁移。
+//
+// 与旧的“一次 seed 后删除终态”不同，该场景从本版本起同时承载全局日期策略，必须始终恰好有一个
+// canonical owner。迁移每次启动幂等执行：
+// - 1 条：清空历史适用渠道；除把逐字等于旧系统默认值的 function 更新为当前准确说明外，
+//   不覆盖名称、启停、优先级或其它 config，自定义 function 也原样保留；
+// - 0 条：从当前完整 seed 深拷贝恢复，默认 disabled + 通用渠道；
+// - 多条：不合并、不删除，只清空这些 owner 的适用渠道并返回 duplicate，运行时 resolver 会 fail-closed。
+// 普通 CRUD 不调用本函数，内置身份只由此可信 SQL 路径创建。
+function ensureFundTransferBackfillCanonicalOwner(db) {
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT id, category, name, priority, enabled, is_builtin, config_json
+        FROM scenarios
+       ORDER BY id ASC
+    `).all();
+  } catch (_error) {
+    return { status: 'skipped-no-scenarios-table', ownerCount: 0 };
+  }
+
+  const tableSqlRow = db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='scenarios'"
+  ).get();
+  if (!tableSqlRow || !tableSqlRow.sql || !tableSqlRow.sql.includes("'builtin-fixed'")) {
+    return { status: 'skipped-check-not-extended', ownerCount: 0 };
+  }
+
+  const owners = rows.map((row) => {
+    let config = null;
+    try {
+      config = JSON.parse(row.config_json);
+    } catch (_error) {
+      config = null;
+    }
+    return {
+      id: Number(row.id),
+      category: row.category,
+      name: row.name,
+      priority: Number(row.priority),
+      enabled: Number(row.enabled) === 1,
+      isBuiltin: Number(row.is_builtin) === 1,
+      config
+    };
+  }).filter(isCanonicalFundTransferOwner);
+
+  const applicableTableExists = Boolean(db.prepare(
+    "SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='scenario_applicable_channels'"
+  ).get());
+  const clearApplicable = applicableTableExists
+    ? db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?')
+    : null;
+  const updateLegacyFunction = db.prepare(
+    'UPDATE scenarios SET config_json = ?, updated_at = ? WHERE id = ?'
+  );
+  const hasChannelId = hasColumn(db, 'scenarios', 'channel_id');
+  const now = new Date().toISOString();
+
+  db.exec('BEGIN');
+  try {
+    owners.forEach((owner) => {
+      if (clearApplicable) clearApplicable.run(owner.id);
+      if (owner.config
+        && owner.config.function === FUND_TRANSFER_BACKFILL_LEGACY_FUNCTION) {
+        owner.config = {
+          ...owner.config,
+          function: FUND_TRANSFER_BACKFILL_CURRENT_FUNCTION
+        };
+        updateLegacyFunction.run(JSON.stringify(owner.config), now, owner.id);
+      }
+    });
+
+    if (owners.length === 1) {
+      db.exec('COMMIT');
+      return {
+        status: 'owner-present',
+        ownerCount: 1,
+        ownerId: owners[0].id
+      };
+    }
+    if (owners.length > 1) {
+      db.exec('COMMIT');
+      return {
+        status: 'duplicate-owner',
+        ownerCount: owners.length,
+        ownerIds: owners.map((owner) => owner.id)
+      };
+    }
+
+    const configJson = JSON.stringify(
+      JSON.parse(JSON.stringify(FUND_TRANSFER_BACKFILL_CANONICAL_SEED.config))
+    );
+    const candidateNames = [
+      FUND_TRANSFER_BACKFILL_CANONICAL_SEED.name,
+      '调拨回填功能管理（系统恢复）'
+    ];
+    let restored = null;
+
+    for (const name of candidateNames) {
+      try {
+        const result = hasChannelId
+          ? db.prepare(`
+              INSERT INTO scenarios
+                (category, name, priority, enabled, config_json, is_builtin, channel_id, created_at, updated_at)
+              VALUES ('builtin-fixed', ?, ?, 0, ?, 1, 1, ?, ?)
+            `).run(
+              name,
+              FUND_TRANSFER_BACKFILL_CANONICAL_SEED.priority,
+              configJson,
+              now,
+              now
+            )
+          : db.prepare(`
+              INSERT INTO scenarios
+                (category, name, priority, enabled, config_json, is_builtin, created_at, updated_at)
+              VALUES ('builtin-fixed', ?, ?, 0, ?, 1, ?, ?)
+            `).run(
+              name,
+              FUND_TRANSFER_BACKFILL_CANONICAL_SEED.priority,
+              configJson,
+              now,
+              now
+            );
+        restored = {
+          id: Number(result.lastInsertRowid),
+          name
+        };
+        break;
+      } catch (error) {
+        const message = String(error && error.message ? error.message : error);
+        if (/UNIQUE constraint failed/i.test(message)) {
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    db.exec('COMMIT');
+    if (!restored) {
+      return {
+        status: 'missing-name-conflict',
+        ownerCount: 0,
+        attemptedNames: candidateNames
+      };
+    }
+    return {
+      status: 'owner-restored',
+      ownerCount: 1,
+      ownerId: restored.id,
+      ownerName: restored.name
+    };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（🔴 资金红线 —— 默认休眠 enabled=0）。
@@ -3739,6 +3907,10 @@ module.exports = {
   ensureScenarioApplicableChannelsTable,
   // v2.1.16-beta.2 §8：5 轮对账 R4/R5 内置场景 seed（5 R4 + 2 R5，🔴 资金红线）
   ensureReconRoundBuiltinScenariosSeed,
+  // v3.1.1：canonical 调拨回填 owner 幂等恢复 + 全渠道归一（不覆盖已有单 owner 配置）
+  ensureFundTransferBackfillCanonicalOwner,
+  // 测试/契约复用：恢复 owner 必须与当前完整 seed 深相等
+  FUND_TRANSFER_BACKFILL_CANONICAL_SEED,
   // v2.1.16-beta.4 ③：中台退款订单回填场景独立补种（默认休眠 enabled=0，独立 marker 绕开全局 marker 短路）
   ensureRefundBackfillScenarioSeed,
   // v2.1.16-beta.5 需求4：JPM 调拨订单修复写死场景独立补种（默认休眠 enabled=0，独立 marker；category=gateway-recon-id-fix）

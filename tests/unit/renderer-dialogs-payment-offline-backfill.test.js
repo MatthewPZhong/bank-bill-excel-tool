@@ -5,7 +5,7 @@
 // 防止后续重构无意回退。配套行为由 backend 层测试 + main 侧守卫 + 手测把关。
 //
 // 锁定点：
-//   - F1 gating：仅 config.subCategory==='fund-transfer-backfill' 场景显示 payment 控件。
+//   - F1 gating：仅完整 canonical fund-transfer owner 显示 payment 控件。
 //   - F1 校验：勾选时银行渠道/地区/大账号三项全必填；inline 校验不关弹窗（return 无 reopen）。
 //   - F1 显隐：勾选/取消联动展开区显隐（取消保留输入值）。
 //   - F2 守卫：加载完成前禁用保存（防竞态写空 config）。
@@ -47,10 +47,10 @@ describe('F1：Payment 勾选行 + 条件展开三输入框', () => {
     assert.ok(dialogBody.includes('placeholder="如 202782001、202782002"'), '大账号 placeholder 应展示顿号分隔示例');
   });
 
-  test('gating：仅 config.subCategory===fund-transfer-backfill 场景显示 payment 控件', () => {
+  test('gating：仅完整 canonical fund-transfer owner 显示 payment 控件', () => {
     assert.ok(
-      /isPaymentScenario\s*=\s*cachedConfig\.subCategory\s*===\s*'fund-transfer-backfill'/.test(dialogBody),
-      'gating 应判定 cachedConfig.subCategory === fund-transfer-backfill'
+      /isCanonicalFundTransferOwner\s*=\s*isCanonicalFundTransferOwnerUi\(scenarioDetail\)[\s\S]*?isPaymentScenario\s*=\s*isCanonicalFundTransferOwner/.test(dialogBody),
+      'gating 应使用完整 canonical owner 谓词，不能只看 subCategory'
     );
     // gating 生效后才显示 paymentRow（默认 hidden）
     assert.ok(
@@ -113,7 +113,7 @@ describe('F2：config 读-改-写浅合并保存 + 加载守卫', () => {
 
   test('cachedConfig 缓存自 scenarios.get 返回的完整 config（保存浅合并基底）', () => {
     assert.ok(
-      /cachedConfig\s*=\s*\(scResult\.scenario\.config\s*&&\s*typeof\s*scResult\.scenario\.config\s*===\s*'object'\)/.test(dialogBody),
+      /cachedConfig\s*=\s*\(scenarioDetail\.config\s*&&\s*typeof\s*scenarioDetail\.config\s*===\s*'object'\)/.test(dialogBody),
       'cachedConfig 应缓存 scenarios.get 返回的 config'
     );
   });

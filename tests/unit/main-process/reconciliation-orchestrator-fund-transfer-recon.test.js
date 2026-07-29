@@ -226,6 +226,109 @@ test.describe('runReconciliation R5s2 二选一 —— 取消路（reconSourceMi
   });
 });
 
+test.describe('v3.1.1 resolved policy 接线（两来源共用，配置失败关闭）', () => {
+  test('日期关闭时调拨来源跨期仍可匹配；启用 ±1 时同一输入不匹配', async () => {
+    const disabledBankRows = [makeBankRow({
+      _rowId: 'date-disabled',
+      'Credit Amount': 100,
+      BillDate: '2026-06-20'
+    })];
+    const disabled = await runReconciliation({
+      bankRows: disabledBankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
+      fundTransferReconContext: {
+        reconRows: [makeReconRow({ BillDate: '2026-05-26', ReconID: 'DATE-DISABLED-HIT' })]
+      },
+      fundTransferDatePolicy: {
+        enabled: false,
+        toleranceDays: 1,
+        ownerScenarioId: 502,
+        signature: 'date-disabled'
+      }
+    });
+    assert.equal(disabledBankRows[0].ReconciliationId, 'DATE-DISABLED-HIT');
+    assert.equal(disabled.stats.r5s2BackfilledCount, 1);
+    assert.equal(disabled.modifiedRows.length + disabled.unmatchedRows.length, disabledBankRows.length);
+
+    const enabledBankRows = [makeBankRow({
+      _rowId: 'date-enabled',
+      'Credit Amount': 100,
+      BillDate: '2026-06-20'
+    })];
+    const enabled = await runReconciliation({
+      bankRows: enabledBankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
+      fundTransferReconContext: {
+        reconRows: [makeReconRow({ BillDate: '2026-05-26', ReconID: 'OUTSIDE-WINDOW' })]
+      },
+      fundTransferDatePolicy: {
+        enabled: true,
+        toleranceDays: 1,
+        ownerScenarioId: 502,
+        signature: 'date-enabled'
+      }
+    });
+    assert.equal(enabledBankRows[0].ReconciliationId, '');
+    assert.equal(enabled.stats.r5s2BackfilledCount, 0);
+    assert.ok(enabled.errorReport.some((warning) => warning.code === 'fund-transfer-date-mismatch'));
+    assert.equal(enabled.modifiedRows.length + enabled.unmatchedRows.length, enabledBankRows.length);
+
+    const partialPolicyBankRows = [makeBankRow({
+      _rowId: 'date-policy-missing-enabled',
+      'Credit Amount': 100,
+      BillDate: '2026-06-20'
+    })];
+    const partialPolicy = await runReconciliation({
+      bankRows: partialPolicyBankRows,
+      gwRows: [],
+      scenarios: [makeR5s2Scenario({ reconSourceMid: true })],
+      fundTransferReconContext: {
+        reconRows: [makeReconRow({ BillDate: '2026-05-26', ReconID: 'MUST-NOT-DISABLE-DATE' })]
+      },
+      fundTransferDatePolicy: {
+        toleranceDays: 1,
+        ownerScenarioId: 502,
+        signature: 'missing-enabled'
+      }
+    });
+    assert.equal(
+      partialPolicyBankRows[0].ReconciliationId,
+      '',
+      '部分 policy 缺少 enabled 时必须按安全默认启用日期，不能静默放宽成关闭'
+    );
+    assert.equal(partialPolicy.stats.r5s2BackfilledCount, 0);
+  });
+
+  test('调拨来源 directions 缺项时整轮失败关闭，不产生消费或改写', async () => {
+    const scenario = makeR5s2Scenario({ reconSourceMid: true });
+    scenario.config.directions = [scenario.config.directions[0]];
+    const bankRows = [makeBankRow({ _rowId: 'invalid-directions', 'Credit Amount': 100 })];
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      scenarios: [scenario],
+      fundTransferReconContext: { reconRows: [makeReconRow({ ReconID: 'MUST-NOT-WRITE' })] },
+      fundTransferDatePolicy: {
+        enabled: false,
+        toleranceDays: 1,
+        ownerScenarioId: 502,
+        signature: 'invalid-directions'
+      }
+    });
+
+    assert.equal(bankRows[0].ReconciliationId, '');
+    assert.equal(result.stats.r5s2BackfilledCount, 0);
+    assert.equal(result.modifications.length, 0);
+    assert.equal(
+      result.errorReport.filter((warning) => warning.code === 'r5-fund-transfer-directions-invalid').length,
+      1
+    );
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
+  });
+});
+
 // ---- 3. 🔴 两路 usedBankRowIds 并入 r5s2ConsumedBankRowIds → 传 R5s2b excludeBankRowIds ----
 
 test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两路（资金红线点7：R5s2b 互斥）', () => {

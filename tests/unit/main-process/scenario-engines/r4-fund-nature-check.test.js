@@ -274,6 +274,40 @@ test.describe('R4 v3.0.23 — 严格1:1消费与顺序', () => {
     assert.deepEqual(result.modifications.map((m) => m.rowId), ['complete']);
   });
 
+  test('v3.1.1 同 ReconID 的 AchReturn/WireReturn 只形成 Debit/Credit 两个具体 opposite-direction pair', () => {
+    const debitBank = bank({
+      _rowId: 'debit-bank',
+      ReconciliationId: 'RID001',
+      'Debit Amount': '100',
+      'Credit Amount': '0'
+    });
+    const creditBank = bank({
+      _rowId: 'credit-bank',
+      ReconciliationId: 'RID001',
+      'Debit Amount': '0',
+      'Credit Amount': '100'
+    });
+    const achGateway = gateway({ reconciliationid: 'RID001', TradeType: 'AchReturn' });
+    const wireGateway = gateway({ reconciliationid: 'RID001', TradeType: 'WireReturn' });
+
+    const result = runRound4FundNatureCheck(
+      [achGateway, wireGateway],
+      [debitBank, creditBank],
+      [scenario('ach-return'), scenario('wire-return')]
+    );
+
+    assert.equal(debitBank.FundType, 'Ach Return');
+    assert.equal(creditBank.FundType, 'Wire Return');
+    assert.equal(result.matchedPairs.length, 2);
+    assert.equal(result.matchedPairs[0].gwRow, achGateway);
+    assert.equal(result.matchedPairs[0].bankRow, debitBank);
+    assert.equal(result.matchedPairs[0].subCategory, 'ach-return');
+    assert.equal(result.matchedPairs[1].gwRow, wireGateway);
+    assert.equal(result.matchedPairs[1].bankRow, creditBank);
+    assert.equal(result.matchedPairs[1].subCategory, 'wire-return');
+    assert.deepEqual(result.warnings, []);
+  });
+
   test('多个完整银行候选：取银行原序第一条并告警', () => {
     const first = bank({ _rowId: 'first' });
     const second = bank({ _rowId: 'second' });

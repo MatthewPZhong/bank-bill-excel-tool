@@ -54,7 +54,8 @@ function bankRow({
   debit = 100,
   extraFee = '',
   fundType = 'Inbound',
-  reconId = ''
+  reconId = '',
+  billDate = '2026-06-07'
 } = {}) {
   return {
     _rowId: rowId,
@@ -64,6 +65,7 @@ function bankRow({
     'Credit Amount': credit,
     'Debit Amount': debit,
     'Extra Fee': extraFee,
+    BillDate: billDate,
     FundType: fundType,
     ReconciliationId: reconId
   };
@@ -81,9 +83,8 @@ function gwRow({ reconId = 'RC-1', amount = 100, currency = 'USD', tradeType = '
 
 // 调拨对账单行（字段经 FT_RECON_FIELD_MAP.recon.* 构造，绝不手敲）。
 //   big_account 已按方向固化（in=收款卡号 / out=付款卡号）；本引擎零方向分支，仅比 big_account。
-//   🔴 v3.0.6 codex-pr74-fix P1（方向感知门控）：fund_type 默认 FT_IN（必须有有效方向才进 dispRows）；
-//     默认 in 行只判 收款渠道===DBS（receiveChannel 默认 'DBS'），payChannel 由 builder 留空（这里默认 'DBS'
-//     不参与 in 行判定，仅为兼容旧夹具显式传 payChannel 的少数用例）。隔离验证「不写 FundType」的用例已不复存在
+//   🔴 fund_type 默认 FT_OUT，与 bankRow 默认 Debit 发生额方向一致；显式 in 用例传 FT_IN。
+//     out 行只判 付款渠道===DBS，receiveChannel 不参与。隔离验证「不写 FundType」的用例已不复存在
 //     —— 匹配必带方向，命中行必被标 FundTransfer-in/out；需隔离 FundType 的用例改用与目标方向相同的初始 FundType
 //     使其 no-op（old===new 不 record）。out 方向用例显式传 fundType: FT_OUT。
 function dispRow({
@@ -93,7 +94,8 @@ function dispRow({
   currency = 'USD',
   amount = 100,
   reconId = 'RC-1',
-  fundType = FT_IN
+  fundType = FT_OUT,
+  billDate = '2026-06-07'
 } = {}) {
   return {
     [R.payChannel]: payChannel,
@@ -102,7 +104,8 @@ function dispRow({
     [R.currency]: currency,
     [R.amount]: amount,
     [R.reconId]: reconId,
-    [R.fundType]: fundType
+    [R.fundType]: fundType,
+    [R.billDate]: billDate
   };
 }
 
@@ -149,7 +152,7 @@ test.describe('DBS-Charge — 步骤1 金额口径', () => {
 test.describe('DBS-Charge — 步骤1 匹配赋值', () => {
   test('① in 行：big_account=收款卡号，银行 MerchantId=收款卡号 → 命中赋 ReconciliationId', () => {
     const bank = bankRow({ rowId: 'b1', merchantId: 'CARD-IN-001', credit: 100, debit: 0, fundType: 'Inbound', reconId: '' });
-    const disp = dispRow({ bigAccount: 'CARD-IN-001', amount: 100, reconId: 'RC-IN' });
+    const disp = dispRow({ bigAccount: 'CARD-IN-001', amount: 100, reconId: 'RC-IN', fundType: FT_IN });
     const { modifications } = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
 
     const mod = findMod(modifications, 'b1', 'ReconciliationId');
@@ -166,9 +169,9 @@ test.describe('DBS-Charge — 步骤1 匹配赋值', () => {
       credit: 0,
       debit: 100,
       extraFee: 25,
-      fundType: FT_IN
+      fundType: FT_OUT
     });
-    const disp = dispRow({ bigAccount: 'CARD-FEE', amount: 100, reconId: 'RC-FEE', fundType: FT_IN });
+    const disp = dispRow({ bigAccount: 'CARD-FEE', amount: 100, reconId: 'RC-FEE', fundType: FT_OUT });
 
     const result = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
 
@@ -205,6 +208,200 @@ test.describe('DBS-Charge — 步骤1 匹配赋值', () => {
     const mod = findMod(modifications, 'b1', 'ReconciliationId');
     assert.ok(mod);
     assert.equal(mod.newValue, 'RC-OUT');
+  });
+});
+
+test.describe('DBS-Charge v3.1.1 — Step1 日期策略全局两阶段', () => {
+  const optionsWithPolicy = (enabled, toleranceDays) => ({
+    config: CONFIG,
+    fundTransferDatePolicy: { enabled, toleranceDays }
+  });
+
+  test('全局 Phase1 先完成所有同日：后序调拨保住同日行，前序调拨再取剩余 ±N 行', () => {
+    const dispatchRows = [
+      dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-FIRST', fundType: FT_OUT, billDate: '2026-07-10' }),
+      dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-SAME-DAY', fundType: FT_OUT, billDate: '2026-07-11' })
+    ];
+    const banks = [
+      bankRow({ rowId: 'b-0711', merchantId: 'C1', debit: 100, billDate: '2026-07-11' }),
+      bankRow({ rowId: 'b-0709', merchantId: 'C1', debit: 100, billDate: '2026-07-09' })
+    ];
+
+    const result = runDbsChargeFundCheck([], banks, dispatchRows, optionsWithPolicy(true, 1));
+
+    assert.equal(banks[0].ReconciliationId, 'RC-SAME-DAY');
+    assert.equal(banks[1].ReconciliationId, 'RC-FIRST');
+    assert.equal(result.modifications.filter((item) => item.column === 'ReconciliationId').length, 2);
+  });
+
+  test('日期关闭完全跳过日期：来源与银行日期非法仍可按其它严格条件命中', () => {
+    const bank = bankRow({ rowId: 'date-disabled', merchantId: 'C1', debit: 100, billDate: 'not-a-date' });
+    const dispatch = dispRow({
+      bigAccount: 'C1',
+      amount: 100,
+      reconId: 'RC-NO-DATE',
+      fundType: FT_OUT,
+      billDate: ''
+    });
+
+    const result = runDbsChargeFundCheck([], [bank], [dispatch], optionsWithPolicy(false, 7));
+
+    assert.equal(bank.ReconciliationId, 'RC-NO-DATE');
+    assert.equal(result.warnings.length, 0);
+  });
+
+  test('日期开启时非法日期不降级，近似候选不消费并产生可审计告警', () => {
+    const bank = bankRow({ rowId: 'bad-date', merchantId: 'C1', debit: 100, billDate: '2026-07-10' });
+    const dispatch = dispRow({
+      bigAccount: 'C1',
+      amount: 100,
+      reconId: 'RC-BAD-DATE',
+      fundType: FT_OUT,
+      billDate: 'not-a-date'
+    });
+
+    const result = runDbsChargeFundCheck([], [bank], [dispatch], optionsWithPolicy(true, 7));
+
+    assert.equal(bank.ReconciliationId, '');
+    assert.deepEqual(result.modifications, []);
+    const dateWarnings = result.warnings.filter((item) => item.code === 'fund-transfer-date-mismatch');
+    assert.equal(dateWarnings.length, 1, 'Phase1/Phase2 对同一失败候选只告警一次');
+    const warning = dateWarnings[0];
+    assert.equal(warning.rowId, 'bad-date');
+    assert.equal(warning.expectedDirection, 'DEBIT');
+    assert.equal(warning.reason, 'counterpart-date-invalid');
+  });
+
+  test('同一来源已有同日合法候选时，日期非法 near-candidate 仍逐条告警且不影响选择/改写', () => {
+    const banks = [
+      bankRow({ rowId: 'same-day-valid', merchantId: 'C1', debit: 100, billDate: '2026-07-10' }),
+      bankRow({ rowId: 'invalid-date-near', merchantId: 'C1', debit: 100, billDate: 'not-a-date' }),
+      bankRow({ rowId: 'outside-date-near', merchantId: 'C1', debit: 100, billDate: '2026-07-12' })
+    ];
+    const dispatch = dispRow({
+      bigAccount: 'C1',
+      amount: 100,
+      reconId: 'RC-AUDIT',
+      fundType: FT_OUT,
+      billDate: '2026-07-10'
+    });
+
+    const result = runDbsChargeFundCheck([], banks, [dispatch], optionsWithPolicy(true, 1));
+
+    assert.equal(banks[0].ReconciliationId, 'RC-AUDIT');
+    assert.equal(banks[1].ReconciliationId, '');
+    assert.equal(banks[2].ReconciliationId, '');
+    assert.equal(findMod(result.modifications, 'same-day-valid', 'ReconciliationId').newValue, 'RC-AUDIT');
+    assert.equal(findMod(result.modifications, 'invalid-date-near', 'ReconciliationId'), undefined);
+    assert.equal(findMod(result.modifications, 'outside-date-near', 'ReconciliationId'), undefined);
+    assert.equal(result.warnings.filter((item) => item.code === 'multi-bank-match-dispatch').length, 0);
+    const dateWarnings = result.warnings.filter((item) => item.code === 'fund-transfer-date-mismatch');
+    assert.deepEqual(
+      dateWarnings.map((item) => [item.rowId, item.reason]),
+      [
+        ['invalid-date-near', 'bank-date-invalid'],
+        ['outside-date-near', 'outside-tolerance']
+      ]
+    );
+    assert.ok(!JSON.stringify(dateWarnings).includes('C1'), '告警不得泄露完整账号');
+  });
+
+  test('25×25 日期失败密集组按银行行/方向/原因去重，Phase1/2 不放大为 625 条', () => {
+    const secretAccount = 'DENSE-SECRET-ACCOUNT';
+    const dispatchRows = Array.from({ length: 25 }, (_, index) => dispRow({
+      bigAccount: secretAccount,
+      amount: 100,
+      reconId: `DENSE-DISP-${index}`,
+      fundType: FT_OUT,
+      billDate: '2026-07-01'
+    }));
+    const banks = Array.from({ length: 25 }, (_, index) => bankRow({
+      rowId: `dense-bank-${index}`,
+      merchantId: secretAccount,
+      debit: 100,
+      reconId: '',
+      billDate: '2026-08-01'
+    }));
+    // 无稳定 _rowId 时仍必须按银行原始行序区分，不能把两条真实银行行误并成一条 warning。
+    delete banks[23]._rowId;
+    delete banks[24]._rowId;
+    const sourceBefore = structuredClone(dispatchRows);
+    const banksBefore = structuredClone(banks);
+
+    const result = runDbsChargeFundCheck(
+      [],
+      banks,
+      dispatchRows,
+      optionsWithPolicy(true, 1)
+    );
+    const dateWarnings = result.warnings.filter(
+      (warning) => warning.code === 'fund-transfer-date-mismatch'
+    );
+
+    assert.equal(dateWarnings.length, 25, '25×25 失败边应收敛为每条银行行 1 条，而非 625 条');
+    assert.ok(dateWarnings.every((warning) => warning.expectedDirection === 'DEBIT'));
+    assert.ok(dateWarnings.every((warning) => warning.reason === 'outside-tolerance'));
+    assert.equal(dateWarnings.filter((warning) => warning.rowId === undefined).length, 2);
+    assert.equal(JSON.stringify(dateWarnings).includes(secretAccount), false, '告警不得泄露完整账号');
+    assert.deepEqual(result.modifications, [], '日期失败不得产生匹配或改写');
+    assert.deepEqual(dispatchRows, sourceBefore, '调拨来源行保持只读');
+    assert.deepEqual(banks, banksBefore, '银行行保持未消费、未改写');
+  });
+
+  test('同一银行行的不同日期失败原因分别保留', () => {
+    const bank = bankRow({
+      rowId: 'multi-reason-bank',
+      merchantId: 'C1',
+      debit: 100,
+      billDate: '2026-08-01'
+    });
+    const result = runDbsChargeFundCheck(
+      [],
+      [bank],
+      [
+        dispRow({ bigAccount: 'C1', reconId: 'INVALID-SOURCE', fundType: FT_OUT, billDate: 'not-a-date' }),
+        dispRow({ bigAccount: 'C1', reconId: 'OUTSIDE-SOURCE', fundType: FT_OUT, billDate: '2026-07-01' })
+      ],
+      optionsWithPolicy(true, 1)
+    );
+
+    assert.deepEqual(
+      result.warnings
+        .filter((warning) => warning.code === 'fund-transfer-date-mismatch')
+        .map((warning) => warning.reason)
+        .sort(),
+      ['counterpart-date-invalid', 'outside-tolerance']
+    );
+    assert.deepEqual(result.modifications, []);
+  });
+
+  test('±7 边界包含，+8 排除；绝对差相等继续按银行原序并保留多候选告警', () => {
+    const boundaryBanks = [
+      bankRow({ rowId: 'plus-8', merchantId: 'C1', debit: 100, billDate: '2026-07-09' }),
+      bankRow({ rowId: 'plus-7', merchantId: 'C1', debit: 100, billDate: '2026-07-08' })
+    ];
+    runDbsChargeFundCheck(
+      [],
+      boundaryBanks,
+      [dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-N7', fundType: FT_OUT, billDate: '2026-07-01' })],
+      optionsWithPolicy(true, 7)
+    );
+    assert.equal(boundaryBanks[1].ReconciliationId, 'RC-N7');
+    assert.equal(boundaryBanks[0].ReconciliationId, '');
+
+    const tieBanks = [
+      bankRow({ rowId: 'future', merchantId: 'C1', debit: 100, billDate: '2026-07-11' }),
+      bankRow({ rowId: 'past', merchantId: 'C1', debit: 100, billDate: '2026-07-09' })
+    ];
+    const tie = runDbsChargeFundCheck(
+      [],
+      tieBanks,
+      [dispRow({ bigAccount: 'C1', amount: 100, reconId: 'RC-TIE', fundType: FT_OUT, billDate: '2026-07-10' })],
+      optionsWithPolicy(true, 1)
+    );
+    assert.equal(tieBanks[0].ReconciliationId, 'RC-TIE');
+    assert.equal(tieBanks[1].ReconciliationId, '');
+    assert.equal(tie.warnings.filter((item) => item.code === 'multi-bank-match-dispatch').length, 1);
   });
 });
 
@@ -306,6 +503,90 @@ test.describe('DBS-Charge — 步骤1 in/out 同 ReconID 交互（两阶段防�
     assert.equal(otherMod.oldValue, 'Inbound');
     assert.equal(otherMod.newValue, 'Charge');
     assert.equal(bOther.FundType, 'Charge');
+  });
+
+  test('v3.1.1 同 RID/账号/币种/金额/日期的 Debit/Credit 严格分流，保护命中行且 Stage B 只归并 Debit sibling', () => {
+    const debitMatch = bankRow({
+      rowId: 'debit-match',
+      merchantId: 'CARD-SHARED',
+      currency: 'USD',
+      credit: 0,
+      debit: 100,
+      fundType: 'Outbound',
+      reconId: '',
+      billDate: '2026-07-10'
+    });
+    const creditMatch = bankRow({
+      rowId: 'credit-match',
+      merchantId: 'CARD-SHARED',
+      currency: 'USD',
+      credit: 100,
+      debit: 0,
+      fundType: 'Inbound',
+      reconId: '',
+      billDate: '2026-07-10'
+    });
+    const creditSibling = bankRow({
+      rowId: 'credit-sibling',
+      merchantId: 'OTHER',
+      credit: 25,
+      debit: 0,
+      fundType: 'Inbound',
+      reconId: 'RID001',
+      billDate: '2026-07-10'
+    });
+    const debitSibling = bankRow({
+      rowId: 'debit-sibling',
+      merchantId: 'OTHER',
+      credit: 0,
+      debit: 25,
+      fundType: 'Inbound',
+      reconId: 'RID001',
+      billDate: '2026-07-10'
+    });
+    const dispIn = dispRow({
+      payChannel: '',
+      receiveChannel: 'DBS',
+      bigAccount: 'CARD-SHARED',
+      currency: 'USD',
+      amount: 100,
+      reconId: 'RID001',
+      fundType: FT_IN,
+      billDate: '2026-07-10'
+    });
+    const dispOut = dispRow({
+      payChannel: 'DBS',
+      receiveChannel: '',
+      bigAccount: 'CARD-SHARED',
+      currency: 'USD',
+      amount: 100,
+      reconId: 'RID001',
+      fundType: FT_OUT,
+      billDate: '2026-07-10'
+    });
+
+    const result = runDbsChargeFundCheck(
+      [],
+      [debitMatch, creditMatch, creditSibling, debitSibling],
+      [dispIn, dispOut],
+      { config: CONFIG, fundTransferDatePolicy: { enabled: true, toleranceDays: 1 } }
+    );
+
+    assert.equal(creditMatch.ReconciliationId, 'RID001');
+    assert.equal(creditMatch.FundType, FT_IN);
+    assert.equal(debitMatch.ReconciliationId, 'RID001');
+    assert.equal(debitMatch.FundType, FT_OUT);
+    assert.equal(creditSibling.FundType, 'Inbound', '严格 Credit sibling 不得被 Stage B 改 Charge');
+    assert.equal(debitSibling.FundType, 'Charge', '严格 Debit 且未保护 sibling 才允许归 Charge');
+    assert.equal(findMod(result.modifications, 'credit-sibling', 'FundType'), undefined);
+    assert.equal(findMod(result.modifications, 'debit-sibling', 'FundType').newValue, 'Charge');
+    assert.equal(
+      result.modifications.filter(
+        (item) => (item.rowId === 'credit-match' || item.rowId === 'debit-match') && item.newValue === 'Charge'
+      ).length,
+      0,
+      '两条具体命中行必须始终留在保护集'
+    );
   });
 });
 
@@ -724,7 +1005,7 @@ test.describe('DBS-Charge — 步骤2 outbound Credit 方向守卫', () => {
     assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
   });
 
-  test('步骤1既有改写保留：sibling 先归 Charge 后方向不符，步骤2不新增 modification', () => {
+  test('Stage B 严格 DEBIT：Credit sibling 不归 Charge，步骤2方向不符也保持原值', () => {
     const transfer = bankRow({
       rowId: 'step1-transfer', merchantId: 'CARD-OUT', credit: 0, debit: 500,
       fundType: 'Outbound', reconId: ''
@@ -742,13 +1023,11 @@ test.describe('DBS-Charge — 步骤2 outbound Credit 方向守卫', () => {
       OPTIONS
     );
 
-    assert.equal(sibling.FundType, 'Charge', '步骤1 sibling 归并结果必须保留');
+    assert.equal(sibling.FundType, 'outbound', 'Credit sibling 不满足 Stage B DEBIT，必须保持原值');
     const siblingMods = result.modifications.filter(
       (modification) => modification.rowId === 'step1-sibling' && modification.column === 'FundType'
     );
-    assert.deepEqual(siblingMods.map(({ oldValue, newValue }) => ({ oldValue, newValue })), [
-      { oldValue: 'outbound', newValue: 'Charge' }
-    ]);
+    assert.deepEqual(siblingMods, [], 'Stage B 与 Step2 都不得伪造 FundType modification');
     assert.equal(result.warnings.length, 1);
     assert.equal(result.warnings[0].code, 'dbs-charge-fund-direction-mismatch');
   });
@@ -924,22 +1203,19 @@ test.describe('DBS-Charge — 跨渠道置 Charge 单向性（步骤2 不恢复�
 // 零额行固化（构造银行零额行记录当前行为，不改零额逻辑）
 // ========================================================================
 
-test.describe('DBS-Charge — 零额行当前行为固化（不改零额逻辑）', () => {
-  test('零额调拨行（金额 0）匹配零额 DBS 银行行（|credit-debit|=0）→ 当前行为：0===0 视为相等并赋 ReconciliationId', () => {
-    // ⚠️ 固化「当前行为」：dispatchBankAmountEqual 对 0 与 0 → Math.round(0)===Math.round(0) → true。
-    //   故零额调拨行会命中零额银行行（big_account/币种相等且 big_account 非空时）。本测试仅记录现状，不改零额逻辑。
-    // 🔴 方向感知门控：disp 须带方向（默认 in 行判收款渠道=DBS）；bank 初始 FundType 预置 FT_IN 使命中标记 no-op，
-    //   隔离验证零额匹配行为（命中行 FundType 不掺二次改动）。
+test.describe('DBS-Charge — 零额行严格方向失败关闭', () => {
+  test('零额调拨行与双零银行行虽金额绝对值相等，主侧为0仍不得命中/消费/改写', () => {
     const bank = bankRow({ rowId: 'bz', merchantId: 'C1', currency: 'USD', credit: 0, debit: 0, fundType: FT_IN, reconId: '' });
     const disp = dispRow({ bigAccount: 'C1', currency: 'USD', amount: 0, reconId: 'RC-Z', fundType: FT_IN });
-    const { modifications } = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
+    const { modifications, warnings } = runDbsChargeFundCheck([], [bank], [disp], OPTIONS);
 
     const mod = findMod(modifications, 'bz', 'ReconciliationId');
-    assert.ok(mod, '当前行为：零额↔零额视为金额相等 → 命中赋值（固化现状）');
-    assert.equal(mod.newValue, 'RC-Z');
-    assert.equal(bank.ReconciliationId, 'RC-Z');
-    // 命中行自身 FundType 不动（初始即 FT_IN，标记 no-op）。
+    assert.equal(mod, undefined);
+    assert.equal(bank.ReconciliationId, '');
     assert.equal(bank.FundType, FT_IN);
+    assert.equal(warnings.length, 1);
+    assert.equal(warnings[0].code, 'fund-transfer-direction-mismatch');
+    assert.equal(warnings[0].reason, 'expected-zero');
   });
 
   test('零额调拨行 不命中 非零额银行行（0 ≠ 100，金额精确到分仍生效）', () => {

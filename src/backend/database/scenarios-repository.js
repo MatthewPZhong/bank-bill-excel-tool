@@ -8,6 +8,11 @@
 // - 排序 (priority desc, id asc) — 与 PRD §7.4 调度顺序一致
 // - name UNIQUE 约束破坏 → 抛 friendly error
 
+const {
+  hasFundTransferReservedSignature,
+  isCanonicalFundTransferOwner
+} = require('../../main-process/fund-transfer-date-policy');
+
 const VALID_CATEGORIES = [
   'extract-recon-id',
   'offset-bill-mark',
@@ -46,6 +51,65 @@ function validateName(name) {
     throw new Error('场景名称不能为空');
   }
   return trimmed;
+}
+
+function makeScenarioIdentityError(message) {
+  const error = new Error(message);
+  error.code = 'fund-transfer-owner-protected';
+  return error;
+}
+
+function assertPublicCreateCanUseIdentity(payload) {
+  if (payload && Boolean(payload.isBuiltin)) {
+    throw makeScenarioIdentityError(
+      '普通场景创建入口不允许设置 isBuiltin=true；系统内置场景只能由可信迁移创建'
+    );
+  }
+  const candidate = {
+    category: payload && payload.category,
+    isBuiltin: false,
+    config: payload && payload.config
+  };
+  if (hasFundTransferReservedSignature(candidate)) {
+    throw makeScenarioIdentityError(
+      '“builtin-fixed + platform-order + fund-transfer-backfill”是系统调拨回填配置的保留签名，不能创建非系统克隆'
+    );
+  }
+}
+
+function assertScenarioUpdatePreservesIdentity(existing, fields) {
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'is_builtin')) {
+    throw makeScenarioIdentityError('updateScenario: is_builtin 不可修改');
+  }
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'isBuiltin')) {
+    throw makeScenarioIdentityError('updateScenario: isBuiltin 不可修改');
+  }
+  const nextScenario = {
+    ...existing,
+    config: fields && Object.prototype.hasOwnProperty.call(fields, 'config')
+      ? fields.config
+      : existing.config
+  };
+  if (isCanonicalFundTransferOwner(existing)) {
+    if (!isCanonicalFundTransferOwner(nextScenario)) {
+      throw makeScenarioIdentityError(
+        '“调拨回填功能管理”是系统全局策略载体，不能修改 funcCategory/subCategory 使其脱离保留身份'
+      );
+    }
+    return;
+  }
+  if (hasFundTransferReservedSignature(nextScenario)) {
+    throw makeScenarioIdentityError(
+      '非系统场景不能占用调拨回填保留签名；如为旧库冲突场景，请使用“删除冲突”处理'
+    );
+  }
+}
+
+function assertScenarioNotCanonicalOwner(scenario, actionLabel) {
+  if (!isCanonicalFundTransferOwner(scenario)) return;
+  throw makeScenarioIdentityError(
+    `“调拨回填功能管理”是系统全局策略载体，禁止${actionLabel}`
+  );
 }
 
 // v2.1.9 SR-FIX-1 (spec §16.3)：判定是否「scenarios.name UNIQUE 冲突」（兼容新旧约束）
@@ -333,13 +397,15 @@ function calculateNextScenarioId(db) {
 }
 
 function createScenario(db, payload) {
+  assertPublicCreateCanUseIdentity(payload);
   const category = payload.category;
   validateCategory(category);
   const name = validateName(payload.name);
   const priority = validatePriority(payload.priority);
   const enabled = validateEnabled(payload.enabled);
   const configJson = serializeConfig(payload.config);
-  const isBuiltin = payload.isBuiltin ? 1 : 0;
+  // public create 永远只能创建普通场景；可信内置 seed/修复迁移直接走 migrations.js 内部 SQL。
+  const isBuiltin = 0;
   const now = new Date().toISOString();
   const nextId = calculateNextScenarioId(db);
   // v2.1.9 SR-FIX-1 round 2 F1（spec §16.3.2）：createScenario 现在接受 channelId 入参
@@ -390,9 +456,7 @@ function updateScenario(db, id, fields) {
   if (fields && Object.prototype.hasOwnProperty.call(fields, 'category')) {
     throw new Error('updateScenario: category 不可修改（如需改类别请先 delete 再 create）');
   }
-  if (fields && Object.prototype.hasOwnProperty.call(fields, 'is_builtin')) {
-    throw new Error('updateScenario: is_builtin 不可修改');
-  }
+  assertScenarioUpdatePreservesIdentity(existing, fields);
   const sets = [];
   const params = [];
 
@@ -439,6 +503,8 @@ function updateScenario(db, id, fields) {
 
 function deleteScenario(db, id) {
   const numericId = Number(id);
+  const existing = getScenario(db, numericId);
+  if (existing) assertScenarioNotCanonicalOwner(existing, '删除');
   const result = db.prepare('DELETE FROM scenarios WHERE id = ?').run(numericId);
   return { id: numericId, deleted: Number(result.changes) > 0 };
 }
@@ -486,6 +552,10 @@ function transferScenarios(db, scenarioIds, targetChannelId) {
       throw new Error(`transferScenarios: scenario id 必须是正整数，当前为 ${id}`);
     }
     return n;
+  });
+  numericIds.forEach((id) => {
+    const scenario = getScenario(db, id);
+    if (scenario) assertScenarioNotCanonicalOwner(scenario, '转移银行渠道');
   });
 
   db.exec('BEGIN');
@@ -553,6 +623,10 @@ function batchDelete(db, scenarioIds) {
     }
     return n;
   });
+  numericIds.forEach((id) => {
+    const scenario = getScenario(db, id);
+    if (scenario) assertScenarioNotCanonicalOwner(scenario, '批量删除');
+  });
 
   db.exec('BEGIN');
   try {
@@ -597,9 +671,13 @@ function setApplicableChannelIds(db, scenarioId, channelIds) {
   if (!Number.isFinite(numericId)) {
     throw new Error(`setApplicableChannelIds: scenarioId 必须是数字，当前为 ${scenarioId}`);
   }
-  const ids = Array.isArray(channelIds)
+  let ids = Array.isArray(channelIds)
     ? [...new Set(channelIds.map((c) => Number(c)).filter((c) => Number.isFinite(c) && c > 0))]
     : [];
+  const scenario = getScenario(db, numericId);
+  if (scenario && isCanonicalFundTransferOwner(scenario)) {
+    ids = [];
+  }
   db.exec('BEGIN');
   try {
     applyApplicableChannelIdsInTx(db, numericId, ids);
@@ -615,11 +693,14 @@ function setApplicableChannelIds(db, scenarioId, channelIds) {
 //   （SQLite 不支持嵌套事务 — bundle import 已 BEGIN，再调 setApplicableChannelIds 的 BEGIN 会抛错）。
 //   注意：本函数不做参数校验/去重，调用方需先把 ids 处理成合法正整数去重数组。
 function applyApplicableChannelIdsInTx(db, scenarioId, ids) {
+  const scenario = getScenario(db, scenarioId);
+  const normalizedIds = scenario && isCanonicalFundTransferOwner(scenario) ? [] : ids;
   db.prepare('DELETE FROM scenario_applicable_channels WHERE scenario_id = ?').run(scenarioId);
-  if (Array.isArray(ids) && ids.length > 0) {
+  if (Array.isArray(normalizedIds) && normalizedIds.length > 0) {
     const insert = db.prepare('INSERT INTO scenario_applicable_channels (scenario_id, channel_id) VALUES (?, ?)');
-    ids.forEach((cid) => insert.run(scenarioId, cid));
+    normalizedIds.forEach((cid) => insert.run(scenarioId, cid));
   }
+  return { scenarioId: Number(scenarioId), channelIds: Array.isArray(normalizedIds) ? normalizedIds : [] };
 }
 
 // v2.1.13 D-3/D-5：dispatcher hot path — 取对「指定渠道」生效的 builtin-fixed 场景（enabled=1，含 config）

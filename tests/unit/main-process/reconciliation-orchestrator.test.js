@@ -224,6 +224,32 @@ test.describe('bucketScenarios 分桶', () => {
     assert.equal(r5s3.length, 0);
   });
 
+  test('v3.1.1 canonical owner 绑定：仅 owner id 进入 R5s2，伪内置同签名不会落入 R2', () => {
+    const owner = makeR5BackfillScenario();
+    const conflict = {
+      ...makeR5BackfillScenario(),
+      id: 599,
+      name: '伪内置调拨回填',
+      isBuiltin: false
+    };
+    const buckets = bucketScenarios([conflict, owner], {
+      enforceFundTransferOwner: true,
+      fundTransferOwnerScenarioId: owner.id
+    });
+    assert.deepEqual(buckets.r5s2.map((scenario) => scenario.id), [owner.id]);
+    assert.equal(buckets.r2.some((scenario) => scenario.id === conflict.id), false);
+  });
+
+  test('v3.1.1 owner 缺失：保留签名场景不执行 R5s2，也不旁路进入 R2', () => {
+    const reserved = makeR5BackfillScenario();
+    const buckets = bucketScenarios([reserved], {
+      enforceFundTransferOwner: true,
+      fundTransferOwnerScenarioId: null
+    });
+    assert.equal(buckets.r5s2.length, 0);
+    assert.equal(buckets.r2.length, 0);
+  });
+
   test('空 / null 入参 → 四桶皆空，不抛错', async () => {
     for (const input of [[], null, undefined]) {
       const r = bucketScenarios(input);
@@ -233,6 +259,34 @@ test.describe('bucketScenarios 分桶', () => {
       assert.equal(r.r5s3.length, 0);
     }
   });
+});
+
+test('v3.1.1 initialWarnings 先进入错误报告并按稳定身份去重', async () => {
+  const warning = {
+    scenarioId: null,
+    scenarioName: '调拨日期策略配置',
+    rowId: null,
+    code: 'fund-transfer-date-policy-owner-missing',
+    message: '调拨日期策略 owner 缺失，已使用默认值'
+  };
+  const result = await runReconciliation({
+    bankRows: [],
+    gwRows: [],
+    scenarios: [],
+    fundTransferDatePolicy: {
+      enabled: true,
+      toleranceDays: 1,
+      ownerScenarioId: null,
+      signature: 'missing-owner'
+    },
+    initialWarnings: [warning, { ...warning }]
+  });
+  assert.deepEqual(result.errorReport[0], warning);
+  assert.equal(
+    result.errorReport.filter((item) => item.code === warning.code).length,
+    1
+  );
+  assert.equal(result.stats.warningCount, result.errorReport.length);
 });
 
 // ---------------------------------------------------------------------------
@@ -1105,7 +1159,16 @@ test.describe('v3.0.7 需求6：gwRows 全程只读不变量（删 structuredClo
       makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
       makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
     ];
-    const dispRows = [{ 付款渠道: 'DBS', 收款渠道: 'DBS', big_account: 'M-DBS', 币种: 'USD', 金额: 100, ReconID: 'DISP-RECON-1', fund_type: 'FundTransfer-out' }];
+    const dispRows = [{
+      付款渠道: 'DBS',
+      收款渠道: 'DBS',
+      big_account: 'M-DBS',
+      币种: 'USD',
+      金额: 100,
+      BillDate: '2026-06-01',
+      ReconID: 'DISP-RECON-1',
+      fund_type: 'FundTransfer-out'
+    }];
     const scenarios = [
       makeR2OffsetScenario(),
       makeDbsChargeScenario(),
@@ -1159,7 +1222,16 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
       makeGwRow({ reconciliationid: 'RC-INB', TradeType: 'Inbound-VA', orderid: 'ORD-INB' }),
       makeGwRow({ reconciliationid: 'DISP-RECON-1', TradeType: 'HX_OUTBOUND', merchantid: 'M-DBS', currency: 'USD', amount: 100 })
     ];
-    const dispRows = [{ 付款渠道: 'DBS', 收款渠道: 'DBS', big_account: 'M-DBS', 币种: 'USD', 金额: 100, ReconID: 'DISP-RECON-1', fund_type: 'FundTransfer-out' }];
+    const dispRows = [{
+      付款渠道: 'DBS',
+      收款渠道: 'DBS',
+      big_account: 'M-DBS',
+      币种: 'USD',
+      金额: 100,
+      BillDate: '2026-06-01',
+      ReconID: 'DISP-RECON-1',
+      fund_type: 'FundTransfer-out'
+    }];
     const scenarios = [
       makeR2OffsetScenario(),
       makeDbsChargeScenario(),

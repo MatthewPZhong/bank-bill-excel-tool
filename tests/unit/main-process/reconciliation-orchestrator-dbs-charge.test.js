@@ -39,7 +39,8 @@ function makeBankRow(o = {}) {
 }
 
 // 调拨对账单派生行（linked_fund_transfer_recon；字段名 = FT_RECON_FIELD_MAP.recon 真实列）
-//   付款渠道/收款渠道（步骤1 门控=DBS）、big_account ↔ MerchantId、币种 ↔ Currency、金额（绝对值精确到分）、ReconID（赋值来源）
+//   付款渠道/收款渠道（步骤1 门控=DBS）、big_account ↔ MerchantId、币种 ↔ Currency、
+//   金额（绝对值精确到分）、BillDate（v3.1.1 日期门禁）、ReconID（赋值来源）
 function makeDispRow(o = {}) {
   return {
     付款渠道: o['付款渠道'] ?? 'DBS',
@@ -47,6 +48,7 @@ function makeDispRow(o = {}) {
     big_account: o.big_account ?? 'M-DBS-001',
     币种: o['币种'] ?? 'USD',
     金额: o['金额'] ?? 100,
+    BillDate: o.BillDate ?? '2026-06-01',
     ReconID: o.ReconID ?? 'DISP-RECON-1',
     fund_type: o.fund_type ?? 'FundTransfer-out'
   };
@@ -190,7 +192,13 @@ test.describe('runReconciliation R3.5 —— DBS-Charge 改写流出（modifiedR
     //   网关侧无对应 amount → 步骤2 不触发 outbound（保持 Charge）。
     const bankRows = [
       makeBankRow({ _rowId: 'b1', FundType: 'Charge', ReconciliationId: '', 'Debit Amount': 100 }),
-      makeBankRow({ _rowId: 'b2', FundType: 'SomeOther', ReconciliationId: 'DISP-RECON-1', 'Debit Amount': 999 })
+      makeBankRow({
+        _rowId: 'b2',
+        FundType: 'SomeOther',
+        ReconciliationId: 'DISP-RECON-1',
+        'Credit Amount': 0,
+        'Debit Amount': 999
+      })
     ];
     const result = await runReconciliation({
       bankRows,
@@ -374,5 +382,119 @@ test.describe('runReconciliation R3.5 —— 行数守恒（混合行）', () =>
     // 行数守恒（全覆盖、互斥）
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
     assert.equal(bankRows.length, 3);
+  });
+});
+
+// ---- 6. R5 关闭时，R3.5 调拨副本仍进入独立只读 M2M 审计 ------------------
+
+test.describe('runReconciliation R3.5 —— 独立调拨 M2M 审计 context', () => {
+  test('R5 关闭、R3.5 开启、N=7 的 2×2：R3.5 正常改写，R5 零改写，实际修改行均进入调拨审计且行数守恒', async () => {
+    const bankRows = [
+      makeBankRow({
+        _rowId: 'm2m-b1',
+        FundType: 'Charge',
+        ReconciliationId: '',
+        'Debit Amount': 100,
+        BillDate: '2026-06-08'
+      }),
+      makeBankRow({
+        _rowId: 'm2m-b2',
+        FundType: 'Charge',
+        ReconciliationId: '',
+        'Debit Amount': 100,
+        BillDate: '2026-06-08'
+      })
+    ];
+    const dispatchRows = [
+      makeDispRow({ ReconID: 'M2M-DISP-1', 金额: 100, BillDate: '2026-06-01' }),
+      makeDispRow({ ReconID: 'M2M-DISP-2', 金额: 100, BillDate: '2026-06-01' })
+    ];
+    const dispatchRowsBefore = structuredClone(dispatchRows);
+
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      // 只有 R3.5 场景，明确表示 R5s2 关闭。
+      scenarios: [makeDbsChargeScenario()],
+      dispatchReconContext: { dispatchReconRows: dispatchRows },
+      // R5 写入 context 保持空；审计数据只能从独立只读 context 获取。
+      fundTransferReconContext: { reconRows: [] },
+      fundTransferAuditContext: { reconRows: dispatchRows },
+      // 银行日与调拨日相差 7 天：若静默回退默认 N=1，R3.5 和 M2M 都无法命中。
+      fundTransferDatePolicy: {
+        enabled: true,
+        toleranceDays: 7,
+        ownerScenarioId: 999,
+        signature: 'test-r35-m2m-n7'
+      }
+    });
+
+    assert.deepEqual(
+      bankRows.map((row) => row.ReconciliationId).sort(),
+      ['M2M-DISP-1', 'M2M-DISP-2'],
+      'R3.5 应按 N=7 完成两条 1:1 调拨匹配'
+    );
+    assert.ok(
+      bankRows.every((row) => row.FundType === 'FundTransfer-out'),
+      'R3.5 两条实际修改行均应改为 FundTransfer-out'
+    );
+    assert.equal(result.stats.dbsChargeChangedCount, 4, 'R3.5 两行各改 ReconciliationId + FundType');
+
+    assert.equal(result.stats.r5s2BackfilledCount, 0, 'R5 场景关闭，R5s2 必须零改写');
+    assert.equal(result.rounds.r5s2.backfilled, 0, 'R5 轮次统计保持 0');
+    assert.ok(
+      result.modifications.every((mod) => mod._round === 'R3.5'),
+      '独立审计数组不得进入 R5 写入路径'
+    );
+
+    assert.deepEqual(
+      result.manyToManyReviewRows.map((entry) => entry.row._rowId),
+      ['m2m-b1', 'm2m-b2'],
+      '两条实际修改银行行都应进入调拨多对多审计'
+    );
+    assert.ok(
+      result.manyToManyReviewRows.every((entry) => (
+        entry.note.includes('银行↔调拨多对多')
+        && entry.note.includes('银行 2 行 × 调拨 2 行')
+      )),
+      '每条审计说明应明确记录 2×2 调拨多对多关系'
+    );
+    assert.equal(result.stats.manyToManyReviewCount, 2);
+
+    assert.deepEqual(dispatchRows, dispatchRowsBefore, '独立审计与 R3.5 均不得修改调拨源行');
+    assert.equal(result.modifiedRows.length, 2);
+    assert.equal(result.unmatchedRows.length, 0);
+    assert.equal(
+      result.modifiedRows.length + result.unmatchedRows.length,
+      bankRows.length,
+      'modifiedRows + unmatchedRows 必须保持输入行数守恒'
+    );
+  });
+
+  test('未提供独立审计 context 时，兼容回退 fundTransferReconContext.reconRows', async () => {
+    const bankRows = [
+      makeBankRow({ _rowId: 'fallback-b1', 'Debit Amount': 100 }),
+      makeBankRow({ _rowId: 'fallback-b2', 'Debit Amount': 100 })
+    ];
+    const dispatchRows = [
+      makeDispRow({ ReconID: 'FALLBACK-DISP-1' }),
+      makeDispRow({ ReconID: 'FALLBACK-DISP-2' })
+    ];
+
+    const result = await runReconciliation({
+      bankRows,
+      gwRows: [],
+      scenarios: [makeDbsChargeScenario()],
+      dispatchReconContext: { dispatchReconRows: dispatchRows },
+      fundTransferReconContext: { reconRows: dispatchRows }
+      // 不传 fundTransferAuditContext，锁定旧调用兼容回退。
+    });
+
+    assert.deepEqual(
+      result.manyToManyReviewRows.map((entry) => entry.row._rowId),
+      ['fallback-b1', 'fallback-b2']
+    );
+    assert.equal(result.stats.manyToManyReviewCount, 2);
+    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 });

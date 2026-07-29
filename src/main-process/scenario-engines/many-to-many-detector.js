@@ -43,10 +43,9 @@ const { dayDiffWithin } = require('./engine-date-utils');
 const { bankAmountWithExtraFee, gwAmountAbs } = require('./r5-fund-transfer-backfill');
 const { reconAmountAbs } = require('./r5-fund-transfer-recon-backfill');
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+const { normalizeFundTransferDatePolicy } = require('./fund-transfer-engine-policy');
 
 const RECON = FT_RECON_FIELD_MAP.recon;
-
-const DEFAULT_DATE_TOLERANCE_DAYS = 1;
 
 // 🔴 大组封顶阈值（性能护栏）：单个同 key 合格组若 银行数×对手数 超过此值，不建二部图（防 O(nb×nc)
 //   尖峰卡顿），改为保守把整组银行行全部判命中（资金工具绝不静默封顶/漏报，宁可过报供人工复核）。
@@ -109,7 +108,7 @@ function computeKey(account, currency, amount) {
 
 // 单侧检测：银行行 × 单一对手池 → 命中银行行（{ row, note }）。纯只读。
 //   性能（v3.0.12）：银行优先门控 + 探测即丢 + 大组封顶——输出与「先全建组再整组剪枝」逐字节一致。
-function detectOneSide(bankRows, cpRows, cpAccessors, tolerance) {
+function detectOneSide(bankRows, cpRows, cpAccessors, datePolicy) {
   const groups = new Map(); // key -> { account, currency, cents, banks:[], cps:[] }
 
   // 银行 loop：只有银行行能创建 group（账号=MerchantId、币种=Currency、
@@ -151,6 +150,14 @@ function detectOneSide(bankRows, cpRows, cpAccessors, tolerance) {
     const nb = g.banks.length;
     const nc = g.cps.length;
 
+    // 日期策略关闭：同账号/币种/金额的 2×2 组即为完整二部图结论。
+    // 不解析任一日期，也不实际构造 N×M 边；空/非法/跨年日期均不额外阻断。
+    if (!datePolicy.enabled) {
+      const note = buildNote(cpAccessors.label, g, nb, nc);
+      for (const bankRow of g.banks) hits.push({ row: bankRow, note });
+      continue;
+    }
+
     // 🔴 大组封顶：nb×nc 超阈值则不建二部图（防 O(nb×nc) 尖峰），保守把整组银行行全部判命中。
     //   资金工具绝不静默封顶/漏报——宁可过报：用区别于普通命中的 note（含「规模过大」）把整组银行行写进
     //   「异常-人工判断」sheet，作为**用户可见**的非静默信号（比终端日志更强：用户在结果文件直接看到）。
@@ -170,7 +177,7 @@ function detectOneSide(bankRows, cpRows, cpAccessors, tolerance) {
     for (let i = 0; i < nb; i++) {
       const bankDate = g.banks[i] && g.banks[i].BillDate;
       for (let j = 0; j < nc; j++) {
-        if (dayDiffWithin(bankDate, cpAccessors.date(g.cps[j]), tolerance)) {
+        if (dayDiffWithin(bankDate, cpAccessors.date(g.cps[j]), datePolicy.toleranceDays)) {
           uf.union(i, nb + j);
         }
       }
@@ -207,6 +214,8 @@ function detectOneSide(bankRows, cpRows, cpAccessors, tolerance) {
  * @param {Array<Object>} gwRows    网关对账单行（safeGwRows；不按 TradeType 过滤）
  * @param {Array<Object>} reconRows 调拨对账单派生行（fundTransferReconContext.reconRows；取消路为 [] → 调拨检测 no-op）
  * @param {Object} [options]
+ * @param {Object} [options.fundTransferDatePolicy] 主流程解析后的不可变日期策略（{ enabled, toleranceDays }）
+ * @param {boolean} [options.dateMatchEnabled] 旧直接调用兼容：是否启用日期
  * @param {number} [options.dateToleranceDays] 日期容差天数（默认 1，含同日 ±1）
  * @returns {{ reviewRows: Array<{ row: Object, note: string }> }}
  *   reviewRows：命中银行行的**引用** + 中文说明；按 bankRows 原序稳定排序；空入参 → { reviewRows: [] }。
@@ -215,16 +224,18 @@ function detectFundTransferManyToMany(bankRows, gwRows, reconRows, options = {})
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
   const safeGwRows = Array.isArray(gwRows) ? gwRows : [];
   const safeReconRows = Array.isArray(reconRows) ? reconRows : [];
-  const tolerance = Number.isFinite(options.dateToleranceDays)
-    ? options.dateToleranceDays
-    : DEFAULT_DATE_TOLERANCE_DAYS;
+  const datePolicy = normalizeFundTransferDatePolicy(options);
 
   // 空入参 no-op（无银行行 → 无可标记）。
   if (safeBankRows.length === 0) return { reviewRows: [] };
 
-  const gwHits = safeGwRows.length > 0 ? detectOneSide(safeBankRows, safeGwRows, GW_ACCESSORS, tolerance) : [];
+  const gwHits = safeGwRows.length > 0
+    ? detectOneSide(safeBankRows, safeGwRows, GW_ACCESSORS, datePolicy)
+    : [];
   const reconHits =
-    safeReconRows.length > 0 ? detectOneSide(safeBankRows, safeReconRows, RECON_ACCESSORS, tolerance) : [];
+    safeReconRows.length > 0
+      ? detectOneSide(safeBankRows, safeReconRows, RECON_ACCESSORS, datePolicy)
+      : [];
 
   // 网关 + 调拨命中按 _rowId 去重合并 note（同一银行行两侧都命中 → 两条说明拼接）。
   //   _rowId 缺失时回退按对象引用去重（同一 run 内 bankRows 引用稳定）。

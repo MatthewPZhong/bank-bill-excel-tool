@@ -4546,17 +4546,30 @@ select.mapping-text-input {
   font-family: "Courier New", ui-monospace, monospace;
 }
 
-/* v2.1.16 A1：自带写死场景管理弹窗 —「银行渠道」与「优先级」并列居中，两组间保持间距。
-   row 沿用 .builtin-fixed-channel-row（flex + justify-content:center），此处加大组间 gap；
-   每组内部 label + 控件用小 gap 紧凑成组，整体两组在弹窗内居中。 */
+/* v2.1.16 A1 / v3.1.1：自带写死场景管理弹窗共用一条主配置行。
+   普通场景显示「银行渠道 + 优先级」；canonical 调拨场景隐藏银行渠道并显示
+   「调拨单匹配日期 + 优先级」。左侧业务配置、右侧优先级的顺序由 DOM 固定。 */
 .builtin-fixed-priority-row {
   gap: 48px;
 }
 .builtin-fixed-channel-group,
-.builtin-fixed-priority-group {
+.builtin-fixed-priority-group,
+.builtin-fixed-date-policy-group {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+/* canonical 调拨弹窗上下两行都居中，但两行总宽不同；实机测量上方勾选项需右移 4px
+   才能与下方首个勾选项的左起点对齐。仅做视觉位移，不参与 flex 宽度计算。 */
+.builtin-fixed-date-policy-group {
+  transform: translateX(4px);
+}
+.builtin-fixed-date-policy-group[hidden] {
+  display: none;
+}
+.builtin-fixed-date-policy-error {
+  margin-top: 8px;
+  text-align: center;
 }
 /* 渠道组里下拉给一个固定基准宽度（脱离原 row 后用组宽，避免被压扁） */
 .builtin-fixed-channel-group .builtin-fixed-channel-dropdown-wrap {

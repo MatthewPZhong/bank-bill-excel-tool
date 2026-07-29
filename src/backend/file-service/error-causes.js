@@ -32,6 +32,14 @@ const CAUSE_MAP = Object.freeze({
   // v3.0.26：R5 中台调拨订单回填 Extra Fee 校验（🔴 资金红线）
   'r5-invalid-extra-fee': '银行行 Extra Fee 非空但不是合法金额，已跳过中台调拨订单对账ID回填与调拨多对多审计，请人工核对手续费原值',
 
+  // v3.1.1：调拨真实借贷方向、日期与 directions 整体校验（🔴 资金红线）
+  'fund-transfer-direction-mismatch': '银行行借贷方向与调拨方向不符或方向金额格式异常，已排除该候选且未消费、未回填，请人工核对 Credit/Debit Amount',
+  'fund-transfer-date-mismatch': '调拨与银行日期缺失、格式非法或超出已配置的日期范围，已跳过该候选且未消费、未回填，请核对账单日期和日期策略',
+  'r5-fund-transfer-directions-invalid': '中台调拨订单回填方向配置不完整、重复或配对错误，本轮已安全跳过且未消费银行行，请恢复内置配置',
+  'fund-transfer-policy-owner-missing': '未找到“调拨回填功能管理”系统配置，当前已按启用日期匹配、允许 ±1 天的安全默认值处理，请修复本机配置',
+  'fund-transfer-policy-invalid-date-enabled': '“调拨单匹配日期”开关配置无效，当前已按默认值“启用”处理，请重新保存配置',
+  'fund-transfer-policy-invalid-tolerance-days': '“调拨单匹配日期”天数配置无效，当前已按默认值 ±1 天处理；请输入 1–999 的整数并重新保存',
+
   // v3.0.23：R4 四类资金性质严格 1:1 匹配（🔴 资金红线）
   'r4-fund-direction-mismatch': '同对账ID存在目标网关行，但银行借贷方向金额非0或格式非法，已跳过资金性质改写，请人工核对方向',
   'r4-fund-match-mismatch': '同对账ID存在银行行，但账号、币种、金额、手续费或候选消费状态不满足完整匹配条件',

@@ -85,8 +85,13 @@ const {
   bankAmountEqualWithoutExtraFee,
   bankAmountAbs
 } = require('./r5-fund-transfer-backfill');
+const { sameDay, dayDiffWithin, toDate } = require('./engine-date-utils');
+const { validateBankDirection } = require('./bank-direction-validator');
+const { normalizeFundTransferDatePolicy } = require('./fund-transfer-engine-policy');
 
 const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+
+const MS_PER_DAY = 86400000;
 
 // —— 银行行跨表字段名常量（显式映射，绝不假设同名）——
 const BANK_CHANNEL_FIELD = 'Channel';
@@ -127,6 +132,10 @@ const DISP_CURRENCY_FIELD = DISP.currency;          // '币种'
 const DISP_AMOUNT_FIELD = DISP.amount;              // '金额'
 const DISP_RECON_ID_FIELD = DISP.reconId;           // 'ReconID'
 const DISP_FUND_TYPE_FIELD = DISP.fundType;         // 'fund_type'（值=FundTransfer-in/out，步骤1 标命中行 FundType）
+const DISP_BILL_DATE_FIELD = DISP.billDate;          // 'BillDate'（由中台调拨订单交易时间派生）
+
+const DIRECTION_MISMATCH_WARNING_CODE = 'fund-transfer-direction-mismatch';
+const DATE_MISMATCH_WARNING_CODE = 'fund-transfer-date-mismatch';
 
 // 默认 config（全 config 化；plan「需求3」步骤1/2）。
 //   bankChannel          银行 Channel 门控值（仅该渠道行参与）
@@ -188,6 +197,8 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
   const setFundTypeOutbound = config.setFundTypeOutbound;
   // 'dbs-only'（默认）时步骤1末批量置 Charge 仅波及 Channel===bankChannel 的同 reconId 行；'all' 时全量。
   const chargeSiblingsDbsOnly = config.chargeSiblingsScope === 'dbs-only';
+  const datePolicy = normalizeFundTransferDatePolicy(options);
+  const dateToleranceDays = datePolicy.toleranceDays;
 
   const emptyResult = () => ({
     modifications: modCollector.listModifications(),
@@ -241,34 +252,109 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
   //   阶段A 先把所有命中行收集进 matchedBankRows（对象引用），阶段B 归并时排除该 Set —— 所有 FundTransfer 命中行都被保护。
   const matchedBankRows = new Set(); // 阶段A 标记的所有命中行（对象引用，阶段B 归并护栏）
   const mergeReconKeys = new Set();  // 阶段A 实际赋到银行行的 ReconID 键集合（阶段B 据此归并）
+  const warnedCandidateFailures = new Set();
+  const bankOriginalIndex = new Map();
+  safeBankRows.forEach((row, index) => {
+    if (!bankOriginalIndex.has(row)) bankOriginalIndex.set(row, index);
+  });
 
-  // ===== 阶段A：匹配 + 赋 ReconciliationId + 标命中行 FundType=FundTransfer-in/out（不归并）=====
-  for (const d of dispRows) {
-    // 候选：未被消费 + 大账号(MerchantId↔big_account) + 币种 + 金额（精确到分）全等。
-    //   大账号方向已在需求1 派生固化（in=收款卡号 / out=付款卡号），引擎零方向分支（D1）。
-    const cand = dbsBankRows.filter(
-      (b) =>
-        !usedBankRows.has(b) &&
-        valuesEqual(b && b[BANK_MERCHANT_ID_FIELD], d && d[DISP_BIG_ACCOUNT_FIELD]) &&
-        valuesEqual(b && b[BANK_CURRENCY_FIELD], d && d[DISP_CURRENCY_FIELD]) &&
-        dispatchBankAmountEqual(d, b)
-    );
-    if (cand.length === 0) continue; // 该调拨行在 DBS 银行侧无候选 → 跳过，无改动
+  const expectedDirectionForDispatch = (dispatchRow) =>
+    normalizeCellValue(dispatchRow && dispatchRow[DISP_FUND_TYPE_FIELD]) === FT_RECON_FIELD_MAP.FUND_TYPE_OUT
+      ? 'DEBIT'
+      : 'CREDIT';
 
-    if (cand.length > 1) {
+  const warnDirectionFailure = (bankRow, expectedDirection, result) => {
+    const key = `direction\u0000${String(bankRow && bankRow[BANK_ROW_ID_FIELD])}\u0000${expectedDirection}\u0000${result.code}`;
+    if (warnedCandidateFailures.has(key)) return;
+    warnedCandidateFailures.add(key);
+    warningCollector.push({
+      rowId: bankRow && bankRow[BANK_ROW_ID_FIELD],
+      engine: 'dbs-charge-fund-check-step1',
+      code: DIRECTION_MISMATCH_WARNING_CODE,
+      expectedDirection,
+      reason: result.code,
+      message: `DBS 调拨近似候选银行行(${bankRow && bankRow[BANK_ROW_ID_FIELD]})未通过 ${expectedDirection} 方向校验（${result.code}），未进入可写候选`
+    });
+  };
+
+  const warnDateFailure = (dispatchRow, bankRow) => {
+    const counterpartDate = toDate(dispatchRow && dispatchRow[DISP_BILL_DATE_FIELD]);
+    const bankDate = toDate(bankRow && bankRow.BillDate);
+    const reason = !counterpartDate
+      ? 'counterpart-date-invalid'
+      : !bankDate
+        ? 'bank-date-invalid'
+        : 'outside-tolerance';
+    const expectedDirection = expectedDirectionForDispatch(dispatchRow);
+    // 同账号/币种/金额密集组可能形成 N 来源 × M 银行的日期失败边；warning 本身不含来源身份，
+    // 按 sourceIndex 去重只会产出 N×M 条用户不可区分的重复告警。收敛为每个具体银行行 /
+    // 期望方向 / 失败原因一条；bankOriginalIndex 在 _rowId 缺失或重复时仍能区分真实银行行。
+    const key = [
+      'date',
+      bankOriginalIndex.get(bankRow) ?? '',
+      String(bankRow && bankRow[BANK_ROW_ID_FIELD]),
+      expectedDirection,
+      reason
+    ].join('\u0000');
+    if (warnedCandidateFailures.has(key)) return;
+    warnedCandidateFailures.add(key);
+    warningCollector.push({
+      rowId: bankRow && bankRow[BANK_ROW_ID_FIELD],
+      engine: 'dbs-charge-fund-check-step1',
+      code: DATE_MISMATCH_WARNING_CODE,
+      expectedDirection,
+      reason,
+      message: `DBS 调拨近似候选银行行(${bankRow && bankRow[BANK_ROW_ID_FIELD]})未通过日期策略（${reason}），未进入可写候选`
+    });
+  };
+
+  const directionEligibleCandidates = (dispatchRow) => {
+    const dispatchMerchantId = normalizeCellValue(dispatchRow && dispatchRow[DISP_BIG_ACCOUNT_FIELD]);
+    const dispatchCurrency = normalizeCellValue(dispatchRow && dispatchRow[DISP_CURRENCY_FIELD]);
+    const expectedDirection = expectedDirectionForDispatch(dispatchRow);
+    const nearCandidates = dbsBankRows.filter((bankRow) => {
+      const bankMerchantId = normalizeCellValue(bankRow && bankRow[BANK_MERCHANT_ID_FIELD]);
+      const bankCurrency = normalizeCellValue(bankRow && bankRow[BANK_CURRENCY_FIELD]);
+      return (
+        !usedBankRows.has(bankRow) &&
+        dispatchMerchantId !== '' &&
+        bankMerchantId !== '' &&
+        dispatchMerchantId === bankMerchantId &&
+        dispatchCurrency !== '' &&
+        bankCurrency !== '' &&
+        dispatchCurrency === bankCurrency &&
+        dispatchBankAmountEqual(dispatchRow, bankRow)
+      );
+    });
+    const eligible = [];
+    for (const bankRow of nearCandidates) {
+      const directionResult = validateBankDirection(bankRow, expectedDirection);
+      if (directionResult.ok) {
+        eligible.push(bankRow);
+      } else {
+        warnDirectionFailure(bankRow, expectedDirection, directionResult);
+      }
+    }
+    return eligible;
+  };
+
+  const applyDispatchMatch = (dispatchRow, candidates) => {
+    if (candidates.length === 0) return false;
+
+    if (candidates.length > 1) {
       // 多候选 → 取原序首行（dbsBankRows 顺序，即 bankRows 原序）+ warning（数据脏）。
       warningCollector.push({
-        rowId: cand[0][BANK_ROW_ID_FIELD],
+        rowId: candidates[0][BANK_ROW_ID_FIELD],
         code: 'multi-bank-match-dispatch',
-        message: `调拨对账单在 DBS 银行行中匹配到 ${cand.length} 行可用候选，取原序最前一条（数据脏）`
+        message: `调拨对账单在 DBS 银行行中匹配到 ${candidates.length} 行可用候选，取原序最前一条（数据脏）`
       });
     }
 
-    const chosen = cand[0];
+    const chosen = candidates[0];
     usedBankRows.add(chosen);     // 🔴 严格 1v1 单向消费
     matchedBankRows.add(chosen);  // 🔴 命中行进保护集（阶段B 归并排除，防 in/out 互相覆盖）
 
-    const newReconId = normalizeCellValue(d && d[DISP_RECON_ID_FIELD]);
+    const newReconId = normalizeCellValue(dispatchRow && dispatchRow[DISP_RECON_ID_FIELD]);
     const oldReconId = normalizeCellValue(chosen[BANK_RECON_ID_FIELD]);
     // 命中即覆盖（含非空原值）；normalize 后非空且与原值不同才写、才 record（同 R5s2 语义）。
     if (newReconId !== '' && oldReconId !== newReconId) {
@@ -278,7 +364,7 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
 
     // 🔴 命中行 FundType 标为该调拨行 fund_type（FundTransfer-in 或 -out，按调拨方向；经常量取，绝不手敲）。
     //   normalize 后非空且与原值不同才写、才 record（旧值===新值时 no-op，不留痕）。
-    const newFundType = normalizeCellValue(d && d[DISP_FUND_TYPE_FIELD]);
+    const newFundType = normalizeCellValue(dispatchRow && dispatchRow[DISP_FUND_TYPE_FIELD]);
     const oldChosenFundType = normalizeCellValue(chosen[BANK_FUND_TYPE_FIELD]);
     if (newFundType !== '' && oldChosenFundType !== newFundType) {
       chosen[BANK_FUND_TYPE_FIELD] = newFundType; // 🔴 命中行标 FundTransfer-in/out
@@ -287,6 +373,73 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
 
     // 记录归并键（阶段B 据此把同 ReconID 非命中行归 Charge）；空键不可归并。
     if (newReconId !== '') mergeReconKeys.add(newReconId);
+    return true;
+  };
+
+  // ===== 阶段A：匹配 + 赋 ReconciliationId + 标命中行 FundType=FundTransfer-in/out（不归并）=====
+  // 日期关闭时完全跳过日期；日期开启时先让所有调拨行跑严格同日，再仅让未命中行跑 ±N。
+  if (!datePolicy.enabled) {
+    for (const dispatchRow of dispRows) {
+      applyDispatchMatch(dispatchRow, directionEligibleCandidates(dispatchRow));
+    }
+  } else {
+    const unmatchedAfterSameDay = [];
+    for (const dispatchRow of dispRows) {
+      const directionEligible = directionEligibleCandidates(dispatchRow);
+      for (const bankRow of directionEligible) {
+        if (
+          !dayDiffWithin(
+            dispatchRow && dispatchRow[DISP_BILL_DATE_FIELD],
+            bankRow && bankRow.BillDate,
+            dateToleranceDays
+          )
+        ) {
+          warnDateFailure(dispatchRow, bankRow);
+        }
+      }
+      const sameDayCandidates = directionEligible.filter(
+        (bankRow) =>
+          sameDay(
+            dispatchRow && dispatchRow[DISP_BILL_DATE_FIELD],
+            bankRow && bankRow.BillDate
+          )
+      );
+      if (!applyDispatchMatch(dispatchRow, sameDayCandidates)) {
+        unmatchedAfterSameDay.push(dispatchRow);
+      }
+    }
+
+    for (const dispatchRow of unmatchedAfterSameDay) {
+      const directionEligible = directionEligibleCandidates(dispatchRow);
+      const withinTolerance = [];
+      for (const bankRow of directionEligible) {
+        if (
+          dayDiffWithin(
+            dispatchRow && dispatchRow[DISP_BILL_DATE_FIELD],
+            bankRow && bankRow.BillDate,
+            dateToleranceDays
+          )
+        ) {
+          withinTolerance.push(bankRow);
+        } else {
+          // near-candidate 的日期失败原因必须逐条可审计，即使同一来源另有合法候选最终成功。
+          warnDateFailure(dispatchRow, bankRow);
+        }
+      }
+      const counterpartDate = toDate(dispatchRow && dispatchRow[DISP_BILL_DATE_FIELD]);
+      const dayDiffAbs = (bankRow) => {
+        const bankDate = toDate(bankRow && bankRow.BillDate);
+        if (!counterpartDate || !bankDate) return Number.POSITIVE_INFINITY;
+        return Math.abs(Math.round((counterpartDate.getTime() - bankDate.getTime()) / MS_PER_DAY));
+      };
+      withinTolerance.sort(
+        (a, b) =>
+          dayDiffAbs(a) - dayDiffAbs(b) ||
+          (bankOriginalIndex.get(a) ?? Number.MAX_SAFE_INTEGER) -
+            (bankOriginalIndex.get(b) ?? Number.MAX_SAFE_INTEGER)
+      );
+      applyDispatchMatch(dispatchRow, withinTolerance);
+    }
   }
 
   // ===== 阶段B：归并（🔴 最大红线）—— 同 ReconId + 不在命中行 Set + 非 Charge → 置 Charge =====
@@ -302,6 +455,7 @@ function runDbsChargeFundCheck(gwRows, bankRows, dispatchReconRows, options = {}
       //   'all'（经 config 切回）不进此分支 → 忠于 plan 原文「搜全量银行单」全渠道波及。
       if (chargeSiblingsDbsOnly && !valuesEqual(b && b[BANK_CHANNEL_FIELD], bankChannel)) continue;
       if (normalizeCellValue(b && b[BANK_RECON_ID_FIELD]) !== key) continue; // 同 reconId
+      if (!validateBankDirection(b, 'DEBIT').ok) continue; // Stage B 只允许真实严格出账 sibling 归 Charge
       const oldFundType = normalizeCellValue(b && b[BANK_FUND_TYPE_FIELD]);
       if (oldFundType === setFundTypeCharge) continue; // 已 Charge → no-op，不 record
       b[BANK_FUND_TYPE_FIELD] = setFundTypeCharge; // 🔴 原地归并为 Charge

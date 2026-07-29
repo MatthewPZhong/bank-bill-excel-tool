@@ -43,11 +43,15 @@ const {
   makeModificationCollector,
   makeWarningCollector,
   normalizeCellValue,
-  parseNumber,
-  valuesEqual
+  parseNumber
 } = require('./engine-utils');
 
 const { sameDay, dayDiffWithin, toDate } = require('./engine-date-utils');
+const { validateBankDirection } = require('./bank-direction-validator');
+const {
+  normalizeFundTransferDatePolicy,
+  validateFundTransferDirections
+} = require('./fund-transfer-engine-policy');
 
 // 🔴 复用 R5s2 的含手续费银行匹配金额与非法 fee 判定——禁重写，防两种来源口径漂移。
 const {
@@ -63,14 +67,9 @@ const RECON = FT_RECON_FIELD_MAP.recon;
 
 const MS_PER_DAY = 86400000;
 
-// 双方向（与 R5s2 DEFAULT_DIRECTIONS 同值；调拨对账单 fund_type 与银行 FundType 同枚举值）。
-//   两方向独立池：bankPool=bank.FundType===dir.fundType；reconPool=rc[recon.fundType]===dir.fundType。
-const DIRECTIONS = [
-  { fundType: FT_RECON_FIELD_MAP.FUND_TYPE_IN },
-  { fundType: FT_RECON_FIELD_MAP.FUND_TYPE_OUT }
-];
-
-const DEFAULT_DATE_TOLERANCE_DAYS = 1;
+const INVALID_DIRECTIONS_WARNING_CODE = 'r5-fund-transfer-directions-invalid';
+const DIRECTION_MISMATCH_WARNING_CODE = 'fund-transfer-direction-mismatch';
+const DATE_MISMATCH_WARNING_CODE = 'fund-transfer-date-mismatch';
 
 // 调拨对账单金额绝对值 = |rc[recon.amount]|；非数值 → NaN（→ amountEqual 判非有限数 → 不命中）。
 function reconAmountAbs(reconRow) {
@@ -85,6 +84,12 @@ function amountEqual(reconRow, bankRow) {
   const reconAbs = reconAmountAbs(reconRow);
   if (!Number.isFinite(bankAmount) || !Number.isFinite(reconAbs)) return false;
   return Math.round(bankAmount * 100) === Math.round(reconAbs * 100);
+}
+
+function dateMismatchReason(counterpartDateValue, bankDateValue) {
+  if (!toDate(counterpartDateValue)) return 'counterpart-date-invalid';
+  if (!toDate(bankDateValue)) return 'bank-date-invalid';
+  return 'outside-tolerance';
 }
 
 /**
@@ -114,9 +119,26 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
   const safeReconRows = Array.isArray(reconRows) ? reconRows : [];
   const safeBankRows = Array.isArray(bankRows) ? bankRows : [];
 
-  const dateToleranceDays = Number.isFinite(options.dateToleranceDays)
-    ? options.dateToleranceDays
-    : DEFAULT_DATE_TOLERANCE_DAYS;
+  const directionsValidation = validateFundTransferDirections(options.directions, {
+    allowDefault: !Object.prototype.hasOwnProperty.call(options, 'directions')
+  });
+  if (!directionsValidation.ok) {
+    warningCollector.push({
+      rowId: null,
+      engine: 'r5-fund-transfer-recon-backfill',
+      code: INVALID_DIRECTIONS_WARNING_CODE,
+      reason: directionsValidation.reason,
+      message: `R5 调拨对账单回填 directions 配置非法，整轮已失败关闭：${directionsValidation.reason}`
+    });
+    return {
+      modifications: modCollector.listModifications(),
+      warnings: warningCollector.list(),
+      usedBankRowIds: consumedBankRowIds
+    };
+  }
+  const directions = directionsValidation.directions;
+  const datePolicy = normalizeFundTransferDatePolicy(options);
+  const dateToleranceDays = datePolicy.toleranceDays;
 
   // 无银行行 → 直接返回；无调拨行时仍遍历方向银行池，以保证非法 Extra Fee warning 不被早退吞掉。
   if (safeBankRows.length === 0) {
@@ -127,13 +149,66 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
     };
   }
 
-  // 对账字段全等：big_account↔MerchantId、币种↔Currency（valuesEqual）
+  // 对账字段全等：非空 big_account↔MerchantId、非空 币种↔Currency
   //   + (|Credit-Debit| + signed Extra Fee) 先加总后精确到分。
   //   ⚠️ 大账号方向已在派生固化（D1），引擎零方向分支——此处不区分收/付，直接 big_account 比 MerchantId。
-  const fieldEq = (rc, bank) =>
-    valuesEqual(rc && rc[RECON.bigAccount], bank && bank.MerchantId) &&
-    valuesEqual(rc && rc[RECON.currency], bank && bank.Currency) &&
-    amountEqual(rc, bank);
+  const fieldEq = (rc, bank) => {
+    const reconMerchantId = normalizeCellValue(rc && rc[RECON.bigAccount]);
+    const bankMerchantId = normalizeCellValue(bank && bank.MerchantId);
+    const reconCurrency = normalizeCellValue(rc && rc[RECON.currency]);
+    const bankCurrency = normalizeCellValue(bank && bank.Currency);
+    return (
+      reconMerchantId !== '' &&
+      bankMerchantId !== '' &&
+      reconMerchantId === bankMerchantId &&
+      reconCurrency !== '' &&
+      bankCurrency !== '' &&
+      reconCurrency === bankCurrency &&
+      amountEqual(rc, bank)
+    );
+  };
+
+  const warnedCandidateFailures = new Set();
+  const warnDirectionFailure = (bankRow, expectedDirection, result) => {
+    const key = `direction\u0000${String(bankRow && bankRow._rowId)}\u0000${expectedDirection}\u0000${result.code}`;
+    if (warnedCandidateFailures.has(key)) return;
+    warnedCandidateFailures.add(key);
+    warningCollector.push({
+      rowId: bankRow && bankRow._rowId,
+      engine: 'r5-fund-transfer-recon-backfill',
+      code: DIRECTION_MISMATCH_WARNING_CODE,
+      expectedDirection,
+      reason: result.code,
+      message: `R5 调拨对账单近似候选银行行(${bankRow && bankRow._rowId})未通过 ${expectedDirection} 方向校验（${result.code}），未进入可写候选`
+    });
+  };
+  const warnDateFailure = (reconRow, bankRow, expectedDirection) => {
+    const reason = dateMismatchReason(reconRow && reconRow[RECON.billDate], bankRow && bankRow.BillDate);
+    // 同账号/币种/金额密集组可能形成 N 来源 × M 银行的日期失败边；warning 不含来源身份，
+    // 按 sourceIndex 保留只会制造 N×M 条不可区分的重复告警。每个具体银行行 / 方向 /
+    // 原因只报一次；bankOriginalIndex 在 _rowId 缺失或重复时仍保持银行行级区分。
+    const key = [
+      'date',
+      bankOriginalIndex.get(bankRow) ?? '',
+      String(bankRow && bankRow._rowId),
+      expectedDirection,
+      reason
+    ].join('\u0000');
+    if (warnedCandidateFailures.has(key)) return;
+    warnedCandidateFailures.add(key);
+    warningCollector.push({
+      rowId: bankRow && bankRow._rowId,
+      engine: 'r5-fund-transfer-recon-backfill',
+      code: DATE_MISMATCH_WARNING_CODE,
+      expectedDirection,
+      reason,
+      message: `R5 调拨对账单近似候选银行行(${bankRow && bankRow._rowId})未通过日期策略（${reason}），未进入可写候选`
+    });
+  };
+  const bankOriginalIndex = new Map();
+  safeBankRows.forEach((row, index) => {
+    if (!bankOriginalIndex.has(row)) bankOriginalIndex.set(row, index);
+  });
 
   // 命中回填：把调拨对账单 ReconID 写入银行 ReconciliationId（命中即覆盖，含非空原值；与 R5s2 同语义）。
   //   cand 已保证按 bankPool 顺序；tie-break 取 cand[0]（原序最前）。
@@ -161,18 +236,18 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
   };
 
   // 每个 direction 独立跑：独立 reconPool / bankPool / usedBankRowId（两方向不串池）。
-  for (const dir of DIRECTIONS) {
+  for (const dir of directions) {
     // reconPool：fund_type 同方向 且 ReconID 非空（空 ReconID 无可回填，进池只会空占银行候选）
     //   且 big_account 非空（🔴 资金红线护栏：valuesEqual('','')===true，空 big_account 的调拨行会误命中
     //   空 MerchantId 的银行行并写错 ReconciliationId；与现有 reconId 非空护栏并列，空 big_account 不进池）。
     const reconPool = safeReconRows.filter(
       (rc) =>
-        normalizeCellValue(rc && rc[RECON.fundType]) === dir.fundType &&
+        normalizeCellValue(rc && rc[RECON.fundType]) === dir.gwTradeType &&
         normalizeCellValue(rc && rc[RECON.reconId]) !== '' &&
         normalizeCellValue(rc && rc[RECON.bigAccount]) !== ''
     );
     const bankPool = safeBankRows.filter((b) => {
-      if (normalizeCellValue(b && b.FundType) !== dir.fundType) return false;
+      if (normalizeCellValue(b && b.FundType) !== dir.bankFundType) return false;
       if (!hasInvalidExtraFee(b)) return true;
       if (shouldEmitInvalidExtraFeeWarning(b)) {
         warningCollector.push(createInvalidExtraFeeWarning(b));
@@ -180,15 +255,41 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
       return false;
     });
     const usedBankRowId = new Set();
+    const directionEligibleCandidates = (sourceRow) => {
+      const nearCandidates = bankPool.filter(
+        (b) => !usedBankRowId.has(b._rowId) && fieldEq(sourceRow, b)
+      );
+      const eligible = [];
+      for (const bankRow of nearCandidates) {
+        const directionResult = validateBankDirection(bankRow, dir.expectedBankDirection);
+        if (directionResult.ok) {
+          eligible.push(bankRow);
+        } else {
+          warnDirectionFailure(bankRow, dir.expectedBankDirection, directionResult);
+        }
+      }
+      return eligible;
+    };
+
+    if (!datePolicy.enabled) {
+      for (const rc of reconPool) {
+        backfill(rc, directionEligibleCandidates(rc), 'date-disabled', usedBankRowId);
+      }
+      for (const consumedRowId of usedBankRowId) consumedBankRowIds.add(consumedRowId);
+      continue;
+    }
 
     // ===== Phase1：严格同日 —— 先把所有 recon 跑完，消费掉同日命中（保证「优先同日」硬约束）=====
     const unmatchedAfterPhase1 = [];
     for (const rc of reconPool) {
-      const cand = bankPool.filter(
-        (b) =>
-          !usedBankRowId.has(b._rowId) &&
-          fieldEq(rc, b) &&
-          sameDay(rc && rc[RECON.billDate], b.BillDate)
+      const directionEligible = directionEligibleCandidates(rc);
+      for (const bankRow of directionEligible) {
+        if (!dayDiffWithin(rc && rc[RECON.billDate], bankRow.BillDate, dateToleranceDays)) {
+          warnDateFailure(rc, bankRow, dir.expectedBankDirection);
+        }
+      }
+      const cand = directionEligible.filter(
+        (b) => sameDay(rc && rc[RECON.billDate], b.BillDate)
       );
       if (cand.length === 0) {
         unmatchedAfterPhase1.push(rc);
@@ -199,12 +300,16 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
 
     // ===== Phase2：仅 Phase1 未命中的 recon，对未被消费的银行行用 ±dateToleranceDays 再匹配 =====
     for (const rc of unmatchedAfterPhase1) {
-      const cand = bankPool.filter(
-        (b) =>
-          !usedBankRowId.has(b._rowId) &&
-          fieldEq(rc, b) &&
-          dayDiffWithin(rc && rc[RECON.billDate], b.BillDate, dateToleranceDays)
-      );
+      const directionEligible = directionEligibleCandidates(rc);
+      const cand = [];
+      for (const bankRow of directionEligible) {
+        if (dayDiffWithin(rc && rc[RECON.billDate], bankRow.BillDate, dateToleranceDays)) {
+          cand.push(bankRow);
+        } else {
+          // near-candidate 的日期失败原因必须逐条可审计，即使同一来源另有合法候选最终成功。
+          warnDateFailure(rc, bankRow, dir.expectedBankDirection);
+        }
+      }
       // 按「与调拨 BillDate 的绝对天数差」升序稳定排序（差小优先；同天数差保持 bankPool 原序）。
       const reconDate = toDate(rc && rc[RECON.billDate]);
       const dayDiffAbs = (b) => {
@@ -212,7 +317,12 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
         if (!reconDate || !bd) return Number.POSITIVE_INFINITY;
         return Math.abs(Math.round((reconDate.getTime() - bd.getTime()) / MS_PER_DAY));
       };
-      cand.sort((a, b) => dayDiffAbs(a) - dayDiffAbs(b));
+      cand.sort(
+        (a, b) =>
+          dayDiffAbs(a) - dayDiffAbs(b) ||
+          (bankOriginalIndex.get(a) ?? Number.MAX_SAFE_INTEGER) -
+            (bankOriginalIndex.get(b) ?? Number.MAX_SAFE_INTEGER)
+      );
       backfill(rc, cand, `±${dateToleranceDays}day`, usedBankRowId);
     }
 

@@ -53,17 +53,29 @@ function midRow(overrides = {}) {
   }, overrides);
 }
 
-// DBS 银行行（驼峰真实表头）。金额放 Debit 单边，匹配看 |credit-debit|。
-function bankRow({ rowId, merchantId, currency = 'USD', amount, fundType = 'Inbound', reconId = '' }) {
+// DBS 银行行（驼峰真实表头）。v3.1.1 下 in 腿金额放 Credit、out 腿放 Debit；
+// BillDate 默认与 midRow 交易时间同日，同时满足严格方向与日期门禁。
+function bankRow({
+  rowId,
+  merchantId,
+  currency = 'USD',
+  amount,
+  fundType = 'Inbound',
+  reconId = '',
+  billDate = '2026-06-10',
+  direction = 'DEBIT'
+}) {
+  const isCredit = direction === 'CREDIT';
   return {
     _rowId: rowId,
     Channel: 'DBS',
     MerchantId: merchantId,
     Currency: currency,
-    'Credit Amount': 0,
-    'Debit Amount': amount,
+    'Credit Amount': isCredit ? amount : 0,
+    'Debit Amount': isCredit ? 0 : amount,
     FundType: fundType,
-    ReconciliationId: reconId
+    ReconciliationId: reconId,
+    BillDate: billDate
   };
 }
 
@@ -84,7 +96,7 @@ test.describe('builder↔DBS-Charge 端到端联测（方向感知门控，🔴 
     assert.equal(outDisp[FT_RECON_FIELD_MAP.recon.payChannel], 'DBS');
 
     // 配套 DBS 银行行：bIn 对齐 in 腿（MerchantId=RECV-CARD、100）、bOut 对齐 out 腿（MerchantId=PAY-CARD、90）。
-    const bIn = bankRow({ rowId: 'bIn', merchantId: 'RECV-CARD', amount: 100 });
+    const bIn = bankRow({ rowId: 'bIn', merchantId: 'RECV-CARD', amount: 100, direction: 'CREDIT' });
     const bOut = bankRow({ rowId: 'bOut', merchantId: 'PAY-CARD', amount: 90 });
 
     const { modifications } = runDbsChargeFundCheck([], [bIn, bOut], dispRows, OPTIONS);
@@ -105,7 +117,13 @@ test.describe('builder↔DBS-Charge 端到端联测（方向感知门控，🔴 
     const { rows: dispRows } = buildFundTransferReconRows([
       midRow({ [M.receiveChannel]: 'ICBC' }) // 收款渠道=ICBC（in 腿渠道）；付款渠道仍 DBS（out 腿渠道）
     ]);
-    const bIn = bankRow({ rowId: 'bIn', merchantId: 'RECV-CARD', amount: 100, fundType: 'Inbound' });
+    const bIn = bankRow({
+      rowId: 'bIn',
+      merchantId: 'RECV-CARD',
+      amount: 100,
+      fundType: 'Inbound',
+      direction: 'CREDIT'
+    });
     const bOut = bankRow({ rowId: 'bOut', merchantId: 'PAY-CARD', amount: 90, fundType: 'Outbound' });
 
     const { modifications } = runDbsChargeFundCheck([], [bIn, bOut], dispRows, OPTIONS);
@@ -125,7 +143,13 @@ test.describe('builder↔DBS-Charge 端到端联测（方向感知门控，🔴 
     const { rows: dispRows } = buildFundTransferReconRows([
       midRow({ [M.payChannel]: 'ICBC' }) // 付款渠道=ICBC（out 腿渠道）；收款渠道仍 DBS（in 腿渠道）
     ]);
-    const bIn = bankRow({ rowId: 'bIn', merchantId: 'RECV-CARD', amount: 100, fundType: 'Inbound' });
+    const bIn = bankRow({
+      rowId: 'bIn',
+      merchantId: 'RECV-CARD',
+      amount: 100,
+      fundType: 'Inbound',
+      direction: 'CREDIT'
+    });
     const bOut = bankRow({ rowId: 'bOut', merchantId: 'PAY-CARD', amount: 90, fundType: 'Outbound' });
 
     const { modifications } = runDbsChargeFundCheck([], [bIn, bOut], dispRows, OPTIONS);
@@ -144,7 +168,13 @@ test.describe('builder↔DBS-Charge 端到端联测（方向感知门控，🔴 
     const { rows: dispRows } = buildFundTransferReconRows([
       midRow({ [M.payChannel]: 'ICBC', [M.receiveChannel]: 'CITI' })
     ]);
-    const bIn = bankRow({ rowId: 'bIn', merchantId: 'RECV-CARD', amount: 100, fundType: 'Inbound' });
+    const bIn = bankRow({
+      rowId: 'bIn',
+      merchantId: 'RECV-CARD',
+      amount: 100,
+      fundType: 'Inbound',
+      direction: 'CREDIT'
+    });
     const bOut = bankRow({ rowId: 'bOut', merchantId: 'PAY-CARD', amount: 90, fundType: 'Outbound' });
 
     const { modifications } = runDbsChargeFundCheck([], [bIn, bOut], dispRows, OPTIONS);
@@ -173,7 +203,13 @@ test.describe('builder↔DBS-Charge 端到端联测（方向感知门控，🔴 
     // 每单两条配套 DBS 银行行（in 腿 MerchantId=收款卡号、金额 100；out 腿 MerchantId=付款卡号、金额 90）。
     const banks = [];
     for (const n of [1, 2, 3, 4]) {
-      banks.push(bankRow({ rowId: `in${n}`, merchantId: `R${n}`, amount: 100, fundType: 'Inbound' }));
+      banks.push(bankRow({
+        rowId: `in${n}`,
+        merchantId: `R${n}`,
+        amount: 100,
+        fundType: 'Inbound',
+        direction: 'CREDIT'
+      }));
       banks.push(bankRow({ rowId: `out${n}`, merchantId: `P${n}`, amount: 90, fundType: 'Outbound' }));
     }
 

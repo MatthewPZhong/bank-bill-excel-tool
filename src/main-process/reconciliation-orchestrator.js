@@ -151,7 +151,7 @@ function buildChannelRegionHits(modifiedRows, allMods) {
  * @param {Array<Object>} scenarios 已 enabled 过的场景数组
  * @returns {{ dbsChargeFundCheck: Array, r2: Array, r4: Array, r5s2: Array, r5s3: Array, r5s4: Array }}
  */
-function bucketScenarios(scenarios) {
+function bucketScenarios(scenarios, options = {}) {
   const dbsChargeFundCheck = []; // v3.0.6 需求3：R3.5 DBS-Charge 资金校验
   const r2 = [];
   const r4 = [];
@@ -160,6 +160,8 @@ function bucketScenarios(scenarios) {
   const r5s4 = [];
 
   const list = Array.isArray(scenarios) ? scenarios : [];
+  const enforceFundTransferOwner = options.enforceFundTransferOwner === true;
+  const fundTransferOwnerScenarioId = options.fundTransferOwnerScenarioId;
   for (const s of list) {
     if (!s) continue;
     const fc = s.config && s.config.funcCategory;
@@ -169,7 +171,19 @@ function bucketScenarios(scenarios) {
     } else if (s.category === 'builtin-fixed' && fc === 'fund-nature-check') {
       r4.push(s);
     } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'fund-transfer-backfill') {
-      r5s2.push(s);
+      // v3.1.1：R5s2 的执行身份必须与全局日期策略的 canonical owner 是同一条记录。
+      // main 已对伪内置保留签名和重复 owner fail-closed；这里再防御一次，绝不把非 owner
+      // 场景送入 R5s2，也不让它落入 R2 兜底。
+      if (
+        !enforceFundTransferOwner
+        || (
+          fundTransferOwnerScenarioId !== null
+          && fundTransferOwnerScenarioId !== undefined
+          && String(s.id) === String(fundTransferOwnerScenarioId)
+        )
+      ) {
+        r5s2.push(s);
+      }
     } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'platform-inbound-cleanup') {
       r5s3.push(s);
     } else if (s.category === 'builtin-fixed' && fc === 'platform-order' && sub === 'refund-order-backfill') {
@@ -253,6 +267,8 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  *   （{ reconRows }）；仿 midAllocationContext 范式。R5s2 二选一 gating（config.reconSourceMid !== false，
  *   默认勾选）命中「勾选路」时注入调拨对账单派生行（linked_fund_transfer_recon）；取消路（reconSourceMid:false）
  *   不读本 context，沿用现状网关回填。缺省 → 勾选路得空 reconRows → 新引擎空入参 no-op。
+ * @param {Object} [params.fundTransferAuditContext] v3.1.1：M2M 调拨侧独立只读审计入参（{ reconRows }）。
+ *   只在 R1-R5 全部完成后传给检测器，绝不进入 R5 写入引擎；缺省时兼容回退 fundTransferReconContext.reconRows。
  * @param {Object} [params.dispatchReconContext] v3.0.6 需求3：R3.5「DBS-Charge 资金校验」引擎入参
  *   （{ dispatchReconRows }）；数据源同为调拨对账单派生表（linked_fund_transfer_recon），但语义独立于需求2 —
  *   DBS-Charge 总需调拨对账单，**不受**需求2 reconSourceMid 开关控制，故 bank-statement:run 单独 structuredClone
@@ -273,7 +289,21 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
 //   `await yieldTick(round)` 让出事件循环 + 上报进度。**轮次顺序、各引擎入参、数据匹配/派生逻辑零改动**——
 //   仅在 R1→R2(dispatcher)→R3.5→R4→R5(s2/s2b/s3/s4) 各轮 *执行之后* 让出一次（结果 golden 字节不变）。
 //   onProgress 为可选回调（main.js handler 注入 forwarder；测试/脚本不传 → yieldTick 仅 setImmediate 让出、不上报）。
-async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, refundContext, midAllocationContext, fundTransferReconContext, dispatchReconContext, onProgress } = {}) {
+async function runReconciliation({
+  bankRows,
+  gwRows,
+  c3GwRows,
+  scenarios,
+  deps,
+  refundContext,
+  midAllocationContext,
+  fundTransferReconContext,
+  fundTransferAuditContext,
+  dispatchReconContext,
+  fundTransferDatePolicy,
+  initialWarnings,
+  onProgress
+} = {}) {
   if (!Array.isArray(bankRows)) {
     throw new Error('runReconciliation: bankRows 必须是数组');
   }
@@ -289,10 +319,39 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
     }
     await new Promise((r) => setImmediate(r));
   };
+  const hasResolvedFundTransferPolicy = !!(
+    fundTransferDatePolicy
+    && typeof fundTransferDatePolicy === 'object'
+    && !Array.isArray(fundTransferDatePolicy)
+  );
+  const resolvedFundTransferDatePolicy = hasResolvedFundTransferPolicy
+    ? Object.freeze({
+      // 只有显式 boolean false 才能关闭日期门禁；缺失/非法值按安全默认“启用”处理。
+      // 正常生产路径由 main resolver 保证类型，这里是编排器防御边界，避免部分对象意外放宽候选。
+      enabled: typeof fundTransferDatePolicy.enabled === 'boolean'
+        ? fundTransferDatePolicy.enabled
+        : true,
+      toleranceDays: Number.isInteger(fundTransferDatePolicy.toleranceDays)
+        && fundTransferDatePolicy.toleranceDays >= 1
+        && fundTransferDatePolicy.toleranceDays <= 999
+        ? fundTransferDatePolicy.toleranceDays
+        : 1,
+      ownerScenarioId: fundTransferDatePolicy.ownerScenarioId ?? null,
+      signature: fundTransferDatePolicy.signature || ''
+    })
+    : Object.freeze({
+      enabled: true,
+      toleranceDays: 1,
+      ownerScenarioId: null,
+      signature: ''
+    });
   const {
     dbsChargeFundCheck: dbsChargeBucket,
     r2: r2Bucket, r4: r4Bucket, r5s2: r5s2Bucket, r5s3: r5s3Bucket, r5s4: r5s4Bucket
-  } = bucketScenarios(scenarios);
+  } = bucketScenarios(scenarios, {
+    enforceFundTransferOwner: hasResolvedFundTransferPolicy,
+    fundTransferOwnerScenarioId: resolvedFundTransferDatePolicy.ownerScenarioId
+  });
 
   // ===== 跨轮累积器 =====
   const modColsByRowId = new Map(); // rowId -> Set<column>（标黄来源，跨 5 轮合并）
@@ -303,7 +362,24 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
       modColsByRowId.get(m.rowId).add(m.column);
     }
   };
-  const allWarnings = []; // 汇总 errorReport
+  const warningIdentity = (warning) => [
+    warning && warning.scenarioId,
+    warning && warning.rowId,
+    warning && warning.code,
+    warning && warning.message
+  ].map((value) => (value === null || value === undefined ? '' : String(value))).join('\u0000');
+  const initialWarningKeys = new Set();
+  const normalizedInitialWarnings = [];
+  for (const warning of Array.isArray(initialWarnings) ? initialWarnings : []) {
+    if (!warning || typeof warning !== 'object') continue;
+    const key = warningIdentity(warning);
+    if (initialWarningKeys.has(key)) continue;
+    initialWarningKeys.add(key);
+    normalizedInitialWarnings.push({ ...warning });
+  }
+  // 汇总 errorReport；配置 resolver 告警必须排在各引擎告警之前。只去除配置告警自身及其与
+  // 引擎结果的精确重复，不改变既有引擎之间的 warning 数量/顺序（R4 golden 契约）。
+  const allWarnings = [...normalizedInitialWarnings];
   const allMods = [];     // 汇总 modifications（带 _round 标记便于审计）
 
   // ===== R1：reconid 1v1 匹配（不改字段，仅得 matchedGwRows）=====
@@ -336,7 +412,10 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
   if (dbsChargeBucket.length) {
     const cfg = dbsChargeBucket[0].config || {};
     const dispRows = (dispatchReconContext && dispatchReconContext.dispatchReconRows) || [];
-    const r35 = runDbsChargeFundCheck(safeGwRows, bankRows, dispRows, { config: cfg });
+    const r35 = runDbsChargeFundCheck(safeGwRows, bankRows, dispRows, {
+      config: cfg,
+      fundTransferDatePolicy: resolvedFundTransferDatePolicy
+    });
     mergeMods(r35.modifications);
     allWarnings.push(...(r35.warnings || []));
     for (const m of r35.modifications || []) allMods.push({ ...m, _round: 'R3.5' });
@@ -382,7 +461,8 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
       // —— 勾选路：调拨对账单 ReconID 回填银行 ReconciliationId（新引擎，对手方换源；口径与 R5s2 一致）——
       const reconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
       const rA = runRound5FundTransferReconBackfill(reconRows, bankRows, {
-        dateToleranceDays: opt.dateToleranceDays
+        directions: opt.directions,
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy
       });
       mergeMods(rA.modifications);
       allWarnings.push(...(rA.warnings || []));
@@ -398,7 +478,7 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
       // —— 取消路：现状网关回填，逐字保留（R5s2 parity 不破）——
       const r5a = runRound5FundTransferBackfill(safeGwRows, bankRows, {
         directions: opt.directions,
-        dateToleranceDays: opt.dateToleranceDays
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy
       });
       mergeMods(r5a.modifications);
       allWarnings.push(...(r5a.warnings || []));
@@ -502,21 +582,23 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
   //   锁定 no-op / 未改值行不进入检测器，不能因异常说明被提升为命中；实际改值行的异常说明仍保留。
   //   🔴 检测器不 mergeMods、不进 modColsByRowId、不改任何 bankRow 字段 → modifiedRows + unmatchedRows
   //   === bankRows.length 行数守恒不受影响（属只读审计增强，与 R1-R5 回填值/派生口径完全解耦）。
-  //   actuallyModifiedBankRows = 最终态实际改值行；gwRows = safeGwRows（恒可用）；reconRows 取 fundTransferReconContext.reconRows
-  //   （需求2 取消路 / 缺省 → [] → 调拨检测自然 no-op）。
-  const detectorReconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
-  // v3.0.12 PR#82 codex-P2-1（🔴 资金红线）：检测器日期容差必须 = R5s2 回填引擎**实际用值**，否则容差≠1 时
-  //   复核表与回填口径不一致（容差3→隔2天的2×2组漏进表；容差0→过报）。网关侧 runRound5FundTransferBackfill
-  //   与调拨侧 runRound5FundTransferReconBackfill **同源同字段**：均以 r5s2Bucket[0].config.dateToleranceDays
-  //   为入参、且 `Number.isFinite?值:1` 归一化口径与检测器一致（两路 useMidReconTable 互斥择一）→ 单一容差，
-  //   无需按侧分传。R5s2 未启用（bucket 空）→ undefined → 检测器回退默认 1（与引擎缺省同口径）；
-  //   默认容差(1)路径输出逐字节不变。
-  const fundTransferDateToleranceDays = r5s2Bucket.length
-    ? (r5s2Bucket[0].config || {}).dateToleranceDays
-    : undefined;
+  //   actuallyModifiedBankRows = 最终态实际改值行；gwRows = safeGwRows（恒可用）；调拨审计优先读取独立
+  //   fundTransferAuditContext.reconRows。该 context 只在此处读取，绝不进入上方 R5 写入引擎；
+  //   旧调用未提供 audit context 时才兼容回退 fundTransferReconContext.reconRows。
+  const hasDedicatedAuditReconRows = !!(
+    fundTransferAuditContext
+    && Object.prototype.hasOwnProperty.call(fundTransferAuditContext, 'reconRows')
+  );
+  const detectorReconRows = hasDedicatedAuditReconRows
+    ? fundTransferAuditContext.reconRows
+    : ((fundTransferReconContext && fundTransferReconContext.reconRows) || []);
+  // v3.1.1：审计时间窗口与写入引擎共享 main 已解析的不可变 policy，不再依赖 R5s2
+  // 是否启用。日期关闭时检测器完全跳过日期；方向仍保持既有宽口径，只读不写。
   const actuallyModifiedBankRows = bankRows.filter((row) => hasActualFieldChanges(modColsByRowId, row));
   const manyToManyReviewRows = detectFundTransferManyToMany(actuallyModifiedBankRows, safeGwRows, detectorReconRows, {
-    dateToleranceDays: fundTransferDateToleranceDays
+    dateMatchEnabled: resolvedFundTransferDatePolicy.enabled,
+    dateToleranceDays: resolvedFundTransferDatePolicy.toleranceDays,
+    fundTransferDatePolicy: resolvedFundTransferDatePolicy
   }).reviewRows;
   await yieldTick('M2M'); // 轮次边界让出（M2M 异常说明检测已完成，进 buildOutputRows 前；上游 R5s4+detector 不再挤成同步块）
 
@@ -531,11 +613,16 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
   //   纯只读聚合（不改任何匹配/派生），口径与 channel-enum-repository.extractChannelRegionCombos 单行逻辑同源。
   const channelRegionHits = buildChannelRegionHits(modifiedRows, allMods);
 
+  const finalWarnings = allWarnings.filter((warning, index) => (
+    index < normalizedInitialWarnings.length
+    || !initialWarningKeys.has(warningIdentity(warning))
+  ));
+
   return {
     modifiedRows,
     unmatchedRows,
     modifications: allMods,
-    errorReport: allWarnings,
+    errorReport: finalWarnings,
     stats: {
       ...(r2.stats || {}),
       // self-review B：用最终分区计数覆盖 r2.stats 的 R2 作用域值（hitRowCount/unmatchedRowCount/warningCount/
@@ -546,7 +633,7 @@ async function runReconciliation({ bankRows, gwRows, c3GwRows, scenarios, deps, 
       // v3.0.7 需求1a：状态框「已处理」分支按 渠道-地区 分组展示命中行数与场景名（空集 → []，renderer 据此回退旧格式）
       channelRegionHits,
       unmatchedRowCount: unmatchedRows.length,
-      warningCount: allWarnings.length,
+      warningCount: finalWarnings.length,
       r1Matched: r1.matchedGwRows.length,
       // v3.0.6 需求3：R3.5 DBS-Charge 改写行数（ReconciliationId + FundType modifications 总数）
       dbsChargeChangedCount,
