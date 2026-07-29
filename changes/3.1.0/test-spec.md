@@ -1,6 +1,6 @@
 # Test Spec — v3.1.0 平盘资金性质校验
 
-> status: release-prepared-pass
+> status: released-pass
 > created: 2026-07-26
 > updated: 2026-07-29
 
@@ -105,4 +105,6 @@
 - `npm run scan:vars`：218 个 JS 文件、2554 个顶层声明；`npm run check:vars -- --include-minor` 确认 `src/` 无未提交改动。
 - `npm audit --omit=dev`：0 critical、7 high、2 moderate，与既有生产依赖基线一致。
 - 首次 Windows 发布工作流发现替代文件单测使用 Unix `/tmp` 期望值；测试已改用平台绝对路径，并要求在 Windows runner 重新通过。
+- 修复后本地定向测试 `18/18`、unit `4011/4011`、integration `2016/2016` 通过；Windows 发布 run `30420343816` 的 release-check、几何校验、打包、应用检查、更新资产校验和发布后复核全部通过。
+- GitHub latest 为稳定版 `v3.1.0`；四项资产状态均为 uploaded，`latest.yml` 契约与 setup 一致，setup/portable 文件头均为 `MZ`。
 - Windows Excel/WPS 人工检查和真实或脱敏资金数据逐笔复核仍为发布后人工验收项。

@@ -155,6 +155,14 @@
 - 生产依赖审计保留既有 9 条告警：0 critical、7 high、2 moderate。
 - 发布准备开始时仓库为公开仓库，`v3.1.0` tag 与 GitHub Release 均不存在。
 - 首次 tag 工作流在 Windows 单测阶段发现 `archive-center-controller` 的替代文件测试硬编码 Unix `/tmp` 路径；生产控制器行为正确，测试改为使用 `path.resolve()` 构造平台绝对路径，防止 Windows 将其规范化为盘符路径后产生伪失败。
+- 修复后本地定向测试 `18/18`、unit `4011/4011`、integration `2016/2016` 通过；修复提交为 `a8e4178`。
+- Windows 发布 run `30420343816` 全部通过，稳定版 [v3.1.0](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.0) 于 2026-07-29 发布为 GitHub latest。
+- 发布资产核验：
+  - setup：`99,863,092` bytes，SHA-256 `844500615b128303ed8b3df671150ebf6fffe14812ae7e6c546333bc2aff2648`。
+  - portable：`99,366,321` bytes，SHA-256 `c88a2458dd567bb0f4ba6a1f0482c82c59293ce2059853e8da8bf2d619edd41c`。
+  - blockmap：`105,338` bytes，SHA-256 `025886bdfef2d44cfec2804029792923d84db7ee76d4efe70b475449acb78095`。
+  - `latest.yml`：`368` bytes，SHA-256 `123f830a0679564684dba7632e78d57b6d7b1b0f9b435d21d637ba6729a5e629`；版本、setup 路径、大小和 SHA-512 契约一致。
+  - setup 与 portable 的前两个字节均为 `4d5a`（`MZ`）。
 
 ## Remaining Unknowns
 

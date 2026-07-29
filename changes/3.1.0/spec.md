@@ -1,6 +1,6 @@
 # Spec — v3.1.0 平盘资金性质校验
 
-> status: release-prepared
+> status: released
 > owner: PM / Dev
 > created: 2026-07-26
 > updated: 2026-07-29
@@ -183,4 +183,6 @@
 - 主页面几何校验 `6/6` 通过；启动性能五次中位数为进程总耗时 `766.383ms`、ready-to-show `175.031ms`。
 - `scan:vars` 已刷新至 218 个 JS 文件、2554 个顶层声明；`check:vars -- --include-minor` 确认 `src/` 无未提交改动。
 - 生产依赖审计保留既有 9 条告警（0 critical、7 high、2 moderate）；未在发布收尾阶段变更依赖。
-- 当前为发布准备状态，`v3.1.0` tag 与 GitHub Release 尚未创建。
+- 首次 Windows 发布 run `30419837868` 在打包前发现跨平台测试路径问题；修复后 tag 指向 `a8e4178`。
+- Windows 发布 run `30420343816` 全部通过，稳定版 [v3.1.0](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.0) 已发布为 GitHub latest。
+- setup、portable、blockmap 和 `latest.yml` 四项资产已上传并核验；`latest.yml` 的版本、路径和大小与 setup 一致，两个 exe 文件头均为 `MZ`。

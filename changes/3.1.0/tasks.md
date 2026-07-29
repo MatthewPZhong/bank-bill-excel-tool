@@ -95,7 +95,7 @@
 - [x] 合并后 `scan:vars`、`check:vars -- --include-minor` 与生产依赖审计
 - [x] 修复首次 Windows 发布门禁发现的替代文件路径跨平台测试
 - [x] 提交并推送发布准备记录
-- [ ] 创建并推送 annotated tag `v3.1.0`
-- [ ] Windows 发布工作流成功
-- [ ] GitHub Release 与 setup、portable、blockmap、`latest.yml` 四项资产核验
-- [ ] 回写最终发布证据并清理已合并开发分支
+- [x] 创建并推送 annotated tag `v3.1.0`
+- [x] Windows 发布工作流成功
+- [x] GitHub Release 与 setup、portable、blockmap、`latest.yml` 四项资产核验
+- [x] 回写最终发布证据并清理已合并开发分支
