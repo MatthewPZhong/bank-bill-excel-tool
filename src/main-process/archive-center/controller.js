@@ -2,11 +2,38 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const {
+  outboxBatchId,
+  parseOutboxBatchId
+} = require('./outbox-store');
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY = 'archive_center_excluded_template_ids';
 const DEFAULT_RETENTION_DAYS = 60;
 const ALLOWED_RETENTION_DAYS = new Set([30, 60, 90, 180, 365]);
+const SHA256_RE = /^[a-f0-9]{64}$/i;
+
+function artifactSupportsReplacementRetry(artifact) {
+  const metadata = artifact && artifact.metadata;
+  const expectedSizeBytes = Number(metadata && metadata.expectedSizeBytes);
+  return Boolean(
+    metadata
+    && SHA256_RE.test(String(metadata.expectedSha256 || '').trim())
+    && Number.isSafeInteger(expectedSizeBytes)
+    && expectedSizeBytes >= 0
+  );
+}
+
+function publicArtifactMetadata(metadata) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
+  const {
+    sourceSnapshot: _sourceSnapshot,
+    expectedSha256: _expectedSha256,
+    expectedSizeBytes: _expectedSizeBytes,
+    ...visible
+  } = metadata;
+  return visible;
+}
 
 function parseRetentionDays(value) {
   if (value === null || value === 'permanent') return null;
@@ -28,11 +55,42 @@ function publicFailure(result, fallbackMessage) {
   };
 }
 
+function publicRetryFailure(result, failure, fallbackMessage) {
+  const response = publicFailure(failure || result, fallbackMessage);
+  const counts = {};
+  for (const key of ['attempted', 'succeeded', 'failed']) {
+    const value = Number(result && result[key]);
+    if (Number.isSafeInteger(value) && value >= 0) counts[key] = value;
+  }
+  if (counts.succeeded > 0 && counts.failed > 0) {
+    response.message += `；本次已成功 ${counts.succeeded} 个，仍失败 ${counts.failed} 个`;
+  }
+  return { ...response, ...counts };
+}
+
 function operationFailureMessage(failures) {
   const count = Array.isArray(failures) ? failures.length : 0;
   return count > 0
     ? `${count} 个文件存档失败，可在存档中心重试`
     : '存档文件失败，可在存档中心重试';
+}
+
+function filesHaveDurableArtifacts(files, created) {
+  const specs = Array.isArray(files) ? files : [];
+  if (specs.length === 0) return true;
+  const results = created && Array.isArray(created.results) ? created.results : [];
+  return results.length === specs.length && results.every((result) => {
+    const artifactId = Number(result && result.artifact && result.artifact.id);
+    return Number.isSafeInteger(artifactId) && artifactId > 0;
+  });
+}
+
+function outboxFilesHaveDurableArtifacts(record, created) {
+  const files = record && record.payload && Array.isArray(record.payload.files)
+    ? record.payload.files
+    : [];
+  if (files.length === 0) return true;
+  return filesHaveDurableArtifacts(files, created);
 }
 
 class ArchiveCenterController {
@@ -49,8 +107,13 @@ class ArchiveCenterController {
     }
     this.database = options.database;
     this.service = options.service;
+    this.showOpenDialog = options.showOpenDialog || null;
     this.showSaveDialog = options.showSaveDialog || null;
     this.logWarning = options.logWarning || null;
+    this.outboxStore = options.outboxStore || null;
+    this.onOutboxFlushed = typeof options.onOutboxFlushed === 'function'
+      ? options.onOutboxFlushed
+      : null;
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
     this.sink = Object.freeze({
@@ -84,11 +147,66 @@ class ArchiveCenterController {
     if (initialized.ok === false) {
       this._warn('存档目录暂不可用，业务成功时仍会登记可重试批次', initialized.message);
     }
+    await this.flushOutbox();
     const cleanup = await this.service.cleanupExpired();
     if (cleanup && cleanup.ok === false) {
       this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
     }
     return initialized;
+  }
+
+  listUnresolvedSourcePaths() {
+    const servicePaths = this.service.listUnresolvedSourcePaths();
+    const outboxPaths = this.outboxStore ? this.outboxStore.listSourcePaths() : [];
+    return [...new Set([...servicePaths, ...outboxPaths])];
+  }
+
+  async flushOutbox() {
+    if (!this.outboxStore) return { flushed: 0, remaining: 0 };
+    const records = this.outboxStore.list();
+    let flushed = 0;
+    for (const record of records) {
+      let created;
+      try {
+        created = await this.service.createBatch(record.payload);
+      } catch (error) {
+        this._warn('存档 outbox 重放失败', error && error.message ? error.message : String(error));
+        continue;
+      }
+      if (!created || !created.batch) continue;
+      if (!outboxFilesHaveDurableArtifacts(record, created)) {
+        this._warn(
+          '存档 outbox 已建批次但附件登记不完整',
+          `outbox=${record.id}，已保留重放任务和源文件`
+        );
+        continue;
+      }
+      this.outboxStore.remove(record.id);
+      flushed += 1;
+      if (this.onOutboxFlushed) {
+        let releasablePaths;
+        try {
+          const unresolvedPaths = new Set(
+            this.listUnresolvedSourcePaths()
+              .filter(Boolean)
+              .map((value) => path.resolve(String(value)))
+          );
+          releasablePaths = record.payload.files
+            .map((file) => file.filePath)
+            .filter(Boolean)
+            .map((value) => path.resolve(String(value)))
+            .filter((filePath) => !unresolvedPaths.has(filePath));
+        } catch (_error) {
+          releasablePaths = [];
+        }
+        try {
+          if (releasablePaths.length > 0) await this.onOutboxFlushed(releasablePaths);
+        } catch (_error) {
+          // outbox 已转成正式批次；已解决源暂存清理失败留待后续回收。
+        }
+      }
+    }
+    return { flushed, remaining: this.outboxStore.list().length };
   }
 
   _trackedFilePayload(file, sourceOperation) {
@@ -100,6 +218,9 @@ class ArchiveCenterController {
       sourceOperation: file.sourceOperation || sourceOperation || '',
       originalName: file.originalName || path.basename(file.filePath),
       sourceSnapshot: file.sourceSnapshot,
+      expectedSha256: file.expectedSha256,
+      expectedSizeBytes: file.expectedSizeBytes ?? file.sizeBytes,
+      sizeBytes: file.sizeBytes,
       metadata: file.metadata || {}
     };
   }
@@ -133,41 +254,182 @@ class ArchiveCenterController {
     };
   }
 
+  _batchPayload(payload, files) {
+    const sourceOperation = payload.sourceOperation || 'archive';
+    const metadata = {
+      ...(payload.metadata || {}),
+      sourceOperation
+    };
+    const positionOperationToken = String(metadata.positionOperationToken || '').trim();
+    return {
+      moduleId: payload.moduleId,
+      moduleCode: payload.moduleCode,
+      moduleName: payload.moduleName,
+      operationKey: payload.operationKey || (
+        positionOperationToken
+          ? `position:${positionOperationToken}:${sourceOperation}`
+          : `${sourceOperation}:${crypto.randomUUID()}`
+      ),
+      businessStatus: 'success',
+      retentionDays: this.getRetentionDays(),
+      metadata,
+      sourceOperation,
+      files
+    };
+  }
+
+  _persistOutboxPayload(batchPayload) {
+    if (!this.outboxStore) {
+      throw new Error('存档持久 outbox 尚未初始化');
+    }
+    const existing = this.outboxStore.findByOperationKey(batchPayload.operationKey);
+    return existing
+      ? this.outboxStore.append(existing.id, batchPayload.files)
+      : this.outboxStore.enqueue(batchPayload);
+  }
+
+  persistOperationIntent(payload = {}) {
+    const files = (Array.isArray(payload.files) ? payload.files : []).map(
+      (file) => this._trackedFilePayload(file, payload.sourceOperation)
+    );
+    if (files.length === 0) throw new Error('存档恢复意图缺少文件');
+    const batchPayload = this._batchPayload(payload, files);
+    const record = this._persistOutboxPayload(batchPayload);
+    return {
+      batchId: outboxBatchId(record.id),
+      operationKey: batchPayload.operationKey,
+      persisted: true
+    };
+  }
+
   async createTrackedBatch(payload = {}) {
     const files = (Array.isArray(payload.files) ? payload.files : []).map(
       (file) => this._trackedFilePayload(file, payload.sourceOperation)
     );
-    const created = await this.service.createBatch({
-      moduleId: payload.moduleId,
-      moduleCode: payload.moduleCode,
-      moduleName: payload.moduleName,
-      operationKey: `${payload.sourceOperation || 'archive'}:${crypto.randomUUID()}`,
-      businessStatus: 'success',
-      retentionDays: this.getRetentionDays(),
-      metadata: {
-        ...(payload.metadata || {}),
-        sourceOperation: payload.sourceOperation || ''
-      },
-      sourceOperation: payload.sourceOperation,
-      files
-    });
+    const batchPayload = this._batchPayload(payload, files);
+    let created;
+    try {
+      created = await this.service.createBatch(batchPayload);
+    } catch (error) {
+      created = {
+        ok: false,
+        message: error && error.message ? error.message : String(error)
+      };
+    }
     if (!created || !created.batch) {
+      if (this.outboxStore) {
+        try {
+          const record = this._persistOutboxPayload(batchPayload);
+          return {
+            batchId: outboxBatchId(record.id),
+            archiveFailed: true,
+            persistentRetryAvailable: true,
+            failureRecorded: true,
+            warning: {
+              message: created && created.message
+                ? `${created.message}；已登记持久重试任务`
+                : '无法建立存档批次，已登记持久重试任务'
+            }
+          };
+        } catch (outboxError) {
+          return {
+            archiveFailed: true,
+            persistentRetryAvailable: false,
+            failureRecorded: false,
+            warning: {
+              message:
+                `${created && created.message ? created.message : '无法建立存档批次'}；` +
+                `持久重试任务登记失败：${
+                  outboxError && outboxError.message ? outboxError.message : String(outboxError)
+                }`
+            }
+          };
+        }
+      }
       return {
         archiveFailed: true,
+        persistentRetryAvailable: false,
+        failureRecorded: false,
         warning: { message: created && created.message ? created.message : '无法建立存档批次' }
       };
     }
     const batch = this._rememberBatch(created.batch);
     const attached = this._summarizeTrackedFiles(created, files);
+    if (!filesHaveDurableArtifacts(files, created)) {
+      const baseMessage = attached.warning && attached.warning.message
+        ? attached.warning.message
+        : '存档批次附件登记不完整';
+      try {
+        const record = this._persistOutboxPayload(batchPayload);
+        return {
+          ...attached,
+          batchId: outboxBatchId(record.id),
+          batchNumber: batch.batchNumber,
+          created: created.created,
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；已登记持久重试任务`
+          }
+        };
+      } catch (outboxError) {
+        return {
+          ...attached,
+          batchId: batch.id,
+          batchNumber: batch.batchNumber,
+          created: created.created,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message:
+              `${baseMessage}；持久重试任务登记失败：${
+                outboxError && outboxError.message ? outboxError.message : String(outboxError)
+              }`
+          }
+        };
+      }
+    }
     return {
       batchId: batch.id,
       batchNumber: batch.batchNumber,
       created: created.created,
+      persistentRetryAvailable: true,
+      failureRecorded: true,
       ...attached
     };
   }
 
   async appendTrackedFiles(payload = {}) {
+    const outboxId = parseOutboxBatchId(payload.batchId);
+    if (outboxId) {
+      const files = (Array.isArray(payload.files) ? payload.files : []).map(
+        (file) => this._trackedFilePayload(file, payload.sourceOperation)
+      );
+      try {
+        this.outboxStore.append(outboxId, files);
+        return {
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: { message: '存档中心暂不可用，追加文件已登记持久重试任务' }
+        };
+      } catch (error) {
+        return {
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            message: `存档持久重试任务追加失败：${
+              error && error.message ? error.message : String(error)
+            }`
+          }
+        };
+      }
+    }
     const resolvedBatchId = await this.resolveBatchId(payload.batchId);
     if (!resolvedBatchId) {
       return {
@@ -183,7 +445,69 @@ class ArchiveCenterController {
       sourceOperation: payload.sourceOperation,
       files
     });
-    return this._summarizeTrackedFiles(appended, files);
+    const attached = this._summarizeTrackedFiles(appended, files);
+    if (!filesHaveDurableArtifacts(files, appended)) {
+      const batch = (appended && appended.batch)
+        || this.service.repository.getBatch(resolvedBatchId);
+      const baseMessage = attached.warning && attached.warning.message
+        ? attached.warning.message
+        : '存档批次附件登记不完整';
+      if (!batch) {
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；无法读取正式批次，未能登记持久重试任务`
+          }
+        };
+      }
+      const retryPayload = this._batchPayload({
+        moduleId: batch.moduleId,
+        moduleCode: batch.moduleCode,
+        moduleName: batch.moduleName,
+        operationKey: batch.operationKey,
+        sourceOperation: payload.sourceOperation,
+        metadata: {
+          ...(batch.metadata || {}),
+          ...(payload.metadata || {})
+        }
+      }, files);
+      try {
+        this._persistOutboxPayload(retryPayload);
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: true,
+          failureRecorded: true,
+          warning: {
+            ...(attached.warning || {}),
+            message: `${baseMessage}；已登记持久重试任务`
+          }
+        };
+      } catch (outboxError) {
+        return {
+          ...attached,
+          archiveFailed: true,
+          persistentRetryAvailable: false,
+          failureRecorded: false,
+          warning: {
+            ...(attached.warning || {}),
+            message:
+              `${baseMessage}；持久重试任务登记失败：${
+                outboxError && outboxError.message ? outboxError.message : String(outboxError)
+              }`
+          }
+        };
+      }
+    }
+    return {
+      persistentRetryAvailable: true,
+      failureRecorded: true,
+      ...attached
+    };
   }
 
   async resolveBatchId(value) {
@@ -215,26 +539,81 @@ class ArchiveCenterController {
 
   _mapBatch(batch) {
     this._rememberBatch(batch);
+    const capability = this._retryCapability(batch);
+    const { artifacts: _artifacts, ...visibleBatch } = batch;
     return {
-      ...batch,
+      ...visibleBatch,
       batchId: batch.batchNumber,
       internalId: batch.id,
-      canRetry: Number(batch.failedArtifactCount) > 0
-        && batch.lastErrorCode !== 'ARCHIVE_SOURCE_CHANGED',
-      requiresBusinessRerun: batch.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED',
+      ...capability,
       warningMessage: batch.lastErrorMessage || ''
     };
   }
 
   _mapArtifact(artifact) {
+    const rawArtifact = this.service.repository.getArtifact(Number(artifact && artifact.id));
+    const visibleMetadata = publicArtifactMetadata(artifact && artifact.metadata);
+    const { sourcePath: _sourcePath, ...visibleArtifact } = artifact || {};
     return {
-      ...artifact,
+      ...visibleArtifact,
+      metadata: visibleMetadata,
       fileRefId: artifact.id,
       fileName: artifact.originalName,
       direction: artifact.direction === 'output' ? '输出' : '输入',
       sizeBytes: artifact.blob ? artifact.blob.sizeBytes : 0,
       archiveStatus: artifact.status,
-      errorMessage: artifact.lastErrorMessage || ''
+      errorMessage: artifact.lastErrorMessage || '',
+      canSelectReplacementSource: artifact.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED'
+        && artifactSupportsReplacementRetry(rawArtifact)
+    };
+  }
+
+  _failedArtifacts(batchId) {
+    const repository = this.service && this.service.repository;
+    if (!repository || typeof repository.listFailedArtifacts !== 'function') return [];
+    return repository.listFailedArtifacts(Number(batchId));
+  }
+
+  _retryCapability(batch) {
+    const failedArtifacts = this._failedArtifacts(batch && batch.id);
+    const failedCount = Math.max(
+      Number(batch && batch.failedArtifactCount) || 0,
+      failedArtifacts.length
+    );
+    if (failedCount === 0) {
+      return {
+        canRetry: false,
+        retryMode: 'none',
+        requiresBusinessRerun: false
+      };
+    }
+
+    const sourceChangedArtifacts = failedArtifacts.filter(
+      (artifact) => artifact.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED'
+    );
+    const fallbackSourceChanged = sourceChangedArtifacts.length === 0
+      && batch && batch.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED';
+    const unsupportedSourceChanged = sourceChangedArtifacts.some(
+      (artifact) => !artifactSupportsReplacementRetry(artifact)
+    );
+    if (fallbackSourceChanged || unsupportedSourceChanged) {
+      return {
+        canRetry: false,
+        retryMode: 'rerun-business',
+        requiresBusinessRerun: true
+      };
+    }
+    if (sourceChangedArtifacts.length > 0) {
+      return {
+        canRetry: true,
+        retryMode: 'select-source',
+        requiresBusinessRerun: false
+      };
+    }
+    return {
+      canRetry: true,
+      retryMode: 'same-source',
+      requiresBusinessRerun: false
     };
   }
 
@@ -302,12 +681,111 @@ class ArchiveCenterController {
     return { status: 'success', ok: true, message: '存档批次已永久删除' };
   }
 
-  async retryBatch(batchNumberOrId) {
+  async selectRetrySources(batchNumberOrId) {
     const batchId = await this.resolveBatchId(batchNumberOrId);
     if (!batchId) return publicFailure(null, '存档批次不存在');
-    const result = await this.service.retryBatch(batchId);
-    if (!result || result.ok === false) return publicFailure(result, '重试存档失败');
-    return { status: 'success', message: '失败文件已重新存档', batch: this._mapBatch(result.batch) };
+    const batch = this.service.repository.getBatch(batchId);
+    const capability = this._retryCapability(batch);
+    if (capability.retryMode !== 'select-source') {
+      return publicFailure(null, capability.requiresBusinessRerun
+        ? '该批次缺少业务内容摘要，需要重新运行业务'
+        : '该批次不需要选择原文件');
+    }
+    if (typeof this.showOpenDialog !== 'function') {
+      return publicFailure(null, '选择原文件服务暂不可用');
+    }
+
+    const artifacts = this._failedArtifacts(batchId).filter((artifact) => (
+      artifact.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED'
+      && artifactSupportsReplacementRetry(artifact)
+    ));
+    const sourcePaths = {};
+    for (let index = 0; index < artifacts.length; index += 1) {
+      const artifact = artifacts[index];
+      const extension = path.extname(artifact.originalName).replace(/^\./, '').toLowerCase();
+      const selected = await this.showOpenDialog({
+        title: `选择“${artifact.originalName}”原文件`,
+        buttonLabel: '选择原文件',
+        properties: ['openFile'],
+        filters: extension
+          ? [{ name: extension.toUpperCase(), extensions: [extension] }]
+          : undefined
+      });
+      if (!selected || selected.canceled || !selected.filePaths || !selected.filePaths[0]) {
+        return { status: 'cancelled' };
+      }
+      sourcePaths[artifact.id] = path.resolve(String(selected.filePaths[0]));
+    }
+    return { status: 'success', sourcePaths, selectedCount: artifacts.length };
+  }
+
+  _validatedRetrySourcePaths(batch, sourcePaths) {
+    const capability = this._retryCapability(batch);
+    if (!capability.canRetry) {
+      return {
+        error: capability.requiresBusinessRerun
+          ? '该批次缺少业务内容摘要，需要重新运行业务'
+          : '该批次没有可重试文件'
+      };
+    }
+    const supplied = sourcePaths == null ? {} : sourcePaths;
+    if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied)) {
+      return { error: '重试文件参数无效' };
+    }
+    const replacementArtifacts = this._failedArtifacts(batch.id).filter((artifact) => (
+      artifact.lastErrorCode === 'ARCHIVE_SOURCE_CHANGED'
+      && artifactSupportsReplacementRetry(artifact)
+    ));
+    const allowedIds = new Set(replacementArtifacts.map((artifact) => String(artifact.id)));
+    const normalized = {};
+    for (const [artifactId, filePath] of Object.entries(supplied)) {
+      if (!allowedIds.has(String(artifactId))
+          || typeof filePath !== 'string'
+          || filePath.trim() === '') {
+        return { error: '重试文件参数无效' };
+      }
+      normalized[artifactId] = path.resolve(filePath);
+    }
+    if (capability.retryMode === 'same-source' && Object.keys(normalized).length > 0) {
+      return { error: '普通存档重试不接受替代文件' };
+    }
+    if (capability.retryMode === 'select-source'
+        && replacementArtifacts.some((artifact) => !normalized[artifact.id])) {
+      return { error: '请先为全部失败文件选择原文件' };
+    }
+    return { sourcePaths: normalized };
+  }
+
+  async retryBatch(batchNumberOrId, sourcePaths = null) {
+    const batchId = await this.resolveBatchId(batchNumberOrId);
+    if (!batchId) return publicFailure(null, '存档批次不存在');
+    const batch = this.service.repository.getBatch(batchId);
+    const validated = this._validatedRetrySourcePaths(batch, sourcePaths);
+    if (validated.error) return publicFailure(null, validated.error);
+    const result = await this.service.retryBatch(batchId, {
+      sourcePaths: validated.sourcePaths
+    });
+    if (!result || result.ok === false) {
+      const failed = result && Array.isArray(result.results)
+        ? result.results.find((item) => item && item.ok === false)
+        : null;
+      if (failed && failed.code === 'ARCHIVE_SOURCE_CHANGED'
+          && Object.keys(validated.sourcePaths).length > 0) {
+        return publicRetryFailure(result, {
+          code: failed.code,
+          message: '所选文件与业务处理时的原始内容不一致，请重新选择正确文件'
+        }, '重试存档失败');
+      }
+      return publicRetryFailure(result, failed || result, '重试存档失败');
+    }
+    return {
+      status: 'success',
+      message: '失败文件已重新存档',
+      batch: this._mapBatch(result.batch),
+      attempted: Number(result.attempted) || 0,
+      succeeded: Number(result.succeeded) || 0,
+      failed: Number(result.failed) || 0
+    };
   }
 
   async openFile(fileRefId) {

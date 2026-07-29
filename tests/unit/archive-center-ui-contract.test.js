@@ -16,6 +16,9 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
   const main = read('src/main.js');
+  const positionOperationLifecycle = read(
+    'src/main-process/position-reconciliation/operation-lifecycle.js'
+  );
 
   test('主进程源码不含真实 NUL 字节，保持 Git 文本差异可审查', () => {
     const mainBuffer = fs.readFileSync(path.join(ROOT, 'src', 'main.js'));
@@ -28,6 +31,65 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const quitFlow = main.slice(start, end);
     assert.match(quitFlow, /await archiveOperationTail/);
     assert.doesNotMatch(quitFlow, /Promise\.race\(\[\s*archiveOperationTail/);
+  });
+
+  test('业务 IPC 返回成功前等待本次存档登记与处理，不只写入内存尾队列', () => {
+    const start = main.indexOf('async function runArchiveAwareOperation');
+    const end = main.indexOf('function runRegisteredBusinessOperation', start);
+    const operationFlow = main.slice(start, end);
+    assert.match(operationFlow, /return settlePositionArchiveResult\(\{/);
+    const settlementStart = positionOperationLifecycle.indexOf(
+      'async function settlePositionArchiveResult'
+    );
+    const settlementEnd = positionOperationLifecycle.indexOf(
+      'async function runPositionOperationLifecycle',
+      settlementStart
+    );
+    const settlementFlow = positionOperationLifecycle.slice(settlementStart, settlementEnd);
+    assert.match(settlementFlow, /const archiveResult = await archiveTask/);
+    assert.ok(
+      settlementFlow.indexOf('await archiveTask') < settlementFlow.lastIndexOf('return result'),
+      '存档任务应在返回业务结果前完成'
+    );
+  });
+
+  test('存档写操作纳入业务退出闸门，平盘失败源由存档状态驱动释放', () => {
+    assert.match(
+      main,
+      /function archiveCenterMutationIpcHandle[\s\S]*?runRegisteredBusinessOperation\(meta, handler\)/
+    );
+    for (const channel of [
+      'archive-center:save-as',
+      'archive-center:set-locked',
+      'archive-center:delete-batch',
+      'archive-center:select-retry-sources',
+      'archive-center:retry-batch',
+      'archive-center:set-retention-days'
+    ]) {
+      assert.ok(
+        main.includes(`archiveCenterMutationIpcHandle('${channel}'`),
+        `${channel} 应接入退出闸门`
+      );
+    }
+    assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
+    assert.match(main, /protectedStagingPaths:[\s\S]*?listUnresolvedSourcePaths\(\)/);
+    assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*unresolvedSourcePaths\)/);
+  });
+
+  test('异常恢复完成后只清理未提交输入，并在清除 pending 后执行受保护目录清理', () => {
+    const serviceStart = main.indexOf('function getPositionReconciliationService');
+    const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
+    const recoveryFlow = main.slice(serviceStart, serviceEnd);
+    assert.match(recoveryFlow, /const recovery = recoverPositionArchiveIntent\(/);
+    assert.match(
+      recoveryFlow,
+      /cleanupPositionArchiveSourcePaths\(recovery\.uncommittedInputPaths\)/
+    );
+    assert.ok(
+      recoveryFlow.indexOf("database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '')")
+        < recoveryFlow.indexOf('cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths)'),
+      '未提交 staging 只能在 checkpoint 同步和 pending 清除后清理'
+    );
   });
 
   test('设置弹窗为双栏导航且默认停留在自动更新', () => {
@@ -82,6 +144,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       ['saveAs', 'archive-center:save-as'],
       ['setLocked', 'archive-center:set-locked'],
       ['deleteBatch', 'archive-center:delete-batch'],
+      ['selectRetrySources', 'archive-center:select-retry-sources'],
       ['retryBatch', 'archive-center:retry-batch'],
       ['getSettings', 'archive-center:get-settings'],
       ['setRetentionDays', 'archive-center:set-retention-days'],
@@ -135,7 +198,19 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /api\.saveAs\(fileRefId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.setLocked\(batchId, nextLocked\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.deleteBatch\(batchId\)/);
-    assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.selectRetrySources\(batchId\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId, sourcePaths\)/);
+    assert.match(renderer, /batch\.requiresBusinessRerun === true/);
+    assert.match(renderer, /需要重新运行业务/);
+    assert.match(preload, /retryBatch:\s*\(batchId, sourcePaths\)/);
+    assert.match(
+      main,
+      /archive-center:retry-batch'[\s\S]*?\(_event, batchId, sourcePaths\)[\s\S]*?retryBatch', batchId, sourcePaths/
+    );
+    assert.match(
+      main,
+      /showOpenDialog:\s*\(options\)\s*=>\s*showImportOpenDialog\('archive-center-retry-source', options\)/
+    );
     assert.match(renderer, /confirmOverlay = createConfirmDialog\(\{/);
     assert.match(renderer, /batch\?\.internalId \?\? batch\?\.batchId/);
     assert.match(renderer, /data-batch-number="\$\{escapeHtml\(batchNumber\)\}"/);
@@ -239,12 +314,23 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /if \(role === 'output'\) return '首次结果'/);
     assert.match(renderer, /const role = archiveCenterRoleText\(file\.role \?\? file\.fileRole\)/);
     assert.match(renderer, /const canRetry = typeof batch\.canRetry === 'boolean'/);
+    assert.match(renderer, /batch\.retryMode === 'select-source'/);
+    assert.match(renderer, /选择原文件并重试/);
 
     const lockStart = renderer.indexOf('async function toggleArchiveBatchLock');
     const retryStart = renderer.indexOf('async function retryArchiveBatch', lockStart);
     const deleteStart = renderer.indexOf('function confirmArchiveBatchDelete', retryStart);
+    const retrySource = renderer.slice(retryStart, deleteStart);
     assert.match(renderer.slice(lockStart, retryStart), /finally \{[\s\S]*?button\.isConnected/);
-    assert.match(renderer.slice(retryStart, deleteStart), /finally \{[\s\S]*?button\.isConnected/);
+    assert.match(retrySource, /let retryAttempted = false/);
+    assert.match(
+      retrySource,
+      /retryAttempted = true;[\s\S]*?retryBatch\(batchId, sourcePaths\)/
+    );
+    assert.match(
+      retrySource,
+      /finally \{[\s\S]*?if \(retryAttempted\)[\s\S]*?loadArchiveBatches\(\{ clearFeedback: false \}\)[\s\S]*?loadArchiveStats\(\)[\s\S]*?showArchiveFeedback\([\s\S]*?button\.isConnected/
+    );
   });
 
   test('图标按钮具备可访问名称，尺寸覆盖两个目标窗口', () => {

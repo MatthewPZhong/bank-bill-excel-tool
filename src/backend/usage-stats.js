@@ -38,6 +38,13 @@ const FUNCTION_REGISTRY = Object.freeze({
   '业务OP数据核对': ['导入文件', '开始运行', '导出差异'],
   // v2.1.6：收单单据币种校验（与 main.js trackedIpcHandle 第 3 参严格一致；listMonths / sessionStatus / clearMonth 走 plain ipcMain.handle 不计）
   '收单单据币种校验': ['导入流水表', '导入单据表', '开始运行', '导出差异'],
+  // v3.1.0：平盘资金性质校验的持久化银行/链接数据、运行、结果回导和确认。
+  '平盘对账数据处理': [
+    '导入银行对账单', '导入链接原始表', '账户映射管理',
+    '删除银行数据', '删除链接原始表',
+    '导出银行数据', '导出链接对账表', '导出链接原始表',
+    '开始运行', '导出文件', '导入修改结果', '确认结果'
+  ],
   // v2.1.16 PR#61 F1：链接表管理（main.js trackedIpcHandle('linked-table:import', '链接表管理', '导入', ...)
   //   此前未注册 → incrementFunction 静默丢弃 → 链接表导入成功不计入 .usage-stats.txt。
   '链接表管理': ['导入'],

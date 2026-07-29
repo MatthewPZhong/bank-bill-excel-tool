@@ -82,7 +82,12 @@ function publicArtifact(artifact) {
   if (!artifact) return null;
   const { sourcePath: _sourcePath, blob, ...visible } = artifact;
   if (visible.metadata && typeof visible.metadata === 'object') {
-    const { sourceSnapshot: _sourceSnapshot, ...metadata } = visible.metadata;
+    const {
+      sourceSnapshot: _sourceSnapshot,
+      expectedSha256: _expectedSha256,
+      expectedSizeBytes: _expectedSizeBytes,
+      ...metadata
+    } = visible.metadata;
     visible.metadata = metadata;
   }
   if (!blob) return { ...visible, blob: null };
@@ -156,6 +161,9 @@ class ArchiveService {
     if (options.opener !== undefined && typeof options.opener !== 'function') {
       throw new TypeError('ArchiveService opener 必须是函数');
     }
+    if (options.onSourceReleased !== undefined && typeof options.onSourceReleased !== 'function') {
+      throw new TypeError('ArchiveService onSourceReleased 必须是函数');
+    }
     if (options.repository === undefined && !database) {
       throw new TypeError('ArchiveService 需要调用方注入 DatabaseSync 或 repository');
     }
@@ -176,11 +184,44 @@ class ArchiveService {
     this.now = options.now || (() => new Date());
     this.fs = options.fsImpl || fs;
     this.opener = options.opener || null;
+    this.onSourceReleased = options.onSourceReleased || null;
     this.defaultRetentionDays = defaultRetentionDays;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
     this.repository = options.repository || createArchiveRepository(database, { now: this.now });
     this.initialized = false;
     this.initialization = null;
+  }
+
+  async _releaseSourcePaths(sourcePaths) {
+    if (!this.onSourceReleased) return;
+    const paths = [...new Set(
+      (Array.isArray(sourcePaths) ? sourcePaths : [])
+        .filter(Boolean)
+        .map((value) => path.resolve(String(value)))
+    )];
+    if (paths.length === 0) return;
+    let unresolvedPaths;
+    try {
+      unresolvedPaths = new Set(
+        this.listUnresolvedSourcePaths()
+          .filter(Boolean)
+          .map((value) => path.resolve(String(value)))
+      );
+    } catch (_error) {
+      // 无法证明源文件已无未完成引用时，保守保留以供后续重试。
+      return;
+    }
+    const releasablePaths = paths.filter((sourcePath) => !unresolvedPaths.has(sourcePath));
+    if (releasablePaths.length === 0) return;
+    try {
+      await this.onSourceReleased(releasablePaths);
+    } catch (_error) {
+      // 业务源暂存清理失败不得把已完成的存档回滚为失败。
+    }
+  }
+
+  listUnresolvedSourcePaths() {
+    return this.repository.listUnresolvedArtifactSourcePaths();
   }
 
   _resolveManagedRelative(relativePath) {
@@ -393,9 +434,32 @@ class ArchiveService {
     return stat;
   }
 
-  async _stageSourceFile(filePath, originalName, expectedSnapshot = null) {
+  async _stageSourceFile(
+    filePath,
+    originalName,
+    expectedSnapshot = null,
+    expectedSha256 = '',
+    expectedSizeBytes = null
+  ) {
     const before = await this._statRegularFile(filePath, originalName);
-    if (expectedSnapshot && !sourceSnapshotMatchesStat(expectedSnapshot, before)) {
+    const normalizedExpectedSha = String(expectedSha256 || '').toLowerCase();
+    const hasExpectedSha = SHA256_RE.test(normalizedExpectedSha);
+    const normalizedExpectedSize = Number(expectedSizeBytes);
+    const hasExpectedSize = expectedSizeBytes !== null
+      && expectedSizeBytes !== undefined
+      && expectedSizeBytes !== ''
+      && Number.isSafeInteger(normalizedExpectedSize)
+      && normalizedExpectedSize >= 0;
+    if (hasExpectedSha && hasExpectedSize && Number(before.size) !== normalizedExpectedSize) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_SOURCE_CHANGED',
+        `文件“${safeName(originalName)}”大小与业务解析时版本不一致，未写入存档`,
+        { retryable: true }
+      );
+    }
+    if (!hasExpectedSha
+        && expectedSnapshot
+        && !sourceSnapshotMatchesStat(expectedSnapshot, before)) {
       throw new ArchiveOperationError(
         'ARCHIVE_SOURCE_CHANGED',
         `文件“${safeName(originalName)}”在业务完成后发生变化，未写入存档，请恢复原文件后重试`,
@@ -430,9 +494,17 @@ class ArchiveService {
           { retryable: true }
         );
       }
+      const sha256 = hash.digest('hex');
+      if (hasExpectedSha && sha256 !== normalizedExpectedSha) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_SOURCE_CHANGED',
+          `文件“${safeName(originalName)}”内容与业务解析时版本不一致，未写入存档`,
+          { retryable: true }
+        );
+      }
       return {
         stagedPath,
-        sha256: hash.digest('hex'),
+        sha256,
         sizeBytes
       };
     } catch (error) {
@@ -509,13 +581,20 @@ class ArchiveService {
 
   async _archiveArtifactUnlocked(artifact, sourcePath) {
     const originalName = artifact.originalName;
+    const previouslyRegisteredSourcePath = artifact.sourcePath;
     let staged = null;
     try {
       const started = this.repository.startArtifactAttempt(artifact.id, { sourcePath });
+      const archivedSourcePath = sourcePath || started.sourcePath;
       staged = await this._stageSourceFile(
-        sourcePath || started.sourcePath,
+        archivedSourcePath,
         originalName,
-        artifact.metadata && artifact.metadata.sourceSnapshot
+        artifact.metadata && artifact.metadata.sourceSnapshot,
+        artifact.metadata && artifact.metadata.expectedSha256,
+        artifact.metadata && (
+          artifact.metadata.expectedSizeBytes
+          ?? artifact.metadata.sourceSnapshot?.sizeBytes
+        )
       );
       const published = await this._publishStagedBlob(staged);
       staged = null;
@@ -524,6 +603,7 @@ class ArchiveService {
         sizeBytes: Number((await this.fs.promises.stat(published.targetPath)).size),
         relativePath: published.relativePath
       });
+      await this._releaseSourcePaths([previouslyRegisteredSourcePath, archivedSourcePath]);
       return {
         ok: true,
         status: 'ready',
@@ -595,6 +675,29 @@ class ArchiveService {
         : {};
       const sourceSnapshot = normalizeSourceSnapshot(payload.sourceSnapshot);
       if (sourceSnapshot) metadata.sourceSnapshot = sourceSnapshot;
+      const rawExpectedSha256 = payload.expectedSha256 == null
+        ? ''
+        : String(payload.expectedSha256).trim().toLowerCase();
+      if (rawExpectedSha256 && !SHA256_RE.test(rawExpectedSha256)) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_EXPECTED_SHA_INVALID',
+          `文件“${originalName}”缺少合法的业务解析摘要`
+        );
+      }
+      if (rawExpectedSha256) metadata.expectedSha256 = rawExpectedSha256;
+      const rawExpectedSizeBytes = payload.expectedSizeBytes
+        ?? payload.sizeBytes
+        ?? (rawExpectedSha256 && sourceSnapshot ? sourceSnapshot.sizeBytes : undefined);
+      if (rawExpectedSizeBytes !== undefined && rawExpectedSizeBytes !== null) {
+        const expectedSizeBytes = Number(rawExpectedSizeBytes);
+        if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+          throw new ArchiveOperationError(
+            'ARCHIVE_EXPECTED_SIZE_INVALID',
+            `文件“${originalName}”缺少合法的业务解析大小`
+          );
+        }
+        metadata.expectedSizeBytes = expectedSizeBytes;
+      }
       artifact = this.repository.addArtifact(batch.id, {
         artifactKey,
         direction: payload.direction || 'input',
@@ -822,6 +925,9 @@ class ArchiveService {
   }
 
   async _deleteBatchUnlocked(batchId, options = {}) {
+    const sourcePaths = this.repository.listArtifacts(batchId)
+      .map((artifact) => artifact.sourcePath)
+      .filter(Boolean);
     const deleted = this.repository.deleteBatch(batchId, {
       allowLocked: options.force === true
     });
@@ -842,6 +948,7 @@ class ArchiveService {
         batch: deleted.batch
       };
     }
+    await this._releaseSourcePaths(sourcePaths);
     const physical = await this._removeReleasedBlobs(deleted.releasedBlobs);
     return {
       ok: physical.failures.length === 0,

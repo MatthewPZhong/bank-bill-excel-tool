@@ -13,7 +13,8 @@ const {
   createArchiveService
 } = require('../../../src/main-process/archive-center/archive-service');
 const {
-  sourceSnapshotFromStat
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
 } = require('../../../src/main-process/archive-center/source-snapshot');
 const {
   createArchiveRepository
@@ -275,6 +276,125 @@ test('存档失败以明确结果返回且不泄露绝对路径，修复源文�
   }
 });
 
+test('源文件仅在存档成功或批次删除后释放，失败重试期间保持可用', async () => {
+  const releasedPaths = [];
+  const fixture = createFixture({
+    onSourceReleased: (paths) => releasedPaths.push(...paths)
+  });
+  try {
+    const retryPath = path.join(fixture.sourceDir, 'position-retry.xlsx');
+    const retryBatch = await fixture.service.createBatch(batchPayload('position-retry-source'));
+    const failed = await fixture.service.attachFile(retryBatch.batch.id, {
+      filePath: retryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(failed.ok, false);
+    assert.deepEqual(releasedPaths, []);
+
+    fs.writeFileSync(retryPath, 'retry-source');
+    const retried = await fixture.service.retryBatch(retryBatch.batch.id);
+    assert.equal(retried.ok, true);
+    assert.deepEqual(releasedPaths, [retryPath]);
+
+    const deletePath = path.join(fixture.sourceDir, 'position-delete.xlsx');
+    const deleteBatch = await fixture.service.createBatch(batchPayload('position-delete-source'));
+    const deleteFailure = await fixture.service.attachFile(deleteBatch.batch.id, {
+      filePath: deletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(deleteFailure.ok, false);
+    assert.deepEqual(releasedPaths, [retryPath]);
+
+    const deleted = await fixture.service.deleteBatch(deleteBatch.batch.id);
+    assert.equal(deleted.metadataDeleted, true);
+    assert.deepEqual(releasedPaths, [retryPath, deletePath]);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('同一源文件仍被其它未完成 artifact 引用时不得提前释放', async () => {
+  const releasedPaths = [];
+  const fixture = createFixture({
+    onSourceReleased: (paths) => releasedPaths.push(...paths)
+  });
+  try {
+    const sharedRetryPath = path.join(fixture.sourceDir, 'position-shared-retry.xlsx');
+    const failedBatch = await fixture.service.createBatch(batchPayload('position-shared-failed'));
+    const failed = await fixture.service.attachFile(failedBatch.batch.id, {
+      filePath: sharedRetryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(failed.ok, false);
+
+    fs.writeFileSync(sharedRetryPath, 'shared-retry-source');
+    const completedBatch = await fixture.service.createBatch(batchPayload('position-shared-complete'));
+    const completed = await fixture.service.attachFile(completedBatch.batch.id, {
+      filePath: sharedRetryPath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(completed.ok, true);
+    assert.deepEqual(releasedPaths, []);
+
+    const replacementPath = writeSource(fixture, 'position-shared-replacement.xlsx', 'replacement-source');
+    const retried = await fixture.service.retryBatch(failedBatch.batch.id, {
+      sourcePaths: {
+        [failed.artifact.id]: replacementPath
+      }
+    });
+    assert.equal(retried.ok, true);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
+
+    const sharedDeletePath = path.join(fixture.sourceDir, 'position-shared-delete.xlsx');
+    const firstDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-first'));
+    const secondDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-second'));
+    const firstDeleteFailure = await fixture.service.attachFile(firstDeleteBatch.batch.id, {
+      filePath: sharedDeletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    const secondDeleteFailure = await fixture.service.attachFile(secondDeleteBatch.batch.id, {
+      filePath: sharedDeletePath,
+      role: 'input',
+      sourceOperation: 'position-import'
+    });
+    assert.equal(firstDeleteFailure.ok, false);
+    assert.equal(secondDeleteFailure.ok, false);
+
+    await fixture.service.deleteBatch(firstDeleteBatch.batch.id);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
+
+    await fixture.service.deleteBatch(secondDeleteBatch.batch.id);
+    assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath, sharedDeletePath]);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('源释放回调失败不把已完成存档回滚为失败', async () => {
+  const fixture = createFixture({
+    onSourceReleased: () => {
+      throw new Error('injected release failure');
+    }
+  });
+  try {
+    const sourcePath = writeSource(fixture, 'release-failure.xlsx', 'archived');
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('release-callback-failure'),
+      filePath: sourcePath,
+      role: 'input'
+    });
+    assert.equal(archived.ok, true);
+    assert.equal(archived.status, 'ready');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('业务完成后源文件发生变化时拒绝错存，并保留明确失败审计', async () => {
   const fixture = createFixture();
   try {
@@ -300,6 +420,157 @@ test('业务完成后源文件发生变化时拒绝错存，并保留明确失�
     assert.equal(detail.batch.archiveStatus, 'incomplete');
     assert.equal(detail.batch.artifacts[0].lastErrorCode, 'ARCHIVE_SOURCE_CHANGED');
     assert.equal('sourceSnapshot' in detail.batch.artifacts[0].metadata, false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('源 stat 与当前文件一致但 SHA 不等于业务解析摘要时仍拒绝存档', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'same-stat-different-bytes.xlsx', 'version-A-contents');
+    const expectedSha256 = crypto
+      .createHash('sha256')
+      .update('version-A-contents')
+      .digest('hex');
+    fs.writeFileSync(sourcePath, 'version-B-contents');
+    const currentSnapshot = sourceSnapshotFromStat(fs.statSync(sourcePath));
+
+    const rejected = await fixture.service.archiveFile({
+      ...batchPayload('source-sha-mismatch'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: currentSnapshot,
+      expectedSha256
+    });
+
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.code, 'ARCHIVE_SOURCE_CHANGED');
+    assert.equal(rejected.retryable, true);
+    assert.match(rejected.message, /业务解析时版本不一致/);
+    const detail = await fixture.service.getBatch(rejected.batch.id);
+    assert.equal('expectedSha256' in detail.batch.artifacts[0].metadata, false);
+
+    const validPath = writeSource(fixture, 'matching-sha.xlsx', 'matching-contents');
+    const valid = await fixture.service.archiveFile({
+      ...batchPayload('source-sha-match'),
+      filePath: validPath,
+      role: 'input',
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(validPath)),
+      expectedSha256: crypto.createHash('sha256').update('matching-contents').digest('hex')
+    });
+    assert.equal(valid.ok, true);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时，同字节文件即使 inode/ctime/mtime 变化仍可按原路径重试', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'same-bytes-new-stat.xlsx', 'same-business-bytes');
+    const originalSnapshot = sourceSnapshotFromStat(fs.statSync(sourcePath));
+    const expectedSha256 = crypto.createHash('sha256').update('same-business-bytes').digest('hex');
+    const expectedSizeBytes = Buffer.byteLength('same-business-bytes');
+    fs.rmSync(sourcePath);
+
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('same-bytes-new-stat'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: originalSnapshot,
+      expectedSha256,
+      expectedSizeBytes
+    });
+    assert.equal(failed.ok, false);
+    fs.writeFileSync(sourcePath, 'same-business-bytes');
+    assert.equal(sourceSnapshotMatchesStat(originalSnapshot, fs.statSync(sourcePath)), false);
+
+    const retried = await fixture.service.retryBatch(failed.batch.id);
+    assert.equal(retried.ok, true);
+    assert.equal(retried.succeeded, 1);
+    const internal = fixture.service.repository.getArtifact(failed.artifact.id);
+    assert.equal(internal.metadata.expectedSizeBytes, expectedSizeBytes);
+    const detail = await fixture.service.getBatch(failed.batch.id);
+    assert.equal('expectedSizeBytes' in detail.batch.artifacts[0].metadata, false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时允许同字节替代路径，仍拒绝同长度不同字节', async () => {
+  const fixture = createFixture();
+  try {
+    const originalPath = writeSource(fixture, 'original-for-override.xlsx', 'expected-version');
+    const originalSnapshot = sourceSnapshotFromStat(fs.statSync(originalPath));
+    const expectedSha256 = crypto.createHash('sha256').update('expected-version').digest('hex');
+    const expectedSizeBytes = Buffer.byteLength('expected-version');
+    fs.rmSync(originalPath);
+
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('replacement-path-same-sha'),
+      filePath: originalPath,
+      role: 'input',
+      sourceSnapshot: originalSnapshot,
+      expectedSha256,
+      expectedSizeBytes
+    });
+    const wrongPath = writeSource(fixture, 'wrong-same-size.xlsx', 'different-bytes!');
+    assert.equal(Buffer.byteLength('different-bytes!'), expectedSizeBytes);
+    const rejected = await fixture.service.retryBatch(failed.batch.id, {
+      sourcePaths: { [failed.artifact.id]: wrongPath }
+    });
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.results[0].code, 'ARCHIVE_SOURCE_CHANGED');
+
+    const replacementPath = writeSource(fixture, 'replacement.xlsx', 'expected-version');
+    const recovered = await fixture.service.retryBatch(failed.batch.id, {
+      sourcePaths: { [failed.artifact.id]: replacementPath }
+    });
+    assert.equal(recovered.ok, true);
+    assert.equal(recovered.succeeded, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('有业务 SHA 时仍拒绝存档读取期间发生变化且不留下 part 或 blob', async () => {
+  let sourcePath = '';
+  let mutated = false;
+  const changingFs = {
+    ...fs,
+    createReadStream(filePath, options) {
+      const stream = fs.createReadStream(filePath, options);
+      if (path.resolve(filePath) === sourcePath) {
+        stream.once('data', () => {
+          if (mutated) return;
+          mutated = true;
+          fs.writeFileSync(filePath, 'changed-during-read');
+        });
+      }
+      return stream;
+    }
+  };
+  const fixture = createFixture({ fsImpl: changingFs });
+  try {
+    sourcePath = writeSource(fixture, 'changes-during-read.xlsx', 'original-read-bytes');
+    const expectedSha256 = crypto.createHash('sha256').update('original-read-bytes').digest('hex');
+    const result = await fixture.service.archiveFile({
+      ...batchPayload('source-changes-during-read'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceSnapshot: sourceSnapshotFromStat(fs.statSync(sourcePath)),
+      expectedSha256,
+      expectedSizeBytes: Buffer.byteLength('original-read-bytes')
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'ARCHIVE_SOURCE_CHANGED');
+    assert.deepEqual(fs.readdirSync(path.join(fixture.rootDir, '.staging')), []);
+    const blobFiles = fs.readdirSync(path.join(fixture.rootDir, 'blobs', 'sha256'), {
+      recursive: true
+    }).filter((entry) => /^[a-f0-9]{64}$/.test(entry));
+    assert.deepEqual(blobFiles, []);
   } finally {
     fixture.close();
   }

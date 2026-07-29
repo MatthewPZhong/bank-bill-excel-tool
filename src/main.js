@@ -1,4 +1,4 @@
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os'); // v2.1.12 β.1-T3：多 worker D33 OOM clamp（cpus / freemem）
@@ -32,7 +32,9 @@ const {
   selectSuccessfulPathsByResultIndex
 } = require('./main-process/archive-center/operation-tracker');
 const {
-  captureArchiveSourceSnapshots
+  captureArchiveSourceSnapshots,
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
 } = require('./main-process/archive-center/source-snapshot');
 const {
   createArchiveService
@@ -40,6 +42,9 @@ const {
 const {
   createArchiveCenterController
 } = require('./main-process/archive-center/controller');
+const {
+  createArchiveOutboxStore
+} = require('./main-process/archive-center/outbox-store');
 const { applyWatermark } = require('./main-process/workbook-watermark');
 // v2.1.6 Module B T9：收单单据币种校验 — session + writer
 const acquiringBillCurrencySession = require('./main-process/acquiring-bill-currency-session');
@@ -62,6 +67,30 @@ const {
 const {
   createDuplicateInboundMatchService
 } = require('./main-process/duplicate-inbound-match/service');
+// v3.1.0：平盘资金性质校验（持久化银行/链接侧库 + 严格1:1匹配 + 结果回导确认）。
+const {
+  createPositionReconciliationService
+} = require('./main-process/position-reconciliation/service');
+const {
+  assertStagedInputUnchanged,
+  filterStagingPathsWithoutProtectedSources
+} = require('./main-process/position-reconciliation/input-staging');
+const {
+  POSITION_SIDE_DB_CHECKPOINT_SETTING,
+  POSITION_SIDE_DB_PENDING_SETTING,
+  POSITION_SIDE_DB_BOOTSTRAP_SETTING
+} = require('./main-process/position-reconciliation/constants');
+const {
+  assertPositionRecoveryInputsUnchanged,
+  positionCommittedRecoveryArchiveFiles,
+  positionUncommittedRecoveryInputPaths,
+  requirePositionPendingArchiveFiles,
+  positionRecoveryArchiveFiles,
+  positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
+  positionBusinessStateForResult,
+  runPositionOperationLifecycle,
+  settlePositionArchiveResult
+} = require('./main-process/position-reconciliation/operation-lifecycle');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
@@ -394,12 +423,15 @@ let database = null;
 let pendingDb = null;
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
+let positionReconciliationService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
 let archiveOperationTracker = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
+const positionReconciliationOperationContext = new AsyncLocalStorage();
+let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
@@ -3492,39 +3524,58 @@ function registerArchiveCenterHandlers() {
   ipcMain.handle('archive-center:open-file', (_event, fileRefId) => {
     return callArchiveCenter('openFile', fileRefId);
   });
-  ipcMain.handle('archive-center:save-as', (_event, fileRefId) => {
+  archiveCenterMutationIpcHandle('archive-center:save-as', '另存为', (_event, fileRefId) => {
     return callArchiveCenter('saveAs', fileRefId);
   });
-  ipcMain.handle('archive-center:set-locked', (_event, batchId, locked) => {
+  archiveCenterMutationIpcHandle('archive-center:set-locked', '锁定批次', (_event, batchId, locked) => {
     if (typeof locked !== 'boolean') {
       return { status: 'failed', message: '批次锁定状态无效' };
     }
     return callArchiveCenter('setLocked', batchId, locked);
   });
-  ipcMain.handle('archive-center:delete-batch', (_event, batchId) => {
+  archiveCenterMutationIpcHandle('archive-center:delete-batch', '删除批次', (_event, batchId) => {
     return callArchiveCenter('deleteBatch', batchId);
   });
-  ipcMain.handle('archive-center:retry-batch', (_event, batchId) => {
-    return callArchiveCenter('retryBatch', batchId);
+  archiveCenterMutationIpcHandle('archive-center:select-retry-sources',
+    '选择存档恢复文件',
+    (_event, batchId) => callArchiveCenter('selectRetrySources', batchId)
+  );
+  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', (_event, batchId, sourcePaths) => {
+    return callArchiveCenter('retryBatch', batchId, sourcePaths);
   });
   ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
-  ipcMain.handle('archive-center:set-retention-days', (_event, retentionDays) => {
+  archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
 }
 
+function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
+  const meta = { channel, moduleKey: '存档中心', functionKey };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
+}
+
 function initializeArchiveCenter() {
   if (archiveCenterService || !database || !database.db) return archiveCenterService;
   const archiveRoot = path.join(ensureStorageRoot(), '存档中心');
+  const archiveOutbox = createArchiveOutboxStore(path.join(
+    path.dirname(database.dbPath),
+    'run-data',
+    'archive-center',
+    'outbox'
+  ));
   const service = createArchiveService({
     database: database.db,
     rootDir: archiveRoot,
-    opener: (filePath) => shell.openPath(filePath)
+    opener: (filePath) => shell.openPath(filePath),
+    onSourceReleased: cleanupPositionArchiveSourcePaths
   });
   archiveCenterService = createArchiveCenterController({
     database,
     service,
+    outboxStore: archiveOutbox,
+    onOutboxFlushed: cleanupPositionArchiveSourcePaths,
+    showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
       appendActivityLogEntry({
@@ -14102,6 +14153,647 @@ function registerDuplicateInboundMatchHandlers() {
   });
 }
 
+function readPositionPendingOperation() {
+  const raw = database && database.db
+    ? database.getSetting(POSITION_SIDE_DB_PENDING_SETTING)
+    : '';
+  if (!raw) return null;
+  let pending;
+  try {
+    pending = JSON.parse(raw);
+  } catch (_error) {
+    throw new Error('主库中的平盘待完成操作记录损坏');
+  }
+  if (!pending || typeof pending !== 'object' || Array.isArray(pending)) {
+    throw new Error('主库中的平盘待完成操作记录格式非法');
+  }
+  return pending;
+}
+
+function writePositionPendingOperation(pending, operationToken) {
+  const current = readPositionPendingOperation();
+  if (!current || current.operationToken !== operationToken) {
+    throw new Error('平盘待完成操作所有权已变化');
+  }
+  database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify(pending));
+}
+
+function capturePositionArchiveFileSnapshot(filePath) {
+  try {
+    return sourceSnapshotFromStat(fs.statSync(filePath));
+  } catch (_error) {
+    return null;
+  }
+}
+
+function recordPositionArchiveIntentFiles(filePaths, role) {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context || !Array.isArray(filePaths) || filePaths.length === 0) return;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
+    return;
+  }
+  const seen = new Set(
+    (Array.isArray(pending.archiveFiles) ? pending.archiveFiles : []).map(
+      (file) => `${file.role || ''}\u0000${file.filePath || ''}`
+    )
+  );
+  const archiveFiles = Array.isArray(pending.archiveFiles)
+    ? pending.archiveFiles.slice()
+    : [];
+  for (const value of filePaths) {
+    const descriptor = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : { filePath: value };
+    const rawPath = String(descriptor.filePath || '').trim();
+    if (!rawPath) continue;
+    const filePath = path.resolve(rawPath);
+    const key = `${role}\u0000${filePath}`;
+    if (seen.has(key)) continue;
+    const archiveFile = role === 'input'
+      ? {
+          filePath,
+          role,
+          sourceType: String(descriptor.sourceType || '').trim(),
+          sourceSnapshot: descriptor.sourceSnapshot,
+          sha256: descriptor.expectedSha256 || descriptor.sha256,
+          sizeBytes: descriptor.sizeBytes
+        }
+      : {
+          filePath,
+          role,
+          beforeSnapshot: capturePositionArchiveFileSnapshot(filePath)
+        };
+    const normalized = requirePositionPendingArchiveFiles({
+      archiveFiles: [archiveFile]
+    })[0];
+    seen.add(key);
+    archiveFiles.push(normalized);
+  }
+  writePositionPendingOperation({
+    ...pending,
+    archiveState: archiveFiles.length > 0 ? 'intent-recorded' : pending.archiveState,
+    archiveFiles
+  }, context.operationToken);
+}
+
+function markPositionBusinessOutcome(result) {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context) return;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken) return;
+  writePositionPendingOperation({
+    ...pending,
+    businessState: positionBusinessStateForResult(result, SUCCESS_STATUSES)
+  }, context.operationToken);
+}
+
+function markPositionArchiveDurable(archiveResult = {}) {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context) return;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
+    return;
+  }
+  writePositionPendingOperation({
+    ...pending,
+    archiveState: 'durable',
+    archiveReference: archiveResult.batchId || archiveResult.outboxId || ''
+  }, context.operationToken);
+}
+
+function positionArchiveModule(channel) {
+  const isLink = channel.includes(':source:')
+    || channel.includes(':linked:')
+    || channel.includes(':raw:');
+  return {
+    moduleId: 'position-reconciliation-process',
+    moduleCode: isLink ? 'POSITIONLINK' : 'POSITION',
+    moduleName: '平盘对账数据处理'
+  };
+}
+
+function positionArchiveIntentEvidence(pending, currentCheckpoint) {
+  return evaluatePositionArchiveIntentEvidence(pending, currentCheckpoint, {
+    statSync: fs.statSync,
+    sourceSnapshotFromStat,
+    sourceSnapshotMatchesStat
+  });
+}
+
+function persistPositionArchiveIntentIfNeeded(
+  pending,
+  currentCheckpoint,
+  service = positionReconciliationService,
+  options = {}
+) {
+  if (!pending) return null;
+  const files = requirePositionPendingArchiveFiles(pending);
+  const archiveRequired = pending.archiveRequired === true
+    || (
+      pending.archiveRequired === undefined
+      && archiveOperationTracker
+      && archiveOperationTracker.supportsChannel(pending.channel)
+    );
+  if (!archiveRequired) return null;
+  if (pending.archiveState === 'durable') {
+    if (options.includeCleanupCandidates !== true
+        || !service
+        || typeof service.listCommittedOperationInputs !== 'function') {
+      return null;
+    }
+    const committedFiles = positionCommittedRecoveryArchiveFiles(
+      { ...pending, archiveFiles: files },
+      service.listCommittedOperationInputs(pending.operationToken)
+    );
+    return {
+      archiveResult: null,
+      uncommittedInputPaths: positionUncommittedRecoveryInputPaths(
+        { ...pending, archiveFiles: files },
+        committedFiles
+      )
+    };
+  }
+  const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
+  if (!evidence.requiresPersistence) return null;
+  if (!service || typeof service.listCommittedOperationInputs !== 'function') {
+    throw new Error('平盘业务已提交但无法读取文件级提交凭证，已停止恢复');
+  }
+  const committedInputs = service.listCommittedOperationInputs(pending.operationToken);
+  const committedFiles = positionCommittedRecoveryArchiveFiles(
+    { ...pending, archiveFiles: files },
+    committedInputs
+  );
+  const uncommittedInputPaths = positionUncommittedRecoveryInputPaths(
+    { ...pending, archiveFiles: files },
+    committedFiles
+  );
+  if (committedFiles.length === 0 || !archiveCenterService
+      || typeof archiveCenterService.persistOperationIntent !== 'function') {
+    throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
+  }
+  assertPositionRecoveryInputsUnchanged(
+    { archiveFiles: committedFiles },
+    assertStagedInputUnchanged
+  );
+  const recoveryFiles = positionRecoveryArchiveFiles(
+    { archiveFiles: committedFiles },
+    { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
+  );
+  const archiveResult = archiveCenterService.persistOperationIntent({
+    ...positionArchiveModule(String(pending.channel || '')),
+    sourceOperation: String(pending.channel || ''),
+    operationKey: `position:${pending.operationToken}:${pending.channel}`,
+    metadata: { positionOperationToken: pending.operationToken, recovered: true },
+    files: recoveryFiles
+  });
+  return options.includeCleanupCandidates === true
+    ? { archiveResult, uncommittedInputPaths }
+    : archiveResult;
+}
+
+function recoverPositionArchiveIntent(pending, currentCheckpoint, service) {
+  return persistPositionArchiveIntentIfNeeded(
+    pending,
+    currentCheckpoint,
+    service,
+    { includeCleanupCandidates: true }
+  );
+}
+
+function persistCurrentPositionArchiveIntentIfNeeded() {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context) return null;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken) {
+    throw new Error('平盘待完成操作所有权已变化，无法登记存档恢复任务');
+  }
+  const currentCheckpoint = positionReconciliationService
+    ? positionReconciliationService.persistenceCheckpoint()
+    : pending.baseCheckpoint || {};
+  return persistPositionArchiveIntentIfNeeded(
+    pending,
+    currentCheckpoint,
+    positionReconciliationService
+  );
+}
+
+function getPositionReconciliationService() {
+  if (!database || !database.db) {
+    throw new Error('数据库尚未初始化，请稍后重试');
+  }
+  if (!positionReconciliationService) {
+    const expectedSideDbCheckpoint = database.getSetting(
+      POSITION_SIDE_DB_CHECKPOINT_SETTING
+    );
+    const pendingSideDbOperation = database.getSetting(
+      POSITION_SIDE_DB_PENDING_SETTING
+    );
+    let initialSideDbCheckpoint = null;
+    if (!expectedSideDbCheckpoint) {
+      initialSideDbCheckpoint = database.getSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING);
+      if (!initialSideDbCheckpoint) {
+        initialSideDbCheckpoint = JSON.stringify({
+          identity: randomUUID(),
+          generation: 0,
+          token: randomUUID()
+        });
+        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, initialSideDbCheckpoint);
+      }
+    }
+    const service = createPositionReconciliationService({
+      userDataDir: path.dirname(database.dbPath),
+      templatePath: path.join(__dirname, '..', 'assets', '平盘银行对账单.xlsx'),
+      requireExistingSideDb: Boolean(expectedSideDbCheckpoint),
+      expectedSideDbCheckpoint,
+      expectedPendingOperation: pendingSideDbOperation,
+      initialSideDbCheckpoint,
+      operationTokenProvider: () => {
+        const operation = positionReconciliationOperationContext.getStore();
+        return operation && operation.operationToken;
+      },
+      recordArchiveIntent: (filePaths, role) => {
+        recordPositionArchiveIntentFiles(filePaths, role);
+      },
+      protectedStagingPaths: () => {
+        if (!archiveCenterService
+            || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+          return null;
+        }
+        return archiveCenterService.listUnresolvedSourcePaths();
+      }
+    });
+    try {
+      const checkpoint = service.persistenceCheckpoint();
+      const recovery = recoverPositionArchiveIntent(
+        pendingSideDbOperation ? readPositionPendingOperation() : null,
+        checkpoint,
+        service
+      );
+      database.setSetting(
+        POSITION_SIDE_DB_CHECKPOINT_SETTING,
+        JSON.stringify(checkpoint)
+      );
+      database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+      database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+      positionReconciliationService = service;
+      if (recovery && Array.isArray(recovery.uncommittedInputPaths)) {
+        cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths);
+      }
+    } catch (error) {
+      service.close();
+      throw error;
+    }
+  }
+  return positionReconciliationService;
+}
+
+function syncPositionReconciliationCheckpoint() {
+  if (!database || !database.db || !positionReconciliationService) return;
+  database.setSetting(
+    POSITION_SIDE_DB_CHECKPOINT_SETTING,
+    JSON.stringify(positionReconciliationService.persistenceCheckpoint())
+  );
+}
+
+async function runPositionReconciliationOperation(channel, operation) {
+  if (positionReconciliationOperationActive) {
+    return {
+      status: 'busy',
+      code: 'position-operation-busy',
+      message: '平盘对账正在完成上一项操作，请稍后重试'
+    };
+  }
+  let service;
+  let baseCheckpoint;
+  const operationToken = randomUUID();
+  positionReconciliationOperationActive = { operationToken, channel };
+  try {
+    service = getPositionReconciliationService();
+    const unresolvedPending = database.getSetting(POSITION_SIDE_DB_PENDING_SETTING);
+    if (unresolvedPending) {
+      throw new Error('上一项平盘对账操作的 checkpoint 尚未完成同步，请重启软件恢复后再试');
+    }
+    baseCheckpoint = service.persistenceCheckpoint();
+    const archiveRequired = Boolean(
+      archiveOperationTracker && archiveOperationTracker.supportsChannel(channel)
+    );
+    return await runPositionOperationLifecycle({
+      operationToken,
+      pending: {
+        operationToken,
+        channel,
+        baseCheckpoint,
+        archiveRequired,
+        archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
+        businessState: 'running',
+        archiveFiles: []
+      },
+      writeInitialPending: (pending) => {
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, JSON.stringify(pending));
+      },
+      runInContext: (task) => positionReconciliationOperationContext.run(
+        { operationToken },
+        task
+      ),
+      operation,
+      readPending: () => JSON.parse(
+        database.getSetting(POSITION_SIDE_DB_PENDING_SETTING) || 'null'
+      ),
+      syncCheckpoint: syncPositionReconciliationCheckpoint,
+      clearPending: () => {
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+      },
+      failureResult: positionReconciliationFailureResult
+    });
+  } catch (error) {
+    return positionReconciliationFailureResult(error);
+  } finally {
+    if (positionReconciliationOperationActive
+        && positionReconciliationOperationActive.operationToken === operationToken) {
+      positionReconciliationOperationActive = null;
+    }
+  }
+}
+
+function positionReconciliationFailureResult(error) {
+  return {
+    status: 'failed',
+    code: error && error.code ? String(error.code) : 'position-reconciliation-failed',
+    message: error && error.message ? String(error.message) : String(error),
+    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+  };
+}
+
+async function withPositionReconciliationLock(operation, task) {
+  const lock = tryAcquireBankStatementOpLock(`position-reconciliation-${operation}`);
+  if (!lock.acquired) return { status: 'busy', message: lock.message };
+  try {
+    return await task();
+  } catch (error) {
+    return positionReconciliationFailureResult(error);
+  } finally {
+    releaseBankStatementOpLock();
+  }
+}
+
+function positionReconciliationExportName(prefix) {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const stamp = [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    pad(now.getHours()),
+    pad(now.getMinutes())
+  ].join('');
+  return `${stamp}_${sanitizeFileName(prefix)}.xlsx`;
+}
+
+function registerPositionReconciliationHandlers() {
+  ipcMain.handle('position-reconciliation:status', () => {
+    try {
+      return getPositionReconciliationService().status();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:data-manager', () => {
+    try {
+      return getPositionReconciliationService().dataManager();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:linked-manager', () => {
+    try {
+      return getPositionReconciliationService().linkedManager();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+  ipcMain.handle('position-reconciliation:mappings:list', () => {
+    try {
+      return getPositionReconciliationService().listMappings();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:prepare-import',
+    '平盘对账数据处理',
+    '导入银行对账单',
+    () => withPositionReconciliationLock('bank-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-bank', {
+        title: '导入平盘银行对账单',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().prepareBankImport(choice.filePaths);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:apply-import',
+    '平盘对账数据处理',
+    '导入银行对账单',
+    (_event, token) => withPositionReconciliationLock('bank-import-apply', () => {
+      const service = getPositionReconciliationService();
+      recordPositionArchiveIntentFiles(service.bankImportArchiveIntent(token), 'input');
+      return service.applyBankImport(token);
+    })
+  );
+
+  ipcMain.handle('position-reconciliation:bank:cancel-import', () => {
+    try {
+      return getPositionReconciliationService().cancelBankImport();
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:source:prepare-import',
+    '平盘对账数据处理',
+    '导入链接原始表',
+    () => withPositionReconciliationLock('source-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-linked-source', {
+        title: '导入链接原始表',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().prepareSourceImport(choice.filePaths);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:source:apply-import',
+    '平盘对账数据处理',
+    '导入链接原始表',
+    (_event, token) => withPositionReconciliationLock('source-import-apply', () => {
+      const service = getPositionReconciliationService();
+      recordPositionArchiveIntentFiles(service.sourceImportArchiveIntent(token), 'input');
+      return service.applySourceImport(token);
+    })
+  );
+
+  ipcMain.handle('position-reconciliation:source:cancel-import', (_event, token) => {
+    try {
+      return getPositionReconciliationService().cancelSourceImport(token);
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  trackedIpcHandle(
+    'position-reconciliation:mappings:save',
+    '平盘对账数据处理',
+    '账户映射管理',
+    (_event, mappings) => withPositionReconciliationLock('mapping-save', () => (
+      getPositionReconciliationService().saveMappings(mappings)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:delete',
+    '平盘对账数据处理',
+    '删除银行数据',
+    (_event, payload = {}) => withPositionReconciliationLock('bank-delete', () => (
+      getPositionReconciliationService().deleteBank(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:source:delete',
+    '平盘对账数据处理',
+    '删除链接原始表',
+    (_event, payload = {}) => withPositionReconciliationLock('source-delete', () => (
+      getPositionReconciliationService().deleteSource(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:bank:export',
+    '平盘对账数据处理',
+    '导出银行数据',
+    (_event, payload = {}) => withPositionReconciliationLock('bank-export', async () => {
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出平盘银行对账单',
+        defaultPath: positionReconciliationExportName('平盘银行对账单'),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      recordPositionArchiveIntentFiles([choice.filePath], 'output');
+      return getPositionReconciliationService().exportBank(payload, choice.filePath);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:linked:export',
+    '平盘对账数据处理',
+    '导出链接对账表',
+    (_event, sourceType, tableName = '平盘链接对账表') => (
+      withPositionReconciliationLock('linked-export', async () => {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出链接对账表',
+          defaultPath: positionReconciliationExportName(tableName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+        recordPositionArchiveIntentFiles([choice.filePath], 'output');
+        return getPositionReconciliationService().exportLinked(sourceType, choice.filePath);
+      })
+    )
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:raw:export',
+    '平盘对账数据处理',
+    '导出链接原始表',
+    (_event, sourceType, tableName = '链接原始表') => (
+      withPositionReconciliationLock('raw-export', async () => {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出链接原始表',
+          defaultPath: positionReconciliationExportName(tableName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+        recordPositionArchiveIntentFiles([choice.filePath], 'output');
+        return getPositionReconciliationService().exportRaw(sourceType, choice.filePath);
+      })
+    )
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run',
+    '平盘对账数据处理',
+    '开始运行',
+    (_event, payload = {}) => withPositionReconciliationLock('run', () => (
+      getPositionReconciliationService().run(payload)
+    ))
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:export',
+    '平盘对账数据处理',
+    '导出文件',
+    (_event, payload = {}) => withPositionReconciliationLock('result-export', async () => {
+      const service = getPositionReconciliationService();
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: payload.differencesOnly ? '导出平盘差异数据' : '导出平盘资金性质校验结果',
+        defaultPath: payload.differencesOnly
+          ? positionReconciliationExportName('平盘资金性质校验差异数据')
+          : service.defaultResultFileName(),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      recordPositionArchiveIntentFiles([choice.filePath], 'output');
+      return service.exportRun(payload.runId, choice.filePath, {
+        differencesOnly: payload.differencesOnly === true,
+        channels: Array.isArray(payload.channels) ? payload.channels : [],
+        regions: Array.isArray(payload.regions) ? payload.regions : [],
+        months: Array.isArray(payload.months) ? payload.months : [],
+        differenceStatuses: Array.isArray(payload.differenceStatuses)
+          ? payload.differenceStatuses
+          : []
+      });
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:import-result',
+    '平盘对账数据处理',
+    '导入修改结果',
+    (_event, runId) => withPositionReconciliationLock('result-import', async () => {
+      const choice = await showImportOpenDialog('position-reconciliation-result', {
+        title: '导入修改后的平盘资金性质校验结果',
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      return getPositionReconciliationService().importRunResult(runId, choice.filePaths[0]);
+    })
+  );
+
+  trackedIpcHandle(
+    'position-reconciliation:run:confirm',
+    '平盘对账数据处理',
+    '确认结果',
+    (_event, runId) => withPositionReconciliationLock('result-confirm', () => (
+      getPositionReconciliationService().confirmRun(runId)
+    ))
+  );
+}
+
 // 工具箱🧰（合表 / 拆表）3 个 IPC handler。
 //   行级变换、流式读写和原子发布委托 main-process/toolbox* 模块；本处负责 dialog、IPC 编排、状态反馈和日志。
 //
@@ -14623,7 +15315,130 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
     const paths = result && Array.isArray(result.archivedSourcePaths) ? result.archivedSourcePaths : [];
     return { inputPaths: paths };
   }
+  if (channel === 'position-reconciliation:bank:apply-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : [],
+      metadata: {
+        scopes: result && Array.isArray(result.scopes) ? result.scopes : [],
+        scopeInputs: result && Array.isArray(result.scopeInputs) ? result.scopeInputs : []
+      }
+    };
+  }
+  if (channel === 'position-reconciliation:source:prepare-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
+  if (channel === 'position-reconciliation:source:apply-import') {
+    return {
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
+  if (channel === 'position-reconciliation:run:export'
+      || channel === 'position-reconciliation:bank:export'
+      || channel === 'position-reconciliation:linked:export'
+      || channel === 'position-reconciliation:raw:export') {
+    return {
+      runKey: result && result.runId,
+      outputPaths: archiveOutputPaths([result && result.filePath])
+    };
+  }
+  if (channel === 'position-reconciliation:run:import-result') {
+    return {
+      runKey: result && result.runId,
+      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
+      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
+      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
+    };
+  }
   return {};
+}
+
+function positionArchiveStagingRoot() {
+  if (!database || !database.dbPath) return '';
+  return path.resolve(
+    path.dirname(database.dbPath),
+    'run-data',
+    'position-reconciliation',
+    'import-staging'
+  );
+}
+
+function cleanupPositionArchiveStagingDirectories(targets) {
+  if (!Array.isArray(targets) || targets.length === 0) return;
+  const root = positionArchiveStagingRoot();
+  if (!root) return;
+  for (const value of targets) {
+    const target = path.resolve(String(value || ''));
+    if (target === root || !target.startsWith(`${root}${path.sep}`)) continue;
+    try {
+      fs.rmSync(target, { recursive: true, force: true });
+      const batchRoot = path.dirname(target);
+      if (batchRoot !== root
+          && batchRoot.startsWith(`${root}${path.sep}`)
+          && fs.existsSync(batchRoot)
+          && fs.readdirSync(batchRoot).length === 0) {
+        fs.rmdirSync(batchRoot);
+      }
+    } catch (_error) {
+      // 成功存档后的临时副本清理失败留待下次启动回收。
+    }
+  }
+}
+
+function cleanupPositionArchiveSourcePaths(sourcePaths) {
+  const root = positionArchiveStagingRoot();
+  if (!root
+      || !archiveCenterService
+      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+    return;
+  }
+  const directories = [];
+  for (const value of Array.isArray(sourcePaths) ? sourcePaths : []) {
+    const sourcePath = path.resolve(String(value || ''));
+    const relative = path.relative(root, sourcePath);
+    const parts = relative.split(path.sep).filter(Boolean);
+    if (relative === '..'
+        || relative.startsWith(`..${path.sep}`)
+        || path.isAbsolute(relative)
+        || parts.length < 3) {
+      continue;
+    }
+    directories.push(path.dirname(sourcePath));
+  }
+  let unresolvedSourcePaths;
+  try {
+    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
+  } catch (_error) {
+    return;
+  }
+  cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(directories, unresolvedSourcePaths)
+  );
+}
+
+function cleanupPositionArchiveStaging(runtime) {
+  const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
+  if (targets.length === 0
+      || !archiveCenterService
+      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
+    return;
+  }
+  let unresolvedSourcePaths;
+  try {
+    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
+  } catch (_error) {
+    return;
+  }
+  cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(targets, unresolvedSourcePaths)
+  );
 }
 
 function reportArchiveFailure(warning) {
@@ -14645,6 +15460,19 @@ function reportArchiveFailure(warning) {
   } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
 }
 
+function archiveRegistrationFailureResult(result, warning) {
+  const detail = warning && warning.message
+    ? String(warning.message)
+    : '存档持久重试记录建立失败';
+  return {
+    status: 'failed',
+    code: 'archive-retry-registration-failed',
+    message: '业务处理已完成，但存档重试记录建立失败；请勿重复操作，重启软件后先核对业务数据',
+    detailLines: [detail],
+    businessResult: archiveResultSnapshot(result)
+  };
+}
+
 async function runArchiveAwareOperation(meta, event, args, handler) {
   if (!archiveOperationTracker || !archiveOperationTracker.supportsChannel(meta.channel)) {
     return handler(event, ...args);
@@ -14652,6 +15480,7 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
   const context = { dialogSelections: [] };
   return archiveOperationContext.run(context, async () => {
     const result = await handler(event, ...args);
+    markPositionBusinessOutcome(result);
 
     const selectedPaths = context.dialogSelections.flatMap((selection) => selection.filePaths || []);
     let runtime;
@@ -14663,29 +15492,37 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         selectedPaths,
         runtime
       });
+      const positionOperation = positionReconciliationOperationContext.getStore();
+      if (positionOperation) {
+        runtime.metadata = {
+          ...(runtime.metadata || {}),
+          positionOperationToken: positionOperation.operationToken
+        };
+      }
     } catch (error) {
-      reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
-      return result;
+      const warning = { message: error && error.message ? error.message : String(error) };
+      reportArchiveFailure(warning);
+      return archiveRegistrationFailureResult(result, warning);
     }
 
-    archiveOperationTail = archiveOperationTail
-      .then(() => archiveOperationTracker.handleOperation({
+    const archiveTask = archiveOperationTail.then(() => archiveOperationTracker.handleOperation({
         channel: meta.channel,
         args,
         result: archiveResultSnapshot(result),
         selectedPaths,
         runtime
-      }))
-      .then((archiveResult) => {
-        if (archiveResult && archiveResult.archiveFailed === true) {
-          reportArchiveFailure(archiveResult.warning);
-        }
-      })
-      .catch((error) => {
-        reportArchiveFailure({ message: error && error.message ? error.message : String(error) });
-      });
-
-    return result;
+    }));
+    archiveOperationTail = archiveTask.catch(() => undefined);
+    return settlePositionArchiveResult({
+      result,
+      archiveTask,
+      runtime,
+      persistRecovery: persistCurrentPositionArchiveIntentIfNeeded,
+      markDurable: markPositionArchiveDurable,
+      cleanup: cleanupPositionArchiveStaging,
+      reportFailure: reportArchiveFailure,
+      registrationFailureResult: archiveRegistrationFailureResult
+    });
   });
 }
 
@@ -14716,7 +15553,10 @@ function businessIpcHandle(channel, label, handler) {
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
   const meta = { channel, moduleKey, functionKey };
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
-    const result = await runArchiveAwareOperation(meta, event, args, handler);
+    const execute = () => runArchiveAwareOperation(meta, event, args, handler);
+    const result = channel.startsWith('position-reconciliation:')
+      ? await runPositionReconciliationOperation(channel, execute)
+      : await execute();
     if (result && SUCCESS_STATUSES.has(result.status)) {
       tickUsageStats(moduleKey, functionKey);
     }
@@ -14815,6 +15655,7 @@ function registerAllIpcHandlers() {
   registerNewAccountHandlers();
   registerPreFundReconciliationHandlers();
   registerDuplicateInboundMatchHandlers();
+  registerPositionReconciliationHandlers();
   registerToolboxHandlers();
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
@@ -15637,6 +16478,22 @@ async function prepareApplicationForQuit() {
   if (quitPreparationPromise) return quitPreparationPromise;
 
   quitPreparationPromise = (async () => {
+    businessOperationRegistry.beginShutdownTransition();
+    const businessDrainTimer = setTimeout(() => {
+      appendActivityLogEntry({
+        level: 'warning',
+        source: 'main',
+        domain: 'app-quit',
+        message: '退出等待活动业务完成已超过 5 秒，完成后将继续退出'
+      });
+    }, 5000);
+    if (businessDrainTimer.unref) businessDrainTimer.unref();
+    try {
+      await businessOperationRegistry.waitForIdle();
+    } finally {
+      clearTimeout(businessDrainTimer);
+    }
+
     if (needsWorkerShutdown()) await shutdownWorkerPoolGracefully();
 
     const archiveDrainTimer = setTimeout(() => {
@@ -15684,11 +16541,19 @@ async function prepareApplicationForQuit() {
     if (failures.length > 0) {
       throw new Error(`退出清理失败：${failures.length} 个运行数据未完成清理`);
     }
+    if (positionReconciliationService) {
+      syncPositionReconciliationCheckpoint();
+      positionReconciliationService.close();
+      positionReconciliationService = null;
+    }
     quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
     flushUsageStatsForQuit();
     quitPreparationComplete = true;
   })().finally(() => {
-    if (!quitPreparationComplete) quitPreparationPromise = null;
+    if (!quitPreparationComplete) {
+      businessOperationRegistry.cancelInstallTransition();
+      quitPreparationPromise = null;
+    }
   });
 
   return quitPreparationPromise;

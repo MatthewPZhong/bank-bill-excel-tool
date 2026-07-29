@@ -17,6 +17,8 @@ const MODULES = Object.freeze({
   vcc: Object.freeze({ id: 'vcc-op-calc', code: 'VCCOP', name: 'VCC业务OP计算' }),
   preFund: Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUND', name: '前置资金对账' }),
   duplicateInbound: Object.freeze({ id: 'duplicate-inbound-match', code: 'DUPINBOUND', name: '重复入金匹配' }),
+  position: Object.freeze({ id: 'position-reconciliation-process', code: 'POSITION', name: '平盘对账数据处理' }),
+  positionLink: Object.freeze({ id: 'position-reconciliation-process', code: 'POSITIONLINK', name: '平盘对账数据处理' }),
   linkedTable: Object.freeze({ id: 'bank-statement-process', code: 'LINKED', name: '资金对账数据处理' }),
   preFundTemp: Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUNDTEMP', name: '前置资金对账' })
 });
@@ -62,7 +64,15 @@ const ARCHIVE_CHANNELS = new Set([
   'pre-fund-reconciliation:export',
   'duplicate-inbound-match:import-files',
   'duplicate-inbound-match:run',
-  'duplicate-inbound-match:export'
+  'duplicate-inbound-match:export',
+  'position-reconciliation:bank:apply-import',
+  'position-reconciliation:source:prepare-import',
+  'position-reconciliation:source:apply-import',
+  'position-reconciliation:bank:export',
+  'position-reconciliation:linked:export',
+  'position-reconciliation:raw:export',
+  'position-reconciliation:run:export',
+  'position-reconciliation:run:import-result'
 ]);
 
 function normalizePathList(values) {
@@ -116,13 +126,26 @@ function outputPathsFromFiles(result) {
   return normalizePathList(result.files.map((item) => item && (item.filePath || item.savedPath || item.path)));
 }
 
-function buildFileSpecs(paths, role, sourceOperation) {
-  return normalizePathList(paths).map((filePath) => ({
-    filePath,
-    role,
-    sourceOperation,
-    originalName: path.basename(filePath)
-  }));
+function buildFileSpecs(values, role, sourceOperation) {
+  const source = Array.isArray(values) ? values : (values ? [values] : []);
+  const seen = new Set();
+  const files = [];
+  for (const value of source) {
+    const descriptor = value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : { filePath: value };
+    const filePath = String(descriptor.filePath || '').trim();
+    if (!filePath || seen.has(filePath)) continue;
+    seen.add(filePath);
+    files.push({
+      ...descriptor,
+      filePath,
+      role: descriptor.role || role,
+      sourceOperation: descriptor.sourceOperation || sourceOperation,
+      originalName: descriptor.originalName || path.basename(filePath)
+    });
+  }
+  return files;
 }
 
 function dedupeFileSpecs(files) {
@@ -141,6 +164,9 @@ function summarizeBatchResults(batches) {
   );
   return {
     archiveFailed: failed.length > 0,
+    persistentRetryAvailable: failed.every(
+      (batch) => batch.persistentRetryAvailable === true
+    ),
     warning: failed.length > 0
       ? { message: `${failed.length} 个存档批次存在失败文件，可在存档中心重试` }
       : null
@@ -270,7 +296,17 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       metadata
     });
     const batchId = batchIdFromResult(created);
-    if (!batchId) throw new Error(`存档服务未返回批次 ID：${operation}`);
+    if (!batchId) {
+      return {
+        batchId: null,
+        created,
+        archiveFailed: true,
+        persistentRetryAvailable: created && created.persistentRetryAvailable === true,
+        warning: created && created.warning
+          ? created.warning
+          : { message: `存档服务未返回批次 ID：${operation}` }
+      };
+    }
     if (rememberActive) rememberBatch(module, batchId, runKeys);
     attachedPaths.set(String(batchId), new Set(uniqueFiles.map(fileIdentity)));
     if (!keepOutputOpen && uniqueFiles.some((item) => item.role === 'output')) {
@@ -280,6 +316,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       batchId,
       created,
       archiveFailed: created.archiveFailed === true,
+      persistentRetryAvailable: created.archiveFailed === true
+        ? created.persistentRetryAvailable === true
+        : true,
       warning: created.warning || null
     };
   }
@@ -318,6 +357,9 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       batchId,
       appended,
       archiveFailed: appended && appended.archiveFailed === true,
+      persistentRetryAvailable: appended && appended.archiveFailed === true
+        ? appended.persistentRetryAvailable === true
+        : true,
       warning: appended && appended.warning ? appended.warning : null
     };
   }
@@ -662,6 +704,86 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       });
     }
 
+    if (channel === 'position-reconciliation:bank:apply-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:source:prepare-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:source:apply-import') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
+        [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:run:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        { ...(runtime.metadata || {}), runKey: runtime.runKey }
+      );
+    }
+    if (channel === 'position-reconciliation:run:import-result') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        runtime.inputFiles && runtime.inputFiles.length > 0
+          ? runtime.inputFiles
+          : (runtime.inputPaths || []),
+        [],
+        { ...(runtime.metadata || {}), runKey: runtime.runKey }
+      );
+    }
+    if (channel === 'position-reconciliation:bank:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.position,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        runtime.metadata || {}
+      );
+    }
+    if (channel === 'position-reconciliation:linked:export'
+        || channel === 'position-reconciliation:raw:export') {
+      if (!isSuccessful(result)) return { handled: false };
+      return archiveImmediate(
+        MODULES.positionLink,
+        channel,
+        [],
+        runtime.outputPaths || [],
+        runtime.metadata || {}
+      );
+    }
+
     return { handled: false };
   }
 
@@ -680,7 +802,12 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       if (typeof onWarning === 'function') {
         try { onWarning(warning); } catch (_error) { /* 存档告警不得影响业务 */ }
       }
-      return { handled: true, archiveFailed: true, warning };
+      return {
+        handled: true,
+        archiveFailed: true,
+        persistentRetryAvailable: false,
+        warning
+      };
     }
   }
 

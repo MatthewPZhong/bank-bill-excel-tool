@@ -217,6 +217,7 @@ test('失败和重试保留累计元数据，最终完成后恢复批次完成�
     assert.equal(interrupted.artifactCount, 1);
     assert.equal(repository.getArtifact(artifact.id).status, 'failed');
     assert.equal(repository.getBatch(batch.id).failureCount, 1);
+    assert.deepEqual(repository.listUnresolvedArtifactSourcePaths(), ['/private/source.xlsx']);
 
     setTime('2026-07-20T12:01:00.000Z');
     repository.beginBatchRetry(batch.id);
@@ -247,6 +248,7 @@ test('失败和重试保留累计元数据，最终完成后恢复批次完成�
     assert.equal(completed.batch.failureCount, 2);
     assert.equal(completed.batch.retryCount, 2);
     assert.equal(completed.batch.lastErrorCode, '');
+    assert.deepEqual(repository.listUnresolvedArtifactSourcePaths(), []);
   } finally {
     db.close();
   }

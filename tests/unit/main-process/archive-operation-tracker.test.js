@@ -269,6 +269,32 @@ test.describe('archive operation tracker', () => {
     assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, sourceSnapshot);
   });
 
+  test('平盘输入优先携带解析时 snapshot 和 SHA，不被操作完成后的快照覆盖', async () => {
+    const { tracker, calls } = createHarness();
+    const inputPath = path.resolve('/tmp/position-input.xlsx');
+    const parsedSnapshot = { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 };
+    const laterSnapshot = { sizeBytes: 10, mtimeMs: 50, ctimeMs: 60, ino: 40 };
+    const expectedSha256 = 'b'.repeat(64);
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: [inputPath],
+        inputFiles: [{
+          filePath: inputPath,
+          sourceSnapshot: parsedSnapshot,
+          expectedSha256,
+          sizeBytes: 10
+        }],
+        sourceSnapshots: new Map([[inputPath, laterSnapshot]])
+      }
+    });
+
+    assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, parsedSnapshot);
+    assert.equal(calls[0].payload.files[0].expectedSha256, expectedSha256);
+    assert.equal(calls[0].payload.files[0].sizeBytes, 10);
+  });
+
   test('存档异常转成告警，不向业务调用方抛出', async () => {
     const warnings = [];
     const tracker = createArchiveOperationTracker({
@@ -286,6 +312,7 @@ test.describe('archive operation tracker', () => {
     });
 
     assert.equal(result.archiveFailed, true);
+    assert.equal(result.persistentRetryAvailable, false);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0].message, /disk full/);
   });
@@ -559,6 +586,96 @@ test.describe('archive operation tracker', () => {
     assert.deepEqual(calls.find((call) => call.type === 'append').payload.files.map((item) => item.filePath), [
       '/tmp/channel-a.xlsx', '/tmp/channel-b.xlsx'
     ]);
+  });
+
+  test('平盘输入、回导和每次结果导出都独立立即存档，不依赖进程内运行批次', async () => {
+    const { tracker, calls } = createHarness();
+
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:source:prepare-import',
+      result: {
+        status: 'ok',
+        results: [
+          { status: 'ok', fileName: 'transfer.xlsx' },
+          { status: 'failed', fileName: 'bad.xlsx' }
+        ]
+      },
+      runtime: { inputPaths: ['/tmp/transfer.xlsx'] }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: ['/tmp/position-bank.xlsx'],
+        metadata: { scopes: [{ channel: 'DBS', monthKey: '2026-07' }] }
+      }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:run:export',
+      result: { status: 'ok', runId: 31 },
+      runtime: { runKey: 31, outputPaths: ['/tmp/position-result.xlsx'] }
+    });
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:run:import-result',
+      result: { status: 'ok', runId: 31 },
+      runtime: { runKey: 31, inputPaths: ['/tmp/position-edited.xlsx'] }
+    });
+
+    const creates = calls.filter((call) => call.type === 'create');
+    assert.equal(creates.length, 4);
+    assert.deepEqual(creates.map((call) => call.payload.files[0].filePath), [
+      '/tmp/transfer.xlsx',
+      '/tmp/position-bank.xlsx',
+      '/tmp/position-result.xlsx',
+      '/tmp/position-edited.xlsx'
+    ]);
+    assert.equal(calls.filter((call) => call.type === 'append').length, 0);
+  });
+
+  test('仅待确认的账户表 prepare 阶段不建立空存档批次', async () => {
+    const { tracker, calls } = createHarness();
+    const result = await tracker.handleOperation({
+      channel: 'position-reconciliation:source:prepare-import',
+      result: {
+        status: 'ok',
+        successCount: 0,
+        confirmationCount: 1,
+        archiveDeferred: true,
+        inputPaths: []
+      },
+      runtime: { inputPaths: [] }
+    });
+
+    assert.deepEqual(result, { handled: false });
+    assert.deepEqual(calls, []);
+  });
+
+  test('平盘银行批量导入立即存档全部成功输入，跨重启无需恢复范围内存', async () => {
+    const { tracker, calls } = createHarness();
+
+    await tracker.handleOperation({
+      channel: 'position-reconciliation:bank:apply-import',
+      result: { status: 'ok' },
+      runtime: {
+        inputPaths: ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx'],
+        metadata: {
+          scopes: [
+            { channel: 'DBS', monthKey: '2026-07' },
+            { channel: 'MAYBANK', monthKey: '2026-08' }
+          ],
+          scopeInputs: [
+            { channel: 'DBS', monthKey: '2026-07', inputPaths: ['/tmp/dbs.xlsx'] },
+            { channel: 'MAYBANK', monthKey: '2026-08', inputPaths: ['/tmp/maybank.xlsx'] }
+          ]
+        }
+      }
+    });
+
+    const importedBatch = calls.find((call) => call.type === 'create');
+    assert.deepEqual(
+      importedBatch.payload.files.map((item) => item.filePath),
+      ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx']
+    );
   });
 
   test('临时 MPT 修复不会抢占正式前置资金对账的首次结果', async () => {

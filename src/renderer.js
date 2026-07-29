@@ -543,6 +543,17 @@ const rendererPending = window.__rendererPending.createRendererPending({
   createConfirmDialog
 });
 
+const positionReconciliationUI = window.__positionReconciliation
+  ? window.__positionReconciliation.createPositionReconciliationUI({
+      api: window.desktopApi && window.desktopApi.positionReconciliation,
+      openModal,
+      closeModal,
+      createAlertDialog,
+      createConfirmDialog,
+      modalRoot: elements.modalRoot
+    })
+  : null;
+
 const {
   applyNewAccountPreviewState,
   applyTemplateManagerPreviewState,
@@ -1527,6 +1538,11 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   }
   if (elements.positionReconciliationModulePanel) {
     elements.positionReconciliationModulePanel.hidden = moduleId !== MODULES.positionReconciliation.id;
+    if (moduleId === MODULES.positionReconciliation.id && positionReconciliationUI) {
+      positionReconciliationUI.refresh().catch((error) => {
+        console.warn('refresh position reconciliation status failed:', error);
+      });
+    }
   }
   // v2.1.2 T2：月度银行对账单BU回填校验模块面板隐藏控制
   if (elements.bankBuReconModulePanel) {
@@ -2649,12 +2665,19 @@ function createAppUpdateSettingsDialog() {
         || status === 'failed'
         || status === 'incomplete';
     const locked = batch.locked === true;
+    const selectRetrySource = batch.retryMode === 'select-source';
+    const retryTitle = selectRetrySource ? '选择原文件并重试' : '重试失败存档';
     const deleteTitle = locked ? '请先解除锁定，再永久删除批次' : '永久删除批次';
-    const warning = batch.warning
+    const baseWarning = batch.warning
       ?? batch.warningMessage
       ?? batch.errorMessage
       ?? batch.lastErrorMessage
       ?? '';
+    const warning = batch.requiresBusinessRerun === true
+      ? [baseWarning, '该批次缺少可验证的业务内容摘要，需要重新运行业务。']
+        .filter(Boolean)
+        .join('；')
+      : baseWarning;
 
     const fileRows = files.length > 0
       ? files.map((file) => {
@@ -2695,7 +2718,7 @@ function createAppUpdateSettingsDialog() {
         </div>
         <div class="archive-center-detail-actions">
           ${canRetry
-            ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="重试失败存档" aria-label="重试失败存档">↻</button>`
+            ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" data-retry-mode="${escapeHtml(batch.retryMode || 'same-source')}" title="${retryTitle}" aria-label="${retryTitle}">↻</button>`
             : ''}
           <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '◇' : '◆'}</button>
           <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${locked ? ' disabled' : ''}>×</button>
@@ -3020,19 +3043,50 @@ function createAppUpdateSettingsDialog() {
   async function retryArchiveBatch(button) {
     const batchId = button.dataset.batchId;
     button.disabled = true;
-    showArchiveFeedback('正在重试失败存档…', 'info');
+    const selectSource = button.dataset.retryMode === 'select-source';
+    let retryAttempted = false;
+    let operationFeedback = null;
+    showArchiveFeedback(selectSource ? '请选择业务处理时使用的原文件…' : '正在重试失败存档…', 'info');
     try {
-      const result = await getArchiveCenterApi().retryBatch(batchId);
+      let sourcePaths = null;
+      if (selectSource) {
+        const selected = await getArchiveCenterApi().selectRetrySources(batchId);
+        if (!verifyArchiveCenterAction(selected, '选择原文件失败')) {
+          showArchiveFeedback('', 'info');
+          return;
+        }
+        sourcePaths = selected.sourcePaths;
+        showArchiveFeedback('正在校验原文件并重试存档…', 'info');
+      }
+      retryAttempted = true;
+      const result = await getArchiveCenterApi().retryBatch(batchId, sourcePaths);
       if (!verifyArchiveCenterAction(result, '重试存档失败')) {
-        showArchiveFeedback('', 'info');
+        operationFeedback = { message: '', type: 'info' };
         return;
       }
-      showArchiveFeedback(result?.message || '已提交存档重试', 'success');
-      await loadArchiveBatches({ clearFeedback: false });
-      await loadArchiveStats();
+      operationFeedback = {
+        message: result?.message || '已提交存档重试',
+        type: 'success'
+      };
     } catch (error) {
-      showArchiveFeedback(`重试存档失败：${archiveCenterErrorText(error, '未知错误')}`);
+      operationFeedback = {
+        message: `重试存档失败：${archiveCenterErrorText(error, '未知错误')}`,
+        type: 'error'
+      };
     } finally {
+      if (retryAttempted) {
+        const batchesLoaded = await loadArchiveBatches({ clearFeedback: false });
+        const statsLoaded = await loadArchiveStats();
+        if (operationFeedback) {
+          const refreshSuffix = batchesLoaded && statsLoaded
+            ? ''
+            : '；页面刷新失败，请重新打开存档中心查看最新状态';
+          showArchiveFeedback(
+            `${operationFeedback.message}${refreshSuffix}`,
+            refreshSuffix ? 'error' : operationFeedback.type
+          );
+        }
+      }
       if (button.isConnected) button.disabled = false;
     }
   }
@@ -7780,6 +7834,7 @@ async function applyFullInfo(info) {
   closeModuleMenu();
   await rendererPending.initialize();
   rendererPending.bindEvents();
+  if (positionReconciliationUI) await positionReconciliationUI.initialize();
   setStatus(getEnumStatusMessage(), state.hasEnum ? 'info' : 'error', {
     errorReportReady: false
   });
@@ -7883,16 +7938,7 @@ async function applyFullInfo(info) {
       updateReconIdFixUi();
     });
   }
-  // v3.0.24：仅前端占位，所有业务按钮禁止接真实 IPC。
-  [
-    [elements.positionReconciliationRunBtn, '开始运行'],
-    [elements.positionReconciliationTableManagerBtn, '对账数据管理'],
-    [elements.positionReconciliationLinkedTableManagerBtn, '链接表管理'],
-    [elements.positionReconciliationConfigBtn, '对账配置管理'],
-    [elements.positionReconciliationExportBtn, '导出文件']
-  ].forEach(([button, featureName]) => {
-    if (button) button.addEventListener('click', () => showComingSoon(featureName));
-  });
+  // v3.1.0：平盘模块事件由 renderer-position-reconciliation.js 独立管理。
   elements.statusBox.addEventListener('click', () => {
     if (state.manualBalancePromptReady && state.manualBalancePrompt) {
       openModal(createManualBalanceSeedDialog(state.manualBalancePrompt));
@@ -8448,6 +8494,38 @@ async function applyFullInfo(info) {
   } else if (info.previewModal === 'position-reconciliation-panel') {
     setTimeout(() => {
       applyPositionReconciliationPanelPreviewState();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-data-manager') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewDataManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-differences') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewDifferenceManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-linked-manager') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewLinkedManager();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-raw-sources') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewRawSourceDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-source-delete') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewSourceDeleteDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-run-scope') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewRunScopeDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-result') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewResultDialog();
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-account-mapping') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewMappingDialog();
     }, 120);
   } else if (info.previewModal === 'scenario-config-c4-gateway') {
     setTimeout(() => {

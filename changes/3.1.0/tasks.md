@@ -1,0 +1,87 @@
+# Tasks — v3.1.0
+
+## 1. 文档与模板
+
+- [x] 建立 spec、test-spec、tasks、implementation notes
+- [x] 新建四个链接对账模板并更新清结算银行账户表名称
+- [x] 更新版本号、三份版本文档和重要变量清单
+
+## 2. 存储与导入
+
+- [x] 建立持久 position side DB 与 schema
+- [x] 增加 operation 级输入文件提交凭证，并与银行、普通来源、账户确认和结果回导业务事务原子写入
+- [x] 增加首次 bootstrap、主库预登记 operation token、侧库 checkpoint 历史链、未知/旧标记侧库拒绝接管、新旧 generation 分叉阻断和完整目录备份说明
+- [x] 增加平盘全局操作互斥、operation token 所有权校验和异常退出追平
+- [x] 银行 46/49 列导入、范围替换和表库管理
+- [x] 五类原始表识别、校验、写入和派生
+- [x] 独立账户映射、重建和 revision
+- [x] 链接表导出、月份删除和账户快照删除
+- [x] 银行全局 revision、跨范围 BizId 冲突和删除范围门禁
+
+## 3. 引擎与结果
+
+- [x] 十组资金性质匹配和严格 1:1
+- [x] 账户逻辑分组与三类账户场景
+- [x] 持久草稿、差异和 stale 校验
+- [x] 运行范围、来源集合、冲突计数、快照、汇总结构及明细一致性 fail-closed 校验
+- [x] 运行行完整性 hash、结果/差异精确集合、来源消费标记和当前银行/链接引用校验
+- [x] 49 列导出、高亮、回导防篡改和确认事务
+- [x] 零数据导出的标识符列级文本格式
+- [x] 已确认运行间订单来源/银行 BizId 双向 1:1 消费审计
+- [x] 已确认运行血缘与持久来源消费表双向完整性校验
+- [x] 消费 owner 运行状态、完整运行行血缘与幂等旧 owner 验真
+- [x] Excel 日期时间往返兼容、回导统计刷新和差异范围隔离
+- [x] BillDate/ValueDate 纯日期兼容与完整时分秒防篡改
+
+## 4. UI 与接线
+
+- [x] 主面板运行、管理和导出状态
+- [x] 对账数据管理三 tab
+- [x] 差异页功能/月份单选筛选、银行渠道 `Channel-地区` 与五列表格
+- [x] 链接表/原始表/删除/映射
+- [x] 链接表月份范围和表库更新日期
+- [x] 链接表操作栏退役及底部导入/导出/返回入口调整
+- [x] 链接原始表行数/操作栏退役及底部导出/返回入口调整
+- [x] 运行范围和结果确认
+- [x] 存档中心与活动操作接线
+- [x] 修复失败存档暂存副本的重试、删除、启动保护和退出排空生命周期
+- [x] 防止跨批次共用源路径在仍有未完成 artifact 时被提前释放
+- [x] 防止主进程后置目录清理绕过未完成 artifact 保护集
+- [x] 静态模板与运行时 writer 统一标识符文本列判定
+- [x] 存档业务成功返回前完成登记与处理，消除未持久内存尾队列窗口
+- [x] 增加持久存档 outbox、启动重放和纯导出异常退出恢复
+- [x] 覆盖同进程部分提交的 outbox 恢复及部分失败重放源文件保护
+- [x] outbox 附件登记完整后才删除任务，元数据登记前失败继续保护源文件
+- [x] 正式建批/追加附件缺少 artifact 时转同 operation key outbox，双失败不推进 checkpoint
+- [x] 区分账户表待确认 prepare 与已提交业务，避免空存档 pending
+- [x] 抽取 pending/存档/checkpoint 生命周期 helper 并覆盖正式批次、outbox、双失败
+- [x] 主库 pending 文件加入启动暂存保护集，保护集不可读时跳过清理
+- [x] pending `archiveFiles` 缺失或结构损坏时禁止降级为空保护集
+- [x] 恢复流程复用 pending 文件校验，损坏清单不写 outbox、不清 pending
+- [x] outbox 拒绝非字符串和空白文件路径，并覆盖两次启动保留
+- [x] 所有 archive 状态在 checkpoint 前强制校验 pending 文件清单
+- [x] 管理页侧库恢复错误展示 detailLines
+- [x] 暂存输入解析时 snapshot/size/SHA-256 绑定并贯穿 token、pending、outbox 和正式存档
+- [x] 恢复 input 复用解析时证据并在 outbox 登记前校验，内容变化时 fail closed
+- [x] 多文件部分提交恢复按 pending 与 side DB 提交凭证交集存档，未提交文件排除、证据不一致 fail closed
+- [x] 存档重试已有 SHA 时允许历史 stat 变化的同字节副本，并保留当前读取稳定性、大小和 SHA 门禁
+- [x] 存档中心接通选择原文件重试，区分 same-source / select-source / rerun-business 且不暴露摘要
+- [x] 异常恢复完成后立即清理 prepared 未提交输入的受控 staging 子目录
+
+## 5. 验证
+
+- [x] 定向 unit / integration
+- [x] 全部相关 preview
+- [x] release-check（最终提交）
+- [x] scan:vars / check:vars（最终提交，命中项已进入关联功能 review）
+- [x] startup:measure（最终提交）
+- [x] reconciliation blindspot pass
+- [ ] team-lead 三层质量门禁（最终提交）
+- [x] second review P2/P3 修复及 self-review P0-P4 Finding 清零
+- [x] 记录真实资金人工复核缺口
+- [x] 外部 final review P2/P3 故障注入回归
+- [x] 第三轮 review P3 与维护建议定向回归
+- [x] Self-review 修复空白行导致的物理行号漂移
+- [x] Self-review 修复存档混合重试部分成功后的计数与页面刷新
+
+> 自动化、预览和代码复核已完成；真实或脱敏资金数据逐笔验收仍是发布前人工门禁，不以本清单勾选代替。
