@@ -70,6 +70,9 @@
 - [x] PR #104、PR #105 合入 `main`
 - [x] 用户确认 Windows Excel/WPS 人工验收通过
 - [x] 合并后干净依赖环境发布门禁
-- [ ] 创建并推送 `v3.1.2` tag
+- [x] 首轮 Windows Release 门禁发现 staging 只读句柄 `fsync` 失败并完成定向修复
+- [x] Windows fd 热修完整 `release-check` 与重要变量门禁
+- [x] 首轮 `v3.1.2` tag 已触发门禁，且确认失败发生在构建/Release/资产创建前
+- [ ] 热修合入并确认无同名 Release/资产后，将失败 tag 重建到修复后的最新 `main`
 - [ ] Windows Release workflow 与四项公开资产回读
 - [ ] 回写正式发布证据并确认 tracked worktree 干净

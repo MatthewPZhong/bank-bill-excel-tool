@@ -24,6 +24,7 @@ v3.1.2 修复工具箱合并/拆分后日期变数字、长编号变科学计数
 - 输出样式按最终签名去重并执行组件预算；临时文件发布前严格解析 Content Types、包根/工作簿 relationships、全部 worksheet 和 styles，并核对内部关系目标、Sheet 声明闭包、逐页表头、数据行、样式数及结构扫描前后摘要。缺失包根关系、悬空内部关系、截断 XML、悬空/游离 Sheet、错表头、漏行或校验期间换文件均不发布。
 - 单/多文件输出均先整批生成、校验，再通过 staging、journal 和恢复索引发布。固定索引会在任何 staging byte 写入前登记 preparing intent；写后 identity 贯穿 generation、staging 和 rename 后目标，同大小换内容也会拒绝。提交收尾另有 finalizing intent，journal 删除失败或 journal 已删但 index 未删都可安全重试；启动恢复失败时直接显示人工恢复路径并停止启动。
 - 全文件哈希、staging 复制、fsync 和恢复在串行 Worker 中执行，不阻塞 Electron 主界面；Worker 异常退出会先恢复再报告失败。30 万行级低样式文件保持流式处理，路径矩阵覆盖 XLSX/BIFF8/CSV 的合并、单拆、多拆、分页、行数与顺序守恒。
+- Windows 暂存文件以可写句柄执行落盘刷新，避免 `FlushFileBuffers` 对只读句柄返回 `EPERM`；该修复只改变 staging 句柄权限，不改变文件内容、哈希、hardlink no-replace、回滚或人工恢复口径。
 
 **兼容与人工门禁**
 
