@@ -1,9 +1,9 @@
 # Spec B — 工具箱合并/拆分格式保真
 
-> status: implemented-awaiting-release-gates
+> status: release-prepared
 > scope: 工具箱“合并表格 / 按字段拆分”读取、行载荷、写入、Worker 与测试
 > excludes: 资金匹配引擎、场景配置、数据库 schema
-> updated: 2026-07-29
+> updated: 2026-07-30
 
 ## 0. Task Brief
 
@@ -819,3 +819,10 @@ TOOLBOX_STYLE_BUDGETS = {
 - 分别用 Windows Excel 与 WPS 打开。
 - 核对可见格式、日期、长数字、分页、隐藏布局和无修复提示。
 - 自动 XML/回读测试不能替代最终 Excel/WPS 人工打开验收。
+
+### 发布准备状态（2026-07-30）
+
+- PR #104 与尾随小数点修复 PR #105 均已合入 `main`。
+- 用户已明确确认人工验收通过；该确认作为 Windows Excel/WPS 人工门禁的签字证据，不扩写未提供的样本明细。
+- 合并后干净依赖环境的 `release-check`、主页面对齐、重要变量扫描和生产依赖审计均已执行；正式 tag 与 GitHub Release 仍须由不可变 Windows 发布工作流完成。
+- FAT 或部分网络盘不支持 hardlink 时仍按既定契约在改动正式目标前安全失败，不因人工验收而放宽或增加覆盖型 fallback。
