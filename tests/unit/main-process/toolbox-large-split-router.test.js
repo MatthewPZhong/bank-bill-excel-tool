@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const XLSX = require('xlsx');
+const JSZip = require('jszip');
 
 // router 通过模块对象调用 sizePreflight.collectEntrySizes，故此处覆盖同一模块对象的属性即可拦截。
 const sizePreflight = require('../../../src/backend/pending-import/xlsx-size-preflight');
@@ -263,6 +264,82 @@ test('真实夹具：多 sheet .xlsx（真实 collectEntrySizes）→ true', asy
     XLSX.utils.book_append_sheet(wb, ws2, 'S2');
     XLSX.writeFile(wb, fp);
     assert.equal(await shouldUseLargeChannel(fp), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('真实夹具：worksheet relationship 指向 customA/customB.xml 仍进入大通道', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tbx-router-custom-rel-'));
+  const fp = path.join(dir, 'custom-parts.xlsx');
+  try {
+    const zip = new JSZip();
+    zip.file('[Content_Types].xml', [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">',
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>',
+      '<Default Extension="xml" ContentType="application/xml"/>',
+      '</Types>'
+    ].join(''));
+    zip.file('xl/workbook.xml', [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+      ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">',
+      '<sheets>',
+      '<sheet name="A" sheetId="1" r:id="rId1"/>',
+      '<sheet name="B" sheetId="2" r:id="rId2"/>',
+      '</sheets>',
+      '</workbook>'
+    ].join(''));
+    zip.file('xl/_rels/workbook.xml.rels', [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/customA.xml"/>',
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/customB.xml"/>',
+      '</Relationships>'
+    ].join(''));
+    const sheetXml = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+      '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>H</t></is></c></row></sheetData>',
+      '</worksheet>'
+    ].join('');
+    zip.file('xl/worksheets/customA.xml', sheetXml);
+    zip.file('xl/worksheets/customB.xml', sheetXml);
+    fs.writeFileSync(fp, await zip.generateAsync({ type: 'nodebuffer' }));
+
+    assert.equal(await shouldUseLargeChannel(fp), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('真实夹具：扩展名为 .xls 的多 Sheet OOXML 仍按 magic 进入大通道', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tbx-router-real-'));
+  const actual = path.join(dir, 'actual.xlsx');
+  const disguised = path.join(dir, 'disguised.xls');
+  try {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['H'], ['A']]), 'S1');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['H'], ['B']]), 'S2');
+    XLSX.writeFile(wb, actual);
+    fs.copyFileSync(actual, disguised);
+    assert.equal(await shouldUseLargeChannel(disguised), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('真实夹具：扩展名为 .xlsx 的 OLE2 BIFF8 不进入 ZIP Worker', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tbx-router-real-'));
+  const actual = path.join(dir, 'actual.xls');
+  const disguised = path.join(dir, 'disguised.xlsx');
+  try {
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['H'], ['A']]), 'S1');
+    XLSX.writeFile(wb, actual, { bookType: 'biff8' });
+    fs.copyFileSync(actual, disguised);
+    assert.equal(await shouldUseLargeChannel(disguised), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

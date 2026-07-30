@@ -29,7 +29,7 @@ test.describe('toolbox multi split validation', () => {
     }
   });
 
-  test('支持 1-8 组并拒绝大小写不敏感的重复文件名', () => {
+  test('支持 1-8 组并按当前平台路径规则判断大小写重复文件名', () => {
     const groups = Array.from({ length: MAX_MULTI_SPLIT_GROUPS }, (_, index) => ({
       fileName: `文件${index + 1}`,
       field: 'Channel',
@@ -40,10 +40,22 @@ test.describe('toolbox multi split validation', () => {
       () => normalizeMultiSplitGroups([...groups, { fileName: '文件9', field: 'Channel', values: ['C9'] }]),
       ToolboxMultiSplitValidationError
     );
+    const caseOnlyGroups = [
+      { fileName: 'Same', field: 'Channel', values: ['A'] },
+      { fileName: 'same.XLSX', field: 'Channel', values: ['B'] }
+    ];
+    if (process.platform === 'linux') {
+      assert.equal(normalizeMultiSplitGroups(caseOnlyGroups).length, 2);
+    } else {
+      assert.throws(() => normalizeMultiSplitGroups(caseOnlyGroups), /文件名重复/);
+    }
+  });
+
+  test('Unicode NFC 与 NFD 等价文件名在生成前被判为重复', () => {
     assert.throws(
       () => normalizeMultiSplitGroups([
-        { fileName: 'Same', field: 'Channel', values: ['A'] },
-        { fileName: 'same.XLSX', field: 'Channel', values: ['B'] }
+        { fileName: '\u00e9', field: 'Channel', values: ['A'] },
+        { fileName: 'e\u0301.xlsx', field: 'Channel', values: ['B'] }
       ]),
       /文件名重复/
     );
@@ -137,6 +149,27 @@ test.describe('toolbox multi split atomic publish', () => {
     );
     assert.equal(fs.readFileSync(temporaryPath, 'utf8'), 'new-a');
     assert.equal(fs.lstatSync(targetPath).isDirectory(), true);
+  });
+
+  test('Unicode NFC 与 NFD 等价目标在移动任何文件前拒绝发布', () => {
+    const temp1 = path.join(root, '.tmp-unicode-1');
+    const temp2 = path.join(root, '.tmp-unicode-2');
+    const targetNfc = path.join(root, '\u00e9.xlsx');
+    const targetNfd = path.join(root, 'e\u0301.xlsx');
+    fs.writeFileSync(temp1, 'new-a');
+    fs.writeFileSync(temp2, 'new-b');
+    fs.writeFileSync(targetNfc, 'old-target');
+
+    assert.throws(
+      () => publishPreparedSplitFiles([
+        { temporaryPath: temp1, targetPath: targetNfc, fileName: '\u00e9.xlsx' },
+        { temporaryPath: temp2, targetPath: targetNfd, fileName: 'e\u0301.xlsx' }
+      ]),
+      /目标路径重复/
+    );
+    assert.equal(fs.readFileSync(targetNfc, 'utf8'), 'old-target');
+    assert.equal(fs.readFileSync(temp1, 'utf8'), 'new-a');
+    assert.equal(fs.readFileSync(temp2, 'utf8'), 'new-b');
   });
 
   test('原文件恢复失败时保留备份并显式要求上层保留临时目录', () => {

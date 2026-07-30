@@ -1,0 +1,525 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
+const XLSX = require('xlsx');
+const {
+  countStyleComponents,
+  createToolboxOutputWriter,
+  validateGeneratedWorkbook,
+  writeToolboxRows
+} = require('../../../src/main-process/toolbox-output-writer');
+
+function tempOutput(name = 'out.xlsx') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-output-writer-'));
+  return {
+    dir,
+    filePath: path.join(dir, name),
+    cleanup() {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  };
+}
+
+function makeResolver() {
+  const styles = new Map([
+    [0, Object.freeze({})],
+    [1, Object.freeze({
+      font: { name: 'Calibri', size: 12, bold: true, color: { argb: 'FFFF0000' } },
+      fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } },
+      alignment: { horizontal: 'center', vertical: 'middle', wrapText: true }
+    })],
+    [2, Object.freeze({
+      numFmt: '000000',
+      border: { bottom: { style: 'thin', color: { argb: 'FF0000FF' } } }
+    })],
+    [3, Object.freeze({ alignment: { textRotation: -45 } })],
+    [4, Object.freeze({ alignment: { textRotation: 'vertical' } })]
+  ]);
+  return new Map([['fixture', { get: (ref) => styles.get(ref) }]]);
+}
+
+function cell(columnIndex, outputValue, styleRef, extra = {}) {
+  return {
+    isExplicitCell: true,
+    columnIndex,
+    outputValue,
+    effectiveStyleRef: { sourceRegistryId: 'fixture', styleRef },
+    sourceFile: '/tmp/input.xlsx',
+    sourceSheet: 'Data',
+    cellRef: `${String.fromCharCode(65 + columnIndex)}2`,
+    ...extra
+  };
+}
+
+test('唯一 writer 保留表头/数据样式、值类型与行列布局', async () => {
+  const output = tempOutput();
+  try {
+    const headerCells = [cell(0, ' raw ', 1), cell(1, 'ID', 2)];
+    const row = {
+      rowIndex: 2,
+      height: 23,
+      hidden: true,
+      outlineLevel: 2,
+      cells: [cell(0, true, 1), cell(1, '001234', 2)]
+    };
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['Flag', 'ID'],
+      rawHeaderCells: headerCells,
+      headerRow: { height: 31 },
+      layoutBaseline: {
+        defaultRowHeight: 18,
+        defaultColWidth: 11,
+        customHeight: true,
+        columnRanges: [
+          { min: 1, max: 1, width: 17, hidden: false, outlineLevel: 1 },
+          { min: 2, max: 2, width: 22, hidden: true, outlineLevel: 0 }
+        ]
+      },
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => emit(row)
+    });
+
+    assert.equal(result.dataRowCount, 1);
+    assert.equal(result.sheetCount, 1);
+    assert.equal(result.warningSummary.warningCount, 0);
+    assert.equal(result.sha256.length, 64);
+    assert.ok(result.styleStats.actualCounts.cellXfs >= 2);
+    assert.deepEqual(
+      result.styleStats.actualCounts,
+      result.styleStats.projectedFinalCounts,
+      'writer 预计样式组件数必须与临时产物实际节点数完全一致'
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.getCell('A1').value, 'Flag');
+    assert.equal(sheet.getCell('A1').font.bold, true);
+    assert.equal(sheet.getCell('A1').font.color.argb, 'FFFF0000');
+    assert.equal(sheet.getCell('A1').fill.fgColor.argb, 'FFFFFF00');
+    assert.equal(sheet.getCell('B1').numFmt, '000000');
+    assert.equal(sheet.getCell('A2').value, true);
+    assert.equal(sheet.getCell('B2').value, '001234');
+    assert.equal(sheet.getCell('B2').numFmt, '000000');
+    assert.equal(sheet.getRow(1).height, 31);
+    assert.equal(sheet.getRow(2).height, 23);
+    assert.equal(sheet.getRow(2).hidden, true);
+    assert.equal(sheet.getRow(2).outlineLevel, 2);
+    assert.equal(sheet.getColumn(1).width, 17);
+    assert.equal(sheet.getColumn(2).hidden, true);
+    assert.equal(sheet.properties.defaultRowHeight, 18);
+    assert.equal(sheet.properties.defaultColWidth, 11);
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultRowHeight="18"/);
+    assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultColWidth="11"/);
+    assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bcustomHeight="1"/);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('自动分页重放基准表头与列布局', async () => {
+  const output = tempOutput();
+  try {
+    const writer = createToolboxOutputWriter({
+      savePath: output.filePath,
+      normalizedHeaders: ['ID'],
+      rawHeaderCells: [cell(0, 'ID', 1)],
+      layoutBaseline: {
+        defaultRowHeight: 18,
+        defaultColWidth: 11,
+        customHeight: true,
+        columnRanges: [{ min: 1, max: 1, width: 24 }]
+      },
+      sourceRegistryResolver: makeResolver(),
+      maxRowsPerSheet: 1
+    });
+    writer.emitRow({ cells: [cell(0, 'A', 2)] });
+    writer.emitRow({ cells: [cell(0, 'B', 2)] });
+    const result = await writer.commitAndValidate();
+    assert.equal(result.sheetCount, 2);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['COMMON', 'COMMON(2)']);
+    for (const sheet of workbook.worksheets) {
+      assert.equal(sheet.getCell('A1').value, 'ID');
+      assert.equal(sheet.getCell('A1').font.bold, true);
+      assert.equal(sheet.getColumn(1).width, 24);
+      assert.equal(sheet.properties.defaultRowHeight, 18);
+      assert.equal(sheet.properties.defaultColWidth, 11);
+    }
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    for (const sheetNumber of [1, 2]) {
+      const sheetXml = await zip.file(`xl/worksheets/sheet${sheetNumber}.xml`).async('string');
+      assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultRowHeight="18"/);
+      assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultColWidth="11"/);
+      assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bcustomHeight="1"/);
+    }
+    assert.equal(workbook.worksheets[0].getCell('A2').value, 'A');
+    assert.equal(workbook.worksheets[1].getCell('A2').value, 'B');
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('重叠列范围按来源声明顺序应用，后声明范围覆盖前声明范围', async () => {
+  const output = tempOutput();
+  try {
+    const writer = createToolboxOutputWriter({
+      savePath: output.filePath,
+      normalizedHeaders: ['A', 'B', 'C'],
+      layoutBaseline: {
+        columns: [
+          { minColumnIndex: 1, maxColumnIndex: 2, width: 20, hidden: true, outlineLevel: 2 },
+          { minColumnIndex: 0, maxColumnIndex: 1, width: 10, hidden: false, outlineLevel: 0 }
+        ]
+      },
+      sourceRegistryResolver: makeResolver()
+    });
+    await writer.commitAndValidate();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.getColumn(1).width, 10);
+    assert.equal(sheet.getColumn(2).width, 10);
+    assert.equal(sheet.getColumn(3).width, 20);
+    assert.equal(sheet.getColumn(2).hidden, false);
+    assert.equal(sheet.getColumn(2).outlineLevel, 0);
+    assert.equal(sheet.getColumn(3).hidden, true);
+    assert.equal(sheet.getColumn(3).outlineLevel, 2);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('负角度和竖排文字旋转写入后仍可回读', async () => {
+  const output = tempOutput();
+  try {
+    const writer = createToolboxOutputWriter({
+      savePath: output.filePath,
+      normalizedHeaders: ['A', 'B'],
+      sourceRegistryResolver: makeResolver()
+    });
+    writer.emitRow({
+      cells: [cell(0, 'left', 3), cell(1, 'vertical', 4)]
+    });
+    await writer.commitAndValidate();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.getCell('A2').alignment.textRotation, -45);
+    assert.equal(sheet.getCell('B2').alignment.textRotation, 'vertical');
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('稀疏表头的隐式空白单元格继承表头行 customFormat 样式', async () => {
+  const output = tempOutput();
+  try {
+    const writer = createToolboxOutputWriter({
+      savePath: output.filePath,
+      normalizedHeaders: ['A', '', 'C'],
+      rawHeaderCells: [cell(0, 'A', 2), cell(2, 'C', 2)],
+      headerRow: {
+        rowIndex: 1,
+        customFormat: true,
+        effectiveStyleRef: { sourceRegistryId: 'fixture', styleRef: 1 }
+      },
+      sourceRegistryResolver: makeResolver()
+    });
+    await writer.commitAndValidate();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.getCell('B1').fill.fgColor.argb, 'FFFFFF00');
+    assert.equal(sheet.getCell('B1').font.bold, true);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('日期文本安全降级返回有界 warning summary', async () => {
+  const output = tempOutput();
+  try {
+    const rows = Array.from({ length: 25 }, (_, index) => ({
+      cells: [{
+        isExplicitCell: true,
+        columnIndex: 0,
+        effectiveStyleRef: { sourceRegistryId: 'fixture', styleRef: 0 },
+        sourceFile: '/tmp/input.xlsx',
+        sourceSheet: 'Data',
+        cellRef: `A${index + 2}`,
+        decodedSemanticValue: { kind: 'iso-date', lexical: `12000-01-${String(index + 1).padStart(2, '0')}` }
+      }]
+    }));
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['Date'],
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => rows.forEach(emit)
+    });
+    assert.equal(result.warningSummary.warningCount, 25);
+    assert.equal(result.warningSummary.warningSamples.length, 20);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('极端数值日期不得写出 Infinity，固定降级 canonical 文本并提示', async () => {
+  const output = tempOutput('extreme-date.xlsx');
+  try {
+    const extremeCell = {
+      isExplicitCell: true,
+      columnIndex: 0,
+      rawLexicalValue: '1e309',
+      decodedSemanticValue: `1${'0'.repeat(309)}`,
+      cellType: 'number',
+      sourceDateSystem: 1900,
+      sourceFormat: 'yyyy-mm-dd',
+      effectiveStyleRef: { sourceRegistryId: 'fixture', styleRef: 0 },
+      sourceFile: '/tmp/extreme-date.xlsx',
+      sourceSheet: 'Data',
+      rowIndex: 2,
+      cellRef: 'A2'
+    };
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['Date'],
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => emit({ rowIndex: 2, cells: [extremeCell] })
+    });
+    assert.equal(result.warningSummary.warningCount, 1);
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    assert.equal(workbook.worksheets[0].getCell('A2').value, `1${'0'.repeat(309)}`);
+    assert.equal(workbook.worksheets[0].getCell('A2').numFmt, '@');
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const worksheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert.doesNotMatch(worksheetXml, /(?:NaN|Infinity)/);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('writer 统一 ST_Xstring 编码，保留控制字符和 escape 字面量', async () => {
+  const output = tempOutput('st-xstring.xlsx');
+  const semanticControlText = 'A\u0000B\u0001C\u000BD\r\nE\u007FF';
+  try {
+    await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['_x0041_', 'Control'],
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => emit({
+        rowIndex: 2,
+        cells: [
+          cell(0, '_X0042_', 0),
+          cell(1, semanticControlText, 0)
+        ]
+      })
+    });
+
+    const workbook = XLSX.readFile(output.filePath, { raw: true });
+    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
+      header: 1,
+      raw: true
+    });
+    assert.equal(rows[0][0], '_x0041_');
+    assert.equal(rows[1][0], '_X0042_');
+    assert.equal(rows[1][1], semanticControlText);
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const worksheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert.match(worksheetXml, /_x005F_x0041_/);
+    assert.match(worksheetXml, /_x005F_X0042_/);
+    assert.match(worksheetXml, /_x0000_/);
+    assert.match(worksheetXml, /_x000D_/);
+    assert.match(worksheetXml, /_x007F_/);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('超过 Excel 32767 UTF-16 code unit 的表头或数据文本整批失败并清理', async () => {
+  const headerOutput = tempOutput('long-header.xlsx');
+  try {
+    assert.throws(
+      () => createToolboxOutputWriter({
+        savePath: headerOutput.filePath,
+        normalizedHeaders: ['A'.repeat(32768)],
+        sourceRegistryResolver: makeResolver()
+      }),
+      (error) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /文本超出 Excel 可保真范围/);
+        assert.match(error.detailLines.join('\n'), /32767.*UTF-16/);
+        return true;
+      }
+    );
+    assert.equal(fs.existsSync(headerOutput.filePath), false);
+  } finally {
+    headerOutput.cleanup();
+  }
+
+  const dataOutput = tempOutput('long-data.xlsx');
+  try {
+    await assert.rejects(
+      () => writeToolboxRows({
+        savePath: dataOutput.filePath,
+        normalizedHeaders: ['Text'],
+        sourceRegistryResolver: makeResolver(),
+        writeRows: async (emit) => emit({
+          rowIndex: 2,
+          cells: [cell(0, '😀'.repeat(16384), 0)]
+        })
+      }),
+      (error) => {
+        assert.match(error.message, /文本超出 Excel 可保真范围/);
+        assert.match(error.detailLines.join('\n'), /input\\.xlsx|Data|A2/);
+        return true;
+      }
+    );
+    assert.equal(fs.existsSync(dataOutput.filePath), false);
+  } finally {
+    dataOutput.cleanup();
+  }
+});
+
+test('组件预算超限在 commit 前失败并清理生成文件', async () => {
+  const output = tempOutput();
+  try {
+    assert.throws(
+      () => createToolboxOutputWriter({
+        savePath: output.filePath,
+        normalizedHeaders: ['A'],
+        rawHeaderCells: [cell(0, 'A', 1)],
+        sourceRegistryResolver: makeResolver(),
+        budgets: { fills: 2 }
+      }),
+      /fills/
+    );
+    // 构造阶段在目标 writer 提交任何行之前失败；打开的空 generation stream 由进程结束前关闭。
+    // 生产 orchestrator 会在同一 task finally 中统一 dispose generation path。
+    if (fs.existsSync(output.filePath)) fs.rmSync(output.filePath, { force: true });
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('表头行 customFormat 预算失败发生在创建 generation stream 之前', () => {
+  const output = tempOutput('header-row-budget.xlsx');
+  try {
+    assert.throws(
+      () => createToolboxOutputWriter({
+        savePath: output.filePath,
+        normalizedHeaders: ['A'],
+        headerRow: {
+          rowIndex: 1,
+          customFormat: true,
+          effectiveStyleRef: { sourceRegistryId: 'fixture', styleRef: 1 }
+        },
+        sourceRegistryResolver: makeResolver(),
+        budgets: { cellXfs: 1 }
+      }),
+      /cellXfs|单元格样式/
+    );
+    assert.equal(
+      fs.existsSync(output.filePath),
+      false,
+      '调用方尚未拿到 writer 时，预算失败不得留下 generation 文件'
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('临时产物样式计数以实际子节点为准，并拒绝伪造 count 或损坏 XML', () => {
+  const valid = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">',
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>',
+    '<fonts count="2"><font/><font/></fonts>',
+    '<fills count="1"><fill/></fills>',
+    '<borders count="1"><border/></borders>',
+    '<cellXfs count="2"><xf/><xf/></cellXfs>',
+    '</styleSheet>'
+  ].join('');
+  assert.deepEqual(countStyleComponents(valid), {
+    cellXfs: 2,
+    fonts: 2,
+    fills: 1,
+    borders: 1,
+    customNumFmts: 1
+  });
+
+  assert.throws(
+    () => countStyleComponents(valid.replace(
+      '<cellXfs count="2"><xf/><xf/></cellXfs>',
+      '<cellXfs count="1"><xf/><xf/></cellXfs>'
+    )),
+    /count 与实际节点数不一致/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace('</styleSheet>', '')),
+    /不是完整有效的 XML|未完整闭合/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace('<fonts count="2"><font/><font/></fonts>', '')),
+    /缺少 fonts/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace(
+      '<fonts count="2"><font/><font/></fonts>',
+      '<fonts count="0"><wrapper><font/></wrapper></fonts>'
+    )),
+    /font 必须是 fonts 的直接子元素/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace(
+      'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"',
+      'xmlns="urn:invalid"'
+    )),
+    /命名空间无效/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace('<cellXfs ', '<CELLXFS ')),
+    /大小写无效/
+  );
+  assert.throws(
+    () => countStyleComponents(valid.replace('<fonts count=', '<fonts COUNT=')),
+    /大小写无效/
+  );
+});
+
+test('写后复核拒绝 registry 预计数量与 writer 实际数量漂移', async () => {
+  const output = tempOutput('projected-drift.xlsx');
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['ID'],
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => emit({ cells: [cell(0, '001', 2)] })
+    });
+    const wrongProjected = {
+      ...result.styleStats.projectedFinalCounts,
+      cellXfs: result.styleStats.projectedFinalCounts.cellXfs + 1
+    };
+    await assert.rejects(
+      validateGeneratedWorkbook(output.filePath, undefined, wrongProjected),
+      /样式组件数量与预计不一致：cellXfs/
+    );
+  } finally {
+    output.cleanup();
+  }
+});

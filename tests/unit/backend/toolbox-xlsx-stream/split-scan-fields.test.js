@@ -184,15 +184,16 @@ test.describe('toolbox-xlsx-stream split-scan-fields scanFields', () => {
     assert.ok(!valuesByField['ID'].includes(`v${N}`), `第 N+1 个值 v${N} 被截掉`);
   });
 
-  test('空文件（无有意义行）→ headers=null、valuesByField={}', async () => {
+  test('空文件（无有意义行）→ 统一抛 ToolboxStreamEmptyError', async () => {
     const fp = await writeMultiSheetXlsx({
       sheets: [
         { name: 'E1', target: 'worksheets/sheet1.xml', body: rowsToSheetBody([{ selfClose: true }]) }
       ]
     });
-    const { headers, valuesByField } = await scanFields(fp, null);
-    assert.equal(headers, null, '空文件 headers=null');
-    assert.deepEqual(valuesByField, {}, '空文件 valuesByField={}（累加器未 setHeaders）');
+    await assert.rejects(
+      scanFields(fp, null),
+      (error) => error && error.name === 'ToolboxStreamEmptyError' && /文件为空/.test(error.message)
+    );
   });
 
   test('🚩 契约锁：valuesByField 只含 { [field]: string[] }，不含 truncated / distinctSeen 等元数据', async () => {
@@ -216,7 +217,7 @@ test.describe('toolbox-xlsx-stream split-scan-fields scanFields', () => {
     }
   });
 
-  test('cancelToken 透传：预置取消 → reader 进入 sheet 前即 break（headers=null、valuesByField={}）', async () => {
+  test('cancelToken 透传：预置取消 → 抛专用取消错误，不返回部分成功', async () => {
     const rows = [['c']];
     for (let i = 0; i < 50; i += 1) rows.push([`v${i}`]);
     const fp = await writeMultiSheetXlsx({
@@ -226,9 +227,10 @@ test.describe('toolbox-xlsx-stream split-scan-fields scanFields', () => {
     //   循环体一次都不执行 → onHeaderRow 从不触发 → 累加器未 setHeaders → valuesByField={}、headers=null。
     //   （证明 scanFields 把 cancelToken 透传给了 T1 reader：无透传则会全量扫出 51 行。）
     const cancelToken = { cancelled: true };
-    const { headers, valuesByField } = await scanFields(fp, cancelToken);
-    assert.equal(headers, null, '预置取消：表头未读（reader 进 sheet 前即 break）');
-    assert.deepEqual(valuesByField, {}, '预置取消：valuesByField={}（cancelToken 已透传给 reader）');
+    await assert.rejects(
+      scanFields(fp, cancelToken),
+      (error) => error && error.code === 'TOOLBOX_XLSX_CANCELLED'
+    );
   });
 
   test('cancelToken 中途置位：读到若干数据行后取消 → 停止扫描（不读完全部，子集为已见值）', async () => {

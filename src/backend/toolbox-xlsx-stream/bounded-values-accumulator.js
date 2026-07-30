@@ -47,9 +47,9 @@ function createBoundedValuesAccumulator(options = {}) {
   // header -> string[]（首现序去重值，封顶后稳定为前 N 个）。这是 result() 唯一回传的结构。
   let valuesByField = {};
   // header -> Set<string>（去重判定用；该列达 N 后【丢弃 Set】释放内存，置 null）。
-  let seenByField = {};
+  let seenByField = Object.create(null);
   // header -> boolean（该列是否已封顶 / 丢弃 Set；用于内部 log / 护栏，不进 result()）。
-  let truncatedByField = {};
+  let truncatedByField = Object.create(null);
   // 已收集的去重值总数（仅统计实际放进 valuesByField 的，跨所有列）。
   let totalDistinct = 0;
   // 全局兜底是否已触发（达 maxTotalDistinct 后停止所有列新增）。
@@ -59,14 +59,19 @@ function createBoundedValuesAccumulator(options = {}) {
     const safeHeaders = Array.isArray(headers) ? headers : [];
     colIdxByField = new Map();
     valuesByField = {};
-    seenByField = {};
-    truncatedByField = {};
+    seenByField = Object.create(null);
+    truncatedByField = Object.create(null);
     totalDistinct = 0;
     totalCapReached = false;
     safeHeaders.forEach((rawHeader, colIdx) => {
       // 表头比对 / 列名键沿用 toolbox.js 现状：extractHeaders 已 normalizeCell，这里仍按列名建键（保持同名后者覆盖）。
       const header = rawHeader;
-      valuesByField[header] = [];
+      Object.defineProperty(valuesByField, header, {
+        value: [],
+        writable: true,
+        enumerable: true,
+        configurable: true
+      });
       seenByField[header] = new Set();
       truncatedByField[header] = false;
       colIdxByField.set(header, colIdx);
@@ -142,7 +147,12 @@ function createBoundedValuesAccumulator(options = {}) {
         if (!Array.isArray(incoming)) continue;
         // 本累加器未知的列 → 动态登记（列索引追加在末尾，仅用于 addRow 时的列定位；merge 直接按值追加不依赖它）。
         if (!Object.prototype.hasOwnProperty.call(valuesByField, header)) {
-          valuesByField[header] = [];
+          Object.defineProperty(valuesByField, header, {
+            value: [],
+            writable: true,
+            enumerable: true,
+            configurable: true
+          });
           seenByField[header] = new Set();
           truncatedByField[header] = false;
           colIdxByField.set(header, colIdxByField.size);

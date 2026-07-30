@@ -127,14 +127,22 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     const wb = new ExcelJS.Workbook();
     const headers = ['渠道', '币种', '金额'];
     const ws1 = wb.addWorksheet('S1');
-    ws1.addRow(headers);
+    ws1.getColumn(2).width = 23;
+    const header1 = ws1.addRow(headers);
+    header1.getCell(1).font = { bold: true, color: { argb: 'FFFF0000' } };
     ws1.addRow(['ALIPAY', 'CNY', '100']);
-    ws1.addRow(['WECHAT', 'USD', '200']);
+    const workerStyledRow1 = ws1.addRow(['WECHAT', 'USD', '200']);
+    workerStyledRow1.getCell(2).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFFF00' }
+    };
     ws1.addRow(['ALIPAY', 'CNY', '300']); // 渠道/币种重复，验证去重
     const ws2 = wb.addWorksheet('S2');
     ws2.addRow(headers); // 重复表头（续页）→ 应被跳过，不计入数据/去重
     ws2.addRow(['UNIONPAY', 'HKD', '400']);
-    ws2.addRow(['WECHAT', 'USD', '500']); // WECHAT/USD 跨 sheet 重复
+    const workerStyledRow2 = ws2.addRow(['WECHAT', 'USD', '500']); // WECHAT/USD 跨 sheet 重复
+    workerStyledRow2.getCell(2).font = { italic: true, color: { argb: 'FF0000FF' } };
     await wb.xlsx.writeFile(filePath);
   }
 
@@ -178,8 +186,13 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     });
     const result = await promise;
 
-    assert.deepEqual(Object.keys(result), ['matchedCount'], 'exportFilter result 仅含 matchedCount');
     assert.equal(result.matchedCount, 2, 'WECHAT 命中 2 行（跨 sheet）');
+    assert.equal(result.inputDataRowCount, 5, '结果携带全部输入有效数据行数');
+    assert.equal(result.outputId, 'split-1', '结果携带稳定 outputId');
+    assert.ok(result.warningSummary && typeof result.warningSummary.warningCount === 'number',
+      '结果携带有界 warning summary');
+    assert.ok(result.styleStats && result.styleStats.actualCounts,
+      '结果携带样式预算与实际计数');
     assert.ok(fs.existsSync(outPath), '应写出过滤后的 xlsx');
 
     // readback 校验产物（小文件直接 ExcelJS 读）。
@@ -188,6 +201,11 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     const ws = wb.worksheets[0];
     // 表头 1 行 + 命中 2 行 = 3 行。
     assert.equal(ws.rowCount, 3, '产物应有表头 + 2 命中行');
+    assert.equal(ws.getColumn(2).width, 23, 'Worker 输出重放首个逻辑表的列宽');
+    assert.equal(ws.getCell('A1').font.bold, true, 'Worker 输出保留表头样式');
+    assert.equal(ws.getCell('B2').fill.fgColor.argb, 'FFFFFF00', 'Worker 输出保留 S1 数据样式');
+    assert.equal(ws.getCell('B3').font.italic, true, 'Worker 输出保留 S2 数据样式');
+    assert.equal(ws.getCell('B3').font.color.argb, 'FF0000FF');
   });
 
   test('B3. 真 worker 拓扑跑通 exportMultiFilters：多个结果共用一次作业', async () => {
@@ -209,6 +227,7 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
     const result = await promise;
 
     assert.deepEqual(result.files.map((file) => file.matchedCount), [2, 2, 0]);
+    assert.equal(result.inputDataRowCount, 5, '多输出作业只统计一次全部输入有效数据行数');
     for (const filePath of [channelPath, currencyPath, emptyPath]) {
       assert.equal(fs.existsSync(filePath), true, `${filePath} 应生成`);
     }

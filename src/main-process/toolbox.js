@@ -110,10 +110,15 @@ function computeValuesByField(headers, aoa) {
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const dataRows = Array.isArray(aoa) ? aoa.slice(1) : [];
   const valuesByField = {};
-  const seenByField = {};
+  const seenByField = Object.create(null);
 
   safeHeaders.forEach((header) => {
-    valuesByField[header] = [];
+    Object.defineProperty(valuesByField, header, {
+      value: [],
+      writable: true,
+      enumerable: true,
+      configurable: true
+    });
     seenByField[header] = new Set();
   });
 
@@ -186,12 +191,17 @@ function filterRowsByFieldValues(aoa, field, values) {
 function createValuesByFieldAccumulator(headers) {
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const valuesByField = {};
-  const seenByField = {};
+  const seenByField = Object.create(null);
   // header -> 列索引（同名后者覆盖前者，对齐全量 computeValuesByField 的对象键覆盖语义）
   const colIdxByField = new Map();
 
   safeHeaders.forEach((header, colIdx) => {
-    valuesByField[header] = [];
+    Object.defineProperty(valuesByField, header, {
+      value: [],
+      writable: true,
+      enumerable: true,
+      configurable: true
+    });
     seenByField[header] = new Set();
     colIdxByField.set(header, colIdx);
   });

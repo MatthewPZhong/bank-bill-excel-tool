@@ -1,285 +1,472 @@
-// 工具箱🧰「合表 / 拆表」大文件流式端到端集成测试（v3.0.8 BUG3）
-//   目标：证明 30 万行级大文件下 merge / split 走流式不 OOM、不闪退，且输出行数/内容/格式正确。
+'use strict';
+
+// 工具箱🧰「合表 / 拆表」大文件生产链路端到端验证（v3.1.2）。
 //
-// 为什么必须有这条（feedback_multiagent_seam_gap）：
-//   BUG3 跨 3 个文件协作——toolbox-stream-io.js（流式读写）↔ toolbox.js（流式去重/过滤纯逻辑）↔
-//   main.js 三个 IPC handler。逐文件 review / 小数据单测看不见「30 万行真实跨接缝」的内存/正确性接缝。
-//   本脚本复刻 main.js handler 的「流式读源 → toolbox 纯逻辑 → 流式写 → readback」整条链路（绕过 Electron dialog），
-//   用真实大 xlsx 验证：① 不 OOM（实测 RSS 峰值远低于全量路径会撞的 >1GB）；② 输出行数/内容/格式与契约一致。
+// 目标：
+//   1. 直接调用主进程生产共用入口，不再复刻旧 toolbox-stream-io 拼装链路；
+//   2. 在 30 万行/源文件规模下验证合并与拆分的行数守恒、筛选内容和格式保真；
+//   3. 验证长纯数字编号仍为文本，不会被科学计数法改写；
+//   4. 峰值 RSS < 800MB。
+//
+// 注意：scripts/integration-runner.js 会无条件自动发现并执行本文件。
 //
 // 用法：node scripts/integration/toolbox-large-file-stream.js
-//      可调行数：TOOLBOX_LARGE_ROWS=300000 node scripts/integration/toolbox-large-file-stream.js（缺省 30 万）
+// 可调行数：TOOLBOX_LARGE_ROWS=300000 node scripts/integration/toolbox-large-file-stream.js
+// 缺省规模必须保持 30 万行。
 
 const fs = require('node:fs');
-const path = require('node:path');
 const os = require('node:os');
+const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 const ExcelJS = require('exceljs');
 
-// 与 main.js handler 同源：流式读写 + toolbox 纯逻辑
 const {
-  streamDataRows,
-  readHeaderRowStreamed,
-  writeRowsStreamed
-} = require('../../src/main-process/toolbox-stream-io');
+  findToolboxCell,
+  openToolboxXlsxPass
+} = require('../../src/backend/toolbox-format');
 const {
-  assertHeadersIdentical,
-  createValuesByFieldAccumulator,
-  createRowFilter
-} = require('../../src/main-process/toolbox');
-// 流式读引擎（直接用于 readback 校验大输出，避免 SheetJS 全量读大文件再 OOM）
-const { readXlsxStreamed } = require('../../src/backend/pending-import/streaming-xlsx-reader');
+  locateSheets,
+  openZipWithEntries
+} = require('../../src/backend/big-table-import/zip-reader');
+const {
+  exportToolboxFilter,
+  scanToolboxSplitFields
+} = require('../../src/main-process/toolbox-format-operations');
+const {
+  mergeToolboxFilesToXlsx
+} = require('../../src/main-process/toolbox-merge-io');
 
 const ROWS = Number(process.env.TOOLBOX_LARGE_ROWS || 300000);
-const HEADERS = ['MerchantId', 'Channel', 'Currency', 'BillDate', 'Credit Amount', 'Debit Amount', 'Balance', 'OrderNo'];
+const HEADERS = [
+  'MerchantId',
+  'Channel',
+  'Currency',
+  'BillDate',
+  'Credit Amount',
+  'Debit Amount',
+  'Balance',
+  'OrderNo'
+];
+const CHANNELS = ['ALIPAY', 'WECHAT', 'UNION'];
+const SOURCE_DATE = new Date(Date.UTC(2026, 0, 2));
+
+if (!Number.isSafeInteger(ROWS) || ROWS <= 0) {
+  throw new Error(`TOOLBOX_LARGE_ROWS 必须为正整数，收到：${process.env.TOOLBOX_LARGE_ROWS}`);
+}
 
 let passed = 0;
 let failed = 0;
 const failures = [];
-function assertTrue(cond, label) {
-  if (cond) { passed += 1; return; }
+
+function assertTrue(condition, label) {
+  if (condition) {
+    passed += 1;
+    return;
+  }
   failed += 1;
   failures.push({ label });
 }
+
 function assertEq(actual, expected, label) {
-  if (actual === expected) { passed += 1; return; }
+  if (actual === expected) {
+    passed += 1;
+    return;
+  }
   failed += 1;
   failures.push({ label, actual, expected });
 }
 
-// 用 ExcelJS streaming writer 生成大 xlsx 源文件（生成端本身流式，不 OOM）。
-//   channelCycle：渠道值循环序列（用于后续拆表按 Channel 过滤验证）。
-async function genLargeXlsx(filePath, rowCount, { channelCycle = ['ALIPAY', 'WECHAT', 'UNION'] } = {}) {
-  const writer = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filePath, useStyles: false, useSharedStrings: false });
+function longOrderNo(index) {
+  return String(index + 1).padStart(21, '0');
+}
+
+// 用 ExcelJS streaming writer 生成带少量稳定样式的大 xlsx。
+// 样式种类保持常数，避免由测试数据本身制造样式爆炸。
+async function genLargeXlsx(
+  filePath,
+  rowCount,
+  { channelCycle = CHANNELS, trackMemory = () => {} } = {}
+) {
+  const writer = new ExcelJS.stream.xlsx.WorkbookWriter({
+    filename: filePath,
+    useStyles: true,
+    useSharedStrings: false
+  });
   const sheet = writer.addWorksheet('COMMON');
-  sheet.addRow(HEADERS.slice()).commit();
-  const counts = {};
-  for (let i = 0; i < rowCount; i += 1) {
-    const channel = channelCycle[i % channelCycle.length];
-    counts[channel] = (counts[channel] || 0) + 1;
-    sheet.addRow([
-      `M${(i % 5000)}`,            // MerchantId（文本，会套 @）
-      channel,                      // Channel（文本）
-      i % 2 === 0 ? 'USD' : 'CNY',  // Currency（文本）
-      '2026-01-02',                 // BillDate（日期 serial）
-      i % 3 === 0 ? '100.50' : '',  // Credit Amount（数字 0.00）
-      i % 3 === 0 ? '' : '12.34',   // Debit Amount（数字 0.00）
-      String(1000 + i) + '.00',     // Balance（数字 0.00）
-      `ORDER-${i}`                  // OrderNo（普通列，原样）
-    ]).commit();
+  const columnSpecs = [
+    { width: 16, numFmt: '@' },
+    { width: 14, numFmt: '@' },
+    { width: 12, numFmt: '@' },
+    { width: 15, numFmt: 'yyyy-mm-dd' },
+    { width: 18, numFmt: '#,##0.00' },
+    { width: 18, numFmt: '#,##0.00' },
+    { width: 18, numFmt: '#,##0.00' },
+    { width: 25, numFmt: '@' }
+  ];
+  for (let index = 0; index < columnSpecs.length; index += 1) {
+    const column = sheet.getColumn(index + 1);
+    column.width = columnSpecs[index].width;
+    column.numFmt = columnSpecs[index].numFmt;
   }
-  await sheet.commit();
+
+  const header = sheet.addRow(HEADERS.slice());
+  header.height = 24;
+  header.eachCell({ includeEmpty: true }, (cell) => {
+    cell.font = {
+      name: 'Courier New',
+      size: 11,
+      bold: true,
+      color: { argb: 'FF1F4E78' }
+    };
+    cell.fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFD9EAF7' }
+    };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+  header.commit();
+
+  const counts = {};
+  for (let index = 0; index < rowCount; index += 1) {
+    const channel = channelCycle[index % channelCycle.length];
+    counts[channel] = (counts[channel] || 0) + 1;
+    const row = sheet.addRow([
+      `M${index % 5000}`,
+      channel,
+      index % 2 === 0 ? 'USD' : 'CNY',
+      SOURCE_DATE,
+      index % 3 === 0 ? 100.5 : null,
+      index % 3 === 0 ? null : 12.34,
+      1000 + index,
+      longOrderNo(index)
+    ]);
+    if (index === 0) row.height = 19;
+    row.commit();
+    if (index % 5000 === 0) trackMemory();
+  }
+  sheet.commit();
   await writer.commit();
+  trackMemory();
   return { counts };
 }
 
-// 流式 readback：统计输出文件各 sheet 的行数——用 JSZip nodeStream 增量扫 <row，**不把整张 sheet XML
-//   一次性物化成大字符串**（26MB 文件解压后 XML 可达数百 MB，readFileSync+async('string') 会让 readback 自身吃满内存，
-//   污染「证明流式不 OOM」的内存峰值结论）。本函数内存常数。
-//   返回 { totalDataRows, sheetDataCounts }。
-async function readbackStreamed(filePath) {
-  const JSZip = require('jszip');
-  // loadAsync(readFileSync) 把压缩包载入内存（压缩态，26MB 量级，可接受）；解压走 nodeStream 不物化全 XML。
-  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
-  const sheetEntries = Object.keys(zip.files)
-    .filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n))
-    .sort();
-  let totalDataRows = 0;
-  const sheetDataCounts = [];
-  for (const entryName of sheetEntries) {
-    // eslint-disable-next-line no-await-in-loop
-    const rowCount = await countRowsStreamed(zip.file(entryName));
-    const dataRows = Math.max(rowCount - 1, 0); // 数据行 = <row> 数 - 1（表头行）
-    sheetDataCounts.push(dataRows);
-    totalDataRows += dataRows;
-  }
-  return { totalDataRows, sheetDataCounts };
+function countRowsStreamed(zip, entry) {
+  return new Promise((resolve, reject) => {
+    zip.openReadStream(entry, (openError, stream) => {
+      if (openError) {
+        reject(openError);
+        return;
+      }
+      const decoder = new StringDecoder('utf8');
+      const matcher = /<row\b/g;
+      let pending = '';
+      let count = 0;
+
+      const countMatches = (text) => {
+        matcher.lastIndex = 0;
+        while (matcher.exec(text)) count += 1;
+      };
+
+      stream.on('data', (chunk) => {
+        const text = pending + decoder.write(chunk);
+        countMatches(text);
+        // "<row" 长 4 字符；保留末尾 3 字符即可覆盖跨 chunk 的未完成标签，
+        // 且不会把已经完整计数的标签带到下一轮重复计算。
+        pending = text.slice(-3);
+      });
+      stream.on('end', () => {
+        countMatches(pending + decoder.end());
+        resolve(count);
+      });
+      stream.on('error', reject);
+    });
+  });
 }
 
-// 流式数 entry XML 里的 <row 标签数（nodeStream + 增量计数，内存常数）。
-function countRowsStreamed(entry) {
-  return new Promise((resolve, reject) => {
-    const { StringDecoder } = require('node:string_decoder');
-    const stream = entry.nodeStream();
-    const decoder = new StringDecoder('utf8');
-    let pending = '';
-    let count = 0;
-    const RE = /<row\b/g;
-    stream.on('data', (chunk) => {
-      pending += typeof chunk === 'string' ? chunk : decoder.write(chunk);
-      RE.lastIndex = 0;
-      let m;
-      let lastIdx = 0;
-      while ((m = RE.exec(pending))) { count += 1; lastIdx = m.index + 4; }
-      // 保留尾部少量字符防 `<row` 跨 chunk 截断（最长 4 字符 + 一点余量）。
-      pending = pending.slice(Math.max(lastIdx, pending.length - 8));
-    });
-    stream.on('end', () => resolve(count));
-    stream.on('error', reject);
-  });
+// 直接用 yauzl 对输出 worksheet XML 增量计数，不把整张 sheet XML 物化到内存。
+async function readbackStreamed(filePath) {
+  const { zip, entries } = await openZipWithEntries(path.basename(filePath), filePath);
+  try {
+    const declaredSheets = await locateSheets(zip, entries);
+    let sheetEntries = declaredSheets
+      .map((sheet) => sheet.entryPath && entries.get(sheet.entryPath))
+      .filter(Boolean);
+    if (sheetEntries.length === 0) {
+      sheetEntries = [...entries.entries()]
+        .filter(([entryName]) => /^xl\/worksheets\/sheet\d+\.xml$/.test(entryName))
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([, entry]) => entry);
+    }
+
+    let totalDataRows = 0;
+    const sheetDataCounts = [];
+    for (const entry of sheetEntries) {
+      const rowCount = await countRowsStreamed(zip, entry);
+      const dataRows = Math.max(rowCount - 1, 0);
+      sheetDataCounts.push(dataRows);
+      totalDataRows += dataRows;
+    }
+    return { totalDataRows, sheetDataCounts };
+  } finally {
+    try { zip.close(); } catch (_error) { /* ignore */ }
+  }
+}
+
+function resolveCellStyle(pass, cell) {
+  if (!cell || !cell.effectiveStyleRef) return null;
+  return pass.sourceRegistry.get(cell.effectiveStyleRef.styleRef);
+}
+
+function columnMetadataAt(sheetMeta, columnIndex) {
+  const columns = sheetMeta && Array.isArray(sheetMeta.columns) ? sheetMeta.columns : [];
+  for (let index = columns.length - 1; index >= 0; index -= 1) {
+    const column = columns[index];
+    if (columnIndex >= column.minColumnIndex && columnIndex <= column.maxColumnIndex) {
+      return column;
+    }
+  }
+  return null;
+}
+
+// 通过 3.1.2 同一格式模型重新打开输出，只读到首条数据行即取消。
+// 行数守恒另由 readbackStreamed 的原始 XML 计数独立验证。
+async function inspectFirstOutputDataRow(filePath) {
+  const pass = await openToolboxXlsxPass(filePath);
+  const cancelToken = { cancelled: false };
+  let sheetMeta = null;
+  let headerRow = null;
+  let dataRow = null;
+  try {
+    try {
+      await pass.scanSheet(0, {
+        cancelToken,
+        onSheetMeta: (meta) => { sheetMeta = meta; },
+        onRow: (row) => {
+          if (row.rowIndex === 1) headerRow = row;
+          if (row.rowIndex === 2) {
+            dataRow = row;
+            cancelToken.cancelled = true;
+          }
+        }
+      });
+    } catch (error) {
+      if (!error || error.code !== 'TOOLBOX_XLSX_CANCELLED') throw error;
+    }
+
+    const headerCell = findToolboxCell(headerRow, 0);
+    const merchantCell = findToolboxCell(dataRow, 0);
+    const channelCell = findToolboxCell(dataRow, 1);
+    const billDateCell = findToolboxCell(dataRow, 3);
+    const creditCell = findToolboxCell(dataRow, 4);
+    const balanceCell = findToolboxCell(dataRow, 6);
+    const orderCell = findToolboxCell(dataRow, 7);
+    const headerStyle = resolveCellStyle(pass, headerCell);
+    const merchantStyle = resolveCellStyle(pass, merchantCell);
+    const billDateStyle = resolveCellStyle(pass, billDateCell);
+    const balanceStyle = resolveCellStyle(pass, balanceCell);
+    const orderStyle = resolveCellStyle(pass, orderCell);
+
+    return {
+      headerText: headerCell && headerCell.decodedSemanticValue,
+      merchant: merchantCell && merchantCell.decodedSemanticValue,
+      channel: channelCell && channelCell.decodedSemanticValue,
+      billDateSerial: billDateCell && Number(billDateCell.rawLexicalValue),
+      credit: creditCell && Number(creditCell.rawLexicalValue),
+      balance: balanceCell && Number(balanceCell.rawLexicalValue),
+      orderNo: orderCell && orderCell.decodedSemanticValue,
+      headerFontName: headerStyle && headerStyle.font && headerStyle.font.name,
+      headerBold: !!(headerStyle && headerStyle.font && headerStyle.font.bold),
+      headerFontColor: headerStyle && headerStyle.font &&
+        headerStyle.font.color && headerStyle.font.color.argb,
+      headerFillColor: headerStyle && headerStyle.fill &&
+        headerStyle.fill.fgColor && headerStyle.fill.fgColor.argb,
+      merchantNumFmt: merchantStyle && merchantStyle.numFmt,
+      billDateNumFmt: billDateStyle && billDateStyle.numFmt,
+      balanceNumFmt: balanceStyle && balanceStyle.numFmt,
+      orderNumFmt: orderStyle && orderStyle.numFmt,
+      merchantColumnWidth: columnMetadataAt(sheetMeta, 0) &&
+        columnMetadataAt(sheetMeta, 0).width,
+      orderColumnWidth: columnMetadataAt(sheetMeta, 7) &&
+        columnMetadataAt(sheetMeta, 7).width,
+      headerRowHeight: headerRow && headerRow.height,
+      firstDataRowHeight: dataRow && dataRow.height
+    };
+  } finally {
+    pass.close();
+  }
+}
+
+function assertFirstRowContentAndFormat(sample, label) {
+  assertEq(sample.headerText, HEADERS[0], `${label}：表头内容保持`);
+  assertEq(sample.merchant, 'M0', `${label}：首行 MerchantId 内容保持`);
+  assertEq(sample.channel, 'ALIPAY', `${label}：首行 Channel 内容保持`);
+  assertEq(sample.credit, 100.5, `${label}：首行 Credit 数值保持`);
+  assertEq(sample.balance, 1000, `${label}：首行 Balance 数值保持`);
+  assertEq(sample.orderNo, longOrderNo(0), `${label}：21 位纯数字 OrderNo 原样保持`);
+  assertTrue(Number.isFinite(sample.billDateSerial), `${label}：BillDate 保持 Excel 日期序列`);
+  assertEq(sample.headerFontName, 'Courier New', `${label}：表头字体保持 Courier New`);
+  assertEq(sample.headerBold, true, `${label}：表头粗体保持`);
+  assertEq(sample.headerFontColor, 'FF1F4E78', `${label}：表头字体颜色保持`);
+  assertEq(sample.headerFillColor, 'FFD9EAF7', `${label}：表头填充色保持`);
+  assertEq(sample.merchantNumFmt, '@', `${label}：MerchantId 文本格式保持`);
+  assertEq(sample.billDateNumFmt, 'yyyy-mm-dd', `${label}：BillDate 日期格式保持`);
+  assertEq(sample.balanceNumFmt, '#,##0.00', `${label}：Balance 数字格式保持`);
+  assertEq(sample.orderNumFmt, '@', `${label}：OrderNo 文本格式保持且不科学计数`);
+  assertEq(sample.merchantColumnWidth, 16, `${label}：MerchantId 列宽保持`);
+  assertEq(sample.orderColumnWidth, 25, `${label}：OrderNo 列宽保持`);
+  assertEq(sample.headerRowHeight, 24, `${label}：表头行高保持`);
+  assertEq(sample.firstDataRowHeight, 19, `${label}：首条数据行高保持`);
 }
 
 function rssMB() {
   return Math.round(process.memoryUsage().rss / 1024 / 1024);
 }
 
+function formatSeconds(milliseconds) {
+  return `${(milliseconds / 1000).toFixed(1)}s`;
+}
+
 async function run() {
-  console.log(`==== 工具箱🧰 大文件流式 端到端验证（${ROWS.toLocaleString()} 行/文件）====`);
+  console.log(`==== 工具箱🧰 3.1.2 大文件生产链路验证（${ROWS.toLocaleString()} 行/文件）====`);
+  console.log('集成 runner：scripts/integration-runner.js 会无条件执行本脚本（默认规模未下调）');
+  const startedAt = Date.now();
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-'));
   let peakRss = rssMB();
-  const track = () => { const m = rssMB(); if (m > peakRss) peakRss = m; };
+  const phaseTimings = [];
+  const track = () => {
+    peakRss = Math.max(peakRss, rssMB());
+  };
+  const memoryTimer = setInterval(track, 50);
+  memoryTimer.unref();
+
+  const phase = async (label, task) => {
+    const phaseStartedAt = Date.now();
+    const result = await task();
+    track();
+    const elapsedMs = Date.now() - phaseStartedAt;
+    phaseTimings.push({ label, elapsedMs });
+    console.log(`  ${label}：${formatSeconds(elapsedMs)}，当前 RSS=${rssMB()}MB`);
+    return result;
+  };
 
   try {
-    // ===== 生成 2 个同表头大源文件（合表用）=====
     const fileA = path.join(tmpDir, 'large-a.xlsx');
     const fileB = path.join(tmpDir, 'large-b.xlsx');
-    console.log(`生成源文件 A/B（各 ${ROWS.toLocaleString()} 行）...`);
-    const genA = await genLargeXlsx(fileA, ROWS);
-    track();
-    const genB = await genLargeXlsx(fileB, ROWS);
-    track();
-    console.log(`  源文件大小：A=${(fs.statSync(fileA).size / 1024 / 1024).toFixed(1)}MB B=${(fs.statSync(fileB).size / 1024 / 1024).toFixed(1)}MB`);
+    console.log(`生成源文件 A/B（各 ${ROWS.toLocaleString()} 行，带日期/文本/金额/表头样式）...`);
+    const genA = await phase('生成源文件 A', () => (
+      genLargeXlsx(fileA, ROWS, { trackMemory: track })
+    ));
+    const genB = await phase('生成源文件 B', () => (
+      genLargeXlsx(fileB, ROWS, { trackMemory: track })
+    ));
+    console.log(
+      `  源文件大小：A=${(fs.statSync(fileA).size / 1024 / 1024).toFixed(1)}MB ` +
+      `B=${(fs.statSync(fileB).size / 1024 / 1024).toFixed(1)}MB`
+    );
 
-    // ===== ① 合表：流式表头校验 + 流式合并 =====
-    console.log('① 合表（流式读 A+B → 合并写）...');
-    const headersA = await readHeaderRowStreamed(fileA);
-    const headersB = await readHeaderRowStreamed(fileB);
-    track();
-    const baseHeaders = assertHeadersIdentical([headersA, headersB], ['large-a.xlsx', 'large-b.xlsx']);
-    assertEq(JSON.stringify(baseHeaders), JSON.stringify(HEADERS), '①表头校验通过 + 基准表头 = 原表头');
-
+    console.log('① 合表：mergeToolboxFilesToXlsx(A+B) ...');
     const mergeOut = path.join(tmpDir, 'merged.xlsx');
-    const mergeRes = await writeRowsStreamed({
-      savePath: mergeOut,
-      normalizedHeaders: baseHeaders,
-      sheetBaseName: 'COMMON',
-      writeDataRows: async (emit) => {
-        for (const p of [fileA, fileB]) {
-          // eslint-disable-next-line no-await-in-loop
-          await streamDataRows(p, (cells) => { emit(cells); track(); });
-        }
-      }
-    });
-    track();
-    assertEq(mergeRes.dataRowCount, ROWS * 2, '①合并数据行数 = A 行数 + B 行数');
-    const mergeReadback = await readbackStreamed(mergeOut);
-    assertEq(mergeReadback.totalDataRows, ROWS * 2, '①合并产物 readback 数据行数 = 2×ROWS');
-    console.log(`  合并输出：${mergeReadback.totalDataRows.toLocaleString()} 数据行，${mergeReadback.sheetDataCounts.length} sheet，大小 ${(fs.statSync(mergeOut).size / 1024 / 1024).toFixed(1)}MB`);
+    const mergeResult = await phase('生产合表入口', () => mergeToolboxFilesToXlsx({
+      filePaths: [fileA, fileB],
+      savePath: mergeOut
+    }));
+    assertEq(JSON.stringify(mergeResult.baseHeaders), JSON.stringify(HEADERS), '①合表基准表头 = 原表头');
+    assertEq(mergeResult.dataRowCount, ROWS * 2, '①合表返回数据行数 = A+B');
+    assertEq(
+      JSON.stringify(mergeResult.fileSummaries.map((item) => item.dataRowCount)),
+      JSON.stringify([ROWS, ROWS]),
+      '①两个输入文件的数据行统计分别守恒'
+    );
+    assertEq(genA.counts.ALIPAY, genB.counts.ALIPAY, '①A/B 渠道分布一致');
 
-    // ===== ② 拆表第一步：流式去重值 =====
-    console.log('② 拆表 split:read（流式扫一遍累积去重值）...');
-    const splitHeaders = await readHeaderRowStreamed(fileA);
-    const acc = createValuesByFieldAccumulator(splitHeaders);
-    await streamDataRows(fileA, (cells) => { acc.addRow(cells); track(); });
-    track();
-    const valuesByField = acc.result();
-    assertEq(JSON.stringify(valuesByField['Channel'].sort()), JSON.stringify(['ALIPAY', 'UNION', 'WECHAT']), '②Channel 去重值 = 3 个渠道（流式去重不物化全部行）');
-    assertEq(valuesByField['Currency'].sort().join(','), 'CNY,USD', '②Currency 去重值 = USD/CNY');
+    const mergeReadback = await phase('合表 XML 流式 readback', () => readbackStreamed(mergeOut));
+    assertEq(mergeReadback.totalDataRows, ROWS * 2, '①合表产物 readback 数据行数 = 2×ROWS');
+    const mergeSample = await phase('合表首行内容/格式检查', () => (
+      inspectFirstOutputDataRow(mergeOut)
+    ));
+    assertFirstRowContentAndFormat(mergeSample, '①合表产物');
+    console.log(
+      `  合表输出：${mergeReadback.totalDataRows.toLocaleString()} 数据行，` +
+      `${mergeReadback.sheetDataCounts.length} sheet，` +
+      `${(fs.statSync(mergeOut).size / 1024 / 1024).toFixed(1)}MB`
+    );
 
-    // ===== ③ 拆表第二步：流式过滤 + 写 =====
-    console.log('③ 拆表 split:export（流式过滤 Channel=ALIPAY → 写）...');
-    const filter = createRowFilter(splitHeaders, 'Channel', ['ALIPAY']);
-    assertTrue(filter.fieldFound, '③字段 Channel 命中');
+    console.log('② 拆表第一步：scanToolboxSplitFields(A) ...');
+    const scanResult = await phase('生产拆表字段扫描入口', () => (
+      scanToolboxSplitFields(fileA)
+    ));
+    assertEq(JSON.stringify(scanResult.headers), JSON.stringify(HEADERS), '②拆表扫描表头 = 原表头');
+    assertEq(
+      scanResult.valuesByField.Channel.slice().sort().join(','),
+      'ALIPAY,UNION,WECHAT',
+      '②Channel 去重值 = 3 个渠道'
+    );
+    assertEq(
+      scanResult.valuesByField.Currency.slice().sort().join(','),
+      'CNY,USD',
+      '②Currency 去重值 = USD/CNY'
+    );
+
+    console.log('③ 拆表第二步：exportToolboxFilter(Channel=ALIPAY) ...');
     const splitOut = path.join(tmpDir, 'split-alipay.xlsx');
-    const splitRes = await writeRowsStreamed({
-      savePath: splitOut,
-      normalizedHeaders: splitHeaders,
-      sheetBaseName: 'COMMON',
-      writeDataRows: async (emit) => {
-        await streamDataRows(fileA, (cells) => {
-          if (filter.matches(cells)) { emit(cells); }
-          track();
-        });
-      }
-    });
+    const splitResult = await phase('生产单文件拆表入口', () => exportToolboxFilter({
+      filePath: fileA,
+      field: 'Channel',
+      values: ['ALIPAY'],
+      savePath: splitOut
+    }));
+    assertEq(splitResult.matchedCount, genA.counts.ALIPAY, '③拆表命中行数 = 源文件 ALIPAY 行数');
+    assertEq(splitResult.warningSummary.warningCount, 0, '③安全日期没有产生文本回退提示');
+
+    const splitReadback = await phase('拆表 XML 流式 readback', () => readbackStreamed(splitOut));
+    assertEq(
+      splitReadback.totalDataRows,
+      genA.counts.ALIPAY,
+      '③拆表产物 readback 行数 = ALIPAY 行数'
+    );
+    const splitSample = await phase('拆表首行内容/格式检查', () => (
+      inspectFirstOutputDataRow(splitOut)
+    ));
+    assertFirstRowContentAndFormat(splitSample, '③拆表产物');
+    console.log(
+      `  拆表输出：${splitReadback.totalDataRows.toLocaleString()} 数据行，` +
+      `${(fs.statSync(splitOut).size / 1024 / 1024).toFixed(1)}MB`
+    );
+
     track();
-    assertEq(splitRes.dataRowCount, genA.counts.ALIPAY, '③拆表命中行数 = 源文件 ALIPAY 行数');
-    const splitReadback = await readbackStreamed(splitOut);
-    assertEq(splitReadback.totalDataRows, genA.counts.ALIPAY, '③拆表产物 readback 行数 = ALIPAY 行数');
-
-    // ===== ④ 抽样校验内容 + 格式（决策①：by-name 格式正确套用）=====
-    console.log('④ 抽样校验拆表产物内容 + 格式（by-name）...');
-    const sampleCells = [];
-    await readXlsxStreamed(splitOut, (cells, idx) => {
-      if (idx >= 2 && idx <= 4) sampleCells.push(cells.slice(0, HEADERS.length)); // 取前几条数据行
-    }, { colCount: HEADERS.length, maxRows: 5 });
-    assertTrue(sampleCells.length >= 1, '④抽到样本数据行');
-    // 内容：所有抽样行 Channel 列（idx 1）= ALIPAY
-    assertTrue(sampleCells.every((r) => r[1] === 'ALIPAY'), '④抽样行 Channel 均为 ALIPAY（仅含命中值行）');
-    // 格式：读 styles.xml + 抽样单元格 numFmt——Balance/Credit 应为数字格式，BillDate 为日期 serial
-    const fmtOk = await verifyByNameFormat(splitOut);
-    assertTrue(fmtOk.balanceIsNumber, '④Balance 列写成数字（非文本）');
-    assertTrue(fmtOk.billDateIsSerial, '④BillDate 列写成日期 serial（数字 + 日期 numFmt）');
-    assertTrue(fmtOk.merchantIsText, '④MerchantId 列写成文本（@ 格式）');
-    assertTrue(fmtOk.headerCourierNew, '④表头行 Courier New 字体');
-
-    // ===== ⑤ 内存峰值断言（不 OOM）=====
-    console.log(`\n内存 RSS 峰值：${peakRss}MB`);
-    // 30 万行 × 2 文件全量 readRows + writeFile 会撞 >1GB；流式应远低于此。给 800MB 宽松上限（含 node 基线 + ExcelJS）。
-    assertTrue(peakRss < 800, `⑤内存峰值 ${peakRss}MB < 800MB（流式不 OOM；全量路径此规模必 >1GB）`);
+    const totalElapsedMs = Date.now() - startedAt;
+    console.log('\n阶段耗时：');
+    for (const timing of phaseTimings) {
+      console.log(`  - ${timing.label}: ${formatSeconds(timing.elapsedMs)}`);
+    }
+    console.log(`总耗时：${formatSeconds(totalElapsedMs)}`);
+    console.log(`内存 RSS 峰值：${peakRss}MB`);
+    assertTrue(
+      peakRss < 800,
+      `④内存峰值 ${peakRss}MB < 800MB（30 万行生产链路无 OOM）`
+    );
 
     const total = passed + failed;
     console.log(`\n==== ${passed}/${total} PASS ====`);
     if (failed > 0) {
       console.error('\nFAILURES:');
-      failures.forEach((f) => {
-        console.error(`  - ${f.label}`);
-        if ('actual' in f) {
-          console.error(`      actual:   ${JSON.stringify(f.actual)}`);
-          console.error(`      expected: ${JSON.stringify(f.expected)}`);
+      for (const failure of failures) {
+        console.error(`  - ${failure.label}`);
+        if (Object.prototype.hasOwnProperty.call(failure, 'actual')) {
+          console.error(`      actual:   ${JSON.stringify(failure.actual)}`);
+          console.error(`      expected: ${JSON.stringify(failure.expected)}`);
         }
-      });
-      process.exit(1);
+      }
+      process.exitCode = 1;
     }
   } finally {
-    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+    clearInterval(memoryTimer);
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_error) { /* ignore */ }
   }
 }
 
-// 校验输出 xlsx 的 by-name 格式（直接解析 sheet1.xml 单元格 t/s 属性 + styles.xml numFmt）。
-async function verifyByNameFormat(filePath) {
-  const JSZip = require('jszip');
-  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
-  const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
-  const stylesXml = await zip.file('xl/styles.xml').async('string');
-
-  // 列序：HEADERS = [MerchantId(A), Channel(B), Currency(C), BillDate(D), Credit(E), Debit(F), Balance(G), OrderNo(H)]
-  // 取第 2 行（首个数据行）各列单元格。
-  const rowMatch = sheetXml.match(/<row r="2"[^>]*>([\s\S]*?)<\/row>/);
-  const rowXml = rowMatch ? rowMatch[1] : '';
-  const cellOf = (col) => {
-    const m = rowXml.match(new RegExp(`<c r="${col}2"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`));
-    if (!m) return null;
-    return { attrs: m[1] || '', body: m[2] || '' };
-  };
-  const typeOf = (cell) => { if (!cell) return ''; const m = cell.attrs.match(/\st="([^"]+)"/); return m ? m[1] : ''; };
-  const styleIdxOf = (cell) => { if (!cell) return null; const m = cell.attrs.match(/\ss="(\d+)"/); return m ? Number(m[1]) : null; };
-
-  const balance = cellOf('G');
-  const billDate = cellOf('D');
-  const merchant = cellOf('A');
-
-  // 数字单元格：无 t（或 t="n"）+ <v> 数字
-  const balanceIsNumber = !!balance && (typeOf(balance) === '' || typeOf(balance) === 'n') && /<v(?:\s[^>]*)?>[\d.]+<\/v>/.test(balance.body);
-  // 日期 serial：数字单元格（无 t / t=n）+ 值为整数 serial（45000+ 量级）
-  const billDateIsSerial = !!billDate && (typeOf(billDate) === '' || typeOf(billDate) === 'n') && /<v(?:\s[^>]*)?>\d{5,}<\/v>/.test(billDate.body);
-  // 文本单元格：t="s"（sharedString，useSharedStrings:false 下 ExcelJS 仍可能 inlineStr）或 t="str" / inlineStr
-  const merchantType = typeOf(merchant);
-  const merchantIsText = !!merchant && (merchantType === 's' || merchantType === 'str' || merchantType === 'inlineStr');
-
-  // numFmt：解析 cellXfs 找 Balance/MerchantId 单元格的 numFmtId 是否指向 0.00 / @。
-  //   宽松校验：只要 styles.xml 同时含 0.00 与 @ 的 numFmt 定义（自定义或内建引用），即认为 by-name 格式生效。
-  const has0_00 = /numFmtId="2"|formatCode="0\.00"/.test(stylesXml);
-  const hasText = /numFmtId="49"|formatCode="@"/.test(stylesXml);
-
-  // 表头 Courier New
-  const headerCourierNew = /<name val="Courier New"\/>/.test(stylesXml);
-
-  return {
-    balanceIsNumber: balanceIsNumber && has0_00,
-    billDateIsSerial,
-    merchantIsText: merchantIsText && hasText,
-    headerCourierNew
-  };
-}
-
-run().catch((e) => { console.error('FATAL', e && e.stack ? e.stack : e); process.exit(1); });
+run().catch((error) => {
+  console.error('FATAL', error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});

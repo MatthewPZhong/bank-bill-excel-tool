@@ -183,6 +183,13 @@ test.describe('computeValuesByField', () => {
     assert.deepEqual(Object.keys(vbf).sort(), ['H1', 'H2', 'H3']);
     assert.deepEqual(vbf.H1, []);
   });
+
+  test('__proto__ 表头作为普通 own key 收集并可安全序列化', () => {
+    const vbf = computeValuesByField(['__proto__'], [['__proto__'], ['PAYPAL']]);
+    assert.equal(Object.prototype.hasOwnProperty.call(vbf, '__proto__'), true);
+    assert.deepEqual(vbf.__proto__, ['PAYPAL']);
+    assert.deepEqual(JSON.parse(JSON.stringify(vbf)).__proto__, ['PAYPAL']);
+  });
 });
 
 test.describe('filterRowsByFieldValues', () => {
@@ -261,6 +268,15 @@ test.describe('createValuesByFieldAccumulator（流式去重，口径同 compute
     acc.addRow(undefined);
     acc.addRow(['a']);
     assert.deepEqual(acc.result().H, ['a']);
+  });
+
+  test('__proto__ 表头不会触发对象原型 setter', () => {
+    const acc = createValuesByFieldAccumulator(['__proto__']);
+    acc.addRow(['PAYPAL']);
+    const result = acc.result();
+    assert.equal(Object.prototype.hasOwnProperty.call(result, '__proto__'), true);
+    assert.deepEqual(result.__proto__, ['PAYPAL']);
+    assert.deepEqual(structuredClone(result).__proto__, ['PAYPAL']);
   });
 });
 

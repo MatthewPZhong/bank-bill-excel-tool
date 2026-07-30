@@ -58,7 +58,9 @@ function normalizeWorksheetTarget(target) {
 
 // 打开 ZIP + 收集 entry 列表（一次性，lazyEntries:false）。返回 { zip, entries: Map<fileName, entry> }。
 //   平移自 reader.js openZipWithEntries：autoClose:false（caller 必须显式 zip.close()）。
-function openZipWithEntries(sourceFile, filePath) {
+//   options.rejectDuplicateEntries 仅供需要 strict fail-closed 的调用方开启；默认保持既有“首项优先”
+//   行为，避免改变共享 reader 的历史契约。
+function openZipWithEntries(sourceFile, filePath, options = {}) {
   return new Promise((resolve, reject) => {
     yauzl.open(filePath, { lazyEntries: false, autoClose: false }, (err, zip) => {
       if (err) {
@@ -70,7 +72,19 @@ function openZipWithEntries(sourceFile, filePath) {
       const entries = new Map();
       let settled = false;
       zip.on('entry', (entry) => {
-        if (!entries.has(entry.fileName)) entries.set(entry.fileName, entry);
+        if (settled) return;
+        if (entries.has(entry.fileName)) {
+          if (options.rejectDuplicateEntries === true) {
+            settled = true;
+            try { zip.close(); } catch (_) {}
+            reject(new BigTableImportError(
+              `${sourceFile}：xlsx 包含重复的 ZIP entry，无法安全读取`,
+              [`重复 entry：${entry.fileName}`]
+            ));
+          }
+          return;
+        }
+        entries.set(entry.fileName, entry);
       });
       zip.on('end', () => {
         if (!settled) {

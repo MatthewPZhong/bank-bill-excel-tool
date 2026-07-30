@@ -261,34 +261,25 @@ const {
 //   合表表头一致性校验 / 多文件 aoa 合并 / 字段去重值计算 / 按字段值过滤 / 文件名模板（YYYYMMDDHHmm 时间戳）
 //   IPC handler（toolbox:merge / toolbox:split:read / toolbox:split:export）做 dialog + file-service IO，纯变换委托本模块
 const {
-  computeValuesByField: toolboxComputeValuesByField,
-  filterRowsByFieldValues: toolboxFilterRowsByFieldValues,
   buildMergeFileName: toolboxBuildMergeFileName,
-  buildSplitFileName: toolboxBuildSplitFileName,
-  // v3.0.8 BUG3：流式增量版（修大文件 OOM）——逐行喂去重/过滤，绝不全量物化行
-  createValuesByFieldAccumulator: toolboxCreateValuesByFieldAccumulator,
-  createRowFilter: toolboxCreateRowFilter
+  buildSplitFileName: toolboxBuildSplitFileName
 } = require('./main-process/toolbox');
-// v3.0.8 BUG3：工具箱🧰 流式读写封装——.xlsx 走流式（内存常数）修 30 万行级大文件 OOM 闪退；.csv/.xls 回退全量 readRows。
-//   三个工具箱 IPC handler（toolbox:merge / split:read / split:export）改走这里：读用 readHeaderRowStreamed +
-//   streamDataRows、写用 writeRowsStreamed（by-name 格式 + 超 104 万行自动分 sheet），不再 readRows 全量 + writeToolboxTempWorkbook。
 const {
-  isStreamableXlsx: toolboxIsStreamableXlsx,
-  streamDataRows: toolboxStreamDataRows,
-  readHeaderRowStreamed: toolboxReadHeaderRowStreamed,
-  writeRowsStreamed: toolboxWriteRowsStreamed,
-  writeRowsToMultipleFilesStreamed: toolboxWriteRowsToMultipleFilesStreamed,
-  ToolboxStreamEmptyError
-} = require('./main-process/toolbox-stream-io');
-const {
-  mergeToolboxFilesToXlsx: toolboxMergeFilesToXlsx,
-  publishMergedWorkbook: toolboxPublishMergedWorkbook
+  mergeToolboxFilesToXlsx: toolboxMergeFilesToXlsx
 } = require('./main-process/toolbox-merge-io');
 const {
-  normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups,
-  createMultipleRowFilters: toolboxCreateMultipleRowFilters,
-  publishPreparedSplitFiles: toolboxPublishPreparedSplitFiles
+  normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups
 } = require('./main-process/toolbox-multi-split');
+const {
+  prepareToolboxPublication,
+  publishPreparedToolboxPublication,
+  recoverPendingToolboxPublications
+} = require('./main-process/toolbox-output-publication');
+const {
+  exportToolboxFilter,
+  exportToolboxMultiFilters,
+  scanToolboxSplitFields
+} = require('./main-process/toolbox-format-operations');
 // v3.0.9 T6：工具箱「按字段值拆分」大文件隔离 worker 通道——路由判定 + 主侧 dispatch。
 //   两个 toolbox:split handler（read/export）在现有小文件分支「之前」加 if (await shouldUseLargeChannel(...)) {大通道}，
 //   现有小文件分支原样不动（🔴 小文件零回归）。回传契约逐字节一致（前端零改动）。
@@ -14864,19 +14855,141 @@ function registerPositionReconciliationHandlers() {
 //     失败     { status:'failed', message, detailLines }（表头不一致 / 空文件 / 字段缺失 / 运行错误）
 //   trackedIpcHandle 仅在 status∈{ok,success} 时计 usage（取消/失败不计）。
 //
-// 工具箱旧全量写入辅助函数；合并链路另由 try/finally 清理 OS 临时目录，并在目标目录原子发布。
-function writeToolboxTempWorkbook(rows, sheetName = 'COMMON') {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
-  const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
-  writeWorkbookRows({ rows, outputFilePath: tempPath, sheetName });
-  return tempPath;
-}
-
 // 把 catch 到的异常归一为 {status:'failed', message, detailLines}（FileValidationError / ToolboxHeaderMismatchError 带 detailLines）。
 function toolboxFailureResult(error) {
   const message = error && error.message ? String(error.message) : String(error);
-  const detailLines = error && Array.isArray(error.detailLines) ? error.detailLines : [];
+  const detailLines = error && Array.isArray(error.detailLines) ? error.detailLines.slice() : [];
+  const detailSet = new Set(detailLines);
+  for (const recoveryPath of error && Array.isArray(error.recoveryPaths) ? error.recoveryPaths : []) {
+    const line = `恢复路径：${recoveryPath}`;
+    if (!detailSet.has(line)) {
+      detailSet.add(line);
+      detailLines.push(line);
+    }
+  }
   return { status: 'failed', message, detailLines };
+}
+
+const EMPTY_TOOLBOX_WARNING_SUMMARY = Object.freeze({
+  warningCount: 0,
+  warningSamples: Object.freeze([])
+});
+
+function aggregateToolboxWarningSummary(files) {
+  let warningCount = 0;
+  const warningSamples = [];
+  for (const file of Array.isArray(files) ? files : []) {
+    const summary = file && file.warningSummary;
+    if (!summary || typeof summary !== 'object' || Array.isArray(summary)) continue;
+    warningCount += Number(summary.warningCount) || 0;
+    for (const sample of Array.isArray(summary.warningSamples) ? summary.warningSamples : []) {
+      if (warningSamples.length >= 20) break;
+      warningSamples.push({ ...sample });
+    }
+  }
+  return { warningCount, warningSamples };
+}
+
+const TOOLBOX_STYLE_AUDIT_COMPONENTS = Object.freeze([
+  'cellXfs',
+  'fonts',
+  'fills',
+  'borders',
+  'customNumFmts'
+]);
+
+function formatToolboxStyleAuditCounts(counts) {
+  const source = counts && typeof counts === 'object' ? counts : {};
+  return TOOLBOX_STYLE_AUDIT_COMPONENTS
+    .map((key) => `${key}=${Number(source[key]) || 0}`)
+    .join('，');
+}
+
+function buildToolboxAuditDetailLines(files, warningSummary = null) {
+  const fileList = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  const summary = warningSummary && typeof warningSummary === 'object' && !Array.isArray(warningSummary)
+    ? warningSummary
+    : aggregateToolboxWarningSummary(fileList);
+  const warningCount = Number(summary.warningCount) || 0;
+  const samples = Array.isArray(summary.warningSamples)
+    ? summary.warningSamples.slice(0, 20)
+    : [];
+  const details = [`日期文本降级总数：${warningCount}`];
+
+  samples.forEach((sample, index) => {
+    const location = [
+      sample && sample.sourceFileName,
+      sample && sample.sourceSheet,
+      sample && sample.cellRef
+    ].filter(Boolean).join(' / ');
+    details.push(
+      `日期文本降级样例 ${index + 1}${location ? `（${location}）` : ''}：` +
+      `${(sample && sample.message) || '已按原文本保留'}`
+    );
+  });
+  if (warningCount > samples.length) {
+    details.push(`其余日期文本降级样例未展开：${warningCount - samples.length}`);
+  }
+
+  fileList.forEach((file, index) => {
+    const label = file.fileName || file.outputId || file.filePath || `输出 ${index + 1}`;
+    const styleStats = file.styleStats && typeof file.styleStats === 'object'
+      ? file.styleStats
+      : {};
+    const projected = styleStats.projectedFinalCounts || styleStats.counts || {};
+    const actual = styleStats.actualCounts || {};
+    details.push(`[${label}] 样式预算预计：${formatToolboxStyleAuditCounts(projected)}`);
+    details.push(`[${label}] 样式组件实际：${formatToolboxStyleAuditCounts(actual)}`);
+    // 只有 commitAndValidate 已成功的临时产物才会进入可恢复发布，因此这里的“通过”是
+    // 发布前结构、样式预算、文件大小与摘要校验的真实结果，不是乐观推断。
+    details.push(`[${label}] 临时产物校验：通过`);
+  });
+  return details;
+}
+
+function publishToolboxArtifacts(kind, artifacts, targets) {
+  const prepared = prepareToolboxPublication({
+    taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
+    artifacts,
+    targets,
+    userDataDir: app.getPath('userData')
+  });
+  return publishPreparedToolboxPublication(prepared);
+}
+
+function recoverToolboxPublicationsAtStartup() {
+  try {
+    const result = recoverPendingToolboxPublications({
+      userDataDir: app.getPath('userData')
+    });
+    const recovered = Array.isArray(result.recovered) ? result.recovered : [];
+    if (recovered.length > 0) {
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'toolbox',
+        message: '工具箱输出发布恢复完成',
+        details: recovered.map((item) => (
+          `${item.taskId}：${item.action}`
+        ))
+      });
+    }
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'toolbox',
+      message: '工具箱输出发布自动恢复失败',
+      details: [
+        error && error.message ? error.message : String(error),
+        ...(error && Array.isArray(error.detailLines) ? error.detailLines : []),
+        ...(error && Array.isArray(error.recoveryPaths)
+          ? error.recoveryPaths.map((filePath) => `恢复路径：${filePath}`)
+          : [])
+      ],
+      stack: error && error.stack ? error.stack : undefined
+    });
+  }
 }
 
 function registerToolboxHandlers() {
@@ -14910,7 +15023,18 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { status: 'cancelled' };
         }
-        const publishResult = toolboxPublishMergedWorkbook(tempPath, saveResult.filePath);
+        const publishResult = publishToolboxArtifacts(
+          'merge',
+          [{
+            sourcePath: tempPath,
+            outputId: 'merge-1',
+            fileName: path.basename(saveResult.filePath),
+            warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+            styleStats: writeRes.styleStats || null
+          }],
+          [{ targetPath: saveResult.filePath }]
+        );
+        const publishedFile = publishResult.files[0];
         appendActivityLogEntry({
           level: 'info',
           source: 'main',
@@ -14921,11 +15045,17 @@ function registerToolboxHandlers() {
             `参与合并 sheet 数：${writeRes.inputSheetCount}`,
             `数据行数：${writeRes.dataRowCount}`,
             `输出 sheet 数：${writeRes.sheetCount}`,
-            `导出路径：${saveResult.filePath}`,
+            `导出路径：${publishedFile.filePath}`,
+            ...buildToolboxAuditDetailLines(publishedFile),
             ...(publishResult.warnings || [])
           ]
         });
-        return { status: 'success', filePath: saveResult.filePath };
+        return {
+          status: 'success',
+          filePath: publishedFile.filePath,
+          warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+          warnings: publishResult.warnings || []
+        };
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
@@ -14949,31 +15079,13 @@ function registerToolboxHandlers() {
       }
       const sourceFilePath = choice.filePaths[0];
 
-      // v3.0.9 T6：大文件（多 sheet / 单 worksheet 解压 ≥1.5GB 的 .xlsx）走隔离 worker 通道，
-      //   绕开现有小文件路径对多 sheet 的 SheetJS 全量读 OOM。fail-closed：路由 false 时落下方现有小文件分支（原样不动）。
-      //   回传契约与现有分支逐字节一致：{status,sourceFilePath,headers,valuesByField}（valuesByField={field:string[]}，无截断元数据）。
-      if (await shouldUseLargeChannel(sourceFilePath)) {
-        const { headers, valuesByField } = await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise;
-        // codex P3 / SR-1：空文件（无有意义行）scanFields 回 headers=null；与小文件流式路径
-        //   （readHeaderRowStreamed 抛 ToolboxStreamEmptyError → toolboxFailureResult）逐字节对齐为 failed，
-        //   不把 null 表头当 success 回前端（否则渲染层强转空表头、开一个无列可选的无用弹框）。
-        if (!headers || headers.length === 0) {
-          return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
-        }
-        return { status: 'success', sourceFilePath, headers, valuesByField };
-      }
-
-      let headers;
-      let valuesByField;
-      if (toolboxIsStreamableXlsx(sourceFilePath)) {
-        headers = await toolboxReadHeaderRowStreamed(sourceFilePath);
-        const acc = toolboxCreateValuesByFieldAccumulator(headers);
-        await toolboxStreamDataRows(sourceFilePath, (cells) => acc.addRow(cells));
-        valuesByField = acc.result();
-      } else {
-        headers = extractHeaders(sourceFilePath);
-        const aoa = readRows(sourceFilePath);
-        valuesByField = toolboxComputeValuesByField(headers, aoa);
+      // 普通与 Worker 只区分执行位置，读取、matchValue 和字段去重均走同一 style-aware facade。
+      const scanResult = await shouldUseLargeChannel(sourceFilePath)
+        ? await dispatchLargeSplit({ op: 'scanFields', filePath: sourceFilePath }).promise
+        : await scanToolboxSplitFields(sourceFilePath);
+      const { headers, valuesByField } = scanResult || {};
+      if (!headers || headers.length === 0) {
+        return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
       return { status: 'success', sourceFilePath, headers, valuesByField };
     } catch (error) {
@@ -15038,73 +15150,95 @@ function registerToolboxHandlers() {
         try {
           const preparedPlans = targetPlans.map((plan, index) => ({
             ...plan,
+            outputId: plan.outputId || `split-${index + 1}`,
             temporaryPath: path.join(tempDir, `${String(index + 1).padStart(2, '0')}.xlsx`),
             matchedCount: 0
           }));
 
+          let generationResult;
           if (await shouldUseLargeChannel(sourceFilePath)) {
-            const workerResult = await dispatchLargeSplit({
+            generationResult = await dispatchLargeSplit({
               op: 'exportMultiFilters',
               filePath: sourceFilePath,
               groups: preparedPlans.map((plan) => ({
+                outputId: plan.outputId,
                 fileName: plan.fileName,
                 field: plan.field,
                 values: plan.values,
                 savePath: plan.temporaryPath
               }))
             }).promise;
-            const workerFiles = workerResult && Array.isArray(workerResult.files) ? workerResult.files : [];
-            if (workerFiles.length !== preparedPlans.length) {
-              throw new Error('大文件拆分结果数量与请求分组不一致');
-            }
-            workerFiles.forEach((file, index) => {
-              preparedPlans[index].matchedCount = Number(file.matchedCount) || 0;
-            });
           } else {
-            let normalizedHeaders;
-            let writeDataRows;
-            if (toolboxIsStreamableXlsx(sourceFilePath)) {
-              normalizedHeaders = await toolboxReadHeaderRowStreamed(sourceFilePath);
-              writeDataRows = async (emit) => {
-                await toolboxStreamDataRows(sourceFilePath, emit);
-              };
-            } else {
-              const sourceRows = readRows(sourceFilePath);
-              const headerRow = Array.isArray(sourceRows[0]) ? sourceRows[0] : null;
-              if (!headerRow) {
-                throw new ToolboxStreamEmptyError('文件为空或不可读，请重新导入');
-              }
-              normalizedHeaders = trimToolboxTrailingEmptyCells(headerRow).map((cell) => normalizeLinkedCell(cell));
-              writeDataRows = async (emit) => {
-                for (let rowIndex = 1; rowIndex < sourceRows.length; rowIndex += 1) {
-                  if (Array.isArray(sourceRows[rowIndex])) emit(sourceRows[rowIndex]);
-                }
-              };
-            }
-
-            const filters = toolboxCreateMultipleRowFilters(normalizedHeaders, preparedPlans);
-            const writeResults = await toolboxWriteRowsToMultipleFilesStreamed({
-              normalizedHeaders,
-              outputs: filters.map((filter, index) => ({
-                savePath: preparedPlans[index].temporaryPath,
-                matches: filter.matches
-              })),
-              writeDataRows
-            });
-            writeResults.forEach((result, index) => {
-              preparedPlans[index].matchedCount = result.dataRowCount;
+            generationResult = await exportToolboxMultiFilters({
+              filePath: sourceFilePath,
+              groups: preparedPlans.map((plan) => ({
+                outputId: plan.outputId,
+                fileName: plan.fileName,
+                field: plan.field,
+                values: plan.values,
+                savePath: plan.temporaryPath
+              }))
             });
           }
 
-          const files = toolboxPublishPreparedSplitFiles(preparedPlans);
+          const generationFiles = generationResult && Array.isArray(generationResult.files)
+            ? generationResult.files
+            : [];
+          const inputDataRowCount = Number(
+            generationResult && generationResult.inputDataRowCount
+          ) || 0;
+          const generationById = new Map();
+          for (const file of generationFiles) {
+            if (!file || !file.outputId || generationById.has(file.outputId)) {
+              throw new Error('拆分结果缺少唯一 outputId，未发布任何文件');
+            }
+            generationById.set(file.outputId, file);
+          }
+          if (generationById.size !== preparedPlans.length) {
+            throw new Error('拆分结果数量与请求分组不一致');
+          }
+          for (const plan of preparedPlans) {
+            const generated = generationById.get(plan.outputId);
+            if (!generated) {
+              throw new Error(`拆分结果缺少分组：${plan.outputId}`);
+            }
+            plan.matchedCount = Number(generated.matchedCount) || 0;
+            plan.warningSummary = generated.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY;
+            plan.styleStats = generated.styleStats || null;
+          }
+
+          const publishResult = publishToolboxArtifacts(
+            'split-multi',
+            preparedPlans.map((plan, index) => ({
+              sourcePath: plan.temporaryPath,
+              outputId: plan.outputId || `split-${index + 1}`,
+              fileName: plan.fileName,
+              matchedCount: plan.matchedCount,
+              warningSummary: plan.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+              styleStats: plan.styleStats || null
+            })),
+            preparedPlans.map((plan) => ({ targetPath: plan.targetPath }))
+          );
+          const files = publishResult.files;
+          const warningSummary = aggregateToolboxWarningSummary(files);
           appendActivityLogEntry({
             level: 'info',
             source: 'main',
             domain: 'toolbox',
             message: '工具箱多文件拆分成功',
-            details: files.map((file) => `${file.fileName}：${file.matchedCount} 行，${file.filePath}`)
+            details: [
+              `输入有效行数：${inputDataRowCount}`,
+              ...files.map((file) => `${file.fileName}：${file.matchedCount} 行，${file.filePath}`),
+              ...buildToolboxAuditDetailLines(files, warningSummary),
+              ...(publishResult.warnings || [])
+            ]
           });
-          return { status: 'success', files };
+          return {
+            status: 'success',
+            files,
+            warningSummary,
+            warnings: publishResult.warnings || []
+          };
         } catch (error) {
           preserveTempDir = error && error.preserveTemporaryFiles === true;
           throw error;
@@ -15129,13 +15263,17 @@ function registerToolboxHandlers() {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-'));
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         try {
-          const { matchedCount } = await dispatchLargeSplit({
+          const generationResult = await dispatchLargeSplit({
             op: 'exportFilter',
             filePath: sourceFilePath,
             field,
             values,
             savePath: tempPath
           }).promise;
+          const matchedCount = Number(generationResult && generationResult.matchedCount) || 0;
+          const inputDataRowCount = Number(
+            generationResult && generationResult.inputDataRowCount
+          ) || 0;
           if (matchedCount === 0) {
             // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
             return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
@@ -15147,7 +15285,19 @@ function registerToolboxHandlers() {
           if (saveResult.canceled || !saveResult.filePath) {
             return { status: 'cancelled' };
           }
-          fs.copyFileSync(tempPath, saveResult.filePath);
+          const publishResult = publishToolboxArtifacts(
+            'split-single-large',
+            [{
+              sourcePath: tempPath,
+              outputId: 'split-1',
+              fileName: path.basename(saveResult.filePath),
+              matchedCount,
+              warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+              styleStats: generationResult.styleStats || null
+            }],
+            [{ targetPath: saveResult.filePath }]
+          );
+          const publishedFile = publishResult.files[0];
           appendActivityLogEntry({
             level: 'info',
             source: 'main',
@@ -15156,82 +15306,95 @@ function registerToolboxHandlers() {
             details: [
               `拆分字段：${field}`,
               `选中值数：${values.length}`,
+              `输入有效行数：${inputDataRowCount}`,
               `命中行数：${matchedCount}`,
-              `导出路径：${saveResult.filePath}`
+              `导出路径：${publishedFile.filePath}`,
+              ...buildToolboxAuditDetailLines(publishedFile),
+              ...(publishResult.warnings || [])
             ]
           });
-          return { status: 'success', filePath: saveResult.filePath };
+          return {
+            status: 'success',
+            filePath: publishedFile.filePath,
+            warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+            warnings: publishResult.warnings || []
+          };
         } finally {
           // 🔴 修 B20：可靠清临时目录（800MB 级临时大文件；含 worker crash / dispatch reject 路径）。
           try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
         }
       }
 
-      let tempPath;
-      let matchedCount;
-      let splitHeaders;
-      if (toolboxIsStreamableXlsx(sourceFilePath)) {
-        // 流式：先取表头判字段是否存在（开始前），存在再流式过滤写临时；命中数由 writeRowsStreamed.dataRowCount 计。
-        splitHeaders = await toolboxReadHeaderRowStreamed(sourceFilePath);
-        const filter = toolboxCreateRowFilter(splitHeaders, field, values);
-        if (!filter.fieldFound) {
-          return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
-        }
-        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
-        tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
-        const writeRes = await toolboxWriteRowsStreamed({
+      const generationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+      const tempPath = path.join(generationDir, `toolbox-${Date.now()}.xlsx`);
+      let generationResult;
+      try {
+        generationResult = await exportToolboxFilter({
+          filePath: sourceFilePath,
+          field,
+          values,
           savePath: tempPath,
-          normalizedHeaders: splitHeaders,
-          sheetBaseName: 'COMMON',
-          writeDataRows: async (emit) => {
-            await toolboxStreamDataRows(sourceFilePath, (cells) => {
-              if (filter.matches(cells)) {
-                emit(cells);
-              }
-            });
-          }
+          outputId: 'split-1'
         });
-        matchedCount = writeRes.dataRowCount;
-        if (matchedCount === 0) {
-          // 0 命中：删掉只含表头的临时文件、不弹保存框、不产用户文件（保留现文案）。
-          try { fs.rmSync(path.dirname(tempPath), { recursive: true, force: true }); } catch (_e) { /* swallow */ }
-          return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
-        }
-      } else {
-        // .csv/.xls 回退：全量 readRows + filterRowsByFieldValues（字段不存在 / 0 命中口径同现状）。
-        const aoa = readRows(sourceFilePath);
-        const filtered = toolboxFilterRowsByFieldValues(aoa, field, values);
-        if (!filtered.fieldFound) {
-          return { status: 'failed', message: `源文件中找不到字段「${field}」`, detailLines: [] };
-        }
-        if (filtered.matchedCount === 0) {
-          return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
-        }
-        tempPath = writeToolboxTempWorkbook(filtered.rows);
-        matchedCount = filtered.matchedCount;
+      } catch (error) {
+        try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+        throw error;
+      }
+      const matchedCount = Number(generationResult.matchedCount) || 0;
+      const inputDataRowCount = Number(generationResult.inputDataRowCount) || 0;
+      if (matchedCount === 0) {
+        try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+        return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
       }
 
-      const saveResult = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
+      try {
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { status: 'cancelled' };
+        }
+        const publishResult = publishToolboxArtifacts(
+          'split-single',
+          [{
+            sourcePath: tempPath,
+            outputId: 'split-1',
+            fileName: path.basename(saveResult.filePath),
+            matchedCount,
+            warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+            styleStats: generationResult.styleStats || null
+          }],
+          [{ targetPath: saveResult.filePath }]
+        );
+        const publishedFile = publishResult.files[0];
+        appendActivityLogEntry({
+          level: 'info',
+          source: 'main',
+          domain: 'toolbox',
+          message: '工具箱拆分表格成功',
+          details: [
+            `拆分字段：${field}`,
+            `选中值数：${values.length}`,
+            `输入有效行数：${inputDataRowCount}`,
+            `命中行数：${matchedCount}`,
+            `导出路径：${publishedFile.filePath}`,
+            ...buildToolboxAuditDetailLines(publishedFile),
+            ...(publishResult.warnings || [])
+          ]
+        });
+        return {
+          status: 'success',
+          filePath: publishedFile.filePath,
+          warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+          warnings: publishResult.warnings || []
+        };
+      } finally {
+        const generationDirName = path.basename(generationDir);
+        if (generationDirName.startsWith('toolbox-') && generationDir.startsWith(os.tmpdir())) {
+          try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* best effort */ }
+        }
       }
-      fs.copyFileSync(tempPath, saveResult.filePath);
-      appendActivityLogEntry({
-        level: 'info',
-        source: 'main',
-        domain: 'toolbox',
-        message: '工具箱拆分表格成功',
-        details: [
-          `拆分字段：${field}`,
-          `选中值数：${values.length}`,
-          `命中行数：${matchedCount}`,
-          `导出路径：${saveResult.filePath}`
-        ]
-      });
-      return { status: 'success', filePath: saveResult.filePath };
     } catch (error) {
       return toolboxFailureResult(error);
     }
@@ -15810,6 +15973,7 @@ if (hasSingleInstanceLock) app.whenReady()
   .then(() => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();
+    recoverToolboxPublicationsAtStartup();
 
     // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
     try {

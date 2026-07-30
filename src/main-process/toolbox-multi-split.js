@@ -4,6 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeCell } = require('../backend/file-service/common');
 const { createRowFilter } = require('./toolbox');
+const {
+  normalizeTargetAliasKey,
+  targetPathAliasKey
+} = require('./toolbox-target-identity');
 
 const MAX_MULTI_SPLIT_GROUPS = 8;
 const WINDOWS_RESERVED_BASENAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -63,7 +67,7 @@ function normalizeMultiSplitGroups(groups) {
   return groups.map((group, index) => {
     const number = index + 1;
     const fileName = normalizeSplitOutputFileName(group && group.fileName);
-    const duplicateKey = fileName.toLocaleLowerCase('en-US');
+    const duplicateKey = normalizeTargetAliasKey(fileName);
     if (seenNames.has(duplicateKey)) {
       throw new ToolboxMultiSplitValidationError(
         `文件${number}与文件${seenNames.get(duplicateKey)}的文件名重复`,
@@ -130,7 +134,7 @@ function publishPreparedSplitFiles(preparedFiles, options = {}) {
         );
       }
     }
-    const key = path.resolve(plan.targetPath).toLocaleLowerCase('en-US');
+    const key = targetPathAliasKey(fsImpl, plan.targetPath);
     if (targetKeys.has(key)) {
       throw new ToolboxMultiSplitPublishError('拆分文件目标路径重复，未发布任何文件');
     }

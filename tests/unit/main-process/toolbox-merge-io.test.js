@@ -217,6 +217,53 @@ test.describe('toolbox merge io', () => {
     assert.deepEqual(readback.sheets.map((rows) => rows.slice(1).flat()), [['1', '2'], ['3', '4'], ['5']]);
   });
 
+  test('跨工作簿合并保留首表布局、表头样式和各来源数据样式', async () => {
+    const dir = makeTempDir();
+    const firstPath = path.join(dir, 'styled-first.xlsx');
+    const secondPath = path.join(dir, 'styled-second.xlsx');
+    const output = path.join(dir, 'styled-output.xlsx');
+
+    const firstBook = new ExcelJS.Workbook();
+    const firstSheet = firstBook.addWorksheet('S1');
+    firstSheet.getColumn(2).width = 27;
+    const firstHeader = firstSheet.addRow(['ID', 'Amount']);
+    firstHeader.getCell(1).font = { bold: true, color: { argb: 'FFFF0000' } };
+    const firstData = firstSheet.addRow(['001234567890123456789', 1]);
+    firstData.getCell(1).numFmt = '@';
+    firstData.getCell(2).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFFFF00' }
+    };
+    await firstBook.xlsx.writeFile(firstPath);
+
+    const secondBook = new ExcelJS.Workbook();
+    const secondSheet = secondBook.addWorksheet('S2');
+    secondSheet.getColumn(2).width = 12;
+    secondSheet.addRow(['ID', 'Amount']);
+    const secondData = secondSheet.addRow(['B', 2]);
+    secondData.getCell(2).font = { italic: true, color: { argb: 'FF0000FF' } };
+    await secondBook.xlsx.writeFile(secondPath);
+
+    const result = await mergeToolboxFilesToXlsx({
+      filePaths: [firstPath, secondPath],
+      savePath: output
+    });
+    assert.equal(result.dataRowCount, 2);
+    assert.ok(result.styleStats.actualCounts.cellXfs > 1);
+
+    const readback = new ExcelJS.Workbook();
+    await readback.xlsx.readFile(output);
+    const sheet = readback.worksheets[0];
+    assert.equal(sheet.getColumn(2).width, 27);
+    assert.equal(sheet.getCell('A1').font.bold, true);
+    assert.equal(sheet.getCell('A1').font.color.argb, 'FFFF0000');
+    assert.equal(sheet.getCell('A2').value, '001234567890123456789');
+    assert.equal(sheet.getCell('B2').fill.fgColor.argb, 'FFFFFF00');
+    assert.equal(sheet.getCell('B3').font.italic, true);
+    assert.equal(sheet.getCell('B3').font.color.argb, 'FF0000FF');
+  });
+
   test('扩展名为 CSV 但实际为 XLSX 时按工作簿读取全部可见 sheet', async () => {
     const dir = makeTempDir();
     const actual = await writeXlsx(path.join(dir, 'actual.xlsx'), [
