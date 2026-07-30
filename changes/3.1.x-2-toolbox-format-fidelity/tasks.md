@@ -75,6 +75,8 @@
 - [x] 首轮 `v3.1.2` tag 已触发门禁，且确认失败发生在构建/Release/资产创建前
 - [x] 第二轮 Windows Release 门禁确认 publication 55/55 通过，并修复两处 CRLF 源码静态测试误报
 - [x] CRLF 测试热修完整 `release-check` 与重要变量门禁
-- [ ] 热修合入并确认无同名 Release/资产后，将失败 tag 重建到修复后的最新 `main`
-- [ ] Windows Release workflow 与四项公开资产回读
-- [ ] 回写正式发布证据并确认 tracked worktree 干净
+- [x] 热修合入并确认无同名 Release/资产后，将失败 tag 重建到修复后的最新 `main`
+- [x] Windows Release workflow 与四项公开资产回读
+- [x] 回写正式发布证据
+
+正式发布证据：发布触发时 `origin/main` / `v3.1.2` 均指向 `69e4dbadf7a1b4593c2000b06c0335a46bc951b2`；Windows Release run `30572240178` 全绿；stable/latest Release `v3.1.2` 的 Setup、blockmap、portable 与 `latest.yml` 四项资产均已公开下载并完成摘要回读。证据 PR 合入后的 tracked worktree 只读核对结果记录在 PR 收尾和最终交付中，避免为回写自身合并状态再创建循环 PR。
