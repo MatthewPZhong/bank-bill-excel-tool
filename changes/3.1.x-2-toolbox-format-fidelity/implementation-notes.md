@@ -29,10 +29,32 @@
 
 BLOCK 问题：无。以上未知均可由仓库证据和故障注入消除，不需要改变用户流程或新增业务选择。
 
+### General 尾随小数点回归 Preflight（2026-07-30）
+
+- Goal: 修复工具箱合并后，来源为 General、底层数字词法带无效尾零时，整数金额被显示为带末尾小数点的问题。
+- Context: 用户真实来源单元格保存为 `<v>1200000.0</v>`，来源可见值为 `1200000`；v3.1.2 writer 生成 `numFmt='0.#'` 后，合并结果可见值变为 `1200000.`。
+- Constraints: 不通过 JavaScript `Number` 推导精度；不改变 numeric/text 安全分类、canonical 值、`matchValue`、金额值、行选择、样式继承优先级或发布链路；只修正 General/显式科学格式自动生成的非科学数字格式码。
+- Done when: `.0/.00` 整数语义生成 `numFmt='0'`，非零有效小数继续保留所需可选位；纯函数、合并端到端和三份真实来源回放通过，规格与 v3.1.2 发布文档同步。
+
+| 已确认事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 目标来源两行的 OOXML 原始值均为 `1200000.0`、样式为 General | `Fund_transfer_apply_1784944566043.xlsx` 的 `Sheet1!J3/J151` | 来源显示语义是整数，不能把词法尾零变成可见标点 |
+| 原合并结果把两行写为 numeric `1200000`，但套用 `0.#` | `合并-202607301111.xlsx` 的 `COMMON!J3/J151` | 根因在生成的 `numFmt`，不是金额数值被改写 |
+| 原合并结果共有 12,997 个整数单元格使用 `0.#` | OOXML/SheetJS 审计：H 列 5,697、J 列 7,300 | 修复必须覆盖通用生成逻辑，不能只特判渠道流水号或某一列 |
+
+| 未知 | 影响 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| 去除词法尾零是否会损失 General 来源的可见小数 | 高 | PROBE | `.0/.00`、`12.50`、`12.05`、`0.0100`、负数和科学词法纯函数矩阵 | 只去除 canonical 小数部分末尾的 `0`；中间零和非零有效小数保留 |
+| 修复是否改变金额值、匹配值或非科学计数安全门禁 | 高 | PROBE | 合并端到端同时断言 output value、formatted value、numFmt | 只改变自动生成的 `numFmt`；其它分类结果与数据路径不变 |
+| 真实三文件合并是否仍保持行数并消除末尾点 | 高 | PROBE | 用用户三份来源生成临时结果并核对目标两行与全表 `0.#` 整数计数 | 已回放；不覆盖用户源文件或原合并文件 |
+
+BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读真实样本回放消除。
+
 ## Decisions
 
 | 决定 | 原因与证据 | 放弃的方案 | 影响 |
 | --- | --- | --- | --- |
+| General/科学格式输出 `numFmt` 使用有效 scale，安全门禁仍使用原始 scale | `1200000.0` 的 canonical 数值为整数，原始 scale=1 生成 `0.#` 会显示末尾小数点；独立复核同时发现若直接用缩短后的格式长度做门禁，会让 241 字符边界由 text 变 number | 特判金额列/渠道流水号；恢复为 General；先转 Number 再猜小数位；用 effective scale 同时放宽格式安全门禁 | `.0/.00` 的实际格式变 `0`；240 字符门禁仍按 `scale + 2` 计算，保留既有 numeric/text 分类。有效小数、数值、精度门禁和非 General 语义格式不变 |
 | `.xls` 先用真实 BIFF8 fixture 做双解析器 probe | Spec B 4.4 明确要求，且当前 `.xls` 与 XLSX 使用不同读取层 | 直接假设 SheetJS `cellStyles` 等价支持所有样式 | 未过门禁前不编辑生产代码 |
 | LibreOffice probe 使用独立临时 user profile | 默认 profile 在受限环境中无法初始化 | 把环境启动失败误报成格式能力缺失 | 探测可重复且不污染用户配置 |
 | OOXML/BIFF8 低编号格式按物理权威分区 | 真实 SheetJS/Excel 文件会在 `5–8/23–26/41–44/50+` 写 locale 或自定义格式；仓库资产实际包含 id 41/56，BIFF8 自定义日期实际使用 id 60 | 一律把 `<164` 当 built-in，或让任意低 id 覆盖 canonical | 允许区间内物理格式优先；其余 `0–49` canonical 保护。BIFF8 只核对实际物理 FORMAT 的有值 cell，避免 id 14/37 locale 表示误拒 |
@@ -129,6 +151,11 @@ BLOCK 问题：无。以上未知均可由仓库证据和故障注入消除，�
 | publication 精确身份/取消耐久性/恢复路径补充回归 | publication core 54/54 PASS | `ino=0` fail-closed、超过安全整数的相邻 inode 精确区分、跨目录 staging 取消逐目录 fsync、rollback 三个收尾失败窗口展示 generation 路径 |
 | 最终重要变量与 smoke 门禁 | `scan:vars` 刷新 242 files / 3077 top-level names；`check:vars -- --include-minor` 命中既有 `normalizeCell`、`serializeError` 两项 Important-skeleton；`npm run smoke` 全部 PASS | `normalizeCell` 的 Excel/CSV/PDF 读写放大面未回归；serializeError stack/cause/FileValidationError/ManualRecovery 新字段双向契约由完整单测与 smoke 覆盖 |
 | PR #104 最终 `npm run release-check` | 冻结源码状态 lint PASS；smoke PASS；unit 4376/4376 PASS（272 files，日志 `logs/unit-tests/unit-20260730-095713.log`）；integration 2051/2051 PASS（44 scripts，总耗时 309139ms） | 覆盖严格 OPC、54 项 publication 故障注入、Worker FIFO/heartbeat、30 万行流式回放与全仓既有功能；该行是提交依据 |
+| General 尾零纯函数与合并端到端回归 | 定向 22/22 PASS；覆盖 `.0/.00`、零/负数、中间零、非零有效小数、正负科学词法、非 General 语义格式，以及原始格式长度 240/241 的 number/text 边界 | 防止再次按原始 scale 生成 `0.#`，同时锁定 numeric 值、格式输出及既有安全降级类型 |
+| 用户三文件真实回放与修复前后对拍 | 合并 27,716 行；目标 `COMMON!J3/J151` 均为 numeric `1200000`、显示 `1200000`、`numFmt='0'`。修复前后 Sheet 与 `A1:Z27717` 范围一致，逐格对拍 564,238 个单元格的类型/值/公式差异为 0；仅 12,997 个格式由 `0.#` 变为 `0` | 真实来源边界、全表影响面、目标两行显示、业务值零差异与行数守恒；源文件和原结果未改动 |
+| General 尾零修复最终重要变量检查 | `npm run scan:vars` 刷新 242 files / 3078 top-level names；`npm run check:vars -- --include-minor` PASS，本次唯一 `src/` 改动未命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor | 不需要追加关联功能 review；仍以工具箱定向矩阵、真实回放和全量门禁作为行为证据 |
+| General 尾零修复最终 `npm run release-check` | 最终源码状态 lint PASS；smoke PASS；unit 4378/4378 PASS（272 files，日志 `logs/unit-tests/unit-20260730-125849.log`）；integration 2051/2051 PASS（44 scripts，总耗时 298728ms） | 覆盖全部既有功能，并包含新增纯函数、240/241 门禁边界和真实 OOXML `<v>1200000.0</v>` 合并回归 |
+| 独立 review 的格式长度 P3 收口 | 首轮发现 effective scale 若同时参与 240 字符门禁会把极端尾零由 text 变 number；改为输出/门禁双尺度后，`1.0e-237` 保持 number，`1.0e-238` 与 239 位小数零保持 text + `@`。两位独立 reviewer 最终均确认 P0/P1/P2/P3=0；88,000 组尾零/指数/长度边界词法与基线分类对拍 `outputType/reason` 零差异；工具箱定向矩阵 62/62 PASS | 关闭确定性的 numeric/text 契约漂移，最终实现、测试和行为文档一致 |
 
 ## Remaining Unknowns
 
@@ -140,10 +167,10 @@ BLOCK 问题：无。以上未知均可由仓库证据和故障注入消除，�
 | 30 万行 XLSX 内存与耗时上限 | RESOLVED（自动门禁） | 新生产入口峰值 RSS 426MB，总耗时 108.9s；Windows 实机仍随发布资产复核 | 自动性能门禁不阻塞；实机人工项保留 |
 | Windows/网络盘输出目录是否支持同目录 hardlink | ASSUME（显式 fail-closed） | Windows NTFS 发布回放必须覆盖；不支持 hardlink 的 FAT/部分网络盘由错误路径明确拒绝，禁止 fallback | 不影响文件安全；支持范围需在发布验收/用户文档中确认 |
 
-## Reconciliation Blindspot Pass（PR #104 Review 修复后）
+## Reconciliation Blindspot Pass（General 尾随小数点修复后）
 
-- 输入到输出的数据选择、金额、币种、方向和匹配口径未变；本轮只收紧临时 XLSX 完整性、行数守恒和发布/恢复边界。
+- 输入到输出的数据选择、金额数值、币种、方向和匹配口径未变；本轮只修正 General/显式科学格式安全数字自动生成的 `numFmt`，不改变 canonical、`matchValue` 或 numeric/text 分类。
 - 每个 writer emit 行只计一次，输出按 `Sheet ×（表头 1 行 + 数据行）` 流式回读；0 数据行仍要求一页表头，分页总数据行必须与 writer 计数精确一致。
 - generation 的校验身份贯穿 prepare/staging，正式目标只在 index/journal 均 prepared 后改动；异常退出、部分 copy、部分 hardlink 发布和外部篡改都有互斥去向与故障注入。
 - “临时产物校验：通过”只在严格 Content Types/workbook/rels/全部 worksheet/styles、行数和摘要均通过后写入；启动恢复失败同时进入日志和用户可见启动阻断。
-- 本轮未命中账号/主体/币种、金额方向、匹配主键或记账幂等规则变化，因此没有新增资金红线；Windows Excel/WPS 对真实或脱敏账单的可见格式/行数人工门禁仍保留。
+- 本轮命中金额**可见格式**资金红线，但未改变金额值、账号/主体/币种、金额方向、匹配主键或记账幂等规则；用户三文件回放已核对目标两行、全表影响计数和 27,716 行守恒。正式发布前仍保留 Windows Excel/WPS 对真实或脱敏账单可见金额、日期、长编号和行数的人工复核。

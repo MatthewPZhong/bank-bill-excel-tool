@@ -353,7 +353,22 @@ function isScientificNumberFormat(formatCode) {
 
 function generatedPlainNumberFormat(parsed) {
   if (!parsed || parsed.scale <= 0) return '0';
-  return `0.${'#'.repeat(parsed.scale)}`;
+  const canonical = String(parsed.canonical || '');
+  const decimalPoint = canonical.indexOf('.');
+  if (decimalPoint < 0) return '0';
+  const effectiveScale = canonical
+    .slice(decimalPoint + 1)
+    .replace(/0+$/, '')
+    .length;
+  if (effectiveScale <= 0) return '0';
+  return `0.${'#'.repeat(effectiveScale)}`;
+}
+
+function generatedPlainNumberFormatSafetyLength(parsed) {
+  // 安全分类继续按 canonical 原始 scale 计费；显示格式可去尾零，
+  // 但不能借此把既有 text/number 类型门禁放宽。
+  if (!parsed || parsed.scale <= 0) return 1;
+  return parsed.scale + 2;
 }
 
 function classifyNumericOutput(rawLexicalValue, sourceNumFmt = 'General') {
@@ -373,6 +388,7 @@ function classifyNumericOutput(rawLexicalValue, sourceNumFmt = 'General') {
   const parsed = parseResult.value;
 
   const plainFormat = generatedPlainNumberFormat(parsed);
+  const plainFormatSafetyLength = generatedPlainNumberFormatSafetyLength(parsed);
   const numeric = Number(parsed.canonical);
   const numericRoundTrip = Number.isFinite(numeric)
     ? parseDecimalLexical(String(numeric))
@@ -384,7 +400,7 @@ function classifyNumericOutput(rawLexicalValue, sourceNumFmt = 'General') {
     Number.isFinite(numeric) &&
     (!parsed.isZero ? numeric !== 0 : true) &&
     roundTripEqual &&
-    plainFormat.length <= TOOLBOX_MAX_GENERATED_NUMFMT_CHARS;
+    plainFormatSafetyLength <= TOOLBOX_MAX_GENERATED_NUMFMT_CHARS;
 
   if (!safe) {
     return Object.freeze({
@@ -396,7 +412,7 @@ function classifyNumericOutput(rawLexicalValue, sourceNumFmt = 'General') {
         ? 'precision'
         : parsed.integerDigits > 15
           ? 'integer-digits'
-          : plainFormat.length > TOOLBOX_MAX_GENERATED_NUMFMT_CHARS
+          : plainFormatSafetyLength > TOOLBOX_MAX_GENERATED_NUMFMT_CHARS
             ? 'format-length'
             : 'number-range-or-roundtrip'
     });
