@@ -9,6 +9,31 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.1.2（2026-07-29）
+
+v3.1.2 修复工具箱合并/拆分后日期变数字、长编号变科学计数法和样式丢失的问题，并把 `.xlsx`、标准 BIFF8 `.xls` 与 CSV 的全部工具箱入口收口到统一链路。
+
+**关键行为**
+
+- 合并、普通/大文件单拆、多文件拆分和自动分页统一保留来源数字/日期/文本格式、字体、填充、边框、对齐、换行、旋转、列宽、行高、隐藏与 outline；分页重放基准表头和列布局。
+- 超过 Excel 安全精度的整数、科学计数词法和前导零标识符安全转成文本，避免近似值与科学计数法；字段扫描和导出使用同一匹配投影，保证 UI 中出现的值可以重新命中。
+- 统一处理 1900/1904 日期系统、内置/自定义日期格式、纯时间和 `t=d`。无法安全转换的日期保留原文本，在成功弹框显示总数及最多 20 条样例；提示不标黄、不进入错误报告。
+- 文件类型按 magic 识别：ZIP OOXML、OLE/CFB BIFF8、CSV 可混合使用，扩展名伪装不会让合并与拆分走不同 reader。标准 `.xls` 的 XF、Theme/XFExt、palette、布局与值层先严格对齐，再输出 `.xlsx`。
+- workbook/rels/worksheet/sharedStrings/styles/theme 与 BIFF8 records/XFCRC/XFExt 全部失败关闭；BIFF8 `Dimensions` 按 65536 行 / 256 列的半开边界核对 Row/cell。截断、重复、错位、越界、CRC 不符或未知必需颜色不会产出部分结果或默认黑白样式。
+- 输出样式按最终签名去重并执行组件预算；临时文件发布前严格解析 Content Types、包根/工作簿 relationships、全部 worksheet 和 styles，并核对内部关系目标、Sheet 声明闭包、逐页表头、数据行、样式数及结构扫描前后摘要。缺失包根关系、悬空内部关系、截断 XML、悬空/游离 Sheet、错表头、漏行或校验期间换文件均不发布。
+- 单/多文件输出均先整批生成、校验，再通过 staging、journal 和恢复索引发布。固定索引会在任何 staging byte 写入前登记 preparing intent；写后 identity 贯穿 generation、staging 和 rename 后目标，同大小换内容也会拒绝。提交收尾另有 finalizing intent，journal 删除失败或 journal 已删但 index 未删都可安全重试；启动恢复失败时直接显示人工恢复路径并停止启动。
+- 全文件哈希、staging 复制、fsync 和恢复在串行 Worker 中执行，不阻塞 Electron 主界面；Worker 异常退出会先恢复再报告失败。30 万行级低样式文件保持流式处理，路径矩阵覆盖 XLSX/BIFF8/CSV 的合并、单拆、多拆、分页、行数与顺序守恒。
+
+**兼容与人工门禁**
+
+- 正式发布依赖保存目录支持同目录 hardlink no-replace。Windows 本机 NTFS 等支持目录可正常使用；FAT 或部分网络盘不支持时会在改动正式目标前失败，禁止降级为可能覆盖并发文件的普通 rename。
+
+- `.xls` 仅支持未加密的标准 OLE/CFB BIFF8；兼容 LibreOffice 全列 `ColInfo` 终止哨兵，并把零宽/默认隐藏布局转换成可再次导入的等价 OOXML，不写零默认行高且不生成第 257 列。BIFF2–5、加密、损坏和 XML Spreadsheet 2003 伪装文件明确拒绝并提示另存。CSV 没有来源样式，继续按文本值输出。
+- 资金对账、平盘、模板映射、存档及既有拆分分组语义不变。
+- 用真实或脱敏 `.xlsx`/`.xls` 在 Windows Excel/WPS 中核对日期、长账号、颜色、边框、行列布局和行数；自动测试不能替代人工账单复核。
+
+---
+
 ## v3.1.1（2026-07-29）
 
 v3.1.1 在不放宽数据防丢边界的前提下兼容可证明为空的旧平盘侧库，并修复资金对账中 Credit/Inbound 行可能被调拨规则误改的问题。

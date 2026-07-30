@@ -11,16 +11,19 @@ const {
   trimTrailingEmptyCells
 } = require('../backend/file-service/common');
 const {
-  ensureSupportedFile,
   isMemoryLimitError,
   readRows
 } = require('../backend/file-service/readers');
 const {
-  streamStrictWorkbookSheetTables,
   ToolboxSheetReadError
 } = require('../backend/toolbox-xlsx-stream/multi-sheet-reader');
 const { ToolboxHeaderMismatchError } = require('./toolbox');
-const { createRowsStreamWriter } = require('./toolbox-stream-io');
+const { detectToolboxInputKind } = require('./toolbox-input-kind');
+const {
+  TOOLBOX_SHEET_STRATEGIES,
+  streamToolboxTables
+} = require('./toolbox-format-io');
+const { createToolboxOutputWriter } = require('./toolbox-output-writer');
 
 class ToolboxMergePublishError extends Error {
   constructor(message, detailLines = []) {
@@ -30,34 +33,8 @@ class ToolboxMergePublishError extends Error {
   }
 }
 
-function readFileMagic(filePath) {
-  const buffer = Buffer.alloc(4);
-  const fd = fs.openSync(filePath, 'r');
-  try {
-    const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
 function detectMergeInputKind(filePath) {
-  ensureSupportedFile(filePath);
-  if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
-    throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
-  }
-
-  const magic = readFileMagic(filePath);
-  const isOle2 = magic.length >= 4
-    && magic[0] === 0xd0 && magic[1] === 0xcf && magic[2] === 0x11 && magic[3] === 0xe0;
-  const isZip = magic.length >= 4
-    && magic[0] === 0x50 && magic[1] === 0x4b && magic[2] === 0x03 && magic[3] === 0x04;
-  if (isZip) return 'xlsx';
-  if (isOle2) return 'xls';
-
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === '.csv') return 'csv';
-  return extension === '.xlsx' ? 'xlsx' : 'xls';
+  return detectToolboxInputKind(filePath);
 }
 
 function normalizeHeaderRow(row) {
@@ -223,14 +200,35 @@ function streamCsvTable(filePath, options = {}) {
 }
 
 async function streamMergeInputFile(filePath, options = {}) {
-  const kind = detectMergeInputKind(filePath);
-  if (kind === 'xlsx') {
-    return streamStrictWorkbookSheetTables(filePath, options);
-  }
-  if (kind === 'xls') {
-    return streamLegacyWorkbookSheetTables(filePath, options);
-  }
-  return streamCsvTable(filePath, options);
+  const onSheetHeader = typeof options.onSheetHeader === 'function'
+    ? options.onSheetHeader
+    : null;
+  const onDataRow = typeof options.onDataRow === 'function'
+    ? options.onDataRow
+    : null;
+  const result = await streamToolboxTables(filePath, {
+    strategy: TOOLBOX_SHEET_STRATEGIES.MERGE,
+    sourceRegistryResolver: options.sourceRegistryResolver,
+    cancelToken: options.cancelToken || null,
+    onHeader: (headerInfo) => {
+      if (!onSheetHeader) return;
+      onSheetHeader({
+        ...headerInfo,
+        headers: headerInfo.normalizedHeaders.slice(),
+        sheetName: headerInfo.sourceSheet
+      });
+    },
+    onDataRow: (row, rowInfo) => {
+      if (onDataRow) onDataRow(row, rowInfo);
+    }
+  });
+  return {
+    ...result,
+    physicalSheetCount: result.sheetSummaries.length + result.hiddenSheetCount,
+    visibleSheetCount: result.sheetSummaries.length,
+    nonEmptySheetCount: result.participatingSheetCount,
+    skippedEmptySheetCount: result.emptySheetCount
+  };
 }
 
 async function mergeToolboxFilesToXlsx({
@@ -238,7 +236,7 @@ async function mergeToolboxFilesToXlsx({
   savePath,
   sheetBaseName = 'COMMON',
   maxRowsPerSheet,
-  writerFactory = createRowsStreamWriter
+  writerFactory = createToolboxOutputWriter
 }) {
   const sources = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
   if (sources.length === 0) {
@@ -254,6 +252,7 @@ async function mergeToolboxFilesToXlsx({
   let skippedHiddenSheetCount = 0;
   let skippedEmptySheetCount = 0;
   const fileSummaries = [];
+  const sourceRegistryResolver = new Map();
 
   const onSheetHeader = (headerInfo) => {
     if (baseHeader === null) {
@@ -261,6 +260,10 @@ async function mergeToolboxFilesToXlsx({
       streamWriter = writerFactory({
         savePath,
         normalizedHeaders: baseHeader.headers,
+        rawHeaderCells: headerInfo.rawHeaderCells,
+        headerRow: headerInfo.headerRow,
+        layoutBaseline: headerInfo.sheetMeta,
+        sourceRegistryResolver,
         sheetBaseName,
         maxRowsPerSheet
       });
@@ -270,17 +273,27 @@ async function mergeToolboxFilesToXlsx({
     inputSheetCount += 1;
   };
 
-  const onDataRow = (cells) => {
+  const onDataRow = (row) => {
     if (!streamWriter) {
       throw new Error('工具箱合并输出尚未初始化');
     }
-    streamWriter.emit(cells);
+    const emit = typeof streamWriter.emitRow === 'function'
+      ? streamWriter.emitRow
+      : streamWriter.emit;
+    if (typeof emit !== 'function') {
+      throw new Error('工具箱合并 writer 缺少逐行写入接口');
+    }
+    emit.call(streamWriter, row);
   };
 
   try {
     for (const filePath of sources) {
       // eslint-disable-next-line no-await-in-loop
-      const summary = await streamMergeInputFile(filePath, { onSheetHeader, onDataRow });
+      const summary = await streamMergeInputFile(filePath, {
+        onSheetHeader,
+        onDataRow,
+        sourceRegistryResolver
+      });
       if (!summary || summary.nonEmptySheetCount === 0) {
         const sourceFile = path.basename(filePath);
         throw new FileValidationError(
@@ -302,7 +315,13 @@ async function mergeToolboxFilesToXlsx({
     if (!streamWriter || baseHeader === null) {
       throw new FileValidationError('TOOLBOX_MERGE_EMPTY', '没有找到可合并的数据，请重新选择文件');
     }
-    const result = await streamWriter.commit();
+    const commit = typeof streamWriter.commitAndValidate === 'function'
+      ? streamWriter.commitAndValidate
+      : streamWriter.commit;
+    if (typeof commit !== 'function') {
+      throw new Error('工具箱合并 writer 缺少提交接口');
+    }
+    const result = await commit.call(streamWriter);
     return {
       ...result,
       fileCount: sources.length,

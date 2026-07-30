@@ -4,6 +4,7 @@
 //   - name / message / stack / code（SQLITE_BUSY / FileValidationError code 等）
 //   - cause 链（Error.cause 嵌套 — Node 16.9+ 引入）
 //   - FileValidationError 专属字段（detailLines / context — src/backend/file-service/common.js）
+//   - 可恢复文件操作字段（recoveryPaths / preserveTemporaryFiles）
 //
 // spec §2.4 范式 + spec §16（self-review）扩展：
 //   - 循环引用防护：cause 嵌套上限 10 层（超过返回 placeholder）
@@ -38,6 +39,8 @@ function serializeError(err, depth = 0) {
       cause: null,
       detailLines: null,
       context: null,
+      recoveryPaths: null,
+      preserveTemporaryFiles: false,
       __truncated__: true,
     };
   }
@@ -51,6 +54,8 @@ function serializeError(err, depth = 0) {
       cause: null,
       detailLines: null,
       context: null,
+      recoveryPaths: null,
+      preserveTemporaryFiles: false,
     };
   }
   const out = {
@@ -66,6 +71,12 @@ function serializeError(err, depth = 0) {
     context: err.context && typeof err.context === 'object'
       ? safeCloneContext(err.context)
       : null,
+    // 发布/回滚类错误需要把人工恢复路径带回 Electron 主进程；临时目录清理逻辑
+    // 也依赖 preserveTemporaryFiles，跨 worker 时不得静默丢失。
+    recoveryPaths: Array.isArray(err.recoveryPaths)
+      ? err.recoveryPaths.map((filePath) => String(filePath))
+      : null,
+    preserveTemporaryFiles: err.preserveTemporaryFiles === true,
     // 大表导入引擎整批拒绝错误专属（v3.0.4 PR-C）：结构化行级错误样本 + 总数 + 截断标志，
     //   供 pending session 跨 worker 边界还原报错 xlsx（collectedErrors 含 cells）。JSON 安全（一层 clone 兜底）。
     structuredImportErrors: err.structuredImportErrors && typeof err.structuredImportErrors === 'object'
@@ -142,6 +153,12 @@ function deserializeError(serialized) {
   }
   if (serialized.context && typeof serialized.context === 'object') {
     err.context = { ...serialized.context };
+  }
+  if (Array.isArray(serialized.recoveryPaths)) {
+    err.recoveryPaths = serialized.recoveryPaths.slice();
+  }
+  if (serialized.preserveTemporaryFiles === true) {
+    err.preserveTemporaryFiles = true;
   }
   if (serialized.structuredImportErrors && typeof serialized.structuredImportErrors === 'object') {
     err.structuredImportErrors = serialized.structuredImportErrors;

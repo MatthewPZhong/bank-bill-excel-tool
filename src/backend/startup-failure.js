@@ -15,6 +15,19 @@ function buildStartupFailureDialogMessage(error, logFilePath) {
   const lines = [
     `错误摘要：${summary}`
   ];
+  const detailLines = error && Array.isArray(error.detailLines)
+    ? error.detailLines.map((line) => String(line)).filter(Boolean).slice(0, 20)
+    : [];
+  const recoveryPaths = error && Array.isArray(error.recoveryPaths)
+    ? [...new Set(error.recoveryPaths.map((filePath) => String(filePath)).filter(Boolean))]
+    : [];
+
+  if (detailLines.length > 0) {
+    lines.push('处理明细：', ...detailLines);
+  }
+  if (recoveryPaths.length > 0) {
+    lines.push('人工恢复路径：', ...recoveryPaths);
+  }
 
   if (logFilePath) {
     lines.push(`日志文件：${logFilePath}`);
@@ -33,6 +46,12 @@ function reportStartupFailure({
   const summary = normalizeErrorMessage(error);
   const title = '清结算小助手启动失败';
   const message = buildStartupFailureDialogMessage(error, logFilePath);
+  const detailLines = error && Array.isArray(error.detailLines)
+    ? error.detailLines.map((line) => String(line)).filter(Boolean)
+    : [];
+  const recoveryPaths = error && Array.isArray(error.recoveryPaths)
+    ? [...new Set(error.recoveryPaths.map((filePath) => String(filePath)).filter(Boolean))]
+    : [];
 
   try {
     appendRecord(logFilePath, {
@@ -40,6 +59,8 @@ function reportStartupFailure({
       message: '应用启动失败',
       details: [
         `错误摘要：${summary}`,
+        ...detailLines,
+        ...recoveryPaths.map((filePath) => `人工恢复路径：${filePath}`),
         ...(logFilePath ? [`日志文件：${logFilePath}`] : [])
       ]
     });

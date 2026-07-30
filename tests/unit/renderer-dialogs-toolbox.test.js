@@ -75,6 +75,16 @@ describe('T2/T3 合表：一气呵成 + 结果分流 + 应用内弹框', () => {
     assert.ok(fn.includes('createAlertDialog('), 'showToolboxAlert 应走应用内 createAlertDialog');
     assert.ok(!/window\.alert\(/.test(fn), '工具箱不应再出现原生 window.alert( 调用（已全改应用内弹框）');
   });
+
+  test('格式转换提示合并进成功弹框，并保持非错误上报', () => {
+    assert.ok(fn.includes('function buildToolboxNoticeLines('));
+    assert.ok(fn.includes('result.warningSummary'));
+    assert.ok(fn.includes('samples.slice(0, 20)'));
+    assert.ok(!fn.includes('samples.slice(0, 5)'));
+    assert.ok(fn.includes('...buildToolboxNoticeLines(result)'));
+    assert.ok(fn.includes('...buildToolboxNoticeLines(exportResult)'));
+    assert.ok(fn.includes('skipLogReport: !isError'));
+  });
 });
 
 describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无独立导出按钮）', () => {
@@ -86,6 +96,13 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
 
   test('splitRead 成功 → 打开选字段弹框 createSplitFieldPickerDialog', () => {
     assert.ok(fn.includes('createSplitFieldPickerDialog('), 'splitRead 成功应弹选字段弹框');
+  });
+
+  test('splitRead failed → message + detailLines 均展示', () => {
+    assert.match(
+      fn,
+      /status !== 'success'[\s\S]*?showToolboxAlert\(result\.message \|\| '读取文件失败', \{[\s\S]*?isError:\s*true,[\s\S]*?lines:\s*result\.detailLines/
+    );
   });
 
   test('选字段弹框传 headers / valuesByField / onComplete / onCancel', () => {
@@ -223,16 +240,16 @@ describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', (
     assert.ok(mergeHandler.includes("sheetBaseName: 'COMMON'"));
   });
 
-  test('临时目录由 try/finally 在成功、取消保存和失败路径统一清理', () => {
+  test('临时目录由 try/finally 在成功、取消保存和失败路径统一 best-effort 清理', () => {
     const tempIdx = mergeHandler.indexOf("fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'))");
     const tryIdx = mergeHandler.indexOf('try {', tempIdx);
     const finallyIdx = mergeHandler.indexOf('} finally {', tryIdx);
-    const cleanupIdx = mergeHandler.indexOf("fs.rmSync(tempDir, { recursive: true, force: true });", finallyIdx);
+    const cleanupIdx = mergeHandler.indexOf('cleanupToolboxTemporaryDirectory(tempDir);', finallyIdx);
     assert.ok(tempIdx >= 0 && tryIdx > tempIdx && finallyIdx > tryIdx && cleanupIdx > finallyIdx);
   });
 
-  test('用户目标文件通过原子发布 helper 落盘，不直接复制覆盖', () => {
-    assert.ok(mergeHandler.includes('toolboxPublishMergedWorkbook(tempPath, saveResult.filePath)'));
+  test('用户目标文件通过统一可恢复发布 helper 落盘，不直接复制覆盖', () => {
+    assert.ok(mergeHandler.includes("publishToolboxArtifacts(\n          'merge'"));
     assert.ok(!mergeHandler.includes('fs.copyFileSync(tempPath, saveResult.filePath)'));
   });
 

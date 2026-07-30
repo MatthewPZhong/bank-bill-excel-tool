@@ -308,3 +308,13 @@ test.describe('setHeaders 重复调用重置', () => {
     assert.deepEqual(result.new, ['w']);
   });
 });
+
+test('__proto__ 表头在 Worker 有界累加器中保持 own key', () => {
+  const acc = createBoundedValuesAccumulator();
+  acc.setHeaders(['__proto__']);
+  acc.addRow(['PAYPAL']);
+  const result = acc.result();
+  assert.equal(Object.prototype.hasOwnProperty.call(result, '__proto__'), true);
+  assert.deepEqual(result.__proto__, ['PAYPAL']);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)).__proto__, ['PAYPAL']);
+});

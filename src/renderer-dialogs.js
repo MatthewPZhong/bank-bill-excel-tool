@@ -11754,6 +11754,34 @@
         }));
       }
 
+      function buildToolboxNoticeLines(result) {
+        const lines = [];
+        const summary = result && result.warningSummary && typeof result.warningSummary === 'object'
+          ? result.warningSummary
+          : {};
+        const warningCount = Number(summary.warningCount) || 0;
+        const samples = Array.isArray(summary.warningSamples) ? summary.warningSamples : [];
+        if (warningCount > 0) {
+          lines.push(`处理提示：${warningCount} 个单元格无法安全转换为 Excel 日期，已按原文本保留。`);
+          const visibleSamples = samples.slice(0, 20);
+          for (const sample of visibleSamples) {
+            const location = [
+              sample && sample.sourceFileName,
+              sample && sample.sourceSheet,
+              sample && sample.cellRef
+            ].filter(Boolean).join(' / ');
+            lines.push(`${location ? `${location}：` : ''}${(sample && sample.message) || '已按文本保留'}`);
+          }
+          if (warningCount > visibleSamples.length) {
+            lines.push(`其余 ${warningCount - visibleSamples.length} 个同类提示未展开；活动日志保留本批同样的最多 20 条样例。`);
+          }
+        }
+        for (const warning of Array.isArray(result && result.warnings) ? result.warnings : []) {
+          if (warning != null && String(warning) !== '') lines.push(`发布提示：${warning}`);
+        }
+        return lines;
+      }
+
       closeBtn.addEventListener('click', () => closeModal());
       overlay.addEventListener('click', (ev) => {
         if (ev.target === overlay) closeModal();
@@ -11769,7 +11797,9 @@
           const result = await desktopApi.toolbox.merge();
           if (!result || result.status === 'cancelled') return;
           if (result.status === 'success') {
-            showToolboxAlert('合并完成，已保存到：', { lines: [result.filePath] });
+            showToolboxAlert('合并完成，已保存到：', {
+              lines: [result.filePath, ...buildToolboxNoticeLines(result)]
+            });
             return;
           }
           showToolboxAlert(result.message || '合并失败', { isError: true, lines: result.detailLines });
@@ -11791,7 +11821,10 @@
           const result = await desktopApi.toolbox.splitRead();
           if (!result || result.status === 'cancelled') return;
           if (result.status !== 'success') {
-            showToolboxAlert(result.message || '读取文件失败', { isError: true });
+            showToolboxAlert(result.message || '读取文件失败', {
+              isError: true,
+              lines: result.detailLines
+            });
             return;
           }
           const headers = Array.isArray(result.headers) ? result.headers : [];
@@ -11831,10 +11864,15 @@
                   if (isMultiple) {
                     const files = Array.isArray(exportResult.files) ? exportResult.files : [];
                     showToolboxAlert('拆分完成：', {
-                      lines: files.map((file) => `${file.fileName}（${Number(file.matchedCount) || 0} 行）：${file.filePath}`)
+                      lines: [
+                        ...files.map((file) => `${file.fileName}（${Number(file.matchedCount) || 0} 行）：${file.filePath}`),
+                        ...buildToolboxNoticeLines(exportResult)
+                      ]
                     });
                   } else {
-                    showToolboxAlert('拆分完成，已保存到：', { lines: [exportResult.filePath] });
+                    showToolboxAlert('拆分完成，已保存到：', {
+                      lines: [exportResult.filePath, ...buildToolboxNoticeLines(exportResult)]
+                    });
                   }
                   return;
                 }
