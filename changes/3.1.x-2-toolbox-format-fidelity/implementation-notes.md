@@ -6,6 +6,23 @@
 - Initial plan: 严格在 v3.1.1 发布开发收尾后开始 v3.1.2；先用 probe 定位 `.xls` 缺口，再以项目自有 BIFF8 样式 overlay 与 XLSX reader 汇入统一载荷并逐条贯通路径矩阵。
 - Done when: Spec B 所有明确要求均有测试或人工验收证据，完成 PR、自审至无 P3 Finding、合并和发布收尾。
 
+### v3.1.2 发布收尾 Preflight（2026-07-30）
+
+- Goal: 将已合入 `main` 的 v3.1.2 以不可变 tag 发布，公开回读全部更新资产，并把发布事实归档回仓库。
+- Context: PR #104 合并提交为 `e5a999c`，PR #105 合并提交为 `05c3dbf`；用户已明确确认人工验收通过；开始收尾时远端不存在 `v3.1.2` tag 或同名 Release。
+- Constraints: tag 必须等于 `v${package.json.version}` 并精确指向创建时最新 `origin/main`；不得覆盖同名 tag/Release；不纳入工作区既有未跟踪文件；发布后只接受 Setup、Setup blockmap、portable 和 `latest.yml` 四项约定资产。
+- Done when: 发布准备记录合入 `main`，Windows Release workflow 全绿，Release 为 stable/latest 且四项资产可公开回读，`latest.yml` 与 Setup SHA-512/大小一致，最终 tag、workflow、资产摘要和状态回写仓库。
+
+| 未知 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- |
+| `v3.1.2` tag/Release 是否已存在 | 高 | PROBE | GitHub 与 refs 均确认不存在，可以创建一次 |
+| 合并后的源码是否仍通过完整门禁 | 高 | PROBE | 干净 `npm ci` 后重跑全部发布门禁 |
+| 人工 Excel/WPS 门禁是否签字 | 高 | RESOLVED | 用户于 2026-07-30 明确确认“人工验收通过”；不虚构未提供的样本明细 |
+| FAT/部分网络盘不支持 hardlink | 中 | ASSUME（显式 fail-closed） | 保留既有安全失败边界，不增加覆盖型 fallback，不阻断 NTFS 正式包发布 |
+| 生产在线升级 canary | 中 | 发布后人工项 | 技术 Release 先按不可变流程完成；公告前仍遵循 Windows Release Runbook |
+
+BLOCK 问题：无。tag/Release 缺失、版本和当前 `main` 均已由只读探针确认。
+
 ### PR #104 复审修复 Preflight（2026-07-30）
 
 - Goal: 关闭输出结构校验 fail-open、prepare 阶段不可发现残留和 Electron 主进程同步发布三个已确认 Finding。
@@ -156,6 +173,9 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | General 尾零修复最终重要变量检查 | `npm run scan:vars` 刷新 242 files / 3078 top-level names；`npm run check:vars -- --include-minor` PASS，本次唯一 `src/` 改动未命中 Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor | 不需要追加关联功能 review；仍以工具箱定向矩阵、真实回放和全量门禁作为行为证据 |
 | General 尾零修复最终 `npm run release-check` | 最终源码状态 lint PASS；smoke PASS；unit 4378/4378 PASS（272 files，日志 `logs/unit-tests/unit-20260730-125849.log`）；integration 2051/2051 PASS（44 scripts，总耗时 298728ms） | 覆盖全部既有功能，并包含新增纯函数、240/241 门禁边界和真实 OOXML `<v>1200000.0</v>` 合并回归 |
 | 独立 review 的格式长度 P3 收口 | 首轮发现 effective scale 若同时参与 240 字符门禁会把极端尾零由 text 变 number；改为输出/门禁双尺度后，`1.0e-237` 保持 number，`1.0e-238` 与 239 位小数零保持 text + `@`。两位独立 reviewer 最终均确认 P0/P1/P2/P3=0；88,000 组尾零/指数/长度边界词法与基线分类对拍 `outputType/reason` 零差异；工具箱定向矩阵 62/62 PASS | 关闭确定性的 numeric/text 契约漂移，最终实现、测试和行为文档一致 |
+| 合并与人工验收状态 | PR #104 合并提交 `e5a999c`，PR #105 合并提交 `05c3dbf`；用户于 2026-07-30 明确确认人工验收通过 | 代码已进入 `main`；Windows Excel/WPS 人工发布门禁按用户签字关闭，不补写未提供的样本明细 |
+| 合并后干净环境发布门禁 | `npm ci` 成功；`npm run release-check`：lint/smoke PASS、unit 4378/4378 PASS（272 files，日志 `logs/unit-tests/unit-20260730-132526.log`）、integration 2051/2051 PASS（44 scripts，总耗时 297113ms）；`verify:main-panel-alignment` 6/6 PASS，最大中心误差 0.0039 CSS px | 证明最终合并源码树保持全量回归与主页面几何契约；随后仅修改发布文档与自动刷新报告 |
+| 合并后重要变量与生产依赖审计 | `scan:vars` 刷新 242 files / 3078 top-level names；`check:vars -- --include-minor` 因 `src/` 相对 HEAD 无改动而安全跳过；`npm audit --omit=dev` 保留既有 9 条生产依赖告警（0 critical、7 high、2 moderate），相对 v3.1.1 无生产依赖图变更 | 重要变量硬节点已执行；既有依赖告警继续作为独立治理项，不在发布收尾阶段无评审升级依赖 |
 
 ## Remaining Unknowns
 
@@ -163,7 +183,7 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | --- | --- | --- | --- |
 | BIFF8 scanner 对 cell record、XF 继承、Continue 和 palette 的完整覆盖 | RESOLVED | record fixture、真实资产与 overlay mismatch 故障注入已覆盖 | 无 |
 | BIFF8 Theme/XFExt 最终颜色映射 | RESOLVED | 真实资产和最小 fixture 已覆盖 theme/palette/automatic/未知必需色 | 无 |
-| Windows Excel/WPS 人工打开 | 发布门禁 | 实现后在 Windows 分别打开脱敏 fixture | 未签字不得合并 |
+| Windows Excel/WPS 人工打开 | RESOLVED | 用户于 2026-07-30 明确确认人工验收通过；不扩写未提供的样本明细 | 发布门禁已关闭 |
 | 30 万行 XLSX 内存与耗时上限 | RESOLVED（自动门禁） | 新生产入口峰值 RSS 426MB，总耗时 108.9s；Windows 实机仍随发布资产复核 | 自动性能门禁不阻塞；实机人工项保留 |
 | Windows/网络盘输出目录是否支持同目录 hardlink | ASSUME（显式 fail-closed） | Windows NTFS 发布回放必须覆盖；不支持 hardlink 的 FAT/部分网络盘由错误路径明确拒绝，禁止 fallback | 不影响文件安全；支持范围需在发布验收/用户文档中确认 |
 
@@ -173,4 +193,4 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 - 每个 writer emit 行只计一次，输出按 `Sheet ×（表头 1 行 + 数据行）` 流式回读；0 数据行仍要求一页表头，分页总数据行必须与 writer 计数精确一致。
 - generation 的校验身份贯穿 prepare/staging，正式目标只在 index/journal 均 prepared 后改动；异常退出、部分 copy、部分 hardlink 发布和外部篡改都有互斥去向与故障注入。
 - “临时产物校验：通过”只在严格 Content Types/workbook/rels/全部 worksheet/styles、行数和摘要均通过后写入；启动恢复失败同时进入日志和用户可见启动阻断。
-- 本轮命中金额**可见格式**资金红线，但未改变金额值、账号/主体/币种、金额方向、匹配主键或记账幂等规则；用户三文件回放已核对目标两行、全表影响计数和 27,716 行守恒。正式发布前仍保留 Windows Excel/WPS 对真实或脱敏账单可见金额、日期、长编号和行数的人工复核。
+- 本轮命中金额**可见格式**资金红线，但未改变金额值、账号/主体/币种、金额方向、匹配主键或记账幂等规则；用户三文件回放已核对目标两行、全表影响计数和 27,716 行守恒。用户已于 2026-07-30 明确确认 Windows Excel/WPS 人工验收通过，该资金可见格式发布门禁已关闭。

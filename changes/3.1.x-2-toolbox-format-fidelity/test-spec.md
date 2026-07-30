@@ -25,6 +25,6 @@
 
 - XLSX/BIFF8/CSV × merge/单输出/多输出/分页路径矩阵。
 - 30 万行低/高样式基数性能。
-- Windows Excel 与 WPS 打开真实脱敏 `.xlsx`/`.xls` 产物，无修复提示。
+- [x] 用户于 2026-07-30 明确确认人工验收通过，覆盖本版 Windows Excel/WPS 人工发布门禁；不补写用户未提供的样本明细。
 - LibreOffice 生成的标准 BIFF8 `.xls` 合并/拆分后，OOXML `<col max>` 不得超过 256，零宽/默认隐藏布局不得变回可见；writer 产物必须可由同版 strict XLSX reader 再次扫描，且不得出现 `defaultRowHeight=0`。
 - Windows/OneDrive 覆盖和恢复演练。

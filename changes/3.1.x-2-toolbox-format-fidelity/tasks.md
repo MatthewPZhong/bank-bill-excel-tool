@@ -67,4 +67,9 @@
 - [x] `release-check`
 - [x] 最终 `scan:vars` / `check:vars`
 - [x] 自审无 P3 Finding
-- [ ] PR、合并、tag、GitHub Release 与正式发布收尾
+- [x] PR #104、PR #105 合入 `main`
+- [x] 用户确认 Windows Excel/WPS 人工验收通过
+- [x] 合并后干净依赖环境发布门禁
+- [ ] 创建并推送 `v3.1.2` tag
+- [ ] Windows Release workflow 与四项公开资产回读
+- [ ] 回写正式发布证据并确认 tracked worktree 干净
