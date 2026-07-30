@@ -218,6 +218,19 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | 第二轮正式 Windows Release workflow | run `30570163218`：tag/main 校验通过；publication 55/55 PASS；unit 4367/4370 PASS、2 FAIL，分别为 LF 专用 helper 截取和固定 LF 跨行调用断言；构建与 Release 步骤均未执行 | 证明 Windows staging fsync 生产修复已经通过真实平台，同时确认第二个阻断仅在测试文本边界 |
 | Windows CRLF 定向回归 | 两个原失败测试文件合计 42/42 PASS；内存把 `src/main.js` 转成 CRLF 后，helper 边界规范化与合并 publication 语义正则均 PASS | 直接覆盖 Windows checkout 文本形态，不依赖当前 macOS 工作树的 LF |
 | Windows CRLF 测试热修完整发布门禁 | `npm run release-check`：lint/smoke PASS、unit 4379/4379 PASS（272 files，日志 `logs/unit-tests/unit-20260730-143623.log`）、integration 2051/2051 PASS（44 scripts，总耗时 288282ms）；`scan:vars` 为 242 files / 3078 names，`check:vars -- --include-minor` 因无 `src/` 改动安全跳过 | 证明测试修复未改变生产代码或全仓行为；发布/合并硬节点已执行 |
+| 最终 tag 重建与源码身份 | PR #107 合并提交 `a576bd6c5497fc89326ed68afbc3336c1bdbea2e`，PR #108 合并提交 `69e4dbadf7a1b4593c2000b06c0335a46bc951b2`；每轮均先确认 Release 404/无资产，再以旧 tag object 为 lease 重建；正式发布触发时 `origin/main` 与 `v3.1.2` 均指向 `69e4dbadf7a1b4593c2000b06c0335a46bc951b2` | 失败触发 tag 没有覆盖已发布 Release；v3.1.2 tag 精确绑定全部 Windows 热修后的主线源码，后续证据 PR 只追加文档 |
+| 最终正式 Windows Release workflow | [run 30572240178](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30572240178)、job `90971561649` 全绿；unit 4378 PASS、1 个 macOS-only SKIP、0 FAIL（共 4379）；integration 2051/2051 PASS、44 个脚本、1145645ms；tag/main、主页面对齐、Windows 构建、资产暂存、校验、不可变发布和发布后回读全部成功 | 关闭真实 Windows checkout、构建和发布链门禁；唯一 skip 与平台限定一致，不是发布缺口 |
+| 正式 Release 公开状态 | [v3.1.2 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.2)，ID `362660900`，stable、non-draft、non-prerelease，且 `/releases/latest` 回读为 `v3.1.2`；发布时间 `2026-07-30T19:19:32Z` | 证明版本不是草稿或预发布，正式更新入口可公开访问 |
+| 四项正式资产公开回读 | portable 99,466,605 bytes / SHA-256 `99daee31dfc34c0381e1bc3fbe5574dccf66cae62aa107c8a8b58f321ef67ab8`；Setup 99,963,374 / `11ea5cbf1cbc2d0144c95b72b47b9b9501d31ae7ac57030f9a09dd1bd7a1a119`；blockmap 105,285 / `e5d60c3b33ff46b962d1ceffcb3cb27274aa8b4505091619106fd3485a2474bb`；`latest.yml` 368 / `ea01db0bf8162d4581876c6ab137e4ab524a6cf4ff26afbc87dbe736b34ce8e5` | 四个文件均可完整下载，且本地 SHA-256 与 GitHub `digest` 逐项一致 |
+| 更新契约与二进制完整性 | `latest.yml` 指向唯一 Setup，version `3.1.2`、size `99963374`；完整 Setup 的 SHA-512 base64 与 yml `nALy1VN/MAhLhEgDX1K4hC4oPfkKcIioxTZULvNey+0sUmkPILH8+g/vj5HTFD6oHwRXR5KsWrTMYrGpM66NDQ==` 一致；Setup 与 portable 首字节均为 Windows PE `4d5a`（`MZ`） | 自动更新元数据、安装包身份和可执行文件基本格式闭合，没有上传错包或摘要漂移 |
+
+## Formal Release Closeout（2026-07-30）
+
+- 用户明确确认人工验收通过，Windows Excel/WPS 人工门禁按用户签字关闭；不补写用户未提供的样本、文件系统或操作细节。
+- 正式源码、tag、workflow 和 Release 已形成单一血缘：`release-time origin/main@69e4dbad` = `v3.1.2` → run `30572240178` → Release ID `362660900` → 四项公开资产；证据 PR 合入后 `main` 可继续前进，但不改变 tag/Release 源码身份。
+- 两次失败 run `30567689697`、`30570163218` 均在构建和 Release 步骤前停止，未产生可见 Release 或资产；对应生产兼容与测试兼容修复保留在 PR #107、PR #108 中。
+- 正式 Release、自动更新元数据和三项二进制资产均已公开回读并核对大小/摘要；技术发布和正式发布收尾完成。
+- 既有未跟踪用户文件不属于 v3.1.2 发布范围，收尾过程不删除、不暂存、不提交；发布证据 PR 合入后从同步的 `main` 只读确认 tracked worktree 状态。
 
 ## Remaining Unknowns
 
@@ -226,8 +239,8 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | BIFF8 scanner 对 cell record、XF 继承、Continue 和 palette 的完整覆盖 | RESOLVED | record fixture、真实资产与 overlay mismatch 故障注入已覆盖 | 无 |
 | BIFF8 Theme/XFExt 最终颜色映射 | RESOLVED | 真实资产和最小 fixture 已覆盖 theme/palette/automatic/未知必需色 | 无 |
 | Windows Excel/WPS 人工打开 | RESOLVED | 用户于 2026-07-30 明确确认人工验收通过；不扩写未提供的样本明细 | 发布门禁已关闭 |
-| 30 万行 XLSX 内存与耗时上限 | RESOLVED（自动门禁） | 新生产入口峰值 RSS 426MB，总耗时 108.9s；Windows 实机仍随发布资产复核 | 自动性能门禁不阻塞；实机人工项保留 |
-| Windows/网络盘输出目录是否支持同目录 hardlink | ASSUME（显式 fail-closed） | Windows NTFS 发布回放必须覆盖；不支持 hardlink 的 FAT/部分网络盘由错误路径明确拒绝，禁止 fallback | 不影响文件安全；支持范围需在发布验收/用户文档中确认 |
+| 30 万行 XLSX 内存与耗时上限 | RESOLVED（自动门禁） | 专项自动回放中，新生产入口峰值 RSS 426MB、总耗时 108.9s；最终 Windows Release suite 同时全绿 | 无 |
+| Windows/网络盘输出目录是否支持同目录 hardlink | RESOLVED（支持边界） | 最终 Windows workflow 的 publication 55/55 在 Windows runner 真实执行；不支持 hardlink 的 FAT/部分网络盘由故障注入锁定为改动正式目标前失败，禁止 fallback | 无；属于已文档化的支持范围，不是待发布项 |
 
 ## Reconciliation Blindspot Pass（General 尾随小数点修复后）
 

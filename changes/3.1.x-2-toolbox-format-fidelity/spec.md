@@ -1,6 +1,6 @@
 # Spec B — 工具箱合并/拆分格式保真
 
-> status: release-prepared
+> status: released
 > scope: 工具箱“合并表格 / 按字段拆分”读取、行载荷、写入、Worker 与测试
 > excludes: 资金匹配引擎、场景配置、数据库 schema
 > updated: 2026-07-30
@@ -820,11 +820,21 @@ TOOLBOX_STYLE_BUDGETS = {
 - 核对可见格式、日期、长数字、分页、隐藏布局和无修复提示。
 - 自动 XML/回读测试不能替代最终 Excel/WPS 人工打开验收。
 
-### 发布准备状态（2026-07-30）
+### 正式发布状态（2026-07-30）
 
-- PR #104 与尾随小数点修复 PR #105 均已合入 `main`。
+- PR #104、尾随小数点修复 PR #105、发布准备 PR #106、Windows staging fd 热修 PR #107 与 CRLF 测试热修 PR #108 均已合入 `main`。
 - 用户已明确确认人工验收通过；该确认作为 Windows Excel/WPS 人工门禁的签字证据，不扩写未提供的样本明细。
-- 合并后干净依赖环境的 `release-check`、主页面对齐、重要变量扫描和生产依赖审计均已执行；正式 tag 与 GitHub Release 仍须由不可变 Windows 发布工作流完成。
-- 首轮正式 Windows workflow 在发布任何资产前发现 staging 文件用只读句柄执行 `fsync` 会返回 `EPERM`；修复仅把本任务新建的 staging 文件以 `r+` 打开后刷新，目录刷新兼容、摘要校验、hardlink no-replace 与失败关闭边界不变。
-- 前两轮 workflow 均在发布资产前失败：首轮发现 staging 只读句柄问题，第二轮确认该生产修复在 Windows 上通过 55/55 publication 回归后，又暴露两处仅在源码静态测试中写死 LF 换行的 CRLF 兼容误报；两轮均未创建同名 GitHub Release 或任何发布资产。测试修复合入并通过最新 `main` Windows 构建后，须再次确认 Release 不存在，才允许把当前失败 tag 重建到修复后的最新 `main`；若届时已存在 Release 或资产则立即中止，禁止覆盖 Release。
-- FAT 或部分网络盘不支持 hardlink 时仍按既定契约在改动正式目标前安全失败，不因人工验收而放宽或增加覆盖型 fallback。
+- 正式发布触发时 `origin/main` 与 `v3.1.2` tag 均指向 `69e4dbadf7a1b4593c2000b06c0335a46bc951b2`；该提交是 v3.1.2 Release 的源码身份，后续发布证据 PR 只允许在其后追加文档。
+- 最终 Windows Release workflow [run 30572240178](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30572240178) 全绿：Windows unit 4378 PASS、1 个 macOS-only 用例 SKIP、0 FAIL；integration 2051/2051 PASS（44 个脚本）；主页面对齐、Windows 构建、资产暂存、发布和发布后回读全部成功。
+- [GitHub Release v3.1.2](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.2) 为 stable、non-draft、non-prerelease 且是 latest Release；发布 ID 为 `362660900`。
+
+| 公开资产 | 字节数 | SHA-256 |
+| --- | ---: | --- |
+| `bank-bill-excel-tool-portable-3.1.2.exe` | 99,466,605 | `99daee31dfc34c0381e1bc3fbe5574dccf66cae62aa107c8a8b58f321ef67ab8` |
+| `bank-bill-excel-tool-setup-3.1.2.exe` | 99,963,374 | `11ea5cbf1cbc2d0144c95b72b47b9b9501d31ae7ac57030f9a09dd1bd7a1a119` |
+| `bank-bill-excel-tool-setup-3.1.2.exe.blockmap` | 105,285 | `e5d60c3b33ff46b962d1ceffcb3cb27274aa8b4505091619106fd3485a2474bb` |
+| `latest.yml` | 368 | `ea01db0bf8162d4581876c6ab137e4ab524a6cf4ff26afbc87dbe736b34ce8e5` |
+
+- 四项公开下载的 SHA-256 均与 GitHub `digest` 一致；Setup 的大小和 SHA-512 与 `latest.yml` 完全一致，Setup/portable 均以 Windows PE `MZ` 头开头。
+- 前两轮 workflow 均在发布资产前失败：run `30567689697` 暴露 Windows staging 只读句柄 `fsync` 问题；run `30570163218` 证明生产修复已通过 publication 55/55 后，暴露两处仅影响测试的 CRLF 兼容误报。两轮均未创建同名 Release 或资产，失败 tag 只在每次重新确认 Release 不存在后才安全重建到修复后的最新 `main`。
+- FAT 或部分网络盘不支持 hardlink 时仍按既定契约在改动正式目标前安全失败，不因人工验收或正式发布而放宽或增加覆盖型 fallback。
