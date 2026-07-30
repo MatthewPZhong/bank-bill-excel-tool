@@ -40,6 +40,21 @@ BLOCK 问题：无。tag/Release 缺失、版本和当前 `main` 均已由只读
 
 BLOCK 问题：无。不得采用“忽略普通文件 fsync EPERM”的放宽方案。
 
+### Windows CRLF 源码静态测试修复 Preflight（2026-07-30）
+
+- Goal: 修复正式 Windows workflow 中两处仅由 CRLF checkout 触发的源码静态测试误报，继续完成 v3.1.2 发布。
+- Context: 第二轮 Release run `30570163218` 已通过 tag/main 校验；publication 55/55 全部通过，证明 staging `r+` 修复生效。unit 最终为 4367/4370 PASS、2 FAIL：一处 LF 专用函数边界把 helper 截成空串，另一处把跨行调用写死为 `\n + 固定缩进`。
+- Constraints: 不修改生产代码、业务流程或发布协议；只让源码静态测试把 LF/CRLF 当等价文本表示，同时保留对 helper、`await` 和首参数 `'merge'` 的语义约束。
+- Done when: 两个失败文件定向测试、内存 CRLF 对抗 probe、完整 `release-check`、重要变量门禁与正式 Windows workflow 全部通过。
+
+| 未知 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- |
+| `shouldPreserveToolboxTemporaryFiles` 是否真的缺失 | 高 | RESOLVED | `src/main.js` 中函数存在；Windows 下 LF 专用 end marker 返回 -1，`slice(start, 1)` 为空，才在测试 eval 时抛 ReferenceError |
+| 合并 handler 是否未调用 publication helper | 高 | RESOLVED | Windows 源码实际为 `publishToolboxArtifacts(\r\n ... 'merge'`；旧 `includes` 只接受 LF，生产调用仍存在且被 await |
+| 是否应强制全仓 checkout 为 LF | 中 | 拒绝 | 新增 `.gitattributes` 会扩大整个仓库的 checkout/renormalize 影响；本轮只在源码静态测试边界规范化或使用空白无关语义正则 |
+
+BLOCK 问题：无。两项均为测试误报；正式 Release/资产步骤仍未执行。
+
 ### PR #104 复审修复 Preflight（2026-07-30）
 
 - Goal: 关闭输出结构校验 fail-open、prepare 阶段不可发现残留和 Electron 主进程同步发布三个已确认 Finding。
@@ -149,7 +164,8 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | 初版发布核心在 Electron 主进程同步执行 | 保留同步、可故障注入的事务核心，但生产入口通过 FIFO Worker dispatcher 调用 | 大产物多轮 hash/copy 会冻结 UI；单纯把 generation 放 Worker 不覆盖最终另存为 | 四个 publish 调用点和启动恢复均 await 异步 dispatcher；worker 异常退出先恢复，错误字段跨线程保留 | 是 |
 | 初版 committed 收尾先移除固定 index、再 best-effort 删除 journal | 增加 durable `finalizing` 状态并把固定 index 改为最后删除；同一 no-orphan 规则随后扩展到 `cancelling` 与 `rollback-finalizing` | Review 明确要求任一残留都能从固定恢复根发现；简单换序会制造缺 journal 阻断；后续 probe 证明 cancel/rollback 仍会留下孤儿 | 三种 terminal intent 都先固定恢复职责、再删 journal、最后删 index；legacy v1 不自动升级 | 是 |
 | staging 文件以只读 `r` 句柄执行 `fsync` | 仅该 staging 文件改用 `r+`，目录句柄和哈希读取仍为只读 | Windows `FlushFileBuffers` 对只读普通文件句柄返回 `EPERM`；忽略该错误会放宽耐久性 | Windows 可完成文件刷新；文件字节、摘要、状态机和失败关闭规则不变 | 是 |
-| 发布 tag 一经推送即不重建 | 首轮 workflow 在任何 Release/资产生成前失败后，把该 tag 视为失败触发器；仅在热修合入、最新 `main` Windows 构建通过且 Release 再次确认为不存在时重建到修复后的 `main` | 原 tag 指向不含 Windows 修复的提交，无法产出可用 v3.1.2；保留旧 tag 或重复运行都会继续失败 | 只移动未发布 tag，不覆盖 GitHub Release 或资产；旧/新 commit、失败/成功 run 和恢复检查全部留档 | 是 |
+| 发布 tag 一经推送即不重建 | workflow 在任何 Release/资产生成前失败后，把当前 tag 视为失败触发器；每轮都只在热修合入、最新 `main` Windows 构建通过且 Release 再次确认为不存在时重建到修复后的 `main` | 失败 tag 指向不含下一项修复的提交，无法产出可用 v3.1.2；保留旧 tag 或重复运行都会继续失败 | 只移动未发布 tag，不覆盖 GitHub Release 或资产；历次 commit、失败/成功 run 和恢复检查全部留档 | 是 |
+| 源码静态测试直接依赖 LF 边界与固定跨行缩进 | 需要截取函数的测试先统一 CRLF/LF；单个调用断言改为约束 `const + await + helper + merge 首参` 的空白无关正则 | Windows checkout 使用 CRLF，导致生产逻辑正常却在 Release unit 阶段误报 | 只改变测试输入规范化和断言表达，不改变生产文件换行、函数或发布行为 | 是 |
 
 ## Evidence
 
@@ -199,6 +215,9 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | Windows staging fd 定向回归 | `node --test tests/unit/toolbox-output-publication.test.js` → 55/55 PASS；新增测试在 staging fd 为只读时模拟 Windows `EPERM`，并断言实际执行 `fsync` 的唯一 staging mode 为 `r+` | 防止再次用只读 fd 调用 `FlushFileBuffers`，同时覆盖完整 publication 状态机与故障注入矩阵 |
 | Windows staging fd 热修完整发布门禁 | `npm run release-check`：lint/smoke PASS、unit 4379/4379 PASS（272 files，日志 `logs/unit-tests/unit-20260730-140540.log`）、integration 2051/2051 PASS（44 scripts，总耗时 291525ms） | 覆盖新增 Windows fd 契约、全部 publication 故障注入、30 万行流式路径及全仓既有功能 |
 | Windows staging fd 热修重要变量门禁 | `npm run scan:vars` → 242 files / 3078 top-level names；`npm run check:vars -- --include-minor` PASS，本次唯一 `src/` 改动未命中重要变量 | 发布/合并硬节点已执行；无需追加重要变量关联功能清单 |
+| 第二轮正式 Windows Release workflow | run `30570163218`：tag/main 校验通过；publication 55/55 PASS；unit 4367/4370 PASS、2 FAIL，分别为 LF 专用 helper 截取和固定 LF 跨行调用断言；构建与 Release 步骤均未执行 | 证明 Windows staging fsync 生产修复已经通过真实平台，同时确认第二个阻断仅在测试文本边界 |
+| Windows CRLF 定向回归 | 两个原失败测试文件合计 42/42 PASS；内存把 `src/main.js` 转成 CRLF 后，helper 边界规范化与合并 publication 语义正则均 PASS | 直接覆盖 Windows checkout 文本形态，不依赖当前 macOS 工作树的 LF |
+| Windows CRLF 测试热修完整发布门禁 | `npm run release-check`：lint/smoke PASS、unit 4379/4379 PASS（272 files，日志 `logs/unit-tests/unit-20260730-143623.log`）、integration 2051/2051 PASS（44 scripts，总耗时 288282ms）；`scan:vars` 为 242 files / 3078 names，`check:vars -- --include-minor` 因无 `src/` 改动安全跳过 | 证明测试修复未改变生产代码或全仓行为；发布/合并硬节点已执行 |
 
 ## Remaining Unknowns
 
