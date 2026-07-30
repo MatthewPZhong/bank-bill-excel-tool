@@ -19,6 +19,7 @@
 - Sheet：合并跳过 hidden/veryHidden；拆分继续参与；空/表头-only/重复表头。
 - BIFF8：全部必需 record、唯一 `Dimensions` 半开区间与 65536/256 最大边界、LibreOffice `ColInfo.colLast=256` 哨兵、Row reserved 位、XFCRC、Theme/XFExt、palette、Continue、Mul*、损坏/加密/错位。
 - 发布：prepare、journal、index、backup、publish、commit、cleanup 各 checkpoint 失败和重启恢复；普通 staging 文件必须用可写句柄执行 `fsync`，Windows 对只读普通文件句柄返回的 `EPERM` 不得套用目录 `fsync` 的平台兼容容错。
+- 源码静态接线测试：凡依赖源码片段边界或跨行调用的断言，必须兼容 LF 与 Windows CRLF，不得把换行符或缩进本身当业务契约。
 - Worker：IPC payload 有界，普通与 Worker 使用同一语义。
 
 ## 集成与人工

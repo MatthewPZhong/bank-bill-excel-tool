@@ -5,7 +5,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const mainSource = fs.readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8');
+const mainSource = fs
+  .readFileSync(path.join(__dirname, '../../../src/main.js'), 'utf8')
+  .replace(/\r\n?/g, '\n');
 const mergeStart = mainSource.indexOf("trackedIpcHandle('toolbox:merge'");
 const start = mainSource.indexOf("trackedIpcHandle('toolbox:split:export'");
 const end = mainSource.indexOf('\n}\n\n// v2.0.0-beta.4', start);

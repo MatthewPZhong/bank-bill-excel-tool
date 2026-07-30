@@ -249,7 +249,10 @@ describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', (
   });
 
   test('用户目标文件通过统一可恢复发布 helper 落盘，不直接复制覆盖', () => {
-    assert.ok(mergeHandler.includes("publishToolboxArtifacts(\n          'merge'"));
+    assert.match(
+      mergeHandler,
+      /\bconst\s+publishResult\s*=\s*await\s+publishToolboxArtifacts\(\s*'merge'\s*,/
+    );
     assert.ok(!mergeHandler.includes('fs.copyFileSync(tempPath, saveResult.filePath)'));
   });
 
