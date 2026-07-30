@@ -63,6 +63,44 @@ test.describe('toolbox-format number-date', () => {
     assert.equal(semanticFormat.numFmt, null);
   });
 
+  test('General/科学格式按有效小数位生成非科学格式，不把词法尾零变成末尾小数点', () => {
+    for (const lexical of [
+      '1200000.0',
+      '1200000.00',
+      '-1200000.0',
+      '0.000',
+      '-0.00'
+    ]) {
+      const classified = classifyNumericOutput(lexical, 'General');
+      assert.equal(classified.outputType, 'number');
+      assert.equal(classified.numFmt, '0', lexical);
+    }
+
+    assert.equal(classifyNumericOutput('12.50', 'General').numFmt, '0.#');
+    assert.equal(classifyNumericOutput('12.05', 'General').numFmt, '0.##');
+    assert.equal(classifyNumericOutput('0.0100', 'General').numFmt, '0.##');
+    assert.equal(classifyNumericOutput('-0.0100', 'General').numFmt, '0.##');
+    assert.equal(classifyNumericOutput('1.0e-3', 'General').numFmt, '0.###');
+    assert.equal(classifyNumericOutput('1.2300e-2', 'General').numFmt, '0.####');
+    assert.equal(classifyNumericOutput('1.2300e2', 'General').numFmt, '0');
+    assert.equal(classifyNumericOutput('1200000.0', '0.00E+00').numFmt, '0');
+    const formatBoundary = classifyNumericOutput('1.0e-237', 'General');
+    assert.equal(formatBoundary.outputType, 'number');
+    assert.equal(formatBoundary.numFmt.length, TOOLBOX_MAX_GENERATED_NUMFMT_CHARS - 1);
+    for (const lexical of [
+      '1.0e-238',
+      `0.${'0'.repeat(239)}`
+    ]) {
+      const classified = classifyNumericOutput(lexical, 'General');
+      assert.equal(classified.outputType, 'text', lexical);
+      assert.equal(classified.numFmt, '@', lexical);
+      assert.equal(classified.reason, 'format-length', lexical);
+    }
+    for (const sourceFormat of ['0.00', '#,##0.00', '000000']) {
+      assert.equal(classifyNumericOutput('1200000.0', sourceFormat).numFmt, null, sourceFormat);
+    }
+  });
+
   test('canonical plain decimal 受 Excel 单元格文本上限约束，极端指数快速 fail-closed', () => {
     assert.equal(TOOLBOX_MAX_CANONICAL_DECIMAL_CHARS, 32767);
 

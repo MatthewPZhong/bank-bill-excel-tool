@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 const XLSX = require('xlsx');
 const { ToolboxHeaderMismatchError } = require('../../../src/main-process/toolbox');
 const {
@@ -38,6 +39,20 @@ async function writeXlsx(filePath, sheets) {
   }
   await workbook.xlsx.writeFile(filePath);
   return filePath;
+}
+
+async function replaceZipEntry(filePath, entryName, transform) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const entry = zip.file(entryName);
+  assert.ok(entry, `测试夹具缺少 ZIP entry：${entryName}`);
+  const source = await entry.async('string');
+  const changed = transform(source);
+  assert.notEqual(changed, source, `测试夹具未改写 ZIP entry：${entryName}`);
+  zip.file(entryName, changed);
+  fs.writeFileSync(filePath, await zip.generateAsync({
+    type: 'nodebuffer',
+    compression: 'DEFLATE'
+  }));
 }
 
 function writeXls(filePath, sheets) {
@@ -108,6 +123,48 @@ test.describe('toolbox merge io', () => {
       ['B', '2'],
       ['C', '3']
     ]);
+  });
+
+  test('General 数字的词法尾零不会在合并结果中生成末尾小数点', async () => {
+    const dir = makeTempDir();
+    const input = await writeXlsx(path.join(dir, 'general-trailing-zero.xlsx'), [
+      { name: 'Data', rows: [['渠道流水号', '收款金额'], ['Kbank_VN-20260226-USD1.2M', 1200000]] }
+    ]);
+    await replaceZipEntry(input, 'xl/worksheets/sheet1.xml', (xml) => {
+      const target = /(<c r="B2"[^>]*>\s*<v>)1200000(<\/v>\s*<\/c>)/;
+      assert.match(xml, target);
+      return xml.replace(target, (_match, prefix, suffix) => `${prefix}1200000.0${suffix}`);
+    });
+    const sourceReadback = XLSX.readFile(input, {
+      raw: false,
+      cellNF: true
+    });
+    const sourceCell = sourceReadback.Sheets.Data.B2;
+    assert.equal(sourceCell.v, 1200000);
+    assert.equal(sourceCell.w, '1200000');
+    assert.equal(sourceCell.z, 'General');
+    const output = path.join(dir, 'general-trailing-zero-output.xlsx');
+
+    const result = await mergeToolboxFilesToXlsx({
+      filePaths: [input],
+      savePath: output
+    });
+    assert.equal(result.dataRowCount, 1);
+
+    const excelReadback = new ExcelJS.Workbook();
+    await excelReadback.xlsx.readFile(output);
+    const outputCell = excelReadback.worksheets[0].getCell('B2');
+    assert.equal(outputCell.value, 1200000);
+    assert.equal(outputCell.numFmt, '0');
+
+    const sheetJsReadback = XLSX.readFile(output, {
+      raw: false,
+      cellNF: true
+    });
+    const formattedCell = sheetJsReadback.Sheets.COMMON.B2;
+    assert.equal(formattedCell.v, 1200000);
+    assert.equal(formattedCell.w, '1200000');
+    assert.equal(formattedCell.z, '0');
   });
 
   test('XLSX + XLS + CSV 混合输入，隐藏 sheet 跳过并按文件选择顺序合并', async () => {

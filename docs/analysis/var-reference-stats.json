@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.2",
-    "scannedAt": "2026-07-30T13:56:53.654Z",
+    "scannedAt": "2026-07-30T17:12:14.861Z",
     "root": "src",
     "totalFiles": 242,
-    "totalTopLevelNames": 3077,
+    "totalTopLevelNames": 3078,
     "buckets": {
       "shared": 414,
       "paired": 705,
-      "local": 1814,
+      "local": 1815,
       "crossFile": 1119
     }
   },
@@ -46143,6 +46143,20 @@
         "refFiles": [
           {
             "file": "src/backend/database/channels-repository.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "generatedPlainNumberFormatSafetyLength",
+        "defFiles": [
+          "src/backend/toolbox-format/number-date.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/number-date.js",
             "count": 2
           }
         ],

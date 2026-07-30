@@ -62,6 +62,7 @@
 - [x] success `warningSummary`
 - [x] renderer 有界一次提示，保持中性且不进入错误报告
 - [x] 活动日志含行数、样式、验证和恢复信息
+- [x] General 数字词法尾零按有效小数位生成 `numFmt`，整数不再显示末尾小数点
 - [x] 版本号、CHANGELOG、功能历史、用户手册
 - [x] `release-check`
 - [x] 最终 `scan:vars` / `check:vars`
