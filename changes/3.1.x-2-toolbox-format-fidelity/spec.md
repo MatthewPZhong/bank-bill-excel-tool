@@ -341,7 +341,14 @@ ExcelJS 流式 writer 在首行提交后不能可靠补齐列属性，因此固�
 5. 逐行写入数据值、行元数据和单元格样式；
 6. 达到分页阈值时以同一顺序创建下一 Sheet；
 7. 完成 writer；
-8. 解析临时产物做结构/样式复核；
+8. 严格解析临时产物的 `[Content_Types].xml`、package root `_rels/.rels`、`workbook.xml`、
+   `workbook.xml.rels`、`styles.xml` 和 workbook 声明的全部 worksheet，且必须完整闭合；
+   `[Content_Types].xml` 必须包含正确的 `rels` Default；package root 必须恰有一个 internal
+   `officeDocument` relationship 且规范化后指向 `xl/workbook.xml`；package root 与 workbook
+   中全部 internal relationship 的规范化 Target 必须位于包内并指向实际存在的 ZIP part。
+   同时复核 worksheet 与 Content Type/relationship/ZIP entry 形成严格闭包、无重复/缺失/游离
+   声明，并精确核对 writer 返回的 Sheet 数、每页 `normalizedHeaders`、物理行数和数据行总数；
+   结构扫描前后的整文件 size/hash 必须一致；
 9. 所有输出均通过后，进入 5.3 的整批可回滚发布。
 
 ### 5.2 值与样式
@@ -360,27 +367,103 @@ ExcelJS 流式 writer 在首行提交后不能可靠补齐列属性，因此固�
 
 Prepare/validate：
 
-- writer 的 generation temp 可沿用系统临时目录；正式发布前，每个已验证产物必须复制/移动到目标目录同文件系统的 task staging 区，并再次校验大小/哈希或结构，publish 只从该 staging 区 rename。
-- 这样合并入口可保持现有“先生成、后弹保存框”时序，不要求为了同文件系统 rename 提前改变 UI；跨文件系统 copy 失败仍属于 prepare 失败。
+- writer 的 generation temp 可沿用系统临时目录；正式发布前，每个已验证产物必须复制到目标目录
+  同文件系统的 task staging 区，并再次校验大小/哈希或结构。publish 只从该 staging 区通过
+  同目录 hardlink no-replace 协议发布，禁止退回会覆盖既有路径的普通 rename。
+- writer 写后复核返回的 `byteSize + SHA-256` 是 generation 的验证身份；publication prepare
+  必须重新计算并与该身份精确一致，随后 staging 也必须与同一身份一致。校验完成后即使仅发生
+  “同大小换内容”，也必须拒绝发布。
+- 这样合并入口可保持现有“先生成、后弹保存框”时序，不要求为了同目录 hardlink 提前改变 UI；
+  跨文件系统 staging copy 失败仍属于 prepare 失败。
 - 全部 writer、结构复核和样式预算均成功前，不触碰任何正式目标。
 - prepare 失败只删除没有恢复价值的本任务生成文件，不改动用户已有文件。
+- preflight 必须按统一 alias 规则对固定 index、journal、全部 target/staging/backup 建立全局闭包；
+  任何跨项碰撞都须在 index/journal/staging 写入前零副作用拒绝。artifact 不得与上述路径重合，
+  正式 target 也不得位于任一 artifact 的 generation 父目录内，避免发布成功后 finally 递归删掉
+  正式结果。
+- 生产环境中的 generation/target/staging 全文件哈希、staging copy、fsync 和恢复必须在
+  单一 FIFO publication Worker 中执行，不得占用 Electron 主事件循环。主进程只负责对话框、
+  排队、节流进度和结果处理；同一发布任务的 prepare 与 publish 必须在同一 Worker 生命周期
+  连续完成。
 
 Publish：
 
-1. 预检目标路径互不重复，目标不存在或为可覆盖普通文件，父目录可写；保留现有“覆盖全部”交互。
-2. 在输出目录持久化外部任务 journal，记录 task id、staged/target/backup、阶段和每项状态；journal 自身使用临时文件 + rename 更新。
-3. 在固定 `{userData}/toolbox-publish-journal-index.json` 中以原子 temp+rename 登记 `{taskId, journalAbsolutePath, createdAt}`；只有 index 和外部 journal 都耐久写入后才允许触碰目标。
-4. 对已存在目标逐个 rename 到同目录 task-specific backup，并更新外部 journal。
-5. 对 staged 文件逐个 rename 到正式目标，并更新外部 journal。
-6. 全部完成后先在外部 journal 标记 committed；再删除 backup/staging；随后从固定 index 原子移除任务；最后删除外部 journal。崩溃发生在清理中途时，index 仍能指向 committed journal 并继续收尾；index 已移除后遗留的外部 journal 不再具有恢复职责，只做 best-effort 删除。
-7. 单输出、普通拆分、大文件拆分和多输出全部复用同一 publish helper；禁止继续直接 `copyFileSync` 覆盖。
+1. 预检目标路径互不重复，目标不存在或为可覆盖普通文件，父目录可写，并完成上述全局路径闭包；
+   保留现有“覆盖全部”交互。
+2. 在任何 staging byte 落盘前，先在固定
+   `{userData}/toolbox-publish-journal-index.json` 原子登记 `preparing` intent；该条目必须包含
+   `taskId / nonce / journalAbsolutePath / stagedAbsolutePaths / targetAbsolutePaths /
+   backupAbsolutePaths`，使新进程仅凭固定恢复根即可定位 copy 中断产生的部分 staging，并固定
+   后续恢复允许触碰的全部 task-managed 路径。
+3. 在输出目录持久化 `status=preparing` 的外部任务 journal，记录已验证 generation 身份、
+   原目标快照、staged/target/backup、阶段和每项状态；journal 自身使用临时文件 + rename 更新。
+4. 复制全部 generation 到同目录 staging，逐文件 fsync 并用相同 size/hash 复核；再把 journal
+   标记 `prepared`，最后把固定 index intent 原子更新为 `prepared`。只有 index 与外部 journal
+   均完整 prepared 后才允许触碰正式目标。
+5. 对已存在目标使用 `linkSync(target, backup)` 原子创建同目录 task-specific backup；若 backup
+   已存在或文件系统不支持 hardlink，立即 fail-closed，禁止 fallback。link 及目录 fsync 后，
+   必须用 `lstatSync(path, { bigint:true })` 取得精确 `dev + ino`，确认 source 与 backup 仍是
+   同一普通文件后才允许 unlink source。`dev/ino` 不是 bigint、`ino <= 0` 或运行环境不支持精确
+   identity 时一律 fail-closed 并保留两端；不得把默认 Number Stats 或无效 inode 当成可信相等。
+   若 source 已被替换，保留两端并转人工恢复。link 后/unlink 前崩溃时，恢复可识别双 hardlink
+   并保留原目标。
+6. 对每个 staged 文件，在发布紧前统一断言 target 仍不存在，再调用
+   `linkSync(staged, target)`；`EEXIST` 是 syscall 边界的原子 no-replace 失败，必须保留未知 target。
+   link 及目录 fsync 后同样以精确 bigint `dev + ino` 复核 source/target，仅身份一致才 unlink
+   staging；身份不可用或不支持 hardlink 必须 fail-closed，且不得退回 rename/copy 覆盖。目录
+   fsync 和单项 size/hash 校验成功后，才更新该项 published 状态。rollback 的
+   `backup → target` 恢复也必须复用同一 no-replace 原语。
+7. 全部 staged 发布和单项 published 更新完成后，journal 仍保持未 committed；必须对整批
+   target 再做一次 size + SHA-256 最终复核。任何单目标或先前已发布目标发生漂移，都进入现有
+   rollback/manual-recovery，禁止返回 committed，且不得删除身份未知的外部改写内容。
+8. 整批最终复核通过后才在外部 journal 标记 committed；随后删除 backup/staging，把固定 index
+   原子更新为 `finalizing`，删除并 fsync 外部 journal，最后才从固定 index 移除任务。
+   journal 删除失败时 finalizing intent 保留并重试；journal 已删除但 index 删除失败/崩溃时，
+   新进程允许仅凭 finalizing intent 移除残留 index，绝不回滚 committed target。
+   最终复核后不得再暴露可返回的测试 checkpoint，必须立即耐久写 committed；本协议通过原子
+   no-replace、源/目标 inode 身份复核与 committed 前整批哈希收窄竞态，但不宣称提供跨进程文件锁
+   或条件 unlink 意义上的绝对零窗口。
+9. 单输出、普通拆分、大文件拆分和多输出全部复用同一异步 publish dispatcher；禁止主进程继续直接执行同步 publication core。
 
 失败/恢复：
 
-- 捕获到发布失败时，逆序删除本任务已发布的新文件并恢复所有旧文件 backup。
+- 捕获到发布失败时，逆序清理本任务已发布的新文件并通过 no-replace 恢复所有旧文件 backup；
+  恢复路径被并发创建时不得覆盖，必须保留 backup 并转人工恢复。
+- `preparing` intent 的恢复只允许删除该 intent 中随机命名的 staging 和对应 journal，再移除
+  index 条目；该阶段绝不触碰正式 target。即使 staging 只复制了一部分，也必须可由新进程发现
+  并清理。
+- 对所有带 `discoveryState` 的新式 index，恢复任何 journal 状态前必须严格校对
+  `taskId / nonce / userDataDir / entry 数`，以及逐项 `stagedPath / targetPath / backupPath`
+  与 index 锚点。任一不一致必须返回 manual-recovery，且在失败前不得触碰任何
+  target/staging/backup。无 `discoveryState` 的存量 v1 index 因没有可信路径锚点，publish 与
+  跨进程 recovery 一律 manual-only：只展示固定 index/journal 绝对路径，不得自动读取 journal
+  后修改任何 target/staging/backup。
+- `readIndex` 校验的全局 managed-path set 必须预先包含固定 indexPath 自身；任何新式
+  journal/target/staging/backup 与固定 indexPath alias 的损坏或篡改，都须在读取恢复根阶段
+  fail-closed，不能等到 journal 执行后才发现。
+- prepared 取消前必须先把固定 index 耐久更新为 `cancelling`；完整 rollback 后必须先持久化
+  `status=rolled-back` 并把固定 index 更新为 `rollback-finalizing`。两条路径都只允许按
+  “逐个删除 staging 并 fsync 各自父目录 → 删除并 fsync journal → 最后移除 index”的顺序
+  收尾；journal 删除失败或 journal 已删但 index 删除失败时，下次启动仍必须仅凭固定恢复根
+  继续清理，禁止产生不可发现的孤儿 journal/staging。
+- `finalizing` intent 只表示 committed target 已完成、backup/staging 已安全清理；恢复只允许
+  删除仍存在且身份一致的 committed journal，再移除 index。journal 已不存在时可直接移除
+  finalizing index，不得按“缺 journal”转人工恢复或回滚正式结果。
+- 正式目标已经 durable committed 后，generation temp 目录清理属于独立收尾。`EPERM`、
+  `EBUSY` 或其它删除异常只写入活动日志告警并保留临时目录，不得把成功结果改成 failed、
+  不得提示用户重复发布，也不得进入业务错误报告。
 - rollback 完整：清理无恢复价值的生成临时文件，返回失败。
 - rollback 不完整：必须保留 journal 和仍有恢复价值的 backup，错误明确返回绝对恢复路径；不得为了“目录干净”删除用户旧文件的唯一副本。
 - 进程崩溃可能在下次恢复前短暂留下部分 target；应用不得报告成功。下次启动或下一次工具箱任务必须先读取固定 index，逐一定位外部 journal 并完成回滚/收尾，再允许新任务；不得尝试扫描用户所有目录。
+- publication Worker 若在未返回结果前异常退出，dispatcher 必须在同一 FIFO 队列项中先启动
+  recovery Worker；自动恢复完成后才向调用方返回失败，后续排队任务不得越过恢复。若恢复本身
+  失败，错误必须跨线程保留 `recoveryPaths` 与 `preserveTemporaryFiles`。
+- 任一 `ToolboxPublicationManualRecoveryError` 必须默认
+  `preserveTemporaryFiles=true`；可读 journal 的恢复路径还须包含 artifact/generation 绝对路径。
+  该字段跨 Worker 序列化后由合并、多拆、大文件单拆、普通单拆四入口统一消费，人工恢复完成前
+  不得由 main 的 finally 删除 generation 目录。
+- 启动恢复失败时不得继续注册业务 IPC 或创建可操作窗口；启动失败对话框必须直接展示错误明细、
+  人工恢复绝对路径和日志位置，随后退出，禁止把阻断推迟到用户下一次点击发布。
 - index 指向的 journal 缺失/不可读时，保留 index 项并输出可操作的恢复错误，不能静默当作已成功；人工确认目标/backup 状态后才允许清除。
 - 若产品要求“崩溃窗口内也绝不出现部分正式路径”，必须把输出契约改为单一结果目录/压缩包的原子 rename，另立 UI 与路径 Spec；本 PR 不暗示已做到。
 
@@ -507,12 +590,23 @@ TOOLBOX_STYLE_BUDGETS = {
 
 ### 8.3 写后复核
 
-正式发布前解析每个临时 XLSX 的 `xl/styles.xml`：
+正式发布前严格解析每个临时 XLSX 的 `[Content_Types].xml`、workbook、relationships、
+`xl/styles.xml` 与全部已声明 worksheet：
 
 - 复核实际 `cellXfs`；
 - 复核实际 fonts、fills、borders 和 custom numFmts 数量；
 - 验证应用缓存与 writer 实际生成结果没有异常膨胀；
 - 验证每个实际 component count 未超过对应应用预算；
+- 验证 workbook 声明、worksheet relationship、Content Type 与 ZIP entry 一一对应，不存在重复、
+  缺失或游离 worksheet；
+- 验证每个 worksheet XML 完整闭合、每页表头与 `normalizedHeaders` 一致、实际 Sheet 数和数据行
+  总数与 writer 计数一致；
+- 生成验证摘要 `byteSize + SHA-256`，并由 publication prepare 重新比对，关闭校验后替换临时
+  产物的时间窗口；
+- 结构/样式扫描前后分别读取整文件 size/hash，两次身份不一致即失败；publication 在 staging
+  rename 成正式目标后、写入单项 published 状态前再次核对目标 size/hash，并在全部输出发布后、
+  journal committed 前对整批 target 再做一次 size/hash 最终复核，禁止把后续被改写的先前目标
+  或最后瞬间漂移的 staging/target 报告为 committed；
 - 任一复核失败仍属于 prepare 失败，不进入 publish。
 
 活动日志记录：
@@ -598,10 +692,56 @@ TOOLBOX_STYLE_BUDGETS = {
 ### 9.7 发布与恢复
 
 - prepare success / validation failure / 0 命中 / 保存取消均清理所有可安全删除的 task 临时文件。
+- 合法产物分别注入截断 `[Content_Types].xml`、workbook、worksheet、缺失分页 Sheet、错表头、
+  少数据行和游离 worksheet；写后复核必须失败且不得发布。
+- 删除 `_rels/.rels`、删除/篡改 `rels` Default、构造零个/多个/外部或错误 Target 的
+  `officeDocument` relationship，以及在 package root/workbook relationships 中构造越界或
+  指向不存在 part 的 internal Target；写后复核均必须 fail-closed 且不得发布。
+- writer 校验完成后以同大小不同内容替换 generation，publication prepare 必须因 size/hash 身份
+  不一致失败，正式目标保持原样。
+- 在 writer 结构扫描与最终摘要之间同大小替换文件，前后 size/hash 必须检测漂移；在 staging
+  发布后、journal published 状态前改写正式目标，任务不得返回 committed，且外部改写不明时
+  必须保留 backup/journal 与人工恢复路径。
+- prepare 时不存在的 target 若在 `publish:before-publish` 后或 `linkSync` 原语内部被并发创建，
+  stage→target 必须以 `EEXIST` fail-closed，未知文件逐字节保留；target→backup 与
+  rollback backup→target 也分别注入 syscall 边界并验证不覆盖未知路径。不支持 hardlink 时整批
+  失败且不得 fallback；link 后替换 source 必须由 `dev + ino` 复核发现且不得 unlink 未知 source。
+- hardlink 建立后分别注入 `ino=0` 和两个大于 `Number.MAX_SAFE_INTEGER`、经 Number 舍入会碰撞
+  的相邻 inode；身份不可用时必须 fail-closed，相邻 64-bit identity 必须精确区分，未知 source
+  不得被 unlink。
+- 分别在 target→backup 与 stage→target 的 link 已耐久、source 尚未 unlink 时模拟崩溃；新进程
+  必须识别同 inode 双链接，回滚旧 target 并清理 task-owned 重复链接。
+- 单目标在 `publish:after-publish` 被无异常改写，以及多目标后续发布期间改写先前目标，均必须由
+  committed 前整批最终复核发现。
+- 分别在最后一项 `publish:after-publish` 与 `publish:before-final-target-verify` 模拟崩溃；
+  两者 journal 均保持未 committed，新进程必须回滚旧目标，不能按 committed/finalizing 收尾。
 - 单文件与多文件覆盖既有目标成功。
-- 第 N 个正式文件 rename 失败时，新文件逆序删除、原文件从 backup 恢复。
+- 第 N 个正式文件 no-replace 发布失败时，新文件逆序清理、原文件从 backup 恢复。
 - 注入 rollback 恢复失败时保留 recovery backup 与 journal，并向用户返回绝对路径。
+- 在 `prepare:after-index-before-journal`、`prepare:after-preparing-journal`、部分 staging copy、
+  `prepare:after-staged`、`prepare:after-journal` 分别模拟崩溃；新进程必须只通过固定 index 找到
+  任务，删除部分/完整 staging 和 journal，保持正式目标逐字节不变。
 - 模拟进程崩溃后，新进程只通过固定 `{userData}` index 找到任意外部目录 journal 并恢复；恢复前不报告上次成功。
+- publication Worker 在正式目标 hardlink 发布后、journal 状态更新前异常退出：dispatcher 必须先运行
+  recovery Worker 恢复旧目标，再向调用方报告失败；同一时刻排队的下一任务只能在恢复后开始。
+- committed 后分别注入 journal 删除失败，以及 journal 已删但 index 删除失败；两种情况固定
+  index 都必须保持 `finalizing` 可发现状态，下次恢复只做收尾且保留新正式目标。
+- committed 成功返回后的 generation temp 删除分别注入 `EPERM` / `EBUSY`；四个入口仍返回
+  success，只生成一条可观测活动日志告警，不显示黄色业务 warning、不写业务错误报告。
+- prepared 取消和完整 rollback 分别注入 journal 删除失败；固定 index 必须保持 `cancelling` /
+  `rollback-finalizing`，下一次恢复能完成收尾且不触碰外部 target。
+- 多目标分别保存到不同目录时触发 prepared 取消；每个 staging 删除后都必须 fsync 对应父目录，
+  再删除 journal/index。rollback 三个 terminal-intent/index/journal 收尾失败窗口返回的人工恢复
+  路径都必须包含可读 journal 中的 artifact/generation 绝对路径。
+- 崩溃后把新式 prepared journal 的 target 重定向到同目录、与 generated 同 hash 的 victim；
+  恢复必须先因 index/journal 锚点不一致进入 manual-recovery，不得删除 victim，也不得触碰
+  原 target、staging 或 backup。把同一 fixture 降为无 `discoveryState` 的 v1 后，publish/recovery
+  必须 manual-only，并验证即使 journal 指向同 hash victim 也保持 index/journal/全部 managed file
+  逐字节不变。
+- 构造 target=固定 index、跨项 target=另一项 staging、artifact=target、target 位于 artifact
+  generation 目录；全部必须在 index/journal/staging 写入前失败，正式结果与生成源均零变化。
+- 用真实 publication Worker 发布大产物时主进程 heartbeat 持续运行；两个同时提交的
+  publish/recover 作业严格 FIFO，最大并发为 1。
 - 外部 journal 丢失/损坏时固定 index 不被静默清除，新任务被阻断并返回可操作错误。
 
 ### 9.8 匹配值双轨

@@ -271,10 +271,9 @@ const {
   normalizeMultiSplitGroups: toolboxNormalizeMultiSplitGroups
 } = require('./main-process/toolbox-multi-split');
 const {
-  prepareToolboxPublication,
-  publishPreparedToolboxPublication,
-  recoverPendingToolboxPublications
-} = require('./main-process/toolbox-output-publication');
+  publishToolboxPublicationAsync,
+  recoverToolboxPublicationsAsync
+} = require('./main-process/toolbox-output-publication-dispatch');
 const {
   exportToolboxFilter,
   exportToolboxMultiFilters,
@@ -14870,6 +14869,32 @@ function toolboxFailureResult(error) {
   return { status: 'failed', message, detailLines };
 }
 
+function shouldPreserveToolboxTemporaryFiles(error) {
+  return Boolean(error && error.preserveTemporaryFiles === true);
+}
+
+function cleanupToolboxTemporaryDirectory(directoryPath) {
+  try {
+    fs.rmSync(directoryPath, { recursive: true, force: true });
+    return true;
+  } catch (error) {
+    // 正式结果可能已经 durable committed。临时目录清理失败只能留下可观测告警，
+    // 不能覆盖成功返回并诱导用户重复发布同一批文件。
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'toolbox',
+      message: '工具箱临时目录清理失败',
+      details: [
+        `临时目录：${directoryPath}`,
+        `原因：${error && error.message ? error.message : String(error)}`
+      ],
+      stack: error && error.stack ? error.stack : undefined
+    });
+    return false;
+  }
+}
+
 const EMPTY_TOOLBOX_WARNING_SUMMARY = Object.freeze({
   warningCount: 0,
   warningSamples: Object.freeze([])
@@ -14948,18 +14973,17 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
 }
 
 function publishToolboxArtifacts(kind, artifacts, targets) {
-  const prepared = prepareToolboxPublication({
+  return publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
     targets,
     userDataDir: app.getPath('userData')
   });
-  return publishPreparedToolboxPublication(prepared);
 }
 
-function recoverToolboxPublicationsAtStartup() {
+async function recoverToolboxPublicationsAtStartup() {
   try {
-    const result = recoverPendingToolboxPublications({
+    const result = await recoverToolboxPublicationsAsync({
       userDataDir: app.getPath('userData')
     });
     const recovered = Array.isArray(result.recovered) ? result.recovered : [];
@@ -14989,6 +15013,9 @@ function recoverToolboxPublicationsAtStartup() {
       ],
       stack: error && error.stack ? error.stack : undefined
     });
+    // 固定恢复根损坏或自动恢复不完整时，不能继续注册 IPC/创建窗口。
+    // 继续启动会允许用户生成新产物，直到发布阶段才再次失败，且可能掩盖人工恢复路径。
+    throw error;
   }
 }
 
@@ -15009,6 +15036,7 @@ function registerToolboxHandlers() {
       const filePaths = choice.filePaths;
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
       const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+      let preserveTempDir = false;
       try {
         const writeRes = await toolboxMergeFilesToXlsx({
           filePaths,
@@ -15023,12 +15051,16 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { status: 'cancelled' };
         }
-        const publishResult = publishToolboxArtifacts(
+        const publishResult = await publishToolboxArtifacts(
           'merge',
           [{
             sourcePath: tempPath,
             outputId: 'merge-1',
             fileName: path.basename(saveResult.filePath),
+            byteSize: writeRes.byteSize,
+            sha256: writeRes.sha256,
+            dataRowCount: writeRes.dataRowCount,
+            sheetCount: writeRes.sheetCount,
             warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             styleStats: writeRes.styleStats || null
           }],
@@ -15056,8 +15088,13 @@ function registerToolboxHandlers() {
           warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
           warnings: publishResult.warnings || []
         };
+      } catch (error) {
+        preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+        throw error;
       } finally {
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        if (!preserveTempDir) {
+          cleanupToolboxTemporaryDirectory(tempDir);
+        }
       }
     } catch (error) {
       return toolboxFailureResult(error);
@@ -15203,17 +15240,25 @@ function registerToolboxHandlers() {
               throw new Error(`拆分结果缺少分组：${plan.outputId}`);
             }
             plan.matchedCount = Number(generated.matchedCount) || 0;
+            plan.byteSize = generated.byteSize;
+            plan.sha256 = generated.sha256;
+            plan.dataRowCount = generated.dataRowCount;
+            plan.sheetCount = generated.sheetCount;
             plan.warningSummary = generated.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY;
             plan.styleStats = generated.styleStats || null;
           }
 
-          const publishResult = publishToolboxArtifacts(
+          const publishResult = await publishToolboxArtifacts(
             'split-multi',
             preparedPlans.map((plan, index) => ({
               sourcePath: plan.temporaryPath,
               outputId: plan.outputId || `split-${index + 1}`,
               fileName: plan.fileName,
               matchedCount: plan.matchedCount,
+              byteSize: plan.byteSize,
+              sha256: plan.sha256,
+              dataRowCount: plan.dataRowCount,
+              sheetCount: plan.sheetCount,
               warningSummary: plan.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: plan.styleStats || null
             })),
@@ -15240,11 +15285,11 @@ function registerToolboxHandlers() {
             warnings: publishResult.warnings || []
           };
         } catch (error) {
-          preserveTempDir = error && error.preserveTemporaryFiles === true;
+          preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
           throw error;
         } finally {
           if (!preserveTempDir) {
-            try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+            cleanupToolboxTemporaryDirectory(tempDir);
           }
         }
       }
@@ -15262,6 +15307,7 @@ function registerToolboxHandlers() {
       if (await shouldUseLargeChannel(sourceFilePath)) {
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-'));
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+        let preserveTempDir = false;
         try {
           const generationResult = await dispatchLargeSplit({
             op: 'exportFilter',
@@ -15285,13 +15331,17 @@ function registerToolboxHandlers() {
           if (saveResult.canceled || !saveResult.filePath) {
             return { status: 'cancelled' };
           }
-          const publishResult = publishToolboxArtifacts(
+          const publishResult = await publishToolboxArtifacts(
             'split-single-large',
             [{
               sourcePath: tempPath,
               outputId: 'split-1',
               fileName: path.basename(saveResult.filePath),
               matchedCount,
+              byteSize: generationResult.byteSize,
+              sha256: generationResult.sha256,
+              dataRowCount: generationResult.dataRowCount,
+              sheetCount: generationResult.sheetCount,
               warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: generationResult.styleStats || null
             }],
@@ -15319,9 +15369,14 @@ function registerToolboxHandlers() {
             warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             warnings: publishResult.warnings || []
           };
+        } catch (error) {
+          preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+          throw error;
         } finally {
           // 🔴 修 B20：可靠清临时目录（800MB 级临时大文件；含 worker crash / dispatch reject 路径）。
-          try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_e) { /* swallow */ }
+          if (!preserveTempDir) {
+            cleanupToolboxTemporaryDirectory(tempDir);
+          }
         }
       }
 
@@ -15347,6 +15402,7 @@ function registerToolboxHandlers() {
         return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
       }
 
+      let preserveTempDir = false;
       try {
         const saveResult = await dialog.showSaveDialog(mainWindow, {
           defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
@@ -15355,13 +15411,17 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { status: 'cancelled' };
         }
-        const publishResult = publishToolboxArtifacts(
+        const publishResult = await publishToolboxArtifacts(
           'split-single',
           [{
             sourcePath: tempPath,
             outputId: 'split-1',
             fileName: path.basename(saveResult.filePath),
             matchedCount,
+            byteSize: generationResult.byteSize,
+            sha256: generationResult.sha256,
+            dataRowCount: generationResult.dataRowCount,
+            sheetCount: generationResult.sheetCount,
             warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             styleStats: generationResult.styleStats || null
           }],
@@ -15389,10 +15449,15 @@ function registerToolboxHandlers() {
           warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
           warnings: publishResult.warnings || []
         };
+      } catch (error) {
+        preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+        throw error;
       } finally {
-        const generationDirName = path.basename(generationDir);
-        if (generationDirName.startsWith('toolbox-') && generationDir.startsWith(os.tmpdir())) {
-          try { fs.rmSync(generationDir, { recursive: true, force: true }); } catch (_e) { /* best effort */ }
+        if (!preserveTempDir) {
+          const generationDirName = path.basename(generationDir);
+          if (generationDirName.startsWith('toolbox-') && generationDir.startsWith(os.tmpdir())) {
+            cleanupToolboxTemporaryDirectory(generationDir);
+          }
         }
       }
     } catch (error) {
@@ -15970,10 +16035,10 @@ function markAppInitDone() {
 }
 
 if (hasSingleInstanceLock) app.whenReady()
-  .then(() => {
+  .then(async () => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();
-    recoverToolboxPublicationsAtStartup();
+    await recoverToolboxPublicationsAtStartup();
 
     // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
     try {

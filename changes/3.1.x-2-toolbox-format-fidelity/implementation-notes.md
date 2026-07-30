@@ -6,6 +6,29 @@
 - Initial plan: 严格在 v3.1.1 发布开发收尾后开始 v3.1.2；先用 probe 定位 `.xls` 缺口，再以项目自有 BIFF8 样式 overlay 与 XLSX reader 汇入统一载荷并逐条贯通路径矩阵。
 - Done when: Spec B 所有明确要求均有测试或人工验收证据，完成 PR、自审至无 P3 Finding、合并和发布收尾。
 
+### PR #104 复审修复 Preflight（2026-07-30）
+
+- Goal: 关闭输出结构校验 fail-open、prepare 阶段不可发现残留和 Electron 主进程同步发布三个已确认 Finding。
+- Context: 修复基线为 PR #104 `069ead0e04d565ca0945b3b296cc9e3f95f34c30`；普通/Worker 候选上限差异及 XLSX 物理 `width="0"` 拒绝不属于本轮 Finding。
+- Constraints: 不改变工具箱用户流程、合并/拆分业务顺序和既有输入兼容范围；保持崩溃恢复 fail-closed；大文件校验/发布不得重新线性占用主进程内存或阻塞主事件循环；合并继续暂停。
+- Done when: 损坏/少行/错表头/缺 Sheet/验证后变异均不得发布；任何 staging byte 落盘前任务已可由固定恢复根发现；大文件 hash/copy/recovery 不在 Electron 主事件循环执行；定向故障注入、heartbeat、30 万行回放、`release-check` 与 `check-vars` 通过，Windows Excel/WPS 人工门禁仍保留。
+
+| 已确认事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 写后校验只严格解析 `styles.xml` | `src/main-process/toolbox-output-writer.js:719`；截断 workbook/worksheet、缺 Sheet、错表头和少行故障注入仍通过 | 必须严格扫描 workbook/rels/全部声明 worksheet，并把预期 Sheet/表头/行数作为校验输入 |
+| 发布元数据丢弃 writer 已验证摘要 | `src/main-process/toolbox-output-publication.js:517`；校验后替换 generation 仍可 committed | 验证时 size/hash 必须绑定 prepare 与 staging，禁止重新信任已变化的 generation |
+| staging 先于 journal/index 产生 | `src/main-process/toolbox-output-publication.js:1038-1079`；after-staged/after-journal crash 后固定 index 为空 | 固定恢复根中的 preparing intent 必须先于任何 staging 写入 |
+| 发布核心同步执行全文件 I/O | `hashFileSync`、`copyFileSync`、`fsyncSync`；256 MiB 覆盖探针事件循环停顿约 1.04 秒 | O(file-size) 工作必须移出 Electron 主线程；短 rename/journal 临界区也需由同一串行作业保护 |
+
+| 未知 | 影响 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| 现有 strict XLSX pass 能否以有界内存完成输出结构、表头和行数复核 | 高 | PROBE | 对 0 行、分页、截断和 30 万行产物做流式回读 | 优先复用，不另造第二套 OOXML parser |
+| preparing index 扩展能否兼容现有 v1 index/journal | 高 | PROBE | 旧 entry 回放 + 四个 prepare crash checkpoint | 旧 entry 按既有 prepared 语义读取；新 entry 显式记录 preparing 状态和清理路径 |
+| Worker 调度如何保持发布全生命周期串行并兼容打包 | 高 | PROBE | 盘点所有 main 调用点、现有 worker 模式和打包产物；新增并发/heartbeat 测试 | 生产 O(file-size) 路径使用单队列 Worker；同步核心保留给故障注入单测 |
+| strict validation 与 publication 之间如何防止 TOCTOU | 高 | PROBE | 校验后替换 generation，prepare 必须拒绝 | publication artifact 必须携带并强校验 validated size/hash |
+
+BLOCK 问题：无。以上未知均可由仓库证据和故障注入消除，不需要改变用户流程或新增业务选择。
+
 ## Decisions
 
 | 决定 | 原因与证据 | 放弃的方案 | 影响 |
@@ -33,6 +56,22 @@
 | 普通拆分保持全部去重值，只有 Worker 有界 | 既有普通路径为无界列表；把 Worker 1000 上限误套普通文件会静默隐藏可选值 | 所有路径统一截断 1000 | 普通路径第 1001 项继续可见；超大文件 Worker 保持有界防 OOM |
 | 日期降级只做中性成功提示与信息审计 | 用户明确要求“不标黄，不要进错误报告” | 把无法转换日期当失败或 warning/error report | 成功弹框显示总数和最多 20 条；`skipLogReport` 保持 true；活动日志以 info 记录同批样例 |
 | 所有成功输出记录统一格式审计 | Spec 6.3/8.3 要求预计/实际样式数和验证结果可追溯 | 只记录输出路径/行数 | 合并、普通/Worker 单拆及多拆均写日期降级、projected/actual counts 和临时产物校验通过 |
+| 写后校验复用 strict XLSX pass，并单独严格校验 Content Types | 现有 strict pass 已能有界解析 workbook/rels/styles/theme/worksheet；PR Review 复现旧校验只看 entry 名和 styles | 用 ExcelJS/SheetJS 整本回读，或再造一套 worksheet parser | 全部声明 worksheet 逐页扫描到闭合；额外拒绝 Content Types 损坏、Sheet/relationship/ZIP entry 不一致、游离 worksheet、错表头和行数漂移 |
+| writer 的 size/hash 成为 publication 的强身份 | 仅在 writer 校验后重新 hash 但不比对旧摘要，会给验证后变异重新背书 | 只比较文件大小，或信任路径未变化 | 四个生产入口都携带 `byteSize + sha256`；prepare 在任何 staging/index 写入前重算并精确比较，staging 再与同一身份核对 |
+| 固定 index 的 preparing intent 先于外部 journal/staging | 原顺序在 staging 或 journal 已存在但固定 index 尚未登记时崩溃，新进程无法发现 | 扫描全部用户输出目录寻找孤儿文件 | index 记录 nonce、journal/staged/target 绝对路径和 discovery state；preparing 恢复只清本任务 staging/journal，绝不触碰 target |
+| publication 全生命周期由单 FIFO Worker 串行执行 | 256 MiB 探针证明同步 hash/copy 会阻塞 Electron 主线程约 1 秒；prepare 与 publish 不能跨 Worker 丢失 runtime/预留状态 | 在主线程改为分段 async stream，或让 prepare/publish 使用不同 Worker | 主进程只排队/收结果；worker transport crash 后同一队列项先启动恢复 Worker，再失败；业务错误保留原核心在线回滚语义 |
+| 启动恢复失败直接阻断应用启动并展示恢复路径 | 独立复核发现 helper 只记日志后吞错，窗口和 IPC 仍会注册，用户直到发布阶段才知道恢复根损坏 | 仅设置工具箱运行时 blocked flag | 恢复错误重新抛给既有 startup failure 链；对话框/启动日志显示 detailLines、去重 recoveryPaths 和日志路径，随后退出 |
+| publication FIFO 覆盖 worker 的真实退出生命周期 | `worker.terminate()` 返回 Promise；若仅调用不等待，error/done Promise 会在旧 worker exit 前结算，recovery/下一任务可抢跑 | 只把 JS 作业 Promise 串行，不管 worker teardown | 每个 job 建立 exit barrier；done、business error、transport error 都在旧 worker `exit` 后才结算，异常恢复和下一任务严格后继 |
+| 写后复核使用前后整文件身份，正式发布后再验目标 | 对抗探针可在 worksheet 扫描后、最终 hash 前同大小换文件并取得“已验证”摘要；也可在 staging 最后校验后改写并被 committed | 只依赖单次末尾 hash，或只在发布前校验 staging | 结构扫描前后 size/hash 必须相同；publication prepare 继续重算，staging 发布后、published journal 前再核对正式目标 identity |
+| 输出 OPC worksheet 声明必须形成严格闭包 | 额外 worksheet Override/relationship 不被 workbook Sheet 使用时，旧 strict pass 会忽略 | 只验证 workbook 实际引用的正常路径 | Content Types worksheet Override、workbook worksheet relationship、ZIP worksheet entry 与 Sheet 声明精确一一对应；任何悬空/游离声明失败 |
+| 输出 OPC 从 worksheet 闭包扩展为 package/workbook 全关系闭包 | writer 仅验证 workbook 侧 worksheet 时，缺失 `_rels/.rels`、错误 `rels` Default、错误/重复 `officeDocument` 或其它悬空 internal relationship 仍可能通过 | 只检查固定 ZIP entry 名存在；只验证 worksheet relationship | 严格解析 package root relationships；要求唯一 internal `officeDocument → xl/workbook.xml`；校验正确 `rels` Default；package/workbook 全部 internal Target 规范化后必须位于包内且实际存在 |
+| committed 清理使用 durable finalizing intent | Review 的 no-orphan 门禁高于初版“index 移除后 journal 仅 best-effort”承诺 | 简单反转为先删 journal（会留下 index 指向缺失 journal并阻断启动） | backup/stage 清完后 index→finalizing；删 journal；最后删 index。journal 存在/已删除两种崩溃状态都可从固定根安全收尾，绝不回滚新 target |
+| committed 后 generation temp 清理失败不反转成功 | 正式目标已耐久提交后，finally 中 `rmSync` 的 `EPERM/EBUSY` 若继续抛出，会把实际成功显示为失败并诱发重复发布 | 把 temp 清理与事务 commit 绑定；静默吞错且无审计 | 清理 helper 捕获删除异常并写活动日志 warning，四个入口保持 success；残留 temp 可后续人工清理，不进入业务错误报告 |
+| 正式发布与回滚恢复统一使用 hardlink no-replace | 实测 `lstat` 后普通 rename 仍可在 syscall 内覆盖并发创建的 target；target→backup 与 backup→target 同样存在覆盖窗口；默认 Number Stats 还会舍入 64-bit inode 或把 `ino=0` 误当可信 | 继续用检查+rename；hardlink 失败后 fallback rename；用默认 Number `dev/ino`；宣称 Node 提供原生 `RENAME_NOREPLACE` | stage→target、target→backup、backup→target 均 `linkSync + fsync + bigint dev/ino 复核 + unlink`；`ino<=0`、identity 不精确、`EEXIST`/不支持均 fail-closed，无覆盖式 fallback；link 后/source unlink 前崩溃可恢复 |
+| 新式 index 的路径清单同时是全局 managed-path 闭包 | probe 可令 target 指向固定 index，或令第二 target 等于第一 staging，造成恢复根自覆盖/结构中毒 | 只做 target-target 去重和“随机路径当前不存在”检查 | addIndex 前统一比较 index/journal/全部 target-stage-backup alias；artifact 碰撞及 target 落在 generation 父目录也零副作用拒绝 |
+| 无锚点 legacy v1 一律 manual-only | 同 hash victim probe 证明旧 journal 可把未知文件当 generated 删除并把 backup 覆盖过去；index 没有独立真相可安全迁移 | 为兼容而继续自动 publish/recover；从同一不可信 journal 反推锚点 | publish/recover 均只返回 index/journal 人工路径，不读 journal 后触碰 managed file；安全优先于未发布协议的自动兼容 |
+| prepared 取消与 rollback 也使用 durable terminal intent | 注入 journal 删除失败时，旧顺序先删 index 会留下永不可发现的孤儿 journal；多目录 staging 删除不 fsync 还可能在掉电后复现 | index 先删、journal best-effort；复用 committed finalizing 语义；只 fsync journal 所在目录 | cancel 先写 `cancelling`，逐个删除 staging 并 fsync 各父目录；rollback 完成后写 `rollback-finalizing`；两者均删/fsync journal 后最后删 index |
+| 人工恢复错误默认保留并展示 generation | 业务型 ManualRecovery 经真实 worker 返回时原错误未设置 `preserveTemporaryFiles`，main 四入口会执行 finally 删除临时目录；rollback terminal 收尾错误虽保留目录却未把 artifact 路径展示给用户 | 只在 worker transport+recovery 双失败时设置；依赖调用点猜测错误名；只返回 journal/index | ManualRecovery 构造器统一设 true；可读 journal 的三处 rollback 收尾错误统一返回 index + artifact/target/backup/staging/journal；现有跨 worker 序列化与四入口统一保留开关生效 |
 
 ## Assumptions
 
@@ -50,6 +89,9 @@
 | 初始 Spec 要求现有依赖能力门禁失败后由用户选择降级/拒绝/转换 | 用户决定 `.xls` 与 `.xlsx` 一起实现，改为自有 BIFF8 样式元数据 overlay | 格式范围不能靠现有 SheetJS 返回值完整覆盖 | 扩大 v3.1.2 工程范围与测试矩阵，不改变格式保真目标 | 是 |
 | 初始复核把 XF bit25 视为所有 XF 的 `fHasXFExt` | 按 MS-XLS 改为仅 Cell XF 双向校验；Style XF 同位是 `reserved2=0`，仍允许 XFExt | 真实 `外汇交割表.xls` 的 43 个 Style XF 扩展对应位均为 0，若全量套用会误拒 | 保留合法 Style XF 扩展并继续严格验证 CRC/index/duplicate；Cell XF 仍双向一致 | 是 |
 | 初版 BIFF8 scanner 未解析 `Dimensions`，且 writer 丢弃合法零布局 | 增加唯一 Dimensions 半开区间校验、Row reserved 校验和零布局等价投影 | 独立 BIFF8 边界审计发现损坏 used-range 会通过、零宽/默认隐藏会静默变可见 | 增加解析、writer→strict reader roundtrip 与 LibreOffice 产物回归；不改变工具箱业务值/行选择 | 是 |
+| 初版发布顺序为“staging → 外部 journal → 固定 index” | 改为“固定 preparing intent → 外部 preparing journal → staging/复核 → journal prepared → index prepared” | PR Review 证明前两种崩溃窗口无法从固定恢复根发现 | 新版 index entry 增加 discovery state/nonce/路径清单；后续对抗 probe 又证明旧 v1 无锚点自动恢复不安全，因此 v1 最终收敛为 manual-only；Spec 5.3 已反向同步 | 是 |
+| 初版发布核心在 Electron 主进程同步执行 | 保留同步、可故障注入的事务核心，但生产入口通过 FIFO Worker dispatcher 调用 | 大产物多轮 hash/copy 会冻结 UI；单纯把 generation 放 Worker 不覆盖最终另存为 | 四个 publish 调用点和启动恢复均 await 异步 dispatcher；worker 异常退出先恢复，错误字段跨线程保留 | 是 |
+| 初版 committed 收尾先移除固定 index、再 best-effort 删除 journal | 增加 durable `finalizing` 状态并把固定 index 改为最后删除；同一 no-orphan 规则随后扩展到 `cancelling` 与 `rollback-finalizing` | Review 明确要求任一残留都能从固定恢复根发现；简单换序会制造缺 journal 阻断；后续 probe 证明 cancel/rollback 仍会留下孤儿 | 三种 terminal intent 都先固定恢复职责、再删 journal、最后删 index；legacy v1 不自动升级 | 是 |
 
 ## Evidence
 
@@ -73,11 +115,20 @@
 | 输出样式与拆分审计故障注入 | 临时 `styles.xml` 实际直属子节点数量必须与声明及 registry projected counts 完全一致；普通/Worker/多拆日志记录输入有效行数 | 防止伪造 count 绕过预算，以及日志只记命中行导致无法核对输入处置 |
 | 新 style-aware 30 万行性能回放 | 两个 30 万行来源合并为 60 万行、拆分命中 10 万行；总耗时 108.9s，峰值 RSS 426MB，小于 800MB；日期/数字/文本/样式/布局/21 位 ID/非科学计数全部通过 | 证明生产入口未退回整表物化，并验证行数与格式守恒 |
 | warning/审计定向回归 | renderer 展示最多 20 条并保持 `skipLogReport: true`；四类成功日志统一记录日期降级、样式预计/实际和校验通过 | 用户要求的“不标黄、不进错误报告”及发布审计 |
-| 正式 `npm run release-check` | 最新源码状态 lint PASS；smoke PASS；unit 4316/4316 PASS（270 files，日志 `logs/unit-tests/unit-20260730-053747.log`）；integration 2051/2051 PASS（44 scripts） | 全仓发布门禁、30 万行流式路径、合并/拆分/分页/恢复与既有功能回归 |
-| 最终重要变量扫描 | 最新源码状态 `npm run scan:vars` 成功刷新 240 files / 3031 top-level names；`npm run check:vars -- --include-minor` 未命中重要变量 | 版本号 bump 与提 PR 前硬门禁；扫描结果与本次源代码同状态 |
+| 初版 `npm run release-check` | 当时源码状态 lint PASS；smoke PASS；unit 4316/4316 PASS（270 files，日志 `logs/unit-tests/unit-20260730-053747.log`）；integration 2051/2051 PASS（44 scripts） | 保留 PR #104 复审前的历史门禁血缘；最终证据见下方最新行 |
+| 初版重要变量扫描 | 当时源码状态 `npm run scan:vars` 成功刷新 240 files / 3031 top-level names；`npm run check:vars -- --include-minor` 未命中重要变量 | 保留历史扫描血缘；最终源码扫描结果见下方最新行 |
 | 独立发布门禁 review | 初次 P0=0、P1=0、P2=0、P3=0；后续 BIFF8 边界与零布局对抗 review 的 Finding、修复和最终结论在下两行保留完整血缘 | 代码、测试、Spec/文档和格式边界独立复核 |
 | BIFF8 merge 前补充边界审计 | 首轮发现 P2×2、P3×1：缺少 Dimensions 校验、合法零布局丢失、Row reserved1 未校验；另由真实 LibreOffice 文件复现 `ColInfo.colLast=256` 哨兵 | 合并前对真实生成器兼容、最大行列和隐藏布局做二次收口；修复后须重新执行全量门禁和独立 review |
 | 零布局补丁二次 review | 发现并修复 P1×1、P2×1、失败路径 P3×1：`Number(null)` 误写 0；BIFF8 hidden+0 缺 `zeroHeight`；兼容层若在文件流创建后安装失败会残留半文件。交叉空 Dimensions 的 P3 因无规范 MUST 已撤回，未扩大拒绝范围。最终独立复审 P0=0、P1=0、P2=0、P3=0；定向 65/65、工具箱矩阵 285/285、完整 release-check 均通过 | 显式判缺失；统一传递 `defaultRowHidden`；输出正高度 + `zeroHeight=1`；兼容层在创建文件流前安装并包装错误；writer→strict reader、默认隐藏下显式可见行和普通路径均有回归 |
+| PR #104 Review 有效 Finding 定向回归 | 联合定向测试 109/109 PASS；其中 writer 严格校验 22/22、publication core 28/28、worker dispatcher 3/3、启动失败 2/2，另含错误序列化、main 接线与 renderer 回归 | 截断 Content Types/workbook/worksheet、缺 Sheet/错表头/少行/游离 worksheet、验证后同大小变异、preparing 五窗口、真实目标 rename 后 worker crash 回滚、FIFO、heartbeat、启动恢复失败阻断与路径展示 |
+| PR #104 二次对抗复核补充 | writer 25/25 PASS、publication core 31/31 PASS、dispatcher 6/6 PASS（最终联合/全量数字待下次门禁刷新） | 扫描前后同大小换文件、rename 后 target 漂移、悬空 Content Type/relationship、finalizing 两个崩溃窗口、worker exit barrier |
+| PR #104 publication syscall/恢复根对抗 probe | 普通 rename 的 stage→target、target→backup、backup→target 均可在检查后覆盖未知文件；legacy v1 同 hash victim 被自动改写；跨项 managed path 可覆盖固定 index；cancel/rollback journal 删除失败会成为不可发现孤儿 | 直接推翻“紧前 lstat 足够”“v1 自动兼容安全”“committed finalizing 已覆盖全部 no-orphan”的假设，并驱动 Spec 反向同步 |
+| publication no-replace/legacy/path/no-orphan 定向回归 | publication core 50/50 PASS；连同真实 worker dispatch、serialize-error 和 main 四入口接线共 82/82 PASS | 三个 link syscall 边界、两处 link→unlink crash、source 替换、hardlink 不支持、legacy manual-only victim、固定 index 自身保留、全局路径闭包、generation 目录保护、cancelling/rollback-finalizing、ManualRecovery 临时目录保护跨 worker |
+| PR #104 最终 OPC/成功清理补充回归 | writer strict OPC 29/29 PASS；main/renderer 临时目录保留、清理与成功语义 42/42 PASS；连同 publication/dispatcher/错误序列化联合最终 149/149 PASS | `_rels/.rels`、`rels` Default、唯一 internal `officeDocument → workbook`、package/workbook internal Target 闭包，以及 committed 后 `EPERM/EBUSY` 清理只告警不反转 success |
+| publication 最终 inode/耐久性对抗复审 | 发现 P2×1：默认 Number `dev/ino` 可因 `ino=0` 或 64-bit 舍入误删替换 source；P3×2：cancel 未 fsync 每个 staging 目录、rollback 三个收尾错误未展示 generation；用户手册 hardlink 提示由并行主审同步 | 驱动 bigint identity fail-closed、跨目录取消耐久化与人工恢复路径闭包；所有 Finding 均有确定性故障注入 |
+| publication 精确身份/取消耐久性/恢复路径补充回归 | publication core 54/54 PASS | `ino=0` fail-closed、超过安全整数的相邻 inode 精确区分、跨目录 staging 取消逐目录 fsync、rollback 三个收尾失败窗口展示 generation 路径 |
+| 最终重要变量与 smoke 门禁 | `scan:vars` 刷新 242 files / 3077 top-level names；`check:vars -- --include-minor` 命中既有 `normalizeCell`、`serializeError` 两项 Important-skeleton；`npm run smoke` 全部 PASS | `normalizeCell` 的 Excel/CSV/PDF 读写放大面未回归；serializeError stack/cause/FileValidationError/ManualRecovery 新字段双向契约由完整单测与 smoke 覆盖 |
+| PR #104 最终 `npm run release-check` | 冻结源码状态 lint PASS；smoke PASS；unit 4376/4376 PASS（272 files，日志 `logs/unit-tests/unit-20260730-095713.log`）；integration 2051/2051 PASS（44 scripts，总耗时 309139ms） | 覆盖严格 OPC、54 项 publication 故障注入、Worker FIFO/heartbeat、30 万行流式回放与全仓既有功能；该行是提交依据 |
 
 ## Remaining Unknowns
 
@@ -87,3 +138,12 @@
 | BIFF8 Theme/XFExt 最终颜色映射 | RESOLVED | 真实资产和最小 fixture 已覆盖 theme/palette/automatic/未知必需色 | 无 |
 | Windows Excel/WPS 人工打开 | 发布门禁 | 实现后在 Windows 分别打开脱敏 fixture | 未签字不得合并 |
 | 30 万行 XLSX 内存与耗时上限 | RESOLVED（自动门禁） | 新生产入口峰值 RSS 426MB，总耗时 108.9s；Windows 实机仍随发布资产复核 | 自动性能门禁不阻塞；实机人工项保留 |
+| Windows/网络盘输出目录是否支持同目录 hardlink | ASSUME（显式 fail-closed） | Windows NTFS 发布回放必须覆盖；不支持 hardlink 的 FAT/部分网络盘由错误路径明确拒绝，禁止 fallback | 不影响文件安全；支持范围需在发布验收/用户文档中确认 |
+
+## Reconciliation Blindspot Pass（PR #104 Review 修复后）
+
+- 输入到输出的数据选择、金额、币种、方向和匹配口径未变；本轮只收紧临时 XLSX 完整性、行数守恒和发布/恢复边界。
+- 每个 writer emit 行只计一次，输出按 `Sheet ×（表头 1 行 + 数据行）` 流式回读；0 数据行仍要求一页表头，分页总数据行必须与 writer 计数精确一致。
+- generation 的校验身份贯穿 prepare/staging，正式目标只在 index/journal 均 prepared 后改动；异常退出、部分 copy、部分 hardlink 发布和外部篡改都有互斥去向与故障注入。
+- “临时产物校验：通过”只在严格 Content Types/workbook/rels/全部 worksheet/styles、行数和摘要均通过后写入；启动恢复失败同时进入日志和用户可见启动阻断。
+- 本轮未命中账号/主体/币种、金额方向、匹配主键或记账幂等规则变化，因此没有新增资金红线；Windows Excel/WPS 对真实或脱敏账单的可见格式/行数人工门禁仍保留。

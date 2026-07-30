@@ -10,10 +10,18 @@ const {
   readEntryAsString
 } = require('../backend/big-table-import/zip-reader');
 const {
+  OFFICE_RELATIONSHIP_NAMESPACES,
+  PACKAGE_RELATIONSHIP_NAMESPACES,
   SPREADSHEETML_NAMESPACES,
   namespaceAllowed,
   saxAttributeValue
 } = require('../backend/toolbox-format/ooxml-namespaces');
+const {
+  normalizeCell: normalizeOutputHeaderCell
+} = require('../backend/toolbox-format/model');
+const {
+  openToolboxXlsxPass
+} = require('../backend/toolbox-format/xlsx-pass');
 const {
   ToolboxExcelTextError,
   assertExcelCellTextLength,
@@ -30,6 +38,22 @@ const DEFAULT_STYLE_BUDGETS = Object.freeze({
   customNumFmts: 180
 });
 const WARNING_SAMPLE_LIMIT = 20;
+const PACKAGE_CONTENT_TYPES_NAMESPACES = Object.freeze(new Set([
+  'http://schemas.openxmlformats.org/package/2006/content-types',
+  'http://purl.oclc.org/ooxml/package/content-types'
+]));
+const PACKAGE_RELATIONSHIPS_ENTRY_NAME = '_rels/.rels';
+const PACKAGE_RELATIONSHIPS_CONTENT_TYPE =
+  'application/vnd.openxmlformats-package.relationships+xml';
+const OFFICE_DOCUMENT_RELATIONSHIP_TYPES = Object.freeze(new Set(
+  [...OFFICE_RELATIONSHIP_NAMESPACES]
+    .map((namespace) => `${namespace}/officeDocument`)
+));
+const GENERATED_WORKBOOK_CONTENT_TYPES = Object.freeze({
+  workbook: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
+  styles: 'application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml',
+  worksheet: 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml'
+});
 const EXCELJS_ZERO_HEIGHT_PATCH = Symbol.for(
   'bank-bill-excel-tool.toolbox.exceljs-zero-height'
 );
@@ -705,6 +729,391 @@ function countStyleComponents(stylesXml) {
   return counts;
 }
 
+function parseGeneratedContentTypes(
+  contentTypesXml,
+  worksheetEntryNames,
+  zipEntryNames
+) {
+  const xml = String(contentTypesXml || '');
+  const expectedWorksheets = new Set(worksheetEntryNames || []);
+  const packagedEntries = new Set(zipEntryNames || []);
+  const defaults = new Map();
+  const overrides = new Map();
+  const recognizedElements = new Map([
+    ['types', 'Types'],
+    ['default', 'Default'],
+    ['override', 'Override']
+  ]);
+  const recognizedAttributes = Object.freeze({
+    Default: new Map([
+      ['extension', 'Extension'],
+      ['contenttype', 'ContentType']
+    ]),
+    Override: new Map([
+      ['partname', 'PartName'],
+      ['contenttype', 'ContentType']
+    ])
+  });
+  let rootSeen = false;
+  let rootClosed = false;
+  let depth = 0;
+
+  const fail = (message, detailLines = []) => {
+    throw new ToolboxOutputValidationError(message, detailLines);
+  };
+  const exactAttributes = (node, elementName) => {
+    const output = {};
+    const expected = recognizedAttributes[elementName];
+    for (const [rawName, attribute] of Object.entries(node.attributes || {})) {
+      const qualifiedName = attribute && attribute.name ? attribute.name : rawName;
+      if (qualifiedName === 'xmlns' || String(qualifiedName).startsWith('xmlns:')) continue;
+      const local = attribute && typeof attribute.local === 'string'
+        ? attribute.local
+        : String(qualifiedName).split(':').pop();
+      const canonical = expected.get(String(local).toLowerCase());
+      if (!canonical || local !== canonical) {
+        fail(
+          `工具箱临时产物的 [Content_Types].xml 中 ${elementName}.${local} 无效`
+        );
+      }
+      if (Object.prototype.hasOwnProperty.call(output, canonical)) {
+        fail(
+          `工具箱临时产物的 [Content_Types].xml 中 ${elementName}.${canonical} 重复`
+        );
+      }
+      output[canonical] = String(saxAttributeValue(attribute) || '');
+    }
+    for (const required of expected.values()) {
+      if (!output[required]) {
+        fail(
+          `工具箱临时产物的 [Content_Types].xml 中 ${elementName} 缺少 ${required}`
+        );
+      }
+    }
+    return output;
+  };
+
+  if (!xml.trim()) fail('工具箱临时产物的 [Content_Types].xml 为空');
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onopentag = (node) => {
+    depth += 1;
+    const local = node && node.local
+      ? String(node.local)
+      : String(node && node.name ? node.name : '').split(':').pop();
+    const canonical = recognizedElements.get(local.toLowerCase());
+    if (!canonical || local !== canonical) {
+      fail(`工具箱临时产物的 [Content_Types].xml 元素 ${local} 无效`);
+    }
+    if (!namespaceAllowed(node.uri, PACKAGE_CONTENT_TYPES_NAMESPACES)) {
+      fail(`工具箱临时产物的 [Content_Types].xml 元素 ${local} 命名空间无效`);
+    }
+    if (depth === 1) {
+      if (rootSeen || canonical !== 'Types') {
+        fail('工具箱临时产物的 [Content_Types].xml 根节点无效');
+      }
+      rootSeen = true;
+      return;
+    }
+    if (!rootSeen || rootClosed || depth !== 2 || canonical === 'Types') {
+      fail(`工具箱临时产物的 [Content_Types].xml 元素 ${local} 层级无效`);
+    }
+    const attributes = exactAttributes(node, canonical);
+    if (canonical === 'Default') {
+      const extension = String(attributes.Extension || '').toLowerCase();
+      if (defaults.has(extension)) {
+        fail(
+          '工具箱临时产物的 [Content_Types].xml 重复声明 Extension',
+          [`Extension：${attributes.Extension}`]
+        );
+      }
+      defaults.set(extension, attributes.ContentType);
+      return;
+    }
+    if (canonical !== 'Override') return;
+    const partName = attributes.PartName;
+    if (!partName.startsWith('/') || partName.includes('\\')) {
+      fail(
+        '工具箱临时产物的 [Content_Types].xml PartName 无效',
+        [`PartName：${partName}`]
+      );
+    }
+    const entryName = partName.slice(1);
+    if (overrides.has(entryName)) {
+      fail(
+        '工具箱临时产物的 [Content_Types].xml 重复声明 PartName',
+        [`PartName：${partName}`]
+      );
+    }
+    overrides.set(entryName, attributes.ContentType);
+  };
+  parser.onclosetag = (rawName) => {
+    const local = String(rawName || '').split(':').pop();
+    if (local === 'Types' && depth === 1) rootClosed = true;
+    depth -= 1;
+  };
+
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof ToolboxOutputValidationError) throw error;
+    fail(
+      '工具箱临时产物的 [Content_Types].xml 不是完整有效的 XML',
+      [error && error.message ? error.message : String(error)]
+    );
+  }
+  if (!rootSeen || !rootClosed || depth !== 0) {
+    fail('工具箱临时产物的 [Content_Types].xml 未完整闭合');
+  }
+  const relationshipsContentType = defaults.get('rels');
+  if (relationshipsContentType !== PACKAGE_RELATIONSHIPS_CONTENT_TYPE) {
+    fail(
+      '工具箱临时产物的 [Content_Types].xml 缺少有效的 rels Default',
+      [
+        `预计类型：${PACKAGE_RELATIONSHIPS_CONTENT_TYPE}`,
+        `实际类型：${relationshipsContentType || '（缺失）'}`
+      ]
+    );
+  }
+
+  const requiredOverrides = new Map([
+    ['xl/workbook.xml', GENERATED_WORKBOOK_CONTENT_TYPES.workbook],
+    ['xl/styles.xml', GENERATED_WORKBOOK_CONTENT_TYPES.styles],
+    ...[...expectedWorksheets].map((entryName) => [
+      entryName,
+      GENERATED_WORKBOOK_CONTENT_TYPES.worksheet
+    ])
+  ]);
+  for (const [entryName, expectedContentType] of requiredOverrides) {
+    const actualContentType = overrides.get(entryName);
+    if (actualContentType !== expectedContentType) {
+      fail(
+        '工具箱临时产物的 [Content_Types].xml 声明与产物结构不一致',
+        [
+          `PartName：/${entryName}`,
+          `预计类型：${expectedContentType}`,
+          `实际类型：${actualContentType || '（缺失）'}`
+        ]
+      );
+    }
+  }
+  const worksheetOverrides = new Set(
+    [...overrides.entries()]
+      .filter(([, contentType]) => (
+        contentType === GENERATED_WORKBOOK_CONTENT_TYPES.worksheet
+      ))
+      .map(([entryName]) => entryName)
+  );
+  const missingOrExtraWorksheetOverrides = [
+    ...[...expectedWorksheets]
+      .filter((entryName) => !worksheetOverrides.has(entryName))
+      .map((entryName) => `缺少 worksheet Override：/${entryName}`),
+    ...[...worksheetOverrides]
+      .filter((entryName) => !expectedWorksheets.has(entryName))
+      .map((entryName) => `游离 worksheet Override：/${entryName}`)
+  ];
+  const missingOverrideParts = [...overrides.keys()]
+    .filter((entryName) => !packagedEntries.has(entryName))
+    .map((entryName) => `Override 指向不存在的 Part：/${entryName}`);
+  if (missingOrExtraWorksheetOverrides.length > 0 || missingOverrideParts.length > 0) {
+    fail(
+      '工具箱临时产物的 [Content_Types].xml 包含悬空或不一致声明',
+      [...missingOrExtraWorksheetOverrides, ...missingOverrideParts]
+    );
+  }
+  return overrides;
+}
+
+function normalizePackageRootRelationshipTarget(target) {
+  const value = String(target || '').trim();
+  if (!value || value.includes('\\') || value.includes('\0')) return null;
+  const packageRelative = value.startsWith('/') ? value.slice(1) : value;
+  if (!packageRelative) return null;
+  const normalized = path.posix.normalize(packageRelative);
+  if (
+    !normalized
+    || normalized === '.'
+    || normalized === '..'
+    || normalized.startsWith('../')
+    || path.posix.isAbsolute(normalized)
+  ) {
+    return null;
+  }
+  return normalized;
+}
+
+function parseGeneratedPackageRelationships(relationshipsXml, zipEntryNames) {
+  const xml = String(relationshipsXml || '');
+  const packagedEntries = new Set(zipEntryNames || []);
+  const relationships = new Map();
+  const recognizedElements = new Map([
+    ['relationships', 'Relationships'],
+    ['relationship', 'Relationship']
+  ]);
+  const recognizedAttributes = new Map([
+    ['id', 'Id'],
+    ['type', 'Type'],
+    ['target', 'Target'],
+    ['targetmode', 'TargetMode']
+  ]);
+  let rootSeen = false;
+  let rootClosed = false;
+  let depth = 0;
+
+  const fail = (message, detailLines = []) => {
+    throw new ToolboxOutputValidationError(message, detailLines);
+  };
+  const exactRelationshipAttributes = (node) => {
+    const output = {};
+    for (const [rawName, attribute] of Object.entries(node.attributes || {})) {
+      const qualifiedName = attribute && attribute.name ? attribute.name : rawName;
+      if (qualifiedName === 'xmlns' || String(qualifiedName).startsWith('xmlns:')) continue;
+      const prefix = attribute && typeof attribute.prefix === 'string'
+        ? attribute.prefix
+        : String(qualifiedName).includes(':')
+          ? String(qualifiedName).split(':')[0]
+          : '';
+      const local = attribute && typeof attribute.local === 'string'
+        ? attribute.local
+        : String(qualifiedName).split(':').pop();
+      const canonical = recognizedAttributes.get(String(local).toLowerCase());
+      if (prefix || !canonical || local !== canonical) {
+        fail(
+          `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 中 ` +
+            `Relationship.${qualifiedName} 无效`
+        );
+      }
+      if (Object.prototype.hasOwnProperty.call(output, canonical)) {
+        fail(
+          `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 中 ` +
+            `Relationship.${canonical} 重复`
+        );
+      }
+      output[canonical] = String(saxAttributeValue(attribute) || '').trim();
+    }
+    for (const required of ['Id', 'Type', 'Target']) {
+      if (!output[required]) {
+        fail(
+          `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 中 ` +
+            `Relationship 缺少 ${required}`
+        );
+      }
+    }
+    return output;
+  };
+
+  if (!xml.trim()) {
+    fail(`工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 为空`);
+  }
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onopentag = (node) => {
+    depth += 1;
+    const local = node && node.local
+      ? String(node.local)
+      : String(node && node.name ? node.name : '').split(':').pop();
+    const canonical = recognizedElements.get(local.toLowerCase());
+    if (!canonical || local !== canonical) {
+      fail(`工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 元素 ${local} 无效`);
+    }
+    if (!namespaceAllowed(node.uri, PACKAGE_RELATIONSHIP_NAMESPACES)) {
+      fail(
+        `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} ` +
+          `元素 ${local} 命名空间无效`
+      );
+    }
+    if (depth === 1) {
+      if (rootSeen || canonical !== 'Relationships') {
+        fail(`工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 根节点无效`);
+      }
+      rootSeen = true;
+      return;
+    }
+    if (!rootSeen || rootClosed || depth !== 2 || canonical !== 'Relationship') {
+      fail(
+        `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 元素 ${local} 层级无效`
+      );
+    }
+    const attributes = exactRelationshipAttributes(node);
+    if (relationships.has(attributes.Id)) {
+      fail(
+        `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 包含重复关系 Id`,
+        [`Id：${attributes.Id}`]
+      );
+    }
+    const targetMode = attributes.TargetMode || 'Internal';
+    if (targetMode !== 'Internal' && targetMode !== 'External') {
+      fail(
+        `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} TargetMode 无效`,
+        [`Id：${attributes.Id}`, `TargetMode：${targetMode}`]
+      );
+    }
+    const target = targetMode === 'External'
+      ? attributes.Target
+      : normalizePackageRootRelationshipTarget(attributes.Target);
+    if (!target) {
+      fail(
+        `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 关系目标越界或无效`,
+        [`Id：${attributes.Id}`, `Target：${attributes.Target}`]
+      );
+    }
+    relationships.set(attributes.Id, {
+      id: attributes.Id,
+      type: attributes.Type,
+      target,
+      targetMode
+    });
+  };
+  parser.onclosetag = (rawName) => {
+    const local = String(rawName || '').split(':').pop();
+    if (local === 'Relationships' && depth === 1) rootClosed = true;
+    depth -= 1;
+  };
+
+  try {
+    parser.write(xml).close();
+  } catch (error) {
+    if (error instanceof ToolboxOutputValidationError) throw error;
+    fail(
+      `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 不是完整有效的 XML`,
+      [error && error.message ? error.message : String(error)]
+    );
+  }
+  if (!rootSeen || !rootClosed || depth !== 0) {
+    fail(`工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 未完整闭合`);
+  }
+
+  const internalRelationships = [...relationships.values()]
+    .filter((relationship) => relationship.targetMode !== 'External');
+  const danglingRelationships = internalRelationships
+    .filter((relationship) => !packagedEntries.has(relationship.target));
+  if (danglingRelationships.length > 0) {
+    fail(
+      `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} 包含悬空内部关系`,
+      danglingRelationships.map((relationship) => (
+        `${relationship.id}：${relationship.target}`
+      ))
+    );
+  }
+
+  const officeDocumentRelationships = [...relationships.values()]
+    .filter((relationship) => OFFICE_DOCUMENT_RELATIONSHIP_TYPES.has(relationship.type));
+  if (
+    officeDocumentRelationships.length !== 1
+    || officeDocumentRelationships[0].targetMode === 'External'
+    || officeDocumentRelationships[0].target !== 'xl/workbook.xml'
+  ) {
+    fail(
+      `工具箱临时产物的 ${PACKAGE_RELATIONSHIPS_ENTRY_NAME} ` +
+        '必须唯一指向 xl/workbook.xml',
+      officeDocumentRelationships.length === 0
+        ? ['缺少 officeDocument relationship']
+        : officeDocumentRelationships.map((relationship) => (
+          `${relationship.id}：${relationship.targetMode} → ${relationship.target}`
+        ))
+    );
+  }
+  return relationships;
+}
+
 async function sha256File(filePath) {
   const hash = crypto.createHash('sha256');
   await new Promise((resolve, reject) => {
@@ -716,22 +1125,245 @@ async function sha256File(filePath) {
   return hash.digest('hex');
 }
 
+function normalizeExpectedWorkbookStructure(expectedStructure) {
+  if (expectedStructure == null) return null;
+  if (!expectedStructure || typeof expectedStructure !== 'object' || Array.isArray(expectedStructure)) {
+    throw new ToolboxOutputValidationError('工具箱输出结构预计值无效');
+  }
+  const sheetCount = Number(expectedStructure.sheetCount);
+  const dataRowCount = Number(expectedStructure.dataRowCount);
+  const normalizedHeaders = expectedStructure.normalizedHeaders;
+  if (!Number.isSafeInteger(sheetCount) || sheetCount < 1) {
+    throw new ToolboxOutputValidationError(
+      '工具箱输出预计 Sheet 数无效',
+      [`预计数量：${expectedStructure.sheetCount}`]
+    );
+  }
+  if (!Number.isSafeInteger(dataRowCount) || dataRowCount < 0) {
+    throw new ToolboxOutputValidationError(
+      '工具箱输出预计数据行数无效',
+      [`预计数量：${expectedStructure.dataRowCount}`]
+    );
+  }
+  if (
+    !Array.isArray(normalizedHeaders)
+    || normalizedHeaders.length === 0
+    || normalizedHeaders.some((header) => typeof header !== 'string')
+  ) {
+    throw new ToolboxOutputValidationError('工具箱输出预计表头无效');
+  }
+  return Object.freeze({
+    sheetCount,
+    dataRowCount,
+    normalizedHeaders: Object.freeze(normalizedHeaders.slice())
+  });
+}
+
+function normalizedHeadersFromOutputRow(row) {
+  const cells = row && Array.isArray(row.cells) ? row.cells : [];
+  const highestColumnIndex = cells.reduce(
+    (highest, cell) => (
+      cell && Number.isInteger(cell.columnIndex)
+        ? Math.max(highest, cell.columnIndex)
+        : highest
+    ),
+    -1
+  );
+  const headers = new Array(highestColumnIndex + 1).fill('');
+  for (const cell of cells) {
+    if (!cell || !Number.isInteger(cell.columnIndex)) continue;
+    headers[cell.columnIndex] = normalizeOutputHeaderCell(cell.matchProjectionValue);
+  }
+  while (headers.length > 0 && headers[headers.length - 1] === '') headers.pop();
+  return headers;
+}
+
+function formatHeadersForDetail(headers) {
+  return headers.length > 0 ? headers.join(' | ') : '（空）';
+}
+
+async function validateGeneratedWorkbookStructure(filePath, expectedStructure = null) {
+  const expected = normalizeExpectedWorkbookStructure(expectedStructure);
+  let pass = null;
+  try {
+    pass = await openToolboxXlsxPass(filePath);
+    const actualSheetCount = pass.sheets.length;
+    const declaredWorksheetEntries = new Set(pass.sheets.map((sheet) => sheet.entryPath));
+    const packagedWorksheetEntries = [...pass.entries.keys()]
+      .filter((entryName) => /^xl\/worksheets\/[^/]+\.xml$/i.test(entryName));
+    const orphanWorksheetEntries = packagedWorksheetEntries
+      .filter((entryName) => !declaredWorksheetEntries.has(entryName));
+    if (
+      declaredWorksheetEntries.size !== packagedWorksheetEntries.length
+      || orphanWorksheetEntries.length > 0
+    ) {
+      throw new ToolboxOutputValidationError(
+        '工具箱临时产物包含未声明的 worksheet',
+        [
+          ...orphanWorksheetEntries.map((entryName) => `孤立 worksheet：${entryName}`),
+          `workbook 声明数量：${declaredWorksheetEntries.size}`,
+          `ZIP worksheet 数量：${packagedWorksheetEntries.length}`,
+          `临时产物：${filePath}`
+        ]
+      );
+    }
+    const declaredRelationshipIds = new Set(
+      pass.sheets.map((sheet) => sheet.relationshipId)
+    );
+    const worksheetRelationshipTypes = new Set(
+      [...OFFICE_RELATIONSHIP_NAMESPACES]
+        .map((namespace) => `${namespace}/worksheet`)
+    );
+    const worksheetRelationships = pass.workbookRelationships.filter((relationship) => (
+      worksheetRelationshipTypes.has(relationship.type)
+      || /^xl\/worksheets\/[^/]+\.xml$/i.test(relationship.target)
+    ));
+    const invalidWorksheetRelationships = worksheetRelationships.filter((relationship) => (
+      !worksheetRelationshipTypes.has(relationship.type)
+      || String(relationship.targetMode || '').toLowerCase() === 'external'
+      || !declaredRelationshipIds.has(relationship.id)
+      || !declaredWorksheetEntries.has(relationship.target)
+      || !pass.entries.has(relationship.target)
+    ));
+    if (
+      worksheetRelationships.length !== pass.sheets.length
+      || invalidWorksheetRelationships.length > 0
+    ) {
+      throw new ToolboxOutputValidationError(
+        '工具箱临时产物包含未被 workbook Sheet 使用的 worksheet relationship',
+        [
+          ...invalidWorksheetRelationships.map((relationship) => (
+            `游离 relationship：${relationship.id} → ${relationship.target}`
+          )),
+          `workbook Sheet 数量：${pass.sheets.length}`,
+          `worksheet relationship 数量：${worksheetRelationships.length}`,
+          `临时产物：${filePath}`
+        ]
+      );
+    }
+    const danglingInternalRelationships = pass.workbookRelationships.filter((relationship) => (
+      String(relationship.targetMode || '').toLowerCase() !== 'external'
+      && (!relationship.target || !pass.entries.has(relationship.target))
+    ));
+    if (danglingInternalRelationships.length > 0) {
+      throw new ToolboxOutputValidationError(
+        '工具箱临时产物的 workbook relationships 包含悬空内部关系',
+        danglingInternalRelationships.map((relationship) => (
+          `${relationship.id}：${relationship.target || '（无效目标）'}`
+        ))
+      );
+    }
+    let actualPhysicalRowCount = 0;
+    let actualDataRowCount = 0;
+
+    for (const sheet of pass.sheets) {
+      let headerSeen = false;
+      let actualHeaders = null;
+      // 严格 opener 只解析 workbook/rels 和工作簿级元数据；必须逐个 scan，
+      // 才会严格解析并完整闭合验证每个已声明 worksheet。
+      // eslint-disable-next-line no-await-in-loop
+      const summary = await pass.scanSheet(sheet, {
+        onRow: (row) => {
+          if (!headerSeen) {
+            headerSeen = true;
+            if (expected) actualHeaders = normalizedHeadersFromOutputRow(row);
+          }
+        }
+      });
+      if (!headerSeen || summary.rowCount < 1) {
+        throw new ToolboxOutputValidationError(
+          '工具箱临时产物缺少分页表头',
+          [`Sheet：${sheet.name}`, `临时产物：${filePath}`]
+        );
+      }
+      if (
+        expected
+        && (
+          actualHeaders.length !== expected.normalizedHeaders.length
+          || actualHeaders.some((header, index) => header !== expected.normalizedHeaders[index])
+        )
+      ) {
+        throw new ToolboxOutputValidationError(
+          '工具箱临时产物表头与预计不一致',
+          [
+            `Sheet：${sheet.name}`,
+            `预计表头：${formatHeadersForDetail(expected.normalizedHeaders)}`,
+            `实际表头：${formatHeadersForDetail(actualHeaders)}`,
+            `临时产物：${filePath}`
+          ]
+        );
+      }
+      actualPhysicalRowCount += summary.rowCount;
+      actualDataRowCount += summary.rowCount - 1;
+    }
+
+    if (expected && actualSheetCount !== expected.sheetCount) {
+      throw new ToolboxOutputValidationError(
+        '工具箱临时产物 Sheet 数与预计不一致',
+        [
+          `预计数量：${expected.sheetCount}`,
+          `实际数量：${actualSheetCount}`,
+          `临时产物：${filePath}`
+        ]
+      );
+    }
+    if (expected && actualDataRowCount !== expected.dataRowCount) {
+      throw new ToolboxOutputValidationError(
+        '工具箱临时产物数据行数与预计不一致',
+        [
+          `预计数据行数：${expected.dataRowCount}`,
+          `实际数据行数：${actualDataRowCount}`,
+          `实际物理行数：${actualPhysicalRowCount}`,
+          `临时产物：${filePath}`
+        ]
+      );
+    }
+    return {
+      actualSheetCount,
+      actualDataRowCount,
+      actualPhysicalRowCount
+    };
+  } catch (error) {
+    if (error instanceof ToolboxOutputValidationError) throw error;
+    const validationError = new ToolboxOutputValidationError(
+      '工具箱临时产物结构复核失败',
+      [
+        `原因：${error && error.message ? error.message : String(error)}`,
+        `临时产物：${filePath}`
+      ]
+    );
+    validationError.cause = error;
+    throw validationError;
+  } finally {
+    if (pass) pass.close();
+  }
+}
+
 async function validateGeneratedWorkbook(
   filePath,
   budgets = DEFAULT_STYLE_BUDGETS,
-  projectedStyleCounts = null
+  projectedStyleCounts = null,
+  expectedStructure = null
 ) {
-  const stat = await fs.promises.stat(filePath);
-  if (!stat.isFile() || stat.size <= 0) {
+  const initialStat = await fs.promises.stat(filePath);
+  if (!initialStat.isFile() || initialStat.size <= 0) {
     throw new ToolboxOutputValidationError('工具箱临时产物为空或不是普通文件');
   }
+  // 结构/样式解析会按 part 多次打开同一路径；先记录整文件身份，最终再取一次，
+  // 防止校验期间被同大小换内容后为新内容重新背书。
+  const initialSha256 = await sha256File(filePath);
 
   const { zip, entries } = await openZipWithEntries(path.basename(filePath), filePath, {
     rejectDuplicateEntries: true
   });
   let actualCounts;
   try {
-    const required = ['[Content_Types].xml', 'xl/workbook.xml', 'xl/styles.xml'];
+    const required = [
+      '[Content_Types].xml',
+      PACKAGE_RELATIONSHIPS_ENTRY_NAME,
+      'xl/workbook.xml',
+      'xl/styles.xml'
+    ];
     const missing = required.filter((entryName) => !entries.has(entryName));
     const worksheets = [...entries.keys()].filter((name) => /^xl\/worksheets\/[^/]+\.xml$/i.test(name));
     if (missing.length > 0 || worksheets.length === 0) {
@@ -740,6 +1372,16 @@ async function validateGeneratedWorkbook(
         [...missing.map((name) => `缺少：${name}`), ...(worksheets.length === 0 ? ['缺少 worksheet'] : [])]
       );
     }
+    const contentTypesXml = await readEntryAsString(
+      zip,
+      entries.get('[Content_Types].xml')
+    );
+    parseGeneratedContentTypes(contentTypesXml, worksheets, entries.keys());
+    const packageRelationshipsXml = await readEntryAsString(
+      zip,
+      entries.get(PACKAGE_RELATIONSHIPS_ENTRY_NAME)
+    );
+    parseGeneratedPackageRelationships(packageRelationshipsXml, entries.keys());
     const stylesXml = await readEntryAsString(zip, entries.get('xl/styles.xml'));
     actualCounts = countStyleComponents(stylesXml);
   } finally {
@@ -777,10 +1419,30 @@ async function validateGeneratedWorkbook(
     }
   }
 
+  const structure = await validateGeneratedWorkbookStructure(filePath, expectedStructure);
+  const finalStat = await fs.promises.stat(filePath);
+  const finalSha256 = await sha256File(filePath);
+  if (
+    !finalStat.isFile()
+    || finalStat.size !== initialStat.size
+    || finalSha256 !== initialSha256
+  ) {
+    throw new ToolboxOutputValidationError(
+      '工具箱临时产物在写后复核期间发生变化，已阻止发布',
+      [
+        `复核前大小：${initialStat.size}`,
+        `复核后大小：${finalStat.size}`,
+        `复核前 SHA-256：${initialSha256}`,
+        `复核后 SHA-256：${finalSha256}`,
+        `临时产物：${filePath}`
+      ]
+    );
+  }
   return {
-    byteSize: stat.size,
-    sha256: await sha256File(filePath),
-    actualStyleCounts: actualCounts
+    byteSize: finalStat.size,
+    sha256: finalSha256,
+    actualStyleCounts: actualCounts,
+    ...structure
   };
 }
 
@@ -960,7 +1622,12 @@ function createToolboxOutputWriter({
         const validation = await validateGeneratedWorkbook(
           savePath,
           budgets,
-          projectedStyleCounts
+          projectedStyleCounts,
+          {
+            sheetCount: sheetIndex,
+            dataRowCount,
+            normalizedHeaders
+          }
         );
         state = 'committed';
         return {

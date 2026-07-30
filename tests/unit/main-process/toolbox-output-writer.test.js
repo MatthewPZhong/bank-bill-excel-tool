@@ -58,6 +58,51 @@ function cell(columnIndex, outputValue, styleRef, extra = {}) {
   };
 }
 
+function plainCell(columnIndex, outputValue) {
+  return {
+    isExplicitCell: true,
+    columnIndex,
+    outputValue
+  };
+}
+
+function expectedStructure(result, normalizedHeaders) {
+  return {
+    sheetCount: result.sheetCount,
+    dataRowCount: result.dataRowCount,
+    normalizedHeaders: normalizedHeaders.slice()
+  };
+}
+
+async function rewriteWorkbookEntry(sourcePath, targetPath, entryName, rewrite) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(sourcePath));
+  const entry = zip.file(entryName);
+  assert.ok(entry, `测试夹具缺少 ZIP entry：${entryName}`);
+  const original = await entry.async('string');
+  const changed = rewrite(original, zip);
+  assert.notEqual(changed, original, `测试故障注入未改变 ZIP entry：${entryName}`);
+  zip.file(entryName, changed);
+  fs.writeFileSync(targetPath, await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
+async function removeWorkbookEntry(sourcePath, targetPath, entryName) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(sourcePath));
+  assert.ok(zip.file(entryName), `测试夹具缺少 ZIP entry：${entryName}`);
+  zip.remove(entryName);
+  fs.writeFileSync(targetPath, await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
+function assertValidationDetail(error, messagePattern, detailPattern) {
+  assert.equal(error && error.name, 'ToolboxOutputValidationError');
+  assert.match(error.message, messagePattern);
+  assert.ok(
+    Array.isArray(error.detailLines)
+      && error.detailLines.some((line) => detailPattern.test(line)),
+    `错误明细未命中 ${detailPattern}：${JSON.stringify(error.detailLines)}`
+  );
+  return true;
+}
+
 test('唯一 writer 保留表头/数据样式、值类型与行列布局', async () => {
   const output = tempOutput();
   try {
@@ -652,5 +697,532 @@ test('写后复核拒绝 registry 预计数量与 writer 实际数量漂移', as
     );
   } finally {
     output.cleanup();
+  }
+});
+
+test('写后结构复核严格拒绝截断的 workbook 与 worksheet XML', async () => {
+  const output = tempOutput('strict-structure.xlsx');
+  const headers = ['OrderId', 'Amount'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({
+        cells: [plainCell(0, 'O-1'), plainCell(1, 100)]
+      })
+    });
+    const expected = expectedStructure(result, headers);
+    const projected = result.styleStats.projectedFinalCounts;
+
+    const truncatedWorkbookPath = path.join(output.dir, 'truncated-workbook.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      truncatedWorkbookPath,
+      'xl/workbook.xml',
+      (xml) => xml.slice(0, Math.floor(xml.length / 2))
+    );
+    await assert.rejects(
+      validateGeneratedWorkbook(truncatedWorkbookPath, undefined, projected, expected),
+      (error) => assertValidationDetail(error, /结构复核失败/, /workbook\.xml/)
+    );
+
+    const truncatedWorksheetPath = path.join(output.dir, 'truncated-worksheet.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      truncatedWorksheetPath,
+      'xl/worksheets/sheet1.xml',
+      (xml) => xml.slice(0, Math.floor(xml.length / 2))
+    );
+    await assert.rejects(
+      validateGeneratedWorkbook(truncatedWorksheetPath, undefined, projected, expected),
+      (error) => assertValidationDetail(error, /结构复核失败/, /工作表 XML/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核严格拒绝截断的 Content_Types XML', async () => {
+  const output = tempOutput('strict-content-types.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'truncated-content-types.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      '[Content_Types].xml',
+      (xml) => xml.slice(0, Math.floor(xml.length / 2))
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => {
+        assert.equal(error && error.name, 'ToolboxOutputValidationError');
+        assert.match(error.message, /\[Content_Types\]\.xml/);
+        return true;
+      }
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝缺少 package root relationships 的工作簿', async () => {
+  const output = tempOutput('missing-package-root-relationships.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'missing-package-root-relationships-mutated.xlsx');
+    await removeWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      '_rels/.rels'
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /结构不完整/, /_rels\/\.rels/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核要求唯一 package root officeDocument 关系指向 workbook', async () => {
+  const output = tempOutput('wrong-package-root-office-document.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'wrong-package-root-office-document-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      '_rels/.rels',
+      (xml) => xml.replace('Target="xl/workbook.xml"', 'Target="xl/styles.xml"')
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(
+        error,
+        /必须唯一指向 xl\/workbook\.xml/,
+        /xl\/styles\.xml/
+      )
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝 Content_Types 缺少 rels Default', async () => {
+  const output = tempOutput('missing-rels-default.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'missing-rels-default-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      '[Content_Types].xml',
+      (xml) => xml.replace(
+        /<Default\b[^>]*\bExtension="rels"[^>]*\/>/,
+        ''
+      )
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /缺少有效的 rels Default/, /实际类型：/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝 Content_Types 中指向不存在 Part 的 worksheet Override', async () => {
+  const output = tempOutput('dangling-content-type.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'dangling-content-type-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      '[Content_Types].xml',
+      (xml) => xml.replace(
+        '</Types>',
+        '<Override PartName="/xl/worksheets/missing.xml" ' +
+          'ContentType="application/vnd.openxmlformats-officedocument.' +
+          'spreadsheetml.worksheet+xml"/></Types>'
+      )
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /悬空或不一致声明/, /missing\.xml/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝 workbook relationships 中悬空的内部关系', async () => {
+  const output = tempOutput('dangling-workbook-relationship.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'dangling-workbook-relationship-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      'xl/_rels/workbook.xml.rels',
+      (xml) => xml.replace(
+        '</Relationships>',
+        '<Relationship Id="rDangling" ' +
+          'Type="http://schemas.openxmlformats.org/officeDocument/2006/' +
+          'relationships/calcChain" Target="calcChain-missing.xml"/>' +
+          '</Relationships>'
+      )
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(
+        error,
+        /workbook relationships 包含悬空内部关系/,
+        /rDangling.*calcChain-missing\.xml/
+      )
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝未被 workbook Sheet 使用的 worksheet relationship', async () => {
+  const output = tempOutput('dangling-relationship.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const corruptedPath = path.join(output.dir, 'dangling-relationship-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      corruptedPath,
+      'xl/_rels/workbook.xml.rels',
+      (xml) => xml.replace(
+        '</Relationships>',
+        '<Relationship Id="rExtra" ' +
+          'Type="http://schemas.openxmlformats.org/officeDocument/2006/' +
+          'relationships/worksheet" Target="worksheets/missing.xml"/>' +
+          '</Relationships>'
+      )
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        corruptedPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(
+        error,
+        /未被 workbook Sheet 使用的 worksheet relationship/,
+        /rExtra/
+      )
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝 ZIP 中未被 workbook 声明的孤立 worksheet', async () => {
+  const output = tempOutput('orphan-worksheet.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const orphanPath = path.join(output.dir, 'orphan-worksheet-mutated.xlsx');
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const worksheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    const contentTypesXml = await zip.file('[Content_Types].xml').async('string');
+    zip.file('xl/worksheets/orphan.xml', worksheetXml);
+    zip.file(
+      '[Content_Types].xml',
+      contentTypesXml.replace(
+        '</Types>',
+        '<Override PartName="/xl/worksheets/orphan.xml" ' +
+          'ContentType="application/vnd.openxmlformats-officedocument.' +
+          'spreadsheetml.worksheet+xml"/></Types>'
+      )
+    );
+    fs.writeFileSync(orphanPath, await zip.generateAsync({ type: 'nodebuffer' }));
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        orphanPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /未声明的 worksheet/, /orphan\.xml/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后复核前后文件身份不一致时拒绝为替换后的 bytes 背书', async () => {
+  const output = tempOutput('validation-snapshot-drift.xlsx');
+  const headers = ['OrderId'];
+  const originalCreateReadStream = fs.createReadStream;
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({ cells: [plainCell(0, 'O-1')] })
+    });
+    const expected = expectedStructure(result, headers);
+    const projected = result.styleStats.projectedFinalCounts;
+    const originalSize = fs.statSync(output.filePath).size;
+    let targetHashStreamCount = 0;
+    fs.createReadStream = function createMutatingReadStream(filePath, ...args) {
+      if (path.resolve(filePath) === path.resolve(output.filePath)) {
+        if (targetHashStreamCount === 1) {
+          fs.writeFileSync(output.filePath, Buffer.alloc(originalSize, 0x5a));
+        }
+        targetHashStreamCount += 1;
+      }
+      return originalCreateReadStream.call(this, filePath, ...args);
+    };
+
+    await assert.rejects(
+      validateGeneratedWorkbook(output.filePath, undefined, projected, expected),
+      /写后复核期间发生变化/
+    );
+    assert.equal(targetHashStreamCount, 2);
+  } finally {
+    fs.createReadStream = originalCreateReadStream;
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝 workbook 声明但实际缺失的分页 Sheet', async () => {
+  const output = tempOutput('missing-page.xlsx');
+  const headers = ['OrderId'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      maxRowsPerSheet: 1,
+      writeRows: async (emit) => {
+        emit({ cells: [plainCell(0, 'O-1')] });
+        emit({ cells: [plainCell(0, 'O-2')] });
+      }
+    });
+    assert.equal(result.sheetCount, 2);
+    const missingSheetPath = path.join(output.dir, 'missing-sheet2.xlsx');
+    await removeWorkbookEntry(
+      output.filePath,
+      missingSheetPath,
+      'xl/worksheets/sheet2.xml'
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        missingSheetPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(
+        error,
+        /悬空或不一致声明|结构复核失败/,
+        /sheet2\.xml|worksheet entry 不存在/
+      )
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝任一分页表头与 normalizedHeaders 不一致', async () => {
+  const output = tempOutput('wrong-header.xlsx');
+  const headers = ['OrderId', 'Amount'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => emit({
+        cells: [plainCell(0, 'O-1'), plainCell(1, 100)]
+      })
+    });
+    const wrongHeaderPath = path.join(output.dir, 'wrong-header-mutated.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      wrongHeaderPath,
+      'xl/worksheets/sheet1.xml',
+      (xml) => xml.replace('OrderId', 'WrongHeader')
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        wrongHeaderPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /表头与预计不一致/, /WrongHeader/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核拒绝物理数据行少于 writer emit 计数', async () => {
+  const output = tempOutput('missing-data-row.xlsx');
+  const headers = ['OrderId', 'Amount'];
+  try {
+    const result = await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: headers,
+      writeRows: async (emit) => {
+        emit({ cells: [plainCell(0, 'O-1'), plainCell(1, 100)] });
+        emit({ cells: [plainCell(0, 'O-2'), plainCell(1, 200)] });
+      }
+    });
+    assert.equal(result.dataRowCount, 2);
+    const missingRowPath = path.join(output.dir, 'missing-row3.xlsx');
+    await rewriteWorkbookEntry(
+      output.filePath,
+      missingRowPath,
+      'xl/worksheets/sheet1.xml',
+      (xml) => xml.replace(
+        /<row\b[^>]*\br="3"[^>]*>[\s\S]*?<\/row>/,
+        ''
+      )
+    );
+
+    await assert.rejects(
+      validateGeneratedWorkbook(
+        missingRowPath,
+        undefined,
+        result.styleStats.projectedFinalCounts,
+        expectedStructure(result, headers)
+      ),
+      (error) => assertValidationDetail(error, /数据行数与预计不一致/, /实际数据行数：1/)
+    );
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('写后结构复核允许 0 数据行，并精确核对自动分页的表头与物理行守恒', async () => {
+  const zeroOutput = tempOutput('zero-row.xlsx');
+  const pagedOutput = tempOutput('paged-row.xlsx');
+  try {
+    const zeroHeaders = ['OrderId'];
+    const zeroResult = await writeToolboxRows({
+      savePath: zeroOutput.filePath,
+      normalizedHeaders: zeroHeaders,
+      writeRows: async () => {}
+    });
+    assert.equal(zeroResult.dataRowCount, 0);
+    assert.equal(zeroResult.sheetCount, 1);
+    const zeroValidation = await validateGeneratedWorkbook(
+      zeroOutput.filePath,
+      undefined,
+      zeroResult.styleStats.projectedFinalCounts,
+      expectedStructure(zeroResult, zeroHeaders)
+    );
+    assert.equal(zeroValidation.actualSheetCount, 1);
+    assert.equal(zeroValidation.actualDataRowCount, 0);
+    assert.equal(zeroValidation.actualPhysicalRowCount, 1);
+
+    const pagedHeaders = ['OrderId', 'Amount'];
+    const pagedResult = await writeToolboxRows({
+      savePath: pagedOutput.filePath,
+      normalizedHeaders: pagedHeaders,
+      maxRowsPerSheet: 1,
+      writeRows: async (emit) => {
+        emit({ cells: [plainCell(0, 'O-1'), plainCell(1, 100)] });
+        emit({ cells: [plainCell(0, 'O-2'), plainCell(1, 200)] });
+      }
+    });
+    assert.equal(pagedResult.dataRowCount, 2);
+    assert.equal(pagedResult.sheetCount, 2);
+    const pagedValidation = await validateGeneratedWorkbook(
+      pagedOutput.filePath,
+      undefined,
+      pagedResult.styleStats.projectedFinalCounts,
+      expectedStructure(pagedResult, pagedHeaders)
+    );
+    assert.equal(pagedValidation.actualSheetCount, 2);
+    assert.equal(pagedValidation.actualDataRowCount, 2);
+    assert.equal(pagedValidation.actualPhysicalRowCount, 4);
+  } finally {
+    zeroOutput.cleanup();
+    pagedOutput.cleanup();
   }
 });

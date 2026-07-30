@@ -923,6 +923,7 @@ class ToolboxXlsxPass {
     zip,
     entries,
     sheets,
+    relationships,
     date1904,
     sharedStrings,
     sourceRegistry,
@@ -934,6 +935,9 @@ class ToolboxXlsxPass {
     this.zip = zip;
     this.entries = entries;
     this.sheets = Object.freeze(sheets.map((sheet) => Object.freeze({ ...sheet })));
+    this.workbookRelationships = Object.freeze(
+      [...relationships.values()].map((relationship) => Object.freeze({ ...relationship }))
+    );
     this.date1904 = !!date1904;
     this.sharedStrings = sharedStrings;
     this.sourceRegistry = sourceRegistry;
@@ -1156,6 +1160,7 @@ async function openToolboxXlsxPass(filePath, options = {}) {
       zip,
       entries,
       sheets,
+      relationships,
       date1904: workbook.date1904,
       sharedStrings,
       sourceRegistry: styleResult.registry,

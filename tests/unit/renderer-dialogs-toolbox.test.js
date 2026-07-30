@@ -240,11 +240,11 @@ describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', (
     assert.ok(mergeHandler.includes("sheetBaseName: 'COMMON'"));
   });
 
-  test('临时目录由 try/finally 在成功、取消保存和失败路径统一清理', () => {
+  test('临时目录由 try/finally 在成功、取消保存和失败路径统一 best-effort 清理', () => {
     const tempIdx = mergeHandler.indexOf("fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'))");
     const tryIdx = mergeHandler.indexOf('try {', tempIdx);
     const finallyIdx = mergeHandler.indexOf('} finally {', tryIdx);
-    const cleanupIdx = mergeHandler.indexOf("fs.rmSync(tempDir, { recursive: true, force: true });", finallyIdx);
+    const cleanupIdx = mergeHandler.indexOf('cleanupToolboxTemporaryDirectory(tempDir);', finallyIdx);
     assert.ok(tempIdx >= 0 && tryIdx > tempIdx && finallyIdx > tryIdx && cleanupIdx > finallyIdx);
   });
 

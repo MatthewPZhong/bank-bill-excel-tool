@@ -257,4 +257,23 @@ test.describe('serialize-error', () => {
     const r = deserializeError(s);
     assert.equal(r.structuredImportErrors, undefined, '普通错误反序列化不挂该字段');
   });
+
+  test('14. 发布人工恢复路径与临时文件保留标记跨 worker 完整透传', () => {
+    const err = new Error('发布需要人工恢复');
+    err.name = 'ToolboxPublicationManualRecoveryError';
+    err.recoveryPaths = [
+      '/tmp/toolbox-publish-journal-index.json',
+      '/tmp/.toolbox-publish-task.journal.json'
+    ];
+    err.preserveTemporaryFiles = true;
+
+    const serialized = serializeError(err);
+    assert.deepEqual(serialized.recoveryPaths, err.recoveryPaths);
+    assert.equal(serialized.preserveTemporaryFiles, true);
+
+    const restored = deserializeError(serialized);
+    assert.equal(restored.name, 'ToolboxPublicationManualRecoveryError');
+    assert.deepEqual(restored.recoveryPaths, err.recoveryPaths);
+    assert.equal(restored.preserveTemporaryFiles, true);
+  });
 });

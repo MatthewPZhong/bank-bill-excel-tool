@@ -12,6 +12,18 @@ const JOURNAL_INDEX_NAME = 'toolbox-publish-journal-index.json';
 const JOURNAL_VERSION = 1;
 const COPY_BUFFER_SIZE = 1024 * 1024;
 const PREPARED_RUNTIME = Symbol('toolboxPublicationRuntime');
+const INDEX_DISCOVERY_PREPARING = 'preparing';
+const INDEX_DISCOVERY_PREPARED = 'prepared';
+const INDEX_DISCOVERY_CANCELLING = 'cancelling';
+const INDEX_DISCOVERY_ROLLBACK_FINALIZING = 'rollback-finalizing';
+const INDEX_DISCOVERY_FINALIZING = 'finalizing';
+const INDEX_DISCOVERY_STATES = new Set([
+  INDEX_DISCOVERY_PREPARING,
+  INDEX_DISCOVERY_PREPARED,
+  INDEX_DISCOVERY_CANCELLING,
+  INDEX_DISCOVERY_ROLLBACK_FINALIZING,
+  INDEX_DISCOVERY_FINALIZING
+]);
 
 const activeTaskIds = new Set();
 const targetReservations = new Map();
@@ -34,6 +46,9 @@ class ToolboxPublicationManualRecoveryError extends ToolboxPublicationError {
   constructor(message, details = {}) {
     super('TOOLBOX_PUBLICATION_MANUAL_RECOVERY', message, details);
     this.name = 'ToolboxPublicationManualRecoveryError';
+    // 只要仍需人工恢复，generation 可能是辨认/重建正式结果的唯一可信副本。
+    // 该字段经 worker 序列化后由四个 main 入口统一消费，禁止 finally 递归删除。
+    this.preserveTemporaryFiles = true;
   }
 }
 
@@ -234,6 +249,97 @@ function emptyIndex() {
   return { version: JOURNAL_VERSION, entries: [] };
 }
 
+function indexEntryDiscoveryState(entry) {
+  // 仅用于识别索引状态；无 discoveryState 的 v1 条目没有可信路径锚点，
+  // 发布与跨进程恢复入口会在触碰 managed file 前单独 fail-closed。
+  return entry && entry.discoveryState === undefined
+    ? INDEX_DISCOVERY_PREPARED
+    : entry && entry.discoveryState;
+}
+
+function validateDiscoverableIndexEntry(runtime, entry, journalPathKey, managedPathKeys) {
+  if (entry.discoveryState === undefined) return true;
+  if (!INDEX_DISCOVERY_STATES.has(entry.discoveryState) ||
+      typeof entry.nonce !== 'string' ||
+      !entry.nonce ||
+      !Array.isArray(entry.stagedAbsolutePaths) ||
+      entry.stagedAbsolutePaths.length === 0 ||
+      !Array.isArray(entry.targetAbsolutePaths) ||
+      entry.targetAbsolutePaths.length !== entry.stagedAbsolutePaths.length ||
+      !Array.isArray(entry.backupAbsolutePaths) ||
+      entry.backupAbsolutePaths.length !== entry.stagedAbsolutePaths.length) {
+    return false;
+  }
+  if (!path.basename(entry.journalAbsolutePath).endsWith(
+    `-${entry.nonce}.journal.json`
+  )) {
+    return false;
+  }
+  const localManagedKeys = new Set();
+  for (let index = 0; index < entry.stagedAbsolutePaths.length; index += 1) {
+    const stagedPath = entry.stagedAbsolutePaths[index];
+    const targetPath = entry.targetAbsolutePaths[index];
+    const backupPath = entry.backupAbsolutePaths[index];
+    if (typeof stagedPath !== 'string' ||
+        !path.isAbsolute(stagedPath) ||
+        typeof targetPath !== 'string' ||
+        !path.isAbsolute(targetPath) ||
+        typeof backupPath !== 'string' ||
+        !path.isAbsolute(backupPath) ||
+        path.basename(stagedPath) !==
+          `.toolbox-publish-${entry.nonce}-${index + 1}.stage` ||
+        path.basename(backupPath) !==
+          `.toolbox-publish-${entry.nonce}-${index + 1}.backup`) {
+      return false;
+    }
+    let stagedKey = '';
+    let targetKey = '';
+    let backupKey = '';
+    try {
+      stagedKey = targetPathAliasKey(runtime.fsImpl, stagedPath);
+      targetKey = targetPathAliasKey(runtime.fsImpl, targetPath);
+      backupKey = targetPathAliasKey(runtime.fsImpl, backupPath);
+      if (
+        directoryPathAliasKey(runtime.fsImpl, path.dirname(stagedPath))
+          !== directoryPathAliasKey(runtime.fsImpl, path.dirname(targetPath))
+        || directoryPathAliasKey(runtime.fsImpl, path.dirname(backupPath))
+          !== directoryPathAliasKey(runtime.fsImpl, path.dirname(targetPath))
+      ) {
+        return false;
+      }
+    } catch (_error) {
+      return false;
+    }
+    const itemKeys = [stagedKey, targetKey, backupKey];
+    if (!stagedKey ||
+        !targetKey ||
+        !backupKey ||
+        stagedKey === journalPathKey ||
+        targetKey === journalPathKey ||
+        backupKey === journalPathKey ||
+        new Set(itemKeys).size !== 3 ||
+        itemKeys.some((key) => localManagedKeys.has(key) || managedPathKeys.has(key))) {
+      return false;
+    }
+    for (const key of itemKeys) localManagedKeys.add(key);
+  }
+  try {
+    if (
+      directoryPathAliasKey(runtime.fsImpl, path.dirname(entry.journalAbsolutePath))
+      !== directoryPathAliasKey(
+        runtime.fsImpl,
+        path.dirname(entry.targetAbsolutePaths[0])
+      )
+    ) {
+      return false;
+    }
+  } catch (_error) {
+    return false;
+  }
+  for (const managedKey of localManagedKeys) managedPathKeys.add(managedKey);
+  return true;
+}
+
 function readIndex(runtime, userDataDir) {
   const indexPath = getIndexPath(userDataDir);
   const stat = lstatOrNull(runtime.fsImpl, indexPath);
@@ -247,6 +353,9 @@ function readIndex(runtime, userDataDir) {
   const value = readJsonFile(runtime.fsImpl, indexPath, '工具箱发布恢复索引');
   const taskIds = new Set();
   const journalPaths = new Set();
+  const managedPathKeys = new Set([
+    targetPathAliasKey(runtime.fsImpl, indexPath)
+  ]);
   if (
     !value
     || value.version !== JOURNAL_VERSION
@@ -273,10 +382,18 @@ function readIndex(runtime, userDataDir) {
         || !journalPathKey
         || taskIds.has(entry.taskId)
         || journalPaths.has(journalPathKey)
+        || managedPathKeys.has(journalPathKey)
+        || !validateDiscoverableIndexEntry(
+          runtime,
+          entry,
+          journalPathKey,
+          managedPathKeys
+        )
       );
       if (!invalid) {
         taskIds.add(entry.taskId);
         journalPaths.add(journalPathKey);
+        managedPathKeys.add(journalPathKey);
       }
       return invalid;
     })
@@ -304,6 +421,93 @@ function addIndexEntry(runtime, userDataDir, entry) {
   value.entries.push(entry);
   writeIndex(runtime, indexPath, value);
   return indexPath;
+}
+
+function markIndexEntryPrepared(runtime, userDataDir, taskId, journalPath) {
+  const { indexPath, value } = readIndex(runtime, userDataDir);
+  const expectedKey = targetPathAliasKey(runtime.fsImpl, journalPath);
+  const matches = value.entries.filter((entry) => (
+    entry.taskId === taskId
+    && targetPathAliasKey(runtime.fsImpl, entry.journalAbsolutePath) === expectedKey
+  ));
+  if (matches.length !== 1 ||
+      matches[0].discoveryState !== INDEX_DISCOVERY_PREPARING) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `任务 ${taskId} 的 preparing 恢复索引状态无效，拒绝进入发布阶段`,
+      {
+        recoveryPaths: [indexPath, journalPath],
+        detailLines: [`任务：${taskId}`, `journal：${journalPath}`]
+      }
+    );
+  }
+  matches[0].discoveryState = INDEX_DISCOVERY_PREPARED;
+  writeIndex(runtime, indexPath, value);
+}
+
+function markIndexEntryCleanupState(
+  runtime,
+  journal,
+  nextState,
+  allowedCurrentStates,
+  operationLabel
+) {
+  const { indexPath, value } = readIndex(runtime, journal.userDataDir);
+  const expectedKey = targetPathAliasKey(runtime.fsImpl, journal.journalPath);
+  const matches = value.entries.filter((entry) => (
+    entry.taskId === journal.taskId
+    && targetPathAliasKey(runtime.fsImpl, entry.journalAbsolutePath) === expectedKey
+  ));
+  if (
+    matches.length !== 1
+    || matches[0].discoveryState === undefined
+    || !allowedCurrentStates.includes(matches[0].discoveryState)
+    || !discoverableAnchorsMatchJournal(
+      runtime,
+      { ...matches[0], userDataDir: journal.userDataDir },
+      journal
+    )
+  ) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `任务 ${journal.taskId} 的恢复索引状态或锚点无效，拒绝${operationLabel}`,
+      {
+        recoveryPaths: [indexPath, journal.journalPath],
+        detailLines: [`任务：${journal.taskId}`, `journal：${journal.journalPath}`]
+      }
+    );
+  }
+  const entry = matches[0];
+  entry.discoveryState = nextState;
+  writeIndex(runtime, indexPath, value);
+}
+
+function markIndexEntryFinalizing(runtime, journal) {
+  markIndexEntryCleanupState(
+    runtime,
+    journal,
+    INDEX_DISCOVERY_FINALIZING,
+    [INDEX_DISCOVERY_PREPARED],
+    '结束 committed 清理'
+  );
+}
+
+function markIndexEntryCancelling(runtime, journal) {
+  markIndexEntryCleanupState(
+    runtime,
+    journal,
+    INDEX_DISCOVERY_CANCELLING,
+    [INDEX_DISCOVERY_PREPARING, INDEX_DISCOVERY_PREPARED],
+    '进入 prepared 取消清理'
+  );
+}
+
+function markIndexEntryRollbackFinalizing(runtime, journal) {
+  markIndexEntryCleanupState(
+    runtime,
+    journal,
+    INDEX_DISCOVERY_ROLLBACK_FINALIZING,
+    [INDEX_DISCOVERY_PREPARED],
+    '结束 rollback 清理'
+  );
 }
 
 function indexContainsEntry(runtime, userDataDir, taskId, journalPath) {
@@ -420,6 +624,7 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
     && validSha(value.sha256)
   );
   const validStatuses = new Set([
+    'preparing',
     'prepared',
     'publishing',
     'rolling-back',
@@ -455,6 +660,10 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
         || new Set(managedKeys).size !== 3
         || !validSnapshot(entry.original, true)
         || !validGenerated(entry.generated)
+        || (
+          entry.validatedGenerated !== undefined
+          && !validGenerated(entry.validatedGenerated)
+        )
         || !entry.metadata
         || typeof entry.metadata !== 'object'
         || targets.has(targetKey)
@@ -528,12 +737,40 @@ function publicationMetadata(artifact, target, targetPath) {
     outputId: choose('outputId', null),
     fileName: String(choose('fileName', path.basename(targetPath))),
     matchedCount: choose('matchedCount', null),
+    dataRowCount: choose('dataRowCount', null),
+    sheetCount: choose('sheetCount', null),
     warningSummary: cloneJsonValue(choose('warningSummary', [])) || [],
     styleStats: cloneJsonValue(choose('styleStats', null))
   };
 }
 
-function normalizeInputs(artifacts, targets) {
+function validatedArtifactSnapshot(artifact, index, required) {
+  const value = artifact && typeof artifact === 'object' ? artifact : {};
+  const hasSize = value.byteSize !== undefined && value.byteSize !== null;
+  const hasSha = value.sha256 !== undefined && value.sha256 !== null;
+  if (!hasSize && !hasSha) {
+    if (!required) return null;
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_VALIDATION_REQUIRED',
+      `第 ${index + 1} 个发布产物缺少写后校验摘要，已阻止发布`
+    );
+  }
+  const size = Number(value.byteSize);
+  const sha256 = String(value.sha256 || '').toLowerCase();
+  if (
+    !Number.isSafeInteger(size)
+    || size <= 0
+    || !/^[a-f0-9]{64}$/.test(sha256)
+  ) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_INVALID_VALIDATION',
+      `第 ${index + 1} 个发布产物的写后校验摘要无效`
+    );
+  }
+  return { size, sha256 };
+}
+
+function normalizeInputs(artifacts, targets, options = {}) {
   const artifactList = Array.isArray(artifacts) ? artifacts : [];
   const targetList = Array.isArray(targets) && targets.length > 0
     ? targets
@@ -560,9 +797,15 @@ function normalizeInputs(artifacts, targets) {
       );
     }
     const resolvedTarget = path.resolve(targetPath);
+    const validatedGenerated = validatedArtifactSnapshot(
+      artifact,
+      index,
+      options.requireValidatedArtifacts === true
+    );
     return {
       artifactPath: path.resolve(artifactPath),
       targetPath: resolvedTarget,
+      ...(validatedGenerated ? { validatedGenerated } : {}),
       metadata: publicationMetadata(artifact, target, resolvedTarget)
     };
   });
@@ -619,6 +862,163 @@ function removeKnownFile(runtime, filePath, expected, label) {
   fsyncDirectory(runtime.fsImpl, path.dirname(filePath));
 }
 
+function regularFileIdentity(fsImpl, filePath, options = {}) {
+  let stat;
+  try {
+    // Node 默认的 Stats 会把 64-bit dev/ino 转成 Number；超过安全整数后会
+    // 舍入，不能用于决定是否 unlink source。硬链接发布只信任精确 bigint。
+    stat = fsImpl.lstatSync(filePath, { bigint: true });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return null;
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_NO_REPLACE_IDENTITY_UNAVAILABLE',
+      `${options.operationLabel || '文件移动'}无法取得精确文件身份，已保留两端文件并停止发布`,
+      {
+        detailLines: [`路径：${filePath}`, `原因：${messageOf(error)}`],
+        recoveryPaths: options.recoveryPaths || [filePath],
+        cause: error
+      }
+    );
+  }
+  if (!stat || !stat.isFile()) return null;
+  if (
+    typeof stat.dev !== 'bigint'
+    || typeof stat.ino !== 'bigint'
+    || stat.dev < 0n
+    || stat.ino <= 0n
+  ) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_NO_REPLACE_IDENTITY_UNAVAILABLE',
+      `${options.operationLabel || '文件移动'}无法取得可信文件身份，已保留两端文件并停止发布`,
+      {
+        detailLines: [
+          `路径：${filePath}`,
+          `dev 类型：${typeof stat.dev}`,
+          `ino：${String(stat.ino)}`
+        ],
+        recoveryPaths: options.recoveryPaths || [filePath]
+      }
+    );
+  }
+  return {
+    dev: stat.dev,
+    ino: stat.ino
+  };
+}
+
+function sameFileIdentity(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.dev === right.dev
+    && left.ino === right.ino
+  );
+}
+
+function moveFileNoReplace(runtime, sourcePath, destinationPath, options = {}) {
+  const operationLabel = options.operationLabel || '文件移动';
+  const destinationExistsCode = options.destinationExistsCode
+    || 'TOOLBOX_PUBLICATION_DESTINATION_EXISTS';
+  const destinationExistsMessage = options.destinationExistsMessage
+    || `${operationLabel}的目标路径已存在，拒绝覆盖：${destinationPath}`;
+  if (
+    typeof runtime.fsImpl.linkSync !== 'function'
+    || typeof runtime.fsImpl.unlinkSync !== 'function'
+  ) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_NO_REPLACE_UNAVAILABLE',
+      `${operationLabel}需要文件系统支持原子硬链接，当前运行环境不支持，已停止发布`,
+      {
+        detailLines: [`源：${sourcePath}`, `目标：${destinationPath}`],
+        recoveryPaths: [sourcePath, destinationPath]
+      }
+    );
+  }
+
+  try {
+    // link(2) 对已存在目标原子返回 EEXIST；禁止退回会覆盖目标的 rename。
+    // source/destination 均由协议约束在同一目录，因此不会跨文件系统。
+    runtime.fsImpl.linkSync(sourcePath, destinationPath);
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      throw new ToolboxPublicationError(
+        destinationExistsCode,
+        destinationExistsMessage,
+        {
+          detailLines: [`源：${sourcePath}`, `目标：${destinationPath}`],
+          recoveryPaths: [sourcePath, destinationPath],
+          cause: error
+        }
+      );
+    }
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_NO_REPLACE_UNAVAILABLE',
+      `${operationLabel}无法使用原子不覆盖操作，已停止发布：${destinationPath}`,
+      {
+        detailLines: [
+          `源：${sourcePath}`,
+          `目标：${destinationPath}`,
+          `原因：${messageOf(error)}`
+        ],
+        recoveryPaths: [sourcePath, destinationPath],
+        cause: error
+      }
+    );
+  }
+
+  try {
+    fsyncDirectory(runtime.fsImpl, path.dirname(destinationPath));
+    if (options.afterLinkCheckpoint) {
+      callCheckpoint(
+        runtime,
+        options.afterLinkCheckpoint,
+        options.checkpointContext || {}
+      );
+    }
+    const identityOptions = {
+      operationLabel,
+      recoveryPaths: [sourcePath, destinationPath]
+    };
+    const sourceIdentity = regularFileIdentity(
+      runtime.fsImpl,
+      sourcePath,
+      identityOptions
+    );
+    const destinationIdentity = regularFileIdentity(
+      runtime.fsImpl,
+      destinationPath,
+      identityOptions
+    );
+    if (!sameFileIdentity(sourceIdentity, destinationIdentity)) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_SOURCE_REPLACED',
+        `${operationLabel}建立目标后源路径被替换，已保留两端文件并停止发布`,
+        {
+          detailLines: [`源：${sourcePath}`, `目标：${destinationPath}`],
+          recoveryPaths: [sourcePath, destinationPath]
+        }
+      );
+    }
+    runtime.fsImpl.unlinkSync(sourcePath);
+    fsyncDirectory(runtime.fsImpl, path.dirname(sourcePath));
+  } catch (error) {
+    if (isCrashError(error) || error instanceof ToolboxPublicationError) throw error;
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_NO_REPLACE_MOVE_INCOMPLETE',
+      `${operationLabel}已建立安全目标，但源路径未能完成清理`,
+      {
+        detailLines: [
+          `源：${sourcePath}`,
+          `目标：${destinationPath}`,
+          `原因：${messageOf(error)}`
+        ],
+        recoveryPaths: [sourcePath, destinationPath],
+        cause: error
+      }
+    );
+  }
+}
+
 function targetState(runtime, entry) {
   const stat = lstatOrNull(runtime.fsImpl, entry.targetPath);
   if (!stat) return 'missing';
@@ -653,6 +1053,7 @@ function collectRecoveryPaths(journal) {
   return [
     journal.journalPath,
     ...journal.entries.flatMap((entry) => [
+      entry.artifactPath,
       entry.targetPath,
       entry.backupPath,
       entry.stagedPath
@@ -716,8 +1117,12 @@ function rollbackUncommitted(runtime, journal) {
             currentTarget = 'missing';
           }
           if (currentTarget === 'missing') {
-            runtime.fsImpl.renameSync(entry.backupPath, entry.targetPath);
-            fsyncDirectory(runtime.fsImpl, path.dirname(entry.targetPath));
+            moveFileNoReplace(runtime, entry.backupPath, entry.targetPath, {
+              operationLabel: '恢复原目标',
+              destinationExistsCode: 'TOOLBOX_PUBLICATION_RESTORE_TARGET_EXISTS',
+              destinationExistsMessage:
+                `恢复原目标时正式路径被并发创建，拒绝覆盖：${entry.targetPath}`
+            });
           } else if (currentTarget === 'original') {
             removeKnownFile(runtime, entry.backupPath, entry.original, '重复原文件备份');
           }
@@ -754,13 +1159,18 @@ function rollbackUncommitted(runtime, journal) {
   journal.status = 'rolled-back';
   try {
     persistJournal(runtime, journal);
-    removeIndexEntry(runtime, journal.userDataDir, journal.taskId, journal.journalPath);
+    // target/backup/staging 已恢复完成后，先用固定恢复根记录 durable
+    // rollback-finalizing，再删 journal，最后删 index。任何收尾失败都可发现。
+    markIndexEntryRollbackFinalizing(runtime, journal);
   } catch (error) {
     throw new ToolboxPublicationManualRecoveryError(
-      `任务 ${journal.taskId} 的文件已回滚，但恢复记录收尾失败`,
+      `任务 ${journal.taskId} 的文件已回滚，但恢复索引未能进入 rollback-finalizing`,
       {
         detailLines: [`journal：${journal.journalPath}`, `原因：${messageOf(error)}`],
-        recoveryPaths: [journal.journalPath, getIndexPath(journal.userDataDir)],
+        recoveryPaths: [
+          getIndexPath(journal.userDataDir),
+          ...collectRecoveryPaths(journal)
+        ],
         cause: error
       }
     );
@@ -773,7 +1183,25 @@ function rollbackUncommitted(runtime, journal) {
       `任务 ${journal.taskId} 已回滚，但 journal 清理失败`,
       {
         detailLines: [`journal：${journal.journalPath}`, `原因：${messageOf(error)}`],
-        recoveryPaths: [journal.journalPath]
+        recoveryPaths: [
+          getIndexPath(journal.userDataDir),
+          ...collectRecoveryPaths(journal)
+        ]
+      }
+    );
+  }
+  try {
+    removeIndexEntry(runtime, journal.userDataDir, journal.taskId, journal.journalPath);
+  } catch (error) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `任务 ${journal.taskId} 已回滚且 journal 已删除，但恢复索引未能收尾`,
+      {
+        detailLines: [`原因：${messageOf(error)}`],
+        recoveryPaths: [
+          getIndexPath(journal.userDataDir),
+          ...collectRecoveryPaths(journal)
+        ],
+        cause: error
       }
     );
   }
@@ -806,23 +1234,320 @@ function cleanupCommitted(runtime, journal) {
     return { complete: false, warnings: issues };
   }
 
-  removeIndexEntry(runtime, journal.userDataDir, journal.taskId, journal.journalPath);
   const warnings = [];
+  try {
+    // committed 数据与 backup/staging 已完成收尾后，先把固定恢复根切到
+    // finalizing。这样 journal 删除失败仍可重试；journal 已删但 index
+    // 删除失败时，新进程也能仅凭 finalizing intent 安全移除残留索引。
+    markIndexEntryFinalizing(runtime, journal);
+  } catch (error) {
+    warnings.push(
+      `发布已提交，但恢复索引未能进入 finalizing：${messageOf(error)}`
+    );
+    return { complete: false, warnings };
+  }
   try {
     runtime.fsImpl.rmSync(journal.journalPath, { force: true });
     fsyncDirectory(runtime.fsImpl, path.dirname(journal.journalPath));
   } catch (error) {
-    warnings.push(`发布已提交，但 journal 未能删除：${journal.journalPath}（${messageOf(error)}）`);
+    warnings.push(
+      `发布已提交，但 journal 未能删除：${journal.journalPath}（${messageOf(error)}）`
+    );
+    return { complete: false, warnings };
+  }
+  try {
+    removeIndexEntry(runtime, journal.userDataDir, journal.taskId, journal.journalPath);
+  } catch (error) {
+    warnings.push(
+      `发布已提交，journal 已删除，但恢复索引未能收尾：${messageOf(error)}`
+    );
+    return { complete: false, warnings };
   }
   return { complete: true, warnings };
 }
 
+function discoverableAnchorsMatchJournal(runtime, indexEntry, journal) {
+  if (!journal ||
+      journal.taskId !== indexEntry.taskId ||
+      journal.nonce !== indexEntry.nonce ||
+      journal.entries.length !== indexEntry.stagedAbsolutePaths.length ||
+      journal.entries.length !== indexEntry.targetAbsolutePaths.length ||
+      journal.entries.length !== indexEntry.backupAbsolutePaths.length) {
+    return false;
+  }
+  try {
+    return directoryPathAliasKey(runtime.fsImpl, journal.userDataDir) ===
+        directoryPathAliasKey(runtime.fsImpl, indexEntry.userDataDir)
+      && journal.entries.every((entry, index) => (
+        targetPathAliasKey(runtime.fsImpl, entry.stagedPath) ===
+          targetPathAliasKey(runtime.fsImpl, indexEntry.stagedAbsolutePaths[index])
+        && targetPathAliasKey(runtime.fsImpl, entry.targetPath) ===
+          targetPathAliasKey(runtime.fsImpl, indexEntry.targetAbsolutePaths[index])
+        && targetPathAliasKey(runtime.fsImpl, entry.backupPath) ===
+          targetPathAliasKey(runtime.fsImpl, indexEntry.backupAbsolutePaths[index])
+      ));
+  } catch (_error) {
+    return false;
+  }
+}
+
+function discoverableIntentMatchesJournal(
+  runtime,
+  indexEntry,
+  journal,
+  allowedJournalStatuses = ['preparing', 'prepared']
+) {
+  return Boolean(
+    journal
+    && allowedJournalStatuses.includes(journal.status)
+    && discoverableAnchorsMatchJournal(runtime, indexEntry, journal)
+  );
+}
+
+function throwDiscoverableAnchorMismatch(runtime, indexEntry) {
+  const indexPath = getIndexPath(indexEntry.userDataDir);
+  throw new ToolboxPublicationManualRecoveryError(
+    `任务 ${indexEntry.taskId} 的恢复索引与 journal 锚点不一致，拒绝触碰任何文件`,
+    {
+      detailLines: [
+        `任务：${indexEntry.taskId}`,
+        `journal：${indexEntry.journalAbsolutePath}`,
+        '请人工核对 index 与 journal 中的 nonce、userDataDir 及 target/staging/backup 路径。'
+      ],
+      recoveryPaths: [
+        indexPath,
+        indexEntry.journalAbsolutePath,
+        ...indexEntry.targetAbsolutePaths,
+        ...indexEntry.stagedAbsolutePaths,
+        ...indexEntry.backupAbsolutePaths
+      ]
+    }
+  );
+}
+
+function throwLegacyIndexManualRecovery(runtime, indexEntry) {
+  const indexPath = getIndexPath(indexEntry.userDataDir);
+  throw new ToolboxPublicationManualRecoveryError(
+    `存量 v1 发布任务 ${indexEntry.taskId} 缺少可信路径锚点，只允许人工恢复`,
+    {
+      detailLines: [
+        `任务：${indexEntry.taskId}`,
+        `journal：${indexEntry.journalAbsolutePath}`,
+        '为避免按未锚定 journal 删除或覆盖未知文件，程序未读取或修改任何 task-managed 文件。'
+      ],
+      recoveryPaths: [indexPath, indexEntry.journalAbsolutePath]
+    }
+  );
+}
+
+function recoverPreparingIntent(runtime, indexEntry, options = {}) {
+  const stateLabel = options.stateLabel || 'preparing';
+  const recoveredAction = options.recoveredAction || 'cancelled-preparing';
+  const indexPath = getIndexPath(indexEntry.userDataDir);
+  const journalStat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
+  if (journalStat) {
+    if (!journalStat.isFile()) {
+      throw new ToolboxPublicationManualRecoveryError(
+        `${stateLabel} 任务 ${indexEntry.taskId} 的 journal 不是普通文件`,
+        {
+          recoveryPaths: [indexPath, indexEntry.journalAbsolutePath],
+          detailLines: [`journal：${indexEntry.journalAbsolutePath}`]
+        }
+      );
+    }
+    const journal = readJournal(
+      runtime,
+      indexEntry.journalAbsolutePath,
+      indexEntry.taskId
+    );
+    if (!discoverableIntentMatchesJournal(runtime, indexEntry, journal)) {
+      throwDiscoverableAnchorMismatch(runtime, indexEntry);
+    }
+  }
+
+  const cleanupErrors = [];
+  for (const stagedPath of indexEntry.stagedAbsolutePaths) {
+    try {
+      const stat = lstatOrNull(runtime.fsImpl, stagedPath);
+      if (!stat) continue;
+      if (!stat.isFile()) {
+        cleanupErrors.push(`staging 不是普通文件，未删除：${stagedPath}`);
+        continue;
+      }
+      // preparing intent 在任何正式目标变更前持久化；该随机路径只属于本任务，
+      // copy 中断产生的部分文件也必须直接删除，不能要求它先通过完整 hash。
+      runtime.fsImpl.rmSync(stagedPath, { force: true });
+      fsyncDirectory(runtime.fsImpl, path.dirname(stagedPath));
+    } catch (error) {
+      cleanupErrors.push(`删除 staging 失败：${stagedPath}（${messageOf(error)}）`);
+    }
+  }
+  if (cleanupErrors.length > 0) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `${stateLabel} 任务 ${indexEntry.taskId} 的 staging 清理不完整`,
+      {
+        recoveryPaths: [
+          indexPath,
+          indexEntry.journalAbsolutePath,
+          ...indexEntry.stagedAbsolutePaths
+        ],
+        detailLines: cleanupErrors
+      }
+    );
+  }
+
+  try {
+    const stat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
+    if (stat) {
+      runtime.fsImpl.rmSync(indexEntry.journalAbsolutePath, { force: true });
+      fsyncDirectory(runtime.fsImpl, path.dirname(indexEntry.journalAbsolutePath));
+    }
+  } catch (error) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `${stateLabel} 任务 ${indexEntry.taskId} 的 journal 清理失败`,
+      {
+        recoveryPaths: [indexPath, indexEntry.journalAbsolutePath],
+        detailLines: [`原因：${messageOf(error)}`],
+        cause: error
+      }
+    );
+  }
+
+  try {
+    removeIndexEntry(
+      runtime,
+      indexEntry.userDataDir,
+      indexEntry.taskId,
+      indexEntry.journalAbsolutePath
+    );
+  } catch (error) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `${stateLabel} 任务 ${indexEntry.taskId} 已清理，但 index 收尾失败`,
+      {
+        recoveryPaths: [indexPath],
+        detailLines: [`原因：${messageOf(error)}`],
+        cause: error
+      }
+    );
+  }
+  return { taskId: indexEntry.taskId, action: recoveredAction, warnings: [] };
+}
+
+function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
+  const stateLabel = options.stateLabel || 'finalizing';
+  const allowedJournalStatuses = options.allowedJournalStatuses
+    || ['committed', 'committed-cleanup-pending'];
+  const recoveredAction = options.recoveredAction || 'commit-cleanup';
+  const indexPath = getIndexPath(indexEntry.userDataDir);
+  const journalStat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
+  if (journalStat) {
+    if (!journalStat.isFile()) {
+      throw new ToolboxPublicationManualRecoveryError(
+        `${stateLabel} 任务 ${indexEntry.taskId} 的 journal 不是普通文件`,
+        {
+          recoveryPaths: [indexPath, indexEntry.journalAbsolutePath],
+          detailLines: [`journal：${indexEntry.journalAbsolutePath}`]
+        }
+      );
+    }
+    const journal = readJournal(
+      runtime,
+      indexEntry.journalAbsolutePath,
+      indexEntry.taskId
+    );
+    if (!discoverableIntentMatchesJournal(
+      runtime,
+      indexEntry,
+      journal,
+      allowedJournalStatuses
+    )) {
+      throwDiscoverableAnchorMismatch(runtime, indexEntry);
+    }
+    try {
+      runtime.fsImpl.rmSync(indexEntry.journalAbsolutePath, { force: true });
+      fsyncDirectory(runtime.fsImpl, path.dirname(indexEntry.journalAbsolutePath));
+    } catch (error) {
+      throw new ToolboxPublicationManualRecoveryError(
+        `${stateLabel} 任务 ${indexEntry.taskId} 的 journal 清理失败`,
+        {
+          recoveryPaths: [indexPath, indexEntry.journalAbsolutePath],
+          detailLines: [`原因：${messageOf(error)}`],
+          cause: error
+        }
+      );
+    }
+  }
+  try {
+    removeIndexEntry(
+      runtime,
+      indexEntry.userDataDir,
+      indexEntry.taskId,
+      indexEntry.journalAbsolutePath
+    );
+  } catch (error) {
+    throw new ToolboxPublicationManualRecoveryError(
+      `${stateLabel} 任务 ${indexEntry.taskId} 的 index 收尾失败`,
+      {
+        recoveryPaths: [indexPath],
+        detailLines: [`原因：${messageOf(error)}`],
+        cause: error
+      }
+    );
+  }
+  return { taskId: indexEntry.taskId, action: recoveredAction, warnings: [] };
+}
+
 function recoverOneJournal(runtime, indexEntry) {
+  if (indexEntry.discoveryState === undefined) {
+    throwLegacyIndexManualRecovery(runtime, indexEntry);
+  }
+  const discoveryState = indexEntryDiscoveryState(indexEntry);
+  if (discoveryState === INDEX_DISCOVERY_PREPARING) {
+    return recoverPreparingIntent(runtime, indexEntry);
+  }
+  if (discoveryState === INDEX_DISCOVERY_CANCELLING) {
+    return recoverPreparingIntent(runtime, indexEntry, {
+      stateLabel: 'cancelling',
+      recoveredAction: 'cancelled'
+    });
+  }
+  if (discoveryState === INDEX_DISCOVERY_ROLLBACK_FINALIZING) {
+    return recoverFinalizingIntent(runtime, indexEntry, {
+      stateLabel: 'rollback-finalizing',
+      allowedJournalStatuses: ['rolled-back'],
+      recoveredAction: 'rolled-back'
+    });
+  }
+  if (discoveryState === INDEX_DISCOVERY_FINALIZING) {
+    return recoverFinalizingIntent(runtime, indexEntry);
+  }
   const journal = readJournal(
     runtime,
     indexEntry.journalAbsolutePath,
     indexEntry.taskId
   );
+  if (
+    indexEntry.discoveryState !== undefined
+    && !discoverableAnchorsMatchJournal(runtime, indexEntry, journal)
+  ) {
+    throwDiscoverableAnchorMismatch(runtime, indexEntry);
+  }
+  if (journal.status === 'preparing') {
+    if (indexEntry.discoveryState !== undefined) {
+      return recoverPreparingIntent(runtime, indexEntry);
+    }
+    const cleanupErrors = cancelPrepared(runtime, journal, true);
+    if (cleanupErrors.length > 0) {
+      throw new ToolboxPublicationManualRecoveryError(
+        `preparing 任务 ${journal.taskId} 清理不完整`,
+        {
+          detailLines: cleanupErrors,
+          recoveryPaths: collectRecoveryPaths(journal)
+        }
+      );
+    }
+    return { taskId: journal.taskId, action: 'cancelled-preparing', warnings: [] };
+  }
   if (journal.userDataDir !== indexEntry.userDataDir && indexEntry.userDataDir) {
     markManualRecovery(runtime, journal, ['journal 的 userDataDir 与恢复索引上下文不一致']);
   }
@@ -946,19 +1671,94 @@ function ensureTargetParent(runtime, targetPath) {
   runtime.fsImpl.accessSync(parent, (runtime.fsImpl.constants || fs.constants).W_OK);
 }
 
+function pathAliasIsWithinDirectory(fileAliasKey, directoryAliasKey) {
+  return fileAliasKey === directoryAliasKey
+    || fileAliasKey.startsWith(
+      directoryAliasKey.endsWith(path.sep)
+        ? directoryAliasKey
+        : `${directoryAliasKey}${path.sep}`
+    );
+}
+
 function preflightJournal(runtime, journal) {
-  const targetKeys = new Set();
   for (const entry of journal.entries) {
     ensureTargetParent(runtime, entry.targetPath);
     assertRegularFile(runtime.fsImpl, entry.artifactPath, '生成产物');
-    const key = targetReservationKey(runtime.fsImpl, entry.targetPath);
-    if (targetKeys.has(key)) {
+  }
+
+  const managedPaths = [
+    { label: '固定恢复索引', filePath: getIndexPath(journal.userDataDir) },
+    { label: '任务 journal', filePath: journal.journalPath },
+    ...journal.entries.flatMap((entry, index) => [
+      { label: `第 ${index + 1} 个正式目标`, filePath: entry.targetPath },
+      { label: `第 ${index + 1} 个 staging`, filePath: entry.stagedPath },
+      { label: `第 ${index + 1} 个 backup`, filePath: entry.backupPath }
+    ])
+  ];
+  const managedKeys = new Map();
+  for (const managed of managedPaths) {
+    const key = targetPathAliasKey(runtime.fsImpl, managed.filePath);
+    const previous = managedKeys.get(key);
+    if (previous) {
+      const duplicateTargets = previous.label.includes('正式目标')
+        && managed.label.includes('正式目标');
       throw new ToolboxPublicationError(
-        'TOOLBOX_PUBLICATION_DUPLICATE_TARGET',
-        `发布目标路径重复：${entry.targetPath}`
+        duplicateTargets
+          ? 'TOOLBOX_PUBLICATION_DUPLICATE_TARGET'
+          : 'TOOLBOX_PUBLICATION_PATH_COLLISION',
+        `发布保留路径发生碰撞：${managed.filePath}`,
+        {
+          detailLines: [
+            `${previous.label}：${previous.filePath}`,
+            `${managed.label}：${managed.filePath}`
+          ],
+          recoveryPaths: [previous.filePath, managed.filePath]
+        }
       );
     }
-    targetKeys.add(key);
+    managedKeys.set(key, managed);
+  }
+
+  const artifactParents = journal.entries.map((entry) => ({
+    artifactPath: entry.artifactPath,
+    parentAliasKey: directoryPathAliasKey(
+      runtime.fsImpl,
+      path.dirname(entry.artifactPath)
+    )
+  }));
+  for (const entry of journal.entries) {
+    const artifactKey = targetPathAliasKey(runtime.fsImpl, entry.artifactPath);
+    const collision = managedKeys.get(artifactKey);
+    if (collision) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_ARTIFACT_PATH_COLLISION',
+        `生成产物与发布保留路径发生碰撞：${entry.artifactPath}`,
+        {
+          detailLines: [
+            `生成产物：${entry.artifactPath}`,
+            `${collision.label}：${collision.filePath}`
+          ],
+          recoveryPaths: [entry.artifactPath, collision.filePath]
+        }
+      );
+    }
+    const targetKey = targetPathAliasKey(runtime.fsImpl, entry.targetPath);
+    const generationOwner = artifactParents.find((item) => (
+      pathAliasIsWithinDirectory(targetKey, item.parentAliasKey)
+    ));
+    if (generationOwner) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_TARGET_IN_GENERATION_DIR',
+        `正式目标不能位于生成临时目录内：${entry.targetPath}`,
+        {
+          detailLines: [
+            `正式目标：${entry.targetPath}`,
+            `生成产物：${generationOwner.artifactPath}`
+          ],
+          recoveryPaths: [entry.targetPath, generationOwner.artifactPath]
+        }
+      );
+    }
     const targetStat = lstatOrNull(runtime.fsImpl, entry.targetPath);
     if (targetStat && !targetStat.isFile()) {
       throw new ToolboxPublicationError(
@@ -985,14 +1785,33 @@ function preflightJournal(runtime, journal) {
 
 function cancelPrepared(runtime, journal, indexRegistered) {
   const cleanupErrors = [];
+  if (indexRegistered) {
+    try {
+      // 固定恢复根必须先进入 durable cancelling，再删除任何可发现文件。
+      // 任一后续失败/崩溃都由该 intent 继续清理，禁止留下孤儿 journal。
+      markIndexEntryCancelling(runtime, journal);
+    } catch (error) {
+      cleanupErrors.push(`恢复索引未能进入 cancelling：${messageOf(error)}`);
+      return cleanupErrors;
+    }
+  }
   for (const entry of journal.entries) {
     try {
       // 该路径由本任务随机创建，且 cancelPrepared 只会在正式目标尚未被触碰时
       // 执行；即使 copy 中途失败或校验不一致，它也没有恢复价值。
       runtime.fsImpl.rmSync(entry.stagedPath, { force: true });
+      fsyncDirectory(runtime.fsImpl, path.dirname(entry.stagedPath));
     } catch (error) {
       cleanupErrors.push(`删除 staging 失败：${entry.stagedPath}（${messageOf(error)}）`);
     }
+  }
+  if (cleanupErrors.length > 0) return cleanupErrors;
+  try {
+    runtime.fsImpl.rmSync(journal.journalPath, { force: true });
+    fsyncDirectory(runtime.fsImpl, path.dirname(journal.journalPath));
+  } catch (error) {
+    cleanupErrors.push(`删除 journal 失败：${journal.journalPath}（${messageOf(error)}）`);
+    return cleanupErrors;
   }
   if (indexRegistered) {
     try {
@@ -1000,11 +1819,6 @@ function cancelPrepared(runtime, journal, indexRegistered) {
     } catch (error) {
       cleanupErrors.push(`移除恢复索引失败：${messageOf(error)}`);
     }
-  }
-  try {
-    runtime.fsImpl.rmSync(journal.journalPath, { force: true });
-  } catch (error) {
-    cleanupErrors.push(`删除 journal 失败：${journal.journalPath}（${messageOf(error)}）`);
   }
   return cleanupErrors;
 }
@@ -1019,7 +1833,9 @@ function prepareToolboxPublication(options = {}) {
         '发布任务必须提供非空 taskId 和 userDataDir'
       );
     }
-    recoverPendingInternal(runtime, options.userDataDir);
+    const resolvedUserDataDir = path.resolve(options.userDataDir);
+    runtime.fsImpl.mkdirSync(resolvedUserDataDir, { recursive: true });
+    recoverPendingInternal(runtime, resolvedUserDataDir);
     if (activeTaskIds.has(taskId)) {
       throw new ToolboxPublicationError(
         'TOOLBOX_PUBLICATION_DUPLICATE_TASK',
@@ -1027,22 +1843,74 @@ function prepareToolboxPublication(options = {}) {
       );
     }
 
-    const inputs = normalizeInputs(options.artifacts, options.targets);
-    const journal = makeJournal(runtime, taskId, options.userDataDir, inputs);
+    const inputs = normalizeInputs(options.artifacts, options.targets, {
+      requireValidatedArtifacts: options.requireValidatedArtifacts === true
+    });
+    const journal = makeJournal(runtime, taskId, resolvedUserDataDir, inputs);
     preflightJournal(runtime, journal);
     const reservationKeys = reserveTargets(runtime, taskId, journal.entries);
     activeTaskIds.add(taskId);
     let indexRegistered = false;
 
     try {
+      // 先完成只读快照；此阶段尚未在目标目录创建任何 staging byte。
       for (let index = 0; index < journal.entries.length; index += 1) {
         const entry = journal.entries[index];
         const generated = inspectRegularFile(runtime.fsImpl, entry.artifactPath);
+        if (
+          entry.validatedGenerated
+          && (
+            generated.size !== entry.validatedGenerated.size
+            || generated.sha256 !== entry.validatedGenerated.sha256
+          )
+        ) {
+          throw new ToolboxPublicationError(
+            'TOOLBOX_PUBLICATION_GENERATION_CHANGED',
+            `已验证的工具箱临时产物在发布前发生变化：${entry.artifactPath}`,
+            {
+              detailLines: [
+                `校验时大小：${entry.validatedGenerated.size}`,
+                `当前大小：${generated.size}`,
+                `校验时 SHA-256：${entry.validatedGenerated.sha256}`,
+                `当前 SHA-256：${generated.sha256}`
+              ]
+            }
+          );
+        }
         entry.generated = generated;
         const originalStat = lstatOrNull(runtime.fsImpl, entry.targetPath);
         if (originalStat) {
           entry.original = { exists: true, ...inspectRegularFile(runtime.fsImpl, entry.targetPath) };
         }
+      }
+
+      // 固定 index 的 preparing intent 必须先于外部 journal/staging 落盘。
+      // 即使进程在后续 copy 中途退出，新进程也能只凭 userData index
+      // 找到本任务随机 staging 路径并清理，且绝不触碰正式 target。
+      addIndexEntry(runtime, journal.userDataDir, {
+        taskId,
+        journalAbsolutePath: journal.journalPath,
+        createdAt: journal.createdAt,
+        discoveryState: INDEX_DISCOVERY_PREPARING,
+        nonce: journal.nonce,
+        stagedAbsolutePaths: journal.entries.map((entry) => entry.stagedPath),
+        targetAbsolutePaths: journal.entries.map((entry) => entry.targetPath),
+        backupAbsolutePaths: journal.entries.map((entry) => entry.backupPath)
+      });
+      indexRegistered = true;
+      callCheckpoint(runtime, 'prepare:after-index-before-journal', {
+        taskId,
+        journalPath: journal.journalPath
+      });
+
+      persistJournal(runtime, journal);
+      callCheckpoint(runtime, 'prepare:after-preparing-journal', {
+        taskId,
+        journalPath: journal.journalPath
+      });
+
+      for (let index = 0; index < journal.entries.length; index += 1) {
+        const entry = journal.entries[index];
         runtime.fsImpl.copyFileSync(
           entry.artifactPath,
           entry.stagedPath,
@@ -1051,7 +1919,10 @@ function prepareToolboxPublication(options = {}) {
         fsyncFile(runtime.fsImpl, entry.stagedPath);
         fsyncDirectory(runtime.fsImpl, path.dirname(entry.stagedPath));
         const staged = inspectRegularFile(runtime.fsImpl, entry.stagedPath);
-        if (staged.size !== generated.size || staged.sha256 !== generated.sha256) {
+        if (
+          staged.size !== entry.generated.size
+          || staged.sha256 !== entry.generated.sha256
+        ) {
           throw new ToolboxPublicationError(
             'TOOLBOX_PUBLICATION_STAGE_VERIFY',
             `发布暂存文件校验失败：${entry.stagedPath}`
@@ -1070,12 +1941,12 @@ function prepareToolboxPublication(options = {}) {
         taskId,
         journalPath: journal.journalPath
       });
-      addIndexEntry(runtime, journal.userDataDir, {
-        taskId,
-        journalAbsolutePath: journal.journalPath,
-        createdAt: journal.createdAt
-      });
-      indexRegistered = true;
+      markIndexEntryPrepared(
+        runtime,
+        journal.userDataDir,
+        journal.taskId,
+        journal.journalPath
+      );
       callCheckpoint(runtime, 'prepare:after-index', {
         taskId,
         journalPath: journal.journalPath
@@ -1174,6 +2045,35 @@ function assertTargetUnchangedSincePrepare(runtime, entry) {
   }
 }
 
+function assertTargetAbsentImmediatelyBeforePublish(runtime, entry) {
+  if (lstatOrNull(runtime.fsImpl, entry.targetPath)) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_TARGET_RECREATED',
+      `正式目标在 staging 发布前被并发创建，拒绝覆盖：${entry.targetPath}`
+    );
+  }
+}
+
+function assertAllPublishedTargetsMatch(runtime, entries) {
+  const mismatches = [];
+  for (const entry of entries) {
+    try {
+      if (!fileMatches(runtime.fsImpl, entry.targetPath, entry.generated)) {
+        mismatches.push(`正式目标大小或 SHA-256 不一致：${entry.targetPath}`);
+      }
+    } catch (error) {
+      mismatches.push(`正式目标最终复核失败：${entry.targetPath}（${messageOf(error)}）`);
+    }
+  }
+  if (mismatches.length > 0) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_FINAL_TARGET_VERIFY',
+      '整批正式目标在 committed 前最终复核失败',
+      { detailLines: mismatches }
+    );
+  }
+}
+
 function collectMetadataWarnings(entries) {
   const warnings = [];
   const append = (value) => {
@@ -1205,6 +2105,10 @@ function buildPublishFiles(journal) {
     filePath: entry.targetPath,
     fileName: entry.metadata.fileName || path.basename(entry.targetPath),
     matchedCount: entry.metadata.matchedCount,
+    dataRowCount: entry.metadata.dataRowCount,
+    sheetCount: entry.metadata.sheetCount,
+    byteSize: entry.generated.size,
+    sha256: entry.generated.sha256,
     outputId: entry.metadata.outputId,
     warningSummary: entry.metadata.warningSummary,
     styleStats: entry.metadata.styleStats
@@ -1252,14 +2156,38 @@ function publishPreparedToolboxPublication(prepared) {
     let journal = readJournal(runtime, prepared.journalPath, prepared.taskId);
     const { value: index } = readIndex(runtime, journal.userDataDir);
     const journalPathKey = targetReservationKey(runtime.fsImpl, journal.journalPath);
-    const indexed = index.entries.some((entry) => (
+    const indexedEntry = index.entries.find((entry) => (
       entry.taskId === journal.taskId
       && targetReservationKey(runtime.fsImpl, entry.journalAbsolutePath) === journalPathKey
     ));
-    if (!indexed) {
+    if (!indexedEntry) {
       releaseReservations(journal.taskId, reservationKeys);
       throw new ToolboxPublicationManualRecoveryError(
         `任务 ${journal.taskId} 的 journal 未登记在固定恢复索引中，拒绝触碰目标`,
+        {
+          recoveryPaths: [getIndexPath(journal.userDataDir), journal.journalPath]
+        }
+      );
+    }
+    if (indexedEntry.discoveryState === undefined) {
+      releaseReservations(journal.taskId, reservationKeys);
+      throwLegacyIndexManualRecovery(runtime, {
+        ...indexedEntry,
+        userDataDir: journal.userDataDir
+      });
+    }
+    if (indexEntryDiscoveryState(indexedEntry) !== INDEX_DISCOVERY_PREPARED ||
+        (
+          indexedEntry.discoveryState !== undefined
+          && !discoverableIntentMatchesJournal(
+            runtime,
+            { ...indexedEntry, userDataDir: journal.userDataDir },
+            journal
+          )
+        )) {
+      releaseReservations(journal.taskId, reservationKeys);
+      throw new ToolboxPublicationManualRecoveryError(
+        `任务 ${journal.taskId} 的 journal/index 尚未完整 prepared，拒绝触碰目标`,
         {
           recoveryPaths: [getIndexPath(journal.userDataDir), journal.journalPath]
         }
@@ -1314,8 +2242,19 @@ function publishPreparedToolboxPublication(prepared) {
           index,
           targetPath: entry.targetPath
         });
-        runtime.fsImpl.renameSync(entry.targetPath, entry.backupPath);
-        fsyncDirectory(runtime.fsImpl, path.dirname(entry.targetPath));
+        moveFileNoReplace(runtime, entry.targetPath, entry.backupPath, {
+          operationLabel: '把原目标移入任务备份',
+          destinationExistsCode: 'TOOLBOX_PUBLICATION_BACKUP_RECREATED',
+          destinationExistsMessage:
+            `任务备份路径被并发创建，拒绝覆盖：${entry.backupPath}`,
+          afterLinkCheckpoint: 'publish:after-backup-link-before-target-unlink',
+          checkpointContext: {
+            taskId: journal.taskId,
+            index,
+            targetPath: entry.targetPath,
+            backupPath: entry.backupPath
+          }
+        });
         callCheckpoint(runtime, 'publish:after-backup-rename-before-journal', {
           taskId: journal.taskId,
           index,
@@ -1337,13 +2276,33 @@ function publishPreparedToolboxPublication(prepared) {
           index,
           targetPath: entry.targetPath
         });
-        runtime.fsImpl.renameSync(entry.stagedPath, entry.targetPath);
-        fsyncDirectory(runtime.fsImpl, path.dirname(entry.targetPath));
+        // 所有原目标此时都已移入 backup；无论 prepare 时目标是否存在，
+        // link 紧前先快速检查，并由 link(2) 在 syscall 边界原子拒绝已存在目标。
+        assertTargetAbsentImmediatelyBeforePublish(runtime, entry);
+        moveFileNoReplace(runtime, entry.stagedPath, entry.targetPath, {
+          operationLabel: '发布 staging 到正式目标',
+          destinationExistsCode: 'TOOLBOX_PUBLICATION_TARGET_RECREATED',
+          destinationExistsMessage:
+            `正式目标在 staging 发布时被并发创建，拒绝覆盖：${entry.targetPath}`,
+          afterLinkCheckpoint: 'publish:after-stage-link-before-staging-unlink',
+          checkpointContext: {
+            taskId: journal.taskId,
+            index,
+            stagedPath: entry.stagedPath,
+            targetPath: entry.targetPath
+          }
+        });
         callCheckpoint(runtime, 'publish:after-publish-rename-before-journal', {
           taskId: journal.taskId,
           index,
           targetPath: entry.targetPath
         });
+        if (!fileMatches(runtime.fsImpl, entry.targetPath, entry.generated)) {
+          throw new ToolboxPublicationError(
+            'TOOLBOX_PUBLICATION_TARGET_VERIFY',
+            `正式目标在发布重命名后校验失败：${entry.targetPath}`
+          );
+        }
         entry.published = true;
         persistJournal(runtime, journal);
         callCheckpoint(runtime, 'publish:after-publish', {
@@ -1352,6 +2311,13 @@ function publishPreparedToolboxPublication(prepared) {
           targetPath: entry.targetPath
         });
       }
+
+      callCheckpoint(runtime, 'publish:before-final-target-verify', {
+        taskId: journal.taskId
+      });
+      // 单项 hardlink 发布后校验只能覆盖该时刻；多输出后续发布期间，先前目标仍可能
+      // 被外部改写。committed 前必须重新对整批 target 做 size + SHA-256 复核。
+      assertAllPublishedTargetsMatch(runtime, journal.entries);
 
       journal.status = 'committed';
       journal.committedAt = dateIso(runtime);
