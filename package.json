@@ -137,6 +137,10 @@
     "test:v2.0.0:streaming-writer": "node scripts/test-v2.0.0-streaming-writer-diff.js",
     "startup:measure": "node scripts/measure-startup.js",
     "benchmark:duplicate-inbound": "node scripts/benchmark-duplicate-inbound-match.js",
+    "test:position-import:parity": "node scripts/test-position-import-parity.js",
+    "test:position-import:faults": "node scripts/test-position-import-faults.js",
+    "benchmark:position-import": "node scripts/benchmark-position-import.js",
+    "generate:position-import-fixture": "node scripts/generate-position-import-fixture.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
   },
