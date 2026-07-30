@@ -18,7 +18,7 @@
 - 布局：默认/显式宽高、零宽、BIFF8 默认隐藏零高度到 OOXML `zeroHeight=1` 的转换、隐藏、outline、分页重放。
 - Sheet：合并跳过 hidden/veryHidden；拆分继续参与；空/表头-only/重复表头。
 - BIFF8：全部必需 record、唯一 `Dimensions` 半开区间与 65536/256 最大边界、LibreOffice `ColInfo.colLast=256` 哨兵、Row reserved 位、XFCRC、Theme/XFExt、palette、Continue、Mul*、损坏/加密/错位。
-- 发布：prepare、journal、index、backup、publish、commit、cleanup 各 checkpoint 失败和重启恢复。
+- 发布：prepare、journal、index、backup、publish、commit、cleanup 各 checkpoint 失败和重启恢复；普通 staging 文件必须用可写句柄执行 `fsync`，Windows 对只读普通文件句柄返回的 `EPERM` 不得套用目录 `fsync` 的平台兼容容错。
 - Worker：IPC payload 有界，普通与 Worker 使用同一语义。
 
 ## 集成与人工

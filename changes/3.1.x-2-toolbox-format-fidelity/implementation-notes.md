@@ -10,7 +10,7 @@
 
 - Goal: 将已合入 `main` 的 v3.1.2 以不可变 tag 发布，公开回读全部更新资产，并把发布事实归档回仓库。
 - Context: PR #104 合并提交为 `e5a999c`，PR #105 合并提交为 `05c3dbf`；用户已明确确认人工验收通过；开始收尾时远端不存在 `v3.1.2` tag 或同名 Release。
-- Constraints: tag 必须等于 `v${package.json.version}` 并精确指向创建时最新 `origin/main`；不得覆盖同名 tag/Release；不纳入工作区既有未跟踪文件；发布后只接受 Setup、Setup blockmap、portable 和 `latest.yml` 四项约定资产。
+- Constraints: tag 必须等于 `v${package.json.version}` 并精确指向创建时最新 `origin/main`；正常发布不得覆盖同名 tag/Release。若首次 tag workflow 在创建 Release/资产前失败，只有在再次确认同名 Release 不存在后，才允许把该失败触发 tag 重建到修复后的最新 `main`；任何已有 Release/资产都必须中止恢复。不得纳入工作区既有未跟踪文件；发布后只接受 Setup、Setup blockmap、portable 和 `latest.yml` 四项约定资产。
 - Done when: 发布准备记录合入 `main`，Windows Release workflow 全绿，Release 为 stable/latest 且四项资产可公开回读，`latest.yml` 与 Setup SHA-512/大小一致，最终 tag、workflow、资产摘要和状态回写仓库。
 
 | 未知 | 影响 | 处理 | 当前决定 |
@@ -22,6 +22,23 @@
 | 生产在线升级 canary | 中 | 发布后人工项 | 技术 Release 先按不可变流程完成；公告前仍遵循 Windows Release Runbook |
 
 BLOCK 问题：无。tag/Release 缺失、版本和当前 `main` 均已由只读探针确认。
+
+### Windows staging fsync 发布修复 Preflight（2026-07-30）
+
+- Goal: 修复正式 Windows workflow 中 staging 文件落盘刷新稳定返回 `EPERM`，恢复 v3.1.2 不可变发布链。
+- Context: Release run `30567689697` 已通过 tag/main 校验，在 `release-check` 的 publication 单测中 46 项失败；共同根因均为 `fsyncFile` 把 staging 文件以只读 `r` 句柄打开。
+- Constraints: 只调整本任务刚复制、后续待发布的 staging 文件句柄权限；文件内容、哈希、目录 fsync 兼容、hardlink no-replace、journal/index 状态机、回滚和人工恢复边界不得改变。
+- Done when: 定向测试模拟 Windows 对只读 staging fd 的 `fsync` 返回 `EPERM` 并要求可写句柄；publication 全矩阵、完整 `release-check`、重要变量检查与 Windows workflow 通过。
+
+| 未知 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- |
+| `EPERM` 来自目录还是普通文件句柄 | 高 | RESOLVED | 日志栈精确落在 `fsyncFile(...entry.stagedPath)`，不是已有容错的 `fsyncDirectory` |
+| 是否应忽略 staging 文件 `fsync` 的 `EPERM` | 高 | BLOCK/拒绝 | 文件耐久化失败不能当成功；继续 fail-closed |
+| Windows 所需最小权限 | 高 | PROBE | 只把 staging `openSync` 从 `r` 改为 `r+`，测试模拟只读 fd 失败 |
+| 只读来源文件是否受影响 | 低 | ASSUME | `copyFileSync` 后刷新的是任务 staging，不改来源；若目标目录无法创建可写 staging，仍在触碰正式目标前失败 |
+| 首轮失败 tag 如何恢复 | 高 | RESOLVED | run `30567689697` 未进入构建、Release 或资产步骤；热修合入并通过最新 `main` Windows 构建后，再次确认 Release 404，删除失败 tag 并在修复后的最新 `main` 重建；若 Release/资产存在则中止 |
+
+BLOCK 问题：无。不得采用“忽略普通文件 fsync EPERM”的放宽方案。
 
 ### PR #104 复审修复 Preflight（2026-07-30）
 
@@ -131,6 +148,8 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | 初版发布顺序为“staging → 外部 journal → 固定 index” | 改为“固定 preparing intent → 外部 preparing journal → staging/复核 → journal prepared → index prepared” | PR Review 证明前两种崩溃窗口无法从固定恢复根发现 | 新版 index entry 增加 discovery state/nonce/路径清单；后续对抗 probe 又证明旧 v1 无锚点自动恢复不安全，因此 v1 最终收敛为 manual-only；Spec 5.3 已反向同步 | 是 |
 | 初版发布核心在 Electron 主进程同步执行 | 保留同步、可故障注入的事务核心，但生产入口通过 FIFO Worker dispatcher 调用 | 大产物多轮 hash/copy 会冻结 UI；单纯把 generation 放 Worker 不覆盖最终另存为 | 四个 publish 调用点和启动恢复均 await 异步 dispatcher；worker 异常退出先恢复，错误字段跨线程保留 | 是 |
 | 初版 committed 收尾先移除固定 index、再 best-effort 删除 journal | 增加 durable `finalizing` 状态并把固定 index 改为最后删除；同一 no-orphan 规则随后扩展到 `cancelling` 与 `rollback-finalizing` | Review 明确要求任一残留都能从固定恢复根发现；简单换序会制造缺 journal 阻断；后续 probe 证明 cancel/rollback 仍会留下孤儿 | 三种 terminal intent 都先固定恢复职责、再删 journal、最后删 index；legacy v1 不自动升级 | 是 |
+| staging 文件以只读 `r` 句柄执行 `fsync` | 仅该 staging 文件改用 `r+`，目录句柄和哈希读取仍为只读 | Windows `FlushFileBuffers` 对只读普通文件句柄返回 `EPERM`；忽略该错误会放宽耐久性 | Windows 可完成文件刷新；文件字节、摘要、状态机和失败关闭规则不变 | 是 |
+| 发布 tag 一经推送即不重建 | 首轮 workflow 在任何 Release/资产生成前失败后，把该 tag 视为失败触发器；仅在热修合入、最新 `main` Windows 构建通过且 Release 再次确认为不存在时重建到修复后的 `main` | 原 tag 指向不含 Windows 修复的提交，无法产出可用 v3.1.2；保留旧 tag 或重复运行都会继续失败 | 只移动未发布 tag，不覆盖 GitHub Release 或资产；旧/新 commit、失败/成功 run 和恢复检查全部留档 | 是 |
 
 ## Evidence
 
@@ -176,6 +195,10 @@ BLOCK 问题：无。全部未知均可由现有契约、定向测试和只读�
 | 合并与人工验收状态 | PR #104 合并提交 `e5a999c`，PR #105 合并提交 `05c3dbf`；用户于 2026-07-30 明确确认人工验收通过 | 代码已进入 `main`；Windows Excel/WPS 人工发布门禁按用户签字关闭，不补写未提供的样本明细 |
 | 合并后干净环境发布门禁 | `npm ci` 成功；`npm run release-check`：lint/smoke PASS、unit 4378/4378 PASS（272 files，日志 `logs/unit-tests/unit-20260730-132526.log`）、integration 2051/2051 PASS（44 scripts，总耗时 297113ms）；`verify:main-panel-alignment` 6/6 PASS，最大中心误差 0.0039 CSS px | 证明最终合并源码树保持全量回归与主页面几何契约；随后仅修改发布文档与自动刷新报告 |
 | 合并后重要变量与生产依赖审计 | `scan:vars` 刷新 242 files / 3078 top-level names；`check:vars -- --include-minor` 因 `src/` 相对 HEAD 无改动而安全跳过；`npm audit --omit=dev` 保留既有 9 条生产依赖告警（0 critical、7 high、2 moderate），相对 v3.1.1 无生产依赖图变更 | 重要变量硬节点已执行；既有依赖告警继续作为独立治理项，不在发布收尾阶段无评审升级依赖 |
+| 首轮正式 Windows Release workflow | run `30567689697`：tag/main 校验与依赖安装通过；`release-check` 在 unit 阶段 4322/4369 PASS、46 FAIL，全部失败链路共同落到 staging 普通文件 `fsync` 的 `EPERM`；构建与 Release 步骤均未执行 | 证明无同名 Release/资产被部分发布，并锁定 Windows 普通文件句柄权限缺口 |
+| Windows staging fd 定向回归 | `node --test tests/unit/toolbox-output-publication.test.js` → 55/55 PASS；新增测试在 staging fd 为只读时模拟 Windows `EPERM`，并断言实际执行 `fsync` 的唯一 staging mode 为 `r+` | 防止再次用只读 fd 调用 `FlushFileBuffers`，同时覆盖完整 publication 状态机与故障注入矩阵 |
+| Windows staging fd 热修完整发布门禁 | `npm run release-check`：lint/smoke PASS、unit 4379/4379 PASS（272 files，日志 `logs/unit-tests/unit-20260730-140540.log`）、integration 2051/2051 PASS（44 scripts，总耗时 291525ms） | 覆盖新增 Windows fd 契约、全部 publication 故障注入、30 万行流式路径及全仓既有功能 |
+| Windows staging fd 热修重要变量门禁 | `npm run scan:vars` → 242 files / 3078 top-level names；`npm run check:vars -- --include-minor` PASS，本次唯一 `src/` 改动未命中重要变量 | 发布/合并硬节点已执行；无需追加重要变量关联功能清单 |
 
 ## Remaining Unknowns
 

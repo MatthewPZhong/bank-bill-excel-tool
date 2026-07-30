@@ -19,6 +19,7 @@
 - **样式预算与严格写后校验**：输出按最终样式签名去重，并对 cell XF、字体、填充、边框和自定义数字格式设置安全预算。临时文件发布前严格解析 Content Types、包根/工作簿 relationships、全部 worksheet 和 styles，拒绝缺失包根关系、悬空内部关系、截断 XML、悬空/游离 Sheet 声明、错表头及漏行；实际 Sheet/数据行数、样式数量与结构扫描前后文件摘要必须一致。
 - **整批可恢复发布**：任何 staging 数据写入前先在固定恢复索引登记 preparing intent，再生成外部 journal 和 staging；覆盖过程中断会恢复旧目标，准备阶段中断会只清理本任务临时文件。写后校验身份会绑定到 generation、staging 及 rename 后正式目标，同大小换内容也不会报告成功；提交收尾使用 finalizing intent，journal 删除前后崩溃都能由固定索引继续清理。若启动恢复失败，应用会显示恢复路径并停止启动，不会让新任务越过损坏状态。
 - **发布不冻结主界面**：全文件哈希、staging 复制、fsync 和启动恢复由串行 publication Worker 执行；Worker 异常退出时会先自动恢复再报告失败，后续任务不会越过恢复。30 万行级低样式文件继续流式读取/写出，合并、拆分、分页和混合 XLSX/XLS/CSV 路径均核对表头、行序、行数与长编号。
+- **Windows 暂存落盘兼容**：复制后的 staging 文件使用 Windows 可执行 `FlushFileBuffers` 的可写句柄完成落盘，不再因只读句柄返回 `EPERM` 而在发布正式目标前失败；文件内容、摘要复核和目录耐久化边界不变。
 
 ### v3.1.2 · 兼容与边界
 

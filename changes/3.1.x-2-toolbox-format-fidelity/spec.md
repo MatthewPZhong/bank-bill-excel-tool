@@ -825,4 +825,6 @@ TOOLBOX_STYLE_BUDGETS = {
 - PR #104 与尾随小数点修复 PR #105 均已合入 `main`。
 - 用户已明确确认人工验收通过；该确认作为 Windows Excel/WPS 人工门禁的签字证据，不扩写未提供的样本明细。
 - 合并后干净依赖环境的 `release-check`、主页面对齐、重要变量扫描和生产依赖审计均已执行；正式 tag 与 GitHub Release 仍须由不可变 Windows 发布工作流完成。
+- 首轮正式 Windows workflow 在发布任何资产前发现 staging 文件用只读句柄执行 `fsync` 会返回 `EPERM`；修复仅把本任务新建的 staging 文件以 `r+` 打开后刷新，目录刷新兼容、摘要校验、hardlink no-replace 与失败关闭边界不变。
+- 首轮 workflow 创建的 `v3.1.2` tag 只作为失败触发器存在，仍指向未含修复的旧 `main`，且未创建同名 GitHub Release 或任何发布资产。热修合入并通过最新 `main` Windows 构建后，须再次确认 Release 不存在，才允许删除该失败 tag 并在修复后的最新 `main` 上重建同名 annotated tag；若届时已存在 Release 或资产则立即中止，禁止覆盖 Release。
 - FAT 或部分网络盘不支持 hardlink 时仍按既定契约在改动正式目标前安全失败，不因人工验收而放宽或增加覆盖型 fallback。

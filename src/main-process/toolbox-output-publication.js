@@ -164,7 +164,9 @@ function fileMatches(fsImpl, filePath, expected) {
 }
 
 function fsyncFile(fsImpl, filePath) {
-  const fd = fsImpl.openSync(filePath, 'r');
+  // Windows 的 FlushFileBuffers 需要可写文件句柄；只读句柄会返回 EPERM。
+  // staged 文件由本任务刚创建且后续仍需发布，使用 r+ 不改变内容。
+  const fd = fsImpl.openSync(filePath, 'r+');
   try {
     fsImpl.fsyncSync(fd);
   } finally {

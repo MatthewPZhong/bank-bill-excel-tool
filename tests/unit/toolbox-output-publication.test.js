@@ -88,6 +88,51 @@ function recoverInFreshProcess(userDataDir) {
 }
 
 test.describe('toolbox output publication', () => {
+  test('staging 文件使用 Windows 可执行 fsync 的可写句柄', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+    const target = path.join(ctx.outputDir, 'target.xlsx');
+    const fsImpl = Object.create(fs);
+    const stagedFdModes = new Map();
+    const syncedStageModes = [];
+
+    fsImpl.openSync = (filePath, flags, ...args) => {
+      const fd = fs.openSync(filePath, flags, ...args);
+      if (String(filePath).endsWith('.stage')) stagedFdModes.set(fd, flags);
+      return fd;
+    };
+    fsImpl.fsyncSync = (fd) => {
+      const mode = stagedFdModes.get(fd);
+      if (mode) {
+        syncedStageModes.push(mode);
+        if (mode === 'r') {
+          const error = new Error('EPERM: operation not permitted, fsync');
+          error.code = 'EPERM';
+          throw error;
+        }
+      }
+      return fs.fsyncSync(fd);
+    };
+    fsImpl.closeSync = (fd) => {
+      stagedFdModes.delete(fd);
+      return fs.closeSync(fd);
+    };
+
+    const prepared = prepareToolboxPublication({
+      taskId: 'windows-staging-fsync-writable-handle',
+      artifacts: [validatedArtifact(source)],
+      targets: [target],
+      userDataDir: ctx.userDataDir,
+      requireValidatedArtifacts: true,
+      fsImpl
+    });
+    const result = publishPreparedToolboxPublication(prepared);
+
+    assert.deepEqual(syncedStageModes, ['r+']);
+    assert.equal(result.committed, true);
+    assert.equal(fs.readFileSync(target, 'utf8'), 'generated');
+  });
+
   test('生产发布要求写后校验摘要，并拒绝校验后发生变化的 generation', () => {
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'validated-v1');
