@@ -56,6 +56,7 @@ const RECORD = Object.freeze({
   DEFAULT_ROW_HEIGHT_OLD: 0x0025,
   DEF_COL_WIDTH: 0x0055,
   STANDARD_WIDTH: 0x0099,
+  DIMENSIONS: 0x0200,
   COL_INFO: 0x007d,
   ROW: 0x0208,
   BLANK: 0x0201,
@@ -1100,6 +1101,7 @@ function parseRow(record) {
   const firstColumn = payload.readUInt16LE(2);
   const lastColumnExclusive = payload.readUInt16LE(4);
   const heightTwips = payload.readUInt16LE(6);
+  const reserved1 = payload.readUInt16LE(8);
   const flags = payload[12];
   const reserved3 = payload[13];
   const xfFlags = payload.readUInt16LE(14);
@@ -1115,9 +1117,10 @@ function parseRow(record) {
       offset: record.offset
     });
   }
-  if ((flags & 0x08) !== 0 || reserved3 !== 0x01) {
+  if (reserved1 !== 0 || (flags & 0x08) !== 0 || reserved3 !== 0x01) {
     fail('BIFF8_INVALID_ROW_FLAGS', `Row ${row} reserved flags 非法`, {
       offset: record.offset,
+      reserved1,
       flags,
       reserved3
     });
@@ -1142,19 +1145,58 @@ function parseRow(record) {
   };
 }
 
+function parseDimensions(record) {
+  requireLength(record, 14, 'Dimensions');
+  const payload = record.payload;
+  const firstRow = payload.readUInt32LE(0);
+  const lastRowExclusive = payload.readUInt32LE(4);
+  const firstColumn = payload.readUInt16LE(8);
+  const lastColumnExclusive = payload.readUInt16LE(10);
+  const reserved = payload.readUInt16LE(12);
+  if (
+    firstRow > 65535
+    || lastRowExclusive > 65536
+    || lastRowExclusive < firstRow
+    || firstColumn > 255
+    || lastColumnExclusive > 256
+    || lastColumnExclusive < firstColumn
+    || reserved !== 0
+  ) {
+    fail('BIFF8_INVALID_DIMENSIONS', 'Dimensions used range 非法', {
+      offset: record.offset,
+      firstRow,
+      lastRowExclusive,
+      firstColumn,
+      lastColumnExclusive,
+      reserved
+    });
+  }
+  return {
+    firstRow,
+    lastRowExclusive,
+    firstColumn,
+    lastColumnExclusive,
+    recordOffset: record.offset
+  };
+}
+
 function parseColInfo(record) {
   requireLength(record, 12, 'ColInfo');
   const payload = record.payload;
   const firstColumn = payload.readUInt16LE(0);
-  const lastColumn = payload.readUInt16LE(2);
+  const rawLastColumn = payload.readUInt16LE(2);
+  // LibreOffice 会用 256 表示“从 firstColumn 到 BIFF8 最后一列”的兼容哨兵。
+  // BIFF8 实际可寻址列仍只有 0..255；必须在进入布局/样式解析前收口到 255，
+  // 否则下游 OOXML writer 会凭空创建第 257 列。
+  const lastColumn = rawLastColumn === 256 ? 255 : rawLastColumn;
   const width256 = payload.readUInt16LE(4);
   const xfIndex = payload.readUInt16LE(6);
   const flags = payload.readUInt16LE(8);
-  if (firstColumn > 255 || lastColumn > 255 || lastColumn < firstColumn) {
+  if (firstColumn > 255 || rawLastColumn > 256 || lastColumn < firstColumn) {
     fail('BIFF8_INVALID_COLUMN_RANGE', 'ColInfo column range 非法', {
       offset: record.offset,
       firstColumn,
-      lastColumn
+      lastColumn: rawLastColumn
     });
   }
   if ((flags & 0xe0f0) !== 0) {
@@ -1166,6 +1208,8 @@ function parseColInfo(record) {
   return {
     firstColumn,
     lastColumn,
+    rawLastColumn,
+    endSentinelNormalized: rawLastColumn === 256,
     width256,
     widthCharacters: width256 / 256,
     xfIndex,
@@ -1253,6 +1297,7 @@ function scanSheet(buffer, boundSheet, xfs) {
     type: boundSheet.type,
     streamOffset: start,
     endOffset: null,
+    dimensions: null,
     defaultRow: null,
     defColWidth: null,
     standardWidth: null,
@@ -1286,6 +1331,13 @@ function scanSheet(buffer, boundSheet, xfs) {
       break;
     }
 
+    if (record.type === RECORD.DIMENSIONS) {
+      if (sheet.dimensions) {
+        fail('BIFF8_DUPLICATE_DIMENSIONS', `Sheet ${sheet.name} 存在多个 Dimensions`);
+      }
+      sheet.dimensions = parseDimensions(record);
+      continue;
+    }
     if (record.type === RECORD.DEFAULT_ROW_HEIGHT || record.type === RECORD.DEFAULT_ROW_HEIGHT_OLD) {
       if (sheet.defaultRow) {
         fail('BIFF8_DUPLICATE_DEFAULT_ROW_HEIGHT', `Sheet ${sheet.name} 存在多个 DefaultRowHeight`);
@@ -1412,8 +1464,49 @@ function scanSheet(buffer, boundSheet, xfs) {
     ? sheet.standardWidth / 256
     : sheet.defColWidth;
   if (sheet.type === 'worksheet' || sheet.type === 'macro') {
+    if (!sheet.dimensions) {
+      fail('BIFF8_MISSING_DIMENSIONS', `Sheet ${sheet.name} 缺少 Dimensions`, {
+        sheetName: sheet.name
+      });
+    }
+    const dimensions = sheet.dimensions;
+    for (const row of sheet.rows) {
+      const rowRangeEmpty = row.firstColumn === row.lastColumnExclusive;
+      if (
+        row.row < dimensions.firstRow
+        || row.row >= dimensions.lastRowExclusive
+        || (!rowRangeEmpty && (
+          row.firstColumn < dimensions.firstColumn
+          || row.lastColumnExclusive > dimensions.lastColumnExclusive
+        ))
+      ) {
+        fail('BIFF8_ROW_OUTSIDE_DIMENSIONS', `Sheet ${sheet.name} 的 Row ${row.row + 1} 超出 Dimensions`, {
+          sheetName: sheet.name,
+          row: row.row,
+          rowRange: [row.firstColumn, row.lastColumnExclusive],
+          dimensions
+        });
+      }
+    }
     const rowsByIndex = new Map(sheet.rows.map((row) => [row.row, row]));
     for (const cell of sheet.cells) {
+      if (
+        cell.row < dimensions.firstRow
+        || cell.row >= dimensions.lastRowExclusive
+        || cell.column < dimensions.firstColumn
+        || cell.column >= dimensions.lastColumnExclusive
+      ) {
+        fail(
+          'BIFF8_CELL_OUTSIDE_DIMENSIONS',
+          `${sheet.name}!R${cell.row + 1}C${cell.column + 1} 超出 Dimensions`,
+          {
+            sheetName: sheet.name,
+            row: cell.row,
+            column: cell.column,
+            dimensions
+          }
+        );
+      }
       const row = rowsByIndex.get(cell.row);
       // Row、DefaultRowHeight 和 DefColWidth 都可能被合法 BIFF8 生成器省略。
       // 省略 Row 时按工作簿默认行属性解释；一旦存在显式 Row，则其列范围必须与 cell table 一致。

@@ -14,6 +14,7 @@ const {
   validateGeneratedWorkbook,
   writeToolboxRows
 } = require('../../../src/main-process/toolbox-output-writer');
+const { openToolboxXlsxPass } = require('../../../src/backend/toolbox-format');
 
 function tempOutput(name = 'out.xlsx') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-output-writer-'));
@@ -121,6 +122,136 @@ test('唯一 writer 保留表头/数据样式、值类型与行列布局', async
     assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultRowHeight="18"/);
     assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultColWidth="11"/);
     assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bcustomHeight="1"/);
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('唯一 writer 将 BIFF8 零默认高度与零宽列保留为不可见布局', async () => {
+  const output = tempOutput('zero-layout.xlsx');
+  try {
+    await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['ID'],
+      rawHeaderCells: [cell(0, 'ID', 1)],
+      headerRow: { rowIndex: 1, hidden: true },
+      layoutBaseline: {
+        defaultRowHeight: 0,
+        defaultRowHidden: true,
+        defaultColWidth: 0,
+        customHeight: true,
+        columns: [
+          {
+            minColumnIndex: 0,
+            maxColumnIndex: 255,
+            width: null,
+            hidden: true,
+            outlineLevel: 0
+          },
+          {
+            minColumnIndex: 0,
+            maxColumnIndex: 0,
+            width: 0,
+            hidden: true,
+            outlineLevel: 0
+          }
+        ]
+      },
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => {
+        emit({
+          rowIndex: 2,
+          hidden: true,
+          cells: [cell(0, '001234567890123456789', 2)]
+        });
+        emit({
+          rowIndex: 3,
+          hidden: false,
+          cells: [cell(0, '显式可见行', 2)]
+        });
+      }
+    });
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(output.filePath);
+    const sheet = workbook.worksheets[0];
+    assert.equal(sheet.properties.defaultRowHeight, 15);
+    assert.equal(sheet.getRow(1).hidden, true);
+    assert.equal(sheet.getRow(2).hidden, true);
+    assert.equal(sheet.getRow(3).hidden, false);
+    assert.equal(sheet.getColumn(1).hidden, true);
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bdefaultRowHeight="15"/);
+    assert.match(sheetXml, /<sheetFormatPr\b[^>]*\bzeroHeight="1"/);
+    assert.doesNotMatch(sheetXml, /\bdefaultRowHeight="0"/);
+    const columnTags = [...sheetXml.matchAll(/<col\b[^>]*>/g)].map((match) => match[0]);
+    assert.ok(columnTags.some((tag) => /\bhidden="1"/.test(tag)));
+    assert.ok(columnTags.every((tag) => {
+      const match = tag.match(/\bmax="(\d+)"/);
+      return !match || Number(match[1]) <= 256;
+    }));
+
+    const strictPass = await openToolboxXlsxPass(output.filePath);
+    try {
+      let meta = null;
+      const rows = [];
+      await strictPass.scanSheet(0, {
+        onSheetMeta: (value) => {
+          meta = value;
+        },
+        onRow: (row) => rows.push(row)
+      });
+      assert.equal(meta.defaultRowHeight, 15);
+      assert.equal(meta.defaultRowHidden, true);
+      assert.deepEqual(rows.map((row) => row.hidden), [true, true, false]);
+    } finally {
+      strictPass.close();
+    }
+  } finally {
+    output.cleanup();
+  }
+});
+
+test('唯一 writer 不把缺失默认行高误写为零，并允许同版工具再次读取', async () => {
+  const output = tempOutput('missing-default-height.xlsx');
+  try {
+    await writeToolboxRows({
+      savePath: output.filePath,
+      normalizedHeaders: ['ID'],
+      rawHeaderCells: [cell(0, 'ID', 1)],
+      headerRow: { rowIndex: 1 },
+      layoutBaseline: {
+        defaultRowHeight: null,
+        defaultRowHidden: false
+      },
+      sourceRegistryResolver: makeResolver(),
+      writeRows: async (emit) => emit({
+        rowIndex: 2,
+        cells: [cell(0, '001234567890123456789', 2)]
+      })
+    });
+
+    const zip = await JSZip.loadAsync(fs.readFileSync(output.filePath));
+    const sheetXml = await zip.file('xl/worksheets/sheet1.xml').async('string');
+    assert.doesNotMatch(sheetXml, /\bdefaultRowHeight="0"/);
+    assert.doesNotMatch(sheetXml, /\bzeroHeight="1"/);
+
+    const strictPass = await openToolboxXlsxPass(output.filePath);
+    try {
+      let meta = null;
+      const summary = await strictPass.scanSheet(0, {
+        onSheetMeta: (value) => {
+          meta = value;
+        }
+      });
+      assert.equal(summary.rowCount, 2);
+      assert.equal(meta.defaultRowHeight, 15);
+      assert.equal(meta.defaultRowHidden, false);
+    } finally {
+      strictPass.close();
+    }
   } finally {
     output.cleanup();
   }

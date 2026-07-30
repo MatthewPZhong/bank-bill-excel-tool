@@ -30,6 +30,53 @@ function sheetStateFromHidden(hidden) {
   return 'visible';
 }
 
+function buildBiff8ColumnLayout(overlaySheet, sourceRegistry) {
+  const columns = [];
+  // BIFF8 合法允许默认列宽为 0。ExcelJS 不会序列化 defaultColWidth=0，
+  // 因此先把 BIFF8 全列范围投影为隐藏，再由显式 ColInfo 按顺序覆盖。
+  if (overlaySheet && overlaySheet.defaultColumnWidth === 0) {
+    columns.push({
+      minColumnIndex: 0,
+      maxColumnIndex: 255,
+      width: null,
+      hidden: true,
+      outlineLevel: 0,
+      sourceStyleId: null,
+      effectiveStyleRef: null,
+      customWidth: true
+    });
+  }
+  for (const column of (overlaySheet && overlaySheet.columns) || []) {
+    columns.push({
+      minColumnIndex: column.firstColumn,
+      maxColumnIndex: column.lastColumn,
+      width: column.widthCharacters,
+      // coldx=0 与隐藏列具有相同可见语义；不得让 writer 因 falsy width 回退为可见默认宽。
+      hidden: column.hidden || column.widthCharacters === 0,
+      outlineLevel: column.outlineLevel,
+      sourceStyleId: column.xfIndex,
+      effectiveStyleRef: sourceRegistry.compoundRef(
+        sourceRegistry.styleRefForXf(column.xfIndex)
+      ),
+      customWidth: column.userSet || column.widthCharacters === 0
+    });
+  }
+  return columns;
+}
+
+function resolveBiff8RowForOutput(explicitRow, defaultRow, rowIndex) {
+  if (explicitRow) return explicitRow;
+  return {
+    row: rowIndex,
+    formatted: false,
+    customHeight: false,
+    heightPoints: null,
+    hidden: !!(defaultRow && defaultRow.hidden),
+    outlineLevel: 0,
+    xfIndex: null
+  };
+}
+
 function buildSheetJsProjection(workbook) {
   return {
     sheets: workbook.SheetNames.map((name) => ({
@@ -243,19 +290,9 @@ class ToolboxBiff8Pass {
         defaultRowHeight: overlaySheet.defaultRow
           ? overlaySheet.defaultRow.heightPoints
           : null,
+        defaultRowHidden: !!(overlaySheet.defaultRow && overlaySheet.defaultRow.hidden),
         customHeight: !!(overlaySheet.defaultRow && overlaySheet.defaultRow.customHeight),
-        columns: overlaySheet.columns.map((column) => ({
-          minColumnIndex: column.firstColumn,
-          maxColumnIndex: column.lastColumn,
-          width: column.widthCharacters,
-          hidden: column.hidden,
-          outlineLevel: column.outlineLevel,
-          sourceStyleId: column.xfIndex,
-          effectiveStyleRef: this.sourceRegistry.compoundRef(
-            this.sourceRegistry.styleRefForXf(column.xfIndex)
-          ),
-          customWidth: column.userSet
-        })),
+        columns: buildBiff8ColumnLayout(overlaySheet, this.sourceRegistry),
         sourceRegistryId: this.sourceRegistryId,
         sourceFile: this.filePath,
         themeColors: this.overlay.themeColorsArgb || {}
@@ -279,15 +316,11 @@ class ToolboxBiff8Pass {
       let explicitCellCount = 0;
       let maxColumnIndex = -1;
       for (const rowIndex of logicalRowIndexes) {
-        const overlayRow = explicitRowsByIndex.get(rowIndex) || {
-          row: rowIndex,
-          formatted: false,
-          customHeight: false,
-          heightPoints: null,
-          hidden: false,
-          outlineLevel: 0,
-          xfIndex: null
-        };
+        const overlayRow = resolveBiff8RowForOutput(
+          explicitRowsByIndex.get(rowIndex),
+          overlaySheet.defaultRow,
+          rowIndex
+        );
         if (options.cancelToken && options.cancelToken.cancelled) {
           const error = new Error('工具箱 BIFF8 处理已取消');
           error.name = 'ToolboxBiff8CancelledError';
@@ -423,9 +456,11 @@ module.exports = {
   assertBiff8ValueFormatsMatch,
   assertSheetStatesMatch,
   buildLegacyMatchMatrix,
+  buildBiff8ColumnLayout,
   buildSheetJsProjection,
   createBiff8SourceRegistry,
   decodeSheetJsCell,
   openToolboxBiff8Pass,
+  resolveBiff8RowForOutput,
   sheetStateFromHidden
 };

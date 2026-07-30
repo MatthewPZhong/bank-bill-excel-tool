@@ -51,6 +51,7 @@ const WORKSHEET_CONSUMED_ATTRIBUTES = Object.freeze({
   sheetFormatPr: Object.freeze([
     'defaultColWidth',
     'defaultRowHeight',
+    'zeroHeight',
     'customHeight'
   ]),
   col: Object.freeze([
@@ -524,6 +525,7 @@ async function scanXlsxSheet(options = {}) {
   const columns = [];
   let defaultColWidth = null;
   let defaultRowHeight = null;
+  let defaultRowHidden = false;
   let customHeight = false;
   let sheetMeta = null;
   let sheetMetaEmitted = false;
@@ -588,6 +590,7 @@ async function scanXlsxSheet(options = {}) {
       date1904,
       defaultColWidth,
       defaultRowHeight,
+      defaultRowHidden,
       customHeight,
       columns,
       sourceRegistryId: sourceRegistry.sourceRegistryId,
@@ -900,6 +903,7 @@ async function scanXlsxSheet(options = {}) {
         'defaultRowHeight',
         { sourceFile, sheetName }
       );
+      defaultRowHidden = parseBoolean(attrs.zeroheight);
       customHeight = parseBoolean(attrs.customheight);
       return;
     }

@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.2 |
-| 扫描时间 | 2026-7-30 03:41:32 |
+| 扫描时间 | 2026-7-30 05:42:32 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 240 |
-| 顶层声明总数 | 3026 |
-| ≥2 次引用 | 2882 |
+| 顶层声明总数 | 3031 |
+| ≥2 次引用 | 2887 |
 | 跨 ≥3 文件 (A-share) | 410 |
 | 跨 2 文件 (A-pair) | 704 |
-| 单文件 (A-local) | 1768 |
+| 单文件 (A-local) | 1773 |
 | 跨文件合计 (B) | 1114 |
 
 ---
@@ -58,7 +58,7 @@
 | `makeModificationCollector` | 9 | 18 | 1 | src/main-process/scenario-engines/engine-utils.js |
 | `saveMappings` | 9 | 17 | 2 | src/backend/database/fund-transfer-account-mapping-repository.js |
 | `insertRun` | 9 | 13 | 4 | src/backend/acquiring-bill-currency-db/run-repository.js |
-| `fail` | 8 | 204 | 2 | src/backend/toolbox-format/biff8-overlay.js |
+| `fail` | 8 | 209 | 2 | src/backend/toolbox-format/biff8-overlay.js |
 | `RUNS_TABLE` | 8 | 66 | 8 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `cancel` | 8 | 31 | 1 | src/main-process/run-check-worker-pool.js |
 | `openZipWithEntries` | 8 | 18 | 2 | src/backend/acquiring-bill-currency-import/reader.js |
@@ -1708,10 +1708,12 @@
 | `ToolboxBiff8PassError` | 6 |
 | `assertBiff8ValueFormatsMatch` | 3 |
 | `assertSheetStatesMatch` | 3 |
+| `buildBiff8ColumnLayout` | 3 |
 | `buildLegacyMatchMatrix` | 3 |
 | `buildSheetJsProjection` | 3 |
 | `createBiff8SourceRegistry` | 3 |
 | `decodeSheetJsCell` | 3 |
+| `resolveBiff8RowForOutput` | 3 |
 | `sheetStateFromHidden` | 3 |
 | `ToolboxBiff8Pass` | 3 |
 
@@ -1719,8 +1721,8 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `RECORD` | 62 |
-| `requireLength` | 18 |
+| `RECORD` | 63 |
+| `requireLength` | 19 |
 | `requireMinimumLength` | 12 |
 | `readCursorByte` | 11 |
 | `makeCell` | 9 |
@@ -1847,7 +1849,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `parseBoolean` | 6 |
+| `parseBoolean` | 7 |
 | `parseInteger` | 6 |
 | `parsePositiveLayoutNumber` | 5 |
 | `columnLettersToIndex` | 3 |
@@ -2974,7 +2976,7 @@
 
 | 名字 | 总次数 |
 |---|---:|
-| `ToolboxOutputValidationError` | 17 |
+| `ToolboxOutputValidationError` | 19 |
 | `resolveSourceStyle` | 10 |
 | `DEFAULT_STYLE_BUDGETS` | 8 |
 | `stripNullish` | 8 |
@@ -2986,6 +2988,7 @@
 | `createSheetAndHeader` | 3 |
 | `createToolboxWarningCollector` | 3 |
 | `defaultProjectCell` | 3 |
+| `EXCELJS_ZERO_HEIGHT_PATCH` | 3 |
 | `prepareExcelTextValue` | 3 |
 | `sha256File` | 3 |
 | `sheetPropertiesFromLayout` | 3 |
@@ -3164,7 +3167,7 @@
 | `makeModificationCollector` | 9 | 18 | 1 | src/main-process/scenario-engines/c1-extract-recon-id.js(2), src/main-process/scenario-engines/c2-offset-bill-mark.js(2), src/main-process/scenario-engines/c3-gateway-recon-join.js(2) |
 | `saveMappings` | 9 | 17 | 2 | src/backend/database.js(3), src/renderer-dialogs.js(3), src/backend/database/fund-transfer-account-mapping-repository.js(2) |
 | `insertRun` | 9 | 13 | 4 | src/backend/acquiring-bill-currency-db/run-repository.js(2), src/backend/bank-bu-recon-db/run-repository.js(2), src/backend/biz-op-recon-db/run-repository.js(2) |
-| `fail` | 8 | 204 | 2 | src/backend/toolbox-format/biff8-records.js(122), src/backend/toolbox-format/biff8-overlay.js(35), src/main-process/toolbox-output-writer.js(17) |
+| `fail` | 8 | 209 | 2 | src/backend/toolbox-format/biff8-records.js(127), src/backend/toolbox-format/biff8-overlay.js(35), src/main-process/toolbox-output-writer.js(17) |
 | `RUNS_TABLE` | 8 | 66 | 8 | src/backend/acquiring-bill-currency-db/run-repository.js(15), src/backend/biz-op-recon-db/run-repository.js(11), src/main-process/bank-bu-recon-run-data.js(9) |
 | `cancel` | 8 | 31 | 1 | src/renderer-position-reconciliation.js(12), src/backend/big-table-import/pipeline.js(4), src/renderer-dialogs.js(4) |
 | `openZipWithEntries` | 8 | 18 | 2 | src/backend/acquiring-bill-currency-import/reader.js(4), src/backend/toolbox-xlsx-stream/multi-sheet-reader.js(3), src/main-process/duplicate-inbound-match/document-statement-reader.js(3) |

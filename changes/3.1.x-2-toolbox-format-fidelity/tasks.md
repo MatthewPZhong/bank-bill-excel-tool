@@ -26,6 +26,7 @@
 - [x] SheetJS 值层与 overlay 的 Sheet/坐标/XF 严格对齐
 - [x] MsoCrc32Compute、CellXF/StyleXF 扩展标志及真实资产 CRC 校验
 - [x] 低编号 FORMAT 分区、Date1904/id60、压缩 Font、非有限 numeric/formula/RK 与 BoolErr/special cache 值域
+- [x] 唯一 Dimensions 半开区间、Row reserved 位、LibreOffice ColInfo 256 哨兵与 BIFF8 最大行列边界
 
 完成证据：真实资产、record fixture、损坏/加密/错位 fail-closed 测试。
 
@@ -35,6 +36,7 @@
 - [x] 来源值类型、样式、行列布局
 - [x] 样式缓存/预算、写后直属结构及 projected/actual count 复核、warning summary
 - [x] ST_Xstring 安全编码、32,767 UTF-16 文本上限、非字符/代理项拒绝与非有限输出兜底
+- [x] BIFF8 零宽列、零默认高度和默认隐藏行的等价 OOXML 投影
 
 完成证据：XLSX 回读与 XML 计数、分页、abort、超预算测试。
 

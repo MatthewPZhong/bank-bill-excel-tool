@@ -30,6 +30,9 @@ const DEFAULT_STYLE_BUDGETS = Object.freeze({
   customNumFmts: 180
 });
 const WARNING_SAMPLE_LIMIT = 20;
+const EXCELJS_ZERO_HEIGHT_PATCH = Symbol.for(
+  'bank-bill-excel-tool.toolbox.exceljs-zero-height'
+);
 
 class ToolboxOutputValidationError extends Error {
   constructor(message, detailLines = []) {
@@ -37,6 +40,72 @@ class ToolboxOutputValidationError extends Error {
     this.name = 'ToolboxOutputValidationError';
     this.detailLines = Array.isArray(detailLines) ? detailLines.slice() : [];
   }
+}
+
+function installExcelJsZeroHeightSupport() {
+  // ExcelJS 4.4 的 streaming writer 没有透传 sheetFormatPr.zeroHeight。
+  // 只在本工具确实需要输出 BIFF8 默认隐藏行时补这一条属性；普通工作簿继续走原实现。
+  // package-lock 锁定了该内部入口，若后续升级 ExcelJS 改掉私有契约，应明确失败并由测试暴露。
+  let WorksheetWriter;
+  let XmlStream;
+  try {
+    // eslint-disable-next-line global-require
+    WorksheetWriter = require('exceljs/lib/stream/xlsx/worksheet-writer');
+    // eslint-disable-next-line global-require
+    XmlStream = require('exceljs/lib/utils/xml-stream');
+  } catch (cause) {
+    const error = new ToolboxOutputValidationError(
+      '当前 Excel 写入组件无法保留默认隐藏行，请升级后重试'
+    );
+    error.cause = cause;
+    throw error;
+  }
+  const prototype = WorksheetWriter && WorksheetWriter.prototype;
+  if (!prototype || typeof prototype._writeSheetFormatProperties !== 'function') {
+    throw new ToolboxOutputValidationError(
+      '当前 Excel 写入组件无法保留默认隐藏行，请升级后重试'
+    );
+  }
+  if (prototype[EXCELJS_ZERO_HEIGHT_PATCH]) return;
+
+  const original = prototype._writeSheetFormatProperties;
+  Object.defineProperty(prototype, EXCELJS_ZERO_HEIGHT_PATCH, {
+    value: true,
+    configurable: false,
+    enumerable: false,
+    writable: false
+  });
+  prototype._writeSheetFormatProperties = function writeToolboxSheetFormat(
+    xmlBuffer,
+    properties
+  ) {
+    if (!properties || properties.zeroHeight !== true) {
+      return original.call(this, xmlBuffer, properties);
+    }
+    const model = {
+      defaultRowHeight: properties.defaultRowHeight,
+      dyDescent: properties.dyDescent,
+      outlineLevelCol: properties.outlineLevelCol,
+      outlineLevelRow: properties.outlineLevelRow
+    };
+    if (properties.defaultColWidth) model.defaultColWidth = properties.defaultColWidth;
+
+    const attributes = {
+      defaultRowHeight: model.defaultRowHeight,
+      outlineLevelRow: model.outlineLevelRow,
+      outlineLevelCol: model.outlineLevelCol,
+      'x14ac:dyDescent': model.dyDescent,
+      zeroHeight: '1'
+    };
+    if (model.defaultColWidth) attributes.defaultColWidth = model.defaultColWidth;
+    if (!model.defaultRowHeight || model.defaultRowHeight !== 15) {
+      attributes.customHeight = '1';
+    }
+    const xmlStream = new XmlStream();
+    xmlStream.leafNode('sheetFormatPr', attributes);
+    xmlBuffer.addText(xmlStream.xml);
+    return undefined;
+  };
 }
 
 function columnName(columnIndex) {
@@ -249,7 +318,18 @@ function sheetPropertiesFromLayout(layoutBaseline) {
   if (Number.isFinite(Number(meta.defaultColWidth)) && Number(meta.defaultColWidth) > 0) {
     properties.defaultColWidth = Number(meta.defaultColWidth);
   }
-  if (Number.isFinite(Number(meta.defaultRowHeight)) && Number(meta.defaultRowHeight) > 0) {
+  const hasDefaultRowHeight = meta.defaultRowHeight !== null
+    && meta.defaultRowHeight !== undefined
+    && meta.defaultRowHeight !== ''
+    && Number.isFinite(Number(meta.defaultRowHeight));
+  if (meta.defaultRowHidden === true) {
+    const sourceHeight = hasDefaultRowHeight ? Number(meta.defaultRowHeight) : null;
+    const defaultRowHeight = sourceHeight !== null && sourceHeight > 0 ? sourceHeight : 15;
+    properties.defaultRowHeight = meta.customHeight === true && defaultRowHeight === 15
+      ? '15'
+      : defaultRowHeight;
+    properties.zeroHeight = true;
+  } else if (hasDefaultRowHeight && Number(meta.defaultRowHeight) > 0) {
     const defaultRowHeight = Number(meta.defaultRowHeight);
     // ExcelJS 以严格数字 15 判断是否输出 customHeight。来源显式 customHeight=1 且高度恰好
     // 为 15 时传等价字符串，既保持数值又让 OOXML 保留 customHeight 语义。
@@ -286,7 +366,8 @@ function applySheetLayout(worksheet, layoutBaseline, sourceRegistryResolver) {
         delete column.width;
       }
       // OOXML 允许范围重叠且后声明覆盖前声明；false/0 也必须能清掉早先范围。
-      column.hidden = range.hidden === true;
+      column.hidden = range.hidden === true
+        || (Number.isFinite(range.width) && Number(range.width) === 0);
       column.outlineLevel = Number.isInteger(Number(range.outlineLevel))
         ? Math.max(0, Number(range.outlineLevel))
         : 0;
@@ -768,6 +849,10 @@ function createToolboxOutputWriter({
     );
   }
 
+  // 私有兼容契约必须在创建文件流前完成；安装失败时不得留下半文件或打开句柄。
+  if (layoutBaseline && layoutBaseline.defaultRowHidden === true) {
+    installExcelJsZeroHeightSupport();
+  }
   const writer = new ExcelJS.stream.xlsx.WorkbookWriter({
     filename: savePath,
     useStyles: true,

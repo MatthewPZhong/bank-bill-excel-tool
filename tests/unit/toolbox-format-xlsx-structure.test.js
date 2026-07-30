@@ -236,6 +236,10 @@ test('工作表整数、数值和布尔属性使用严格 OOXML 词法，不把�
     {
       xml: '<worksheet><sheetData><row r="1" hidden="maybe"/></sheetData></worksheet>',
       message: /布尔属性/
+    },
+    {
+      xml: '<worksheet><sheetFormatPr zeroHeight="maybe"/><sheetData/></worksheet>',
+      message: /布尔属性/
     }
   ];
 
@@ -314,7 +318,8 @@ test('合法 SpreadsheetML namespace 前缀保持可解析，真正未知扩展�
   const namespace = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
   const { rows, summary } = await scanWorksheetXml(
     `<x:worksheet xmlns:x="${namespace}" xmlns:ext="urn:future-extension">`
-      + '<x:sheetFormatPr defaultColWidth="9" defaultRowHeight="15" customHeight="1"/>'
+      + '<x:sheetFormatPr defaultColWidth="9" defaultRowHeight="15"'
+      + ' customHeight="1" zeroHeight="1"/>'
       + '<ext:futureLayout DEFAULTCOLWIDTH="999"/>'
       + '<x:cols><x:col min="1" max="1" width="18" outlineLevel="7" customWidth="1"'
       + ' ext:R="ignored"/></x:cols>'
@@ -327,6 +332,7 @@ test('合法 SpreadsheetML namespace 前缀保持可解析，真正未知扩展�
 
   assert.equal(summary.sheetMeta.defaultColWidth, 9);
   assert.equal(summary.sheetMeta.defaultRowHeight, 15);
+  assert.equal(summary.sheetMeta.defaultRowHidden, true);
   assert.equal(summary.sheetMeta.columns[0].outlineLevel, 7);
   assert.equal(rows[0].outlineLevel, 7);
   assert.equal(rows[0].cells[0].decodedSemanticValue, 42);
@@ -404,6 +410,7 @@ test('错误单元格仅接受 Excel 合法错误码，缺值或未知错误 fai
 test('已消费整数、布尔和单元格坐标属性的显式空值不得按缺省值解释', async () => {
   const cases = [
     '<worksheet><sheetFormatPr customHeight=""/><sheetData/></worksheet>',
+    '<worksheet><sheetFormatPr zeroHeight=""/><sheetData/></worksheet>',
     '<worksheet><cols><col min="1" max="1" hidden=""/></cols><sheetData/></worksheet>',
     '<worksheet><cols><col min="1" max="1" customWidth=""/></cols><sheetData/></worksheet>',
     '<worksheet><sheetData><row r=""/></sheetData></worksheet>',

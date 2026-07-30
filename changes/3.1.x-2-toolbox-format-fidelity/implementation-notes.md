@@ -20,6 +20,10 @@
 | `XFCRC` 与 `StandardWidth/DxGCol` 纳入 BIFF8 强校验 | 真实资产含 66 个 XF，存储 CRC `0xB94F84D8` 与规范算法一致；同时含精确标准列宽 | 忽略 CRC 后盲套可能过期的 XFExt；仅用整数 DefaultColWidth | CRC/数量不符 fail-closed；精确标准宽优先 |
 | BIFF8 `.xls` 拆分扩展为多 Sheet 续页 | Spec 9.10 明确要求 `.xls` 单/多 Sheet 拆分，而既有 fallback 只读首 Sheet | 为保持旧实现而删减 `.xls` 路径矩阵 | 这是显式行为变更，需测试和版本说明 |
 | BIFF8 Cell XF 当前渲染不动态继承 parent Style XF | MS-XLS 定义 Cell XF 保存完整当前格式；used-attribute flags 表达父样式未来修改时的联动 | 按 `fAtr*=0` 把 parent 字段混回 Cell XF | parent 只做血缘合法性；grid 层按整套 Cell XF 优先级选择 |
+| BIFF8 `Dimensions` 作为唯一半开 used-range 契约校验 | 独立边界审计证明原 scanner 完全忽略 `Dimensions`，损坏范围仍会继续输出 | 继续忽略，或把 `rwMac/colMac` 当闭区间 | worksheet/macro 要求恰好一个 `Dimensions`；合法末端 65536/256，Row/cell 越界失败 |
+| LibreOffice `ColInfo.colLast=256` 只按终止哨兵兼容 | LibreOffice Excel 97 导出器会用 `8..256` 覆盖剩余列，但转回 OOXML 不产生第 257 列 | 把 256 当真实列号，或拒绝 LibreOffice 标准 BIFF8 | 解析层立即规范化为 255；其它越界继续失败，writer 上界测试锁定 256 个 OOXML 列 |
+| BIFF8 零宽/默认隐藏按可见语义等价投影 | `DefColWidth/StandardWidth/coldx=0` 与 `DefaultRowHeight hidden+0` 合法，旧 writer 的 `>0` 判断会静默改成可见 | 静默回退到默认宽高，或拒绝合法文件 | 全列默认零宽投影为 BIFF8 0..255 隐藏；默认隐藏行输出正高度 + `zeroHeight=1`，同版 reader 可再读；显式列覆盖，隐式数据行继承隐藏 |
+| 仅在 `zeroHeight` 输出路径补 ExcelJS 4.4 streaming 属性透传 | ExcelJS 公开 properties 与内部 xform 均丢弃 `zeroHeight`；提交后重写大 XLSX 会破坏流式内存目标 | 写 `defaultRowHeight=0`、整包 JSZip 重写、放弃默认隐藏 | package-lock 锁定私有入口；普通 Sheet 继续调用原方法，定向测试锁定零高度与普通路径 roundtrip |
 | 所有实际存在的 OOXML 元数据都严格解析并验证闭合 | 自审可复现截断 workbook 少处理 Sheet、截断 styles 把日期退成 General、截断 theme 串色 | 接受 SAX 已读前缀或用默认主题/样式兜底 | workbook/rels/worksheet/SST/styles/theme 任一存在但不完整即整文件失败；缺少可选 entry 才使用规范缺省 |
 | OOXML 核心 part、关系类型和单元格载荷按完整契约失败关闭 | 独立故障注入复现 `urn:evil/styles` 可冒充样式关系，以及 `inlineStr + v` 等非法组合会把实际值投影为空 | 按 local-name/URI 后缀分类，或忽略与 `t` 不一致的 payload | 只接受 Transitional/Strict 完整 namespace/Relationship Type；重复 ZIP entry、错层节点、非法 type/payload 组合整文件失败 |
 | foreign OOXML 扩展只在 workbook 直属 `extLst/ext` 内忽略 | 真实 Excel 模板含合法 `x15:workbookPr`；全局按 local-name 校验会误拒，而任意错层放行会重开 namespace spoof | 全部 foreign 同名拒绝，或全局忽略 foreign 同名 | 合法 x15 扩展可读；wrapper/sheets 错层、核心 namespace 错大小写仍 fail-closed |
@@ -45,6 +49,7 @@
 | 初始 probe 计划用等价转义规范化比较 BIFF8 numFmt | 最终改为低编号物理权威分区，并只对实际 record-defined FORMAT 的有值 cell 与 SheetJS `cell.z` 精确核对 | 宽泛规范化会隐藏真正 FORMAT 漂移；无物理 canonical built-in 又存在合法 locale 字符串差异 | 物理格式严格、canonical built-in 兼容，id 60/Date1904 与 id 14/37 均有正反测试 | 是 |
 | 初始 Spec 要求现有依赖能力门禁失败后由用户选择降级/拒绝/转换 | 用户决定 `.xls` 与 `.xlsx` 一起实现，改为自有 BIFF8 样式元数据 overlay | 格式范围不能靠现有 SheetJS 返回值完整覆盖 | 扩大 v3.1.2 工程范围与测试矩阵，不改变格式保真目标 | 是 |
 | 初始复核把 XF bit25 视为所有 XF 的 `fHasXFExt` | 按 MS-XLS 改为仅 Cell XF 双向校验；Style XF 同位是 `reserved2=0`，仍允许 XFExt | 真实 `外汇交割表.xls` 的 43 个 Style XF 扩展对应位均为 0，若全量套用会误拒 | 保留合法 Style XF 扩展并继续严格验证 CRC/index/duplicate；Cell XF 仍双向一致 | 是 |
+| 初版 BIFF8 scanner 未解析 `Dimensions`，且 writer 丢弃合法零布局 | 增加唯一 Dimensions 半开区间校验、Row reserved 校验和零布局等价投影 | 独立 BIFF8 边界审计发现损坏 used-range 会通过、零宽/默认隐藏会静默变可见 | 增加解析、writer→strict reader roundtrip 与 LibreOffice 产物回归；不改变工具箱业务值/行选择 | 是 |
 
 ## Evidence
 
@@ -68,9 +73,11 @@
 | 输出样式与拆分审计故障注入 | 临时 `styles.xml` 实际直属子节点数量必须与声明及 registry projected counts 完全一致；普通/Worker/多拆日志记录输入有效行数 | 防止伪造 count 绕过预算，以及日志只记命中行导致无法核对输入处置 |
 | 新 style-aware 30 万行性能回放 | 两个 30 万行来源合并为 60 万行、拆分命中 10 万行；总耗时 108.9s，峰值 RSS 426MB，小于 800MB；日期/数字/文本/样式/布局/21 位 ID/非科学计数全部通过 | 证明生产入口未退回整表物化，并验证行数与格式守恒 |
 | warning/审计定向回归 | renderer 展示最多 20 条并保持 `skipLogReport: true`；四类成功日志统一记录日期降级、样式预计/实际和校验通过 | 用户要求的“不标黄、不进错误报告”及发布审计 |
-| 正式 `npm run release-check` | lint PASS；smoke PASS；unit 4309/4309 PASS（270 files）；integration 2051/2051 PASS（44 scripts） | 全仓发布门禁、30 万行流式路径、合并/拆分/分页/恢复与既有功能回归 |
-| 最终重要变量扫描 | `npm run scan:vars` 成功刷新统计；`npm run check:vars -- --include-minor` 命中项均完成影响归类与对应测试复核 | 版本号 bump 与提 PR 前硬门禁；风险链路详见 PR body |
-| 独立发布门禁 review | P0=0、P1=0、P2=0、P3=0；定向 225/225 PASS，lint PASS，`git diff --check` PASS | 代码、测试、Spec/文档和格式边界独立复核 |
+| 正式 `npm run release-check` | 最新源码状态 lint PASS；smoke PASS；unit 4316/4316 PASS（270 files，日志 `logs/unit-tests/unit-20260730-053747.log`）；integration 2051/2051 PASS（44 scripts） | 全仓发布门禁、30 万行流式路径、合并/拆分/分页/恢复与既有功能回归 |
+| 最终重要变量扫描 | 最新源码状态 `npm run scan:vars` 成功刷新 240 files / 3031 top-level names；`npm run check:vars -- --include-minor` 未命中重要变量 | 版本号 bump 与提 PR 前硬门禁；扫描结果与本次源代码同状态 |
+| 独立发布门禁 review | 初次 P0=0、P1=0、P2=0、P3=0；后续 BIFF8 边界与零布局对抗 review 的 Finding、修复和最终结论在下两行保留完整血缘 | 代码、测试、Spec/文档和格式边界独立复核 |
+| BIFF8 merge 前补充边界审计 | 首轮发现 P2×2、P3×1：缺少 Dimensions 校验、合法零布局丢失、Row reserved1 未校验；另由真实 LibreOffice 文件复现 `ColInfo.colLast=256` 哨兵 | 合并前对真实生成器兼容、最大行列和隐藏布局做二次收口；修复后须重新执行全量门禁和独立 review |
+| 零布局补丁二次 review | 发现并修复 P1×1、P2×1、失败路径 P3×1：`Number(null)` 误写 0；BIFF8 hidden+0 缺 `zeroHeight`；兼容层若在文件流创建后安装失败会残留半文件。交叉空 Dimensions 的 P3 因无规范 MUST 已撤回，未扩大拒绝范围。最终独立复审 P0=0、P1=0、P2=0、P3=0；定向 65/65、工具箱矩阵 285/285、完整 release-check 均通过 | 显式判缺失；统一传递 `defaultRowHidden`；输出正高度 + `zeroHeight=1`；兼容层在创建文件流前安装并包装错误；writer→strict reader、默认隐藏下显式可见行和普通路径均有回归 |
 
 ## Remaining Unknowns
 

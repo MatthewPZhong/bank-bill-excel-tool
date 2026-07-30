@@ -19,14 +19,14 @@ v3.1.2 修复工具箱合并/拆分后日期变数字、长编号变科学计数
 - 超过 Excel 安全精度的整数、科学计数词法和前导零标识符安全转成文本，避免近似值与科学计数法；字段扫描和导出使用同一匹配投影，保证 UI 中出现的值可以重新命中。
 - 统一处理 1900/1904 日期系统、内置/自定义日期格式、纯时间和 `t=d`。无法安全转换的日期保留原文本，在成功弹框显示总数及最多 20 条样例；提示不标黄、不进入错误报告。
 - 文件类型按 magic 识别：ZIP OOXML、OLE/CFB BIFF8、CSV 可混合使用，扩展名伪装不会让合并与拆分走不同 reader。标准 `.xls` 的 XF、Theme/XFExt、palette、布局与值层先严格对齐，再输出 `.xlsx`。
-- workbook/rels/worksheet/sharedStrings/styles/theme 与 BIFF8 records/XFCRC/XFExt 全部失败关闭；截断、重复、错位、越界、CRC 不符或未知必需颜色不会产出部分结果或默认黑白样式。
+- workbook/rels/worksheet/sharedStrings/styles/theme 与 BIFF8 records/XFCRC/XFExt 全部失败关闭；BIFF8 `Dimensions` 按 65536 行 / 256 列的半开边界核对 Row/cell。截断、重复、错位、越界、CRC 不符或未知必需颜色不会产出部分结果或默认黑白样式。
 - 输出样式按最终签名去重并执行组件预算；临时文件发布前校验结构、实际样式数量、大小和摘要。活动日志保存预计/实际样式数、校验结果、日期降级计数和有界样例。
 - 单/多文件输出均先整批生成、校验，再通过 staging、journal 和恢复索引发布。覆盖中断会自动恢复旧文件；无法自动恢复时返回明确人工恢复路径。
 - 30 万行级低样式文件保持流式处理；Worker 只传控制消息。路径矩阵覆盖 XLSX/BIFF8/CSV 的合并、单拆、多拆、分页、行数与顺序守恒。
 
 **兼容与人工门禁**
 
-- `.xls` 仅支持未加密的标准 OLE/CFB BIFF8；BIFF2–5、加密、损坏和 XML Spreadsheet 2003 伪装文件明确拒绝并提示另存。CSV 没有来源样式，继续按文本值输出。
+- `.xls` 仅支持未加密的标准 OLE/CFB BIFF8；兼容 LibreOffice 全列 `ColInfo` 终止哨兵，并把零宽/默认隐藏布局转换成可再次导入的等价 OOXML，不写零默认行高且不生成第 257 列。BIFF2–5、加密、损坏和 XML Spreadsheet 2003 伪装文件明确拒绝并提示另存。CSV 没有来源样式，继续按文本值输出。
 - 资金对账、平盘、模板映射、存档及既有拆分分组语义不变。
 - 用真实或脱敏 `.xlsx`/`.xls` 在 Windows Excel/WPS 中核对日期、长账号、颜色、边框、行列布局和行数；自动测试不能替代人工账单复核。
 

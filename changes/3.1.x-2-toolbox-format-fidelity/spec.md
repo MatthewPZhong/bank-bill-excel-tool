@@ -295,7 +295,7 @@ BIFF8 元数据层至少解析并建立边界校验：
 
 - global 与 worksheet `BOF/EOF`、`BoundSheet8`、`Date1904`、`CodePage`；
 - `Format`、`Font`、`Palette`、`XF`、`XFCRC`、`XFExt`、`Theme`；
-- `DefaultRowHeight`、`DefaultColWidth`、`StandardWidth/DxGCol`、`ColInfo`、`Row`；
+- `Dimensions`、`DefaultRowHeight`、`DefaultColWidth`、`StandardWidth/DxGCol`、`ColInfo`、`Row`；
 - `Blank`、`MulBlank`、`Number`、`RK`、`MulRK`、`Label`、`LabelSst`、`RString`、`BoolErr`、`Formula` 等带 XF 的 cell record；
 - BIFF logical record 的 `Continue` 拼接和字符串边界；
 - 文件加密标记、记录长度、worksheet offset 和 CFB stream 边界。
@@ -303,6 +303,9 @@ BIFF8 元数据层至少解析并建立边界校验：
 - `fHasXFExt` 只属于 Cell XF，必须与该 Cell XF 的实际 `XFExt` 双向一致；Style XF 的同一 bit 是 `reserved2`，必须为 0，但 Style XF 仍可按规范拥有 `XFExt`。不得把 Cell XF 规则误套给 Style XF 并拒绝合法文件。
 - BIFF8 `Format` 的低编号物理权威区间固定为 `5–8`、`23–26`、`41–44`、`50+`；其余 `0–49` canonical built-in 受到保护，冲突记录整文件失败。只有实际存在物理 `Format` 的有值单元格需要与 SheetJS `cell.z` 精确一致，未声明物理格式的 id 14/37 等 locale 表示差异不得误拒。
 - `Number`、`Formula` numeric cache、`RK/MulRK` 的 `NaN/±Infinity` 必须失败；Formula special cache 与 `BoolErr` 的类型、reserved bytes、boolean/error 值域必须按 BIFF8 契约校验。`Font` 的压缩/未压缩 `ShortXLUnicodeString` 都必须按 flag 和边界解析。
+- worksheet/macro Sheet 必须恰好包含一个 14-byte `Dimensions`。其行列范围按半开区间 `[rwMic,rwMac)` / `[colMic,colMac)` 解释，合法最大末端分别是 `65536` / `256`，空 Sheet 可为 `0,0,0,0`；reserved 非零、缺失、重复、反向或 Row/cell 超出范围均整文件失败。`Dimensions` 不限制只描述列布局的 `ColInfo`。
+- `Row.reserved1` 和其它 reserved 位必须符合 BIFF8 契约，非零不得继续输出。
+- 为兼容 LibreOffice 的 Excel 97 导出器，`ColInfo.colLast=256` 只作为“延伸到 BIFF8 最后一列”的终止哨兵接受，并在解析层立即规范化为闭区间末列 `255`；`firstColumn=256`、`colLast>256`、反向范围仍失败，任何下游输出不得创建第 257 列。
 
 样式映射固定覆盖：
 
@@ -314,6 +317,7 @@ BIFF8 元数据层至少解析并建立边界校验：
 - grid 层按“显式 cell Cell XF → row 自定义 Cell XF → column Cell XF → workbook 默认 Cell XF”选择整套 XF；parent Style XF 只做合法性/血缘校验；
 - 行高、行隐藏/outline、列宽、列隐藏/outline；
 - `StandardWidth/DxGCol` 存在且有效时作为无 `ColInfo` 列的精确默认宽度，否则回退 `DefaultColWidth`；
+- 合法的零宽列和 `DefaultRowHeight.fDyZero=1 + height=0` 不得因 falsy 判断回落为可见默认布局。OOXML 无法直接表达 BIFF8 `defaultColWidth=0` 时，统一等价投影为 BIFF8 全列 `0..255` 隐藏，再按后续显式 `ColInfo` 覆盖；显式 `coldx=0` 同样输出为隐藏列。默认隐藏行使用正数 `defaultRowHeight`（来源为 0 时取 15）+ `zeroHeight=1` 表达，禁止写出同版严格 reader 会拒绝的 `defaultRowHeight=0`；XLSX reader/统一模型必须继续识别该属性，隐式数据行继承默认隐藏状态。输出列上界仍固定为 BIFF8 第 256 列。
 - 1900/1904 日期系统和公式缓存值。
 
 输入边界：

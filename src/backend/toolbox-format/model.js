@@ -111,6 +111,7 @@ function createToolboxSheetMeta(input = {}) {
     date1904: !!input.date1904,
     defaultColWidth: Number.isFinite(input.defaultColWidth) ? input.defaultColWidth : null,
     defaultRowHeight: Number.isFinite(input.defaultRowHeight) ? input.defaultRowHeight : null,
+    defaultRowHidden: !!input.defaultRowHidden,
     customHeight: !!input.customHeight,
     columns: Object.freeze(columns),
     logicalHeaderRowIndex: Number.isInteger(input.logicalHeaderRowIndex)

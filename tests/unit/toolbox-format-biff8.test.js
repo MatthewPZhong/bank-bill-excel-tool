@@ -209,7 +209,7 @@ function rowRecord(rowIndex, { formatted = false, xfIndex = 0, hidden = false } 
   const payload = Buffer.alloc(16);
   payload.writeUInt16LE(rowIndex, 0);
   payload.writeUInt16LE(0, 2);
-  payload.writeUInt16LE(12, 4);
+  payload.writeUInt16LE(4, 4);
   payload.writeUInt16LE(formatted ? 400 : 300, 6);
   payload[12] = (rowIndex === 0 ? 0x11 : 0)
     | (hidden ? 0x20 : 0)
@@ -228,6 +228,22 @@ function colInfo(first, last, xfIndex) {
   payload.writeUInt16LE(xfIndex, 6);
   payload.writeUInt16LE(0x1207, 8);
   return record(RECORD.COL_INFO, payload);
+}
+
+function dimensions({
+  firstRow = 0,
+  lastRowExclusive = 4,
+  firstColumn = 0,
+  lastColumnExclusive = 4,
+  reserved = 0
+} = {}) {
+  const payload = Buffer.alloc(14);
+  payload.writeUInt32LE(firstRow, 0);
+  payload.writeUInt32LE(lastRowExclusive, 4);
+  payload.writeUInt16LE(firstColumn, 8);
+  payload.writeUInt16LE(lastColumnExclusive, 10);
+  payload.writeUInt16LE(reserved, 12);
+  return record(RECORD.DIMENSIONS, payload);
 }
 
 function blank(row, column, xfIndex) {
@@ -339,32 +355,45 @@ async function themeRecord() {
   ]);
 }
 
-function makeSheet() {
+function makeSheet({
+  includeDimensions = true,
+  duplicateDimensions = false,
+  dimensionsOptions = {},
+  emptySheet = false,
+  colInfoFirst = 0,
+  colInfoLast = 1
+} = {}) {
   const defaultRow = Buffer.alloc(4);
   defaultRow.writeUInt16LE(1, 0);
   defaultRow.writeInt16LE(300, 2);
   return Buffer.concat([
     bof(0x0010),
+    ...(includeDimensions ? [
+      dimensions(dimensionsOptions),
+      ...(duplicateDimensions ? [dimensions(dimensionsOptions)] : [])
+    ] : []),
     record(RECORD.DEFAULT_ROW_HEIGHT, defaultRow),
     record(RECORD.DEF_COL_WIDTH, uint16(10)),
     record(RECORD.STANDARD_WIDTH, uint16(12 * 256)),
-    colInfo(0, 1, 3),
-    rowRecord(0, { formatted: true, xfIndex: 2, hidden: true }),
-    blank(0, 0, 1),
-    mulBlank(0, 1, [1, 1]),
-    rowRecord(1),
-    number(1, 0, 1),
-    rk(1, 1, 1),
-    mulRk(1, 2, [1, 1]),
-    rowRecord(2),
-    label(RECORD.LABEL, 2, 0, 1, 'Label'),
-    labelSst(2, 1, 1),
-    label(RECORD.RSTRING, 2, 2, 1, 'Rich'),
-    boolErr(2, 3, 1),
-    rowRecord(3),
-    formula(3, 0, 1),
-    formula(3, 1, 1, true),
-    continuedString('缓存'),
+    colInfo(colInfoFirst, colInfoLast, 3),
+    ...(emptySheet ? [] : [
+      rowRecord(0, { formatted: true, xfIndex: 2, hidden: true }),
+      blank(0, 0, 1),
+      mulBlank(0, 1, [1, 1]),
+      rowRecord(1),
+      number(1, 0, 1),
+      rk(1, 1, 1),
+      mulRk(1, 2, [1, 1]),
+      rowRecord(2),
+      label(RECORD.LABEL, 2, 0, 1, 'Label'),
+      labelSst(2, 1, 1),
+      label(RECORD.RSTRING, 2, 2, 1, 'Rich'),
+      boolErr(2, 3, 1),
+      rowRecord(3),
+      formula(3, 0, 1),
+      formula(3, 1, 1, true),
+      continuedString('缓存')
+    ]),
     record(RECORD.EOF)
   ]);
 }
@@ -388,7 +417,8 @@ async function makeWorkbookStream(options = {}) {
     includeCustomFormat = true,
     additionalFormats = [],
     primaryCellNumFmtId = customFormatId,
-    compressedBaseFont = false
+    compressedBaseFont = false,
+    sheetOptions = {}
   } = options;
   const cellXfExtFlag = options.cellXfExtFlag == null
     ? (includeXfExt && xfExtIndex === 1)
@@ -468,7 +498,7 @@ async function makeWorkbookStream(options = {}) {
     theme
   ];
   const placeholderGlobal = Buffer.concat([...fixedGlobals, boundSheet(0), record(RECORD.EOF)]);
-  const sheet = makeSheet();
+  const sheet = makeSheet(sheetOptions);
   const sheetOffset = badBoundSheetOffset ? placeholderGlobal.length + 1 : placeholderGlobal.length;
   const globals = Buffer.concat([...fixedGlobals, boundSheet(sheetOffset), record(RECORD.EOF)]);
   return Buffer.concat([globals, sheet]);
@@ -531,6 +561,15 @@ test('BIFF8 record scanner 覆盖 globals、布局和全部带 XF cell records',
   assert.deepEqual(scanned.palette, ['123456']);
   assert.equal(scanned.sheets.length, 1);
   const sheet = scanned.sheets[0];
+  assert.deepEqual(
+    {
+      firstRow: sheet.dimensions.firstRow,
+      lastRowExclusive: sheet.dimensions.lastRowExclusive,
+      firstColumn: sheet.dimensions.firstColumn,
+      lastColumnExclusive: sheet.dimensions.lastColumnExclusive
+    },
+    { firstRow: 0, lastRowExclusive: 4, firstColumn: 0, lastColumnExclusive: 4 }
+  );
   assert.equal(sheet.defaultRow.heightPoints, 15);
   assert.equal(sheet.defaultRow.customHeight, true);
   assert.equal(sheet.defaultColumnWidth, 12);
@@ -545,6 +584,161 @@ test('BIFF8 record scanner 覆盖 globals、布局和全部带 XF cell records',
   );
   assert.equal(sheet.cells.length, 13);
   assert.equal(sheet.cells.filter((cell) => cell.explicitBlank).length, 3);
+});
+
+test('BIFF8 Dimensions 必须唯一完整，并以半开区间校验最大边界、Row 与 cell table', async () => {
+  const maximum = scanBiff8WorkbookStream(await makeWorkbookStream({
+    sheetOptions: {
+      dimensionsOptions: {
+        firstRow: 0,
+        lastRowExclusive: 65536,
+        firstColumn: 0,
+        lastColumnExclusive: 256
+      }
+    }
+  }));
+  assert.equal(maximum.sheets[0].dimensions.lastRowExclusive, 65536);
+  assert.equal(maximum.sheets[0].dimensions.lastColumnExclusive, 256);
+
+  const empty = scanBiff8WorkbookStream(await makeWorkbookStream({
+    sheetOptions: {
+      emptySheet: true,
+      colInfoFirst: 0,
+      colInfoLast: 256,
+      dimensionsOptions: {
+        firstRow: 0,
+        lastRowExclusive: 0,
+        firstColumn: 0,
+        lastColumnExclusive: 0
+      }
+    }
+  }));
+  assert.equal(empty.sheets[0].rows.length, 0);
+  assert.equal(empty.sheets[0].cells.length, 0);
+  assert.equal(empty.sheets[0].columns[0].lastColumn, 255);
+
+  for (const { options, code } of [
+    {
+      options: { sheetOptions: { includeDimensions: false } },
+      code: 'BIFF8_MISSING_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { duplicateDimensions: true } },
+      code: 'BIFF8_DUPLICATE_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { lastRowExclusive: 65537 } } },
+      code: 'BIFF8_INVALID_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { lastColumnExclusive: 257 } } },
+      code: 'BIFF8_INVALID_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { reserved: 1 } } },
+      code: 'BIFF8_INVALID_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { firstRow: 5, lastRowExclusive: 4 } } },
+      code: 'BIFF8_INVALID_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { lastRowExclusive: 3 } } },
+      code: 'BIFF8_ROW_OUTSIDE_DIMENSIONS'
+    },
+    {
+      options: { sheetOptions: { dimensionsOptions: { lastColumnExclusive: 3 } } },
+      code: 'BIFF8_ROW_OUTSIDE_DIMENSIONS'
+    }
+  ]) {
+    const invalid = await makeWorkbookStream(options);
+    assert.throws(
+      () => scanBiff8WorkbookStream(invalid),
+      (error) => error.code === code
+    );
+  }
+});
+
+test('BIFF8 Row reserved1 非零必须失败关闭', async () => {
+  const invalid = mutateLogicalRecord(
+    await makeWorkbookStream(),
+    RECORD.ROW,
+    0,
+    (payload) => payload.writeUInt16LE(7, 8)
+  );
+  assert.throws(
+    () => scanBiff8WorkbookStream(invalid),
+    (error) => error.code === 'BIFF8_INVALID_ROW_FLAGS'
+  );
+});
+
+test('BIFF8 合法零宽与默认隐藏零高度不得在解析层丢失', async () => {
+  let stream = await makeWorkbookStream();
+  stream = mutateLogicalRecord(stream, RECORD.DEFAULT_ROW_HEIGHT, 0, (payload) => {
+    payload.writeUInt16LE(0x0003, 0);
+    payload.writeInt16LE(0, 2);
+  });
+  stream = mutateLogicalRecord(stream, RECORD.DEF_COL_WIDTH, 0, (payload) => {
+    payload.writeUInt16LE(0, 0);
+  });
+  stream = mutateLogicalRecord(stream, RECORD.STANDARD_WIDTH, 0, (payload) => {
+    payload.writeUInt16LE(0, 0);
+  });
+  stream = mutateLogicalRecord(stream, RECORD.COL_INFO, 0, (payload) => {
+    payload.writeUInt16LE(0, 4);
+  });
+  const scanned = scanBiff8WorkbookStream(stream);
+  const sheet = scanned.sheets[0];
+  assert.equal(sheet.defaultRow.hidden, true);
+  assert.equal(sheet.defaultRow.heightTwips, 0);
+  assert.equal(sheet.defaultRow.heightPoints, 0);
+  assert.equal(sheet.defColWidth, 0);
+  assert.equal(sheet.standardWidth, 0);
+  assert.equal(sheet.defaultColumnWidth, 0);
+  assert.equal(sheet.columns[0].widthCharacters, 0);
+});
+
+test('LibreOffice ColInfo 末列 256 哨兵收口为 BIFF8 最后一列，越界仍失败关闭', async () => {
+  const sentinelStream = mutateLogicalRecord(
+    await makeWorkbookStream(),
+    RECORD.COL_INFO,
+    0,
+    (payload) => payload.writeUInt16LE(256, 2)
+  );
+  const sentinelScan = scanBiff8WorkbookStream(sentinelStream);
+  const column = sentinelScan.sheets[0].columns[0];
+  assert.equal(column.firstColumn, 0);
+  assert.equal(column.lastColumn, 255);
+  assert.equal(column.rawLastColumn, 256);
+  assert.equal(column.endSentinelNormalized, true);
+
+  const fixture = wrapCfb(sentinelStream);
+  const resolver = createBiff8GridResolver(await readBiff8Overlay(fixture));
+  assert.doesNotThrow(() => resolver.resolve(0, 0, 255));
+  assert.throws(
+    () => resolver.resolve(0, 0, 256),
+    (error) => error.code === 'BIFF8_INVALID_GRID_COORDINATE'
+  );
+
+  for (const { first, last } of [
+    { first: 256, last: 256 },
+    { first: 0, last: 257 },
+    { first: 9, last: 8 }
+  ]) {
+    const invalid = mutateLogicalRecord(
+      await makeWorkbookStream(),
+      RECORD.COL_INFO,
+      0,
+      (payload) => {
+        payload.writeUInt16LE(first, 0);
+        payload.writeUInt16LE(last, 2);
+      }
+    );
+    assert.throws(
+      () => scanBiff8WorkbookStream(invalid),
+      (error) => error.code === 'BIFF8_INVALID_COLUMN_RANGE'
+    );
+  }
 });
 
 test('BIFF8 Format 以物理记录覆盖允许的低位范围，保护 canonical built-in，id 164 保持可用', async () => {

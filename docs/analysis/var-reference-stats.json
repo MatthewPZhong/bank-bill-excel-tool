@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.2",
-    "scannedAt": "2026-07-30T07:41:32.603Z",
+    "scannedAt": "2026-07-30T09:42:32.310Z",
     "root": "src",
     "totalFiles": 240,
-    "totalTopLevelNames": 3026,
+    "totalTopLevelNames": 3031,
     "buckets": {
       "shared": 410,
       "paired": 704,
-      "local": 1768,
+      "local": 1773,
       "crossFile": 1114
     }
   },
@@ -3555,7 +3555,7 @@
           },
           {
             "file": "src/backend/toolbox-format/biff8-records.js",
-            "count": 122
+            "count": 127
           },
           {
             "file": "src/backend/toolbox-format/xlsx-pass.js",
@@ -3574,7 +3574,7 @@
             "count": 17
           }
         ],
-        "totalHits": 204,
+        "totalHits": 209,
         "fileSpan": 8
       },
       {
@@ -26435,10 +26435,10 @@
         "refFiles": [
           {
             "file": "src/backend/toolbox-format/biff8-records.js",
-            "count": 62
+            "count": 63
           }
         ],
-        "totalHits": 62,
+        "totalHits": 63,
         "fileSpan": 1
       },
       {
@@ -26764,6 +26764,20 @@
         "fileSpan": 1
       },
       {
+        "name": "requireLength",
+        "defFiles": [
+          "src/backend/toolbox-format/biff8-records.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/biff8-records.js",
+            "count": 19
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 1
+      },
+      {
         "name": "serializeJson",
         "defFiles": [
           "src/main-process/position-reconciliation/store.js"
@@ -26771,6 +26785,20 @@
         "refFiles": [
           {
             "file": "src/main-process/position-reconciliation/store.js",
+            "count": 19
+          }
+        ],
+        "totalHits": 19,
+        "fileSpan": 1
+      },
+      {
+        "name": "ToolboxOutputValidationError",
+        "defFiles": [
+          "src/main-process/toolbox-output-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-output-writer.js",
             "count": 19
           }
         ],
@@ -26806,20 +26834,6 @@
         "fileSpan": 1
       },
       {
-        "name": "requireLength",
-        "defFiles": [
-          "src/backend/toolbox-format/biff8-records.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-format/biff8-records.js",
-            "count": 18
-          }
-        ],
-        "totalHits": 18,
-        "fileSpan": 1
-      },
-      {
         "name": "addReason",
         "defFiles": [
           "src/main-process/scenario-engines/r4-fund-nature-check.js"
@@ -26827,20 +26841,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
-            "count": 17
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 1
-      },
-      {
-        "name": "ToolboxOutputValidationError",
-        "defFiles": [
-          "src/main-process/toolbox-output-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/toolbox-output-writer.js",
             "count": 17
           }
         ],
@@ -28682,6 +28682,20 @@
         "fileSpan": 1
       },
       {
+        "name": "parseBoolean",
+        "defFiles": [
+          "src/backend/toolbox-format/xlsx-sheet-scanner.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "PENDING_TABLE",
         "defFiles": [
           "src/backend/bank-bu-recon-db/month-repository.js"
@@ -29389,20 +29403,6 @@
         "refFiles": [
           {
             "file": "src/main-process/acquiring-bill-currency-session.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
-        "name": "parseBoolean",
-        "defFiles": [
-          "src/backend/toolbox-format/xlsx-sheet-scanner.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-format/xlsx-sheet-scanner.js",
             "count": 6
           }
         ],
@@ -35346,6 +35346,20 @@
         "fileSpan": 1
       },
       {
+        "name": "buildBiff8ColumnLayout",
+        "defFiles": [
+          "src/backend/toolbox-format/biff8-pass.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/biff8-pass.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "buildChangedClause",
         "defFiles": [
           "src/backend/pending-reconcile/engine.js"
@@ -37257,6 +37271,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "EXCELJS_ZERO_HEIGHT_PATCH",
+        "defFiles": [
+          "src/main-process/toolbox-output-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-output-writer.js",
             "count": 3
           }
         ],
@@ -40995,6 +41023,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/bank-row.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "resolveBiff8RowForOutput",
+        "defFiles": [
+          "src/backend/toolbox-format/biff8-pass.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/biff8-pass.js",
             "count": 3
           }
         ],
@@ -46266,6 +46308,20 @@
         "fileSpan": 1
       },
       {
+        "name": "installExcelJsZeroHeightSupport",
+        "defFiles": [
+          "src/main-process/toolbox-output-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/toolbox-output-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "INTERNAL_FIELDS",
         "defFiles": [
           "src/main-process/exceljs-writer.js"
@@ -47975,6 +48031,20 @@
       },
       {
         "name": "parseDefaultRowHeight",
+        "defFiles": [
+          "src/backend/toolbox-format/biff8-records.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/biff8-records.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "parseDimensions",
         "defFiles": [
           "src/backend/toolbox-format/biff8-records.js"
         ],
@@ -54709,7 +54779,7 @@
         },
         {
           "file": "src/backend/toolbox-format/biff8-records.js",
-          "count": 122
+          "count": 127
         },
         {
           "file": "src/backend/toolbox-format/xlsx-pass.js",
@@ -54728,7 +54798,7 @@
           "count": 17
         }
       ],
-      "totalHits": 204,
+      "totalHits": 209,
       "fileSpan": 8
     },
     {
