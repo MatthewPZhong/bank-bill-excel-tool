@@ -52,6 +52,7 @@
 | PR-C2 初始 apply 连接使用 16 MiB page cache | 改为 ledger/side DB 各 2 MiB、关闭 mmap，并在文件提交后回收 page cache | 初始真实试跑在第 3 份文件达到 1,085,390,848 B，超过 1 GiB；该轮停止且不计为通过 | 最终五文件峰值 832,225,280 B，资源门禁通过 |
 | 银行 apply 原计划把 sealed ledger 的全部 BizId 复制到 side DB TEMP 表后再查冲突 | 删除全量 TEMP 键表；保留小型 scope 表，逐行仍向只读 ledger 精确验证物理归属，跨 scope 冲突交由正式唯一约束裁决 | TEMP 键表在冲突预扫描移除后已无消费者，继续保留会产生约 300 万次无效写入 | 业务错误码、事务回滚和逐行 ledger 一致性不变，银行 apply 更快且磁盘峰值更低 |
 | benchmark 原使用 `Date.now()` 计算运行时长和进度间隔 | 改用 `process.hrtime.bigint()`；墙上时间只保留为审计时间戳 | macOS 测试期间系统墙上时间发生跳变，会污染 elapsed 和静默门槛 | 证据时长、采样和 P95 使用单调时钟，业务代码的用户时间语义不变 |
+| 首次 `v3.1.3` Windows 发布工作流应直接生成安装资产 | run `30673001316` 在 release-check 阶段停止，未进入构建和发布；修复 Windows 路径断言及测试 teardown 的 SQLite 先关后删顺序后重新发布 | macOS 允许删除仍被打开的 SQLite 文件，掩盖了 `node:test` after hook 按注册顺序执行时的 Windows `EBUSY`；另有一条 `/tmp` 预期值未规范化盘符 | 不修改业务代码、资金规则或数据契约；确认 GitHub Release 不存在后才允许移动并重推同版本 tag |
 
 ## Self-review Corrections
 
@@ -121,6 +122,9 @@
 | 2026-08-01 | 发布前变量硬节点 | `scan:vars` 为 261 个文件、3,283 个顶层名称；发布准备无 `src` 改动，`check:vars -- --include-minor` 安全跳过 |
 | 2026-08-01 | macOS 本地时区复核 | `Asia/Shanghai` 下 5 个日期夹具受 SheetJS 1899 历史秒级时区偏移影响；Node 22 + UTC / Windows workflow 口径全绿，本次不改变既有日期 parity |
 | 2026-08-01 | 发布仓库预检 | GitHub 仓库为 PUBLIC；`v3.1.3` tag 与 Release 均不存在，可进入不可变发布流程 |
+| 2026-08-01 | 首次 Windows Release workflow | run `30673001316` 在 `release-check` 失败：1 条路径预期未规范化、17 条测试 teardown 因 SQLite 尚未关闭触发 `EBUSY`；构建和发布步骤均未执行，GitHub Release 不存在 |
+| 2026-08-01 | Windows 发布闸门修复定向回归 | CI 同版本 Node 22 + UTC 下三个失败文件 `109/109 PASS`；改动仅涉及测试路径及资源清理顺序 |
+| 2026-08-01 | Windows 发布闸门修复完整本地门禁 | Node 22 + UTC 下 lint、smoke、unit `4454/4454`、44 个 integration 脚本 `2051/2051` 全部通过；`scan:vars` 仍为 261 个文件、3283 个顶层名称，未改 `src`，`check:vars -- --include-minor` 安全跳过 |
 
 ## Remaining Unknowns
 

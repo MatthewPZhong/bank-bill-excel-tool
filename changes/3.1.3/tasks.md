@@ -49,7 +49,8 @@
 - [x] 建立 `docs/prs/PR110-v3.1.3.md` 和 `docs/iterations/v3.1.3/PRD-v3.1.3.md`。
 - [x] 合并后重新执行 Node 22 发布门禁、parity、fault、布局、启动性能和变量检查。
 - [x] 记录 macOS 历史时区导致的 SheetJS 测试夹具偏移，且不改变既有业务日期契约。
-- [ ] 提交并合并 v3.1.3 发布准备 PR。
+- [x] PR #111 以 merge commit `f73f1aeda599eb3c3988b8d0789b752e175e2ae2` 合入 v3.1.3 发布准备记录。
+- [ ] 修复首次 Windows 发布工作流暴露的跨平台测试资源清理问题并通过修复 PR。
 
 ## 发布收尾
 

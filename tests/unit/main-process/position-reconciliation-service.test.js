@@ -2818,14 +2818,16 @@ test('取消账户确认不得删除普通来源存档重试仍引用的共享�
   const userDataDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'position-account-cancel-staging-protection-')
   );
-  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
   let protectedPaths = [];
   const service = createPositionReconciliationService({
     userDataDir,
     templatePath: TEMPLATE_PATH,
     protectedStagingPaths: () => protectedPaths
   });
-  t.after(() => service.close());
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
 
   const jobRoot = path.join(
     userDataDir,
@@ -2863,7 +2865,6 @@ test('账户确认取消时存档保护集不可读会保守保留暂存目录',
   const userDataDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'position-account-cancel-protection-unavailable-')
   );
-  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
   const service = createPositionReconciliationService({
     userDataDir,
     templatePath: TEMPLATE_PATH,
@@ -2871,7 +2872,10 @@ test('账户确认取消时存档保护集不可读会保守保留暂存目录',
       throw new Error('archive center unavailable');
     }
   });
-  t.after(() => service.close());
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
 
   const jobRoot = path.join(
     userDataDir,

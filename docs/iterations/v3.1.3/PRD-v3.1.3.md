@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.3 PRD
 
 > 目标版本：`3.1.3`
-> 状态：release-prepared（PR #110 已合入 `main`；自动发布门禁通过；GitHub Release 待发布）
+> 状态：release-prepared（PR #110、发布准备 PR #111 已合入 `main`；GitHub Release 待发布）
 > 源规格：`changes/3.1.3/spec.md`
 > 交付归档：`docs/prs/PR110-v3.1.3.md`
 > 更新时间：2026-08-01
@@ -67,6 +67,8 @@
 
 - 用户已授权执行技术发布收尾；`v3.1.3` tag、Windows workflow、四个公开更新资产和
   最终摘要将在发布证据提交中回写。
+- 首次 Windows run `30673001316` 在 release-check 阶段因测试路径规范化和 SQLite
+  teardown 顺序失败，未执行构建或发布；修复 PR 通过后才会重新指向 tag 并触发发布。
 - Windows 安装版真实导入、取消和文件锁手测尚未完成。
 - 真实或脱敏资金数据的范围替换、链接派生、账户数据、严格 1:1 和存档证据尚未逐笔确认。
 - 上述人工项不阻断技术资产生成，但阻断“人工验收通过”的公告和未复核数据上的业务启用。
