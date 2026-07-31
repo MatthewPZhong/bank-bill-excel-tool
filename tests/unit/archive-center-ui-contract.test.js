@@ -72,8 +72,16 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       );
     }
     assert.match(main, /onSourceReleased:\s*cleanupPositionArchiveSourcePaths/);
-    assert.match(main, /protectedStagingPaths:[\s\S]*?listUnresolvedSourcePaths\(\)/);
-    assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*unresolvedSourcePaths\)/);
+    assert.match(main, /protectedStagingPaths:\s*positionArchivePersistentStagingPaths/);
+    assert.match(
+      main,
+      /positionPersistentStagingProtectionPaths\(\s*archiveCenterService\.listUnresolvedSourcePaths\(\),\s*readPositionPendingOperation\(\)\s*\)/
+    );
+    assert.match(
+      main,
+      /protectedPaths\s*=\s*protectedPaths\.concat\(activePaths\)/
+    );
+    assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*protectedPaths\)/);
   });
 
   test('异常恢复完成后只清理未提交输入，并在清除 pending 后执行受保护目录清理', () => {

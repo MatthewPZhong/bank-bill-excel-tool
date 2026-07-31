@@ -12,6 +12,12 @@ const POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST = Object.freeze([
   'gateway-outbound'
 ]);
 const POSITION_IMPORT_MAINTENANCE_BATCH_SIZE = 10000;
+const POSITION_IMPORT_PROGRESS_ROW_INTERVAL = 4000;
+const POSITION_IMPORT_PROGRESS_HEARTBEAT_MS = 750;
+const POSITION_IMPORT_NON_CANCELLABLE_STAGES = Object.freeze([
+  'summarizing',
+  'committing'
+]);
 
 const POSITION_IMPORT_ENGINES = Object.freeze({
   STREAMING: 'streaming',
@@ -35,6 +41,7 @@ const POSITION_IMPORT_MESSAGE_TYPES = Object.freeze({
   PROGRESS: 'PROGRESS',
   PREFLIGHT_READY: 'PREFLIGHT_READY',
   APPLY_GRANTED: 'APPLY_GRANTED',
+  APPLY_REJECTED: 'APPLY_REJECTED',
   FILE_COMMITTED: 'FILE_COMMITTED',
   COMPLETE: 'COMPLETE',
   FATAL: 'FATAL',
@@ -62,6 +69,12 @@ function normalizePositionStreamingSourceTypes(
   return new Set(values.filter((item) => allowed.has(item)));
 }
 
+function isPositionImportCancellationLocked(stage) {
+  return POSITION_IMPORT_NON_CANCELLABLE_STAGES.includes(
+    String(stage || '').trim()
+  );
+}
+
 module.exports = {
   POSITION_IMPORT_PROTOCOL_VERSION,
   POSITION_IMPORT_LEDGER_SCHEMA_VERSION,
@@ -70,9 +83,13 @@ module.exports = {
   POSITION_IMPORT_MAX_ERROR_DETAILS,
   POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST,
   POSITION_IMPORT_MAINTENANCE_BATCH_SIZE,
+  POSITION_IMPORT_PROGRESS_ROW_INTERVAL,
+  POSITION_IMPORT_PROGRESS_HEARTBEAT_MS,
+  POSITION_IMPORT_NON_CANCELLABLE_STAGES,
   POSITION_IMPORT_ENGINES,
   POSITION_IMPORT_COMMANDS,
   POSITION_IMPORT_MESSAGE_TYPES,
+  isPositionImportCancellationLocked,
   normalizePositionImportEngine,
   normalizePositionStreamingSourceTypes
 };

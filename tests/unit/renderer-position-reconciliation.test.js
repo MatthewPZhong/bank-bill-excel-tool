@@ -59,6 +59,9 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-run-scope'"));
     assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-result'"));
     assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-account-mapping'"));
+    assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-import-progress'"));
+    assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-import-stopping'"));
+    assert.ok(renderer.includes("info.previewModal === 'position-reconciliation-import-committing'"));
   });
 
   test('功能下拉固定三项并默认选中第一项', () => {
@@ -124,6 +127,24 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     const pad = (number) => String(number).padStart(2, '0');
     const expected = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
     assert.equal(module.formatUpdatedDate(value), expected);
+  });
+
+  test('主进程取消状态和兼容错误码都不当作导入失败', () => {
+    const module = loadRendererModule();
+    assert.equal(module.isImportCancelledResult({ status: 'cancelled' }), true);
+    assert.equal(module.isImportCancelledResult({
+      status: 'failed',
+      code: 'position-import-cancelled'
+    }), true);
+    assert.equal(module.isImportCancelledResult({
+      status: 'failed',
+      code: 'position-write-failed'
+    }), false);
+    assert.match(positionRenderer, /if \(isImportCancelledResult\(applied\)\) return;/);
+    assert.match(
+      positionRenderer,
+      /if \(isImportCancelledResult\(applied\)\) \{[\s\S]*?item\.status = 'cancelled';[\s\S]*?item\.message = '已取消替换';/
+    );
   });
 
   test('独立控制器接通导入、管理、运行、导出、回导和确认，非一期功能继续占位', () => {
@@ -323,13 +344,40 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('preload 仅暴露平盘命名空间，不向 renderer 泄露 Electron IPC', () => {
     for (const method of [
       'status', 'dataManager', 'linkedManager', 'prepareBankImport', 'applyBankImport',
-      'prepareSourceImport', 'applySourceImport', 'cancelSourceImport', 'listMappings', 'saveMappings',
+      'prepareSourceImport', 'applySourceImport', 'cancelSourceImport',
+      'cancelActiveImport', 'onImportProgress', 'listMappings', 'saveMappings',
       'deleteBank', 'deleteSource', 'exportBank', 'exportLinked', 'exportRaw',
       'run', 'exportRun', 'importRunResult', 'confirmRun'
     ]) {
       assert.match(preload, new RegExp(`${method}:\\s*\\(`));
     }
     assert.doesNotMatch(positionRenderer, /ipcRenderer|require\(['"]electron['"]\)/);
+  });
+
+  test('百万级导入显示进度、支持取消，并在提交阶段锁定取消操作', () => {
+    assert.match(positionRenderer, /function withImportProgress\(title, task, previewProgress = null\)/);
+    assert.match(positionRenderer, /api\.onImportProgress\(updateProgress\)/);
+    assert.match(positionRenderer, /api\.cancelActiveImport\(jobId\)/);
+    assert.match(positionRenderer, /stage === 'committing'[\s\S]*cancel\.disabled = true/);
+    assert.match(positionRenderer, /summarizing: '正在汇总并提交，无法取消'/);
+    assert.match(
+      positionRenderer,
+      /result && result\.status === 'not-cancellable'[\s\S]*正在提交，无法取消/
+    );
+    assert.match(positionRenderer, /'preparing-apply': '正在准备写入索引'/);
+    assert.match(positionRenderer, /stage === 'stopping' \|\| stage === 'force-terminating'/);
+    assert.match(
+      positionRenderer,
+      /finally\s*\{[\s\S]*if \(typeof unsubscribe === 'function'\) unsubscribe\(\);[\s\S]*shell\.overlay\.remove\(\)/
+    );
+    assert.match(positionRenderer, /withImportProgress\(\s*'导入平盘银行对账单'/);
+    assert.match(positionRenderer, /withImportProgress\(\s*'写入平盘银行对账单'/);
+    assert.match(positionRenderer, /withImportProgress\(\s*'导入链接原始表'/);
+    assert.match(positionRenderer, /withImportProgress\(\s*'替换清结算银行账户表'/);
+    assert.match(preload, /position-reconciliation:import:cancel/);
+    assert.match(preload, /position-reconciliation:import-progress/);
+    assert.match(mainProcess, /position-reconciliation:import:cancel/);
+    assert.match(mainProcess, /position-reconciliation:import-progress/);
   });
 
   test('主进程以主库 checkpoint 防止平盘侧库缺失或回滚后静默继续', () => {
@@ -379,8 +427,12 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(mainProcess, /settlePositionArchiveResult\(\{/);
     assert.match(mainProcess, /persistCurrentPositionArchiveIntentIfNeeded\(\)/);
     assert.match(operationLifecycle, /markDurable\(recoveryIntent \|\| archiveResult\)/);
-    assert.match(operationLifecycle, /if \(!recoveryIntent\) cleanup\(runtime\)/);
+    assert.match(
+      operationLifecycle,
+      /markDurable\(recoveryIntent \|\| archiveResult\);\s*await cleanup\(runtime\)/
+    );
     assert.match(operationLifecycle, /archiveResult\.persistentRetryAvailable !== true/);
+    assert.match(operationLifecycle, /markDurable\(archiveResult\);\s*await cleanup\(runtime\)/);
     assert.match(mainProcess, /code:\s*'archive-retry-registration-failed'/);
   });
 

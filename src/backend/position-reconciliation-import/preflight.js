@@ -30,6 +30,9 @@ const {
   validateSourceRow
 } = require('./contracts');
 const {
+  POSITION_IMPORT_PROGRESS_ROW_INTERVAL
+} = require('./constants');
+const {
   PositionImportLedger,
   verifySealedLedger
 } = require('./ledger');
@@ -110,7 +113,7 @@ async function preflightSourceFile({
         sourceType = detectedType;
         sheetName = detectedSheet;
         stats.scannedNonBlankRows += 1;
-        if (stats.scannedNonBlankRows % 10000 === 0) {
+        if (stats.scannedNonBlankRows % POSITION_IMPORT_PROGRESS_ROW_INTERVAL === 0) {
           progressEmitter(onProgress, startedAt, stats);
         }
 
@@ -239,7 +242,7 @@ async function preflightBankFile({
       onRow: ({ row, excelRowNumber, sheetName: detectedSheet }) => {
         sheetName = detectedSheet;
         stats.scannedNonBlankRows += 1;
-        if (stats.scannedNonBlankRows % 10000 === 0) {
+        if (stats.scannedNonBlankRows % POSITION_IMPORT_PROGRESS_ROW_INTERVAL === 0) {
           progressEmitter(onProgress, startedAt, stats);
         }
         const bankRow = Object.fromEntries(

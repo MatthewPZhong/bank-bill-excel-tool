@@ -36,7 +36,9 @@
 
 ## PR-E — Bank, Account, UI And Release
 
-- [ ] 银行 prepare/apply 和账户混合确认流程。
-- [ ] SQL scope 计数、磁盘门禁、进度/取消弹窗和 previews。
-- [ ] 300 万 bank/inbound/outbound 压测及 macOS/Windows 手测。
-- [ ] 版本号、三份版本文档、重要变量检查和人工资金复核。
+- [x] 银行 prepare/apply 和账户混合确认流程。
+- [x] SQL scope 计数、磁盘门禁、进度/取消弹窗和 previews。
+- [x] 300 万 bank/inbound/outbound macOS 压测及证据固化。
+- [ ] Windows 安装版导入、取消和文件锁手测。
+- [x] 版本号、三份版本文档和重要变量清单更新。
+- [ ] 真实资金范围替换、派生和账户数据人工逐笔复核。

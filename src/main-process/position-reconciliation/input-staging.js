@@ -329,6 +329,20 @@ function cleanupStagingPaths(paths) {
   }
 }
 
+async function cleanupStagingPathsAsync(paths) {
+  const unique = new Set((Array.isArray(paths) ? paths : []).filter(Boolean).map((value) => (
+    path.resolve(String(value))
+  )));
+  for (const target of unique) {
+    await fs.promises.rm(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100
+    });
+  }
+}
+
 function filterStagingPathsWithoutProtectedSources(paths, protectedSourcePaths) {
   const targets = [...new Set(
     (Array.isArray(paths) ? paths : [])
@@ -395,6 +409,7 @@ module.exports = {
   assertStagedInputUnchanged,
   assertStagedInputUnchangedAsync,
   cleanupStagingPaths,
+  cleanupStagingPathsAsync,
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 };

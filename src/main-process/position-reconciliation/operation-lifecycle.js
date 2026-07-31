@@ -76,6 +76,18 @@ function requirePositionPendingArchiveFiles(value) {
   return files;
 }
 
+function positionPersistentStagingProtectionPaths(unresolvedSourcePaths, pending) {
+  if (!Array.isArray(unresolvedSourcePaths)) return null;
+  const pendingFiles = parsePositionPendingArchiveFiles(pending);
+  if (pendingFiles === null) return null;
+  return [...new Set([
+    ...unresolvedSourcePaths,
+    ...pendingFiles
+      .filter((file) => file.role === 'input')
+      .map((file) => file.filePath)
+  ].filter(Boolean).map(String))];
+}
+
 function positionPreflightAcceptedInputFiles(preflightReady) {
   const accepted = preflightReady
     && Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
@@ -352,6 +364,18 @@ function positionBusinessStateForResult(result, successStatuses) {
   return result && successStatuses.has(result.status) ? 'success' : 'not-success';
 }
 
+function positionReconciliationFailureResult(error) {
+  const code = error && error.code
+    ? String(error.code)
+    : 'position-reconciliation-failed';
+  return {
+    status: code === 'position-import-cancelled' ? 'cancelled' : 'failed',
+    code,
+    message: error && error.message ? String(error.message) : String(error),
+    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+  };
+}
+
 function positionArchiveIntentEvidence(pending, currentCheckpoint, {
   statSync,
   sourceSnapshotFromStat,
@@ -407,16 +431,17 @@ async function settlePositionArchiveResult({
     if (archiveResult && archiveResult.handled === false) {
       const recoveryIntent = persistRecovery();
       markDurable(recoveryIntent || archiveResult);
-      if (!recoveryIntent) cleanup(runtime);
+      await cleanup(runtime);
     } else if (archiveResult && archiveResult.archiveFailed === true) {
       reportFailure(archiveResult.warning);
       if (archiveResult.persistentRetryAvailable !== true) {
         return registrationFailureResult(result, archiveResult.warning);
       }
       markDurable(archiveResult);
+      await cleanup(runtime);
     } else {
       markDurable(archiveResult || {});
-      cleanup(runtime);
+      await cleanup(runtime);
     }
   } catch (error) {
     const warning = { message: error && error.message ? error.message : String(error) };
@@ -475,6 +500,7 @@ async function runPositionOperationLifecycle({
 module.exports = {
   parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
+  positionPersistentStagingProtectionPaths,
   positionPreflightAcceptedInputFiles,
   authorizePositionImportApply,
   positionCommittedRecoveryArchiveFiles,
@@ -483,6 +509,7 @@ module.exports = {
   assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
+  positionReconciliationFailureResult,
   runPositionOperationLifecycle,
   settlePositionArchiveResult
 };

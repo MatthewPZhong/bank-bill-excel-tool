@@ -466,4 +466,46 @@ test('FundTransfer 映射重建逐行派生 0/hidden/visible 双腿且取消整�
     '1'
   );
   afterCancel.close();
+
+  await assert.rejects(
+    () => runPositionMaintenanceJob({
+      command: POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING,
+      sideDbPath,
+      expectedCheckpoint: result.nextCheckpoint,
+      operationToken: 'mapping-low-disk-operation',
+      payload: {
+        mappings: [{ midAccountId: 'LOW-DISK', clearingAccountId: 'LOW-DISK-MAPPED' }]
+      },
+      availableBytes: 0
+    }),
+    (error) => error && error.code === 'position-import-disk-space-insufficient'
+  );
+  const afterLowDisk = new DatabaseSync(sideDbPath, { readOnly: true });
+  assert.equal(
+    afterLowDisk.prepare(`
+      SELECT COUNT(*) AS count
+      FROM position_account_mappings
+      WHERE mid_account_id IN ('MID-PAY', 'MID-RECEIVE')
+    `).get().count,
+    2,
+    '磁盘门禁必须在替换旧账户映射前生效'
+  );
+  assert.equal(
+    afterLowDisk.prepare(`
+      SELECT COUNT(*) AS count
+      FROM position_link_rows
+      WHERE source_type = ?
+    `).get(SOURCE_TYPES.FUND_TRANSFER).count,
+    4,
+    '磁盘门禁必须在删除旧调拨链接前生效'
+  );
+  assert.equal(
+    afterLowDisk.prepare(`
+      SELECT value
+      FROM position_meta
+      WHERE key = 'position_database_generation_v1'
+    `).get().value,
+    '1'
+  );
+  afterLowDisk.close();
 });

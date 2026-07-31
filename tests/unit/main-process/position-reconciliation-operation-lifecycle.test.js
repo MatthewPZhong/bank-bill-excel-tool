@@ -14,6 +14,8 @@ const {
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
+  positionPersistentStagingProtectionPaths,
+  positionReconciliationFailureResult,
   runPositionOperationLifecycle,
   settlePositionArchiveResult
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
@@ -47,12 +49,58 @@ function checkpoint(generation) {
 }
 
 function failureResult(error) {
-  return {
-    status: 'failed',
-    code: error && error.code ? error.code : 'position-reconciliation-failed',
-    message: error && error.message ? error.message : String(error)
-  };
+  return positionReconciliationFailureResult(error);
 }
+
+test('用户取消导入返回 cancelled，其他异常仍返回 failed', () => {
+  const cancelled = positionReconciliationFailureResult(Object.assign(
+    new Error('平盘导入已取消'),
+    { code: 'position-import-cancelled' }
+  ));
+  assert.deepEqual(cancelled, {
+    status: 'cancelled',
+    code: 'position-import-cancelled',
+    message: '平盘导入已取消',
+    detailLines: []
+  });
+
+  const failed = positionReconciliationFailureResult(Object.assign(
+    new Error('写入失败'),
+    { code: 'position-write-failed', detailLines: ['detail'] }
+  ));
+  assert.deepEqual(failed, {
+    status: 'failed',
+    code: 'position-write-failed',
+    message: '写入失败',
+    detailLines: ['detail']
+  });
+});
+
+test('暂存保护集合同时包含持久 outbox 与当前主库 pending 输入', () => {
+  assert.deepEqual(positionPersistentStagingProtectionPaths(
+    ['/tmp/outbox.xlsx'],
+    {
+      archiveFiles: [
+        {
+          filePath: '/tmp/pending.xlsx',
+          role: 'input',
+          sourceSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+          sha256: INPUT_EVIDENCE.sha256,
+          sizeBytes: INPUT_EVIDENCE.sizeBytes
+        },
+        {
+          filePath: '/tmp/result.xlsx',
+          role: 'output',
+          beforeSnapshot: null
+        }
+      ]
+    }
+  ), ['/tmp/outbox.xlsx', '/tmp/pending.xlsx']);
+  assert.equal(positionPersistentStagingProtectionPaths([], {
+    archiveFiles: [{ role: 'input', filePath: '' }]
+  }), null);
+  assert.equal(positionPersistentStagingProtectionPaths(null, null), null);
+});
 
 async function runHarness({
   operationToken,
@@ -139,6 +187,33 @@ async function runHarness({
   };
 }
 
+test('存档完成后会等待异步清理结束再返回业务结果', async () => {
+  let releaseCleanup;
+  let cleanupFinished = false;
+  const cleanupGate = new Promise((resolve) => {
+    releaseCleanup = resolve;
+  });
+  const settling = settlePositionArchiveResult({
+    result: { status: 'success' },
+    archiveTask: Promise.resolve({ status: 'success' }),
+    runtime: { cleanupPaths: ['/tmp/position-staging'] },
+    persistRecovery: () => null,
+    markDurable: () => undefined,
+    cleanup: async () => {
+      await cleanupGate;
+      cleanupFinished = true;
+    },
+    reportFailure: () => undefined,
+    registrationFailureResult: () => ({ status: 'failed' })
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(cleanupFinished, false);
+  releaseCleanup();
+  assert.deepEqual(await settling, { status: 'success' });
+  assert.equal(cleanupFinished, true);
+});
+
 test('账户表 prepare 不建空存档且清除 pending，apply 后正式存档并推进 checkpoint', async () => {
   const prepared = await runHarness({
     operationToken: 'prepare-account',
@@ -221,9 +296,34 @@ test('输出已发布但业务状态落库失败时登记 outbox、保留文件�
   assert.equal(recovered.result.code, 'position-export-state-failed');
   assert.equal(recovered.pending, null);
   assert.deepEqual(recovered.syncedCheckpoint, checkpoint(0));
-  assert.equal(recovered.cleanupCount, 0);
+  assert.equal(recovered.cleanupCount, 1);
   assert.deepEqual(outbox, [{ outboxId: 'position-outbox-1' }]);
   assert.equal(fs.readFileSync(outputPath, 'utf8'), 'published-result');
+});
+
+test('存档失败已形成持久重试后清理函数只处理未受保护暂存', async () => {
+  const recovered = await runHarness({
+    operationToken: 'archive-persistent-retry',
+    baseCheckpoint: checkpoint(0),
+    currentCheckpoint: checkpoint(1),
+    businessResult: { status: 'ok', inputPaths: ['/tmp/input.xlsx'] },
+    archiveFiles: [{
+      filePath: '/tmp/input.xlsx',
+      role: 'input',
+      ...INPUT_EVIDENCE
+    }],
+    archiveResult: {
+      archiveFailed: true,
+      persistentRetryAvailable: true,
+      outboxId: 'position-outbox-retry',
+      warning: { message: 'archive copy failed' }
+    }
+  });
+  assert.equal(recovered.result.status, 'ok');
+  assert.equal(recovered.pending, null);
+  assert.deepEqual(recovered.syncedCheckpoint, checkpoint(1));
+  assert.equal(recovered.cleanupCount, 1);
+  assert.deepEqual(recovered.warnings, [{ message: 'archive copy failed' }]);
 });
 
 test('正式存档与持久重试都失败时保留 pending 并返回禁止重试错误', async () => {

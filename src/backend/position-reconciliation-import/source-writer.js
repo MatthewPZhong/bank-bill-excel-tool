@@ -8,6 +8,7 @@ const {
   SOURCE_TYPES
 } = require('../../main-process/position-reconciliation/constants');
 const {
+  POSITION_IMPORT_PROGRESS_ROW_INTERVAL,
   POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST
 } = require('./constants');
 const {
@@ -30,6 +31,9 @@ const {
   runPositionSideDbMutation
 } = require('../../main-process/position-reconciliation/side-db-mutation');
 const {
+  refreshPositionSourceSummary
+} = require('../../main-process/position-reconciliation/source-summary-cache');
+const {
   parseJson,
   serializeJson
 } = require('../../main-process/position-reconciliation/store');
@@ -38,6 +42,9 @@ const {
   stableRowGuardHash,
   validateSourceRow
 } = require('./contracts');
+const {
+  assertPositionImportDiskSpace
+} = require('./disk-space-gate');
 const {
   verifySealedLedger
 } = require('./ledger');
@@ -310,7 +317,10 @@ async function applySourceFile({
   mappings,
   sstOptions,
   onProgress,
-  startedAt
+  startedAt,
+  ledgerSizeBytes,
+  availableBytes,
+  sideDbPath
 }) {
   const expected = expectedLedgerFile(verifiedLedger, descriptor);
   const sourceType = String(descriptor.sourceType || '');
@@ -322,6 +332,14 @@ async function applySourceFile({
   }
   await assertStagedInputUnchangedAsync(descriptor);
   assertNotCancelled(cancelToken);
+  assertPositionImportDiskSpace({
+    kind: 'source',
+    sideDbPath,
+    rowCount: Number(expected.persistedCandidateRows),
+    stagedBytes: Number(descriptor.stagedSizeBytes || 0),
+    ledgerBytes: Number(ledgerSizeBytes || 0),
+    availableBytes
+  });
   const evidence = inputEvidenceFor(descriptor);
 
   const mutation = await runPositionSideDbMutation({
@@ -357,7 +375,7 @@ async function applySourceFile({
           detectedSourceType = detectedType;
           sheetName = detectedSheet;
           stats.scannedNonBlankRows += 1;
-          if (stats.scannedNonBlankRows % 10000 === 0) {
+          if (stats.scannedNonBlankRows % POSITION_IMPORT_PROGRESS_ROW_INTERVAL === 0) {
             assertNotCancelled(cancelToken);
             if (typeof onProgress === 'function') {
               onProgress({
@@ -490,17 +508,38 @@ async function applySourceFile({
       assertNotCancelled(cancelToken);
       bumpRevision(db, 'source', sourceType);
       bumpRevision(db, 'linked', sourceType);
-      const linkedRowCount = Number(db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_link_rows
-        WHERE source_type = ? AND visible = 1
-      `).get(sourceType).count);
+      const sourceSummary = refreshPositionSourceSummary(db, sourceType, {
+        onPhase: (phase) => {
+          if (typeof onProgress !== 'function') return;
+          onProgress({
+            stage: 'summarizing',
+            summaryPhase: phase,
+            currentFile: descriptor.fileIndex + 1,
+            fileName: descriptor.fileName,
+            scannedRows: stats.scannedNonBlankRows,
+            acceptedRows: stats.persistedCandidateRows,
+            committedRows: 0,
+            elapsedMs: Date.now() - startedAt
+          });
+        }
+      });
+      if (typeof onProgress === 'function') {
+        onProgress({
+          stage: 'committing',
+          currentFile: descriptor.fileIndex + 1,
+          fileName: descriptor.fileName,
+          scannedRows: stats.scannedNonBlankRows,
+          acceptedRows: stats.persistedCandidateRows,
+          committedRows: stats.persistedCandidateRows,
+          elapsedMs: Date.now() - startedAt
+        });
+      }
       return {
         sourceType,
         sourceName: SOURCE_DEFINITIONS[sourceType].sourceName,
         linkedName: SOURCE_DEFINITIONS[sourceType].linkedName,
         rowCount: stats.persistedCandidateRows,
-        linkedRowCount,
+        linkedRowCount: sourceSummary.linkedRowCount,
         collapsedDuplicateCount: stats.collapsedDuplicateRows,
         contentHash: stats.contentHash
       };
@@ -555,17 +594,23 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
       '没有可提交的普通链接原始表'
     );
   }
-  if (preflightReady.accountConfirmationDescriptor) {
-    throw new PositionReconciliationError(
-      'position-streaming-source-type-disabled',
-      '当前阶段的流式导入不支持与清结算银行账户表混合选择'
-    );
-  }
   const enabled = accepted.filter((file) => allowed.has(file.sourceType));
 
+  const startedAt = Date.now();
+  if (enabled.length > 0 && typeof input.onProgress === 'function') {
+    input.onProgress({
+      stage: 'applying',
+      currentFile: 1,
+      totalFiles: enabled.length,
+      fileName: enabled[0].fileName,
+      scannedRows: 0,
+      acceptedRows: Number(enabled[0].persistedCandidateRows) || 0,
+      committedRows: 0,
+      elapsedMs: 0
+    });
+  }
   const verifiedLedger = await verifySealedLedger(preflightReady.ledgerEvidence);
   const db = new DatabaseSync(path.resolve(String(input.sideDbPath || '')));
-  const startedAt = Date.now();
   let checkpoint = input.grant.baseCheckpoint;
   const appliedByIndex = new Map();
   try {
@@ -600,7 +645,10 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         mappings,
         sstOptions: input.sstOptions,
         onProgress: input.onProgress,
-        startedAt
+        startedAt,
+        ledgerSizeBytes: preflightReady.ledgerEvidence.ledgerSizeBytes,
+        availableBytes: input.availableBytes,
+        sideDbPath: input.sideDbPath
       });
       checkpoint = applied.nextCheckpoint;
       appliedByIndex.set(Number(descriptor.fileIndex), applied);
@@ -620,7 +668,21 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
       ? preflightReady.orderedFileResults
       : []).map((item) => {
       const applied = appliedByIndex.get(Number(item.fileIndex));
-      if (!applied) return item;
+      if (!applied) {
+        if (item.status === 'ok'
+            && item.sourceType
+            && item.sourceType !== SOURCE_TYPES.BANK_ACCOUNT
+            && !allowed.has(item.sourceType)) {
+          return {
+            ...item,
+            status: 'failed',
+            code: 'position-streaming-source-type-disabled',
+            message: `当前未启用该流式来源类型：${item.sourceName || item.sourceType}`,
+            detailLines: []
+          };
+        }
+        return item;
+      }
       return {
         ...item,
         status: 'ok',
@@ -639,23 +701,31 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     });
     const success = results.filter((item) => item.status === 'ok' && item.applied === true);
     const failed = results.filter((item) => item.status === 'failed');
+    const confirmation = results.filter((item) => item.status === 'needs-confirmation');
     const jobRoot = path.dirname(
       path.resolve(String(preflightReady.ledgerEvidence.ledgerPath || ''))
     );
+    const cleanupPaths = preflightReady.accountConfirmationDescriptor
+      ? results
+        .filter((item) => item.status !== 'needs-confirmation')
+        .map((item) => item.stagingDir)
+        .filter(Boolean)
+      : [jobRoot];
     return {
       ...preflightReady,
-      status: success.length > 0 ? 'ok' : 'failed',
+      status: success.length > 0 || confirmation.length > 0 ? 'ok' : 'failed',
       message:
-        `链接原始表导入完成：成功 ${success.length}，待确认 0，失败 ${failed.length}`,
+        `链接原始表导入完成：成功 ${success.length}，` +
+        `待确认 ${confirmation.length}，失败 ${failed.length}`,
       results,
       orderedFileResults: results,
       successCount: success.length,
       failedCount: failed.length,
-      confirmationCount: 0,
-      archiveDeferred: false,
+      confirmationCount: confirmation.length,
+      archiveDeferred: success.length === 0 && confirmation.length > 0,
       inputPaths: success.flatMap((item) => item.inputPaths || []),
       inputFiles: success.flatMap((item) => item.inputFiles || []),
-      cleanupPaths: [jobRoot],
+      cleanupPaths,
       checkpoint
     };
   } finally {

@@ -35,21 +35,26 @@ const {
 } = require('./matching-engine');
 const {
   stageInputFiles,
+  STAGING_RELATIVE_PATH,
   assertStagedInputUnchanged,
   cleanupStagingPaths,
+  cleanupStagingPathsAsync,
+  filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 } = require('./input-staging');
 const {
   parsePositionPendingArchiveFiles
 } = require('./operation-lifecycle');
 const {
+  isPositionImportCancellationLocked,
   POSITION_IMPORT_COMMANDS,
   POSITION_IMPORT_ENGINES,
   normalizePositionImportEngine,
   normalizePositionStreamingSourceTypes
 } = require('../../backend/position-reconciliation-import/constants');
 const {
-  dispatchPositionImportPreflight
+  dispatchPositionImportPreflight,
+  dispatchPositionLargeImportSchemaMigration
 } = require('./import-dispatch');
 const {
   positionCheckpointsEqual
@@ -289,7 +294,8 @@ class PositionReconciliationService {
     positionImportEngine = undefined,
     streamingSourceTypes = undefined,
     authorizeStreamingSourceApply = null,
-    positionImportDispatcher = dispatchPositionImportPreflight
+    positionImportDispatcher = dispatchPositionImportPreflight,
+    onImportProgress = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
@@ -305,6 +311,9 @@ class PositionReconciliationService {
     this.operationTokenProvider = typeof operationTokenProvider === 'function'
       ? operationTokenProvider
       : null;
+    this.protectedStagingPaths = typeof protectedStagingPaths === 'function'
+      ? protectedStagingPaths
+      : null;
     this.positionImportEngine = normalizePositionImportEngine(positionImportEngine);
     this.streamingSourceTypes = normalizePositionStreamingSourceTypes(
       streamingSourceTypes,
@@ -315,6 +324,10 @@ class PositionReconciliationService {
         ? authorizeStreamingSourceApply
         : null;
     this.positionImportDispatcher = positionImportDispatcher;
+    this.onImportProgress = typeof onImportProgress === 'function'
+      ? onImportProgress
+      : null;
+    this.activeImportJobs = new Map();
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
       requireExisting: requireExistingSideDb,
       expectedCheckpoint: expectedSideDbCheckpoint,
@@ -329,9 +342,9 @@ class PositionReconciliationService {
       ? pendingArchiveFiles.map((file) => file.filePath)
       : [];
     let stagingProtectionComplete = pendingArchiveFiles !== null;
-    if (typeof protectedStagingPaths === 'function') {
+    if (this.protectedStagingPaths) {
       try {
-        const archiveProtectedPaths = protectedStagingPaths();
+        const archiveProtectedPaths = this.protectedStagingPaths();
         if (Array.isArray(archiveProtectedPaths)) {
           protectedPaths.push(...archiveProtectedPaths);
         } else {
@@ -348,27 +361,266 @@ class PositionReconciliationService {
   }
 
   close() {
-    this.clearBankImportTokens();
-    this.clearSourceImportTokens();
+    for (const active of this.activeImportJobs.values()) {
+      if (active.forceTimer) clearTimeout(active.forceTimer);
+      if (typeof active.terminate === 'function') active.terminate();
+    }
+    this.activeImportJobs.clear();
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      void Promise.all([
+        this.clearBankImportTokensAsync(),
+        this.clearSourceImportTokensAsync()
+      ]).catch(() => undefined);
+    } else {
+      this.clearBankImportTokens();
+      this.clearSourceImportTokens();
+    }
     this.store.close();
   }
 
   clearBankImportTokens() {
     const paths = [];
     for (const parsed of this.bankImportTokens.values()) {
-      paths.push(...(parsed.stagingDirs || []));
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else paths.push(...(parsed.stagingDirs || []));
     }
     this.bankImportTokens.clear();
-    cleanupStagingPaths(paths);
+    this.cleanupUnprotectedStagingPaths(paths);
   }
 
   clearSourceImportTokens() {
     const paths = [];
     for (const parsed of this.sourceImportTokens.values()) {
-      if (parsed.stagingDir) paths.push(parsed.stagingDir);
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
     }
     this.sourceImportTokens.clear();
-    cleanupStagingPaths(paths);
+    this.cleanupUnprotectedStagingPaths(paths);
+  }
+
+  async clearBankImportTokensAsync() {
+    const paths = [];
+    for (const parsed of this.bankImportTokens.values()) {
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else paths.push(...(parsed.stagingDirs || []));
+    }
+    this.bankImportTokens.clear();
+    await this.cleanupUnprotectedStagingPathsAsync(paths);
+  }
+
+  async clearSourceImportTokensAsync() {
+    const paths = [];
+    for (const parsed of this.sourceImportTokens.values()) {
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
+    }
+    this.sourceImportTokens.clear();
+    await this.cleanupUnprotectedStagingPathsAsync(paths);
+  }
+
+  cleanupUnprotectedStagingPaths(paths) {
+    let targets = Array.isArray(paths) ? paths : [];
+    if (this.protectedStagingPaths) {
+      let protectedPaths;
+      try {
+        protectedPaths = this.protectedStagingPaths();
+      } catch (_error) {
+        return;
+      }
+      if (!Array.isArray(protectedPaths)) return;
+      targets = filterStagingPathsWithoutProtectedSources(targets, protectedPaths);
+    }
+    cleanupStagingPaths(targets);
+  }
+
+  activeImportStagingPaths() {
+    const paths = [];
+    for (const active of this.activeImportJobs.values()) {
+      paths.push(...(active.protectedStagingPaths || []));
+    }
+    for (const parsed of this.bankImportTokens.values()) {
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else paths.push(...(parsed.stagingDirs || []));
+    }
+    for (const parsed of this.sourceImportTokens.values()) {
+      if (parsed.jobRoot) paths.push(parsed.jobRoot);
+      else if (parsed.stagingDir) paths.push(parsed.stagingDir);
+    }
+    return [...new Set(paths.filter(Boolean).map((value) => path.resolve(value)))];
+  }
+
+  async cleanupUnprotectedStagingPathsAsync(paths) {
+    let targets = Array.isArray(paths) ? paths : [];
+    if (this.protectedStagingPaths) {
+      let protectedPaths;
+      try {
+        protectedPaths = this.protectedStagingPaths();
+      } catch (_error) {
+        return;
+      }
+      if (!Array.isArray(protectedPaths)) return;
+      targets = filterStagingPathsWithoutProtectedSources(targets, protectedPaths);
+    }
+    await cleanupStagingPathsAsync(targets);
+  }
+
+  async cleanupDiscardedStreamingImport(parsed) {
+    try {
+      await this.cleanupUnprotectedStagingPathsAsync(parsed
+        ? [parsed.jobRoot].filter(Boolean)
+        : []);
+    } catch (_error) {
+      // Token 已失效；文件锁导致的孤儿目录交由启动过期清理回收。
+    }
+  }
+
+  emitImportProgress(progress) {
+    if (!this.onImportProgress) return;
+    try {
+      this.onImportProgress(progress);
+    } catch (_error) {
+      // Renderer lifecycle must not break a business import.
+    }
+  }
+
+  trackImportDispatch(dispatched, label, protectedStagingPaths = []) {
+    const jobId = text(dispatched && dispatched.jobId);
+    if (!jobId || !dispatched || !dispatched.promise) {
+      throw new TypeError('平盘导入 dispatcher 未返回完整 job');
+    }
+    const active = {
+      jobId,
+      label: text(label),
+      cancel: typeof dispatched.cancel === 'function'
+        ? () => dispatched.cancel()
+        : null,
+      terminate: typeof dispatched.terminate === 'function'
+        ? () => dispatched.terminate()
+        : null,
+      protectedStagingPaths: [...new Set(
+        (Array.isArray(protectedStagingPaths) ? protectedStagingPaths : [])
+          .filter(Boolean)
+          .map((value) => path.resolve(value))
+      )],
+      stage: 'starting',
+      cancelAcknowledged: false,
+      forceTimer: null
+    };
+    this.activeImportJobs.set(jobId, active);
+    this.emitImportProgress({
+      jobId,
+      stage: 'starting',
+      fileName: '',
+      currentFile: null,
+      totalFiles: 0,
+      scannedRows: 0,
+      acceptedRows: 0,
+      committedRows: 0,
+      elapsedMs: 0,
+      label: active.label
+    });
+    return Promise.resolve(dispatched.promise).finally(() => {
+      const current = this.activeImportJobs.get(jobId);
+      if (current && current.forceTimer) clearTimeout(current.forceTimer);
+      this.activeImportJobs.delete(jobId);
+    });
+  }
+
+  cancelActiveImport(jobId) {
+    const normalized = text(jobId);
+    const active = this.activeImportJobs.get(normalized);
+    if (!active) {
+      return {
+        status: 'not-active',
+        message: '当前导入任务已结束或不存在'
+      };
+    }
+    if (isPositionImportCancellationLocked(active.stage)) {
+      return {
+        status: 'not-cancellable',
+        jobId: normalized,
+        message: '数据正在提交，当前阶段无法取消'
+      };
+    }
+    if (active.cancelAcknowledged) {
+      return { status: 'stopping', jobId: normalized };
+    }
+    if (active.cancel) active.cancel();
+    this.emitImportProgress({
+      jobId: normalized,
+      stage: 'stopping',
+      label: active.label
+    });
+    if (!active.forceTimer) {
+      active.forceTimer = setTimeout(() => {
+        const current = this.activeImportJobs.get(normalized);
+        if (!current || current.cancelAcknowledged) return;
+        if (current.terminate) current.terminate();
+        this.emitImportProgress({
+          jobId: normalized,
+          stage: 'force-terminating',
+          label: current.label
+        });
+      }, 10000);
+      active.forceTimer.unref?.();
+    }
+    return { status: 'stopping', jobId: normalized };
+  }
+
+  dispatchTrackedImport(input, label) {
+    const dispatched = this.positionImportDispatcher({
+      ...input,
+      protectedStagingPaths: this.protectedStagingPaths,
+      onProgress: (progress) => {
+        const active = this.activeImportJobs.get(text(progress && progress.jobId));
+        if (active && progress && progress.stage) {
+          active.stage = text(progress.stage);
+        }
+        this.emitImportProgress({
+          ...(progress || {}),
+          label: active ? active.label : text(label)
+        });
+      },
+      onCancelAck: (message) => {
+        const active = this.activeImportJobs.get(text(message && message.jobId));
+        if (active) {
+          const accepted = !message || message.accepted !== false;
+          active.cancelAcknowledged = accepted;
+          if (!accepted && message.stage) {
+            active.stage = text(message.stage);
+          }
+          if (active.forceTimer) {
+            clearTimeout(active.forceTimer);
+            active.forceTimer = null;
+          }
+        }
+        this.emitImportProgress({
+          ...(message || {}),
+          stage: message && message.accepted === false
+            ? text(message.stage || 'committing')
+            : 'stopping',
+          label: active ? active.label : text(label)
+        });
+      }
+    });
+    const ledgerPath = text(
+      input
+      && input.payload
+      && input.payload.preflightReady
+      && input.payload.preflightReady.ledgerEvidence
+      && input.payload.preflightReady.ledgerEvidence.ledgerPath
+    );
+    const protectedStagingPaths = ledgerPath
+      ? [path.dirname(path.resolve(ledgerPath))]
+      : [path.join(this.userDataDir, STAGING_RELATIVE_PATH, dispatched.jobId)];
+    return {
+      ...dispatched,
+      promise: this.trackImportDispatch(
+        dispatched,
+        label,
+        protectedStagingPaths
+      )
+    };
   }
 
   assertStagedInputs(files, phase, { beforeCommit = false } = {}) {
@@ -397,9 +649,10 @@ class PositionReconciliationService {
 
   status() {
     const pending = this.store.latestPendingRun();
+    const bankManager = this.store.getBankManagerSnapshot();
     return {
       status: 'ok',
-      bank: this.store.getBankSummary(),
+      bank: bankManager.summary,
       linked: this.store.listLinkedSummary(),
       pendingRun: pending ? {
         id: pending.id,
@@ -409,12 +662,21 @@ class PositionReconciliationService {
         canExport: Boolean(pending.exported_at || pending.reimported_at),
         createdAt: pending.created_at
       } : null,
-      canRun: this.store.listBankScopes({ statuses: [BANK_STATUSES.UNPROCESSED] }).length > 0,
+      canRun: bankManager.scopes.some(
+        (scope) => scope.status === BANK_STATUSES.UNPROCESSED
+      ),
       canExport: Boolean(pending && this.store.snapshotIsCurrent(pending.snapshot))
     };
   }
 
   prepareBankImport(filePaths) {
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.prepareStreamingBankImport(filePaths);
+    }
+    return this.prepareLegacyBankImport(filePaths);
+  }
+
+  prepareLegacyBankImport(filePaths) {
     const token = crypto.randomUUID();
     this.clearBankImportTokens();
     const staged = stageInputFiles(this.userDataDir, filePaths, `bank-${token}`);
@@ -447,6 +709,14 @@ class PositionReconciliationService {
   }
 
   applyBankImport(token) {
+    const parsed = this.bankImportTokens.get(text(token));
+    if (parsed && parsed.streaming === true) {
+      return this.applyStreamingBankImport(token);
+    }
+    return this.applyLegacyBankImport(token);
+  }
+
+  applyLegacyBankImport(token) {
     const parsed = this.bankImportTokens.get(text(token));
     if (!parsed) {
       throw new PositionReconciliationError(
@@ -489,6 +759,160 @@ class PositionReconciliationService {
     };
   }
 
+  async prepareStreamingBankImport(filePaths) {
+    const files = Array.isArray(filePaths) ? filePaths : [];
+    if (files.length === 0) {
+      throw new PositionReconciliationError(
+        'position-bank-files-empty',
+        '请选择至少一份平盘银行对账单'
+      );
+    }
+    await this.clearBankImportTokensAsync();
+    const dispatched = this.dispatchTrackedImport({
+      engine: this.positionImportEngine,
+      command: POSITION_IMPORT_COMMANDS.BANK_PREPARE,
+      files,
+      userDataDir: this.userDataDir,
+      sideDbPath: this.store.dbPath,
+      featureFlags: { preflightOnly: true }
+    }, '读取平盘银行对账单');
+    const preflightReady = await dispatched.promise;
+    const accepted = Array.isArray(preflightReady.acceptedBankFiles)
+      ? preflightReady.acceptedBankFiles
+      : [];
+    if (accepted.length !== files.length) {
+      const failed = Array.isArray(preflightReady.orderedFileResults)
+        ? preflightReady.orderedFileResults.find((item) => item.status === 'failed')
+        : null;
+      const ledgerPath = text(
+        preflightReady.ledgerEvidence && preflightReady.ledgerEvidence.ledgerPath
+      );
+      if (ledgerPath) {
+        await cleanupStagingPathsAsync([path.dirname(path.resolve(ledgerPath))]);
+      }
+      return {
+        status: 'failed',
+        code: failed && failed.code
+          ? failed.code
+          : 'position-bank-import-failed',
+        message: failed && failed.message
+          ? failed.message
+          : '平盘银行对账单预检失败',
+        detailLines: failed && Array.isArray(failed.detailLines)
+          ? failed.detailLines
+          : []
+      };
+    }
+    const token = crypto.randomUUID();
+    const jobRoot = path.dirname(
+      path.resolve(String(preflightReady.ledgerEvidence.ledgerPath || ''))
+    );
+    this.bankImportTokens.set(token, {
+      streaming: true,
+      preflightReady,
+      jobRoot
+    });
+    const scopes = (preflightReady.ledgerEvidence.manifest.bankScopes || []).map(
+      ({ channel, monthKey }) => ({ channel, monthKey })
+    );
+    const existing = this.store.countBankRowsByScopes(scopes).filter(
+      (scope) => scope.rowCount > 0
+    );
+    return {
+      status: 'needs-confirmation',
+      token,
+      jobId: preflightReady.jobId || dispatched.jobId,
+      fileCount: accepted.length,
+      rowCount: accepted.reduce((sum, file) => sum + Number(file.rowCount || 0), 0),
+      scopes,
+      existing
+    };
+  }
+
+  async applyStreamingBankImport(token) {
+    const normalizedToken = text(token);
+    const parsed = this.bankImportTokens.get(normalizedToken);
+    if (!parsed || parsed.streaming !== true) {
+      throw new PositionReconciliationError(
+        'position-bank-import-token-expired',
+        '银行导入确认已失效，请重新选择文件'
+      );
+    }
+    this.bankImportTokens.delete(normalizedToken);
+    const baseCheckpoint = this.store.persistenceCheckpoint();
+    const operationToken = text(
+      this.operationTokenProvider ? this.operationTokenProvider() : ''
+    );
+    if (!operationToken) {
+      await this.cleanupDiscardedStreamingImport(parsed);
+      throw new PositionReconciliationError(
+        'position-import-intent-not-durable',
+        '银行导入缺少外部 operation token'
+      );
+    }
+    let dispatched;
+    try {
+      const schema = await dispatchPositionLargeImportSchemaMigration({
+        engine: this.positionImportEngine,
+        userDataDir: this.userDataDir,
+        sideDbPath: this.store.dbPath,
+        expectedCheckpoint: baseCheckpoint
+      }).promise;
+      dispatched = this.dispatchTrackedImport({
+        engine: this.positionImportEngine,
+        command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+        files: [],
+        userDataDir: this.userDataDir,
+        sideDbPath: this.store.dbPath,
+        expectedCheckpoint: baseCheckpoint,
+        operationToken,
+        payload: {
+          schemaFingerprint: schema.fingerprint,
+          preflightReady: parsed.preflightReady
+        },
+        featureFlags: { importApply: true }
+      }, '写入平盘银行对账单');
+    } catch (error) {
+      await this.cleanupDiscardedStreamingImport(parsed);
+      throw error;
+    }
+    const result = await dispatched.promise;
+    const currentCheckpoint = this.store.persistenceCheckpoint();
+    if (!result
+        || !positionCheckpointsEqual(result.nextCheckpoint, currentCheckpoint)
+        || currentCheckpoint.generation !== baseCheckpoint.generation + 1) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '银行导入完成后的 checkpoint 证据不一致'
+      );
+    }
+    const scopeInputs = (result.scopes || []).map((scope) => {
+      const key = scopeKey(scope.channel, scope.monthKey);
+      const fileIndexes = new Set((result.fileScopes || [])
+        .filter((item) => scopeKey(item.channel, item.monthKey) === key)
+        .map((item) => Number(item.fileIndex)));
+      const files = result.fileScopes && result.fileScopes.length > 0
+        ? parsed.preflightReady.acceptedBankFiles.filter(
+          (file) => fileIndexes.has(Number(file.fileIndex))
+        )
+        : parsed.preflightReady.acceptedBankFiles;
+      const filePaths = new Set(files.map((file) => path.resolve(file.archivePath)));
+      return {
+        ...scope,
+        inputPaths: files.map((file) => file.archivePath),
+        inputFiles: (result.inputFiles || []).filter(
+          (file) => filePaths.has(path.resolve(file.filePath))
+        )
+      };
+    });
+    return {
+      status: 'ok',
+      message: `已导入 ${result.rowCount} 行平盘银行对账单`,
+      ...result,
+      scopeInputs
+    };
+  }
+
   bankImportArchiveIntent(token) {
     const parsed = this.bankImportTokens.get(text(token));
     if (!parsed) {
@@ -497,11 +921,16 @@ class PositionReconciliationService {
         '银行导入确认已失效，请重新选择文件'
       );
     }
+    if (parsed.streaming === true) {
+      return parsed.preflightReady.acceptedBankFiles.map(
+        (file) => stagedInputArchiveFile(file, 'position-bank')
+      );
+    }
     return parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank'));
   }
 
-  cancelBankImport() {
-    this.clearBankImportTokens();
+  async cancelBankImport() {
+    await this.clearBankImportTokensAsync();
     return { status: 'cancelled' };
   }
 
@@ -634,9 +1063,9 @@ class PositionReconciliationService {
         '请选择至少一份链接原始表'
       );
     }
-    this.clearSourceImportTokens();
+    await this.clearSourceImportTokensAsync();
     const allowedSourceTypes = [...this.streamingSourceTypes];
-    const dispatched = this.positionImportDispatcher({
+    const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
       command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
       files,
@@ -650,14 +1079,13 @@ class PositionReconciliationService {
         const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
           ? preflightReady.acceptedOrdinaryInputFiles
           : [];
-        if (preflightReady.accountConfirmationDescriptor) {
-          throw new PositionReconciliationError(
-            'position-streaming-source-type-disabled',
-            '当前阶段的流式导入不支持与清结算银行账户表混合选择',
-            ['清结算银行账户表将在后续阶段接入流式确认']
-          );
-        }
         if (accepted.length === 0) {
+          if (preflightReady.accountConfirmationDescriptor) {
+            return {
+              preflightOnly: true,
+              archiveManifestHash: preflightReady.archiveManifestHash
+            };
+          }
           throw new PositionReconciliationError(
             'position-streaming-source-empty',
             '预检后没有可提交的普通链接原始表'
@@ -665,42 +1093,43 @@ class PositionReconciliationService {
         }
         return this.authorizeStreamingSourceApply(preflightReady);
       }
-    });
+    }, '导入链接原始表');
     const streamed = await dispatched.promise;
-    const deferred = (Array.isArray(streamed.results) ? streamed.results : []).filter(
-      (item) => (
-        item.status === 'ok'
-        && item.applied !== true
-        && item.sourceType
-        && !this.streamingSourceTypes.has(item.sourceType)
-      )
-    );
-    if (deferred.length === 0) return streamed;
-
-    const staged = deferred.map((item) => ({
-      filePath: item.archivePath,
-      sourceFilePath: item.filePath,
-      sourceFileName: item.fileName,
-      archivePath: item.archivePath,
-      stagingDir: item.stagingDir,
-      stagedSnapshot: item.stagedSnapshot,
-      stagedSha256: item.stagedSha256,
-      stagedSizeBytes: item.stagedSizeBytes
-    }));
-    const legacy = this.prepareLegacyStagedSourceImport(staged, {
-      recordArchiveIntent: false
-    });
-    const legacyByFileIndex = new Map(
-      deferred.map((item, index) => [
-        Number(item.fileIndex),
-        legacy.results[index]
-      ])
-    );
-    const results = streamed.results.map((item) => (
-      legacyByFileIndex.has(Number(item.fileIndex))
+    const sourceResults = Array.isArray(streamed.results)
+      ? streamed.results
+      : (Array.isArray(streamed.orderedFileResults)
+        ? streamed.orderedFileResults
+        : []);
+    const accountDescriptor = streamed.accountConfirmationDescriptor;
+    let accountToken = '';
+    let accountOldValidCount = 0;
+    if (accountDescriptor) {
+      accountToken = crypto.randomUUID();
+      const current = this.store.listRawSummary().find(
+        (row) => row.sourceType === SOURCE_TYPES.BANK_ACCOUNT
+      );
+      accountOldValidCount = current ? Number(current.rowCount) : 0;
+      const ledgerPath = text(streamed.ledgerEvidence && streamed.ledgerEvidence.ledgerPath);
+      if (!ledgerPath) {
+        throw new PositionReconciliationError(
+          'position-import-job-ledger-invalid',
+          '账户快照预检缺少 sealed ledger'
+        );
+      }
+      this.sourceImportTokens.set(accountToken, {
+        streaming: true,
+        preflightReady: streamed,
+        descriptor: accountDescriptor,
+        jobRoot: path.dirname(path.resolve(ledgerPath))
+      });
+    }
+    const results = sourceResults.map((item) => (
+      item.status === 'needs-confirmation'
         ? {
-            ...legacyByFileIndex.get(Number(item.fileIndex)),
-            fileIndex: Number(item.fileIndex)
+            ...item,
+            token: accountToken,
+            oldValidCount: accountOldValidCount,
+            newValidCount: Number(item.rowCount || 0)
           }
         : item
     ));
@@ -709,6 +1138,12 @@ class PositionReconciliationService {
     const confirmationCount = results.filter(
       (item) => item.status === 'needs-confirmation'
     ).length;
+    const resultInputPaths = results
+      .filter((item) => item.status === 'ok')
+      .flatMap((item) => item.inputPaths || []);
+    const resultInputFiles = results
+      .filter((item) => item.status === 'ok')
+      .flatMap((item) => item.inputFiles || []);
     return {
       ...streamed,
       status: successCount > 0 || confirmationCount > 0 ? 'ok' : 'failed',
@@ -721,19 +1156,29 @@ class PositionReconciliationService {
       failedCount,
       confirmationCount,
       archiveDeferred: successCount === 0 && confirmationCount > 0,
-      inputPaths: results
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.inputPaths || []),
-      inputFiles: results
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.inputFiles || []),
-      cleanupPaths: results
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.cleanupPaths || [])
+      inputPaths: resultInputPaths.length > 0
+        ? resultInputPaths
+        : (Array.isArray(streamed.inputPaths) ? streamed.inputPaths : []),
+      inputFiles: resultInputFiles.length > 0
+        ? resultInputFiles
+        : (Array.isArray(streamed.inputFiles) ? streamed.inputFiles : []),
+      cleanupPaths: accountDescriptor
+        ? results.flatMap((item) => item.status === 'needs-confirmation'
+          ? []
+          : (item.cleanupPaths || (item.stagingDir ? [item.stagingDir] : [])))
+        : (Array.isArray(streamed.cleanupPaths) ? streamed.cleanupPaths : [])
     };
   }
 
   applySourceImport(token) {
+    const parsed = this.sourceImportTokens.get(text(token));
+    if (parsed && parsed.streaming === true) {
+      return this.applyStreamingAccountImport(token);
+    }
+    return this.applyLegacySourceImport(token);
+  }
+
+  applyLegacySourceImport(token) {
     const parsed = this.sourceImportTokens.get(text(token));
     if (!parsed) {
       throw new PositionReconciliationError(
@@ -763,6 +1208,70 @@ class PositionReconciliationService {
     };
   }
 
+  async applyStreamingAccountImport(token) {
+    const normalizedToken = text(token);
+    const parsed = this.sourceImportTokens.get(normalizedToken);
+    if (!parsed || parsed.streaming !== true) {
+      throw new PositionReconciliationError(
+        'position-source-import-token-expired',
+        '账户表导入确认已失效，请重新选择文件'
+      );
+    }
+    this.sourceImportTokens.delete(normalizedToken);
+    const baseCheckpoint = this.store.persistenceCheckpoint();
+    const operationToken = text(
+      this.operationTokenProvider ? this.operationTokenProvider() : ''
+    );
+    if (!operationToken) {
+      await this.cleanupDiscardedStreamingImport(parsed);
+      throw new PositionReconciliationError(
+        'position-import-intent-not-durable',
+        '账户快照导入缺少外部 operation token'
+      );
+    }
+    let dispatched;
+    try {
+      const schema = await dispatchPositionLargeImportSchemaMigration({
+        engine: this.positionImportEngine,
+        userDataDir: this.userDataDir,
+        sideDbPath: this.store.dbPath,
+        expectedCheckpoint: baseCheckpoint
+      }).promise;
+      dispatched = this.dispatchTrackedImport({
+        engine: this.positionImportEngine,
+        command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+        files: [],
+        userDataDir: this.userDataDir,
+        sideDbPath: this.store.dbPath,
+        expectedCheckpoint: baseCheckpoint,
+        operationToken,
+        payload: {
+          schemaFingerprint: schema.fingerprint,
+          preflightReady: parsed.preflightReady
+        },
+        featureFlags: { importApply: true }
+      }, '替换清结算银行账户表');
+    } catch (error) {
+      await this.cleanupDiscardedStreamingImport(parsed);
+      throw error;
+    }
+    const result = await dispatched.promise;
+    const currentCheckpoint = this.store.persistenceCheckpoint();
+    if (!result
+        || !positionCheckpointsEqual(result.nextCheckpoint, currentCheckpoint)
+        || currentCheckpoint.generation !== baseCheckpoint.generation + 1) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '账户快照导入完成后的 checkpoint 证据不一致'
+      );
+    }
+    return {
+      status: 'ok',
+      message: `已导入 ${result.rowCount} 行${result.sourceName}`,
+      ...result
+    };
+  }
+
   sourceImportArchiveIntent(token) {
     const parsed = this.sourceImportTokens.get(text(token));
     if (!parsed) {
@@ -771,24 +1280,35 @@ class PositionReconciliationService {
         '账户表导入确认已失效，请重新选择文件'
       );
     }
+    if (parsed.streaming === true) {
+      return [
+        stagedInputArchiveFile(
+          parsed.descriptor,
+          SOURCE_TYPES.BANK_ACCOUNT
+        )
+      ];
+    }
     return [stagedInputArchiveFile(parsed, parsed.sourceType)];
   }
 
-  cancelSourceImport(token) {
+  async cancelSourceImport(token) {
     const normalizedToken = text(token);
     if (normalizedToken) {
       const parsed = this.sourceImportTokens.get(normalizedToken);
       this.sourceImportTokens.delete(normalizedToken);
-      cleanupStagingPaths(parsed && parsed.stagingDir ? [parsed.stagingDir] : []);
+      await this.cleanupUnprotectedStagingPathsAsync(parsed
+        ? [parsed.jobRoot || parsed.stagingDir].filter(Boolean)
+        : []);
     }
     return { status: 'cancelled' };
   }
 
   dataManager() {
+    const bankManager = this.store.getBankManagerSnapshot();
     return {
       status: 'ok',
       unarchived: [
-        this.store.getBankSummary(),
+        bankManager.summary,
         {
           tableName: '平盘交易对账单',
           rowCount: 0,
@@ -801,7 +1321,7 @@ class PositionReconciliationService {
       ],
       archived: [],
       differences: this.store.listDifferenceSummary(),
-      scopes: this.store.listBankScopes()
+      scopes: bankManager.scopes
     };
   }
 

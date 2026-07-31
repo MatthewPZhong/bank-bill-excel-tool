@@ -38,6 +38,11 @@ const {
   listPositionCommittedOperationInputs,
   runPositionSideDbMutation
 } = require('./side-db-mutation');
+const {
+  POSITION_SOURCE_SUMMARY_SCHEMA,
+  readPositionSourceSummary,
+  refreshPositionSourceSummary
+} = require('./source-summary-cache');
 
 const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
 const POSITION_DB_INITIALIZATION_MODES = Object.freeze({
@@ -84,6 +89,8 @@ const SCHEMA = `
     PRIMARY KEY(kind, scope_key)
   );
 
+  ${POSITION_SOURCE_SUMMARY_SCHEMA}
+
   CREATE TABLE IF NOT EXISTS position_bank_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     biz_id TEXT NOT NULL UNIQUE,
@@ -108,6 +115,8 @@ const SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS idx_position_bank_scope
     ON position_bank_rows(channel, month_key, status, import_order);
+  CREATE INDEX IF NOT EXISTS idx_position_bank_scope_dates
+    ON position_bank_rows(channel, month_key, status, bill_date);
   CREATE INDEX IF NOT EXISTS idx_position_bank_fund_type
     ON position_bank_rows(working_fund_type, status);
 
@@ -1825,24 +1834,63 @@ class PositionReconciliationStore {
     `).all(...values).map((row) => ({ ...row, rowCount: Number(row.rowCount) }));
   }
 
-  getBankSummary() {
-    const row = this.db.prepare(`
-      SELECT COUNT(*) AS rowCount, MIN(bill_date) AS dateMin, MAX(bill_date) AS dateMax
-      FROM position_bank_rows
-    `).get();
-    const statuses = this.db.prepare(`
-      SELECT status, COUNT(*) AS rowCount
-      FROM position_bank_rows
-      GROUP BY status
-      ORDER BY status
-    `).all().map((item) => ({ status: item.status, rowCount: Number(item.rowCount) }));
+  getBankManagerSnapshot() {
+    const scopes = this.listBankScopes();
+    const statusCounts = new Map();
+    let rowCount = 0;
+    let dateMin = '';
+    let dateMax = '';
+    for (const scope of scopes) {
+      const count = Number(scope.rowCount);
+      rowCount += count;
+      statusCounts.set(scope.status, (statusCounts.get(scope.status) || 0) + count);
+      if (scope.dateMin && (!dateMin || scope.dateMin < dateMin)) dateMin = scope.dateMin;
+      if (scope.dateMax && (!dateMax || scope.dateMax > dateMax)) dateMax = scope.dateMax;
+    }
+    const statuses = [...statusCounts.entries()]
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([status, count]) => ({ status, rowCount: count }));
     return {
-      tableName: '平盘银行对账单',
-      rowCount: Number(row.rowCount),
-      dateMin: row.dateMin || '',
-      dateMax: row.dateMax || '',
-      statuses
+      summary: {
+        tableName: '平盘银行对账单',
+        rowCount,
+        dateMin,
+        dateMax,
+        statuses
+      },
+      scopes
     };
+  }
+
+  getBankSummary() {
+    return this.getBankManagerSnapshot().summary;
+  }
+
+  countBankRowsByScopes(scopes) {
+    const normalized = [...new Map(
+      (Array.isArray(scopes) ? scopes : []).map((scope) => {
+        const channel = text(scope && scope.channel);
+        const monthKey = text(scope && scope.monthKey);
+        return [scopeKey(channel, monthKey), { channel, monthKey }];
+      }).filter(([, scope]) => scope.channel && scope.monthKey)
+    ).values()];
+    if (normalized.length === 0) return [];
+    const channels = [...new Set(normalized.map((scope) => scope.channel))];
+    const months = [...new Set(normalized.map((scope) => scope.monthKey))];
+    const counts = new Map(this.db.prepare(`
+      SELECT channel, month_key AS monthKey, COUNT(*) AS rowCount
+      FROM position_bank_rows
+      WHERE channel IN (${placeholders(channels)})
+        AND month_key IN (${placeholders(months)})
+      GROUP BY channel, month_key
+    `).all(...channels, ...months).map((row) => [
+      scopeKey(row.channel, row.monthKey),
+      Number(row.rowCount)
+    ]));
+    return normalized.map((scope) => ({
+      ...scope,
+      rowCount: counts.get(scopeKey(scope.channel, scope.monthKey)) || 0
+    }));
   }
 
   getBankRows({ channels = [], months = [], statuses = [] } = {}) {
@@ -1927,6 +1975,10 @@ class PositionReconciliationStore {
       normalized.forEach((mapping) => insert.run(mapping.midAccountId, mapping.clearingAccountId));
       this.bumpRevision('mapping', 'global');
       this.rebuildLinkedRows(SOURCE_TYPES.FUND_TRANSFER);
+      refreshPositionSourceSummary(this.db, SOURCE_TYPES.FUND_TRANSFER, {
+        refreshRaw: false,
+        refreshLinked: true
+      });
       return { count: normalized.length };
     });
   }
@@ -1965,15 +2017,21 @@ class PositionReconciliationStore {
     const result = Object.fromEntries(
       Object.values(SOURCE_TYPES).map((sourceType) => [sourceType, []])
     );
-    const rows = this.db.prepare(`
-      SELECT source_type AS sourceType, month_key AS monthKey
-      FROM position_source_rows
-      WHERE month_key IS NOT NULL AND TRIM(month_key) <> ''
-      GROUP BY source_type, month_key
-      ORDER BY source_type, month_key
-    `).all();
-    for (const row of rows) {
-      if (result[row.sourceType]) result[row.sourceType].push(row.monthKey);
+    for (const sourceType of Object.values(SOURCE_TYPES)) {
+      const cached = readPositionSourceSummary(this.db, sourceType);
+      if (cached) {
+        result[sourceType] = cached.sourceMonths.slice();
+        continue;
+      }
+      result[sourceType] = this.db.prepare(`
+        SELECT month_key AS monthKey
+        FROM position_source_rows
+        WHERE source_type = ?
+          AND month_key IS NOT NULL
+          AND TRIM(month_key) <> ''
+        GROUP BY month_key
+        ORDER BY month_key
+      `).all(sourceType).map((row) => row.monthKey);
     }
     return result;
   }
@@ -2060,11 +2118,12 @@ class PositionReconciliationStore {
       }
       this.rebuildLinkedRows(sourceType);
       this.bumpRevision('source', sourceType);
+      const summary = refreshPositionSourceSummary(this.db, sourceType);
       return {
         sourceType,
         sourceName: SOURCE_DEFINITIONS[sourceType].sourceName,
         rowCount: parsed.records.length,
-        linkedRowCount: this.countLinkedRows(sourceType),
+        linkedRowCount: summary.linkedRowCount,
         collapsedDuplicateCount: Number(parsed.collapsedDuplicateCount) || 0
       };
     }, {
@@ -2175,22 +2234,33 @@ class PositionReconciliationStore {
   listLinkedSummary() {
     return SOURCE_DISPLAY_ORDER.map((sourceType) => {
       const definition = SOURCE_DEFINITIONS[sourceType];
+      const cached = readPositionSourceSummary(this.db, sourceType);
+      if (cached) {
+        return {
+          sourceType,
+          tableName: definition.linkedName,
+          rowCount: cached.linkedRowCount,
+          dateMin: cached.linkedDateMin,
+          dateMax: cached.linkedDateMax,
+          updatedAt: cached.linkedUpdatedAt
+        };
+      }
       const row = this.db.prepare(`
-        SELECT COUNT(*) AS rowCount, MIN(event_date) AS dateMin, MAX(event_date) AS dateMax,
-               MAX(created_at) AS linkedUpdatedAt
-        FROM position_link_rows
-        WHERE source_type = ? AND visible = 1
-      `).get(sourceType);
+          SELECT COUNT(*) AS rowCount, MIN(event_date) AS dateMin, MAX(event_date) AS dateMax,
+                 MAX(created_at) AS linkedUpdatedAt
+          FROM position_link_rows
+          WHERE source_type = ? AND visible = 1
+        `).get(sourceType);
       const revision = this.db.prepare(`
-        SELECT updated_at AS updatedAt
-        FROM position_revisions
-        WHERE kind = 'linked' AND scope_key = ?
-      `).get(sourceType);
+          SELECT updated_at AS updatedAt
+          FROM position_revisions
+          WHERE kind = 'linked' AND scope_key = ?
+        `).get(sourceType);
       const source = this.db.prepare(`
-        SELECT MAX(updated_at) AS updatedAt
-        FROM position_source_rows
-        WHERE source_type = ?
-      `).get(sourceType);
+          SELECT MAX(updated_at) AS updatedAt
+          FROM position_source_rows
+          WHERE source_type = ?
+        `).get(sourceType);
       return {
         sourceType,
         tableName: definition.linkedName,
@@ -2205,6 +2275,17 @@ class PositionReconciliationStore {
   listRawSummary() {
     return SOURCE_DISPLAY_ORDER.map((sourceType) => {
       const definition = SOURCE_DEFINITIONS[sourceType];
+      const cached = readPositionSourceSummary(this.db, sourceType);
+      if (cached) {
+        return {
+          sourceType,
+          tableName: definition.sourceName,
+          rowCount: cached.rawRowCount,
+          dateMin: cached.rawDateMin,
+          dateMax: cached.rawDateMax,
+          updatedAt: cached.rawUpdatedAt
+        };
+      }
       const row = this.db.prepare(`
         SELECT COUNT(*) AS rowCount, MIN(event_date) AS dateMin, MAX(event_date) AS dateMax,
                MAX(updated_at) AS updatedAt
@@ -2249,6 +2330,7 @@ class PositionReconciliationStore {
       }
       this.rebuildLinkedRows(sourceType);
       this.bumpRevision('source', sourceType);
+      refreshPositionSourceSummary(this.db, sourceType);
       return { deletedCount: Number(result.changes), sourceType };
     });
   }

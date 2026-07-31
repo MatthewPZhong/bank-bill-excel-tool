@@ -2927,6 +2927,74 @@ select.mapping-text-input {
   background: #fff;
 }
 
+.position-import-progress-dialog {
+  width: min(560px, calc(100vw - 56px));
+  min-height: 0;
+}
+
+.position-import-progress-dialog .position-dialog-content {
+  overflow: visible;
+}
+
+.position-import-progress-body {
+  display: grid;
+  gap: 14px;
+  padding: 22px 24px 24px;
+}
+
+.position-import-progress-stage {
+  min-height: 22px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+
+.position-import-progress-file {
+  min-height: 20px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.position-import-progress-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+.position-import-progress-metrics > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px 10px;
+  text-align: center;
+}
+
+.position-import-progress-metrics > div + div {
+  border-left: 1px solid var(--line-soft);
+}
+
+.position-import-progress-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.position-import-progress-metrics strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .position-manager-dialog {
   height: min(650px, calc(100vh - 56px));
 }

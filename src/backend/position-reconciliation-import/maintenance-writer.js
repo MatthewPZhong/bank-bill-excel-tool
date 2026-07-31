@@ -23,6 +23,9 @@ const {
   runPositionSideDbMutation
 } = require('../../main-process/position-reconciliation/side-db-mutation');
 const {
+  refreshPositionSourceSummary
+} = require('../../main-process/position-reconciliation/source-summary-cache');
+const {
   parseJson,
   serializeJson
 } = require('../../main-process/position-reconciliation/store');
@@ -30,6 +33,9 @@ const {
   POSITION_IMPORT_COMMANDS,
   POSITION_IMPORT_MAINTENANCE_BATCH_SIZE
 } = require('./constants');
+const {
+  assertPositionImportDiskSpace
+} = require('./disk-space-gate');
 
 const MAINTENANCE_COMMANDS = new Set([
   POSITION_IMPORT_COMMANDS.DELETE_BANK,
@@ -160,7 +166,9 @@ async function deleteSourceRowsStreamed({
   payload,
   cancelToken,
   onProgress,
-  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE
+  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE,
+  sideDbPath,
+  availableBytes
 }) {
   const selection = sourceDeleteSelection(payload);
   const normalizedBatchSize = normalizeBatchSize(batchSize);
@@ -180,6 +188,12 @@ async function deleteSourceRowsStreamed({
         FROM position_source_rows
         WHERE source_type = ?${monthClause}
       `).get(...args).count);
+      assertPositionImportDiskSpace({
+        kind: 'maintenance',
+        sideDbPath,
+        rowCount: expectedRows,
+        availableBytes
+      });
       const statement = db.prepare(`
         DELETE FROM position_source_rows
         WHERE id IN (
@@ -208,6 +222,15 @@ async function deleteSourceRowsStreamed({
       }
       bumpRevision(db, 'source', selection.sourceType);
       bumpRevision(db, 'linked', selection.sourceType);
+      refreshPositionSourceSummary(db, selection.sourceType, {
+        onPhase: (phase) => emitProgress(onProgress, {
+          stage: 'summarizing',
+          summaryPhase: phase,
+          scannedRows: deletedCount,
+          acceptedRows: expectedRows,
+          committedRows: 0
+        })
+      });
       return {
         sourceType: selection.sourceType,
         deletedCount
@@ -236,7 +259,9 @@ async function deleteBankScopesStreamed({
   payload,
   cancelToken,
   onProgress,
-  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE
+  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE,
+  sideDbPath,
+  availableBytes
 }) {
   const selection = bankDeleteSelection(payload);
   const normalizedBatchSize = normalizeBatchSize(batchSize);
@@ -268,6 +293,12 @@ async function deleteBankScopesStreamed({
           '所选 Channel 和月份下没有可删除的银行数据'
         );
       }
+      assertPositionImportDiskSpace({
+        kind: 'maintenance',
+        sideDbPath,
+        rowCount: expectedRows,
+        availableBytes
+      });
       const statement = db.prepare(`
         DELETE FROM position_bank_rows
         WHERE id IN (
@@ -369,7 +400,9 @@ async function rebuildFundTransferLinksStreamed({
   payload,
   cancelToken,
   onProgress,
-  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE
+  batchSize = POSITION_IMPORT_MAINTENANCE_BATCH_SIZE,
+  sideDbPath,
+  availableBytes
 }) {
   const mappings = normalizeMappings(payload && payload.mappings);
   const normalizedBatchSize = normalizeBatchSize(batchSize);
@@ -380,6 +413,17 @@ async function rebuildFundTransferLinksStreamed({
     requireExternalOperationToken: true,
     mutate: async () => {
       assertNotCancelled(cancelToken);
+      const totalRows = Number(db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_source_rows
+        WHERE source_type = ?
+      `).get(SOURCE_TYPES.FUND_TRANSFER).count);
+      assertPositionImportDiskSpace({
+        kind: 'maintenance',
+        sideDbPath,
+        rowCount: totalRows,
+        availableBytes
+      });
       db.exec('DELETE FROM position_account_mappings;');
       const insertMapping = db.prepare(`
         INSERT INTO position_account_mappings(mid_account_id, clearing_account_id)
@@ -392,11 +436,6 @@ async function rebuildFundTransferLinksStreamed({
       db.prepare(
         'DELETE FROM position_link_rows WHERE source_type = ?'
       ).run(SOURCE_TYPES.FUND_TRANSFER);
-      const totalRows = Number(db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM position_source_rows
-        WHERE source_type = ?
-      `).get(SOURCE_TYPES.FUND_TRANSFER).count);
       const sourceRows = db.prepare(`
         SELECT id, business_key AS businessKey, event_date AS eventDate,
                month_key AS monthKey, source_row_number AS sourceRowNumber,
@@ -495,6 +534,17 @@ async function rebuildFundTransferLinksStreamed({
       }
       bumpRevision(db, 'mapping', 'global');
       bumpRevision(db, 'linked', SOURCE_TYPES.FUND_TRANSFER);
+      refreshPositionSourceSummary(db, SOURCE_TYPES.FUND_TRANSFER, {
+        refreshRaw: false,
+        refreshLinked: true,
+        onPhase: (phase) => emitProgress(onProgress, {
+          stage: 'summarizing',
+          summaryPhase: phase,
+          scannedRows,
+          acceptedRows: totalRows,
+          committedRows: 0
+        })
+      });
       return {
         count: mappings.length,
         sourceRowCount: scannedRows,
@@ -539,7 +589,9 @@ async function runPositionMaintenanceJob(input = {}) {
       payload: input.payload || {},
       cancelToken: input.cancelToken,
       onProgress: input.onProgress,
-      batchSize: input.batchSize
+      batchSize: input.batchSize,
+      sideDbPath,
+      availableBytes: input.availableBytes
     };
     if (command === POSITION_IMPORT_COMMANDS.DELETE_BANK) {
       return await deleteBankScopesStreamed(common);

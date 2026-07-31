@@ -92,6 +92,8 @@ const {
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
   authorizePositionImportApply,
   positionBusinessStateForResult,
+  positionPersistentStagingProtectionPaths,
+  positionReconciliationFailureResult,
   runPositionOperationLifecycle,
   settlePositionArchiveResult
 } = require('./main-process/position-reconciliation/operation-lifecycle');
@@ -14346,7 +14348,17 @@ function persistPositionArchiveIntentIfNeeded(
     };
   }
   const evidence = positionArchiveIntentEvidence(pending, currentCheckpoint);
-  if (!evidence.requiresPersistence) return null;
+  if (!evidence.requiresPersistence) {
+    return options.includeCleanupCandidates === true
+      ? {
+          archiveResult: null,
+          uncommittedInputPaths: positionUncommittedRecoveryInputPaths(
+            { ...pending, archiveFiles: files },
+            []
+          )
+        }
+      : null;
+  }
   if (!service || typeof service.listCommittedOperationInputs !== 'function') {
     throw new Error('平盘业务已提交但无法读取文件级提交凭证，已停止恢复');
   }
@@ -14448,12 +14460,19 @@ function getPositionReconciliationService() {
         recordArchiveIntent: (filePaths, role) => {
           recordPositionArchiveIntentFiles(filePaths, role);
         },
-        protectedStagingPaths: () => {
-          if (!archiveCenterService
-              || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
-            return null;
+        protectedStagingPaths: positionArchivePersistentStagingPaths,
+        positionImportEngine: 'streaming',
+        onImportProgress: (progress) => {
+          try {
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send(
+                'position-reconciliation:import-progress',
+                progress
+              );
+            }
+          } catch (_error) {
+            // Renderer may be closing while the utility process settles.
           }
-          return archiveCenterService.listUnresolvedSourcePaths();
         },
         authorizeStreamingSourceApply: async (preflightReady) => {
           const migration = dispatchPositionLargeImportSchemaMigration({
@@ -14487,7 +14506,8 @@ function getPositionReconciliationService() {
       database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       positionReconciliationService = service;
       if (recovery && Array.isArray(recovery.uncommittedInputPaths)) {
-        cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths);
+        void cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths)
+          .catch(() => undefined);
       }
       const initializationResult = service.store
         && typeof service.store.initializationResult === 'function'
@@ -14587,15 +14607,6 @@ async function runPositionReconciliationOperation(channel, operation) {
   }
 }
 
-function positionReconciliationFailureResult(error) {
-  return {
-    status: 'failed',
-    code: error && error.code ? String(error.code) : 'position-reconciliation-failed',
-    message: error && error.message ? String(error.message) : String(error),
-    detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
-  };
-}
-
 async function withPositionReconciliationLock(operation, task) {
   const lock = tryAcquireBankStatementOpLock(`position-reconciliation-${operation}`);
   if (!lock.acquired) return { status: 'busy', message: lock.message };
@@ -14679,9 +14690,9 @@ function registerPositionReconciliationHandlers() {
     })
   );
 
-  ipcMain.handle('position-reconciliation:bank:cancel-import', () => {
+  ipcMain.handle('position-reconciliation:bank:cancel-import', async () => {
     try {
-      return getPositionReconciliationService().cancelBankImport();
+      return await getPositionReconciliationService().cancelBankImport();
     } catch (error) {
       return positionReconciliationFailureResult(error);
     }
@@ -14715,9 +14726,17 @@ function registerPositionReconciliationHandlers() {
     })
   );
 
-  ipcMain.handle('position-reconciliation:source:cancel-import', (_event, token) => {
+  ipcMain.handle('position-reconciliation:source:cancel-import', async (_event, token) => {
     try {
-      return getPositionReconciliationService().cancelSourceImport(token);
+      return await getPositionReconciliationService().cancelSourceImport(token);
+    } catch (error) {
+      return positionReconciliationFailureResult(error);
+    }
+  });
+
+  ipcMain.handle('position-reconciliation:import:cancel', (_event, jobId) => {
+    try {
+      return getPositionReconciliationService().cancelActiveImport(jobId);
     } catch (error) {
       return positionReconciliationFailureResult(error);
     }
@@ -15679,7 +15698,7 @@ function positionArchiveStagingRoot() {
   );
 }
 
-function cleanupPositionArchiveStagingDirectories(targets) {
+async function cleanupPositionArchiveStagingDirectories(targets) {
   if (!Array.isArray(targets) || targets.length === 0) return;
   const root = positionArchiveStagingRoot();
   if (!root) return;
@@ -15687,13 +15706,18 @@ function cleanupPositionArchiveStagingDirectories(targets) {
     const target = path.resolve(String(value || ''));
     if (target === root || !target.startsWith(`${root}${path.sep}`)) continue;
     try {
-      fs.rmSync(target, { recursive: true, force: true });
+      await fs.promises.rm(target, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100
+      });
       const batchRoot = path.dirname(target);
-      if (batchRoot !== root
-          && batchRoot.startsWith(`${root}${path.sep}`)
-          && fs.existsSync(batchRoot)
-          && fs.readdirSync(batchRoot).length === 0) {
-        fs.rmdirSync(batchRoot);
+      if (batchRoot !== root && batchRoot.startsWith(`${root}${path.sep}`)) {
+        const entries = await fs.promises.readdir(batchRoot);
+        if (entries.length === 0) {
+          await fs.promises.rmdir(batchRoot);
+        }
       }
     } catch (_error) {
       // 成功存档后的临时副本清理失败留待下次启动回收。
@@ -15701,14 +15725,42 @@ function cleanupPositionArchiveStagingDirectories(targets) {
   }
 }
 
-function cleanupPositionArchiveSourcePaths(sourcePaths) {
-  const root = positionArchiveStagingRoot();
-  if (!root
-      || !archiveCenterService
+function positionArchivePersistentStagingPaths() {
+  if (!archiveCenterService
       || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
-    return;
+    return null;
   }
+  try {
+    return positionPersistentStagingProtectionPaths(
+      archiveCenterService.listUnresolvedSourcePaths(),
+      readPositionPendingOperation()
+    );
+  } catch (_error) {
+    return null;
+  }
+}
+
+function positionArchiveProtectedStagingPaths() {
+  let protectedPaths = positionArchivePersistentStagingPaths();
+  if (!protectedPaths) return null;
+  try {
+    if (positionReconciliationService
+        && typeof positionReconciliationService.activeImportStagingPaths === 'function') {
+      const activePaths = positionReconciliationService.activeImportStagingPaths();
+      if (!Array.isArray(activePaths)) return null;
+      protectedPaths = protectedPaths.concat(activePaths);
+    }
+  } catch (_error) {
+    return null;
+  }
+  return protectedPaths;
+}
+
+async function cleanupPositionArchiveSourcePaths(sourcePaths) {
+  const root = positionArchiveStagingRoot();
+  if (!root) return;
   const directories = [];
+  const jobRoots = [];
   for (const value of Array.isArray(sourcePaths) ? sourcePaths : []) {
     const sourcePath = path.resolve(String(value || ''));
     const relative = path.relative(root, sourcePath);
@@ -15720,33 +15772,25 @@ function cleanupPositionArchiveSourcePaths(sourcePaths) {
       continue;
     }
     directories.push(path.dirname(sourcePath));
+    jobRoots.push(path.join(root, parts[0]));
   }
-  let unresolvedSourcePaths;
-  try {
-    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
-  } catch (_error) {
-    return;
-  }
-  cleanupPositionArchiveStagingDirectories(
-    filterStagingPathsWithoutProtectedSources(directories, unresolvedSourcePaths)
+  const protectedPaths = positionArchiveProtectedStagingPaths();
+  if (!protectedPaths) return;
+  await cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(
+      directories.concat(jobRoots),
+      protectedPaths
+    )
   );
 }
 
-function cleanupPositionArchiveStaging(runtime) {
+async function cleanupPositionArchiveStaging(runtime) {
   const targets = runtime && Array.isArray(runtime.cleanupPaths) ? runtime.cleanupPaths : [];
-  if (targets.length === 0
-      || !archiveCenterService
-      || typeof archiveCenterService.listUnresolvedSourcePaths !== 'function') {
-    return;
-  }
-  let unresolvedSourcePaths;
-  try {
-    unresolvedSourcePaths = archiveCenterService.listUnresolvedSourcePaths();
-  } catch (_error) {
-    return;
-  }
-  cleanupPositionArchiveStagingDirectories(
-    filterStagingPathsWithoutProtectedSources(targets, unresolvedSourcePaths)
+  if (targets.length === 0) return;
+  const protectedPaths = positionArchiveProtectedStagingPaths();
+  if (!protectedPaths) return;
+  await cleanupPositionArchiveStagingDirectories(
+    filterStagingPathsWithoutProtectedSources(targets, protectedPaths)
   );
 }
 

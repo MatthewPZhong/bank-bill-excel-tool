@@ -8527,6 +8527,18 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       positionReconciliationUI?.previewMappingDialog();
     }, 120);
+  } else if (info.previewModal === 'position-reconciliation-import-progress') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewImportProgress('preflight');
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-import-stopping') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewImportProgress('stopping');
+    }, 120);
+  } else if (info.previewModal === 'position-reconciliation-import-committing') {
+    setTimeout(() => {
+      positionReconciliationUI?.previewImportProgress('committing');
+    }, 120);
   } else if (info.previewModal === 'scenario-config-c4-gateway') {
     setTimeout(() => {
       applyScenarioConfigC4GatewayPreviewState();

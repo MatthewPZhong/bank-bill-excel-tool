@@ -144,7 +144,7 @@ src/main-process/position-reconciliation/
 | D-01 | `jobId`、`confirmationToken`、`operationToken` 是三种不同身份 | 禁止跨 IPC 复用 operationToken |
 | D-02 | 普通来源 apply 前必须由 main 持久化 archive intent，并收到持久化确认后才允许 worker 写 side DB | 引入 `PREFLIGHT_READY → APPLY_GRANTED` 握手 |
 | D-03 | job ledger 预检结束后封存，不再修改 | apply 只读打开并验证 SHA/size/snapshot/schema/manifest |
-| D-04 | 生产路径不依赖可写 ATTACH ledger | ledger 使用独立只读连接；银行键集合流式复制到 side connection 的 TEMP 表 |
+| D-04 | 生产路径不依赖可写 ATTACH ledger | ledger 使用独立只读连接；银行只复制 scope 聚合，逐行按 BizId 精确复核 ledger 归属 |
 | D-05 | worker 与 Store 共用唯一 mutation helper | helper 必须精确校验 expected checkpoint 和外部 operationToken |
 | D-06 | 增量链接写入前必须补 `source_row_id` 索引和唯一约束 | 未迁移成功不得启用生产增量 writer |
 | D-07 | 新链接读取顺序由 `(source_row_id, leg_index, id)` 定义 | 新写 `ordinal=source_row_id`；旧 ordinal 不回填 |
@@ -313,9 +313,10 @@ IDLE
 1. 同一次选择最多一份账户快照。
 2. 只有 `账户状态=正常` 的行进入有效快照。
 3. 非正常账户属于 `readerFilteredRows`，不是错误，也不进入来源表。
-4. 过滤后 0 行：拒绝，旧快照保持不变。
-5. prepare 只保存 manifest/token，不保存完整行数组。
-6. 用户确认后的 apply 为单一整表替换事务。
+4. 内容完全相同的账户物理行也分别保留；账户记录身份绑定完整规范行和 Excel 物理行号，不按内容摘要折叠。
+5. 过滤后 0 行：拒绝，旧快照保持不变。
+6. prepare 只保存 manifest/token，不保存完整行数组。
+7. 用户确认后的 apply 为单一整表替换事务。
 7. account apply 使用新的 operationToken，不能复用 source prepare token。
 
 ### 4.4 来源原始行与链接派生必须分开
@@ -1134,34 +1135,28 @@ ORDER BY source_row_id, leg_index, id
 Bank apply 采用一个 transaction：
 
 1. 只读打开 sealed ledger。
-2. 在 side DB connection 创建 TEMP 表：
+2. 在 side DB connection 只创建小型 scope TEMP 表：
 
 ```sql
-CREATE TEMP TABLE incoming_bank_keys(
-  biz_id TEXT PRIMARY KEY,
-  channel TEXT NOT NULL,
-  month_key TEXT NOT NULL
-);
-
 CREATE TEMP TABLE incoming_bank_scopes(
   channel TEXT NOT NULL,
   month_key TEXT NOT NULL,
+  row_count INTEGER NOT NULL,
   PRIMARY KEY(channel, month_key)
 );
 ```
 
-3. 从 ledger cursor 流式复制 keys/scopes 到 TEMP 表，禁止 JS 数组。
+3. 从 ledger 复制 scope 聚合；禁止复制完整 BizId TEMP 表或构造 JS 主键数组。
 4. 进入 shared mutation helper。
-5. 用 SQL join 检查 incoming BizId 与现有其它 scope 冲突；返回前 50 条并记录总数。
-6. 冲突存在：回滚，不删除旧范围。
-7. 删除 TEMP scopes 命中的旧银行行。
-8. 按文件选择顺序重新流式扫描并 INSERT 全部银行行。
-9. 49 列输入只写 46 列业务 JSON。
-10. 验证 batch/per-file counts、hash、scopes、importOrder。
-11. bump 每个实际目标 scope 一次，bump `bank-global/all` 一次。
-12. 写全部文件 evidence。
-13. checkpoint 只推进一次。
-14. COMMIT。
+5. 删除 TEMP scopes 命中的旧银行行。
+6. 按文件选择顺序重新流式扫描；每行 BizId、scope、文件序号和物理行号必须与只读 ledger 首次归属一致。
+7. INSERT 依赖正式表 BizId 唯一约束原子阻断其它 scope 冲突；冲突时查询该 BizId 的既有 scope，返回 `position-bank-existing-bizid-conflict` 并回滚整个事务。
+8. 49 列输入只写 46 列业务 JSON。
+9. 验证 batch/per-file counts、hash、scopes、importOrder。
+10. bump 每个实际目标 scope 一次，bump `bank-global/all` 一次。
+11. 写全部文件 evidence。
+12. checkpoint 只推进一次。
+13. COMMIT。
 
 ### 10.5 Account writer
 
@@ -1231,6 +1226,11 @@ rebuildFundTransferLinksStreamed(mappings)
 ```
 
 `status/dataManager/linkedManager` 继续只返回小型聚合结果。300 万行下同步 SQL P95 超过 1 秒时，发布前必须补索引或异步化。
+
+普通来源和链接管理摘要使用 side DB 内的派生缓存
+`position_source_summaries`。来源导入、来源删除、账户快照替换和
+FundTransfer 映射重建必须在同一个业务事务内刷新对应缓存；缓存缺失或结构损坏时只允许
+回退事实表查询，不得把损坏缓存当成 0 行。缓存不是匹配、消费或恢复的业务事实来源。
 
 ---
 
@@ -1343,7 +1343,14 @@ Renderer 必须在 `finally` 调用 unsubscribe。
 - 显示 stage、文件序号、文件名、扫描/接受/提交行数、耗时；
 - staging/preflight/applying/deriving 阶段显示“取消导入”；
 - 用户点击后变为“正在停止…”并禁用重复点击；
-- committing 阶段取消按钮禁用，文案“正在提交，无法取消”；
+- summarizing/committing 阶段取消按钮禁用，文案“正在提交，无法取消”；
+- worker 必须再次拒绝在 summarizing/committing 阶段到达的竞态取消，并返回
+  `CANCEL_ACK accepted=false`；main 收到后取消强制终止计时器并恢复真实阶段，禁止把已进入
+  提交区间的任务显示为停止成功；
+- utility process 真实进度间隔超过 750ms 时，dispatcher 只重复最后一份阶段和计数作为
+  heartbeat，不得虚增扫描、接受或提交数量；
+- UI 耗时和 benchmark 间隔使用 monotonic clock；系统墙上时间跳变不得制造负耗时、虚假
+  超时或错误的进度静默结论；
 - worker 完成/失败后关闭；
 - bank/account 确认框在 prepare 完成后继续沿用当前 UI；
 - 增加 preview：
@@ -1836,6 +1843,9 @@ worker peak RSS/heap
 side DB/WAL/staging/ledger/SST spill 峰值磁盘
 status/data-manager/linked-manager P50/P95
 ```
+
+运行耗时、采样间隔和进度静默必须由 monotonic clock 计算；`generatedAt/capturedAt`
+可继续保留墙上时间用于审计。两种时间不得混用。
 
 初始门槛：
 

@@ -44,6 +44,13 @@
     return details.length > 0 ? `${message}；${details.join('；')}` : message;
   }
 
+  function isImportCancelledResult(result) {
+    return Boolean(result && (
+      result.status === 'cancelled'
+      || result.code === 'position-import-cancelled'
+    ));
+  }
+
   function createPositionReconciliationUI({
     api,
     openModal,
@@ -225,6 +232,113 @@
       return button;
     }
 
+    function importStageText(stage) {
+      return {
+        starting: '正在启动导入任务',
+        staging: '正在复制并校验文件',
+        preflight: '正在识别和校验数据',
+        'awaiting-apply-grant': '正在确认存档与写入凭证',
+        'preparing-apply': '正在准备写入索引',
+        applying: '正在写入数据',
+        deriving: '正在生成链接对账数据',
+        summarizing: '正在汇总并提交，无法取消',
+        committing: '正在提交，无法取消',
+        committed: '当前文件已提交',
+        stopping: '正在停止…',
+        'force-terminating': '正在终止并核对已提交数据'
+      }[String(stage || '')] || '正在处理';
+    }
+
+    async function withImportProgress(title, task, previewProgress = null) {
+      if (!api || typeof api.onImportProgress !== 'function') {
+        return task();
+      }
+      const shell = createDialogShell(
+        title,
+        'position-import-progress-dialog',
+        () => {}
+      );
+      shell.closeButton.hidden = true;
+      shell.content.innerHTML = `
+        <div class="position-import-progress-body">
+          <div class="position-import-progress-stage" data-role="stage">正在启动导入任务</div>
+          <div class="position-import-progress-file" data-role="file">准备文件…</div>
+          <div class="position-import-progress-metrics">
+            <div><span>已扫描</span><strong data-role="scanned">0</strong></div>
+            <div><span>已接受</span><strong data-role="accepted">0</strong></div>
+            <div><span>已提交</span><strong data-role="committed">0</strong></div>
+            <div><span>耗时</span><strong data-role="elapsed">0秒</strong></div>
+          </div>
+        </div>
+      `;
+      const cancel = makeButton('取消导入');
+      const right = document.createElement('div');
+      right.className = 'position-footer-right';
+      right.append(cancel);
+      shell.footer.append(document.createElement('span'), right);
+      const nodes = {
+        stage: shell.content.querySelector('[data-role="stage"]'),
+        file: shell.content.querySelector('[data-role="file"]'),
+        scanned: shell.content.querySelector('[data-role="scanned"]'),
+        accepted: shell.content.querySelector('[data-role="accepted"]'),
+        committed: shell.content.querySelector('[data-role="committed"]'),
+        elapsed: shell.content.querySelector('[data-role="elapsed"]')
+      };
+      let jobId = '';
+      let stopping = false;
+      const updateProgress = (progress) => {
+        if (!progress || typeof progress !== 'object') return;
+        if (jobId && progress.jobId && progress.jobId !== jobId) return;
+        if (progress.jobId) jobId = progress.jobId;
+        const stage = String(progress.stage || '');
+        nodes.stage.textContent = importStageText(stage);
+        const currentFile = Number(progress.currentFile) || 0;
+        const totalFiles = Number(progress.totalFiles) || 0;
+        const fileName = String(progress.fileName || '').trim();
+        nodes.file.textContent = fileName
+          ? `${totalFiles > 0 ? `第 ${currentFile}/${totalFiles} 个文件：` : ''}${fileName}`
+          : '准备文件…';
+        nodes.scanned.textContent = String(Number(progress.scannedRows) || 0);
+        nodes.accepted.textContent = String(Number(progress.acceptedRows) || 0);
+        nodes.committed.textContent = String(Number(progress.committedRows) || 0);
+        nodes.elapsed.textContent = `${Math.floor((Number(progress.elapsedMs) || 0) / 1000)}秒`;
+        if (stage === 'summarizing' || stage === 'committing') {
+          cancel.disabled = true;
+          cancel.textContent = '正在提交，无法取消';
+        } else if (stage === 'stopping' || stage === 'force-terminating') {
+          stopping = true;
+          cancel.disabled = true;
+          cancel.textContent = '正在停止…';
+        }
+      };
+      const unsubscribe = api.onImportProgress(updateProgress);
+      cancel.addEventListener('click', async () => {
+        if (stopping || cancel.disabled || !jobId) return;
+        stopping = true;
+        cancel.disabled = true;
+        cancel.textContent = '正在停止…';
+        nodes.stage.textContent = '正在停止…';
+        const result = await api.cancelActiveImport(jobId);
+        if (result && result.status === 'not-cancellable') {
+          nodes.stage.textContent = '正在提交，无法取消';
+          cancel.textContent = '正在提交，无法取消';
+          return;
+        }
+        if (result && result.status === 'not-active') {
+          nodes.stage.textContent = '正在核对任务结果';
+          cancel.textContent = '任务已结束';
+        }
+      });
+      openModal(shell.overlay);
+      if (previewProgress) updateProgress(previewProgress);
+      try {
+        return await task();
+      } finally {
+        if (typeof unsubscribe === 'function') unsubscribe();
+        shell.overlay.remove();
+      }
+    }
+
     function formatDateRange(row) {
       if (!row || (!row.dateMin && !row.dateMax)) return '-';
       if (row.dateMin === row.dateMax) return row.dateMin || '-';
@@ -331,8 +445,14 @@
 
     async function handleBankImport() {
       if (!ensureAvailable()) return;
-      const result = await withInflight('正在读取平盘银行对账单…', () => api.prepareBankImport());
-      if (!result || result.status === 'cancelled') return;
+      const result = await withInflight(
+        '正在读取平盘银行对账单…',
+        () => withImportProgress(
+          '导入平盘银行对账单',
+          () => api.prepareBankImport()
+        )
+      );
+      if (!result || isImportCancelledResult(result)) return;
       if (result.status !== 'needs-confirmation') {
         showAlert(failureDetailsHtml(result, '平盘银行对账单导入失败'), { html: true });
         return;
@@ -349,7 +469,14 @@
         await api.cancelBankImport();
         return;
       }
-      const applied = await withInflight('正在写入平盘银行对账单…', () => api.applyBankImport(result.token));
+      const applied = await withInflight(
+        '正在写入平盘银行对账单…',
+        () => withImportProgress(
+          '写入平盘银行对账单',
+          () => api.applyBankImport(result.token)
+        )
+      );
+      if (isImportCancelledResult(applied)) return;
       if (!applied || applied.status !== 'ok') {
         showAlert(failureDetailsHtml(applied, '平盘银行对账单写入失败'), { html: true });
         return;
@@ -375,8 +502,14 @@
 
     async function handleSourceImport(afterChanged = null) {
       if (!ensureAvailable()) return;
-      const result = await withInflight('正在识别链接原始表…', () => api.prepareSourceImport());
-      if (!result || result.status === 'cancelled') return;
+      const result = await withInflight(
+        '正在识别链接原始表…',
+        () => withImportProgress(
+          '导入链接原始表',
+          () => api.prepareSourceImport()
+        )
+      );
+      if (!result || isImportCancelledResult(result)) return;
       if (result.status !== 'ok') {
         const summary = sourceImportSummary(result);
         showAlert(summary || failureDetailsHtml(result, '链接原始表导入失败'), {
@@ -396,8 +529,17 @@
           item.message = '已取消替换';
           continue;
         }
-        const applied = await withInflight('正在替换清结算银行账户表…', () => api.applySourceImport(item.token));
-        if (!applied || applied.status !== 'ok') {
+        const applied = await withInflight(
+          '正在替换清结算银行账户表…',
+          () => withImportProgress(
+            '替换清结算银行账户表',
+            () => api.applySourceImport(item.token)
+          )
+        );
+        if (isImportCancelledResult(applied)) {
+          item.status = 'cancelled';
+          item.message = '已取消替换';
+        } else if (!applied || applied.status !== 'ok') {
           item.status = 'failed';
           item.message = applied && applied.message ? applied.message : '清结算银行账户表写入失败';
           item.detailLines = applied && Array.isArray(applied.detailLines)
@@ -1415,6 +1557,24 @@
       }));
     }
 
+    function previewImportProgress(stage = 'preflight') {
+      return withImportProgress(
+        '导入平盘银行对账单',
+        () => new Promise(() => {}),
+        {
+          jobId: 'preview-position-import',
+          stage,
+          fileName: '渠道账单_2026-07.xlsx',
+          currentFile: 2,
+          totalFiles: 4,
+          scannedRows: 1824567,
+          acceptedRows: 1824401,
+          committedRows: stage === 'committing' ? 1824401 : 960000,
+          elapsedMs: 128000
+        }
+      );
+    }
+
     return {
       initialize,
       refresh,
@@ -1431,12 +1591,14 @@
       previewSourceDeleteDialog,
       previewRunScopeDialog,
       previewResultDialog,
-      previewMappingDialog
+      previewMappingDialog,
+      previewImportProgress
     };
   }
 
   global.__positionReconciliation = {
     createPositionReconciliationUI,
-    formatUpdatedDate
+    formatUpdatedDate,
+    isImportCancelledResult
   };
 }(window));

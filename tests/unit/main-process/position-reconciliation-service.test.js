@@ -47,6 +47,9 @@ const {
 const {
   BANK_STATEMENT_FIELDS
 } = require('../../../src/constants/bank-statement-fields');
+const {
+  POSITION_IMPORT_COMMANDS
+} = require('../../../src/backend/position-reconciliation-import/constants');
 
 const ROOT = path.resolve(__dirname, '../../..');
 const TEMPLATE_PATH = path.join(ROOT, 'assets', '平盘银行对账单.xlsx');
@@ -136,6 +139,8 @@ function createEmptyLegacyPositionDatabase(userDataDir) {
   const db = new DatabaseSync(dbPath);
   db.exec(POSITION_RECONCILIATION_SCHEMA);
   db.exec(`
+    DROP INDEX idx_position_bank_scope_dates;
+    DROP TABLE position_source_summaries;
     DROP TABLE position_operation_inputs;
     DROP TABLE position_checkpoint_history;
     ALTER TABLE position_run_rows DROP COLUMN integrity_hash;
@@ -177,6 +182,119 @@ test('链接管理和原始表始终按业务规定顺序返回', (t) => {
   const manager = service.linkedManager();
   assert.deepEqual(manager.linked.map((row) => row.sourceType), [...SOURCE_DISPLAY_ORDER]);
   assert.deepEqual(manager.raw.map((row) => row.sourceType), [...SOURCE_DISPLAY_ORDER]);
+});
+
+test('链接管理汇总缓存随导入和删除原子刷新，损坏时回退事实表', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-source-summary-cache-'));
+  const sourcePath = path.join(userDataDir, 'gateway-inbound.xlsx');
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow({ originOutboundCurrency: 'EUR' })]
+  );
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'disabled',
+    operationTokenProvider: () => 'source-summary-cache-operation'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  let manager = service.linkedManager();
+  assert.equal(
+    manager.raw.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    1
+  );
+  assert.equal(
+    manager.linked.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    1
+  );
+  assert.deepEqual(manager.sourceMonths[SOURCE_TYPES.GATEWAY_INBOUND], ['2026-07']);
+
+  service.store.db.prepare(`
+    UPDATE position_source_summaries
+    SET source_months_json = '{'
+    WHERE source_type = ?
+  `).run(SOURCE_TYPES.GATEWAY_INBOUND);
+  manager = service.linkedManager();
+  assert.equal(
+    manager.raw.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    1,
+    '缓存损坏时原始表汇总必须回退事实表'
+  );
+  assert.equal(
+    manager.linked.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    1,
+    '缓存损坏时链接表汇总必须回退事实表'
+  );
+  assert.deepEqual(manager.sourceMonths[SOURCE_TYPES.GATEWAY_INBOUND], ['2026-07']);
+
+  service.store.deleteSource({
+    sourceType: SOURCE_TYPES.GATEWAY_INBOUND,
+    months: ['2026-07']
+  });
+  manager = service.linkedManager();
+  assert.equal(
+    manager.raw.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    0
+  );
+  assert.equal(
+    manager.linked.find((row) => row.sourceType === SOURCE_TYPES.GATEWAY_INBOUND).rowCount,
+    0
+  );
+  assert.deepEqual(manager.sourceMonths[SOURCE_TYPES.GATEWAY_INBOUND], []);
+});
+
+test('银行管理快照单次聚合范围、总数、日期和状态并使用覆盖索引', (t) => {
+  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-bank-manager-'));
+  const store = createPositionReconciliationStore(userDataDir);
+  t.after(() => {
+    store.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+  const insert = store.db.prepare(`
+    INSERT INTO position_bank_rows(
+      biz_id, channel, month_key, bill_date, status,
+      source_file_path, source_file_name, source_sheet, source_row_number,
+      import_order, original_json, working_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', '{}')
+  `);
+  insert.run(
+    'MANAGER-1', 'DBS', '2026-06', '2026-06-30', '未处理',
+    '/tmp/a.xlsx', 'a.xlsx', BANK_SHEET_NAME, 2, 0
+  );
+  insert.run(
+    'MANAGER-2', 'DBS', '2026-07', '2026-07-01', '已校验性质',
+    '/tmp/b.xlsx', 'b.xlsx', BANK_SHEET_NAME, 2, 1
+  );
+  insert.run(
+    'MANAGER-3', 'JPM', '2026-07', '2026-07-31', '未处理',
+    '/tmp/c.xlsx', 'c.xlsx', BANK_SHEET_NAME, 2, 2
+  );
+
+  const snapshot = store.getBankManagerSnapshot();
+  assert.equal(snapshot.summary.rowCount, 3);
+  assert.equal(snapshot.summary.dateMin, '2026-06-30');
+  assert.equal(snapshot.summary.dateMax, '2026-07-31');
+  assert.deepEqual(snapshot.summary.statuses, [
+    { status: '已校验性质', rowCount: 1 },
+    { status: '未处理', rowCount: 2 }
+  ]);
+  assert.equal(snapshot.scopes.length, 3);
+
+  const plan = store.db.prepare(`
+    EXPLAIN QUERY PLAN
+    SELECT channel, month_key, status, COUNT(*), MIN(bill_date), MAX(bill_date)
+    FROM position_bank_rows
+    GROUP BY channel, month_key, status
+    ORDER BY channel COLLATE NOCASE, month_key, status
+  `).all().map((row) => String(row.detail || '')).join('\n');
+  assert.match(plan, /COVERING INDEX idx_position_bank_scope_dates/);
 });
 
 test('现代来源身份下旧小文件路径保留同业务主键的不同内容', (t) => {
@@ -365,7 +483,7 @@ test('同业务主键的不同来源记录可分别匹配并独立消费', async
   assert.equal(consumption.sourceRecordKeyCount, 2);
 });
 
-test('gateway-outbound 流式门禁与其他普通来源旧路径可在同批混合运行', async (t) => {
+test('流式来源配置收窄时未启用来源明确失败且不得自动回退旧路径', async (t) => {
   const userDataDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'position-streaming-hybrid-source-path-')
   );
@@ -439,8 +557,8 @@ test('gateway-outbound 流式门禁与其他普通来源旧路径可在同批混
   });
 
   const result = await service.prepareSourceImport([outboundPath, paymentPath]);
-  assert.equal(result.successCount, 2);
-  assert.equal(result.failedCount, 0);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.failedCount, 1);
   assert.deepEqual(
     result.results.map((item) => item.sourceType),
     [SOURCE_TYPES.GATEWAY_OUTBOUND, SOURCE_TYPES.TEST_PAYMENT]
@@ -451,13 +569,187 @@ test('gateway-outbound 流式门禁与其他普通来源旧路径可在同批混
   );
   assert.equal(
     service.store.countSourceRows(SOURCE_TYPES.TEST_PAYMENT),
-    1
+    0
   );
-  assert.equal(service.persistenceCheckpoint().generation, 2);
+  assert.equal(service.persistenceCheckpoint().generation, 1);
   assert.equal(
     service.listCommittedOperationInputs('streaming-hybrid-operation').length,
-    2
+    1
   );
+  assert.equal(result.results[1].code, 'position-streaming-source-type-disabled');
+});
+
+test('普通来源 worker 退出恢复后 Service 保留已提交文件的存档证据', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-streaming-recovery-evidence-')
+  );
+  const stagedPath = path.join(userDataDir, 'committed-source.xlsx');
+  fs.writeFileSync(stagedPath, 'committed');
+  const evidence = {
+    filePath: stagedPath,
+    role: 'input',
+    sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
+    originalName: 'committed-source.xlsx',
+    sourceSnapshot: sourceSnapshotFromStat(fs.statSync(stagedPath)),
+    expectedSha256: hashFileSha256Sync(stagedPath).sha256,
+    sizeBytes: fs.statSync(stagedPath).size
+  };
+  const recovered = {
+    status: 'ok',
+    recoveredFromWorkerExit: true,
+    results: [{
+      status: 'ok',
+      fileIndex: 0,
+      filePath: '/original/source.xlsx',
+      archivePath: stagedPath,
+      stagingDir: path.dirname(stagedPath),
+      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
+      sourceName: '中台网关原始出账订单',
+      rowCount: 1
+    }],
+    inputPaths: [stagedPath],
+    inputFiles: [evidence],
+    cleanupPaths: [path.dirname(stagedPath)]
+  };
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming',
+    operationTokenProvider: () => 'streaming-recovery-operation',
+    authorizeStreamingSourceApply: async () => ({}),
+    positionImportDispatcher: () => ({
+      jobId: 'streaming-recovery-job',
+      promise: Promise.resolve(recovered),
+      cancel: () => true,
+      terminate: () => true
+    })
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const result = await service.prepareSourceImport(['/original/source.xlsx']);
+  assert.deepEqual(result.inputPaths, [stagedPath]);
+  assert.deepEqual(result.inputFiles, [evidence]);
+  assert.equal(result.successCount, 1);
+});
+
+test('流式 service 完成银行确认、普通来源自动提交和账户快照确认替换', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-streaming-bank-account-service-')
+  );
+  const bankPath = path.join(userDataDir, 'bank.xlsx');
+  const outboundPath = path.join(userDataDir, 'gateway-outbound.xlsx');
+  const accountPath = path.join(userDataDir, 'bank-account.xlsx');
+  writeWorkbook(
+    bankPath,
+    BANK_SHEET_NAME,
+    POSITION_BANK_HEADERS,
+    [bankRow({ BizId: 'STREAMING-BANK-1' })]
+  );
+  writeWorkbook(
+    outboundPath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].headers,
+    [{
+      账单日期: '2026-07-20',
+      渠道名称: 'DBS',
+      账户号: 'M001',
+      交易类型: 'Outbound',
+      主对账id: 'STREAMING-OUT-RID',
+      业务单号: 'STREAMING-OUT-ORDER',
+      币种: 'USD',
+      金额: '100',
+      原始币种: 'EUR',
+      原始金额: '95',
+      银行扣款币种: 'USD'
+    }]
+  );
+  const accountDefinition = SOURCE_DEFINITIONS[SOURCE_TYPES.BANK_ACCOUNT];
+  writeWorkbook(
+    accountPath,
+    '清结算银行账户表',
+    accountDefinition.headers,
+    [
+      {
+        账户状态: '正常',
+        账户性质: '自有',
+        币种: 'USD',
+        银行账号: 'STREAMING-ACCOUNT-1'
+      },
+      {
+        账户状态: '注销',
+        账户性质: '自有',
+        币种: 'EUR',
+        银行账号: 'STREAMING-ACCOUNT-CLOSED'
+      }
+    ]
+  );
+
+  let service = null;
+  let confirmedSequence = 0;
+  let ordinarySequence = 0;
+  service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'streaming',
+    operationTokenProvider: () => `streaming-confirmed-${++confirmedSequence}`,
+    authorizeStreamingSourceApply: async (ready) => {
+      const baseCheckpoint = service.persistenceCheckpoint();
+      const schema = await dispatchPositionLargeImportSchemaMigration({
+        engine: 'streaming',
+        userDataDir,
+        sideDbPath: service.store.dbPath,
+        expectedCheckpoint: baseCheckpoint
+      }).promise;
+      return {
+        operationToken: `streaming-ordinary-${++ordinarySequence}`,
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schema.fingerprint,
+        baseCheckpoint
+      };
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const bankPrepared = await service.prepareBankImport([bankPath]);
+  assert.equal(bankPrepared.status, 'needs-confirmation');
+  assert.equal(bankPrepared.rowCount, 1);
+  assert.equal(
+    service.bankImportArchiveIntent(bankPrepared.token)[0].sourceType,
+    'position-bank'
+  );
+  const bankApplied = await service.applyBankImport(bankPrepared.token);
+  assert.equal(bankApplied.status, 'ok');
+  assert.equal(bankApplied.rowCount, 1);
+  assert.equal(service.persistenceCheckpoint().generation, 1);
+
+  const sourcePrepared = await service.prepareSourceImport([outboundPath, accountPath]);
+  assert.equal(sourcePrepared.successCount, 1);
+  assert.equal(sourcePrepared.confirmationCount, 1);
+  assert.deepEqual(
+    sourcePrepared.results.map((item) => item.status),
+    ['ok', 'needs-confirmation']
+  );
+  const accountItem = sourcePrepared.results.find(
+    (item) => item.status === 'needs-confirmation'
+  );
+  assert.ok(accountItem && accountItem.token);
+  assert.equal(
+    service.sourceImportArchiveIntent(accountItem.token)[0].sourceType,
+    SOURCE_TYPES.BANK_ACCOUNT
+  );
+  assert.equal(service.persistenceCheckpoint().generation, 2);
+
+  const accountApplied = await service.applySourceImport(accountItem.token);
+  assert.equal(accountApplied.status, 'ok');
+  assert.equal(accountApplied.rowCount, 1);
+  assert.equal(service.store.countSourceRows(SOURCE_TYPES.BANK_ACCOUNT), 1);
+  assert.equal(service.persistenceCheckpoint().generation, 3);
 });
 
 test('流式 service 通过 utility worker 删除来源并同步 checkpoint', async (t) => {
@@ -505,6 +797,133 @@ test('流式 service 通过 utility worker 删除来源并同步 checkpoint', as
   assert.equal(result.deletedCount, 1);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0);
   assert.equal(service.persistenceCheckpoint().generation, checkpoint.generation + 1);
+});
+
+test('流式导入取消由主进程跟踪，汇总与提交阶段拒绝取消', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-streaming-cancel-state-')
+  );
+  const jobs = new Map();
+  let sequence = 0;
+  const progressEvents = [];
+  const dispatcher = (input) => {
+    sequence += 1;
+    const jobId = `cancel-state-${sequence}`;
+    let resolveJob;
+    const job = {
+      input,
+      cancelCount: 0,
+      terminateCount: 0,
+      resolve(value) {
+        resolveJob(value);
+      }
+    };
+    jobs.set(jobId, job);
+    return {
+      jobId,
+      promise: new Promise((resolve) => {
+        resolveJob = resolve;
+      }),
+      cancel() {
+        job.cancelCount += 1;
+        return true;
+      },
+      terminate() {
+        job.terminateCount += 1;
+        return true;
+      }
+    };
+  };
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportDispatcher: dispatcher,
+    onImportProgress: (progress) => progressEvents.push(progress)
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const first = service.dispatchTrackedImport({ command: 'test-cancel' }, '测试取消');
+  const firstJob = jobs.get(first.jobId);
+  firstJob.input.onProgress({ jobId: first.jobId, stage: 'preflight' });
+  assert.deepEqual(service.cancelActiveImport(first.jobId), {
+    status: 'stopping',
+    jobId: first.jobId
+  });
+  assert.equal(firstJob.cancelCount, 1);
+  firstJob.input.onCancelAck({ jobId: first.jobId });
+  firstJob.resolve({ status: 'cancelled' });
+  await first.promise;
+
+  const raced = service.dispatchTrackedImport(
+    { command: 'test-cancel-race' },
+    '测试取消竞态'
+  );
+  const racedJob = jobs.get(raced.jobId);
+  racedJob.input.onProgress({ jobId: raced.jobId, stage: 'applying' });
+  assert.deepEqual(service.cancelActiveImport(raced.jobId), {
+    status: 'stopping',
+    jobId: raced.jobId
+  });
+  racedJob.input.onCancelAck({
+    jobId: raced.jobId,
+    stage: 'committing',
+    accepted: false
+  });
+  assert.equal(service.activeImportJobs.get(raced.jobId).forceTimer, null);
+  assert.deepEqual(service.cancelActiveImport(raced.jobId), {
+    status: 'not-cancellable',
+    jobId: raced.jobId,
+    message: '数据正在提交，当前阶段无法取消'
+  });
+  racedJob.resolve({ status: 'ok' });
+  await raced.promise;
+
+  const second = service.dispatchTrackedImport({ command: 'test-commit' }, '测试提交');
+  const secondJob = jobs.get(second.jobId);
+  secondJob.input.onProgress({ jobId: second.jobId, stage: 'summarizing' });
+  assert.deepEqual(service.cancelActiveImport(second.jobId), {
+    status: 'not-cancellable',
+    jobId: second.jobId,
+    message: '数据正在提交，当前阶段无法取消'
+  });
+  secondJob.input.onProgress({ jobId: second.jobId, stage: 'committing' });
+  assert.deepEqual(service.cancelActiveImport(second.jobId), {
+    status: 'not-cancellable',
+    jobId: second.jobId,
+    message: '数据正在提交，当前阶段无法取消'
+  });
+  assert.equal(secondJob.cancelCount, 0);
+  secondJob.resolve({ status: 'ok' });
+  await second.promise;
+
+  const preparedJobRoot = path.join(
+    userDataDir,
+    STAGING_RELATIVE_PATH,
+    'source-prepare-job'
+  );
+  const accountApply = service.dispatchTrackedImport({
+    command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+    payload: {
+      preflightReady: {
+        ledgerEvidence: {
+          ledgerPath: path.join(preparedJobRoot, 'job-ledger.sqlite')
+        }
+      }
+    }
+  }, '测试账户确认');
+  assert.ok(service.activeImportStagingPaths().includes(preparedJobRoot));
+  jobs.get(accountApply.jobId).resolve({ status: 'ok' });
+  await accountApply.promise;
+
+  assert.ok(progressEvents.some((event) => event.stage === 'stopping'));
+  assert.ok(progressEvents.some((event) => (
+    event.stage === 'committing' && event.accepted === false
+  )));
+  assert.ok(progressEvents.some((event) => event.stage === 'summarizing'));
+  assert.ok(progressEvents.some((event) => event.stage === 'committing'));
 });
 
 test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导和确认', async (t) => {
@@ -720,7 +1139,7 @@ test('差异页隐藏失效和被替换草稿，并保留当前草稿批次', (t
   assert.equal(activeDifferences[0].runId, secondRun.runId);
 });
 
-test('清结算银行账户表只保存状态正常的行，零有效行不覆盖旧快照', (t) => {
+test('清结算银行账户表只保存状态正常的行，零有效行不覆盖旧快照', async (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-account-'));
   const validPath = path.join(userDataDir, 'accounts-valid.xlsx');
   const invalidPath = path.join(userDataDir, 'accounts-invalid.xlsx');
@@ -774,7 +1193,7 @@ test('清结算银行账户表只保存状态正常的行，零有效行不覆�
     (row) => row.status === 'needs-confirmation'
   );
   assert.ok(cancelled);
-  service.cancelSourceImport(cancelled.token);
+  await service.cancelSourceImport(cancelled.token);
   assert.throws(
     () => service.applySourceImport(cancelled.token),
     (error) => error && error.code === 'position-source-import-token-expired'
@@ -2393,6 +2812,82 @@ test('业务后置清理只返回没有未完成存档引用的暂存目录', ()
     filterStagingPathsWithoutProtectedSources([sharedDir], [sharedDir]),
     []
   );
+});
+
+test('取消账户确认不得删除普通来源存档重试仍引用的共享暂存目录', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-account-cancel-staging-protection-')
+  );
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  let protectedPaths = [];
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    protectedStagingPaths: () => protectedPaths
+  });
+  t.after(() => service.close());
+
+  const jobRoot = path.join(
+    userDataDir,
+    STAGING_RELATIVE_PATH,
+    'mixed-source-account-job'
+  );
+  const ordinaryFile = path.join(jobRoot, 'ordinary', 'gateway-outbound.xlsx');
+  const accountFile = path.join(jobRoot, 'account', 'bank-account.xlsx');
+  fs.mkdirSync(path.dirname(ordinaryFile), { recursive: true });
+  fs.mkdirSync(path.dirname(accountFile), { recursive: true });
+  fs.writeFileSync(ordinaryFile, 'ordinary');
+  fs.writeFileSync(accountFile, 'account');
+
+  protectedPaths = [ordinaryFile];
+  service.sourceImportTokens.set('protected-account-token', {
+    streaming: true,
+    jobRoot
+  });
+  assert.deepEqual(await service.cancelSourceImport('protected-account-token'), {
+    status: 'cancelled'
+  });
+  assert.equal(fs.existsSync(ordinaryFile), true);
+  assert.equal(fs.existsSync(accountFile), true);
+
+  protectedPaths = [];
+  service.sourceImportTokens.set('released-account-token', {
+    streaming: true,
+    jobRoot
+  });
+  await service.cancelSourceImport('released-account-token');
+  assert.equal(fs.existsSync(jobRoot), false);
+});
+
+test('账户确认取消时存档保护集不可读会保守保留暂存目录', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-account-cancel-protection-unavailable-')
+  );
+  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    protectedStagingPaths: () => {
+      throw new Error('archive center unavailable');
+    }
+  });
+  t.after(() => service.close());
+
+  const jobRoot = path.join(
+    userDataDir,
+    STAGING_RELATIVE_PATH,
+    'unavailable-protection-job'
+  );
+  const accountFile = path.join(jobRoot, 'account', 'bank-account.xlsx');
+  fs.mkdirSync(path.dirname(accountFile), { recursive: true });
+  fs.writeFileSync(accountFile, 'account');
+  service.sourceImportTokens.set('account-token', {
+    streaming: true,
+    jobRoot
+  });
+
+  await service.cancelSourceImport('account-token');
+  assert.equal(fs.existsSync(accountFile), true);
 });
 
 test('规则版本变化后持久草稿自动失效并禁止确认', (t) => {
