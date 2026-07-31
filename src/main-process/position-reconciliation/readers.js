@@ -473,5 +473,6 @@ module.exports = {
   readSourceFiles,
   normalizeHeaderRow,
   headersEqual,
-  rowValues
+  rowValues,
+  validateSourceRow
 };

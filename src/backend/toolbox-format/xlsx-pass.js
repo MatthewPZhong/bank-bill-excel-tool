@@ -667,9 +667,11 @@ function readToolboxMetadataEntryAsString(
   });
 }
 
-function loadToolboxSharedStrings(zip, entry, sourceFile = '') {
+function loadToolboxSharedStrings(zip, entry, sourceFile = '', options = {}) {
   if (!entry) return Promise.resolve([]);
-  assertToolboxSharedStringsSize(entry, sourceFile);
+  if (options.skipDeclaredSizeLimit !== true) {
+    assertToolboxSharedStringsSize(entry, sourceFile);
+  }
   return new Promise((resolve, reject) => {
     zip.openReadStream(entry, (openError, stream) => {
       if (openError) {
@@ -682,6 +684,12 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '') {
         xmlns: true
       });
       const values = [];
+      const onValue = typeof options.onValue === 'function'
+        ? options.onValue
+        : (value) => values.push(value);
+      const cancelToken = options.cancelToken && typeof options.cancelToken === 'object'
+        ? options.cancelToken
+        : null;
       const elementStack = [];
       let rootSeen = false;
       let rootClosed = false;
@@ -708,11 +716,14 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '') {
         settled = true;
         if (error) {
           try { stream.destroy(); } catch (_destroyError) {}
-          reject(error instanceof ToolboxXlsxFormatError
-            ? error
-            : invalidSharedStrings(`不是完整有效的 XML：${error.message}`, {
-              cause: error.message
-            }));
+          reject(
+            error instanceof ToolboxXlsxFormatError ||
+            String(error && error.code || '').startsWith('position-import-')
+              ? error
+              : invalidSharedStrings(`不是完整有效的 XML：${error.message}`, {
+                cause: error.message
+              })
+          );
         }
         else resolve(values);
       };
@@ -885,7 +896,12 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '') {
           richRunTextSeen = false;
           currentTextValue = '';
         } else if (name === 'si' && depth === siDepth) {
-          values.push(currentValue);
+          try {
+            onValue(currentValue);
+          } catch (error) {
+            finish(error);
+            return;
+          }
           currentValue = '';
           insideSi = false;
           siDepth = -1;
@@ -909,6 +925,16 @@ function loadToolboxSharedStrings(zip, entry, sourceFile = '') {
           return;
         }
         finish();
+      });
+      stream.on('data', () => {
+        if (!settled && cancelToken && cancelToken.cancelled) {
+          const error = new ToolboxXlsxFormatError(
+            `${sourceFile || '该文件'}：sharedStrings.xml 读取已取消`,
+            { sourceFile }
+          );
+          error.code = 'TOOLBOX_XLSX_CANCELLED';
+          finish(error);
+        }
       });
       stream.on('error', finish);
       stream.pipe(parser);

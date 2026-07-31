@@ -9,16 +9,16 @@
 
 ## PR-B — Preflight Engine
 
-- [ ] 流式 XLSX workbook/sheet reader 和 SheetJS parity decoder。
-- [ ] 内存/磁盘 shared strings provider。
-- [ ] 异步 staging/hash、job ledger、封存和验证。
-- [ ] utilityProcess dispatcher、进度和基础取消。
+- [x] 流式 XLSX workbook/sheet reader 和 SheetJS parity decoder。
+- [x] 内存/磁盘 shared strings provider。
+- [x] 异步 staging/hash、按 `row_hash` 折叠完全重复行的 job ledger、封存和验证。
+- [x] utilityProcess dispatcher、进度和基础取消。
 
 ## PR-C1 — Mutation And Recovery
 
 - [ ] Store/worker 共用 side DB mutation helper。
 - [ ] archive intent durable 后才允许 apply。
-- [ ] 现代索引、schema fingerprint 和重复阻断。
+- [ ] `row_hash` 来源身份迁移、消费血缘回填、现代索引和 schema fingerprint。
 - [ ] worker exit 后按 checkpoint/history/input proof 恢复。
 
 ## PR-C2 — Gateway Outbound

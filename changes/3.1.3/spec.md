@@ -37,7 +37,7 @@
 2. 普通来源仍为**先完成全批预检，再按文件独立事务提交**；前序成功文件不因后序失败回滚。
 3. 清结算银行账户表仍为确认后整表替换。
 4. 文件字节证据、业务数据、revision、`position_operation_inputs`、checkpoint history 和存档恢复必须可证明一致。
-5. 不修改平盘资金性质匹配算法、来源主键、状态过滤、金额/币种/日期规则或链接派生规则。
+5. 不修改平盘资金性质匹配算法、来源业务主键字段、状态过滤、金额/币种/日期规则或链接派生规则；来源业务主键不再承担技术唯一性。
 6. 不允许 Electron main 持有随输入行数增长的完整行、主键、冲突、派生或 raw JSON 集合。
 7. 本 change 不改变匹配规则，不得自行提升 `POSITION_RULESET_VERSION`；来源 revision 变化继续使旧 pending run 失效。
 8. 新引擎失败后不得自动回退到 Electron main 中的 `XLSX.readFile`。
@@ -154,8 +154,9 @@ src/main-process/position-reconciliation/
 | D-11 | `.xls` 继续 SheetJS，但只在 utilityProcess | main 不执行 BIFF 全量读取 |
 | D-12 | 取消采用协作取消 + 超时强制终止 | hard terminate 后依赖 SQLite 回滚和 operation evidence 恢复 |
 | D-13 | 生产默认不自动 fallback | legacy 仅为开发/紧急显式模式，且只能在 utilityProcess 和安全阈值内运行 |
-| D-14 | target version 暂不确定 | Codex 不得自行 bump 版本或写发布号 |
+| D-14 | target version 为 `3.1.3` | 版本 bump 仅在 PR-E 执行 |
 | D-15 | 普通来源混合账户快照的现有行为保留 | 普通来源自动提交；账户仍返回待确认 token |
+| D-16 | 普通来源以完整规范行的 `row_hash` 作为内部记录键 | 同业务主键不同内容全部保留；完全相同行在同批及后续独立导入中折叠 |
 
 ---
 
@@ -241,8 +242,8 @@ IDLE
 
 约束：
 
-- 预检接受文件的跨文件主键所有权在 apply 前已固定；
-- 前序文件 DB 系统失败不会让后序冲突文件重新获得主键；
+- 预检接受文件的跨文件记录身份所有权在 apply 前已固定；
+- 前序文件 DB 系统失败不会让后序完全重复记录重新获得首次所有权；
 - 每个成功文件独立推进一次 generation；
 - worker fatal 时，side DB `position_operation_inputs(operationToken)` 是已提交文件的唯一权威；
 - 未提交文件不得归档为成功输入。
@@ -296,14 +297,16 @@ IDLE
 
 1. 一次选择必须先完成所有文件预检，再开始任何普通来源写库。
 2. 输出结果顺序等于用户选择顺序。
-3. 同文件相同业务主键、相同 `row_hash`：折叠，保留第一次物理行。
-4. 同文件相同业务主键、不同 `row_hash`：整文件拒绝。
+3. 同文件 `row_hash` 相同：折叠，保留第一次物理行。
+4. 同文件业务主键相同、`row_hash` 不同：作为两条独立来源记录全部保留。
 5. 任一业务非法行：整文件拒绝。
-6. 跨文件出现相同 `sourceType + businessKey`：后序文件整份拒绝，不区分 row hash 是否相同。
+6. 跨文件 `sourceType + row_hash` 相同：后序完全重复行折叠；业务主键相同但 `row_hash` 不同不冲突。
 7. 被拒绝文件不得产生来源行、链接行、revision、checkpoint 或 operation input evidence。
-8. 后续独立导入同一业务主键仍执行 upsert。
+8. 后续独立导入相同 `sourceType + row_hash` 执行 upsert；同业务主键的新内容作为新记录插入，旧内容不被覆盖。
 9. 每个预检接受文件一个独立 side DB transaction。
 10. 同一文件即使全部 upsert 内容与现库相同，仍保持当前行为：执行写入/链接重建、bump revision、推进 checkpoint；本 change 不做 no-op 优化。
+11. 一个非空文件即使全部是本批前序文件的完全重复行，也保持文件接受、独立事务和 input evidence；其 `persistedCandidateRows=0`，全部计入 `collapsedDuplicateRows`。
+12. `row_hash` 为完整规范行的 SHA-256；`business_key` 继续保存原业务主键并允许重复。若同一 `row_hash` 对应不同规范行或业务主键，按哈希碰撞 fail closed。
 
 ### 4.3 清结算银行账户表
 
@@ -321,8 +324,8 @@ IDLE
 
 ```text
 scannedNonBlankRows      扫描到的业务表头范围内非空数据行
-persistedCandidateRows   通过 reader 业务校验、应写 position_source_rows 的唯一行
-collapsedDuplicateRows  同文件同 key 同 hash 折叠行
+persistedCandidateRows   通过 reader 业务校验、且在本批首次出现的唯一 row_hash 行
+collapsedDuplicateRows  同文件或跨文件 row_hash 相同而折叠的完全重复行
 readerFilteredRows       旧 reader 本来就不写来源表的行；当前主要是账户状态非正常
 invalidRows              导致整文件拒绝的非法行数量
 visibleLinkRows          派生 visible=1 的链接行
@@ -587,14 +590,17 @@ CREATE TABLE job_files (
   first_error_detail_json TEXT NOT NULL DEFAULT '[]'
 );
 
-CREATE TABLE source_seen_keys (
+CREATE TABLE source_seen_records (
   source_type TEXT NOT NULL,
-  business_key TEXT NOT NULL,
   row_hash TEXT NOT NULL,
+  business_key TEXT NOT NULL,
   first_file_index INTEGER NOT NULL,
   first_row_number INTEGER NOT NULL,
-  PRIMARY KEY(source_type, business_key)
+  PRIMARY KEY(source_type, row_hash)
 );
+
+CREATE INDEX idx_source_seen_business_key
+ON source_seen_records(source_type, business_key);
 
 CREATE TABLE bank_seen_biz_ids (
   biz_id TEXT PRIMARY KEY,
@@ -629,10 +635,10 @@ CREATE TABLE file_errors (
 3. `PRAGMA temp_store=FILE`。
 4. 每个文件使用独立 savepoint。
 5. 文件最终失败时回滚该文件写入的 seen keys、scope 和统计。
-6. 普通来源文件被接受后，其 seen keys 保留，用于拒绝后序跨文件冲突。
+6. 普通来源文件被接受后，其 seen record identities 保留，用于折叠后序跨文件完全重复行；同业务主键不同 `row_hash` 不冲突。
 7. 错误详情每文件最多 100 条；`invalid_rows` 记录全量计数。
 8. ledger 不保存完整行或 raw JSON。
-9. 业务 key 可保存在 ledger，但不得进入日志、IPC 或用户可见错误明细。
+9. 业务 key 和 row hash 可保存在 ledger，但不得进入日志、IPC 或用户可见错误明细。
 
 ### 6.4 Ledger 封存
 
@@ -839,9 +845,36 @@ SHA256(
 
 ---
 
-## 8. 现代 Side DB 索引与 Schema Gate
+## 8. 现代 Side DB 来源身份、索引与 Schema Gate
 
-### 8.1 必需索引
+### 8.1 来源记录唯一身份迁移
+
+普通来源必须从“业务主键唯一”迁移为“完整规范行唯一”：
+
+```text
+business_key       = 原来源业务主键，仅用于业务展示、查询和血缘，允许重复
+source_record_key  = row_hash，即 stableHash(完整规范行)，作为跨导入稳定技术身份
+source_row_id      = 当前侧库自增物理主键，不作为跨重建稳定身份
+```
+
+侧库契约调整为：
+
+1. `position_source_rows` 移除 `UNIQUE(source_type,business_key)`，新增 `UNIQUE(source_type,row_hash)`。
+2. 新增非唯一索引 `idx_position_source_type_business_key(source_type,business_key)`。
+3. `position_link_rows` 新增非空 `source_record_key`，值取父来源行 `row_hash`。
+4. `position_consumed_sources` 新增非空 `source_record_key`，唯一约束改为 `(source_type,source_record_key,leg_index)`；`business_key` 保留用于审计。
+5. 新运行的 lineage 必须同时记录 `sourceBusinessKey` 与 `sourceRecordKey`。
+6. 旧确认运行没有 `sourceRecordKey` 时，只允许在迁移期间通过旧库唯一的 `source_type + business_key` 解析并回填；无法唯一解析则阻断迁移。
+7. 表重建、回填、索引创建和 schema fingerprint 更新必须在同一 `BEGIN IMMEDIATE` 事务内完成。
+8. 迁移前执行磁盘空间门禁；失败不得留下半迁移 schema。
+
+后续独立导入语义：
+
+- 完全相同规范行：命中同一 `source_record_key`，更新文件血缘，不新增记录；
+- 同业务主键但内容不同：生成不同 `source_record_key`，新增记录并独立派生、匹配和消费；
+- 删除仍按既有来源类型/月范围删除命中的全部内容版本。
+
+### 8.2 必需索引
 
 增量链接 writer 上线前必须存在：
 
@@ -860,7 +893,7 @@ ON position_link_rows(source_type, source_row_id, leg_index, id);
 - 新读取顺序需要 sourceType/sourceRow/leg 索引；
 - `(source_row_id, leg_index)` 保证单来源腿唯一。
 
-### 8.2 迁移前检查
+### 8.3 迁移前检查
 
 创建唯一索引前执行：
 
@@ -876,7 +909,7 @@ LIMIT 51;
 - 有重复：fail closed，错误码 `position-link-source-leg-duplicate`；
 - 不得自动删除、保留第一条或重新编号。
 
-### 8.3 迁移方式
+### 8.4 迁移方式
 
 1. 新增 `ENSURE_LARGE_IMPORT_INDEXES` utility job。
 2. 平盘全局 operation lock 覆盖整个迁移。
@@ -885,12 +918,12 @@ LIMIT 51;
    - `journal_mode=WAL`；
    - `synchronous=NORMAL`；
    - `busy_timeout=30000`。
-4. `BEGIN IMMEDIATE`；检查重复；创建索引；`COMMIT`。
+4. `BEGIN IMMEDIATE`；执行来源身份表重建与回填；检查重复；创建索引；`COMMIT`。
 5. schema-only 索引迁移不推进业务 checkpoint generation。
 6. 失败或 worker exit 依赖 SQLite DDL transaction 回滚。
 7. 新建空库可以在首次大导入前创建索引；不要求 main 启动时同步构建大索引。
 
-### 8.4 Legacy schema 常量
+### 8.5 Legacy schema 常量
 
 `SUPPORTED_EMPTY_LEGACY_TABLE_INFO/SQL/INDEX_INFO` 继续描述“允许接管的旧空库证明”，不得直接改成要求旧库预先拥有新索引。
 
@@ -1002,15 +1035,18 @@ Bank/account：
 3. 创建连接级 TEMP 去重表，`temp_store=FILE`。
 4. 调用 shared mutation helper，开始单文件事务。
 5. 重新流式扫描文件并执行完整业务校验。
-6. 同文件重复规则在 TEMP 表重演：
-   - 同 key 同 hash：折叠；
-   - 同 key 不同 hash：抛错，回滚整文件。
+6. 来源记录身份规则在 TEMP 表和只读 ledger 中重演：
+   - 同 `sourceType + row_hash`：完全重复，只有本批首次所有者写入，其他物理行折叠；
+   - 同 business key 不同 hash：全部保留；
+   - 同 hash 却出现不同规范行或业务主键：按哈希碰撞阻断并回滚。
 7. 每条唯一来源执行：
 
 ```sql
 INSERT INTO position_source_rows(...)
 VALUES (...)
-ON CONFLICT(source_type, business_key) DO UPDATE SET ...
+ON CONFLICT(source_type, row_hash) DO UPDATE SET
+  business_key = excluded.business_key,
+  ...文件血缘字段...
 RETURNING id;
 ```
 
@@ -1032,6 +1068,7 @@ deriveLinkedRowsForRecord(sourceType, record, mappings)
 
 ```text
 source_row_id = RETURNING id
+source_record_key = row_hash
 ordinal      = source_row_id
 leg_index    = 0..N-1
 ```
@@ -1528,8 +1565,8 @@ staging 副本
    - 多 sheet 识别；
    - 物理行号；
    - 所有 cell type/date system；
-   - 同文件重复/冲突；
-   - 跨文件后序冲突；
+   - 同文件完全重复折叠、同业务主键不同内容保留；
+   - 跨文件完全重复折叠；
    - 账户过滤；
    - 0/hidden/visible/2-leg 派生。
 3. snapshot：
@@ -1670,10 +1707,10 @@ staging 副本
 #### Source
 
 - 同文件 same hash collapse；
-- 同文件 different hash reject；
-- 跨文件后序 reject；
-- 前序预检接受但 DB 失败，后序 ownership 不重分配；
-- 后续独立 upsert；
+- 同文件 same business key/different hash 全部保留；
+- 跨文件 same hash collapse；
+- 前序预检接受但 DB 失败，后序完全重复记录 ownership 不重分配；
+- 后续独立导入 same hash upsert、different hash insert；
 - 文件结果顺序；
 - mixed account；
 - partial success；
@@ -1839,15 +1876,15 @@ npm run check:vars
 
 1. characterization 证明当前生产行为与本 Spec 的业务不变量冲突。
 2. 真实生产样本包含旧 SheetJS 接受、但无法在不改变 JS 类型/hash 的情况下解码的 cell form。
-3. 真实 side DB 存在 `(source_row_id, leg_index)` 重复，需要决定人工修复策略。
+3. 真实 side DB 存在 `(source_row_id, leg_index)` 重复，或旧消费关系无法唯一回填 `sourceRecordKey`，需要决定人工修复策略。
 4. 要实现目标必须改变：
    - 银行事务粒度；
-   - 普通来源跨文件 ownership；
+   - 普通来源跨文件完全重复 ownership；
    - account mixed import 行为；
-   - 来源主键或派生规则；
+   - 超出 D-16 已批准范围的来源业务主键字段、记录身份或派生规则；
    - 错误首因契约。
 5. 300 万 benchmark 在有界结构下仍显著超过门槛，且下一步需要改变产品范围或硬件基线。
-6. 需要决定正式 target version、版本 bump 或受保护分支合并。
+6. 需要提前执行 PR-E 的版本 bump，或合并到受保护分支。
 
 提问时必须附：
 

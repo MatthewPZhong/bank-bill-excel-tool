@@ -340,6 +340,20 @@ function legacyNumericProjection(rawValue) {
   return Number.isFinite(parsed) ? String(parsed) : rawValue;
 }
 
+function sharedStringCount(sharedStrings) {
+  if (sharedStrings && typeof sharedStrings.get === 'function') {
+    return Number.isSafeInteger(sharedStrings.count) ? sharedStrings.count : 0;
+  }
+  return Array.isArray(sharedStrings) ? sharedStrings.length : 0;
+}
+
+function sharedStringAt(sharedStrings, index) {
+  if (sharedStrings && typeof sharedStrings.get === 'function') {
+    return sharedStrings.get(index);
+  }
+  return Array.isArray(sharedStrings) ? sharedStrings[index] : undefined;
+}
+
 function decodeCellPayload({
   type,
   rawValue,
@@ -358,15 +372,17 @@ function decodeCellPayload({
   if (normalizedType === 's') {
     const lexicalIndex = String(rawValue || '').trim();
     const index = /^\d+$/.test(lexicalIndex) ? Number.parseInt(lexicalIndex, 10) : -1;
-    if (!Number.isSafeInteger(index) || index < 0 || index >= sharedStrings.length ||
-        sharedStrings[index] === undefined) {
+    const count = sharedStringCount(sharedStrings);
+    const decoded = Number.isSafeInteger(index) && index >= 0 && index < count
+      ? sharedStringAt(sharedStrings, index)
+      : undefined;
+    if (decoded === undefined) {
       throw new ToolboxXlsxFormatError('共享字符串索引越界或无效，无法安全读取单元格', {
         ...context,
         sharedStringIndex: rawValue,
-        sharedStringCount: sharedStrings.length
+        sharedStringCount: count
       });
     }
-    const decoded = sharedStrings[index];
     return {
       cellType: 'text',
       decodedSemanticValue: decoded,
