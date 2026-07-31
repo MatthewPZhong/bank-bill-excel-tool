@@ -79,9 +79,21 @@ const {
   initializeIncomingBankTables
 } = require('../../../src/backend/position-reconciliation-import/bank-writer');
 
-function tempDir(t, prefix) {
+const tempDirs = [];
+test.after(() => {
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100
+    });
+  }
+});
+
+function tempDir(_t, prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  tempDirs.push(dir);
   return dir;
 }
 
@@ -675,7 +687,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
   });
 
   test('dispatcher 只接受 staging 根目录直属批次作为零提交清理目标', () => {
-    const userDataDir = path.join('/tmp', 'position-cleanup-root');
+    const userDataDir = path.resolve('/tmp', 'position-cleanup-root');
     const jobRoot = path.join(userDataDir, STAGING_RELATIVE_PATH, 'safe-job');
     assert.equal(
       uncommittedJobRoot({ userDataDir }, 'other-job', {

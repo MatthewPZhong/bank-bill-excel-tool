@@ -44,9 +44,21 @@ const INITIAL_CHECKPOINT = Object.freeze({
 });
 const ENOUGH_DISK = () => 10n ** 15n;
 
-function tempStore(t, prefix) {
+const tempDirs = [];
+test.after(() => {
+  for (const dir of tempDirs) {
+    fs.rmSync(dir, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100
+    });
+  }
+});
+
+function tempStore(_t, prefix) {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  t.after(() => fs.rmSync(userDataDir, { recursive: true, force: true }));
+  tempDirs.push(userDataDir);
   const store = createPositionReconciliationStore(userDataDir, {
     initialCheckpoint: INITIAL_CHECKPOINT
   });
