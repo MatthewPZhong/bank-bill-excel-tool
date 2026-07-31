@@ -129,6 +129,45 @@ function deriveBankAccount(record) {
   return [{ row: { ...record.row }, visible: true }];
 }
 
+function accountMappingFrom(mappings) {
+  return new Map(
+    (Array.isArray(mappings) ? mappings : []).map((mapping) => [
+      text(mapping.midAccountId),
+      text(mapping.clearingAccountId)
+    ]).filter(([left, right]) => left && right)
+  );
+}
+
+function deriveLinkedRowsForRecord(sourceType, record, mappings = []) {
+  const accountMapping = mappings instanceof Map
+    ? mappings
+    : accountMappingFrom(mappings);
+  let rows;
+  if (sourceType === SOURCE_TYPES.FUND_TRANSFER) {
+    rows = deriveFundTransfer(record, accountMapping);
+  } else if (sourceType === SOURCE_TYPES.TEST_PAYMENT) {
+    rows = deriveTestPayment(record);
+  } else if (sourceType === SOURCE_TYPES.GATEWAY_INBOUND) {
+    rows = deriveGatewayInbound(record);
+  } else if (sourceType === SOURCE_TYPES.GATEWAY_OUTBOUND) {
+    rows = deriveGatewayOutbound(record);
+  } else if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
+    rows = deriveBankAccount(record);
+  } else {
+    rows = [];
+  }
+  return rows.map((item, legIndex) => ({
+    sourceType,
+    businessKey: record.businessKey,
+    sourceRecordKey: record.sourceRecordKey || record.row_hash || record.rowHash || '',
+    sourceRowId: record.sourceRowId || record.id || null,
+    sourceRowNumber: record.sourceRowNumber,
+    legIndex,
+    visible: item.visible !== false,
+    row: item.row
+  }));
+}
+
 function deriveLinkedRows(sourceType, records, mappings = []) {
   const accountMapping = new Map(
     (Array.isArray(mappings) ? mappings : []).map((mapping) => [
@@ -138,29 +177,10 @@ function deriveLinkedRows(sourceType, records, mappings = []) {
   );
   const derived = [];
   for (const record of Array.isArray(records) ? records : []) {
-    let rows;
-    if (sourceType === SOURCE_TYPES.FUND_TRANSFER) {
-      rows = deriveFundTransfer(record, accountMapping);
-    } else if (sourceType === SOURCE_TYPES.TEST_PAYMENT) {
-      rows = deriveTestPayment(record);
-    } else if (sourceType === SOURCE_TYPES.GATEWAY_INBOUND) {
-      rows = deriveGatewayInbound(record);
-    } else if (sourceType === SOURCE_TYPES.GATEWAY_OUTBOUND) {
-      rows = deriveGatewayOutbound(record);
-    } else if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
-      rows = deriveBankAccount(record);
-    } else {
-      rows = [];
-    }
-    rows.forEach((item, legIndex) => {
+    deriveLinkedRowsForRecord(sourceType, record, accountMapping).forEach((item) => {
       derived.push({
-        sourceType,
-        businessKey: record.businessKey,
-        sourceRowNumber: record.sourceRowNumber,
-        ordinal: derived.length,
-        legIndex,
-        visible: item.visible !== false,
-        row: item.row
+        ...item,
+        ordinal: derived.length
       });
     });
   }
@@ -169,6 +189,7 @@ function deriveLinkedRows(sourceType, records, mappings = []) {
 
 module.exports = {
   deriveLinkedRows,
+  deriveLinkedRowsForRecord,
   deriveFundTransfer,
   deriveTestPayment,
   deriveGatewayInbound,

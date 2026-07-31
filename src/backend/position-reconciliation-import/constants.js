@@ -1,0 +1,95 @@
+'use strict';
+
+const POSITION_IMPORT_PROTOCOL_VERSION = 1;
+const POSITION_IMPORT_LEDGER_SCHEMA_VERSION = 2;
+const POSITION_SST_MEMORY_BUDGET_BYTES = 64 * 1024 * 1024;
+const POSITION_SST_LRU_MAX_ENTRIES = 8192;
+const POSITION_IMPORT_MAX_ERROR_DETAILS = 100;
+const POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST = Object.freeze([
+  'fund-transfer',
+  'test-payment',
+  'gateway-inbound',
+  'gateway-outbound'
+]);
+const POSITION_IMPORT_MAINTENANCE_BATCH_SIZE = 10000;
+const POSITION_IMPORT_PROGRESS_ROW_INTERVAL = 4000;
+const POSITION_IMPORT_PROGRESS_HEARTBEAT_MS = 750;
+const POSITION_IMPORT_NON_CANCELLABLE_STAGES = Object.freeze([
+  'summarizing',
+  'committing'
+]);
+
+const POSITION_IMPORT_ENGINES = Object.freeze({
+  STREAMING: 'streaming',
+  LEGACY_WORKER: 'legacy-worker',
+  DISABLED: 'disabled'
+});
+
+const POSITION_IMPORT_COMMANDS = Object.freeze({
+  BANK_PREPARE: 'BANK_PREPARE',
+  BANK_APPLY: 'BANK_APPLY',
+  SOURCE_PREPARE_AND_APPLY: 'SOURCE_PREPARE_AND_APPLY',
+  ACCOUNT_APPLY: 'ACCOUNT_APPLY',
+  DELETE_BANK: 'DELETE_BANK',
+  DELETE_SOURCE: 'DELETE_SOURCE',
+  REBUILD_FUND_TRANSFER_MAPPING: 'REBUILD_FUND_TRANSFER_MAPPING',
+  ENSURE_LARGE_IMPORT_INDEXES: 'ENSURE_LARGE_IMPORT_INDEXES'
+});
+
+const POSITION_IMPORT_MESSAGE_TYPES = Object.freeze({
+  START_JOB: 'START_JOB',
+  PROGRESS: 'PROGRESS',
+  PREFLIGHT_READY: 'PREFLIGHT_READY',
+  APPLY_GRANTED: 'APPLY_GRANTED',
+  APPLY_REJECTED: 'APPLY_REJECTED',
+  FILE_COMMITTED: 'FILE_COMMITTED',
+  COMPLETE: 'COMPLETE',
+  FATAL: 'FATAL',
+  CANCEL: 'CANCEL',
+  CANCEL_ACK: 'CANCEL_ACK'
+});
+
+function normalizePositionImportEngine(value = process.env.POSITION_IMPORT_ENGINE) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return Object.values(POSITION_IMPORT_ENGINES).includes(normalized)
+    ? normalized
+    : POSITION_IMPORT_ENGINES.DISABLED;
+}
+
+function normalizePositionStreamingSourceTypes(
+  value = process.env.POSITION_STREAMING_SOURCE_TYPES,
+  { engine = normalizePositionImportEngine() } = {}
+) {
+  if (engine !== POSITION_IMPORT_ENGINES.STREAMING) return new Set();
+  const configured = String(value || '').trim();
+  const values = configured
+    ? configured.split(',').map((item) => item.trim()).filter(Boolean)
+    : POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST;
+  const allowed = new Set(POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST);
+  return new Set(values.filter((item) => allowed.has(item)));
+}
+
+function isPositionImportCancellationLocked(stage) {
+  return POSITION_IMPORT_NON_CANCELLABLE_STAGES.includes(
+    String(stage || '').trim()
+  );
+}
+
+module.exports = {
+  POSITION_IMPORT_PROTOCOL_VERSION,
+  POSITION_IMPORT_LEDGER_SCHEMA_VERSION,
+  POSITION_SST_MEMORY_BUDGET_BYTES,
+  POSITION_SST_LRU_MAX_ENTRIES,
+  POSITION_IMPORT_MAX_ERROR_DETAILS,
+  POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST,
+  POSITION_IMPORT_MAINTENANCE_BATCH_SIZE,
+  POSITION_IMPORT_PROGRESS_ROW_INTERVAL,
+  POSITION_IMPORT_PROGRESS_HEARTBEAT_MS,
+  POSITION_IMPORT_NON_CANCELLABLE_STAGES,
+  POSITION_IMPORT_ENGINES,
+  POSITION_IMPORT_COMMANDS,
+  POSITION_IMPORT_MESSAGE_TYPES,
+  isPositionImportCancellationLocked,
+  normalizePositionImportEngine,
+  normalizePositionStreamingSourceTypes
+};

@@ -1,0 +1,3033 @@
+{
+  "status": "success",
+  "generatedAt": "2026-07-31T09:33:26.237Z",
+  "platform": "darwin",
+  "release": "24.6.0",
+  "arch": "arm64",
+  "cpuModel": "Apple M4 Pro",
+  "cpus": 14,
+  "totalMemoryBytes": 51539607552,
+  "versions": {
+    "node": "v24.13.0",
+    "electron": null,
+    "v8": "13.6.233.17-node.37"
+  },
+  "kind": "source",
+  "apply": true,
+  "elapsedMs": 1472492,
+  "files": [
+    {
+      "fileName": "v313-inbound-3m-01.xlsx",
+      "sizeBytes": 160517624,
+      "uncompressedBytes": 1529016724,
+      "sharedStringsUncompressedBytes": 0
+    },
+    {
+      "fileName": "v313-inbound-3m-02.xlsx",
+      "sizeBytes": 161236799,
+      "uncompressedBytes": 1532350036,
+      "sharedStringsUncompressedBytes": 0
+    },
+    {
+      "fileName": "v313-inbound-3m-03.xlsx",
+      "sizeBytes": 161236699,
+      "uncompressedBytes": 1532350036,
+      "sharedStringsUncompressedBytes": 0
+    }
+  ],
+  "results": [
+    {
+      "fileName": "v313-inbound-3m-01.xlsx",
+      "status": "ok",
+      "sourceType": "gateway-inbound",
+      "rowCount": 1000000,
+      "collapsedDuplicateCount": 0,
+      "sharedStringsMode": "memory"
+    },
+    {
+      "fileName": "v313-inbound-3m-02.xlsx",
+      "status": "ok",
+      "sourceType": "gateway-inbound",
+      "rowCount": 1000000,
+      "collapsedDuplicateCount": 0,
+      "sharedStringsMode": "memory"
+    },
+    {
+      "fileName": "v313-inbound-3m-03.xlsx",
+      "status": "ok",
+      "sourceType": "gateway-inbound",
+      "rowCount": 1000000,
+      "collapsedDuplicateCount": 0,
+      "sharedStringsMode": "memory"
+    }
+  ],
+  "resourceMetrics": {
+    "mainBaselineRssBytes": 87801856,
+    "mainPeakRssBytes": 96354304,
+    "mainEndRssBytes": 93683712,
+    "mainRssDeltaBytes": 8552448,
+    "mainBaselineHeapUsedBytes": 23899512,
+    "mainPeakHeapUsedBytes": 24868040,
+    "mainEndHeapUsedBytes": 19432184,
+    "workerPeakRssBytes": 870514688,
+    "workerPeakHeapUsedBytes": 80657456,
+    "peakRunDataBytes": 8967135330,
+    "ledgerSizeBytes": 1209745408,
+    "maxProgressSilenceMs": 1977,
+    "maxProgressGap": {
+      "durationMs": 1977,
+      "fromStage": "committing",
+      "toStage": "committing",
+      "fromCapturedAt": 1785491588363,
+      "toCapturedAt": 1785491590340
+    }
+  },
+  "databaseEvidence": {
+    "bankRows": 0,
+    "sourceRows": 3000000,
+    "linkRows": 3000000,
+    "distinctSourceRecordKeys": 3000000,
+    "committedInputProofs": 3,
+    "expectedProofs": 3,
+    "checkpoint": {
+      "identity": "c2d02969-6c42-4571-a64a-549a44c62ef3",
+      "generation": 3,
+      "token": "85265847-2afa-4e38-897a-5af3b1bf5ff7"
+    },
+    "quickCheck": [
+      "ok"
+    ]
+  },
+  "summaryTimings": {
+    "status": {
+      "samples": 20,
+      "p50Ms": 0.159292,
+      "p95Ms": 0.283709,
+      "maxMs": 1.406958
+    },
+    "dataManager": {
+      "samples": 20,
+      "p50Ms": 0.042292,
+      "p95Ms": 0.06075,
+      "maxMs": 0.128083
+    },
+    "linkedManager": {
+      "samples": 20,
+      "p50Ms": 0.319125,
+      "p95Ms": 0.427125,
+      "maxMs": 0.907959
+    }
+  },
+  "progressSamples": [
+    {
+      "capturedAt": 1785490406419,
+      "stage": "staging",
+      "currentFile": 1,
+      "scannedRows": 0,
+      "acceptedRows": 0,
+      "committedRows": 0,
+      "workerRssBytes": 102055936,
+      "elapsedMs": 8
+    },
+    {
+      "capturedAt": 1785490407521,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 4000,
+      "acceptedRows": 3999,
+      "committedRows": 0,
+      "workerRssBytes": 271581184,
+      "elapsedMs": 1110
+    },
+    {
+      "capturedAt": 1785490413236,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 32000,
+      "acceptedRows": 31999,
+      "committedRows": 0,
+      "workerRssBytes": 292634624,
+      "elapsedMs": 6825
+    },
+    {
+      "capturedAt": 1785490418238,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 56000,
+      "acceptedRows": 55999,
+      "committedRows": 0,
+      "workerRssBytes": 323616768,
+      "elapsedMs": 11827
+    },
+    {
+      "capturedAt": 1785490423964,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 84000,
+      "acceptedRows": 83999,
+      "committedRows": 0,
+      "workerRssBytes": 324861952,
+      "elapsedMs": 17553
+    },
+    {
+      "capturedAt": 1785490429760,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 112000,
+      "acceptedRows": 111999,
+      "committedRows": 0,
+      "workerRssBytes": 325156864,
+      "elapsedMs": 23349
+    },
+    {
+      "capturedAt": 1785490434793,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 136000,
+      "acceptedRows": 135999,
+      "committedRows": 0,
+      "workerRssBytes": 325550080,
+      "elapsedMs": 28382
+    },
+    {
+      "capturedAt": 1785490439801,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 160000,
+      "acceptedRows": 159999,
+      "committedRows": 0,
+      "workerRssBytes": 377421824,
+      "elapsedMs": 33390
+    },
+    {
+      "capturedAt": 1785490444834,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 184000,
+      "acceptedRows": 183999,
+      "committedRows": 0,
+      "workerRssBytes": 379240448,
+      "elapsedMs": 38423
+    },
+    {
+      "capturedAt": 1785490449842,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 208000,
+      "acceptedRows": 207999,
+      "committedRows": 0,
+      "workerRssBytes": 382795776,
+      "elapsedMs": 43431
+    },
+    {
+      "capturedAt": 1785490454915,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 232000,
+      "acceptedRows": 231999,
+      "committedRows": 0,
+      "workerRssBytes": 383942656,
+      "elapsedMs": 48504
+    },
+    {
+      "capturedAt": 1785490459928,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 256000,
+      "acceptedRows": 255999,
+      "committedRows": 0,
+      "workerRssBytes": 384712704,
+      "elapsedMs": 53517
+    },
+    {
+      "capturedAt": 1785490464932,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 280000,
+      "acceptedRows": 279999,
+      "committedRows": 0,
+      "workerRssBytes": 384712704,
+      "elapsedMs": 58521
+    },
+    {
+      "capturedAt": 1785490470717,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 308000,
+      "acceptedRows": 307999,
+      "committedRows": 0,
+      "workerRssBytes": 384925696,
+      "elapsedMs": 64306
+    },
+    {
+      "capturedAt": 1785490476514,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 336000,
+      "acceptedRows": 335999,
+      "committedRows": 0,
+      "workerRssBytes": 384925696,
+      "elapsedMs": 70103
+    },
+    {
+      "capturedAt": 1785490481514,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 360000,
+      "acceptedRows": 359999,
+      "committedRows": 0,
+      "workerRssBytes": 385253376,
+      "elapsedMs": 75103
+    },
+    {
+      "capturedAt": 1785490486531,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 384000,
+      "acceptedRows": 383999,
+      "committedRows": 0,
+      "workerRssBytes": 385286144,
+      "elapsedMs": 80119
+    },
+    {
+      "capturedAt": 1785490491537,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 408000,
+      "acceptedRows": 407999,
+      "committedRows": 0,
+      "workerRssBytes": 385302528,
+      "elapsedMs": 85126
+    },
+    {
+      "capturedAt": 1785490497357,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 436000,
+      "acceptedRows": 435999,
+      "committedRows": 0,
+      "workerRssBytes": 385302528,
+      "elapsedMs": 90946
+    },
+    {
+      "capturedAt": 1785490503171,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 464000,
+      "acceptedRows": 463999,
+      "committedRows": 0,
+      "workerRssBytes": 385302528,
+      "elapsedMs": 96760
+    },
+    {
+      "capturedAt": 1785490509001,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 492000,
+      "acceptedRows": 491999,
+      "committedRows": 0,
+      "workerRssBytes": 385302528,
+      "elapsedMs": 102590
+    },
+    {
+      "capturedAt": 1785490514085,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 516000,
+      "acceptedRows": 515999,
+      "committedRows": 0,
+      "workerRssBytes": 385417216,
+      "elapsedMs": 107674
+    },
+    {
+      "capturedAt": 1785490519177,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 540000,
+      "acceptedRows": 539999,
+      "committedRows": 0,
+      "workerRssBytes": 385466368,
+      "elapsedMs": 112766
+    },
+    {
+      "capturedAt": 1785490524204,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 564000,
+      "acceptedRows": 563999,
+      "committedRows": 0,
+      "workerRssBytes": 385990656,
+      "elapsedMs": 117793
+    },
+    {
+      "capturedAt": 1785490530026,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 592000,
+      "acceptedRows": 591999,
+      "committedRows": 0,
+      "workerRssBytes": 385990656,
+      "elapsedMs": 123615
+    },
+    {
+      "capturedAt": 1785490535855,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 620000,
+      "acceptedRows": 619999,
+      "committedRows": 0,
+      "workerRssBytes": 386023424,
+      "elapsedMs": 129444
+    },
+    {
+      "capturedAt": 1785490540858,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 644000,
+      "acceptedRows": 643999,
+      "committedRows": 0,
+      "workerRssBytes": 386023424,
+      "elapsedMs": 134447
+    },
+    {
+      "capturedAt": 1785490545947,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 668000,
+      "acceptedRows": 667999,
+      "committedRows": 0,
+      "workerRssBytes": 386039808,
+      "elapsedMs": 139536
+    },
+    {
+      "capturedAt": 1785490551766,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 696000,
+      "acceptedRows": 695999,
+      "committedRows": 0,
+      "workerRssBytes": 386072576,
+      "elapsedMs": 145355
+    },
+    {
+      "capturedAt": 1785490556785,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 720000,
+      "acceptedRows": 719999,
+      "committedRows": 0,
+      "workerRssBytes": 386088960,
+      "elapsedMs": 150374
+    },
+    {
+      "capturedAt": 1785490561829,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 744000,
+      "acceptedRows": 743999,
+      "committedRows": 0,
+      "workerRssBytes": 386285568,
+      "elapsedMs": 155418
+    },
+    {
+      "capturedAt": 1785490566846,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 768000,
+      "acceptedRows": 767999,
+      "committedRows": 0,
+      "workerRssBytes": 386285568,
+      "elapsedMs": 160435
+    },
+    {
+      "capturedAt": 1785490571865,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 792000,
+      "acceptedRows": 791999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 165454
+    },
+    {
+      "capturedAt": 1785490576978,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 816000,
+      "acceptedRows": 815999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 170567
+    },
+    {
+      "capturedAt": 1785490581995,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 840000,
+      "acceptedRows": 839999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 175584
+    },
+    {
+      "capturedAt": 1785490587820,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 868000,
+      "acceptedRows": 867999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 181409
+    },
+    {
+      "capturedAt": 1785490593656,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 896000,
+      "acceptedRows": 895999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 187245
+    },
+    {
+      "capturedAt": 1785490598703,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 920000,
+      "acceptedRows": 919999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 192292
+    },
+    {
+      "capturedAt": 1785490603834,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 944000,
+      "acceptedRows": 943999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 197423
+    },
+    {
+      "capturedAt": 1785490608846,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 968000,
+      "acceptedRows": 967999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 202435
+    },
+    {
+      "capturedAt": 1785490613859,
+      "stage": "preflight",
+      "currentFile": 1,
+      "scannedRows": 992000,
+      "acceptedRows": 991999,
+      "committedRows": 0,
+      "workerRssBytes": 386301952,
+      "elapsedMs": 207448
+    },
+    {
+      "capturedAt": 1785490619074,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 16000,
+      "acceptedRows": 15999,
+      "committedRows": 0,
+      "workerRssBytes": 389038080,
+      "elapsedMs": 212662
+    },
+    {
+      "capturedAt": 1785490624165,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 40000,
+      "acceptedRows": 39999,
+      "committedRows": 0,
+      "workerRssBytes": 389414912,
+      "elapsedMs": 217754
+    },
+    {
+      "capturedAt": 1785490629185,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 64000,
+      "acceptedRows": 63999,
+      "committedRows": 0,
+      "workerRssBytes": 389414912,
+      "elapsedMs": 222774
+    },
+    {
+      "capturedAt": 1785490634389,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 88000,
+      "acceptedRows": 87999,
+      "committedRows": 0,
+      "workerRssBytes": 389414912,
+      "elapsedMs": 227978
+    },
+    {
+      "capturedAt": 1785490639450,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 112000,
+      "acceptedRows": 111999,
+      "committedRows": 0,
+      "workerRssBytes": 389414912,
+      "elapsedMs": 233038
+    },
+    {
+      "capturedAt": 1785490644584,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 136000,
+      "acceptedRows": 135999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 238173
+    },
+    {
+      "capturedAt": 1785490649650,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 160000,
+      "acceptedRows": 159999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 243239
+    },
+    {
+      "capturedAt": 1785490654718,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 184000,
+      "acceptedRows": 183999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 248307
+    },
+    {
+      "capturedAt": 1785490659765,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 208000,
+      "acceptedRows": 207999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 253354
+    },
+    {
+      "capturedAt": 1785490665014,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 232000,
+      "acceptedRows": 231999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 258603
+    },
+    {
+      "capturedAt": 1785490670095,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 256000,
+      "acceptedRows": 255999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 263684
+    },
+    {
+      "capturedAt": 1785490675153,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 280000,
+      "acceptedRows": 279999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 268742
+    },
+    {
+      "capturedAt": 1785490680244,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 304000,
+      "acceptedRows": 303999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 273833
+    },
+    {
+      "capturedAt": 1785490685318,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 328000,
+      "acceptedRows": 327999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 278907
+    },
+    {
+      "capturedAt": 1785490690394,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 352000,
+      "acceptedRows": 351999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 283983
+    },
+    {
+      "capturedAt": 1785490695671,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 376000,
+      "acceptedRows": 375999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 289260
+    },
+    {
+      "capturedAt": 1785490700721,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 400000,
+      "acceptedRows": 399999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 294310
+    },
+    {
+      "capturedAt": 1785490705764,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 424000,
+      "acceptedRows": 423999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 299353
+    },
+    {
+      "capturedAt": 1785490710825,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 448000,
+      "acceptedRows": 447999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 304414
+    },
+    {
+      "capturedAt": 1785490715881,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 472000,
+      "acceptedRows": 471999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 309470
+    },
+    {
+      "capturedAt": 1785490720944,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 496000,
+      "acceptedRows": 495999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 314533
+    },
+    {
+      "capturedAt": 1785490726269,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 520000,
+      "acceptedRows": 519999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 319858
+    },
+    {
+      "capturedAt": 1785490731340,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 544000,
+      "acceptedRows": 543999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 324929
+    },
+    {
+      "capturedAt": 1785490736393,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 568000,
+      "acceptedRows": 567999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 329982
+    },
+    {
+      "capturedAt": 1785490741474,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 592000,
+      "acceptedRows": 591999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 335063
+    },
+    {
+      "capturedAt": 1785490746550,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 616000,
+      "acceptedRows": 615999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 340139
+    },
+    {
+      "capturedAt": 1785490751627,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 640000,
+      "acceptedRows": 639999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 345216
+    },
+    {
+      "capturedAt": 1785490757009,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 664000,
+      "acceptedRows": 663999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 350597
+    },
+    {
+      "capturedAt": 1785490762102,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 688000,
+      "acceptedRows": 687999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 355691
+    },
+    {
+      "capturedAt": 1785490767170,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 712000,
+      "acceptedRows": 711999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 360759
+    },
+    {
+      "capturedAt": 1785490772234,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 736000,
+      "acceptedRows": 735999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 365823
+    },
+    {
+      "capturedAt": 1785490777302,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 760000,
+      "acceptedRows": 759999,
+      "committedRows": 0,
+      "workerRssBytes": 389464064,
+      "elapsedMs": 370891
+    },
+    {
+      "capturedAt": 1785490782660,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 784000,
+      "acceptedRows": 783999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 376249
+    },
+    {
+      "capturedAt": 1785490787741,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 808000,
+      "acceptedRows": 807999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 381330
+    },
+    {
+      "capturedAt": 1785490792825,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 832000,
+      "acceptedRows": 831999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 386414
+    },
+    {
+      "capturedAt": 1785490797912,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 856000,
+      "acceptedRows": 855999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 391501
+    },
+    {
+      "capturedAt": 1785490803003,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 880000,
+      "acceptedRows": 879999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 396592
+    },
+    {
+      "capturedAt": 1785490808090,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 904000,
+      "acceptedRows": 903999,
+      "committedRows": 0,
+      "workerRssBytes": 389496832,
+      "elapsedMs": 401679
+    },
+    {
+      "capturedAt": 1785490813530,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 928000,
+      "acceptedRows": 927999,
+      "committedRows": 0,
+      "workerRssBytes": 389513216,
+      "elapsedMs": 407119
+    },
+    {
+      "capturedAt": 1785490818619,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 952000,
+      "acceptedRows": 951999,
+      "committedRows": 0,
+      "workerRssBytes": 389513216,
+      "elapsedMs": 412208
+    },
+    {
+      "capturedAt": 1785490823717,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 976000,
+      "acceptedRows": 975999,
+      "committedRows": 0,
+      "workerRssBytes": 389513216,
+      "elapsedMs": 417306
+    },
+    {
+      "capturedAt": 1785490828860,
+      "stage": "preflight",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 999999,
+      "committedRows": 0,
+      "workerRssBytes": 389578752,
+      "elapsedMs": 422449
+    },
+    {
+      "capturedAt": 1785490834308,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 24000,
+      "acceptedRows": 23999,
+      "committedRows": 0,
+      "workerRssBytes": 391692288,
+      "elapsedMs": 427897
+    },
+    {
+      "capturedAt": 1785490839454,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 48000,
+      "acceptedRows": 47999,
+      "committedRows": 0,
+      "workerRssBytes": 391692288,
+      "elapsedMs": 433043
+    },
+    {
+      "capturedAt": 1785490845040,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 72000,
+      "acceptedRows": 71999,
+      "committedRows": 0,
+      "workerRssBytes": 391774208,
+      "elapsedMs": 438629
+    },
+    {
+      "capturedAt": 1785490850149,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 96000,
+      "acceptedRows": 95999,
+      "committedRows": 0,
+      "workerRssBytes": 391774208,
+      "elapsedMs": 443738
+    },
+    {
+      "capturedAt": 1785490855253,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 120000,
+      "acceptedRows": 119999,
+      "committedRows": 0,
+      "workerRssBytes": 391774208,
+      "elapsedMs": 448842
+    },
+    {
+      "capturedAt": 1785490860381,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 144000,
+      "acceptedRows": 143999,
+      "committedRows": 0,
+      "workerRssBytes": 392232960,
+      "elapsedMs": 453970
+    },
+    {
+      "capturedAt": 1785490865536,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 168000,
+      "acceptedRows": 167999,
+      "committedRows": 0,
+      "workerRssBytes": 392232960,
+      "elapsedMs": 459125
+    },
+    {
+      "capturedAt": 1785490870654,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 192000,
+      "acceptedRows": 191999,
+      "committedRows": 0,
+      "workerRssBytes": 392232960,
+      "elapsedMs": 464243
+    },
+    {
+      "capturedAt": 1785490876015,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 216000,
+      "acceptedRows": 215999,
+      "committedRows": 0,
+      "workerRssBytes": 392298496,
+      "elapsedMs": 469604
+    },
+    {
+      "capturedAt": 1785490881136,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 240000,
+      "acceptedRows": 239999,
+      "committedRows": 0,
+      "workerRssBytes": 392495104,
+      "elapsedMs": 474725
+    },
+    {
+      "capturedAt": 1785490886266,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 264000,
+      "acceptedRows": 263999,
+      "committedRows": 0,
+      "workerRssBytes": 392642560,
+      "elapsedMs": 479855
+    },
+    {
+      "capturedAt": 1785490891383,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 288000,
+      "acceptedRows": 287999,
+      "committedRows": 0,
+      "workerRssBytes": 392658944,
+      "elapsedMs": 484972
+    },
+    {
+      "capturedAt": 1785490896505,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 312000,
+      "acceptedRows": 311999,
+      "committedRows": 0,
+      "workerRssBytes": 392658944,
+      "elapsedMs": 490093
+    },
+    {
+      "capturedAt": 1785490901651,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 336000,
+      "acceptedRows": 335999,
+      "committedRows": 0,
+      "workerRssBytes": 392658944,
+      "elapsedMs": 495240
+    },
+    {
+      "capturedAt": 1785490907262,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 360000,
+      "acceptedRows": 359999,
+      "committedRows": 0,
+      "workerRssBytes": 392757248,
+      "elapsedMs": 500851
+    },
+    {
+      "capturedAt": 1785490912365,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 384000,
+      "acceptedRows": 383999,
+      "committedRows": 0,
+      "workerRssBytes": 392757248,
+      "elapsedMs": 505954
+    },
+    {
+      "capturedAt": 1785490917471,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 408000,
+      "acceptedRows": 407999,
+      "committedRows": 0,
+      "workerRssBytes": 392757248,
+      "elapsedMs": 511060
+    },
+    {
+      "capturedAt": 1785490922601,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 432000,
+      "acceptedRows": 431999,
+      "committedRows": 0,
+      "workerRssBytes": 392757248,
+      "elapsedMs": 516190
+    },
+    {
+      "capturedAt": 1785490927748,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 456000,
+      "acceptedRows": 455999,
+      "committedRows": 0,
+      "workerRssBytes": 392757248,
+      "elapsedMs": 521337
+    },
+    {
+      "capturedAt": 1785490933365,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 480000,
+      "acceptedRows": 479999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 526954
+    },
+    {
+      "capturedAt": 1785490938476,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 504000,
+      "acceptedRows": 503999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 532065
+    },
+    {
+      "capturedAt": 1785490943584,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 528000,
+      "acceptedRows": 527999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 537173
+    },
+    {
+      "capturedAt": 1785490948686,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 552000,
+      "acceptedRows": 551999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 542275
+    },
+    {
+      "capturedAt": 1785490953795,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 576000,
+      "acceptedRows": 575999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 547384
+    },
+    {
+      "capturedAt": 1785490958912,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 600000,
+      "acceptedRows": 599999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 552500
+    },
+    {
+      "capturedAt": 1785490964562,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 624000,
+      "acceptedRows": 623999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 558151
+    },
+    {
+      "capturedAt": 1785490969700,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 648000,
+      "acceptedRows": 647999,
+      "committedRows": 0,
+      "workerRssBytes": 392773632,
+      "elapsedMs": 563289
+    },
+    {
+      "capturedAt": 1785490974830,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 672000,
+      "acceptedRows": 671999,
+      "committedRows": 0,
+      "workerRssBytes": 392806400,
+      "elapsedMs": 568419
+    },
+    {
+      "capturedAt": 1785490980518,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 700000,
+      "acceptedRows": 699999,
+      "committedRows": 0,
+      "workerRssBytes": 392806400,
+      "elapsedMs": 574106
+    },
+    {
+      "capturedAt": 1785490985662,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 724000,
+      "acceptedRows": 723999,
+      "committedRows": 0,
+      "workerRssBytes": 392806400,
+      "elapsedMs": 579250
+    },
+    {
+      "capturedAt": 1785490990770,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 748000,
+      "acceptedRows": 747999,
+      "committedRows": 0,
+      "workerRssBytes": 392871936,
+      "elapsedMs": 584359
+    },
+    {
+      "capturedAt": 1785490996465,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 772000,
+      "acceptedRows": 771999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 590054
+    },
+    {
+      "capturedAt": 1785491001581,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 796000,
+      "acceptedRows": 795999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 595170
+    },
+    {
+      "capturedAt": 1785491006703,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 820000,
+      "acceptedRows": 819999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 600292
+    },
+    {
+      "capturedAt": 1785491011845,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 844000,
+      "acceptedRows": 843999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 605434
+    },
+    {
+      "capturedAt": 1785491016987,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 868000,
+      "acceptedRows": 867999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 610576
+    },
+    {
+      "capturedAt": 1785491022626,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 888000,
+      "acceptedRows": 887999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 616215
+    },
+    {
+      "capturedAt": 1785491027836,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 916000,
+      "acceptedRows": 915999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 621425
+    },
+    {
+      "capturedAt": 1785491032963,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 940000,
+      "acceptedRows": 939999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 626552
+    },
+    {
+      "capturedAt": 1785491038073,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 964000,
+      "acceptedRows": 963999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 631662
+    },
+    {
+      "capturedAt": 1785491043195,
+      "stage": "preflight",
+      "currentFile": 3,
+      "scannedRows": 988000,
+      "acceptedRows": 987999,
+      "committedRows": 0,
+      "workerRssBytes": 392904704,
+      "elapsedMs": 636784
+    },
+    {
+      "capturedAt": 1785491048622,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 0,
+      "acceptedRows": 0,
+      "committedRows": 0,
+      "workerRssBytes": 624377856,
+      "elapsedMs": 0
+    },
+    {
+      "capturedAt": 1785491054045,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 16000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 822722560,
+      "elapsedMs": 5424
+    },
+    {
+      "capturedAt": 1785491059057,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 36000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 824213504,
+      "elapsedMs": 10436
+    },
+    {
+      "capturedAt": 1785491065037,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 60000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 834060288,
+      "elapsedMs": 16416
+    },
+    {
+      "capturedAt": 1785491070153,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 80000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 834158592,
+      "elapsedMs": 21532
+    },
+    {
+      "capturedAt": 1785491075220,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 100000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 834224128,
+      "elapsedMs": 26598
+    },
+    {
+      "capturedAt": 1785491080358,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 120000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 834469888,
+      "elapsedMs": 31737
+    },
+    {
+      "capturedAt": 1785491085595,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 140000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 834535424,
+      "elapsedMs": 36973
+    },
+    {
+      "capturedAt": 1785491090790,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 160000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 837959680,
+      "elapsedMs": 42169
+    },
+    {
+      "capturedAt": 1785491095931,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 180000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839024640,
+      "elapsedMs": 47309
+    },
+    {
+      "capturedAt": 1785491101090,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 200000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839090176,
+      "elapsedMs": 52469
+    },
+    {
+      "capturedAt": 1785491106302,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 220000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839270400,
+      "elapsedMs": 57681
+    },
+    {
+      "capturedAt": 1785491111501,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 240000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839614464,
+      "elapsedMs": 62880
+    },
+    {
+      "capturedAt": 1785491116883,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 260000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839729152,
+      "elapsedMs": 68262
+    },
+    {
+      "capturedAt": 1785491122083,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 280000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839794688,
+      "elapsedMs": 73462
+    },
+    {
+      "capturedAt": 1785491127357,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 300000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 839860224,
+      "elapsedMs": 78736
+    },
+    {
+      "capturedAt": 1785491132555,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 320000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840073216,
+      "elapsedMs": 83934
+    },
+    {
+      "capturedAt": 1785491137809,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 340000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840138752,
+      "elapsedMs": 89188
+    },
+    {
+      "capturedAt": 1785491143229,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 360000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840204288,
+      "elapsedMs": 94608
+    },
+    {
+      "capturedAt": 1785491148454,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 380000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840269824,
+      "elapsedMs": 99833
+    },
+    {
+      "capturedAt": 1785491153684,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 400000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840335360,
+      "elapsedMs": 105062
+    },
+    {
+      "capturedAt": 1785491158968,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 420000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840433664,
+      "elapsedMs": 110346
+    },
+    {
+      "capturedAt": 1785491164169,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 440000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840531968,
+      "elapsedMs": 115548
+    },
+    {
+      "capturedAt": 1785491169415,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 460000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840597504,
+      "elapsedMs": 120794
+    },
+    {
+      "capturedAt": 1785491174914,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 480000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840663040,
+      "elapsedMs": 126293
+    },
+    {
+      "capturedAt": 1785491180151,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 500000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 840744960,
+      "elapsedMs": 131530
+    },
+    {
+      "capturedAt": 1785491185385,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 520000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841056256,
+      "elapsedMs": 136764
+    },
+    {
+      "capturedAt": 1785491190621,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 540000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841121792,
+      "elapsedMs": 142000
+    },
+    {
+      "capturedAt": 1785491195830,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 556000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841187328,
+      "elapsedMs": 147209
+    },
+    {
+      "capturedAt": 1785491201133,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 580000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841285632,
+      "elapsedMs": 152512
+    },
+    {
+      "capturedAt": 1785491206741,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 600000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841351168,
+      "elapsedMs": 158120
+    },
+    {
+      "capturedAt": 1785491211999,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 620000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841416704,
+      "elapsedMs": 163378
+    },
+    {
+      "capturedAt": 1785491217288,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 640000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841515008,
+      "elapsedMs": 168666
+    },
+    {
+      "capturedAt": 1785491222537,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 660000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841580544,
+      "elapsedMs": 173916
+    },
+    {
+      "capturedAt": 1785491227877,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 676000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841613312,
+      "elapsedMs": 179256
+    },
+    {
+      "capturedAt": 1785491233559,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 700000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841711616,
+      "elapsedMs": 184938
+    },
+    {
+      "capturedAt": 1785491238880,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 720000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841777152,
+      "elapsedMs": 190259
+    },
+    {
+      "capturedAt": 1785491244120,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 740000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841842688,
+      "elapsedMs": 195499
+    },
+    {
+      "capturedAt": 1785491249418,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 760000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841908224,
+      "elapsedMs": 200797
+    },
+    {
+      "capturedAt": 1785491254657,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 780000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 841973760,
+      "elapsedMs": 206036
+    },
+    {
+      "capturedAt": 1785491259924,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 796000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842055680,
+      "elapsedMs": 211302
+    },
+    {
+      "capturedAt": 1785491265835,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 820000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842366976,
+      "elapsedMs": 217214
+    },
+    {
+      "capturedAt": 1785491271125,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 840000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842465280,
+      "elapsedMs": 222504
+    },
+    {
+      "capturedAt": 1785491276501,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 860000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842530816,
+      "elapsedMs": 227880
+    },
+    {
+      "capturedAt": 1785491281864,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 880000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842596352,
+      "elapsedMs": 233243
+    },
+    {
+      "capturedAt": 1785491287231,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 900000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842661888,
+      "elapsedMs": 238610
+    },
+    {
+      "capturedAt": 1785491292985,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 916000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842694656,
+      "elapsedMs": 244364
+    },
+    {
+      "capturedAt": 1785491298656,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 940000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842792960,
+      "elapsedMs": 250035
+    },
+    {
+      "capturedAt": 1785491304002,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 956000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842858496,
+      "elapsedMs": 255381
+    },
+    {
+      "capturedAt": 1785491309380,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 980000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842924032,
+      "elapsedMs": 260759
+    },
+    {
+      "capturedAt": 1785491314696,
+      "stage": "applying",
+      "currentFile": 1,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842989568,
+      "elapsedMs": 266075
+    },
+    {
+      "capturedAt": 1785491314697,
+      "stage": "summarizing",
+      "currentFile": 1,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 842989568,
+      "elapsedMs": 266076
+    },
+    {
+      "capturedAt": 1785491315315,
+      "stage": "committing",
+      "currentFile": 1,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 843005952,
+      "elapsedMs": 266694
+    },
+    {
+      "capturedAt": 1785491317026,
+      "stage": "committing",
+      "currentFile": 1,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 843005952,
+      "elapsedMs": 268405
+    },
+    {
+      "capturedAt": 1785491317447,
+      "stage": "committed",
+      "currentFile": 1,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 843005952,
+      "elapsedMs": 268826
+    },
+    {
+      "capturedAt": 1785491319021,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 4000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851329024,
+      "elapsedMs": 270400
+    },
+    {
+      "capturedAt": 1785491324363,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 24000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851525632,
+      "elapsedMs": 275742
+    },
+    {
+      "capturedAt": 1785491329610,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 44000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851607552,
+      "elapsedMs": 280988
+    },
+    {
+      "capturedAt": 1785491334857,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 64000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851607552,
+      "elapsedMs": 286236
+    },
+    {
+      "capturedAt": 1785491340158,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 84000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851607552,
+      "elapsedMs": 291537
+    },
+    {
+      "capturedAt": 1785491345486,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 104000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851607552,
+      "elapsedMs": 296865
+    },
+    {
+      "capturedAt": 1785491350811,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 124000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851607552,
+      "elapsedMs": 302190
+    },
+    {
+      "capturedAt": 1785491356170,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 144000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851656704,
+      "elapsedMs": 307549
+    },
+    {
+      "capturedAt": 1785491361492,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 164000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851656704,
+      "elapsedMs": 312871
+    },
+    {
+      "capturedAt": 1785491366792,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 184000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851656704,
+      "elapsedMs": 318171
+    },
+    {
+      "capturedAt": 1785491372097,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 204000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851738624,
+      "elapsedMs": 323476
+    },
+    {
+      "capturedAt": 1785491377440,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 224000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 328819
+    },
+    {
+      "capturedAt": 1785491382940,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 244000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 334319
+    },
+    {
+      "capturedAt": 1785491388295,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 264000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 339674
+    },
+    {
+      "capturedAt": 1785491393608,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 284000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 344987
+    },
+    {
+      "capturedAt": 1785491398871,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 304000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 350250
+    },
+    {
+      "capturedAt": 1785491404172,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 320000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851918848,
+      "elapsedMs": 355551
+    },
+    {
+      "capturedAt": 1785491409595,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 344000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 360974
+    },
+    {
+      "capturedAt": 1785491415296,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 364000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 366675
+    },
+    {
+      "capturedAt": 1785491420656,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 384000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 372035
+    },
+    {
+      "capturedAt": 1785491425949,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 404000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 377328
+    },
+    {
+      "capturedAt": 1785491431293,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 424000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 382671
+    },
+    {
+      "capturedAt": 1785491436636,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 444000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 388015
+    },
+    {
+      "capturedAt": 1785491441999,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 464000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 393378
+    },
+    {
+      "capturedAt": 1785491447317,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 484000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 398696
+    },
+    {
+      "capturedAt": 1785491452587,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 504000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 403966
+    },
+    {
+      "capturedAt": 1785491457942,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 524000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 409321
+    },
+    {
+      "capturedAt": 1785491463229,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 540000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 414608
+    },
+    {
+      "capturedAt": 1785491468581,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 564000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 419960
+    },
+    {
+      "capturedAt": 1785491473982,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 584000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 425361
+    },
+    {
+      "capturedAt": 1785491479346,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 604000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 430725
+    },
+    {
+      "capturedAt": 1785491484684,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 624000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 436063
+    },
+    {
+      "capturedAt": 1785491490020,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 644000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 441399
+    },
+    {
+      "capturedAt": 1785491495372,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 664000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 446751
+    },
+    {
+      "capturedAt": 1785491500686,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 684000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 452065
+    },
+    {
+      "capturedAt": 1785491506170,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 704000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 457549
+    },
+    {
+      "capturedAt": 1785491511511,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 724000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 462890
+    },
+    {
+      "capturedAt": 1785491516855,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 744000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 468234
+    },
+    {
+      "capturedAt": 1785491522189,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 764000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 473568
+    },
+    {
+      "capturedAt": 1785491527568,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 784000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 478947
+    },
+    {
+      "capturedAt": 1785491533038,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 804000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 484417
+    },
+    {
+      "capturedAt": 1785491538435,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 824000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 489814
+    },
+    {
+      "capturedAt": 1785491543771,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 844000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 495150
+    },
+    {
+      "capturedAt": 1785491549256,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 864000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 500635
+    },
+    {
+      "capturedAt": 1785491554737,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 884000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 506116
+    },
+    {
+      "capturedAt": 1785491560257,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 904000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 511636
+    },
+    {
+      "capturedAt": 1785491565901,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 924000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851935232,
+      "elapsedMs": 517279
+    },
+    {
+      "capturedAt": 1785491571467,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 944000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 851968000,
+      "elapsedMs": 522846
+    },
+    {
+      "capturedAt": 1785491576973,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 964000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 852033536,
+      "elapsedMs": 528351
+    },
+    {
+      "capturedAt": 1785491582512,
+      "stage": "applying",
+      "currentFile": 2,
+      "scannedRows": 984000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 852131840,
+      "elapsedMs": 533891
+    },
+    {
+      "capturedAt": 1785491586961,
+      "stage": "summarizing",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 538340
+    },
+    {
+      "capturedAt": 1785491588363,
+      "stage": "committing",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 539742
+    },
+    {
+      "capturedAt": 1785491590340,
+      "stage": "committing",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 541719
+    },
+    {
+      "capturedAt": 1785491591340,
+      "stage": "committing",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 542719
+    },
+    {
+      "capturedAt": 1785491591449,
+      "stage": "committed",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 542828
+    },
+    {
+      "capturedAt": 1785491593342,
+      "stage": "committed",
+      "currentFile": 2,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 852164608,
+      "elapsedMs": 544721
+    },
+    {
+      "capturedAt": 1785491593567,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 4000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865107968,
+      "elapsedMs": 544946
+    },
+    {
+      "capturedAt": 1785491599115,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 24000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865107968,
+      "elapsedMs": 550494
+    },
+    {
+      "capturedAt": 1785491604698,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 44000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865779712,
+      "elapsedMs": 556077
+    },
+    {
+      "capturedAt": 1785491610220,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 64000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865779712,
+      "elapsedMs": 561599
+    },
+    {
+      "capturedAt": 1785491615729,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 84000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865779712,
+      "elapsedMs": 567108
+    },
+    {
+      "capturedAt": 1785491621223,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 104000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865779712,
+      "elapsedMs": 572602
+    },
+    {
+      "capturedAt": 1785491626881,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 124000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 865779712,
+      "elapsedMs": 578260
+    },
+    {
+      "capturedAt": 1785491632378,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 140000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 869892096,
+      "elapsedMs": 583757
+    },
+    {
+      "capturedAt": 1785491637913,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 164000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 589292
+    },
+    {
+      "capturedAt": 1785491643388,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 180000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 594767
+    },
+    {
+      "capturedAt": 1785491648926,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 204000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 600305
+    },
+    {
+      "capturedAt": 1785491654686,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 224000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 606065
+    },
+    {
+      "capturedAt": 1785491660234,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 244000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 611613
+    },
+    {
+      "capturedAt": 1785491665838,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 264000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870154240,
+      "elapsedMs": 617217
+    },
+    {
+      "capturedAt": 1785491671373,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 284000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 622752
+    },
+    {
+      "capturedAt": 1785491677025,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 304000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 628404
+    },
+    {
+      "capturedAt": 1785491682903,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 324000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 634282
+    },
+    {
+      "capturedAt": 1785491688689,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 344000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 640068
+    },
+    {
+      "capturedAt": 1785491694400,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 364000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 645779
+    },
+    {
+      "capturedAt": 1785491700052,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 384000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 651431
+    },
+    {
+      "capturedAt": 1785491705781,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 404000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 657160
+    },
+    {
+      "capturedAt": 1785491711378,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 424000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870170624,
+      "elapsedMs": 662757
+    },
+    {
+      "capturedAt": 1785491717175,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 444000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 668554
+    },
+    {
+      "capturedAt": 1785491722885,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 464000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 674264
+    },
+    {
+      "capturedAt": 1785491728467,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 480000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 679846
+    },
+    {
+      "capturedAt": 1785491734138,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 504000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 685516
+    },
+    {
+      "capturedAt": 1785491739705,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 524000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 691084
+    },
+    {
+      "capturedAt": 1785491745401,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 544000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 696780
+    },
+    {
+      "capturedAt": 1785491750779,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 564000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 702158
+    },
+    {
+      "capturedAt": 1785491756206,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 584000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 707585
+    },
+    {
+      "capturedAt": 1785491761591,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 604000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 712970
+    },
+    {
+      "capturedAt": 1785491767003,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 624000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 718382
+    },
+    {
+      "capturedAt": 1785491772508,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 640000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 723887
+    },
+    {
+      "capturedAt": 1785491778003,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 664000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 729382
+    },
+    {
+      "capturedAt": 1785491783402,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 684000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870236160,
+      "elapsedMs": 734781
+    },
+    {
+      "capturedAt": 1785491788894,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 704000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 740273
+    },
+    {
+      "capturedAt": 1785491794275,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 724000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 745654
+    },
+    {
+      "capturedAt": 1785491799701,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 744000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 751080
+    },
+    {
+      "capturedAt": 1785491805271,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 764000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 756650
+    },
+    {
+      "capturedAt": 1785491810628,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 784000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 762007
+    },
+    {
+      "capturedAt": 1785491816106,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 804000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 767485
+    },
+    {
+      "capturedAt": 1785491821531,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 824000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 772910
+    },
+    {
+      "capturedAt": 1785491827044,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 844000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 778423
+    },
+    {
+      "capturedAt": 1785491832563,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 860000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 783942
+    },
+    {
+      "capturedAt": 1785491838136,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 884000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 789515
+    },
+    {
+      "capturedAt": 1785491843548,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 904000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 794927
+    },
+    {
+      "capturedAt": 1785491848988,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 924000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 800367
+    },
+    {
+      "capturedAt": 1785491854394,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 944000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870252544,
+      "elapsedMs": 805773
+    },
+    {
+      "capturedAt": 1785491859874,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 964000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870350848,
+      "elapsedMs": 811253
+    },
+    {
+      "capturedAt": 1785491865122,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 980000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870383616,
+      "elapsedMs": 816501
+    },
+    {
+      "capturedAt": 1785491870517,
+      "stage": "applying",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 821896
+    },
+    {
+      "capturedAt": 1785491870518,
+      "stage": "summarizing",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 0,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 821897
+    },
+    {
+      "capturedAt": 1785491874689,
+      "stage": "committing",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 826068
+    },
+    {
+      "capturedAt": 1785491876602,
+      "stage": "committing",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 827981
+    },
+    {
+      "capturedAt": 1785491877603,
+      "stage": "committing",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 828982
+    },
+    {
+      "capturedAt": 1785491878417,
+      "stage": "committed",
+      "currentFile": 3,
+      "scannedRows": 1000000,
+      "acceptedRows": 1000000,
+      "committedRows": 1000000,
+      "workerRssBytes": 870514688,
+      "elapsedMs": 829796
+    }
+  ]
+}

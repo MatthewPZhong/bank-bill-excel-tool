@@ -291,6 +291,18 @@ contextBridge.exposeInMainWorld('desktopApi', {
     prepareSourceImport: () => ipcRenderer.invoke('position-reconciliation:source:prepare-import'),
     applySourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:apply-import', token),
     cancelSourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:cancel-import', token),
+    cancelActiveImport: (jobId) => ipcRenderer.invoke(
+      'position-reconciliation:import:cancel',
+      jobId
+    ),
+    onImportProgress: (listener) => {
+      const wrapped = (_event, progress) => listener(progress);
+      ipcRenderer.on('position-reconciliation:import-progress', wrapped);
+      return () => ipcRenderer.removeListener(
+        'position-reconciliation:import-progress',
+        wrapped
+      );
+    },
     listMappings: () => ipcRenderer.invoke('position-reconciliation:mappings:list'),
     saveMappings: (mappings) => ipcRenderer.invoke('position-reconciliation:mappings:save', mappings),
     deleteBank: (payload) => ipcRenderer.invoke('position-reconciliation:bank:delete', payload),

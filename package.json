@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.1.2",
+  "version": "3.1.3",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -92,7 +92,10 @@
     "preview:position-reconciliation-run-scope": "node scripts/render-modal-preview.js position-reconciliation-run-scope position-reconciliation-run-scope.png",
     "preview:position-reconciliation-result": "node scripts/render-modal-preview.js position-reconciliation-result position-reconciliation-result.png",
     "preview:position-reconciliation-account-mapping": "node scripts/render-modal-preview.js position-reconciliation-account-mapping position-reconciliation-account-mapping.png",
-    "preview:position-reconciliation": "npm run preview:position-reconciliation-panel && npm run preview:position-reconciliation-data-manager && npm run preview:position-reconciliation-differences && npm run preview:position-reconciliation-linked-manager && npm run preview:position-reconciliation-raw-sources && npm run preview:position-reconciliation-source-delete && npm run preview:position-reconciliation-run-scope && npm run preview:position-reconciliation-result && npm run preview:position-reconciliation-account-mapping",
+    "preview:position-reconciliation-import-progress": "node scripts/render-modal-preview.js position-reconciliation-import-progress position-reconciliation-import-progress.png",
+    "preview:position-reconciliation-import-stopping": "node scripts/render-modal-preview.js position-reconciliation-import-stopping position-reconciliation-import-stopping.png",
+    "preview:position-reconciliation-import-committing": "node scripts/render-modal-preview.js position-reconciliation-import-committing position-reconciliation-import-committing.png",
+    "preview:position-reconciliation": "npm run preview:position-reconciliation-panel && npm run preview:position-reconciliation-data-manager && npm run preview:position-reconciliation-differences && npm run preview:position-reconciliation-linked-manager && npm run preview:position-reconciliation-raw-sources && npm run preview:position-reconciliation-source-delete && npm run preview:position-reconciliation-run-scope && npm run preview:position-reconciliation-result && npm run preview:position-reconciliation-account-mapping && npm run preview:position-reconciliation-import-progress && npm run preview:position-reconciliation-import-stopping && npm run preview:position-reconciliation-import-committing",
     "preview:scenario-config-c4": "node scripts/render-modal-preview.js scenario-config-c4 scenario-config-c4.png",
     "preview:scenario-config-c4-both": "node scripts/render-modal-preview.js scenario-config-c4-both scenario-config-c4-both.png",
     "preview:recon-id-fix-panel-business": "node scripts/render-modal-preview.js recon-id-fix-panel-business recon-id-fix-panel-business.png",
@@ -137,6 +140,10 @@
     "test:v2.0.0:streaming-writer": "node scripts/test-v2.0.0-streaming-writer-diff.js",
     "startup:measure": "node scripts/measure-startup.js",
     "benchmark:duplicate-inbound": "node scripts/benchmark-duplicate-inbound-match.js",
+    "test:position-import:parity": "node scripts/test-position-import-parity.js",
+    "test:position-import:faults": "node scripts/test-position-import-faults.js",
+    "benchmark:position-import": "node scripts/benchmark-position-import.js",
+    "generate:position-import-fixture": "node scripts/generate-position-import-fixture.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
   },

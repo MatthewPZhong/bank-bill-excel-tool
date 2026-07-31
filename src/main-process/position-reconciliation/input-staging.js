@@ -3,6 +3,8 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { Transform } = require('node:stream');
+const { pipeline } = require('node:stream/promises');
 
 const {
   normalizeSourceSnapshot,
@@ -13,7 +15,19 @@ const {
 const STAGING_RELATIVE_PATH = 'run-data/position-reconciliation/import-staging';
 const DEFAULT_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const HASH_BUFFER_SIZE = 1024 * 1024;
+const PROGRESS_INTERVAL_BYTES = 8 * 1024 * 1024;
 const SHA256_RE = /^[a-f0-9]{64}$/;
+const STAGING_BATCH_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+function normalizeStagingBatchId(value) {
+  const batchId = String(value || '').trim();
+  if (!STAGING_BATCH_ID_RE.test(batchId) || batchId === '.' || batchId === '..') {
+    const error = new TypeError('平盘导入 staging batchId 非法');
+    error.code = 'position-import-job-ledger-invalid';
+    throw error;
+  }
+  return batchId;
+}
 
 function sourceStat(filePath) {
   const stat = fs.statSync(filePath);
@@ -42,6 +56,37 @@ function hashFileSha256Sync(filePath) {
     fs.closeSync(handle);
   }
   return { sha256: hash.digest('hex'), sizeBytes };
+}
+
+async function sourceStatAsync(filePath) {
+  const stat = await fs.promises.stat(filePath);
+  if (!stat.isFile()) throw new Error(`不是普通文件：${filePath}`);
+  return stat;
+}
+
+async function hashFileSha256Async(filePath) {
+  const hash = crypto.createHash('sha256');
+  let sizeBytes = 0;
+  const input = fs.createReadStream(filePath, { highWaterMark: HASH_BUFFER_SIZE });
+  for await (const chunk of input) {
+    hash.update(chunk);
+    sizeBytes += chunk.length;
+  }
+  return { sha256: hash.digest('hex'), sizeBytes };
+}
+
+async function captureStagedInputEvidenceAsync(filePath) {
+  const before = await sourceStatAsync(filePath);
+  const hashed = await hashFileSha256Async(filePath);
+  const after = await sourceStatAsync(filePath);
+  if (!sameSourceStat(before, after) || hashed.sizeBytes !== Number(after.size)) {
+    throw new Error(`计算摘要期间暂存文件发生变化：${path.basename(filePath)}`);
+  }
+  return {
+    stagedSnapshot: sourceSnapshotFromStat(after),
+    stagedSha256: hashed.sha256,
+    stagedSizeBytes: hashed.sizeBytes
+  };
 }
 
 function captureStagedInputEvidence(filePath) {
@@ -95,12 +140,154 @@ function assertStagedInputUnchanged(descriptor) {
   return true;
 }
 
-function stageInputFiles(userDataDir, filePaths, batchId) {
+async function assertStagedInputUnchangedAsync(descriptor) {
+  const input = descriptor && typeof descriptor === 'object' ? descriptor : {};
+  const filePath = path.resolve(String(input.archivePath || input.filePath || ''));
+  const expectedSnapshot = normalizeSourceSnapshot(input.stagedSnapshot);
+  const expectedSha256 = String(input.stagedSha256 || '').trim().toLowerCase();
+  const expectedSizeBytes = Number(input.stagedSizeBytes);
+  if (!expectedSnapshot
+      || !SHA256_RE.test(expectedSha256)
+      || !Number.isSafeInteger(expectedSizeBytes)
+      || expectedSizeBytes < 0
+      || expectedSnapshot.sizeBytes !== expectedSizeBytes) {
+    const error = new Error(`暂存输入缺少完整内容证据：${path.basename(filePath)}`);
+    error.code = 'position-staged-input-evidence-invalid';
+    throw error;
+  }
+  try {
+    const before = await sourceStatAsync(filePath);
+    if (!sourceSnapshotMatchesStat(expectedSnapshot, before)) {
+      throw new Error('文件身份快照不一致');
+    }
+    const actual = await hashFileSha256Async(filePath);
+    const after = await sourceStatAsync(filePath);
+    if (!sourceSnapshotMatchesStat(expectedSnapshot, after)
+        || actual.sizeBytes !== expectedSizeBytes
+        || actual.sha256 !== expectedSha256) {
+      throw new Error('文件内容摘要不一致');
+    }
+  } catch (cause) {
+    const error = new Error(`导入暂存文件在确认前发生变化：${path.basename(filePath)}`);
+    error.code = 'position-staged-input-changed';
+    error.cause = cause;
+    throw error;
+  }
+  return true;
+}
+
+async function copyAndHashInputAsync(
+  originalPath,
+  stagedPath,
+  onProgress,
+  cancelToken
+) {
+  const hash = crypto.createHash('sha256');
+  let sizeBytes = 0;
+  const meter = new Transform({
+    transform(chunk, _encoding, callback) {
+      if (cancelToken && cancelToken.cancelled) {
+        const error = new Error('平盘导入已取消');
+        error.code = 'position-import-cancelled';
+        callback(error);
+        return;
+      }
+      hash.update(chunk);
+      sizeBytes += chunk.length;
+      if (typeof onProgress === 'function') onProgress(sizeBytes);
+      callback(null, chunk);
+    }
+  });
+  await pipeline(
+    fs.createReadStream(originalPath, { highWaterMark: HASH_BUFFER_SIZE }),
+    meter,
+    fs.createWriteStream(stagedPath, {
+      flags: 'wx',
+      mode: 0o600,
+      highWaterMark: HASH_BUFFER_SIZE
+    })
+  );
+  return { sha256: hash.digest('hex'), sizeBytes };
+}
+
+async function stageInputFilesAsync(userDataDir, filePaths, batchId, options = {}) {
   const paths = Array.isArray(filePaths) ? filePaths : [];
+  const normalizedBatchId = normalizeStagingBatchId(batchId);
   const batchRoot = path.join(
     path.resolve(userDataDir),
     STAGING_RELATIVE_PATH,
-    String(batchId)
+    normalizedBatchId
+  );
+  const staged = [];
+  try {
+    for (let index = 0; index < paths.length; index += 1) {
+      if (options.cancelToken && options.cancelToken.cancelled) {
+        const error = new Error('平盘导入已取消');
+        error.code = 'position-import-cancelled';
+        throw error;
+      }
+      const input = paths[index];
+      const originalPath = path.resolve(String(
+        input && typeof input === 'object' ? input.filePath : input
+      ));
+      const before = await sourceStatAsync(originalPath);
+      const stagingDir = path.join(batchRoot, String(index + 1));
+      await fs.promises.mkdir(stagingDir, { recursive: true, mode: 0o700 });
+      const stagedPath = path.join(stagingDir, path.basename(originalPath));
+      let lastReportedBytes = 0;
+      const copied = await copyAndHashInputAsync(
+        originalPath,
+        stagedPath,
+        typeof options.onProgress === 'function'
+          ? (copiedBytes) => {
+            if (copiedBytes !== Number(before.size)
+                && copiedBytes - lastReportedBytes < PROGRESS_INTERVAL_BYTES) {
+              return;
+            }
+            lastReportedBytes = copiedBytes;
+            options.onProgress({
+              fileIndex: index,
+              fileName: path.basename(originalPath),
+              copiedBytes,
+              totalBytes: Number(before.size)
+            });
+          }
+          : null,
+        options.cancelToken
+      );
+      const after = await sourceStatAsync(originalPath);
+      const stagedStat = await sourceStatAsync(stagedPath);
+      if (!sameSourceStat(before, after)
+          || copied.sizeBytes !== Number(before.size)
+          || stagedStat.size !== before.size) {
+        throw new Error(`复制期间源文件发生变化：${path.basename(originalPath)}`);
+      }
+      staged.push({
+        fileIndex: index,
+        filePath: stagedPath,
+        sourceFilePath: originalPath,
+        sourceFileName: path.basename(originalPath),
+        archivePath: stagedPath,
+        stagingDir,
+        stagedSnapshot: sourceSnapshotFromStat(stagedStat),
+        stagedSha256: copied.sha256,
+        stagedSizeBytes: copied.sizeBytes
+      });
+    }
+    return staged;
+  } catch (error) {
+    await fs.promises.rm(batchRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function stageInputFiles(userDataDir, filePaths, batchId) {
+  const paths = Array.isArray(filePaths) ? filePaths : [];
+  const normalizedBatchId = normalizeStagingBatchId(batchId);
+  const batchRoot = path.join(
+    path.resolve(userDataDir),
+    STAGING_RELATIVE_PATH,
+    normalizedBatchId
   );
   const staged = [];
   try {
@@ -139,6 +326,20 @@ function cleanupStagingPaths(paths) {
   )));
   for (const target of unique) {
     fs.rmSync(target, { recursive: true, force: true });
+  }
+}
+
+async function cleanupStagingPathsAsync(paths) {
+  const unique = new Set((Array.isArray(paths) ? paths : []).filter(Boolean).map((value) => (
+    path.resolve(String(value))
+  )));
+  for (const target of unique) {
+    await fs.promises.rm(target, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100
+    });
   }
 }
 
@@ -199,10 +400,16 @@ function pruneStagingRoot(userDataDir, {
 
 module.exports = {
   STAGING_RELATIVE_PATH,
+  normalizeStagingBatchId,
   stageInputFiles,
+  stageInputFilesAsync,
   hashFileSha256Sync,
+  hashFileSha256Async,
+  captureStagedInputEvidenceAsync,
   assertStagedInputUnchanged,
+  assertStagedInputUnchangedAsync,
   cleanupStagingPaths,
+  cleanupStagingPathsAsync,
   filterStagingPathsWithoutProtectedSources,
   pruneStagingRoot
 };

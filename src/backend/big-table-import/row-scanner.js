@@ -132,7 +132,15 @@ function cellValueFromBody(body, type, sharedStrings) {
     const t = lastCollectedText(body, false);
     if (t === null) return '';
     const idx = parseInt(xmlUnescape(t), 10);
-    return Number.isFinite(idx) && sharedStrings[idx] !== undefined ? sharedStrings[idx] : '';
+    if (!Number.isFinite(idx) || idx < 0) return '';
+    if (sharedStrings && typeof sharedStrings.get === 'function') {
+      if (!Number.isSafeInteger(sharedStrings.count) || idx >= sharedStrings.count) return '';
+      const value = sharedStrings.get(idx);
+      return value === undefined ? '' : value;
+    }
+    return Array.isArray(sharedStrings) && sharedStrings[idx] !== undefined
+      ? sharedStrings[idx]
+      : '';
   }
   const t = lastCollectedText(body, false);
   return t === null ? '' : xmlUnescape(t);
