@@ -5,6 +5,9 @@ const path = require('node:path');
 const {
   normalizeSourceSnapshot
 } = require('../archive-center/source-snapshot');
+const {
+  normalizePositionCheckpoint
+} = require('./side-db-mutation');
 
 const SHA256_RE = /^[a-f0-9]{64}$/;
 
@@ -71,6 +74,108 @@ function requirePositionPendingArchiveFiles(value) {
     throw new Error('平盘待完成操作的存档文件清单损坏');
   }
   return files;
+}
+
+function positionPreflightAcceptedInputFiles(preflightReady) {
+  const accepted = preflightReady
+    && Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
+    ? preflightReady.acceptedOrdinaryInputFiles
+    : [];
+  return requirePositionPendingArchiveFiles({
+    archiveFiles: accepted.map((file) => ({
+      filePath: file.archivePath,
+      role: 'input',
+      sourceType: file.sourceType,
+      sourceSnapshot: file.stagedSnapshot,
+      sha256: file.stagedSha256,
+      sizeBytes: file.stagedSizeBytes
+    }))
+  });
+}
+
+function assertSameArchiveInputEvidence(actualFiles, expectedFiles) {
+  const actualInputs = actualFiles.filter((file) => file.role === 'input');
+  if (actualInputs.length !== expectedFiles.length) {
+    throw new Error('平盘导入 pending 的输入文件清单与预检 manifest 不一致');
+  }
+  const expectedByKey = new Map(expectedFiles.map((file) => [
+    recoveryInputKey(file),
+    file
+  ]));
+  for (const actual of actualInputs) {
+    const expected = expectedByKey.get(recoveryInputKey(actual));
+    if (!expected
+        || String(actual.sourceType || '').trim() !== String(expected.sourceType || '').trim()
+        || actual.sha256 !== expected.sha256
+        || actual.sizeBytes !== expected.sizeBytes
+        || !snapshotsEqual(actual.sourceSnapshot, expected.sourceSnapshot)) {
+      throw new Error('平盘导入 pending 的文件证据与预检 manifest 不一致');
+    }
+  }
+}
+
+function authorizePositionImportApply({
+  preflightReady,
+  currentCheckpoint,
+  schemaFingerprint,
+  readPending,
+  writePending,
+  recordArchiveIntentFiles
+}) {
+  const manifestHash = String(
+    preflightReady && preflightReady.archiveManifestHash || ''
+  ).trim().toLowerCase();
+  const fingerprint = String(schemaFingerprint || '').trim().toLowerCase();
+  const checkpoint = normalizePositionCheckpoint(
+    currentCheckpoint,
+    '导入 apply 基准 checkpoint'
+  );
+  if (!SHA256_RE.test(manifestHash)
+      || !SHA256_RE.test(fingerprint)
+      || !checkpoint
+      || typeof readPending !== 'function'
+      || typeof writePending !== 'function'
+      || typeof recordArchiveIntentFiles !== 'function') {
+    throw new Error('平盘导入 apply 授权参数不完整');
+  }
+  const expectedFiles = positionPreflightAcceptedInputFiles(preflightReady);
+  if (expectedFiles.length === 0) {
+    throw new Error('平盘导入没有可提交的普通来源文件');
+  }
+  const initialPending = readPending();
+  const operationToken = String(initialPending && initialPending.operationToken || '').trim();
+  if (!operationToken || initialPending.archiveRequired !== true) {
+    throw new Error('平盘导入缺少有效的存档 pending 所有权');
+  }
+
+  recordArchiveIntentFiles(expectedFiles, 'input');
+  const pendingWithFiles = readPending();
+  if (!pendingWithFiles || pendingWithFiles.operationToken !== operationToken) {
+    throw new Error('平盘导入登记存档意图时 pending 所有权已变化');
+  }
+  const persistedFiles = requirePositionPendingArchiveFiles(pendingWithFiles);
+  assertSameArchiveInputEvidence(persistedFiles, expectedFiles);
+  writePending({
+    ...pendingWithFiles,
+    archiveManifestHash: manifestHash
+  }, operationToken);
+
+  const verifiedPending = readPending();
+  if (!verifiedPending
+      || verifiedPending.operationToken !== operationToken
+      || String(verifiedPending.archiveManifestHash || '').trim().toLowerCase() !== manifestHash) {
+    throw new Error('平盘导入 archive manifest 未持久化，禁止 apply');
+  }
+  assertSameArchiveInputEvidence(
+    requirePositionPendingArchiveFiles(verifiedPending),
+    expectedFiles
+  );
+  return {
+    operationToken,
+    archiveManifestHash: manifestHash,
+    schemaFingerprint: fingerprint,
+    baseCheckpoint: checkpoint
+  };
 }
 
 function recoveryIntegrityError(message) {
@@ -370,6 +475,8 @@ async function runPositionOperationLifecycle({
 module.exports = {
   parsePositionPendingArchiveFiles,
   requirePositionPendingArchiveFiles,
+  positionPreflightAcceptedInputFiles,
+  authorizePositionImportApply,
   positionCommittedRecoveryArchiveFiles,
   positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,

@@ -21,19 +21,22 @@ const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields
 const {
   PositionReconciliationError,
   text,
-  transaction,
   stableHash
 } = require('./common');
-const {
-  normalizeSourceSnapshot
-} = require('../archive-center/source-snapshot');
 const { deriveLinkedRows } = require('./derivation');
+const {
+  POSITION_DB_IDENTITY_KEY,
+  POSITION_DB_GENERATION_KEY,
+  POSITION_DB_CHECKPOINT_TOKEN_KEY,
+  normalizePositionCheckpoint,
+  positionCheckpointsEqual,
+  readPositionDatabaseCheckpoint,
+  assertCurrentPositionCheckpointHistory,
+  listPositionCommittedOperationInputs,
+  runPositionSideDbMutation
+} = require('./side-db-mutation');
 
 const DATE_JSON_TYPE_KEY = '__position_reconciliation_type__';
-const POSITION_DB_IDENTITY_KEY = 'position_database_identity_v1';
-const POSITION_DB_GENERATION_KEY = 'position_database_generation_v1';
-const POSITION_DB_CHECKPOINT_TOKEN_KEY = 'position_database_checkpoint_token_v1';
-const SHA256_RE = /^[a-f0-9]{64}$/;
 const POSITION_DB_INITIALIZATION_MODES = Object.freeze({
   NEW: 'new',
   EMPTY_LEGACY_UPGRADE: 'empty-legacy-upgrade',
@@ -499,57 +502,6 @@ function serializeJson(value) {
   });
 }
 
-function operationInputKey(role, filePath) {
-  return stableHash({
-    role: text(role),
-    filePath: path.resolve(String(filePath || ''))
-  });
-}
-
-function normalizeOperationInputEvidence(value, fallbackSourceType = '') {
-  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-  const role = text(input.role || 'input');
-  const filePath = path.resolve(String(input.filePath || ''));
-  const sourceType = text(input.sourceType || fallbackSourceType);
-  const originalName = text(input.originalName) || path.basename(filePath);
-  const sourceSnapshot = normalizeSourceSnapshot(input.sourceSnapshot);
-  const sha256 = text(input.expectedSha256 || input.sha256).toLowerCase();
-  const sizeBytes = Number(input.expectedSizeBytes ?? input.sizeBytes);
-  if (role !== 'input'
-      || !String(input.filePath || '').trim()
-      || !sourceType
-      || !sourceSnapshot
-      || !SHA256_RE.test(sha256)
-      || !Number.isSafeInteger(sizeBytes)
-      || sizeBytes < 0
-      || sourceSnapshot.sizeBytes !== sizeBytes) {
-    throwInvalidSideData('平盘输入缺少完整的文件级提交证据');
-  }
-  return {
-    inputKey: operationInputKey(role, filePath),
-    sourceType,
-    role,
-    filePath,
-    originalName,
-    sourceSnapshot,
-    sha256,
-    sizeBytes
-  };
-}
-
-function operationInputEvidenceHash(value) {
-  return stableHash({
-    inputKey: value.inputKey,
-    sourceType: value.sourceType,
-    role: value.role,
-    filePath: value.filePath,
-    originalName: value.originalName,
-    sourceSnapshot: value.sourceSnapshot,
-    sha256: value.sha256,
-    sizeBytes: value.sizeBytes
-  });
-}
-
 function runRowIntegrityHash({
   runId,
   bizId,
@@ -613,57 +565,6 @@ function checkpointValue(value, label) {
   return normalized;
 }
 
-function checkpointGeneration(value) {
-  const normalized = text(value);
-  if (!/^(0|[1-9]\d*)$/.test(normalized)) {
-    throw new PositionReconciliationError(
-      'position-side-db-mismatch',
-      '平盘对账侧库 generation 非法，无法确认主库与侧库属于同一数据代次'
-    );
-  }
-  const generation = Number(normalized);
-  if (!Number.isSafeInteger(generation)) {
-    throw new PositionReconciliationError(
-      'position-side-db-mismatch',
-      '平盘对账侧库 generation 超出安全范围'
-    );
-  }
-  return generation;
-}
-
-function normalizeCheckpoint(value, label = 'checkpoint') {
-  if (value === null || value === undefined || value === '') return null;
-  let payload = value;
-  if (typeof value === 'string') {
-    try {
-      payload = JSON.parse(value);
-    } catch (_error) {
-      throw new PositionReconciliationError(
-        'position-side-db-mismatch',
-        `主库中的平盘侧库 ${label} 损坏，请恢复完整软件数据目录`
-      );
-    }
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    throw new PositionReconciliationError(
-      'position-side-db-mismatch',
-      `主库中的平盘侧库 ${label} 格式非法，请恢复完整软件数据目录`
-    );
-  }
-  return {
-    identity: checkpointValue(payload.identity, 'identity'),
-    generation: checkpointGeneration(payload.generation),
-    token: checkpointValue(payload.token, 'checkpoint token')
-  };
-}
-
-function checkpointsEqual(left, right) {
-  return Boolean(left && right)
-    && left.identity === right.identity
-    && left.generation === right.generation
-    && left.token === right.token;
-}
-
 function normalizePendingOperation(value) {
   if (value === null || value === undefined || value === '') return null;
   let payload = value;
@@ -685,27 +586,11 @@ function normalizePendingOperation(value) {
   }
   return {
     operationToken: checkpointValue(payload.operationToken, 'operation token'),
-    baseCheckpoint: normalizeCheckpoint(payload.baseCheckpoint, '待完成操作基准 checkpoint')
+    baseCheckpoint: normalizePositionCheckpoint(
+      payload.baseCheckpoint,
+      '待完成操作基准 checkpoint'
+    )
   };
-}
-
-function readDatabaseCheckpoint(db) {
-  const rows = db.prepare(`
-    SELECT key, value
-    FROM position_meta
-    WHERE key IN (?, ?, ?)
-  `).all(
-    POSITION_DB_IDENTITY_KEY,
-    POSITION_DB_GENERATION_KEY,
-    POSITION_DB_CHECKPOINT_TOKEN_KEY
-  );
-  const values = new Map(rows.map((row) => [row.key, row.value]));
-  if (values.size !== 3) return null;
-  return normalizeCheckpoint({
-    identity: values.get(POSITION_DB_IDENTITY_KEY),
-    generation: values.get(POSITION_DB_GENERATION_KEY),
-    token: values.get(POSITION_DB_CHECKPOINT_TOKEN_KEY)
-  }, 'checkpoint');
 }
 
 function checkpointMismatch(actual, expected, reason) {
@@ -721,19 +606,8 @@ function checkpointMismatch(actual, expected, reason) {
   );
 }
 
-function assertCurrentCheckpointHistory(db, actual) {
-  const row = db.prepare(`
-    SELECT token
-    FROM position_checkpoint_history
-    WHERE generation = ?
-  `).get(actual.generation);
-  if (!row || text(row.token) !== actual.token) {
-    checkpointMismatch(actual, null, '侧库当前 checkpoint 缺少对应历史记录');
-  }
-}
-
 function assertCheckpointCompatible(db, actual, expected, pendingOperation = null) {
-  assertCurrentCheckpointHistory(db, actual);
+  assertCurrentPositionCheckpointHistory(db, actual);
   if (!expected) return;
   if (actual.identity !== expected.identity) {
     checkpointMismatch(actual, expected, '主库与侧库的实例身份不同');
@@ -750,7 +624,7 @@ function assertCheckpointCompatible(db, actual, expected, pendingOperation = nul
   if (!pendingOperation) {
     checkpointMismatch(actual, expected, '侧库领先主库，但主库没有对应的待完成操作记录');
   }
-  if (!checkpointsEqual(pendingOperation.baseCheckpoint, expected)) {
+  if (!positionCheckpointsEqual(pendingOperation.baseCheckpoint, expected)) {
     checkpointMismatch(actual, expected, '待完成操作的基准 checkpoint 与主库当前 checkpoint 不一致');
   }
 
@@ -1551,8 +1425,8 @@ class PositionReconciliationStore {
     this.operationTokenProvider = typeof operationTokenProvider === 'function'
       ? operationTokenProvider
       : null;
-    const expected = normalizeCheckpoint(expectedCheckpoint, 'checkpoint');
-    const initial = normalizeCheckpoint(initialCheckpoint, '首次绑定 checkpoint');
+    const expected = normalizePositionCheckpoint(expectedCheckpoint, 'checkpoint');
+    const initial = normalizePositionCheckpoint(initialCheckpoint, '首次绑定 checkpoint');
     const pendingOperation = normalizePendingOperation(expectedPendingOperation);
     if (expected && initial) {
       throw new PositionReconciliationError(
@@ -1594,7 +1468,7 @@ class PositionReconciliationStore {
           FROM sqlite_master
           WHERE type = 'table' AND name = 'position_meta'
         `).get();
-        existingCheckpoint = hasMetaTable ? readDatabaseCheckpoint(this.db) : null;
+        existingCheckpoint = hasMetaTable ? readPositionDatabaseCheckpoint(this.db) : null;
         const hasHistoryTable = this.db.prepare(`
           SELECT 1 AS present
           FROM sqlite_master
@@ -1622,7 +1496,7 @@ class PositionReconciliationStore {
           if (!historyRow || text(historyRow.token) !== existingCheckpoint.token) {
             checkpointMismatch(existingCheckpoint, expected || initial, '侧库当前 checkpoint 历史缺失');
           }
-          if (!expected && initial && !checkpointsEqual(existingCheckpoint, initial)) {
+          if (!expected && initial && !positionCheckpointsEqual(existingCheckpoint, initial)) {
             checkpointMismatch(existingCheckpoint, initial, '侧库与主库首次绑定 checkpoint 不一致');
           }
         }
@@ -1683,7 +1557,7 @@ class PositionReconciliationStore {
         INSERT INTO position_meta(key, value) VALUES (?, ?)
         ON CONFLICT(key) DO NOTHING
       `).run(POSITION_DB_CHECKPOINT_TOKEN_KEY, seedCheckpoint.token);
-      const currentCheckpoint = readDatabaseCheckpoint(this.db);
+      const currentCheckpoint = readPositionDatabaseCheckpoint(this.db);
       if (!currentCheckpoint) {
         throw new PositionReconciliationError(
           'position-side-db-missing',
@@ -1752,7 +1626,7 @@ class PositionReconciliationStore {
   }
 
   persistenceCheckpoint() {
-    const checkpoint = readDatabaseCheckpoint(this.db);
+    const checkpoint = readPositionDatabaseCheckpoint(this.db);
     if (!checkpoint) {
       throw new PositionReconciliationError(
         'position-side-db-mismatch',
@@ -1762,156 +1636,29 @@ class PositionReconciliationStore {
     return checkpoint;
   }
 
-  _mutation(operation) {
-    return transaction(this.db, () => {
-      const currentCheckpoint = readDatabaseCheckpoint(this.db);
-      if (!currentCheckpoint) {
-        throw new PositionReconciliationError(
-          'position-side-db-mismatch',
-          '平盘对账侧库 checkpoint 缺失'
-        );
-      }
-      assertCurrentCheckpointHistory(this.db, currentCheckpoint);
-      const operationToken = text(
-        this.operationTokenProvider ? this.operationTokenProvider() : ''
-      ) || crypto.randomUUID();
-      const result = operation({ operationToken });
-      const nextGeneration = currentCheckpoint.generation + 1;
-      if (!Number.isSafeInteger(nextGeneration)) {
-        throw new PositionReconciliationError(
-          'position-side-db-mismatch',
-          '平盘对账侧库 generation 超出安全范围'
-        );
-      }
-      const nextToken = crypto.randomUUID();
-      const generationUpdate = this.db.prepare(`
-        UPDATE position_meta
-        SET value = ?
-        WHERE key = ? AND value = ?
-      `).run(
-        String(nextGeneration),
-        POSITION_DB_GENERATION_KEY,
-        String(currentCheckpoint.generation)
-      );
-      const tokenUpdate = this.db.prepare(`
-        UPDATE position_meta SET value = ? WHERE key = ? AND value = ?
-      `).run(
-        nextToken,
-        POSITION_DB_CHECKPOINT_TOKEN_KEY,
-        currentCheckpoint.token
-      );
-      const historyInsert = this.db.prepare(`
-        INSERT INTO position_checkpoint_history(
-          generation, token, parent_token, operation_token
-        )
-        VALUES (?, ?, ?, ?)
-      `).run(nextGeneration, nextToken, currentCheckpoint.token, operationToken);
-      if (Number(generationUpdate.changes) !== 1
-          || Number(tokenUpdate.changes) !== 1
-          || Number(historyInsert.changes) !== 1) {
-        throw new PositionReconciliationError(
-          'position-side-db-mismatch',
-          '平盘对账侧库 checkpoint 更新失败'
-        );
-      }
-      return result;
-    });
-  }
-
-  _recordOperationInputs(operationToken, inputEvidence, fallbackSourceType = '') {
-    const token = text(operationToken);
-    if (!token) {
-      throwInvalidSideData('平盘文件级提交凭证缺少 operation token');
-    }
-    const inputs = Array.isArray(inputEvidence) ? inputEvidence : [];
-    if (inputs.length === 0) return [];
-    const insert = this.db.prepare(`
-      INSERT INTO position_operation_inputs(
-        operation_token, input_key, source_type, role, file_path, original_name,
-        sha256, size_bytes, source_snapshot_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(operation_token, input_key) DO NOTHING
-    `);
-    const find = this.db.prepare(`
-      SELECT operation_token AS operationToken, input_key AS inputKey,
-             source_type AS sourceType, role, file_path AS filePath,
-             original_name AS originalName, sha256, size_bytes AS sizeBytes,
-             source_snapshot_json AS sourceSnapshotJson
-      FROM position_operation_inputs
-      WHERE operation_token = ? AND input_key = ?
-    `);
-    const recorded = [];
-    for (const value of inputs) {
-      const normalized = normalizeOperationInputEvidence(value, fallbackSourceType);
-      insert.run(
-        token,
-        normalized.inputKey,
-        normalized.sourceType,
-        normalized.role,
-        normalized.filePath,
-        normalized.originalName,
-        normalized.sha256,
-        normalized.sizeBytes,
-        serializeJson(normalized.sourceSnapshot)
-      );
-      const stored = find.get(token, normalized.inputKey);
-      if (!stored) throwInvalidSideData('平盘文件级提交凭证写入失败');
-      const storedSnapshot = normalizeSourceSnapshot(
-        parseJson(stored.sourceSnapshotJson, '文件级提交凭证快照')
-      );
-      const storedEvidence = {
-        inputKey: text(stored.inputKey),
-        sourceType: text(stored.sourceType),
-        role: text(stored.role),
-        filePath: path.resolve(String(stored.filePath || '')),
-        originalName: text(stored.originalName),
-        sourceSnapshot: storedSnapshot,
-        sha256: text(stored.sha256).toLowerCase(),
-        sizeBytes: Number(stored.sizeBytes)
-      };
-      if (!storedSnapshot
-          || operationInputEvidenceHash(storedEvidence) !== operationInputEvidenceHash(normalized)) {
-        throwInvalidSideData('平盘文件级提交凭证与既有记录冲突');
-      }
-      recorded.push(storedEvidence);
-    }
-    return recorded;
+  _mutation(operation, {
+    inputEvidence = [],
+    fallbackSourceType = ''
+  } = {}) {
+    const expectedCheckpoint = this.persistenceCheckpoint();
+    const operationToken = text(
+      this.operationTokenProvider ? this.operationTokenProvider() : ''
+    );
+    return runPositionSideDbMutation({
+      db: this.db,
+      expectedCheckpoint,
+      operationToken,
+      inputEvidence,
+      fallbackSourceType,
+      mutate: ({ operationToken: token, currentCheckpoint }) => operation({
+        operationToken: token,
+        currentCheckpoint
+      })
+    }).result;
   }
 
   listCommittedOperationInputs(operationToken) {
-    const token = text(operationToken);
-    if (!token) return [];
-    const rows = this.db.prepare(`
-      SELECT operation_token AS operationToken, input_key AS inputKey,
-             source_type AS sourceType, role, file_path AS filePath,
-             original_name AS originalName, sha256, size_bytes AS sizeBytes,
-             source_snapshot_json AS sourceSnapshotJson, committed_at AS committedAt
-      FROM position_operation_inputs
-      WHERE operation_token = ?
-      ORDER BY committed_at, input_key
-    `).all(token);
-    return rows.map((row) => {
-      const sourceSnapshot = normalizeSourceSnapshot(
-        parseJson(row.sourceSnapshotJson, '文件级提交凭证快照')
-      );
-      const normalized = normalizeOperationInputEvidence({
-        sourceType: row.sourceType,
-        role: row.role,
-        filePath: row.filePath,
-        originalName: row.originalName,
-        sourceSnapshot,
-        sha256: row.sha256,
-        sizeBytes: row.sizeBytes
-      });
-      if (text(row.inputKey) !== normalized.inputKey) {
-        throwInvalidSideData('平盘文件级提交凭证的 input key 不一致');
-      }
-      return {
-        operationToken: token,
-        ...normalized,
-        committedAt: text(row.committedAt)
-      };
-    });
+    return listPositionCommittedOperationInputs(this.db, operationToken);
   }
 
   getRevision(kind, key) {
@@ -1964,8 +1711,7 @@ class PositionReconciliationStore {
   replaceBankScopes(parsed, { inputEvidence = [] } = {}) {
     const records = Array.isArray(parsed.records) ? parsed.records : [];
     const scopes = Array.isArray(parsed.scopes) ? parsed.scopes : [];
-    return this._mutation(({ operationToken }) => {
-      this._recordOperationInputs(operationToken, inputEvidence, 'position-bank');
+    return this._mutation(() => {
       const existingByBizId = new Map(this.db.prepare(`
         SELECT biz_id AS bizId, channel, month_key AS monthKey
         FROM position_bank_rows
@@ -2027,6 +1773,9 @@ class PositionReconciliationStore {
         rowCount: records.length,
         scopes: scopes.map(decodeScopeKey)
       };
+    }, {
+      inputEvidence,
+      fallbackSourceType: 'position-bank'
     });
   }
 
@@ -2196,8 +1945,7 @@ class PositionReconciliationStore {
 
   applySourceImport(parsed, { inputEvidence = [] } = {}) {
     const sourceType = parsed.sourceType;
-    return this._mutation(({ operationToken }) => {
-      this._recordOperationInputs(operationToken, inputEvidence, sourceType);
+    return this._mutation(() => {
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         this.db.prepare('DELETE FROM position_source_rows WHERE source_type = ?').run(sourceType);
       }
@@ -2241,6 +1989,9 @@ class PositionReconciliationStore {
         linkedRowCount: this.countLinkedRows(sourceType),
         collapsedDuplicateCount: Number(parsed.collapsedDuplicateCount) || 0
       };
+    }, {
+      inputEvidence,
+      fallbackSourceType: sourceType
     });
   }
 
@@ -2614,8 +2365,7 @@ class PositionReconciliationStore {
     const existingRows = new Map(
       this.listRunRows(runId).map((row) => [text(row.biz_id), row])
     );
-    return this._mutation(({ operationToken }) => {
-      this._recordOperationInputs(operationToken, inputEvidence, 'position-result-reimport');
+    return this._mutation(() => {
       const update = this.db.prepare(`
         UPDATE position_run_rows SET
           result_fund_type = ?,
@@ -2733,6 +2483,9 @@ class PositionReconciliationStore {
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(serializeJson(summary), runId);
+    }, {
+      inputEvidence,
+      fallbackSourceType: 'position-result-reimport'
     });
   }
 
@@ -2904,6 +2657,8 @@ module.exports = {
   POSITION_DB_INITIALIZATION_MODES,
   scopeKey,
   decodeScopeKey,
+  parseJson,
   serializeJson,
+  runRowIntegrityHash,
   SCHEMA
 };

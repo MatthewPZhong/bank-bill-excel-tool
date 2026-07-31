@@ -9,7 +9,9 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v31（app v3.1.0 — 平盘银行/五类链接表持久侧库、侧库初始化一致性门禁、十组 FundType 资金性质判断、账户别名归并、严格 1:1、49 列结果、回导确认和 snapshot 失效门禁） |
+| 当前清单版本 | v32（app v3.1.3 PR-C1 — 平盘百万级导入共享 mutation、`row_hash` 来源身份迁移、archive apply 握手、schema fingerprint 与 worker exit 证据恢复） |
+| v32 本轮 review | 2026-07-30（覆盖普通来源 `sourceRecordKey`、链接/消费/运行血缘迁移、迁移磁盘门禁与事务回滚、schema-only checkpoint 不推进、pending manifest 持久化先于 apply、普通来源部分提交恢复及 bank/account fail-closed） |
+| v31 历史版本 | app v3.1.0 — 平盘银行/五类链接表持久侧库、侧库初始化一致性门禁、十组 FundType 资金性质判断、账户别名归并、严格 1:1、49 列结果、回导确认和 snapshot 失效门禁。 |
 | v31 本轮 review | 2026-07-28（覆盖主库 bulk 禁令、主库/side DB 同批备份与缺失阻断、运行 envelope 与明细一致性、原始/工作值隔离、Channel+月份替换、链接 revision、全局单一草稿、三字段 ReconID 候选冲突、调拨 signed `Extra Fee`、账户别名币种判断、零数据文本列、49 列防篡改和确认事务，以及存档替代源 SHA 恢复与 prepared staging 清理） |
 | v30 历史版本 | app v3.0.26 — R5 两种调拨来源和多对多审计统一纳入 signed `Extra Fee`；DBS-Charge 显式保持旧无手续费口径；前置资金不平结果新增 `FundType` 并锁定 C4 三代列契约。 |
 | v31 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
@@ -1278,24 +1280,27 @@ GATEWAY_RECON_FIELDS 维持原有非升格状态（已经在 scan-vars 中是 A-
 
 ---
 
-### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_CHECKPOINT_SETTING` / `POSITION_SIDE_DB_PENDING_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionFundNatureCheck`（v3.1.0 新增 Risk-sensitive ⚠️🔴🔴 资金红线）
+### `POSITION_BANK_HEADERS` / `POSITION_RULESET_VERSION` / `POSITION_SIDE_DB_CHECKPOINT_SETTING` / `POSITION_SIDE_DB_PENDING_SETTING` / `SOURCE_TYPES` / `SOURCE_DISPLAY_ORDER` / `PositionReconciliationStore` / `runPositionSideDbMutation` / `ensurePositionLargeImportSchema` / `runPositionFundNatureCheck`（v3.1.0 新增；v3.1.3 扩展百万级导入基础设施 Risk-sensitive ⚠️🔴🔴 资金红线）
 - 定义：
   - `src/main-process/position-reconciliation/constants.js`：49 列银行结果契约、side DB 跨库 checkpoint、五类来源、十组基础/FX配对和状态枚举。
   - `store.js` / `service.js` / `input-staging.js`：独立持久 side DB、原始/工作值、revision+规则版本 snapshot、不可变输入暂存、单一待确认草稿、回导和确认事务。
+  - `side-db-mutation.js` / `large-import-schema.js` / `import-dispatch.js`：唯一 checkpoint mutation helper、`row_hash` 来源身份迁移、现代索引/schema fingerprint、`PREFLIGHT_READY → APPLY_GRANTED` 和 worker exit 证据恢复。
   - `matching-engine.js` / `logical-accounts.js` / `decimal.js`：ReconID 候选图、全局严格 1:1、方向/日期/手续费、账户别名归并和 FundType 判定。
 - 关联功能：「平盘对账数据处理 → 平盘资金性质校验」的银行/链接导入、十组性质判断、差异、49 列结果、人工回导和确认。
 - 🔴 变更 review 要点（资金红线）：
   - **主库隔离与原始值不变**：银行、订单、账户和运行结果只能进入 `{userData}/run-data/position-reconciliation/position-data.sqlite`；主库不得出现批量明细。`original_json/original_fund_type` 永不改写，确认只更新工作值、审计和状态。
-  - **导入原子与血缘**：银行按 Channel+月份整批替换，BizId 全选择唯一；来源同文件冲突整份拒绝，跨文件后续文件拒绝，后续独立导入按业务主键更新。错误必须保留文件/sheet/行号/字段。
+  - **导入原子与血缘**：银行按 Channel+月份整批替换，BizId 全选择唯一；普通来源 `business_key` 仅作业务展示且允许重复，完整规范行 `row_hash` 是稳定 `sourceRecordKey`。同 `sourceType + row_hash` 的完全重复行折叠并更新文件血缘，同业务主键不同内容全部保留、独立派生和消费。错误必须保留文件/sheet/行号/字段。
   - **候选和去向守恒**：三种银行标识只 trim、大小写敏感；不同标识命中不同记录、多候选、链接复用均转人工。所有订单类场景先建立全局关系再裁决，禁止 first-wins；每条目标银行行必须恰有一个结果去向。
-  - **跨运行双向消费**：已确认订单来源的 `source_type + business_key + leg_index` 与 `bank_biz_id` 均为全局唯一；跨月份和来源重建后不得复用。同 BizId+同来源只允许幂等复核，同 BizId 改配必须转人工。
+  - **跨运行双向消费**：已确认订单来源的 `source_type + source_record_key + leg_index` 与 `bank_biz_id` 均为全局唯一；`business_key` 只保留为审计字段。跨月份和来源重建后不得复用。同 BizId+同来源只允许幂等复核，同 BizId 改配必须转人工。
   - **金额/方向/日期**：调拨固定使用 `abs(方向金额)+signed Extra Fee`，空手续费按 0，非法或负合计 fail closed；入出账方向、Test 只校验 Debit、FundTransfer-in/out 日期门禁不可互相套用。
   - **币种和账户**：Inbound 仅在银行/订单/原始出金币种三者明确相同时移除 `&FX`；仅当银行币种=订单币种且不同于原始出金币种时增加 `&FX`，三币种互异必须转人工。三类账户场景先唯一识别自有账户，再从剩余银行字段唯一识别非自有逻辑账户。别名、多币种、多性质或多候选不得按表序取第一条。
   - **草稿与确认**：银行/来源/映射 revision 或 `POSITION_RULESET_VERSION` 变化后旧草稿禁止导出、回导和确认，范围外 FundTransfer-out 变化也必须通过银行全局 revision 失效；第一期全局只能有一个待确认草稿。回导只允许原 FundType 基础/FX二元组变化，禁止缺行、加行、仅改详情或其它字段篡改；Excel 日期时间只豁免已知时区往返；未成功导出/合法回导前不得确认。未解决人工差异不得消费来源，唯一成功匹配被人工修改时仍须保留原来源血缘。
   - **输出与存档**：49 列名称和顺序固定，只有实际改变的 FundType 标黄，同值匹配不伪造修改；标识符列使用列级文本格式，`客户号/accountReference` 与零数据文件也必须保留。银行导入、账户快照和结果回导必须从私有不可变副本完成解析、写库与存档；每次成功输入、导出和回导独立即时存档，业务返回成功前须完成存档或形成可重试失败记录。
   - **侧库结构完整性**：主库必须在侧库写入前持久登记基准 checkpoint 与 operation token；side DB 的实例身份、generation、事务 token、父 token 和 operation token 历史必须同时满足契约。缺失、旧主库单独恢复、旧库回滚、同代或更高代次分叉必须阻断，旧 initialized 标记只能迁移真实旧库；备份恢复必须同时包含主库和 `run-data/`。银行、来源、链接、运行结果与血缘 JSON 不仅要求语法合法，还必须包含契约字段；运行来源由原始行推导，消费冲突由血缘重算，scope/snapshot/summary 共同篡改也必须 fail closed。
+  - **百万级来源身份迁移**：旧 `(source_type,business_key)` 唯一库只能在磁盘空间门禁通过后，用单笔 `BEGIN IMMEDIATE` 重建来源/链接/消费三表；旧消费和运行血缘必须唯一解析并回填 `sourceRecordKey`，重复来源腿、哈希碰撞、缺失来源或未知 schema 一律回滚阻断。schema-only 迁移不得推进业务 checkpoint。
+  - **apply 存档握手与崩溃恢复**：普通来源 worker 发出 `PREFLIGHT_READY` 后必须暂停；main 将全部接受文件证据和 manifest hash 持久化到 pending，才可连同当前 checkpoint/schema fingerprint 发 `APPLY_GRANTED`。worker exit/fatal 后只按 checkpoint history 和 `position_operation_inputs` 恢复已提交文件，禁止凭最后 IPC、扫描进度或 ledger 声明成功。
   - **顺序与退出**：`SOURCE_DISPLAY_ORDER` 固定五张链接表的业务展示顺序；普通退出和更新重启都必须先阻止新业务并等待活动业务、worker 与存档队列排空，再关闭 side DB。
-  - 必跑：position reconciliation unit、`position-reconciliation-side-db-parity.js`、archive operation tracker、9 张 preview、release-check、启动性能；⚠️ 真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
+  - 必跑：position reconciliation unit、`position-reconciliation-large-import-schema.test.js`、`position-reconciliation-import-preflight.test.js`、`position-reconciliation-side-db-parity.js`、archive operation tracker、9 张 preview、release-check、启动性能；⚠️ 来源身份迁移、真实账号别名、币种、正负手续费、日期和 1:1 冲突必须逐笔人工复核。
 
 ## 5. Minor — 提示性（次要）
 

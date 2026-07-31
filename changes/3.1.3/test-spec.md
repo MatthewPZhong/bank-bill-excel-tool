@@ -21,4 +21,7 @@
 - 故障：OOM、SIGKILL、未捕获异常、取消、磁盘不足、DB busy/full、ledger 损坏。
 - 兼容：除用户明确变更的来源重复口径外，旧 reader 的 JS 值、类型、日期、hash、DB JSON、物理行号和错误首因等价。
 - 身份迁移：旧业务主键唯一库原子迁移为 `row_hash` 唯一，链接与消费关系完整回填 `sourceRecordKey`。
+- 全局 schema 兼容：只启用 gateway-outbound streaming 后，尚未切换的
+  gateway-inbound、fund-transfer、test-payment 旧小文件导入仍可在现代身份 schema
+  上安全写入，不得触发旧 business-key conflict SQL 或丢失 `sourceRecordKey`。
 - 人工：macOS/Windows 各一次真实导入；资金数据范围替换、派生和存档证据人工复核。

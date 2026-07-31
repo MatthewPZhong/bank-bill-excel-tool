@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  authorizePositionImportApply,
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
   positionUncommittedRecoveryInputPaths,
@@ -486,4 +487,95 @@ test('恢复前暂存输入字节变化时 fail closed，不允许继续登记�
   );
   assert.equal(recoveryIntentCount, 0);
   assert.equal(fs.existsSync(inputPath), true);
+});
+
+test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 grant', () => {
+  const operationToken = 'operation-authorized';
+  const archiveManifestHash = 'b'.repeat(64);
+  const schemaFingerprint = 'c'.repeat(64);
+  const archivePath = path.resolve('/tmp/position-authorized.xlsx');
+  let pending = {
+    operationToken,
+    archiveRequired: true,
+    archiveState: 'awaiting-intent',
+    archiveFiles: []
+  };
+  const preflightReady = {
+    archiveManifestHash,
+    acceptedOrdinaryInputFiles: [{
+      archivePath,
+      sourceType: 'gateway-outbound',
+      stagedSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+      stagedSha256: INPUT_EVIDENCE.sha256,
+      stagedSizeBytes: INPUT_EVIDENCE.sizeBytes
+    }]
+  };
+  const grant = authorizePositionImportApply({
+    preflightReady,
+    currentCheckpoint: checkpoint(4),
+    schemaFingerprint,
+    readPending: () => structuredClone(pending),
+    writePending: (value, ownerToken) => {
+      assert.equal(ownerToken, operationToken);
+      pending = structuredClone(value);
+    },
+    recordArchiveIntentFiles: (files, role) => {
+      assert.equal(role, 'input');
+      pending = {
+        ...pending,
+        archiveState: 'intent-recorded',
+        archiveFiles: structuredClone(files)
+      };
+    }
+  });
+
+  assert.deepEqual(grant, {
+    operationToken,
+    archiveManifestHash,
+    schemaFingerprint,
+    baseCheckpoint: checkpoint(4)
+  });
+  assert.equal(pending.archiveManifestHash, archiveManifestHash);
+  assert.equal(pending.archiveFiles.length, 1);
+  assert.equal(pending.archiveFiles[0].filePath, archivePath);
+});
+
+test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
+  const operationToken = 'operation-rejected';
+  let pending = {
+    operationToken,
+    archiveRequired: true,
+    archiveFiles: []
+  };
+  assert.throws(
+    () => authorizePositionImportApply({
+      preflightReady: {
+        archiveManifestHash: 'd'.repeat(64),
+        acceptedOrdinaryInputFiles: [{
+          archivePath: '/tmp/position-rejected.xlsx',
+          sourceType: 'gateway-outbound',
+          stagedSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+          stagedSha256: INPUT_EVIDENCE.sha256,
+          stagedSizeBytes: INPUT_EVIDENCE.sizeBytes
+        }]
+      },
+      currentCheckpoint: checkpoint(0),
+      schemaFingerprint: 'e'.repeat(64),
+      readPending: () => structuredClone(pending),
+      writePending: (value) => {
+        pending = structuredClone(value);
+      },
+      recordArchiveIntentFiles: (files) => {
+        pending = {
+          ...pending,
+          archiveFiles: [{
+            ...structuredClone(files[0]),
+            sha256: 'f'.repeat(64)
+          }]
+        };
+      }
+    }),
+    /文件证据与预检 manifest 不一致/
+  );
+  assert.equal(pending.archiveManifestHash, undefined);
 });

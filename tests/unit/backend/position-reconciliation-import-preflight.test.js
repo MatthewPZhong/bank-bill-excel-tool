@@ -43,8 +43,15 @@ const {
   streamPositionXlsRows
 } = require('../../../src/backend/position-reconciliation-import/xls-reader');
 const {
-  dispatchPositionImportPreflight
+  dispatchPositionImportPreflight,
+  dispatchPositionLargeImportSchemaMigration
 } = require('../../../src/main-process/position-reconciliation/import-dispatch');
+const {
+  createPositionReconciliationStore
+} = require('../../../src/main-process/position-reconciliation/store');
+const {
+  assertPositionLargeImportSchema
+} = require('../../../src/main-process/position-reconciliation/large-import-schema');
 const {
   STAGING_RELATIVE_PATH,
   hashFileSha256Async,
@@ -486,6 +493,83 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(Object.prototype.hasOwnProperty.call(result.preflightReady, 'records'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(result, 'records'), false);
     assert.ok(progress.some((event) => event.stage === 'staging'));
+  });
+
+  test('schema-only utility job 原子建立现代来源身份且不推进 checkpoint', async (t) => {
+    const dir = tempDir(t, 'position-prc1-schema-dispatch-');
+    const checkpoint = {
+      identity: 'schema-dispatch-identity',
+      generation: 0,
+      token: 'schema-dispatch-token'
+    };
+    let store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+
+    const job = dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    });
+    const result = await job.promise;
+    assert.equal(result.migrated, true);
+    assert.deepEqual(result.checkpoint, checkpoint);
+
+    store = createPositionReconciliationStore(dir, {
+      expectedCheckpoint: checkpoint
+    });
+    t.after(() => store.close());
+    assertPositionLargeImportSchema(store.db);
+    assert.deepEqual(store.persistenceCheckpoint(), checkpoint);
+  });
+
+  test('worker 在 PREFLIGHT_READY 后验证 grant 的 manifest、schema 和 checkpoint', async (t) => {
+    const dir = tempDir(t, 'position-prc1-apply-grant-');
+    const checkpoint = {
+      identity: 'apply-grant-identity',
+      generation: 0,
+      token: 'apply-grant-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+      'apply-grant.xlsx'
+    );
+    let authorizedManifest = '';
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [filePath],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      authorizeApply: (ready) => {
+        authorizedManifest = ready.archiveManifestHash;
+        return {
+          operationToken: 'apply-grant-operation',
+          archiveManifestHash: ready.archiveManifestHash,
+          schemaFingerprint: schemaResult.fingerprint,
+          baseCheckpoint: checkpoint
+        };
+      }
+    }).promise;
+    assert.equal(result.status, undefined);
+    assert.equal(result.orderedFileResults[0].status, 'ok');
+    assert.equal(result.archiveManifestHash, authorizedManifest);
   });
 
   test('默认 disabled 不启动 worker，.xls 主进程调用被拒绝', async () => {

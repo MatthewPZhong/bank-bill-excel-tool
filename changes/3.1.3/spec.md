@@ -922,6 +922,10 @@ LIMIT 51;
 5. schema-only 索引迁移不推进业务 checkpoint generation。
 6. 失败或 worker exit 依赖 SQLite DDL transaction 回滚。
 7. 新建空库可以在首次大导入前创建索引；不要求 main 启动时同步构建大索引。
+8. 来源身份 schema 为全局结构，不按 sourceType 分表。首次生产迁移前，仍走旧小文件
+   reader 的来源写入路径也必须兼容 `row_hash` 唯一键和 `sourceRecordKey` 链接结构；
+   sourceType streaming gate 不得让旧 `ON CONFLICT(source_type,business_key)` SQL 在现代
+   schema 上继续运行。未完成该兼容时不得启用任何生产 schema 迁移。
 
 ### 8.5 Legacy schema 常量
 
@@ -1618,9 +1622,10 @@ staging 副本
 1. 实现普通来源逐文件 source writer。
 2. 实现单记录派生 API。
 3. 接 `gateway-outbound`。
-4. 改链接排序。
-5. 真实五文件 1,339,185 行 end-to-end。
-6. 文件 A commit/B fatal/恢复测试。
+4. 让未切 streaming 的旧小文件来源写入路径兼容现代全局身份 schema。
+5. 改链接排序。
+6. 真实五文件 1,339,185 行 end-to-end。
+7. 文件 A commit/B fatal/恢复测试。
 
 **生产接线：仅 `gateway-outbound`，受 sourceType gate 控制。**
 

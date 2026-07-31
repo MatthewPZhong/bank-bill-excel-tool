@@ -11,6 +11,12 @@ const {
 const {
   runPositionImportPreflight
 } = require('./preflight');
+const {
+  verifyPositionImportApplyGrant
+} = require('./apply-grant');
+const {
+  ensurePositionLargeImportSchemaAtPath
+} = require('../../main-process/position-reconciliation/large-import-schema');
 
 function unwrapMessage(eventOrMessage) {
   return eventOrMessage &&
@@ -69,12 +75,44 @@ async function runJob(message) {
     error.code = 'position-import-job-ledger-invalid';
     throw error;
   }
+  const command = String(message.command || '');
+  if (command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES) {
+    if (!message.featureFlags || message.featureFlags.schemaOnly !== true) {
+      const error = new Error('平盘 schema 迁移缺少 schemaOnly 授权');
+      error.code = 'position-import-intent-not-durable';
+      throw error;
+    }
+    active = {
+      jobId: String(message.jobId || ''),
+      cancelToken: { cancelled: false },
+      stage: 'schema-migration',
+      peakRssBytes: process.memoryUsage().rss,
+      peakHeapUsedBytes: process.memoryUsage().heapUsed
+    };
+    const result = ensurePositionLargeImportSchemaAtPath({
+      sideDbPath: message.sideDbPath,
+      expectedCheckpoint: message.expectedCheckpoint
+    });
+    const memory = process.memoryUsage();
+    channel.send({
+      type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+      jobId: active.jobId,
+      result: {
+        ...result,
+        resourceMetrics: {
+          workerPeakRssBytes: Math.max(active.peakRssBytes, memory.rss),
+          workerPeakHeapUsedBytes: Math.max(active.peakHeapUsedBytes, memory.heapUsed)
+        }
+      }
+    });
+    active = null;
+    return;
+  }
   if (message.featureFlags && message.featureFlags.preflightOnly !== true) {
     const error = new Error('PR-B worker 只允许 preflightOnly');
     error.code = 'position-import-intent-not-durable';
     throw error;
   }
-  const command = String(message.command || '');
   const kind = command === POSITION_IMPORT_COMMANDS.BANK_PREPARE
     ? 'bank'
     : command === POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
@@ -87,10 +125,18 @@ async function runJob(message) {
   }
 
   const cancelToken = { cancelled: false };
+  let resolveApplyGrant;
+  let rejectApplyGrant;
+  const applyGrant = new Promise((resolve, reject) => {
+    resolveApplyGrant = resolve;
+    rejectApplyGrant = reject;
+  });
   active = {
     jobId: String(message.jobId || ''),
     cancelToken,
     stage: 'staging',
+    resolveApplyGrant,
+    rejectApplyGrant,
     peakRssBytes: process.memoryUsage().rss,
     peakHeapUsedBytes: process.memoryUsage().heapUsed
   };
@@ -133,12 +179,22 @@ async function runJob(message) {
   channel.send({
     type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
     jobId: active.jobId,
+    kind,
     archiveManifestHash: result.archiveManifestHash,
     acceptedOrdinaryInputFiles: result.acceptedOrdinaryInputFiles,
     acceptedBankFiles: result.acceptedBankFiles,
     accountConfirmationDescriptor: result.accountConfirmationDescriptor,
     orderedFileResults: result.orderedFileResults,
     ledgerEvidence: result.ledgerEvidence
+  });
+  active.stage = 'awaiting-apply-grant';
+  const grant = await applyGrant;
+  verifyPositionImportApplyGrant({
+    grant,
+    jobId: active.jobId,
+    archiveManifestHash: result.archiveManifestHash,
+    sideDbPath: message.sideDbPath,
+    allowPreflightOnly: message.featureFlags && message.featureFlags.preflightOnly === true
   });
   channel.send({
     type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
@@ -156,9 +212,20 @@ async function runJob(message) {
 
 channel.onMessage((message) => {
   if (!message || typeof message !== 'object') return;
+  if (message.type === POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED) {
+    if (active && active.jobId === String(message.jobId || '')) {
+      active.resolveApplyGrant(message);
+    }
+    return;
+  }
   if (message.type === POSITION_IMPORT_MESSAGE_TYPES.CANCEL) {
     if (active && active.jobId === String(message.jobId || '')) {
       active.cancelToken.cancelled = true;
+      if (active.stage === 'awaiting-apply-grant') {
+        const error = new Error('平盘导入已取消');
+        error.code = 'position-import-cancelled';
+        active.rejectApplyGrant(error);
+      }
       channel.send({
         type: POSITION_IMPORT_MESSAGE_TYPES.CANCEL_ACK,
         jobId: active.jobId,

@@ -16,15 +16,17 @@
 
 ## PR-C1 — Mutation And Recovery
 
-- [ ] Store/worker 共用 side DB mutation helper。
-- [ ] archive intent durable 后才允许 apply。
-- [ ] `row_hash` 来源身份迁移、消费血缘回填、现代索引和 schema fingerprint。
-- [ ] worker exit 后按 checkpoint/history/input proof 恢复。
+- [x] Store/worker 共用 side DB mutation helper。
+- [x] archive intent durable 后才允许 apply。
+- [x] `row_hash` 来源身份迁移、消费血缘回填、现代索引和 schema fingerprint。
+- [x] 普通来源 worker exit 后按 checkpoint/history/input proof 恢复。
+- [x] bank/account 专用恢复未接入前明确 fail closed，禁止误套普通来源算法。
 
 ## PR-C2 — Gateway Outbound
 
 - [ ] 单记录派生 API 和增量 source/link writer。
 - [ ] 接入 gateway-outbound feature gate。
+- [ ] 现代全局身份 schema 下保持其余旧小文件来源写入路径可用。
 - [ ] 回放真实 1,339,185 行和部分提交故障。
 
 ## PR-D — Remaining Sources And Maintenance
