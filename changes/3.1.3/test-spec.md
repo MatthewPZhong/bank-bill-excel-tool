@@ -89,3 +89,25 @@
   3,000,000 个 distinct `sourceRecordKey`。
 - Windows 实机导入/取消、真实资金范围替换和派生逐笔核对仍为人工发布门禁；不得用合成
   benchmark 或 macOS 自动化替代。
+
+## Formal Closeout Evidence
+
+- PR #110 已以 merge commit `4bb08b54676c9dd826d48c63ec6f7b4f6acf96f1`
+  合入 `main`。
+- 合并后按 Windows 发布 workflow 的 Node 22 + UTC 运行环境重新验证：
+  - `npm run test:position-import:parity`：`54/54 PASS`；
+  - `npm run test:position-import:faults`：`50/50 PASS`；
+  - `npm run release-check`：lint、smoke、unit `4454/4454`、44 个 integration
+    脚本 `2051/2051` 全部通过；
+  - `npm run verify:main-panel-alignment`：两种窗口尺寸和三种缩放共 `6/6 PASS`；
+  - `npm run startup:measure`：进程总耗时平均 `715.103ms`，ready-to-show 平均
+    `194.527ms`，建窗到可见平均 `92.246ms`；
+  - `scan:vars`：261 个文件、3283 个顶层名称；发布准备无 `src` 改动，
+    `check:vars -- --include-minor` 安全跳过。
+- 首次在 macOS `Asia/Shanghai` 直接执行 unit 时有 5 个 SheetJS 日期夹具失败；复核证明
+  原因是 `xlsx@0.18.5` 使用 1899 本地基准日期时继承秒级历史时区偏移。Node 22 + UTC
+  与 Windows 发布环境均通过；本次不修改旧 reader parity 和业务日期口径。
+- `npm audit --omit=dev` 为 9 条生产依赖 advisory：7 high、2 moderate、0 critical；
+  本次收尾不静默升级依赖，保留为独立安全治理 follow-up。
+- Windows 实机导入/取消/文件锁和真实资金逐笔复核仍未完成；技术发布授权不得解释为
+  这些人工门禁已通过。
