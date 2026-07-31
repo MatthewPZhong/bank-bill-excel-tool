@@ -42,3 +42,26 @@
 - [ ] Windows 安装版导入、取消和文件锁手测。
 - [x] 版本号、三份版本文档和重要变量清单更新。
 - [ ] 真实资金范围替换、派生和账户数据人工逐笔复核。
+
+## 正式收尾
+
+- [x] PR #110 以 merge commit `4bb08b54676c9dd826d48c63ec6f7b4f6acf96f1` 合入 `main`。
+- [x] 建立 `docs/prs/PR110-v3.1.3.md` 和 `docs/iterations/v3.1.3/PRD-v3.1.3.md`。
+- [x] 合并后重新执行 Node 22 发布门禁、parity、fault、布局、启动性能和变量检查。
+- [x] 记录 macOS 历史时区导致的 SheetJS 测试夹具偏移，且不改变既有业务日期契约。
+- [ ] 提交并合并 v3.1.3 发布准备 PR。
+
+## 发布收尾
+
+- [ ] 创建并推送 annotated tag `v3.1.3`，且 tag 必须指向当时最新 `main`。
+- [ ] 等待 Windows Release workflow 全部通过。
+- [ ] 验证 GitHub Release 为 stable/latest 且恰有 Setup、Setup blockmap、portable、`latest.yml` 四个资产。
+- [ ] 下载并回读发布资产，核对 PE 头、文件大小、SHA-256、`latest.yml` 的 SHA-512 和版本引用。
+- [ ] 回写发布 run、资产摘要和最终状态，提交并合并发布证据 PR。
+- [ ] 同步本地 `main`，删除收尾分支并确认 tracked worktree 干净。
+
+## 发布后人工跟进
+
+- [ ] Windows 安装版完成真实导入、取消和文件锁手测。
+- [ ] 使用真实或脱敏资金数据逐笔核对范围替换、链接派生、账户数据、严格 1:1 和存档证据。
+- [ ] 使用上一 stable 完成 `v3.1.2 → v3.1.3` 在线升级 canary，并核对 SQLite、设置和导出文件保留。

@@ -36,6 +36,7 @@
 | 普通来源管理摘要保存为事务内派生缓存 | 300 万 source/link 每次打开管理页执行全表聚合不满足同步查询门槛 | 导入、删除、账户替换和映射重建同事务刷新；缺失/损坏时回退事实表 |
 | 导入及维护写事务统一执行保守磁盘门禁 | WAL、临时索引、派生和 schema 迁移会短时放大磁盘占用 | 无法确认空间或空间不足时在删除/替换旧数据、账户映射或链接派生前失败关闭 |
 | 暂存清理动态合并 outbox、主库 pending 和活动 token/job 保护集 | 普通来源与账户快照可共享 job root，且授权、提交、存档分属不同持久化阶段 | 任何保护来源不可读时 fail closed；仅在提交/存档证据闭合后异步清理未保护目录 |
+| 用户明确授权执行技术发布收尾 | PR-E 计划原本保留 Windows 与真实资金人工门禁，用户于 2026-08-01 要求正式收尾和发布收尾 | 允许打 stable tag 和生成 Windows Release，但必须继续明确披露人工门禁未完成，不得写成已验收 |
 
 ## Assumptions
 
@@ -112,10 +113,19 @@
 | 2026-07-31 | PR-E self-review parity / fault | parity 54/54、fault 50/50 PASS |
 | 2026-07-31 | PR-E self-review 最终 `npm run release-check` | lint、smoke、4,454/4,454 单测、44 个 integration 脚本 2,051/2,051 断言全部通过 |
 | 2026-07-31 | PR-E self-review `scan:vars` / `check:vars -- --include-minor` | 扫描 261 个 `src` 文件、3,283 个顶层名称；8 个本次源码文件未命中重要变量清单 |
+| 2026-08-01 | PR #110 合并 | merge commit `4bb08b54676c9dd826d48c63ec6f7b4f6acf96f1`；实现 head `3185aa343b2c935dafcde093148ac436da4ef193` |
+| 2026-08-01 | 干净依赖与生产审计 | `npm ci` 成功；`npm audit --omit=dev` 为 7 high、2 moderate、0 critical，依赖升级保留为独立 follow-up |
+| 2026-08-01 | 合并后 Node 22 发布门禁 | lint、smoke、unit 4,454/4,454、44 个 integration 脚本 2,051/2,051 全部通过 |
+| 2026-08-01 | 合并后 parity / fault | parity 54/54、fault 50/50 PASS |
+| 2026-08-01 | 主页面布局与启动性能 | 对齐 6/6 PASS；进程总耗时平均 715.103ms，ready-to-show 平均 194.527ms，建窗到可见平均 92.246ms |
+| 2026-08-01 | 发布前变量硬节点 | `scan:vars` 为 261 个文件、3,283 个顶层名称；发布准备无 `src` 改动，`check:vars -- --include-minor` 安全跳过 |
+| 2026-08-01 | macOS 本地时区复核 | `Asia/Shanghai` 下 5 个日期夹具受 SheetJS 1899 历史秒级时区偏移影响；Node 22 + UTC / Windows workflow 口径全绿，本次不改变既有日期 parity |
+| 2026-08-01 | 发布仓库预检 | GitHub 仓库为 PUBLIC；`v3.1.3` tag 与 Release 均不存在，可进入不可变发布流程 |
 
 ## Remaining Unknowns
 
 | 未知 | 分类 | 下一步 |
 | --- | --- | --- |
-| Windows 实机导入、取消和文件锁 | PROBE | 发布前 Windows 安装版手测；当前 macOS 自动化不能替代 |
-| 真实资金逐笔正确性 | BLOCK（发布前） | 业务负责人复核 |
+| Windows 实机导入、取消和文件锁 | PROBE（业务启用/公告前） | Windows 安装版手测；当前 macOS 自动化不能替代 |
+| 真实资金逐笔正确性 | BLOCK（业务启用/公告前） | 业务负责人复核；技术发布授权不等于验收通过 |
+| 生产依赖 advisory | FOLLOW-UP | 单独升级并完整回归 `electron-updater`、`marked`、`xlsx` 等依赖，不在发布收尾中改变依赖图 |

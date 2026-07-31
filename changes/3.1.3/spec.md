@@ -1,14 +1,14 @@
 # Codex Implementation Spec — 平盘对账百万级 Excel 流式导入、增量派生与崩溃隔离
 
 > change-name: `position-reconciliation-large-table-import`
-> status: `ready-for-implementation`
+> status: `release-prepared`（PR #110 已合入 `main`；自动发布门禁通过；人工资金与 Windows 实机验收待完成）
 > baseline-branch: `main`
 > baseline-commit: `db43294`
 > baseline-version: `3.1.2`
 > target-version: `3.1.3`
-> implementation-branch: `codex/v3.1.3-position-large-import`
+> implementation-branch: `codex/v3.1.3-pr-e-bank-account-ui-release`
 > owner: PM / Dev
-> updated: 2026-07-30
+> updated: 2026-08-01
 > risk: 🔴 资金红线
 > delivery-mode: `必须按 PR-A → PR-B → PR-C1 → PR-C2 → PR-D → PR-E 分阶段实施；禁止单个 mega PR`
 
@@ -1960,3 +1960,29 @@ npm run check:vars
 不得写：
 
 > 支持百万级平盘全链路处理、匹配和单文件导出。
+
+---
+
+## 21. 正式收尾与发布准备状态
+
+1. PR #110 已于 2026-08-01 合入 `main`，merge commit 为
+   `4bb08b54676c9dd826d48c63ec6f7b4f6acf96f1`；最终实现 commit 为
+   `3185aa343b2c935dafcde093148ac436da4ef193`。
+2. 合并后使用发布流水线同款 Node 22 环境重新完成：
+   - parity `54/54`；
+   - fault `50/50`；
+   - unit `4454/4454`；
+   - 44 个 integration 脚本 `2051/2051`；
+   - lint、smoke、主页面对齐 `6/6` 和启动性能检查全部通过。
+3. `scan:vars` 为 261 个 `src` 文件、3283 个顶层名称；发布准备提交未修改
+   `src`，`check:vars -- --include-minor` 安全跳过。
+4. macOS `Asia/Shanghai` 下直接运行单测时，旧 `xlsx@0.18.5` 会受 1899 年
+   历史秒级时区偏移影响，使测试生成的日期夹具出现前一天/43 秒差异；这与
+   Windows Node 22 发布环境不同。发布门禁按 Windows workflow 的 Node 22 + UTC
+   环境执行并全绿，不在本次收尾中改变既有 SheetJS parity 或业务日期口径。
+5. 用户已明确要求执行正式收尾和发布收尾，因此允许创建 `v3.1.3` 技术发布；
+   该授权不等于以下人工门禁已通过：
+   - Windows 安装版导入、取消和文件锁；
+   - 真实资金范围替换、链接派生和账户数据逐笔复核。
+6. 上述人工门禁继续作为发布公告和业务启用前 follow-up。任何最终归档不得把
+   自动化证据写成真实资金人工验收结论。
