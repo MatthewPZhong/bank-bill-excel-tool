@@ -14,8 +14,15 @@ const {
 } = require('../../../src/main-process/position-reconciliation/service');
 const {
   SCHEMA: POSITION_RECONCILIATION_SCHEMA,
-  POSITION_DB_INITIALIZATION_MODES
+  POSITION_DB_INITIALIZATION_MODES,
+  createPositionReconciliationStore
 } = require('../../../src/main-process/position-reconciliation/store');
+const {
+  ensurePositionLargeImportSchemaAtPath
+} = require('../../../src/main-process/position-reconciliation/large-import-schema');
+const {
+  dispatchPositionLargeImportSchemaMigration
+} = require('../../../src/main-process/position-reconciliation/import-dispatch');
 const {
   positionCommittedRecoveryArchiveFiles,
   requirePositionPendingArchiveFiles
@@ -170,6 +177,287 @@ test('链接管理和原始表始终按业务规定顺序返回', (t) => {
   const manager = service.linkedManager();
   assert.deepEqual(manager.linked.map((row) => row.sourceType), [...SOURCE_DISPLAY_ORDER]);
   assert.deepEqual(manager.raw.map((row) => row.sourceType), [...SOURCE_DISPLAY_ORDER]);
+});
+
+test('现代来源身份下旧小文件路径保留同业务主键的不同内容', (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-modern-legacy-source-path-')
+  );
+  const checkpoint = {
+    identity: 'modern-legacy-source-identity',
+    generation: 0,
+    token: 'modern-legacy-source-token'
+  };
+  let store = createPositionReconciliationStore(userDataDir, {
+    initialCheckpoint: checkpoint
+  });
+  const sideDbPath = store.dbPath;
+  store.close();
+  ensurePositionLargeImportSchemaAtPath({
+    sideDbPath,
+    expectedCheckpoint: checkpoint,
+    availableBytesProvider: () => 10n ** 15n
+  });
+  store = createPositionReconciliationStore(userDataDir, {
+    expectedCheckpoint: checkpoint
+  });
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    store,
+    positionImportEngine: 'disabled',
+    operationTokenProvider: () => 'modern-legacy-source-operation'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const sourcePath = path.join(userDataDir, 'same-business-key.xlsx');
+  const definition = SOURCE_DEFINITIONS[SOURCE_TYPES.TEST_PAYMENT];
+  const common = {
+    付款单号: 'SAME-PAYMENT-ORDER',
+    付款状态: '付款成功',
+    源金额: '100',
+    源币种: 'USD',
+    目标金额: '95',
+    目标币种: 'EUR',
+    创建时间: '2026-07-20'
+  };
+  writeWorkbook(sourcePath, '账单明细', definition.headers, [
+    {
+      ...common,
+      渠道流水号: 'SAME-PAYMENT-RID-1',
+      付款渠道: 'CHANNEL-A'
+    },
+    {
+      ...common,
+      渠道流水号: 'SAME-PAYMENT-RID-2',
+      付款渠道: 'CHANNEL-B'
+    }
+  ]);
+
+  const result = service.prepareSourceImport([sourcePath]);
+  assert.equal(result.successCount, 1);
+  assert.equal(result.results[0].rowCount, 2);
+  assert.equal(service.store.countSourceRows(SOURCE_TYPES.TEST_PAYMENT), 2);
+  const links = service.store.listLinkRows(
+    SOURCE_TYPES.TEST_PAYMENT,
+    { includeHidden: true }
+  );
+  assert.equal(links.length, 2);
+  assert.equal(new Set(links.map((row) => row.business_key)).size, 1);
+  assert.equal(new Set(links.map((row) => row.source_record_key)).size, 2);
+});
+
+test('同业务主键的不同来源记录可分别匹配并独立消费', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-modern-source-consumption-')
+  );
+  const checkpoint = {
+    identity: 'modern-source-consumption-identity',
+    generation: 0,
+    token: 'modern-source-consumption-token'
+  };
+  let store = createPositionReconciliationStore(userDataDir, {
+    initialCheckpoint: checkpoint
+  });
+  const sideDbPath = store.dbPath;
+  store.close();
+  ensurePositionLargeImportSchemaAtPath({
+    sideDbPath,
+    expectedCheckpoint: checkpoint,
+    availableBytesProvider: () => 10n ** 15n
+  });
+  store = createPositionReconciliationStore(userDataDir, {
+    expectedCheckpoint: checkpoint
+  });
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    store,
+    positionImportEngine: 'disabled'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const bankPath = path.join(userDataDir, 'same-key-bank.xlsx');
+  const sourcePath = path.join(userDataDir, 'same-key-outbound.xlsx');
+  writeWorkbook(bankPath, BANK_SHEET_NAME, BANK_STATEMENT_FIELDS, [
+    bankRow({
+      BizId: 'SAME-KEY-BANK-1',
+      MerchantId: 'M001',
+      Currency: 'USD',
+      'Credit Amount': '0',
+      'Debit Amount': '100',
+      ReconciliationId: 'SAME-KEY-RID-1',
+      FundType: 'outbound'
+    }),
+    bankRow({
+      BizId: 'SAME-KEY-BANK-2',
+      MerchantId: 'M001',
+      Currency: 'USD',
+      'Credit Amount': '0',
+      'Debit Amount': '200',
+      ReconciliationId: 'SAME-KEY-RID-2',
+      FundType: 'outbound'
+    })
+  ]);
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].headers,
+    [
+      {
+        账单日期: '2026-07-20',
+        渠道名称: 'DBS',
+        账户号: 'M001',
+        交易类型: 'Outbound',
+        主对账id: 'SAME-KEY-RID-1',
+        业务单号: 'SAME-OUTBOUND-ORDER',
+        币种: 'EUR',
+        金额: '100',
+        原始币种: 'EUR',
+        原始金额: '100',
+        银行扣款币种: 'USD'
+      },
+      {
+        账单日期: '2026-07-20',
+        渠道名称: 'DBS',
+        账户号: 'M001',
+        交易类型: 'Outbound',
+        主对账id: 'SAME-KEY-RID-2',
+        业务单号: 'SAME-OUTBOUND-ORDER',
+        币种: 'EUR',
+        金额: '200',
+        原始币种: 'EUR',
+        原始金额: '200',
+        银行扣款币种: 'USD'
+      }
+    ]
+  );
+
+  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
+  const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
+  assert.equal(run.summary.changedRows, 2);
+  assert.equal(run.summary.differenceRows, 0);
+  const runRows = service.store.listRunRows(run.runId);
+  assert.equal(new Set(runRows.map((row) => row.lineage.sourceBusinessKey)).size, 1);
+  assert.equal(new Set(runRows.map((row) => row.lineage.sourceRecordKey)).size, 2);
+
+  await service.exportRun(
+    run.runId,
+    path.join(userDataDir, 'same-key-result.xlsx')
+  );
+  service.confirmRun(run.runId);
+  const consumption = service.store.db.prepare(`
+    SELECT COUNT(*) AS rowCount,
+           COUNT(DISTINCT business_key) AS businessKeyCount,
+           COUNT(DISTINCT source_record_key) AS sourceRecordKeyCount
+    FROM position_consumed_sources
+    WHERE business_key = 'SAME-OUTBOUND-ORDER'
+  `).get();
+  assert.equal(consumption.rowCount, 2);
+  assert.equal(consumption.businessKeyCount, 1);
+  assert.equal(consumption.sourceRecordKeyCount, 2);
+});
+
+test('gateway-outbound 流式门禁与其他普通来源旧路径可在同批混合运行', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-streaming-hybrid-source-path-')
+  );
+  const checkpoint = {
+    identity: 'streaming-hybrid-source-identity',
+    generation: 0,
+    token: 'streaming-hybrid-source-token'
+  };
+  const outboundPath = path.join(userDataDir, 'gateway-outbound.xlsx');
+  const paymentPath = path.join(userDataDir, 'test-payment.xlsx');
+  writeWorkbook(
+    outboundPath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_OUTBOUND].headers,
+    [{
+      账单日期: '2026-07-20',
+      渠道名称: 'DBS',
+      账户号: 'M001',
+      交易类型: 'Outbound',
+      主对账id: 'OUT-HYBRID-RID',
+      业务单号: 'OUT-HYBRID-ORDER',
+      币种: 'USD',
+      金额: '100',
+      原始币种: 'EUR',
+      原始金额: '95',
+      银行扣款币种: 'USD'
+    }]
+  );
+  writeWorkbook(
+    paymentPath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.TEST_PAYMENT].headers,
+    [{
+      付款单号: 'PAYMENT-HYBRID-ORDER',
+      付款状态: '付款成功',
+      渠道流水号: 'PAYMENT-HYBRID-RID',
+      源金额: '100',
+      源币种: 'USD',
+      目标金额: '95',
+      目标币种: 'EUR',
+      创建时间: '2026-07-20'
+    }]
+  );
+
+  let service = null;
+  service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    initialSideDbCheckpoint: checkpoint,
+    positionImportEngine: 'streaming',
+    streamingSourceTypes: SOURCE_TYPES.GATEWAY_OUTBOUND,
+    operationTokenProvider: () => 'streaming-hybrid-operation',
+    authorizeStreamingSourceApply: async (ready) => {
+      const schema = await dispatchPositionLargeImportSchemaMigration({
+        engine: 'streaming',
+        userDataDir,
+        sideDbPath: service.store.dbPath,
+        expectedCheckpoint: service.persistenceCheckpoint()
+      }).promise;
+      return {
+        operationToken: 'streaming-hybrid-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schema.fingerprint,
+        baseCheckpoint: service.persistenceCheckpoint()
+      };
+    }
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const result = await service.prepareSourceImport([outboundPath, paymentPath]);
+  assert.equal(result.successCount, 2);
+  assert.equal(result.failedCount, 0);
+  assert.deepEqual(
+    result.results.map((item) => item.sourceType),
+    [SOURCE_TYPES.GATEWAY_OUTBOUND, SOURCE_TYPES.TEST_PAYMENT]
+  );
+  assert.equal(
+    service.store.countSourceRows(SOURCE_TYPES.GATEWAY_OUTBOUND),
+    1
+  );
+  assert.equal(
+    service.store.countSourceRows(SOURCE_TYPES.TEST_PAYMENT),
+    1
+  );
+  assert.equal(service.persistenceCheckpoint().generation, 2);
+  assert.equal(
+    service.listCommittedOperationInputs('streaming-hybrid-operation').length,
+    2
+  );
 });
 
 test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导和确认', async (t) => {

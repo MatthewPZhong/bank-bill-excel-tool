@@ -72,6 +72,9 @@ const {
   createPositionReconciliationService
 } = require('./main-process/position-reconciliation/service');
 const {
+  dispatchPositionLargeImportSchemaMigration
+} = require('./main-process/position-reconciliation/import-dispatch');
+const {
   assertStagedInputUnchanged,
   filterStagingPathsWithoutProtectedSources
 } = require('./main-process/position-reconciliation/input-staging');
@@ -87,6 +90,7 @@ const {
   requirePositionPendingArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
+  authorizePositionImportApply,
   positionBusinessStateForResult,
   runPositionOperationLifecycle,
   settlePositionArchiveResult
@@ -14450,6 +14454,23 @@ function getPositionReconciliationService() {
             return null;
           }
           return archiveCenterService.listUnresolvedSourcePaths();
+        },
+        authorizeStreamingSourceApply: async (preflightReady) => {
+          const migration = dispatchPositionLargeImportSchemaMigration({
+            engine: 'streaming',
+            userDataDir: path.dirname(database.dbPath),
+            sideDbPath: service.store.dbPath,
+            expectedCheckpoint: service.persistenceCheckpoint()
+          });
+          const schema = await migration.promise;
+          return authorizePositionImportApply({
+            preflightReady,
+            currentCheckpoint: service.persistenceCheckpoint(),
+            schemaFingerprint: schema.fingerprint,
+            readPending: readPositionPendingOperation,
+            writePending: writePositionPendingOperation,
+            recordArchiveIntentFiles: recordPositionArchiveIntentFiles
+          });
         }
       });
       const checkpoint = service.persistenceCheckpoint();

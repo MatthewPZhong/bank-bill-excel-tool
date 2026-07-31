@@ -21,9 +21,12 @@ const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields
 const {
   PositionReconciliationError,
   text,
-  stableHash
+  stableHash,
+  stableJson
 } = require('./common');
-const { deriveLinkedRows } = require('./derivation');
+const {
+  deriveLinkedRowsForRecord
+} = require('./derivation');
 const {
   POSITION_DB_IDENTITY_KEY,
   POSITION_DB_GENERATION_KEY,
@@ -331,6 +334,16 @@ const SUPPORTED_EMPTY_LEGACY_INDEX_INFO = Object.freeze({
 
 function quoteSqlIdentifier(value) {
   return `"${String(value).replace(/"/g, '""')}"`;
+}
+
+function tableHasColumn(db, tableName, columnName) {
+  return db.prepare(`PRAGMA table_info(${quoteSqlIdentifier(tableName)})`).all()
+    .some((column) => String(column.name || '') === columnName);
+}
+
+function usesModernSourceIdentity(db) {
+  return tableHasColumn(db, 'position_link_rows', 'source_record_key')
+    && tableHasColumn(db, 'position_consumed_sources', 'source_record_key');
 }
 
 function normalizeSchemaSql(value) {
@@ -977,13 +990,14 @@ function assertRunDifferenceSet(db, run, envelopeRows) {
 
 function consumptionRelationKey({
   sourceType,
+  sourceRecordKey,
   businessKey,
   legIndex,
   bankBizId
 }) {
   return JSON.stringify([
     text(sourceType),
-    text(businessKey),
+    text(sourceRecordKey || businessKey),
     Number(legIndex),
     text(bankBizId)
   ]);
@@ -1039,11 +1053,13 @@ function assertConsumptionOwner(db, currentRun, consumption, ownerCache) {
       ownerRow.lineage_json,
       `来源消费 owner 血缘 ${ownerRunId}/${ownerRow.biz_id}`
     ),
-    ownerRow
+    ownerRow,
+    { requireSourceRecordKey: usesModernSourceIdentity(db) }
   );
   assertRunRowContract(ownerRow, originalRow, resultRow, lineage);
   const ownerRelation = {
     sourceType: lineage.sourceType,
+    sourceRecordKey: lineage.sourceRecordKey,
     businessKey: lineage.sourceBusinessKey,
     legIndex: lineage.sourceLegIndex,
     bankBizId: ownerRow.biz_id
@@ -1054,8 +1070,10 @@ function assertConsumptionOwner(db, currentRun, consumption, ownerCache) {
 }
 
 function assertRunConsumptionSet(db, run, expectedConsumptions) {
+  const modern = usesModernSourceIdentity(db);
   const ownedConsumptions = db.prepare(`
     SELECT run_id AS runId, source_type AS sourceType, business_key AS businessKey,
+           ${modern ? 'source_record_key AS sourceRecordKey,' : ''}
            leg_index AS legIndex, bank_biz_id AS bankBizId
     FROM position_consumed_sources
     WHERE run_id = ?
@@ -1077,15 +1095,18 @@ function assertRunConsumptionSet(db, run, expectedConsumptions) {
 
   const findConsumption = db.prepare(`
     SELECT run_id AS runId, source_type AS sourceType, business_key AS businessKey,
+           ${modern ? 'source_record_key AS sourceRecordKey,' : ''}
            leg_index AS legIndex, bank_biz_id AS bankBizId
     FROM position_consumed_sources
-    WHERE source_type = ? AND business_key = ? AND leg_index = ?
+    WHERE source_type = ?
+      AND ${modern ? 'source_record_key' : 'business_key'} = ?
+      AND leg_index = ?
   `);
   const ownerCache = new Map();
   for (const expected of expectedConsumptions) {
     const actual = findConsumption.get(
       text(expected.sourceType),
-      text(expected.businessKey),
+      text(modern ? expected.sourceRecordKey : expected.businessKey),
       Number(expected.legIndex)
     );
     if (
@@ -1111,6 +1132,7 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
   const derivedSourceTypes = [];
   const expectedConsumptions = [];
   let confirmedConsumptionConflicts = 0;
+  const modernSourceIdentity = usesModernSourceIdentity(db);
   for (const row of envelopeRows) {
     const originalRow = assertBankPayload(
       parseJson(row.original_json, `${runLabel}原始行 BizId=${row.biz_id}`),
@@ -1129,13 +1151,15 @@ function assertRunEnvelope(db, run, scope, snapshot, summary) {
     if (sourceType) derivedSourceTypes.push(sourceType);
     const lineage = assertRunLineage(
       parseJson(row.lineage_json, `${runLabel}血缘 BizId=${row.biz_id}`),
-      row
+      row,
+      { requireSourceRecordKey: modernSourceIdentity }
     );
     assertRunRowContract(row, originalRow, resultRow, lineage);
     if (Number(row.consumes_source) === 1) {
       expectedConsumptions.push({
         runId: run.id,
         sourceType: lineage.sourceType,
+        sourceRecordKey: lineage.sourceRecordKey,
         businessKey: lineage.sourceBusinessKey,
         legIndex: lineage.sourceLegIndex,
         bankBizId: row.biz_id
@@ -1254,7 +1278,7 @@ function assertBankPayload(payload, row, label) {
   return payload;
 }
 
-function assertRunLineage(lineage, row) {
+function assertRunLineage(lineage, row, { requireSourceRecordKey = false } = {}) {
   if (!isPlainObject(lineage)) {
     throwInvalidSideData(`平盘侧库运行血缘必须为对象：run=${row.run_id}，BizId=${row.biz_id}`);
   }
@@ -1289,6 +1313,7 @@ function assertRunLineage(lineage, row) {
         || !Number.isSafeInteger(linkRowId)
         || linkRowId < 1
         || !text(lineage.sourceBusinessKey)
+        || (requireSourceRecordKey && !text(lineage.sourceRecordKey))
         || !Number.isInteger(legIndex)
         || legIndex < 0
       ) {
@@ -1305,6 +1330,7 @@ function assertRunLineage(lineage, row) {
         && lineage.sourceLinkRowId !== undefined
       )
       || text(lineage.sourceBusinessKey)
+      || text(lineage.sourceRecordKey)
       || (
         lineage.sourceLegIndex !== null
         && lineage.sourceLegIndex !== undefined
@@ -1342,6 +1368,7 @@ function assertRunLineage(lineage, row) {
     !Number.isSafeInteger(linkRowId)
     || linkRowId < 1
     || !text(lineage.sourceBusinessKey)
+    || (requireSourceRecordKey && !text(lineage.sourceRecordKey))
     || !Number.isInteger(legIndex)
     || legIndex < 0
   ) {
@@ -1362,6 +1389,7 @@ function assertCurrentRunReferences(db, runId) {
   `).all(runId);
   const getBank = db.prepare('SELECT * FROM position_bank_rows WHERE biz_id = ?');
   const getLink = db.prepare('SELECT * FROM position_link_rows WHERE id = ?');
+  const modern = usesModernSourceIdentity(db);
   for (const row of rows) {
     const originalRow = parseJson(
       row.original_json,
@@ -1400,6 +1428,7 @@ function assertCurrentRunReferences(db, runId) {
       !link
       || text(link.source_type) !== text(lineage.sourceType)
       || text(link.business_key) !== text(lineage.sourceBusinessKey)
+      || (modern && text(link.source_record_key) !== text(lineage.sourceRecordKey))
       || Number(link.leg_index) !== Number(lineage.sourceLegIndex)
       || Number(link.source_row_number) !== Number(lineage.sourceRowNumber)
     ) {
@@ -1634,6 +1663,10 @@ class PositionReconciliationStore {
       );
     }
     return checkpoint;
+  }
+
+  usesModernSourceIdentity() {
+    return usesModernSourceIdentity(this.db);
   }
 
   _mutation(operation, {
@@ -1913,6 +1946,8 @@ class PositionReconciliationStore {
       return {
         ...row,
         businessKey: row.business_key,
+        sourceRecordKey: row.row_hash,
+        sourceRowId: row.id,
         sourceRowNumber: row.source_row_number,
         row: payload
       };
@@ -1946,28 +1981,71 @@ class PositionReconciliationStore {
   applySourceImport(parsed, { inputEvidence = [] } = {}) {
     const sourceType = parsed.sourceType;
     return this._mutation(() => {
+      const modern = usesModernSourceIdentity(this.db);
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         this.db.prepare('DELETE FROM position_source_rows WHERE source_type = ?').run(sourceType);
       }
-      const upsert = this.db.prepare(`
-        INSERT INTO position_source_rows(
-          source_type, business_key, event_date, month_key,
-          source_file_path, source_file_name, source_sheet, source_row_number,
-          row_hash, raw_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(source_type, business_key) DO UPDATE SET
-          event_date = excluded.event_date,
-          month_key = excluded.month_key,
-          source_file_path = excluded.source_file_path,
-          source_file_name = excluded.source_file_name,
-          source_sheet = excluded.source_sheet,
-          source_row_number = excluded.source_row_number,
-          row_hash = excluded.row_hash,
-          raw_json = excluded.raw_json,
-          updated_at = CURRENT_TIMESTAMP
-      `);
+      const findExisting = modern
+        ? this.db.prepare(`
+            SELECT business_key AS businessKey, raw_json AS rawJson
+            FROM position_source_rows
+            WHERE source_type = ? AND row_hash = ?
+          `)
+        : null;
+      const upsert = this.db.prepare(modern ? `
+          INSERT INTO position_source_rows(
+            source_type, business_key, event_date, month_key,
+            source_file_path, source_file_name, source_sheet, source_row_number,
+            row_hash, raw_json, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(source_type, row_hash) DO UPDATE SET
+            business_key = excluded.business_key,
+            event_date = excluded.event_date,
+            month_key = excluded.month_key,
+            source_file_path = excluded.source_file_path,
+            source_file_name = excluded.source_file_name,
+            source_sheet = excluded.source_sheet,
+            source_row_number = excluded.source_row_number,
+            raw_json = excluded.raw_json,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id
+        ` : `
+          INSERT INTO position_source_rows(
+            source_type, business_key, event_date, month_key,
+            source_file_path, source_file_name, source_sheet, source_row_number,
+            row_hash, raw_json, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(source_type, business_key) DO UPDATE SET
+            event_date = excluded.event_date,
+            month_key = excluded.month_key,
+            source_file_path = excluded.source_file_path,
+            source_file_name = excluded.source_file_name,
+            source_sheet = excluded.source_sheet,
+            source_row_number = excluded.source_row_number,
+            row_hash = excluded.row_hash,
+            raw_json = excluded.raw_json,
+            updated_at = CURRENT_TIMESTAMP
+          RETURNING id
+        `);
       for (const record of parsed.records) {
-        upsert.run(
+        const rawJson = serializeJson(record.row);
+        if (modern) {
+          const existing = findExisting.get(sourceType, record.rowHash);
+          if (existing) {
+            const stored = parseJson(
+              existing.rawJson,
+              `链接原始行 ${sourceType}/${existing.businessKey}`
+            );
+            if (stableJson(stored) !== stableJson(record.row)
+                || text(existing.businessKey) !== text(record.businessKey)) {
+              throw new PositionReconciliationError(
+                'position-source-record-hash-collision',
+                '来源记录 row_hash 对应了不同规范内容，已停止导入'
+              );
+            }
+          }
+        }
+        upsert.get(
           sourceType,
           record.businessKey,
           record.eventDate || null,
@@ -1977,7 +2055,7 @@ class PositionReconciliationStore {
           record.sourceSheet,
           record.sourceRowNumber,
           record.rowHash,
-          serializeJson(record.row)
+          rawJson
         );
       }
       this.rebuildLinkedRows(sourceType);
@@ -1998,23 +2076,32 @@ class PositionReconciliationStore {
   rebuildLinkedRows(sourceType) {
     const sourceRecords = this.sourceRecords(sourceType);
     const mappings = this.listMappings();
-    const derived = deriveLinkedRows(sourceType, sourceRecords, mappings);
+    const modern = usesModernSourceIdentity(this.db);
+    const derived = sourceRecords.flatMap((record) => (
+      deriveLinkedRowsForRecord(sourceType, record, mappings)
+    ));
     this.db.prepare('DELETE FROM position_link_rows WHERE source_type = ?').run(sourceType);
-    const sourceIds = new Map(sourceRecords.map((record) => [record.business_key, record.id]));
-    const insert = this.db.prepare(`
-      INSERT INTO position_link_rows(
-        source_type, business_key, source_row_id, source_row_number, ordinal, leg_index,
-        recon_id, merchant_id, currency, amount, fund_type, status, event_date, visible, linked_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const item of derived) {
+    const insert = this.db.prepare(modern ? `
+        INSERT INTO position_link_rows(
+          source_type, business_key, source_record_key, source_row_id,
+          source_row_number, ordinal, leg_index, recon_id, merchant_id,
+          currency, amount, fund_type, status, event_date, visible, linked_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ` : `
+        INSERT INTO position_link_rows(
+          source_type, business_key, source_row_id, source_row_number, ordinal, leg_index,
+          recon_id, merchant_id, currency, amount, fund_type, status, event_date, visible, linked_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+    for (const [ordinal, item] of derived.entries()) {
       const row = item.row;
-      insert.run(
+      const values = [
         sourceType,
         item.businessKey,
-        sourceIds.get(item.businessKey),
+        ...(modern ? [item.sourceRecordKey] : []),
+        item.sourceRowId,
         item.sourceRowNumber,
-        item.ordinal,
+        modern ? item.sourceRowId : ordinal,
         item.legIndex,
         text(row.ReconID),
         text(row.MerchantId),
@@ -2025,7 +2112,8 @@ class PositionReconciliationStore {
         text(row['交易时间'] || row['创建时间'] || row.billDate || row['账单日期']),
         item.visible === false ? 0 : 1,
         serializeJson(row)
-      );
+      ];
+      insert.run(...values);
     }
     this.bumpRevision('linked', sourceType);
     return derived.length;
@@ -2043,7 +2131,7 @@ class PositionReconciliationStore {
       SELECT *
       FROM position_link_rows
       WHERE source_type = ? ${includeHidden ? '' : 'AND visible = 1'}
-      ORDER BY ordinal, id
+      ORDER BY source_row_id, leg_index, id
     `).all(sourceType).map((row) => ({
       ...row,
       row: assertPayloadFields(
@@ -2070,8 +2158,10 @@ class PositionReconciliationStore {
         throwInvalidSideData(`平盘侧库来源消费关系指向不存在的运行 ID=${runId}`);
       }
     }
+    const modern = usesModernSourceIdentity(this.db);
     return this.db.prepare(`
       SELECT source_type AS sourceType, business_key AS businessKey,
+             ${modern ? 'source_record_key AS sourceRecordKey,' : ''}
              leg_index AS legIndex, run_id AS runId, bank_biz_id AS bankBizId
       FROM position_consumed_sources
       ORDER BY id
@@ -2325,6 +2415,7 @@ class PositionReconciliationStore {
       clauses.push(`d.status IN (${placeholders(normalizedStatuses)})`);
       args.push(...normalizedStatuses);
     }
+    const modernSourceIdentity = usesModernSourceIdentity(this.db);
     return this.db.prepare(`
       SELECT r.*
       FROM position_run_rows r
@@ -2344,7 +2435,8 @@ class PositionReconciliationStore {
       );
       const lineage = assertRunLineage(
         parseJson(row.lineage_json, `运行血缘 ${runId}/${row.biz_id}`),
-        row
+        row,
+        { requireSourceRecordKey: modernSourceIdentity }
       );
       return { ...row, originalRow, resultRow, lineage };
     });
@@ -2494,18 +2586,27 @@ class PositionReconciliationStore {
     if (!run) throw new Error('运行草稿不存在');
     const rows = this.listRunRows(runId);
     return this._mutation(() => {
-      const insertConsumption = this.db.prepare(`
-        INSERT INTO position_consumed_sources(
-          run_id, source_type, business_key, leg_index, bank_biz_id
-        ) VALUES (?, ?, ?, ?, ?)
-      `);
+      const modern = usesModernSourceIdentity(this.db);
+      const insertConsumption = this.db.prepare(modern ? `
+          INSERT INTO position_consumed_sources(
+            run_id, source_type, business_key, source_record_key, leg_index, bank_biz_id
+          ) VALUES (?, ?, ?, ?, ?, ?)
+        ` : `
+          INSERT INTO position_consumed_sources(
+            run_id, source_type, business_key, leg_index, bank_biz_id
+          ) VALUES (?, ?, ?, ?, ?)
+        `);
       const findConsumption = this.db.prepare(`
         SELECT bank_biz_id AS bankBizId
         FROM position_consumed_sources
-        WHERE source_type = ? AND business_key = ? AND leg_index = ?
+        WHERE source_type = ?
+          AND ${modern ? 'source_record_key' : 'business_key'} = ?
+          AND leg_index = ?
       `);
       const findBankConsumption = this.db.prepare(`
-        SELECT source_type AS sourceType, business_key AS businessKey, leg_index AS legIndex
+        SELECT source_type AS sourceType, business_key AS businessKey,
+               ${modern ? 'source_record_key AS sourceRecordKey,' : ''}
+               leg_index AS legIndex
         FROM position_consumed_sources
         WHERE bank_biz_id = ?
       `);
@@ -2513,19 +2614,28 @@ class PositionReconciliationStore {
         const lineage = row.lineage || {};
         const sourceType = text(lineage.sourceType);
         const businessKey = text(lineage.sourceBusinessKey);
+        const sourceRecordKey = text(lineage.sourceRecordKey);
         const legIndex = Number(lineage.sourceLegIndex);
+        if (Number(row.consumes_source) === 1 && modern && !sourceRecordKey) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            `平盘运行血缘缺少 sourceRecordKey：run=${runId}，BizId=${row.biz_id}`
+          );
+        }
         if (
           Number(row.consumes_source) === 1
           && sourceType
           && sourceType !== SOURCE_TYPES.BANK_ACCOUNT
           && businessKey
+          && (!modern || sourceRecordKey)
           && lineage.sourceLegIndex !== null
           && lineage.sourceLegIndex !== undefined
           && lineage.sourceLegIndex !== ''
           && Number.isInteger(legIndex)
           && legIndex >= 0
         ) {
-          const existing = findConsumption.get(sourceType, businessKey, legIndex);
+          const sourceIdentity = modern ? sourceRecordKey : businessKey;
+          const existing = findConsumption.get(sourceType, sourceIdentity, legIndex);
           if (existing) {
             if (text(existing.bankBizId) !== text(row.biz_id)) {
               throw new Error(
@@ -2541,7 +2651,18 @@ class PositionReconciliationStore {
               `${bankConsumption.sourceType}/${bankConsumption.businessKey}/${bankConsumption.legIndex}`
             );
           }
-          insertConsumption.run(runId, sourceType, businessKey, legIndex, row.biz_id);
+          if (modern) {
+            insertConsumption.run(
+              runId,
+              sourceType,
+              businessKey,
+              sourceRecordKey,
+              legIndex,
+              row.biz_id
+            );
+          } else {
+            insertConsumption.run(runId, sourceType, businessKey, legIndex, row.biz_id);
+          }
         }
       }
       const updateBank = this.db.prepare(`

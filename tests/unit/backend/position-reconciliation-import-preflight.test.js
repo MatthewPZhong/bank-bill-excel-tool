@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { DatabaseSync } = require('node:sqlite');
 const XLSX = require('xlsx');
 
 const {
@@ -26,7 +27,9 @@ const {
   BANK_STATEMENT_FIELDS
 } = require('../../../src/constants/bank-statement-fields');
 const {
-  POSITION_IMPORT_COMMANDS
+  POSITION_IMPORT_COMMANDS,
+  POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST,
+  normalizePositionStreamingSourceTypes
 } = require('../../../src/backend/position-reconciliation-import/constants');
 const {
   PositionImportLedger,
@@ -50,8 +53,12 @@ const {
   createPositionReconciliationStore
 } = require('../../../src/main-process/position-reconciliation/store');
 const {
-  assertPositionLargeImportSchema
+  assertPositionLargeImportSchema,
+  positionLargeImportSchemaFingerprint
 } = require('../../../src/main-process/position-reconciliation/large-import-schema');
+const {
+  readPositionDatabaseCheckpoint
+} = require('../../../src/main-process/position-reconciliation/side-db-mutation');
 const {
   STAGING_RELATIVE_PATH,
   hashFileSha256Async,
@@ -166,6 +173,34 @@ function bankRow(overrides = {}) {
 }
 
 test.describe('v3.1.3 position streaming preflight', () => {
+  test('PR-C2 流式来源门禁固定只允许 gateway-outbound', () => {
+    assert.deepEqual(POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST, [
+      SOURCE_TYPES.GATEWAY_OUTBOUND
+    ]);
+    assert.deepEqual(
+      [...normalizePositionStreamingSourceTypes(undefined, { engine: 'streaming' })],
+      [SOURCE_TYPES.GATEWAY_OUTBOUND]
+    );
+    assert.deepEqual(
+      [...normalizePositionStreamingSourceTypes(
+        [
+          SOURCE_TYPES.GATEWAY_INBOUND,
+          SOURCE_TYPES.GATEWAY_OUTBOUND,
+          SOURCE_TYPES.FUND_TRANSFER
+        ].join(','),
+        { engine: 'streaming' }
+      )],
+      [SOURCE_TYPES.GATEWAY_OUTBOUND]
+    );
+    assert.deepEqual(
+      [...normalizePositionStreamingSourceTypes(
+        SOURCE_TYPES.GATEWAY_OUTBOUND,
+        { engine: 'disabled' }
+      )],
+      []
+    );
+  });
+
   test('五类来源的新 XLSX reader 与旧 SheetJS row/type/hash 等价', async (t) => {
     const dir = tempDir(t, 'position-prb-parity-');
     const rows = sourceRows();
@@ -327,6 +362,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
       businessKey: 'KEY-1',
       rowHash: 'HASH-1',
+      rowGuardHash: 'GUARD-1',
       fileIndex: 0,
       rowNumber: 2
     }).status, 'accepted');
@@ -339,6 +375,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
       businessKey: 'KEY-1',
       rowHash: 'HASH-1',
+      rowGuardHash: 'GUARD-1',
       fileIndex: 1,
       rowNumber: 2
     }).status, 'accepted');
@@ -346,9 +383,18 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
       businessKey: 'KEY-1',
       rowHash: 'HASH-2',
+      rowGuardHash: 'GUARD-2',
       fileIndex: 1,
       rowNumber: 3
     }).status, 'accepted');
+    assert.equal(ledger.claimSourceRecord({
+      sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
+      businessKey: 'KEY-1',
+      rowHash: 'HASH-1',
+      rowGuardHash: 'GUARD-COLLISION',
+      fileIndex: 1,
+      rowNumber: 4
+    }).status, 'hash-collision');
     ledger.acceptFile(1, {
       sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND,
       sheetName: 'Sheet1',
@@ -570,6 +616,303 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(result.status, undefined);
     assert.equal(result.orderedFileResults[0].status, 'ok');
     assert.equal(result.archiveManifestHash, authorizedManifest);
+  });
+
+  test('gateway-outbound 生产 writer 保留同主键不同内容并折叠完全重复', async (t) => {
+    const dir = tempDir(t, 'position-prc2-source-writer-');
+    const checkpoint = {
+      identity: 'source-writer-identity',
+      generation: 0,
+      token: 'source-writer-token'
+    };
+    let store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+
+    const row = sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND];
+    const changed = {
+      ...row,
+      渠道名称: 'Yeepay'
+    };
+    const first = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [row, changed],
+      'writer-first.xlsx'
+    );
+    const duplicate = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [row],
+      'writer-duplicate.xlsx'
+    );
+    const committedFiles = [];
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [first, duplicate],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'source-writer-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: checkpoint
+      }),
+      onFileCommitted: (event) => committedFiles.push(event)
+    }).promise;
+    assert.equal(result.status, 'ok');
+    assert.equal(result.successCount, 2);
+    assert.equal(result.failedCount, 0);
+    assert.deepEqual(
+      result.results.map((item) => [
+        item.rowCount,
+        item.collapsedDuplicateCount
+      ]),
+      [[2, 0], [0, 1]]
+    );
+    assert.deepEqual(
+      committedFiles.map((item) => item.committedRows),
+      [2, 0]
+    );
+
+    let db = new DatabaseSync(sideDbPath, { readOnly: true });
+    assertPositionLargeImportSchema(db);
+    assert.equal(positionLargeImportSchemaFingerprint(db), schemaResult.fingerprint);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
+      2
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(DISTINCT business_key) AS count
+        FROM position_source_rows
+      `).get().count,
+      1
+    );
+    assert.equal(
+      db.prepare('SELECT COUNT(DISTINCT row_hash) AS count FROM position_source_rows').get().count,
+      2
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(DISTINCT source_record_key) AS count
+        FROM position_link_rows
+      `).get().count,
+      2
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_operation_inputs
+        WHERE operation_token = 'source-writer-operation'
+      `).get().count,
+      2
+    );
+    const currentCheckpoint = readPositionDatabaseCheckpoint(db);
+    assert.equal(currentCheckpoint.generation, 2);
+    db.close();
+
+    const repeated = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [row],
+      'writer-independent-repeat.xlsx'
+    );
+    const repeatedResult = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [repeated],
+      userDataDir: path.join(dir, 'worker-user-data-repeat'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'source-writer-repeat-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: currentCheckpoint
+      })
+    }).promise;
+    assert.equal(repeatedResult.successCount, 1);
+    assert.equal(repeatedResult.results[0].rowCount, 1);
+
+    db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
+      2
+    );
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count,
+      2
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_source_rows
+        WHERE source_file_name = 'writer-independent-repeat.xlsx'
+      `).get().count,
+      1
+    );
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 3);
+  });
+
+  test('worker 拒绝绕过 PR-C2 白名单提前启用其他普通来源', async (t) => {
+    const dir = tempDir(t, 'position-prc2-source-allowlist-');
+    const checkpoint = {
+      identity: 'source-allowlist-identity',
+      generation: 0,
+      token: 'source-allowlist-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const inbound = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_INBOUND,
+      [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]],
+      'blocked-inbound.xlsx'
+    );
+
+    await assert.rejects(
+      () => dispatchPositionImportPreflight({
+        engine: 'streaming',
+        command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+        files: [inbound],
+        userDataDir: path.join(dir, 'worker-user-data'),
+        sideDbPath,
+        featureFlags: {
+          preflightOnly: false,
+          streamingSourceTypes: [SOURCE_TYPES.GATEWAY_INBOUND]
+        },
+        authorizeApply: (ready) => ({
+          operationToken: 'source-allowlist-operation',
+          archiveManifestHash: ready.archiveManifestHash,
+          schemaFingerprint: schemaResult.fingerprint,
+          baseCheckpoint: checkpoint
+        })
+      }).promise,
+      (error) => error && error.code === 'position-streaming-source-type-disabled'
+    );
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
+      0
+    );
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_operation_inputs').get().count,
+      0
+    );
+    assert.deepEqual(readPositionDatabaseCheckpoint(db), checkpoint);
+  });
+
+  test('gateway-outbound 后序文件失效时保留前序已提交文件并可恢复', async (t) => {
+    const dir = tempDir(t, 'position-prc2-source-recovery-');
+    const checkpoint = {
+      identity: 'source-recovery-identity',
+      generation: 0,
+      token: 'source-recovery-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const row = sourceRows()[SOURCE_TYPES.GATEWAY_OUTBOUND];
+    const first = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [{ ...row, 业务单号: 'RECOVERY-A' }],
+      'recovery-a.xlsx'
+    );
+    const second = sourceFile(
+      dir,
+      SOURCE_TYPES.GATEWAY_OUTBOUND,
+      [{ ...row, 业务单号: 'RECOVERY-B' }],
+      'recovery-b.xlsx'
+    );
+
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [first, second],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
+      },
+      authorizeApply: (ready) => {
+        fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
+        return {
+          operationToken: 'source-recovery-operation',
+          archiveManifestHash: ready.archiveManifestHash,
+          schemaFingerprint: schemaResult.fingerprint,
+          baseCheckpoint: checkpoint
+        };
+      }
+    }).promise;
+    assert.equal(result.status, 'ok');
+    assert.equal(result.successCount, 1);
+    assert.equal(result.failedCount, 1);
+    assert.deepEqual(
+      result.results.map((item) => item.status),
+      ['ok', 'failed']
+    );
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
+      1
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT business_key AS businessKey
+        FROM position_source_rows
+      `).get().businessKey,
+      'RECOVERY-A'
+    );
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_operation_inputs
+        WHERE operation_token = 'source-recovery-operation'
+      `).get().count,
+      1
+    );
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
   });
 
   test('默认 disabled 不启动 worker，.xls 主进程调用被拒绝', async () => {

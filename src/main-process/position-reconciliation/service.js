@@ -42,6 +42,15 @@ const {
 const {
   parsePositionPendingArchiveFiles
 } = require('./operation-lifecycle');
+const {
+  POSITION_IMPORT_COMMANDS,
+  POSITION_IMPORT_ENGINES,
+  normalizePositionImportEngine,
+  normalizePositionStreamingSourceTypes
+} = require('../../backend/position-reconciliation-import/constants');
+const {
+  dispatchPositionImportPreflight
+} = require('./import-dispatch');
 
 const FUND_TYPE_PAIR_BY_VALUE = new Map();
 const SOURCE_BY_FUND_TYPE = new Map(Object.entries(SOURCE_TYPE_BY_FUND_TYPE));
@@ -116,8 +125,8 @@ function assertEngineResultSet(engineRows, bankRows) {
   }
 }
 
-function sourceConsumptionKey(sourceType, businessKey, legIndex) {
-  return `${text(sourceType)}\u0000${text(businessKey)}\u0000${Number(legIndex)}`;
+function sourceConsumptionKey(sourceType, sourceIdentity, legIndex) {
+  return `${text(sourceType)}\u0000${text(sourceIdentity)}\u0000${Number(legIndex)}`;
 }
 
 function priorBankConsumptionConflict(priorConsumption, result) {
@@ -127,12 +136,12 @@ function priorBankConsumptionConflict(priorConsumption, result) {
   const lineage = result.lineage || {};
   const currentKey = sourceConsumptionKey(
     lineage.sourceType,
-    lineage.sourceBusinessKey,
+    lineage.sourceRecordKey || lineage.sourceBusinessKey,
     lineage.sourceLegIndex
   );
   const priorKey = sourceConsumptionKey(
     priorConsumption.sourceType,
-    priorConsumption.businessKey,
+    priorConsumption.sourceRecordKey || priorConsumption.businessKey,
     priorConsumption.legIndex
   );
   if (currentKey === priorKey) return null;
@@ -273,7 +282,11 @@ class PositionReconciliationService {
     operationTokenProvider = null,
     recordArchiveIntent = null,
     protectedStagingPaths = null,
-    beforeStagedInputCommit = null
+    beforeStagedInputCommit = null,
+    positionImportEngine = undefined,
+    streamingSourceTypes = undefined,
+    authorizeStreamingSourceApply = null,
+    positionImportDispatcher = dispatchPositionImportPreflight
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
@@ -286,6 +299,16 @@ class PositionReconciliationService {
     this.beforeStagedInputCommit = typeof beforeStagedInputCommit === 'function'
       ? beforeStagedInputCommit
       : null;
+    this.positionImportEngine = normalizePositionImportEngine(positionImportEngine);
+    this.streamingSourceTypes = normalizePositionStreamingSourceTypes(
+      streamingSourceTypes,
+      { engine: this.positionImportEngine }
+    );
+    this.authorizeStreamingSourceApply =
+      typeof authorizeStreamingSourceApply === 'function'
+        ? authorizeStreamingSourceApply
+        : null;
+    this.positionImportDispatcher = positionImportDispatcher;
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
       requireExisting: requireExistingSideDb,
       expectedCheckpoint: expectedSideDbCheckpoint,
@@ -477,10 +500,25 @@ class PositionReconciliationService {
   }
 
   prepareSourceImport(filePaths) {
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.prepareStreamingSourceImport(filePaths);
+    }
+    return this.prepareLegacySourceImport(filePaths);
+  }
+
+  prepareLegacySourceImport(filePaths) {
     this.clearSourceImportTokens();
     const batchToken = crypto.randomUUID();
     const staged = stageInputFiles(this.userDataDir, filePaths, `source-${batchToken}`);
-    const results = readSourceFiles(staged);
+    return this.prepareLegacyStagedSourceImport(staged);
+  }
+
+  prepareLegacyStagedSourceImport(staged, { recordArchiveIntent = true } = {}) {
+    const results = readSourceFiles(staged, {
+      identityMode: this.store.usesModernSourceIdentity()
+        ? 'row-hash'
+        : 'business-key'
+    });
     const output = [];
     for (const result of results) {
       if (result.status !== 'ok') {
@@ -518,7 +556,7 @@ class PositionReconciliationService {
       } else {
         try {
           const inputEvidence = stagedInputArchiveFile(result, result.sourceType);
-          if (this.recordArchiveIntent) {
+          if (recordArchiveIntent && this.recordArchiveIntent) {
             this.recordArchiveIntent([inputEvidence], 'input');
           }
           this.assertStagedInputs([result], 'source-auto-apply', { beforeCommit: true });
@@ -571,6 +609,119 @@ class PositionReconciliationService {
         .filter((item) => item.status === 'ok')
         .flatMap((item) => item.inputFiles || []),
       cleanupPaths: output
+        .filter((item) => item.status === 'ok')
+        .flatMap((item) => item.cleanupPaths || [])
+    };
+  }
+
+  async prepareStreamingSourceImport(filePaths) {
+    if (!this.authorizeStreamingSourceApply) {
+      throw new PositionReconciliationError(
+        'position-import-intent-not-durable',
+        '平盘流式导入缺少持久化 apply 授权器'
+      );
+    }
+    const files = Array.isArray(filePaths) ? filePaths : [];
+    if (files.length === 0) {
+      throw new PositionReconciliationError(
+        'position-source-files-empty',
+        '请选择至少一份链接原始表'
+      );
+    }
+    this.clearSourceImportTokens();
+    const allowedSourceTypes = [...this.streamingSourceTypes];
+    const dispatched = this.positionImportDispatcher({
+      engine: this.positionImportEngine,
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files,
+      userDataDir: this.userDataDir,
+      sideDbPath: this.store.dbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: allowedSourceTypes
+      },
+      authorizeApply: async (preflightReady) => {
+        const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
+          ? preflightReady.acceptedOrdinaryInputFiles
+          : [];
+        if (preflightReady.accountConfirmationDescriptor) {
+          throw new PositionReconciliationError(
+            'position-streaming-source-type-disabled',
+            '当前阶段的流式导入不支持与清结算银行账户表混合选择',
+            ['清结算银行账户表将在后续阶段接入流式确认']
+          );
+        }
+        if (accepted.length === 0) {
+          throw new PositionReconciliationError(
+            'position-streaming-source-empty',
+            '预检后没有可提交的普通链接原始表'
+          );
+        }
+        return this.authorizeStreamingSourceApply(preflightReady);
+      }
+    });
+    const streamed = await dispatched.promise;
+    const deferred = (Array.isArray(streamed.results) ? streamed.results : []).filter(
+      (item) => (
+        item.status === 'ok'
+        && item.applied !== true
+        && item.sourceType
+        && !this.streamingSourceTypes.has(item.sourceType)
+      )
+    );
+    if (deferred.length === 0) return streamed;
+
+    const staged = deferred.map((item) => ({
+      filePath: item.archivePath,
+      sourceFilePath: item.filePath,
+      sourceFileName: item.fileName,
+      archivePath: item.archivePath,
+      stagingDir: item.stagingDir,
+      stagedSnapshot: item.stagedSnapshot,
+      stagedSha256: item.stagedSha256,
+      stagedSizeBytes: item.stagedSizeBytes
+    }));
+    const legacy = this.prepareLegacyStagedSourceImport(staged, {
+      recordArchiveIntent: false
+    });
+    const legacyByFileIndex = new Map(
+      deferred.map((item, index) => [
+        Number(item.fileIndex),
+        legacy.results[index]
+      ])
+    );
+    const results = streamed.results.map((item) => (
+      legacyByFileIndex.has(Number(item.fileIndex))
+        ? {
+            ...legacyByFileIndex.get(Number(item.fileIndex)),
+            fileIndex: Number(item.fileIndex)
+          }
+        : item
+    ));
+    const successCount = results.filter((item) => item.status === 'ok').length;
+    const failedCount = results.filter((item) => item.status === 'failed').length;
+    const confirmationCount = results.filter(
+      (item) => item.status === 'needs-confirmation'
+    ).length;
+    return {
+      ...streamed,
+      status: successCount > 0 || confirmationCount > 0 ? 'ok' : 'failed',
+      message: successCount > 0 || confirmationCount > 0
+        ? `链接原始表导入完成：成功 ${successCount}，待确认 ${confirmationCount}，失败 ${failedCount}`
+        : '所选链接原始表全部导入失败',
+      results,
+      orderedFileResults: results,
+      successCount,
+      failedCount,
+      confirmationCount,
+      archiveDeferred: successCount === 0 && confirmationCount > 0,
+      inputPaths: results
+        .filter((item) => item.status === 'ok')
+        .flatMap((item) => item.inputPaths || []),
+      inputFiles: results
+        .filter((item) => item.status === 'ok')
+        .flatMap((item) => item.inputFiles || []),
+      cleanupPaths: results
         .filter((item) => item.status === 'ok')
         .flatMap((item) => item.cleanupPaths || [])
     };
@@ -764,7 +915,11 @@ class PositionReconciliationService {
     });
     const consumedSourceRows = this.store.listConsumedSources();
     const consumedSources = new Map(consumedSourceRows.map((item) => [
-      sourceConsumptionKey(item.sourceType, item.businessKey, item.legIndex),
+      sourceConsumptionKey(
+        item.sourceType,
+        item.sourceRecordKey || item.businessKey,
+        item.legIndex
+      ),
       item
     ]));
     const consumedBanks = new Map(consumedSourceRows.map((item) => [item.bankBizId, item]));
@@ -773,12 +928,17 @@ class PositionReconciliationService {
         sourceType,
         this.store.listLinkRows(sourceType, { includeHidden: true }).map((item) => {
           const consumed = consumedSources.get(
-            sourceConsumptionKey(sourceType, item.business_key, item.leg_index)
+            sourceConsumptionKey(
+              sourceType,
+              item.source_record_key || item.business_key,
+              item.leg_index
+            )
           );
           return {
             ...item.row,
             _linkRowId: item.id,
             _sourceBusinessKey: item.business_key,
+            _sourceRecordKey: item.source_record_key || '',
             _sourceRowNumber: item.source_row_number,
             _sourceLegIndex: Number(item.leg_index),
             _consumedByRunId: consumed ? consumed.runId : null,

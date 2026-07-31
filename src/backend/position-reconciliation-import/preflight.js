@@ -26,6 +26,7 @@ const {
 } = require('../../main-process/position-reconciliation/input-staging');
 const {
   StableArrayHashAccumulator,
+  stableRowGuardHash,
   validateSourceRow
 } = require('./contracts');
 const {
@@ -137,11 +138,13 @@ async function preflightSourceFile({
           );
         }
         const rowHash = stableHash(row);
+        const rowGuardHash = stableRowGuardHash(row);
         if (SOURCE_DEFINITIONS[sourceType].keyField) {
           const claim = ledger.claimSourceRecord({
             sourceType,
             businessKey: validation.businessKey,
             rowHash,
+            rowGuardHash,
             fileIndex: descriptor.fileIndex,
             rowNumber: excelRowNumber
           });
@@ -517,6 +520,8 @@ async function runPositionImportPreflight(input = {}) {
 
 module.exports = {
   emptyStats,
+  updateDateRange,
+  readerFor,
   preflightSourceFile,
   preflightBankFile,
   runPositionImportPreflight

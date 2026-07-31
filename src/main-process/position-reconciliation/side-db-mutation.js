@@ -417,8 +417,75 @@ function runPositionSideDbMutation({
   const token = suppliedOperationToken || crypto.randomUUID();
 
   db.exec('BEGIN IMMEDIATE');
+  let currentCheckpoint;
+  const rollback = (error) => {
+    try {
+      db.exec('ROLLBACK');
+    } catch (_rollbackError) {
+      // 保留原始错误。
+    }
+    throw error;
+  };
+  const commit = (result) => {
+    try {
+      recordPositionOperationInputs(
+        db,
+        token,
+        inputEvidence,
+        fallbackSourceType
+      );
+
+      const nextGeneration = currentCheckpoint.generation + 1;
+      if (!Number.isSafeInteger(nextGeneration)) {
+        throw new PositionReconciliationError(
+          'position-side-db-mismatch',
+          '平盘对账侧库 generation 超出安全范围'
+        );
+      }
+      const nextToken = crypto.randomUUID();
+      const generationUpdate = db.prepare(`
+        UPDATE position_meta
+        SET value = ?
+        WHERE key = ? AND value = ?
+      `).run(
+        String(nextGeneration),
+        POSITION_DB_GENERATION_KEY,
+        String(currentCheckpoint.generation)
+      );
+      const tokenUpdate = db.prepare(`
+        UPDATE position_meta SET value = ? WHERE key = ? AND value = ?
+      `).run(
+        nextToken,
+        POSITION_DB_CHECKPOINT_TOKEN_KEY,
+        currentCheckpoint.token
+      );
+      const historyInsert = db.prepare(`
+        INSERT INTO position_checkpoint_history(
+          generation, token, parent_token, operation_token
+        )
+        VALUES (?, ?, ?, ?)
+      `).run(nextGeneration, nextToken, currentCheckpoint.token, token);
+      if (Number(generationUpdate.changes) !== 1
+          || Number(tokenUpdate.changes) !== 1
+          || Number(historyInsert.changes) !== 1) {
+        throw new PositionReconciliationError(
+          'position-side-db-mismatch',
+          '平盘对账侧库 checkpoint 更新失败'
+        );
+      }
+      const nextCheckpoint = {
+        identity: currentCheckpoint.identity,
+        generation: nextGeneration,
+        token: nextToken
+      };
+      db.exec('COMMIT');
+      return { result, nextCheckpoint };
+    } catch (error) {
+      return rollback(error);
+    }
+  };
   try {
-    const currentCheckpoint = readPositionDatabaseCheckpoint(db);
+    currentCheckpoint = readPositionDatabaseCheckpoint(db);
     if (!currentCheckpoint) {
       throw new PositionReconciliationError(
         'position-side-db-mismatch',
@@ -434,68 +501,11 @@ function runPositionSideDbMutation({
       currentCheckpoint
     });
     if (result && typeof result.then === 'function') {
-      throw new TypeError('平盘侧库 mutation 必须为同步函数');
+      return Promise.resolve(result).then(commit, rollback);
     }
-
-    recordPositionOperationInputs(
-      db,
-      token,
-      inputEvidence,
-      fallbackSourceType
-    );
-
-    const nextGeneration = currentCheckpoint.generation + 1;
-    if (!Number.isSafeInteger(nextGeneration)) {
-      throw new PositionReconciliationError(
-        'position-side-db-mismatch',
-        '平盘对账侧库 generation 超出安全范围'
-      );
-    }
-    const nextToken = crypto.randomUUID();
-    const generationUpdate = db.prepare(`
-      UPDATE position_meta
-      SET value = ?
-      WHERE key = ? AND value = ?
-    `).run(
-      String(nextGeneration),
-      POSITION_DB_GENERATION_KEY,
-      String(currentCheckpoint.generation)
-    );
-    const tokenUpdate = db.prepare(`
-      UPDATE position_meta SET value = ? WHERE key = ? AND value = ?
-    `).run(
-      nextToken,
-      POSITION_DB_CHECKPOINT_TOKEN_KEY,
-      currentCheckpoint.token
-    );
-    const historyInsert = db.prepare(`
-      INSERT INTO position_checkpoint_history(
-        generation, token, parent_token, operation_token
-      )
-      VALUES (?, ?, ?, ?)
-    `).run(nextGeneration, nextToken, currentCheckpoint.token, token);
-    if (Number(generationUpdate.changes) !== 1
-        || Number(tokenUpdate.changes) !== 1
-        || Number(historyInsert.changes) !== 1) {
-      throw new PositionReconciliationError(
-        'position-side-db-mismatch',
-        '平盘对账侧库 checkpoint 更新失败'
-      );
-    }
-    const nextCheckpoint = {
-      identity: currentCheckpoint.identity,
-      generation: nextGeneration,
-      token: nextToken
-    };
-    db.exec('COMMIT');
-    return { result, nextCheckpoint };
+    return commit(result);
   } catch (error) {
-    try {
-      db.exec('ROLLBACK');
-    } catch (_rollbackError) {
-      // 保留原始错误。
-    }
-    throw error;
+    return rollback(error);
   }
 }
 

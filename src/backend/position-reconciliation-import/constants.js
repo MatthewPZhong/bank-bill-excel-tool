@@ -1,10 +1,13 @@
 'use strict';
 
 const POSITION_IMPORT_PROTOCOL_VERSION = 1;
-const POSITION_IMPORT_LEDGER_SCHEMA_VERSION = 1;
+const POSITION_IMPORT_LEDGER_SCHEMA_VERSION = 2;
 const POSITION_SST_MEMORY_BUDGET_BYTES = 64 * 1024 * 1024;
 const POSITION_SST_LRU_MAX_ENTRIES = 8192;
 const POSITION_IMPORT_MAX_ERROR_DETAILS = 100;
+const POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST = Object.freeze([
+  'gateway-outbound'
+]);
 
 const POSITION_IMPORT_ENGINES = Object.freeze({
   STREAMING: 'streaming',
@@ -42,14 +45,29 @@ function normalizePositionImportEngine(value = process.env.POSITION_IMPORT_ENGIN
     : POSITION_IMPORT_ENGINES.DISABLED;
 }
 
+function normalizePositionStreamingSourceTypes(
+  value = process.env.POSITION_STREAMING_SOURCE_TYPES,
+  { engine = normalizePositionImportEngine() } = {}
+) {
+  if (engine !== POSITION_IMPORT_ENGINES.STREAMING) return new Set();
+  const configured = String(value || '').trim();
+  const values = configured
+    ? configured.split(',').map((item) => item.trim()).filter(Boolean)
+    : POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST;
+  const allowed = new Set(POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST);
+  return new Set(values.filter((item) => allowed.has(item)));
+}
+
 module.exports = {
   POSITION_IMPORT_PROTOCOL_VERSION,
   POSITION_IMPORT_LEDGER_SCHEMA_VERSION,
   POSITION_SST_MEMORY_BUDGET_BYTES,
   POSITION_SST_LRU_MAX_ENTRIES,
   POSITION_IMPORT_MAX_ERROR_DETAILS,
+  POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST,
   POSITION_IMPORT_ENGINES,
   POSITION_IMPORT_COMMANDS,
   POSITION_IMPORT_MESSAGE_TYPES,
-  normalizePositionImportEngine
+  normalizePositionImportEngine,
+  normalizePositionStreamingSourceTypes
 };

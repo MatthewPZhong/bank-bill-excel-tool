@@ -15,6 +15,9 @@ const {
   verifyPositionImportApplyGrant
 } = require('./apply-grant');
 const {
+  applyPositionOrdinarySourceFiles
+} = require('./source-writer');
+const {
   ensurePositionLargeImportSchemaAtPath
 } = require('../../main-process/position-reconciliation/large-import-schema');
 
@@ -108,8 +111,11 @@ async function runJob(message) {
     active = null;
     return;
   }
-  if (message.featureFlags && message.featureFlags.preflightOnly !== true) {
-    const error = new Error('PR-B worker 只允许 preflightOnly');
+  const preflightOnly = !message.featureFlags
+    || message.featureFlags.preflightOnly !== false;
+  if (!preflightOnly
+      && command !== POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY) {
+    const error = new Error('当前生产 writer 只允许普通链接原始表导入');
     error.code = 'position-import-intent-not-durable';
     throw error;
   }
@@ -189,18 +195,59 @@ async function runJob(message) {
   });
   active.stage = 'awaiting-apply-grant';
   const grant = await applyGrant;
-  verifyPositionImportApplyGrant({
+  const verifiedGrant = verifyPositionImportApplyGrant({
     grant,
     jobId: active.jobId,
     archiveManifestHash: result.archiveManifestHash,
     sideDbPath: message.sideDbPath,
-    allowPreflightOnly: message.featureFlags && message.featureFlags.preflightOnly === true
+    allowPreflightOnly: preflightOnly
   });
+  let finalResult = result;
+  if (!preflightOnly && !verifiedGrant.preflightOnly) {
+    active.stage = 'applying';
+    finalResult = await applyPositionOrdinarySourceFiles({
+      sideDbPath: message.sideDbPath,
+      grant: verifiedGrant,
+      preflightReady: result,
+      cancelToken,
+      allowedSourceTypes: message.featureFlags.streamingSourceTypes,
+      sstOptions: message.contractOptions && message.contractOptions.sstOptions,
+      onProgress(progress) {
+        active.stage = progress.stage || active.stage;
+        const memory = process.memoryUsage();
+        active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
+        active.peakHeapUsedBytes = Math.max(active.peakHeapUsedBytes, memory.heapUsed);
+        channel.send({
+          type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
+          jobId: active.jobId,
+          currentFile: progress.currentFile || null,
+          totalFiles: Array.isArray(message.files) ? message.files.length : 0,
+          fileName: progress.fileName || '',
+          scannedRows: Number(progress.scannedRows || 0),
+          acceptedRows: Number(progress.acceptedRows || 0),
+          committedRows: Number(progress.committedRows || 0),
+          copiedBytes: 0,
+          totalBytes: 0,
+          workerRssBytes: memory.rss,
+          workerHeapUsedBytes: memory.heapUsed,
+          elapsedMs: Number(progress.elapsedMs || 0),
+          stage: active.stage
+        });
+      },
+      onFileCommitted(file) {
+        channel.send({
+          type: POSITION_IMPORT_MESSAGE_TYPES.FILE_COMMITTED,
+          jobId: active.jobId,
+          ...file
+        });
+      }
+    });
+  }
   channel.send({
     type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
     jobId: active.jobId,
     result: {
-      ...result,
+      ...finalResult,
       resourceMetrics: {
         workerPeakRssBytes: active.peakRssBytes,
         workerPeakHeapUsedBytes: active.peakHeapUsedBytes

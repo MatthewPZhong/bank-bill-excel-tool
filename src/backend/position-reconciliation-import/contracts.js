@@ -34,7 +34,12 @@ class StableArrayHashAccumulator {
   }
 }
 
+function stableRowGuardHash(value) {
+  return crypto.createHash('sha512').update(stableJson(value)).digest('hex');
+}
+
 module.exports = {
   StableArrayHashAccumulator,
+  stableRowGuardHash,
   validateSourceRow
 };

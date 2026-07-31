@@ -593,6 +593,7 @@ CREATE TABLE job_files (
 CREATE TABLE source_seen_records (
   source_type TEXT NOT NULL,
   row_hash TEXT NOT NULL,
+  row_guard_hash TEXT NOT NULL,
   business_key TEXT NOT NULL,
   first_file_index INTEGER NOT NULL,
   first_row_number INTEGER NOT NULL,
@@ -638,14 +639,16 @@ CREATE TABLE file_errors (
 6. 普通来源文件被接受后，其 seen record identities 保留，用于折叠后序跨文件完全重复行；同业务主键不同 `row_hash` 不冲突。
 7. 错误详情每文件最多 100 条；`invalid_rows` 记录全量计数。
 8. ledger 不保存完整行或 raw JSON。
-9. 业务 key 和 row hash 可保存在 ledger，但不得进入日志、IPC 或用户可见错误明细。
+9. 业务 key、row hash 和独立 SHA-512 `row_guard_hash` 可保存在 ledger，但不得进入
+   日志、IPC 或用户可见错误明细。相同 row hash 的 guard 或业务 key 不一致时按哈希碰撞
+   fail closed。
 
 ### 6.4 Ledger 封存
 
 preflight 全部完成后：
 
 1. 写入：
-   - `ledgerSchemaVersion=1`；
+   - `ledgerSchemaVersion=2`；
    - `protocolVersion=1`；
    - `jobId`；
    - `kind`；
@@ -660,7 +663,7 @@ preflight 全部完成后：
 ```js
 {
   ledgerPath,
-  ledgerSchemaVersion: 1,
+  ledgerSchemaVersion: 2,
   ledgerSnapshot,
   ledgerSizeBytes,
   ledgerSha256,
@@ -1512,6 +1515,13 @@ Electron main 不得持有随行数增长的：
 
 主键和跨文件状态放 ledger；大量 SST 放 spill 文件；SQLite TEMP 使用 FILE。
 
+PR-C2 普通来源 apply 连接额外约束：
+
+- sealed ledger 只读连接和 side DB 写连接的 `cache_size` 均固定为 2 MiB；
+- 两个连接均禁用 `mmap`，避免大型 ledger/side DB 映射页抬高 worker RSS；
+- side DB 每个文件提交后执行 `PRAGMA shrink_memory`；
+- 上述资源控制不得改变文件级事务、去重、派生或 checkpoint 语义。
+
 ### 14.3 磁盘门禁
 
 正式业务 DELETE/INSERT 前估算：
@@ -1627,7 +1637,11 @@ staging 副本
 6. 真实五文件 1,339,185 行 end-to-end。
 7. 文件 A commit/B fatal/恢复测试。
 
-**生产接线：仅 `gateway-outbound`，受 sourceType gate 控制。**
+**生产接线：仅 `gateway-outbound` 使用流式 writer，受 sourceType gate 控制；同次选择中
+未开放的普通来源复用预检暂存文件走现代 schema 兼容的小文件路径，不重新复制、不重复
+登记存档意图。PR-C2 真实五文件 apply 必须满足 worker RSS 不超过 1 GiB，并保留
+source/link/input proof/checkpoint/quick_check 数据库证据。PR-C2 允许集合必须由代码固定，
+环境变量或 worker 消息均不得提前开放其它普通来源。**
 
 ### PR-D — 其它普通来源、删除与映射重建
 

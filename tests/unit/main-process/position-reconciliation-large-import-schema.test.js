@@ -248,6 +248,68 @@ test('共享 mutation helper 在同一事务写业务、input proof 与 checkpoi
   );
 });
 
+test('共享 mutation helper 支持异步写入并在异步失败时整体回滚', async (t) => {
+  const { store, userDataDir } = tempStore(t, 'position-async-mutation-helper-');
+  t.after(() => store.close());
+  const successPath = path.join(userDataDir, 'async-success.xlsx');
+  const failurePath = path.join(userDataDir, 'async-failure.xlsx');
+  fs.writeFileSync(successPath, 'async-success-proof');
+  fs.writeFileSync(failurePath, 'async-failure-proof');
+
+  const committed = await runPositionSideDbMutation({
+    db: store.db,
+    expectedCheckpoint: store.persistenceCheckpoint(),
+    operationToken: 'async-success-operation',
+    requireExternalOperationToken: true,
+    inputEvidence: [inputEvidence(successPath)],
+    mutate: async ({ db }) => {
+      await Promise.resolve();
+      db.prepare(`
+        INSERT INTO position_revisions(kind, scope_key, revision)
+        VALUES ('test', 'async-success', 1)
+      `).run();
+      return { changed: 1 };
+    }
+  });
+  assert.deepEqual(committed.result, { changed: 1 });
+  assert.equal(committed.nextCheckpoint.generation, 1);
+  assert.equal(
+    listPositionCommittedOperationInputs(store.db, 'async-success-operation').length,
+    1
+  );
+
+  const checkpointBeforeFailure = store.persistenceCheckpoint();
+  await assert.rejects(
+    () => runPositionSideDbMutation({
+      db: store.db,
+      expectedCheckpoint: checkpointBeforeFailure,
+      operationToken: 'async-failure-operation',
+      requireExternalOperationToken: true,
+      inputEvidence: [inputEvidence(failurePath)],
+      mutate: async ({ db }) => {
+        db.prepare(`
+          INSERT INTO position_revisions(kind, scope_key, revision)
+          VALUES ('test', 'async-failure', 1)
+        `).run();
+        await Promise.resolve();
+        throw new Error('async mutation failed');
+      }
+    }),
+    /async mutation failed/
+  );
+  assert.deepEqual(store.persistenceCheckpoint(), checkpointBeforeFailure);
+  assert.equal(
+    store.db.prepare(
+      "SELECT COUNT(*) AS count FROM position_revisions WHERE scope_key = 'async-failure'"
+    ).get().count,
+    0
+  );
+  assert.equal(
+    listPositionCommittedOperationInputs(store.db, 'async-failure-operation').length,
+    0
+  );
+});
+
 test('来源身份迁移折叠完全相同行并回填链接、运行和消费血缘', (t) => {
   const { store } = tempStore(t, 'position-source-identity-migration-');
   const dbPath = store.dbPath;

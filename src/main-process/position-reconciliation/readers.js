@@ -18,7 +18,8 @@ const {
   normalizeDate,
   monthOf,
   canonicalDecimal,
-  stableHash
+  stableHash,
+  stableJson
 } = require('./common');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
 
@@ -299,7 +300,7 @@ function validateSourceRow(sourceType, row) {
   return { errors, businessKey, eventDate, monthKey };
 }
 
-function readSourceFile(input) {
+function readSourceFile(input, { identityMode = 'business-key' } = {}) {
   const descriptor = normalizeFileInput(input);
   const filePath = descriptor.filePath;
   const workbook = ensureReadableWorkbook(filePath);
@@ -333,9 +334,20 @@ function readSourceFile(input) {
     }
     const rowHash = stableHash(parsed.row);
     if (detected.definition.keyField) {
-      const previous = seen.get(validation.businessKey);
+      const identityKey = identityMode === 'row-hash'
+        ? rowHash
+        : validation.businessKey;
+      const previous = seen.get(identityKey);
       if (previous) {
         if (previous.rowHash === rowHash) {
+          if (previous.businessKey !== validation.businessKey
+              || stableJson(previous.row) !== stableJson(parsed.row)) {
+            throw new PositionReconciliationError(
+              'position-source-record-hash-collision',
+              `来源记录内容摘要冲突：${fileName}`,
+              ['无法证明两条来源记录完全相同，已停止导入']
+            );
+          }
           collapsedDuplicateCount += 1;
           continue;
         }
@@ -348,8 +360,10 @@ function readSourceFile(input) {
           ]
         );
       }
-      seen.set(validation.businessKey, {
+      seen.set(identityKey, {
         rowHash,
+        businessKey: validation.businessKey,
+        row: parsed.row,
         excelRowNumber: parsed.excelRowNumber
       });
     }
@@ -396,7 +410,7 @@ function readSourceFile(input) {
   };
 }
 
-function readSourceFiles(filePaths) {
+function readSourceFiles(filePaths, { identityMode = 'business-key' } = {}) {
   const paths = Array.isArray(filePaths) ? filePaths : [];
   if (paths.length === 0) {
     throw new PositionReconciliationError('position-source-files-empty', '请选择至少一份链接原始表');
@@ -407,7 +421,7 @@ function readSourceFiles(filePaths) {
   for (const input of paths) {
     const descriptor = normalizeFileInput(input);
     try {
-      const parsed = readSourceFile(descriptor);
+      const parsed = readSourceFile(descriptor, { identityMode });
       const conflicting = [];
       if (
         parsed.sourceType === SOURCE_TYPES.BANK_ACCOUNT
@@ -419,27 +433,53 @@ function readSourceFiles(filePaths) {
           [`已选择：${acceptedAccountSnapshots[0]}`]
         );
       }
+      const retainedRecords = [];
       if (SOURCE_DEFINITIONS[parsed.sourceType].keyField) {
         for (const record of parsed.records) {
-          const batchKey = `${parsed.sourceType}\u0000${record.businessKey}`;
+          const identity = identityMode === 'row-hash'
+            ? record.rowHash
+            : record.businessKey;
+          const batchKey = `${parsed.sourceType}\u0000${identity}`;
           const previous = acceptedKeys.get(batchKey);
-          if (previous) {
-            conflicting.push(
-              `${record.businessKey} 已在 ${previous.fileName} 第 ${previous.sourceRowNumber} 行出现`
-            );
+          if (!previous) {
+            retainedRecords.push(record);
+            continue;
           }
+          if (identityMode === 'row-hash'
+              && previous.businessKey === record.businessKey
+              && stableJson(previous.row) === stableJson(record.row)) {
+            parsed.collapsedDuplicateCount += 1;
+            continue;
+          }
+          conflicting.push(
+            `${record.businessKey} 已在 ${previous.fileName} 第 ${previous.sourceRowNumber} 行出现`
+          );
         }
+      } else {
+        retainedRecords.push(...parsed.records);
       }
       if (conflicting.length > 0) {
         throw new PositionReconciliationError(
-          'position-source-cross-file-conflict',
-          `后续文件存在跨文件业务主键冲突，整份文件已拒绝：${parsed.fileName}`,
+          identityMode === 'row-hash'
+            ? 'position-source-record-hash-collision'
+            : 'position-source-cross-file-conflict',
+          identityMode === 'row-hash'
+            ? `后续文件存在来源记录摘要冲突，整份文件已拒绝：${parsed.fileName}`
+            : `后续文件存在跨文件业务主键冲突，整份文件已拒绝：${parsed.fileName}`,
           conflicting
         );
       }
-      for (const record of parsed.records) {
-        acceptedKeys.set(`${parsed.sourceType}\u0000${record.businessKey}`, {
+      parsed.records = retainedRecords;
+      parsed.rowCount = retainedRecords.length;
+      parsed.contentHash = stableHash(retainedRecords.map((record) => record.row));
+      for (const record of retainedRecords) {
+        const identity = identityMode === 'row-hash'
+          ? record.rowHash
+          : record.businessKey;
+        acceptedKeys.set(`${parsed.sourceType}\u0000${identity}`, {
           rowHash: record.rowHash,
+          businessKey: record.businessKey,
+          row: record.row,
           fileName: parsed.fileName,
           sourceRowNumber: record.sourceRowNumber
         });

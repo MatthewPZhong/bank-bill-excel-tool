@@ -24,10 +24,10 @@
 
 ## PR-C2 — Gateway Outbound
 
-- [ ] 单记录派生 API 和增量 source/link writer。
-- [ ] 接入 gateway-outbound feature gate。
-- [ ] 现代全局身份 schema 下保持其余旧小文件来源写入路径可用。
-- [ ] 回放真实 1,339,185 行和部分提交故障。
+- [x] 单记录派生 API 和增量 source/link writer。
+- [x] 接入 gateway-outbound feature gate。
+- [x] 现代全局身份 schema 下保持其余旧小文件来源写入路径可用。
+- [x] 回放真实 1,339,185 行和部分提交故障。
 
 ## PR-D — Remaining Sources And Maintenance
 

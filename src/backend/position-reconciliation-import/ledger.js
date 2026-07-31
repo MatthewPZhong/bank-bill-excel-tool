@@ -56,6 +56,7 @@ const LEDGER_SCHEMA = `
   CREATE TABLE source_seen_records (
     source_type TEXT NOT NULL,
     row_hash TEXT NOT NULL,
+    row_guard_hash TEXT NOT NULL,
     business_key TEXT NOT NULL,
     first_file_index INTEGER NOT NULL,
     first_row_number INTEGER NOT NULL,
@@ -260,11 +261,19 @@ class PositionImportLedger {
     this.activeBatchName = null;
   }
 
-  claimSourceRecord({ sourceType, businessKey, rowHash, fileIndex, rowNumber }) {
+  claimSourceRecord({
+    sourceType,
+    businessKey,
+    rowHash,
+    rowGuardHash,
+    fileIndex,
+    rowNumber
+  }) {
     this._assertOpen();
     const index = normalizedFileIndex(fileIndex);
     const existing = this.db.prepare(`
-      SELECT business_key AS businessKey, first_file_index AS firstFileIndex,
+      SELECT business_key AS businessKey, row_guard_hash AS rowGuardHash,
+             first_file_index AS firstFileIndex,
              first_row_number AS firstRowNumber
       FROM source_seen_records
       WHERE source_type = ? AND row_hash = ?
@@ -272,18 +281,21 @@ class PositionImportLedger {
     if (!existing) {
       this.db.prepare(`
         INSERT INTO source_seen_records(
-          source_type, row_hash, business_key, first_file_index, first_row_number
-        ) VALUES (?, ?, ?, ?, ?)
+          source_type, row_hash, row_guard_hash, business_key,
+          first_file_index, first_row_number
+        ) VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         String(sourceType),
         String(rowHash),
+        String(rowGuardHash),
         String(businessKey),
         index,
         Number(rowNumber)
       );
       return { status: 'accepted' };
     }
-    if (existing.businessKey !== String(businessKey)) {
+    if (existing.businessKey !== String(businessKey)
+        || existing.rowGuardHash !== String(rowGuardHash)) {
       return {
         status: 'hash-collision',
         firstFileIndex: Number(existing.firstFileIndex),
@@ -620,6 +632,9 @@ async function verifySealedLedger(evidence) {
 
   const db = new DatabaseSync(ledgerPath, { readOnly: true });
   try {
+    db.exec('PRAGMA cache_size=-2048;');
+    db.exec('PRAGMA mmap_size=0;');
+    db.exec('PRAGMA temp_store=FILE;');
     const checks = db.prepare('PRAGMA quick_check').all();
     if (checks.length !== 1 || checks[0].quick_check !== 'ok') {
       throw new PositionImportLedgerError('只读 job ledger quick_check 失败');

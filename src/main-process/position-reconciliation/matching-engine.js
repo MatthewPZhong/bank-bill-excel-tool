@@ -836,6 +836,9 @@ function buildCompatibilityRow(bankRecord) {
         sourceIndex: outcome.sourceIndex,
         sourceLinkRowId: sourceRow && sourceRow._linkRowId,
         sourceBusinessKey: sourceRow && sourceRow._sourceBusinessKey,
+        ...(sourceRow && sourceRow._sourceRecordKey
+          ? { sourceRecordKey: sourceRow._sourceRecordKey }
+          : {}),
         sourceRowNumber: sourceRow && sourceRow._sourceRowNumber,
         sourceLegIndex: Number.isInteger(sourceLegIndex) && sourceLegIndex >= 0
           ? sourceLegIndex

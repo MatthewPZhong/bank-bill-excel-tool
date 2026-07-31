@@ -190,6 +190,10 @@ function dispatchPositionImportPreflight(input = {}) {
         if (typeof input.onCancelAck === 'function') {
           try { input.onCancelAck(message); } catch (_error) {}
         }
+      } else if (message.type === POSITION_IMPORT_MESSAGE_TYPES.FILE_COMMITTED) {
+        if (typeof input.onFileCommitted === 'function') {
+          try { input.onFileCommitted(message); } catch (_error) {}
+        }
       } else if (message.type === POSITION_IMPORT_MESSAGE_TYPES.COMPLETE) {
         cleanupAndFinish(resolve, {
           ...message.result,
@@ -222,7 +226,12 @@ function dispatchPositionImportPreflight(input = {}) {
       contractOptions: input.contractOptions || {},
       featureFlags: {
         ...(input.featureFlags || {}),
-        ...(schemaOnly ? { schemaOnly: true } : { preflightOnly: true })
+        ...(schemaOnly
+          ? { schemaOnly: true }
+          : {
+              preflightOnly:
+                !input.featureFlags || input.featureFlags.preflightOnly !== false
+            })
       }
     });
   });
