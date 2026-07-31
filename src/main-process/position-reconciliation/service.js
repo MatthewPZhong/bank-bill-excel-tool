@@ -51,6 +51,9 @@ const {
 const {
   dispatchPositionImportPreflight
 } = require('./import-dispatch');
+const {
+  positionCheckpointsEqual
+} = require('./side-db-mutation');
 
 const FUND_TYPE_PAIR_BY_VALUE = new Map();
 const SOURCE_BY_FUND_TYPE = new Map(Object.entries(SOURCE_TYPE_BY_FUND_TYPE));
@@ -298,6 +301,9 @@ class PositionReconciliationService {
       : null;
     this.beforeStagedInputCommit = typeof beforeStagedInputCommit === 'function'
       ? beforeStagedInputCommit
+      : null;
+    this.operationTokenProvider = typeof operationTokenProvider === 'function'
+      ? operationTokenProvider
       : null;
     this.positionImportEngine = normalizePositionImportEngine(positionImportEngine);
     this.streamingSourceTypes = normalizePositionStreamingSourceTypes(
@@ -813,7 +819,66 @@ class PositionReconciliationService {
   }
 
   saveMappings(mappings) {
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.saveMappingsStreamed(mappings);
+    }
     const result = this.store.saveMappings(mappings);
+    return {
+      status: 'ok',
+      message: `已保存 ${result.count} 条平盘账户映射`,
+      ...result
+    };
+  }
+
+  async runStreamingMaintenance(command, payload) {
+    const baseCheckpoint = this.store.persistenceCheckpoint();
+    const operationToken = text(
+      this.operationTokenProvider ? this.operationTokenProvider() : ''
+    );
+    if (!operationToken) {
+      throw new PositionReconciliationError(
+        'position-import-intent-not-durable',
+        '平盘维护操作缺少外部 operation token'
+      );
+    }
+    const schema = this.positionImportDispatcher({
+      engine: this.positionImportEngine,
+      command: POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES,
+      files: [],
+      userDataDir: this.userDataDir,
+      sideDbPath: this.store.dbPath,
+      expectedCheckpoint: baseCheckpoint
+    });
+    await schema.promise;
+    const dispatched = this.positionImportDispatcher({
+      engine: this.positionImportEngine,
+      command,
+      files: [],
+      userDataDir: this.userDataDir,
+      sideDbPath: this.store.dbPath,
+      expectedCheckpoint: baseCheckpoint,
+      operationToken,
+      payload,
+      featureFlags: { maintenance: true }
+    });
+    const result = await dispatched.promise;
+    const currentCheckpoint = this.store.persistenceCheckpoint();
+    if (!result
+        || !positionCheckpointsEqual(result.nextCheckpoint, currentCheckpoint)
+        || currentCheckpoint.generation !== baseCheckpoint.generation + 1) {
+      throw new PositionReconciliationError(
+        'position-side-db-mismatch',
+        '平盘维护操作完成后的 checkpoint 证据不一致'
+      );
+    }
+    return result;
+  }
+
+  async saveMappingsStreamed(mappings) {
+    const result = await this.runStreamingMaintenance(
+      POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING,
+      { mappings }
+    );
     return {
       status: 'ok',
       message: `已保存 ${result.count} 条平盘账户映射`,
@@ -823,6 +888,9 @@ class PositionReconciliationService {
 
   deleteBank(payload) {
     const selection = requireScopeSelection(payload, '删除');
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.deleteBankStreamed(selection);
+    }
     const result = this.store.deleteBankScopes(selection);
     if (result.deletedCount === 0) {
       throw new PositionReconciliationError(
@@ -833,14 +901,41 @@ class PositionReconciliationService {
     return { status: 'ok', message: `已删除 ${result.deletedCount} 行银行数据`, ...result };
   }
 
+  async deleteBankStreamed(selection) {
+    const result = await this.runStreamingMaintenance(
+      POSITION_IMPORT_COMMANDS.DELETE_BANK,
+      selection
+    );
+    return {
+      status: 'ok',
+      message: `已删除 ${result.deletedCount} 行银行数据`,
+      ...result
+    };
+  }
+
   deleteSource(payload) {
     const sourceType = text(payload && payload.sourceType);
     const wholeTable = payload && payload.wholeTable === true;
     const months = [...new Set(
       (Array.isArray(payload && payload.months) ? payload.months : []).map(text).filter(Boolean)
     )];
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.deleteSourceStreamed({ sourceType, wholeTable, months });
+    }
     const result = this.store.deleteSource({ sourceType, wholeTable, months });
     return { status: 'ok', message: `已删除 ${result.deletedCount} 行原始数据`, ...result };
+  }
+
+  async deleteSourceStreamed(selection) {
+    const result = await this.runStreamingMaintenance(
+      POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
+      selection
+    );
+    return {
+      status: 'ok',
+      message: `已删除 ${result.deletedCount} 行原始数据`,
+      ...result
+    };
   }
 
   async exportBank(payload, outputPath) {

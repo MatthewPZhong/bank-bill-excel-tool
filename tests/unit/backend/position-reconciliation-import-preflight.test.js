@@ -173,13 +173,21 @@ function bankRow(overrides = {}) {
 }
 
 test.describe('v3.1.3 position streaming preflight', () => {
-  test('PR-C2 流式来源门禁固定只允许 gateway-outbound', () => {
+  test('PR-D 流式来源门禁固定开放四类普通来源', () => {
     assert.deepEqual(POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST, [
+      SOURCE_TYPES.FUND_TRANSFER,
+      SOURCE_TYPES.TEST_PAYMENT,
+      SOURCE_TYPES.GATEWAY_INBOUND,
       SOURCE_TYPES.GATEWAY_OUTBOUND
     ]);
     assert.deepEqual(
       [...normalizePositionStreamingSourceTypes(undefined, { engine: 'streaming' })],
-      [SOURCE_TYPES.GATEWAY_OUTBOUND]
+      [
+        SOURCE_TYPES.FUND_TRANSFER,
+        SOURCE_TYPES.TEST_PAYMENT,
+        SOURCE_TYPES.GATEWAY_INBOUND,
+        SOURCE_TYPES.GATEWAY_OUTBOUND
+      ]
     );
     assert.deepEqual(
       [...normalizePositionStreamingSourceTypes(
@@ -190,7 +198,11 @@ test.describe('v3.1.3 position streaming preflight', () => {
         ].join(','),
         { engine: 'streaming' }
       )],
-      [SOURCE_TYPES.GATEWAY_OUTBOUND]
+      [
+        SOURCE_TYPES.GATEWAY_INBOUND,
+        SOURCE_TYPES.GATEWAY_OUTBOUND,
+        SOURCE_TYPES.FUND_TRANSFER
+      ]
     );
     assert.deepEqual(
       [...normalizePositionStreamingSourceTypes(
@@ -772,7 +784,136 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(readPositionDatabaseCheckpoint(db).generation, 3);
   });
 
-  test('worker 拒绝绕过 PR-C2 白名单提前启用其他普通来源', async (t) => {
+  test('四类普通来源流式 writer 保持 0/hidden/visible/双腿派生语义', async (t) => {
+    const dir = tempDir(t, 'position-prd-source-writers-');
+    const checkpoint = {
+      identity: 'source-writers-identity',
+      generation: 0,
+      token: 'source-writers-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const base = sourceRows();
+    const files = [
+      sourceFile(dir, SOURCE_TYPES.FUND_TRANSFER, [
+        base[SOURCE_TYPES.FUND_TRANSFER],
+        {
+          ...base[SOURCE_TYPES.FUND_TRANSFER],
+          调拨单号: 'FT-PRD-HIDDEN',
+          渠道流水号: 'FT-RID-HIDDEN',
+          收款金额: 100,
+          收款币种: 'USD'
+        }
+      ], 'prd-fund-transfer.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.TEST_PAYMENT, [
+        base[SOURCE_TYPES.TEST_PAYMENT],
+        {
+          ...base[SOURCE_TYPES.TEST_PAYMENT],
+          付款单号: 'TEST-PRD-ZERO',
+          渠道流水号: 'TEST-RID-ZERO',
+          源金额: 0
+        }
+      ], 'prd-test-payment.xlsx'),
+      sourceFile(dir, SOURCE_TYPES.GATEWAY_INBOUND, [
+        base[SOURCE_TYPES.GATEWAY_INBOUND],
+        {
+          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
+          bizId: 'IN-PRD-HIDDEN',
+          reconId: 'IN-RID-HIDDEN',
+          originOutboundCurrency: 'USD'
+        },
+        {
+          ...base[SOURCE_TYPES.GATEWAY_INBOUND],
+          bizId: 'IN-PRD-ZERO',
+          reconId: 'IN-RID-ZERO',
+          tradeType: 'Unsupported'
+        }
+      ], 'prd-gateway-inbound.xlsx'),
+      sourceFile(
+        dir,
+        SOURCE_TYPES.GATEWAY_OUTBOUND,
+        [base[SOURCE_TYPES.GATEWAY_OUTBOUND]],
+        'prd-gateway-outbound.xlsx'
+      )
+    ];
+
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files,
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'source-writers-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: checkpoint
+      })
+    }).promise;
+    assert.equal(result.status, 'ok');
+    assert.equal(result.successCount, 4);
+    assert.deepEqual(result.cleanupPaths, [
+      path.dirname(result.ledgerEvidence.ledgerPath)
+    ]);
+    assert.deepEqual(
+      result.results.map((item) => [item.sourceType, item.rowCount]),
+      [
+        [SOURCE_TYPES.FUND_TRANSFER, 2],
+        [SOURCE_TYPES.TEST_PAYMENT, 2],
+        [SOURCE_TYPES.GATEWAY_INBOUND, 3],
+        [SOURCE_TYPES.GATEWAY_OUTBOUND, 1]
+      ]
+    );
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    assert.deepEqual(
+      db.prepare(`
+        SELECT source_type AS sourceType, COUNT(*) AS rowCount
+        FROM position_source_rows
+        GROUP BY source_type
+        ORDER BY source_type
+      `).all().map((row) => ({ ...row })),
+      [
+        { sourceType: SOURCE_TYPES.FUND_TRANSFER, rowCount: 2 },
+        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, rowCount: 3 },
+        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, rowCount: 1 },
+        { sourceType: SOURCE_TYPES.TEST_PAYMENT, rowCount: 2 }
+      ]
+    );
+    assert.deepEqual(
+      db.prepare(`
+        SELECT source_type AS sourceType,
+               SUM(CASE WHEN visible = 1 THEN 1 ELSE 0 END) AS visibleCount,
+               SUM(CASE WHEN visible = 0 THEN 1 ELSE 0 END) AS hiddenCount
+        FROM position_link_rows
+        GROUP BY source_type
+        ORDER BY source_type
+      `).all().map((row) => ({ ...row })),
+      [
+        { sourceType: SOURCE_TYPES.FUND_TRANSFER, visibleCount: 2, hiddenCount: 2 },
+        { sourceType: SOURCE_TYPES.GATEWAY_INBOUND, visibleCount: 1, hiddenCount: 1 },
+        { sourceType: SOURCE_TYPES.GATEWAY_OUTBOUND, visibleCount: 1, hiddenCount: 0 },
+        { sourceType: SOURCE_TYPES.TEST_PAYMENT, visibleCount: 1, hiddenCount: 0 }
+      ]
+    );
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 4);
+  });
+
+  test('worker 拒绝绕过 PR-D 白名单启用账户快照 writer', async (t) => {
     const dir = tempDir(t, 'position-prc2-source-allowlist-');
     const checkpoint = {
       identity: 'source-allowlist-identity',
@@ -790,23 +931,23 @@ test.describe('v3.1.3 position streaming preflight', () => {
       sideDbPath,
       expectedCheckpoint: checkpoint
     }).promise;
-    const inbound = sourceFile(
+    const account = sourceFile(
       dir,
-      SOURCE_TYPES.GATEWAY_INBOUND,
-      [sourceRows()[SOURCE_TYPES.GATEWAY_INBOUND]],
-      'blocked-inbound.xlsx'
+      SOURCE_TYPES.BANK_ACCOUNT,
+      [sourceRows()[SOURCE_TYPES.BANK_ACCOUNT]],
+      'blocked-account.xlsx'
     );
 
     await assert.rejects(
       () => dispatchPositionImportPreflight({
         engine: 'streaming',
         command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
-        files: [inbound],
+        files: [account],
         userDataDir: path.join(dir, 'worker-user-data'),
         sideDbPath,
         featureFlags: {
           preflightOnly: false,
-          streamingSourceTypes: [SOURCE_TYPES.GATEWAY_INBOUND]
+          streamingSourceTypes: [SOURCE_TYPES.BANK_ACCOUNT]
         },
         authorizeApply: (ready) => ({
           operationToken: 'source-allowlist-operation',

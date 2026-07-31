@@ -1655,7 +1655,12 @@ source/link/input proof/checkpoint/quick_check 数据库证据。PR-C2 允许集
 6. 实现 FundTransfer 映射游标重建。
 7. 验证 0/hidden/visible/2-leg parity。
 
-**生产接线：逐 sourceType gate。**
+**生产接线：代码级允许集合扩展为 `fund-transfer`、`test-payment`、
+`gateway-inbound`、`gateway-outbound` 四类普通来源；配置仍可按 sourceType
+缩小开启范围，但不能越过该集合。来源删除、银行删除和 FundTransfer 映射重建
+统一在 utilityProcess 中使用同一 side DB mutation/checkpoint 事务，旧同步实现只在
+streaming engine 未启用时作为兼容路径。普通来源作业在存档 durable 后按整个 job root
+回收 staging、拒绝文件与 sealed ledger。**
 
 ### PR-E — Bank、Account、UI、磁盘门禁与发布收尾
 

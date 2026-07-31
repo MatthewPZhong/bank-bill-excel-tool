@@ -31,8 +31,8 @@
 
 ## PR-D — Remaining Sources And Maintenance
 
-- [ ] 接入 gateway-inbound、fund-transfer、test-payment。
-- [ ] 流式来源删除、银行删除和 FundTransfer 映射重建。
+- [x] 接入 gateway-inbound、fund-transfer、test-payment。
+- [x] 流式来源删除、银行删除和 FundTransfer 映射重建。
 
 ## PR-E — Bank, Account, UI And Release
 

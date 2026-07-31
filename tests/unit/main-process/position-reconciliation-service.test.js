@@ -460,6 +460,53 @@ test('gateway-outbound 流式门禁与其他普通来源旧路径可在同批混
   );
 });
 
+test('流式 service 通过 utility worker 删除来源并同步 checkpoint', async (t) => {
+  const userDataDir = fs.mkdtempSync(
+    path.join(os.tmpdir(), 'position-streaming-maintenance-service-')
+  );
+  const sourcePath = path.join(userDataDir, 'gateway-inbound.xlsx');
+  writeWorkbook(
+    sourcePath,
+    '账单明细',
+    SOURCE_DEFINITIONS[SOURCE_TYPES.GATEWAY_INBOUND].headers,
+    [inboundRow()]
+  );
+
+  let legacy = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    positionImportEngine: 'disabled',
+    operationTokenProvider: () => 'maintenance-seed-operation'
+  });
+  assert.equal(legacy.prepareSourceImport([sourcePath]).successCount, 1);
+  const checkpoint = legacy.persistenceCheckpoint();
+  legacy.close();
+
+  const store = createPositionReconciliationStore(userDataDir, {
+    expectedCheckpoint: checkpoint
+  });
+  const service = createPositionReconciliationService({
+    userDataDir,
+    templatePath: TEMPLATE_PATH,
+    store,
+    positionImportEngine: 'streaming',
+    operationTokenProvider: () => 'maintenance-delete-operation'
+  });
+  t.after(() => {
+    service.close();
+    fs.rmSync(userDataDir, { recursive: true, force: true });
+  });
+
+  const result = await service.deleteSource({
+    sourceType: SOURCE_TYPES.GATEWAY_INBOUND,
+    months: ['2026-07']
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.deletedCount, 1);
+  assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0);
+  assert.equal(service.persistenceCheckpoint().generation, checkpoint.generation + 1);
+});
+
 test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导和确认', async (t) => {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-service-'));
   const bankPath = path.join(userDataDir, 'bank.xlsx');

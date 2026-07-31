@@ -639,6 +639,9 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     });
     const success = results.filter((item) => item.status === 'ok' && item.applied === true);
     const failed = results.filter((item) => item.status === 'failed');
+    const jobRoot = path.dirname(
+      path.resolve(String(preflightReady.ledgerEvidence.ledgerPath || ''))
+    );
     return {
       ...preflightReady,
       status: success.length > 0 ? 'ok' : 'failed',
@@ -652,7 +655,7 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
       archiveDeferred: false,
       inputPaths: success.flatMap((item) => item.inputPaths || []),
       inputFiles: success.flatMap((item) => item.inputFiles || []),
-      cleanupPaths: success.flatMap((item) => item.cleanupPaths || []),
+      cleanupPaths: [jobRoot],
       checkpoint
     };
   } finally {

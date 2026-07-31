@@ -18,6 +18,10 @@ const {
   applyPositionOrdinarySourceFiles
 } = require('./source-writer');
 const {
+  MAINTENANCE_COMMANDS,
+  runPositionMaintenanceJob
+} = require('./maintenance-writer');
+const {
   ensurePositionLargeImportSchemaAtPath
 } = require('../../main-process/position-reconciliation/large-import-schema');
 
@@ -105,6 +109,73 @@ async function runJob(message) {
         resourceMetrics: {
           workerPeakRssBytes: Math.max(active.peakRssBytes, memory.rss),
           workerPeakHeapUsedBytes: Math.max(active.peakHeapUsedBytes, memory.heapUsed)
+        }
+      }
+    });
+    active = null;
+    return;
+  }
+  if (MAINTENANCE_COMMANDS.has(command)) {
+    if (!message.featureFlags || message.featureFlags.maintenance !== true) {
+      const error = new Error('平盘维护命令缺少 utilityProcess 授权');
+      error.code = 'position-import-intent-not-durable';
+      throw error;
+    }
+    active = {
+      jobId: String(message.jobId || ''),
+      cancelToken: { cancelled: false },
+      stage: 'maintenance',
+      peakRssBytes: process.memoryUsage().rss,
+      peakHeapUsedBytes: process.memoryUsage().heapUsed
+    };
+    const result = await runPositionMaintenanceJob({
+      command,
+      sideDbPath: message.sideDbPath,
+      expectedCheckpoint: message.expectedCheckpoint,
+      operationToken: message.operationToken,
+      payload: message.payload,
+      cancelToken: active.cancelToken,
+      batchSize: message.contractOptions && message.contractOptions.batchSize,
+      onProgress(progress) {
+        active.stage = progress.stage || active.stage;
+        const memory = process.memoryUsage();
+        active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
+        active.peakHeapUsedBytes = Math.max(
+          active.peakHeapUsedBytes,
+          memory.heapUsed
+        );
+        channel.send({
+          type: POSITION_IMPORT_MESSAGE_TYPES.PROGRESS,
+          jobId: active.jobId,
+          currentFile: null,
+          totalFiles: 0,
+          fileName: '',
+          scannedRows: Number(progress.scannedRows || 0),
+          acceptedRows: Number(progress.acceptedRows || 0),
+          committedRows: Number(progress.committedRows || 0),
+          copiedBytes: 0,
+          totalBytes: 0,
+          workerRssBytes: memory.rss,
+          workerHeapUsedBytes: memory.heapUsed,
+          elapsedMs: Number(progress.elapsedMs || 0),
+          stage: active.stage
+        });
+      }
+    });
+    const memory = process.memoryUsage();
+    active.peakRssBytes = Math.max(active.peakRssBytes, memory.rss);
+    active.peakHeapUsedBytes = Math.max(
+      active.peakHeapUsedBytes,
+      memory.heapUsed
+    );
+    channel.send({
+      type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+      jobId: active.jobId,
+      result: {
+        ...result,
+        resourceMetrics: {
+          workerPeakRssBytes: active.peakRssBytes,
+          workerPeakHeapUsedBytes: active.peakHeapUsedBytes
         }
       }
     });

@@ -6,7 +6,8 @@
 - 基线：`main@db43294` / `3.1.2`
 - 分支：按 PR 阶段从 `codex/v3.1.3-position-large-import` 递进；PR-C1 为
   `codex/v3.1.3-pr-c1-mutation-recovery`，PR-C2 为
-  `codex/v3.1.3-pr-c2-gateway-outbound`
+  `codex/v3.1.3-pr-c2-gateway-outbound`，PR-D 为
+  `codex/v3.1.3-pr-d-remaining-sources`
 
 ## Decisions
 
@@ -23,6 +24,9 @@
 | PR-C2 使用 sourceType 混合路由 | 单一全局 streaming 开关会误拦尚未迁移的普通来源 | gateway-outbound 走 worker；其余普通来源复用预检暂存文件走现代 schema 兼容旧路径 |
 | PR-C2 流式来源使用代码级固定白名单 | 仅靠环境变量默认值仍可误开未验收 writer | 配置归一和 worker apply 双层只接受 gateway-outbound；PR-D 再显式扩容 |
 | PR-C2 SQLite 连接固定 2 MiB page cache、关闭 mmap | 16 MiB cache 的试跑在第 3 份文件越过 1 GiB worker RSS 门槛 | 每文件提交后再执行 `shrink_memory`；最终真实回放峰值降至 832,225,280 B |
+| PR-D 四类普通来源共用同一增量 writer | 规范化、来源身份、派生和文件级 checkpoint 契约一致 | 代码级允许集合一次扩展到四类；账户快照仍 fail closed |
+| 删除和映射重建使用独立 maintenance utility job | 旧实现会构造全量行对象、ID 数组或派生数组 | 单事务分批删除/游标派生，每批 yield 并检查取消 |
+| 普通来源存档后按 job root 清理 | 只返回成功文件目录会遗留拒绝文件和 sealed ledger | 存档失败时由 unresolved source path 继续保护整个 job root |
 
 ## Assumptions
 
@@ -70,6 +74,12 @@
 | 2026-07-31 | 同业务主键独立匹配与消费端到端测试 | service 定向测试 56/56 PASS；同一业务主键下两个不同 `sourceRecordKey` 分别匹配、导出、确认并写入两条消费关系 |
 | 2026-07-31 | 新增消费守恒与来源白名单用例后的全量单测 | 4,423/4,423 PASS |
 | 2026-07-31 | PR-C2 来源白名单自查修复 | 配置和真实 worker 双层门禁通过；请求 gateway-inbound 时 0 业务行、0 input proof、generation 不变；相关定向测试合计 78/78 PASS |
+| 2026-07-31 | PR-D 四类普通来源 writer | preflight/worker 定向 23/23 PASS；覆盖四类来源及 0/hidden/visible/双腿派生 |
+| 2026-07-31 | PR-D maintenance writer | 3/3 PASS；覆盖来源/银行分批删除、FK cascade、映射游标重建及中途取消整体回滚 |
+| 2026-07-31 | PR-D service utility 接线 | service 定向 57/57 PASS；真实 child worker 删除来源并同步 checkpoint |
+| 2026-07-31 | PR-D parity / fault / lint | parity 41/41、fault 33/33、lint PASS |
+| 2026-07-31 | PR-D 最终 `npm run release-check` | lint、smoke、unit 和 44 个 integration 脚本全部通过；integration 2,051/2,051 |
+| 2026-07-31 | PR-D `scan:vars` / `check:vars -- --include-minor` | 扫描 257 个 `src` 文件；6 个本次源码文件未命中重要变量清单 |
 
 ## Remaining Unknowns
 

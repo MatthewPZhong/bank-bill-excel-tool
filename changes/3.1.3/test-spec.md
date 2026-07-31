@@ -21,14 +21,15 @@
 - 故障：OOM、SIGKILL、未捕获异常、取消、磁盘不足、DB busy/full、ledger 损坏。
 - 兼容：除用户明确变更的来源重复口径外，旧 reader 的 JS 值、类型、日期、hash、DB JSON、物理行号和错误首因等价。
 - 身份迁移：旧业务主键唯一库原子迁移为 `row_hash` 唯一，链接与消费关系完整回填 `sourceRecordKey`。
-- 全局 schema 兼容：只启用 gateway-outbound streaming 后，尚未切换的
-  gateway-inbound、fund-transfer、test-payment 旧小文件导入仍可在现代身份 schema
-  上安全写入，不得触发旧 business-key conflict SQL 或丢失 `sourceRecordKey`。
-- 混合门禁：同次选择 gateway-outbound 与未开放普通来源时，前者由流式 writer 提交，
-  后者复用同一暂存证据走旧小文件路径；两类文件各自只有一条 input proof。
-- 双层白名单：配置层和 worker apply 层均只能开放 gateway-outbound；直接请求
-  gateway-inbound、fund-transfer 或 test-payment 必须 fail closed，且业务行、input proof
-  和 checkpoint 均不得变化。
+- 普通来源门禁：`fund-transfer`、`test-payment`、`gateway-inbound`、
+  `gateway-outbound` 均使用现代身份流式 writer；代码级和 worker apply 层继续拒绝
+  `bank-account` 或未知来源。
+- 配置缩小兼容：显式只开放部分普通来源时，未开放的小文件仍可复用同一暂存证据走
+  现代 schema 兼容旧路径；两类文件各自只有一条 input proof。
+- 派生 parity：四类普通来源覆盖 0、hidden、visible 和 FundTransfer 双腿，并校验
+  `source_row_id/leg_index/id` 顺序、`sourceRecordKey` 和 checkpoint。
+- 维护作业：来源删除、银行删除和 FundTransfer 映射重建在 utilityProcess 中分批执行；
+  任一取消/异常整体回滚，0 行来源删除仍推进 revision，0 行银行删除不推进 checkpoint。
 - Apply 防碰撞：ledger 与连接级磁盘 TEMP 表同时校验 SHA-256 row hash、独立 SHA-512
   guard、业务主键及首次物理位置。
 - 人工：macOS/Windows 各一次真实导入；资金数据范围替换、派生和存档证据人工复核。
@@ -45,3 +46,11 @@
   `row_hash`；第 4 份文件的 `Yeepay_CN` 与 `Yeepay` 两条均落库并独立派生。
 - 部分提交故障：文件 A commit、文件 B 暂存字节变化时，仅 A 保留业务数据、
   input proof 和 generation，B 回滚并返回失败。
+
+## PR-D Evidence
+
+- 四类普通来源流式 writer 定向用例通过；8 条来源派生为 8 条链接，覆盖 2 条可见
+  FundTransfer 腿、2 条隐藏 FundTransfer 腿、来源零派生及入账隐藏证据。
+- 来源/银行删除与 FundTransfer 映射重建 3/3 定向用例通过；覆盖批大小 1 的多批事务、
+  FK cascade、实际 scope revision、空结果及重建中途取消回滚。
+- Service → dispatcher → utility worker → side DB → 主进程 checkpoint 同步链路通过。

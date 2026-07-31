@@ -223,6 +223,8 @@ function dispatchPositionImportPreflight(input = {}) {
       userDataDir: input.userDataDir,
       sideDbPath: input.sideDbPath || '',
       expectedCheckpoint: input.expectedCheckpoint || null,
+      operationToken: input.operationToken || '',
+      payload: input.payload || {},
       contractOptions: input.contractOptions || {},
       featureFlags: {
         ...(input.featureFlags || {}),
