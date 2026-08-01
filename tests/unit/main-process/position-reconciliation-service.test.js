@@ -140,6 +140,8 @@ function createEmptyLegacyPositionDatabase(userDataDir) {
   db.exec(POSITION_RECONCILIATION_SCHEMA);
   db.exec(`
     DROP INDEX idx_position_bank_scope_dates;
+    DROP TABLE position_run_filtered_sources;
+    DROP TABLE position_filtered_source_rows;
     DROP TABLE position_source_summaries;
     DROP TABLE position_operation_inputs;
     DROP TABLE position_checkpoint_history;

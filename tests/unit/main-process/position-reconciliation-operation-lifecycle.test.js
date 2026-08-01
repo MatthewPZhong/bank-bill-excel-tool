@@ -640,6 +640,59 @@ test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 gr
   assert.equal(pending.archiveFiles[0].filePath, archivePath);
 });
 
+test('含过滤行的普通来源在 grant 前同时持久化异常报告证据', () => {
+  const operationToken = 'operation-with-anomaly-report';
+  const reportSnapshot = { ...INPUT_EVIDENCE.sourceSnapshot, ino: 88 };
+  const reportSha256 = '8'.repeat(64);
+  let pending = {
+    operationToken,
+    archiveRequired: true,
+    archiveState: 'awaiting-intent',
+    archiveFiles: []
+  };
+  const roles = [];
+  const grant = authorizePositionImportApply({
+    preflightReady: {
+      archiveManifestHash: '7'.repeat(64),
+      acceptedOrdinaryInputFiles: [{
+        archivePath: '/tmp/position-with-anomaly-input.xlsx',
+        sourceType: 'fund-transfer',
+        stagedSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+        stagedSha256: INPUT_EVIDENCE.sha256,
+        stagedSizeBytes: INPUT_EVIDENCE.sizeBytes
+      }],
+      outputFiles: [{
+        filePath: '/tmp/position-anomaly-report.xlsx',
+        artifactKey: 'source-import-anomaly-report',
+        sourceSnapshot: reportSnapshot,
+        expectedSha256: reportSha256,
+        sizeBytes: reportSnapshot.sizeBytes
+      }]
+    },
+    currentCheckpoint: checkpoint(5),
+    schemaFingerprint: '6'.repeat(64),
+    readPending: () => structuredClone(pending),
+    writePending: (value) => {
+      pending = structuredClone(value);
+    },
+    recordArchiveIntentFiles: (files, role) => {
+      roles.push(role);
+      pending = {
+        ...pending,
+        archiveState: 'intent-recorded',
+        archiveFiles: [...pending.archiveFiles, ...structuredClone(files)]
+      };
+    }
+  });
+
+  assert.equal(grant.operationToken, operationToken);
+  assert.deepEqual(roles, ['input', 'output']);
+  assert.equal(pending.archiveFiles.length, 2);
+  assert.equal(pending.archiveFiles[1].role, 'output');
+  assert.equal(pending.archiveFiles[1].artifactKey, 'source-import-anomaly-report');
+  assert.equal(pending.archiveFiles[1].sha256, reportSha256);
+});
+
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
   const operationToken = 'operation-rejected';
   let pending = {

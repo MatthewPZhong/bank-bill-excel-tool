@@ -72,11 +72,15 @@ const {
   createPositionReconciliationService
 } = require('./main-process/position-reconciliation/service');
 const {
+  PositionReconciliationError
+} = require('./main-process/position-reconciliation/common');
+const {
   dispatchPositionLargeImportSchemaMigration
 } = require('./main-process/position-reconciliation/import-dispatch');
 const {
   assertStagedInputUnchanged,
-  filterStagingPathsWithoutProtectedSources
+  filterStagingPathsWithoutProtectedSources,
+  hashFileSha256Async
 } = require('./main-process/position-reconciliation/input-staging');
 const {
   POSITION_SIDE_DB_CHECKPOINT_SETTING,
@@ -14255,7 +14259,18 @@ function recordPositionArchiveIntentFiles(filePaths, role) {
       : {
           filePath,
           role,
-          beforeSnapshot: capturePositionArchiveFileSnapshot(filePath)
+          beforeSnapshot: capturePositionArchiveFileSnapshot(filePath),
+          ...(descriptor.sourceSnapshot ? {
+            sourceSnapshot: descriptor.sourceSnapshot,
+            sha256: descriptor.expectedSha256 || descriptor.sha256,
+            sizeBytes: descriptor.sizeBytes
+          } : {}),
+          artifactKey: String(descriptor.artifactKey || '').trim(),
+          sourceOperation: String(descriptor.sourceOperation || '').trim(),
+          originalName: String(descriptor.originalName || path.basename(filePath)),
+          metadata: descriptor.metadata && typeof descriptor.metadata === 'object'
+            ? descriptor.metadata
+            : {}
         };
     const normalized = requirePositionPendingArchiveFiles({
       archiveFiles: [archiveFile]
@@ -14421,6 +14436,52 @@ function persistCurrentPositionArchiveIntentIfNeeded() {
   );
 }
 
+async function resolvePositionAnomalyReportReference(report = {}) {
+  const stagedPath = String(report.reportFilePath || '').trim();
+  if (stagedPath) {
+    try {
+      const stat = await fs.promises.stat(stagedPath);
+      const expectedSize = Number(report.reportSizeBytes);
+      const expectedSha256 = String(report.reportSha256 || '').trim().toLowerCase();
+      if (stat.isFile() && Number(stat.size) === expectedSize) {
+        const actual = await hashFileSha256Async(stagedPath);
+        if (actual.sha256 === expectedSha256 && actual.sizeBytes === expectedSize) {
+          return { filePath: stagedPath };
+        }
+      }
+    } catch (_error) {
+      // 导入暂存已回收或无法验证时，继续从锁定的存档批次恢复同一份报告。
+    }
+  }
+  const center = archiveCenterService || initializeArchiveCenter();
+  const repository = center && center.service && center.service.repository;
+  const operationKey = String(report.archiveOperationKey || '').trim();
+  const artifactKey = String(report.reportArtifactKey || '').trim();
+  const batch = repository && operationKey
+    ? repository.getBatchByOperationKey('position-reconciliation-process', operationKey)
+    : null;
+  const artifact = batch && artifactKey
+    ? repository.getArtifactByKey(batch.id, artifactKey)
+    : null;
+  if (!artifact || artifact.status !== 'ready') {
+    throw new PositionReconciliationError(
+      'position-anomaly-report-integrity-invalid',
+      '异常报告暂存已不存在，且存档中心没有可用的审计副本'
+    );
+  }
+  const readonly = await center.service.openReadonlyCopy(artifact.id, {
+    opener: async () => ''
+  });
+  if (!readonly || readonly.ok === false || !readonly.filePath) {
+    throw new PositionReconciliationError(
+      'position-anomaly-report-integrity-invalid',
+      '无法从存档中心恢复异常报告',
+      [readonly && readonly.message ? readonly.message : '存档副本不可用']
+    );
+  }
+  return { filePath: readonly.filePath };
+}
+
 function getPositionReconciliationService() {
   if (!database || !database.db) {
     throw new Error('数据库尚未初始化，请稍后重试');
@@ -14462,6 +14523,7 @@ function getPositionReconciliationService() {
         },
         protectedStagingPaths: positionArchivePersistentStagingPaths,
         positionImportEngine: 'streaming',
+        resolveAnomalyReport: resolvePositionAnomalyReportReference,
         onImportProgress: (progress) => {
           try {
             if (mainWindow && !mainWindow.isDestroyed()) {
@@ -14734,6 +14796,19 @@ function registerPositionReconciliationHandlers() {
     }
   });
 
+  ipcMain.handle('position-reconciliation:source:export-anomaly', (_event, reportKey) => (
+    withPositionReconciliationLock('source-anomaly-export', async () => {
+      const service = getPositionReconciliationService();
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出链接原始表异常数据',
+        defaultPath: service.defaultAnomalyReportFileName(reportKey),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return service.exportAnomalyReport(reportKey, choice.filePath);
+    })
+  ));
+
   ipcMain.handle('position-reconciliation:import:cancel', (_event, jobId) => {
     try {
       return getPositionReconciliationService().cancelActiveImport(jobId);
@@ -14856,6 +14931,19 @@ function registerPositionReconciliationHandlers() {
       });
     })
   );
+
+  ipcMain.handle('position-reconciliation:run:export-filtered', (_event, runId) => (
+    withPositionReconciliationLock('result-filtered-export', async () => {
+      const service = getPositionReconciliationService();
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出平盘资金性质校验过滤数据',
+        defaultPath: service.defaultFilteredResultFileName(runId),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      return service.exportRunFilteredSources(runId, choice.filePath);
+    })
+  ));
 
   trackedIpcHandle(
     'position-reconciliation:run:import-result',
@@ -15658,6 +15746,8 @@ async function buildArchiveRuntimeSnapshot(channel, args, result) {
     return {
       inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
       inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
+      outputPaths: result && Array.isArray(result.outputPaths) ? result.outputPaths : [],
+      outputFiles: result && Array.isArray(result.outputFiles) ? result.outputFiles : [],
       cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
     };
   }

@@ -488,7 +488,21 @@
       const rows = Array.isArray(result && result.results) ? result.results : [];
       return rows.map((item) => {
         const label = escapeHtml(item.sourceName || item.fileName || '未识别文件');
-        if (item.status === 'ok') return `${label}：成功 ${Number(item.rowCount) || 0} 行`;
+        if (item.status === 'ok') {
+          const filtered = Number(item.filteredRowCount) || 0;
+          const accepted = Number(item.rowCount) || 0;
+          if (filtered > 0 && accepted === 0) {
+            return `${label}：导入完成，但有效落库数据为 0 行，已过滤 ${filtered} 行`;
+          }
+          if (filtered > 0) {
+            return `${label}：导入完成，已自动过滤异常数据：` +
+              `总数据 ${Number(item.physicalRowCount) || 0} 行，` +
+              `正常落库 ${accepted} 行，过滤 ${filtered} 行，` +
+              `重复折叠 ${Number(item.collapsedDuplicateCount) || 0} 行，` +
+              `生成链接 ${Number(item.generatedLinkRowCount) || 0} 行`;
+          }
+          return `${label}：成功落库 ${accepted} 行`;
+        }
         if (item.status === 'needs-confirmation') {
           return `${label}：待确认 ${Number(item.oldValidCount) || 0} → ${Number(item.newValidCount) || 0} 行`;
         }
@@ -500,7 +514,51 @@
       }).join('<br>');
     }
 
-    async function handleSourceImport(afterChanged = null) {
+    function showSourceImportCompletion(result, afterClose = null) {
+      const report = result && result.anomalyReport
+        ? result.anomalyReport
+        : (result && Array.isArray(result.results)
+          ? result.results.find((item) => item && item.anomalyReport)?.anomalyReport
+          : null);
+      if (!report || Number(report.filteredRowCount) <= 0) {
+        showAlert(sourceImportSummary(result), {
+          info: !(result.results || []).some((item) => item.status === 'failed'),
+          html: true
+        });
+        return;
+      }
+      const shell = createDialogShell('链接原始表导入提醒', 'position-source-anomaly-dialog');
+      shell.content.innerHTML = `
+        <p class="position-result-note">发现 ${Number(report.filteredRowCount)} 行异常数据，已过滤异常行并继续写入正常数据。</p>
+        <div class="position-import-summary">${sourceImportSummary(result)}</div>
+        <p class="muted">异常报告已进入存档中心，也可立即导出到本地。</p>
+      `;
+      const right = document.createElement('div');
+      right.className = 'position-footer-right';
+      const exportButton = makeButton('导出异常数据');
+      const confirmButton = makeButton('关闭', { primary: true });
+      right.append(exportButton, confirmButton);
+      shell.footer.append(right);
+      exportButton.addEventListener('click', async () => {
+        const exported = await withInflight(
+          '正在导出异常数据…',
+          () => api.exportSourceAnomaly(report.reportKey)
+        );
+        if (!exported || exported.status === 'cancelled') return;
+        if (exported.status !== 'ok') {
+          showAlert(failureDetailsHtml(exported, '异常数据导出失败'), { html: true });
+          return;
+        }
+        setStatus(`已导出 ${Number(exported.rowCount) || 0} 行异常数据：${exported.fileName}`, 'success');
+      });
+      confirmButton.addEventListener('click', async () => {
+        closeModal();
+        if (typeof afterClose === 'function') await afterClose();
+      });
+      openModal(shell.overlay);
+    }
+
+    async function handleSourceImport(afterChanged = null, afterCompletionClose = null) {
       if (!ensureAvailable()) return;
       const result = await withInflight(
         '正在识别链接原始表…',
@@ -553,10 +611,7 @@
         }
       }
       if (typeof afterChanged === 'function') await afterChanged();
-      showAlert(sourceImportSummary(result), {
-        info: !(result.results || []).some((item) => item.status === 'failed'),
-        html: true
-      });
+      showSourceImportCompletion(result, afterCompletionClose);
     }
 
     async function openRunScopeDialog() {
@@ -631,6 +686,20 @@
       return true;
     }
 
+    async function exportRunFiltered(runId) {
+      const result = await withInflight(
+        '正在导出本次运行的过滤数据…',
+        () => api.exportRunFiltered(runId)
+      );
+      if (!result || result.status === 'cancelled') return false;
+      if (result.status !== 'ok') {
+        showAlert(failureDetailsHtml(result, '过滤数据导出失败'), { html: true });
+        return false;
+      }
+      setStatus(`已导出 ${Number(result.rowCount) || 0} 行过滤数据：${result.fileName}`, 'success');
+      return true;
+    }
+
     async function confirmRun(runId) {
       const accepted = await confirmAction(
         '确认结果后将更新系统表库中的 FundType 和审计信息，并把对应银行数据状态改为“已校验性质”。未解决差异只保留人工结论，不会认领或消费链接来源。',
@@ -673,7 +742,13 @@
       const left = document.createElement('div');
       left.className = 'position-footer-left';
       const importButton = makeButton('导入修改结果');
-      left.append(importButton);
+      const filteredButton = makeButton('过滤数据导出');
+      const hasFilteredRows = Boolean(
+        pending.hasFilteredRows || Number(pending.filteredRowCount) > 0
+      );
+      filteredButton.disabled = !hasFilteredRows;
+      if (!hasFilteredRows) filteredButton.title = '本次运行没有过滤数据';
+      left.append(importButton, filteredButton);
       const right = document.createElement('div');
       right.className = 'position-footer-right';
       const closeButton = makeButton('稍后');
@@ -692,6 +767,7 @@
           await openResultDialog(targetRunId);
         }
       });
+      filteredButton.addEventListener('click', () => exportRunFiltered(targetRunId));
       confirmButton.addEventListener('click', () => confirmRun(targetRunId));
       openModal(shell.overlay);
     }
@@ -1375,7 +1451,7 @@
       remove.addEventListener('click', () => openSourceDeleteDialog(result, reload));
       importButton.addEventListener('click', async () => {
         closeModal();
-        await handleSourceImport(reload);
+        await handleSourceImport(null, openLinkedManager);
       });
       exportButton.addEventListener('click', () => openLinkedExportDialog(result.linked));
       back.addEventListener('click', closeModal);
@@ -1513,6 +1589,8 @@
         id: 12,
         stale: false,
         canExport: true,
+        hasFilteredRows: true,
+        filteredRowCount: 6,
         summary: {
           inputRows: 960,
           changedRows: 184,

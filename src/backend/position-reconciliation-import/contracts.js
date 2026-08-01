@@ -6,6 +6,7 @@ const {
   stableJson
 } = require('../../main-process/position-reconciliation/common');
 const {
+  classifySourceRow,
   validateSourceRow
 } = require('../../main-process/position-reconciliation/readers');
 
@@ -41,5 +42,6 @@ function stableRowGuardHash(value) {
 module.exports = {
   StableArrayHashAccumulator,
   stableRowGuardHash,
+  classifySourceRow,
   validateSourceRow
 };

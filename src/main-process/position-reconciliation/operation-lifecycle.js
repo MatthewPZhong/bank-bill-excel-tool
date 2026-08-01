@@ -55,11 +55,31 @@ function parsePositionPendingArchiveFiles(value) {
         ? null
         : normalizeSourceSnapshot(file.beforeSnapshot);
       if (file.beforeSnapshot !== null && !beforeSnapshot) return null;
+      const hasExpectedEvidence = file.sourceSnapshot !== undefined
+        || file.sha256 !== undefined
+        || file.sizeBytes !== undefined;
+      const sourceSnapshot = hasExpectedEvidence
+        ? normalizeSourceSnapshot(file.sourceSnapshot)
+        : null;
+      const sha256 = hasExpectedEvidence
+        ? String(file.sha256 || '').trim().toLowerCase()
+        : '';
+      const sizeBytes = hasExpectedEvidence ? Number(file.sizeBytes) : null;
+      if (hasExpectedEvidence && (
+        !sourceSnapshot
+        || !SHA256_RE.test(sha256)
+        || !Number.isSafeInteger(sizeBytes)
+        || sizeBytes < 0
+        || sourceSnapshot.sizeBytes !== sizeBytes
+      )) {
+        return null;
+      }
       files.push({
         ...file,
         filePath: file.filePath.trim(),
         role,
-        beforeSnapshot
+        beforeSnapshot,
+        ...(hasExpectedEvidence ? { sourceSnapshot, sha256, sizeBytes } : {})
       });
       continue;
     }
@@ -105,6 +125,23 @@ function positionPreflightAcceptedInputFiles(preflightReady) {
   });
 }
 
+function positionPreflightAnomalyOutputFiles(preflightReady) {
+  const outputs = preflightReady && Array.isArray(preflightReady.outputFiles)
+    ? preflightReady.outputFiles
+    : [];
+  return requirePositionPendingArchiveFiles({
+    archiveFiles: outputs.map((file) => ({
+      ...file,
+      filePath: file.filePath,
+      role: 'output',
+      beforeSnapshot: file.sourceSnapshot || null,
+      sourceSnapshot: file.sourceSnapshot,
+      sha256: file.expectedSha256 || file.sha256,
+      sizeBytes: file.sizeBytes
+    }))
+  });
+}
+
 function assertSameArchiveInputEvidence(actualFiles, expectedFiles) {
   const actualInputs = actualFiles.filter((file) => file.role === 'input');
   if (actualInputs.length !== expectedFiles.length) {
@@ -122,6 +159,27 @@ function assertSameArchiveInputEvidence(actualFiles, expectedFiles) {
         || actual.sizeBytes !== expected.sizeBytes
         || !snapshotsEqual(actual.sourceSnapshot, expected.sourceSnapshot)) {
       throw new Error('平盘导入 pending 的文件证据与预检 manifest 不一致');
+    }
+  }
+}
+
+function assertSameArchiveOutputEvidence(actualFiles, expectedFiles) {
+  const actualOutputs = actualFiles.filter((file) => file.role === 'output');
+  if (actualOutputs.length !== expectedFiles.length) {
+    throw new Error('平盘导入 pending 的异常报告清单与预检 manifest 不一致');
+  }
+  const expectedByPath = new Map(expectedFiles.map((file) => [
+    path.resolve(file.filePath),
+    file
+  ]));
+  for (const actual of actualOutputs) {
+    const expected = expectedByPath.get(path.resolve(actual.filePath));
+    if (!expected
+        || actual.sha256 !== expected.sha256
+        || actual.sizeBytes !== expected.sizeBytes
+        || !snapshotsEqual(actual.sourceSnapshot, expected.sourceSnapshot)
+        || String(actual.artifactKey || '') !== String(expected.artifactKey || '')) {
+      throw new Error('平盘导入 pending 的异常报告证据与预检 manifest 不一致');
     }
   }
 }
@@ -151,6 +209,7 @@ function authorizePositionImportApply({
     throw new Error('平盘导入 apply 授权参数不完整');
   }
   const expectedFiles = positionPreflightAcceptedInputFiles(preflightReady);
+  const expectedOutputs = positionPreflightAnomalyOutputFiles(preflightReady);
   if (expectedFiles.length === 0) {
     throw new Error('平盘导入没有可提交的普通来源文件');
   }
@@ -161,12 +220,16 @@ function authorizePositionImportApply({
   }
 
   recordArchiveIntentFiles(expectedFiles, 'input');
+  if (expectedOutputs.length > 0) {
+    recordArchiveIntentFiles(expectedOutputs, 'output');
+  }
   const pendingWithFiles = readPending();
   if (!pendingWithFiles || pendingWithFiles.operationToken !== operationToken) {
     throw new Error('平盘导入登记存档意图时 pending 所有权已变化');
   }
   const persistedFiles = requirePositionPendingArchiveFiles(pendingWithFiles);
   assertSameArchiveInputEvidence(persistedFiles, expectedFiles);
+  assertSameArchiveOutputEvidence(persistedFiles, expectedOutputs);
   writePending({
     ...pendingWithFiles,
     archiveManifestHash: manifestHash
@@ -181,6 +244,10 @@ function authorizePositionImportApply({
   assertSameArchiveInputEvidence(
     requirePositionPendingArchiveFiles(verifiedPending),
     expectedFiles
+  );
+  assertSameArchiveOutputEvidence(
+    requirePositionPendingArchiveFiles(verifiedPending),
+    expectedOutputs
   );
   return {
     operationToken,
@@ -338,7 +405,15 @@ function positionRecoveryArchiveFiles(value, { captureOutputSnapshot }) {
     return {
       filePath: file.filePath,
       role: 'output',
-      sourceSnapshot
+      sourceSnapshot,
+      ...(file.sha256 ? {
+        expectedSha256: file.sha256,
+        sizeBytes: file.sizeBytes
+      } : {}),
+      artifactKey: file.artifactKey,
+      sourceOperation: file.sourceOperation,
+      originalName: file.originalName,
+      metadata: file.metadata
     };
   });
 }
@@ -502,6 +577,7 @@ module.exports = {
   requirePositionPendingArchiveFiles,
   positionPersistentStagingProtectionPaths,
   positionPreflightAcceptedInputFiles,
+  positionPreflightAnomalyOutputFiles,
   authorizePositionImportApply,
   positionCommittedRecoveryArchiveFiles,
   positionUncommittedRecoveryInputPaths,

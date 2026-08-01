@@ -167,6 +167,27 @@ test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', as
     businessKey: 'IN-C',
     rowNumber: 4
   });
+  const insertFiltered = db.prepare(`
+    INSERT INTO position_filtered_source_rows(
+      report_row_key, source_type, business_key, recon_id,
+      event_date, month_key, error_code, error_reason,
+      source_file_path, source_file_name, source_sheet, source_row_number,
+      row_hash, import_operation_token, archive_operation_key,
+      report_key, report_artifact_key, report_file_path, report_file_name,
+      report_sha256, report_size_bytes
+    ) VALUES (?, ?, ?, '', ?, ?, 'TEST_FILTER', '测试过滤',
+              '/tmp/filter.xlsx', 'filter.xlsx', 'Sheet1', 2,
+              ?, 'operation', 'archive-operation',
+              'report', 'artifact', '/tmp/report.xlsx', 'report.xlsx', ?, 10)
+  `);
+  insertFiltered.run(
+    'filtered-july', SOURCE_TYPES.GATEWAY_INBOUND, 'FILTER-JULY',
+    '2026-07-01', '2026-07', 'filtered-row-july', 'a'.repeat(64)
+  );
+  insertFiltered.run(
+    'filtered-august', SOURCE_TYPES.GATEWAY_INBOUND, 'FILTER-AUGUST',
+    '2026-08-01', '2026-08', 'filtered-row-august', 'a'.repeat(64)
+  );
   db.close();
 
   const result = await runPositionMaintenanceJob({
@@ -181,6 +202,7 @@ test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', as
     batchSize: 1
   });
   assert.equal(result.deletedCount, 2);
+  assert.equal(result.resolvedFilteredCount, 1);
   assert.equal(result.nextCheckpoint.generation, 1);
 
   const verify = new DatabaseSync(sideDbPath, { readOnly: true });
@@ -195,6 +217,26 @@ test('来源删除按月份分批执行并依赖 FK cascade 清理链接行', as
   assert.equal(
     verify.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count,
     1
+  );
+  assert.deepEqual(
+    verify.prepare(`
+      SELECT report_row_key AS reportRowKey, resolved_at AS resolvedAt,
+             resolution_reason AS resolutionReason
+      FROM position_filtered_source_rows
+      ORDER BY id
+    `).all().map((row) => ({ ...row, resolvedAt: Boolean(row.resolvedAt) })),
+    [
+      {
+        reportRowKey: 'filtered-july',
+        resolvedAt: true,
+        resolutionReason: 'source-range-deleted'
+      },
+      {
+        reportRowKey: 'filtered-august',
+        resolvedAt: false,
+        resolutionReason: null
+      }
+    ]
   );
   assert.equal(
     verify.prepare(`

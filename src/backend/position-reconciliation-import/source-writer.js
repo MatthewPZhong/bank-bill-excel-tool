@@ -39,8 +39,8 @@ const {
 } = require('../../main-process/position-reconciliation/store');
 const {
   StableArrayHashAccumulator,
-  stableRowGuardHash,
-  validateSourceRow
+  classifySourceRow,
+  stableRowGuardHash
 } = require('./contracts');
 const {
   assertPositionImportDiskSpace
@@ -97,12 +97,14 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
            preflight_status AS preflightStatus,
            scanned_non_blank_rows AS scannedNonBlankRows,
            persisted_candidate_rows AS persistedCandidateRows,
+           filtered_rows AS filteredRows,
            collapsed_duplicate_rows AS collapsedDuplicateRows,
            reader_filtered_rows AS readerFilteredRows,
            invalid_rows AS invalidRows, visible_link_rows AS visibleLinkRows,
            hidden_link_rows AS hiddenLinkRows,
            derived_zero_source_rows AS derivedZeroSourceRows,
-           date_min AS dateMin, date_max AS dateMax, content_hash AS contentHash
+           date_min AS dateMin, date_max AS dateMax, content_hash AS contentHash,
+           filter_reason_json AS filterReasonJson
     FROM job_files
     WHERE file_index = ?
   `).get(fileIndex);
@@ -117,7 +119,11 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
   }
   const expected = {
     ...ledgerFile,
-    sourceSnapshot
+    sourceSnapshot,
+    filterReasonCounts: parseJson(
+      ledgerFile.filterReasonJson,
+      'sealed ledger filter reason counts'
+    )
   };
   if (expected.preflightStatus !== 'accepted'
       || path.resolve(expected.stagedPath) !== path.resolve(String(descriptor.archivePath || ''))
@@ -138,6 +144,7 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
         preflightStatus: expected.preflightStatus,
         scannedNonBlankRows: expected.scannedNonBlankRows,
         persistedCandidateRows: expected.persistedCandidateRows,
+        filteredRows: expected.filteredRows,
         collapsedDuplicateRows: expected.collapsedDuplicateRows,
         readerFilteredRows: expected.readerFilteredRows,
         invalidRows: expected.invalidRows,
@@ -147,6 +154,7 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
         dateMin: expected.dateMin,
         dateMax: expected.dateMax,
         contentHash: expected.contentHash,
+        filterReasonCounts: expected.filterReasonCounts,
         firstErrorCode: null,
         firstErrorMessage: null,
         firstErrorDetailLines: []
@@ -156,10 +164,49 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
   return expected;
 }
 
+async function verifyAnomalyReportEvidence(verifiedLedger, preflightReady) {
+  const manifestReport = verifiedLedger.manifest.anomalyReport || null;
+  const report = preflightReady && preflightReady.anomalyReport
+    ? preflightReady.anomalyReport
+    : null;
+  const filteredRows = verifiedLedger.manifest.files.reduce(
+    (total, file) => total + Number(file.filteredRows || 0),
+    0
+  );
+  if (filteredRows === 0) {
+    if (manifestReport || report) {
+      throw applyMismatch('sealed ledger 在无过滤行时错误地携带异常报告');
+    }
+    return null;
+  }
+  if (!manifestReport
+      || !report
+      || stableHash(manifestReport) !== stableHash(report)
+      || Number(report.filteredRowCount) !== filteredRows) {
+    throw applyMismatch('异常报告证据与 sealed ledger manifest 不一致');
+  }
+  try {
+    await assertStagedInputUnchangedAsync({
+      archivePath: report.filePath,
+      stagedSnapshot: report.sourceSnapshot,
+      stagedSha256: report.sha256,
+      stagedSizeBytes: report.sizeBytes
+    });
+  } catch (error) {
+    throw new PositionReconciliationError(
+      'position-anomaly-report-integrity-invalid',
+      '平盘来源异常报告缺失或内容校验失败，禁止写入数据库',
+      [error && error.message ? error.message : String(error)]
+    );
+  }
+  return report;
+}
+
 function assertSourceStatsMatch(actual, expected, sourceType, sheetName) {
   const fields = [
     ['scannedNonBlankRows', '扫描非空行数'],
     ['persistedCandidateRows', '持久化候选行数'],
+    ['filteredRows', '过滤行数'],
     ['collapsedDuplicateRows', '完全重复折叠行数'],
     ['readerFilteredRows', '读取过滤行数'],
     ['invalidRows', '非法行数'],
@@ -187,6 +234,10 @@ function assertSourceStatsMatch(actual, expected, sourceType, sheetName) {
     if ((actual[key] || null) !== (expected[key] || null)) {
       differences.push(`${label}与预检不一致`);
     }
+  }
+  if (stableHash(actual.filterReasonCounts || {})
+      !== stableHash(expected.filterReasonCounts || {})) {
+    differences.push('过滤原因统计与预检不一致');
   }
   if (differences.length > 0) {
     throw applyMismatch('链接原始表 apply 结果与预检不一致', differences);
@@ -250,10 +301,21 @@ function sourceStatements(db, ledgerDb) {
   return {
     ledgerOwner: ledgerDb.prepare(`
       SELECT business_key AS businessKey, row_guard_hash AS rowGuardHash,
+             disposition,
              first_file_index AS firstFileIndex,
              first_row_number AS firstRowNumber
       FROM source_seen_records
       WHERE source_type = ? AND row_hash = ?
+    `),
+    ledgerFilteredRow: ledgerDb.prepare(`
+      SELECT report_row_key AS reportRowKey, source_type AS sourceType,
+             business_key AS businessKey, recon_id AS reconId,
+             event_date AS eventDate, month_key AS monthKey,
+             error_code AS errorCode, error_reason AS errorReason,
+             row_hash AS rowHash, row_guard_hash AS rowGuardHash,
+             is_owner AS isOwner
+      FROM filtered_source_rows
+      WHERE source_file_index = ? AND source_row_number = ?
     `),
     claimApplyOwner: db.prepare(`
       INSERT INTO position_import_apply_seen_records(
@@ -274,6 +336,12 @@ function sourceStatements(db, ledgerDb) {
              raw_json AS rawJson
       FROM position_source_rows
       WHERE source_type = ? AND row_hash = ?
+    `),
+    findSourceByBusinessKey: db.prepare(`
+      SELECT id
+      FROM position_source_rows
+      WHERE source_type = ? AND business_key = ?
+      LIMIT 1
     `),
     upsertSource: db.prepare(`
       INSERT INTO position_source_rows(
@@ -302,6 +370,28 @@ function sourceStatements(db, ledgerDb) {
         source_row_number, ordinal, leg_index, recon_id, merchant_id,
         currency, amount, fund_type, status, event_date, visible, linked_json
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    resolveExactFiltered: db.prepare(`
+      UPDATE position_filtered_source_rows
+      SET resolved_at = CURRENT_TIMESTAMP,
+          resolution_reason = 'same-anomaly-reimported'
+      WHERE source_type = ? AND row_hash = ? AND resolved_at IS NULL
+    `),
+    resolveFilteredByBusinessKey: db.prepare(`
+      UPDATE position_filtered_source_rows
+      SET resolved_at = CURRENT_TIMESTAMP,
+          resolution_reason = 'normal-source-imported'
+      WHERE source_type = ? AND business_key = ? AND resolved_at IS NULL
+    `),
+    insertFiltered: db.prepare(`
+      INSERT INTO position_filtered_source_rows(
+        report_row_key, source_type, business_key, recon_id,
+        event_date, month_key, error_code, error_reason,
+        source_file_path, source_file_name, source_sheet, source_row_number,
+        row_hash, import_operation_token, archive_operation_key,
+        report_key, report_artifact_key, report_file_path, report_file_name,
+        report_sha256, report_size_bytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
   };
 }
@@ -320,7 +410,8 @@ async function applySourceFile({
   startedAt,
   ledgerSizeBytes,
   availableBytes,
-  sideDbPath
+  sideDbPath,
+  anomalyReport
 }) {
   const expected = expectedLedgerFile(verifiedLedger, descriptor);
   const sourceType = String(descriptor.sourceType || '');
@@ -335,7 +426,8 @@ async function applySourceFile({
   assertPositionImportDiskSpace({
     kind: 'source',
     sideDbPath,
-    rowCount: Number(expected.persistedCandidateRows),
+    rowCount:
+      Number(expected.persistedCandidateRows) + Number(expected.filteredRows),
     stagedBytes: Number(descriptor.stagedSizeBytes || 0),
     ledgerBytes: Number(ledgerSizeBytes || 0),
     availableBytes
@@ -392,8 +484,9 @@ async function applySourceFile({
           if (detectedSourceType !== sourceType) {
             throw applyMismatch('链接原始表 apply 期间来源类型发生变化');
           }
-          const validation = validateSourceRow(sourceType, row);
-          if (validation.errors.length > 0) {
+          const classification = classifySourceRow(sourceType, row);
+          const validation = classification.validation;
+          if (classification.disposition === 'invalid') {
             stats.invalidRows += 1;
             throw applyMismatch(
               `链接原始表 apply 期间出现非法行：第 ${excelRowNumber} 行`,
@@ -405,7 +498,8 @@ async function applySourceFile({
           const owner = statements.ledgerOwner.get(sourceType, rowHash);
           if (!owner
               || text(owner.businessKey) !== text(validation.businessKey)
-              || String(owner.rowGuardHash || '') !== rowGuardHash) {
+              || String(owner.rowGuardHash || '') !== rowGuardHash
+              || String(owner.disposition || '') !== classification.disposition) {
             throw new PositionReconciliationError(
               'position-source-record-hash-collision',
               `来源记录摘要无法与 sealed ledger 对齐：第 ${excelRowNumber} 行`
@@ -432,7 +526,80 @@ async function applySourceFile({
           }
           if (Number(owner.firstFileIndex) !== Number(descriptor.fileIndex)
               || Number(owner.firstRowNumber) !== Number(excelRowNumber)) {
+            if (classification.disposition === 'filtered') {
+              const duplicateFiltered = statements.ledgerFilteredRow.get(
+                descriptor.fileIndex,
+                excelRowNumber
+              );
+              if (!duplicateFiltered
+                  || Number(duplicateFiltered.isOwner) !== 0
+                  || duplicateFiltered.rowHash !== rowHash
+                  || duplicateFiltered.rowGuardHash !== rowGuardHash) {
+                throw applyMismatch(
+                  `过滤重复行无法与 sealed ledger 对齐：第 ${excelRowNumber} 行`
+                );
+              }
+            }
             stats.collapsedDuplicateRows += 1;
+            return;
+          }
+
+          if (classification.disposition === 'filtered') {
+            const filtered = statements.ledgerFilteredRow.get(
+              descriptor.fileIndex,
+              excelRowNumber
+            );
+            const filter = classification.filter;
+            if (!filtered
+                || Number(filtered.isOwner) !== 1
+                || filtered.sourceType !== sourceType
+                || filtered.businessKey !== validation.businessKey
+                || filtered.rowHash !== rowHash
+                || filtered.rowGuardHash !== rowGuardHash
+                || filtered.errorCode !== filter.code
+                || filtered.errorReason !== filter.reason
+                || !anomalyReport) {
+              throw applyMismatch(
+                `过滤行无法与 sealed ledger 或异常报告对齐：第 ${excelRowNumber} 行`
+              );
+            }
+            if (statements.findSourceByBusinessKey.get(
+              sourceType,
+              validation.businessKey
+            )) {
+              throw new PositionReconciliationError(
+                'position-filtered-key-collision',
+                `过滤行业务单号已存在正常记录，整份文件禁止写入：${descriptor.fileName}`,
+                [validation.businessKey]
+              );
+            }
+            statements.resolveExactFiltered.run(sourceType, rowHash);
+            statements.insertFiltered.run(
+              filtered.reportRowKey,
+              sourceType,
+              validation.businessKey,
+              filter.reconId,
+              validation.eventDate || null,
+              validation.monthKey || null,
+              filter.code,
+              filter.reason,
+              descriptor.filePath,
+              descriptor.fileName,
+              sheetName,
+              excelRowNumber,
+              rowHash,
+              operationToken,
+              `position:${operationToken}:position-reconciliation:source:prepare-import`,
+              anomalyReport.reportKey,
+              anomalyReport.artifactKey,
+              anomalyReport.filePath,
+              anomalyReport.fileName,
+              anomalyReport.sha256,
+              Number(anomalyReport.sizeBytes)
+            );
+            stats.filteredRows += 1;
+            stats.filterReasonCounts[filter.code] =
+              Number(stats.filterReasonCounts[filter.code] || 0) + 1;
             return;
           }
 
@@ -455,6 +622,10 @@ async function applySourceFile({
           if (!Number.isSafeInteger(sourceRowId) || sourceRowId < 1) {
             throw applyMismatch('来源记录 upsert 未返回有效 source_row_id');
           }
+          statements.resolveFilteredByBusinessKey.run(
+            sourceType,
+            validation.businessKey
+          );
           statements.deleteLinks.run(sourceRowId);
           const record = {
             sourceType,
@@ -539,6 +710,11 @@ async function applySourceFile({
         sourceName: SOURCE_DEFINITIONS[sourceType].sourceName,
         linkedName: SOURCE_DEFINITIONS[sourceType].linkedName,
         rowCount: stats.persistedCandidateRows,
+        physicalRowCount: stats.scannedNonBlankRows,
+        filteredRowCount: stats.filteredRows,
+        filterReasonCounts: stats.filterReasonCounts,
+        generatedLinkRowCount:
+          Number(stats.visibleLinkRows) + Number(stats.hiddenLinkRows),
         linkedRowCount: sourceSummary.linkedRowCount,
         collapsedDuplicateCount: stats.collapsedDuplicateRows,
         contentHash: stats.contentHash
@@ -610,6 +786,16 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     });
   }
   const verifiedLedger = await verifySealedLedger(preflightReady.ledgerEvidence);
+  let anomalyReport;
+  try {
+    anomalyReport = await verifyAnomalyReportEvidence(
+      verifiedLedger,
+      preflightReady
+    );
+  } catch (error) {
+    verifiedLedger.db.close();
+    throw error;
+  }
   const db = new DatabaseSync(path.resolve(String(input.sideDbPath || '')));
   let checkpoint = input.grant.baseCheckpoint;
   const appliedByIndex = new Map();
@@ -648,7 +834,8 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         startedAt,
         ledgerSizeBytes: preflightReady.ledgerEvidence.ledgerSizeBytes,
         availableBytes: input.availableBytes,
-        sideDbPath: input.sideDbPath
+        sideDbPath: input.sideDbPath,
+        anomalyReport
       });
       checkpoint = applied.nextCheckpoint;
       appliedByIndex.set(Number(descriptor.fileIndex), applied);
@@ -693,9 +880,14 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         sourceName: applied.sourceName,
         linkedName: applied.linkedName,
         rowCount: applied.rowCount,
+        physicalRowCount: applied.physicalRowCount,
+        filteredRowCount: applied.filteredRowCount,
+        filterReasonCounts: applied.filterReasonCounts,
+        generatedLinkRowCount: applied.generatedLinkRowCount,
         linkedRowCount: applied.linkedRowCount,
         collapsedDuplicateCount: applied.collapsedDuplicateCount,
         contentHash: applied.contentHash,
+        anomalyReport: applied.filteredRowCount > 0 ? anomalyReport : null,
         applied: true
       };
     });

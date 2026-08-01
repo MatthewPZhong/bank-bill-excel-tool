@@ -181,7 +181,10 @@ test.describe('v3.1.3 旧平盘导入 characterization', () => {
   test('真实 XLSX shared/inline/formula/rich-text/1904 日期系统保持旧 SheetJS 类型契约', (t) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-char-cell-forms-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const expectedDate = new Date(2026, 0, 2);
+    // SheetJS 0.18.x serializes a JS Date through the host's historical local
+    // timezone offset and may round the reconstructed timestamp by 1ms. Noon
+    // keeps this type-contract fixture away from an unrelated day boundary.
+    const expectedDate = new Date(2026, 0, 2, 12);
 
     for (const bookSST of [false, true]) {
       const workbook = XLSX.utils.book_new();
@@ -212,7 +215,7 @@ test.describe('v3.1.3 旧平盘导入 characterization', () => {
       assert.equal(typeof values[3], 'number');
       assert.equal(values[4], 'Rich');
       assert.ok(values[5] instanceof Date);
-      assert.equal(values[5].getTime(), expectedDate.getTime());
+      assert.ok(Math.abs(values[5].getTime() - expectedDate.getTime()) <= 1);
       assert.equal(values[6], '001234567890123456');
       assert.equal(values[7], 0);
       assert.equal(Object.is(values[7], -0), false);
@@ -223,7 +226,9 @@ test.describe('v3.1.3 旧平盘导入 characterization', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-char-bank-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
     const filePath = path.join(dir, 'bank.xlsx');
-    const excelDate = new Date(2026, 6, 20);
+    // Use a non-boundary time so this test characterizes bank row/date/hash
+    // behavior instead of SheetJS's host-timezone Excel epoch residue.
+    const excelDate = new Date(2026, 6, 20, 12);
     writeWorkbook(filePath, [
       { name: '说明', headers: ['说明'], rows: [{ 说明: '忽略' }] },
       {

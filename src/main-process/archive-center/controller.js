@@ -212,6 +212,7 @@ class ArchiveCenterController {
   _trackedFilePayload(file, sourceOperation) {
     const direction = file.role === 'output' ? 'output' : 'input';
     return {
+      ...file,
       filePath: file.filePath,
       direction,
       role: file.role || direction,
@@ -271,6 +272,7 @@ class ArchiveCenterController {
           : `${sourceOperation}:${crypto.randomUUID()}`
       ),
       businessStatus: 'success',
+      locked: payload.locked === true,
       retentionDays: this.getRetentionDays(),
       metadata,
       sourceOperation,
@@ -557,6 +559,7 @@ class ArchiveCenterController {
     return {
       ...visibleArtifact,
       metadata: visibleMetadata,
+      role: visibleMetadata.displayRole || visibleArtifact.role,
       fileRefId: artifact.id,
       fileName: artifact.originalName,
       direction: artifact.direction === 'output' ? '输出' : '输入',

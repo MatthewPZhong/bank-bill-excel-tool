@@ -284,7 +284,8 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
     runKeys = [],
     metadata = {},
     keepOutputOpen = false,
-    rememberActive = true
+    rememberActive = true,
+    locked = false
   } = {}) {
     const uniqueFiles = attachSourceSnapshots(dedupeFileSpecs(files));
     const created = await sink.createBatch({
@@ -293,7 +294,8 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       moduleName: module.name,
       sourceOperation: operation,
       files: uniqueFiles,
-      metadata
+      metadata,
+      locked
     });
     const batchId = batchIdFromResult(created);
     if (!batchId) {
@@ -384,7 +386,8 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
       metadata,
       runKeys,
       keepOutputOpen: options.keepOutputOpen === true,
-      rememberActive: options.rememberActive !== false
+      rememberActive: options.rememberActive !== false,
+      locked: options.locked === true
     });
     return { handled: true, ...created };
   }
@@ -718,14 +721,19 @@ function createArchiveOperationTracker({ sink, onWarning = null } = {}) {
     }
     if (channel === 'position-reconciliation:source:prepare-import') {
       if (!isSuccessful(result)) return { handled: false };
+      const anomalyOutputs = runtime.outputFiles && runtime.outputFiles.length > 0
+        ? runtime.outputFiles
+        : (runtime.outputPaths || []);
       return archiveImmediate(
         MODULES.positionLink,
         channel,
         runtime.inputFiles && runtime.inputFiles.length > 0
           ? runtime.inputFiles
           : (runtime.inputPaths || []),
+        anomalyOutputs,
+        runtime.metadata || {},
         [],
-        runtime.metadata || {}
+        { locked: anomalyOutputs.length > 0 }
       );
     }
     if (channel === 'position-reconciliation:source:apply-import') {

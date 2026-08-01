@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const { DatabaseSync } = require('node:sqlite');
+const ExcelJS = require('exceljs');
 const XLSX = require('xlsx');
 
 const {
@@ -1348,7 +1349,9 @@ test.describe('v3.1.3 position streaming preflight', () => {
         },
         bankRow({
           BizId: 'BANK-PRB-2',
-          BillDate: new Date(2026, 7, 1),
+          // 本用例验证银行批次原子替换，不验证 SheetJS 在部分历史时区下写 Date
+          // 产生的 Excel 纪元秒级余数；使用业务等价的纯日期文本避免月份边界受宿主时区影响。
+          BillDate: '2026-08-01',
           Channel: 'JPM',
           Currency: 'EUR'
         })
@@ -2001,5 +2004,402 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const actual = await hashFileSha256Async(result.ledgerEvidence.ledgerPath);
     assert.equal(actual.sha256, result.ledgerEvidence.ledgerSha256);
     assert.equal(actual.sizeBytes, result.ledgerEvidence.ledgerSizeBytes);
+  });
+
+  test('3.1.4 白名单异常完整扫描、生成同字节报告并与正常行同文件事务提交', async (t) => {
+    const dir = tempDir(t, 'position-v314-filter-apply-');
+    const checkpoint = {
+      identity: 'v314-filter-identity',
+      generation: 0,
+      token: 'v314-filter-token'
+    };
+    let store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filtered = {
+      ...base,
+      调拨单号: 'FT-FILTERED-1',
+      调拨状态: '付款失败',
+      渠道流水号: 'RID-FILTERED-1',
+      付款金额: ''
+    };
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [
+        { ...base, 调拨单号: 'FT-VALID-1' },
+        filtered,
+        filtered,
+        { ...base, 调拨单号: 'FT-VALID-2', 渠道流水号: 'RID-VALID-2' }
+      ],
+      'v314-filter.xlsx'
+    );
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [filePath],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'v314-filter-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: checkpoint
+      })
+    }).promise;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.results[0].physicalRowCount, 4);
+    assert.equal(result.results[0].rowCount, 2);
+    assert.equal(result.results[0].filteredRowCount, 1);
+    assert.equal(result.results[0].collapsedDuplicateCount, 1);
+    assert.equal(result.results[0].generatedLinkRowCount, 4);
+    assert.equal(result.anomalyReport.filteredRowCount, 1);
+    assert.ok(fs.existsSync(result.anomalyReport.filePath));
+    const reportHash = await hashFileSha256Async(result.anomalyReport.filePath);
+    assert.equal(reportHash.sha256, result.anomalyReport.sha256);
+    assert.equal(reportHash.sizeBytes, result.anomalyReport.sizeBytes);
+
+    const reportWorkbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
+    assert.deepEqual(reportWorkbook.SheetNames, ['异常汇总', '调拨异常明细']);
+    const detailRows = XLSX.utils.sheet_to_json(
+      reportWorkbook.Sheets['调拨异常明细'],
+      { defval: '', raw: true }
+    );
+    assert.equal(detailRows.length, 1);
+    assert.equal(detailRows[0].调拨单号, 'FT-FILTERED-1');
+    assert.equal(detailRows[0].Excel行号, 3);
+
+    const styledReport = new ExcelJS.Workbook();
+    await styledReport.xlsx.readFile(result.anomalyReport.filePath);
+    const summarySheet = styledReport.getWorksheet('异常汇总');
+    const detailSheet = styledReport.getWorksheet('调拨异常明细');
+    assert.equal(summarySheet.getRow(1).height, 30);
+    assert.equal(summarySheet.getRow(1).getCell(1).alignment.wrapText, true);
+    assert.equal(summarySheet.getColumn(1).width, 44);
+    assert.equal(summarySheet.getColumn(8).width, 48);
+    assert.equal(summarySheet.getRow(2).getCell(8).alignment.wrapText, true);
+    assert.equal(detailSheet.getColumn(9).width, 48);
+    assert.equal(detailSheet.getRow(2).getCell(9).alignment.wrapText, true);
+    assert.equal(detailSheet.getColumn(12).numFmt, '@');
+    assert.deepEqual(detailSheet.getCell('L2').value, {
+      richText: [{ text: 'FT-FILTERED-1' }]
+    });
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count,
+      2
+    );
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count,
+      4
+    );
+    const tombstone = db.prepare(`
+      SELECT business_key AS businessKey, error_code AS errorCode,
+             report_sha256 AS reportSha256, resolved_at AS resolvedAt
+      FROM position_filtered_source_rows
+    `).get();
+    assert.equal(tombstone.businessKey, 'FT-FILTERED-1');
+    assert.equal(tombstone.errorCode, 'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE');
+    assert.equal(tombstone.reportSha256, result.anomalyReport.sha256);
+    assert.equal(tombstone.resolvedAt, null);
+    db.close();
+  });
+
+  test('3.1.4 全量过滤文件仍提交墓碑但不生成来源与链接候选', async (t) => {
+    const dir = tempDir(t, 'position-v314-all-filtered-');
+    const checkpoint = {
+      identity: 'v314-all-filtered-identity',
+      generation: 0,
+      token: 'v314-all-filtered-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const base = sourceRows()[SOURCE_TYPES.TEST_PAYMENT];
+    const filePath = sourceFile(
+      dir,
+      SOURCE_TYPES.TEST_PAYMENT,
+      [
+        { ...base, 付款单号: 'TEST-ALL-FILTERED-1', 源金额: '' },
+        { ...base, 付款单号: 'TEST-ALL-FILTERED-2', 源币种: '' }
+      ],
+      'all-filtered.xlsx'
+    );
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [filePath],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'v314-all-filtered-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: checkpoint
+      })
+    }).promise;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.results[0].physicalRowCount, 2);
+    assert.equal(result.results[0].rowCount, 0);
+    assert.equal(result.results[0].filteredRowCount, 2);
+    assert.equal(result.results[0].generatedLinkRowCount, 0);
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count, 0);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
+      2
+    );
+    db.close();
+
+    const reimport = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [filePath],
+      userDataDir: path.join(dir, 'worker-reimport'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'v314-all-filtered-reimport',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: result.checkpoint
+      })
+    }).promise;
+    const afterReimport = new DatabaseSync(sideDbPath, { readOnly: true });
+    assert.equal(
+      afterReimport.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
+      4
+    );
+    assert.equal(
+      afterReimport.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_filtered_source_rows
+        WHERE resolved_at IS NULL
+      `).get().count,
+      2,
+      '完全相同异常重导后每个精确异常仍只能有一条活动墓碑'
+    );
+    afterReimport.close();
+
+    const validPath = sourceFile(
+      dir,
+      SOURCE_TYPES.TEST_PAYMENT,
+      [
+        { ...base, 付款单号: 'TEST-ALL-FILTERED-1' },
+        { ...base, 付款单号: 'TEST-ALL-FILTERED-2' }
+      ],
+      'all-filtered-corrected.xlsx'
+    );
+    await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [validPath],
+      userDataDir: path.join(dir, 'worker-corrected'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'v314-all-filtered-corrected',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: reimport.checkpoint
+      })
+    }).promise;
+    const afterCorrected = new DatabaseSync(sideDbPath, { readOnly: true });
+    assert.equal(
+      afterCorrected.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_filtered_source_rows
+        WHERE resolved_at IS NULL
+      `).get().count,
+      0
+    );
+    assert.equal(
+      afterCorrected.prepare(`
+        SELECT COUNT(*) AS count
+        FROM position_filtered_source_rows
+        WHERE resolution_reason = 'normal-source-imported'
+      `).get().count,
+      2
+    );
+    assert.equal(afterCorrected.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 2);
+    afterCorrected.close();
+  });
+
+  test('3.1.4 正常行与过滤行业务键碰撞时结果不受文件选择顺序影响', async (t) => {
+    const dir = tempDir(t, 'position-v314-filter-collision-');
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const businessKey = 'FT-COLLISION-1';
+    const validPath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{ ...base, 调拨单号: businessKey }],
+      'valid.xlsx'
+    );
+    const filteredPath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: businessKey,
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      'filtered.xlsx'
+    );
+
+    for (const [index, files] of [
+      [1, [filteredPath, validPath]],
+      [2, [validPath, filteredPath]]
+    ]) {
+      const result = await runPositionImportPreflight({
+        jobId: `v314-collision-order-${index}`,
+        kind: 'source',
+        files,
+        userDataDir: path.join(dir, `worker-${index}`)
+      });
+      const byName = new Map(result.orderedFileResults.map((item) => [item.fileName, item]));
+      assert.equal(byName.get('valid.xlsx').status, 'ok');
+      assert.equal(byName.get('valid.xlsx').rowCount, 1);
+      assert.equal(byName.get('filtered.xlsx').status, 'failed');
+      assert.equal(byName.get('filtered.xlsx').code, 'position-filtered-key-collision');
+      assert.equal(result.anomalyReport, null);
+    }
+  });
+
+  test('3.1.4 异常报告失败只拒绝含过滤行文件，普通文件继续预检提交', async (t) => {
+    const dir = tempDir(t, 'position-v314-report-failure-');
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filteredPath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: 'FT-REPORT-FAIL-FILTERED',
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      'filtered-report-failure.xlsx'
+    );
+    const validPath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{ ...base, 调拨单号: 'FT-REPORT-FAIL-VALID' }],
+      'valid-after-report-failure.xlsx'
+    );
+    const result = await runPositionImportPreflight({
+      jobId: 'v314-report-failure',
+      kind: 'source',
+      files: [filteredPath, validPath],
+      userDataDir: path.join(dir, 'worker'),
+      writeAnomalyReport: async () => {
+        throw new Error('injected anomaly writer failure');
+      }
+    });
+    const byName = new Map(result.orderedFileResults.map((item) => [item.fileName, item]));
+    assert.equal(byName.get('filtered-report-failure.xlsx').status, 'failed');
+    assert.equal(
+      byName.get('filtered-report-failure.xlsx').code,
+      'position-anomaly-report-failed'
+    );
+    assert.equal(byName.get('valid-after-report-failure.xlsx').status, 'ok');
+    assert.equal(result.acceptedOrdinaryInputFiles.length, 1);
+    assert.equal(result.acceptedOrdinaryInputFiles[0].fileName, 'valid-after-report-failure.xlsx');
+    assert.equal(result.anomalyReport, null);
+  });
+
+  test('3.1.4 过滤行业务键已存在正常记录时整文件拒绝且不删除旧记录', async (t) => {
+    const dir = tempDir(t, 'position-v314-existing-collision-');
+    const checkpoint = {
+      identity: 'v314-existing-collision-identity',
+      generation: 0,
+      token: 'v314-existing-collision-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.db.prepare(`
+      INSERT INTO position_source_rows(
+        source_type, business_key, event_date, month_key,
+        source_file_path, source_file_name, source_sheet, source_row_number,
+        row_hash, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      SOURCE_TYPES.FUND_TRANSFER,
+      'FT-EXISTING-COLLISION',
+      '2026-07-20',
+      '2026-07',
+      '/tmp/existing.xlsx',
+      'existing.xlsx',
+      'Sheet1',
+      2,
+      'existing-row-hash',
+      '{}'
+    );
+    store.close();
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const filteredPath = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: 'FT-EXISTING-COLLISION',
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      'filtered-existing-collision.xlsx'
+    );
+    const result = await runPositionImportPreflight({
+      jobId: 'v314-existing-collision',
+      kind: 'source',
+      files: [filteredPath],
+      userDataDir: path.join(dir, 'worker'),
+      sideDbPath
+    });
+    assert.equal(result.orderedFileResults[0].status, 'failed');
+    assert.equal(result.orderedFileResults[0].code, 'position-filtered-key-collision');
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 1);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM position_filtered_source_rows').get().count,
+      0
+    );
+    db.close();
   });
 });

@@ -39,6 +39,7 @@ const LEDGER_SCHEMA = `
     preflight_status TEXT NOT NULL,
     scanned_non_blank_rows INTEGER NOT NULL DEFAULT 0,
     persisted_candidate_rows INTEGER NOT NULL DEFAULT 0,
+    filtered_rows INTEGER NOT NULL DEFAULT 0,
     collapsed_duplicate_rows INTEGER NOT NULL DEFAULT 0,
     reader_filtered_rows INTEGER NOT NULL DEFAULT 0,
     invalid_rows INTEGER NOT NULL DEFAULT 0,
@@ -48,6 +49,7 @@ const LEDGER_SCHEMA = `
     date_min TEXT,
     date_max TEXT,
     content_hash TEXT,
+    filter_reason_json TEXT NOT NULL DEFAULT '{}',
     first_error_code TEXT,
     first_error_message TEXT,
     first_error_detail_json TEXT NOT NULL DEFAULT '[]'
@@ -58,12 +60,36 @@ const LEDGER_SCHEMA = `
     row_hash TEXT NOT NULL,
     row_guard_hash TEXT NOT NULL,
     business_key TEXT NOT NULL,
+    disposition TEXT NOT NULL,
     first_file_index INTEGER NOT NULL,
     first_row_number INTEGER NOT NULL,
     PRIMARY KEY(source_type, row_hash)
   );
   CREATE INDEX idx_source_seen_business_key
-    ON source_seen_records(source_type, business_key);
+    ON source_seen_records(source_type, business_key, disposition);
+
+  CREATE TABLE filtered_source_rows (
+    report_row_key TEXT PRIMARY KEY,
+    source_type TEXT NOT NULL,
+    business_key TEXT NOT NULL,
+    recon_id TEXT NOT NULL DEFAULT '',
+    event_date TEXT,
+    month_key TEXT,
+    error_code TEXT NOT NULL,
+    error_reason TEXT NOT NULL,
+    source_file_index INTEGER NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    row_hash TEXT NOT NULL,
+    row_guard_hash TEXT NOT NULL,
+    is_owner INTEGER NOT NULL,
+    raw_json TEXT NOT NULL,
+    UNIQUE(source_file_index, source_row_number),
+    FOREIGN KEY(source_file_index) REFERENCES job_files(file_index)
+  );
+  CREATE INDEX idx_filtered_source_business_key
+    ON filtered_source_rows(source_type, business_key, source_file_index);
+  CREATE INDEX idx_filtered_source_month
+    ON filtered_source_rows(source_type, month_key, source_file_index);
 
   CREATE TABLE bank_seen_biz_ids (
     biz_id TEXT PRIMARY KEY,
@@ -94,6 +120,7 @@ const LEDGER_SCHEMA = `
 const FILE_STAT_FIELDS = Object.freeze([
   'scannedNonBlankRows',
   'persistedCandidateRows',
+  'filteredRows',
   'collapsedDuplicateRows',
   'readerFilteredRows',
   'invalidRows',
@@ -105,6 +132,7 @@ const FILE_STAT_FIELDS = Object.freeze([
 const FILE_STAT_COLUMNS = Object.freeze({
   scannedNonBlankRows: 'scanned_non_blank_rows',
   persistedCandidateRows: 'persisted_candidate_rows',
+  filteredRows: 'filtered_rows',
   collapsedDuplicateRows: 'collapsed_duplicate_rows',
   readerFilteredRows: 'reader_filtered_rows',
   invalidRows: 'invalid_rows',
@@ -267,12 +295,14 @@ class PositionImportLedger {
     rowHash,
     rowGuardHash,
     fileIndex,
-    rowNumber
+    rowNumber,
+    disposition = 'accepted'
   }) {
     this._assertOpen();
     const index = normalizedFileIndex(fileIndex);
     const existing = this.db.prepare(`
       SELECT business_key AS businessKey, row_guard_hash AS rowGuardHash,
+             disposition,
              first_file_index AS firstFileIndex,
              first_row_number AS firstRowNumber
       FROM source_seen_records
@@ -281,21 +311,23 @@ class PositionImportLedger {
     if (!existing) {
       this.db.prepare(`
         INSERT INTO source_seen_records(
-          source_type, row_hash, row_guard_hash, business_key,
+          source_type, row_hash, row_guard_hash, business_key, disposition,
           first_file_index, first_row_number
-        ) VALUES (?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
       `).run(
         String(sourceType),
         String(rowHash),
         String(rowGuardHash),
         String(businessKey),
+        String(disposition),
         index,
         Number(rowNumber)
       );
       return { status: 'accepted' };
     }
     if (existing.businessKey !== String(businessKey)
-        || existing.rowGuardHash !== String(rowGuardHash)) {
+        || existing.rowGuardHash !== String(rowGuardHash)
+        || existing.disposition !== String(disposition)) {
       return {
         status: 'hash-collision',
         firstFileIndex: Number(existing.firstFileIndex),
@@ -307,6 +339,115 @@ class PositionImportLedger {
       firstFileIndex: Number(existing.firstFileIndex),
       firstRowNumber: Number(existing.firstRowNumber)
     };
+  }
+
+  recordFilteredRow(input = {}) {
+    this._assertOpen();
+    const fileIndex = normalizedFileIndex(input.fileIndex);
+    if (this.activeFileIndex !== fileIndex) {
+      throw new PositionImportLedgerError('过滤行不属于当前文件 savepoint');
+    }
+    this.db.prepare(`
+      INSERT INTO filtered_source_rows(
+        report_row_key, source_type, business_key, recon_id,
+        event_date, month_key, error_code, error_reason,
+        source_file_index, source_row_number, row_hash, row_guard_hash,
+        is_owner, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(input.reportRowKey || ''),
+      String(input.sourceType || ''),
+      String(input.businessKey || ''),
+      String(input.reconId || ''),
+      input.eventDate || null,
+      input.monthKey || null,
+      String(input.errorCode || ''),
+      String(input.errorReason || ''),
+      fileIndex,
+      Number(input.rowNumber),
+      String(input.rowHash || ''),
+      String(input.rowGuardHash || ''),
+      input.isOwner === false ? 0 : 1,
+      json(input.row || {})
+    );
+  }
+
+  *iterateFilteredRows({ sourceTypes = [] } = {}) {
+    this._assertOpen();
+    const normalizedTypes = Array.isArray(sourceTypes)
+      ? sourceTypes.map(String).filter(Boolean)
+      : [];
+    const where = normalizedTypes.length > 0
+      ? `WHERE f.is_owner = 1 AND f.source_type IN (${normalizedTypes.map(() => '?').join(', ')})`
+      : 'WHERE f.is_owner = 1';
+    for (const row of this.db.prepare(`
+      SELECT f.report_row_key AS reportRowKey,
+             f.source_type AS sourceType, f.business_key AS businessKey,
+             f.recon_id AS reconId, f.event_date AS eventDate,
+             f.month_key AS monthKey, f.error_code AS errorCode,
+             f.error_reason AS errorReason,
+             f.source_file_index AS fileIndex,
+             f.source_row_number AS rowNumber,
+             f.row_hash AS rowHash, f.row_guard_hash AS rowGuardHash,
+             f.raw_json AS rawJson,
+             j.original_name AS fileName, j.sheet_name AS sheetName
+      FROM filtered_source_rows f
+      INNER JOIN job_files j ON j.file_index = f.source_file_index
+      ${where}
+      ORDER BY f.source_file_index, f.source_row_number
+    `).iterate(...normalizedTypes)) {
+      yield {
+        ...row,
+        row: parsedJson(row.rawJson, 'filtered source raw row')
+      };
+    }
+  }
+
+  listFilteredRows(options = {}) {
+    return [...this.iterateFilteredRows(options)];
+  }
+
+  listFilteredFileIndexes() {
+    this._assertOpen();
+    return this.db.prepare(`
+      SELECT DISTINCT source_file_index AS fileIndex
+      FROM filtered_source_rows
+      ORDER BY source_file_index
+    `).all().map((row) => Number(row.fileIndex));
+  }
+
+  listFilteredBatchCollisions() {
+    this._assertOpen();
+    return this.db.prepare(`
+      SELECT DISTINCT filtered.source_file_index AS fileIndex,
+             filtered.source_type AS sourceType,
+             filtered.business_key AS businessKey,
+             accepted.first_file_index AS acceptedFileIndex,
+             accepted.first_row_number AS acceptedRowNumber
+      FROM filtered_source_rows filtered
+      INNER JOIN source_seen_records accepted
+        ON accepted.source_type = filtered.source_type
+       AND accepted.business_key = filtered.business_key
+       AND accepted.disposition = 'accepted'
+      ORDER BY filtered.source_file_index, filtered.source_type, filtered.business_key
+    `).all();
+  }
+
+  *iterateFilteredBusinessKeys() {
+    this._assertOpen();
+    yield* this.db.prepare(`
+      SELECT source_type AS sourceType, business_key AS businessKey,
+             source_file_index AS fileIndex,
+             MIN(source_row_number) AS rowNumber
+      FROM filtered_source_rows
+      GROUP BY source_type, business_key, source_file_index
+      ORDER BY source_type, business_key, source_file_index
+    `).iterate();
+  }
+
+  setAnomalyReport(report) {
+    this._assertOpen();
+    this.setMeta('anomalyReport', report || null);
   }
 
   claimBankBizId({ bizId, channel, monthKey, fileIndex, rowNumber }) {
@@ -368,10 +509,10 @@ class PositionImportLedger {
     this.db.prepare(`
       UPDATE job_files
       SET source_type = ?, sheet_name = ?, preflight_status = 'accepted',
-          scanned_non_blank_rows = ?, persisted_candidate_rows = ?,
+          scanned_non_blank_rows = ?, persisted_candidate_rows = ?, filtered_rows = ?,
           collapsed_duplicate_rows = ?, reader_filtered_rows = ?, invalid_rows = ?,
           visible_link_rows = ?, hidden_link_rows = ?, derived_zero_source_rows = ?,
-          date_min = ?, date_max = ?, content_hash = ?,
+          date_min = ?, date_max = ?, content_hash = ?, filter_reason_json = ?,
           first_error_code = NULL, first_error_message = NULL,
           first_error_detail_json = '[]'
       WHERE file_index = ?
@@ -380,6 +521,7 @@ class PositionImportLedger {
       String(input.sheetName || ''),
       stats.scannedNonBlankRows,
       stats.persistedCandidateRows,
+      stats.filteredRows,
       stats.collapsedDuplicateRows,
       stats.readerFilteredRows,
       stats.invalidRows,
@@ -389,6 +531,7 @@ class PositionImportLedger {
       input.dateMin || null,
       input.dateMax || null,
       input.contentHash || null,
+      json(input.filterReasonCounts || {}),
       index
     );
     this.db.exec(`RELEASE ${savepointName(index)}`);
@@ -452,12 +595,14 @@ class PositionImportLedger {
              preflight_status AS preflightStatus,
              scanned_non_blank_rows AS scannedNonBlankRows,
              persisted_candidate_rows AS persistedCandidateRows,
+             filtered_rows AS filteredRows,
              collapsed_duplicate_rows AS collapsedDuplicateRows,
              reader_filtered_rows AS readerFilteredRows,
              invalid_rows AS invalidRows, visible_link_rows AS visibleLinkRows,
              hidden_link_rows AS hiddenLinkRows,
              derived_zero_source_rows AS derivedZeroSourceRows,
              date_min AS dateMin, date_max AS dateMax, content_hash AS contentHash,
+             filter_reason_json AS filterReasonJson,
              first_error_code AS firstErrorCode,
              first_error_message AS firstErrorMessage,
              first_error_detail_json AS firstErrorDetailJson
@@ -466,6 +611,7 @@ class PositionImportLedger {
     `).all().map((row) => ({
       ...row,
       sourceSnapshot: parsedJson(row.sourceSnapshotJson, 'source snapshot'),
+      filterReasonCounts: parsedJson(row.filterReasonJson, 'filter reason counts'),
       firstErrorDetailLines: parsedJson(row.firstErrorDetailJson, 'first error detail')
     }));
   }
@@ -497,6 +643,7 @@ class PositionImportLedger {
         preflightStatus: file.preflightStatus,
         scannedNonBlankRows: file.scannedNonBlankRows,
         persistedCandidateRows: file.persistedCandidateRows,
+        filteredRows: file.filteredRows,
         collapsedDuplicateRows: file.collapsedDuplicateRows,
         readerFilteredRows: file.readerFilteredRows,
         invalidRows: file.invalidRows,
@@ -506,11 +653,15 @@ class PositionImportLedger {
         dateMin: file.dateMin,
         dateMax: file.dateMax,
         contentHash: file.contentHash,
+        filterReasonCounts: file.filterReasonCounts,
         firstErrorCode: file.firstErrorCode,
         firstErrorMessage: file.firstErrorMessage,
         firstErrorDetailLines: file.firstErrorDetailLines
       })),
-      bankScopes: this.kind === 'bank' ? this.listBankScopes() : []
+      bankScopes: this.kind === 'bank' ? this.listBankScopes() : [],
+      anomalyReport: this.getMeta('anomalyReport')
+        ? parsedJson(this.getMeta('anomalyReport'), 'anomaly report')
+        : null
     };
   }
 
@@ -526,7 +677,11 @@ class PositionImportLedger {
           WHEN preflight_status = 'accepted' AND source_type <> 'bank-account'
             THEN persisted_candidate_rows
           ELSE 0
-        END), 0) AS keyedSourceRows
+        END), 0) AS keyedSourceRows,
+        COALESCE(SUM(CASE
+          WHEN preflight_status = 'accepted' THEN filtered_rows
+          ELSE 0
+        END), 0) AS filteredRows
       FROM job_files
     `).get();
     if (this.kind === 'source') {
@@ -534,13 +689,45 @@ class PositionImportLedger {
         SELECT COUNT(*) AS rowCount
         FROM source_seen_records
       `).get();
-      if (Number(seen.rowCount) !== Number(persisted.keyedSourceRows)) {
+      const filtered = this.db.prepare(`
+        SELECT COUNT(*) AS rowCount
+        FROM filtered_source_rows
+        WHERE is_owner = 1
+      `).get();
+      const expectedSeen = Number(persisted.keyedSourceRows) + Number(persisted.filteredRows);
+      if (Number(seen.rowCount) !== expectedSeen
+          || Number(filtered.rowCount) !== Number(persisted.filteredRows)) {
         throw new PositionImportLedgerError(
           'job ledger 来源记录计数不一致',
           [
             `来源身份数=${Number(seen.rowCount)}`,
-            `文件持久化候选行数=${Number(persisted.keyedSourceRows)}`
+            `文件持久化候选行数=${Number(persisted.keyedSourceRows)}`,
+            `过滤身份数=${Number(filtered.rowCount)}`,
+            `文件过滤行数=${Number(persisted.filteredRows)}`
           ]
+        );
+      }
+      const conservationFailures = this.db.prepare(`
+        SELECT original_name AS fileName,
+               scanned_non_blank_rows AS scannedRows,
+               persisted_candidate_rows AS acceptedRows,
+               filtered_rows AS filteredRows,
+               collapsed_duplicate_rows AS duplicateRows,
+               reader_filtered_rows AS readerFilteredRows
+        FROM job_files
+        WHERE preflight_status = 'accepted'
+          AND scanned_non_blank_rows <>
+            persisted_candidate_rows + filtered_rows
+            + collapsed_duplicate_rows + reader_filtered_rows
+        ORDER BY file_index
+      `).all();
+      if (conservationFailures.length > 0) {
+        throw new PositionImportLedgerError(
+          'job ledger 文件行数不守恒',
+          conservationFailures.slice(0, 20).map((row) => (
+            `${row.fileName}：扫描=${row.scannedRows}，正常=${row.acceptedRows}，` +
+            `过滤=${row.filteredRows}，重复=${row.duplicateRows}，读取过滤=${row.readerFilteredRows}`
+          ))
         );
       }
       return;

@@ -59,6 +59,11 @@ const {
 const {
   positionCheckpointsEqual
 } = require('./side-db-mutation');
+const {
+  copyVerifiedAnomalyReport,
+  verifyAnomalyReportFile,
+  writeRunFilteredSourcesWorkbook
+} = require('./filtered-source-report');
 
 const FUND_TYPE_PAIR_BY_VALUE = new Map();
 const SOURCE_BY_FUND_TYPE = new Map(Object.entries(SOURCE_TYPE_BY_FUND_TYPE));
@@ -193,6 +198,12 @@ function formatTimestamp(date = new Date()) {
   ].join('');
 }
 
+const EXCEL_EPOCH_LOCAL_OFFSET_REMAINDER_MS = (() => {
+  const localEpoch = new Date(1899, 11, 30).getTime();
+  const historicalOffsetMs = Date.UTC(1899, 11, 30) - localEpoch;
+  return historicalOffsetMs - (Math.trunc(historicalOffsetMs / 60000) * 60000);
+})();
+
 function stagedInputArchiveFile(file, sourceType = '') {
   return {
     filePath: path.resolve(String(file && (file.archivePath || file.filePath) || '')),
@@ -213,10 +224,13 @@ function sameExcelDateTime(left, right) {
   if (Math.abs(leftTime - rightTime) <= 2) return true;
 
   // ExcelJS 写入后由 SheetJS 读取时，日期序列会按本地时区再偏移一次。
-  // left 是回导值；只接受消除该固定时区偏移后与原值相同的情况。
-  // Excel 浮点日期序列在秒级值上可能产生 1ms 误差，因此仅容忍 2ms。
+  // 个别时区在 Excel 纪元仍使用含秒的地方时；getTimezoneOffset 只有分钟精度，
+  // 因此还需补回纪元历史偏移的秒级余数。除此之外仍只容忍 2ms 浮点误差。
   return Math.abs(
-    leftTime - (left.getTimezoneOffset() * 60 * 1000) - rightTime
+    leftTime
+      - (left.getTimezoneOffset() * 60 * 1000)
+      + EXCEL_EPOCH_LOCAL_OFFSET_REMAINDER_MS
+      - rightTime
   ) <= 2;
 }
 
@@ -295,7 +309,8 @@ class PositionReconciliationService {
     streamingSourceTypes = undefined,
     authorizeStreamingSourceApply = null,
     positionImportDispatcher = dispatchPositionImportPreflight,
-    onImportProgress = null
+    onImportProgress = null,
+    resolveAnomalyReport = null
   }) {
     if (!userDataDir) throw new TypeError('平盘对账 service 需要 userDataDir');
     if (!templatePath) throw new TypeError('平盘对账 service 需要 templatePath');
@@ -326,6 +341,9 @@ class PositionReconciliationService {
     this.positionImportDispatcher = positionImportDispatcher;
     this.onImportProgress = typeof onImportProgress === 'function'
       ? onImportProgress
+      : null;
+    this.resolveAnomalyReport = typeof resolveAnomalyReport === 'function'
+      ? resolveAnomalyReport
       : null;
     this.activeImportJobs = new Map();
     this.store = store || createPositionReconciliationStore(this.userDataDir, {
@@ -658,6 +676,8 @@ class PositionReconciliationService {
         id: pending.id,
         scope: pending.scope,
         summary: pending.summary,
+        filteredRowCount: Number(pending.filteredRowCount || 0),
+        hasFilteredRows: Number(pending.filteredRowCount || 0) > 0,
         stale: !this.store.snapshotIsCurrent(pending.snapshot),
         canExport: Boolean(pending.exported_at || pending.reimported_at),
         createdAt: pending.created_at
@@ -1495,6 +1515,88 @@ class PositionReconciliationService {
     return { status: 'ok', filePath: outputPath, rowCount: rows.length };
   }
 
+  async resolveFilteredReportFile(report) {
+    if (!report) {
+      throw new PositionReconciliationError(
+        'position-anomaly-report-missing',
+        '异常报告记录不存在'
+      );
+    }
+    let filePath = text(report.reportFilePath);
+    if (this.resolveAnomalyReport) {
+      const resolved = await this.resolveAnomalyReport({ ...report });
+      filePath = text(
+        typeof resolved === 'string'
+          ? resolved
+          : resolved && (resolved.filePath || resolved.reportFilePath)
+      ) || filePath;
+    }
+    return verifyAnomalyReportFile({
+      filePath,
+      sha256: report.reportSha256,
+      sizeBytes: report.reportSizeBytes
+    });
+  }
+
+  async exportAnomalyReport(reportKey, outputPath) {
+    const report = this.store.findFilteredReport(reportKey);
+    if (!report) {
+      throw new PositionReconciliationError(
+        'position-anomaly-report-missing',
+        '异常报告记录不存在或已失效'
+      );
+    }
+    const verified = await this.resolveFilteredReportFile(report);
+    const copied = await copyVerifiedAnomalyReport(verified, outputPath);
+    return {
+      ...copied,
+      reportKey: report.reportKey,
+      rowCount: Number(report.filteredRowCount) || 0,
+      fileName: path.basename(copied.filePath)
+    };
+  }
+
+  async resolveRunFilteredReports(runId) {
+    const filteredSources = this.store.listRunFilteredSources(Number(runId));
+    const reports = new Map();
+    for (const item of filteredSources) {
+      const existing = reports.get(item.reportKey);
+      if (existing && (
+        existing.reportSha256 !== item.reportSha256
+        || Number(existing.reportSizeBytes) !== Number(item.reportSizeBytes)
+        || existing.reportArtifactKey !== item.reportArtifactKey
+        || existing.archiveOperationKey !== item.archiveOperationKey
+      )) {
+        throw new PositionReconciliationError(
+          'position-anomaly-report-integrity-invalid',
+          `运行冻结的异常报告引用不一致：${item.reportKey}`
+        );
+      }
+      reports.set(item.reportKey, existing || item);
+    }
+    const reportFiles = [];
+    for (const report of reports.values()) {
+      const verified = await this.resolveFilteredReportFile(report);
+      reportFiles.push({
+        ...verified,
+        reportKey: report.reportKey,
+        reportFileName: report.reportFileName
+      });
+    }
+    return { filteredSources, reportFiles };
+  }
+
+  async exportRunFilteredSources(runId, outputPath) {
+    const run = this.requireCurrentPendingRun(runId);
+    const { filteredSources, reportFiles } = await this.resolveRunFilteredReports(run.id);
+    return writeRunFilteredSourcesWorkbook({
+      outputPath,
+      run,
+      filteredSources,
+      reportFiles
+    });
+  }
+
   run(payload = {}) {
     const selection = requireScopeSelection(payload, '运行');
     const bankRows = this.store.getBankRows({
@@ -1515,6 +1617,33 @@ class PositionReconciliationService {
     }
     const scope = runScopeOf(bankRows);
     const sources = requiredSourceTypes(bankRows);
+    const filteredSources = this.store.listActiveFilteredSources({
+      sourceTypes: sources,
+      months: scope.months
+    });
+    const filteredBySource = new Map();
+    for (const item of filteredSources) {
+      const rows = filteredBySource.get(item.sourceType) || [];
+      rows.push(item);
+      filteredBySource.set(item.sourceType, rows);
+    }
+    const allFiltered = sources.flatMap((sourceType) => {
+      const filtered = filteredBySource.get(sourceType) || [];
+      const validRows = this.store.countSourceRowsInMonths(sourceType, scope.months);
+      return filtered.length > 0 && validRows === 0
+        ? [{ sourceType, filteredRows: filtered.length, validRows }]
+        : [];
+    });
+    if (allFiltered.length > 0) {
+      throw new PositionReconciliationError(
+        'position-source-all-filtered',
+        '运行所需来源在目标月份内有效数据为 0，已停止资金性质校验',
+        allFiltered.map((item) => (
+          `${SOURCE_DEFINITIONS[item.sourceType].sourceName}：` +
+          `月份 ${scope.months.join(' / ')}，有效 ${item.validRows} 行，过滤 ${item.filteredRows} 行`
+        ))
+      );
+    }
     const missing = sources.filter((sourceType) => this.store.countSourceRows(sourceType) === 0);
     if (missing.length > 0) {
       throw new PositionReconciliationError(
@@ -1631,6 +1760,7 @@ class PositionReconciliationService {
       notApplicableRows: resultRows.filter((row) => row.hitType === MATCH_TYPES.NOT_APPLICABLE).length,
       manualModifiedRows: 0,
       sourceTypes: sources,
+      filteredRowCount: filteredSources.length,
       engine: {
         ...(engineResult.summary || {}),
         matched: resultRows.filter((row) => (
@@ -1650,6 +1780,10 @@ class PositionReconciliationService {
       snapshot,
       summary,
       rows: resultRows,
+      filteredSources: filteredSources.map((item) => ({
+        ...item,
+        sourceRevision: Number(snapshot.sources[item.sourceType] || 0)
+      })),
       supersedeRunId: existing ? existing.id : null
     });
     return {
@@ -1657,6 +1791,8 @@ class PositionReconciliationService {
       runId: run.id,
       scope,
       summary,
+      filteredRowCount: filteredSources.length,
+      hasFilteredRows: filteredSources.length > 0,
       canExport: true
     };
   }
@@ -1853,16 +1989,30 @@ class PositionReconciliationService {
         '请先成功导出结果或回导修改后的合法结果，再点击确认'
       );
     }
-    const result = this.store.confirmRun(run.id);
-    return {
-      status: 'ok',
-      message: `已确认 ${result.confirmedRows} 行，银行批次状态已更新为“已校验性质”`,
-      ...result
+    const finish = () => {
+      const result = this.store.confirmRun(run.id);
+      return {
+        status: 'ok',
+        message: `已确认 ${result.confirmedRows} 行，银行批次状态已更新为“已校验性质”`,
+        ...result
+      };
     };
+    if (Number(run.filteredRowCount) === 0) return finish();
+    return this.resolveRunFilteredReports(run.id).then(finish);
   }
 
   defaultResultFileName() {
     return `${formatTimestamp(this.now())}_平盘资金性质校验结果.xlsx`;
+  }
+
+  defaultFilteredResultFileName(runId) {
+    return `${formatTimestamp(this.now())}_平盘资金性质校验过滤数据_Run${Number(runId)}.xlsx`;
+  }
+
+  defaultAnomalyReportFileName(reportKey) {
+    const report = this.store.findFilteredReport(reportKey);
+    return text(report && report.reportFileName)
+      || `${formatTimestamp(this.now())}_链接原始表异常数据.xlsx`;
   }
 
   diagnostics() {

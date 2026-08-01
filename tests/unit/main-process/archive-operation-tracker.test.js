@@ -600,7 +600,14 @@ test.describe('archive operation tracker', () => {
           { status: 'failed', fileName: 'bad.xlsx' }
         ]
       },
-      runtime: { inputPaths: ['/tmp/transfer.xlsx'] }
+      runtime: {
+        inputPaths: ['/tmp/transfer.xlsx'],
+        outputFiles: [{
+          filePath: '/tmp/position-anomaly.xlsx',
+          artifactKey: 'source-import-anomaly-report',
+          metadata: { displayRole: '异常数据' }
+        }]
+      }
     });
     await tracker.handleOperation({
       channel: 'position-reconciliation:bank:apply-import',
@@ -623,6 +630,14 @@ test.describe('archive operation tracker', () => {
 
     const creates = calls.filter((call) => call.type === 'create');
     assert.equal(creates.length, 4);
+    assert.equal(creates[0].payload.locked, true);
+    assert.deepEqual(
+      creates[0].payload.files.map((item) => [item.role, item.filePath, item.artifactKey || '']),
+      [
+        ['input', '/tmp/transfer.xlsx', ''],
+        ['output', '/tmp/position-anomaly.xlsx', 'source-import-anomaly-report']
+      ]
+    );
     assert.deepEqual(creates.map((call) => call.payload.files[0].filePath), [
       '/tmp/transfer.xlsx',
       '/tmp/position-bank.xlsx',
