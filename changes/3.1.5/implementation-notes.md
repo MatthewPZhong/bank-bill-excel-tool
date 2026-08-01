@@ -27,6 +27,13 @@
 - E8：`npm run verify:main-panel-alignment` 在受限桌面沙箱内返回 `electron exit null`；沙箱外按真实 Electron 路径重跑，两种窗口尺寸、三种缩放 `6/6 PASS`。
 - E9：发布 workflow 继续强制 tag/version/main 三者一致、annotated tag、完整 release checks、更新资产 SHA-512 和不可替换 Release；v3.1.3 直接升级到稳定 SemVer v3.1.5 不需要中间 v3.1.4 资产。
 - E10：通用与资金盲区扫描未发现入口旁路、状态生命周期、兼容性、行数守恒或资损新风险；最终实现 diff 不含 `src/`、schema、配置或资金测试期望。
+- E11：PR #116 的 Windows Build run `30705791034` 成功，包含新增的 `Run Windows SQLite teardown regression`；Codex Review 对最终提交 `c665fb090d35e75f18ba37cea07ebe1be1cd0bcd` 未发现 major issue，GraphQL `review_threads=[]`。
+- E12：PR #116 已以 merge commit `58bea9bb633930b73db13aee8174f5d989e0267e` 合入 `main`；main 候选 Windows run `30705981990` 成功完成 smoke、SQLite teardown、布局、Setup/portable 构建、包体、更新资产暂存和上传。
+- E13：annotated tag `v3.1.5` 的 tag object 为 `6b6d7591423563c8f24cf35b81b6d33587ac3195`，peeled commit 与最新 main 均为 `58bea9bb633930b73db13aee8174f5d989e0267e`。
+- E14：正式 Windows Release [run 30706152991](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30706152991) 全部成功；release checks 用时 26 分 25 秒，随后布局、构建、包体、更新资产、不可变发布和公开复核全部通过。
+- E15：[v3.1.5 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.5) 于 2026-08-02 00:01:11 +08:00 发布，stable/latest、non-draft、non-prerelease；四项资产均为 uploaded。
+- E16：公开资产独立下载后 SHA-256/size 与 GitHub digest 完全一致：portable `afcc4917...9116f2` / 99,526,150；Setup `27a1be34...3b40ec` / 100,023,007；blockmap `75331686...8e7682` / 105,674；`latest.yml` `afad0c38...66ee31` / 369 bytes。
+- E17：`latest.yml` 的 version `3.1.5`、path `bank-bill-excel-tool-setup-3.1.5.exe`、size `100023007` 和 SHA-512 `dFd2gBX3bL9fkWBvxvX1v0+/JKy3ny1tOVFOg5MHzgC3rPVGdrkpa/usovYskSpa8svGEtIp8NON7Y0WbCQTrQ==` 与实际 Setup 完全一致。
 
 ## Deviations
 
@@ -34,8 +41,8 @@
 
 ## Remaining unknowns
 
-- R1（PROBE）：修复后的 Windows PR 定向回归是否通过。
-- R2（PROBE）：完整 Release workflow 是否完成并产出四项资产。
+- R1（resolved）：Windows PR 定向回归已在 run `30705791034` 通过。
+- R2（resolved）：完整 Release workflow 已成功并产出、复核四项公开资产。
 - R3（人工 follow-up）：Windows 10/11 安装、SmartScreen、离线/在线升级和用户数据保留仍未实测。
 
 ## Reconciliation blindspot pass

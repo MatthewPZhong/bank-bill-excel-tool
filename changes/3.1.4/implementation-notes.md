@@ -69,6 +69,7 @@
 - E33：Windows Release [run 30703982194](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30703982194) 在 `Run release checks` 阶段失败：unit `4478/4481 PASS`、2 fail、1 skip；两项均为 cleanup hook 的 `EBUSY`，不是产品断言失败。
 - E34：失败测试在注册 `store.close()` 之前注册临时目录删除 hook；Node 按注册顺序执行 after hook，Windows 拒绝删除仍打开的 `position-data.sqlite`，macOS 则允许 unlink，因此本地门禁未复现。
 - E35：workflow 未进入布局、构建、资产暂存或 GitHub Release 创建；`gh release view v3.1.4` 返回 release not found，公开资产为 0。
+- E36：恢复版本 v3.1.5 已于 2026-08-02 通过 Windows Release run `30706152991` 正式发布；v3.1.4 继续只保留失败 tag，无 Release/资产，全部用户功能由 v3.1.5 承接。
 
 ## Deviations
 

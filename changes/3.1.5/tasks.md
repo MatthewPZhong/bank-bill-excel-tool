@@ -7,10 +7,10 @@
 - [x] 将 CHANGELOG、VERSION_FEATURE_HISTORY、USER_GUIDE 的实际交付版本同步为 v3.1.5。
 - [x] 执行定向测试、lint、完整 `release-check`、布局和发布契约检查。
 - [x] 执行 `scan:vars` / `check:vars` 并完成关联 review。
-- [ ] 提交 PR，等待 Windows checks 与 Codex Review，修复至无 P3 或更高 Finding。
-- [ ] 合并 PR，同步最新 `main`。
-- [ ] 创建并推送 annotated tag `v3.1.5`。
-- [ ] 等待 Release workflow 成功并核对四项公开资产。
+- [x] PR #116 的 Windows checks 与 Codex Review 通过；最终提交无 review thread 或 P3 及更高 Finding。
+- [x] PR #116 以 merge commit `58bea9bb633930b73db13aee8174f5d989e0267e` 合入 `main`。
+- [x] 创建并推送 annotated tag `v3.1.5`，peeled commit 为 `58bea9bb633930b73db13aee8174f5d989e0267e`。
+- [x] Release workflow run `30706152991` 成功，并独立核对四项公开资产。
 - [ ] 提交并合并发布证据 PR，回写发布日期、run、资产大小和 SHA-256。
 - [ ] 同步本地 `main`，确认 tracked worktree 干净。
 
