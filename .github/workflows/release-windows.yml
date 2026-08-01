@@ -34,6 +34,10 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne $expectedTag) {
             throw "Tag $env:GITHUB_REF_NAME does not match package version $expectedTag"
           }
+          $tagObjectType = (git cat-file -t "refs/tags/$env:GITHUB_REF_NAME").Trim()
+          if ($tagObjectType -ne 'tag') {
+            throw 'Release tag must be annotated'
+          }
           $mainSha = (git rev-parse origin/main).Trim()
           $tagCommit = (git rev-list -n 1 $env:GITHUB_REF_NAME).Trim()
           if ($tagCommit -ne $mainSha) {

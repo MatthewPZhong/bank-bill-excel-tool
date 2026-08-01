@@ -9,7 +9,7 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.1.4（2026-08-01）
+## v3.1.4（Unreleased）
 
 v3.1.4 让中台调拨单和测试付款单中的明确无效证据行可以自动过滤，正常行继续落库，同时补齐异常报告、过滤墓碑、存档下载和运行过滤数据导出。
 

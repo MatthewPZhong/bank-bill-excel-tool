@@ -27,6 +27,8 @@
 
 ## 发布收尾
 
+- [ ] Windows 10/11 验证候选 Setup/portable 与 SmartScreen，或取得发布负责人的单独可追溯豁免。
+- [ ] 使用候选 Setup 完成 `v3.1.3 → v3.1.4` 离线覆盖 canary 并核对用户数据，或取得发布负责人的单独可追溯豁免。
 - [ ] 创建并推送 annotated tag `v3.1.4`，且 tag 必须指向当时最新 `main`。
 - [ ] 等待 Windows Release workflow 全部通过。
 - [ ] 验证 GitHub Release 为 stable/latest、non-draft、non-prerelease，并包含 Setup、Setup blockmap、portable、`latest.yml` 四项资产。
@@ -38,4 +40,4 @@
 
 - [ ] Windows 打包环境验证大异常报告流式 writer 峰值与存档恢复。
 - [ ] Windows 安装版演练进程硬退出、系统文件锁和存档持久重试提示。
-- [ ] 使用上一 stable 完成 `v3.1.3 → v3.1.4` 在线升级 canary，并核对 SQLite、平盘 side DB、设置、存档和导出文件保留。
+- [ ] Release 公开后使用上一 stable 完成 production/latest 在线升级 canary，核对检查、下载、稍后、业务忙阻断、重启安装和用户数据保留。

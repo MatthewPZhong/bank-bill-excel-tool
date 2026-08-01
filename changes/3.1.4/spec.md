@@ -414,7 +414,7 @@
   - `docs/VERSION_FEATURE_HISTORY.md`
   - `docs/USER_GUIDE.md`
   - 3.1.4 迭代 PRD、测试和交付记录
-- 正式发布准备前版本记录保持 `Unreleased`；业务负责人确认发布后，发布准备 PR 才可写入正式发布日期。
+- Windows Release workflow 成功并完成公开资产核对前，版本记录保持 `Unreleased`；正式发布日期只在发布证据 PR 中回写。
 - 创建`v3.1.4`标签和 Windows Release 不属于本 Spec 自动授权范围，需用户明确批准发布。
 
 ## 13. 决策、假设与资金红线
@@ -462,12 +462,16 @@
 5. 六份异常来源及一份网关入账来源的生产流式路径只读回放保持：成功文件正常落库
    902,204 行、过滤 409 行、生成链接 916,206 行；第三份调拨文件继续按硬错误 0 行提交。
 6. 2026-08-01，用户以业务负责人身份确认第 13.3 节五项资金判断，并明确批准创建
-   `v3.1.4` 技术发布；Windows 大报告恢复和进程硬退出演练继续作为发布后人工跟进，
-   不得在发布记录中描述为已通过。
-7. 发布准备 PR 合并后，annotated tag 必须指向当时最新 `main`；标签触发的 Windows
+   `v3.1.4` 技术发布；不可变批准副本见
+   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
+   Windows 大报告恢复和进程硬退出演练继续作为发布后人工跟进，不得描述为已通过。
+7. Windows 10/11 候选 Setup/portable 验证和候选安装包 `v3.1.3 → v3.1.4` 离线覆盖
+   canary 仍是打标签前门禁；缺少实测证据时，必须取得发布负责人对这两项的单独、可追溯
+   豁免，不得从 R2/R3 豁免扩大解释。
+8. 发布准备 PR 合并且第 7 项闭环后，annotated tag 必须指向当时最新 `main`；标签触发的 Windows
    Release workflow、四项更新资产和最终公开校验结果须在发布证据 PR 中回写。
-8. 发布准备硬节点已执行：`scan:vars` 为 263 个源文件、3,322 个顶层名称；本分支
+9. 发布准备硬节点已执行：`scan:vars` 为 263 个源文件、3,322 个顶层名称；本分支
    未修改 `src/`，`check:vars -- --include-minor` 安全跳过。主页面布局首次受桌面沙箱
    限制出现 `electron exit null`，在沙箱外按真实 Electron 路径重跑后 6/6 PASS。
-9. `npm audit --omit=dev` 记录 7 high、2 moderate、0 critical；本次不静默升级依赖，
+10. `npm audit --omit=dev` 记录 7 high、2 moderate、0 critical；本次不静默升级依赖，
    保留为独立治理任务。

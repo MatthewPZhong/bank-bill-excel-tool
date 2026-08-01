@@ -18,9 +18,13 @@
 1. 确认 `main` 可发布、tracked worktree 干净，`package.json.version` 为目标版本。
 2. 执行 `npm ci`、`npm run release-check`、`npm run scan:vars` 和
    `npm run check:vars -- --include-minor`。
-3. 在 Windows 10/11 验证 setup 与 portable；无签名版本需记录 SmartScreen 实际提示。
-4. 对升级器版本执行真实 `N -> N+1`：检查、下载、稍后、业务忙阻断、重启安装，并核对 SQLite、用户设置和导出文件。
+3. 在 Windows 10/11 验证候选 setup 与 portable；无签名版本需记录 SmartScreen 实际提示。
+4. 使用候选 Setup 执行离线 `N -> N+1` 覆盖安装，至少核对应用版本、SQLite、平盘 side DB、用户设置、存档和导出文件。公开 `production/latest` 的检查、下载、稍后、业务忙阻断和重启安装只能在目标 Release 存在后验证，仍按“发布后”第 2 项执行。
 5. v3.0.18 是引导版本：从 v3.0.17 手动覆盖安装验证，不能宣称 v3.0.17 可在线升级。
+
+若发布负责人决定豁免第 3 或第 4 项，必须在打 tag 前留下稳定的 GitHub PR/Issue 评论：
+写明批准人、具体豁免范围、理由和发布后补做项。豁免只允许继续生成技术资产，不得把
+对应项目标记为已验证或用于“人工验收通过”的公告。
 
 ## 创建发布
 
@@ -29,12 +33,12 @@
 ```bash
 git switch main
 git pull --ff-only
-git tag vX.Y.Z
+git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
 workflow 会拒绝以下情况：tag 不等于 `v${package.json.version}`、tag 不指向当前
-`main`、同名 Release 已存在、测试/构建失败、`latest.yml` 与 Setup SHA-512 不匹配，
+`main`、tag 不是 annotated tag、同名 Release 已存在、测试/构建失败、`latest.yml` 与 Setup SHA-512 不匹配，
 或缺少 Setup、portable、blockmap、metadata 任一资产。
 
 发布前会保留本地中文品牌构建产物，并额外 staging ASCII 文件名：Setup 使用
