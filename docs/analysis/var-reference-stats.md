@@ -5,7 +5,7 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.3 |
-| 扫描时间 | 2026-8-1 07:14:38 |
+| 扫描时间 | 2026-8-1 08:38:25 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 261 |
 | 顶层声明总数 | 3283 |
@@ -4621,4 +4621,3 @@
 | `readMeaningfulRowsHead` | 2 | 2 | 1 | src/backend/file-service/readers.js(1), src/main-process/table-type-detector.js(1) |
 | `readReconIdFixFile` | 2 | 2 | 1 | src/main-process/recon-id-fix-io.js(1), src/main.js(1) |
 | `WINDOWS_RESERVED_NAMES` | 2 | 2 | 2 | src/main-process/bank-statement-io.js(1), src/main-process/recon-id-fix-io.js(1) |
-

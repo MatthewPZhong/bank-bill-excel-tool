@@ -50,16 +50,22 @@
 - [x] 合并后重新执行 Node 22 发布门禁、parity、fault、布局、启动性能和变量检查。
 - [x] 记录 macOS 历史时区导致的 SheetJS 测试夹具偏移，且不改变既有业务日期契约。
 - [x] PR #111 以 merge commit `f73f1aeda599eb3c3988b8d0789b752e175e2ae2` 合入 v3.1.3 发布准备记录。
-- [ ] 修复首次 Windows 发布工作流暴露的跨平台测试资源清理问题并通过修复 PR。
+- [x] 修复首次 Windows 发布工作流暴露的跨平台测试资源清理问题；PR #112 以 merge
+  commit `6c5339f33e02b8833da6d5111cdc8710f61b6250` 合入 `main`。
 
 ## 发布收尾
 
-- [ ] 创建并推送 annotated tag `v3.1.3`，且 tag 必须指向当时最新 `main`。
-- [ ] 等待 Windows Release workflow 全部通过。
-- [ ] 验证 GitHub Release 为 stable/latest 且恰有 Setup、Setup blockmap、portable、`latest.yml` 四个资产。
-- [ ] 下载并回读发布资产，核对 PE 头、文件大小、SHA-256、`latest.yml` 的 SHA-512 和版本引用。
-- [ ] 回写发布 run、资产摘要和最终状态，提交并合并发布证据 PR。
-- [ ] 同步本地 `main`，删除收尾分支并确认 tracked worktree 干净。
+- [x] 创建并推送 annotated tag `v3.1.3`；最终 tag 指向当时最新
+  `main@6c5339f33e02b8833da6d5111cdc8710f61b6250`。
+- [x] Windows Release workflow run `30674305362` 全部通过。
+- [x] workflow 发布后验证确认 GitHub Release 为 stable/latest、non-draft、
+  non-prerelease，且恰有 Setup、Setup blockmap、portable、`latest.yml` 四个资产。
+- [x] workflow 核对 Windows 包、版本引用、Setup 文件名和 `latest.yml` 的 Setup
+  SHA-512；当前会话受网络授权额度限制，未执行独立本地 PE 头、文件大小和 SHA-256 回读。
+- [x] 回写发布 run、资产摘要和最终状态并提交发布证据 PR；PR 合并状态在最终交付中
+  只读确认，避免为记录自身合并再创建循环 PR。
+- [x] 发布证据 PR 合并后同步本地 `main`、清理收尾分支并核对 tracked worktree；实际
+  结果在最终交付中记录，既有无关未跟踪文件不纳入清理范围。
 
 ## 发布后人工跟进
 

@@ -125,6 +125,10 @@
 | 2026-08-01 | 首次 Windows Release workflow | run `30673001316` 在 `release-check` 失败：1 条路径预期未规范化、17 条测试 teardown 因 SQLite 尚未关闭触发 `EBUSY`；构建和发布步骤均未执行，GitHub Release 不存在 |
 | 2026-08-01 | Windows 发布闸门修复定向回归 | CI 同版本 Node 22 + UTC 下三个失败文件 `109/109 PASS`；改动仅涉及测试路径及资源清理顺序 |
 | 2026-08-01 | Windows 发布闸门修复完整本地门禁 | Node 22 + UTC 下 lint、smoke、unit `4454/4454`、44 个 integration 脚本 `2051/2051` 全部通过；`scan:vars` 仍为 261 个文件、3283 个顶层名称，未改 `src`，`check:vars -- --include-minor` 安全跳过 |
+| 2026-08-01 | Windows 发布闸门修复 PR | PR #112 以 merge commit `6c5339f33e02b8833da6d5111cdc8710f61b6250` 合入 `main`；只修改测试路径与 SQLite 资源清理顺序 |
+| 2026-08-01 | 最终 Windows Release workflow | [run 30674305362](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30674305362)、job `91298258636` 全绿；unit 4453 PASS、1 个 macOS-only SKIP、0 FAIL（共 4454），integration 2051/2051 PASS（44 个脚本），主页面对齐 6/6 PASS |
+| 2026-08-01 | v3.1.3 发布资产 | annotated tag `v3.1.3` 指向 `6c5339f33e02b8833da6d5111cdc8710f61b6250`；workflow 完成 Windows 构建、包检查、Setup SHA-512/版本引用校验、不可变发布和发布后四资产核对 |
+| 2026-08-01 | GitHub Release | [v3.1.3](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.3) 由发布后步骤验证为 stable/latest、non-draft、non-prerelease；资产为 Setup、Setup blockmap、portable、`latest.yml` |
 
 ## Remaining Unknowns
 
@@ -133,3 +137,4 @@
 | Windows 实机导入、取消和文件锁 | PROBE（业务启用/公告前） | Windows 安装版手测；当前 macOS 自动化不能替代 |
 | 真实资金逐笔正确性 | BLOCK（业务启用/公告前） | 业务负责人复核；技术发布授权不等于验收通过 |
 | 生产依赖 advisory | FOLLOW-UP | 单独升级并完整回归 `electron-updater`、`marked`、`xlsx` 等依赖，不在发布收尾中改变依赖图 |
+| 公开资产独立本地回读 | PROBE（证据增强） | 当前会话因网络授权额度限制未能再次下载二进制；workflow 已完成包检查和 `latest.yml` SHA-512 校验，后续可独立核对 PE 头、文件大小与 SHA-256 |

@@ -111,3 +111,19 @@
   本次收尾不静默升级依赖，保留为独立安全治理 follow-up。
 - Windows 实机导入/取消/文件锁和真实资金逐笔复核仍未完成；技术发布授权不得解释为
   这些人工门禁已通过。
+
+## Final Release Evidence
+
+- Windows 测试热修 PR #112 以 merge commit
+  `6c5339f33e02b8833da6d5111cdc8710f61b6250` 合入 `main`；最终 annotated tag
+  `v3.1.3` 指向同一提交。
+- 最终 Windows Release workflow
+  [run 30674305362](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30674305362)
+  全绿：unit 共 4454 条，4453 PASS、1 条 macOS-only SKIP、0 FAIL；integration
+  2051/2051 PASS（44 个脚本）；主页面对齐 6/6 PASS。
+- Windows Setup、portable、Setup blockmap 和 `latest.yml` 的构建、包检查、暂存、
+  SHA-512/版本引用校验、不可变发布及发布后四资产核对全部通过。
+- [GitHub Release v3.1.3](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.3)
+  已由 workflow 验证为 stable/latest、non-draft、non-prerelease。
+- 当前会话受网络授权额度限制，未再次把公开资产下载到本机执行独立 PE 头、文件大小和
+  SHA-256 回读；该项不冒充完成，Windows 实机和真实资金人工复核仍按原门禁保留。

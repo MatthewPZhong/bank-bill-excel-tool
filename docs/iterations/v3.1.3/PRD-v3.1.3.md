@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.3 PRD
 
 > 目标版本：`3.1.3`
-> 状态：release-prepared（PR #110、发布准备 PR #111 已合入 `main`；GitHub Release 待发布）
+> 状态：released（`v3.1.3` Windows Release 已发布；人工资金与 Windows 实机验收待完成）
 > 源规格：`changes/3.1.3/spec.md`
 > 交付归档：`docs/prs/PR110-v3.1.3.md`
 > 更新时间：2026-08-01
@@ -65,10 +65,22 @@
 
 ## 6. 发布与人工门禁
 
-- 用户已授权执行技术发布收尾；`v3.1.3` tag、Windows workflow、四个公开更新资产和
-  最终摘要将在发布证据提交中回写。
 - 首次 Windows run `30673001316` 在 release-check 阶段因测试路径规范化和 SQLite
-  teardown 顺序失败，未执行构建或发布；修复 PR 通过后才会重新指向 tag 并触发发布。
+  teardown 顺序失败，未执行构建或发布，也未创建同名 Release 或资产。
+- 测试热修 PR #112 以 merge commit
+  `6c5339f33e02b8833da6d5111cdc8710f61b6250` 合入 `main`；最终 annotated tag
+  `v3.1.3` 指向同一提交。
+- 最终 Windows Release workflow
+  [run 30674305362](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30674305362)
+  全绿：unit 4453 PASS、1 个 macOS-only SKIP、0 FAIL，integration 2051/2051 PASS
+  （44 个脚本），tag/main、主页面对齐、构建、包检查、资产校验、不可变发布和发布后验证
+  全部成功。
+- [GitHub Release v3.1.3](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.3)
+  已由 workflow 验证为 stable/latest、non-draft、non-prerelease，并包含 Setup、Setup
+  blockmap、portable、`latest.yml` 四项资产。workflow 同时核对 Setup 文件名、版本和
+  `latest.yml` SHA-512。
+- 当前会话因网络授权额度限制，未再次把公开资产下载到本机执行独立 PE 头、文件大小和
+  SHA-256 回读；该证据边界不改变技术发布状态，也不得解释为 Windows 实机验收。
 - Windows 安装版真实导入、取消和文件锁手测尚未完成。
 - 真实或脱敏资金数据的范围替换、链接派生、账户数据、严格 1:1 和存档证据尚未逐笔确认。
 - 上述人工项不阻断技术资产生成，但阻断“人工验收通过”的公告和未复核数据上的业务启用。
