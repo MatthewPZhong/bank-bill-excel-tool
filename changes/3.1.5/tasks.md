@@ -11,7 +11,7 @@
 - [x] PR #116 以 merge commit `58bea9bb633930b73db13aee8174f5d989e0267e` 合入 `main`。
 - [x] 创建并推送 annotated tag `v3.1.5`，peeled commit 为 `58bea9bb633930b73db13aee8174f5d989e0267e`。
 - [x] Release workflow run `30706152991` 成功，并独立核对四项公开资产。
-- [ ] 提交并合并发布证据 PR，回写发布日期、run、资产大小和 SHA-256。
+- [ ] 合并发布证据 PR #117；发布日期、run、资产大小和 SHA-256 已在该 PR 回写。
 - [ ] 同步本地 `main`，确认 tracked worktree 干净。
 
 ## 发布后人工跟进
