@@ -1,7 +1,7 @@
 # v3.1.4 Spec — 平盘来源异常行自动过滤、审计报告与运行过滤数据导出
 
 > change-name: `position-reconciliation-filtered-source-import`
-> status: `implemented-validation-complete-awaiting-human-review`
+> status: `release-prepared`（PR #114 已合入 `main`；资金人工复核已确认；Windows Release 待发布）
 > baseline-branch: `main`
 > baseline-commit: `64f19dd`
 > baseline-version: `3.1.3`
@@ -31,7 +31,7 @@
 - 异常报告可立即导出，也可后续从“存档中心 → 平盘对账数据处理”下载。
 - 文件内每个非空物理数据行均有唯一、可解释的处理去向。
 - 不修改 ReconID、商户、金额、币种、方向、日期、FundType 或严格 1:1 匹配规则。
-- 六份真实异常文件完成回放；业务人工复核作为正式发布前资金门禁保留。
+- 六份真实异常文件完成回放；业务负责人已在正式发布前完成人工复核并确认第 13.3 节五项判断。
 
 ## 2. 范围与非目标
 
@@ -414,7 +414,7 @@
   - `docs/VERSION_FEATURE_HISTORY.md`
   - `docs/USER_GUIDE.md`
   - 3.1.4 迭代 PRD、测试和交付记录
-- 正式发布前版本记录保持 `Unreleased`，不得提前写入发布日期或“已发布”。
+- Windows Release workflow 成功并完成公开资产核对前，版本记录保持 `Unreleased`；正式发布日期只在发布证据 PR 中回写。
 - 创建`v3.1.4`标签和 Windows Release 不属于本 Spec 自动授权范围，需用户明确批准发布。
 
 ## 13. 决策、假设与资金红线
@@ -444,3 +444,37 @@
 3. 自动过滤并直接落库符合操作预期，导入完成提示足以让用户识别部分数据未落库。
 4. 同业务单号碰撞整文件拒绝不会阻断合法的日常补数方式。
 5. 六份真实文件的正常候选、金额、币种、方向和严格 1:1 结果不存在非预期变化。
+
+2026-08-01，用户以业务负责人身份明确确认上述五项判断，并授权执行正式发布。该确认解除资金业务发布门禁，但不替代 Windows 打包环境的大报告恢复和进程硬退出演练；后两项按用户决定保留为发布后人工 follow-up，不阻断技术资产发布。
+
+同日，用户在已了解候选 Setup 离线升级 canary 的验证范围及未执行风险后再次确认发布，并以发布负责人身份单独豁免 Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选 Setup 的 `v3.1.3 → v3.1.4` 离线覆盖 canary。可追溯副本见 [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)。该豁免只解除 tag 前人工门禁，两项均按“未实测”转为发布后 follow-up，不得写成测试通过。
+
+## 14. 正式收尾与发布准备状态
+
+1. PR #114 已于 2026-08-01 以 merge commit
+   `1e5dfc697f043a83ef4881843fd6a284ff31e6d2` 合入 `main`；最终实现 commit 为
+   `836dc5d1db975c0bee69d83ea1f22a79e91b0639`。
+2. PR #114 的全部 review 线程已关闭；Codex 对最终实现 commit 的结论为
+   `Didn't find any major issues`，未留下 P3 或更高 Finding。
+3. 最终实现及发布准备分支均已通过 lint、smoke、unit `4481/4481` 和 44 个
+   integration 脚本 `2051/2051`；最新定向回归 `200/200` 通过。发布准备分支的
+   integration 总耗时为 297,909ms。
+4. `main@1e5dfc6` 的 Windows Build workflow run `30697133308` 已成功完成 smoke、
+   主页面对齐、Windows Setup/portable 构建、包体检查和更新资产暂存。
+5. 六份异常来源及一份网关入账来源的生产流式路径只读回放保持：成功文件正常落库
+   902,204 行、过滤 409 行、生成链接 916,206 行；第三份调拨文件继续按硬错误 0 行提交。
+6. 2026-08-01，用户以业务负责人身份确认第 13.3 节五项资金判断，并明确批准创建
+   `v3.1.4` 技术发布；不可变批准副本见
+   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
+   Windows 大报告恢复和进程硬退出演练继续作为发布后人工跟进，不得描述为已通过。
+7. Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选安装包 `v3.1.3 → v3.1.4`
+   离线覆盖 canary 尚无实测证据；发布负责人已在
+   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
+   单独明确豁免 tag 前门禁并接受风险。两项转为发布后人工 follow-up，不得描述为已通过。
+8. 发布准备 PR 合并且第 7 项豁免证据闭环后，annotated tag 必须指向当时最新 `main`；标签触发的 Windows
+   Release workflow、四项更新资产和最终公开校验结果须在发布证据 PR 中回写。
+9. 发布准备硬节点已执行：`scan:vars` 为 263 个源文件、3,322 个顶层名称；本分支
+   未修改 `src/`，`check:vars -- --include-minor` 安全跳过。主页面布局首次受桌面沙箱
+   限制出现 `electron exit null`，在沙箱外按真实 Electron 路径重跑后 6/6 PASS。
+10. `npm audit --omit=dev` 记录 7 high、2 moderate、0 critical；本次不静默升级依赖，
+   保留为独立治理任务。

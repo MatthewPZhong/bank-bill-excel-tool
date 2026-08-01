@@ -35,6 +35,36 @@
 
 ## 真实文件
 
-- 三份调拨：预期 filter 3 / 2 / 1；第三份因另 1 行付款成功缺金额整文件拒绝。
+- 三份调拨：行级预检预期 filter 3 / 2 / 1；第三份因另 1 行付款成功缺金额触发硬错误，
+  最终整文件拒绝、0 行提交且不发布该文件的过滤报告。
 - 三份测试付款：预期 filter 197 / 181 / 26。
 - 核对正常候选 row hash、金额、币种、方向、link leg 和严格 1:1 结果不变。
+
+## Formal Closeout Evidence
+
+- PR #114 已以 merge commit `1e5dfc697f043a83ef4881843fd6a284ff31e6d2`
+  合入 `main`；最终实现 commit 为 `836dc5d1db975c0bee69d83ea1f22a79e91b0639`。
+- PR 全部 review 线程已关闭；Codex 对最终 commit 的复核未发现 major issue，未留下
+  P3 或更高 Finding。
+- 最终实现门禁：lint、smoke、unit `4481/4481`、44 个 integration 脚本
+  `2051/2051` 全部通过；报告依赖、部分成功、重复 owner、报告计数和主进程 pending
+  持久化定向回归 `200/200` 通过。
+- `main@1e5dfc6` 的 Windows Build workflow
+  [run 30697133308](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30697133308)
+  已完成 smoke、主页面对齐、Windows Setup/portable 构建、包体检查和更新资产暂存。
+- 发布准备分支使用 Node `24.13.0` 重新执行 `npm run release-check`：lint、smoke、
+  unit `4481/4481`、integration `2051/2051` 全部通过，integration 总耗时 297,909ms。
+- `npm run verify:main-panel-alignment` 首次在桌面沙箱内因 Electron 无法启动返回
+  `electron exit null`；沙箱外按真实 Electron 路径重跑，两种窗口尺寸和三种缩放
+  `6/6 PASS`。
+- `scan:vars` 为 263 个源文件、3,322 个顶层名称；发布准备未修改 `src/`，
+  `check:vars -- --include-minor` 安全跳过。
+- `npm audit --omit=dev` 为 7 high、2 moderate、0 critical；依赖治理不混入发布收尾。
+- 2026-08-01，业务负责人确认 Spec 13.3 五项资金判断并批准技术发布；不可变批准副本见
+  [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
+- Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选安装包 `v3.1.3 → v3.1.4`
+  离线覆盖 canary 尚无实测证据；发布负责人已通过
+  [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
+  单独豁免 tag 前门禁。测试结论保持“未执行”，两项转发布后人工跟进。
+- Windows 打包环境的大报告恢复及进程硬退出/文件锁/存档重试仍为发布后人工跟进；
+  技术发布状态不得解释为这些实机演练已通过。

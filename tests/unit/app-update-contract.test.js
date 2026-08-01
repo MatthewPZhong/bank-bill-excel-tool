@@ -158,9 +158,12 @@ test.describe('v3.0.18 在线升级静态契约', () => {
   test('Windows 发布工作流验证 main、版本、更新哈希并直接发布稳定 Release', () => {
     const workflow = read('.github/workflows/release-windows.yml');
     const ordinaryBuild = read('.github/workflows/build-windows.yml');
+    const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
 
     assert.match(workflow, /tags:\s*\n\s*- 'v\*\.\*\.\*'/);
     assert.match(workflow, /Release tag must point to the current main commit/);
+    assert.match(workflow, /git cat-file -t "refs\/tags\/\$env:GITHUB_REF_NAME"/);
+    assert.match(workflow, /Release tag must be annotated/);
     assert.match(workflow, /Package version \$version is not a stable semantic version/);
     assert.match(workflow, /npm run release-check/);
     assert.match(workflow, /npm run prebuild:meta/);
@@ -174,5 +177,6 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.doesNotMatch(workflow, /--draft|--prerelease/);
     assert.match(ordinaryBuild, /electron-builder --win --publish never/);
     assert.match(ordinaryBuild, /dist\/bank-bill-excel-tool-portable-\*\.exe/);
+    assert.match(runbook, /git tag -a vX\.Y\.Z -m "vX\.Y\.Z"/);
   });
 });
