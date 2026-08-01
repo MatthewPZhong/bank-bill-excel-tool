@@ -347,15 +347,18 @@ test('多月份运行逐来源逐月份阻断全量过滤，不能被其他月�
 
 test('全量过滤月份仍可在链接表管理中选择并解除活动墓碑', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-month-manager-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const store = createPositionReconciliationStore(dir, {
+  let store = null;
+  t.after(() => {
+    if (store) store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  store = createPositionReconciliationStore(dir, {
     initialCheckpoint: {
       identity: 'filtered-month-manager-identity',
       generation: 0,
       token: 'filtered-month-manager-token'
     }
   });
-  t.after(() => store.close());
   store.db.prepare(`
     INSERT INTO position_filtered_source_rows(
       report_row_key, source_type, business_key, recon_id,
@@ -450,15 +453,18 @@ test('结果确认前重新校验运行冻结的异常报告哈希', async (t) =
 
 test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-envelope-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const store = createPositionReconciliationStore(dir, {
+  let store = null;
+  t.after(() => {
+    if (store) store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  store = createPositionReconciliationStore(dir, {
     initialCheckpoint: {
       identity: 'filtered-envelope-identity',
       generation: 0,
       token: 'filtered-envelope-token'
     }
   });
-  t.after(() => store.close());
   const reportSha256 = 'b'.repeat(64);
   const inserted = store.db.prepare(`
     INSERT INTO position_filtered_source_rows(

@@ -68,3 +68,13 @@
   单独豁免 tag 前门禁。测试结论保持“未执行”，两项转发布后人工跟进。
 - Windows 打包环境的大报告恢复及进程硬退出/文件锁/存档重试仍为发布后人工跟进；
   技术发布状态不得解释为这些实机演练已通过。
+
+## Release Result
+
+- annotated tag `v3.1.4` 指向 `main@14a9ce9de1d5607fe3c4dc58ae3adf81defef611`。
+- Windows Release [run 30703982194](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30703982194)
+  的 unit 汇总为 `4478/4481 PASS`、2 fail、1 skip；两项失败都是 test hook 的
+  `EBUSY`，不是资金或产品断言失败。
+- 失败原因是 Windows 不允许删除仍由 `PositionReconciliationStore` 打开的
+  `position-data.sqlite`；macOS 允许 unlink 已打开文件，因而发布前本地门禁未暴露该问题。
+- workflow 在构建/发布前停止，未创建 GitHub Release 或公开资产；恢复验证与正式资产发布转入 v3.1.5。

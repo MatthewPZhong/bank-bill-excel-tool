@@ -23,6 +23,7 @@
 | D17 | 三份对外版本文档在 Windows Release 成功前继续标记 `Unreleased/未发布` | 避免标签后 workflow 失败时 `main` 提前宣称一个不存在的版本已发布 | active |
 | D18 | Runbook 只允许 annotated tag，release workflow 以 Git object type 强制拒绝 lightweight tag | 任务清单不能替代可执行发布契约，且不可变 Release 必须能审计 tag 注释对象 | active |
 | D19 | 发布负责人单独豁免 R4 候选 Setup 离线升级 canary 与 R6 Windows 10/11 候选包/SmartScreen 验证，二者转发布后 follow-up | 当前无 Windows 实机证据；用户在了解范围和 immutable Release 风险后再次确认发布。豁免解除 tag 前人工门禁，但不等于测试通过 | active |
+| D20 | v3.1.4 tag 保留作失败发布审计，不删除、不移动；正式恢复发布使用 v3.1.5 | v3.1.4 没有 Release/资产，使用新版本可保持 tag 不可变和更新链可解释 | active |
 
 ## Assumptions
 
@@ -64,18 +65,23 @@
 - E29：`npm audit --omit=dev` 为 7 high、2 moderate、0 critical；与上一版发布边界一致，本次不静默升级依赖图。
 - E30：PR #115 Codex Review 发现 2 条 P1、3 条 P2；版本状态、人工批准证据和 annotated tag 契约已修订。`app-update-contract.test.js` 定向 6/6、完整 unit 4,481/4,481 PASS；Windows 候选安装和离线升级 canary 被保留为 tag 前 BLOCK，不用原 R2/R3 豁免越过。
 - E31：在明确解释候选 Setup 离线升级 canary 的验证范围和未执行风险后，发布负责人于 2026-08-01 再次确认发布，并单独豁免 R4/R6 的 tag 前人工门禁；稳定证据为 [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)。评论明确两项未实测、只转发布后 follow-up，且不豁免 annotated tag、GitHub Actions、四项资产核对和 production/latest 在线 canary。
+- E32：PR #115 已以 merge commit `14a9ce9de1d5607fe3c4dc58ae3adf81defef611` 合入 `main`；annotated tag `v3.1.4` 指向该提交。
+- E33：Windows Release [run 30703982194](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30703982194) 在 `Run release checks` 阶段失败：unit `4478/4481 PASS`、2 fail、1 skip；两项均为 cleanup hook 的 `EBUSY`，不是产品断言失败。
+- E34：失败测试在注册 `store.close()` 之前注册临时目录删除 hook；Node 按注册顺序执行 after hook，Windows 拒绝删除仍打开的 `position-data.sqlite`，macOS 则允许 unlink，因此本地门禁未复现。
+- E35：workflow 未进入布局、构建、资产暂存或 GitHub Release 创建；`gh release view v3.1.4` 返回 release not found，公开资产为 0。
 
 ## Deviations
 
 - Dv1：真实回放推翻了“第三份调拨异常也应被过滤”的早期口头预期：付款成功且付款金额为空属于资金证据硬错误，按已确认白名单整文件拒绝；已反向同步 `spec.md` 第 11.1 节。
 - Dv2：发布准备初稿曾在 tag/Release 成功前把三份版本文档写成 2026-08-01 已发布；PR #115 P2 复核指出失败 workflow 会造成对外状态失真，现恢复 `Unreleased/未发布`，正式日期改由发布证据 PR 回写。
 - Dv3：R4/R6 在 PR #115 review 修订后按 runbook 恢复为 tag 前 BLOCK；用户随后在了解风险后提供单独可追溯豁免，因此两项不再阻断本次 tag，但保持“未实测”并转入发布后 follow-up。
+- Dv4：v3.1.4 Release 没有产出公开资产。原“同版本发布证据回写”流程停止，tag 保留为失败发布审计；恢复发布改用 v3.1.5，避免移动不可变发布边界。
 
 ## Remaining unknowns
 
 - R2（PROBE，发布后人工跟进）：Windows 打包环境下大报告的流式 writer 峰值与存档恢复尚未实机验证。
 - R3（PROBE，发布后人工跟进）：代码级故障注入已覆盖多文件部分提交的报告范围；Windows 打包环境仍需人工演练进程硬退出和存档持久重试，确认系统级文件锁与恢复提示符合预期。
-- R4（PROBE，发布后人工跟进）：候选 Setup 的 `v3.1.3 → v3.1.4` 离线覆盖 canary 尚未执行；tag 前门禁已由发布负责人单独豁免，但仍需补做主库、平盘 side DB、设置、存档与导出文件保留核对。Release 公开后还需独立完成 production/latest 在线升级 canary。
+- R4（PROBE，发布后人工跟进）：候选 Setup 的离线覆盖 canary 尚未执行；tag 前门禁已由发布负责人单独豁免。由于 v3.1.4 没有公开资产，须使用正式 v3.1.5 补做 `v3.1.3 → v3.1.5` 主库、平盘 side DB、设置、存档与导出文件保留核对；Release 公开后还需独立完成 production/latest 在线升级 canary。
 - R6（PROBE，发布后人工跟进）：Windows 10/11 候选 Setup/portable 启动及 SmartScreen 实际提示尚无人工证据；tag 前门禁已由发布负责人单独豁免，不能按已通过处理。
 - R5（PROBE，独立依赖治理）：生产依赖审计仍有 7 high、2 moderate、0 critical；需在独立迭代确认可升级版本并完整回归，不与资金发布收尾混改。
 
