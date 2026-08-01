@@ -447,6 +447,8 @@
 
 2026-08-01，用户以业务负责人身份明确确认上述五项判断，并授权执行正式发布。该确认解除资金业务发布门禁，但不替代 Windows 打包环境的大报告恢复和进程硬退出演练；后两项按用户决定保留为发布后人工 follow-up，不阻断技术资产发布。
 
+同日，用户在已了解候选 Setup 离线升级 canary 的验证范围及未执行风险后再次确认发布，并以发布负责人身份单独豁免 Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选 Setup 的 `v3.1.3 → v3.1.4` 离线覆盖 canary。可追溯副本见 [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)。该豁免只解除 tag 前人工门禁，两项均按“未实测”转为发布后 follow-up，不得写成测试通过。
+
 ## 14. 正式收尾与发布准备状态
 
 1. PR #114 已于 2026-08-01 以 merge commit
@@ -465,10 +467,11 @@
    `v3.1.4` 技术发布；不可变批准副本见
    [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
    Windows 大报告恢复和进程硬退出演练继续作为发布后人工跟进，不得描述为已通过。
-7. Windows 10/11 候选 Setup/portable 验证和候选安装包 `v3.1.3 → v3.1.4` 离线覆盖
-   canary 仍是打标签前门禁；缺少实测证据时，必须取得发布负责人对这两项的单独、可追溯
-   豁免，不得从 R2/R3 豁免扩大解释。
-8. 发布准备 PR 合并且第 7 项闭环后，annotated tag 必须指向当时最新 `main`；标签触发的 Windows
+7. Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选安装包 `v3.1.3 → v3.1.4`
+   离线覆盖 canary 尚无实测证据；发布负责人已在
+   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
+   单独明确豁免 tag 前门禁并接受风险。两项转为发布后人工 follow-up，不得描述为已通过。
+8. 发布准备 PR 合并且第 7 项豁免证据闭环后，annotated tag 必须指向当时最新 `main`；标签触发的 Windows
    Release workflow、四项更新资产和最终公开校验结果须在发布证据 PR 中回写。
 9. 发布准备硬节点已执行：`scan:vars` 为 263 个源文件、3,322 个顶层名称；本分支
    未修改 `src/`，`check:vars -- --include-minor` 安全跳过。主页面布局首次受桌面沙箱

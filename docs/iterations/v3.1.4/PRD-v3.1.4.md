@@ -61,8 +61,10 @@
   已完成 smoke、主页面对齐、Setup/portable 构建、包体检查和更新资产暂存。
 - 2026-08-01，用户以业务负责人身份确认 Spec 13.3 五项资金判断并批准技术发布；批准副本见
   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
-- Windows 10/11 候选 Setup/portable 验证和候选 Setup 的 `v3.1.3 → v3.1.4` 离线覆盖
-  canary 仍是 tag 前门禁；无实测证据时必须取得发布负责人的单独可追溯豁免。
+- Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选 Setup 的
+  `v3.1.3 → v3.1.4` 离线覆盖 canary 尚无实测证据；发布负责人已通过
+  [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
+  单独豁免 tag 前门禁并接受风险。两项不记为测试通过。
 - `v3.1.4` tag、Windows Release workflow、四项公开更新资产和最终摘要将在发布证据
   PR 中回写。
 
@@ -70,6 +72,9 @@
 
 - Windows 打包环境验证大异常报告流式 writer 峰值与存档恢复。
 - Windows 安装版演练进程硬退出、系统文件锁和存档持久重试提示。
+- Windows 10/11 补做 Setup/portable 启动及 SmartScreen 实际提示验证。
+- 使用 Setup 补做 `v3.1.3 → v3.1.4` 覆盖安装，并核对主库、平盘 side DB、设置、
+  存档和导出文件保留。
 - Release 公开后从 `v3.1.3` 执行 production/latest 在线升级 canary，覆盖检查、下载、
   稍后、业务忙阻断、重启安装和用户数据保留。
 

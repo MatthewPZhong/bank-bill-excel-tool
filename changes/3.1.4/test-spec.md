@@ -62,7 +62,9 @@
 - `npm audit --omit=dev` 为 7 high、2 moderate、0 critical；依赖治理不混入发布收尾。
 - 2026-08-01，业务负责人确认 Spec 13.3 五项资金判断并批准技术发布；不可变批准副本见
   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151496159)。
-- Windows 10/11 候选 Setup/portable 验证和候选安装包 `v3.1.3 → v3.1.4` 离线覆盖
-  canary 仍需在 tag 前提供实测证据或单独可追溯豁免。
+- Windows 10/11 候选 Setup/portable/SmartScreen 验证和候选安装包 `v3.1.3 → v3.1.4`
+  离线覆盖 canary 尚无实测证据；发布负责人已通过
+  [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
+  单独豁免 tag 前门禁。测试结论保持“未执行”，两项转发布后人工跟进。
 - Windows 打包环境的大报告恢复及进程硬退出/文件锁/存档重试仍为发布后人工跟进；
   技术发布状态不得解释为这些实机演练已通过。
