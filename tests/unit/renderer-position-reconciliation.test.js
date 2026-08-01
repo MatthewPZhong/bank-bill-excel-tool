@@ -191,6 +191,11 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(positionRenderer, /filteredButton\.disabled = !hasFilteredRows/);
     assert.match(positionRenderer, /filteredButton\.title = '本次运行没有过滤数据'/);
     assert.match(positionRenderer, /api\.exportRunFiltered\(runId\)/);
+    assert.match(
+      positionRenderer,
+      /Number\(row\.rowCount\) > 0 \|\| Number\(row\.filteredRowCount\) > 0/
+    );
+    assert.match(positionRenderer, /仅活动过滤记录/);
   });
 
   test('管理按钮不得把 click 事件误当成 preview 数据', () => {

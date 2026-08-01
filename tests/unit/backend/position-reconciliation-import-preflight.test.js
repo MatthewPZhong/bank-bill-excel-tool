@@ -2068,6 +2068,8 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(result.results[0].filteredRowCount, 1);
     assert.equal(result.results[0].collapsedDuplicateCount, 1);
     assert.equal(result.results[0].generatedLinkRowCount, 4);
+    assert.equal(result.results[0].sourceRevision, 1);
+    assert.equal(result.results[0].linkedRevision, 1);
     assert.equal(result.anomalyReport.filteredRowCount, 1);
     assert.ok(fs.existsSync(result.anomalyReport.filePath));
     const reportHash = await hashFileSha256Async(result.anomalyReport.filePath);
@@ -2172,6 +2174,8 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(result.results[0].rowCount, 0);
     assert.equal(result.results[0].filteredRowCount, 2);
     assert.equal(result.results[0].generatedLinkRowCount, 0);
+    assert.equal(result.results[0].sourceRevision, 1);
+    assert.equal(result.results[0].linkedRevision, 1);
     const db = new DatabaseSync(sideDbPath, { readOnly: true });
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_source_rows').get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM position_link_rows').get().count, 0);

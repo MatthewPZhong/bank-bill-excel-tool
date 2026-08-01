@@ -35,11 +35,11 @@ const {
   serializeJson
 } = require('../../../src/main-process/position-reconciliation/store');
 
-async function writeReport(filePath) {
+async function writeReport(filePath, { detailCount = 1 } = {}) {
   const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ filename: filePath });
   const summary = workbook.addWorksheet('异常汇总');
   summary.addRow(['文件名', '来源类型', '过滤行数']).commit();
-  summary.addRow(['transfer.xlsx', SOURCE_TYPES.FUND_TRANSFER, 1]).commit();
+  summary.addRow(['transfer.xlsx', SOURCE_TYPES.FUND_TRANSFER, detailCount]).commit();
   summary.commit();
   const headers = [
     ...DETAIL_META_HEADERS,
@@ -58,16 +58,23 @@ async function writeReport(filePath) {
     收款金额: '95',
     收款币种: 'EUR'
   });
-  const values = [
-    'report-row-1', 'transfer.xlsx', 'Sheet1', 2,
-    SOURCE_TYPES.FUND_TRANSFER, raw.调拨单号, raw.渠道流水号,
-    'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE', '非成功调拨缺少付款金额',
-    '2026-07-20', '2026-07',
-    ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => raw[header])
-  ];
   const detail = workbook.addWorksheet('调拨异常明细');
   detail.addRow(headers).commit();
-  detail.addRow(values).commit();
+  for (let index = 0; index < detailCount; index += 1) {
+    const row = {
+      ...raw,
+      调拨单号: index === 0 ? raw.调拨单号 : `${raw.调拨单号}-${index + 1}`,
+      渠道流水号: index === 0 ? raw.渠道流水号 : `${raw.渠道流水号}-${index + 1}`
+    };
+    const values = [
+      `report-row-${index + 1}`, 'transfer.xlsx', 'Sheet1', index + 2,
+      SOURCE_TYPES.FUND_TRANSFER, row.调拨单号, row.渠道流水号,
+      'FT_NON_SUCCESS_EVIDENCE_INCOMPLETE', '非成功调拨缺少付款金额',
+      '2026-07-20', '2026-07',
+      ...SOURCE_DEFINITIONS[SOURCE_TYPES.FUND_TRANSFER].headers.map((header) => row[header])
+    ];
+    detail.addRow(values).commit();
+  }
   detail.commit();
   await workbook.commit();
 }
@@ -133,6 +140,55 @@ test('异常报告按 SHA 校验、同字节导出并按运行冻结记录合并
   );
 });
 
+test('运行过滤合并报告超过单 Sheet 上限时完整拆分', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-report-split-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const reportPath = path.join(dir, 'report.xlsx');
+  await writeReport(reportPath, { detailCount: 2 });
+  const evidence = await hashFileSha256Async(reportPath);
+  const outputPath = path.join(dir, 'run-filtered.xlsx');
+  const shared = {
+    sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    sourceRevision: 3,
+    reportKey: 'report-split',
+    reportFileName: 'report.xlsx',
+    reportSha256: evidence.sha256
+  };
+  const result = await writeRunFilteredSourcesWorkbook({
+    outputPath,
+    run: {
+      id: 13,
+      scope: { channels: ['DBS'], months: ['2026-07'] }
+    },
+    filteredSources: [
+      { ...shared, reportRowKey: 'report-row-1' },
+      { ...shared, reportRowKey: 'report-row-2' }
+    ],
+    reportFiles: [{
+      filePath: reportPath,
+      reportKey: 'report-split',
+      sha256: evidence.sha256,
+      sizeBytes: evidence.sizeBytes
+    }],
+    maxDetailRowsPerSheet: 1
+  });
+  assert.equal(result.rowCount, 2);
+  const workbook = XLSX.readFile(outputPath, { raw: true });
+  assert.deepEqual(workbook.SheetNames, [
+    '运行与过滤汇总',
+    '调拨过滤数据',
+    '调拨过滤数据_2'
+  ]);
+  assert.equal(
+    XLSX.utils.sheet_to_json(workbook.Sheets['调拨过滤数据']).length,
+    1
+  );
+  assert.equal(
+    XLSX.utils.sheet_to_json(workbook.Sheets['调拨过滤数据_2']).length,
+    1
+  );
+});
+
 test('异常报告缺失或字节被修改时 fail closed', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-tamper-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -179,6 +235,54 @@ test('目标月份来源全量过滤时在匹配引擎前阻断运行', (t) => {
     (error) => error && error.code === 'position-source-all-filtered'
   );
   service.close();
+});
+
+test('全量过滤月份仍可在链接表管理中选择并解除活动墓碑', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-month-manager-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = createPositionReconciliationStore(dir, {
+    initialCheckpoint: {
+      identity: 'filtered-month-manager-identity',
+      generation: 0,
+      token: 'filtered-month-manager-token'
+    }
+  });
+  t.after(() => store.close());
+  store.db.prepare(`
+    INSERT INTO position_filtered_source_rows(
+      report_row_key, source_type, business_key, recon_id,
+      event_date, month_key, error_code, error_reason,
+      source_file_path, source_file_name, source_sheet, source_row_number,
+      row_hash, import_operation_token, archive_operation_key,
+      report_key, report_artifact_key, report_file_path, report_file_name,
+      report_sha256, report_size_bytes
+    ) VALUES (
+      'filtered-only-row', ?, 'FT-FILTERED-ONLY', 'RID-FILTERED-ONLY',
+      '2026-07-20', '2026-07', 'FT_FILTER', '测试全量过滤',
+      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 2,
+      'filtered-only-row-hash', 'operation', 'archive-operation',
+      'report-filtered-only', 'artifact-filtered-only',
+      '/tmp/report.xlsx', 'report.xlsx', ?, 10
+    )
+  `).run(SOURCE_TYPES.FUND_TRANSFER, 'd'.repeat(64));
+
+  const raw = store.listRawSummary().find(
+    (item) => item.sourceType === SOURCE_TYPES.FUND_TRANSFER
+  );
+  assert.equal(raw.rowCount, 0);
+  assert.equal(raw.filteredRowCount, 1);
+  assert.deepEqual(
+    store.listSourceMonths()[SOURCE_TYPES.FUND_TRANSFER],
+    ['2026-07']
+  );
+
+  const removed = store.deleteSource({
+    sourceType: SOURCE_TYPES.FUND_TRANSFER,
+    months: ['2026-07']
+  });
+  assert.equal(removed.deletedCount, 0);
+  assert.equal(removed.resolvedFilteredCount, 1);
+  assert.deepEqual(store.listSourceMonths()[SOURCE_TYPES.FUND_TRANSFER], []);
 });
 
 test('结果确认前重新校验运行冻结的异常报告哈希', async (t) => {
@@ -368,5 +472,57 @@ test('运行信封拒绝被改写的过滤报告引用和来源 revision', (t) =
   assert.throws(
     () => store.getRun(run.id),
     (error) => error && error.code === 'position-side-data-invalid'
+  );
+  store.db.prepare(`
+    UPDATE position_run_filtered_sources
+    SET report_sha256 = ?
+    WHERE run_id = ?
+  `).run(reportSha256, run.id);
+  assert.equal(store.getRun(run.id).filteredRowCount, 1);
+
+  store.db.prepare(`
+    UPDATE position_filtered_source_rows
+    SET error_reason = '被改写的过滤原因'
+    WHERE id = ?
+  `).run(Number(inserted.lastInsertRowid));
+  assert.throws(
+    () => store.getRun(run.id),
+    (error) => error
+      && error.code === 'position-side-data-invalid'
+      && error.message.includes('过滤快照完整性校验失败')
+  );
+  store.db.prepare(`
+    UPDATE position_filtered_source_rows
+    SET error_reason = '测试过滤'
+    WHERE id = ?
+  `).run(Number(inserted.lastInsertRowid));
+  assert.equal(store.getRun(run.id).filteredRowCount, 1);
+
+  const replacement = store.db.prepare(`
+    INSERT INTO position_filtered_source_rows(
+      report_row_key, source_type, business_key, recon_id,
+      event_date, month_key, error_code, error_reason,
+      source_file_path, source_file_name, source_sheet, source_row_number,
+      row_hash, import_operation_token, archive_operation_key,
+      report_key, report_artifact_key, report_file_path, report_file_name,
+      report_sha256, report_size_bytes
+    ) VALUES (
+      'envelope-row-replacement', ?, 'FT-ENVELOPE-REPLACEMENT', 'RID-ENVELOPE-REPLACEMENT',
+      '2026-07-21', '2026-07', 'FT_FILTER', '测试过滤替换行',
+      '/tmp/source.xlsx', 'source.xlsx', 'Sheet1', 3,
+      'envelope-row-hash-replacement', 'operation', 'archive-operation',
+      'report-envelope', 'artifact-envelope', '/tmp/report.xlsx', 'report.xlsx', ?, 10
+    )
+  `).run(SOURCE_TYPES.FUND_TRANSFER, reportSha256);
+  store.db.prepare(`
+    UPDATE position_run_filtered_sources
+    SET filtered_source_id = ?
+    WHERE run_id = ?
+  `).run(Number(replacement.lastInsertRowid), run.id);
+  assert.throws(
+    () => store.getRun(run.id),
+    (error) => error
+      && error.code === 'position-side-data-invalid'
+      && error.message.includes('过滤快照完整性校验失败')
   );
 });

@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.4",
-    "scannedAt": "2026-08-01T08:22:18.822Z",
+    "scannedAt": "2026-08-01T09:41:03.918Z",
     "root": "src",
     "totalFiles": 263,
-    "totalTopLevelNames": 3316,
+    "totalTopLevelNames": 3317,
     "buckets": {
       "shared": 472,
       "paired": 748,
-      "local": 1952,
+      "local": 1953,
       "crossFile": 1220
     }
   },
@@ -1260,7 +1260,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 132
+            "count": 150
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -1307,7 +1307,7 @@
             "count": 62
           }
         ],
-        "totalHits": 619,
+        "totalHits": 637,
         "fileSpan": 38
       },
       {
@@ -2075,6 +2075,10 @@
             "count": 1
           },
           {
+            "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+            "count": 13
+          },
+          {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
             "count": 2
           },
@@ -2123,8 +2127,8 @@
             "count": 214
           }
         ],
-        "totalHits": 514,
-        "fileSpan": 26
+        "totalHits": 527,
+        "fileSpan": 27
       },
       {
         "name": "normalizeCellValue",
@@ -2637,14 +2641,14 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 32
+            "count": 34
           },
           {
             "file": "src/main.js",
             "count": 1
           }
         ],
-        "totalHits": 201,
+        "totalHits": 203,
         "fileSpan": 19
       },
       {
@@ -3545,14 +3549,14 @@
           },
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 5
+            "count": 6
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
             "count": 7
           }
         ],
-        "totalHits": 49,
+        "totalHits": 50,
         "fileSpan": 13
       },
       {
@@ -7107,6 +7111,39 @@
         "fileSpan": 5
       },
       {
+        "name": "EXCEL_MAX_ROWS",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/anomaly-report.js",
+          "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "src/main-process/position-reconciliation/excel-io.js",
+          "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/anomaly-report.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/excel-io.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 5
+      },
+      {
         "name": "normalizePositionCheckpoint",
         "defFiles": [
           "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -9050,35 +9087,6 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 4
-      },
-      {
-        "name": "EXCEL_MAX_ROWS",
-        "defFiles": [
-          "src/backend/position-reconciliation-import/anomaly-report.js",
-          "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "src/main-process/position-reconciliation/excel-io.js",
-          "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/position-reconciliation/excel-io.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
             "count": 5
           }
         ],
@@ -29700,10 +29708,10 @@
         "refFiles": [
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 53
+            "count": 54
           }
         ],
-        "totalHits": 53,
+        "totalHits": 54,
         "fileSpan": 1
       },
       {
@@ -36245,6 +36253,20 @@
         "fileSpan": 1
       },
       {
+        "name": "initializeSheet",
+        "defFiles": [
+          "src/main-process/position-reconciliation/filtered-source-report.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "inspectRegularFile",
         "defFiles": [
           "src/main-process/toolbox-output-publication.js"
@@ -42447,20 +42469,6 @@
         "fileSpan": 1
       },
       {
-        "name": "initializeSheet",
-        "defFiles": [
-          "src/main-process/position-reconciliation/filtered-source-report.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/filtered-source-report.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "INTAKE_ORIGINAL_ORDER_SIGNATURE",
         "defFiles": [
           "src/constants/table-signatures.js"
@@ -45912,6 +45920,20 @@
         "refFiles": [
           {
             "file": "src/backend/run-data-store.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "runFilteredSourceIntegrityHash",
+        "defFiles": [
+          "src/main-process/position-reconciliation/store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/store.js",
             "count": 3
           }
         ],
@@ -58241,7 +58263,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 132
+          "count": 150
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/matching-engine.js",
@@ -58288,7 +58310,7 @@
           "count": 62
         }
       ],
-      "totalHits": 619,
+      "totalHits": 637,
       "fileSpan": 38
     },
     {
@@ -59056,6 +59078,10 @@
           "count": 1
         },
         {
+          "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+          "count": 13
+        },
+        {
           "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
           "count": 2
         },
@@ -59104,8 +59130,8 @@
           "count": 214
         }
       ],
-      "totalHits": 514,
-      "fileSpan": 26
+      "totalHits": 527,
+      "fileSpan": 27
     },
     {
       "name": "normalizeCellValue",
@@ -59618,14 +59644,14 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 32
+          "count": 34
         },
         {
           "file": "src/main.js",
           "count": 1
         }
       ],
-      "totalHits": 201,
+      "totalHits": 203,
       "fileSpan": 19
     },
     {
@@ -60526,14 +60552,14 @@
         },
         {
           "file": "src/main-process/position-reconciliation/store.js",
-          "count": 5
+          "count": 6
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
           "count": 7
         }
       ],
-      "totalHits": 49,
+      "totalHits": 50,
       "fileSpan": 13
     },
     {
@@ -64088,6 +64114,39 @@
       "fileSpan": 5
     },
     {
+      "name": "EXCEL_MAX_ROWS",
+      "defFiles": [
+        "src/backend/position-reconciliation-import/anomaly-report.js",
+        "src/main-process/duplicate-inbound-match/excel-writer.js",
+        "src/main-process/position-reconciliation/excel-io.js",
+        "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/position-reconciliation-import/anomaly-report.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/excel-io.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/position-reconciliation/filtered-source-report.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 5
+    },
+    {
       "name": "normalizePositionCheckpoint",
       "defFiles": [
         "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -66031,35 +66090,6 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 5
-        }
-      ],
-      "totalHits": 14,
-      "fileSpan": 4
-    },
-    {
-      "name": "EXCEL_MAX_ROWS",
-      "defFiles": [
-        "src/backend/position-reconciliation-import/anomaly-report.js",
-        "src/main-process/duplicate-inbound-match/excel-writer.js",
-        "src/main-process/position-reconciliation/excel-io.js",
-        "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/excel-writer.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/position-reconciliation/excel-io.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js",
           "count": 5
         }
       ],

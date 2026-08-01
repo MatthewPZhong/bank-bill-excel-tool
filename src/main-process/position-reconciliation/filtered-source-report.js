@@ -26,6 +26,7 @@ const {
 const {
   COLUMN_WIDTHS,
   DETAIL_META_HEADERS,
+  EXCEL_MAX_ROWS,
   TEXT_HEADER_PATTERN,
   excelValueForHeader
 } = require('../../backend/position-reconciliation-import/anomaly-report');
@@ -226,7 +227,8 @@ async function writeRunFilteredSourcesWorkbook({
   outputPath,
   run,
   filteredSources,
-  reportFiles
+  reportFiles,
+  maxDetailRowsPerSheet = EXCEL_MAX_ROWS - 1
 }) {
   const requested = new Map((Array.isArray(filteredSources) ? filteredSources : []).map(
     (item) => [text(item.reportRowKey), item]
@@ -247,6 +249,12 @@ async function writeRunFilteredSourcesWorkbook({
   await fs.promises.mkdir(path.dirname(resolvedOutput), { recursive: true });
   const temporaryPath = `${resolvedOutput}.${crypto.randomUUID()}.tmp`;
   const found = new Set();
+  const detailRowLimit = Number(maxDetailRowsPerSheet);
+  if (!Number.isSafeInteger(detailRowLimit)
+      || detailRowLimit < 1
+      || detailRowLimit > EXCEL_MAX_ROWS - 1) {
+    throw new TypeError('过滤数据单 Sheet 行数上限非法');
+  }
   try {
     const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
       filename: temporaryPath,
@@ -285,7 +293,7 @@ async function writeRunFilteredSourcesWorkbook({
     }
     summarySheet.commit();
 
-    const detailSheets = new Map();
+    const detailSheetStates = new Map();
     const detailHeaders = new Map([
       [SOURCE_TYPES.FUND_TRANSFER, [
         ...DETAIL_META_HEADERS,
@@ -298,13 +306,15 @@ async function writeRunFilteredSourcesWorkbook({
     ]);
     for (const sourceType of [SOURCE_TYPES.FUND_TRANSFER, SOURCE_TYPES.TEST_PAYMENT]) {
       if (![...requested.values()].some((item) => item.sourceType === sourceType)) continue;
-      detailSheets.set(sourceType, initializeSheet(
-        workbook,
-        sourceType === SOURCE_TYPES.FUND_TRANSFER
-          ? '调拨过滤数据'
-          : '测试付款过滤数据',
-        detailHeaders.get(sourceType)
-      ));
+      const baseName = sourceType === SOURCE_TYPES.FUND_TRANSFER
+        ? '调拨过滤数据'
+        : '测试付款过滤数据';
+      detailSheetStates.set(sourceType, {
+        baseName,
+        sheetIndex: 1,
+        dataRows: 0,
+        sheet: initializeSheet(workbook, baseName, detailHeaders.get(sourceType))
+      });
     }
 
     for (const report of Array.isArray(reportFiles) ? reportFiles : []) {
@@ -319,21 +329,32 @@ async function writeRunFilteredSourcesWorkbook({
           throw integrityError(`过滤记录来源类型与运行快照不一致：${reportRowKey}`);
         }
         const expectedHeaders = detailHeaders.get(target.sourceType);
-        const sheet = detailSheets.get(target.sourceType);
-        if (!sheet || !expectedHeaders) {
+        const state = detailSheetStates.get(target.sourceType);
+        if (!state || !expectedHeaders) {
           throw integrityError(`过滤记录来源类型无法导出：${target.sourceType}`);
+        }
+        if (state.dataRows >= detailRowLimit) {
+          state.sheet.commit();
+          state.sheetIndex += 1;
+          state.dataRows = 0;
+          state.sheet = initializeSheet(
+            workbook,
+            `${state.baseName}_${state.sheetIndex}`,
+            expectedHeaders
+          );
         }
         const projected = projectValuesByHeaderOccurrence(
           headers,
           values,
           expectedHeaders
         );
-        const reportRow = sheet.addRow(expectedHeaders.map(
+        const reportRow = state.sheet.addRow(expectedHeaders.map(
           (header, index) => excelValueForHeader(header, projected[index])
         ));
         reportRow.height = 30;
         reportRow.getCell(9).alignment = { vertical: 'top', wrapText: true };
         reportRow.commit();
+        state.dataRows += 1;
         found.add(reportRowKey);
       });
     }
@@ -344,7 +365,7 @@ async function writeRunFilteredSourcesWorkbook({
         missing.slice(0, 20)
       );
     }
-    for (const sheet of detailSheets.values()) sheet.commit();
+    for (const state of detailSheetStates.values()) state.sheet.commit();
     await workbook.commit();
     await fs.promises.rename(temporaryPath, resolvedOutput);
     return {

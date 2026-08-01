@@ -245,13 +245,15 @@ function assertSourceStatsMatch(actual, expected, sourceType, sheetName) {
 }
 
 function bumpRevision(db, kind, key) {
-  db.prepare(`
+  const row = db.prepare(`
     INSERT INTO position_revisions(kind, scope_key, revision, updated_at)
     VALUES (?, ?, 1, CURRENT_TIMESTAMP)
     ON CONFLICT(kind, scope_key) DO UPDATE SET
       revision = position_revisions.revision + 1,
       updated_at = CURRENT_TIMESTAMP
-  `).run(kind, key);
+    RETURNING revision
+  `).get(kind, key);
+  return Number(row && row.revision);
 }
 
 function inputEvidenceFor(descriptor) {
@@ -677,8 +679,8 @@ async function applySourceFile({
       stats.contentHash = contentHash.digest();
       assertSourceStatsMatch(stats, expected, detectedSourceType, sheetName);
       assertNotCancelled(cancelToken);
-      bumpRevision(db, 'source', sourceType);
-      bumpRevision(db, 'linked', sourceType);
+      const sourceRevision = bumpRevision(db, 'source', sourceType);
+      const linkedRevision = bumpRevision(db, 'linked', sourceType);
       const sourceSummary = refreshPositionSourceSummary(db, sourceType, {
         onPhase: (phase) => {
           if (typeof onProgress !== 'function') return;
@@ -717,7 +719,9 @@ async function applySourceFile({
           Number(stats.visibleLinkRows) + Number(stats.hiddenLinkRows),
         linkedRowCount: sourceSummary.linkedRowCount,
         collapsedDuplicateCount: stats.collapsedDuplicateRows,
-        contentHash: stats.contentHash
+        contentHash: stats.contentHash,
+        sourceRevision,
+        linkedRevision
       };
     }
   });
@@ -887,6 +891,8 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         linkedRowCount: applied.linkedRowCount,
         collapsedDuplicateCount: applied.collapsedDuplicateCount,
         contentHash: applied.contentHash,
+        sourceRevision: applied.sourceRevision,
+        linkedRevision: applied.linkedRevision,
         anomalyReport: applied.filteredRowCount > 0 ? anomalyReport : null,
         applied: true
       };

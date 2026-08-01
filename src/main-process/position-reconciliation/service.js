@@ -1463,7 +1463,13 @@ class PositionReconciliationService {
       return this.deleteSourceStreamed({ sourceType, wholeTable, months });
     }
     const result = this.store.deleteSource({ sourceType, wholeTable, months });
-    return { status: 'ok', message: `已删除 ${result.deletedCount} 行原始数据`, ...result };
+    const resolved = Number(result.resolvedFilteredCount) || 0;
+    return {
+      status: 'ok',
+      message: `已删除 ${result.deletedCount} 行原始数据` +
+        (resolved > 0 ? `，已解除 ${resolved} 行活动过滤记录` : ''),
+      ...result
+    };
   }
 
   async deleteSourceStreamed(selection) {
@@ -1473,7 +1479,10 @@ class PositionReconciliationService {
     );
     return {
       status: 'ok',
-      message: `已删除 ${result.deletedCount} 行原始数据`,
+      message: `已删除 ${result.deletedCount} 行原始数据` +
+        (Number(result.resolvedFilteredCount) > 0
+          ? `，已解除 ${Number(result.resolvedFilteredCount)} 行活动过滤记录`
+          : ''),
       ...result
     };
   }

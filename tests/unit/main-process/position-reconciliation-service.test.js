@@ -3142,6 +3142,10 @@ test('完整空旧侧库只在合法 generation 0 bootstrap 下原地升级', (t
     .all().map((column) => column.name);
   assert.ok(runRowColumns.includes('consumes_source'));
   assert.ok(runRowColumns.includes('integrity_hash'));
+  const runFilteredSourceColumns = db.prepare(
+    'PRAGMA table_info(position_run_filtered_sources)'
+  ).all().map((column) => column.name);
+  assert.ok(runFilteredSourceColumns.includes('integrity_hash'));
   assert.equal(
     db.prepare('SELECT COUNT(*) AS count FROM position_checkpoint_history').get().count,
     1

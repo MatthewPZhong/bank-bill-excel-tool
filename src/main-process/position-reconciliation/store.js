@@ -234,6 +234,7 @@ const SCHEMA = `
     report_sha256 TEXT NOT NULL,
     report_size_bytes INTEGER NOT NULL,
     source_revision INTEGER NOT NULL,
+    integrity_hash TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY(run_id, filtered_source_id),
     FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE,
@@ -621,6 +622,56 @@ function runRowIntegrityHash({
   });
 }
 
+function runFilteredSourceIntegrityHash({
+  runId,
+  filteredSourceId,
+  reportRowKey,
+  sourceType,
+  businessKey,
+  reconId,
+  eventDate,
+  monthKey,
+  errorCode,
+  errorReason,
+  sourceFileName,
+  sourceSheet,
+  sourceRowNumber,
+  rowHash,
+  importOperationToken,
+  reportFileName,
+  reportKey,
+  reportArtifactKey,
+  archiveOperationKey,
+  reportSha256,
+  reportSizeBytes,
+  sourceRevision
+}) {
+  return stableHash({
+    runId: Number(runId),
+    filteredSourceId: Number(filteredSourceId),
+    reportRowKey: text(reportRowKey),
+    sourceType: text(sourceType),
+    businessKey: text(businessKey),
+    reconId: text(reconId),
+    eventDate: text(eventDate),
+    monthKey: text(monthKey),
+    errorCode: text(errorCode),
+    errorReason: text(errorReason),
+    sourceFileName: text(sourceFileName),
+    sourceSheet: text(sourceSheet),
+    sourceRowNumber: Number(sourceRowNumber),
+    rowHash: text(rowHash),
+    importOperationToken: text(importOperationToken),
+    reportFileName: text(reportFileName),
+    reportKey: text(reportKey),
+    reportArtifactKey: text(reportArtifactKey),
+    archiveOperationKey: text(archiveOperationKey),
+    reportSha256: text(reportSha256),
+    reportSizeBytes: Number(reportSizeBytes),
+    sourceRevision: Number(sourceRevision)
+  });
+}
+
 function runRowConsumesSource(item) {
   const lineage = item && item.lineage ? item.lineage : {};
   const sourceType = text(lineage.sourceType);
@@ -929,8 +980,21 @@ function assertRunFilteredSourceEnvelope(db, run, scope, snapshot, summary) {
            rf.report_sha256 AS frozenReportSha256,
            rf.report_size_bytes AS frozenReportSizeBytes,
            rf.source_revision AS sourceRevision,
+           rf.integrity_hash AS integrityHash,
+           f.report_row_key AS reportRowKey,
            f.source_type AS sourceType,
+           f.business_key AS businessKey,
+           f.recon_id AS reconId,
+           f.event_date AS eventDate,
            f.month_key AS monthKey,
+           f.error_code AS errorCode,
+           f.error_reason AS errorReason,
+           f.source_file_name AS sourceFileName,
+           f.source_sheet AS sourceSheet,
+           f.source_row_number AS sourceRowNumber,
+           f.row_hash AS rowHash,
+           f.import_operation_token AS importOperationToken,
+           f.report_file_name AS reportFileName,
            f.report_key AS reportKey,
            f.report_artifact_key AS reportArtifactKey,
            f.archive_operation_key AS archiveOperationKey,
@@ -974,6 +1038,33 @@ function assertRunFilteredSourceEnvelope(db, run, scope, snapshot, summary) {
         || text(row.frozenReportSha256) !== text(row.reportSha256)
         || sizeBytes !== Number(row.reportSizeBytes)) {
       throwInvalidSideData(`平盘侧库运行 ID=${run.id}异常报告冻结引用不一致`);
+    }
+    const expectedIntegrityHash = runFilteredSourceIntegrityHash({
+      runId: run.id,
+      filteredSourceId: row.filteredSourceId,
+      reportRowKey: row.reportRowKey,
+      sourceType: row.sourceType,
+      businessKey: row.businessKey,
+      reconId: row.reconId,
+      eventDate: row.eventDate,
+      monthKey: row.monthKey,
+      errorCode: row.errorCode,
+      errorReason: row.errorReason,
+      sourceFileName: row.sourceFileName,
+      sourceSheet: row.sourceSheet,
+      sourceRowNumber: row.sourceRowNumber,
+      rowHash: row.rowHash,
+      importOperationToken: row.importOperationToken,
+      reportFileName: row.reportFileName,
+      reportKey: row.frozenReportKey,
+      reportArtifactKey: row.frozenArtifactKey,
+      archiveOperationKey: row.frozenArchiveOperationKey,
+      reportSha256: row.frozenReportSha256,
+      reportSizeBytes: row.frozenReportSizeBytes,
+      sourceRevision: row.sourceRevision
+    });
+    if (text(row.integrityHash) !== expectedIntegrityHash) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}过滤快照完整性校验失败`);
     }
   }
   return rows.length;
@@ -1691,6 +1782,27 @@ class PositionReconciliationStore {
         }
         for (const [, statement] of missingRunRowColumns) this.db.exec(statement);
       }
+      const runFilteredSourceColumns = this.db.prepare(
+        'PRAGMA table_info(position_run_filtered_sources)'
+      ).all();
+      if (!runFilteredSourceColumns.some((column) => column.name === 'integrity_hash')) {
+        const existingRunFilteredSources = Number(
+          this.db.prepare(
+            'SELECT COUNT(*) AS count FROM position_run_filtered_sources'
+          ).get().count
+        );
+        if (existingRunFilteredSources > 0) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            '旧版平盘运行过滤快照缺少完整性锚点，禁止自动接管',
+            ['请删除未正式发布版本的平盘运行草稿后重新运行，或恢复完整软件数据目录']
+          );
+        }
+        this.db.exec(
+          "ALTER TABLE position_run_filtered_sources " +
+          "ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''"
+        );
+      }
       const seedCheckpoint = existingCheckpoint || initial || {
         identity: crypto.randomUUID(),
         generation: 0,
@@ -2208,21 +2320,37 @@ class PositionReconciliationStore {
     const result = Object.fromEntries(
       Object.values(SOURCE_TYPES).map((sourceType) => [sourceType, []])
     );
+    const filteredMonthsBySource = new Map();
+    for (const row of this.db.prepare(`
+      SELECT source_type AS sourceType, month_key AS monthKey
+      FROM position_filtered_source_rows
+      WHERE resolved_at IS NULL
+        AND month_key IS NOT NULL
+        AND TRIM(month_key) <> ''
+      GROUP BY source_type, month_key
+      ORDER BY source_type, month_key
+    `).all()) {
+      const months = filteredMonthsBySource.get(row.sourceType) || [];
+      months.push(row.monthKey);
+      filteredMonthsBySource.set(row.sourceType, months);
+    }
     for (const sourceType of Object.values(SOURCE_TYPES)) {
       const cached = readPositionSourceSummary(this.db, sourceType);
-      if (cached) {
-        result[sourceType] = cached.sourceMonths.slice();
-        continue;
-      }
-      result[sourceType] = this.db.prepare(`
-        SELECT month_key AS monthKey
-        FROM position_source_rows
-        WHERE source_type = ?
-          AND month_key IS NOT NULL
-          AND TRIM(month_key) <> ''
-        GROUP BY month_key
-        ORDER BY month_key
-      `).all(sourceType).map((row) => row.monthKey);
+      const sourceMonths = cached
+        ? cached.sourceMonths.slice()
+        : this.db.prepare(`
+          SELECT month_key AS monthKey
+          FROM position_source_rows
+          WHERE source_type = ?
+            AND month_key IS NOT NULL
+            AND TRIM(month_key) <> ''
+          GROUP BY month_key
+          ORDER BY month_key
+        `).all(sourceType).map((row) => row.monthKey);
+      result[sourceType] = [...new Set([
+        ...sourceMonths,
+        ...(filteredMonthsBySource.get(sourceType) || [])
+      ])].sort();
     }
     return result;
   }
@@ -2464,17 +2592,32 @@ class PositionReconciliationStore {
   }
 
   listRawSummary() {
+    const filteredBySource = new Map(this.db.prepare(`
+      SELECT source_type AS sourceType, COUNT(*) AS filteredRowCount,
+             MAX(created_at) AS filteredUpdatedAt
+      FROM position_filtered_source_rows
+      WHERE resolved_at IS NULL
+      GROUP BY source_type
+    `).all().map((row) => [row.sourceType, {
+      filteredRowCount: Number(row.filteredRowCount),
+      filteredUpdatedAt: row.filteredUpdatedAt || ''
+    }]));
     return SOURCE_DISPLAY_ORDER.map((sourceType) => {
       const definition = SOURCE_DEFINITIONS[sourceType];
+      const filtered = filteredBySource.get(sourceType) || {
+        filteredRowCount: 0,
+        filteredUpdatedAt: ''
+      };
       const cached = readPositionSourceSummary(this.db, sourceType);
       if (cached) {
         return {
           sourceType,
           tableName: definition.sourceName,
           rowCount: cached.rawRowCount,
+          filteredRowCount: filtered.filteredRowCount,
           dateMin: cached.rawDateMin,
           dateMax: cached.rawDateMax,
-          updatedAt: cached.rawUpdatedAt
+          updatedAt: cached.rawUpdatedAt || filtered.filteredUpdatedAt
         };
       }
       const row = this.db.prepare(`
@@ -2487,9 +2630,10 @@ class PositionReconciliationStore {
         sourceType,
         tableName: definition.sourceName,
         rowCount: Number(row.rowCount),
+        filteredRowCount: filtered.filteredRowCount,
         dateMin: row.dateMin || '',
         dateMax: row.dateMax || '',
-        updatedAt: row.updatedAt || ''
+        updatedAt: row.updatedAt || filtered.filteredUpdatedAt
       };
     });
   }
@@ -2573,10 +2717,44 @@ class PositionReconciliationStore {
       const insertFilteredSource = this.db.prepare(`
         INSERT INTO position_run_filtered_sources(
           run_id, filtered_source_id, report_key, report_artifact_key,
-          archive_operation_key, report_sha256, report_size_bytes, source_revision
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          archive_operation_key, report_sha256, report_size_bytes, source_revision,
+          integrity_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const findFilteredSource = this.db.prepare(`
+        SELECT report_row_key AS reportRowKey,
+               source_type AS sourceType, business_key AS businessKey,
+               recon_id AS reconId, event_date AS eventDate,
+               month_key AS monthKey, error_code AS errorCode,
+               error_reason AS errorReason,
+               source_file_name AS sourceFileName,
+               source_sheet AS sourceSheet,
+               source_row_number AS sourceRowNumber,
+               row_hash AS rowHash,
+               import_operation_token AS importOperationToken,
+               report_file_name AS reportFileName
+        FROM position_filtered_source_rows
+        WHERE id = ?
       `);
       for (const item of Array.isArray(filteredSources) ? filteredSources : []) {
+        const filteredSource = findFilteredSource.get(Number(item.id));
+        if (!filteredSource) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            `运行引用的过滤记录不存在：${Number(item.id)}`
+          );
+        }
+        const integrityHash = runFilteredSourceIntegrityHash({
+          runId,
+          filteredSourceId: item.id,
+          ...filteredSource,
+          reportKey: item.reportKey,
+          reportArtifactKey: item.reportArtifactKey,
+          archiveOperationKey: item.archiveOperationKey,
+          reportSha256: item.reportSha256,
+          reportSizeBytes: item.reportSizeBytes,
+          sourceRevision: item.sourceRevision
+        });
         insertFilteredSource.run(
           runId,
           Number(item.id),
@@ -2585,7 +2763,8 @@ class PositionReconciliationStore {
           text(item.archiveOperationKey),
           text(item.reportSha256),
           Number(item.reportSizeBytes),
-          Number(item.sourceRevision)
+          Number(item.sourceRevision),
+          integrityHash
         );
       }
       const insertRow = this.db.prepare(`

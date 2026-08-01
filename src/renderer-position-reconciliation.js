@@ -1274,9 +1274,11 @@
     }
 
     async function openSourceDeleteDialog(data, reload) {
-      const rows = (data.raw || []).filter((row) => Number(row.rowCount) > 0);
+      const rows = (data.raw || []).filter((row) => (
+        Number(row.rowCount) > 0 || Number(row.filteredRowCount) > 0
+      ));
       if (rows.length === 0) {
-        showAlert('当前没有可删除的链接原始表数据', { info: true });
+        showAlert('当前没有可删除的链接原始表或活动过滤记录', { info: true });
         return;
       }
       const shell = createDialogShell('删除链接表数据', 'position-delete-source-dialog');
@@ -1284,7 +1286,7 @@
         <div class="position-form-row">
           <label for="positionDeleteSourceType">目标表</label>
           <select id="positionDeleteSourceType" class="main-panel-select-control">
-            ${rows.map((row) => `<option value="${escapeHtml(row.sourceType)}">${escapeHtml(row.tableName)}</option>`).join('')}
+            ${rows.map((row) => `<option value="${escapeHtml(row.sourceType)}">${escapeHtml(row.tableName)}${Number(row.rowCount) === 0 && Number(row.filteredRowCount) > 0 ? '（仅活动过滤记录）' : ''}</option>`).join('')}
           </select>
         </div>
         <div class="position-form-row" data-month-row>
@@ -1323,7 +1325,7 @@
         const accepted = await confirmAction(
           wholeTable
             ? '清结算银行账户表将整表清空，且相关草稿会失效。确认继续？'
-            : '确认删除所选月份的链接原始表及派生链接数据？',
+            : '确认删除所选月份的链接原始表、派生链接及活动过滤记录？',
           wholeTable ? '确认整表删除' : '确认删除'
         );
         if (!accepted) return;
