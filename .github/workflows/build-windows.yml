@@ -30,6 +30,9 @@ jobs:
       - name: Run smoke test
         run: npm run smoke
 
+      - name: Run Windows SQLite teardown regression
+        run: node --test tests/unit/main-process/position-reconciliation-filtered-source-report.test.js
+
       - name: Verify main panel alignment
         run: npm run verify:main-panel-alignment
 

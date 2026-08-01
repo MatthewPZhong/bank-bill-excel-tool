@@ -23,23 +23,21 @@
 - [x] 建立 `docs/prs/PR114-v3.1.4.md` 和 `docs/iterations/v3.1.4/PRD-v3.1.4.md`。
 - [x] 业务负责人确认 Spec 13.3 五项资金判断，并授权技术发布。
 - [x] 重新执行发布门禁、布局校验、变量扫描与 check-vars。
-- [ ] 提交并合并 v3.1.4 发布准备 PR。
+- [x] PR #115 以 merge commit `14a9ce9de1d5607fe3c4dc58ae3adf81defef611` 合入 `main`。
 
 ## 发布收尾
 
 - [x] Windows 10/11 候选 Setup/portable 与 SmartScreen 门禁已由发布负责人单独豁免；证据见 [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)，不记为实测通过。
 - [x] 候选 Setup `v3.1.3 → v3.1.4` 离线覆盖 canary 门禁已由发布负责人单独豁免；证据同上，不记为实测通过。
-- [ ] 创建并推送 annotated tag `v3.1.4`，且 tag 必须指向当时最新 `main`。
-- [ ] 等待 Windows Release workflow 全部通过。
-- [ ] 验证 GitHub Release 为 stable/latest、non-draft、non-prerelease，并包含 Setup、Setup blockmap、portable、`latest.yml` 四项资产。
-- [ ] 回读公开资产元数据与摘要，核对版本、文件名、大小及 `latest.yml` 引用。
-- [ ] 回写发布 run、资产摘要和最终状态，提交并合并发布证据 PR。
-- [ ] 同步本地 `main` 并确认 tracked worktree 干净；既有无关未跟踪文件不纳入清理。
+- [x] 创建并推送 annotated tag `v3.1.4`，指向 `main@14a9ce9de1d5607fe3c4dc58ae3adf81defef611`。
+- [x] Windows Release workflow run `30703982194` 已结束：在发布检查阶段失败，未进入构建或发布。
+- [x] 已确认 v3.1.4 GitHub Release 不存在，Setup、blockmap、portable、`latest.yml` 均未创建。
+- [x] 保留 v3.1.4 tag 作审计，不改写历史；恢复发布转入 `changes/3.1.5/`。
 
 ## 发布后人工跟进
 
 - [ ] Windows 打包环境验证大异常报告流式 writer 峰值与存档恢复。
 - [ ] Windows 安装版演练进程硬退出、系统文件锁和存档持久重试提示。
 - [ ] 在 Windows 10/11 补做候选/正式 Setup 与 portable 启动及 SmartScreen 实际提示验证。
-- [ ] 使用 Setup 补做 `v3.1.3 → v3.1.4` 覆盖安装并核对主库、平盘 side DB、设置、存档与导出文件保留。
+- [ ] 使用正式 Setup 补做 `v3.1.3 → v3.1.5` 覆盖安装并核对主库、平盘 side DB、设置、存档与导出文件保留。
 - [ ] Release 公开后使用上一 stable 完成 production/latest 在线升级 canary，核对检查、下载、稍后、业务忙阻断、重启安装和用户数据保留。

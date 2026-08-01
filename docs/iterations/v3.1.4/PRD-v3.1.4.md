@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.4 PRD
 
 > 目标版本：`3.1.4`
-> 状态：release-prepared（PR #114 已合入 `main`；资金人工复核已确认；GitHub Release 待发布）
+> 状态：release-failed（tag 已保留；Windows Release 构建前失败；无公开资产；由 v3.1.5 恢复）
 > 源规格：`changes/3.1.4/spec.md`
 > 交付归档：`docs/prs/PR114-v3.1.4.md`
 > 更新时间：2026-08-01
@@ -65,15 +65,17 @@
   `v3.1.3 → v3.1.4` 离线覆盖 canary 尚无实测证据；发布负责人已通过
   [PR #115 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/115#issuecomment-5151827405)
   单独豁免 tag 前门禁并接受风险。两项不记为测试通过。
-- `v3.1.4` tag、Windows Release workflow、四项公开更新资产和最终摘要将在发布证据
-  PR 中回写。
+- `v3.1.4` annotated tag 已指向 `main@14a9ce9`；Windows Release
+  [run 30703982194](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30703982194)
+  在构建前因 Windows SQLite 单测清理顺序失败，没有 GitHub Release 或公开更新资产。
+- tag 保留为审计记录，不改写历史；全部用户功能与正式资产改由 v3.1.5 承接。
 
 ## 6. 发布后人工跟进
 
 - Windows 打包环境验证大异常报告流式 writer 峰值与存档恢复。
 - Windows 安装版演练进程硬退出、系统文件锁和存档持久重试提示。
 - Windows 10/11 补做 Setup/portable 启动及 SmartScreen 实际提示验证。
-- 使用 Setup 补做 `v3.1.3 → v3.1.4` 覆盖安装，并核对主库、平盘 side DB、设置、
+- 使用正式 Setup 补做 `v3.1.3 → v3.1.5` 覆盖安装，并核对主库、平盘 side DB、设置、
   存档和导出文件保留。
 - Release 公开后从 `v3.1.3` 执行 production/latest 在线升级 canary，覆盖检查、下载、
   稍后、业务忙阻断、重启安装和用户数据保留。

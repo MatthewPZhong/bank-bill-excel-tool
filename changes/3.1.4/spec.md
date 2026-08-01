@@ -1,7 +1,7 @@
 # v3.1.4 Spec — 平盘来源异常行自动过滤、审计报告与运行过滤数据导出
 
 > change-name: `position-reconciliation-filtered-source-import`
-> status: `release-prepared`（PR #114 已合入 `main`；资金人工复核已确认；Windows Release 待发布）
+> status: `release-failed`（annotated tag 已推送；Windows Release 在构建前失败；无公开 Release/资产；由 v3.1.5 恢复发布）
 > baseline-branch: `main`
 > baseline-commit: `64f19dd`
 > baseline-version: `3.1.3`
@@ -478,3 +478,7 @@
    限制出现 `electron exit null`，在沙箱外按真实 Electron 路径重跑后 6/6 PASS。
 10. `npm audit --omit=dev` 记录 7 high、2 moderate、0 critical；本次不静默升级依赖，
    保留为独立治理任务。
+11. annotated tag `v3.1.4` 已指向 `main@14a9ce9de1d5607fe3c4dc58ae3adf81defef611`；
+    Windows Release [run 30703982194](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30703982194)
+    在 `Run release checks` 阶段因两处单测先删除仍打开的 SQLite 临时库而失败，未进入构建、
+    发布或资产上传。GitHub Release 不存在，四项公开资产均未创建；tag 保留作审计，恢复发布改走 v3.1.5。
