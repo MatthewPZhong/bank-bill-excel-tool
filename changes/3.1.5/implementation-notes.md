@@ -34,6 +34,7 @@
 - E15：[v3.1.5 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.5) 于 2026-08-02 00:01:11 +08:00 发布，stable/latest、non-draft、non-prerelease；四项资产均为 uploaded。
 - E16：公开资产独立下载后 SHA-256/size 与 GitHub digest 完全一致：portable `afcc4917...9116f2` / 99,526,150；Setup `27a1be34...3b40ec` / 100,023,007；blockmap `75331686...8e7682` / 105,674；`latest.yml` `afad0c38...66ee31` / 369 bytes。
 - E17：`latest.yml` 的 version `3.1.5`、path `bank-bill-excel-tool-setup-3.1.5.exe`、size `100023007` 和 SHA-512 `dFd2gBX3bL9fkWBvxvX1v0+/JKy3ny1tOVFOg5MHzgC3rPVGdrkpa/usovYskSpa8svGEtIp8NON7Y0WbCQTrQ==` 与实际 Setup 完全一致。
+- E18：发布证据 PR #117 首轮 Codex Review 发现 2 条 P2：PR #116 合并日期误沿用 Release 日期，以及两份公开版本记录仍把已完成的资金复核写成未来门禁。现已分别更正为 2026-08-01 实际合并日期和已完成人工确认的过去时证据。
 
 ## Deviations
 
