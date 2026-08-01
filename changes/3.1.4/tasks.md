@@ -14,4 +14,28 @@
 - [x] CHANGELOG / VERSION_FEATURE_HISTORY / USER_GUIDE / 版本号
 - [x] `scan:vars` / `check:vars` 与关联变量 review
 - [x] `release-check`
-- [ ] 资金业务人工复核
+- [x] 资金业务人工复核（2026-08-01，业务负责人确认 Spec 13.3 五项判断）
+
+## 正式收尾
+
+- [x] PR #114 以 merge commit `1e5dfc697f043a83ef4881843fd6a284ff31e6d2` 合入 `main`。
+- [x] PR #114 最终实现 commit `836dc5d1db975c0bee69d83ea1f22a79e91b0639` 经 Codex Review 无 P3 或更高 Finding，全部 review 线程关闭。
+- [x] 建立 `docs/prs/PR114-v3.1.4.md` 和 `docs/iterations/v3.1.4/PRD-v3.1.4.md`。
+- [x] 业务负责人确认 Spec 13.3 五项资金判断，并授权技术发布。
+- [x] 重新执行发布门禁、布局校验、变量扫描与 check-vars。
+- [ ] 提交并合并 v3.1.4 发布准备 PR。
+
+## 发布收尾
+
+- [ ] 创建并推送 annotated tag `v3.1.4`，且 tag 必须指向当时最新 `main`。
+- [ ] 等待 Windows Release workflow 全部通过。
+- [ ] 验证 GitHub Release 为 stable/latest、non-draft、non-prerelease，并包含 Setup、Setup blockmap、portable、`latest.yml` 四项资产。
+- [ ] 回读公开资产元数据与摘要，核对版本、文件名、大小及 `latest.yml` 引用。
+- [ ] 回写发布 run、资产摘要和最终状态，提交并合并发布证据 PR。
+- [ ] 同步本地 `main` 并确认 tracked worktree 干净；既有无关未跟踪文件不纳入清理。
+
+## 发布后人工跟进
+
+- [ ] Windows 打包环境验证大异常报告流式 writer 峰值与存档恢复。
+- [ ] Windows 安装版演练进程硬退出、系统文件锁和存档持久重试提示。
+- [ ] 使用上一 stable 完成 `v3.1.3 → v3.1.4` 在线升级 canary，并核对 SQLite、平盘 side DB、设置、存档和导出文件保留。
