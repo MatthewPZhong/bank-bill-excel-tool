@@ -74,11 +74,26 @@ function parsePositionPendingArchiveFiles(value) {
       )) {
         return null;
       }
+      let requiredInputPaths;
+      if (file.requiredInputPaths !== undefined) {
+        if (!Array.isArray(file.requiredInputPaths)
+            || file.requiredInputPaths.length === 0) {
+          return null;
+        }
+        const normalizedDependencies = file.requiredInputPaths.map((item) => (
+          String(item || '').trim()
+        ));
+        if (normalizedDependencies.some((item) => !item)) return null;
+        requiredInputPaths = [...new Set(normalizedDependencies.map((item) => (
+          path.resolve(item)
+        )))];
+      }
       files.push({
         ...file,
         filePath: file.filePath.trim(),
         role,
         beforeSnapshot,
+        ...(requiredInputPaths ? { requiredInputPaths } : {}),
         ...(hasExpectedEvidence ? { sourceSnapshot, sha256, sizeBytes } : {})
       });
       continue;
@@ -178,7 +193,9 @@ function assertSameArchiveOutputEvidence(actualFiles, expectedFiles) {
         || actual.sha256 !== expected.sha256
         || actual.sizeBytes !== expected.sizeBytes
         || !snapshotsEqual(actual.sourceSnapshot, expected.sourceSnapshot)
-        || String(actual.artifactKey || '') !== String(expected.artifactKey || '')) {
+        || String(actual.artifactKey || '') !== String(expected.artifactKey || '')
+        || JSON.stringify(actual.requiredInputPaths || [])
+          !== JSON.stringify(expected.requiredInputPaths || [])) {
       throw new Error('平盘导入 pending 的异常报告证据与预检 manifest 不一致');
     }
   }
@@ -355,9 +372,26 @@ function positionCommittedRecoveryArchiveFiles(value, committedInputs) {
     committedKeys.add(key);
   }
 
-  return files.filter((file) => (
-    file.role !== 'input' || committedKeys.has(recoveryInputKey(file))
-  ));
+  const allInputsCommitted = committedKeys.size === pendingInputs.size;
+  return files.filter((file) => {
+    if (file.role === 'input') return committedKeys.has(recoveryInputKey(file));
+    if (!Array.isArray(file.requiredInputPaths)) {
+      if (pendingInputs.size === 0 || !allInputsCommitted) {
+        throw recoveryIntegrityError(
+          '部分提交恢复遇到未声明输入依赖的输出文件，禁止归入成功批次'
+        );
+      }
+      return true;
+    }
+    for (const inputPath of file.requiredInputPaths) {
+      const key = recoveryInputKey({ role: 'input', filePath: inputPath });
+      if (!pendingInputs.has(key)) {
+        throw recoveryIntegrityError('异常报告引用了 pending 之外的输入文件');
+      }
+      if (!committedKeys.has(key)) return false;
+    }
+    return true;
+  });
 }
 
 function positionUncommittedRecoveryInputPaths(value, committedFiles) {

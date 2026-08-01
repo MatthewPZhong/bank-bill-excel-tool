@@ -87,6 +87,7 @@ test('异常报告按 SHA 校验、同字节导出并按运行冻结记录合并
   const evidence = await hashFileSha256Async(reportPath);
   const reference = {
     filePath: reportPath,
+    reportKey: 'report-1',
     sha256: evidence.sha256,
     sizeBytes: evidence.sizeBytes
   };
@@ -137,6 +138,67 @@ test('异常报告按 SHA 校验、同字节导出并按运行冻结记录合并
   assert.deepEqual(
     styledWorkbook.getWorksheet('调拨过滤数据').getCell('L2').value,
     { richText: [{ text: '123456789012345678901234567890' }] }
+  );
+});
+
+test('文件级分片与批次报告重叠时只从墓碑冻结的报告读取一次', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-filtered-report-overlap-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const shardPath = path.join(dir, 'shard.xlsx');
+  const aggregatePath = path.join(dir, 'aggregate.xlsx');
+  await writeReport(shardPath, { detailCount: 1 });
+  await writeReport(aggregatePath, { detailCount: 2 });
+  const shardEvidence = await hashFileSha256Async(shardPath);
+  const aggregateEvidence = await hashFileSha256Async(aggregatePath);
+  const outputPath = path.join(dir, 'run-filtered.xlsx');
+  const result = await writeRunFilteredSourcesWorkbook({
+    outputPath,
+    run: {
+      id: 14,
+      scope: { channels: ['DBS'], months: ['2026-07'] }
+    },
+    filteredSources: [
+      {
+        reportRowKey: 'report-row-1',
+        sourceType: SOURCE_TYPES.FUND_TRANSFER,
+        sourceRevision: 3,
+        reportKey: 'report-shard',
+        reportFileName: 'shard.xlsx',
+        reportSha256: shardEvidence.sha256
+      },
+      {
+        reportRowKey: 'report-row-2',
+        sourceType: SOURCE_TYPES.FUND_TRANSFER,
+        sourceRevision: 4,
+        reportKey: 'report-aggregate',
+        reportFileName: 'aggregate.xlsx',
+        reportSha256: aggregateEvidence.sha256
+      }
+    ],
+    reportFiles: [
+      {
+        filePath: aggregatePath,
+        reportKey: 'report-aggregate',
+        sha256: aggregateEvidence.sha256,
+        sizeBytes: aggregateEvidence.sizeBytes
+      },
+      {
+        filePath: shardPath,
+        reportKey: 'report-shard',
+        sha256: shardEvidence.sha256,
+        sizeBytes: shardEvidence.sizeBytes
+      }
+    ]
+  });
+  assert.equal(result.rowCount, 2);
+  const workbook = XLSX.readFile(outputPath, { raw: true });
+  const rows = XLSX.utils.sheet_to_json(workbook.Sheets['调拨过滤数据'], {
+    raw: true,
+    defval: ''
+  });
+  assert.deepEqual(
+    rows.map((row) => row.过滤记录标识),
+    ['report-row-2', 'report-row-1']
   );
 });
 
@@ -233,6 +295,52 @@ test('目标月份来源全量过滤时在匹配引擎前阻断运行', (t) => {
   assert.throws(
     () => service.run({ channels: ['DBS'], months: ['2026-07'] }),
     (error) => error && error.code === 'position-source-all-filtered'
+  );
+  service.close();
+});
+
+test('多月份运行逐来源逐月份阻断全量过滤，不能被其他月份的正常行掩盖', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'position-all-filtered-month-pair-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = {
+    getBankRows: () => [
+      {
+        biz_id: 'BANK-JUNE',
+        channel: 'DBS',
+        month_key: '2026-06',
+        working_fund_type: 'FundTransfer-in'
+      },
+      {
+        biz_id: 'BANK-JULY',
+        channel: 'DBS',
+        month_key: '2026-07',
+        working_fund_type: 'FundTransfer-in'
+      }
+    ],
+    latestPendingRun: () => null,
+    listActiveFilteredSources: () => [{
+      id: 1,
+      sourceType: SOURCE_TYPES.FUND_TRANSFER,
+      monthKey: '2026-07'
+    }],
+    countSourceRowsInMonths: (_sourceType, months) => (
+      months.length === 1 && months[0] === '2026-06' ? 1 : 0
+    ),
+    close() {}
+  };
+  const service = createPositionReconciliationService({
+    userDataDir: dir,
+    templatePath: path.join(process.cwd(), 'assets', '平盘银行对账单.xlsx'),
+    store
+  });
+  assert.throws(
+    () => service.run({ channels: ['DBS'], months: ['2026-06', '2026-07'] }),
+    (error) => (
+      error
+      && error.code === 'position-source-all-filtered'
+      && error.detailLines.some((line) => line.includes('月份 2026-07'))
+      && error.detailLines.every((line) => !line.includes('2026-06 / 2026-07'))
+    )
   );
   service.close();
 });

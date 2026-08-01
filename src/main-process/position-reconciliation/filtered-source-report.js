@@ -324,7 +324,9 @@ async function writeRunFilteredSourcesWorkbook({
         const sourceTypeIndex = headers.indexOf('来源类型');
         const reportRowKey = text(values[reportRowKeyIndex]);
         const target = requested.get(reportRowKey);
-        if (!target || found.has(reportRowKey)) return;
+        if (!target
+            || text(target.reportKey) !== text(report.reportKey)
+            || found.has(reportRowKey)) return;
         if (text(values[sourceTypeIndex]) !== text(target.sourceType)) {
           throw integrityError(`过滤记录来源类型与运行快照不一致：${reportRowKey}`);
         }

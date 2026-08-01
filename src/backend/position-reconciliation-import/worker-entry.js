@@ -363,6 +363,7 @@ async function runJob(message) {
     accountConfirmationDescriptor: result.accountConfirmationDescriptor,
     orderedFileResults: result.orderedFileResults,
     anomalyReport: result.anomalyReport,
+    anomalyReports: result.anomalyReports,
     outputPaths: result.outputPaths,
     outputFiles: result.outputFiles,
     ledgerEvidence: result.ledgerEvidence

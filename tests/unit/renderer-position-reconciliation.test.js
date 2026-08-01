@@ -182,8 +182,9 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
 
   test('异常导入使用提醒弹框，结果页过滤数据导出始终显示且无数据时置灰', () => {
     assert.match(positionRenderer, /createDialogShell\('链接原始表导入提醒'/);
-    assert.match(positionRenderer, /发现 \$\{Number\(report\.filteredRowCount\)\} 行异常数据，已过滤异常行并继续写入正常数据/);
-    assert.match(positionRenderer, /const exportButton = makeButton\('导出异常数据'\)/);
+    assert.match(positionRenderer, /发现 \$\{filteredRowCount\} 行异常数据，已过滤异常行并继续写入正常数据/);
+    assert.match(positionRenderer, /reports\.length === 1 \? '导出异常数据'/);
+    assert.match(positionRenderer, /异常恢复报告按已提交文件拆分为/);
     assert.match(positionRenderer, /api\.exportSourceAnomaly\(report\.reportKey\)/);
     assert.match(positionRenderer, /if \(typeof afterClose === 'function'\) await afterClose\(\)/);
     assert.match(positionRenderer, /handleSourceImport\(null, openLinkedManager\)/);

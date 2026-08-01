@@ -129,18 +129,46 @@ function detailSheetBaseName(sourceType) {
   throw reportError(`不支持生成异常明细的来源：${sourceType}`);
 }
 
-async function writePositionAnomalyReport({ ledger, jobRoot, jobId }) {
+function normalizedReportFileIndexes(value) {
+  if (!Array.isArray(value) || value.length === 0) return [];
+  const indexes = [...new Set(value.map(Number))];
+  if (indexes.some((index) => !Number.isSafeInteger(index) || index < 0)) {
+    throw new TypeError('异常报告文件索引非法');
+  }
+  return indexes.sort((left, right) => left - right);
+}
+
+async function writePositionAnomalyReport({
+  ledger,
+  jobRoot,
+  jobId,
+  fileIndexes = [],
+  artifactKey = REPORT_ARTIFACT_KEY,
+  fileName = `平盘来源异常数据_${String(jobId)}.xlsx`,
+  displayRole = '异常数据'
+}) {
+  const selectedIndexes = normalizedReportFileIndexes(fileIndexes);
+  const indexClause = selectedIndexes.length > 0
+    ? ` AND source_file_index IN (${selectedIndexes.map(() => '?').join(', ')})`
+    : '';
   const filteredCount = Number(ledger.db.prepare(`
-    SELECT COUNT(*) AS count FROM filtered_source_rows WHERE is_owner = 1
-  `).get().count);
+    SELECT COUNT(*) AS count
+    FROM filtered_source_rows
+    WHERE is_owner = 1${indexClause}
+  `).get(...selectedIndexes).count);
   if (filteredCount === 0) return null;
 
   const reportDir = path.join(path.resolve(jobRoot), 'anomaly-report');
   await fs.promises.mkdir(reportDir, { recursive: true, mode: 0o700 });
-  const fileName = `平盘来源异常数据_${String(jobId)}.xlsx`;
-  const outputPath = path.join(reportDir, fileName);
+  const normalizedArtifactKey = text(artifactKey);
+  const normalizedFileName = text(fileName);
+  if (!normalizedArtifactKey || !normalizedFileName || path.basename(normalizedFileName) !== normalizedFileName) {
+    throw new TypeError('异常报告 artifact key 或文件名非法');
+  }
+  const outputPath = path.join(reportDir, normalizedFileName);
   const temporaryPath = `${outputPath}.${crypto.randomUUID()}.tmp`;
-  const reportKey = `${String(jobId)}:${REPORT_ARTIFACT_KEY}`;
+  const reportKey = `${String(jobId)}:${normalizedArtifactKey}`;
+  const selectedIndexSet = new Set(selectedIndexes);
   let workbook;
   try {
     workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
@@ -156,6 +184,7 @@ async function writePositionAnomalyReport({ ledger, jobRoot, jobId }) {
     addHeader(summary, summaryHeaders);
     for (const file of ledger.listFiles().filter((item) => (
       item.preflightStatus === 'accepted' && Number(item.filteredRows) > 0
+      && (selectedIndexSet.size === 0 || selectedIndexSet.has(Number(item.fileIndex)))
     ))) {
       const reportRow = summary.addRow([
         file.originalName,
@@ -179,7 +208,10 @@ async function writePositionAnomalyReport({ ledger, jobRoot, jobId }) {
       let sheet = null;
       let sheetIndex = 0;
       let dataRows = 0;
-      for (const item of ledger.iterateFilteredRows({ sourceTypes: [sourceType] })) {
+      for (const item of ledger.iterateFilteredRows({
+        sourceTypes: [sourceType],
+        fileIndexes: selectedIndexes
+      })) {
         if (!sheet || dataRows >= EXCEL_MAX_ROWS - 1) {
           if (sheet) sheet.commit();
           sheetIndex += 1;
@@ -211,16 +243,19 @@ async function writePositionAnomalyReport({ ledger, jobRoot, jobId }) {
     }
     return {
       reportKey,
-      artifactKey: REPORT_ARTIFACT_KEY,
+      artifactKey: normalizedArtifactKey,
       sourceOperation: REPORT_SOURCE_OPERATION,
       filePath: outputPath,
-      fileName,
+      fileName: normalizedFileName,
       sha256: first.sha256,
       sizeBytes: first.sizeBytes,
       sourceSnapshot: snapshot,
       filteredRowCount: filteredCount,
+      sourceFileIndexes: selectedIndexes.length > 0
+        ? selectedIndexes
+        : ledger.listFilteredFileIndexes(),
       role: 'output',
-      displayRole: '异常数据'
+      displayRole: text(displayRole) || '异常数据'
     };
   } catch (error) {
     try { await fs.promises.rm(temporaryPath, { force: true }); } catch (_cleanupError) {}

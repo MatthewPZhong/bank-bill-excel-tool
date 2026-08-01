@@ -166,40 +166,93 @@ function expectedLedgerFile(verifiedLedger, descriptor) {
 
 async function verifyAnomalyReportEvidence(verifiedLedger, preflightReady) {
   const manifestReport = verifiedLedger.manifest.anomalyReport || null;
+  const manifestReports = Array.isArray(verifiedLedger.manifest.anomalyReports)
+    ? verifiedLedger.manifest.anomalyReports
+    : [];
   const report = preflightReady && preflightReady.anomalyReport
     ? preflightReady.anomalyReport
     : null;
-  const filteredRows = verifiedLedger.manifest.files.reduce(
-    (total, file) => total + Number(file.filteredRows || 0),
+  const reports = preflightReady && Array.isArray(preflightReady.anomalyReports)
+    ? preflightReady.anomalyReports
+    : [];
+  const filteredFiles = verifiedLedger.manifest.files.filter((file) => (
+    file.preflightStatus === 'accepted' && Number(file.filteredRows) > 0
+  ));
+  const filteredRows = filteredFiles.reduce(
+    (total, file) => total + Number(file.filteredRows),
     0
   );
   if (filteredRows === 0) {
-    if (manifestReport || report) {
+    if (manifestReport || report || manifestReports.length > 0 || reports.length > 0) {
       throw applyMismatch('sealed ledger 在无过滤行时错误地携带异常报告');
     }
-    return null;
+    return { aggregateReport: null, byFileIndex: new Map() };
   }
   if (!manifestReport
       || !report
       || stableHash(manifestReport) !== stableHash(report)
-      || Number(report.filteredRowCount) !== filteredRows) {
+      || Number(report.filteredRowCount) !== filteredRows
+      || stableHash(manifestReports) !== stableHash(reports)
+      || reports.length !== filteredFiles.length) {
     throw applyMismatch('异常报告证据与 sealed ledger manifest 不一致');
   }
-  try {
-    await assertStagedInputUnchangedAsync({
-      archivePath: report.filePath,
-      stagedSnapshot: report.sourceSnapshot,
-      stagedSha256: report.sha256,
-      stagedSizeBytes: report.sizeBytes
-    });
-  } catch (error) {
-    throw new PositionReconciliationError(
-      'position-anomaly-report-integrity-invalid',
-      '平盘来源异常报告缺失或内容校验失败，禁止写入数据库',
-      [error && error.message ? error.message : String(error)]
+  const expectedByIndex = new Map(filteredFiles.map((file) => [
+    Number(file.fileIndex),
+    Number(file.filteredRows)
+  ]));
+  const expectedIndexes = [...expectedByIndex.keys()].sort((left, right) => left - right);
+  const reportIdentities = new Set();
+  const verifiedReports = [];
+  for (const item of reports) {
+    const sourceFileIndexes = Array.isArray(item && item.sourceFileIndexes)
+      ? [...new Set(item.sourceFileIndexes.map(Number))].sort((left, right) => left - right)
+      : [];
+    if (sourceFileIndexes.length === 0
+        || sourceFileIndexes.some((fileIndex) => !expectedByIndex.has(fileIndex))) {
+      throw applyMismatch('异常报告引用了 sealed ledger 之外的文件');
+    }
+    const expectedRows = sourceFileIndexes.reduce(
+      (total, fileIndex) => total + expectedByIndex.get(fileIndex),
+      0
     );
+    const identity = `${text(item.reportKey)}\u0000${path.resolve(text(item.filePath))}`;
+    if (reportIdentities.has(identity)
+        || Number(item.filteredRowCount) !== expectedRows) {
+      throw applyMismatch('异常报告分片身份或过滤行数与 sealed ledger 不一致');
+    }
+    reportIdentities.add(identity);
+    try {
+      await assertStagedInputUnchangedAsync({
+        archivePath: item.filePath,
+        stagedSnapshot: item.sourceSnapshot,
+        stagedSha256: item.sha256,
+        stagedSizeBytes: item.sizeBytes
+      });
+    } catch (error) {
+      throw new PositionReconciliationError(
+        'position-anomaly-report-integrity-invalid',
+        '平盘来源异常报告缺失或内容校验失败，禁止写入数据库',
+        [error && error.message ? error.message : String(error)]
+      );
+    }
+    verifiedReports.push({ item, sourceFileIndexes });
   }
-  return report;
+  const aggregate = verifiedReports.find((item) => (
+    stableHash(item.item) === stableHash(report)
+  ));
+  if (!aggregate || stableHash(aggregate.sourceFileIndexes) !== stableHash(expectedIndexes)) {
+    throw applyMismatch('批次异常报告没有覆盖全部过滤文件');
+  }
+  const byFileIndex = new Map();
+  for (const fileIndex of expectedIndexes.slice(0, -1)) {
+    const shard = verifiedReports.find((item) => (
+      item.sourceFileIndexes.length === 1 && item.sourceFileIndexes[0] === fileIndex
+    ));
+    if (!shard) throw applyMismatch(`过滤文件 ${fileIndex + 1} 缺少独立异常报告`);
+    byFileIndex.set(fileIndex, shard.item);
+  }
+  byFileIndex.set(expectedIndexes[expectedIndexes.length - 1], aggregate.item);
+  return { aggregateReport: aggregate.item, byFileIndex };
 }
 
 function assertSourceStatsMatch(actual, expected, sourceType, sheetName) {
@@ -790,9 +843,9 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     });
   }
   const verifiedLedger = await verifySealedLedger(preflightReady.ledgerEvidence);
-  let anomalyReport;
+  let anomalyEvidence;
   try {
-    anomalyReport = await verifyAnomalyReportEvidence(
+    anomalyEvidence = await verifyAnomalyReportEvidence(
       verifiedLedger,
       preflightReady
     );
@@ -824,6 +877,9 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     initializeApplyIdentityTable(db);
     for (const descriptor of enabled) {
       assertNotCancelled(input.cancelToken);
+      const anomalyReport = anomalyEvidence.byFileIndex.get(
+        Number(descriptor.fileIndex)
+      ) || null;
       const applied = await applySourceFile({
         db,
         verifiedLedger,
@@ -893,7 +949,9 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         contentHash: applied.contentHash,
         sourceRevision: applied.sourceRevision,
         linkedRevision: applied.linkedRevision,
-        anomalyReport: applied.filteredRowCount > 0 ? anomalyReport : null,
+        anomalyReport: applied.filteredRowCount > 0
+          ? anomalyEvidence.byFileIndex.get(Number(item.fileIndex)) || null
+          : null,
         applied: true
       };
     });

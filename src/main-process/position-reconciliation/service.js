@@ -1630,26 +1630,27 @@ class PositionReconciliationService {
       sourceTypes: sources,
       months: scope.months
     });
-    const filteredBySource = new Map();
+    const filteredBySourceMonth = new Map();
     for (const item of filteredSources) {
-      const rows = filteredBySource.get(item.sourceType) || [];
+      const key = `${item.sourceType}\u0000${item.monthKey}`;
+      const rows = filteredBySourceMonth.get(key) || [];
       rows.push(item);
-      filteredBySource.set(item.sourceType, rows);
+      filteredBySourceMonth.set(key, rows);
     }
-    const allFiltered = sources.flatMap((sourceType) => {
-      const filtered = filteredBySource.get(sourceType) || [];
-      const validRows = this.store.countSourceRowsInMonths(sourceType, scope.months);
+    const allFiltered = sources.flatMap((sourceType) => scope.months.flatMap((monthKey) => {
+      const filtered = filteredBySourceMonth.get(`${sourceType}\u0000${monthKey}`) || [];
+      const validRows = this.store.countSourceRowsInMonths(sourceType, [monthKey]);
       return filtered.length > 0 && validRows === 0
-        ? [{ sourceType, filteredRows: filtered.length, validRows }]
+        ? [{ sourceType, monthKey, filteredRows: filtered.length, validRows }]
         : [];
-    });
+    }));
     if (allFiltered.length > 0) {
       throw new PositionReconciliationError(
         'position-source-all-filtered',
         '运行所需来源在目标月份内有效数据为 0，已停止资金性质校验',
         allFiltered.map((item) => (
           `${SOURCE_DEFINITIONS[item.sourceType].sourceName}：` +
-          `月份 ${scope.months.join(' / ')}，有效 ${item.validRows} 行，过滤 ${item.filteredRows} 行`
+          `月份 ${item.monthKey}，有效 ${item.validRows} 行，过滤 ${item.filteredRows} 行`
         ))
       );
     }

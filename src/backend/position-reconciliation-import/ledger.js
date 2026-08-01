@@ -372,14 +372,25 @@ class PositionImportLedger {
     );
   }
 
-  *iterateFilteredRows({ sourceTypes = [] } = {}) {
+  *iterateFilteredRows({ sourceTypes = [], fileIndexes = [] } = {}) {
     this._assertOpen();
     const normalizedTypes = Array.isArray(sourceTypes)
       ? sourceTypes.map(String).filter(Boolean)
       : [];
-    const where = normalizedTypes.length > 0
-      ? `WHERE f.is_owner = 1 AND f.source_type IN (${normalizedTypes.map(() => '?').join(', ')})`
-      : 'WHERE f.is_owner = 1';
+    const normalizedIndexes = Array.isArray(fileIndexes)
+      ? [...new Set(fileIndexes.map(normalizedFileIndex))]
+      : [];
+    const conditions = ['f.is_owner = 1'];
+    const params = [];
+    if (normalizedTypes.length > 0) {
+      conditions.push(`f.source_type IN (${normalizedTypes.map(() => '?').join(', ')})`);
+      params.push(...normalizedTypes);
+    }
+    if (normalizedIndexes.length > 0) {
+      conditions.push(`f.source_file_index IN (${normalizedIndexes.map(() => '?').join(', ')})`);
+      params.push(...normalizedIndexes);
+    }
+    const where = `WHERE ${conditions.join(' AND ')}`;
     for (const row of this.db.prepare(`
       SELECT f.report_row_key AS reportRowKey,
              f.source_type AS sourceType, f.business_key AS businessKey,
@@ -395,7 +406,7 @@ class PositionImportLedger {
       INNER JOIN job_files j ON j.file_index = f.source_file_index
       ${where}
       ORDER BY f.source_file_index, f.source_row_number
-    `).iterate(...normalizedTypes)) {
+    `).iterate(...params)) {
       yield {
         ...row,
         row: parsedJson(row.rawJson, 'filtered source raw row')
@@ -448,6 +459,11 @@ class PositionImportLedger {
   setAnomalyReport(report) {
     this._assertOpen();
     this.setMeta('anomalyReport', report || null);
+  }
+
+  setAnomalyReports(reports) {
+    this._assertOpen();
+    this.setMeta('anomalyReports', Array.isArray(reports) ? reports : []);
   }
 
   claimBankBizId({ bizId, channel, monthKey, fileIndex, rowNumber }) {
@@ -661,7 +677,10 @@ class PositionImportLedger {
       bankScopes: this.kind === 'bank' ? this.listBankScopes() : [],
       anomalyReport: this.getMeta('anomalyReport')
         ? parsedJson(this.getMeta('anomalyReport'), 'anomaly report')
-        : null
+        : null,
+      anomalyReports: this.getMeta('anomalyReports')
+        ? parsedJson(this.getMeta('anomalyReports'), 'anomaly reports')
+        : []
     };
   }
 

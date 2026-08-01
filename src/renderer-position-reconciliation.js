@@ -515,12 +515,26 @@
     }
 
     function showSourceImportCompletion(result, afterClose = null) {
-      const report = result && result.anomalyReport
+      const aggregateReport = result && result.anomalyReport
         ? result.anomalyReport
-        : (result && Array.isArray(result.results)
-          ? result.results.find((item) => item && item.anomalyReport)?.anomalyReport
-          : null);
-      if (!report || Number(report.filteredRowCount) <= 0) {
+        : null;
+      const reportCandidates = aggregateReport
+        ? [aggregateReport]
+        : (result && Array.isArray(result.anomalyReports)
+          ? result.anomalyReports
+          : (result && Array.isArray(result.results)
+            ? result.results
+              .filter((item) => item && item.status === 'ok' && item.anomalyReport)
+              .map((item) => item.anomalyReport)
+            : []));
+      const reports = [...new Map(reportCandidates
+        .filter((report) => report && Number(report.filteredRowCount) > 0)
+        .map((report) => [report.reportKey, report])).values()];
+      const filteredRowCount = reports.reduce(
+        (total, report) => total + Number(report.filteredRowCount),
+        0
+      );
+      if (reports.length === 0 || filteredRowCount <= 0) {
         showAlert(sourceImportSummary(result), {
           info: !(result.results || []).some((item) => item.status === 'failed'),
           html: true
@@ -529,28 +543,35 @@
       }
       const shell = createDialogShell('链接原始表导入提醒', 'position-source-anomaly-dialog');
       shell.content.innerHTML = `
-        <p class="position-result-note">发现 ${Number(report.filteredRowCount)} 行异常数据，已过滤异常行并继续写入正常数据。</p>
+        <p class="position-result-note">发现 ${filteredRowCount} 行异常数据，已过滤异常行并继续写入正常数据。</p>
         <div class="position-import-summary">${sourceImportSummary(result)}</div>
-        <p class="muted">异常报告已进入存档中心，也可立即导出到本地。</p>
+        <p class="muted">${reports.length === 1
+    ? '异常报告已进入存档中心，也可立即导出到本地。'
+    : `异常恢复报告按已提交文件拆分为 ${reports.length} 份，均已进入存档中心，也可分别导出到本地。`}</p>
       `;
       const right = document.createElement('div');
       right.className = 'position-footer-right';
-      const exportButton = makeButton('导出异常数据');
       const confirmButton = makeButton('关闭', { primary: true });
-      right.append(exportButton, confirmButton);
-      shell.footer.append(right);
-      exportButton.addEventListener('click', async () => {
-        const exported = await withInflight(
-          '正在导出异常数据…',
-          () => api.exportSourceAnomaly(report.reportKey)
+      for (const [index, report] of reports.entries()) {
+        const exportButton = makeButton(
+          reports.length === 1 ? '导出异常数据' : `导出异常数据 ${index + 1}/${reports.length}`
         );
-        if (!exported || exported.status === 'cancelled') return;
-        if (exported.status !== 'ok') {
-          showAlert(failureDetailsHtml(exported, '异常数据导出失败'), { html: true });
-          return;
-        }
-        setStatus(`已导出 ${Number(exported.rowCount) || 0} 行异常数据：${exported.fileName}`, 'success');
-      });
+        right.append(exportButton);
+        exportButton.addEventListener('click', async () => {
+          const exported = await withInflight(
+            '正在导出异常数据…',
+            () => api.exportSourceAnomaly(report.reportKey)
+          );
+          if (!exported || exported.status === 'cancelled') return;
+          if (exported.status !== 'ok') {
+            showAlert(failureDetailsHtml(exported, '异常数据导出失败'), { html: true });
+            return;
+          }
+          setStatus(`已导出 ${Number(exported.rowCount) || 0} 行异常数据：${exported.fileName}`, 'success');
+        });
+      }
+      right.append(confirmButton);
+      shell.footer.append(right);
       confirmButton.addEventListener('click', async () => {
         closeModal();
         if (typeof afterClose === 'function') await afterClose();

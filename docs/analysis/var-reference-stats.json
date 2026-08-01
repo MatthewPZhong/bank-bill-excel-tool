@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.4",
-    "scannedAt": "2026-08-01T09:41:03.918Z",
+    "scannedAt": "2026-08-01T10:14:29.190Z",
     "root": "src",
     "totalFiles": 263,
-    "totalTopLevelNames": 3317,
+    "totalTopLevelNames": 3319,
     "buckets": {
       "shared": 472,
-      "paired": 748,
-      "local": 1953,
-      "crossFile": 1220
+      "paired": 749,
+      "local": 1954,
+      "crossFile": 1221
     }
   },
   "A": {
@@ -238,7 +238,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-            "count": 4
+            "count": 5
           },
           {
             "file": "src/backend/position-reconciliation-import/apply-grant.js",
@@ -262,7 +262,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/preflight.js",
-            "count": 10
+            "count": 12
           },
           {
             "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
@@ -270,7 +270,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 7
+            "count": 8
           },
           {
             "file": "src/backend/position-reconciliation-import/worker-entry.js",
@@ -442,7 +442,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-            "count": 6
+            "count": 7
           },
           {
             "file": "src/main-process/position-reconciliation/readers.js",
@@ -569,7 +569,7 @@
             "count": 2
           }
         ],
-        "totalHits": 594,
+        "totalHits": 599,
         "fileSpan": 111
       },
       {
@@ -747,7 +747,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/preflight.js",
-            "count": 5
+            "count": 6
           },
           {
             "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
@@ -962,7 +962,7 @@
             "count": 1
           }
         ],
-        "totalHits": 366,
+        "totalHits": 367,
         "fileSpan": 77
       },
       {
@@ -1164,7 +1164,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-            "count": 3
+            "count": 6
           },
           {
             "file": "src/backend/position-reconciliation-import/apply-grant.js",
@@ -1184,7 +1184,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 14
+            "count": 16
           },
           {
             "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
@@ -1240,7 +1240,7 @@
           },
           {
             "file": "src/main-process/position-reconciliation/filtered-source-report.js",
-            "count": 12
+            "count": 14
           },
           {
             "file": "src/main-process/position-reconciliation/large-import-schema.js",
@@ -1307,7 +1307,7 @@
             "count": 62
           }
         ],
-        "totalHits": 637,
+        "totalHits": 644,
         "fileSpan": 38
       },
       {
@@ -2597,7 +2597,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/preflight.js",
-            "count": 16
+            "count": 19
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
@@ -2648,7 +2648,7 @@
             "count": 1
           }
         ],
-        "totalHits": 203,
+        "totalHits": 206,
         "fileSpan": 19
       },
       {
@@ -3521,7 +3521,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 10
+            "count": 16
           },
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
@@ -3556,7 +3556,7 @@
             "count": 7
           }
         ],
-        "totalHits": 50,
+        "totalHits": 56,
         "fileSpan": 13
       },
       {
@@ -11213,10 +11213,10 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 14
+            "count": 18
           }
         ],
-        "totalHits": 31,
+        "totalHits": 35,
         "fileSpan": 3
       },
       {
@@ -16433,6 +16433,24 @@
         "fileSpan": 2
       },
       {
+        "name": "parsedJson",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/ledger.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/ledger.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/scenarios-bundle-io.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 2
+      },
+      {
         "name": "requirePositionPendingArchiveFiles",
         "defFiles": [
           "src/main-process/position-reconciliation/operation-lifecycle.js"
@@ -16556,24 +16574,6 @@
           {
             "file": "src/main-process/biz-op-recon-writer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 13,
-        "fileSpan": 2
-      },
-      {
-        "name": "parsedJson",
-        "defFiles": [
-          "src/backend/position-reconciliation-import/ledger.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/position-reconciliation-import/ledger.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/scenarios-bundle-io.js",
-            "count": 6
           }
         ],
         "totalHits": 13,
@@ -21792,6 +21792,24 @@
           {
             "file": "src/renderer.js",
             "count": 4
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "REPORT_ARTIFACT_KEY",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/anomaly-report.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/anomaly-report.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/position-reconciliation-import/preflight.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -30023,6 +30041,20 @@
         "fileSpan": 1
       },
       {
+        "name": "recoveryRequired",
+        "defFiles": [
+          "src/main-process/position-reconciliation/import-recovery.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/import-recovery.js",
+            "count": 20
+          }
+        ],
+        "totalHits": 20,
+        "fileSpan": 1
+      },
+      {
         "name": "ToolboxStyleParseError",
         "defFiles": [
           "src/backend/toolbox-format/style-registry.js"
@@ -30163,20 +30195,6 @@
         "fileSpan": 1
       },
       {
-        "name": "recoveryRequired",
-        "defFiles": [
-          "src/main-process/position-reconciliation/import-recovery.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/import-recovery.js",
-            "count": 17
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 1
-      },
-      {
         "name": "archiveCenterErrorText",
         "defFiles": [
           "src/renderer.js"
@@ -30261,6 +30279,20 @@
         "fileSpan": 1
       },
       {
+        "name": "inputPathKey",
+        "defFiles": [
+          "src/main-process/position-reconciliation/import-recovery.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/import-recovery.js",
+            "count": 15
+          }
+        ],
+        "totalHits": 15,
+        "fileSpan": 1
+      },
+      {
         "name": "safeFailure",
         "defFiles": [
           "src/main-process/archive-center/archive-service.js"
@@ -30296,20 +30328,6 @@
         "refFiles": [
           {
             "file": "src/main-process/position-reconciliation/store.js",
-            "count": 14
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 1
-      },
-      {
-        "name": "inputPathKey",
-        "defFiles": [
-          "src/main-process/position-reconciliation/import-recovery.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/import-recovery.js",
             "count": 14
           }
         ],
@@ -30527,6 +30545,20 @@
         "fileSpan": 1
       },
       {
+        "name": "recoveryIntegrityError",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 1
+      },
+      {
         "name": "releaseReservations",
         "defFiles": [
           "src/main-process/toolbox-output-publication.js"
@@ -30723,20 +30755,6 @@
         "fileSpan": 1
       },
       {
-        "name": "recoveryIntegrityError",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-            "count": 11
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 1
-      },
-      {
         "name": "RENDERER_STARTUP_MARKS",
         "defFiles": [
           "src/renderer.js"
@@ -30891,6 +30909,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizedFileIndex",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/ledger.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/ledger.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
         "name": "parseBillDateMs",
         "defFiles": [
           "src/main-process/scenario-engines/c4-recon-id-fix.js"
@@ -30912,6 +30944,20 @@
         "refFiles": [
           {
             "file": "src/main-process/archive-center/archive-service.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
+        "name": "recoveryInputKey",
+        "defFiles": [
+          "src/main-process/position-reconciliation/operation-lifecycle.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 10
           }
         ],
@@ -31115,20 +31161,6 @@
         "fileSpan": 1
       },
       {
-        "name": "normalizedFileIndex",
-        "defFiles": [
-          "src/backend/position-reconciliation-import/ledger.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/position-reconciliation-import/ledger.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 1
-      },
-      {
         "name": "PreFundReconciliationError",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/service.js"
@@ -31150,20 +31182,6 @@
         "refFiles": [
           {
             "file": "src/main-process/table-type-detector.js",
-            "count": 9
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 1
-      },
-      {
-        "name": "recoveryInputKey",
-        "defFiles": [
-          "src/main-process/position-reconciliation/operation-lifecycle.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
             "count": 9
           }
         ],
@@ -37310,20 +37328,6 @@
         "refFiles": [
           {
             "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
-        "name": "REPORT_ARTIFACT_KEY",
-        "defFiles": [
-          "src/backend/position-reconciliation-import/anomaly-report.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/position-reconciliation-import/anomaly-report.js",
             "count": 4
           }
         ],
@@ -49483,6 +49487,20 @@
         "fileSpan": 1
       },
       {
+        "name": "committedRecoveryOutputs",
+        "defFiles": [
+          "src/main-process/position-reconciliation/import-recovery.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/position-reconciliation/import-recovery.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "compareSnapshotEntries",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/service.js"
@@ -52850,6 +52868,20 @@
         "refFiles": [
           {
             "file": "src/main-process/duplicate-inbound-match/matching-engine.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "normalizedReportFileIndexes",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/anomaly-report.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/anomaly-report.js",
             "count": 2
           }
         ],
@@ -57241,7 +57273,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-          "count": 4
+          "count": 5
         },
         {
           "file": "src/backend/position-reconciliation-import/apply-grant.js",
@@ -57265,7 +57297,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/preflight.js",
-          "count": 10
+          "count": 12
         },
         {
           "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
@@ -57273,7 +57305,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 7
+          "count": 8
         },
         {
           "file": "src/backend/position-reconciliation-import/worker-entry.js",
@@ -57445,7 +57477,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/operation-lifecycle.js",
-          "count": 6
+          "count": 7
         },
         {
           "file": "src/main-process/position-reconciliation/readers.js",
@@ -57572,7 +57604,7 @@
           "count": 2
         }
       ],
-      "totalHits": 594,
+      "totalHits": 599,
       "fileSpan": 111
     },
     {
@@ -57750,7 +57782,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/preflight.js",
-          "count": 5
+          "count": 6
         },
         {
           "file": "src/backend/position-reconciliation-import/shared-strings-provider.js",
@@ -57965,7 +57997,7 @@
           "count": 1
         }
       ],
-      "totalHits": 366,
+      "totalHits": 367,
       "fileSpan": 77
     },
     {
@@ -58167,7 +58199,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/anomaly-report.js",
-          "count": 3
+          "count": 6
         },
         {
           "file": "src/backend/position-reconciliation-import/apply-grant.js",
@@ -58187,7 +58219,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 14
+          "count": 16
         },
         {
           "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
@@ -58243,7 +58275,7 @@
         },
         {
           "file": "src/main-process/position-reconciliation/filtered-source-report.js",
-          "count": 12
+          "count": 14
         },
         {
           "file": "src/main-process/position-reconciliation/large-import-schema.js",
@@ -58310,7 +58342,7 @@
           "count": 62
         }
       ],
-      "totalHits": 637,
+      "totalHits": 644,
       "fileSpan": 38
     },
     {
@@ -59600,7 +59632,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/preflight.js",
-          "count": 16
+          "count": 19
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
@@ -59651,7 +59683,7 @@
           "count": 1
         }
       ],
-      "totalHits": 203,
+      "totalHits": 206,
       "fileSpan": 19
     },
     {
@@ -60524,7 +60556,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 10
+          "count": 16
         },
         {
           "file": "src/main-process/duplicate-inbound-match/service.js",
@@ -60559,7 +60591,7 @@
           "count": 7
         }
       ],
-      "totalHits": 50,
+      "totalHits": 56,
       "fileSpan": 13
     },
     {
@@ -68216,10 +68248,10 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 14
+          "count": 18
         }
       ],
-      "totalHits": 31,
+      "totalHits": 35,
       "fileSpan": 3
     },
     {
@@ -73434,6 +73466,24 @@
       "fileSpan": 2
     },
     {
+      "name": "parsedJson",
+      "defFiles": [
+        "src/backend/position-reconciliation-import/ledger.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/position-reconciliation-import/ledger.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/scenarios-bundle-io.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 2
+    },
+    {
       "name": "requirePositionPendingArchiveFiles",
       "defFiles": [
         "src/main-process/position-reconciliation/operation-lifecycle.js"
@@ -73557,24 +73607,6 @@
         {
           "file": "src/main-process/biz-op-recon-writer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 13,
-      "fileSpan": 2
-    },
-    {
-      "name": "parsedJson",
-      "defFiles": [
-        "src/backend/position-reconciliation-import/ledger.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/position-reconciliation-import/ledger.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/scenarios-bundle-io.js",
-          "count": 6
         }
       ],
       "totalHits": 13,
@@ -78793,6 +78825,24 @@
         {
           "file": "src/renderer.js",
           "count": 4
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "REPORT_ARTIFACT_KEY",
+      "defFiles": [
+        "src/backend/position-reconciliation-import/anomaly-report.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/position-reconciliation-import/anomaly-report.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/position-reconciliation-import/preflight.js",
+          "count": 2
         }
       ],
       "totalHits": 5,

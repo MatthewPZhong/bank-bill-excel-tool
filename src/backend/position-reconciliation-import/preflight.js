@@ -38,6 +38,7 @@ const {
   verifySealedLedger
 } = require('./ledger');
 const {
+  REPORT_ARTIFACT_KEY,
   writePositionAnomalyReport
 } = require('./anomaly-report');
 const {
@@ -695,13 +696,61 @@ async function runPositionImportPreflight(input = {}) {
     }
 
     let anomalyReport = null;
+    let anomalyReports = [];
+    let anomalyReportByFileIndex = new Map();
     if (kind === 'source') {
       const writeAnomalyReport = typeof input.writeAnomalyReport === 'function'
         ? input.writeAnomalyReport
         : writePositionAnomalyReport;
       try {
-        anomalyReport = await writeAnomalyReport({ ledger, jobRoot, jobId });
+        const filteredFileIndexes = ledger.listFilteredFileIndexes();
+        for (const fileIndex of filteredFileIndexes.slice(0, -1)) {
+          const shard = await writeAnomalyReport({
+            ledger,
+            jobRoot,
+            jobId,
+            fileIndexes: [fileIndex],
+            artifactKey: `${REPORT_ARTIFACT_KEY}:file-${fileIndex}`,
+            fileName: `平盘来源异常数据_${String(jobId)}_文件${fileIndex + 1}.xlsx`,
+            displayRole: '异常数据审计分片'
+          });
+          if (!shard) {
+            throw new PositionReconciliationError(
+              'position-anomaly-report-failed',
+              `文件 ${fileIndex + 1} 的异常报告未生成`
+            );
+          }
+          const normalizedShard = { ...shard, sourceFileIndexes: [fileIndex] };
+          anomalyReports.push(normalizedShard);
+          anomalyReportByFileIndex.set(fileIndex, normalizedShard);
+        }
+        if (filteredFileIndexes.length > 0) {
+          const aggregate = await writeAnomalyReport({
+            ledger,
+            jobRoot,
+            jobId,
+            fileIndexes: filteredFileIndexes
+          });
+          if (!aggregate) {
+            throw new PositionReconciliationError(
+              'position-anomaly-report-failed',
+              '批次异常报告未生成'
+            );
+          }
+          anomalyReport = {
+            ...aggregate,
+            sourceFileIndexes: filteredFileIndexes
+          };
+          anomalyReports.push(anomalyReport);
+          anomalyReportByFileIndex.set(
+            filteredFileIndexes[filteredFileIndexes.length - 1],
+            anomalyReport
+          );
+        }
       } catch (reportError) {
+        anomalyReport = null;
+        anomalyReports = [];
+        anomalyReportByFileIndex = new Map();
         const filteredFileIndexes = new Set(ledger.listFilteredFileIndexes());
         if (filteredFileIndexes.size === 0) throw reportError;
         const firstPassFiles = new Map(
@@ -709,6 +758,10 @@ async function runPositionImportPreflight(input = {}) {
         );
         ledger.close();
         ledger = null;
+        await fs.promises.rm(path.join(jobRoot, 'anomaly-report'), {
+          recursive: true,
+          force: true
+        });
         for (const suffix of ['', '-journal', '-wal', '-shm']) {
           await fs.promises.rm(`${ledgerPath}${suffix}`, { force: true });
         }
@@ -790,9 +843,10 @@ async function runPositionImportPreflight(input = {}) {
     }
     if (anomalyReport) {
       ledger.setAnomalyReport(anomalyReport);
+      ledger.setAnomalyReports(anomalyReports);
       for (const result of orderedFileResults) {
         if (result.status === 'ok' && Number(result.filteredRowCount) > 0) {
-          result.anomalyReport = anomalyReport;
+          result.anomalyReport = anomalyReportByFileIndex.get(Number(result.fileIndex));
         }
       }
     }
@@ -807,6 +861,40 @@ async function runPositionImportPreflight(input = {}) {
     const acceptedBankFiles = kind === 'bank' && orderedFileResults.every((result) => result.status === 'ok')
       ? orderedFileResults.slice()
       : [];
+    const acceptedByFileIndex = new Map(acceptedOrdinaryInputFiles.map((file) => [
+      Number(file.fileIndex),
+      file
+    ]));
+    const outputFiles = anomalyReports.map((report) => {
+      const requiredInputPaths = report.sourceFileIndexes.map((fileIndex) => {
+        const acceptedFile = acceptedByFileIndex.get(Number(fileIndex));
+        if (!acceptedFile || !acceptedFile.archivePath) {
+          throw new PositionReconciliationError(
+            'position-import-job-ledger-invalid',
+            `异常报告引用了未接受的文件索引：${Number(fileIndex)}`
+          );
+        }
+        return path.resolve(acceptedFile.archivePath);
+      });
+      return {
+        filePath: report.filePath,
+        role: 'output',
+        originalName: report.fileName,
+        artifactKey: report.artifactKey,
+        sourceOperation: report.sourceOperation,
+        sourceSnapshot: report.sourceSnapshot,
+        expectedSha256: report.sha256,
+        sizeBytes: report.sizeBytes,
+        requiredInputPaths,
+        metadata: {
+          displayRole: report.displayRole,
+          reportKey: report.reportKey,
+          reportSha256: report.sha256,
+          reportRowCount: report.filteredRowCount,
+          sourceFileIndexes: report.sourceFileIndexes
+        }
+      };
+    });
     return {
       jobId,
       kind,
@@ -816,23 +904,9 @@ async function runPositionImportPreflight(input = {}) {
       accountConfirmationDescriptor: account || null,
       orderedFileResults,
       anomalyReport,
-      outputPaths: anomalyReport ? [anomalyReport.filePath] : [],
-      outputFiles: anomalyReport ? [{
-        filePath: anomalyReport.filePath,
-        role: 'output',
-        originalName: anomalyReport.fileName,
-        artifactKey: anomalyReport.artifactKey,
-        sourceOperation: anomalyReport.sourceOperation,
-        sourceSnapshot: anomalyReport.sourceSnapshot,
-        expectedSha256: anomalyReport.sha256,
-        sizeBytes: anomalyReport.sizeBytes,
-        metadata: {
-          displayRole: anomalyReport.displayRole,
-          reportKey: anomalyReport.reportKey,
-          reportSha256: anomalyReport.sha256,
-          reportRowCount: anomalyReport.filteredRowCount
-        }
-      }] : [],
+      anomalyReports,
+      outputPaths: outputFiles.map((file) => file.filePath),
+      outputFiles,
       ledgerEvidence,
       elapsedMs: Date.now() - startedAt
     };

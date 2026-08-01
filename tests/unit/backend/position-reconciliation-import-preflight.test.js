@@ -1840,6 +1840,200 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
   });
 
+  test('含过滤行的多文件部分提交只恢复已提交文件的独立异常报告', async (t) => {
+    const dir = tempDir(t, 'position-filter-report-recovery-');
+    const checkpoint = {
+      identity: 'filter-report-recovery-identity',
+      generation: 0,
+      token: 'filter-report-recovery-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const first = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: 'FILTER-RECOVERY-A',
+        渠道流水号: 'FILTER-RID-A',
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      'filter-recovery-a.xlsx'
+    );
+    const second = sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: 'FILTER-RECOVERY-B',
+        渠道流水号: 'FILTER-RID-B',
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      'filter-recovery-b.xlsx'
+    );
+
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [first, second],
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
+      },
+      authorizeApply: (ready) => {
+        assert.equal(ready.anomalyReports.length, 2);
+        assert.deepEqual(
+          ready.outputFiles.map((file) => file.requiredInputPaths.length),
+          [1, 2]
+        );
+        fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
+        return {
+          operationToken: 'filter-report-recovery-operation',
+          archiveManifestHash: ready.archiveManifestHash,
+          schemaFingerprint: schemaResult.fingerprint,
+          baseCheckpoint: checkpoint
+        };
+      }
+    }).promise;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(result.successCount, 1);
+    assert.equal(result.failedCount, 1);
+    assert.equal(result.outputFiles.length, 1);
+    assert.equal(result.anomalyReports.length, 1);
+    assert.equal(result.anomalyReport.reportKey, result.anomalyReports[0].reportKey);
+    assert.equal(result.results[0].anomalyReport.reportKey, result.anomalyReport.reportKey);
+    assert.equal(result.results[1].anomalyReport, undefined);
+    assert.deepEqual(
+      result.outputFiles[0].requiredInputPaths,
+      [path.resolve(result.results[0].archivePath)]
+    );
+
+    const workbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
+    const detailRows = XLSX.utils.sheet_to_json(
+      workbook.Sheets['调拨异常明细'],
+      { defval: '', raw: true }
+    );
+    assert.deepEqual(detailRows.map((row) => row.调拨单号), ['FILTER-RECOVERY-A']);
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    const tombstones = db.prepare(`
+      SELECT business_key AS businessKey, report_key AS reportKey
+      FROM position_filtered_source_rows
+      ORDER BY business_key
+    `).all();
+    assert.deepEqual(tombstones.map((row) => ({ ...row })), [{
+      businessKey: 'FILTER-RECOVERY-A',
+      reportKey: result.anomalyReport.reportKey
+    }]);
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 1);
+  });
+
+  test('含过滤行的多文件全部提交时保留文件级审计分片和完整批次报告', async (t) => {
+    const dir = tempDir(t, 'position-filter-report-complete-');
+    const checkpoint = {
+      identity: 'filter-report-complete-identity',
+      generation: 0,
+      token: 'filter-report-complete-token'
+    };
+    const store = createPositionReconciliationStore(dir, {
+      initialCheckpoint: checkpoint
+    });
+    const sideDbPath = store.dbPath;
+    store.close();
+    const schemaResult = await dispatchPositionLargeImportSchemaMigration({
+      engine: 'streaming',
+      userDataDir: dir,
+      sideDbPath,
+      expectedCheckpoint: checkpoint
+    }).promise;
+    const base = sourceRows()[SOURCE_TYPES.FUND_TRANSFER];
+    const files = ['A', 'B'].map((suffix) => sourceFile(
+      dir,
+      SOURCE_TYPES.FUND_TRANSFER,
+      [{
+        ...base,
+        调拨单号: `FILTER-COMPLETE-${suffix}`,
+        渠道流水号: `FILTER-COMPLETE-RID-${suffix}`,
+        调拨状态: '付款失败',
+        付款金额: ''
+      }],
+      `filter-complete-${suffix}.xlsx`
+    ));
+
+    const result = await dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files,
+      userDataDir: path.join(dir, 'worker-user-data'),
+      sideDbPath,
+      featureFlags: {
+        preflightOnly: false,
+        streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
+      },
+      authorizeApply: (ready) => ({
+        operationToken: 'filter-report-complete-operation',
+        archiveManifestHash: ready.archiveManifestHash,
+        schemaFingerprint: schemaResult.fingerprint,
+        baseCheckpoint: checkpoint
+      })
+    }).promise;
+
+    assert.equal(result.successCount, 2);
+    assert.equal(result.failedCount, 0);
+    assert.equal(result.anomalyReports.length, 2);
+    assert.equal(result.outputFiles.length, 2);
+    assert.equal(result.anomalyReport.filteredRowCount, 2);
+    assert.equal(result.results[0].anomalyReport.filteredRowCount, 1);
+    assert.equal(
+      result.results[1].anomalyReport.reportKey,
+      result.anomalyReport.reportKey
+    );
+    const workbook = XLSX.readFile(result.anomalyReport.filePath, { raw: true });
+    const detailRows = XLSX.utils.sheet_to_json(
+      workbook.Sheets['调拨异常明细'],
+      { defval: '', raw: true }
+    );
+    assert.deepEqual(
+      detailRows.map((row) => row.调拨单号),
+      ['FILTER-COMPLETE-A', 'FILTER-COMPLETE-B']
+    );
+
+    const db = new DatabaseSync(sideDbPath, { readOnly: true });
+    t.after(() => db.close());
+    const tombstones = db.prepare(`
+      SELECT business_key AS businessKey, report_key AS reportKey
+      FROM position_filtered_source_rows
+      ORDER BY business_key
+    `).all().map((row) => ({ ...row }));
+    assert.deepEqual(tombstones, [
+      {
+        businessKey: 'FILTER-COMPLETE-A',
+        reportKey: result.results[0].anomalyReport.reportKey
+      },
+      {
+        businessKey: 'FILTER-COMPLETE-B',
+        reportKey: result.anomalyReport.reportKey
+      }
+    ]);
+    assert.equal(readPositionDatabaseCheckpoint(db).generation, 2);
+  });
+
   test('磁盘门禁使用保守行放大和固定安全边际，无法确认空间时 fail closed', (t) => {
     const dir = tempDir(t, 'position-pr-e-disk-gate-');
     const sideDbPath = path.join(dir, 'position-data.sqlite');
