@@ -1,7 +1,7 @@
 # Codex Implementation Spec — 平盘对账百万级 Excel 流式导入、增量派生与崩溃隔离
 
 > change-name: `position-reconciliation-large-table-import`
-> status: `release-prepared`（PR #110 已合入 `main`；自动发布门禁通过；人工资金与 Windows 实机验收待完成）
+> status: `released`（`v3.1.3` Windows Release 已发布；人工资金与 Windows 实机验收待完成）
 > baseline-branch: `main`
 > baseline-commit: `db43294`
 > baseline-version: `3.1.2`
@@ -1986,3 +1986,19 @@ npm run check:vars
    - 真实资金范围替换、链接派生和账户数据逐笔复核。
 6. 上述人工门禁继续作为发布公告和业务启用前 follow-up。任何最终归档不得把
    自动化证据写成真实资金人工验收结论。
+7. 首次 Windows Release workflow run `30673001316` 在构建前暴露 Windows 路径
+   规范化和 SQLite teardown 文件锁问题；该轮未创建 Release 或发布资产。PR #112
+   仅修复跨平台测试路径与资源释放顺序，并以 merge commit
+   `6c5339f33e02b8833da6d5111cdc8710f61b6250` 合入 `main`。
+8. annotated tag `v3.1.3` 最终指向上述 merge commit；Windows Release workflow
+   [run 30674305362](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30674305362)
+   全部通过，包括 tag/main 校验、release-check、主页面对齐、Windows 构建、包检查、
+   更新资产校验、不可变发布和发布后验证。
+9. [GitHub Release v3.1.3](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.3)
+   由 workflow 校验为 stable、latest、non-draft、non-prerelease，并包含且仅包含：
+   `bank-bill-excel-tool-setup-3.1.3.exe`、
+   `bank-bill-excel-tool-setup-3.1.3.exe.blockmap`、
+   `bank-bill-excel-tool-portable-3.1.3.exe`、`latest.yml`。
+10. workflow 已核对包结构、版本引用、Setup 文件名及 `latest.yml` 中的 Setup SHA-512；
+    当前 Codex 会话因网络授权额度限制未能再次下载公开资产执行独立 PE 头、文件大小和
+    SHA-256 回读。该证据边界保留在发布记录中，不解释为 Windows 实机验收。
