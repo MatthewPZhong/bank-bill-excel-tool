@@ -9,7 +9,8 @@ const {
   POSITION_BANK_HEADERS,
   BANK_SHEET_NAME,
   SOURCE_DEFINITIONS,
-  SOURCE_TYPES
+  SOURCE_TYPES,
+  SOURCE_FILTER_CODES
 } = require('./constants');
 const {
   PositionReconciliationError,
@@ -300,6 +301,74 @@ function validateSourceRow(sourceType, row) {
   return { errors, businessKey, eventDate, monthKey };
 }
 
+function invalidEvidenceFields(sourceType, row) {
+  if (sourceType === SOURCE_TYPES.FUND_TRANSFER) {
+    return [
+      !canonicalDecimal(row['付款金额']) ? '付款金额' : '',
+      !text(row['付款币种']) ? '付款币种' : '',
+      !canonicalDecimal(row['收款金额']) ? '收款金额' : '',
+      !text(row['收款币种']) ? '收款币种' : ''
+    ].filter(Boolean);
+  }
+  if (sourceType === SOURCE_TYPES.TEST_PAYMENT) {
+    return [
+      !canonicalDecimal(row['源金额']) ? '源金额' : '',
+      !text(row['源币种']) ? '源币种' : ''
+    ].filter(Boolean);
+  }
+  return [];
+}
+
+function classifySourceRow(sourceType, row) {
+  const validation = validateSourceRow(sourceType, row);
+  if (validation.errors.length === 0) {
+    return { disposition: 'accepted', validation, filter: null };
+  }
+
+  const definition = SOURCE_DEFINITIONS[sourceType];
+  const keyAndDateValid = Boolean(
+    (!definition.keyField || validation.businessKey)
+    && (!definition.dateField || (validation.eventDate && validation.monthKey))
+  );
+  if (sourceType === SOURCE_TYPES.FUND_TRANSFER && keyAndDateValid) {
+    const fields = invalidEvidenceFields(sourceType, row);
+    if (text(row['调拨状态']) !== '付款成功' && fields.length > 0) {
+      return {
+        disposition: 'filtered',
+        validation,
+        filter: {
+          code: SOURCE_FILTER_CODES.FUND_TRANSFER_NON_SUCCESS_EVIDENCE_INCOMPLETE,
+          reason: `非付款成功调拨记录的金额/币种证据不完整：${fields.join('、')}`,
+          fields,
+          reconId: text(row['渠道流水号'])
+        }
+      };
+    }
+  }
+
+  if (sourceType === SOURCE_TYPES.TEST_PAYMENT && keyAndDateValid) {
+    const fields = invalidEvidenceFields(sourceType, row);
+    const targetEvidenceValid = Boolean(
+      canonicalDecimal(row['目标金额'])
+      && text(row['目标币种'])
+    );
+    if (fields.length > 0 && targetEvidenceValid) {
+      return {
+        disposition: 'filtered',
+        validation,
+        filter: {
+          code: SOURCE_FILTER_CODES.TEST_PAYMENT_SOURCE_EVIDENCE_INCOMPLETE,
+          reason: `测试付款记录的源金额/源币种证据不完整：${fields.join('、')}`,
+          fields,
+          reconId: text(row['渠道流水号'])
+        }
+      };
+    }
+  }
+
+  return { disposition: 'invalid', validation, filter: null };
+}
+
 function readSourceFile(input, { identityMode = 'business-key' } = {}) {
   const descriptor = normalizeFileInput(input);
   const filePath = descriptor.filePath;
@@ -514,5 +583,7 @@ module.exports = {
   normalizeHeaderRow,
   headersEqual,
   rowValues,
-  validateSourceRow
+  validateSourceRow,
+  classifySourceRow,
+  invalidEvidenceFields
 };

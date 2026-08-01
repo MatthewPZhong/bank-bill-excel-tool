@@ -291,6 +291,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     prepareSourceImport: () => ipcRenderer.invoke('position-reconciliation:source:prepare-import'),
     applySourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:apply-import', token),
     cancelSourceImport: (token) => ipcRenderer.invoke('position-reconciliation:source:cancel-import', token),
+    exportSourceAnomaly: (reportKey) => ipcRenderer.invoke(
+      'position-reconciliation:source:export-anomaly',
+      reportKey
+    ),
     cancelActiveImport: (jobId) => ipcRenderer.invoke(
       'position-reconciliation:import:cancel',
       jobId
@@ -320,6 +324,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     ),
     run: (payload) => ipcRenderer.invoke('position-reconciliation:run', payload),
     exportRun: (payload) => ipcRenderer.invoke('position-reconciliation:run:export', payload),
+    exportRunFiltered: (runId) => ipcRenderer.invoke(
+      'position-reconciliation:run:export-filtered',
+      runId
+    ),
     importRunResult: (runId) => ipcRenderer.invoke('position-reconciliation:run:import-result', runId),
     confirmRun: (runId) => ipcRenderer.invoke('position-reconciliation:run:confirm', runId)
   },

@@ -220,6 +220,13 @@ async function deleteSourceRowsStreamed({
           [`预期 ${expectedRows} 行，实际 ${deletedCount} 行`]
         );
       }
+      const resolvedFiltered = db.prepare(`
+        UPDATE position_filtered_source_rows
+        SET resolved_at = CURRENT_TIMESTAMP,
+            resolution_reason = 'source-range-deleted'
+        WHERE source_type = ?${monthClause}
+          AND resolved_at IS NULL
+      `).run(...args);
       bumpRevision(db, 'source', selection.sourceType);
       bumpRevision(db, 'linked', selection.sourceType);
       refreshPositionSourceSummary(db, selection.sourceType, {
@@ -233,7 +240,8 @@ async function deleteSourceRowsStreamed({
       });
       return {
         sourceType: selection.sourceType,
-        deletedCount
+        deletedCount,
+        resolvedFilteredCount: Number(resolvedFiltered.changes) || 0
       };
     }
   });

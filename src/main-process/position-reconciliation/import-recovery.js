@@ -249,6 +249,31 @@ function proofMatchesExpected(proof, expected) {
     && snapshotsEqual(proof.sourceSnapshot, expected.sourceSnapshot);
 }
 
+function committedRecoveryOutputs(preflightReady, acceptedPaths, committedPaths) {
+  const outputs = Array.isArray(preflightReady && preflightReady.outputFiles)
+    ? preflightReady.outputFiles
+    : [];
+  const allAcceptedCommitted = committedPaths.size === acceptedPaths.size;
+  return outputs.filter((file) => {
+    const dependencies = Array.isArray(file && file.requiredInputPaths)
+      ? file.requiredInputPaths.map(inputPathKey)
+      : null;
+    if (!dependencies) {
+      if (!allAcceptedCommitted) {
+        throw recoveryRequired(
+          '部分提交恢复遇到未声明输入依赖的异常报告，禁止归入成功批次'
+        );
+      }
+      return true;
+    }
+    if (dependencies.length === 0
+        || dependencies.some((filePath) => !acceptedPaths.has(filePath))) {
+      throw recoveryRequired('异常报告输入依赖无法与预检文件集合对齐');
+    }
+    return dependencies.every((filePath) => committedPaths.has(filePath));
+  });
+}
+
 function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
   const acceptedBankFiles = Array.isArray(preflightReady.acceptedBankFiles)
     ? preflightReady.acceptedBankFiles
@@ -299,7 +324,7 @@ function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
     );
   }
 
-  const results = ordered.map((item) => {
+  let results = ordered.map((item) => {
     if (item.status !== 'ok' || !expectedByPath.has(inputPathKey(item.archivePath))) {
       return item;
     }
@@ -311,8 +336,9 @@ function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
         recoveredFromWorkerExit: true
       };
     }
+    const { anomalyReport: _uncommittedReport, ...withoutReport } = item;
     return {
-      ...item,
+      ...withoutReport,
       status: 'failed',
       code: 'position-import-worker-exited-before-commit',
       message: 'worker 退出前该文件尚未形成侧库提交凭证',
@@ -334,6 +360,31 @@ function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
       sizeBytes: expected.sizeBytes
     };
   });
+  const acceptedPaths = new Set(expectedByPath.keys());
+  const outputFiles = committedRecoveryOutputs(
+    preflightReady,
+    acceptedPaths,
+    committedPaths
+  );
+  const retainedReportKeys = new Set(outputFiles.map((file) => (
+    String(file && file.metadata && file.metadata.reportKey || '').trim()
+  )).filter(Boolean));
+  const anomalyReports = (Array.isArray(preflightReady.anomalyReports)
+    ? preflightReady.anomalyReports
+    : []).filter((report) => retainedReportKeys.has(String(report.reportKey || '').trim()));
+  results = results.map((item) => {
+    const filteredRowCount = Number(item.filteredRowCount) || 0;
+    if (item.status !== 'ok' || filteredRowCount <= 0) return item;
+    if (!item.anomalyReport
+        || !retainedReportKeys.has(String(item.anomalyReport.reportKey || '').trim())) {
+      throw recoveryRequired('已提交文件的异常报告未进入恢复输出集合');
+    }
+    return item;
+  });
+  const aggregateReport = preflightReady.anomalyReport
+    && retainedReportKeys.has(String(preflightReady.anomalyReport.reportKey || '').trim())
+    ? preflightReady.anomalyReport
+    : (anomalyReports.length === 1 ? anomalyReports[0] : null);
   return {
     status: success.length > 0 || confirmation.length > 0 ? 'ok' : 'failed',
     code: success.length > 0 ? 'position-import-worker-exit-recovered' : (
@@ -351,6 +402,10 @@ function rebuildOrdinarySourceResult(preflightReady, chain, workerError) {
     confirmationCount: confirmation.length,
     inputPaths: committedFiles.map((file) => file.filePath),
     inputFiles: committedFiles,
+    anomalyReport: aggregateReport,
+    anomalyReports,
+    outputPaths: outputFiles.map((file) => file.filePath),
+    outputFiles,
     cleanupPaths: results
       .filter((item) => item.status !== 'needs-confirmation')
       .map((item) => item.stagingDir)

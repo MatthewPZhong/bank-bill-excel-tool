@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const {
   BANK_STATEMENT_FIELDS
@@ -26,8 +27,8 @@ const {
 } = require('../../main-process/position-reconciliation/input-staging');
 const {
   StableArrayHashAccumulator,
-  stableRowGuardHash,
-  validateSourceRow
+  classifySourceRow,
+  stableRowGuardHash
 } = require('./contracts');
 const {
   POSITION_IMPORT_PROGRESS_ROW_INTERVAL
@@ -36,6 +37,10 @@ const {
   PositionImportLedger,
   verifySealedLedger
 } = require('./ledger');
+const {
+  REPORT_ARTIFACT_KEY,
+  writePositionAnomalyReport
+} = require('./anomaly-report');
 const {
   streamPositionXlsRows
 } = require('./xls-reader');
@@ -47,6 +52,7 @@ function emptyStats() {
   return {
     scannedNonBlankRows: 0,
     persistedCandidateRows: 0,
+    filteredRows: 0,
     collapsedDuplicateRows: 0,
     readerFilteredRows: 0,
     invalidRows: 0,
@@ -55,7 +61,8 @@ function emptyStats() {
     derivedZeroSourceRows: 0,
     dateMin: null,
     dateMax: null,
-    contentHash: null
+    contentHash: null,
+    filterReasonCounts: {}
   };
 }
 
@@ -131,8 +138,9 @@ async function preflightSourceFile({
           return;
         }
 
-        const validation = validateSourceRow(sourceType, row);
-        if (validation.errors.length > 0) {
+        const classification = classifySourceRow(sourceType, row);
+        const validation = classification.validation;
+        if (classification.disposition === 'invalid') {
           stats.invalidRows += 1;
           throw new PositionReconciliationError(
             'position-source-row-invalid',
@@ -142,26 +150,63 @@ async function preflightSourceFile({
         }
         const rowHash = stableHash(row);
         const rowGuardHash = stableRowGuardHash(row);
+        let claim = { status: 'accepted' };
         if (SOURCE_DEFINITIONS[sourceType].keyField) {
-          const claim = ledger.claimSourceRecord({
+          claim = ledger.claimSourceRecord({
             sourceType,
             businessKey: validation.businessKey,
             rowHash,
             rowGuardHash,
             fileIndex: descriptor.fileIndex,
-            rowNumber: excelRowNumber
+            rowNumber: excelRowNumber,
+            disposition: classification.disposition
           });
-          if (claim.status === 'collapsed') {
-            stats.collapsedDuplicateRows += 1;
-            return;
-          }
-          if (claim.status !== 'accepted') {
+          if (claim.status !== 'accepted' && claim.status !== 'collapsed') {
             throw new PositionReconciliationError(
               'position-source-record-hash-collision',
               `来源记录内容摘要冲突：${descriptor.sourceFileName}`,
               ['无法证明两条来源记录完全相同，已停止导入']
             );
           }
+        }
+
+        if (classification.disposition === 'filtered') {
+          const filter = classification.filter;
+          ledger.recordFilteredRow({
+            reportRowKey: stableHash({
+              jobId: ledger.jobId,
+              fileIndex: descriptor.fileIndex,
+              rowNumber: excelRowNumber,
+              sourceType,
+              rowHash
+            }),
+            sourceType,
+            businessKey: validation.businessKey,
+            reconId: filter.reconId,
+            eventDate: validation.eventDate,
+            monthKey: validation.monthKey,
+            errorCode: filter.code,
+            errorReason: filter.reason,
+            fileIndex: descriptor.fileIndex,
+            rowNumber: excelRowNumber,
+            rowHash,
+            rowGuardHash,
+            isOwner: claim.status === 'accepted',
+            row
+          });
+          if (claim.status === 'collapsed') {
+            stats.collapsedDuplicateRows += 1;
+            return;
+          }
+          stats.filteredRows += 1;
+          stats.filterReasonCounts[filter.code] =
+            Number(stats.filterReasonCounts[filter.code] || 0) + 1;
+          return;
+        }
+
+        if (claim.status === 'collapsed') {
+          stats.collapsedDuplicateRows += 1;
+          return;
         }
 
         const record = {
@@ -330,7 +375,12 @@ function resultFromAccepted(descriptor, preflight, kind) {
     linkedName: preflight.linkedName || null,
     sheetName: preflight.sheetName,
     rowCount: preflight.persistedCandidateRows,
+    physicalRowCount: preflight.scannedNonBlankRows,
+    filteredRowCount: preflight.filteredRows,
+    filterReasonCounts: preflight.filterReasonCounts,
     collapsedDuplicateCount: preflight.collapsedDuplicateRows,
+    generatedLinkRowCount:
+      Number(preflight.visibleLinkRows) + Number(preflight.hiddenLinkRows),
     contentHash: preflight.contentHash,
     sharedStringsMode: preflight.sharedStringsMode,
     sharedStringsCount: preflight.sharedStringsCount,
@@ -341,6 +391,9 @@ function resultFromAccepted(descriptor, preflight, kind) {
 }
 
 function resultFromFailure(descriptor, error) {
+  const stats = error && error.positionImportStats
+    ? error.positionImportStats
+    : {};
   return {
     status: 'failed',
     fileIndex: descriptor.fileIndex,
@@ -348,6 +401,9 @@ function resultFromFailure(descriptor, error) {
     archivePath: descriptor.archivePath,
     stagingDir: descriptor.stagingDir,
     fileName: descriptor.sourceFileName,
+    sourceType: stats.sourceType || error.sourceType || null,
+    physicalRowCount: Number(stats.scannedNonBlankRows || 0),
+    fileRejectedRowCount: Number(stats.scannedNonBlankRows || 0),
     code: error && error.code ? error.code : 'position-source-import-failed',
     message: error && error.message ? error.message : String(error),
     detailLines: Array.isArray(error && error.detailLines)
@@ -362,6 +418,73 @@ function isSystemFatal(error) {
     'position-import-job-ledger-invalid',
     'position-import-cancelled'
   ]).has(String(error && error.code || ''));
+}
+
+function collisionFailureMap(ledger, sideDbPath) {
+  const failures = new Map();
+  const add = (item, location) => {
+    const fileIndex = Number(item.fileIndex);
+    const current = failures.get(fileIndex) || {
+      sourceType: String(item.sourceType || ''),
+      collisions: []
+    };
+    current.collisions.push({
+      businessKey: String(item.businessKey || ''),
+      location: String(location || '')
+    });
+    failures.set(fileIndex, current);
+  };
+
+  for (const item of ledger.listFilteredBatchCollisions()) {
+    add(
+      item,
+      `同批正常记录位于第 ${Number(item.acceptedFileIndex) + 1} 个文件` +
+        `第 ${Number(item.acceptedRowNumber)} 行`
+    );
+  }
+
+  const resolvedSideDbPath = String(sideDbPath || '').trim();
+  if (!resolvedSideDbPath || !fs.existsSync(path.resolve(resolvedSideDbPath))) {
+    return failures;
+  }
+  const db = new DatabaseSync(path.resolve(resolvedSideDbPath), { readOnly: true });
+  try {
+    db.exec('PRAGMA busy_timeout=30000;');
+    const sourceTable = db.prepare(`
+      SELECT 1
+      FROM sqlite_master
+      WHERE type = 'table' AND name = 'position_source_rows'
+    `).get();
+    if (!sourceTable) return failures;
+    const findExisting = db.prepare(`
+      SELECT id
+      FROM position_source_rows
+      WHERE source_type = ? AND business_key = ?
+      LIMIT 1
+    `);
+    for (const item of ledger.iterateFilteredBusinessKeys()) {
+      if (findExisting.get(item.sourceType, item.businessKey)) {
+        add(item, '当前数据库已存在正常记录');
+      }
+    }
+  } finally {
+    db.close();
+  }
+  return failures;
+}
+
+function filteredCollisionError(descriptor, failure) {
+  const detailLines = [...new Map(
+    (failure.collisions || []).map((item) => [
+      `${item.businessKey}\u0000${item.location}`,
+      `${item.businessKey}：${item.location}`
+    ])
+  ).values()].slice(0, 100);
+  return new PositionReconciliationError(
+    'position-filtered-key-collision',
+    `过滤行业务单号与正常记录冲突，整份文件已拒绝：${descriptor.sourceFileName}`,
+    detailLines
+  );
 }
 
 async function runPositionImportPreflight(input = {}) {
@@ -467,6 +590,85 @@ async function runPositionImportPreflight(input = {}) {
       }
     }
 
+    if (kind === 'source') {
+      const collisions = collisionFailureMap(ledger, input.sideDbPath);
+      if (collisions.size > 0) {
+        const firstPassFiles = new Map(
+          ledger.listFiles().map((file) => [Number(file.fileIndex), file])
+        );
+        ledger.close();
+        ledger = null;
+        for (const suffix of ['', '-journal', '-wal', '-shm']) {
+          await fs.promises.rm(`${ledgerPath}${suffix}`, { force: true });
+        }
+        ledger = new PositionImportLedger({ ledgerPath, jobId, kind });
+        staged.forEach((descriptor) => ledger.addFile(descriptor));
+        orderedFileResults.length = 0;
+        filePreflightStats.clear();
+
+        for (const descriptor of staged) {
+          if (cancelToken.cancelled) {
+            throw new PositionReconciliationError('position-import-cancelled', '平盘导入已取消');
+          }
+          ledger.beginFile(descriptor.fileIndex);
+          const collision = collisions.get(Number(descriptor.fileIndex));
+          if (collision) {
+            const firstPass = firstPassFiles.get(Number(descriptor.fileIndex)) || {};
+            const error = filteredCollisionError(descriptor, collision);
+            error.sourceType = collision.sourceType;
+            error.positionImportStats = {
+              scannedNonBlankRows: Number(firstPass.scannedNonBlankRows || 0),
+              invalidRows: 0,
+              sourceType: collision.sourceType,
+              sheetName: firstPass.sheetName || ''
+            };
+            ledger.rejectFile(descriptor.fileIndex, error, error.positionImportStats);
+            orderedFileResults.push(resultFromFailure(descriptor, error));
+            continue;
+          }
+          try {
+            const reportProgress = typeof input.onProgress === 'function'
+              ? (progress) => input.onProgress({
+                ...progress,
+                currentFile: descriptor.fileIndex + 1,
+                totalFiles: staged.length,
+                fileName: descriptor.sourceFileName,
+                replayedForCollision: true
+              })
+              : null;
+            const preflight = await preflightSourceFile({
+              descriptor,
+              ledger,
+              cancelToken,
+              onProgress: reportProgress,
+              startedAt,
+              sstOptions: input.sstOptions,
+              allowMainThreadXls: input.allowMainThreadXls
+            });
+            ledger.acceptFile(descriptor.fileIndex, preflight);
+            filePreflightStats.set(descriptor.fileIndex, {
+              scannedNonBlankRows: preflight.scannedNonBlankRows,
+              invalidRows: 0,
+              sourceType: preflight.sourceType,
+              sheetName: preflight.sheetName
+            });
+            orderedFileResults.push(resultFromAccepted(descriptor, preflight, kind));
+          } catch (error) {
+            ledger.rejectFile(
+              descriptor.fileIndex,
+              error,
+              error && error.positionImportStats ? error.positionImportStats : {}
+            );
+            if (isSystemFatal(error)) {
+              error.fileIndex = descriptor.fileIndex;
+              throw error;
+            }
+            orderedFileResults.push(resultFromFailure(descriptor, error));
+          }
+        }
+      }
+    }
+
     if (kind === 'bank') {
       if (bankFailure) {
         ledger.rollbackBatch();
@@ -493,6 +695,163 @@ async function runPositionImportPreflight(input = {}) {
       }
     }
 
+    let anomalyReport = null;
+    let anomalyReports = [];
+    let anomalyReportByFileIndex = new Map();
+    if (kind === 'source') {
+      const writeAnomalyReport = typeof input.writeAnomalyReport === 'function'
+        ? input.writeAnomalyReport
+        : writePositionAnomalyReport;
+      try {
+        const filteredFileIndexes = ledger.listFilteredFileIndexes();
+        if (filteredFileIndexes.length > 1) {
+          for (const fileIndex of filteredFileIndexes) {
+            const shard = await writeAnomalyReport({
+              ledger,
+              jobRoot,
+              jobId,
+              fileIndexes: [fileIndex],
+              artifactKey: `${REPORT_ARTIFACT_KEY}:file-${fileIndex}`,
+              fileName: `平盘来源异常数据_${String(jobId)}_文件${fileIndex + 1}.xlsx`,
+              displayRole: '异常数据审计分片'
+            });
+            if (!shard) {
+              throw new PositionReconciliationError(
+                'position-anomaly-report-failed',
+                `文件 ${fileIndex + 1} 的异常报告未生成`
+              );
+            }
+            const normalizedShard = { ...shard, sourceFileIndexes: [fileIndex] };
+            anomalyReports.push(normalizedShard);
+            anomalyReportByFileIndex.set(fileIndex, normalizedShard);
+          }
+        }
+        if (filteredFileIndexes.length > 0) {
+          const aggregate = await writeAnomalyReport({
+            ledger,
+            jobRoot,
+            jobId,
+            fileIndexes: filteredFileIndexes
+          });
+          if (!aggregate) {
+            throw new PositionReconciliationError(
+              'position-anomaly-report-failed',
+              '批次异常报告未生成'
+            );
+          }
+          anomalyReport = {
+            ...aggregate,
+            sourceFileIndexes: filteredFileIndexes
+          };
+          anomalyReports.push(anomalyReport);
+          if (filteredFileIndexes.length === 1) {
+            anomalyReportByFileIndex.set(filteredFileIndexes[0], anomalyReport);
+          }
+        }
+      } catch (reportError) {
+        anomalyReport = null;
+        anomalyReports = [];
+        anomalyReportByFileIndex = new Map();
+        const filteredFileIndexes = new Set(ledger.listFilteredFileIndexes());
+        if (filteredFileIndexes.size === 0) throw reportError;
+        const firstPassFiles = new Map(
+          ledger.listFiles().map((file) => [Number(file.fileIndex), file])
+        );
+        ledger.close();
+        ledger = null;
+        await fs.promises.rm(path.join(jobRoot, 'anomaly-report'), {
+          recursive: true,
+          force: true
+        });
+        for (const suffix of ['', '-journal', '-wal', '-shm']) {
+          await fs.promises.rm(`${ledgerPath}${suffix}`, { force: true });
+        }
+        ledger = new PositionImportLedger({ ledgerPath, jobId, kind });
+        staged.forEach((descriptor) => ledger.addFile(descriptor));
+        orderedFileResults.length = 0;
+        filePreflightStats.clear();
+
+        for (const descriptor of staged) {
+          if (cancelToken.cancelled) {
+            throw new PositionReconciliationError('position-import-cancelled', '平盘导入已取消');
+          }
+          ledger.beginFile(descriptor.fileIndex);
+          if (filteredFileIndexes.has(Number(descriptor.fileIndex))) {
+            const firstPass = firstPassFiles.get(Number(descriptor.fileIndex)) || {};
+            const error = new PositionReconciliationError(
+              'position-anomaly-report-failed',
+              `异常报告生成失败，含过滤行文件未提交：${descriptor.sourceFileName}`,
+              [
+                reportError && reportError.message
+                  ? reportError.message
+                  : String(reportError),
+                ...(Array.isArray(reportError && reportError.detailLines)
+                  ? reportError.detailLines
+                  : [])
+              ].filter(Boolean).slice(0, 100)
+            );
+            error.positionImportStats = {
+              scannedNonBlankRows: Number(firstPass.scannedNonBlankRows || 0),
+              invalidRows: 0,
+              sourceType: firstPass.sourceType || '',
+              sheetName: firstPass.sheetName || ''
+            };
+            ledger.rejectFile(descriptor.fileIndex, error, error.positionImportStats);
+            orderedFileResults.push(resultFromFailure(descriptor, error));
+            continue;
+          }
+          try {
+            const reportProgress = typeof input.onProgress === 'function'
+              ? (progress) => input.onProgress({
+                ...progress,
+                currentFile: descriptor.fileIndex + 1,
+                totalFiles: staged.length,
+                fileName: descriptor.sourceFileName,
+                replayedAfterReportFailure: true
+              })
+              : null;
+            const preflight = await preflightSourceFile({
+              descriptor,
+              ledger,
+              cancelToken,
+              onProgress: reportProgress,
+              startedAt,
+              sstOptions: input.sstOptions,
+              allowMainThreadXls: input.allowMainThreadXls
+            });
+            ledger.acceptFile(descriptor.fileIndex, preflight);
+            filePreflightStats.set(descriptor.fileIndex, {
+              scannedNonBlankRows: preflight.scannedNonBlankRows,
+              invalidRows: 0,
+              sourceType: preflight.sourceType,
+              sheetName: preflight.sheetName
+            });
+            orderedFileResults.push(resultFromAccepted(descriptor, preflight, kind));
+          } catch (error) {
+            ledger.rejectFile(
+              descriptor.fileIndex,
+              error,
+              error && error.positionImportStats ? error.positionImportStats : {}
+            );
+            if (isSystemFatal(error)) {
+              error.fileIndex = descriptor.fileIndex;
+              throw error;
+            }
+            orderedFileResults.push(resultFromFailure(descriptor, error));
+          }
+        }
+      }
+    }
+    if (anomalyReport) {
+      ledger.setAnomalyReport(anomalyReport);
+      ledger.setAnomalyReports(anomalyReports);
+      for (const result of orderedFileResults) {
+        if (result.status === 'ok' && Number(result.filteredRowCount) > 0) {
+          result.anomalyReport = anomalyReportByFileIndex.get(Number(result.fileIndex));
+        }
+      }
+    }
+
     const ledgerEvidence = await ledger.seal();
     const verifiedLedger = await verifySealedLedger(ledgerEvidence);
     verifiedLedger.db.close();
@@ -503,6 +862,40 @@ async function runPositionImportPreflight(input = {}) {
     const acceptedBankFiles = kind === 'bank' && orderedFileResults.every((result) => result.status === 'ok')
       ? orderedFileResults.slice()
       : [];
+    const acceptedByFileIndex = new Map(acceptedOrdinaryInputFiles.map((file) => [
+      Number(file.fileIndex),
+      file
+    ]));
+    const outputFiles = anomalyReports.map((report) => {
+      const requiredInputPaths = report.sourceFileIndexes.map((fileIndex) => {
+        const acceptedFile = acceptedByFileIndex.get(Number(fileIndex));
+        if (!acceptedFile || !acceptedFile.archivePath) {
+          throw new PositionReconciliationError(
+            'position-import-job-ledger-invalid',
+            `异常报告引用了未接受的文件索引：${Number(fileIndex)}`
+          );
+        }
+        return path.resolve(acceptedFile.archivePath);
+      });
+      return {
+        filePath: report.filePath,
+        role: 'output',
+        originalName: report.fileName,
+        artifactKey: report.artifactKey,
+        sourceOperation: report.sourceOperation,
+        sourceSnapshot: report.sourceSnapshot,
+        expectedSha256: report.sha256,
+        sizeBytes: report.sizeBytes,
+        requiredInputPaths,
+        metadata: {
+          displayRole: report.displayRole,
+          reportKey: report.reportKey,
+          reportSha256: report.sha256,
+          reportRowCount: report.filteredRowCount,
+          sourceFileIndexes: report.sourceFileIndexes
+        }
+      };
+    });
     return {
       jobId,
       kind,
@@ -511,6 +904,10 @@ async function runPositionImportPreflight(input = {}) {
       acceptedBankFiles,
       accountConfirmationDescriptor: account || null,
       orderedFileResults,
+      anomalyReport,
+      anomalyReports,
+      outputPaths: outputFiles.map((file) => file.filePath),
+      outputFiles,
       ledgerEvidence,
       elapsedMs: Date.now() - startedAt
     };

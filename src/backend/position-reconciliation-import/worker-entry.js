@@ -321,6 +321,7 @@ async function runJob(message) {
     kind,
     files: message.files,
     userDataDir: message.userDataDir,
+    sideDbPath: message.sideDbPath,
     cancelToken,
     sstOptions: message.contractOptions && message.contractOptions.sstOptions,
     onProgress(progress) {
@@ -361,6 +362,10 @@ async function runJob(message) {
     acceptedBankFiles: result.acceptedBankFiles,
     accountConfirmationDescriptor: result.accountConfirmationDescriptor,
     orderedFileResults: result.orderedFileResults,
+    anomalyReport: result.anomalyReport,
+    anomalyReports: result.anomalyReports,
+    outputPaths: result.outputPaths,
+    outputFiles: result.outputFiles,
     ledgerEvidence: result.ledgerEvidence
   });
   active.stage = 'awaiting-apply-grant';

@@ -139,6 +139,44 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_position_source_type_month
     ON position_source_rows(source_type, month_key);
 
+  CREATE TABLE IF NOT EXISTS position_filtered_source_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_row_key TEXT NOT NULL UNIQUE,
+    source_type TEXT NOT NULL,
+    business_key TEXT NOT NULL,
+    recon_id TEXT NOT NULL DEFAULT '',
+    event_date TEXT,
+    month_key TEXT,
+    error_code TEXT NOT NULL,
+    error_reason TEXT NOT NULL,
+    source_file_path TEXT NOT NULL,
+    source_file_name TEXT NOT NULL,
+    source_sheet TEXT NOT NULL,
+    source_row_number INTEGER NOT NULL,
+    row_hash TEXT NOT NULL,
+    import_operation_token TEXT NOT NULL,
+    archive_operation_key TEXT NOT NULL,
+    report_key TEXT NOT NULL,
+    report_artifact_key TEXT NOT NULL,
+    report_file_path TEXT NOT NULL,
+    report_file_name TEXT NOT NULL,
+    report_sha256 TEXT NOT NULL,
+    report_size_bytes INTEGER NOT NULL,
+    report_row_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at TEXT,
+    resolution_reason TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_position_filtered_source_month_active
+    ON position_filtered_source_rows(source_type, month_key, resolved_at, id);
+  CREATE INDEX IF NOT EXISTS idx_position_filtered_source_recon_active
+    ON position_filtered_source_rows(source_type, recon_id, resolved_at, id);
+  CREATE INDEX IF NOT EXISTS idx_position_filtered_source_business_active
+    ON position_filtered_source_rows(source_type, business_key, resolved_at, id);
+  CREATE UNIQUE INDEX IF NOT EXISTS uq_position_filtered_source_row_active
+    ON position_filtered_source_rows(source_type, row_hash)
+    WHERE resolved_at IS NULL;
+
   CREATE TABLE IF NOT EXISTS position_link_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source_type TEXT NOT NULL,
@@ -187,6 +225,24 @@ const SCHEMA = `
     ON position_runs(status, id DESC);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_position_runs_single_pending
     ON position_runs(status) WHERE status = 'pending';
+
+  CREATE TABLE IF NOT EXISTS position_run_filtered_sources (
+    run_id INTEGER NOT NULL,
+    filtered_source_id INTEGER NOT NULL,
+    report_key TEXT NOT NULL,
+    report_artifact_key TEXT NOT NULL,
+    archive_operation_key TEXT NOT NULL,
+    report_sha256 TEXT NOT NULL,
+    report_size_bytes INTEGER NOT NULL,
+    source_revision INTEGER NOT NULL,
+    integrity_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY(run_id, filtered_source_id),
+    FOREIGN KEY(run_id) REFERENCES position_runs(id) ON DELETE CASCADE,
+    FOREIGN KEY(filtered_source_id) REFERENCES position_filtered_source_rows(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_position_run_filtered_report
+    ON position_run_filtered_sources(run_id, report_key, filtered_source_id);
 
   CREATE TABLE IF NOT EXISTS position_run_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -567,6 +623,56 @@ function runRowIntegrityHash({
   });
 }
 
+function runFilteredSourceIntegrityHash({
+  runId,
+  filteredSourceId,
+  reportRowKey,
+  sourceType,
+  businessKey,
+  reconId,
+  eventDate,
+  monthKey,
+  errorCode,
+  errorReason,
+  sourceFileName,
+  sourceSheet,
+  sourceRowNumber,
+  rowHash,
+  importOperationToken,
+  reportFileName,
+  reportKey,
+  reportArtifactKey,
+  archiveOperationKey,
+  reportSha256,
+  reportSizeBytes,
+  sourceRevision
+}) {
+  return stableHash({
+    runId: Number(runId),
+    filteredSourceId: Number(filteredSourceId),
+    reportRowKey: text(reportRowKey),
+    sourceType: text(sourceType),
+    businessKey: text(businessKey),
+    reconId: text(reconId),
+    eventDate: text(eventDate),
+    monthKey: text(monthKey),
+    errorCode: text(errorCode),
+    errorReason: text(errorReason),
+    sourceFileName: text(sourceFileName),
+    sourceSheet: text(sourceSheet),
+    sourceRowNumber: Number(sourceRowNumber),
+    rowHash: text(rowHash),
+    importOperationToken: text(importOperationToken),
+    reportFileName: text(reportFileName),
+    reportKey: text(reportKey),
+    reportArtifactKey: text(reportArtifactKey),
+    archiveOperationKey: text(archiveOperationKey),
+    reportSha256: text(reportSha256),
+    reportSizeBytes: Number(reportSizeBytes),
+    sourceRevision: Number(sourceRevision)
+  });
+}
+
 function runRowConsumesSource(item) {
   const lineage = item && item.lineage ? item.lineage : {};
   const sourceType = text(lineage.sourceType);
@@ -864,6 +970,105 @@ function assertRunSummary(payload, label) {
     throwInvalidSideData(`平盘侧库${label}计数超过输入行数`);
   }
   return payload;
+}
+
+function assertRunFilteredSourceEnvelope(db, run, scope, snapshot, summary) {
+  const rows = db.prepare(`
+    SELECT rf.filtered_source_id AS filteredSourceId,
+           rf.report_key AS frozenReportKey,
+           rf.report_artifact_key AS frozenArtifactKey,
+           rf.archive_operation_key AS frozenArchiveOperationKey,
+           rf.report_sha256 AS frozenReportSha256,
+           rf.report_size_bytes AS frozenReportSizeBytes,
+           rf.source_revision AS sourceRevision,
+           rf.integrity_hash AS integrityHash,
+           f.report_row_key AS reportRowKey,
+           f.source_type AS sourceType,
+           f.business_key AS businessKey,
+           f.recon_id AS reconId,
+           f.event_date AS eventDate,
+           f.month_key AS monthKey,
+           f.error_code AS errorCode,
+           f.error_reason AS errorReason,
+           f.source_file_name AS sourceFileName,
+           f.source_sheet AS sourceSheet,
+           f.source_row_number AS sourceRowNumber,
+           f.row_hash AS rowHash,
+           f.import_operation_token AS importOperationToken,
+           f.report_file_name AS reportFileName,
+           f.report_key AS reportKey,
+           f.report_artifact_key AS reportArtifactKey,
+           f.archive_operation_key AS archiveOperationKey,
+           f.report_sha256 AS reportSha256,
+           f.report_size_bytes AS reportSizeBytes
+    FROM position_run_filtered_sources rf
+    INNER JOIN position_filtered_source_rows f
+      ON f.id = rf.filtered_source_id
+    WHERE rf.run_id = ?
+    ORDER BY rf.filtered_source_id
+  `).all(Number(run.id));
+  const hasSummaryCount = Object.prototype.hasOwnProperty.call(summary, 'filteredRowCount');
+  if (hasSummaryCount) {
+    assertStoredCounter(summary.filteredRowCount, `运行汇总 ID=${run.id}.filteredRowCount`);
+  }
+  if ((hasSummaryCount && Number(summary.filteredRowCount) !== rows.length)
+      || (!hasSummaryCount && rows.length > 0)) {
+    throwInvalidSideData(`平盘侧库运行 ID=${run.id}过滤记录汇总不一致`);
+  }
+  const allowedMonths = new Set(scope.months);
+  const allowedSources = new Set(summary.sourceTypes);
+  for (const row of rows) {
+    const sourceType = text(row.sourceType);
+    const sourceRevision = Number(row.sourceRevision);
+    const sizeBytes = Number(row.frozenReportSizeBytes);
+    if (!allowedMonths.has(text(row.monthKey))
+        || !allowedSources.has(sourceType)
+        || !Object.prototype.hasOwnProperty.call(snapshot.sources, sourceType)
+        || sourceRevision !== Number(snapshot.sources[sourceType])) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}过滤记录范围或来源 revision 不一致`);
+    }
+    if (!text(row.frozenReportKey)
+        || !text(row.frozenArtifactKey)
+        || !text(row.frozenArchiveOperationKey)
+        || !/^[a-f0-9]{64}$/.test(text(row.frozenReportSha256).toLowerCase())
+        || !Number.isSafeInteger(sizeBytes)
+        || sizeBytes < 0
+        || text(row.frozenReportKey) !== text(row.reportKey)
+        || text(row.frozenArtifactKey) !== text(row.reportArtifactKey)
+        || text(row.frozenArchiveOperationKey) !== text(row.archiveOperationKey)
+        || text(row.frozenReportSha256) !== text(row.reportSha256)
+        || sizeBytes !== Number(row.reportSizeBytes)) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}异常报告冻结引用不一致`);
+    }
+    const expectedIntegrityHash = runFilteredSourceIntegrityHash({
+      runId: run.id,
+      filteredSourceId: row.filteredSourceId,
+      reportRowKey: row.reportRowKey,
+      sourceType: row.sourceType,
+      businessKey: row.businessKey,
+      reconId: row.reconId,
+      eventDate: row.eventDate,
+      monthKey: row.monthKey,
+      errorCode: row.errorCode,
+      errorReason: row.errorReason,
+      sourceFileName: row.sourceFileName,
+      sourceSheet: row.sourceSheet,
+      sourceRowNumber: row.sourceRowNumber,
+      rowHash: row.rowHash,
+      importOperationToken: row.importOperationToken,
+      reportFileName: row.reportFileName,
+      reportKey: row.frozenReportKey,
+      reportArtifactKey: row.frozenArtifactKey,
+      archiveOperationKey: row.frozenArchiveOperationKey,
+      reportSha256: row.frozenReportSha256,
+      reportSizeBytes: row.frozenReportSizeBytes,
+      sourceRevision: row.sourceRevision
+    });
+    if (text(row.integrityHash) !== expectedIntegrityHash) {
+      throwInvalidSideData(`平盘侧库运行 ID=${run.id}过滤快照完整性校验失败`);
+    }
+  }
+  return rows.length;
 }
 
 function assertSameTextSet(actualValues, expectedValues, label) {
@@ -1578,6 +1783,36 @@ class PositionReconciliationStore {
         }
         for (const [, statement] of missingRunRowColumns) this.db.exec(statement);
       }
+      const runFilteredSourceColumns = this.db.prepare(
+        'PRAGMA table_info(position_run_filtered_sources)'
+      ).all();
+      if (!runFilteredSourceColumns.some((column) => column.name === 'integrity_hash')) {
+        const existingRunFilteredSources = Number(
+          this.db.prepare(
+            'SELECT COUNT(*) AS count FROM position_run_filtered_sources'
+          ).get().count
+        );
+        if (existingRunFilteredSources > 0) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            '旧版平盘运行过滤快照缺少完整性锚点，禁止自动接管',
+            ['请删除未正式发布版本的平盘运行草稿后重新运行，或恢复完整软件数据目录']
+          );
+        }
+        this.db.exec(
+          "ALTER TABLE position_run_filtered_sources " +
+          "ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''"
+        );
+      }
+      const filteredSourceColumns = this.db.prepare(
+        'PRAGMA table_info(position_filtered_source_rows)'
+      ).all();
+      if (!filteredSourceColumns.some((column) => column.name === 'report_row_count')) {
+        this.db.exec(
+          'ALTER TABLE position_filtered_source_rows ' +
+          'ADD COLUMN report_row_count INTEGER NOT NULL DEFAULT 0'
+        );
+      }
       const seedCheckpoint = existingCheckpoint || initial || {
         identity: crypto.randomUUID(),
         generation: 0,
@@ -2013,25 +2248,122 @@ class PositionReconciliationStore {
     return Number(row && row.count) || 0;
   }
 
+  countSourceRowsInMonths(sourceType, months = []) {
+    const normalizedMonths = [...new Set(
+      (Array.isArray(months) ? months : []).map(text).filter(Boolean)
+    )];
+    if (normalizedMonths.length === 0) return 0;
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM position_source_rows
+      WHERE source_type = ?
+        AND month_key IN (${placeholders(normalizedMonths)})
+    `).get(sourceType, ...normalizedMonths);
+    return Number(row && row.count) || 0;
+  }
+
+  listActiveFilteredSources({ sourceTypes = [], months = [] } = {}) {
+    const normalizedTypes = [...new Set(
+      (Array.isArray(sourceTypes) ? sourceTypes : []).map(text).filter(Boolean)
+    )];
+    const normalizedMonths = [...new Set(
+      (Array.isArray(months) ? months : []).map(text).filter(Boolean)
+    )];
+    if (normalizedTypes.length === 0 || normalizedMonths.length === 0) return [];
+    return this.db.prepare(`
+      SELECT id, report_row_key AS reportRowKey,
+             source_type AS sourceType, business_key AS businessKey,
+             recon_id AS reconId, event_date AS eventDate,
+             month_key AS monthKey, error_code AS errorCode,
+             error_reason AS errorReason,
+             source_file_name AS sourceFileName,
+             source_sheet AS sourceSheet,
+             source_row_number AS sourceRowNumber,
+             row_hash AS rowHash,
+             import_operation_token AS importOperationToken,
+             archive_operation_key AS archiveOperationKey,
+             report_key AS reportKey,
+             report_artifact_key AS reportArtifactKey,
+             report_file_path AS reportFilePath,
+             report_file_name AS reportFileName,
+             report_sha256 AS reportSha256,
+             report_size_bytes AS reportSizeBytes,
+             created_at AS createdAt
+      FROM position_filtered_source_rows
+      WHERE resolved_at IS NULL
+        AND source_type IN (${placeholders(normalizedTypes)})
+        AND month_key IN (${placeholders(normalizedMonths)})
+      ORDER BY source_type, month_key, id
+    `).all(...normalizedTypes, ...normalizedMonths).map((row) => ({
+      ...row,
+      id: Number(row.id),
+      sourceRowNumber: Number(row.sourceRowNumber),
+      reportSizeBytes: Number(row.reportSizeBytes)
+    }));
+  }
+
+  findFilteredReport(reportKey) {
+    const row = this.db.prepare(`
+      SELECT report_key AS reportKey,
+             report_artifact_key AS reportArtifactKey,
+             archive_operation_key AS archiveOperationKey,
+             report_file_path AS reportFilePath,
+             report_file_name AS reportFileName,
+             report_sha256 AS reportSha256,
+             report_size_bytes AS reportSizeBytes,
+             CASE
+               WHEN report_row_count > 0 THEN report_row_count
+               ELSE (SELECT COUNT(*)
+                     FROM position_filtered_source_rows counted
+                     WHERE counted.report_key = filtered.report_key)
+             END AS filteredRowCount
+      FROM position_filtered_source_rows filtered
+      WHERE report_key = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(text(reportKey));
+    return row ? {
+      ...row,
+      reportSizeBytes: Number(row.reportSizeBytes),
+      filteredRowCount: Number(row.filteredRowCount)
+    } : null;
+  }
+
   listSourceMonths() {
     const result = Object.fromEntries(
       Object.values(SOURCE_TYPES).map((sourceType) => [sourceType, []])
     );
+    const filteredMonthsBySource = new Map();
+    for (const row of this.db.prepare(`
+      SELECT source_type AS sourceType, month_key AS monthKey
+      FROM position_filtered_source_rows
+      WHERE resolved_at IS NULL
+        AND month_key IS NOT NULL
+        AND TRIM(month_key) <> ''
+      GROUP BY source_type, month_key
+      ORDER BY source_type, month_key
+    `).all()) {
+      const months = filteredMonthsBySource.get(row.sourceType) || [];
+      months.push(row.monthKey);
+      filteredMonthsBySource.set(row.sourceType, months);
+    }
     for (const sourceType of Object.values(SOURCE_TYPES)) {
       const cached = readPositionSourceSummary(this.db, sourceType);
-      if (cached) {
-        result[sourceType] = cached.sourceMonths.slice();
-        continue;
-      }
-      result[sourceType] = this.db.prepare(`
-        SELECT month_key AS monthKey
-        FROM position_source_rows
-        WHERE source_type = ?
-          AND month_key IS NOT NULL
-          AND TRIM(month_key) <> ''
-        GROUP BY month_key
-        ORDER BY month_key
-      `).all(sourceType).map((row) => row.monthKey);
+      const sourceMonths = cached
+        ? cached.sourceMonths.slice()
+        : this.db.prepare(`
+          SELECT month_key AS monthKey
+          FROM position_source_rows
+          WHERE source_type = ?
+            AND month_key IS NOT NULL
+            AND TRIM(month_key) <> ''
+          GROUP BY month_key
+          ORDER BY month_key
+        `).all(sourceType).map((row) => row.monthKey);
+      result[sourceType] = [...new Set([
+        ...sourceMonths,
+        ...(filteredMonthsBySource.get(sourceType) || [])
+      ])].sort();
     }
     return result;
   }
@@ -2273,17 +2605,32 @@ class PositionReconciliationStore {
   }
 
   listRawSummary() {
+    const filteredBySource = new Map(this.db.prepare(`
+      SELECT source_type AS sourceType, COUNT(*) AS filteredRowCount,
+             MAX(created_at) AS filteredUpdatedAt
+      FROM position_filtered_source_rows
+      WHERE resolved_at IS NULL
+      GROUP BY source_type
+    `).all().map((row) => [row.sourceType, {
+      filteredRowCount: Number(row.filteredRowCount),
+      filteredUpdatedAt: row.filteredUpdatedAt || ''
+    }]));
     return SOURCE_DISPLAY_ORDER.map((sourceType) => {
       const definition = SOURCE_DEFINITIONS[sourceType];
+      const filtered = filteredBySource.get(sourceType) || {
+        filteredRowCount: 0,
+        filteredUpdatedAt: ''
+      };
       const cached = readPositionSourceSummary(this.db, sourceType);
       if (cached) {
         return {
           sourceType,
           tableName: definition.sourceName,
           rowCount: cached.rawRowCount,
+          filteredRowCount: filtered.filteredRowCount,
           dateMin: cached.rawDateMin,
           dateMax: cached.rawDateMax,
-          updatedAt: cached.rawUpdatedAt
+          updatedAt: cached.rawUpdatedAt || filtered.filteredUpdatedAt
         };
       }
       const row = this.db.prepare(`
@@ -2296,9 +2643,10 @@ class PositionReconciliationStore {
         sourceType,
         tableName: definition.sourceName,
         rowCount: Number(row.rowCount),
+        filteredRowCount: filtered.filteredRowCount,
         dateMin: row.dateMin || '',
         dateMax: row.dateMax || '',
-        updatedAt: row.updatedAt || ''
+        updatedAt: row.updatedAt || filtered.filteredUpdatedAt
       };
     });
   }
@@ -2319,23 +2667,50 @@ class PositionReconciliationStore {
     }
     return this._mutation(() => {
       let result;
+      let resolvedFiltered;
       if (sourceType === SOURCE_TYPES.BANK_ACCOUNT) {
         if (!wholeTable) throw new Error('清结算银行账户表只能整表删除');
         result = this.db.prepare('DELETE FROM position_source_rows WHERE source_type = ?').run(sourceType);
+        resolvedFiltered = this.db.prepare(`
+          UPDATE position_filtered_source_rows
+          SET resolved_at = CURRENT_TIMESTAMP,
+              resolution_reason = 'source-range-deleted'
+          WHERE source_type = ? AND resolved_at IS NULL
+        `).run(sourceType);
       } else {
         result = this.db.prepare(`
           DELETE FROM position_source_rows
           WHERE source_type = ? AND month_key IN (${placeholders(normalizedMonths)})
         `).run(sourceType, ...normalizedMonths);
+        resolvedFiltered = this.db.prepare(`
+          UPDATE position_filtered_source_rows
+          SET resolved_at = CURRENT_TIMESTAMP,
+              resolution_reason = 'source-range-deleted'
+          WHERE source_type = ?
+            AND month_key IN (${placeholders(normalizedMonths)})
+            AND resolved_at IS NULL
+        `).run(sourceType, ...normalizedMonths);
       }
       this.rebuildLinkedRows(sourceType);
       this.bumpRevision('source', sourceType);
       refreshPositionSourceSummary(this.db, sourceType);
-      return { deletedCount: Number(result.changes), sourceType };
+      return {
+        deletedCount: Number(result.changes),
+        resolvedFilteredCount: Number(resolvedFiltered.changes) || 0,
+        sourceType
+      };
     });
   }
 
-  createRun({ runUuid, scope, snapshot, summary, rows, supersedeRunId = null }) {
+  createRun({
+    runUuid,
+    scope,
+    snapshot,
+    summary,
+    rows,
+    filteredSources = [],
+    supersedeRunId = null
+  }) {
     return this._mutation(() => {
       if (supersedeRunId !== null && supersedeRunId !== undefined) {
         const superseded = this.db.prepare(`
@@ -2352,6 +2727,59 @@ class PositionReconciliationStore {
         VALUES (?, 'pending', ?, ?, ?)
       `).run(runUuid, serializeJson(scope), serializeJson(snapshot), serializeJson(summary));
       const runId = Number(runResult.lastInsertRowid);
+      const insertFilteredSource = this.db.prepare(`
+        INSERT INTO position_run_filtered_sources(
+          run_id, filtered_source_id, report_key, report_artifact_key,
+          archive_operation_key, report_sha256, report_size_bytes, source_revision,
+          integrity_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const findFilteredSource = this.db.prepare(`
+        SELECT report_row_key AS reportRowKey,
+               source_type AS sourceType, business_key AS businessKey,
+               recon_id AS reconId, event_date AS eventDate,
+               month_key AS monthKey, error_code AS errorCode,
+               error_reason AS errorReason,
+               source_file_name AS sourceFileName,
+               source_sheet AS sourceSheet,
+               source_row_number AS sourceRowNumber,
+               row_hash AS rowHash,
+               import_operation_token AS importOperationToken,
+               report_file_name AS reportFileName
+        FROM position_filtered_source_rows
+        WHERE id = ?
+      `);
+      for (const item of Array.isArray(filteredSources) ? filteredSources : []) {
+        const filteredSource = findFilteredSource.get(Number(item.id));
+        if (!filteredSource) {
+          throw new PositionReconciliationError(
+            'position-side-data-invalid',
+            `运行引用的过滤记录不存在：${Number(item.id)}`
+          );
+        }
+        const integrityHash = runFilteredSourceIntegrityHash({
+          runId,
+          filteredSourceId: item.id,
+          ...filteredSource,
+          reportKey: item.reportKey,
+          reportArtifactKey: item.reportArtifactKey,
+          archiveOperationKey: item.archiveOperationKey,
+          reportSha256: item.reportSha256,
+          reportSizeBytes: item.reportSizeBytes,
+          sourceRevision: item.sourceRevision
+        });
+        insertFilteredSource.run(
+          runId,
+          Number(item.id),
+          text(item.reportKey),
+          text(item.reportArtifactKey),
+          text(item.archiveOperationKey),
+          text(item.reportSha256),
+          Number(item.reportSizeBytes),
+          Number(item.sourceRevision),
+          integrityHash
+        );
+      }
       const insertRow = this.db.prepare(`
         INSERT INTO position_run_rows(
           run_id, biz_id, channel, month_key, source_order,
@@ -2436,6 +2864,13 @@ class PositionReconciliationStore {
       parseJson(run.summary_json, `运行汇总 ID=${run.id}`),
       `运行汇总 ID=${run.id}`
     );
+    const filteredRowCount = assertRunFilteredSourceEnvelope(
+      this.db,
+      run,
+      scope,
+      snapshot,
+      summary
+    );
     assertRunEnvelope(this.db, run, scope, snapshot, summary);
     if (run.status === 'pending' && this.snapshotIsCurrent(snapshot)) {
       assertCurrentRunReferences(this.db, run.id);
@@ -2445,8 +2880,42 @@ class PositionReconciliationStore {
       id: Number(run.id),
       scope,
       snapshot,
-      summary
+      summary,
+      filteredRowCount
     };
+  }
+
+  listRunFilteredSources(runId) {
+    return this.db.prepare(`
+      SELECT f.id, f.report_row_key AS reportRowKey,
+             f.source_type AS sourceType, f.business_key AS businessKey,
+             f.recon_id AS reconId, f.event_date AS eventDate,
+             f.month_key AS monthKey, f.error_code AS errorCode,
+             f.error_reason AS errorReason,
+             f.source_file_name AS sourceFileName,
+             f.source_sheet AS sourceSheet,
+             f.source_row_number AS sourceRowNumber,
+             f.row_hash AS rowHash,
+             f.report_file_path AS reportFilePath,
+             f.report_file_name AS reportFileName,
+             rf.report_key AS reportKey,
+             rf.report_artifact_key AS reportArtifactKey,
+             rf.archive_operation_key AS archiveOperationKey,
+             rf.report_sha256 AS reportSha256,
+             rf.report_size_bytes AS reportSizeBytes,
+             rf.source_revision AS sourceRevision
+      FROM position_run_filtered_sources rf
+      INNER JOIN position_filtered_source_rows f
+        ON f.id = rf.filtered_source_id
+      WHERE rf.run_id = ?
+      ORDER BY f.source_type, f.month_key, f.id
+    `).all(Number(runId)).map((row) => ({
+      ...row,
+      id: Number(row.id),
+      sourceRowNumber: Number(row.sourceRowNumber),
+      reportSizeBytes: Number(row.reportSizeBytes),
+      sourceRevision: Number(row.sourceRevision)
+    }));
   }
 
   latestPendingRun() {
@@ -2833,8 +3302,10 @@ class PositionReconciliationStore {
     for (const table of [
       'position_bank_rows',
       'position_source_rows',
+      'position_filtered_source_rows',
       'position_link_rows',
       'position_runs',
+      'position_run_filtered_sources',
       'position_run_rows',
       'position_differences',
       'position_consumed_sources',

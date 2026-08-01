@@ -479,12 +479,24 @@ test('恢复只保留 side DB 已提交的文件级输入，prepared 输入不�
   const outputPending = {
     filePath: outputPath,
     role: 'output',
-    beforeSnapshot: null
+    beforeSnapshot: null,
+    requiredInputPaths: [firstPath]
+  };
+  const aggregateOutputPending = {
+    filePath: path.resolve('/tmp/position-output-aggregate.xlsx'),
+    role: 'output',
+    beforeSnapshot: null,
+    requiredInputPaths: [firstPath, secondPath]
   };
 
   const filtered = positionCommittedRecoveryArchiveFiles({
     operationToken: 'multi-file-operation',
-    archiveFiles: [firstPending, secondPending, outputPending]
+    archiveFiles: [
+      firstPending,
+      secondPending,
+      outputPending,
+      aggregateOutputPending
+    ]
   }, [{
     operationToken: 'multi-file-operation',
     sourceType: firstPending.sourceType,
@@ -499,9 +511,52 @@ test('恢复只保留 side DB 已提交的文件级输入，prepared 输入不�
   assert.deepEqual(
     positionUncommittedRecoveryInputPaths({
       operationToken: 'multi-file-operation',
-      archiveFiles: [firstPending, secondPending, outputPending]
+      archiveFiles: [
+        firstPending,
+        secondPending,
+        outputPending,
+        aggregateOutputPending
+      ]
     }, filtered),
     [secondPath]
+  );
+});
+
+test('部分提交恢复遇到未声明输入依赖的旧输出时 fail closed', () => {
+  const firstPath = path.resolve('/tmp/position-legacy-output-A.xlsx');
+  const secondPath = path.resolve('/tmp/position-legacy-output-B.xlsx');
+  const firstPending = {
+    filePath: firstPath,
+    role: 'input',
+    sourceType: 'fund-transfer',
+    ...INPUT_EVIDENCE
+  };
+  const secondPending = {
+    filePath: secondPath,
+    role: 'input',
+    sourceType: 'test-payment',
+    sourceSnapshot: { ...INPUT_EVIDENCE.sourceSnapshot, ino: 51 },
+    sha256: 'd'.repeat(64),
+    sizeBytes: INPUT_EVIDENCE.sizeBytes
+  };
+  assert.throws(
+    () => positionCommittedRecoveryArchiveFiles({
+      operationToken: 'legacy-output-operation',
+      archiveFiles: [firstPending, secondPending, {
+        filePath: path.resolve('/tmp/position-legacy-shared-report.xlsx'),
+        role: 'output',
+        beforeSnapshot: null
+      }]
+    }, [{
+      operationToken: 'legacy-output-operation',
+      sourceType: firstPending.sourceType,
+      role: 'input',
+      filePath: firstPath,
+      sourceSnapshot: firstPending.sourceSnapshot,
+      sha256: firstPending.sha256,
+      sizeBytes: firstPending.sizeBytes
+    }]),
+    (error) => error && error.code === 'position-side-data-invalid'
   );
 });
 
@@ -638,6 +693,80 @@ test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 gr
   assert.equal(pending.archiveManifestHash, archiveManifestHash);
   assert.equal(pending.archiveFiles.length, 1);
   assert.equal(pending.archiveFiles[0].filePath, archivePath);
+});
+
+test('含过滤行的普通来源在 grant 前同时持久化异常报告证据', () => {
+  const operationToken = 'operation-with-anomaly-report';
+  const reportSnapshot = { ...INPUT_EVIDENCE.sourceSnapshot, ino: 88 };
+  const reportSha256 = '8'.repeat(64);
+  let pending = {
+    operationToken,
+    archiveRequired: true,
+    archiveState: 'awaiting-intent',
+    archiveFiles: []
+  };
+  const roles = [];
+  const grant = authorizePositionImportApply({
+    preflightReady: {
+      archiveManifestHash: '7'.repeat(64),
+      acceptedOrdinaryInputFiles: [{
+        archivePath: '/tmp/position-with-anomaly-input.xlsx',
+        sourceType: 'fund-transfer',
+        stagedSnapshot: INPUT_EVIDENCE.sourceSnapshot,
+        stagedSha256: INPUT_EVIDENCE.sha256,
+        stagedSizeBytes: INPUT_EVIDENCE.sizeBytes
+      }],
+      outputFiles: [{
+        filePath: '/tmp/position-anomaly-report.xlsx',
+        artifactKey: 'source-import-anomaly-report',
+        requiredInputPaths: ['/tmp/position-with-anomaly-input.xlsx'],
+        sourceSnapshot: reportSnapshot,
+        expectedSha256: reportSha256,
+        sizeBytes: reportSnapshot.sizeBytes
+      }]
+    },
+    currentCheckpoint: checkpoint(5),
+    schemaFingerprint: '6'.repeat(64),
+    readPending: () => structuredClone(pending),
+    writePending: (value) => {
+      pending = structuredClone(value);
+    },
+    recordArchiveIntentFiles: (files, role) => {
+      roles.push(role);
+      pending = {
+        ...pending,
+        archiveState: 'intent-recorded',
+        archiveFiles: [...pending.archiveFiles, ...structuredClone(files)]
+      };
+    }
+  });
+
+  assert.equal(grant.operationToken, operationToken);
+  assert.deepEqual(roles, ['input', 'output']);
+  assert.equal(pending.archiveFiles.length, 2);
+  assert.equal(pending.archiveFiles[1].role, 'output');
+  assert.equal(pending.archiveFiles[1].artifactKey, 'source-import-anomaly-report');
+  assert.equal(pending.archiveFiles[1].sha256, reportSha256);
+  assert.deepEqual(
+    pending.archiveFiles[1].requiredInputPaths,
+    [path.resolve('/tmp/position-with-anomaly-input.xlsx')]
+  );
+});
+
+test('主进程异常报告存档意图保留预检声明的输入依赖', () => {
+  const mainSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../src/main.js'),
+    'utf8'
+  );
+  const start = mainSource.indexOf('function recordPositionArchiveIntentFiles');
+  const end = mainSource.indexOf('\nfunction markPositionBusinessOutcome', start);
+  assert.ok(start >= 0 && end > start, '应能定位主进程存档意图转换函数');
+  const implementation = mainSource.slice(start, end);
+  assert.match(
+    implementation,
+    /requiredInputPaths:\s*descriptor\.requiredInputPaths/,
+    '异常报告 requiredInputPaths 必须进入 pending，不能在主进程转换时丢失'
+  );
 });
 
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
