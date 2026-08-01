@@ -186,14 +186,17 @@ async function verifyAnomalyReportEvidence(verifiedLedger, preflightReady) {
     if (manifestReport || report || manifestReports.length > 0 || reports.length > 0) {
       throw applyMismatch('sealed ledger 在无过滤行时错误地携带异常报告');
     }
-    return { aggregateReport: null, byFileIndex: new Map() };
+    return {
+      aggregateReport: null,
+      byFileIndex: new Map(),
+      filteredFileIndexes: []
+    };
   }
   if (!manifestReport
       || !report
       || stableHash(manifestReport) !== stableHash(report)
       || Number(report.filteredRowCount) !== filteredRows
-      || stableHash(manifestReports) !== stableHash(reports)
-      || reports.length !== filteredFiles.length) {
+      || stableHash(manifestReports) !== stableHash(reports)) {
     throw applyMismatch('异常报告证据与 sealed ledger manifest 不一致');
   }
   const expectedByIndex = new Map(filteredFiles.map((file) => [
@@ -201,6 +204,12 @@ async function verifyAnomalyReportEvidence(verifiedLedger, preflightReady) {
     Number(file.filteredRows)
   ]));
   const expectedIndexes = [...expectedByIndex.keys()].sort((left, right) => left - right);
+  const expectedReportCount = expectedIndexes.length === 1
+    ? 1
+    : expectedIndexes.length + 1;
+  if (reports.length !== expectedReportCount) {
+    throw applyMismatch('异常报告分片数量与 sealed ledger 不一致');
+  }
   const reportIdentities = new Set();
   const verifiedReports = [];
   for (const item of reports) {
@@ -244,15 +253,22 @@ async function verifyAnomalyReportEvidence(verifiedLedger, preflightReady) {
     throw applyMismatch('批次异常报告没有覆盖全部过滤文件');
   }
   const byFileIndex = new Map();
-  for (const fileIndex of expectedIndexes.slice(0, -1)) {
+  for (const fileIndex of expectedIndexes) {
+    if (expectedIndexes.length === 1) {
+      byFileIndex.set(fileIndex, aggregate.item);
+      continue;
+    }
     const shard = verifiedReports.find((item) => (
       item.sourceFileIndexes.length === 1 && item.sourceFileIndexes[0] === fileIndex
     ));
     if (!shard) throw applyMismatch(`过滤文件 ${fileIndex + 1} 缺少独立异常报告`);
     byFileIndex.set(fileIndex, shard.item);
   }
-  byFileIndex.set(expectedIndexes[expectedIndexes.length - 1], aggregate.item);
-  return { aggregateReport: aggregate.item, byFileIndex };
+  return {
+    aggregateReport: aggregate.item,
+    byFileIndex,
+    filteredFileIndexes: expectedIndexes
+  };
 }
 
 function assertSourceStatsMatch(actual, expected, sourceType, sheetName) {
@@ -445,8 +461,8 @@ function sourceStatements(db, ledgerDb) {
         source_file_path, source_file_name, source_sheet, source_row_number,
         row_hash, import_operation_token, archive_operation_key,
         report_key, report_artifact_key, report_file_path, report_file_name,
-        report_sha256, report_size_bytes
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        report_sha256, report_size_bytes, report_row_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
   };
 }
@@ -650,7 +666,8 @@ async function applySourceFile({
               anomalyReport.filePath,
               anomalyReport.fileName,
               anomalyReport.sha256,
-              Number(anomalyReport.sizeBytes)
+              Number(anomalyReport.sizeBytes),
+              Number(anomalyReport.filteredRowCount)
             );
             stats.filteredRows += 1;
             stats.filterReasonCounts[filter.code] =
@@ -813,6 +830,76 @@ function normalizeAllowedSourceTypes(value) {
   return new Set(requested);
 }
 
+function reportKeyOf(value) {
+  return text(value && (
+    value.reportKey
+    || (value.metadata && value.metadata.reportKey)
+  ));
+}
+
+function outputDependenciesSatisfied(file, committedInputPaths) {
+  const dependencies = Array.isArray(file && file.requiredInputPaths)
+    ? file.requiredInputPaths.map((item) => path.resolve(String(item || '')))
+    : [];
+  return dependencies.length > 0
+    && dependencies.every((item) => committedInputPaths.has(item));
+}
+
+function retainedCommittedAnomalyArtifacts(preflightReady, results) {
+  const successful = results.filter((item) => item.status === 'ok' && item.applied === true);
+  const committedInputPaths = new Set(successful.flatMap((item) => (
+    Array.isArray(item.inputPaths) ? item.inputPaths : []
+  )).map((item) => path.resolve(String(item || ''))));
+  const referencedReportKeys = new Set(successful
+    .map((item) => reportKeyOf(item.anomalyReport))
+    .filter(Boolean));
+  const aggregateReportKey = reportKeyOf(preflightReady.anomalyReport);
+  const outputFiles = (Array.isArray(preflightReady.outputFiles)
+    ? preflightReady.outputFiles
+    : []).filter((file) => {
+    const reportKey = reportKeyOf(file);
+    return reportKey
+      && (referencedReportKeys.has(reportKey) || reportKey === aggregateReportKey)
+      && outputDependenciesSatisfied(file, committedInputPaths);
+  });
+  const retainedReportKeys = new Set(outputFiles.map(reportKeyOf).filter(Boolean));
+  const anomalyReports = (Array.isArray(preflightReady.anomalyReports)
+    ? preflightReady.anomalyReports
+    : []).filter((report) => retainedReportKeys.has(reportKeyOf(report)));
+  const sanitizedResults = results.map((item) => {
+    const reportKey = reportKeyOf(item.anomalyReport);
+    if (item.status === 'ok'
+        && item.applied === true
+        && (!reportKey || retainedReportKeys.has(reportKey))) {
+      return item;
+    }
+    const sanitized = { ...item };
+    delete sanitized.anomalyReport;
+    return sanitized;
+  });
+  for (const item of sanitizedResults) {
+    if (item.status === 'ok'
+        && item.applied === true
+        && Number(item.filteredRowCount) > 0
+        && !item.anomalyReport) {
+      throw applyMismatch(
+        `已提交过滤文件缺少可持久化异常报告：${item.fileName || item.sourceName || ''}`
+      );
+    }
+  }
+  const aggregateReport = preflightReady.anomalyReport
+    && retainedReportKeys.has(reportKeyOf(preflightReady.anomalyReport))
+    ? preflightReady.anomalyReport
+    : (anomalyReports.length === 1 ? anomalyReports[0] : null);
+  return {
+    results: sanitizedResults,
+    anomalyReport: aggregateReport,
+    anomalyReports,
+    outputPaths: outputFiles.map((file) => file.filePath),
+    outputFiles
+  };
+}
+
 async function applyPositionOrdinarySourceFiles(input = {}) {
   const preflightReady = input.preflightReady || {};
   const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
@@ -853,6 +940,40 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     verifiedLedger.db.close();
     throw error;
   }
+  const enabledFileIndexes = new Set(enabled.map((file) => Number(file.fileIndex)));
+  const anomalyReportByFileIndex = new Map(anomalyEvidence.byFileIndex);
+  const allFilteredFilesEnabled = anomalyEvidence.filteredFileIndexes.every(
+    (fileIndex) => enabledFileIndexes.has(Number(fileIndex))
+  );
+  if (allFilteredFilesEnabled && anomalyEvidence.filteredFileIndexes.length > 1) {
+    const lastFilteredFileIndex = anomalyEvidence.filteredFileIndexes[
+      anomalyEvidence.filteredFileIndexes.length - 1
+    ];
+    anomalyReportByFileIndex.set(
+      Number(lastFilteredFileIndex),
+      anomalyEvidence.aggregateReport
+    );
+  }
+  const enabledInputPaths = new Set(enabled.map((file) => (
+    path.resolve(String(file.archivePath || ''))
+  )));
+  const outputByReportKey = new Map((Array.isArray(preflightReady.outputFiles)
+    ? preflightReady.outputFiles
+    : []).map((file) => [reportKeyOf(file), file]));
+  for (const descriptor of enabled) {
+    const manifestFile = verifiedLedger.manifest.files.find(
+      (file) => Number(file.fileIndex) === Number(descriptor.fileIndex)
+    );
+    if (!manifestFile || Number(manifestFile.filteredRows) <= 0) continue;
+    const report = anomalyReportByFileIndex.get(Number(descriptor.fileIndex));
+    const output = outputByReportKey.get(reportKeyOf(report));
+    if (!report || !output || !outputDependenciesSatisfied(output, enabledInputPaths)) {
+      verifiedLedger.db.close();
+      throw applyMismatch(
+        `已启用过滤文件缺少独立且依赖闭合的异常报告：${descriptor.fileName || ''}`
+      );
+    }
+  }
   const db = new DatabaseSync(path.resolve(String(input.sideDbPath || '')));
   let checkpoint = input.grant.baseCheckpoint;
   const appliedByIndex = new Map();
@@ -877,7 +998,7 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
     initializeApplyIdentityTable(db);
     for (const descriptor of enabled) {
       assertNotCancelled(input.cancelToken);
-      const anomalyReport = anomalyEvidence.byFileIndex.get(
+      const anomalyReport = anomalyReportByFileIndex.get(
         Number(descriptor.fileIndex)
       ) || null;
       const applied = await applySourceFile({
@@ -911,7 +1032,7 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
       }
     }
 
-    const results = (Array.isArray(preflightReady.orderedFileResults)
+    const preliminaryResults = (Array.isArray(preflightReady.orderedFileResults)
       ? preflightReady.orderedFileResults
       : []).map((item) => {
       const applied = appliedByIndex.get(Number(item.fileIndex));
@@ -950,11 +1071,16 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
         sourceRevision: applied.sourceRevision,
         linkedRevision: applied.linkedRevision,
         anomalyReport: applied.filteredRowCount > 0
-          ? anomalyEvidence.byFileIndex.get(Number(item.fileIndex)) || null
+          ? anomalyReportByFileIndex.get(Number(item.fileIndex)) || null
           : null,
         applied: true
       };
     });
+    const retainedArtifacts = retainedCommittedAnomalyArtifacts(
+      preflightReady,
+      preliminaryResults
+    );
+    const results = retainedArtifacts.results;
     const success = results.filter((item) => item.status === 'ok' && item.applied === true);
     const failed = results.filter((item) => item.status === 'failed');
     const confirmation = results.filter((item) => item.status === 'needs-confirmation');
@@ -969,6 +1095,10 @@ async function applyPositionOrdinarySourceFiles(input = {}) {
       : [jobRoot];
     return {
       ...preflightReady,
+      anomalyReport: retainedArtifacts.anomalyReport,
+      anomalyReports: retainedArtifacts.anomalyReports,
+      outputPaths: retainedArtifacts.outputPaths,
+      outputFiles: retainedArtifacts.outputFiles,
       status: success.length > 0 || confirmation.length > 0 ? 'ok' : 'failed',
       message:
         `链接原始表导入完成：成功 ${success.length}，` +

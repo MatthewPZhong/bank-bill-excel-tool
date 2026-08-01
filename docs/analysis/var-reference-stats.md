@@ -5,14 +5,14 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.4 |
-| 扫描时间 | 2026-8-1 18:14:29 |
+| 扫描时间 | 2026-8-1 18:54:08 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 263 |
-| 顶层声明总数 | 3319 |
-| ≥2 次引用 | 3175 |
+| 顶层声明总数 | 3322 |
+| ≥2 次引用 | 3178 |
 | 跨 ≥3 文件 (A-share) | 472 |
 | 跨 2 文件 (A-pair) | 749 |
-| 单文件 (A-local) | 1954 |
+| 单文件 (A-local) | 1957 |
 | 跨文件合计 (B) | 1221 |
 
 ---
@@ -21,10 +21,10 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 声明位置（首个） |
 |---|---:|---:|---:|---|
-| `path` | 111 | 599 | 105 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
+| `path` | 111 | 602 | 105 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
 | `fs` | 77 | 367 | 76 | src/backend/balance-adjustment-store.js |
 | `parse` | 43 | 91 | 1 | src/backend/usage-stats.js |
-| `text` | 38 | 644 | 2 | src/main-process/position-reconciliation/common.js |
+| `text` | 38 | 645 | 2 | src/main-process/position-reconciliation/common.js |
 | `channel` | 31 | 394 | 1 | src/backend/position-reconciliation-import/worker-entry.js |
 | `normalizeCell` | 31 | 153 | 15 | src/backend/balance-adjustment-store.js |
 | `crypto` | 30 | 93 | 30 | src/backend/pending-import/validator.js |
@@ -280,8 +280,8 @@
 | `ToolboxXlsxFormatError` | 3 | 124 | 1 | src/backend/toolbox-format/xlsx-sheet-scanner.js |
 | `bankValue` | 3 | 41 | 1 | src/main-process/pre-fund-reconciliation/output-mapper.js |
 | `settingsRepository` | 3 | 40 | 3 | src/backend/database.js |
+| `applyMismatch` | 3 | 38 | 3 | src/backend/position-reconciliation-import/account-writer.js |
 | `hasColumn` | 3 | 37 | 2 | src/backend/biz-op-recon-db/migrations.js |
-| `applyMismatch` | 3 | 35 | 3 | src/backend/position-reconciliation-import/account-writer.js |
 | `POSITION_IMPORT_MESSAGE_TYPES` | 3 | 31 | 1 | src/backend/position-reconciliation-import/constants.js |
 | `validationError` | 3 | 31 | 1 | src/main-process/pre-fund-reconciliation/mpt-schema.js |
 | `targetPathAliasKey` | 3 | 30 | 1 | src/main-process/toolbox-target-identity.js |
@@ -1819,9 +1819,11 @@
 
 | 名字 | 总次数 |
 |---|---:|
+| `reportKeyOf` | 10 |
 | `applySourceFile` | 3 |
 | `initializeApplyIdentityTable` | 3 |
 | `ORDINARY_SOURCE_TYPES` | 3 |
+| `outputDependenciesSatisfied` | 3 |
 
 ### `src/backend/position-reconciliation-import/worker-entry.js`
 
@@ -3454,10 +3456,10 @@
 
 | 名字 | 跨度 | 总次数 | 声明数 | 前三引用位置 |
 |---|---:|---:|---:|---|
-| `path` | 111 | 599 | 105 | src/main-process/toolbox-output-publication.js(63), src/main-process/position-reconciliation/input-staging.js(42), src/main-process/archive-center/archive-service.js(28) |
+| `path` | 111 | 602 | 105 | src/main-process/toolbox-output-publication.js(63), src/main-process/position-reconciliation/input-staging.js(42), src/main-process/archive-center/archive-service.js(28) |
 | `fs` | 77 | 367 | 76 | src/main-process/archive-center/archive-service.js(46), src/main-process/position-reconciliation/input-staging.js(21), src/main-process/archive-center/outbox-store.js(20) |
 | `parse` | 43 | 91 | 1 | src/backend/database/linked-table-repository.js(12), src/backend/database/migrations.js(11), src/backend/duplicate-inbound-match-store.js(5) |
-| `text` | 38 | 644 | 2 | src/main-process/position-reconciliation/store.js(150), src/main-process/position-reconciliation/service.js(64), src/renderer.js(62) |
+| `text` | 38 | 645 | 2 | src/main-process/position-reconciliation/store.js(150), src/main-process/position-reconciliation/service.js(64), src/renderer.js(62) |
 | `channel` | 31 | 394 | 1 | src/main-process/archive-center/operation-tracker.js(115), src/main-process/position-reconciliation/store.js(46), src/backend/pre-fund-reconciliation-run-store.js(39) |
 | `normalizeCell` | 31 | 153 | 15 | src/backend/file-service.js(34), src/backend/file-service/normalizers.js(12), src/main-process/big-account-recognition.js(12) |
 | `crypto` | 30 | 93 | 30 | src/main-process/archive-center/archive-service.js(8), src/main-process/position-reconciliation/service.js(8), src/backend/toolbox-format/biff8-pass.js(4) |
@@ -3713,8 +3715,8 @@
 | `ToolboxXlsxFormatError` | 3 | 124 | 1 | src/backend/toolbox-format/xlsx-sheet-scanner.js(69), src/backend/toolbox-format/xlsx-pass.js(50), src/backend/position-reconciliation-import/xlsx-reader.js(5) |
 | `bankValue` | 3 | 41 | 1 | src/main-process/pre-fund-reconciliation/output-mapper.js(33), src/main-process/position-reconciliation/logical-accounts.js(4), src/main-process/scenario-engines/c3-gateway-recon-join.js(4) |
 | `settingsRepository` | 3 | 40 | 3 | src/backend/database.js(31), src/main-process/import-dialog-state.js(5), src/backend/database/own-accounts-migration.js(4) |
+| `applyMismatch` | 3 | 38 | 3 | src/backend/position-reconciliation-import/source-writer.js(21), src/backend/position-reconciliation-import/account-writer.js(9), src/backend/position-reconciliation-import/bank-writer.js(8) |
 | `hasColumn` | 3 | 37 | 2 | src/backend/database/migrations.js(32), src/backend/database.js(3), src/backend/biz-op-recon-db/migrations.js(2) |
-| `applyMismatch` | 3 | 35 | 3 | src/backend/position-reconciliation-import/source-writer.js(18), src/backend/position-reconciliation-import/account-writer.js(9), src/backend/position-reconciliation-import/bank-writer.js(8) |
 | `POSITION_IMPORT_MESSAGE_TYPES` | 3 | 31 | 1 | src/backend/position-reconciliation-import/worker-entry.js(18), src/main-process/position-reconciliation/import-dispatch.js(11), src/backend/position-reconciliation-import/constants.js(2) |
 | `validationError` | 3 | 31 | 1 | src/main-process/pre-fund-reconciliation/mpt-schema.js(17), src/main-process/pre-fund-reconciliation/mpt-parser.js(11), src/main-process/toolbox-output-writer.js(3) |
 | `targetPathAliasKey` | 3 | 30 | 1 | src/main-process/toolbox-output-publication.js(27), src/main-process/toolbox-target-identity.js(2), src/main-process/toolbox-multi-split.js(1) |

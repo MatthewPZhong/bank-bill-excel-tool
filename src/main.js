@@ -14268,6 +14268,7 @@ function recordPositionArchiveIntentFiles(filePaths, role) {
           artifactKey: String(descriptor.artifactKey || '').trim(),
           sourceOperation: String(descriptor.sourceOperation || '').trim(),
           originalName: String(descriptor.originalName || path.basename(filePath)),
+          requiredInputPaths: descriptor.requiredInputPaths,
           metadata: descriptor.metadata && typeof descriptor.metadata === 'object'
             ? descriptor.metadata
             : {}

@@ -15,7 +15,10 @@
 | D9 | 运行过滤合并报告与原始异常报告使用相同的 Excel Sheet 行数上限并自动拆分 | 防止跨报告合并后超过 1,048,576 行造成审计数据失败或截断 | active |
 | D10 | 普通来源逐文件结果显式返回 source/linked revision | 让过滤提交、恢复和日志能直接核对本次事务推进的版本 | active |
 | D11 | 全量过滤阻断按必要来源与目标月份的笛卡尔积逐项判断 | 防止其他月份的正常行掩盖单月来源完全缺失 | active |
-| D12 | sealed ledger v4 冻结文件级异常报告与输入依赖；完整批次报告仅由最后一个过滤文件引用 | 保持正常单报告体验，同时让逐文件事务的部分提交恢复不夹带未提交文件 | active |
+| D12 | sealed ledger v5 在多文件过滤时冻结“每文件分片 + 完整批次报告”；全部提交时最后一个过滤文件引用批次报告，部分成功时每个已提交文件引用自己的分片 | 保持正常单报告体验，并让允许来源子集、逐文件事务和任意文件顺序都具备独立审计产物 | active |
+| D13 | 正常部分成功与异常恢复统一按 `requiredInputPaths` 和 side DB 文件级提交凭证裁剪 `outputFiles/anomalyReports/逐文件引用` | 禁止未提交或未启用文件进入成功批次的可下载报告 | active |
+| D14 | 报告依赖必须由主进程原样持久化到 pending，并在 apply grant 前与预检证据逐项一致 | 防止真实 IPC 编排层丢字段而使过滤导入无法授权或恢复证据失真 | active |
+| D15 | 墓碑保存 sealed `report_row_count`；重复折叠的非 owner 过滤行不生成文件级报告依赖 | 保持聚合报告导出行数准确，并避免重复-only 文件制造虚假报告 | active |
 
 ## Assumptions
 
@@ -36,14 +39,18 @@
 - E8：结果回导的 Excel 日期序列兼容处理覆盖合法往返及 1 秒、1 分钟、1 小时篡改测试；仅吸收本地 Excel epoch 历史时区产生的 43 秒固定余量，不放宽 2ms 的相对误差门限。
 - E9：按电子表格交付门禁生成并检查包含调拨/测试付款的异常报告和运行合并报告；Sheet 结构、关键值、样式及全部 Sheet 渲染通过，公式错误扫描为 0。纯数字长单号和前导零账号使用 inline rich text 文本单元格，避免科学计数法与精度丢失。
 - E10：生产报告到运行合并报告的验证发现并修复两项读取盲区：ZIP 条目顺序导致 ExcelJS streaming reader 漏读，以及调拨两列同名“业务日期”被对象键覆盖；现改为 relationship-aware 扫描并按同名表头出现次序逐列投影。
-- E11：`npm run scan:vars` 已按 v3.1.4 刷新 263 个源文件、3,319 个顶层名称；首次 `npm run check:vars` 命中 `ipcRenderer`、`dialog`、`setStatus`，首轮 PR 复核补丁命中同名局部变量 `state`，行内 finding 修复再次命中 `setStatus`，均完成下述关联 review。脚本以 2 退出表示存在需人工 review 的命中，不是测试执行错误。
-- E12：首次完整门禁仅有两个既有 characterization 日期 fixture 在 Asia/Shanghai 下受 SheetJS 0.18 的 1899 epoch 历史时区余量影响；将 fixture 从本地零点改为本地正午并保留 `<= 1ms` 往返断言后，生产解析、月份契约和结果回导 2ms 门限均未放宽。PR 最终复核补丁完成后再次执行 `npm run release-check`，最终退出码为 0：lint、smoke、4,478/4,478 单测及 44 个集成脚本（2,051/2,051）全部通过。
+- E11：`npm run scan:vars` 已按 v3.1.4 刷新 263 个源文件、3,322 个顶层名称；首次 `npm run check:vars` 命中 `ipcRenderer`、`dialog`、`setStatus`，首轮 PR 复核补丁命中同名局部变量 `state`，行内 finding 修复再次命中 `setStatus`，均完成下述关联 review。二轮 finding 修复涉及的 6 个代码文件未命中重要变量。脚本以 2 退出表示存在需人工 review 的命中，不是测试执行错误。
+- E12：首次完整门禁仅有两个既有 characterization 日期 fixture 在 Asia/Shanghai 下受 SheetJS 0.18 的 1899 epoch 历史时区余量影响；将 fixture 从本地零点改为本地正午并保留 `<= 1ms` 往返断言后，生产解析、月份契约和结果回导 2ms 门限均未放宽。PR 二轮复核补丁完成后再次执行 `npm run release-check`，最终退出码为 0：lint、smoke、4,481/4,481 单测及 44 个集成脚本（2,051/2,051）全部通过。
 - E13：PR 复核补充运行过滤关联完整性锚点；篡改冻结报告哈希或把 `filtered_source_id` 换成同报告、同来源、同月份的另一条墓碑都会以 `position-side-data-invalid` 失败关闭。
 - E14：PR 复核补充全量过滤月份的管理入口；原始表 0 行、活动墓碑大于 0 时仍返回来源/月范围，删除结果明确区分原始行数与已解除过滤记录数。
 - E15：PR 复核补充运行过滤合并报告的 Sheet 上限注入测试；两行数据在阈值 1 下完整生成基础 Sheet 与 `_2` Sheet，合计行数保持 2。
 - E16：PR 复核补充逐文件 revision 结果断言；混合过滤与全量过滤提交都返回 source/linked revision=1，并与侧库事务推进一致。
 - E17：PR 行内 review 的多月份反例已锁定：2026-06 有 1 行有效调拨、2026-07 有活动过滤墓碑且有效 0 行时，运行按 2026-07 单月返回 `position-source-all-filtered`，不能被 6 月计数掩盖。
 - E18：PR 行内 review 的部分提交反例已锁定：两份含过滤行文件预检后，第一份提交、第二份暂存字节变化时，只恢复第一份 input proof、第一份文件级报告和第一条墓碑；覆盖两份输入的批次报告不会进入恢复输出。两份全部提交时仍保留完整批次报告，运行合并按冻结 `report_key` 去重取行。
+- E19：二轮 PR review 的正常部分成功反例已锁定：一份已启用调拨过滤文件与一份未启用测试付款过滤文件混合导入时，最终只返回调拨文件分片；未启用文件从 `outputFiles`、`anomalyReports`、逐文件报告引用和侧库墓碑中同时消失，批次报告因依赖未闭合不进入结果。
+- E20：两个文件携带完全相同过滤行时，仅首个 owner 文件进入 `sourceFileIndexes/requiredInputPaths`；第二个文件保持 `filtered=0, duplicate=1`，不会生成额外报告或触发 sealed manifest 数量不一致。
+- E21：完整两文件过滤批次的墓碑分别持久化分片行数 1 和聚合报告行数 2；`findFilteredReport(aggregate)` 返回 sealed 2，而不是仅统计引用聚合 key 的最后一条墓碑。
+- E22：主进程 `recordPositionArchiveIntentFiles` 的真实转换已由 wiring 回归锁定，output descriptor 的 `requiredInputPaths` 会进入 pending；本轮相关定向测试合计 200/200 PASS。
 
 ## Deviations
 
@@ -63,10 +70,10 @@
 | 金额、币种与方向 | PASS，待人工业务确认 | accepted 行仍走既有规范化与派生；过滤白名单不改值。付款成功调拨缺证据整文件拒绝，过滤行不生成任何链接腿。 |
 | 时间与月份边界 | PASS | 过滤前要求业务日期可解析，墓碑冻结 `event_date/month_key`；范围删除同步解除墓碑。Excel 日期往返保持 2ms 门限并覆盖 1 秒级篡改。 |
 | 幂等与重复 | PASS | 同 `source_type + row_hash` 只保留一条活动墓碑，重导关闭旧墓碑再建审计记录；完整重复仍按 owner 折叠。 |
-| 部分失败与恢复 | PASS，有 R3 系统级演练项 | 报告/归档证据在 grant 前密封；单文件 side DB mutation 原子；文件级报告声明输入依赖，部分提交只恢复依赖闭合的报告；报告损坏、碰撞、source revision 与运行信封不一致均 fail closed。 |
+| 部分失败与恢复 | PASS，有 R3 系统级演练项 | 报告/归档证据在 grant 前密封；单文件 side DB mutation 原子；每个过滤 owner 文件有独立分片，正常部分成功与恢复都只保留依赖闭合的报告；未提交/未启用/重复-only 文件不能进入审计产物；报告损坏、碰撞、source revision 与运行信封不一致均 fail closed。 |
 | 行数守恒 | PASS | sealed ledger 校验 `扫描行 = 正常候选 + 过滤 owner + 重复折叠 + reader 过滤`；apply 逐项复算并与 manifest 比对，真实成功文件合计 902,204 正常行 + 409 过滤行。 |
 | 匹配与消费 | PASS | 新表未接入候选、严格 1:1、多候选或消费表；运行只从既有 `position_link_rows` 取候选，过滤墓碑仅用于阻断、快照和导出。 |
-| 可观测与审计 | PASS | 导入提示展示物理/正常/过滤/重复/链接行数；报告立即导出与存档下载同字节；运行导出按冻结行键合并，最终确认前复核报告 SHA-256/size。 |
+| 可观测与审计 | PASS | 导入提示展示物理/正常/过滤/重复/链接行数；报告立即导出与存档下载同字节；导出行数取 sealed 报告行数；运行导出按冻结行键合并，最终确认前复核报告 SHA-256/size。 |
 
 资金红线结论：自动化与证据检查未发现会改变已接受行金额、币种、方向或消费归属的路径；正式发布仍必须完成人工复核 Spec 13.3 的五项业务判断。
 

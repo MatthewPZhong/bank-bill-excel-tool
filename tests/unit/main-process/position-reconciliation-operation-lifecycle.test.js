@@ -753,6 +753,22 @@ test('含过滤行的普通来源在 grant 前同时持久化异常报告证据'
   );
 });
 
+test('主进程异常报告存档意图保留预检声明的输入依赖', () => {
+  const mainSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../src/main.js'),
+    'utf8'
+  );
+  const start = mainSource.indexOf('function recordPositionArchiveIntentFiles');
+  const end = mainSource.indexOf('\nfunction markPositionBusinessOutcome', start);
+  assert.ok(start >= 0 && end > start, '应能定位主进程存档意图转换函数');
+  const implementation = mainSource.slice(start, end);
+  assert.match(
+    implementation,
+    /requiredInputPaths:\s*descriptor\.requiredInputPaths/,
+    '异常报告 requiredInputPaths 必须进入 pending，不能在主进程转换时丢失'
+  );
+});
+
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
   const operationToken = 'operation-rejected';
   let pending = {

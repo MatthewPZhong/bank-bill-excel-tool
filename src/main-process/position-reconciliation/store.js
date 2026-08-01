@@ -162,6 +162,7 @@ const SCHEMA = `
     report_file_name TEXT NOT NULL,
     report_sha256 TEXT NOT NULL,
     report_size_bytes INTEGER NOT NULL,
+    report_row_count INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at TEXT,
     resolution_reason TEXT
@@ -1803,6 +1804,15 @@ class PositionReconciliationStore {
           "ADD COLUMN integrity_hash TEXT NOT NULL DEFAULT ''"
         );
       }
+      const filteredSourceColumns = this.db.prepare(
+        'PRAGMA table_info(position_filtered_source_rows)'
+      ).all();
+      if (!filteredSourceColumns.some((column) => column.name === 'report_row_count')) {
+        this.db.exec(
+          'ALTER TABLE position_filtered_source_rows ' +
+          'ADD COLUMN report_row_count INTEGER NOT NULL DEFAULT 0'
+        );
+      }
       const seedCheckpoint = existingCheckpoint || initial || {
         identity: crypto.randomUUID(),
         generation: 0,
@@ -2301,9 +2311,12 @@ class PositionReconciliationStore {
              report_file_name AS reportFileName,
              report_sha256 AS reportSha256,
              report_size_bytes AS reportSizeBytes,
-             (SELECT COUNT(*)
-              FROM position_filtered_source_rows counted
-              WHERE counted.report_key = filtered.report_key) AS filteredRowCount
+             CASE
+               WHEN report_row_count > 0 THEN report_row_count
+               ELSE (SELECT COUNT(*)
+                     FROM position_filtered_source_rows counted
+                     WHERE counted.report_key = filtered.report_key)
+             END AS filteredRowCount
       FROM position_filtered_source_rows filtered
       WHERE report_key = ?
       ORDER BY id DESC

@@ -423,6 +423,7 @@ class PositionImportLedger {
     return this.db.prepare(`
       SELECT DISTINCT source_file_index AS fileIndex
       FROM filtered_source_rows
+      WHERE is_owner = 1
       ORDER BY source_file_index
     `).all().map((row) => Number(row.fileIndex));
   }

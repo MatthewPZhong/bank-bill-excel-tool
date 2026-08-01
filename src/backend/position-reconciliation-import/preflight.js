@@ -704,25 +704,27 @@ async function runPositionImportPreflight(input = {}) {
         : writePositionAnomalyReport;
       try {
         const filteredFileIndexes = ledger.listFilteredFileIndexes();
-        for (const fileIndex of filteredFileIndexes.slice(0, -1)) {
-          const shard = await writeAnomalyReport({
-            ledger,
-            jobRoot,
-            jobId,
-            fileIndexes: [fileIndex],
-            artifactKey: `${REPORT_ARTIFACT_KEY}:file-${fileIndex}`,
-            fileName: `平盘来源异常数据_${String(jobId)}_文件${fileIndex + 1}.xlsx`,
-            displayRole: '异常数据审计分片'
-          });
-          if (!shard) {
-            throw new PositionReconciliationError(
-              'position-anomaly-report-failed',
-              `文件 ${fileIndex + 1} 的异常报告未生成`
-            );
+        if (filteredFileIndexes.length > 1) {
+          for (const fileIndex of filteredFileIndexes) {
+            const shard = await writeAnomalyReport({
+              ledger,
+              jobRoot,
+              jobId,
+              fileIndexes: [fileIndex],
+              artifactKey: `${REPORT_ARTIFACT_KEY}:file-${fileIndex}`,
+              fileName: `平盘来源异常数据_${String(jobId)}_文件${fileIndex + 1}.xlsx`,
+              displayRole: '异常数据审计分片'
+            });
+            if (!shard) {
+              throw new PositionReconciliationError(
+                'position-anomaly-report-failed',
+                `文件 ${fileIndex + 1} 的异常报告未生成`
+              );
+            }
+            const normalizedShard = { ...shard, sourceFileIndexes: [fileIndex] };
+            anomalyReports.push(normalizedShard);
+            anomalyReportByFileIndex.set(fileIndex, normalizedShard);
           }
-          const normalizedShard = { ...shard, sourceFileIndexes: [fileIndex] };
-          anomalyReports.push(normalizedShard);
-          anomalyReportByFileIndex.set(fileIndex, normalizedShard);
         }
         if (filteredFileIndexes.length > 0) {
           const aggregate = await writeAnomalyReport({
@@ -742,10 +744,9 @@ async function runPositionImportPreflight(input = {}) {
             sourceFileIndexes: filteredFileIndexes
           };
           anomalyReports.push(anomalyReport);
-          anomalyReportByFileIndex.set(
-            filteredFileIndexes[filteredFileIndexes.length - 1],
-            anomalyReport
-          );
+          if (filteredFileIndexes.length === 1) {
+            anomalyReportByFileIndex.set(filteredFileIndexes[0], anomalyReport);
+          }
         }
       } catch (reportError) {
         anomalyReport = null;

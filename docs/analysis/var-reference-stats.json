@@ -1,14 +1,14 @@
 {
   "meta": {
     "version": "3.1.4",
-    "scannedAt": "2026-08-01T10:14:29.190Z",
+    "scannedAt": "2026-08-01T10:54:08.751Z",
     "root": "src",
     "totalFiles": 263,
-    "totalTopLevelNames": 3319,
+    "totalTopLevelNames": 3322,
     "buckets": {
       "shared": 472,
       "paired": 749,
-      "local": 1954,
+      "local": 1957,
       "crossFile": 1221
     }
   },
@@ -270,7 +270,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 8
+            "count": 11
           },
           {
             "file": "src/backend/position-reconciliation-import/worker-entry.js",
@@ -569,7 +569,7 @@
             "count": 2
           }
         ],
-        "totalHits": 599,
+        "totalHits": 602,
         "fileSpan": 111
       },
       {
@@ -1184,7 +1184,7 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 16
+            "count": 17
           },
           {
             "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
@@ -1307,7 +1307,7 @@
             "count": 62
           }
         ],
-        "totalHits": 644,
+        "totalHits": 645,
         "fileSpan": 38
       },
       {
@@ -11173,6 +11173,30 @@
         "fileSpan": 3
       },
       {
+        "name": "applyMismatch",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/account-writer.js",
+          "src/backend/position-reconciliation-import/bank-writer.js",
+          "src/backend/position-reconciliation-import/source-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/account-writer.js",
+            "count": 9
+          },
+          {
+            "file": "src/backend/position-reconciliation-import/bank-writer.js",
+            "count": 8
+          },
+          {
+            "file": "src/backend/position-reconciliation-import/source-writer.js",
+            "count": 21
+          }
+        ],
+        "totalHits": 38,
+        "fileSpan": 3
+      },
+      {
         "name": "hasColumn",
         "defFiles": [
           "src/backend/biz-op-recon-db/migrations.js",
@@ -11193,30 +11217,6 @@
           }
         ],
         "totalHits": 37,
-        "fileSpan": 3
-      },
-      {
-        "name": "applyMismatch",
-        "defFiles": [
-          "src/backend/position-reconciliation-import/account-writer.js",
-          "src/backend/position-reconciliation-import/bank-writer.js",
-          "src/backend/position-reconciliation-import/source-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/position-reconciliation-import/account-writer.js",
-            "count": 9
-          },
-          {
-            "file": "src/backend/position-reconciliation-import/bank-writer.js",
-            "count": 8
-          },
-          {
-            "file": "src/backend/position-reconciliation-import/source-writer.js",
-            "count": 18
-          }
-        ],
-        "totalHits": 35,
         "fileSpan": 3
       },
       {
@@ -30965,6 +30965,20 @@
         "fileSpan": 1
       },
       {
+        "name": "reportKeyOf",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/source-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/source-writer.js",
+            "count": 10
+          }
+        ],
+        "totalHits": 10,
+        "fileSpan": 1
+      },
+      {
         "name": "resolveSourceStyle",
         "defFiles": [
           "src/main-process/toolbox-output-writer.js"
@@ -44195,6 +44209,20 @@
         "fileSpan": 1
       },
       {
+        "name": "outputDependenciesSatisfied",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/source-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/source-writer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "PACKAGE_RELATIONSHIPS_CONTENT_TYPE",
         "defFiles": [
           "src/main-process/toolbox-output-writer.js"
@@ -55143,6 +55171,20 @@
         "fileSpan": 1
       },
       {
+        "name": "retainedCommittedAnomalyArtifacts",
+        "defFiles": [
+          "src/backend/position-reconciliation-import/source-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/position-reconciliation-import/source-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "REUSE_MODULE_MAPPING_FIELD",
         "defFiles": [
           "src/main.js"
@@ -57305,7 +57347,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 8
+          "count": 11
         },
         {
           "file": "src/backend/position-reconciliation-import/worker-entry.js",
@@ -57604,7 +57646,7 @@
           "count": 2
         }
       ],
-      "totalHits": 599,
+      "totalHits": 602,
       "fileSpan": 111
     },
     {
@@ -58219,7 +58261,7 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 16
+          "count": 17
         },
         {
           "file": "src/backend/position-reconciliation-import/xlsx-reader.js",
@@ -58342,7 +58384,7 @@
           "count": 62
         }
       ],
-      "totalHits": 644,
+      "totalHits": 645,
       "fileSpan": 38
     },
     {
@@ -68208,6 +68250,30 @@
       "fileSpan": 3
     },
     {
+      "name": "applyMismatch",
+      "defFiles": [
+        "src/backend/position-reconciliation-import/account-writer.js",
+        "src/backend/position-reconciliation-import/bank-writer.js",
+        "src/backend/position-reconciliation-import/source-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/position-reconciliation-import/account-writer.js",
+          "count": 9
+        },
+        {
+          "file": "src/backend/position-reconciliation-import/bank-writer.js",
+          "count": 8
+        },
+        {
+          "file": "src/backend/position-reconciliation-import/source-writer.js",
+          "count": 21
+        }
+      ],
+      "totalHits": 38,
+      "fileSpan": 3
+    },
+    {
       "name": "hasColumn",
       "defFiles": [
         "src/backend/biz-op-recon-db/migrations.js",
@@ -68228,30 +68294,6 @@
         }
       ],
       "totalHits": 37,
-      "fileSpan": 3
-    },
-    {
-      "name": "applyMismatch",
-      "defFiles": [
-        "src/backend/position-reconciliation-import/account-writer.js",
-        "src/backend/position-reconciliation-import/bank-writer.js",
-        "src/backend/position-reconciliation-import/source-writer.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/position-reconciliation-import/account-writer.js",
-          "count": 9
-        },
-        {
-          "file": "src/backend/position-reconciliation-import/bank-writer.js",
-          "count": 8
-        },
-        {
-          "file": "src/backend/position-reconciliation-import/source-writer.js",
-          "count": 18
-        }
-      ],
-      "totalHits": 35,
       "fileSpan": 3
     },
     {
