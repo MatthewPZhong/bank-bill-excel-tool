@@ -13,7 +13,7 @@
 
 - A1：用户在“保留 v3.1.4、改走 v3.1.5”的推荐方案后要求继续，视为批准该恢复路径。
 - A2：只要最终 diff 不含 `src/` 或业务配置，v3.1.4 的资金人工确认可沿用；任何后续业务 diff 都会使该假设失效并重新触发人工复核。
-- A3：v3.1.3 仍是生产 latest，因此离线和在线升级 follow-up 的起点都是 v3.1.3。
+- A3（resolved）：正式发布前 v3.1.3 是 production latest；v3.1.5 发布后 latest 已切换为 v3.1.5。尚未执行的离线/在线升级 canary 仍从上一 stable v3.1.3 起步，以验证真实跨版本升级和数据保留。
 
 ## Evidence
 
@@ -27,6 +27,15 @@
 - E8：`npm run verify:main-panel-alignment` 在受限桌面沙箱内返回 `electron exit null`；沙箱外按真实 Electron 路径重跑，两种窗口尺寸、三种缩放 `6/6 PASS`。
 - E9：发布 workflow 继续强制 tag/version/main 三者一致、annotated tag、完整 release checks、更新资产 SHA-512 和不可替换 Release；v3.1.3 直接升级到稳定 SemVer v3.1.5 不需要中间 v3.1.4 资产。
 - E10：通用与资金盲区扫描未发现入口旁路、状态生命周期、兼容性、行数守恒或资损新风险；最终实现 diff 不含 `src/`、schema、配置或资金测试期望。
+- E11：PR #116 的 Windows Build run `30705791034` 成功，包含新增的 `Run Windows SQLite teardown regression`；Codex Review 对最终提交 `c665fb090d35e75f18ba37cea07ebe1be1cd0bcd` 未发现 major issue，GraphQL `review_threads=[]`。
+- E12：PR #116 已以 merge commit `58bea9bb633930b73db13aee8174f5d989e0267e` 合入 `main`；main 候选 Windows run `30705981990` 成功完成 smoke、SQLite teardown、布局、Setup/portable 构建、包体、更新资产暂存和上传。
+- E13：annotated tag `v3.1.5` 的 tag object 为 `6b6d7591423563c8f24cf35b81b6d33587ac3195`；tag 创建和 Release run 启动时，peeled commit 与当时最新 `origin/main` 均为 `58bea9bb633930b73db13aee8174f5d989e0267e`。发布证据 PR 合并后 `main` 可继续前进，immutable tag 保持该提交不变。
+- E14：正式 Windows Release [run 30706152991](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30706152991) 全部成功；release checks 用时 26 分 25 秒，随后布局、构建、包体、更新资产、不可变发布和公开复核全部通过。
+- E15：[v3.1.5 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.5) 于 2026-08-02 00:01:11 +08:00 发布，stable/latest、non-draft、non-prerelease；四项资产均为 uploaded。
+- E16：公开资产独立下载后 SHA-256/size 与 GitHub digest 完全一致：portable `afcc4917...9116f2` / 99,526,150；Setup `27a1be34...3b40ec` / 100,023,007；blockmap `75331686...8e7682` / 105,674；`latest.yml` `afad0c38...66ee31` / 369 bytes。
+- E17：`latest.yml` 的 version `3.1.5`、path `bank-bill-excel-tool-setup-3.1.5.exe`、size `100023007` 和 SHA-512 `dFd2gBX3bL9fkWBvxvX1v0+/JKy3ny1tOVFOg5MHzgC3rPVGdrkpa/usovYskSpa8svGEtIp8NON7Y0WbCQTrQ==` 与实际 Setup 完全一致。
+- E18：发布证据 PR #117 首轮 Codex Review 发现 2 条 P2：PR #116 合并日期误沿用 Release 日期，以及两份公开版本记录仍把已完成的资金复核写成未来门禁。现已分别更正为 2026-08-01 实际合并日期和已完成人工确认的过去时证据。
+- E19：PR #117 二轮 Codex Review 发现 3 条 P2：released frontmatter 缺日期/tag、tag 与 latest main 的等值证据未限定时间点、A3 仍把 v3.1.3 写作当前 latest。现已补齐 `2026-08-02 (v3.1.5)`，将 main 等值限定为 tag/Release run 当时，并记录 v3.1.5 已成为 production latest、升级 canary 仍从上一 stable v3.1.3 起步。
 
 ## Deviations
 
@@ -34,8 +43,8 @@
 
 ## Remaining unknowns
 
-- R1（PROBE）：修复后的 Windows PR 定向回归是否通过。
-- R2（PROBE）：完整 Release workflow 是否完成并产出四项资产。
+- R1（resolved）：Windows PR 定向回归已在 run `30705791034` 通过。
+- R2（resolved）：完整 Release workflow 已成功并产出、复核四项公开资产。
 - R3（人工 follow-up）：Windows 10/11 安装、SmartScreen、离线/在线升级和用户数据保留仍未实测。
 
 ## Reconciliation blindspot pass

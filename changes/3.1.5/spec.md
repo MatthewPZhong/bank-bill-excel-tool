@@ -1,10 +1,10 @@
 # v3.1.5 Spec — v3.1.4 Windows Release 恢复
 
-> status: `review-ready`
+> status: `released`
 > baseline: `main@14a9ce9de1d5607fe3c4dc58ae3adf81defef611`
 > target-version: `3.1.5`
 > branch: `codex/v3.1.5-release-recovery`
-> updated: `2026-08-01`
+> updated: `2026-08-02`
 
 ## 1. 目标
 
@@ -39,3 +39,10 @@ v3.1.4 的产品实现和发布准备已经合并，但 tag 触发的 Windows Re
 ## 5. 人工门禁与 follow-up
 
 2026-08-01 已完成的资金业务确认继续适用于本版，因为恢复 diff 不触及产品或资金代码。此前明确豁免的 Windows 实机项仍保持“未执行”：正式资产公开后补做 `v3.1.3 → v3.1.5` 离线覆盖、Windows 10/11 启动/SmartScreen、大报告恢复、进程硬退出与 production/latest 在线升级 canary。
+
+## 6. 发布结果
+
+- PR #116 已以 merge commit `58bea9bb633930b73db13aee8174f5d989e0267e` 合入 `main`；Codex Review 覆盖最终提交 `c665fb090d35e75f18ba37cea07ebe1be1cd0bcd`，无 review thread 或 P3 及更高 Finding。
+- annotated tag `v3.1.5` 的 tag object 为 `6b6d7591423563c8f24cf35b81b6d33587ac3195`，peeled commit 为 `58bea9bb633930b73db13aee8174f5d989e0267e`。
+- Windows Release [run 30706152991](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30706152991) 全部成功；2026-08-02 00:01:11 +08:00 发布 stable/latest、non-draft、non-prerelease [v3.1.5](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.5)。
+- Setup、Setup blockmap、portable 和 `latest.yml` 四项资产均已独立下载并核对大小、SHA-256；`latest.yml` 对 Setup 的 version/path/size/SHA-512 与实际字节一致。
