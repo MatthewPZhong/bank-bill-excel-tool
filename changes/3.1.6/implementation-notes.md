@@ -114,6 +114,7 @@
 - E53：正式 Windows Release run `30756698074` 从 2026-08-03 00:28:09 运行至 00:55:38 +08:00，一次通过 tag/main/version、完整 release-check、布局、构建、包体、更新资产、不可变发布和公开 Release 复核。Release `363840801` 于 00:55:31 发布为 latest、non-draft、non-prerelease。
 - E54：四项公开资产独立下载后的 size / SHA-256 与 GitHub digest 一致：portable `99620858` / `747cbca029001d1d276490e6ce1aa0d1e815e6db66ae18e2c3e54d7571e3cfad`；Setup `100117634` / `48616703e156ef7bf8706c9259c7736430486c75bd35e4d17566a8844074bd47`；blockmap `105596` / `14d8a8b431d2ffd3ab620289adbd9e952a93fdc5b3ad67c3d309b263708040e9`；`latest.yml` `369` / `62869ce5715377029fb8af2d7a371715c6bf34a2b2104b91763a98461fb49d63`。两个 EXE 文件头均为 `MZ`。
 - E55：`latest.yml` 的 version/path/size 为 `3.1.6` / `bank-bill-excel-tool-setup-3.1.6.exe` / `100117634`，SHA-512 `oKUhqYUL/oCpbJhwjAecEYLirxXizHWttX226N4tjw6muk5ewaIU6N4YfwvODeF2kGdnfETd4kntyZ3dmIO6Yw==` 与 Setup 实际字节一致。
+- E56：正式日期、tag、workflow 和资产摘要由发布证据 PR #120 回写；该 PR 不修改 `src`，`check:vars --since origin/main --include-minor` 安全跳过，通用与资金盲区复核未发现新的 P0-P3 Finding。
 
 ## Deviations
 

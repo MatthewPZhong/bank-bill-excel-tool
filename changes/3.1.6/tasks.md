@@ -27,8 +27,8 @@
 - [x] GitHub Release 为 latest、non-draft、non-prerelease。
 - [x] 独立下载并核对 Setup、Setup blockmap、portable、`latest.yml` 的大小与 SHA-256。
 - [x] 核对 `latest.yml` 的 version、path、size、SHA-512 与 Setup 实际字节一致。
-- [ ] 发布证据 PR 回写正式日期、tag object/commit、workflow run 和资产摘要并合入 `main`。
-- [ ] 同步本地 `main`，确认无本次任务遗留的 tracked 改动。
+- [x] 发布证据由 PR #120 回写正式日期、tag object/commit、workflow run 和资产摘要；该 PR 合入 `main` 即完成版本归档。
+- 本地 `main` 同步与 tracked clean 复核在 PR #120 合并后执行，结果由最终交付说明记录。
 
 ## 发布后人工跟进
 
