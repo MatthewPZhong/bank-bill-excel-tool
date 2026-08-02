@@ -56,3 +56,10 @@
 - 用户明确要求执行正式收尾和发布收尾，允许按仓库受控 tag workflow 生成 v3.1.6 稳定版技术资产。
 - 历史全量业务键扫描、真实资金逐项复核、真实 400 万行导出、Windows Excel/WPS 和平盘现场单文件重试仍未完成；它们从“阻止生成技术资产”转为发布后人工门禁，不得被记录成已验证。
 - Release 成功前，CHANGELOG、版本功能清单和使用手册保持 Unreleased/未发布；只有公开资产和摘要独立核对后才能回写正式发布日期。
+
+## 发布结果（2026-08-03）
+
+- 发布准备 PR #119 合入 `main@97324e56` 后，main Windows Build run `30756470739` 成功。
+- annotated tag `v3.1.6` 指向上述最新 `main`；Release run `30756698074` 全部成功。
+- GitHub Release 为 latest、non-draft、non-prerelease；四项公开资产的 size/SHA-256 与 `latest.yml` 的 Setup size/SHA-512 已独立回读一致。
+- 发布技术闭环完成；完整历史、真实资金、大库/Windows 和平盘现场验证继续作为人工上线门禁。

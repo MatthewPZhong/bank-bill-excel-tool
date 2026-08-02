@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.6 PRD
 
 > 目标版本：`3.1.6`
-> 状态：release-prepared（PR #118 已合入 `main`；正式 GitHub Release 待发布）
+> 状态：released（v3.1.6 已于 2026-08-03 发布为 stable/latest）
 > 源规格：`changes/3.1.6/spec.md`
 > 交付归档：`docs/prs/PR118-v3.1.6.md`
 > 更新时间：2026-08-03
@@ -41,6 +41,6 @@
 
 ## 6. 发布与人工门禁
 
-用户已授权执行稳定版技术发布。`v3.1.6` tag、Windows Release、四项公开资产和摘要将在发布证据提交中回写。
+用户已授权并完成稳定版技术发布。annotated tag `v3.1.6` 指向创建时最新 `main@97324e56`；Windows Release [run 30756698074](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30756698074) 全部成功，[v3.1.6](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.6) 已成为 latest、non-draft、non-prerelease。Setup、blockmap、portable 和 `latest.yml` 四项资产的大小与摘要已独立复核，updater 元数据与 Setup 实际字节一致。
 
 以下项目仍未执行，不得因技术发布完成而记为通过：完整历史业务键扫描、真实资金逐项复核、真实 400 万行导出、Windows Excel/WPS、平盘现场单文件重试，以及从上一 stable v3.1.5 的离线/在线升级 canary。

@@ -109,6 +109,11 @@
 - E48：`main@54acd9e` 的 Windows Build run `30755450625` 全部成功，覆盖 smoke、SQLite teardown、主页面对齐、Setup/portable 构建、包体检查、更新资产暂存和上传。
 - E49：2026-08-03 从合并基线执行干净 `npm ci` 后，`npm run release-check` 再次通过 lint、smoke、4,592/4,592 单元测试（`logs/unit-tests/unit-20260803-000249.log`）和 44 个集成脚本 2,051/2,051 断言；集成总耗时 296,264 ms。主页面几何在真实桌面权限下 6/6 PASS；`scan:vars` 为 282 files / 3,515 top-level names，发布分支无 `src` 差异，`check:vars` 安全跳过。
 - E50：`npm audit --omit=dev` 为 0 critical、7 high、2 moderate，与既有发布基线一致；本次不在资金发布收尾中升级 `electron-updater`、`marked`、`xlsx`、`exceljs` 或传递依赖。
+- E51：发布准备 PR #119 的 Windows run `30756371447` 成功且无评论、review 或未解决线程；PR 以 merge commit `97324e56fa7f6a227b1ed9e4516dfa166c5798d8` 合入 `main`，合并后的 Windows run `30756470739` 完成 smoke、SQLite teardown、布局和 Setup/portable 候选构建。
+- E52：annotated tag `v3.1.6` 的 tag object 为 `3f18dccf8f7cffe81a23e2ccfd0094efafe81d3b`，peeled commit 与创建时最新 `origin/main` 均为 `97324e56fa7f6a227b1ed9e4516dfa166c5798d8`；远端 tag object 与 peeled commit 回读一致。
+- E53：正式 Windows Release run `30756698074` 从 2026-08-03 00:28:09 运行至 00:55:38 +08:00，一次通过 tag/main/version、完整 release-check、布局、构建、包体、更新资产、不可变发布和公开 Release 复核。Release `363840801` 于 00:55:31 发布为 latest、non-draft、non-prerelease。
+- E54：四项公开资产独立下载后的 size / SHA-256 与 GitHub digest 一致：portable `99620858` / `747cbca029001d1d276490e6ce1aa0d1e815e6db66ae18e2c3e54d7571e3cfad`；Setup `100117634` / `48616703e156ef7bf8706c9259c7736430486c75bd35e4d17566a8844074bd47`；blockmap `105596` / `14d8a8b431d2ffd3ab620289adbd9e952a93fdc5b3ad67c3d309b263708040e9`；`latest.yml` `369` / `62869ce5715377029fb8af2d7a371715c6bf34a2b2104b91763a98461fb49d63`。两个 EXE 文件头均为 `MZ`。
+- E55：`latest.yml` 的 version/path/size 为 `3.1.6` / `bank-bill-excel-tool-setup-3.1.6.exe` / `100117634`，SHA-512 `oKUhqYUL/oCpbJhwjAecEYLirxXizHWttX226N4tjw6muk5ewaIU6N4YfwvODeF2kGdnfETd4kntyZ3dmIO6Yw==` 与 Setup 实际字节一致。
 
 ## Deviations
 

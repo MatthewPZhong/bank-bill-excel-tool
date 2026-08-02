@@ -18,15 +18,15 @@
 - [x] `scan:vars` / `check:vars` 硬节点完成；release 分支无 `src` 差异。
 - [x] 生产依赖审计记录 0 critical、7 high、2 moderate，不在发布收尾中混改依赖。
 - [x] 建立 PR #118 归档、v3.1.6 PRD 与 release-prepared 规格/测试证据。
-- [ ] release-closeout PR 合入 `main`，并确认其 Windows checks 成功。
+- [x] release-closeout PR #119 合入 `main@97324e56`，PR 与合并后 Windows checks 均成功。
 
 ## 发布收尾
 
-- [ ] 创建并推送指向最新 `main` 的 annotated tag `v3.1.6`。
-- [ ] Windows Release workflow 全部成功。
-- [ ] GitHub Release 为 latest、non-draft、non-prerelease。
-- [ ] 独立下载并核对 Setup、Setup blockmap、portable、`latest.yml` 的大小与 SHA-256。
-- [ ] 核对 `latest.yml` 的 version、path、size、SHA-512 与 Setup 实际字节一致。
+- [x] 创建并推送指向最新 `main@97324e56` 的 annotated tag `v3.1.6`。
+- [x] Windows Release workflow run `30756698074` 全部成功。
+- [x] GitHub Release 为 latest、non-draft、non-prerelease。
+- [x] 独立下载并核对 Setup、Setup blockmap、portable、`latest.yml` 的大小与 SHA-256。
+- [x] 核对 `latest.yml` 的 version、path、size、SHA-512 与 Setup 实际字节一致。
 - [ ] 发布证据 PR 回写正式日期、tag object/commit、workflow run 和资产摘要并合入 `main`。
 - [ ] 同步本地 `main`，确认无本次任务遗留的 tracked 改动。
 

@@ -1,9 +1,9 @@
 # v3.1.6 Spec - VCC财务OP校验
 
-> status: `release-prepared`（PR #118 已合入 `main`；合并后自动门禁与 Windows 候选构建通过；正式 Release 待发布）
+> status: `released`（v3.1.6 已于 2026-08-03 发布为 stable/latest；人工上线门禁继续保留）
 > baseline: `main@603807895a39408a7c4e4246e3b2657d1ee9cc66`（v3.1.5）
 > target-version: `3.1.6`
-> release-branch: `codex/v3.1.6-release-closeout`
+> release-branch: `codex/v3.1.6-release-closeout` / `codex/v3.1.6-release-evidence`
 > updated: `2026-08-03`
 > nature: 资金校验、跨期归档、业务主键幂等，实施及上线前必须完成人工资金复核。
 
@@ -340,7 +340,7 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 - 若真实历史数据证明任一业务键会被合法跨期复用，应停止使用全历史唯一范围并反向更新本 spec；不得静默把账期、主体或其他字段拼入联合键。
 - 当前可访问的 2026-06 样本已完成全量唯一性扫描，但上线前仍须由业务提供全部历史数据完成第 3.6 节门禁，并人工复核真实主体、币种、方向、金额、账期和归档衔接。自动测试不能替代该资金门禁。
 
-## 9. 正式收尾与发布准备状态
+## 9. 正式收尾与发布结果
 
 1. PR #118 已于 2026-08-02 以 merge commit `54acd9ea0dc5a8b9bfa9528a9d0d264018c7c3f1` 合入 `main`；最终实现提交为 `92f91f6ca9f9daf3a1b06b0c096beaaf54027d22`。
 2. 合并前 self-review 发现并修复 1 个 P3：Pending 校验表显示名与正式导出名称不一致。复查后无未解决 P0-P3 Finding，PR 无评论、review 或未解决线程。
@@ -350,7 +350,11 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 6. `npm run scan:vars` 为 282 个源文件、3,515 个顶层名称；发布收尾分支不修改 `src`，`npm run check:vars -- --since origin/main --include-minor` 安全跳过。
 7. `npm audit --omit=dev` 保留既有 0 critical、7 high、2 moderate；依赖治理不与本次资金版本发布混改。
 8. 用户于 2026-08-03 明确要求执行正式收尾和发布收尾，视为授权生成 v3.1.6 技术发布资产。该授权不等于第 8 节人工资金门禁、真实 400 万行导出、Windows Excel/WPS 或平盘真实单文件重试已经完成，相关结论必须继续披露为未执行。
-9. 发布准备 PR 合并后，annotated tag `v3.1.6` 必须指向当时最新 `main`；标签触发的 Windows Release、四项公开资产和独立摘要核对须在发布证据 PR 中回写。
+9. 发布准备 PR #119 的 Windows [run 30756371447](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30756371447) 成功，复查无未解决 P0-P3 Finding、评论、review 或线程；PR 以 merge commit `97324e56fa7f6a227b1ed9e4516dfa166c5798d8` 合入 `main`，合并后的 Windows [run 30756470739](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30756470739) 也完成 smoke 与 Setup/portable 候选构建。
+10. annotated tag `v3.1.6` 的 tag object 为 `3f18dccf8f7cffe81a23e2ccfd0094efafe81d3b`，peeled commit 为创建时最新 `main@97324e56fa7f6a227b1ed9e4516dfa166c5798d8`；远端 tag 回读一致。
+11. 正式 Windows Release [run 30756698074](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30756698074) 在 2026-08-03 00:28:09 至 00:55:38 +08:00 一次成功，覆盖 tag/main/version、完整 release-check、布局、构建、包体、更新资产、不可变发布和公开回读。
+12. [v3.1.6 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.6) 于 2026-08-03 00:55:31 +08:00 发布为 latest、non-draft、non-prerelease。四项资产独立下载后的大小和 SHA-256 与 GitHub 元数据逐项一致，Setup 与 portable 文件头均为 `MZ`。
+13. `latest.yml` 的 version/path/size 为 `3.1.6` / `bank-bill-excel-tool-setup-3.1.6.exe` / `100117634`，SHA-512 `oKUhqYUL/oCpbJhwjAecEYLirxXizHWttX226N4tjw6muk5ewaIU6N4YfwvODeF2kGdnfETd4kntyZ3dmIO6Yw==` 与 Setup 实际字节一致。
 
 ## 10. 变更记录
 
@@ -368,3 +372,4 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 | 2026-08-02 | 修复系统财务OP导入完成提示把一个九币种主体快照误写成“新增 1 行”：持久化统计继续按快照守恒，主状态框与导入详情同时展示币种数据行数和主体快照数。 |
 | 2026-08-02 | 合并前 self-review 统一 Pending 校验表名称：数据管理、目标表下拉框和导出工作簿共同使用正式名称“移除归档Pending账单_校验表”。 |
 | 2026-08-03 | 进入正式发布准备：记录 PR #118 合并、Windows 候选构建、干净依赖 release-check、几何/变量/依赖门禁和技术发布授权；公开 Release 成功前对外文档保持未发布。 |
+| 2026-08-03 | v3.1.6 正式发布：PR #119 合入后创建 annotated tag；Windows Release、公开状态、四项资产与 `latest.yml` 独立摘要核对全部通过。 |
