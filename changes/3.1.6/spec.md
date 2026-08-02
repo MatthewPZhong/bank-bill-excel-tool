@@ -1,9 +1,10 @@
 # v3.1.6 Spec - VCC财务OP校验
 
-> status: `implemented`（严格系统财务OP模板、当前有效数据导出、删除状态生命周期、自动化与 self-review 已完成；人工资金复核待完成）
+> status: `release-prepared`（PR #118 已合入 `main`；合并后自动门禁与 Windows 候选构建通过；正式 Release 待发布）
 > baseline: `main@603807895a39408a7c4e4246e3b2657d1ee9cc66`（v3.1.5）
 > target-version: `3.1.6`
-> updated: `2026-08-02`
+> release-branch: `codex/v3.1.6-release-closeout`
+> updated: `2026-08-03`
 > nature: 资金校验、跨期归档、业务主键幂等，实施及上线前必须完成人工资金复核。
 
 ## 1. 目标
@@ -328,7 +329,7 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 
 - 相关单元、集成、smoke 和 `npm run release-check` 通过。
 - 以多分片合计 500 万行执行导入完成性能、内存峰值、跨分片判重、取消和失败恢复测试。
-- 在真实数据库副本上以不少于 400 万条通道有效行执行一次数据管理导出，核对耗时、峰值内存、临时磁盘、自动续 sheet、Windows Excel/WPS 打开及应用退出后的临时文件清理；该人工发布门禁不能由小规模自动化替代。
+- 在真实数据库副本上以不少于 400 万条通道有效行执行一次数据管理导出，核对耗时、峰值内存、临时磁盘、自动续 sheet、Windows Excel/WPS 打开及应用退出后的临时文件清理；该人工上线门禁不能由小规模自动化替代。
 - 修改 `src/**/*.js` 后按 `rules/important-variables.md` 汇报关联功能；提 PR、版本 bump 或合并受保护分支前执行 `npm run scan:vars` 和 `npm run check:vars`。
 
 ## 8. 非目标与上线门禁
@@ -339,7 +340,19 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 - 若真实历史数据证明任一业务键会被合法跨期复用，应停止使用全历史唯一范围并反向更新本 spec；不得静默把账期、主体或其他字段拼入联合键。
 - 当前可访问的 2026-06 样本已完成全量唯一性扫描，但上线前仍须由业务提供全部历史数据完成第 3.6 节门禁，并人工复核真实主体、币种、方向、金额、账期和归档衔接。自动测试不能替代该资金门禁。
 
-## 9. 变更记录
+## 9. 正式收尾与发布准备状态
+
+1. PR #118 已于 2026-08-02 以 merge commit `54acd9ea0dc5a8b9bfa9528a9d0d264018c7c3f1` 合入 `main`；最终实现提交为 `92f91f6ca9f9daf3a1b06b0c096beaaf54027d22`。
+2. 合并前 self-review 发现并修复 1 个 P3：Pending 校验表显示名与正式导出名称不一致。复查后无未解决 P0-P3 Finding，PR 无评论、review 或未解决线程。
+3. `main@54acd9e` 的 Windows Build [run 30755450625](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30755450625) 已完成 smoke、SQLite teardown、主页面对齐、Setup/portable 构建、包体检查、更新资产暂存和上传，全部成功。
+4. 2026-08-03 在上述合并基线执行干净 `npm ci` 后，`npm run release-check` 再次通过：lint、smoke、单元测试 4,592/4,592、44 个集成脚本 2,051/2,051 断言全部 PASS；集成总耗时 296,264 ms。
+5. 主页面在两种窗口尺寸、三档缩放下 6/6 PASS；VCC 双按钮宽度差和中线对称差均为 0。桌面沙箱内首次执行因 Electron 无法启动返回 `electron exit null`，在真实桌面权限下重跑通过。
+6. `npm run scan:vars` 为 282 个源文件、3,515 个顶层名称；发布收尾分支不修改 `src`，`npm run check:vars -- --since origin/main --include-minor` 安全跳过。
+7. `npm audit --omit=dev` 保留既有 0 critical、7 high、2 moderate；依赖治理不与本次资金版本发布混改。
+8. 用户于 2026-08-03 明确要求执行正式收尾和发布收尾，视为授权生成 v3.1.6 技术发布资产。该授权不等于第 8 节人工资金门禁、真实 400 万行导出、Windows Excel/WPS 或平盘真实单文件重试已经完成，相关结论必须继续披露为未执行。
+9. 发布准备 PR 合并后，annotated tag `v3.1.6` 必须指向当时最新 `main`；标签触发的 Windows Release、四项公开资产和独立摘要核对须在发布证据 PR 中回写。
+
+## 10. 变更记录
 
 | 日期 | 变更 |
 |---|---|
@@ -354,3 +367,4 @@ Sheet2 的 J:K 列为「币种、差额」汇总表，4.2 的移除归档Pending
 | 2026-08-02 | 修复校验表“生成时间”为空：新增独立数据集生成时间，实际新增时刷新，幂等跳过与归档保持，旧库按成功导入完成时间回填。 |
 | 2026-08-02 | 修复系统财务OP导入完成提示把一个九币种主体快照误写成“新增 1 行”：持久化统计继续按快照守恒，主状态框与导入详情同时展示币种数据行数和主体快照数。 |
 | 2026-08-02 | 合并前 self-review 统一 Pending 校验表名称：数据管理、目标表下拉框和导出工作簿共同使用正式名称“移除归档Pending账单_校验表”。 |
+| 2026-08-03 | 进入正式发布准备：记录 PR #118 合并、Windows 候选构建、干净依赖 release-check、几何/变量/依赖门禁和技术发布授权；公开 Release 成功前对外文档保持未发布。 |
