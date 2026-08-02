@@ -109,6 +109,7 @@ test('数据管理校验表返回独立生成时间', (t) => {
     ) VALUES ('2026-06', ?, ?, '2026-07-03 12:00:00')
   `);
   insertDataset.run(SOURCE_TYPES.RECHARGE, '2026-07-01 10:20:30');
+  insertDataset.run(SOURCE_TYPES.PENDING, '2026-07-01 10:30:30');
   insertDataset.run(SOURCE_TYPES.SYSTEM_OP, '2026-07-02 11:21:31');
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
@@ -121,10 +122,18 @@ test('数据管理校验表返回独立生成时间', (t) => {
     sourceType: row.sourceType,
     generatedAt: row.generatedAt
   })), [
+    { sourceType: SOURCE_TYPES.PENDING, generatedAt: '2026-07-01 10:30:30' },
     { sourceType: SOURCE_TYPES.RECHARGE, generatedAt: '2026-07-01 10:20:30' },
     { sourceType: SOURCE_TYPES.SYSTEM_OP, generatedAt: '2026-07-02 11:21:31' }
   ]);
-  assert.equal(overview.raw[0].generatedAt, '2026-07-01 10:20:30');
+  assert.equal(
+    overview.raw.find((row) => row.sourceType === SOURCE_TYPES.RECHARGE).generatedAt,
+    '2026-07-01 10:20:30'
+  );
+  assert.equal(
+    overview.checks.find((row) => row.sourceType === SOURCE_TYPES.PENDING).tableName,
+    '移除归档Pending账单_校验表'
+  );
 });
 
 test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t) => {

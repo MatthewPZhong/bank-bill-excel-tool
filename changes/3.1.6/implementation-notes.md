@@ -47,6 +47,7 @@
 | D41 | 校验表导出读取有效行中已持久化的主体、统计币种和有符号金额，不在导出时重算 | 保证导出内容与实际参与计算的数据逐行同源，避免导出逻辑与资金计算逻辑漂移 | active |
 | D42 | 校验表生成时间使用独立 `generated_at`，只随实际新增有效事实刷新 | `updated_at` 会在归档时变化，直接展示会把状态更新时间误报为生成时间；全量幂等和失败没有生成新事实，不应刷新 | active |
 | D43 | 系统财务OP数据库统计继续以主体快照为守恒单元，用户可见计数同时展示九币种原始行数 | 改写数据库计数会破坏既有幂等、冲突和回滚守恒；仅把 `1 快照 = 9 行币种数据` 明确展开即可消除“导漏八行”的误解 | active |
+| D44 | 数据管理校验表显示名复用校验表导出定义 | Pending 校验表正式名称不带 `VCC_` 前缀；复用单一定义可避免页面、下拉框和工作簿名称再次漂移 | active |
 
 ## Assumptions
 
@@ -102,6 +103,7 @@
 - E43：生成时间修复后的最终 `npm run release-check` 通过：lint、smoke、4,591/4,591 单元测试（`logs/unit-tests/unit-20260802-222038.log`）及 44 个集成脚本 2,051/2,051 断言全部 PASS；VCC 专项 109/109 PASS。`npm run scan:vars` 已刷新统计，`npm run check:vars` 仅命中 Important-skeleton/Runtime-state，未命中 Critical 或 Risk-sensitive；关联 IPC、错误序列化、模块状态、对话框取消与状态栏链路均由本轮全量门禁覆盖，`git diff --check` 通过。
 - E44：真实文件 `财务OP (20).xlsx` 以 2026-05 回放得到 1 个 PPHK 快照，原始血缘完整包含 Excel 第 2 至 10 行的 USD、SGD、JPY、HKD、GBP、EUR、CNY、CAD、AUD；CNY 归一化为 CNH。正式应用数据库中的导入记录 7 为 `success / raw_count=1 / inserted_count=1`，对应有效快照 `raw_json.rows.length=9` 且九币种余额完整，证明“新增 1”是快照展示口径而非数据导漏。
 - E45：快照计数展示修复后的最终 `npm run release-check` 通过：lint、smoke、4,592/4,592 单元测试（`logs/unit-tests/unit-20260802-223957.log`）及 44 个集成脚本 2,051/2,051 断言全部 PASS；VCC 专项 109/109 PASS。`npm run scan:vars` 已刷新统计，`npm run check:vars` 仅命中 Important-skeleton/Runtime-state，未命中 Critical 或 Risk-sensitive；`git diff --check` 通过。
+- E46：合并前 self-review 发现并修复 1 个 P3：数据管理曾把 Pending 校验表机械显示为 `VCC_移除归档Pending账单_校验表`，现改为复用导出定义中的正式名称 `移除归档Pending账单_校验表`，并增加服务层回归断言。专项测试 164/164 PASS；最终 `npm run release-check` 通过 lint、smoke、4,592/4,592 单元测试（`logs/unit-tests/unit-20260802-234409.log`）及 44 个集成脚本 2,051/2,051 断言。`npm run scan:vars` 已刷新统计；`npm run check:vars -- --since origin/main --include-minor` 仅命中 Important-skeleton/Runtime-state，未命中 Critical 或 Risk-sensitive。
 
 ## Deviations
 
@@ -118,7 +120,7 @@
 - R3（删除发布门禁）：在真实 501 万行数据库副本上执行一次未归档账期删除，核对临时 WAL 空间、耗时、重启恢复、审计回查和重新导入；合成回放不能替代真实库及 Windows 设备验收。
 - R4（导出发布门禁）：在真实数据库副本上导出不少于 400 万条通道有效行，核对耗时、峰值内存、临时磁盘、续 sheet、Windows Excel/WPS 打开和应用退出时的临时文件清理。当前自动化证明流式写入、行数守恒和异常原子保护，但不能替代真实设备上的大文件验收。
 
-最终 self-review 已修复运行异常悬挂、活动导入归档竞态、重启后导出入口丢失、未开始原表缺少审计记录、数据管理快速切页旧响应覆盖、零有效数据误解禁、删除成功后刷新异常误报失败、静默部分删除、多主体部分失败快照无审计、同主体精确重放误报冲突及二次表头校验差异丢失；本轮进一步修复导出异常中止可能无限等待、系统导出九币种血缘未二次验重、Pending 错币标记异常值被静默转为 FALSE、校验表生成时间缺失和被归档状态时间污染，以及系统OP主体快照数被误标为原始行数的问题。复查后无未解决 P3 及以上 Finding。
+最终 self-review 已修复运行异常悬挂、活动导入归档竞态、重启后导出入口丢失、未开始原表缺少审计记录、数据管理快速切页旧响应覆盖、零有效数据误解禁、删除成功后刷新异常误报失败、静默部分删除、多主体部分失败快照无审计、同主体精确重放误报冲突及二次表头校验差异丢失；本轮进一步修复导出异常中止可能无限等待、系统导出九币种血缘未二次验重、Pending 错币标记异常值被静默转为 FALSE、校验表生成时间缺失和被归档状态时间污染、系统OP主体快照数被误标为原始行数，以及 Pending 校验表显示名与正式导出名称不一致的问题。复查后无未解决 P3 及以上 Finding。
 
 ## Reconciliation Blindspot Pass
 

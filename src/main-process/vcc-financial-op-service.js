@@ -24,7 +24,10 @@ const {
 } = require('../backend/vcc-financial-op/dataset-deletion');
 const { writeRunWorkbooks } = require('./vcc-financial-op-writer');
 const { writeImportAuditWorkbook } = require('./vcc-financial-op-audit-writer');
-const { inspectDatasetExport } = require('./vcc-financial-op-dataset-writer');
+const {
+  CHECK_EXPORT_DEFINITIONS,
+  inspectDatasetExport
+} = require('./vcc-financial-op-dataset-writer');
 
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
 
@@ -465,7 +468,8 @@ function createVccFinancialOpService({ database, assetsDir }) {
     const checks = datasets
       .filter((row) => row.dataset_type !== SOURCE_TYPES.SYSTEM_OP)
       .map((row) => ({
-        tableName: `${SOURCE_LABELS[row.dataset_type]}_校验表`,
+        tableName: CHECK_EXPORT_DEFINITIONS[row.dataset_type]?.label
+          || `${SOURCE_LABELS[row.dataset_type]}_校验表`,
         sourceType: row.dataset_type,
         dataStatus: row.data_status,
         dataStatusText: DATA_STATUS_TEXT[row.data_status] || row.data_status,

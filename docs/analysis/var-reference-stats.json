@@ -1,15 +1,15 @@
 {
   "meta": {
     "version": "3.1.6",
-    "scannedAt": "2026-08-02T14:45:13.015Z",
+    "scannedAt": "2026-08-02T15:49:46.248Z",
     "root": "src",
     "totalFiles": 282,
     "totalTopLevelNames": 3515,
     "buckets": {
       "shared": 510,
-      "paired": 778,
-      "local": 2075,
-      "crossFile": 1288
+      "paired": 779,
+      "local": 2074,
+      "crossFile": 1289
     }
   },
   "A": {
@@ -19803,6 +19803,24 @@
         "fileSpan": 2
       },
       {
+        "name": "CHECK_EXPORT_DEFINITIONS",
+        "defFiles": [
+          "src/main-process/vcc-financial-op-dataset-writer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/vcc-financial-op-dataset-writer.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/vcc-financial-op-service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 2
+      },
+      {
         "name": "createBackup",
         "defFiles": [
           "src/backend/database/backup.js"
@@ -23313,8 +23331,7 @@
       {
         "name": "inspectDatasetExport",
         "defFiles": [
-          "src/main-process/vcc-financial-op-dataset-writer.js",
-          "src/main-process/vcc-financial-op-service.js"
+          "src/main-process/vcc-financial-op-dataset-writer.js"
         ],
         "refFiles": [
           {
@@ -36088,20 +36105,6 @@
         "refFiles": [
           {
             "file": "src/backend/database.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "CHECK_EXPORT_DEFINITIONS",
-        "defFiles": [
-          "src/main-process/vcc-financial-op-dataset-writer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/vcc-financial-op-dataset-writer.js",
             "count": 5
           }
         ],
@@ -80888,6 +80891,24 @@
       "fileSpan": 2
     },
     {
+      "name": "CHECK_EXPORT_DEFINITIONS",
+      "defFiles": [
+        "src/main-process/vcc-financial-op-dataset-writer.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/vcc-financial-op-dataset-writer.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/vcc-financial-op-service.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 7,
+      "fileSpan": 2
+    },
+    {
       "name": "createBackup",
       "defFiles": [
         "src/backend/database/backup.js"
@@ -84398,8 +84419,7 @@
     {
       "name": "inspectDatasetExport",
       "defFiles": [
-        "src/main-process/vcc-financial-op-dataset-writer.js",
-        "src/main-process/vcc-financial-op-service.js"
+        "src/main-process/vcc-financial-op-dataset-writer.js"
       ],
       "refFiles": [
         {

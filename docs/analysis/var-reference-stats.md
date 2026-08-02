@@ -5,15 +5,15 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.6 |
-| 扫描时间 | 2026-8-2 22:45:13 |
+| 扫描时间 | 2026-8-2 23:49:46 |
 | 扫描目录 | `src/` |
 | JS 文件数 | 282 |
 | 顶层声明总数 | 3515 |
 | ≥2 次引用 | 3363 |
 | 跨 ≥3 文件 (A-share) | 510 |
-| 跨 2 文件 (A-pair) | 778 |
-| 单文件 (A-local) | 2075 |
-| 跨文件合计 (B) | 1288 |
+| 跨 2 文件 (A-pair) | 779 |
+| 单文件 (A-local) | 2074 |
+| 跨文件合计 (B) | 1289 |
 
 ---
 
@@ -643,6 +643,7 @@
 | `bankStatementSession` | 7 | src/main.js |
 | `buildChannelFileName` | 7 | src/main-process/pre-fund-reconciliation/excel-writer.js |
 | `BUILTIN_NUMBER_FORMATS` | 7 | src/backend/toolbox-format/biff8-records.js |
+| `CHECK_EXPORT_DEFINITIONS` | 7 | src/main-process/vcc-financial-op-dataset-writer.js |
 | `createBackup` | 7 | src/backend/database/backup.js |
 | `DecimalAccumulator` | 7 | src/backend/vcc-financial-op/calculator.js |
 | `decimalComparable` | 7 | src/backend/toolbox-format/number-date.js |
@@ -3544,7 +3545,6 @@
 |---|---:|
 | `exportError` | 13 |
 | `EXPORT_KINDS` | 6 |
-| `CHECK_EXPORT_DEFINITIONS` | 5 |
 | `createWorksheet` | 3 |
 | `normalizeDatasetExportScope` | 3 |
 | `systemSnapshotRows` | 3 |
@@ -4285,6 +4285,7 @@
 | `bankStatementSession` | 2 | 7 | 1 | src/renderer.js(6), src/main.js(1) |
 | `buildChannelFileName` | 2 | 7 | 1 | src/main-process/pre-fund-reconciliation/excel-writer.js(4), src/main-process/pre-fund-reconciliation/service.js(3) |
 | `BUILTIN_NUMBER_FORMATS` | 2 | 7 | 2 | src/backend/toolbox-format/number-date.js(5), src/backend/toolbox-format/biff8-records.js(2) |
+| `CHECK_EXPORT_DEFINITIONS` | 2 | 7 | 1 | src/main-process/vcc-financial-op-dataset-writer.js(5), src/main-process/vcc-financial-op-service.js(2) |
 | `createBackup` | 2 | 7 | 1 | src/backend/database.js(6), src/backend/database/backup.js(1) |
 | `DecimalAccumulator` | 2 | 7 | 2 | src/backend/vcc-financial-op/calculator.js(4), src/backend/vcc-financial-op/decimal-accumulator.js(3) |
 | `decimalComparable` | 2 | 7 | 1 | src/backend/toolbox-format/number-date.js(4), src/backend/toolbox-format/xlsx-sheet-scanner.js(3) |
@@ -4477,7 +4478,7 @@
 | `hasInvalidExtraFee` | 2 | 5 | 1 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js(3), src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js(2) |
 | `importDetailGroup` | 2 | 5 | 1 | src/backend/vcc-financial-op/detail-importer.js(3), src/backend/vcc-financial-op/import-service.js(2) |
 | `INBOUND_FIELDS` | 2 | 5 | 1 | src/main-process/pre-fund-reconciliation/mpt-schema.js(3), src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js(2) |
-| `inspectDatasetExport` | 2 | 5 | 2 | src/main-process/vcc-financial-op-dataset-writer.js(3), src/main-process/vcc-financial-op-service.js(2) |
+| `inspectDatasetExport` | 2 | 5 | 1 | src/main-process/vcc-financial-op-dataset-writer.js(3), src/main-process/vcc-financial-op-service.js(2) |
 | `iterateDuplicateAuditRows` | 2 | 5 | 1 | src/main-process/pre-fund-reconciliation/output-mapper.js(3), src/main-process/pre-fund-reconciliation/service.js(2) |
 | `JOURNAL_INDEX_NAME` | 2 | 5 | 2 | src/main-process/toolbox-output-publication.js(3), src/main-process/toolbox-output-publication-dispatch.js(2) |
 | `listImportedDates` | 2 | 5 | 1 | src/main-process/biz-op-recon-run-data.js(3), src/backend/biz-op-recon-db/flow-imports-repository.js(2) |
