@@ -38,8 +38,8 @@ test.afterEach(() => {
 // ========================================================================
 
 test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
-  test('ALL_MODULE_IDS 包含 12 个模块', () => {
-    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 12);
+  test('ALL_MODULE_IDS 包含 13 个模块', () => {
+    assert.equal(settingsRepo.ALL_MODULE_IDS.length, 13);
     assert.ok(Object.isFrozen(settingsRepo.ALL_MODULE_IDS));
   });
 
@@ -48,6 +48,7 @@ test.describe('ALL_MODULE_IDS / DEFAULT_ENABLED_MODULES 常量', () => {
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('acquiring-bill-currency'));
     // v2.1.12 需求1：VCC业务OP计算模块注册（spec §8.1，修复 dev d2050b0 漏注册）
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-op-calc'));
+    assert.ok(settingsRepo.ALL_MODULE_IDS.includes('vcc-financial-op'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('pre-fund-reconciliation'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('duplicate-inbound-match'));
     assert.ok(settingsRepo.ALL_MODULE_IDS.includes('position-reconciliation-process'));

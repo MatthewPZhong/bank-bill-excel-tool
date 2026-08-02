@@ -1,0 +1,803 @@
+/* VCC财务OP校验在 Clear / General 主题下共用的模块样式。 */
+/* v3.1.6：VCC财务OP校验 */
+#vccFinancialOpStatusBox[data-tone="warning"] {
+  color: #8a5a00;
+  border-color: rgba(178, 116, 0, 0.42);
+}
+
+.vcc-financial-op-board .pending-action-pair > button {
+  width: 140px;
+  min-width: 140px;
+  flex: 0 0 140px;
+}
+
+.vcc-fin-op-overlay {
+  z-index: 1200;
+  background: rgba(24, 29, 37, 0.5);
+}
+
+.vcc-fin-op-dialog {
+  width: min(100%, 760px);
+  max-height: calc(100vh - 48px);
+  padding: 20px;
+  border-radius: 8px;
+  border-color: #d7dce2;
+  background: #ffffff;
+  color: #20242b;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vcc-fin-op-dialog .dialog-header {
+  flex: 0 0 auto;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #e5e8ec;
+}
+
+.vcc-fin-op-dialog .dialog-title {
+  min-width: 0;
+  font-size: 19px;
+  line-height: 1.35;
+}
+
+.vcc-fin-op-dialog-body {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.vcc-fin-op-compact-dialog {
+  width: min(100%, 500px);
+}
+
+.vcc-fin-op-import-month-dialog {
+  width: min(100%, 420px);
+  padding: 24px 28px;
+}
+
+.vcc-fin-op-import-month-dialog .dialog-header {
+  margin-bottom: 20px;
+  padding: 0;
+  border-bottom: 0;
+}
+
+.vcc-fin-op-import-month-dialog .dialog-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.vcc-fin-op-import-month-dialog .icon-close {
+  display: none;
+}
+
+.vcc-fin-op-import-month-dialog .vcc-fin-op-dialog-body {
+  overflow: visible;
+}
+
+.vcc-fin-op-import-month-picker {
+  justify-content: flex-start;
+  margin-bottom: 20px;
+}
+
+.vcc-fin-op-import-month-actions {
+  justify-content: center;
+}
+
+.vcc-fin-op-subject-dialog {
+  width: min(100%, 1080px);
+}
+
+.vcc-fin-op-review-dialog {
+  width: min(96vw, 1400px);
+  max-height: min(88vh, 900px);
+}
+
+.vcc-fin-op-opening-dialog {
+  width: min(96vw, 1180px);
+  max-height: min(88vh, 860px);
+}
+
+.vcc-fin-op-detail-dialog,
+.vcc-fin-op-manager-dialog {
+  width: min(96vw, 1400px);
+  height: min(88vh, 900px);
+}
+
+.vcc-fin-op-manager-dialog {
+  padding: 0;
+}
+
+.vcc-fin-op-manager-dialog .dialog-header {
+  margin-bottom: 0;
+  padding: 22px 28px 16px;
+}
+
+.vcc-fin-op-manager-dialog .dialog-title {
+  font-size: 20px;
+}
+
+.vcc-fin-op-manager-dialog .vcc-fin-op-dialog-body {
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.vcc-fin-op-message-dialog {
+  width: min(100%, 560px);
+}
+
+.vcc-fin-op-delete-dialog {
+  width: min(100%, 470px);
+}
+
+.vcc-fin-op-export-dialog {
+  width: min(100%, 680px);
+}
+
+.vcc-fin-op-message,
+.vcc-fin-op-summary-line {
+  margin: 0 0 16px;
+  line-height: 1.65;
+}
+
+.vcc-fin-op-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vcc-fin-op-message[data-tone="error"] {
+  color: #a12b20;
+}
+
+.vcc-fin-op-message[data-tone="warning"] {
+  color: #805200;
+}
+
+.vcc-fin-op-message[data-tone="success"] {
+  color: #247147;
+}
+
+.vcc-fin-op-field,
+.vcc-fin-op-inline-field {
+  display: grid;
+  gap: 7px;
+  color: #4c535d;
+  font-size: 13px;
+}
+
+.vcc-fin-op-inline-field {
+  grid-template-columns: 72px minmax(180px, 260px);
+  align-items: center;
+}
+
+.vcc-fin-op-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 10px;
+  border: 1px solid #c9cfd7;
+  border-radius: 6px;
+  background: #fff;
+  color: #20242b;
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.vcc-fin-op-input.vcc-fin-op-run-month-input {
+  width: 25%;
+  margin-left: 28px;
+}
+
+.vcc-fin-op-dialog .vcc-fin-op-run-month-actions {
+  margin-top: 15px;
+}
+
+.vcc-fin-op-input:focus {
+  outline: 2px solid rgba(34, 105, 197, 0.2);
+  border-color: #2269c5;
+}
+
+.vcc-fin-op-textarea {
+  min-height: 92px;
+  resize: vertical;
+}
+
+.vcc-fin-op-field-error {
+  margin: 8px 0 0;
+  color: #a12b20;
+  font-size: 13px;
+}
+
+.vcc-fin-op-file-list {
+  border-top: 1px solid #e5e8ec;
+}
+
+.vcc-fin-op-file-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(260px, auto);
+  align-items: center;
+  gap: 20px;
+  padding: 13px 4px;
+  border-bottom: 1px solid #e5e8ec;
+}
+
+.vcc-fin-op-file-meta {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.vcc-fin-op-file-meta strong,
+.vcc-fin-op-file-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vcc-fin-op-file-meta span,
+.vcc-fin-op-subject-from-file {
+  color: #68717d;
+  font-size: 12px;
+}
+
+.vcc-fin-op-table-wrap {
+  width: 100%;
+  overflow: auto;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.vcc-fin-op-table {
+  width: 100%;
+  min-width: 700px;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 13px;
+}
+
+.vcc-fin-op-table th,
+.vcc-fin-op-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #e6e9ed;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  letter-spacing: 0;
+}
+
+.vcc-fin-op-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f3f5f7;
+  color: #3c444e;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.vcc-fin-op-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.vcc-fin-op-table .number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vcc-fin-op-table .empty {
+  padding: 30px;
+  color: #68717d;
+  text-align: center;
+}
+
+.vcc-fin-op-balance-table {
+  min-width: 1080px;
+  table-layout: fixed;
+}
+
+.vcc-fin-op-balance-table th:first-child {
+  width: 150px;
+}
+
+.vcc-fin-op-balance-table .difference-row th,
+.vcc-fin-op-balance-table .difference-row td {
+  background: #f8fafb;
+  font-weight: 650;
+}
+
+.vcc-fin-op-balance-table td.is-difference {
+  color: #a12b20;
+  background: #fff0ed;
+}
+
+.vcc-fin-op-result-scroll {
+  display: grid;
+  gap: 18px;
+  max-height: calc(88vh - 230px);
+  overflow: auto;
+}
+
+.vcc-fin-op-opening-scroll {
+  max-height: calc(88vh - 390px);
+  overflow: auto;
+}
+
+.vcc-fin-op-opening-section {
+  margin-bottom: 16px;
+}
+
+.vcc-fin-op-opening-section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.vcc-fin-op-opening-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(105px, 1fr));
+  gap: 8px;
+  min-width: 1040px;
+}
+
+.vcc-fin-op-opening-note {
+  margin-top: 16px;
+}
+
+.vcc-fin-op-result-section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.35;
+}
+
+.vcc-fin-op-confirm-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  color: #3d454f;
+  font-size: 13px;
+}
+
+.vcc-fin-op-confirm-check input {
+  width: 17px;
+  height: 17px;
+}
+
+.vcc-fin-op-manager-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.vcc-fin-op-manager-toolbar h3 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  transform: translateX(11px);
+}
+
+.vcc-fin-op-manager-toolbar label {
+  display: grid;
+  grid-template-columns: auto 150px;
+  align-items: center;
+  gap: 9px;
+  color: #4c535d;
+  font-size: 13px;
+}
+
+.vcc-fin-op-manager-shell {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vcc-fin-op-manager-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  overflow: hidden;
+}
+
+.vcc-fin-op-manager-footer {
+  min-height: 72px;
+  margin: 0;
+}
+
+.vcc-fin-op-manager-nav .position-nav-item {
+  padding-left: 20px;
+}
+
+.vcc-fin-op-delete-form {
+  display: grid;
+  gap: 14px;
+  margin-left: 20px;
+  padding: 4px 8px 0;
+}
+
+.vcc-fin-op-delete-fields {
+  display: grid;
+  grid-template-columns: 25% 40%;
+  align-items: start;
+  column-gap: 10px;
+}
+
+.vcc-fin-op-delete-fields .vcc-fin-op-field {
+  min-width: 0;
+}
+
+.vcc-fin-op-export-dialog .vcc-fin-op-delete-fields {
+  grid-template-columns: 25% minmax(0, 1fr);
+}
+
+.vcc-fin-op-delete-state {
+  min-height: 20px;
+  margin: 0;
+  color: #68717d;
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.vcc-fin-op-delete-state[data-tone="warning"] {
+  color: #805200;
+}
+
+.vcc-fin-op-delete-state[data-tone="error"] {
+  color: #a12b20;
+}
+
+.vcc-fin-op-delete-state[data-tone="success"] {
+  color: #247147;
+}
+
+.vcc-fin-op-tabs button,
+.vcc-fin-op-link-btn {
+  border: 0;
+  background: transparent;
+  color: #3e4853;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.vcc-fin-op-manager-pane,
+.vcc-fin-op-manager-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+.vcc-fin-op-manager-pane {
+  display: flex;
+  flex-direction: column;
+}
+
+.vcc-fin-op-manager-content {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.vcc-fin-op-record-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.vcc-fin-op-manager-subheading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 18px 0 8px;
+}
+
+.vcc-fin-op-manager-subheading h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.vcc-fin-op-manager-subheading span {
+  color: #68717d;
+  font-size: 12px;
+}
+
+.vcc-fin-op-opening-audit-table {
+  min-width: 1220px;
+}
+
+.vcc-fin-op-record-heading span {
+  color: #68717d;
+  font-size: 12px;
+}
+
+.vcc-fin-op-record-heading > div {
+  display: grid;
+  gap: 4px;
+}
+
+.vcc-fin-op-record-table-wrap {
+  max-height: calc(88vh - 205px);
+}
+
+.vcc-fin-op-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.vcc-fin-op-state::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #818a95;
+  content: '';
+}
+
+.vcc-fin-op-state[data-state="archived"]::before,
+.vcc-fin-op-state[data-state="success"]::before {
+  background: #258653;
+}
+
+.vcc-fin-op-state[data-state="blocked"]::before,
+.vcc-fin-op-state[data-state="error"]::before {
+  background: #ba3a2d;
+}
+
+.vcc-fin-op-state[data-state="warning"]::before {
+  background: #b77700;
+}
+
+.vcc-fin-op-link-btn {
+  color: #185ba9;
+  white-space: nowrap;
+}
+
+.vcc-fin-op-link-btn:hover {
+  text-decoration: underline;
+}
+
+.vcc-fin-op-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #dfe3e8;
+  overflow-x: auto;
+}
+
+.vcc-fin-op-tabs button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 7px 10px;
+  border-bottom: 2px solid transparent;
+}
+
+.vcc-fin-op-tabs button[aria-selected="true"] {
+  color: #185ba9;
+  border-bottom-color: #2269c5;
+  font-weight: 650;
+}
+
+.vcc-fin-op-detail-content {
+  min-height: 0;
+}
+
+.vcc-fin-op-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(90px, 1fr));
+  margin-bottom: 16px;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.vcc-fin-op-metric-grid > div {
+  min-width: 0;
+  padding: 13px 12px;
+  border-right: 1px solid #dfe3e8;
+  display: grid;
+  gap: 7px;
+}
+
+.vcc-fin-op-metric-grid > div:last-child {
+  border-right: 0;
+}
+
+.vcc-fin-op-metric-grid span {
+  color: #68717d;
+  font-size: 12px;
+}
+
+.vcc-fin-op-metric-grid strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.vcc-fin-op-detail-toolbar {
+  display: grid;
+  grid-template-columns: minmax(150px, 240px) minmax(150px, 240px) auto auto;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.vcc-fin-op-detail-table-wrap {
+  max-height: calc(88vh - 290px);
+}
+
+.vcc-fin-op-expanded-row td {
+  padding: 0 10px 10px;
+  background: #fafbfc;
+}
+
+.vcc-fin-op-row-details summary {
+  padding: 7px 0;
+  color: #185ba9;
+  cursor: pointer;
+}
+
+.vcc-fin-op-compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.vcc-fin-op-compare-grid.is-single {
+  grid-template-columns: 1fr;
+}
+
+.vcc-fin-op-compare-grid section {
+  min-width: 0;
+  border: 1px solid #dfe3e8;
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+}
+
+.vcc-fin-op-compare-grid h4,
+.vcc-fin-op-compare-grid p {
+  margin: 0 0 7px;
+  font-size: 12px;
+}
+
+.vcc-fin-op-compare-grid p {
+  color: #68717d;
+}
+
+.vcc-fin-op-compare-grid pre {
+  max-height: 260px;
+  margin: 0;
+  padding: 9px;
+  overflow: auto;
+  background: #f4f6f8;
+  color: #20242b;
+  font-size: 11px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vcc-fin-op-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 10px;
+  color: #68717d;
+  font-size: 12px;
+}
+
+.vcc-fin-op-error-list,
+.vcc-fin-op-resolution {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border-left: 3px solid #ba3a2d;
+  background: #fff3f1;
+  color: #81281f;
+  font-size: 13px;
+}
+
+.vcc-fin-op-error-list p {
+  margin: 0 0 6px;
+}
+
+.vcc-fin-op-error-list p:last-child {
+  margin-bottom: 0;
+}
+
+.vcc-fin-op-resolution {
+  border-left-color: #258653;
+  background: #eff9f3;
+  color: #20673f;
+}
+
+.vcc-fin-op-empty,
+.vcc-fin-op-loading {
+  padding: 42px 20px;
+  color: #68717d;
+  text-align: center;
+}
+
+@media (max-width: 820px) {
+  .vcc-fin-op-overlay {
+    padding: 10px;
+  }
+
+  .vcc-fin-op-dialog,
+  .vcc-fin-op-review-dialog,
+  .vcc-fin-op-opening-dialog,
+  .vcc-fin-op-detail-dialog,
+  .vcc-fin-op-manager-dialog {
+    width: 100%;
+    height: auto;
+    max-height: calc(100vh - 20px);
+    padding: 14px;
+  }
+
+  .vcc-fin-op-manager-dialog {
+    padding: 0;
+  }
+
+  .vcc-fin-op-file-row,
+  .vcc-fin-op-manager-layout,
+  .vcc-fin-op-compare-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vcc-fin-op-manager-layout {
+    height: min(72vh, 680px);
+  }
+
+  .vcc-fin-op-manager-nav {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--line-soft);
+  }
+
+  .vcc-fin-op-manager-nav button {
+    flex: 0 0 auto;
+    text-align: center;
+  }
+
+  .vcc-fin-op-metric-grid {
+    grid-template-columns: repeat(2, minmax(100px, 1fr));
+  }
+
+  .vcc-fin-op-metric-grid > div {
+    border-bottom: 1px solid #dfe3e8;
+  }
+
+  .vcc-fin-op-detail-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .vcc-fin-op-inline-field {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .vcc-fin-op-manager-toolbar,
+  .vcc-fin-op-manager-subheading,
+  .vcc-fin-op-record-heading,
+  .vcc-fin-op-pagination {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .vcc-fin-op-manager-toolbar label,
+  .vcc-fin-op-detail-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .vcc-fin-op-metric-grid {
+    grid-template-columns: 1fr;
+  }
+}

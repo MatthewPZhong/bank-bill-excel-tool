@@ -359,9 +359,10 @@
 
     function formatStatuses(statuses) {
       const rows = Array.isArray(statuses) ? statuses : [];
-      return rows.length
-        ? rows.map((item) => `${item.status} ${Number(item.rowCount) || 0}`).join(' / ')
-        : '-';
+      const labels = rows
+        .map((item) => String(item && item.status ? item.status : '').trim())
+        .filter(Boolean);
+      return labels.length ? labels.join(' / ') : '-';
     }
 
     function createScopeDialog({
@@ -542,8 +543,9 @@
         return;
       }
       const shell = createDialogShell('链接原始表导入提醒', 'position-source-anomaly-dialog');
+      shell.footer.className = 'dialog-actions right';
       shell.content.innerHTML = `
-        <p class="position-result-note">发现 ${filteredRowCount} 行异常数据，已过滤异常行并继续写入正常数据。</p>
+        <p class="position-source-anomaly-note">发现 ${filteredRowCount} 行异常数据，已过滤异常行并继续写入正常数据。</p>
         <div class="position-import-summary">${sourceImportSummary(result)}</div>
         <p class="muted">${reports.length === 1
     ? '异常报告已进入存档中心，也可立即导出到本地。'

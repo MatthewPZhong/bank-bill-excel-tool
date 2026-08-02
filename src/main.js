@@ -213,6 +213,8 @@ const {
 } = require('./backend/biz-op-recon-import/reader');
 // v2.1.12 需求1：VCC业务OP计算模块（仅流水文件 → 按月聚合发生额出/入 → 算期末OP，资金红线 🔴）
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
+// v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
+const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 // v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 // v2.1.16-beta.2 T1：5 轮对账编排器（R1→R5；bank-statement:run 接入，dispatcher 仅作 R2）
@@ -428,6 +430,7 @@ let pendingDb = null;
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
+let vccFinancialOpService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
@@ -455,6 +458,17 @@ const bizOpReconSession = createBizOpReconSession({
 const vccOpCalcSession = createVccOpCalcSession({
   getDb: () => database && database.db
 });
+
+function getVccFinancialOpService() {
+  if (!database || !database.db) throw new Error('数据库未初始化');
+  if (!vccFinancialOpService) {
+    vccFinancialOpService = createVccFinancialOpService({
+      database,
+      assetsDir: path.join(__dirname, '../assets')
+    });
+  }
+  return vccFinancialOpService;
+}
 let lastGeneratedExports = {
   detail: null,
   balance: null,
@@ -12376,6 +12390,251 @@ function registerNewAccountHandlers() {
   });
 
   // ==========================================================================
+  // v3.1.6：VCC财务OP校验 — vccFinancialOp:* IPC
+  // 四类明细和系统OP使用独立表空间；导入/计算在 worker 中执行，归档在主库事务中执行。
+  // ==========================================================================
+
+  ipcMain.handle('vccFinancialOp:import:pick-files', async () => {
+    const choice = await showImportOpenDialog('vcc-financial-op', {
+      title: '选择 VCC 财务OP校验原表（可多选）',
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+      return { status: 'cancelled' };
+    }
+    try {
+      const files = await getVccFinancialOpService().inspectSelectedFiles(choice.filePaths);
+      return { status: 'success', files };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: error && error.message ? error.message : String(error),
+        detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+      };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', async (event, payload = {}) => {
+    try {
+      const result = await getVccFinancialOpService().importSelectedFiles(payload, (progress) => {
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('vccFinancialOp:import:progress', progress);
+        }
+      });
+      return { status: 'success', ...result };
+    } catch (error) {
+      return {
+        status: 'error',
+        message: error && error.message ? error.message : String(error),
+        detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+      };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:task:cancel', async () => {
+    try {
+      return await getVccFinancialOpService().cancelActiveTask();
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:run:calculate', 'VCC财务OP校验', '开始运行', async (_event, payload = {}) => {
+    try {
+      return await getVccFinancialOpService().calculate(payload);
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:opening:initialize', 'VCC财务OP校验', '初始化期初财务OP', (_event, payload = {}) => {
+    try {
+      return getVccFinancialOpService().initializeOpening(payload);
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', (_event, payload = {}) => {
+    try {
+      return getVccFinancialOpService().archive(payload);
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:imports:list-months', () => {
+    return getVccFinancialOpService().listImportMonths();
+  });
+
+  ipcMain.handle('vccFinancialOp:imports:list-records', (_event, payload = {}) => {
+    return getVccFinancialOpService().listImportRecords(payload.yearMonth);
+  });
+
+  ipcMain.handle('vccFinancialOp:imports:get-detail', (_event, payload = {}) => {
+    try {
+      return { status: 'success', ...getVccFinancialOpService().getImportRecordDetail(payload) };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', (_event, payload = {}) => {
+    try {
+      return { status: 'success', record: getVccFinancialOpService().resolveRecord(payload) };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:data-manager:overview', (_event, payload = {}) => {
+    try {
+      return { status: 'success', ...getVccFinancialOpService().dataManagerOverview(payload.yearMonth) };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:data-manager:delete-preview', (_event, payload = {}) => {
+    try {
+      return {
+        status: 'success',
+        ...getVccFinancialOpService().previewDatasetDeletion(payload)
+      };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:data-manager:delete', 'VCC财务OP校验', '删除数据', async (_event, payload = {}) => {
+    try {
+      return {
+        status: 'success',
+        ...await getVccFinancialOpService().deleteDatasetData(payload)
+      };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:data-manager:export-preview', (_event, payload = {}) => {
+    try {
+      return {
+        status: 'success',
+        ...getVccFinancialOpService().previewDatasetExport(payload)
+      };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', async (_event, payload = {}) => {
+    try {
+      const service = getVccFinancialOpService();
+      const inspection = service.previewDatasetExport(payload);
+      if (!inspection.exportable) {
+        return { status: 'error', message: inspection.message || '当前选择没有可导出的有效数据' };
+      }
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出 VCC 财务OP数据',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          `${inspection.targetMonth}_${sanitizeFileName(inspection.tableName) || 'VCC财务OP数据'}.xlsx`
+        ),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      const result = await service.exportDatasetData({
+        ...payload,
+        outputPath: choice.filePath
+      });
+      return { status: 'success', ...result };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:run:get', (_event, payload = {}) => {
+    try {
+      const result = getVccFinancialOpService().getRunResult(payload.runId);
+      return result
+        ? { ...result, runStatus: result.status, status: 'success' }
+        : { status: 'error', message: '校验结果不存在' };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:run:latest-archived', () => {
+    try {
+      const result = getVccFinancialOpService().latestArchivedRun();
+      return result
+        ? { ...result, runStatus: result.status, status: 'success' }
+        : { status: 'empty' };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', async (_event, payload = {}) => {
+    try {
+      const service = getVccFinancialOpService();
+      const runId = Number(payload.runId);
+      const run = service.getRunResult(runId);
+      if (!run || run.status !== 'archived') {
+        return { status: 'error', message: '仅已确认归档的财务OP校验结果可以导出' };
+      }
+      const subjects = service.listRunSubjects(runId);
+      if (subjects.length === 1) {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出 VCC 财务OP校验结果表',
+          defaultPath: path.join(
+            app.getPath('documents'),
+            `${run.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
+          ),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+        const result = await service.exportRun({ runId, outputPath: choice.filePath });
+        return { status: 'success', ...result };
+      }
+      const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
+        title: '选择各主体校验结果表保存目录',
+        properties: ['openDirectory', 'createDirectory']
+      });
+      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+        return { status: 'cancelled' };
+      }
+      const result = await service.exportRun({ runId, outputDirectory: choice.filePaths[0] });
+      return { status: 'success', ...result };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:export:import-audit', 'VCC财务OP校验', '导出导入审计', async (_event, payload = {}) => {
+    try {
+      const choice = await dialog.showSaveDialog(mainWindow, {
+        title: '导出校验原表导入审计',
+        defaultPath: path.join(
+          app.getPath('documents'),
+          `VCC财务OP导入审计_${payload.recordId || ''}.xlsx`
+        ),
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      const result = await getVccFinancialOpService().exportImportAudit({
+        ...payload,
+        outputPath: choice.filePath
+      });
+      return { status: 'success', ...result };
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  // ==========================================================================
   // v2.1.16 阶段一 A4：链接表管理 — linked-table:* IPC handlers（2 个）
   //   list   ：只读，返回 4 个 tableKey 的元数据（前端弹窗渲染 4 行）
   //   import ：多选 Excel → 逐文件识别（仅 scope='linked' 候选）→ 命中且支持 → 读行落库
@@ -14223,11 +14482,14 @@ function capturePositionArchiveFileSnapshot(filePath) {
   }
 }
 
-function recordPositionArchiveIntentFiles(filePaths, role) {
+function recordPositionArchiveIntentFiles(filePaths, role, explicitOperationToken = '') {
   const context = positionReconciliationOperationContext.getStore();
-  if (!context || !Array.isArray(filePaths) || filePaths.length === 0) return;
+  const operationToken = String(
+    explicitOperationToken || (context && context.operationToken) || ''
+  ).trim();
+  if (!operationToken || !Array.isArray(filePaths) || filePaths.length === 0) return;
   const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
+  if (!pending || pending.operationToken !== operationToken || !pending.archiveRequired) {
     return;
   }
   const seen = new Set(
@@ -14283,7 +14545,7 @@ function recordPositionArchiveIntentFiles(filePaths, role) {
     ...pending,
     archiveState: archiveFiles.length > 0 ? 'intent-recorded' : pending.archiveState,
     archiveFiles
-  }, context.operationToken);
+  }, operationToken);
 }
 
 function markPositionBusinessOutcome(result) {
@@ -16990,6 +17252,10 @@ async function prepareApplicationForQuit() {
       syncPositionReconciliationCheckpoint();
       positionReconciliationService.close();
       positionReconciliationService = null;
+    }
+    if (vccFinancialOpService) {
+      await vccFinancialOpService.terminate();
+      vccFinancialOpService = null;
     }
     quitPreparationPreviousLastClosedAt = usageStats ? usageStats.lastClosedAt : null;
     flushUsageStatsForQuit();

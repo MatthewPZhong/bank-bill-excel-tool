@@ -13,6 +13,10 @@ const positionRenderer = fs.readFileSync(
   path.join(ROOT, 'src', 'renderer-position-reconciliation.js'),
   'utf8'
 );
+const positionStyles = fs.readFileSync(
+  path.join(ROOT, 'src', 'styles-gemini-extra.css'),
+  'utf8'
+);
 const rendererDialogs = fs.readFileSync(path.join(ROOT, 'src', 'renderer-dialogs.js'), 'utf8');
 const preload = fs.readFileSync(path.join(ROOT, 'src', 'preload.js'), 'utf8');
 const previews = fs.readFileSync(path.join(ROOT, 'src', 'renderer-previews.js'), 'utf8');
@@ -181,7 +185,11 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   });
 
   test('异常导入使用提醒弹框，结果页过滤数据导出始终显示且无数据时置灰', () => {
-    assert.match(positionRenderer, /createDialogShell\('链接原始表导入提醒'/);
+    assert.match(
+      positionRenderer,
+      /createDialogShell\('链接原始表导入提醒', 'position-source-anomaly-dialog'\);\s*shell\.footer\.className = 'dialog-actions right';/
+    );
+    assert.match(positionRenderer, /class="position-source-anomaly-note"/);
     assert.match(positionRenderer, /发现 \$\{filteredRowCount\} 行异常数据，已过滤异常行并继续写入正常数据/);
     assert.match(positionRenderer, /reports\.length === 1 \? '导出异常数据'/);
     assert.match(positionRenderer, /异常恢复报告按已提交文件拆分为/);
@@ -197,6 +205,14 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
       /Number\(row\.rowCount\) > 0 \|\| Number\(row\.filteredRowCount\) > 0/
     );
     assert.match(positionRenderer, /仅活动过滤记录/);
+    assert.match(
+      positionStyles,
+      /\.position-source-anomaly-dialog \.position-dialog-content\s*\{[\s\S]*?padding: 24px 28px;/
+    );
+    assert.match(
+      positionStyles,
+      /\.position-source-anomaly-dialog \.position-import-summary\s*\{[\s\S]*?overflow-wrap: anywhere;/
+    );
   });
 
   test('管理按钮不得把 click 事件误当成 preview 数据', () => {
@@ -229,6 +245,16 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(positionRenderer, /modalRoot\.appendChild\(overlay\)/);
     assert.match(rendererDialogs, /confirmSecondary \? 'secondary-btn small' : 'primary-btn small'/);
     assert.match(rendererDialogs, /if \(closeOnConfirm\) closeModal\(\);\s*else overlay\.remove\(\);/);
+  });
+
+  test('对账数据管理状态列只显示状态名称，不拼接条数', () => {
+    const formatter = positionRenderer.match(
+      /function formatStatuses\(statuses\) \{[\s\S]*?\n    \}/
+    );
+    assert.ok(formatter, '应保留对账数据状态格式化函数');
+    assert.match(formatter[0], /labels\.join\(' \/ '\)/);
+    assert.doesNotMatch(formatter[0], /rowCount/);
+    assert.match(positionRenderer, /escapeHtml\(formatStatuses\(row\.statuses\)\)/);
   });
 
   test('差异数据把功能和月份移到表格上方并按最新月份单选过滤', () => {

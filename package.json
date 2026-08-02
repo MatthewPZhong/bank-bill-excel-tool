@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.1.5",
+  "version": "3.1.6",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -120,6 +120,15 @@
     "preview:vcc-op-calc-compute": "node scripts/render-modal-preview.js vcc-op-calc-compute vcc-op-calc-compute.png",
     "preview:vcc-op-calc-show-balance": "node scripts/render-modal-preview.js vcc-op-calc-show-balance vcc-op-calc-show-balance.png",
     "preview:vcc-op-calc": "npm run preview:vcc-op-calc-panel-initial && npm run preview:vcc-op-calc-panel-result && npm run preview:vcc-op-calc-compute && npm run preview:vcc-op-calc-show-balance",
+    "preview:vcc-financial-op-panel": "node scripts/render-modal-preview.js vcc-financial-op-panel vcc-financial-op-panel.png",
+    "preview:vcc-financial-op-import-month": "node scripts/render-modal-preview.js vcc-financial-op-import-month vcc-financial-op-import-month.png",
+    "preview:vcc-financial-op-run-month": "node scripts/render-modal-preview.js vcc-financial-op-run-month vcc-financial-op-run-month.png",
+    "preview:vcc-financial-op-data-manager": "node scripts/render-modal-preview.js vcc-financial-op-data-manager vcc-financial-op-data-manager.png",
+    "preview:vcc-financial-op-delete": "node scripts/render-modal-preview.js vcc-financial-op-delete vcc-financial-op-delete.png",
+    "preview:vcc-financial-op-export": "node scripts/render-modal-preview.js vcc-financial-op-export vcc-financial-op-export.png",
+    "preview:vcc-financial-op-result": "node scripts/render-modal-preview.js vcc-financial-op-result vcc-financial-op-result.png",
+    "preview:vcc-financial-op-opening": "node scripts/render-modal-preview.js vcc-financial-op-opening vcc-financial-op-opening.png",
+    "preview:vcc-financial-op": "npm run preview:vcc-financial-op-panel && npm run preview:vcc-financial-op-import-month && npm run preview:vcc-financial-op-run-month && npm run preview:vcc-financial-op-data-manager && npm run preview:vcc-financial-op-delete && npm run preview:vcc-financial-op-export && npm run preview:vcc-financial-op-result && npm run preview:vcc-financial-op-opening",
     "preview:toolbox": "node scripts/render-modal-preview.js toolbox toolbox.png",
     "preview:toolbox-split-field-picker": "node scripts/render-modal-preview.js toolbox-split-field-picker toolbox-split-field-picker.png",
     "preview:toolbox-split-field-picker-multiple": "node scripts/render-modal-preview.js toolbox-split-field-picker-multiple toolbox-split-field-picker-multiple.png",

@@ -109,6 +109,11 @@ const MODULES = Object.freeze({
   vccOpCalc: {
     id: 'vcc-op-calc',
     name: 'VCC业务OP计算'
+  },
+  // v3.1.6：VCC财务OP校验。
+  vccFinancialOp: {
+    id: 'vcc-financial-op',
+    name: 'VCC财务OP校验'
   }
 });
 const RENDERER_STARTUP_MARKS = Object.freeze({
@@ -391,6 +396,7 @@ const elements = {
   vccOpCalcRunBtn: document.getElementById('vccOpCalcRunBtn'),
   vccOpCalcShowBalanceBtn: document.getElementById('vccOpCalcShowBalanceBtn'),
   vccOpCalcStatusBox: document.getElementById('vccOpCalcStatusBox'),
+  vccFinancialOpModulePanel: document.getElementById('vccFinancialOpModulePanel'),
   // v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §一.1 + §七 — 6 项 DOM 缓存）
   // v2.1.0-beta.3 T4：新增主面板"账单类别"下拉 + 行 2 整行 wrapper（可隐藏）
   reconIdFixModulePanel: document.getElementById('reconIdFixModulePanel'),
@@ -1578,6 +1584,9 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
       restoreVccOpCalcPanelState();
     }
   }
+  if (elements.vccFinancialOpModulePanel) {
+    elements.vccFinancialOpModulePanel.hidden = moduleId !== MODULES.vccFinancialOp.id;
+  }
 
   Array.from(elements.moduleSwitcherMenu.querySelectorAll('.module-option')).forEach((button) => {
     button.classList.toggle('is-active', button.dataset.module === moduleId);
@@ -2391,7 +2400,9 @@ function createAppUpdateSettingsDialog() {
   dialog.setAttribute('aria-labelledby', 'appUpdateSettingsTitle');
 
   const archiveModules = new Map(
-    Object.values(MODULES).map((module) => [module.id, module.name])
+    Object.values(MODULES)
+      .filter((module) => module.id !== MODULES.vccFinancialOp.id)
+      .map((module) => [module.id, module.name])
   );
   const archiveState = {
     activeTab: 'update',
@@ -8577,6 +8588,43 @@ async function applyFullInfo(info) {
     setTimeout(() => { applyVccOpCalcComputeDialogPreviewState(); }, 120);
   } else if (info.previewModal === 'vcc-op-calc-show-balance') {
     setTimeout(() => { applyVccOpCalcShowBalanceDialogPreviewState(); }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-panel') {
+    setTimeout(() => { setCurrentModule(MODULES.vccFinancialOp.id); }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-import-month') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openImportMonth();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-run-month') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openRunMonth();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-data-manager') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openDataManager();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-delete') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openDelete();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-export') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openExport();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-result') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openResult();
+    }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-opening') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openOpening();
+    }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);
   } else if (info.previewModal === 'toolbox') {

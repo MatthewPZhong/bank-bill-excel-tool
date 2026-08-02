@@ -118,9 +118,12 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const modulesStart = renderer.indexOf('const MODULES = Object.freeze({');
     const modulesEnd = renderer.indexOf('const RENDERER_STARTUP_MARKS', modulesStart);
     const modulesSource = renderer.slice(modulesStart, modulesEnd);
-    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 12);
+    assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 13);
     assert.doesNotMatch(modulesSource, /id:\s*'archive-center'/);
-    assert.match(renderer, /const archiveModules = new Map\([\s\S]*?Object\.values\(MODULES\)/);
+    assert.match(
+      renderer,
+      /const archiveModules = new Map\([\s\S]*?Object\.values\(MODULES\)[\s\S]*?module\.id !== MODULES\.vccFinancialOp\.id/
+    );
   });
 
   test('自动更新既有选择器与行为契约继续存在', () => {

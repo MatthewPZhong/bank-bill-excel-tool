@@ -161,15 +161,25 @@ const QUOTE = 0x22;     // '"'
 
 // ──────────────────────── 单行解析（在「整行字节 + 列字母→type→body 区间」上跑取值；供单测直接驱动）────────────────────────
 // rowBytesToValues：给定一行的字节 Buffer（[rowStart,rowEnd) 已切好，含 <row..> 起始与 </row> 或不含均可——
-//   本函数只扫 <c> cell，不依赖行边界标签），白名单 / 全列解析出 { values, hasAnyCellText }。
+//   本函数只扫 <c> cell，不依赖行边界标签），白名单 / 全列解析出 { values, hasAnyCellText, cellTypes }。
 //   ⚠️ 本函数是「行内 cell 状态机」的纯函数版（不跨 chunk）；流式主循环 scanSheetRows 用同款 cell 解析逻辑
 //   但内联进逐字节循环以支持跨 chunk。两者语义必须一致（四方 harness 锁）。
 //
 // 参数：buf=行字节、start/end=行内字节区间（cell 都在此内）、rowR、expectedLen、sharedStrings、
-//   whitelist=Set|null（null=全列）、isHeaderRow（表头恒全列）。
-function rowBytesToValues(buf, start, end, expectedLen, sharedStrings, whitelist, isHeaderRow) {
+//   whitelist=Set|null（null=全列）、isHeaderRow（表头恒全列）、cellTypeWhitelist=Set|null（按需返回类型）。
+function rowBytesToValues(
+  buf,
+  start,
+  end,
+  expectedLen,
+  sharedStrings,
+  whitelist,
+  isHeaderRow,
+  cellTypeWhitelist = null
+) {
   const effWhitelist = isHeaderRow ? null : whitelist;
   const values = isHeaderRow ? [] : new Array(expectedLen).fill('');
+  const cellTypes = cellTypeWhitelist ? Object.create(null) : null;
   let hasAnyCellText = false;
 
   let i = start;
@@ -191,6 +201,9 @@ function rowBytesToValues(buf, start, end, expectedLen, sharedStrings, whitelist
     // 提列号 + type（在 attrs 区间 [tagStart, tagEnd) 内逐字节提取）
     const colIdx = parseCellColumn(buf, tagStart, tagEnd);
     const type = parseCellType(buf, tagStart, tagEnd);
+    if (cellTypes && colIdx >= 0 && cellTypeWhitelist.has(colIdx)) {
+      cellTypes[colIdx] = type || 'n';
+    }
 
     if (selfClose) {
       // 自闭合 <c .../>：body=''，取值恒 ''，不影响 hasAnyCellText。
@@ -234,7 +247,7 @@ function rowBytesToValues(buf, start, end, expectedLen, sharedStrings, whitelist
     // else：白名单外列 且 hasAnyCellText 已 true → 完全跳过该 cell（不 toString、不取值）。
     i = nextI;
   }
-  return { values, hasAnyCellText };
+  return { values, hasAnyCellText, cellTypes };
 }
 
 // 🔴 单遍行解析（性能核心）：从 cellsStart 逐字节扫描，**同时**解析每个 <c> cell 取值 + 检测 </row> 行尾，
@@ -243,9 +256,19 @@ function rowBytesToValues(buf, start, end, expectedLen, sharedStrings, whitelist
 //     - endPos = -1 表示在 limit 内未遇 </row>（行跨界，调用方需累积更多字节后重试，绝不发射半行）。
 //   与 rowBytesToValues 语义一致（后者用于已知行边界的单测驱动；本函数额外内联行尾检测，消除二次扫描）。
 //   isHeaderRow=true（表头）→ 全列解析；whitelist 仅数据行生效。
-function parseRowInline(buf, cellsStart, limit, expectedLen, sharedStrings, whitelist, isHeaderRow) {
+function parseRowInline(
+  buf,
+  cellsStart,
+  limit,
+  expectedLen,
+  sharedStrings,
+  whitelist,
+  isHeaderRow,
+  cellTypeWhitelist = null
+) {
   const effWhitelist = isHeaderRow ? null : whitelist;
   const values = isHeaderRow ? [] : new Array(expectedLen).fill('');
+  const cellTypes = cellTypeWhitelist ? Object.create(null) : null;
   let hasAnyCellText = false;
 
   let i = cellsStart;
@@ -256,7 +279,7 @@ function parseRowInline(buf, cellsStart, limit, expectedLen, sharedStrings, whit
     if (b1 === SLASH) {
       // 可能是 </c>（理论已被 cell 内部消费）/ </row>。比对 </row>。
       if (buf[i + 2] === 0x72 && buf[i + 3] === 0x6f && buf[i + 4] === 0x77 && buf[i + 5] === GT) {
-        return { values, hasAnyCellText, endPos: i + 6 };
+        return { values, hasAnyCellText, cellTypes, endPos: i + 6 };
       }
       i++;
       continue;
@@ -269,13 +292,15 @@ function parseRowInline(buf, cellsStart, limit, expectedLen, sharedStrings, whit
     const tagStart = i;
     let p = i + 2;
     while (p < limit && buf[p] !== GT) p++;
-    if (p >= limit) return { values, hasAnyCellText, endPos: -1 };   // 标签跨界 → 需更多字节
+    if (p >= limit) return { values, hasAnyCellText, cellTypes, endPos: -1 };   // 标签跨界 → 需更多字节
     const tagEnd = p;
     const selfClose = buf[tagEnd - 1] === SLASH;
     // 仅取列号（决定白名单/越界）；type 推迟到确实需要取 body 时再解析（省 44/48 非取值 cell 的 type 扫描 + latin1Slice）。
     const colIdx = parseCellColumn(buf, tagStart, tagEnd);
+    const trackCellType = cellTypes && colIdx >= 0 && cellTypeWhitelist.has(colIdx);
 
     if (selfClose) {
+      if (trackCellType) cellTypes[colIdx] = parseCellType(buf, tagStart, tagEnd) || 'n';
       if (colIdx >= 0 && (isHeaderRow || colIdx < expectedLen)) {
         if (isHeaderRow) ensureIndex(values, colIdx);
         values[colIdx] = '';
@@ -292,7 +317,7 @@ function parseRowInline(buf, cellsStart, limit, expectedLen, sharedStrings, whit
       if (buf[q] === LT && buf[q + 1] === SLASH && buf[q + 2] === 0x63 /* c */ && buf[q + 3] === GT) { foundClose = true; break; }
       q++;
     }
-    if (!foundClose) return { values, hasAnyCellText, endPos: -1 };   // </c> 跨界 → 需更多字节
+    if (!foundClose) return { values, hasAnyCellText, cellTypes, endPos: -1 };   // </c> 跨界 → 需更多字节
     const bodyEnd = q;
     const nextI = q + 4;
 
@@ -300,23 +325,26 @@ function parseRowInline(buf, cellsStart, limit, expectedLen, sharedStrings, whit
     if (!isHeaderRow && colIdx >= expectedLen) { i = nextI; continue; }
 
     const inWhitelist = effWhitelist === null || effWhitelist.has(colIdx);
-    if (inWhitelist || !hasAnyCellText) {
+    if (inWhitelist || !hasAnyCellText || trackCellType) {
       // 到这里才解析 type + toString body（仅取值/探测的 cell 付此开销）。
       const type = parseCellType(buf, tagStart, tagEnd);
-      const bodyStr = bodyEnd > bodyStart ? buf.toString('utf8', bodyStart, bodyEnd) : '';
-      if (inWhitelist) {
-        const v = cellValueFromBody(bodyStr, type, sharedStrings);
-        if (isHeaderRow) ensureIndex(values, colIdx);
-        values[colIdx] = v;
-        if (!hasAnyCellText && v !== '') hasAnyCellText = true;
-      } else {
-        if (!hasAnyCellText && cellHasText(bodyStr, type, sharedStrings)) hasAnyCellText = true;
+      if (trackCellType) cellTypes[colIdx] = type || 'n';
+      if (inWhitelist || !hasAnyCellText) {
+        const bodyStr = bodyEnd > bodyStart ? buf.toString('utf8', bodyStart, bodyEnd) : '';
+        if (inWhitelist) {
+          const v = cellValueFromBody(bodyStr, type, sharedStrings);
+          if (isHeaderRow) ensureIndex(values, colIdx);
+          values[colIdx] = v;
+          if (!hasAnyCellText && v !== '') hasAnyCellText = true;
+        } else if (!hasAnyCellText && cellHasText(bodyStr, type, sharedStrings)) {
+          hasAnyCellText = true;
+        }
       }
     }
     i = nextI;
   }
   // 扫到 limit 仍无 </row> → 行跨界（需更多字节）。
-  return { values, hasAnyCellText, endPos: -1 };
+  return { values, hasAnyCellText, cellTypes, endPos: -1 };
 }
 
 // 表头行动态数组扩容：保证 idx 处可写（中间空洞填 ''，对齐 sax sparse array 写入后 .map 产 '' 的语义）。
@@ -427,12 +455,20 @@ const BUF_SHEETDATA_SELFCLOSE = Buffer.from('<sheetData/>');
 //     仅跨界行把两侧字节拼成单行 buffer 再解析（拷贝量 = 该行字节，KB 级）。绝不整 chunk concat。
 //
 //   接口（与 reader-handrolled streamSheetRowsHandRolled 对齐）：
-//     - 入参 { stream, expectedHeaders, sharedStrings, onRow, valueColumnWhitelist=null }。
-//     - onRow({ rowR, values, hasAnyCellText })：rowR 取 <row r> 真实行号；表头行（rowR===1）恒全列解析。
+//     - 入参 { stream, expectedHeaders, sharedStrings, onRow, valueColumnWhitelist=null,
+//       cellTypeColumnWhitelist=null }。
+//     - onRow({ rowR, values, hasAnyCellText, cellTypes })：rowR 取 <row r> 真实行号；表头行（rowR===1）恒全列解析。
 //     - onRow 抛 { __stopParsing:true, __stopValue } → 停止 stream + resolve(__stopValue)（peek 早退）。
 //     - onRow 抛其它 → reject。
 //     - 自闭合 <row .../> 空行：保号 + values 全空 + hasAnyCellText=false（onRow 内 allEmpty 跳过）。
-function scanSheetRows({ stream, expectedHeaders, sharedStrings, onRow, valueColumnWhitelist = null }) {
+function scanSheetRows({
+  stream,
+  expectedHeaders,
+  sharedStrings,
+  onRow,
+  valueColumnWhitelist = null,
+  cellTypeColumnWhitelist = null
+}) {
   const expectedLen = expectedHeaders.length;
   const whitelist = valueColumnWhitelist || null;
 
@@ -460,7 +496,12 @@ function scanSheetRows({ stream, expectedHeaders, sharedStrings, onRow, valueCol
     // 发射已解析的一行（values/hasAnyCellText 由 parseRowInline 单遍产出）。返回 false 表示已 stop/fail。
     function emitParsed(theRowR, parsed) {
       try {
-        onRow({ rowR: theRowR, values: parsed.values, hasAnyCellText: parsed.hasAnyCellText });
+        onRow({
+          rowR: theRowR,
+          values: parsed.values,
+          hasAnyCellText: parsed.hasAnyCellText,
+          cellTypes: parsed.cellTypes
+        });
         return true;
       } catch (rowErr) {
         if (rowErr && rowErr.__stopParsing) { stop(rowErr.__stopValue); return false; }
@@ -474,7 +515,12 @@ function scanSheetRows({ stream, expectedHeaders, sharedStrings, onRow, valueCol
       const isHeader = theRowR === 1;
       const values = isHeader ? [] : new Array(expectedLen).fill('');
       try {
-        onRow({ rowR: theRowR, values, hasAnyCellText: false });
+        onRow({
+          rowR: theRowR,
+          values,
+          hasAnyCellText: false,
+          cellTypes: cellTypeColumnWhitelist ? Object.create(null) : null
+        });
         return true;
       } catch (rowErr) {
         if (rowErr && rowErr.__stopParsing) { stop(rowErr.__stopValue); return false; }
@@ -551,7 +597,16 @@ function scanSheetRows({ stream, expectedHeaders, sharedStrings, onRow, valueCol
               }
               // 带 body 行：单遍解析（cell 取值 + </row> 检测同一遍）。
               const isHeader = theRowR === 1;
-              const parsed = parseRowInline(buf, tagEnd + 1, len, expectedLen, sharedStrings, whitelist, isHeader);
+              const parsed = parseRowInline(
+                buf,
+                tagEnd + 1,
+                len,
+                expectedLen,
+                sharedStrings,
+                whitelist,
+                isHeader,
+                cellTypeColumnWhitelist
+              );
               if (parsed.endPos < 0) {
                 // </row> 跨界 → 从 lt 保留整段到 tail，下个 chunk 拼接后重解析（最多 1 行/chunk）。
                 if (isFinal) return len;   // 流尾仍未闭合 → 丢弃半行（与 sax </row> 缺失等价）。

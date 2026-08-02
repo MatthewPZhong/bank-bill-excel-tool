@@ -2927,6 +2927,32 @@ select.mapping-text-input {
   background: #fff;
 }
 
+.position-source-anomaly-dialog .position-dialog-content {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 28px;
+}
+
+.position-source-anomaly-dialog .position-dialog-content p {
+  margin: 0;
+}
+
+.position-source-anomaly-note,
+.position-source-anomaly-dialog .muted {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.position-source-anomaly-dialog .position-import-summary {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .position-import-progress-dialog {
   width: min(560px, calc(100vw - 56px));
   min-height: 0;

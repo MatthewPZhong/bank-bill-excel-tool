@@ -509,6 +509,33 @@ contextBridge.exposeInMainWorld('desktopApi', {
       return () => ipcRenderer.removeListener('vccOpCalc:scan:progress', listener);
     }
   },
+  // v3.1.6：VCC财务OP校验（明细幂等审计、逐币种计算、系统OP比较与归档）。
+  vccFinancialOp: {
+    pickFiles: () => ipcRenderer.invoke('vccFinancialOp:import:pick-files'),
+    importFiles: (payload) => ipcRenderer.invoke('vccFinancialOp:import:apply', payload),
+    cancelTask: () => ipcRenderer.invoke('vccFinancialOp:task:cancel'),
+    calculate: (payload) => ipcRenderer.invoke('vccFinancialOp:run:calculate', payload),
+    initializeOpening: (payload) => ipcRenderer.invoke('vccFinancialOp:opening:initialize', payload),
+    archive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:archive', payload),
+    getRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:get', payload),
+    latestArchivedRun: () => ipcRenderer.invoke('vccFinancialOp:run:latest-archived'),
+    exportResult: (payload) => ipcRenderer.invoke('vccFinancialOp:export:result', payload),
+    listImportMonths: () => ipcRenderer.invoke('vccFinancialOp:imports:list-months'),
+    listImportRecords: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:list-records', payload),
+    getImportDetail: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:get-detail', payload),
+    resolveImportRecord: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:resolve', payload),
+    dataManagerOverview: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:overview', payload),
+    previewDatasetDeletion: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-preview', payload),
+    deleteDataset: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete', payload),
+    previewDatasetExport: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:export-preview', payload),
+    exportDataset: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:export', payload),
+    exportImportAudit: (payload) => ipcRenderer.invoke('vccFinancialOp:export:import-audit', payload),
+    onImportProgress: (callback) => {
+      const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
+      ipcRenderer.on('vccFinancialOp:import:progress', listener);
+      return () => ipcRenderer.removeListener('vccFinancialOp:import:progress', listener);
+    }
+  },
   // v2.1.6 Module B：收单单据币种校验
   // v2.1.7 F6：新增 onImportProgress / onRunProgress 订阅 API（spec §6.4）
   //   返回 unsubscribe 函数；renderer 必须在 finally 调用避免 listener 内存泄漏
