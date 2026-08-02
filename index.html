@@ -11,6 +11,7 @@
     <link id="cssFonts" rel="stylesheet" href="./src/fonts.css" />
     <link id="cssClear" rel="stylesheet" href="./src/styles-gemini.css" />
     <link id="cssClearExtra" rel="stylesheet" href="./src/styles-gemini-extra.css" />
+    <link rel="stylesheet" href="./src/styles-vcc-financial-op.css" />
   </head>
   <body data-style="clear">
     <div id="appShell" class="app-shell">
@@ -302,6 +303,36 @@
                     <span class="status-box-text">欢迎使用小助手</span>
                   </span>
                 </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- v3.1.6：VCC财务OP校验（布局沿用收单单据币种校验）。 -->
+          <section id="vccFinancialOpModulePanel" class="control-board module-panel acquiring-bill-currency-board vcc-financial-op-board" hidden>
+            <div class="control-row">
+              <div class="cell left">
+                <div class="pending-action-pair">
+                  <button id="vccFinancialOpImportBtn" class="secondary-btn" type="button">导入文件</button>
+                  <button id="vccFinancialOpRunBtn" class="primary-btn" type="button">开始运行</button>
+                </div>
+              </div>
+              <div class="cell right">
+                <button id="vccFinancialOpExportBtn" class="secondary-btn" type="button" disabled>导出校验结果表</button>
+              </div>
+            </div>
+            <div class="control-row">
+              <div class="cell left">
+                <div id="vccFinancialOpStatusBox" class="status-box">
+                  <span class="status-box-content">
+                    <span class="status-spark" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" width="14" height="14"><defs><linearGradient id="gsStatusVccFinancialOp" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#4285F4"/><stop offset="50%" stop-color="#9B72F2"/><stop offset="100%" stop-color="#E95EA2"/></linearGradient></defs><path d="M12 2 L14.2 9.8 L22 12 L14.2 14.2 L12 22 L9.8 14.2 L2 12 L9.8 9.8 Z" fill="url(#gsStatusVccFinancialOp)"/></svg>
+                    </span>
+                    <span class="status-box-text">欢迎使用小助手</span>
+                  </span>
+                </div>
+              </div>
+              <div class="cell right">
+                <button id="vccFinancialOpDataManagerBtn" class="secondary-btn" type="button">数据管理</button>
               </div>
             </div>
           </section>
@@ -614,6 +645,7 @@
     <script src="./src/renderer-previews.js"></script>
     <script src="./src/renderer-pending.js"></script>
     <script src="./src/renderer-position-reconciliation.js"></script>
+    <script src="./src/renderer-vcc-financial-op.js"></script>
     <script src="./src/renderer.js"></script>
   </body>
 </html>

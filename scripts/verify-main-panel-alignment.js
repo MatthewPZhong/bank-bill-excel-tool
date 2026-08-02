@@ -57,6 +57,8 @@ function runParent() {
         `${outcome} (single=${result.metrics.maxSingleDelta.toFixed(4)}px, ` +
         `multi=${result.metrics.maxMultiDelta.toFixed(4)}px, ` +
         `control=${result.metrics.maxControlDelta.toFixed(4)}px, ` +
+        `vcc-width=${result.metrics.vccButtonWidthDelta.toFixed(4)}px, ` +
+        `vcc-symmetry=${result.metrics.vccButtonSymmetryDelta.toFixed(4)}px, ` +
         `dpr=${result.metrics.devicePixelRatio})`
       );
       if (!result.ok) failures.push({ viewport, scaleFactor, details: result.failures });
@@ -80,6 +82,7 @@ function measurePage(expectedScaleFactor) {
     ['bankBuReconModulePanel', 'bankBuReconStatusBox'],
     ['duplicateInboundMatchModulePanel', 'duplicateInboundMatchStatusBox'],
     ['vccOpCalcModulePanel', 'vccOpCalcStatusBox'],
+    ['vccFinancialOpModulePanel', 'vccFinancialOpStatusBox'],
     ['bankStatementModulePanel', 'bankStatementStatusBox'],
     ['preFundReconciliationModulePanel', 'preFundReconciliationStatusBox'],
     ['reconIdFixModulePanel', 'reconIdFixStatusBox'],
@@ -100,6 +103,8 @@ function measurePage(expectedScaleFactor) {
     maxSingleDelta: 0,
     maxMultiDelta: 0,
     maxControlDelta: 0,
+    vccButtonWidthDelta: 0,
+    vccButtonSymmetryDelta: 0,
     bankStatusClientHeight: 0,
     bankStatusScrollHeight: 0,
     bankStatusBottomScrollTop: 0
@@ -115,6 +120,7 @@ function measurePage(expectedScaleFactor) {
     panels.forEach((panel) => { panel.hidden = panel.id !== panelId; });
   };
   const centerY = (rect) => rect.top + (rect.height / 2);
+  const centerX = (rect) => rect.left + (rect.width / 2);
   const inside = (inner, outer) => (
     inner.top >= outer.top - tolerance &&
     inner.bottom <= outer.bottom + tolerance &&
@@ -178,6 +184,32 @@ function measurePage(expectedScaleFactor) {
     const controlDelta = Math.max(...deltas);
     metrics.maxControlDelta = Math.max(metrics.maxControlDelta, controlDelta);
     if (controlDelta > tolerance) failures.push(`${controlId}: control delta ${controlDelta}`);
+  }
+
+  showPanel('vccFinancialOpModulePanel');
+  const vccImportButton = document.getElementById('vccFinancialOpImportBtn');
+  const vccRunButton = document.getElementById('vccFinancialOpRunBtn');
+  const vccStatusBox = document.getElementById('vccFinancialOpStatusBox');
+  if (!vccImportButton || !vccRunButton || !vccStatusBox) {
+    failures.push('vcc financial op: missing symmetry controls');
+  } else {
+    const importRect = vccImportButton.getBoundingClientRect();
+    const runRect = vccRunButton.getBoundingClientRect();
+    const statusRect = vccStatusBox.getBoundingClientRect();
+    const statusCenter = centerX(statusRect);
+    const importDistance = statusCenter - centerX(importRect);
+    const runDistance = centerX(runRect) - statusCenter;
+    metrics.vccButtonWidthDelta = Math.abs(importRect.width - runRect.width);
+    metrics.vccButtonSymmetryDelta = Math.abs(importDistance - runDistance);
+    if (metrics.vccButtonWidthDelta > tolerance) {
+      failures.push(`vcc financial op: button width delta ${metrics.vccButtonWidthDelta}`);
+    }
+    if (Math.abs(importRect.width - 140) > tolerance) {
+      failures.push(`vcc financial op: import width ${importRect.width}`);
+    }
+    if (importDistance <= 0 || runDistance <= 0 || metrics.vccButtonSymmetryDelta > tolerance) {
+      failures.push(`vcc financial op: status symmetry delta ${metrics.vccButtonSymmetryDelta}`);
+    }
   }
 
   showPanel('positionReconciliationModulePanel');

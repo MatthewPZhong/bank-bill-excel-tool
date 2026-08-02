@@ -15,6 +15,7 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'big-account',
   'toolbox',
   'toolbox-split-export-directory',
+  'vcc-financial-op-export-directory',
   'linked-table',
   'pre-fund-reconciliation-export',
   'position-reconciliation-bank',

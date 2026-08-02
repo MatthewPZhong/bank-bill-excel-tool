@@ -1,0 +1,1481 @@
+'use strict';
+
+(() => {
+  const api = window.desktopApi && window.desktopApi.vccFinancialOp;
+  if (!api) return;
+
+  const CURRENCIES = Object.freeze(['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
+  const SOURCE_LABELS = Object.freeze({
+    recharge_refund: 'VCC充值清退明细',
+    fee_fx: 'VCC费用及换汇明细',
+    channel: 'VCC通道明细',
+    pending_archive_removal: 'VCC_移除归档Pending账单',
+    system_op: '系统财务OP'
+  });
+  const CHECK_TABLE_LABELS = Object.freeze({
+    recharge_refund: 'VCC充值清退明细_校验表',
+    fee_fx: 'VCC费用及换汇明细_校验表',
+    channel: 'VCC通道明细_校验表',
+    pending_archive_removal: '移除归档Pending账单_校验表',
+    system_op: '系统财务OP'
+  });
+  const DISPOSITION_LABELS = Object.freeze({
+    idempotent_skip: '幂等跳过',
+    idempotent_conflict: '幂等冲突',
+    invalid_key: '幂等键为空',
+    format_error: '格式异常',
+    rolled_back: '整表回滚'
+  });
+  const elements = {
+    importBtn: document.getElementById('vccFinancialOpImportBtn'),
+    runBtn: document.getElementById('vccFinancialOpRunBtn'),
+    exportBtn: document.getElementById('vccFinancialOpExportBtn'),
+    dataManagerBtn: document.getElementById('vccFinancialOpDataManagerBtn'),
+    statusBox: document.getElementById('vccFinancialOpStatusBox'),
+    modalRoot: document.getElementById('modalRoot')
+  };
+  if (!elements.importBtn || !elements.modalRoot) return;
+
+  const state = {
+    busy: false,
+    busyKind: '',
+    cancelRequested: false,
+    lastMonth: '',
+    latestArchivedRun: null
+  };
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function formatDateTime(value) {
+    if (!value) return '-';
+    return String(value).replace('T', ' ').replace(/\.\d{3}Z$/, '');
+  }
+
+  function formatInteger(value) {
+    return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Number(value) || 0);
+  }
+
+  function formatAmount(value) {
+    const text = String(value == null ? '0' : value);
+    const match = text.match(/^(-?)(\d+)(\.\d+)?$/);
+    if (!match) return text;
+    return `${match[1]}${match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${match[3] || ''}`;
+  }
+
+  function formatSystemOpSnapshotCount(value, compact = false) {
+    const snapshots = Math.max(0, Number(value) || 0);
+    const sourceRows = snapshots * CURRENCIES.length;
+    return compact
+      ? `${formatInteger(sourceRows)} 行 / ${formatInteger(snapshots)} 快照`
+      : `${formatInteger(sourceRows)} 行币种数据（${formatInteger(snapshots)} 个主体快照）`;
+  }
+
+  function buildImportCompletionStatus(result, fallbackMonth = '') {
+    const records = Array.isArray(result && result.records) ? result.records : [];
+    const systemRecords = records.filter((record) => record.sourceType === 'system_op');
+    const detailRecords = records.filter((record) => record.sourceType !== 'system_op');
+    const detailTotals = detailRecords.reduce((summary, record) => ({
+      inserted: summary.inserted + (Number(record.insertedCount) || 0),
+      skipped: summary.skipped + (Number(record.skippedCount) || 0)
+    }), { inserted: 0, skipped: 0 });
+    const systemTotals = systemRecords.reduce((summary, record) => ({
+      inserted: summary.inserted + (Number(record.insertedCount) || 0),
+      skipped: summary.skipped + (Number(record.skippedCount) || 0)
+    }), { inserted: 0, skipped: 0 });
+    const failedRecordCount = records.filter((record) => String(record.status).startsWith('failed')).length;
+    const month = String(result && result.targetMonth || fallbackMonth || '当前账期');
+    const details = [];
+    if (detailRecords.length > 0) {
+      const prefix = systemRecords.length > 0 ? '明细' : '';
+      details.push(`${prefix}新增 ${formatInteger(detailTotals.inserted)} 行`);
+      details.push(`${prefix}幂等跳过 ${formatInteger(detailTotals.skipped)} 行`);
+    }
+    if (systemRecords.length > 0) {
+      details.push(`系统财务OP新增 ${formatSystemOpSnapshotCount(systemTotals.inserted)}`);
+      const prefix = detailRecords.length > 0 ? '系统财务OP' : '';
+      details.push(`${prefix}幂等跳过 ${formatSystemOpSnapshotCount(systemTotals.skipped)}`);
+    }
+    if (details.length === 0) details.push('新增 0 行', '幂等跳过 0 行');
+    if (failedRecordCount > 0) {
+      details.push(`待处理异常 ${formatInteger(failedRecordCount)} 条导入记录`);
+      details.push('详情见数据管理 → 校验原表');
+    }
+    return {
+      message: `${month} 导入完成：${details.join('，')}`,
+      tone: failedRecordCount > 0 ? 'warning' : 'success'
+    };
+  }
+
+  function setStatus(message, tone = 'info') {
+    const text = elements.statusBox && elements.statusBox.querySelector('.status-box-text');
+    if (text) text.textContent = String(message || '');
+    if (elements.statusBox) elements.statusBox.dataset.tone = tone;
+  }
+
+  function setBusy(busy, kind = '') {
+    state.busy = Boolean(busy);
+    state.busyKind = state.busy ? kind : '';
+    elements.importBtn.disabled = state.busy && state.busyKind !== 'import';
+    elements.importBtn.textContent = state.busyKind === 'import' ? '取消导入' : '导入文件';
+    elements.runBtn.disabled = state.busy;
+    elements.dataManagerBtn.disabled = state.busy;
+    elements.exportBtn.disabled = state.busy || !state.latestArchivedRun;
+  }
+
+  function mountDialog({ title, className = '', bodyHtml = '', initialFocusSelector = '', onClose, canClose }) {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay vcc-fin-op-overlay';
+    const dialog = document.createElement('section');
+    dialog.className = `modal-card vcc-fin-op-dialog ${className}`.trim();
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-label', title);
+    dialog.innerHTML = `
+      <div class="dialog-header">
+        <div class="dialog-title">${escapeHtml(title)}</div>
+        <button class="icon-close" type="button" data-action="close" aria-label="关闭">×</button>
+      </div>
+      <div class="vcc-fin-op-dialog-body">${bodyHtml}</div>
+    `;
+    overlay.appendChild(dialog);
+    elements.modalRoot.appendChild(overlay);
+    let closed = false;
+    const close = () => {
+      if (closed) return;
+      if (typeof canClose === 'function' && !canClose()) return;
+      closed = true;
+      document.removeEventListener('keydown', onKeyDown);
+      overlay.remove();
+      if (typeof onClose === 'function') onClose();
+    };
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') close();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    dialog.querySelector('[data-action="close"]').addEventListener('click', close);
+    overlay.addEventListener('click', (event) => {
+      if (event.target === overlay) close();
+    });
+    requestAnimationFrame(() => {
+      const focusTarget = (initialFocusSelector && dialog.querySelector(initialFocusSelector))
+        || dialog.querySelector('[aria-current="page"], input:not(:disabled), select:not(:disabled), button:not([data-action="close"]):not(:disabled)');
+      if (focusTarget) focusTarget.focus();
+    });
+    return { overlay, dialog, body: dialog.querySelector('.vcc-fin-op-dialog-body'), close };
+  }
+
+  function showMessage(title, message, tone = 'info') {
+    const modal = mountDialog({
+      title,
+      className: 'vcc-fin-op-message-dialog',
+      bodyHtml: `
+        <p class="vcc-fin-op-message" data-tone="${escapeHtml(tone)}">${escapeHtml(message)}</p>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm">确定</button>
+        </div>
+      `
+    });
+    modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', modal.close);
+  }
+
+  function chooseImportMonth({ title, initial = '' }) {
+    return new Promise((resolve) => {
+      let value = null;
+      const initialMatch = String(initial || '').match(/^(\d{4})-(0[1-9]|1[0-2])$/);
+      const currentYear = new Date().getFullYear();
+      const availableYears = [currentYear - 1, currentYear, currentYear + 1];
+      const canReuseInitial = Boolean(initialMatch && availableYears.includes(Number(initialMatch[1])));
+      const selectedYear = canReuseInitial ? initialMatch[1] : '';
+      const selectedMonth = canReuseInitial ? initialMatch[2] : '';
+      const yearOptions = availableYears
+        .map((year) => `<option value="${year}"${String(year) === selectedYear ? ' selected' : ''}>${year} 年</option>`)
+        .join('');
+      const monthOptions = Array.from({ length: 12 }, (_, index) => {
+        const month = String(index + 1).padStart(2, '0');
+        return `<option value="${month}"${month === selectedMonth ? ' selected' : ''}>${index + 1} 月</option>`;
+      }).join('');
+      const modal = mountDialog({
+        title,
+        className: 'vcc-fin-op-import-month-dialog',
+        initialFocusSelector: '[data-field="import-year"]',
+        onClose: () => resolve(value),
+        bodyHtml: `
+          <div class="monthly-balance-time-picker pending-import-month-picker biz-op-recon-date-picker vcc-fin-op-import-month-picker">
+            <select class="monthly-balance-year-select mapping-text-input biz-op-recon-date-year" data-field="import-year" aria-label="年份">
+              ${selectedYear ? '' : '<option value="" selected disabled>年份</option>'}
+              ${yearOptions}
+            </select>
+            <select class="monthly-balance-month-select mapping-text-input biz-op-recon-date-month" data-field="import-month" aria-label="月份">
+              ${selectedMonth ? '' : '<option value="" selected disabled>月份</option>'}
+              ${monthOptions}
+            </select>
+          </div>
+          <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
+          <div class="dialog-actions center vcc-fin-op-import-month-actions">
+            <button class="primary-btn small" type="button" data-action="confirm">确定</button>
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          </div>
+        `
+      });
+      const yearSelect = modal.dialog.querySelector('[data-field="import-year"]');
+      const monthSelect = modal.dialog.querySelector('[data-field="import-month"]');
+      const error = modal.dialog.querySelector('[data-role="error"]');
+      const confirm = () => {
+        const selected = `${yearSelect && yearSelect.value || ''}-${monthSelect && monthSelect.value || ''}`;
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selected)) {
+          error.textContent = '请选择有效的月份账期';
+          error.hidden = false;
+          return;
+        }
+        value = selected;
+        modal.close();
+      };
+      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+      modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', confirm);
+      [yearSelect, monthSelect].forEach((select) => {
+        select.addEventListener('change', () => { error.hidden = true; });
+        select.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') confirm();
+        });
+      });
+    });
+  }
+
+  function chooseMonth({ title, months = [], initial = '' }) {
+    return new Promise((resolve) => {
+      let value = null;
+      const options = months.length > 0
+        ? months.map((month) => `<option value="${escapeHtml(month)}"${month === initial ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
+        : '<option value="">暂无账期</option>';
+      const modal = mountDialog({
+        title,
+        className: 'vcc-fin-op-compact-dialog',
+        onClose: () => resolve(value),
+        bodyHtml: `
+          <select class="vcc-fin-op-input vcc-fin-op-run-month-input" data-field="month" aria-label="月份账期"${months.length === 0 ? ' disabled' : ''}>${options}</select>
+          <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
+          <div class="dialog-actions right vcc-fin-op-run-month-actions">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="confirm"${months.length === 0 ? ' disabled' : ''}>确定</button>
+          </div>
+        `
+      });
+      const input = modal.dialog.querySelector('[data-field="month"]');
+      const error = modal.dialog.querySelector('[data-role="error"]');
+      const confirm = () => {
+        const selected = String(input && input.value || '').trim();
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(selected)) {
+          error.textContent = '请选择有效的月份账期';
+          error.hidden = false;
+          return;
+        }
+        value = selected;
+        modal.close();
+      };
+      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+      modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', confirm);
+      if (input) input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') confirm();
+      });
+    });
+  }
+
+  function assignSubjects(files) {
+    const pending = files.filter((file) => file.requiresSubject);
+    if (pending.length === 0) return Promise.resolve(files.map((file) => ({ ...file, subject: '' })));
+    return new Promise((resolve) => {
+      let result = null;
+      const rows = files.map((file, index) => `
+        <div class="vcc-fin-op-file-row">
+          <div class="vcc-fin-op-file-meta">
+            <strong>${escapeHtml(file.fileName)}</strong>
+            <span>${escapeHtml(SOURCE_LABELS[file.sourceType] || file.sourceType)} · ${escapeHtml(file.sheetName)}</span>
+          </div>
+          ${file.requiresSubject
+            ? `<label class="vcc-fin-op-inline-field"><span>公司主体</span><input class="vcc-fin-op-input" data-subject-index="${index}" type="text" autocomplete="off"></label>`
+            : '<span class="vcc-fin-op-subject-from-file">主体取自原表</span>'}
+        </div>
+      `).join('');
+      const modal = mountDialog({
+        title: '确认原表与公司主体',
+        className: 'vcc-fin-op-subject-dialog',
+        onClose: () => resolve(result),
+        bodyHtml: `
+          <div class="vcc-fin-op-file-list">${rows}</div>
+          <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
+          <div class="dialog-actions right">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="confirm">继续导入</button>
+          </div>
+        `
+      });
+      const error = modal.dialog.querySelector('[data-role="error"]');
+      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+      modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        const prepared = files.map((file, index) => {
+          const input = modal.dialog.querySelector(`[data-subject-index="${index}"]`);
+          return { ...file, subject: input ? input.value.trim() : '' };
+        });
+        const missing = prepared.filter((file) => file.requiresSubject && !file.subject);
+        if (missing.length > 0) {
+          error.textContent = 'VCC通道明细必须填写公司主体';
+          error.hidden = false;
+          return;
+        }
+        result = prepared;
+        modal.close();
+      });
+    });
+  }
+
+  async function handleImport() {
+    if (state.busy) return;
+    setBusy(true, 'prepare-import');
+    try {
+      const month = await chooseImportMonth({ title: '选择导入账期', initial: state.lastMonth });
+      if (!month) return;
+      setBusy(true, 'import');
+      setStatus('正在识别原表…', 'info');
+      const picked = await api.pickFiles();
+      if (!picked || picked.status === 'cancelled') {
+        setStatus('已取消导入', 'info');
+        return;
+      }
+      if (picked.status !== 'success') {
+        const detailLines = Array.isArray(picked.detailLines)
+          ? picked.detailLines.filter((line) => String(line || '').trim())
+          : [];
+        throw new Error([picked.message || '原表识别失败', ...detailLines].join('\n'));
+      }
+      const files = await assignSubjects(Array.isArray(picked.files) ? picked.files : []);
+      if (!files) {
+        setStatus('已取消导入', 'info');
+        return;
+      }
+      const unsubscribe = api.onImportProgress((progress) => {
+        const label = SOURCE_LABELS[progress.sourceType] || '原表';
+        setStatus(`正在导入 ${label}：${formatInteger(progress.rows)} 行`, 'info');
+      });
+      let result;
+      try {
+        setBusy(true, 'import');
+        setStatus('正在导入并校验幂等数据…', 'info');
+        result = await api.importFiles({ targetMonth: month, files });
+      } finally {
+        if (typeof unsubscribe === 'function') unsubscribe();
+      }
+      if (!result || result.status === 'error') {
+        const detailLines = result && Array.isArray(result.detailLines)
+          ? result.detailLines.filter((line) => String(line || '').trim())
+          : [];
+        throw new Error([result && result.message || '导入失败', ...detailLines].join('\n'));
+      }
+      state.lastMonth = month;
+      const completion = buildImportCompletionStatus(result, month);
+      setStatus(completion.message, completion.tone);
+    } catch (error) {
+      if (state.cancelRequested) {
+        setStatus('导入已取消，未完成数据未进入有效数据集', 'warning');
+        return;
+      }
+      setStatus(`导入失败：${error.message || error}`, 'error');
+      showMessage('导入失败', error.message || String(error), 'error');
+    } finally {
+      state.cancelRequested = false;
+      setBusy(false);
+    }
+  }
+
+  async function handleCancelImport() {
+    if (state.busyKind !== 'import' || state.cancelRequested) return;
+    state.cancelRequested = true;
+    elements.importBtn.disabled = true;
+    elements.importBtn.textContent = '正在取消';
+    setStatus('正在取消导入并回滚本次未完成数据…', 'warning');
+    const result = await api.cancelTask();
+    if (result && result.status === 'idle') state.cancelRequested = false;
+    if (result && result.status === 'error') {
+      state.cancelRequested = false;
+      throw new Error(result.message || '取消导入失败');
+    }
+  }
+
+  function blockedCalculationMessage(result) {
+    if (result.code === 'active-imports') {
+      return `账期内仍有 ${Array.isArray(result.activeImports) ? result.activeImports.length : 0} 个导入批次未结束。请等待导入完成后重新运行。`;
+    }
+    if (result.code === 'missing-datasets') {
+      return `缺少必需原表：${(result.missing || []).join('、') || '未知'}。请补齐后重新运行。`;
+    }
+    if (result.code === 'unresolved-imports') {
+      return `账期内仍有 ${Array.isArray(result.unresolved) ? result.unresolved.length : 0} 条未处理的失败导入记录。请在数据管理的“导入记录”中处理后重新运行。`;
+    }
+    if (result.code === 'month-already-archived') {
+      return `${result.targetMonth} 已归档，原表和结果均不可再次计算或改写。`;
+    }
+    if (result.code === 'missing-opening-balance') {
+      return `缺少上月 ${result.previousMonth || ''} 的归档财务OP余额，涉及主体：${(result.missingOpeningSubjects || []).join('、')}。需要人工初始化首月期初余额，系统不会按 0 或系统财务OP代替。`;
+    }
+    if (result.code === 'missing-system-subject') {
+      return `缺少主体对应的系统财务OP：${(result.missingSystemSubjects || []).join('、')}。`;
+    }
+    return result.message || '当前数据不满足计算条件。';
+  }
+
+  function requestOpeningInitialization(result) {
+    return new Promise((resolve) => {
+      let payload = null;
+      const subjects = Array.isArray(result.missingOpeningSubjects)
+        ? result.missingOpeningSubjects
+        : [];
+      const sections = subjects.map((subject) => `
+        <section class="vcc-fin-op-opening-section">
+          <h3>${escapeHtml(subject)}</h3>
+          <div class="vcc-fin-op-opening-grid">
+            ${CURRENCIES.map((currency) => `
+              <label class="vcc-fin-op-field">
+                <span>${currency}</span>
+                <input class="vcc-fin-op-input" type="text" inputmode="decimal"
+                  autocomplete="off" data-opening-subject="${escapeHtml(subject)}"
+                  data-opening-currency="${currency}" placeholder="必填">
+              </label>
+            `).join('')}
+          </div>
+        </section>
+      `).join('');
+      const modal = mountDialog({
+        title: `初始化 ${result.targetMonth} 期初财务OP`,
+        className: 'vcc-fin-op-opening-dialog',
+        onClose: () => resolve(payload),
+        bodyHtml: `
+          <p class="vcc-fin-op-message" data-tone="warning">${escapeHtml(result.previousMonth || '上月')} 没有已归档余额。请按已核对的账务依据填写固定九币种期初余额；保存后不可修改。</p>
+          <div class="vcc-fin-op-opening-scroll">${sections}</div>
+          <label class="vcc-fin-op-field vcc-fin-op-opening-note">
+            <span>核对说明</span>
+            <textarea class="vcc-fin-op-input vcc-fin-op-textarea" data-field="opening-note" rows="3" maxlength="500" placeholder="填写余额来源和核对结论"></textarea>
+          </label>
+          <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="opening-confirm">已逐主体核对九币种期初余额，确认一次性初始化</label>
+          <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
+          <div class="dialog-actions right">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="initialize" disabled>确认初始化</button>
+          </div>
+        `
+      });
+      const checkbox = modal.dialog.querySelector('[data-field="opening-confirm"]');
+      const confirmButton = modal.dialog.querySelector('[data-action="initialize"]');
+      const error = modal.dialog.querySelector('[data-role="error"]');
+      checkbox.addEventListener('change', () => { confirmButton.disabled = !checkbox.checked; });
+      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+      confirmButton.addEventListener('click', () => {
+        const note = modal.dialog.querySelector('[data-field="opening-note"]').value.trim();
+        const entries = subjects.map((subject) => {
+          const balances = {};
+          for (const currency of CURRENCIES) {
+            const input = modal.dialog.querySelector(
+              `[data-opening-subject="${CSS.escape(subject)}"][data-opening-currency="${currency}"]`
+            );
+            balances[currency] = input ? input.value.trim() : '';
+          }
+          return { subject, balances };
+        });
+        const hasBlank = entries.some((entry) => CURRENCIES.some((currency) => entry.balances[currency] === ''));
+        if (hasBlank || !note) {
+          error.textContent = hasBlank ? '九个币种余额均需填写，零余额请填写 0' : '请填写核对说明';
+          error.hidden = false;
+          return;
+        }
+        payload = { targetMonth: result.targetMonth, entries, note };
+        modal.close();
+      });
+    });
+  }
+
+  function confirmArchive(result) {
+    return new Promise((resolve) => {
+      let accepted = false;
+      const bySubject = new Map();
+      for (const row of result.balances || []) {
+        if (!bySubject.has(row.subject)) bySubject.set(row.subject, new Map());
+        bySubject.get(row.subject).set(row.currency, row);
+      }
+      const sections = [...bySubject].map(([subject, rows]) => `
+        <section class="vcc-fin-op-result-section">
+          <h3>${escapeHtml(subject)}</h3>
+          <div class="vcc-fin-op-table-wrap">
+            <table class="vcc-fin-op-table vcc-fin-op-balance-table">
+              <thead><tr><th>项目</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}</tr></thead>
+              <tbody>
+                <tr><th>当月计算财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).calculatedBalance))}</td>`).join('')}</tr>
+                <tr><th>系统财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).systemBalance))}</td>`).join('')}</tr>
+                <tr class="difference-row"><th>差异</th>${CURRENCIES.map((currency) => {
+                  const difference = (rows.get(currency) || {}).difference || '0';
+                  const isZero = /^-?0(?:\.0+)?$/.test(difference);
+                  return `<td class="number${isZero ? '' : ' is-difference'}">${escapeHtml(formatAmount(difference))}</td>`;
+                }).join('')}</tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      `).join('');
+      const modal = mountDialog({
+        title: `${result.targetMonth} 财务OP校验结果确认`,
+        className: 'vcc-fin-op-review-dialog',
+        onClose: () => resolve(accepted),
+        bodyHtml: `
+          <p class="vcc-fin-op-summary-line">确认归档后，该账期的原表与结果不可改写；本月计算余额将成为下月期初余额。</p>
+          <div class="vcc-fin-op-result-scroll">${sections}</div>
+          <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="archive-confirm">已核对结果，确认归档</label>
+          <div class="dialog-actions right">
+            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+            <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
+          </div>
+        `
+      });
+      const checkbox = modal.dialog.querySelector('[data-field="archive-confirm"]');
+      const archiveBtn = modal.dialog.querySelector('[data-action="archive"]');
+      checkbox.addEventListener('change', () => { archiveBtn.disabled = !checkbox.checked; });
+      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+      archiveBtn.addEventListener('click', () => {
+        accepted = true;
+        modal.close();
+      });
+    });
+  }
+
+  async function chooseExistingMonth(title) {
+    const months = await api.listImportMonths();
+    const initial = months.includes(state.lastMonth) ? state.lastMonth : (months[0] || '');
+    return chooseMonth({ title, months, initial });
+  }
+
+  async function handleRun() {
+    if (state.busy) return;
+    setBusy(true, 'run');
+    try {
+      const month = await chooseExistingMonth('选择运行账期');
+      if (!month) return;
+      state.lastMonth = month;
+      setStatus(`正在计算 ${month} 财务OP…`, 'info');
+      let result = await api.calculate({ targetMonth: month });
+      if (!result || result.status === 'error') throw new Error(result && result.message || '计算失败');
+      if (result.status === 'blocked' && result.code === 'missing-opening-balance') {
+        setStatus(blockedCalculationMessage(result), 'warning');
+        const openingPayload = await requestOpeningInitialization(result);
+        if (!openingPayload) {
+          setStatus(`${month} 期初财务OP未初始化`, 'warning');
+          return;
+        }
+        setStatus(`正在初始化 ${month} 期初财务OP…`, 'info');
+        const initialized = await api.initializeOpening(openingPayload);
+        if (!initialized || initialized.status === 'error') {
+          throw new Error(initialized && initialized.message || '期初财务OP初始化失败');
+        }
+        setStatus(`期初财务OP已保存，正在重新计算 ${month}…`, 'info');
+        result = await api.calculate({ targetMonth: month });
+        if (!result || result.status === 'error') throw new Error(result && result.message || '计算失败');
+      }
+      if (result.status === 'blocked') {
+        const message = blockedCalculationMessage(result);
+        setStatus(`无法运行：${message}`, 'warning');
+        showMessage('暂不能运行', message, 'warning');
+        return;
+      }
+      if (result.status !== 'calculated') throw new Error('计算返回了未知状态');
+      setStatus(`${month} 计算完成，等待确认归档`, 'info');
+      const accepted = await confirmArchive(result);
+      if (!accepted) {
+        setStatus(`${month} 结果未归档`, 'warning');
+        return;
+      }
+      setStatus(`正在归档 ${month} 结果…`, 'info');
+      const archived = await api.archive({ runId: result.runId });
+      if (!archived || archived.status === 'error') throw new Error(archived && archived.message || '归档失败');
+      state.latestArchivedRun = {
+        runId: archived.runId,
+        targetMonth: archived.targetMonth,
+        status: archived.status
+      };
+      setStatus(`${archived.targetMonth} 已确认归档，可导出结果`, 'success');
+      showMessage('归档完成', `${archived.targetMonth} 已归档，可导出校验结果表。`, 'success');
+    } catch (error) {
+      setStatus(`运行失败：${error.message || error}`, 'error');
+      showMessage('运行失败', error.message || String(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleExport() {
+    if (state.busy || !state.latestArchivedRun) return;
+    setBusy(true, 'export');
+    try {
+      setStatus(`正在导出 ${state.latestArchivedRun.targetMonth} 校验结果…`, 'info');
+      const result = await api.exportResult({ runId: state.latestArchivedRun.runId });
+      if (!result || result.status === 'cancelled') {
+        setStatus('已取消导出', 'info');
+        return;
+      }
+      if (result.status !== 'success') throw new Error(result.message || '导出失败');
+      const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
+      setStatus(`${state.latestArchivedRun.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
+    } catch (error) {
+      setStatus(`导出失败：${error.message || error}`, 'error');
+      showMessage('导出失败', error.message || String(error), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function statusTone(status) {
+    if (String(status).startsWith('failed')) return 'error';
+    if (status === 'success_with_skips' || status === 'all_skipped') return 'warning';
+    if (status === 'deleted') return 'deleted';
+    return 'success';
+  }
+
+  function renderOverviewTable(rows, emptyText) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return `<div class="vcc-fin-op-empty">${escapeHtml(emptyText)}</div>`;
+    }
+    return `
+      <div class="vcc-fin-op-table-wrap">
+        <table class="vcc-fin-op-table">
+          <thead><tr><th>表名</th><th>处理状态</th><th>生成时间</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.tableName)}</td>
+              <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
+              <td>${escapeHtml(formatDateTime(row.generatedAt || row.createdAt || row.archivedAt))}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderOpeningAudit(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) return '';
+    return `
+      <div class="vcc-fin-op-manager-subheading"><h4>首月期初初始化</h4><span>一次性记录，不可改写</span></div>
+      <div class="vcc-fin-op-table-wrap">
+        <table class="vcc-fin-op-table vcc-fin-op-opening-audit-table">
+          <thead><tr><th>主体</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}<th>初始化时间</th><th>核对说明</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.subject)}</td>
+              ${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((row.balances || {})[currency]))}</td>`).join('')}
+              <td>${escapeHtml(formatDateTime(row.initializedAt))}</td>
+              <td>${escapeHtml(row.note || '-')}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function rawRecordsTable(records) {
+    if (!records.length) return '<div class="vcc-fin-op-empty">当前账期暂无导入记录</div>';
+    return `
+      <div class="vcc-fin-op-table-wrap vcc-fin-op-record-table-wrap">
+        <table class="vcc-fin-op-table">
+          <thead>
+            <tr><th>账期</th><th>导入批次</th><th>原表类型</th><th>来源文件</th><th>导入时间</th><th>导入状态</th><th>操作</th></tr>
+          </thead>
+          <tbody>${records.map((record) => {
+            const batchDisplay = String(record.batchId || '').slice(0, 8) || '-';
+            return `
+              <tr>
+                <td>${escapeHtml(record.targetMonth)}</td>
+                <td title="${escapeHtml(record.batchId || '')}">${escapeHtml(batchDisplay)}</td>
+                <td>${escapeHtml(record.sourceLabel)}</td>
+                <td title="${escapeHtml((record.sourceFiles || []).join('\n'))}">${escapeHtml(record.sourceFileDisplay || '-')}</td>
+                <td>${escapeHtml(formatDateTime(record.finishedAt || record.startedAt))}</td>
+                <td><span class="vcc-fin-op-state" data-state="${statusTone(record.status)}">${escapeHtml(record.statusText)}</span></td>
+                <td><button class="vcc-fin-op-link-btn" type="button" data-record-id="${record.id}">查看导入明细</button></td>
+              </tr>
+            `;
+          }).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function rowDetailHtml(row) {
+    const incoming = escapeHtml(JSON.stringify(row.incoming || {}, null, 2));
+    const existing = row.existing ? escapeHtml(JSON.stringify(row.existing, null, 2)) : '';
+    const source = row.existingSource
+      ? `${row.existingSource.sourceFile || '-'} / ${row.existingSource.sheetName || '-'} / 第 ${row.existingSource.sourceRow || '-'} 行`
+      : '';
+    return `
+      <details class="vcc-fin-op-row-details">
+        <summary>展开原始数据${row.diffFields && row.diffFields.length ? `（差异字段：${escapeHtml(row.diffFields.join('、'))}）` : ''}</summary>
+        <div class="vcc-fin-op-compare-grid${existing ? '' : ' is-single'}">
+          <section><h4>本次导入</h4><pre>${incoming}</pre></section>
+          ${existing ? `<section><h4>已存在记录</h4><p>${escapeHtml(source)}</p><pre>${existing}</pre></section>` : ''}
+        </div>
+      </details>
+    `;
+  }
+
+  function importRowsTable(rows) {
+    if (!rows.length) return '<div class="vcc-fin-op-empty">当前分类没有数据</div>';
+    return `
+      <div class="vcc-fin-op-table-wrap vcc-fin-op-detail-table-wrap">
+        <table class="vcc-fin-op-table">
+          <thead><tr><th>幂等键</th><th>文件</th><th>sheet</th><th>原表行号</th><th>分类</th><th>异常字段</th><th>说明</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.idempotencyKey || '-')}</td>
+              <td>${escapeHtml(row.sourceFile || '-')}</td>
+              <td>${escapeHtml(row.sheetName || '-')}</td>
+              <td class="number">${escapeHtml(row.sourceRow || '-')}</td>
+              <td>${escapeHtml(DISPOSITION_LABELS[row.disposition] || row.disposition)}</td>
+              <td>${escapeHtml(row.validationField || '-')}</td>
+              <td>${escapeHtml(row.message || '-')}</td>
+            </tr>
+            <tr class="vcc-fin-op-expanded-row"><td colspan="7">${rowDetailHtml(row)}</td></tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function importErrorsTable(errors) {
+    if (!Array.isArray(errors) || errors.length === 0) return '';
+    return `
+      <div class="vcc-fin-op-table-wrap vcc-fin-op-error-list">
+        <table class="vcc-fin-op-table">
+          <thead><tr><th>文件</th><th>sheet</th><th>原表行号</th><th>异常字段</th><th>错误码</th><th>说明</th></tr></thead>
+          <tbody>${errors.map((error) => `
+            <tr>
+              <td>${escapeHtml(error.source_file || '-')}</td>
+              <td>${escapeHtml(error.sheet_name || '-')}</td>
+              <td class="number">${escapeHtml(error.source_row || '-')}</td>
+              <td>${escapeHtml(error.field_name || '-')}</td>
+              <td>${escapeHtml(error.error_code || '-')}</td>
+              <td>${escapeHtml(error.message || '导入异常')}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function openImportRecordDetail(recordId, onChanged) {
+    const detailState = { tab: 'summary', page: 1, pageSize: 100, key: '', fileName: '' };
+    const modal = mountDialog({
+      title: '导入记录详情',
+      className: 'vcc-fin-op-detail-dialog',
+      bodyHtml: '<div class="vcc-fin-op-loading">正在读取导入记录…</div>'
+    });
+
+    async function load() {
+      const payload = { recordId, ...detailState };
+      const result = await api.getImportDetail(payload);
+      if (!result || result.status !== 'success') {
+        modal.body.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(result && result.message || '读取失败')}</div>`;
+        return;
+      }
+      const summary = result.summary;
+      const isSystemOpSummary = summary.sourceType === 'system_op';
+      const countValue = (value) => (
+        isSystemOpSummary ? formatSystemOpSnapshotCount(value, true) : formatInteger(value)
+      );
+      const summaryStatusText = summary.status === 'deleted'
+        ? `已删除（原导入状态：${summary.originalStatusText || '-'}）`
+        : summary.statusText;
+      const tabs = [
+        ['summary', `概览`],
+        ['skips', `幂等跳过 ${isSystemOpSummary ? `${formatInteger(summary.skippedCount)} 快照` : formatInteger(summary.skippedCount)}`],
+        ['conflicts', `幂等冲突 ${isSystemOpSummary ? `${formatInteger(summary.conflictCount)} 快照` : formatInteger(summary.conflictCount)}`],
+        ['other', `其他异常 ${formatInteger(summary.invalidKeyCount + summary.formatErrorCount + summary.rolledBackCount)}`]
+      ];
+      const summaryHtml = `
+        <div class="vcc-fin-op-metric-grid">
+          <div><span>${isSystemOpSummary ? '原始输入单元' : '原始行'}</span><strong>${formatInteger(summary.rawCount)}</strong></div>
+          <div><span>${isSystemOpSummary ? '新增币种数据' : '新增'}</span><strong>${countValue(summary.insertedCount)}</strong></div>
+          <div><span>${isSystemOpSummary ? '幂等跳过数据' : '幂等跳过'}</span><strong>${countValue(summary.skippedCount)}</strong></div>
+          <div><span>${isSystemOpSummary ? '幂等冲突数据' : '幂等冲突'}</span><strong>${countValue(summary.conflictCount)}</strong></div>
+          <div><span>幂等键为空</span><strong>${formatInteger(summary.invalidKeyCount)}</strong></div>
+          <div><span>格式异常</span><strong>${formatInteger(summary.formatErrorCount)}</strong></div>
+          <div><span>${isSystemOpSummary ? '回滚币种数据' : '回滚行'}</span><strong>${countValue(summary.rolledBackCount)}</strong></div>
+        </div>
+        ${summary.errorMessage ? `<p class="vcc-fin-op-message" data-tone="error">${escapeHtml(summary.errorMessage)}</p>` : ''}
+        ${summary.status === 'deleted' ? `<p class="vcc-fin-op-message">关联有效原表已于 ${escapeHtml(formatDateTime(summary.datasetDeletedAt))} 删除；原导入统计与审计明细继续保留。</p>` : ''}
+        ${importErrorsTable(result.errors || [])}
+        ${summary.resolutionStatus === 'resolved' ? `<p class="vcc-fin-op-resolution">已处理：保留当前有效数据集，本次失败导入不参与计算。${escapeHtml(summary.resolutionNote || '-')}（${escapeHtml(formatDateTime(summary.resolvedAt))}）</p>` : ''}
+      `;
+      const pages = Math.max(1, Math.ceil((result.total || 0) / result.pageSize));
+      const rowsHtml = detailState.tab === 'summary'
+        ? summaryHtml
+        : `
+          <div class="vcc-fin-op-detail-toolbar">
+            <input class="vcc-fin-op-input" type="search" data-filter="key" value="${escapeHtml(detailState.key)}" placeholder="筛选幂等键">
+            <input class="vcc-fin-op-input" type="search" data-filter="file" value="${escapeHtml(detailState.fileName)}" placeholder="筛选文件名">
+            <button class="secondary-btn small" type="button" data-action="search">筛选</button>
+            <button class="secondary-btn small" type="button" data-action="audit">导出当前分类</button>
+          </div>
+          ${detailState.tab === 'other' ? importErrorsTable(result.errors || []) : ''}
+          ${importRowsTable(result.rows || [])}
+          <div class="vcc-fin-op-pagination">
+            <button class="secondary-btn small" type="button" data-page="prev"${result.page <= 1 ? ' disabled' : ''}>上一页</button>
+            <span>第 ${result.page} / ${pages} 页，共 ${formatInteger(result.total)} 行</span>
+            <button class="secondary-btn small" type="button" data-page="next"${result.page >= pages ? ' disabled' : ''}>下一页</button>
+          </div>
+        `;
+      modal.body.innerHTML = `
+        <div class="vcc-fin-op-record-heading">
+          <div><strong>${escapeHtml(summary.sourceLabel)}</strong><span>${escapeHtml(summary.targetMonth)} · ${escapeHtml(summaryStatusText)}</span></div>
+          ${summary.resolutionStatus === 'unresolved' ? '<button class="secondary-btn small" type="button" data-action="resolve">标记异常已处理</button>' : ''}
+        </div>
+        <div class="vcc-fin-op-tabs" role="tablist">
+          ${tabs.map(([tab, label]) => `<button type="button" role="tab" data-tab="${tab}" aria-selected="${detailState.tab === tab}">${escapeHtml(label)}</button>`).join('')}
+        </div>
+        <div class="vcc-fin-op-detail-content">${rowsHtml}</div>
+      `;
+      modal.body.querySelectorAll('[data-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+          detailState.tab = button.dataset.tab;
+          detailState.page = 1;
+          load();
+        });
+      });
+      const searchBtn = modal.body.querySelector('[data-action="search"]');
+      if (searchBtn) searchBtn.addEventListener('click', () => {
+        detailState.key = modal.body.querySelector('[data-filter="key"]').value.trim();
+        detailState.fileName = modal.body.querySelector('[data-filter="file"]').value.trim();
+        detailState.page = 1;
+        load();
+      });
+      const auditBtn = modal.body.querySelector('[data-action="audit"]');
+      if (auditBtn) auditBtn.addEventListener('click', async () => {
+        auditBtn.disabled = true;
+        try {
+          const exported = await api.exportImportAudit({ recordId, tab: detailState.tab, key: detailState.key, fileName: detailState.fileName });
+          if (exported && exported.status === 'error') showMessage('导出失败', exported.message || '导出失败', 'error');
+        } finally {
+          auditBtn.disabled = false;
+        }
+      });
+      modal.body.querySelectorAll('[data-page]').forEach((button) => {
+        button.addEventListener('click', () => {
+          detailState.page += button.dataset.page === 'next' ? 1 : -1;
+          load();
+        });
+      });
+      const resolveBtn = modal.body.querySelector('[data-action="resolve"]');
+      if (resolveBtn) resolveBtn.addEventListener('click', () => openResolutionDialog(summary, async () => {
+        if (typeof onChanged === 'function') await onChanged();
+        await load();
+      }));
+    }
+
+    load().catch((error) => {
+      modal.body.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
+    });
+  }
+
+  function openResolutionDialog(summary, onResolved) {
+    const modal = mountDialog({
+      title: '标记导入异常已处理',
+      className: 'vcc-fin-op-compact-dialog',
+      bodyHtml: `
+        <p class="vcc-fin-op-message" data-tone="warning">本次失败导入的数据未生效。标记已处理后，计算将继续使用此前已生效的数据；请写明核对结论。</p>
+        <label class="vcc-fin-op-field"><span>处理说明</span><textarea class="vcc-fin-op-input vcc-fin-op-textarea" data-field="note" rows="4" maxlength="500"></textarea></label>
+        <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="resolution-confirm">已确认保留当前有效数据集，本次失败导入不参与计算</label>
+        <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
+        <div class="dialog-actions right">
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+          <button class="primary-btn small" type="button" data-action="confirm">确认已处理</button>
+        </div>
+      `
+    });
+    modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
+    modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
+      const button = modal.dialog.querySelector('[data-action="confirm"]');
+      const note = modal.dialog.querySelector('[data-field="note"]').value.trim();
+      const confirmed = modal.dialog.querySelector('[data-field="resolution-confirm"]').checked;
+      const error = modal.dialog.querySelector('[data-role="error"]');
+      if (!note || !confirmed) {
+        error.textContent = !note ? '请填写处理说明' : '请确认本次失败导入不参与计算';
+        error.hidden = false;
+        return;
+      }
+      button.disabled = true;
+      try {
+        const result = await api.resolveImportRecord({
+          recordId: summary.id,
+          note,
+          action: 'keep_current_effective_dataset'
+        });
+        if (!result || result.status !== 'success') throw new Error(result && result.message || '处理失败');
+        modal.close();
+        if (typeof onResolved === 'function') await onResolved();
+      } catch (cause) {
+        error.textContent = cause.message || String(cause);
+        error.hidden = false;
+      } finally {
+        button.disabled = false;
+      }
+    });
+  }
+
+  function openDatasetDeleteDialog({ months, initialMonth = '', onDeleted, previewResult = null }) {
+    const availableMonths = Array.isArray(months) ? months : [];
+    const selectedMonth = availableMonths.includes(initialMonth) ? initialMonth : (availableMonths[0] || '');
+    const sourceOptions = Object.entries(SOURCE_LABELS)
+      .map(([sourceType, label]) => `<option value="${escapeHtml(sourceType)}">${escapeHtml(label)}</option>`)
+      .join('');
+    const monthOptions = availableMonths.length
+      ? availableMonths.map((month) => `<option value="${escapeHtml(month)}"${month === selectedMonth ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
+      : '<option value="">暂无已导入账期</option>';
+    let deleting = false;
+    const modal = mountDialog({
+      title: '删除数据',
+      className: 'vcc-fin-op-delete-dialog',
+      initialFocusSelector: '[data-field="delete-month"]:not(:disabled)',
+      canClose: () => !deleting,
+      bodyHtml: `
+        <div class="vcc-fin-op-delete-form">
+          <div class="vcc-fin-op-delete-fields">
+            <label class="vcc-fin-op-field">
+              <span>月份账期</span>
+              <select class="vcc-fin-op-input" data-field="delete-month"${availableMonths.length ? '' : ' disabled'}>${monthOptions}</select>
+            </label>
+            <label class="vcc-fin-op-field">
+              <span>目标表</span>
+              <select class="vcc-fin-op-input" data-field="delete-source"${availableMonths.length ? '' : ' disabled'}>${sourceOptions}</select>
+            </label>
+          </div>
+          <p class="vcc-fin-op-delete-state" data-role="delete-state" data-tone="neutral"></p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="danger-btn small" type="button" data-action="confirm-delete" disabled>删除</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `
+    });
+    const sourceSelect = modal.dialog.querySelector('[data-field="delete-source"]');
+    const monthSelect = modal.dialog.querySelector('[data-field="delete-month"]');
+    const deleteButton = modal.dialog.querySelector('[data-action="confirm-delete"]');
+    const cancelButton = modal.dialog.querySelector('[data-action="cancel"]');
+    const closeButton = modal.dialog.querySelector('[data-action="close"]');
+    const stateText = modal.dialog.querySelector('[data-role="delete-state"]');
+    let previewVersion = 0;
+
+    function setDeleteState(message, tone = 'neutral') {
+      stateText.textContent = String(message || '');
+      stateText.dataset.tone = tone;
+    }
+
+    async function refreshPreview() {
+      const currentVersion = ++previewVersion;
+      deleteButton.disabled = true;
+      const targetMonth = monthSelect.value;
+      const sourceType = sourceSelect.value;
+      if (!targetMonth || !sourceType) {
+        setDeleteState('当前没有可删除的有效数据');
+        return;
+      }
+      setDeleteState('正在核对可删除数据…');
+      try {
+        const result = previewResult
+          ? { status: 'success', ...(typeof previewResult === 'function'
+            ? previewResult({ targetMonth, sourceType })
+            : previewResult) }
+          : await api.previewDatasetDeletion({ targetMonth, sourceType });
+        if (currentVersion !== previewVersion) return;
+        if (!result || result.status !== 'success') {
+          setDeleteState(result && result.message || '删除范围核对失败', 'error');
+          return;
+        }
+        if (!result.deletable) {
+          setDeleteState(result.message || '当前选择没有可删除的有效数据', 'error');
+          return;
+        }
+        const invalidated = Number(result.calculatedRunCount) || 0;
+        setDeleteState(
+          `当前有效数据 ${formatInteger(result.dataCount)} 条${invalidated > 0 ? `，将同步作废 ${formatInteger(invalidated)} 条未归档结果` : ''}`,
+          'warning'
+        );
+        deleteButton.disabled = false;
+      } catch (error) {
+        if (currentVersion !== previewVersion) return;
+        setDeleteState(error.message || String(error), 'error');
+      }
+    }
+
+    sourceSelect.addEventListener('change', refreshPreview);
+    monthSelect.addEventListener('change', refreshPreview);
+    cancelButton.addEventListener('click', modal.close);
+    deleteButton.addEventListener('click', async () => {
+      const targetMonth = monthSelect.value;
+      const sourceType = sourceSelect.value;
+      if (!targetMonth || !sourceType || deleteButton.disabled) return;
+      previewVersion += 1;
+      deleting = true;
+      setBusy(true, 'delete');
+      deleteButton.disabled = true;
+      cancelButton.disabled = true;
+      closeButton.disabled = true;
+      sourceSelect.disabled = true;
+      monthSelect.disabled = true;
+      setDeleteState('正在删除数据…', 'warning');
+      setStatus(`正在删除 ${targetMonth} ${SOURCE_LABELS[sourceType]}数据…`, 'info');
+      let result;
+      try {
+        result = await api.deleteDataset({ targetMonth, sourceType });
+        if (!result || result.status !== 'success') {
+          throw new Error(result && result.message || '删除失败');
+        }
+      } catch (error) {
+        deleting = false;
+        setBusy(false);
+        setStatus(`删除失败：${error.message || error}`, 'error');
+        showMessage('删除失败', error.message || String(error), 'error');
+        cancelButton.disabled = false;
+        closeButton.disabled = false;
+        sourceSelect.disabled = false;
+        monthSelect.disabled = false;
+        refreshPreview();
+        return;
+      }
+
+      deleting = false;
+      setBusy(false);
+      modal.close();
+      const invalidated = Number(result.invalidatedRunCount) || 0;
+      const successMessage = `已删除 ${result.targetMonth} ${result.sourceLabel}有效数据 ${formatInteger(result.deletedDataCount)} 条${invalidated > 0 ? `，并作废 ${formatInteger(invalidated)} 条未归档结果` : ''}。`;
+      setStatus(`${result.targetMonth} ${result.sourceLabel}数据已删除`, 'success');
+      try {
+        if (typeof onDeleted === 'function') await onDeleted(result);
+      } catch (error) {
+        showMessage('删除完成', `${successMessage} 数据管理刷新失败：${error.message || error}`, 'warning');
+        return;
+      }
+      showMessage('删除完成', successMessage, 'success');
+    });
+    refreshPreview();
+    return modal;
+  }
+
+  function openDatasetExportDialog({ months, initialMonth = '', initialSection = 'raw', previewResult = null }) {
+    const availableMonths = Array.isArray(months) ? months : [];
+    const selectedMonth = availableMonths.includes(initialMonth) ? initialMonth : (availableMonths[0] || '');
+    const preferredKind = initialSection === 'checks' ? 'check' : 'raw';
+    const targetOptions = [
+      ['raw', '校验原表', SOURCE_LABELS],
+      ['check', '校验表', CHECK_TABLE_LABELS]
+    ].map(([kind, groupLabel, labels]) => `
+      <optgroup label="${groupLabel}">
+        ${Object.entries(labels).map(([sourceType, label], index) => `
+          <option value="${kind}:${escapeHtml(sourceType)}"${kind === preferredKind && index === 0 ? ' selected' : ''}>${escapeHtml(label)}</option>
+        `).join('')}
+      </optgroup>
+    `).join('');
+    const monthOptions = availableMonths.length
+      ? availableMonths.map((month) => `<option value="${escapeHtml(month)}"${month === selectedMonth ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
+      : '<option value="">暂无已导入账期</option>';
+    let exporting = false;
+    const modal = mountDialog({
+      title: '导出数据',
+      className: 'vcc-fin-op-delete-dialog vcc-fin-op-export-dialog',
+      initialFocusSelector: '[data-field="export-month"]:not(:disabled)',
+      canClose: () => !exporting,
+      bodyHtml: `
+        <div class="vcc-fin-op-delete-form">
+          <div class="vcc-fin-op-delete-fields">
+            <label class="vcc-fin-op-field">
+              <span>月份账期</span>
+              <select class="vcc-fin-op-input" data-field="export-month"${availableMonths.length ? '' : ' disabled'}>${monthOptions}</select>
+            </label>
+            <label class="vcc-fin-op-field">
+              <span>目标表</span>
+              <select class="vcc-fin-op-input" data-field="export-target"${availableMonths.length ? '' : ' disabled'}>${targetOptions}</select>
+            </label>
+          </div>
+          <p class="vcc-fin-op-delete-state" data-role="export-state" data-tone="neutral"></p>
+        </div>
+        <div class="dialog-actions right">
+          <button class="primary-btn small" type="button" data-action="confirm-export" disabled>导出</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `
+    });
+    const monthSelect = modal.dialog.querySelector('[data-field="export-month"]');
+    const targetSelect = modal.dialog.querySelector('[data-field="export-target"]');
+    const exportButton = modal.dialog.querySelector('[data-action="confirm-export"]');
+    const cancelButton = modal.dialog.querySelector('[data-action="cancel"]');
+    const closeButton = modal.dialog.querySelector('[data-action="close"]');
+    const stateText = modal.dialog.querySelector('[data-role="export-state"]');
+    let previewVersion = 0;
+
+    function selectedTarget() {
+      const [targetKind, sourceType] = String(targetSelect.value || '').split(':');
+      return { targetKind, sourceType };
+    }
+
+    function setExportState(message, tone = 'neutral') {
+      stateText.textContent = String(message || '');
+      stateText.dataset.tone = tone;
+    }
+
+    async function refreshPreview() {
+      const currentVersion = ++previewVersion;
+      exportButton.disabled = true;
+      const targetMonth = monthSelect.value;
+      const { targetKind, sourceType } = selectedTarget();
+      if (!targetMonth || !targetKind || !sourceType) {
+        setExportState('当前没有可导出的有效数据');
+        return;
+      }
+      setExportState('正在核对可导出数据…');
+      try {
+        const result = previewResult
+          ? { status: 'success', ...(typeof previewResult === 'function'
+            ? previewResult({ targetMonth, sourceType, targetKind })
+            : previewResult) }
+          : await api.previewDatasetExport({ targetMonth, sourceType, targetKind });
+        if (currentVersion !== previewVersion) return;
+        if (!result || result.status !== 'success') {
+          setExportState(result && result.message || '导出范围核对失败', 'error');
+          return;
+        }
+        if (!result.exportable) {
+          setExportState(result.message || '当前选择没有可导出的有效数据', 'error');
+          return;
+        }
+        setExportState(`当前可导出有效数据 ${formatInteger(result.dataCount)} 条`, 'success');
+        exportButton.disabled = false;
+      } catch (error) {
+        if (currentVersion !== previewVersion) return;
+        setExportState(error.message || String(error), 'error');
+      }
+    }
+
+    monthSelect.addEventListener('change', refreshPreview);
+    targetSelect.addEventListener('change', refreshPreview);
+    cancelButton.addEventListener('click', modal.close);
+    exportButton.addEventListener('click', async () => {
+      const targetMonth = monthSelect.value;
+      const { targetKind, sourceType } = selectedTarget();
+      if (!targetMonth || !targetKind || !sourceType || exportButton.disabled) return;
+      previewVersion += 1;
+      exporting = true;
+      setBusy(true, 'export-data');
+      exportButton.disabled = true;
+      cancelButton.disabled = true;
+      closeButton.disabled = true;
+      monthSelect.disabled = true;
+      targetSelect.disabled = true;
+      setExportState('正在导出数据…', 'warning');
+      setStatus(`正在导出 ${targetMonth} 数据…`, 'info');
+      try {
+        const result = await api.exportDataset({ targetMonth, sourceType, targetKind });
+        if (!result || result.status === 'cancelled') {
+          exporting = false;
+          setBusy(false);
+          cancelButton.disabled = false;
+          closeButton.disabled = false;
+          monthSelect.disabled = false;
+          targetSelect.disabled = false;
+          setStatus('已取消导出', 'info');
+          refreshPreview();
+          return;
+        }
+        if (result.status !== 'success') throw new Error(result.message || '导出失败');
+        exporting = false;
+        setBusy(false);
+        modal.close();
+        const successMessage = `已导出 ${result.targetMonth} ${result.tableName}有效数据 ${formatInteger(result.dataCount)} 条。`;
+        setStatus(`${result.targetMonth} ${result.tableName}已导出`, 'success');
+        showMessage('导出完成', successMessage, 'success');
+      } catch (error) {
+        exporting = false;
+        setBusy(false);
+        setStatus(`导出失败：${error.message || error}`, 'error');
+        showMessage('导出失败', error.message || String(error), 'error');
+        cancelButton.disabled = false;
+        closeButton.disabled = false;
+        monthSelect.disabled = false;
+        targetSelect.disabled = false;
+        refreshPreview();
+      }
+    });
+    refreshPreview();
+    return modal;
+  }
+
+  async function openDataManager({ initialMonth = '', initialSection = 'results', previewData = null } = {}) {
+    let months;
+    try {
+      months = previewData ? previewData.months : await api.listImportMonths();
+    } catch (error) {
+      showMessage('数据管理', error.message || String(error), 'error');
+      return;
+    }
+    const titles = { results: '结果表', checks: '校验表', raw: '导入记录' };
+    const managerState = {
+      month: months.includes(initialMonth) ? initialMonth : (months[0] || ''),
+      section: Object.hasOwn(titles, initialSection) ? initialSection : 'results'
+    };
+    const monthOptions = months.length
+      ? months.map((month) => `<option value="${escapeHtml(month)}"${month === managerState.month ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
+      : '<option value="">暂无已导入账期</option>';
+    const modal = mountDialog({
+      title: '数据管理',
+      className: 'vcc-fin-op-manager-dialog',
+      initialFocusSelector: '[data-field="manager-month"]:not(:disabled)',
+      bodyHtml: `
+        <div class="vcc-fin-op-manager-shell">
+          <div class="position-manager-layout vcc-fin-op-manager-layout">
+            <nav class="position-manager-nav vcc-fin-op-manager-nav" aria-label="数据分类">
+              <button class="position-nav-item" type="button" data-section="results">结果表</button>
+              <button class="position-nav-item" type="button" data-section="checks">校验表</button>
+              <button class="position-nav-item" type="button" data-section="raw">校验原表</button>
+            </nav>
+            <section class="position-manager-pane vcc-fin-op-manager-pane">
+              <div class="vcc-fin-op-manager-toolbar">
+                <h3 data-role="manager-title">${escapeHtml(titles[managerState.section])}</h3>
+                <label><span>月份账期</span><select class="vcc-fin-op-input" data-field="manager-month"${months.length ? '' : ' disabled'}>${monthOptions}</select></label>
+              </div>
+              <div class="vcc-fin-op-manager-content" data-role="manager-content"></div>
+            </section>
+          </div>
+          <div class="dialog-actions right vcc-fin-op-manager-footer">
+            <button class="secondary-btn small" type="button" data-action="delete-dataset"${months.length ? '' : ' disabled'}>删除</button>
+            <button class="secondary-btn small" type="button" data-action="export-dataset"${months.length ? '' : ' disabled'}>导出</button>
+            <button class="secondary-btn small" type="button" data-action="return">返回</button>
+          </div>
+        </div>
+      `
+    });
+    const content = modal.dialog.querySelector('[data-role="manager-content"]');
+    const managerTitle = modal.dialog.querySelector('[data-role="manager-title"]');
+    const monthSelect = modal.dialog.querySelector('[data-field="manager-month"]');
+    const deleteButton = modal.dialog.querySelector('[data-action="delete-dataset"]');
+    const exportButton = modal.dialog.querySelector('[data-action="export-dataset"]');
+    const returnButton = modal.dialog.querySelector('[data-action="return"]');
+    let renderVersion = 0;
+
+    async function render() {
+      const currentVersion = ++renderVersion;
+      const section = managerState.section;
+      const month = managerState.month;
+      modal.dialog.querySelectorAll('[data-section]').forEach((button) => {
+        const selected = button.dataset.section === section;
+        button.classList.toggle('active', selected);
+        button.setAttribute('aria-current', selected ? 'page' : 'false');
+      });
+      managerTitle.textContent = titles[section];
+      content.innerHTML = '<div class="vcc-fin-op-loading">正在读取…</div>';
+      if (!month) {
+        content.innerHTML = '<div class="vcc-fin-op-empty">暂无已导入账期</div>';
+        return;
+      }
+      state.lastMonth = month;
+      try {
+        if (section === 'raw') {
+          const records = previewData
+            ? previewData.records
+            : await api.listImportRecords({ yearMonth: month });
+          if (currentVersion !== renderVersion) return;
+          content.innerHTML = rawRecordsTable(records || []);
+          content.querySelectorAll('[data-record-id]').forEach((button) => {
+            button.addEventListener('click', () => openImportRecordDetail(Number(button.dataset.recordId), render));
+          });
+          return;
+        }
+        const overview = previewData
+          ? { status: 'success', ...previewData.overview }
+          : await api.dataManagerOverview({ yearMonth: month });
+        if (currentVersion !== renderVersion) return;
+        if (!overview || overview.status !== 'success') throw new Error(overview && overview.message || '读取数据管理状态失败');
+        const rows = section === 'results' ? overview.results : overview.checks;
+        content.innerHTML = `
+          ${renderOverviewTable(rows, section === 'results' ? '当前账期还没有校验结果' : '当前账期还没有校验表数据')}
+          ${section === 'results' ? renderOpeningAudit(overview.openingBalances) : ''}
+        `;
+      } catch (error) {
+        if (currentVersion === renderVersion) {
+          content.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
+        }
+      }
+    }
+
+    modal.dialog.querySelectorAll('[data-section]').forEach((button) => {
+      button.addEventListener('click', () => {
+        managerState.section = button.dataset.section;
+        render();
+      });
+    });
+    monthSelect.addEventListener('change', () => {
+      managerState.month = monthSelect.value;
+      render();
+    });
+    deleteButton.addEventListener('click', () => {
+      openDatasetDeleteDialog({
+        months,
+        initialMonth: managerState.month,
+        onDeleted: render
+      });
+    });
+    exportButton.addEventListener('click', () => {
+      openDatasetExportDialog({
+        months,
+        initialMonth: managerState.month,
+        initialSection: managerState.section
+      });
+    });
+    returnButton.addEventListener('click', modal.close);
+    render();
+  }
+
+  async function initialize() {
+    try {
+      const latest = await api.latestArchivedRun();
+      if (latest && latest.status === 'success') {
+        state.latestArchivedRun = latest;
+        state.lastMonth = latest.targetMonth || '';
+        setStatus(`${latest.targetMonth} 已归档，可导出结果`, 'success');
+      }
+    } catch (_error) {
+      // 启动时读取历史状态失败不阻断模块使用。
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  elements.importBtn.addEventListener('click', () => {
+    if (state.busyKind === 'import') {
+      handleCancelImport().catch((error) => {
+        setStatus(`取消失败：${error.message || error}`, 'error');
+        showMessage('取消失败', error.message || String(error), 'error');
+      });
+      return;
+    }
+    handleImport();
+  });
+  elements.runBtn.addEventListener('click', handleRun);
+  elements.exportBtn.addEventListener('click', handleExport);
+  elements.dataManagerBtn.addEventListener('click', () => openDataManager());
+  window.__vccFinancialOpPreview = {
+    openImportMonth() {
+      return chooseImportMonth({ title: '选择导入账期' });
+    },
+    openRunMonth() {
+      return chooseMonth({
+        title: '选择运行账期',
+        months: ['2026-06', '2026-05'],
+        initial: '2026-06'
+      });
+    },
+    openDataManager() {
+      return openDataManager({
+        initialMonth: '2026-06',
+        initialSection: 'raw',
+        previewData: {
+          months: ['2026-06', '2026-05'],
+          records: [
+            {
+              id: 42,
+              batchId: 'f91d2d4e-c2dd-4acd-a2c0-420000000001',
+              targetMonth: '2026-06',
+              sourceLabel: 'VCC充值清退明细',
+              sourceFiles: ['VCC充值清退明细_01.xlsx', 'VCC充值清退明细_02.xlsx'],
+              sourceFileDisplay: '2 个文件',
+              finishedAt: '2026-07-02 10:28:41',
+              status: 'deleted',
+              statusText: '已删除'
+            },
+            {
+              id: 41,
+              batchId: '2cc18056-e037-463a-8ed2-410000000001',
+              targetMonth: '2026-06',
+              sourceLabel: 'VCC通道明细',
+              sourceFiles: ['VCC通道明细_01.xlsx'],
+              sourceFileDisplay: 'VCC通道明细_01.xlsx',
+              finishedAt: '2026-07-02 09:46:03',
+              status: 'failed_conflict',
+              statusText: '失败（幂等冲突）'
+            },
+            {
+              id: 40,
+              batchId: '62850680-950d-4abd-babb-400000000001',
+              targetMonth: '2026-06',
+              sourceLabel: 'VCC_移除归档Pending账单',
+              sourceFiles: ['移除归档Pending账单.xlsx'],
+              sourceFileDisplay: '移除归档Pending账单.xlsx',
+              finishedAt: '2026-07-02 09:21:18',
+              status: 'success',
+              statusText: '导入成功'
+            }
+          ],
+          overview: {
+            results: [{ tableName: '财务OP校验结果表', dataStatus: 'unprocessed', dataStatusText: '未处理', createdAt: '2026-07-02 11:00:00' }],
+            checks: [],
+            raw: []
+          }
+        }
+      });
+    },
+    openDelete() {
+      return openDatasetDeleteDialog({
+        months: ['2026-06', '2026-05'],
+        initialMonth: '2026-06',
+        previewResult: {
+          deletable: true,
+          dataCount: 36932,
+          calculatedRunCount: 1
+        }
+      });
+    },
+    openExport() {
+      return openDatasetExportDialog({
+        months: ['2026-06', '2026-05'],
+        initialMonth: '2026-06',
+        initialSection: 'checks',
+        previewResult: {
+          exportable: true,
+          dataCount: 4003645
+        }
+      });
+    },
+    openResult() {
+      const balances = [];
+      for (const currency of CURRENCIES) {
+        balances.push({
+          subject: 'PPHK',
+          currency,
+          calculatedBalance: currency === 'USD' ? '15208345.72' : '1000000',
+          systemBalance: currency === 'USD' ? '15208340.72' : '1000000',
+          difference: currency === 'USD' ? '-5' : '0'
+        });
+      }
+      return confirmArchive({
+        status: 'calculated',
+        runId: 316,
+        targetMonth: '2026-06',
+        balances
+      });
+    },
+    openOpening() {
+      return requestOpeningInitialization({
+        status: 'blocked',
+        code: 'missing-opening-balance',
+        targetMonth: '2026-06',
+        previousMonth: '2026-05',
+        missingOpeningSubjects: ['PPHK']
+      });
+    }
+  };
+  initialize();
+})();

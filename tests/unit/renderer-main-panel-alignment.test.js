@@ -24,6 +24,7 @@ const TARGET_STATUS_IDS = [
   'bankBuReconStatusBox',
   'duplicateInboundMatchStatusBox',
   'vccOpCalcStatusBox',
+  'vccFinancialOpStatusBox',
   'bankStatementStatusBox',
   'preFundReconciliationStatusBox',
   'reconIdFixStatusBox',
@@ -49,7 +50,7 @@ function elementSourceById(id) {
 }
 
 test.describe('v3.0.20 主页面垂直对齐契约', () => {
-  test('11 个目标状态框共享内容层，新开账户状态框保持原结构', () => {
+  test('12 个目标状态框共享内容层，新开账户状态框保持原结构', () => {
     assert.equal((html.match(/class="status-box-content"/g) || []).length, TARGET_STATUS_IDS.length);
 
     for (const id of TARGET_STATUS_IDS) {
@@ -144,7 +145,10 @@ test.describe('v3.0.20 主页面垂直对齐契约', () => {
     assert.match(geometryVerifier, /const SCALE_FACTORS = \[1, 1\.25, 1\.5\]/);
     assert.match(geometryVerifier, /Emulation\.setDeviceMetricsOverride/);
     assert.match(geometryVerifier, /device scale factor: expected \$\{expectedScaleFactor\}, got \$\{window\.devicePixelRatio\}/);
-    assert.match(geometryVerifier, /statusTargets = \[[\s\S]*duplicateInboundMatchStatusBox[\s\S]*acquiringBillCurrencyStatusBox/);
+    assert.match(geometryVerifier, /statusTargets = \[[\s\S]*duplicateInboundMatchStatusBox[\s\S]*vccFinancialOpStatusBox[\s\S]*acquiringBillCurrencyStatusBox/);
+    assert.match(geometryVerifier, /vccButtonWidthDelta[\s\S]*vccButtonSymmetryDelta/);
+    assert.match(geometryVerifier, /Math\.abs\(importRect\.width - 140\) > tolerance/);
+    assert.match(geometryVerifier, /importDistance <= 0 \|\| runDistance <= 0 \|\| metrics\.vccButtonSymmetryDelta > tolerance/);
     assert.match(geometryVerifier, /bankBox\.scrollTop = bankBox\.scrollHeight/);
     assert.match(geometryVerifier, /Math\.abs\(bankCellHeight - 176\) > tolerance/);
     assert.match(windowsBuildWorkflow, /Verify main panel alignment[\s\S]*npm run verify:main-panel-alignment/);

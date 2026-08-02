@@ -674,8 +674,9 @@ test('普通来源 apply 只有在 manifest 文件证据持久化后才签发 gr
       assert.equal(ownerToken, operationToken);
       pending = structuredClone(value);
     },
-    recordArchiveIntentFiles: (files, role) => {
+    recordArchiveIntentFiles: (files, role, ownerToken) => {
       assert.equal(role, 'input');
+      assert.equal(ownerToken, operationToken);
       pending = {
         ...pending,
         archiveState: 'intent-recorded',
@@ -731,7 +732,8 @@ test('含过滤行的普通来源在 grant 前同时持久化异常报告证据'
     writePending: (value) => {
       pending = structuredClone(value);
     },
-    recordArchiveIntentFiles: (files, role) => {
+    recordArchiveIntentFiles: (files, role, ownerToken) => {
+      assert.equal(ownerToken, operationToken);
       roles.push(role);
       pending = {
         ...pending,
@@ -766,6 +768,16 @@ test('主进程异常报告存档意图保留预检声明的输入依赖', () =>
     implementation,
     /requiredInputPaths:\s*descriptor\.requiredInputPaths/,
     '异常报告 requiredInputPaths 必须进入 pending，不能在主进程转换时丢失'
+  );
+  assert.match(
+    implementation,
+    /function recordPositionArchiveIntentFiles\(filePaths, role, explicitOperationToken = ''\)/,
+    'utilityProcess 授权回调必须能显式传入 pending operation token'
+  );
+  assert.match(
+    implementation,
+    /explicitOperationToken \|\| \(context && context\.operationToken\)/,
+    '显式 owner token 应优先于可能丢失的 AsyncLocalStorage 上下文'
   );
 });
 

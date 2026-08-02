@@ -87,6 +87,7 @@ const {
   hasColumn
 } = require('./database/migrations');
 const { ensureBizOpReconTablesSupport } = require('./biz-op-recon-db/migrations');
+const { ensureVccFinancialOpTablesSupport } = require('./vcc-financial-op-db/migrations');
 const scenariosRepository = require('./database/scenarios-repository');
 const settingsRepository = require('./database/settings-repository');
 const templateRepository = require('./database/template-repository');
@@ -413,6 +414,8 @@ class AppDatabase {
     this.ensureBankBuReconRunsSideDbPath();
     // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表 + 2 索引（与现有 5 模块表完全隔离，调用顺序无依赖）
     this.ensureVccOpCalcTablesSupport();
+    // v3.1.6：VCC财务OP校验独立持久化空间（导入审计、有效事实、快照、运行及归档）。
+    this.ensureVccFinancialOpTablesSupport();
     // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
     // 与 v2.1.2 bank_bu_recon_* 完全独立，调用顺序无依赖
     this.ensureBizOpReconTablesSupport();
@@ -713,6 +716,11 @@ class AppDatabase {
   // v2.1.12 需求1 T-vcc-1：VCC业务OP计算模块 2 张表（runs / run_files）+ 2 索引
   ensureVccOpCalcTablesSupport() {
     return ensureVccOpCalcTablesSupport(this.db);
+  }
+
+  // v3.1.6：VCC财务OP校验表（与旧 VCC业务OP计算完全隔离）。
+  ensureVccFinancialOpTablesSupport() {
+    return ensureVccFinancialOpTablesSupport(this.db);
   }
 
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）

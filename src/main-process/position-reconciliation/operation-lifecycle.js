@@ -236,9 +236,9 @@ function authorizePositionImportApply({
     throw new Error('平盘导入缺少有效的存档 pending 所有权');
   }
 
-  recordArchiveIntentFiles(expectedFiles, 'input');
+  recordArchiveIntentFiles(expectedFiles, 'input', operationToken);
   if (expectedOutputs.length > 0) {
-    recordArchiveIntentFiles(expectedOutputs, 'output');
+    recordArchiveIntentFiles(expectedOutputs, 'output', operationToken);
   }
   const pendingWithFiles = readPending();
   if (!pendingWithFiles || pendingWithFiles.operationToken !== operationToken) {

@@ -1,0 +1,691 @@
+'use strict';
+
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const XLSX = require('xlsx');
+const { DatabaseSync } = require('node:sqlite');
+const { ensureVccFinancialOpTablesSupport } = require('../../../../src/backend/vcc-financial-op-db/migrations');
+const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
+const {
+  SOURCE_TYPES,
+  SUPPORTED_CURRENCIES,
+  SYSTEM_OP_HEADERS
+} = require('../../../../src/backend/vcc-financial-op/definitions');
+const { inspectSourceFile } = require('../../../../src/backend/vcc-financial-op/workbook-reader');
+const {
+  readSystemOpSnapshots,
+  importSystemOpGroup,
+  systemRecordResult
+} = require('../../../../src/backend/vcc-financial-op/system-op-importer');
+
+const TEMPLATE_PATH = path.join(
+  __dirname,
+  '../../../../assets/VCC财务OP校验/系统财务OP.xlsx'
+);
+
+function createDb() {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  return db;
+}
+
+function tempDir(t, prefix = 'vcc-system-op-test-') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+function balances(seed = 1) {
+  return Object.fromEntries(
+    SUPPORTED_CURRENCIES.map((currency, index) => [currency, seed + index + 0.25])
+  );
+}
+
+function sourceCurrency(currency) {
+  return currency === 'CNH' ? 'CNY' : currency;
+}
+
+function systemDataRows(snapshots) {
+  return snapshots.flatMap((snapshot) => {
+    const currencies = snapshot.currencies || SUPPORTED_CURRENCIES;
+    return currencies.map((currency) => ({
+      账单日期: snapshot.date || '2026-05-31',
+      主体: snapshot.subject,
+      业务部门: snapshot.department === undefined ? 'VCC' : snapshot.department,
+      币种: sourceCurrency(currency),
+      OP发生额: 0,
+      '发生额（入）': 0,
+      '发生额（出）': 0,
+      本期移除Pending金额: 0,
+      调账金额: 0,
+      OP期末余额: 0,
+      pending余额: 0,
+      费用项: 0,
+      财务余额: snapshot.balances[currency],
+      主体变动发生额: 0,
+      财务主体余额: snapshot.balances[currency],
+      创建时间: '2026-07-03 09:37:43'
+    }));
+  });
+}
+
+function writeWorkbook(t, {
+  snapshots = [{ subject: 'PPHK', balances: balances() }],
+  rows,
+  headers = SYSTEM_OP_HEADERS,
+  leadingRows = [],
+  fileName = 'system-op.xlsx',
+  sheetName = 'System',
+  duplicateSheet = false,
+  date1904 = false,
+  mutateSheet
+} = {}) {
+  const dir = tempDir(t);
+  const dataRows = rows || systemDataRows(snapshots);
+  const matrix = [
+    ...leadingRows,
+    headers,
+    ...dataRows.map((row) => headers.map((header) => (
+      Object.hasOwn(row, header) ? row[header] : ''
+    )))
+  ];
+  const workbook = XLSX.utils.book_new();
+  if (date1904) workbook.Workbook = { WBProps: { date1904: true } };
+  const sheet = XLSX.utils.aoa_to_sheet(matrix);
+  if (typeof mutateSheet === 'function') mutateSheet(sheet, leadingRows.length + 2);
+  XLSX.utils.book_append_sheet(workbook, sheet, sheetName);
+  if (duplicateSheet) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(matrix), `${sheetName}-2`);
+  }
+  const filePath = path.join(dir, fileName);
+  XLSX.writeFile(workbook, filePath);
+  return { filePath, sheetName };
+}
+
+function importFile(entry) {
+  return { filePath: entry.filePath, sheetName: entry.sheetName };
+}
+
+test('系统财务OP导入结果保留全部异常计数供界面汇总', () => {
+  const result = systemRecordResult({
+    id: 7,
+    batch_id: 'batch-7',
+    target_month: '2026-05',
+    source_type: SOURCE_TYPES.SYSTEM_OP,
+    status: 'failed_validation',
+    raw_count: 2,
+    inserted_count: 0,
+    skipped_count: 0,
+    invalid_key_count: 3,
+    conflict_count: 4,
+    format_error_count: 5,
+    rolled_back_count: 6,
+    error_message: '校验失败'
+  });
+
+  assert.equal(result.invalidKeyCount, 3);
+  assert.equal(result.conflictCount, 4);
+  assert.equal(result.formatErrorCount, 5);
+  assert.equal(result.rolledBackCount, 6);
+});
+
+test('系统财务OP正式资产逐列表头与识别契约一致', async () => {
+  const workbook = XLSX.readFile(TEMPLATE_PATH);
+  assert.equal(workbook.SheetNames.length, 1);
+  const matrix = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
+    header: 1,
+    raw: false,
+    defval: ''
+  });
+  assert.deepEqual(matrix[0], SYSTEM_OP_HEADERS);
+
+  const inspected = await inspectSourceFile(TEMPLATE_PATH);
+  assert.equal(inspected.sourceType, SOURCE_TYPES.SYSTEM_OP);
+  assert.equal(inspected.headerRow, 1);
+  assert.equal(inspected.requiresSubject, false);
+});
+
+test('系统财务OP按正式行式模板读取主体、九币种和完整原始血缘', (t) => {
+  const entry = writeWorkbook(t);
+  const snapshots = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.equal(snapshots.length, 1);
+  const snapshot = snapshots[0];
+  assert.equal(snapshot.targetMonth, '2026-05');
+  assert.equal(snapshot.subject, 'PPHK');
+  assert.equal(snapshot.sourceRow, 2);
+  assert.equal(snapshot.balances.AUD, '1.25');
+  assert.equal(snapshot.balances.CNH, '3.25');
+  assert.equal(snapshot.balances.USD, '9.25');
+  const raw = JSON.parse(snapshot.rawJson);
+  assert.deepEqual(raw.displayHeaders, SYSTEM_OP_HEADERS);
+  assert.equal(raw.rows.length, 9);
+  const cny = raw.rows.find((row) => row.sourceCurrency === 'CNY');
+  assert.equal(cny.normalizedCurrency, 'CNH');
+  assert.equal(Object.hasOwn(snapshot.balances, 'CNY'), false);
+});
+
+test('系统财务OP财务余额严格优先使用 Excel 显示值', (t) => {
+  const input = balances();
+  input.AUD = 123.45;
+  const entry = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: input }],
+    mutateSheet(sheet, firstDataRow) {
+      const ref = XLSX.utils.encode_cell({ r: firstDataRow - 1, c: 12 });
+      sheet[ref].z = '0.0';
+    }
+  });
+  const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.equal(snapshot.balances.AUD, '123.5');
+});
+
+test('系统财务OP表头位于第 20 行之后时识别和正式导入仍使用同一范围', async (t) => {
+  const leadingRows = Array.from({ length: 24 }, (_unused, index) => [`说明 ${index + 1}`]);
+  const entry = writeWorkbook(t, { leadingRows, fileName: 'late-header.xlsx' });
+  const inspected = await inspectSourceFile(entry.filePath);
+  assert.equal(inspected.headerRow, 25);
+  const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.equal(snapshot.sourceRow, 26);
+});
+
+test('系统财务OP缺列、多列或调换顺序均给出正式模板差异提示', async (t) => {
+  const variants = [];
+  variants.push(writeWorkbook(t, {
+    headers: SYSTEM_OP_HEADERS.filter((header) => header !== '财务余额'),
+    fileName: 'missing-header.xlsx'
+  }));
+  variants.push(writeWorkbook(t, {
+    headers: [...SYSTEM_OP_HEADERS, '额外列'],
+    fileName: 'extra-header.xlsx'
+  }));
+  const swapped = [...SYSTEM_OP_HEADERS];
+  [swapped[12], swapped[13]] = [swapped[13], swapped[12]];
+  variants.push(writeWorkbook(t, { headers: swapped, fileName: 'swapped-header.xlsx' }));
+
+  for (const entry of variants) {
+    await assert.rejects(
+      inspectSourceFile(entry.filePath),
+      (error) => {
+        assert.match(error.message, /系统财务OP表头与正式模板不一致/);
+        assert.ok(error.detailLines.some((line) => line.includes('系统财务OP.xlsx')));
+        assert.ok(error.detailLines.some((line) => line.includes('第 ')));
+        return true;
+      }
+    );
+    assert.throws(
+      () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+      (error) => {
+        assert.match(error.message, /系统财务OP表头与正式模板不一致/);
+        assert.ok(error.detailLines.some((line) => line.includes('系统财务OP.xlsx')));
+        assert.ok(error.detailLines.some((line) => line.includes('第 ')));
+        return true;
+      }
+    );
+  }
+});
+
+test('旧 YYMMOP 横表不再被系统财务OP宽松识别', async (t) => {
+  const dir = tempDir(t, 'vcc-system-op-legacy-');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([
+    ['', '', ...SUPPORTED_CURRENCIES],
+    ['', '2605OP', ...SUPPORTED_CURRENCIES.map(() => 0)],
+    ['', '系统', ...SUPPORTED_CURRENCIES.map(() => 1)]
+  ]), 'Legacy');
+  const filePath = path.join(dir, 'legacy-system-op.xlsx');
+  XLSX.writeFile(workbook, filePath);
+
+  await assert.rejects(
+    inspectSourceFile(filePath),
+    (error) => {
+      assert.match(error.message, /无法识别为 VCC 财务OP校验原表/);
+      assert.ok(error.detailLines.some((line) => line.includes('旧 YYMMOP 横表不再支持')));
+      return true;
+    }
+  );
+});
+
+test('同一工作簿存在多处系统财务OP表头时拒绝静默选第一处', async (t) => {
+  const entry = writeWorkbook(t, { duplicateSheet: true, fileName: 'ambiguous-system.xlsx' });
+  await assert.rejects(inspectSourceFile(entry.filePath), /检测到多处系统财务OP完整表头/);
+  assert.throws(
+    () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+    /正式导入时检测到多个可识别业务表/
+  );
+});
+
+test('系统财务OP正式导入二次拒绝 1904 日期系统', (t) => {
+  const entry = writeWorkbook(t, { date1904: true, fileName: 'date-1904.xlsx' });
+  assert.throws(
+    () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+    /暂不支持 1904 日期系统/
+  );
+});
+
+test('系统财务OP按所选账期筛选，并支持一个文件形成多个主体快照', (t) => {
+  const entry = writeWorkbook(t, {
+    snapshots: [
+      { subject: 'PPHK', date: '2026-04-30', balances: balances(50) },
+      { subject: 'PPHK', date: '2026-05-31', balances: balances(1) },
+      { subject: 'PPUS', date: '2026-05-31', balances: balances(20) }
+    ]
+  });
+  const snapshots = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.subject), ['PPHK', 'PPUS']);
+  assert.equal(snapshots[0].balances.AUD, '1.25');
+  assert.equal(snapshots[1].balances.AUD, '20.25');
+
+  const db = createDb();
+  t.after(() => db.close());
+  repository.createImportBatch(db, { id: 'multi-subject', targetMonth: '2026-05', fileCount: 1 });
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'multi-subject',
+    targetMonth: '2026-05',
+    files: [importFile(entry)]
+  });
+  assert.equal(record.status, 'success');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 2);
+});
+
+test('系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余额', (t) => {
+  const invalidCases = [
+    {
+      name: 'invalid-date.xlsx',
+      snapshot: { subject: 'PPHK', date: 'not-a-date', balances: balances() },
+      expected: /账单日期.*无法解析/
+    },
+    {
+      name: 'wrong-department.xlsx',
+      snapshot: { subject: 'PPHK', department: 'OTHER', balances: balances() },
+      expected: /业务部门.*必须为 VCC/
+    },
+    {
+      name: 'blank-subject.xlsx',
+      snapshot: { subject: '', balances: balances() },
+      expected: /主体.*不能为空/
+    },
+    {
+      name: 'blank-balance.xlsx',
+      snapshot: { subject: 'PPHK', balances: { ...balances(), AUD: '' } },
+      expected: /财务余额.*值不能为空/
+    }
+  ];
+
+  for (const invalid of invalidCases) {
+    const entry = writeWorkbook(t, {
+      snapshots: [invalid.snapshot],
+      fileName: invalid.name
+    });
+    assert.throws(
+      () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+      invalid.expected
+    );
+  }
+});
+
+test('系统财务OP拒绝缺失币种及 CNY/CNH 归一化重复', (t) => {
+  const missing = writeWorkbook(t, {
+    snapshots: [{
+      subject: 'PPHK',
+      balances: balances(),
+      currencies: SUPPORTED_CURRENCIES.filter((currency) => currency !== 'USD')
+    }],
+    fileName: 'missing-currency.xlsx'
+  });
+  assert.throws(
+    () => readSystemOpSnapshots(missing.filePath, '2026-05', missing.sheetName),
+    /缺少系统财务OP币种：USD/
+  );
+
+  const duplicateRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  duplicateRows.push({ ...duplicateRows.find((row) => row.币种 === 'CNY'), 币种: 'CNH' });
+  const duplicate = writeWorkbook(t, {
+    rows: duplicateRows,
+    fileName: 'cny-cnh-duplicate.xlsx'
+  });
+  assert.throws(
+    () => readSystemOpSnapshots(duplicate.filePath, '2026-05', duplicate.sheetName),
+    /币种 CNH.*重复/
+  );
+});
+
+test('系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const firstFile = writeWorkbook(t, { fileName: 'first.xlsx' });
+  const sameFile = writeWorkbook(t, { fileName: 'same.xlsx' });
+  const changedFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: { ...balances(), USD: 99.25 } }],
+    fileName: 'changed.xlsx'
+  });
+
+  repository.createImportBatch(db, { id: 'b1', targetMonth: '2026-05', fileCount: 1 });
+  const first = importSystemOpGroup({
+    db, batchId: 'b1', targetMonth: '2026-05', files: [importFile(firstFile)]
+  });
+  repository.createImportBatch(db, { id: 'b2', targetMonth: '2026-05', fileCount: 1 });
+  const same = importSystemOpGroup({
+    db, batchId: 'b2', targetMonth: '2026-05', files: [importFile(sameFile)]
+  });
+  repository.createImportBatch(db, { id: 'b3', targetMonth: '2026-05', fileCount: 1 });
+  const changed = importSystemOpGroup({
+    db, batchId: 'b3', targetMonth: '2026-05', files: [importFile(changedFile)]
+  });
+
+  assert.equal(first.status, 'success');
+  assert.equal(same.status, 'all_skipped');
+  assert.equal(changed.status, 'failed_conflict');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
+  const stored = db.prepare('SELECT balances_json FROM vcc_fin_op_system_snapshots').get();
+  assert.equal(JSON.parse(stored.balances_json).USD, '9.25');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
+    WHERE disposition = 'idempotent_skip'
+  `).get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
+    WHERE disposition = 'idempotent_conflict'
+  `).get().n, 1);
+});
+
+test('系统财务OP校验表生成时间只随新增主体快照刷新', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const firstFile = writeWorkbook(t, { fileName: 'generated-system-first.xlsx' });
+  const secondFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+    fileName: 'generated-system-second.xlsx'
+  });
+
+  repository.createImportBatch(db, { id: 'generated-system-1', targetMonth: '2026-05', fileCount: 1 });
+  importSystemOpGroup({
+    db,
+    batchId: 'generated-system-1',
+    targetMonth: '2026-05',
+    files: [importFile(firstFile)]
+  });
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets SET generated_at = '2000-01-01 00:00:00'
+    WHERE target_month = '2026-05' AND dataset_type = ?
+  `).run(SOURCE_TYPES.SYSTEM_OP);
+
+  repository.createImportBatch(db, { id: 'generated-system-skip', targetMonth: '2026-05', fileCount: 1 });
+  const skipped = importSystemOpGroup({
+    db,
+    batchId: 'generated-system-skip',
+    targetMonth: '2026-05',
+    files: [importFile(firstFile)]
+  });
+  assert.equal(skipped.status, 'all_skipped');
+  assert.equal(db.prepare(`
+    SELECT generated_at FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-05' AND dataset_type = ?
+  `).get(SOURCE_TYPES.SYSTEM_OP).generated_at, '2000-01-01 00:00:00');
+
+  repository.createImportBatch(db, { id: 'generated-system-2', targetMonth: '2026-05', fileCount: 1 });
+  const inserted = importSystemOpGroup({
+    db,
+    batchId: 'generated-system-2',
+    targetMonth: '2026-05',
+    files: [importFile(secondFile)]
+  });
+  assert.equal(inserted.status, 'success');
+  assert.equal(db.prepare(`
+    SELECT generated_at FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-05' AND dataset_type = ?
+  `).get(SOURCE_TYPES.SYSTEM_OP).generated_at, inserted.finished_at);
+});
+
+test('系统财务OP归档后允许精确重放但拒绝新增主体快照', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const firstFile = writeWorkbook(t, { fileName: 'archive-first.xlsx' });
+  const sameFile = writeWorkbook(t, { fileName: 'archive-same.xlsx' });
+  const newSubjectFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+    fileName: 'archive-new-subject.xlsx'
+  });
+
+  repository.createImportBatch(db, { id: 'archive-b1', targetMonth: '2026-05', fileCount: 1 });
+  importSystemOpGroup({
+    db, batchId: 'archive-b1', targetMonth: '2026-05', files: [importFile(firstFile)]
+  });
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (target_month, status, input_revisions_json)
+    VALUES ('2026-05', 'archived', '{}')
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
+    VALUES ('2026-05', 'PPHK', ?, ?)
+  `).run(JSON.stringify(balances()), runId);
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets SET data_status = 'archived', archived_run_id = ?
+    WHERE target_month = '2026-05'
+  `).run(runId);
+
+  repository.createImportBatch(db, { id: 'archive-b2', targetMonth: '2026-05', fileCount: 1 });
+  const replay = importSystemOpGroup({
+    db, batchId: 'archive-b2', targetMonth: '2026-05', files: [importFile(sameFile)]
+  });
+  repository.createImportBatch(db, { id: 'archive-b3', targetMonth: '2026-05', fileCount: 1 });
+  const rejected = importSystemOpGroup({
+    db, batchId: 'archive-b3', targetMonth: '2026-05', files: [importFile(newSubjectFile)]
+  });
+
+  assert.equal(replay.status, 'all_skipped');
+  assert.equal(rejected.status, 'failed_validation');
+  assert.match(rejected.error_message, /已归档/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ? AND disposition = 'rolled_back'
+  `).get(rejected.id).n, 1);
+});
+
+test('同批同主体系统财务OP异内容冲突互相关联以供双侧核对', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const firstFile = writeWorkbook(t, { fileName: 'batch-first.xlsx' });
+  const changedFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: { ...balances(), USD: 88.25 } }],
+    fileName: 'batch-changed.xlsx'
+  });
+  repository.createImportBatch(db, { id: 'same-batch', targetMonth: '2026-05', fileCount: 2 });
+
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'same-batch',
+    targetMonth: '2026-05',
+    files: [importFile(firstFile), importFile(changedFile)]
+  });
+
+  assert.equal(record.status, 'failed_conflict');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 0);
+  const attempts = db.prepare(`
+    SELECT id, comparison_attempt_id
+    FROM vcc_fin_op_system_snapshot_attempts
+    ORDER BY id
+  `).all();
+  assert.equal(attempts.length, 2);
+  assert.equal(attempts[0].comparison_attempt_id, attempts[1].id);
+  assert.equal(attempts[1].comparison_attempt_id, attempts[0].id);
+});
+
+test('系统快照失败批次中的精确重放仍归类为幂等跳过', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const baseline = writeWorkbook(t, { fileName: 'baseline-system.xlsx' });
+  repository.createImportBatch(db, { id: 'baseline-batch', targetMonth: '2026-05', fileCount: 1 });
+  importSystemOpGroup({
+    db, batchId: 'baseline-batch', targetMonth: '2026-05', files: [importFile(baseline)]
+  });
+  const same = writeWorkbook(t, { fileName: 'same-system.xlsx' });
+  const firstConflict = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+    fileName: 'ppus-1.xlsx'
+  });
+  const secondConflict = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(30) }],
+    fileName: 'ppus-2.xlsx'
+  });
+  repository.createImportBatch(db, { id: 'mixed-system-batch', targetMonth: '2026-05', fileCount: 3 });
+
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'mixed-system-batch',
+    targetMonth: '2026-05',
+    files: [importFile(same), importFile(firstConflict), importFile(secondConflict)]
+  });
+
+  assert.equal(record.status, 'failed_conflict');
+  assert.equal(record.raw_count, 3);
+  assert.equal(record.skipped_count, 1);
+  assert.equal(record.conflict_count, 2);
+  assert.equal(record.rolled_back_count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
+});
+
+test('系统快照同主体的精确重放与异内容在失败批次内分别归类', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const baseline = writeWorkbook(t, { fileName: 'baseline-same-subject.xlsx' });
+  repository.createImportBatch(db, { id: 'same-subject-baseline', targetMonth: '2026-05', fileCount: 1 });
+  importSystemOpGroup({
+    db,
+    batchId: 'same-subject-baseline',
+    targetMonth: '2026-05',
+    files: [importFile(baseline)]
+  });
+
+  const same = writeWorkbook(t, { fileName: 'same-existing.xlsx' });
+  const changed = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: { ...balances(), USD: 88.25 } }],
+    fileName: 'changed-existing.xlsx'
+  });
+  repository.createImportBatch(db, { id: 'same-subject-mixed', targetMonth: '2026-05', fileCount: 2 });
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'same-subject-mixed',
+    targetMonth: '2026-05',
+    files: [importFile(same), importFile(changed)]
+  });
+
+  assert.equal(record.status, 'failed_conflict');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.skipped_count, 1);
+  assert.equal(record.conflict_count, 1);
+  assert.equal(record.rolled_back_count, 0);
+  const attempts = db.prepare(`
+    SELECT source_file, disposition, existing_snapshot_id
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ?
+    ORDER BY source_file
+  `).all(record.id);
+  assert.deepEqual(attempts.map((item) => [item.source_file, item.disposition]), [
+    ['changed-existing.xlsx', 'idempotent_conflict'],
+    ['same-existing.xlsx', 'idempotent_skip']
+  ]);
+  assert.ok(attempts.every((item) => item.existing_snapshot_id));
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
+  assert.equal(
+    JSON.parse(db.prepare('SELECT balances_json FROM vcc_fin_op_system_snapshots').get().balances_json).USD,
+    '9.25'
+  );
+});
+
+test('系统财务OP格式错误记录保留字段、行号并满足快照数守恒', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const validFile = writeWorkbook(t, { fileName: 'valid-system.xlsx' });
+  const invalidFile = writeWorkbook(t, {
+    snapshots: [{ subject: '', balances: balances(20) }],
+    fileName: 'invalid-system.xlsx'
+  });
+  repository.createImportBatch(db, { id: 'mixed-validity', targetMonth: '2026-05', fileCount: 2 });
+
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'mixed-validity',
+    targetMonth: '2026-05',
+    files: [importFile(validFile), importFile(invalidFile)]
+  });
+
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.format_error_count, 1);
+  assert.equal(record.rolled_back_count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 0);
+  const attempt = db.prepare(`
+    SELECT disposition, source_file FROM vcc_fin_op_system_snapshot_attempts
+  `).get();
+  assert.equal(attempt.disposition, 'rolled_back');
+  assert.equal(attempt.source_file, 'valid-system.xlsx');
+  const error = db.prepare(`
+    SELECT source_file, sheet_name, source_row, field_name
+    FROM vcc_fin_op_import_errors
+  `).get();
+  assert.equal(error.source_file, 'invalid-system.xlsx');
+  assert.equal(error.sheet_name, 'System');
+  assert.equal(error.source_row, 2);
+  assert.equal(error.field_name, '主体');
+  assert.equal(
+    record.raw_count,
+    record.inserted_count + record.skipped_count + record.invalid_key_count
+      + record.conflict_count + record.format_error_count + record.rolled_back_count
+  );
+});
+
+test('系统财务OP同文件多主体部分格式错误时保留完整主体的回滚快照', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const entry = writeWorkbook(t, {
+    snapshots: [
+      { subject: 'PPHK', balances: balances() },
+      { subject: 'PPUS', department: 'OTHER', balances: balances(20) }
+    ],
+    fileName: 'mixed-subject-validity.xlsx'
+  });
+
+  assert.throws(
+    () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+    (error) => {
+      assert.match(error.message, /业务部门.*必须为 VCC/);
+      assert.equal(error.parsedSnapshots.length, 1);
+      assert.equal(error.parsedSnapshots[0].subject, 'PPHK');
+      return true;
+    }
+  );
+
+  repository.createImportBatch(db, { id: 'mixed-subject-validity', targetMonth: '2026-05', fileCount: 1 });
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'mixed-subject-validity',
+    targetMonth: '2026-05',
+    files: [importFile(entry)]
+  });
+
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.format_error_count, 1);
+  assert.equal(record.rolled_back_count, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 0);
+  const attempt = db.prepare(`
+    SELECT subject, disposition, raw_json
+    FROM vcc_fin_op_system_snapshot_attempts
+  `).get();
+  assert.equal(attempt.subject, 'PPHK');
+  assert.equal(attempt.disposition, 'rolled_back');
+  assert.equal(JSON.parse(attempt.raw_json).rows.length, 9);
+  const error = db.prepare(`
+    SELECT source_file, source_row, field_name
+    FROM vcc_fin_op_import_errors
+  `).get();
+  assert.equal(error.source_file, 'mixed-subject-validity.xlsx');
+  assert.equal(error.source_row, 11);
+  assert.equal(error.field_name, '业务部门');
+});

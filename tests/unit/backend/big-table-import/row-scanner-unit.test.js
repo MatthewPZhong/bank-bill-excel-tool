@@ -109,4 +109,23 @@ test.describe('big-table-import row-scanner 单元', () => {
     assert.equal(values[2], '有值');
     assert.equal(hasAnyCellText, true, 'col2 有值');
   });
+
+  test('rowBytesToValues：按需返回目标列的 OOXML 单元格类型', () => {
+    const b = buf('<c r="A2" t="s"><v>0</v></c>'
+      + '<c r="B2"><v>1234567890123456</v></c>'
+      + '<c r="C2" t="inlineStr"><is><t>文本</t></is></c>');
+    const { cellTypes } = rs.rowBytesToValues(
+      b,
+      0,
+      b.length,
+      3,
+      ['共享文本'],
+      null,
+      false,
+      new Set([0, 1])
+    );
+    assert.equal(cellTypes[0], 's');
+    assert.equal(cellTypes[1], 'n');
+    assert.equal(cellTypes[2], undefined);
+  });
 });
