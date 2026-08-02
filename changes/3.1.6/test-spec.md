@@ -44,3 +44,15 @@
 ## 非自动化结论
 
 完整历史唯一性、真实资金逐项复核、真实大库删除/导出、Windows Excel/WPS、平盘现场单文件重试及 v3.1.5→v3.1.6 升级 canary 均保持未执行。技术 Release 成功不得替代这些业务和实机结论。
+
+## Release Evidence
+
+- 发布准备 PR #119 Windows run `30756371447` 和合并后 main Windows run `30756470739` 均成功。
+- annotated tag `v3.1.6`：tag object `3f18dccf8f7cffe81a23e2ccfd0094efafe81d3b`；peeled commit `97324e56fa7f6a227b1ed9e4516dfa166c5798d8`，等于创建时最新 `main`。
+- 正式 Release run [`30756698074`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30756698074) 全步骤成功；[v3.1.6](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.6) 于 2026-08-03 00:55:31 +08:00 成为 latest、non-draft、non-prerelease。
+- 独立下载资产核对：
+  - portable：99,620,858 bytes；SHA-256 `747cbca029001d1d276490e6ce1aa0d1e815e6db66ae18e2c3e54d7571e3cfad`
+  - Setup：100,117,634 bytes；SHA-256 `48616703e156ef7bf8706c9259c7736430486c75bd35e4d17566a8844074bd47`
+  - blockmap：105,596 bytes；SHA-256 `14d8a8b431d2ffd3ab620289adbd9e952a93fdc5b3ad67c3d309b263708040e9`
+  - `latest.yml`：369 bytes；SHA-256 `62869ce5715377029fb8af2d7a371715c6bf34a2b2104b91763a98461fb49d63`
+- `latest.yml` 的 version/path/size 为 `3.1.6` / `bank-bill-excel-tool-setup-3.1.6.exe` / `100117634`，SHA-512 `oKUhqYUL/oCpbJhwjAecEYLirxXizHWttX226N4tjw6muk5ewaIU6N4YfwvODeF2kGdnfETd4kntyZ3dmIO6Yw==` 与 Setup 实际字节一致；Setup 与 portable 文件头均为 `MZ`。
