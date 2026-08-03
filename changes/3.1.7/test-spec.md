@@ -47,3 +47,12 @@
 ## 非自动化结论
 
 固定样本中的 220 条 Payment 配对及 2 条 R5 后续回填尚未取得业务逐笔复核证据。用户已授权继续生成技术 Release，但正式业务启用和公告仍被该人工资金门禁阻断，CI、样本基线和公开资产状态均不能替代业务签字。
+
+## 正式发布结果
+
+- release-closeout PR #122：Windows run `30796827775` PASS；merge `1117c8b7d047cf408807b023368c63123a90d81f`；main run `30797197015` PASS。
+- tag：annotated `v3.1.7`，object `3b001b60c4e00a4c946ba2681f45c1ff6a15c9ff`，peeled commit 与发布时最新 main 均为 `1117c8b7d047cf408807b023368c63123a90d81f`。
+- Windows Release run `30797428933`：tag/main/version、release-check、布局、构建、包体、资产暂存、updater 校验、不可变发布和公开回读全部 PASS。
+- Release `364087395`：2026-08-03 17:01:02 +08:00 发布为 latest、non-draft、non-prerelease，公开且仅有四项预期资产。
+- 资产独立回读：portable 99,619,052 bytes / SHA-256 `10e48e17cb78c1b56b06d8955f8aa8b7f04cab1d584029cd52b6168672f0144d`；Setup 100,115,826 / `c6332203082334c0b1daeb8c6ef75f4fec2adff586d1210bacb8e319a20b3b1a`；blockmap 105,513 / `e659f29a3d7c097dcc4ae9fac94c438824b8b4555ef46b48e455fcf6ade50a12`；`latest.yml` 369 / `d7100dd6706e3c17e081d727f91a039c99ee208fef9424b38848eceaae8401de`。
+- `latest.yml`：version `3.1.7`，path `bank-bill-excel-tool-setup-3.1.7.exe`，`files[0].size=100115826`，SHA-512 `g90PD6fhQyoFA+4/jpsAYa1HmVA4fcFvkEmZ1tQbHMul/IaW2i5O8tHx4BWZ3IvgNQBuZ+/eSuCtt4ZgqhwCcA==` 与 Setup 实际字节一致；两个 EXE 文件头均为 `MZ`。

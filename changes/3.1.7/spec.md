@@ -1,6 +1,6 @@
 # v3.1.7 Spec - Payment 与 R5s2-recon 调拨回填调整
 
-> status: `release-prepared`
+> status: `released`
 > target-version: `3.1.7`
 > updated: `2026-08-03`
 > nature: ReconciliationId 资金回填红线，正式业务启用和公告前必须人工复核。
@@ -90,3 +90,11 @@
 - 两份固定样本由生产 reader、派生 builder、编排器和 writer 重跑，Payment 220、R5 后续改写 2、命中 192、未命中 1,639，且 220 条付款账号全部等于 `Drawee CardNo`。
 - 用户在明确知悉资金人工门禁尚未完成后，要求继续完成正式收尾和发布收尾。因此可生成受控技术 Release，但不得把自动化证据记作业务人工验收；正式业务启用和公告仍受 220 条 Payment 配对及 2 条 R5 回填逐笔复核约束。
 - Release 成功前，CHANGELOG、版本功能清单和使用手册保持 Unreleased/未发布；只有公开资产和 updater 元数据独立核对后才能回写正式发布日期。
+
+## 9. 正式发布证据
+
+- 发布准备 PR #122 以 merge commit `1117c8b7d047cf408807b023368c63123a90d81f` 合入 `main`；PR Windows run `30796827775` 和合并后 main run `30797197015` 均成功。
+- annotated tag `v3.1.7` 的 tag object 为 `3b001b60c4e00a4c946ba2681f45c1ff6a15c9ff`，远端 peeled commit 与发布时最新 `main` 均为 `1117c8b7d047cf408807b023368c63123a90d81f`。
+- Windows Release [run 30797428933](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/30797428933) 从 2026-08-03 16:26:55 至 17:01:08 +08:00 全部成功；[v3.1.7](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.7) 为 latest、non-draft、non-prerelease。
+- 四项公开资产经独立下载后，大小与 SHA-256 全部等于 GitHub digest；Setup 与 portable 均为 Windows PE `MZ` 文件。`latest.yml` 的 version、path、`files[0].size` 和 SHA-512 与 Setup 实际字节一致。
+- 技术 Release 已完成，但固定样本 220 条 Payment 配对和 2 条 R5 回填、Windows 10/11 实机及 v3.1.6→v3.1.7 在线升级 canary 仍是未执行的业务启用/公告前人工门禁。

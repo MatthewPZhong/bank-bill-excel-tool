@@ -41,3 +41,9 @@
 - 主键血缘、付款账户、时间边界、同值消费、跨引擎银行互斥、运行态重置和行数守恒已有代码、测试和固定样本证据。
 - 本次 release-closeout 不改业务实现，不新增匹配旁路、fallback、金额/币种转换或持久化状态。
 - 仍命中资金红线：自动化只能证明实现符合规则，不能证明 220+2 业务配对本身正确。必须保留人工复核阻断，不得静默降级。
+
+## 发布结果
+
+- release-closeout PR #122 与合并后 main 的 Windows checks 均成功，发布代码身份冻结为 `1117c8b7d047cf408807b023368c63123a90d81f`。
+- annotated tag、Windows Release run `30797428933`、latest stable 和四项公开资产均已完成独立回读；tag、版本、摘要和 updater 元数据一致。
+- Unknowns Register 中 tag/Release 身份和资产一致性两个 PROBE 已解决。220+2 业务复核及 Windows 实机 canary 继续保留，不因技术发布完成而关闭。
