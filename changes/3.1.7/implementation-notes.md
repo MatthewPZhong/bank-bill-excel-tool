@@ -50,7 +50,7 @@
 - 正式 Windows Release run `30797428933` 从 2026-08-03 16:26:55 运行至 17:01:08 +08:00，一次通过 tag/main/version、完整 release-check、布局、构建、包体、updater 资产、不可变发布和公开回读。Release `364087395` 于 17:01:02 发布为 latest、non-draft、non-prerelease。
 - 四项公开资产独立下载后的 size / SHA-256 与 GitHub digest 一致：portable `99619052` / `10e48e17cb78c1b56b06d8955f8aa8b7f04cab1d584029cd52b6168672f0144d`；Setup `100115826` / `c6332203082334c0b1daeb8c6ef75f4fec2adff586d1210bacb8e319a20b3b1a`；blockmap `105513` / `e659f29a3d7c097dcc4ae9fac94c438824b8b4555ef46b48e455fcf6ade50a12`；`latest.yml` `369` / `d7100dd6706e3c17e081d727f91a039c99ee208fef9424b38848eceaae8401de`。两个 EXE 文件头均为 `MZ`。
 - `latest.yml` 的 version/path/`files[0].size` 为 `3.1.7` / `bank-bill-excel-tool-setup-3.1.7.exe` / `100115826`，SHA-512 `g90PD6fhQyoFA+4/jpsAYa1HmVA4fcFvkEmZ1tQbHMul/IaW2i5O8tHx4BWZ3IvgNQBuZ+/eSuCtt4ZgqhwCcA==` 与 Setup 实际字节一致。
-- 正式日期、tag、workflow 和资产摘要由本发布证据分支回写；该分支不修改 `src`，不得改变或解除 Remaining Unknowns 中的业务人工门禁。
+- 正式日期、tag、workflow 和资产摘要由发布证据 PR #123 回写；该 PR 不修改 `src`，`check:vars --since origin/main --include-minor` 安全跳过，且不得改变或解除 Remaining Unknowns 中的业务人工门禁。
 
 ## Remaining Unknowns
 
