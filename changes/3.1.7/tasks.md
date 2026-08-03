@@ -18,18 +18,18 @@
 - [x] 固定样本重跑保持 Payment 220、R5 2、命中 192、未命中 1,639，付款账户 220/220 相等。
 - [x] 生产依赖审计记录 0 critical、7 high、2 moderate，本次不混改依赖。
 - [x] 建立 PR #121 归档、v3.1.7 PRD、preflight、test spec 和 release-prepared 证据。
-- [ ] release-closeout PR 合入 `main`，并确认 Windows checks 成功。
+- [x] release-closeout PR #122 合入 `main@1117c8b7`；PR run `30796827775` 与 main run `30797197015` 均成功。
 
 ## 发布收尾
 
-- [ ] 再次确认同名 tag 和 GitHub Release 不存在。
-- [ ] 创建并推送指向最新 `main` 的 annotated tag `v3.1.7`。
-- [ ] Windows Release workflow 全部成功。
-- [ ] GitHub Release 为 latest、non-draft、non-prerelease。
-- [ ] 独立下载并核对 Setup、Setup blockmap、portable、`latest.yml` 的大小与 SHA-256。
-- [ ] 核对 `latest.yml` 的 version、path、size、SHA-512 与 Setup 实际字节一致。
-- [ ] 发布证据 PR 回写正式日期、tag object/commit、workflow run 和资产摘要并合入 `main`。
-- [ ] 同步本地 `main`，确认无本次任务遗留的 tracked 改动。
+- [x] tag 前确认同名远端 tag 不存在；workflow 在发布前再次确认同名 GitHub Release 不存在。
+- [x] 创建并推送指向最新 `main@1117c8b7` 的 annotated tag `v3.1.7`。
+- [x] Windows Release workflow run `30797428933` 全部成功。
+- [x] GitHub Release 为 latest、non-draft、non-prerelease。
+- [x] 独立下载并核对 Setup、Setup blockmap、portable、`latest.yml` 的大小与 SHA-256。
+- [x] 核对 `latest.yml` 的 version、path、`files[0].size`、SHA-512 与 Setup 实际字节一致。
+- [x] 发布证据由 PR #123 回写正式日期、tag object/commit、workflow run 和资产摘要；该 PR 合入 `main` 即完成版本归档。
+- 本地 `main` 同步与 tracked clean 复核在 PR #123 合并后执行，结果由最终交付说明记录。
 
 ## 发布后人工跟进
 

@@ -45,6 +45,12 @@
 - 正式收尾主页面几何在两种尺寸、三档缩放下 6/6 PASS；`scan:vars` 为 282 files / 3,526 top-level names。`check-vars` 的三个 Runtime-state 词法命中已逐项核对，没有新的 app 生命周期或 renderer 全局 state 行为变更。
 - 正式收尾固定样本重跑保持 1,831 条银行行、223 条订单、446 条派生行、Payment 220、Payment 改写 190、R5 改写 2、命中 192、未命中 1,639；220 条付款账号全部等于 `Drawee CardNo`。本次临时工作簿 SHA-256 为 `1221705fe3df8fdf37e8db806d18e6bbea2d94777bed0698da8eee7fae54d2fa`；生成时间元数据使工作簿字节摘要不作为确定性 golden，结构和业务断言才是发布基线。
 - `npm audit --omit=dev` 为 0 critical、7 high、2 moderate，与 v3.1.6 发布基线一致；本次不在资金发布收尾中升级依赖。
+- 发布准备 PR #122 的 Windows run `30796827775` 成功且无 review 或未解决 thread；PR 以 merge commit `1117c8b7d047cf408807b023368c63123a90d81f` 合入 `main`，合并后 main Windows run `30797197015` 成功。
+- annotated tag `v3.1.7` 的 tag object 为 `3b001b60c4e00a4c946ba2681f45c1ff6a15c9ff`；远端 tag object 回读一致，peeled commit 与发布时最新 `main` 均为 `1117c8b7d047cf408807b023368c63123a90d81f`。
+- 正式 Windows Release run `30797428933` 从 2026-08-03 16:26:55 运行至 17:01:08 +08:00，一次通过 tag/main/version、完整 release-check、布局、构建、包体、updater 资产、不可变发布和公开回读。Release `364087395` 于 17:01:02 发布为 latest、non-draft、non-prerelease。
+- 四项公开资产独立下载后的 size / SHA-256 与 GitHub digest 一致：portable `99619052` / `10e48e17cb78c1b56b06d8955f8aa8b7f04cab1d584029cd52b6168672f0144d`；Setup `100115826` / `c6332203082334c0b1daeb8c6ef75f4fec2adff586d1210bacb8e319a20b3b1a`；blockmap `105513` / `e659f29a3d7c097dcc4ae9fac94c438824b8b4555ef46b48e455fcf6ade50a12`；`latest.yml` `369` / `d7100dd6706e3c17e081d727f91a039c99ee208fef9424b38848eceaae8401de`。两个 EXE 文件头均为 `MZ`。
+- `latest.yml` 的 version/path/`files[0].size` 为 `3.1.7` / `bank-bill-excel-tool-setup-3.1.7.exe` / `100115826`，SHA-512 `g90PD6fhQyoFA+4/jpsAYa1HmVA4fcFvkEmZ1tQbHMul/IaW2i5O8tHx4BWZ3IvgNQBuZ+/eSuCtt4ZgqhwCcA==` 与 Setup 实际字节一致。
+- 正式日期、tag、workflow 和资产摘要由发布证据 PR #123 回写；该 PR 不修改 `src`，`check:vars --since origin/main --include-minor` 安全跳过，且不得改变或解除 Remaining Unknowns 中的业务人工门禁。
 
 ## Remaining Unknowns
 

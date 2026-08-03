@@ -9,7 +9,7 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.1.7（Unreleased）
+## v3.1.7（2026-08-03）
 
 v3.1.7 将 Payment 线下调拨和 R5s2-recon 收口到同一份调拨对账单运行工作副本，固定 Payment 先运行，并增加付款账户、订单周边界和跨引擎消费保护。
 

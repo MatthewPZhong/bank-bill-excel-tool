@@ -38,3 +38,7 @@ Payment 线下调拨回填和普通 R5s2-recon 原先使用不同输入形态和
 本功能写入银行 ReconciliationId，属于资金红线。自动化和固定样本 baseline 只能证明规则按代码执行，不能替代业务逐笔判断。技术 Release 可按受控 tag workflow 生成，但正式业务启用和公告前必须完成人工复核 220 条 Payment 配对与 2 条 R5 回填。
 
 正式发布还要求：完整 release-check、主页面布局、重要变量检查、Windows Release workflow、四项公开资产摘要和 `latest.yml` 契约全部通过，并通过独立证据 PR 回写。
+
+## 七、发布状态
+
+v3.1.7 已于 2026-08-03 通过受控 Windows Release workflow 发布为 latest stable，四项公开资产及 updater 元数据已独立回读通过。技术 Release 不解除第六节人工资金门禁；业务启用和公告仍须完成 220+2 逐笔复核及 Windows 实机 canary。
