@@ -14,6 +14,7 @@
 - 同周多订单号日期取最早值；订单周断档在任何 Payment/R5 写值前阻断。
 - 用户已取消最终 ReconciliationId 重复检测与异常说明；现有多对多审计保持不变。
 - 新一轮银行对账运行开始即清空上一轮 `processingResult`；预检或引擎失败后不允许导出旧结果。
+- 用户在获知 220 条 Payment 与 2 条 R5 人工逐笔复核尚未完成后，明确要求完成正式收尾和发布收尾；据此只授权生成受控技术 Release，不解除正式业务启用和公告的人工资金门禁。
 
 ## Assumptions
 
@@ -38,7 +39,13 @@
 - 桌面交付文件由当前生产链路重跑生成，SHA-256 为 `a3ce595288f0533af7dddbb335d6b046330f1add39e9e0bdc6dec0413f9378ea`，五个 sheet 及关键行数断言全部通过。
 - UI 预览确认 Payment 开启时来源勾选项自动选中并锁定；工作簿渲染确认付款账号、`Drawee CardNo` 和“是否被使用”可见，公式错误扫描为 0。
 - 最终通用盲区与资金盲区复核未发现剩余 P3 及以上 Finding；仍保留下面的人工资金门禁。
+- PR #121 最终实现提交为 `73c35a3f2b8ea2b7cc69e94bc1c44ae641c4cbe6`，以 squash merge commit `6fe118b8c4d665e1ce877fb792e6a4bbcda64cdf` 合入 `main`；PR 及合并前 review 无未解决 P3 及以上 Finding。
+- `main@6fe118b` 的 Windows Build run `30794912210` 成功，包含 smoke、SQLite teardown、主页面布局、Setup/portable 构建、包体检查和 updater 资产暂存。
+- 2026-08-03 从合并基线执行干净 `npm ci` 后，`npm run release-check` 再次通过 lint、smoke、4,575/4,575 单测（`logs/unit-tests/unit-20260803-160156.log`）和 44 个集成脚本 2,051/2,051 断言；集成总耗时 291,015 ms。
+- 正式收尾主页面几何在两种尺寸、三档缩放下 6/6 PASS；`scan:vars` 为 282 files / 3,526 top-level names。`check-vars` 的三个 Runtime-state 词法命中已逐项核对，没有新的 app 生命周期或 renderer 全局 state 行为变更。
+- 正式收尾固定样本重跑保持 1,831 条银行行、223 条订单、446 条派生行、Payment 220、Payment 改写 190、R5 改写 2、命中 192、未命中 1,639；220 条付款账号全部等于 `Drawee CardNo`。本次临时工作簿 SHA-256 为 `1221705fe3df8fdf37e8db806d18e6bbea2d94777bed0698da8eee7fae54d2fa`；生成时间元数据使工作簿字节摘要不作为确定性 golden，结构和业务断言才是发布基线。
+- `npm audit --omit=dev` 为 0 critical、7 high、2 moderate，与 v3.1.6 发布基线一致；本次不在资金发布收尾中升级依赖。
 
 ## Remaining Unknowns
 
-- `BLOCK（业务）`：自动测试不能替代资金人工门禁；上线前须人工复核固定样本中的 220 条 Payment 配对与 2 条 R5 后续回填。
+- `BLOCK（业务启用/公告）`：自动测试不能替代资金人工门禁；正式业务启用和公告前须人工复核固定样本中的 220 条 Payment 配对与 2 条 R5 后续回填。该项不因用户授权生成技术 Release 而变成已完成。

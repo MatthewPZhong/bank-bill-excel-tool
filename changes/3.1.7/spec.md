@@ -1,9 +1,9 @@
 # v3.1.7 Spec - Payment 与 R5s2-recon 调拨回填调整
 
-> status: `implemented`
+> status: `release-prepared`
 > target-version: `3.1.7`
 > updated: `2026-08-03`
-> nature: ReconciliationId 资金回填红线，发布前必须人工复核。
+> nature: ReconciliationId 资金回填红线，正式业务启用和公告前必须人工复核。
 
 ## 1. 目标
 
@@ -82,3 +82,11 @@
 - 必须覆盖共享消费、同值消费、in/out 独立、未命中降级、跨年 ISO 周、同周多日期、周断档原子阻断和运行态重置。
 - 收尾执行相关单测、集成、smoke、`release-check`、`check-vars`、文档三件套和版本号 `3.1.7` 更新。
 - 资金人工复核固定样本中的 220 条 Payment 配对及 2 条 R5 后续回填。
+
+## 8. 发布转换（2026-08-03）
+
+- PR #121 已以 merge commit `6fe118b8c4d665e1ce877fb792e6a4bbcda64cdf` 合入 `main`；合并后 Windows Build run `30794912210` 全部成功。
+- 干净 `npm ci` 后完整 `release-check` 再次通过：unit 4,575/4,575、integration 44 个脚本 2,051/2,051、lint 与 smoke 全绿；主页面两种尺寸、三档缩放 6/6 PASS。
+- 两份固定样本由生产 reader、派生 builder、编排器和 writer 重跑，Payment 220、R5 后续改写 2、命中 192、未命中 1,639，且 220 条付款账号全部等于 `Drawee CardNo`。
+- 用户在明确知悉资金人工门禁尚未完成后，要求继续完成正式收尾和发布收尾。因此可生成受控技术 Release，但不得把自动化证据记作业务人工验收；正式业务启用和公告仍受 220 条 Payment 配对及 2 条 R5 回填逐笔复核约束。
+- Release 成功前，CHANGELOG、版本功能清单和使用手册保持 Unreleased/未发布；只有公开资产和 updater 元数据独立核对后才能回写正式发布日期。
