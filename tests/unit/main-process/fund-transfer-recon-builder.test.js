@@ -23,7 +23,8 @@ const assert = require('node:assert/strict');
 const { buildFundTransferReconRows } = require('../../../src/main-process/fund-transfer-recon-builder');
 const {
   FT_RECON_FIELD_MAP,
-  MID_ALLOCATION_SUCCESS_STATUS
+  MID_ALLOCATION_SUCCESS_STATUS,
+  FUND_TRANSFER_RECON_UNUSED
 } = require('../../../src/constants/fund-transfer-recon-fields');
 
 const M = FT_RECON_FIELD_MAP.mid; // 中台源列名（含全角括号）
@@ -35,6 +36,7 @@ function midRow(overrides = {}) {
   return Object.assign({
     [M.allocationNo]: 'AL1', // 调拨单号
     [M.status]: MID_ALLOCATION_SUCCESS_STATUS, // 调拨状态：仅付款成功派生
+    [M.payMethod]: '线下',
     [M.txTime]: '2026-05-04', // 交易时间 → BillDate
     [M.channelSerial]: 'SER1', // 渠道流水号 → ReconID
     [M.payCard]: 'PAY-CARD-1', // 付款账户（卡号）
@@ -68,14 +70,16 @@ test.describe('buildFundTransferReconRows - 一行拆 in+out 两行（行数守�
     assert.equal(out.rows[1][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
   });
 
-  test('两行共用公共字段（BillDate←交易时间、ReconID←渠道流水号、付款账号、收款账号）', () => {
+  test('两行共用公共字段，并初始化付款方式与是否被使用', () => {
     const out = buildFundTransferReconRows([midRow()]);
     for (const r of out.rows) {
       assert.equal(r[R.allocationNo], 'AL1');
       assert.equal(r[R.billDate], '2026-05-04'); // 交易时间 → BillDate
       assert.equal(r[R.reconId], 'SER1'); // 渠道流水号 → ReconID
+      assert.equal(r[R.payMethod], '线下');
       assert.equal(r[R.payAccount], 'PAY-CARD-1'); // 付款账号 ← 付款卡号
       assert.equal(r[R.payeeAccount], 'RECV-CARD-1'); // 收款账号 ← 收款卡号
+      assert.equal(r[R.used], FUND_TRANSFER_RECON_UNUSED);
     }
   });
 });

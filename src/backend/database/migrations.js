@@ -3619,7 +3619,7 @@ function ensureAdmBankDepositSupport(db) {
 
 // v3.0.6 需求1：调拨对账单隐藏表（linked_fund_transfer_recon）。
 //   由中台调拨订单（mid-allocation）经 buildFundTransferReconRows 派生（一行 → FundTransfer-in + out 两行，
-//   recon 11 字段全进 raw_json），供需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge）引擎读取匹配。
+//   recon 13 字段全进 raw_json），供需求2（r5-fund-transfer-recon-backfill）/ 需求3（dbs-charge）引擎读取匹配。
 //   🔴 资金/数据红线说明：纯新增隐藏表，无破坏性 DDL（CREATE TABLE / INDEX IF NOT EXISTS 幂等）；
 //      与现有链接表完全隔离、无调用顺序依赖；整表覆盖语义由 replaceFundTransferReconRows 仓储函数实现。
 //   🔴 绝不进 ALL_TABLE_KEYS / 不写 linked_table_meta（前端弹窗不可见，与 ADM 隐藏表同范式）。

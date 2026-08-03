@@ -240,7 +240,7 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
     fs.mkdirSync(dir, { recursive: true });
   }
   // v2.1.7 round 3 F8：透传 unmatchedRows；v2.1.16-beta.6 需求 B：透传 modifications（命中明细列）；
-  //   v3.0.4 块 F 修订 R2 Q14：透传 paymentOfflinePairs（追加匹配对照/银行行-原始/订单行-原始 3 sheet）。
+  //   v3.1.7：透传 paymentOfflinePairs（追加匹配对照/银行行-原始/调拨对账单行-原始 3 sheet）。
   //   v3.0.13：透传 manyToManyRows（writer 第 8 形参；第 7 形参 staleHitNotesByRowId 主链不传 → 显式 null 占位）。
   const result = await writeBankStatementOutput(
     modifiedRows, headers, mainFilePath, unmatchedRows, modifications, paymentOfflinePairs, null, manyToManyRows

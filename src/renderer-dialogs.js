@@ -8369,11 +8369,17 @@
         dateMatchEnabledCheck.addEventListener('change', syncDatePolicyInputState);
       }
 
-      // F1：勾选/取消勾选 → 展开区显隐（取消勾选保留输入值，照 C3 extraFee 范式）
+      // F1：勾选/取消勾选联动。v3.1.7 Payment 开启时强制勾选并锁定派生调拨表来源；关闭后解除锁定。
       function syncPaymentFieldsVisibility() {
         if (!paymentFields || !paymentCheck) return;
-        paymentFields.hidden = !paymentCheck.checked;
-        if (!paymentCheck.checked && paymentError) {
+        const enabled = paymentCheck.checked === true;
+        paymentFields.hidden = !enabled;
+        if (reconSourceCheck) {
+          if (enabled) reconSourceCheck.checked = true;
+          reconSourceCheck.disabled = enabled;
+          reconSourceCheck.title = enabled ? 'Payment开启时必须使用中台调拨单派生表' : '';
+        }
+        if (!enabled && paymentError) {
           paymentError.hidden = true; // 取消勾选时清掉 inline 校验提示
         }
       }
@@ -8614,12 +8620,12 @@
             bigAccount: parsedBigAccounts.normalized
           };
         }
-        // v3.0.6 需求2（T6）：对账数据来源二选一勾选值（仅 payment 场景显示本控件）。
-        //   checked === true 才记 true；否则（含未勾选/控件缺失）记 false。
-        //   与 seed/编排器口径统一：写回的 reconSourceMid 直接是布尔值，后续 gating 用 !== false 判定。
+        // v3.1.7：Payment 开启时持久化 reconSourceMid=true，防止历史冲突配置继续存在。
         let reconSourceMid = null;
         if (isPaymentScenario && reconSourceCheck) {
-          reconSourceMid = reconSourceCheck.checked === true;
+          reconSourceMid = paymentOfflineBackfill && paymentOfflineBackfill.enabled === true
+            ? true
+            : reconSourceCheck.checked === true;
         }
         let bankPaymentSerialFuzzyMatchEnabled = null;
         if (isRefundScenario && refundFuzzyCheck) {
@@ -8642,8 +8648,7 @@
         //   读-改-写：以 cachedConfig（加载时缓存的完整 config）为基底展开，仅覆盖 reconSourceMid/paymentOfflineBackfill 子键，
         //   funcCategory/subCategory/roundPhase/directions/dateToleranceDays 等 seed 契约字段原样保留（不可丢，否则掉桶/引擎漂移）。
         //   非 payment 场景维持原行为：仅 update priority，不携带 config（不引入无谓 config 写入）。
-        // v3.0.6 需求2（T6）：reconSourceMid 二选一开关与 paymentOfflineBackfill 同属 fund-transfer-backfill 场景，
-        //   两者在同一次浅合并里写入；payment 勾选框是否启用不影响 reconSourceMid 写入（两控件独立）。
+        // v3.1.7：两项仍在同一次浅合并中写入；Payment 开启时 reconSourceMid 被强制为 true。
         const updateFields = { priority: priorityNum };
         if (isPaymentScenario && (reconSourceMid !== null || paymentOfflineBackfill)) {
           updateFields.config = { ...(cachedConfig || {}) };

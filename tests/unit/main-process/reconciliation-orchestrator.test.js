@@ -1242,7 +1242,7 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
     return { bankRows, gwRows, dispRows, scenarios };
   }
 
-  test('onProgress 仅在轮次边界被调，顺序固定 R1→R2→R3.5→R4→R5s2→R5s2b→R5s3→R5s4→M2M', async () => {
+  test('onProgress 仅在轮次边界被调，顺序固定 R1→R2→R3.5→R4→R5s2b→R5s2→R5s3→R5s4→M2M', async () => {
     const { bankRows, gwRows, dispRows, scenarios } = buildFullRoundInput();
     const rounds = [];
     await runReconciliation({
@@ -1255,7 +1255,7 @@ test.describe('v3.0.8 需求3：runReconciliation async + onProgress 轮次边�
     //   其后只剩只读输出构造（buildOutputRows），无 yield。
     assert.deepStrictEqual(
       rounds,
-      ['R1', 'R2', 'R3.5', 'R4', 'R5s2', 'R5s2b', 'R5s3', 'R5s4', 'M2M'],
+      ['R1', 'R2', 'R3.5', 'R4', 'R5s2b', 'R5s2', 'R5s3', 'R5s4', 'M2M'],
       'onProgress round 序列必须严格等于 9 个轮次边界、顺序固定'
     );
   });

@@ -34,8 +34,11 @@ const { runRound5FundTransferBackfill } = require('./scenario-engines/r5-fund-tr
 const { runRound5FundTransferReconBackfill } = require('./scenario-engines/r5-fund-transfer-recon-backfill');
 const { runRound5PlatformInboundCleanup } = require('./scenario-engines/r5-platform-inbound-cleanup');
 const { runRound5RefundOrderBackfill } = require('./scenario-engines/r5-refund-order-backfill');
-// v3.0.4 块 F：Payment线下调拨订单回填（R5 场景2b，R5s2 之后接线；🔴 网关回填优先互斥）
-const { runRound5PaymentOfflineAllocationBackfill } = require('./scenario-engines/r5-payment-offline-allocation-backfill');
+// v3.1.7：Payment线下调拨订单回填改为 R5 场景2b 先执行，并与 R5s2-recon 共享派生行消费状态。
+const {
+  runRound5PaymentOfflineAllocationBackfill,
+  resetFundTransferReconUsage
+} = require('./scenario-engines/r5-payment-offline-allocation-backfill');
 // v3.0.6 需求3：DBS-Charge 资金校验（R3.5，R3 后 R4 前；🔴 改 ReconciliationId + FundType；替换原全渠道 charge→outbound）
 const { runDbsChargeFundCheck } = require('./scenario-engines/dbs-charge-fund-check');
 // v3.0.12 功能1：多对多异常说明检测器（🔴 资金红线·纯只读 —— 不改回填/字段/行数守恒）
@@ -260,13 +263,8 @@ function buildOutputRows(bankRows, modColsByRowId, r2HitByRowId) {
  * @param {Object} [params.deps] dispatcher 双维调度可选依赖（{ channelsRepo, db }）；不传 → R2 走单维 first-match-wins
  * @param {Object} [params.refundContext] R5 场景4 退款回填引擎入参（{ refundOrderRows, depositRows }）；
  *   本轮（Layer 1）上游恒注入空 refundOrderRows → 引擎空入参返回空，不影响 R1-R5 既有行为。
- * @param {Object} [params.midAllocationContext] v3.0.4 块 F：R5 场景2b Payment线下调拨回填引擎入参
- *   （{ midAllocationRows }）；仿 refundContext 范式。bank-statement:run 仅在勾选 gating 命中时注入真实
- *   中台调拨订单行；未勾选 / 缺省 → undefined，R5s2b 内部 gating（config.paymentOfflineBackfill）+ 空入参 no-op。
- * @param {Object} [params.fundTransferReconContext] v3.0.6 需求2：R5s2「数据来源=调拨对账单」引擎入参
- *   （{ reconRows }）；仿 midAllocationContext 范式。R5s2 二选一 gating（config.reconSourceMid !== false，
- *   默认勾选）命中「勾选路」时注入调拨对账单派生行（linked_fund_transfer_recon）；取消路（reconSourceMid:false）
- *   不读本 context，沿用现状网关回填。缺省 → 勾选路得空 reconRows → 新引擎空入参 no-op。
+ * @param {Object} [params.fundTransferReconContext] R5s2-recon 与 Payment 共用的调拨派生工作副本
+ *   （{ reconRows }）。Payment 开启时强制走本来源，并先于 R5s2-recon 消费。
  * @param {Object} [params.fundTransferAuditContext] v3.1.1：M2M 调拨侧独立只读审计入参（{ reconRows }）。
  *   只在 R1-R5 全部完成后传给检测器，绝不进入 R5 写入引擎；缺省时兼容回退 fundTransferReconContext.reconRows。
  * @param {Object} [params.dispatchReconContext] v3.0.6 需求3：R3.5「DBS-Charge 资金校验」引擎入参
@@ -296,7 +294,6 @@ async function runReconciliation({
   scenarios,
   deps,
   refundContext,
-  midAllocationContext,
   fundTransferReconContext,
   fundTransferAuditContext,
   dispatchReconContext,
@@ -439,89 +436,81 @@ async function runReconciliation({
   }
   await yieldTick('R4'); // 轮次边界让出（R4 资金性质校验已完成，进 R5 前）
 
-  // ===== R5 场景2：回填 ReconciliationId =====
-  let r5s2BackfilledCount = 0;
-  // v3.0.4 块 F（🔴 Q3 网关回填优先）：收集 R5s2 已消费 bank _rowId 集合，供 R5s2b 剔除（两引擎零互相覆盖）。
-  //   取径 = 引擎返回的 usedBankRowIds（引擎内 1v1 消费的完整集合，**含「消费但未写（nv 空/同值不 record）」行**）。
-  //   为何 usedBankRowIds 即超集、无需再叠 modifications rowId：
-  //     引擎 backfill 对命中行先无条件 usedBankRowId.add（占用 1v1），再判 nv 非空且异值才 record 进 modifications；
-  //     每 direction 跑完把整份 usedBankRowId union 进返回集 —— 故凡进 modifications 的 rowId 必已在 usedBankRowIds 内，
-  //     且引擎两个 return 出口（空入参早退 / 正常）均携带该字段。modifications 收集路是 usedBankRowIds 的真子集，纯冗余。
-  //   闭合说明：旧实现仅取 modifications，「消费但未写」行取不到、可能被 R5s2b 二次匹配并覆盖网关已确认值；
-  //   改取 usedBankRowIds 后该窄缺口闭合 —— 凡被 R5s2 消费（无论是否实写）的银行行一律不进 R5s2b 银行池，
-  //   「网关回填优先」语义完整覆盖（不改 R5s2 既有匹配/写值逻辑）。
-  const r5s2ConsumedBankRowIds = new Set();
-  if (r5s2Bucket.length) {
-    const opt = r5s2Bucket[0].config || {};
-    // v3.0.6 需求2（决策 D4 默认勾选）：数据来源二选一 gating。
-    //   reconSourceMid !== false → 勾选路（默认/缺省/老库无字段视为勾选）：对手方=调拨对账单（reconRows）。
-    //   reconSourceMid === false → 取消路：沿用现状 runRound5FundTransferBackfill（对手方=网关 gwRows），逐字保留。
-    const useMidReconTable = opt.reconSourceMid !== false;
-    if (useMidReconTable) {
-      // —— 勾选路：调拨对账单 ReconID 回填银行 ReconciliationId（新引擎，对手方换源；口径与 R5s2 一致）——
-      const reconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
-      const rA = runRound5FundTransferReconBackfill(reconRows, bankRows, {
-        directions: opt.directions,
-        fundTransferDatePolicy: resolvedFundTransferDatePolicy
-      });
-      mergeMods(rA.modifications);
-      allWarnings.push(...(rA.warnings || []));
-      for (const m of rA.modifications || []) allMods.push({ ...m, _round: 'R5s2-recon' });
-      // 🔴 资金红线点7：勾选路消费集同样并入 r5s2ConsumedBankRowIds（下游 R5s2b excludeBankRowIds 互斥不变量）。
-      if (rA.usedBankRowIds) {
-        for (const rid of rA.usedBankRowIds) {
-          if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);
-        }
-      }
-      r5s2BackfilledCount = (rA.modifications || []).length;
-    } else {
-      // —— 取消路：现状网关回填，逐字保留（R5s2 parity 不破）——
-      const r5a = runRound5FundTransferBackfill(safeGwRows, bankRows, {
-        directions: opt.directions,
-        fundTransferDatePolicy: resolvedFundTransferDatePolicy
-      });
-      mergeMods(r5a.modifications);
-      allWarnings.push(...(r5a.warnings || []));
-      for (const m of r5a.modifications || []) allMods.push({ ...m, _round: 'R5s2' });
-      // 引擎完整消费集（含同值未写行，已是 modifications rowId 的超集）—— 闭合「消费但未写」窄缺口（资金红线）。
-      if (r5a.usedBankRowIds) {
-        for (const rid of r5a.usedBankRowIds) {
-          if (rid !== undefined && rid !== null) r5s2ConsumedBankRowIds.add(rid);
-        }
-      }
-      r5s2BackfilledCount = (r5a.modifications || []).length;
-    }
-  }
-  await yieldTick('R5s2'); // 轮次边界让出（R5 场景2 回填已完成，进 R5s2b 前）
-
-  // ===== R5 场景2b：Payment线下调拨订单回填（v3.0.4 块 F，🔴 资金红线）=====
-  //   gating（三条件全真才跑）：r5s2Bucket 非空 ∧ config.paymentOfflineBackfill.enabled===true ∧ midRows 非空。
-  //   显式传 { bigAccount, bankChannel, region, excludeBankRowIds } 进引擎（⚠️ config 加 key 不会自动流入引擎，
-  //   须在编排器显式拣出，与 R5s2 拣 directions/dateToleranceDays 同范式）。
-  //   excludeBankRowIds = R5s2 已回填 bank _rowId 集合 → 引擎构银行池时剔除（网关回填优先不变量）。
+  // ===== R5 场景2b：Payment 先跑（v3.1.7，资金红线）=====
+  const r5s2Options = r5s2Bucket.length ? (r5s2Bucket[0].config || {}) : {};
+  const paymentOptions = r5s2Options.paymentOfflineBackfill;
+  const paymentOfflineEnabled = !!(paymentOptions && paymentOptions.enabled === true);
+  const sharedReconRows = (fundTransferReconContext && fundTransferReconContext.reconRows) || [];
+  // “是否被使用”只属于单次 run 工作副本。无论数据库 raw_json 中是否残留旧值，
+  // Payment 与后续 R5s2-recon 开始前都统一恢复为空，运行态不写回持久表。
+  resetFundTransferReconUsage(sharedReconRows);
   let r5s2bBackfilledCount = 0;
-  // v3.0.4 块 F 修订 R2 Q14：引擎匹配对（导出 3 核对 sheet 数据源），缺省 []（仿 platformCleanupRows 范式）。
+  let r5s2bMatchedCount = 0;
   let paymentOfflineMatchedPairs = [];
-  if (r5s2Bucket.length) {
-    const opt = r5s2Bucket[0].config || {};
-    const pob = opt.paymentOfflineBackfill;
-    const midRows = (midAllocationContext && midAllocationContext.midAllocationRows) || [];
-    if (pob && pob.enabled === true && Array.isArray(midRows) && midRows.length > 0) {
-      const r5ab = runRound5PaymentOfflineAllocationBackfill(bankRows, midRows, {
-        bigAccount: pob.bigAccount,
-        bankChannel: pob.bankChannel,
-        region: pob.region,
-        excludeBankRowIds: r5s2ConsumedBankRowIds
+  const paymentConsumedBankRowIds = new Set();
+  if (r5s2Bucket.length && paymentOfflineEnabled) {
+    if (r5s2Options.reconSourceMid === false) {
+      allWarnings.push({
+        rowId: null,
+        engine: 'r5-payment-offline-allocation-backfill',
+        scenario: 'Payment线下调拨订单回填处理',
+        code: 'payment-offline-forced-recon-source',
+        message: 'Payment已开启，R5数据来源已强制切换为中台调拨派生表'
       });
-      mergeMods(r5ab.modifications);
-      allWarnings.push(...(r5ab.warnings || []));
-      for (const m of r5ab.modifications || []) allMods.push({ ...m, _round: 'R5s2b' });
-      r5s2bBackfilledCount = (r5ab.modifications || []).length;
-      // 修订 R2 Q14：透传匹配对供导出阶段追加 3 核对 sheet（缺省 []）。
-      paymentOfflineMatchedPairs = r5ab.matchedPairs || [];
+    }
+    const paymentResult = runRound5PaymentOfflineAllocationBackfill(
+      bankRows,
+      sharedReconRows,
+      {
+        bigAccount: paymentOptions.bigAccount,
+        bankChannel: paymentOptions.bankChannel,
+        region: paymentOptions.region
+      }
+    );
+    mergeMods(paymentResult.modifications);
+    allWarnings.push(...(paymentResult.warnings || []));
+    for (const modification of paymentResult.modifications || []) {
+      allMods.push({ ...modification, _round: 'R5s2b' });
+    }
+    for (const rowId of paymentResult.usedBankRowIds || []) {
+      if (rowId !== undefined && rowId !== null) paymentConsumedBankRowIds.add(rowId);
+    }
+    paymentOfflineMatchedPairs = paymentResult.matchedPairs || [];
+    r5s2bMatchedCount = paymentOfflineMatchedPairs.length;
+    r5s2bBackfilledCount = (paymentResult.modifications || []).length;
+  }
+  await yieldTick('R5s2b');
+
+  // ===== R5 场景2：Payment 之后运行普通调拨回填 =====
+  let r5s2BackfilledCount = 0;
+  if (r5s2Bucket.length) {
+    const useMidReconTable = paymentOfflineEnabled || r5s2Options.reconSourceMid !== false;
+    if (useMidReconTable) {
+      const r5ReconResult = runRound5FundTransferReconBackfill(sharedReconRows, bankRows, {
+        directions: r5s2Options.directions,
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy,
+        excludeBankRowIds: paymentConsumedBankRowIds
+      });
+      mergeMods(r5ReconResult.modifications);
+      allWarnings.push(...(r5ReconResult.warnings || []));
+      for (const modification of r5ReconResult.modifications || []) {
+        allMods.push({ ...modification, _round: 'R5s2-recon' });
+      }
+      r5s2BackfilledCount = (r5ReconResult.modifications || []).length;
+    } else {
+      const r5GatewayResult = runRound5FundTransferBackfill(safeGwRows, bankRows, {
+        directions: r5s2Options.directions,
+        fundTransferDatePolicy: resolvedFundTransferDatePolicy
+      });
+      mergeMods(r5GatewayResult.modifications);
+      allWarnings.push(...(r5GatewayResult.warnings || []));
+      for (const modification of r5GatewayResult.modifications || []) {
+        allMods.push({ ...modification, _round: 'R5s2' });
+      }
+      r5s2BackfilledCount = (r5GatewayResult.modifications || []).length;
     }
   }
-  await yieldTick('R5s2b'); // 轮次边界让出（R5 场景2b Payment线下调拨回填已完成，进 R5s3 前）
+  await yieldTick('R5s2');
 
   // ===== R5 场景3：生成剔除行（一般不改银行行）=====
   let platformCleanupRows = [];
@@ -639,7 +628,8 @@ async function runReconciliation({
       dbsChargeChangedCount,
       r4ChangedCount,
       r5s2BackfilledCount,
-      // v3.0.4 块 F：Payment线下调拨回填命中行数（进状态框可选展示）
+      // Payment 同值命中也会消费双方，但不会产生 modification；匹配数与实际改写数必须分开统计。
+      r5s2bMatchedCount,
       r5s2bBackfilledCount,
       r5s3CleanupCount: platformCleanupRows.length,
       r5s4BackfilledCount: refundBackfillRows.length,
@@ -670,8 +660,8 @@ async function runReconciliation({
       r35: { changed: dbsChargeChangedCount },
       r4: { changed: r4ChangedCount },
       r5s2: { backfilled: r5s2BackfilledCount },
-      // v3.0.4 块 F：Payment线下调拨回填轮次统计
-      r5s2b: { backfilled: r5s2bBackfilledCount },
+      // v3.1.7：matched 含同值消费，backfilled 仅实际改写。
+      r5s2b: { matched: r5s2bMatchedCount, backfilled: r5s2bBackfilledCount },
       r5s3: { cleanup: platformCleanupRows.length },
       r5s4: { backfilled: refundBackfillRows.length }
     }

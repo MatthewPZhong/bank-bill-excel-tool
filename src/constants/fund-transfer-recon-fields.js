@@ -20,6 +20,7 @@ const FT_RECON_FIELD_MAP = Object.freeze({
   mid: Object.freeze({
     allocationNo: '调拨单号',
     status: '调拨状态',
+    payMethod: '付款方式',
     txTime: '交易时间',
     channelSerial: '渠道流水号',
     payCard: '付款账户（卡号）', // 全角括号；out 行 big_account 来源
@@ -36,6 +37,7 @@ const FT_RECON_FIELD_MAP = Object.freeze({
     allocationNo: '调拨单号',
     billDate: 'BillDate',
     reconId: 'ReconID',
+    payMethod: '付款方式',
     payAccount: '付款账号',
     payeeAccount: '收款账号',
     payChannel: '付款渠道',
@@ -43,7 +45,8 @@ const FT_RECON_FIELD_MAP = Object.freeze({
     amount: '金额',
     currency: '币种',
     fundType: 'fund_type', // 方向标记 + 匹配热列（FundTransfer-in/out）
-    bigAccount: 'big_account' // D1 按方向固化（in=收款卡号 / out=付款卡号）
+    bigAccount: 'big_account', // D1 按方向固化（in=收款卡号 / out=付款卡号）
+    used: '是否被使用'
   }),
   // —— 方向固定值（资产表 FundType枚举值.xlsx 实证大写 T，与 R5s2 / R5s2b 一致）——
   FUND_TYPE_IN: 'FundTransfer-in',
@@ -51,6 +54,8 @@ const FT_RECON_FIELD_MAP = Object.freeze({
 });
 
 const MID_ALLOCATION_SUCCESS_STATUS = '付款成功';
+const FUND_TRANSFER_RECON_UNUSED = '';
+const FUND_TRANSFER_RECON_USED = '1';
 
 // 启动期断言①：mid 源列全部 ∈ ZHONGTAI_DISPATCH_ORDER_SIGNATURE.expectedHeaders
 //   （防全角括号被手敲成半角 / 列名漂移 → 派生取空 → big_account 取空 → 需求2/3 引擎会误命中
@@ -74,5 +79,7 @@ if (__emptyRecon.length > 0) {
 
 module.exports = {
   FT_RECON_FIELD_MAP,
-  MID_ALLOCATION_SUCCESS_STATUS
+  MID_ALLOCATION_SUCCESS_STATUS,
+  FUND_TRANSFER_RECON_UNUSED,
+  FUND_TRANSFER_RECON_USED
 };

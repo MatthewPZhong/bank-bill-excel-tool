@@ -61,7 +61,10 @@ const {
   makeInvalidExtraFeeWarningDeduper
 } = require('./r5-fund-transfer-backfill');
 
-const { FT_RECON_FIELD_MAP } = require('../../constants/fund-transfer-recon-fields');
+const {
+  FT_RECON_FIELD_MAP,
+  FUND_TRANSFER_RECON_USED
+} = require('../../constants/fund-transfer-recon-fields');
 
 const RECON = FT_RECON_FIELD_MAP.recon;
 
@@ -99,11 +102,11 @@ function dateMismatchReason(counterpartDateValue, bankDateValue) {
  * @param {Array<Object>} bankRows  R4 后的银行对账单行（带 _rowId，FundType/ReconciliationId 可能已被前序轮次改写）
  * @param {Object} [options]
  * @param {number} [options.dateToleranceDays] Phase2 日期容差天数（默认 1）
+ * @param {Set|Array} [options.excludeBankRowIds] Payment 已消费银行行
  * @returns {{ modifications: Array, warnings: Array, usedBankRowIds: Set }}
  *   modifications：实际改写 ReconciliationId 的行（{ rowId, column:'ReconciliationId', oldValue, newValue }）
  *   warnings：multi-bank-match-backfill / r5-invalid-extra-fee
- *   usedBankRowIds：引擎内 1v1 消费的全部 bank _rowId 集合（含「消费但未写」行）——
- *     与 R5s2 同语义，供编排器并入 r5s2ConsumedBankRowIds 传 R5s2b 剔除（互斥防二次覆盖）。
+ *   usedBankRowIds：引擎内 1v1 消费的全部 bank _rowId 集合（含「消费但未写」行），供审计统计。
  */
 function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
   const warningCollector = makeWarningCollector(
@@ -111,7 +114,7 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
     '中台调拨订单对账ID回填（调拨对账单）'
   );
   const modCollector = makeModificationCollector();
-  // 跨 direction 聚合的消费集合（含同值未写行），作为返回字段供 R5s2b 剔除。
+  // 跨 direction 聚合的消费集合（含同值未写行）。
   const consumedBankRowIds = new Set();
   // v3.0.26：稳定 _rowId 优先去重；无 _rowId 才按对象身份，保证非法 fee 银行行只告警一次。
   const shouldEmitInvalidExtraFeeWarning = makeInvalidExtraFeeWarningDeduper();
@@ -139,6 +142,9 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
   const directions = directionsValidation.directions;
   const datePolicy = normalizeFundTransferDatePolicy(options);
   const dateToleranceDays = datePolicy.toleranceDays;
+  const excludeBankRowIds = options.excludeBankRowIds instanceof Set
+    ? options.excludeBankRowIds
+    : new Set(Array.isArray(options.excludeBankRowIds) ? options.excludeBankRowIds : []);
 
   // 无银行行 → 直接返回；无调拨行时仍遍历方向银行池，以保证非法 Extra Fee warning 不被早退吞掉。
   if (safeBankRows.length === 0) {
@@ -225,6 +231,7 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
 
     const chosen = cand[0];
     usedBankRowId.add(chosen._rowId); // 严格 1v1 单向消费（命中先 add 再判写）
+    rc[RECON.used] = FUND_TRANSFER_RECON_USED;
 
     const nv = normalizeCellValue(rc && rc[RECON.reconId]);
     const old = normalizeCellValue(chosen.ReconciliationId);
@@ -244,9 +251,11 @@ function runRound5FundTransferReconBackfill(reconRows, bankRows, options = {}) {
       (rc) =>
         normalizeCellValue(rc && rc[RECON.fundType]) === dir.gwTradeType &&
         normalizeCellValue(rc && rc[RECON.reconId]) !== '' &&
-        normalizeCellValue(rc && rc[RECON.bigAccount]) !== ''
+        normalizeCellValue(rc && rc[RECON.bigAccount]) !== '' &&
+        normalizeCellValue(rc && rc[RECON.used]) !== FUND_TRANSFER_RECON_USED
     );
     const bankPool = safeBankRows.filter((b) => {
+      if (excludeBankRowIds.has(b && b._rowId)) return false;
       if (normalizeCellValue(b && b.FundType) !== dir.bankFundType) return false;
       if (!hasInvalidExtraFee(b)) return true;
       if (shouldEmitInvalidExtraFeeWarning(b)) {

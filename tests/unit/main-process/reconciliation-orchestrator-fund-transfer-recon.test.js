@@ -2,17 +2,14 @@
 // 目标文件：src/main-process/reconciliation-orchestrator.js（R5s2 二选一 gating 落点）
 // plan「需求2」/ 资金红线 review 点 7。
 //
-// ⚠️ 范围边界：只测【编排器二选一 gating / context 注入管道 / _round 标记 / usedBankRowIds 并入两路 /
-//   下游 R5s2b excludeBankRowIds 互斥 / 行数守恒 / 取消路 parity】，
+// ⚠️ 范围边界：只测【编排器二选一 gating / context 注入管道 / _round 标记 / 行数守恒 / 取消路 parity】，
 //   不重测引擎匹配矩阵（那是 r5-fund-transfer-recon-backfill / r5-fund-transfer-backfill 引擎单测职责）。
 //
 // 覆盖：
 //   1. 勾选（reconSourceMid 缺省/true）→ 走新引擎，fundTransferReconContext.reconRows 命中 →
 //      ReconciliationId 回填进 modifiedRows、_round='R5s2-recon'、stats.r5s2BackfilledCount=1
 //   2. 取消（reconSourceMid:false）→ 走旧网关 runRound5FundTransferBackfill，与现状一致（_round='R5s2'，parity）
-//   3. 🔴 两路 usedBankRowIds 都并入 r5s2ConsumedBankRowIds → 传 R5s2b excludeBankRowIds
-//      （断言被消费行不被 R5s2b 二次匹配/覆盖）
-//   4. 行数守恒：modifiedRows + unmatchedRows === bankRows.length
+//   3. 行数守恒：modifiedRows + unmatchedRows === bankRows.length
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -35,7 +32,8 @@ function makeBankRow(o = {}) {
     'Credit Amount': o['Credit Amount'] ?? '',
     'Debit Amount': o['Debit Amount'] ?? '',
     'Extra Fee': o['Extra Fee'] ?? '',
-    BillDate: o.BillDate ?? '2026-05-26'
+    BillDate: o.BillDate ?? '2026-05-26',
+    'Drawee CardNo': o['Drawee CardNo'] ?? 'PAY-CARD-1'
   };
 }
 
@@ -46,10 +44,16 @@ function makeReconRow(o = {}) {
     调拨单号: o['调拨单号'] ?? 'FTA-1',
     BillDate: o.BillDate ?? '2026-05-26',
     ReconID: o.ReconID ?? 'RECON-MID',
+    付款方式: o['付款方式'] ?? '线上',
+    付款账号: o['付款账号'] ?? 'PAY-CARD-1',
+    收款账号: o['收款账号'] ?? '202782001',
+    付款渠道: o['付款渠道'] ?? '',
+    收款渠道: o['收款渠道'] ?? 'CITI',
     big_account: o.big_account ?? '202782001',
     币种: o['币种'] ?? 'USD',
     金额: o['金额'] ?? 100,
-    fund_type: o.fund_type ?? 'FundTransfer-in'
+    fund_type: o.fund_type ?? 'FundTransfer-in',
+    是否被使用: o['是否被使用'] ?? ''
   };
 }
 
@@ -62,21 +66,6 @@ function makeGwRow(o = {}) {
     amount: o.amount ?? 100,
     Billdate: o.Billdate ?? '2026-05-26',
     reconciliationid: o.reconciliationid ?? 'GW-RECON'
-  };
-}
-
-// 中台调拨订单行（R5s2b 引擎需要；与 payment-offline 测试同范式）
-function makeMidRow(o = {}) {
-  return {
-    调拨单号: o['调拨单号'] ?? 'FTA202606021000477', // → 2026-06-02 → 订单周 2623
-    付款方式: o['付款方式'] ?? '线下',
-    渠道流水号: o['渠道流水号'] ?? 'CH-OFFLINE',
-    交易时间: o['交易时间'] ?? '2026-05-26',
-    '收款账户（卡号）': o['收款账户（卡号）'] ?? '202782001',
-    收款金额: o['收款金额'] ?? 100,
-    收款币种: o['收款币种'] ?? 'USD',
-    付款渠道: o['付款渠道'] ?? 'BGL',
-    收款渠道: o['收款渠道'] ?? 'CITI'
   };
 }
 
@@ -96,8 +85,6 @@ function makeR5s2Scenario({ reconSourceMid, paymentOfflineBackfill } = {}) {
   if (paymentOfflineBackfill) config.paymentOfflineBackfill = paymentOfflineBackfill;
   return { id: 502, name: '中台调拨订单对账ID回填', category: 'builtin-fixed', priority: 0, enabled: true, config };
 }
-
-const POB_ON = { enabled: true, bigAccount: '202782001', bankChannel: 'CITI', region: 'LU' };
 
 // ---- 1. 勾选路（默认 / true）→ 走新引擎，命中回填 ----------------------
 
@@ -325,89 +312,6 @@ test.describe('v3.1.1 resolved policy 接线（两来源共用，配置失败关
       result.errorReport.filter((warning) => warning.code === 'r5-fund-transfer-directions-invalid').length,
       1
     );
-    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
-  });
-});
-
-// ---- 3. 🔴 两路 usedBankRowIds 并入 r5s2ConsumedBankRowIds → 传 R5s2b excludeBankRowIds ----
-
-test.describe('runReconciliation R5s2 二选一 —— usedBankRowIds 并入两路（资金红线点7：R5s2b 互斥）', () => {
-  test('🔴 勾选路：新引擎消费的银行行不被 R5s2b 二次匹配/覆盖', async () => {
-    // b1 同时满足：调拨对账单（勾选路命中→RECON-MID）与 R5s2b 中台订单（CH-OFFLINE）。
-    //   勾选路先消费 b1 → usedBankRowIds 并入 r5s2ConsumedBankRowIds → R5s2b excludeBankRowIds 剔除 → 不覆盖。
-    const bankRows = [makeBankRow({
-      _rowId: 'b1',
-      FundType: 'FundTransfer-in',
-      MerchantId: '202782001',
-      Currency: 'USD',
-      'Credit Amount': 100, 'Debit Amount': 0,
-      BillDate: '2026-05-26',
-      ReconciliationId: ''
-    })];
-    const result = await runReconciliation({
-      bankRows,
-      gwRows: [],
-      scenarios: [makeR5s2Scenario({ reconSourceMid: true, paymentOfflineBackfill: POB_ON })],
-      fundTransferReconContext: { reconRows: [makeReconRow({ ReconID: 'RECON-MID' })] },
-      midAllocationContext: { midAllocationRows: [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })] }
-    });
-
-    assert.equal(bankRows[0].ReconciliationId, 'RECON-MID', '勾选路回填胜出，R5s2b 不覆盖');
-    assert.equal(result.stats.r5s2BackfilledCount, 1, '勾选路命中 1');
-    assert.equal(result.stats.r5s2bBackfilledCount, 0, 'R5s2b 被 excludeBankRowIds 剔除 → 0');
-    assert.ok(!result.modifications.some((m) => m._round === 'R5s2b' && m.rowId === 'b1'),
-      'R5s2b 不应对被勾选路消费的行产 modification');
-    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
-  });
-
-  test('🔴 勾选路「同值消费但未写」行也并入排除集 → R5s2b 不触碰（窄缺口闭合·端到端）', async () => {
-    // 银行行 ReconciliationId 原值 === 调拨对账单 ReconID（RECON-MID）。
-    //   勾选路命中但 old===nv → 不 record（modifications 取不到），但 usedBankRowIds 已消费它。
-    //   断言：该行已并入排除集 → R5s2b 不二次匹配覆盖为 CH-OFFLINE。
-    const bankRows = [makeBankRow({
-      _rowId: 'b1',
-      FundType: 'FundTransfer-in',
-      MerchantId: '202782001',
-      Currency: 'USD',
-      'Credit Amount': 100, 'Debit Amount': 0,
-      BillDate: '2026-05-26',
-      ReconciliationId: 'RECON-MID' // 原值已等于调拨对账单 ReconID → 勾选路同值消费不写
-    })];
-    const result = await runReconciliation({
-      bankRows,
-      gwRows: [],
-      scenarios: [makeR5s2Scenario({ reconSourceMid: true, paymentOfflineBackfill: POB_ON })],
-      fundTransferReconContext: { reconRows: [makeReconRow({ ReconID: 'RECON-MID' })] },
-      midAllocationContext: { midAllocationRows: [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })] }
-    });
-
-    assert.equal(result.stats.r5s2BackfilledCount, 0, '勾选路同值未写 → 计数 0');
-    assert.equal(bankRows[0].ReconciliationId, 'RECON-MID',
-      '🔴 同值消费行不被 R5s2b 覆盖（usedBankRowIds 含同值未写行）');
-    assert.equal(result.stats.r5s2bBackfilledCount, 0, 'R5s2b 不触碰被消费的同值行 → 0');
-    assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
-  });
-
-  test('🔴 取消路：网关消费的银行行不被 R5s2b 二次匹配/覆盖（现状 parity，排除集接线仍生效）', async () => {
-    const bankRows = [makeBankRow({
-      _rowId: 'b1',
-      FundType: 'FundTransfer-in',
-      MerchantId: '202782001',
-      Currency: 'USD',
-      'Credit Amount': 100, 'Debit Amount': 0,
-      BillDate: '2026-05-26',
-      ReconciliationId: ''
-    })];
-    const result = await runReconciliation({
-      bankRows,
-      gwRows: [makeGwRow({ reconciliationid: 'GW-RECON' })],
-      scenarios: [makeR5s2Scenario({ reconSourceMid: false, paymentOfflineBackfill: POB_ON })],
-      midAllocationContext: { midAllocationRows: [makeMidRow({ 渠道流水号: 'CH-OFFLINE' })] }
-    });
-
-    assert.equal(bankRows[0].ReconciliationId, 'GW-RECON', '取消路网关回填胜出，R5s2b 不覆盖');
-    assert.equal(result.stats.r5s2BackfilledCount, 1, '取消路命中 1');
-    assert.equal(result.stats.r5s2bBackfilledCount, 0, 'R5s2b 被 excludeBankRowIds 剔除 → 0');
     assert.equal(result.modifiedRows.length + result.unmatchedRows.length, bankRows.length);
   });
 });

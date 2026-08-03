@@ -3,7 +3,7 @@
 // 覆盖（🔴 资金对账数据层 — 隐藏性 / round-trip / 整表覆盖 / 幂等是需求2/3 引擎的地基契约）：
 //   UT-FTR-1  fund-transfer-recon 不在 ALL_TABLE_KEYS（隐藏表，前端弹窗渲染不到它）
 //   UT-FTR-2  listLinkedTableMeta 结果不含 fund-transfer-recon，仍是现有 5 张可见表
-//   UT-FTR-3  replaceFundTransferReconRows → readFundTransferReconRows round-trip（recon 11 字段一致）
+//   UT-FTR-3  replaceFundTransferReconRows → readFundTransferReconRows round-trip（recon 13 字段一致）
 //   UT-FTR-4  allocation_no / fund_type / bill_date / recon_id / big_account 列从行经常量取值正确落列
 //   UT-FTR-5  整表覆盖：第二次 replace 仅含第二批（二次 replace 不累加）
 //   UT-FTR-6  readFundTransferReconRows ORDER BY id ASC 还原原序 + 损坏 raw_json 行跳过
@@ -47,6 +47,7 @@ function midRow(overrides = {}) {
   const base = {
     [M.allocationNo]: 'ALLOC-1',
     [M.status]: '付款成功',
+    [M.payMethod]: '线下',
     [M.txTime]: '2026-05-04',
     [M.channelSerial]: 'SERIAL-1',
     [M.payCard]: 'PAY-CARD-1',
@@ -83,21 +84,23 @@ test.describe('linked-table-repository — 调拨对账单隐藏表（v3.0.6 需
     assert.equal(metas.length, 5, '链接表弹窗仍为 5 行（调拨对账单不计入）');
   });
 
-  // UT-FTR-3：recon 11 字段 round-trip（写入 → 读回字段集合与值一致）
-  test('UT-FTR-3：replaceFundTransferReconRows → readFundTransferReconRows round-trip（recon 11 字段）', () => {
+  // UT-FTR-3：recon 13 字段 round-trip（写入 → 读回字段集合与值一致）
+  test('UT-FTR-3：replaceFundTransferReconRows → readFundTransferReconRows round-trip（recon 13 字段）', () => {
     const rows = reconRowsFrom(midRow());
     assert.equal(rows.length, 2, '一行中台订单派生 in/out 两行');
     appDb.replaceFundTransferReconRows(rows);
     const back = appDb.readFundTransferReconRows();
     assert.equal(back.length, 2);
-    // 字段集合一致（recon 11 字段）
-    assert.deepEqual(Object.keys(back[0]).sort(), Object.keys(rows[0]).sort(), 'raw_json 字段集合 = recon 11 字段');
+    assert.deepEqual(Object.keys(back[0]).sort(), Object.keys(rows[0]).sort(), 'raw_json 字段集合 = recon 13 字段');
+    assert.equal(Object.keys(back[0]).length, 13);
     // in 行（第 1 行）：方向 / 渠道 / 金额 / 币种 / big_account 抽查
     assert.equal(back[0][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_IN);
     assert.equal(back[0][R.receiveChannel], 'DBS');
     assert.equal(back[0][R.amount], '2100000');
     assert.equal(back[0][R.currency], 'USD');
     assert.equal(back[0][R.bigAccount], 'PAYEE-CARD-1', 'D1：in 行 big_account = 收款卡号');
+    assert.equal(back[0][R.payMethod], '线下');
+    assert.equal(back[0][R.used], '');
     // out 行（第 2 行）
     assert.equal(back[1][R.fundType], FT_RECON_FIELD_MAP.FUND_TYPE_OUT);
     assert.equal(back[1][R.payChannel], 'CITI');

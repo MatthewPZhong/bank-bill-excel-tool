@@ -41,7 +41,8 @@ function reconRow({
   currency = 'USD',
   amount = 100,
   billDate = '2026-06-07',
-  reconId = 'RC-1'
+  reconId = 'RC-1',
+  used = ''
 } = {}) {
   return {
     [RECON.fundType]: fundType,
@@ -49,7 +50,8 @@ function reconRow({
     [RECON.currency]: currency,
     [RECON.amount]: amount,
     [RECON.billDate]: billDate,
-    [RECON.reconId]: reconId
+    [RECON.reconId]: reconId,
+    [RECON.used]: used
   };
 }
 
@@ -876,5 +878,44 @@ test.describe('R5场景2(调拨对账单) — 空入参 no-op', () => {
       assert.ok(r.usedBankRowIds instanceof Set);
       assert.equal(r.usedBankRowIds.size, 0);
     }
+  });
+});
+
+test.describe('R5场景2(调拨对账单) v3.1.7 — 与 Payment 共享消费状态', () => {
+  test('是否被使用=1 的派生行必须跳过', () => {
+    const source = reconRow({ reconId: 'USED', used: '1' });
+    const bank = bankRow({ reconId: '' });
+    const result = runRound5FundTransferReconBackfill([source], [bank]);
+
+    assert.deepEqual(result.modifications, []);
+    assert.equal(bank.ReconciliationId, '');
+    assert.equal(source[RECON.used], '1');
+  });
+
+  test('excludeBankRowIds 中的 Payment 银行行必须跳过', () => {
+    const source = reconRow({ reconId: 'R5-MUST-NOT-WRITE' });
+    const bank = bankRow({ rowId: 'payment-bank', reconId: '' });
+    const result = runRound5FundTransferReconBackfill([source], [bank], {
+      excludeBankRowIds: new Set(['payment-bank'])
+    });
+
+    assert.deepEqual(result.modifications, []);
+    assert.equal(bank.ReconciliationId, '');
+    assert.equal(source[RECON.used], '');
+  });
+
+  test('R5 命中后标记派生行；同值命中也标记并消费银行行', () => {
+    const changed = reconRow({ reconId: 'CHANGED' });
+    const changedBank = bankRow({ rowId: 'changed', reconId: '' });
+    const changedResult = runRound5FundTransferReconBackfill([changed], [changedBank]);
+    assert.equal(changed[RECON.used], '1');
+    assert.deepEqual([...changedResult.usedBankRowIds], ['changed']);
+
+    const same = reconRow({ reconId: 'SAME' });
+    const sameBank = bankRow({ rowId: 'same', reconId: 'SAME' });
+    const sameResult = runRound5FundTransferReconBackfill([same], [sameBank]);
+    assert.equal(same[RECON.used], '1');
+    assert.deepEqual(sameResult.modifications, []);
+    assert.deepEqual([...sameResult.usedBankRowIds], ['same']);
   });
 });

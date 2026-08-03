@@ -23,11 +23,19 @@ const CAUSE_MAP = Object.freeze({
   'overwrite-existing-recon-id': '原值非空被覆盖',
   'overwrite-existing-value': '原值非空被覆盖',
 
-  // v3.0.4 块 F：Payment线下调拨订单回填（R5 场景2b）—— 新引擎 warning code
-  'payment-offline-invalid-fta': '调拨单号不是合法的 FTA+8位日期，算不出订单周数，已跳过',
+  // v3.1.7：Payment线下调拨订单回填（R5 场景2b）—— 派生表、周边界与共享消费。
+  'payment-offline-invalid-fta': 'Payment候选含无法解析日期的调拨单号，本次运行已在回填前阻断',
+  'payment-offline-recon-schema-invalid': '调拨对账单派生字段不完整，请重新导入中台调拨订单后再运行',
+  'payment-offline-recon-derive-failed': 'Payment运行前生成调拨对账单失败，为避免读取陈旧数据已阻断',
+  'payment-offline-order-week-gap': 'Payment候选订单周不连续，本次运行已阻断，禁止跨空档扩大窗口猜配',
   'payment-offline-invalid-big-account-config': 'Payment线下调拨大账号配置无效，请使用中文顿号分隔且不要填写空项或重复账号',
+  'payment-offline-config-incomplete': 'Payment线下调拨配置缺少银行渠道或地区，本轮已安全跳过',
   'payment-offline-multi-candidate': '一条银行行匹配到多条调拨订单候选，已按就近取最近一条',
-  'payment-offline-no-order-match': '银行行未匹配到金额币种相符且晚于交易时间的调拨订单',
+  'payment-offline-empty-recon-id': '调拨派生行 ReconID 为空，已跳过且未消费银行行',
+  'payment-offline-empty-pay-account': '调拨派生行付款账号为空，已跳过且未消费银行行',
+  'payment-offline-no-eligible-recon-row': '调拨对账单中没有满足Payment配置的可用FundTransfer-in派生行',
+  'payment-offline-forced-recon-source': 'Payment已开启，本次运行已强制使用中台调拨派生表',
+  'payment-offline-no-order-match': '银行行未匹配到付款账号、金额币种和日期均相符的调拨派生行',
 
   // v3.0.26：R5 中台调拨订单回填 Extra Fee 校验（🔴 资金红线）
   'r5-invalid-extra-fee': '银行行 Extra Fee 非空但不是合法金额，已跳过中台调拨订单对账ID回填与调拨多对多审计，请人工核对手续费原值',
