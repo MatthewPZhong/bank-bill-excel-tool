@@ -61,10 +61,8 @@ describe('F1：Payment 勾选行 + 条件展开三输入框', () => {
 
   test('显隐联动：勾选/取消展开区显隐（取消勾选保留输入值，不清空 input.value）', () => {
     assert.ok(dialogBody.includes('function syncPaymentFieldsVisibility()'), '应有显隐联动函数');
-    assert.ok(
-      /paymentFields\.hidden\s*=\s*!paymentCheck\.checked/.test(dialogBody),
-      '展开区 hidden 跟随勾选框 checked'
-    );
+    assert.ok(/const\s+enabled\s*=\s*paymentCheck\.checked\s*===\s*true/.test(dialogBody));
+    assert.ok(/paymentFields\.hidden\s*=\s*!enabled/.test(dialogBody), '展开区 hidden 跟随 Payment 开关');
     // 取消勾选不应清空输入框值（保留草稿）——断言 change 联动里没有把 input.value 置空
     assert.ok(
       !/payment(BankChannel|Region|BigAccount)Input\.value\s*=\s*''/.test(
@@ -179,10 +177,21 @@ describe('T6：对账数据来源二选一勾选行（reconSourceMid）', () => 
     );
   });
 
-  test('保存：reconSourceMid = (checkbox.checked === true)，浅合并逐键写入 config', () => {
+  test('Payment 开启时自动勾选并锁定来源，关闭后解除锁定且保留勾选值', () => {
     assert.ok(
-      /reconSourceMid\s*=\s*reconSourceCheck\.checked\s*===\s*true/.test(dialogBody),
-      'reconSourceMid 取值应为 checkbox.checked === true（布尔）'
+      /if\s*\(enabled\)\s*reconSourceCheck\.checked\s*=\s*true/.test(dialogBody),
+      'Payment 开启时必须自动勾选派生表来源'
+    );
+    assert.ok(
+      /reconSourceCheck\.disabled\s*=\s*enabled/.test(dialogBody),
+      'Payment 开启时锁定，关闭时解除锁定'
+    );
+  });
+
+  test('保存：Payment 开启时强制 reconSourceMid=true，否则取复选框值', () => {
+    assert.ok(
+      /reconSourceMid\s*=\s*paymentOfflineBackfill\s*&&\s*paymentOfflineBackfill\.enabled\s*===\s*true\s*\?\s*true\s*:\s*reconSourceCheck\.checked\s*===\s*true/.test(dialogBody),
+      '持久化时必须收敛历史冲突配置'
     );
     assert.ok(
       /if\s*\(reconSourceMid\s*!==\s*null\)\s*updateFields\.config\.reconSourceMid\s*=\s*reconSourceMid/.test(dialogBody),

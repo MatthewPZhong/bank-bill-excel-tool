@@ -5272,7 +5272,11 @@ async function handleBankStatementBatchImport() {
     // v2.1.16-beta.6 防御：状态刷新抛错不应阻断后续提醒（导入反馈仍要落地）。
     //   refreshBankStatementStatus 内部会调 updateBankStatementUi，带上 issues 摘要一并渲染。
     try {
-      await refreshBankStatementStatus();
+      try {
+        await refreshBankStatementStatus();
+      } catch (refreshError) {
+        console.error(refreshError);
+      }
     } catch (refreshErr) {
       console.error('[导入对账单] 状态刷新失败（已兜底，不阻断提醒）:', refreshErr);
     }
@@ -5662,7 +5666,13 @@ async function runBankStatementInternal() {
   try {
     const result = await window.desktopApi.bankStatement.run();
     if (!result || result.status !== 'ok') {
-      openModal(createAlertDialog(`运行失败：${result?.message || '未知错误'}`));
+      const message = result?.message || '未知错误';
+      const detailLines = Array.isArray(result?.detailLines) ? result.detailLines : [];
+      const details = detailLines.length > 0
+        ? `<br/><br/>${detailLines.slice(0, 20).map((line) => escapeHtml(line)).join('<br/>')}`
+        : '';
+      await refreshBankStatementStatus();
+      openModal(createAlertDialog(`运行失败：${escapeHtml(message)}${details}`));
       return;
     }
     state.bankStatementExport = null;  // 重新运行 → 清掉「已导出」缓存

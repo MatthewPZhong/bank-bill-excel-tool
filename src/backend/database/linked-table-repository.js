@@ -1251,14 +1251,14 @@ function writeAdmMatchFlags(db, admRows) {
 //     BillDate       → bill_date（normalizeDateForRange 归一 YYYY-MM-DD；不可解析则列为 null，整行仍落库）
 //     ReconID        → recon_id（normalizeKey）
 //     big_account    → big_account（D1 按方向固化卡号；normalizeKey）
-//     整行 11 字段   → raw_json（数据真相）
+//     整行 13 字段   → raw_json（数据真相；含付款方式、是否被使用，不新增热列）
 // ============================================================================
 
 const FUND_TRANSFER_RECON_TABLE = 'linked_fund_transfer_recon';
 const FTR_COL = FT_RECON_FIELD_MAP.recon; // recon 列名常量（单一真相）
 
 // 整表覆盖写入调拨对账单行：事务内 DELETE 全表 + 批量 INSERT 7 列（prepared）。
-//   rows = buildFundTransferReconRows 产物（每单 in/out 两行，recon 11 字段对象；仓储不关心字段语义，整行存 raw_json）。
+//   rows = buildFundTransferReconRows 产物（每单 in/out 两行，recon 13 字段对象；仓储不关心字段语义，整行存 raw_json）。
 //   caller 不需持有事务；本函数自带 BEGIN/COMMIT/ROLLBACK（与 replaceAdmBankDeposit 范式一致）。
 //   🔴 重导中台调拨订单 = 调拨对账单重建（整表覆盖语义；下游匹配在需求2/3 引擎按整批重算，非增量）。
 function replaceFundTransferReconRows(db, rows, options = {}) {

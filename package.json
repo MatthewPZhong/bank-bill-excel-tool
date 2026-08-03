@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -153,6 +153,7 @@
     "test:position-import:faults": "node scripts/test-position-import-faults.js",
     "benchmark:position-import": "node scripts/benchmark-position-import.js",
     "generate:position-import-fixture": "node scripts/generate-position-import-fixture.js",
+    "generate:v3.1.7-payment-r5s2-fixed-sample": "node scripts/generate-v3.1.7-payment-r5s2-fixed-sample.js",
     "scan:vars": "node scripts/scan-vars.js",
     "check:vars": "node scripts/check-vars.js"
   },

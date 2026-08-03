@@ -9,7 +9,8 @@
 
 const {
   FT_RECON_FIELD_MAP,
-  MID_ALLOCATION_SUCCESS_STATUS
+  MID_ALLOCATION_SUCCESS_STATUS,
+  FUND_TRANSFER_RECON_UNUSED
 } = require('../constants/fund-transfer-recon-fields');
 const { normalizeCellValue } = require('./scenario-engines/engine-utils');
 
@@ -54,8 +55,10 @@ function buildFundTransferReconRows(midRows, options = {}) {
       [R.allocationNo]: normalizeCellValue(m[M.allocationNo]),
       [R.billDate]: normalizeCellValue(m[M.txTime]), // 交易时间 → BillDate
       [R.reconId]: normalizeCellValue(m[M.channelSerial]), // 渠道流水号 → ReconID
+      [R.payMethod]: normalizeCellValue(m[M.payMethod]),
       [R.payAccount]: payAccount,
-      [R.payeeAccount]: payeeAccount
+      [R.payeeAccount]: payeeAccount,
+      [R.used]: FUND_TRANSFER_RECON_UNUSED
     };
 
     // FundTransfer-in 行：渠道 / 金额 / 币种取收款侧；big_account = 收款卡号（D1）
