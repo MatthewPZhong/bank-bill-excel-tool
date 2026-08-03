@@ -21,4 +21,29 @@
 - 聚焦 unit/integration。
 - `npm run release-check`。
 - `npm run scan:vars`、`npm run check:vars`。
-- 固定样本人工资金复核。
+
+## 业务启用门禁
+
+- 固定样本 220 条 Payment 配对及 2 条 R5 回填必须由业务逐笔复核；技术 Release 不解除该门禁。
+
+## 正式收尾证据
+
+- PR #121 最终实现提交 `73c35a3f2b8ea2b7cc69e94bc1c44ae641c4cbe6`，squash merge commit `6fe118b8c4d665e1ce877fb792e6a4bbcda64cdf`。
+- 合并前和正式收尾复查均无未解决 P3 及以上 Finding。
+- 合并后 Windows Build run `30794912210` 成功，覆盖 smoke、SQLite teardown、主页面布局、Setup/portable 构建、包体检查和 updater 资产暂存。
+- 2026-08-03 干净依赖 `release-check`：unit 4,575/4,575，integration 44 个脚本 2,051/2,051，lint 与 smoke PASS。
+- 主页面布局 6/6 PASS；变量扫描为 282 个 JS 文件、3,526 个顶层声明。`check-vars` 命中 `processingResult`、`app`、`state`，均已按清单核对并由运行结果失效测试、完整 smoke 和 UI 回归覆盖。
+- 固定样本正式收尾回放再次得到 Payment 220（R1=218、R2=0、R3=2）、Payment 改写 190、R5 改写 2、命中 192、未命中 1,639，并保持 220 条付款账户完全相等。
+- 生产依赖审计为 0 critical、7 high、2 moderate；本次资金发布收尾不混入依赖升级。
+
+## Release 验证
+
+- tag 必须为 annotated `v3.1.7`，且 peeled commit 等于创建时最新 `main`。
+- tag、`package.json.version` 和 `latest.yml.version` 必须一致。
+- Windows Release workflow 的 main/tag 校验、完整 release-check、布局、构建、包体、资产暂存、发布和公开回读必须全部成功。
+- GitHub Release 必须为 latest、non-draft、non-prerelease，并且只发布一套 Setup、Setup blockmap、portable 和 `latest.yml`。
+- 四项资产必须独立下载并核对大小与 SHA-256；`latest.yml` 的 version、path、size、SHA-512 必须与 Setup 实际字节一致。
+
+## 非自动化结论
+
+固定样本中的 220 条 Payment 配对及 2 条 R5 后续回填尚未取得业务逐笔复核证据。用户已授权继续生成技术 Release，但正式业务启用和公告仍被该人工资金门禁阻断，CI、样本基线和公开资产状态均不能替代业务签字。

@@ -9,7 +9,7 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.1.7（2026-08-03）
+## v3.1.7（Unreleased）
 
 v3.1.7 将 Payment 线下调拨和 R5s2-recon 收口到同一份调拨对账单运行工作副本，固定 Payment 先运行，并增加付款账户、订单周边界和跨引擎消费保护。
 
@@ -24,7 +24,7 @@ v3.1.7 将 Payment 线下调拨和 R5s2-recon 收口到同一份调拨对账单�
 **固定样本与人工门禁**
 
 - 生产链路回放 1,831 条银行行与 223 条调拨订单：Payment 匹配 220、实际改写 190；R5s2-recon 后续改写 2；命中 192、未命中 1,639。220 条 Payment 配对的付款账号与 `Drawee CardNo` 全量相等。
-- 这是 ReconciliationId 资金回填红线。自动基线验证不能替代人工复核，发布前必须逐笔检查固定样本中的 220 条 Payment 配对和 2 条 R5 后续回填。
+- 这是 ReconciliationId 资金回填红线。自动基线验证不能替代人工复核，正式业务启用和公告前必须逐笔检查固定样本中的 220 条 Payment 配对和 2 条 R5 后续回填。
 
 ## v3.1.6（2026-08-03）
 
