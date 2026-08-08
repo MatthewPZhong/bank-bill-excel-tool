@@ -3,7 +3,7 @@
 const IMPORT_ROW_INSERT_SQL = `
   INSERT INTO vcc_fin_op_import_rows (
     import_record_id, source_type, target_month,
-    idempotency_key_raw, idempotency_key, content_hash, hash_version,
+    idempotency_key_raw, idempotency_key, content_hash, hash_version, raw_contract_version,
     subject, stat_currency, signed_amount,
     business_department, counterparty_department, business_sub_type,
     channel_name, mid, recon_type,
@@ -11,7 +11,7 @@ const IMPORT_ROW_INSERT_SQL = `
     source_file, sheet_name, source_row, raw_json,
     disposition, validation_field, validation_message
   ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
   )
 `;
 

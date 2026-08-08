@@ -10,7 +10,10 @@ const {
   getSourceDefinition,
   headersEqual
 } = require('../backend/vcc-financial-op/definitions');
-const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
+const {
+  normalizeYearMonth,
+  pendingCanonicalValues
+} = require('../backend/vcc-financial-op/row-mapper');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
 const MAX_DATA_ROWS_PER_SHEET = 1048575;
@@ -94,13 +97,21 @@ function parseJson(value, fallback) {
 function detailRawValues(row) {
   const definition = getSourceDefinition(row.source_type);
   const values = parseJson(row.raw_json, null);
-  if (!definition || !Array.isArray(values) || values.length !== definition.headers.length) {
+  let normalizedValues = values;
+  if (definition && Array.isArray(values) && row.source_type === SOURCE_TYPES.PENDING) {
+    try {
+      normalizedValues = pendingCanonicalValues(values, row.raw_contract_version);
+    } catch (_error) {
+      normalizedValues = null;
+    }
+  }
+  if (!definition || !Array.isArray(normalizedValues) || normalizedValues.length !== definition.headers.length) {
     throw exportError(
       'invalid-export-lineage',
       `${SOURCE_LABELS[row.source_type] || row.source_type}有效行 ${row.id} 的原始字段血缘不完整，无法导出`
     );
   }
-  return values.map((value) => value == null ? '' : String(value));
+  return normalizedValues.map((value) => value == null ? '' : String(value));
 }
 
 function selectedValues(sourceType, values, headers) {
@@ -217,7 +228,8 @@ function *iterateDatasetRows(db, scope) {
   }
 
   const rows = db.prepare(`
-    SELECT id, source_type, raw_json, subject, stat_currency, signed_amount,
+    SELECT id, source_type, raw_json, raw_contract_version,
+           subject, stat_currency, signed_amount,
            pending_amount, flow_amount, currency_mismatch
     FROM vcc_fin_op_effective_rows
     WHERE target_month = ? AND source_type = ?

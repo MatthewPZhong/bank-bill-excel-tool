@@ -63,16 +63,17 @@ function createEffectiveRecord(db, sourceType, overrides, derived, { key, batchS
   const effectiveKey = key || overrides[getSourceDefinition(sourceType).keyHeader];
   db.prepare(`
     INSERT INTO vcc_fin_op_effective_rows (
-      source_type, idempotency_key_raw, idempotency_key, content_hash,
+      source_type, idempotency_key_raw, idempotency_key, content_hash, raw_contract_version,
       target_month, subject, stat_currency, signed_amount,
       pending_amount, flow_amount, currency_mismatch,
       source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES (?, ?, ?, ?, '2026-06', ?, ?, ?, ?, ?, ?, ?, 'Sheet1', 2, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, '2026-06', ?, ?, ?, ?, ?, ?, ?, 'Sheet1', 2, ?, ?)
   `).run(
     sourceType,
     effectiveKey,
     effectiveKey,
     `hash-${effectiveKey}`,
+    sourceType === SOURCE_TYPES.PENDING ? 2 : 1,
     derived.subject,
     derived.statCurrency || null,
     derived.signedAmount || null,

@@ -5,9 +5,15 @@ const path = require('node:path');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
+  PENDING_HEADERS,
   getSourceDefinition
 } = require('./definitions');
-const { mapDetailRow, mappedRowToInsertParams, normalizeYearMonth } = require('./row-mapper');
+const {
+  mapDetailRow,
+  mappedRowToInsertParams,
+  normalizeYearMonth,
+  pendingCanonicalValues
+} = require('./row-mapper');
 const { inspectSourceFiles, streamDetailRows } = require('./workbook-reader');
 const repository = require('../vcc-financial-op-db/repository');
 
@@ -54,12 +60,34 @@ function parseRawJson(value) {
   }
 }
 
-function diffFieldNames(sourceType, leftRawJson, rightRawJson, leftSubject = '', rightSubject = '') {
+function comparableRawValues(sourceType, rawJson, rawContractVersion) {
+  const values = parseRawJson(rawJson);
+  if (sourceType !== SOURCE_TYPES.PENDING) {
+    const definition = getSourceDefinition(sourceType);
+    return { headers: definition ? definition.headers : [], values };
+  }
+  return {
+    headers: PENDING_HEADERS,
+    values: pendingCanonicalValues(values, rawContractVersion)
+  };
+}
+
+function diffFieldNames(
+  sourceType,
+  leftRawJson,
+  rightRawJson,
+  leftSubject = '',
+  rightSubject = '',
+  leftRawContractVersion = 1,
+  rightRawContractVersion = 1
+) {
   const definition = getSourceDefinition(sourceType);
   if (!definition) return [];
-  const left = parseRawJson(leftRawJson);
-  const right = parseRawJson(rightRawJson);
-  const fields = definition.headers.filter((_header, index) => String(left[index] ?? '') !== String(right[index] ?? ''));
+  const left = comparableRawValues(sourceType, leftRawJson, leftRawContractVersion);
+  const right = comparableRawValues(sourceType, rightRawJson, rightRawContractVersion);
+  const fields = left.headers.filter((_header, index) => (
+    String(left.values[index] ?? '') !== String(right.values[index] ?? '')
+  ));
   if (sourceType === SOURCE_TYPES.CHANNEL && String(leftSubject) !== String(rightSubject)) {
     fields.push('公司主体（导入指定）');
   }
@@ -87,8 +115,9 @@ function recordResult(db, recordId) {
 
 function updateConflictComparisons(db, recordId, sourceType) {
   const conflictRows = db.prepare(`
-    SELECT i.id, i.idempotency_key, i.content_hash, i.raw_json, i.subject,
+    SELECT i.id, i.idempotency_key, i.content_hash, i.raw_json, i.raw_contract_version, i.subject,
            i.existing_effective_id, e.raw_json AS existing_raw_json,
+           e.raw_contract_version AS existing_raw_contract_version,
            e.subject AS existing_subject
     FROM vcc_fin_op_import_rows i
     LEFT JOIN vcc_fin_op_effective_rows e ON e.id = i.existing_effective_id
@@ -96,7 +125,7 @@ function updateConflictComparisons(db, recordId, sourceType) {
     ORDER BY i.id
   `).all(recordId);
   const findPeer = db.prepare(`
-    SELECT id, raw_json, subject
+    SELECT id, raw_json, raw_contract_version, subject
     FROM vcc_fin_op_import_rows
     WHERE import_record_id = ? AND idempotency_key = ? AND content_hash <> ?
     ORDER BY id
@@ -110,12 +139,14 @@ function updateConflictComparisons(db, recordId, sourceType) {
   for (const row of conflictRows) {
     let comparisonId = null;
     let comparisonRaw = row.existing_raw_json;
+    let comparisonRawContractVersion = row.existing_raw_contract_version;
     let comparisonSubject = row.existing_subject;
     if (!comparisonRaw) {
       const peer = findPeer.get(recordId, row.idempotency_key, row.content_hash);
       if (peer) {
         comparisonId = peer.id;
         comparisonRaw = peer.raw_json;
+        comparisonRawContractVersion = peer.raw_contract_version;
         comparisonSubject = peer.subject;
       }
     }
@@ -126,7 +157,9 @@ function updateConflictComparisons(db, recordId, sourceType) {
         row.raw_json,
         comparisonRaw || '[]',
         row.subject,
-        comparisonSubject
+        comparisonSubject,
+        row.raw_contract_version,
+        comparisonRawContractVersion
       )),
       row.id
     );
@@ -263,6 +296,7 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
   db.prepare(`
     INSERT INTO vcc_fin_op_effective_rows (
       source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+      raw_contract_version,
       target_month, subject, stat_currency, signed_amount,
       business_department, counterparty_department, business_sub_type,
       channel_name, mid, recon_type,
@@ -271,6 +305,7 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     )
     SELECT
       source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+      raw_contract_version,
       target_month, subject, stat_currency, signed_amount,
       business_department, counterparty_department, business_sub_type,
       channel_name, mid, recon_type,

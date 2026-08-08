@@ -13,6 +13,7 @@ const {
   previousYearMonth,
   nextYearMonth,
   initializeOpeningBalances,
+  preflightCalculation,
   calculateMonth,
   archiveRun
 } = require('../../../../src/backend/vcc-financial-op/calculator');
@@ -163,6 +164,57 @@ test('缺少上月归档时明确阻断且不默认补零', (t) => {
   assert.equal(result.code, 'missing-opening-balance');
   assert.deepEqual(result.missingOpeningSubjects, ['PPHK']);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month = ?').get('2026-06').n, 0);
+});
+
+test('运行前预检要求四类明细和系统财务OP全部存在且逐表返回结构化状态', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  db.prepare(`
+    DELETE FROM vcc_fin_op_effective_rows
+    WHERE source_type = ?
+  `).run(SOURCE_TYPES.PENDING);
+
+  const preflight = preflightCalculation(db, '2026-06');
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.code, 'missing-datasets');
+  assert.deepEqual(preflight.missing, ['VCC_移除归档Pending账单_校验表']);
+  assert.equal(preflight.datasets.length, 5);
+  const pending = preflight.datasets.find((row) => row.sourceType === SOURCE_TYPES.PENDING);
+  assert.deepEqual(pending, {
+    sourceType: SOURCE_TYPES.PENDING,
+    label: 'VCC_移除归档Pending账单_校验表',
+    datasetExists: true,
+    rowCount: 0,
+    dataStatus: 'unprocessed',
+    revision: 1,
+    complete: false,
+    reason: '没有有效数据'
+  });
+});
+
+test('worker 二次预检以输入 fingerprint 阻断预检后的数据变化', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  const preview = preflightCalculation(db, '2026-06');
+  assert.equal(preview.ok, true);
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets
+    SET revision = revision + 1
+    WHERE target_month = '2026-06' AND dataset_type = ?
+  `).run(SOURCE_TYPES.PENDING);
+
+  const result = calculateMonth({
+    db,
+    targetMonth: '2026-06',
+    expectedInputFingerprint: preview.inputFingerprint
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.code, 'state-changed');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month = '2026-06'
+  `).get().n, 0);
 });
 
 test('上月归档主体即使本月无发生额也必须延续并校验系统财务OP', (t) => {

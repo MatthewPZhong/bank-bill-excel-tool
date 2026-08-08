@@ -353,6 +353,14 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /elements\.exportBtn\.disabled = state\.busy \|\| !state\.latestArchivedRun/);
   });
 
+  test('开始运行先做五表预检，失败不启动 worker 并使用明确错误标题', () => {
+    assert.match(preload, /preflightRun: \(payload\) => ipcRenderer\.invoke\('vccFinancialOp:run:preflight'/);
+    assert.match(main, /ipcMain\.handle\('vccFinancialOp:run:preflight'/);
+    assert.match(moduleRenderer, /await api\.preflightRun\(\{ targetMonth: month \}\)/);
+    assert.match(moduleRenderer, /showMessage\('无法开始运行', message, 'warning'\)/);
+    assert.match(moduleRenderer, /expectedInputFingerprint: preflight\.inputFingerprint/);
+  });
+
   test('缺少上月归档时提供九币种一次性期初初始化且不默认补零', () => {
     assert.match(moduleRenderer, /result\.code === 'active-imports'/);
     assert.match(moduleRenderer, /result\.code === 'missing-opening-balance'/);

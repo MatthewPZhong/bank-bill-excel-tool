@@ -121,6 +121,11 @@ function materializeDetailAudit(db, targetMonth, sourceType) {
           (SELECT effective.raw_json FROM vcc_fin_op_effective_rows effective
            WHERE effective.id = audit.existing_effective_id)
         ),
+        existing_raw_contract_version_snapshot = COALESCE(
+          existing_raw_contract_version_snapshot,
+          (SELECT effective.raw_contract_version FROM vcc_fin_op_effective_rows effective
+           WHERE effective.id = audit.existing_effective_id)
+        ),
         existing_subject_snapshot = COALESCE(
           existing_subject_snapshot,
           (SELECT effective.subject FROM vcc_fin_op_effective_rows effective

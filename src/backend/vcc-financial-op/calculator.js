@@ -18,7 +18,8 @@ const { DecimalAccumulator, addToAccumulatorMap } = require('./decimal-accumulat
 const REQUIRED_DETAIL_TYPES = Object.freeze([
   SOURCE_TYPES.RECHARGE,
   SOURCE_TYPES.FEE_FX,
-  SOURCE_TYPES.CHANNEL
+  SOURCE_TYPES.CHANNEL,
+  SOURCE_TYPES.PENDING
 ]);
 const REQUIRED_DATASET_TYPES = Object.freeze([
   ...REQUIRED_DETAIL_TYPES,
@@ -91,36 +92,128 @@ function activeImportBatches(db, targetMonth) {
 function preflightCalculation(db, targetMonth) {
   const snapshot = datasetSnapshot(db, targetMonth);
   const byType = new Map(snapshot.rows.map((row) => [row.dataset_type, row]));
-  const missing = REQUIRED_DATASET_TYPES.filter((sourceType) => !byType.has(sourceType));
+  const detailCounts = new Map();
   for (const sourceType of REQUIRED_DETAIL_TYPES) {
     const count = db.prepare(`
       SELECT COUNT(*) AS row_count
       FROM vcc_fin_op_effective_rows
       WHERE target_month = ? AND source_type = ?
     `).get(targetMonth, sourceType);
-    if ((Number(count.row_count) || 0) === 0 && !missing.includes(sourceType)) missing.push(sourceType);
+    detailCounts.set(sourceType, Number(count.row_count) || 0);
   }
+  const systemRows = db.prepare(`
+    SELECT subject, balances_json, content_hash
+    FROM vcc_fin_op_system_snapshots
+    WHERE target_month = ?
+    ORDER BY subject
+  `).all(targetMonth);
+  const invalidSystemSubjects = [];
+  for (const row of systemRows) {
+    try {
+      parseBalancesJson(row.balances_json, `${targetMonth} ${row.subject} 系统财务OP`);
+    } catch (error) {
+      invalidSystemSubjects.push({ subject: row.subject, reason: error.message });
+    }
+  }
+  const datasets = REQUIRED_DATASET_TYPES.map((sourceType) => {
+    const dataset = byType.get(sourceType) || null;
+    const rowCount = sourceType === SOURCE_TYPES.SYSTEM_OP
+      ? systemRows.length
+      : (detailCounts.get(sourceType) || 0);
+    const reasons = [];
+    if (!dataset) reasons.push('缺少数据集');
+    if (rowCount === 0) reasons.push('没有有效数据');
+    if (dataset && dataset.data_status !== 'unprocessed') reasons.push('数据已归档');
+    if (sourceType === SOURCE_TYPES.SYSTEM_OP && invalidSystemSubjects.length > 0) {
+      reasons.push(`九币种快照不完整：${invalidSystemSubjects.map((item) => item.subject).join('、')}`);
+    }
+    return {
+      sourceType,
+      label: sourceType === SOURCE_TYPES.SYSTEM_OP
+        ? SOURCE_LABELS[sourceType]
+        : `${SOURCE_LABELS[sourceType]}_校验表`,
+      datasetExists: Boolean(dataset),
+      rowCount,
+      dataStatus: dataset ? dataset.data_status : null,
+      revision: dataset ? Number(dataset.revision) || 1 : null,
+      complete: reasons.length === 0,
+      reason: reasons.join('；')
+    };
+  });
+  const missing = datasets.filter((item) => (
+    !item.datasetExists
+    || item.rowCount === 0
+    || (item.sourceType === SOURCE_TYPES.SYSTEM_OP && invalidSystemSubjects.length > 0)
+  )).map((item) => item.sourceType);
   const archived = snapshot.rows
     .filter((row) => row.data_status === 'archived')
     .map((row) => row.dataset_type);
   const activeImports = activeImportBatches(db, targetMonth);
   const unresolved = unresolvedImports(db, targetMonth);
-  if (activeImports.length > 0 || missing.length > 0 || archived.length > 0 || unresolved.length > 0) {
+  const detailSubjects = db.prepare(`
+    SELECT DISTINCT subject
+    FROM vcc_fin_op_effective_rows
+    WHERE target_month = ? AND source_type IN (?, ?, ?, ?)
+    ORDER BY subject
+  `).all(targetMonth, ...REQUIRED_DETAIL_TYPES).map((row) => row.subject);
+  const systemSubjects = systemRows.map((row) => row.subject);
+  const previousMonth = previousYearMonth(targetMonth);
+  const openingSubjects = db.prepare(`
+    SELECT subject FROM vcc_fin_op_archives WHERE target_month = ?
+    UNION
+    SELECT subject FROM vcc_fin_op_opening_balances WHERE target_month = ?
+    ORDER BY subject
+  `).all(previousMonth, targetMonth).map((row) => row.subject);
+  const expectedSubjects = [...new Set([...detailSubjects, ...openingSubjects])].sort();
+  const systemSubjectSet = new Set(systemSubjects);
+  const expectedSubjectSet = new Set(expectedSubjects);
+  const missingSystemSubjects = expectedSubjects.filter((subject) => !systemSubjectSet.has(subject));
+  const unexpectedSystemSubjects = systemSubjects.filter((subject) => !expectedSubjectSet.has(subject));
+  const inputFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+    targetMonth,
+    datasets: datasets.map((item) => ({
+      sourceType: item.sourceType,
+      rowCount: item.rowCount,
+      dataStatus: item.dataStatus,
+      revision: item.revision
+    })),
+    system: systemRows.map((row) => [row.subject, row.content_hash]),
+    unresolved: unresolved.map((row) => row.id)
+  }), 'utf8').digest('hex');
+  if (
+    activeImports.length > 0
+    || missing.length > 0
+    || archived.length > 0
+    || unresolved.length > 0
+    || missingSystemSubjects.length > 0
+    || unexpectedSystemSubjects.length > 0
+  ) {
     return {
       ok: false,
       code: activeImports.length > 0
         ? 'active-imports'
         : (missing.length > 0
           ? 'missing-datasets'
-          : (archived.length > 0 ? 'month-already-archived' : 'unresolved-imports')),
-      missing: missing.map((sourceType) => SOURCE_LABELS[sourceType]),
+          : (archived.length > 0
+            ? 'month-already-archived'
+            : (unresolved.length > 0
+              ? 'unresolved-imports'
+              : (missingSystemSubjects.length > 0 ? 'missing-system-subject' : 'subject-mismatch')))),
+      missing: missing.map((sourceType) => (
+        datasets.find((item) => item.sourceType === sourceType).label
+      )),
       archived: archived.map((sourceType) => SOURCE_LABELS[sourceType]),
       activeImports,
       unresolved,
-      revisions: snapshot.revisions
+      invalidSystemSubjects,
+      missingSystemSubjects,
+      unexpectedSystemSubjects,
+      datasets,
+      revisions: snapshot.revisions,
+      inputFingerprint
     };
   }
-  return { ok: true, revisions: snapshot.revisions };
+  return { ok: true, datasets, revisions: snapshot.revisions, inputFingerprint };
 }
 
 function movementGroupKey(row) {
@@ -527,7 +620,7 @@ function persistCalculation(db, targetMonth, revisions, aggregate, balanceResult
   return runId;
 }
 
-function calculateMonth({ db, targetMonth }) {
+function calculateMonth({ db, targetMonth, expectedInputFingerprint = '' }) {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`计算账期格式无效：${targetMonth}`);
   db.exec('BEGIN IMMEDIATE');
@@ -536,6 +629,17 @@ function calculateMonth({ db, targetMonth }) {
     if (!preflight.ok) {
       db.exec('ROLLBACK');
       return { status: 'blocked', targetMonth: normalizedMonth, ...preflight };
+    }
+    if (expectedInputFingerprint && preflight.inputFingerprint !== expectedInputFingerprint) {
+      db.exec('ROLLBACK');
+      return {
+        status: 'blocked',
+        code: 'state-changed',
+        targetMonth: normalizedMonth,
+        message: '数据状态已变化，请刷新并重新确认。',
+        datasets: preflight.datasets,
+        inputFingerprint: preflight.inputFingerprint
+      };
     }
     const aggregate = aggregateEffectiveRows(db, normalizedMonth);
     const systemSnapshots = loadSystemSnapshots(db, normalizedMonth);

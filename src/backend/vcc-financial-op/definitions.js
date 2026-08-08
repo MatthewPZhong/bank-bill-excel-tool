@@ -48,14 +48,26 @@ const CHANNEL_HEADERS = Object.freeze([
   '结算金额', '渠道手续费'
 ]);
 
+const PENDING_RAW_CONTRACT_V1 = 1;
+const PENDING_RAW_CONTRACT_V2 = 2;
+
+// v3.1.8 新导入唯一契约：用户确认的 46 列 Pending 原表。
 const PENDING_HEADERS = Object.freeze([
   'pending类型', 'pending资金类型', '账单类型', 'billDate', 'valueDate', '平账账期', '业务BU',
   '对手业务BU', '财务BU', '主体', '对账类型', 'recon_id', '金额', '币种', 'order_no', 'acc_id',
   'finish_time', '穿透ID', 'channel', 'merchant_id', 'bank_ref', '对账明细ID', '对账单ID',
   'PendingBizId', '备注', '计算金额', '计算币种', '是否拆分Pending', '流水_账单日期', '流水_公司主体',
   '流水_流水类型', '流水_业务部门', '流水_主对账ID', '流水_出入方向', '流水_流水单号',
-  '流水_用户编号', '流水_账户编号', '是否错币', '金额差', '流水_币种', '流水_对账金额',
+  '流水_用户编号', '流水_账户编号', '流水_币种', '流水_对账金额',
   '流水_账户类型', '授信金额', '非授信金额', '维护人', '维护人BU', '客户所在地', '是否已流水替换'
+]);
+
+// 历史 v1 只用于旧审计反序列化和幂等迁移，不参与新文件识别。
+const PENDING_V1_HEADERS = Object.freeze([
+  ...PENDING_HEADERS.slice(0, 37),
+  '是否错币',
+  '金额差',
+  ...PENDING_HEADERS.slice(37)
 ]);
 
 const SYSTEM_OP_HEADERS = Object.freeze([
@@ -115,6 +127,21 @@ function detectDetailSourceType(headers) {
   return null;
 }
 
+function isLegacyPendingHeaders(headers) {
+  return headersEqual(headers, PENDING_V1_HEADERS);
+}
+
+function getRawContractHeaders(sourceType, rawContractVersion) {
+  if (sourceType !== SOURCE_TYPES.PENDING) {
+    const definition = getSourceDefinition(sourceType);
+    return definition ? definition.headers : null;
+  }
+  const version = Number(rawContractVersion) || PENDING_RAW_CONTRACT_V1;
+  if (version === PENDING_RAW_CONTRACT_V1) return PENDING_V1_HEADERS;
+  if (version === PENDING_RAW_CONTRACT_V2) return PENDING_HEADERS;
+  return null;
+}
+
 function isSystemOpHeaders(headers) {
   return headersEqual(headers, SYSTEM_OP_HEADERS);
 }
@@ -131,6 +158,9 @@ module.exports = {
   FEE_FX_HEADERS,
   CHANNEL_HEADERS,
   PENDING_HEADERS,
+  PENDING_V1_HEADERS,
+  PENDING_RAW_CONTRACT_V1,
+  PENDING_RAW_CONTRACT_V2,
   SYSTEM_OP_HEADERS,
   SOURCE_DEFINITIONS,
   SYSTEM_OP_DEFINITION,
@@ -138,6 +168,8 @@ module.exports = {
   normalizeHeaderRow,
   headersEqual,
   detectDetailSourceType,
+  isLegacyPendingHeaders,
+  getRawContractHeaders,
   isSystemOpHeaders,
   getSourceDefinition
 };

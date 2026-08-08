@@ -514,6 +514,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     pickFiles: () => ipcRenderer.invoke('vccFinancialOp:import:pick-files'),
     importFiles: (payload) => ipcRenderer.invoke('vccFinancialOp:import:apply', payload),
     cancelTask: () => ipcRenderer.invoke('vccFinancialOp:task:cancel'),
+    preflightRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:preflight', payload),
     calculate: (payload) => ipcRenderer.invoke('vccFinancialOp:run:calculate', payload),
     initializeOpening: (payload) => ipcRenderer.invoke('vccFinancialOp:opening:initialize', payload),
     archive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:archive', payload),

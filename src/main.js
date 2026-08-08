@@ -12453,6 +12453,14 @@ function registerNewAccountHandlers() {
     }
   });
 
+  ipcMain.handle('vccFinancialOp:run:preflight', (_event, payload = {}) => {
+    try {
+      return getVccFinancialOpService().preflightRun(payload);
+    } catch (error) {
+      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
   trackedIpcHandle('vccFinancialOp:run:calculate', 'VCC财务OP校验', '开始运行', async (_event, payload = {}) => {
     try {
       return await getVccFinancialOpService().calculate(payload);

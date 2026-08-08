@@ -31,12 +31,58 @@ function normalizeSystemCurrency(value) {
   return currency === 'CNY' ? 'CNH' : currency;
 }
 
-function systemAmountToken(displayValue, rawValue) {
+function displayAmountToken(displayValue, rawValue) {
   const display = text(displayValue);
   if (display === '') return rawValue === '' ? '' : rawValue;
-  if (/^-+$/.test(display)) return rawValue === '' ? '0' : rawValue;
+  if (/^-+$/.test(display)) return '0';
   const accounting = display.match(/^\((.+)\)$/);
   return accounting ? `-${accounting[1]}` : display;
+}
+
+function rawNumericToken(rawValue) {
+  if (typeof rawValue !== 'number') return null;
+  if (!Number.isFinite(rawValue) || Math.abs(rawValue) > Number.MAX_SAFE_INTEGER) {
+    const error = new Error(`Excel raw 数值超出安全范围：${rawValue}`);
+    error.code = 'amount-precision-invalid';
+    throw error;
+  }
+  return Object.is(rawValue, -0) ? '0' : String(rawValue);
+}
+
+function systemAmountRead(displayValue, rawValue, context = {}) {
+  const rawToken = rawNumericToken(rawValue);
+  const source = rawToken === null ? 'display-text' : 'raw-numeric';
+  const token = rawToken === null ? displayAmountToken(displayValue, rawValue) : rawToken;
+  const canonicalValue = canonicalizeVccAmount(token, context.label || '系统财务OP财务余额');
+  const evidence = {
+    field: context.field || SYSTEM_OP_DEFINITION.balanceHeader,
+    cell: context.cell || '',
+    source,
+    rawValue,
+    displayValue: displayValue == null ? '' : String(displayValue),
+    canonicalValue
+  };
+  if (source === 'raw-numeric') {
+    try {
+      const displayToken = displayAmountToken(displayValue, '');
+      if (displayToken !== '') {
+        const displayCanonical = canonicalizeVccAmount(displayToken, '系统财务OP财务余额显示值');
+        if (displayCanonical !== canonicalValue) {
+          evidence.auditCode = 'amount-display-raw-mismatch';
+          evidence.displayCanonicalValue = displayCanonical;
+        }
+      }
+    } catch (_error) {
+      evidence.auditCode = 'amount-display-raw-mismatch';
+      evidence.displayCanonicalValue = null;
+    }
+  }
+  return { token, canonicalValue, evidence };
+}
+
+function systemAmountToken(displayValue, rawValue) {
+  const rawToken = rawNumericToken(rawValue);
+  return rawToken === null ? displayAmountToken(displayValue, rawValue) : rawToken;
 }
 
 function findSystemHeader(matrix) {
@@ -185,7 +231,8 @@ function buildSubjectSnapshot({
       sourceCurrency: row.sourceCurrency,
       normalizedCurrency: row.currency,
       displayValues: row.displayValues,
-      rawValues: row.rawValues
+      rawValues: row.rawValues,
+      balanceEvidence: row.balanceEvidence
     }))
   };
   const balancesJson = JSON.stringify(balances);
@@ -314,16 +361,25 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
       const displayBalance = rowField(displayValues, SYSTEM_OP_DEFINITION.balanceHeader);
       const rawBalance = rowField(rawValues, SYSTEM_OP_DEFINITION.balanceHeader);
       let balance;
+      let balanceEvidence;
       try {
-        balance = canonicalizeVccAmount(
-          systemAmountToken(displayBalance, rawBalance),
-          `系统财务OP ${subject} ${sourceCurrency} 财务余额`
-        );
+        const reading = systemAmountRead(displayBalance, rawBalance, {
+          label: `系统财务OP ${subject} ${sourceCurrency} 财务余额`,
+          field: SYSTEM_OP_DEFINITION.balanceHeader,
+          cell: XLSX.utils.encode_cell({
+            r: rowIndex,
+            c: SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader]
+          })
+        });
+        balance = reading.canonicalValue;
+        balanceEvidence = reading.evidence;
       } catch (error) {
-        throw systemRowError(
+        const wrapped = systemRowError(
           `${sheetName} 第 ${sourceRow} 行“财务余额”无效：${error.message}`,
           { sourceRow, fieldName: SYSTEM_OP_DEFINITION.balanceHeader, sheetName }
         );
+        wrapped.code = error.code || 'amount-precision-invalid';
+        throw wrapped;
       }
 
       if (!rowsBySubject.has(subject)) rowsBySubject.set(subject, []);
@@ -332,6 +388,7 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
         sourceCurrency,
         currency,
         balance,
+        balanceEvidence,
         displayValues,
         rawValues
       });
@@ -426,7 +483,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       }
       for (const { file, error } of validationErrors) {
         repository.addImportError(db, recordId, {
-          errorCode: 'system-op-validation-error',
+          errorCode: error.code || 'system-op-validation-error',
           message: error.message,
           sourceFile: path.basename(file.filePath),
           sheetName: error.sheetName || file.sheetName || '',
@@ -660,6 +717,9 @@ function systemRecordResult(record) {
 
 module.exports = {
   normalizeSystemCurrency,
+  displayAmountToken,
+  rawNumericToken,
+  systemAmountRead,
   systemAmountToken,
   findSystemHeader,
   meaningfulPreview,

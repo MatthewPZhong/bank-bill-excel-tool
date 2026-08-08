@@ -426,6 +426,13 @@
     if (result.code === 'missing-system-subject') {
       return `缺少主体对应的系统财务OP：${(result.missingSystemSubjects || []).join('、')}。`;
     }
+    if (result.code === 'subject-mismatch') {
+      const missing = (result.missingSystemSubjects || []).join('、');
+      const extra = (result.unexpectedSystemSubjects || []).join('、');
+      return `参与运算主体不一致${missing ? `；缺少系统财务OP主体：${missing}` : ''}${extra ? `；系统财务OP多出主体：${extra}` : ''}。`;
+    }
+    if (result.code === 'active-vcc-task') return result.message || '已有 VCC 财务OP任务正在运行。';
+    if (result.code === 'state-changed') return result.message || '数据状态已变化，请刷新并重新确认。';
     return result.message || '当前数据不满足计算条件。';
   }
 
@@ -563,8 +570,21 @@
       const month = await chooseExistingMonth('选择运行账期');
       if (!month) return;
       state.lastMonth = month;
+      let preflight = await api.preflightRun({ targetMonth: month });
+      if (!preflight || preflight.status === 'error') {
+        throw new Error(preflight && preflight.message || '运行前检查失败');
+      }
+      if (!preflight.ok) {
+        const message = blockedCalculationMessage(preflight);
+        setStatus(`无法运行：${message}`, 'warning');
+        showMessage('无法开始运行', message, 'warning');
+        return;
+      }
       setStatus(`正在计算 ${month} 财务OP…`, 'info');
-      let result = await api.calculate({ targetMonth: month });
+      let result = await api.calculate({
+        targetMonth: month,
+        expectedInputFingerprint: preflight.inputFingerprint
+      });
       if (!result || result.status === 'error') throw new Error(result && result.message || '计算失败');
       if (result.status === 'blocked' && result.code === 'missing-opening-balance') {
         setStatus(blockedCalculationMessage(result), 'warning');
@@ -579,7 +599,16 @@
           throw new Error(initialized && initialized.message || '期初财务OP初始化失败');
         }
         setStatus(`期初财务OP已保存，正在重新计算 ${month}…`, 'info');
-        result = await api.calculate({ targetMonth: month });
+        preflight = await api.preflightRun({ targetMonth: month });
+        if (!preflight || !preflight.ok) {
+          const message = blockedCalculationMessage(preflight || {});
+          showMessage('无法开始运行', message, 'warning');
+          return;
+        }
+        result = await api.calculate({
+          targetMonth: month,
+          expectedInputFingerprint: preflight.inputFingerprint
+        });
         if (!result || result.status === 'error') throw new Error(result && result.message || '计算失败');
       }
       if (result.status === 'blocked') {

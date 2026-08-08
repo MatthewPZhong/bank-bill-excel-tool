@@ -7,14 +7,17 @@ const {
   SOURCE_TYPES,
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES,
+  getRawContractHeaders,
   getSourceDefinition
 } = require('../backend/vcc-financial-op/definitions');
 const {
   archiveRun,
   getRunResult,
   parseBalancesJson,
-  initializeOpeningBalances
+  initializeOpeningBalances,
+  preflightCalculation
 } = require('../backend/vcc-financial-op/calculator');
+const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
 const repository = require('../backend/vcc-financial-op-db/repository');
 const {
   IMPORT_CANCELLED_CODE
@@ -91,11 +94,12 @@ function detailRecordShape(record) {
   };
 }
 
-function rawObject(sourceType, rawJson, assignedSubject = '') {
+function rawObject(sourceType, rawJson, assignedSubject = '', rawContractVersion = 1) {
   const definition = getSourceDefinition(sourceType);
+  const headers = getRawContractHeaders(sourceType, rawContractVersion);
   const values = parseJson(rawJson, []);
-  if (!definition || !Array.isArray(values)) return values;
-  const result = Object.fromEntries(definition.headers.map((header, index) => [header, values[index] ?? '']));
+  if (!definition || !headers || !Array.isArray(values)) return values;
+  const result = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
   if (sourceType === SOURCE_TYPES.CHANNEL) result['公司主体（导入指定）'] = assignedSubject || '';
   return result;
 }
@@ -115,9 +119,19 @@ function importRowShape(row) {
     validationField: row.validation_field || '',
     message: row.validation_message || '',
     diffFields: parseJson(row.diff_fields_json, []),
-    incoming: rawObject(row.source_type, row.raw_json, row.subject),
+    incoming: rawObject(
+      row.source_type,
+      row.raw_json,
+      row.subject,
+      row.raw_contract_version
+    ),
     existing: existingRawJson
-      ? rawObject(row.source_type, existingRawJson, row.existing_subject || row.comparison_subject)
+      ? rawObject(
+        row.source_type,
+        existingRawJson,
+        row.existing_subject || row.comparison_subject,
+        row.existing_raw_contract_version || row.comparison_raw_contract_version
+      )
       : null,
     existingSource: existingRawJson ? {
       sourceFile: row.existing_source_file || row.comparison_source_file || '',
@@ -191,6 +205,20 @@ function createVccFinancialOpService({ database, assetsDir }) {
 
   async function calculate(payload) {
     return runWorker('calculate', payload);
+  }
+
+  function preflightRun(payload = {}) {
+    const targetMonth = normalizeYearMonth(payload.targetMonth);
+    if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
+    if (activeWorker) {
+      return {
+        ok: false,
+        code: 'active-vcc-task',
+        targetMonth,
+        message: '已有 VCC 财务OP任务正在运行，请完成后重试。'
+      };
+    }
+    return { targetMonth, ...preflightCalculation(database.db, targetMonth) };
   }
 
   async function cancelActiveTask() {
@@ -416,6 +444,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
     const rows = database.db.prepare(`
       SELECT i.*,
              COALESCE(e.raw_json, i.existing_raw_json_snapshot) AS existing_raw_json,
+             COALESCE(e.raw_contract_version, i.existing_raw_contract_version_snapshot) AS existing_raw_contract_version,
              COALESCE(e.subject, i.existing_subject_snapshot) AS existing_subject,
              COALESCE(e.source_file, i.existing_source_file_snapshot) AS existing_source_file,
              COALESCE(e.sheet_name, i.existing_sheet_name_snapshot) AS existing_sheet_name,
@@ -423,6 +452,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
              COALESCE(e.import_record_id, i.existing_import_record_id_snapshot) AS existing_import_record_id,
              COALESCE(e.first_imported_at, i.existing_imported_at_snapshot) AS existing_imported_at,
              c.raw_json AS comparison_raw_json,
+             c.raw_contract_version AS comparison_raw_contract_version,
              c.subject AS comparison_subject,
              c.source_file AS comparison_source_file,
              c.sheet_name AS comparison_sheet_name,
@@ -555,6 +585,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
     inspectSelectedFiles,
     importSelectedFiles,
     calculate,
+    preflightRun,
     cancelActiveTask,
     archive,
     initializeOpening,

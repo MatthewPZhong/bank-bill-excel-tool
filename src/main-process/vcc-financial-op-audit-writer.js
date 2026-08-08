@@ -5,6 +5,9 @@ const ExcelJS = require('exceljs');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
+  PENDING_RAW_CONTRACT_V1,
+  PENDING_RAW_CONTRACT_V2,
+  getRawContractHeaders,
   getSourceDefinition
 } = require('../backend/vcc-financial-op/definitions');
 const repository = require('../backend/vcc-financial-op-db/repository');
@@ -37,9 +40,10 @@ function dispositionsForTab(tab) {
   return ['idempotent_skip', 'idempotent_conflict', 'invalid_key', 'format_error', 'rolled_back'];
 }
 
-function detailHeaders(sourceType) {
+function detailHeaders(sourceType, rawContractVersion = PENDING_RAW_CONTRACT_V1) {
   const definition = getSourceDefinition(sourceType);
-  const original = definition ? [...definition.headers] : [];
+  const contractHeaders = getRawContractHeaders(sourceType, rawContractVersion);
+  const original = definition && contractHeaders ? [...contractHeaders] : [];
   const metadata = [
     '审计_账期', '审计_原表类型', '审计_公司主体', '审计_幂等键', '审计_处置结果',
     '审计_来源文件', '审计_sheet', '审计_原始行号', '审计_导入批次',
@@ -68,15 +72,22 @@ function createDetailSheet(workbook, baseName, index, headers) {
   return sheet;
 }
 
-function rawValues(rawJson, length) {
+function rawValues(rawJson, sourceType, rawContractVersion, targetHeaders) {
   const values = parseJson(rawJson, []);
-  return Array.from({ length }, (_unused, index) => String(values[index] ?? ''));
+  const sourceHeaders = getRawContractHeaders(sourceType, rawContractVersion) || [];
+  const byHeader = Object.fromEntries(sourceHeaders.map((header, index) => [header, values[index]]));
+  return targetHeaders.map((header) => String(byHeader[header] ?? ''));
 }
 
 function detailRowValues(row, headers, record) {
   const existingRaw = row.existing_raw_json || row.comparison_raw_json || '[]';
   return [
-    ...rawValues(row.raw_json, headers.original.length),
+    ...rawValues(
+      row.raw_json,
+      row.source_type,
+      row.raw_contract_version,
+      headers.original
+    ),
     row.target_month,
     SOURCE_LABELS[row.source_type] || row.source_type,
     row.subject || '',
@@ -90,7 +101,12 @@ function detailRowValues(row, headers, record) {
     row.validation_field || '',
     row.validation_message || '',
     parseJson(row.diff_fields_json, []).join('、'),
-    ...rawValues(existingRaw, headers.original.length),
+    ...rawValues(
+      existingRaw,
+      row.source_type,
+      row.existing_raw_contract_version || row.comparison_raw_contract_version,
+      headers.original
+    ),
     row.existing_subject || row.comparison_subject || '',
     row.existing_source_file || row.comparison_source_file || '',
     row.existing_sheet_name || row.comparison_sheet_name || '',
@@ -117,6 +133,7 @@ function queryDetailRows(db, recordId, dispositions, filters) {
   return db.prepare(`
     SELECT i.*,
            COALESCE(e.raw_json, i.existing_raw_json_snapshot) AS existing_raw_json,
+           COALESCE(e.raw_contract_version, i.existing_raw_contract_version_snapshot) AS existing_raw_contract_version,
            COALESCE(e.subject, i.existing_subject_snapshot) AS existing_subject,
            COALESCE(e.source_file, i.existing_source_file_snapshot) AS existing_source_file,
            COALESCE(e.sheet_name, i.existing_sheet_name_snapshot) AS existing_sheet_name,
@@ -124,6 +141,7 @@ function queryDetailRows(db, recordId, dispositions, filters) {
            COALESCE(e.import_record_id, i.existing_import_record_id_snapshot) AS existing_import_record_id,
            COALESCE(e.first_imported_at, i.existing_imported_at_snapshot) AS existing_imported_at,
            c.raw_json AS comparison_raw_json,
+           c.raw_contract_version AS comparison_raw_contract_version,
            c.subject AS comparison_subject,
            c.source_file AS comparison_source_file,
            c.sheet_name AS comparison_sheet_name,
@@ -136,6 +154,29 @@ function queryDetailRows(db, recordId, dispositions, filters) {
     WHERE ${conditions.join(' AND ')}
     ORDER BY i.id
   `).iterate(...params);
+}
+
+function auditRawContractVersion(db, recordId, sourceType) {
+  if (sourceType !== SOURCE_TYPES.PENDING) return PENDING_RAW_CONTRACT_V1;
+  const row = db.prepare(`
+    SELECT 1 AS has_v1
+    FROM vcc_fin_op_import_rows i
+    LEFT JOIN vcc_fin_op_effective_rows e ON e.id = i.existing_effective_id
+    LEFT JOIN vcc_fin_op_import_rows c ON c.id = i.comparison_import_row_id
+    WHERE i.import_record_id = ?
+      AND (
+        i.raw_contract_version = ?
+        OR COALESCE(e.raw_contract_version, i.existing_raw_contract_version_snapshot) = ?
+        OR c.raw_contract_version = ?
+      )
+    LIMIT 1
+  `).get(
+    recordId,
+    PENDING_RAW_CONTRACT_V1,
+    PENDING_RAW_CONTRACT_V1,
+    PENDING_RAW_CONTRACT_V1
+  );
+  return row ? PENDING_RAW_CONTRACT_V1 : PENDING_RAW_CONTRACT_V2;
 }
 
 function writeSystemAttempts(workbook, db, record, dispositions, filters) {
@@ -252,7 +293,10 @@ async function writeImportAuditWorkbook({ db, recordId, tab = 'all', outputPath,
         useSharedStrings: false
       });
       if (record.source_type !== SOURCE_TYPES.SYSTEM_OP) {
-        const headers = detailHeaders(record.source_type);
+        const headers = detailHeaders(
+          record.source_type,
+          auditRawContractVersion(db, record.id, record.source_type)
+        );
         let sheetIndex = 1;
         let rowsInSheet = 0;
         let sheet = createDetailSheet(workbook, '导入审计', sheetIndex, headers.all);
@@ -300,5 +344,6 @@ module.exports = {
   DISPOSITION_TEXT,
   dispositionsForTab,
   detailHeaders,
+  auditRawContractVersion,
   writeImportAuditWorkbook
 };

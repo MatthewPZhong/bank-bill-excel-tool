@@ -168,7 +168,7 @@ test('系统财务OP按正式行式模板读取主体、九币种和完整原始
   assert.equal(Object.hasOwn(snapshot.balances, 'CNY'), false);
 });
 
-test('系统财务OP财务余额严格优先使用 Excel 显示值', (t) => {
+test('系统财务OP财务余额严格优先使用 Excel raw 数值并记录显示差异', (t) => {
   const input = balances();
   input.AUD = 123.45;
   const entry = writeWorkbook(t, {
@@ -179,7 +179,52 @@ test('系统财务OP财务余额严格优先使用 Excel 显示值', (t) => {
     }
   });
   const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
-  assert.equal(snapshot.balances.AUD, '123.5');
+  assert.equal(snapshot.balances.AUD, '123.45');
+  const raw = JSON.parse(snapshot.rawJson);
+  const aud = raw.rows.find((row) => row.normalizedCurrency === 'AUD');
+  assert.equal(aud.balanceEvidence.source, 'raw-numeric');
+  assert.equal(aud.balanceEvidence.canonicalValue, '123.45');
+  assert.equal(aud.balanceEvidence.auditCode, 'amount-display-raw-mismatch');
+});
+
+test('系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本会计负数和横线零值', (t) => {
+  const input = balances();
+  input.AUD = 135886024.59;
+  input.CAD = '(1,234.56)';
+  input.CNH = '-';
+  input.EUR = 3.25;
+  const entry = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: input }],
+    mutateSheet(sheet, firstDataRow) {
+      const aud = XLSX.utils.encode_cell({ r: firstDataRow - 1, c: 12 });
+      sheet[aud].z = '0.0';
+      const eur = XLSX.utils.encode_cell({ r: firstDataRow + 2, c: 12 });
+      sheet[eur] = { t: 'n', f: '1+2.25', v: 3.25, z: 'General' };
+    }
+  });
+  const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.equal(snapshot.balances.AUD, '135886024.59');
+  assert.equal(snapshot.balances.CAD, '-1234.56');
+  assert.equal(snapshot.balances.CNH, '0');
+  assert.equal(snapshot.balances.EUR, '3.25');
+});
+
+test('系统财务OP raw 数值超过两位小数或安全范围时拒绝且不舍入', (t) => {
+  for (const [fileName, invalidValue] of [
+    ['three-decimals.xlsx', 1.234],
+    ['unsafe-number.xlsx', Number.MAX_SAFE_INTEGER + 1]
+  ]) {
+    const input = balances();
+    input.AUD = invalidValue;
+    const entry = writeWorkbook(t, {
+      snapshots: [{ subject: 'PPHK', balances: input }],
+      fileName
+    });
+    assert.throws(
+      () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+      (error) => error.code === 'amount-precision-invalid'
+    );
+  }
 });
 
 test('系统财务OP表头位于第 20 行之后时识别和正式导入仍使用同一范围', async (t) => {
