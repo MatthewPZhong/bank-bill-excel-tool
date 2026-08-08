@@ -58,6 +58,30 @@ function promotePreview(stagedPath, previewPath) {
   fs.renameSync(stagedPath, previewPath);
 }
 
+function finalizePreviewCapture({
+  stagedPath,
+  previewPath,
+  tempRoot,
+  error = null,
+  exitCode = 1,
+  logger = console
+}) {
+  let finalError = null;
+  let finalExitCode = 0;
+  try {
+    if (error) throw error;
+    promotePreview(stagedPath, previewPath);
+  } catch (cause) {
+    finalError = cause;
+    finalExitCode = exitCode || 1;
+    logger.error(cause && cause.message ? cause.message : String(cause));
+  } finally {
+    fs.rmSync(stagedPath, { force: true });
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+  return { error: finalError, exitCode: finalExitCode };
+}
+
 function run() {
   const modalName = String(process.argv[2] || '').trim();
   const outputName = String(process.argv[3] || '').trim();
@@ -115,16 +139,17 @@ function run() {
   const finish = (error, exitCode = 1) => {
     if (finished) return;
     finished = true;
-    try {
-      if (error) throw error;
-      promotePreview(stagedPath, previewPath);
+    const result = finalizePreviewCapture({
+      stagedPath,
+      previewPath,
+      tempRoot,
+      error,
+      exitCode
+    });
+    if (!result.error) {
       console.log(`${modalName} preview saved to ${previewPath}`);
-    } catch (finishError) {
-      console.error(finishError && finishError.message ? finishError.message : String(finishError));
-      process.exitCode = exitCode || 1;
-    } finally {
-      fs.rmSync(stagedPath, { force: true });
-      fs.rmSync(tempRoot, { recursive: true, force: true });
+    } else {
+      process.exitCode = result.exitCode;
     }
   };
 
@@ -148,6 +173,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  finalizePreviewCapture,
   hasPngSignature,
   promotePreview,
   validateOptionalNumber

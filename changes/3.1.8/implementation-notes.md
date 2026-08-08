@@ -46,6 +46,7 @@
 | 合成预览入口只在主进程确认 `APP_CAPTURE_PATH` 后向 preload 暴露只读 `previewCapture=true`，VCC 假数据 hook 仅在该标志为真时挂载 | 仅凭 `APP_PREVIEW_MODAL` 或生产 renderer 全局 hook 会形成伪造业务状态的旁路 | 生产环境始终挂载 hook；只用环境中的 modal token 作为门禁 | 正常启动时 `window.__vccFinancialOpPreview` 不存在；capture hook 冻结且不可写，preview modal/zoom/窗口尺寸均受同一 capture gate 约束 |
 | 预览 PNG 先写同目录本轮 staging，Electron 非 0 退出或 PNG 结构不完整时保留旧图；仅验证通过后原子 rename | 直接写正式截图会在 capture 失败时留下截断图，或让旧图冒充本轮成功证据 | 启动前删除旧图；只校验 8 字节签名 | 校验 signature、13 字节 IHDR、正尺寸、非空完整 IDAT、IEND 且恰好 EOF；失败返回非 0，旧证据不动 |
 | Windows PR 构建对任意目标分支执行完整发布检查，并实际构建 x64 installer/portable 后运行分发守卫 | 旧 workflow 跳过 PR build，且架构未锁定时可能检查陈旧 `win-unpacked` | 仅做静态 workflow lint；继续依赖本机旧 dist | 本地/PR/Release 构建统一 `--x64`；分发守卫校验两份 VCC 金标准模板及包内版本，目标平台产物仍须 CI 与人工打开确认 |
+| PR 6 reviewer P2 将全部 26 个 `vcc-financial-op-*` capture token 冻结为显式 `sync / state / lifecycle` readiness 契约，并由主进程对此前缀统一失败关闭 | 数据管理、删除、导出等弹框依赖异步状态；结果/导入/运行/调整等入口返回的 Promise 却代表“弹框关闭”，若统一 await 会死锁，若统一固定延时会截到旧状态 | 继续只门禁解归档 4 个 token；所有 hook 都 await 返回 Promise；用固定 sleep 猜状态 | `state` 入口必须返回并等待真实 DOM 状态 tracker，`lifecycle` 入口只探测同步/立即拒绝而不等待关闭，`sync` 入口禁止意外 Promise；未知 token、缺 hook/method、null、同步抛错、拒绝、非法结果或 8 秒超时均以非 0 退出，staged PNG 不得晋升 |
 
 ## Assumptions
 
@@ -132,6 +133,11 @@
 | PR 6 reviewer 最终定向与全量回归 | 最终对外术语修复后，release-docs `3/3 PASS`；完整 `npm run release-check` 为 lint/smoke PASS、unit `4695/4695 PASS`、integration `47/47` 脚本与 `2186/2186` 断言 PASS；术语修复前的 preview + renderer + release-docs 组合为 `37/37 PASS` | 真实 disabled 行为、readiness 负向用例、当前 v3.1.8 对外切片术语负断言和手册操作链已进入全仓门禁；集成链确认解归档/删除/历史导出的后台保护无回归 |
 | PR 6 reviewer 最终范围冻结 | intended 变更共 56 个文件：33 个 tracked + 23 个 intended untracked（1 份锁定 spec、18 张新 VCC PNG、4 个新单测） | `scripts/scan-vars.js` 删除末尾多余空行属于 PR6 报告稳定性修复，纳入 33 个 tracked；`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 及其他既有未跟踪文件明确排除，未 stage/commit |
 | PR 6 reviewer 最终通用/资金盲区复核 | 最终 diff 对 `src/backend/` 与 `src/main-process/` 的生产资金实现为 0 文件；逐项检查 capture 入口隔离、缺失/超时/拒绝、异步旧响应、DOM 销毁、旧 PNG 替换、尾月依赖、主键、金额/币种、跨月、重复操作、部分失败、行/余额守恒和错误可观测性 | 未发现新的生产入口旁路、自动删改资金事实或静默降级；capture 只读取预览 DOM 并在失败时非 0 退出。真实月份逐主体/币种、Windows Excel/WPS 和关窗时序人工复核继续作为资金发布红线，不得由自动化 PASS 代替 |
+| PR 6 reviewer P2 全 token readiness 定向回归 | preview contract 新增完整 26-token 集合一致性、策略分派、缺失/未知/null/同步抛错/拒绝/悬挂超时/非法结果负向矩阵；行为伪 DOM 验证删除目标异步切换后真实按钮/文案稳定；pending 的 result/import/run/adjustment lifecycle Promise 在 100ms 内完成 readiness；合法 staged PNG 遇 readiness 错误也不覆盖旧正式图 | 证明所有 capture 入口由同一 fail-closed 主进程门禁覆盖，同时避免生命周期 Promise 导致截图命令死锁；测试断言最终 DOM 与发布文件行为而非只匹配源码字符串 |
+| PR 6 reviewer P2 26-token 最终预览冻结 | 最终代码批量生成的 26 张 VCC PNG 均按 package 脚本顺序在 2026-08-09 02:12:01～02:13:24（Asia/Shanghai）完成落盘，最后 token 为 `vcc-financial-op-opening`；25 张为 2480×1720，最小窗口为 2160×1520，PNG 结构测试覆盖完整集合 | 26/26 token 无卡点；首月/已归档首月删除、历史月份导出及结果页人工抽查均显示预期稳定状态，未用旧图冒充本轮成功 |
+| PR 6 reviewer P2 最终 `npm run check:vars` 与人工 review | 仅命中 Runtime-state：`MODULES`、`dialog`、`state`；无 Critical / Important-skeleton / Risk-sensitive 命中 | `MODULES` 只把既有 VCC preview 路由集中到显式契约，未增删模块枚举或 UI tab；`dialog` 为 renderer 局部 DOM；`state` 为策略字面量/局部状态文案，不是 `src/renderer.js` 顶层单例结构。模块切换、原生文件对话框及模板/当前模块/导出可用性联动均未改写 |
+| PR 6 reviewer P2 最终定向与发布回归 | 定向 renderer + preview + release-docs `41/41 PASS`；`npm run release-check` 完整通过：lint/smoke PASS，unit `4705/4705 PASS`（301 个测试文件），integration `47/47` 脚本、`2198/2198` 断言 PASS，其中调整归档 `55/55`、破坏性状态链 `64/64`、历史模板导出 `28/28`；集成清单已自动同步 | 当前冻结代码覆盖 readiness、生产资金状态链与其他模块回归；发布门禁证据对应本轮 reviewer P2 修复，而非沿用旧的 4695/2186 结果 |
+| PR 6 reviewer P2 通用/资金盲区复核 | 本轮生产改动仅在 capture 主进程门禁、renderer preview 路由与 preview-only hook 状态观测；`src/backend/`、`src/main-process/`、金额/币种、数据库迁移及资金 writer 均为 0 diff。复核全部 VCC 前缀入口、未知 token、注册时序、最新异步 Promise、DOM 销毁、同步/拒绝/超时、生命周期不等待及 staged 输出原子晋升 | 未发现生产入口旁路、异步旧响应覆盖、截图死锁、旧 PNG 冒充或资金事实自动改写；真实月份逐主体/币种、Windows Excel/WPS 与关窗时序继续保留为人工发布红线，不由本轮自动化替代 |
 
 ## Remaining Unknowns
 

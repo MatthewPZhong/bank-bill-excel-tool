@@ -14,32 +14,50 @@ const renderScript = read('scripts/render-modal-preview.js');
 const clearStyles = read('src/styles-gemini.css');
 const legacyStyles = read('src/styles.css');
 const packageJson = JSON.parse(read('package.json'));
-const { hasPngSignature, promotePreview } = require('../../scripts/render-modal-preview');
+const {
+  finalizePreviewCapture,
+  hasPngSignature,
+  promotePreview
+} = require('../../scripts/render-modal-preview');
 
 const PREVIEW_CONTRACT = [
-  ['vcc-financial-op-data-manager-no-archive', 'openDataManagerNoArchive'],
-  ['vcc-financial-op-delete-first-month', 'openDeleteFirstMonth'],
-  ['vcc-financial-op-delete-first-month-archived', 'openDeleteFirstMonthArchived'],
-  ['vcc-financial-op-delete-result', 'openDeleteResult'],
-  ['vcc-financial-op-unarchive', 'openUnarchive'],
-  ['vcc-financial-op-unarchive-year-switch', 'openUnarchiveYearSwitch'],
-  ['vcc-financial-op-unarchive-non-tail', 'openUnarchiveNonTail'],
-  ['vcc-financial-op-unarchive-executing', 'openUnarchiveExecuting'],
-  ['vcc-financial-op-result-export-month-empty', 'openResultExportMonthEmpty'],
-  ['vcc-financial-op-result-single-adjustment', 'openResultSingleAdjustment'],
-  ['vcc-financial-op-result-multiple-adjustments', 'openResultMultipleAdjustments'],
-  ['vcc-financial-op-result-archived', 'openResultArchived'],
-  ['vcc-financial-op-result-zoom-125', 'openResult'],
-  ['vcc-financial-op-result-zoom-150', 'openResult'],
-  ['vcc-financial-op-result-min-window', 'openResult'],
-  ['vcc-financial-op-run-preflight-error', 'openRunPreflightError']
+  ['vcc-financial-op-panel', 'openPanel', 'sync'],
+  ['vcc-financial-op-import-month', 'openImportMonth', 'lifecycle'],
+  ['vcc-financial-op-run-month', 'openRunMonth', 'lifecycle'],
+  ['vcc-financial-op-data-manager', 'openDataManager', 'state'],
+  ['vcc-financial-op-data-manager-no-archive', 'openDataManagerNoArchive', 'state'],
+  ['vcc-financial-op-delete', 'openDelete', 'state'],
+  ['vcc-financial-op-delete-first-month', 'openDeleteFirstMonth', 'state'],
+  ['vcc-financial-op-delete-first-month-archived', 'openDeleteFirstMonthArchived', 'state'],
+  ['vcc-financial-op-delete-result', 'openDeleteResult', 'state'],
+  ['vcc-financial-op-unarchive', 'openUnarchive', 'state'],
+  ['vcc-financial-op-unarchive-year-switch', 'openUnarchiveYearSwitch', 'state'],
+  ['vcc-financial-op-unarchive-non-tail', 'openUnarchiveNonTail', 'state'],
+  ['vcc-financial-op-unarchive-executing', 'openUnarchiveExecuting', 'state'],
+  ['vcc-financial-op-export', 'openExport', 'state'],
+  ['vcc-financial-op-result-export-month', 'openResultExportMonth', 'state'],
+  ['vcc-financial-op-result-export-month-empty', 'openResultExportMonthEmpty', 'sync'],
+  ['vcc-financial-op-result', 'openResult', 'lifecycle'],
+  ['vcc-financial-op-result-single-adjustment', 'openResultSingleAdjustment', 'lifecycle'],
+  ['vcc-financial-op-result-multiple-adjustments', 'openResultMultipleAdjustments', 'lifecycle'],
+  ['vcc-financial-op-result-archived', 'openResultArchived', 'lifecycle'],
+  ['vcc-financial-op-result-zoom-125', 'openResult', 'lifecycle'],
+  ['vcc-financial-op-result-zoom-150', 'openResult', 'lifecycle'],
+  ['vcc-financial-op-result-min-window', 'openResult', 'lifecycle'],
+  ['vcc-financial-op-adjustment', 'openAdjustment', 'lifecycle'],
+  ['vcc-financial-op-run-preflight-error', 'openRunPreflightError', 'sync'],
+  ['vcc-financial-op-opening', 'openOpening', 'lifecycle']
 ];
 
 test('v3.1.8 VCC 关键 preview 状态均有 renderer token、mock hook 与独立脚本', () => {
-  for (const [token, method] of PREVIEW_CONTRACT) {
+  for (const [token, method, strategy] of PREVIEW_CONTRACT) {
     assert.ok(renderer.includes(`'${token}'`), `renderer 缺少 preview token：${token}`);
-    assert.ok(renderer.includes(`'${token}': '${method}'`), `preview token 未路由到 ${method}`);
-    assert.match(moduleRenderer, new RegExp(`\\b${method}\\(\\)\\s*\\{`));
+    assert.ok(main.includes(`'${token}'`), `main readiness 白名单缺少 preview token：${token}`);
+    assert.ok(
+      renderer.includes(`'${token}': Object.freeze({ method: '${method}', strategy: '${strategy}' })`),
+      `preview token 未锁定到 ${method}/${strategy}`
+    );
+    assert.match(moduleRenderer, new RegExp(`(?:async\\s+)?\\b${method}\\(\\)\\s*\\{`));
     assert.ok(
       Object.hasOwn(packageJson.scripts, `preview:${token}`),
       `package scripts 缺少 preview:${token}`
@@ -49,6 +67,11 @@ test('v3.1.8 VCC 关键 preview 状态均有 renderer token、mock hook 与独�
       `preview:vcc-financial-op 未聚合 ${token}`
     );
   }
+  const scriptTokens = Object.keys(packageJson.scripts)
+    .filter((name) => name.startsWith('preview:vcc-financial-op-'))
+    .map((name) => name.slice('preview:'.length))
+    .sort();
+  assert.deepEqual(scriptTokens, PREVIEW_CONTRACT.map(([token]) => token).sort());
   assert.ok(packageJson.scripts['preview:all'].includes('npm run preview:vcc-financial-op'));
   assert.match(moduleRenderer, /openDataManager\(\)[\s\S]*previewDataManagerPayload\(\{ hasArchive: true \}\)/);
   assert.match(moduleRenderer, /openResult\(\) \{\s*return confirmArchive\(buildResultPreview\(\)\);/);
@@ -115,8 +138,8 @@ test('VCC 合成 preview hook 只在 preload 确认 capture 模式时挂载', ()
   assert.equal(Object.getOwnPropertyDescriptor(fakeWindow, '__vccFinancialOpPreview').writable, false);
 });
 
-test('VCC capture readiness 缺 hook 或缺 method 时明确失败，生产启动不注册等待', async () => {
-  const helperStart = renderer.indexOf('function registerVccPreviewCaptureReadiness(');
+test('VCC capture readiness 对未知、缺失、null、throw 与 reject 全部失败关闭', async () => {
+  const helperStart = renderer.indexOf('const VCC_PREVIEW_CAPTURE_CONTRACT = Object.freeze(');
   const helperEnd = renderer.indexOf('const rendererStartupProfiler', helperStart);
   assert.ok(helperStart >= 0 && helperEnd > helperStart);
   const requestAnimationFrame = (callback) => queueMicrotask(callback);
@@ -128,31 +151,188 @@ test('VCC capture readiness 缺 hook 或缺 method 时明确失败，生产启�
 
   const productionWindow = { desktopApi: { previewCapture: false } };
   const productionRegister = buildRegister(productionWindow);
-  assert.equal(productionRegister(Promise.resolve()), false);
+  assert.equal(productionRegister('vcc-financial-op-unarchive'), false);
   assert.equal(productionWindow.__vccPreviewCaptureReady, undefined);
 
-  const captureWindow = { desktopApi: { previewCapture: true } };
-  const captureRegister = buildRegister(captureWindow);
-  const missingHookTask = captureWindow.__vccFinancialOpPreview?.openUnarchive?.();
-  assert.equal(captureRegister(missingHookTask), true);
+  const unknownWindow = { desktopApi: { previewCapture: true }, __vccFinancialOpPreview: {} };
+  const unknownRegister = buildRegister(unknownWindow);
+  assert.equal(unknownRegister('vcc-financial-op-unknown'), true);
   await assert.rejects(
-    captureWindow.__vccPreviewCaptureReady,
-    /did not return a readiness task/
+    unknownWindow.__vccPreviewCaptureReady,
+    /Unknown VCC preview capture token/
   );
 
-  captureWindow.__vccFinancialOpPreview = {};
-  const missingMethodTask = captureWindow.__vccFinancialOpPreview?.openUnarchive?.();
-  assert.equal(captureRegister(missingMethodTask), true);
+  const missingHooksWindow = { desktopApi: { previewCapture: true } };
+  buildRegister(missingHooksWindow)('vcc-financial-op-delete-first-month');
   await assert.rejects(
-    captureWindow.__vccPreviewCaptureReady,
-    /did not return a readiness task/
+    missingHooksWindow.__vccPreviewCaptureReady,
+    /preview hooks are unavailable/
   );
 
-  assert.equal(captureRegister(Promise.resolve({ confirmDisabled: true })), true);
-  assert.deepEqual(await captureWindow.__vccPreviewCaptureReady, { status: 'ready' });
-  assert.match(renderer, /info\.previewModal\.startsWith\('vcc-financial-op-unarchive'\)/);
+  const missingMethodWindow = { desktopApi: { previewCapture: true }, __vccFinancialOpPreview: {} };
+  buildRegister(missingMethodWindow)('vcc-financial-op-delete-first-month');
+  await assert.rejects(missingMethodWindow.__vccPreviewCaptureReady, /hook is unavailable/);
+
+  const nullStateWindow = {
+    desktopApi: { previewCapture: true },
+    __vccFinancialOpPreview: { openDeleteFirstMonth: () => null }
+  };
+  buildRegister(nullStateWindow)('vcc-financial-op-delete-first-month');
+  await assert.rejects(nullStateWindow.__vccPreviewCaptureReady, /did not return a readiness task/);
+
+  const rejectedStateWindow = {
+    desktopApi: { previewCapture: true },
+    __vccFinancialOpPreview: { openDeleteFirstMonth: () => Promise.reject(new Error('delete preview failed')) }
+  };
+  buildRegister(rejectedStateWindow)('vcc-financial-op-delete-first-month');
+  await assert.rejects(rejectedStateWindow.__vccPreviewCaptureReady, /delete preview failed/);
+
+  const throwingWindow = {
+    desktopApi: { previewCapture: true },
+    __vccFinancialOpPreview: { openRunPreflightError: () => { throw new Error('sync preview failed'); } }
+  };
+  buildRegister(throwingWindow)('vcc-financial-op-run-preflight-error');
+  await assert.rejects(throwingWindow.__vccPreviewCaptureReady, /sync preview failed/);
+
+  const rejectedLifecycleWindow = {
+    desktopApi: { previewCapture: true },
+    __vccFinancialOpPreview: { openResult: () => Promise.reject(new Error('result dialog failed')) }
+  };
+  buildRegister(rejectedLifecycleWindow)('vcc-financial-op-result');
+  await assert.rejects(rejectedLifecycleWindow.__vccPreviewCaptureReady, /result dialog failed/);
+
+  const readyWindow = {
+    desktopApi: { previewCapture: true },
+    __vccFinancialOpPreview: { openDeleteFirstMonth: () => Promise.resolve({ confirmDisabled: false }) }
+  };
+  buildRegister(readyWindow)('vcc-financial-op-delete-first-month');
+  assert.deepEqual(
+    await readyWindow.__vccPreviewCaptureReady,
+    { status: 'ready', token: 'vcc-financial-op-delete-first-month' }
+  );
+  assert.match(renderer, /info\.previewModal\.startsWith\('vcc-financial-op-'\)/);
   assert.match(main, /VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000/);
   assert.match(main, /await waitForVccPreviewCaptureReady\(mainWindow\.webContents\)/);
+  assert.match(main, /throw new Error\(`Unknown VCC preview capture token:/);
+});
+
+test('result/import/run/adjustment 生命周期 Promise 不参与 readiness 等待', async () => {
+  const helperStart = renderer.indexOf('const VCC_PREVIEW_CAPTURE_CONTRACT = Object.freeze(');
+  const helperEnd = renderer.indexOf('const rendererStartupProfiler', helperStart);
+  const requestAnimationFrame = (callback) => queueMicrotask(callback);
+  const buildRegister = (fakeWindow) => Function(
+    'window',
+    'requestAnimationFrame',
+    `'use strict'; ${renderer.slice(helperStart, helperEnd)}; return registerVccPreviewCaptureReadiness;`
+  )(fakeWindow, requestAnimationFrame);
+
+  for (const [token, method] of [
+    ['vcc-financial-op-result', 'openResult'],
+    ['vcc-financial-op-import-month', 'openImportMonth'],
+    ['vcc-financial-op-run-month', 'openRunMonth'],
+    ['vcc-financial-op-adjustment', 'openAdjustment']
+  ]) {
+    const lifecycleWindow = {
+      desktopApi: { previewCapture: true },
+      __vccFinancialOpPreview: { [method]: () => new Promise(() => {}) }
+    };
+    buildRegister(lifecycleWindow)(token);
+    const settled = await Promise.race([
+      lifecycleWindow.__vccPreviewCaptureReady.then(() => true),
+      new Promise((resolve) => setTimeout(() => resolve(false), 100))
+    ]);
+    assert.equal(settled, true, `${token} readiness 错误等待了弹框关闭`);
+  }
+});
+
+test('main readiness 对缺注册、悬挂、拒绝和非法结果均在超时内失败', async () => {
+  const helperStart = main.indexOf('const VCC_PREVIEW_READINESS_TOKENS = new Set(');
+  const helperEnd = main.indexOf('function createWindow()', helperStart);
+  const helperSource = main.slice(helperStart, helperEnd)
+    .replace('const VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000;', 'const VCC_PREVIEW_READINESS_TIMEOUT_MS = 30;');
+  const waitForReady = Function(
+    `'use strict'; ${helperSource}; return waitForVccPreviewCaptureReady;`
+  )();
+  const webContentsFor = (fakeWindow) => ({
+    executeJavaScript(source) {
+      return Function('window', `'use strict'; return (${source});`)(fakeWindow);
+    }
+  });
+
+  await assert.rejects(waitForReady(webContentsFor({})), /was not registered before timeout/);
+  await assert.rejects(
+    waitForReady(webContentsFor({ __vccPreviewCaptureReady: new Promise(() => {}) })),
+    /did not settle before timeout/
+  );
+  await assert.rejects(
+    waitForReady(webContentsFor({ __vccPreviewCaptureReady: Promise.reject(new Error('renderer failed')) })),
+    /renderer failed/
+  );
+  await assert.rejects(
+    waitForReady(webContentsFor({ __vccPreviewCaptureReady: Promise.resolve(null) })),
+    /returned an invalid state/
+  );
+});
+
+test('delete-first-month readiness 等 selector 异步刷新按钮与文案稳定后才完成', async () => {
+  const trackerStart = moduleRenderer.indexOf('function attachPreviewStateTracker(');
+  const trackerEnd = moduleRenderer.indexOf('function showMessage(', trackerStart);
+  const waitStart = moduleRenderer.indexOf('async function waitForArchivedPickerPreview(');
+  const waitEnd = moduleRenderer.indexOf('function createUnarchivePreviewDialog(', waitStart);
+  const helpers = Function(
+    `'use strict'; ${moduleRenderer.slice(trackerStart, trackerEnd)} ${moduleRenderer.slice(waitStart, waitEnd)}; return { attachPreviewStateTracker, selectPreviewControl };`
+  )();
+
+  let confirmDisabled = true;
+  let stateMessage = '正在核对可删除数据…';
+  let refreshSettled = false;
+  const targetControl = {
+    value: 'recharge_refund',
+    dispatchEvent() {
+      modal.trackPreviewState(new Promise((resolve) => {
+        setImmediate(() => {
+          confirmDisabled = false;
+          stateMessage = '将删除 1 条主体期初初始化数据，并删除 1 份未归档结果；导入事实保留。';
+          refreshSettled = true;
+          resolve();
+        });
+      }));
+    }
+  };
+  const modal = {
+    dialog: {
+      isConnected: true,
+      classList: { contains: () => false },
+      querySelector(selector) {
+        return selector === '[data-field="delete-target"]' ? targetControl : null;
+      }
+    }
+  };
+  helpers.attachPreviewStateTracker(modal, () => ({
+    modalPresent: true,
+    selectedMonth: '2026-06',
+    selectedTarget: targetControl.value,
+    confirmDisabled,
+    stateMessage
+  }));
+
+  const readiness = helpers.selectPreviewControl(
+    modal,
+    '[data-field="delete-target"]',
+    'opening_initialization',
+    {
+      delay: 0,
+      expectedMonth: '2026-06',
+      expectedConfirmDisabled: false,
+      stateMessageIncludes: '主体期初初始化数据'
+    }
+  );
+  assert.equal(refreshSettled, false);
+  const snapshot = await readiness;
+  assert.equal(refreshSettled, true);
+  assert.equal(snapshot.selectedTarget, 'opening_initialization');
+  assert.equal(snapshot.confirmDisabled, false);
+  assert.match(snapshot.stateMessage, /主体期初初始化数据/);
 });
 
 test('年份切换、非尾月与执行中预览等待异步状态后读取真实 disabled 属性', async () => {
@@ -354,6 +534,36 @@ test('preview 仅在本轮临时产物具备完整 PNG 结构时替换旧证据'
   promotePreview(validStage, target);
   assert.equal(hasPngSignature(target), true);
   assert.equal(fs.existsSync(validStage), false);
+});
+
+test('异步 readiness 失败时即使 staged PNG 合法也不替换旧证据', (t) => {
+  const previewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-failure-'));
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'preview-readiness-user-data-'));
+  t.after(() => fs.rmSync(previewRoot, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const target = path.join(previewRoot, 'preview.png');
+  const staged = path.join(previewRoot, '.preview.png.part');
+  const validPng = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64'
+  );
+  fs.writeFileSync(target, 'old-evidence');
+  fs.writeFileSync(staged, validPng);
+
+  const result = finalizePreviewCapture({
+    stagedPath: staged,
+    previewPath: target,
+    tempRoot,
+    error: new Error('VCC preview readiness did not settle before timeout'),
+    exitCode: 1,
+    logger: { error() {} }
+  });
+
+  assert.equal(result.exitCode, 1);
+  assert.match(result.error.message, /readiness did not settle/);
+  assert.equal(fs.readFileSync(target, 'utf8'), 'old-evidence');
+  assert.equal(fs.existsSync(staged), false);
+  assert.equal(fs.existsSync(tempRoot), false);
 });
 
 test('危险按钮 disabled 在两套基础样式中均有不可点击视觉态', () => {

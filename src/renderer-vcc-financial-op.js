@@ -177,6 +177,56 @@
     return { overlay, dialog, body: dialog.querySelector('.vcc-fin-op-dialog-body'), close };
   }
 
+  function attachPreviewStateTracker(modal, readSnapshot) {
+    let pendingPreview = null;
+    let previewPending = false;
+
+    function trackPreviewState(task) {
+      const pending = Promise.resolve(task);
+      pendingPreview = pending;
+      previewPending = true;
+      pending.then(
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        },
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        }
+      );
+      pending.catch(() => {});
+      return pending;
+    }
+
+    async function waitForPreviewState() {
+      let observed = pendingPreview;
+      while (observed) {
+        await observed;
+        if (observed === pendingPreview) break;
+        observed = pendingPreview;
+      }
+      return {
+        ...readSnapshot(),
+        previewPending
+      };
+    }
+
+    Object.defineProperties(modal, {
+      trackPreviewState: {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: trackPreviewState
+      },
+      waitForPreviewState: {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: waitForPreviewState
+      }
+    });
+    return modal;
+  }
+
   function showMessage(title, message, tone = 'info') {
     const modal = mountDialog({
       title,
@@ -1981,6 +2031,15 @@
     let latestPreview = null;
     let currentTargets = [];
 
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedTarget: targetSelect.value,
+      confirmDisabled: deleteButton.disabled === true,
+      stateMessage: stateText.textContent,
+      stateTone: stateText.dataset.tone || 'neutral'
+    }));
+
     function setDeleteState(message, tone = 'neutral') {
       stateText.textContent = String(message || '');
       stateText.dataset.tone = tone;
@@ -2078,8 +2137,8 @@
       }
     }
 
-    targetSelect.addEventListener('change', refreshPreview);
-    monthSelect.addEventListener('change', loadTargets);
+    targetSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
+    monthSelect.addEventListener('change', () => modal.trackPreviewState(loadTargets()));
     cancelButton.addEventListener('click', modal.close);
     deleteButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
@@ -2116,7 +2175,7 @@
         closeButton.disabled = false;
         targetSelect.disabled = false;
         monthSelect.disabled = false;
-        loadTargets();
+        modal.trackPreviewState(loadTargets());
         return;
       }
 
@@ -2141,7 +2200,7 @@
       }
       showMessage('删除完成', successMessage, 'success');
     });
-    loadTargets();
+    modal.trackPreviewState(loadTargets());
     return modal;
   }
 
@@ -2196,6 +2255,15 @@
     const stateText = modal.dialog.querySelector('[data-role="export-state"]');
     let previewVersion = 0;
 
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedTarget: targetSelect.value,
+      confirmDisabled: exportButton.disabled === true,
+      stateMessage: stateText.textContent,
+      stateTone: stateText.dataset.tone || 'neutral'
+    }));
+
     function selectedTarget() {
       const [targetKind, sourceType] = String(targetSelect.value || '').split(':');
       return { targetKind, sourceType };
@@ -2239,8 +2307,8 @@
       }
     }
 
-    monthSelect.addEventListener('change', refreshPreview);
-    targetSelect.addEventListener('change', refreshPreview);
+    monthSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
+    targetSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
     cancelButton.addEventListener('click', modal.close);
     exportButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
@@ -2266,7 +2334,7 @@
           monthSelect.disabled = false;
           targetSelect.disabled = false;
           setStatus('已取消导出', 'info');
-          refreshPreview();
+          modal.trackPreviewState(refreshPreview());
           return;
         }
         if (result.status !== 'success') throw new Error(result.message || '导出失败');
@@ -2285,10 +2353,10 @@
         closeButton.disabled = false;
         monthSelect.disabled = false;
         targetSelect.disabled = false;
-        refreshPreview();
+        modal.trackPreviewState(refreshPreview());
       }
     });
-    refreshPreview();
+    modal.trackPreviewState(refreshPreview());
     return modal;
   }
 
@@ -2358,6 +2426,14 @@
     const exportButton = modal.dialog.querySelector('[data-action="export-dataset"]');
     const returnButton = modal.dialog.querySelector('[data-action="return"]');
     let renderVersion = 0;
+
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedSection: managerState.section,
+      contentText: content.textContent,
+      unarchiveDisabled: unarchiveButton.disabled === true
+    }));
 
     function updateUnarchiveButton() {
       const available = archivedMonths.length > 0;
@@ -2440,12 +2516,12 @@
     modal.dialog.querySelectorAll('[data-section]').forEach((button) => {
       button.addEventListener('click', () => {
         managerState.section = button.dataset.section;
-        render();
+        modal.trackPreviewState(render());
       });
     });
     monthSelect.addEventListener('change', () => {
       managerState.month = monthSelect.value;
-      render();
+      modal.trackPreviewState(render());
     });
     unarchiveButton.addEventListener('click', () => {
       openUnarchiveDialog({
@@ -2489,7 +2565,8 @@
     });
     returnButton.addEventListener('click', modal.close);
     updateUnarchiveButton();
-    render();
+    modal.trackPreviewState(render());
+    return modal;
   }
 
   async function initialize() {
@@ -2760,6 +2837,51 @@
     return liveSnapshot;
   }
 
+  async function waitForTrackedPreview(modal, {
+    expectedMonth,
+    expectedTarget,
+    expectedSection,
+    expectedConfirmDisabled,
+    stateMessageIncludes = '',
+    contentIncludes = ''
+  } = {}) {
+    if (!modal || !modal.dialog || typeof modal.waitForPreviewState !== 'function') {
+      throw new Error('VCC 预览弹框未创建或不支持状态等待');
+    }
+    const snapshot = await modal.waitForPreviewState();
+    const liveSnapshot = {
+      ...snapshot,
+      modalPresent: Boolean(modal.dialog.isConnected)
+    };
+    if (!liveSnapshot.modalPresent) throw new Error('VCC 预览弹框未挂载');
+    if (liveSnapshot.previewPending) throw new Error('VCC 预览仍在构建状态');
+    if (expectedMonth !== undefined && liveSnapshot.selectedMonth !== expectedMonth) {
+      throw new Error(`VCC 预览月份不一致：${liveSnapshot.selectedMonth} != ${expectedMonth}`);
+    }
+    if (expectedTarget !== undefined && liveSnapshot.selectedTarget !== expectedTarget) {
+      throw new Error(`VCC 预览目标不一致：${liveSnapshot.selectedTarget} != ${expectedTarget}`);
+    }
+    if (expectedSection !== undefined && liveSnapshot.selectedSection !== expectedSection) {
+      throw new Error(`VCC 预览分区不一致：${liveSnapshot.selectedSection} != ${expectedSection}`);
+    }
+    if (expectedConfirmDisabled !== undefined
+      && liveSnapshot.confirmDisabled !== expectedConfirmDisabled) {
+      throw new Error(
+        `VCC 预览按钮禁用状态不一致：${liveSnapshot.confirmDisabled} != ${expectedConfirmDisabled}`
+      );
+    }
+    if (stateMessageIncludes
+      && !String(liveSnapshot.stateMessage || '').includes(stateMessageIncludes)) {
+      throw new Error(
+        `VCC 预览状态文案缺少：${stateMessageIncludes}；当前：${liveSnapshot.stateMessage || ''}`
+      );
+    }
+    if (contentIncludes && !String(liveSnapshot.contentText || '').includes(contentIncludes)) {
+      throw new Error(`VCC 预览内容缺少：${contentIncludes}`);
+    }
+    return liveSnapshot;
+  }
+
   function selectPreviewControl(modal, selector, value, options = {}) {
     const normalizedOptions = typeof options === 'number' ? { delay: options } : options;
     const delay = normalizedOptions.delay == null ? 180 : normalizedOptions.delay;
@@ -2772,7 +2894,16 @@
           control.dispatchEvent(new Event('change', { bubbles: true }));
           if (control.value !== value) throw new Error(`预览控件未稳定到目标值：${value}`);
           if (typeof modal.waitForPreviewState === 'function') {
-            resolve(await waitForArchivedPickerPreview(modal, normalizedOptions));
+            if (modal.dialog.classList.contains('vcc-fin-op-archive-picker-dialog')) {
+              resolve(await waitForArchivedPickerPreview(modal, normalizedOptions));
+              return;
+            }
+            resolve(await waitForTrackedPreview(modal, {
+              ...normalizedOptions,
+              expectedTarget: normalizedOptions.expectedTarget === undefined
+                ? value
+                : normalizedOptions.expectedTarget
+            }));
             return;
           }
           resolve({ modalPresent: Boolean(modal.dialog.isConnected), selectedValue: control.value });
@@ -2803,6 +2934,9 @@
   }
 
   const previewHooks = window.desktopApi.previewCapture === true ? {
+    openPanel() {
+      return null;
+    },
     openImportMonth() {
       return chooseImportMonth({ title: '选择导入账期' });
     },
@@ -2813,22 +2947,32 @@
         initial: '2026-06'
       });
     },
-    openDataManager() {
-      return openDataManager({
+    async openDataManager() {
+      const modal = await openDataManager({
         initialMonth: '2026-06',
         initialSection: 'raw',
         previewData: previewDataManagerPayload({ hasArchive: true })
       });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedSection: 'raw',
+        contentIncludes: 'VCC充值清退明细'
+      });
     },
-    openDataManagerNoArchive() {
-      return openDataManager({
+    async openDataManagerNoArchive() {
+      const modal = await openDataManager({
         initialMonth: '2026-06',
         initialSection: 'results',
         previewData: previewDataManagerPayload({ hasArchive: false })
       });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedSection: 'results',
+        contentIncludes: '财务OP校验结果表'
+      });
     },
     openDelete() {
-      return openDatasetDeleteDialog({
+      const modal = openDatasetDeleteDialog({
         months: ['2026-06', '2026-05'],
         initialMonth: '2026-06',
         previewResult: {
@@ -2836,6 +2980,12 @@
           dataCount: 36932,
           calculatedRunCount: 1
         }
+      });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedTarget: 'recharge_refund',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '36,932'
       });
     },
     openDeleteFirstMonth() {
@@ -2854,7 +3004,11 @@
           }
           : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 1 }
       });
-      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization');
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '主体期初初始化数据'
+      });
     },
     openDeleteFirstMonthArchived() {
       const modal = openDatasetDeleteDialog({
@@ -2869,7 +3023,11 @@
           }
           : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 0 }
       });
-      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization');
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: true,
+        stateMessageIncludes: '已归档'
+      });
     },
     openDeleteResult() {
       const modal = openDatasetDeleteDialog({
@@ -2887,7 +3045,11 @@
           }
           : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 2 }
       });
-      return selectPreviewControl(modal, '[data-field="delete-target"]', 'result');
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'result', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '2 份未归档'
+      });
     },
     openUnarchive() {
       const modal = createUnarchivePreviewDialog();
@@ -2944,7 +3106,7 @@
       });
     },
     openResultExportMonth() {
-      return createArchivedMonthPickerDialog({
+      const modal = createArchivedMonthPickerDialog({
         months: PREVIEW_ARCHIVED_MONTHS,
         actionLabel: '导出',
         previewSelection: async (entry) => ({
@@ -2956,6 +3118,12 @@
         }),
         executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
       });
+      return waitForArchivedPickerPreview(modal, {
+        expectedYear: '2026',
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '可导出'
+      });
     },
     openResultExportMonthEmpty() {
       applyArchivedMonthsState([]);
@@ -2963,7 +3131,7 @@
       return null;
     },
     openExport() {
-      return openDatasetExportDialog({
+      const modal = openDatasetExportDialog({
         months: ['2026-06', '2026-05'],
         initialMonth: '2026-06',
         initialSection: 'checks',
@@ -2971,6 +3139,12 @@
           exportable: true,
           dataCount: 4003645
         }
+      });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedTarget: 'check:recharge_refund',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '4,003,645'
       });
     },
     openResult() {

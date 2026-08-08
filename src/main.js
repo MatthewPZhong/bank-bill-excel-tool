@@ -3203,10 +3203,32 @@ function sendWindowState() {
 }
 
 const VCC_PREVIEW_READINESS_TOKENS = new Set([
+  'vcc-financial-op-panel',
+  'vcc-financial-op-import-month',
+  'vcc-financial-op-run-month',
+  'vcc-financial-op-data-manager',
+  'vcc-financial-op-data-manager-no-archive',
+  'vcc-financial-op-delete',
+  'vcc-financial-op-delete-first-month',
+  'vcc-financial-op-delete-first-month-archived',
+  'vcc-financial-op-delete-result',
   'vcc-financial-op-unarchive',
   'vcc-financial-op-unarchive-year-switch',
   'vcc-financial-op-unarchive-non-tail',
-  'vcc-financial-op-unarchive-executing'
+  'vcc-financial-op-unarchive-executing',
+  'vcc-financial-op-export',
+  'vcc-financial-op-result-export-month',
+  'vcc-financial-op-result-export-month-empty',
+  'vcc-financial-op-result',
+  'vcc-financial-op-result-single-adjustment',
+  'vcc-financial-op-result-multiple-adjustments',
+  'vcc-financial-op-result-archived',
+  'vcc-financial-op-result-zoom-125',
+  'vcc-financial-op-result-zoom-150',
+  'vcc-financial-op-result-min-window',
+  'vcc-financial-op-adjustment',
+  'vcc-financial-op-run-preflight-error',
+  'vcc-financial-op-opening'
 ]);
 const VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000;
 
@@ -3299,7 +3321,11 @@ function createWindow() {
       setTimeout(async () => {
         let captureExitCode = 0;
         try {
-          if (VCC_PREVIEW_READINESS_TOKENS.has(process.env.APP_PREVIEW_MODAL || '')) {
+          const previewToken = process.env.APP_PREVIEW_MODAL || '';
+          if (previewToken.startsWith('vcc-financial-op-')) {
+            if (!VCC_PREVIEW_READINESS_TOKENS.has(previewToken)) {
+              throw new Error(`Unknown VCC preview capture token: ${previewToken}`);
+            }
             await waitForVccPreviewCaptureReady(mainWindow.webContents);
           }
           const image = await mainWindow.webContents.capturePage();
