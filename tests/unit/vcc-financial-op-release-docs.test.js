@@ -110,3 +110,21 @@ test('仓库内最终 Spec 修正发布文档路径并保留来源哈希证据',
   assert.match(notes, /9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de/);
   assert.match(notes, /changes\/3\.1\.8\/spec\.md/);
 });
+
+test('v3.1.8 iteration PRD 索引归档锁定规格、非目标、验收与人工门禁', () => {
+  const prd = read('docs/iterations/v3.1.8/PRD-v3.1.8.md');
+
+  assert.match(prd, /^# bank-bill-excel-tool 3\.1\.8 PRD 索引$/m);
+  assert.match(prd, /> 目标版本：`3\.1\.8`/);
+  assert.match(prd, /> 状态：发布候选（未正式发布）/);
+  assert.ok(prd.includes('[`changes/3.1.8/spec.md`](../../../changes/3.1.8/spec.md)'));
+  assert.match(prd, /^## 2\. 范围$/m);
+  assert.match(prd, /^## 3\. 非目标$/m);
+  assert.match(prd, /^## 4\. 验收索引$/m);
+  assert.match(prd, /^## 5\. 人工发布门禁$/m);
+  assert.match(prd, /spec\.md#11-测试计划/);
+  assert.match(prd, /spec\.md#12-验收矩阵/);
+  assert.match(prd, /spec\.md#15-definition-of-done/);
+  assert.match(prd, /preflight\.md#仍阻塞-v318-正式发布/);
+  assert.match(prd, /不得将本索引、自动化 PASS 或 Windows CI 构建视为已正式发布或已完成资金验收/);
+});

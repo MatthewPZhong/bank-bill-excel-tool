@@ -54,11 +54,11 @@
 ### 已完成
 
 - 版本已提升到 `3.1.8`；CHANGELOG、版本历史和用户手册统一保持“Unreleased / 待发布 / 发布候选”，没有宣称已发布或已通过资金人工验收。
-- 锁定规范已纳入 `changes/3.1.8/spec.md`；保留 Downloads 原文件 SHA-256，并只把 §10.4 修正为仓库真实文档路径。
+- 锁定规范已纳入 `changes/3.1.8/spec.md`；保留 Downloads 原文件 SHA-256，并只把 §10.4 修正为仓库真实文档路径。`docs/iterations/v3.1.8/PRD-v3.1.8.md` 以索引/导读归档版本范围、非目标、验收与人工门禁，不重复规范正文。
 - VCC 26 张合成预览已生成并视觉复核，覆盖关键业务状态、100%/125%/150% 和最小窗口；capture hook、窗口参数和假数据均与生产路径隔离，失败或截断 PNG 不会替换旧证据。
 - Windows 本地、PR 和 Release 构建命令统一锁定 x64；任意 PR 配置为先跑完整发布检查，再构建 installer/portable 并执行分发守卫；守卫新增两份 VCC 模板和包内版本校验。
 - `npm run scan:vars` 已刷新 v3.1.8 报告：`src/` 293 文件、3688 个顶层名字；`npm run check:vars` 仅命中 Runtime-state 的 `MODULES`、`app`、`dialog`、`setStatus`、`state`。`state` 命中来自 preview/既有引用，本轮未改 `src/renderer.js` 全局 state 结构，capture 状态只在隔离的 Promise 和局部 DOM 快照内流转；其余命中也已按 capture-only 或局部变量复核，无 Critical/Risk-sensitive 命中。
-- 最终对外术语修复后的单次 `npm run release-check` 通过：lint、smoke、unit `4695/4695`，integration `47/47` 脚本、`2186/2186` 断言全部 PASS；其中 VCC 调整归档 `55/55`、破坏性状态链 `52/52`、历史模板导出 `28/28`。实施记录只在此后补写本组实跑计数，不再改生产代码或对外文档。
+- 截至当前 PR6 修复 SHA 的证据为阶段性证据，不代表最终冻结：前一 readiness 阶段完整 `npm run release-check` 为 unit `4705/4705`、integration `47/47` 脚本/`2198/2198` 断言；本轮 self-review 修复后，关联定向单测 `55/55`（含 RSS 模型 `4/4`、真实 26 PNG、iteration PRD、Windows/asar 契约），5 万/15 万行与默认 50 万/150 万行独立子进程集成链均 `31/31` PASS，`npm run lint`、修改 JS `node --check`、`git diff --check` 均通过。并行 PR1～PR4 修复叠加后，必须由主代理对最终 HEAD 重跑全栈门禁并回写最终计数。
 - 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
 
 ### Reviewer 退回项复核（2026-08-08）
@@ -70,7 +70,7 @@
 - 用户手册已明确：较新“已归档”和“已计算”均会阻断更早月；须从最新月开始逐月“解归档→删除全部未归档结果”，修订目标月后再按时间正序重跑、归档；删除不会清理源数据、导入审计或固定首月。
 - 公开的 v3.1.8 CHANGELOG/版本历史/手册当前候选切片已改为用户语言，不再使用“金标准/语义模板”，改为“正式模板/结果模板”；Windows 统一表述为“64 位 Windows 安装版和便携版”。VCC 界面不再展示英文 `revision`，内部字段和错误码保持不变；release-docs 对三份当前版本切片增加了术语负断言。
 - 最终 `scan:vars/check:vars` 扫描 `src/` 293 文件、3688 个顶层名字；仅命中 Runtime-state 的 `MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical/Risk-sensitive。后两者及 `dialog` 为 VCC 局部 DOM/状态，`MODULES` 仅用既有 ID 做 capture 路由，`app` 仅改变 capture 失败的退出码。
-- 最终 intended 范围为 56 个文件：33 个 tracked + 23 个 intended untracked（1 份锁定 spec、18 张新 VCC PNG、4 个新单测）。`scripts/scan-vars.js` 的 1 行删除是 PR6 为了消除统计 Markdown 末尾多余空行、保证刷新结果稳定的修复，纳入 tracked 范围。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件不在本迭代范围，未被更改或纳入。
+- 截至当前 PR6 修复工作树，相对 PR5 base 的阶段性范围为 59 个文件：34 个 modified + 25 个 added；新增项中包含锁定 spec、v3.1.8 iteration PRD 索引、18 张新 VCC PNG 及 5 个新单测文件。该数字不是最终冻结；并行 PR1～PR4 修复叠加后由主代理以最终 HEAD 重新计算。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件仍明确排除。
 
 ### 仍阻塞 v3.1.8 正式发布
 
@@ -80,4 +80,4 @@
 - 对生产数据库副本做只读扫描，核对 Pending 46/48 列、归档主体/九币种余额及五类数据状态；异常只阻断并人工处理，不自动修复。
 - 由财务人员用真实月份逐主体、逐九币种核对基础值、调整值、生效余额、差异、颜色、归档及连续两月期初衔接，并记录签字结论。
 
-结论：PR6 的代码、预览、版本、文档和自动化收口已完成；上述人工门禁完成前，v3.1.8 仍是发布候选，不得发布。
+结论：当前 PR6 self-review 修复及其阶段性证据已完成；并行修复叠加后的最终全栈回归和范围冻结尚待主代理回写。上述人工门禁完成前，v3.1.8 仍是发布候选，不得发布。

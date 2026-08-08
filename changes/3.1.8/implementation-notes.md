@@ -47,6 +47,7 @@
 | 预览 PNG 先写同目录本轮 staging，Electron 非 0 退出或 PNG 结构不完整时保留旧图；仅验证通过后原子 rename | 直接写正式截图会在 capture 失败时留下截断图，或让旧图冒充本轮成功证据 | 启动前删除旧图；只校验 8 字节签名 | 校验 signature、13 字节 IHDR、正尺寸、非空完整 IDAT、IEND 且恰好 EOF；失败返回非 0，旧证据不动 |
 | Windows PR 构建对任意目标分支执行完整发布检查，并实际构建 x64 installer/portable 后运行分发守卫 | 旧 workflow 跳过 PR build，且架构未锁定时可能检查陈旧 `win-unpacked` | 仅做静态 workflow lint；继续依赖本机旧 dist | 本地/PR/Release 构建统一 `--x64`；分发守卫校验两份 VCC 金标准模板及包内版本，目标平台产物仍须 CI 与人工打开确认 |
 | PR 6 reviewer P2 将全部 26 个 `vcc-financial-op-*` capture token 冻结为显式 `sync / state / lifecycle` readiness 契约，并由主进程对此前缀统一失败关闭 | 数据管理、删除、导出等弹框依赖异步状态；结果/导入/运行/调整等入口返回的 Promise 却代表“弹框关闭”，若统一 await 会死锁，若统一固定延时会截到旧状态 | 继续只门禁解归档 4 个 token；所有 hook 都 await 返回 Promise；用固定 sleep 猜状态 | `state` 入口必须返回并等待真实 DOM 状态 tracker，`lifecycle` 入口只探测同步/立即拒绝而不等待关闭，`sync` 入口禁止意外 Promise；未知 token、缺 hook/method、null、同步抛错、拒绝、非法结果或 8 秒超时均以非 0 退出，staged PNG 不得晋升 |
+| PR 6 self-review 将 RSS 增长分为“低信号有界”与“可测增长”，并把两档扫描改为独立 `--expose-gc` 子进程 | tier1/tier2 同时加减 8MB 会使 `13→39MB`、行数比 3 的精确线性增长通过；同进程先后扫描又会混入 allocator 复用 | 双侧不确定性区间；删除亚线性门禁；只提高 150MB 硬上限 | tier1 `<=8MB` 时 tier2 必须 `<=32MB`；tier1 `>8MB` 时以原始 tier1 外推一半并只加一次 8MB 余量。150MB 硬上限和非法输入 fail-closed 不变 |
 
 ## Assumptions
 
@@ -70,6 +71,8 @@
 | Spec 示例以模板业务末行为静态参考；实际导出按语义行计划重建结果表并将打印区动态收口为 `A1:L<实际末行>` | 调整行数量与主体业务分类会改变结果末行；固定 A1:L45 会留下样例行或截断新增行 | 保留模板原 45 行并原位覆盖；固定打印区 | M/N 仍保留为可见审计列但不进入模板锁定打印宽度；动态合并/打印区由 staged validator 回读验证 | 无需（Spec 已要求动态行与模板打印宽度） |
 
 ## Evidence
+
+> 表中既有“最终/冻结”表述只表示当时阶段的历史证据，不代表当前并行修复叠加后的最终 HEAD。当前可归属证据以表末“截至当前 PR6 修复 SHA”行为准，最终计数由主代理全栈重跑后回写。
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
@@ -131,13 +134,17 @@
 | PR 6 reviewer P2 用户文案与操作链 | VCC 界面所有用户可见 `revision` 改为“结果版本”，内部 `resultRevision` 与错误码不改；手册写明较新“已归档/已计算”均会阻断，须从最新月逐月“解归档→删除全部未归档结果”，修订后再按时间正序重跑/归档 | CHANGELOG/版本历史/手册当前 v3.1.8 候选切片删除内部评审词、“金标准/语义模板”和 x64/arm64 矛盾，改用“正式模板/结果模板”及“64 位 Windows 安装版和便携版”；历史版本记录不做机械改写 |
 | PR 6 reviewer 最终 `npm run scan:vars` / `npm run check:vars` | 扫描 v3.1.8、`src/` 293 文件、3688 个顶层名字；命中 Runtime-state：`MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical/Risk-sensitive | `MODULES` 只用既有 VCC ID 做 capture 路由；`app` 只在 capture 失败时非 0 退出；`dialog`/`setStatus`/`state` 是 VCC 局部 DOM、状态或测试引用，未改 Electron 原生 dialog、全局状态结构或生产退出钩子 |
 | PR 6 reviewer 最终定向与全量回归 | 最终对外术语修复后，release-docs `3/3 PASS`；完整 `npm run release-check` 为 lint/smoke PASS、unit `4695/4695 PASS`、integration `47/47` 脚本与 `2186/2186` 断言 PASS；术语修复前的 preview + renderer + release-docs 组合为 `37/37 PASS` | 真实 disabled 行为、readiness 负向用例、当前 v3.1.8 对外切片术语负断言和手册操作链已进入全仓门禁；集成链确认解归档/删除/历史导出的后台保护无回归 |
-| PR 6 reviewer 最终范围冻结 | intended 变更共 56 个文件：33 个 tracked + 23 个 intended untracked（1 份锁定 spec、18 张新 VCC PNG、4 个新单测） | `scripts/scan-vars.js` 删除末尾多余空行属于 PR6 报告稳定性修复，纳入 33 个 tracked；`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 及其他既有未跟踪文件明确排除，未 stage/commit |
+| PR 6 reviewer 范围记录（历史） | 当时 intended 变更共 56 个文件：33 个 modified + 23 个 added | 该数字在随后 RSS 门禁和 self-review 修复后已过期；当前范围见表末阶段性证据，不得继续引用为最终冻结 |
 | PR 6 reviewer 最终通用/资金盲区复核 | 最终 diff 对 `src/backend/` 与 `src/main-process/` 的生产资金实现为 0 文件；逐项检查 capture 入口隔离、缺失/超时/拒绝、异步旧响应、DOM 销毁、旧 PNG 替换、尾月依赖、主键、金额/币种、跨月、重复操作、部分失败、行/余额守恒和错误可观测性 | 未发现新的生产入口旁路、自动删改资金事实或静默降级；capture 只读取预览 DOM 并在失败时非 0 退出。真实月份逐主体/币种、Windows Excel/WPS 和关窗时序人工复核继续作为资金发布红线，不得由自动化 PASS 代替 |
 | PR 6 reviewer P2 全 token readiness 定向回归 | preview contract 新增完整 26-token 集合一致性、策略分派、缺失/未知/null/同步抛错/拒绝/悬挂超时/非法结果负向矩阵；行为伪 DOM 验证删除目标异步切换后真实按钮/文案稳定；pending 的 result/import/run/adjustment lifecycle Promise 在 100ms 内完成 readiness；合法 staged PNG 遇 readiness 错误也不覆盖旧正式图 | 证明所有 capture 入口由同一 fail-closed 主进程门禁覆盖，同时避免生命周期 Promise 导致截图命令死锁；测试断言最终 DOM 与发布文件行为而非只匹配源码字符串 |
-| PR 6 reviewer P2 26-token 最终预览冻结 | 最终代码批量生成的 26 张 VCC PNG 均按 package 脚本顺序在 2026-08-09 02:12:01～02:13:24（Asia/Shanghai）完成落盘，最后 token 为 `vcc-financial-op-opening`；25 张为 2480×1720，最小窗口为 2160×1520，PNG 结构测试覆盖完整集合 | 26/26 token 无卡点；首月/已归档首月删除、历史月份导出及结果页人工抽查均显示预期稳定状态，未用旧图冒充本轮成功 |
+| PR 6 reviewer P2 26-token 预览证据 | 生成日志记录 26 张 VCC PNG 按 package 脚本顺序完成；自动门禁不使用 mtime 判断新鲜度，而是按 26-token 契约枚举仓库真实文件，逐张验证 signature、IHDR、非空 IDAT、以 IEND 精确结束及尺寸 | 25 张必须为 2480×1720，`result-min-window` 必须为 2160×1520；缺失、截断、空 IDAT、额外尾字节或尺寸漂移都会让 unit 失败 |
 | PR 6 reviewer P2 最终 `npm run check:vars` 与人工 review | 仅命中 Runtime-state：`MODULES`、`dialog`、`state`；无 Critical / Important-skeleton / Risk-sensitive 命中 | `MODULES` 只把既有 VCC preview 路由集中到显式契约，未增删模块枚举或 UI tab；`dialog` 为 renderer 局部 DOM；`state` 为策略字面量/局部状态文案，不是 `src/renderer.js` 顶层单例结构。模块切换、原生文件对话框及模板/当前模块/导出可用性联动均未改写 |
-| PR 6 reviewer P2 最终定向与发布回归 | 定向 renderer + preview + release-docs `41/41 PASS`；`npm run release-check` 完整通过：lint/smoke PASS，unit `4705/4705 PASS`（301 个测试文件），integration `47/47` 脚本、`2198/2198` 断言 PASS，其中调整归档 `55/55`、破坏性状态链 `64/64`、历史模板导出 `28/28`；集成清单已自动同步 | 当前冻结代码覆盖 readiness、生产资金状态链与其他模块回归；发布门禁证据对应本轮 reviewer P2 修复，而非沿用旧的 4695/2186 结果 |
+| PR 6 reviewer P2 readiness 阶段发布回归（历史） | 定向 renderer + preview + release-docs `41/41 PASS`；`npm run release-check` 当时完整通过：lint/smoke PASS，unit `4705/4705 PASS`（301 个测试文件），integration `47/47` 脚本、`2198/2198` 断言 PASS | 该证据早于随后 RSS 稳定性和 self-review 修复，只作历史 baseline；不得声称它覆盖当前或最终 HEAD |
 | PR 6 reviewer P2 通用/资金盲区复核 | 本轮生产改动仅在 capture 主进程门禁、renderer preview 路由与 preview-only hook 状态观测；`src/backend/`、`src/main-process/`、金额/币种、数据库迁移及资金 writer 均为 0 diff。复核全部 VCC 前缀入口、未知 token、注册时序、最新异步 Promise、DOM 销毁、同步/拒绝/超时、生命周期不等待及 staged 输出原子晋升 | 未发现生产入口旁路、异步旧响应覆盖、截图死锁、旧 PNG 冒充或资金事实自动改写；真实月份逐主体/币种、Windows Excel/WPS 与关窗时序继续保留为人工发布红线，不由本轮自动化替代 |
+| 截至当前 PR6 修复 SHA 的 RSS 门禁证据 | RSS 模型单测 `4/4 PASS`；5 万/15 万行小规模与默认 50 万/150 万行 `toolbox-large-split-multi-sheet.js` 均 `31/31 PASS`；默认档独立采样为 `93→138MB`，可测预算上限 148MB，两档均低于 150MB 硬上限 | `6→29MB` 低信号包络通过，`6→33MB` 超包络拒绝，`13→39MB` 与 `32→96MB` 精确线性反例拒绝，150MB 硬上限与非法输入 fail-closed；真多 sheet/真 worker 链同时通过 |
+| 截至当前 PR6 修复 SHA 的归档与预览证据 | 关联定向单测 `55/55 PASS`，其中 renderer + preview + release-docs `43/43 PASS`；新增 `docs/iterations/v3.1.8/PRD-v3.1.8.md` 索引并由 release-docs 锁定 | release-docs 定位版本/锁定 spec/范围/非目标/验收/人工门禁；preview 测试直接读取仓库 26 张 PNG 并锁定 25+1 尺寸分布；Windows/asar 定向契约也在同组通过 |
+| 截至当前 PR6 修复 SHA 的静态证据 | `npm run lint` PASS；修改的 4 个 JS 文件 `node --check` PASS；`git diff --check` PASS | 未引入 src lint 回归、JS 语法错误或新 whitespace 问题 |
+| 截至当前 PR6 修复 SHA 的阶段性范围 | 相对 PR5 base 为 59 个文件：34 modified + 25 added；本轮新增 1 份 iteration PRD 索引和 1 份 RSS 门禁单测 | 该数字不是最终冻结；并行 PR1～PR4 修复叠加后，由主代理对最终 HEAD 重跑 release-check 并回写计数/范围 |
 
 ## Remaining Unknowns
 
@@ -151,3 +158,4 @@
 | 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | 已用事务、唯一约束、故障与 stale revision 单测消除 | 继续由 `getEffectiveRunResult()` 在每次读取、归档和审计时复核连续 sequence/revision | 不阻塞合并；任何账本漂移仍按结构化错误失败关闭 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | Windows 手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞代码评审 |
+| 并行 PR1～PR4 修复叠加后的最终回归与文件范围 | PROBE | 主代理合并全部修复后，对最终 HEAD 运行全栈 release-check、lint、diff-check 并重算 diff 统计 | 阻塞“最终冻结”证据声明，不阻塞当前聚焦修复提交 |

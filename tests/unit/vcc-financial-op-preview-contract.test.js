@@ -78,6 +78,38 @@ test('v3.1.8 VCC 关键 preview 状态均有 renderer token、mock hook 与独�
   assert.match(moduleRenderer, /openAdjustment\(\) \{[\s\S]*return requestRunAdjustment/);
 });
 
+test('仓库提交的 26 张 VCC preview 均为完整 PNG 且尺寸与 capture 契约一致', () => {
+  assert.equal(PREVIEW_CONTRACT.length, 26);
+  const previewDir = path.join(ROOT, 'docs', 'previews');
+  const expectedFiles = PREVIEW_CONTRACT.map(([token]) => `${token}.png`).sort();
+  const committedFiles = fs.readdirSync(previewDir)
+    .filter((name) => /^vcc-financial-op.*\.png$/.test(name))
+    .sort();
+  assert.deepEqual(committedFiles, expectedFiles, '仓库根 preview 目录必须与 26-token 契约精确一致');
+  let standardCount = 0;
+  let minWindowCount = 0;
+
+  for (const [token] of PREVIEW_CONTRACT) {
+    const previewPath = path.join(previewDir, `${token}.png`);
+    assert.equal(fs.existsSync(previewPath), true, `缺少已提交 preview：${token}.png`);
+    assert.equal(hasPngSignature(previewPath), true, `preview 不是含完整 IHDR/IDAT/IEND 的 PNG：${token}.png`);
+
+    const bytes = fs.readFileSync(previewPath);
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    if (token === 'vcc-financial-op-result-min-window') {
+      assert.deepEqual([width, height], [2160, 1520], `${token}.png 必须为最小窗口 capture 尺寸`);
+      minWindowCount += 1;
+    } else {
+      assert.deepEqual([width, height], [2480, 1720], `${token}.png 必须为标准 capture 尺寸`);
+      standardCount += 1;
+    }
+  }
+
+  assert.equal(standardCount, 25);
+  assert.equal(minWindowCount, 1);
+});
+
 test('zoom 与最小窗口参数只在 APP_CAPTURE_PATH preview 路径改写 BrowserWindow options', () => {
   const createWindowStart = main.indexOf('function createWindow()');
   const createWindowEnd = main.indexOf('function buildTemplateSummary(', createWindowStart);
