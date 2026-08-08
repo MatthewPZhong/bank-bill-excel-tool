@@ -360,6 +360,17 @@ function validateOperationConfirmation(expectedPreviewToken, taskGeneration) {
   return Number(taskGeneration);
 }
 
+function readDatabaseLocalTimestamp(db) {
+  const row = db.prepare(`
+    SELECT datetime('now', 'localtime') AS local_timestamp
+  `).get();
+  const timestamp = String(row && row.local_timestamp ? row.local_timestamp : '');
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(timestamp)) {
+    throw operationError('database-time-unavailable', '无法获取数据库事务时间');
+  }
+  return timestamp;
+}
+
 module.exports = {
   OPERATION_TOKEN_VERSION,
   STATE_CHANGED_CODE,
@@ -381,5 +392,6 @@ module.exports = {
   buildOperationState,
   operationPreviewToken,
   assertPreviewToken,
-  validateOperationConfirmation
+  validateOperationConfirmation,
+  readDatabaseLocalTimestamp
 };

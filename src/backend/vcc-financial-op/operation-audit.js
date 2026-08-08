@@ -35,13 +35,16 @@ function insertOperationAudit(db, {
   evidence,
   errorMessage = null,
   appVersion = null,
-  buildSha = null
+  buildSha = null,
+  createdAt = null
 }) {
   const result = db.prepare(`
     INSERT INTO vcc_fin_op_operation_audit (
       target_month, operation_type, run_id, status, preview_token,
-      evidence_json, error_message, app_version, build_sha
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      evidence_json, error_message, app_version, build_sha, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+      COALESCE(?, datetime('now', 'localtime'))
+    )
   `).run(
     targetMonth,
     operationType,
@@ -51,7 +54,8 @@ function insertOperationAudit(db, {
     JSON.stringify(evidence),
     errorMessage,
     appVersion,
-    buildSha
+    buildSha,
+    createdAt
   );
   return Number(result.lastInsertRowid);
 }
@@ -66,6 +70,7 @@ function assertSuccessOperationAudit(db, {
   evidence,
   appVersion = null,
   buildSha = null,
+  createdAt,
   code,
   message
 }) {
@@ -86,7 +91,8 @@ function assertSuccessOperationAudit(db, {
   const actualEvidenceHash = row ? sha256(row.evidence_json) : null;
   const actualRunId = row && row.run_id !== null ? Number(row.run_id) : null;
   const expectedRunId = runId === null ? null : Number(runId);
-  const valid = Number.isSafeInteger(expectedId)
+  const valid = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(String(createdAt || ''))
+    && Number.isSafeInteger(expectedId)
     && Number.isSafeInteger(boundaryId)
     && expectedId > boundaryId
     && newAuditCount === 1
@@ -101,7 +107,7 @@ function assertSuccessOperationAudit(db, {
     && row.error_message === null
     && row.app_version === appVersion
     && row.build_sha === buildSha
-    && Boolean(row.created_at);
+    && row.created_at === createdAt;
   if (valid) return { auditId: expectedId, evidenceHash: actualEvidenceHash };
   throw operationError(code, message, {
     context: {
@@ -116,7 +122,8 @@ function assertSuccessOperationAudit(db, {
         previewToken,
         evidenceHash: expectedEvidenceHash,
         appVersion,
-        buildSha
+        buildSha,
+        createdAt
       },
       actual: row ? {
         auditId: Number(row.id),
@@ -129,7 +136,7 @@ function assertSuccessOperationAudit(db, {
         appVersion: row.app_version,
         buildSha: row.build_sha,
         hasErrorMessage: row.error_message !== null,
-        hasCreatedAt: Boolean(row.created_at)
+        createdAt: row.created_at
       } : null
     }
   });

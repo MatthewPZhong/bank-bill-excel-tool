@@ -7,6 +7,7 @@ const {
   operationPreviewToken,
   assertPreviewToken,
   validateOperationConfirmation,
+  readDatabaseLocalTimestamp,
   fingerprintQuery,
   stableStringify
 } = require('./operation-state');
@@ -232,21 +233,7 @@ function materializeDetailAudit(db, targetMonth, sourceType) {
   return affectedCount;
 }
 
-function acceptedAttemptMatchesSnapshot(row, { requireMaterialized }) {
-  const incomingFields = [
-    ['attempt_existing_snapshot_id', 'snapshot_id'],
-    ['attempt_import_record_id', 'snapshot_import_record_id'],
-    ['attempt_target_month', 'snapshot_target_month'],
-    ['attempt_subject', 'snapshot_subject'],
-    ['attempt_balances_json', 'snapshot_balances_json'],
-    ['attempt_content_hash', 'snapshot_content_hash'],
-    ['attempt_source_file', 'snapshot_source_file'],
-    ['attempt_sheet_name', 'snapshot_sheet_name'],
-    ['attempt_source_row', 'snapshot_source_row'],
-    ['attempt_raw_json', 'snapshot_raw_json']
-  ];
-  if (incomingFields.some(([actual, expected]) => row[actual] !== row[expected])) return false;
-  if (row.attempt_comparison_attempt_id !== null || !row.attempt_created_at) return false;
+function linkedAttemptMaterializedFieldsMatch(row, { requireMaterialized }) {
   const materializedFields = [
     ['attempt_existing_balances_json_snapshot', 'snapshot_balances_json'],
     ['attempt_existing_raw_json_snapshot', 'snapshot_raw_json'],
@@ -263,7 +250,24 @@ function acceptedAttemptMatchesSnapshot(row, { requireMaterialized }) {
   ));
 }
 
-function assertLinkedAcceptedAttempts(db, targetMonth, {
+function acceptedAttemptMatchesSnapshot(row) {
+  const incomingFields = [
+    ['attempt_existing_snapshot_id', 'snapshot_id'],
+    ['attempt_import_record_id', 'snapshot_import_record_id'],
+    ['attempt_target_month', 'snapshot_target_month'],
+    ['attempt_subject', 'snapshot_subject'],
+    ['attempt_balances_json', 'snapshot_balances_json'],
+    ['attempt_content_hash', 'snapshot_content_hash'],
+    ['attempt_source_file', 'snapshot_source_file'],
+    ['attempt_sheet_name', 'snapshot_sheet_name'],
+    ['attempt_source_row', 'snapshot_source_row'],
+    ['attempt_raw_json', 'snapshot_raw_json']
+  ];
+  if (incomingFields.some(([actual, expected]) => row[actual] !== row[expected])) return false;
+  return row.attempt_comparison_attempt_id === null && Boolean(row.attempt_created_at);
+}
+
+function assertLinkedSystemAttempts(db, targetMonth, {
   requireExactlyOne,
   requireMaterialized
 }) {
@@ -279,7 +283,7 @@ function assertLinkedAcceptedAttempts(db, targetMonth, {
     ) {
       throw scopeError(
         'delete-invariant-failed',
-        '系统财务OP首次成功审计与有效快照不一致，删除已回滚'
+        '系统财务OP导入尝试审计与有效快照不一致，删除已回滚'
       );
     }
   };
@@ -296,6 +300,7 @@ function assertLinkedAcceptedAttempts(db, targetMonth, {
            snapshot.raw_json AS snapshot_raw_json,
            snapshot.imported_at AS snapshot_imported_at,
            attempt.id AS attempt_id,
+           attempt.disposition AS attempt_disposition,
            attempt.import_record_id AS attempt_import_record_id,
            attempt.target_month AS attempt_target_month,
            attempt.subject AS attempt_subject,
@@ -318,7 +323,6 @@ function assertLinkedAcceptedAttempts(db, targetMonth, {
     FROM vcc_fin_op_system_snapshots snapshot
     LEFT JOIN vcc_fin_op_system_snapshot_attempts attempt
       ON attempt.existing_snapshot_id = snapshot.id
-     AND attempt.disposition = 'accepted'
     WHERE snapshot.target_month = ?
     ORDER BY snapshot.id, attempt.id
   `).iterate(targetMonth)) {
@@ -330,21 +334,43 @@ function assertLinkedAcceptedAttempts(db, targetMonth, {
       mismatchFound = false;
     }
     if (row.attempt_id === null) continue;
-    acceptedCount += 1;
-    if (!acceptedAttemptMatchesSnapshot(row, { requireMaterialized })) mismatchFound = true;
+    if (!linkedAttemptMaterializedFieldsMatch(row, { requireMaterialized })) {
+      mismatchFound = true;
+    }
+    if (row.attempt_disposition === 'accepted') {
+      acceptedCount += 1;
+      if (!acceptedAttemptMatchesSnapshot(row)) mismatchFound = true;
+    }
   }
   assertCurrentSnapshot();
 }
 
-function materializeSystemAudit(db, targetMonth) {
-  assertLinkedAcceptedAttempts(db, targetMonth, {
+function materializeSystemAudit(db, targetMonth, {
+  attemptBoundaryId,
+  transactionTimestamp
+}) {
+  assertLinkedSystemAttempts(db, targetMonth, {
     requireExactlyOne: false,
     requireMaterialized: false
   });
-  const beforeAttemptMaxId = countValue(db.prepare(`
+  const beforeAttemptMaxId = Number(attemptBoundaryId);
+  const currentAttemptMaxId = countValue(db.prepare(`
     SELECT COALESCE(MAX(id), 0) AS row_count
     FROM vcc_fin_op_system_snapshot_attempts
   `).get());
+  const unexpectedAttemptCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE id > ?
+  `).get(beforeAttemptMaxId));
+  if (
+    !Number.isSafeInteger(beforeAttemptMaxId)
+    || beforeAttemptMaxId < 0
+    || currentAttemptMaxId !== beforeAttemptMaxId
+    || unexpectedAttemptCount !== 0
+  ) {
+    throw scopeError('delete-invariant-failed', '系统财务OP审计在物化前出现未授权新增，删除已回滚');
+  }
   const beforeAttemptCount = countValue(db.prepare(`
     SELECT COUNT(*) AS row_count
     FROM vcc_fin_op_system_snapshot_attempts
@@ -354,13 +380,13 @@ function materializeSystemAudit(db, targetMonth) {
     INSERT INTO vcc_fin_op_system_snapshot_attempts (
       import_record_id, target_month, subject, balances_json, content_hash,
       source_file, sheet_name, source_row, raw_json,
-      disposition, existing_snapshot_id, message
+      disposition, existing_snapshot_id, message, created_at
     )
     SELECT snapshot.import_record_id, snapshot.target_month, snapshot.subject,
            snapshot.balances_json, snapshot.content_hash,
            snapshot.source_file, snapshot.sheet_name, snapshot.source_row,
            snapshot.raw_json, 'accepted', snapshot.id,
-           '历史快照删除前补录首次成功导入审计'
+           '历史快照删除前补录首次成功导入审计', ?
     FROM vcc_fin_op_system_snapshots snapshot
     WHERE snapshot.target_month = ?
       AND NOT EXISTS (
@@ -378,7 +404,7 @@ function materializeSystemAudit(db, targetMonth) {
           AND attempt.source_row = snapshot.source_row
           AND attempt.raw_json = snapshot.raw_json
       )
-  `).run(targetMonth).changes) || 0;
+  `).run(transactionTimestamp, targetMonth).changes) || 0;
   db.prepare(`
     UPDATE vcc_fin_op_system_snapshot_attempts AS audit
     SET existing_balances_json_snapshot = COALESCE(
@@ -420,7 +446,7 @@ function materializeSystemAudit(db, targetMonth) {
       SELECT id FROM vcc_fin_op_system_snapshots WHERE target_month = ?
     )
   `).run(targetMonth);
-  assertLinkedAcceptedAttempts(db, targetMonth, {
+  assertLinkedSystemAttempts(db, targetMonth, {
     requireExactlyOne: true,
     requireMaterialized: true
   });
@@ -453,22 +479,41 @@ function materializeSystemAudit(db, targetMonth) {
     SELECT COALESCE(MAX(id), 0) AS row_count
     FROM vcc_fin_op_system_snapshot_attempts
   `).get());
+  const newAttemptCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE id > ?
+  `).get(beforeAttemptMaxId));
+  const wrongBackfillTimeCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE id > ? AND created_at IS NOT ?
+  `).get(beforeAttemptMaxId, transactionTimestamp));
   const backfilledFingerprint = fingerprintQuery(db, {
     tableName: 'vcc_fin_op_system_snapshot_attempts:new-backfill',
     sql: `
       SELECT * FROM vcc_fin_op_system_snapshot_attempts
-      WHERE id > ? AND id <= ?
+      WHERE id > ?
       ORDER BY id
     `,
-    params: [beforeAttemptMaxId, afterAttemptMaxId]
+    params: [beforeAttemptMaxId]
   });
+  if (
+    newAttemptCount !== backfilledAttemptCount
+    || backfilledFingerprint.count !== backfilledAttemptCount
+    || wrongBackfillTimeCount !== 0
+  ) {
+    throw scopeError('delete-invariant-failed', '系统财务OP历史补录审计新增集不唯一，删除已回滚');
+  }
   return {
+    targetMonth,
     beforeAttemptCount,
     backfilledAttemptCount,
     afterAttemptCount,
     beforeAttemptMaxId,
     afterAttemptMaxId,
-    backfilledFingerprint
+    backfilledFingerprint,
+    transactionTimestamp
   };
 }
 
@@ -478,12 +523,32 @@ function assertSystemBackfillUnchanged(db, materialization) {
     tableName: 'vcc_fin_op_system_snapshot_attempts:new-backfill',
     sql: `
       SELECT * FROM vcc_fin_op_system_snapshot_attempts
-      WHERE id > ? AND id <= ?
+      WHERE id > ?
       ORDER BY id
     `,
-    params: [materialization.beforeAttemptMaxId, materialization.afterAttemptMaxId]
+    params: [materialization.beforeAttemptMaxId]
   });
-  if (stableStringify(after) !== stableStringify(materialization.backfilledFingerprint)) {
+  const finalAttemptMaxId = countValue(db.prepare(`
+    SELECT COALESCE(MAX(id), 0) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+  `).get());
+  const finalTargetAttemptCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE target_month = ?
+  `).get(materialization.targetMonth));
+  const wrongBackfillTimeCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE id > ? AND created_at IS NOT ?
+  `).get(materialization.beforeAttemptMaxId, materialization.transactionTimestamp));
+  if (
+    finalAttemptMaxId !== materialization.afterAttemptMaxId
+    || finalTargetAttemptCount !== materialization.afterAttemptCount
+    || after.count !== materialization.backfilledAttemptCount
+    || wrongBackfillTimeCount !== 0
+    || stableStringify(after) !== stableStringify(materialization.backfilledFingerprint)
+  ) {
     throw scopeError('delete-invariant-failed', '历史系统快照补录审计在删除时发生漂移，操作已回滚');
   }
 }
@@ -542,7 +607,7 @@ function assertDeletionPostconditions(
   const remainingRunCount = countValue(db.prepare(`
     SELECT COUNT(*) AS row_count
     FROM vcc_fin_op_runs
-    WHERE target_month = ? AND status = 'calculated'
+    WHERE target_month = ?
   `).get(state.targetMonth));
   const remainingDatasetCount = countValue(db.prepare(`
     SELECT COUNT(*) AS row_count
@@ -551,20 +616,22 @@ function assertDeletionPostconditions(
   `).get(state.targetMonth, state.sourceType));
   const expectedDatasetCount = state.datasetRevision === null ? 0 : 1;
   let remainingRunChildCount = 0;
-  if (invalidatedRunIds.length > 0) {
-    const placeholders = invalidatedRunIds.map(() => '?').join(', ');
-    for (const tableName of [
-      'vcc_fin_op_run_adjustments',
-      'vcc_fin_op_run_rows',
-      'vcc_fin_op_run_balances',
-      'vcc_fin_op_pending_summary_rows',
-      'vcc_fin_op_pending_currency_totals'
-    ]) {
-      remainingRunChildCount += countValue(db.prepare(`
-        SELECT COUNT(*) AS row_count FROM ${tableName}
-        WHERE run_id IN (${placeholders})
-      `).get(...invalidatedRunIds));
-    }
+  const originalRunFilter = invalidatedRunIds.length > 0
+    ? ` OR child.run_id IN (${invalidatedRunIds.map(() => '?').join(', ')})`
+    : '';
+  for (const tableName of [
+    'vcc_fin_op_run_adjustments',
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals'
+  ]) {
+    remainingRunChildCount += countValue(db.prepare(`
+      SELECT COUNT(*) AS row_count
+      FROM ${tableName} child
+      LEFT JOIN vcc_fin_op_runs run ON run.id = child.run_id
+      WHERE run.target_month = ?${originalRunFilter}
+    `).get(state.targetMonth, ...invalidatedRunIds));
   }
   if (
     deletedDataCount !== state.dataCount
@@ -579,7 +646,43 @@ function assertDeletionPostconditions(
   }
 }
 
-function markImportRecordsDeleted(db, state, deletionId) {
+function assertDatasetDeletionRecord(db, {
+  deletionId,
+  deletionBoundaryId,
+  state,
+  deletedDataCount,
+  invalidatedRunCount,
+  deletedAt
+}) {
+  const row = db.prepare(`
+    SELECT id, target_month, source_type, dataset_revision,
+           deleted_data_count, invalidated_run_count, deleted_at
+    FROM vcc_fin_op_dataset_deletions WHERE id = ?
+  `).get(deletionId);
+  const newDeletionCount = countValue(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_dataset_deletions
+    WHERE id > ?
+  `).get(deletionBoundaryId));
+  if (
+    !Number.isSafeInteger(Number(deletionId))
+    || Number(deletionId) <= Number(deletionBoundaryId)
+    || newDeletionCount !== 1
+    || !row
+    || Number(row.id) !== Number(deletionId)
+    || row.target_month !== state.targetMonth
+    || row.source_type !== state.sourceType
+    || (row.dataset_revision === null ? null : Number(row.dataset_revision))
+      !== state.datasetRevision
+    || Number(row.deleted_data_count) !== deletedDataCount
+    || Number(row.invalidated_run_count) !== invalidatedRunCount
+    || row.deleted_at !== deletedAt
+  ) {
+    throw scopeError('delete-invariant-failed', '数据集删除记录提交前校验失败，删除已回滚');
+  }
+}
+
+function markImportRecordsDeleted(db, state, deletionId, deletedAt) {
   const statusPlaceholders = DELETABLE_IMPORT_STATUSES.map(() => '?').join(', ');
   const scopeParams = [state.targetMonth, state.sourceType, ...DELETABLE_IMPORT_STATUSES];
   const expectedCount = countValue(db.prepare(`
@@ -594,17 +697,25 @@ function markImportRecordsDeleted(db, state, deletionId) {
   }
   const markedCount = Number(db.prepare(`
     UPDATE vcc_fin_op_import_records
-    SET dataset_deleted_at = datetime('now', 'localtime'),
+    SET dataset_deleted_at = ?,
         dataset_deletion_id = ?
     WHERE target_month = ? AND source_type = ?
       AND status IN (${statusPlaceholders})
       AND dataset_deleted_at IS NULL
-  `).run(deletionId, ...scopeParams).changes) || 0;
+  `).run(deletedAt, deletionId, ...scopeParams).changes) || 0;
   const linkedCount = countValue(db.prepare(`
     SELECT COUNT(*) AS row_count
     FROM vcc_fin_op_import_records
-    WHERE dataset_deletion_id = ? AND dataset_deleted_at IS NOT NULL
-  `).get(deletionId));
+    WHERE target_month = ? AND source_type = ?
+      AND status IN (${statusPlaceholders})
+      AND dataset_deletion_id = ? AND dataset_deleted_at IS ?
+  `).get(
+    state.targetMonth,
+    state.sourceType,
+    ...DELETABLE_IMPORT_STATUSES,
+    deletionId,
+    deletedAt
+  ));
   if (markedCount !== expectedCount || linkedCount !== expectedCount) {
     throw scopeError('delete-invariant-failed', '导入记录删除状态未能完整更新，删除已回滚');
   }
@@ -654,6 +765,7 @@ function deleteDataset({
     assertDeletable(initialState);
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
     const state = inspectDatasetDeletion(db, initialState.targetMonth, initialState.sourceType);
     assertDeletable(state);
     const operationState = buildOperationState(db, {
@@ -697,13 +809,17 @@ function deleteDataset({
       previewToken: currentPreviewToken,
       evidence: failureEvidence,
       appVersion,
-      buildSha
+      buildSha,
+      createdAt: transactionTimestamp
     });
     const invalidatedRunCount = deleteCalculatedRuns(db, state.targetMonth);
     let deletedDataCount;
     let systemAuditMaterialization = null;
     if (state.sourceType === SOURCE_TYPES.SYSTEM_OP) {
-      systemAuditMaterialization = materializeSystemAudit(db, state.targetMonth);
+      systemAuditMaterialization = materializeSystemAudit(db, state.targetMonth, {
+        attemptBoundaryId: preservedBefore.boundaries.systemAttemptMaxId,
+        transactionTimestamp
+      });
       deletedDataCount = Number(db.prepare(`
         DELETE FROM vcc_fin_op_system_snapshots WHERE target_month = ?
       `).run(state.targetMonth).changes) || 0;
@@ -730,34 +846,31 @@ function deleteDataset({
     const deletionResult = db.prepare(`
       INSERT INTO vcc_fin_op_dataset_deletions (
         target_month, source_type, dataset_revision,
-        deleted_data_count, invalidated_run_count
-      ) VALUES (?, ?, ?, ?, ?)
+        deleted_data_count, invalidated_run_count, deleted_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       state.targetMonth,
       state.sourceType,
       state.datasetRevision,
       deletedDataCount,
-      invalidatedRunCount
+      invalidatedRunCount,
+      transactionTimestamp
     );
     const deletionId = Number(deletionResult.lastInsertRowid);
-    const deletedImportRecordCount = markImportRecordsDeleted(db, state, deletionId);
-    const deletionRow = db.prepare(`
-      SELECT target_month, source_type, dataset_revision,
-             deleted_data_count, invalidated_run_count, deleted_at
-      FROM vcc_fin_op_dataset_deletions WHERE id = ?
-    `).get(deletionId);
-    if (
-      !deletionRow
-      || deletionRow.target_month !== state.targetMonth
-      || deletionRow.source_type !== state.sourceType
-      || (deletionRow.dataset_revision === null ? null : Number(deletionRow.dataset_revision))
-        !== state.datasetRevision
-      || Number(deletionRow.deleted_data_count) !== deletedDataCount
-      || Number(deletionRow.invalidated_run_count) !== invalidatedRunCount
-      || !deletionRow.deleted_at
-    ) {
-      throw scopeError('delete-invariant-failed', '数据集删除记录提交前校验失败，删除已回滚');
-    }
+    const deletedImportRecordCount = markImportRecordsDeleted(
+      db,
+      state,
+      deletionId,
+      transactionTimestamp
+    );
+    assertDatasetDeletionRecord(db, {
+      deletionId,
+      deletionBoundaryId: preservedBefore.boundaries.datasetDeletionMaxId,
+      state,
+      deletedDataCount,
+      invalidatedRunCount,
+      deletedAt: transactionTimestamp
+    });
     assertSuccessOperationAudit(db, {
       auditId,
       auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
@@ -767,6 +880,7 @@ function deleteDataset({
       evidence: failureEvidence,
       appVersion,
       buildSha,
+      createdAt: transactionTimestamp,
       code: 'delete-invariant-failed',
       message: '原表删除成功审计提交前校验失败，操作已回滚。'
     });
@@ -782,6 +896,23 @@ function deleteDataset({
       code: 'delete-invariant-failed',
       message: '删除前后保留数据或审计内容发生变化，操作已回滚。'
     });
+    assertDatasetDeletionRecord(db, {
+      deletionId,
+      deletionBoundaryId: preservedBefore.boundaries.datasetDeletionMaxId,
+      state,
+      deletedDataCount,
+      invalidatedRunCount,
+      deletedAt: transactionTimestamp
+    });
+    assertSystemBackfillUnchanged(db, systemAuditMaterialization);
+    assertDeletionPostconditions(
+      db,
+      state,
+      deletedDataCount,
+      invalidatedRunCount,
+      deletedDatasetCount,
+      calculatedRunIds
+    );
     db.exec('COMMIT');
     transactionStarted = false;
     return {

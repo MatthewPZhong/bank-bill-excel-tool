@@ -370,6 +370,18 @@ test('尾月解归档原子成功并保留基础结果、Pending 与调整证据
   const audits = auditRows(db, 'unarchive');
   assert.equal(audits.length, 1);
   assert.equal(audits[0].status, 'success');
+  const transactionTime = db.prepare(`
+    SELECT audit.created_at AS audit_created_at, run.updated_at AS run_updated_at
+    FROM vcc_fin_op_operation_audit audit
+    JOIN vcc_fin_op_runs run ON run.id = ?
+    WHERE audit.id = ?
+  `).get(runId, result.auditId);
+  assert.match(transactionTime.audit_created_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(transactionTime.run_updated_at, transactionTime.audit_created_at);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06' AND updated_at = ?
+  `).get(transactionTime.audit_created_at).n, REQUIRED_DATASET_TYPES.length);
   const evidence = JSON.parse(audits[0].evidence_json);
   assert.equal(evidence.runEvidence.adjustments.length, 1);
   assert.equal(evidence.before.archives[0].balancesJson.includes('USD'), true);
@@ -518,6 +530,7 @@ test('本次 success audit 的唯一行与关键序列化字段在 COMMIT 前逐
     { name: 'status', mutation: "UPDATE vcc_fin_op_operation_audit SET status = 'blocked' WHERE id = NEW.id" },
     { name: 'preview token', mutation: "UPDATE vcc_fin_op_operation_audit SET preview_token = 'tampered-token' WHERE id = NEW.id" },
     { name: 'evidence hash', mutation: "UPDATE vcc_fin_op_operation_audit SET evidence_json = '{}' WHERE id = NEW.id" },
+    { name: 'created at', mutation: "UPDATE vcc_fin_op_operation_audit SET created_at = '2000-01-01 00:00:00' WHERE id = NEW.id" },
     {
       name: 'extra audit row',
       mutation: `INSERT INTO vcc_fin_op_operation_audit (
@@ -563,6 +576,133 @@ test('本次 success audit 的唯一行与关键序列化字段在 COMMIT 前逐
       assert.deepEqual(restored.context, thrown.context, 'hash-only audit evidence 必须跨 worker 保真');
       assert.equal(db.prepare(`SELECT status FROM vcc_fin_op_runs WHERE id = ?`).get(runId).status, 'archived');
       assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+      assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
+    });
+  }
+});
+
+test('删除期初/结果的后置 trigger 新建 archived run 与子表时最终全状态断言回滚', async (t) => {
+  const cases = [
+    {
+      name: 'opening after audit',
+      operationType: 'delete_opening_initialization',
+      targetType: DELETE_TARGET_TYPES.OPENING,
+      triggerSql: `
+        CREATE TRIGGER recreate_archived_run_after_opening_audit
+        AFTER INSERT ON vcc_fin_op_operation_audit
+        WHEN NEW.operation_type = 'delete_opening_initialization' AND NEW.status = 'success'
+        BEGIN
+          INSERT INTO vcc_fin_op_runs (
+            target_month, status, input_revisions_json, input_fingerprint, archived_at
+          ) VALUES ('2026-06', 'archived', '{}', 'trigger-after-audit', '2000-01-01 00:00:00');
+          INSERT INTO vcc_fin_op_run_rows (
+            run_id, subject, row_kind, currency, amount
+          ) VALUES (last_insert_rowid(), 'TRIGGER', 'movement', 'USD', '1');
+        END
+      `
+    },
+    {
+      name: 'result after delete',
+      operationType: 'delete_unarchived_result',
+      targetType: DELETE_TARGET_TYPES.RESULT,
+      triggerSql: `
+        CREATE TRIGGER recreate_archived_run_after_result_delete
+        AFTER DELETE ON vcc_fin_op_runs
+        WHEN OLD.target_month = '2026-06'
+        BEGIN
+          INSERT INTO vcc_fin_op_runs (
+            target_month, status, input_revisions_json, input_fingerprint, archived_at
+          ) VALUES ('2026-06', 'archived', '{}', 'trigger-after-delete', '2000-01-01 00:00:00');
+          INSERT INTO vcc_fin_op_run_rows (
+            run_id, subject, row_kind, currency, amount
+          ) VALUES (last_insert_rowid(), 'TRIGGER', 'movement', 'USD', '1');
+        END
+      `
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = createDb(subtest);
+      seedOpening(db);
+      seedDatasets(db, '2026-06', 'unprocessed');
+      const runId = seedRun(db);
+      const preview = previewDataTargetDeletion(db, {
+        targetMonth: '2026-06',
+        targetType: fixture.targetType
+      }, { taskGeneration: 21 });
+      db.exec(fixture.triggerSql);
+
+      const execute = fixture.targetType === DELETE_TARGET_TYPES.OPENING
+        ? deleteOpeningInitialization
+        : deleteUnarchivedResult;
+      assert.throws(() => execute({
+        db,
+        targetMonth: '2026-06',
+        expectedPreviewToken: preview.previewToken,
+        taskGeneration: 21
+      }), (error) => error.code === 'delete-invariant-failed');
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?`).get(runId).n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_rows WHERE run_id = ?`).get(runId).n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances`).get().n, 1);
+      assert.deepEqual(auditRows(db, fixture.operationType).map((row) => row.status), ['rolled_back']);
+    });
+  }
+});
+
+test('解归档 run/dataset 事务时间被非空错值篡改时整体回滚', async (t) => {
+  const cases = [
+    {
+      name: 'run updated_at',
+      triggerSql: `
+        CREATE TRIGGER tamper_unarchive_run_time
+        AFTER UPDATE OF status ON vcc_fin_op_runs
+        WHEN NEW.status = 'calculated'
+        BEGIN
+          UPDATE vcc_fin_op_runs SET updated_at = '2000-01-01 00:00:00' WHERE id = NEW.id;
+        END
+      `
+    },
+    {
+      name: 'dataset updated_at',
+      triggerSql: `
+        CREATE TRIGGER tamper_unarchive_dataset_time
+        AFTER UPDATE OF data_status ON vcc_fin_op_datasets
+        WHEN NEW.data_status = 'unprocessed'
+        BEGIN
+          UPDATE vcc_fin_op_datasets
+          SET updated_at = '2000-01-01 00:00:00'
+          WHERE target_month = NEW.target_month AND dataset_type = NEW.dataset_type;
+        END
+      `
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = createDb(subtest);
+      const runId = seedRun(db, { status: 'archived' });
+      seedArchive(db, '2026-06', runId);
+      seedDatasets(db, '2026-06', 'archived', runId);
+      const preview = previewUnarchive(db, '2026-06', { taskGeneration: 22 });
+      db.exec(fixture.triggerSql);
+
+      assert.throws(() => unarchiveMonth({
+        db,
+        targetMonth: '2026-06',
+        expectedPreviewToken: preview.previewToken,
+        taskGeneration: 22
+      }), (error) => error.code === 'unarchive-invariant-failed');
+      const restoredRun = db.prepare(`
+        SELECT status, archived_at, updated_at FROM vcc_fin_op_runs WHERE id = ?
+      `).get(runId);
+      assert.equal(restoredRun.status, 'archived');
+      assert.equal(restoredRun.archived_at, '2026-08-01 11:00:00');
+      assert.equal(restoredRun.updated_at, '2026-08-01 10:00:00');
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS n FROM vcc_fin_op_datasets
+        WHERE data_status = 'archived' AND updated_at = '2026-08-01 10:00:00'
+      `).get().n, REQUIRED_DATASET_TYPES.length);
       assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
     });
   }
