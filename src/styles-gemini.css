@@ -237,6 +237,14 @@ button, select { font: inherit; }
 .export-balance-btn { background: #fff; }
 
 .danger-btn { background: var(--danger); color: #fff; }
+.danger-btn:disabled {
+  background: #f1d7d4;
+  color: #985f58;
+  border-color: #ead0cd;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
 
 .cell.right .primary-btn,
 .cell.right .secondary-btn,

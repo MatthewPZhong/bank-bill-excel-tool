@@ -167,7 +167,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(workflow, /Package version \$version is not a stable semantic version/);
     assert.match(workflow, /npm run release-check/);
     assert.match(workflow, /npm run prebuild:meta/);
-    assert.match(workflow, /electron-builder --win --publish never/);
+    assert.match(workflow, /electron-builder --win --x64 --publish never/);
     assert.match(workflow, /npm run stage:update-artifacts/);
     assert.match(workflow, /bank-bill-excel-tool-setup-\$version\.exe/);
     assert.match(workflow, /bank-bill-excel-tool-portable-\$version\.exe/);
@@ -175,7 +175,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(workflow, /latest\.yml SHA512 does not match/);
     assert.match(workflow, /gh release create[\s\S]*--latest/);
     assert.doesNotMatch(workflow, /--draft|--prerelease/);
-    assert.match(ordinaryBuild, /electron-builder --win --publish never/);
+    assert.match(ordinaryBuild, /electron-builder --win --x64 --publish never/);
     assert.match(ordinaryBuild, /dist\/bank-bill-excel-tool-portable-\*\.exe/);
     assert.match(runbook, /git tag -a vX\.Y\.Z -m "vX\.Y\.Z"/);
   });

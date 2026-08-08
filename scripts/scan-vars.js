@@ -267,7 +267,6 @@ for (const r of crossFile) {
   const top = r.refFiles.slice().sort((a,b)=>b.count-a.count).slice(0,3).map(x=>`${x.file}(${x.count})`).join(', ');
   md += `| \`${r.name}\` | ${r.fileSpan} | ${r.totalHits} | ${r.defFiles.length} | ${top} |\n`;
 }
-md += '\n';
 
 fs.mkdirSync(path.dirname(OUT_MD), { recursive: true });
 fs.writeFileSync(OUT_MD, md);

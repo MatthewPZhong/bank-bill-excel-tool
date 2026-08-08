@@ -3202,9 +3202,56 @@ function sendWindowState() {
   }
 }
 
+const VCC_PREVIEW_READINESS_TOKENS = new Set([
+  'vcc-financial-op-unarchive',
+  'vcc-financial-op-unarchive-year-switch',
+  'vcc-financial-op-unarchive-non-tail',
+  'vcc-financial-op-unarchive-executing'
+]);
+const VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000;
+
+async function waitForVccPreviewCaptureReady(webContents) {
+  return webContents.executeJavaScript(`
+    new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const timeoutMs = ${VCC_PREVIEW_READINESS_TIMEOUT_MS};
+      const fail = (message) => reject(new Error(message));
+      const poll = () => {
+        const readiness = window.__vccPreviewCaptureReady;
+        const elapsed = Date.now() - startedAt;
+        if (!readiness) {
+          if (elapsed >= timeoutMs) {
+            fail('VCC preview readiness was not registered before timeout');
+            return;
+          }
+          setTimeout(poll, 25);
+          return;
+        }
+        const remaining = Math.max(1, timeoutMs - elapsed);
+        const timer = setTimeout(
+          () => fail('VCC preview readiness did not settle before timeout'),
+          remaining
+        );
+        Promise.resolve(readiness).then((result) => {
+          clearTimeout(timer);
+          if (!result || result.status !== 'ready') {
+            fail('VCC preview readiness returned an invalid state');
+            return;
+          }
+          resolve(result);
+        }, (error) => {
+          clearTimeout(timer);
+          fail(error && error.message ? error.message : String(error));
+        });
+      };
+      poll();
+    })
+  `);
+}
+
 function createWindow() {
   const windowIcon = loadBundledIcon();
-  mainWindow = new BrowserWindow({
+  const windowOptions = {
     width: 1240,
     height: 860,
     minWidth: 1080,
@@ -3217,7 +3264,20 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
     }
-  });
+  };
+  if (process.env.APP_CAPTURE_PATH) {
+    const captureWidth = Number.parseInt(process.env.APP_CAPTURE_WINDOW_WIDTH || '', 10);
+    const captureHeight = Number.parseInt(process.env.APP_CAPTURE_WINDOW_HEIGHT || '', 10);
+    const captureZoomFactor = Number.parseFloat(process.env.APP_PREVIEW_ZOOM_FACTOR || '');
+    if (Number.isInteger(captureWidth)) windowOptions.width = Math.max(1080, captureWidth);
+    if (Number.isInteger(captureHeight)) windowOptions.height = Math.max(760, captureHeight);
+    if (Number.isFinite(captureZoomFactor)
+      && captureZoomFactor >= 0.5
+      && captureZoomFactor <= 2) {
+      windowOptions.webPreferences.zoomFactor = captureZoomFactor;
+    }
+  }
+  mainWindow = new BrowserWindow(windowOptions);
   markStartupMetric(STARTUP_METRIC_MARKS.windowCreated);
 
   if (windowIcon && process.platform !== 'darwin') {
@@ -3237,11 +3297,16 @@ function createWindow() {
 
     if (process.env.APP_CAPTURE_PATH) {
       setTimeout(async () => {
+        let captureExitCode = 0;
         try {
+          if (VCC_PREVIEW_READINESS_TOKENS.has(process.env.APP_PREVIEW_MODAL || '')) {
+            await waitForVccPreviewCaptureReady(mainWindow.webContents);
+          }
           const image = await mainWindow.webContents.capturePage();
           fs.mkdirSync(path.dirname(process.env.APP_CAPTURE_PATH), { recursive: true });
           fs.writeFileSync(process.env.APP_CAPTURE_PATH, image.toPNG());
         } catch (error) {
+          captureExitCode = 1;
           // v2.1.9 SR-log-1：startup capture（preview 截图）失败 → 日志上报
           appendActivityLogEntry({
             level: 'error',
@@ -3252,7 +3317,7 @@ function createWindow() {
             stack: error && error.stack ? error.stack : undefined
           });
         } finally {
-          app.quit();
+          app.exit(captureExitCode);
         }
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
@@ -3652,7 +3717,7 @@ function registerAppHandlers() {
       accountMappingCount: database.countAllAccountMappings(),
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
-      previewModal: process.env.APP_PREVIEW_MODAL || '',
+      previewModal: process.env.APP_CAPTURE_PATH ? (process.env.APP_PREVIEW_MODAL || '') : '',
       // v2.0.0-beta.2 F1 / v2.1.15 W4：UI 风格恒为 'Clear'（General 已弃用）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
       // 上次使用模块；renderer 启动时恢复

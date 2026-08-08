@@ -128,6 +128,28 @@ const RENDERER_STARTUP_MARKS = Object.freeze({
   eventsBindDone: 'renderer-events-bind-done',
   initComplete: 'renderer-init-complete'
 });
+
+function registerVccPreviewCaptureReadiness(previewTask) {
+  if (window.desktopApi.previewCapture !== true) return false;
+  const afterPaint = () => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  const readiness = previewTask && typeof previewTask.then === 'function'
+    ? Promise.resolve(previewTask).then(async () => {
+      await afterPaint();
+      return { status: 'ready' };
+    })
+    : Promise.reject(new Error('VCC preview hook did not return a readiness task'));
+  readiness.catch(() => {});
+  Object.defineProperty(window, '__vccPreviewCaptureReady', {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: readiness
+  });
+  return true;
+}
+
 const rendererStartupProfiler = {
   startedAt: performance.now(),
   marks: new Map()
@@ -8644,6 +8666,50 @@ async function applyFullInfo(info) {
     setTimeout(() => {
       setCurrentModule(MODULES.vccFinancialOp.id);
       window.__vccFinancialOpPreview?.openOpening();
+    }, 120);
+  } else if ([
+    'vcc-financial-op-data-manager-no-archive',
+    'vcc-financial-op-delete-first-month',
+    'vcc-financial-op-delete-first-month-archived',
+    'vcc-financial-op-delete-result',
+    'vcc-financial-op-unarchive',
+    'vcc-financial-op-unarchive-year-switch',
+    'vcc-financial-op-unarchive-non-tail',
+    'vcc-financial-op-unarchive-executing',
+    'vcc-financial-op-result-export-month-empty',
+    'vcc-financial-op-result-single-adjustment',
+    'vcc-financial-op-result-multiple-adjustments',
+    'vcc-financial-op-result-archived',
+    'vcc-financial-op-result-zoom-125',
+    'vcc-financial-op-result-zoom-150',
+    'vcc-financial-op-result-min-window',
+    'vcc-financial-op-run-preflight-error'
+  ].includes(info.previewModal)) {
+    const previewMethodByToken = {
+      'vcc-financial-op-data-manager-no-archive': 'openDataManagerNoArchive',
+      'vcc-financial-op-delete-first-month': 'openDeleteFirstMonth',
+      'vcc-financial-op-delete-first-month-archived': 'openDeleteFirstMonthArchived',
+      'vcc-financial-op-delete-result': 'openDeleteResult',
+      'vcc-financial-op-unarchive': 'openUnarchive',
+      'vcc-financial-op-unarchive-year-switch': 'openUnarchiveYearSwitch',
+      'vcc-financial-op-unarchive-non-tail': 'openUnarchiveNonTail',
+      'vcc-financial-op-unarchive-executing': 'openUnarchiveExecuting',
+      'vcc-financial-op-result-export-month-empty': 'openResultExportMonthEmpty',
+      'vcc-financial-op-result-single-adjustment': 'openResultSingleAdjustment',
+      'vcc-financial-op-result-multiple-adjustments': 'openResultMultipleAdjustments',
+      'vcc-financial-op-result-archived': 'openResultArchived',
+      'vcc-financial-op-result-zoom-125': 'openResult',
+      'vcc-financial-op-result-zoom-150': 'openResult',
+      'vcc-financial-op-result-min-window': 'openResult',
+      'vcc-financial-op-run-preflight-error': 'openRunPreflightError'
+    };
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      const previewMethod = previewMethodByToken[info.previewModal];
+      const previewTask = window.__vccFinancialOpPreview?.[previewMethod]?.();
+      if (info.previewModal.startsWith('vcc-financial-op-unarchive')) {
+        registerVccPreviewCaptureReadiness(previewTask);
+      }
     }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);

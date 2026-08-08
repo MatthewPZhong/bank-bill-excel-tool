@@ -48,3 +48,36 @@
 | 4 | PR 4：完整结果确认与调整交互 | rowKey 防伪、核对 revision、UI 与后端一致 | renderer contract + service/DB 测试 | 不影响基础导入，可关闭修改入口 | feature UI 回滚 |
 | 5 | PR 5：语义模板、着色和月份导出 | 输出可审计；样式来自模板；月份不串 | 真实模板 round-trip、fill、调整行、月份测试 | 阻塞结果导出 | 导出 fail-closed，不回退旧模板 |
 | 6 | PR 6：预览、文档、版本与全量发布门禁 | 用户可见契约、重要变量、回归完整 | release-check、check-vars、Windows CI、人工清单 | 不得发布 3.1.8 | 保持全部 PR 草稿 |
+
+## PR6 收口状态（2026-08-08）
+
+### 已完成
+
+- 版本已提升到 `3.1.8`；CHANGELOG、版本历史和用户手册统一保持“Unreleased / 待发布 / 发布候选”，没有宣称已发布或已通过资金人工验收。
+- 锁定规范已纳入 `changes/3.1.8/spec.md`；保留 Downloads 原文件 SHA-256，并只把 §10.4 修正为仓库真实文档路径。
+- VCC 26 张合成预览已生成并视觉复核，覆盖关键业务状态、100%/125%/150% 和最小窗口；capture hook、窗口参数和假数据均与生产路径隔离，失败或截断 PNG 不会替换旧证据。
+- Windows 本地、PR 和 Release 构建命令统一锁定 x64；任意 PR 配置为先跑完整发布检查，再构建 installer/portable 并执行分发守卫；守卫新增两份 VCC 模板和包内版本校验。
+- `npm run scan:vars` 已刷新 v3.1.8 报告：`src/` 293 文件、3688 个顶层名字；`npm run check:vars` 仅命中 Runtime-state 的 `MODULES`、`app`、`dialog`、`setStatus`、`state`。`state` 命中来自 preview/既有引用，本轮未改 `src/renderer.js` 全局 state 结构，capture 状态只在隔离的 Promise 和局部 DOM 快照内流转；其余命中也已按 capture-only 或局部变量复核，无 Critical/Risk-sensitive 命中。
+- 最终对外术语修复后的单次 `npm run release-check` 通过：lint、smoke、unit `4695/4695`，integration `47/47` 脚本、`2186/2186` 断言全部 PASS；其中 VCC 调整归档 `55/55`、破坏性状态链 `52/52`、历史模板导出 `28/28`。实施记录只在此后补写本组实跑计数，不再改生产代码或对外文档。
+- 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
+
+### Reviewer 退回项复核（2026-08-08）
+
+- 已用文件时间线确认：旧“切年后有后续依赖，但删除按钮仍像可点”截图早于 disabled 样式和后续 renderer 改动；生产 picker 的异步状态和后台尾月保护未失效，问题是陈旧截图证据及 capture 缺少异步完成信号。
+- 已为 4 个解归档截图状态增加 capture-only 完成信号和 8 秒超时；必须等目标年/月、preview response、真实 `button.disabled` 和状态文案稳定后才允许截图。缺 hook/缺 method/无 Promise/拒绝/悬挂均以非 0 失败，不得用旧 PNG 冒充。
+- 已增加行为测试：实际触发切年和非尾月切换，异步完成后直接断言确认按钮 `disabled === true`；执行中同样断言真实 DOM 禁用状态。
+- 已重新生成 26/26 张 VCC PNG 并全部解码校验：25 张 2480×1720，最小窗口图 2160×1520。人工检查切年、非尾月、执行中和结果页，禁用按钮均为灰色且不可点，结果页显示“结果版本”。
+- 用户手册已明确：较新“已归档”和“已计算”均会阻断更早月；须从最新月开始逐月“解归档→删除全部未归档结果”，修订目标月后再按时间正序重跑、归档；删除不会清理源数据、导入审计或固定首月。
+- 公开的 v3.1.8 CHANGELOG/版本历史/手册当前候选切片已改为用户语言，不再使用“金标准/语义模板”，改为“正式模板/结果模板”；Windows 统一表述为“64 位 Windows 安装版和便携版”。VCC 界面不再展示英文 `revision`，内部字段和错误码保持不变；release-docs 对三份当前版本切片增加了术语负断言。
+- 最终 `scan:vars/check:vars` 扫描 `src/` 293 文件、3688 个顶层名字；仅命中 Runtime-state 的 `MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical/Risk-sensitive。后两者及 `dialog` 为 VCC 局部 DOM/状态，`MODULES` 仅用既有 ID 做 capture 路由，`app` 仅改变 capture 失败的退出码。
+- 最终 intended 范围为 56 个文件：33 个 tracked + 23 个 intended untracked（1 份锁定 spec、18 张新 VCC PNG、4 个新单测）。`scripts/scan-vars.js` 的 1 行删除是 PR6 为了消除统计 Markdown 末尾多余空行、保证刷新结果稳定的修复，纳入 tracked 范围。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件不在本迭代范围，未被更改或纳入。
+
+### 仍阻塞 v3.1.8 正式发布
+
+- 在 Windows CI/目标机实际产出并检查 x64 installer 与 portable，确认两份 VCC 模板存在且可读。
+- 用 Windows Excel/WPS 人工检查字体、正常/异常颜色、动态行、长调整原因换行、M/N 可见性及默认 A:L 打印区；需要纸质调整证据时人工扩展打印区。
+- 在受保护解归档/删除任务进入关键写入后触发关窗，确认应用等待事务安全收口且不强制终止后台任务。
+- 对生产数据库副本做只读扫描，核对 Pending 46/48 列、归档主体/九币种余额及五类数据状态；异常只阻断并人工处理，不自动修复。
+- 由财务人员用真实月份逐主体、逐九币种核对基础值、调整值、生效余额、差异、颜色、归档及连续两月期初衔接，并记录签字结论。
+
+结论：PR6 的代码、预览、版本、文档和自动化收口已完成；上述人工门禁完成前，v3.1.8 仍是发布候选，不得发布。

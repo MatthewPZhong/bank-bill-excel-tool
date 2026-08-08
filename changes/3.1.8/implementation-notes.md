@@ -2,7 +2,7 @@
 
 ## Baseline
 
-- Goal/spec: `/Users/pzhong/Downloads/v3.1.8-codex-spec-final.md`，SHA-256 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；Q01～Q12 全部锁定。
+- Goal/spec source: `/Users/pzhong/Downloads/v3.1.8-codex-spec-final.md`，原始 SHA-256 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；仓库内最终规范为 `changes/3.1.8/spec.md`；Q01～Q12 全部锁定。
 - Initial plan: 按 Spec Phase 0～6 建立六个堆叠草稿 PR，分别覆盖输入契约、状态模型、破坏性事务、调整 UI、模板导出与发布收口。
 - Done when: `changes/3.1.8/preflight.md` 的 Done when 与 Spec §15 同时满足；人工财务核对门禁保持开启。
 
@@ -16,12 +16,13 @@
 | 两份已在工作区且哈希匹配的模板视为用户提供的本迭代资产 | 哈希与 Spec §2.3/§2.4 精确一致 | 重新生成或肉眼复制模板 | 保留用户原始工作簿字节，测试不得改写 golden |
 | 极老残缺审计表为空时允许补列；若已有 Pending 行却缺少 `raw_json` 等重算证据则失败关闭 | 无原始 46/48 列载荷无法证明新 hash，静默跳过会制造同键异内容 | 猜测列序或沿用旧 hash | 空旧库兼容升级；有事实但无血缘的旧库必须人工处理 |
 | GitHub 认证问题不阻塞本地实现 | `gh` 已安装但 token 失效；代码和测试均可离线推进 | 等待登录后才开始编码 | push/PR 创建仍明确阻塞，不能声称已发布 |
+| 将锁定规范纳入仓库，并只反向同步 §10.4 的真实发布文档路径 | Downloads 原文件不是可随代码评审的仓库证据，且其中 `VERSION_FEATURE_HISTORY.md`、`USER_GUIDE.html` 与仓库真实位置不符 | 继续仅引用 Downloads；照抄错误路径 | `changes/3.1.8/spec.md` 保留原规范内容，只将路径修正为 `docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`；原始文件哈希单独留证 |
 | PR 2 将首月事实诊断拆到无迁移依赖的 `state-model.js` | 运行时 repository 不应反向依赖 migrations；迁移和运行门禁必须共享同一严格月份诊断 | repository 直接导入 migrations；复制两套判断 | 避免依赖环和迁移副作用，旧库诊断与运行门禁口径一致 |
 | 多期初月份/畸形月份只记录幂等诊断并阻断 VCC 功能，不让 `AppDatabase.init()` 整体失败 | Spec 要求不自动删改资金事实；桌面应用仍需启动供诊断和其他模块使用 | 启动抛错；自动选择最早月份并覆盖 | 资金事实原样保留；preflight/calculate/initialize fail-closed |
 | 首次人工期初写入和 `first_month` claim 放在同一 `BEGIN IMMEDIATE` 事务 | 首月是全局永久事实，不能出现余额已写但首月为空或反向状态 | 先写余额后单独更新状态；只靠 UI 串行 | claim 失败时余额与状态同时回滚；同月同内容重放幂等 |
 | 首月期初提交完整性只检查 `subjects - opening.balances` 的真正缺失主体 | PR #125 review 证明 preflight/renderer 只向用户收集 `missingOpeningSubjects`；要求重复提交已初始化主体会阻断同月新增主体 | 每次提交全部主体；跳过完整性检查 | 已初始化主体无需重复提交；主动重放已初始化主体仍按 content hash 幂等跳过或拒绝改写，真正漏交的新主体仍整事务回滚；属于既定契约缺陷修复，不改 Spec |
 | `rowKey` 固定为 `v1:sha256(JSON.stringify([row_kind, subject, source_type, category_major || '', category_minor || '']))` | 调整坐标必须跨币种稳定，又不能受 run/id/金额/展示顺序影响 | 使用数据库行 id；把币种或金额纳入 key | 同一逻辑行不同币种共享 rowKey，以 `rowKey × currency` 构成调整坐标 |
-| PR 2 的 `getEffectiveRunResult()` 仅做只读统一重算，并严格核对 sequence/revision/基础公式/坐标 | 基础 `run_rows`、`run_balances` 必须不可变；损坏的调整账本不得静默参与归档 | 就地覆盖基础表；遇到损坏记录跳过 | 后续 PR 4 复用同一 reader 接入调整写入与归档；任何事实不一致均结构化失败 |
+| PR 2 的 `getEffectiveRunResult()` 仅做只读统一重算，并严格核对 sequence/revision/基础公式/坐标 | 基础 `run_rows`、`run_balances` 必须不可变；损坏的调整账本不得静默参与归档 | 就地覆盖基础表；遇到损坏记录跳过 | PR 4 已复用同一 reader 接入调整写入与归档；任何事实不一致均结构化失败 |
 | PR 3 的归档枚举和解归档均复用同一套严格一致性检查，并逐主体逐九币种比对含调整的生效余额 | 单看 `run.status` 会把缺 archive、错 run、混合 dataset 或余额漂移暴露为可操作月份 | 宽松枚举后在提交时尽力修复；只比基础 calculated balance | 损坏月份不进入普通枚举；直接 preview 返回 `archive-state-inconsistent` 并失败关闭 |
 | 所有 VCC worker/直接任务共享一个全局任务租约，任务代次仅在释放租约时递增 | preview token 需要同时防数据库状态漂移和预览后插队任务；导出、归档、期初初始化、异常处理等直接写也不能旁路 | 只互斥 worker；获取租约即递增代次 | preview 与提交按 generation 二次门禁；任何在先任务完成后旧预览失效 |
 | 破坏性 worker 在 `openDb()` 和 migration 之前先完成 `critical-ready → 父进程保护 → critical-ack` 握手 | 打开数据库本身可能产生 migration 写事务；父进程必须在允许写入前承诺不 terminate | 事务开始后再通知；超时一律 terminate | 仅事务前任务可协作取消/超时终止；已保护或状态未知任务只能等待收口 |
@@ -41,6 +42,10 @@
 | picker 的执行失败与随后月份刷新失败分开保留；刷新返回结构化 `{ok,error}`，空列表/不可执行是成功刷新 | OS 保存取消或失败后需要保留弹框重试，同时列表可能变化；吞掉刷新错误会留下禁用按钮且无解释 | 任一错误关闭弹框；刷新 catch 内吞；把不可执行当刷新异常 | 原月份仍在时显示原错误；被移除时自动切到新月份并要求确认重试；刷新自身失败追加说明且不覆盖原错 |
 | PR 5 review 后将导出失败响应的 `detailLines` 过滤后保留到 renderer Error，并由主状态与 picker 统一显示 `message + 明细` | 模板缺失/漂移错误虽经 IPC 携带实际模板路径，旧 `responseFailure()` 只保留 message/code，用户无法定位真实文件；reviewer P2 复现 | 仅写日志；展示 error.stack/context；把路径拼进固定 message | 只展示显式结构化 detailLines，不泄漏无关 stack；模板实际路径在失败弹框内可见且仍可重试 |
 | 调整原因行高按 N 列实际宽度与 Unicode 显示宽度确定性估算，仅 adjustment 行覆盖模板行高，并限制为 Excel 最大 `409.5pt` | 500 字调整原因虽启用 wrapText，但复制 15/17pt 固定行高会裁切；reviewer P2 复现 | 依赖 Excel 自动适配；扩大全部业务行；固定一个大行高 | ASCII 按 1、其他 Unicode 按 2 估算换行；validator 复用同一 helper；长文本可能触顶但单元格数据完整，基础行保持模板高度 |
+| 用户文档明确披露 M/N 可见但默认打印区保持 A:L | 调整值与原因必须在电子表格中可见且可审计，但用户提供模板锁定的默认打印宽度不包含 M/N | 静默扩大打印区；不解释纸质记录缺少调整列 | 保持模板打印口径；需要纸质调整证据时由用户在 Excel/WPS 手动扩展打印区，并列入 Windows 人工门禁 |
+| 合成预览入口只在主进程确认 `APP_CAPTURE_PATH` 后向 preload 暴露只读 `previewCapture=true`，VCC 假数据 hook 仅在该标志为真时挂载 | 仅凭 `APP_PREVIEW_MODAL` 或生产 renderer 全局 hook 会形成伪造业务状态的旁路 | 生产环境始终挂载 hook；只用环境中的 modal token 作为门禁 | 正常启动时 `window.__vccFinancialOpPreview` 不存在；capture hook 冻结且不可写，preview modal/zoom/窗口尺寸均受同一 capture gate 约束 |
+| 预览 PNG 先写同目录本轮 staging，Electron 非 0 退出或 PNG 结构不完整时保留旧图；仅验证通过后原子 rename | 直接写正式截图会在 capture 失败时留下截断图，或让旧图冒充本轮成功证据 | 启动前删除旧图；只校验 8 字节签名 | 校验 signature、13 字节 IHDR、正尺寸、非空完整 IDAT、IEND 且恰好 EOF；失败返回非 0，旧证据不动 |
+| Windows PR 构建对任意目标分支执行完整发布检查，并实际构建 x64 installer/portable 后运行分发守卫 | 旧 workflow 跳过 PR build，且架构未锁定时可能检查陈旧 `win-unpacked` | 仅做静态 workflow lint；继续依赖本机旧 dist | 本地/PR/Release 构建统一 `--x64`；分发守卫校验两份 VCC 金标准模板及包内版本，目标平台产物仍须 CI 与人工打开确认 |
 
 ## Assumptions
 
@@ -50,7 +55,7 @@
 | 后续 PR 可暂时保持草稿和堆叠 base | 用户要求“按 Spec 里的多 PR 推进”且未要求每个立即合入 main | GitHub 展示/合并顺序需维护 | PR body 标明前序；前序合并后再重设 base |
 | 旧结果行的 `category_major` 可能为空，不能在 PR 2 reader 中新增非空限制 | 当前 recharge/fee 取 `business_sub_type || ''`，channel 取 `mid || ''`，现有持久化契约允许空字符串 | 若生产事实始终非空则校验可更严格 | 继续将空值规范编码进 rowKey；未知/错配 `source_type` 仍严格拒绝 |
 | 余额表存在“主体有九币种余额但本月无基础发生额行”是合法延续场景 | 上月归档主体本月无发生额仍必须进入结果与系统余额核对 | 若来源链路改变则可能掩盖孤儿余额 | 允许 balance-only 主体；反向要求每个基础行 subject+currency 必须存在 balance |
-| 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | PR 4 若引入不同 revision 语义会触发 reader 门禁 | PR 4 写入必须在单事务内追加 sequence=N+1 并 revision+1 |
+| 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | 若后续引入不同 revision 语义会触发 reader 门禁 | PR 4 已按单事务追加 sequence=N+1 并 revision+1；后续仍须维持该契约 |
 | 严格 `YYYY-MM` 字符串可直接用于跨月先后比较 | 月份入口统一规范化且固定两位月份 | 非规范历史月份会被排除普通枚举并在直接 preview 失败 | 保持 `normalizeOperationMonth()` 为所有破坏性入口前置门禁 |
 | 删除首月期初允许五类 dataset 中部分已被用户删除，但所有仍存在的 dataset 必须处于未归档状态 | 用户可能先删除某一原表；期初清理不应要求伪造缺失 dataset | 强制五表必须齐全；缺表即阻断 | 只删除期初和同月 calculated runs；first_month、剩余 dataset、源事实和导入审计保持不变 |
 | `assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx` 在 PR 5 生命周期内是不可变 golden，SHA-256 固定为 `f920fd2161156314a0d523eacb7cf7d11f7002b7781fe9cca01b298edfa4a1f4` | 用户提供文件与 Spec 锁定 hash 一致 | 文件变化会使所有结果导出失败关闭 | 单测每次从磁盘重新 stat/read/hash；任何更新必须先由 PM/财务人员更新契约和验收基线，不能自动接受 |
@@ -60,7 +65,7 @@
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | Spec 建议六个提交 | 六个堆叠 PR，每个 PR 内可含少量聚焦提交 | 用户明确要求多 PR 推进 | 评审与回滚粒度更细，功能口径不变 | 是（本实施记录） |
-| 共享归档月份选择器在 PR 3 先服务解归档，但历史结果按月份导出仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | 不影响 PR 3 解归档/删除验收；PR 5 必须接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
+| 共享归档月份选择器在 PR 3 先服务解归档，历史结果按月份导出当时仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | PR 5 已接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
 | Spec 示例以模板业务末行为静态参考；实际导出按语义行计划重建结果表并将打印区动态收口为 `A1:L<实际末行>` | 调整行数量与主体业务分类会改变结果末行；固定 A1:L45 会留下样例行或截断新增行 | 保留模板原 45 行并原位覆盖；固定打印区 | M/N 仍保留为可见审计列但不进入模板锁定打印宽度；动态合并/打印区由 staged validator 回读验证 | 无需（Spec 已要求动态行与模板打印宽度） |
 
 ## Evidence
@@ -105,20 +110,38 @@
 | PR 5 模板/金额/renderer 定向单测 | result-template contract、共享判零 helper、writer、service、破坏性 resolver 与 renderer picker 覆盖模板 SHA/锚点/缓存、九币种金额、样式故障、血缘负向矩阵、原子不覆盖、targetMonth 租约、空态和失败重试 | 模板漂移、串月导出、浮点判零、样例泄漏、血缘孤儿、刷新错误吞没 |
 | PR 5 ExcelJS defined name 探针 | 金标准 rowKey 标记经 write→reopen 后仍精确引用 `'财务OP校验结果表'!$M$2`，可逆还原完整 `v1:64hex + JPY` | 证明当前 ExcelJS 版本可承载非业务可见列的严格调整血缘；validator 仍对异常引用失败关闭 |
 | PR 5 真实 SQLite + 金标准模板历史导出链 | `scripts/integration/vcc-financial-op-historical-template-export.js` 直接执行 `28/28 PASS` | 两个一致归档月份倒序枚举；显式选择旧月严格导出旧 run；调整 M/N、effective 汇总、动态 printArea 和 named-range 写后回读均正确，未回退 latest；latest 真实 worker 解归档后立即从枚举消失并以 `no-archived-results` 禁止再次导出；正式 service 重新归档后恢复为 latest 候选和严格 resolver |
-| PR 5 可重复 UI 预览入口 | `preview:vcc-financial-op-result-export-month` 使用静态 2026/2025 两年归档月份并复用蓝色【导出】picker；已串入 `preview:vcc-financial-op` | PR 6 可在不依赖本机数据库的情况下生成最终历史月份导出截图；本 PR 不提交截图资产 |
+| PR 5 可重复 UI 预览入口 | `preview:vcc-financial-op-result-export-month` 使用静态 2026/2025 两年归档月份并复用蓝色【导出】picker；已串入 `preview:vcc-financial-op` | PR 6 已在不依赖本机数据库的情况下生成并纳入最终历史月份导出截图资产 |
 | PR 5 reviewer P2 定向回归 | renderer + writer 两文件 `36/36 PASS`；PR 5 六文件组合 `70/70 PASS`；历史月份真实 SQLite + 金标准模板链 `28/28 PASS`。500 字 Unicode 原因 write→reopen 后 adjustment 行为 `409.5pt`、wrapText 保留、相邻基础行仍为模板 `15pt`；结构化模板错误测试确认 code/message/detailLines 保留、实际路径可见且 stack 不展示 | 模板错误可观测性、长调整原因裁切、基础行样式回归、staged validator 同口径，以及历史月份导出/解归档/重归档链无回归 |
 | PR 5 reviewer P2 修复后最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4673/4673 PASS`（297 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中 VCC 历史月份模板导出链 `28/28 PASS` | 同一次命令覆盖静态检查、基础 smoke、全仓单测和全部集成链；证据对应最终冻结代码 |
 | PR 5 最终 `npm run check:vars` 与人工 review | 仅命中 `MODULES`、`elements`、`setStatus`、`state`；`MODULES` 只新增 preview route，后三者均为 VCC renderer 局部变量；无 Critical/Risk-sensitive 命中 | 已复核导出可用性、错误状态展示和模块路由，未发现重要变量旁路或全局状态污染 |
+| PR 6 锁定规范入库 | Downloads 原规范 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；仓库 `changes/3.1.8/spec.md` 修正 §10.4 两处真实路径后 SHA-256 为 `018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` | 原始规范身份、反向同步路径及评审基线可同时追溯；没有改 Q01～Q12 或业务契约 |
+| PR 6 版本与发布文档契约 | `package.json`、`package-lock.json` 均为 `3.1.8`；CHANGELOG 标记 `Unreleased`、版本历史标记“待发布”、用户手册标记“发布候选”；release-docs `3/3 PASS` | 防止未完成人工门禁时误写成已发布；锁定 46 列、原始数值、五表预检、调整不覆盖基础行、尾月解归档、历史导出、M/N 与 A:L 披露及旧口径负断言 |
+| PR 6 VCC Electron 预览矩阵 | 26 张 PNG 全量生成并视觉复核，覆盖主面板、缺表、期初、数据管理、首月/结果删除、尾月/非尾月/执行中解归档、历史导出空态、完整结果、单/多调整、已归档、100%/125%/150% 与最小窗口 | 关键状态均可重复生成；面板版本为 3.1.8，危险 disabled 按钮有明确静默视觉；预览隔离与旧图防冒充由静态/行为测试锁定 |
+| PR 6 preview/dist/Windows 定向回归 | VCC preview、renderer、在线升级、Windows 构建及 check-dist 组合 `45/45 PASS`；release-docs `3/3 PASS`；真实 asar fixture 覆盖模板缺失、旧版本、version 缺失/空值 | capture-only hook、PNG 完整性、x64 构建、任意 PR 门禁、模板/版本分发守卫和发布候选文档均有自动化证据 |
+| PR 6 asar fixture 并发稳定性修复 | 首轮全量 unit 为 `4691/4692`，定位 `@electron/asar` 3.x 在调用 destination stream `end()` 后即 resolve；fixture 增加等待 stream `finish`，定向 `6/6 PASS`，后续两次全量 unit 均 `4692/4692 PASS` | 消除高负载下读取未完全 flush 的测试包；没有放宽分发守卫或生产打包契约 |
+| PR 6 最终 `npm run scan:vars` / `npm run check:vars` | 扫描 v3.1.8、`src/` 293 文件、3688 个顶层名字；命中 Runtime-state：`MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical/Risk-sensitive | `MODULES` 只使用既有 VCC ID 做 capture 路由；`app` 仅让 capture 失败以非 0 退出；`dialog` 是 VCC renderer 局部 DOM；`setStatus` 只生成 capture 的空归档/缺表状态；`state` 命中来自 preview/既有引用，本轮未修改 `src/renderer.js` 全局 state 结构，capture 状态仅保存为隔离的 Promise/DOM 快照；生产模块枚举、Electron dialog、状态栏行为和启动/退出钩子未改变 |
+| PR 6 本机陈旧 dist 负向探针 | `npm run check:dist` 正确拒绝本机 3.0.13 `win-unpacked`：缺两份 VCC 模板且包内版本 `3.0.13 != 3.1.8` | 证明旧目录不能冒充当前构建；这不是 3.1.8 Windows 产物成功证据，不能替代目标平台构建与打开验证 |
+| PR 6 冻结工作树最终单次 `npm run release-check` | 最终对外术语修复后重跑：lint PASS；smoke PASS；unit `4695/4695 PASS`（301 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中调整归档 `55/55`、破坏性状态链 `52/52`、历史模板导出 `28/28` | 同一次命令覆盖静态检查、其他模块 smoke、全仓单测和全部集成链；证据对应最终生产代码与用户行为，不替代 Windows/Excel/WPS、关窗时序或真实月份资金人工验收 |
+| PR 6 资金/通用 blindspot 收口 | 复核入口旁路、capture 生命周期、分发架构/陈旧产物、模板路径、状态部分失败、主键血缘、金额币种、跨月边界、幂等和行/余额守恒 | 未发现新增自动改写资金事实或生产预览旁路；剩余项全部保留为人工发布门禁，不把自动化结果升级为财务签字 |
+| PR 6 reviewer P1 预览根因定位 | 旧切年 PNG 修改时间为 20:33:11，早于 disabled CSS 的 20:35:27；非尾月 PNG 在 20:35:56 才生成，renderer 又在 21:13 后继续改动。旧 capture 只等固定延时，没有等年/月切换后的异步 preview 完成 | 退回图中“有后续依赖但危险按钮仍像可点”是陈旧截图证据与缺失 capture 完成信号的组合问题，不是生产 picker 或后台尾月保护失效 |
+| PR 6 reviewer P1 capture 完成信号 | 解归档 4 个截图 token 的 hook 必须返回 Promise；年/月切换后等 preview response、目标选项、真实 `button.disabled` 和状态文案稳定，再等两帧绘制；主进程 8 秒超时且失败非 0 退出 | 等待只由 `APP_CAPTURE_PATH` 激活；缺 hook、缺 method、无返回值、Promise 拒绝/悬挂或错误状态都不得用旧 PNG 冒充本轮证据，生产弹框和后台 token/generation 保护不变 |
+| PR 6 reviewer P1 行为回归 | 伪 DOM 行为测试实际触发年份/月份 `change` 事件，等异步 preview 结束后断言切年、非尾月与执行中的真实确认按钮均为 `disabled === true`；缺 hook/缺 method 负向用例断言 readiness 拒绝 | 回归检查 DOM 最终状态，不仅匹配源码字符串；后台依赖保护仍由原 service/integration 测试覆盖 |
+| PR 6 reviewer P1 预览证据冻结 | 本轮一次全量生成 26/26 张 VCC PNG，全部修改时间晚于本轮生成起点；`sips` 26/26 解码成功，25 张为 2480×1720，最小窗口图为 2160×1520 | 人工复核切年为 2025-12/灰色禁用删除、非尾月 2026-05/灰色禁用删除、执行中禁用年月与删除/取消、结果页“当前结果版本”，未再发现陈旧状态 |
+| PR 6 reviewer P2 用户文案与操作链 | VCC 界面所有用户可见 `revision` 改为“结果版本”，内部 `resultRevision` 与错误码不改；手册写明较新“已归档/已计算”均会阻断，须从最新月逐月“解归档→删除全部未归档结果”，修订后再按时间正序重跑/归档 | CHANGELOG/版本历史/手册当前 v3.1.8 候选切片删除内部评审词、“金标准/语义模板”和 x64/arm64 矛盾，改用“正式模板/结果模板”及“64 位 Windows 安装版和便携版”；历史版本记录不做机械改写 |
+| PR 6 reviewer 最终 `npm run scan:vars` / `npm run check:vars` | 扫描 v3.1.8、`src/` 293 文件、3688 个顶层名字；命中 Runtime-state：`MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical/Risk-sensitive | `MODULES` 只用既有 VCC ID 做 capture 路由；`app` 只在 capture 失败时非 0 退出；`dialog`/`setStatus`/`state` 是 VCC 局部 DOM、状态或测试引用，未改 Electron 原生 dialog、全局状态结构或生产退出钩子 |
+| PR 6 reviewer 最终定向与全量回归 | 最终对外术语修复后，release-docs `3/3 PASS`；完整 `npm run release-check` 为 lint/smoke PASS、unit `4695/4695 PASS`、integration `47/47` 脚本与 `2186/2186` 断言 PASS；术语修复前的 preview + renderer + release-docs 组合为 `37/37 PASS` | 真实 disabled 行为、readiness 负向用例、当前 v3.1.8 对外切片术语负断言和手册操作链已进入全仓门禁；集成链确认解归档/删除/历史导出的后台保护无回归 |
+| PR 6 reviewer 最终范围冻结 | intended 变更共 56 个文件：33 个 tracked + 23 个 intended untracked（1 份锁定 spec、18 张新 VCC PNG、4 个新单测） | `scripts/scan-vars.js` 删除末尾多余空行属于 PR6 报告稳定性修复，纳入 33 个 tracked；`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 及其他既有未跟踪文件明确排除，未 stage/commit |
+| PR 6 reviewer 最终通用/资金盲区复核 | 最终 diff 对 `src/backend/` 与 `src/main-process/` 的生产资金实现为 0 文件；逐项检查 capture 入口隔离、缺失/超时/拒绝、异步旧响应、DOM 销毁、旧 PNG 替换、尾月依赖、主键、金额/币种、跨月、重复操作、部分失败、行/余额守恒和错误可观测性 | 未发现新的生产入口旁路、自动删改资金事实或静默降级；capture 只读取预览 DOM 并在失败时非 0 退出。真实月份逐主体/币种、Windows Excel/WPS 和关窗时序人工复核继续作为资金发布红线，不得由自动化 PASS 代替 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| 生产历史 Pending raw_json 是否有未知列数 | PROBE | Codex 在 PR 1 建 dry-run 迁移测试；运行时异常 fail-closed | 阻塞 PR 1 合并 |
-| Windows 打包资产与 Excel/WPS 实际显示 | PROBE + 人工门禁 | PR 6 Windows CI 与财务人员 | 阻塞版本发布 |
+| 生产历史 Pending raw_json 是否有未知列数 | 已通过 dry-run 迁移测试与运行时失败关闭收口 | PR 1 覆盖 46/48/异常列数；异常历史事实拒绝迁移且不改写 | 不再阻塞代码合并；生产遇到异常仍需人工处置 |
+| Windows 打包资产与 Excel/WPS 实际显示 | PROBE + 人工门禁 | 任意 PR 的 Windows x64 构建提供产物证据；财务人员实际打开 installer/portable 与 Excel/WPS 复核 | 阻塞版本发布 |
 | GitHub 登录恢复 | BLOCK（发布） | 用户执行 `gh auth login -h github.com`，Codex 复检 | 阻塞 push/PR，不阻塞实现 |
 | 真实月份逐主体逐币种复核 | BLOCK（发布） | 财务人员按最终核对清单执行 | 阻塞 3.1.8 发布 |
 | 其他生产机器的存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE + fail-closed | 本机生产库只读探针确认 run/row/balance 均为 0；其他机器仍须在升级前只读扫描，异常 run 要求重跑 | 不得把本机“无存量 run”结论泛化；可能要求异常旧 run 重新运行，不允许静默归档 |
-| PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | 已用事务/唯一约束/故障与 stale revision 单测消除 | 继续由 `getEffectiveRunResult()` 在每次读取、归档和审计时复核连续 sequence/revision | 当前不阻塞 PR 4；任何账本漂移仍按结构化错误失败关闭 |
+| 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | 已用事务、唯一约束、故障与 stale revision 单测消除 | 继续由 `getEffectiveRunResult()` 在每次读取、归档和审计时复核连续 sequence/revision | 不阻塞合并；任何账本漂移仍按结构化错误失败关闭 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
-| Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | PR 6 Windows CI/手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |
+| Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | Windows 手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞代码评审 |
