@@ -109,6 +109,8 @@
 | PR 5 reviewer P2 定向回归 | renderer + writer 两文件 `36/36 PASS`；PR 5 六文件组合 `70/70 PASS`；历史月份真实 SQLite + 金标准模板链 `28/28 PASS`。500 字 Unicode 原因 write→reopen 后 adjustment 行为 `409.5pt`、wrapText 保留、相邻基础行仍为模板 `15pt`；结构化模板错误测试确认 code/message/detailLines 保留、实际路径可见且 stack 不展示 | 模板错误可观测性、长调整原因裁切、基础行样式回归、staged validator 同口径，以及历史月份导出/解归档/重归档链无回归 |
 | PR 5 reviewer P2 修复后最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4673/4673 PASS`（297 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中 VCC 历史月份模板导出链 `28/28 PASS` | 同一次命令覆盖静态检查、基础 smoke、全仓单测和全部集成链；证据对应最终冻结代码 |
 | PR 5 最终 `npm run check:vars` 与人工 review | 仅命中 `MODULES`、`elements`、`setStatus`、`state`；`MODULES` 只新增 preview route，后三者均为 VCC renderer 局部变量；无 Critical/Risk-sensitive 命中 | 已复核导出可用性、错误状态展示和模块路由，未发现重要变量旁路或全局状态污染 |
+| PR 5 合并前资金链盲区复核 | 将既有真实 SQLite/worker 调整归档链扩展为 `calculate → adjust → 重开数据库 → archive → 按月 export → ExcelJS reopen → 次月 calculate` 单一链，直接执行 `295/295 PASS`；逐结果行核对主体/分类、D:L 九币种、M/N 调整事实、defined-name 坐标、archive audit 生效余额，并逐九币种核对下月期初；相关 effective/归档/service/writer 单测 `56/56 PASS`，既有历史模板导出链 `28/28 PASS` | 消除原来“调整归档继承”与“历史 Excel 回读”分属两条 fixture、无法证明同一 run 端到端闭环的 P3 测试缺口；未改变生产逻辑或锁定 Spec |
+| PR 5 合并前全量 integration | `npm run test:integration` 为 `47/47` 脚本、`2438/2438` 可计数断言 PASS；runner 自动同步 `rules/integration-test-policy.md`，其中调整归档导出继承链 `295/295 PASS`、破坏性状态链 `64/64 PASS`、历史模板导出链 `28/28 PASS` | 新单链回归进入自动发现门禁；既有迁移、大文件、side DB、破坏性事务与其他业务集成无回归 |
 
 ## Remaining Unknowns
 
