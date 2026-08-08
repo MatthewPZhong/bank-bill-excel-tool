@@ -13,7 +13,21 @@ const repository = require('../../../src/backend/vcc-financial-op-db/repository'
 const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
+const {
+  previewDataTargetDeletion
+} = require('../../../src/backend/vcc-financial-op/data-target-deletion');
 const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
+
+function deleteWithPreview(db, targetMonth, sourceType) {
+  const preview = previewDataTargetDeletion(db, { targetMonth, targetType: sourceType });
+  return deleteDataset({
+    db,
+    targetMonth,
+    sourceType,
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+}
 
 class FakeWorker extends EventEmitter {
   constructor(options) {
@@ -55,6 +69,7 @@ test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
   const openDbIndex = runSource.indexOf('const db = openDb(workerData.dbPath)');
   assert.ok(handshakeIndex >= 0, '破坏性 action 必须等待 critical ACK');
   assert.ok(openDbIndex > handshakeIndex, 'openDb（含 migration）必须发生在父进程 protected/ACK 之后');
+  assert.doesNotMatch(workerSource, /['"]delete-dataset['"]/, '不得保留绕过统一确认契约的 legacy action');
 });
 
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
@@ -110,7 +125,7 @@ test('系统财务OP导入详情按主体筛选、分页并返回既有快照血
     INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
     VALUES ('2026-06', ?)
   `).run(SOURCE_TYPES.SYSTEM_OP);
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.SYSTEM_OP });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.SYSTEM_OP);
   const afterDeletion = service.getImportRecordDetail({
     recordId, tab: 'skips', key: 'PPHK', page: 1, pageSize: 1
   });
@@ -221,7 +236,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   });
   t.after(() => service.terminate());
 
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
   const detail = service.getImportRecordDetail({
     recordId,
     tab: 'skips',

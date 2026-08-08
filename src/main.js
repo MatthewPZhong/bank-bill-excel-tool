@@ -467,7 +467,19 @@ function getVccFinancialOpService() {
       database,
       assetsDir: path.join(__dirname, '../assets'),
       appVersion: pkg.version,
-      buildSha: buildInfo.commit
+      buildSha: buildInfo.commit,
+      archiveConsistencyLogger: ({ targetMonth, consistencyReasons }) => {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: 'VCC 财务OP归档月份状态不一致，已从可操作列表排除',
+          details: [
+            `月份：${targetMonth}`,
+            `一致性原因：${(consistencyReasons || []).join('、') || 'unknown'}`
+          ],
+          source: 'main',
+          domain: 'vcc-financial-op'
+        });
+      }
     });
   }
   return vccFinancialOpService;

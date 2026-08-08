@@ -160,6 +160,7 @@ function createVccFinancialOpService({
   workerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  archiveConsistencyLogger = null,
   cancelTimeoutMs = 120000
 }) {
   let activeTask = null;
@@ -446,7 +447,7 @@ function createVccFinancialOpService({
   }
 
   function listArchivedResultMonths() {
-    return listArchivedResultMonthsFromDb(database.db);
+    return listArchivedResultMonthsFromDb(database.db, { logger: archiveConsistencyLogger });
   }
 
   function previewUnarchive(payload = {}) {
@@ -743,7 +744,7 @@ function createVccFinancialOpService({
   }
 
   function latestArchivedRun() {
-    const latest = listArchivedResultMonthsFromDb(database.db)[0] || null;
+    const latest = listArchivedResultMonths()[0] || null;
     return latest ? getRunResult(database.db, latest.runId) : null;
   }
 
@@ -753,7 +754,9 @@ function createVccFinancialOpService({
       const run = getRunResult(database.db, Number(runId));
       if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
       if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
-      const consistentArchive = listArchivedResultMonthsFromDb(database.db)
+      const consistentArchive = listArchivedResultMonthsFromDb(database.db, {
+        logger: archiveConsistencyLogger
+      })
         .some((item) => item.runId === Number(runId) && item.targetMonth === run.targetMonth);
       if (!consistentArchive) {
         throw operationError(

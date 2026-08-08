@@ -30,6 +30,11 @@
 | UI 把破坏性执行成功视为不可逆边界：提交成功后保持执行锁定，完成 `onCompleted` 刷新后再关闭；刷新失败也关闭并警告，不重开或重试提交 | 重开弹框会诱导用户对已成功事务重复操作 | 将执行与刷新放在同一 catch 后恢复按钮 | renderer 明确显示“操作已成功但刷新失败”，执行中 Esc/遮罩/关闭均被锁定 |
 | 首月期初初始化成功后立即结束当前【开始运行】流程，要求用户再次显式点击后才重新预检和计算 | Spec §4.2.5 禁止初始化后自动沿用当前点击继续计算或归档；资金结果需要新的明确用户动作 | 初始化成功后在同一调用栈自动 preflight/calculate | 成功状态和弹框均明确提示再次点击；renderer 契约测试禁止初始化后分支出现 preflight/calculate/archive |
 | 来源原表删除在同一 `BEGIN IMMEDIATE` 内按 run id 顺序先固化完整生效结果证据，再写 success operation audit，最后执行既有级联删除与 legacy deletion 记录 | PR #126 review 证明原实现先删 `run_adjustments`/run，只留下计数，无法还原人工纠错、基础结果和九币种余额 | 仅扩大 `vcc_fin_op_dataset_deletions` 计数字段；删除后再尽力拼证据 | operation type 固定为 `delete-source-dataset`；证据损坏、success 审计写入或后续删除失败均回滚零业务写，事务外只 best-effort 追加 `rolled_back` 且不掩盖主错误；旧调用方与 legacy deletion 记录保持兼容 |
+| 系统财务OP首次成功写 snapshot 时同步写一条引用该 snapshot 的 `accepted` attempt；删除历史 snapshot 前在同事务补齐缺失 accepted，再物化全部既有侧证据并解除 FK | 首次成功且从未重试的历史 snapshot 原先没有 attempt，删除后余额、raw、文件、sheet、行号和 import record 血缘永久丢失 | 只依赖后续幂等重试生成 attempt；删除时只更新已有 attempt | 新导入天然具备首次成功审计；历史补录以完整 snapshot 字段和引用为幂等判据，补录、物化、删除、记录标记任一步失败均整体回滚 |
+| `protected === true` 是取消超时后无限等待的唯一判据；`critical-ready` 但未 ACK/未 protected 的 worker 仍可安全 terminate | 用户先取消或关窗后 worker 才发 `critical-ready` 时，父进程不会发 ACK，worker 不可能进入数据库事务；旧逻辑却把 phase 当成 protected 永久等待 | 看到 `critical-ready` 就无限等；所有 timeout 都强杀 | 已 ACK 的事务继续只等待；取消在先的握手窗口超时后强制终止并释放全局租约，避免关窗悬挂 |
+| 四类破坏性事务在 COMMIT 前使用无歧义 framing 的 `iterate()` 增量 SHA-256 对保留状态做前后指纹；source 删除只归一化允许的目标审计物化、成功记录删除标记和 accepted backfill | 单看删除计数无法发现 silent trigger 对其他来源、dataset、opening 或 run 子表的删改；大表 `.all()`/`group_concat` 又会放大内存 | 为所有事实加载完整 raw 数组；只继续比较聚合计数 | 普通 unarchive/opening/result 仅流式读取 id/content hash/关键审计元数据；只有目标 source 物化校验读取必要 raw。错误 context 仅含表级 count/hash，不含原始资金载荷 |
+| 删除提交统一要求非空 preview token 和显式安全 generation，并移除 worker legacy `delete-dataset` action | 参数解构默认和 `Number('')` 会把缺失代次降为 0，低层或旧 worker action 可绕过用户已观察状态确认 | 保留 service 层单点校验；缺失值按 generation 0 执行 | unified `delete-data-target` dispatch 前和 source/opening/result 内部入口双层 fail-closed；所有正常调用先 preview，缺失/空串/NaN/负数/超范围均不进入业务事务 |
+| 损坏归档月在继续排除普通枚举的同时通过注入 logger 输出固定结构事件 | PR 3 的 fail-closed 枚举原先静默 `continue/catch`，生产无法发现 run/archive/dataset 漂移 | 向用户枚举返回损坏月份；日志失败时中断枚举 | 从后续 PR 5 最小回移 `archiveConsistencyLogger`；日志异常仅影响旁路观测，不会让损坏月重新可操作 |
 
 ## Assumptions
 
@@ -42,6 +47,7 @@
 | 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | PR 4 若引入不同 revision 语义会触发 reader 门禁 | PR 4 写入必须在单事务内追加 sequence=N+1 并 revision+1 |
 | 严格 `YYYY-MM` 字符串可直接用于跨月先后比较 | 月份入口统一规范化且固定两位月份 | 非规范历史月份会被排除普通枚举并在直接 preview 失败 | 保持 `normalizeOperationMonth()` 为所有破坏性入口前置门禁 |
 | 删除首月期初允许五类 dataset 中部分已被用户删除，但所有仍存在的 dataset 必须处于未归档状态 | 用户可能先删除某一原表；期初清理不应要求伪造缺失 dataset | 强制五表必须齐全；缺表即阻断 | 只删除期初和同月 calculated runs；first_month、剩余 dataset、源事实和导入审计保持不变 |
+| 非目标 source 大表的 `content_hash` 是 raw 内容一致性的权威摘要；普通破坏性操作不重复读取整月 raw_json | importer 在有效事实和审计表中持久化内容哈希，目标 source 删除另有逐行 raw 物化核对 | 普通 unarchive/opening/result 每次完整扫描 raw_json | 指纹仍覆盖 id、hash、金额/币种字段、来源定位和关键审计元数据；若未来允许绕过 importer 直接改 raw，必须同步更新 hash 或新增数据库完整性诊断 |
 
 ## Deviations
 
@@ -49,6 +55,7 @@
 | --- | --- | --- | --- | --- |
 | Spec 建议六个提交 | 六个堆叠 PR，每个 PR 内可含少量聚焦提交 | 用户明确要求多 PR 推进 | 评审与回滚粒度更细，功能口径不变 | 是（本实施记录） |
 | 共享归档月份选择器在 PR 3 先服务解归档，但历史结果按月份导出仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | 不影响 PR 3 解归档/删除验收；PR 5 必须接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
+| 归档一致性 logger 原计划随 PR 5 进入，现提前最小回移到 PR 3 | PR #126/P3+ review 明确要求生产不再静默隐藏损坏 archive；PR 5 参考实现已验证且不依赖 writer 语义 | 等 PR 5 restack 后再补 | PR 5 restack 时解决重复实现；本 PR 不回移 `getArchivedRunByMonth` 或模板 writer 语义 | 是（review 明确要求） |
 
 ## Evidence
 
@@ -81,6 +88,11 @@
 | PR 3 最终跨月血缘盲区回归 | 后月依赖改为 archived/calculated runs、archive 快照、archived datasets 的确定性排序去重并集；孤立 archive 和孤立 archived dataset 定向测试均返回 `unarchive-not-tail`，重复 preview 的月份/token 稳定且目标月资金状态零改动 | 保留完整 `laterRuns` 证据并将并集纳入 preview token；只阻断，不自动修复或级联损坏历史状态 |
 | PR #126 来源删除审计修复定向回归 | dataset deletion、destructive actions、service 共 `36/36 PASS`；真实 SQLite + worker 状态链 `64/64 PASS` | success 证据完整保留 USD `12.34` 人工纠错、rowKey/sequence/reason、基础/生效结果、九币种余额和 Pending 汇总；删除后 run/adjustment/目标原表为 0；证据损坏、success audit failpoint、后续 DELETE failpoint 均零业务删除且只留 `rolled_back` |
 | PR #126 来源删除审计修复静态门禁 | `npm run lint`、修改文件 `node --check`、`git diff --check` 均通过；`npm run check:vars` 仅命中通用局部变量名 `state` | 未修改 `src/renderer.js` 全局 Runtime-state，也未命中 Critical / Important-skeleton / Risk-sensitive；按清单将该命中记录为误报并保留人工复核说明 |
+| PR #126 P3+ 修复聚焦回归 | system importer / dataset deletion / destructive actions / audit writer / service 共覆盖首次 accepted、历史无重试 backfill、取消握手窗口、显式 confirmation、四类 silent trigger 和 logger；最新组合回归全部 PASS | accepted 的 snapshot FK/文件/sheet/行/raw 血缘；backfill 删除后完整双侧证据；未 protected timeout 可终止；mismatch 回滚且 context 不泄露 raw |
+| PR #126 P3+ 真实 SQLite + worker 状态链 | `scripts/integration/vcc-financial-op-destructive-state-chain.js` 为 `64/64 PASS` | M1/M2/M3 解归档/删除链、worker generation/token、成功与 rolled_back 审计、全部子表与来源守恒 |
+| PR #126 P3+ 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4648/4648 PASS`（295 个测试文件）；integration `45/45` 脚本、`2115/2115` 可计数断言 PASS | 当前代码一次性通过静态、其他模块 smoke、全仓单测、迁移/大文件/side DB 与破坏性状态链门禁 |
+| PR #126 P3+ `npm run check:vars` | 仅命中通用局部变量名 `state`；未改 `src/renderer.js` 顶层 UI state，无 Critical / Important-skeleton / Risk-sensitive 命中 | 已额外复核 VCC `activeTask/taskGeneration/protected/phase` 生命周期、worker ACK 边界和任务释放；旧预览仍在 generation 推进后失效 |
+| PR #126 P3+ blindspot + reconciliation 复核 | 入口旁路、月份/source 主键血缘、九币种余额原样物化、幂等 backfill、部分失败、行/子表守恒、错误可观测性均有代码与 silent-trigger 回归 | 新发现的 unified undefined→0 和 backfill 后 trigger 漂移已在本轮修复；未发现未处理的 P3+ 自动化缺口，真实财务月份与 Windows 退出时序仍保留人工门禁 |
 
 ## Remaining Unknowns
 
@@ -93,4 +105,4 @@
 | 生产存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE | PR 4 接线前用真实数据库只读扫描；reader 已 fail-closed | 可能要求旧 run 重新运行，不允许静默归档 |
 | PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务 | 阻塞人工调整入口和 effective 归档接线 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
-| Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | PR 6 Windows CI/手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |
+| Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | 自动化已覆盖“取消在先→critical-ready 未 protected→timeout terminate”和“protected 后只等待”；PR 6 仍需 Windows CI/手测在真实 SQLite 事务中触发关窗 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |

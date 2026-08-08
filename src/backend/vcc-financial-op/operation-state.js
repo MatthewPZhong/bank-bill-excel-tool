@@ -48,6 +48,55 @@ function sha256(value) {
   return crypto.createHash('sha256').update(String(value), 'utf8').digest('hex');
 }
 
+function fingerprintScalar(value) {
+  if (value === null) return { type: 'null', value: null };
+  if (Buffer.isBuffer(value)) return { type: 'blob', value: value.toString('base64') };
+  if (typeof value === 'number') {
+    return { type: 'number', value: Number.isFinite(value) ? String(value) : `non-finite:${value}` };
+  }
+  if (typeof value === 'bigint') return { type: 'bigint', value: value.toString() };
+  if (typeof value === 'boolean') return { type: 'boolean', value: value ? '1' : '0' };
+  return { type: typeof value, value: String(value) };
+}
+
+function appendFingerprintFrame(hash, frame) {
+  const encoded = stableStringify(frame);
+  hash.update(String(Buffer.byteLength(encoded, 'utf8')), 'utf8');
+  hash.update(':', 'utf8');
+  hash.update(encoded, 'utf8');
+}
+
+function fingerprintQuery(db, {
+  tableName,
+  sql,
+  params = [],
+  normalizeRow = null
+}) {
+  const logicalTable = String(tableName || '');
+  const hash = crypto.createHash('sha256');
+  appendFingerprintFrame(hash, { version: 1, table: logicalTable });
+  let count = 0;
+  for (const sourceRow of db.prepare(sql).iterate(...params)) {
+    const row = normalizeRow ? normalizeRow(sourceRow) : sourceRow;
+    const columns = Object.keys(row).sort().map((column) => ({
+      name: column,
+      ...fingerprintScalar(row[column])
+    }));
+    appendFingerprintFrame(hash, {
+      table: logicalTable,
+      row: count,
+      columns
+    });
+    count += 1;
+  }
+  appendFingerprintFrame(hash, { table: logicalTable, rowCount: count });
+  return {
+    table: logicalTable,
+    count,
+    contentHash: hash.digest('hex')
+  };
+}
+
 function countRows(db, sql, ...params) {
   const row = db.prepare(sql).get(...params);
   return Number(row && row.row_count) || 0;
@@ -292,6 +341,25 @@ function assertPreviewToken(expectedToken, actualToken) {
   }
 }
 
+function validateOperationConfirmation(expectedPreviewToken, taskGeneration) {
+  if (typeof expectedPreviewToken !== 'string' || expectedPreviewToken.trim() === '') {
+    throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE, {
+      expectedPreviewToken: null,
+      context: { expectedPreviewToken: null }
+    });
+  }
+  if (
+    taskGeneration === undefined
+    || taskGeneration === null
+    || (typeof taskGeneration === 'string' && taskGeneration.trim() === '')
+    || !Number.isSafeInteger(Number(taskGeneration))
+    || Number(taskGeneration) < 0
+  ) {
+    throw operationError('invalid-task-generation', 'VCC 财务OP任务代次无效');
+  }
+  return Number(taskGeneration);
+}
+
 module.exports = {
   OPERATION_TOKEN_VERSION,
   STATE_CHANGED_CODE,
@@ -301,6 +369,7 @@ module.exports = {
   normalizeOperationMonth,
   stableStringify,
   sha256,
+  fingerprintQuery,
   countRows,
   snapshotRuns,
   snapshotLaterRuns,
@@ -311,5 +380,6 @@ module.exports = {
   snapshotSourceFacts,
   buildOperationState,
   operationPreviewToken,
-  assertPreviewToken
+  assertPreviewToken,
+  validateOperationConfirmation
 };

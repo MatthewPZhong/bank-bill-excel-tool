@@ -11,17 +11,21 @@ const {
 const {
   operationError,
   normalizeOperationMonth,
-  stableStringify,
   buildOperationState,
   operationPreviewToken,
   assertPreviewToken,
-  snapshotSourceFacts
+  validateOperationConfirmation
 } = require('./operation-state');
 const {
   collectRunEvidence,
   insertOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
+const {
+  PRESERVED_OPERATIONS,
+  snapshotPreservedOperationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const DELETE_ACTION = 'delete-data-target';
 const DELETE_TARGET_TYPES = Object.freeze({
@@ -227,14 +231,24 @@ function deleteRunChildren(db, runIds) {
   }
 }
 
-function assertSourceFactsUnchanged(db, targetMonth, before) {
-  const after = snapshotSourceFacts(db, targetMonth);
-  if (stableStringify(after) !== stableStringify(before)) {
-    throw operationError(
-      'delete-invariant-failed',
-      '删除前后源数据或导入审计计数发生变化，操作已回滚。',
-      { sourceFactsBefore: before, sourceFactsAfter: after }
-    );
+function assertRunChildrenDeleted(db, runIds) {
+  if (!Array.isArray(runIds) || runIds.length === 0) return;
+  const placeholders = runIds.map(() => '?').join(', ');
+  let remainingCount = 0;
+  for (const tableName of [
+    'vcc_fin_op_run_adjustments',
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals'
+  ]) {
+    remainingCount += Number(db.prepare(`
+      SELECT COUNT(*) AS row_count FROM ${tableName}
+      WHERE run_id IN (${placeholders})
+    `).get(...runIds).row_count) || 0;
+  }
+  if (remainingCount !== 0) {
+    throw operationError('delete-invariant-failed', '未归档结果子表未能完整删除，操作已回滚。');
   }
 }
 
@@ -260,7 +274,7 @@ function deleteOpeningInitialization({
   db,
   targetMonth,
   expectedPreviewToken,
-  taskGeneration = 0,
+  taskGeneration,
   reason = '用户在数据管理中删除首月全部期初初始化数据',
   appVersion = null,
   buildSha = null
@@ -269,17 +283,25 @@ function deleteOpeningInitialization({
   let failureEvidence = { action: DELETE_OPENING_OPERATION, targetMonth: target.targetMonth, reason };
   let transactionStarted = false;
   try {
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      taskGeneration
+    );
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
-    const preview = previewDataTargetDeletion(db, target, { taskGeneration });
+    const preview = previewDataTargetDeletion(db, target, { taskGeneration: confirmedGeneration });
     assertPreviewToken(expectedPreviewToken, preview.previewToken);
     assertDeletePreview(preview);
-    const before = operationStateForTarget(db, target, taskGeneration);
+    const before = operationStateForTarget(db, target, confirmedGeneration);
     const openings = openingEvidence(db, target.targetMonth);
     const calculatedRunIds = before.runs
       .filter((run) => run.status === 'calculated')
       .map((run) => run.id);
     const runs = calculatedRunIds.map((runId) => collectRunEvidence(db, runId));
+    const preservedBefore = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_OPENING
+    });
     failureEvidence = {
       action: DELETE_OPENING_OPERATION,
       targetMonth: target.targetMonth,
@@ -287,7 +309,8 @@ function deleteOpeningInitialization({
       preview,
       before,
       openings,
-      runs
+      runs,
+      preservedState: preservedBefore
     };
     const auditId = insertOperationAudit(db, {
       targetMonth: target.targetMonth,
@@ -326,7 +349,17 @@ function deleteOpeningInitialization({
     ) {
       throw operationError('delete-invariant-failed', '删除后首月状态断言失败，操作已回滚。');
     }
-    assertSourceFactsUnchanged(db, target.targetMonth, before.sourceFacts);
+    assertRunChildrenDeleted(db, calculatedRunIds);
+    const preservedAfter = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_OPENING,
+      phase: 'after',
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'delete-invariant-failed',
+      message: '删除期初前后保留数据或审计内容发生变化，操作已回滚。'
+    });
     db.exec('COMMIT');
     transactionStarted = false;
     return {
@@ -362,7 +395,7 @@ function deleteUnarchivedResult({
   db,
   targetMonth,
   expectedPreviewToken,
-  taskGeneration = 0,
+  taskGeneration,
   reason = '用户在数据管理中删除目标月全部未归档财务OP校验结果',
   appVersion = null,
   buildSha = null
@@ -371,21 +404,30 @@ function deleteUnarchivedResult({
   let failureEvidence = { action: DELETE_RESULT_OPERATION, targetMonth: target.targetMonth, reason };
   let transactionStarted = false;
   try {
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      taskGeneration
+    );
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
-    const preview = previewDataTargetDeletion(db, target, { taskGeneration });
+    const preview = previewDataTargetDeletion(db, target, { taskGeneration: confirmedGeneration });
     assertPreviewToken(expectedPreviewToken, preview.previewToken);
     assertDeletePreview(preview);
-    const before = operationStateForTarget(db, target, taskGeneration);
+    const before = operationStateForTarget(db, target, confirmedGeneration);
     const runIds = before.runs.filter((run) => run.status === 'calculated').map((run) => run.id);
     const runs = runIds.map((runId) => collectRunEvidence(db, runId));
+    const preservedBefore = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_RESULT
+    });
     failureEvidence = {
       action: DELETE_RESULT_OPERATION,
       targetMonth: target.targetMonth,
       reason,
       preview,
       before,
-      runs
+      runs,
+      preservedState: preservedBefore
     };
     const auditId = insertOperationAudit(db, {
       targetMonth: target.targetMonth,
@@ -409,7 +451,17 @@ function deleteUnarchivedResult({
     if (deletedRuns !== runIds.length || remainingCalculated !== 0) {
       throw operationError('delete-invariant-failed', '未归档结果未能完整删除，操作已回滚。');
     }
-    assertSourceFactsUnchanged(db, target.targetMonth, before.sourceFacts);
+    assertRunChildrenDeleted(db, runIds);
+    const preservedAfter = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_RESULT,
+      phase: 'after',
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'delete-invariant-failed',
+      message: '删除结果前后保留数据或审计内容发生变化，操作已回滚。'
+    });
     db.exec('COMMIT');
     transactionStarted = false;
     return {
@@ -441,21 +493,26 @@ function deleteUnarchivedResult({
 }
 
 function deleteDataTarget({ db, ...payload }) {
+  const confirmedGeneration = validateOperationConfirmation(
+    payload.expectedPreviewToken,
+    payload.taskGeneration
+  );
   const target = normalizeDeleteTarget(payload);
+  const confirmedPayload = { ...payload, taskGeneration: confirmedGeneration };
   if (target.kind === 'source') {
     return deleteDataset({
       db,
       targetMonth: target.targetMonth,
       sourceType: target.sourceType,
-      expectedPreviewToken: payload.expectedPreviewToken,
-      taskGeneration: payload.taskGeneration,
-      reason: payload.reason,
-      appVersion: payload.appVersion,
-      buildSha: payload.buildSha
+      expectedPreviewToken: confirmedPayload.expectedPreviewToken,
+      taskGeneration: confirmedPayload.taskGeneration,
+      reason: confirmedPayload.reason,
+      appVersion: confirmedPayload.appVersion,
+      buildSha: confirmedPayload.buildSha
     });
   }
-  if (target.kind === 'opening') return deleteOpeningInitialization({ db, ...payload });
-  return deleteUnarchivedResult({ db, ...payload });
+  if (target.kind === 'opening') return deleteOpeningInitialization({ db, ...confirmedPayload });
+  return deleteUnarchivedResult({ db, ...confirmedPayload });
 }
 
 module.exports = {

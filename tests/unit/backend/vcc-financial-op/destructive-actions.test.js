@@ -21,7 +21,8 @@ const {
   DELETE_TARGET_TYPES,
   previewDataTargetDeletion,
   deleteOpeningInitialization,
-  deleteUnarchivedResult
+  deleteUnarchivedResult,
+  deleteDataTarget
 } = require('../../../../src/backend/vcc-financial-op/data-target-deletion');
 const {
   serializeError,
@@ -196,7 +197,22 @@ test('归档月份枚举只返回 run/archive/九币种主体/五数据集完全
   db.prepare(`DELETE FROM vcc_fin_op_datasets WHERE target_month = '2026-05' AND dataset_type = ?`)
     .run(SOURCE_TYPES.PENDING);
 
-  assert.deepEqual(listArchivedResultMonths(db).map((item) => item.targetMonth), ['2026-06']);
+  const logs = [];
+  assert.deepEqual(
+    listArchivedResultMonths(db, { logger: (entry) => logs.push(entry) })
+      .map((item) => item.targetMonth),
+    ['2026-06']
+  );
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].targetMonth, '2026-05');
+  assert.ok(logs[0].consistencyReasons.some((reason) => reason.startsWith('dataset-types:')));
+  assert.deepEqual(Object.keys(logs[0]), ['event', 'targetMonth', 'consistencyReasons']);
+  assert.deepEqual(
+    listArchivedResultMonths(db, { logger: () => { throw new Error('日志不可用'); } })
+      .map((item) => item.targetMonth),
+    ['2026-06'],
+    '日志失败时损坏月仍不得进入枚举'
+  );
   const badPreview = previewUnarchive(db, '2026-05', { taskGeneration: 4 });
   assert.equal(badPreview.canUnarchive, false);
   assert.equal(badPreview.code, 'archive-state-inconsistent');
@@ -395,6 +411,33 @@ test('解归档提交时重算 token；stale 和事务故障均零业务写并�
   assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back', 'rolled_back']);
 });
 
+test('解归档 silent trigger 篡改结果子表时提交前指纹阻断并完整回滚', (t) => {
+  const db = createDb(t);
+  const runId = seedRun(db, { status: 'archived' });
+  seedArchive(db, '2026-06', runId);
+  seedDatasets(db, '2026-06', 'archived', runId);
+  const preview = previewUnarchive(db, '2026-06', { taskGeneration: 12 });
+  db.exec(`
+    CREATE TRIGGER drift_unarchive_run_child
+    AFTER DELETE ON vcc_fin_op_archives
+    BEGIN
+      UPDATE vcc_fin_op_run_rows SET amount = '999' WHERE run_id = OLD.run_id;
+    END;
+  `);
+
+  assert.throws(() => unarchiveMonth({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: 12
+  }), (error) => error.code === 'unarchive-invariant-failed');
+  assert.equal(db.prepare(`SELECT status FROM vcc_fin_op_runs WHERE id = ?`).get(runId).status, 'archived');
+  assert.equal(db.prepare(`SELECT amount FROM vcc_fin_op_run_rows WHERE run_id = ?`).get(runId).amount, '10');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets WHERE data_status = 'archived'`).get().n, 5);
+  assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
+});
+
 test('失败审计写入异常仅附加到主错误并可跨 worker 边界观测', (t) => {
   const db = createDb(t);
   const runId = seedRun(db, { status: 'archived' });
@@ -474,6 +517,45 @@ test('删除首月期初整体删除全部期初和 calculated 结果，first_mo
   assert.equal(evidence.runs[0].adjustments.length, 1);
 });
 
+test('统一删除入口与内部 opening/result 删除均拒绝缺失确认代次', (t) => {
+  const db = createDb(t);
+  const sourcePreview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  assert.throws(() => deleteDataTarget({
+    db,
+    targetMonth: '2026-06',
+    targetType: SOURCE_TYPES.RECHARGE,
+    taskGeneration: 0
+  }), (error) => error.code === 'state-changed');
+  for (const invalidGeneration of [undefined, '', Number.NaN, -1]) {
+    assert.throws(() => deleteDataTarget({
+      db,
+      targetMonth: '2026-06',
+      targetType: SOURCE_TYPES.RECHARGE,
+      expectedPreviewToken: sourcePreview.previewToken,
+      taskGeneration: invalidGeneration
+    }), (error) => error.code === 'invalid-task-generation');
+  }
+
+  const openingPreview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: DELETE_TARGET_TYPES.OPENING
+  });
+  assert.throws(() => deleteOpeningInitialization({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: openingPreview.previewToken
+  }), (error) => error.code === 'invalid-task-generation');
+  const resultPreview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: DELETE_TARGET_TYPES.RESULT
+  });
+  assert.throws(() => deleteUnarchivedResult({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: resultPreview.previewToken
+  }), (error) => error.code === 'invalid-task-generation');
+});
+
 test('首月缺少一个已被用户删除的数据集时仍允许删除期初', (t) => {
   const db = createDb(t);
   seedOpening(db);
@@ -535,6 +617,41 @@ test('首月已归档禁止删期初；事务故障回滚期初/结果并保留�
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances`).get().n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE status = 'calculated'`).get().n, 1);
   assert.equal(auditRows(db, 'delete_opening_initialization')[0].status, 'rolled_back');
+});
+
+test('删除期初 silent trigger 篡改保留数据集时提交前指纹阻断并完整回滚', (t) => {
+  const db = createDb(t);
+  seedOpening(db);
+  seedDatasets(db, '2026-06', 'unprocessed');
+  const runId = seedRun(db);
+  const originalRevisions = db.prepare(`
+    SELECT dataset_type, revision FROM vcc_fin_op_datasets ORDER BY dataset_type
+  `).all();
+  const preview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: DELETE_TARGET_TYPES.OPENING
+  }, { taskGeneration: 13 });
+  db.exec(`
+    CREATE TRIGGER drift_opening_preserved_dataset
+    AFTER DELETE ON vcc_fin_op_opening_balances
+    BEGIN
+      UPDATE vcc_fin_op_datasets
+      SET revision = revision + 100
+      WHERE target_month = OLD.target_month;
+    END;
+  `);
+
+  assert.throws(() => deleteOpeningInitialization({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: 13
+  }), (error) => error.code === 'delete-invariant-failed');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?`).get(runId).n, 1);
+  assert.deepEqual(db.prepare(`
+    SELECT dataset_type, revision FROM vcc_fin_op_datasets ORDER BY dataset_type
+  `).all(), originalRevisions);
+  assert.deepEqual(auditRows(db, 'delete_opening_initialization').map((row) => row.status), ['rolled_back']);
 });
 
 test('删除结果一次清空同月全部 calculated run/children/adjustments并保持源事实', (t) => {
@@ -604,4 +721,39 @@ test('已归档结果禁止删除；结果删除故障回滚所有 run 并留失
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?`).get(runId).n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_rows WHERE run_id = ?`).get(runId).n, 1);
   assert.equal(auditRows(db, 'delete_unarchived_result')[0].status, 'rolled_back');
+});
+
+test('删除结果 silent trigger 篡改保留期初时提交前指纹阻断并完整回滚', (t) => {
+  const db = createDb(t);
+  seedOpening(db);
+  seedDatasets(db, '2026-06', 'unprocessed');
+  const runId = seedRun(db);
+  const originalBalances = db.prepare(`
+    SELECT balances_json FROM vcc_fin_op_opening_balances WHERE target_month = '2026-06'
+  `).get().balances_json;
+  const preview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: DELETE_TARGET_TYPES.RESULT
+  }, { taskGeneration: 14 });
+  db.exec(`
+    CREATE TRIGGER drift_result_preserved_opening
+    AFTER DELETE ON vcc_fin_op_runs
+    BEGIN
+      UPDATE vcc_fin_op_opening_balances
+      SET balances_json = '{"USD":"999"}'
+      WHERE target_month = OLD.target_month;
+    END;
+  `);
+
+  assert.throws(() => deleteUnarchivedResult({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: 14
+  }), (error) => error.code === 'delete-invariant-failed');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?`).get(runId).n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_rows WHERE run_id = ?`).get(runId).n, 1);
+  assert.equal(db.prepare(`
+    SELECT balances_json FROM vcc_fin_op_opening_balances WHERE target_month = '2026-06'
+  `).get().balances_json, originalBalances);
+  assert.deepEqual(auditRows(db, 'delete_unarchived_result').map((row) => row.status), ['rolled_back']);
 });

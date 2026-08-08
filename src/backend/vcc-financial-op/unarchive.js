@@ -16,6 +16,11 @@ const {
   insertOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
+const {
+  PRESERVED_OPERATIONS,
+  snapshotPreservedOperationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const UNARCHIVE_OPERATION = 'unarchive';
 const REQUIRED_DATASET_SET = new Set(REQUIRED_DATASET_TYPES);
@@ -191,7 +196,22 @@ function previewUnarchive(db, targetMonth, {
   };
 }
 
-function listArchivedResultMonths(db) {
+function logExcludedArchiveMonth(logger, targetMonth, consistencyReasons) {
+  if (!logger) return;
+  const payload = Object.freeze({
+    event: 'vcc-financial-op-archive-month-excluded',
+    targetMonth: String(targetMonth || ''),
+    consistencyReasons: Object.freeze([...(consistencyReasons || [])].map(String))
+  });
+  try {
+    if (typeof logger === 'function') logger(payload);
+    else if (typeof logger.warn === 'function') logger.warn(payload);
+  } catch (_error) {
+    // 日志是旁路观测能力；写入失败时仍须排除损坏月份。
+  }
+}
+
+function listArchivedResultMonths(db, { logger = null } = {}) {
   const candidates = db.prepare(`
     SELECT target_month FROM vcc_fin_op_runs WHERE status = 'archived'
     UNION
@@ -210,7 +230,10 @@ function listArchivedResultMonths(db) {
         taskGeneration: 0
       });
       const consistency = inspectArchiveConsistencyFromState(db, state);
-      if (!consistency.consistent) continue;
+      if (!consistency.consistent) {
+        logExcludedArchiveMonth(logger, targetMonth, consistency.reasons);
+        continue;
+      }
       months.push({
         targetMonth,
         runId: consistency.run.id,
@@ -218,7 +241,8 @@ function listArchivedResultMonths(db) {
         resultRevision: consistency.run.resultRevision,
         subjects: consistency.archiveSubjects
       });
-    } catch (_error) {
+    } catch (error) {
+      logExcludedArchiveMonth(logger, targetMonth, [error.code || 'archive-state-read-failed']);
       // 非严格 YYYY-MM 或损坏月份不会进入普通前端枚举；直接 preview 仍返回结构化错误。
     }
   }
@@ -264,12 +288,17 @@ function unarchiveMonth({
       includeLaterRuns: true
     });
     const runEvidence = collectRunEvidence(db, runId);
+    const preservedBefore = snapshotPreservedOperationState(db, {
+      targetMonth: month,
+      operation: PRESERVED_OPERATIONS.UNARCHIVE
+    });
     failureEvidence = {
       action: UNARCHIVE_OPERATION,
       targetMonth: month,
       preview,
       before: operationState,
-      runEvidence
+      runEvidence,
+      preservedState: preservedBefore
     };
     const auditId = insertOperationAudit(db, {
       targetMonth: month,
@@ -328,6 +357,17 @@ function unarchiveMonth({
       throw operationError('unarchive-invariant-failed', '解归档提交前状态断言失败，操作已回滚');
     }
 
+    const preservedAfter = snapshotPreservedOperationState(db, {
+      targetMonth: month,
+      operation: PRESERVED_OPERATIONS.UNARCHIVE,
+      phase: 'after',
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'unarchive-invariant-failed',
+      message: '解归档前后保留数据或结果子表发生变化，操作已回滚。'
+    });
+
     db.exec('COMMIT');
     transactionStarted = false;
     return {
@@ -362,6 +402,7 @@ module.exports = {
   UNARCHIVE_OPERATION,
   inspectRunBalanceSubjects,
   inspectArchiveConsistencyFromState,
+  logExcludedArchiveMonth,
   listArchivedResultMonths,
   previewUnarchive,
   unarchiveMonth
