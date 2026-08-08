@@ -22,6 +22,8 @@
 | 首月期初提交完整性只检查 `subjects - opening.balances` 的真正缺失主体 | PR #125 review 证明 preflight/renderer 只向用户收集 `missingOpeningSubjects`；要求重复提交已初始化主体会阻断同月新增主体 | 每次提交全部主体；跳过完整性检查 | 已初始化主体无需重复提交；主动重放已初始化主体仍按 content hash 幂等跳过或拒绝改写，真正漏交的新主体仍整事务回滚；属于既定契约缺陷修复，不改 Spec |
 | `rowKey` 固定为 `v1:sha256(JSON.stringify([row_kind, subject, source_type, category_major || '', category_minor || '']))` | 调整坐标必须跨币种稳定，又不能受 run/id/金额/展示顺序影响 | 使用数据库行 id；把币种或金额纳入 key | 同一逻辑行不同币种共享 rowKey，以 `rowKey × currency` 构成调整坐标 |
 | PR 2 的 `getEffectiveRunResult()` 仅做只读统一重算，并严格核对 sequence/revision/基础公式/坐标 | 基础 `run_rows`、`run_balances` 必须不可变；损坏的调整账本不得静默参与归档 | 就地覆盖基础表；遇到损坏记录跳过 | 后续 PR 4 复用同一 reader 接入调整写入与归档；任何事实不一致均结构化失败 |
+| 生效结果的基础行与不可变调整先用 `DecimalAccumulator` 无损聚合，仅在每个最终可见字段分别执行 15 位有效数字校验 | PR #125 review 证明 `999999999999999 + 1 - 1` 的合法抵消链会被中间值校验误拒；计算器既有契约也是“全量聚合后再校验最终值” | 每一步调用 `canonicalizeVccAmount`；改用 `Number`；对整个 DTO 只做一次总校验 | 合法抵消可通过，真实最终溢出继续 fail-closed；`base-period`、`adjustment-total`、行级和余额级字段各自独立封顶，不允许跨字段掩盖溢出 |
+| 最终金额溢出统一返回 `result-amount-out-of-range`，稳定坐标放入 JSON-safe `error.context` | worker 的 `serializeError()` 只保留 `code/detailLines/context`；仅挂顶层 `scope/field/rowKey/value` 会在跨线程后丢失 | 只依赖错误 message；只保留任意顶层属性 | 调用方跨 worker 仍可读取 scope、field、rowKey/summary 坐标和原始十进制值；真实错误已做 `serializeError → deserializeError` 往返回归 |
 
 ## Assumptions
 
@@ -59,6 +61,11 @@
 | PR 2 reconciliation blindspot pass | 主键血缘、九币种、月份边界、幂等、事务回滚、基础表不可变和行/余额坐标守恒均有代码与测试证据 | 未发现自动删改或静默补零；首月期初与生效金额仍需发布前人工财务复核 |
 | PR #125 review 增量主体回归 | calculator `22/22 PASS`；首月既有 PPHK 后新增 NEW 时 preflight/calculate 仅返回 NEW，仅提交 NEW 成功，PPHK 的金额/hash/说明与 `first_month` 不变；新增 NEW+NEW2 仅提交 NEW 时 NEW 写入回滚 | 修复已初始化主体被误判 omitted，同时锁定真正缺失主体、九币种和事务完整性 |
 | PR #125 review 链路与变量门禁 | service/renderer `21/21 PASS`；`npm run check:vars` 扫描本次唯一 src 改动，未命中重要变量 | renderer 仍只提交缺失主体；未改 IPC/用户流程，未触及既有重要变量清单 |
+| PR #125 review 金额抵消与最终封顶定向回归 | result-adjustments、calculator、state migration、serialize-error 合计 `59/59 PASS`；其中 effective result `14/14 PASS` | 基础行和 adjustment 的“先越界后抵消”合法；基础汇总、调整汇总、行级 effectiveAmount、跨行 balance 的真实最终溢出均返回稳定 code/context，不返回部分 DTO，数据库/归档/调整账本不变；sequence、revision 与九币种契约保持 |
+| PR #125 review 生效结果真实 SQLite 集成 | `scripts/integration/vcc-financial-op-effective-result.js` 返回 `19/19 PASS`，数据库关闭重开后读取 | 锁定合法抵消、精确字符串、归档只读和真实最终溢出；失败前后 run/row/balance/adjustment/archive 快照一致 |
+| PR #125 review 静态与变量门禁 | 变更源文件 ESLint、3 个 JS 文件 `node --check`、`git diff --check` 全部通过；`npm run check:vars` 未命中任何重要变量 | 未引入语法/格式问题；本次金额聚合修复未触及 `rules/important-variables.md` 中的重要变量 |
+| PR #125 review reconciliation blindspot pass | 已复核 rowKey×currency 血缘、币种隔离、精确十进制、逐可见字段封顶、只读生命周期、失败原子性与跨 worker 可观测性 | 未发现 P3+ 新缺口；金额规则属于资金红线，自动化证据不能替代发布前真实财务样本人工复核 |
+| PR #125 review 全仓 `npm run release-check` | lint、smoke 通过；unit `4618/4618 PASS`；integration `45/45` 脚本、`2070/2070` 断言通过 | 新增集成脚本已被 runner 自动发现并同步 `rules/integration-test-policy.md`；全仓资金、迁移、大文件和 side DB 回归无失败 |
 
 ## Remaining Unknowns
 
@@ -69,4 +76,4 @@
 | GitHub 登录恢复 | BLOCK（发布） | 用户执行 `gh auth login -h github.com`，Codex 复检 | 阻塞 push/PR，不阻塞实现 |
 | 真实月份逐主体逐币种复核 | BLOCK（发布） | 财务人员按最终核对清单执行 | 阻塞 3.1.8 发布 |
 | 生产存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE | PR 4 接线前用真实数据库只读扫描；reader 已 fail-closed | 可能要求旧 run 重新运行，不允许静默归档 |
-| PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务 | 阻塞人工调整入口和 effective 归档接线 |
+| PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务；PR 2 已锁定 reader 与跨 worker 错误 context 契约 | 阻塞人工调整入口和 effective 归档接线 |
