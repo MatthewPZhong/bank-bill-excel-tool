@@ -12468,7 +12468,7 @@ function registerNewAccountHandlers() {
     try {
       return await getVccFinancialOpService().calculate(payload);
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
@@ -12704,7 +12704,7 @@ function registerNewAccountHandlers() {
       const result = await service.exportRun({ runId, outputDirectory: choice.filePaths[0] });
       return { status: 'success', ...result };
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 

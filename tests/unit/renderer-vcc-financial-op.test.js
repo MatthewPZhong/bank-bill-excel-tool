@@ -218,6 +218,24 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /setBusy\(true, 'import'\);\s*setStatus\('正在识别原表/);
     assert.match(moduleRenderer, /api\.cancelTask\(\)/);
     assert.match(main, /\{ \.\.\.result, runStatus: result\.status, status: 'success' \}/);
+
+    const calculateStart = main.indexOf("trackedIpcHandle('vccFinancialOp:run:calculate'");
+    const calculateEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:opening:initialize'", calculateStart);
+    const calculateHandler = main.slice(calculateStart, calculateEnd);
+    assert.match(
+      calculateHandler,
+      /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
+      '计算 IPC 必须保留 worker 结构化错误和 auditFailure'
+    );
+
+    const resultExportStart = main.indexOf("trackedIpcHandle('vccFinancialOp:export:result'");
+    const resultExportEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'", resultExportStart);
+    const resultExportHandler = main.slice(resultExportStart, resultExportEnd);
+    assert.match(
+      resultExportHandler,
+      /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
+      '结果导出 IPC 必须返回临时 fail-closed 闸的稳定 code 和上下文'
+    );
   });
 
   test('数据管理标题和左侧导航沿用平盘对账数据管理契约', () => {

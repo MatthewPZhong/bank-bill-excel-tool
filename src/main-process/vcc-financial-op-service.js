@@ -47,6 +47,9 @@ const {
 } = require('./vcc-financial-op-dataset-writer');
 
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
+const ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE = 'adjusted-result-export-unsupported';
+const ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE =
+  '该归档结果包含人工调整，当前版本暂不支持按生效金额导出，请升级后重试。';
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -823,6 +826,26 @@ function createVccFinancialOpService({
           '该月归档结果、主体余额或数据集状态不一致，禁止导出。'
         );
       }
+      // PR 4 仍使用只读取基础结果表的旧 writer。含人工调整的 run 必须在写文件前失败关闭，
+      // 直到后续语义 writer 能直接消费生效结果，避免归档/下月期初与 Excel 出现两套金额。
+      const adjustmentCount = Number(database.db.prepare(`
+        SELECT COUNT(*) AS adjustment_count
+        FROM vcc_fin_op_run_adjustments
+        WHERE run_id = ?
+      `).get(Number(runId)).adjustment_count) || 0;
+      if (adjustmentCount > 0) {
+        throw operationError(
+          ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
+          ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
+          {
+            context: {
+              runId: Number(runId),
+              targetMonth: run.targetMonth,
+              adjustmentCount
+            }
+          }
+        );
+      }
       return writeRunWorkbooksFn({
         db: database.db,
         runId: Number(runId),
@@ -892,6 +915,8 @@ function createVccFinancialOpService({
 }
 
 module.exports = {
+  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
+  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
   IMPORT_STATUS_TEXT,
   DATA_STATUS_TEXT,
   createVccFinancialOpService

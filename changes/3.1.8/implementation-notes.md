@@ -34,6 +34,7 @@
 | 完整结果页面只渲染后端固定九币种 review DTO，不在 renderer 做金额计算或把缺失值当 0 | 页面、归档和下月期初必须共享同一生效口径；空值补零会掩盖资金事实缺失 | renderer 基于基础行和调整行自行求和；宽松容忍缺币种 | 九币种、四类 summary 与规范十进制均严格校验；DTO 损坏或回读失败时归档 fail-closed |
 | 结果操作失败与 review 健康度分离 | 调整候选为空/暂时读取失败或 `active-vcc-task` 不代表已展示结果不可信，不应永久禁用归档 | 任一异常统一设置 `reviewHealthy=false` | 修改失败清核对并提示；无候选仅禁用修改；并发已归档/revision 变化强制回读；归档临时占用允许重新勾选重试，输入/结构性错误仍失败关闭 |
 | 重算替换在读取旧结果证据阶段失败也必须补写 rolled_back 审计 | 旧 run 若损坏，`collectRunEvidence()` 会在赋值完整 evidence 前抛错；原实现虽零删除但没有替换失败记录 | 仅依赖原始异常和数据库现状；为写审计而绕过严格 reader | 审计固化全部旧 run IDs、已成功采集的前缀、失败 run/code/message；业务事务先回滚且不删除损坏旧 run，审计失败仍只附加 `auditFailure` |
+| PR 4 对含人工调整的已归档结果在旧 writer 前临时失败关闭 | PR 4 的 writer 仍直接读取基础 `run_rows/run_balances`，而归档和下月期初已读取生效结果；继续导出会让同一 run 出现两套资金口径 | 让旧 writer 静默导出基础值；在 PR 4 提前实现 PR 5 语义模板 writer | 在全局导出租约及归档一致性检查后，若调整数大于 0，返回稳定 `adjusted-result-export-unsupported`、中文提示和 run/月/调整数上下文，writer 零调用；无调整历史归档保持兼容。PR 5 仅在 writer 改为消费生效结果且补足 readback 回归后解除此闸 |
 
 ## Assumptions
 
@@ -88,7 +89,9 @@
 | PR 4 本机生产库只读探针 | 对 `/Users/pzhong/Library/Application Support/bank-bill-excel-tool/tool-data.sqlite` 使用 `DatabaseSync({ readOnly: true })` 并执行 `PRAGMA query_only=ON`；`vcc_fin_op_runs`、`vcc_fin_op_run_rows`、`vcc_fin_op_run_balances` 均存在且 count=0，升级前尚无 `vcc_fin_op_run_adjustments` | 本机没有存量 calculated/archived run 需要兼容非规范金额或空分类；仅证明这台机器当前事实，不能泛化到其他生产机器，迁移仍只允许新增空账本/列而不得猜测或改写资金值 |
 | PR 4 调整/归档定向单测 | result-adjustments + calculator 覆盖合法/非法金额、500 Unicode 字符边界、rowKey/元数据防伪、坐标唯一、revision、effective 九币种、归档和重算替换事务；证据采集阶段损坏时亦零删除并写 rolled_back 审计 | 调整账本不可变、金额/币种语义、失败原错优先、旧结果证据和跨期归档血缘 |
 | PR 4 service/IPC/usage/renderer 契约测试 | 调整 options 为不计数查询，成功 add 计“修改结果”且持有全局租约；full-result get/manager row/revision/preload 对称；renderer 严格消费后端 DTO、失败策略可重试、归档 revision gate 和已归档只读 | IPC 旁路、usage 误计、并发状态污染、renderer 自算金额和核对状态未清除 |
-| PR 4 真实 SQLite + 真实 worker 调整归档链 | `scripts/integration/vcc-financial-op-adjustment-archive-chain.js` 直接执行 `55/55 PASS` | M1 计算→调整→关闭重开→九币种生效归档→M2 从调整后 USD `104.25` 继承期初并计算至 `107.25`；同时覆盖 stale revision、归档锁定、版本元数据和完整审计 |
+| PR 4 真实 SQLite + 真实 worker 调整归档链 | `scripts/integration/vcc-financial-op-adjustment-archive-chain.js` 直接执行 `59/59 PASS` | M1 计算→调整→关闭重开→九币种生效归档→含调整导出在 writer 前以稳定 code/context 失败关闭且零文件→M2 从调整后 USD `104.25` 继承期初并计算至 `107.25`；同时覆盖 stale revision、归档锁定、版本元数据和完整审计 |
+| PR 4 dev self-review P1/P3 定向回归 | `node --test` 运行 calculator、service、serialize-error、renderer VCC 契约共 `80/80 PASS`；隔离工作树通过 `NODE_PATH` 只读复用主仓依赖 | 无调整历史归档仍成功进入 writer；calculate 业务主错误及 rolled_back 审计二次失败从 worker 序列化到 IPC 保留 `code/detailLines/context.auditFailure`；calculate/export handler 均使用统一结构化错误返回 |
+| PR 4 dev self-review 最终静态门禁 | 全量 `src/` ESLint PASS；修改 JS `node --check` PASS；`git diff --check` PASS；`node scripts/check-vars.js` 返回“未命中任何重要变量” | 临时资金闸、IPC 接线及测试文件均无静态错误或重要变量旁路 |
 | PR 4 Electron 结果/调整预览 | `/private/tmp/codex-vcc-pr4-result.png` 与 `/private/tmp/codex-vcc-pr4-adjustment.png` 均成功生成 2480×1720 截图；调整预览入口可重复执行 | 完整结果宽表、调整行/revision/归档控件，以及主体→大类→分类→币种→调整值→原因、取消/确认顺序和桌面双列布局视觉通过；520px 单列由 renderer/CSS 契约测试锁定 |
 | PR 4 冻结代码最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4654/4654 PASS`（295 个测试文件）；integration `46/46` 脚本、`2158/2158` 断言 PASS，其中 PR 4 真实 SQLite/worker 调整归档链 `55/55 PASS` | 同一次命令完整覆盖静态检查、其他模块 smoke、全仓单测及全部集成链；证据对应冻结代码，但不替代真实财务月份和 Windows 发布门禁 |
 | PR 4 `npm run check:vars` 与人工 review | `ipcRenderer` 为真实命中：main/preload 通道对称且已有契约测试；`MODULES` 仅被 preview 路由引用，未修改枚举；`dialog`、`setStatus`、`state` 均为 VCC renderer 局部命名或局部状态，不是规则指向的 Electron `dialog` 或 `src/renderer.js` 全局 `state`；无 Critical/Risk-sensitive 命中 | ⚠️ 关联功能 review 已覆盖 IPC 对称性、preview 路由、局部弹框/状态生命周期；未发现重要变量旁路或全局状态污染 |
@@ -104,5 +107,6 @@
 | 真实月份逐主体逐币种复核 | BLOCK（发布） | 财务人员按最终核对清单执行 | 阻塞 3.1.8 发布 |
 | 其他生产机器的存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE + fail-closed | 本机生产库只读探针确认 run/row/balance 均为 0；其他机器仍须在升级前只读扫描，异常 run 要求重跑 | 不得把本机“无存量 run”结论泛化；可能要求异常旧 run 重新运行，不允许静默归档 |
 | PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | 已用事务/唯一约束/故障与 stale revision 单测消除 | 继续由 `getEffectiveRunResult()` 在每次读取、归档和审计时复核连续 sequence/revision | 当前不阻塞 PR 4；任何账本漂移仍按结构化错误失败关闭 |
+| PR 5 何时解除 PR 4 的含调整导出临时闸 | PROBE | PR 5 owner 必须确认 writer 全部金额行读取 `getEffectiveRunResult()` 生效 DTO，并补“调整→归档→导出 readback→下月继承”同口径测试后删除闸及临时 code | 未满足前不得解除，否则重新暴露两套资金口径 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | PR 6 Windows CI/手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |

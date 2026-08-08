@@ -13,7 +13,11 @@ const repository = require('../../../src/backend/vcc-financial-op-db/repository'
 const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
-const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
+const { serializeError } = require('../../../src/main-process/serialize-error');
+const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
+const {
+  createVccFinancialOpService
+} = require('../../../src/main-process/vcc-financial-op-service');
 
 class FakeWorker extends EventEmitter {
   constructor(options) {
@@ -164,6 +168,62 @@ test('调整服务查询不占写租约，新增调整独占租约并返回完�
   assert.deepEqual({ ...archiveAudit }, {
     app_version: '3.1.8',
     build_sha: 'service-build'
+  });
+});
+
+test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误和审计上下文', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const calculation = service.calculate({ targetMonth: '2026-06' });
+  const primaryError = new Error('replacement-primary-fault');
+  primaryError.code = 'SQLITE_CONSTRAINT_TRIGGER';
+  primaryError.detailLines = ['旧结果保留，替换事务已回滚'];
+  primaryError.context = {
+    targetMonth: '2026-06',
+    operationType: 'replace_calculated_result'
+  };
+  primaryError.auditFailure = {
+    name: 'Error',
+    code: 'SQLITE_BUSY',
+    message: 'replacement-audit-fault'
+  };
+  workers[0].emit('message', {
+    type: 'error',
+    error: serializeError(primaryError)
+  });
+
+  let restoredError = null;
+  await assert.rejects(calculation, (error) => {
+    restoredError = error;
+    return error.message === 'replacement-primary-fault';
+  });
+  assert.deepEqual(vccFinancialOpErrorResult(restoredError), {
+    status: 'error',
+    code: 'SQLITE_CONSTRAINT_TRIGGER',
+    message: 'replacement-primary-fault',
+    detailLines: ['旧结果保留，替换事务已回滚'],
+    dependentMonths: [],
+    context: {
+      targetMonth: '2026-06',
+      operationType: 'replace_calculated_result',
+      auditFailure: {
+        name: 'Error',
+        code: 'SQLITE_BUSY',
+        message: 'replacement-audit-fault'
+      }
+    }
   });
 });
 
@@ -666,7 +726,7 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
   assert.equal(worker.terminateCount, 0);
 });
 
-test('直接结果导出持有同一租约，退出等待 writer 完成', async (t) => {
+test('无调整的历史归档仍可导出，且直接结果导出持有同一租约', async (t) => {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
@@ -732,6 +792,9 @@ test('直接结果导出持有同一租约，退出等待 writer 完成', async 
   });
   t.after(() => db.close());
 
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+  `).get(runId).row_count, 0, '历史归档没有人工调整');
   assert.equal(service.latestArchivedRun().runId, runId, '不一致的更新 archived run 不得成为 latest');
 
   const exporting = service.exportRun({ runId, outputPath: '/tmp/fixture.xlsx' });

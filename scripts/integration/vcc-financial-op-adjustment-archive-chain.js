@@ -4,8 +4,9 @@
 //   1. 首月真实计算后新增调整，revision 与创建版本元数据原子落库；
 //   2. 关闭并重新打开数据库后，调整仍紧邻目标基础行展示且生效汇总不漂移；
 //   3. 归档写入九币种生效余额，并固化含调整事实的完整审计证据；
-//   4. 次月真实计算从上月归档生效值继承期初，验证跨月余额血缘；
-//   5. stale revision 与已归档结果修改均 fail closed。
+//   4. PR 4 旧 writer 对含调整归档失败关闭，且在 writer 调用前返回稳定错误；
+//   5. 次月真实计算从上月归档生效值继承期初，验证跨月余额血缘；
+//   6. stale revision 与已归档结果修改均 fail closed。
 //
 // 用法：node scripts/integration/vcc-financial-op-adjustment-archive-chain.js
 
@@ -29,6 +30,8 @@ const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
 const {
+  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
+  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');
 
@@ -241,6 +244,7 @@ async function run() {
   const dbPath = path.join(tempDir, 'tool-data.sqlite');
   let db = null;
   let service = null;
+  let resultWriterCallCount = 0;
   console.log('==== VCC 财务OP结果调整与跨月归档链集成验证 ====');
   try {
     db = openDatabase(dbPath);
@@ -329,7 +333,11 @@ async function run() {
       database: { db, dbPath },
       assetsDir: '',
       appVersion: APP_VERSION,
-      buildSha: BUILD_SHA
+      buildSha: BUILD_SHA,
+      writeRunWorkbooksFn: async () => {
+        resultWriterCallCount += 1;
+        return { filePaths: [path.join(tempDir, 'unexpected-adjusted-export.xlsx')] };
+      }
     });
     const reopened = service.getRunResult(runId);
     assertEq(reopened.status, 'calculated', '重开数据库后结果仍为待归档');
@@ -414,6 +422,21 @@ async function run() {
       '104.25',
       '归档审计固化 USD 生效余额'
     );
+
+    const blockedExportPath = path.join(tempDir, 'adjusted-result.xlsx');
+    const blockedExportError = await expectCode(
+      () => service.exportRun({ runId, outputPath: blockedExportPath }),
+      ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
+      ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
+      '含调整的归档结果在旧 writer 前失败关闭'
+    );
+    assertDeepEq(blockedExportError.context, {
+      runId,
+      targetMonth: M1,
+      adjustmentCount: 1
+    }, '导出阻断返回稳定 run/月/调整数上下文');
+    assertEq(resultWriterCallCount, 0, '含调整结果被阻断时 writer 零调用');
+    assertEq(fs.existsSync(blockedExportPath), false, '含调整结果被阻断时零输出文件');
 
     seedMonth(db, M2, fixedBalances('100', { USD: '107.25', EUR: '116' }));
     const m2Preflight = service.preflightRun({ targetMonth: M2 });
