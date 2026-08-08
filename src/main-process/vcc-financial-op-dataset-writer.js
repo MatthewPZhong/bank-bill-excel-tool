@@ -7,9 +7,11 @@ const {
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES,
   SYSTEM_OP_HEADERS,
+  SYSTEM_OP_DEFINITION,
   getSourceDefinition,
   headersEqual
 } = require('../backend/vcc-financial-op/definitions');
+const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
 const {
   normalizeYearMonth,
   pendingCanonicalValues
@@ -164,6 +166,111 @@ function detailCheckValues(row, rawValues) {
   return [...sourceValues, required(row.signed_amount, '发生额')];
 }
 
+function topLevelJsonObjectKeys(json) {
+  const keys = [];
+  let objectDepth = 0;
+  let arrayDepth = 0;
+  for (let index = 0; index < json.length; index += 1) {
+    const char = json[index];
+    if (char === '"') {
+      const tokenStart = index;
+      let escaped = false;
+      for (index += 1; index < json.length; index += 1) {
+        const stringChar = json[index];
+        if (escaped) {
+          escaped = false;
+        } else if (stringChar === '\\') {
+          escaped = true;
+        } else if (stringChar === '"') {
+          break;
+        }
+      }
+      if (objectDepth === 1 && arrayDepth === 0) {
+        let next = index + 1;
+        while (/\s/.test(json[next] || '')) next += 1;
+        if (json[next] === ':') keys.push(JSON.parse(json.slice(tokenStart, index + 1)));
+      }
+      continue;
+    }
+    if (char === '{') objectDepth += 1;
+    else if (char === '}') objectDepth -= 1;
+    else if (char === '[') arrayDepth += 1;
+    else if (char === ']') arrayDepth -= 1;
+  }
+  return keys;
+}
+
+function invalidSystemLineage(snapshot, detail) {
+  return exportError(
+    'invalid-export-lineage',
+    `系统财务OP主体 ${snapshot.subject || snapshot.id} ${detail}，无法导出`
+  );
+}
+
+function systemCanonicalBalances(snapshot) {
+  if (typeof snapshot.balances_json !== 'string' || snapshot.balances_json.trim() === '') {
+    throw invalidSystemLineage(snapshot, '缺少九币种 canonical 余额血缘');
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(snapshot.balances_json);
+  } catch (_error) {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw invalidSystemLineage(snapshot, '的九币种 canonical 余额不是有效对象');
+  }
+
+  let serializedKeys;
+  try {
+    serializedKeys = topLevelJsonObjectKeys(snapshot.balances_json);
+  } catch (_error) {
+    throw invalidSystemLineage(snapshot, '的九币种 canonical 余额键无法解析');
+  }
+  const seenKeys = new Set();
+  const duplicateKeys = serializedKeys.filter((key) => {
+    if (seenKeys.has(key)) return true;
+    seenKeys.add(key);
+    return false;
+  });
+  if (duplicateKeys.length > 0) {
+    throw invalidSystemLineage(
+      snapshot,
+      `的九币种 canonical 余额存在重复币种：${[...new Set(duplicateKeys)].join('、')}`
+    );
+  }
+
+  const balanceKeys = Object.keys(parsed);
+  const missingCurrencies = SUPPORTED_CURRENCIES.filter((currency) => !Object.hasOwn(parsed, currency));
+  const unexpectedCurrencies = balanceKeys.filter((currency) => !SUPPORTED_CURRENCIES.includes(currency));
+  if (
+    balanceKeys.length !== SUPPORTED_CURRENCIES.length
+    || missingCurrencies.length > 0
+    || unexpectedCurrencies.length > 0
+  ) {
+    const details = [];
+    if (missingCurrencies.length > 0) details.push(`缺少 ${missingCurrencies.join('、')}`);
+    if (unexpectedCurrencies.length > 0) details.push(`未知 ${unexpectedCurrencies.join('、')}`);
+    throw invalidSystemLineage(
+      snapshot,
+      `的九币种 canonical 余额币种集合不完整${details.length > 0 ? `：${details.join('；')}` : ''}`
+    );
+  }
+
+  const canonicalBalances = {};
+  for (const currency of SUPPORTED_CURRENCIES) {
+    try {
+      canonicalBalances[currency] = canonicalizeVccAmount(
+        parsed[currency],
+        `系统财务OP ${snapshot.subject || snapshot.id} ${currency} 财务余额`
+      );
+    } catch (_error) {
+      throw invalidSystemLineage(snapshot, `的 ${currency} canonical 财务余额非法`);
+    }
+  }
+  return canonicalBalances;
+}
+
 function systemSnapshotRows(snapshot) {
   const payload = parseJson(snapshot.raw_json, null);
   if (
@@ -177,6 +284,8 @@ function systemSnapshotRows(snapshot) {
       `系统财务OP主体 ${snapshot.subject || snapshot.id} 的 16 列原始行血缘不完整，无法导出`
     );
   }
+  const canonicalBalances = systemCanonicalBalances(snapshot);
+  const balanceIndex = SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader];
   const normalizedCurrencies = new Set();
   const rows = payload.rows.map((row) => {
     if (!row || !Array.isArray(row.displayValues) || row.displayValues.length !== SYSTEM_OP_HEADERS.length) {
@@ -193,7 +302,29 @@ function systemSnapshotRows(snapshot) {
       );
     }
     normalizedCurrencies.add(currency);
-    return row.displayValues.map((value) => value == null ? '' : String(value));
+    const canonicalBalance = canonicalBalances[currency];
+    if (row.balanceEvidence !== null && row.balanceEvidence !== undefined) {
+      if (typeof row.balanceEvidence !== 'object' || Array.isArray(row.balanceEvidence)) {
+        throw invalidSystemLineage(snapshot, `的 ${currency} 余额读取证据无效`);
+      }
+      if (Object.hasOwn(row.balanceEvidence, 'canonicalValue')) {
+        let evidenceCanonical;
+        try {
+          evidenceCanonical = canonicalizeVccAmount(
+            row.balanceEvidence.canonicalValue,
+            `系统财务OP ${snapshot.subject || snapshot.id} ${currency} 读取证据`
+          );
+        } catch (_error) {
+          throw invalidSystemLineage(snapshot, `的 ${currency} 余额读取证据非法`);
+        }
+        if (evidenceCanonical !== canonicalBalance) {
+          throw invalidSystemLineage(snapshot, `的 ${currency} 余额读取证据与 canonical 余额不一致`);
+        }
+      }
+    }
+    const values = row.displayValues.map((value) => value == null ? '' : String(value));
+    values[balanceIndex] = canonicalBalance;
+    return values;
   });
   if (SUPPORTED_CURRENCIES.some((currency) => !normalizedCurrencies.has(currency))) {
     throw exportError(
@@ -216,7 +347,7 @@ function exportHeaders(scope) {
 function *iterateDatasetRows(db, scope) {
   if (scope.sourceType === SOURCE_TYPES.SYSTEM_OP) {
     const snapshots = db.prepare(`
-      SELECT id, subject, raw_json
+      SELECT id, subject, balances_json, raw_json
       FROM vcc_fin_op_system_snapshots
       WHERE target_month = ?
       ORDER BY id
@@ -253,7 +384,7 @@ function countDatasetRows(db, scope) {
   }
   let count = 0;
   for (const snapshot of db.prepare(`
-    SELECT id, subject, raw_json
+    SELECT id, subject, balances_json, raw_json
     FROM vcc_fin_op_system_snapshots
     WHERE target_month = ?
     ORDER BY id
