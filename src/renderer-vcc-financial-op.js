@@ -413,6 +413,12 @@
   }
 
   function blockedCalculationMessage(result) {
+    const issueMessages = Array.isArray(result.issues)
+      ? result.issues
+        .map((issue) => String(issue && issue.message || '').trim())
+        .filter(Boolean)
+      : [];
+    if (issueMessages.length > 0) return issueMessages.join('\n');
     if (result.code === 'active-imports') {
       return `账期内仍有 ${Array.isArray(result.activeImports) ? result.activeImports.length : 0} 个导入批次未结束。请等待导入完成后重新运行。`;
     }
@@ -437,6 +443,9 @@
       return `参与运算主体不一致${missing ? `；缺少系统财务OP主体：${missing}` : ''}${extra ? `；系统财务OP多出主体：${extra}` : ''}。`;
     }
     if (result.code === 'active-vcc-task') return result.message || '已有 VCC 财务OP任务正在运行。';
+    if (result.code === 'preflight-required') {
+      return result.message || '缺少有效的运行前检查凭证，请刷新数据并重新确认后再运行。';
+    }
     if (result.code === 'state-changed') return result.message || '数据状态已变化，请刷新并重新确认。';
     return result.message || '当前数据不满足计算条件。';
   }

@@ -15,6 +15,12 @@
 | 系统财务OP数据管理导出以 `balances_json` 为九币种财务余额唯一权威源，`raw_json.rows[].displayValues` 仅保留其余 15 列展示血缘 | PR #124 review 用真实精度反例证明显示值 `135886024.6` 会覆盖 canonical `135886024.59`；Spec §4.7.3 要求数据管理全链路保持原精度 | 继续从 `displayValues` 导出全行；在 writer 内重算余额 | 仅“财务余额”按 `normalizedCurrency` 覆盖为 canonical；九币种集合、金额或读取证据损坏时 `invalid-export-lineage` 失败关闭，不回退显示值 |
 | 两份已在工作区且哈希匹配的模板视为用户提供的本迭代资产 | 哈希与 Spec §2.3/§2.4 精确一致 | 重新生成或肉眼复制模板 | 保留用户原始工作簿字节，测试不得改写 golden |
 | 极老残缺审计表为空时允许补列；若已有 Pending 行却缺少 `raw_json` 等重算证据则失败关闭 | 无原始 46/48 列载荷无法证明新 hash，静默跳过会制造同键异内容 | 猜测列序或沿用旧 hash | 空旧库兼容升级；有事实但无血缘的旧库必须人工处理 |
+| 系统财务OP金额以 workbook relationship 指向 worksheet 的原始 `<v>` lexical token 为第一权威源 | SheetJS 在形成 `Number` 前可能已合并大额分币，显示值也可能被单元格格式截断 | 继续信任 SheetJS `raw:true` Number；从显示文本反推 | 公式使用缓存 `<v>`；重复余额 cell、空/损坏 XML 稳定以 `amount-precision-invalid` 失败关闭；只有明确缺少 OOXML relationship/entry 时才进入 Number fallback |
+| OOXML 缺失时的 Number fallback 允许安全整数，非整数在 `abs(value) >= 2^46` 时拒绝 | 15 位整数在 `Number.isSafeInteger` 时可精确证明；`2^46` 起浮点相邻间距已不能保证分币唯一 | 所有大于低阈值的 Number 一律拒绝；继续放行至 `MAX_SAFE_INTEGER` | 合法 15 位整数不误伤，大额非整数缺 lexical 证据时 fail closed；最终仍受两位小数与 15 位有效数字门禁约束 |
+| 财务OP运行必须同时通过主进程 service 与 worker 内 `expectedInputFingerprint` 校验 | 可选 fingerprint 允许绕过“预检确认 → 事务内二次预检”的状态一致性门禁 | 仅依赖 renderer 总会传参；只在主进程入口校验 | 缺失、格式非法或与最新状态不一致均不写计算结果；伪造 64 位值只能进入 `state-changed`，不能放行 |
+| preflight 以稳定顺序返回完整 `issues[]`，renderer 逐条展示；损坏系统快照不再冒充 missing dataset | 单一 top-level code 会遮蔽同账期其它待处理问题，用户需反复运行才能逐个发现 | 保留 first-error-only；把 invalid snapshot 继续塞入 `missing` | 兼容保留 top-level code/missing 等字段，同时一次展示 active、缺失/空表、快照损坏、归档、未处理导入和主体差异 |
+| 后置候选表头通过 row-scanner 的按行稀疏全宽模式校验到 XFD | 原扫描器只有物理第 1 行全宽，后置 Pending 表头的 BM/XFD 增列会被 64 列预览截断 | 将所有行稠密扩到 16384 列；只扩大固定预览宽度 | 普通数据行契约不变；候选行只物化实际非空 cell，XFD fixture 仅有 2 个数组键；正式读取再次全宽核验命中表头行 |
+| `systemRowError` 同时保留顶层定位字段与 JSON-safe `context` | worker 错误序列化只透传 `context`，原顶层 `sourceRow/fieldName/sheetName` 会在主进程丢失 | 扩展全局 serialize-error 的专用字段列表 | 保持库内旧调用兼容，跨 worker 的 `amount-precision-invalid` 仍可定位 sheet、行和字段 |
 | GitHub 认证问题不阻塞本地实现 | `gh` 已安装但 token 失效；代码和测试均可离线推进 | 等待登录后才开始编码 | push/PR 创建仍明确阻塞，不能声称已发布 |
 | PR 2 将首月事实诊断拆到无迁移依赖的 `state-model.js` | 运行时 repository 不应反向依赖 migrations；迁移和运行门禁必须共享同一严格月份诊断 | repository 直接导入 migrations；复制两套判断 | 避免依赖环和迁移副作用，旧库诊断与运行门禁口径一致 |
 | 多期初月份/畸形月份只记录幂等诊断并阻断 VCC 功能，不让 `AppDatabase.init()` 整体失败 | Spec 要求不自动删改资金事实；桌面应用仍需启动供诊断和其他模块使用 | 启动抛错；自动选择最早月份并覆盖 | 资金事实原样保留；preflight/calculate/initialize fail-closed |
@@ -22,6 +28,9 @@
 | 首月期初提交完整性只检查 `subjects - opening.balances` 的真正缺失主体 | PR #125 review 证明 preflight/renderer 只向用户收集 `missingOpeningSubjects`；要求重复提交已初始化主体会阻断同月新增主体 | 每次提交全部主体；跳过完整性检查 | 已初始化主体无需重复提交；主动重放已初始化主体仍按 content hash 幂等跳过或拒绝改写，真正漏交的新主体仍整事务回滚；属于既定契约缺陷修复，不改 Spec |
 | `rowKey` 固定为 `v1:sha256(JSON.stringify([row_kind, subject, source_type, category_major || '', category_minor || '']))` | 调整坐标必须跨币种稳定，又不能受 run/id/金额/展示顺序影响 | 使用数据库行 id；把币种或金额纳入 key | 同一逻辑行不同币种共享 rowKey，以 `rowKey × currency` 构成调整坐标 |
 | PR 2 的 `getEffectiveRunResult()` 仅做只读统一重算，并严格核对 sequence/revision/基础公式/坐标 | 基础 `run_rows`、`run_balances` 必须不可变；损坏的调整账本不得静默参与归档 | 就地覆盖基础表；遇到损坏记录跳过 | 后续 PR 4 复用同一 reader 接入调整写入与归档；任何事实不一致均结构化失败 |
+| 生效结果的基础行与不可变调整先用 `DecimalAccumulator` 无损聚合，仅在每个最终可见字段分别执行 15 位有效数字校验 | PR #125 review 证明 `999999999999999 + 1 - 1` 的合法抵消链会被中间值校验误拒；计算器既有契约也是“全量聚合后再校验最终值” | 每一步调用 `canonicalizeVccAmount`；改用 `Number`；对整个 DTO 只做一次总校验 | 合法抵消可通过，真实最终溢出继续 fail-closed；`base-period`、`adjustment-total`、行级和余额级字段各自独立封顶，不允许跨字段掩盖溢出 |
+| 最终金额溢出统一返回 `result-amount-out-of-range`，稳定坐标放入 JSON-safe `error.context` | worker 的 `serializeError()` 只保留 `code/detailLines/context`；仅挂顶层 `scope/field/rowKey/value` 会在跨线程后丢失 | 只依赖错误 message；只保留任意顶层属性 | 调用方跨 worker 仍可读取 scope、field、rowKey/summary 坐标和原始十进制值；真实错误已做 `serializeError → deserializeError` 往返回归 |
+| PR 1 合入 PR 2 时，保留 PR 1 的强制 fingerprint 与完整 `issues[]`，并合并 PR 2 的 module/openingState 门禁 | 两分支分别收紧预检时序与首月资金状态，任一侧被覆盖都会形成绕过；用户在知悉资金红线后明确批准合并规则 | 任选一侧解决冲突；让 openingState 覆盖其它输入问题；把首月待初始化当预检错误 | `migrationDiagnostic` 去重后保持首项；active、缺/空表、非法快照、归档、未处理记录、主体问题按稳定顺序；其它 blocked opening 后置；`first-month-initialization-required` 仅在无其它 issue 时随成功 preflight 进入初始化流程；primary code 取首项，message 聚合全部 |
 | PR 3 的归档枚举和解归档均复用同一套严格一致性检查，并逐主体逐九币种比对含调整的生效余额 | 单看 `run.status` 会把缺 archive、错 run、混合 dataset 或余额漂移暴露为可操作月份 | 宽松枚举后在提交时尽力修复；只比基础 calculated balance | 损坏月份不进入普通枚举；直接 preview 返回 `archive-state-inconsistent` 并失败关闭 |
 | 所有 VCC worker/直接任务共享一个全局任务租约，任务代次仅在释放租约时递增 | preview token 需要同时防数据库状态漂移和预览后插队任务；导出、归档、期初初始化、异常处理等直接写也不能旁路 | 只互斥 worker；获取租约即递增代次 | preview 与提交按 generation 二次门禁；任何在先任务完成后旧预览失效 |
 | 破坏性 worker 在 `openDb()` 和 migration 之前先完成 `critical-ready → 父进程保护 → critical-ack` 握手 | 打开数据库本身可能产生 migration 写事务；父进程必须在允许写入前承诺不 terminate | 事务开始后再通知；超时一律 terminate | 仅事务前任务可协作取消/超时终止；已保护或状态未知任务只能等待收口 |
@@ -38,7 +47,7 @@
 | opening/result/source 删除在所有业务写完成后、COMMIT 前最后重跑目标月全 status run/全子表与操作专属零残留断言；允许新行以事务前 max-id 精确限定 | broad target exclusion 会漏掉 success audit、dataset deletion 或 import-record UPDATE trigger 后置新建 archived run/child、目标 source/dataset、attempt 或 deletion row | 只依赖中途 postcondition 或 preserved fingerprint；只按 `status='calculated'` 查残留 | operation audit 边界后恰 1 条；source deletion 边界后恰 1 条且字段一致；system attempt 物化前不得越过 preserved boundary，物化后仅允许记录的 backfill fingerprint/max/count；后置重建全部回滚 |
 | 每个破坏性事务在 `BEGIN IMMEDIATE` 后仅从 SQLite 读取一次 localtime，success audit、source deletion/import deletion/system backfill 及 unarchive run/dataset 时间线都显式写入并精确断言该值 | 仅断言时间非空会让 trigger 写入等长错误时间仍提交；多次 `datetime('now')` 也不能证明同一事务时间线 | 使用 column default/各 SQL 自行取时；只做 truthy 检查 | 同一事务的 `operation_audit.created_at`、`dataset_deletions.deleted_at`、`import_records.dataset_deleted_at`、本次 backfill `created_at` 与 unarchive `updated_at` 可相互对账；任一非空错值均回滚 |
 | 破坏性提交统一要求非空 preview token 和显式安全 generation，并移除 worker legacy `delete-dataset` action | 参数解构默认和 service 预先 `Number('')` 会把缺失代次降为 0，低层或旧 worker action 可绕过用户已观察状态确认 | 只在 acquireTask/部分低层校验；缺失值按 generation 0 执行 | service 在创建 worker 前对 raw payload 调用统一 validator；unarchive 与 unified source/opening/result 内部入口继续防御，缺失/null/空串/NaN/负数/超范围均不进入业务事务 |
-| 损坏归档月在继续排除普通枚举的同时通过注入 logger 输出固定结构事件 | PR 3 的 fail-closed 枚举原先静默 `continue/catch`，生产无法发现 run/archive/dataset 漂移 | 向用户枚举返回损坏月份；日志失败时中断枚举 | 从后续 PR 5 最小回移 `archiveConsistencyLogger`；日志异常仅影响旁路观测，不会让损坏月重新可操作 |
+| 损坏归档月在继续排除普通枚举的同时通过注入 logger 输出固定结构事件 | PR 3 的 fail-closed 枚举原先静默 `continue/catch`，生产无法发现 run/archive/dataset 漂移 | 向用户枚举返回损坏月份；日志失败时中断枚举 | 从后续 PR 5 最小回移到 PR 3 的 `archiveConsistencyLogger`；日志异常仅影响旁路观测，不会让损坏月重新可操作 |
 
 ## Assumptions
 
@@ -71,6 +80,8 @@
 | 极老审计表回归 | 空残缺表可幂等补审计列；存在 Pending 行但缺 `raw_json` 时事务回滚且历史 hash 不变 | 迁移兼容与失败关闭 |
 | 真实样本 `/Users/pzhong/Downloads/财务OP (22).xlsx` | PPHK JPY 读取为 `135886024.59`；检测到显示值 `135886024.6` 与原始值不一致并保留审计证据 | 原始数值优先及大额两位小数不被显示格式截断 |
 | PR 1 `npm run release-check` | lint 通过；smoke 通过；unit `4587/4587 PASS`；integration `44/44` 脚本、`2051/2051` 断言通过 | 全仓静态检查、核心业务回归、迁移/大文件/side DB 集成门禁 |
+| PR 1 review 定向回归 | 核心 7 文件 `93/93 PASS`；system importer + serialize-error `42/42 PASS` | 正负大额分币、relationship 重定位、公式缓存、安全 15 位整数、重复/损坏 XML、跨 worker 定位上下文、强制 fingerprint、多问题完整展示、后置 XFD 增列与稀疏键数 |
+| PR 1 review 全仓门禁 | changed src ESLint 通过；smoke 通过；unit `4600/4600 PASS`；integration `44/44` 脚本、`2051/2051` 断言通过；`git diff --check` 通过 | 共享 row-scanner 四方等价、VCC 资金计算、迁移、全仓模块与大文件集成零回归 |
 | `gh auth status` | 默认账号 token invalid | 仅 GitHub 发布被阻塞 |
 | PR 2 定向单测 | `39/39 PASS`（calculator 22、state/migration 8、effective result 9） | 首月 claim 原子回滚、同月新增主体增量初始化与漏交回滚、迁移诊断启动隔离、非首月/早于首月门禁、多失败 code/message 同源、run fingerprint/revision/timestamp、rowKey 稳定、防伪/金额边界、跨币种调整及基础表不可变 |
 | `AppDatabase.init()` 多期初旧库回归 | 二次启动成功；`first_month` 保持 `NULL`；幂等诊断仅 1 条 | 诊断不扩大为全应用不可启动，同时 VCC 运行层保持失败关闭 |
@@ -80,6 +91,16 @@
 | PR 2 reconciliation blindspot pass | 主键血缘、九币种、月份边界、幂等、事务回滚、基础表不可变和行/余额坐标守恒均有代码与测试证据 | 未发现自动删改或静默补零；首月期初与生效金额仍需发布前人工财务复核 |
 | PR #125 review 增量主体回归 | calculator `22/22 PASS`；首月既有 PPHK 后新增 NEW 时 preflight/calculate 仅返回 NEW，仅提交 NEW 成功，PPHK 的金额/hash/说明与 `first_month` 不变；新增 NEW+NEW2 仅提交 NEW 时 NEW 写入回滚 | 修复已初始化主体被误判 omitted，同时锁定真正缺失主体、九币种和事务完整性 |
 | PR #125 review 链路与变量门禁 | service/renderer `21/21 PASS`；`npm run check:vars` 扫描本次唯一 src 改动，未命中重要变量 | renderer 仍只提交缺失主体；未改 IPC/用户流程，未触及既有重要变量清单 |
+| PR #125 review 金额抵消与最终封顶定向回归 | result-adjustments、calculator、state migration、serialize-error 合计 `59/59 PASS`；其中 effective result `14/14 PASS` | 基础行和 adjustment 的“先越界后抵消”合法；基础汇总、调整汇总、行级 effectiveAmount、跨行 balance 的真实最终溢出均返回稳定 code/context，不返回部分 DTO，数据库/归档/调整账本不变；sequence、revision 与九币种契约保持 |
+| PR #125 review 生效结果真实 SQLite 集成 | `scripts/integration/vcc-financial-op-effective-result.js` 返回 `19/19 PASS`，数据库关闭重开后读取 | 锁定合法抵消、精确字符串、归档只读和真实最终溢出；失败前后 run/row/balance/adjustment/archive 快照一致 |
+| PR #125 review 静态与变量门禁 | 变更源文件 ESLint、3 个 JS 文件 `node --check`、`git diff --check` 全部通过；`npm run check:vars` 未命中任何重要变量 | 未引入语法/格式问题；本次金额聚合修复未触及 `rules/important-variables.md` 中的重要变量 |
+| PR #125 review reconciliation blindspot pass | 已复核 rowKey×currency 血缘、币种隔离、精确十进制、逐可见字段封顶、只读生命周期、失败原子性与跨 worker 可观测性 | 未发现 P3+ 新缺口；金额规则属于资金红线，自动化证据不能替代发布前真实财务样本人工复核 |
+| PR #125 review 全仓 `npm run release-check` | lint、smoke 通过；unit `4618/4618 PASS`；integration `45/45` 脚本、`2070/2070` 断言通过 | 新增集成脚本已被 runner 自动发现并同步 `rules/integration-test-policy.md`；全仓资金、迁移、大文件和 side DB 回归无失败 |
+| PR 1 → PR 2 组合定向回归 | PR 1 导入/预检/跨 worker `81/81 PASS`；PR 2 calculator/state/effective `48/48 PASS`；真实 SQLite effective `19/19 PASS` | 同时保留 OOXML 原始金额、Pending 全宽表头、强制 fingerprint、首月状态模型、最终金额封顶和归档只读契约 |
+| 预检并存门禁矩阵 | calculator `26/26 PASS` | 缺表+缺上月归档按稳定顺序完整展示；非法快照+首月待初始化不写期初或 claim 首月；migration diagnostic+缺表保持诊断最高优先且 issue 不重复；所有失败均在写 run/opening 前阻断 |
+| PR 1 → PR 2 合并后全仓门禁 | changed src ESLint、`git diff --check` 通过；smoke 通过；unit `4631/4631 PASS`；integration `45/45` 脚本、`2070/2070` 断言通过 | 资金计算、导入、迁移、side DB、大文件及 UI 静态契约无回归；integration runner 已同步测试清单 |
+| PR 1 → PR 2 `npm run check:vars` | Runtime-state 命中通用词 `state`；实际未改 `src/renderer.js` 顶层 `state`，仅新增 `state-changed` 提示与 VCC issues 展示 | 已复核模板列表、当前模块、导出可用性三组联动均未改；`src/renderer-vcc-financial-op.js` 只读错误 DTO 并展示，未新增/改写全局状态 |
+| PR 1 → PR 2 reconciliation blindspot pass | 已复核预检优先级、首月 claim、失败零写入、fingerprint 二次核对、金额/币种精度、rowKey 血缘、归档只读与错误可观测性 | 未发现 P3+ 新缺口；本次同时触及期初与金额规则，仍属资金红线，发布前真实月份逐主体逐币种人工复核保持阻塞 |
 | PR 3 破坏性事务定向单测 | 冻结代码全仓 unit 由 team-lead 复核 `4633/4633 PASS`；其中覆盖严格归档一致性、调整后余额、非尾月及孤立后月归档状态、token 失效统一返回 `state-changed`、期初/结果整体删除、事务故障和失败审计二次失败 | 破坏性操作失败关闭、原始错误优先、跨月血缘、源事实/first_month/调整证据守恒 |
 | PR 3 真实 SQLite + 真实 worker 状态链 | `scripts/integration/vcc-financial-op-destructive-state-chain.js` 为 `52/52 PASS` | M1 非尾阻断→M2 解归档/删结果→M1 解归档/删期初；持久化审计、generation、`state-changed` token 门禁和触发器故障全链路 |
 | PR 3 全量 integration | `45/45` 脚本、`2103/2103` 可计数断言通过；自动刷新 `rules/integration-test-policy.md` 第七节 | 新状态链纳入 auto-discovery 门禁，既有迁移、大文件、side DB 和其他业务集成无回归 |
@@ -106,6 +127,10 @@
 | PR #126 第四轮全仓 unit + smoke | unit `4701/4701 PASS`（295 个测试文件）；`npm run smoke` PASS | 当前冻结代码的全仓单测及其他业务基础集成链无回归；最终堆叠分支仍由 team-lead 统一运行 release-check |
 | PR #126 第四轮静态与变量门禁 | 修改 JS `node --check` PASS；targeted ESLint PASS；`git diff --check` PASS；`npm run check:vars` 仅命中 Runtime-state 通用词 `state` | 5 个 src 均为后端 VCC 事务局部状态，未改 renderer 全局 `state`，无 Critical / Important-skeleton / Risk-sensitive 命中 |
 | PR #126 第四轮 blindspot + reconciliation 复核 | 检查最后写后断言窗口、显式低/高 ID、跨月归属、全 disposition 物化、时间线与错误上下文 | 未发现新的可自动化 P2/P3；低 ID 由旧行指纹捕获，高 ID 由 exact allowset 捕获，无业务写位于最终断言之后。真实资金月份复核仍为人工红线 |
+| PR 2 → PR 3 restack staged diff 复核 | `MERGE_HEAD=b05a2478f060ab0c25a07b39cf3fb87853da4e3c`；无 unmerged entry/冲突标记；`git diff --cached --check` PASS；两条 service worker 测试仅给既有 `calculate()` 调用补合法小写 64 位 fingerprint，未删除或放宽断言 | 同时保留 PR 2 结构化 preflight + `openingState`、强制 `expectedInputFingerprint`、`DecimalAccumulator` 最终值封顶，以及 PR 3 事务前 critical 握手、统一 token/generation 门禁、四类破坏性事务 exact allowset |
+| PR 2 → PR 3 restack 全仓门禁 | `NODE_PATH=/Users/pzhong/Desktop/Project/bank-bill-excel-tool/node_modules npm run test:unit` 为 `4719/4719 PASS`（295 个测试文件）；`npm run smoke` PASS；`npm run test:integration` 为 `46/46` 脚本、`2134/2134` 可计数断言 PASS | 真实 SQLite + worker destructive state chain `64/64 PASS`，effective result `19/19 PASS`；integration runner 已同步 policy，且两条 VCC 集成入口同时在清单内 |
+| PR 2 → PR 3 restack `npm run check:vars` | 仅命中 Runtime-state 通用词 `state` 并按工具约定以 code 2 提醒；实际 diff 命中为 `opening-state` 等 VCC 状态码，未修改 `src/renderer.js` 顶层 `state`，无 Critical / Important-skeleton / Risk-sensitive 命中 | 已按清单复核模板列表、当前模块、导出可用性三组联动未变；smoke 已通过，PR body 仍保留关联功能 review 说明 |
+| PR 2 → PR 3 restack reconciliation blindspot pass | 复核 fingerprint/月份/source/run 主键血缘、九币种与十进制金额、重放及并发 generation、事务部分失败、全表 exact allowset、审计与行/子表守恒 | 自动化未发现新 P2/P3 缺口；未自动修复生产异常资金事实。真实月份逐主体逐币种、生产副本历史归档一致性与 Windows 退出时序仍保持人工/平台门禁 |
 
 ## Remaining Unknowns
 
@@ -116,6 +141,6 @@
 | GitHub 登录恢复 | BLOCK（发布） | 用户执行 `gh auth login -h github.com`，Codex 复检 | 阻塞 push/PR，不阻塞实现 |
 | 真实月份逐主体逐币种复核 | BLOCK（发布） | 财务人员按最终核对清单执行 | 阻塞 3.1.8 发布 |
 | 生产存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE | PR 4 接线前用真实数据库只读扫描；reader 已 fail-closed | 可能要求旧 run 重新运行，不允许静默归档 |
-| PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务 | 阻塞人工调整入口和 effective 归档接线 |
+| PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务；PR 2 已锁定 reader 与跨 worker 错误 context 契约 | 阻塞人工调整入口和 effective 归档接线 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | 自动化已覆盖“取消在先→critical-ready 未 protected→timeout terminate”和“protected 后只等待”；PR 6 仍需 Windows CI/手测在真实 SQLite 事务中触发关窗 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |

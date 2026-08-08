@@ -72,6 +72,27 @@ test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
   assert.doesNotMatch(workerSource, /['"]delete-dataset['"]/, '不得保留绕过统一确认契约的 legacy action');
 });
 
+test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 worker', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: ''
+  });
+  t.after(() => service.terminate());
+
+  for (const expectedInputFingerprint of [undefined, 'short', 'F'.repeat(64)]) {
+    const result = await service.calculate({
+      targetMonth: '2026-06',
+      expectedInputFingerprint
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.code, 'preflight-required');
+  }
+});
+
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
@@ -438,7 +459,10 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   assert.equal(oldPreview.taskGeneration, 0);
-  const calculation = service.calculate({ targetMonth: '2026-06' });
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64)
+  });
   assert.equal(service._taskStateForTests().taskGeneration, 0);
   assert.throws(() => service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
@@ -580,7 +604,10 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
   await termination;
   assert.equal(worker.terminateCount, 0);
   await assert.rejects(
-    service.calculate({ targetMonth: '2026-07' }),
+    service.calculate({
+      targetMonth: '2026-07',
+      expectedInputFingerprint: 'a'.repeat(64)
+    }),
     (error) => error.code === 'service-closing'
   );
 });
