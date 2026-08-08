@@ -2,6 +2,11 @@
 
 const { SOURCE_TYPES, SOURCE_LABELS } = require('./definitions');
 const { normalizeYearMonth } = require('./row-mapper');
+const {
+  buildOperationState,
+  operationPreviewToken,
+  assertPreviewToken
+} = require('./operation-state');
 
 const DETAIL_SOURCE_TYPES = new Set([
   SOURCE_TYPES.RECHARGE,
@@ -229,6 +234,7 @@ function deleteCalculatedRuns(db, targetMonth) {
     WHERE target_month = ? AND status = 'calculated'
   `).get(targetMonth));
   const childTables = [
+    'vcc_fin_op_run_adjustments',
     'vcc_fin_op_run_rows',
     'vcc_fin_op_run_balances',
     'vcc_fin_op_pending_summary_rows',
@@ -320,7 +326,14 @@ function markImportRecordsDeleted(db, state, deletionId) {
   return markedCount;
 }
 
-function deleteDataset({ db, targetMonth, sourceType, taskActive = false }) {
+function deleteDataset({
+  db,
+  targetMonth,
+  sourceType,
+  taskActive = false,
+  expectedPreviewToken = '',
+  taskGeneration = 0
+}) {
   const initialState = inspectDatasetDeletion(db, targetMonth, sourceType, { taskActive });
   assertDeletable(initialState);
 
@@ -328,6 +341,15 @@ function deleteDataset({ db, targetMonth, sourceType, taskActive = false }) {
   try {
     const state = inspectDatasetDeletion(db, initialState.targetMonth, initialState.sourceType);
     assertDeletable(state);
+    if (expectedPreviewToken) {
+      const operationState = buildOperationState(db, {
+        action: 'delete-data-target',
+        targetMonth: state.targetMonth,
+        taskGeneration,
+        scope: { targetType: state.sourceType }
+      });
+      assertPreviewToken(expectedPreviewToken, operationPreviewToken(operationState));
+    }
     const invalidatedRunCount = deleteCalculatedRuns(db, state.targetMonth);
     let deletedDataCount;
     if (state.sourceType === SOURCE_TYPES.SYSTEM_OP) {

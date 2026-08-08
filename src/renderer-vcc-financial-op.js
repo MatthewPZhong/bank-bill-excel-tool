@@ -19,6 +19,11 @@
     pending_archive_removal: '移除归档Pending账单_校验表',
     system_op: '系统财务OP'
   });
+  const DELETE_TARGET_LABELS = Object.freeze({
+    ...SOURCE_LABELS,
+    opening_initialization: '首月期初初始化数据',
+    result: '财务OP校验结果表'
+  });
   const DISPOSITION_LABELS = Object.freeze({
     idempotent_skip: '幂等跳过',
     idempotent_conflict: '幂等冲突',
@@ -520,6 +525,7 @@
             <table class="vcc-fin-op-table vcc-fin-op-balance-table">
               <thead><tr><th>项目</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}</tr></thead>
               <tbody>
+                <tr><th>期初财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).openingBalance))}</td>`).join('')}</tr>
                 <tr><th>当月计算财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).calculatedBalance))}</td>`).join('')}</tr>
                 <tr><th>系统财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).systemBalance))}</td>`).join('')}</tr>
                 <tr class="difference-row"><th>差异</th>${CURRENCIES.map((currency) => {
@@ -598,18 +604,10 @@
         if (!initialized || initialized.status === 'error') {
           throw new Error(initialized && initialized.message || '期初财务OP初始化失败');
         }
-        setStatus(`期初财务OP已保存，正在重新计算 ${month}…`, 'info');
-        preflight = await api.preflightRun({ targetMonth: month });
-        if (!preflight || !preflight.ok) {
-          const message = blockedCalculationMessage(preflight || {});
-          showMessage('无法开始运行', message, 'warning');
-          return;
-        }
-        result = await api.calculate({
-          targetMonth: month,
-          expectedInputFingerprint: preflight.inputFingerprint
-        });
-        if (!result || result.status === 'error') throw new Error(result && result.message || '计算失败');
+        const initializedMessage = `${month} 期初财务OP已保存，请再次点击【开始运行】进行计算。`;
+        setStatus(initializedMessage, 'success');
+        showMessage('期初初始化完成', initializedMessage, 'success');
+        return;
       }
       if (result.status === 'blocked') {
         const message = blockedCalculationMessage(result);
@@ -642,19 +640,250 @@
     }
   }
 
+  async function loadArchivedResultMonths() {
+    const response = await api.listArchivedResultMonths();
+    if (Array.isArray(response)) return response;
+    if (!response || response.status !== 'success') {
+      throw new Error(response && response.message || '读取已归档月份失败');
+    }
+    return Array.isArray(response.months) ? response.months : [];
+  }
+
+  async function refreshArchivedState() {
+    const months = await loadArchivedResultMonths();
+    state.latestArchivedRun = months[0] || null;
+    if (state.latestArchivedRun) state.lastMonth = state.latestArchivedRun.targetMonth || state.lastMonth;
+    elements.exportBtn.disabled = state.busy || !state.latestArchivedRun;
+    return months;
+  }
+
+  async function settleArchivedPickerCompletion(onCompleted, result, entry) {
+    if (typeof onCompleted !== 'function') return null;
+    try {
+      await onCompleted(result, entry);
+      return null;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  function createArchivedMonthPickerDialog({
+    months,
+    actionLabel,
+    danger = false,
+    previewSelection = null,
+    executeSelection,
+    onCompleted = null,
+    runningText = '正在处理…'
+  }) {
+    const entries = (Array.isArray(months) ? months : [])
+      .filter((item) => item && /^\d{4}-\d{2}$/.test(item.targetMonth || ''));
+    if (entries.length === 0) {
+      showMessage('请选择月份', '暂无已归档结果', 'info');
+      return null;
+    }
+    const byYear = new Map();
+    for (const entry of entries) {
+      const year = entry.targetMonth.slice(0, 4);
+      if (!byYear.has(year)) byYear.set(year, []);
+      byYear.get(year).push(entry);
+    }
+    const years = [...byYear.keys()].sort().reverse();
+    for (const rows of byYear.values()) {
+      rows.sort((left, right) => right.targetMonth.localeCompare(left.targetMonth));
+    }
+    let executing = false;
+    let latestPreview = null;
+    let previewVersion = 0;
+    const modal = mountDialog({
+      title: actionLabel === '导出' ? '请选择要导出的月份' : '请选择月份',
+      className: 'vcc-fin-op-archive-picker-dialog',
+      initialFocusSelector: '[data-field="archive-year"]',
+      canClose: () => !executing,
+      bodyHtml: `
+        <div class="vcc-fin-op-archive-picker-fields">
+          <span>月份</span>
+          <select class="vcc-fin-op-input" data-field="archive-year">
+            ${years.map((year) => `<option value="${escapeHtml(year)}">${escapeHtml(year)}年</option>`).join('')}
+          </select>
+          <select class="vcc-fin-op-input" data-field="archive-month"></select>
+        </div>
+        <p class="vcc-fin-op-delete-state" data-role="archive-picker-state" data-tone="neutral"></p>
+        <div class="dialog-actions right">
+          <button class="${danger ? 'danger-btn' : 'primary-btn'} small" type="button" data-action="archive-picker-confirm" disabled>${escapeHtml(actionLabel)}</button>
+          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
+        </div>
+      `
+    });
+    const yearSelect = modal.dialog.querySelector('[data-field="archive-year"]');
+    const monthSelect = modal.dialog.querySelector('[data-field="archive-month"]');
+    const actionButton = modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
+    const cancelButton = modal.dialog.querySelector('[data-action="cancel"]');
+    const closeButton = modal.dialog.querySelector('[data-action="close"]');
+    const stateText = modal.dialog.querySelector('[data-role="archive-picker-state"]');
+
+    function setPickerState(message, tone = 'neutral') {
+      stateText.textContent = String(message || '');
+      stateText.dataset.tone = tone;
+    }
+
+    function selectedEntry() {
+      return entries.find((item) => item.targetMonth === monthSelect.value) || null;
+    }
+
+    function renderMonths(preferredMonth = '') {
+      const yearEntries = byYear.get(yearSelect.value) || [];
+      const selected = yearEntries.some((item) => item.targetMonth === preferredMonth)
+        ? preferredMonth
+        : (yearEntries[0] && yearEntries[0].targetMonth || '');
+      monthSelect.innerHTML = yearEntries.map((item) => `
+        <option value="${escapeHtml(item.targetMonth)}"${item.targetMonth === selected ? ' selected' : ''}>${escapeHtml(item.targetMonth.slice(5))}月</option>
+      `).join('');
+    }
+
+    async function refreshPreview() {
+      const currentVersion = ++previewVersion;
+      latestPreview = null;
+      actionButton.disabled = true;
+      const entry = selectedEntry();
+      if (!entry) {
+        setPickerState('暂无已归档结果');
+        return;
+      }
+      if (typeof previewSelection !== 'function') {
+        setPickerState(`${entry.targetMonth} 已归档，可导出`, 'success');
+        actionButton.disabled = false;
+        return;
+      }
+      setPickerState('正在核对归档状态…');
+      try {
+        const result = await previewSelection(entry);
+        if (currentVersion !== previewVersion) return;
+        if (!result || result.status !== 'success') {
+          setPickerState(result && result.message || '归档状态核对失败', 'error');
+          return;
+        }
+        latestPreview = result;
+        if (!result.canUnarchive) {
+          const dependencies = Array.isArray(result.dependentMonths) && result.dependentMonths.length
+            ? ` 后续依赖月份：${result.dependentMonths.join('、')}。`
+            : '';
+          setPickerState(`${result.message || '当前月份不可解归档'}${dependencies}`, 'error');
+          return;
+        }
+        setPickerState(`${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`, 'warning');
+        actionButton.disabled = false;
+      } catch (error) {
+        if (currentVersion === previewVersion) setPickerState(error.message || String(error), 'error');
+      }
+    }
+
+    function setExecutionLocked(locked) {
+      yearSelect.disabled = locked;
+      monthSelect.disabled = locked;
+      cancelButton.disabled = locked;
+      closeButton.disabled = locked;
+      actionButton.disabled = locked;
+    }
+
+    yearSelect.addEventListener('change', () => {
+      renderMonths();
+      refreshPreview();
+    });
+    monthSelect.addEventListener('change', refreshPreview);
+    cancelButton.addEventListener('click', modal.close);
+    actionButton.addEventListener('click', async () => {
+      const entry = selectedEntry();
+      if (!entry || actionButton.disabled || typeof executeSelection !== 'function') return;
+      executing = true;
+      setExecutionLocked(true);
+      setPickerState(runningText, 'warning');
+      let result;
+      try {
+        result = await executeSelection(entry, latestPreview);
+        if (!result || result.status === 'error') {
+          throw new Error(result && result.message || `${actionLabel}失败`);
+        }
+        if (result.status === 'cancelled') {
+          executing = false;
+          setExecutionLocked(false);
+          setPickerState(`已取消${actionLabel}`, 'neutral');
+          await refreshPreview();
+          return;
+        }
+      } catch (error) {
+        executing = false;
+        setExecutionLocked(false);
+        await refreshPreview();
+        setPickerState(error.message || String(error), 'error');
+        return;
+      }
+
+      const completionError = await settleArchivedPickerCompletion(onCompleted, result, entry);
+      executing = false;
+      modal.close();
+      if (completionError) {
+        showMessage(
+          '操作已成功但刷新失败',
+          `${entry.targetMonth} ${actionLabel}已完成，但界面刷新失败：${completionError.message || String(completionError)}`,
+          'warning'
+        );
+      }
+    });
+    renderMonths(entries[0].targetMonth);
+    refreshPreview();
+    return modal;
+  }
+
+  async function openUnarchiveDialog({ archivedMonths = null, onUnarchived = null } = {}) {
+    try {
+      const months = archivedMonths || await loadArchivedResultMonths();
+      return createArchivedMonthPickerDialog({
+        months,
+        actionLabel: '删除',
+        danger: true,
+        previewSelection: (entry) => api.previewUnarchive({ targetMonth: entry.targetMonth }),
+        runningText: '正在解归档，请勿关闭窗口…',
+        executeSelection: async (entry, preview) => {
+          setBusy(true, 'unarchive');
+          setStatus(`正在解归档 ${entry.targetMonth}…`, 'info');
+          try {
+            return await api.unarchiveMonth({
+              targetMonth: entry.targetMonth,
+              expectedPreviewToken: preview && preview.previewToken,
+              taskGeneration: preview && preview.taskGeneration
+            });
+          } finally {
+            setBusy(false);
+          }
+        },
+        onCompleted: async (result, entry) => {
+          await refreshArchivedState();
+          setStatus(`${entry.targetMonth} 已解归档，结果恢复为未处理`, 'success');
+          if (typeof onUnarchived === 'function') await onUnarchived(result, entry);
+          showMessage('解归档完成', `${entry.targetMonth} 已恢复为未处理；基础结果和调整记录均已保留。`, 'success');
+        }
+      });
+    } catch (error) {
+      showMessage('解归档', error.message || String(error), 'error');
+      return null;
+    }
+  }
+
   async function handleExport() {
     if (state.busy || !state.latestArchivedRun) return;
     setBusy(true, 'export');
     try {
-      setStatus(`正在导出 ${state.latestArchivedRun.targetMonth} 校验结果…`, 'info');
-      const result = await api.exportResult({ runId: state.latestArchivedRun.runId });
+      const target = state.latestArchivedRun;
+      setStatus(`正在导出 ${target.targetMonth} 校验结果…`, 'info');
+      const result = await api.exportResult({ runId: target.runId });
       if (!result || result.status === 'cancelled') {
         setStatus('已取消导出', 'info');
         return;
       }
       if (result.status !== 'success') throw new Error(result.message || '导出失败');
       const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
-      setStatus(`${state.latestArchivedRun.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
+      setStatus(`${target.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
     } catch (error) {
       setStatus(`导出失败：${error.message || error}`, 'error');
       showMessage('导出失败', error.message || String(error), 'error');
@@ -683,26 +912,6 @@
               <td>${escapeHtml(row.tableName)}</td>
               <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
               <td>${escapeHtml(formatDateTime(row.generatedAt || row.createdAt || row.archivedAt))}</td>
-            </tr>
-          `).join('')}</tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function renderOpeningAudit(rows) {
-    if (!Array.isArray(rows) || rows.length === 0) return '';
-    return `
-      <div class="vcc-fin-op-manager-subheading"><h4>首月期初初始化</h4><span>一次性记录，不可改写</span></div>
-      <div class="vcc-fin-op-table-wrap">
-        <table class="vcc-fin-op-table vcc-fin-op-opening-audit-table">
-          <thead><tr><th>主体</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}<th>初始化时间</th><th>核对说明</th></tr></thead>
-          <tbody>${rows.map((row) => `
-            <tr>
-              <td>${escapeHtml(row.subject)}</td>
-              ${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((row.balances || {})[currency]))}</td>`).join('')}
-              <td>${escapeHtml(formatDateTime(row.initializedAt))}</td>
-              <td>${escapeHtml(row.note || '-')}</td>
             </tr>
           `).join('')}</tbody>
         </table>
@@ -960,9 +1169,6 @@
   function openDatasetDeleteDialog({ months, initialMonth = '', onDeleted, previewResult = null }) {
     const availableMonths = Array.isArray(months) ? months : [];
     const selectedMonth = availableMonths.includes(initialMonth) ? initialMonth : (availableMonths[0] || '');
-    const sourceOptions = Object.entries(SOURCE_LABELS)
-      .map(([sourceType, label]) => `<option value="${escapeHtml(sourceType)}">${escapeHtml(label)}</option>`)
-      .join('');
     const monthOptions = availableMonths.length
       ? availableMonths.map((month) => `<option value="${escapeHtml(month)}"${month === selectedMonth ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
       : '<option value="">暂无已导入账期</option>';
@@ -981,7 +1187,7 @@
             </label>
             <label class="vcc-fin-op-field">
               <span>目标表</span>
-              <select class="vcc-fin-op-input" data-field="delete-source"${availableMonths.length ? '' : ' disabled'}>${sourceOptions}</select>
+              <select class="vcc-fin-op-input" data-field="delete-target" disabled><option value="">正在读取…</option></select>
             </label>
           </div>
           <p class="vcc-fin-op-delete-state" data-role="delete-state" data-tone="neutral"></p>
@@ -992,25 +1198,40 @@
         </div>
       `
     });
-    const sourceSelect = modal.dialog.querySelector('[data-field="delete-source"]');
+    const targetSelect = modal.dialog.querySelector('[data-field="delete-target"]');
     const monthSelect = modal.dialog.querySelector('[data-field="delete-month"]');
     const deleteButton = modal.dialog.querySelector('[data-action="confirm-delete"]');
     const cancelButton = modal.dialog.querySelector('[data-action="cancel"]');
     const closeButton = modal.dialog.querySelector('[data-action="close"]');
     const stateText = modal.dialog.querySelector('[data-role="delete-state"]');
     let previewVersion = 0;
+    let latestPreview = null;
+    let currentTargets = [];
 
     function setDeleteState(message, tone = 'neutral') {
       stateText.textContent = String(message || '');
       stateText.dataset.tone = tone;
     }
 
+    function previewSummary(result) {
+      const targetType = result.targetType || targetSelect.value;
+      if (Object.hasOwn(SOURCE_LABELS, targetType)) {
+        const invalidated = Number(result.calculatedRunCount) || 0;
+        return `当前有效数据 ${formatInteger(result.dataCount || result.count)} 条${invalidated > 0 ? `，将同步作废 ${formatInteger(invalidated)} 份未归档结果` : ''}`;
+      }
+      if (targetType === 'opening_initialization') {
+        return `将删除 ${formatInteger(result.count)} 条主体期初初始化数据，并删除 ${formatInteger(result.calculatedRunCount)} 份未归档结果；导入事实保留。`;
+      }
+      return `将删除该月全部 ${formatInteger(result.calculatedRunCount || result.count)} 份未归档财务OP校验结果；原表和导入审计保留。`;
+    }
+
     async function refreshPreview() {
       const currentVersion = ++previewVersion;
+      latestPreview = null;
       deleteButton.disabled = true;
       const targetMonth = monthSelect.value;
-      const sourceType = sourceSelect.value;
-      if (!targetMonth || !sourceType) {
+      const targetType = targetSelect.value;
+      if (!targetMonth || !targetType) {
         setDeleteState('当前没有可删除的有效数据');
         return;
       }
@@ -1018,23 +1239,20 @@
       try {
         const result = previewResult
           ? { status: 'success', ...(typeof previewResult === 'function'
-            ? previewResult({ targetMonth, sourceType })
+            ? previewResult({ targetMonth, targetType })
             : previewResult) }
-          : await api.previewDatasetDeletion({ targetMonth, sourceType });
+          : await api.previewDataTargetDeletion({ targetMonth, targetType });
         if (currentVersion !== previewVersion) return;
         if (!result || result.status !== 'success') {
           setDeleteState(result && result.message || '删除范围核对失败', 'error');
           return;
         }
-        if (!result.deletable) {
-          setDeleteState(result.message || '当前选择没有可删除的有效数据', 'error');
+        latestPreview = result;
+        if (!(result.deletable || result.available)) {
+          setDeleteState(result.disabledReason || result.message || '当前选择没有可删除的有效数据', 'error');
           return;
         }
-        const invalidated = Number(result.calculatedRunCount) || 0;
-        setDeleteState(
-          `当前有效数据 ${formatInteger(result.dataCount)} 条${invalidated > 0 ? `，将同步作废 ${formatInteger(invalidated)} 条未归档结果` : ''}`,
-          'warning'
-        );
+        setDeleteState(previewSummary(result), 'warning');
         deleteButton.disabled = false;
       } catch (error) {
         if (currentVersion !== previewVersion) return;
@@ -1042,26 +1260,77 @@
       }
     }
 
-    sourceSelect.addEventListener('change', refreshPreview);
-    monthSelect.addEventListener('change', refreshPreview);
+    async function loadTargets() {
+      const currentVersion = ++previewVersion;
+      latestPreview = null;
+      deleteButton.disabled = true;
+      targetSelect.disabled = true;
+      const targetMonth = monthSelect.value;
+      if (!targetMonth) {
+        targetSelect.innerHTML = '<option value="">暂无删除目标</option>';
+        setDeleteState('当前没有可删除的数据');
+        return;
+      }
+      setDeleteState('正在读取删除目标…');
+      try {
+        let response;
+        if (previewResult) {
+          response = {
+            status: 'success',
+            targets: Object.entries(DELETE_TARGET_LABELS).map(([targetType, targetLabel]) => ({
+              targetType, targetLabel, available: true
+            }))
+          };
+        } else {
+          response = await api.listDeleteTargets({ targetMonth });
+        }
+        if (currentVersion !== previewVersion) return;
+        if (!response || response.status !== 'success') {
+          throw new Error(response && response.message || '读取删除目标失败');
+        }
+        currentTargets = Array.isArray(response.targets) ? response.targets : [];
+        const previousTarget = targetSelect.value;
+        targetSelect.innerHTML = currentTargets.length
+          ? currentTargets.map((target) => `
+            <option value="${escapeHtml(target.targetType)}"${target.targetType === previousTarget ? ' selected' : ''}>${escapeHtml(target.targetLabel || DELETE_TARGET_LABELS[target.targetType] || target.targetType)}</option>
+          `).join('')
+          : '<option value="">暂无删除目标</option>';
+        targetSelect.disabled = currentTargets.length === 0;
+        await refreshPreview();
+      } catch (error) {
+        if (currentVersion !== previewVersion) return;
+        currentTargets = [];
+        targetSelect.innerHTML = '<option value="">读取失败</option>';
+        setDeleteState(error.message || String(error), 'error');
+      }
+    }
+
+    targetSelect.addEventListener('change', refreshPreview);
+    monthSelect.addEventListener('change', loadTargets);
     cancelButton.addEventListener('click', modal.close);
     deleteButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
-      const sourceType = sourceSelect.value;
-      if (!targetMonth || !sourceType || deleteButton.disabled) return;
+      const targetType = targetSelect.value;
+      if (!targetMonth || !targetType || deleteButton.disabled || !latestPreview) return;
       previewVersion += 1;
       deleting = true;
       setBusy(true, 'delete');
       deleteButton.disabled = true;
       cancelButton.disabled = true;
       closeButton.disabled = true;
-      sourceSelect.disabled = true;
+      targetSelect.disabled = true;
       monthSelect.disabled = true;
       setDeleteState('正在删除数据…', 'warning');
-      setStatus(`正在删除 ${targetMonth} ${SOURCE_LABELS[sourceType]}数据…`, 'info');
+      const targetLabel = latestPreview.targetLabel || DELETE_TARGET_LABELS[targetType] || targetType;
+      setStatus(`正在删除 ${targetMonth} ${targetLabel}…`, 'info');
       let result;
       try {
-        result = await api.deleteDataset({ targetMonth, sourceType });
+        result = await api.deleteDataTarget({
+          targetMonth,
+          targetType,
+          expectedPreviewToken: latestPreview.previewToken,
+          taskGeneration: latestPreview.taskGeneration
+        });
         if (!result || result.status !== 'success') {
           throw new Error(result && result.message || '删除失败');
         }
@@ -1072,18 +1341,25 @@
         showMessage('删除失败', error.message || String(error), 'error');
         cancelButton.disabled = false;
         closeButton.disabled = false;
-        sourceSelect.disabled = false;
+        targetSelect.disabled = false;
         monthSelect.disabled = false;
-        refreshPreview();
+        loadTargets();
         return;
       }
 
       deleting = false;
       setBusy(false);
       modal.close();
-      const invalidated = Number(result.invalidatedRunCount) || 0;
-      const successMessage = `已删除 ${result.targetMonth} ${result.sourceLabel}有效数据 ${formatInteger(result.deletedDataCount)} 条${invalidated > 0 ? `，并作废 ${formatInteger(invalidated)} 条未归档结果` : ''}。`;
-      setStatus(`${result.targetMonth} ${result.sourceLabel}数据已删除`, 'success');
+      let successMessage;
+      if (targetType === 'opening_initialization') {
+        successMessage = `已删除 ${result.targetMonth} 首月期初初始化数据 ${formatInteger(result.deletedOpeningCount)} 条，并删除 ${formatInteger(result.deletedRunCount)} 份未归档结果。`;
+      } else if (targetType === 'result') {
+        successMessage = `已删除 ${result.targetMonth} 全部 ${formatInteger(result.deletedRunCount)} 份未归档财务OP校验结果；原表和导入审计均已保留。`;
+      } else {
+        const invalidated = Number(result.invalidatedRunCount) || 0;
+        successMessage = `已删除 ${result.targetMonth} ${result.sourceLabel || targetLabel}有效数据 ${formatInteger(result.deletedDataCount)} 条${invalidated > 0 ? `，并作废 ${formatInteger(invalidated)} 份未归档结果` : ''}。`;
+      }
+      setStatus(`${result.targetMonth} ${targetLabel}已删除`, 'success');
       try {
         if (typeof onDeleted === 'function') await onDeleted(result);
       } catch (error) {
@@ -1092,7 +1368,7 @@
       }
       showMessage('删除完成', successMessage, 'success');
     });
-    refreshPreview();
+    loadTargets();
     return modal;
   }
 
@@ -1245,8 +1521,17 @@
 
   async function openDataManager({ initialMonth = '', initialSection = 'results', previewData = null } = {}) {
     let months;
+    let archivedMonths;
     try {
-      months = previewData ? previewData.months : await api.listImportMonths();
+      if (previewData) {
+        months = previewData.months;
+        archivedMonths = previewData.archivedMonths || [];
+      } else {
+        [months, archivedMonths] = await Promise.all([
+          api.listImportMonths(),
+          loadArchivedResultMonths()
+        ]);
+      }
     } catch (error) {
       showMessage('数据管理', error.message || String(error), 'error');
       return;
@@ -1279,10 +1564,15 @@
               <div class="vcc-fin-op-manager-content" data-role="manager-content"></div>
             </section>
           </div>
-          <div class="dialog-actions right vcc-fin-op-manager-footer">
-            <button class="secondary-btn small" type="button" data-action="delete-dataset"${months.length ? '' : ' disabled'}>删除</button>
-            <button class="secondary-btn small" type="button" data-action="export-dataset"${months.length ? '' : ' disabled'}>导出</button>
-            <button class="secondary-btn small" type="button" data-action="return">返回</button>
+          <div class="dialog-actions split vcc-fin-op-manager-footer">
+            <div class="vcc-fin-op-manager-footer-left">
+              <button class="secondary-btn small" type="button" data-action="unarchive"${archivedMonths.length ? '' : ' disabled'} title="${archivedMonths.length ? '解归档已归档结果' : '暂无已归档结果'}">解归档</button>
+            </div>
+            <div class="vcc-fin-op-manager-footer-right">
+              <button class="secondary-btn small" type="button" data-action="delete-dataset"${months.length ? '' : ' disabled'}>删除</button>
+              <button class="secondary-btn small" type="button" data-action="export-dataset"${months.length ? '' : ' disabled'}>导出</button>
+              <button class="secondary-btn small" type="button" data-action="return">返回</button>
+            </div>
           </div>
         </div>
       `
@@ -1290,10 +1580,17 @@
     const content = modal.dialog.querySelector('[data-role="manager-content"]');
     const managerTitle = modal.dialog.querySelector('[data-role="manager-title"]');
     const monthSelect = modal.dialog.querySelector('[data-field="manager-month"]');
+    const unarchiveButton = modal.dialog.querySelector('[data-action="unarchive"]');
     const deleteButton = modal.dialog.querySelector('[data-action="delete-dataset"]');
     const exportButton = modal.dialog.querySelector('[data-action="export-dataset"]');
     const returnButton = modal.dialog.querySelector('[data-action="return"]');
     let renderVersion = 0;
+
+    function updateUnarchiveButton() {
+      const available = archivedMonths.length > 0;
+      unarchiveButton.disabled = !available;
+      unarchiveButton.title = available ? '解归档已归档结果' : '暂无已归档结果';
+    }
 
     async function render() {
       const currentVersion = ++renderVersion;
@@ -1329,10 +1626,10 @@
         if (currentVersion !== renderVersion) return;
         if (!overview || overview.status !== 'success') throw new Error(overview && overview.message || '读取数据管理状态失败');
         const rows = section === 'results' ? overview.results : overview.checks;
-        content.innerHTML = `
-          ${renderOverviewTable(rows, section === 'results' ? '当前账期还没有校验结果' : '当前账期还没有校验表数据')}
-          ${section === 'results' ? renderOpeningAudit(overview.openingBalances) : ''}
-        `;
+        content.innerHTML = renderOverviewTable(
+          rows,
+          section === 'results' ? '当前账期还没有校验结果' : '当前账期还没有校验表数据'
+        );
       } catch (error) {
         if (currentVersion === renderVersion) {
           content.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
@@ -1350,11 +1647,37 @@
       managerState.month = monthSelect.value;
       render();
     });
+    unarchiveButton.addEventListener('click', () => {
+      openUnarchiveDialog({
+        archivedMonths,
+        onUnarchived: async (_result, entry) => {
+          archivedMonths = await loadArchivedResultMonths();
+          updateUnarchiveButton();
+          if (months.includes(entry.targetMonth)) {
+            managerState.month = entry.targetMonth;
+            monthSelect.value = entry.targetMonth;
+          }
+          managerState.section = 'results';
+          await render();
+          monthSelect.focus();
+        }
+      });
+    });
     deleteButton.addEventListener('click', () => {
       openDatasetDeleteDialog({
         months,
         initialMonth: managerState.month,
-        onDeleted: render
+        onDeleted: async (result) => {
+          managerState.month = result.targetMonth || managerState.month;
+          if (result.targetType === 'result' || result.targetType === 'opening_initialization') {
+            managerState.section = 'results';
+          }
+          archivedMonths = await loadArchivedResultMonths();
+          updateUnarchiveButton();
+          await refreshArchivedState();
+          await render();
+          monthSelect.focus();
+        }
       });
     });
     exportButton.addEventListener('click', () => {
@@ -1365,16 +1688,15 @@
       });
     });
     returnButton.addEventListener('click', modal.close);
+    updateUnarchiveButton();
     render();
   }
 
   async function initialize() {
     try {
-      const latest = await api.latestArchivedRun();
-      if (latest && latest.status === 'success') {
-        state.latestArchivedRun = latest;
-        state.lastMonth = latest.targetMonth || '';
-        setStatus(`${latest.targetMonth} 已归档，可导出结果`, 'success');
+      await refreshArchivedState();
+      if (state.latestArchivedRun) {
+        setStatus(`${state.latestArchivedRun.targetMonth} 已归档，可导出结果`, 'success');
       }
     } catch (_error) {
       // 启动时读取历史状态失败不阻断模块使用。
@@ -1413,6 +1735,12 @@
         initialSection: 'raw',
         previewData: {
           months: ['2026-06', '2026-05'],
+          archivedMonths: [{
+            targetMonth: '2026-06',
+            runId: 316,
+            archivedAt: '2026-07-02 11:15:00',
+            subjects: ['PPHK']
+          }],
           records: [
             {
               id: 42,
@@ -1465,6 +1793,20 @@
           dataCount: 36932,
           calculatedRunCount: 1
         }
+      });
+    },
+    openUnarchive() {
+      return createArchivedMonthPickerDialog({
+        months: [
+          { targetMonth: '2026-06', runId: 316, archivedAt: '2026-07-02 11:15:00' },
+          { targetMonth: '2025-12', runId: 288, archivedAt: '2026-01-05 09:30:00' }
+        ],
+        actionLabel: '删除',
+        danger: true,
+        previewSelection: async () => ({
+          status: 'success', canUnarchive: true, previewToken: 'preview-token', taskGeneration: 0
+        }),
+        executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
       });
     },
     openExport() {

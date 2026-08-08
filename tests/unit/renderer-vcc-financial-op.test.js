@@ -180,11 +180,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:calculate',
       'vccFinancialOp:opening:initialize',
       'vccFinancialOp:run:archive',
+      'vccFinancialOp:run:archived-months',
+      'vccFinancialOp:run:unarchive-preview',
+      'vccFinancialOp:run:unarchive',
       'vccFinancialOp:imports:list-months',
       'vccFinancialOp:imports:list-records',
       'vccFinancialOp:imports:get-detail',
       'vccFinancialOp:imports:resolve',
       'vccFinancialOp:data-manager:overview',
+      'vccFinancialOp:data-manager:delete-targets',
       'vccFinancialOp:data-manager:delete-preview',
       'vccFinancialOp:data-manager:delete',
       'vccFinancialOp:data-manager:export-preview',
@@ -200,7 +204,12 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
     assert.match(vccService, /return runWorker\('inspect', \{ filePaths \}\)/);
-    assert.match(vccService, /return runWorker\('delete-dataset'/);
+    assert.match(vccService, /return runWorker\('delete-data-target'/);
+    assert.doesNotMatch(main, /legacySourceRequest|service\.deleteDatasetData\(payload\)/);
+    assert.match(
+      vccService,
+      /function deleteDatasetData\(payload = \{\}\) \{[\s\S]*?expectedPreviewToken: payload\.expectedPreviewToken,[\s\S]*?taskGeneration: payload\.taskGeneration[\s\S]*?\n  \}/
+    );
     assert.match(preload, /ipcRenderer\.on\('vccFinancialOp:import:progress'/);
     assert.match(preload, /ipcRenderer\.removeListener\('vccFinancialOp:import:progress'/);
     assert.match(moduleRenderer, /elements\.importBtn\.textContent\s*=\s*state\.busyKind === 'import' \? '取消导入'/);
@@ -236,14 +245,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-manager-nav \.position-nav-item\s*\{[\s\S]*padding-left:\s*20px;/);
   });
 
-  test('数据管理右下角按删除、导出、返回排列，删除页按账期与五类目标表预检后执行', () => {
-    assert.match(moduleRenderer, /class="dialog-actions right vcc-fin-op-manager-footer"[\s\S]*data-action="delete-dataset"[^>]*>删除<\/button>[\s\S]*data-action="export-dataset"[^>]*>导出<\/button>[\s\S]*data-action="return">返回<\/button>/);
+  test('数据管理左侧解归档、右侧删除导出返回，删除页使用动态统一目标与 token', () => {
+    assert.match(moduleRenderer, /class="dialog-actions split vcc-fin-op-manager-footer"[\s\S]*data-action="unarchive"[^>]*>解归档<\/button>[\s\S]*data-action="delete-dataset"[^>]*>删除<\/button>[\s\S]*data-action="export-dataset"[^>]*>导出<\/button>[\s\S]*data-action="return">返回<\/button>/);
+    assert.match(moduleRenderer, /暂无已归档结果/);
     assert.match(moduleRenderer, /returnButton\.addEventListener\('click', modal\.close\)/);
     assert.match(moduleRenderer, /title: '删除数据'/);
-    assert.match(moduleRenderer, /data-field="delete-source"/);
+    assert.match(moduleRenderer, /data-field="delete-target"/);
     assert.match(moduleRenderer, /data-field="delete-month"/);
     assert.ok(
-      moduleRenderer.indexOf('data-field="delete-month"') < moduleRenderer.indexOf('data-field="delete-source"'),
+      moduleRenderer.indexOf('data-field="delete-month"') < moduleRenderer.indexOf('data-field="delete-target"'),
       '删除页应在左侧展示月份账期、右侧展示目标表'
     );
     assert.match(moduleRenderer, /class="danger-btn small"[^>]*data-action="confirm-delete" disabled>删除<\/button>/);
@@ -253,25 +263,71 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'VCC费用及换汇明细',
       'VCC通道明细',
       'VCC_移除归档Pending账单',
-      '系统财务OP'
+      '系统财务OP',
+      '首月期初初始化数据',
+      '财务OP校验结果表'
     ]) {
       assert.ok(moduleRenderer.includes(label), `删除目标表缺少 ${label}`);
     }
-    assert.match(moduleRenderer, /api\.previewDatasetDeletion\(\{ targetMonth, sourceType \}\)/);
-    assert.match(moduleRenderer, /api\.deleteDataset\(\{ targetMonth, sourceType \}\)/);
+    assert.match(moduleRenderer, /api\.listDeleteTargets\(\{ targetMonth \}\)/);
+    assert.match(moduleRenderer, /api\.previewDataTargetDeletion\(\{ targetMonth, targetType \}\)/);
+    assert.match(moduleRenderer, /api\.deleteDataTarget\(\{[\s\S]*expectedPreviewToken: latestPreview\.previewToken,[\s\S]*taskGeneration: latestPreview\.taskGeneration/);
+    assert.doesNotMatch(moduleRenderer, /<option[^>]*disabled[^>]*>[^<]*(首月期初初始化数据|财务OP校验结果表)/);
     assert.match(moduleRenderer, /const currentVersion = \+\+previewVersion;/);
     assert.match(moduleRenderer, /if \(currentVersion !== previewVersion\) return;/);
     assert.match(moduleRenderer, /canClose: \(\) => !deleting/);
     assert.match(moduleRenderer, /setBusy\(true, 'delete'\)/);
     assert.match(moduleRenderer, /cancelButton\.disabled = true/);
     assert.match(moduleRenderer, /closeButton\.disabled = true/);
-    assert.match(moduleRenderer, /const successMessage = `已删除/);
+    assert.match(moduleRenderer, /let successMessage;/);
     assert.match(moduleRenderer, /数据管理刷新失败/);
-    assert.match(moduleRenderer, /onDeleted: render/);
+    assert.match(moduleRenderer, /onDeleted: async \(result\)/);
     assert.match(styles, /\.vcc-fin-op-delete-dialog\s*\{[\s\S]*width:\s*min\(100%, 470px\);/);
     assert.match(styles, /\.vcc-fin-op-delete-form\s*\{[\s\S]*margin-left:\s*20px;[\s\S]*padding:\s*4px 8px 0;/);
     assert.match(styles, /\.vcc-fin-op-delete-fields\s*\{[\s\S]*grid-template-columns:\s*25% 40%;[\s\S]*column-gap:\s*10px;/);
     assert.match(styles, /\.vcc-fin-op-manager-shell\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
+  });
+
+  test('解归档复用年月选择器，非尾月展示依赖且执行中禁止关闭', () => {
+    assert.match(moduleRenderer, /function createArchivedMonthPickerDialog\(/);
+    assert.match(moduleRenderer, /title: actionLabel === '导出' \? '请选择要导出的月份' : '请选择月份'/);
+    assert.match(moduleRenderer, /data-field="archive-year"[\s\S]*data-field="archive-month"/);
+    assert.match(moduleRenderer, /rows\.sort\(\(left, right\) => right\.targetMonth\.localeCompare\(left\.targetMonth\)\)/);
+    assert.match(moduleRenderer, /yearSelect\.addEventListener\('change',[\s\S]*renderMonths\(\);[\s\S]*refreshPreview\(\)/);
+    assert.match(moduleRenderer, /result\.dependentMonths\.join\('、'\)/);
+    assert.match(moduleRenderer, /canClose: \(\) => !executing/);
+    assert.match(moduleRenderer, /setExecutionLocked\(true\)/);
+    assert.match(moduleRenderer, /expectedPreviewToken: preview && preview\.previewToken/);
+    assert.match(moduleRenderer, /taskGeneration: preview && preview\.taskGeneration/);
+    assert.match(moduleRenderer, /await refreshArchivedState\(\)/);
+    assert.match(moduleRenderer, /managerState\.section = 'results'/);
+    assert.match(styles, /\.vcc-fin-op-archive-picker-fields\s*\{[\s\S]*grid-template-columns:/);
+  });
+
+  test('解归档提交成功后刷新失败只告警关闭，不重新开放破坏性操作', async () => {
+    const helperStart = moduleRenderer.indexOf('async function settleArchivedPickerCompletion(');
+    const helperEnd = moduleRenderer.indexOf('function createArchivedMonthPickerDialog(', helperStart);
+    assert.ok(helperStart >= 0 && helperEnd > helperStart);
+    const settleCompletion = Function(
+      `'use strict'; ${moduleRenderer.slice(helperStart, helperEnd)}; return settleArchivedPickerCompletion;`
+    )();
+    const entry = { targetMonth: '2026-06' };
+    const result = { status: 'success' };
+    assert.equal(await settleCompletion(null, result, entry), null);
+    let received = null;
+    assert.equal(await settleCompletion(async (...args) => { received = args; }, result, entry), null);
+    assert.deepEqual(received, [result, entry]);
+    const refreshError = new Error('刷新异常');
+    assert.equal(await settleCompletion(async () => { throw refreshError; }, result, entry), refreshError);
+
+    const handlerStart = moduleRenderer.indexOf("actionButton.addEventListener('click', async () => {");
+    const handlerEnd = moduleRenderer.indexOf('renderMonths(entries[0].targetMonth);', handlerStart);
+    assert.ok(handlerStart >= 0 && handlerEnd > handlerStart);
+    const handler = moduleRenderer.slice(handlerStart, handlerEnd);
+    assert.match(handler, /let result;[\s\S]*result = await executeSelection/);
+    assert.match(handler, /const completionError = await settleArchivedPickerCompletion[\s\S]*modal\.close\(\);[\s\S]*操作已成功但刷新失败/);
+    const committedPath = handler.slice(handler.indexOf('const completionError'));
+    assert.doesNotMatch(committedPath, /refreshPreview\(\)|setExecutionLocked\(false\)/);
   });
 
   test('数据管理导出按账期和分组目标表预检，支持校验原表与校验表', () => {
@@ -369,10 +425,22 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /data-field="opening-note"/);
     assert.match(moduleRenderer, /data-field="opening-confirm"/);
     assert.match(moduleRenderer, /api\.initializeOpening\(openingPayload\)/);
+    const initializedStart = moduleRenderer.indexOf('const initialized = await api.initializeOpening(openingPayload)');
+    const initializedEnd = moduleRenderer.indexOf("if (result.status === 'blocked')", initializedStart);
+    assert.ok(initializedStart >= 0 && initializedEnd > initializedStart, '应能定位期初初始化后的运行分支');
+    const afterInitialization = moduleRenderer.slice(initializedStart, initializedEnd);
+    assert.match(afterInitialization, /请再次点击【开始运行】进行计算。/);
+    assert.match(afterInitialization, /showMessage\('期初初始化完成', initializedMessage, 'success'\);\s*return;/);
+    assert.doesNotMatch(
+      afterInitialization,
+      /api\.preflightRun|api\.calculate|confirmArchive|api\.archive/,
+      '期初初始化成功后不得在同一次点击中继续预检、计算或归档'
+    );
     assert.match(moduleRenderer, /零余额请填写 0/);
-    assert.match(moduleRenderer, /首月期初初始化/);
-    assert.match(moduleRenderer, /一次性记录，不可改写/);
-    assert.match(moduleRenderer, /overview\.openingBalances/);
+    assert.match(moduleRenderer, /确认一次性初始化/);
+    assert.match(moduleRenderer, />期初财务OP<\/th>/);
+    assert.doesNotMatch(moduleRenderer, /overview\.openingBalances|function renderOpeningAudit/);
+    assert.doesNotMatch(vccService, /openingBalances/);
   });
 
   test('宽表和低分辨率弹框具备稳定尺寸及滚动约束', () => {

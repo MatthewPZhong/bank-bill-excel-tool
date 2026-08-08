@@ -13,7 +13,6 @@ const {
 const {
   archiveRun,
   getRunResult,
-  parseBalancesJson,
   initializeOpeningBalances,
   preflightCalculation
 } = require('../backend/vcc-financial-op/calculator');
@@ -23,8 +22,18 @@ const {
   IMPORT_CANCELLED_CODE
 } = require('../backend/vcc-financial-op/detail-importer');
 const {
-  inspectDatasetDeletion
-} = require('../backend/vcc-financial-op/dataset-deletion');
+  operationError,
+  STATE_CHANGED_CODE,
+  STATE_CHANGED_MESSAGE
+} = require('../backend/vcc-financial-op/operation-state');
+const {
+  listArchivedResultMonths: listArchivedResultMonthsFromDb,
+  previewUnarchive: previewUnarchiveFromDb
+} = require('../backend/vcc-financial-op/unarchive');
+const {
+  listDeleteTargets: listDeleteTargetsFromDb,
+  previewDataTargetDeletion: previewDataTargetDeletionFromDb
+} = require('../backend/vcc-financial-op/data-target-deletion');
 const { writeRunWorkbooks } = require('./vcc-financial-op-writer');
 const { writeImportAuditWorkbook } = require('./vcc-financial-op-audit-writer');
 const {
@@ -143,38 +152,116 @@ function importRowShape(row) {
   };
 }
 
-function createVccFinancialOpService({ database, assetsDir }) {
-  let activeWorker = null;
-  let activeWorkerAction = '';
-  let activeWorkerCompletion = null;
+function createVccFinancialOpService({
+  database,
+  assetsDir,
+  appVersion = null,
+  buildSha = null,
+  workerFactory = (filename, options) => new Worker(filename, options),
+  writeRunWorkbooksFn = writeRunWorkbooks,
+  writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  cancelTimeoutMs = 120000
+}) {
+  let activeTask = null;
+  let taskGeneration = 0;
+  let closing = false;
   repository.recoverInterruptedImports(database.db);
 
-  function runWorker(action, payload, onProgress) {
-    if (activeWorker) throw new Error('已有 VCC 财务OP任务正在运行，请等待完成');
+  function acquireTask(action, {
+    kind = 'worker',
+    destructive = false,
+    expectedTaskGeneration = null
+  } = {}) {
+    if (closing) {
+      throw operationError('service-closing', 'VCC 财务OP服务正在关闭，不能开始新任务。');
+    }
+    if (activeTask) {
+      throw operationError('active-vcc-task', '已有 VCC 财务OP任务正在运行，请等待完成。');
+    }
+    if (expectedTaskGeneration !== null && expectedTaskGeneration !== undefined) {
+      const expected = Number(expectedTaskGeneration);
+      if (!Number.isSafeInteger(expected) || expected < 0 || expected !== taskGeneration) {
+        throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE, {
+          context: { expectedTaskGeneration, actualTaskGeneration: taskGeneration }
+        });
+      }
+    }
+    let complete;
+    const completion = new Promise((resolve) => { complete = resolve; });
+    const task = {
+      action,
+      kind,
+      destructive,
+      baseGeneration: taskGeneration,
+      protected: false,
+      phase: kind === 'worker' ? 'pretransaction' : 'direct',
+      cancelRequested: false,
+      worker: null,
+      completion,
+      complete,
+      released: false
+    };
+    activeTask = task;
+    return task;
+  }
+
+  function releaseTask(task, outcome) {
+    if (!task || task.released) return;
+    task.released = true;
+    if (activeTask === task) {
+      activeTask = null;
+      taskGeneration += 1;
+    }
+    task.complete(outcome);
+  }
+
+  async function runDirectTask(action, callback, options = {}) {
+    const task = acquireTask(action, { ...options, kind: 'direct' });
+    try {
+      const result = await callback(task);
+      releaseTask(task, { type: 'result', result });
+      return result;
+    } catch (error) {
+      releaseTask(task, { type: 'error', error });
+      throw error;
+    }
+  }
+
+  function runWorker(action, payload, onProgress, options = {}) {
+    const task = acquireTask(action, options);
     return new Promise((resolve, reject) => {
-      const worker = new Worker(WORKER_PATH, {
-        workerData: { action, payload, dbPath: database.dbPath }
-      });
-      let completeWorker;
-      const completion = new Promise((complete) => { completeWorker = complete; });
-      activeWorker = worker;
-      activeWorkerAction = action;
-      activeWorkerCompletion = completion;
+      let worker;
+      try {
+        worker = workerFactory(WORKER_PATH, {
+          workerData: {
+            action,
+            payload: {
+              ...(payload || {}),
+              taskGeneration: task.baseGeneration,
+              appVersion: payload && payload.appVersion !== undefined
+                ? payload.appVersion
+                : appVersion,
+              buildSha: payload && payload.buildSha !== undefined ? payload.buildSha : buildSha
+            },
+            dbPath: database.dbPath
+          }
+        });
+        task.worker = worker;
+      } catch (error) {
+        releaseTask(task, { type: 'error', error });
+        reject(error);
+        return;
+      }
       let settled = false;
       const finish = (error, result) => {
         if (settled) return;
         settled = true;
-        if (activeWorker === worker) {
-          activeWorker = null;
-          activeWorkerAction = '';
-          activeWorkerCompletion = null;
-        }
         if (error) {
           try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
-          completeWorker({ type: 'error', error });
+          releaseTask(task, { type: 'error', error });
           reject(error);
         } else {
-          completeWorker({ type: 'result', result });
+          releaseTask(task, { type: 'result', result });
           resolve(result);
         }
       };
@@ -182,6 +269,27 @@ function createVccFinancialOpService({ database, assetsDir }) {
         if (!message || typeof message !== 'object') return;
         if (message.type === 'progress') {
           if (typeof onProgress === 'function') onProgress(message.progress);
+        } else if (message.type === 'critical-ready') {
+          if (!task.destructive) {
+            finish(operationError(
+              'worker-protocol-error',
+              `非破坏性任务 ${action} 意外请求进入破坏性事务。`
+            ));
+            return;
+          }
+          task.phase = 'critical-ready';
+          if (task.cancelRequested) {
+            try { worker.postMessage({ type: 'cancel' }); } catch (_error) { /* exit 事件收口 */ }
+            return;
+          }
+          // 父进程先标记为不可终止，再确认 worker 可以进入事务。
+          task.protected = true;
+          task.phase = 'protected';
+          try {
+            worker.postMessage({ type: 'critical-ack' });
+          } catch (error) {
+            finish(error);
+          }
         } else if (message.type === 'result') {
           finish(null, message.result);
         } else if (message.type === 'error') {
@@ -210,7 +318,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
   function preflightRun(payload = {}) {
     const targetMonth = normalizeYearMonth(payload.targetMonth);
     if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
-    if (activeWorker) {
+    if (activeTask) {
       return {
         ok: false,
         code: 'active-vcc-task',
@@ -222,23 +330,31 @@ function createVccFinancialOpService({ database, assetsDir }) {
   }
 
   async function cancelActiveTask() {
-    const worker = activeWorker;
-    if (!worker) return { status: 'idle' };
-    const action = activeWorkerAction;
-    const completion = activeWorkerCompletion;
-    if (action !== 'import' || !completion) {
-      await worker.terminate();
-      repository.recoverInterruptedImports(database.db);
-      return { status: 'cancelled' };
+    const task = activeTask;
+    if (!task) return { status: 'idle' };
+    const worker = task.worker;
+    const completion = task.completion;
+    if (task.kind === 'direct' || task.protected || !worker) {
+      const outcome = await completion;
+      if (outcome.type === 'result') {
+        return { status: 'completed', protected: task.protected || task.kind === 'direct' };
+      }
+      return {
+        status: 'error',
+        protected: task.protected || task.kind === 'direct',
+        code: outcome.error && outcome.error.code,
+        message: outcome.error && outcome.error.message ? outcome.error.message : '任务执行失败'
+      };
     }
 
+    task.cancelRequested = true;
     try {
       worker.postMessage({ type: 'cancel' });
     } catch (_error) {
       const outcome = await completion;
       repository.recoverInterruptedImports(database.db);
       if (outcome.type === 'result') return { status: 'completed' };
-      if (outcome.error && outcome.error.code === IMPORT_CANCELLED_CODE) {
+      if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
         return { status: 'cancelled', forced: false };
       }
       return {
@@ -250,18 +366,30 @@ function createVccFinancialOpService({ database, assetsDir }) {
     }
     let timer = null;
     const timeout = new Promise((resolve) => {
-      timer = setTimeout(() => resolve({ type: 'timeout' }), 120000);
+      timer = setTimeout(() => resolve({ type: 'timeout' }), cancelTimeoutMs);
     });
     const outcome = await Promise.race([completion, timeout]);
     if (timer) clearTimeout(timer);
     if (outcome.type === 'timeout') {
-      if (activeWorker === worker) await worker.terminate();
+      if (task.protected || task.phase === 'critical-ready') {
+        const protectedOutcome = await completion;
+        if (protectedOutcome.type === 'result') return { status: 'completed', protected: true };
+        return {
+          status: 'error',
+          protected: true,
+          code: protectedOutcome.error && protectedOutcome.error.code,
+          message: protectedOutcome.error && protectedOutcome.error.message
+            ? protectedOutcome.error.message
+            : '任务执行失败'
+        };
+      }
+      if (activeTask === task) await worker.terminate();
       repository.recoverInterruptedImports(database.db);
       return { status: 'cancelled', forced: true };
     }
     repository.recoverInterruptedImports(database.db);
     if (outcome.type === 'result') return { status: 'completed' };
-    if (outcome.error && outcome.error.code === IMPORT_CANCELLED_CODE) {
+    if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
       return { status: 'cancelled', forced: false };
     }
     return {
@@ -273,16 +401,20 @@ function createVccFinancialOpService({ database, assetsDir }) {
   }
 
   function archive(payload) {
-    return archiveRun({ db: database.db, runId: Number(payload && payload.runId) });
+    return runDirectTask('archive', () => (
+      archiveRun({ db: database.db, runId: Number(payload && payload.runId) })
+    ));
   }
 
   function initializeOpening(payload) {
-    return initializeOpeningBalances({
-      db: database.db,
-      targetMonth: payload && payload.targetMonth,
-      entries: payload && payload.entries,
-      note: payload && payload.note
-    });
+    return runDirectTask('initialize-opening', () => (
+      initializeOpeningBalances({
+        db: database.db,
+        targetMonth: payload && payload.targetMonth,
+        entries: payload && payload.entries,
+        note: payload && payload.note
+      })
+    ));
   }
 
   function listImportMonths() {
@@ -294,15 +426,86 @@ function createVccFinancialOpService({ database, assetsDir }) {
   }
 
   function previewDatasetDeletion(payload = {}) {
-    return inspectDatasetDeletion(database.db, payload.targetMonth, payload.sourceType, {
-      taskActive: Boolean(activeWorker)
+    return previewDataTargetDeletionFromDb(database.db, {
+      targetMonth: payload.targetMonth,
+      targetType: payload.sourceType
+    }, {
+      taskActive: Boolean(activeTask),
+      taskGeneration
     });
   }
 
   function deleteDatasetData(payload = {}) {
-    return runWorker('delete-dataset', {
+    return deleteDataTargetData({
       targetMonth: payload.targetMonth,
-      sourceType: payload.sourceType
+      targetType: payload.sourceType,
+      expectedPreviewToken: payload.expectedPreviewToken,
+      taskGeneration: payload.taskGeneration
+    });
+  }
+
+  function listArchivedResultMonths() {
+    return listArchivedResultMonthsFromDb(database.db);
+  }
+
+  function previewUnarchive(payload = {}) {
+    return previewUnarchiveFromDb(database.db, payload.targetMonth, {
+      taskActive: Boolean(activeTask),
+      taskGeneration
+    });
+  }
+
+  function unarchiveMonth(payload = {}) {
+    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
+    if (
+      !expectedPreviewToken
+      || payload.taskGeneration === null
+      || payload.taskGeneration === undefined
+      || !Number.isSafeInteger(Number(payload.taskGeneration))
+    ) {
+      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
+    }
+    return runWorker('unarchive-month', {
+      targetMonth: payload.targetMonth,
+      expectedPreviewToken
+    }, null, {
+      destructive: true,
+      expectedTaskGeneration: payload.taskGeneration
+    });
+  }
+
+  function listDeleteTargets(payload = {}) {
+    return listDeleteTargetsFromDb(database.db, payload.targetMonth, {
+      taskActive: Boolean(activeTask),
+      taskGeneration
+    });
+  }
+
+  function previewDataTargetDeletion(payload = {}) {
+    return previewDataTargetDeletionFromDb(database.db, payload, {
+      taskActive: Boolean(activeTask),
+      taskGeneration
+    });
+  }
+
+  function deleteDataTargetData(payload = {}) {
+    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
+    if (
+      !expectedPreviewToken
+      || payload.taskGeneration === null
+      || payload.taskGeneration === undefined
+      || !Number.isSafeInteger(Number(payload.taskGeneration))
+    ) {
+      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
+    }
+    return runWorker('delete-data-target', {
+      targetMonth: payload.targetMonth,
+      targetType: payload.targetType || payload.sourceType,
+      expectedPreviewToken,
+      reason: payload.reason
+    }, null, {
+      destructive: true,
+      expectedTaskGeneration: payload.taskGeneration
     });
   }
 
@@ -312,7 +515,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
       payload.targetMonth,
       payload.sourceType,
       payload.targetKind,
-      { taskActive: Boolean(activeWorker) }
+      { taskActive: Boolean(activeTask) }
     );
   }
 
@@ -478,10 +681,12 @@ function createVccFinancialOpService({ database, assetsDir }) {
   }
 
   function resolveRecord({ recordId, note, action }) {
-    return detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
-      note,
-      action
-    }));
+    return runDirectTask('resolve-import-record', () => (
+      detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
+        note,
+        action
+      }))
+    ));
   }
 
   function dataManagerOverview(yearMonth) {
@@ -526,18 +731,7 @@ function createVccFinancialOpService({ database, assetsDir }) {
       createdAt: row.created_at,
       archivedAt: row.archived_at
     }));
-    const openingBalances = database.db.prepare(`
-      SELECT subject, balances_json, initialization_note, initialized_at
-      FROM vcc_fin_op_opening_balances
-      WHERE target_month = ? ORDER BY subject
-    `).all(yearMonth).map((row) => ({
-      subject: row.subject,
-      balances: parseBalancesJson(row.balances_json, `${yearMonth} ${row.subject} 人工期初OP`),
-      note: row.initialization_note,
-      initializedAt: row.initialized_at,
-      currencies: SUPPORTED_CURRENCIES
-    }));
-    return { targetMonth: yearMonth, results: runs, checks, raw, openingBalances };
+    return { targetMonth: yearMonth, results: runs, checks, raw };
   }
 
   function listRunSubjects(runId) {
@@ -548,37 +742,45 @@ function createVccFinancialOpService({ database, assetsDir }) {
   }
 
   function latestArchivedRun() {
-    const row = database.db.prepare(`
-      SELECT id FROM vcc_fin_op_runs
-      WHERE status = 'archived'
-      ORDER BY target_month DESC, id DESC
-      LIMIT 1
-    `).get();
-    return row ? getRunResult(database.db, row.id) : null;
+    const latest = listArchivedResultMonthsFromDb(database.db)[0] || null;
+    return latest ? getRunResult(database.db, latest.runId) : null;
   }
 
   async function exportRun({ runId, outputDirectory, outputPath }) {
-    const run = getRunResult(database.db, Number(runId));
-    if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
-    if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
-    return writeRunWorkbooks({
-      db: database.db,
-      runId: Number(runId),
-      outputDirectory,
-      outputPath,
-      assetsDir
+    return runDirectTask('export-result', async () => {
+      // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
+      const run = getRunResult(database.db, Number(runId));
+      if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
+      if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
+      const consistentArchive = listArchivedResultMonthsFromDb(database.db)
+        .some((item) => item.runId === Number(runId) && item.targetMonth === run.targetMonth);
+      if (!consistentArchive) {
+        throw operationError(
+          'archive-state-inconsistent',
+          '该月归档结果、主体余额或数据集状态不一致，禁止导出。'
+        );
+      }
+      return writeRunWorkbooksFn({
+        db: database.db,
+        runId: Number(runId),
+        outputDirectory,
+        outputPath,
+        assetsDir
+      });
     });
   }
 
   async function exportImportAudit(payload) {
-    return writeImportAuditWorkbook({
-      db: database.db,
-      recordId: Number(payload.recordId),
-      tab: payload.tab,
-      outputPath: payload.outputPath,
-      key: payload.key,
-      fileName: payload.fileName
-    });
+    return runDirectTask('export-import-audit', () => (
+      writeImportAuditWorkbookFn({
+        db: database.db,
+        recordId: Number(payload.recordId),
+        tab: payload.tab,
+        outputPath: payload.outputPath,
+        key: payload.key,
+        fileName: payload.fileName
+      })
+    ));
   }
 
   return {
@@ -591,8 +793,14 @@ function createVccFinancialOpService({ database, assetsDir }) {
     initializeOpening,
     listImportMonths,
     listImportRecords,
+    listArchivedResultMonths,
+    previewUnarchive,
+    unarchiveMonth,
     previewDatasetDeletion,
     deleteDatasetData,
+    listDeleteTargets,
+    previewDataTargetDeletion,
+    deleteDataTarget: deleteDataTargetData,
     previewDatasetExport,
     exportDatasetData,
     getImportRecordDetail,
@@ -604,8 +812,17 @@ function createVccFinancialOpService({ database, assetsDir }) {
     exportImportAudit,
     getRunResult: (runId) => getRunResult(database.db, Number(runId)),
     async terminate() {
+      closing = true;
       await cancelActiveTask();
-    }
+    },
+    _taskStateForTests: () => ({
+      taskGeneration,
+      closing,
+      active: Boolean(activeTask),
+      action: activeTask ? activeTask.action : null,
+      phase: activeTask ? activeTask.phase : null,
+      protected: activeTask ? activeTask.protected : false
+    })
   };
 }
 

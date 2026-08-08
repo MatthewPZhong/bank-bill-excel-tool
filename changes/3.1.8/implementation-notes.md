@@ -22,6 +22,13 @@
 | 首月期初提交完整性只检查 `subjects - opening.balances` 的真正缺失主体 | PR #125 review 证明 preflight/renderer 只向用户收集 `missingOpeningSubjects`；要求重复提交已初始化主体会阻断同月新增主体 | 每次提交全部主体；跳过完整性检查 | 已初始化主体无需重复提交；主动重放已初始化主体仍按 content hash 幂等跳过或拒绝改写，真正漏交的新主体仍整事务回滚；属于既定契约缺陷修复，不改 Spec |
 | `rowKey` 固定为 `v1:sha256(JSON.stringify([row_kind, subject, source_type, category_major || '', category_minor || '']))` | 调整坐标必须跨币种稳定，又不能受 run/id/金额/展示顺序影响 | 使用数据库行 id；把币种或金额纳入 key | 同一逻辑行不同币种共享 rowKey，以 `rowKey × currency` 构成调整坐标 |
 | PR 2 的 `getEffectiveRunResult()` 仅做只读统一重算，并严格核对 sequence/revision/基础公式/坐标 | 基础 `run_rows`、`run_balances` 必须不可变；损坏的调整账本不得静默参与归档 | 就地覆盖基础表；遇到损坏记录跳过 | 后续 PR 4 复用同一 reader 接入调整写入与归档；任何事实不一致均结构化失败 |
+| PR 3 的归档枚举和解归档均复用同一套严格一致性检查，并逐主体逐九币种比对含调整的生效余额 | 单看 `run.status` 会把缺 archive、错 run、混合 dataset 或余额漂移暴露为可操作月份 | 宽松枚举后在提交时尽力修复；只比基础 calculated balance | 损坏月份不进入普通枚举；直接 preview 返回 `archive-state-inconsistent` 并失败关闭 |
+| 所有 VCC worker/直接任务共享一个全局任务租约，任务代次仅在释放租约时递增 | preview token 需要同时防数据库状态漂移和预览后插队任务；导出、归档、期初初始化、异常处理等直接写也不能旁路 | 只互斥 worker；获取租约即递增代次 | preview 与提交按 generation 二次门禁；任何在先任务完成后旧预览失效 |
+| 破坏性 worker 在 `openDb()` 和 migration 之前先完成 `critical-ready → 父进程保护 → critical-ack` 握手 | 打开数据库本身可能产生 migration 写事务；父进程必须在允许写入前承诺不 terminate | 事务开始后再通知；超时一律 terminate | 仅事务前任务可协作取消/超时终止；已保护或状态未知任务只能等待收口 |
+| 解归档、删除期初、删除结果先在 `BEGIN IMMEDIATE` 中重算 token/门禁并固化完整证据，成功审计与业务写同事务；失败后尽力补写 rolled_back 审计 | 防止预览后状态变化、部分成功和审计先后不一致 | 事务外审计；只记录计数摘要 | 成功审计不会脱离业务提交；回滚后保留失败原因，失败审计自身异常仅附加为 `context.auditFailure`，不覆盖主错 |
+| 统一删除目标使用独立 `targetType` 表达五类源表、首月期初和结果，不伪造 `source_type` | opening/result 不属于导入源类型，伪造会污染数据契约和 usage 统计 | 复用假的 source type 常量 | 旧 source 删除 preload 方法名保持兼容，但提交同样强制携带用户已观察的 token/generation，不再自动 preview；动态 usage 仅将 result 成功路由为“删除结果”，source/opening 沿用业务 operation label“删除数据”，不误计为“删除结果” |
+| UI 把破坏性执行成功视为不可逆边界：提交成功后保持执行锁定，完成 `onCompleted` 刷新后再关闭；刷新失败也关闭并警告，不重开或重试提交 | 重开弹框会诱导用户对已成功事务重复操作 | 将执行与刷新放在同一 catch 后恢复按钮 | renderer 明确显示“操作已成功但刷新失败”，执行中 Esc/遮罩/关闭均被锁定 |
+| 首月期初初始化成功后立即结束当前【开始运行】流程，要求用户再次显式点击后才重新预检和计算 | Spec §4.2.5 禁止初始化后自动沿用当前点击继续计算或归档；资金结果需要新的明确用户动作 | 初始化成功后在同一调用栈自动 preflight/calculate | 成功状态和弹框均明确提示再次点击；renderer 契约测试禁止初始化后分支出现 preflight/calculate/archive |
 
 ## Assumptions
 
@@ -32,12 +39,15 @@
 | 旧结果行的 `category_major` 可能为空，不能在 PR 2 reader 中新增非空限制 | 当前 recharge/fee 取 `business_sub_type || ''`，channel 取 `mid || ''`，现有持久化契约允许空字符串 | 若生产事实始终非空则校验可更严格 | 继续将空值规范编码进 rowKey；未知/错配 `source_type` 仍严格拒绝 |
 | 余额表存在“主体有九币种余额但本月无基础发生额行”是合法延续场景 | 上月归档主体本月无发生额仍必须进入结果与系统余额核对 | 若来源链路改变则可能掩盖孤儿余额 | 允许 balance-only 主体；反向要求每个基础行 subject+currency 必须存在 balance |
 | 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | PR 4 若引入不同 revision 语义会触发 reader 门禁 | PR 4 写入必须在单事务内追加 sequence=N+1 并 revision+1 |
+| 严格 `YYYY-MM` 字符串可直接用于跨月先后比较 | 月份入口统一规范化且固定两位月份 | 非规范历史月份会被排除普通枚举并在直接 preview 失败 | 保持 `normalizeOperationMonth()` 为所有破坏性入口前置门禁 |
+| 删除首月期初允许五类 dataset 中部分已被用户删除，但所有仍存在的 dataset 必须处于未归档状态 | 用户可能先删除某一原表；期初清理不应要求伪造缺失 dataset | 强制五表必须齐全；缺表即阻断 | 只删除期初和同月 calculated runs；first_month、剩余 dataset、源事实和导入审计保持不变 |
 
 ## Deviations
 
 | 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
 | --- | --- | --- | --- | --- |
 | Spec 建议六个提交 | 六个堆叠 PR，每个 PR 内可含少量聚焦提交 | 用户明确要求多 PR 推进 | 评审与回滚粒度更细，功能口径不变 | 是（本实施记录） |
+| 共享归档月份选择器在 PR 3 先服务解归档，但历史结果按月份导出仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | 不影响 PR 3 解归档/删除验收；PR 5 必须接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
 
 ## Evidence
 
@@ -59,6 +69,15 @@
 | PR 2 reconciliation blindspot pass | 主键血缘、九币种、月份边界、幂等、事务回滚、基础表不可变和行/余额坐标守恒均有代码与测试证据 | 未发现自动删改或静默补零；首月期初与生效金额仍需发布前人工财务复核 |
 | PR #125 review 增量主体回归 | calculator `22/22 PASS`；首月既有 PPHK 后新增 NEW 时 preflight/calculate 仅返回 NEW，仅提交 NEW 成功，PPHK 的金额/hash/说明与 `first_month` 不变；新增 NEW+NEW2 仅提交 NEW 时 NEW 写入回滚 | 修复已初始化主体被误判 omitted，同时锁定真正缺失主体、九币种和事务完整性 |
 | PR #125 review 链路与变量门禁 | service/renderer `21/21 PASS`；`npm run check:vars` 扫描本次唯一 src 改动，未命中重要变量 | renderer 仍只提交缺失主体；未改 IPC/用户流程，未触及既有重要变量清单 |
+| PR 3 破坏性事务定向单测 | 冻结代码全仓 unit 由 team-lead 复核 `4633/4633 PASS`；其中覆盖严格归档一致性、调整后余额、非尾月及孤立后月归档状态、token 失效统一返回 `state-changed`、期初/结果整体删除、事务故障和失败审计二次失败 | 破坏性操作失败关闭、原始错误优先、跨月血缘、源事实/first_month/调整证据守恒 |
+| PR 3 真实 SQLite + 真实 worker 状态链 | `scripts/integration/vcc-financial-op-destructive-state-chain.js` 为 `52/52 PASS` | M1 非尾阻断→M2 解归档/删结果→M1 解归档/删期初；持久化审计、generation、`state-changed` token 门禁和触发器故障全链路 |
+| PR 3 全量 integration | `45/45` 脚本、`2103/2103` 可计数断言通过；自动刷新 `rules/integration-test-policy.md` 第七节 | 新状态链纳入 auto-discovery 门禁，既有迁移、大文件、side DB 和其他业务集成无回归 |
+| PR 3 冻结代码最终单次 `npm run release-check` | 在孤立后月 archive/archived dataset fail-closed 修复完成后执行：lint PASS；smoke PASS；unit `4633/4633 PASS`（295 个测试文件）；integration `45/45` 脚本、`2103/2103` 断言 PASS，其中破坏性 SQLite/worker 状态链 `52/52 PASS` | 最终发布门禁在同一次命令中完整覆盖静态检查、其他模块 smoke、全仓单测及全部集成链，证据对应当前冻结代码 |
+| PR 3 静态与 smoke 回归 | `npm run lint` PASS；`npm run smoke` PASS；`git diff --check` PASS；新增/修改 JS `node --check` PASS | 主进程、preload、renderer 接线和其他模块基础回归 |
+| PR 3 `npm run check:vars` | 命中 `ipcRenderer`（真实命中，main/preload/renderer 已同步并有契约测试）以及 `dialog`/`elements`/`setStatus`/`state`（仅 VCC renderer 局部命中，并非规则指向的 Electron dialog 或 `src/renderer.js` 全局单例）；无 Critical/Risk-sensitive 命中 | 已复核取消行为、DOM 生命周期、状态显示与归档导出联动，未发现旁路或不同步 |
+| PR 3 P0→P1 自测 | P0：事务链、`state-changed` token 门禁、故障回滚、审计与行数守恒全部通过；P1：全局租约/取消保护、picker 默认最新/切年/非尾禁用、执行锁定、提交后刷新失败边界，以及期初初始化后必须再次点击运行，均由 service/renderer contract tests 通过 | 自动化覆盖本 PR 可重复场景；100%/125%/150% 视觉预览和真实财务月份仍留最终发布阶段人工门禁 |
+| PR 3 reconciliation blindspot pass | 核对 run/archive/dataset 主键血缘、含调整九币种金额、严格月份边界、重复提交、部分失败、行数守恒、审计及错误可观测性 | 未发现资金红线被自动绕过；损坏归档失败关闭，真实月份逐主体逐币种复核继续阻塞发布 |
+| PR 3 最终跨月血缘盲区回归 | 后月依赖改为 archived/calculated runs、archive 快照、archived datasets 的确定性排序去重并集；孤立 archive 和孤立 archived dataset 定向测试均返回 `unarchive-not-tail`，重复 preview 的月份/token 稳定且目标月资金状态零改动 | 保留完整 `laterRuns` 证据并将并集纳入 preview token；只阻断，不自动修复或级联损坏历史状态 |
 
 ## Remaining Unknowns
 
@@ -70,3 +89,5 @@
 | 真实月份逐主体逐币种复核 | BLOCK（发布） | 财务人员按最终核对清单执行 | 阻塞 3.1.8 发布 |
 | 生产存量 calculated run 是否存在空分类或被手工改写的非规范金额 | PROBE | PR 4 接线前用真实数据库只读扫描；reader 已 fail-closed | 可能要求旧 run 重新运行，不允许静默归档 |
 | PR 4 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | PROBE | PR 4 用并发/故障注入单测锁定追加事务 | 阻塞人工调整入口和 effective 归档接线 |
+| 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
+| Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | PR 6 Windows CI/手测在解归档和删除事务中触发关窗，验证应用等待任务收口 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |

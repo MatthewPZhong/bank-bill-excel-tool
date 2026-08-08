@@ -76,6 +76,14 @@ function serializeError(err, depth = 0) {
     recoveryPaths: Array.isArray(err.recoveryPaths)
       ? err.recoveryPaths.map((filePath) => String(filePath))
       : null,
+    dependentMonths: Array.isArray(err.dependentMonths)
+      ? err.dependentMonths.map((month) => String(month))
+      : null,
+    // 破坏性操作在业务事务回滚后会尽力补写 rolled_back 审计；若该补写也失败，
+    // auditFailure 只能作为原始错误的附加可观测信息，不能覆盖主错误。
+    auditFailure: err.auditFailure && typeof err.auditFailure === 'object'
+      ? safeCloneAuditFailure(err.auditFailure)
+      : null,
     preserveTemporaryFiles: err.preserveTemporaryFiles === true,
     // 大表导入引擎整批拒绝错误专属（v3.0.4 PR-C）：结构化行级错误样本 + 总数 + 截断标志，
     //   供 pending session 跨 worker 边界还原报错 xlsx（collectedErrors 含 cells）。JSON 安全（一层 clone 兜底）。
@@ -84,6 +92,14 @@ function serializeError(err, depth = 0) {
       : null,
   };
   return out;
+}
+
+function safeCloneAuditFailure(value) {
+  return {
+    name: typeof value.name === 'string' ? value.name : 'Error',
+    code: value.code === undefined || value.code === null ? null : String(value.code),
+    message: typeof value.message === 'string' ? value.message : String(value.message)
+  };
 }
 
 // 安全 clone structuredImportErrors（JSON.parse(JSON.stringify) 兜底；失败 → null，不阻断错误传递）。
@@ -157,6 +173,12 @@ function deserializeError(serialized) {
   if (Array.isArray(serialized.recoveryPaths)) {
     err.recoveryPaths = serialized.recoveryPaths.slice();
   }
+  if (Array.isArray(serialized.dependentMonths)) {
+    err.dependentMonths = serialized.dependentMonths.slice();
+  }
+  if (serialized.auditFailure && typeof serialized.auditFailure === 'object') {
+    err.auditFailure = safeCloneAuditFailure(serialized.auditFailure);
+  }
   if (serialized.preserveTemporaryFiles === true) {
     err.preserveTemporaryFiles = true;
   }
@@ -175,5 +197,6 @@ module.exports = {
   __test_only__: {
     MAX_CAUSE_DEPTH,
     safeCloneContext,
+    safeCloneAuditFailure,
   },
 };

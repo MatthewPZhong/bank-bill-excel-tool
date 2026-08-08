@@ -131,6 +131,20 @@
   width: min(100%, 470px);
 }
 
+.vcc-fin-op-archive-picker-dialog {
+  width: min(100%, 520px);
+}
+
+.vcc-fin-op-archive-picker-fields {
+  display: grid;
+  grid-template-columns: auto minmax(110px, 1fr) minmax(110px, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin: 4px 20px 14px;
+  color: #4c535d;
+  font-size: 13px;
+}
+
 .vcc-fin-op-export-dialog {
   width: min(100%, 680px);
 }
@@ -406,6 +420,13 @@
 .vcc-fin-op-manager-footer {
   min-height: 72px;
   margin: 0;
+}
+
+.vcc-fin-op-manager-footer-left,
+.vcc-fin-op-manager-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .vcc-fin-op-manager-nav .position-nav-item {
