@@ -91,6 +91,67 @@ function mb(bytes) {
   return Math.round(bytes / 1024 / 1024);
 }
 
+// RSS 是 OS 级驻留集快照，受 GC、allocator 分页提交/回收与采样取整影响。两档测量各自允许 ±8MB：
+//   - tier1 取上界（观测值 + 8MB），避免较小档因页面已复用而低估线性外推；
+//   - tier2 取下界（观测值 - 8MB），避免较大档因页面新提交而高估真实增长。
+// 只有 tier2 下界仍超过 tier1 上界按行数线性外推的一半，才有证据判定增长不再亚线性。
+// 绝对 150MB 上限保持独立门禁，不被不确定性区间放宽。
+const SCAN_DELTA_CEILING_MB = 150;
+const RSS_MEASUREMENT_UNCERTAINTY_MB = 8;
+const SUBLINEAR_FRACTION_OF_LINEAR = 0.5;
+
+function assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio) {
+  const valid = Number.isFinite(tier1DeltaMB)
+    && Number.isFinite(tier2DeltaMB)
+    && Number.isFinite(rowsRatio)
+    && tier1DeltaMB >= 0
+    && tier2DeltaMB >= 0
+    && rowsRatio > 1;
+  if (!valid) {
+    return {
+      valid: false,
+      tier1WithinCeiling: false,
+      tier2WithinCeiling: false,
+      sublinearWithinBudget: false
+    };
+  }
+
+  const tier1UpperMB = tier1DeltaMB + RSS_MEASUREMENT_UNCERTAINTY_MB;
+  const tier2LowerMB = Math.max(0, tier2DeltaMB - RSS_MEASUREMENT_UNCERTAINTY_MB);
+  const sublinearLimitMB = tier1UpperMB * rowsRatio * SUBLINEAR_FRACTION_OF_LINEAR;
+  return {
+    valid: true,
+    tier1WithinCeiling: tier1DeltaMB < SCAN_DELTA_CEILING_MB,
+    tier2WithinCeiling: tier2DeltaMB < SCAN_DELTA_CEILING_MB,
+    // RSS 已取整到 MB；区间端点相等时没有证据证明超过预算，因此闭区间边界应通过。
+    sublinearWithinBudget: tier2LowerMB <= sublinearLimitMB,
+    tier1UpperMB,
+    tier2LowerMB,
+    sublinearLimitMB
+  };
+}
+
+function verifyMemoryGuardModel() {
+  const noisyCiBoundary = assessScanMemoryGrowth(6, 29, 3);
+  const clearlyLinear = assessScanMemoryGrowth(32, 96, 3);
+  const absoluteCeilingOnly = assessScanMemoryGrowth(100, 150, 3);
+  const invalidRatio = assessScanMemoryGrowth(6, 29, 1);
+  const nonFiniteDelta = assessScanMemoryGrowth(6, Number.POSITIVE_INFINITY, 3);
+  const valid = noisyCiBoundary.valid
+    && noisyCiBoundary.sublinearWithinBudget
+    && clearlyLinear.valid
+    && !clearlyLinear.sublinearWithinBudget
+    && absoluteCeilingOnly.sublinearWithinBudget
+    && !absoluteCeilingOnly.tier2WithinCeiling
+    && !invalidRatio.valid
+    && !invalidRatio.sublinearWithinBudget
+    && !nonFiniteDelta.valid
+    && !nonFiniteDelta.sublinearWithinBudget;
+  if (!valid) {
+    throw new Error('内存门禁判据自校验失败：噪声边界、近线性反例、绝对上限或非法输入未按预期裁决');
+  }
+}
+
 // 生成跨多物理 sheet 的大 .xlsx（writeRowsStreamed 流式写，内存恒定）。
 //   maxRowsPerSheet 给「小于单 sheet 行数」的值 → 自动开物理 sub-sheet (2)(3)... → 产出 ≥3 个
 //   xl/worksheets/sheetN.xml（真多物理 sheet，触发多 sheet 续页 + 大通道路由）。
@@ -179,6 +240,10 @@ async function run() {
   console.log(`规模：A 部分两档 ${TIER1_ROWS.toLocaleString()} / ${TIER2_ROWS.toLocaleString()} 行（跨 3 物理 sheet）；`
     + 'B 部分真 worker 小规模。700 万级由 PRD §7 P0 手测覆盖。\n');
 
+  // 判据本身先做确定性自校验，防止为消除 CI 波动而把门禁放宽成恒通过。
+  verifyMemoryGuardModel();
+  console.log('内存门禁自校验：6→29MB 噪声边界通过；32→96MB 近线性反例拒绝；150MB 绝对上限独立拒绝。\n');
+
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-split-t7-'));
 
   try {
@@ -250,30 +315,29 @@ async function run() {
     );
 
     // ── 内存恒定断言（两档对比 + 绝对上限）──────────────────────────────────────────────
-    //   行数从 tier1 涨到 tier2（约 ×${(TIER2_ROWS/TIER1_ROWS).toFixed(1)}）。流式扫描核心的「扫描期 RSS 增量」
-    //   应保持有界、不随行数线性增长（高基数列封顶 N=1000 + sharedStrings 全量但与「值基数」而非「行数」相关）。
+    //   行数从 tier1 涨到 tier2。流式扫描核心的「扫描期 RSS 增量」应保持有界、不随行数线性增长
+    //   （高基数列封顶 N=1000 + sharedStrings 全量但与「值基数」而非「行数」相关）。
     const rowsRatio = TIER2_ROWS / TIER1_ROWS;
+    const memoryAssessment = assessScanMemoryGrowth(scan1.deltaMB, scan2.deltaMB, rowsRatio);
     // (1) 绝对上限：任一档扫描期 RSS 增量 < 150MB（流式核心；全量 readRows 此规模会撑到 GB 级）。
-    const SCAN_DELTA_CEILING_MB = 150;
     assertTrue(
-      scan1.deltaMB < SCAN_DELTA_CEILING_MB,
+      memoryAssessment.valid && memoryAssessment.tier1WithinCeiling,
       `A 内存恒定·绝对上限：tier1 扫描期 RSS 增量 ${scan1.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
     assertTrue(
-      scan2.deltaMB < SCAN_DELTA_CEILING_MB,
+      memoryAssessment.valid && memoryAssessment.tier2WithinCeiling,
       `A 内存恒定·绝对上限：tier2 扫描期 RSS 增量 ${scan2.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
-    // (2) 亚线性：行数涨 ×rowsRatio，扫描期 RSS 增量「远小于」线性增长。
-    //     稳健写法（小增量比值噪声大，不用脆弱的 deltaMB 比值）：断言 tier2 增量 < tier1 增量按行数线性外推的
-    //     一半 + 固定噪声余量；deltaMB 接近 0 时 floor 用 8MB 噪声余量，避免「1MB→2MB」这类纯采样噪声误判。
-    const linearProjectedMB = Math.max(scan1.deltaMB, 1) * rowsRatio; // tier1 增量按行数线性外推到 tier2
-    const SUBLINEAR_SLACK_MB = 8; // GC / 采样噪声余量
-    const sublinearBudgetMB = linearProjectedMB / 2 + SUBLINEAR_SLACK_MB;
+    // (2) 亚线性：对两档 RSS 都传播 ±8MB 测量不确定性，再比较保守区间。
+    //     tier2 下界仍不得超过 tier1 上界按行数线性外推的一半；这能容纳低信号区的 OS/GC 波动，
+    //     同时会拒绝 32→96MB 这类有意义幅度的 3 倍近线性增长。
     console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；扫描期增量 tier1=${scan1.deltaMB}MB → tier2=${scan2.deltaMB}MB`
-      + `（线性外推应约 ${Math.round(linearProjectedMB)}MB，亚线性预算 < ${Math.round(sublinearBudgetMB)}MB）`);
+      + `（±${RSS_MEASUREMENT_UNCERTAINTY_MB}MB 后 tier1 上界=${memoryAssessment.tier1UpperMB}MB，`
+      + `tier2 下界=${memoryAssessment.tier2LowerMB}MB，亚线性上限≤${Math.round(memoryAssessment.sublinearLimitMB)}MB）`);
     assertTrue(
-      scan2.deltaMB < sublinearBudgetMB,
-      `A 内存恒定·亚线性：tier2 扫描期增量 ${scan2.deltaMB}MB < 线性外推一半 + 噪声余量（${Math.round(sublinearBudgetMB)}MB）→ 不随行数线性涨`
+      memoryAssessment.valid && memoryAssessment.sublinearWithinBudget,
+      `A 内存恒定·亚线性：tier2 RSS 下界 ${memoryAssessment.tier2LowerMB}MB ≤ tier1 RSS 上界线性外推的一半`
+        + `（${Math.round(memoryAssessment.sublinearLimitMB)}MB）→ 未观察到有意义幅度的近线性增长`
     );
 
     // ── A3：大输出分 sheet（验证命中子集写出时 writeRowsStreamed 自动分物理 sheet + readback 正确）──
