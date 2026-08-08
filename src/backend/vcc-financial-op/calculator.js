@@ -14,6 +14,11 @@ const {
 } = require('./definitions');
 const { normalizeYearMonth } = require('./row-mapper');
 const { DecimalAccumulator, addToAccumulatorMap } = require('./decimal-accumulator');
+const {
+  getVccFinancialOpModuleState,
+  claimVccFinancialOpFirstMonth
+} = require('../vcc-financial-op-db/repository');
+const { buildRunRowKey } = require('./result-adjustments');
 
 const REQUIRED_DETAIL_TYPES = Object.freeze([
   SOURCE_TYPES.RECHARGE,
@@ -89,7 +94,135 @@ function activeImportBatches(db, targetMonth) {
   `).all(targetMonth);
 }
 
+function createVccStateError(code, message, details = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, details);
+  return error;
+}
+
+function classifyOpeningState({
+  targetMonth,
+  previousMonth,
+  moduleState,
+  manualOpeningRows,
+  previousArchiveRows,
+  expectedSubjects
+}) {
+  if (moduleState.migrationDiagnostic) {
+    return {
+      status: 'blocked',
+      code: moduleState.migrationDiagnostic.code,
+      message: moduleState.migrationDiagnostic.message,
+      reason: moduleState.migrationDiagnostic.reason,
+      diagnostic: moduleState.migrationDiagnostic,
+      firstMonth: moduleState.firstMonth,
+      previousMonth
+    };
+  }
+
+  const firstMonth = moduleState.firstMonth;
+  const manualSubjects = manualOpeningRows.map((row) => row.subject);
+  const archiveSubjects = previousArchiveRows.map((row) => row.subject);
+  if (firstMonth === null) {
+    if (manualSubjects.length > 0 || archiveSubjects.length > 0) {
+      return {
+        status: 'blocked',
+        code: 'vcc-first-month-state-inconsistent',
+        message: '首月状态为空但已存在期初来源，已阻止 VCC 财务OP运行',
+        firstMonth,
+        previousMonth,
+        manualSubjects,
+        archiveSubjects
+      };
+    }
+    return {
+      status: 'first-month-initialization-required',
+      code: 'missing-opening-balance',
+      firstMonth,
+      previousMonth,
+      missingOpeningSubjects: [...expectedSubjects]
+    };
+  }
+
+  if (targetMonth < firstMonth) {
+    return {
+      status: 'blocked',
+      code: 'target-before-first-month',
+      message: `目标账期 ${targetMonth} 早于模块首月 ${firstMonth}，已阻止运行`,
+      firstMonth,
+      previousMonth
+    };
+  }
+
+  if (targetMonth === firstMonth) {
+    if (archiveSubjects.length > 0) {
+      return {
+        status: 'blocked',
+        code: 'vcc-first-month-state-inconsistent',
+        message: `首月 ${firstMonth} 同时检测到上月归档来源，已阻止运行`,
+        firstMonth,
+        previousMonth,
+        archiveSubjects
+      };
+    }
+    const manualSet = new Set(manualSubjects);
+    const missingOpeningSubjects = expectedSubjects.filter((subject) => !manualSet.has(subject));
+    if (missingOpeningSubjects.length > 0) {
+      return {
+        status: 'first-month-initialization-required',
+        code: 'missing-opening-balance',
+        firstMonth,
+        previousMonth,
+        missingOpeningSubjects
+      };
+    }
+    return {
+      status: 'ready',
+      source: 'manual_initialization',
+      firstMonth,
+      previousMonth,
+      subjects: manualSubjects
+    };
+  }
+
+  if (manualSubjects.length > 0) {
+    return {
+      status: 'blocked',
+      code: 'not-first-month',
+      message: `非首月 ${targetMonth} 不允许使用人工期初，必须先归档 ${previousMonth}`,
+      firstMonth,
+      previousMonth,
+      manualSubjects
+    };
+  }
+  const archiveSet = new Set(archiveSubjects);
+  const missingArchiveSubjects = expectedSubjects.filter((subject) => !archiveSet.has(subject));
+  if (missingArchiveSubjects.length > 0) {
+    return {
+      status: 'blocked',
+      code: 'missing-previous-archive',
+      message: `${targetMonth} 缺少 ${previousMonth} 的完整归档余额，禁止人工期初绕过`,
+      firstMonth,
+      previousMonth,
+      missingArchiveSubjects
+    };
+  }
+  return {
+    status: 'ready',
+    source: 'previous_archive',
+    firstMonth,
+    previousMonth,
+    subjects: archiveSubjects
+  };
+}
+
 function preflightCalculation(db, targetMonth) {
+  const normalizedMonth = normalizeYearMonth(targetMonth);
+  if (!normalizedMonth || normalizedMonth !== targetMonth) {
+    throw createVccStateError('invalid-target-month', `计算账期格式无效：${targetMonth}`);
+  }
+  const moduleState = getVccFinancialOpModuleState(db);
   const snapshot = datasetSnapshot(db, targetMonth);
   const byType = new Map(snapshot.rows.map((row) => [row.dataset_type, row]));
   const detailCounts = new Map();
@@ -158,17 +291,35 @@ function preflightCalculation(db, targetMonth) {
   `).all(targetMonth, ...REQUIRED_DETAIL_TYPES).map((row) => row.subject);
   const systemSubjects = systemRows.map((row) => row.subject);
   const previousMonth = previousYearMonth(targetMonth);
-  const openingSubjects = db.prepare(`
-    SELECT subject FROM vcc_fin_op_archives WHERE target_month = ?
-    UNION
-    SELECT subject FROM vcc_fin_op_opening_balances WHERE target_month = ?
+  const previousArchiveRows = db.prepare(`
+    SELECT subject, balances_json, run_id
+    FROM vcc_fin_op_archives
+    WHERE target_month = ?
     ORDER BY subject
-  `).all(previousMonth, targetMonth).map((row) => row.subject);
+  `).all(previousMonth);
+  const manualOpeningRows = db.prepare(`
+    SELECT subject, balances_json, content_hash
+    FROM vcc_fin_op_opening_balances
+    WHERE target_month = ?
+    ORDER BY subject
+  `).all(targetMonth);
+  const openingSubjects = [...new Set([
+    ...previousArchiveRows.map((row) => row.subject),
+    ...manualOpeningRows.map((row) => row.subject)
+  ])].sort();
   const expectedSubjects = [...new Set([...detailSubjects, ...openingSubjects])].sort();
   const systemSubjectSet = new Set(systemSubjects);
   const expectedSubjectSet = new Set(expectedSubjects);
   const missingSystemSubjects = expectedSubjects.filter((subject) => !systemSubjectSet.has(subject));
   const unexpectedSystemSubjects = systemSubjects.filter((subject) => !expectedSubjectSet.has(subject));
+  const openingState = classifyOpeningState({
+    targetMonth,
+    previousMonth,
+    moduleState,
+    manualOpeningRows,
+    previousArchiveRows,
+    expectedSubjects
+  });
   const inputFingerprint = crypto.createHash('sha256').update(JSON.stringify({
     targetMonth,
     datasets: datasets.map((item) => ({
@@ -178,27 +329,36 @@ function preflightCalculation(db, targetMonth) {
       revision: item.revision
     })),
     system: systemRows.map((row) => [row.subject, row.content_hash]),
-    unresolved: unresolved.map((row) => row.id)
+    unresolved: unresolved.map((row) => row.id),
+    firstMonth: moduleState.firstMonth,
+    opening: manualOpeningRows.map((row) => [row.subject, row.content_hash]),
+    previousArchive: previousArchiveRows.map((row) => [
+      row.subject,
+      Number(row.run_id),
+      crypto.createHash('sha256').update(String(row.balances_json), 'utf8').digest('hex')
+    ])
   }), 'utf8').digest('hex');
   if (
-    activeImports.length > 0
+    moduleState.migrationDiagnostic
+    || activeImports.length > 0
     || missing.length > 0
     || archived.length > 0
     || unresolved.length > 0
     || missingSystemSubjects.length > 0
     || unexpectedSystemSubjects.length > 0
+    || openingState.status === 'blocked'
   ) {
+    let code = openingState.code;
+    if (unexpectedSystemSubjects.length > 0) code = 'subject-mismatch';
+    if (missingSystemSubjects.length > 0) code = 'missing-system-subject';
+    if (unresolved.length > 0) code = 'unresolved-imports';
+    if (archived.length > 0) code = 'month-already-archived';
+    if (missing.length > 0) code = 'missing-datasets';
+    if (activeImports.length > 0) code = 'active-imports';
+    if (moduleState.migrationDiagnostic) code = moduleState.migrationDiagnostic.code;
     return {
       ok: false,
-      code: activeImports.length > 0
-        ? 'active-imports'
-        : (missing.length > 0
-          ? 'missing-datasets'
-          : (archived.length > 0
-            ? 'month-already-archived'
-            : (unresolved.length > 0
-              ? 'unresolved-imports'
-              : (missingSystemSubjects.length > 0 ? 'missing-system-subject' : 'subject-mismatch')))),
+      code,
       missing: missing.map((sourceType) => (
         datasets.find((item) => item.sourceType === sourceType).label
       )),
@@ -210,10 +370,20 @@ function preflightCalculation(db, targetMonth) {
       unexpectedSystemSubjects,
       datasets,
       revisions: snapshot.revisions,
-      inputFingerprint
+      inputFingerprint,
+      openingState,
+      message: moduleState.migrationDiagnostic
+        ? moduleState.migrationDiagnostic.message
+        : (code === openingState.code ? openingState.message : undefined)
     };
   }
-  return { ok: true, datasets, revisions: snapshot.revisions, inputFingerprint };
+  return {
+    ok: true,
+    datasets,
+    revisions: snapshot.revisions,
+    inputFingerprint,
+    openingState
+  };
 }
 
 function movementGroupKey(row) {
@@ -473,7 +643,25 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
   try {
     const preflight = preflightCalculation(db, normalizedMonth);
     if (!preflight.ok) {
-      throw new Error('当前账期原表不完整、已归档或仍有未处理异常，不能初始化期初财务OP');
+      throw createVccStateError(
+        preflight.code || 'opening-initialization-blocked',
+        preflight.message || '当前账期原表不完整、已归档或仍有未处理异常，不能初始化期初财务OP',
+        { preflight }
+      );
+    }
+    const openingState = preflight.openingState || {};
+    const initializationRequired = openingState.status === 'first-month-initialization-required';
+    const idempotentReplay = openingState.status === 'ready'
+      && openingState.source === 'manual_initialization'
+      && openingState.firstMonth === normalizedMonth;
+    if (!initializationRequired && !idempotentReplay) {
+      throw createVccStateError(
+        'not-first-month',
+        openingState.firstMonth
+          ? `仅首月 ${openingState.firstMonth} 可人工初始化期初财务OP`
+          : '当前账期不允许人工初始化期初财务OP',
+        { openingState }
+      );
     }
     const aggregate = aggregateEffectiveRows(db, normalizedMonth);
     const systemSnapshots = loadSystemSnapshots(db, normalizedMonth);
@@ -487,9 +675,8 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
     if (missingSystem.length > 0) {
       throw new Error(`以下主体缺少系统财务OP，不能初始化期初余额：${missingSystem.join('、')}`);
     }
-    const missing = [...subjects].filter((subject) => !opening.balances.has(subject));
     const entryBySubject = new Map(normalizedEntries.map((entry) => [entry.subject, entry]));
-    const omitted = missing.filter((subject) => !entryBySubject.has(subject));
+    const omitted = [...subjects].filter((subject) => !entryBySubject.has(subject));
     if (omitted.length > 0) throw new Error(`以下主体仍缺少期初财务OP：${omitted.join('、')}`);
 
     const initializedSubjects = [];
@@ -526,10 +713,51 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
       );
       initializedSubjects.push(entry.subject);
     }
+    const stateBeforeClaim = getVccFinancialOpModuleState(db);
+    if (stateBeforeClaim.migrationDiagnostic) {
+      throw createVccStateError(
+        stateBeforeClaim.migrationDiagnostic.code,
+        stateBeforeClaim.migrationDiagnostic.message,
+        { diagnostic: stateBeforeClaim.migrationDiagnostic }
+      );
+    }
+    if (stateBeforeClaim.firstMonth === null) {
+      const claim = claimVccFinancialOpFirstMonth(db, normalizedMonth);
+      if (claim.diagnostic) {
+        throw createVccStateError(claim.diagnostic.code, claim.diagnostic.message, {
+          diagnostic: claim.diagnostic
+        });
+      }
+      if (claim.conflict || claim.firstMonth !== normalizedMonth) {
+        throw createVccStateError(
+          'not-first-month',
+          `首月已由其他事务确定为 ${claim.firstMonth || '未知月份'}，本次初始化已回滚`,
+          { firstMonth: claim.firstMonth }
+        );
+      }
+    } else if (stateBeforeClaim.firstMonth !== normalizedMonth) {
+      throw createVccStateError(
+        'not-first-month',
+        `仅首月 ${stateBeforeClaim.firstMonth} 可人工初始化期初财务OP`,
+        { firstMonth: stateBeforeClaim.firstMonth }
+      );
+    }
+    const committedState = getVccFinancialOpModuleState(db);
+    if (
+      committedState.migrationDiagnostic
+      || committedState.firstMonth !== normalizedMonth
+    ) {
+      throw createVccStateError(
+        'vcc-first-month-state-inconsistent',
+        '期初余额与首月状态未能原子保持一致，本次初始化已回滚',
+        { moduleState: committedState }
+      );
+    }
     db.exec('COMMIT');
     return {
       status: initializedSubjects.length > 0 ? 'initialized' : 'all_skipped',
       targetMonth: normalizedMonth,
+      firstMonth: committedState.firstMonth,
       initializedSubjects,
       skippedSubjects
     };
@@ -539,15 +767,16 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
   }
 }
 
-function persistCalculation(db, targetMonth, revisions, aggregate, balanceResult) {
+function persistCalculation(db, targetMonth, revisions, inputFingerprint, aggregate, balanceResult) {
   db.prepare(`
     DELETE FROM vcc_fin_op_runs
     WHERE target_month = ? AND status = 'calculated'
   `).run(targetMonth);
   const result = db.prepare(`
-    INSERT INTO vcc_fin_op_runs (target_month, input_revisions_json)
-    VALUES (?, ?)
-  `).run(targetMonth, JSON.stringify(revisions));
+    INSERT INTO vcc_fin_op_runs (
+      target_month, input_revisions_json, result_revision, input_fingerprint, updated_at
+    ) VALUES (?, ?, 0, ?, datetime('now', 'localtime'))
+  `).run(targetMonth, JSON.stringify(revisions), inputFingerprint);
   const runId = Number(result.lastInsertRowid);
   const insertRow = db.prepare(`
     INSERT INTO vcc_fin_op_run_rows (
@@ -555,18 +784,51 @@ function persistCalculation(db, targetMonth, revisions, aggregate, balanceResult
       category_major, category_minor, currency, amount
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  for (const group of aggregate.movementGroups.values()) {
+  const rowCoordinates = new Set();
+  const insertRunRow = (row) => {
+    const rowKey = buildRunRowKey(row);
+    const coordinate = JSON.stringify([rowKey, row.currency]);
+    if (rowCoordinates.has(coordinate)) {
+      throw createVccStateError(
+        'run-row-key-collision',
+        `run ${runId} 存在重复 rowKey + currency：${rowKey} / ${row.currency}`,
+        { runId, rowKey, currency: row.currency }
+      );
+    }
+    rowCoordinates.add(coordinate);
     insertRow.run(
-      runId, group.subject, 'movement', group.sourceType,
-      group.categoryMajor, group.categoryMinor, group.currency, group.amount.value()
+      runId,
+      row.subject,
+      row.rowKind,
+      row.sourceType,
+      row.categoryMajor,
+      row.categoryMinor,
+      row.currency,
+      row.amount
     );
+  };
+  for (const group of aggregate.movementGroups.values()) {
+    insertRunRow({
+      rowKind: 'movement',
+      subject: group.subject,
+      sourceType: group.sourceType,
+      categoryMajor: group.categoryMajor,
+      categoryMinor: group.categoryMinor,
+      currency: group.currency,
+      amount: group.amount.value()
+    });
   }
   for (const [key, amount] of aggregate.pendingCurrencyTotals) {
     const [subject, currency] = JSON.parse(key);
-    insertRow.run(
-      runId, subject, 'pending', SOURCE_TYPES.PENDING,
-      '当月移除pending', '', currency, amount.value()
-    );
+    insertRunRow({
+      rowKind: 'pending',
+      subject,
+      sourceType: SOURCE_TYPES.PENDING,
+      categoryMajor: '当月移除pending',
+      categoryMinor: '',
+      currency,
+      amount: amount.value()
+    });
   }
 
   const insertBalance = db.prepare(`
@@ -654,6 +916,8 @@ function calculateMonth({ db, targetMonth, expectedInputFingerprint = '' }) {
           : 'missing-opening-balance',
         targetMonth: normalizedMonth,
         previousMonth: openingBalances.previousMonth,
+        openingState: preflight.openingState,
+        canInitializeOpening: preflight.openingState.status === 'first-month-initialization-required',
         ...balanceResult
       };
     }
@@ -662,6 +926,7 @@ function calculateMonth({ db, targetMonth, expectedInputFingerprint = '' }) {
       db,
       normalizedMonth,
       preflight.revisions,
+      preflight.inputFingerprint,
       aggregate,
       balanceResult
     );
@@ -672,7 +937,8 @@ function calculateMonth({ db, targetMonth, expectedInputFingerprint = '' }) {
       targetMonth: normalizedMonth,
       previousMonth: openingBalances.previousMonth,
       subjects: balanceResult.subjects,
-      balances: balanceResult.balances
+      balances: balanceResult.balances,
+      inputFingerprint: preflight.inputFingerprint
     };
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }

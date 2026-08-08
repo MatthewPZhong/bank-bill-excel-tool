@@ -11,6 +11,11 @@ const {
   PENDING_HASH_VERSION,
   pendingContentHash
 } = require('../vcc-financial-op/row-mapper');
+const {
+  STRICT_YEAR_MONTH_PATTERN,
+  diagnoseFirstMonthFacts,
+  readFirstMonthFacts
+} = require('./state-model');
 
 function tableColumns(db, tableName) {
   return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name));
@@ -175,6 +180,142 @@ function ensurePendingRawContractSupport(db) {
       }
     }
     db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    throw error;
+  }
+}
+
+const FIRST_MONTH_DIAGNOSTIC_OPERATION = 'first_month_migration_diagnostic';
+
+function persistFirstMonthDiagnostic(db, diagnostic) {
+  if (!diagnostic.blocked) return null;
+  const evidenceJson = JSON.stringify({
+    code: diagnostic.code,
+    reason: diagnostic.reason,
+    firstMonth: diagnostic.firstMonth,
+    openingMonths: diagnostic.openingMonths,
+    invalidFirstMonth: diagnostic.invalidFirstMonth || false,
+    invalidOpeningMonths: diagnostic.invalidOpeningMonths || []
+  });
+  const existing = db.prepare(`
+    SELECT id
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? AND status = 'blocked' AND evidence_json = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(FIRST_MONTH_DIAGNOSTIC_OPERATION, evidenceJson);
+  if (existing) return Number(existing.id);
+  const targetMonth = diagnostic.firstMonth !== null
+    ? diagnostic.firstMonth
+    : (diagnostic.openingMonths[0] == null ? '' : diagnostic.openingMonths[0]);
+  const result = db.prepare(`
+    INSERT INTO vcc_fin_op_operation_audit (
+      target_month, operation_type, status, evidence_json, error_message
+    ) VALUES (?, ?, 'blocked', ?, ?)
+  `).run(
+    targetMonth,
+    FIRST_MONTH_DIAGNOSTIC_OPERATION,
+    evidenceJson,
+    diagnostic.message
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function ensureVccFinancialOpStateModelSupport(db) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_module_state (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        first_month TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_run_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        row_key TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        category_major TEXT NOT NULL,
+        category_minor TEXT NOT NULL DEFAULT '',
+        currency TEXT NOT NULL,
+        adjustment_amount TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        created_app_version TEXT,
+        created_build_sha TEXT,
+        FOREIGN KEY (run_id) REFERENCES vcc_fin_op_runs(id) ON DELETE CASCADE,
+        UNIQUE (run_id, sequence),
+        UNIQUE (run_id, row_key, currency)
+      );
+
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_operation_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_month TEXT NOT NULL,
+        operation_type TEXT NOT NULL,
+        run_id INTEGER,
+        status TEXT NOT NULL,
+        preview_token TEXT,
+        evidence_json TEXT NOT NULL,
+        error_message TEXT,
+        app_version TEXT,
+        build_sha TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_row
+        ON vcc_fin_op_run_adjustments(run_id, row_key, currency);
+      CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_operation_audit_month
+        ON vcc_fin_op_operation_audit(target_month, operation_type, created_at DESC, id DESC);
+    `);
+
+    const runColumns = tableColumns(db, 'vcc_fin_op_runs');
+    if (!runColumns.has('result_revision')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN result_revision INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!runColumns.has('updated_at')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN updated_at TEXT');
+    }
+    if (!runColumns.has('input_fingerprint')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN input_fingerprint TEXT');
+    }
+    db.exec(`
+      UPDATE vcc_fin_op_runs
+      SET updated_at = COALESCE(
+        NULLIF(TRIM(updated_at), ''),
+        NULLIF(TRIM(archived_at), ''),
+        NULLIF(TRIM(created_at), ''),
+        datetime('now', 'localtime')
+      )
+      WHERE updated_at IS NULL OR TRIM(updated_at) = ''
+    `);
+
+    db.prepare(`
+      INSERT OR IGNORE INTO vcc_fin_op_module_state (singleton_id, first_month)
+      VALUES (1, NULL)
+    `).run();
+
+    let facts = readFirstMonthFacts(db);
+    if (
+      facts.firstMonth === null
+      && facts.openingMonths.length === 1
+      && STRICT_YEAR_MONTH_PATTERN.test(facts.openingMonths[0])
+    ) {
+      db.prepare(`
+        UPDATE vcc_fin_op_module_state
+        SET first_month = ?, updated_at = datetime('now', 'localtime')
+        WHERE singleton_id = 1 AND first_month IS NULL
+      `).run(facts.openingMonths[0]);
+      facts = readFirstMonthFacts(db);
+    }
+    const diagnostic = diagnoseFirstMonthFacts(facts);
+    persistFirstMonthDiagnostic(db, diagnostic);
+    db.exec('COMMIT');
+    return diagnostic;
   } catch (error) {
     try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
     throw error;
@@ -387,7 +528,10 @@ function ensureVccFinancialOpTablesSupport(db) {
       status TEXT NOT NULL DEFAULT 'calculated'
         CHECK (status IN ('calculated', 'archived')),
       input_revisions_json TEXT NOT NULL DEFAULT '{}',
+      result_revision INTEGER NOT NULL DEFAULT 0,
+      input_fingerprint TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT,
       archived_at TEXT,
       UNIQUE (target_month, id)
     );
@@ -582,12 +726,18 @@ function ensureVccFinancialOpTablesSupport(db) {
     }
   }
   ensurePendingRawContractSupport(db);
+  const stateDiagnostic = ensureVccFinancialOpStateModelSupport(db);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_import_records_dataset_lifecycle
       ON vcc_fin_op_import_records(target_month, source_type, dataset_deleted_at, status);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_attempts_comparison
       ON vcc_fin_op_system_snapshot_attempts(comparison_attempt_id)
   `);
+  return { firstMonthDiagnostic: stateDiagnostic };
 }
 
-module.exports = { ensureVccFinancialOpTablesSupport };
+module.exports = {
+  FIRST_MONTH_DIAGNOSTIC_OPERATION,
+  ensureVccFinancialOpStateModelSupport,
+  ensureVccFinancialOpTablesSupport
+};
