@@ -13,6 +13,27 @@ const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
 const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
 
+test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 worker', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: ''
+  });
+  t.after(() => service.terminate());
+
+  for (const expectedInputFingerprint of [undefined, 'short', 'F'.repeat(64)]) {
+    const result = await service.calculate({
+      targetMonth: '2026-06',
+      expectedInputFingerprint
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.code, 'preflight-required');
+  }
+});
+
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

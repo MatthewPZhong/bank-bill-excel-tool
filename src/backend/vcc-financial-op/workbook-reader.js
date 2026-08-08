@@ -117,6 +117,7 @@ async function previewSheet(workbook, sheet, maxRows = PREVIEW_MEANINGFUL_ROWS) 
     expectedHeaders: new Array(PREVIEW_COLUMN_COUNT).fill(''),
     sharedStrings: workbook.sharedStrings,
     valueColumnWhitelist: null,
+    collectAllColumns: true,
     onRow: ({ rowR, values, hasAnyCellText }) => {
       if (!hasAnyCellText) return;
       rows.push({ rowR, values: normalizeHeaderRow(values) });
@@ -412,6 +413,7 @@ async function streamDetailRows(filePath, sourceType, { onDataRow, onProgress } 
       sharedStrings: workbook.sharedStrings,
       valueColumnWhitelist: null,
       cellTypeColumnWhitelist: new Set([definition.indexes[definition.keyHeader]]),
+      collectAllColumns: (rowR) => rowR === found.headerRow,
       onRow: ({ rowR, values, hasAnyCellText, cellTypes }) => {
         if (rowR === found.headerRow) {
           if (!headersEqual(values, definition.headers)) {

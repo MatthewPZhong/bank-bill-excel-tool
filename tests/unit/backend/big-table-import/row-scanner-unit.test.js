@@ -5,6 +5,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
+const { Readable } = require('node:stream');
 const rs = require('../../../../src/backend/big-table-import/row-scanner');
 
 // 把一行字符串转 Buffer
@@ -127,5 +128,27 @@ test.describe('big-table-import row-scanner 单元', () => {
     assert.equal(cellTypes[0], 's');
     assert.equal(cellTypes[1], 'n');
     assert.equal(cellTypes[2], undefined);
+  });
+
+  test('scanSheetRows：非首行候选表头可稀疏收集到 XFD，不分配中间 16382 个空串', async () => {
+    const xml = [
+      '<worksheet><sheetData><row r="25">',
+      '<c r="A25" t="inlineStr"><is><t>首列</t></is></c>',
+      '<c r="XFD25" t="inlineStr"><is><t>远列</t></is></c>',
+      '</row></sheetData></worksheet>'
+    ].join('');
+    let captured = null;
+    await rs.scanSheetRows({
+      stream: Readable.from([Buffer.from(xml)]),
+      expectedHeaders: new Array(46).fill(''),
+      sharedStrings: [],
+      collectAllColumns: (rowR) => rowR === 25,
+      onRow(row) { captured = row; }
+    });
+
+    assert.equal(captured.values.length, 16384);
+    assert.equal(captured.values[0], '首列');
+    assert.equal(captured.values[16383], '远列');
+    assert.deepEqual(Object.keys(captured.values), ['0', '16383']);
   });
 });

@@ -255,7 +255,8 @@ function rowBytesToValues(
 //     - endPos = </row> 之后的位置（已收行）；
 //     - endPos = -1 表示在 limit 内未遇 </row>（行跨界，调用方需累积更多字节后重试，绝不发射半行）。
 //   与 rowBytesToValues 语义一致（后者用于已知行边界的单测驱动；本函数额外内联行尾检测，消除二次扫描）。
-//   isHeaderRow=true（表头）→ 全列解析；whitelist 仅数据行生效。
+//   isFullWidth=true → 全列解析；whitelist 仅限宽数据行生效。sparseFullWidth=true 时只写非空 cell，
+//   用于物理第 1 行以外的候选表头，避免 XFD 远列触发 16384 个空串的稠密分配。
 function parseRowInline(
   buf,
   cellsStart,
@@ -263,11 +264,12 @@ function parseRowInline(
   expectedLen,
   sharedStrings,
   whitelist,
-  isHeaderRow,
-  cellTypeWhitelist = null
+  isFullWidth,
+  cellTypeWhitelist = null,
+  sparseFullWidth = false
 ) {
-  const effWhitelist = isHeaderRow ? null : whitelist;
-  const values = isHeaderRow ? [] : new Array(expectedLen).fill('');
+  const effWhitelist = isFullWidth ? null : whitelist;
+  const values = isFullWidth ? [] : new Array(expectedLen).fill('');
   const cellTypes = cellTypeWhitelist ? Object.create(null) : null;
   let hasAnyCellText = false;
 
@@ -301,8 +303,8 @@ function parseRowInline(
 
     if (selfClose) {
       if (trackCellType) cellTypes[colIdx] = parseCellType(buf, tagStart, tagEnd) || 'n';
-      if (colIdx >= 0 && (isHeaderRow || colIdx < expectedLen)) {
-        if (isHeaderRow) ensureIndex(values, colIdx);
+      if (colIdx >= 0 && (isFullWidth || colIdx < expectedLen) && !sparseFullWidth) {
+        if (isFullWidth) ensureIndex(values, colIdx);
         values[colIdx] = '';
       }
       i = tagEnd + 1;
@@ -322,7 +324,7 @@ function parseRowInline(
     const nextI = q + 4;
 
     if (colIdx < 0) { i = nextI; continue; }
-    if (!isHeaderRow && colIdx >= expectedLen) { i = nextI; continue; }
+    if (!isFullWidth && colIdx >= expectedLen) { i = nextI; continue; }
 
     const inWhitelist = effWhitelist === null || effWhitelist.has(colIdx);
     if (inWhitelist || !hasAnyCellText || trackCellType) {
@@ -333,8 +335,10 @@ function parseRowInline(
         const bodyStr = bodyEnd > bodyStart ? buf.toString('utf8', bodyStart, bodyEnd) : '';
         if (inWhitelist) {
           const v = cellValueFromBody(bodyStr, type, sharedStrings);
-          if (isHeaderRow) ensureIndex(values, colIdx);
-          values[colIdx] = v;
+          if (!sparseFullWidth || String(v).trim() !== '') {
+            if (isFullWidth && !sparseFullWidth) ensureIndex(values, colIdx);
+            values[colIdx] = v;
+          }
           if (!hasAnyCellText && v !== '') hasAnyCellText = true;
         } else if (!hasAnyCellText && cellHasText(bodyStr, type, sharedStrings)) {
           hasAnyCellText = true;
@@ -456,7 +460,8 @@ const BUF_SHEETDATA_SELFCLOSE = Buffer.from('<sheetData/>');
 //
 //   接口（与 reader-handrolled streamSheetRowsHandRolled 对齐）：
 //     - 入参 { stream, expectedHeaders, sharedStrings, onRow, valueColumnWhitelist=null,
-//       cellTypeColumnWhitelist=null }。
+//       cellTypeColumnWhitelist=null, collectAllColumns=false }。collectAllColumns 可为 boolean 或
+//       (rowR) => boolean；命中的非首行使用稀疏数组全列解析。
 //     - onRow({ rowR, values, hasAnyCellText, cellTypes })：rowR 取 <row r> 真实行号；表头行（rowR===1）恒全列解析。
 //     - onRow 抛 { __stopParsing:true, __stopValue } → 停止 stream + resolve(__stopValue)（peek 早退）。
 //     - onRow 抛其它 → reject。
@@ -467,7 +472,8 @@ function scanSheetRows({
   sharedStrings,
   onRow,
   valueColumnWhitelist = null,
-  cellTypeColumnWhitelist = null
+  cellTypeColumnWhitelist = null,
+  collectAllColumns = false
 }) {
   const expectedLen = expectedHeaders.length;
   const whitelist = valueColumnWhitelist || null;
@@ -512,8 +518,10 @@ function scanSheetRows({
 
     // 发射自闭合空行。
     function emitSelfCloseRow(theRowR) {
-      const isHeader = theRowR === 1;
-      const values = isHeader ? [] : new Array(expectedLen).fill('');
+      const collectEntireRow = collectAllColumns === true
+        || (typeof collectAllColumns === 'function' && collectAllColumns(theRowR) === true);
+      const isFullWidth = theRowR === 1 || collectEntireRow;
+      const values = isFullWidth ? [] : new Array(expectedLen).fill('');
       try {
         onRow({
           rowR: theRowR,
@@ -596,7 +604,9 @@ function scanSheetRows({
                 continue;
               }
               // 带 body 行：单遍解析（cell 取值 + </row> 检测同一遍）。
-              const isHeader = theRowR === 1;
+              const collectEntireRow = collectAllColumns === true
+                || (typeof collectAllColumns === 'function' && collectAllColumns(theRowR) === true);
+              const isFullWidth = theRowR === 1 || collectEntireRow;
               const parsed = parseRowInline(
                 buf,
                 tagEnd + 1,
@@ -604,8 +614,9 @@ function scanSheetRows({
                 expectedLen,
                 sharedStrings,
                 whitelist,
-                isHeader,
-                cellTypeColumnWhitelist
+                isFullWidth,
+                cellTypeColumnWhitelist,
+                theRowR !== 1 && collectEntireRow
               );
               if (parsed.endPos < 0) {
                 // </row> 跨界 → 从 lt 保留整段到 tail，下个 chunk 拼接后重解析（最多 1 行/chunk）。
