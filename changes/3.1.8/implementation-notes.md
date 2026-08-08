@@ -30,10 +30,12 @@
 | UI 把破坏性执行成功视为不可逆边界：提交成功后保持执行锁定，完成 `onCompleted` 刷新后再关闭；刷新失败也关闭并警告，不重开或重试提交 | 重开弹框会诱导用户对已成功事务重复操作 | 将执行与刷新放在同一 catch 后恢复按钮 | renderer 明确显示“操作已成功但刷新失败”，执行中 Esc/遮罩/关闭均被锁定 |
 | 首月期初初始化成功后立即结束当前【开始运行】流程，要求用户再次显式点击后才重新预检和计算 | Spec §4.2.5 禁止初始化后自动沿用当前点击继续计算或归档；资金结果需要新的明确用户动作 | 初始化成功后在同一调用栈自动 preflight/calculate | 成功状态和弹框均明确提示再次点击；renderer 契约测试禁止初始化后分支出现 preflight/calculate/archive |
 | 来源原表删除在同一 `BEGIN IMMEDIATE` 内按 run id 顺序先固化完整生效结果证据，再写 success operation audit，最后执行既有级联删除与 legacy deletion 记录 | PR #126 review 证明原实现先删 `run_adjustments`/run，只留下计数，无法还原人工纠错、基础结果和九币种余额 | 仅扩大 `vcc_fin_op_dataset_deletions` 计数字段；删除后再尽力拼证据 | operation type 固定为 `delete-source-dataset`；证据损坏、success 审计写入或后续删除失败均回滚零业务写，事务外只 best-effort 追加 `rolled_back` 且不掩盖主错误；旧调用方与 legacy deletion 记录保持兼容 |
-| 系统财务OP首次成功写 snapshot 时同步写一条引用该 snapshot 的 `accepted` attempt；删除历史 snapshot 前在同事务补齐缺失 accepted，再物化全部既有侧证据并解除 FK | 首次成功且从未重试的历史 snapshot 原先没有 attempt，删除后余额、raw、文件、sheet、行号和 import record 血缘永久丢失 | 只依赖后续幂等重试生成 attempt；删除时只更新已有 attempt | 新导入天然具备首次成功审计；历史补录以完整 snapshot 字段和引用为幂等判据，补录、物化、删除、记录标记任一步失败均整体回滚 |
+| 系统财务OP首次成功写 snapshot 时同步写一条引用该 snapshot 的 `accepted` attempt；删除历史 snapshot 前只允许 linked accepted 为 0 或唯一且与 snapshot 一致，0 条时补 1 条，再物化全部既有侧证据并解除 FK | 首次成功且从未重试的历史 snapshot 原先没有 attempt；但按完全一致 `NOT EXISTS` 直接回填会用新正确记录掩盖已有错误/重复 accepted，错误非空 `existing_*` 又会被 `COALESCE` 保留 | 只依赖后续幂等重试；不检查旧 accepted 就补录；只检查存在一条正确 accepted | 新导入天然具备首次成功审计；历史缺失可幂等补录；已有 incoming/双侧字段不一致、重复 accepted 均 fail-closed，补录后再次严格断言每个 live snapshot 恰好一条完整一致 accepted；任一步失败整体回滚 |
 | `protected === true` 是取消超时后无限等待的唯一判据；`critical-ready` 但未 ACK/未 protected 的 worker 仍可安全 terminate | 用户先取消或关窗后 worker 才发 `critical-ready` 时，父进程不会发 ACK，worker 不可能进入数据库事务；旧逻辑却把 phase 当成 protected 永久等待 | 看到 `critical-ready` 就无限等；所有 timeout 都强杀 | 已 ACK 的事务继续只等待；取消在先的握手窗口超时后强制终止并释放全局租约，避免关窗悬挂 |
-| 四类破坏性事务在 COMMIT 前使用无歧义 framing 的 `iterate()` 增量 SHA-256 对保留状态做前后指纹；source 删除只归一化允许的目标审计物化、成功记录删除标记和 accepted backfill | 单看删除计数无法发现 silent trigger 对其他来源、dataset、opening 或 run 子表的删改；大表 `.all()`/`group_concat` 又会放大内存 | 为所有事实加载完整 raw 数组；只继续比较聚合计数 | 普通 unarchive/opening/result 仅流式读取 id/content hash/关键审计元数据；只有目标 source 物化校验读取必要 raw。错误 context 仅含表级 count/hash，不含原始资金载荷 |
-| 删除提交统一要求非空 preview token 和显式安全 generation，并移除 worker legacy `delete-dataset` action | 参数解构默认和 `Number('')` 会把缺失代次降为 0，低层或旧 worker action 可绕过用户已观察状态确认 | 保留 service 层单点校验；缺失值按 generation 0 执行 | unified `delete-data-target` dispatch 前和 source/opening/result 内部入口双层 fail-closed；所有正常调用先 preview，缺失/空串/NaN/负数/超范围均不进入业务事务 |
+| 四类破坏性事务在 COMMIT 前对全部 VCC 表建立“目标月允许集 + 其他月份/全局零漂移”指纹；run child 按父 run 月份、import error 按父 record 月份归属，孤儿按全局事实保护 | 仅 target month 指纹无法发现 trigger 删除/篡改其他月；跨月错链还会被目标 materializer 按 FK 更新并清空 | 仅保护目标月；为所有事实加载数组；依赖 FK 正常而忽略孤儿 | 全部查询使用稳定列/NULL/类型 framing 的 `iterate()` 增量 SHA-256，额外内存不随行数增长；source 删除只归一化允许的目标审计物化、成功记录删除标记和 accepted backfill，跨月错链和其他月 silent trigger 均回滚 |
+| effective/import/system snapshot/attempt 的 `raw_json` 与 `existing_raw_json_snapshot` 直接进入逐行流式指纹，不再只比较 length/content hash | silent trigger 可做同长度 raw 改写且不更新 content_hash，原投影会把资金审计载荷漂移视为未变化 | 信任持久化 content_hash；只比较字符串长度 | 六类同长度 raw 改写回归均触发事务回滚；原始载荷只进入 hash，不进入错误 context |
+| 旧 operation audit 以事务前 max id 为边界纳入全局指纹；边界后必须恰好一条本次 success audit，并明确断言 id/month/type/run/status/token/evidence hash 与构建字段 | success audit INSERT trigger 可篡改旧审计或本次 evidence/metadata，业务事务仍可能提交伪造审计 | 完全排除 operation audit；只相信 `lastInsertRowid` | 旧行任何漂移、新行篡改或额外插入均在 COMMIT 前回滚；错误只携带 metadata/count/hash，跨 worker 序列化不泄露 evidence/raw |
+| 破坏性提交统一要求非空 preview token 和显式安全 generation，并移除 worker legacy `delete-dataset` action | 参数解构默认和 service 预先 `Number('')` 会把缺失代次降为 0，低层或旧 worker action 可绕过用户已观察状态确认 | 只在 acquireTask/部分低层校验；缺失值按 generation 0 执行 | service 在创建 worker 前对 raw payload 调用统一 validator；unarchive 与 unified source/opening/result 内部入口继续防御，缺失/null/空串/NaN/负数/超范围均不进入业务事务 |
 | 损坏归档月在继续排除普通枚举的同时通过注入 logger 输出固定结构事件 | PR 3 的 fail-closed 枚举原先静默 `continue/catch`，生产无法发现 run/archive/dataset 漂移 | 向用户枚举返回损坏月份；日志失败时中断枚举 | 从后续 PR 5 最小回移 `archiveConsistencyLogger`；日志异常仅影响旁路观测，不会让损坏月重新可操作 |
 
 ## Assumptions
@@ -47,7 +49,6 @@
 | 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | PR 4 若引入不同 revision 语义会触发 reader 门禁 | PR 4 写入必须在单事务内追加 sequence=N+1 并 revision+1 |
 | 严格 `YYYY-MM` 字符串可直接用于跨月先后比较 | 月份入口统一规范化且固定两位月份 | 非规范历史月份会被排除普通枚举并在直接 preview 失败 | 保持 `normalizeOperationMonth()` 为所有破坏性入口前置门禁 |
 | 删除首月期初允许五类 dataset 中部分已被用户删除，但所有仍存在的 dataset 必须处于未归档状态 | 用户可能先删除某一原表；期初清理不应要求伪造缺失 dataset | 强制五表必须齐全；缺表即阻断 | 只删除期初和同月 calculated runs；first_month、剩余 dataset、源事实和导入审计保持不变 |
-| 非目标 source 大表的 `content_hash` 是 raw 内容一致性的权威摘要；普通破坏性操作不重复读取整月 raw_json | importer 在有效事实和审计表中持久化内容哈希，目标 source 删除另有逐行 raw 物化核对 | 普通 unarchive/opening/result 每次完整扫描 raw_json | 指纹仍覆盖 id、hash、金额/币种字段、来源定位和关键审计元数据；若未来允许绕过 importer 直接改 raw，必须同步更新 hash 或新增数据库完整性诊断 |
 
 ## Deviations
 
@@ -93,6 +94,10 @@
 | PR #126 P3+ 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4648/4648 PASS`（295 个测试文件）；integration `45/45` 脚本、`2115/2115` 可计数断言 PASS | 当前代码一次性通过静态、其他模块 smoke、全仓单测、迁移/大文件/side DB 与破坏性状态链门禁 |
 | PR #126 P3+ `npm run check:vars` | 仅命中通用局部变量名 `state`；未改 `src/renderer.js` 顶层 UI state，无 Critical / Important-skeleton / Risk-sensitive 命中 | 已额外复核 VCC `activeTask/taskGeneration/protected/phase` 生命周期、worker ACK 边界和任务释放；旧预览仍在 generation 推进后失效 |
 | PR #126 P3+ blindspot + reconciliation 复核 | 入口旁路、月份/source 主键血缘、九币种余额原样物化、幂等 backfill、部分失败、行/子表守恒、错误可观测性均有代码与 silent-trigger 回归 | 新发现的 unified undefined→0 和 backfill 后 trigger 漂移已在本轮修复；未发现未处理的 P3+ 自动化缺口，真实财务月份与 Windows 退出时序仍保留人工门禁 |
+| PR #126 独立终审聚焦回归 | dataset deletion / destructive actions / system importer / audit writer / service 共 `96/96 PASS`，其中核心新增组合 `71/71 PASS` | accepted 0/唯一且完全一致、六类同长 raw 篡改、六类当次 success audit 篡改/额外行、旧 audit 篡改、跨月 run child/import error/外键错链及 service 零 worker 旁路均回滚；错误上下文只含 count/hash/metadata，跨 worker 序列化不泄露 raw/evidence |
+| PR #126 独立终审真实 SQLite + worker 状态链 | `scripts/integration/vcc-financial-op-destructive-state-chain.js` 为 `64/64 PASS` | 三月解归档/删期初/删结果/删原表、generation/token、success/rolled_back 审计及事务故障回滚在真实连接中保持一致 |
+| PR #126 独立终审 `npm run check:vars` | 本轮 6 个 `src` 文件仅命中 Runtime-state 通用词 `state`，无 Critical / Important-skeleton / Risk-sensitive 命中 | 实际未修改 renderer 全局 `state`；已复核 VCC task generation、confirmation、worker 创建前失败关闭与事务保护边界 |
+| PR #126 独立终审 blindspot + reconciliation 复核 | 对照 migration 复核全部 19 张 VCC 表；目标月允许集、其他月/全局零漂移、父表月份归属、raw 精确 framing、audit 边界和 accepted 双侧血缘均有代码与故障注入证据 | 未发现遗留的可自动化 P2/P3 缺口；未自动修复损坏账务数据。真实资金月份主体/币种复核仍为发布前人工红线 |
 
 ## Remaining Unknowns
 

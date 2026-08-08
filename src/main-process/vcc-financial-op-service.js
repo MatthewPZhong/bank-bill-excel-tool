@@ -24,7 +24,8 @@ const {
 const {
   operationError,
   STATE_CHANGED_CODE,
-  STATE_CHANGED_MESSAGE
+  STATE_CHANGED_MESSAGE,
+  validateOperationConfirmation
 } = require('../backend/vcc-financial-op/operation-state');
 const {
   listArchivedResultMonths: listArchivedResultMonthsFromDb,
@@ -458,21 +459,19 @@ function createVccFinancialOpService({
   }
 
   function unarchiveMonth(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('unarchive-month', {
       targetMonth: payload.targetMonth,
       expectedPreviewToken
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 
@@ -491,15 +490,13 @@ function createVccFinancialOpService({
   }
 
   function deleteDataTargetData(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('delete-data-target', {
       targetMonth: payload.targetMonth,
       targetType: payload.targetType || payload.sourceType,
@@ -507,7 +504,7 @@ function createVccFinancialOpService({
       reason: payload.reason
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 

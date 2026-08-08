@@ -478,6 +478,72 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
   assert.equal(workers.length, 1);
 });
 
+test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法 generation', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
+  const deletePreview = service.previewDataTargetDeletion({
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  const operations = [
+    {
+      call: (confirmation) => service.unarchiveMonth({
+        targetMonth: '2026-06',
+        ...confirmation
+      }),
+      token: unarchivePreview.previewToken
+    },
+    {
+      call: (confirmation) => service.deleteDataTarget({
+        targetMonth: '2026-06',
+        targetType: SOURCE_TYPES.RECHARGE,
+        ...confirmation
+      }),
+      token: deletePreview.previewToken
+    }
+  ];
+  for (const operation of operations) {
+    assert.throws(() => operation.call({
+      expectedPreviewToken: '',
+      previewToken: operation.token,
+      taskGeneration: 0
+    }), (error) => error.code === 'state-changed');
+    for (const invalidGeneration of [
+      undefined,
+      null,
+      '',
+      Number.NaN,
+      -1,
+      Number.MAX_SAFE_INTEGER + 1
+    ]) {
+      assert.throws(() => operation.call({
+        expectedPreviewToken: operation.token,
+        taskGeneration: invalidGeneration
+      }), (error) => error.code === 'invalid-task-generation');
+    }
+  }
+  assert.equal(workers.length, 0, '非法 raw confirmation 不得创建 worker');
+  assert.deepEqual(service._taskStateForTests(), {
+    taskGeneration: 0,
+    closing: false,
+    active: false,
+    action: null,
+    phase: null,
+    protected: false
+  });
+});
+
 test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 terminate', async (t) => {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');

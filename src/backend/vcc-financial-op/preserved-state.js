@@ -8,7 +8,7 @@ const {
   stableStringify
 } = require('./operation-state');
 
-const PRESERVED_STATE_VERSION = 1;
+const PRESERVED_STATE_VERSION = 2;
 const PRESERVED_OPERATIONS = Object.freeze({
   UNARCHIVE: 'unarchive',
   DELETE_OPENING: 'delete-opening',
@@ -27,7 +27,8 @@ const EFFECTIVE_FACT_COLUMNS = `
   business_department, counterparty_department, business_sub_type,
   channel_name, mid, recon_type, pending_currency, pending_amount,
   flow_currency, flow_amount, currency_mismatch,
-  source_file, sheet_name, source_row, import_record_id, first_imported_at
+  source_file, sheet_name, source_row, raw_json,
+  import_record_id, first_imported_at
 `;
 const IMPORT_AUDIT_COLUMNS = `
   id, import_record_id, source_type, target_month,
@@ -42,9 +43,13 @@ const IMPORT_AUDIT_COLUMNS = `
   existing_subject_snapshot, existing_source_file_snapshot,
   existing_sheet_name_snapshot, existing_source_row_snapshot,
   existing_import_record_id_snapshot, existing_imported_at_snapshot,
-  existing_raw_contract_version_snapshot, created_at,
-  length(raw_json) AS raw_json_length,
-  length(existing_raw_json_snapshot) AS existing_raw_json_snapshot_length
+  existing_raw_contract_version_snapshot,
+  raw_json, existing_raw_json_snapshot, created_at
+`;
+const SYSTEM_SNAPSHOT_COLUMNS = `
+  id, target_month, subject, balances_json, content_hash,
+  source_file, sheet_name, source_row, raw_json,
+  import_record_id, imported_at
 `;
 const SYSTEM_ATTEMPT_AUDIT_COLUMNS = `
   id, import_record_id, target_month, subject, balances_json, content_hash,
@@ -53,9 +58,7 @@ const SYSTEM_ATTEMPT_AUDIT_COLUMNS = `
   existing_balances_json_snapshot, existing_source_file_snapshot,
   existing_sheet_name_snapshot, existing_source_row_snapshot,
   existing_import_record_id_snapshot, existing_imported_at_snapshot,
-  message, created_at,
-  length(raw_json) AS raw_json_length,
-  length(existing_raw_json_snapshot) AS existing_raw_json_snapshot_length
+  raw_json, existing_raw_json_snapshot, message, created_at
 `;
 
 function maxId(db, tableName) {
@@ -166,9 +169,7 @@ function addSourceFingerprints(fingerprints, db, targetMonth, {
 
   if (!deletingSystem) {
     addFingerprint(fingerprints, db, 'vcc_fin_op_system_snapshots', `
-      SELECT id, target_month, subject, balances_json, content_hash,
-             source_file, sheet_name, source_row, import_record_id, imported_at,
-             length(raw_json) AS raw_json_length
+      SELECT ${SYSTEM_SNAPSHOT_COLUMNS}
       FROM vcc_fin_op_system_snapshots
       WHERE target_month = ?
       ORDER BY id
@@ -292,6 +293,98 @@ function addSourceFingerprints(fingerprints, db, targetMonth, {
   }
 }
 
+function addOtherMonthRunChildFingerprints(fingerprints, db, targetMonth) {
+  const tables = [{ name: 'vcc_fin_op_run_adjustments', order: 'child.id' },
+    { name: 'vcc_fin_op_run_rows', order: 'child.id' },
+    { name: 'vcc_fin_op_run_balances', order: 'child.run_id, child.subject, child.currency' },
+    { name: 'vcc_fin_op_pending_summary_rows', order: 'child.id' },
+    { name: 'vcc_fin_op_pending_currency_totals', order: 'child.run_id, child.subject, child.currency' }];
+  for (const table of tables) {
+    addFingerprint(fingerprints, db, `${table.name}:other-months`, `
+      SELECT child.*
+      FROM ${table.name} child
+      LEFT JOIN vcc_fin_op_runs run ON run.id = child.run_id
+      WHERE run.target_month <> ? OR run.id IS NULL
+      ORDER BY ${table.order}
+    `, [targetMonth]);
+  }
+}
+
+function addOtherMonthAndGlobalFingerprints(fingerprints, db, targetMonth, boundaries) {
+  addFingerprint(fingerprints, db, 'vcc_fin_op_operation_audit:existing', `
+    SELECT * FROM vcc_fin_op_operation_audit
+    WHERE id <= ?
+    ORDER BY id
+  `, [boundaries.operationAuditMaxId]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_import_batches:other-months', `
+    SELECT * FROM vcc_fin_op_import_batches
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_import_records:other-months', `
+    SELECT * FROM vcc_fin_op_import_records
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_import_errors:other-months', `
+    SELECT error.*
+    FROM vcc_fin_op_import_errors error
+    LEFT JOIN vcc_fin_op_import_records record ON record.id = error.import_record_id
+    WHERE record.target_month <> ? OR record.id IS NULL
+    ORDER BY error.id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_import_rows:other-months', `
+    SELECT ${IMPORT_AUDIT_COLUMNS}
+    FROM vcc_fin_op_import_rows
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_effective_rows:other-months', `
+    SELECT ${EFFECTIVE_FACT_COLUMNS}
+    FROM vcc_fin_op_effective_rows
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_datasets:other-months', `
+    SELECT * FROM vcc_fin_op_datasets
+    WHERE target_month <> ?
+    ORDER BY target_month, dataset_type
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_system_snapshots:other-months', `
+    SELECT ${SYSTEM_SNAPSHOT_COLUMNS}
+    FROM vcc_fin_op_system_snapshots
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_system_snapshot_attempts:other-months', `
+    SELECT ${SYSTEM_ATTEMPT_AUDIT_COLUMNS}
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE target_month <> ?
+    ORDER BY id
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_runs:other-months', `
+    SELECT * FROM vcc_fin_op_runs
+    WHERE target_month <> ?
+    ORDER BY target_month, id
+  `, [targetMonth]);
+  addOtherMonthRunChildFingerprints(fingerprints, db, targetMonth);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_archives:other-months', `
+    SELECT * FROM vcc_fin_op_archives
+    WHERE target_month <> ?
+    ORDER BY target_month, subject
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_opening_balances:other-months', `
+    SELECT * FROM vcc_fin_op_opening_balances
+    WHERE target_month <> ?
+    ORDER BY target_month, subject
+  `, [targetMonth]);
+  addFingerprint(fingerprints, db, 'vcc_fin_op_dataset_deletions:other-months', `
+    SELECT * FROM vcc_fin_op_dataset_deletions
+    WHERE target_month <> ?
+    ORDER BY target_month, id
+  `, [targetMonth]);
+}
+
 function addRunChildFingerprints(fingerprints, db, targetMonth) {
   const tables = [{ name: 'vcc_fin_op_run_adjustments', order: 'child.id' },
     { name: 'vcc_fin_op_run_rows', order: 'child.id' },
@@ -326,13 +419,15 @@ function snapshotPreservedOperationState(db, {
   }
   const boundaries = baseline ? baseline.boundaries : {
     systemAttemptMaxId: maxId(db, 'vcc_fin_op_system_snapshot_attempts'),
-    datasetDeletionMaxId: maxId(db, 'vcc_fin_op_dataset_deletions')
+    datasetDeletionMaxId: maxId(db, 'vcc_fin_op_dataset_deletions'),
+    operationAuditMaxId: maxId(db, 'vcc_fin_op_operation_audit')
   };
   const fingerprints = [];
 
   addFingerprint(fingerprints, db, 'vcc_fin_op_module_state', `
-    SELECT * FROM vcc_fin_op_module_state WHERE singleton_id = 1
+    SELECT * FROM vcc_fin_op_module_state ORDER BY singleton_id
   `);
+  addOtherMonthAndGlobalFingerprints(fingerprints, db, month, boundaries);
 
   if (operation === PRESERVED_OPERATIONS.UNARCHIVE) {
     addFingerprint(fingerprints, db, 'vcc_fin_op_runs:preserved-columns', `

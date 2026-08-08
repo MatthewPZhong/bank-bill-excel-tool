@@ -19,6 +19,7 @@ const {
 const {
   collectRunEvidence,
   insertOperationAudit,
+  assertSuccessOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
 const {
@@ -350,6 +351,18 @@ function deleteOpeningInitialization({
       throw operationError('delete-invariant-failed', '删除后首月状态断言失败，操作已回滚。');
     }
     assertRunChildrenDeleted(db, calculatedRunIds);
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth: target.targetMonth,
+      operationType: DELETE_OPENING_OPERATION,
+      previewToken: preview.previewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      code: 'delete-invariant-failed',
+      message: '删除首月期初成功审计提交前校验失败，操作已回滚。'
+    });
     const preservedAfter = snapshotPreservedOperationState(db, {
       targetMonth: target.targetMonth,
       operation: PRESERVED_OPERATIONS.DELETE_OPENING,
@@ -452,6 +465,18 @@ function deleteUnarchivedResult({
       throw operationError('delete-invariant-failed', '未归档结果未能完整删除，操作已回滚。');
     }
     assertRunChildrenDeleted(db, runIds);
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth: target.targetMonth,
+      operationType: DELETE_RESULT_OPERATION,
+      previewToken: preview.previewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      code: 'delete-invariant-failed',
+      message: '删除未归档结果成功审计提交前校验失败，操作已回滚。'
+    });
     const preservedAfter = snapshotPreservedOperationState(db, {
       targetMonth: target.targetMonth,
       operation: PRESERVED_OPERATIONS.DELETE_RESULT,

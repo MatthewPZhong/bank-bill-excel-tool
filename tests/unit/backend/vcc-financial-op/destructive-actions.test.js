@@ -411,6 +411,39 @@ test('解归档提交时重算 token；stale 和事务故障均零业务写并�
   assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back', 'rolled_back']);
 });
 
+test('低层 unarchive 直接入口拒绝缺失或空白 confirmation generation', (t) => {
+  const db = createDb(t);
+  const runId = seedRun(db, { status: 'archived' });
+  seedArchive(db, '2026-06', runId);
+  seedDatasets(db, '2026-06', 'archived', runId);
+  const preview = previewUnarchive(db, '2026-06', { taskGeneration: 0 });
+
+  assert.throws(() => unarchiveMonth({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: '',
+    taskGeneration: 0
+  }), (error) => error.code === 'state-changed');
+  for (const invalidGeneration of [
+    undefined,
+    null,
+    '',
+    Number.NaN,
+    -1,
+    Number.MAX_SAFE_INTEGER + 1
+  ]) {
+    assert.throws(() => unarchiveMonth({
+      db,
+      targetMonth: '2026-06',
+      expectedPreviewToken: preview.previewToken,
+      taskGeneration: invalidGeneration
+    }), (error) => error.code === 'invalid-task-generation');
+  }
+  assert.equal(db.prepare(`SELECT status FROM vcc_fin_op_runs WHERE id = ?`).get(runId).status, 'archived');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets WHERE data_status = 'archived'`).get().n, 5);
+});
+
 test('解归档 silent trigger 篡改结果子表时提交前指纹阻断并完整回滚', (t) => {
   const db = createDb(t);
   const runId = seedRun(db, { status: 'archived' });
@@ -436,6 +469,103 @@ test('解归档 silent trigger 篡改结果子表时提交前指纹阻断并完�
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets WHERE data_status = 'archived'`).get().n, 5);
   assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
+});
+
+test('success audit INSERT trigger 篡改旧审计时全局指纹阻断并回滚', (t) => {
+  const db = createDb(t);
+  const runId = seedRun(db, { status: 'archived' });
+  seedArchive(db, '2026-06', runId);
+  seedDatasets(db, '2026-06', 'archived', runId);
+  const oldAuditId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_operation_audit (
+      target_month, operation_type, status, preview_token, evidence_json
+    ) VALUES ('2026-05', 'fixture-old-audit', 'success', 'old-token', '{"stable":"A"}')
+  `).run().lastInsertRowid);
+  const preview = previewUnarchive(db, '2026-06', { taskGeneration: 15 });
+  db.exec(`
+    CREATE TRIGGER drift_old_audit_after_success_insert
+    AFTER INSERT ON vcc_fin_op_operation_audit
+    WHEN NEW.operation_type = 'unarchive' AND NEW.status = 'success'
+    BEGIN
+      UPDATE vcc_fin_op_operation_audit
+      SET evidence_json = '{"stable":"B"}'
+      WHERE id = ${oldAuditId};
+    END;
+  `);
+
+  assert.throws(() => unarchiveMonth({
+    db,
+    targetMonth: '2026-06',
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: 15
+  }), (error) => {
+    assert.equal(error.code, 'unarchive-invariant-failed');
+    assert.doesNotMatch(JSON.stringify(error.context), /stable|fixture-old-audit/);
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT evidence_json FROM vcc_fin_op_operation_audit WHERE id = ?
+  `).get(oldAuditId).evidence_json, '{"stable":"A"}');
+  assert.equal(db.prepare(`SELECT status FROM vcc_fin_op_runs WHERE id = ?`).get(runId).status, 'archived');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+  assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
+});
+
+test('本次 success audit 的唯一行与关键序列化字段在 COMMIT 前逐项断言', async (t) => {
+  const cases = [
+    { name: 'operation type', mutation: "UPDATE vcc_fin_op_operation_audit SET operation_type = 'tampered' WHERE id = NEW.id" },
+    { name: 'target month', mutation: "UPDATE vcc_fin_op_operation_audit SET target_month = '2026-05' WHERE id = NEW.id" },
+    { name: 'status', mutation: "UPDATE vcc_fin_op_operation_audit SET status = 'blocked' WHERE id = NEW.id" },
+    { name: 'preview token', mutation: "UPDATE vcc_fin_op_operation_audit SET preview_token = 'tampered-token' WHERE id = NEW.id" },
+    { name: 'evidence hash', mutation: "UPDATE vcc_fin_op_operation_audit SET evidence_json = '{}' WHERE id = NEW.id" },
+    {
+      name: 'extra audit row',
+      mutation: `INSERT INTO vcc_fin_op_operation_audit (
+        target_month, operation_type, status, evidence_json
+      ) VALUES ('2026-06', 'trigger-extra', 'blocked', '{}')`
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = createDb(subtest);
+      const runId = seedRun(db, { status: 'archived' });
+      seedArchive(db, '2026-06', runId);
+      seedDatasets(db, '2026-06', 'archived', runId);
+      const preview = previewUnarchive(db, '2026-06', { taskGeneration: 16 });
+      db.exec(`
+        CREATE TRIGGER tamper_current_success_audit
+        AFTER INSERT ON vcc_fin_op_operation_audit
+        WHEN NEW.operation_type = 'unarchive' AND NEW.status = 'success'
+        BEGIN
+          ${fixture.mutation};
+        END;
+      `);
+
+      let thrown = null;
+      try {
+        unarchiveMonth({
+          db,
+          targetMonth: '2026-06',
+          expectedPreviewToken: preview.previewToken,
+          taskGeneration: 16
+        });
+      } catch (error) {
+        thrown = error;
+      }
+      assert.ok(thrown);
+      assert.equal(thrown.code, 'unarchive-invariant-failed');
+      assert.ok(thrown.context.expected.evidenceHash);
+      assert.equal(
+        Object.prototype.hasOwnProperty.call(thrown.context.expected, 'evidence'),
+        false
+      );
+      const restored = deserializeError(serializeError(thrown));
+      assert.deepEqual(restored.context, thrown.context, 'hash-only audit evidence 必须跨 worker 保真');
+      assert.equal(db.prepare(`SELECT status FROM vcc_fin_op_runs WHERE id = ?`).get(runId).status, 'archived');
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_archives`).get().n, 1);
+      assert.deepEqual(auditRows(db, 'unarchive').map((row) => row.status), ['rolled_back']);
+    });
+  }
 });
 
 test('失败审计写入异常仅附加到主错误并可跨 worker 边界观测', (t) => {
@@ -528,7 +658,14 @@ test('统一删除入口与内部 opening/result 删除均拒绝缺失确认代�
     targetType: SOURCE_TYPES.RECHARGE,
     taskGeneration: 0
   }), (error) => error.code === 'state-changed');
-  for (const invalidGeneration of [undefined, '', Number.NaN, -1]) {
+  for (const invalidGeneration of [
+    undefined,
+    null,
+    '',
+    Number.NaN,
+    -1,
+    Number.MAX_SAFE_INTEGER + 1
+  ]) {
     assert.throws(() => deleteDataTarget({
       db,
       targetMonth: '2026-06',

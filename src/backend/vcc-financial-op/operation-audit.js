@@ -1,6 +1,7 @@
 'use strict';
 
 const { getEffectiveRunResult } = require('./result-adjustments');
+const { operationError, sha256 } = require('./operation-state');
 
 function collectRunEvidence(db, runId) {
   const effective = getEffectiveRunResult(db, Number(runId));
@@ -55,6 +56,85 @@ function insertOperationAudit(db, {
   return Number(result.lastInsertRowid);
 }
 
+function assertSuccessOperationAudit(db, {
+  auditId,
+  auditBoundaryId,
+  targetMonth,
+  operationType,
+  runId = null,
+  previewToken,
+  evidence,
+  appVersion = null,
+  buildSha = null,
+  code,
+  message
+}) {
+  const expectedId = Number(auditId);
+  const boundaryId = Number(auditBoundaryId);
+  const expectedEvidenceHash = sha256(JSON.stringify(evidence));
+  const row = Number.isSafeInteger(expectedId) ? db.prepare(`
+    SELECT id, target_month, operation_type, run_id, status, preview_token,
+           evidence_json, error_message, app_version, build_sha, created_at
+    FROM vcc_fin_op_operation_audit
+    WHERE id = ?
+  `).get(expectedId) : null;
+  const newAuditCount = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_operation_audit
+    WHERE id > ?
+  `).get(boundaryId).row_count) || 0;
+  const actualEvidenceHash = row ? sha256(row.evidence_json) : null;
+  const actualRunId = row && row.run_id !== null ? Number(row.run_id) : null;
+  const expectedRunId = runId === null ? null : Number(runId);
+  const valid = Number.isSafeInteger(expectedId)
+    && Number.isSafeInteger(boundaryId)
+    && expectedId > boundaryId
+    && newAuditCount === 1
+    && row
+    && Number(row.id) === expectedId
+    && row.target_month === targetMonth
+    && row.operation_type === operationType
+    && actualRunId === expectedRunId
+    && row.status === 'success'
+    && row.preview_token === previewToken
+    && actualEvidenceHash === expectedEvidenceHash
+    && row.error_message === null
+    && row.app_version === appVersion
+    && row.build_sha === buildSha
+    && Boolean(row.created_at);
+  if (valid) return { auditId: expectedId, evidenceHash: actualEvidenceHash };
+  throw operationError(code, message, {
+    context: {
+      auditBoundaryId: boundaryId,
+      newAuditCount,
+      expected: {
+        auditId: expectedId,
+        targetMonth,
+        operationType,
+        runId: expectedRunId,
+        status: 'success',
+        previewToken,
+        evidenceHash: expectedEvidenceHash,
+        appVersion,
+        buildSha
+      },
+      actual: row ? {
+        auditId: Number(row.id),
+        targetMonth: row.target_month,
+        operationType: row.operation_type,
+        runId: actualRunId,
+        status: row.status,
+        previewToken: row.preview_token,
+        evidenceHash: actualEvidenceHash,
+        appVersion: row.app_version,
+        buildSha: row.build_sha,
+        hasErrorMessage: row.error_message !== null,
+        hasCreatedAt: Boolean(row.created_at)
+      } : null
+    }
+  });
+}
+
 function errorEvidence(error) {
   return {
     name: error && error.name ? error.name : 'Error',
@@ -100,5 +180,6 @@ function persistRolledBackAudit(db, {
 module.exports = {
   collectRunEvidence,
   insertOperationAudit,
+  assertSuccessOperationAudit,
   persistRolledBackAudit
 };

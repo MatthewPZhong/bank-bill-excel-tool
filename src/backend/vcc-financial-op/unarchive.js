@@ -9,11 +9,13 @@ const {
   normalizeOperationMonth,
   buildOperationState,
   operationPreviewToken,
-  assertPreviewToken
+  assertPreviewToken,
+  validateOperationConfirmation
 } = require('./operation-state');
 const {
   collectRunEvidence,
   insertOperationAudit,
+  assertSuccessOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
 const {
@@ -266,7 +268,7 @@ function unarchiveMonth({
   db,
   targetMonth,
   expectedPreviewToken,
-  taskGeneration = 0,
+  taskGeneration,
   appVersion = null,
   buildSha = null
 }) {
@@ -275,16 +277,20 @@ function unarchiveMonth({
   let runId = null;
   let transactionStarted = false;
   try {
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      taskGeneration
+    );
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
-    const preview = previewUnarchive(db, month, { taskGeneration });
+    const preview = previewUnarchive(db, month, { taskGeneration: confirmedGeneration });
     assertPreviewToken(expectedPreviewToken, preview.previewToken);
     assertUnarchiveAllowed(preview);
     runId = preview.runId;
     const operationState = buildOperationState(db, {
       action: UNARCHIVE_OPERATION,
       targetMonth: month,
-      taskGeneration,
+      taskGeneration: confirmedGeneration,
       includeLaterRuns: true
     });
     const runEvidence = collectRunEvidence(db, runId);
@@ -356,6 +362,20 @@ function unarchiveMonth({
     ) {
       throw operationError('unarchive-invariant-failed', '解归档提交前状态断言失败，操作已回滚');
     }
+
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth: month,
+      operationType: UNARCHIVE_OPERATION,
+      runId,
+      previewToken: preview.previewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      code: 'unarchive-invariant-failed',
+      message: '解归档成功审计提交前校验失败，操作已回滚。'
+    });
 
     const preservedAfter = snapshotPreservedOperationState(db, {
       targetMonth: month,
