@@ -29,6 +29,7 @@
 | 统一删除目标使用独立 `targetType` 表达五类源表、首月期初和结果，不伪造 `source_type` | opening/result 不属于导入源类型，伪造会污染数据契约和 usage 统计 | 复用假的 source type 常量 | 旧 source 删除 preload 方法名保持兼容，但提交同样强制携带用户已观察的 token/generation，不再自动 preview；动态 usage 仅将 result 成功路由为“删除结果”，source/opening 沿用业务 operation label“删除数据”，不误计为“删除结果” |
 | UI 把破坏性执行成功视为不可逆边界：提交成功后保持执行锁定，完成 `onCompleted` 刷新后再关闭；刷新失败也关闭并警告，不重开或重试提交 | 重开弹框会诱导用户对已成功事务重复操作 | 将执行与刷新放在同一 catch 后恢复按钮 | renderer 明确显示“操作已成功但刷新失败”，执行中 Esc/遮罩/关闭均被锁定 |
 | 首月期初初始化成功后立即结束当前【开始运行】流程，要求用户再次显式点击后才重新预检和计算 | Spec §4.2.5 禁止初始化后自动沿用当前点击继续计算或归档；资金结果需要新的明确用户动作 | 初始化成功后在同一调用栈自动 preflight/calculate | 成功状态和弹框均明确提示再次点击；renderer 契约测试禁止初始化后分支出现 preflight/calculate/archive |
+| 来源原表删除在同一 `BEGIN IMMEDIATE` 内按 run id 顺序先固化完整生效结果证据，再写 success operation audit，最后执行既有级联删除与 legacy deletion 记录 | PR #126 review 证明原实现先删 `run_adjustments`/run，只留下计数，无法还原人工纠错、基础结果和九币种余额 | 仅扩大 `vcc_fin_op_dataset_deletions` 计数字段；删除后再尽力拼证据 | operation type 固定为 `delete-source-dataset`；证据损坏、success 审计写入或后续删除失败均回滚零业务写，事务外只 best-effort 追加 `rolled_back` 且不掩盖主错误；旧调用方与 legacy deletion 记录保持兼容 |
 
 ## Assumptions
 
@@ -78,6 +79,8 @@
 | PR 3 P0→P1 自测 | P0：事务链、`state-changed` token 门禁、故障回滚、审计与行数守恒全部通过；P1：全局租约/取消保护、picker 默认最新/切年/非尾禁用、执行锁定、提交后刷新失败边界，以及期初初始化后必须再次点击运行，均由 service/renderer contract tests 通过 | 自动化覆盖本 PR 可重复场景；100%/125%/150% 视觉预览和真实财务月份仍留最终发布阶段人工门禁 |
 | PR 3 reconciliation blindspot pass | 核对 run/archive/dataset 主键血缘、含调整九币种金额、严格月份边界、重复提交、部分失败、行数守恒、审计及错误可观测性 | 未发现资金红线被自动绕过；损坏归档失败关闭，真实月份逐主体逐币种复核继续阻塞发布 |
 | PR 3 最终跨月血缘盲区回归 | 后月依赖改为 archived/calculated runs、archive 快照、archived datasets 的确定性排序去重并集；孤立 archive 和孤立 archived dataset 定向测试均返回 `unarchive-not-tail`，重复 preview 的月份/token 稳定且目标月资金状态零改动 | 保留完整 `laterRuns` 证据并将并集纳入 preview token；只阻断，不自动修复或级联损坏历史状态 |
+| PR #126 来源删除审计修复定向回归 | dataset deletion、destructive actions、service 共 `36/36 PASS`；真实 SQLite + worker 状态链 `64/64 PASS` | success 证据完整保留 USD `12.34` 人工纠错、rowKey/sequence/reason、基础/生效结果、九币种余额和 Pending 汇总；删除后 run/adjustment/目标原表为 0；证据损坏、success audit failpoint、后续 DELETE failpoint 均零业务删除且只留 `rolled_back` |
+| PR #126 来源删除审计修复静态门禁 | `npm run lint`、修改文件 `node --check`、`git diff --check` 均通过；`npm run check:vars` 仅命中通用局部变量名 `state` | 未修改 `src/renderer.js` 全局 Runtime-state，也未命中 Critical / Important-skeleton / Risk-sensitive；按清单将该命中记录为误报并保留人工复核说明 |
 
 ## Remaining Unknowns
 

@@ -280,14 +280,38 @@ test('数据管理删除通过 worker 执行并返回删除与结果失效计数
       target_month, dataset_type, generated_at, updated_at
     ) VALUES ('2026-06', ?, '2026-08-01 08:00:00', '2026-08-01 08:00:00')
   `).run(SOURCE_TYPES.RECHARGE);
-  db.prepare(`
+  const runId = Number(db.prepare(`
     INSERT INTO vcc_fin_op_runs (
-      target_month, status, created_at, updated_at
+      target_month, status, input_revisions_json, input_fingerprint,
+      created_at, updated_at
     ) VALUES (
-      '2026-06', 'calculated', '2026-08-01 08:00:00', '2026-08-01 08:00:00'
+      '2026-06', 'calculated', '{"fixture":1}', 'worker-delete-fingerprint',
+      '2026-08-01 08:00:00', '2026-08-01 08:00:00'
     )
-  `).run();
-  const service = createVccFinancialOpService({ database: { db, dbPath }, assetsDir: '' });
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_run_rows (
+      run_id, subject, row_kind, source_type,
+      category_major, category_minor, currency, amount
+    ) VALUES (?, 'PPHK', 'movement', ?, '充值', '正常', 'USD', '10')
+  `).run(runId, SOURCE_TYPES.RECHARGE);
+  const insertBalance = db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, 'PPHK', ?, '100', ?, ?, ?, '0')
+  `);
+  for (const currency of SUPPORTED_CURRENCIES) {
+    const periodAmount = currency === 'USD' ? '10' : '0';
+    const calculatedBalance = currency === 'USD' ? '110' : '100';
+    insertBalance.run(runId, currency, periodAmount, calculatedBalance, calculatedBalance);
+  }
+  const service = createVccFinancialOpService({
+    database: { db, dbPath },
+    assetsDir: '',
+    appVersion: '3.1.8',
+    buildSha: 'worker-service-build'
+  });
   t.after(() => service.terminate());
 
   const preview = service.previewDatasetDeletion({
@@ -308,12 +332,22 @@ test('数据管理删除通过 worker 执行并返回删除与结果失效计数
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
-    taskGeneration: preview.taskGeneration
+    taskGeneration: preview.taskGeneration,
+    reason: 'worker 链路删除原因'
   });
   assert.equal(deleted.deletedDataCount, 1);
   assert.equal(deleted.invalidatedRunCount, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs').get().n, 0);
+  const operationAudit = db.prepare(`
+    SELECT status, evidence_json, app_version, build_sha
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'delete-source-dataset'
+  `).get();
+  assert.equal(operationAudit.status, 'success');
+  assert.equal(operationAudit.app_version, '3.1.8');
+  assert.equal(operationAudit.build_sha, 'worker-service-build');
+  assert.equal(JSON.parse(operationAudit.evidence_json).reason, 'worker 链路删除原因');
 });
 
 test('数据管理有效表通过 worker 流式导出并返回工作簿元数据', async (t) => {

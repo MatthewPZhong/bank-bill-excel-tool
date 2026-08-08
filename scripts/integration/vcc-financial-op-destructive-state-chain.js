@@ -5,7 +5,8 @@
 //   2. M2 解归档成功且 M1 保持归档，随后删除 M2 全部未归档结果；
 //   3. M1 解归档后删除首月期初，first_month 永久事实与源数据/导入审计计数守恒；
 //   4. preview token 过期时零业务删除并写 rolled_back 审计；
-//   5. 事务中途故障时 run/子表全部回滚，成功审计不残留且 rolled_back 审计完整。
+//   5. 事务中途故障时 run/子表全部回滚，成功审计不残留且 rolled_back 审计完整；
+//   6. 删除来源原表前固化含人工调整的完整 run 证据，并通过真实 worker 透传版本与原因。
 //
 // 用法：node scripts/integration/vcc-financial-op-destructive-state-chain.js
 
@@ -27,6 +28,9 @@ const {
 const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
+const {
+  buildRunRowKey
+} = require('../../src/backend/vcc-financial-op/result-adjustments');
 const {
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');
@@ -216,16 +220,17 @@ function seedDatasets(db, targetMonth, status, runId = null) {
   });
 }
 
-function seedRun(db, targetMonth, status = 'calculated') {
+function seedRun(db, targetMonth, status = 'calculated', { adjustmentAmount = null } = {}) {
   const runId = Number(db.prepare(`
     INSERT INTO vcc_fin_op_runs (
       target_month, status, input_revisions_json, result_revision,
       input_fingerprint, created_at, updated_at, archived_at
-    ) VALUES (?, ?, '{}', 0, ?, '2026-08-01 08:30:00',
+    ) VALUES (?, ?, '{}', ?, ?, '2026-08-01 08:30:00',
               '2026-08-01 09:00:00', ?)
   `).run(
     targetMonth,
     status,
+    adjustmentAmount === null ? 0 : 1,
     `fingerprint-${targetMonth}`,
     status === 'archived' ? '2026-08-01 09:30:00' : null
   ).lastInsertRowid);
@@ -258,6 +263,27 @@ function seedRun(db, targetMonth, status = 'calculated') {
     INSERT INTO vcc_fin_op_pending_currency_totals (run_id, subject, currency, amount)
     VALUES (?, 'PPHK', 'USD', '0')
   `).run(runId);
+  if (adjustmentAmount !== null) {
+    db.prepare(`
+      INSERT INTO vcc_fin_op_run_adjustments (
+        run_id, row_key, subject, source_type, category_major, category_minor,
+        currency, adjustment_amount, reason, sequence,
+        created_app_version, created_build_sha
+      ) VALUES (?, ?, 'PPHK', ?, '充值', '集成测试', 'USD', ?, '人工纠错调整', 1,
+                '3.1.8', 'integration-fixture-sha')
+    `).run(
+      runId,
+      buildRunRowKey({
+        rowKind: 'movement',
+        subject: 'PPHK',
+        sourceType: SOURCE_TYPES.RECHARGE,
+        categoryMajor: '充值',
+        categoryMinor: '集成测试'
+      }),
+      SOURCE_TYPES.RECHARGE,
+      adjustmentAmount
+    );
+  }
   if (status === 'archived') {
     db.prepare(`
       INSERT INTO vcc_fin_op_archives (
@@ -610,6 +636,53 @@ async function run() {
       JSON.parse(faultAudits[0].evidence_json).failure.message.includes('integration-result-delete-failure'),
       '故障审计保留原始失败原因'
     );
+
+    const sourceDeleteMonth = '2026-09';
+    seedSourceFacts(db, sourceDeleteMonth);
+    seedDatasets(db, sourceDeleteMonth, 'unprocessed');
+    const sourceRunId = seedRun(db, sourceDeleteMonth, 'calculated', {
+      adjustmentAmount: '12.34'
+    });
+    const sourcePreview = service.previewDataTargetDeletion({
+      targetMonth: sourceDeleteMonth,
+      targetType: SOURCE_TYPES.RECHARGE
+    });
+    assertEq(sourcePreview.deletable, true, '来源原表删除预览可执行');
+    const sourceDeleted = await service.deleteDataTarget({
+      targetMonth: sourceDeleteMonth,
+      targetType: SOURCE_TYPES.RECHARGE,
+      expectedPreviewToken: sourcePreview.previewToken,
+      taskGeneration: sourcePreview.taskGeneration,
+      reason: '集成链纠正来源数据'
+    });
+    assertEq(sourceDeleted.invalidatedRunCount, 1, '来源删除同步作废 calculated run');
+    assertEq(
+      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs WHERE id = ?`, sourceRunId),
+      0,
+      '来源删除后 run 已清空'
+    );
+    assertEq(
+      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments WHERE run_id = ?`, sourceRunId),
+      0,
+      '来源删除后调整账本已清空'
+    );
+    assertEq(
+      count(db, `
+        SELECT COUNT(*) AS row_count FROM vcc_fin_op_effective_rows
+        WHERE target_month = ? AND source_type = ?
+      `, sourceDeleteMonth, SOURCE_TYPES.RECHARGE),
+      0,
+      '来源删除后目标原表已清空'
+    );
+    const sourceAudits = operationAudits(db, sourceDeleteMonth, 'delete-source-dataset');
+    assertDeepEq(sourceAudits.map((row) => row.status), ['success'], '来源删除只保留 success 审计');
+    assertEq(sourceAudits[0].app_version, '3.1.8', '来源删除审计记录应用版本');
+    assertEq(sourceAudits[0].build_sha, 'integration-fixture-sha', '来源删除审计记录 build SHA');
+    const sourceEvidence = JSON.parse(sourceAudits[0].evidence_json);
+    assertEq(sourceEvidence.reason, '集成链纠正来源数据', '来源删除审计保留用户原因');
+    assertEq(sourceEvidence.runs[0].adjustments[0].adjustmentAmount, '12.34', '来源删除审计保留调整金额');
+    assertEq(sourceEvidence.runs[0].adjustments[0].reason, '人工纠错调整', '来源删除审计保留调整原因');
+    assertEq(sourceEvidence.runs[0].balances.length, SUPPORTED_CURRENCIES.length, '来源删除审计保留九币种余额');
   } finally {
     if (service) {
       try { await service.terminate(); } catch (_error) { /* cleanup */ }

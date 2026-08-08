@@ -440,7 +440,8 @@ function createVccFinancialOpService({
       targetMonth: payload.targetMonth,
       targetType: payload.sourceType,
       expectedPreviewToken: payload.expectedPreviewToken,
-      taskGeneration: payload.taskGeneration
+      taskGeneration: payload.taskGeneration,
+      reason: payload.reason
     });
   }
 

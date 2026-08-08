@@ -7,6 +7,14 @@ const {
   operationPreviewToken,
   assertPreviewToken
 } = require('./operation-state');
+const {
+  collectRunEvidence,
+  insertOperationAudit,
+  persistRolledBackAudit
+} = require('./operation-audit');
+
+const DELETE_SOURCE_DATASET_OPERATION = 'delete-source-dataset';
+const DEFAULT_DELETE_REASON = '用户在数据管理中删除目标月原表及关联未归档计算结果';
 
 const DETAIL_SOURCE_TYPES = new Set([
   SOURCE_TYPES.RECHARGE,
@@ -332,24 +340,75 @@ function deleteDataset({
   sourceType,
   taskActive = false,
   expectedPreviewToken = '',
-  taskGeneration = 0
+  taskGeneration = 0,
+  reason = DEFAULT_DELETE_REASON,
+  appVersion = null,
+  buildSha = null
 }) {
-  const initialState = inspectDatasetDeletion(db, targetMonth, sourceType, { taskActive });
-  assertDeletable(initialState);
-
-  db.exec('BEGIN IMMEDIATE');
+  const scope = normalizeScope(targetMonth, sourceType);
+  const deletionReason = String(reason || DEFAULT_DELETE_REASON);
+  let failureEvidence = {
+    action: DELETE_SOURCE_DATASET_OPERATION,
+    targetMonth: scope.targetMonth,
+    sourceType: scope.sourceType,
+    sourceLabel: SOURCE_LABELS[scope.sourceType],
+    datasetRevision: null,
+    reason: deletionReason,
+    previewToken: expectedPreviewToken || null,
+    taskGeneration: Number(taskGeneration),
+    runs: []
+  };
+  let transactionStarted = false;
   try {
+    const initialState = inspectDatasetDeletion(
+      db,
+      scope.targetMonth,
+      scope.sourceType,
+      { taskActive }
+    );
+    assertDeletable(initialState);
+    db.exec('BEGIN IMMEDIATE');
+    transactionStarted = true;
     const state = inspectDatasetDeletion(db, initialState.targetMonth, initialState.sourceType);
     assertDeletable(state);
+    const operationState = buildOperationState(db, {
+      action: 'delete-data-target',
+      targetMonth: state.targetMonth,
+      taskGeneration,
+      scope: { targetType: state.sourceType }
+    });
+    const currentPreviewToken = operationPreviewToken(operationState);
+    failureEvidence = {
+      ...failureEvidence,
+      sourceLabel: state.sourceLabel,
+      datasetRevision: state.datasetRevision,
+      previewToken: expectedPreviewToken || currentPreviewToken,
+      operationState,
+      runIds: [],
+      runs: []
+    };
     if (expectedPreviewToken) {
-      const operationState = buildOperationState(db, {
-        action: 'delete-data-target',
-        targetMonth: state.targetMonth,
-        taskGeneration,
-        scope: { targetType: state.sourceType }
-      });
-      assertPreviewToken(expectedPreviewToken, operationPreviewToken(operationState));
+      assertPreviewToken(expectedPreviewToken, currentPreviewToken);
     }
+    const calculatedRunIds = db.prepare(`
+      SELECT id
+      FROM vcc_fin_op_runs
+      WHERE target_month = ? AND status = 'calculated'
+      ORDER BY id
+    `).all(state.targetMonth).map((row) => Number(row.id));
+    failureEvidence.runIds = calculatedRunIds;
+    for (const runId of calculatedRunIds) {
+      failureEvidence.runs.push(collectRunEvidence(db, runId));
+    }
+    const auditId = insertOperationAudit(db, {
+      targetMonth: state.targetMonth,
+      operationType: DELETE_SOURCE_DATASET_OPERATION,
+      status: 'success',
+      previewToken: currentPreviewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha
+    });
     const invalidatedRunCount = deleteCalculatedRuns(db, state.targetMonth);
     let deletedDataCount;
     if (state.sourceType === SOURCE_TYPES.SYSTEM_OP) {
@@ -390,6 +449,7 @@ function deleteDataset({
     const deletionId = Number(deletionResult.lastInsertRowid);
     const deletedImportRecordCount = markImportRecordsDeleted(db, state, deletionId);
     db.exec('COMMIT');
+    transactionStarted = false;
     return {
       targetMonth: state.targetMonth,
       sourceType: state.sourceType,
@@ -397,15 +457,31 @@ function deleteDataset({
       deletedDataCount,
       invalidatedRunCount,
       deletionId,
-      deletedImportRecordCount
+      deletedImportRecordCount,
+      auditId
     };
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    if (transactionStarted) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* best-effort audit below */ }
+    }
+    if (db.isTransaction !== true) {
+      persistRolledBackAudit(db, {
+        targetMonth: scope.targetMonth,
+        operationType: DELETE_SOURCE_DATASET_OPERATION,
+        previewToken: failureEvidence.previewToken || expectedPreviewToken || null,
+        evidence: failureEvidence,
+        error,
+        appVersion,
+        buildSha
+      });
+    }
     throw error;
   }
 }
 
 module.exports = {
+  DELETE_SOURCE_DATASET_OPERATION,
+  DEFAULT_DELETE_REASON,
   ALLOWED_SOURCE_TYPES,
   DELETABLE_IMPORT_STATUSES,
   inspectDatasetDeletion,

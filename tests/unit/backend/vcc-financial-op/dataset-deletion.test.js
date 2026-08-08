@@ -5,8 +5,13 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../../../src/backend/vcc-financial-op-db/migrations');
 const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
-const { SOURCE_TYPES } = require('../../../../src/backend/vcc-financial-op/definitions');
 const {
+  SOURCE_TYPES,
+  SUPPORTED_CURRENCIES
+} = require('../../../../src/backend/vcc-financial-op/definitions');
+const { buildRunRowKey } = require('../../../../src/backend/vcc-financial-op/result-adjustments');
+const {
+  DELETE_SOURCE_DATASET_OPERATION,
   inspectDatasetDeletion,
   deleteDataset
 } = require('../../../../src/backend/vcc-financial-op/dataset-deletion');
@@ -131,22 +136,36 @@ function insertEffective(db, recordId, {
   ).lastInsertRowid);
 }
 
-function insertCalculatedRun(db, targetMonth = '2026-06') {
+function insertCalculatedRun(db, targetMonth = '2026-06', {
+  adjustmentAmount = null,
+  adjustmentReason = '人工纠错调整'
+} = {}) {
   const runId = Number(db.prepare(`
-    INSERT INTO vcc_fin_op_runs (target_month, status, input_revisions_json)
-    VALUES (?, 'calculated', '{"recharge_refund":1}')
-  `).run(targetMonth).lastInsertRowid);
+    INSERT INTO vcc_fin_op_runs (
+      target_month, status, input_revisions_json, result_revision, input_fingerprint
+    ) VALUES (?, 'calculated', '{"recharge_refund":1}', ?, ?)
+  `).run(
+    targetMonth,
+    adjustmentAmount === null ? 0 : 1,
+    `fixture-${targetMonth}`
+  ).lastInsertRowid);
   db.prepare(`
     INSERT INTO vcc_fin_op_run_rows (
-      run_id, subject, row_kind, source_type, currency, amount
-    ) VALUES (?, 'PPHK', 'movement', ?, 'USD', '10')
+      run_id, subject, row_kind, source_type,
+      category_major, category_minor, currency, amount
+    ) VALUES (?, 'PPHK', 'movement', ?, '充值', '正常', 'USD', '10')
   `).run(runId, SOURCE_TYPES.RECHARGE);
-  db.prepare(`
+  const insertBalance = db.prepare(`
     INSERT INTO vcc_fin_op_run_balances (
       run_id, subject, currency, opening_balance, period_amount,
       calculated_balance, system_balance, difference
-    ) VALUES (?, 'PPHK', 'USD', '100', '10', '110', '110', '0')
-  `).run(runId);
+    ) VALUES (?, 'PPHK', ?, '100', ?, ?, ?, '0')
+  `);
+  for (const currency of SUPPORTED_CURRENCIES) {
+    const periodAmount = currency === 'USD' ? '10' : '0';
+    const calculatedBalance = currency === 'USD' ? '110' : '100';
+    insertBalance.run(runId, currency, periodAmount, calculatedBalance, calculatedBalance);
+  }
   db.prepare(`
     INSERT INTO vcc_fin_op_pending_summary_rows (
       run_id, subject, currency_mismatch, flow_amount, pending_amount
@@ -156,6 +175,23 @@ function insertCalculatedRun(db, targetMonth = '2026-06') {
     INSERT INTO vcc_fin_op_pending_currency_totals (run_id, subject, currency, amount)
     VALUES (?, 'PPHK', 'USD', '0')
   `).run(runId);
+  if (adjustmentAmount !== null) {
+    const rowKey = buildRunRowKey({
+      rowKind: 'movement',
+      subject: 'PPHK',
+      sourceType: SOURCE_TYPES.RECHARGE,
+      categoryMajor: '充值',
+      categoryMinor: '正常'
+    });
+    db.prepare(`
+      INSERT INTO vcc_fin_op_run_adjustments (
+        run_id, row_key, subject, source_type, category_major, category_minor,
+        currency, adjustment_amount, reason, sequence,
+        created_app_version, created_build_sha
+      ) VALUES (?, ?, 'PPHK', ?, '充值', '正常', 'USD', ?, ?, 1,
+                '3.1.8', 'fixture-build')
+    `).run(runId, rowKey, SOURCE_TYPES.RECHARGE, adjustmentAmount, adjustmentReason);
+  }
   return runId;
 }
 
@@ -211,7 +247,10 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
       target_month, subject, balances_json, content_hash, initialization_note
     ) VALUES ('2026-06', 'PPHK', '{}', 'opening-hash', '人工核对')
   `).run();
-  const runId = insertCalculatedRun(db);
+  const runId = insertCalculatedRun(db, '2026-06', {
+    adjustmentAmount: '12.34',
+    adjustmentReason: '人工纠错调整'
+  });
 
   const otherRecordId = createRecord(db, {
     batchId: 'batch-other',
@@ -240,7 +279,10 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
   const result = deleteDataset({
     db,
     targetMonth: '2026-06',
-    sourceType: SOURCE_TYPES.RECHARGE
+    sourceType: SOURCE_TYPES.RECHARGE,
+    reason: '纠正来源数据后重新计算',
+    appVersion: '3.1.8',
+    buildSha: 'fixture-build'
   });
   assert.deepEqual(result, {
     targetMonth: '2026-06',
@@ -249,7 +291,8 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
     deletedDataCount: 1,
     invalidatedRunCount: 1,
     deletionId: 1,
-    deletedImportRecordCount: 1
+    deletedImportRecordCount: 1,
+    auditId: 1
   });
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
@@ -259,6 +302,7 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
   for (const tableName of [
     'vcc_fin_op_run_rows',
     'vcc_fin_op_run_balances',
+    'vcc_fin_op_run_adjustments',
     'vcc_fin_op_pending_summary_rows',
     'vcc_fin_op_pending_currency_totals'
   ]) {
@@ -308,6 +352,35 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
     deleted_data_count: 1,
     invalidated_run_count: 1
   });
+  const operationAudit = db.prepare(`
+    SELECT operation_type, status, preview_token, evidence_json, app_version, build_sha
+    FROM vcc_fin_op_operation_audit WHERE id = ?
+  `).get(result.auditId);
+  assert.equal(operationAudit.operation_type, DELETE_SOURCE_DATASET_OPERATION);
+  assert.equal(operationAudit.status, 'success');
+  assert.match(operationAudit.preview_token, /^v1:[a-f0-9]{64}$/);
+  assert.equal(operationAudit.app_version, '3.1.8');
+  assert.equal(operationAudit.build_sha, 'fixture-build');
+  const evidence = JSON.parse(operationAudit.evidence_json);
+  assert.equal(evidence.action, DELETE_SOURCE_DATASET_OPERATION);
+  assert.equal(evidence.targetMonth, '2026-06');
+  assert.equal(evidence.sourceType, SOURCE_TYPES.RECHARGE);
+  assert.equal(evidence.sourceLabel, 'VCC充值清退明细');
+  assert.equal(evidence.datasetRevision, 4);
+  assert.equal(evidence.reason, '纠正来源数据后重新计算');
+  assert.deepEqual(evidence.runIds, [runId]);
+  assert.equal(evidence.runs[0].baseRows[0].amount, '10');
+  assert.equal(evidence.runs[0].adjustments[0].adjustmentAmount, '12.34');
+  assert.equal(evidence.runs[0].adjustments[0].reason, '人工纠错调整');
+  assert.equal(evidence.runs[0].adjustments[0].sequence, 1);
+  assert.equal(evidence.runs[0].effectiveRows[0].effectiveAmount, '22.34');
+  assert.equal(evidence.runs[0].balances.length, SUPPORTED_CURRENCIES.length);
+  const usdBalance = evidence.runs[0].balances.find((row) => row.currency === 'USD');
+  assert.equal(usdBalance.adjustmentAmount, '12.34');
+  assert.equal(usdBalance.effectivePeriodAmount, '22.34');
+  assert.equal(usdBalance.effectiveCalculatedBalance, '122.34');
+  assert.equal(evidence.runs[0].pendingSummaryRows.length, 1);
+  assert.equal(evidence.runs[0].pendingCurrencyTotals.length, 1);
 });
 
 test('删除系统财务OP时固化快照对比证据并保留系统导入尝试', (t) => {
@@ -419,6 +492,16 @@ test('删除中任一步失败时审计、有效数据、结果和数据集全�
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?').get(runId).n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions').get().n, 0);
+  const operationAudits = db.prepare(`
+    SELECT status, evidence_json
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? ORDER BY id
+  `).all(DELETE_SOURCE_DATASET_OPERATION);
+  assert.deepEqual(operationAudits.map((row) => row.status), ['rolled_back']);
+  const failureEvidence = JSON.parse(operationAudits[0].evidence_json);
+  assert.equal(failureEvidence.failure.message.includes('forced delete failure'), true);
+  assert.equal(failureEvidence.runs[0].run.runId, runId);
+  assert.equal(failureEvidence.runs[0].adjustments.length, 0);
   const record = db.prepare(`
     SELECT dataset_deleted_at, dataset_deletion_id
     FROM vcc_fin_op_import_records WHERE id = ?
@@ -431,6 +514,81 @@ test('删除中任一步失败时审计、有效数据、结果和数据集全�
   `).get();
   assert.equal(audit.existing_effective_id, effectiveId);
   assert.equal(audit.existing_raw_json_snapshot, null);
+});
+
+test('结果证据损坏时原表、run、调整和数据集零删除并记录失败目标', (t) => {
+  const db = openDb(t);
+  const recordId = createRecord(db);
+  insertEffective(db, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type, revision)
+    VALUES ('2026-06', ?, 9)
+  `).run(SOURCE_TYPES.RECHARGE);
+  const runId = insertCalculatedRun(db, '2026-06', { adjustmentAmount: '12.34' });
+  db.prepare(`
+    DELETE FROM vcc_fin_op_run_balances
+    WHERE run_id = ? AND currency = 'JPY'
+  `).run(runId);
+
+  assert.throws(
+    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    (error) => error.code === 'run-balance-currencies-incomplete'
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?').get(runId).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments WHERE run_id = ?').get(runId).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions').get().n, 0);
+  const audit = db.prepare(`
+    SELECT status, evidence_json
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ?
+  `).get(DELETE_SOURCE_DATASET_OPERATION);
+  assert.equal(audit.status, 'rolled_back');
+  const evidence = JSON.parse(audit.evidence_json);
+  assert.equal(evidence.action, DELETE_SOURCE_DATASET_OPERATION);
+  assert.equal(evidence.targetMonth, '2026-06');
+  assert.equal(evidence.sourceType, SOURCE_TYPES.RECHARGE);
+  assert.equal(evidence.datasetRevision, 9);
+  assert.deepEqual(evidence.runIds, [runId]);
+  assert.deepEqual(evidence.runs, []);
+  assert.equal(evidence.failure.code, 'run-balance-currencies-incomplete');
+});
+
+test('success 审计写入失败时业务事实不变且仅尽力记录 rolled_back', (t) => {
+  const db = openDb(t);
+  const recordId = createRecord(db);
+  insertEffective(db, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.RECHARGE);
+  const runId = insertCalculatedRun(db, '2026-06', { adjustmentAmount: '12.34' });
+  db.exec(`
+    CREATE TRIGGER fail_source_delete_success_audit
+    BEFORE INSERT ON vcc_fin_op_operation_audit
+    WHEN NEW.operation_type = 'delete-source-dataset' AND NEW.status = 'success'
+    BEGIN SELECT RAISE(ABORT, 'forced source audit failure'); END;
+  `);
+
+  assert.throws(
+    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    /forced source audit failure/
+  );
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?').get(runId).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments WHERE run_id = ?').get(runId).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions').get().n, 0);
+  const audits = db.prepare(`
+    SELECT status, evidence_json
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? ORDER BY id
+  `).all(DELETE_SOURCE_DATASET_OPERATION);
+  assert.deepEqual(audits.map((row) => row.status), ['rolled_back']);
+  const evidence = JSON.parse(audits[0].evidence_json);
+  assert.equal(evidence.failure.message.includes('forced source audit failure'), true);
+  assert.equal(evidence.runs[0].adjustments[0].adjustmentAmount, '12.34');
 });
 
 test('删除范围严格校验月份和目标表，无有效数据时不可执行', (t) => {

@@ -448,7 +448,10 @@ function deleteDataTarget({ db, ...payload }) {
       targetMonth: target.targetMonth,
       sourceType: target.sourceType,
       expectedPreviewToken: payload.expectedPreviewToken,
-      taskGeneration: payload.taskGeneration
+      taskGeneration: payload.taskGeneration,
+      reason: payload.reason,
+      appVersion: payload.appVersion,
+      buildSha: payload.buildSha
     });
   }
   if (target.kind === 'opening') return deleteOpeningInitialization({ db, ...payload });
