@@ -12,7 +12,6 @@ const {
 } = require('../backend/vcc-financial-op/definitions');
 const {
   archiveRun,
-  getRunResult: getStoredRunResult,
   initializeOpeningBalances,
   preflightCalculation
 } = require('../backend/vcc-financial-op/calculator');
@@ -33,6 +32,7 @@ const {
 } = require('../backend/vcc-financial-op/operation-state');
 const {
   listArchivedResultMonths: listArchivedResultMonthsFromDb,
+  getArchivedRunByMonth: getArchivedRunByMonthFromDb,
   previewUnarchive: previewUnarchiveFromDb
 } = require('../backend/vcc-financial-op/unarchive');
 const {
@@ -190,6 +190,7 @@ function createVccFinancialOpService({
   workerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  archiveConsistencyLogger = null,
   cancelTimeoutMs = 120000
 }) {
   let activeTask = null;
@@ -504,7 +505,11 @@ function createVccFinancialOpService({
   }
 
   function listArchivedResultMonths() {
-    return listArchivedResultMonthsFromDb(database.db);
+    return listArchivedResultMonthsFromDb(database.db, { logger: archiveConsistencyLogger });
+  }
+
+  function getArchivedRunByMonth(targetMonth) {
+    return getArchivedRunByMonthFromDb(database.db, targetMonth);
   }
 
   function previewUnarchive(payload = {}) {
@@ -797,35 +802,18 @@ function createVccFinancialOpService({
     return { targetMonth: yearMonth, results: runs, checks, raw };
   }
 
-  function listRunSubjects(runId) {
-    return database.db.prepare(`
-      SELECT DISTINCT subject FROM vcc_fin_op_run_balances
-      WHERE run_id = ? ORDER BY subject
-    `).all(Number(runId)).map((row) => row.subject);
-  }
-
   function latestArchivedRun() {
-    const latest = listArchivedResultMonthsFromDb(database.db)[0] || null;
+    const latest = listArchivedResultMonths()[0] || null;
     return latest ? getRunReview(latest.runId) : null;
   }
 
-  async function exportRun({ runId, outputDirectory, outputPath }) {
+  async function exportRun({ targetMonth, outputDirectory, outputPath }) {
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
-      const run = getStoredRunResult(database.db, Number(runId));
-      if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
-      if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
-      const consistentArchive = listArchivedResultMonthsFromDb(database.db)
-        .some((item) => item.runId === Number(runId) && item.targetMonth === run.targetMonth);
-      if (!consistentArchive) {
-        throw operationError(
-          'archive-state-inconsistent',
-          '该月归档结果、主体余额或数据集状态不一致，禁止导出。'
-        );
-      }
+      const target = getArchivedRunByMonthFromDb(database.db, targetMonth);
       return writeRunWorkbooksFn({
         db: database.db,
-        runId: Number(runId),
+        runId: target.runId,
         outputDirectory,
         outputPath,
         assetsDir
@@ -859,6 +847,7 @@ function createVccFinancialOpService({
     listImportMonths,
     listImportRecords,
     listArchivedResultMonths,
+    getArchivedRunByMonth,
     previewUnarchive,
     unarchiveMonth,
     previewDatasetDeletion,
@@ -871,7 +860,6 @@ function createVccFinancialOpService({
     getImportRecordDetail,
     resolveRecord,
     dataManagerOverview,
-    listRunSubjects,
     latestArchivedRun,
     exportRun,
     exportImportAudit,

@@ -34,6 +34,13 @@
 | 完整结果页面只渲染后端固定九币种 review DTO，不在 renderer 做金额计算或把缺失值当 0 | 页面、归档和下月期初必须共享同一生效口径；空值补零会掩盖资金事实缺失 | renderer 基于基础行和调整行自行求和；宽松容忍缺币种 | 九币种、四类 summary 与规范十进制均严格校验；DTO 损坏或回读失败时归档 fail-closed |
 | 结果操作失败与 review 健康度分离 | 调整候选为空/暂时读取失败或 `active-vcc-task` 不代表已展示结果不可信，不应永久禁用归档 | 任一异常统一设置 `reviewHealthy=false` | 修改失败清核对并提示；无候选仅禁用修改；并发已归档/revision 变化强制回读；归档临时占用允许重新勾选重试，输入/结构性错误仍失败关闭 |
 | 重算替换在读取旧结果证据阶段失败也必须补写 rolled_back 审计 | 旧 run 若损坏，`collectRunEvidence()` 会在赋值完整 evidence 前抛错；原实现虽零删除但没有替换失败记录 | 仅依赖原始异常和数据库现状；为写审计而绕过严格 reader | 审计固化全部旧 run IDs、已成功采集的前缀、失败 run/code/message；业务事务先回滚且不删除损坏旧 run，审计失败仍只附加 `auditFailure` |
+| PR 5 将用户提供的结果模板按文件名、SHA-256、14 列表头、物理/业务区域、打印区和唯一语义锚点完整校验，任何缺失或漂移均在解析输出路径前失败关闭 | 样式和业务行定位不能依赖脆弱固定行号；错误模板不得生成“看似成功”的财务文件或覆盖已有目标 | 模板漂移时回退代码内置样式；只校验 sheet 名/表头；先创建目标再校验 | 金标准模板保持只读；contract cache 按 path+stat+hash 隔离并深拷贝，半样式/旧缓存均不可复用；无 fallback |
+| PR 5 writer 只消费 `getEffectiveRunResult()` 的基础行、调整行和四类生效汇总，调整血缘用可逆 Excel defined name 一对一绑定最终结果表 M 单元格 | 导出必须与页面/归档共享同一生效金额口径，并让人工调整能从 Excel 追溯到 `rowKey × currency` | 继续从基础表自行汇总；把 rowKey 写进可见业务列；用 comment/隐藏列作为非严格标记 | 调整紧邻目标基础行，M/N 可见；defined name 对多引用、跨表、区域、额外/重复标记均失败关闭，写后重开验证 |
+| 历史导出 IPC/renderer 只提交 `targetMonth`，service 先取得全局直接任务租约再严格重查一致归档并派生 runId，租约持有到原子发布结束 | picker 打开后月份可能被解归档；信任 renderer runId 或租约外解析会串月/导出过期事实 | renderer 同时提交 runId；默认永远导出 latest；选择时解析一次后直接写 | 两年月份选择器默认最新但可选历史；导出与解归档双向互斥；无归档证据返回 `no-archived-results`，部分证据返回 `archive-state-inconsistent` |
+| 页面与 Excel 表头复用同一严格十进制零值 helper；颜色仅标记固定九币种表头，差异数值格不着色 | Spec §4.6.3/Q10 将视觉提示范围锁定在九币种表头；页面和 writer 不能用 JS 浮点近似判零 | 页面和 writer 各自判断；同时给差异数值格上色 | `0`/`0.00`/`-0.00` 视为零，非法值抛错；差异行零值显示 `-`，非零显示原规范金额 |
+| picker 的执行失败与随后月份刷新失败分开保留；刷新返回结构化 `{ok,error}`，空列表/不可执行是成功刷新 | OS 保存取消或失败后需要保留弹框重试，同时列表可能变化；吞掉刷新错误会留下禁用按钮且无解释 | 任一错误关闭弹框；刷新 catch 内吞；把不可执行当刷新异常 | 原月份仍在时显示原错误；被移除时自动切到新月份并要求确认重试；刷新自身失败追加说明且不覆盖原错 |
+| PR 5 review 后将导出失败响应的 `detailLines` 过滤后保留到 renderer Error，并由主状态与 picker 统一显示 `message + 明细` | 模板缺失/漂移错误虽经 IPC 携带实际模板路径，旧 `responseFailure()` 只保留 message/code，用户无法定位真实文件；reviewer P2 复现 | 仅写日志；展示 error.stack/context；把路径拼进固定 message | 只展示显式结构化 detailLines，不泄漏无关 stack；模板实际路径在失败弹框内可见且仍可重试 |
+| 调整原因行高按 N 列实际宽度与 Unicode 显示宽度确定性估算，仅 adjustment 行覆盖模板行高，并限制为 Excel 最大 `409.5pt` | 500 字调整原因虽启用 wrapText，但复制 15/17pt 固定行高会裁切；reviewer P2 复现 | 依赖 Excel 自动适配；扩大全部业务行；固定一个大行高 | ASCII 按 1、其他 Unicode 按 2 估算换行；validator 复用同一 helper；长文本可能触顶但单元格数据完整，基础行保持模板高度 |
 
 ## Assumptions
 
@@ -46,6 +53,7 @@
 | 不可变调整账本的 `result_revision` 等于连续 sequence `1..N` 的记录数 | 每次新增调整只允许追加一次且 revision 加一；没有删除/编辑 API | PR 4 若引入不同 revision 语义会触发 reader 门禁 | PR 4 写入必须在单事务内追加 sequence=N+1 并 revision+1 |
 | 严格 `YYYY-MM` 字符串可直接用于跨月先后比较 | 月份入口统一规范化且固定两位月份 | 非规范历史月份会被排除普通枚举并在直接 preview 失败 | 保持 `normalizeOperationMonth()` 为所有破坏性入口前置门禁 |
 | 删除首月期初允许五类 dataset 中部分已被用户删除，但所有仍存在的 dataset 必须处于未归档状态 | 用户可能先删除某一原表；期初清理不应要求伪造缺失 dataset | 强制五表必须齐全；缺表即阻断 | 只删除期初和同月 calculated runs；first_month、剩余 dataset、源事实和导入审计保持不变 |
+| `assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx` 在 PR 5 生命周期内是不可变 golden，SHA-256 固定为 `f920fd2161156314a0d523eacb7cf7d11f7002b7781fe9cca01b298edfa4a1f4` | 用户提供文件与 Spec 锁定 hash 一致 | 文件变化会使所有结果导出失败关闭 | 单测每次从磁盘重新 stat/read/hash；任何更新必须先由 PM/财务人员更新契约和验收基线，不能自动接受 |
 
 ## Deviations
 
@@ -53,6 +61,7 @@
 | --- | --- | --- | --- | --- |
 | Spec 建议六个提交 | 六个堆叠 PR，每个 PR 内可含少量聚焦提交 | 用户明确要求多 PR 推进 | 评审与回滚粒度更细，功能口径不变 | 是（本实施记录） |
 | 共享归档月份选择器在 PR 3 先服务解归档，但历史结果按月份导出仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | 不影响 PR 3 解归档/删除验收；PR 5 必须接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
+| Spec 示例以模板业务末行为静态参考；实际导出按语义行计划重建结果表并将打印区动态收口为 `A1:L<实际末行>` | 调整行数量与主体业务分类会改变结果末行；固定 A1:L45 会留下样例行或截断新增行 | 保留模板原 45 行并原位覆盖；固定打印区 | M/N 仍保留为可见审计列但不进入模板锁定打印宽度；动态合并/打印区由 staged validator 回读验证 | 无需（Spec 已要求动态行与模板打印宽度） |
 
 ## Evidence
 
@@ -93,6 +102,13 @@
 | PR 4 冻结代码最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4654/4654 PASS`（295 个测试文件）；integration `46/46` 脚本、`2158/2158` 断言 PASS，其中 PR 4 真实 SQLite/worker 调整归档链 `55/55 PASS` | 同一次命令完整覆盖静态检查、其他模块 smoke、全仓单测及全部集成链；证据对应冻结代码，但不替代真实财务月份和 Windows 发布门禁 |
 | PR 4 `npm run check:vars` 与人工 review | `ipcRenderer` 为真实命中：main/preload 通道对称且已有契约测试；`MODULES` 仅被 preview 路由引用，未修改枚举；`dialog`、`setStatus`、`state` 均为 VCC renderer 局部命名或局部状态，不是规则指向的 Electron `dialog` 或 `src/renderer.js` 全局 `state`；无 Critical/Risk-sensitive 命中 | ⚠️ 关联功能 review 已覆盖 IPC 对称性、preview 路由、局部弹框/状态生命周期；未发现重要变量旁路或全局状态污染 |
 | PR 4 发布门禁复核 | 自动化与本机视觉证据均不能替代真实财务事实及目标平台验证 | 真实财务月份逐主体逐币种核对、Windows 打包及 Excel/WPS 显示仍阻塞 3.1.8 发布 |
+| PR 5 模板/金额/renderer 定向单测 | result-template contract、共享判零 helper、writer、service、破坏性 resolver 与 renderer picker 覆盖模板 SHA/锚点/缓存、九币种金额、样式故障、血缘负向矩阵、原子不覆盖、targetMonth 租约、空态和失败重试 | 模板漂移、串月导出、浮点判零、样例泄漏、血缘孤儿、刷新错误吞没 |
+| PR 5 ExcelJS defined name 探针 | 金标准 rowKey 标记经 write→reopen 后仍精确引用 `'财务OP校验结果表'!$M$2`，可逆还原完整 `v1:64hex + JPY` | 证明当前 ExcelJS 版本可承载非业务可见列的严格调整血缘；validator 仍对异常引用失败关闭 |
+| PR 5 真实 SQLite + 金标准模板历史导出链 | `scripts/integration/vcc-financial-op-historical-template-export.js` 直接执行 `28/28 PASS` | 两个一致归档月份倒序枚举；显式选择旧月严格导出旧 run；调整 M/N、effective 汇总、动态 printArea 和 named-range 写后回读均正确，未回退 latest；latest 真实 worker 解归档后立即从枚举消失并以 `no-archived-results` 禁止再次导出；正式 service 重新归档后恢复为 latest 候选和严格 resolver |
+| PR 5 可重复 UI 预览入口 | `preview:vcc-financial-op-result-export-month` 使用静态 2026/2025 两年归档月份并复用蓝色【导出】picker；已串入 `preview:vcc-financial-op` | PR 6 可在不依赖本机数据库的情况下生成最终历史月份导出截图；本 PR 不提交截图资产 |
+| PR 5 reviewer P2 定向回归 | renderer + writer 两文件 `36/36 PASS`；PR 5 六文件组合 `70/70 PASS`；历史月份真实 SQLite + 金标准模板链 `28/28 PASS`。500 字 Unicode 原因 write→reopen 后 adjustment 行为 `409.5pt`、wrapText 保留、相邻基础行仍为模板 `15pt`；结构化模板错误测试确认 code/message/detailLines 保留、实际路径可见且 stack 不展示 | 模板错误可观测性、长调整原因裁切、基础行样式回归、staged validator 同口径，以及历史月份导出/解归档/重归档链无回归 |
+| PR 5 reviewer P2 修复后最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4673/4673 PASS`（297 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中 VCC 历史月份模板导出链 `28/28 PASS` | 同一次命令覆盖静态检查、基础 smoke、全仓单测和全部集成链；证据对应最终冻结代码 |
+| PR 5 最终 `npm run check:vars` 与人工 review | 仅命中 `MODULES`、`elements`、`setStatus`、`state`；`MODULES` 只新增 preview route，后三者均为 VCC renderer 局部变量；无 Critical/Risk-sensitive 命中 | 已复核导出可用性、错误状态展示和模块路由，未发现重要变量旁路或全局状态污染 |
 
 ## Remaining Unknowns
 

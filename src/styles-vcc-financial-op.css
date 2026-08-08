@@ -415,13 +415,14 @@
   font-weight: 650;
 }
 
-.vcc-fin-op-summary-row.difference-row td.balanced {
-  color: #247147;
+.vcc-fin-op-full-result-table thead th.balanced {
+  color: #245f8f;
+  background: #e6f1fb;
 }
 
-.vcc-fin-op-summary-row.difference-row td.unbalanced {
-  color: #a12b20;
-  background: #fff0ed;
+.vcc-fin-op-full-result-table thead th.unbalanced {
+  color: #8d241c;
+  background: #ffe7e2;
 }
 
 .vcc-fin-op-manager-result-table th:last-child,

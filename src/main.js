@@ -467,7 +467,19 @@ function getVccFinancialOpService() {
       database,
       assetsDir: path.join(__dirname, '../assets'),
       appVersion: pkg.version,
-      buildSha: buildInfo.commit
+      buildSha: buildInfo.commit,
+      archiveConsistencyLogger: ({ targetMonth, consistencyReasons }) => {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: 'VCC 财务OP归档月份状态不一致，已从可操作列表排除',
+          details: [
+            `月份：${targetMonth}`,
+            `一致性原因：${(consistencyReasons || []).join('、') || 'unknown'}`
+          ],
+          source: 'main',
+          domain: 'vcc-financial-op'
+        });
+      }
     });
   }
   return vccFinancialOpService;
@@ -12675,23 +12687,22 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', async (_event, payload = {}) => {
     try {
       const service = getVccFinancialOpService();
-      const runId = Number(payload.runId);
-      const run = service.getRunResult(runId);
-      if (!run || run.status !== 'archived') {
-        return { status: 'error', message: '仅已确认归档的财务OP校验结果可以导出' };
-      }
-      const subjects = service.listRunSubjects(runId);
+      const target = service.getArchivedRunByMonth(payload.targetMonth);
+      const subjects = target.subjects;
       if (subjects.length === 1) {
         const choice = await dialog.showSaveDialog(mainWindow, {
           title: '导出 VCC 财务OP校验结果表',
           defaultPath: path.join(
             app.getPath('documents'),
-            `${run.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
+            `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
           ),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
         if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-        const result = await service.exportRun({ runId, outputPath: choice.filePath });
+        const result = await service.exportRun({
+          targetMonth: target.targetMonth,
+          outputPath: choice.filePath
+        });
         return { status: 'success', ...result };
       }
       const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
@@ -12701,10 +12712,13 @@ function registerNewAccountHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { status: 'cancelled' };
       }
-      const result = await service.exportRun({ runId, outputDirectory: choice.filePaths[0] });
+      const result = await service.exportRun({
+        targetMonth: target.targetMonth,
+        outputDirectory: choice.filePaths[0]
+      });
       return { status: 'success', ...result };
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 

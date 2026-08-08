@@ -8625,6 +8625,11 @@ async function applyFullInfo(info) {
       setCurrentModule(MODULES.vccFinancialOp.id);
       window.__vccFinancialOpPreview?.openExport();
     }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-result-export-month') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openResultExportMonth();
+    }, 120);
   } else if (info.previewModal === 'vcc-financial-op-result') {
     setTimeout(() => {
       setCurrentModule(MODULES.vccFinancialOp.id);

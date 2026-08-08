@@ -13,6 +13,7 @@ const {
 const { REQUIRED_DATASET_TYPES } = require('../../../../src/backend/vcc-financial-op/calculator');
 const { buildRunRowKey } = require('../../../../src/backend/vcc-financial-op/result-adjustments');
 const {
+  getArchivedRunByMonth,
   listArchivedResultMonths,
   previewUnarchive,
   unarchiveMonth
@@ -196,11 +197,84 @@ test('归档月份枚举只返回 run/archive/九币种主体/五数据集完全
   db.prepare(`DELETE FROM vcc_fin_op_datasets WHERE target_month = '2026-05' AND dataset_type = ?`)
     .run(SOURCE_TYPES.PENDING);
 
-  assert.deepEqual(listArchivedResultMonths(db).map((item) => item.targetMonth), ['2026-06']);
+  const logs = [];
+  assert.deepEqual(
+    listArchivedResultMonths(db, { logger: (entry) => logs.push(entry) })
+      .map((item) => item.targetMonth),
+    ['2026-06']
+  );
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].targetMonth, '2026-05');
+  assert.ok(logs[0].consistencyReasons.some((reason) => reason.startsWith('dataset-types:')));
+  assert.deepEqual(Object.keys(logs[0]), ['event', 'targetMonth', 'consistencyReasons']);
+  assert.deepEqual(getArchivedRunByMonth(db, '2026-06'), {
+    targetMonth: '2026-06',
+    runId: goodRun,
+    archivedAt: '2026-08-01 11:00:00',
+    resultRevision: 0,
+    subjects: ['PPHK']
+  });
+  assert.throws(
+    () => getArchivedRunByMonth(db, '2026-05'),
+    (error) => error.code === 'archive-state-inconsistent'
+      && error.targetMonth === '2026-05'
+      && error.consistencyReasons.some((reason) => reason.startsWith('dataset-types:'))
+  );
+  assert.throws(
+    () => getArchivedRunByMonth(db, '2026-04'),
+    (error) => error.code === 'no-archived-results' && error.targetMonth === '2026-04'
+  );
+  assert.deepEqual(
+    listArchivedResultMonths(db, { logger: () => { throw new Error('日志不可用'); } })
+      .map((item) => item.targetMonth),
+    ['2026-06'],
+    '日志失败时损坏月仍不得进入枚举'
+  );
   const badPreview = previewUnarchive(db, '2026-05', { taskGeneration: 4 });
   assert.equal(badPreview.canUnarchive, false);
   assert.equal(badPreview.code, 'archive-state-inconsistent');
   assert.match(badPreview.previewToken, /^v1:[a-f0-9]{64}$/);
+});
+
+test('归档枚举拒绝多 archived run、archive run_id 和 dataset run_id 错配', (t) => {
+  const scenarios = [{
+    label: '多 archived run',
+    expectedReason: 'archived-run-count:2',
+    seed(db, primaryRun) {
+      seedRun(db, { month: '2026-06', status: 'archived' });
+      seedArchive(db, '2026-06', primaryRun);
+      seedDatasets(db, '2026-06', 'archived', primaryRun);
+    }
+  }, {
+    label: 'archive run_id 错配',
+    expectedReason: 'archive-run-mismatch',
+    seed(db, primaryRun) {
+      const otherRun = seedRun(db, { month: '2026-06', status: 'calculated' });
+      seedArchive(db, '2026-06', otherRun);
+      seedDatasets(db, '2026-06', 'archived', primaryRun);
+    }
+  }, {
+    label: 'dataset archived_run_id 错配',
+    expectedReason: 'dataset-archive-state-mismatch',
+    seed(db, primaryRun) {
+      const otherRun = seedRun(db, { month: '2026-06', status: 'calculated' });
+      seedArchive(db, '2026-06', primaryRun);
+      seedDatasets(db, '2026-06', 'archived', otherRun);
+    }
+  }];
+
+  for (const scenario of scenarios) {
+    const db = createDb(t);
+    const primaryRun = seedRun(db, { month: '2026-06', status: 'archived' });
+    scenario.seed(db, primaryRun);
+    assert.deepEqual(listArchivedResultMonths(db), [], scenario.label);
+    assert.throws(
+      () => getArchivedRunByMonth(db, '2026-06'),
+      (error) => error.code === 'archive-state-inconsistent'
+        && error.consistencyReasons.includes(scenario.expectedReason),
+      scenario.label
+    );
+  }
 });
 
 test('归档余额必须逐主体逐币种等于含调整后的生效结果', (t) => {
@@ -351,6 +425,15 @@ test('尾月解归档原子成功并保留基础结果、Pending 与调整证据
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments WHERE run_id = ?`).get(runId).n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_pending_summary_rows WHERE run_id = ?`).get(runId).n, 1);
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets WHERE data_status = 'unprocessed'`).get().n, 5);
+  assert.equal(
+    listArchivedResultMonths(db).some((item) => item.targetMonth === '2026-06'),
+    false,
+    '解归档成功后该月必须立即退出可导出枚举'
+  );
+  assert.throws(
+    () => getArchivedRunByMonth(db, '2026-06'),
+    (error) => error.code === 'no-archived-results'
+  );
   const audits = auditRows(db, 'unarchive');
   assert.equal(audits.length, 1);
   assert.equal(audits[0].status, 'success');
