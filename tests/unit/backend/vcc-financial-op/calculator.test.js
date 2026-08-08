@@ -64,12 +64,13 @@ function insertEffective(db, fields) {
       business_sub_type, counterparty_department, channel_name, mid,
       recon_type, pending_currency, pending_amount, flow_currency, flow_amount,
       currency_mismatch, source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES (?, ?, ?, ?, '2026-06', 'PPHK', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'x.xlsx', 'sheet1', 2, '[]', ?)
+    ) VALUES (?, ?, ?, ?, '2026-06', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'x.xlsx', 'sheet1', 2, '[]', ?)
   `).run(
     fields.sourceType,
     fields.key,
     fields.key,
     `hash-${fields.sourceType}-${fields.key}`,
+    fields.subject || 'PPHK',
     fields.currency || null,
     fields.amount || null,
     fields.businessSubType || '',
@@ -82,6 +83,22 @@ function insertEffective(db, fields) {
     fields.flowCurrency || null,
     fields.flowAmount || null,
     fields.currencyMismatch ?? null,
+    recordId
+  );
+}
+
+function insertSystemSnapshot(db, { subject, balances = fixedBalances('100'), key = subject }) {
+  const recordId = seedRecord(db, SOURCE_TYPES.SYSTEM_OP, `system-${key}`);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, import_record_id
+    ) VALUES ('2026-06', ?, ?, ?, ?, 'Validate', 3, '{}', ?)
+  `).run(
+    subject,
+    JSON.stringify(balances),
+    `system-hash-${key}`,
+    `system-${key}.xlsx`,
     recordId
   );
 }
@@ -321,10 +338,136 @@ test('首月期初逐主体九币种一次性初始化，同值重试跳过且�
     entries: [{ subject: 'PPHK', balances: { ...fixedBalances('100'), USD: '101' } }],
     note: '试图改写'
   }), /已经初始化，禁止改写/);
+  assert.throws(() => initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'UNKNOWN', balances: fixedBalances('100') }],
+    note: '试图新增未知主体'
+  }), /UNKNOWN 不属于 2026-06 的有效原表主体/);
 
   const calculated = calculateMonth({ db, targetMonth: '2026-06' });
   assert.equal(calculated.status, 'calculated');
   assert.equal(calculated.balances.find((row) => row.currency === 'USD').openingBalance, '100');
+});
+
+test('首月已初始化主体不要求重复提交，新增主体可单独初始化', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db, { includeOpening: false });
+  initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'PPHK', balances: fixedBalances('100') }],
+    note: 'PPHK 首月期初已核对'
+  });
+  const oldBefore = db.prepare(`
+    SELECT balances_json, content_hash, initialization_note
+    FROM vcc_fin_op_opening_balances
+    WHERE target_month = '2026-06' AND subject = 'PPHK'
+  `).get();
+
+  insertEffective(db, {
+    sourceType: SOURCE_TYPES.RECHARGE,
+    key: 'new-subject-recharge',
+    subject: 'NEW',
+    currency: 'USD',
+    amount: '1',
+    businessSubType: '充值',
+    counterpartyDepartment: 'OPS'
+  });
+  insertSystemSnapshot(db, {
+    subject: 'NEW',
+    balances: fixedBalances('200'),
+    key: 'new-subject'
+  });
+
+  const preflight = preflightCalculation(db, '2026-06');
+  assert.equal(preflight.ok, true);
+  assert.equal(preflight.openingState.status, 'first-month-initialization-required');
+  assert.deepEqual(preflight.openingState.missingOpeningSubjects, ['NEW']);
+  const calculation = calculateMonth({ db, targetMonth: '2026-06' });
+  assert.equal(calculation.status, 'blocked');
+  assert.equal(calculation.code, 'missing-opening-balance');
+  assert.deepEqual(calculation.missingOpeningSubjects, ['NEW']);
+
+  const initialized = initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'NEW', balances: fixedBalances('200') }],
+    note: 'NEW 首月期初已核对'
+  });
+  assert.equal(initialized.status, 'initialized');
+  assert.equal(initialized.firstMonth, '2026-06');
+  assert.deepEqual(initialized.initializedSubjects, ['NEW']);
+  assert.deepEqual(initialized.skippedSubjects, []);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT balances_json, content_hash, initialization_note
+      FROM vcc_fin_op_opening_balances
+      WHERE target_month = '2026-06' AND subject = 'PPHK'
+    `).get(),
+    oldBefore
+  );
+  assert.deepEqual(
+    JSON.parse(db.prepare(`
+      SELECT balances_json FROM vcc_fin_op_opening_balances
+      WHERE target_month = '2026-06' AND subject = 'NEW'
+    `).get().balances_json),
+    fixedBalances('200')
+  );
+  assert.equal(
+    db.prepare(`SELECT first_month FROM vcc_fin_op_module_state WHERE singleton_id = 1`).get()
+      .first_month,
+    '2026-06'
+  );
+  assert.equal(preflightCalculation(db, '2026-06').openingState.status, 'ready');
+});
+
+test('新增主体仍必须全部提交，漏交真正缺失主体时整次回滚', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db, { includeOpening: false });
+  initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'PPHK', balances: fixedBalances('100') }],
+    note: 'PPHK 首月期初已核对'
+  });
+  for (const subject of ['NEW', 'NEW2']) {
+    insertEffective(db, {
+      sourceType: SOURCE_TYPES.RECHARGE,
+      key: `${subject}-recharge`,
+      subject,
+      currency: 'USD',
+      amount: '1',
+      businessSubType: '充值',
+      counterpartyDepartment: 'OPS'
+    });
+    insertSystemSnapshot(db, { subject, balances: fixedBalances('200'), key: subject });
+  }
+
+  assert.deepEqual(
+    preflightCalculation(db, '2026-06').openingState.missingOpeningSubjects,
+    ['NEW', 'NEW2']
+  );
+  assert.throws(() => initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'NEW', balances: fixedBalances('200') }],
+    note: '故意漏交 NEW2'
+  }), /以下主体仍缺少期初财务OP：NEW2/);
+  assert.deepEqual(
+    db.prepare(`
+      SELECT subject FROM vcc_fin_op_opening_balances
+      WHERE target_month = '2026-06' ORDER BY subject
+    `).all().map((row) => row.subject),
+    ['PPHK']
+  );
+  assert.equal(
+    db.prepare(`SELECT first_month FROM vcc_fin_op_module_state WHERE singleton_id = 1`).get()
+      .first_month,
+    '2026-06'
+  );
 });
 
 test('期初初始化拒绝缺币种、超两位小数和不属于当前账期的主体', (t) => {

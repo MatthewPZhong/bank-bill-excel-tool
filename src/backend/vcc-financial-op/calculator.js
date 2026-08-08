@@ -676,7 +676,8 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
       throw new Error(`以下主体缺少系统财务OP，不能初始化期初余额：${missingSystem.join('、')}`);
     }
     const entryBySubject = new Map(normalizedEntries.map((entry) => [entry.subject, entry]));
-    const omitted = [...subjects].filter((subject) => !entryBySubject.has(subject));
+    const missingOpeningSubjects = [...subjects].filter((subject) => !opening.balances.has(subject));
+    const omitted = missingOpeningSubjects.filter((subject) => !entryBySubject.has(subject));
     if (omitted.length > 0) throw new Error(`以下主体仍缺少期初财务OP：${omitted.join('、')}`);
 
     const initializedSubjects = [];
