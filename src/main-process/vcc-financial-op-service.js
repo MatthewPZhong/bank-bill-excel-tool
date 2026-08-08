@@ -13,9 +13,11 @@ const {
 const {
   archiveRun,
   getRunResult,
+  isValidInputFingerprint,
   parseBalancesJson,
   initializeOpeningBalances,
-  preflightCalculation
+  preflightCalculation,
+  preflightRequiredResult
 } = require('../backend/vcc-financial-op/calculator');
 const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
 const repository = require('../backend/vcc-financial-op-db/repository');
@@ -203,8 +205,13 @@ function createVccFinancialOpService({ database, assetsDir }) {
     return runWorker('import', payload, onProgress);
   }
 
-  async function calculate(payload) {
-    return runWorker('calculate', payload);
+  async function calculate(payload = {}) {
+    const targetMonth = normalizeYearMonth(payload.targetMonth);
+    if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
+    if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
+      return preflightRequiredResult(targetMonth);
+    }
+    return runWorker('calculate', { ...payload, targetMonth });
   }
 
   function preflightRun(payload = {}) {

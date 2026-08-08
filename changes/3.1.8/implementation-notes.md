@@ -15,6 +15,12 @@
 | 系统财务OP数据管理导出以 `balances_json` 为九币种财务余额唯一权威源，`raw_json.rows[].displayValues` 仅保留其余 15 列展示血缘 | PR #124 review 用真实精度反例证明显示值 `135886024.6` 会覆盖 canonical `135886024.59`；Spec §4.7.3 要求数据管理全链路保持原精度 | 继续从 `displayValues` 导出全行；在 writer 内重算余额 | 仅“财务余额”按 `normalizedCurrency` 覆盖为 canonical；九币种集合、金额或读取证据损坏时 `invalid-export-lineage` 失败关闭，不回退显示值 |
 | 两份已在工作区且哈希匹配的模板视为用户提供的本迭代资产 | 哈希与 Spec §2.3/§2.4 精确一致 | 重新生成或肉眼复制模板 | 保留用户原始工作簿字节，测试不得改写 golden |
 | 极老残缺审计表为空时允许补列；若已有 Pending 行却缺少 `raw_json` 等重算证据则失败关闭 | 无原始 46/48 列载荷无法证明新 hash，静默跳过会制造同键异内容 | 猜测列序或沿用旧 hash | 空旧库兼容升级；有事实但无血缘的旧库必须人工处理 |
+| 系统财务OP金额以 workbook relationship 指向 worksheet 的原始 `<v>` lexical token 为第一权威源 | SheetJS 在形成 `Number` 前可能已合并大额分币，显示值也可能被单元格格式截断 | 继续信任 SheetJS `raw:true` Number；从显示文本反推 | 公式使用缓存 `<v>`；重复余额 cell、空/损坏 XML 稳定以 `amount-precision-invalid` 失败关闭；只有明确缺少 OOXML relationship/entry 时才进入 Number fallback |
+| OOXML 缺失时的 Number fallback 允许安全整数，非整数在 `abs(value) >= 2^46` 时拒绝 | 15 位整数在 `Number.isSafeInteger` 时可精确证明；`2^46` 起浮点相邻间距已不能保证分币唯一 | 所有大于低阈值的 Number 一律拒绝；继续放行至 `MAX_SAFE_INTEGER` | 合法 15 位整数不误伤，大额非整数缺 lexical 证据时 fail closed；最终仍受两位小数与 15 位有效数字门禁约束 |
+| 财务OP运行必须同时通过主进程 service 与 worker 内 `expectedInputFingerprint` 校验 | 可选 fingerprint 允许绕过“预检确认 → 事务内二次预检”的状态一致性门禁 | 仅依赖 renderer 总会传参；只在主进程入口校验 | 缺失、格式非法或与最新状态不一致均不写计算结果；伪造 64 位值只能进入 `state-changed`，不能放行 |
+| preflight 以稳定顺序返回完整 `issues[]`，renderer 逐条展示；损坏系统快照不再冒充 missing dataset | 单一 top-level code 会遮蔽同账期其它待处理问题，用户需反复运行才能逐个发现 | 保留 first-error-only；把 invalid snapshot 继续塞入 `missing` | 兼容保留 top-level code/missing 等字段，同时一次展示 active、缺失/空表、快照损坏、归档、未处理导入和主体差异 |
+| 后置候选表头通过 row-scanner 的按行稀疏全宽模式校验到 XFD | 原扫描器只有物理第 1 行全宽，后置 Pending 表头的 BM/XFD 增列会被 64 列预览截断 | 将所有行稠密扩到 16384 列；只扩大固定预览宽度 | 普通数据行契约不变；候选行只物化实际非空 cell，XFD fixture 仅有 2 个数组键；正式读取再次全宽核验命中表头行 |
+| `systemRowError` 同时保留顶层定位字段与 JSON-safe `context` | worker 错误序列化只透传 `context`，原顶层 `sourceRow/fieldName/sheetName` 会在主进程丢失 | 扩展全局 serialize-error 的专用字段列表 | 保持库内旧调用兼容，跨 worker 的 `amount-precision-invalid` 仍可定位 sheet、行和字段 |
 | GitHub 认证问题不阻塞本地实现 | `gh` 已安装但 token 失效；代码和测试均可离线推进 | 等待登录后才开始编码 | push/PR 创建仍明确阻塞，不能声称已发布 |
 
 ## Assumptions
@@ -41,6 +47,8 @@
 | 极老审计表回归 | 空残缺表可幂等补审计列；存在 Pending 行但缺 `raw_json` 时事务回滚且历史 hash 不变 | 迁移兼容与失败关闭 |
 | 真实样本 `/Users/pzhong/Downloads/财务OP (22).xlsx` | PPHK JPY 读取为 `135886024.59`；检测到显示值 `135886024.6` 与原始值不一致并保留审计证据 | 原始数值优先及大额两位小数不被显示格式截断 |
 | PR 1 `npm run release-check` | lint 通过；smoke 通过；unit `4587/4587 PASS`；integration `44/44` 脚本、`2051/2051` 断言通过 | 全仓静态检查、核心业务回归、迁移/大文件/side DB 集成门禁 |
+| PR 1 review 定向回归 | 核心 7 文件 `93/93 PASS`；system importer + serialize-error `42/42 PASS` | 正负大额分币、relationship 重定位、公式缓存、安全 15 位整数、重复/损坏 XML、跨 worker 定位上下文、强制 fingerprint、多问题完整展示、后置 XFD 增列与稀疏键数 |
+| PR 1 review 全仓门禁 | changed src ESLint 通过；smoke 通过；unit `4600/4600 PASS`；integration `44/44` 脚本、`2051/2051` 断言通过；`git diff --check` 通过 | 共享 row-scanner 四方等价、VCC 资金计算、迁移、全仓模块与大文件集成零回归 |
 | `gh auth status` | 默认账号 token invalid | 仅 GitHub 发布被阻塞 |
 
 ## Remaining Unknowns
