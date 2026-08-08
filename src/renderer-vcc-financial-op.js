@@ -510,56 +510,565 @@
     });
   }
 
-  function confirmArchive(result) {
-    return new Promise((resolve) => {
-      let accepted = false;
-      const bySubject = new Map();
-      for (const row of result.balances || []) {
-        if (!bySubject.has(row.subject)) bySubject.set(row.subject, new Map());
-        bySubject.get(row.subject).set(row.currency, row);
+  function runStatusOf(result) {
+    return String(result && (result.runStatus || result.status) || '');
+  }
+
+  function normalizeRunResponse(response) {
+    if (!response || response.status !== 'success') {
+      const error = new Error(response && response.message || '读取完整结果失败');
+      error.code = response && response.code || null;
+      throw error;
+    }
+    return { ...response, status: response.runStatus };
+  }
+
+  function isZeroAmount(value) {
+    return value === '0';
+  }
+
+  function isCanonicalReviewAmount(value) {
+    if (typeof value !== 'string' || value === '-0') return false;
+    if (!/^-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/.test(value)) return false;
+    const fraction = value.includes('.') ? value.slice(value.indexOf('.') + 1) : '';
+    if (fraction.length > 2) return false;
+    return value.replace(/[-.]/g, '').length <= 15;
+  }
+
+  function validateResultReview(result) {
+    const currencies = result && result.review && Array.isArray(result.review.currencies)
+      ? result.review.currencies
+      : null;
+    if (!currencies || JSON.stringify(currencies) !== JSON.stringify(CURRENCIES)) {
+      throw new Error('完整结果币种契约异常，已禁止核对和归档。');
+    }
+    const subjects = Array.isArray(result.review.subjects) ? result.review.subjects : [];
+    if (subjects.length === 0) throw new Error('完整结果缺少主体，已禁止核对和归档。');
+    for (const subjectResult of subjects) {
+      if (!subjectResult || !String(subjectResult.subject || '').trim()) {
+        throw new Error('完整结果包含空主体，已禁止核对和归档。');
       }
-      const sections = [...bySubject].map(([subject, rows]) => `
-        <section class="vcc-fin-op-result-section">
+      const summaries = subjectResult.summaries;
+      for (const summaryKey of [
+        'openingBalance',
+        'effectiveCalculatedBalance',
+        'systemBalance',
+        'effectiveDifference'
+      ]) {
+        if (!summaries || !summaries[summaryKey] || typeof summaries[summaryKey] !== 'object') {
+          throw new Error(`${subjectResult.subject} 缺少 ${summaryKey} 汇总，已禁止核对和归档。`);
+        }
+        for (const currency of currencies) {
+          if (!Object.hasOwn(summaries[summaryKey], currency)) {
+            throw new Error(`${subjectResult.subject} ${summaryKey} 缺少 ${currency}，已禁止核对和归档。`);
+          }
+          if (!isCanonicalReviewAmount(summaries[summaryKey][currency])) {
+            throw new Error(`${subjectResult.subject} ${currency} ${summaryKey} 金额契约异常，已禁止核对和归档。`);
+          }
+        }
+      }
+    }
+    return { currencies, subjects };
+  }
+
+  function resultReviewHtml(result) {
+    const { currencies, subjects } = validateResultReview(result);
+    const summaryLabels = [
+      ['openingBalance', '期初财务OP'],
+      ['effectiveCalculatedBalance', '当月计算财务OP'],
+      ['systemBalance', '系统财务OP'],
+      ['effectiveDifference', '差异']
+    ];
+    return subjects.map((subjectResult) => {
+      const subject = subjectResult.subject || '';
+      const rows = Array.isArray(subjectResult.rows) ? subjectResult.rows : [];
+      const summaries = subjectResult.summaries || {};
+      const detailRows = rows.map((row) => {
+        const adjustment = row.type === 'adjustment';
+        const currencyAmounts = row.currencyAmounts || {};
+        return `
+          <tr class="${adjustment ? 'vcc-fin-op-adjustment-row' : 'vcc-fin-op-base-row'}">
+            <td>${escapeHtml(row.subject || subject)}</td>
+            <td>${escapeHtml(row.categoryMajor || '-')}</td>
+            <td>
+              <span>${escapeHtml(row.categoryMinor || '-')}</span>
+              <small class="vcc-fin-op-source-label">${escapeHtml(row.sourceLabel || SOURCE_LABELS[row.sourceType] || row.sourceType || '-')}</small>
+              ${adjustment ? '<span class="vcc-fin-op-adjustment-badge">人工调整</span>' : ''}
+            </td>
+            ${currencies.map((currency) => {
+              const amount = currencyAmounts[currency];
+              return `<td class="number">${amount === null || amount === undefined ? '-' : escapeHtml(formatAmount(amount))}</td>`;
+            }).join('')}
+            <td class="number">${adjustment ? escapeHtml(formatAmount(row.adjustmentAmount)) : '-'}</td>
+            <td class="vcc-fin-op-adjustment-reason">${adjustment ? escapeHtml(row.reason) : '-'}</td>
+          </tr>
+        `;
+      }).join('');
+      const summaryRows = summaryLabels.map(([key, label]) => {
+        const amounts = summaries[key] || {};
+        const differenceRow = key === 'effectiveDifference';
+        return `
+          <tr class="vcc-fin-op-summary-row${differenceRow ? ' difference-row' : ''}">
+            <td>${escapeHtml(subject)}</td>
+            <th colspan="2">${label}</th>
+            ${currencies.map((currency) => {
+              const amount = amounts[currency];
+              const balanced = differenceRow && isZeroAmount(amount);
+              const semanticClass = differenceRow ? (balanced ? ' balanced' : ' unbalanced') : '';
+              const display = balanced ? '-' : formatAmount(amount);
+              return `<td class="number${semanticClass}">${escapeHtml(display)}</td>`;
+            }).join('')}
+            <td>-</td><td>-</td>
+          </tr>
+        `;
+      }).join('');
+      return `
+        <section class="vcc-fin-op-result-section" data-subject="${escapeHtml(subject)}">
           <h3>${escapeHtml(subject)}</h3>
           <div class="vcc-fin-op-table-wrap">
-            <table class="vcc-fin-op-table vcc-fin-op-balance-table">
-              <thead><tr><th>项目</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}</tr></thead>
-              <tbody>
-                <tr><th>期初财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).openingBalance))}</td>`).join('')}</tr>
-                <tr><th>当月计算财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).calculatedBalance))}</td>`).join('')}</tr>
-                <tr><th>系统财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).systemBalance))}</td>`).join('')}</tr>
-                <tr class="difference-row"><th>差异</th>${CURRENCIES.map((currency) => {
-                  const difference = (rows.get(currency) || {}).difference || '0';
-                  const isZero = /^-?0(?:\.0+)?$/.test(difference);
-                  return `<td class="number${isZero ? '' : ' is-difference'}">${escapeHtml(formatAmount(difference))}</td>`;
-                }).join('')}</tr>
-              </tbody>
+            <table class="vcc-fin-op-table vcc-fin-op-full-result-table">
+              <thead><tr>
+                <th>主体</th><th>大类</th><th>分类</th>
+                ${currencies.map((currency) => `<th>${currency}</th>`).join('')}
+                <th>调整值</th><th>调整原因</th>
+              </tr></thead>
+              <tbody>${detailRows}${summaryRows}</tbody>
             </table>
           </div>
         </section>
-      `).join('');
+      `;
+    }).join('');
+  }
+
+  function reviewFailureDisposition(action, code) {
+    const normalizedAction = String(action || '');
+    const normalizedCode = String(code || '');
+    if (normalizedCode === 'result-revision-changed') {
+      return Object.freeze({ refetch: true, poisonReview: false, disableModify: false });
+    }
+    if (normalizedAction === 'modify') {
+      return Object.freeze({
+        refetch: normalizedCode === 'adjustment-locked',
+        poisonReview: false,
+        disableModify: normalizedCode === 'adjustment-options-empty'
+      });
+    }
+    return Object.freeze({
+      refetch: false,
+      poisonReview: normalizedCode !== 'active-vcc-task',
+      disableModify: false
+    });
+  }
+
+  function responseFailure(response, fallbackMessage) {
+    const error = new Error(response && response.message || fallbackMessage);
+    error.code = response && response.code || null;
+    return error;
+  }
+
+  async function requestRunAdjustment(result, previewResponse = null) {
+    const response = previewResponse || await api.listAdjustmentOptions({ runId: result.runId });
+    if (!response || response.status !== 'success') {
+      const error = new Error(response && response.message || '读取可调整结果行失败');
+      error.code = response && response.code || null;
+      throw error;
+    }
+    if (response.runStatus !== 'calculated') {
+      const error = new Error('已归档结果不能修改，请先解归档。');
+      error.code = 'adjustment-locked';
+      throw error;
+    }
+    if (response.resultRevision !== result.resultRevision) {
+      const error = new Error('结果已发生变化，请重新核对后归档。');
+      error.code = 'result-revision-changed';
+      throw error;
+    }
+    const options = Array.isArray(response.options)
+      ? response.options.map((row, index) => ({ ...row, optionToken: String(index) }))
+      : [];
+    if (options.length === 0) {
+      const error = new Error('当前结果没有尚未调整的业务发生额坐标。');
+      error.code = 'adjustment-options-empty';
+      throw error;
+    }
+
+    return new Promise((resolve) => {
+      let outcome = null;
+      let saving = false;
       const modal = mountDialog({
-        title: `${result.targetMonth} 财务OP校验结果确认`,
-        className: 'vcc-fin-op-review-dialog',
-        onClose: () => resolve(accepted),
+        title: '修改结果',
+        className: 'vcc-fin-op-adjustment-dialog',
+        initialFocusSelector: '[data-field="adjustment-subject"]',
+        canClose: () => !saving,
+        onClose: () => resolve(outcome),
         bodyHtml: `
-          <p class="vcc-fin-op-summary-line">确认归档后，该账期的原表与结果不可改写；本月计算余额将成为下月期初余额。</p>
-          <div class="vcc-fin-op-result-scroll">${sections}</div>
-          <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="archive-confirm">已核对结果，确认归档</label>
+          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种只能调整一次。</p>
+          <div class="vcc-fin-op-adjustment-form">
+            <label class="vcc-fin-op-field"><span>主体</span><select class="vcc-fin-op-input" data-field="adjustment-subject"></select></label>
+            <label class="vcc-fin-op-field"><span>大类</span><select class="vcc-fin-op-input" data-field="adjustment-major" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>分类</span><select class="vcc-fin-op-input" data-field="adjustment-minor" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>币种</span><select class="vcc-fin-op-input" data-field="adjustment-currency" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>调整值</span><input class="vcc-fin-op-input" data-field="adjustment-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 1,234.56 或 (1234.56)"></label>
+            <label class="vcc-fin-op-field vcc-fin-op-adjustment-reason-field"><span>调整原因</span><textarea class="vcc-fin-op-input vcc-fin-op-textarea" data-field="adjustment-reason" rows="3" placeholder="必填，1～500 字"></textarea></label>
+          </div>
+          <p class="vcc-fin-op-field-error" data-role="adjustment-error" hidden></p>
           <div class="dialog-actions right">
-            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-            <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
+            <button class="secondary-btn small" type="button" data-action="cancel-adjustment">取消</button>
+            <button class="primary-btn small" type="button" data-action="confirm-adjustment" disabled>确认</button>
           </div>
         `
       });
+      const subjectSelect = modal.dialog.querySelector('[data-field="adjustment-subject"]');
+      const majorSelect = modal.dialog.querySelector('[data-field="adjustment-major"]');
+      const minorSelect = modal.dialog.querySelector('[data-field="adjustment-minor"]');
+      const currencySelect = modal.dialog.querySelector('[data-field="adjustment-currency"]');
+      const amountInput = modal.dialog.querySelector('[data-field="adjustment-amount"]');
+      const reasonInput = modal.dialog.querySelector('[data-field="adjustment-reason"]');
+      const errorText = modal.dialog.querySelector('[data-role="adjustment-error"]');
+      const confirmBtn = modal.dialog.querySelector('[data-action="confirm-adjustment"]');
+      const cancelBtn = modal.dialog.querySelector('[data-action="cancel-adjustment"]');
+      const closeBtn = modal.dialog.querySelector('[data-action="close"]');
+
+      function resetSelect(select, placeholder, disabled = true) {
+        select.innerHTML = `<option value="" selected disabled>${escapeHtml(placeholder)}</option>`;
+        select.disabled = disabled;
+      }
+
+      function addSelectOption(select, value, label, rowKey = '') {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        if (rowKey) option.dataset.rowKey = rowKey;
+        select.appendChild(option);
+      }
+
+      function selectedTarget() {
+        const selectedOption = minorSelect.selectedOptions && minorSelect.selectedOptions[0];
+        const token = selectedOption && selectedOption.value;
+        return options.find((row) => row.optionToken === token) || null;
+      }
+
+      function updateConfirmState() {
+        const complete = Boolean(
+          selectedTarget()
+          && currencySelect.value
+          && amountInput.value.trim()
+          && reasonInput.value.trim()
+        );
+        confirmBtn.disabled = saving || !complete;
+      }
+
+      function renderSubjects() {
+        resetSelect(subjectSelect, '请选择主体', false);
+        for (const subject of [...new Set(options.map((row) => row.subject))]) {
+          addSelectOption(subjectSelect, subject, subject);
+        }
+        resetSelect(majorSelect, '请先选择主体');
+        resetSelect(minorSelect, '请先选择大类');
+        resetSelect(currencySelect, '请先选择分类');
+      }
+
+      function renderMajors() {
+        const subjectRows = options.filter((row) => row.subject === subjectSelect.value);
+        resetSelect(majorSelect, '请选择大类', subjectRows.length === 0);
+        for (const major of [...new Set(subjectRows.map((row) => row.categoryMajor))]) {
+          addSelectOption(majorSelect, major, major || '（空）');
+        }
+        resetSelect(minorSelect, '请先选择大类');
+        resetSelect(currencySelect, '请先选择分类');
+        updateConfirmState();
+      }
+
+      function renderMinors() {
+        const rows = options.filter((row) => (
+          row.subject === subjectSelect.value && row.categoryMajor === majorSelect.value
+        ));
+        const duplicateCounts = new Map();
+        for (const row of rows) {
+          const key = String(row.categoryMinor || '');
+          duplicateCounts.set(key, (duplicateCounts.get(key) || 0) + 1);
+        }
+        resetSelect(minorSelect, '请选择分类', rows.length === 0);
+        for (const row of rows) {
+          const minorLabel = row.categoryMinor || '（空）';
+          const label = duplicateCounts.get(String(row.categoryMinor || '')) > 1
+            ? `${minorLabel}（${row.sourceLabel || SOURCE_LABELS[row.sourceType] || row.sourceType}）`
+            : minorLabel;
+          addSelectOption(minorSelect, row.optionToken, label, row.rowKey);
+        }
+        resetSelect(currencySelect, '请先选择分类');
+        updateConfirmState();
+      }
+
+      function renderCurrencies() {
+        const target = selectedTarget();
+        const available = target && Array.isArray(target.availableCurrencies)
+          ? target.availableCurrencies
+          : [];
+        resetSelect(currencySelect, '请选择币种', available.length === 0);
+        for (const currency of CURRENCIES) {
+          if (available.includes(currency)) addSelectOption(currencySelect, currency, currency);
+        }
+        updateConfirmState();
+      }
+
+      function setAdjustmentLocked(locked) {
+        saving = locked;
+        for (const control of [
+          subjectSelect, majorSelect, minorSelect, currencySelect,
+          amountInput, reasonInput, confirmBtn, cancelBtn, closeBtn
+        ]) control.disabled = locked;
+        if (!locked) {
+          subjectSelect.disabled = false;
+          majorSelect.disabled = !subjectSelect.value;
+          minorSelect.disabled = !majorSelect.value;
+          currencySelect.disabled = !selectedTarget();
+          updateConfirmState();
+        }
+      }
+
+      subjectSelect.addEventListener('change', renderMajors);
+      majorSelect.addEventListener('change', renderMinors);
+      minorSelect.addEventListener('change', renderCurrencies);
+      currencySelect.addEventListener('change', updateConfirmState);
+      amountInput.addEventListener('input', updateConfirmState);
+      reasonInput.addEventListener('input', updateConfirmState);
+      cancelBtn.addEventListener('click', modal.close);
+      confirmBtn.addEventListener('click', async () => {
+        const target = selectedTarget();
+        const reason = reasonInput.value.trim();
+        if (!target || !currencySelect.value || !amountInput.value.trim() || !reason) return;
+        if (Array.from(reason).length > 500) {
+          errorText.textContent = '调整原因不能超过 500 个字符';
+          errorText.hidden = false;
+          return;
+        }
+        const selectedOption = minorSelect.selectedOptions[0];
+        const rowKey = selectedOption && selectedOption.dataset.rowKey;
+        const previousBusy = { busy: state.busy, kind: state.busyKind };
+        setAdjustmentLocked(true);
+        setBusy(true, 'adjustment');
+        errorText.hidden = true;
+        try {
+          const saved = await api.addRunAdjustment({
+            runId: result.runId,
+            rowKey,
+            currency: currencySelect.value,
+            adjustmentAmount: amountInput.value.trim(),
+            reason,
+            expectedResultRevision: result.resultRevision
+          });
+          if (!saved || saved.status !== 'success') {
+            if (saved && ['result-revision-changed', 'adjustment-locked'].includes(saved.code)) {
+              outcome = {
+                status: saved.code === 'adjustment-locked' ? 'locked' : 'stale',
+                message: saved.message
+              };
+              saving = false;
+              modal.close();
+              return;
+            }
+            throw responseFailure(saved, '保存调整失败');
+          }
+          outcome = { status: 'saved', result: saved };
+          saving = false;
+          modal.close();
+        } catch (error) {
+          if (['result-revision-changed', 'adjustment-locked'].includes(error.code)) {
+            outcome = {
+              status: error.code === 'adjustment-locked' ? 'locked' : 'stale',
+              message: error.message
+            };
+            saving = false;
+            modal.close();
+            return;
+          }
+          errorText.textContent = error.message || String(error);
+          errorText.hidden = false;
+        } finally {
+          setBusy(previousBusy.busy, previousBusy.kind);
+          if (!outcome) setAdjustmentLocked(false);
+        }
+      });
+      renderSubjects();
+      updateConfirmState();
+    });
+  }
+
+  function confirmArchive(initialResult) {
+    return new Promise((resolve) => {
+      let currentResult = initialResult;
+      let completion = null;
+      let operating = false;
+      let reviewHealthy = true;
+      let adjustmentAvailable = true;
+      const modal = mountDialog({
+        title: `${initialResult.targetMonth} 财务OP校验结果确认`,
+        className: 'vcc-fin-op-review-dialog',
+        canClose: () => !operating,
+        onClose: () => resolve(completion || { status: 'closed', run: currentResult }),
+        bodyHtml: `
+          <p class="vcc-fin-op-summary-line">确认归档后，该账期的原表与结果不可改写；本月生效计算余额将成为下月期初余额。</p>
+          <p class="vcc-fin-op-review-state" data-role="review-state" data-tone="neutral"></p>
+          <div class="vcc-fin-op-result-scroll" data-role="review-result"></div>
+          <label class="vcc-fin-op-confirm-check" data-role="archive-confirm-row"><input type="checkbox" data-field="archive-confirm">已核对当前完整结果，确认归档</label>
+          <div class="dialog-actions split vcc-fin-op-review-actions">
+            <div><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
+            <div class="dialog-actions right">
+              <button class="secondary-btn small" type="button" data-action="cancel">关闭</button>
+              <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
+            </div>
+          </div>
+        `
+      });
+      const resultHost = modal.dialog.querySelector('[data-role="review-result"]');
+      const reviewState = modal.dialog.querySelector('[data-role="review-state"]');
+      const confirmRow = modal.dialog.querySelector('[data-role="archive-confirm-row"]');
       const checkbox = modal.dialog.querySelector('[data-field="archive-confirm"]');
       const archiveBtn = modal.dialog.querySelector('[data-action="archive"]');
-      checkbox.addEventListener('change', () => { archiveBtn.disabled = !checkbox.checked; });
-      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
-      archiveBtn.addEventListener('click', () => {
-        accepted = true;
-        modal.close();
+      const modifyBtn = modal.dialog.querySelector('[data-action="modify-result"]');
+      const cancelBtn = modal.dialog.querySelector('[data-action="cancel"]');
+      const closeBtn = modal.dialog.querySelector('[data-action="close"]');
+
+      function setReviewState(message, tone = 'neutral') {
+        reviewState.textContent = String(message || '');
+        reviewState.dataset.tone = tone;
+      }
+
+      function renderCurrentResult(message = '', tone = 'neutral') {
+        const status = runStatusOf(currentResult);
+        checkbox.checked = false;
+        try {
+          resultHost.innerHTML = resultReviewHtml(currentResult);
+        } catch (error) {
+          resultHost.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
+          confirmRow.hidden = true;
+          archiveBtn.hidden = true;
+          modifyBtn.hidden = true;
+          reviewHealthy = false;
+          setReviewState(error.message || String(error), 'error');
+          return false;
+        }
+        const editable = status === 'calculated';
+        confirmRow.hidden = !editable;
+        archiveBtn.hidden = !editable;
+        modifyBtn.hidden = !editable;
+        archiveBtn.disabled = true;
+        reviewHealthy = true;
+        adjustmentAvailable = editable;
+        setReviewState(
+          message || (editable
+            ? `当前结果 revision ${currentResult.resultRevision}，请核对后归档。`
+            : '该结果已归档，当前为只读查看。'),
+          message ? tone : (editable ? 'neutral' : 'success')
+        );
+        return true;
+      }
+
+      function setReviewLocked(locked) {
+        operating = locked;
+        closeBtn.disabled = locked;
+        cancelBtn.disabled = locked;
+        modifyBtn.disabled = locked || !reviewHealthy || !adjustmentAvailable
+          || runStatusOf(currentResult) !== 'calculated';
+        checkbox.disabled = locked || !reviewHealthy || runStatusOf(currentResult) !== 'calculated';
+        archiveBtn.disabled = locked || !reviewHealthy || !checkbox.checked;
+      }
+
+      async function refetchCurrentResult(message, tone) {
+        try {
+          const response = await api.getRun({ runId: currentResult.runId });
+          currentResult = normalizeRunResponse(response);
+          renderCurrentResult(message, tone);
+        } catch (error) {
+          if (error && typeof error === 'object') error.reviewRefetchFailed = true;
+          throw error;
+        }
+      }
+
+      checkbox.addEventListener('change', () => {
+        archiveBtn.disabled = operating || !reviewHealthy || !checkbox.checked;
       });
+      cancelBtn.addEventListener('click', modal.close);
+      modifyBtn.addEventListener('click', async () => {
+        if (modifyBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
+        setReviewLocked(true);
+        setReviewState('正在读取当前 run 的可调整坐标…', 'warning');
+        try {
+          const adjustmentOutcome = await requestRunAdjustment(currentResult);
+          if (adjustmentOutcome && adjustmentOutcome.status === 'saved') {
+            await refetchCurrentResult('调整已保存，请重新核对完整结果后归档。', 'success');
+          } else if (adjustmentOutcome && ['stale', 'locked'].includes(adjustmentOutcome.status)) {
+            await refetchCurrentResult(
+              adjustmentOutcome.message || (adjustmentOutcome.status === 'locked'
+                ? '已归档结果不能修改，请先解归档。'
+                : '结果已发生变化，请重新核对后归档。'),
+              'error'
+            );
+          } else {
+            setReviewState(`当前结果 revision ${currentResult.resultRevision}，请核对后归档。`);
+          }
+        } catch (error) {
+          checkbox.checked = false;
+          if (error && error.reviewRefetchFailed) {
+            reviewHealthy = false;
+            setReviewState(error.message || String(error), 'error');
+          } else {
+            const disposition = reviewFailureDisposition('modify', error.code);
+            if (disposition.refetch) {
+              try {
+                await refetchCurrentResult(error.message, 'error');
+              } catch (refreshError) {
+                reviewHealthy = false;
+                setReviewState(refreshError.message || String(refreshError), 'error');
+              }
+            } else {
+              if (disposition.disableModify) adjustmentAvailable = false;
+              if (disposition.poisonReview) reviewHealthy = false;
+              setReviewState(error.message || String(error), 'error');
+            }
+          }
+        } finally {
+          setReviewLocked(false);
+        }
+      });
+      archiveBtn.addEventListener('click', async () => {
+        if (archiveBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
+        setReviewLocked(true);
+        setReviewState('正在按当前 revision 重新核对并归档…', 'warning');
+        try {
+          const archived = await api.archive({
+            runId: currentResult.runId,
+            expectedResultRevision: currentResult.resultRevision
+          });
+          if (!archived || archived.status === 'error') {
+            throw responseFailure(archived, '归档失败');
+          }
+          completion = archived;
+          operating = false;
+          modal.close();
+        } catch (error) {
+          checkbox.checked = false;
+          const disposition = reviewFailureDisposition('archive', error.code);
+          if (disposition.refetch) {
+            try {
+              await refetchCurrentResult(
+                error.message || '结果已发生变化，请重新核对后归档。',
+                'error'
+              );
+            } catch (refreshError) {
+              reviewHealthy = false;
+              setReviewState(refreshError.message || String(refreshError), 'error');
+            }
+          } else {
+            if (disposition.poisonReview) reviewHealthy = false;
+            setReviewState(error.message || String(error), 'error');
+          }
+        } finally {
+          if (!completion) setReviewLocked(false);
+        }
+      });
+      renderCurrentResult();
     });
   }
 
@@ -617,21 +1126,19 @@
       }
       if (result.status !== 'calculated') throw new Error('计算返回了未知状态');
       setStatus(`${month} 计算完成，等待确认归档`, 'info');
-      const accepted = await confirmArchive(result);
-      if (!accepted) {
+      const fullResult = normalizeRunResponse(await api.getRun({ runId: result.runId }));
+      const reviewOutcome = await confirmArchive(fullResult);
+      if (!reviewOutcome || reviewOutcome.status !== 'archived') {
         setStatus(`${month} 结果未归档`, 'warning');
         return;
       }
-      setStatus(`正在归档 ${month} 结果…`, 'info');
-      const archived = await api.archive({ runId: result.runId });
-      if (!archived || archived.status === 'error') throw new Error(archived && archived.message || '归档失败');
       state.latestArchivedRun = {
-        runId: archived.runId,
-        targetMonth: archived.targetMonth,
-        status: archived.status
+        runId: reviewOutcome.runId,
+        targetMonth: reviewOutcome.targetMonth,
+        status: reviewOutcome.status
       };
-      setStatus(`${archived.targetMonth} 已确认归档，可导出结果`, 'success');
-      showMessage('归档完成', `${archived.targetMonth} 已归档，可导出校验结果表。`, 'success');
+      setStatus(`${reviewOutcome.targetMonth} 已确认归档，可导出结果`, 'success');
+      showMessage('归档完成', `${reviewOutcome.targetMonth} 已归档，可导出校验结果表。`, 'success');
     } catch (error) {
       setStatus(`运行失败：${error.message || error}`, 'error');
       showMessage('运行失败', error.message || String(error), 'error');
@@ -912,6 +1419,28 @@
               <td>${escapeHtml(row.tableName)}</td>
               <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
               <td>${escapeHtml(formatDateTime(row.generatedAt || row.createdAt || row.archivedAt))}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderResultOverviewTable(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return '<div class="vcc-fin-op-empty">当前账期还没有校验结果</div>';
+    }
+    return `
+      <div class="vcc-fin-op-table-wrap">
+        <table class="vcc-fin-op-table vcc-fin-op-manager-result-table">
+          <thead><tr><th>表名</th><th>处理状态</th><th>结果 revision</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.tableName)}</td>
+              <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
+              <td>${escapeHtml(row.resultRevision == null ? '0' : row.resultRevision)}</td>
+              <td>${escapeHtml(formatDateTime(row.updatedAt || row.archivedAt || row.createdAt))}</td>
+              <td><button class="vcc-fin-op-link-btn" type="button" data-result-run-id="${escapeHtml(row.runId)}">查看结果</button></td>
             </tr>
           `).join('')}</tbody>
         </table>
@@ -1592,6 +2121,25 @@
       unarchiveButton.title = available ? '解归档已归档结果' : '暂无已归档结果';
     }
 
+    async function reopenManagedResult(runId, triggerButton) {
+      if (triggerButton) triggerButton.disabled = true;
+      try {
+        const fullResult = normalizeRunResponse(await api.getRun({ runId }));
+        const outcome = await confirmArchive(fullResult);
+        if (outcome && outcome.status === 'archived') {
+          setStatus(`${outcome.targetMonth} 已确认归档，可导出结果`, 'success');
+        }
+        archivedMonths = await loadArchivedResultMonths();
+        updateUnarchiveButton();
+        await refreshArchivedState();
+        await render();
+      } catch (error) {
+        showMessage('查看结果失败', error.message || String(error), 'error');
+      } finally {
+        if (triggerButton && triggerButton.isConnected) triggerButton.disabled = false;
+      }
+    }
+
     async function render() {
       const currentVersion = ++renderVersion;
       const section = managerState.section;
@@ -1625,10 +2173,18 @@
           : await api.dataManagerOverview({ yearMonth: month });
         if (currentVersion !== renderVersion) return;
         if (!overview || overview.status !== 'success') throw new Error(overview && overview.message || '读取数据管理状态失败');
-        const rows = section === 'results' ? overview.results : overview.checks;
+        if (section === 'results') {
+          content.innerHTML = renderResultOverviewTable(overview.results);
+          content.querySelectorAll('[data-result-run-id]').forEach((button) => {
+            button.addEventListener('click', () => (
+              reopenManagedResult(Number(button.dataset.resultRunId), button)
+            ));
+          });
+          return;
+        }
         content.innerHTML = renderOverviewTable(
-          rows,
-          section === 'results' ? '当前账期还没有校验结果' : '当前账期还没有校验表数据'
+          overview.checks,
+          '当前账期还没有校验表数据'
         );
       } catch (error) {
         if (currentVersion === renderVersion) {
@@ -1777,7 +2333,15 @@
             }
           ],
           overview: {
-            results: [{ tableName: '财务OP校验结果表', dataStatus: 'unprocessed', dataStatusText: '未处理', createdAt: '2026-07-02 11:00:00' }],
+            results: [{
+              runId: 316,
+              tableName: '财务OP校验结果表',
+              dataStatus: 'unprocessed',
+              dataStatusText: '未处理',
+              resultRevision: 1,
+              createdAt: '2026-07-02 11:00:00',
+              updatedAt: '2026-07-02 11:08:00'
+            }],
             checks: [],
             raw: []
           }
@@ -1821,21 +2385,90 @@
       });
     },
     openResult() {
-      const balances = [];
-      for (const currency of CURRENCIES) {
-        balances.push({
-          subject: 'PPHK',
-          currency,
-          calculatedBalance: currency === 'USD' ? '15208345.72' : '1000000',
-          systemBalance: currency === 'USD' ? '15208340.72' : '1000000',
-          difference: currency === 'USD' ? '-5' : '0'
-        });
-      }
+      const baseAmounts = Object.fromEntries(CURRENCIES.map((currency) => [
+        currency,
+        currency === 'USD' ? '15208345.72' : null
+      ]));
+      const adjustmentAmounts = Object.fromEntries(CURRENCIES.map((currency) => [
+        currency,
+        currency === 'USD' ? '-5' : null
+      ]));
+      const summary = (usdValue, otherValue = '1000000') => Object.fromEntries(
+        CURRENCIES.map((currency) => [currency, currency === 'USD' ? usdValue : otherValue])
+      );
       return confirmArchive({
         status: 'calculated',
         runId: 316,
         targetMonth: '2026-06',
-        balances
+        resultRevision: 1,
+        review: {
+          currencies: CURRENCIES,
+          subjects: [{
+            subject: 'PPHK',
+            rows: [{
+              type: 'base',
+              rowKey: 'preview-row',
+              subject: 'PPHK',
+              sourceType: 'recharge_refund',
+              sourceLabel: 'VCC充值清退明细',
+              categoryMajor: '充值',
+              categoryMinor: 'OPS',
+              currencyAmounts: baseAmounts
+            }, {
+              type: 'adjustment',
+              rowKey: 'preview-row',
+              subject: 'PPHK',
+              sourceType: 'recharge_refund',
+              sourceLabel: 'VCC充值清退明细',
+              categoryMajor: '充值',
+              categoryMinor: 'OPS',
+              currency: 'USD',
+              currencyAmounts: adjustmentAmounts,
+              adjustmentAmount: '-5',
+              reason: '按银行回单核对调整'
+            }],
+            summaries: {
+              openingBalance: summary('1000000'),
+              effectiveCalculatedBalance: summary('15208340.72'),
+              systemBalance: summary('15208340.72'),
+              effectiveDifference: summary('0', '0')
+            }
+          }]
+        }
+      });
+    },
+    openAdjustment() {
+      return requestRunAdjustment({
+        runId: 316,
+        targetMonth: '2026-06',
+        resultRevision: 1,
+        status: 'calculated'
+      }, {
+        status: 'success',
+        runStatus: 'calculated',
+        runId: 316,
+        targetMonth: '2026-06',
+        resultRevision: 1,
+        currencies: CURRENCIES,
+        options: [{
+          rowKey: 'v1:preview-recharge-ops',
+          subject: 'PPHK',
+          sourceType: 'recharge_refund',
+          sourceLabel: 'VCC充值清退明细',
+          categoryMajor: '充值',
+          categoryMinor: 'OPS',
+          availableCurrencies: CURRENCIES,
+          adjustedCurrencies: []
+        }, {
+          rowKey: 'v1:preview-fee-ops',
+          subject: 'PPHK',
+          sourceType: 'fee_fx',
+          sourceLabel: 'VCC费用及换汇明细',
+          categoryMajor: '费用',
+          categoryMinor: 'OPS',
+          availableCurrencies: ['EUR', 'USD'],
+          adjustedCurrencies: []
+        }]
       });
     },
     openOpening() {

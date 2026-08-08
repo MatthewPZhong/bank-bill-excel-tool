@@ -8,7 +8,10 @@ const {
 } = require('../../../../src/backend/vcc-financial-op-db/migrations');
 const {
   buildRunRowKey,
-  getEffectiveRunResult
+  normalizeAdjustmentAmount,
+  getEffectiveRunResult,
+  listAdjustmentOptions,
+  addRunAdjustment
 } = require('../../../../src/backend/vcc-financial-op/result-adjustments');
 const {
   SOURCE_TYPES,
@@ -247,6 +250,237 @@ test('effective result 按主体币种叠加正负调整并保持基础结果不
   assert.deepEqual(tableSnapshot(db, runId), before);
   assert.equal(Object.isFrozen(result), true);
   assert.equal(Object.isFrozen(result.effectiveRows), true);
+  assert.deepEqual(
+    result.review.subjects[0].rows.map((row) => [row.type, row.rowKey, row.currency || null]),
+    [
+      ['base', rechargeKey, null],
+      ['adjustment', rechargeKey, 'USD'],
+      ['adjustment', rechargeKey, 'JPY'],
+      ['base', pendingKey, null],
+      ['adjustment', pendingKey, 'EUR']
+    ]
+  );
+  assert.equal(result.review.subjects[0].summaries.openingBalance.USD, '100');
+  assert.equal(result.review.subjects[0].summaries.effectiveCalculatedBalance.USD, '108');
+  assert.equal(result.review.subjects[0].summaries.systemBalance.USD, '112');
+  assert.equal(result.review.subjects[0].summaries.effectiveDifference.USD, '4');
+});
+
+test('调整值支持规范千分位与会计负数并拒绝零、非数和超精度', () => {
+  assert.equal(normalizeAdjustmentAmount('1,234.56'), '1234.56');
+  assert.equal(normalizeAdjustmentAmount('-1,234.50'), '-1234.5');
+  assert.equal(normalizeAdjustmentAmount('(1,234.56)'), '-1234.56');
+  assert.equal(normalizeAdjustmentAmount(' +12.00 '), '12');
+  for (const value of [
+    '', ' ', 'abc', 'NaN', 'Infinity', '-Infinity', '0', '0.00', '-0',
+    '1.234', '1,23.45', '(+1)', '(-1)', '()', '9999999999999999'
+  ]) {
+    assertThrowsCode(() => normalizeAdjustmentAmount(value), 'invalid-adjustment-amount');
+  }
+});
+
+test('调整选项由基础事实生成，固定九币种并移除已调整坐标', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const rechargeKey = buildRunRowKey(RECHARGE_ROW);
+  insertAdjustment(db, runId, rechargeKey, RECHARGE_ROW, {
+    currency: 'USD', amount: '1', sequence: 1
+  });
+  db.prepare(`UPDATE vcc_fin_op_runs SET result_revision = 1 WHERE id = ?`).run(runId);
+
+  const result = listAdjustmentOptions(db, runId);
+
+  assert.equal(result.runId, runId);
+  assert.equal(result.resultRevision, 1);
+  assert.deepEqual(result.currencies, SUPPORTED_CURRENCIES);
+  assert.equal(result.options.length, 2);
+  const recharge = result.options.find((row) => row.rowKey === rechargeKey);
+  assert.equal(recharge.subject, RECHARGE_ROW.subject);
+  assert.equal(recharge.sourceType, SOURCE_TYPES.RECHARGE);
+  assert.equal(recharge.sourceLabel, 'VCC充值清退明细');
+  assert.deepEqual(recharge.adjustedCurrencies, ['USD']);
+  assert.equal(recharge.availableCurrencies.includes('USD'), false);
+  assert.equal(recharge.availableCurrencies.includes('JPY'), true);
+});
+
+test('addRunAdjustment 仅按后端 rowKey 事实落元数据并原子递增 revision', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const rowKey = buildRunRowKey(RECHARGE_ROW);
+
+  const result = addRunAdjustment({
+    db,
+    runId,
+    rowKey,
+    currency: 'USD',
+    adjustmentAmount: '(1,234.56)',
+    reason: '  人工复核系统余额  ',
+    expectedResultRevision: 0,
+    appVersion: '3.1.8',
+    buildSha: 'build-sha',
+    subject: 'FORGED',
+    categoryMajor: 'FORGED'
+  });
+
+  assert.equal(result.status, 'adjusted');
+  assert.equal(result.resultRevision, 1);
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT subject, source_type, category_major, category_minor,
+             currency, adjustment_amount, reason, sequence,
+             created_app_version, created_build_sha
+      FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+    `).get(runId) },
+    {
+      subject: RECHARGE_ROW.subject,
+      source_type: RECHARGE_ROW.sourceType,
+      category_major: RECHARGE_ROW.categoryMajor,
+      category_minor: RECHARGE_ROW.categoryMinor,
+      currency: 'USD',
+      adjustment_amount: '-1234.56',
+      reason: '人工复核系统余额',
+      sequence: 1,
+      created_app_version: '3.1.8',
+      created_build_sha: 'build-sha'
+    }
+  );
+  const storedRun = db.prepare(`
+    SELECT result_revision, updated_at FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  assert.equal(storedRun.result_revision, 1);
+  assert.notEqual(storedRun.updated_at, '2026-07-01 10:00:00');
+  assert.equal(tableSnapshot(db, runId).rows.length, 3, '基础结果行保持不可变');
+});
+
+test('addRunAdjustment 缺失或陈旧 expectedResultRevision 均 fail-closed', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const payload = {
+    db,
+    runId,
+    rowKey: buildRunRowKey(RECHARGE_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '人工核对'
+  };
+  assertThrowsCode(() => addRunAdjustment(payload), 'result-revision-changed');
+  assertThrowsCode(
+    () => addRunAdjustment({ ...payload, expectedResultRevision: 1 }),
+    'result-revision-changed'
+  );
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments`).get().n, 0);
+  assert.equal(db.prepare(`SELECT result_revision FROM vcc_fin_op_runs WHERE id = ?`).get(runId).result_revision, 0);
+});
+
+test('调整原因按 Unicode code point 执行 500 字边界', (t) => {
+  const acceptedDb = createDb(t);
+  const acceptedRunId = seedBaseRun(acceptedDb);
+  const acceptedReason = '🫠'.repeat(500);
+  const accepted = addRunAdjustment({
+    db: acceptedDb,
+    runId: acceptedRunId,
+    rowKey: buildRunRowKey(RECHARGE_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: acceptedReason,
+    expectedResultRevision: 0
+  });
+  assert.equal(accepted.adjustment.reason, acceptedReason);
+  assert.equal(Array.from(accepted.adjustment.reason).length, 500);
+  assert.equal(getEffectiveRunResult(acceptedDb, acceptedRunId).adjustments.length, 1);
+
+  const rejectedDb = createDb(t);
+  const rejectedRunId = seedBaseRun(rejectedDb);
+  assertThrowsCode(() => addRunAdjustment({
+    db: rejectedDb,
+    runId: rejectedRunId,
+    rowKey: buildRunRowKey(RECHARGE_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '🫠'.repeat(501),
+    expectedResultRevision: 0
+  }), 'invalid-adjustment-reason');
+  assert.equal(
+    rejectedDb.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments`).get().n,
+    0
+  );
+});
+
+test('同一坐标由唯一事实锁定，不同币种可分别调整一次', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const rowKey = buildRunRowKey(RECHARGE_ROW);
+  const common = { db, runId, rowKey, adjustmentAmount: '1', reason: '人工核对' };
+
+  addRunAdjustment({ ...common, currency: 'USD', expectedResultRevision: 0 });
+  assertThrowsCode(
+    () => addRunAdjustment({ ...common, currency: 'USD', expectedResultRevision: 1 }),
+    'adjustment-already-exists'
+  );
+  const second = addRunAdjustment({
+    ...common,
+    currency: 'JPY',
+    adjustmentAmount: '-2',
+    expectedResultRevision: 1
+  });
+  assert.equal(second.resultRevision, 2);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments`).get().n, 2);
+});
+
+test('已归档及解归档后的已用坐标保持锁定', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const rowKey = buildRunRowKey(RECHARGE_ROW);
+  const payload = {
+    db,
+    runId,
+    rowKey,
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '人工核对',
+    expectedResultRevision: 0
+  };
+  db.prepare(`UPDATE vcc_fin_op_runs SET status = 'archived' WHERE id = ?`).run(runId);
+  assertThrowsCode(() => addRunAdjustment(payload), 'adjustment-locked');
+  assertThrowsCode(() => listAdjustmentOptions(db, runId), 'adjustment-locked');
+
+  db.prepare(`UPDATE vcc_fin_op_runs SET status = 'calculated' WHERE id = ?`).run(runId);
+  addRunAdjustment(payload);
+  db.prepare(`UPDATE vcc_fin_op_runs SET status = 'archived' WHERE id = ?`).run(runId);
+  db.prepare(`UPDATE vcc_fin_op_runs SET status = 'calculated' WHERE id = ?`).run(runId);
+  assertThrowsCode(
+    () => addRunAdjustment({ ...payload, expectedResultRevision: 1 }),
+    'adjustment-already-exists'
+  );
+});
+
+test('revision 更新故障时调整行与 updated_at 全部回滚', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  db.exec(`
+    CREATE TRIGGER fail_adjustment_revision_update
+    BEFORE UPDATE OF result_revision ON vcc_fin_op_runs
+    WHEN OLD.id = ${runId}
+    BEGIN
+      SELECT RAISE(ABORT, 'adjustment-revision-fault');
+    END;
+  `);
+
+  assert.throws(() => addRunAdjustment({
+    db,
+    runId,
+    rowKey: buildRunRowKey(RECHARGE_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '人工核对',
+    expectedResultRevision: 0
+  }), /adjustment-revision-fault/);
+
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments`).get().n, 0);
+  assert.deepEqual(
+    { ...db.prepare(`SELECT result_revision, updated_at FROM vcc_fin_op_runs WHERE id = ?`).get(runId) },
+    { result_revision: 0, updated_at: '2026-07-01 10:00:00' }
+  );
 });
 
 test('effective result 对 adjustment sequence 与 result_revision 事实不一致 fail-closed', (t) => {

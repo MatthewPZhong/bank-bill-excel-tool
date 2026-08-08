@@ -12,10 +12,15 @@ const {
 } = require('../backend/vcc-financial-op/definitions');
 const {
   archiveRun,
-  getRunResult,
+  getRunResult: getStoredRunResult,
   initializeOpeningBalances,
   preflightCalculation
 } = require('../backend/vcc-financial-op/calculator');
+const {
+  getEffectiveRunResult,
+  listAdjustmentOptions: listAdjustmentOptionsFromDb,
+  addRunAdjustment: addRunAdjustmentToDb
+} = require('../backend/vcc-financial-op/result-adjustments');
 const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
 const repository = require('../backend/vcc-financial-op-db/repository');
 const {
@@ -149,6 +154,31 @@ function importRowShape(row) {
       importRecordId: row.existing_import_record_id || row.comparison_import_record_id || null,
       importedAt: row.existing_imported_at || row.comparison_created_at || null
     } : null
+  };
+}
+
+function effectiveRunShape(effective) {
+  if (!effective) return null;
+  const balances = effective.balances.map((row) => ({
+    ...row,
+    periodAmount: row.effectivePeriodAmount,
+    calculatedBalance: row.effectiveCalculatedBalance,
+    difference: row.effectiveDifference
+  }));
+  return {
+    runId: effective.run.runId,
+    targetMonth: effective.run.targetMonth,
+    status: effective.run.status,
+    resultRevision: effective.run.resultRevision,
+    inputFingerprint: effective.run.inputFingerprint,
+    createdAt: effective.run.createdAt,
+    updatedAt: effective.run.updatedAt,
+    archivedAt: effective.run.archivedAt,
+    baseRows: effective.baseRows,
+    adjustments: effective.adjustments,
+    effectiveRows: effective.effectiveRows,
+    balances,
+    review: effective.review
   };
 }
 
@@ -402,8 +432,36 @@ function createVccFinancialOpService({
 
   function archive(payload) {
     return runDirectTask('archive', () => (
-      archiveRun({ db: database.db, runId: Number(payload && payload.runId) })
+      archiveRun({
+        db: database.db,
+        runId: Number(payload && payload.runId),
+        expectedResultRevision: payload && payload.expectedResultRevision,
+        appVersion,
+        buildSha
+      })
     ));
+  }
+
+  function listAdjustmentOptions(payload = {}) {
+    return listAdjustmentOptionsFromDb(database.db, Number(payload.runId));
+  }
+
+  function addRunAdjustment(payload = {}) {
+    return runDirectTask('add-adjustment', () => addRunAdjustmentToDb({
+      db: database.db,
+      runId: Number(payload.runId),
+      rowKey: payload.rowKey,
+      currency: payload.currency,
+      adjustmentAmount: payload.adjustmentAmount,
+      reason: payload.reason,
+      expectedResultRevision: payload.expectedResultRevision,
+      appVersion,
+      buildSha
+    }));
+  }
+
+  function getRunReview(runId) {
+    return effectiveRunShape(getEffectiveRunResult(database.db, Number(runId)));
   }
 
   function initializeOpening(payload) {
@@ -722,14 +780,18 @@ function createVccFinancialOpService({
       });
     }
     const runs = database.db.prepare(`
-      SELECT id, target_month, status, created_at, archived_at
+      SELECT id, target_month, status, result_revision, input_fingerprint,
+             created_at, updated_at, archived_at
       FROM vcc_fin_op_runs WHERE target_month = ? ORDER BY id DESC
     `).all(yearMonth).map((row) => ({
       runId: row.id,
       tableName: '财务OP校验结果表',
       dataStatus: row.status === 'archived' ? 'archived' : 'unprocessed',
       dataStatusText: row.status === 'archived' ? '已归档' : '未处理',
+      resultRevision: Number(row.result_revision) || 0,
+      inputFingerprint: row.input_fingerprint || null,
       createdAt: row.created_at,
+      updatedAt: row.updated_at,
       archivedAt: row.archived_at
     }));
     return { targetMonth: yearMonth, results: runs, checks, raw };
@@ -744,13 +806,13 @@ function createVccFinancialOpService({
 
   function latestArchivedRun() {
     const latest = listArchivedResultMonthsFromDb(database.db)[0] || null;
-    return latest ? getRunResult(database.db, latest.runId) : null;
+    return latest ? getRunReview(latest.runId) : null;
   }
 
   async function exportRun({ runId, outputDirectory, outputPath }) {
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
-      const run = getRunResult(database.db, Number(runId));
+      const run = getStoredRunResult(database.db, Number(runId));
       if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
       if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
       const consistentArchive = listArchivedResultMonthsFromDb(database.db)
@@ -791,6 +853,8 @@ function createVccFinancialOpService({
     preflightRun,
     cancelActiveTask,
     archive,
+    listAdjustmentOptions,
+    addRunAdjustment,
     initializeOpening,
     listImportMonths,
     listImportRecords,
@@ -811,7 +875,7 @@ function createVccFinancialOpService({
     latestArchivedRun,
     exportRun,
     exportImportAudit,
-    getRunResult: (runId) => getRunResult(database.db, Number(runId)),
+    getRunResult: getRunReview,
     async terminate() {
       closing = true;
       await cancelActiveTask();

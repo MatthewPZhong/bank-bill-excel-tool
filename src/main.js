@@ -12488,6 +12488,24 @@ function registerNewAccountHandlers() {
     }
   });
 
+  ipcMain.handle('vccFinancialOp:run:adjustment-options', (_event, payload = {}) => {
+    try {
+      const result = getVccFinancialOpService().listAdjustmentOptions(payload);
+      return { ...result, runStatus: result.status, status: 'success' };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', async (_event, payload = {}) => {
+    try {
+      const result = await getVccFinancialOpService().addRunAdjustment(payload);
+      return { ...result, operationStatus: result.status, status: 'success' };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
   ipcMain.handle('vccFinancialOp:run:archived-months', () => {
     try {
       return {

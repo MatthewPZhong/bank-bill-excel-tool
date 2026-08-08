@@ -8630,6 +8630,11 @@ async function applyFullInfo(info) {
       setCurrentModule(MODULES.vccFinancialOp.id);
       window.__vccFinancialOpPreview?.openResult();
     }, 120);
+  } else if (info.previewModal === 'vcc-financial-op-adjustment') {
+    setTimeout(() => {
+      setCurrentModule(MODULES.vccFinancialOp.id);
+      window.__vccFinancialOpPreview?.openAdjustment();
+    }, 120);
   } else if (info.previewModal === 'vcc-financial-op-opening') {
     setTimeout(() => {
       setCurrentModule(MODULES.vccFinancialOp.id);

@@ -42,6 +42,131 @@ function createFakeWorkerFactory(workers) {
   };
 }
 
+function seedCalculatedReviewRun(db) {
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (
+      target_month, status, input_revisions_json, result_revision,
+      input_fingerprint, created_at, updated_at
+    ) VALUES (
+      '2026-06', 'calculated', '{"fixture":1}', 0,
+      'fixture-fingerprint', '2026-07-01 09:00:00', '2026-07-01 09:00:00'
+    )
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_run_rows (
+      run_id, subject, row_kind, source_type,
+      category_major, category_minor, currency, amount
+    ) VALUES (?, 'PPHK', 'movement', ?, '充值', 'OPS', 'USD', '10')
+  `).run(runId, SOURCE_TYPES.RECHARGE);
+  const insertBalance = db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, 'PPHK', ?, '100', ?, ?, ?, ?)
+  `);
+  for (const currency of SUPPORTED_CURRENCIES) {
+    const periodAmount = currency === 'USD' ? '10' : '0';
+    const calculatedBalance = currency === 'USD' ? '110' : '100';
+    const systemBalance = currency === 'USD' ? '112' : '100';
+    const difference = currency === 'USD' ? '2' : '0';
+    insertBalance.run(
+      runId,
+      currency,
+      periodAmount,
+      calculatedBalance,
+      systemBalance,
+      difference
+    );
+  }
+  return runId;
+}
+
+test('调整服务查询不占写租约，新增调整独占租约并返回完整生效结果', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedCalculatedReviewRun(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    appVersion: '3.1.8',
+    buildSha: 'service-build'
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const initialOptions = service.listAdjustmentOptions({ runId });
+  assert.equal(initialOptions.resultRevision, 0);
+  assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 options 不计任务 generation');
+  assert.equal(service.getRunResult(runId).review.subjects.length, 1);
+  assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 full result 不计任务 generation');
+
+  const adding = service.addRunAdjustment({
+    runId,
+    rowKey: initialOptions.options[0].rowKey,
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '服务层调整',
+    expectedResultRevision: 0
+  });
+  assert.equal(service._taskStateForTests().action, 'add-adjustment');
+  await assert.rejects(
+    service.addRunAdjustment({
+      runId,
+      rowKey: initialOptions.options[0].rowKey,
+      currency: 'JPY',
+      adjustmentAmount: '1',
+      reason: '并发写入',
+      expectedResultRevision: 0
+    }),
+    (error) => error.code === 'active-vcc-task'
+  );
+  const adjusted = await adding;
+  assert.equal(adjusted.resultRevision, 1);
+  assert.equal(service._taskStateForTests().taskGeneration, 1);
+  const storedAdjustment = db.prepare(`
+    SELECT created_app_version, created_build_sha
+    FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+  `).get(runId);
+  assert.deepEqual({ ...storedAdjustment }, {
+    created_app_version: '3.1.8',
+    created_build_sha: 'service-build'
+  });
+  const effective = service.getRunResult(runId);
+  assert.equal(effective.resultRevision, 1);
+  assert.equal(effective.adjustments.length, 1);
+  assert.equal(
+    effective.balances.find((row) => row.currency === 'USD').effectiveCalculatedBalance,
+    '111'
+  );
+  assert.deepEqual(
+    {
+      periodAmount: effective.balances.find((row) => row.currency === 'USD').periodAmount,
+      calculatedBalance: effective.balances.find((row) => row.currency === 'USD').calculatedBalance,
+      difference: effective.balances.find((row) => row.currency === 'USD').difference
+    },
+    { periodAmount: '11', calculatedBalance: '111', difference: '1' }
+  );
+  assert.equal(service.dataManagerOverview('2026-06').results[0].resultRevision, 1);
+  const refreshedOptions = service.listAdjustmentOptions({ runId });
+  assert.equal(refreshedOptions.options[0].availableCurrencies.includes('USD'), false);
+
+  await assert.rejects(
+    service.archive({ runId, expectedResultRevision: 1 }),
+    (error) => error.code === 'result-input-fingerprint-missing'
+  );
+  const archiveAudit = db.prepare(`
+    SELECT app_version, build_sha FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'archive_result' AND status = 'rolled_back'
+  `).get();
+  assert.deepEqual({ ...archiveAudit }, {
+    app_version: '3.1.8',
+    build_sha: 'service-build'
+  });
+});
+
 test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
   const workerSource = fs.readFileSync(path.join(
     __dirname,

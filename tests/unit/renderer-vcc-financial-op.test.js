@@ -180,6 +180,8 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:calculate',
       'vccFinancialOp:opening:initialize',
       'vccFinancialOp:run:archive',
+      'vccFinancialOp:run:adjustment-options',
+      'vccFinancialOp:run:adjustment-add',
       'vccFinancialOp:run:archived-months',
       'vccFinancialOp:run:unarchive-preview',
       'vccFinancialOp:run:unarchive',
@@ -398,15 +400,188 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /row\.validationField \|\| '-'/);
   });
 
-  test('结果确认固定九币种、明确差异并二次勾选后归档', () => {
+  test('结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档', () => {
     assert.match(moduleRenderer, /\['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'\]/);
-    assert.match(moduleRenderer, />当月计算财务OP<\/th>/);
-    assert.match(moduleRenderer, />系统财务OP<\/th>/);
-    assert.match(moduleRenderer, />差异<\/th>/);
+    assert.match(moduleRenderer, /<th>主体<\/th><th>大类<\/th><th>分类<\/th>/);
+    assert.match(moduleRenderer, /\['effectiveCalculatedBalance', '当月计算财务OP'\]/);
+    assert.match(moduleRenderer, /\['systemBalance', '系统财务OP'\]/);
+    assert.match(moduleRenderer, /\['effectiveDifference', '差异'\]/);
+    assert.match(moduleRenderer, /row\.type === 'adjustment'/);
+    assert.match(moduleRenderer, /amount === null \|\| amount === undefined \? '-' :/);
+    assert.match(moduleRenderer, /balanced \? '-' : formatAmount\(amount\)/);
+    assert.match(moduleRenderer, /balanced' : ' unbalanced'/);
     assert.match(moduleRenderer, /data-field="archive-confirm"/);
-    assert.match(moduleRenderer, /archiveBtn\.disabled = !checkbox\.checked/);
-    assert.match(moduleRenderer, /api\.archive\(\{ runId: result\.runId \}\)/);
+    assert.match(moduleRenderer, /archiveBtn\.disabled = operating \|\| !reviewHealthy \|\| !checkbox\.checked/);
+    assert.match(moduleRenderer, /expectedResultRevision: currentResult\.resultRevision/);
+    assert.match(moduleRenderer, /reviewFailureDisposition\('archive', error\.code\)/);
+    assert.match(moduleRenderer, /await refetchCurrentResult/);
+    assert.match(moduleRenderer, /normalizeRunResponse\(await api\.getRun\(\{ runId: result\.runId \}\)\)/);
+    assert.match(moduleRenderer, /data-result-run-id=/);
+    assert.match(moduleRenderer, /reopenManagedResult\(Number\(button\.dataset\.resultRunId\), button\)/);
     assert.match(moduleRenderer, /elements\.exportBtn\.disabled = state\.busy \|\| !state\.latestArchivedRun/);
+    assert.match(moduleRenderer, /results: \[\{\s*runId: 316,[\s\S]*resultRevision: 1,[\s\S]*updatedAt: '2026-07-02 11:08:00'/);
+    assert.match(moduleRenderer, /openResult\(\) \{[\s\S]*return confirmArchive\(\{[\s\S]*resultRevision: 1,[\s\S]*review:/);
+    assert.match(moduleRenderer, /openAdjustment\(\) \{[\s\S]*return requestRunAdjustment\([\s\S]*runStatus: 'calculated'/);
+    assert.match(renderer, /info\.previewModal === 'vcc-financial-op-adjustment'[\s\S]*__vccFinancialOpPreview\?\.openAdjustment\(\)/);
+  });
+
+  test('完整结果渲染严格校验九币种与四类 summary，调整紧跟基础行且不在前端计算金额', () => {
+    const start = moduleRenderer.indexOf('function isZeroAmount(');
+    const end = moduleRenderer.indexOf('async function requestRunAdjustment(', start);
+    assert.ok(start >= 0 && end > start);
+    const buildResultHtml = Function(
+      'escapeHtml',
+      'formatAmount',
+      'SOURCE_LABELS',
+      'CURRENCIES',
+      `'use strict'; ${moduleRenderer.slice(start, end)}; return resultReviewHtml;`
+    )(
+      (value) => String(value == null ? '' : value),
+      (value) => String(value),
+      { recharge_refund: 'VCC充值清退明细' },
+      ['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']
+    );
+    const currencies = ['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'];
+    const amounts = (usd, eur = '0') => Object.fromEntries(
+      currencies.map((currency) => [currency, currency === 'USD' ? usd : (currency === 'EUR' ? eur : '0')])
+    );
+    const dto = {
+      review: {
+        currencies,
+        subjects: [{
+          subject: 'PPHK',
+          rows: [{
+            type: 'base', subject: 'PPHK', sourceType: 'recharge_refund',
+            categoryMajor: '充值', categoryMinor: 'OPS',
+            currencyAmounts: { ...amounts(null), USD: '10', EUR: null }
+          }, {
+            type: 'adjustment', subject: 'PPHK', sourceType: 'recharge_refund',
+            categoryMajor: '充值', categoryMinor: 'OPS', currency: 'USD',
+            currencyAmounts: { ...amounts(null), USD: '-2', EUR: null },
+            adjustmentAmount: '-2', reason: '人工核对'
+          }],
+          summaries: {
+            openingBalance: amounts('100'),
+            effectiveCalculatedBalance: amounts('108'),
+            systemBalance: amounts('108', '-2'),
+            effectiveDifference: amounts('0', '-2')
+          }
+        }]
+      }
+    };
+    const output = buildResultHtml(dto);
+    assert.ok(output.indexOf('vcc-fin-op-base-row') < output.indexOf('vcc-fin-op-adjustment-row'));
+    assert.match(output, /人工调整/);
+    assert.match(output, /人工核对/);
+    assert.match(output, /class="number balanced">-<\/td>/);
+    assert.match(output, /class="number unbalanced">-2<\/td>/);
+    assert.match(output, /<th>调整值<\/th><th>调整原因<\/th>/);
+
+    const badCurrencies = JSON.parse(JSON.stringify(dto));
+    badCurrencies.review.currencies = currencies.slice(0, 8);
+    assert.throws(() => buildResultHtml(badCurrencies), /币种契约异常/);
+    const missingSummaryCurrency = JSON.parse(JSON.stringify(dto));
+    delete missingSummaryCurrency.review.subjects[0].summaries.effectiveDifference.USD;
+    assert.throws(() => buildResultHtml(missingSummaryCurrency), /缺少 USD/);
+    const nonCanonical = JSON.parse(JSON.stringify(dto));
+    nonCanonical.review.subjects[0].summaries.systemBalance.USD = '108.00';
+    assert.throws(() => buildResultHtml(nonCanonical), /金额契约异常/);
+
+    const resultFunction = moduleRenderer.slice(
+      moduleRenderer.indexOf('function resultReviewHtml('),
+      moduleRenderer.indexOf('async function requestRunAdjustment(')
+    );
+    assert.match(resultFunction, /const \{ currencies, subjects \} = validateResultReview\(result\)/);
+    assert.doesNotMatch(resultFunction, /CURRENCIES\.map/);
+    assert.doesNotMatch(resultFunction, /parseFloat|parseInt|Number\(/);
+  });
+
+  test('修改结果固定四级无默认级联，保存锁窗并在成功或 stale 后强制 refetch 清核对', () => {
+    const start = moduleRenderer.indexOf('async function requestRunAdjustment(');
+    const end = moduleRenderer.indexOf('function confirmArchive(', start);
+    const adjustmentSource = moduleRenderer.slice(start, end);
+    assert.ok(start >= 0 && end > start);
+    const orderedFields = [
+      'adjustment-subject', 'adjustment-major', 'adjustment-minor',
+      'adjustment-currency', 'adjustment-amount', 'adjustment-reason'
+    ];
+    let previous = -1;
+    for (const field of orderedFields) {
+      const index = adjustmentSource.indexOf(`data-field="${field}"`);
+      assert.ok(index > previous, `${field} 必须按固定顺序出现`);
+      previous = index;
+    }
+    assert.match(adjustmentSource, /resetSelect\(subjectSelect, '请选择主体', false\)/);
+    assert.match(adjustmentSource, /<option value="" selected disabled>/);
+    assert.match(adjustmentSource, /option\.dataset\.rowKey = rowKey/);
+    assert.match(adjustmentSource, /duplicateCounts[\s\S]*row\.sourceLabel/);
+    assert.match(adjustmentSource, /for \(const currency of CURRENCIES\)[\s\S]*available\.includes\(currency\)/);
+    assert.match(adjustmentSource, /rowKey,[\s\S]*expectedResultRevision: result\.resultRevision/);
+    assert.match(adjustmentSource, /canClose: \(\) => !saving/);
+    assert.match(adjustmentSource, /setAdjustmentLocked\(true\);\s*setBusy\(true, 'adjustment'\)/);
+    assert.match(adjustmentSource, /setBusy\(previousBusy\.busy, previousBusy\.kind\)/);
+    assert.doesNotMatch(adjustmentSource, /maxlength="500"/);
+    assert.ok(
+      adjustmentSource.indexOf('data-action="cancel-adjustment"')
+        < adjustmentSource.indexOf('data-action="confirm-adjustment"'),
+      '取消必须在左，蓝色确认必须在最右'
+    );
+
+    const reviewStart = moduleRenderer.indexOf('function confirmArchive(');
+    const reviewEnd = moduleRenderer.indexOf('async function chooseExistingMonth', reviewStart);
+    const reviewSource = moduleRenderer.slice(reviewStart, reviewEnd);
+    assert.match(reviewSource, /adjustmentOutcome && adjustmentOutcome\.status === 'saved'[\s\S]*await refetchCurrentResult\('调整已保存/);
+    assert.match(reviewSource, /\['stale', 'locked'\]\.includes\(adjustmentOutcome\.status\)[\s\S]*await refetchCurrentResult/);
+    assert.match(reviewSource, /checkbox\.checked = false/);
+    assert.match(reviewSource, /modifyBtn\.hidden = !editable/);
+    assert.match(reviewSource, /if \(modifyBtn\.disabled \|\| runStatusOf\(currentResult\) !== 'calculated'\) return;/);
+    assert.match(reviewSource, /reviewFailureDisposition\('archive', error\.code\)[\s\S]*await refetchCurrentResult/);
+  });
+
+  test('结果操作失败策略区分临时失败、无候选、并发归档与结构性归档错误', () => {
+    const start = moduleRenderer.indexOf('function reviewFailureDisposition(');
+    const end = moduleRenderer.indexOf('function responseFailure(', start);
+    assert.ok(start >= 0 && end > start);
+    const disposition = Function(
+      `'use strict'; ${moduleRenderer.slice(start, end)}; return reviewFailureDisposition;`
+    )();
+
+    assert.deepEqual(disposition('modify', 'active-vcc-task'), {
+      refetch: false, poisonReview: false, disableModify: false
+    });
+    assert.deepEqual(disposition('modify', 'adjustment-options-empty'), {
+      refetch: false, poisonReview: false, disableModify: true
+    });
+    assert.deepEqual(disposition('modify', 'adjustment-locked'), {
+      refetch: true, poisonReview: false, disableModify: false
+    });
+    assert.deepEqual(disposition('modify', 'result-revision-changed'), {
+      refetch: true, poisonReview: false, disableModify: false
+    });
+    assert.deepEqual(disposition('archive', 'active-vcc-task'), {
+      refetch: false, poisonReview: false, disableModify: false
+    });
+    assert.deepEqual(disposition('archive', 'result-input-changed'), {
+      refetch: false, poisonReview: true, disableModify: false
+    });
+
+    const reviewStart = moduleRenderer.indexOf('function confirmArchive(');
+    const reviewEnd = moduleRenderer.indexOf('async function chooseExistingMonth', reviewStart);
+    const reviewSource = moduleRenderer.slice(reviewStart, reviewEnd);
+    assert.match(reviewSource, /checkbox\.checked = false;\s*if \(error && error\.reviewRefetchFailed\)/);
+    assert.match(reviewSource, /if \(disposition\.disableModify\) adjustmentAvailable = false/);
+    assert.match(reviewSource, /modifyBtn\.disabled = locked \|\| !reviewHealthy \|\| !adjustmentAvailable/);
+    assert.match(reviewSource, /checkbox\.disabled = locked \|\| !reviewHealthy/);
+    assert.match(reviewSource, /reviewFailureDisposition\('archive', error\.code\)/);
+    assert.match(reviewSource, /if \(disposition\.poisonReview\) reviewHealthy = false/);
+    assert.match(reviewSource, /error\.reviewRefetchFailed = true/);
+
+    const adjustmentStart = moduleRenderer.indexOf('async function requestRunAdjustment(');
+    const adjustmentEnd = moduleRenderer.indexOf('function confirmArchive(', adjustmentStart);
+    const adjustmentSource = moduleRenderer.slice(adjustmentStart, adjustmentEnd);
+    assert.match(adjustmentSource, /error\.code = 'adjustment-options-empty'/);
+    assert.match(adjustmentSource, /\['result-revision-changed', 'adjustment-locked'\]\.includes\(saved\.code\)/);
+    assert.match(reviewSource, /\['stale', 'locked'\]\.includes\(adjustmentOutcome\.status\)[\s\S]*await refetchCurrentResult/);
   });
 
   test('开始运行先做五表预检，失败不启动 worker 并使用明确错误标题', () => {
@@ -438,7 +613,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(moduleRenderer, /零余额请填写 0/);
     assert.match(moduleRenderer, /确认一次性初始化/);
-    assert.match(moduleRenderer, />期初财务OP<\/th>/);
+    assert.match(moduleRenderer, /\['openingBalance', '期初财务OP'\]/);
     assert.doesNotMatch(moduleRenderer, /overview\.openingBalances|function renderOpeningAudit/);
     assert.doesNotMatch(vccService, /openingBalances/);
   });
@@ -450,5 +625,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-manager-dialog\s*\.vcc-fin-op-dialog-body\s*\{[\s\S]*overflow:\s*hidden;/);
     assert.match(styles, /@media \(max-width: 820px\)/);
     assert.match(styles, /@media \(max-width: 520px\)/);
+    const narrowStart = styles.indexOf('@media (max-width: 520px)');
+    const narrowStyles = styles.slice(narrowStart);
+    assert.match(narrowStyles, /\.vcc-fin-op-adjustment-form\s*\{\s*grid-template-columns:\s*1fr;/);
+    assert.match(narrowStyles, /\.vcc-fin-op-adjustment-reason-field\s*\{\s*grid-column:\s*auto;/);
   });
 });

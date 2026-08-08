@@ -518,6 +518,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     calculate: (payload) => ipcRenderer.invoke('vccFinancialOp:run:calculate', payload),
     initializeOpening: (payload) => ipcRenderer.invoke('vccFinancialOp:opening:initialize', payload),
     archive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:archive', payload),
+    listAdjustmentOptions: (payload) => ipcRenderer.invoke('vccFinancialOp:run:adjustment-options', payload),
+    addRunAdjustment: (payload) => ipcRenderer.invoke('vccFinancialOp:run:adjustment-add', payload),
     listArchivedResultMonths: () => ipcRenderer.invoke('vccFinancialOp:run:archived-months'),
     previewUnarchive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:unarchive-preview', payload),
     unarchiveMonth: (payload) => ipcRenderer.invoke('vccFinancialOp:run:unarchive', payload),
