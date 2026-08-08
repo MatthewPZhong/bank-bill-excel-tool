@@ -541,6 +541,43 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
   assert.equal(worker.terminateCount, 0);
 });
 
+test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，超时后可安全终止', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers),
+    cancelTimeoutMs: 5
+  });
+  t.after(() => db.close());
+  const preview = service.previewDataTargetDeletion({
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  const operation = service.deleteDataTarget({
+    targetMonth: '2026-06',
+    targetType: SOURCE_TYPES.RECHARGE,
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+  const rejection = assert.rejects(operation, /后台任务退出但未返回结果/);
+  const termination = service.terminate();
+  const worker = workers[0];
+  assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }]);
+
+  worker.emit('message', { type: 'critical-ready' });
+  assert.equal(service._taskStateForTests().phase, 'critical-ready');
+  assert.equal(service._taskStateForTests().protected, false);
+  assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }, { type: 'cancel' }]);
+
+  await termination;
+  await rejection;
+  assert.equal(worker.terminateCount, 1);
+  assert.equal(service._taskStateForTests().active, false);
+});
+
 test('直接结果导出持有同一租约，退出等待 writer 完成', async (t) => {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');

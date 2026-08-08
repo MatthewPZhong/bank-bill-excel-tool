@@ -371,7 +371,7 @@ function createVccFinancialOpService({
     const outcome = await Promise.race([completion, timeout]);
     if (timer) clearTimeout(timer);
     if (outcome.type === 'timeout') {
-      if (task.protected || task.phase === 'critical-ready') {
+      if (task.protected === true) {
         const protectedOutcome = await completion;
         if (protectedOutcome.type === 'result') return { status: 'completed', protected: true };
         return {

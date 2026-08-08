@@ -642,6 +642,14 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           recordId
         );
         item.insertedId = Number(result.lastInsertRowid);
+        insertAttempt(
+          db,
+          recordId,
+          item.snapshot,
+          'accepted',
+          item.insertedId,
+          '首次成功导入系统财务OP快照'
+        );
         insertedCount += 1;
       } else {
         skippedCount += 1;
