@@ -223,6 +223,24 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /setBusy\(true, 'import'\);\s*setStatus\('正在识别原表/);
     assert.match(moduleRenderer, /api\.cancelTask\(\)/);
     assert.match(main, /\{ \.\.\.result, runStatus: result\.status, status: 'success' \}/);
+
+    const calculateStart = main.indexOf("trackedIpcHandle('vccFinancialOp:run:calculate'");
+    const calculateEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:opening:initialize'", calculateStart);
+    const calculateHandler = main.slice(calculateStart, calculateEnd);
+    assert.match(
+      calculateHandler,
+      /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
+      '计算 IPC 必须保留 worker 结构化错误和 auditFailure'
+    );
+
+    const resultExportStart = main.indexOf("trackedIpcHandle('vccFinancialOp:export:result'");
+    const resultExportEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'", resultExportStart);
+    const resultExportHandler = main.slice(resultExportStart, resultExportEnd);
+    assert.match(
+      resultExportHandler,
+      /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
+      '结果导出 IPC 必须返回临时 fail-closed 闸的稳定 code 和上下文'
+    );
   });
 
   test('数据管理标题和左侧导航沿用平盘对账数据管理契约', () => {
@@ -818,6 +836,27 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /await api\.preflightRun\(\{ targetMonth: month \}\)/);
     assert.match(moduleRenderer, /showMessage\('无法开始运行', message, 'warning'\)/);
     assert.match(moduleRenderer, /expectedInputFingerprint: preflight\.inputFingerprint/);
+  });
+
+  test('运行前检查同时存在多个问题时完整展示结构化 issues', () => {
+    const start = moduleRenderer.indexOf('function blockedCalculationMessage(');
+    const end = moduleRenderer.indexOf('function requestOpeningInitialization(', start);
+    assert.ok(start >= 0 && end > start);
+    const formatter = Function(
+      `'use strict'; ${moduleRenderer.slice(start, end)}; return blockedCalculationMessage;`
+    )();
+    assert.equal(formatter({
+      code: 'missing-datasets',
+      issues: [
+        { code: 'empty-dataset', message: 'Pending 校验表没有有效数据。' },
+        { code: 'invalid-system-snapshot', message: 'PPHK 系统财务OP缺少 USD 余额。' },
+        { code: 'unresolved-imports', message: '仍有 1 条未处理失败记录。' }
+      ]
+    }), [
+      'Pending 校验表没有有效数据。',
+      'PPHK 系统财务OP缺少 USD 余额。',
+      '仍有 1 条未处理失败记录。'
+    ].join('\n'));
   });
 
   test('缺少上月归档时提供九币种一次性期初初始化且不默认补零', () => {

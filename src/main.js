@@ -12480,7 +12480,7 @@ function registerNewAccountHandlers() {
     try {
       return await getVccFinancialOpService().calculate(payload);
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 

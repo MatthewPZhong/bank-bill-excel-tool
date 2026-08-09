@@ -187,6 +187,16 @@ function seedCompleteMonth(db, { includeOpening = true, unresolved = false } = {
   return null;
 }
 
+function calculateCurrent(db, targetMonth = '2026-06', options = {}) {
+  const preflight = preflightCalculation(db, targetMonth);
+  return calculateMonth({
+    ...options,
+    db,
+    targetMonth,
+    expectedInputFingerprint: preflight.inputFingerprint
+  });
+}
+
 test('previousYearMonth 正确跨年', () => {
   assert.equal(previousYearMonth('2026-01'), '2025-12');
   assert.equal(previousYearMonth('2026-06'), '2026-05');
@@ -197,7 +207,7 @@ test('缺少上月归档时明确阻断且不默认补零', (t) => {
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db, { includeOpening: false });
-  const result = calculateMonth({ db, targetMonth: '2026-06' });
+  const result = calculateCurrent(db);
   assert.equal(result.status, 'blocked');
   assert.equal(result.code, 'missing-opening-balance');
   assert.deepEqual(result.missingOpeningSubjects, ['PPHK']);
@@ -231,7 +241,7 @@ test('运行前预检要求四类明细和系统财务OP全部存在且逐表返
   });
 });
 
-test('缺表与缺上月归档并存时 code 和 message 均以缺表门禁为准', (t) => {
+test('缺表与缺上月归档并存时主 code 保持缺表且一次展示全部门禁', (t) => {
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db, { includeOpening: false });
@@ -246,9 +256,167 @@ test('缺表与缺上月归档并存时 code 和 message 均以缺表门禁为�
 
   const preflight = preflightCalculation(db, '2026-06');
   assert.equal(preflight.code, 'missing-datasets');
-  assert.equal(preflight.message, undefined);
+  assert.deepEqual(preflight.issues.map((issue) => issue.code), [
+    'missing-dataset',
+    'missing-previous-archive'
+  ]);
+  assert.equal(preflight.message, preflight.issues.map((issue) => issue.message).join('\n'));
   assert.equal(preflight.openingState.code, 'missing-previous-archive');
   assert.deepEqual(preflight.missing, ['VCC_移除归档Pending账单_校验表']);
+  assert.throws(() => initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'PPHK', balances: fixedBalances('100') }],
+    note: '不得绕过缺表门禁'
+  }), (error) => {
+    assert.equal(error.code, 'missing-datasets');
+    assert.deepEqual(error.preflight.issues.map((issue) => issue.code), [
+      'missing-dataset',
+      'missing-previous-archive'
+    ]);
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances WHERE target_month = '2026-06'
+  `).get().n, 0);
+});
+
+test('运行前预检一次返回空表、损坏系统快照和未处理失败记录的全部问题', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const failedId = seedCompleteMonth(db, { unresolved: true });
+  db.prepare(`
+    DELETE FROM vcc_fin_op_effective_rows
+    WHERE source_type = ?
+  `).run(SOURCE_TYPES.PENDING);
+  const invalidBalances = fixedBalances('100');
+  delete invalidBalances.USD;
+  db.prepare(`
+    UPDATE vcc_fin_op_system_snapshots
+    SET balances_json = ?
+    WHERE target_month = '2026-06' AND subject = 'PPHK'
+  `).run(JSON.stringify(invalidBalances));
+
+  const preflight = preflightCalculation(db, '2026-06');
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.code, 'missing-datasets');
+  assert.deepEqual(preflight.missing, ['VCC_移除归档Pending账单_校验表']);
+  assert.deepEqual(preflight.issues.map((issue) => issue.code), [
+    'empty-dataset',
+    'invalid-system-snapshot',
+    'unresolved-imports'
+  ]);
+  assert.match(preflight.issues[1].message, /PPHK/);
+  assert.match(preflight.issues[1].message, /USD/);
+  assert.deepEqual(preflight.issues[2].recordIds, [failedId]);
+  assert.equal(preflight.message, preflight.issues.map((issue) => issue.message).join('\n'));
+});
+
+test('非法系统快照与首月待初始化并存时先阻断且不写入期初', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db, { includeOpening: false });
+  const invalidBalances = fixedBalances('100');
+  delete invalidBalances.USD;
+  db.prepare(`
+    UPDATE vcc_fin_op_system_snapshots
+    SET balances_json = ?
+    WHERE target_month = '2026-06' AND subject = 'PPHK'
+  `).run(JSON.stringify(invalidBalances));
+
+  const preflight = preflightCalculation(db, '2026-06');
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.code, 'invalid-system-snapshots');
+  assert.deepEqual(preflight.missing, []);
+  assert.deepEqual(preflight.issues.map((issue) => issue.code), [
+    'invalid-system-snapshot'
+  ]);
+  assert.equal(preflight.message, preflight.issues[0].message);
+  assert.equal(preflight.openingState.status, 'first-month-initialization-required');
+  assert.deepEqual(preflight.openingState.missingOpeningSubjects, ['PPHK']);
+
+  assert.throws(() => initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'PPHK', balances: fixedBalances('100') }],
+    note: '不得绕过损坏快照门禁'
+  }), (error) => {
+    assert.equal(error.code, 'invalid-system-snapshots');
+    assert.equal(error.preflight.openingState.status, 'first-month-initialization-required');
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances WHERE target_month = '2026-06'
+  `).get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT first_month FROM vcc_fin_op_module_state WHERE singleton_id = 1
+  `).get().first_month, null);
+});
+
+test('迁移诊断与缺表并存时诊断保持最高优先且 issues 不重复', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db, { includeOpening: false });
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_opening_balances (
+      target_month, subject, balances_json, content_hash, initialization_note
+    ) VALUES (?, ?, ?, ?, '历史异常期初')
+  `);
+  insert.run('2026-04', 'LEGACY-A', JSON.stringify(fixedBalances('1')), 'hash-a');
+  insert.run('2026-05', 'LEGACY-B', JSON.stringify(fixedBalances('2')), 'hash-b');
+  const migration = ensureVccFinancialOpStateModelSupport(db);
+  assert.equal(migration.code, 'vcc-first-month-migration-blocked');
+  db.prepare(`
+    DELETE FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06' AND dataset_type = ?
+  `).run(SOURCE_TYPES.PENDING);
+
+  const preflight = preflightCalculation(db, '2026-06');
+  assert.equal(preflight.ok, false);
+  assert.equal(preflight.code, 'vcc-first-month-migration-blocked');
+  assert.deepEqual(preflight.issues.map((issue) => issue.code), [
+    'vcc-first-month-migration-blocked',
+    'missing-dataset'
+  ]);
+  assert.equal(preflight.message, preflight.issues.map((issue) => issue.message).join('\n'));
+  assert.equal(preflight.openingState.status, 'blocked');
+  assert.equal(preflight.openingState.reason, 'multiple-opening-months');
+
+  assert.throws(() => initializeOpeningBalances({
+    db,
+    targetMonth: '2026-06',
+    entries: [{ subject: 'PPHK', balances: fixedBalances('100') }],
+    note: '不得绕过迁移诊断与缺表门禁'
+  }), (error) => {
+    assert.equal(error.code, 'vcc-first-month-migration-blocked');
+    assert.deepEqual(error.preflight.issues.map((issue) => issue.code), [
+      'vcc-first-month-migration-blocked',
+      'missing-dataset'
+    ]);
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_opening_balances WHERE target_month = '2026-06'
+  `).get().n, 0);
+});
+
+test('calculateMonth 缺少或伪造 fingerprint 时在事务和写结果前失败关闭', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+
+  for (const expectedInputFingerprint of [undefined, '', '0'.repeat(63), 'A'.repeat(64)]) {
+    const result = calculateMonth({
+      db,
+      targetMonth: '2026-06',
+      expectedInputFingerprint
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.code, 'preflight-required');
+  }
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month = '2026-06'
+  `).get().n, 0);
 });
 
 test('worker 二次预检以输入 fingerprint 阻断预检后的数据变化', (t) => {
@@ -287,7 +455,7 @@ test('上月归档主体即使本月无发生额也必须延续并校验系统�
     VALUES ('2026-05', 'PPHK-NO-MOVEMENT', ?, ?)
   `).run(JSON.stringify(fixedBalances('50')), previousRunId);
 
-  const blocked = calculateMonth({ db, targetMonth: '2026-06' });
+  const blocked = calculateCurrent(db);
   assert.equal(blocked.status, 'blocked');
   assert.equal(blocked.code, 'missing-system-subject');
   assert.deepEqual(blocked.missingSystemSubjects, ['PPHK-NO-MOVEMENT']);
@@ -301,7 +469,7 @@ test('上月归档主体即使本月无发生额也必须延续并校验系统�
               'system-extra.xlsx', 'Validate', 3, '{}', ?)
   `).run(JSON.stringify(fixedBalances('50')), systemRecordId);
 
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'calculated');
   assert.ok(calculated.subjects.includes('PPHK-NO-MOVEMENT'));
   const extraUsd = calculated.balances.find((row) => (
@@ -358,7 +526,7 @@ test('首月期初逐主体九币种一次性初始化，同值重试跳过且�
     note: '试图新增未知主体'
   }), /UNKNOWN 不属于 2026-06 的有效原表主体/);
 
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'calculated');
   assert.equal(calculated.balances.find((row) => row.currency === 'USD').openingBalance, '100');
 });
@@ -398,7 +566,7 @@ test('首月已初始化主体不要求重复提交，新增主体可单独初�
   assert.equal(preflight.ok, true);
   assert.equal(preflight.openingState.status, 'first-month-initialization-required');
   assert.deepEqual(preflight.openingState.missingOpeningSubjects, ['NEW']);
-  const calculation = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculation = calculateCurrent(db);
   assert.equal(calculation.status, 'blocked');
   assert.equal(calculation.code, 'missing-opening-balance');
   assert.deepEqual(calculation.missingOpeningSubjects, ['NEW']);
@@ -550,7 +718,7 @@ test('非首月缺少上月归档时预检、计算和人工期初均结构化�
   assert.equal(preflight.ok, false);
   assert.equal(preflight.code, 'missing-previous-archive');
   assert.deepEqual(preflight.openingState.missingArchiveSubjects, ['PPHK']);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'blocked');
   assert.equal(calculated.code, 'missing-previous-archive');
   assert.throws(() => initializeOpeningBalances({
@@ -577,7 +745,7 @@ test('目标账期早于 first_month 时 fail-closed', (t) => {
   const preflight = preflightCalculation(db, '2026-06');
   assert.equal(preflight.ok, false);
   assert.equal(preflight.code, 'target-before-first-month');
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'blocked');
   assert.equal(calculated.code, 'target-before-first-month');
   assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs`).get().n, 0);
@@ -601,7 +769,7 @@ test('首月迁移诊断不阻断建库，但阻断预检、计算和期初初�
   assert.equal(preflight.ok, false);
   assert.equal(preflight.code, 'vcc-first-month-migration-blocked');
   assert.equal(preflight.openingState.reason, 'multiple-opening-months');
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'blocked');
   assert.equal(calculated.code, 'vcc-first-month-migration-blocked');
   assert.throws(() => initializeOpeningBalances({
@@ -619,7 +787,7 @@ test('逐主体逐币种精确汇总四类发生额并计算系统差异', (t) =
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const result = calculateMonth({ db, targetMonth: '2026-06' });
+  const result = calculateCurrent(db);
   assert.equal(result.status, 'calculated');
   const byCurrency = Object.fromEntries(result.balances.map((row) => [row.currency, row]));
 
@@ -661,7 +829,7 @@ test('未处理失败导入阻断计算，人工处理后可重新运行', (t) =
   const db = createDb();
   t.after(() => db.close());
   const failedId = seedCompleteMonth(db, { unresolved: true });
-  const blocked = calculateMonth({ db, targetMonth: '2026-06' });
+  const blocked = calculateCurrent(db);
   assert.equal(blocked.status, 'blocked');
   assert.equal(blocked.code, 'unresolved-imports');
   assert.equal(blocked.unresolved[0].id, failedId);
@@ -670,7 +838,7 @@ test('未处理失败导入阻断计算，人工处理后可重新运行', (t) =
     note: '已核对既有有效行，无需覆盖',
     action: 'keep_current_effective_dataset'
   });
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'calculated');
 });
 
@@ -678,12 +846,12 @@ test('未结束导入批次阻断计算和归档，即使尚未生成原表记�
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   repository.createImportBatch(db, {
     id: 'active-batch', targetMonth: '2026-06', fileCount: 1
   });
 
-  const blocked = calculateMonth({ db, targetMonth: '2026-06' });
+  const blocked = calculateCurrent(db);
   assert.equal(blocked.status, 'blocked');
   assert.equal(blocked.code, 'active-imports');
   assert.equal(blocked.activeImports[0].id, 'active-batch');
@@ -701,7 +869,7 @@ test('归档绑定计算时的数据版本，原表变化后拒绝旧结果归�
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   db.prepare(`
     UPDATE vcc_fin_op_datasets SET revision = revision + 1
     WHERE target_month = '2026-06' AND dataset_type = ?
@@ -717,8 +885,8 @@ test('同账期重新计算原子替换未归档草稿', (t) => {
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const first = calculateMonth({ db, targetMonth: '2026-06' });
-  const second = calculateMonth({ db, targetMonth: '2026-06' });
+  const first = calculateCurrent(db);
+  const second = calculateCurrent(db);
 
   assert.equal(first.status, 'calculated');
   assert.equal(second.status, 'calculated');
@@ -731,9 +899,7 @@ test('重算替换审计保留旧 adjustment、Pending、effective 与 fingerpri
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const first = calculateMonth({
-    db,
-    targetMonth: '2026-06',
+  const first = calculateCurrent(db, '2026-06', {
     appVersion: '3.1.8',
     buildSha: 'first-build'
   });
@@ -749,9 +915,7 @@ test('重算替换审计保留旧 adjustment、Pending、effective 与 fingerpri
     buildSha: 'adjust-build'
   });
 
-  const second = calculateMonth({
-    db,
-    targetMonth: '2026-06',
+  const second = calculateCurrent(db, '2026-06', {
     appVersion: '3.1.8',
     buildSha: 'replace-build'
   });
@@ -797,7 +961,7 @@ test('重算替换注入失败时恢复旧 run 全部子表，并单独记录 ro
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const first = calculateMonth({ db, targetMonth: '2026-06' });
+  const first = calculateCurrent(db);
   addRunAdjustment({
     db,
     runId: first.runId,
@@ -826,7 +990,7 @@ test('重算替换注入失败时恢复旧 run 全部子表，并单独记录 ro
   `);
 
   assert.throws(
-    () => calculateMonth({ db, targetMonth: '2026-06', appVersion: '3.1.8' }),
+    () => calculateCurrent(db, '2026-06', { appVersion: '3.1.8' }),
     /replacement-write-fault/
   );
 
@@ -863,16 +1027,14 @@ test('旧结果证据采集失败时零删除并记录可诊断的 rolled_back �
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const first = calculateMonth({ db, targetMonth: '2026-06' });
+  const first = calculateCurrent(db);
   db.prepare(`
     DELETE FROM vcc_fin_op_run_balances
     WHERE run_id = ? AND subject = 'PPHK' AND currency = 'AUD'
   `).run(first.runId);
 
   assert.throws(
-    () => calculateMonth({
-      db,
-      targetMonth: '2026-06',
+    () => calculateCurrent(db, '2026-06', {
       appVersion: '3.1.8',
       buildSha: 'collection-failure-build'
     }),
@@ -911,7 +1073,7 @@ test('重算失败审计写入也失败时不掩盖主异常', (t) => {
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const first = calculateMonth({ db, targetMonth: '2026-06' });
+  const first = calculateCurrent(db);
   db.exec(`
     CREATE TRIGGER fail_replacement_run_insert_with_audit
     BEFORE INSERT ON vcc_fin_op_runs
@@ -927,7 +1089,7 @@ test('重算失败审计写入也失败时不掩盖主异常', (t) => {
     END;
   `);
 
-  assert.throws(() => calculateMonth({ db, targetMonth: '2026-06' }), (error) => {
+  assert.throws(() => calculateCurrent(db), (error) => {
     assert.equal(error.message, 'replacement-primary-fault');
     assert.equal(error.auditFailure.message, 'replacement-audit-fault');
     return true;
@@ -949,7 +1111,7 @@ test('确认归档原子写入当月期末余额并统一更新数据状态', (t
     UPDATE vcc_fin_op_datasets SET generated_at = '2026-07-01 08:30:00'
     WHERE target_month = '2026-06'
   `).run();
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   const archived = archiveRun({ db, runId: calculated.runId, expectedResultRevision: 0 });
   assert.equal(archived.status, 'archived');
   const stored = db.prepare(`
@@ -974,7 +1136,7 @@ test('归档强制 revision 门禁，缺失或过期时保留生效结果等待�
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
 
   for (const expectedResultRevision of [undefined, 1]) {
     assert.throws(() => archiveRun({
@@ -999,7 +1161,7 @@ test('归档拒绝缺失或旧输入 fingerprint，且不存在 run 不污染审
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   db.prepare(`UPDATE vcc_fin_op_runs SET input_fingerprint = NULL WHERE id = ?`)
     .run(calculated.runId);
   assert.throws(() => archiveRun({
@@ -1041,7 +1203,7 @@ test('归档写入人工调整后的九币种余额，并成为下月唯一期�
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   addRunAdjustment({
     db,
     runId: calculated.runId,
@@ -1106,7 +1268,7 @@ test('归档提交后断言发现快照损坏时，九币种快照、run 和五�
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   db.exec(`
     CREATE TRIGGER corrupt_archive_snapshot
     AFTER INSERT ON vcc_fin_op_archives
@@ -1151,7 +1313,7 @@ test('下月出现人工期初时归档预检 fail-closed，避免双来源', (t
   const db = createDb();
   t.after(() => db.close());
   seedCompleteMonth(db);
-  const calculated = calculateMonth({ db, targetMonth: '2026-06' });
+  const calculated = calculateCurrent(db);
   db.prepare(`
     INSERT INTO vcc_fin_op_opening_balances (
       target_month, subject, balances_json, content_hash, initialization_note
@@ -1181,7 +1343,7 @@ test('聚合后超过 Excel 有效数字上限时在生成可归档结果前阻�
     WHERE source_type = ?
   `).run(SOURCE_TYPES.RECHARGE);
 
-  assert.throws(() => calculateMonth({ db, targetMonth: '2026-06' }), /15 位有效数字/);
+  assert.throws(() => calculateCurrent(db), /15 位有效数字/);
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE target_month = '2026-06'
   `).get().n, 0);

@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const JSZip = require('jszip');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../../../src/backend/vcc-financial-op-db/migrations');
@@ -16,6 +17,12 @@ const {
 } = require('../../../../src/backend/vcc-financial-op/definitions');
 const { inspectSourceFile } = require('../../../../src/backend/vcc-financial-op/workbook-reader');
 const {
+  serializeError,
+  deserializeError
+} = require('../../../../src/main-process/serialize-error');
+const {
+  systemAmountRead,
+  systemBalanceLexicalTokens,
   readSystemOpSnapshots,
   importSystemOpGroup,
   systemRecordResult
@@ -104,6 +111,56 @@ function writeWorkbook(t, {
   const filePath = path.join(dir, fileName);
   XLSX.writeFile(workbook, filePath);
   return { filePath, sheetName };
+}
+
+async function rewriteWorksheetXml(filePath, transform, { relocateTo = '' } = {}) {
+  const zip = await JSZip.loadAsync(fs.readFileSync(filePath));
+  const workbookXml = await zip.file('xl/workbook.xml').async('string');
+  const sheetTag = workbookXml.match(/<sheet\b[^>]*>/)[0];
+  const relationshipId = sheetTag.match(/\br:id="([^"]+)"/)[1];
+  const relationshipsPath = 'xl/_rels/workbook.xml.rels';
+  let relationshipsXml = await zip.file(relationshipsPath).async('string');
+  const relationshipTag = relationshipsXml.match(new RegExp(
+    `<Relationship\\b(?=[^>]*\\bId="${relationshipId}")[^>]*>`
+  ))[0];
+  const originalTarget = relationshipTag.match(/\bTarget="([^"]+)"/)[1];
+  const originalEntry = originalTarget.startsWith('/')
+    ? originalTarget.slice(1)
+    : `xl/${originalTarget}`;
+  const originalXml = await zip.file(originalEntry).async('string');
+  const rewrittenXml = transform(originalXml);
+  assert.notEqual(rewrittenXml, originalXml, 'worksheet XML fixture 必须实际发生变化');
+
+  if (relocateTo) {
+    const targetEntry = `xl/${relocateTo}`;
+    const rewrittenRelationship = relationshipTag.replace(
+      /\bTarget="[^"]+"/,
+      `Target="${relocateTo}"`
+    );
+    relationshipsXml = relationshipsXml.replace(relationshipTag, rewrittenRelationship);
+    zip.file(relationshipsPath, relationshipsXml);
+    zip.remove(originalEntry);
+    zip.file(targetEntry, rewrittenXml);
+  } else {
+    zip.file(originalEntry, rewrittenXml);
+  }
+  fs.writeFileSync(filePath, await zip.generateAsync({ type: 'nodebuffer' }));
+}
+
+function replaceCellValue(xml, cellReference, rawToken) {
+  const cellPattern = new RegExp(
+    `(<c\\b(?=[^>]*\\br="${cellReference}")[^>]*>[\\s\\S]*?<v>)[^<]*(</v>[\\s\\S]*?</c>)`
+  );
+  assert.match(xml, cellPattern);
+  return xml.replace(cellPattern, `$1${rawToken}$2`);
+}
+
+function duplicateCell(xml, cellReference) {
+  const cellPattern = new RegExp(
+    `(<c\\b(?=[^>]*\\br="${cellReference}")[^>]*>[\\s\\S]*?</c>)`
+  );
+  assert.match(xml, cellPattern);
+  return xml.replace(cellPattern, '$1$1');
 }
 
 function importFile(entry) {
@@ -207,6 +264,123 @@ test('系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本�
   assert.equal(snapshot.balances.CAD, '-1234.56');
   assert.equal(snapshot.balances.CNH, '0');
   assert.equal(snapshot.balances.EUR, '3.25');
+  const raw = JSON.parse(snapshot.rawJson);
+  const eur = raw.rows.find((row) => row.normalizedCurrency === 'EUR');
+  assert.equal(eur.balanceEvidence.rawTokenSource, 'ooxml-worksheet-v');
+  assert.equal(eur.balanceEvidence.rawLexicalToken, '3.25');
+});
+
+test('系统财务OP直接按 worksheet v token 拒绝正负超精度值，避免 SheetJS Number 先吞分币', async (t) => {
+  for (const [fileName, rawToken] of [
+    ['positive-cent-loss.xlsx', '90071992547409.91'],
+    ['negative-cent-loss.xlsx', '-90071992547409.91']
+  ]) {
+    const entry = writeWorkbook(t, { fileName });
+    await rewriteWorksheetXml(
+      entry.filePath,
+      (xml) => replaceCellValue(xml, 'M2', rawToken)
+    );
+    let caught = null;
+    assert.throws(
+      () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+      (error) => {
+        caught = error;
+        return error.code === 'amount-precision-invalid'
+          && /15 位有效数字/.test(error.message);
+      }
+    );
+    const restored = deserializeError(serializeError(caught));
+    assert.equal(restored.code, 'amount-precision-invalid');
+    assert.deepEqual(restored.context, {
+      sourceRow: 2,
+      fieldName: '财务余额',
+      sheetName: entry.sheetName
+    });
+  }
+});
+
+test('系统财务OP通过 workbook relationship 定位 worksheet，并保留合法精度边界 lexical 证据', async (t) => {
+  const entry = writeWorkbook(t, { fileName: 'lexical-boundary.xlsx' });
+  await rewriteWorksheetXml(
+    entry.filePath,
+    (xml) => replaceCellValue(xml, 'M2', '9999999999999.99'),
+    { relocateTo: 'worksheets/sheet7.xml' }
+  );
+  const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
+  assert.equal(snapshot.balances.AUD, '9999999999999.99');
+  const raw = JSON.parse(snapshot.rawJson);
+  const aud = raw.rows.find((row) => row.normalizedCurrency === 'AUD');
+  assert.equal(aud.balanceEvidence.rawTokenSource, 'ooxml-worksheet-v');
+  assert.equal(aud.balanceEvidence.rawLexicalToken, '9999999999999.99');
+  assert.equal(aud.balanceEvidence.canonicalValue, '9999999999999.99');
+});
+
+test('系统财务OP缺少 OOXML lexical 时仅允许可证明分币安全的 Number fallback', () => {
+  const safe = systemAmountRead('123.45', 123.45, { label: 'fallback-safe' });
+  assert.equal(safe.canonicalValue, '123.45');
+  assert.equal(safe.evidence.rawTokenSource, 'sheetjs-number-fallback');
+  const safeFifteenDigitInteger = systemAmountRead(
+    '999999999999999',
+    999999999999999,
+    { label: 'fallback-safe-integer' }
+  );
+  assert.equal(safeFifteenDigitInteger.canonicalValue, '999999999999999');
+  assert.equal(safeFifteenDigitInteger.evidence.rawTokenSource, 'sheetjs-number-fallback');
+  assert.throws(
+    () => systemAmountRead('90071992547409.9', 90071992547409.9, { label: 'fallback-unsafe' }),
+    (error) => error.code === 'amount-precision-invalid'
+      && /无法保证两位小数精度/.test(error.message)
+  );
+});
+
+test('系统财务OP worksheet 重复财务余额 cell 时稳定失败关闭而不回退 Number', async (t) => {
+  const entry = writeWorkbook(t, { fileName: 'duplicate-balance-cell.xlsx' });
+  await rewriteWorksheetXml(
+    entry.filePath,
+    (xml) => duplicateCell(xml, 'M2')
+  );
+  assert.throws(
+    () => readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName),
+    (error) => {
+      assert.equal(error.code, 'amount-precision-invalid');
+      assert.match(error.message, /第 2 行财务余额单元格重复/);
+      assert.equal(error.context.sourceRow, 2);
+      return true;
+    }
+  );
+});
+
+test('系统财务OP worksheet XML 为空或结构损坏时返回稳定精度错误及定位上下文', () => {
+  const workbook = {
+    Workbook: { Sheets: [{ name: 'System', id: 'rId1' }] },
+    files: {
+      'xl/_rels/workbook.xml.rels': {
+        content: Buffer.from([
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">',
+          '<Relationship Id="rId1"',
+          ' Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"',
+          ' Target="worksheets/sheet1.xml"/>',
+          '</Relationships>'
+        ].join(''))
+      },
+      'xl/worksheets/sheet1.xml': {
+        content: Buffer.alloc(0)
+      }
+    }
+  };
+  for (const worksheetXml of ['', '<worksheet><sheetData>']) {
+    workbook.files['xl/worksheets/sheet1.xml'].content = Buffer.from(worksheetXml);
+    assert.throws(
+      () => systemBalanceLexicalTokens(workbook, 'System'),
+      (error) => {
+        assert.equal(error.code, 'amount-precision-invalid');
+        assert.match(error.message, /worksheet XML 结构无效/);
+        assert.equal(error.context.sheetName, 'System');
+        assert.equal(error.context.entryPath, 'xl/worksheets/sheet1.xml');
+        return true;
+      }
+    );
+  }
 });
 
 test('系统财务OP raw 数值超过两位小数或安全范围时拒绝且不舍入', (t) => {
@@ -428,6 +602,21 @@ test('系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
   const stored = db.prepare('SELECT balances_json FROM vcc_fin_op_system_snapshots').get();
   assert.equal(JSON.parse(stored.balances_json).USD, '9.25');
+  const accepted = db.prepare(`
+    SELECT attempt.disposition, attempt.existing_snapshot_id,
+           attempt.source_file, attempt.sheet_name, attempt.source_row,
+           attempt.raw_json, snapshot.id AS snapshot_id
+    FROM vcc_fin_op_system_snapshot_attempts attempt
+    JOIN vcc_fin_op_system_snapshots snapshot
+      ON snapshot.id = attempt.existing_snapshot_id
+    WHERE attempt.disposition = 'accepted'
+  `).get();
+  assert.equal(accepted.disposition, 'accepted');
+  assert.equal(accepted.existing_snapshot_id, accepted.snapshot_id);
+  assert.equal(accepted.source_file, 'first.xlsx');
+  assert.equal(accepted.sheet_name, firstFile.sheetName);
+  assert.equal(accepted.source_row, 2);
+  assert.ok(accepted.raw_json.includes('PPHK'));
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
     WHERE disposition = 'idempotent_skip'

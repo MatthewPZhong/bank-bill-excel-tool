@@ -41,6 +41,7 @@ const REQUIRED_DATASET_TYPES = Object.freeze([
 ]);
 const REPLACE_CALCULATED_RESULT_OPERATION = 'replace_calculated_result';
 const ARCHIVE_RESULT_OPERATION = 'archive_result';
+const INPUT_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 
 function previousYearMonth(yearMonth) {
   const normalized = normalizeYearMonth(yearMonth);
@@ -228,6 +229,21 @@ function classifyOpeningState({
   };
 }
 
+function preflightIssueMessage(issue) {
+  if (!issue || typeof issue !== 'object') return '';
+  return String(issue.message || '').trim();
+}
+
+function primaryPreflightCode(issues) {
+  const code = issues.length > 0 ? issues[0].code : '';
+  if (code === 'missing-dataset' || code === 'empty-dataset') return 'missing-datasets';
+  if (code === 'archived-dataset') return 'month-already-archived';
+  if (code === 'invalid-system-snapshot') return 'invalid-system-snapshots';
+  if (code === 'missing-system-subject') return 'missing-system-subject';
+  if (code === 'unexpected-system-subject') return 'subject-mismatch';
+  return code || 'preflight-blocked';
+}
+
 function preflightCalculation(db, targetMonth) {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth || normalizedMonth !== targetMonth) {
@@ -285,9 +301,7 @@ function preflightCalculation(db, targetMonth) {
     };
   });
   const missing = datasets.filter((item) => (
-    !item.datasetExists
-    || item.rowCount === 0
-    || (item.sourceType === SOURCE_TYPES.SYSTEM_OP && invalidSystemSubjects.length > 0)
+    !item.datasetExists || item.rowCount === 0
   )).map((item) => item.sourceType);
   const archived = snapshot.rows
     .filter((row) => row.data_status === 'archived')
@@ -349,27 +363,98 @@ function preflightCalculation(db, targetMonth) {
       crypto.createHash('sha256').update(String(row.balances_json), 'utf8').digest('hex')
     ])
   }), 'utf8').digest('hex');
-  if (
-    moduleState.migrationDiagnostic
-    || activeImports.length > 0
-    || missing.length > 0
-    || archived.length > 0
-    || unresolved.length > 0
-    || missingSystemSubjects.length > 0
-    || unexpectedSystemSubjects.length > 0
-    || openingState.status === 'blocked'
-  ) {
-    let code = openingState.code;
-    if (unexpectedSystemSubjects.length > 0) code = 'subject-mismatch';
-    if (missingSystemSubjects.length > 0) code = 'missing-system-subject';
-    if (unresolved.length > 0) code = 'unresolved-imports';
-    if (archived.length > 0) code = 'month-already-archived';
-    if (missing.length > 0) code = 'missing-datasets';
-    if (activeImports.length > 0) code = 'active-imports';
-    if (moduleState.migrationDiagnostic) code = moduleState.migrationDiagnostic.code;
+  const issues = [];
+  if (moduleState.migrationDiagnostic) {
+    issues.push({
+      code: moduleState.migrationDiagnostic.code,
+      message: moduleState.migrationDiagnostic.message,
+      reason: moduleState.migrationDiagnostic.reason,
+      diagnostic: moduleState.migrationDiagnostic
+    });
+  }
+  if (activeImports.length > 0) {
+    issues.push({
+      code: 'active-imports',
+      message: `账期内仍有 ${activeImports.length} 个导入批次未结束，请等待导入完成后重新运行。`,
+      count: activeImports.length,
+      batchIds: activeImports.map((row) => row.id)
+    });
+  }
+  for (const dataset of datasets) {
+    if (!dataset.datasetExists) {
+      issues.push({
+        code: 'missing-dataset',
+        message: `缺少必需原表：${dataset.label}。`,
+        sourceType: dataset.sourceType,
+        label: dataset.label,
+        reason: '缺少数据集'
+      });
+    } else if (dataset.rowCount === 0) {
+      issues.push({
+        code: 'empty-dataset',
+        message: `${dataset.label}没有有效数据。`,
+        sourceType: dataset.sourceType,
+        label: dataset.label,
+        reason: '没有有效数据'
+      });
+    }
+  }
+  for (const invalid of invalidSystemSubjects) {
+    issues.push({
+      code: 'invalid-system-snapshot',
+      message: `系统财务OP主体 ${invalid.subject} 的九币种快照无效：${invalid.reason}。`,
+      sourceType: SOURCE_TYPES.SYSTEM_OP,
+      subject: invalid.subject,
+      reason: invalid.reason
+    });
+  }
+  if (archived.length > 0) {
+    const labels = archived.map((sourceType) => SOURCE_LABELS[sourceType]);
+    issues.push({
+      code: 'archived-dataset',
+      message: `以下原表已归档，不可再次计算或改写：${labels.join('、')}。`,
+      sourceTypes: [...archived],
+      labels
+    });
+  }
+  if (unresolved.length > 0) {
+    issues.push({
+      code: 'unresolved-imports',
+      message: `账期内仍有 ${unresolved.length} 条未处理的失败导入记录，请在数据管理的“导入记录”中处理后重新运行。`,
+      count: unresolved.length,
+      recordIds: unresolved.map((row) => row.id)
+    });
+  }
+  const systemDataset = datasets.find((item) => item.sourceType === SOURCE_TYPES.SYSTEM_OP);
+  const canCheckSystemSubjects = systemDataset && systemDataset.datasetExists && systemDataset.rowCount > 0;
+  if (canCheckSystemSubjects && missingSystemSubjects.length > 0) {
+    issues.push({
+      code: 'missing-system-subject',
+      message: `缺少主体对应的系统财务OP：${missingSystemSubjects.join('、')}。`,
+      subjects: [...missingSystemSubjects]
+    });
+  }
+  if (canCheckSystemSubjects && unexpectedSystemSubjects.length > 0) {
+    issues.push({
+      code: 'unexpected-system-subject',
+      message: `系统财务OP存在未参与本月运算的主体：${unexpectedSystemSubjects.join('、')}。`,
+      subjects: [...unexpectedSystemSubjects]
+    });
+  }
+  if (!moduleState.migrationDiagnostic && openingState.status === 'blocked') {
+    issues.push({
+      code: openingState.code,
+      message: openingState.message,
+      category: 'opening-state',
+      openingState: { ...openingState }
+    });
+  }
+  if (issues.length > 0) {
     return {
       ok: false,
-      code,
+      code: primaryPreflightCode(issues),
+      message: issues.map(preflightIssueMessage).filter(Boolean).join('\n'),
+      issues,
       missing: missing.map((sourceType) => (
         datasets.find((item) => item.sourceType === sourceType).label
       )),
@@ -382,14 +467,12 @@ function preflightCalculation(db, targetMonth) {
       datasets,
       revisions: snapshot.revisions,
       inputFingerprint,
-      openingState,
-      message: moduleState.migrationDiagnostic
-        ? moduleState.migrationDiagnostic.message
-        : (code === openingState.code ? openingState.message : undefined)
+      openingState
     };
   }
   return {
     ok: true,
+    issues: [],
     datasets,
     revisions: snapshot.revisions,
     inputFingerprint,
@@ -1010,15 +1093,31 @@ function persistCalculation(
   return { runId, replacementAuditId, replacedRunIds };
 }
 
+function isValidInputFingerprint(value) {
+  return typeof value === 'string' && INPUT_FINGERPRINT_RE.test(value);
+}
+
+function preflightRequiredResult(targetMonth) {
+  return {
+    status: 'blocked',
+    code: 'preflight-required',
+    targetMonth,
+    message: '缺少有效的运行前检查凭证，请刷新数据并重新确认后再运行。'
+  };
+}
+
 function calculateMonth({
   db,
   targetMonth,
-  expectedInputFingerprint = '',
+  expectedInputFingerprint,
   appVersion = null,
   buildSha = null
 }) {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`计算账期格式无效：${targetMonth}`);
+  if (!isValidInputFingerprint(expectedInputFingerprint)) {
+    return preflightRequiredResult(normalizedMonth);
+  }
   let transactionStarted = false;
   let replacementEvidence = null;
   try {
@@ -1030,7 +1129,7 @@ function calculateMonth({
       transactionStarted = false;
       return { status: 'blocked', targetMonth: normalizedMonth, ...preflight };
     }
-    if (expectedInputFingerprint && preflight.inputFingerprint !== expectedInputFingerprint) {
+    if (preflight.inputFingerprint !== expectedInputFingerprint) {
       db.exec('ROLLBACK');
       transactionStarted = false;
       return {
@@ -1346,6 +1445,7 @@ function getRunResult(db, runId) {
 module.exports = {
   REPLACE_CALCULATED_RESULT_OPERATION,
   ARCHIVE_RESULT_OPERATION,
+  INPUT_FINGERPRINT_RE,
   REQUIRED_DETAIL_TYPES,
   REQUIRED_DATASET_TYPES,
   previousYearMonth,
@@ -1355,6 +1455,8 @@ module.exports = {
   activeImportBatches,
   unresolvedImports,
   preflightCalculation,
+  isValidInputFingerprint,
+  preflightRequiredResult,
   aggregateEffectiveRows,
   loadOpeningBalances,
   buildBalanceRows,

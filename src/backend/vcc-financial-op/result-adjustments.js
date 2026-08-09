@@ -2,7 +2,6 @@
 
 const crypto = require('node:crypto');
 const {
-  addCanonicalDecimals,
   subtractCanonicalDecimals
 } = require('../../main-process/financial-decimal');
 const { canonicalizeVccAmount } = require('./amount-rules');
@@ -11,6 +10,10 @@ const {
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES
 } = require('./definitions');
+const {
+  DecimalAccumulator,
+  addToAccumulatorMap
+} = require('./decimal-accumulator');
 
 const RUN_ROW_KEY_VERSION = 'v1';
 const ADJUSTABLE_ROW_KINDS = new Set(['movement', 'pending']);
@@ -163,9 +166,55 @@ function canonicalStoredAmount(value, label, code) {
   return canonical;
 }
 
-function addAmount(map, key, amount, label) {
-  const next = addCanonicalDecimals(map.get(key) || '0', amount, { label });
-  map.set(key, canonicalizeVccAmount(next, label));
+function canonicalFinalAmount(value, { label, field, ...context }) {
+  const raw = String(value == null ? '' : value);
+  try {
+    return canonicalizeVccAmount(raw, label);
+  } catch (error) {
+    const errorContext = {
+      ...context,
+      field,
+      value: raw,
+      reason: error.message
+    };
+    throw resultStateError('result-amount-out-of-range', error.message, {
+      ...errorContext,
+      context: errorContext
+    });
+  }
+}
+
+function accumulateAmounts(...amounts) {
+  const accumulator = new DecimalAccumulator();
+  for (const amount of amounts) accumulator.add(amount);
+  return accumulator.value();
+}
+
+function addAmount(map, key, amount) {
+  addToAccumulatorMap(map, key, amount);
+}
+
+function finalizeSummaryAmounts(accumulators, {
+  runId,
+  field,
+  summaryType,
+  labelFor
+}) {
+  const totals = new Map();
+  for (const [key, accumulator] of accumulators) {
+    const [subject, currency] = JSON.parse(key);
+    const value = accumulator.value();
+    totals.set(key, canonicalFinalAmount(value, {
+      label: labelFor(subject, currency),
+      runId,
+      scope: 'summary',
+      summaryType,
+      field,
+      subject,
+      currency
+    }));
+  }
+  return totals;
 }
 
 function validateBaseRows(db, runId) {
@@ -185,7 +234,7 @@ function validateBaseRows(db, runId) {
   }
   const coordinates = new Map();
   const logicalRows = new Map();
-  const periodTotals = new Map();
+  const periodAccumulators = new Map();
   const baseRows = rawRows.map((row) => {
     const metadata = normalizedRunRowMetadata(row);
     if (!ADJUSTABLE_ROW_KINDS.has(metadata.rowKind)) {
@@ -237,12 +286,17 @@ function validateBaseRows(db, runId) {
     coordinates.set(coord, normalized);
     if (!logicalRows.has(rowKey)) logicalRows.set(rowKey, normalized);
     addAmount(
-      periodTotals,
+      periodAccumulators,
       subjectCurrencyKey(metadata.subject, currency),
-      amount,
-      `${metadata.subject} ${currency} 基础发生额汇总`
+      amount
     );
     return normalized;
+  });
+  const periodTotals = finalizeSummaryAmounts(periodAccumulators, {
+    runId,
+    field: 'basePeriodAmount',
+    summaryType: 'base-period',
+    labelFor: (subject, currency) => `${subject} ${currency} 基础发生额汇总`
   });
   return { baseRows, coordinates, logicalRows, periodTotals };
 }
@@ -257,7 +311,7 @@ function validateAdjustments(db, runId, logicalRows) {
     ORDER BY sequence, id
   `).all(runId);
   const coordinates = new Set();
-  const totals = new Map();
+  const totalAccumulators = new Map();
   const adjustments = rows.map((row) => {
     const rowKey = String(row.row_key == null ? '' : row.row_key);
     const target = logicalRows.get(rowKey);
@@ -333,10 +387,9 @@ function validateAdjustments(db, runId, logicalRows) {
       );
     }
     addAmount(
-      totals,
+      totalAccumulators,
       subjectCurrencyKey(target.subject, currency),
-      amount,
-      `${target.subject} ${currency} 人工调整汇总`
+      amount
     );
     return Object.freeze({
       id: Number(row.id),
@@ -367,10 +420,16 @@ function validateAdjustments(db, runId, logicalRows) {
       );
     }
   }
+  const totals = finalizeSummaryAmounts(totalAccumulators, {
+    runId,
+    field: 'adjustmentAmount',
+    summaryType: 'adjustment-total',
+    labelFor: (subject, currency) => `${subject} ${currency} 人工调整汇总`
+  });
   return { adjustments, totals };
 }
 
-function buildEffectiveRows(baseState, adjustments) {
+function buildEffectiveRows(runId, baseState, adjustments) {
   const rowsByCoordinate = new Map();
   for (const baseRow of baseState.baseRows) {
     rowsByCoordinate.set(coordinateKey(baseRow.rowKey, baseRow.currency), {
@@ -382,7 +441,7 @@ function buildEffectiveRows(baseState, adjustments) {
       categoryMinor: baseRow.categoryMinor,
       currency: baseRow.currency,
       baseAmount: baseRow.amount,
-      adjustmentAmount: '0'
+      adjustmentAccumulator: new DecimalAccumulator()
     });
   }
   for (const adjustment of adjustments) {
@@ -399,29 +458,45 @@ function buildEffectiveRows(baseState, adjustments) {
         categoryMinor: target.categoryMinor,
         currency: adjustment.currency,
         baseAmount: '0',
-        adjustmentAmount: '0'
+        adjustmentAccumulator: new DecimalAccumulator()
       };
       rowsByCoordinate.set(coord, row);
     }
-    row.adjustmentAmount = addCanonicalDecimals(
-      row.adjustmentAmount,
-      adjustment.adjustmentAmount,
-      { label: `${row.subject} ${row.currency} 结果行调整` }
-    );
+    row.adjustmentAccumulator.add(adjustment.adjustmentAmount);
   }
-  return [...rowsByCoordinate.values()].map((row) => Object.freeze({
-    ...row,
-    adjustmentAmount: canonicalizeVccAmount(
-      row.adjustmentAmount,
-      `${row.subject} ${row.currency} 结果行调整`
-    ),
-    effectiveAmount: canonicalizeVccAmount(
-      addCanonicalDecimals(row.baseAmount, row.adjustmentAmount, {
-        label: `${row.subject} ${row.currency} 生效结果行金额`
+  return [...rowsByCoordinate.values()].map((row) => {
+    const adjustmentValue = row.adjustmentAccumulator.value();
+    const context = {
+      runId,
+      scope: 'row',
+      rowKey: row.rowKey,
+      subject: row.subject,
+      currency: row.currency
+    };
+    return Object.freeze({
+      rowKey: row.rowKey,
+      rowKind: row.rowKind,
+      subject: row.subject,
+      sourceType: row.sourceType,
+      categoryMajor: row.categoryMajor,
+      categoryMinor: row.categoryMinor,
+      currency: row.currency,
+      baseAmount: row.baseAmount,
+      adjustmentAmount: canonicalFinalAmount(adjustmentValue, {
+        ...context,
+        field: 'adjustmentAmount',
+        label: `${row.subject} ${row.currency} 结果行调整`
       }),
-      `${row.subject} ${row.currency} 生效结果行金额`
-    )
-  }));
+      effectiveAmount: canonicalFinalAmount(
+        accumulateAmounts(row.baseAmount, adjustmentValue),
+        {
+          ...context,
+          field: 'effectiveAmount',
+          label: `${row.subject} ${row.currency} 生效结果行金额`
+        }
+      )
+    });
+  });
 }
 
 function buildEffectiveBalances(db, runId, baseState, adjustmentTotals) {
@@ -483,17 +558,24 @@ function buildEffectiveBalances(db, runId, baseState, adjustmentTotals) {
         { runId, subject, currency, stored: basePeriodAmount, recomputed: recomputedPeriod }
       );
     }
-    const recomputedCalculated = canonicalizeVccAmount(
-      addCanonicalDecimals(openingBalance, basePeriodAmount, {
+    const balanceContext = { runId, scope: 'balance', subject, currency };
+    const recomputedCalculated = canonicalFinalAmount(
+      accumulateAmounts(openingBalance, basePeriodAmount),
+      {
+        ...balanceContext,
+        field: 'baseCalculatedBalance',
         label: `${subject} ${currency} 基础计算余额复核`
-      }),
-      `${subject} ${currency} 基础计算余额复核`
+      }
     );
-    const recomputedDifference = canonicalizeVccAmount(
+    const recomputedDifference = canonicalFinalAmount(
       subtractCanonicalDecimals(systemBalance, baseCalculatedBalance, {
         label: `${subject} ${currency} 基础差异复核`
       }),
-      `${subject} ${currency} 基础差异复核`
+      {
+        ...balanceContext,
+        field: 'baseDifference',
+        label: `${subject} ${currency} 基础差异复核`
+      }
     );
     if (recomputedCalculated !== baseCalculatedBalance || recomputedDifference !== baseDifference) {
       throw resultStateError(
@@ -503,23 +585,31 @@ function buildEffectiveBalances(db, runId, baseState, adjustmentTotals) {
       );
     }
     const adjustmentAmount = adjustmentTotals.get(key) || '0';
-    const effectivePeriodAmount = canonicalizeVccAmount(
-      addCanonicalDecimals(basePeriodAmount, adjustmentAmount, {
-        label: `${subject} ${currency} 生效发生额`
-      }),
-      `${subject} ${currency} 生效发生额`
+    const effectivePeriodValue = accumulateAmounts(basePeriodAmount, adjustmentAmount);
+    const effectiveCalculatedValue = accumulateAmounts(
+      openingBalance,
+      basePeriodAmount,
+      adjustmentAmount
     );
-    const effectiveCalculatedBalance = canonicalizeVccAmount(
-      addCanonicalDecimals(openingBalance, effectivePeriodAmount, {
-        label: `${subject} ${currency} 生效计算余额`
-      }),
-      `${subject} ${currency} 生效计算余额`
-    );
-    const effectiveDifference = canonicalizeVccAmount(
-      subtractCanonicalDecimals(systemBalance, effectiveCalculatedBalance, {
+    const effectivePeriodAmount = canonicalFinalAmount(effectivePeriodValue, {
+      ...balanceContext,
+      field: 'effectivePeriodAmount',
+      label: `${subject} ${currency} 生效发生额`
+    });
+    const effectiveCalculatedBalance = canonicalFinalAmount(effectiveCalculatedValue, {
+      ...balanceContext,
+      field: 'effectiveCalculatedBalance',
+      label: `${subject} ${currency} 生效计算余额`
+    });
+    const effectiveDifference = canonicalFinalAmount(
+      subtractCanonicalDecimals(systemBalance, effectiveCalculatedValue, {
         label: `${subject} ${currency} 生效差异`
       }),
-      `${subject} ${currency} 生效差异`
+      {
+        ...balanceContext,
+        field: 'effectiveDifference',
+        label: `${subject} ${currency} 生效差异`
+      }
     );
     return Object.freeze({
       subject,
@@ -712,7 +802,11 @@ function getEffectiveRunResult(db, runId) {
       }
     );
   }
-  const effectiveRows = buildEffectiveRows(baseState, adjustmentState.adjustments);
+  const effectiveRows = buildEffectiveRows(
+    normalizedRunId,
+    baseState,
+    adjustmentState.adjustments
+  );
   const balances = buildEffectiveBalances(
     db,
     normalizedRunId,

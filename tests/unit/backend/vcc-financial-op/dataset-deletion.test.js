@@ -15,6 +15,9 @@ const {
   inspectDatasetDeletion,
   deleteDataset
 } = require('../../../../src/backend/vcc-financial-op/dataset-deletion');
+const {
+  previewDataTargetDeletion
+} = require('../../../../src/backend/vcc-financial-op/data-target-deletion');
 
 function openDb(t) {
   const db = new DatabaseSync(':memory:');
@@ -22,6 +25,21 @@ function openDb(t) {
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
   return db;
+}
+
+function deleteWithPreview({ db, targetMonth, sourceType, taskGeneration = 0, ...options }) {
+  const preview = previewDataTargetDeletion(db, {
+    targetMonth,
+    targetType: sourceType
+  }, { taskGeneration });
+  return deleteDataset({
+    db,
+    targetMonth,
+    sourceType,
+    taskGeneration: preview.taskGeneration,
+    expectedPreviewToken: preview.previewToken,
+    ...options
+  });
 }
 
 test('旧审计表可重复迁移出删除快照列与删除记录表', (t) => {
@@ -134,6 +152,106 @@ function insertEffective(db, recordId, {
     JSON.stringify([key, subject]),
     recordId
   ).lastInsertRowid);
+}
+
+function insertSystemSnapshot(db, recordId, {
+  targetMonth = '2026-06',
+  subject = 'PPHK',
+  balancesJson = '{"USD":"100"}',
+  contentHash = 'system-hash',
+  sourceFile = 'system.xlsx',
+  sheetName = 'Validate',
+  sourceRow = 3,
+  rawJson = '{"row":"original"}',
+  importedAt = '2026-08-01 08:30:00'
+} = {}) {
+  return Number(db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, import_record_id, imported_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    targetMonth,
+    subject,
+    balancesJson,
+    contentHash,
+    sourceFile,
+    sheetName,
+    sourceRow,
+    rawJson,
+    recordId,
+    importedAt
+  ).lastInsertRowid);
+}
+
+function insertSystemAttempt(db, {
+  recordId,
+  snapshotId,
+  targetMonth = '2026-06',
+  subject = 'PPHK',
+  balancesJson = '{"USD":"100"}',
+  contentHash = 'system-hash',
+  sourceFile = 'system.xlsx',
+  sheetName = 'Validate',
+  sourceRow = 3,
+  rawJson = '{"row":"original"}',
+  disposition = 'accepted',
+  comparisonAttemptId = null,
+  existingBalancesJson = null,
+  existingRawJson = null,
+  existingSourceFile = null,
+  existingSheetName = null,
+  existingSourceRow = null,
+  existingImportRecordId = null,
+  existingImportedAt = null,
+  message = '首次成功导入系统财务OP快照'
+}) {
+  return Number(db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshot_attempts (
+      import_record_id, target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, disposition,
+      existing_snapshot_id, comparison_attempt_id,
+      existing_balances_json_snapshot, existing_raw_json_snapshot,
+      existing_source_file_snapshot, existing_sheet_name_snapshot,
+      existing_source_row_snapshot, existing_import_record_id_snapshot,
+      existing_imported_at_snapshot, message
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    recordId,
+    targetMonth,
+    subject,
+    balancesJson,
+    contentHash,
+    sourceFile,
+    sheetName,
+    sourceRow,
+    rawJson,
+    disposition,
+    snapshotId,
+    comparisonAttemptId,
+    existingBalancesJson,
+    existingRawJson,
+    existingSourceFile,
+    existingSheetName,
+    existingSourceRow,
+    existingImportRecordId,
+    existingImportedAt,
+    message
+  ).lastInsertRowid);
+}
+
+function seedSystemDeletionFixture(db, batchId) {
+  const recordId = createRecord(db, {
+    batchId,
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    status: 'success'
+  });
+  const snapshotId = insertSystemSnapshot(db, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.SYSTEM_OP);
+  return { recordId, snapshotId };
 }
 
 function insertCalculatedRun(db, targetMonth = '2026-06', {
@@ -276,7 +394,7 @@ test('按账期和目标原表删除有效数据，保留导入审计与人工�
     datasetRevision: 4
   });
 
-  const result = deleteDataset({
+  const result = deleteWithPreview({
     db,
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE,
@@ -408,7 +526,7 @@ test('删除系统财务OP时固化快照对比证据并保留系统导入尝试
     VALUES ('2026-06', ?)
   `).run(SOURCE_TYPES.SYSTEM_OP);
 
-  const result = deleteDataset({
+  const result = deleteWithPreview({
     db,
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.SYSTEM_OP
@@ -429,6 +547,428 @@ test('删除系统财务OP时固化快照对比证据并保留系统导入尝试
   assert.equal(attempt.existing_import_record_id_snapshot, recordId);
 });
 
+test('历史系统快照从未重试时删除前补录 accepted 并保留完整双侧血缘', (t) => {
+  const db = openDb(t);
+  const recordId = createRecord(db, {
+    batchId: 'system-first-only',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    status: 'success'
+  });
+  db.prepare(`
+    UPDATE vcc_fin_op_import_records
+    SET raw_count = 1, inserted_count = 1, skipped_count = 0
+    WHERE id = ?
+  `).run(recordId);
+  const snapshotId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, import_record_id,
+      imported_at
+    ) VALUES ('2026-06', 'PPHK', '{"CNY":"88","USD":"100"}', 'system-first-hash',
+      'system-first.xlsx', 'Validate', 23, '{"row":"first"}', ?,
+      '2026-08-01 08:30:00')
+  `).run(recordId).lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.SYSTEM_OP);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
+  `).get().n, 0);
+
+  const result = deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP
+  });
+  assert.equal(result.deletedDataCount, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 0);
+  const accepted = db.prepare(`
+    SELECT * FROM vcc_fin_op_system_snapshot_attempts
+    WHERE disposition = 'accepted'
+  `).get();
+  assert.equal(accepted.import_record_id, recordId);
+  assert.equal(accepted.target_month, '2026-06');
+  assert.equal(accepted.subject, 'PPHK');
+  assert.equal(accepted.balances_json, '{"CNY":"88","USD":"100"}');
+  assert.equal(accepted.content_hash, 'system-first-hash');
+  assert.equal(accepted.source_file, 'system-first.xlsx');
+  assert.equal(accepted.sheet_name, 'Validate');
+  assert.equal(accepted.source_row, 23);
+  assert.equal(accepted.raw_json, '{"row":"first"}');
+  assert.equal(accepted.existing_snapshot_id, null);
+  assert.equal(accepted.existing_balances_json_snapshot, accepted.balances_json);
+  assert.equal(accepted.existing_raw_json_snapshot, accepted.raw_json);
+  assert.equal(accepted.existing_source_file_snapshot, accepted.source_file);
+  assert.equal(accepted.existing_sheet_name_snapshot, accepted.sheet_name);
+  assert.equal(accepted.existing_source_row_snapshot, accepted.source_row);
+  assert.equal(accepted.existing_import_record_id_snapshot, recordId);
+  assert.equal(accepted.existing_imported_at_snapshot, '2026-08-01 08:30:00');
+  assert.match(accepted.message, /历史快照删除前补录/);
+  assert.ok(snapshotId > 0);
+});
+
+test('历史 accepted 回填被 snapshot DELETE trigger 静默篡改时整体回滚', (t) => {
+  const db = openDb(t);
+  const recordId = createRecord(db, {
+    batchId: 'system-backfill-drift',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    status: 'success'
+  });
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, import_record_id
+    ) VALUES ('2026-06', 'PPHK', '{"USD":"100"}', 'system-backfill-hash',
+      'system-backfill.xlsx', 'Validate', 3, '{"row":"original"}', ?)
+  `).run(recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.SYSTEM_OP);
+  db.exec(`
+    CREATE TRIGGER drift_system_backfill_after_snapshot_delete
+    AFTER DELETE ON vcc_fin_op_system_snapshots
+    BEGIN
+      UPDATE vcc_fin_op_system_snapshot_attempts
+      SET content_hash = 'tampered-after-delete'
+      WHERE target_month = OLD.target_month AND disposition = 'accepted';
+    END;
+  `);
+
+  assert.throws(() => deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP
+  }), (error) => error.code === 'delete-invariant-failed');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n, 0);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT dataset_deleted_at FROM vcc_fin_op_import_records WHERE id = ?
+  `).get(recordId).dataset_deleted_at, null);
+  assert.deepEqual(db.prepare(`
+    SELECT status FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? ORDER BY id
+  `).all(DELETE_SOURCE_DATASET_OPERATION).map((row) => row.status), ['rolled_back']);
+});
+
+test('系统快照删除拒绝不一致、重复或错误双侧快照的 linked accepted', async (t) => {
+  const cases = [
+    {
+      name: 'incoming 字段不一致',
+      attempts: [{ contentHash: 'mismatched-system-hash' }]
+    },
+    {
+      name: '重复 accepted',
+      attempts: [{}, {}]
+    },
+    {
+      name: '既有侧快照字段非空但错误',
+      attempts: [{ existingRawJson: '{"row":"tampered"}' }]
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const { recordId, snapshotId } = seedSystemDeletionFixture(
+        db,
+        `accepted-corruption-${fixture.name}`
+      );
+      for (const overrides of fixture.attempts) {
+        insertSystemAttempt(db, { recordId, snapshotId, ...overrides });
+      }
+      const originalAttemptCount = fixture.attempts.length;
+
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: SOURCE_TYPES.SYSTEM_OP
+      }), (error) => {
+        assert.equal(error.code, 'delete-invariant-failed');
+        assert.match(error.message, /导入尝试审计与有效快照不一致/);
+        return true;
+      });
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+      assert.equal(
+        db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n,
+        originalAttemptCount
+      );
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+      assert.equal(db.prepare(`
+        SELECT dataset_deleted_at FROM vcc_fin_op_import_records WHERE id = ?
+      `).get(recordId).dataset_deleted_at, null);
+      assert.deepEqual(db.prepare(`
+        SELECT status FROM vcc_fin_op_operation_audit
+        WHERE operation_type = ? ORDER BY id
+      `).all(DELETE_SOURCE_DATASET_OPERATION).map((row) => row.status), ['rolled_back']);
+    });
+  }
+});
+
+test('非 accepted linked attempt 的任一既有侧快照错值都会失败关闭', async (t) => {
+  const cases = [
+    {
+      name: 'skip balances',
+      disposition: 'idempotent_skip',
+      overrides: { existingBalancesJson: '{"USD":"999"}' }
+    },
+    {
+      name: 'skip raw',
+      disposition: 'idempotent_skip',
+      overrides: { existingRawJson: '{"row":"tampered"}' }
+    },
+    {
+      name: 'conflict source file',
+      disposition: 'idempotent_conflict',
+      overrides: { existingSourceFile: 'wrong.xlsx', contentHash: 'conflict-hash' }
+    },
+    {
+      name: 'conflict sheet',
+      disposition: 'idempotent_conflict',
+      overrides: { existingSheetName: 'WrongSheet', contentHash: 'conflict-hash' }
+    },
+    {
+      name: 'rolled back source row',
+      disposition: 'rolled_back',
+      overrides: { existingSourceRow: 99 }
+    },
+    {
+      name: 'rolled back import record',
+      disposition: 'rolled_back',
+      overrides: { existingImportRecordId: 999 }
+    },
+    {
+      name: 'rolled back imported at',
+      disposition: 'rolled_back',
+      overrides: { existingImportedAt: '2026-08-01 08:30:01' }
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const { recordId, snapshotId } = seedSystemDeletionFixture(
+        db,
+        `non-accepted-corruption-${fixture.name}`
+      );
+      insertSystemAttempt(db, {
+        recordId,
+        snapshotId,
+        disposition: fixture.disposition,
+        ...fixture.overrides
+      });
+
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: SOURCE_TYPES.SYSTEM_OP
+      }), (error) => {
+        assert.equal(error.code, 'delete-invariant-failed');
+        assert.match(error.message, /导入尝试审计与有效快照不一致/);
+        return true;
+      });
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+      assert.deepEqual(db.prepare(`
+        SELECT status FROM vcc_fin_op_operation_audit
+        WHERE operation_type = ? ORDER BY id
+      `).all(DELETE_SOURCE_DATASET_OPERATION).map((row) => row.status), ['rolled_back']);
+    });
+  }
+});
+
+test('非 accepted linked attempt 空既有侧会完整物化并与本次审计共用事务时间', (t) => {
+  const db = openDb(t);
+  const { recordId, snapshotId } = seedSystemDeletionFixture(db, 'non-accepted-materialization');
+  const attemptIds = [
+    insertSystemAttempt(db, {
+      recordId,
+      snapshotId,
+      disposition: 'idempotent_skip',
+      sourceFile: 'retry.xlsx',
+      rawJson: '{"row":"retry"}'
+    }),
+    insertSystemAttempt(db, {
+      recordId,
+      snapshotId,
+      disposition: 'idempotent_conflict',
+      contentHash: 'conflict-hash',
+      sourceFile: 'conflict.xlsx',
+      rawJson: '{"row":"conflict"}'
+    }),
+    insertSystemAttempt(db, {
+      recordId,
+      snapshotId,
+      disposition: 'rolled_back',
+      sourceFile: 'rolled-back.xlsx',
+      rawJson: '{"row":"rolled-back"}'
+    })
+  ];
+
+  const result = deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP
+  });
+  assert.equal(result.deletedDataCount, 1);
+  const attempts = db.prepare(`
+    SELECT id, disposition, existing_snapshot_id,
+           existing_balances_json_snapshot, existing_raw_json_snapshot,
+           existing_source_file_snapshot, existing_sheet_name_snapshot,
+           existing_source_row_snapshot, existing_import_record_id_snapshot,
+           existing_imported_at_snapshot, created_at
+    FROM vcc_fin_op_system_snapshot_attempts
+    ORDER BY id
+  `).all();
+  const nonAccepted = attempts.filter((row) => attemptIds.includes(Number(row.id)));
+  assert.equal(nonAccepted.length, 3);
+  for (const attempt of nonAccepted) {
+    assert.equal(attempt.existing_snapshot_id, null);
+    assert.equal(attempt.existing_balances_json_snapshot, '{"USD":"100"}');
+    assert.equal(attempt.existing_raw_json_snapshot, '{"row":"original"}');
+    assert.equal(attempt.existing_source_file_snapshot, 'system.xlsx');
+    assert.equal(attempt.existing_sheet_name_snapshot, 'Validate');
+    assert.equal(attempt.existing_source_row_snapshot, 3);
+    assert.equal(attempt.existing_import_record_id_snapshot, recordId);
+    assert.equal(attempt.existing_imported_at_snapshot, '2026-08-01 08:30:00');
+  }
+  const accepted = attempts.find((row) => row.disposition === 'accepted');
+  const deletion = db.prepare(`
+    SELECT deleted_at FROM vcc_fin_op_dataset_deletions WHERE id = ?
+  `).get(result.deletionId);
+  const operationAudit = db.prepare(`
+    SELECT created_at FROM vcc_fin_op_operation_audit WHERE id = ?
+  `).get(result.auditId);
+  const importRecord = db.prepare(`
+    SELECT dataset_deleted_at FROM vcc_fin_op_import_records WHERE id = ?
+  `).get(recordId);
+  assert.match(operationAudit.created_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(deletion.deleted_at, operationAudit.created_at);
+  assert.equal(importRecord.dataset_deleted_at, operationAudit.created_at);
+  assert.equal(accepted.created_at, operationAudit.created_at);
+});
+
+test('明细审计跨月错链不会被本月 source delete 物化或清空', (t) => {
+  const db = openDb(t);
+  const targetRecordId = createRecord(db, { batchId: 'detail-cross-target', status: 'success' });
+  const effectiveId = insertEffective(db, targetRecordId, { key: 'TARGET-CROSS-LINK' });
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.RECHARGE);
+  const crossRecordId = createRecord(db, {
+    batchId: 'detail-cross-other',
+    targetMonth: '2026-07',
+    status: 'all_skipped'
+  });
+  const crossAuditId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_import_rows (
+      import_record_id, source_type, target_month,
+      idempotency_key_raw, idempotency_key, content_hash,
+      source_file, sheet_name, source_row, raw_json,
+      disposition, existing_effective_id
+    ) VALUES (?, ?, '2026-07', 'CROSS-ROW', 'CROSS-ROW', 'cross-row-hash',
+      'cross-month.xlsx', 'Sheet1', 8, '["CROSS-ROW","PPHK"]',
+      'idempotent_skip', ?)
+  `).run(crossRecordId, SOURCE_TYPES.RECHARGE, effectiveId).lastInsertRowid);
+
+  assert.throws(() => deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE
+  }), (error) => {
+    assert.equal(error.code, 'delete-invariant-failed');
+    assert.doesNotMatch(JSON.stringify(error.context), /CROSS-ROW|cross-month\.xlsx/);
+    return true;
+  });
+  const crossAudit = db.prepare(`
+    SELECT existing_effective_id, existing_raw_json_snapshot,
+           existing_import_record_id_snapshot
+    FROM vcc_fin_op_import_rows WHERE id = ?
+  `).get(crossAuditId);
+  assert.equal(crossAudit.existing_effective_id, effectiveId);
+  assert.equal(crossAudit.existing_raw_json_snapshot, null);
+  assert.equal(crossAudit.existing_import_record_id_snapshot, null);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+});
+
+test('系统审计跨月错链不会被本月 system snapshot delete 物化或清空', (t) => {
+  const db = openDb(t);
+  const { snapshotId } = seedSystemDeletionFixture(db, 'system-cross-target');
+  const crossRecordId = createRecord(db, {
+    batchId: 'system-cross-other',
+    targetMonth: '2026-07',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    status: 'all_skipped'
+  });
+  const crossAttemptId = insertSystemAttempt(db, {
+    recordId: crossRecordId,
+    snapshotId,
+    targetMonth: '2026-07',
+    disposition: 'idempotent_skip',
+    sourceFile: 'cross-system.xlsx',
+    rawJson: '{"row":"crossed__"}'
+  });
+
+  assert.throws(() => deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP
+  }), (error) => error.code === 'delete-invariant-failed');
+  const crossAttempt = db.prepare(`
+    SELECT existing_snapshot_id, existing_balances_json_snapshot,
+           existing_raw_json_snapshot, existing_import_record_id_snapshot
+    FROM vcc_fin_op_system_snapshot_attempts WHERE id = ?
+  `).get(crossAttemptId);
+  assert.equal(crossAttempt.existing_snapshot_id, snapshotId);
+  assert.equal(crossAttempt.existing_balances_json_snapshot, null);
+  assert.equal(crossAttempt.existing_raw_json_snapshot, null);
+  assert.equal(crossAttempt.existing_import_record_id_snapshot, null);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+});
+
+test('低层 source delete 无条件要求 preview token 与安全 generation', (t) => {
+  const db = openDb(t);
+  const recordId = createRecord(db, { status: 'success' });
+  insertEffective(db, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.RECHARGE);
+
+  assert.throws(() => deleteDataset({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    taskGeneration: 0
+  }), (error) => error.code === 'state-changed');
+  assert.throws(() => deleteDataset({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    expectedPreviewToken: '   ',
+    taskGeneration: 0
+  }), (error) => error.code === 'state-changed');
+  const preview = previewDataTargetDeletion(db, {
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  for (const invalidGeneration of [undefined, '', Number.NaN, -1, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => deleteDataset({
+      db,
+      targetMonth: '2026-06',
+      sourceType: SOURCE_TYPES.RECHARGE,
+      expectedPreviewToken: preview.previewToken,
+      taskGeneration: invalidGeneration
+    }), (error) => error.code === 'invalid-task-generation');
+  }
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows`).get().n, 1);
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+});
+
 test('已归档账期和活动导入均失败关闭', (t) => {
   const db = openDb(t);
   const recordId = createRecord(db);
@@ -442,7 +982,7 @@ test('已归档账期和活动导入均失败关闭', (t) => {
   assert.equal(archived.deletable, false);
   assert.equal(archived.code, 'archived-month');
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     (error) => error.code === 'archived-month'
   );
 
@@ -455,7 +995,7 @@ test('已归档账期和活动导入均失败关闭', (t) => {
   assert.equal(active.deletable, false);
   assert.equal(active.code, 'active-task');
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     (error) => error.code === 'active-task'
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
@@ -485,7 +1025,7 @@ test('删除中任一步失败时审计、有效数据、结果和数据集全�
   `);
 
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     /forced delete failure/
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
@@ -531,7 +1071,7 @@ test('结果证据损坏时原表、run、调整和数据集零删除并记录�
   `).run(runId);
 
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     (error) => error.code === 'run-balance-currencies-incomplete'
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
@@ -572,7 +1112,7 @@ test('success 审计写入失败时业务事实不变且仅尽力记录 rolled_b
   `);
 
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     /forced source audit failure/
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
@@ -631,13 +1171,323 @@ test('DELETE 被触发器静默忽略时由提交前不变量校验回滚', (t) 
   `);
 
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     (error) => error.code === 'delete-invariant-failed'
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?').get(runId).n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions').get().n, 0);
+});
+
+test('source delete silent trigger 篡改其他来源内容时指纹阻断并完整回滚', (t) => {
+  const db = openDb(t);
+  const targetRecordId = createRecord(db, { batchId: 'target-source', status: 'success' });
+  insertEffective(db, targetRecordId, { key: 'TARGET-1' });
+  db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+    VALUES ('2026-06', ?)
+  `).run(SOURCE_TYPES.RECHARGE);
+  const preservedRecordId = createRecord(db, {
+    batchId: 'preserved-source', sourceType: SOURCE_TYPES.FEE_FX, status: 'success'
+  });
+  insertEffective(db, preservedRecordId, {
+    sourceType: SOURCE_TYPES.FEE_FX,
+    key: 'PRESERVED-1'
+  });
+  db.exec(`
+    CREATE TRIGGER drift_other_source_content
+    AFTER DELETE ON vcc_fin_op_effective_rows
+    WHEN OLD.source_type = 'recharge_refund'
+    BEGIN
+      UPDATE vcc_fin_op_effective_rows
+      SET content_hash = 'tampered-content-hash'
+      WHERE source_type = 'fee_fx' AND target_month = OLD.target_month;
+    END;
+  `);
+
+  assert.throws(() => deleteWithPreview({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE
+  }), (error) => {
+    assert.equal(error.code, 'delete-invariant-failed');
+    const contextJson = JSON.stringify(error.context);
+    assert.doesNotMatch(contextJson, /PRESERVED-1|tampered-content-hash/);
+    assert.match(contextJson, /contentHash/);
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
+    WHERE source_type = ?
+  `).get(SOURCE_TYPES.RECHARGE).n, 1);
+  assert.equal(db.prepare(`
+    SELECT content_hash FROM vcc_fin_op_effective_rows
+    WHERE source_type = ?
+  `).get(SOURCE_TYPES.FEE_FX).content_hash, 'hash-PRESERVED-1');
+  assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+  assert.deepEqual(db.prepare(`
+    SELECT status FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? ORDER BY id
+  `).all(DELETE_SOURCE_DATASET_OPERATION).map((row) => row.status), ['rolled_back']);
+});
+
+test('同长度 raw_json 改写在各保留事实投影中均被精确识别并回滚', async (t) => {
+  const cases = [
+    {
+      name: 'effective raw_json',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-effective-other', sourceType: SOURCE_TYPES.FEE_FX, status: 'success'
+        });
+        const id = insertEffective(db, recordId, {
+          sourceType: SOURCE_TYPES.FEE_FX, key: 'RAW-EFFECTIVE'
+        });
+        db.prepare(`UPDATE vcc_fin_op_effective_rows SET raw_json = '["RAW-A","PPHK"]' WHERE id = ?`).run(id);
+        return {
+          mutation: `UPDATE vcc_fin_op_effective_rows SET raw_json = '["RAW-B","PPHK"]' WHERE id = ${id}`,
+          read: () => db.prepare(`SELECT raw_json FROM vcc_fin_op_effective_rows WHERE id = ?`).get(id).raw_json,
+          original: '["RAW-A","PPHK"]'
+        };
+      }
+    },
+    {
+      name: 'import row raw_json',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-import-other', sourceType: SOURCE_TYPES.FEE_FX, status: 'all_skipped'
+        });
+        const id = Number(db.prepare(`
+          INSERT INTO vcc_fin_op_import_rows (
+            import_record_id, source_type, target_month, source_file,
+            sheet_name, source_row, raw_json, disposition
+          ) VALUES (?, ?, '2026-06', 'raw-import.xlsx', 'Sheet1', 3,
+                    '["INCOMING-A"]', 'idempotent_skip')
+        `).run(recordId, SOURCE_TYPES.FEE_FX).lastInsertRowid);
+        return {
+          mutation: `UPDATE vcc_fin_op_import_rows SET raw_json = '["INCOMING-B"]' WHERE id = ${id}`,
+          read: () => db.prepare(`SELECT raw_json FROM vcc_fin_op_import_rows WHERE id = ?`).get(id).raw_json,
+          original: '["INCOMING-A"]'
+        };
+      }
+    },
+    {
+      name: 'import row existing_raw_json_snapshot',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-import-existing', sourceType: SOURCE_TYPES.FEE_FX, status: 'all_skipped'
+        });
+        const id = Number(db.prepare(`
+          INSERT INTO vcc_fin_op_import_rows (
+            import_record_id, source_type, target_month, source_file,
+            sheet_name, source_row, raw_json, disposition,
+            existing_raw_json_snapshot
+          ) VALUES (?, ?, '2026-06', 'raw-existing.xlsx', 'Sheet1', 4,
+                    '["INCOMING"]', 'idempotent_skip', '["EXISTING-A"]')
+        `).run(recordId, SOURCE_TYPES.FEE_FX).lastInsertRowid);
+        return {
+          mutation: `UPDATE vcc_fin_op_import_rows SET existing_raw_json_snapshot = '["EXISTING-B"]' WHERE id = ${id}`,
+          read: () => db.prepare(`
+            SELECT existing_raw_json_snapshot AS raw_value
+            FROM vcc_fin_op_import_rows WHERE id = ?
+          `).get(id).raw_value,
+          original: '["EXISTING-A"]'
+        };
+      }
+    },
+    {
+      name: 'system snapshot raw_json',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-system-snapshot',
+          targetMonth: '2026-05',
+          sourceType: SOURCE_TYPES.SYSTEM_OP,
+          status: 'success'
+        });
+        const id = insertSystemSnapshot(db, recordId, {
+          targetMonth: '2026-05', rawJson: '{"raw":"A"}'
+        });
+        return {
+          mutation: `UPDATE vcc_fin_op_system_snapshots SET raw_json = '{"raw":"B"}' WHERE id = ${id}`,
+          read: () => db.prepare(`SELECT raw_json FROM vcc_fin_op_system_snapshots WHERE id = ?`).get(id).raw_json,
+          original: '{"raw":"A"}'
+        };
+      }
+    },
+    {
+      name: 'system attempt raw_json',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-system-attempt',
+          targetMonth: '2026-05',
+          sourceType: SOURCE_TYPES.SYSTEM_OP,
+          status: 'all_skipped'
+        });
+        const snapshotId = insertSystemSnapshot(db, recordId, {
+          targetMonth: '2026-05', rawJson: '{"raw":"A"}'
+        });
+        const id = insertSystemAttempt(db, {
+          recordId,
+          snapshotId,
+          targetMonth: '2026-05',
+          disposition: 'idempotent_skip',
+          rawJson: '{"try":"A"}',
+          existingRawJson: '{"old":"A"}'
+        });
+        return {
+          mutation: `UPDATE vcc_fin_op_system_snapshot_attempts SET raw_json = '{"try":"B"}' WHERE id = ${id}`,
+          read: () => db.prepare(`
+            SELECT raw_json FROM vcc_fin_op_system_snapshot_attempts WHERE id = ?
+          `).get(id).raw_json,
+          original: '{"try":"A"}'
+        };
+      }
+    },
+    {
+      name: 'system attempt existing_raw_json_snapshot',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'raw-system-attempt-existing',
+          targetMonth: '2026-05',
+          sourceType: SOURCE_TYPES.SYSTEM_OP,
+          status: 'all_skipped'
+        });
+        const snapshotId = insertSystemSnapshot(db, recordId, {
+          targetMonth: '2026-05', rawJson: '{"raw":"A"}'
+        });
+        const id = insertSystemAttempt(db, {
+          recordId,
+          snapshotId,
+          targetMonth: '2026-05',
+          disposition: 'idempotent_skip',
+          rawJson: '{"try":"A"}',
+          existingRawJson: '{"old":"A"}'
+        });
+        return {
+          mutation: `UPDATE vcc_fin_op_system_snapshot_attempts SET existing_raw_json_snapshot = '{"old":"B"}' WHERE id = ${id}`,
+          read: () => db.prepare(`
+            SELECT existing_raw_json_snapshot AS raw_value
+            FROM vcc_fin_op_system_snapshot_attempts WHERE id = ?
+          `).get(id).raw_value,
+          original: '{"old":"A"}'
+        };
+      }
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const targetRecordId = createRecord(db, { batchId: `raw-target-${fixture.name}`, status: 'success' });
+      insertEffective(db, targetRecordId, { key: 'RAW-TARGET' });
+      db.prepare(`
+        INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+        VALUES ('2026-06', ?)
+      `).run(SOURCE_TYPES.RECHARGE);
+      const preserved = fixture.setup(db);
+      db.exec(`
+        CREATE TRIGGER drift_same_length_raw_after_source_delete
+        AFTER DELETE ON vcc_fin_op_effective_rows
+        WHEN OLD.target_month = '2026-06' AND OLD.source_type = 'recharge_refund'
+        BEGIN
+          ${preserved.mutation};
+        END;
+      `);
+
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: SOURCE_TYPES.RECHARGE
+      }), (error) => {
+        assert.equal(error.code, 'delete-invariant-failed');
+        const context = JSON.stringify(error.context);
+        assert.match(context, /contentHash/);
+        assert.doesNotMatch(context, /RAW-A|INCOMING-A|EXISTING-A|"raw":"A"|"try":"A"|"old":"A"/);
+        return true;
+      });
+      assert.equal(preserved.read(), preserved.original);
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
+        WHERE target_month = '2026-06' AND source_type = ?
+      `).get(SOURCE_TYPES.RECHARGE).n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+    });
+  }
+});
+
+test('其他月份 run child 与 import error 通过父月份归属纳入全局回滚边界', async (t) => {
+  const cases = [
+    {
+      name: 'run child',
+      setup(db) {
+        const runId = insertCalculatedRun(db, '2026-05');
+        return {
+          mutation: `UPDATE vcc_fin_op_run_rows SET amount = '99' WHERE run_id = ${runId}`,
+          read: () => db.prepare(`
+            SELECT amount FROM vcc_fin_op_run_rows WHERE run_id = ?
+          `).get(runId).amount,
+          original: '10'
+        };
+      }
+    },
+    {
+      name: 'import error',
+      setup(db) {
+        const recordId = createRecord(db, {
+          batchId: 'other-month-error', targetMonth: '2026-05', status: 'failed_validation'
+        });
+        repository.addImportError(db, recordId, {
+          errorCode: 'OTHER_MONTH_ERROR',
+          message: 'other-month-A',
+          sourceFile: 'other-month.xlsx'
+        });
+        const errorId = Number(db.prepare(`
+          SELECT id FROM vcc_fin_op_import_errors WHERE import_record_id = ?
+        `).get(recordId).id);
+        return {
+          mutation: `UPDATE vcc_fin_op_import_errors SET message = 'other-month-B' WHERE id = ${errorId}`,
+          read: () => db.prepare(`
+            SELECT message FROM vcc_fin_op_import_errors WHERE id = ?
+          `).get(errorId).message,
+          original: 'other-month-A'
+        };
+      }
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const targetRecordId = createRecord(db, {
+        batchId: `cross-month-target-${fixture.name}`, status: 'success'
+      });
+      insertEffective(db, targetRecordId, { key: 'CROSS-MONTH-TARGET' });
+      db.prepare(`
+        INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+        VALUES ('2026-06', ?)
+      `).run(SOURCE_TYPES.RECHARGE);
+      const preserved = fixture.setup(db);
+      db.exec(`
+        CREATE TRIGGER drift_other_month_parent_owned_row
+        AFTER DELETE ON vcc_fin_op_effective_rows
+        WHEN OLD.target_month = '2026-06' AND OLD.source_type = 'recharge_refund'
+        BEGIN
+          ${preserved.mutation};
+        END;
+      `);
+
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: SOURCE_TYPES.RECHARGE
+      }), (error) => error.code === 'delete-invariant-failed');
+      assert.equal(preserved.read(), preserved.original);
+      assert.equal(db.prepare(`
+        SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
+        WHERE target_month = '2026-06' AND source_type = ?
+      `).get(SOURCE_TYPES.RECHARGE).n, 1);
+    });
+  }
 });
 
 test('删除只标记成功类记录，失败记录保留；重导后新旧删除周期彼此独立', (t) => {
@@ -656,7 +1506,7 @@ test('删除只标记成功类记录，失败记录保留；重导后新旧删�
     status: 'failed_validation'
   });
 
-  const firstDelete = deleteDataset({
+  const firstDelete = deleteWithPreview({
     db,
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE
@@ -678,7 +1528,7 @@ test('删除只标记成功类记录，失败记录保留；重导后新旧删�
     INSERT INTO vcc_fin_op_datasets (target_month, dataset_type, revision)
     VALUES ('2026-06', ?, 2)
   `).run(SOURCE_TYPES.RECHARGE);
-  const secondDelete = deleteDataset({
+  const secondDelete = deleteWithPreview({
     db,
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE
@@ -713,7 +1563,7 @@ test('导入记录删除状态被静默忽略时有效数据与删除审计整�
   `);
 
   assert.throws(
-    () => deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
+    () => deleteWithPreview({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE }),
     (error) => error.code === 'delete-invariant-failed'
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
@@ -725,4 +1575,250 @@ test('导入记录删除状态被静默忽略时有效数据与删除审计整�
   `).get(recordId);
   assert.equal(record.dataset_deleted_at, null);
   assert.equal(record.dataset_deletion_id, null);
+});
+
+test('source delete 在后置写入重建目标事实、dataset 或 archived run/child 时最终零残留断言回滚', async (t) => {
+  const cases = [
+    {
+      name: 'after source delete archived run and child',
+      triggerSql: `
+        CREATE TRIGGER recreate_run_after_source_delete
+        AFTER DELETE ON vcc_fin_op_effective_rows
+        WHEN OLD.target_month = '2026-06' AND OLD.source_type = 'recharge_refund'
+        BEGIN
+          INSERT INTO vcc_fin_op_runs (
+            target_month, status, input_revisions_json, input_fingerprint, archived_at
+          ) VALUES ('2026-06', 'archived', '{}', 'trigger-run', '2000-01-01 00:00:00');
+          INSERT INTO vcc_fin_op_run_rows (
+            run_id, subject, row_kind, currency, amount
+          ) VALUES (last_insert_rowid(), 'TRIGGER', 'movement', 'USD', '1');
+        END;
+      `
+    },
+    {
+      name: 'after import update target source and dataset',
+      triggerSql: `
+        CREATE TRIGGER recreate_source_after_import_update
+        AFTER UPDATE OF dataset_deleted_at ON vcc_fin_op_import_records
+        WHEN NEW.target_month = '2026-06' AND NEW.source_type = 'recharge_refund'
+        BEGIN
+          INSERT INTO vcc_fin_op_effective_rows (
+            source_type, idempotency_key_raw, idempotency_key, content_hash,
+            target_month, subject, source_file, sheet_name, source_row, raw_json,
+            import_record_id
+          ) VALUES (
+            'recharge_refund', 'TRIGGER-ROW', 'TRIGGER-ROW', 'trigger-hash',
+            '2026-06', 'PPHK', 'trigger.xlsx', 'Sheet1', 99, '[]', NEW.id
+          );
+          INSERT INTO vcc_fin_op_datasets (
+            target_month, dataset_type, data_status, revision
+          ) VALUES ('2026-06', 'recharge_refund', 'unprocessed', 99);
+        END;
+      `
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const recordId = createRecord(db, {
+        batchId: `final-zero-${fixture.name}`,
+        status: 'success'
+      });
+      insertEffective(db, recordId);
+      db.prepare(`
+        INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+        VALUES ('2026-06', ?)
+      `).run(SOURCE_TYPES.RECHARGE);
+      const runId = insertCalculatedRun(db);
+      db.exec(fixture.triggerSql);
+
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: SOURCE_TYPES.RECHARGE
+      }), (error) => error.code === 'delete-invariant-failed');
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_runs WHERE id = ?`).get(runId).n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions`).get().n, 0);
+    });
+  }
+});
+
+test('source delete 只允许单一 deletion 记录与物化阶段的 system backfill ID 集', async (t) => {
+  const cases = [
+    {
+      name: 'success audit trigger 插入 target attempt',
+      setup(db) {
+        const { recordId } = seedSystemDeletionFixture(db, 'attempt-after-audit');
+        db.exec(`
+          CREATE TRIGGER add_attempt_after_success_audit
+          AFTER INSERT ON vcc_fin_op_operation_audit
+          WHEN NEW.operation_type = 'delete-source-dataset' AND NEW.status = 'success'
+          BEGIN
+            INSERT INTO vcc_fin_op_system_snapshot_attempts (
+              import_record_id, target_month, subject, balances_json, content_hash,
+              source_file, sheet_name, source_row, raw_json, disposition, message
+            ) VALUES (
+              ${recordId}, '2026-06', 'PPHK', '{"USD":"100"}', 'trigger-attempt',
+              'trigger.xlsx', 'Validate', 3, '{"row":"trigger"}', 'rolled_back',
+              'trigger after audit'
+            );
+          END;
+        `);
+        return { sourceType: SOURCE_TYPES.SYSTEM_OP };
+      },
+      assertRestored(db) {
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n, 0);
+      }
+    },
+    {
+      name: 'import update trigger 插入额外 target attempt',
+      setup(db) {
+        const { recordId } = seedSystemDeletionFixture(db, 'attempt-after-import-update');
+        db.exec(`
+          CREATE TRIGGER add_attempt_after_import_update
+          AFTER UPDATE OF dataset_deleted_at ON vcc_fin_op_import_records
+          WHEN NEW.id = ${recordId}
+          BEGIN
+            INSERT INTO vcc_fin_op_system_snapshot_attempts (
+              import_record_id, target_month, subject, balances_json, content_hash,
+              source_file, sheet_name, source_row, raw_json, disposition, message,
+              created_at
+            ) VALUES (
+              NEW.id, '2026-06', 'PPHK', '{"USD":"100"}', 'late-attempt',
+              'late.xlsx', 'Validate', 3, '{"row":"late"}', 'rolled_back',
+              'trigger after import update', NEW.dataset_deleted_at
+            );
+          END;
+        `);
+        return { sourceType: SOURCE_TYPES.SYSTEM_OP };
+      },
+      assertRestored(db) {
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n, 1);
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts`).get().n, 0);
+      }
+    },
+    {
+      name: 'import update trigger 插入额外 deletion record',
+      setup(db) {
+        const recordId = createRecord(db, { batchId: 'deletion-after-import-update', status: 'success' });
+        insertEffective(db, recordId);
+        db.prepare(`
+          INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
+          VALUES ('2026-06', ?)
+        `).run(SOURCE_TYPES.RECHARGE);
+        db.exec(`
+          CREATE TRIGGER add_deletion_after_import_update
+          AFTER UPDATE OF dataset_deleted_at ON vcc_fin_op_import_records
+          WHEN NEW.id = ${recordId}
+          BEGIN
+            INSERT INTO vcc_fin_op_dataset_deletions (
+              target_month, source_type, dataset_revision,
+              deleted_data_count, invalidated_run_count, deleted_at
+            ) VALUES ('2026-06', 'recharge_refund', 1, 0, 0, NEW.dataset_deleted_at);
+          END;
+        `);
+        return { sourceType: SOURCE_TYPES.RECHARGE };
+      },
+      assertRestored(db) {
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows`).get().n, 1);
+      }
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      const { sourceType } = fixture.setup(db);
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType
+      }), (error) => error.code === 'delete-invariant-failed');
+      fixture.assertRestored(db);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions`).get().n, 0);
+    });
+  }
+});
+
+test('source delete 允许的时间字段被非空错值篡改时整体回滚', async (t) => {
+  const cases = [
+    {
+      name: 'dataset deletion deleted_at',
+      sourceType: SOURCE_TYPES.RECHARGE,
+      setup(db) {
+        const recordId = createRecord(db, { batchId: 'wrong-deletion-time', status: 'success' });
+        insertEffective(db, recordId);
+        db.prepare(`INSERT INTO vcc_fin_op_datasets (target_month, dataset_type) VALUES ('2026-06', ?)`)
+          .run(SOURCE_TYPES.RECHARGE);
+        db.exec(`
+          CREATE TRIGGER tamper_deletion_time
+          AFTER INSERT ON vcc_fin_op_dataset_deletions
+          BEGIN
+            UPDATE vcc_fin_op_dataset_deletions
+            SET deleted_at = '2000-01-01 00:00:00'
+            WHERE id = NEW.id;
+          END;
+        `);
+      }
+    },
+    {
+      name: 'import record dataset_deleted_at',
+      sourceType: SOURCE_TYPES.RECHARGE,
+      setup(db) {
+        const recordId = createRecord(db, { batchId: 'wrong-import-time', status: 'success' });
+        insertEffective(db, recordId);
+        db.prepare(`INSERT INTO vcc_fin_op_datasets (target_month, dataset_type) VALUES ('2026-06', ?)`)
+          .run(SOURCE_TYPES.RECHARGE);
+        db.exec(`
+          CREATE TRIGGER tamper_import_deletion_time
+          AFTER UPDATE OF dataset_deleted_at ON vcc_fin_op_import_records
+          WHEN NEW.id = ${recordId}
+          BEGIN
+            UPDATE vcc_fin_op_import_records
+            SET dataset_deleted_at = '2000-01-01 00:00:00'
+            WHERE id = NEW.id;
+          END;
+        `);
+      }
+    },
+    {
+      name: 'system accepted backfill created_at',
+      sourceType: SOURCE_TYPES.SYSTEM_OP,
+      setup(db) {
+        seedSystemDeletionFixture(db, 'wrong-backfill-time');
+        db.exec(`
+          CREATE TRIGGER tamper_system_backfill_time
+          AFTER INSERT ON vcc_fin_op_system_snapshot_attempts
+          WHEN NEW.disposition = 'accepted'
+            AND NEW.message = '历史快照删除前补录首次成功导入审计'
+          BEGIN
+            UPDATE vcc_fin_op_system_snapshot_attempts
+            SET created_at = '2000-01-01 00:00:00'
+            WHERE id = NEW.id;
+          END;
+        `);
+      }
+    }
+  ];
+  for (const fixture of cases) {
+    await t.test(fixture.name, (subtest) => {
+      const db = openDb(subtest);
+      fixture.setup(db);
+      assert.throws(() => deleteWithPreview({
+        db,
+        targetMonth: '2026-06',
+        sourceType: fixture.sourceType
+      }), (error) => error.code === 'delete-invariant-failed');
+      const sourceCount = fixture.sourceType === SOURCE_TYPES.SYSTEM_OP
+        ? db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots`).get().n
+        : db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows`).get().n;
+      assert.equal(sourceCount, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_datasets`).get().n, 1);
+      assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM vcc_fin_op_dataset_deletions`).get().n, 0);
+    });
+  }
 });

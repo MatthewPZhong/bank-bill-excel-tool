@@ -5,7 +5,6 @@ const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../vcc-financial-op-db/migrations');
 const { inspectFiles, importFiles } = require('./import-service');
 const { calculateMonth } = require('./calculator');
-const { deleteDataset } = require('./dataset-deletion');
 const { unarchiveMonth } = require('./unarchive');
 const { deleteDataTarget } = require('./data-target-deletion');
 const { writeDatasetWorkbook } = require('../../main-process/vcc-financial-op-dataset-writer');
@@ -14,7 +13,6 @@ const { serializeError } = require('../../main-process/serialize-error');
 let cancelRequested = false;
 let resolveCriticalDecision = null;
 const DESTRUCTIVE_ACTIONS = new Set([
-  'delete-dataset',
   'unarchive-month',
   'delete-data-target'
 ]);
@@ -84,9 +82,6 @@ async function run() {
     }
     if (workerData.action === 'calculate') {
       return calculateMonth({ db, ...workerData.payload });
-    }
-    if (workerData.action === 'delete-dataset') {
-      return deleteDataset({ db, ...workerData.payload });
     }
     if (workerData.action === 'unarchive-month') {
       return unarchiveMonth({ db, ...workerData.payload });
