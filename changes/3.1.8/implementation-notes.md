@@ -294,7 +294,7 @@
 | #127 → #128 restack `npm run check:vars` 与双盲区终审 | 工具 code 2 仅命中 Runtime-state 通用词 `state`；diff 实际是 `operation-state`/`preserved-state`/`*StateError`/`snapshotResultMutationState` 等后端局部命名，未修改 renderer 顶层 `state`。沿 service allowlist→worker→calculate/adjust/archive→19 表指纹/audit→targetMonth export→Excel readback→次月继承复核入口、状态、幂等、部分失败、九币种和审计血缘 | 无现存 P3+ 或新增旁路；`snapshotResultMutationState` 仍是待人工审批的 Risk-sensitive 升格候选，不静默改清单。真实生产副本逐主体×币种/revision/sequence/success+rolled_back 审计与 Windows Excel/WPS ST_Xstring 显示仍为发布人工资金红线 |
 | #129 → 冻结 #128 合并边界与冲突裁决 | `67019de...` 与 `cc3080e...` 的共同祖先为 `e086f2d...`，两侧独有 6/3 个提交；普通 `--no-commit` merge 仅冲突 implementation-notes 与 integration policy，生产代码/测试无冲突。#127/#128 资金文件逐字节等同 `cc3080e`，#129 RSS/scan/spec 文件逐字节等同 `67019de`；markers 为 0 | notes 按双方决策/证据并集合并；policy 由本轮 48 脚本全绿后自动重建，未用旧计时覆盖最终树；相对 `cc3080e` 的 intended 范围为 60 文件（34 modified + 26 added） |
 | #129 → 冻结 #128 定向与真实链 | #127 calculator/result-adjustments/service `77/77 PASS`；#128 helper/writer `17/17 PASS`；#129 RSS 模型/重采样/scan source-set `7/7 PASS`；5万/15万真实 RSS 链 `31/31 PASS`（`44→44MB`）。四条真实链分别为 `297/297`、`64/64`、`19/19`、`28/28` | AFTER trigger 全表漂移、success audit/provenance 伪造继续 fail-closed；ST_Xstring 仅在 Excel 边界单次编码；低信号反例、任一样本 150MB 与 Git-tracked source set 同时保留 |
-| #129 → 冻结 #128 最终统计与发布门禁 | `scan:vars` 为 Git-tracked `src/` 293 文件、3744 个顶层名字（A-share 558 / A-pair 800 / A-local 2232 / B 1358）；`release-check` 为 lint/smoke PASS、unit `4801/4801`（303 文件、0 failures）、integration `48/48` / `2459/2459`（`294086ms`），policy 自动刷新 | 默认 50万/150万 RSS 为 `31/31`；同一次全量门禁包含 297/64/19/28 四链。`check:vars` 对 #128 合并增量仅命中 Runtime-state `state`；完整 PR base `cc3080e...` 仅命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中 |
+| #129 → 冻结 #128 最终统计与发布门禁 | 本地 SHA `61bcd26d2f7e11622ac322011f50c622cd5ad560`（无 Actions run ID）：`scan:vars` 为 Git-tracked `src/` 293 文件、3744 个顶层名字（A-share 558 / A-pair 800 / A-local 2232 / B 1358）；`release-check` 为 lint/smoke PASS、unit `4801/4801`（303 文件、0 failures）、integration `48/48` / `2459/2459`（`294086ms`），policy 自动刷新 | 这是该历史本地 SHA 的证据，不是后续 Windows 口径；默认 50万/150万 RSS 为 `31/31`，同一次本地门禁包含 297/64/19/28 四链。`check:vars` 对 #128 合并增量仅命中 Runtime-state `state`；完整 PR base `cc3080e...` 仅命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中 |
 | #129 → 冻结 #128 blindspot + reconciliation 终审 | 沿 service allowlist→worker→calculate/adjust/archive→19 表指纹/success audit→targetMonth semantic writer→ST_Xstring readback→次月九币种继承，复核入口、主键血缘、金额币种、状态/幂等、部分失败、行/子表守恒与可观测性 | 未发现新的 P3+ 或自动化缺口；未改金额、币种、方向、主键或迁移契约。`snapshotResultMutationState` 仍待人工审批清单升格；真实生产副本逐主体×币种/revision/sequence/audit 与 Windows Excel/WPS 显示继续是发布资金红线 |
 
 ## #129 → 冻结 #128 Restack Unknowns Preflight（2026-08-09）
@@ -361,10 +361,54 @@
 | RSS 默认真实链 | 50万/150万 `31/31 PASS`，`82→134MB`，样本数 1 | 默认约 82MB 不触发重采；tier2 低于 139MB 可测预算和 150MB 硬上限 |
 | Spec 当前文件 | CRLF/CR → LF 规范化冻结内容 SHA-256 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | original `9f3af...`、pre-format `018675...` 与当前候选三阶段分离；完整 `cc3080e...→working tree` diff-check code 0 |
 | `scan:vars` / `check:vars` | Git-tracked `src/` 293 文件、3744 个顶层名字；`check:vars` code 0 并因 `src/` 无改动跳过。合并前硬节点再次运行 `scan:vars`，两份报告只刷新 `scannedAt/扫描时间`，统计与源码集合均无漂移 | 本轮只改测试/docs 契约和发布证据，无重要变量命中；保留并纳入共享工作树中的合并前时间戳刷新，不覆盖协作者改动 |
-| 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4802/4802 PASS`（303 文件、0 failures）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（`291703ms`） | 跨平台 Spec 哈希回归已进入全仓门禁；release 内默认 RSS `31/31 PASS`，297/64/19/28 四条 VCC 真实链均保持；runner 只刷新 policy 时间与耗时，不改变脚本/断言集合 |
+| 最终单次 `npm run release-check` | 本地候选内容（后提交为 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52`，无 Actions run ID）：lint PASS；smoke PASS；unit `4802/4802 PASS`（303 文件、0 failures）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（`291703ms`） | 这是本地证据；跨平台 Spec 哈希回归已进入全仓门禁，release 内默认 RSS `31/31 PASS`，297/64/19/28 四条 VCC 真实链均保持。后续 Windows run `31296877417` 的 RSS 失败另行记录，不得把本行概括为 Windows 或全平台 PASS |
 | blindspot threshold/evidence consistency 终审 | `assessScanMemoryGrowth()` 与 8/32/150MB 判据相对冻结 HEAD 零行为 diff；16MB 新常量只进入 `collectMemorySamples()` 重采条件。日志、代码注释、测试和 preflight 均把 9～16MB 称为 RSS 重采保护区；三阶段 Spec 哈希、当前规范化内容实算值和两类差异表述一致 | 已修复旧 self-review 把 `<=8MB` 写成当前重采边界的同根文档 P3；未发现其余 P3+。负值、非有限值、采样异常继续失败关闭；真实 700 万压力、Windows 构建/Excel/WPS 和财务人工资金核对仍为发布门禁 |
 | Windows Actions run `31295431757` Spec 哈希失败根因与修复 | LF checkout 原始 SHA-256 为 `1f5f0663...`；同内容模拟 CRLF 得到 CI 实际 `9af4dfd836ea3037cf3006b0746ba639fcc482bf16472680181c5b840aa9a0c3`，CRLF 再规范化为 LF 后恢复 `1f5f0663...` | 哈希入口仅把 CRLF/孤立 CR 规范化为 LF，其他字节仍参与 SHA-256；自动测试锁定 LF/CRLF/CR 等价，并用真实路径内容变化证明非换行改动继续失败。定向 `5/5 PASS`、完整 release-check `4802/4802` + `2459/2459`；Spec 本身、业务路径和三阶段证据值未修改 |
 | Windows Spec 哈希 P3+ blindspot 终审 | 搜索确认冻结哈希只有 release-docs 单测这一处可执行入口；规范化函数用 latin1 保持字节一一映射，只替换 `0D 0A`/`0D` 换行，不做 trim、Unicode 规范化或内容修补。Spec、`src/`、scan 源码均零 diff；两份 scan 报告仅为协作者执行合并前硬节点产生的时间戳刷新，293/3744 不变 | 未发现遗留 P3+。内容变更、增删尾随换行、Unicode 或其它字节变化仍改变哈希并触发断言；剩余外部验证仅为修复提交后的 Windows Actions 重跑，不在本地伪造通过 |
+
+## Windows RSS 边界重采 Follow-up（2026-08-09）
+
+### Task Brief
+
+- Goal：修复 Windows Actions run `31296877417` 在 `49→94MB`、精确预算 `89.5MB` 处的单样本边界裁决，不改变既有 RSS 增长预算或硬上限。
+- Context：同一 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 的本地 `release-check` 为 unit `4802/4802`、integration `48/48` / `2459/2459`；Windows unit 为 4801 pass + 1 skipped，其他 47 个 integration 脚本通过，仅 RSS 脚本 `30/31`。PR 相对冻结 #128 的生产 scan 路径为零 diff。
+- Constraints：不改 `src/`、Spec、16MB measurable 余量、8/32MB low-signal 边界、0.5 fraction、strict-linear 或 150MB hard cap；19 个既有未跟踪入口不读取、不移动、不删除、不暂存；不 push、Ready 或 merge。
+- Done when：首对 measurable 样本距预算边界两侧 `<=8MB` 时固定追加两组成对采样；旧独立中位裁决继续是必要条件，paired budget/linear margin 只新增拒绝；精确日志、反例、真实小/默认档、全仓门禁、diff/check-vars 与 P3+ 复核通过，并提交到本地分支。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 最便宜验证 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| `49→94MB` 是生产回归还是平台基线/单样本敏感 | 归因 | 高 | PROBE | 对比 PR5 base 的生产 scan 文件、倍率/硬上限与 47 条其余 integration | 生产路径零 diff，`94/49≈1.92 < rowsRatio 3`，且 94MB 低于 147MB 线性外推和 150MB 硬上限；不是本 PR 生产回归证据，但单次 Windows 样本仍不能区分随机抖动与稳定平台基线 |
+| 成对 margin 是否可能放宽历史裁决 | 回归边界 | 高 | PROBE | 回放 `[9,8,8]→[26,24,23]` 和构造独立中位假 PASS 反例 | 采用保守 AND 双门禁：原独立中位 assessment 必须通过，paired budget/linear margin 也必须通过；paired 只能新增拒绝，历史 8/9MB 边界 FAIL 不翻转 |
+| 边界重采会否重复追加或只覆盖失败侧 | 状态/偏差 | 中 | PROBE | stub 首对在预算两侧恰好 8MB，并让 9～16MB 同时命中两条件 | 单一布尔门控制固定三样本；低 tier1 保护区优先且不重复追加，可测预算 PASS/FAIL 两侧对称触发 |
+| 发布证据中的 4801/4802 口径能否追溯 | 可观测性 | 中 | PROBE | 对照 preflight 两处计数与 Windows run | 本地 4802/4802 和 Windows 4801 pass + 1 skipped 按 SHA/平台/run ID 分开；Windows RSS FAIL 前不得再称自动化平台门禁完成 |
+
+### Decisions
+
+| 决策 | 原因 | 放弃方案/边界 |
+| --- | --- | --- |
+| 首对 `measurable-growth` 的 `abs(tier2 - sublinearLimit) <= 8MB` 与既有 tier1 `<=16MB` 任一命中即追加两组成对采样 | 覆盖预算两侧边界抖动，同时保持增长分类与预算不变 | 不只对 FAIL 侧重采，避免选择偏差；不全局三采样，远离边界仍保持单样本 |
+| 多样本同时要求独立中位 assessment、paired budget-margin 中位数 `<=0`、paired linear-margin 中位数 `<0` | 保留上一轮 reviewer 锁定的历史 FAIL，并阻止不同轮次错配造成假 PASS | 不采用“paired 多数可把独立中位 FAIL 翻为 PASS”的宽松裁决 |
+| 150MB 对每个原始样本逐一检查；日志输出未四舍五入的参考预算和两类 paired margin | 中位数不得隐藏 spike；Windows `89.5MB` 不再显示成误导性的 90MB | 不改 150MB，不用日志格式替代真实浮点比较 |
+
+### 当前证据
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| Windows Actions 基线 | SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52`，run `31296877417`：unit 4801 pass + 1 skipped；RSS `30/31`，其他 47 个 integration 脚本通过 | 精确预算 `49×3×0.5+16=89.5MB`，94MB 超 4.5MB；整体 workflow FAIL、build skipped |
+| RSS 确定性单测 | `6/6 PASS` | 预算两侧 `<=8MB` 对称重采且不重复；稳定 `49→94` 三样本仍 FAIL；旧 `[9,8,8]→[26,24,23]` 仍 FAIL；独立中位假 PASS 会被 paired margin 拒绝；线性、140/150、非法输入均 fail-closed |
+| RSS + release-docs 定向组合 | `11/11 PASS` | RSS 六组模型/采样回归与版本候选、用户文档、Spec 三阶段/跨换行哈希契约同时通过 |
+| RSS 小规模真实链 | 5万/15万 `31/31 PASS`，`38→42MB`，单样本 | 预算 73MB、paired 预算 margin -31MB、线性 margin -72MB；远离 8MB 边界带时不追加采样，真实 multi-sheet/worker 链保持 |
+| RSS 默认真实链 | 50万/150万 `31/31 PASS`，`88→133MB`，单样本 | 预算 148MB、paired 预算 margin -15MB、线性 margin -131MB；默认档本轮远离保护带，150MB 硬上限与真实链同时通过 |
+| 当前工作树最终单次 `npm run release-check` | 本地（基于 `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 的未提交最小修复，无 Actions run ID）：lint/smoke PASS；unit `4802/4802 PASS`；integration `48/48` / `2459/2459 PASS`（`295458ms`） | RSS 脚本 `31/31 PASS`，297/64/19/28 四条 VCC 真实链保持；runner 只刷新 integration policy 时间与耗时。该本地证据不替代提交后的 Windows Actions 重跑 |
+| diff/check-vars 与 P3+ 终审 | 目标脚本/单测 ESLint PASS；working tree 与完整 `cc3080e...→working tree` diff-check code 0；本轮 `src/` 零 diff，`npm run check:vars` 因 HEAD + working tree 均无 `src/` 改动而跳过；生产 scan 路径相对冻结 #128 仍为零 diff；19 个既有 untracked 入口数量不变 | 复核入口、边界、失败关闭、配对关系、硬上限和日志：首对预算两侧恰好 8MB 均触发、两侧 9MB 均单采样；9～16MB 双条件只追加一次；独立中位旧裁决与 paired margin 为 AND，paired 不能新增 PASS；非法/非有限样本、精确线性和任一 150MB spike 均拒绝。未发现剩余 P3+；唯一存活外部未知是修复提交后的 Windows Actions 结果 |
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 下一步 | 合并影响 |
+| --- | --- | --- | --- |
+| 修复后的 Windows 平台结果 | PROBE（外部） | 本地提交后由根代理 push 并重跑 Windows Actions；按 run ID 回写最终状态 | 阻断 Ready/merge，不阻断本地修复提交 |
 
 ## Remaining Unknowns
 
