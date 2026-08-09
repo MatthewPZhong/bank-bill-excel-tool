@@ -92,20 +92,23 @@ function mb(bytes) {
   return Math.round(bytes / 1024 / 1024);
 }
 
-// RSS 是 OS 级驻留集快照，受 GC、allocator 分页提交/回收与 MB 取整影响。判据分两类：
-//   - tier1 <= 8MB：基线落在测量噪声量级，追加两轮独立采样并取三次中位数；tier2 必须同时留在
-//     固定 32MB 低信号包络内，且严格低于按行数比得到的线性外推。单次低信号不能直接证明亚线性。
+// RSS 是 OS 级驻留集快照，受 GC、allocator 分页提交/回收与 MB 取整影响。增长判据分两类：
+//   - tier1 <= 8MB：基线落在测量噪声量级；tier2 必须同时留在固定 32MB 低信号包络内，
+//     且严格低于按行数比得到的线性外推。单次低信号不能直接证明亚线性。
 //   - tier1 > 8MB：已有可测信号，直接以原始 tier1 外推；tier2 预算侧只加一次 16MB RSS 余量，
 //     且无论余量大小都必须严格低于按行数比得到的线性外推。
 //     独立子进程仍观察到约 11MB 的 allocator/OS 页提交偏移，16MB 覆盖该偏移且不会放过精确线性反例。
+// 采样策略与增长分类独立：首次 tier1 <= 16MB 时均位于 RSS 重采保护区，追加两轮独立采样并取
+// 三次中位数，以避免 1MB 边界抖动让 8MB 三采样而 9MB 只采一次；首次 tier1 > 16MB 保持单次采样。
 // 禁止同时抬高 tier1、压低 tier2；那会把 rowsRatio=3 的 13→39MB 精确线性增长误判为通过。
 // 两档仍在独立 --expose-gc 子进程采样，绝对 150MB 上限保持独立门禁。
 const SCAN_DELTA_CEILING_MB = 150;
 const RSS_MEASUREMENT_NOISE_MB = 8;
 const LOW_SIGNAL_TIER1_MAX_MB = RSS_MEASUREMENT_NOISE_MB;
 const LOW_SIGNAL_TIER2_CEILING_MB = RSS_MEASUREMENT_NOISE_MB * 4;
-const LOW_SIGNAL_SAMPLE_COUNT = 3;
 const MEASURABLE_GROWTH_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 2;
+const RSS_RESAMPLE_PROTECTION_MAX_MB = MEASURABLE_GROWTH_NOISE_MB;
+const RSS_RESAMPLE_SAMPLE_COUNT = 3;
 const SUBLINEAR_FRACTION_OF_LINEAR = 0.5;
 const SCAN_MEMORY_PROBE_MODE = '--scan-memory-probe';
 const SCAN_MEMORY_RESULT_PREFIX = '__TBX_SCAN_MEMORY__';
@@ -241,7 +244,7 @@ function verifyMemoryGuardModel() {
     && !nonFiniteDelta.valid
     && !nonFiniteDelta.sublinearWithinBudget
     && medianLowSignal.valid
-    && medianLowSignal.sampleCount === LOW_SIGNAL_SAMPLE_COUNT
+    && medianLowSignal.sampleCount === RSS_RESAMPLE_SAMPLE_COUNT
     && medianLowSignal.tier1DeltaMB === 8
     && medianLowSignal.tier2DeltaMB === 22
     && medianLowSignal.sublinearWithinBudget
@@ -363,9 +366,9 @@ function collectMemorySamples(fileT1, fileT2, scan1, scan2, runIsolatedScan = sc
   const tier2Samples = [scan2.deltaMB];
   if (Number.isFinite(scan1.deltaMB)
       && scan1.deltaMB >= 0
-      && scan1.deltaMB <= LOW_SIGNAL_TIER1_MAX_MB) {
-    console.log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于低信号区，追加两轮隔离采样并取中位数...`);
-    while (tier1Samples.length < LOW_SIGNAL_SAMPLE_COUNT) {
+      && scan1.deltaMB <= RSS_RESAMPLE_PROTECTION_MAX_MB) {
+    console.log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于 RSS 重采保护区（≤${RSS_RESAMPLE_PROTECTION_MAX_MB}MB），追加两轮隔离采样并取中位数...`);
+    while (tier1Samples.length < RSS_RESAMPLE_SAMPLE_COUNT) {
       tier1Samples.push(runIsolatedScan(fileT1).deltaMB);
       tier2Samples.push(runIsolatedScan(fileT2).deltaMB);
     }
@@ -471,8 +474,9 @@ async function run() {
       memoryAssessment.valid && memoryAssessment.tier2WithinCeiling,
       `A 内存恒定·绝对上限：tier2 所有 RSS 增量 [${memoryAssessment.tier2Samples.join(', ')}]MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
-    // (2) 亚线性：两档由独立子进程采样。tier1 在噪声量级时追加两轮并取中位数，再同时应用
-    //     固定低信号包络与严格低于线性外推；否则只在 tier2 预算侧加一次 16MB RSS 余量。
+    // (2) 亚线性：两档由独立子进程采样。首次 tier1 在 16MB RSS 重采保护区时追加两轮并取
+    //     中位数；增长分类仍以 8MB 为界，低信号同时应用固定包络与严格低于线性外推，
+    //     可测档只在 tier2 预算侧加一次 16MB RSS 余量。
     console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；RSS 中位增量 tier1=${memoryAssessment.tier1DeltaMB}MB → tier2=${memoryAssessment.tier2DeltaMB}MB`
       + `（样本数=${memoryAssessment.sampleCount}，tier1=[${memoryAssessment.tier1Samples.join(', ')}]MB，tier2=[${memoryAssessment.tier2Samples.join(', ')}]MB）`
       + `（${memoryAssessment.classification}，tier2 上限≤${Math.round(memoryAssessment.sublinearLimitMB)}MB）`);

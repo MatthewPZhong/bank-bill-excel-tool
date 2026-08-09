@@ -30,6 +30,7 @@ test('RSS 低信号同时要求固定包络与严格低于线性外推', () => {
 
 test('RSS 低信号用三次中位数抗抖动，但任一样本触及硬上限仍失败', () => {
   const stable = assessScanMemorySamples([7, 8, 8], [17, 23, 22], 3);
+  const boundaryJitter = assessScanMemorySamples([9, 8, 8], [26, 24, 23], 3);
   const spike = assessScanMemorySamples([7, 8, 8], [17, 151, 22], 3);
 
   assert.equal(stable.valid, true);
@@ -38,36 +39,48 @@ test('RSS 低信号用三次中位数抗抖动，但任一样本触及硬上限�
   assert.equal(stable.tier2DeltaMB, 22);
   assert.equal(stable.sublinearWithinBudget, true);
   assert.equal(stable.tier2WithinCeiling, true);
+  assert.equal(boundaryJitter.tier1DeltaMB, 8);
+  assert.equal(boundaryJitter.tier2DeltaMB, 24);
+  assert.equal(boundaryJitter.classification, 'bounded-low-signal');
+  assert.equal(boundaryJitter.strictlyBelowLinear, false);
+  assert.equal(boundaryJitter.sublinearWithinBudget, false);
   assert.equal(spike.tier2DeltaMB, 22);
   assert.equal(spike.sublinearWithinBudget, true);
   assert.equal(spike.tier2WithinCeiling, false);
 });
 
-test('RSS 仅在首次 tier1 为低信号时追加两轮成对隔离采样', () => {
-  const calls = [];
-  const results = [7, 22, 8, 21];
-  const lowSignal = collectMemorySamples(
-    'tier1.xlsx',
-    'tier2.xlsx',
-    { deltaMB: 8 },
-    { deltaMB: 23 },
-    (filePath) => {
-      calls.push(filePath);
-      return { deltaMB: results.shift() };
-    }
-  );
-  assert.deepEqual(calls, ['tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx']);
-  assert.deepEqual(lowSignal.tier1Samples, [8, 7, 8]);
-  assert.deepEqual(lowSignal.tier2Samples, [23, 22, 21]);
+test('RSS 首次 tier1 位于 16MB 重采保护区时追加两轮成对隔离采样', () => {
+  for (const scenario of [
+    { initial: [9, 26], extra: [8, 24, 8, 23] },
+    { initial: [16, 31], extra: [15, 30, 16, 31] }
+  ]) {
+    const calls = [];
+    const results = scenario.extra.slice();
+    const samples = collectMemorySamples(
+      'tier1.xlsx',
+      'tier2.xlsx',
+      { deltaMB: scenario.initial[0] },
+      { deltaMB: scenario.initial[1] },
+      (filePath) => {
+        calls.push(filePath);
+        return { deltaMB: results.shift() };
+      }
+    );
+    assert.deepEqual(calls, ['tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx']);
+    assert.deepEqual(samples.tier1Samples, [scenario.initial[0], scenario.extra[0], scenario.extra[2]]);
+    assert.deepEqual(samples.tier2Samples, [scenario.initial[1], scenario.extra[1], scenario.extra[3]]);
+  }
 
-  const measurable = collectMemorySamples(
-    'tier1.xlsx',
-    'tier2.xlsx',
-    { deltaMB: 9 },
-    { deltaMB: 26 },
-    () => { throw new Error('可测分支不应追加采样'); }
-  );
-  assert.deepEqual(measurable, { tier1Samples: [9], tier2Samples: [26] });
+  for (const initial of [[17, 34], [82, 135]]) {
+    const samples = collectMemorySamples(
+      'tier1.xlsx',
+      'tier2.xlsx',
+      { deltaMB: initial[0] },
+      { deltaMB: initial[1] },
+      () => { throw new Error('重采保护区外不应追加采样'); }
+    );
+    assert.deepEqual(samples, { tier1Samples: [initial[0]], tier2Samples: [initial[1]] });
+  }
 });
 
 test('RSS 门禁拒绝低幅和高幅的精确线性增长', () => {

@@ -22,7 +22,7 @@
 | 后置候选表头通过 row-scanner 的按行稀疏全宽模式校验到 XFD | 原扫描器只有物理第 1 行全宽，后置 Pending 表头的 BM/XFD 增列会被 64 列预览截断 | 将所有行稠密扩到 16384 列；只扩大固定预览宽度 | 普通数据行契约不变；候选行只物化实际非空 cell，XFD fixture 仅有 2 个数组键；正式读取再次全宽核验命中表头行 |
 | `systemRowError` 同时保留顶层定位字段与 JSON-safe `context` | worker 错误序列化只透传 `context`，原顶层 `sourceRow/fieldName/sheetName` 会在主进程丢失 | 扩展全局 serialize-error 的专用字段列表 | 保持库内旧调用兼容，跨 worker 的 `amount-precision-invalid` 仍可定位 sheet、行和字段 |
 | GitHub 认证问题不阻塞本地实现 | `gh` 已安装但 token 失效；代码和测试均可离线推进 | 等待登录后才开始编码 | push/PR 创建仍明确阻塞，不能声称已发布 |
-| 将锁定规范纳入仓库，并只反向同步 §10.4 的真实发布文档路径 | Downloads 原文件不是可随代码评审的仓库证据，且其中 `VERSION_FEATURE_HISTORY.md`、`USER_GUIDE.html` 与仓库真实位置不符 | 继续仅引用 Downloads；照抄错误路径 | `changes/3.1.8/spec.md` 保留原规范内容，只将路径修正为 `docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md`；原始文件哈希单独留证 |
+| 将锁定规范纳入仓库，业务内容只反向同步 §10.4 的两处真实发布文档路径，并把前五行双空格硬换行改为等价 `<br>` | Downloads 原文件不是可随代码评审的仓库证据，其中 `VERSION_FEATURE_HISTORY.md`、`USER_GUIDE.html` 与仓库真实位置不符；双空格又会使完整 diff-check 报错 | 继续仅引用 Downloads；照抄错误路径；把格式修复误记为业务变更 | `changes/3.1.8/spec.md` 的业务差异仅为 `docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 两处路径；五处换行仅是语义等价格式修复。原文件、格式修复前阶段和当前文件三组哈希分别留证 |
 | PR 2 将首月事实诊断拆到无迁移依赖的 `state-model.js` | 运行时 repository 不应反向依赖 migrations；迁移和运行门禁必须共享同一严格月份诊断 | repository 直接导入 migrations；复制两套判断 | 避免依赖环和迁移副作用，旧库诊断与运行门禁口径一致 |
 | 多期初月份/畸形月份只记录幂等诊断并阻断 VCC 功能，不让 `AppDatabase.init()` 整体失败 | Spec 要求不自动删改资金事实；桌面应用仍需启动供诊断和其他模块使用 | 启动抛错；自动选择最早月份并覆盖 | 资金事实原样保留；preflight/calculate/initialize fail-closed |
 | 首次人工期初写入和 `first_month` claim 放在同一 `BEGIN IMMEDIATE` 事务 | 首月是全局永久事实，不能出现余额已写但首月为空或反向状态 | 先写余额后单独更新状态；只靠 UI 串行 | claim 失败时余额与状态同时回滚；同月同内容重放幂等 |
@@ -70,7 +70,7 @@
 | PR 6 reviewer P2 将全部 26 个 `vcc-financial-op-*` capture token 冻结为显式 `sync / state / lifecycle` readiness 契约，并由主进程对此前缀统一失败关闭 | 数据管理、删除、导出等弹框依赖异步状态；结果/导入/运行/调整等入口返回的 Promise 却代表“弹框关闭”，若统一 await 会死锁，若统一固定延时会截到旧状态 | 继续只门禁解归档 4 个 token；所有 hook 都 await 返回 Promise；用固定 sleep 猜状态 | `state` 入口必须返回并等待真实 DOM 状态 tracker，`lifecycle` 入口只探测同步/立即拒绝而不等待关闭，`sync` 入口禁止意外 Promise；未知 token、缺 hook/method、null、同步抛错、拒绝、非法结果或 8 秒超时均以非 0 退出，staged PNG 不得晋升 |
 | PR 6 self-review 将 RSS 增长分为“低信号有界”与“可测增长”，并把两档扫描改为独立 `--expose-gc` 子进程 | tier1/tier2 同时加减 8MB 会使 `13→39MB`、行数比 3 的精确线性增长通过；同进程先后扫描又会混入 allocator 复用 | 双侧不确定性区间；删除亚线性门禁；只提高 150MB 硬上限 | tier1 `<=8MB` 时 tier2 必须 `<=32MB`；tier1 `>8MB` 时以原始 tier1 外推一半并只加一次 8MB 余量。150MB 硬上限和非法输入 fail-closed 不变 |
 | PR 6 restack 将可测增长的单侧 RSS 余量从 8MB 校准为 16MB，并独立要求可测档严格低于线性外推；低信号包络与硬上限不变 | 最新 PR5 合入后同一生产路径零 diff，但默认规模两次独立采样稳定得到 `82→135MB`、`82→133MB`，均仅因 8MB 余量产生的 131MB 边界失败；self-review 又证明仅扩大余量会让 `9→27MB` 的低幅精确线性增长通过 | 反复执行直到偶然通过；恢复双侧区间；删除亚线性断言；提高 150MB 硬上限；只保留 13MB/32MB 高档反例 | 16MB 仅加在可测 tier2 预算侧，同时要求 tier2 严格小于 `tier1 × rowsRatio`；`6→33MB` 低信号溢出、`9→27MB`/`13→39MB`/`32→96MB` 精确线性、140MB 新边界、150MB 硬上限与非法输入仍失败关闭；只改变测试稳定性，不改变产品/资金契约 |
-| PR #129 review 对低信号 RSS 也强制严格低于线性外推，并仅在首次 tier1 `<=8MB` 时追加两轮隔离采样、以三次中位数裁决增长 | 固定 32MB 包络本身会让 `8→24MB` 精确线性、`6→29MB`/`8→32MB` 超线性通过；单次低信号又容易被 MB 取整和 allocator 抖动支配 | 继续把 low-signal 标为自动通过；只收紧常量；所有正常档无条件跑三次；删除低信号分支并靠偶然单样本 | 低信号同时满足 `tier2<=32MB` 与 `tier2<tier1×rowsRatio`；三次中位数只用于增长趋势，任一样本 `>=150MB` 仍失败。默认实测首次 tier1 为 82～88MB，不增加常规 CI 次数；自动化只证明 50万/150万采样档，700万仍是 PRD 人工门禁 |
+| PR #129 review 对低信号 RSS 也强制严格低于线性外推；后续 P3 将采样触发与增长分类解耦，首次 tier1 `<=16MB` 时追加两轮隔离采样、以三次中位数裁决增长 | 固定 32MB 包络本身会让 `8→24MB` 精确线性、`6→29MB`/`8→32MB` 超线性通过；若只在 `<=8MB` 重采，1MB 抖动会让 `8→24MB` 三采样而 `9→26MB` 单采样 | 继续把 low-signal 标为自动通过；只收紧常量；把 9～16MB 误称为低信号；所有正常档无条件跑三次 | 增长分类仍以 8MB 为界，低信号同时满足 `tier2<=32MB` 与 `tier2<tier1×rowsRatio`；16MB 只定义 RSS 重采保护区。三次中位数裁决趋势，任一样本 `>=150MB` 仍失败；默认实测约 82MB，不增加常规 CI 次数，700万仍是 PRD 人工门禁 |
 | `scan-vars` 的源码集合固定为 Git index 已跟踪 `.js` | 文件系统递归会把 ignored/generated `src/build-info.js` 计入本地报告，导致本地 294 文件、clean checkout 293 文件 | 按文件名硬编码排除 build-info；继续扫描所有非 ignored untracked；把 294 固化为报告常量 | `git ls-files --cached` 成为唯一集合来源；ignored/generated/untracked 全排除，报告写入 `sourceSet=git-tracked-js`，独立临时 Git 仓库测试锁定 tracked/ignored/untracked 三类 |
 | PR 5 调整原因只在 ExcelJS 单元格赋值边界调用既有 `encodeExcelStXstring()`，数据库、review DTO、归档审计和行高计算继续使用业务原文 | 直接赋值时 ExcelJS 会把用户输入的字面 `_x000D_` 解码成回车，并把真实 CRLF 规范成 LF；既有 helper 已覆盖大小写十六进制、预编码外观、控制字符和 Unicode 合法性 | 在写入数据库时编码；复制一份 writer 私有 escape；对读回结果再做猜测性反解 | 每次导出都从不可变原文单次编码，避免重复导出双重编码；staged validator 仍严格以业务原文 readback，审计与 Excel 可逐字符对账 |
 | PR #127 调整与归档事务对全部 19 张 VCC 事实表做流式确定性指纹，并用事务前 max-id/目标月精确划定新增调整、目标归档、run revision/status 和 dataset status 允许集 | 原提交前检查只证明新调整或目标归档看起来正确，AFTER INSERT trigger 仍可同时篡改旧 sequence、基础 run row 或其他月份/全局事实 | 只检查目标 run/新行；复用只覆盖破坏性删除的目标月排除模型 | 调整与归档在最后一次业务写后、COMMIT 前验证旧事实零漂移；新调整必须边界后恰一条且字段/时间/构建来源全等，目标归档与五类 dataset 必须精确匹配；任一 silent trigger 整事务回滚并留下 rolled_back 审计 |
@@ -189,7 +189,7 @@
 | PR 5 reviewer P2 定向回归 | renderer + writer 两文件 `36/36 PASS`；PR 5 六文件组合 `70/70 PASS`；历史月份真实 SQLite + 金标准模板链 `28/28 PASS`。500 字 Unicode 原因 write→reopen 后 adjustment 行为 `409.5pt`、wrapText 保留、相邻基础行仍为模板 `15pt`；结构化模板错误测试确认 code/message/detailLines 保留、实际路径可见且 stack 不展示 | 模板错误可观测性、长调整原因裁切、基础行样式回归、staged validator 同口径，以及历史月份导出/解归档/重归档链无回归 |
 | PR 5 reviewer P2 修复后最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4673/4673 PASS`（297 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中 VCC 历史月份模板导出链 `28/28 PASS` | 同一次命令覆盖静态检查、基础 smoke、全仓单测和全部集成链；证据对应最终冻结代码 |
 | PR 5 最终 `npm run check:vars` 与人工 review | 仅命中 `MODULES`、`elements`、`setStatus`、`state`；`MODULES` 只新增 preview route，后三者均为 VCC renderer 局部变量；无 Critical/Risk-sensitive 命中 | 已复核导出可用性、错误状态展示和模块路由，未发现重要变量旁路或全局状态污染 |
-| PR 6 锁定规范入库 | Downloads 原规范 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；仓库 `changes/3.1.8/spec.md` 修正 §10.4 两处真实路径后 SHA-256 为 `018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` | 原始规范身份、反向同步路径及评审基线可同时追溯；没有改 Q01～Q12 或业务契约 |
+| PR 6 锁定规范入库 | Downloads 原规范 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；`018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` 是仅修正 §10.4 两处真实路径、尚未完成五处 Markdown 换行格式修复的阶段哈希；当前 `changes/3.1.8/spec.md` SHA-256 为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | 业务内容只改两处路径，前五行双空格改 `<br>` 为五处语义等价格式修复；原始规范、格式修复前阶段与当前评审基线均可追溯，没有改 Q01～Q12 或业务契约 |
 | PR 6 版本与发布文档契约 | `package.json`、`package-lock.json` 均为 `3.1.8`；CHANGELOG 标记 `Unreleased`、版本历史标记“待发布”、用户手册标记“发布候选”；release-docs `3/3 PASS` | 防止未完成人工门禁时误写成已发布；锁定 46 列、原始数值、五表预检、调整不覆盖基础行、尾月解归档、历史导出、M/N 与 A:L 披露及旧口径负断言 |
 | PR 6 VCC Electron 预览矩阵 | 26 张 PNG 全量生成并视觉复核，覆盖主面板、缺表、期初、数据管理、首月/结果删除、尾月/非尾月/执行中解归档、历史导出空态、完整结果、单/多调整、已归档、100%/125%/150% 与最小窗口 | 关键状态均可重复生成；面板版本为 3.1.8，危险 disabled 按钮有明确静默视觉；预览隔离与旧图防冒充由静态/行为测试锁定 |
 | PR 6 preview/dist/Windows 定向回归 | VCC preview、renderer、在线升级、Windows 构建及 check-dist 组合 `45/45 PASS`；release-docs `3/3 PASS`；真实 asar fixture 覆盖模板缺失、旧版本、version 缺失/空值 | capture-only hook、PNG 完整性、x64 构建、任意 PR 门禁、模板/版本分发守卫和发布候选文档均有自动化证据 |
@@ -272,7 +272,7 @@
 
 | 级别 | Finding | 最便宜验证 | 处置 |
 | --- | --- | --- | --- |
-| P2 | low-signal 分支把 `strictlyBelowLinear` 无条件设为 true，使 `8→24MB`、`6→29MB`、`8→32MB` 线性/超线性反例通过，不能支撑亚线性结论 | 直接调用模型，并以低信号触发的成对隔离采样 stub 验证实际分支 | 已修复：低信号也严格低于线性外推；首次 tier1 `<=8MB` 时追加两轮取三次中位数，任一样本 150MB 硬上限和非法输入 fail-closed 保留；700 万仍明确是人工门禁 |
+| P2 | low-signal 分支把 `strictlyBelowLinear` 无条件设为 true，使 `8→24MB`、`6→29MB`、`8→32MB` 线性/超线性反例通过，不能支撑亚线性结论 | 直接调用模型，并以低信号触发的成对隔离采样 stub 验证实际分支 | 当时阶段已修复低信号线性判定并在首次 tier1 `<=8MB` 时重采；后续同根 P3 已把采样触发独立扩大为 `<=16MB` 的 RSS 重采保护区，增长分类仍以 8MB 为界。任一样本 150MB 硬上限、非法输入 fail-closed 与 700 万人工门禁不变 |
 | P3 | `changes/3.1.8/spec.md` 前五行用 Markdown 双空格换行，完整 PR base→HEAD `git diff --check` code 2 | 对完整 `e086f2d...→HEAD` 跑 diff-check，不只检查最后提交 | 已改为显式 `<br>`；完整 base→工作树 diff-check code 0 |
 | P3 | `scan-vars` 递归文件系统，把 ignored/generated `src/build-info.js` 纳入本地统计，clean checkout 文件数少 1 | 对照 `git check-ignore` / `git ls-files`，并在独立临时 Git 仓库同时放 tracked、ignored、untracked JS | 已改为只扫描 Git index 已跟踪 JS；报告写明 sourceSet，本地含 ignored build-info 时为 293 文件，自动测试证明 generated/untracked 均不进入 |
 | P3 | 两档 RSS 在独立进程中的单侧 allocator 抖动使默认样本 `82→135MB` / `82→133MB` 仅越过 131MB 预算，却均低于 150MB 硬上限；原 8MB 单侧余量会产生稳定误报 | 在生产路径零 diff 的同一环境连续运行默认 50 万/150 万行档，并对照硬上限与原预算 | 已修复：可测档只把 tier2 单侧余量校准到 16MB，不放宽低信号 32MB 包络或 150MB 硬上限；小档、默认档及最终 release-check 内默认档均 `31/31 PASS` |
@@ -330,6 +330,39 @@
 | 2 | 定向与真实资金链 | 19 表、audit、provenance、ST_Xstring、RSS | 77/17/7 与 297/64/19/28 全绿 | 阻断提交并修复 P3+ | 仅修可复现缺口，不放宽资金门禁 |
 | 3 | 重生成报告并全量回归 | 可复现证据、其他模块兼容 | 293/3744、4801/2459 | 阻断提交 | 恢复到 runner/scanner 生成结果 |
 | 4 | 双盲区与提交图/clean checkout 复核 | 交付完整性、人工红线 | 无 P3+、双亲正确、clean scan 一致 | 阻断交付 | 不 push，保留本地 merge 供诊断 |
+
+## 冻结 `61bcd26` P3 Follow-up（2026-08-09）
+
+### Task Brief
+
+- Goal：修复 RSS 8/9MB 边界采样次数突变与 Spec 阶段哈希表述不完整两个 P3，在冻结 `61bcd26d2f7e11622ac322011f50c622cd5ad560` 上提交，不 push。
+- Context：分支、HEAD 与远端完全一致且 tracked clean；本轮不改 `src/`、资金数据、增长分类或发布契约。
+- Constraints：保留 8MB low-signal 分类、32MB 低信号包络、严格低于线性、任一样本 150MB 硬上限与非法输入 fail-closed；19 个既有未跟踪项不读取、不移动、不删除、不暂存。
+- Done when：9/16MB 重采、17/约82MB 单采样、中位数与 spike 有确定性回归；Spec 三阶段哈希与两类差异可自动核验；小/默认压力、docs、完整 diff-check、release-check、scan/check-vars 和盲区复核通过。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 最便宜验证 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| 16MB 应改变增长分类还是只改变采样触发 | RSS 契约 | 高 | PROBE | 对照既有常量、反例和 16MB 可测档公式 | 只新增 `RSS_RESAMPLE_PROTECTION_MAX_MB=16`；low-signal 仍为 `<=8MB`，9～16MB 明确称 RSS 重采保护区 |
+| 保护区扩大是否让默认档无条件三采样 | 性能/CI | 中 | PROBE | 小规模和默认 50万/150万真实链记录首次 tier1 | 小档 `42MB`、默认档 `82MB`，均单采样并 `31/31 PASS`；17MB 和 82MB stub 同样锁定不重采 |
+| 中位数能否统一裁决 8/9MB 抖动且不隐藏硬上限 spike | 失败模式 | 高 | PROBE | `9,8,8 → 26,24,23` 与含 151MB 样本的确定性模型 | 中位数把前者裁决为 `8→24MB` 并拒绝线性趋势；后者中位趋势虽通过，但 every-sample ceiling 独立失败 |
+| Spec 的 `018675...` 是否是当前候选哈希 | 证据链 | 中 | PROBE | 对 original、pre-format stage 与当前文件逐字节 SHA-256/差异 | 否；`018675...` 是仅修两路径、五处格式修复前阶段，当前为 `1f5f0663...`；业务内容仅两处路径，另有五处语义等价格式修复 |
+| 是否存在同根 P3+ 表述漂移 | 文档/可观测性 | 中 | PROBE | 搜索采样阈值、low-signal、两阶段哈希及相关测试 | 找到并修正旧 self-review 把 `<=8MB` 重采写成当前结论的证据一致性 P3；历史测试计数保留为当时事实，未发现行为 P3+ |
+
+无 BLOCK 问题；没有采用会改变产品、资金、数据或公开接口的假设。
+
+### 当前证据
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| RSS + scan-vars + release docs 定向组合 | `11/11 PASS` | 9/16MB 三采样，17/82MB 单采样，中位数决定趋势，任一样本 150MB 硬上限不被隐藏；Spec 当前哈希与三阶段证据被测试锁定 |
+| RSS 小规模真实链 | 5万/15万 `31/31 PASS`，`42→48MB`，样本数 1 | 保护区外保持单采样，亚线性预算 79MB、150MB 硬上限和真 multi-sheet/worker 链同时通过 |
+| RSS 默认真实链 | 50万/150万 `31/31 PASS`，`82→134MB`，样本数 1 | 默认约 82MB 不触发重采；tier2 低于 139MB 可测预算和 150MB 硬上限 |
+| Spec 当前文件 | SHA-256 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | original `9f3af...`、pre-format `018675...` 与当前候选三阶段分离；完整 `cc3080e...→working tree` diff-check code 0 |
+| `scan:vars` / `check:vars` | Git-tracked `src/` 293 文件、3744 个顶层名字；扫描器源码和两份统计报告相对冻结 HEAD 零 diff；`check:vars` code 0 并因 `src/` 无改动跳过 | 本轮只改 integration test、unit/docs 契约和发布证据，无重要变量命中；报告不因仅刷新时间戳进入提交 |
+| 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4801/4801 PASS`（303 文件、0 failures）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（`295757ms`） | release 内默认 RSS `31/31 PASS`；297/64/19/28 四条 VCC 真实链均保持；runner 只刷新 policy 时间与耗时，不改变脚本/断言集合 |
+| blindspot threshold/evidence consistency 终审 | `assessScanMemoryGrowth()` 与 8/32/150MB 判据相对冻结 HEAD 零行为 diff；16MB 新常量只进入 `collectMemorySamples()` 重采条件。日志、代码注释、测试和 preflight 均把 9～16MB 称为 RSS 重采保护区；三阶段 Spec 哈希、当前文件实算值和两类差异表述一致 | 已修复旧 self-review 把 `<=8MB` 写成当前重采边界的同根文档 P3；未发现其余 P3+。负值、非有限值、采样异常继续失败关闭；真实 700 万压力、Windows 构建/Excel/WPS 和财务人工资金核对仍为发布门禁 |
 
 ## Remaining Unknowns
 

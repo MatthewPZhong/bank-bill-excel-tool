@@ -54,13 +54,13 @@
 ### 已完成
 
 - 版本已提升到 `3.1.8`；CHANGELOG、版本历史和用户手册统一保持“Unreleased / 待发布 / 发布候选”，没有宣称已发布或已通过资金人工验收。
-- 锁定规范已纳入 `changes/3.1.8/spec.md`；保留 Downloads 原文件 SHA-256，并只把 §10.4 修正为仓库真实文档路径。`docs/iterations/v3.1.8/PRD-v3.1.8.md` 以索引/导读归档版本范围、非目标、验收与人工门禁，不重复规范正文。
+- 锁定规范已纳入 `changes/3.1.8/spec.md`。相对 Downloads 原文件，业务内容只修正 §10.4 的两处真实文档路径；另有前五行 Markdown 双空格硬换行改为等价 `<br>` 的五处纯格式修复。原文件 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；`018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` 明确是五处格式修复前、仅完成路径修正的阶段哈希；当前候选 `changes/3.1.8/spec.md` SHA-256 为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`。`docs/iterations/v3.1.8/PRD-v3.1.8.md` 以索引/导读归档版本范围、非目标、验收与人工门禁，不重复规范正文。
 - VCC 26 张合成预览已在最新 PR 5 restack 候选上重新生成，覆盖关键业务状态、100%/125%/150% 和最小窗口；25 张为 2480×1720，最小窗口图为 2160×1520。自动门禁逐图验证 signature、IHDR、正尺寸、非空 IDAT、IEND 长度 0 且恰好 EOF，capture hook、窗口参数和假数据均与生产路径隔离。
 - Windows 本地、PR 和 Release 构建命令统一锁定 x64；任意 PR 配置为先跑完整发布检查，再构建 installer/portable 并执行分发守卫；守卫新增两份 VCC 模板和包内版本校验。
 - `npm run scan:vars` 只统计 Git 已跟踪 JS，ignored/generated/untracked 不参与；最终合并树稳定得到 `src/` 293 文件、3744 个顶层名字。#128 合并增量的 `check:vars` 仅命中 Runtime-state `state`，来自 VCC 后端事务局部命名；完整 PR base `cc3080e...→候选树` 仍只命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中。模块枚举、原生 dialog、renderer 顶层状态结构和生产退出钩子未改变；`snapshotResultMutationState` 保留为待人工审批的 Risk-sensitive 升格候选，不静默修改清单。
 - 冻结 #128 `cc3080eb3e8720d5dc6093010348a964b6d7085c` 已以普通 merge restack 到 PR 6 候选；最终范围相对该 base 为 60 个文件（34 modified + 26 added）。合并完整保留 #127 的 19 表精确指纹/allowset、success audit precommit 与可信 provenance，#128 的 semantic writer、targetMonth 租约、ST_Xstring 单次边界编码及 297 链，以及 #129 的低信号三采样、Git-tracked scan-vars 和 Spec 空白修复。
-- RSS 门禁的可测档继续只在 tier2 预算侧加一次 16MB 余量并严格低于线性外推。PR #129 进一步修复 low-signal：首次 tier1 `<=8MB` 时追加两轮独立采样并取三次中位数，tier2 同时满足 32MB 包络和严格低于线性外推；`8→24MB`、`6→29MB`、`8→32MB` 均拒绝，任一样本 150MB 硬上限与非法输入 fail-closed 不变。最终合并树的 5万/15万真实链为 `31/31 PASS`（`44→44MB`），默认 50万/150万档在 release-check 内为 `31/31 PASS`；自动证据只覆盖这些规模，700 万仍按 PRD 保留人工门禁。
-- 最终单次 `npm run release-check` 全绿：lint PASS、smoke PASS、unit `4801/4801 PASS`（303 个测试文件、0 failures）、integration `48/48` 脚本和 `2459/2459` 可计数断言 PASS（`294086ms`）；其中 VCC 调整归档继承 `297/297`、破坏性状态链 `64/64`、effective result `19/19`、历史模板导出 `28/28`。
+- RSS 门禁的可测档继续只在 tier2 预算侧加一次 16MB 余量并严格低于线性外推。增长分类仍以 tier1 `<=8MB` 为 low-signal，低信号 tier2 同时满足 32MB 包络和严格低于线性外推；采样策略独立扩大为首次 tier1 `<=16MB` 的 RSS 重采保护区，追加两轮独立采样并取三次中位数，避免 8/9MB 边界抖动造成采样次数突变。`8→24MB`、`6→29MB`、`8→32MB` 均拒绝，任一样本 150MB 硬上限与非法输入 fail-closed 不变。本轮 follow-up 的 5万/15万真实链为 `31/31 PASS`（`42→48MB`、单样本），独立默认 50万/150万档为 `31/31 PASS`（`82→134MB`、单样本），完整 release-check 内默认档再次 `31/31 PASS`；自动证据只覆盖这些规模，700 万仍按 PRD 保留人工门禁。
+- 最终单次 `npm run release-check` 全绿：lint PASS、smoke PASS、unit `4801/4801 PASS`（303 个测试文件、0 failures）、integration `48/48` 脚本和 `2459/2459` 可计数断言 PASS（`295757ms`）；其中 VCC 调整归档继承 `297/297`、破坏性状态链 `64/64`、effective result `19/19`、历史模板导出 `28/28`。
 - 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
 
 ### Reviewer 退回项与最终盲区复核
