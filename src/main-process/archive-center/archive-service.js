@@ -347,6 +347,20 @@ class ArchiveService {
     };
   }
 
+  _taskBatchInput(payload = {}) {
+    const input = {
+      ...this._batchInput(payload),
+      operationKey: payload.operationKey,
+      taskKey: payload.taskKey,
+      taskRunId: payload.taskRunId,
+      parentRunId: payload.parentRunId
+    };
+    if (Object.prototype.hasOwnProperty.call(payload, 'batchNumber')) {
+      input.batchNumber = payload.batchNumber;
+    }
+    return input;
+  }
+
   _createBatchUnlocked(payload = {}) {
     const created = this.repository.createBatch(this._batchInput(payload));
     return {
@@ -372,6 +386,117 @@ class ArchiveService {
         created: created.created,
         creationStatus: created.status,
         batchId: created.batch.id
+      };
+    });
+  }
+
+  async reserveTaskBatch(payload = {}) {
+    return this._run('reserveTaskBatch', async () => {
+      const reserved = this.repository.reserveTaskBatch(this._taskBatchInput(payload));
+      return {
+        ok: true,
+        status: reserved.created ? 'reserved' : 'existing',
+        created: reserved.created,
+        batchId: reserved.batch.id,
+        batchNumber: reserved.batch.batchNumber,
+        localDate: reserved.batch.localDate,
+        dailySequence: reserved.batch.dailySequence,
+        taskStatus: reserved.batch.taskStatus,
+        archiveStatus: reserved.batch.archiveStatus,
+        batch: reserved.batch
+      };
+    });
+  }
+
+  async _setTaskStatus(operation, batchId, taskStatus, options = {}) {
+    return this._run(operation, async () => {
+      const transition = this.repository.transitionTaskStatus(
+        batchId,
+        taskStatus,
+        options
+      );
+      if (transition.status === 'not-found') {
+        return {
+          ok: false,
+          status: 'not-found',
+          code: 'ARCHIVE_BATCH_NOT_FOUND',
+          message: '存档批次不存在'
+        };
+      }
+      if (transition.status === 'conflict') {
+        return {
+          ok: false,
+          status: 'conflict',
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          message: '任务已进入终态，迟到结果未覆盖现有状态',
+          batch: transition.batch
+        };
+      }
+      return { ok: true, status: transition.status, batch: transition.batch };
+    });
+  }
+
+  async markTaskStarted(batchId) {
+    return this._setTaskStatus('markTaskStarted', batchId, 'running', {
+      expectedStatuses: ['reserved']
+    });
+  }
+
+  async completeTaskBatch(batchId) {
+    return this._setTaskStatus('completeTaskBatch', batchId, 'succeeded', {
+      expectedStatuses: ['reserved', 'running']
+    });
+  }
+
+  async failTaskBatch(batchId, failure = {}) {
+    return this._setTaskStatus('failTaskBatch', batchId, 'failed', {
+      ...failure,
+      expectedStatuses: ['reserved', 'running']
+    });
+  }
+
+  async cancelTaskBatch(batchId, cancellation = {}) {
+    return this._setTaskStatus('cancelTaskBatch', batchId, 'cancelled', {
+      ...cancellation,
+      expectedStatuses: ['reserved', 'running']
+    });
+  }
+
+  async getLatestBatch() {
+    return this._run('getLatestBatch', async () => ({
+      ok: true,
+      status: 'success',
+      latestBatch: this.repository.getLatestIssuedBatch()
+    }));
+  }
+
+  async listRelatedBatches(parentRunId) {
+    return this._run('listRelatedBatches', async () => ({
+      ok: true,
+      status: 'success',
+      batches: this.repository.listRelatedBatches(parentRunId)
+    }));
+  }
+
+  async findFlowAnchor(payload = {}) {
+    return this._run('findFlowAnchor', async () => {
+      const anchor = this.repository.findFlowAnchor(payload);
+      return {
+        ok: true,
+        status: anchor ? 'found' : 'not-found',
+        anchor
+      };
+    });
+  }
+
+  async bindFlowAnchor(payload = {}) {
+    return this._run('bindFlowAnchor', async () => {
+      const bound = this.repository.bindFlowAnchor(payload);
+      return {
+        ok: true,
+        status: bound.created ? 'bound' : 'existing',
+        created: bound.created,
+        anchor: bound.anchor
       };
     });
   }

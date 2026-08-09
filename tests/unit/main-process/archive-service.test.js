@@ -185,6 +185,79 @@ test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的�
   }
 });
 
+test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关联 DTO', async () => {
+  const fixture = createFixture();
+  try {
+    const payload = {
+      ...batchPayload('task-operation-1'),
+      taskKey: 'statement:generate',
+      taskRunId: 'task-run-1',
+      parentRunId: 'parent-run-1'
+    };
+    const reserved = await fixture.service.reserveTaskBatch(payload);
+    const replay = await fixture.service.reserveTaskBatch(payload);
+    assert.equal(reserved.ok, true);
+    assert.equal(reserved.status, 'reserved');
+    assert.equal(reserved.batchNumber, '2026-07-20-001');
+    assert.equal(reserved.taskStatus, 'reserved');
+    assert.equal(replay.status, 'existing');
+    assert.equal(replay.batchId, reserved.batchId);
+
+    const running = await fixture.service.markTaskStarted(reserved.batchId);
+    assert.equal(running.batch.taskStatus, 'running');
+    const failed = await fixture.service.failTaskBatch(reserved.batchId, {
+      code: 'BUSINESS_FAILED',
+      message: '业务处理失败'
+    });
+    assert.equal(failed.batch.taskStatus, 'failed');
+    assert.equal(failed.batch.failureCode, 'BUSINESS_FAILED');
+    assert.equal(failed.batch.archiveStatus, 'complete');
+
+    const latest = await fixture.service.getLatestBatch();
+    assert.equal(latest.ok, true);
+    assert.equal(latest.latestBatch.batchNumber, reserved.batchNumber);
+    const related = await fixture.service.listRelatedBatches('parent-run-1');
+    assert.deepEqual(related.batches.map((batch) => batch.id), [reserved.batchId]);
+
+    const anchorInput = {
+      moduleId: 'bank-statement',
+      identityType: 'business-run-id',
+      identityValue: 'bank-statement-business-run-20260720-001',
+      parentRunId: 'parent-run-1',
+      sourceBatchId: reserved.batchId
+    };
+    const bound = await fixture.service.bindFlowAnchor(anchorInput);
+    const anchorReplay = await fixture.service.bindFlowAnchor(anchorInput);
+    const found = await fixture.service.findFlowAnchor(anchorInput);
+    assert.equal(bound.status, 'bound');
+    assert.equal(anchorReplay.status, 'existing');
+    assert.deepEqual(found.anchor, bound.anchor);
+    const crossModuleAnchor = await fixture.service.bindFlowAnchor({
+      ...anchorInput,
+      moduleId: 'toolbox'
+    });
+    assert.equal(crossModuleAnchor.ok, false);
+    assert.equal(crossModuleAnchor.code, 'ARCHIVE_FLOW_ANCHOR_CONFLICT');
+    const anchorConflict = await fixture.service.bindFlowAnchor({
+      ...anchorInput,
+      parentRunId: 'different-parent'
+    });
+    assert.equal(anchorConflict.ok, false);
+    assert.equal(anchorConflict.code, 'ARCHIVE_FLOW_ANCHOR_CONFLICT');
+
+    const forged = await fixture.service.reserveTaskBatch({
+      ...payload,
+      operationKey: 'task-operation-forged',
+      batchNumber: '2026-07-20-999'
+    });
+    assert.equal(forged.ok, false);
+    assert.equal(forged.code, 'ARCHIVE_OPERATION_FAILED');
+    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('批量复制开始前先登记整批文件，进程中断后不会丢失后续重试线索', async () => {
   const fixture = createFixture();
   try {
