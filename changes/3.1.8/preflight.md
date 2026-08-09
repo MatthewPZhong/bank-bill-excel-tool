@@ -62,7 +62,7 @@
 - RSS 门禁的可测档继续只在 tier2 预算侧加一次 16MB 余量并严格低于线性外推。增长分类仍以 tier1 `<=8MB` 为 low-signal，低信号 tier2 同时满足 32MB 包络和严格低于线性外推；首次 tier1 `<=16MB` 的既有 RSS 重采保护区不变，首对样本属于 measurable-growth 且距亚线性预算边界两侧 `<=8MB` 时也对称追加两轮成对隔离采样。多样本保留 tier1/tier2 独立中位样本的既有裁决，并额外要求每对 budget margin 与 linear margin 的中位数通过，因此 paired margin 只会新增拒绝，不会把历史 FAIL 翻为 PASS；任一原始样本仍须逐个满足 `<150MB`。`8→24MB`、`9→27MB`、`32→96MB`、`49→147MB`、`82→140MB` 和任一 150MB spike 均继续拒绝，16MB/8MB/32MB/0.5/150MB 常量未改。
 - 本地候选内容（提交为 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52`）的单次 `npm run release-check` 为 lint PASS、smoke PASS、unit `4802/4802 PASS`（303 个测试文件、0 failures）、integration `48/48` 脚本和 `2459/2459` 可计数断言 PASS（`291703ms`）。这是本地证据，不代表后续 Windows 平台门禁通过。
 - Windows Actions run [`31296877417`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31296877417) 对同一 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 的 unit 阶段为 4801 pass、1 skipped、0 failed；integration 的其他 47 个脚本通过，但 `toolbox-large-split-multi-sheet` 为 `30/31 PASS`：`49→94MB`、rowsRatio=3 的精确预算是 `89.5MB`（旧日志四舍五入显示 90MB），严格线性外推 147MB 和 150MB 硬上限均通过，仅亚线性预算超出 4.5MB。故该 Windows `release-check` 整体 FAIL、build job 未运行，自动化平台门禁尚未完成。
-- 基于上述 SHA 的本轮最小修复本地工作树（无 Actions run ID）已取得：RSS + release-docs 定向 `11/11 PASS`；5万/15万真实链 `31/31 PASS`（`38→42MB`、单样本、预算 73MB）；50万/150万真实链 `31/31 PASS`（`88→133MB`、单样本、预算 148MB）；最终单次 `npm run release-check` 为 lint/smoke PASS、unit `4802/4802 PASS`、integration `48/48` / `2459/2459 PASS`（`295458ms`）。该证据证明本地候选树通过，不替代修复提交后的 Windows Actions 重跑。
+- 基于 `9eabde3` 的本轮最小修复候选树（尚无 Actions run ID）已取得：RSS + release-docs 定向 `11/11 PASS`；5万/15万真实链 `31/31 PASS`（`38→42MB`、单样本、预算 73MB）；50万/150万真实链 `31/31 PASS`（`88→133MB`、单样本、预算 148MB）；最终单次 `npm run release-check` 为 lint/smoke PASS、unit `4802/4802 PASS`、integration `48/48` / `2459/2459 PASS`（`295458ms`）。该证据证明本地候选树通过，不替代修复提交后的 Windows Actions 重跑。
 - 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
 
 ### Reviewer 退回项与最终盲区复核
@@ -84,4 +84,4 @@
 - 对生产数据库副本做只读扫描，核对 Pending 46/48 列、归档主体/九币种余额及五类数据状态；异常只阻断并人工处理，不自动修复。
 - 由财务人员用真实月份逐主体、逐九币种核对基础值、调整值、生效余额、差异、颜色、归档及连续两月期初衔接，并记录签字结论。
 
-结论：PR6 已完成冻结 #128 restack、26 张预览冻结、重要变量与双盲区复核；PR #129 的既有修复与 #127/#128 资金边界同时保留。本地 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 曾取得 unit `4802/4802`、integration `48/48` / `2459/2459`，同 SHA 的 Windows run `31296877417` 则是 unit 4801 pass + 1 skipped 并在 RSS integration 失败；两者不得合并写成无平台标识的“最终 4801/4801”。本轮最小修复工作树已再次取得本地 unit `4802/4802`、integration `48/48` / `2459/2459`，但自动化平台门禁仍须在提交后重新取得 Windows 全绿；上述人工/平台门禁完成前，v3.1.8 仍是发布候选，不得发布。
+结论：PR6 已完成冻结 #128 restack、26 张预览冻结、重要变量与双盲区复核；PR #129 的既有修复与 #127/#128 资金边界同时保留。本地 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 曾取得 unit `4802/4802`、integration `48/48` / `2459/2459`，同 SHA 的 Windows run `31296877417` 则是 unit 4801 pass + 1 skipped 并在 RSS integration 失败；两者不得合并写成无平台标识的“最终 4801/4801”。基于 `9eabde3` 的本轮最小修复候选树已再次取得本地 unit `4802/4802`、integration `48/48` / `2459/2459`，但自动化平台门禁仍须在提交后重新取得 Windows 全绿；上述人工/平台门禁完成前，v3.1.8 仍是发布候选，不得发布。

@@ -401,8 +401,8 @@
 | RSS + release-docs 定向组合 | `11/11 PASS` | RSS 六组模型/采样回归与版本候选、用户文档、Spec 三阶段/跨换行哈希契约同时通过 |
 | RSS 小规模真实链 | 5万/15万 `31/31 PASS`，`38→42MB`，单样本 | 预算 73MB、paired 预算 margin -31MB、线性 margin -72MB；远离 8MB 边界带时不追加采样，真实 multi-sheet/worker 链保持 |
 | RSS 默认真实链 | 50万/150万 `31/31 PASS`，`88→133MB`，单样本 | 预算 148MB、paired 预算 margin -15MB、线性 margin -131MB；默认档本轮远离保护带，150MB 硬上限与真实链同时通过 |
-| 当前工作树最终单次 `npm run release-check` | 本地（基于 `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 的未提交最小修复，无 Actions run ID）：lint/smoke PASS；unit `4802/4802 PASS`；integration `48/48` / `2459/2459 PASS`（`295458ms`） | RSS 脚本 `31/31 PASS`，297/64/19/28 四条 VCC 真实链保持；runner 只刷新 integration policy 时间与耗时。该本地证据不替代提交后的 Windows Actions 重跑 |
-| diff/check-vars 与 P3+ 终审 | 目标脚本/单测 ESLint PASS；working tree 与完整 `cc3080e...→working tree` diff-check code 0；本轮 `src/` 零 diff，`npm run check:vars` 因 HEAD + working tree 均无 `src/` 改动而跳过；生产 scan 路径相对冻结 #128 仍为零 diff；19 个既有 untracked 入口数量不变 | 复核入口、边界、失败关闭、配对关系、硬上限和日志：首对预算两侧恰好 8MB 均触发、两侧 9MB 均单采样；9～16MB 双条件只追加一次；独立中位旧裁决与 paired margin 为 AND，paired 不能新增 PASS；非法/非有限样本、精确线性和任一 150MB spike 均拒绝。未发现剩余 P3+；唯一存活外部未知是修复提交后的 Windows Actions 结果 |
+| 本轮最小修复候选树最终单次 `npm run release-check` | 基于 `9eabde3` 的本轮最小修复候选树（尚无 Actions run ID）：lint/smoke PASS；unit `4802/4802 PASS`；integration `48/48` / `2459/2459 PASS`（`295458ms`） | RSS 脚本 `31/31 PASS`，297/64/19/28 四条 VCC 真实链保持；runner 只刷新 integration policy 时间与耗时。该本地证据不替代提交后的 Windows Actions 重跑 |
+| diff/check-vars 与 P3+ 终审 | 目标脚本/单测 ESLint PASS；本轮最小修复候选树与完整 `cc3080e...→候选树` diff-check code 0；本轮提交未修改 `src/`，`npm run check:vars` 因 `src/` 无改动而跳过；生产 scan 路径相对冻结 #128 仍为零 diff；19 个既有 untracked 入口数量不变 | 复核入口、边界、失败关闭、配对关系、硬上限和日志：首对预算两侧恰好 8MB 均触发、两侧 9MB 均单采样；9～16MB 双条件只追加一次；独立中位旧裁决与 paired margin 为 AND，paired 不能新增 PASS；非法/非有限样本、精确线性和任一 150MB spike 均拒绝。未发现剩余 P3+；唯一存活外部未知是修复提交后的 Windows Actions 结果 |
 
 ### Remaining Unknowns
 
