@@ -139,6 +139,17 @@
   width: min(100%, 520px);
 }
 
+.vcc-fin-op-archive-picker-dialog button.danger-btn:disabled,
+.vcc-fin-op-archive-picker-dialog button.danger-btn:disabled:hover {
+  background: #e5e8ed;
+  color: #858c96;
+  border-color: #d5d9df;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+  opacity: 1;
+}
+
 .vcc-fin-op-archive-picker-fields {
   display: grid;
   grid-template-columns: auto minmax(110px, 1fr) minmax(110px, 1fr);
@@ -415,13 +426,14 @@
   font-weight: 650;
 }
 
-.vcc-fin-op-summary-row.difference-row td.balanced {
-  color: #247147;
+.vcc-fin-op-full-result-table thead th.balanced {
+  color: #245f8f;
+  background: #e6f1fb;
 }
 
-.vcc-fin-op-summary-row.difference-row td.unbalanced {
-  color: #a12b20;
-  background: #fff0ed;
+.vcc-fin-op-full-result-table thead th.unbalanced {
+  color: #8d241c;
+  background: #ffe7e2;
 }
 
 .vcc-fin-op-manager-result-table th:last-child,

@@ -214,6 +214,47 @@ function logExcludedArchiveMonth(logger, targetMonth, consistencyReasons) {
   }
 }
 
+function getArchivedRunByMonth(db, targetMonth) {
+  const month = normalizeOperationMonth(targetMonth);
+  const state = buildOperationState(db, {
+    action: 'export-result',
+    targetMonth: month,
+    taskGeneration: 0
+  });
+  const consistency = inspectArchiveConsistencyFromState(db, state);
+  const hasArchivedEvidence = state.runs.some((run) => run.status === 'archived')
+    || state.archives.length > 0
+    || state.datasets.some((dataset) => dataset.dataStatus === 'archived');
+  if (!hasArchivedEvidence) {
+    throw operationError(
+      'no-archived-results',
+      `${month} 暂无已归档财务OP校验结果。`,
+      { targetMonth: month, context: { targetMonth: month } }
+    );
+  }
+  if (!consistency.consistent || !consistency.run) {
+    throw operationError(
+      'archive-state-inconsistent',
+      `${month} 的归档结果、主体余额或五类数据集状态不一致，禁止导出。`,
+      {
+        targetMonth: month,
+        consistencyReasons: consistency.reasons,
+        context: {
+          targetMonth: month,
+          consistencyReasons: consistency.reasons
+        }
+      }
+    );
+  }
+  return {
+    targetMonth: month,
+    runId: consistency.run.id,
+    archivedAt: consistency.run.archivedAt,
+    resultRevision: consistency.run.resultRevision,
+    subjects: consistency.archiveSubjects
+  };
+}
+
 function listArchivedResultMonths(db, { logger = null } = {}) {
   const candidates = db.prepare(`
     SELECT target_month FROM vcc_fin_op_runs WHERE status = 'archived'
@@ -245,8 +286,10 @@ function listArchivedResultMonths(db, { logger = null } = {}) {
         subjects: consistency.archiveSubjects
       });
     } catch (error) {
-      logExcludedArchiveMonth(logger, targetMonth, [error.code || 'archive-state-read-failed']);
       // 非严格 YYYY-MM 或损坏月份不会进入普通前端枚举；直接 preview 仍返回结构化错误。
+      logExcludedArchiveMonth(logger, targetMonth, [
+        error && error.code ? error.code : 'archive-state-read-failed'
+      ]);
     }
   }
   return months;
@@ -432,6 +475,7 @@ module.exports = {
   inspectRunBalanceSubjects,
   inspectArchiveConsistencyFromState,
   logExcludedArchiveMonth,
+  getArchivedRunByMonth,
   listArchivedResultMonths,
   previewUnarchive,
   unarchiveMonth

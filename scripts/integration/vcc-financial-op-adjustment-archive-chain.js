@@ -1,10 +1,10 @@
-// VCC 财务OP结果调整与跨月归档链集成验证（真实文件 SQLite + 真实 worker）
+// VCC 财务OP结果调整、归档导出与跨月继承链集成验证（真实文件 SQLite + 真实 worker）
 //
 // 覆盖：
 //   1. 首月真实计算后新增调整，revision 与创建版本元数据原子落库；
 //   2. 关闭并重新打开数据库后，调整仍紧邻目标基础行展示且生效汇总不漂移；
 //   3. 归档写入九币种生效余额，并固化含调整事实的完整审计证据；
-//   4. PR 4 旧 writer 对含调整归档失败关闭，且在 writer 调用前返回稳定错误；
+//   4. 归档月份经正式 resolver 导出，重新打开 Excel 后逐字段核对生效 DTO 与调整血缘；
 //   5. 次月真实计算从上月归档生效值继承期初，验证跨月余额血缘；
 //   6. stale revision 与已归档结果修改均 fail closed。
 //
@@ -15,6 +15,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const ExcelJS = require('exceljs');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
@@ -30,8 +31,13 @@ const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
 const {
-  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
-  ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
+  parseAdjustmentLineageName
+} = require('../../src/backend/vcc-financial-op/adjustment-lineage');
+const {
+  RESULT_SHEET_NAME,
+  PENDING_SHEET_NAME
+} = require('../../src/main-process/vcc-financial-op-writer');
+const {
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');
 
@@ -40,6 +46,8 @@ const M2 = '2026-06';
 const SUBJECT = 'PPHK';
 const APP_VERSION = '3.1.8';
 const BUILD_SHA = 'adjustment-archive-integration-sha';
+const ADJUSTMENT_REASON =
+  '系统外核对_x000D_补记；大小写_X000d_；字面_x005F_x000D_；真实CRLF\r\n下一行；普通😀中文';
 
 let passed = 0;
 let failed = 0;
@@ -239,12 +247,134 @@ function operationAudit(db, targetMonth, operationType) {
   `).get(targetMonth, operationType) || null;
 }
 
+function assertCurrencyCells(sheet, rowNumber, amounts, label) {
+  SUPPORTED_CURRENCIES.forEach((currency, index) => {
+    const expected = Number(amounts && amounts[currency] != null ? amounts[currency] : 0);
+    assertEq(
+      sheet.getCell(rowNumber, index + 4).value,
+      expected,
+      `${label} ${currency} 回读值与生效 DTO 一致`
+    );
+  });
+}
+
+function assertEffectiveBalancesEqual(actualRows, expectedRows, label) {
+  const fields = [
+    'openingBalance',
+    'basePeriodAmount',
+    'baseCalculatedBalance',
+    'baseDifference',
+    'systemBalance',
+    'adjustmentAmount',
+    'effectivePeriodAmount',
+    'effectiveCalculatedBalance',
+    'effectiveDifference'
+  ];
+  assertEq(actualRows.length, expectedRows.length, `${label}坐标数量一致`);
+  expectedRows.forEach((expected) => {
+    const actual = actualRows.find((row) => (
+      row.subject === expected.subject && row.currency === expected.currency
+    ));
+    assertTrue(Boolean(actual), `${label}${expected.subject}/${expected.currency} 坐标存在`);
+    if (!actual) return;
+    fields.forEach((field) => {
+      assertEq(
+        actual[field],
+        expected[field],
+        `${label}${expected.subject}/${expected.currency} ${field} 一致`
+      );
+    });
+  });
+}
+
+function assertExportMatchesEffectiveResult(workbook, effectiveResult, archivedBalances) {
+  assertEq(workbook.worksheets.length, 2, '归档导出只包含结果表与 Pending 计算表');
+  assertEq(workbook.worksheets[0].name, RESULT_SHEET_NAME, '归档导出首个 sheet 为结果表');
+  assertEq(workbook.worksheets[1].name, PENDING_SHEET_NAME, '归档导出第二个 sheet 为 Pending 计算表');
+
+  const review = effectiveResult.review.subjects.find((item) => item.subject === SUBJECT);
+  const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
+  const expectedRows = [
+    {
+      type: 'opening',
+      major: '上月财务OP',
+      minor: '',
+      amounts: review.summaries.openingBalance
+    },
+    ...review.rows.map((row) => ({
+      ...row,
+      major: row.categoryMajor,
+      minor: row.categoryMinor,
+      amounts: row.currencyAmounts
+    })),
+    {
+      type: 'calculated',
+      major: '当月计算财务OP',
+      minor: '',
+      amounts: review.summaries.effectiveCalculatedBalance
+    },
+    {
+      type: 'system',
+      major: '当月系统财务OP',
+      minor: '',
+      amounts: review.summaries.systemBalance
+    },
+    {
+      type: 'difference',
+      major: '差异',
+      minor: '',
+      amounts: review.summaries.effectiveDifference
+    }
+  ];
+
+  assertEq(sheet.actualRowCount, expectedRows.length + 1, 'Excel 结果行数与生效 DTO 完全一致');
+  expectedRows.forEach((row, index) => {
+    const rowNumber = index + 2;
+    assertEq(sheet.getCell(rowNumber, 1).value, SUBJECT, `Excel 第 ${rowNumber} 行主体一致`);
+    assertEq(sheet.getCell(rowNumber, 2).value, row.major, `Excel 第 ${rowNumber} 行大类一致`);
+    if (row.minor) {
+      assertEq(sheet.getCell(rowNumber, 3).value, row.minor, `Excel 第 ${rowNumber} 行小类一致`);
+    }
+    assertCurrencyCells(sheet, rowNumber, row.amounts, `Excel 第 ${rowNumber} 行`);
+
+    if (row.type === 'adjustment') {
+      assertEq(
+        sheet.getCell(rowNumber, 13).value,
+        Number(row.adjustmentAmount),
+        `Excel 第 ${rowNumber} 行调整值一致`
+      );
+      assertEq(
+        sheet.getCell(rowNumber, 14).value,
+        row.reason,
+        `Excel 第 ${rowNumber} 行调整原因一致`
+      );
+      const lineageNames = sheet.getCell(rowNumber, 13).names;
+      assertEq(lineageNames.length, 1, `Excel 第 ${rowNumber} 行调整血缘唯一`);
+      const lineage = parseAdjustmentLineageName(lineageNames[0]);
+      assertEq(lineage && lineage.rowKey, row.rowKey, `Excel 第 ${rowNumber} 行血缘 rowKey 一致`);
+      assertEq(lineage && lineage.currency, row.currency, `Excel 第 ${rowNumber} 行血缘币种一致`);
+    } else {
+      assertEq(sheet.getCell(rowNumber, 13).value, null, `Excel 第 ${rowNumber} 行没有伪调整值`);
+      assertEq(sheet.getCell(rowNumber, 14).value, null, `Excel 第 ${rowNumber} 行没有伪调整原因`);
+    }
+  });
+
+  SUPPORTED_CURRENCIES.forEach((currency) => {
+    assertEq(
+      archivedBalances[currency],
+      review.summaries.effectiveCalculatedBalance[currency],
+      `归档快照 ${currency} 与生效计算余额一致`
+    );
+  });
+}
+
 async function run() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-adjustment-archive-chain-'));
   const dbPath = path.join(tempDir, 'tool-data.sqlite');
+  const outputPath = path.join(tempDir, 'archived-adjusted-result.xlsx');
+  const assetsDir = path.resolve(__dirname, '../../assets');
   let db = null;
   let service = null;
-  let resultWriterCallCount = 0;
   console.log('==== VCC 财务OP结果调整与跨月归档链集成验证 ====');
   try {
     db = openDatabase(dbPath);
@@ -252,7 +382,7 @@ async function run() {
 
     service = createVccFinancialOpService({
       database: { db, dbPath },
-      assetsDir: '',
+      assetsDir,
       appVersion: APP_VERSION,
       buildSha: BUILD_SHA
     });
@@ -294,11 +424,12 @@ async function run() {
       rowKey: rechargeOption.rowKey,
       currency: 'USD',
       adjustmentAmount: '1.25',
-      reason: '系统外已核实补记',
+      reason: ADJUSTMENT_REASON,
       expectedResultRevision: options.resultRevision
     });
     assertEq(adjusted.status, 'adjusted', '调整通过真实 service 原子写入');
     assertEq(adjusted.resultRevision, 1, '新增调整后 revision 递增为 1');
+    assertEq(adjusted.adjustment.reason, ADJUSTMENT_REASON, '调整写入保持业务原文');
     assertEq(adjusted.adjustment.createdAppVersion, APP_VERSION, '调整事实记录创建应用版本');
     assertEq(adjusted.adjustment.createdBuildSha, BUILD_SHA, '调整事实记录创建 build SHA');
 
@@ -331,13 +462,9 @@ async function run() {
     db = openDatabase(dbPath);
     service = createVccFinancialOpService({
       database: { db, dbPath },
-      assetsDir: '',
+      assetsDir,
       appVersion: APP_VERSION,
-      buildSha: BUILD_SHA,
-      writeRunWorkbooksFn: async () => {
-        resultWriterCallCount += 1;
-        return { filePaths: [path.join(tempDir, 'unexpected-adjusted-export.xlsx')] };
-      }
+      buildSha: BUILD_SHA
     });
     const reopened = service.getRunResult(runId);
     assertEq(reopened.status, 'calculated', '重开数据库后结果仍为待归档');
@@ -353,7 +480,7 @@ async function run() {
     ));
     const adjustmentIndex = subjectReview.rows.findIndex((row) => row.type === 'adjustment');
     assertEq(adjustmentIndex, baseIndex + 1, '调整行紧邻目标基础行展示');
-    assertEq(subjectReview.rows[adjustmentIndex].reason, '系统外已核实补记', '结果复核保留调整原因');
+    assertEq(subjectReview.rows[adjustmentIndex].reason, ADJUSTMENT_REASON, '结果复核保留调整原因');
     assertDeepEq(reopened.review.currencies, SUPPORTED_CURRENCIES, '结果复核币种顺序固定为完整九币种');
 
     const optionsAfterAdjustment = service.listAdjustmentOptions({ runId });
@@ -418,25 +545,33 @@ async function run() {
     assertEq(archiveAudit.build_sha, BUILD_SHA, '归档审计记录 build SHA');
     assertEq(archiveEvidence.effectiveRun.adjustments.length, 1, '归档审计固化完整调整事实');
     assertEq(
+      archiveEvidence.effectiveRun.adjustments[0].reason,
+      ADJUSTMENT_REASON,
+      '归档审计保留未编码的业务调整原因'
+    );
+    assertEq(
       archiveEvidence.effectiveRun.balances.find((row) => row.currency === 'USD').effectiveCalculatedBalance,
       '104.25',
       '归档审计固化 USD 生效余额'
     );
-
-    const blockedExportPath = path.join(tempDir, 'adjusted-result.xlsx');
-    const blockedExportError = await expectCode(
-      () => service.exportRun({ runId, outputPath: blockedExportPath }),
-      ADJUSTED_RESULT_EXPORT_UNSUPPORTED_CODE,
-      ADJUSTED_RESULT_EXPORT_UNSUPPORTED_MESSAGE,
-      '含调整的归档结果在旧 writer 前失败关闭'
+    assertDeepEq(
+      archiveEvidence.effectiveRun.adjustments,
+      archivedResult.adjustments,
+      '归档审计逐字段固化调整事实'
     );
-    assertDeepEq(blockedExportError.context, {
-      runId,
-      targetMonth: M1,
-      adjustmentCount: 1
-    }, '导出阻断返回稳定 run/月/调整数上下文');
-    assertEq(resultWriterCallCount, 0, '含调整结果被阻断时 writer 零调用');
-    assertEq(fs.existsSync(blockedExportPath), false, '含调整结果被阻断时零输出文件');
+    assertEffectiveBalancesEqual(
+      archiveEvidence.effectiveRun.balances,
+      archivedResult.balances,
+      '归档审计逐字段固化生效余额：'
+    );
+
+    const exported = await service.exportRun({ targetMonth: M1, outputPath });
+    assertEq(exported.runId, runId, '归档导出月份严格解析回原 run');
+    assertEq(exported.targetMonth, M1, '归档导出返回原目标月份');
+    assertEq(exported.filePaths[0], outputPath, '归档导出发布到指定路径');
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(outputPath);
+    assertExportMatchesEffectiveResult(workbook, archivedResult, archivedBalances);
 
     seedMonth(db, M2, fixedBalances('100', { USD: '107.25', EUR: '116' }));
     const m2Preflight = service.preflightRun({ targetMonth: M2 });
@@ -450,6 +585,13 @@ async function run() {
     const m2Result = service.getRunResult(m2Calculation.runId);
     const m2Usd = balanceOf(m2Result, 'USD');
     const m2Eur = balanceOf(m2Result, 'EUR');
+    SUPPORTED_CURRENCIES.forEach((currency) => {
+      assertEq(
+        balanceOf(m2Result, currency).openingBalance,
+        archivedBalances[currency],
+        `M2 ${currency} 期初逐币种继承 M1 生效归档值`
+      );
+    });
     assertEq(m2Usd.openingBalance, '104.25', 'M2 USD 期初继承 M1 调整后归档值');
     assertEq(m2Usd.effectivePeriodAmount, '3', 'M2 USD 当期发生额保持源事实汇总');
     assertEq(m2Usd.effectiveCalculatedBalance, '107.25', 'M2 USD 计算余额血缘闭合');

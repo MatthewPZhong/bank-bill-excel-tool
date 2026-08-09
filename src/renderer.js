@@ -128,6 +128,84 @@ const RENDERER_STARTUP_MARKS = Object.freeze({
   eventsBindDone: 'renderer-events-bind-done',
   initComplete: 'renderer-init-complete'
 });
+
+const VCC_PREVIEW_CAPTURE_CONTRACT = Object.freeze({
+  'vcc-financial-op-panel': Object.freeze({ method: 'openPanel', strategy: 'sync' }),
+  'vcc-financial-op-import-month': Object.freeze({ method: 'openImportMonth', strategy: 'lifecycle' }),
+  'vcc-financial-op-run-month': Object.freeze({ method: 'openRunMonth', strategy: 'lifecycle' }),
+  'vcc-financial-op-data-manager': Object.freeze({ method: 'openDataManager', strategy: 'state' }),
+  'vcc-financial-op-data-manager-no-archive': Object.freeze({ method: 'openDataManagerNoArchive', strategy: 'state' }),
+  'vcc-financial-op-delete': Object.freeze({ method: 'openDelete', strategy: 'state' }),
+  'vcc-financial-op-delete-first-month': Object.freeze({ method: 'openDeleteFirstMonth', strategy: 'state' }),
+  'vcc-financial-op-delete-first-month-archived': Object.freeze({ method: 'openDeleteFirstMonthArchived', strategy: 'state' }),
+  'vcc-financial-op-delete-result': Object.freeze({ method: 'openDeleteResult', strategy: 'state' }),
+  'vcc-financial-op-unarchive': Object.freeze({ method: 'openUnarchive', strategy: 'state' }),
+  'vcc-financial-op-unarchive-year-switch': Object.freeze({ method: 'openUnarchiveYearSwitch', strategy: 'state' }),
+  'vcc-financial-op-unarchive-non-tail': Object.freeze({ method: 'openUnarchiveNonTail', strategy: 'state' }),
+  'vcc-financial-op-unarchive-executing': Object.freeze({ method: 'openUnarchiveExecuting', strategy: 'state' }),
+  'vcc-financial-op-export': Object.freeze({ method: 'openExport', strategy: 'state' }),
+  'vcc-financial-op-result-export-month': Object.freeze({ method: 'openResultExportMonth', strategy: 'state' }),
+  'vcc-financial-op-result-export-month-empty': Object.freeze({ method: 'openResultExportMonthEmpty', strategy: 'sync' }),
+  'vcc-financial-op-result': Object.freeze({ method: 'openResult', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-single-adjustment': Object.freeze({ method: 'openResultSingleAdjustment', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-multiple-adjustments': Object.freeze({ method: 'openResultMultipleAdjustments', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-archived': Object.freeze({ method: 'openResultArchived', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-zoom-125': Object.freeze({ method: 'openResult', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-zoom-150': Object.freeze({ method: 'openResult', strategy: 'lifecycle' }),
+  'vcc-financial-op-result-min-window': Object.freeze({ method: 'openResult', strategy: 'lifecycle' }),
+  'vcc-financial-op-adjustment': Object.freeze({ method: 'openAdjustment', strategy: 'lifecycle' }),
+  'vcc-financial-op-run-preflight-error': Object.freeze({ method: 'openRunPreflightError', strategy: 'sync' }),
+  'vcc-financial-op-opening': Object.freeze({ method: 'openOpening', strategy: 'lifecycle' })
+});
+
+function registerVccPreviewCaptureReadiness(previewToken) {
+  if (window.desktopApi.previewCapture !== true) return false;
+  const afterPaint = () => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  const readiness = Promise.resolve().then(async () => {
+    const contract = VCC_PREVIEW_CAPTURE_CONTRACT[previewToken];
+    if (!contract) throw new Error(`Unknown VCC preview capture token: ${previewToken}`);
+    const hooks = window.__vccFinancialOpPreview;
+    if (!hooks) throw new Error('VCC preview hooks are unavailable');
+    const hook = hooks[contract.method];
+    if (typeof hook !== 'function') {
+      throw new Error(`VCC preview hook is unavailable: ${contract.method}`);
+    }
+    const hookResult = hook();
+    const isPromise = Boolean(hookResult && typeof hookResult.then === 'function');
+    if (contract.strategy === 'state') {
+      if (!isPromise) {
+        throw new Error(`VCC state preview hook did not return a readiness task: ${contract.method}`);
+      }
+      await hookResult;
+    } else if (contract.strategy === 'lifecycle') {
+      if (!isPromise) {
+        throw new Error(`VCC lifecycle preview hook did not return a Promise: ${contract.method}`);
+      }
+      let lifecycleError = null;
+      Promise.resolve(hookResult).catch((error) => {
+        lifecycleError = error;
+      });
+      await Promise.resolve();
+      if (lifecycleError) throw lifecycleError;
+    } else if (isPromise) {
+      Promise.resolve(hookResult).catch(() => {});
+      throw new Error(`VCC synchronous preview hook returned a Promise: ${contract.method}`);
+    }
+    await afterPaint();
+    return { status: 'ready', token: previewToken };
+  });
+  readiness.catch(() => {});
+  Object.defineProperty(window, '__vccPreviewCaptureReady', {
+    configurable: true,
+    enumerable: false,
+    writable: false,
+    value: readiness
+  });
+  return true;
+}
+
 const rendererStartupProfiler = {
   startedAt: performance.now(),
   marks: new Map()
@@ -8598,47 +8676,10 @@ async function applyFullInfo(info) {
     setTimeout(() => { applyVccOpCalcComputeDialogPreviewState(); }, 120);
   } else if (info.previewModal === 'vcc-op-calc-show-balance') {
     setTimeout(() => { applyVccOpCalcShowBalanceDialogPreviewState(); }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-panel') {
-    setTimeout(() => { setCurrentModule(MODULES.vccFinancialOp.id); }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-import-month') {
+  } else if (info.previewModal.startsWith('vcc-financial-op-')) {
     setTimeout(() => {
       setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openImportMonth();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-run-month') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openRunMonth();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-data-manager') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openDataManager();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-delete') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openDelete();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-export') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openExport();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-result') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openResult();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-adjustment') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openAdjustment();
-    }, 120);
-  } else if (info.previewModal === 'vcc-financial-op-opening') {
-    setTimeout(() => {
-      setCurrentModule(MODULES.vccFinancialOp.id);
-      window.__vccFinancialOpPreview?.openOpening();
+      registerVccPreviewCaptureReadiness(info.previewModal);
     }, 120);
   } else if (info.previewModal === 'module-cabinet') {
     setTimeout(() => { applyModuleCabinetPreviewState(); }, 120);

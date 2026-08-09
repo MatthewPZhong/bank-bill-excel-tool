@@ -814,6 +814,11 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
   worker.emit('message', { type: 'critical-ready' });
   assert.deepEqual(worker.sentMessages, [{ type: 'critical-ack' }]);
   assert.equal(service._taskStateForTests().protected, true);
+  await assert.rejects(
+    service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' }),
+    (error) => error.code === 'active-vcc-task',
+    '解归档持有全局租约时必须拒绝结果导出'
+  );
 
   let terminated = false;
   const termination = service.terminate().then(() => { terminated = true; });
@@ -965,11 +970,13 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   `).run();
   let releaseWriter;
   let writerStarted;
+  let writerArgs;
   const started = new Promise((resolve) => { writerStarted = resolve; });
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: '',
-    writeRunWorkbooksFn: () => {
+    writeRunWorkbooksFn: (args) => {
+      writerArgs = args;
       writerStarted();
       return new Promise((resolve) => { releaseWriter = resolve; });
     }
@@ -980,10 +987,39 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
     SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments WHERE run_id = ?
   `).get(runId).row_count, 0, '历史归档没有人工调整');
   assert.equal(service.latestArchivedRun().runId, runId, '不一致的更新 archived run 不得成为 latest');
+  assert.deepEqual(service.getArchivedRunByMonth('2026-06'), {
+    targetMonth: '2026-06',
+    runId,
+    archivedAt: '2026-08-01 09:00:00',
+    resultRevision: 0,
+    subjects: ['PPHK']
+  });
+  await assert.rejects(
+    service.exportRun({
+      targetMonth: '2026-07',
+      runId,
+      outputPath: '/tmp/must-not-export.xlsx'
+    }),
+    (error) => error.code === 'archive-state-inconsistent',
+    '外部 runId 不得覆盖租约内 targetMonth 解析'
+  );
+  assert.equal(writerArgs, undefined);
 
-  const exporting = service.exportRun({ runId, outputPath: '/tmp/fixture.xlsx' });
+  const exporting = service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' });
   await started;
   assert.equal(service._taskStateForTests().action, 'export-result');
+  assert.equal(writerArgs.runId, runId, 'runId 必须在租约内由 targetMonth 严格解析');
+  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
+  assert.equal(unarchivePreview.code, 'active-vcc-task');
+  assert.throws(
+    () => service.unarchiveMonth({
+      targetMonth: '2026-06',
+      expectedPreviewToken: unarchivePreview.previewToken,
+      taskGeneration: unarchivePreview.taskGeneration
+    }),
+    (error) => error.code === 'active-vcc-task',
+    '结果导出持有全局租约时必须拒绝解归档'
+  );
   const concurrentPreview = service.previewDatasetExport({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
   });
