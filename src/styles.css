@@ -295,6 +295,15 @@ select {
   color: #fff;
 }
 
+.danger-btn:disabled {
+  background: rgba(165, 61, 48, 0.2);
+  color: rgba(112, 41, 32, 0.56);
+  border-color: rgba(165, 61, 48, 0.12);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
 .small {
   min-width: 108px;
   height: 38px;

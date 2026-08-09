@@ -1,5 +1,327 @@
 'use strict';
 
+const {
+  SOURCE_TYPES,
+  PENDING_HEADERS,
+  PENDING_V1_HEADERS,
+  PENDING_RAW_CONTRACT_V1,
+  PENDING_RAW_CONTRACT_V2
+} = require('../vcc-financial-op/definitions');
+const {
+  PENDING_HASH_VERSION,
+  pendingContentHash
+} = require('../vcc-financial-op/row-mapper');
+const {
+  STRICT_YEAR_MONTH_PATTERN,
+  diagnoseFirstMonthFacts,
+  readFirstMonthFacts
+} = require('./state-model');
+
+function tableColumns(db, tableName) {
+  return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name));
+}
+
+function parsePendingRawJson(rawJson, tableName, rowId) {
+  let values;
+  try { values = JSON.parse(rawJson); } catch (_error) { values = null; }
+  if (!Array.isArray(values)) {
+    const error = new Error(`${tableName} 记录 ${rowId} 的 Pending raw_json 不是数组，已阻止升级`);
+    error.code = 'pending-contract-migration-blocked';
+    throw error;
+  }
+  if (values.length === PENDING_V1_HEADERS.length) {
+    return { values, rawContractVersion: PENDING_RAW_CONTRACT_V1 };
+  }
+  if (values.length === PENDING_HEADERS.length) {
+    return { values, rawContractVersion: PENDING_RAW_CONTRACT_V2 };
+  }
+  const error = new Error(
+    `${tableName} 记录 ${rowId} 的 Pending raw_json 为 ${values.length} 项，既不是历史 48 列也不是最新 46 列，已阻止升级`
+  );
+  error.code = 'pending-contract-migration-blocked';
+  error.recordIds = [Number(rowId)];
+  throw error;
+}
+
+function pendingMigrationPlan(db, tableName) {
+  const columns = tableColumns(db, tableName);
+  const totalRows = Number(db.prepare(`SELECT COUNT(*) AS n FROM ${tableName}`).get().n || 0);
+  if (!columns.has('source_type')) {
+    if (totalRows === 0) return [];
+    const error = new Error(`${tableName} 缺少 source_type，无法识别历史 Pending 记录，已阻止升级`);
+    error.code = 'pending-contract-migration-blocked';
+    throw error;
+  }
+  const pendingCount = Number(db.prepare(`
+    SELECT COUNT(*) AS n FROM ${tableName} WHERE source_type = ?
+  `).get(SOURCE_TYPES.PENDING).n || 0);
+  if (pendingCount === 0) return [];
+  const requiredColumns = ['id', 'raw_json', 'content_hash', 'hash_version', 'raw_contract_version'];
+  const missingColumns = requiredColumns.filter((column) => !columns.has(column));
+  if (missingColumns.length > 0) {
+    const error = new Error(
+      `${tableName} 存在 ${pendingCount} 条 Pending 记录，但缺少 ${missingColumns.join('、')}，已阻止升级`
+    );
+    error.code = 'pending-contract-migration-blocked';
+    throw error;
+  }
+  return db.prepare(`
+    SELECT id, raw_json, content_hash, hash_version, raw_contract_version
+    FROM ${tableName}
+    WHERE source_type = ?
+    ORDER BY id
+  `).all(SOURCE_TYPES.PENDING).map((row) => {
+    const parsed = parsePendingRawJson(row.raw_json, tableName, row.id);
+    return {
+      ...row,
+      desiredRawContractVersion: parsed.rawContractVersion,
+      desiredContentHash: pendingContentHash(parsed.values, parsed.rawContractVersion)
+    };
+  });
+}
+
+function pendingSnapshotVersion(rawJson, rowId) {
+  if (rawJson === null || rawJson === undefined || rawJson === '') return null;
+  return parsePendingRawJson(rawJson, 'vcc_fin_op_import_rows(existing snapshot)', rowId)
+    .rawContractVersion;
+}
+
+function ensurePendingRawContractSupport(db) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const importColumns = tableColumns(db, 'vcc_fin_op_import_rows');
+    if (!importColumns.has('raw_contract_version')) {
+      db.exec('ALTER TABLE vcc_fin_op_import_rows ADD COLUMN raw_contract_version INTEGER NOT NULL DEFAULT 1');
+    }
+    if (!importColumns.has('existing_raw_contract_version_snapshot')) {
+      db.exec('ALTER TABLE vcc_fin_op_import_rows ADD COLUMN existing_raw_contract_version_snapshot INTEGER');
+    }
+    const effectiveColumns = tableColumns(db, 'vcc_fin_op_effective_rows');
+    if (!effectiveColumns.has('raw_contract_version')) {
+      db.exec('ALTER TABLE vcc_fin_op_effective_rows ADD COLUMN raw_contract_version INTEGER NOT NULL DEFAULT 1');
+    }
+    if (!effectiveColumns.has('legacy_content_hash')) {
+      db.exec('ALTER TABLE vcc_fin_op_effective_rows ADD COLUMN legacy_content_hash TEXT');
+    }
+
+    // 先构造完整计划；任一未知 raw_json 会在首条 UPDATE 前抛错并回滚加列。
+    const importPlan = pendingMigrationPlan(db, 'vcc_fin_op_import_rows');
+    const effectivePlan = pendingMigrationPlan(db, 'vcc_fin_op_effective_rows');
+    const snapshotPlan = db.prepare(`
+      SELECT id, existing_raw_json_snapshot
+      FROM vcc_fin_op_import_rows
+      WHERE source_type = ? AND existing_raw_json_snapshot IS NOT NULL
+      ORDER BY id
+    `).all(SOURCE_TYPES.PENDING).map((row) => ({
+      id: row.id,
+      version: pendingSnapshotVersion(row.existing_raw_json_snapshot, row.id)
+    }));
+
+    if (importPlan.length > 0) {
+      const updateImport = db.prepare(`
+        UPDATE vcc_fin_op_import_rows
+        SET content_hash = ?, hash_version = ?, raw_contract_version = ?
+        WHERE id = ?
+      `);
+      for (const row of importPlan) {
+        updateImport.run(
+          row.desiredContentHash,
+          PENDING_HASH_VERSION,
+          row.desiredRawContractVersion,
+          row.id
+        );
+      }
+    }
+    if (effectivePlan.length > 0) {
+      const updateEffective = db.prepare(`
+        UPDATE vcc_fin_op_effective_rows
+        SET legacy_content_hash = CASE
+              WHEN legacy_content_hash IS NULL AND hash_version < ? THEN content_hash
+              ELSE legacy_content_hash
+            END,
+            content_hash = ?, hash_version = ?, raw_contract_version = ?
+        WHERE id = ?
+      `);
+      for (const row of effectivePlan) {
+        updateEffective.run(
+          PENDING_HASH_VERSION,
+          row.desiredContentHash,
+          PENDING_HASH_VERSION,
+          row.desiredRawContractVersion,
+          row.id
+        );
+      }
+    }
+    const updateSnapshotVersion = db.prepare(`
+      UPDATE vcc_fin_op_import_rows
+      SET existing_raw_contract_version_snapshot = ?
+      WHERE id = ?
+    `);
+    for (const row of snapshotPlan) updateSnapshotVersion.run(row.version, row.id);
+
+    for (const [tableName, plan] of [
+      ['vcc_fin_op_import_rows', importPlan],
+      ['vcc_fin_op_effective_rows', effectivePlan]
+    ]) {
+      if (plan.length === 0) continue;
+      const stored = new Map(db.prepare(`
+        SELECT id, content_hash, hash_version, raw_contract_version
+        FROM ${tableName}
+        WHERE source_type = ?
+      `).all(SOURCE_TYPES.PENDING).map((row) => [Number(row.id), row]));
+      if (stored.size !== plan.length || plan.some((expected) => {
+        const actual = stored.get(Number(expected.id));
+        return !actual
+          || actual.content_hash !== expected.desiredContentHash
+          || Number(actual.hash_version) !== PENDING_HASH_VERSION
+          || Number(actual.raw_contract_version) !== expected.desiredRawContractVersion;
+      })) {
+        throw new Error(`${tableName} Pending v2 哈希迁移提交前断言失败`);
+      }
+    }
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    throw error;
+  }
+}
+
+const FIRST_MONTH_DIAGNOSTIC_OPERATION = 'first_month_migration_diagnostic';
+
+function persistFirstMonthDiagnostic(db, diagnostic) {
+  if (!diagnostic.blocked) return null;
+  const evidenceJson = JSON.stringify({
+    code: diagnostic.code,
+    reason: diagnostic.reason,
+    firstMonth: diagnostic.firstMonth,
+    openingMonths: diagnostic.openingMonths,
+    invalidFirstMonth: diagnostic.invalidFirstMonth || false,
+    invalidOpeningMonths: diagnostic.invalidOpeningMonths || []
+  });
+  const existing = db.prepare(`
+    SELECT id
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = ? AND status = 'blocked' AND evidence_json = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(FIRST_MONTH_DIAGNOSTIC_OPERATION, evidenceJson);
+  if (existing) return Number(existing.id);
+  const targetMonth = diagnostic.firstMonth !== null
+    ? diagnostic.firstMonth
+    : (diagnostic.openingMonths[0] == null ? '' : diagnostic.openingMonths[0]);
+  const result = db.prepare(`
+    INSERT INTO vcc_fin_op_operation_audit (
+      target_month, operation_type, status, evidence_json, error_message
+    ) VALUES (?, ?, 'blocked', ?, ?)
+  `).run(
+    targetMonth,
+    FIRST_MONTH_DIAGNOSTIC_OPERATION,
+    evidenceJson,
+    diagnostic.message
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function ensureVccFinancialOpStateModelSupport(db) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_module_state (
+        singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+        first_month TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_run_adjustments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id INTEGER NOT NULL,
+        row_key TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        category_major TEXT NOT NULL,
+        category_minor TEXT NOT NULL DEFAULT '',
+        currency TEXT NOT NULL,
+        adjustment_amount TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+        created_app_version TEXT,
+        created_build_sha TEXT,
+        FOREIGN KEY (run_id) REFERENCES vcc_fin_op_runs(id) ON DELETE CASCADE,
+        UNIQUE (run_id, sequence),
+        UNIQUE (run_id, row_key, currency)
+      );
+
+      CREATE TABLE IF NOT EXISTS vcc_fin_op_operation_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target_month TEXT NOT NULL,
+        operation_type TEXT NOT NULL,
+        run_id INTEGER,
+        status TEXT NOT NULL,
+        preview_token TEXT,
+        evidence_json TEXT NOT NULL,
+        error_message TEXT,
+        app_version TEXT,
+        build_sha TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_adjustments_run_row
+        ON vcc_fin_op_run_adjustments(run_id, row_key, currency);
+      CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_operation_audit_month
+        ON vcc_fin_op_operation_audit(target_month, operation_type, created_at DESC, id DESC);
+    `);
+
+    const runColumns = tableColumns(db, 'vcc_fin_op_runs');
+    if (!runColumns.has('result_revision')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN result_revision INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!runColumns.has('updated_at')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN updated_at TEXT');
+    }
+    if (!runColumns.has('input_fingerprint')) {
+      db.exec('ALTER TABLE vcc_fin_op_runs ADD COLUMN input_fingerprint TEXT');
+    }
+    db.exec(`
+      UPDATE vcc_fin_op_runs
+      SET updated_at = COALESCE(
+        NULLIF(TRIM(updated_at), ''),
+        NULLIF(TRIM(archived_at), ''),
+        NULLIF(TRIM(created_at), ''),
+        datetime('now', 'localtime')
+      )
+      WHERE updated_at IS NULL OR TRIM(updated_at) = ''
+    `);
+
+    db.prepare(`
+      INSERT OR IGNORE INTO vcc_fin_op_module_state (singleton_id, first_month)
+      VALUES (1, NULL)
+    `).run();
+
+    let facts = readFirstMonthFacts(db);
+    if (
+      facts.firstMonth === null
+      && facts.openingMonths.length === 1
+      && STRICT_YEAR_MONTH_PATTERN.test(facts.openingMonths[0])
+    ) {
+      db.prepare(`
+        UPDATE vcc_fin_op_module_state
+        SET first_month = ?, updated_at = datetime('now', 'localtime')
+        WHERE singleton_id = 1 AND first_month IS NULL
+      `).run(facts.openingMonths[0]);
+      facts = readFirstMonthFacts(db);
+    }
+    const diagnostic = diagnoseFirstMonthFacts(facts);
+    persistFirstMonthDiagnostic(db, diagnostic);
+    db.exec('COMMIT');
+    return diagnostic;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    throw error;
+  }
+}
+
 function ensureVccFinancialOpTablesSupport(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS vcc_fin_op_import_batches (
@@ -52,6 +374,7 @@ function ensureVccFinancialOpTablesSupport(db) {
       idempotency_key TEXT,
       content_hash TEXT,
       hash_version INTEGER NOT NULL DEFAULT 1,
+      raw_contract_version INTEGER NOT NULL DEFAULT 1,
       subject TEXT,
       stat_currency TEXT,
       signed_amount TEXT,
@@ -87,6 +410,7 @@ function ensureVccFinancialOpTablesSupport(db) {
       existing_source_row_snapshot INTEGER,
       existing_import_record_id_snapshot INTEGER,
       existing_imported_at_snapshot TEXT,
+      existing_raw_contract_version_snapshot INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
       FOREIGN KEY (import_record_id) REFERENCES vcc_fin_op_import_records(id),
       FOREIGN KEY (existing_effective_id) REFERENCES vcc_fin_op_effective_rows(id),
@@ -101,6 +425,8 @@ function ensureVccFinancialOpTablesSupport(db) {
       idempotency_key TEXT NOT NULL,
       content_hash TEXT NOT NULL,
       hash_version INTEGER NOT NULL DEFAULT 1,
+      raw_contract_version INTEGER NOT NULL DEFAULT 1,
+      legacy_content_hash TEXT,
       target_month TEXT NOT NULL,
       subject TEXT NOT NULL,
       stat_currency TEXT,
@@ -202,7 +528,10 @@ function ensureVccFinancialOpTablesSupport(db) {
       status TEXT NOT NULL DEFAULT 'calculated'
         CHECK (status IN ('calculated', 'archived')),
       input_revisions_json TEXT NOT NULL DEFAULT '{}',
+      result_revision INTEGER NOT NULL DEFAULT 0,
+      input_fingerprint TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+      updated_at TEXT,
       archived_at TEXT,
       UNIQUE (target_month, id)
     );
@@ -315,9 +644,7 @@ function ensureVccFinancialOpTablesSupport(db) {
       ON vcc_fin_op_dataset_deletions(target_month, deleted_at DESC, id DESC);
   `);
 
-  const columns = (tableName) => new Set(
-    db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name)
-  );
+  const columns = (tableName) => tableColumns(db, tableName);
   const recordColumns = columns('vcc_fin_op_import_records');
   if (!recordColumns.has('resolution_status')) {
     db.exec("ALTER TABLE vcc_fin_op_import_records ADD COLUMN resolution_status TEXT NOT NULL DEFAULT 'not_applicable'");
@@ -398,12 +725,19 @@ function ensureVccFinancialOpTablesSupport(db) {
       db.exec(`ALTER TABLE vcc_fin_op_system_snapshot_attempts ADD COLUMN ${name} ${type}`);
     }
   }
+  ensurePendingRawContractSupport(db);
+  const stateDiagnostic = ensureVccFinancialOpStateModelSupport(db);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_import_records_dataset_lifecycle
       ON vcc_fin_op_import_records(target_month, source_type, dataset_deleted_at, status);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_attempts_comparison
       ON vcc_fin_op_system_snapshot_attempts(comparison_attempt_id)
   `);
+  return { firstMonthDiagnostic: stateDiagnostic };
 }
 
-module.exports = { ensureVccFinancialOpTablesSupport };
+module.exports = {
+  FIRST_MONTH_DIAGNOSTIC_OPERATION,
+  ensureVccFinancialOpStateModelSupport,
+  ensureVccFinancialOpTablesSupport
+};

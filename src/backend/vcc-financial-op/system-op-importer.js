@@ -2,8 +2,10 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
+const sax = require('sax');
 const XLSX = require('xlsx');
 const { canonicalizeVccAmount } = require('./amount-rules');
+const { normalizeWorksheetTarget } = require('../big-table-import/zip-reader');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
@@ -22,6 +24,10 @@ const {
 } = require('./workbook-reader');
 const repository = require('../vcc-financial-op-db/repository');
 
+// 低于 2^46 时 IEEE-754 相邻数间距小于 0.01；达到该数量级后，只有
+// SheetJS Number 而没有 OOXML lexical token 时无法证明分币未在解析前合并。
+const MAX_FALLBACK_CENT_MAGNITUDE = 2 ** 46;
+
 function text(value) {
   return String(value == null ? '' : value).trim();
 }
@@ -31,12 +37,242 @@ function normalizeSystemCurrency(value) {
   return currency === 'CNY' ? 'CNH' : currency;
 }
 
-function systemAmountToken(displayValue, rawValue) {
+function displayAmountToken(displayValue, rawValue) {
   const display = text(displayValue);
   if (display === '') return rawValue === '' ? '' : rawValue;
-  if (/^-+$/.test(display)) return rawValue === '' ? '0' : rawValue;
+  if (/^-+$/.test(display)) return '0';
   const accounting = display.match(/^\((.+)\)$/);
   return accounting ? `-${accounting[1]}` : display;
+}
+
+function rawNumericToken(rawValue) {
+  if (typeof rawValue !== 'number') return null;
+  if (!Number.isFinite(rawValue)
+      || (!Number.isSafeInteger(rawValue) && Math.abs(rawValue) >= MAX_FALLBACK_CENT_MAGNITUDE)) {
+    const error = new Error(`Excel raw 数值缺少可核验的原始 token，无法保证两位小数精度：${rawValue}`);
+    error.code = 'amount-precision-invalid';
+    throw error;
+  }
+  return Object.is(rawValue, -0) ? '0' : String(rawValue);
+}
+
+function systemAmountRead(displayValue, rawValue, context = {}) {
+  const hasRawLexicalToken = typeof context.rawLexicalToken === 'string';
+  const rawToken = hasRawLexicalToken
+    ? context.rawLexicalToken.trim()
+    : rawNumericToken(rawValue);
+  const source = rawToken === null ? 'display-text' : 'raw-numeric';
+  const token = rawToken === null ? displayAmountToken(displayValue, rawValue) : rawToken;
+  const canonicalValue = canonicalizeVccAmount(token, context.label || '系统财务OP财务余额');
+  const evidence = {
+    field: context.field || SYSTEM_OP_DEFINITION.balanceHeader,
+    cell: context.cell || '',
+    source,
+    rawValue,
+    displayValue: displayValue == null ? '' : String(displayValue),
+    canonicalValue
+  };
+  if (source === 'raw-numeric') {
+    evidence.rawTokenSource = hasRawLexicalToken
+      ? 'ooxml-worksheet-v'
+      : 'sheetjs-number-fallback';
+    if (hasRawLexicalToken) evidence.rawLexicalToken = context.rawLexicalToken;
+  }
+  if (source === 'raw-numeric') {
+    try {
+      const displayToken = displayAmountToken(displayValue, '');
+      if (displayToken !== '') {
+        const displayCanonical = canonicalizeVccAmount(displayToken, '系统财务OP财务余额显示值');
+        if (displayCanonical !== canonicalValue) {
+          evidence.auditCode = 'amount-display-raw-mismatch';
+          evidence.displayCanonicalValue = displayCanonical;
+        }
+      }
+    } catch (_error) {
+      evidence.auditCode = 'amount-display-raw-mismatch';
+      evidence.displayCanonicalValue = null;
+    }
+  }
+  return { token, canonicalValue, evidence };
+}
+
+function systemAmountToken(displayValue, rawValue) {
+  const rawToken = rawNumericToken(rawValue);
+  return rawToken === null ? displayAmountToken(displayValue, rawValue) : rawToken;
+}
+
+function workbookFileText(workbook, entryPath) {
+  const entry = workbook && workbook.files && workbook.files[entryPath];
+  if (!entry || entry.content === null || entry.content === undefined) return null;
+  if (Buffer.isBuffer(entry.content)) return entry.content.toString('utf8');
+  if (entry.content instanceof Uint8Array) return Buffer.from(entry.content).toString('utf8');
+  return typeof entry.content === 'string' ? entry.content : null;
+}
+
+function lexicalStructureError(message, context = {}, cause = null) {
+  const error = new Error(message);
+  error.code = 'amount-precision-invalid';
+  error.context = { ...context };
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function worksheetEntryPath(workbook, sheetName) {
+  const sheets = workbook && workbook.Workbook && Array.isArray(workbook.Workbook.Sheets)
+    ? workbook.Workbook.Sheets
+    : [];
+  const metadata = sheets.find((sheet) => sheet && sheet.name === sheetName);
+  const relationshipId = metadata && String(metadata.id || '').trim();
+  const relationshipEntryPath = 'xl/_rels/workbook.xml.rels';
+  const workbookFiles = workbook && workbook.files;
+  if (!relationshipId
+      || !workbookFiles
+      || !Object.hasOwn(workbookFiles, relationshipEntryPath)) return null;
+  const relationshipsXml = workbookFileText(workbook, relationshipEntryPath);
+  if (relationshipsXml === null) {
+    throw lexicalStructureError(
+      '系统财务OP workbook.xml.rels 内容无法读取，不能核验财务余额原始 token',
+      { sheetName, relationshipId }
+    );
+  }
+
+  let target = null;
+  let external = false;
+  let relationshipsRootSeen = false;
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onerror = (error) => { throw error; };
+  parser.onopentag = (node) => {
+    const localName = node.local || String(node.name || '').replace(/^.*:/, '');
+    if (localName === 'Relationships') relationshipsRootSeen = true;
+    if (localName !== 'Relationship') return;
+    const attributes = Object.values(node.attributes || {}).reduce((result, attribute) => {
+      const name = attribute && typeof attribute === 'object'
+        ? String(attribute.local || attribute.name || '')
+        : '';
+      const value = attribute && typeof attribute === 'object' ? attribute.value : attribute;
+      result[name] = value;
+      return result;
+    }, {});
+    if (String(attributes.Id || '') !== relationshipId) return;
+    if (!String(attributes.Type || '').endsWith('/worksheet')) return;
+    target = String(attributes.Target || '');
+    external = String(attributes.TargetMode || '').toLowerCase() === 'external';
+  };
+  try {
+    parser.write(relationshipsXml).close();
+  } catch (error) {
+    throw lexicalStructureError(
+      '系统财务OP无法解析 workbook.xml.rels，不能核验财务余额原始 token',
+      { sheetName, relationshipId },
+      error
+    );
+  }
+  if (!relationshipsRootSeen) {
+    throw lexicalStructureError(
+      '系统财务OP workbook.xml.rels 结构无效，不能核验财务余额原始 token',
+      { sheetName, relationshipId }
+    );
+  }
+  if (!target || external) return null;
+  const entryPath = normalizeWorksheetTarget(target);
+  if (!Object.hasOwn(workbookFiles, entryPath)) return null;
+  if (workbookFileText(workbook, entryPath) === null) {
+    throw lexicalStructureError(
+      '系统财务OP worksheet XML 内容无法读取，不能核验财务余额原始 token',
+      { sheetName, relationshipId, entryPath }
+    );
+  }
+  return entryPath;
+}
+
+function systemBalanceLexicalTokens(workbook, sheetName) {
+  const entryPath = worksheetEntryPath(workbook, sheetName);
+  if (!entryPath) return null;
+  const worksheetXml = workbookFileText(workbook, entryPath);
+
+  const balanceColumn = XLSX.utils.encode_col(
+    SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader]
+  );
+  const tokens = new Map();
+  const seenBalanceRows = new Set();
+  let worksheetRootSeen = false;
+  let currentCell = null;
+  let collectingValue = false;
+  const parser = sax.parser(true, { trim: false, normalize: false, xmlns: true });
+  parser.onerror = (error) => { throw error; };
+  parser.onopentag = (node) => {
+    const localName = node.local || String(node.name || '').replace(/^.*:/, '');
+    if (localName === 'worksheet') worksheetRootSeen = true;
+    if (localName === 'c') {
+      const attributes = Object.values(node.attributes || {}).reduce((result, attribute) => {
+        const name = attribute && typeof attribute === 'object'
+          ? String(attribute.local || attribute.name || '')
+          : '';
+        const value = attribute && typeof attribute === 'object' ? attribute.value : attribute;
+        result[name] = value;
+        return result;
+      }, {});
+      const match = String(attributes.r || '').toUpperCase().match(/^([A-Z]{1,3})([1-9]\d*)$/);
+      if (match && match[1] === balanceColumn) {
+        const rowNumber = Number(match[2]);
+        if (seenBalanceRows.has(rowNumber)) {
+          throw lexicalStructureError(
+            `系统财务OP第 ${rowNumber} 行财务余额单元格重复，不能核验原始 token`,
+            { sheetName, entryPath, sourceRow: rowNumber }
+          );
+        }
+        seenBalanceRows.add(rowNumber);
+        currentCell = {
+          rowNumber,
+          type: String(attributes.t || ''),
+          valueSeen: false,
+          value: ''
+        };
+      } else {
+        currentCell = null;
+      }
+      return;
+    }
+    if (localName === 'v' && currentCell) {
+      collectingValue = true;
+      currentCell.valueSeen = true;
+      currentCell.value = '';
+    }
+  };
+  parser.ontext = (value) => {
+    if (collectingValue && currentCell) currentCell.value += value;
+  };
+  parser.oncdata = parser.ontext;
+  parser.onclosetag = (name) => {
+    const localName = String(name || '').replace(/^.*:/, '');
+    if (localName === 'v') {
+      collectingValue = false;
+      return;
+    }
+    if (localName !== 'c' || !currentCell) return;
+    if (currentCell.valueSeen && (currentCell.type === '' || currentCell.type === 'n')) {
+      tokens.set(currentCell.rowNumber, currentCell.value.trim());
+    }
+    currentCell = null;
+    collectingValue = false;
+  };
+  try {
+    parser.write(worksheetXml).close();
+  } catch (error) {
+    if (error && error.code === 'amount-precision-invalid') throw error;
+    throw lexicalStructureError(
+      '系统财务OP worksheet XML 结构无效，不能核验财务余额原始 token',
+      { sheetName, entryPath },
+      error
+    );
+  }
+  if (!worksheetRootSeen) {
+    throw lexicalStructureError(
+      '系统财务OP worksheet XML 结构无效，不能核验财务余额原始 token',
+      { sheetName, entryPath }
+    );
+  }
+  return tokens;
 }
 
 function findSystemHeader(matrix) {
@@ -132,9 +368,15 @@ function assertUniqueSystemBusinessSheet(workbook, sourceFile, preferredSheetNam
 
 function systemRowError(message, { sourceRow, fieldName, sheetName } = {}) {
   const error = new Error(message);
-  error.sourceRow = sourceRow || null;
-  error.fieldName = fieldName || '';
-  error.sheetName = sheetName || '';
+  const context = {
+    sourceRow: sourceRow || null,
+    fieldName: fieldName || '',
+    sheetName: sheetName || ''
+  };
+  error.sourceRow = context.sourceRow;
+  error.fieldName = context.fieldName;
+  error.sheetName = context.sheetName;
+  error.context = context;
   return error;
 }
 
@@ -185,7 +427,8 @@ function buildSubjectSnapshot({
       sourceCurrency: row.sourceCurrency,
       normalizedCurrency: row.currency,
       displayValues: row.displayValues,
-      rawValues: row.rawValues
+      rawValues: row.rawValues,
+      balanceEvidence: row.balanceEvidence
     }))
   };
   const balancesJson = JSON.stringify(balances);
@@ -229,7 +472,11 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
   if (!normalizedMonth) throw new Error(`系统财务OP账期格式无效：${targetMonth}`);
 
   const sourceFile = path.basename(filePath);
-  const workbook = XLSX.readFile(filePath, { cellFormula: true, cellDates: false });
+  const workbook = XLSX.readFile(filePath, {
+    cellFormula: true,
+    cellDates: false,
+    bookFiles: true
+  });
   if (workbook.Workbook && workbook.Workbook.WBProps && workbook.Workbook.WBProps.date1904) {
     throw new Error(`${sourceFile}：系统财务OP暂不支持 1904 日期系统，请改为 1900 日期系统后重新导入`);
   }
@@ -238,6 +485,7 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
   const sheet = workbook.Sheets[sheetName];
   const displayMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: '' });
   const rawMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: '' });
+  const balanceLexicalTokens = systemBalanceLexicalTokens(workbook, sheetName);
   const header = findSystemHeader(displayMatrix);
   if (header.rowIndex + 1 !== match.headerRow) {
     throw new Error(`${sourceFile}：系统财务OP表头位置与识别结果不一致`);
@@ -314,16 +562,28 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
       const displayBalance = rowField(displayValues, SYSTEM_OP_DEFINITION.balanceHeader);
       const rawBalance = rowField(rawValues, SYSTEM_OP_DEFINITION.balanceHeader);
       let balance;
+      let balanceEvidence;
       try {
-        balance = canonicalizeVccAmount(
-          systemAmountToken(displayBalance, rawBalance),
-          `系统财务OP ${subject} ${sourceCurrency} 财务余额`
-        );
+        const reading = systemAmountRead(displayBalance, rawBalance, {
+          label: `系统财务OP ${subject} ${sourceCurrency} 财务余额`,
+          field: SYSTEM_OP_DEFINITION.balanceHeader,
+          cell: XLSX.utils.encode_cell({
+            r: rowIndex,
+            c: SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader]
+          }),
+          rawLexicalToken: balanceLexicalTokens && balanceLexicalTokens.has(sourceRow)
+            ? balanceLexicalTokens.get(sourceRow)
+            : undefined
+        });
+        balance = reading.canonicalValue;
+        balanceEvidence = reading.evidence;
       } catch (error) {
-        throw systemRowError(
+        const wrapped = systemRowError(
           `${sheetName} 第 ${sourceRow} 行“财务余额”无效：${error.message}`,
           { sourceRow, fieldName: SYSTEM_OP_DEFINITION.balanceHeader, sheetName }
         );
+        wrapped.code = error.code || 'amount-precision-invalid';
+        throw wrapped;
       }
 
       if (!rowsBySubject.has(subject)) rowsBySubject.set(subject, []);
@@ -332,6 +592,7 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
         sourceCurrency,
         currency,
         balance,
+        balanceEvidence,
         displayValues,
         rawValues
       });
@@ -426,7 +687,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       }
       for (const { file, error } of validationErrors) {
         repository.addImportError(db, recordId, {
-          errorCode: 'system-op-validation-error',
+          errorCode: error.code || 'system-op-validation-error',
           message: error.message,
           sourceFile: path.basename(file.filePath),
           sheetName: error.sheetName || file.sheetName || '',
@@ -585,6 +846,14 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           recordId
         );
         item.insertedId = Number(result.lastInsertRowid);
+        insertAttempt(
+          db,
+          recordId,
+          item.snapshot,
+          'accepted',
+          item.insertedId,
+          '首次成功导入系统财务OP快照'
+        );
         insertedCount += 1;
       } else {
         skippedCount += 1;
@@ -660,7 +929,13 @@ function systemRecordResult(record) {
 
 module.exports = {
   normalizeSystemCurrency,
+  displayAmountToken,
+  rawNumericToken,
+  systemAmountRead,
   systemAmountToken,
+  workbookFileText,
+  worksheetEntryPath,
+  systemBalanceLexicalTokens,
   findSystemHeader,
   meaningfulPreview,
   assertUniqueSystemBusinessSheet,

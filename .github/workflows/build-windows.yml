@@ -7,7 +7,7 @@ on:
       - main
   pull_request:
     branches:
-      - main
+      - '**'
 
 jobs:
   smoke-test:
@@ -27,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run smoke test
-        run: npm run smoke
+      - name: Run release checks
+        run: npm run release-check
 
       - name: Run Windows SQLite teardown regression
         run: node --test tests/unit/main-process/position-reconciliation-filtered-source-report.test.js
@@ -37,7 +37,6 @@ jobs:
         run: npm run verify:main-panel-alignment
 
   build:
-    if: github.event_name != 'pull_request'
     needs: smoke-test
     runs-on: windows-latest
     env:
@@ -58,7 +57,7 @@ jobs:
       - name: Build Windows installer
         run: |
           npm run prebuild:meta
-          npx electron-builder --win --publish never
+          npx electron-builder --win --x64 --publish never
 
       - name: Check dist size
         run: node scripts/check-dist-size.js

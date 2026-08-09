@@ -14,6 +14,7 @@ const {
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES,
   SYSTEM_OP_HEADERS,
+  SYSTEM_OP_DEFINITION,
   getSourceDefinition
 } = require('../../../src/backend/vcc-financial-op/definitions');
 const {
@@ -63,16 +64,17 @@ function createEffectiveRecord(db, sourceType, overrides, derived, { key, batchS
   const effectiveKey = key || overrides[getSourceDefinition(sourceType).keyHeader];
   db.prepare(`
     INSERT INTO vcc_fin_op_effective_rows (
-      source_type, idempotency_key_raw, idempotency_key, content_hash,
+      source_type, idempotency_key_raw, idempotency_key, content_hash, raw_contract_version,
       target_month, subject, stat_currency, signed_amount,
       pending_amount, flow_amount, currency_mismatch,
       source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES (?, ?, ?, ?, '2026-06', ?, ?, ?, ?, ?, ?, ?, 'Sheet1', 2, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, '2026-06', ?, ?, ?, ?, ?, ?, ?, 'Sheet1', 2, ?, ?)
   `).run(
     sourceType,
     effectiveKey,
     effectiveKey,
     `hash-${effectiveKey}`,
+    sourceType === SOURCE_TYPES.PENDING ? 2 : 1,
     derived.subject,
     derived.statCurrency || null,
     derived.signedAmount || null,
@@ -199,6 +201,64 @@ test('五类校验原表和校验表按固定表头导出当前有效数据', as
   assert.equal(system.sheet.getCell('D4').value, 'CNY');
 });
 
+test('系统财务OP原表和校验表仅以 balances_json 覆盖财务余额显示值', async (t) => {
+  const { db, dir } = openFixture(t);
+  insertFormalSystemSnapshot(db);
+  const snapshot = db.prepare(`
+    SELECT id, balances_json, raw_json
+    FROM vcc_fin_op_system_snapshots
+    WHERE target_month = '2026-06'
+  `).get();
+  const balances = JSON.parse(snapshot.balances_json);
+  const payload = JSON.parse(snapshot.raw_json);
+  const jpy = payload.rows.find((row) => row.normalizedCurrency === 'JPY');
+  const balanceIndex = SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader];
+  const endingBalanceIndex = SYSTEM_OP_DEFINITION.indexes['OP期末余额'];
+  balances.JPY = '135886024.59';
+  jpy.displayValues[balanceIndex] = '135886024.6';
+  jpy.displayValues[endingBalanceIndex] = '保留显示值';
+  jpy.balanceEvidence = {
+    field: '财务余额',
+    cell: 'M8',
+    source: 'raw-numeric',
+    rawValue: 135886024.59,
+    displayValue: '135886024.6',
+    canonicalValue: '135886024.59',
+    auditCode: 'amount-display-raw-mismatch'
+  };
+  db.prepare(`
+    UPDATE vcc_fin_op_system_snapshots
+    SET balances_json = ?, raw_json = ?
+    WHERE id = ?
+  `).run(JSON.stringify(balances), JSON.stringify(payload), snapshot.id);
+
+  for (const targetKind of Object.values(EXPORT_KINDS)) {
+    const outputPath = path.join(dir, `system-canonical-${targetKind}.xlsx`);
+    await writeDatasetWorkbook({
+      db,
+      targetMonth: '2026-06',
+      sourceType: SOURCE_TYPES.SYSTEM_OP,
+      targetKind,
+      outputPath
+    });
+    const { sheet } = await readSheet(outputPath);
+    const currencyColumn = SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.currencyHeader] + 1;
+    const balanceColumn = balanceIndex + 1;
+    const endingBalanceColumn = endingBalanceIndex + 1;
+    const jpyRow = sheet.getColumn(currencyColumn).values.findIndex((value) => value === 'JPY');
+    assert.equal(jpyRow > 1, true);
+    assert.equal(sheet.getCell(jpyRow, balanceColumn).value, '135886024.59');
+    assert.equal(sheet.getCell(jpyRow, endingBalanceColumn).value, '保留显示值');
+    for (const currency of SUPPORTED_CURRENCIES) {
+      const displayCurrency = currency === 'CNH' ? 'CNY' : currency;
+      const rowNumber = sheet.getColumn(currencyColumn).values
+        .findIndex((value) => value === displayCurrency);
+      assert.equal(rowNumber > 1, true);
+      assert.equal(sheet.getCell(rowNumber, balanceColumn).value, balances[currency]);
+    }
+  }
+});
+
 test('数据行达到上限时自动续 sheet 且每张表重复原表头', async (t) => {
   const { db, dir } = openFixture(t);
   createEffectiveRecord(db, SOURCE_TYPES.RECHARGE, {
@@ -301,4 +361,47 @@ test('系统九币种血缘重复或 Pending 错币标记非 0/1 时拒绝导出
     (error) => error.code === 'invalid-export-lineage'
   );
   assert.equal(fs.existsSync(outputPath), false);
+});
+
+test('系统财务OP canonical 余额缺失、重复、非法或与读取证据不一致时失败关闭', (t) => {
+  const { db } = openFixture(t);
+  insertFormalSystemSnapshot(db);
+  const snapshot = db.prepare(`
+    SELECT id, balances_json, raw_json
+    FROM vcc_fin_op_system_snapshots
+    WHERE target_month = '2026-06'
+  `).get();
+  const originalBalances = JSON.parse(snapshot.balances_json);
+  const originalPayload = JSON.parse(snapshot.raw_json);
+  const assertInvalid = (balancesJson, rawJson = JSON.stringify(originalPayload)) => {
+    db.prepare(`
+      UPDATE vcc_fin_op_system_snapshots
+      SET balances_json = ?, raw_json = ?
+      WHERE id = ?
+    `).run(balancesJson, rawJson, snapshot.id);
+    assert.throws(
+      () => inspectDatasetExport(db, '2026-06', SOURCE_TYPES.SYSTEM_OP, EXPORT_KINDS.RAW),
+      (error) => error.code === 'invalid-export-lineage'
+    );
+  };
+
+  assertInvalid('');
+  assertInvalid('[]');
+
+  const missingCurrency = { ...originalBalances };
+  delete missingCurrency.USD;
+  assertInvalid(JSON.stringify(missingCurrency));
+
+  const duplicateCurrency = `{${SUPPORTED_CURRENCIES.map((currency) => (
+    `${JSON.stringify(currency)}:${JSON.stringify(originalBalances[currency])}`
+  )).join(',')},"AUD":"999"}`;
+  assertInvalid(duplicateCurrency);
+
+  assertInvalid(JSON.stringify({ ...originalBalances, JPY: '1.234' }));
+
+  const mismatchedEvidence = structuredClone(originalPayload);
+  mismatchedEvidence.rows.find((row) => row.normalizedCurrency === 'JPY').balanceEvidence = {
+    canonicalValue: '999.99'
+  };
+  assertInvalid(JSON.stringify(originalBalances), JSON.stringify(mismatchedEvidence));
 });

@@ -1,9 +1,14 @@
 'use strict';
 
+const {
+  diagnoseFirstMonthFacts,
+  readFirstMonthFacts
+} = require('./state-model');
+
 const IMPORT_ROW_INSERT_SQL = `
   INSERT INTO vcc_fin_op_import_rows (
     import_record_id, source_type, target_month,
-    idempotency_key_raw, idempotency_key, content_hash, hash_version,
+    idempotency_key_raw, idempotency_key, content_hash, hash_version, raw_contract_version,
     subject, stat_currency, signed_amount,
     business_department, counterparty_department, business_sub_type,
     channel_name, mid, recon_type,
@@ -11,7 +16,7 @@ const IMPORT_ROW_INSERT_SQL = `
     source_file, sheet_name, source_row, raw_json,
     disposition, validation_field, validation_message
   ) VALUES (
-    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
   )
 `;
 
@@ -237,6 +242,42 @@ function recoverInterruptedImports(db) {
   }
 }
 
+function getVccFinancialOpModuleState(db) {
+  const facts = readFirstMonthFacts(db);
+  const diagnostic = diagnoseFirstMonthFacts(facts);
+  return {
+    firstMonth: facts.firstMonth,
+    openingMonths: facts.openingMonths,
+    migrationDiagnostic: diagnostic.blocked ? diagnostic : null
+  };
+}
+
+function claimVccFinancialOpFirstMonth(db, targetMonth) {
+  const before = getVccFinancialOpModuleState(db);
+  if (before.migrationDiagnostic) {
+    return { claimed: false, firstMonth: before.firstMonth, diagnostic: before.migrationDiagnostic };
+  }
+  if (before.firstMonth !== null) {
+    return {
+      claimed: false,
+      firstMonth: before.firstMonth,
+      conflict: before.firstMonth !== targetMonth
+    };
+  }
+  const result = db.prepare(`
+    UPDATE vcc_fin_op_module_state
+    SET first_month = ?, updated_at = datetime('now', 'localtime')
+    WHERE singleton_id = 1 AND first_month IS NULL
+  `).run(targetMonth);
+  const after = getVccFinancialOpModuleState(db);
+  return {
+    claimed: Number(result.changes) === 1,
+    firstMonth: after.firstMonth,
+    conflict: after.firstMonth !== targetMonth,
+    diagnostic: after.migrationDiagnostic
+  };
+}
+
 module.exports = {
   IMPORT_ROW_INSERT_SQL,
   createImportBatch,
@@ -250,5 +291,7 @@ module.exports = {
   countImportRowsByDisposition,
   failImportBatch,
   recoverInterruptedImports,
-  resolveImportRecord
+  resolveImportRecord,
+  getVccFinancialOpModuleState,
+  claimVccFinancialOpFirstMonth
 };
