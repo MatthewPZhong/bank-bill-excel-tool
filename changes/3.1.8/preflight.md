@@ -29,7 +29,7 @@
 | raw number 转稳定十进制 token 是否覆盖科学计数法且不掩盖超精度 | 金额精度 | 高 | 容易 | `canonicalizeVccAmount` 已限制两位小数和 15 位有效数字 | PROBE | 真实样例 + 科学计数法/公式缓存/超精度测试 | 有限安全数值 raw-first；规范化失败即拒绝 |
 | 首月旧库存在多个初始化月份 | 历史状态 | 高 | 困难 | 当前 schema 允许多个月份 | PROBE | PR 2 迁移 fixture | 按 Spec fail-closed，绝不自动删改资金值 |
 | 新结果模板动态行/合并区能否由现有 SheetJS writer 无损复制 | Excel 样式能力 | 中 | 一般 | 当前 writer 依赖固定行号 | PROBE | PR 5 先做真实模板 contract/round-trip 测试 | 锚点缺失即失败，不做旧模板 fallback |
-| GitHub 草稿 PR 能否发布 | 外部认证 | 中 | 容易 | `gh auth status` 显示 token invalid | BLOCK（仅发布） | 用户执行 `gh auth login -h github.com` 后复检 | 不阻塞本地实现与提交；阻塞 push/PR 创建 |
+| GitHub 发布写入通道是否可用 | 外部认证 | 中 | 容易 | `gh auth status` 显示 CLI token invalid；Git remote 凭据与 GitHub App 连接是独立通道 | PROBE | 分别验证 `git push`、GitHub App PR 创建；只有需要 CLI fallback 时才重新登录 `gh` | Git push 与 PR 创建已实证可用；CLI 直连操作暂不可用，不作为总发布闸门 |
 | Windows installer/portable 中模板可读性 | 平台产物 | 高 | 一般 | 主干 Windows CI 已构建并由分发守卫核对包内版本及必需文件；尚未在目标 Windows 机器实际安装/运行 | PROBE/人工门禁 | 目标机打开 installer/portable，并从两种安装形态实际读取两份 VCC 模板 | 阻塞最终发布，不阻塞代码 PR 草稿 |
 
 ## 保守假设

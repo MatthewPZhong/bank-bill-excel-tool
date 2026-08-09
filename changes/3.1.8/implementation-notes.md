@@ -509,7 +509,10 @@
 | 生产数据库副本只读扫描 Pending 46/48、主体×九币种归档余额和五类数据状态 | 数据负责人保存只读扫描摘要；异常只阻断、人工处理 | BLOCK |
 | 真实连续两月逐主体×九币种核对基础值、调整、生效余额、差异、颜色、归档与下月期初并签字 | 财务人员签字 | BLOCK（资金红线） |
 | 真实约 700 万行、多 sheet 工具箱极限文件压力验证 | 性能验收人员记录文件规模、峰值 RSS、结果守恒和退出状态 | BLOCK |
-| GitHub CLI 重新认证 | 用户执行 `gh auth login -h github.com` 后复检 | 阻塞 push/PR/tag/Release 写操作，不影响上述本地证据 |
+
+### Operational note
+
+- `gh auth status` 当前仍报告 CLI token invalid，但 Git remote 凭据已成功 push `codex/v3.1.8-release-closeout`，GitHub App 连接也已创建草稿 PR #130。三者是独立认证通道；CLI 失效只影响 `gh` 直连和 fallback，不得再概括为 push/PR/tag/Release 全部阻塞。正式 tag 仍通过已验证的 Git remote 推送，Release 由 tag workflow 使用仓库 token 创建；如后续必须使用本地 `gh`，再单独重新登录并复检。
 
 ### Closeout self-review
 
