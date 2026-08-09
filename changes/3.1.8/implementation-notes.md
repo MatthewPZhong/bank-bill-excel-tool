@@ -62,6 +62,7 @@
 | picker 的执行失败与随后月份刷新失败分开保留；刷新返回结构化 `{ok,error}`，空列表/不可执行是成功刷新 | OS 保存取消或失败后需要保留弹框重试，同时列表可能变化；吞掉刷新错误会留下禁用按钮且无解释 | 任一错误关闭弹框；刷新 catch 内吞；把不可执行当刷新异常 | 原月份仍在时显示原错误；被移除时自动切到新月份并要求确认重试；刷新自身失败追加说明且不覆盖原错 |
 | PR 5 review 后将导出失败响应的 `detailLines` 过滤后保留到 renderer Error，并由主状态与 picker 统一显示 `message + 明细` | 模板缺失/漂移错误虽经 IPC 携带实际模板路径，旧 `responseFailure()` 只保留 message/code，用户无法定位真实文件；reviewer P2 复现 | 仅写日志；展示 error.stack/context；把路径拼进固定 message | 只展示显式结构化 detailLines，不泄漏无关 stack；模板实际路径在失败弹框内可见且仍可重试 |
 | 调整原因行高按 N 列实际宽度与 Unicode 显示宽度确定性估算，仅 adjustment 行覆盖模板行高，并限制为 Excel 最大 `409.5pt` | 500 字调整原因虽启用 wrapText，但复制 15/17pt 固定行高会裁切；reviewer P2 复现 | 依赖 Excel 自动适配；扩大全部业务行；固定一个大行高 | ASCII 按 1、其他 Unicode 按 2 估算换行；validator 复用同一 helper；长文本可能触顶但单元格数据完整，基础行保持模板高度 |
+| PR 5 调整原因只在 ExcelJS 单元格赋值边界调用既有 `encodeExcelStXstring()`，数据库、review DTO、归档审计和行高计算继续使用业务原文 | 直接赋值时 ExcelJS 会把用户输入的字面 `_x000D_` 解码成回车，并把真实 CRLF 规范成 LF；既有 helper 已覆盖大小写十六进制、预编码外观、控制字符和 Unicode 合法性 | 在写入数据库时编码；复制一份 writer 私有 escape；对读回结果再做猜测性反解 | 每次导出都从不可变原文单次编码，避免重复导出双重编码；staged validator 仍严格以业务原文 readback，审计与 Excel 可逐字符对账 |
 
 ## Assumptions
 
@@ -177,6 +178,10 @@
 | PR 4 → PR 5 restack 全仓门禁 | 共享主工作区只读依赖执行全量 `src/` ESLint PASS；`npm run smoke` PASS；unit `4760/4760 PASS`（297 个测试文件）；integration `48/48` 脚本、`2457/2457` 可计数断言 PASS，runner 已同步 policy | 当前普通 merge 结果通过静态、基础 smoke、全仓 unit、迁移/大文件/side DB 与四条 VCC 真实链；未用降级测试替代缺失依赖 |
 | PR 4 → PR 5 restack `npm run check:vars` | 工具按约定以 code 2 提醒，仅命中 Runtime-state `state`；实际 diff 只在 `renderer-vcc-financial-op.js` 的 VCC 局部 state 附近新增完整 preflight 阻断原因展示，未修改 `src/renderer.js` 顶层 state | 已按清单复核模板列表、当前模块、导出可用性三组全局联动未变；局部 busy/latestArchivedRun 生命周期未改，renderer 定向与全仓测试均通过；无 Critical / Important-skeleton / Risk-sensitive 命中 |
 | PR 4 → PR 5 restack 合并与资金盲区终审 | `HEAD=c843f619...`、`MERGE_HEAD=31810ef5...`；无 unmerged entry/冲突标记，cached/working `git diff --check` PASS。沿 preflight→worker→calculate→adjust→archive→按月 export→Excel 回读→次月期初及 preview→破坏性事务→audit 全链复核主键、九币种、Decimal、幂等、租约、部分失败和行/子表守恒 | PR 4 的 mandatory fingerprint、完整 issues/openingState、protected worker、exact destructive allowset、`vccFinancialOpErrorResult`/`auditFailure` 与 PR 5 的 semantic writer/targetMonth 二次重查同时保留；未发现未处理 P3+ 自动化缺口。异常生产事实不自动修复，真实月份逐主体逐币种、历史归档一致性和 Windows Excel/WPS/退出时序仍保持人工/平台门禁 |
+| PR 5 调整原因 ST_Xstring 定向探针与回归 | 原始 `核对_x000D_补记` 经 ExcelJS 重开会变成真实回车；边界编码后，字面 `_x000D_`、`_X000d_`、预编码外观 `_x005F_x000D_`、真实 CRLF 和普通中文/emoji 均严格等于业务原文。helper+writer `17/17 PASS`，相关 writer/renderer/archive/audit 组合 `87/87 PASS` | 证明修复点必须且只需位于 N 列赋值边界；sharedStrings 断言同时锁定 escape 词法，defined-name 仍可逆还原 `rowKey × JPY`，数据库 reason 未被 OOXML 词法污染 |
+| PR 5 调整归档与历史按月导出真实链 | 调整归档导出继承链 `297/297 PASS`，历史 `targetMonth` 模板导出链 `28/28 PASS` | 同一真实 service/SQLite 链核对 adjustment 写入、review DTO、archive audit、按月 semantic writer、ExcelJS reason 严格回读、M defined-name 血缘及次月九币种期初；未走 helper-only 捷径 |
+| PR 5 ST_Xstring 修复最终全仓门禁 | 全量 `src/` ESLint PASS；unit `4761/4761 PASS`（297 个测试文件）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS；smoke PASS；`npm run check:vars` code 0，未命中重要变量 | 静态、writer/renderer、历史导出、调整归档继承、迁移/大文件/side DB 和其他业务链均无回归；integration runner 已同步 policy |
+| PR 5 ST_Xstring blindspot + reconciliation 终审 | 从调整 UI/service 原文 → 不可变账本 → review DTO → archive audit → semantic writer N 列单次编码 → ExcelJS strict readback 全链枚举入口；代码搜索确认无第二个调整原因 Excel 写入口。重复导出不变异数据库原文，失败继续由 staged validator/原子发布阻断，金额、币种、月份、行数与余额均未改 | 未发现 P3+ 旁路、双重编码、状态/幂等、审计不一致或资损风险；真实月份逐主体逐币种及 Windows Excel/WPS 打开显示仍保留人工发布门禁 |
 
 ## Remaining Unknowns
 

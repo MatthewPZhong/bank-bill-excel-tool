@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
+const JSZip = require('jszip');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../../src/backend/vcc-financial-op-db/migrations');
 const { SUPPORTED_CURRENCIES, SOURCE_TYPES } = require('../../../src/backend/vcc-financial-op/definitions');
@@ -302,6 +303,53 @@ test('500 字 Unicode 调整原因仅提高调整行行高并在重开后保持�
   );
   assert.ok(adjustmentHeight > baseHeight * 10, '长调整原因应显著提高调整行行高');
   assert.ok(adjustmentHeight <= MAX_EXCEL_ROW_HEIGHT);
+});
+
+test('调整原因 ST_Xstring 字面量与真实 CRLF 经 semantic writer 单次编码后严格往返', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedRun(db);
+  const reason = '核对_x000D_补记；大小写_X000d_；字面_x005F_x000D_；真实CRLF\r\n下一行；普通😀中文';
+  const rowKey = seedChannelAdjustment(db, runId, 'PPHK', reason);
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-fin-op-st-xstring-'));
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true, force: true }));
+
+  const result = await writeRunWorkbooks({
+    db,
+    runId,
+    outputDirectory,
+    assetsDir: path.resolve(__dirname, '../../../assets')
+  });
+
+  assert.equal(
+    db.prepare('SELECT reason FROM vcc_fin_op_run_adjustments WHERE run_id = ?').get(runId).reason,
+    reason,
+    '持久化事实保持业务原文，不保存 OOXML 词法'
+  );
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(result.filePaths[0]);
+  const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
+  const channelRow = sheet.getColumn(2).values.findIndex((value) => value === 'DISCOVER-UK');
+  const adjustmentRow = channelRow + 1;
+  assert.equal(sheet.getCell(adjustmentRow, 14).value, reason);
+  assert.deepEqual(
+    parseAdjustmentLineageName(sheet.getCell(adjustmentRow, 13).names[0]),
+    { rowKey, currency: 'JPY' }
+  );
+
+  const zip = await JSZip.loadAsync(fs.readFileSync(result.filePaths[0]));
+  const sharedStrings = zip.file('xl/sharedStrings.xml');
+  assert.ok(sharedStrings, 'semantic writer 应输出 sharedStrings');
+  const sharedStringsXml = await sharedStrings.async('string');
+  assert.match(sharedStringsXml, /核对_x005F_x000D_补记/);
+  assert.match(sharedStringsXml, /大小写_x005F_X000d_/);
+  assert.match(sharedStringsXml, /字面_x005F_x005F_x005F_x000D_/);
+  assert.ok(
+    sharedStringsXml.includes('真实CRLF_x000D_\n下一行'),
+    '真实 CR 经 ST_Xstring 编码且 LF 保持真实换行'
+  );
 });
 
 test('staged validator 拒绝调整目标格、M/N 结构或覆盖样式漂移', async (t) => {
