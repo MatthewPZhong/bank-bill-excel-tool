@@ -410,6 +410,42 @@
 | --- | --- | --- | --- |
 | 修复后的 Windows 平台结果 | PROBE（外部） | 本地提交后由根代理 push 并重跑 Windows Actions；按 run ID 回写最终状态 | 阻断 Ready/merge，不阻断本地修复提交 |
 
+## Windows RSS 双预算模型校准 Follow-up（2026-08-09）
+
+### Task Brief
+
+- Goal：按用户明确批准的稳定 Windows 样本校准 measurable-growth 预算模型，消除旧单一相对预算的系统性 runner 偏差，同时保留线性反例、硬上限和 paired 只增拒绝。
+- Context：run `31296877417` 的 `49→94MB` 与 run `31299815769` 的首对 `48→93MB`、后两对 `49→96MB` / `49→96MB` 都低于严格线性和 150MB 硬上限，却稳定超过旧 `0.5×rowsRatio×tier1+16MB` 预算；后一个 run 三样本仍为 `30/31 PASS`，证明重采不能消除模型偏差。
+- Constraints：只改 integration 测试门禁、对应单测和发布证据；不改生产 `src/`、Spec、资金数据/金额币种语义、8MB low-signal、32MB 包络、tier1 `<=16MB` 重采保护、预算边界 `±8MB` 重采、0.5 fraction 或 150MB hard cap。
+- Done when：指定 PASS/FAIL 边界、稳定 Windows 三样本、paired mismatch、非法输入和任一样本 150MB spike 全部确定性锁定；小档、默认档、完整 release-check、diff/check-vars 与 P3+ blindspot 通过；普通新 commit，不 push/Ready/merge。
+
+### Decisions
+
+| 决策 | 原因/证据 | 放弃方案与边界 |
+| --- | --- | --- |
+| measurable relative budget 改为 `0.5×rowsRatio×tier1+24MB` | 四组成对样本相对半线性基线所需噪声依次为 `20.5/21/22.5/22.5MB`；24MB 是既有 8MB 噪声单位的最小向上取整倍数 | 不采用按 run 特判或持续重跑；不改变 low-signal 分支 |
+| 同时增加 `absoluteGrowthBudget=tier1+57MB`，最终 `effectiveBudget=min(relativeBudget,absoluteGrowthBudget)` | 57MB 直接来自既有 `82→139MB` PASS / `82→140MB` FAIL 边界，防止 relative budget 随 tier1 增大而无界放宽 | 不提高 150MB hard cap；不允许 `49→147MB` 或 `32→96MB` 精确线性通过 |
+| 独立中位 assessment、paired effective-budget margin 中位数 `<=0`、paired linear margin 中位数 `<0` 继续按 AND 裁决 | 模型校准只能修正预算偏差，不能让错配样本把历史 FAIL 翻为 PASS | paired margin 仍只能新增拒绝；所有原始样本继续逐一检查 `<150MB` |
+| 用户在 run `31299815769` 触发既定停止条件后明确批准继续及上述模型 | 预算契约发生实质变化，需要显式授权与可追溯证据 | 不把失败 workflow 自动解释成可放宽门禁；不修改 Spec 或产品验收契约 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| 两个 Windows runner 四组成对样本 | `31296877417`: `49→94MB`；`31299815769`: `48→93MB`、`49→96MB`、`49→96MB` | 所需 relative noise 为 `20.5/21/22.5/22.5MB`；四组都严格低于线性外推且 `<150MB`，旧 +16MB 模型存在稳定偏差，不是生产路径回归证据 |
+| RSS 确定性单测 | `6/6 PASS` | 锁定 `8→23/24`、`9→26/27`、`13→39` 严格线性拒绝、`32→72/73/96`、`49→97/98/147`、稳定三样本 `49→94`、`82→139/140`、100→150/任一 150MB spike、非法输入 fail-closed；paired mismatch 仍只增拒绝 |
+| RSS 小规模真实链 | 5万/15万 `31/31 PASS`，`39→48MB`，样本数 1 | relative/absolute/effective=`82.5/96/82.5MB`；paired effective margin `-34.5MB`、linear margin `-69MB`；真 multi-sheet/worker 链保持 |
+| RSS 默认真实链 | 50万/150万 `31/31 PASS`，`89→132MB`，样本数 1 | relative/absolute/effective=`157.5/146/146MB`；paired effective margin `-14MB`、linear margin `-135MB`；绝对增长预算实际成为较严门槛 |
+| 最终单次 `npm run release-check` | lint/smoke PASS；unit `4802/4802 PASS`；integration `48/48` 脚本、`2459/2459 PASS`（`297387ms`），目标脚本 `31/31 PASS`（`74500ms`） | 全仓回归与四条 VCC 真实链保持；integration runner 仅按策略自动刷新清单时间/耗时。本地结果不替代新 commit 的 Windows Actions |
+| RSS blindspot P3+ 终审 | 修复两个 P3 测试证据缺口：把 run `31299815769` 原始三对 `[48,49,49]→[93,96,96]` 直接纳入 self-check/单测；为 tier1 与 tier2 分别增加 150MB spike 显式夹具。修复后定向 `11/11 PASS`，`git diff --check` PASS，未发现剩余 P3+ | 事实：独立中位 assessment 与 paired effective/linear margin 在代码中按 AND 组合，paired 只能新增拒绝；tier1/tier2 ceiling 都对每个原始样本执行 `<150MB`。剩余边界仅是新 commit 的 Windows runner 外部结果 |
+| 影响范围 | 当前仅修改 integration 门禁、对应单测与两份发布证据文档；`src/` 与 `changes/3.1.8/spec.md` 零改动 | 无产品行为、资金状态、金额币种、主键血缘、数据契约或发布规格影响 |
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 下一步 | 合并影响 |
+| --- | --- | --- | --- |
+| 新模型在 Windows runner 的最终结果 | PROBE（外部） | 本地完整门禁和 commit 后由根代理 push，观察新 run 并回写 run ID/样本 | 阻断 Ready/merge，不阻断本地修复提交 |
+
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |

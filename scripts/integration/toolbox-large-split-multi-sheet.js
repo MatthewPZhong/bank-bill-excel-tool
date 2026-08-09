@@ -95,9 +95,10 @@ function mb(bytes) {
 // RSS 是 OS 级驻留集快照，受 GC、allocator 分页提交/回收与 MB 取整影响。增长判据分两类：
 //   - tier1 <= 8MB：基线落在测量噪声量级；tier2 必须同时留在固定 32MB 低信号包络内，
 //     且严格低于按行数比得到的线性外推。单次低信号不能直接证明亚线性。
-//   - tier1 > 8MB：已有可测信号，直接以原始 tier1 外推；tier2 预算侧只加一次 16MB RSS 余量，
-//     且无论余量大小都必须严格低于按行数比得到的线性外推。
-//     独立子进程仍观察到约 11MB 的 allocator/OS 页提交偏移，16MB 覆盖该偏移且不会放过精确线性反例。
+//   - tier1 > 8MB：已有可测信号，同时计算相对预算（半线性外推 + 24MB）和绝对增长预算
+//     （tier1 + 57MB），取两者较小值；tier2 还必须严格低于按行数比得到的线性外推。
+//     24MB 是既有 8MB 噪声单位的 3 倍，覆盖两台 Windows runner 四组成对样本所需的
+//     20.5/21/22.5/22.5MB 相对噪声；57MB 锁定既有 82→139MB PASS / 82→140MB FAIL 边界。
 // 采样策略与增长分类独立：首次 tier1 <= 16MB 时均位于 RSS 重采保护区；此外，首对样本属于
 // measurable-growth 且 tier2 距亚线性预算边界两侧不超过 8MB 时，也追加两轮独立成对采样。
 // 多样本先保留 tier1 / tier2 独立中位样本的既有裁决，再对每一对计算预算 margin / 线性 margin
@@ -109,8 +110,9 @@ const SCAN_DELTA_CEILING_MB = 150;
 const RSS_MEASUREMENT_NOISE_MB = 8;
 const LOW_SIGNAL_TIER1_MAX_MB = RSS_MEASUREMENT_NOISE_MB;
 const LOW_SIGNAL_TIER2_CEILING_MB = RSS_MEASUREMENT_NOISE_MB * 4;
-const MEASURABLE_GROWTH_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 2;
-const RSS_RESAMPLE_PROTECTION_MAX_MB = MEASURABLE_GROWTH_NOISE_MB;
+const MEASURABLE_GROWTH_RELATIVE_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 3;
+const MEASURABLE_GROWTH_ABSOLUTE_BUDGET_DELTA_MB = 57;
+const RSS_RESAMPLE_PROTECTION_MAX_MB = RSS_MEASUREMENT_NOISE_MB * 2;
 const RSS_BUDGET_BOUNDARY_RESAMPLE_MB = RSS_MEASUREMENT_NOISE_MB;
 const RSS_RESAMPLE_SAMPLE_COUNT = 3;
 const SUBLINEAR_FRACTION_OF_LINEAR = 0.5;
@@ -136,17 +138,26 @@ function assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio) {
 
   const lowSignal = tier1DeltaMB <= LOW_SIGNAL_TIER1_MAX_MB;
   const linearProjectedMB = tier1DeltaMB * rowsRatio;
-  const sublinearLimitMB = lowSignal
+  const relativeBudgetMB = lowSignal
     ? LOW_SIGNAL_TIER2_CEILING_MB
-    : tier1DeltaMB * rowsRatio * SUBLINEAR_FRACTION_OF_LINEAR + MEASURABLE_GROWTH_NOISE_MB;
+    : tier1DeltaMB * rowsRatio * SUBLINEAR_FRACTION_OF_LINEAR
+      + MEASURABLE_GROWTH_RELATIVE_NOISE_MB;
+  const absoluteGrowthBudgetMB = lowSignal
+    ? LOW_SIGNAL_TIER2_CEILING_MB
+    : tier1DeltaMB + MEASURABLE_GROWTH_ABSOLUTE_BUDGET_DELTA_MB;
+  const effectiveBudgetMB = Math.min(relativeBudgetMB, absoluteGrowthBudgetMB);
   const strictlyBelowLinear = tier2DeltaMB < linearProjectedMB;
   return {
     valid: true,
     tier1WithinCeiling: tier1DeltaMB < SCAN_DELTA_CEILING_MB,
     tier2WithinCeiling: tier2DeltaMB < SCAN_DELTA_CEILING_MB,
-    sublinearWithinBudget: tier2DeltaMB <= sublinearLimitMB && strictlyBelowLinear,
+    sublinearWithinBudget: tier2DeltaMB <= effectiveBudgetMB && strictlyBelowLinear,
     classification: lowSignal ? 'bounded-low-signal' : 'measurable-growth',
-    sublinearLimitMB,
+    relativeBudgetMB,
+    absoluteGrowthBudgetMB,
+    effectiveBudgetMB,
+    // 兼容既有调用方；新日志与测试显式使用 effectiveBudgetMB。
+    sublinearLimitMB: effectiveBudgetMB,
     linearProjectedMB,
     strictlyBelowLinear
   };
@@ -187,9 +198,12 @@ function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
       tier1DeltaMB,
       tier2DeltaMB,
       classification: assessment.classification,
+      relativeBudgetMB: assessment.relativeBudgetMB,
+      absoluteGrowthBudgetMB: assessment.absoluteGrowthBudgetMB,
+      effectiveBudgetMB: assessment.effectiveBudgetMB,
       sublinearLimitMB: assessment.sublinearLimitMB,
       linearProjectedMB: assessment.linearProjectedMB,
-      budgetMarginMB: tier2DeltaMB - assessment.sublinearLimitMB,
+      budgetMarginMB: tier2DeltaMB - assessment.effectiveBudgetMB,
       linearMarginMB: tier2DeltaMB - assessment.linearProjectedMB
     };
   });
@@ -249,10 +263,15 @@ function verifyMemoryGuardModel() {
   const lowSignalLinear = assessScanMemoryGrowth(8, 24, 3);
   const lowSignalSuperlinear = assessScanMemoryGrowth(6, 29, 3);
   const lowSignalEnvelopeBoundary = assessScanMemoryGrowth(8, 32, 3);
-  const lowMagnitudeLinear = assessScanMemoryGrowth(13, 39, 3);
   const thresholdLinear = assessScanMemoryGrowth(9, 27, 3);
   const thresholdSublinear = assessScanMemoryGrowth(9, 26, 3);
+  const lowMagnitudeLinear = assessScanMemoryGrowth(13, 39, 3);
+  const mediumBoundary = assessScanMemoryGrowth(32, 72, 3);
+  const mediumOverflow = assessScanMemoryGrowth(32, 73, 3);
   const highMagnitudeLinear = assessScanMemoryGrowth(32, 96, 3);
+  const windowsBoundary = assessScanMemoryGrowth(49, 97, 3);
+  const windowsOverflow = assessScanMemoryGrowth(49, 98, 3);
+  const windowsLinear = assessScanMemoryGrowth(49, 147, 3);
   const lowSignalOverflow = assessScanMemoryGrowth(6, 33, 3);
   const measurableSublinear = assessScanMemoryGrowth(20, 30, 3);
   const measurableNoiseBoundary = assessScanMemoryGrowth(82, 139, 3);
@@ -262,7 +281,9 @@ function verifyMemoryGuardModel() {
   const nonFiniteDelta = assessScanMemoryGrowth(6, Number.POSITIVE_INFINITY, 3);
   const medianLowSignal = assessScanMemorySamples([7, 8, 8], [17, 23, 22], 3);
   const hiddenHardLimitSpike = assessScanMemorySamples([7, 8, 8], [17, 151, 22], 3);
-  const stableWindowsBoundaryFailure = assessScanMemorySamples([49, 49, 49], [94, 94, 94], 3);
+  const hiddenTier1HardLimitSpike = assessScanMemorySamples([49, 150, 49], [94, 94, 93], 3);
+  const stableWindowsSamples = assessScanMemorySamples([49, 49, 49], [94, 94, 94], 3);
+  const latestWindowsRunnerSamples = assessScanMemorySamples([48, 49, 49], [93, 96, 96], 3);
   const pairedMismatchRegression = assessScanMemorySamples([20, 40, 100], [60, 120, 20], 3);
   const invalidSamples = assessScanMemorySamples([7, 8], [17, 22], 3);
   const valid = lowSignalSublinear.valid
@@ -275,17 +296,27 @@ function verifyMemoryGuardModel() {
     && !lowSignalSuperlinear.sublinearWithinBudget
     && !lowSignalEnvelopeBoundary.strictlyBelowLinear
     && !lowSignalEnvelopeBoundary.sublinearWithinBudget
-    && lowMagnitudeLinear.valid
-    && lowMagnitudeLinear.classification === 'measurable-growth'
-    && !lowMagnitudeLinear.sublinearWithinBudget
     && thresholdLinear.valid
     && !thresholdLinear.strictlyBelowLinear
     && !thresholdLinear.sublinearWithinBudget
     && thresholdSublinear.valid
     && thresholdSublinear.strictlyBelowLinear
     && thresholdSublinear.sublinearWithinBudget
+    && lowMagnitudeLinear.classification === 'measurable-growth'
+    && !lowMagnitudeLinear.strictlyBelowLinear
+    && !lowMagnitudeLinear.sublinearWithinBudget
+    && mediumBoundary.effectiveBudgetMB === 72
+    && mediumBoundary.sublinearWithinBudget
+    && mediumOverflow.effectiveBudgetMB === 72
+    && !mediumOverflow.sublinearWithinBudget
     && highMagnitudeLinear.valid
     && !highMagnitudeLinear.sublinearWithinBudget
+    && windowsBoundary.relativeBudgetMB === 97.5
+    && windowsBoundary.absoluteGrowthBudgetMB === 106
+    && windowsBoundary.effectiveBudgetMB === 97.5
+    && windowsBoundary.sublinearWithinBudget
+    && !windowsOverflow.sublinearWithinBudget
+    && !windowsLinear.sublinearWithinBudget
     && lowSignalOverflow.valid
     && !lowSignalOverflow.sublinearWithinBudget
     && measurableSublinear.valid
@@ -307,18 +338,26 @@ function verifyMemoryGuardModel() {
     && medianLowSignal.sublinearWithinBudget
     && hiddenHardLimitSpike.sublinearWithinBudget
     && !hiddenHardLimitSpike.tier2WithinCeiling
-    && stableWindowsBoundaryFailure.budgetMarginMedianMB === 4.5
-    && !stableWindowsBoundaryFailure.sublinearWithinBudget
+    && hiddenTier1HardLimitSpike.sublinearWithinBudget
+    && !hiddenTier1HardLimitSpike.tier1WithinCeiling
+    && stableWindowsSamples.budgetMarginMedianMB === -3.5
+    && stableWindowsSamples.linearMarginMedianMB === -53
+    && stableWindowsSamples.sublinearWithinBudget
+    && latestWindowsRunnerSamples.tier1DeltaMB === 49
+    && latestWindowsRunnerSamples.tier2DeltaMB === 96
+    && latestWindowsRunnerSamples.budgetMarginMedianMB === -1.5
+    && latestWindowsRunnerSamples.linearMarginMedianMB === -51
+    && latestWindowsRunnerSamples.sublinearWithinBudget
     && pairedMismatchRegression.tier1DeltaMB === 40
     && pairedMismatchRegression.tier2DeltaMB === 60
     && assessScanMemoryGrowth(40, 60, 3).sublinearWithinBudget
-    && pairedMismatchRegression.budgetMarginMedianMB === 14
+    && pairedMismatchRegression.budgetMarginMedianMB === 6
     && pairedMismatchRegression.linearMarginMedianMB === 0
     && !pairedMismatchRegression.sublinearWithinBudget
     && !invalidSamples.valid
     && !invalidSamples.sublinearWithinBudget;
   if (!valid) {
-    throw new Error('内存门禁判据自校验失败：低信号、低/高幅线性反例、绝对上限或非法输入未按预期裁决');
+    throw new Error('内存门禁判据自校验失败：低信号、双预算边界、线性反例、绝对上限或非法输入未按预期裁决');
   }
 }
 
@@ -454,15 +493,17 @@ function collectMemorySamples(
   const firstAssessment = assessScanMemoryGrowth(scan1.deltaMB, scan2.deltaMB, rowsRatio);
   const budgetBoundaryDistanceMB = firstAssessment.valid
     && firstAssessment.classification === 'measurable-growth'
-    ? Math.abs(scan2.deltaMB - firstAssessment.sublinearLimitMB)
+    ? Math.abs(scan2.deltaMB - firstAssessment.effectiveBudgetMB)
     : Number.POSITIVE_INFINITY;
   const inBudgetBoundaryProtection = budgetBoundaryDistanceMB <= RSS_BUDGET_BOUNDARY_RESAMPLE_MB;
   if (inTier1Protection || inBudgetBoundaryProtection) {
     if (inTier1Protection) {
       log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于 RSS 重采保护区（≤${RSS_RESAMPLE_PROTECTION_MAX_MB}MB），追加两轮成对隔离采样并取 paired margin 中位数...`);
     } else {
-      log(`   首对可测样本距亚线性预算边界 ${formatMemoryMB(budgetBoundaryDistanceMB)}MB`
-        + `（tier2=${formatMemoryMB(scan2.deltaMB)}MB，预算=${formatMemoryMB(firstAssessment.sublinearLimitMB)}MB，保护带±${RSS_BUDGET_BOUNDARY_RESAMPLE_MB}MB），`
+      log(`   首对可测样本距 effective 预算边界 ${formatMemoryMB(budgetBoundaryDistanceMB)}MB`
+        + `（tier2=${formatMemoryMB(scan2.deltaMB)}MB，relative预算=${formatMemoryMB(firstAssessment.relativeBudgetMB)}MB，`
+        + `absolute预算=${formatMemoryMB(firstAssessment.absoluteGrowthBudgetMB)}MB，effective预算=${formatMemoryMB(firstAssessment.effectiveBudgetMB)}MB，`
+        + `保护带±${RSS_BUDGET_BOUNDARY_RESAMPLE_MB}MB），`
         + '追加两轮成对隔离采样并取 paired margin 中位数...');
     }
     while (tier1Samples.length < RSS_RESAMPLE_SAMPLE_COUNT) {
@@ -480,7 +521,7 @@ async function run() {
 
   // 判据本身先做确定性自校验，防止为消除 CI 波动而把门禁放宽成恒通过。
   verifyMemoryGuardModel();
-  console.log('内存门禁自校验：8→23MB 低信号亚线性通过；8→24MB / 6→29MB / 8→32MB 低信号线性或超线性反例拒绝；9→27MB / 13→39MB / 32→96MB 可测线性反例拒绝；150MB 任一样本绝对上限独立拒绝。\n');
+  console.log('内存门禁自校验：8→23MB 通过、8→24MB 拒绝；9→26MB 通过、9→27MB 与 13→39MB 严格线性拒绝；32→72MB 通过、32→73/96MB 拒绝；49→97MB 通过、49→98/147MB 拒绝；82→139MB 通过、82→140MB 拒绝；150MB 任一样本绝对上限独立拒绝。\n');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-split-t7-'));
 
@@ -573,18 +614,21 @@ async function run() {
     );
     // (2) 亚线性：两档由独立子进程成对采样。首次 tier1 在 16MB RSS 重采保护区，或首对
     //     measurable-growth 样本距预算边界两侧不超过 8MB 时，追加两轮；每对先算预算/线性
-    //     margin，再取 margin 中位数。增长分类、32MB 低信号包络与 16MB 可测余量均不变。
+    //     margin，再取 margin 中位数。增长分类、32MB 低信号包络与 16MB tier1 重采保护不变；
+    //     可测档使用 relative/absolute 双预算的较小值。
     console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；RSS 中位增量 tier1=${memoryAssessment.tier1DeltaMB}MB → tier2=${memoryAssessment.tier2DeltaMB}MB`
       + `（样本数=${memoryAssessment.sampleCount}，tier1=[${memoryAssessment.tier1Samples.join(', ')}]MB，tier2=[${memoryAssessment.tier2Samples.join(', ')}]MB）`
-      + `（${memoryAssessment.classification}，中位样本参考预算=${formatMemoryMB(memoryAssessment.sublinearLimitMB)}MB，`
-      + `paired 预算 margin 中位数=${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB，`
+      + `（${memoryAssessment.classification}，relative预算=${formatMemoryMB(memoryAssessment.relativeBudgetMB)}MB，`
+      + `absolute预算=${formatMemoryMB(memoryAssessment.absoluteGrowthBudgetMB)}MB，effective预算=${formatMemoryMB(memoryAssessment.effectiveBudgetMB)}MB，`
+      + `paired effective预算 margin 中位数=${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB，`
       + `paired 线性 margin 中位数=${formatSignedMemoryMB(memoryAssessment.linearMarginMedianMB)}MB）`);
     assertTrue(
       memoryAssessment.valid && memoryAssessment.sublinearWithinBudget,
       `A 内存恒定·亚线性：${memoryAssessment.classification} 的 tier2 RSS 中位增量 ${memoryAssessment.tier2DeltaMB}MB`
-        + `；paired 预算 margin 中位数 ${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB ≤ 0MB`
+        + `；paired effective预算 margin 中位数 ${formatSignedMemoryMB(memoryAssessment.budgetMarginMedianMB)}MB ≤ 0MB`
         + `，paired 线性 margin 中位数 ${formatSignedMemoryMB(memoryAssessment.linearMarginMedianMB)}MB < 0MB`
-        + `（中位样本参考预算 ${formatMemoryMB(memoryAssessment.sublinearLimitMB)}MB，线性外推 ${formatMemoryMB(memoryAssessment.linearProjectedMB)}MB）`
+        + `（relative预算 ${formatMemoryMB(memoryAssessment.relativeBudgetMB)}MB，absolute预算 ${formatMemoryMB(memoryAssessment.absoluteGrowthBudgetMB)}MB，`
+        + `effective预算 ${formatMemoryMB(memoryAssessment.effectiveBudgetMB)}MB，线性外推 ${formatMemoryMB(memoryAssessment.linearProjectedMB)}MB）`
     );
 
     // ── A3：大输出分 sheet（验证命中子集写出时 writeRowsStreamed 自动分物理 sheet + readback 正确）──

@@ -18,7 +18,7 @@ test('RSS 低信号同时要求固定包络与严格低于线性外推', () => {
 
   assert.equal(sublinear.valid, true);
   assert.equal(sublinear.classification, 'bounded-low-signal');
-  assert.equal(sublinear.sublinearLimitMB, 32);
+  assert.equal(sublinear.effectiveBudgetMB, 32);
   assert.equal(sublinear.strictlyBelowLinear, true);
   assert.equal(sublinear.sublinearWithinBudget, true);
   for (const rejected of [exactLinear, superlinear, envelopeBoundary]) {
@@ -34,6 +34,8 @@ test('RSS 多样本保留独立中位裁决并以 paired margin 只新增拒绝�
   const pairedMismatch = assessScanMemorySamples([20, 40, 100], [60, 120, 20], 3);
   const spike = assessScanMemorySamples([7, 8, 8], [17, 151, 22], 3);
   const measurableSpike = assessScanMemorySamples([49, 49, 49], [94, 150, 93], 3);
+  const tier1Spike = assessScanMemorySamples([49, 150, 49], [94, 94, 93], 3);
+  const latestWindowsRunner = assessScanMemorySamples([48, 49, 49], [93, 96, 96], 3);
 
   assert.equal(stable.valid, true);
   assert.equal(stable.sampleCount, 3);
@@ -48,25 +50,34 @@ test('RSS 多样本保留独立中位裁决并以 paired margin 只新增拒绝�
   assert.equal(boundaryJitter.tier1DeltaMB, 8);
   assert.equal(boundaryJitter.tier2DeltaMB, 24);
   assert.equal(boundaryJitter.classification, 'bounded-low-signal');
-  assert.deepEqual(boundaryJitter.budgetMarginsMB, [-3.5, -8, -9]);
+  assert.deepEqual(boundaryJitter.budgetMarginsMB, [-11.5, -8, -9]);
   assert.deepEqual(boundaryJitter.linearMarginsMB, [-1, 0, -1]);
-  assert.equal(boundaryJitter.budgetMarginMedianMB, -8);
+  assert.equal(boundaryJitter.budgetMarginMedianMB, -9);
   assert.equal(boundaryJitter.linearMarginMedianMB, -1);
   assert.equal(boundaryJitter.strictlyBelowLinear, false);
   assert.equal(boundaryJitter.sublinearWithinBudget, false);
   assert.equal(assessScanMemoryGrowth(40, 60, 3).sublinearWithinBudget, true);
   assert.equal(pairedMismatch.tier1DeltaMB, 40);
   assert.equal(pairedMismatch.tier2DeltaMB, 60);
-  assert.deepEqual(pairedMismatch.budgetMarginsMB, [14, 44, -146]);
+  assert.deepEqual(pairedMismatch.budgetMarginsMB, [6, 36, -137]);
   assert.deepEqual(pairedMismatch.linearMarginsMB, [0, 0, -280]);
-  assert.equal(pairedMismatch.budgetMarginMedianMB, 14);
+  assert.equal(pairedMismatch.budgetMarginMedianMB, 6);
   assert.equal(pairedMismatch.linearMarginMedianMB, 0);
   assert.equal(pairedMismatch.sublinearWithinBudget, false);
   assert.equal(spike.tier2DeltaMB, 22);
   assert.equal(spike.sublinearWithinBudget, true);
   assert.equal(spike.tier2WithinCeiling, false);
-  assert.equal(measurableSpike.sublinearWithinBudget, false);
+  assert.equal(measurableSpike.sublinearWithinBudget, true);
   assert.equal(measurableSpike.tier2WithinCeiling, false);
+  assert.equal(tier1Spike.sublinearWithinBudget, true);
+  assert.equal(tier1Spike.tier1WithinCeiling, false);
+  assert.equal(latestWindowsRunner.tier1DeltaMB, 49);
+  assert.equal(latestWindowsRunner.tier2DeltaMB, 96);
+  assert.deepEqual(latestWindowsRunner.budgetMarginsMB, [-3, -1.5, -1.5]);
+  assert.deepEqual(latestWindowsRunner.linearMarginsMB, [-51, -51, -51]);
+  assert.equal(latestWindowsRunner.budgetMarginMedianMB, -1.5);
+  assert.equal(latestWindowsRunner.linearMarginMedianMB, -51);
+  assert.equal(latestWindowsRunner.sublinearWithinBudget, true);
 });
 
 test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮成对采样', () => {
@@ -94,8 +105,8 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
   }
 
   for (const scenario of [
-    { initial: [50, 83], extra: [51, 84, 49, 82] },
-    { initial: [50, 99], extra: [51, 100, 49, 98] }
+    { initial: [50, 91], extra: [51, 92, 49, 90] },
+    { initial: [50, 107], extra: [51, 108, 49, 106] }
   ]) {
     const calls = [];
     const results = scenario.extra.slice();
@@ -128,16 +139,15 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
   );
   assert.deepEqual(stableWindowsSamples.tier1Samples, [49, 49, 49]);
   assert.deepEqual(stableWindowsSamples.tier2Samples, [94, 94, 94]);
-  assert.match(logs[0], /tier2=94MB，预算=89\.5MB/);
-  assert.doesNotMatch(logs[0], /预算=90MB/);
+  assert.match(logs[0], /tier2=94MB，relative预算=97\.5MB，absolute预算=106MB，effective预算=97\.5MB/);
   const stableWindowsAssessment = assessScanMemorySamples(
     stableWindowsSamples.tier1Samples,
     stableWindowsSamples.tier2Samples,
     3
   );
-  assert.equal(stableWindowsAssessment.budgetMarginMedianMB, 4.5);
+  assert.equal(stableWindowsAssessment.budgetMarginMedianMB, -3.5);
   assert.equal(stableWindowsAssessment.linearMarginMedianMB, -53);
-  assert.equal(stableWindowsAssessment.sublinearWithinBudget, false);
+  assert.equal(stableWindowsAssessment.sublinearWithinBudget, true);
 
   for (const initial of [[17, 32], [82, 130], [82, 148]]) {
     const samples = collectMemorySamples(
@@ -153,25 +163,41 @@ test('RSS 对 16MB tier1 保护区与可测预算边界两侧对称追加两轮�
   }
 });
 
-test('RSS 门禁拒绝低幅和高幅的精确线性增长', () => {
+test('RSS 可测档取 relative/absolute 双预算较小值并拒绝精确线性增长', () => {
   const thresholdLinear = assessScanMemoryGrowth(9, 27, 3);
   const thresholdSublinear = assessScanMemoryGrowth(9, 26, 3);
   const lowMagnitudeLinear = assessScanMemoryGrowth(13, 39, 3);
+  const mediumBoundary = assessScanMemoryGrowth(32, 72, 3);
+  const mediumOverflow = assessScanMemoryGrowth(32, 73, 3);
   const highMagnitudeLinear = assessScanMemoryGrowth(32, 96, 3);
+  const windowsBoundary = assessScanMemoryGrowth(49, 97, 3);
+  const windowsOverflow = assessScanMemoryGrowth(49, 98, 3);
   const windowsMagnitudeLinear = assessScanMemoryGrowth(49, 147, 3);
 
   assert.equal(thresholdLinear.classification, 'measurable-growth');
-  assert.equal(thresholdLinear.sublinearLimitMB, 29.5);
+  assert.equal(thresholdLinear.relativeBudgetMB, 37.5);
+  assert.equal(thresholdLinear.absoluteGrowthBudgetMB, 66);
+  assert.equal(thresholdLinear.effectiveBudgetMB, 37.5);
   assert.equal(thresholdLinear.strictlyBelowLinear, false);
   assert.equal(thresholdLinear.sublinearWithinBudget, false);
   assert.equal(thresholdSublinear.strictlyBelowLinear, true);
   assert.equal(thresholdSublinear.sublinearWithinBudget, true);
   assert.equal(lowMagnitudeLinear.classification, 'measurable-growth');
-  assert.equal(lowMagnitudeLinear.sublinearLimitMB, 35.5);
+  assert.equal(lowMagnitudeLinear.effectiveBudgetMB, 43.5);
+  assert.equal(lowMagnitudeLinear.strictlyBelowLinear, false);
   assert.equal(lowMagnitudeLinear.sublinearWithinBudget, false);
+  assert.equal(mediumBoundary.relativeBudgetMB, 72);
+  assert.equal(mediumBoundary.absoluteGrowthBudgetMB, 89);
+  assert.equal(mediumBoundary.effectiveBudgetMB, 72);
+  assert.equal(mediumBoundary.sublinearWithinBudget, true);
+  assert.equal(mediumOverflow.sublinearWithinBudget, false);
   assert.equal(highMagnitudeLinear.classification, 'measurable-growth');
   assert.equal(highMagnitudeLinear.sublinearWithinBudget, false);
-  assert.equal(windowsMagnitudeLinear.sublinearLimitMB, 89.5);
+  assert.equal(windowsBoundary.relativeBudgetMB, 97.5);
+  assert.equal(windowsBoundary.absoluteGrowthBudgetMB, 106);
+  assert.equal(windowsBoundary.effectiveBudgetMB, 97.5);
+  assert.equal(windowsBoundary.sublinearWithinBudget, true);
+  assert.equal(windowsOverflow.sublinearWithinBudget, false);
   assert.equal(windowsMagnitudeLinear.strictlyBelowLinear, false);
   assert.equal(windowsMagnitudeLinear.sublinearWithinBudget, false);
 });
@@ -187,7 +213,9 @@ test('RSS 门禁独立保留 150MB 硬上限与可测亚线性预算', () => {
   assert.equal(sublinear.tier2WithinCeiling, true);
   assert.equal(ceiling.sublinearWithinBudget, true);
   assert.equal(ceiling.tier2WithinCeiling, false);
-  assert.equal(observedBoundary.sublinearLimitMB, 139);
+  assert.equal(observedBoundary.relativeBudgetMB, 147);
+  assert.equal(observedBoundary.absoluteGrowthBudgetMB, 139);
+  assert.equal(observedBoundary.effectiveBudgetMB, 139);
   assert.equal(observedBoundary.sublinearWithinBudget, true);
   assert.equal(observedOverflow.sublinearWithinBudget, false);
 });
