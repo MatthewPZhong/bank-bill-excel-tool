@@ -9,6 +9,20 @@ const test = require('node:test');
 const ROOT = path.resolve(__dirname, '../..');
 const read = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 const readBuffer = (relativePath) => fs.readFileSync(path.join(ROOT, relativePath));
+const FROZEN_SPEC_SHA256 = '1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d';
+
+function normalizeLineEndingsForHash(value) {
+  const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value);
+  // latin1 让每个字节一一映射，只折叠 CRLF/CR，不改变 UTF-8 内容的其它字节。
+  return Buffer.from(bytes.toString('latin1').replace(/\r\n?/g, '\n'), 'latin1');
+}
+
+function normalizedTextSha256(value) {
+  return crypto
+    .createHash('sha256')
+    .update(normalizeLineEndingsForHash(value))
+    .digest('hex');
+}
 
 test('v3.1.8 版本号与三份用户文档保持发布候选状态', () => {
   const packageJson = JSON.parse(read('package.json'));
@@ -102,10 +116,7 @@ test('仓库内最终 Spec 只修正两处业务路径并锁定三阶段哈希�
   const spec = read('changes/3.1.8/spec.md');
   const notes = read('changes/3.1.8/implementation-notes.md');
   const preflight = read('changes/3.1.8/preflight.md');
-  const currentSpecSha256 = crypto
-    .createHash('sha256')
-    .update(readBuffer('changes/3.1.8/spec.md'))
-    .digest('hex');
+  const currentSpecSha256 = normalizedTextSha256(readBuffer('changes/3.1.8/spec.md'));
   const sectionStart = spec.indexOf('### 10.4');
   const sectionEnd = spec.indexOf('\n### ', sectionStart + 1);
   assert.ok(sectionStart >= 0 && sectionEnd > sectionStart);
@@ -114,7 +125,7 @@ test('仓库内最终 Spec 只修正两处业务路径并锁定三阶段哈希�
   assert.match(releaseDocs, /`docs\/VERSION_FEATURE_HISTORY\.md`/);
   assert.match(releaseDocs, /`docs\/USER_GUIDE\.md`/);
   assert.doesNotMatch(releaseDocs, /`USER_GUIDE\.html`/);
-  assert.equal(currentSpecSha256, '1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d');
+  assert.equal(currentSpecSha256, FROZEN_SPEC_SHA256);
   assert.match(notes, /9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de/);
   assert.match(notes, /018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8/);
   assert.match(notes, /1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d/);
@@ -123,7 +134,22 @@ test('仓库内最终 Spec 只修正两处业务路径并锁定三阶段哈希�
   assert.match(preflight, /业务内容只修正 §10\.4 的两处真实文档路径/);
   assert.match(preflight, /五处纯格式修复/);
   assert.match(preflight, /格式修复前、仅完成路径修正的阶段哈希/);
-  assert.match(preflight, /1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d/);
+  assert.match(preflight, /CRLF\/CR.*LF/);
+  assert.match(preflight, new RegExp(FROZEN_SPEC_SHA256));
+});
+
+test('Spec 冻结内容哈希跨 LF、CRLF 与 CR checkout 稳定且内容变化仍失败', () => {
+  const normalizedSpec = normalizeLineEndingsForHash(readBuffer('changes/3.1.8/spec.md'));
+  const lfText = normalizedSpec.toString('utf8');
+  const crlfText = lfText.replace(/\n/g, '\r\n');
+  const crText = lfText.replace(/\n/g, '\r');
+  const changedText = lfText.replace('docs/USER_GUIDE.md', 'docs/USER_GUIDE.html');
+
+  assert.notEqual(changedText, lfText, '内容变化夹具必须实际改动 Spec');
+  assert.equal(normalizedTextSha256(lfText), FROZEN_SPEC_SHA256);
+  assert.equal(normalizedTextSha256(crlfText), FROZEN_SPEC_SHA256);
+  assert.equal(normalizedTextSha256(crText), FROZEN_SPEC_SHA256);
+  assert.notEqual(normalizedTextSha256(changedText), FROZEN_SPEC_SHA256);
 });
 
 test('v3.1.8 iteration PRD 索引归档锁定规格、非目标、验收与人工门禁', () => {

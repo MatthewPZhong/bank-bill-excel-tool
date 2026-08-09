@@ -189,7 +189,7 @@
 | PR 5 reviewer P2 定向回归 | renderer + writer 两文件 `36/36 PASS`；PR 5 六文件组合 `70/70 PASS`；历史月份真实 SQLite + 金标准模板链 `28/28 PASS`。500 字 Unicode 原因 write→reopen 后 adjustment 行为 `409.5pt`、wrapText 保留、相邻基础行仍为模板 `15pt`；结构化模板错误测试确认 code/message/detailLines 保留、实际路径可见且 stack 不展示 | 模板错误可观测性、长调整原因裁切、基础行样式回归、staged validator 同口径，以及历史月份导出/解归档/重归档链无回归 |
 | PR 5 reviewer P2 修复后最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4673/4673 PASS`（297 个测试文件）；integration `47/47` 脚本、`2186/2186` 断言 PASS，其中 VCC 历史月份模板导出链 `28/28 PASS` | 同一次命令覆盖静态检查、基础 smoke、全仓单测和全部集成链；证据对应最终冻结代码 |
 | PR 5 最终 `npm run check:vars` 与人工 review | 仅命中 `MODULES`、`elements`、`setStatus`、`state`；`MODULES` 只新增 preview route，后三者均为 VCC renderer 局部变量；无 Critical/Risk-sensitive 命中 | 已复核导出可用性、错误状态展示和模块路由，未发现重要变量旁路或全局状态污染 |
-| PR 6 锁定规范入库 | Downloads 原规范 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；`018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` 是仅修正 §10.4 两处真实路径、尚未完成五处 Markdown 换行格式修复的阶段哈希；当前 `changes/3.1.8/spec.md` SHA-256 为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | 业务内容只改两处路径，前五行双空格改 `<br>` 为五处语义等价格式修复；原始规范、格式修复前阶段与当前评审基线均可追溯，没有改 Q01～Q12 或业务契约 |
+| PR 6 锁定规范入库 | Downloads 原规范 SHA-256 为 `9f3af33df52907499ec673b20f808b7615e7edf10231a33508c8eb5acd2a76de`；`018675fb6da6a07a72b8a7b23a28928dd8eb643b02592d0320714628f55221d8` 是仅修正 §10.4 两处真实路径、尚未完成五处 Markdown 换行格式修复的阶段哈希；当前 `changes/3.1.8/spec.md` 按 CRLF/CR → LF 规范化后的冻结内容 SHA-256 为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | 业务内容只改两处路径，前五行双空格改 `<br>` 为五处语义等价格式修复；换行规范化只消除 checkout 平台差异，不接受其它字节变化。原始规范、格式修复前阶段与当前评审基线均可追溯，没有改 Q01～Q12 或业务契约 |
 | PR 6 版本与发布文档契约 | `package.json`、`package-lock.json` 均为 `3.1.8`；CHANGELOG 标记 `Unreleased`、版本历史标记“待发布”、用户手册标记“发布候选”；release-docs `3/3 PASS` | 防止未完成人工门禁时误写成已发布；锁定 46 列、原始数值、五表预检、调整不覆盖基础行、尾月解归档、历史导出、M/N 与 A:L 披露及旧口径负断言 |
 | PR 6 VCC Electron 预览矩阵 | 26 张 PNG 全量生成并视觉复核，覆盖主面板、缺表、期初、数据管理、首月/结果删除、尾月/非尾月/执行中解归档、历史导出空态、完整结果、单/多调整、已归档、100%/125%/150% 与最小窗口 | 关键状态均可重复生成；面板版本为 3.1.8，危险 disabled 按钮有明确静默视觉；预览隔离与旧图防冒充由静态/行为测试锁定 |
 | PR 6 preview/dist/Windows 定向回归 | VCC preview、renderer、在线升级、Windows 构建及 check-dist 组合 `45/45 PASS`；release-docs `3/3 PASS`；真实 asar fixture 覆盖模板缺失、旧版本、version 缺失/空值 | capture-only hook、PNG 完整性、x64 构建、任意 PR 门禁、模板/版本分发守卫和发布候选文档均有自动化证据 |
@@ -347,7 +347,7 @@
 | 16MB 应改变增长分类还是只改变采样触发 | RSS 契约 | 高 | PROBE | 对照既有常量、反例和 16MB 可测档公式 | 只新增 `RSS_RESAMPLE_PROTECTION_MAX_MB=16`；low-signal 仍为 `<=8MB`，9～16MB 明确称 RSS 重采保护区 |
 | 保护区扩大是否让默认档无条件三采样 | 性能/CI | 中 | PROBE | 小规模和默认 50万/150万真实链记录首次 tier1 | 小档 `42MB`、默认档 `82MB`，均单采样并 `31/31 PASS`；17MB 和 82MB stub 同样锁定不重采 |
 | 中位数能否统一裁决 8/9MB 抖动且不隐藏硬上限 spike | 失败模式 | 高 | PROBE | `9,8,8 → 26,24,23` 与含 151MB 样本的确定性模型 | 中位数把前者裁决为 `8→24MB` 并拒绝线性趋势；后者中位趋势虽通过，但 every-sample ceiling 独立失败 |
-| Spec 的 `018675...` 是否是当前候选哈希 | 证据链 | 中 | PROBE | 对 original、pre-format stage 与当前文件逐字节 SHA-256/差异 | 否；`018675...` 是仅修两路径、五处格式修复前阶段，当前为 `1f5f0663...`；业务内容仅两处路径，另有五处语义等价格式修复 |
+| Spec 的 `018675...` 是否是当前候选哈希 | 证据链 | 中 | PROBE | 对 original、pre-format stage 与当前文件的规范化内容 SHA-256/差异 | 否；`018675...` 是仅修两路径、五处格式修复前阶段，当前 CRLF/CR → LF 规范化冻结内容为 `1f5f0663...`；业务内容仅两处路径，另有五处语义等价格式修复 |
 | 是否存在同根 P3+ 表述漂移 | 文档/可观测性 | 中 | PROBE | 搜索采样阈值、low-signal、两阶段哈希及相关测试 | 找到并修正旧 self-review 把 `<=8MB` 重采写成当前结论的证据一致性 P3；历史测试计数保留为当时事实，未发现行为 P3+ |
 
 无 BLOCK 问题；没有采用会改变产品、资金、数据或公开接口的假设。
@@ -359,10 +359,12 @@
 | RSS + scan-vars + release docs 定向组合 | `11/11 PASS` | 9/16MB 三采样，17/82MB 单采样，中位数决定趋势，任一样本 150MB 硬上限不被隐藏；Spec 当前哈希与三阶段证据被测试锁定 |
 | RSS 小规模真实链 | 5万/15万 `31/31 PASS`，`42→48MB`，样本数 1 | 保护区外保持单采样，亚线性预算 79MB、150MB 硬上限和真 multi-sheet/worker 链同时通过 |
 | RSS 默认真实链 | 50万/150万 `31/31 PASS`，`82→134MB`，样本数 1 | 默认约 82MB 不触发重采；tier2 低于 139MB 可测预算和 150MB 硬上限 |
-| Spec 当前文件 | SHA-256 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | original `9f3af...`、pre-format `018675...` 与当前候选三阶段分离；完整 `cc3080e...→working tree` diff-check code 0 |
-| `scan:vars` / `check:vars` | Git-tracked `src/` 293 文件、3744 个顶层名字；扫描器源码和两份统计报告相对冻结 HEAD 零 diff；`check:vars` code 0 并因 `src/` 无改动跳过 | 本轮只改 integration test、unit/docs 契约和发布证据，无重要变量命中；报告不因仅刷新时间戳进入提交 |
-| 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4801/4801 PASS`（303 文件、0 failures）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（`295757ms`） | release 内默认 RSS `31/31 PASS`；297/64/19/28 四条 VCC 真实链均保持；runner 只刷新 policy 时间与耗时，不改变脚本/断言集合 |
-| blindspot threshold/evidence consistency 终审 | `assessScanMemoryGrowth()` 与 8/32/150MB 判据相对冻结 HEAD 零行为 diff；16MB 新常量只进入 `collectMemorySamples()` 重采条件。日志、代码注释、测试和 preflight 均把 9～16MB 称为 RSS 重采保护区；三阶段 Spec 哈希、当前文件实算值和两类差异表述一致 | 已修复旧 self-review 把 `<=8MB` 写成当前重采边界的同根文档 P3；未发现其余 P3+。负值、非有限值、采样异常继续失败关闭；真实 700 万压力、Windows 构建/Excel/WPS 和财务人工资金核对仍为发布门禁 |
+| Spec 当前文件 | CRLF/CR → LF 规范化冻结内容 SHA-256 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | original `9f3af...`、pre-format `018675...` 与当前候选三阶段分离；完整 `cc3080e...→working tree` diff-check code 0 |
+| `scan:vars` / `check:vars` | Git-tracked `src/` 293 文件、3744 个顶层名字；`check:vars` code 0 并因 `src/` 无改动跳过。合并前硬节点再次运行 `scan:vars`，两份报告只刷新 `scannedAt/扫描时间`，统计与源码集合均无漂移 | 本轮只改测试/docs 契约和发布证据，无重要变量命中；保留并纳入共享工作树中的合并前时间戳刷新，不覆盖协作者改动 |
+| 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4802/4802 PASS`（303 文件、0 failures）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（`291703ms`） | 跨平台 Spec 哈希回归已进入全仓门禁；release 内默认 RSS `31/31 PASS`，297/64/19/28 四条 VCC 真实链均保持；runner 只刷新 policy 时间与耗时，不改变脚本/断言集合 |
+| blindspot threshold/evidence consistency 终审 | `assessScanMemoryGrowth()` 与 8/32/150MB 判据相对冻结 HEAD 零行为 diff；16MB 新常量只进入 `collectMemorySamples()` 重采条件。日志、代码注释、测试和 preflight 均把 9～16MB 称为 RSS 重采保护区；三阶段 Spec 哈希、当前规范化内容实算值和两类差异表述一致 | 已修复旧 self-review 把 `<=8MB` 写成当前重采边界的同根文档 P3；未发现其余 P3+。负值、非有限值、采样异常继续失败关闭；真实 700 万压力、Windows 构建/Excel/WPS 和财务人工资金核对仍为发布门禁 |
+| Windows Actions run `31295431757` Spec 哈希失败根因与修复 | LF checkout 原始 SHA-256 为 `1f5f0663...`；同内容模拟 CRLF 得到 CI 实际 `9af4dfd836ea3037cf3006b0746ba639fcc482bf16472680181c5b840aa9a0c3`，CRLF 再规范化为 LF 后恢复 `1f5f0663...` | 哈希入口仅把 CRLF/孤立 CR 规范化为 LF，其他字节仍参与 SHA-256；自动测试锁定 LF/CRLF/CR 等价，并用真实路径内容变化证明非换行改动继续失败。定向 `5/5 PASS`、完整 release-check `4802/4802` + `2459/2459`；Spec 本身、业务路径和三阶段证据值未修改 |
+| Windows Spec 哈希 P3+ blindspot 终审 | 搜索确认冻结哈希只有 release-docs 单测这一处可执行入口；规范化函数用 latin1 保持字节一一映射，只替换 `0D 0A`/`0D` 换行，不做 trim、Unicode 规范化或内容修补。Spec、`src/`、scan 源码均零 diff；两份 scan 报告仅为协作者执行合并前硬节点产生的时间戳刷新，293/3744 不变 | 未发现遗留 P3+。内容变更、增删尾随换行、Unicode 或其它字节变化仍改变哈希并触发断言；剩余外部验证仅为修复提交后的 Windows Actions 重跑，不在本地伪造通过 |
 
 ## Remaining Unknowns
 
