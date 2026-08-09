@@ -45,6 +45,19 @@ function writeHeaders(t, headers, { fileName = 'pending.xlsx', duplicate = false
   return filePath;
 }
 
+function writeLateHeaderWithFarExtraColumn(t) {
+  const rows = Array.from({ length: 24 }, (_unused, index) => [`导入说明 ${index + 1}`]);
+  rows.push([...PENDING_HEADERS]);
+  const sheet = XLSX.utils.aoa_to_sheet(rows);
+  sheet.XFD25 = { t: 's', v: '模板外远列' };
+  sheet['!ref'] = 'A1:XFD25';
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Pending');
+  const filePath = path.join(tempDir(t), 'late-header-far-extra.xlsx');
+  XLSX.writeFile(workbook, filePath);
+  return filePath;
+}
+
 test('Pending 金标准资产锁定 SHA、46 列、A1:AT1 与表头指纹', async () => {
   assert.equal(sha256(fs.readFileSync(ASSET_PATH)), PENDING_TEMPLATE_FILE_SHA256);
   const workbook = XLSX.readFile(ASSET_PATH);
@@ -93,6 +106,21 @@ test('Pending 缺列、增列、换序和下划线变化均按最新契约失败
       streamDetailRows(filePath, SOURCE_TYPES.PENDING, { onDataRow() {} }),
       (error) => error.code === 'pending-template-contract-mismatch'
     );
+  }
+});
+
+test('Pending 表头位于后续行时仍拒绝 XFD 远列增列，不受预览列宽截断', async (t) => {
+  const filePath = writeLateHeaderWithFarExtraColumn(t);
+  for (const operation of [
+    () => inspectSourceFile(filePath),
+    () => streamDetailRows(filePath, SOURCE_TYPES.PENDING, { onDataRow() {} })
+  ]) {
+    await assert.rejects(operation(), (error) => {
+      assert.equal(error.code, 'pending-template-contract-mismatch');
+      assert.match(error.message, /Pending 原表表头与最新正式模板不一致/);
+      assert.ok(error.detailLines.some((line) => line.includes('实际识别到 16384 列')));
+      return true;
+    });
   }
 });
 

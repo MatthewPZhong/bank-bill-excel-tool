@@ -12,8 +12,10 @@ const {
 } = require('../backend/vcc-financial-op/definitions');
 const {
   archiveRun,
+  isValidInputFingerprint,
   initializeOpeningBalances,
-  preflightCalculation
+  preflightCalculation,
+  preflightRequiredResult
 } = require('../backend/vcc-financial-op/calculator');
 const {
   getEffectiveRunResult,
@@ -28,7 +30,8 @@ const {
 const {
   operationError,
   STATE_CHANGED_CODE,
-  STATE_CHANGED_MESSAGE
+  STATE_CHANGED_MESSAGE,
+  validateOperationConfirmation
 } = require('../backend/vcc-financial-op/operation-state');
 const {
   listArchivedResultMonths: listArchivedResultMonthsFromDb,
@@ -342,8 +345,13 @@ function createVccFinancialOpService({
     return runWorker('import', payload, onProgress);
   }
 
-  async function calculate(payload) {
-    return runWorker('calculate', payload);
+  async function calculate(payload = {}) {
+    const targetMonth = normalizeYearMonth(payload.targetMonth);
+    if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
+    if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
+      return preflightRequiredResult(targetMonth);
+    }
+    return runWorker('calculate', { ...payload, targetMonth });
   }
 
   function preflightRun(payload = {}) {
@@ -402,7 +410,7 @@ function createVccFinancialOpService({
     const outcome = await Promise.race([completion, timeout]);
     if (timer) clearTimeout(timer);
     if (outcome.type === 'timeout') {
-      if (task.protected || task.phase === 'critical-ready') {
+      if (task.protected === true) {
         const protectedOutcome = await completion;
         if (protectedOutcome.type === 'result') return { status: 'completed', protected: true };
         return {
@@ -520,21 +528,19 @@ function createVccFinancialOpService({
   }
 
   function unarchiveMonth(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('unarchive-month', {
       targetMonth: payload.targetMonth,
       expectedPreviewToken
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 
@@ -553,15 +559,13 @@ function createVccFinancialOpService({
   }
 
   function deleteDataTargetData(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('delete-data-target', {
       targetMonth: payload.targetMonth,
       targetType: payload.targetType || payload.sourceType,
@@ -569,7 +573,7 @@ function createVccFinancialOpService({
       reason: payload.reason
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 
