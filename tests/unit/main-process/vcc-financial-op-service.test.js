@@ -13,6 +13,8 @@ const repository = require('../../../src/backend/vcc-financial-op-db/repository'
 const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
+const { serializeError } = require('../../../src/main-process/serialize-error');
+const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
 const {
   previewDataTargetDeletion
 } = require('../../../src/backend/vcc-financial-op/data-target-deletion');
@@ -56,6 +58,190 @@ function createFakeWorkerFactory(workers) {
   };
 }
 
+function seedCalculatedReviewRun(db) {
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (
+      target_month, status, input_revisions_json, result_revision,
+      input_fingerprint, created_at, updated_at
+    ) VALUES (
+      '2026-06', 'calculated', '{"fixture":1}', 0,
+      'fixture-fingerprint', '2026-07-01 09:00:00', '2026-07-01 09:00:00'
+    )
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_run_rows (
+      run_id, subject, row_kind, source_type,
+      category_major, category_minor, currency, amount
+    ) VALUES (?, 'PPHK', 'movement', ?, '充值', 'OPS', 'USD', '10')
+  `).run(runId, SOURCE_TYPES.RECHARGE);
+  const insertBalance = db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, 'PPHK', ?, '100', ?, ?, ?, ?)
+  `);
+  for (const currency of SUPPORTED_CURRENCIES) {
+    const periodAmount = currency === 'USD' ? '10' : '0';
+    const calculatedBalance = currency === 'USD' ? '110' : '100';
+    const systemBalance = currency === 'USD' ? '112' : '100';
+    const difference = currency === 'USD' ? '2' : '0';
+    insertBalance.run(
+      runId,
+      currency,
+      periodAmount,
+      calculatedBalance,
+      systemBalance,
+      difference
+    );
+  }
+  return runId;
+}
+
+test('调整服务查询不占写租约，新增调整独占租约并返回完整生效结果', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedCalculatedReviewRun(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    appVersion: '3.1.8',
+    buildSha: 'service-build'
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const initialOptions = service.listAdjustmentOptions({ runId });
+  assert.equal(initialOptions.resultRevision, 0);
+  assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 options 不计任务 generation');
+  assert.equal(service.getRunResult(runId).review.subjects.length, 1);
+  assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 full result 不计任务 generation');
+
+  const adding = service.addRunAdjustment({
+    runId,
+    rowKey: initialOptions.options[0].rowKey,
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '服务层调整',
+    expectedResultRevision: 0
+  });
+  assert.equal(service._taskStateForTests().action, 'add-adjustment');
+  await assert.rejects(
+    service.addRunAdjustment({
+      runId,
+      rowKey: initialOptions.options[0].rowKey,
+      currency: 'JPY',
+      adjustmentAmount: '1',
+      reason: '并发写入',
+      expectedResultRevision: 0
+    }),
+    (error) => error.code === 'active-vcc-task'
+  );
+  const adjusted = await adding;
+  assert.equal(adjusted.resultRevision, 1);
+  assert.equal(service._taskStateForTests().taskGeneration, 1);
+  const storedAdjustment = db.prepare(`
+    SELECT created_app_version, created_build_sha
+    FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+  `).get(runId);
+  assert.deepEqual({ ...storedAdjustment }, {
+    created_app_version: '3.1.8',
+    created_build_sha: 'service-build'
+  });
+  const effective = service.getRunResult(runId);
+  assert.equal(effective.resultRevision, 1);
+  assert.equal(effective.adjustments.length, 1);
+  assert.equal(
+    effective.balances.find((row) => row.currency === 'USD').effectiveCalculatedBalance,
+    '111'
+  );
+  assert.deepEqual(
+    {
+      periodAmount: effective.balances.find((row) => row.currency === 'USD').periodAmount,
+      calculatedBalance: effective.balances.find((row) => row.currency === 'USD').calculatedBalance,
+      difference: effective.balances.find((row) => row.currency === 'USD').difference
+    },
+    { periodAmount: '11', calculatedBalance: '111', difference: '1' }
+  );
+  assert.equal(service.dataManagerOverview('2026-06').results[0].resultRevision, 1);
+  const refreshedOptions = service.listAdjustmentOptions({ runId });
+  assert.equal(refreshedOptions.options[0].availableCurrencies.includes('USD'), false);
+
+  await assert.rejects(
+    service.archive({ runId, expectedResultRevision: 1 }),
+    (error) => error.code === 'result-input-fingerprint-missing'
+  );
+  const archiveAudit = db.prepare(`
+    SELECT app_version, build_sha FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'archive_result' AND status = 'rolled_back'
+  `).get();
+  assert.deepEqual({ ...archiveAudit }, {
+    app_version: '3.1.8',
+    build_sha: 'service-build'
+  });
+});
+
+test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误和审计上下文', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64)
+  });
+  const primaryError = new Error('replacement-primary-fault');
+  primaryError.code = 'SQLITE_CONSTRAINT_TRIGGER';
+  primaryError.detailLines = ['旧结果保留，替换事务已回滚'];
+  primaryError.context = {
+    targetMonth: '2026-06',
+    operationType: 'replace_calculated_result'
+  };
+  primaryError.auditFailure = {
+    name: 'Error',
+    code: 'SQLITE_BUSY',
+    message: 'replacement-audit-fault'
+  };
+  workers[0].emit('message', {
+    type: 'error',
+    error: serializeError(primaryError)
+  });
+
+  let restoredError = null;
+  await assert.rejects(calculation, (error) => {
+    restoredError = error;
+    return error.message === 'replacement-primary-fault';
+  });
+  assert.deepEqual(vccFinancialOpErrorResult(restoredError), {
+    status: 'error',
+    code: 'SQLITE_CONSTRAINT_TRIGGER',
+    message: 'replacement-primary-fault',
+    detailLines: ['旧结果保留，替换事务已回滚'],
+    dependentMonths: [],
+    context: {
+      targetMonth: '2026-06',
+      operationType: 'replace_calculated_result',
+      auditFailure: {
+        name: 'Error',
+        code: 'SQLITE_BUSY',
+        message: 'replacement-audit-fault'
+      }
+    }
+  });
+});
+
 test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
   const workerSource = fs.readFileSync(path.join(
     __dirname,
@@ -91,6 +277,44 @@ test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 work
     assert.equal(result.status, 'blocked');
     assert.equal(result.code, 'preflight-required');
   }
+});
+
+test('calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版本', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    appVersion: '3.1.8-trusted',
+    buildSha: 'trusted-build-sha',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64),
+    appVersion: 'forged-version',
+    buildSha: 'forged-sha',
+    taskGeneration: 999,
+    runId: 123,
+    unexpectedField: 'must-not-cross-service-boundary'
+  });
+  assert.equal(workers.length, 1);
+  assert.deepEqual(workers[0].options.workerData.payload, {
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64),
+    taskGeneration: 0,
+    appVersion: '3.1.8-trusted',
+    buildSha: 'trusted-build-sha'
+  });
+  workers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
+  assert.deepEqual(await calculation, { status: 'calculated' });
 });
 
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
@@ -590,6 +814,11 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
   worker.emit('message', { type: 'critical-ready' });
   assert.deepEqual(worker.sentMessages, [{ type: 'critical-ack' }]);
   assert.equal(service._taskStateForTests().protected, true);
+  await assert.rejects(
+    service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' }),
+    (error) => error.code === 'active-vcc-task',
+    '解归档持有全局租约时必须拒绝结果导出'
+  );
 
   let terminated = false;
   const termination = service.terminate().then(() => { terminated = true; });
@@ -686,7 +915,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
   assert.equal(service._taskStateForTests().active, false);
 });
 
-test('直接结果导出持有同一租约，退出等待 writer 完成', async (t) => {
+test('无调整的历史归档仍可导出，且直接结果导出持有同一租约', async (t) => {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
@@ -741,22 +970,56 @@ test('直接结果导出持有同一租约，退出等待 writer 完成', async 
   `).run();
   let releaseWriter;
   let writerStarted;
+  let writerArgs;
   const started = new Promise((resolve) => { writerStarted = resolve; });
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: '',
-    writeRunWorkbooksFn: () => {
+    writeRunWorkbooksFn: (args) => {
+      writerArgs = args;
       writerStarted();
       return new Promise((resolve) => { releaseWriter = resolve; });
     }
   });
   t.after(() => db.close());
 
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+  `).get(runId).row_count, 0, '历史归档没有人工调整');
   assert.equal(service.latestArchivedRun().runId, runId, '不一致的更新 archived run 不得成为 latest');
+  assert.deepEqual(service.getArchivedRunByMonth('2026-06'), {
+    targetMonth: '2026-06',
+    runId,
+    archivedAt: '2026-08-01 09:00:00',
+    resultRevision: 0,
+    subjects: ['PPHK']
+  });
+  await assert.rejects(
+    service.exportRun({
+      targetMonth: '2026-07',
+      runId,
+      outputPath: '/tmp/must-not-export.xlsx'
+    }),
+    (error) => error.code === 'archive-state-inconsistent',
+    '外部 runId 不得覆盖租约内 targetMonth 解析'
+  );
+  assert.equal(writerArgs, undefined);
 
-  const exporting = service.exportRun({ runId, outputPath: '/tmp/fixture.xlsx' });
+  const exporting = service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' });
   await started;
   assert.equal(service._taskStateForTests().action, 'export-result');
+  assert.equal(writerArgs.runId, runId, 'runId 必须在租约内由 targetMonth 严格解析');
+  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
+  assert.equal(unarchivePreview.code, 'active-vcc-task');
+  assert.throws(
+    () => service.unarchiveMonth({
+      targetMonth: '2026-06',
+      expectedPreviewToken: unarchivePreview.previewToken,
+      taskGeneration: unarchivePreview.taskGeneration
+    }),
+    (error) => error.code === 'active-vcc-task',
+    '结果导出持有全局租约时必须拒绝解归档'
+  );
   const concurrentPreview = service.previewDatasetExport({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
   });

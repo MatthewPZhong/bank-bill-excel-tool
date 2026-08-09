@@ -3,6 +3,7 @@
 (() => {
   const api = window.desktopApi && window.desktopApi.vccFinancialOp;
   if (!api) return;
+  const differenceApi = window.__vccFinancialOpDifference;
 
   const CURRENCIES = Object.freeze(['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
   const SOURCE_LABELS = Object.freeze({
@@ -174,6 +175,56 @@
       if (focusTarget) focusTarget.focus();
     });
     return { overlay, dialog, body: dialog.querySelector('.vcc-fin-op-dialog-body'), close };
+  }
+
+  function attachPreviewStateTracker(modal, readSnapshot) {
+    let pendingPreview = null;
+    let previewPending = false;
+
+    function trackPreviewState(task) {
+      const pending = Promise.resolve(task);
+      pendingPreview = pending;
+      previewPending = true;
+      pending.then(
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        },
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        }
+      );
+      pending.catch(() => {});
+      return pending;
+    }
+
+    async function waitForPreviewState() {
+      let observed = pendingPreview;
+      while (observed) {
+        await observed;
+        if (observed === pendingPreview) break;
+        observed = pendingPreview;
+      }
+      return {
+        ...readSnapshot(),
+        previewPending
+      };
+    }
+
+    Object.defineProperties(modal, {
+      trackPreviewState: {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: trackPreviewState
+      },
+      waitForPreviewState: {
+        configurable: false,
+        enumerable: false,
+        writable: false,
+        value: waitForPreviewState
+      }
+    });
+    return modal;
   }
 
   function showMessage(title, message, tone = 'info') {
@@ -519,56 +570,584 @@
     });
   }
 
-  function confirmArchive(result) {
-    return new Promise((resolve) => {
-      let accepted = false;
-      const bySubject = new Map();
-      for (const row of result.balances || []) {
-        if (!bySubject.has(row.subject)) bySubject.set(row.subject, new Map());
-        bySubject.get(row.subject).set(row.currency, row);
+  function runStatusOf(result) {
+    return String(result && (result.runStatus || result.status) || '');
+  }
+
+  function normalizeRunResponse(response) {
+    if (!response || response.status !== 'success') {
+      const error = new Error(response && response.message || '读取完整结果失败');
+      error.code = response && response.code || null;
+      throw error;
+    }
+    return { ...response, status: response.runStatus };
+  }
+
+  function isZeroAmount(value) {
+    if (!differenceApi || typeof differenceApi.isEffectiveDifferenceZero !== 'function') {
+      throw new Error('生效差异共享判定组件缺失，已禁止核对和导出。');
+    }
+    return differenceApi.isEffectiveDifferenceZero(value);
+  }
+
+  function isCanonicalReviewAmount(value) {
+    if (typeof value !== 'string' || value === '-0') return false;
+    if (!/^-?(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/.test(value)) return false;
+    const fraction = value.includes('.') ? value.slice(value.indexOf('.') + 1) : '';
+    if (fraction.length > 2) return false;
+    return value.replace(/[-.]/g, '').length <= 15;
+  }
+
+  function validateResultReview(result) {
+    const currencies = result && result.review && Array.isArray(result.review.currencies)
+      ? result.review.currencies
+      : null;
+    if (!currencies || JSON.stringify(currencies) !== JSON.stringify(CURRENCIES)) {
+      throw new Error('完整结果币种契约异常，已禁止核对和归档。');
+    }
+    const subjects = Array.isArray(result.review.subjects) ? result.review.subjects : [];
+    if (subjects.length === 0) throw new Error('完整结果缺少主体，已禁止核对和归档。');
+    for (const subjectResult of subjects) {
+      if (!subjectResult || !String(subjectResult.subject || '').trim()) {
+        throw new Error('完整结果包含空主体，已禁止核对和归档。');
       }
-      const sections = [...bySubject].map(([subject, rows]) => `
-        <section class="vcc-fin-op-result-section">
+      const summaries = subjectResult.summaries;
+      for (const summaryKey of [
+        'openingBalance',
+        'effectiveCalculatedBalance',
+        'systemBalance',
+        'effectiveDifference'
+      ]) {
+        if (!summaries || !summaries[summaryKey] || typeof summaries[summaryKey] !== 'object') {
+          throw new Error(`${subjectResult.subject} 缺少 ${summaryKey} 汇总，已禁止核对和归档。`);
+        }
+        for (const currency of currencies) {
+          if (!Object.hasOwn(summaries[summaryKey], currency)) {
+            throw new Error(`${subjectResult.subject} ${summaryKey} 缺少 ${currency}，已禁止核对和归档。`);
+          }
+          if (!isCanonicalReviewAmount(summaries[summaryKey][currency])) {
+            throw new Error(`${subjectResult.subject} ${currency} ${summaryKey} 金额契约异常，已禁止核对和归档。`);
+          }
+        }
+      }
+    }
+    return { currencies, subjects };
+  }
+
+  function resultReviewHtml(result) {
+    const { currencies, subjects } = validateResultReview(result);
+    const summaryLabels = [
+      ['openingBalance', '期初财务OP'],
+      ['effectiveCalculatedBalance', '当月计算财务OP'],
+      ['systemBalance', '系统财务OP'],
+      ['effectiveDifference', '差异']
+    ];
+    return subjects.map((subjectResult) => {
+      const subject = subjectResult.subject || '';
+      const rows = Array.isArray(subjectResult.rows) ? subjectResult.rows : [];
+      const summaries = subjectResult.summaries || {};
+      const detailRows = rows.map((row) => {
+        const adjustment = row.type === 'adjustment';
+        const currencyAmounts = row.currencyAmounts || {};
+        return `
+          <tr class="${adjustment ? 'vcc-fin-op-adjustment-row' : 'vcc-fin-op-base-row'}">
+            <td>${escapeHtml(row.subject || subject)}</td>
+            <td>${escapeHtml(row.categoryMajor || '-')}</td>
+            <td>
+              <span>${escapeHtml(row.categoryMinor || '-')}</span>
+              <small class="vcc-fin-op-source-label">${escapeHtml(row.sourceLabel || SOURCE_LABELS[row.sourceType] || row.sourceType || '-')}</small>
+              ${adjustment ? '<span class="vcc-fin-op-adjustment-badge">人工调整</span>' : ''}
+            </td>
+            ${currencies.map((currency) => {
+              const amount = currencyAmounts[currency];
+              return `<td class="number">${amount === null || amount === undefined ? '-' : escapeHtml(formatAmount(amount))}</td>`;
+            }).join('')}
+            <td class="number">${adjustment ? escapeHtml(formatAmount(row.adjustmentAmount)) : '-'}</td>
+            <td class="vcc-fin-op-adjustment-reason">${adjustment ? escapeHtml(row.reason) : '-'}</td>
+          </tr>
+        `;
+      }).join('');
+      const summaryRows = summaryLabels.map(([key, label]) => {
+        const amounts = summaries[key] || {};
+        const differenceRow = key === 'effectiveDifference';
+        return `
+          <tr class="vcc-fin-op-summary-row${differenceRow ? ' difference-row' : ''}">
+            <td>${escapeHtml(subject)}</td>
+            <th colspan="2">${label}</th>
+            ${currencies.map((currency) => {
+              const amount = amounts[currency];
+              const balanced = differenceRow && isZeroAmount(amount);
+              const display = balanced ? '-' : formatAmount(amount);
+              return `<td class="number">${escapeHtml(display)}</td>`;
+            }).join('')}
+            <td>-</td><td>-</td>
+          </tr>
+        `;
+      }).join('');
+      return `
+        <section class="vcc-fin-op-result-section" data-subject="${escapeHtml(subject)}">
           <h3>${escapeHtml(subject)}</h3>
           <div class="vcc-fin-op-table-wrap">
-            <table class="vcc-fin-op-table vcc-fin-op-balance-table">
-              <thead><tr><th>项目</th>${CURRENCIES.map((currency) => `<th>${currency}</th>`).join('')}</tr></thead>
-              <tbody>
-                <tr><th>期初财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).openingBalance))}</td>`).join('')}</tr>
-                <tr><th>当月计算财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).calculatedBalance))}</td>`).join('')}</tr>
-                <tr><th>系统财务OP</th>${CURRENCIES.map((currency) => `<td class="number">${escapeHtml(formatAmount((rows.get(currency) || {}).systemBalance))}</td>`).join('')}</tr>
-                <tr class="difference-row"><th>差异</th>${CURRENCIES.map((currency) => {
-                  const difference = (rows.get(currency) || {}).difference || '0';
-                  const isZero = /^-?0(?:\.0+)?$/.test(difference);
-                  return `<td class="number${isZero ? '' : ' is-difference'}">${escapeHtml(formatAmount(difference))}</td>`;
-                }).join('')}</tr>
-              </tbody>
+            <table class="vcc-fin-op-table vcc-fin-op-full-result-table">
+              <thead><tr>
+                <th>主体</th><th>大类</th><th>分类</th>
+                ${currencies.map((currency) => {
+                  const balanced = isZeroAmount(summaries.effectiveDifference[currency]);
+                  return `<th class="${balanced ? 'balanced' : 'unbalanced'}">${currency}</th>`;
+                }).join('')}
+                <th>调整值</th><th>调整原因</th>
+              </tr></thead>
+              <tbody>${detailRows}${summaryRows}</tbody>
             </table>
           </div>
         </section>
-      `).join('');
+      `;
+    }).join('');
+  }
+
+  function reviewFailureDisposition(action, code) {
+    const normalizedAction = String(action || '');
+    const normalizedCode = String(code || '');
+    if (normalizedCode === 'result-revision-changed') {
+      return Object.freeze({ refetch: true, poisonReview: false, disableModify: false });
+    }
+    if (normalizedAction === 'modify') {
+      return Object.freeze({
+        refetch: normalizedCode === 'adjustment-locked',
+        poisonReview: false,
+        disableModify: normalizedCode === 'adjustment-options-empty'
+      });
+    }
+    return Object.freeze({
+      refetch: false,
+      poisonReview: normalizedCode !== 'active-vcc-task',
+      disableModify: false
+    });
+  }
+
+  function normalizeResponseDetailLines(detailLines) {
+    return (Array.isArray(detailLines) ? detailLines : [])
+      .filter((line) => typeof line === 'string')
+      .map((line) => line.trim())
+      .filter(Boolean);
+  }
+
+  function responseFailure(response, fallbackMessage) {
+    const error = new Error(response && response.message || fallbackMessage);
+    error.code = response && response.code || null;
+    error.detailLines = normalizeResponseDetailLines(response && response.detailLines);
+    return error;
+  }
+
+  function responseFailureDisplayMessage(error) {
+    const message = error && error.message ? error.message : String(error);
+    const detailLines = normalizeResponseDetailLines(error && error.detailLines);
+    return [message, ...detailLines].join('；');
+  }
+
+  async function requestRunAdjustment(result, previewResponse = null) {
+    const response = previewResponse || await api.listAdjustmentOptions({ runId: result.runId });
+    if (!response || response.status !== 'success') {
+      const error = new Error(response && response.message || '读取可调整结果行失败');
+      error.code = response && response.code || null;
+      throw error;
+    }
+    if (response.runStatus !== 'calculated') {
+      const error = new Error('已归档结果不能修改，请先解归档。');
+      error.code = 'adjustment-locked';
+      throw error;
+    }
+    if (response.resultRevision !== result.resultRevision) {
+      const error = new Error('结果已发生变化，请重新核对后归档。');
+      error.code = 'result-revision-changed';
+      throw error;
+    }
+    const options = Array.isArray(response.options)
+      ? response.options.map((row, index) => ({ ...row, optionToken: String(index) }))
+      : [];
+    if (options.length === 0) {
+      const error = new Error('当前结果没有尚未调整的业务发生额坐标。');
+      error.code = 'adjustment-options-empty';
+      throw error;
+    }
+
+    return new Promise((resolve) => {
+      let outcome = null;
+      let saving = false;
       const modal = mountDialog({
-        title: `${result.targetMonth} 财务OP校验结果确认`,
-        className: 'vcc-fin-op-review-dialog',
-        onClose: () => resolve(accepted),
+        title: '修改结果',
+        className: 'vcc-fin-op-adjustment-dialog',
+        initialFocusSelector: '[data-field="adjustment-subject"]',
+        canClose: () => !saving,
+        onClose: () => resolve(outcome),
         bodyHtml: `
-          <p class="vcc-fin-op-summary-line">确认归档后，该账期的原表与结果不可改写；本月计算余额将成为下月期初余额。</p>
-          <div class="vcc-fin-op-result-scroll">${sections}</div>
-          <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="archive-confirm">已核对结果，确认归档</label>
+          <p class="vcc-fin-op-summary-line">调整作为独立审计行保存，不覆盖基础结果；同一结果行的同一币种只能调整一次。</p>
+          <div class="vcc-fin-op-adjustment-form">
+            <label class="vcc-fin-op-field"><span>主体</span><select class="vcc-fin-op-input" data-field="adjustment-subject"></select></label>
+            <label class="vcc-fin-op-field"><span>大类</span><select class="vcc-fin-op-input" data-field="adjustment-major" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>分类</span><select class="vcc-fin-op-input" data-field="adjustment-minor" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>币种</span><select class="vcc-fin-op-input" data-field="adjustment-currency" disabled></select></label>
+            <label class="vcc-fin-op-field"><span>调整值</span><input class="vcc-fin-op-input" data-field="adjustment-amount" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 1,234.56 或 (1234.56)"></label>
+            <label class="vcc-fin-op-field vcc-fin-op-adjustment-reason-field"><span>调整原因</span><textarea class="vcc-fin-op-input vcc-fin-op-textarea" data-field="adjustment-reason" rows="3" placeholder="必填，1～500 字"></textarea></label>
+          </div>
+          <p class="vcc-fin-op-field-error" data-role="adjustment-error" hidden></p>
           <div class="dialog-actions right">
-            <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-            <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
+            <button class="secondary-btn small" type="button" data-action="cancel-adjustment">取消</button>
+            <button class="primary-btn small" type="button" data-action="confirm-adjustment" disabled>确认</button>
           </div>
         `
       });
+      const subjectSelect = modal.dialog.querySelector('[data-field="adjustment-subject"]');
+      const majorSelect = modal.dialog.querySelector('[data-field="adjustment-major"]');
+      const minorSelect = modal.dialog.querySelector('[data-field="adjustment-minor"]');
+      const currencySelect = modal.dialog.querySelector('[data-field="adjustment-currency"]');
+      const amountInput = modal.dialog.querySelector('[data-field="adjustment-amount"]');
+      const reasonInput = modal.dialog.querySelector('[data-field="adjustment-reason"]');
+      const errorText = modal.dialog.querySelector('[data-role="adjustment-error"]');
+      const confirmBtn = modal.dialog.querySelector('[data-action="confirm-adjustment"]');
+      const cancelBtn = modal.dialog.querySelector('[data-action="cancel-adjustment"]');
+      const closeBtn = modal.dialog.querySelector('[data-action="close"]');
+
+      function resetSelect(select, placeholder, disabled = true) {
+        select.innerHTML = `<option value="" selected disabled>${escapeHtml(placeholder)}</option>`;
+        select.disabled = disabled;
+      }
+
+      function addSelectOption(select, value, label, rowKey = '') {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = label;
+        if (rowKey) option.dataset.rowKey = rowKey;
+        select.appendChild(option);
+      }
+
+      function selectedTarget() {
+        const selectedOption = minorSelect.selectedOptions && minorSelect.selectedOptions[0];
+        const token = selectedOption && selectedOption.value;
+        return options.find((row) => row.optionToken === token) || null;
+      }
+
+      function updateConfirmState() {
+        const complete = Boolean(
+          selectedTarget()
+          && currencySelect.value
+          && amountInput.value.trim()
+          && reasonInput.value.trim()
+        );
+        confirmBtn.disabled = saving || !complete;
+      }
+
+      function renderSubjects() {
+        resetSelect(subjectSelect, '请选择主体', false);
+        for (const subject of [...new Set(options.map((row) => row.subject))]) {
+          addSelectOption(subjectSelect, subject, subject);
+        }
+        resetSelect(majorSelect, '请先选择主体');
+        resetSelect(minorSelect, '请先选择大类');
+        resetSelect(currencySelect, '请先选择分类');
+      }
+
+      function renderMajors() {
+        const subjectRows = options.filter((row) => row.subject === subjectSelect.value);
+        resetSelect(majorSelect, '请选择大类', subjectRows.length === 0);
+        for (const major of [...new Set(subjectRows.map((row) => row.categoryMajor))]) {
+          addSelectOption(majorSelect, major, major || '（空）');
+        }
+        resetSelect(minorSelect, '请先选择大类');
+        resetSelect(currencySelect, '请先选择分类');
+        updateConfirmState();
+      }
+
+      function renderMinors() {
+        const rows = options.filter((row) => (
+          row.subject === subjectSelect.value && row.categoryMajor === majorSelect.value
+        ));
+        const duplicateCounts = new Map();
+        for (const row of rows) {
+          const key = String(row.categoryMinor || '');
+          duplicateCounts.set(key, (duplicateCounts.get(key) || 0) + 1);
+        }
+        resetSelect(minorSelect, '请选择分类', rows.length === 0);
+        for (const row of rows) {
+          const minorLabel = row.categoryMinor || '（空）';
+          const label = duplicateCounts.get(String(row.categoryMinor || '')) > 1
+            ? `${minorLabel}（${row.sourceLabel || SOURCE_LABELS[row.sourceType] || row.sourceType}）`
+            : minorLabel;
+          addSelectOption(minorSelect, row.optionToken, label, row.rowKey);
+        }
+        resetSelect(currencySelect, '请先选择分类');
+        updateConfirmState();
+      }
+
+      function renderCurrencies() {
+        const target = selectedTarget();
+        const available = target && Array.isArray(target.availableCurrencies)
+          ? target.availableCurrencies
+          : [];
+        resetSelect(currencySelect, '请选择币种', available.length === 0);
+        for (const currency of CURRENCIES) {
+          if (available.includes(currency)) addSelectOption(currencySelect, currency, currency);
+        }
+        updateConfirmState();
+      }
+
+      function setAdjustmentLocked(locked) {
+        saving = locked;
+        for (const control of [
+          subjectSelect, majorSelect, minorSelect, currencySelect,
+          amountInput, reasonInput, confirmBtn, cancelBtn, closeBtn
+        ]) control.disabled = locked;
+        if (!locked) {
+          subjectSelect.disabled = false;
+          majorSelect.disabled = !subjectSelect.value;
+          minorSelect.disabled = !majorSelect.value;
+          currencySelect.disabled = !selectedTarget();
+          updateConfirmState();
+        }
+      }
+
+      subjectSelect.addEventListener('change', renderMajors);
+      majorSelect.addEventListener('change', renderMinors);
+      minorSelect.addEventListener('change', renderCurrencies);
+      currencySelect.addEventListener('change', updateConfirmState);
+      amountInput.addEventListener('input', updateConfirmState);
+      reasonInput.addEventListener('input', updateConfirmState);
+      cancelBtn.addEventListener('click', modal.close);
+      confirmBtn.addEventListener('click', async () => {
+        const target = selectedTarget();
+        const reason = reasonInput.value.trim();
+        if (!target || !currencySelect.value || !amountInput.value.trim() || !reason) return;
+        if (Array.from(reason).length > 500) {
+          errorText.textContent = '调整原因不能超过 500 个字符';
+          errorText.hidden = false;
+          return;
+        }
+        const selectedOption = minorSelect.selectedOptions[0];
+        const rowKey = selectedOption && selectedOption.dataset.rowKey;
+        const previousBusy = { busy: state.busy, kind: state.busyKind };
+        setAdjustmentLocked(true);
+        setBusy(true, 'adjustment');
+        errorText.hidden = true;
+        try {
+          const saved = await api.addRunAdjustment({
+            runId: result.runId,
+            rowKey,
+            currency: currencySelect.value,
+            adjustmentAmount: amountInput.value.trim(),
+            reason,
+            expectedResultRevision: result.resultRevision
+          });
+          if (!saved || saved.status !== 'success') {
+            if (saved && ['result-revision-changed', 'adjustment-locked'].includes(saved.code)) {
+              outcome = {
+                status: saved.code === 'adjustment-locked' ? 'locked' : 'stale',
+                message: saved.message
+              };
+              saving = false;
+              modal.close();
+              return;
+            }
+            throw responseFailure(saved, '保存调整失败');
+          }
+          outcome = { status: 'saved', result: saved };
+          saving = false;
+          modal.close();
+        } catch (error) {
+          if (['result-revision-changed', 'adjustment-locked'].includes(error.code)) {
+            outcome = {
+              status: error.code === 'adjustment-locked' ? 'locked' : 'stale',
+              message: error.message
+            };
+            saving = false;
+            modal.close();
+            return;
+          }
+          errorText.textContent = error.message || String(error);
+          errorText.hidden = false;
+        } finally {
+          setBusy(previousBusy.busy, previousBusy.kind);
+          if (!outcome) setAdjustmentLocked(false);
+        }
+      });
+      renderSubjects();
+      updateConfirmState();
+    });
+  }
+
+  function confirmArchive(initialResult) {
+    return new Promise((resolve) => {
+      let currentResult = initialResult;
+      let completion = null;
+      let operating = false;
+      let reviewHealthy = true;
+      let adjustmentAvailable = true;
+      const modal = mountDialog({
+        title: `${initialResult.targetMonth} 财务OP校验结果确认`,
+        className: 'vcc-fin-op-review-dialog',
+        canClose: () => !operating,
+        onClose: () => resolve(completion || { status: 'closed', run: currentResult }),
+        bodyHtml: `
+          <p class="vcc-fin-op-summary-line">确认归档后，该账期的原表与结果不可改写；本月生效计算余额将成为下月期初余额。</p>
+          <p class="vcc-fin-op-review-state" data-role="review-state" data-tone="neutral"></p>
+          <div class="vcc-fin-op-result-scroll" data-role="review-result"></div>
+          <label class="vcc-fin-op-confirm-check" data-role="archive-confirm-row"><input type="checkbox" data-field="archive-confirm">已核对当前完整结果，确认归档</label>
+          <div class="dialog-actions split vcc-fin-op-review-actions">
+            <div><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
+            <div class="dialog-actions right">
+              <button class="secondary-btn small" type="button" data-action="cancel">关闭</button>
+              <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
+            </div>
+          </div>
+        `
+      });
+      const resultHost = modal.dialog.querySelector('[data-role="review-result"]');
+      const reviewState = modal.dialog.querySelector('[data-role="review-state"]');
+      const confirmRow = modal.dialog.querySelector('[data-role="archive-confirm-row"]');
       const checkbox = modal.dialog.querySelector('[data-field="archive-confirm"]');
       const archiveBtn = modal.dialog.querySelector('[data-action="archive"]');
-      checkbox.addEventListener('change', () => { archiveBtn.disabled = !checkbox.checked; });
-      modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
-      archiveBtn.addEventListener('click', () => {
-        accepted = true;
-        modal.close();
+      const modifyBtn = modal.dialog.querySelector('[data-action="modify-result"]');
+      const cancelBtn = modal.dialog.querySelector('[data-action="cancel"]');
+      const closeBtn = modal.dialog.querySelector('[data-action="close"]');
+
+      function setReviewState(message, tone = 'neutral') {
+        reviewState.textContent = String(message || '');
+        reviewState.dataset.tone = tone;
+      }
+
+      function renderCurrentResult(message = '', tone = 'neutral') {
+        const status = runStatusOf(currentResult);
+        checkbox.checked = false;
+        try {
+          resultHost.innerHTML = resultReviewHtml(currentResult);
+        } catch (error) {
+          resultHost.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
+          confirmRow.hidden = true;
+          archiveBtn.hidden = true;
+          modifyBtn.hidden = true;
+          reviewHealthy = false;
+          setReviewState(error.message || String(error), 'error');
+          return false;
+        }
+        const editable = status === 'calculated';
+        confirmRow.hidden = !editable;
+        archiveBtn.hidden = !editable;
+        modifyBtn.hidden = !editable;
+        archiveBtn.disabled = true;
+        reviewHealthy = true;
+        adjustmentAvailable = editable;
+        setReviewState(
+          message || (editable
+            ? `当前结果版本 ${currentResult.resultRevision}，请核对后归档。`
+            : '该结果已归档，当前为只读查看。'),
+          message ? tone : (editable ? 'neutral' : 'success')
+        );
+        return true;
+      }
+
+      function setReviewLocked(locked) {
+        operating = locked;
+        closeBtn.disabled = locked;
+        cancelBtn.disabled = locked;
+        modifyBtn.disabled = locked || !reviewHealthy || !adjustmentAvailable
+          || runStatusOf(currentResult) !== 'calculated';
+        checkbox.disabled = locked || !reviewHealthy || runStatusOf(currentResult) !== 'calculated';
+        archiveBtn.disabled = locked || !reviewHealthy || !checkbox.checked;
+      }
+
+      async function refetchCurrentResult(message, tone) {
+        try {
+          const response = await api.getRun({ runId: currentResult.runId });
+          currentResult = normalizeRunResponse(response);
+          renderCurrentResult(message, tone);
+        } catch (error) {
+          if (error && typeof error === 'object') error.reviewRefetchFailed = true;
+          throw error;
+        }
+      }
+
+      checkbox.addEventListener('change', () => {
+        archiveBtn.disabled = operating || !reviewHealthy || !checkbox.checked;
       });
+      cancelBtn.addEventListener('click', modal.close);
+      modifyBtn.addEventListener('click', async () => {
+        if (modifyBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
+        setReviewLocked(true);
+        setReviewState('正在读取当前 run 的可调整坐标…', 'warning');
+        try {
+          const adjustmentOutcome = await requestRunAdjustment(currentResult);
+          if (adjustmentOutcome && adjustmentOutcome.status === 'saved') {
+            await refetchCurrentResult('调整已保存，请重新核对完整结果后归档。', 'success');
+          } else if (adjustmentOutcome && ['stale', 'locked'].includes(adjustmentOutcome.status)) {
+            await refetchCurrentResult(
+              adjustmentOutcome.message || (adjustmentOutcome.status === 'locked'
+                ? '已归档结果不能修改，请先解归档。'
+                : '结果已发生变化，请重新核对后归档。'),
+              'error'
+            );
+          } else {
+            setReviewState(`当前结果版本 ${currentResult.resultRevision}，请核对后归档。`);
+          }
+        } catch (error) {
+          checkbox.checked = false;
+          if (error && error.reviewRefetchFailed) {
+            reviewHealthy = false;
+            setReviewState(error.message || String(error), 'error');
+          } else {
+            const disposition = reviewFailureDisposition('modify', error.code);
+            if (disposition.refetch) {
+              try {
+                await refetchCurrentResult(error.message, 'error');
+              } catch (refreshError) {
+                reviewHealthy = false;
+                setReviewState(refreshError.message || String(refreshError), 'error');
+              }
+            } else {
+              if (disposition.disableModify) adjustmentAvailable = false;
+              if (disposition.poisonReview) reviewHealthy = false;
+              setReviewState(error.message || String(error), 'error');
+            }
+          }
+        } finally {
+          setReviewLocked(false);
+        }
+      });
+      archiveBtn.addEventListener('click', async () => {
+        if (archiveBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
+        setReviewLocked(true);
+        setReviewState('正在按当前结果版本重新核对并归档…', 'warning');
+        try {
+          const archived = await api.archive({
+            runId: currentResult.runId,
+            expectedResultRevision: currentResult.resultRevision
+          });
+          if (!archived || archived.status === 'error') {
+            throw responseFailure(archived, '归档失败');
+          }
+          completion = archived;
+          operating = false;
+          modal.close();
+        } catch (error) {
+          checkbox.checked = false;
+          const disposition = reviewFailureDisposition('archive', error.code);
+          if (disposition.refetch) {
+            try {
+              await refetchCurrentResult(
+                error.message || '结果已发生变化，请重新核对后归档。',
+                'error'
+              );
+            } catch (refreshError) {
+              reviewHealthy = false;
+              setReviewState(refreshError.message || String(refreshError), 'error');
+            }
+          } else {
+            if (disposition.poisonReview) reviewHealthy = false;
+            setReviewState(error.message || String(error), 'error');
+          }
+        } finally {
+          if (!completion) setReviewLocked(false);
+        }
+      });
+      renderCurrentResult();
     });
   }
 
@@ -626,21 +1205,19 @@
       }
       if (result.status !== 'calculated') throw new Error('计算返回了未知状态');
       setStatus(`${month} 计算完成，等待确认归档`, 'info');
-      const accepted = await confirmArchive(result);
-      if (!accepted) {
+      const fullResult = normalizeRunResponse(await api.getRun({ runId: result.runId }));
+      const reviewOutcome = await confirmArchive(fullResult);
+      if (!reviewOutcome || reviewOutcome.status !== 'archived') {
         setStatus(`${month} 结果未归档`, 'warning');
         return;
       }
-      setStatus(`正在归档 ${month} 结果…`, 'info');
-      const archived = await api.archive({ runId: result.runId });
-      if (!archived || archived.status === 'error') throw new Error(archived && archived.message || '归档失败');
       state.latestArchivedRun = {
-        runId: archived.runId,
-        targetMonth: archived.targetMonth,
-        status: archived.status
+        runId: reviewOutcome.runId,
+        targetMonth: reviewOutcome.targetMonth,
+        status: reviewOutcome.status
       };
-      setStatus(`${archived.targetMonth} 已确认归档，可导出结果`, 'success');
-      showMessage('归档完成', `${archived.targetMonth} 已归档，可导出校验结果表。`, 'success');
+      setStatus(`${reviewOutcome.targetMonth} 已确认归档，可导出结果`, 'success');
+      showMessage('归档完成', `${reviewOutcome.targetMonth} 已归档，可导出校验结果表。`, 'success');
     } catch (error) {
       setStatus(`运行失败：${error.message || error}`, 'error');
       showMessage('运行失败', error.message || String(error), 'error');
@@ -660,10 +1237,15 @@
 
   async function refreshArchivedState() {
     const months = await loadArchivedResultMonths();
+    applyArchivedMonthsState(months);
+    return months;
+  }
+
+  function applyArchivedMonthsState(months) {
     state.latestArchivedRun = months[0] || null;
     if (state.latestArchivedRun) state.lastMonth = state.latestArchivedRun.targetMonth || state.lastMonth;
     elements.exportBtn.disabled = state.busy || !state.latestArchivedRun;
-    return months;
+    elements.exportBtn.title = state.latestArchivedRun ? '' : '暂无已归档财务OP校验结果';
   }
 
   async function settleArchivedPickerCompletion(onCompleted, result, entry) {
@@ -676,6 +1258,69 @@
     }
   }
 
+  function normalizeArchivedPickerEntries(rows) {
+    return (Array.isArray(rows) ? rows : [])
+      .filter((item) => item && /^\d{4}-\d{2}$/.test(item.targetMonth || ''))
+      .sort((left, right) => right.targetMonth.localeCompare(left.targetMonth));
+  }
+
+  async function runArchivedPickerExecution({
+    entry,
+    preview,
+    actionLabel,
+    executeSelection,
+    refreshPreview
+  }) {
+    async function refreshAfterExecution() {
+      try {
+        const refreshResult = await refreshPreview();
+        if (refreshResult && refreshResult.ok === false) {
+          const refreshError = refreshResult.error instanceof Error
+            ? refreshResult.error
+            : new Error(refreshResult.error && refreshResult.error.message || '月份刷新失败');
+          return { refreshError, refreshResult };
+        }
+        return { refreshError: null, refreshResult: refreshResult || null };
+      } catch (error) {
+        return { refreshError: error, refreshResult: null };
+      }
+    }
+    try {
+      const result = await executeSelection(entry, preview);
+      if (!result || result.status === 'error') {
+        throw responseFailure(result, `${actionLabel}失败`);
+      }
+      if (result.status === 'cancelled') {
+        const refresh = await refreshAfterExecution();
+        return { outcome: 'cancelled', result, ...refresh };
+      }
+      return { outcome: 'success', result, refreshError: null, refreshResult: null };
+    } catch (error) {
+      const refresh = await refreshAfterExecution();
+      return { outcome: 'error', error, ...refresh };
+    }
+  }
+
+  function archivedPickerExecutionErrorMessage({
+    entry,
+    actionLabel,
+    error,
+    refreshError,
+    refreshResult,
+    currentMonth
+  }) {
+    const errorMessage = responseFailureDisplayMessage(error);
+    const refreshSuffix = refreshError
+      ? `；月份刷新失败：${refreshError.message || String(refreshError)}`
+      : (refreshResult && (refreshResult.empty || refreshResult.canExecute === false)
+        ? `；刷新后${refreshResult.message || '当前月份不可操作'}`
+        : '');
+    if (currentMonth && currentMonth !== entry.targetMonth) {
+      return `${entry.targetMonth} ${actionLabel}失败：${errorMessage}；月份列表已刷新并切至 ${currentMonth}，请确认后重试${refreshSuffix}`;
+    }
+    return `${errorMessage}${refreshSuffix}`;
+  }
+
   function createArchivedMonthPickerDialog({
     months,
     actionLabel,
@@ -685,25 +1330,29 @@
     onCompleted = null,
     runningText = '正在处理…'
   }) {
-    const entries = (Array.isArray(months) ? months : [])
-      .filter((item) => item && /^\d{4}-\d{2}$/.test(item.targetMonth || ''));
+    const normalizeEntries = normalizeArchivedPickerEntries;
+    const groupEntries = (rows) => {
+      const grouped = new Map();
+      for (const entry of rows) {
+        const year = entry.targetMonth.slice(0, 4);
+        if (!grouped.has(year)) grouped.set(year, []);
+        grouped.get(year).push(entry);
+      }
+      return grouped;
+    };
+    let entries = normalizeEntries(months);
     if (entries.length === 0) {
       showMessage('请选择月份', '暂无已归档结果', 'info');
       return null;
     }
-    const byYear = new Map();
-    for (const entry of entries) {
-      const year = entry.targetMonth.slice(0, 4);
-      if (!byYear.has(year)) byYear.set(year, []);
-      byYear.get(year).push(entry);
-    }
-    const years = [...byYear.keys()].sort().reverse();
-    for (const rows of byYear.values()) {
-      rows.sort((left, right) => right.targetMonth.localeCompare(left.targetMonth));
-    }
+    let byYear = groupEntries(entries);
+    let years = [...byYear.keys()].sort().reverse();
     let executing = false;
     let latestPreview = null;
+    let currentSelectionCanExecute = false;
     let previewVersion = 0;
+    let pendingPreview = null;
+    let previewPending = false;
     const modal = mountDialog({
       title: actionLabel === '导出' ? '请选择要导出的月份' : '请选择月份',
       className: 'vcc-fin-op-archive-picker-dialog',
@@ -740,6 +1389,19 @@
       return entries.find((item) => item.targetMonth === monthSelect.value) || null;
     }
 
+    function replaceEntries(nextEntries, preferredMonth = '') {
+      entries = normalizeEntries(nextEntries);
+      byYear = groupEntries(entries);
+      years = [...byYear.keys()].sort().reverse();
+      const preferredYear = preferredMonth.slice(0, 4);
+      const selectedYear = byYear.has(preferredYear) ? preferredYear : (years[0] || '');
+      yearSelect.innerHTML = years.map((year) => (
+        `<option value="${escapeHtml(year)}">${escapeHtml(year)}年</option>`
+      )).join('');
+      yearSelect.value = selectedYear;
+      renderMonths(preferredMonth);
+    }
+
     function renderMonths(preferredMonth = '') {
       const yearEntries = byYear.get(yearSelect.value) || [];
       const selected = yearEntries.some((item) => item.targetMonth === preferredMonth)
@@ -753,53 +1415,127 @@
     async function refreshPreview() {
       const currentVersion = ++previewVersion;
       latestPreview = null;
+      currentSelectionCanExecute = false;
       actionButton.disabled = true;
       const entry = selectedEntry();
       if (!entry) {
-        setPickerState('暂无已归档结果');
-        return;
+        const message = '暂无已归档结果';
+        setPickerState(message);
+        return { ok: true, empty: true, message };
       }
       if (typeof previewSelection !== 'function') {
         setPickerState(`${entry.targetMonth} 已归档，可导出`, 'success');
+        currentSelectionCanExecute = true;
         actionButton.disabled = false;
-        return;
+        return { ok: true };
       }
       setPickerState('正在核对归档状态…');
       try {
         const result = await previewSelection(entry);
-        if (currentVersion !== previewVersion) return;
+        if (currentVersion !== previewVersion) return { ok: true, stale: true };
         if (!result || result.status !== 'success') {
-          setPickerState(result && result.message || '归档状态核对失败', 'error');
-          return;
+          const error = responseFailure(result, '归档状态核对失败');
+          setPickerState(error.message, 'error');
+          return { ok: false, error };
+        }
+        if (Array.isArray(result.months)) {
+          const before = entries.map((item) => item.targetMonth).join(',');
+          const after = normalizeEntries(result.months).map((item) => item.targetMonth).join(',');
+          if (before !== after) {
+            replaceEntries(result.months, entry.targetMonth);
+            const replacement = selectedEntry();
+            if (!replacement) {
+              const message = '暂无已归档结果';
+              setPickerState(message, 'error');
+              return { ok: true, empty: true, message };
+            }
+            if (replacement.targetMonth !== entry.targetMonth) {
+              return refreshPreview();
+            }
+          }
         }
         latestPreview = result;
-        if (!result.canUnarchive) {
+        const canExecute = Object.hasOwn(result, 'canExecute')
+          ? Boolean(result.canExecute)
+          : Boolean(result.canUnarchive);
+        if (!canExecute) {
           const dependencies = Array.isArray(result.dependentMonths) && result.dependentMonths.length
             ? ` 后续依赖月份：${result.dependentMonths.join('、')}。`
             : '';
-          setPickerState(`${result.message || '当前月份不可解归档'}${dependencies}`, 'error');
-          return;
+          const message = `${result.message || '当前月份不可操作'}${dependencies}`;
+          setPickerState(message, 'error');
+          return { ok: true, canExecute: false, message };
         }
-        setPickerState(`${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`, 'warning');
+        const successMessage = result.message || (
+          Object.hasOwn(result, 'canExecute')
+            ? `${entry.targetMonth} 已归档，可${actionLabel}`
+            : `${entry.targetMonth} 可解归档；基础结果和调整记录将保留。`
+        );
+        setPickerState(successMessage, result.tone || (
+          Object.hasOwn(result, 'canExecute') ? 'success' : 'warning'
+        ));
+        currentSelectionCanExecute = true;
         actionButton.disabled = false;
+        return { ok: true, canExecute: true };
       } catch (error) {
         if (currentVersion === previewVersion) setPickerState(error.message || String(error), 'error');
+        return { ok: false, error };
       }
     }
+
+    function requestPreviewRefresh() {
+      previewPending = true;
+      const pending = refreshPreview();
+      pendingPreview = pending;
+      pending.then(
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        },
+        () => {
+          if (pendingPreview === pending) previewPending = false;
+        }
+      );
+      return pending;
+    }
+
+    async function waitForPreviewState() {
+      let observed = pendingPreview;
+      while (observed) {
+        await observed;
+        if (observed === pendingPreview) break;
+        observed = pendingPreview;
+      }
+      return {
+        modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+        selectedYear: yearSelect.value,
+        selectedMonth: monthSelect.value,
+        previewPending,
+        confirmDisabled: actionButton.disabled === true,
+        stateMessage: stateText.textContent,
+        stateTone: stateText.dataset.tone || 'neutral'
+      };
+    }
+
+    Object.defineProperty(modal, 'waitForPreviewState', {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: waitForPreviewState
+    });
 
     function setExecutionLocked(locked) {
       yearSelect.disabled = locked;
       monthSelect.disabled = locked;
       cancelButton.disabled = locked;
       closeButton.disabled = locked;
-      actionButton.disabled = locked;
+      actionButton.disabled = locked || !currentSelectionCanExecute;
     }
 
     yearSelect.addEventListener('change', () => {
       renderMonths();
-      refreshPreview();
+      requestPreviewRefresh();
     });
-    monthSelect.addEventListener('change', refreshPreview);
+    monthSelect.addEventListener('change', requestPreviewRefresh);
     cancelButton.addEventListener('click', modal.close);
     actionButton.addEventListener('click', async () => {
       const entry = selectedEntry();
@@ -807,28 +1543,50 @@
       executing = true;
       setExecutionLocked(true);
       setPickerState(runningText, 'warning');
-      let result;
-      try {
-        result = await executeSelection(entry, latestPreview);
-        if (!result || result.status === 'error') {
-          throw new Error(result && result.message || `${actionLabel}失败`);
-        }
-        if (result.status === 'cancelled') {
-          executing = false;
-          setExecutionLocked(false);
-          setPickerState(`已取消${actionLabel}`, 'neutral');
-          await refreshPreview();
-          return;
-        }
-      } catch (error) {
+      const execution = await runArchivedPickerExecution({
+        entry,
+        preview: latestPreview,
+        actionLabel,
+        executeSelection,
+        refreshPreview: requestPreviewRefresh
+      });
+      if (execution.outcome === 'cancelled') {
         executing = false;
         setExecutionLocked(false);
-        await refreshPreview();
-        setPickerState(error.message || String(error), 'error');
+        const refreshedUnavailable = execution.refreshResult
+          && (execution.refreshResult.empty || execution.refreshResult.canExecute === false);
+        setPickerState(
+          execution.refreshError
+            ? `已取消${actionLabel}；月份刷新失败：${execution.refreshError.message || String(execution.refreshError)}`
+            : (refreshedUnavailable
+              ? `已取消${actionLabel}；${execution.refreshResult.message}`
+              : `已取消${actionLabel}`),
+          execution.refreshError || refreshedUnavailable ? 'warning' : 'neutral'
+        );
+        return;
+      }
+      if (execution.outcome === 'error') {
+        executing = false;
+        setExecutionLocked(false);
+        setPickerState(
+          archivedPickerExecutionErrorMessage({
+            entry,
+            actionLabel,
+            error: execution.error,
+            refreshError: execution.refreshError,
+            refreshResult: execution.refreshResult,
+            currentMonth: monthSelect.value
+          }),
+          'error'
+        );
         return;
       }
 
-      const completionError = await settleArchivedPickerCompletion(onCompleted, result, entry);
+      const completionError = await settleArchivedPickerCompletion(
+        onCompleted,
+        execution.result,
+        entry
+      );
       executing = false;
       modal.close();
       if (completionError) {
@@ -840,7 +1598,7 @@
       }
     });
     renderMonths(entries[0].targetMonth);
-    refreshPreview();
+    requestPreviewRefresh();
     return modal;
   }
 
@@ -862,6 +1620,9 @@
               expectedPreviewToken: preview && preview.previewToken,
               taskGeneration: preview && preview.taskGeneration
             });
+          } catch (error) {
+            setStatus(`${entry.targetMonth} 解归档失败：${error.message || String(error)}`, 'error');
+            throw error;
           } finally {
             setBusy(false);
           }
@@ -880,25 +1641,65 @@
   }
 
   async function handleExport() {
-    if (state.busy || !state.latestArchivedRun) return;
-    setBusy(true, 'export');
+    if (state.busy) return;
+    let months = null;
+    setBusy(true, 'export-months');
     try {
-      const target = state.latestArchivedRun;
-      setStatus(`正在导出 ${target.targetMonth} 校验结果…`, 'info');
-      const result = await api.exportResult({ runId: target.runId });
-      if (!result || result.status === 'cancelled') {
-        setStatus('已取消导出', 'info');
-        return;
-      }
-      if (result.status !== 'success') throw new Error(result.message || '导出失败');
-      const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
-      setStatus(`${target.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
+      months = await loadArchivedResultMonths();
+      applyArchivedMonthsState(months);
     } catch (error) {
       setStatus(`导出失败：${error.message || error}`, 'error');
       showMessage('导出失败', error.message || String(error), 'error');
+      return null;
     } finally {
       setBusy(false);
     }
+    if (!months.length) {
+      const message = '暂无已归档财务OP校验结果';
+      setStatus(message, 'info');
+      showMessage('导出结果', message, 'info');
+      return null;
+    }
+    return createArchivedMonthPickerDialog({
+      months,
+      actionLabel: '导出',
+      previewSelection: async (entry) => {
+        const freshMonths = await loadArchivedResultMonths();
+        applyArchivedMonthsState(freshMonths);
+        const stillArchived = freshMonths.some((item) => item.targetMonth === entry.targetMonth);
+        return {
+          status: 'success',
+          months: freshMonths,
+          canExecute: stillArchived,
+          message: stillArchived
+            ? `${entry.targetMonth} 已归档，可导出`
+            : `${entry.targetMonth} 已不在可导出月份中，请重新选择。`,
+          tone: stillArchived ? 'success' : 'error'
+        };
+      },
+      runningText: '正在导出，请勿关闭窗口…',
+      executeSelection: async (entry) => {
+        setBusy(true, 'export');
+        setStatus(`正在导出 ${entry.targetMonth} 校验结果…`, 'info');
+        try {
+          const result = await api.exportResult({ targetMonth: entry.targetMonth });
+          if (!result || result.status === 'error') {
+            throw responseFailure(result, '导出失败');
+          }
+          if (result.status === 'cancelled') setStatus('已取消导出', 'info');
+          return result;
+        } catch (error) {
+          setStatus(`${entry.targetMonth} 导出失败：${responseFailureDisplayMessage(error)}`, 'error');
+          throw error;
+        } finally {
+          setBusy(false);
+        }
+      },
+      onCompleted: async (result, entry) => {
+        const count = Array.isArray(result.filePaths) ? result.filePaths.length : 1;
+        setStatus(`${entry.targetMonth} 校验结果已导出（${count} 个文件）`, 'success');
+      }
+    });
   }
 
   function statusTone(status) {
@@ -921,6 +1722,28 @@
               <td>${escapeHtml(row.tableName)}</td>
               <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
               <td>${escapeHtml(formatDateTime(row.generatedAt || row.createdAt || row.archivedAt))}</td>
+            </tr>
+          `).join('')}</tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderResultOverviewTable(rows) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      return '<div class="vcc-fin-op-empty">当前账期还没有校验结果</div>';
+    }
+    return `
+      <div class="vcc-fin-op-table-wrap">
+        <table class="vcc-fin-op-table vcc-fin-op-manager-result-table">
+          <thead><tr><th>表名</th><th>处理状态</th><th>结果版本</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody>${rows.map((row) => `
+            <tr>
+              <td>${escapeHtml(row.tableName)}</td>
+              <td><span class="vcc-fin-op-state" data-state="${escapeHtml(row.dataStatus)}">${escapeHtml(row.dataStatusText)}</span></td>
+              <td>${escapeHtml(row.resultRevision == null ? '0' : row.resultRevision)}</td>
+              <td>${escapeHtml(formatDateTime(row.updatedAt || row.archivedAt || row.createdAt))}</td>
+              <td><button class="vcc-fin-op-link-btn" type="button" data-result-run-id="${escapeHtml(row.runId)}">查看结果</button></td>
             </tr>
           `).join('')}</tbody>
         </table>
@@ -1217,6 +2040,15 @@
     let latestPreview = null;
     let currentTargets = [];
 
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedTarget: targetSelect.value,
+      confirmDisabled: deleteButton.disabled === true,
+      stateMessage: stateText.textContent,
+      stateTone: stateText.dataset.tone || 'neutral'
+    }));
+
     function setDeleteState(message, tone = 'neutral') {
       stateText.textContent = String(message || '');
       stateText.dataset.tone = tone;
@@ -1314,8 +2146,8 @@
       }
     }
 
-    targetSelect.addEventListener('change', refreshPreview);
-    monthSelect.addEventListener('change', loadTargets);
+    targetSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
+    monthSelect.addEventListener('change', () => modal.trackPreviewState(loadTargets()));
     cancelButton.addEventListener('click', modal.close);
     deleteButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
@@ -1352,7 +2184,7 @@
         closeButton.disabled = false;
         targetSelect.disabled = false;
         monthSelect.disabled = false;
-        loadTargets();
+        modal.trackPreviewState(loadTargets());
         return;
       }
 
@@ -1377,7 +2209,7 @@
       }
       showMessage('删除完成', successMessage, 'success');
     });
-    loadTargets();
+    modal.trackPreviewState(loadTargets());
     return modal;
   }
 
@@ -1432,6 +2264,15 @@
     const stateText = modal.dialog.querySelector('[data-role="export-state"]');
     let previewVersion = 0;
 
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedTarget: targetSelect.value,
+      confirmDisabled: exportButton.disabled === true,
+      stateMessage: stateText.textContent,
+      stateTone: stateText.dataset.tone || 'neutral'
+    }));
+
     function selectedTarget() {
       const [targetKind, sourceType] = String(targetSelect.value || '').split(':');
       return { targetKind, sourceType };
@@ -1475,8 +2316,8 @@
       }
     }
 
-    monthSelect.addEventListener('change', refreshPreview);
-    targetSelect.addEventListener('change', refreshPreview);
+    monthSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
+    targetSelect.addEventListener('change', () => modal.trackPreviewState(refreshPreview()));
     cancelButton.addEventListener('click', modal.close);
     exportButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
@@ -1502,7 +2343,7 @@
           monthSelect.disabled = false;
           targetSelect.disabled = false;
           setStatus('已取消导出', 'info');
-          refreshPreview();
+          modal.trackPreviewState(refreshPreview());
           return;
         }
         if (result.status !== 'success') throw new Error(result.message || '导出失败');
@@ -1521,10 +2362,10 @@
         closeButton.disabled = false;
         monthSelect.disabled = false;
         targetSelect.disabled = false;
-        refreshPreview();
+        modal.trackPreviewState(refreshPreview());
       }
     });
-    refreshPreview();
+    modal.trackPreviewState(refreshPreview());
     return modal;
   }
 
@@ -1595,10 +2436,37 @@
     const returnButton = modal.dialog.querySelector('[data-action="return"]');
     let renderVersion = 0;
 
+    attachPreviewStateTracker(modal, () => ({
+      modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
+      selectedMonth: monthSelect.value,
+      selectedSection: managerState.section,
+      contentText: content.textContent,
+      unarchiveDisabled: unarchiveButton.disabled === true
+    }));
+
     function updateUnarchiveButton() {
       const available = archivedMonths.length > 0;
       unarchiveButton.disabled = !available;
       unarchiveButton.title = available ? '解归档已归档结果' : '暂无已归档结果';
+    }
+
+    async function reopenManagedResult(runId, triggerButton) {
+      if (triggerButton) triggerButton.disabled = true;
+      try {
+        const fullResult = normalizeRunResponse(await api.getRun({ runId }));
+        const outcome = await confirmArchive(fullResult);
+        if (outcome && outcome.status === 'archived') {
+          setStatus(`${outcome.targetMonth} 已确认归档，可导出结果`, 'success');
+        }
+        archivedMonths = await loadArchivedResultMonths();
+        updateUnarchiveButton();
+        await refreshArchivedState();
+        await render();
+      } catch (error) {
+        showMessage('查看结果失败', error.message || String(error), 'error');
+      } finally {
+        if (triggerButton && triggerButton.isConnected) triggerButton.disabled = false;
+      }
     }
 
     async function render() {
@@ -1634,10 +2502,18 @@
           : await api.dataManagerOverview({ yearMonth: month });
         if (currentVersion !== renderVersion) return;
         if (!overview || overview.status !== 'success') throw new Error(overview && overview.message || '读取数据管理状态失败');
-        const rows = section === 'results' ? overview.results : overview.checks;
+        if (section === 'results') {
+          content.innerHTML = renderResultOverviewTable(overview.results);
+          content.querySelectorAll('[data-result-run-id]').forEach((button) => {
+            button.addEventListener('click', () => (
+              reopenManagedResult(Number(button.dataset.resultRunId), button)
+            ));
+          });
+          return;
+        }
         content.innerHTML = renderOverviewTable(
-          rows,
-          section === 'results' ? '当前账期还没有校验结果' : '当前账期还没有校验表数据'
+          overview.checks,
+          '当前账期还没有校验表数据'
         );
       } catch (error) {
         if (currentVersion === renderVersion) {
@@ -1649,12 +2525,12 @@
     modal.dialog.querySelectorAll('[data-section]').forEach((button) => {
       button.addEventListener('click', () => {
         managerState.section = button.dataset.section;
-        render();
+        modal.trackPreviewState(render());
       });
     });
     monthSelect.addEventListener('change', () => {
       managerState.month = monthSelect.value;
-      render();
+      modal.trackPreviewState(render());
     });
     unarchiveButton.addEventListener('click', () => {
       openUnarchiveDialog({
@@ -1698,7 +2574,8 @@
     });
     returnButton.addEventListener('click', modal.close);
     updateUnarchiveButton();
-    render();
+    modal.trackPreviewState(render());
+    return modal;
   }
 
   async function initialize() {
@@ -1706,6 +2583,8 @@
       await refreshArchivedState();
       if (state.latestArchivedRun) {
         setStatus(`${state.latestArchivedRun.targetMonth} 已归档，可导出结果`, 'success');
+      } else {
+        setStatus('暂无已归档财务OP校验结果', 'info');
       }
     } catch (_error) {
       // 启动时读取历史状态失败不阻断模块使用。
@@ -1727,7 +2606,346 @@
   elements.runBtn.addEventListener('click', handleRun);
   elements.exportBtn.addEventListener('click', handleExport);
   elements.dataManagerBtn.addEventListener('click', () => openDataManager());
-  window.__vccFinancialOpPreview = {
+
+  function exposePreviewHooks(previewHooks) {
+    if (!previewHooks) return false;
+    Object.defineProperty(window, '__vccFinancialOpPreview', {
+      value: Object.freeze(previewHooks),
+      configurable: true,
+      enumerable: false,
+      writable: false
+    });
+    return true;
+  }
+
+  const PREVIEW_ARCHIVED_MONTHS = [
+    { targetMonth: '2026-06', runId: 316, archivedAt: '2026-07-02 11:15:00', subjects: ['PPHK'] },
+    { targetMonth: '2026-05', runId: 305, archivedAt: '2026-06-03 10:20:00', subjects: ['PPHK'] },
+    { targetMonth: '2025-12', runId: 288, archivedAt: '2026-01-05 09:30:00', subjects: ['PPHK'] }
+  ];
+
+  function previewAmounts(values = {}) {
+    return Object.fromEntries(CURRENCIES.map((currency) => [
+      currency,
+      Object.hasOwn(values, currency) ? values[currency] : null
+    ]));
+  }
+
+  function previewSummary(defaultValue, values = {}) {
+    return Object.fromEntries(CURRENCIES.map((currency) => [
+      currency,
+      Object.hasOwn(values, currency) ? values[currency] : defaultValue
+    ]));
+  }
+
+  function buildResultPreview({ status = 'calculated', adjustmentCount = 0 } = {}) {
+    const baseRows = [{
+      type: 'base',
+      rowKey: 'v1:preview-recharge-ops',
+      subject: 'PPHK',
+      sourceType: 'recharge_refund',
+      sourceLabel: 'VCC充值清退明细',
+      categoryMajor: '充值',
+      categoryMinor: 'OPS',
+      currencyAmounts: previewAmounts({ USD: '15208345.72' })
+    }, {
+      type: 'base',
+      rowKey: 'v1:preview-fee-ops',
+      subject: 'PPHK',
+      sourceType: 'fee_fx',
+      sourceLabel: 'VCC费用及换汇明细',
+      categoryMajor: '费用',
+      categoryMinor: 'OPS',
+      currencyAmounts: previewAmounts({ EUR: '-2500.5' })
+    }, {
+      type: 'base',
+      rowKey: 'v1:preview-channel',
+      subject: 'PPHK',
+      sourceType: 'channel',
+      sourceLabel: 'VCC通道明细',
+      categoryMajor: '通道',
+      categoryMinor: 'CARD',
+      currencyAmounts: previewAmounts({ JPY: '135886024.59' })
+    }, {
+      type: 'base',
+      rowKey: 'v1:preview-pending',
+      subject: 'PPHK',
+      sourceType: 'pending_archive_removal',
+      sourceLabel: 'VCC_移除归档Pending账单',
+      categoryMajor: '移除归档Pending',
+      categoryMinor: 'VCC_clearing_credit',
+      currencyAmounts: previewAmounts({ CAD: '-1200' })
+    }];
+    const adjustmentCatalog = [{
+      type: 'adjustment',
+      rowKey: 'v1:preview-recharge-ops',
+      subject: 'PPHK',
+      sourceType: 'recharge_refund',
+      sourceLabel: 'VCC充值清退明细',
+      categoryMajor: '充值',
+      categoryMinor: 'OPS',
+      currency: 'USD',
+      currencyAmounts: previewAmounts({ USD: '-5' }),
+      adjustmentAmount: '-5',
+      reason: '按银行回单核对调整'
+    }, {
+      type: 'adjustment',
+      rowKey: 'v1:preview-fee-ops',
+      subject: 'PPHK',
+      sourceType: 'fee_fx',
+      sourceLabel: 'VCC费用及换汇明细',
+      categoryMajor: '费用',
+      categoryMinor: 'OPS',
+      currency: 'EUR',
+      currencyAmounts: previewAmounts({ EUR: '12.5' }),
+      adjustmentAmount: '12.5',
+      reason: '补录已复核手续费差额'
+    }, {
+      type: 'adjustment',
+      rowKey: 'v1:preview-pending',
+      subject: 'PPHK',
+      sourceType: 'pending_archive_removal',
+      sourceLabel: 'VCC_移除归档Pending账单',
+      categoryMajor: '移除归档Pending',
+      categoryMinor: 'VCC_clearing_credit',
+      currency: 'CAD',
+      currencyAmounts: previewAmounts({ CAD: '-100' }),
+      adjustmentAmount: '-100',
+      reason: '依据复核记录修正 Pending 发生额'
+    }];
+    const adjustments = adjustmentCatalog.slice(0, adjustmentCount);
+    const rows = [];
+    for (const baseRow of baseRows) {
+      rows.push(baseRow);
+      rows.push(...adjustments.filter((row) => row.rowKey === baseRow.rowKey));
+    }
+    const hasUsdAdjustment = adjustmentCount >= 1;
+    const hasEurAdjustment = adjustmentCount >= 2;
+    const hasCadAdjustment = adjustmentCount >= 3;
+    return {
+      status,
+      runId: 316,
+      targetMonth: '2026-06',
+      resultRevision: adjustmentCount,
+      review: {
+        currencies: CURRENCIES,
+        subjects: [{
+          subject: 'PPHK',
+          rows,
+          summaries: {
+            openingBalance: previewSummary('1000000'),
+            effectiveCalculatedBalance: previewSummary('1000000', {
+              CAD: hasCadAdjustment ? '998700' : '998800',
+              EUR: hasEurAdjustment ? '997512' : '997499.5',
+              JPY: '136886024.59',
+              USD: hasUsdAdjustment ? '16208340.72' : '16208345.72'
+            }),
+            systemBalance: previewSummary('1000000', {
+              CAD: '998787.66',
+              EUR: hasEurAdjustment ? '997512' : '997499.5',
+              JPY: '136886024.59',
+              USD: hasUsdAdjustment ? '16208340.72' : '16208345.72'
+            }),
+            effectiveDifference: previewSummary('0', {
+              CAD: hasCadAdjustment ? '87.66' : '-12.34'
+            })
+          }
+        }]
+      }
+    };
+  }
+
+  function previewDataManagerPayload({ hasArchive }) {
+    return {
+      months: ['2026-06', '2026-05'],
+      archivedMonths: hasArchive ? [PREVIEW_ARCHIVED_MONTHS[0]] : [],
+      records: [{
+        id: 42,
+        batchId: 'f91d2d4e-c2dd-4acd-a2c0-420000000001',
+        targetMonth: '2026-06',
+        sourceLabel: 'VCC充值清退明细',
+        sourceFiles: ['VCC充值清退明细_01.xlsx', 'VCC充值清退明细_02.xlsx'],
+        sourceFileDisplay: '2 个文件',
+        finishedAt: '2026-07-02 10:28:41',
+        status: 'deleted',
+        statusText: '已删除'
+      }, {
+        id: 41,
+        batchId: '2cc18056-e037-463a-8ed2-410000000001',
+        targetMonth: '2026-06',
+        sourceLabel: 'VCC通道明细',
+        sourceFiles: ['VCC通道明细_01.xlsx'],
+        sourceFileDisplay: 'VCC通道明细_01.xlsx',
+        finishedAt: '2026-07-02 09:46:03',
+        status: 'failed_conflict',
+        statusText: '失败（幂等冲突）'
+      }, {
+        id: 40,
+        batchId: '62850680-950d-4abd-babb-400000000001',
+        targetMonth: '2026-06',
+        sourceLabel: 'VCC_移除归档Pending账单',
+        sourceFiles: ['VCC_移除归档Pending账单.xlsx'],
+        sourceFileDisplay: 'VCC_移除归档Pending账单.xlsx',
+        finishedAt: '2026-07-02 09:21:18',
+        status: 'success',
+        statusText: '导入成功'
+      }],
+      overview: {
+        results: [{
+          runId: 316,
+          tableName: '财务OP校验结果表',
+          dataStatus: hasArchive ? 'archived' : 'unprocessed',
+          dataStatusText: hasArchive ? '已归档' : '未处理',
+          resultRevision: 1,
+          createdAt: '2026-07-02 11:00:00',
+          updatedAt: '2026-07-02 11:08:00',
+          archivedAt: hasArchive ? '2026-07-02 11:15:00' : null
+        }],
+        checks: [],
+        raw: []
+      }
+    };
+  }
+
+  async function waitForArchivedPickerPreview(modal, {
+    expectedYear,
+    expectedMonth,
+    expectedConfirmDisabled,
+    stateMessageIncludes = ''
+  } = {}) {
+    if (!modal || !modal.dialog || typeof modal.waitForPreviewState !== 'function') {
+      throw new Error('归档月份预览弹框未创建或不支持状态等待');
+    }
+    const snapshot = await modal.waitForPreviewState();
+    const confirmButton = modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
+    const liveSnapshot = {
+      ...snapshot,
+      modalPresent: Boolean(
+        modal.dialog.isConnected
+        && modal.dialog.classList.contains('vcc-fin-op-archive-picker-dialog')
+      ),
+      confirmDisabled: Boolean(confirmButton && confirmButton.disabled === true)
+    };
+    if (!liveSnapshot.modalPresent) throw new Error('归档月份预览弹框未挂载');
+    if (liveSnapshot.previewPending) throw new Error('归档月份预览仍在核对状态');
+    if (expectedYear !== undefined && liveSnapshot.selectedYear !== expectedYear) {
+      throw new Error(`归档月份预览年份不一致：${liveSnapshot.selectedYear} != ${expectedYear}`);
+    }
+    if (expectedMonth !== undefined && liveSnapshot.selectedMonth !== expectedMonth) {
+      throw new Error(`归档月份预览月份不一致：${liveSnapshot.selectedMonth} != ${expectedMonth}`);
+    }
+    if (expectedConfirmDisabled !== undefined
+      && liveSnapshot.confirmDisabled !== expectedConfirmDisabled) {
+      throw new Error(
+        `归档月份预览按钮禁用状态不一致：${liveSnapshot.confirmDisabled} != ${expectedConfirmDisabled}`
+      );
+    }
+    if (stateMessageIncludes && !liveSnapshot.stateMessage.includes(stateMessageIncludes)) {
+      throw new Error(`归档月份预览状态文案缺少：${stateMessageIncludes}`);
+    }
+    return liveSnapshot;
+  }
+
+  async function waitForTrackedPreview(modal, {
+    expectedMonth,
+    expectedTarget,
+    expectedSection,
+    expectedConfirmDisabled,
+    stateMessageIncludes = '',
+    contentIncludes = ''
+  } = {}) {
+    if (!modal || !modal.dialog || typeof modal.waitForPreviewState !== 'function') {
+      throw new Error('VCC 预览弹框未创建或不支持状态等待');
+    }
+    const snapshot = await modal.waitForPreviewState();
+    const liveSnapshot = {
+      ...snapshot,
+      modalPresent: Boolean(modal.dialog.isConnected)
+    };
+    if (!liveSnapshot.modalPresent) throw new Error('VCC 预览弹框未挂载');
+    if (liveSnapshot.previewPending) throw new Error('VCC 预览仍在构建状态');
+    if (expectedMonth !== undefined && liveSnapshot.selectedMonth !== expectedMonth) {
+      throw new Error(`VCC 预览月份不一致：${liveSnapshot.selectedMonth} != ${expectedMonth}`);
+    }
+    if (expectedTarget !== undefined && liveSnapshot.selectedTarget !== expectedTarget) {
+      throw new Error(`VCC 预览目标不一致：${liveSnapshot.selectedTarget} != ${expectedTarget}`);
+    }
+    if (expectedSection !== undefined && liveSnapshot.selectedSection !== expectedSection) {
+      throw new Error(`VCC 预览分区不一致：${liveSnapshot.selectedSection} != ${expectedSection}`);
+    }
+    if (expectedConfirmDisabled !== undefined
+      && liveSnapshot.confirmDisabled !== expectedConfirmDisabled) {
+      throw new Error(
+        `VCC 预览按钮禁用状态不一致：${liveSnapshot.confirmDisabled} != ${expectedConfirmDisabled}`
+      );
+    }
+    if (stateMessageIncludes
+      && !String(liveSnapshot.stateMessage || '').includes(stateMessageIncludes)) {
+      throw new Error(
+        `VCC 预览状态文案缺少：${stateMessageIncludes}；当前：${liveSnapshot.stateMessage || ''}`
+      );
+    }
+    if (contentIncludes && !String(liveSnapshot.contentText || '').includes(contentIncludes)) {
+      throw new Error(`VCC 预览内容缺少：${contentIncludes}`);
+    }
+    return liveSnapshot;
+  }
+
+  function selectPreviewControl(modal, selector, value, options = {}) {
+    const normalizedOptions = typeof options === 'number' ? { delay: options } : options;
+    const delay = normalizedOptions.delay == null ? 180 : normalizedOptions.delay;
+    return new Promise((resolve, reject) => {
+      setTimeout(async () => {
+        try {
+          const control = modal && modal.dialog && modal.dialog.querySelector(selector);
+          if (!control) throw new Error(`预览控件不存在：${selector}`);
+          control.value = value;
+          control.dispatchEvent(new Event('change', { bubbles: true }));
+          if (control.value !== value) throw new Error(`预览控件未稳定到目标值：${value}`);
+          if (typeof modal.waitForPreviewState === 'function') {
+            if (modal.dialog.classList.contains('vcc-fin-op-archive-picker-dialog')) {
+              resolve(await waitForArchivedPickerPreview(modal, normalizedOptions));
+              return;
+            }
+            resolve(await waitForTrackedPreview(modal, {
+              ...normalizedOptions,
+              expectedTarget: normalizedOptions.expectedTarget === undefined
+                ? value
+                : normalizedOptions.expectedTarget
+            }));
+            return;
+          }
+          resolve({ modalPresent: Boolean(modal.dialog.isConnected), selectedValue: control.value });
+        } catch (error) {
+          reject(error);
+        }
+      }, delay);
+    });
+  }
+
+  function createUnarchivePreviewDialog() {
+    return createArchivedMonthPickerDialog({
+      months: PREVIEW_ARCHIVED_MONTHS,
+      actionLabel: '删除',
+      danger: true,
+      previewSelection: async (entry) => ({
+        status: 'success',
+        canUnarchive: entry.targetMonth === '2026-06',
+        dependentMonths: entry.targetMonth === '2026-06' ? [] : ['2026-06'],
+        message: entry.targetMonth === '2026-06'
+          ? '2026-06 可解归档；基础结果和调整记录将保留。'
+          : '该月之后仍存在已归档月份，请先从最新月份开始解归档。',
+        previewToken: 'preview-token',
+        taskGeneration: 0
+      }),
+      executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
+    });
+  }
+
+  const previewHooks = window.desktopApi.previewCapture === true ? {
+    openPanel() {
+      return null;
+    },
     openImportMonth() {
       return chooseImportMonth({ title: '选择导入账期' });
     },
@@ -1738,63 +2956,32 @@
         initial: '2026-06'
       });
     },
-    openDataManager() {
-      return openDataManager({
+    async openDataManager() {
+      const modal = await openDataManager({
         initialMonth: '2026-06',
         initialSection: 'raw',
-        previewData: {
-          months: ['2026-06', '2026-05'],
-          archivedMonths: [{
-            targetMonth: '2026-06',
-            runId: 316,
-            archivedAt: '2026-07-02 11:15:00',
-            subjects: ['PPHK']
-          }],
-          records: [
-            {
-              id: 42,
-              batchId: 'f91d2d4e-c2dd-4acd-a2c0-420000000001',
-              targetMonth: '2026-06',
-              sourceLabel: 'VCC充值清退明细',
-              sourceFiles: ['VCC充值清退明细_01.xlsx', 'VCC充值清退明细_02.xlsx'],
-              sourceFileDisplay: '2 个文件',
-              finishedAt: '2026-07-02 10:28:41',
-              status: 'deleted',
-              statusText: '已删除'
-            },
-            {
-              id: 41,
-              batchId: '2cc18056-e037-463a-8ed2-410000000001',
-              targetMonth: '2026-06',
-              sourceLabel: 'VCC通道明细',
-              sourceFiles: ['VCC通道明细_01.xlsx'],
-              sourceFileDisplay: 'VCC通道明细_01.xlsx',
-              finishedAt: '2026-07-02 09:46:03',
-              status: 'failed_conflict',
-              statusText: '失败（幂等冲突）'
-            },
-            {
-              id: 40,
-              batchId: '62850680-950d-4abd-babb-400000000001',
-              targetMonth: '2026-06',
-              sourceLabel: 'VCC_移除归档Pending账单',
-              sourceFiles: ['移除归档Pending账单.xlsx'],
-              sourceFileDisplay: '移除归档Pending账单.xlsx',
-              finishedAt: '2026-07-02 09:21:18',
-              status: 'success',
-              statusText: '导入成功'
-            }
-          ],
-          overview: {
-            results: [{ tableName: '财务OP校验结果表', dataStatus: 'unprocessed', dataStatusText: '未处理', createdAt: '2026-07-02 11:00:00' }],
-            checks: [],
-            raw: []
-          }
-        }
+        previewData: previewDataManagerPayload({ hasArchive: true })
+      });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedSection: 'raw',
+        contentIncludes: 'VCC充值清退明细'
+      });
+    },
+    async openDataManagerNoArchive() {
+      const modal = await openDataManager({
+        initialMonth: '2026-06',
+        initialSection: 'results',
+        previewData: previewDataManagerPayload({ hasArchive: false })
+      });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedSection: 'results',
+        contentIncludes: '财务OP校验结果表'
       });
     },
     openDelete() {
-      return openDatasetDeleteDialog({
+      const modal = openDatasetDeleteDialog({
         months: ['2026-06', '2026-05'],
         initialMonth: '2026-06',
         previewResult: {
@@ -1803,23 +2990,157 @@
           calculatedRunCount: 1
         }
       });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedTarget: 'recharge_refund',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '36,932'
+      });
+    },
+    openDeleteFirstMonth() {
+      const modal = openDatasetDeleteDialog({
+        months: ['2026-06'],
+        initialMonth: '2026-06',
+        previewResult: ({ targetType }) => targetType === 'opening_initialization'
+          ? {
+            targetType,
+            targetLabel: '首月期初初始化数据',
+            deletable: true,
+            count: 1,
+            calculatedRunCount: 1,
+            previewToken: 'opening-preview-token',
+            taskGeneration: 0
+          }
+          : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 1 }
+      });
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '主体期初初始化数据'
+      });
+    },
+    openDeleteFirstMonthArchived() {
+      const modal = openDatasetDeleteDialog({
+        months: ['2026-06'],
+        initialMonth: '2026-06',
+        previewResult: ({ targetType }) => targetType === 'opening_initialization'
+          ? {
+            targetType,
+            targetLabel: '首月期初初始化数据',
+            deletable: false,
+            disabledReason: '该月财务OP校验结果已归档，请先解归档后再删除首月期初初始化数据'
+          }
+          : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 0 }
+      });
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'opening_initialization', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: true,
+        stateMessageIncludes: '已归档'
+      });
+    },
+    openDeleteResult() {
+      const modal = openDatasetDeleteDialog({
+        months: ['2026-06'],
+        initialMonth: '2026-06',
+        previewResult: ({ targetType }) => targetType === 'result'
+          ? {
+            targetType,
+            targetLabel: '财务OP校验结果表',
+            deletable: true,
+            count: 2,
+            calculatedRunCount: 2,
+            previewToken: 'result-preview-token',
+            taskGeneration: 0
+          }
+          : { targetType, deletable: true, dataCount: 36932, calculatedRunCount: 2 }
+      });
+      return selectPreviewControl(modal, '[data-field="delete-target"]', 'result', {
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '2 份未归档'
+      });
     },
     openUnarchive() {
-      return createArchivedMonthPickerDialog({
-        months: [
-          { targetMonth: '2026-06', runId: 316, archivedAt: '2026-07-02 11:15:00' },
-          { targetMonth: '2025-12', runId: 288, archivedAt: '2026-01-05 09:30:00' }
-        ],
+      const modal = createUnarchivePreviewDialog();
+      return waitForArchivedPickerPreview(modal, {
+        expectedYear: '2026',
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '可解归档'
+      });
+    },
+    openUnarchiveYearSwitch() {
+      const modal = createUnarchivePreviewDialog();
+      return selectPreviewControl(modal, '[data-field="archive-year"]', '2025', {
+        expectedYear: '2025',
+        expectedMonth: '2025-12',
+        expectedConfirmDisabled: true,
+        stateMessageIncludes: '2026-06'
+      });
+    },
+    openUnarchiveNonTail() {
+      const modal = createUnarchivePreviewDialog();
+      return selectPreviewControl(modal, '[data-field="archive-month"]', '2026-05', {
+        expectedYear: '2026',
+        expectedMonth: '2026-05',
+        expectedConfirmDisabled: true,
+        stateMessageIncludes: '2026-06'
+      });
+    },
+    openUnarchiveExecuting() {
+      const modal = createArchivedMonthPickerDialog({
+        months: PREVIEW_ARCHIVED_MONTHS,
         actionLabel: '删除',
         danger: true,
         previewSelection: async () => ({
           status: 'success', canUnarchive: true, previewToken: 'preview-token', taskGeneration: 0
         }),
-        executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
+        runningText: '正在解归档，请勿关闭窗口…',
+        executeSelection: () => new Promise(() => {})
+      });
+      return waitForArchivedPickerPreview(modal, {
+        expectedYear: '2026',
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false
+      }).then(() => {
+        const button = modal && modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
+        if (!button || button.disabled) throw new Error('执行中预览无法启动解归档');
+        button.click();
+        return waitForArchivedPickerPreview(modal, {
+          expectedYear: '2026',
+          expectedMonth: '2026-06',
+          expectedConfirmDisabled: true,
+          stateMessageIncludes: '正在解归档'
+        });
       });
     },
+    openResultExportMonth() {
+      const modal = createArchivedMonthPickerDialog({
+        months: PREVIEW_ARCHIVED_MONTHS,
+        actionLabel: '导出',
+        previewSelection: async (entry) => ({
+          status: 'success',
+          months: PREVIEW_ARCHIVED_MONTHS,
+          canExecute: true,
+          message: `${entry.targetMonth} 已归档，可导出`,
+          tone: 'success'
+        }),
+        executeSelection: async (entry) => ({ status: 'success', targetMonth: entry.targetMonth })
+      });
+      return waitForArchivedPickerPreview(modal, {
+        expectedYear: '2026',
+        expectedMonth: '2026-06',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '可导出'
+      });
+    },
+    openResultExportMonthEmpty() {
+      applyArchivedMonthsState([]);
+      setStatus('暂无已归档财务OP校验结果', 'info');
+      return null;
+    },
     openExport() {
-      return openDatasetExportDialog({
+      const modal = openDatasetExportDialog({
         months: ['2026-06', '2026-05'],
         initialMonth: '2026-06',
         initialSection: 'checks',
@@ -1828,23 +3149,67 @@
           dataCount: 4003645
         }
       });
+      return waitForTrackedPreview(modal, {
+        expectedMonth: '2026-06',
+        expectedTarget: 'check:recharge_refund',
+        expectedConfirmDisabled: false,
+        stateMessageIncludes: '4,003,645'
+      });
     },
     openResult() {
-      const balances = [];
-      for (const currency of CURRENCIES) {
-        balances.push({
-          subject: 'PPHK',
-          currency,
-          calculatedBalance: currency === 'USD' ? '15208345.72' : '1000000',
-          systemBalance: currency === 'USD' ? '15208340.72' : '1000000',
-          difference: currency === 'USD' ? '-5' : '0'
-        });
-      }
-      return confirmArchive({
-        status: 'calculated',
+      return confirmArchive(buildResultPreview());
+    },
+    openResultSingleAdjustment() {
+      return confirmArchive(buildResultPreview({ adjustmentCount: 1 }));
+    },
+    openResultMultipleAdjustments() {
+      return confirmArchive(buildResultPreview({ adjustmentCount: 3 }));
+    },
+    openResultArchived() {
+      return confirmArchive(buildResultPreview({ status: 'archived', adjustmentCount: 1 }));
+    },
+    openRunPreflightError() {
+      const result = {
+        code: 'missing-datasets',
+        missing: ['VCC_移除归档Pending账单_校验表']
+      };
+      const message = blockedCalculationMessage(result);
+      setStatus(`无法运行：${message}`, 'warning');
+      showMessage('无法开始运行', message, 'warning');
+      return null;
+    },
+    openAdjustment() {
+      return requestRunAdjustment({
         runId: 316,
         targetMonth: '2026-06',
-        balances
+        resultRevision: 1,
+        status: 'calculated'
+      }, {
+        status: 'success',
+        runStatus: 'calculated',
+        runId: 316,
+        targetMonth: '2026-06',
+        resultRevision: 1,
+        currencies: CURRENCIES,
+        options: [{
+          rowKey: 'v1:preview-recharge-ops',
+          subject: 'PPHK',
+          sourceType: 'recharge_refund',
+          sourceLabel: 'VCC充值清退明细',
+          categoryMajor: '充值',
+          categoryMinor: 'OPS',
+          availableCurrencies: CURRENCIES,
+          adjustedCurrencies: []
+        }, {
+          rowKey: 'v1:preview-fee-ops',
+          subject: 'PPHK',
+          sourceType: 'fee_fx',
+          sourceLabel: 'VCC费用及换汇明细',
+          categoryMajor: '费用',
+          categoryMinor: 'OPS',
+          availableCurrencies: ['EUR', 'USD'],
+          adjustedCurrencies: []
+        }]
       });
     },
     openOpening() {
@@ -1856,6 +3221,7 @@
         missingOpeningSubjects: ['PPHK']
       });
     }
-  };
+  } : null;
+  exposePreviewHooks(previewHooks);
   initialize();
 })();

@@ -15,6 +15,31 @@ const PRESERVED_OPERATIONS = Object.freeze({
   DELETE_RESULT: 'delete-result',
   DELETE_SOURCE: 'delete-source'
 });
+const RESULT_MUTATION_OPERATIONS = Object.freeze({
+  ADD_ADJUSTMENT: 'add-adjustment',
+  ARCHIVE_RESULT: 'archive-result'
+});
+const VCC_FACT_TABLES = Object.freeze([
+  ['vcc_fin_op_module_state', 'singleton_id'],
+  ['vcc_fin_op_import_batches', 'id'],
+  ['vcc_fin_op_import_records', 'id'],
+  ['vcc_fin_op_import_rows', 'id'],
+  ['vcc_fin_op_import_errors', 'id'],
+  ['vcc_fin_op_effective_rows', 'id'],
+  ['vcc_fin_op_datasets', 'target_month, dataset_type'],
+  ['vcc_fin_op_system_snapshots', 'id'],
+  ['vcc_fin_op_system_snapshot_attempts', 'id'],
+  ['vcc_fin_op_opening_balances', 'target_month, subject'],
+  ['vcc_fin_op_runs', 'id'],
+  ['vcc_fin_op_run_rows', 'id'],
+  ['vcc_fin_op_run_balances', 'run_id, subject, currency'],
+  ['vcc_fin_op_pending_summary_rows', 'id'],
+  ['vcc_fin_op_pending_currency_totals', 'run_id, subject, currency'],
+  ['vcc_fin_op_run_adjustments', 'id'],
+  ['vcc_fin_op_archives', 'target_month, subject'],
+  ['vcc_fin_op_dataset_deletions', 'id'],
+  ['vcc_fin_op_operation_audit', 'id']
+]);
 const DELETABLE_IMPORT_STATUSES = new Set([
   'success',
   'success_with_skips',
@@ -513,9 +538,122 @@ function assertPreservedOperationState(before, after, {
   });
 }
 
+function normalizeExpectedResultMutationRow(tableName, row, {
+  operation,
+  targetMonth,
+  runId
+}) {
+  const normalized = { ...row };
+  if (tableName === 'vcc_fin_op_runs' && Number(row.id) === Number(runId)) {
+    if (operation === RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT) {
+      normalized.result_revision = '__EXPECTED_RESULT_REVISION__';
+      normalized.updated_at = '__EXPECTED_TRANSACTION_TIMESTAMP__';
+    } else if (operation === RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT) {
+      normalized.status = '__EXPECTED_ARCHIVE_STATUS__';
+      normalized.updated_at = '__EXPECTED_TRANSACTION_TIMESTAMP__';
+      normalized.archived_at = '__EXPECTED_TRANSACTION_TIMESTAMP__';
+    }
+  }
+  if (
+    tableName === 'vcc_fin_op_datasets'
+    && operation === RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT
+    && row.target_month === targetMonth
+  ) {
+    normalized.data_status = '__EXPECTED_ARCHIVE_STATUS__';
+    normalized.archived_run_id = '__EXPECTED_ARCHIVE_RUN__';
+    normalized.updated_at = '__EXPECTED_TRANSACTION_TIMESTAMP__';
+  }
+  return normalized;
+}
+
+function resultMutationFilter(tableName, {
+  operation,
+  targetMonth,
+  boundaries
+}) {
+  if (
+    tableName === 'vcc_fin_op_run_adjustments'
+    && operation === RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT
+  ) {
+    return {
+      where: 'WHERE id <= ?',
+      params: [boundaries.adjustmentMaxId]
+    };
+  }
+  if (
+    tableName === 'vcc_fin_op_operation_audit'
+    && operation === RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT
+  ) {
+    return {
+      where: 'WHERE id <= ?',
+      params: [boundaries.operationAuditMaxId]
+    };
+  }
+  if (
+    tableName === 'vcc_fin_op_archives'
+    && operation === RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT
+  ) {
+    return {
+      where: 'WHERE target_month <> ?',
+      params: [targetMonth]
+    };
+  }
+  return { where: '', params: [] };
+}
+
+function snapshotResultMutationState(db, {
+  targetMonth,
+  runId,
+  operation,
+  baseline = null
+}) {
+  const month = normalizeOperationMonth(targetMonth);
+  const normalizedRunId = Number(runId);
+  if (!Object.values(RESULT_MUTATION_OPERATIONS).includes(operation)) {
+    throw operationError('invalid-result-mutation-operation', `不支持的结果事务快照：${operation || ''}`);
+  }
+  if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+    throw operationError('invalid-run-id', `财务OP run id 无效：${runId}`);
+  }
+  const boundaries = baseline ? baseline.boundaries : {
+    adjustmentMaxId: maxId(db, 'vcc_fin_op_run_adjustments'),
+    operationAuditMaxId: maxId(db, 'vcc_fin_op_operation_audit')
+  };
+  const fingerprints = [];
+  for (const [tableName, orderBy] of VCC_FACT_TABLES) {
+    const { where, params } = resultMutationFilter(tableName, {
+      operation,
+      targetMonth: month,
+      boundaries
+    });
+    addFingerprint(
+      fingerprints,
+      db,
+      tableName,
+      `SELECT * FROM ${tableName} ${where} ORDER BY ${orderBy}`,
+      params,
+      (row) => normalizeExpectedResultMutationRow(tableName, row, {
+        operation,
+        targetMonth: month,
+        runId: normalizedRunId
+      })
+    );
+  }
+  return {
+    version: PRESERVED_STATE_VERSION,
+    targetMonth: month,
+    runId: normalizedRunId,
+    operation,
+    boundaries,
+    fingerprints
+  };
+}
+
 module.exports = {
   PRESERVED_STATE_VERSION,
   PRESERVED_OPERATIONS,
+  RESULT_MUTATION_OPERATIONS,
   snapshotPreservedOperationState,
+  snapshotResultMutationState,
   assertPreservedOperationState
 };
