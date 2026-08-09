@@ -139,6 +139,17 @@
   width: min(100%, 520px);
 }
 
+.vcc-fin-op-archive-picker-dialog button.danger-btn:disabled,
+.vcc-fin-op-archive-picker-dialog button.danger-btn:disabled:hover {
+  background: #e5e8ed;
+  color: #858c96;
+  border-color: #d5d9df;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+  opacity: 1;
+}
+
 .vcc-fin-op-archive-picker-fields {
   display: grid;
   grid-template-columns: auto minmax(110px, 1fr) minmax(110px, 1fr);

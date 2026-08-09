@@ -73,7 +73,8 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(moduleRenderer, /chooseImportMonth\(\{ title: '选择导入账期', initial: state\.lastMonth \}\)/);
     assert.match(moduleRenderer, /openImportMonth\(\)\s*\{\s*return chooseImportMonth\(\{ title: '选择导入账期' \}\);/);
-    assert.match(renderer, /info\.previewModal === 'vcc-financial-op-import-month'[\s\S]*__vccFinancialOpPreview\?\.openImportMonth\(\)/);
+    assert.match(renderer, /'vcc-financial-op-import-month': Object\.freeze\(\{ method: 'openImportMonth', strategy: 'lifecycle' \}\)/);
+    assert.match(renderer, /info\.previewModal\.startsWith\('vcc-financial-op-'\)[\s\S]*registerVccPreviewCaptureReadiness\(info\.previewModal\)/);
     assert.match(styles, /\.vcc-fin-op-import-month-dialog\s*\{[\s\S]*width:\s*min\(100%, 420px\);[\s\S]*padding:\s*24px 28px;/);
     assert.match(styles, /\.vcc-fin-op-import-month-dialog \.icon-close\s*\{[\s\S]*display:\s*none;/);
     assert.match(styles, /\.vcc-fin-op-import-month-actions\s*\{[\s\S]*justify-content:\s*center;/);
@@ -98,7 +99,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-dialog \.vcc-fin-op-run-month-actions\s*\{[\s\S]*margin-top:\s*15px;/);
     assert.match(moduleRenderer, /chooseExistingMonth\('选择运行账期'\)/);
     assert.match(moduleRenderer, /openRunMonth\(\)\s*\{[\s\S]*title: '选择运行账期'/);
-    assert.match(renderer, /info\.previewModal === 'vcc-financial-op-run-month'[\s\S]*__vccFinancialOpPreview\?\.openRunMonth\(\)/);
+    assert.match(renderer, /'vcc-financial-op-run-month': Object\.freeze\(\{ method: 'openRunMonth', strategy: 'lifecycle' \}\)/);
   });
 
   test('导入完成不弹导入记录框并将结果摘要写入主页面状态框', () => {
@@ -318,7 +319,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /title: actionLabel === '导出' \? '请选择要导出的月份' : '请选择月份'/);
     assert.match(moduleRenderer, /data-field="archive-year"[\s\S]*data-field="archive-month"/);
     assert.match(moduleRenderer, /sort\(\(left, right\) => right\.targetMonth\.localeCompare\(left\.targetMonth\)\)/);
-    assert.match(moduleRenderer, /yearSelect\.addEventListener\('change',[\s\S]*renderMonths\(\);[\s\S]*refreshPreview\(\)/);
+    assert.match(moduleRenderer, /yearSelect\.addEventListener\('change',[\s\S]*renderMonths\(\);[\s\S]*requestPreviewRefresh\(\)/);
+    assert.match(moduleRenderer, /monthSelect\.addEventListener\('change', requestPreviewRefresh\)/);
+    assert.match(moduleRenderer, /waitForPreviewState[\s\S]*confirmDisabled: actionButton\.disabled === true/);
     assert.match(moduleRenderer, /result\.dependentMonths\.join\('、'\)/);
     assert.match(moduleRenderer, /Object\.hasOwn\(result, 'canExecute'\)/);
     assert.match(moduleRenderer, /Boolean\(result\.canUnarchive\)/);
@@ -521,7 +524,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-export-dialog\s*\{[\s\S]*width:\s*min\(100%, 680px\);/);
     assert.match(styles, /\.vcc-fin-op-export-dialog \.vcc-fin-op-delete-fields\s*\{[\s\S]*grid-template-columns:\s*25% minmax\(0, 1fr\);/);
     assert.match(moduleRenderer, /openExport\(\)\s*\{[\s\S]*openDatasetExportDialog/);
-    assert.match(renderer, /info\.previewModal === 'vcc-financial-op-export'[\s\S]*__vccFinancialOpPreview\?\.openExport\(\)/);
+    assert.match(renderer, /'vcc-financial-op-export': Object\.freeze\(\{ method: 'openExport', strategy: 'state' \}\)/);
     for (const label of Object.values({
       recharge: 'VCC充值清退明细_校验表',
       fee: 'VCC费用及换汇明细_校验表',
@@ -590,9 +593,10 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /reopenManagedResult\(Number\(button\.dataset\.resultRunId\), button\)/);
     assert.match(moduleRenderer, /elements\.exportBtn\.disabled = state\.busy \|\| !state\.latestArchivedRun/);
     assert.match(moduleRenderer, /results: \[\{\s*runId: 316,[\s\S]*resultRevision: 1,[\s\S]*updatedAt: '2026-07-02 11:08:00'/);
-    assert.match(moduleRenderer, /openResult\(\) \{[\s\S]*return confirmArchive\(\{[\s\S]*resultRevision: 1,[\s\S]*review:/);
+    assert.match(moduleRenderer, /function buildResultPreview\(\{ status = 'calculated', adjustmentCount = 0 \} = \{\}\)/);
+    assert.match(moduleRenderer, /openResult\(\) \{\s*return confirmArchive\(buildResultPreview\(\)\);/);
     assert.match(moduleRenderer, /openAdjustment\(\) \{[\s\S]*return requestRunAdjustment\([\s\S]*runStatus: 'calculated'/);
-    assert.match(renderer, /info\.previewModal === 'vcc-financial-op-adjustment'[\s\S]*__vccFinancialOpPreview\?\.openAdjustment\(\)/);
+    assert.match(renderer, /'vcc-financial-op-adjustment': Object\.freeze\(\{ method: 'openAdjustment', strategy: 'lifecycle' \}\)/);
   });
 
   test('完整结果渲染严格校验九币种与四类 summary，调整紧跟基础行且不在前端计算金额', () => {
@@ -700,11 +704,11 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.doesNotMatch(styles, /difference-row td\.(?:balanced|unbalanced)/);
     assert.match(
       moduleRenderer,
-      /openResultExportMonth\(\)[\s\S]*targetMonth: '2026-06'[\s\S]*targetMonth: '2025-12'[\s\S]*actionLabel: '导出'[\s\S]*canExecute: true/
+      /const PREVIEW_ARCHIVED_MONTHS = \[[\s\S]*targetMonth: '2026-06'[\s\S]*targetMonth: '2025-12'[\s\S]*openResultExportMonth\(\)[\s\S]*actionLabel: '导出'[\s\S]*canExecute: true/
     );
     assert.match(
       renderer,
-      /info\.previewModal === 'vcc-financial-op-result-export-month'[\s\S]*__vccFinancialOpPreview\?\.openResultExportMonth\(\)/
+      /'vcc-financial-op-result-export-month': Object\.freeze\(\{ method: 'openResultExportMonth', strategy: 'state' \}\)/
     );
     assert.match(moduleRenderer, /danger \? 'danger-btn' : 'primary-btn'/);
   });
