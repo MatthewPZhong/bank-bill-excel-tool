@@ -154,6 +154,8 @@ test('Spec 冻结内容哈希跨 LF、CRLF 与 CR checkout 稳定且内容变化
 
 test('v3.1.8 iteration PRD 索引归档锁定规格、非目标、验收与人工门禁', () => {
   const prd = read('docs/iterations/v3.1.8/PRD-v3.1.8.md');
+  const preflight = read('changes/3.1.8/preflight.md');
+  const prArchive = read('docs/prs/PR124-v3.1.8.md');
 
   assert.match(prd, /^# bank-bill-excel-tool 3\.1\.8 PRD 索引$/m);
   assert.match(prd, /> 目标版本：`3\.1\.8`/);
@@ -167,5 +169,16 @@ test('v3.1.8 iteration PRD 索引归档锁定规格、非目标、验收与人�
   assert.match(prd, /spec\.md#12-验收矩阵/);
   assert.match(prd, /spec\.md#15-definition-of-done/);
   assert.match(prd, /preflight\.md#仍阻塞-v318-正式发布/);
+  assert.match(prd, /真实约 700 万行、多 sheet 工具箱极限文件/);
   assert.match(prd, /不得将本索引、自动化 PASS 或 Windows CI 构建视为已正式发布或已完成资金验收/);
+  assert.match(preflight, /main@e36bd9a/);
+  assert.match(preflight, /31310190290/);
+  assert.match(preflight, /自动化平台门禁已闭合/);
+  assert.match(preflight, /不得创建正式 tag 或 Release/);
+  assert.match(preflight, /真实约 700 万行、多 sheet 工具箱压力验证/);
+  assert.match(prArchive, /^pr: 124$/m);
+  assert.match(prArchive, /^merged: 2026-08-09 \(e36bd9a9c161becfbb72ab97bf41963d63012089\)$/m);
+  assert.match(prArchive, /^released: pending$/m);
+  assert.match(prArchive, /v3\.1\.8` tag 不存在/);
+  assert.match(prArchive, /上述门禁未全部完成前，不创建 `v3\.1\.8` tag/);
 });

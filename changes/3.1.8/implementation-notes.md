@@ -459,3 +459,64 @@
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | 自动化已覆盖“取消在先→critical-ready 未 protected→timeout terminate”和“protected 后只等待”；仍需 Windows CI/手测在真实 SQLite 事务中触发关窗 | 阻塞 3.1.8 发布，不阻塞代码评审 |
 | PR #127 真实生产副本调整→重算替换→归档的逐主体×币种、revision/sequence 与历史 success/rolled_back 审计一致性 | BLOCK（资金红线，人工复核未完成） | 财务人员在只读副本逐笔核对；异常事实只诊断并阻断，不自动修复 | 阻塞 3.1.8 发布，不阻塞本地代码评审 |
+
+## 正式收尾与发布门禁审计（2026-08-09）
+
+### Task Brief
+
+- Goal：在六层堆叠全部合入后，以最终 `main` 为唯一发布基线完成自动门禁、Windows 产物、远端发布状态和人工闸门审计；只在 Spec Definition of Done 满足后创建 `v3.1.8` annotated tag 与正式 Release。
+- Context：PR #124 已汇总 PR #125～#129 的冻结树并以普通 merge commit 合入 `main`；PR 构建成功不自动等价于合并后主干构建。
+- Constraints：不读取、移动、删除或暂存既有未跟踪文件；不把自动化 PASS 替代目标机、生产副本或财务人工签字；不在收尾 PR 中改依赖、资金实现、锁定 Spec 或用户可见发布状态。
+- Done when：主干 fresh release-check/Windows 构建成功，发布证据可追溯，人工闸门清单无遗漏；人工签字完成后另行进入 tag → Release workflow → 资产复核 → 发布证据回写。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 证据/最便宜验证 | 当前结论 |
+| --- | --- | --- | --- | --- | --- |
+| 合并后 `main` 是否在 Windows 上独立通过 | 平台 | 高 | PROBE | 只认 `main@e36bd9a` 的 push run，不复用 PR head | run `31310190290` 全部成功，自动平台门禁已闭合 |
+| 是否已存在 `v3.1.8` tag 或 Release | 外部状态 | 高 | PROBE | `git ls-remote` + GitHub Actions/Release 状态只读核对 | tag 不存在，Release workflow 未触发，当前未发布 |
+| Windows 产物是否包含版本与两份 VCC 模板 | 分发 | 高 | PROBE | 主干 build 的 `check-dist-size` 与 artifact 元数据 | 7/7 必需文件、版本 3.1.8、installer/portable artifact 均成功；目标机实际运行仍未知 |
+| `npm ci` 报出的 critical 是否进入生产安装包 | 安全 | 高 | PROBE | `npm audit --omit=dev --json` 与 package-lock diff | 生产依赖为 0 critical / 7 high / 2 moderate，critical 仅开发依赖；生产依赖图相对 v3.1.7 未改变 |
+| 人工门禁是否已完成 | 资金/平台 | 高 | BLOCK | 需要目标机、生产副本、财务人员和极限文件的签字记录 | 当前没有完成证据，继续阻塞 tag/Release |
+
+### Decisions
+
+| 决策 | 原因/证据 | 放弃方案与边界 |
+| --- | --- | --- |
+| 收尾 PR 只回写“已集成、自动门禁全绿、仍未发布” | `changes/3.1.8/spec.md` §15 明确要求财务人工核对，且未解决资金人工门禁不得被 CI 替代或静默关闭 | 不提前把 CHANGELOG/版本历史/用户手册改成已发布，不创建 tag/Release |
+| 把 PR #124 已披露的真实约 700 万行压力验证补回人工清单 | PR body 和既有 implementation notes 均把它列为发布承诺，preflight 末尾清单遗漏会造成静默缩小门禁 | 不把 5万/15万或 50万/150万自动 RSS 链表述为 700 万真实文件证明 |
+| 保留生产依赖 0 critical / 7 high / 2 moderate 的既有风险基线，另行治理 | 本迭代 package-lock 只更新版本字段；发布收尾中升级 `electron-updater`、`xlsx` 等会扩大行为和回归范围 | 不运行 `npm audit fix`，不把完整依赖树的开发依赖 critical 隐瞒成“无风险” |
+| 正式发布必须沿用 annotated tag → `Release Windows Packages` → 四项公开资产复核 → 独立证据 PR | workflow 会校验 tag 与 package version、当前 main 和 annotated tag object，并在 Windows 重跑完整门禁 | 不手工上传旁路资产，不用 PR 临时 artifact 充当正式 Release 资产 |
+
+### Evidence
+
+| 检查 | 结果 | 证明/边界 |
+| --- | --- | --- |
+| 最终整合 | PR #124 于 2026-08-09 merge；commit `e36bd9a9c161becfbb72ab97bf41963d63012089`，parents `dff07df1` / `3291c272`，tree `4b032f301cf824bec7b3d9ffa28523439663e278` | 六层冻结头、向上 merge 与最终 main 内容一致；未压扁审计历史 |
+| 主干 fresh Windows run | [`31310190290`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31310190290) success；smoke-test 33m25s、build 2m03s、总计 35m34s | unit 4801 pass + 1 skipped / 0 fail；48/48 integration、2459/2459；RSS 31/31；VCC 297/64/19/28；SQLite 9/9；panel 6/6 |
+| 主干分发守卫 | asar 62.26MB、3142 entries、禁止路径 0、必需文件 7/7、包内版本 3.1.8 | 自动确认包结构与模板资产存在，不证明目标 Windows Excel/WPS 的实际显示或程序运行 |
+| 主干临时 artifacts | installer `9037543874`：100,290,789 bytes，archive SHA-256 `64644b...a7ccd`；portable `9037544724`：99,695,239 bytes，archive SHA-256 `6aa95f...a40f8` | Actions artifact 保留 1 天，只用于主干构建证据；不是正式 Release 四项资产 |
+| 远端发布状态 | `origin/main=e36bd9a`；`refs/tags/v3.1.8` 不存在；Release workflow 未触发 | 无重复 tag/Release，后续可从完成签字后的最新 main 建立唯一 annotated tag |
+| 依赖风险 | 完整树 1 critical / 19 high / 2 moderate；`--omit=dev` 为 0 critical / 7 high / 2 moderate | critical 不进入生产依赖；既有 7 high/2 moderate 仍需后续治理，不能解读为安全问题已解决 |
+
+### Remaining release gates
+
+| 门禁 | 负责人/下一步 | 发布影响 |
+| --- | --- | --- |
+| 目标 Windows 机器实际安装/运行 installer 与 portable，并从两种形态读取两份 VCC 模板 | Windows 验收人员记录机器、系统版本、安装形态和结论 | BLOCK |
+| Excel/WPS 字体、颜色、动态行、长原因换行、M/N 与 A:L 打印区 | 业务/财务验收人员保留截图或核对记录 | BLOCK |
+| 受保护解归档/删除任务关键写入中的真实关窗时序 | Windows 验收人员在测试副本执行，不在生产原库试验 | BLOCK |
+| 生产数据库副本只读扫描 Pending 46/48、主体×九币种归档余额和五类数据状态 | 数据负责人保存只读扫描摘要；异常只阻断、人工处理 | BLOCK |
+| 真实连续两月逐主体×九币种核对基础值、调整、生效余额、差异、颜色、归档与下月期初并签字 | 财务人员签字 | BLOCK（资金红线） |
+| 真实约 700 万行、多 sheet 工具箱极限文件压力验证 | 性能验收人员记录文件规模、峰值 RSS、结果守恒和退出状态 | BLOCK |
+| GitHub CLI 重新认证 | 用户执行 `gh auth login -h github.com` 后复检 | 阻塞 push/PR/tag/Release 写操作，不影响上述本地证据 |
+
+### Closeout self-review
+
+| 检查 | 结果 | 结论 |
+| --- | --- | --- |
+| 变更边界 | `src/` 与 `changes/3.1.8/spec.md` 零 diff；只改发布证据、PRD 索引、release-docs 测试与 scan-vars 时间戳 | 无产品行为、数据迁移、金额币种、状态生命周期或兼容性变更 |
+| release-docs 定向测试 | `node --test tests/unit/vcc-financial-op-release-docs.test.js`：`5/5 PASS` | 锁定发布候选状态、最终 main/run 证据、`released: pending` 与六项人工闸门 |
+| scan/check-vars | `npm run scan:vars`：293 个 Git-tracked JS、3744 个顶层名称；`npm run check:vars -- --since origin/main` 因 `src/` 无改动跳过 | 无重要变量命中；两份统计报告仅刷新扫描时间 |
+| blindspot + reconciliation self-review | 核对发布入口、tag/current-main 约束、artifact 生命周期、依赖风险、目标机/关窗/生产副本、主体×九币种×连续月份金额血缘、异常失败关闭与签字可观测性 | 未发现剩余 P3+；人工资金红线保持 BLOCK，不以 CI 替代 |
+| 本地全量门禁取舍 | 未在文档收尾分支重复执行约 30 分钟的完整 `release-check`；同日最终产品树已由 `main@e36bd9a` 的 fresh Windows run `31310190290` 全量通过，本分支只新增文档断言且定向 5/5 | 收尾 PR 的 Windows workflow 仍会 fresh 跑完整门禁；若未取得该 run，不得合入发布准备分支 |
