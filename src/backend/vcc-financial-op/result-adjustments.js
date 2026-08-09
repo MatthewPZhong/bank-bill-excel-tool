@@ -14,6 +14,12 @@ const {
   DecimalAccumulator,
   addToAccumulatorMap
 } = require('./decimal-accumulator');
+const { readDatabaseLocalTimestamp } = require('./operation-state');
+const {
+  RESULT_MUTATION_OPERATIONS,
+  snapshotResultMutationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const RUN_ROW_KEY_VERSION = 'v1';
 const ADJUSTABLE_ROW_KINDS = new Set(['movement', 'pending']);
@@ -907,6 +913,82 @@ function translateAdjustmentConstraint(db, runId, rowKey, currency, error) {
   return error;
 }
 
+function assertAdjustmentWriteAllowset(db, {
+  runId,
+  adjustmentId,
+  adjustmentBoundaryId,
+  expectedRevision,
+  transactionTimestamp,
+  expectedAdjustment
+}) {
+  const run = db.prepare(`
+    SELECT status, result_revision, updated_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  const adjustment = db.prepare(`
+    SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
+           currency, adjustment_amount, reason, sequence, created_at,
+           created_app_version, created_build_sha
+    FROM vcc_fin_op_run_adjustments WHERE id = ?
+  `).get(adjustmentId);
+  const newAdjustmentCount = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_run_adjustments WHERE id > ?
+  `).get(adjustmentBoundaryId).row_count) || 0;
+  const actual = adjustment ? { ...adjustment } : null;
+  const expected = {
+    id: adjustmentId,
+    run_id: runId,
+    row_key: expectedAdjustment.rowKey,
+    subject: expectedAdjustment.subject,
+    source_type: expectedAdjustment.sourceType,
+    category_major: expectedAdjustment.categoryMajor,
+    category_minor: expectedAdjustment.categoryMinor,
+    currency: expectedAdjustment.currency,
+    adjustment_amount: expectedAdjustment.adjustmentAmount,
+    reason: expectedAdjustment.reason,
+    sequence: expectedRevision,
+    created_at: transactionTimestamp,
+    created_app_version: expectedAdjustment.appVersion,
+    created_build_sha: expectedAdjustment.buildSha
+  };
+  if (
+    run
+    && run.status === 'calculated'
+    && Number(run.result_revision) === expectedRevision
+    && run.updated_at === transactionTimestamp
+    && Number.isSafeInteger(adjustmentId)
+    && adjustmentId > adjustmentBoundaryId
+    && newAdjustmentCount === 1
+    && actual
+    && JSON.stringify(actual) === JSON.stringify(expected)
+  ) return;
+  throw resultStateError(
+    'adjustment-write-invariant-failed',
+    '调整结果提交前精确写入断言失败，操作已回滚。',
+    {
+      runId,
+      adjustmentId,
+      context: {
+        adjustmentBoundaryId,
+        newAdjustmentCount,
+        expectedRun: {
+          status: 'calculated',
+          resultRevision: expectedRevision,
+          updatedAt: transactionTimestamp
+        },
+        actualRun: run ? {
+          status: run.status,
+          resultRevision: Number(run.result_revision),
+          updatedAt: run.updated_at
+        } : null,
+        expectedAdjustment: expected,
+        actualAdjustment: actual
+      }
+    }
+  );
+}
+
 function addRunAdjustment({
   db,
   runId,
@@ -943,6 +1025,7 @@ function addRunAdjustment({
   try {
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
     const before = requireEffectiveRun(db, normalizedRunId);
     if (before.run.status !== 'calculated') {
       throw resultStateError(
@@ -982,14 +1065,19 @@ function addRunAdjustment({
       );
     }
     const nextSequence = before.run.resultRevision + 1;
+    const preservedBefore = snapshotResultMutationState(db, {
+      targetMonth: before.run.targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT
+    });
     let inserted;
     try {
       inserted = db.prepare(`
         INSERT INTO vcc_fin_op_run_adjustments (
           run_id, row_key, subject, source_type, category_major, category_minor,
           currency, adjustment_amount, reason, sequence,
-          created_app_version, created_build_sha
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, created_app_version, created_build_sha
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         normalizedRunId,
         normalizedRowKey,
@@ -1001,6 +1089,7 @@ function addRunAdjustment({
         normalizedAmount,
         normalizedReason,
         nextSequence,
+        transactionTimestamp,
         appVersion,
         buildSha
       );
@@ -1016,33 +1105,47 @@ function addRunAdjustment({
     const updated = db.prepare(`
       UPDATE vcc_fin_op_runs
       SET result_revision = result_revision + 1,
-          updated_at = datetime('now', 'localtime')
+          updated_at = ?
       WHERE id = ? AND status = 'calculated' AND result_revision = ?
-    `).run(normalizedRunId, expectedRevision);
+    `).run(transactionTimestamp, normalizedRunId, expectedRevision);
     if (Number(updated.changes) !== 1) {
       throw resultRevisionChanged({
         runId: normalizedRunId,
         expectedResultRevision: expectedRevision
       });
     }
-    const after = requireEffectiveRun(db, normalizedRunId);
     const adjustmentId = Number(inserted.lastInsertRowid);
+    assertAdjustmentWriteAllowset(db, {
+      runId: normalizedRunId,
+      adjustmentId,
+      adjustmentBoundaryId: preservedBefore.boundaries.adjustmentMaxId,
+      expectedRevision: nextSequence,
+      transactionTimestamp,
+      expectedAdjustment: {
+        rowKey: normalizedRowKey,
+        subject: target.subject,
+        sourceType: target.sourceType,
+        categoryMajor: target.categoryMajor,
+        categoryMinor: target.categoryMinor,
+        currency: normalizedCurrency,
+        adjustmentAmount: normalizedAmount,
+        reason: normalizedReason,
+        appVersion,
+        buildSha
+      }
+    });
+    const preservedAfter = snapshotResultMutationState(db, {
+      targetMonth: before.run.targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'adjustment-write-invariant-failed',
+      message: '调整前后既有资金事实发生预期外变化，操作已回滚。'
+    });
+    const after = requireEffectiveRun(db, normalizedRunId);
     const saved = after.adjustments.find((row) => row.id === adjustmentId);
-    if (
-      after.run.resultRevision !== nextSequence
-      || !saved
-      || saved.rowKey !== normalizedRowKey
-      || saved.currency !== normalizedCurrency
-      || saved.adjustmentAmount !== normalizedAmount
-      || saved.reason !== normalizedReason
-      || saved.sequence !== nextSequence
-    ) {
-      throw resultStateError(
-        'adjustment-write-invariant-failed',
-        '调整结果提交前断言失败，操作已回滚。',
-        { runId: normalizedRunId, adjustmentId }
-      );
-    }
     db.exec('COMMIT');
     transactionStarted = false;
     return Object.freeze({

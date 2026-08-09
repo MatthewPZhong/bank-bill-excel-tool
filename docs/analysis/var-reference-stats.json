@@ -1,16 +1,16 @@
 {
   "meta": {
     "version": "3.1.8",
-    "scannedAt": "2026-08-09T02:51:46.946Z",
+    "scannedAt": "2026-08-09T03:29:31.035Z",
     "root": "src",
     "sourceSet": "git-tracked-js",
     "totalFiles": 293,
-    "totalTopLevelNames": 3737,
+    "totalTopLevelNames": 3744,
     "buckets": {
-      "shared": 555,
-      "paired": 801,
-      "local": 2227,
-      "crossFile": 1356
+      "shared": 558,
+      "paired": 800,
+      "local": 2232,
+      "crossFile": 1358
     }
   },
   "A": {
@@ -1200,7 +1200,7 @@
           },
           {
             "file": "src/backend/vcc-financial-op/calculator.js",
-            "count": 28
+            "count": 38
           },
           {
             "file": "src/backend/vcc-financial-op/data-target-deletion.js",
@@ -1220,7 +1220,7 @@
           },
           {
             "file": "src/backend/vcc-financial-op/result-adjustments.js",
-            "count": 30
+            "count": 40
           },
           {
             "file": "src/backend/vcc-financial-op/system-op-importer.js",
@@ -1351,7 +1351,7 @@
             "count": 10
           }
         ],
-        "totalHits": 811,
+        "totalHits": 831,
         "fileSpan": 77
       },
       {
@@ -6914,7 +6914,7 @@
           },
           {
             "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 4
+            "count": 6
           },
           {
             "file": "src/backend/vcc-financial-op/unarchive.js",
@@ -6929,7 +6929,7 @@
             "count": 5
           }
         ],
-        "totalHits": 38,
+        "totalHits": 40,
         "fileSpan": 7
       },
       {
@@ -8128,6 +8128,42 @@
         "fileSpan": 6
       },
       {
+        "name": "readDatabaseLocalTimestamp",
+        "defFiles": [
+          "src/backend/vcc-financial-op/calculator.js",
+          "src/backend/vcc-financial-op/operation-state.js",
+          "src/backend/vcc-financial-op/result-adjustments.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/operation-state.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/result-adjustments.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/unarchive.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 14,
+        "fileSpan": 6
+      },
+      {
         "name": "runPositionSideDbMutation",
         "defFiles": [
           "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -8159,6 +8195,40 @@
           }
         ],
         "totalHits": 14,
+        "fileSpan": 6
+      },
+      {
+        "name": "assertPreservedOperationState",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/result-adjustments.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/unarchive.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 13,
         "fileSpan": 6
       },
       {
@@ -9582,6 +9652,36 @@
           },
           {
             "file": "src/backend/position-reconciliation-import/source-writer.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 12,
+        "fileSpan": 5
+      },
+      {
+        "name": "assertSuccessOperationAudit",
+        "defFiles": [
+          "src/backend/vcc-financial-op/operation-audit.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/operation-audit.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/unarchive.js",
             "count": 2
           }
         ],
@@ -11122,6 +11222,32 @@
         "fileSpan": 4
       },
       {
+        "name": "normalizeOperationMonth",
+        "defFiles": [
+          "src/backend/vcc-financial-op/operation-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/operation-state.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/unarchive.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 4
+      },
+      {
         "name": "rowValues",
         "defFiles": [
           "src/main-process/duplicate-inbound-match/excel-writer.js",
@@ -11277,32 +11403,6 @@
           {
             "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
             "count": 3
-          }
-        ],
-        "totalHits": 12,
-        "fileSpan": 4
-      },
-      {
-        "name": "normalizeOperationMonth",
-        "defFiles": [
-          "src/backend/vcc-financial-op/operation-state.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/vcc-financial-op/operation-state.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/unarchive.js",
-            "count": 4
           }
         ],
         "totalHits": 12,
@@ -11876,32 +11976,6 @@
         "fileSpan": 4
       },
       {
-        "name": "assertPreservedOperationState",
-        "defFiles": [
-          "src/backend/vcc-financial-op/preserved-state.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/unarchive.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
         "name": "assertStagedInputUnchangedAsync",
         "defFiles": [
           "src/main-process/position-reconciliation/input-staging.js"
@@ -11921,32 +11995,6 @@
           },
           {
             "file": "src/main-process/position-reconciliation/input-staging.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
-        "name": "assertSuccessOperationAudit",
-        "defFiles": [
-          "src/backend/vcc-financial-op/operation-audit.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/operation-audit.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/unarchive.js",
             "count": 2
           }
         ],
@@ -12186,32 +12234,6 @@
           {
             "file": "src/main-process/bank-bu-recon-writer.js",
             "count": 3
-          }
-        ],
-        "totalHits": 9,
-        "fileSpan": 4
-      },
-      {
-        "name": "readDatabaseLocalTimestamp",
-        "defFiles": [
-          "src/backend/vcc-financial-op/operation-state.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/operation-state.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/vcc-financial-op/unarchive.js",
-            "count": 2
           }
         ],
         "totalHits": 9,
@@ -14095,6 +14117,28 @@
         "fileSpan": 3
       },
       {
+        "name": "RESULT_MUTATION_OPERATIONS",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 9
+          },
+          {
+            "file": "src/backend/vcc-financial-op/result-adjustments.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 15,
+        "fileSpan": 3
+      },
+      {
         "name": "archiveRun",
         "defFiles": [
           "src/backend/vcc-financial-op/calculator.js"
@@ -15709,6 +15753,28 @@
           },
           {
             "file": "src/renderer.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 3
+      },
+      {
+        "name": "snapshotResultMutationState",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/vcc-financial-op/result-adjustments.js",
             "count": 3
           }
         ],
@@ -18343,6 +18409,28 @@
         "fileSpan": 3
       },
       {
+        "name": "encodeExcelStXstring",
+        "defFiles": [
+          "src/backend/toolbox-format/excel-text.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/toolbox-format/excel-text.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/toolbox-output-writer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/vcc-financial-op-writer.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 3
+      },
+      {
         "name": "exportAggregate",
         "defFiles": [
           "src/backend/pending-export/writer.js"
@@ -19962,6 +20050,25 @@
         "fileSpan": 2
       },
       {
+        "name": "REQUIRED_DATASET_TYPES",
+        "defFiles": [
+          "src/backend/vcc-financial-op/calculator.js",
+          "src/backend/vcc-financial-op/unarchive.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/vcc-financial-op/unarchive.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 2
+      },
+      {
         "name": "tableColumns",
         "defFiles": [
           "src/backend/vcc-financial-op-db/migrations.js",
@@ -20232,25 +20339,6 @@
           {
             "file": "src/renderer.js",
             "count": 2
-          }
-        ],
-        "totalHits": 11,
-        "fileSpan": 2
-      },
-      {
-        "name": "REQUIRED_DATASET_TYPES",
-        "defFiles": [
-          "src/backend/vcc-financial-op/calculator.js",
-          "src/backend/vcc-financial-op/unarchive.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/calculator.js",
-            "count": 5
-          },
-          {
-            "file": "src/backend/vcc-financial-op/unarchive.js",
-            "count": 6
           }
         ],
         "totalHits": 11,
@@ -27389,24 +27477,6 @@
         "fileSpan": 2
       },
       {
-        "name": "encodeExcelStXstring",
-        "defFiles": [
-          "src/backend/toolbox-format/excel-text.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/toolbox-format/excel-text.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/toolbox-output-writer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
         "name": "ensurePositionLargeImportSchemaAtPath",
         "defFiles": [
           "src/main-process/position-reconciliation/large-import-schema.js"
@@ -34045,10 +34115,10 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 37
+            "count": 38
           }
         ],
-        "totalHits": 37,
+        "totalHits": 38,
         "fileSpan": 1
       },
       {
@@ -36348,6 +36418,20 @@
         "fileSpan": 1
       },
       {
+        "name": "ARCHIVE_RESULT_OPERATION",
+        "defFiles": [
+          "src/backend/vcc-financial-op/calculator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 7,
+        "fileSpan": 1
+      },
+      {
         "name": "archiveCenterStatusKey",
         "defFiles": [
           "src/renderer.js"
@@ -36936,20 +37020,6 @@
         "fileSpan": 1
       },
       {
-        "name": "ARCHIVE_RESULT_OPERATION",
-        "defFiles": [
-          "src/backend/vcc-financial-op/calculator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/calculator.js",
-            "count": 6
-          }
-        ],
-        "totalHits": 6,
-        "fileSpan": 1
-      },
-      {
         "name": "ARTIFACT_STATUSES",
         "defFiles": [
           "src/backend/database/archive-repository.js"
@@ -37454,6 +37524,20 @@
         "fileSpan": 1
       },
       {
+        "name": "maxId",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
         "name": "mixColor",
         "defFiles": [
           "src/renderer.js"
@@ -37657,6 +37741,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-output-publication.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 1
+      },
+      {
+        "name": "REPLACE_CALCULATED_RESULT_OPERATION",
+        "defFiles": [
+          "src/backend/vcc-financial-op/calculator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
             "count": 6
           }
         ],
@@ -39435,20 +39533,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 1
-      },
-      {
-        "name": "REPLACE_CALCULATED_RESULT_OPERATION",
-        "defFiles": [
-          "src/backend/vcc-financial-op/calculator.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/calculator.js",
             "count": 5
           }
         ],
@@ -41836,20 +41920,6 @@
         "fileSpan": 1
       },
       {
-        "name": "maxId",
-        "defFiles": [
-          "src/backend/vcc-financial-op/preserved-state.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 4
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 1
-      },
-      {
         "name": "META_HEADERS",
         "defFiles": [
           "src/main-process/pre-fund-reconciliation/mpt-error-report-writer.js"
@@ -42375,6 +42445,20 @@
         "refFiles": [
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "PRESERVED_STATE_VERSION",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
             "count": 4
           }
         ],
@@ -51048,20 +51132,6 @@
         "fileSpan": 1
       },
       {
-        "name": "PRESERVED_STATE_VERSION",
-        "defFiles": [
-          "src/backend/vcc-financial-op/preserved-state.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/vcc-financial-op/preserved-state.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 1
-      },
-      {
         "name": "PREVIEW_COLUMN_COUNT",
         "defFiles": [
           "src/backend/vcc-financial-op/workbook-reader.js"
@@ -55010,6 +55080,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertAdjustmentWriteAllowset",
+        "defFiles": [
+          "src/backend/vcc-financial-op/result-adjustments.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/result-adjustments.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "assertAllPublishedTargetsMatch",
         "defFiles": [
           "src/main-process/toolbox-output-publication.js"
@@ -55017,6 +55101,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-output-publication.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertArchiveWriteAllowset",
+        "defFiles": [
+          "src/backend/vcc-financial-op/calculator.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/calculator.js",
             "count": 2
           }
         ],
@@ -60414,6 +60512,20 @@
         "fileSpan": 1
       },
       {
+        "name": "normalizeExpectedResultMutationRow",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeExpectedSystemAttempt",
         "defFiles": [
           "src/backend/vcc-financial-op/preserved-state.js"
@@ -62920,6 +63032,20 @@
         "fileSpan": 1
       },
       {
+        "name": "resultMutationFilter",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "resultRowForExport",
         "defFiles": [
           "src/main-process/position-reconciliation/service.js"
@@ -64726,6 +64852,20 @@
         "fileSpan": 1
       },
       {
+        "name": "VCC_FACT_TABLES",
+        "defFiles": [
+          "src/backend/vcc-financial-op/preserved-state.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/vcc-financial-op/preserved-state.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "VCC_PREVIEW_CAPTURE_CONTRACT",
         "defFiles": [
           "src/renderer.js"
@@ -66291,7 +66431,7 @@
         },
         {
           "file": "src/backend/vcc-financial-op/calculator.js",
-          "count": 28
+          "count": 38
         },
         {
           "file": "src/backend/vcc-financial-op/data-target-deletion.js",
@@ -66311,7 +66451,7 @@
         },
         {
           "file": "src/backend/vcc-financial-op/result-adjustments.js",
-          "count": 30
+          "count": 40
         },
         {
           "file": "src/backend/vcc-financial-op/system-op-importer.js",
@@ -66442,7 +66582,7 @@
           "count": 10
         }
       ],
-      "totalHits": 811,
+      "totalHits": 831,
       "fileSpan": 77
     },
     {
@@ -72005,7 +72145,7 @@
         },
         {
           "file": "src/backend/vcc-financial-op/preserved-state.js",
-          "count": 4
+          "count": 6
         },
         {
           "file": "src/backend/vcc-financial-op/unarchive.js",
@@ -72020,7 +72160,7 @@
           "count": 5
         }
       ],
-      "totalHits": 38,
+      "totalHits": 40,
       "fileSpan": 7
     },
     {
@@ -73219,6 +73359,42 @@
       "fileSpan": 6
     },
     {
+      "name": "readDatabaseLocalTimestamp",
+      "defFiles": [
+        "src/backend/vcc-financial-op/calculator.js",
+        "src/backend/vcc-financial-op/operation-state.js",
+        "src/backend/vcc-financial-op/result-adjustments.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/operation-state.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/result-adjustments.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/unarchive.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 14,
+      "fileSpan": 6
+    },
+    {
       "name": "runPositionSideDbMutation",
       "defFiles": [
         "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -73250,6 +73426,40 @@
         }
       ],
       "totalHits": 14,
+      "fileSpan": 6
+    },
+    {
+      "name": "assertPreservedOperationState",
+      "defFiles": [
+        "src/backend/vcc-financial-op/preserved-state.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/preserved-state.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/result-adjustments.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/unarchive.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 13,
       "fileSpan": 6
     },
     {
@@ -74673,6 +74883,36 @@
         },
         {
           "file": "src/backend/position-reconciliation-import/source-writer.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 12,
+      "fileSpan": 5
+    },
+    {
+      "name": "assertSuccessOperationAudit",
+      "defFiles": [
+        "src/backend/vcc-financial-op/operation-audit.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/operation-audit.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/unarchive.js",
           "count": 2
         }
       ],
@@ -76213,6 +76453,32 @@
       "fileSpan": 4
     },
     {
+      "name": "normalizeOperationMonth",
+      "defFiles": [
+        "src/backend/vcc-financial-op/operation-state.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/operation-state.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/preserved-state.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/unarchive.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 4
+    },
+    {
       "name": "rowValues",
       "defFiles": [
         "src/main-process/duplicate-inbound-match/excel-writer.js",
@@ -76368,32 +76634,6 @@
         {
           "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
           "count": 3
-        }
-      ],
-      "totalHits": 12,
-      "fileSpan": 4
-    },
-    {
-      "name": "normalizeOperationMonth",
-      "defFiles": [
-        "src/backend/vcc-financial-op/operation-state.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/vcc-financial-op/operation-state.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/vcc-financial-op/preserved-state.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/unarchive.js",
-          "count": 4
         }
       ],
       "totalHits": 12,
@@ -76967,32 +77207,6 @@
       "fileSpan": 4
     },
     {
-      "name": "assertPreservedOperationState",
-      "defFiles": [
-        "src/backend/vcc-financial-op/preserved-state.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/preserved-state.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/unarchive.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
       "name": "assertStagedInputUnchangedAsync",
       "defFiles": [
         "src/main-process/position-reconciliation/input-staging.js"
@@ -77012,32 +77226,6 @@
         },
         {
           "file": "src/main-process/position-reconciliation/input-staging.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
-      "name": "assertSuccessOperationAudit",
-      "defFiles": [
-        "src/backend/vcc-financial-op/operation-audit.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/operation-audit.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/unarchive.js",
           "count": 2
         }
       ],
@@ -77277,32 +77465,6 @@
         {
           "file": "src/main-process/bank-bu-recon-writer.js",
           "count": 3
-        }
-      ],
-      "totalHits": 9,
-      "fileSpan": 4
-    },
-    {
-      "name": "readDatabaseLocalTimestamp",
-      "defFiles": [
-        "src/backend/vcc-financial-op/operation-state.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/vcc-financial-op/data-target-deletion.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/vcc-financial-op/dataset-deletion.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/operation-state.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/vcc-financial-op/unarchive.js",
-          "count": 2
         }
       ],
       "totalHits": 9,
@@ -79186,6 +79348,28 @@
       "fileSpan": 3
     },
     {
+      "name": "RESULT_MUTATION_OPERATIONS",
+      "defFiles": [
+        "src/backend/vcc-financial-op/preserved-state.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/preserved-state.js",
+          "count": 9
+        },
+        {
+          "file": "src/backend/vcc-financial-op/result-adjustments.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 15,
+      "fileSpan": 3
+    },
+    {
       "name": "archiveRun",
       "defFiles": [
         "src/backend/vcc-financial-op/calculator.js"
@@ -80800,6 +80984,28 @@
         },
         {
           "file": "src/renderer.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 3
+    },
+    {
+      "name": "snapshotResultMutationState",
+      "defFiles": [
+        "src/backend/vcc-financial-op/preserved-state.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/vcc-financial-op/preserved-state.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/vcc-financial-op/result-adjustments.js",
           "count": 3
         }
       ],
@@ -83434,6 +83640,28 @@
       "fileSpan": 3
     },
     {
+      "name": "encodeExcelStXstring",
+      "defFiles": [
+        "src/backend/toolbox-format/excel-text.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/toolbox-format/excel-text.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/toolbox-output-writer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/vcc-financial-op-writer.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 3
+    },
+    {
       "name": "exportAggregate",
       "defFiles": [
         "src/backend/pending-export/writer.js"
@@ -85051,6 +85279,25 @@
       "fileSpan": 2
     },
     {
+      "name": "REQUIRED_DATASET_TYPES",
+      "defFiles": [
+        "src/backend/vcc-financial-op/calculator.js",
+        "src/backend/vcc-financial-op/unarchive.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/vcc-financial-op/calculator.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/vcc-financial-op/unarchive.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 13,
+      "fileSpan": 2
+    },
+    {
       "name": "tableColumns",
       "defFiles": [
         "src/backend/vcc-financial-op-db/migrations.js",
@@ -85321,25 +85568,6 @@
         {
           "file": "src/renderer.js",
           "count": 2
-        }
-      ],
-      "totalHits": 11,
-      "fileSpan": 2
-    },
-    {
-      "name": "REQUIRED_DATASET_TYPES",
-      "defFiles": [
-        "src/backend/vcc-financial-op/calculator.js",
-        "src/backend/vcc-financial-op/unarchive.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/vcc-financial-op/calculator.js",
-          "count": 5
-        },
-        {
-          "file": "src/backend/vcc-financial-op/unarchive.js",
-          "count": 6
         }
       ],
       "totalHits": 11,
@@ -92471,24 +92699,6 @@
         },
         {
           "file": "src/backend/toolbox-format/style-registry.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "encodeExcelStXstring",
-      "defFiles": [
-        "src/backend/toolbox-format/excel-text.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/toolbox-format/excel-text.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/toolbox-output-writer.js",
           "count": 2
         }
       ],

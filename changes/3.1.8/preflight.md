@@ -57,10 +57,10 @@
 - 锁定规范已纳入 `changes/3.1.8/spec.md`；保留 Downloads 原文件 SHA-256，并只把 §10.4 修正为仓库真实文档路径。`docs/iterations/v3.1.8/PRD-v3.1.8.md` 以索引/导读归档版本范围、非目标、验收与人工门禁，不重复规范正文。
 - VCC 26 张合成预览已在最新 PR 5 restack 候选上重新生成，覆盖关键业务状态、100%/125%/150% 和最小窗口；25 张为 2480×1720，最小窗口图为 2160×1520。自动门禁逐图验证 signature、IHDR、正尺寸、非空 IDAT、IEND 长度 0 且恰好 EOF，capture hook、窗口参数和假数据均与生产路径隔离。
 - Windows 本地、PR 和 Release 构建命令统一锁定 x64；任意 PR 配置为先跑完整发布检查，再构建 installer/portable 并执行分发守卫；守卫新增两份 VCC 模板和包内版本校验。
-- `npm run scan:vars` 已改为只统计 Git 已跟踪 JS，ignored/generated/untracked 不参与；本地存在 ignored `src/build-info.js` 时仍稳定得到 `src/` 293 文件、3737 个顶层名字。当前本轮修复不改 `src/`，默认 `check:vars` 正常跳过；完整 PR `e086f2d...→HEAD` 仅命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中。五项均来自既有 PR6 capture/UI 路径，模块枚举、原生 dialog、全局状态结构和生产退出钩子未改变。
-- 最新 PR 5 `e086f2d99e9cb7a0b48c6c32e52b51f7ff9398ff` 已以普通 merge restack 到 PR 6；相对最新 PR 5 的最终范围为 59 个文件（34 modified + 25 added），没有恢复 PR 4 的 adjusted-result 临时导出门禁，PR 5 的 semantic writer、targetMonth 租约、调整归档与次月继承均保留。
-- RSS 门禁的可测档继续只在 tier2 预算侧加一次 16MB 余量并严格低于线性外推。PR #129 进一步修复 low-signal：首次 tier1 `<=8MB` 时追加两轮独立采样并取三次中位数，tier2 同时满足 32MB 包络和严格低于线性外推；`8→24MB`、`6→29MB`、`8→32MB` 均拒绝，任一样本 150MB 硬上限与非法输入 fail-closed 不变。修复后 5万/15万与默认 50万/150万真实 multi-sheet/worker 链均 `31/31 PASS`；自动证据只覆盖这些规模，700 万仍按 PRD 保留人工门禁。最终 release-check 已重新冻结为 unit `4795/4795`、integration `48/48` / `2457/2457`。
-- 最终单次 `npm run release-check` 全绿：lint PASS、smoke PASS、unit `4795/4795 PASS`（303 个测试文件、0 failures）、integration `48/48` 脚本和 `2457/2457` 可计数断言 PASS；其中 VCC 调整归档继承 `295/295`、破坏性状态链 `64/64`、effective result `19/19`、历史模板导出 `28/28`。
+- `npm run scan:vars` 只统计 Git 已跟踪 JS，ignored/generated/untracked 不参与；最终合并树稳定得到 `src/` 293 文件、3744 个顶层名字。#128 合并增量的 `check:vars` 仅命中 Runtime-state `state`，来自 VCC 后端事务局部命名；完整 PR base `cc3080e...→候选树` 仍只命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中。模块枚举、原生 dialog、renderer 顶层状态结构和生产退出钩子未改变；`snapshotResultMutationState` 保留为待人工审批的 Risk-sensitive 升格候选，不静默修改清单。
+- 冻结 #128 `cc3080eb3e8720d5dc6093010348a964b6d7085c` 已以普通 merge restack 到 PR 6 候选；最终范围相对该 base 为 60 个文件（34 modified + 26 added）。合并完整保留 #127 的 19 表精确指纹/allowset、success audit precommit 与可信 provenance，#128 的 semantic writer、targetMonth 租约、ST_Xstring 单次边界编码及 297 链，以及 #129 的低信号三采样、Git-tracked scan-vars 和 Spec 空白修复。
+- RSS 门禁的可测档继续只在 tier2 预算侧加一次 16MB 余量并严格低于线性外推。PR #129 进一步修复 low-signal：首次 tier1 `<=8MB` 时追加两轮独立采样并取三次中位数，tier2 同时满足 32MB 包络和严格低于线性外推；`8→24MB`、`6→29MB`、`8→32MB` 均拒绝，任一样本 150MB 硬上限与非法输入 fail-closed 不变。最终合并树的 5万/15万真实链为 `31/31 PASS`（`44→44MB`），默认 50万/150万档在 release-check 内为 `31/31 PASS`；自动证据只覆盖这些规模，700 万仍按 PRD 保留人工门禁。
+- 最终单次 `npm run release-check` 全绿：lint PASS、smoke PASS、unit `4801/4801 PASS`（303 个测试文件、0 failures）、integration `48/48` 脚本和 `2459/2459` 可计数断言 PASS（`294086ms`）；其中 VCC 调整归档继承 `297/297`、破坏性状态链 `64/64`、effective result `19/19`、历史模板导出 `28/28`。
 - 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
 
 ### Reviewer 退回项与最终盲区复核
@@ -71,8 +71,8 @@
 - 已重新生成 26/26 张 VCC PNG 并全部解码校验：25 张 2480×1720，最小窗口图 2160×1520。人工检查切年、非尾月、执行中和结果页，禁用按钮均为灰色且不可点，结果页显示“结果版本”。
 - 用户手册已明确：较新“已归档”和“已计算”均会阻断更早月；须从最新月开始逐月“解归档→删除全部未归档结果”，修订目标月后再按时间正序重跑、归档；删除不会清理源数据、导入审计或固定首月。
 - 公开的 v3.1.8 CHANGELOG/版本历史/手册当前候选切片已改为用户语言，不再使用“金标准/语义模板”，改为“正式模板/结果模板”；Windows 统一表述为“64 位 Windows 安装版和便携版”。VCC 界面不再展示英文 `revision`，内部字段和错误码保持不变；release-docs 对三份当前版本切片增加了术语负断言。
-- 最终 blindspot pass 已复核发布证据、低信号/可测分支、单样本硬上限、非法样本、clean-checkout 来源集合、完整 base diff 和既有预览入口失败关闭。相对 `c2b3b7e...`，本轮不修改任何 `src/`；PR 1～PR 5 的强制 fingerprint、完整 issues/openingState、DecimalAccumulator、protected worker、exact preserved allowset、调整账本、semantic writer、targetMonth 二次重查和结构化 `auditFailure` 均由既有代码与全量回归覆盖。本轮 1×P2 + 2×P3 均已修复，最终 release-check 全绿，未发现其他 P3+ 或新增资金红线。
-- 最终 intended 范围仍为 59 个文件：34 个 modified + 25 个 added。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件继续明确排除，未读取到实现、未移动、未删除、未暂存。
+- 最终 blindspot 与 reconciliation pass 已沿 service allowlist→worker→calculate/adjust/archive→19 表指纹/success audit→targetMonth semantic export→ST_Xstring Excel readback→次月九币种继承，复核入口旁路、状态/幂等、部分失败、主键金额币种血缘、行/子表守恒和错误可观测性。定向 `77/77`、`17/17`、`7/7` 与四条真实链、全量门禁均通过；未发现其他 P3+ 或新增自动化缺口。真实生产副本与 Windows Excel/WPS 仍为人工资金红线，自动化不替代签字。
+- 最终 intended 范围为 60 个文件：34 个 modified + 26 个 added。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件继续明确排除，未读取到实现、未移动、未删除、未暂存。
 
 ### 仍阻塞 v3.1.8 正式发布
 
@@ -82,4 +82,4 @@
 - 对生产数据库副本做只读扫描，核对 Pending 46/48 列、归档主体/九币种余额及五类数据状态；异常只阻断并人工处理，不自动修复。
 - 由财务人员用真实月份逐主体、逐九币种核对基础值、调整值、生效余额、差异、颜色、归档及连续两月期初衔接，并记录签字结论。
 
-结论：PR6 已完成最新 PR5 restack、26 张预览冻结、重要变量与盲区复核；PR #129 本轮 1×P2 + 2×P3 已修复，最终 `release-check` 为 lint/smoke PASS、unit `4795/4795`、integration `48/48` 脚本且 `2457/2457` 断言 PASS。自动化门禁已完成；上述人工/平台门禁完成前，v3.1.8 仍是发布候选，不得发布。
+结论：PR6 已完成冻结 #128 restack、26 张预览冻结、重要变量与双盲区复核；PR #129 的 1×P2 + 2×P3 修复与 #127/#128 资金边界同时保留。最终 `release-check` 为 lint/smoke PASS、unit `4801/4801`、integration `48/48` 脚本且 `2459/2459` 断言 PASS。自动化门禁已完成；上述人工/平台门禁完成前，v3.1.8 仍是发布候选，不得发布。

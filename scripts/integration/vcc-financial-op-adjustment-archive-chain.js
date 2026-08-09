@@ -46,6 +46,8 @@ const M2 = '2026-06';
 const SUBJECT = 'PPHK';
 const APP_VERSION = '3.1.8';
 const BUILD_SHA = 'adjustment-archive-integration-sha';
+const ADJUSTMENT_REASON =
+  '系统外核对_x000D_补记；大小写_X000d_；字面_x005F_x000D_；真实CRLF\r\n下一行；普通😀中文';
 
 let passed = 0;
 let failed = 0;
@@ -422,11 +424,12 @@ async function run() {
       rowKey: rechargeOption.rowKey,
       currency: 'USD',
       adjustmentAmount: '1.25',
-      reason: '系统外已核实补记',
+      reason: ADJUSTMENT_REASON,
       expectedResultRevision: options.resultRevision
     });
     assertEq(adjusted.status, 'adjusted', '调整通过真实 service 原子写入');
     assertEq(adjusted.resultRevision, 1, '新增调整后 revision 递增为 1');
+    assertEq(adjusted.adjustment.reason, ADJUSTMENT_REASON, '调整写入保持业务原文');
     assertEq(adjusted.adjustment.createdAppVersion, APP_VERSION, '调整事实记录创建应用版本');
     assertEq(adjusted.adjustment.createdBuildSha, BUILD_SHA, '调整事实记录创建 build SHA');
 
@@ -477,7 +480,7 @@ async function run() {
     ));
     const adjustmentIndex = subjectReview.rows.findIndex((row) => row.type === 'adjustment');
     assertEq(adjustmentIndex, baseIndex + 1, '调整行紧邻目标基础行展示');
-    assertEq(subjectReview.rows[adjustmentIndex].reason, '系统外已核实补记', '结果复核保留调整原因');
+    assertEq(subjectReview.rows[adjustmentIndex].reason, ADJUSTMENT_REASON, '结果复核保留调整原因');
     assertDeepEq(reopened.review.currencies, SUPPORTED_CURRENCIES, '结果复核币种顺序固定为完整九币种');
 
     const optionsAfterAdjustment = service.listAdjustmentOptions({ runId });
@@ -541,6 +544,11 @@ async function run() {
     assertEq(archiveAudit.app_version, APP_VERSION, '归档审计记录应用版本');
     assertEq(archiveAudit.build_sha, BUILD_SHA, '归档审计记录 build SHA');
     assertEq(archiveEvidence.effectiveRun.adjustments.length, 1, '归档审计固化完整调整事实');
+    assertEq(
+      archiveEvidence.effectiveRun.adjustments[0].reason,
+      ADJUSTMENT_REASON,
+      '归档审计保留未编码的业务调整原因'
+    );
     assertEq(
       archiveEvidence.effectiveRun.balances.find((row) => row.currency === 'USD').effectiveCalculatedBalance,
       '104.25',

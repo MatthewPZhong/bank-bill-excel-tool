@@ -72,6 +72,12 @@
 | PR 6 restack 将可测增长的单侧 RSS 余量从 8MB 校准为 16MB，并独立要求可测档严格低于线性外推；低信号包络与硬上限不变 | 最新 PR5 合入后同一生产路径零 diff，但默认规模两次独立采样稳定得到 `82→135MB`、`82→133MB`，均仅因 8MB 余量产生的 131MB 边界失败；self-review 又证明仅扩大余量会让 `9→27MB` 的低幅精确线性增长通过 | 反复执行直到偶然通过；恢复双侧区间；删除亚线性断言；提高 150MB 硬上限；只保留 13MB/32MB 高档反例 | 16MB 仅加在可测 tier2 预算侧，同时要求 tier2 严格小于 `tier1 × rowsRatio`；`6→33MB` 低信号溢出、`9→27MB`/`13→39MB`/`32→96MB` 精确线性、140MB 新边界、150MB 硬上限与非法输入仍失败关闭；只改变测试稳定性，不改变产品/资金契约 |
 | PR #129 review 对低信号 RSS 也强制严格低于线性外推，并仅在首次 tier1 `<=8MB` 时追加两轮隔离采样、以三次中位数裁决增长 | 固定 32MB 包络本身会让 `8→24MB` 精确线性、`6→29MB`/`8→32MB` 超线性通过；单次低信号又容易被 MB 取整和 allocator 抖动支配 | 继续把 low-signal 标为自动通过；只收紧常量；所有正常档无条件跑三次；删除低信号分支并靠偶然单样本 | 低信号同时满足 `tier2<=32MB` 与 `tier2<tier1×rowsRatio`；三次中位数只用于增长趋势，任一样本 `>=150MB` 仍失败。默认实测首次 tier1 为 82～88MB，不增加常规 CI 次数；自动化只证明 50万/150万采样档，700万仍是 PRD 人工门禁 |
 | `scan-vars` 的源码集合固定为 Git index 已跟踪 `.js` | 文件系统递归会把 ignored/generated `src/build-info.js` 计入本地报告，导致本地 294 文件、clean checkout 293 文件 | 按文件名硬编码排除 build-info；继续扫描所有非 ignored untracked；把 294 固化为报告常量 | `git ls-files --cached` 成为唯一集合来源；ignored/generated/untracked 全排除，报告写入 `sourceSet=git-tracked-js`，独立临时 Git 仓库测试锁定 tracked/ignored/untracked 三类 |
+| PR 5 调整原因只在 ExcelJS 单元格赋值边界调用既有 `encodeExcelStXstring()`，数据库、review DTO、归档审计和行高计算继续使用业务原文 | 直接赋值时 ExcelJS 会把用户输入的字面 `_x000D_` 解码成回车，并把真实 CRLF 规范成 LF；既有 helper 已覆盖大小写十六进制、预编码外观、控制字符和 Unicode 合法性 | 在写入数据库时编码；复制一份 writer 私有 escape；对读回结果再做猜测性反解 | 每次导出都从不可变原文单次编码，避免重复导出双重编码；staged validator 仍严格以业务原文 readback，审计与 Excel 可逐字符对账 |
+| PR #127 调整与归档事务对全部 19 张 VCC 事实表做流式确定性指纹，并用事务前 max-id/目标月精确划定新增调整、目标归档、run revision/status 和 dataset status 允许集 | 原提交前检查只证明新调整或目标归档看起来正确，AFTER INSERT trigger 仍可同时篡改旧 sequence、基础 run row 或其他月份/全局事实 | 只检查目标 run/新行；复用只覆盖破坏性删除的目标月排除模型 | 调整与归档在最后一次业务写后、COMMIT 前验证旧事实零漂移；新调整必须边界后恰一条且字段/时间/构建来源全等，目标归档与五类 dataset 必须精确匹配；任一 silent trigger 整事务回滚并留下 rolled_back 审计 |
+| PR #127 重算替换和归档的 success operation audit 必须在事务内按旧审计 max-id、唯一新行、完整 evidence hash、run/月/type/status、可信版本来源和同一事务时间做最终断言 | INSERT 后触发器可删除或改写本次 success audit，原流程仍可能提交资金事实且制造伪成功审计 | 只相信 `lastInsertRowid`；COMMIT 后再补查 | `assertSuccessOperationAudit` 成为两条成功路径最后的审计边界；删除、改 evidence 或伪造 app/build 均在 COMMIT 前失败，旧资金事实/归档/dataset 全回滚，事务外仅 best-effort 记录可信 `rolled_back` |
+| PR #127 service 对 calculate 请求只提取 `targetMonth` 与 `expectedInputFingerprint`，所有 worker 任务的 `taskGeneration/appVersion/buildSha` 均由 service 闭包最后覆盖 | renderer/IPC payload 可伪造构建来源，旧 spread 顺序还允许覆盖 worker 审计 provenance | 在 worker 内逐 action 清洗；信任 renderer 只传正常字段 | calculate 的额外 runId/版本/代次等字段不再进入 worker；其他 worker action 即使 payload 同名也只能得到主进程可信 provenance，审计来源单一 |
+| #127 → #128 restack 使用普通双父 merge，并只对实施记录和自动集成策略做语义冲突裁决 | 冻结修复头 `28fbd2a` 与 #128 修复头 `b0b367b` 均已独立验收，rebase/force/squash 会破坏堆叠审计父链；生产代码和测试可自动合并 | rebase 后重写 #128；任选一侧覆盖记录；手工保留旧 integration 计时 | 实施记录完整保留双方决策/证据；integration policy 由最终全量 runner 重新生成；生产树同时保留 19 表 exact allowset、success audit/provenance 白名单、semantic writer、targetMonth 租约重查和 ST_Xstring 单次边界编码 |
+| #129 → 冻结 #128 restack 使用普通双父 merge，第一父固定 `67019de`、第二父固定 `cc3080e` | #129 已独立冻结 RSS/scan/spec 修复，#128 已独立冻结 #127 资金事务收紧与 ST_Xstring/semantic export；rebase/force/squash 会破坏审计父链 | 重写任一冻结头；用一侧 notes/policy 覆盖另一侧；重新手改旧扫描或集成计数 | 生产代码与测试自动合并；实施记录保留双方历史，policy 由最终 integration runner 重建，scan reports 由最终 Git-tracked 源集合重建；最终树同时保留三条 PR 的不变量 |
 
 ## Assumptions
 
@@ -273,6 +279,57 @@
 | P3 | RSS 可测增长把单侧噪声余量调到 16MB 后，原公式会放过 `9→27MB` 的低幅精确线性增长 | 直接调用 `assessScanMemoryGrowth(9, 27, 3)` 并锁定边界 | 已修复：可测档同时要求严格低于线性外推；`9→26MB` PASS、`9→27MB` FAIL，13MB/32MB 反例与 150MB 硬上限保留 |
 | P3 | integration policy 仍把 `release-check` 写成三段且声称项目无 CI，与 package script 和 Windows workflow 不一致 | 对照 `package.json` 与两份 workflow | 已修复为 lint + smoke + unit + integration，并明确本地与 Windows PR/Release 使用同一门禁 |
 | P0～P1 | 未发现 | 对入口旁路、失败关闭、租约/代次、金额币种、幂等、部分失败、行数/子表守恒、审计与输出回读逐项复核 | 无需代码处置；人工资金红线不降级为自动通过 |
+| PR 5 调整原因 ST_Xstring 定向探针与回归 | 原始 `核对_x000D_补记` 经 ExcelJS 重开会变成真实回车；边界编码后，字面 `_x000D_`、`_X000d_`、预编码外观 `_x005F_x000D_`、真实 CRLF 和普通中文/emoji 均严格等于业务原文。helper+writer `17/17 PASS`，相关 writer/renderer/archive/audit 组合 `87/87 PASS` | 证明修复点必须且只需位于 N 列赋值边界；sharedStrings 断言同时锁定 escape 词法，defined-name 仍可逆还原 `rowKey × JPY`，数据库 reason 未被 OOXML 词法污染 |
+| PR 5 调整归档与历史按月导出真实链 | 调整归档导出继承链 `297/297 PASS`，历史 `targetMonth` 模板导出链 `28/28 PASS` | 同一真实 service/SQLite 链核对 adjustment 写入、review DTO、archive audit、按月 semantic writer、ExcelJS reason 严格回读、M defined-name 血缘及次月九币种期初；未走 helper-only 捷径 |
+| PR 5 ST_Xstring 修复最终全仓门禁 | 全量 `src/` ESLint PASS；unit `4761/4761 PASS`（297 个测试文件）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS；smoke PASS；`npm run check:vars` code 0，未命中重要变量 | 静态、writer/renderer、历史导出、调整归档继承、迁移/大文件/side DB 和其他业务链均无回归；integration runner 已同步 policy |
+| PR 5 ST_Xstring blindspot + reconciliation 终审 | 从调整 UI/service 原文 → 不可变账本 → review DTO → archive audit → semantic writer N 列单次编码 → ExcelJS strict readback 全链枚举入口；代码搜索确认无第二个调整原因 Excel 写入口。重复导出不变异数据库原文，失败继续由 staged validator/原子发布阻断，金额、币种、月份、行数与余额均未改 | 未发现 P3+ 旁路、双重编码、状态/幂等、审计不一致或资损风险；真实月份逐主体逐币种及 Windows Excel/WPS 打开显示仍保留人工发布门禁 |
+| PR #127 三条 finding 定向回归 | calculator、result-adjustments、service 共 `77/77 PASS`；全部 VCC + 错误序列化组合 `270/270 PASS` | AFTER INSERT 篡改旧调整 sequence/基础 run row、删除 replacement success audit、篡改 archive success evidence/app/build 均触发结构化错误；业务事实完整回滚，只保留 rolled_back；calculate 伪造字段不会越过 service allowlist |
+| PR #127 真实 SQLite + worker 链 | adjustment/archive `59/59 PASS`；destructive `64/64 PASS`；effective result `19/19 PASS` | 调整→重算替换→归档、三月破坏性事务及最终金额/只读归档三条独立链无回归，审计、revision、九币种和跨月期初血缘保持 |
+| PR #127 全仓门禁 | 全量 `src/` ESLint PASS；smoke PASS；unit `4746/4746 PASS`（295 个测试文件）；integration `47/47` 脚本、`2193/2193` 可计数断言 PASS | 静态检查、其他模块 smoke、全仓单测、迁移/大文件/side DB 与 VCC 三条真实链均通过；integration runner 已同步 policy |
+| PR #127 `npm run check:vars` | 4 个 `src` 文件仅命中 Runtime-state 通用词 `state`；实际为 VCC 事务局部/函数命名，未修改 `src/renderer.js` 顶层 `state`，无 Critical / Important-skeleton / Risk-sensitive 清单命中 | 已复核任务代次、worker provenance、结果 revision/status 与审计生命周期；smoke 和 service 契约回归通过。新增 `snapshotResultMutationState` 跨 3 个源文件且承载资金事务边界，作为下次 `scan:vars` 的 Risk-sensitive 升格候选交由人工审批，不在本次静默改清单 |
+| PR #127 blindspot + reconciliation 复核 | 沿 renderer/IPC→service allowlist→worker→calculate/adjust/archive→audit 检查入口旁路、全 19 表主键/月份/run 血缘、金额币种不变、幂等/revision、部分失败、全表/新行守恒和可观测性 | 未发现遗留可自动化 P2/P3 缺口；无自动修复或生产数据写入。真实生产副本的调整→替换→归档逐主体×币种及历史审计一致性仍是未完成的人工资金红线 |
+| #127 → #128 restack 双亲与冲突预检 | 待提交父固定为 `b0b367b98176e4c3f28aa5942d8d3c69c450790a` + `28fbd2aad5c39362fb10bd0903c83f3fa26f139d`，共同祖先 `31810ef5...`；合并后无 unmerged entry、无冲突标记，staged `git diff --check` PASS | 生产代码与测试自动合并；实施记录保留双侧，policy 先取较新 48 脚本清单再由最终 integration 刷新；未使用 rebase/force/squash |
+| #127 → #128 restack 定向与真实链 | #127 calculator/result-adjustments/service 故障注入 `77/77 PASS`；#128 writer/helper `17/17 PASS`；真实 adjustment/archive/export/inherit `297/297`、destructive `64/64`、effective `19/19`、historical targetMonth `28/28` 全 PASS | AFTER trigger 全表漂移/success audit 篡改/provenance 伪造继续 fail-closed；调整原因原文、M/N defined-name、按月租约导出和次月九币种继承未被 19 表指纹收紧破坏 |
+| #127 → #128 restack 最终单次 `npm run release-check` | 以共享锁定依赖路径执行：lint PASS；smoke PASS；unit `4766/4766 PASS`（297 个测试文件）；integration `48/48` 脚本、`2459/2459` 可计数断言 PASS（271096ms），policy 自动刷新 | 静态、基础集成、全仓 unit、迁移/大文件/side DB 及四条 VCC 真实链均无回归；证据对应待提交最终树 |
+| #127 → #128 restack `npm run check:vars` 与双盲区终审 | 工具 code 2 仅命中 Runtime-state 通用词 `state`；diff 实际是 `operation-state`/`preserved-state`/`*StateError`/`snapshotResultMutationState` 等后端局部命名，未修改 renderer 顶层 `state`。沿 service allowlist→worker→calculate/adjust/archive→19 表指纹/audit→targetMonth export→Excel readback→次月继承复核入口、状态、幂等、部分失败、九币种和审计血缘 | 无现存 P3+ 或新增旁路；`snapshotResultMutationState` 仍是待人工审批的 Risk-sensitive 升格候选，不静默改清单。真实生产副本逐主体×币种/revision/sequence/success+rolled_back 审计与 Windows Excel/WPS ST_Xstring 显示仍为发布人工资金红线 |
+| #129 → 冻结 #128 合并边界与冲突裁决 | `67019de...` 与 `cc3080e...` 的共同祖先为 `e086f2d...`，两侧独有 6/3 个提交；普通 `--no-commit` merge 仅冲突 implementation-notes 与 integration policy，生产代码/测试无冲突。#127/#128 资金文件逐字节等同 `cc3080e`，#129 RSS/scan/spec 文件逐字节等同 `67019de`；markers 为 0 | notes 按双方决策/证据并集合并；policy 由本轮 48 脚本全绿后自动重建，未用旧计时覆盖最终树；相对 `cc3080e` 的 intended 范围为 60 文件（34 modified + 26 added） |
+| #129 → 冻结 #128 定向与真实链 | #127 calculator/result-adjustments/service `77/77 PASS`；#128 helper/writer `17/17 PASS`；#129 RSS 模型/重采样/scan source-set `7/7 PASS`；5万/15万真实 RSS 链 `31/31 PASS`（`44→44MB`）。四条真实链分别为 `297/297`、`64/64`、`19/19`、`28/28` | AFTER trigger 全表漂移、success audit/provenance 伪造继续 fail-closed；ST_Xstring 仅在 Excel 边界单次编码；低信号反例、任一样本 150MB 与 Git-tracked source set 同时保留 |
+| #129 → 冻结 #128 最终统计与发布门禁 | `scan:vars` 为 Git-tracked `src/` 293 文件、3744 个顶层名字（A-share 558 / A-pair 800 / A-local 2232 / B 1358）；`release-check` 为 lint/smoke PASS、unit `4801/4801`（303 文件、0 failures）、integration `48/48` / `2459/2459`（`294086ms`），policy 自动刷新 | 默认 50万/150万 RSS 为 `31/31`；同一次全量门禁包含 297/64/19/28 四链。`check:vars` 对 #128 合并增量仅命中 Runtime-state `state`；完整 PR base `cc3080e...` 仅命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive 命中 |
+| #129 → 冻结 #128 blindspot + reconciliation 终审 | 沿 service allowlist→worker→calculate/adjust/archive→19 表指纹/success audit→targetMonth semantic writer→ST_Xstring readback→次月九币种继承，复核入口、主键血缘、金额币种、状态/幂等、部分失败、行/子表守恒与可观测性 | 未发现新的 P3+ 或自动化缺口；未改金额、币种、方向、主键或迁移契约。`snapshotResultMutationState` 仍待人工审批清单升格；真实生产副本逐主体×币种/revision/sequence/audit 与 Windows Excel/WPS 显示继续是发布资金红线 |
+
+## #129 → 冻结 #128 Restack Unknowns Preflight（2026-08-09）
+
+### Task Brief
+
+- Goal：在 #129 修复头 `67019de` 上以普通 merge 合入冻结 #128 `cc3080e`，保留双亲和三条 PR 的全部不变量，不 push。
+- Context：两侧共同祖先为 `e086f2d...`；#128 已包含 #127 资金事务收紧与 ST_Xstring/semantic export，#129 已冻结 RSS/scan/spec 证据修复。
+- Constraints：严禁 rebase/force/squash；19 个既有 untracked 入口不读取、不暂存、不移动、不删除；资金红线不由自动化替代人工签字。
+- Done when：双亲/祖先正确，无冲突标记；定向与四条真实链、scan/check-vars、完整 base diff-check、release-check、clean checkout 均通过；notes/policy/reports 对应最终树。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 冻结头分叉且可普通合并 | `merge-base=e086f2d...`，两侧独有 6/3 提交 | 第一父必须保持 `67019de`，第二父必须为 `cc3080e` |
+| 生产代码和测试可自动合并 | merge 只冲突 notes/policy；双方关键文件与对应父逐字节一致 | 不得借文档冲突改写生产契约 |
+| 最终来源集合和集成清单必须重算 | #127 新增顶层名字；297 链比 #129 旧快照多 2 断言 | 不沿用 3737/2457 等历史计数 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 三条 PR 不变量能否同时存活 | 资金/状态盲区 | 高 | 困难 | 双方关键文件无冲突 | PROBE | 77/17/7 定向 + 297/64/19/28 真实链 | 已解决，全部精确通过 |
+| 报告是否对应最终树 | 可复现性 | 中 | 容易 | 旧快照分别为 3737/2457 与 2459 | PROBE | 重跑 scan-vars、integration runner | 已解决：3744/2459 |
+| 最终双亲、祖先与 clean checkout | Git/交付边界 | 高 | 一般 | 对最终候选树生成无引用双父提交并 detached 验证 | PROBE | 检查 `%P`、`merge-base --is-ancestor`，detached worktree 重跑 scan | 已解决：父序预演为 `67019de cc3080e`、#128 为祖先；clean scan 与报告逐字段一致，为 293/3744/`git-tracked-js`；正式提交后再复核确切 HEAD |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 普通 merge 与语义冲突裁决 | 父链、生产契约 | 仅 notes/policy 冲突，关键文件与父一致 | 推翻合并方案 | 中止 merge，冻结头不变 |
+| 2 | 定向与真实资金链 | 19 表、audit、provenance、ST_Xstring、RSS | 77/17/7 与 297/64/19/28 全绿 | 阻断提交并修复 P3+ | 仅修可复现缺口，不放宽资金门禁 |
+| 3 | 重生成报告并全量回归 | 可复现证据、其他模块兼容 | 293/3744、4801/2459 | 阻断提交 | 恢复到 runner/scanner 生成结果 |
+| 4 | 双盲区与提交图/clean checkout 复核 | 交付完整性、人工红线 | 无 P3+、双亲正确、clean scan 一致 | 阻断交付 | 不 push，保留本地 merge 供诊断 |
 
 ## Remaining Unknowns
 
@@ -286,3 +343,4 @@
 | 调整写入事务能否始终保持 `sequence=N+1` 与 `result_revision=N+1` | 已用事务、唯一约束、故障与 stale revision 单测消除 | 继续由 `getEffectiveRunResult()` 在每次读取、归档和审计时复核连续 sequence/revision | 不阻塞合并；任何账本漂移仍按结构化错误失败关闭 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | 自动化已覆盖“取消在先→critical-ready 未 protected→timeout terminate”和“protected 后只等待”；仍需 Windows CI/手测在真实 SQLite 事务中触发关窗 | 阻塞 3.1.8 发布，不阻塞代码评审 |
+| PR #127 真实生产副本调整→重算替换→归档的逐主体×币种、revision/sequence 与历史 success/rolled_back 审计一致性 | BLOCK（资金红线，人工复核未完成） | 财务人员在只读副本逐笔核对；异常事实只诊断并阻断，不自动修复 | 阻塞 3.1.8 发布，不阻塞本地代码评审 |

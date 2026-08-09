@@ -23,6 +23,9 @@ const {
 const {
   isEffectiveDifferenceZero
 } = require('../shared/vcc-financial-op-difference');
+const {
+  encodeExcelStXstring
+} = require('../backend/toolbox-format/excel-text');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
 const RESULT_SHEET_NAME = RESULT_TEMPLATE_SHEET_NAME;
@@ -306,7 +309,9 @@ function buildResultSheet(workbook, contract, plan) {
       valueCell.font = cloneStyle(contract.adjustmentValueStyle.style.font);
       valueCell.numFmt = contract.adjustmentValueStyle.numFmt;
       const reasonCell = sheet.getCell(row.rowNumber, 14);
-      reasonCell.value = row.reason;
+      // ExcelJS 会把业务原文中的字面 _xHHHH_ 当作 OOXML ST_Xstring escape。
+      // 仅在 Excel 边界做一次安全编码，DB/review/audit 继续保留原始调整原因。
+      reasonCell.value = encodeExcelStXstring(row.reason);
       reasonCell.font = cloneStyle(contract.adjustmentReasonFont);
       reasonCell.alignment = {
         ...cloneStyle(reasonCell.alignment),

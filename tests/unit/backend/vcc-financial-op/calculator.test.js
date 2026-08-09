@@ -1023,6 +1023,71 @@ test('重算替换注入失败时恢复旧 run 全部子表，并单独记录 ro
   assert.equal(evidence.failure.message, 'replacement-write-fault');
 });
 
+test('重算 success audit 被 AFTER INSERT 删除时不返回假成功且旧资金事实完整回滚', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  const first = calculateCurrent(db);
+  addRunAdjustment({
+    db,
+    runId: first.runId,
+    rowKey: buildRunRowKey(RECHARGE_RESULT_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '必须随旧 run 回滚恢复',
+    expectedResultRevision: 0
+  });
+  const oldChildCounts = Object.fromEntries([
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals',
+    'vcc_fin_op_run_adjustments'
+  ].map((table) => [table, db.prepare(`
+    SELECT COUNT(*) AS n FROM ${table} WHERE run_id = ?
+  `).get(first.runId).n]));
+  db.exec(`
+    CREATE TRIGGER delete_replacement_success_audit
+    AFTER INSERT ON vcc_fin_op_operation_audit
+    WHEN NEW.operation_type = 'replace_calculated_result' AND NEW.status = 'success'
+    BEGIN
+      DELETE FROM vcc_fin_op_operation_audit WHERE id = NEW.id;
+    END;
+  `);
+
+  assert.throws(() => calculateCurrent(db), (error) => {
+    assert.equal(error.code, 'replace-calculated-result-invariant-failed');
+    assert.equal(error.context.actual, null);
+    assert.equal(error.context.newAuditCount, 0);
+    return true;
+  });
+  assert.deepEqual(db.prepare(`
+    SELECT id, status, result_revision FROM vcc_fin_op_runs
+    WHERE target_month = '2026-06'
+  `).all().map((row) => ({ ...row })), [{
+    id: first.runId,
+    status: 'calculated',
+    result_revision: 1
+  }]);
+  for (const [table, count] of Object.entries(oldChildCounts)) {
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS n FROM ${table} WHERE run_id = ?
+    `).get(first.runId).n, count, `${table} 必须恢复`);
+  }
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'replace_calculated_result' AND status = 'success'
+  `).get().n, 0);
+  const rollbackAudit = db.prepare(`
+    SELECT status, evidence_json, error_message
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'replace_calculated_result'
+  `).get();
+  assert.equal(rollbackAudit.status, 'rolled_back');
+  assert.match(rollbackAudit.error_message, /成功审计提交前校验失败/);
+  assert.equal(JSON.parse(rollbackAudit.evidence_json).replacedRunIds[0], first.runId);
+});
+
 test('旧结果证据采集失败时零删除并记录可诊断的 rolled_back 替换审计', (t) => {
   const db = createDb();
   t.after(() => db.close());
@@ -1307,6 +1372,115 @@ test('归档提交后断言发现快照损坏时，九币种快照、run 和五�
   `).get();
   assert.equal(audit.status, 'rolled_back');
   assert.match(audit.error_message, /提交前状态断言失败/);
+});
+
+test('归档 AFTER INSERT 篡改既有 adjustment 与基础事实时全表指纹回滚且失败可审计', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  const calculated = calculateCurrent(db);
+  const adjusted = addRunAdjustment({
+    db,
+    runId: calculated.runId,
+    rowKey: buildRunRowKey(RECHARGE_RESULT_ROW),
+    currency: 'USD',
+    adjustmentAmount: '1',
+    reason: '归档前既有调整',
+    expectedResultRevision: 0
+  });
+  const adjustmentId = adjusted.adjustment.id;
+  const baseRow = db.prepare(`
+    SELECT id, amount FROM vcc_fin_op_run_rows
+    WHERE run_id = ? AND source_type = ? AND currency = 'USD'
+  `).get(calculated.runId, SOURCE_TYPES.RECHARGE);
+  db.exec(`
+    CREATE TRIGGER corrupt_archive_preserved_facts
+    AFTER INSERT ON vcc_fin_op_archives
+    WHEN NEW.target_month = '2026-06'
+    BEGIN
+      UPDATE vcc_fin_op_run_adjustments SET sequence = 88 WHERE id = ${adjustmentId};
+      UPDATE vcc_fin_op_run_rows SET amount = '998' WHERE id = ${baseRow.id};
+    END;
+  `);
+
+  assert.throws(() => archiveRun({
+    db,
+    runId: calculated.runId,
+    expectedResultRevision: 1
+  }), (error) => {
+    assert.equal(error.code, 'archive-write-invariant-failed');
+    assert.equal(error.context.preservedStateBefore.operation, 'archive-result');
+    assert.equal(error.context.preservedStateAfter.operation, 'archive-result');
+    return true;
+  });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT status, result_revision FROM vcc_fin_op_runs WHERE id = ?
+  `).get(calculated.runId) }, { status: 'calculated', result_revision: 1 });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT sequence FROM vcc_fin_op_run_adjustments WHERE id = ?
+  `).get(adjustmentId) }, { sequence: 1 });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT amount FROM vcc_fin_op_run_rows WHERE id = ?
+  `).get(baseRow.id) }, { amount: baseRow.amount });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_archives WHERE target_month = '2026-06'
+  `).get().n, 0);
+  const audit = db.prepare(`
+    SELECT status, evidence_json, error_message
+    FROM vcc_fin_op_operation_audit WHERE operation_type = 'archive_result'
+  `).get();
+  assert.equal(audit.status, 'rolled_back');
+  assert.match(audit.error_message, /既有资金事实/);
+  assert.equal(JSON.parse(audit.evidence_json).runId, calculated.runId);
+});
+
+test('归档 success audit 被 AFTER INSERT 篡改时不返回假成功且归档资金事实回滚', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  const calculated = calculateCurrent(db);
+  db.exec(`
+    CREATE TRIGGER corrupt_archive_success_audit
+    AFTER INSERT ON vcc_fin_op_operation_audit
+    WHEN NEW.operation_type = 'archive_result' AND NEW.status = 'success'
+    BEGIN
+      UPDATE vcc_fin_op_operation_audit
+      SET evidence_json = '{}', app_version = 'forged-version', build_sha = 'forged-sha'
+      WHERE id = NEW.id;
+    END;
+  `);
+
+  assert.throws(() => archiveRun({
+    db,
+    runId: calculated.runId,
+    expectedResultRevision: 0,
+    appVersion: '3.1.8',
+    buildSha: 'trusted-sha'
+  }), (error) => {
+    assert.equal(error.code, 'archive-write-invariant-failed');
+    assert.notEqual(error.context.expected.evidenceHash, error.context.actual.evidenceHash);
+    assert.equal(error.context.actual.appVersion, 'forged-version');
+    return true;
+  });
+  assert.equal(db.prepare(`
+    SELECT status FROM vcc_fin_op_runs WHERE id = ?
+  `).get(calculated.runId).status, 'calculated');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_archives WHERE target_month = '2026-06'
+  `).get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06' AND data_status = 'archived'
+  `).get().n, 0);
+  const audits = db.prepare(`
+    SELECT status, app_version, build_sha, error_message
+    FROM vcc_fin_op_operation_audit
+    WHERE operation_type = 'archive_result' ORDER BY id
+  `).all();
+  assert.deepEqual(audits.map((row) => row.status), ['rolled_back']);
+  assert.equal(audits[0].app_version, '3.1.8');
+  assert.equal(audits[0].build_sha, 'trusted-sha');
+  assert.match(audits[0].error_message, /成功审计提交前校验失败/);
 });
 
 test('下月出现人工期初时归档预检 fail-closed，避免双来源', (t) => {
