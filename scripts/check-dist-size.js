@@ -1,9 +1,10 @@
 // 打包产物体积/内容守卫脚本（size-startup-optimization Part A，A-F3）
 //   背景：v3.0.0 app.asar 膨胀到 101MB（开发文档/测试脚本/开发依赖误入包）。
-//   本脚本对构建产物 app.asar 做三类断言，防止瘦身后再次复发：
+//   本脚本对构建产物 app.asar 做四类断言，防止瘦身后再次复发：
 //     断言①：asar 文件体积 ≤ 70MB（阈值常量 MAX_ASAR_BYTES，v3.0.7 按实测校准）。
 //     断言②：禁止路径不得出现在包内（开发文档/脚本/开发依赖/CHANGELOG/README）。
 //     断言③：反向保护——若干运行时必需文件必须存在（防白名单漏列导致打包版缺文件）。
+//     断言④：包内 package.json.version 必须存在且与当前源码一致（防检查陈旧产物）。
 //   任一断言失败 → 打印逐条明细并 exit 1；全过 → 打印 PASS 摘要（含实测体积）。
 //
 // 用法：
@@ -51,8 +52,11 @@ const FORBIDDEN_EXACT_FILES = ['/CHANGELOG.md', '/README.md'];
 
 // 反向保护：运行时必需、必须存在于包内的文件（精确匹配）
 const REQUIRED_FILES = [
+  '/package.json',
   '/docs/USER_GUIDE.md',
   '/assets/币种映射表.xlsx',
+  '/assets/VCC财务OP校验/VCC_移除归档Pending账单.xlsx',
+  '/assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx',
   '/COMMON枚举.xlsx',
   '/src/main.js',
 ];
@@ -116,6 +120,29 @@ function main() {
     failures.push('断言③缺失必需文件：' + missingRequired.join('、'));
   }
 
+  // 断言④：包内版本必须与当前源码 package.json 一致，防止旧 win-unpacked
+  // 残留时 check:dist 对陈旧 app.asar 误报 PASS。
+  const expectedVersion = JSON.parse(
+    fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
+  ).version;
+  let packagedVersion = '';
+  try {
+    const packagedManifest = JSON.parse(asar.extractFile(asarPath, 'package.json').toString('utf8'));
+    packagedVersion = typeof packagedManifest.version === 'string'
+      ? packagedManifest.version.trim()
+      : '';
+    if (!packagedVersion) {
+      failures.push('断言④包内 package.json.version 缺失或为空');
+    }
+  } catch (error) {
+    failures.push('断言④无法读取包内 package.json：' + (error && error.message ? error.message : String(error)));
+  }
+  if (packagedVersion && packagedVersion !== expectedVersion) {
+    failures.push(
+      `断言④包内版本不匹配：app.asar=${packagedVersion}，当前源码=${expectedVersion}`
+    );
+  }
+
   // 输出结论
   if (failures.length > 0) {
     console.error('==== check-dist-size FAIL ====');
@@ -134,6 +161,7 @@ function main() {
   console.log('  asar 体积：' + formatMB(asarBytes) + '（上限 ' + formatMB(MAX_ASAR_BYTES) + '）');
   console.log('  包内条目数：' + entries.length);
   console.log('  禁止路径：0 命中；必需文件：' + REQUIRED_FILES.length + '/' + REQUIRED_FILES.length + ' 齐全');
+  console.log('  包内版本：' + packagedVersion + '（与当前源码一致）');
 }
 
 main();

@@ -18,7 +18,23 @@ const {
   getVccFinancialOpModuleState,
   claimVccFinancialOpFirstMonth
 } = require('../vcc-financial-op-db/repository');
-const { buildRunRowKey } = require('./result-adjustments');
+const {
+  buildRunRowKey,
+  getEffectiveRunResult,
+  assertExpectedResultRevision
+} = require('./result-adjustments');
+const {
+  collectRunEvidence,
+  insertOperationAudit,
+  assertSuccessOperationAudit,
+  persistRolledBackAudit
+} = require('./operation-audit');
+const { readDatabaseLocalTimestamp } = require('./operation-state');
+const {
+  RESULT_MUTATION_OPERATIONS,
+  snapshotResultMutationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const REQUIRED_DETAIL_TYPES = Object.freeze([
   SOURCE_TYPES.RECHARGE,
@@ -30,6 +46,8 @@ const REQUIRED_DATASET_TYPES = Object.freeze([
   ...REQUIRED_DETAIL_TYPES,
   SOURCE_TYPES.SYSTEM_OP
 ]);
+const REPLACE_CALCULATED_RESULT_OPERATION = 'replace_calculated_result';
+const ARCHIVE_RESULT_OPERATION = 'archive_result';
 const INPUT_FINGERPRINT_RE = /^[0-9a-f]{64}$/;
 
 function previousYearMonth(yearMonth) {
@@ -851,11 +869,96 @@ function initializeOpeningBalances({ db, targetMonth, entries, note }) {
   }
 }
 
-function persistCalculation(db, targetMonth, revisions, inputFingerprint, aggregate, balanceResult) {
-  db.prepare(`
+function collectCalculatedReplacementEvidence(db, targetMonth, revisions, inputFingerprint) {
+  const runIds = db.prepare(`
+    SELECT id
+    FROM vcc_fin_op_runs
+    WHERE target_month = ? AND status = 'calculated'
+    ORDER BY id
+  `).all(targetMonth).map((row) => Number(row.id));
+  if (runIds.length === 0) return null;
+  const evidence = {
+    action: REPLACE_CALCULATED_RESULT_OPERATION,
+    targetMonth,
+    replacementInput: {
+      inputFingerprint,
+      inputRevisions: revisions
+    },
+    replacedRunIds: runIds,
+    replacedRuns: []
+  };
+  for (const runId of runIds) {
+    try {
+      evidence.replacedRuns.push(collectRunEvidence(db, runId));
+    } catch (error) {
+      error.replacementEvidence = {
+        ...evidence,
+        replacedRuns: [...evidence.replacedRuns],
+        evidenceCollectionFailure: {
+          failedRunId: runId,
+          collectedRunIds: evidence.replacedRuns.map((row) => row.run.runId),
+          name: error && error.name ? error.name : 'Error',
+          code: error && error.code ? error.code : null,
+          message: error && error.message ? error.message : String(error)
+        }
+      };
+      throw error;
+    }
+  }
+  return evidence;
+}
+
+function countRunChildren(db, tableName, runIds) {
+  if (runIds.length === 0) return 0;
+  const placeholders = runIds.map(() => '?').join(', ');
+  return Number(db.prepare(`
+    SELECT COUNT(*) AS row_count FROM ${tableName} WHERE run_id IN (${placeholders})
+  `).get(...runIds).row_count) || 0;
+}
+
+function persistCalculation(
+  db,
+  targetMonth,
+  revisions,
+  inputFingerprint,
+  aggregate,
+  balanceResult,
+  {
+    replacementEvidence = null,
+    replacementAuditBoundaryId = null,
+    transactionTimestamp = null,
+    appVersion = null,
+    buildSha = null
+  } = {}
+) {
+  let replacementAuditId = null;
+  const replacedRunIds = replacementEvidence ? replacementEvidence.replacedRunIds : [];
+  const deletedRuns = Number(db.prepare(`
     DELETE FROM vcc_fin_op_runs
     WHERE target_month = ? AND status = 'calculated'
-  `).run(targetMonth);
+  `).run(targetMonth).changes) || 0;
+  if (deletedRuns !== replacedRunIds.length) {
+    throw createVccStateError(
+      'replace-calculated-result-invariant-failed',
+      '旧未归档结果未能完整替换，本次计算已回滚。',
+      { targetMonth, expectedRunIds: replacedRunIds, deletedRuns }
+    );
+  }
+  for (const tableName of [
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals',
+    'vcc_fin_op_run_adjustments'
+  ]) {
+    if (countRunChildren(db, tableName, replacedRunIds) !== 0) {
+      throw createVccStateError(
+        'replace-calculated-result-invariant-failed',
+        `旧未归档结果子表 ${tableName} 未能完整清理，本次计算已回滚。`,
+        { targetMonth, tableName, replacedRunIds }
+      );
+    }
+  }
   const result = db.prepare(`
     INSERT INTO vcc_fin_op_runs (
       target_month, input_revisions_json, result_revision, input_fingerprint, updated_at
@@ -963,7 +1066,56 @@ function persistCalculation(db, targetMonth, revisions, inputFingerprint, aggreg
     const [subject, currency] = JSON.parse(key);
     insertPendingTotal.run(runId, subject, currency, amount.value());
   }
-  return runId;
+  const storedRun = db.prepare(`
+    SELECT id, target_month, status, result_revision, input_fingerprint,
+           input_revisions_json
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  if (
+    !storedRun
+    || storedRun.target_month !== targetMonth
+    || storedRun.status !== 'calculated'
+    || Number(storedRun.result_revision) !== 0
+    || storedRun.input_fingerprint !== inputFingerprint
+    || storedRun.input_revisions_json !== JSON.stringify(revisions)
+  ) {
+    throw createVccStateError(
+      'calculation-write-invariant-failed',
+      '新计算结果提交前状态断言失败，本次计算已回滚。',
+      { targetMonth, runId }
+    );
+  }
+  if (replacementEvidence) {
+    const successEvidence = {
+      ...replacementEvidence,
+      replacementRunId: runId
+    };
+    replacementAuditId = insertOperationAudit(db, {
+      targetMonth,
+      operationType: REPLACE_CALCULATED_RESULT_OPERATION,
+      runId: replacedRunIds.length === 1 ? replacedRunIds[0] : null,
+      status: 'success',
+      evidence: successEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp
+    });
+    assertSuccessOperationAudit(db, {
+      auditId: replacementAuditId,
+      auditBoundaryId: replacementAuditBoundaryId,
+      targetMonth,
+      operationType: REPLACE_CALCULATED_RESULT_OPERATION,
+      runId: replacedRunIds.length === 1 ? replacedRunIds[0] : null,
+      previewToken: null,
+      evidence: successEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'replace-calculated-result-invariant-failed',
+      message: '替换旧计算结果的成功审计提交前校验失败，本次计算已回滚。'
+    });
+  }
+  return { runId, replacementAuditId, replacedRunIds };
 }
 
 function isValidInputFingerprint(value) {
@@ -979,21 +1131,36 @@ function preflightRequiredResult(targetMonth) {
   };
 }
 
-function calculateMonth({ db, targetMonth, expectedInputFingerprint }) {
+function calculateMonth({
+  db,
+  targetMonth,
+  expectedInputFingerprint,
+  appVersion = null,
+  buildSha = null
+}) {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`计算账期格式无效：${targetMonth}`);
   if (!isValidInputFingerprint(expectedInputFingerprint)) {
     return preflightRequiredResult(normalizedMonth);
   }
-  db.exec('BEGIN IMMEDIATE');
+  let transactionStarted = false;
+  let replacementEvidence = null;
   try {
+    db.exec('BEGIN IMMEDIATE');
+    transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const replacementAuditBoundaryId = Number(db.prepare(`
+      SELECT COALESCE(MAX(id), 0) AS max_id FROM vcc_fin_op_operation_audit
+    `).get().max_id) || 0;
     const preflight = preflightCalculation(db, normalizedMonth);
     if (!preflight.ok) {
       db.exec('ROLLBACK');
+      transactionStarted = false;
       return { status: 'blocked', targetMonth: normalizedMonth, ...preflight };
     }
     if (preflight.inputFingerprint !== expectedInputFingerprint) {
       db.exec('ROLLBACK');
+      transactionStarted = false;
       return {
         status: 'blocked',
         code: 'state-changed',
@@ -1009,6 +1176,7 @@ function calculateMonth({ db, targetMonth, expectedInputFingerprint }) {
     const balanceResult = buildBalanceRows(aggregate, systemSnapshots, openingBalances);
     if (!balanceResult.ok) {
       db.exec('ROLLBACK');
+      transactionStarted = false;
       return {
         status: 'blocked',
         code: balanceResult.missingSystemSubjects.length > 0
@@ -1022,101 +1190,348 @@ function calculateMonth({ db, targetMonth, expectedInputFingerprint }) {
       };
     }
     validateCalculatedOutputAmounts(aggregate, balanceResult);
-    const runId = persistCalculation(
+    try {
+      replacementEvidence = collectCalculatedReplacementEvidence(
+        db,
+        normalizedMonth,
+        preflight.revisions,
+        preflight.inputFingerprint
+      );
+    } catch (error) {
+      replacementEvidence = error && error.replacementEvidence || null;
+      throw error;
+    }
+    const persisted = persistCalculation(
       db,
       normalizedMonth,
       preflight.revisions,
       preflight.inputFingerprint,
       aggregate,
-      balanceResult
+      balanceResult,
+      {
+        replacementEvidence,
+        replacementAuditBoundaryId,
+        transactionTimestamp,
+        appVersion,
+        buildSha
+      }
     );
     db.exec('COMMIT');
+    transactionStarted = false;
     return {
       status: 'calculated',
-      runId,
+      runId: persisted.runId,
       targetMonth: normalizedMonth,
       previousMonth: openingBalances.previousMonth,
       subjects: balanceResult.subjects,
       balances: balanceResult.balances,
-      inputFingerprint: preflight.inputFingerprint
+      inputFingerprint: preflight.inputFingerprint,
+      replacedRunIds: persisted.replacedRunIds,
+      replacementAuditId: persisted.replacementAuditId
     };
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    if (transactionStarted) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* preserve primary error */ }
+    }
+    if (replacementEvidence && db.isTransaction !== true) {
+      persistRolledBackAudit(db, {
+        targetMonth: normalizedMonth,
+        operationType: REPLACE_CALCULATED_RESULT_OPERATION,
+        runId: replacementEvidence.replacedRunIds.length === 1
+          ? replacementEvidence.replacedRunIds[0]
+          : null,
+        evidence: replacementEvidence,
+        error,
+        appVersion,
+        buildSha
+      });
+    }
     throw error;
   }
 }
 
-function currentRevisionJson(db, targetMonth) {
-  return JSON.stringify(datasetSnapshot(db, targetMonth).revisions);
+function assertArchiveWriteAllowset(db, {
+  runId,
+  targetMonth,
+  resultRevision,
+  inputFingerprint,
+  transactionTimestamp,
+  expectedArchives
+}) {
+  const run = db.prepare(`
+    SELECT status, result_revision, input_fingerprint, archived_at, updated_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  const archives = db.prepare(`
+    SELECT target_month, subject, balances_json, run_id, archived_at
+    FROM vcc_fin_op_archives WHERE target_month = ? ORDER BY subject
+  `).all(targetMonth).map((row) => ({ ...row }));
+  const datasets = db.prepare(`
+    SELECT dataset_type, data_status, archived_run_id, updated_at
+    FROM vcc_fin_op_datasets WHERE target_month = ? ORDER BY dataset_type
+  `).all(targetMonth).map((row) => ({ ...row }));
+  const expectedArchiveRows = [...expectedArchives.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([subject, balances]) => ({
+      target_month: targetMonth,
+      subject,
+      balances_json: JSON.stringify(balances),
+      run_id: runId,
+      archived_at: transactionTimestamp
+    }));
+  const valid = run
+    && run.status === 'archived'
+    && Number(run.result_revision) === resultRevision
+    && run.input_fingerprint === inputFingerprint
+    && run.archived_at === transactionTimestamp
+    && run.updated_at === transactionTimestamp
+    && JSON.stringify(archives) === JSON.stringify(expectedArchiveRows)
+    && datasets.length === REQUIRED_DATASET_TYPES.length
+    && datasets.every((row) => (
+      REQUIRED_DATASET_TYPES.includes(row.dataset_type)
+      && row.data_status === 'archived'
+      && Number(row.archived_run_id) === runId
+      && row.updated_at === transactionTimestamp
+    ));
+  if (valid) return;
+  throw createVccStateError(
+    'archive-write-invariant-failed',
+    '归档提交前状态断言失败（精确写入不一致），操作已回滚。',
+    {
+      runId,
+      targetMonth,
+      context: {
+        expected: {
+          resultRevision,
+          inputFingerprint,
+          transactionTimestamp,
+          archives: expectedArchiveRows,
+          datasetTypes: REQUIRED_DATASET_TYPES
+        },
+        actual: {
+          run: run ? { ...run } : null,
+          archives,
+          datasets
+        }
+      }
+    }
+  );
 }
 
-function archiveRun({ db, runId }) {
-  db.exec('BEGIN IMMEDIATE');
+function archiveRun({
+  db,
+  runId,
+  expectedResultRevision,
+  appVersion = null,
+  buildSha = null
+}) {
+  const normalizedRunId = Number(runId);
+  let targetMonth = '';
+  let transactionStarted = false;
+  let failureEvidence = {
+    action: ARCHIVE_RESULT_OPERATION,
+    runId: normalizedRunId,
+    expectedResultRevision
+  };
   try {
-    const run = db.prepare('SELECT * FROM vcc_fin_op_runs WHERE id = ?').get(runId);
-    if (!run) throw new Error(`财务OP计算记录不存在：${runId}`);
+    db.exec('BEGIN IMMEDIATE');
+    transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const run = db.prepare('SELECT * FROM vcc_fin_op_runs WHERE id = ?').get(normalizedRunId);
+    if (!run) throw new Error(`财务OP计算记录不存在：${normalizedRunId}`);
+    targetMonth = run.target_month;
+    failureEvidence.targetMonth = targetMonth;
     if (run.status !== 'calculated') throw new Error('该财务OP计算记录已经归档');
-    if (currentRevisionJson(db, run.target_month) !== run.input_revisions_json) {
-      throw new Error('计算完成后原表数据已变化，请重新运行后再归档');
+    const resultRevision = Number(run.result_revision);
+    assertExpectedResultRevision(expectedResultRevision, resultRevision, {
+      runId: normalizedRunId
+    });
+    const storedFingerprint = String(run.input_fingerprint || '').trim();
+    if (!/^[a-f0-9]{64}$/.test(storedFingerprint)) {
+      throw createVccStateError(
+        'result-input-fingerprint-missing',
+        '该结果缺少有效输入指纹，请重新运行后再归档。',
+        { runId: normalizedRunId, inputFingerprint: run.input_fingerprint || null }
+      );
     }
-    if (activeImportBatches(db, run.target_month).length > 0) {
+    if (activeImportBatches(db, targetMonth).length > 0) {
       throw new Error('当前账期仍有原表正在导入，禁止归档');
     }
-    const unresolved = unresolvedImports(db, run.target_month);
+    const unresolved = unresolvedImports(db, targetMonth);
     if (unresolved.length > 0) throw new Error('仍有未处理的失败导入记录，禁止归档');
+    const currentInputs = preflightCalculation(db, targetMonth);
+    if (!currentInputs.ok) {
+      throw createVccStateError(
+        currentInputs.code || 'result-input-changed',
+        currentInputs.message || '计算完成后原表数据已变化，请重新运行后再归档',
+        { preflight: currentInputs }
+      );
+    }
+    const currentRevisionsJson = JSON.stringify(currentInputs.revisions);
+    if (
+      !currentInputs.inputFingerprint
+      || currentInputs.inputFingerprint !== storedFingerprint
+      || !run.input_revisions_json
+      || currentRevisionsJson !== run.input_revisions_json
+    ) {
+      throw createVccStateError(
+        'result-input-changed',
+        '计算完成后原表数据已变化，请重新运行后再归档',
+        {
+          runId: normalizedRunId,
+          storedInputFingerprint: storedFingerprint,
+          currentInputFingerprint: currentInputs.inputFingerprint || null,
+          storedInputRevisionsJson: run.input_revisions_json || null,
+          currentInputRevisionsJson: currentRevisionsJson
+        }
+      );
+    }
     const existing = db.prepare(`
       SELECT subject FROM vcc_fin_op_archives WHERE target_month = ? LIMIT 1
-    `).get(run.target_month);
-    if (existing) throw new Error(`${run.target_month} 已归档，禁止重复归档`);
+    `).get(targetMonth);
+    if (existing) throw new Error(`${targetMonth} 已归档，禁止重复归档`);
 
-    const balances = db.prepare(`
-      SELECT subject, currency, calculated_balance
-      FROM vcc_fin_op_run_balances
-      WHERE run_id = ? ORDER BY subject, currency
-    `).all(runId);
+    const effective = getEffectiveRunResult(db, normalizedRunId);
+    if (!effective) throw new Error(`财务OP计算记录不存在：${normalizedRunId}`);
     const bySubject = new Map();
-    for (const row of balances) {
+    for (const row of effective.balances) {
       if (!bySubject.has(row.subject)) bySubject.set(row.subject, {});
-      bySubject.get(row.subject)[row.currency] = row.calculated_balance;
+      bySubject.get(row.subject)[row.currency] = row.effectiveCalculatedBalance;
     }
+    if (bySubject.size === 0) throw new Error('计算记录没有可归档的主体余额');
+    const runEvidence = collectRunEvidence(db, normalizedRunId);
+    failureEvidence = {
+      action: ARCHIVE_RESULT_OPERATION,
+      targetMonth,
+      runId: normalizedRunId,
+      expectedResultRevision: resultRevision,
+      currentInputs: {
+        inputFingerprint: currentInputs.inputFingerprint,
+        inputRevisions: currentInputs.revisions,
+        datasets: currentInputs.datasets
+      },
+      effectiveRun: runEvidence
+    };
+    const preservedBefore = snapshotResultMutationState(db, {
+      targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT
+    });
+    const auditId = insertOperationAudit(db, {
+      targetMonth,
+      operationType: ARCHIVE_RESULT_OPERATION,
+      runId: normalizedRunId,
+      status: 'success',
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp
+    });
     const insertArchive = db.prepare(`
-      INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO vcc_fin_op_archives (
+        target_month, subject, balances_json, run_id, archived_at
+      ) VALUES (?, ?, ?, ?, ?)
     `);
     for (const [subject, subjectBalances] of bySubject) {
-      parseBalancesJson(JSON.stringify(subjectBalances), `${run.target_month} ${subject} 计算财务OP`);
-      const nextMonth = nextYearMonth(run.target_month);
+      parseBalancesJson(JSON.stringify(subjectBalances), `${targetMonth} ${subject} 生效计算财务OP`);
+      const nextMonth = nextYearMonth(targetMonth);
       const nextOpening = db.prepare(`
         SELECT 1 FROM vcc_fin_op_opening_balances
         WHERE target_month = ? AND subject = ?
       `).get(nextMonth, subject);
       if (nextOpening) {
-        throw new Error(`${nextMonth} ${subject} 已人工初始化期初余额，禁止再归档 ${run.target_month}`);
+        throw new Error(`${nextMonth} ${subject} 已人工初始化期初余额，禁止再归档 ${targetMonth}`);
       }
-      insertArchive.run(run.target_month, subject, JSON.stringify(subjectBalances), runId);
+      insertArchive.run(
+        targetMonth,
+        subject,
+        JSON.stringify(subjectBalances),
+        normalizedRunId,
+        transactionTimestamp
+      );
     }
-    if (bySubject.size === 0) throw new Error('计算记录没有可归档的主体余额');
 
-    db.prepare(`
+    const updatedRuns = Number(db.prepare(`
       UPDATE vcc_fin_op_runs
-      SET status = 'archived', archived_at = datetime('now', 'localtime')
-      WHERE id = ?
-    `).run(runId);
-    db.prepare(`
+      SET status = 'archived', archived_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'calculated' AND result_revision = ?
+    `).run(
+      transactionTimestamp,
+      transactionTimestamp,
+      normalizedRunId,
+      resultRevision
+    ).changes) || 0;
+    const updatedDatasets = Number(db.prepare(`
       UPDATE vcc_fin_op_datasets
       SET data_status = 'archived', archived_run_id = ?,
-          updated_at = datetime('now', 'localtime')
-      WHERE target_month = ?
-    `).run(runId, run.target_month);
+          updated_at = ?
+      WHERE target_month = ? AND data_status = 'unprocessed'
+    `).run(normalizedRunId, transactionTimestamp, targetMonth).changes) || 0;
+    if (updatedRuns !== 1 || updatedDatasets !== REQUIRED_DATASET_TYPES.length) {
+      throw createVccStateError(
+        'archive-write-invariant-failed',
+        '结果或五类数据集未能完整归档，操作已回滚。',
+        { runId: normalizedRunId, updatedRuns, updatedDatasets }
+      );
+    }
+
+    assertArchiveWriteAllowset(db, {
+      runId: normalizedRunId,
+      targetMonth,
+      resultRevision,
+      inputFingerprint: storedFingerprint,
+      transactionTimestamp,
+      expectedArchives: bySubject
+    });
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth,
+      operationType: ARCHIVE_RESULT_OPERATION,
+      runId: normalizedRunId,
+      previewToken: null,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'archive-write-invariant-failed',
+      message: '归档成功审计提交前校验失败，操作已回滚。'
+    });
+    const preservedAfter = snapshotResultMutationState(db, {
+      targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'archive-write-invariant-failed',
+      message: '归档前后既有资金事实发生预期外变化，操作已回滚。'
+    });
     db.exec('COMMIT');
+    transactionStarted = false;
     return {
       status: 'archived',
-      runId,
-      targetMonth: run.target_month,
-      subjects: [...bySubject.keys()].sort()
+      runId: normalizedRunId,
+      targetMonth,
+      resultRevision,
+      subjects: [...bySubject.keys()].sort(),
+      auditId
     };
   } catch (error) {
-    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    if (transactionStarted) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* preserve primary error */ }
+    }
+    if (targetMonth && db.isTransaction !== true) {
+      persistRolledBackAudit(db, {
+        targetMonth,
+        operationType: ARCHIVE_RESULT_OPERATION,
+        runId: Number.isSafeInteger(normalizedRunId) ? normalizedRunId : null,
+        evidence: failureEvidence,
+        error,
+        appVersion,
+        buildSha
+      });
+    }
     throw error;
   }
 }
@@ -1144,6 +1559,8 @@ function getRunResult(db, runId) {
 }
 
 module.exports = {
+  REPLACE_CALCULATED_RESULT_OPERATION,
+  ARCHIVE_RESULT_OPERATION,
   INPUT_FINGERPRINT_RE,
   REQUIRED_DETAIL_TYPES,
   REQUIRED_DATASET_TYPES,

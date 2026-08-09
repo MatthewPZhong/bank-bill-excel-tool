@@ -6,10 +6,20 @@ const {
 } = require('../../main-process/financial-decimal');
 const { canonicalizeVccAmount } = require('./amount-rules');
 const {
+  SOURCE_TYPES,
+  SOURCE_LABELS,
+  SUPPORTED_CURRENCIES
+} = require('./definitions');
+const {
   DecimalAccumulator,
   addToAccumulatorMap
 } = require('./decimal-accumulator');
-const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('./definitions');
+const { readDatabaseLocalTimestamp } = require('./operation-state');
+const {
+  RESULT_MUTATION_OPERATIONS,
+  snapshotResultMutationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const RUN_ROW_KEY_VERSION = 'v1';
 const ADJUSTABLE_ROW_KINDS = new Set(['movement', 'pending']);
@@ -19,6 +29,8 @@ const MOVEMENT_SOURCE_TYPES = new Set([
   SOURCE_TYPES.FEE_FX,
   SOURCE_TYPES.CHANNEL
 ]);
+const RESULT_REVISION_CHANGED_CODE = 'result-revision-changed';
+const RESULT_REVISION_CHANGED_MESSAGE = '结果已发生变化，请重新核对后归档。';
 
 function resultStateError(code, message, details = {}) {
   const error = new Error(message);
@@ -65,6 +77,82 @@ function coordinateKey(rowKey, currency) {
 
 function subjectCurrencyKey(subject, currency) {
   return JSON.stringify([subject, currency]);
+}
+
+function resultRevisionChanged(details = {}) {
+  return resultStateError(
+    RESULT_REVISION_CHANGED_CODE,
+    RESULT_REVISION_CHANGED_MESSAGE,
+    details
+  );
+}
+
+function normalizeExpectedResultRevision(value) {
+  if (value === null || value === undefined || value === '') {
+    throw resultRevisionChanged({ expectedResultRevision: null });
+  }
+  const revision = Number(value);
+  if (!Number.isSafeInteger(revision) || revision < 0 || String(revision) !== String(value).trim()) {
+    throw resultRevisionChanged({ expectedResultRevision: value });
+  }
+  return revision;
+}
+
+function assertExpectedResultRevision(value, actualRevision, details = {}) {
+  const expectedRevision = normalizeExpectedResultRevision(value);
+  if (expectedRevision !== actualRevision) {
+    throw resultRevisionChanged({
+      ...details,
+      expectedResultRevision: expectedRevision,
+      actualResultRevision: actualRevision
+    });
+  }
+  return expectedRevision;
+}
+
+function normalizeAdjustmentAmount(value) {
+  let token = value;
+  if (typeof value === 'string') {
+    token = value.trim();
+    const accounting = token.match(/^\(([^()]*)\)$/);
+    if (accounting) {
+      const unsigned = accounting[1].trim();
+      if (!unsigned || /^[+-]/.test(unsigned)) {
+        throw resultStateError(
+          'invalid-adjustment-amount',
+          `调整值不是有效会计负数：${value}`,
+          { value }
+        );
+      }
+      token = `-${unsigned}`;
+    }
+  }
+  let canonical;
+  try {
+    canonical = canonicalizeVccAmount(token, '调整值');
+  } catch (error) {
+    throw resultStateError('invalid-adjustment-amount', error.message, {
+      cause: error,
+      value
+    });
+  }
+  if (canonical === '0') {
+    throw resultStateError('invalid-adjustment-amount', '调整值不能为 0', { value });
+  }
+  return canonical;
+}
+
+function normalizeAdjustmentReason(value) {
+  const reason = String(value == null ? '' : value).trim();
+  const length = Array.from(reason).length;
+  if (length < 1 || length > 500) {
+    throw resultStateError(
+      'invalid-adjustment-reason',
+      '调整原因必须为 1～500 个字符',
+      { reasonLength: length }
+    );
+  }
+  return reason;
 }
 
 function canonicalStoredAmount(value, label, code) {
@@ -289,7 +377,7 @@ function validateAdjustments(db, runId, logicalRows) {
       );
     }
     const reason = String(row.reason == null ? '' : row.reason);
-    if (!reason || reason !== reason.trim() || reason.length > 500) {
+    if (!reason || reason !== reason.trim() || Array.from(reason).length > 500) {
       throw resultStateError(
         'invalid-adjustment-reason',
         `调整 ${row.id} 的原因必须是 1～500 字的规范文本`,
@@ -576,6 +664,123 @@ function buildEffectiveBalances(db, runId, baseState, adjustmentTotals) {
   return balances;
 }
 
+function emptyCurrencyAmounts() {
+  return Object.fromEntries(SUPPORTED_CURRENCIES.map((currency) => [currency, null]));
+}
+
+function buildReviewRows(baseState, adjustments) {
+  const logicalRows = new Map();
+  for (const row of baseState.baseRows) {
+    let logical = logicalRows.get(row.rowKey);
+    if (!logical) {
+      logical = {
+        type: 'base',
+        rowKey: row.rowKey,
+        rowKind: row.rowKind,
+        subject: row.subject,
+        sourceType: row.sourceType,
+        sourceLabel: SOURCE_LABELS[row.sourceType] || row.sourceType,
+        categoryMajor: row.categoryMajor,
+        categoryMinor: row.categoryMinor,
+        currencyAmounts: emptyCurrencyAmounts(),
+        baseRowIds: []
+      };
+      logicalRows.set(row.rowKey, logical);
+    }
+    logical.currencyAmounts[row.currency] = row.amount;
+    logical.baseRowIds.push(row.id);
+  }
+
+  const adjustmentsByRowKey = new Map();
+  for (const adjustment of adjustments) {
+    if (!adjustmentsByRowKey.has(adjustment.rowKey)) {
+      adjustmentsByRowKey.set(adjustment.rowKey, []);
+    }
+    adjustmentsByRowKey.get(adjustment.rowKey).push(adjustment);
+  }
+
+  const reviewRows = [];
+  for (const logical of logicalRows.values()) {
+    reviewRows.push(Object.freeze({
+      ...logical,
+      currencyAmounts: Object.freeze({ ...logical.currencyAmounts }),
+      baseRowIds: Object.freeze([...logical.baseRowIds])
+    }));
+    for (const adjustment of adjustmentsByRowKey.get(logical.rowKey) || []) {
+      const currencyAmounts = emptyCurrencyAmounts();
+      currencyAmounts[adjustment.currency] = adjustment.adjustmentAmount;
+      reviewRows.push(Object.freeze({
+        type: 'adjustment',
+        adjustmentId: adjustment.id,
+        rowKey: adjustment.rowKey,
+        rowKind: logical.rowKind,
+        subject: logical.subject,
+        sourceType: logical.sourceType,
+        sourceLabel: logical.sourceLabel,
+        categoryMajor: logical.categoryMajor,
+        categoryMinor: logical.categoryMinor,
+        currency: adjustment.currency,
+        currencyAmounts: Object.freeze(currencyAmounts),
+        adjustmentAmount: adjustment.adjustmentAmount,
+        reason: adjustment.reason,
+        sequence: adjustment.sequence,
+        createdAt: adjustment.createdAt
+      }));
+    }
+  }
+  return reviewRows;
+}
+
+function buildReviewSubjects(reviewRows, balances) {
+  const subjectOrder = [];
+  const rowsBySubject = new Map();
+  for (const row of reviewRows) {
+    if (!rowsBySubject.has(row.subject)) {
+      rowsBySubject.set(row.subject, []);
+      subjectOrder.push(row.subject);
+    }
+    rowsBySubject.get(row.subject).push(row);
+  }
+  for (const balance of balances) {
+    if (!rowsBySubject.has(balance.subject)) {
+      rowsBySubject.set(balance.subject, []);
+      subjectOrder.push(balance.subject);
+    }
+  }
+  const balanceByCoordinate = new Map(
+    balances.map((row) => [subjectCurrencyKey(row.subject, row.currency), row])
+  );
+  return subjectOrder.map((subject) => {
+    const summaries = {
+      openingBalance: {},
+      effectiveCalculatedBalance: {},
+      systemBalance: {},
+      effectiveDifference: {}
+    };
+    for (const currency of SUPPORTED_CURRENCIES) {
+      const balance = balanceByCoordinate.get(subjectCurrencyKey(subject, currency));
+      if (!balance) {
+        throw resultStateError(
+          'run-balance-coordinate-missing',
+          `run 结果复核缺少余额坐标：${subject} / ${currency}`,
+          { subject, currency }
+        );
+      }
+      summaries.openingBalance[currency] = balance.openingBalance;
+      summaries.effectiveCalculatedBalance[currency] = balance.effectiveCalculatedBalance;
+      summaries.systemBalance[currency] = balance.systemBalance;
+      summaries.effectiveDifference[currency] = balance.effectiveDifference;
+    }
+    return Object.freeze({
+      subject,
+      rows: Object.freeze([...(rowsBySubject.get(subject) || [])]),
+      summaries: Object.freeze(Object.fromEntries(
+        Object.entries(summaries).map(([key, amounts]) => [key, Object.freeze(amounts)])
+      ))
+    });
+  });
+}
+
 function getEffectiveRunResult(db, runId) {
   const normalizedRunId = Number(runId);
   if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
@@ -614,6 +819,8 @@ function getEffectiveRunResult(db, runId) {
     baseState,
     adjustmentState.totals
   );
+  const reviewRows = buildReviewRows(baseState, adjustmentState.adjustments);
+  const reviewSubjects = buildReviewSubjects(reviewRows, balances);
   return Object.freeze({
     run: Object.freeze({
       runId: Number(run.id),
@@ -629,12 +836,341 @@ function getEffectiveRunResult(db, runId) {
     baseRows: Object.freeze(baseState.baseRows),
     adjustments: Object.freeze(adjustmentState.adjustments),
     effectiveRows: Object.freeze(effectiveRows),
-    balances: Object.freeze(balances)
+    balances: Object.freeze(balances),
+    review: Object.freeze({
+      currencies: Object.freeze([...SUPPORTED_CURRENCIES]),
+      subjects: Object.freeze(reviewSubjects)
+    })
   });
+}
+
+function requireEffectiveRun(db, runId) {
+  const effective = getEffectiveRunResult(db, runId);
+  if (!effective) {
+    throw resultStateError('run-not-found', `财务OP计算记录不存在：${runId}`, {
+      runId: Number(runId)
+    });
+  }
+  return effective;
+}
+
+function listAdjustmentOptions(db, runId) {
+  const effective = requireEffectiveRun(db, runId);
+  if (effective.run.status !== 'calculated') {
+    throw resultStateError(
+      'adjustment-locked',
+      '已归档结果不能修改，请先解归档。',
+      { runId: effective.run.runId, status: effective.run.status }
+    );
+  }
+  const adjusted = new Set(
+    effective.adjustments.map((row) => coordinateKey(row.rowKey, row.currency))
+  );
+  const logicalRows = new Map();
+  for (const row of effective.baseRows) {
+    if (!logicalRows.has(row.rowKey)) logicalRows.set(row.rowKey, row);
+  }
+  const options = [...logicalRows.values()].map((row) => {
+    const adjustedCurrencies = SUPPORTED_CURRENCIES.filter((currency) => (
+      adjusted.has(coordinateKey(row.rowKey, currency))
+    ));
+    const availableCurrencies = SUPPORTED_CURRENCIES.filter((currency) => (
+      !adjusted.has(coordinateKey(row.rowKey, currency))
+    ));
+    return Object.freeze({
+      rowKey: row.rowKey,
+      subject: row.subject,
+      sourceType: row.sourceType,
+      sourceLabel: SOURCE_LABELS[row.sourceType] || row.sourceType,
+      categoryMajor: row.categoryMajor,
+      categoryMinor: row.categoryMinor,
+      availableCurrencies: Object.freeze(availableCurrencies),
+      adjustedCurrencies: Object.freeze(adjustedCurrencies)
+    });
+  }).filter((row) => row.availableCurrencies.length > 0);
+  return Object.freeze({
+    runId: effective.run.runId,
+    targetMonth: effective.run.targetMonth,
+    status: effective.run.status,
+    resultRevision: effective.run.resultRevision,
+    currencies: Object.freeze([...SUPPORTED_CURRENCIES]),
+    options: Object.freeze(options)
+  });
+}
+
+function translateAdjustmentConstraint(db, runId, rowKey, currency, error) {
+  const existing = db.prepare(`
+    SELECT id FROM vcc_fin_op_run_adjustments
+    WHERE run_id = ? AND row_key = ? AND currency = ?
+  `).get(runId, rowKey, currency);
+  if (existing) {
+    return resultStateError(
+      'adjustment-already-exists',
+      '该结果坐标已经修改过，不能再次调整。',
+      { runId, rowKey, currency, adjustmentId: Number(existing.id), cause: error }
+    );
+  }
+  return error;
+}
+
+function assertAdjustmentWriteAllowset(db, {
+  runId,
+  adjustmentId,
+  adjustmentBoundaryId,
+  expectedRevision,
+  transactionTimestamp,
+  expectedAdjustment
+}) {
+  const run = db.prepare(`
+    SELECT status, result_revision, updated_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  const adjustment = db.prepare(`
+    SELECT id, run_id, row_key, subject, source_type, category_major, category_minor,
+           currency, adjustment_amount, reason, sequence, created_at,
+           created_app_version, created_build_sha
+    FROM vcc_fin_op_run_adjustments WHERE id = ?
+  `).get(adjustmentId);
+  const newAdjustmentCount = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_run_adjustments WHERE id > ?
+  `).get(adjustmentBoundaryId).row_count) || 0;
+  const actual = adjustment ? { ...adjustment } : null;
+  const expected = {
+    id: adjustmentId,
+    run_id: runId,
+    row_key: expectedAdjustment.rowKey,
+    subject: expectedAdjustment.subject,
+    source_type: expectedAdjustment.sourceType,
+    category_major: expectedAdjustment.categoryMajor,
+    category_minor: expectedAdjustment.categoryMinor,
+    currency: expectedAdjustment.currency,
+    adjustment_amount: expectedAdjustment.adjustmentAmount,
+    reason: expectedAdjustment.reason,
+    sequence: expectedRevision,
+    created_at: transactionTimestamp,
+    created_app_version: expectedAdjustment.appVersion,
+    created_build_sha: expectedAdjustment.buildSha
+  };
+  if (
+    run
+    && run.status === 'calculated'
+    && Number(run.result_revision) === expectedRevision
+    && run.updated_at === transactionTimestamp
+    && Number.isSafeInteger(adjustmentId)
+    && adjustmentId > adjustmentBoundaryId
+    && newAdjustmentCount === 1
+    && actual
+    && JSON.stringify(actual) === JSON.stringify(expected)
+  ) return;
+  throw resultStateError(
+    'adjustment-write-invariant-failed',
+    '调整结果提交前精确写入断言失败，操作已回滚。',
+    {
+      runId,
+      adjustmentId,
+      context: {
+        adjustmentBoundaryId,
+        newAdjustmentCount,
+        expectedRun: {
+          status: 'calculated',
+          resultRevision: expectedRevision,
+          updatedAt: transactionTimestamp
+        },
+        actualRun: run ? {
+          status: run.status,
+          resultRevision: Number(run.result_revision),
+          updatedAt: run.updated_at
+        } : null,
+        expectedAdjustment: expected,
+        actualAdjustment: actual
+      }
+    }
+  );
+}
+
+function addRunAdjustment({
+  db,
+  runId,
+  rowKey,
+  currency,
+  adjustmentAmount,
+  reason,
+  expectedResultRevision,
+  appVersion = null,
+  buildSha = null
+}) {
+  const normalizedRunId = Number(runId);
+  if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+    throw resultStateError('invalid-run-id', `财务OP run id 无效：${runId}`);
+  }
+  const expectedRevision = normalizeExpectedResultRevision(expectedResultRevision);
+  const normalizedRowKey = String(rowKey == null ? '' : rowKey).trim();
+  if (!/^v1:[a-f0-9]{64}$/.test(normalizedRowKey)) {
+    throw resultStateError('invalid-adjustment-target', '调整目标 rowKey 无效', {
+      runId: normalizedRunId,
+      rowKey
+    });
+  }
+  const normalizedCurrency = String(currency == null ? '' : currency).trim();
+  if (!SUPPORTED_CURRENCY_SET.has(normalizedCurrency)) {
+    throw resultStateError('invalid-adjustment-currency', `不支持调整币种：${normalizedCurrency}`, {
+      currency
+    });
+  }
+  const normalizedAmount = normalizeAdjustmentAmount(adjustmentAmount);
+  const normalizedReason = normalizeAdjustmentReason(reason);
+
+  let transactionStarted = false;
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const before = requireEffectiveRun(db, normalizedRunId);
+    if (before.run.status !== 'calculated') {
+      throw resultStateError(
+        'adjustment-locked',
+        '已归档结果不能修改，请先解归档。',
+        { runId: normalizedRunId, status: before.run.status }
+      );
+    }
+    if (before.run.resultRevision !== expectedRevision) {
+      throw resultRevisionChanged({
+        runId: normalizedRunId,
+        expectedResultRevision: expectedRevision,
+        actualResultRevision: before.run.resultRevision
+      });
+    }
+    const target = before.baseRows.find((row) => row.rowKey === normalizedRowKey);
+    if (!target) {
+      throw resultStateError(
+        'invalid-adjustment-target',
+        '调整目标已变化，请刷新结果表后重试。',
+        { runId: normalizedRunId, rowKey: normalizedRowKey }
+      );
+    }
+    const existing = before.adjustments.find((row) => (
+      row.rowKey === normalizedRowKey && row.currency === normalizedCurrency
+    ));
+    if (existing) {
+      throw resultStateError(
+        'adjustment-already-exists',
+        '该结果坐标已经修改过，不能再次调整。',
+        {
+          runId: normalizedRunId,
+          rowKey: normalizedRowKey,
+          currency: normalizedCurrency,
+          adjustmentId: existing.id
+        }
+      );
+    }
+    const nextSequence = before.run.resultRevision + 1;
+    const preservedBefore = snapshotResultMutationState(db, {
+      targetMonth: before.run.targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT
+    });
+    let inserted;
+    try {
+      inserted = db.prepare(`
+        INSERT INTO vcc_fin_op_run_adjustments (
+          run_id, row_key, subject, source_type, category_major, category_minor,
+          currency, adjustment_amount, reason, sequence,
+          created_at, created_app_version, created_build_sha
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        normalizedRunId,
+        normalizedRowKey,
+        target.subject,
+        target.sourceType,
+        target.categoryMajor,
+        target.categoryMinor,
+        normalizedCurrency,
+        normalizedAmount,
+        normalizedReason,
+        nextSequence,
+        transactionTimestamp,
+        appVersion,
+        buildSha
+      );
+    } catch (error) {
+      throw translateAdjustmentConstraint(
+        db,
+        normalizedRunId,
+        normalizedRowKey,
+        normalizedCurrency,
+        error
+      );
+    }
+    const updated = db.prepare(`
+      UPDATE vcc_fin_op_runs
+      SET result_revision = result_revision + 1,
+          updated_at = ?
+      WHERE id = ? AND status = 'calculated' AND result_revision = ?
+    `).run(transactionTimestamp, normalizedRunId, expectedRevision);
+    if (Number(updated.changes) !== 1) {
+      throw resultRevisionChanged({
+        runId: normalizedRunId,
+        expectedResultRevision: expectedRevision
+      });
+    }
+    const adjustmentId = Number(inserted.lastInsertRowid);
+    assertAdjustmentWriteAllowset(db, {
+      runId: normalizedRunId,
+      adjustmentId,
+      adjustmentBoundaryId: preservedBefore.boundaries.adjustmentMaxId,
+      expectedRevision: nextSequence,
+      transactionTimestamp,
+      expectedAdjustment: {
+        rowKey: normalizedRowKey,
+        subject: target.subject,
+        sourceType: target.sourceType,
+        categoryMajor: target.categoryMajor,
+        categoryMinor: target.categoryMinor,
+        currency: normalizedCurrency,
+        adjustmentAmount: normalizedAmount,
+        reason: normalizedReason,
+        appVersion,
+        buildSha
+      }
+    });
+    const preservedAfter = snapshotResultMutationState(db, {
+      targetMonth: before.run.targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'adjustment-write-invariant-failed',
+      message: '调整前后既有资金事实发生预期外变化，操作已回滚。'
+    });
+    const after = requireEffectiveRun(db, normalizedRunId);
+    const saved = after.adjustments.find((row) => row.id === adjustmentId);
+    db.exec('COMMIT');
+    transactionStarted = false;
+    return Object.freeze({
+      status: 'adjusted',
+      runId: normalizedRunId,
+      targetMonth: after.run.targetMonth,
+      resultRevision: after.run.resultRevision,
+      adjustment: saved
+    });
+  } catch (error) {
+    if (transactionStarted) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* preserve primary error */ }
+    }
+    throw error;
+  }
 }
 
 module.exports = {
   RUN_ROW_KEY_VERSION,
+  RESULT_REVISION_CHANGED_CODE,
+  RESULT_REVISION_CHANGED_MESSAGE,
   buildRunRowKey,
-  getEffectiveRunResult
+  normalizeAdjustmentAmount,
+  assertExpectedResultRevision,
+  getEffectiveRunResult,
+  listAdjustmentOptions,
+  addRunAdjustment
 };

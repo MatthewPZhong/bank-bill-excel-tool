@@ -602,6 +602,21 @@ test('系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
   const stored = db.prepare('SELECT balances_json FROM vcc_fin_op_system_snapshots').get();
   assert.equal(JSON.parse(stored.balances_json).USD, '9.25');
+  const accepted = db.prepare(`
+    SELECT attempt.disposition, attempt.existing_snapshot_id,
+           attempt.source_file, attempt.sheet_name, attempt.source_row,
+           attempt.raw_json, snapshot.id AS snapshot_id
+    FROM vcc_fin_op_system_snapshot_attempts attempt
+    JOIN vcc_fin_op_system_snapshots snapshot
+      ON snapshot.id = attempt.existing_snapshot_id
+    WHERE attempt.disposition = 'accepted'
+  `).get();
+  assert.equal(accepted.disposition, 'accepted');
+  assert.equal(accepted.existing_snapshot_id, accepted.snapshot_id);
+  assert.equal(accepted.source_file, 'first.xlsx');
+  assert.equal(accepted.sheet_name, firstFile.sheetName);
+  assert.equal(accepted.source_row, 2);
+  assert.ok(accepted.raw_json.includes('PPHK'));
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
     WHERE disposition = 'idempotent_skip'
