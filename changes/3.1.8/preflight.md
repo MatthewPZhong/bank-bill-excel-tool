@@ -29,8 +29,8 @@
 | raw number 转稳定十进制 token 是否覆盖科学计数法且不掩盖超精度 | 金额精度 | 高 | 容易 | `canonicalizeVccAmount` 已限制两位小数和 15 位有效数字 | PROBE | 真实样例 + 科学计数法/公式缓存/超精度测试 | 有限安全数值 raw-first；规范化失败即拒绝 |
 | 首月旧库存在多个初始化月份 | 历史状态 | 高 | 困难 | 当前 schema 允许多个月份 | PROBE | PR 2 迁移 fixture | 按 Spec fail-closed，绝不自动删改资金值 |
 | 新结果模板动态行/合并区能否由现有 SheetJS writer 无损复制 | Excel 样式能力 | 中 | 一般 | 当前 writer 依赖固定行号 | PROBE | PR 5 先做真实模板 contract/round-trip 测试 | 锚点缺失即失败，不做旧模板 fallback |
-| GitHub 草稿 PR 能否发布 | 外部认证 | 中 | 容易 | `gh auth status` 显示 token invalid | BLOCK（仅发布） | 用户执行 `gh auth login -h github.com` 后复检 | 不阻塞本地实现与提交；阻塞 push/PR 创建 |
-| Windows installer/portable 中模板可读性 | 平台产物 | 高 | 一般 | 当前环境不是 Windows | PROBE/人工门禁 | Windows CI 构建并检查打包资产 | 阻塞最终发布，不阻塞代码 PR 草稿 |
+| GitHub 发布写入通道是否可用 | 外部认证 | 中 | 容易 | `gh auth status` 显示 CLI token invalid；Git remote 凭据与 GitHub App 连接是独立通道 | PROBE | 分别验证 `git push`、GitHub App PR 创建；只有需要 CLI fallback 时才重新登录 `gh` | Git push 与 PR 创建已实证可用；CLI 直连操作暂不可用，不作为总发布闸门 |
+| Windows installer/portable 中模板可读性 | 平台产物 | 高 | 一般 | 主干 Windows CI 已构建并由分发守卫核对包内版本及必需文件；尚未在目标 Windows 机器实际安装/运行 | PROBE/人工门禁 | 目标机打开 installer/portable，并从两种安装形态实际读取两份 VCC 模板 | 阻塞最终发布，不阻塞代码 PR 草稿 |
 
 ## 保守假设
 
@@ -66,6 +66,14 @@
 - 基于 `40aa812` 的双预算校准候选树已取得：确定性 RSS 单测 `6/6 PASS`；5万/15万真实链 `31/31 PASS`（`39→48MB`，relative/absolute/effective=`82.5/96/82.5MB`，单样本）；50万/150万真实链 `31/31 PASS`（`89→132MB`，relative/absolute/effective=`157.5/146/146MB`，单样本）；最终单次 `npm run release-check` 为 lint/smoke PASS、unit `4802/4802 PASS`、integration `48/48` / `2459/2459 PASS`（`297387ms`），其中目标脚本 `31/31 PASS`（`74500ms`）。这是本地候选树证据，不替代修复提交后的 Windows Actions，仍不得宣告自动化平台门禁完成。
 - 本机旧 `dist/win-unpacked` 为 3.0.13，分发守卫因缺两份 VCC 模板且版本不等于 3.1.8 正确拒绝；该负向结果没有被当成 Windows 3.1.8 构建成功。
 
+### 合入 main 后正式收尾证据（2026-08-09）
+
+- PR #124 已于 2026-08-09 以普通 merge commit `e36bd9a9c161becfbb72ab97bf41963d63012089` 合入 `main`；其 parents 为 `dff07df11fb94ce84940b474b55ac796f084d241` 与 `3291c272ee28388a6fbf4afef0b8694059ae3cc7`，最终 tree 仍为冻结树 `4b032f301cf824bec7b3d9ffa28523439663e278`。
+- 合并后 `main@e36bd9a` 的 fresh Windows Actions run [`31310190290`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31310190290) 全部成功：`smoke-test` 33m25s，`build` 2m03s，总计 35m34s。Windows unit 为 4801 pass + 1 skipped / 0 fail，48 个 integration 脚本与 `2459/2459` 可计数断言通过；RSS `31/31`，VCC 四条真实链 `297/297`、`64/64`、`19/19`、`28/28`，SQLite teardown `9/9`，主面板 `6/6`。
+- 同一主干 run 的 x64 NSIS + portable 构建和分发守卫通过：asar 62.26MB / 3142 条目 / 禁止路径 0 / 必需文件 7/7 / 包内版本 3.1.8。`windows-installer` artifact `9037543874` 为 100,290,789 bytes，Actions archive SHA-256 `64644b284d3b550c66ffec9fbe562d0f4bb7ac1e2e31026f78e2a555172a7ccd`；`windows-portable-exe` artifact `9037544724` 为 99,695,239 bytes，Actions archive SHA-256 `6aa95fb50356d0b83734309e53d35d47d0717b0c99b08ca42068a2aadcba40f8`。两项临时 Actions artifact 的保留期为 1 天，不等同于正式 Release 资产。
+- 只读远端核对确认 `origin/main` 指向 `e36bd9a`，`v3.1.8` tag 不存在，尚未触发 `Release Windows Packages`；因此当前状态仍是“代码已集成、自动门禁全绿、正式发布未发生”。
+- `npm audit --omit=dev` 当前为 0 critical / 7 high / 2 moderate，与 v3.1.7 正式收尾记录的生产依赖风险计数一致；`package-lock.json` 的依赖图未在本迭代改变。完整依赖树为 1 critical / 19 high / 2 moderate，其中 critical 仅位于开发依赖。该基线风险继续公开保留，不在发布收尾中静默升级依赖。
+
 ### Reviewer 退回项与最终盲区复核
 
 - 已用文件时间线确认：旧“切年后有后续依赖，但删除按钮仍像可点”截图早于 disabled 样式和后续 renderer 改动；生产 picker 的异步状态和后台尾月保护未失效，问题是陈旧截图证据及 capture 缺少异步完成信号。
@@ -78,12 +86,17 @@
 - 本轮 RSS blindspot 终审补齐两个 P3 测试证据缺口：run `31299815769` 的原始三对 `[48,49,49]→[93,96,96]` 已进入 self-check 与单测；150MB every-sample 硬上限同时显式覆盖 tier1/tier2 spike。代码结构仍以“独立中位 assessment AND paired effective/linear margins”裁决，paired 不可能新增 PASS；未发现剩余 P3+。
 - 最终 intended 范围为 60 个文件：34 个 modified + 26 个 added。`docs/previews/_general/`、`outputs/`、`.agents/`、`.codex/` 和其他既有未跟踪文件继续明确排除，未读取到实现、未移动、未删除、未暂存。
 
-### 仍阻塞 v3.1.8 正式发布
+### 人工发布门禁确认（2026-08-09）
 
-- 在 Windows CI/目标机实际产出并检查 x64 installer 与 portable，确认两份 VCC 模板存在且可读。
-- 用 Windows Excel/WPS 人工检查字体、正常/异常颜色、动态行、长调整原因换行、M/N 可见性及默认 A:L 打印区；需要纸质调整证据时人工扩展打印区。
-- 在受保护解归档/删除任务进入关键写入后触发关窗，确认应用等待事务安全收口且不强制终止后台任务。
-- 对生产数据库副本做只读扫描，核对 Pending 46/48 列、归档主体/九币种余额及五类数据状态；异常只阻断并人工处理，不自动修复。
-- 由财务人员用真实月份逐主体、逐九币种核对基础值、调整值、生效余额、差异、颜色、归档及连续两月期初衔接，并记录签字结论。
+用户在当前任务中明确回复：“六项均已实际完成，授权记录为通过并继续正式发布。”授权记录时间为 `2026-08-09 20:31:09 +0800`，并已归档到 [PR #130 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/130#issuecomment-5231526107)。该授权不是由 CI 推导，范围只覆盖以下六项：
 
-结论：PR6 已完成冻结 #128 restack、26 张预览冻结、重要变量与双盲区复核；PR #129 的既有修复与 #127/#128 资金边界同时保留。本地 SHA `9eabde33113e0cb1a54891611bd0dba5b5ce1f52` 曾取得 unit `4802/4802`、integration `48/48` / `2459/2459`，其 Windows run `31296877417` 与 SHA `40aa812662ee4b67cba41499f3c7b35a7a40b248` 的 run `31299815769` 均在 RSS integration 失败且 build 未运行；不得把任一本地结果概括为 Windows 或全平台通过。当前双预算校准候选已取得本地完整 `release-check` 全绿，但修复提交后的 Windows Actions 仍待取得；上述人工/平台门禁完成前，v3.1.8 仍是发布候选，不得发布。
+| # | 人工门禁 | 状态 | 记录边界 |
+| --- | --- | --- | --- |
+| 1 | 目标 Windows 机器实际安装/运行 x64 installer 与 portable，并从两种形态读取两份 VCC 模板 | PASS | 目标机实装/实跑和模板可读性已获明确确认 |
+| 2 | Windows Excel/WPS 字体、正常/异常颜色、动态行、长原因换行、M/N 与默认 A:L 打印区 | PASS | 样式、可见性和打印边界已获明确确认 |
+| 3 | 受保护解归档/删除任务关键写入中的真实关窗安全收口 | PASS | 等待事务完成、不强制终止已获明确确认 |
+| 4 | 生产数据库副本只读扫描 Pending 46/48、主体×九币种归档余额和五类数据状态 | PASS | 异常只阻断、人工处理且不自动修复已获明确确认 |
+| 5 | 真实连续两月逐主体×九币种核对基础值、调整、生效余额、差异、颜色、归档与下月期初并签字 | PASS | 财务资金红线复核已获明确确认 |
+| 6 | 真实约 700 万行、多 sheet 工具箱极限文件压力验证 | PASS | 峰值 RSS、结果守恒和退出状态已获明确确认 |
+
+结论：自动化平台门禁已闭合，人工发布门禁为 `6/6 PASS`，v3.1.8 已获授权进入受控正式发布流程。PR6、六层堆叠整合、最终 `main` fresh release-check、Windows x64 构建、分发守卫、重要变量与双盲区复核均已完成；早期失败 run `31296877417` / `31299815769` 继续作为 RSS 模型校准的历史反例保留，最终成功证据以 `main@e36bd9a` 的 run `31310190290` 为准。当前仍未创建 `v3.1.8` annotated tag 或 GitHub Release；下一步只能按“发布准备 PR → annotated tag → Windows Release workflow → 四项公开资产独立复核 → 发布证据 PR”推进，不提前写入正式发布日期或资产摘要。

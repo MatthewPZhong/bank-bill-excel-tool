@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.8 PRD 索引
 
 > 目标版本：`3.1.8`
-> 状态：发布候选（未正式发布）
+> 状态：已批准进入正式发布流程（尚未创建 tag/Release）
 > 锁定规格：[`changes/3.1.8/spec.md`](../../../changes/3.1.8/spec.md)
 > 实施记录：[`changes/3.1.8/implementation-notes.md`](../../../changes/3.1.8/implementation-notes.md)
 > 发布预检：[`changes/3.1.8/preflight.md`](../../../changes/3.1.8/preflight.md)
@@ -33,14 +33,15 @@ v3.1.8 在不改写 VCC 原始导入事实和基础计算血缘的前提下，�
 - 需求到自动化及人工验收的映射：锁定规格 [第 12 章「验收矩阵」](../../../changes/3.1.8/spec.md#12-验收矩阵)。
 - 完成定义：锁定规格 [第 15 章「Definition of Done」](../../../changes/3.1.8/spec.md#15-definition-of-done)。
 
-## 5. 人工发布门禁
+## 5. 人工发布门禁（6/6 已通过）
 
-v3.1.8 当前仍是发布候选。正式发布前必须完成 [preflight「仍阻塞 v3.1.8 正式发布」](../../../changes/3.1.8/preflight.md#仍阻塞-v318-正式发布)，包括：
+v3.1.8 已合入 `main`，主干 fresh Windows release-check、x64 构建和包内分发守卫均已通过。用户于 2026-08-09 明确确认以下六项均已实际完成，授权记录为通过并继续正式发布；详细授权记录见 [preflight「人工发布门禁确认」](../../../changes/3.1.8/preflight.md#人工发布门禁确认2026-08-09)：
 
-1. Windows x64 installer 和 portable 实际构建，以及两份 VCC 模板的包内可读性。
+1. 在目标 Windows 机器实际安装/运行 x64 installer 和 portable，并从两种安装形态读取两份 VCC 模板。
 2. Windows Excel/WPS 下的字体、颜色、动态行、长文本换行、M/N 列和打印区。
 3. 受保护解归档/删除任务写入期间的关窗安全收口。
 4. 生产数据库副本的只读扫描，异常只阻断并由人工处理。
 5. 财务人员按真实月份、主体和九币种逐项核对并记录签字结论。
+6. 真实约 700 万行、多 sheet 工具箱极限文件的压力验证。
 
-上述门禁未全部完成前，不得将本索引、自动化 PASS 或 Windows CI 构建视为已正式发布或已完成资金验收。
+上述人工门禁现为 6/6 PASS，且通过结论来自用户明确签字，不由自动化 PASS 或 Windows CI 构建代替。当前已批准进入 annotated tag → Windows Release workflow → 公开资产复核流程；在 tag、Release 与四项公开资产实际创建并回读前，本索引仍不得表述为已经正式发布。
