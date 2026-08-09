@@ -26,8 +26,15 @@ const {
 const {
   collectRunEvidence,
   insertOperationAudit,
+  assertSuccessOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
+const { readDatabaseLocalTimestamp } = require('./operation-state');
+const {
+  RESULT_MUTATION_OPERATIONS,
+  snapshotResultMutationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const REQUIRED_DETAIL_TYPES = Object.freeze([
   SOURCE_TYPES.RECHARGE,
@@ -918,6 +925,8 @@ function persistCalculation(
   balanceResult,
   {
     replacementEvidence = null,
+    replacementAuditBoundaryId = null,
+    transactionTimestamp = null,
     appVersion = null,
     buildSha = null
   } = {}
@@ -1077,17 +1086,33 @@ function persistCalculation(
     );
   }
   if (replacementEvidence) {
+    const successEvidence = {
+      ...replacementEvidence,
+      replacementRunId: runId
+    };
     replacementAuditId = insertOperationAudit(db, {
       targetMonth,
       operationType: REPLACE_CALCULATED_RESULT_OPERATION,
       runId: replacedRunIds.length === 1 ? replacedRunIds[0] : null,
       status: 'success',
-      evidence: {
-        ...replacementEvidence,
-        replacementRunId: runId
-      },
+      evidence: successEvidence,
       appVersion,
-      buildSha
+      buildSha,
+      createdAt: transactionTimestamp
+    });
+    assertSuccessOperationAudit(db, {
+      auditId: replacementAuditId,
+      auditBoundaryId: replacementAuditBoundaryId,
+      targetMonth,
+      operationType: REPLACE_CALCULATED_RESULT_OPERATION,
+      runId: replacedRunIds.length === 1 ? replacedRunIds[0] : null,
+      previewToken: null,
+      evidence: successEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'replace-calculated-result-invariant-failed',
+      message: '替换旧计算结果的成功审计提交前校验失败，本次计算已回滚。'
     });
   }
   return { runId, replacementAuditId, replacedRunIds };
@@ -1123,6 +1148,10 @@ function calculateMonth({
   try {
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const replacementAuditBoundaryId = Number(db.prepare(`
+      SELECT COALESCE(MAX(id), 0) AS max_id FROM vcc_fin_op_operation_audit
+    `).get().max_id) || 0;
     const preflight = preflightCalculation(db, normalizedMonth);
     if (!preflight.ok) {
       db.exec('ROLLBACK');
@@ -1179,7 +1208,13 @@ function calculateMonth({
       preflight.inputFingerprint,
       aggregate,
       balanceResult,
-      { replacementEvidence, appVersion, buildSha }
+      {
+        replacementEvidence,
+        replacementAuditBoundaryId,
+        transactionTimestamp,
+        appVersion,
+        buildSha
+      }
     );
     db.exec('COMMIT');
     transactionStarted = false;
@@ -1215,6 +1250,74 @@ function calculateMonth({
   }
 }
 
+function assertArchiveWriteAllowset(db, {
+  runId,
+  targetMonth,
+  resultRevision,
+  inputFingerprint,
+  transactionTimestamp,
+  expectedArchives
+}) {
+  const run = db.prepare(`
+    SELECT status, result_revision, input_fingerprint, archived_at, updated_at
+    FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId);
+  const archives = db.prepare(`
+    SELECT target_month, subject, balances_json, run_id, archived_at
+    FROM vcc_fin_op_archives WHERE target_month = ? ORDER BY subject
+  `).all(targetMonth).map((row) => ({ ...row }));
+  const datasets = db.prepare(`
+    SELECT dataset_type, data_status, archived_run_id, updated_at
+    FROM vcc_fin_op_datasets WHERE target_month = ? ORDER BY dataset_type
+  `).all(targetMonth).map((row) => ({ ...row }));
+  const expectedArchiveRows = [...expectedArchives.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([subject, balances]) => ({
+      target_month: targetMonth,
+      subject,
+      balances_json: JSON.stringify(balances),
+      run_id: runId,
+      archived_at: transactionTimestamp
+    }));
+  const valid = run
+    && run.status === 'archived'
+    && Number(run.result_revision) === resultRevision
+    && run.input_fingerprint === inputFingerprint
+    && run.archived_at === transactionTimestamp
+    && run.updated_at === transactionTimestamp
+    && JSON.stringify(archives) === JSON.stringify(expectedArchiveRows)
+    && datasets.length === REQUIRED_DATASET_TYPES.length
+    && datasets.every((row) => (
+      REQUIRED_DATASET_TYPES.includes(row.dataset_type)
+      && row.data_status === 'archived'
+      && Number(row.archived_run_id) === runId
+      && row.updated_at === transactionTimestamp
+    ));
+  if (valid) return;
+  throw createVccStateError(
+    'archive-write-invariant-failed',
+    '归档提交前状态断言失败（精确写入不一致），操作已回滚。',
+    {
+      runId,
+      targetMonth,
+      context: {
+        expected: {
+          resultRevision,
+          inputFingerprint,
+          transactionTimestamp,
+          archives: expectedArchiveRows,
+          datasetTypes: REQUIRED_DATASET_TYPES
+        },
+        actual: {
+          run: run ? { ...run } : null,
+          archives,
+          datasets
+        }
+      }
+    }
+  );
+}
+
 function archiveRun({
   db,
   runId,
@@ -1233,6 +1336,7 @@ function archiveRun({
   try {
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
     const run = db.prepare('SELECT * FROM vcc_fin_op_runs WHERE id = ?').get(normalizedRunId);
     if (!run) throw new Error(`财务OP计算记录不存在：${normalizedRunId}`);
     targetMonth = run.target_month;
@@ -1308,6 +1412,11 @@ function archiveRun({
       },
       effectiveRun: runEvidence
     };
+    const preservedBefore = snapshotResultMutationState(db, {
+      targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT
+    });
     const auditId = insertOperationAudit(db, {
       targetMonth,
       operationType: ARCHIVE_RESULT_OPERATION,
@@ -1315,11 +1424,13 @@ function archiveRun({
       status: 'success',
       evidence: failureEvidence,
       appVersion,
-      buildSha
+      buildSha,
+      createdAt: transactionTimestamp
     });
     const insertArchive = db.prepare(`
-      INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO vcc_fin_op_archives (
+        target_month, subject, balances_json, run_id, archived_at
+      ) VALUES (?, ?, ?, ?, ?)
     `);
     for (const [subject, subjectBalances] of bySubject) {
       parseBalancesJson(JSON.stringify(subjectBalances), `${targetMonth} ${subject} 生效计算财务OP`);
@@ -1331,21 +1442,31 @@ function archiveRun({
       if (nextOpening) {
         throw new Error(`${nextMonth} ${subject} 已人工初始化期初余额，禁止再归档 ${targetMonth}`);
       }
-      insertArchive.run(targetMonth, subject, JSON.stringify(subjectBalances), normalizedRunId);
+      insertArchive.run(
+        targetMonth,
+        subject,
+        JSON.stringify(subjectBalances),
+        normalizedRunId,
+        transactionTimestamp
+      );
     }
 
     const updatedRuns = Number(db.prepare(`
       UPDATE vcc_fin_op_runs
-      SET status = 'archived', archived_at = datetime('now', 'localtime'),
-          updated_at = datetime('now', 'localtime')
+      SET status = 'archived', archived_at = ?, updated_at = ?
       WHERE id = ? AND status = 'calculated' AND result_revision = ?
-    `).run(normalizedRunId, resultRevision).changes) || 0;
+    `).run(
+      transactionTimestamp,
+      transactionTimestamp,
+      normalizedRunId,
+      resultRevision
+    ).changes) || 0;
     const updatedDatasets = Number(db.prepare(`
       UPDATE vcc_fin_op_datasets
       SET data_status = 'archived', archived_run_id = ?,
-          updated_at = datetime('now', 'localtime')
+          updated_at = ?
       WHERE target_month = ? AND data_status = 'unprocessed'
-    `).run(normalizedRunId, targetMonth).changes) || 0;
+    `).run(normalizedRunId, transactionTimestamp, targetMonth).changes) || 0;
     if (updatedRuns !== 1 || updatedDatasets !== REQUIRED_DATASET_TYPES.length) {
       throw createVccStateError(
         'archive-write-invariant-failed',
@@ -1354,43 +1475,38 @@ function archiveRun({
       );
     }
 
-    const postRun = db.prepare(`
-      SELECT status, result_revision, input_fingerprint, archived_at, updated_at
-      FROM vcc_fin_op_runs WHERE id = ?
-    `).get(normalizedRunId);
-    const postArchives = db.prepare(`
-      SELECT subject, balances_json, run_id
-      FROM vcc_fin_op_archives WHERE target_month = ? ORDER BY subject
-    `).all(targetMonth);
-    const postDatasets = db.prepare(`
-      SELECT dataset_type, data_status, archived_run_id
-      FROM vcc_fin_op_datasets WHERE target_month = ? ORDER BY dataset_type
-    `).all(targetMonth);
-    const archivedBalancesMatch = postArchives.length === bySubject.size
-      && postArchives.every((row) => (
-        Number(row.run_id) === normalizedRunId
-        && bySubject.has(row.subject)
-        && row.balances_json === JSON.stringify(bySubject.get(row.subject))
-      ));
-    if (
-      !postRun
-      || postRun.status !== 'archived'
-      || Number(postRun.result_revision) !== resultRevision
-      || postRun.input_fingerprint !== storedFingerprint
-      || !postRun.archived_at
-      || !postRun.updated_at
-      || !archivedBalancesMatch
-      || postDatasets.length !== REQUIRED_DATASET_TYPES.length
-      || postDatasets.some((row) => (
-        row.data_status !== 'archived' || Number(row.archived_run_id) !== normalizedRunId
-      ))
-    ) {
-      throw createVccStateError(
-        'archive-write-invariant-failed',
-        '归档提交前状态断言失败，操作已回滚。',
-        { runId: normalizedRunId, targetMonth }
-      );
-    }
+    assertArchiveWriteAllowset(db, {
+      runId: normalizedRunId,
+      targetMonth,
+      resultRevision,
+      inputFingerprint: storedFingerprint,
+      transactionTimestamp,
+      expectedArchives: bySubject
+    });
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth,
+      operationType: ARCHIVE_RESULT_OPERATION,
+      runId: normalizedRunId,
+      previewToken: null,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'archive-write-invariant-failed',
+      message: '归档成功审计提交前校验失败，操作已回滚。'
+    });
+    const preservedAfter = snapshotResultMutationState(db, {
+      targetMonth,
+      runId: normalizedRunId,
+      operation: RESULT_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'archive-write-invariant-failed',
+      message: '归档前后既有资金事实发生预期外变化，操作已回滚。'
+    });
     db.exec('COMMIT');
     transactionStarted = false;
     return {

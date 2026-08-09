@@ -279,6 +279,44 @@ test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 work
   }
 });
 
+test('calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版本', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    appVersion: '3.1.8-trusted',
+    buildSha: 'trusted-build-sha',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64),
+    appVersion: 'forged-version',
+    buildSha: 'forged-sha',
+    taskGeneration: 999,
+    runId: 123,
+    unexpectedField: 'must-not-cross-service-boundary'
+  });
+  assert.equal(workers.length, 1);
+  assert.deepEqual(workers[0].options.workerData.payload, {
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64),
+    taskGeneration: 0,
+    appVersion: '3.1.8-trusted',
+    buildSha: 'trusted-build-sha'
+  });
+  workers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
+  assert.deepEqual(await calculation, { status: 'calculated' });
+});
+
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
