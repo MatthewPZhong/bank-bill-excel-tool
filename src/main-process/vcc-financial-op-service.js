@@ -13,8 +13,10 @@ const {
 const {
   archiveRun,
   getRunResult: getStoredRunResult,
+  isValidInputFingerprint,
   initializeOpeningBalances,
-  preflightCalculation
+  preflightCalculation,
+  preflightRequiredResult
 } = require('../backend/vcc-financial-op/calculator');
 const {
   getEffectiveRunResult,
@@ -29,7 +31,8 @@ const {
 const {
   operationError,
   STATE_CHANGED_CODE,
-  STATE_CHANGED_MESSAGE
+  STATE_CHANGED_MESSAGE,
+  validateOperationConfirmation
 } = require('../backend/vcc-financial-op/operation-state');
 const {
   listArchivedResultMonths: listArchivedResultMonthsFromDb,
@@ -193,6 +196,7 @@ function createVccFinancialOpService({
   workerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  archiveConsistencyLogger = null,
   cancelTimeoutMs = 120000
 }) {
   let activeTask = null;
@@ -344,8 +348,13 @@ function createVccFinancialOpService({
     return runWorker('import', payload, onProgress);
   }
 
-  async function calculate(payload) {
-    return runWorker('calculate', payload);
+  async function calculate(payload = {}) {
+    const targetMonth = normalizeYearMonth(payload.targetMonth);
+    if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
+    if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
+      return preflightRequiredResult(targetMonth);
+    }
+    return runWorker('calculate', { ...payload, targetMonth });
   }
 
   function preflightRun(payload = {}) {
@@ -404,7 +413,7 @@ function createVccFinancialOpService({
     const outcome = await Promise.race([completion, timeout]);
     if (timer) clearTimeout(timer);
     if (outcome.type === 'timeout') {
-      if (task.protected || task.phase === 'critical-ready') {
+      if (task.protected === true) {
         const protectedOutcome = await completion;
         if (protectedOutcome.type === 'result') return { status: 'completed', protected: true };
         return {
@@ -507,7 +516,7 @@ function createVccFinancialOpService({
   }
 
   function listArchivedResultMonths() {
-    return listArchivedResultMonthsFromDb(database.db);
+    return listArchivedResultMonthsFromDb(database.db, { logger: archiveConsistencyLogger });
   }
 
   function previewUnarchive(payload = {}) {
@@ -518,21 +527,19 @@ function createVccFinancialOpService({
   }
 
   function unarchiveMonth(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('unarchive-month', {
       targetMonth: payload.targetMonth,
       expectedPreviewToken
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 
@@ -551,15 +558,13 @@ function createVccFinancialOpService({
   }
 
   function deleteDataTargetData(payload = {}) {
-    const expectedPreviewToken = payload.expectedPreviewToken || payload.previewToken;
-    if (
-      !expectedPreviewToken
-      || payload.taskGeneration === null
-      || payload.taskGeneration === undefined
-      || !Number.isSafeInteger(Number(payload.taskGeneration))
-    ) {
-      throw operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE);
-    }
+    const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
+      ? payload.expectedPreviewToken
+      : payload.previewToken;
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      payload.taskGeneration
+    );
     return runWorker('delete-data-target', {
       targetMonth: payload.targetMonth,
       targetType: payload.targetType || payload.sourceType,
@@ -567,7 +572,7 @@ function createVccFinancialOpService({
       reason: payload.reason
     }, null, {
       destructive: true,
-      expectedTaskGeneration: payload.taskGeneration
+      expectedTaskGeneration: confirmedGeneration
     });
   }
 
@@ -808,7 +813,7 @@ function createVccFinancialOpService({
   }
 
   function latestArchivedRun() {
-    const latest = listArchivedResultMonthsFromDb(database.db)[0] || null;
+    const latest = listArchivedResultMonths()[0] || null;
     return latest ? getRunReview(latest.runId) : null;
   }
 
@@ -818,7 +823,9 @@ function createVccFinancialOpService({
       const run = getStoredRunResult(database.db, Number(runId));
       if (!run) throw new Error(`财务OP校验结果不存在：${runId}`);
       if (run.status !== 'archived') throw new Error('仅已确认归档的财务OP校验结果可以导出');
-      const consistentArchive = listArchivedResultMonthsFromDb(database.db)
+      const consistentArchive = listArchivedResultMonthsFromDb(database.db, {
+        logger: archiveConsistencyLogger
+      })
         .some((item) => item.runId === Number(runId) && item.targetMonth === run.targetMonth);
       if (!consistentArchive) {
         throw operationError(

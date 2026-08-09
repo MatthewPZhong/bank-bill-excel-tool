@@ -11,17 +11,23 @@ const {
 const {
   operationError,
   normalizeOperationMonth,
-  stableStringify,
   buildOperationState,
   operationPreviewToken,
   assertPreviewToken,
-  snapshotSourceFacts
+  validateOperationConfirmation,
+  readDatabaseLocalTimestamp
 } = require('./operation-state');
 const {
   collectRunEvidence,
   insertOperationAudit,
+  assertSuccessOperationAudit,
   persistRolledBackAudit
 } = require('./operation-audit');
+const {
+  PRESERVED_OPERATIONS,
+  snapshotPreservedOperationState,
+  assertPreservedOperationState
+} = require('./preserved-state');
 
 const DELETE_ACTION = 'delete-data-target';
 const DELETE_TARGET_TYPES = Object.freeze({
@@ -227,15 +233,52 @@ function deleteRunChildren(db, runIds) {
   }
 }
 
-function assertSourceFactsUnchanged(db, targetMonth, before) {
-  const after = snapshotSourceFacts(db, targetMonth);
-  if (stableStringify(after) !== stableStringify(before)) {
-    throw operationError(
-      'delete-invariant-failed',
-      '删除前后源数据或导入审计计数发生变化，操作已回滚。',
-      { sourceFactsBefore: before, sourceFactsAfter: after }
-    );
+function assertTargetMonthRunsDeleted(db, targetMonth, runIds) {
+  const originalRunIds = Array.isArray(runIds) ? runIds : [];
+  const originalRunFilter = originalRunIds.length > 0
+    ? ` OR child.run_id IN (${originalRunIds.map(() => '?').join(', ')})`
+    : '';
+  const remainingRunCount = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_runs
+    WHERE target_month = ?
+  `).get(targetMonth).row_count) || 0;
+  let remainingCount = 0;
+  for (const tableName of [
+    'vcc_fin_op_run_adjustments',
+    'vcc_fin_op_run_rows',
+    'vcc_fin_op_run_balances',
+    'vcc_fin_op_pending_summary_rows',
+    'vcc_fin_op_pending_currency_totals'
+  ]) {
+    remainingCount += Number(db.prepare(`
+      SELECT COUNT(*) AS row_count
+      FROM ${tableName} child
+      LEFT JOIN vcc_fin_op_runs run ON run.id = child.run_id
+      WHERE run.target_month = ?${originalRunFilter}
+    `).get(targetMonth, ...originalRunIds).row_count) || 0;
   }
+  if (remainingRunCount !== 0 || remainingCount !== 0) {
+    throw operationError('delete-invariant-failed', '目标月结果或子表未能完整删除，操作已回滚。');
+  }
+}
+
+function assertOpeningDeletionPostconditions(db, targetMonth, runIds) {
+  const remainingOpening = Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_opening_balances
+    WHERE target_month = ?
+  `).get(targetMonth).row_count) || 0;
+  const moduleState = repository.getVccFinancialOpModuleState(db);
+  if (
+    remainingOpening !== 0
+    || moduleState.firstMonth !== targetMonth
+    || moduleState.migrationDiagnostic
+  ) {
+    throw operationError('delete-invariant-failed', '删除后首月状态断言失败，操作已回滚。');
+  }
+  assertTargetMonthRunsDeleted(db, targetMonth, runIds);
+  return moduleState;
 }
 
 function openingEvidence(db, targetMonth) {
@@ -260,7 +303,7 @@ function deleteOpeningInitialization({
   db,
   targetMonth,
   expectedPreviewToken,
-  taskGeneration = 0,
+  taskGeneration,
   reason = '用户在数据管理中删除首月全部期初初始化数据',
   appVersion = null,
   buildSha = null
@@ -269,17 +312,26 @@ function deleteOpeningInitialization({
   let failureEvidence = { action: DELETE_OPENING_OPERATION, targetMonth: target.targetMonth, reason };
   let transactionStarted = false;
   try {
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      taskGeneration
+    );
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
-    const preview = previewDataTargetDeletion(db, target, { taskGeneration });
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const preview = previewDataTargetDeletion(db, target, { taskGeneration: confirmedGeneration });
     assertPreviewToken(expectedPreviewToken, preview.previewToken);
     assertDeletePreview(preview);
-    const before = operationStateForTarget(db, target, taskGeneration);
+    const before = operationStateForTarget(db, target, confirmedGeneration);
     const openings = openingEvidence(db, target.targetMonth);
     const calculatedRunIds = before.runs
       .filter((run) => run.status === 'calculated')
       .map((run) => run.id);
     const runs = calculatedRunIds.map((runId) => collectRunEvidence(db, runId));
+    const preservedBefore = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_OPENING
+    });
     failureEvidence = {
       action: DELETE_OPENING_OPERATION,
       targetMonth: target.targetMonth,
@@ -287,7 +339,8 @@ function deleteOpeningInitialization({
       preview,
       before,
       openings,
-      runs
+      runs,
+      preservedState: preservedBefore
     };
     const auditId = insertOperationAudit(db, {
       targetMonth: target.targetMonth,
@@ -296,7 +349,8 @@ function deleteOpeningInitialization({
       previewToken: preview.previewToken,
       evidence: failureEvidence,
       appVersion,
-      buildSha
+      buildSha,
+      createdAt: transactionTimestamp
     });
 
     deleteRunChildren(db, calculatedRunIds);
@@ -310,23 +364,35 @@ function deleteOpeningInitialization({
     if (deletedRuns !== calculatedRunIds.length || deletedOpenings !== openings.length) {
       throw operationError('delete-invariant-failed', '首月期初或未归档结果未能完整删除，操作已回滚。');
     }
-    const remainingOpening = Number(db.prepare(`
-      SELECT COUNT(*) AS row_count FROM vcc_fin_op_opening_balances WHERE target_month = ?
-    `).get(target.targetMonth).row_count) || 0;
-    const remainingCalculated = Number(db.prepare(`
-      SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs
-      WHERE target_month = ? AND status = 'calculated'
-    `).get(target.targetMonth).row_count) || 0;
-    const moduleState = repository.getVccFinancialOpModuleState(db);
-    if (
-      remainingOpening !== 0
-      || remainingCalculated !== 0
-      || moduleState.firstMonth !== target.targetMonth
-      || moduleState.migrationDiagnostic
-    ) {
-      throw operationError('delete-invariant-failed', '删除后首月状态断言失败，操作已回滚。');
-    }
-    assertSourceFactsUnchanged(db, target.targetMonth, before.sourceFacts);
+    const moduleState = assertOpeningDeletionPostconditions(
+      db,
+      target.targetMonth,
+      calculatedRunIds
+    );
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth: target.targetMonth,
+      operationType: DELETE_OPENING_OPERATION,
+      previewToken: preview.previewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'delete-invariant-failed',
+      message: '删除首月期初成功审计提交前校验失败，操作已回滚。'
+    });
+    const preservedAfter = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_OPENING,
+      phase: 'after',
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'delete-invariant-failed',
+      message: '删除期初前后保留数据或审计内容发生变化，操作已回滚。'
+    });
+    assertOpeningDeletionPostconditions(db, target.targetMonth, calculatedRunIds);
     db.exec('COMMIT');
     transactionStarted = false;
     return {
@@ -362,7 +428,7 @@ function deleteUnarchivedResult({
   db,
   targetMonth,
   expectedPreviewToken,
-  taskGeneration = 0,
+  taskGeneration,
   reason = '用户在数据管理中删除目标月全部未归档财务OP校验结果',
   appVersion = null,
   buildSha = null
@@ -371,21 +437,31 @@ function deleteUnarchivedResult({
   let failureEvidence = { action: DELETE_RESULT_OPERATION, targetMonth: target.targetMonth, reason };
   let transactionStarted = false;
   try {
+    const confirmedGeneration = validateOperationConfirmation(
+      expectedPreviewToken,
+      taskGeneration
+    );
     db.exec('BEGIN IMMEDIATE');
     transactionStarted = true;
-    const preview = previewDataTargetDeletion(db, target, { taskGeneration });
+    const transactionTimestamp = readDatabaseLocalTimestamp(db);
+    const preview = previewDataTargetDeletion(db, target, { taskGeneration: confirmedGeneration });
     assertPreviewToken(expectedPreviewToken, preview.previewToken);
     assertDeletePreview(preview);
-    const before = operationStateForTarget(db, target, taskGeneration);
+    const before = operationStateForTarget(db, target, confirmedGeneration);
     const runIds = before.runs.filter((run) => run.status === 'calculated').map((run) => run.id);
     const runs = runIds.map((runId) => collectRunEvidence(db, runId));
+    const preservedBefore = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_RESULT
+    });
     failureEvidence = {
       action: DELETE_RESULT_OPERATION,
       targetMonth: target.targetMonth,
       reason,
       preview,
       before,
-      runs
+      runs,
+      preservedState: preservedBefore
     };
     const auditId = insertOperationAudit(db, {
       targetMonth: target.targetMonth,
@@ -394,7 +470,8 @@ function deleteUnarchivedResult({
       previewToken: preview.previewToken,
       evidence: failureEvidence,
       appVersion,
-      buildSha
+      buildSha,
+      createdAt: transactionTimestamp
     });
 
     deleteRunChildren(db, runIds);
@@ -402,14 +479,34 @@ function deleteUnarchivedResult({
       DELETE FROM vcc_fin_op_runs
       WHERE target_month = ? AND status = 'calculated'
     `).run(target.targetMonth).changes) || 0;
-    const remainingCalculated = Number(db.prepare(`
-      SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs
-      WHERE target_month = ? AND status = 'calculated'
-    `).get(target.targetMonth).row_count) || 0;
-    if (deletedRuns !== runIds.length || remainingCalculated !== 0) {
+    if (deletedRuns !== runIds.length) {
       throw operationError('delete-invariant-failed', '未归档结果未能完整删除，操作已回滚。');
     }
-    assertSourceFactsUnchanged(db, target.targetMonth, before.sourceFacts);
+    assertTargetMonthRunsDeleted(db, target.targetMonth, runIds);
+    assertSuccessOperationAudit(db, {
+      auditId,
+      auditBoundaryId: preservedBefore.boundaries.operationAuditMaxId,
+      targetMonth: target.targetMonth,
+      operationType: DELETE_RESULT_OPERATION,
+      previewToken: preview.previewToken,
+      evidence: failureEvidence,
+      appVersion,
+      buildSha,
+      createdAt: transactionTimestamp,
+      code: 'delete-invariant-failed',
+      message: '删除未归档结果成功审计提交前校验失败，操作已回滚。'
+    });
+    const preservedAfter = snapshotPreservedOperationState(db, {
+      targetMonth: target.targetMonth,
+      operation: PRESERVED_OPERATIONS.DELETE_RESULT,
+      phase: 'after',
+      baseline: preservedBefore
+    });
+    assertPreservedOperationState(preservedBefore, preservedAfter, {
+      code: 'delete-invariant-failed',
+      message: '删除结果前后保留数据或审计内容发生变化，操作已回滚。'
+    });
+    assertTargetMonthRunsDeleted(db, target.targetMonth, runIds);
     db.exec('COMMIT');
     transactionStarted = false;
     return {
@@ -441,21 +538,26 @@ function deleteUnarchivedResult({
 }
 
 function deleteDataTarget({ db, ...payload }) {
+  const confirmedGeneration = validateOperationConfirmation(
+    payload.expectedPreviewToken,
+    payload.taskGeneration
+  );
   const target = normalizeDeleteTarget(payload);
+  const confirmedPayload = { ...payload, taskGeneration: confirmedGeneration };
   if (target.kind === 'source') {
     return deleteDataset({
       db,
       targetMonth: target.targetMonth,
       sourceType: target.sourceType,
-      expectedPreviewToken: payload.expectedPreviewToken,
-      taskGeneration: payload.taskGeneration,
-      reason: payload.reason,
-      appVersion: payload.appVersion,
-      buildSha: payload.buildSha
+      expectedPreviewToken: confirmedPayload.expectedPreviewToken,
+      taskGeneration: confirmedPayload.taskGeneration,
+      reason: confirmedPayload.reason,
+      appVersion: confirmedPayload.appVersion,
+      buildSha: confirmedPayload.buildSha
     });
   }
-  if (target.kind === 'opening') return deleteOpeningInitialization({ db, ...payload });
-  return deleteUnarchivedResult({ db, ...payload });
+  if (target.kind === 'opening') return deleteOpeningInitialization({ db, ...confirmedPayload });
+  return deleteUnarchivedResult({ db, ...confirmedPayload });
 }
 
 module.exports = {

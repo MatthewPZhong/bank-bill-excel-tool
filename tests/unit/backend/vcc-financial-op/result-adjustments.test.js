@@ -17,6 +17,10 @@ const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES
 } = require('../../../../src/backend/vcc-financial-op/definitions');
+const {
+  serializeError,
+  deserializeError
+} = require('../../../../src/main-process/serialize-error');
 
 const RECHARGE_ROW = Object.freeze({
   rowKind: 'movement',
@@ -32,6 +36,14 @@ const PENDING_ROW = Object.freeze({
   categoryMajor: '当月移除pending',
   categoryMinor: ''
 });
+const MAX_VCC_AMOUNT = '999999999999999';
+
+function movementRow(categoryMinor) {
+  return Object.freeze({
+    ...RECHARGE_ROW,
+    categoryMinor
+  });
+}
 
 function createDb(t) {
   const db = new DatabaseSync(':memory:');
@@ -79,6 +91,54 @@ function insertBalanceSubject(db, runId, subject, opening = '100', periodAmounts
       : '0';
     insert.run(runId, subject, currency, opening, period, calculated, system, difference);
   }
+}
+
+function insertExactBalanceSubject(db, runId, subject, overrides = {}) {
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const currency of SUPPORTED_CURRENCIES) {
+    const values = {
+      opening: '0',
+      period: '0',
+      calculated: '0',
+      system: '0',
+      difference: '0',
+      ...(overrides[currency] || {})
+    };
+    insert.run(
+      runId,
+      subject,
+      currency,
+      values.opening,
+      values.period,
+      values.calculated,
+      values.system,
+      values.difference
+    );
+  }
+}
+
+function insertRun(db, {
+  targetMonth = '2026-06',
+  status = 'calculated',
+  resultRevision = 0
+} = {}) {
+  return Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (
+      target_month, status, input_revisions_json,
+      result_revision, input_fingerprint, updated_at, archived_at
+    ) VALUES (?, ?, '{"fixture":1}', ?, 'fixture-fingerprint',
+              '2026-07-01 10:00:00', ?)
+  `).run(
+    targetMonth,
+    status,
+    resultRevision,
+    status === 'archived' ? '2026-07-01 11:00:00' : null
+  ).lastInsertRowid);
 }
 
 function seedBaseRun(db, { includeRows = true, includeBalances = true } = {}) {
@@ -133,14 +193,34 @@ function assertThrowsCode(fn, code) {
   });
 }
 
+function captureError(fn) {
+  try {
+    fn();
+  } catch (error) {
+    return error;
+  }
+  assert.fail('期望函数抛错');
+}
+
 function tableSnapshot(db, runId) {
   return {
+    run: { ...db.prepare(`
+      SELECT * FROM vcc_fin_op_runs WHERE id = ?
+    `).get(runId) },
     rows: db.prepare(`
       SELECT * FROM vcc_fin_op_run_rows WHERE run_id = ? ORDER BY id
     `).all(runId).map((row) => ({ ...row })),
     balances: db.prepare(`
       SELECT * FROM vcc_fin_op_run_balances
       WHERE run_id = ? ORDER BY subject, currency
+    `).all(runId).map((row) => ({ ...row })),
+    adjustments: db.prepare(`
+      SELECT * FROM vcc_fin_op_run_adjustments
+      WHERE run_id = ? ORDER BY sequence, id
+    `).all(runId).map((row) => ({ ...row })),
+    archives: db.prepare(`
+      SELECT * FROM vcc_fin_op_archives
+      WHERE run_id = ? ORDER BY subject
     `).all(runId).map((row) => ({ ...row }))
   };
 }
@@ -481,6 +561,260 @@ test('revision 更新故障时调整行与 updated_at 全部回滚', (t) => {
     { ...db.prepare(`SELECT result_revision, updated_at FROM vcc_fin_op_runs WHERE id = ?`).get(runId) },
     { result_revision: 0, updated_at: '2026-07-01 10:00:00' }
   );
+});
+
+test('effective result 基础行先越过 15 位再抵消时按最终发生额通过，且归档事实只读', (t) => {
+  const db = createDb(t);
+  const runId = insertRun(db, { status: 'archived' });
+  const rows = [movementRow('BASE-A'), movementRow('BASE-B'), movementRow('BASE-C')];
+  insertRunRow(db, runId, rows[0], 'USD', MAX_VCC_AMOUNT);
+  insertRunRow(db, runId, rows[1], 'USD', '1');
+  insertRunRow(db, runId, rows[2], 'USD', '-1');
+  insertExactBalanceSubject(db, runId, 'PPHK', {
+    USD: {
+      period: MAX_VCC_AMOUNT,
+      calculated: MAX_VCC_AMOUNT,
+      system: MAX_VCC_AMOUNT,
+      difference: '0'
+    }
+  });
+  const archivedBalances = Object.fromEntries(
+    SUPPORTED_CURRENCIES.map((currency) => [
+      currency,
+      currency === 'USD' ? MAX_VCC_AMOUNT : '0'
+    ])
+  );
+  db.prepare(`
+    INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
+    VALUES ('2026-06', 'PPHK', ?, ?)
+  `).run(JSON.stringify(archivedBalances), runId);
+  const before = tableSnapshot(db, runId);
+
+  const result = getEffectiveRunResult(db, runId);
+
+  assert.equal(result.run.status, 'archived');
+  assert.equal(result.run.resultRevision, 0);
+  assert.equal(result.balances.length, SUPPORTED_CURRENCIES.length);
+  const usd = result.balances.find((row) => row.currency === 'USD');
+  assert.equal(usd.basePeriodAmount, MAX_VCC_AMOUNT);
+  assert.equal(usd.effectivePeriodAmount, MAX_VCC_AMOUNT);
+  assert.equal(usd.effectiveCalculatedBalance, MAX_VCC_AMOUNT);
+  assert.deepEqual(tableSnapshot(db, runId), before);
+});
+
+test('effective result adjustment 抵消链只在最终汇总执行 15 位校验', (t) => {
+  const db = createDb(t);
+  const runId = insertRun(db, { resultRevision: 3 });
+  const rows = [movementRow('ADJ-A'), movementRow('ADJ-B'), movementRow('ADJ-C')];
+  for (const row of rows) insertRunRow(db, runId, row, 'JPY', '0');
+  insertExactBalanceSubject(db, runId, 'PPHK');
+  insertAdjustment(db, runId, buildRunRowKey(rows[0]), rows[0], {
+    currency: 'JPY', amount: MAX_VCC_AMOUNT, sequence: 1
+  });
+  insertAdjustment(db, runId, buildRunRowKey(rows[1]), rows[1], {
+    currency: 'JPY', amount: '1', sequence: 2
+  });
+  insertAdjustment(db, runId, buildRunRowKey(rows[2]), rows[2], {
+    currency: 'JPY', amount: '-1', sequence: 3
+  });
+  const before = tableSnapshot(db, runId);
+
+  const result = getEffectiveRunResult(db, runId);
+
+  assert.equal(result.run.resultRevision, 3);
+  assert.deepEqual(result.adjustments.map((row) => row.sequence), [1, 2, 3]);
+  assert.equal(result.balances.length, SUPPORTED_CURRENCIES.length);
+  const jpy = result.balances.find((row) => row.currency === 'JPY');
+  assert.equal(jpy.adjustmentAmount, MAX_VCC_AMOUNT);
+  assert.equal(jpy.effectivePeriodAmount, MAX_VCC_AMOUNT);
+  assert.equal(jpy.effectiveDifference, `-${MAX_VCC_AMOUNT}`);
+  assert.deepEqual(tableSnapshot(db, runId), before);
+});
+
+test('effective result 对真正溢出的基础/adjustment 最终汇总返回稳定坐标错误且不改账本', (t) => {
+  const baseDb = createDb(t);
+  const baseRunId = insertRun(baseDb);
+  const baseRows = [movementRow('OVERFLOW-BASE-A'), movementRow('OVERFLOW-BASE-B')];
+  insertRunRow(baseDb, baseRunId, baseRows[0], 'USD', MAX_VCC_AMOUNT);
+  insertRunRow(baseDb, baseRunId, baseRows[1], 'USD', '1');
+  insertExactBalanceSubject(baseDb, baseRunId, 'PPHK');
+  const baseBefore = tableSnapshot(baseDb, baseRunId);
+  let baseDto;
+  const baseError = captureError(() => {
+    baseDto = getEffectiveRunResult(baseDb, baseRunId);
+  });
+  assert.equal(baseDto, undefined);
+  assert.deepEqual(
+    {
+      code: baseError.code,
+      scope: baseError.scope,
+      summaryType: baseError.summaryType,
+      field: baseError.field,
+      subject: baseError.subject,
+      currency: baseError.currency,
+      value: baseError.value
+    },
+    {
+      code: 'result-amount-out-of-range',
+      scope: 'summary',
+      summaryType: 'base-period',
+      field: 'basePeriodAmount',
+      subject: 'PPHK',
+      currency: 'USD',
+      value: '1000000000000000'
+    }
+  );
+  assert.deepEqual(tableSnapshot(baseDb, baseRunId), baseBefore);
+
+  const adjustmentDb = createDb(t);
+  const adjustmentRunId = insertRun(adjustmentDb, { resultRevision: 2 });
+  const adjustmentRows = [movementRow('OVERFLOW-ADJ-A'), movementRow('OVERFLOW-ADJ-B')];
+  for (const row of adjustmentRows) insertRunRow(adjustmentDb, adjustmentRunId, row, 'USD', '0');
+  insertExactBalanceSubject(adjustmentDb, adjustmentRunId, 'PPHK');
+  insertAdjustment(
+    adjustmentDb,
+    adjustmentRunId,
+    buildRunRowKey(adjustmentRows[0]),
+    adjustmentRows[0],
+    { currency: 'USD', amount: MAX_VCC_AMOUNT, sequence: 1 }
+  );
+  insertAdjustment(
+    adjustmentDb,
+    adjustmentRunId,
+    buildRunRowKey(adjustmentRows[1]),
+    adjustmentRows[1],
+    { currency: 'USD', amount: '1', sequence: 2 }
+  );
+  const adjustmentBefore = tableSnapshot(adjustmentDb, adjustmentRunId);
+  let adjustmentDto;
+  const adjustmentError = captureError(() => {
+    adjustmentDto = getEffectiveRunResult(adjustmentDb, adjustmentRunId);
+  });
+  assert.equal(adjustmentDto, undefined);
+  assert.deepEqual(
+    {
+      code: adjustmentError.code,
+      scope: adjustmentError.scope,
+      summaryType: adjustmentError.summaryType,
+      field: adjustmentError.field,
+      subject: adjustmentError.subject,
+      currency: adjustmentError.currency,
+      value: adjustmentError.value
+    },
+    {
+      code: 'result-amount-out-of-range',
+      scope: 'summary',
+      summaryType: 'adjustment-total',
+      field: 'adjustmentAmount',
+      subject: 'PPHK',
+      currency: 'USD',
+      value: '1000000000000000'
+    }
+  );
+  assert.deepEqual(tableSnapshot(adjustmentDb, adjustmentRunId), adjustmentBefore);
+});
+
+test('effective result 对基础加调整的真正最终溢出返回 rowKey/字段上下文且不返回部分 DTO', (t) => {
+  const db = createDb(t);
+  const runId = insertRun(db, { resultRevision: 1 });
+  const row = movementRow('OVERFLOW-EFFECTIVE');
+  const rowKey = buildRunRowKey(row);
+  insertRunRow(db, runId, row, 'USD', MAX_VCC_AMOUNT);
+  insertExactBalanceSubject(db, runId, 'PPHK', {
+    USD: {
+      period: MAX_VCC_AMOUNT,
+      calculated: MAX_VCC_AMOUNT,
+      system: MAX_VCC_AMOUNT,
+      difference: '0'
+    }
+  });
+  insertAdjustment(db, runId, rowKey, row, {
+    currency: 'USD', amount: '1', sequence: 1
+  });
+  const before = tableSnapshot(db, runId);
+  let dto;
+
+  const error = captureError(() => {
+    dto = getEffectiveRunResult(db, runId);
+  });
+
+  assert.equal(dto, undefined);
+  assert.deepEqual(
+    {
+      code: error.code,
+      scope: error.scope,
+      field: error.field,
+      rowKey: error.rowKey,
+      subject: error.subject,
+      currency: error.currency,
+      value: error.value
+    },
+    {
+      code: 'result-amount-out-of-range',
+      scope: 'row',
+      field: 'effectiveAmount',
+      rowKey,
+      subject: 'PPHK',
+      currency: 'USD',
+      value: '1000000000000000'
+    }
+  );
+  const restoredError = deserializeError(serializeError(error));
+  assert.equal(restoredError.code, 'result-amount-out-of-range');
+  assert.deepEqual(restoredError.context, {
+    runId,
+    scope: 'row',
+    rowKey,
+    subject: 'PPHK',
+    currency: 'USD',
+    field: 'effectiveAmount',
+    value: '1000000000000000',
+    reason: error.message
+  });
+  assert.deepEqual(tableSnapshot(db, runId), before);
+});
+
+test('effective result 对跨结果行的生效发生额溢出返回 balance 字段上下文', (t) => {
+  const db = createDb(t);
+  const runId = insertRun(db, { resultRevision: 1 });
+  const baseRow = movementRow('EFFECTIVE-BALANCE-BASE');
+  const adjustmentRow = movementRow('EFFECTIVE-BALANCE-ADJ');
+  insertRunRow(db, runId, baseRow, 'USD', MAX_VCC_AMOUNT);
+  insertRunRow(db, runId, adjustmentRow, 'USD', '0');
+  insertExactBalanceSubject(db, runId, 'PPHK', {
+    USD: {
+      period: MAX_VCC_AMOUNT,
+      calculated: MAX_VCC_AMOUNT,
+      system: MAX_VCC_AMOUNT,
+      difference: '0'
+    }
+  });
+  insertAdjustment(db, runId, buildRunRowKey(adjustmentRow), adjustmentRow, {
+    currency: 'USD', amount: '1', sequence: 1
+  });
+  const before = tableSnapshot(db, runId);
+
+  const error = captureError(() => getEffectiveRunResult(db, runId));
+
+  assert.deepEqual(
+    {
+      code: error.code,
+      scope: error.scope,
+      field: error.field,
+      subject: error.subject,
+      currency: error.currency,
+      value: error.value
+    },
+    {
+      code: 'result-amount-out-of-range',
+      scope: 'balance',
+      field: 'effectivePeriodAmount',
+      subject: 'PPHK',
+      currency: 'USD',
+      value: '1000000000000000'
+    }
+  );
+  assert.deepEqual(tableSnapshot(db, runId), before);
 });
 
 test('effective result 对 adjustment sequence 与 result_revision 事实不一致 fail-closed', (t) => {

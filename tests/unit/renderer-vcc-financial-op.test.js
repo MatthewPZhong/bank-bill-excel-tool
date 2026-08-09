@@ -610,6 +610,27 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /expectedInputFingerprint: preflight\.inputFingerprint/);
   });
 
+  test('运行前检查同时存在多个问题时完整展示结构化 issues', () => {
+    const start = moduleRenderer.indexOf('function blockedCalculationMessage(');
+    const end = moduleRenderer.indexOf('function requestOpeningInitialization(', start);
+    assert.ok(start >= 0 && end > start);
+    const formatter = Function(
+      `'use strict'; ${moduleRenderer.slice(start, end)}; return blockedCalculationMessage;`
+    )();
+    assert.equal(formatter({
+      code: 'missing-datasets',
+      issues: [
+        { code: 'empty-dataset', message: 'Pending 校验表没有有效数据。' },
+        { code: 'invalid-system-snapshot', message: 'PPHK 系统财务OP缺少 USD 余额。' },
+        { code: 'unresolved-imports', message: '仍有 1 条未处理失败记录。' }
+      ]
+    }), [
+      'Pending 校验表没有有效数据。',
+      'PPHK 系统财务OP缺少 USD 余额。',
+      '仍有 1 条未处理失败记录。'
+    ].join('\n'));
+  });
+
   test('缺少上月归档时提供九币种一次性期初初始化且不默认补零', () => {
     assert.match(moduleRenderer, /result\.code === 'active-imports'/);
     assert.match(moduleRenderer, /result\.code === 'missing-opening-balance'/);

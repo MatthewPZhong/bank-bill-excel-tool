@@ -16,8 +16,20 @@ const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset
 const { serializeError } = require('../../../src/main-process/serialize-error');
 const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
 const {
-  createVccFinancialOpService
-} = require('../../../src/main-process/vcc-financial-op-service');
+  previewDataTargetDeletion
+} = require('../../../src/backend/vcc-financial-op/data-target-deletion');
+const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
+
+function deleteWithPreview(db, targetMonth, sourceType) {
+  const preview = previewDataTargetDeletion(db, { targetMonth, targetType: sourceType });
+  return deleteDataset({
+    db,
+    targetMonth,
+    sourceType,
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+}
 
 class FakeWorker extends EventEmitter {
   constructor(options) {
@@ -186,7 +198,10 @@ test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误
     db.close();
   });
 
-  const calculation = service.calculate({ targetMonth: '2026-06' });
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64)
+  });
   const primaryError = new Error('replacement-primary-fault');
   primaryError.code = 'SQLITE_CONSTRAINT_TRIGGER';
   primaryError.detailLines = ['旧结果保留，替换事务已回滚'];
@@ -240,6 +255,28 @@ test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
   const openDbIndex = runSource.indexOf('const db = openDb(workerData.dbPath)');
   assert.ok(handshakeIndex >= 0, '破坏性 action 必须等待 critical ACK');
   assert.ok(openDbIndex > handshakeIndex, 'openDb（含 migration）必须发生在父进程 protected/ACK 之后');
+  assert.doesNotMatch(workerSource, /['"]delete-dataset['"]/, '不得保留绕过统一确认契约的 legacy action');
+});
+
+test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 worker', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: ''
+  });
+  t.after(() => service.terminate());
+
+  for (const expectedInputFingerprint of [undefined, 'short', 'F'.repeat(64)]) {
+    const result = await service.calculate({
+      targetMonth: '2026-06',
+      expectedInputFingerprint
+    });
+    assert.equal(result.status, 'blocked');
+    assert.equal(result.code, 'preflight-required');
+  }
 });
 
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
@@ -295,7 +332,7 @@ test('系统财务OP导入详情按主体筛选、分页并返回既有快照血
     INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
     VALUES ('2026-06', ?)
   `).run(SOURCE_TYPES.SYSTEM_OP);
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.SYSTEM_OP });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.SYSTEM_OP);
   const afterDeletion = service.getImportRecordDetail({
     recordId, tab: 'skips', key: 'PPHK', page: 1, pageSize: 1
   });
@@ -406,7 +443,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   });
   t.after(() => service.terminate());
 
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
   const detail = service.getImportRecordDetail({
     recordId,
     tab: 'skips',
@@ -608,7 +645,10 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   assert.equal(oldPreview.taskGeneration, 0);
-  const calculation = service.calculate({ targetMonth: '2026-06' });
+  const calculation = service.calculate({
+    targetMonth: '2026-06',
+    expectedInputFingerprint: 'a'.repeat(64)
+  });
   assert.equal(service._taskStateForTests().taskGeneration, 0);
   assert.throws(() => service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
@@ -648,6 +688,72 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
   assert.equal(workers.length, 1);
 });
 
+test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法 generation', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
+  const deletePreview = service.previewDataTargetDeletion({
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  const operations = [
+    {
+      call: (confirmation) => service.unarchiveMonth({
+        targetMonth: '2026-06',
+        ...confirmation
+      }),
+      token: unarchivePreview.previewToken
+    },
+    {
+      call: (confirmation) => service.deleteDataTarget({
+        targetMonth: '2026-06',
+        targetType: SOURCE_TYPES.RECHARGE,
+        ...confirmation
+      }),
+      token: deletePreview.previewToken
+    }
+  ];
+  for (const operation of operations) {
+    assert.throws(() => operation.call({
+      expectedPreviewToken: '',
+      previewToken: operation.token,
+      taskGeneration: 0
+    }), (error) => error.code === 'state-changed');
+    for (const invalidGeneration of [
+      undefined,
+      null,
+      '',
+      Number.NaN,
+      -1,
+      Number.MAX_SAFE_INTEGER + 1
+    ]) {
+      assert.throws(() => operation.call({
+        expectedPreviewToken: operation.token,
+        taskGeneration: invalidGeneration
+      }), (error) => error.code === 'invalid-task-generation');
+    }
+  }
+  assert.equal(workers.length, 0, '非法 raw confirmation 不得创建 worker');
+  assert.deepEqual(service._taskStateForTests(), {
+    taskGeneration: 0,
+    closing: false,
+    active: false,
+    action: null,
+    phase: null,
+    protected: false
+  });
+});
+
 test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 terminate', async (t) => {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
@@ -684,7 +790,10 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
   await termination;
   assert.equal(worker.terminateCount, 0);
   await assert.rejects(
-    service.calculate({ targetMonth: '2026-07' }),
+    service.calculate({
+      targetMonth: '2026-07',
+      expectedInputFingerprint: 'a'.repeat(64)
+    }),
     (error) => error.code === 'service-closing'
   );
 });
@@ -724,6 +833,43 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
   await rejection;
   assert.deepEqual(await cancellation, { status: 'cancelled', forced: false });
   assert.equal(worker.terminateCount, 0);
+});
+
+test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，超时后可安全终止', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers),
+    cancelTimeoutMs: 5
+  });
+  t.after(() => db.close());
+  const preview = service.previewDataTargetDeletion({
+    targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
+  });
+  const operation = service.deleteDataTarget({
+    targetMonth: '2026-06',
+    targetType: SOURCE_TYPES.RECHARGE,
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+  const rejection = assert.rejects(operation, /后台任务退出但未返回结果/);
+  const termination = service.terminate();
+  const worker = workers[0];
+  assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }]);
+
+  worker.emit('message', { type: 'critical-ready' });
+  assert.equal(service._taskStateForTests().phase, 'critical-ready');
+  assert.equal(service._taskStateForTests().protected, false);
+  assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }, { type: 'cancel' }]);
+
+  await termination;
+  await rejection;
+  assert.equal(worker.terminateCount, 1);
+  assert.equal(service._taskStateForTests().active, false);
 });
 
 test('无调整的历史归档仍可导出，且直接结果导出持有同一租约', async (t) => {
