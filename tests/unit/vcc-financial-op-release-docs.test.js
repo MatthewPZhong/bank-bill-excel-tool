@@ -24,7 +24,7 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.8 版本号与三份用户文档保持发布候选状态', () => {
+test('v3.1.8 版本号与三份用户文档保持已批准但尚未发布状态', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -35,9 +35,12 @@ test('v3.1.8 版本号与三份用户文档保持发布候选状态', () => {
   assert.equal(packageLock.version, '3.1.8');
   assert.equal(packageLock.packages[''].version, '3.1.8');
   assert.match(changelog, /^## 3\.1\.8 - Unreleased$/m);
-  assert.match(history, /^## v3\.1\.8（待发布）$/m);
-  assert.match(guide, /^版本：`v3\.1\.8`（发布候选）$/m);
+  assert.match(history, /^## v3\.1\.8（待发布，人工门禁已通过）$/m);
+  assert.match(guide, /^版本：`v3\.1\.8`（未发布，已批准进入发布流程）$/m);
   assert.match(guide, /v3\.1\.8 尚未发布/);
+  assert.match(changelog, /人工发布门禁 6\/6 通过/);
+  assert.match(history, /已批准发布、待 annotated tag \+ Windows Release workflow \+ 公开资产复核/);
+  assert.match(guide, /该状态不表示 tag、Release 或正式下载资产已经存在/);
   assert.doesNotMatch(changelog, /^## 3\.1\.8 - 20\d{2}-\d{2}-\d{2}$/m);
 
   const changelogCandidate = changelog.slice(
@@ -45,10 +48,10 @@ test('v3.1.8 版本号与三份用户文档保持发布候选状态', () => {
     changelog.indexOf('## 3.1.7')
   );
   const historyCandidate = history.slice(
-    history.indexOf('## v3.1.8（待发布）'),
+    history.indexOf('## v3.1.8（待发布，人工门禁已通过）'),
     history.indexOf('## v3.1.7')
   );
-  const guideSummaryStart = guide.indexOf('> **v3.1.8 VCC财务OP校验发布候选**');
+  const guideSummaryStart = guide.indexOf('> **v3.1.8 VCC财务OP校验发布准备已批准**');
   const guideSummaryEnd = guide.indexOf('> **v3.1.0 平盘资金性质校验**');
   assert.ok(guideSummaryStart >= 0 && guideSummaryEnd > guideSummaryStart);
   const guideSummary = guide.slice(guideSummaryStart, guideSummaryEnd);
@@ -152,33 +155,43 @@ test('Spec 冻结内容哈希跨 LF、CRLF 与 CR checkout 稳定且内容变化
   assert.notEqual(normalizedTextSha256(changedText), FROZEN_SPEC_SHA256);
 });
 
-test('v3.1.8 iteration PRD 索引归档锁定规格、非目标、验收与人工门禁', () => {
+test('v3.1.8 iteration PRD 与 PR 归档锁定人工 6/6 PASS 且 Release 仍 pending', () => {
   const prd = read('docs/iterations/v3.1.8/PRD-v3.1.8.md');
   const preflight = read('changes/3.1.8/preflight.md');
   const prArchive = read('docs/prs/PR124-v3.1.8.md');
 
   assert.match(prd, /^# bank-bill-excel-tool 3\.1\.8 PRD 索引$/m);
   assert.match(prd, /> 目标版本：`3\.1\.8`/);
-  assert.match(prd, /> 状态：发布候选（未正式发布）/);
+  assert.match(prd, /> 状态：已批准进入正式发布流程（尚未创建 tag\/Release）/);
   assert.ok(prd.includes('[`changes/3.1.8/spec.md`](../../../changes/3.1.8/spec.md)'));
   assert.match(prd, /^## 2\. 范围$/m);
   assert.match(prd, /^## 3\. 非目标$/m);
   assert.match(prd, /^## 4\. 验收索引$/m);
-  assert.match(prd, /^## 5\. 人工发布门禁$/m);
+  assert.match(prd, /^## 5\. 人工发布门禁（6\/6 已通过）$/m);
   assert.match(prd, /spec\.md#11-测试计划/);
   assert.match(prd, /spec\.md#12-验收矩阵/);
   assert.match(prd, /spec\.md#15-definition-of-done/);
-  assert.match(prd, /preflight\.md#仍阻塞-v318-正式发布/);
+  assert.match(prd, /preflight\.md#人工发布门禁确认2026-08-09/);
   assert.match(prd, /真实约 700 万行、多 sheet 工具箱极限文件/);
-  assert.match(prd, /不得将本索引、自动化 PASS 或 Windows CI 构建视为已正式发布或已完成资金验收/);
+  assert.match(prd, /人工门禁现为 6\/6 PASS/);
+  assert.match(prd, /在 tag、Release 与四项公开资产实际创建并回读前/);
   assert.match(preflight, /main@e36bd9a/);
   assert.match(preflight, /31310190290/);
   assert.match(preflight, /自动化平台门禁已闭合/);
-  assert.match(preflight, /不得创建正式 tag 或 Release/);
-  assert.match(preflight, /真实约 700 万行、多 sheet 工具箱压力验证/);
+  assert.match(preflight, /^### 人工发布门禁确认（2026-08-09）$/m);
+  assert.match(preflight, /六项均已实际完成，授权记录为通过并继续正式发布/);
+  assert.match(preflight, /授权记录时间为 `2026-08-09 20:31:09 \+0800`/);
+  assert.match(preflight, /pull\/130#issuecomment-5231526107/);
+  const gateSection = preflight.slice(preflight.indexOf('### 人工发布门禁确认（2026-08-09）'));
+  assert.equal((gateSection.match(/\| PASS \|/g) || []).length, 6);
+  assert.match(gateSection, /真实约 700 万行、多 sheet 工具箱极限文件压力验证/);
+  assert.match(gateSection, /当前仍未创建 `v3\.1\.8` annotated tag 或 GitHub Release/);
   assert.match(prArchive, /^pr: 124$/m);
   assert.match(prArchive, /^merged: 2026-08-09 \(e36bd9a9c161becfbb72ab97bf41963d63012089\)$/m);
   assert.match(prArchive, /^released: pending$/m);
   assert.match(prArchive, /v3\.1\.8` tag 不存在/);
-  assert.match(prArchive, /上述门禁未全部完成前，不创建 `v3\.1\.8` tag/);
+  assert.match(prArchive, /六项均已实际完成，授权记录为通过并继续正式发布/);
+  assert.match(prArchive, /pull\/130#issuecomment-5231526107/);
+  assert.equal((prArchive.match(/^\d\. PASS —/gm) || []).length, 6);
+  assert.match(prArchive, /不提前证明 tag、Release 或公开资产已经存在/);
 });
