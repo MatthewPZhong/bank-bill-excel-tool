@@ -71,7 +71,7 @@
 - PR #124 已于 2026-08-09 以普通 merge commit `e36bd9a9c161becfbb72ab97bf41963d63012089` 合入 `main`；其 parents 为 `dff07df11fb94ce84940b474b55ac796f084d241` 与 `3291c272ee28388a6fbf4afef0b8694059ae3cc7`，最终 tree 仍为冻结树 `4b032f301cf824bec7b3d9ffa28523439663e278`。
 - 合并后 `main@e36bd9a` 的 fresh Windows Actions run [`31310190290`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31310190290) 全部成功：`smoke-test` 33m25s，`build` 2m03s，总计 35m34s。Windows unit 为 4801 pass + 1 skipped / 0 fail，48 个 integration 脚本与 `2459/2459` 可计数断言通过；RSS `31/31`，VCC 四条真实链 `297/297`、`64/64`、`19/19`、`28/28`，SQLite teardown `9/9`，主面板 `6/6`。
 - 同一主干 run 的 x64 NSIS + portable 构建和分发守卫通过：asar 62.26MB / 3142 条目 / 禁止路径 0 / 必需文件 7/7 / 包内版本 3.1.8。`windows-installer` artifact `9037543874` 为 100,290,789 bytes，Actions archive SHA-256 `64644b284d3b550c66ffec9fbe562d0f4bb7ac1e2e31026f78e2a555172a7ccd`；`windows-portable-exe` artifact `9037544724` 为 99,695,239 bytes，Actions archive SHA-256 `6aa95fb50356d0b83734309e53d35d47d0717b0c99b08ca42068a2aadcba40f8`。两项临时 Actions artifact 的保留期为 1 天，不等同于正式 Release 资产。
-- 只读远端核对确认 `origin/main` 指向 `e36bd9a`，`v3.1.8` tag 不存在，尚未触发 `Release Windows Packages`；因此当前状态仍是“代码已集成、自动门禁全绿、正式发布未发生”。
+- 发布准备阶段只读远端核对确认 `origin/main` 指向 `e36bd9a`，当时 `v3.1.8` tag 不存在且尚未触发 `Release Windows Packages`；该阶段证据只证明“代码已集成、自动门禁全绿、正式发布未发生”，最终状态由下方正式发布结果覆盖。
 - `npm audit --omit=dev` 当前为 0 critical / 7 high / 2 moderate，与 v3.1.7 正式收尾记录的生产依赖风险计数一致；`package-lock.json` 的依赖图未在本迭代改变。完整依赖树为 1 critical / 19 high / 2 moderate，其中 critical 仅位于开发依赖。该基线风险继续公开保留，不在发布收尾中静默升级依赖。
 
 ### Reviewer 退回项与最终盲区复核
@@ -99,4 +99,36 @@
 | 5 | 真实连续两月逐主体×九币种核对基础值、调整、生效余额、差异、颜色、归档与下月期初并签字 | PASS | 财务资金红线复核已获明确确认 |
 | 6 | 真实约 700 万行、多 sheet 工具箱极限文件压力验证 | PASS | 峰值 RSS、结果守恒和退出状态已获明确确认 |
 
-结论：自动化平台门禁已闭合，人工发布门禁为 `6/6 PASS`，v3.1.8 已获授权进入受控正式发布流程。PR6、六层堆叠整合、最终 `main` fresh release-check、Windows x64 构建、分发守卫、重要变量与双盲区复核均已完成；早期失败 run `31296877417` / `31299815769` 继续作为 RSS 模型校准的历史反例保留，最终成功证据以 `main@e36bd9a` 的 run `31310190290` 为准。当前仍未创建 `v3.1.8` annotated tag 或 GitHub Release；下一步只能按“发布准备 PR → annotated tag → Windows Release workflow → 四项公开资产独立复核 → 发布证据 PR”推进，不提前写入正式发布日期或资产摘要。
+结论（发布准备阶段）：自动化平台门禁已闭合，人工发布门禁为 `6/6 PASS`，v3.1.8 已获授权进入受控正式发布流程。PR6、六层堆叠整合、最终 `main` fresh release-check、Windows x64 构建、分发守卫、重要变量与双盲区复核均已完成；早期失败 run `31296877417` / `31299815769` 继续作为 RSS 模型校准的历史反例保留，最终成功证据以 `main@e36bd9a` 的 run `31310190290` 为准。后续发布链已实际完成，最终证据如下。
+
+## 正式发布结果（2026-08-09）
+
+### 身份与门禁
+
+- 人工六门禁保持 `6/6 PASS`，永久授权记录为 [PR #130 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/130#issuecomment-5231526107)。
+- PR #130 已以普通 merge commit `688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa` 合入 `main`，发布分支未删除。
+- annotated tag `v3.1.8` 的 tag object 为 `eabe485a0393abac09a202420d7a92b4d2d28726`；peeled commit 与发布时 `main` 均为 `688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa`。
+- [Release workflow run 31314412353](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31314412353) / job `93247225343` 在首个 job step `2026-08-09T12:53:34Z` 至 complete-job step `2026-08-09T13:24:20Z` 成功。release-check：unit `4801/4802`（1 expected skip）、integration `48/48` scripts 且 `2459/2459` 可计数断言、smoke PASS、main panel `6/6`；大文件 `50/50` / 475269ms，拆分 `31/31` / 401655ms。
+- [Release v3.1.8](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.8) ID `367485098`，`published_at=2026-08-09T13:24:16Z`；`/releases/latest` 返回同一 tag，draft=false、prerelease=false。
+
+### exactly 四项公开资产
+
+| 名称 | Asset ID | GitHub/实测大小（bytes） | GitHub digest/实测 SHA-256 |
+| --- | ---: | ---: | --- |
+| `bank-bill-excel-tool-portable-3.1.8.exe` | `507535165` | 99,686,916 | `3fe4572b519428a7b749a860130287ada6450fd631f039f258240671ab4c79ab` |
+| `bank-bill-excel-tool-setup-3.1.8.exe` | `507535166` | 100,183,781 | `f2348f6f14d039113568e25b7770eff049ce6fc2af2e246d7261a6c6969351a9` |
+| `bank-bill-excel-tool-setup-3.1.8.exe.blockmap` | `507535163` | 105,382 | `c57e6723010de00c5af235c8f5a6ff1646be7d6729d0590f15a8c4458e4b5c91` |
+| `latest.yml` | `507535164` | 369 | `9ffb50d6cdca2bb49ad06ecfce9c160fafe80ca4cea009e1e0e20e62ac92c1ba` |
+
+以上资产从公开 `browser_download_url` 无 Authorization 独立下载，逐项复算后的大小和 SHA-256 与 GitHub 元数据一致；Release 自定义资产集合恰好四项，无多余或重复资产。Actions run `31310190290` 的 installer/portable artifact 摘要只代表临时 ZIP archive，不参与本表。
+
+### updater 与 PE 架构
+
+- `latest.yml` 的 `version=3.1.8`，`path` 与 `files[0].url` 均为 `bank-bill-excel-tool-setup-3.1.8.exe`，`files[0].size=100183781`；顶层与 `files[0]` 的 SHA-512 均为 `8x/2kU12ea1qpsTlOve2TH9kbL9ObSR6i5jkhv/viYWaQcOPVucD8di4uoEeTKtA/apHeMuBrbLLtfkFzKUGRw==`，与 Setup 实际字节一致。
+- Setup 与 portable 外层文件头均为 `MZ`。NSIS/self-extractor 外层 PE Machine 为 `0x14c`，这是包装器事实，不能据此误判包内应用为 32 位。
+- 两种资产提取出的 `清结算小助手.exe` 均为 202,799,104 bytes，SHA-256 `7c01f36352e98815fe902add3a17608278c316f2fc6b8cc460f3645db5d73e0d`，PE Machine `0x8664`（x86-64）。
+
+### 状态与边界
+
+- `changes/3.1.8/spec.md` 的规范化 SHA-256 继续冻结为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`；它是业务合同，不承载可变发布状态。正式发布状态以 PRD、本 preflight、implementation notes、PR 归档和三份用户发布文档为准。
+- 本证据回填不修改 `src/`、package 版本、依赖或资金事实。人工 6/6 的原始附件未随任务入库，仓库保留永久授权评论和结论，不伪造截图、扫描报告或压力日志。
