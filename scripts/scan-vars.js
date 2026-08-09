@@ -2,6 +2,7 @@
 /* eslint-disable no-console */
 // 扫描 src/ 下顶层变量引用统计，生成 docs/analysis/var-reference-stats.{md,json}
 // 口径：
+//   - 源码集合 = Git index 已跟踪的 .js；ignored/generated/untracked 文件不参与，保证 clean checkout 可复现
 //   - 顶层声明 = 无缩进行的 const/let/var / function / class / module.exports.X / exports.X
 //   - 引用次数 = 全项目 \bname\b 匹配数（已剥离注释/字符串；保留模板串 ${…} 内代码）
 //   - 排除单字符名与 JS built-in
@@ -10,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('node:child_process');
 
 const argv = process.argv.slice(2);
 const opt = { root: 'src', outMd: null, outJson: null, silent: false };
@@ -34,17 +36,24 @@ const pkg = JSON.parse(fs.readFileSync(path.resolve(REPO_ROOT, 'package.json'), 
 const VERSION = pkg.version;
 
 // ---------- 扫描 ----------
-const EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', 'build']);
-function* walk(dir) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) {
-      if (EXCLUDE_DIRS.has(e.name)) continue;
-      yield* walk(full);
-    } else if (e.name.endsWith('.js')) {
-      yield full;
-    }
+function listTrackedJsFiles(root) {
+  const rootRelative = path.relative(REPO_ROOT, root).replace(/\\/g, '/');
+  if (rootRelative === '..' || rootRelative.startsWith('../') || path.isAbsolute(rootRelative)) {
+    throw new Error(`scan root 必须位于仓库内：${root}`);
   }
+  const result = spawnSync(
+    'git',
+    ['-C', REPO_ROOT, 'ls-files', '-z', '--cached', '--', rootRelative || '.'],
+    { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }
+  );
+  if (result.status !== 0) {
+    throw new Error(`无法取得 Git 已跟踪源码集合：${result.stderr || result.stdout || `exit ${result.status}`}`);
+  }
+  return String(result.stdout || '')
+    .split('\0')
+    .filter((file) => file.endsWith('.js'))
+    .map((file) => path.resolve(REPO_ROOT, file))
+    .sort();
 }
 
 function strip(code) {
@@ -148,7 +157,7 @@ function rel(p) {
   return path.relative(REPO_ROOT, p).replace(/\\/g, '/');
 }
 
-const files = [...walk(ROOT)].sort();
+const files = listTrackedJsFiles(ROOT);
 const fileInfo = new Map();
 for (const f of files) {
   const code = fs.readFileSync(f, 'utf8');
@@ -194,6 +203,7 @@ const meta = {
   version: VERSION,
   scannedAt: now.toISOString(),
   root: path.relative(REPO_ROOT, ROOT).replace(/\\/g, '/'),
+  sourceSet: 'git-tracked-js',
   totalFiles: files.length,
   totalTopLevelNames: allNames.size,
   buckets: {
@@ -221,6 +231,7 @@ md += `| 字段 | 值 |\n|---|---|\n`;
 md += `| 版本 | v${VERSION} |\n`;
 md += `| 扫描时间 | ${tsLocal} |\n`;
 md += `| 扫描目录 | \`${meta.root}/\` |\n`;
+md += '| 源码集合 | Git 已跟踪 `.js`（排除 ignored/generated/untracked） |\n';
 md += `| JS 文件数 | ${meta.totalFiles} |\n`;
 md += `| 顶层声明总数 | ${meta.totalTopLevelNames} |\n`;
 md += `| ≥2 次引用 | ${shared.length + paired.length + local.length} |\n`;
@@ -273,6 +284,7 @@ fs.writeFileSync(OUT_MD, md);
 
 if (!opt.silent) {
   console.log(`[scan-vars] v${VERSION} @ ${meta.root}/ — ${meta.totalFiles} files, ${meta.totalTopLevelNames} top-level names`);
+  console.log(`[scan-vars]   source set ${meta.sourceSet} (ignored/generated/untracked excluded)`);
   console.log(`[scan-vars]   A-share ${shared.length} / A-pair ${paired.length} / A-local ${local.length} / B ${crossFile.length}`);
   console.log(`[scan-vars] wrote ${path.relative(REPO_ROOT, OUT_MD)}`);
   console.log(`[scan-vars] wrote ${path.relative(REPO_ROOT, OUT_JSON)}`);

@@ -1,9 +1,10 @@
 {
   "meta": {
     "version": "3.1.8",
-    "scannedAt": "2026-08-09T01:16:54.452Z",
+    "scannedAt": "2026-08-09T02:51:46.946Z",
     "root": "src",
-    "totalFiles": 294,
+    "sourceSet": "git-tracked-js",
+    "totalFiles": 293,
     "totalTopLevelNames": 3737,
     "buckets": {
       "shared": 555,

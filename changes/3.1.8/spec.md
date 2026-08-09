@@ -1,10 +1,10 @@
 # v3.1.8 Spec — VCC 财务OP校验迭代
 
-> status: `ready-for-implementation`  
-> baseline: `main@dff07df11fb94ce84940b474b55ac796f084d241`（当前 `package.json=3.1.7`）  
-> target-version: `3.1.8`  
-> suggested-branch: `codex/v3.1.8-vcc-financial-op`  
-> updated: `2026-08-08`  
+> status: `ready-for-implementation`<br>
+> baseline: `main@dff07df11fb94ce84940b474b55ac796f084d241`（当前 `package.json=3.1.7`）<br>
+> target-version: `3.1.8`<br>
+> suggested-branch: `codex/v3.1.8-vcc-financial-op`<br>
+> updated: `2026-08-08`<br>
 > nature: 财务结果、跨期归档、人工调整及金额精度红线。实现、回归和发布前均须保留人工财务复核门禁。
 > decision-lock: `2026-08-08` 用户确认其余问题全部采用本 Spec 推荐方案；当前不存在待确认产品决策。
 > decisions: `Q01=A`、`Q02=A`、`Q03=A`、`Q04=A`、`Q05=A`、`Q06=A`、`Q07=同一调整坐标只允许一次`、`Q08=A`、`Q09=A`、`Q10=A`、`Q11=A`、`Q12=A（以用户上传的 46 列 Pending 模板为唯一新导入契约）`。

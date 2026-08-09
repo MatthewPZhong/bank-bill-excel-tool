@@ -5,19 +5,69 @@ const test = require('node:test');
 
 const {
   assessScanMemoryGrowth,
+  assessScanMemorySamples,
+  collectMemorySamples,
   verifyMemoryGuardModel
 } = require('../../../scripts/integration/toolbox-large-split-multi-sheet');
 
-test('RSS 低信号采用固定包络，不用噪声基线计算比值', () => {
-  const boundedNoise = assessScanMemoryGrowth(6, 29, 3);
-  const overflow = assessScanMemoryGrowth(6, 33, 3);
+test('RSS 低信号同时要求固定包络与严格低于线性外推', () => {
+  const sublinear = assessScanMemoryGrowth(8, 23, 3);
+  const exactLinear = assessScanMemoryGrowth(8, 24, 3);
+  const superlinear = assessScanMemoryGrowth(6, 29, 3);
+  const envelopeBoundary = assessScanMemoryGrowth(8, 32, 3);
 
-  assert.equal(boundedNoise.valid, true);
-  assert.equal(boundedNoise.classification, 'bounded-low-signal');
-  assert.equal(boundedNoise.sublinearLimitMB, 32);
-  assert.equal(boundedNoise.sublinearWithinBudget, true);
-  assert.equal(overflow.classification, 'bounded-low-signal');
-  assert.equal(overflow.sublinearWithinBudget, false);
+  assert.equal(sublinear.valid, true);
+  assert.equal(sublinear.classification, 'bounded-low-signal');
+  assert.equal(sublinear.sublinearLimitMB, 32);
+  assert.equal(sublinear.strictlyBelowLinear, true);
+  assert.equal(sublinear.sublinearWithinBudget, true);
+  for (const rejected of [exactLinear, superlinear, envelopeBoundary]) {
+    assert.equal(rejected.classification, 'bounded-low-signal');
+    assert.equal(rejected.strictlyBelowLinear, false);
+    assert.equal(rejected.sublinearWithinBudget, false);
+  }
+});
+
+test('RSS 低信号用三次中位数抗抖动，但任一样本触及硬上限仍失败', () => {
+  const stable = assessScanMemorySamples([7, 8, 8], [17, 23, 22], 3);
+  const spike = assessScanMemorySamples([7, 8, 8], [17, 151, 22], 3);
+
+  assert.equal(stable.valid, true);
+  assert.equal(stable.sampleCount, 3);
+  assert.equal(stable.tier1DeltaMB, 8);
+  assert.equal(stable.tier2DeltaMB, 22);
+  assert.equal(stable.sublinearWithinBudget, true);
+  assert.equal(stable.tier2WithinCeiling, true);
+  assert.equal(spike.tier2DeltaMB, 22);
+  assert.equal(spike.sublinearWithinBudget, true);
+  assert.equal(spike.tier2WithinCeiling, false);
+});
+
+test('RSS 仅在首次 tier1 为低信号时追加两轮成对隔离采样', () => {
+  const calls = [];
+  const results = [7, 22, 8, 21];
+  const lowSignal = collectMemorySamples(
+    'tier1.xlsx',
+    'tier2.xlsx',
+    { deltaMB: 8 },
+    { deltaMB: 23 },
+    (filePath) => {
+      calls.push(filePath);
+      return { deltaMB: results.shift() };
+    }
+  );
+  assert.deepEqual(calls, ['tier1.xlsx', 'tier2.xlsx', 'tier1.xlsx', 'tier2.xlsx']);
+  assert.deepEqual(lowSignal.tier1Samples, [8, 7, 8]);
+  assert.deepEqual(lowSignal.tier2Samples, [23, 22, 21]);
+
+  const measurable = collectMemorySamples(
+    'tier1.xlsx',
+    'tier2.xlsx',
+    { deltaMB: 9 },
+    { deltaMB: 26 },
+    () => { throw new Error('可测分支不应追加采样'); }
+  );
+  assert.deepEqual(measurable, { tier1Samples: [9], tier2Samples: [26] });
 });
 
 test('RSS 门禁拒绝低幅和高幅的精确线性增长', () => {
@@ -62,6 +112,16 @@ test('RSS 门禁对非法输入失败关闭并通过内建模型自校验', () =
     [6, 29, 1]
   ]) {
     const result = assessScanMemoryGrowth(...args);
+    assert.equal(result.valid, false);
+    assert.equal(result.sublinearWithinBudget, false);
+  }
+  for (const [tier1Samples, tier2Samples] of [
+    [[], []],
+    [[6, 7], [17, 18]],
+    [[6, Number.NaN, 7], [17, 18, 19]],
+    [[6, 7, 8], [17]]
+  ]) {
+    const result = assessScanMemorySamples(tier1Samples, tier2Samples, 3);
     assert.equal(result.valid, false);
     assert.equal(result.sublinearWithinBudget, false);
   }

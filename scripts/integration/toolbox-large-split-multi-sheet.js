@@ -93,7 +93,8 @@ function mb(bytes) {
 }
 
 // RSS 是 OS 级驻留集快照，受 GC、allocator 分页提交/回收与 MB 取整影响。判据分两类：
-//   - tier1 <= 8MB：基线落在测量噪声量级，不计算不稳定的比值；tier2 必须留在固定 32MB 低信号包络内。
+//   - tier1 <= 8MB：基线落在测量噪声量级，追加两轮独立采样并取三次中位数；tier2 必须同时留在
+//     固定 32MB 低信号包络内，且严格低于按行数比得到的线性外推。单次低信号不能直接证明亚线性。
 //   - tier1 > 8MB：已有可测信号，直接以原始 tier1 外推；tier2 预算侧只加一次 16MB RSS 余量，
 //     且无论余量大小都必须严格低于按行数比得到的线性外推。
 //     独立子进程仍观察到约 11MB 的 allocator/OS 页提交偏移，16MB 覆盖该偏移且不会放过精确线性反例。
@@ -103,6 +104,7 @@ const SCAN_DELTA_CEILING_MB = 150;
 const RSS_MEASUREMENT_NOISE_MB = 8;
 const LOW_SIGNAL_TIER1_MAX_MB = RSS_MEASUREMENT_NOISE_MB;
 const LOW_SIGNAL_TIER2_CEILING_MB = RSS_MEASUREMENT_NOISE_MB * 4;
+const LOW_SIGNAL_SAMPLE_COUNT = 3;
 const MEASURABLE_GROWTH_NOISE_MB = RSS_MEASUREMENT_NOISE_MB * 2;
 const SUBLINEAR_FRACTION_OF_LINEAR = 0.5;
 const SCAN_MEMORY_PROBE_MODE = '--scan-memory-probe';
@@ -130,7 +132,7 @@ function assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio) {
   const sublinearLimitMB = lowSignal
     ? LOW_SIGNAL_TIER2_CEILING_MB
     : tier1DeltaMB * rowsRatio * SUBLINEAR_FRACTION_OF_LINEAR + MEASURABLE_GROWTH_NOISE_MB;
-  const strictlyBelowLinear = lowSignal || tier2DeltaMB < linearProjectedMB;
+  const strictlyBelowLinear = tier2DeltaMB < linearProjectedMB;
   return {
     valid: true,
     tier1WithinCeiling: tier1DeltaMB < SCAN_DELTA_CEILING_MB,
@@ -143,8 +145,52 @@ function assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio) {
   };
 }
 
+function assessScanMemorySamples(tier1Samples, tier2Samples, rowsRatio) {
+  const validSamples = Array.isArray(tier1Samples)
+    && Array.isArray(tier2Samples)
+    && tier1Samples.length > 0
+    && tier1Samples.length === tier2Samples.length
+    && tier1Samples.length % 2 === 1
+    && tier1Samples.every((value) => Number.isFinite(value) && value >= 0)
+    && tier2Samples.every((value) => Number.isFinite(value) && value >= 0);
+  if (!validSamples) {
+    return {
+      ...assessScanMemoryGrowth(Number.NaN, Number.NaN, rowsRatio),
+      sampleCount: 0,
+      tier1Samples: [],
+      tier2Samples: [],
+      tier1DeltaMB: null,
+      tier2DeltaMB: null
+    };
+  }
+
+  const median = (values) => {
+    const sorted = values.slice().sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  };
+  const tier1DeltaMB = median(tier1Samples);
+  const tier2DeltaMB = median(tier2Samples);
+  const assessment = assessScanMemoryGrowth(tier1DeltaMB, tier2DeltaMB, rowsRatio);
+  return {
+    ...assessment,
+    // 增长趋势用中位数抗单次抖动；绝对硬上限检查每一个样本，不能被中位数隐藏。
+    tier1WithinCeiling: assessment.valid
+      && tier1Samples.every((value) => value < SCAN_DELTA_CEILING_MB),
+    tier2WithinCeiling: assessment.valid
+      && tier2Samples.every((value) => value < SCAN_DELTA_CEILING_MB),
+    sampleCount: tier1Samples.length,
+    tier1Samples: tier1Samples.slice(),
+    tier2Samples: tier2Samples.slice(),
+    tier1DeltaMB,
+    tier2DeltaMB
+  };
+}
+
 function verifyMemoryGuardModel() {
-  const noisyCiBoundary = assessScanMemoryGrowth(6, 29, 3);
+  const lowSignalSublinear = assessScanMemoryGrowth(8, 23, 3);
+  const lowSignalLinear = assessScanMemoryGrowth(8, 24, 3);
+  const lowSignalSuperlinear = assessScanMemoryGrowth(6, 29, 3);
+  const lowSignalEnvelopeBoundary = assessScanMemoryGrowth(8, 32, 3);
   const lowMagnitudeLinear = assessScanMemoryGrowth(13, 39, 3);
   const thresholdLinear = assessScanMemoryGrowth(9, 27, 3);
   const thresholdSublinear = assessScanMemoryGrowth(9, 26, 3);
@@ -156,9 +202,19 @@ function verifyMemoryGuardModel() {
   const absoluteCeilingOnly = assessScanMemoryGrowth(100, 150, 3);
   const invalidRatio = assessScanMemoryGrowth(6, 29, 1);
   const nonFiniteDelta = assessScanMemoryGrowth(6, Number.POSITIVE_INFINITY, 3);
-  const valid = noisyCiBoundary.valid
-    && noisyCiBoundary.classification === 'bounded-low-signal'
-    && noisyCiBoundary.sublinearWithinBudget
+  const medianLowSignal = assessScanMemorySamples([7, 8, 8], [17, 23, 22], 3);
+  const hiddenHardLimitSpike = assessScanMemorySamples([7, 8, 8], [17, 151, 22], 3);
+  const invalidSamples = assessScanMemorySamples([7, 8], [17, 22], 3);
+  const valid = lowSignalSublinear.valid
+    && lowSignalSublinear.classification === 'bounded-low-signal'
+    && lowSignalSublinear.strictlyBelowLinear
+    && lowSignalSublinear.sublinearWithinBudget
+    && !lowSignalLinear.strictlyBelowLinear
+    && !lowSignalLinear.sublinearWithinBudget
+    && !lowSignalSuperlinear.strictlyBelowLinear
+    && !lowSignalSuperlinear.sublinearWithinBudget
+    && !lowSignalEnvelopeBoundary.strictlyBelowLinear
+    && !lowSignalEnvelopeBoundary.sublinearWithinBudget
     && lowMagnitudeLinear.valid
     && lowMagnitudeLinear.classification === 'measurable-growth'
     && !lowMagnitudeLinear.sublinearWithinBudget
@@ -183,7 +239,16 @@ function verifyMemoryGuardModel() {
     && !invalidRatio.valid
     && !invalidRatio.sublinearWithinBudget
     && !nonFiniteDelta.valid
-    && !nonFiniteDelta.sublinearWithinBudget;
+    && !nonFiniteDelta.sublinearWithinBudget
+    && medianLowSignal.valid
+    && medianLowSignal.sampleCount === LOW_SIGNAL_SAMPLE_COUNT
+    && medianLowSignal.tier1DeltaMB === 8
+    && medianLowSignal.tier2DeltaMB === 22
+    && medianLowSignal.sublinearWithinBudget
+    && hiddenHardLimitSpike.sublinearWithinBudget
+    && !hiddenHardLimitSpike.tier2WithinCeiling
+    && !invalidSamples.valid
+    && !invalidSamples.sublinearWithinBudget;
   if (!valid) {
     throw new Error('内存门禁判据自校验失败：低信号、低/高幅线性反例、绝对上限或非法输入未按预期裁决');
   }
@@ -293,6 +358,21 @@ function scanInIsolatedProcess(filePath) {
   return JSON.parse(payloadLine.slice(SCAN_MEMORY_RESULT_PREFIX.length));
 }
 
+function collectMemorySamples(fileT1, fileT2, scan1, scan2, runIsolatedScan = scanInIsolatedProcess) {
+  const tier1Samples = [scan1.deltaMB];
+  const tier2Samples = [scan2.deltaMB];
+  if (Number.isFinite(scan1.deltaMB)
+      && scan1.deltaMB >= 0
+      && scan1.deltaMB <= LOW_SIGNAL_TIER1_MAX_MB) {
+    console.log(`   tier1 首次增量 ${scan1.deltaMB}MB 位于低信号区，追加两轮隔离采样并取中位数...`);
+    while (tier1Samples.length < LOW_SIGNAL_SAMPLE_COUNT) {
+      tier1Samples.push(runIsolatedScan(fileT1).deltaMB);
+      tier2Samples.push(runIsolatedScan(fileT2).deltaMB);
+    }
+  }
+  return { tier1Samples, tier2Samples };
+}
+
 async function run() {
   console.log('==== 工具箱大文件按字段拆分 · 多 sheet 隔离 worker 通道 端到端验证 ====');
   console.log(`规模：A 部分两档 ${TIER1_ROWS.toLocaleString()} / ${TIER2_ROWS.toLocaleString()} 行（跨 3 物理 sheet）；`
@@ -300,7 +380,7 @@ async function run() {
 
   // 判据本身先做确定性自校验，防止为消除 CI 波动而把门禁放宽成恒通过。
   verifyMemoryGuardModel();
-  console.log('内存门禁自校验：6→29MB 低信号有界通过；9→27MB / 13→39MB / 32→96MB 线性反例拒绝；可测增长仅加 16MB 单侧余量；150MB 绝对上限独立拒绝。\n');
+  console.log('内存门禁自校验：8→23MB 低信号亚线性通过；8→24MB / 6→29MB / 8→32MB 低信号线性或超线性反例拒绝；9→27MB / 13→39MB / 32→96MB 可测线性反例拒绝；150MB 任一样本绝对上限独立拒绝。\n');
 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-split-t7-'));
 
@@ -376,27 +456,31 @@ async function run() {
     //   行数从 tier1 涨到 tier2。流式扫描核心的「扫描期 RSS 增量」应保持有界、不随行数线性增长
     //   （高基数列封顶 N=1000 + sharedStrings 全量但与「值基数」而非「行数」相关）。
     const rowsRatio = TIER2_ROWS / TIER1_ROWS;
-    const memoryAssessment = assessScanMemoryGrowth(scan1.deltaMB, scan2.deltaMB, rowsRatio);
+    const memorySamples = collectMemorySamples(fileT1, fileT2, scan1, scan2);
+    const memoryAssessment = assessScanMemorySamples(
+      memorySamples.tier1Samples,
+      memorySamples.tier2Samples,
+      rowsRatio
+    );
     // (1) 绝对上限：任一档扫描期 RSS 增量 < 150MB（流式核心；全量 readRows 此规模会撑到 GB 级）。
     assertTrue(
       memoryAssessment.valid && memoryAssessment.tier1WithinCeiling,
-      `A 内存恒定·绝对上限：tier1 扫描期 RSS 增量 ${scan1.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
+      `A 内存恒定·绝对上限：tier1 所有 RSS 增量 [${memoryAssessment.tier1Samples.join(', ')}]MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
     assertTrue(
       memoryAssessment.valid && memoryAssessment.tier2WithinCeiling,
-      `A 内存恒定·绝对上限：tier2 扫描期 RSS 增量 ${scan2.deltaMB}MB < ${SCAN_DELTA_CEILING_MB}MB`
+      `A 内存恒定·绝对上限：tier2 所有 RSS 增量 [${memoryAssessment.tier2Samples.join(', ')}]MB < ${SCAN_DELTA_CEILING_MB}MB`
     );
-    // (2) 亚线性：两档由独立子进程采样。tier1 在噪声量级时改用固定低信号包络；
-    //     否则只在 tier2 预算侧加一次 16MB RSS 余量，不得同时放宽两侧。
-    console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；扫描期增量 tier1=${scan1.deltaMB}MB → tier2=${scan2.deltaMB}MB`
+    // (2) 亚线性：两档由独立子进程采样。tier1 在噪声量级时追加两轮并取中位数，再同时应用
+    //     固定低信号包络与严格低于线性外推；否则只在 tier2 预算侧加一次 16MB RSS 余量。
+    console.log(`   内存恒定对比：行数 ×${rowsRatio.toFixed(1)}；RSS 中位增量 tier1=${memoryAssessment.tier1DeltaMB}MB → tier2=${memoryAssessment.tier2DeltaMB}MB`
+      + `（样本数=${memoryAssessment.sampleCount}，tier1=[${memoryAssessment.tier1Samples.join(', ')}]MB，tier2=[${memoryAssessment.tier2Samples.join(', ')}]MB）`
       + `（${memoryAssessment.classification}，tier2 上限≤${Math.round(memoryAssessment.sublinearLimitMB)}MB）`);
     assertTrue(
       memoryAssessment.valid && memoryAssessment.sublinearWithinBudget,
-      `A 内存恒定·亚线性：${memoryAssessment.classification} 的 tier2 RSS 增量 ${scan2.deltaMB}MB`
+      `A 内存恒定·亚线性：${memoryAssessment.classification} 的 tier2 RSS 中位增量 ${memoryAssessment.tier2DeltaMB}MB`
         + ` ≤ 预算 ${Math.round(memoryAssessment.sublinearLimitMB)}MB`
-        + `${memoryAssessment.classification === 'measurable-growth'
-          ? ` 且严格低于线性外推 ${Math.round(memoryAssessment.linearProjectedMB)}MB`
-          : ''}`
+        + ` 且严格低于线性外推 ${Math.round(memoryAssessment.linearProjectedMB)}MB`
     );
 
     // ── A3：大输出分 sheet（验证命中子集写出时 writeRowsStreamed 自动分物理 sheet + readback 正确）──
@@ -509,5 +593,7 @@ if (require.main === module) {
 
 module.exports = {
   assessScanMemoryGrowth,
+  assessScanMemorySamples,
+  collectMemorySamples,
   verifyMemoryGuardModel
 };

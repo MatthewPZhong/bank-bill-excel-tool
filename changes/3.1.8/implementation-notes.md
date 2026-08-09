@@ -70,6 +70,8 @@
 | PR 6 reviewer P2 将全部 26 个 `vcc-financial-op-*` capture token 冻结为显式 `sync / state / lifecycle` readiness 契约，并由主进程对此前缀统一失败关闭 | 数据管理、删除、导出等弹框依赖异步状态；结果/导入/运行/调整等入口返回的 Promise 却代表“弹框关闭”，若统一 await 会死锁，若统一固定延时会截到旧状态 | 继续只门禁解归档 4 个 token；所有 hook 都 await 返回 Promise；用固定 sleep 猜状态 | `state` 入口必须返回并等待真实 DOM 状态 tracker，`lifecycle` 入口只探测同步/立即拒绝而不等待关闭，`sync` 入口禁止意外 Promise；未知 token、缺 hook/method、null、同步抛错、拒绝、非法结果或 8 秒超时均以非 0 退出，staged PNG 不得晋升 |
 | PR 6 self-review 将 RSS 增长分为“低信号有界”与“可测增长”，并把两档扫描改为独立 `--expose-gc` 子进程 | tier1/tier2 同时加减 8MB 会使 `13→39MB`、行数比 3 的精确线性增长通过；同进程先后扫描又会混入 allocator 复用 | 双侧不确定性区间；删除亚线性门禁；只提高 150MB 硬上限 | tier1 `<=8MB` 时 tier2 必须 `<=32MB`；tier1 `>8MB` 时以原始 tier1 外推一半并只加一次 8MB 余量。150MB 硬上限和非法输入 fail-closed 不变 |
 | PR 6 restack 将可测增长的单侧 RSS 余量从 8MB 校准为 16MB，并独立要求可测档严格低于线性外推；低信号包络与硬上限不变 | 最新 PR5 合入后同一生产路径零 diff，但默认规模两次独立采样稳定得到 `82→135MB`、`82→133MB`，均仅因 8MB 余量产生的 131MB 边界失败；self-review 又证明仅扩大余量会让 `9→27MB` 的低幅精确线性增长通过 | 反复执行直到偶然通过；恢复双侧区间；删除亚线性断言；提高 150MB 硬上限；只保留 13MB/32MB 高档反例 | 16MB 仅加在可测 tier2 预算侧，同时要求 tier2 严格小于 `tier1 × rowsRatio`；`6→33MB` 低信号溢出、`9→27MB`/`13→39MB`/`32→96MB` 精确线性、140MB 新边界、150MB 硬上限与非法输入仍失败关闭；只改变测试稳定性，不改变产品/资金契约 |
+| PR #129 review 对低信号 RSS 也强制严格低于线性外推，并仅在首次 tier1 `<=8MB` 时追加两轮隔离采样、以三次中位数裁决增长 | 固定 32MB 包络本身会让 `8→24MB` 精确线性、`6→29MB`/`8→32MB` 超线性通过；单次低信号又容易被 MB 取整和 allocator 抖动支配 | 继续把 low-signal 标为自动通过；只收紧常量；所有正常档无条件跑三次；删除低信号分支并靠偶然单样本 | 低信号同时满足 `tier2<=32MB` 与 `tier2<tier1×rowsRatio`；三次中位数只用于增长趋势，任一样本 `>=150MB` 仍失败。默认实测首次 tier1 为 82～88MB，不增加常规 CI 次数；自动化只证明 50万/150万采样档，700万仍是 PRD 人工门禁 |
+| `scan-vars` 的源码集合固定为 Git index 已跟踪 `.js` | 文件系统递归会把 ignored/generated `src/build-info.js` 计入本地报告，导致本地 294 文件、clean checkout 293 文件 | 按文件名硬编码排除 build-info；继续扫描所有非 ignored untracked；把 294 固化为报告常量 | `git ls-files --cached` 成为唯一集合来源；ignored/generated/untracked 全排除，报告写入 `sourceSet=git-tracked-js`，独立临时 Git 仓库测试锁定 tracked/ignored/untracked 三类 |
 
 ## Assumptions
 
@@ -92,6 +94,7 @@
 | 共享归档月份选择器在 PR 3 先服务解归档，历史结果按月份导出当时仍沿用“最新归档” | Spec 的 Phase 5 明确拥有月份导出和 writer；PR 3 只负责破坏性状态事务 | 在 PR 3 提前新增 get-by-month 导出契约 | PR 5 已接入同一 picker 并补历史月份导出测试 | 无需（既定阶段边界） |
 | 归档一致性 logger 原计划随 PR 5 进入，现提前最小回移到 PR 3 | PR #126/P3+ review 明确要求生产不再静默隐藏损坏 archive；PR 5 参考实现已验证且不依赖 writer 语义 | 等 PR 5 restack 后再补 | PR 5 restack 时解决重复实现；本 PR 不回移 `getArchivedRunByMonth` 或模板 writer 语义 | 是（review 明确要求） |
 | PR 6 restack 原计划原样复用 8MB 单侧 RSS 余量 | 两次默认规模独立采样都只在 131MB 亚线性边界失败，且 PR5 未改 toolbox 生产路径；按观测到的约 11MB 跨运行偏移校准为单侧 16MB，并在 self-review 补上独立严格低于线性外推的约束及 `9→26/27MB` 边界测试 | 影响仅限非产品测试判据；低信号、全部可测档精确线性、150MB 硬上限和真实 multi-sheet/worker 验证均不放宽 | 无需（Spec 与 PRD 未规定该测试内部余量，产品行为不变） |
+| PR 6 低信号原计划只使用 32MB 固定包络 | PR #129 P2 反例证明它不能支撑“亚线性”判定；改为条件式三样本中位数 + 严格低于线性外推，并把 700 万自动证明口径收窄为既有人工门禁 | 仅测试判据和证据表述改变，产品路径、150MB 硬上限和 PR1～PR5 资金实现不变 | 无需（不改变 Spec 产品契约；修正自动化证据强度） |
 | Spec 示例以模板业务末行为静态参考；实际导出按语义行计划重建结果表并将打印区动态收口为 `A1:L<实际末行>` | 调整行数量与主体业务分类会改变结果末行；固定 A1:L45 会留下样例行或截断新增行 | 保留模板原 45 行并原位覆盖；固定打印区 | M/N 仍保留为可见审计列但不进入模板锁定打印宽度；动态合并/打印区由 staged validator 回读验证 | 无需（Spec 已要求动态行与模板打印宽度） |
 
 ## Evidence
@@ -219,8 +222,34 @@
 | PR 6 restack RSS 盲区发现与修复 | 默认 50 万/150 万行隔离采样连续两次仅在亚线性预算失败：`82→135MB`（预算 131MB）和 `82→133MB`（预算 131MB），两档均低于 150MB 硬上限；校准单侧可测噪声余量后，小档与默认档分别 `31/31 PASS`，完整 release-check 内默认档再次 `31/31 PASS`；self-review 新增 `9→26MB` 通过、`9→27MB` 拒绝 | 两个 P3 测试门禁缺口均已修复；16MB 余量只作用于可测增长的 tier2 预算，可测档另须严格低于线性外推；低信号 32MB 包络、150MB 硬上限、非法输入 fail-closed、真实 multi-sheet/worker 链均保持 |
 | PR 6 restack 26 张 PNG 最终证据 | 一次完整 `npm run preview:vcc-financial-op` 生成 26/26；自动契约 `16/16 PASS`，逐图验证 PNG signature、IHDR、正尺寸、非空 IDAT、IEND 长度 0 且恰好位于 EOF | 25 张为 `2480×1720`，`vcc-financial-op-result-min-window.png` 为 `2160×1520`；缺图、截断、尾随字节或尺寸漂移均会失败，旧图不能冒充本轮证据 |
 | PR 6 restack 最终单次 `npm run release-check` | self-review 的 RSS 公式修复与单测补强后，在同一候选工作树重跑：lint PASS；smoke PASS；unit `4792/4792 PASS`（302 个测试文件，0 failures）；integration `48/48` 脚本、`2457/2457` 可计数断言 PASS（`310791ms`） | 覆盖全部静态检查、smoke、单测、迁移/大文件/side DB 与 VCC 真实链；RSS 默认档 `31/31`，VCC 调整归档继承 `295/295`、破坏性状态 `64/64`、effective `19/19`、历史模板导出 `28/28` |
-| PR 6 restack 最终 `scan:vars` / `check:vars` | `scan:vars` 扫描 v3.1.8、`src/` 294 文件、3737 个顶层名字并刷新 md/json；`check:vars` 按约定 code 2，仅命中 Runtime-state `state`，无 Critical / Important-skeleton / Risk-sensitive 命中 | 相对 PR 5 未改 `src/renderer.js` 顶层 `state` 结构；新增 `state` 文本只属于 preview readiness 策略及 VCC 局部状态跟踪。模板列表、当前模块、导出可用性三组全局联动未改，定向与全仓 renderer 测试通过 |
+| PR 6 restack 最终 `scan:vars` / `check:vars` | 修复可复现源码集合后，`scan:vars` 扫描 v3.1.8、Git 已跟踪 `src/` 293 个 JS 文件、3737 个顶层名字并刷新 md/json；此前 294 文件口径误含 ignored/generated `src/build-info.js`。本轮默认 `check:vars` 因不改 `src/` 正常跳过；完整 PR base `e086f2d...` 口径按约定 code 2，仅命中 Runtime-state `MODULES`、`app`、`dialog`、`setStatus`、`state`，无 Critical / Important-skeleton / Risk-sensitive 命中 | 五项均来自既有 PR6 capture/UI 路径：模块枚举未增删，`app` 只处理 capture 失败退出，`dialog`/`setStatus`/`state` 是局部 DOM、状态或测试引用；未改 Electron 原生 dialog、`src/renderer.js` 顶层状态结构或生产启动/退出钩子。模板列表、当前模块、导出可用性三组全局联动未改，定向与全仓 renderer 测试通过 |
 | PR 6 restack 通用与资金盲区终审 | 相对最新 PR 5，`src/backend/` 与 `src/main-process/` 生产资金实现为 0 diff；逐项复核 capture 入口/超时/拒绝/DOM 生命周期、PR 1 强制 fingerprint + 完整 issues/openingState、PR 2 DecimalAccumulator、PR 3 protected worker + exact preserved allowset、PR 4 调整账本、PR 5 semantic writer + targetMonth 租约与 IPC `auditFailure` | P3 RSS 抖动误报、P3 低幅精确线性漏检与 P3 发布策略文档仍写成三段/无 CI 均已修复；未发现剩余 P3+ 或资金红线新缺口。真实月份逐主体/九币种、生产历史 archive/数据库副本、Windows installer/portable + Excel/WPS、已保护 worker 关窗时序仍是人工/平台发布门禁，不得由自动化 PASS 替代 |
+| PR #129 finding probe | 未改代码前，模型确认 `8→24MB`、`6→29MB`、`8→32MB` 均误判 PASS；默认压力档 `88→140MB`、预算 148MB、`31/31 PASS`，证明常规环境走 measurable 分支。`git check-ignore` 证明 `src/build-info.js` 被 `.gitignore` 排除且不在 index；完整 `e086f2d...→c2b3b7e...` diff-check 精确命中 Spec 第 3～7 行五处尾随空格 | 三个 finding 均有确定触发条件；无 BLOCK 产品决策。修复范围只在发布测试、统计工具、报告和 Markdown，不改变 PR1～PR5 生产资金实现 |
+| PR #129 P2/P3 定向修复证据 | RSS 模型/采样路径与 scan-vars 源码集合组合 `7/7 PASS`；5万/15万行 `31/31 PASS`（`46→51MB`，预算 85MB）；默认 50万/150万行 `31/31 PASS`（`82→135MB`，预算 139MB）；`scan:vars` 在本地 ignored build-info 存在时仍得到 293 文件、3737 名字；完整 base→工作树 `git diff --check` code 0 | `8→24`、`6→29`、`8→32` 反例拒绝；低信号追加两轮路径被 stub 锁定，任一样本 150MB 硬上限不能被中位数隐藏；spec 行尾问题和本地/clean 统计漂移均已直接收口 |
+| PR #129 最终单次 `npm run release-check` | lint PASS；smoke PASS；unit `4795/4795 PASS`（303 个测试文件，0 failures）；integration `48/48` 脚本、`2457/2457` 可计数断言 PASS（`303845ms`） | RSS 默认档 `31/31`；VCC 调整归档继承 `295/295`、破坏性状态 `64/64`、effective `19/19`、历史模板导出 `28/28`；新 RSS/scan-vars 回归已进入全仓门禁，PR1～PR5 资金链无回归 |
+| PR #129 `check:vars` | 当前 `c2b3b7e...→working tree` 没有 `src/` 改动，默认扫描正常跳过；完整 PR `e086f2d...→HEAD` 仅命中 Runtime-state `MODULES/app/dialog/setStatus/state`，无 Critical / Important-skeleton / Risk-sensitive | 五项均来自既有 PR6 capture/UI 路径：模块枚举未增删，`app` 仅 capture 失败退出，`dialog/setStatus/state` 为局部 DOM/状态；本轮测试/统计/文档修复未修改任何生产 `src/` 或资金实现 |
+
+## PR #129 Unknowns Preflight（2026-08-09）
+
+### Task Brief
+
+- Goal：修复 1×P2 RSS 低信号证据缺口与 2×P3 Markdown/scan-vars 可复现性缺口，并在当前 PR6 分支提交，不 push。
+- Context：基线 `c2b3b7e8...` 与远端一致；PR1～PR5 资金实现不是本轮修改范围。
+- Constraints：保留 150MB 硬上限、非法输入 fail-closed、正常大小压力稳定性；完整 base→HEAD 检查；19 个既有未跟踪项不得触碰或暂存。
+- Done when：三个反例与统计漂移都有自动回归，RSS 小/默认档、scan/check-vars、发布/预览契约和完整 release-check 通过，clean checkout 统计一致，提交后 tracked clean。
+
+### Unknowns Register
+
+| 未知 | 影响 | 处理 | 最便宜验证 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| 默认 RSS 是否真的落在 low-signal，收紧后会否破坏常规 CI | 高 | PROBE | 未改代码跑默认 50万/150万档并记录两档增量 | `88→140MB`，明显为 measurable；low-signal 只在异常环境追加采样 |
+| 单次低信号怎样区分取整/allocator 抖动与真实线性增长 | 高 | PROBE | 对确定性反例、三样本中位数及单样本 150MB spike 建模 | 条件式三样本中位数裁决趋势，同时对每个样本保留硬上限 |
+| 294 与 293 差异是否只来自 generated build-info | 中 | PROBE | `git check-ignore`、`git ls-files`、本地扫描与独立临时 Git 仓库 | build-info ignored 且未跟踪；统计集合固定为 Git 已跟踪 JS |
+| 完整 PR diff 是否还有最后提交看不到的 whitespace | 中 | PROBE | `git diff --check e086f2d...` | 原仅 Spec 5 行，已改 `<br>` 后 code 0 |
+| clean checkout 统计 | 高 | PROBE | 对已暂存候选树建立 detached worktree，重跑 scan-vars 并与候选报告去时间戳后比较 | 已解决：clean checkout 不存在 generated build-info；293 文件、3737 名字和 `git-tracked-js` sourceSet 逐字段一致；完整 base diff-check code 0 |
+| 完整发布门禁 | 高 | PROBE | 同一候选工作树运行 `npm run release-check` | 已全绿：unit `4795/4795`，integration `48/48` / `2457/2457` |
+
+无 BLOCK 问题；没有采用会改变产品契约或资金边界的假设。
 
 ## Self-review Findings（2026-08-09）
 
@@ -237,10 +266,13 @@
 
 | 级别 | Finding | 最便宜验证 | 处置 |
 | --- | --- | --- | --- |
+| P2 | low-signal 分支把 `strictlyBelowLinear` 无条件设为 true，使 `8→24MB`、`6→29MB`、`8→32MB` 线性/超线性反例通过，不能支撑亚线性结论 | 直接调用模型，并以低信号触发的成对隔离采样 stub 验证实际分支 | 已修复：低信号也严格低于线性外推；首次 tier1 `<=8MB` 时追加两轮取三次中位数，任一样本 150MB 硬上限和非法输入 fail-closed 保留；700 万仍明确是人工门禁 |
+| P3 | `changes/3.1.8/spec.md` 前五行用 Markdown 双空格换行，完整 PR base→HEAD `git diff --check` code 2 | 对完整 `e086f2d...→HEAD` 跑 diff-check，不只检查最后提交 | 已改为显式 `<br>`；完整 base→工作树 diff-check code 0 |
+| P3 | `scan-vars` 递归文件系统，把 ignored/generated `src/build-info.js` 纳入本地统计，clean checkout 文件数少 1 | 对照 `git check-ignore` / `git ls-files`，并在独立临时 Git 仓库同时放 tracked、ignored、untracked JS | 已改为只扫描 Git index 已跟踪 JS；报告写明 sourceSet，本地含 ignored build-info 时为 293 文件，自动测试证明 generated/untracked 均不进入 |
 | P3 | 两档 RSS 在独立进程中的单侧 allocator 抖动使默认样本 `82→135MB` / `82→133MB` 仅越过 131MB 预算，却均低于 150MB 硬上限；原 8MB 单侧余量会产生稳定误报 | 在生产路径零 diff 的同一环境连续运行默认 50 万/150 万行档，并对照硬上限与原预算 | 已修复：可测档只把 tier2 单侧余量校准到 16MB，不放宽低信号 32MB 包络或 150MB 硬上限；小档、默认档及最终 release-check 内默认档均 `31/31 PASS` |
 | P3 | RSS 可测增长把单侧噪声余量调到 16MB 后，原公式会放过 `9→27MB` 的低幅精确线性增长 | 直接调用 `assessScanMemoryGrowth(9, 27, 3)` 并锁定边界 | 已修复：可测档同时要求严格低于线性外推；`9→26MB` PASS、`9→27MB` FAIL，13MB/32MB 反例与 150MB 硬上限保留 |
 | P3 | integration policy 仍把 `release-check` 写成三段且声称项目无 CI，与 package script 和 Windows workflow 不一致 | 对照 `package.json` 与两份 workflow | 已修复为 lint + smoke + unit + integration，并明确本地与 Windows PR/Release 使用同一门禁 |
-| P0～P2 | 未发现 | 对入口旁路、失败关闭、租约/代次、金额币种、幂等、部分失败、行数/子表守恒、审计与输出回读逐项复核 | 无需代码处置；人工资金红线不降级为自动通过 |
+| P0～P1 | 未发现 | 对入口旁路、失败关闭、租约/代次、金额币种、幂等、部分失败、行数/子表守恒、审计与输出回读逐项复核 | 无需代码处置；人工资金红线不降级为自动通过 |
 
 ## Remaining Unknowns
 
