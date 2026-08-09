@@ -54,6 +54,9 @@
 | 重算替换在读取旧结果证据阶段失败也必须补写 rolled_back 审计 | 旧 run 若损坏，`collectRunEvidence()` 会在赋值完整 evidence 前抛错；原实现虽零删除但没有替换失败记录 | 仅依赖原始异常和数据库现状；为写审计而绕过严格 reader | 审计固化全部旧 run IDs、已成功采集的前缀、失败 run/code/message；业务事务先回滚且不删除损坏旧 run，审计失败仍只附加 `auditFailure` |
 | PR 4 对含人工调整的已归档结果在旧 writer 前临时失败关闭 | PR 4 的 writer 仍直接读取基础 `run_rows/run_balances`，而归档和下月期初已读取生效结果；继续导出会让同一 run 出现两套资金口径 | 让旧 writer 静默导出基础值；在 PR 4 提前实现 PR 5 语义模板 writer | 在全局导出租约及归档一致性检查后，若调整数大于 0，返回稳定 `adjusted-result-export-unsupported`、中文提示和 run/月/调整数上下文，writer 零调用；无调整历史归档保持兼容。PR 5 仅在 writer 改为消费生效结果且补足 readback 回归后解除此闸 |
 | PR 3 → PR 4 restack 使用双父非快进 merge，并按安全边界逐块合并冲突 | PR 3 已在结构化 preflight/fingerprint、最终值 DecimalAccumulator、破坏性事务 exact allowset 与 worker 保护协议上形成更严格基线；PR 4 另有调整账本、review DTO、导出临时闸和 IPC 错误保真 | rebase/force；任选一侧覆盖冲突；放宽 fingerprint 兼容旧测试 | calculator 同时保留必填 64 位 fingerprint、最终值聚合与 replacement audit；service 同时保留 critical/task/generation 链和 adjusted export guard；测试调用改为携带真实 preflight fingerprint，生产门禁不降级 |
+| PR #127 调整与归档事务对全部 19 张 VCC 事实表做流式确定性指纹，并用事务前 max-id/目标月精确划定新增调整、目标归档、run revision/status 和 dataset status 允许集 | 原提交前检查只证明新调整或目标归档看起来正确，AFTER INSERT trigger 仍可同时篡改旧 sequence、基础 run row 或其他月份/全局事实 | 只检查目标 run/新行；复用只覆盖破坏性删除的目标月排除模型 | 调整与归档在最后一次业务写后、COMMIT 前验证旧事实零漂移；新调整必须边界后恰一条且字段/时间/构建来源全等，目标归档与五类 dataset 必须精确匹配；任一 silent trigger 整事务回滚并留下 rolled_back 审计 |
+| PR #127 重算替换和归档的 success operation audit 必须在事务内按旧审计 max-id、唯一新行、完整 evidence hash、run/月/type/status、可信版本来源和同一事务时间做最终断言 | INSERT 后触发器可删除或改写本次 success audit，原流程仍可能提交资金事实且制造伪成功审计 | 只相信 `lastInsertRowid`；COMMIT 后再补查 | `assertSuccessOperationAudit` 成为两条成功路径最后的审计边界；删除、改 evidence 或伪造 app/build 均在 COMMIT 前失败，旧资金事实/归档/dataset 全回滚，事务外仅 best-effort 记录可信 `rolled_back` |
+| PR #127 service 对 calculate 请求只提取 `targetMonth` 与 `expectedInputFingerprint`，所有 worker 任务的 `taskGeneration/appVersion/buildSha` 均由 service 闭包最后覆盖 | renderer/IPC payload 可伪造构建来源，旧 spread 顺序还允许覆盖 worker 审计 provenance | 在 worker 内逐 action 清洗；信任 renderer 只传正常字段 | calculate 的额外 runId/版本/代次等字段不再进入 worker；其他 worker action 即使 payload 同名也只能得到主进程可信 provenance，审计来源单一 |
 
 ## Assumptions
 
@@ -152,6 +155,11 @@
 | PR 3 → PR 4 restack 全仓门禁 | 共享依赖执行全量 `src/` ESLint PASS；`npm run smoke` PASS；unit `4741/4741 PASS`（295 个测试文件）；integration `47/47` 脚本、`2193/2193` 可计数断言 PASS；runner 已同步三条 VCC 集成链到 policy | 静态检查、其他业务 smoke、全仓 unit、迁移/大文件/side DB 与 VCC 三条真实链在当前合并结果无回归 |
 | PR 3 → PR 4 restack `npm run check:vars` | code 2 仅命中 Runtime-state 通用词 `state`；diff 实际为 VCC 局部事务状态、`opening-state` code 及模块文件名，未修改 `src/renderer.js` 顶层 `state` | 按清单判定为误报；无 Critical / Important-skeleton / Risk-sensitive 命中，既有 smoke 与 renderer 契约已通过 |
 | PR 3 → PR 4 restack blindspot + reconciliation 复核 | 沿 preflight→worker→calculate/adjust→archive→export 及 preview→destructive transaction→audit 数据流核对入口、状态、金额、失败与观测；代码定位与上述定向/真实链/全仓门禁相互印证 | 未发现会改变合并方案的新旁路或自动化缺口；未自动修复异常生产事实。真实月份逐主体逐币种、历史 archived run 一致性和 Windows 退出时序仍为发布前人工/平台门禁 |
+| PR #127 三条 finding 定向回归 | calculator、result-adjustments、service 共 `77/77 PASS`；全部 VCC + 错误序列化组合 `270/270 PASS` | AFTER INSERT 篡改旧调整 sequence/基础 run row、删除 replacement success audit、篡改 archive success evidence/app/build 均触发结构化错误；业务事实完整回滚，只保留 rolled_back；calculate 伪造字段不会越过 service allowlist |
+| PR #127 真实 SQLite + worker 链 | adjustment/archive `59/59 PASS`；destructive `64/64 PASS`；effective result `19/19 PASS` | 调整→重算替换→归档、三月破坏性事务及最终金额/只读归档三条独立链无回归，审计、revision、九币种和跨月期初血缘保持 |
+| PR #127 全仓门禁 | 全量 `src/` ESLint PASS；smoke PASS；unit `4746/4746 PASS`（295 个测试文件）；integration `47/47` 脚本、`2193/2193` 可计数断言 PASS | 静态检查、其他模块 smoke、全仓单测、迁移/大文件/side DB 与 VCC 三条真实链均通过；integration runner 已同步 policy |
+| PR #127 `npm run check:vars` | 4 个 `src` 文件仅命中 Runtime-state 通用词 `state`；实际为 VCC 事务局部/函数命名，未修改 `src/renderer.js` 顶层 `state`，无 Critical / Important-skeleton / Risk-sensitive 清单命中 | 已复核任务代次、worker provenance、结果 revision/status 与审计生命周期；smoke 和 service 契约回归通过。新增 `snapshotResultMutationState` 跨 3 个源文件且承载资金事务边界，作为下次 `scan:vars` 的 Risk-sensitive 升格候选交由人工审批，不在本次静默改清单 |
+| PR #127 blindspot + reconciliation 复核 | 沿 renderer/IPC→service allowlist→worker→calculate/adjust/archive→audit 检查入口旁路、全 19 表主键/月份/run 血缘、金额币种不变、幂等/revision、部分失败、全表/新行守恒和可观测性 | 未发现遗留可自动化 P2/P3 缺口；无自动修复或生产数据写入。真实生产副本的调整→替换→归档逐主体×币种及历史审计一致性仍是未完成的人工资金红线 |
 
 ## Remaining Unknowns
 
@@ -166,3 +174,4 @@
 | PR 5 何时解除 PR 4 的含调整导出临时闸 | PROBE | PR 5 owner 必须确认 writer 全部金额行读取 `getEffectiveRunResult()` 生效 DTO，并补“调整→归档→导出 readback→下月继承”同口径测试后删除闸及临时 code | 未满足前不得解除，否则重新暴露两套资金口径 |
 | 生产历史 archived run 是否存在 archive subject/九币种/effective result/dataset 不一致 | PROBE + fail-closed | 合入前对生产副本执行只读枚举/preview；异常月份人工核账，不自动修复 | 异常月份不可解归档/导出，但不污染其他月份 |
 | Windows 退出过程中已保护 worker 的真实时序 | PROBE/平台测试 | 自动化已覆盖“取消在先→critical-ready 未 protected→timeout terminate”和“protected 后只等待”；PR 6 仍需 Windows CI/手测在真实 SQLite 事务中触发关窗 | 阻塞 3.1.8 发布，不阻塞 PR 3 代码评审 |
+| PR #127 真实生产副本调整→重算替换→归档的逐主体×币种、revision/sequence 与历史 success/rolled_back 审计一致性 | BLOCK（资金红线，人工复核未完成） | 财务人员在只读副本逐笔核对；异常事实只诊断并阻断，不自动修复 | 阻塞 3.1.8 发布，不阻塞本地代码评审 |

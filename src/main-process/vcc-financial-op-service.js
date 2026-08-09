@@ -275,10 +275,8 @@ function createVccFinancialOpService({
             payload: {
               ...(payload || {}),
               taskGeneration: task.baseGeneration,
-              appVersion: payload && payload.appVersion !== undefined
-                ? payload.appVersion
-                : appVersion,
-              buildSha: payload && payload.buildSha !== undefined ? payload.buildSha : buildSha
+              appVersion,
+              buildSha
             },
             dbPath: database.dbPath
           }
@@ -354,7 +352,10 @@ function createVccFinancialOpService({
     if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
       return preflightRequiredResult(targetMonth);
     }
-    return runWorker('calculate', { ...payload, targetMonth });
+    return runWorker('calculate', {
+      targetMonth,
+      expectedInputFingerprint: payload.expectedInputFingerprint
+    });
   }
 
   function preflightRun(payload = {}) {

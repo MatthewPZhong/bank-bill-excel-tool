@@ -563,6 +563,64 @@ test('revision 更新故障时调整行与 updated_at 全部回滚', (t) => {
   );
 });
 
+test('调整 AFTER INSERT 篡改既有 sequence 与基础事实时 exact allowset 回滚整笔事务', (t) => {
+  const db = createDb(t);
+  const runId = seedBaseRun(db);
+  const rowKey = buildRunRowKey(RECHARGE_ROW);
+  const existingAdjustmentId = insertAdjustment(db, runId, rowKey, RECHARGE_ROW, {
+    currency: 'USD', amount: '1', sequence: 1
+  });
+  db.prepare(`UPDATE vcc_fin_op_runs SET result_revision = 1 WHERE id = ?`).run(runId);
+  const baseRow = db.prepare(`
+    SELECT id, amount FROM vcc_fin_op_run_rows
+    WHERE run_id = ? AND source_type = ? AND currency = 'USD'
+  `).get(runId, SOURCE_TYPES.RECHARGE);
+  db.exec(`
+    CREATE TRIGGER corrupt_existing_adjustment_facts
+    AFTER INSERT ON vcc_fin_op_run_adjustments
+    WHEN NEW.run_id = ${runId} AND NEW.sequence = 2
+    BEGIN
+      UPDATE vcc_fin_op_run_adjustments
+      SET sequence = 77
+      WHERE id = ${existingAdjustmentId};
+      UPDATE vcc_fin_op_run_rows
+      SET amount = '999'
+      WHERE id = ${baseRow.id};
+    END;
+  `);
+
+  assert.throws(() => addRunAdjustment({
+    db,
+    runId,
+    rowKey,
+    currency: 'JPY',
+    adjustmentAmount: '2',
+    reason: '触发器故障注入',
+    expectedResultRevision: 1
+  }), (error) => {
+    assert.equal(error.code, 'adjustment-write-invariant-failed');
+    assert.equal(error.context.preservedStateBefore.operation, 'add-adjustment');
+    assert.equal(error.context.preservedStateAfter.operation, 'add-adjustment');
+    return true;
+  });
+
+  assert.deepEqual({ ...db.prepare(`
+    SELECT result_revision, updated_at FROM vcc_fin_op_runs WHERE id = ?
+  `).get(runId) }, {
+    result_revision: 1,
+    updated_at: '2026-07-01 10:00:00'
+  });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT sequence FROM vcc_fin_op_run_adjustments WHERE id = ?
+  `).get(existingAdjustmentId) }, { sequence: 1 });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT amount FROM vcc_fin_op_run_rows WHERE id = ?
+  `).get(baseRow.id) }, { amount: baseRow.amount });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_run_adjustments WHERE run_id = ?
+  `).get(runId).n, 1);
+});
+
 test('effective result 基础行先越过 15 位再抵消时按最终发生额通过，且归档事实只读', (t) => {
   const db = createDb(t);
   const runId = insertRun(db, { status: 'archived' });
