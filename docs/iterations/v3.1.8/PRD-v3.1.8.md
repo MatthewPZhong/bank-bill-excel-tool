@@ -1,7 +1,7 @@
 # bank-bill-excel-tool 3.1.8 PRD 索引
 
 > 目标版本：`3.1.8`
-> 状态：已批准进入正式发布流程（尚未创建 tag/Release）
+> 状态：已正式发布（2026-08-09）
 > 锁定规格：[`changes/3.1.8/spec.md`](../../../changes/3.1.8/spec.md)
 > 实施记录：[`changes/3.1.8/implementation-notes.md`](../../../changes/3.1.8/implementation-notes.md)
 > 发布预检：[`changes/3.1.8/preflight.md`](../../../changes/3.1.8/preflight.md)
@@ -44,4 +44,22 @@ v3.1.8 已合入 `main`，主干 fresh Windows release-check、x64 构建和包�
 5. 财务人员按真实月份、主体和九币种逐项核对并记录签字结论。
 6. 真实约 700 万行、多 sheet 工具箱极限文件的压力验证。
 
-上述人工门禁现为 6/6 PASS，且通过结论来自用户明确签字，不由自动化 PASS 或 Windows CI 构建代替。当前已批准进入 annotated tag → Windows Release workflow → 公开资产复核流程；在 tag、Release 与四项公开资产实际创建并回读前，本索引仍不得表述为已经正式发布。
+上述人工门禁现为 6/6 PASS，且通过结论来自用户明确签字，不由自动化 PASS 或 Windows CI 构建代替。永久授权记录见 [PR #130 评论](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/130#issuecomment-5231526107)。
+
+## 6. 正式发布结果
+
+- 发布准备 PR #130 以普通 merge commit `688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa` 合入 `main`，发布分支未删除。
+- annotated tag `v3.1.8` 的 tag object 为 `eabe485a0393abac09a202420d7a92b4d2d28726`，peeled commit 与发布时 `main` 均为 `688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa`。
+- [Release workflow run 31314412353](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31314412353) / job `93247225343` 从首个 job step `2026-08-09T12:53:34Z` 至 complete-job step `2026-08-09T13:24:20Z` 成功完成。release-check 为 unit `4801/4802`（1 个 expected skip）、integration `48/48` 脚本且 `2459/2459` 可计数断言、smoke PASS、main panel `6/6`；大文件链 `50/50`（475269ms），拆分链 `31/31`（401655ms）。
+- [GitHub Release v3.1.8](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.8)（Release ID `367485098`）于 `2026-08-09T13:24:16Z` 发布为 latest、non-draft、non-prerelease。
+
+| 公开资产 | Asset ID | 大小（bytes） | SHA-256 |
+| --- | ---: | ---: | --- |
+| `bank-bill-excel-tool-portable-3.1.8.exe` | `507535165` | 99,686,916 | `3fe4572b519428a7b749a860130287ada6450fd631f039f258240671ab4c79ab` |
+| `bank-bill-excel-tool-setup-3.1.8.exe` | `507535166` | 100,183,781 | `f2348f6f14d039113568e25b7770eff049ce6fc2af2e246d7261a6c6969351a9` |
+| `bank-bill-excel-tool-setup-3.1.8.exe.blockmap` | `507535163` | 105,382 | `c57e6723010de00c5af235c8f5a6ff1646be7d6729d0590f15a8c4458e4b5c91` |
+| `latest.yml` | `507535164` | 369 | `9ffb50d6cdca2bb49ad06ecfce9c160fafe80ca4cea009e1e0e20e62ac92c1ba` |
+
+四项资产从公开下载地址独立回读后，实际大小和 SHA-256 与 GitHub 元数据一致，且 Release 的自定义资产集合恰好为以上四项。`latest.yml` 的 version/path/size 为 `3.1.8` / `bank-bill-excel-tool-setup-3.1.8.exe` / `100183781`，顶层与 `files[0]` 的 SHA-512 均为 `8x/2kU12ea1qpsTlOve2TH9kbL9ObSR6i5jkhv/viYWaQcOPVucD8di4uoEeTKtA/apHeMuBrbLLtfkFzKUGRw==`，与 Setup 实际字节一致。
+
+Setup 和 portable 外层均为 `MZ`；NSIS/self-extractor 外层 PE Machine 为 `0x14c`，这是启动包装器事实，不代表包内应用为 32 位。两种资产提取出的 `清结算小助手.exe` 均为 202,799,104 bytes、SHA-256 `7c01f36352e98815fe902add3a17608278c316f2fc6b8cc460f3645db5d73e0d`、PE Machine `0x8664`（x86-64）。冻结 `changes/3.1.8/spec.md` 继续作为业务合同；正式发布状态以本 PRD 和发布证据文档为准。
