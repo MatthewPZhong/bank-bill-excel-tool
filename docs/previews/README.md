@@ -8,9 +8,9 @@
 npm run preview:all
 ```
 
-> 注：`preview:all` 串行调 35 个独立 Electron 窗口，全跑约 3 分钟。如只更新某一张，使用对应的子命令（见下方表格）。
+> 注：`preview:all` 会串行启动多个独立 Electron 窗口，耗时会随截图矩阵增长。如只更新某一组或某一张，使用对应的子命令（见下方表格）。
 
-## 全部 36 张图
+## 截图索引（持续新增）
 
 ### 主页面 / 模块首屏（7 张）
 
@@ -83,6 +83,39 @@ npm run preview:all
 | ![pending-reconcile](pending-reconcile.png) | 开始运行 / 对账月份选择对话框 | `npm run preview:pending-reconcile` |
 | ![pending-export-runs](pending-export-runs.png) | 导出差异 run 选择对话框（指定月份 / 所有月份汇总） | `npm run preview:pending-export-runs` |
 
+### VCC 财务OP校验（26 张，v3.1.8 发布候选矩阵）
+
+可用 `npm run preview:vcc-financial-op` 重生成本节全部截图。每张图先写入同目录临时文件，只有 Electron 正常退出且新文件通过完整 PNG 结构校验后才替换旧证据。
+
+| 截图 | 说明 | render 命令 |
+|------|------|------|
+| ![vcc-financial-op-panel](vcc-financial-op-panel.png) | VCC 财务OP校验主面板与 v3.1.8 版本标识 | `npm run preview:vcc-financial-op-panel` |
+| ![vcc-financial-op-import-month](vcc-financial-op-import-month.png) | 导入账期选择 | `npm run preview:vcc-financial-op-import-month` |
+| ![vcc-financial-op-run-month](vcc-financial-op-run-month.png) | 运行账期选择 | `npm run preview:vcc-financial-op-run-month` |
+| ![vcc-financial-op-run-preflight-error](vcc-financial-op-run-preflight-error.png) | 五表预检失败且后台任务尚未启动 | `npm run preview:vcc-financial-op-run-preflight-error` |
+| ![vcc-financial-op-opening](vcc-financial-op-opening.png) | 固定首月九币种期初录入 | `npm run preview:vcc-financial-op-opening` |
+| ![vcc-financial-op-data-manager](vcc-financial-op-data-manager.png) | 数据管理：存在归档月份 | `npm run preview:vcc-financial-op-data-manager` |
+| ![vcc-financial-op-data-manager-no-archive](vcc-financial-op-data-manager-no-archive.png) | 数据管理：无可解归档月份 | `npm run preview:vcc-financial-op-data-manager-no-archive` |
+| ![vcc-financial-op-delete](vcc-financial-op-delete.png) | 数据删除目标选择 | `npm run preview:vcc-financial-op-delete` |
+| ![vcc-financial-op-delete-first-month](vcc-financial-op-delete-first-month.png) | 固定首月未归档期初删除确认 | `npm run preview:vcc-financial-op-delete-first-month` |
+| ![vcc-financial-op-delete-first-month-archived](vcc-financial-op-delete-first-month-archived.png) | 首月已归档时禁用危险删除 | `npm run preview:vcc-financial-op-delete-first-month-archived` |
+| ![vcc-financial-op-delete-result](vcc-financial-op-delete-result.png) | 整月未归档结果删除确认 | `npm run preview:vcc-financial-op-delete-result` |
+| ![vcc-financial-op-unarchive](vcc-financial-op-unarchive.png) | 最新归档月解归档确认 | `npm run preview:vcc-financial-op-unarchive` |
+| ![vcc-financial-op-unarchive-year-switch](vcc-financial-op-unarchive-year-switch.png) | 解归档年份切换 | `npm run preview:vcc-financial-op-unarchive-year-switch` |
+| ![vcc-financial-op-unarchive-non-tail](vcc-financial-op-unarchive-non-tail.png) | 非尾月依赖说明与禁用解归档 | `npm run preview:vcc-financial-op-unarchive-non-tail` |
+| ![vcc-financial-op-unarchive-executing](vcc-financial-op-unarchive-executing.png) | 解归档事务执行中锁窗 | `npm run preview:vcc-financial-op-unarchive-executing` |
+| ![vcc-financial-op-export](vcc-financial-op-export.png) | 数据管理导出选择 | `npm run preview:vcc-financial-op-export` |
+| ![vcc-financial-op-result-export-month](vcc-financial-op-result-export-month.png) | 主页历史归档月份导出选择 | `npm run preview:vcc-financial-op-result-export-month` |
+| ![vcc-financial-op-result-export-month-empty](vcc-financial-op-result-export-month-empty.png) | 无一致归档月份时的导出空态 | `npm run preview:vcc-financial-op-result-export-month-empty` |
+| ![vcc-financial-op-result](vcc-financial-op-result.png) | 完整九币种结果确认 | `npm run preview:vcc-financial-op-result` |
+| ![vcc-financial-op-result-single-adjustment](vcc-financial-op-result-single-adjustment.png) | 单条一次性调整后的生效结果 | `npm run preview:vcc-financial-op-result-single-adjustment` |
+| ![vcc-financial-op-result-multiple-adjustments](vcc-financial-op-result-multiple-adjustments.png) | 多业务行调整展示 | `npm run preview:vcc-financial-op-result-multiple-adjustments` |
+| ![vcc-financial-op-result-archived](vcc-financial-op-result-archived.png) | 已归档结果只读态 | `npm run preview:vcc-financial-op-result-archived` |
+| ![vcc-financial-op-result-zoom-125](vcc-financial-op-result-zoom-125.png) | 125% 缩放结果布局 | `npm run preview:vcc-financial-op-result-zoom-125` |
+| ![vcc-financial-op-result-zoom-150](vcc-financial-op-result-zoom-150.png) | 150% 缩放结果布局 | `npm run preview:vcc-financial-op-result-zoom-150` |
+| ![vcc-financial-op-result-min-window](vcc-financial-op-result-min-window.png) | 最小窗口尺寸结果布局 | `npm run preview:vcc-financial-op-result-min-window` |
+| ![vcc-financial-op-adjustment](vcc-financial-op-adjustment.png) | 调整值与原因录入及约束提示 | `npm run preview:vcc-financial-op-adjustment` |
+
 ## 添加新 modal preview 的步骤
 
 1. **renderer-dialogs.js**：确认目标 dialog factory 已 export（通过 `createRendererDialogs` 返回对象）
@@ -102,5 +135,6 @@ npm run preview:all
 ## 注意
 
 - 所有 preview 在**临时目录**启动 Electron（`mkdtempSync` → `APP_USER_DATA_DIR` / `APP_DOCUMENTS_DIR`），不污染本机生产数据
+- 截图生成先写本轮临时 PNG；进程失败、文件截断或结构不完整时保留旧截图并返回失败，避免旧图冒充新证据
 - mock payload 含真实数据形态（含中文 / 多币种 / 多模板）以便截图覆盖典型场景
 - 资金链路 modal（monthly-balance-export / manual-balance-seed / balance-addon-manager）在 mock 时使用形似真实金额的占位（如 `12345.67`），但**不要使用真实客户数据**

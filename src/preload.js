@@ -78,6 +78,8 @@ contextBridge.exposeInMainWorld('appConstants', {
 contextBridge.exposeInMainWorld('desktopApi', {
   // v2.1.13 E2：暴露平台标识，供 renderer 判断是否应用 Win 端 Noto Sans SC 字体（仅 win32 生效）
   platform: process.platform,
+  // 只读 preview 能力标志：生产启动恒为 false，仅 APP_CAPTURE_PATH 截图进程可安装合成 UI hook。
+  previewCapture: Boolean(process.env.APP_CAPTURE_PATH),
   app: {
     getInfo: () => ipcRenderer.invoke('app:get-info'),
     saveUserGuide: () => ipcRenderer.invoke('app:save-user-guide'),
@@ -518,6 +520,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
     calculate: (payload) => ipcRenderer.invoke('vccFinancialOp:run:calculate', payload),
     initializeOpening: (payload) => ipcRenderer.invoke('vccFinancialOp:opening:initialize', payload),
     archive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:archive', payload),
+    listAdjustmentOptions: (payload) => ipcRenderer.invoke('vccFinancialOp:run:adjustment-options', payload),
+    addRunAdjustment: (payload) => ipcRenderer.invoke('vccFinancialOp:run:adjustment-add', payload),
+    listArchivedResultMonths: () => ipcRenderer.invoke('vccFinancialOp:run:archived-months'),
+    previewUnarchive: (payload) => ipcRenderer.invoke('vccFinancialOp:run:unarchive-preview', payload),
+    unarchiveMonth: (payload) => ipcRenderer.invoke('vccFinancialOp:run:unarchive', payload),
     getRun: (payload) => ipcRenderer.invoke('vccFinancialOp:run:get', payload),
     latestArchivedRun: () => ipcRenderer.invoke('vccFinancialOp:run:latest-archived'),
     exportResult: (payload) => ipcRenderer.invoke('vccFinancialOp:export:result', payload),
@@ -526,6 +533,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     getImportDetail: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:get-detail', payload),
     resolveImportRecord: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:resolve', payload),
     dataManagerOverview: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:overview', payload),
+    listDeleteTargets: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-targets', payload),
+    previewDataTargetDeletion: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-preview', payload),
+    deleteDataTarget: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete', payload),
+    // 旧 renderer/API 名称保留；统一通道仍接受 sourceType。
     previewDatasetDeletion: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-preview', payload),
     deleteDataset: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete', payload),
     previewDatasetExport: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:export-preview', payload),

@@ -62,7 +62,7 @@ jobs:
         run: npm run prebuild:meta
 
       - name: Build Windows packages
-        run: npx electron-builder --win --publish never
+        run: npx electron-builder --win --x64 --publish never
 
       - name: Check packaged application
         run: npm run check:dist

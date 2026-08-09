@@ -18,6 +18,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { serializeError, deserializeError, __test_only__ } = require('../../../src/main-process/serialize-error');
+const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
 const { FileValidationError } = require('../../../src/backend/file-service/common');
 
 test.describe('serialize-error', () => {
@@ -275,5 +276,52 @@ test.describe('serialize-error', () => {
     assert.equal(restored.name, 'ToolboxPublicationManualRecoveryError');
     assert.deepEqual(restored.recoveryPaths, err.recoveryPaths);
     assert.equal(restored.preserveTemporaryFiles, true);
+  });
+
+  test('15. 解归档依赖月份与结构化上下文跨 worker 透传', () => {
+    const err = new Error('不是尾月');
+    err.code = 'unarchive-not-tail';
+    err.dependentMonths = ['2026-07', '2026-08'];
+    err.context = { preview: { targetMonth: '2026-06', canUnarchive: false } };
+    const restored = deserializeError(serializeError(err));
+    assert.deepEqual(restored.dependentMonths, ['2026-07', '2026-08']);
+    assert.deepEqual(restored.context.preview, {
+      targetMonth: '2026-06', canUnarchive: false
+    });
+    assert.deepEqual(vccFinancialOpErrorResult(restored), {
+      status: 'error',
+      code: 'unarchive-not-tail',
+      message: '不是尾月',
+      detailLines: [],
+      dependentMonths: ['2026-07', '2026-08'],
+      context: { preview: { targetMonth: '2026-06', canUnarchive: false } }
+    });
+  });
+
+  test('16. 失败审计信息跨 worker 透传且不覆盖主错误', () => {
+    const err = new Error('原始删除失败');
+    err.code = 'SQLITE_CONSTRAINT_TRIGGER';
+    err.context = { targetMonth: '2026-06' };
+    err.auditFailure = {
+      name: 'Error',
+      code: 'SQLITE_BUSY',
+      message: 'rolled_back 审计写入失败'
+    };
+
+    const restored = deserializeError(serializeError(err));
+    assert.equal(restored.code, 'SQLITE_CONSTRAINT_TRIGGER');
+    assert.equal(restored.message, '原始删除失败');
+    assert.deepEqual(restored.auditFailure, err.auditFailure);
+    assert.deepEqual(vccFinancialOpErrorResult(restored), {
+      status: 'error',
+      code: 'SQLITE_CONSTRAINT_TRIGGER',
+      message: '原始删除失败',
+      detailLines: [],
+      dependentMonths: [],
+      context: {
+        targetMonth: '2026-06',
+        auditFailure: err.auditFailure
+      }
+    });
   });
 });

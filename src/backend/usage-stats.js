@@ -48,6 +48,12 @@ const FUNCTION_REGISTRY = Object.freeze({
   // v2.1.16 PR#61 F1：链接表管理（main.js trackedIpcHandle('linked-table:import', '链接表管理', '导入', ...)
   //   此前未注册 → incrementFunction 静默丢弃 → 链接表导入成功不计入 .usage-stats.txt。
   '链接表管理': ['导入'],
+  // v3.1.8：VCC 财务OP校验成功动作；查询/preview 不计数，统一删除仅结果删除计“删除结果”。
+  'VCC财务OP校验': [
+    '导入文件', '开始运行', '初始化期初财务OP', '确认归档',
+    '修改结果', '标记导入异常已处理', '删除数据', '导出数据',
+    '导出校验结果表', '导出导入审计', '解归档', '删除结果'
+  ],
   '切换页面风格': ['切换']
 });
 

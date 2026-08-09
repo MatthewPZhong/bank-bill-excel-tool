@@ -215,6 +215,7 @@ const {
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
+const { vccFinancialOpErrorResult } = require('./main-process/vcc-financial-op-ipc');
 // v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 // v2.1.16-beta.2 T1：5 轮对账编排器（R1→R5；bank-statement:run 接入，dispatcher 仅作 R2）
@@ -464,7 +465,21 @@ function getVccFinancialOpService() {
   if (!vccFinancialOpService) {
     vccFinancialOpService = createVccFinancialOpService({
       database,
-      assetsDir: path.join(__dirname, '../assets')
+      assetsDir: path.join(__dirname, '../assets'),
+      appVersion: pkg.version,
+      buildSha: buildInfo.commit,
+      archiveConsistencyLogger: ({ targetMonth, consistencyReasons }) => {
+        appendActivityLogEntry({
+          level: 'warning',
+          message: 'VCC 财务OP归档月份状态不一致，已从可操作列表排除',
+          details: [
+            `月份：${targetMonth}`,
+            `一致性原因：${(consistencyReasons || []).join('、') || 'unknown'}`
+          ],
+          source: 'main',
+          domain: 'vcc-financial-op'
+        });
+      }
     });
   }
   return vccFinancialOpService;
@@ -3187,9 +3202,78 @@ function sendWindowState() {
   }
 }
 
+const VCC_PREVIEW_READINESS_TOKENS = new Set([
+  'vcc-financial-op-panel',
+  'vcc-financial-op-import-month',
+  'vcc-financial-op-run-month',
+  'vcc-financial-op-data-manager',
+  'vcc-financial-op-data-manager-no-archive',
+  'vcc-financial-op-delete',
+  'vcc-financial-op-delete-first-month',
+  'vcc-financial-op-delete-first-month-archived',
+  'vcc-financial-op-delete-result',
+  'vcc-financial-op-unarchive',
+  'vcc-financial-op-unarchive-year-switch',
+  'vcc-financial-op-unarchive-non-tail',
+  'vcc-financial-op-unarchive-executing',
+  'vcc-financial-op-export',
+  'vcc-financial-op-result-export-month',
+  'vcc-financial-op-result-export-month-empty',
+  'vcc-financial-op-result',
+  'vcc-financial-op-result-single-adjustment',
+  'vcc-financial-op-result-multiple-adjustments',
+  'vcc-financial-op-result-archived',
+  'vcc-financial-op-result-zoom-125',
+  'vcc-financial-op-result-zoom-150',
+  'vcc-financial-op-result-min-window',
+  'vcc-financial-op-adjustment',
+  'vcc-financial-op-run-preflight-error',
+  'vcc-financial-op-opening'
+]);
+const VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000;
+
+async function waitForVccPreviewCaptureReady(webContents) {
+  return webContents.executeJavaScript(`
+    new Promise((resolve, reject) => {
+      const startedAt = Date.now();
+      const timeoutMs = ${VCC_PREVIEW_READINESS_TIMEOUT_MS};
+      const fail = (message) => reject(new Error(message));
+      const poll = () => {
+        const readiness = window.__vccPreviewCaptureReady;
+        const elapsed = Date.now() - startedAt;
+        if (!readiness) {
+          if (elapsed >= timeoutMs) {
+            fail('VCC preview readiness was not registered before timeout');
+            return;
+          }
+          setTimeout(poll, 25);
+          return;
+        }
+        const remaining = Math.max(1, timeoutMs - elapsed);
+        const timer = setTimeout(
+          () => fail('VCC preview readiness did not settle before timeout'),
+          remaining
+        );
+        Promise.resolve(readiness).then((result) => {
+          clearTimeout(timer);
+          if (!result || result.status !== 'ready') {
+            fail('VCC preview readiness returned an invalid state');
+            return;
+          }
+          resolve(result);
+        }, (error) => {
+          clearTimeout(timer);
+          fail(error && error.message ? error.message : String(error));
+        });
+      };
+      poll();
+    })
+  `);
+}
+
 function createWindow() {
   const windowIcon = loadBundledIcon();
-  mainWindow = new BrowserWindow({
+  const windowOptions = {
     width: 1240,
     height: 860,
     minWidth: 1080,
@@ -3202,7 +3286,20 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js')
     }
-  });
+  };
+  if (process.env.APP_CAPTURE_PATH) {
+    const captureWidth = Number.parseInt(process.env.APP_CAPTURE_WINDOW_WIDTH || '', 10);
+    const captureHeight = Number.parseInt(process.env.APP_CAPTURE_WINDOW_HEIGHT || '', 10);
+    const captureZoomFactor = Number.parseFloat(process.env.APP_PREVIEW_ZOOM_FACTOR || '');
+    if (Number.isInteger(captureWidth)) windowOptions.width = Math.max(1080, captureWidth);
+    if (Number.isInteger(captureHeight)) windowOptions.height = Math.max(760, captureHeight);
+    if (Number.isFinite(captureZoomFactor)
+      && captureZoomFactor >= 0.5
+      && captureZoomFactor <= 2) {
+      windowOptions.webPreferences.zoomFactor = captureZoomFactor;
+    }
+  }
+  mainWindow = new BrowserWindow(windowOptions);
   markStartupMetric(STARTUP_METRIC_MARKS.windowCreated);
 
   if (windowIcon && process.platform !== 'darwin') {
@@ -3222,11 +3319,20 @@ function createWindow() {
 
     if (process.env.APP_CAPTURE_PATH) {
       setTimeout(async () => {
+        let captureExitCode = 0;
         try {
+          const previewToken = process.env.APP_PREVIEW_MODAL || '';
+          if (previewToken.startsWith('vcc-financial-op-')) {
+            if (!VCC_PREVIEW_READINESS_TOKENS.has(previewToken)) {
+              throw new Error(`Unknown VCC preview capture token: ${previewToken}`);
+            }
+            await waitForVccPreviewCaptureReady(mainWindow.webContents);
+          }
           const image = await mainWindow.webContents.capturePage();
           fs.mkdirSync(path.dirname(process.env.APP_CAPTURE_PATH), { recursive: true });
           fs.writeFileSync(process.env.APP_CAPTURE_PATH, image.toPNG());
         } catch (error) {
+          captureExitCode = 1;
           // v2.1.9 SR-log-1：startup capture（preview 截图）失败 → 日志上报
           appendActivityLogEntry({
             level: 'error',
@@ -3237,7 +3343,7 @@ function createWindow() {
             stack: error && error.stack ? error.stack : undefined
           });
         } finally {
-          app.quit();
+          app.exit(captureExitCode);
         }
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
@@ -3637,7 +3743,7 @@ function registerAppHandlers() {
       accountMappingCount: database.countAllAccountMappings(),
       currencyOptions: getAvailableCurrencyCodes(),
       backgroundConfig: buildBackgroundPayload(),
-      previewModal: process.env.APP_PREVIEW_MODAL || '',
+      previewModal: process.env.APP_CAPTURE_PATH ? (process.env.APP_PREVIEW_MODAL || '') : '',
       // v2.0.0-beta.2 F1 / v2.1.15 W4：UI 风格恒为 'Clear'（General 已弃用）；renderer 启动时立即应用
       uiStyle: database.getUiStyle() || 'Clear',
       // 上次使用模块；renderer 启动时恢复
@@ -12465,23 +12571,72 @@ function registerNewAccountHandlers() {
     try {
       return await getVccFinancialOpService().calculate(payload);
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:opening:initialize', 'VCC财务OP校验', '初始化期初财务OP', (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:opening:initialize', 'VCC财务OP校验', '初始化期初财务OP', async (_event, payload = {}) => {
     try {
-      return getVccFinancialOpService().initializeOpening(payload);
+      return await getVccFinancialOpService().initializeOpening(payload);
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', async (_event, payload = {}) => {
     try {
-      return getVccFinancialOpService().archive(payload);
+      return await getVccFinancialOpService().archive(payload);
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:run:adjustment-options', (_event, payload = {}) => {
+    try {
+      const result = getVccFinancialOpService().listAdjustmentOptions(payload);
+      return { ...result, runStatus: result.status, status: 'success' };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', async (_event, payload = {}) => {
+    try {
+      const result = await getVccFinancialOpService().addRunAdjustment(payload);
+      return { ...result, operationStatus: result.status, status: 'success' };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:run:archived-months', () => {
+    try {
+      return {
+        status: 'success',
+        months: getVccFinancialOpService().listArchivedResultMonths()
+      };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:run:unarchive-preview', (_event, payload = {}) => {
+    try {
+      return {
+        status: 'success',
+        ...getVccFinancialOpService().previewUnarchive(payload)
+      };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
+  trackedIpcHandle('vccFinancialOp:run:unarchive', 'VCC财务OP校验', '解归档', async (_event, payload = {}) => {
+    try {
+      const result = await getVccFinancialOpService().unarchiveMonth(payload);
+      return { ...result, operationStatus: result.status, status: 'success' };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
     }
   });
 
@@ -12501,9 +12656,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', async (_event, payload = {}) => {
     try {
-      return { status: 'success', record: getVccFinancialOpService().resolveRecord(payload) };
+      return { status: 'success', record: await getVccFinancialOpService().resolveRecord(payload) };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
@@ -12517,25 +12672,47 @@ function registerNewAccountHandlers() {
     }
   });
 
+  ipcMain.handle('vccFinancialOp:data-manager:delete-targets', (_event, payload = {}) => {
+    try {
+      return {
+        status: 'success',
+        targets: getVccFinancialOpService().listDeleteTargets(payload)
+      };
+    } catch (error) {
+      return vccFinancialOpErrorResult(error);
+    }
+  });
+
   ipcMain.handle('vccFinancialOp:data-manager:delete-preview', (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewDatasetDeletion(payload)
+        ...getVccFinancialOpService().previewDataTargetDeletion(payload)
       };
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:data-manager:delete', 'VCC财务OP校验', '删除数据', async (_event, payload = {}) => {
+  dynamicTrackedIpcHandle(
+    'vccFinancialOp:data-manager:delete',
+    'VCC财务OP校验',
+    '删除数据',
+    (_result, _event, payload = {}) => (
+      (payload.targetType || payload.sourceType) === 'result' ? '删除结果' : '删除数据'
+    ),
+    async (_event, payload = {}) => {
     try {
+      const service = getVccFinancialOpService();
+      const result = await service.deleteDataTarget(payload);
       return {
-        status: 'success',
-        ...await getVccFinancialOpService().deleteDatasetData(payload)
+        ...result,
+        targetType: result.targetType || payload.targetType || payload.sourceType,
+        operationStatus: result.status || 'deleted',
+        status: 'success'
       };
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
@@ -12601,23 +12778,22 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', async (_event, payload = {}) => {
     try {
       const service = getVccFinancialOpService();
-      const runId = Number(payload.runId);
-      const run = service.getRunResult(runId);
-      if (!run || run.status !== 'archived') {
-        return { status: 'error', message: '仅已确认归档的财务OP校验结果可以导出' };
-      }
-      const subjects = service.listRunSubjects(runId);
+      const target = service.getArchivedRunByMonth(payload.targetMonth);
+      const subjects = target.subjects;
       if (subjects.length === 1) {
         const choice = await dialog.showSaveDialog(mainWindow, {
           title: '导出 VCC 财务OP校验结果表',
           defaultPath: path.join(
             app.getPath('documents'),
-            `${run.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
+            `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
           ),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
         if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-        const result = await service.exportRun({ runId, outputPath: choice.filePath });
+        const result = await service.exportRun({
+          targetMonth: target.targetMonth,
+          outputPath: choice.filePath
+        });
         return { status: 'success', ...result };
       }
       const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
@@ -12627,10 +12803,13 @@ function registerNewAccountHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { status: 'cancelled' };
       }
-      const result = await service.exportRun({ runId, outputDirectory: choice.filePaths[0] });
+      const result = await service.exportRun({
+        targetMonth: target.targetMonth,
+        outputDirectory: choice.filePaths[0]
+      });
       return { status: 'success', ...result };
     } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+      return vccFinancialOpErrorResult(error);
     }
   });
 
@@ -15899,6 +16078,13 @@ function tickUsageStats(moduleKey, functionKey) {
 //   account-mapping:save / file:export-detail / new-account:export 等 handler 实际返回
 //   `status: 'success'`，导致统计偏低 → 同时接受两种方言（不接受 ready / empty 中间态）
 const SUCCESS_STATUSES = new Set(['ok', 'success']);
+const VCC_USAGE_SUCCESS_STATUSES = new Set(['calculated', 'archived', 'initialized', 'all_skipped']);
+
+function isSuccessfulTrackedResult(result, moduleKey) {
+  if (!result || typeof result !== 'object') return false;
+  if (SUCCESS_STATUSES.has(result.status)) return true;
+  return moduleKey === 'VCC财务OP校验' && VCC_USAGE_SUCCESS_STATUSES.has(result.status);
+}
 
 function archiveOutputPaths(files) {
   const values = Array.isArray(files) ? files : [];
@@ -16284,8 +16470,26 @@ function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
     const result = channel.startsWith('position-reconciliation:')
       ? await runPositionReconciliationOperation(channel, execute)
       : await execute();
-    if (result && SUCCESS_STATUSES.has(result.status)) {
+    if (isSuccessfulTrackedResult(result, moduleKey)) {
       tickUsageStats(moduleKey, functionKey);
+    }
+    return result;
+  }));
+}
+
+function dynamicTrackedIpcHandle(
+  channel,
+  moduleKey,
+  operationFunctionKey,
+  resolveUsageFunctionKey,
+  handler
+) {
+  const meta = { channel, moduleKey, functionKey: operationFunctionKey };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
+    const result = await runArchiveAwareOperation(meta, event, args, handler);
+    if (isSuccessfulTrackedResult(result, moduleKey)) {
+      const usageFunctionKey = resolveUsageFunctionKey(result, event, ...args);
+      if (usageFunctionKey) tickUsageStats(moduleKey, usageFunctionKey);
     }
     return result;
   }));

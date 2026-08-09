@@ -16,7 +16,21 @@ const {
   getSourceDefinition
 } = require('../../../src/backend/vcc-financial-op/definitions');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
+const {
+  previewDataTargetDeletion
+} = require('../../../src/backend/vcc-financial-op/data-target-deletion');
 const { writeImportAuditWorkbook } = require('../../../src/main-process/vcc-financial-op-audit-writer');
+
+function deleteWithPreview(db, targetMonth, sourceType) {
+  const preview = previewDataTargetDeletion(db, { targetMonth, targetType: sourceType });
+  return deleteDataset({
+    db,
+    targetMonth,
+    sourceType,
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+}
 
 test('幂等审计导出保留原表字段、前导零键和新旧双侧血缘', async (t) => {
   const db = new DatabaseSync(':memory:');
@@ -53,7 +67,7 @@ test('幂等审计导出保留原表字段、前导零键和新旧双侧血缘',
     INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
     VALUES ('2026-06', ?)
   `).run(SOURCE_TYPES.RECHARGE);
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-audit-output-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -109,7 +123,7 @@ test('系统财务OP审计导出遵守主体和文件名筛选', async (t) => {
     INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
     VALUES ('2026-06', ?)
   `).run(SOURCE_TYPES.SYSTEM_OP);
-  deleteDataset({ db, targetMonth: '2026-06', sourceType: SOURCE_TYPES.SYSTEM_OP });
+  deleteWithPreview(db, '2026-06', SOURCE_TYPES.SYSTEM_OP);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-system-audit-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const outputPath = path.join(dir, 'system-audit.xlsx');
