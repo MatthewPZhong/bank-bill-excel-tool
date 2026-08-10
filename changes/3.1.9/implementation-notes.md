@@ -43,7 +43,7 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| 确认稿行数与 SHA-256 | 1618 行；`52a7f430...a31b`，归档副本一致 | 产品合同未被重写 |
+| Spec 行数与 SHA-256 | 开工基线确认稿为 1618 行、`52a7f430...a31b`（当时归档副本一致）；本轮按 PR 评论反向同步 §5.2 并修正 Markdown 后，当前仓库 Spec 为 1620 行、`f5c871ccd7fd17a0b93459b12a66dfb7528282a6d1f4bee25020108caa02e024` | 产品变化仅 canonical terminal positional 契约的文档纠错 |
 | 基线检查 | HEAD/origin/main 均为 `63c1ce4...`；版本 3.1.8 | 实施基线锁定 |
 | SQLite ADD COLUMN probe | SQLite 3.50.4；默认值回填成功，非法 task status 被 CHECK 拒绝 | 可用纯加法迁移，不需重建旧表 |
 | archive 定向基线 | repository/service/controller 44/44 PASS | v1 兼容基线 |
