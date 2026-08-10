@@ -30,6 +30,18 @@
 9. 所有新 IPC 都必须经过 preload 白名单、主进程参数校验和退出/迁移互斥；renderer 不得传入任意文件系统路径来绕过 Electron 文件夹选择器。
 10. 完成后必须反向同步：Spec、tasks、test-spec、implementation-notes、CHANGELOG、用户手册、版本功能历史、重要变量清单、预览和发布证据。代码合并前状态保持“待实施 / 待合并”。
 
+## 0.1 VCC 财务 OP 纠错补遗窄范围 Erratum
+
+自 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5` 起，v3.1.9 的以下三类合同由 v3.1.8 上线后[纠错补遗](../3.1.8/erratum/README.md)中的 [Spec v2](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md) 和 [TechDoc v1.1](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md)取代：
+
+1. 标准 v3.1.7 四数据集归档的结构分类与兼容边界；
+2. VCC adjustment、archive、unarchive 和 delete 的操作保护路径；
+3. 数据管理、归档枚举、删除目标和受保护写操作的性能路径。
+
+本 erratum 仅有上述窄效力。第 1 章 C01—C14、PR1 的批次身份合同和 PR2 的 TaskLifecycle/七字段 worker context/终态 CAS 合同保持不变；金额、币种、主体、九币种余额、调整公式、五表新计算规则和结果模板均不改变。
+
+补遗只前向约束 v3.1.9，不追溯改写 v3.1.8 已发布二进制、tag、冻结 Spec/hash 或人工 `6/6 PASS` 历史证据。分类、runtime 或性能 PROBE 失败时必须阻断后续合并/发布，不得放宽 classifier/guard、伪造 Pending、启用无保护提交或新增 fallback。
+
 ---
 
 # 1. 已确认产品决策
@@ -1262,7 +1274,9 @@ VCC财务OP主进程 handlers / service / worker
 
 ---
 
-# 14. 建议 PR 拆分
+# 14. 规范 PR 拆分与串行顺序
+
+冻结顺序为：`PR2 → PR2.5-0 → PR2.5-A → PR2.5-B → PR2.5-C1 → PR2.5-C2 → PR3-VCC → PR3-Toolbox → PR4 → PR5 → PR6 → PR7`。所有 PR 串行，从直接前序冻结头建立；不得并行合并、跨过中间合同，或让后续 PR 依赖未提交的本地文件。PR2 人工 GUI/资金验收仍是整组 merge gate；若验收改变 PR2 核心合同，PR2.5 及后续整链必须 rebase 到新的 PR2 冻结头。
 
 ## PR1 — 批次身份与数据库迁移
 
@@ -1283,12 +1297,51 @@ VCC财务OP主进程 handlers / service / worker
 - 现有 12 模块迁移，不改业务算法；
 - `BusinessFlowResolver` / `parentRunId` 创建、继承、重跑与跨重启契约。
 
-## PR3 — VCC财务OP与工具箱
+## PR2.5-0 — Spec / TechDoc 合同冻结
+
+- 仓库内 v3.1.8 纠错补遗与来源证据；
+- v3.1.9 本窄范围 erratum；
+- Unknowns Register、测试矩阵和发布门禁；
+- 纯文档，不修改生产或测试代码。
+
+## PR2.5-A — Compat foundation
+
+- ArchiveEvidenceV2 与生效结果纯校验器；
+- pure classifier 与 gate 分离；
+- 真实 v3.1.7 fixture 及分类测试；
+- 不切换现有生产入口。
+
+## PR2.5-B — Read performance
+
+- read worker、schema-ready、snapshot/token v2；
+- 集合化 archive/result evidence；
+- active month visibility、delete target one-shot preview；
+- data manager shell/cache、SQL trace 与读取性能。
+
+## PR2.5-C1 — Guard + adjustment/archive
+
+- mutation guard、table/SQL step registry、largeTableScopeProof；
+- adjustment/archive 固定预算与受保护失败审计；
+- adjustment/archive 写 worker 和确认归档性能验收。
+
+## PR2.5-C2 — Unarchive/delete
+
+- current/legacy unarchive 固定计划；
+- opening/result/source delete 固定计划；
+- audit materialization、progress/cancel、故障注入与约 16 GB 删除验收。
+
+## PR3-VCC — VCC 财务 OP TaskLifecycle 接线
 
 - VCC 全通道 reserve/exclude 登记；
+- 七字段 worker context、BOR、cancel 与 terminal CAS；
+- metadata/artifact 登记；
+- 不修改本纠错业务合同。
+
+## PR3-Toolbox — 工具箱独立接线
+
 - 工具箱 archive scope；
 - merge/split 输入输出归档；
-- 13+1 覆盖测试。
+- 不触碰 VCC classifier、token 或 guard。
 
 ## PR4 — 年/月/日/批次目录化
 

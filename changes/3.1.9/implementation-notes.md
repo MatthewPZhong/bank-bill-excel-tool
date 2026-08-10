@@ -296,3 +296,55 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - Final gate `check-vars -- --include-minor`：exit 2 仅命中 Critical `FileValidationError`、`unmatchedRows`。前者只用于新增 assignment exact-set 拒绝，沿用既有 `code/message/detailLines/context` schema 与 catch/writer；后者只用于 Acquiring completed-run summary evidence/canonical main mirror，未改 scenario-dispatcher/reconIdFix 两条同名流水线、`modifiedRows + unmatchedRows = bankRows` 守恒、writer 去内部字段或 runCheck SQL/币种金额算法。按清单必跑 smoke 纳入完整 release-check；真实 Excel/WPS 资金输出仍保留人工门禁。
 - Final release-check：首轮 lint/smoke PASS，unit 4921/4922；唯一失败是 `archive-center-ui-contract` 仍按已替换的旧 Position finalizer 函数名截取源码，判定为陈旧静态测试并只对齐 `finalizePositionTerminalIntent`，未改生产。修正后单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4922/4922（314 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions PASS（304260ms）。runner 全绿后自动刷新 `rules/integration-test-policy.md` §七的 timestamp/timings，脚本与断言数未变，按生成证据约定保留。
 - Windows CI follow-up：Actions run `31416514064` 的 smoke 已通过，unit 唯一失败为 statement 静态顺序测试以 LF 字面量定位 `createPreviewSourceFreshnessGuard`，Windows CRLF checkout 令索引为 `-1`；生产顺序与行为未失败。该测试现以行尾/缩进无关 regex 定位同一 final accepted-path guard，不加 platform branch、retry 或 timeout。单文件 11/11、12 个改动测试文件 273/273、lint/node/diff check PASS；修正后本地单一 session `npm run release-check` exit 0：unit 4922/4922，integration 48/48 scripts、2459/2459 assertions PASS（283436ms）。
+
+## PR2.5-0 纠错 Spec / TechDoc 合同冻结（2026-08-11）
+
+### Baseline
+
+- Goal/spec：[`changes/3.1.8/erratum/README.md`](../3.1.8/erratum/README.md) 所索引的纠错 Spec v2 与 TechDoc v1.1。
+- Initial plan：从 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5` 开始，仅做九个文档文件的合同冻结与 v3.1.9 窄 erratum。
+- Done when：来源与转换可复核、严格 PR 顺序唯一、PR1/PR2 证据保留、全部剩余 PROBE 和人工资金门禁明确未完成。
+
+### Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| 保持 `changes/3.1.8/spec.md` 原 SHA，补遗进入独立目录 | 原 Spec 是已发布合同并被 release-docs 测试锁 hash | 直接 append 已发布 Spec | 历史发布证据不变；PRD 增加前向补遗入口 |
+| raw source 只做 12 处 hard-break 等价格式转换 | 两文档各 6 个 header 行尾双空格会让全量 diff-check 失败 | 逐字节复制并声称 diff-check 通过；顺手格式化全文 | 同时记录 raw/repository SHA，并用 normalization-only diff 证明正文不变 |
+| 只替代 VCC 归档兼容、操作保护和性能路径 | 纠错 Spec v2 §10.1 明确为窄 erratum | 重写 C01—C14 或 PR1/PR2 | 既有全局批次和生命周期合同保持 |
+| 将后续链拆为 A/B/C1/C2、PR3-VCC、PR3-Toolbox 严格串行 | TechDoc §18 冻结所有权和依赖顺序 | 延续合并 PR3 或并行开发 | 后序只从直接前序冻结头开始；PR2 变化触发整链 rebase |
+| 本 PR 不改三份发布用户文档 | 无新二进制或用户行为落地；版本文档同步属于 PR7 | 提前写 CHANGELOG/手册并暗示已实现 | 避免把合同冻结误写为发布事实 |
+
+### Assumptions
+
+无资金、兼容或公共接口假设。仓库目录命名和索引形式是低风险、可回滚的文档组织决定；合同正文、来源 SHA 和实际采用基线分别留证。
+
+### Deviations
+
+| 原计划 | 实际方案 | 原因 | 影响 | Spec 已同步 |
+| --- | --- | --- | --- | --- |
+| 外部 Spec v2 §10.1 写“向 `changes/3.1.8/spec.md` 追加补遗” | 冻结原 Spec，使用 `changes/3.1.8/erratum/` 并由 v3.1.8 PRD、v3.1.9 Spec 互链 | 原 Spec SHA 是已发布证据且有自动测试硬锁；评审已批准独立目录 | 仅改变仓库归档位置，不改变任何产品合同；前向补遗更清楚地与历史发布隔离 | 是 |
+
+### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| raw source SHA-256 | Spec `34778f...17fcf1`；TechDoc `08e9f9...84549` | 来源身份与用户给定权威值一致 |
+| repository copy SHA-256 | Spec `c4354a...c1773`；TechDoc `363533...85b3c` | 仓库副本身份可固定复核 |
+| 仓库化 transformation | 两份文档各 6 个 metadata hard-break 从行尾双空格改为 `<br>`，共 12 处 | 不把格式 normalization 冒充 raw byte identity；正文合同不变 |
+| v3.1.8 frozen Spec baseline | `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d` | 补遗没有追溯改写发布合同 |
+| normalization / link / Markdown gate | 只读 normalization 后两份副本 2/2 无差异；九文件本地链接 17/17；tracked diff 与三个新文件分别通过 diff-check | 12 处转换之外无正文漂移，仓库链接与空白门禁可复核 |
+| 冻结发布文档定向测试 | `node --test tests/unit/vcc-financial-op-release-docs.test.js` 5/5 PASS；原冻结 Spec 与三份发布用户文档零 diff | 已发布 v3.1.8 hash 与 `6/6 PASS` 历史证据未改写 |
+| 提交前 check-vars | 负责人执行 `npm run check:vars -- --include-minor` exit 0；HEAD+working tree 的 `src/` 无改动，脚本 skip | 零变量命中，无需关联功能 review |
+| blindspot / reconciliation pass | 未发现需新增防御、兼容矩阵或自动资金结论；PR2 manual、真实 fixture/旧库、packaged runtime、16 GB 与财务人工均保持未完成 | 文档冻结不冒充实现/发布；资金红线仍由人工门禁阻断 |
+
+本 PR 未运行完整 `release-check`；以上只记录本次 targeted docs evidence，不重复宣称 PR1/PR2 的既有全量门禁为本 PR 新证据。
+
+### Remaining Unknowns
+
+| 未知 | 处理 | 负责人/下一步 | 合并影响 |
+| --- | --- | --- | --- |
+| PR2 GUI、真实崩溃/重启和资金人工验收 | PROBE / 人工 | 用户按 PR2 P0→P1 清单执行 | 整组 merge gate；失败则整链 rebase/重验 |
+| 真实 v3.1.7 fixture、目标 legacy-four 与生产 trigger | PROBE | A 阶段生成真实 fixture；上线前完整副本只读 inspect | 不符不放宽 classifier；阻断对应合并/发布 |
+| packaged runtime `createSession/readOnly/query_only/UPDATE FROM` | PROBE | C1/C2 与 Windows installer/portable feature test | 不可用则阻断，不降级无保护提交 |
+| 约 16 GB 性能与财务人工复核 | PROBE / ⚠️ 人工资金红线 | B/C 性能报告；财务逐主体×九币种、跨月和审计复核 | 阻断发布；自动测试不能替代 |
