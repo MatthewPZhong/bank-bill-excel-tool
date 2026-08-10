@@ -18,8 +18,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const TESTS_ROOT = path.join(__dirname, '..', 'tests', 'unit');
-const LOG_DIR = path.join(__dirname, '..', 'logs', 'unit-tests');
+const REPO_ROOT = path.join(__dirname, '..');
+const TESTS_ROOT = path.join(REPO_ROOT, 'tests', 'unit');
+const LOG_DIR = path.join(REPO_ROOT, 'logs', 'unit-tests');
 
 function findTestFiles(dir) {
   if (!fs.existsSync(dir)) return [];
@@ -33,6 +34,13 @@ function findTestFiles(dir) {
     }
   }
   return out.sort();
+}
+
+function buildNodeTestArgs(files, { coverage = false } = {}) {
+  const args = ['--test'];
+  if (coverage) args.push('--experimental-test-coverage');
+  args.push(...files.map((file) => path.relative(REPO_ROOT, file)));
+  return args;
 }
 
 // 纯函数：解析 node --test 摘要行的计数。
@@ -101,16 +109,17 @@ function main() {
   }
 
   const coverage = process.argv.includes('--coverage');
-  const args = ['--test'];
-  if (coverage) args.push('--experimental-test-coverage');
-  args.push(...files);
+  const args = buildNodeTestArgs(files, { coverage });
 
   const startedAt = new Date();
   const start = Date.now();
 
   // 用异步 spawn + pipe：既能实时回显（.pipe 到父 stdout/stderr），又能累积 buffer 解析/落盘。
   //   stdio 全 pipe；不引入任何 shell（三平台兼容，沿用原脚本 spawn(process.execPath) 约束）。
-  const child = spawn(process.execPath, args, { stdio: ['inherit', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, args, {
+    cwd: REPO_ROOT,
+    stdio: ['inherit', 'pipe', 'pipe']
+  });
 
   let stdoutBuf = '';
   let stderrBuf = '';
@@ -178,4 +187,5 @@ module.exports = {
   parseTapSummary,
   formatLogTimestamp,
   buildSummaryText,
+  buildNodeTestArgs,
 };

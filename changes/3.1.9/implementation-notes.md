@@ -224,6 +224,7 @@
 | PR2 完整 unit 首轮两项收口 | 首轮 4906/4908；原失败两文件修后 13/13 PASS，直接相关 9 文件 90/90 PASS；lint、相关 `node --check`、`git diff --check` PASS | 两项均为测试陈旧而非生产旁路：Position 锁断言未容忍格式化换行；DuplicateInbound 抽取 harness 未注入 `ipcMain`/未执行真实 prepare-execute contract。仅更新测试，生产代码未改 |
 | PR2 完整自动门禁 | `npm run release-check` exit 0；unit 4908/4908；48 个 integration 脚本 2459/2459；smoke、lint PASS | PR2 lifecycle、worker、archive、既有业务导入/对账/输出的完整自动回归通过 |
 | PR2 提交前 check-vars | `npm run check:vars -- --include-minor` exit 2（命中需 review，不是测试失败）；Critical 5、Important-skeleton 8、Runtime-state 9、Risk-sensitive 3、Minor 4 均完成逐项判定 | 模板常量、错误 schema、资金算法、行守恒、一次性迁移均未改变；真实变更限于 lifecycle/context/freshness/精确恢复接线，详下节 |
+| PR2 Windows CI runner follow-up | Actions run `31360364725` 在 smoke PASS 后以 `spawn ENAMETOOLONG` 停于 unit runner；314 个绝对测试路径参数约 35,544 字符。改为仓库相对参数并固定 child cwd 后，直接测试 11/11 PASS；独立完整 `npm run release-check` exit 0：lint/smoke PASS、unit 4909/4909、48 个 integration 脚本 2459/2459（总耗时 399674ms）；语法/diff check PASS | Windows 命令行长度环境差异，不是业务生产回归或陈旧测试；仍保持单次 `node --test`、coverage flag、文件集合/顺序、实时输出、汇总与日志语义 |
 
 PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、真实 Electron 崩溃/重启及资金结果人工复核仍未执行，因此不据此宣称 PR2 人工验收完成。
 

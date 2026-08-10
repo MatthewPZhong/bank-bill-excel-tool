@@ -5,8 +5,15 @@
 
 const { test, describe } = require('node:test');
 const assert = require('node:assert');
+const path = require('node:path');
 
-const { parseTapSummary, buildSummaryText } = require('../../scripts/run-unit-tests.js');
+const {
+  parseTapSummary,
+  buildSummaryText,
+  buildNodeTestArgs
+} = require('../../scripts/run-unit-tests.js');
+
+const REPO_ROOT = path.join(__dirname, '..', '..');
 
 // 真实 node --test（spec reporter，Node 24 捕获 stdout 时的实际格式）尾部摘要
 const SPEC_ALL_PASS = [
@@ -137,5 +144,25 @@ describe('buildSummaryText — N/N PASS 文案', () => {
   test('解析失败（全 null）→ 用 ? 占位、不抛', () => {
     const text = buildSummaryText({ summary: parseTapSummary(''), fileCount: 0, elapsedMs: 1 });
     assert.match(text, /==== \?\/\? PASS ====/);
+  });
+});
+
+describe('buildNodeTestArgs — spawn 路径契约', () => {
+  test('测试文件转为仓库相对路径，coverage、文件集合与顺序不变', () => {
+    const files = [
+      path.join(REPO_ROOT, 'tests', 'unit', 'z-last.test.js'),
+      path.join(REPO_ROOT, 'tests', 'unit', 'nested', 'a-first.test.js')
+    ];
+
+    const args = buildNodeTestArgs(files, { coverage: true });
+    const testFileArgs = args.slice(2);
+
+    assert.deepStrictEqual(args.slice(0, 2), ['--test', '--experimental-test-coverage']);
+    assert.strictEqual(testFileArgs.length, files.length);
+    assert.ok(testFileArgs.every((file) => !path.isAbsolute(file)));
+    assert.deepStrictEqual(
+      testFileArgs.map((file) => path.resolve(REPO_ROOT, file)),
+      files
+    );
   });
 });
