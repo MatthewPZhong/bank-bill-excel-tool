@@ -51,3 +51,44 @@
 | 3 | 增加 task CAS、related/latest 与 flow anchor 查询 | 状态分离、parent 血缘、latest 不倒退、跨重启恢复 | DTO/CAS/锚点/删除与重启测试 | 影响后续 PR 接线，不影响 v1 | 收缩为 repository 基础 API |
 | 4 | 追加 ArchiveService 门面但不接业务 | 形成 PR2 可调用接口且不动现有 tracker | service 单测与既有 44 项回归 | 只影响新 API | 移除门面，保留 repository |
 | 5 | 跑 PR1 unit 与 blindspot/reconciliation 复核 | 防入口越界和资金行为漂移 | 定向 suite 全绿；业务算法 diff 为零 | 不交 review | 修复后重跑，不扩大 PR 范围 |
+
+## PR #132 P1 评论复核（2026-08-10）
+
+### Task Brief
+
+- Goal: 在 PR1 内修复删除授权、旧库 cursor seed、flow anchor 来源血缘和 task 预留日期四条 P1 缺陷。
+- Context: PR1 head 为 `98ddcf9`；四条缺陷均位于 `ArchiveRepository` / `ArchiveService` 的 PR1 基础契约，尚未接入 PR2 业务 action。
+- Constraints: repository 是手工删除与 `cleanupExpired()` 的共用授权点；只做加法迁移和最小时钟契约，不重建 `archive_batches`，不改已有批次号、legacy `createBatch` 显式日期或显式 `retentionUntil` 语义。
+- Done when: active 批次不可物理删除；seed 重复执行不烧号；source flow anchor 严格验证 module/parent；task 日期、批次号、`reservedAt` 与默认 retention 来自事务内同一次时钟采样，并通过定向 P0/P1 回归。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| `deleteBatch` 当前只拒绝 locked | `ArchiveRepository.deleteBatch` 未检查 `task_status`；service 的手工删除和 cleanup 都进入 `_deleteBatchUnlocked` | repository 统一返回 `active`；service 统一映射 `ARCHIVE_BATCH_ACTIVE`，`force/allowLocked` 不绕过 active |
+| module cursor 回填发生在 v2 列创建前且扫描全部 batch | `ensureArchiveMetadataSupport` 先从 `archive_batches` 聚合，再 `addColumnsIfMissing(batch_format_version)` | 首次旧 schema 必须先加列，再只按 `batch_format_version=1` 回填 |
+| global seed 的 batch JOIN 会按同模块 batch 数倍增 cursor | `archive_batch_sequences LEFT JOIN archive_batches` 后直接 `SUM(s.last_sequence)` | global seed 只聚合去重后的 module cursor，不连接 batch 明细；冲突更新只允许不倒退 |
+| source parent 为空时现逻辑会跳过 parent 比较 | `sourceBatch.parent_run_id && sourceBatch.parent_run_id !== parentRunId` | 有 source 时 module 和 parent 必须同时严格相等；无 source 的新 anchor 保持允许 |
+| task 日期和时间当前由 service/repository 分别采样且允许 payload 覆盖 | `_batchInput(payload)` 读取 `payload.localDate`，repository 再调用 `_timestamp()` | 事务回调内只采样一次；显式 task `localDate` 拒绝；默认 retention 基于同一 localDate；legacy createBatch 不变 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| active 的精确集合 | 状态边界 | 高 | 容易 | task CHECK 与评论均锁定五态 | PROBE | reserved/running 表驱动删除 + terminal 后删除 | 仅 `reserved/running`；不为 CHECK 已排除状态加 fallback |
+| 显式 `retentionUntil` 是否需要改变 | 兼容盲区 | 中 | 容易 | 缺陷只要求默认 retention 与权威日一致 | ASSUME | 既有 service/repository retention 回归 | 保留显式日期语义；仅默认 `retentionDays` 下沉 |
+| 时钟样本应由 service 还是 repository 持有 | 并发/午夜边界 | 高 | 一般 | 序号写事务与 DB 幂等均在 repository | PROBE | fake clock 首次/后续样本跨午夜且断言调用次数 | repository 的 `BEGIN IMMEDIATE` 回调内唯一采样 |
+
+### BLOCK 问题
+
+无。现有 Spec、评论和代码证据足以锁定修复方案。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 修正 seed 顺序与聚合 | 老 schema 兼容、cursor 单调与重启幂等 | 同模块多 v1 首迁、跨模块 v2 后重复 ensure | 会继续烧号，停止后续交付 | 回退 seed SQL，不动表结构 |
+| 2 | 收紧 repository 删除授权 | active 状态不可销毁且 cleanup/manual 同源 | reserved/running 拒绝，terminal 后原批次可删，cleanup 返回 active | 任务血缘可丢失，停止交付 | 仅回退授权检查 |
+| 3 | 收紧 source flow anchor | module/parent 主键血缘 | null-parent source 冲突，exact-parent 成功 | 跨流程串联，停止交付 | 回退单个条件 |
+| 4 | 收敛 task 时钟与默认 retention | 日期/号码/时间/保留期同源 | 伪造 localDate 拒绝，跨午夜 fake clock 仅调用一次 | 批次跨日错位，停止交付 | 保留 legacy createBatch，收缩为 task API |
+| 5 | 定向回归与 blindspot 复核 | 不扩大资金/业务行为面 | unit、lint、syntax、diff gate 全绿 | 不交 review | 修复后重跑 |

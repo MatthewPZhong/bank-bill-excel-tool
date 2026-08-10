@@ -163,6 +163,24 @@ function dateToIso(value) {
   return date.toISOString();
 }
 
+function localDateOf(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError('now() 必须返回有效日期');
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function addCalendarDays(localDate, days) {
+  const normalized = normalizeLocalDate(localDate);
+  const count = Number(days);
+  if (!Number.isSafeInteger(count) || count < 1 || count > 36500) {
+    throw new TypeError('retentionDays 必须是 1 到 36500 的安全整数');
+  }
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
 function formatBatchNumber(moduleCode, localDate, dailySequence) {
   const code = normalizeModuleCode(moduleCode);
   const date = normalizeLocalDate(localDate).replace(/-/g, '');
@@ -263,13 +281,6 @@ function ensureArchiveMetadataSupport(db) {
       PRIMARY KEY (module_code, local_date)
     );
 
-    INSERT INTO archive_batch_sequences (module_code, local_date, last_sequence)
-    SELECT module_code, local_date, MAX(daily_sequence)
-    FROM archive_batches
-    GROUP BY module_code, local_date
-    ON CONFLICT(module_code, local_date) DO UPDATE SET
-      last_sequence = MAX(archive_batch_sequences.last_sequence, excluded.last_sequence);
-
     CREATE TABLE IF NOT EXISTS archive_blobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sha256 TEXT NOT NULL UNIQUE,
@@ -326,6 +337,16 @@ function ensureArchiveMetadataSupport(db) {
       ['failure_message', 'failure_message TEXT']
     ]);
 
+    db.exec(`
+      INSERT INTO archive_batch_sequences (module_code, local_date, last_sequence)
+      SELECT module_code, local_date, MAX(daily_sequence)
+      FROM archive_batches
+      WHERE batch_format_version = 1
+      GROUP BY module_code, local_date
+      ON CONFLICT(module_code, local_date) DO UPDATE SET
+        last_sequence = MAX(archive_batch_sequences.last_sequence, excluded.last_sequence);
+    `);
+
     addColumnsIfMissing(db, 'archive_artifacts', [
       ['storage_relative_path', 'storage_relative_path TEXT'],
       ['storage_mode', 'storage_mode TEXT'],
@@ -359,10 +380,8 @@ function ensureArchiveMetadataSupport(db) {
       SELECT
         s.local_date,
         SUM(s.last_sequence),
-        COALESCE(MAX(b.updated_at), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       FROM archive_batch_sequences s
-      LEFT JOIN archive_batches b
-        ON b.module_code = s.module_code AND b.local_date = s.local_date
       GROUP BY s.local_date
       ON CONFLICT(local_date) DO UPDATE SET
         last_sequence = MAX(archive_daily_sequences.last_sequence, excluded.last_sequence),
@@ -647,7 +666,7 @@ class ArchiveRepository {
         `).get(sourceBatchId);
         if (!sourceBatch) throw new Error(`存档批次不存在：${sourceBatchId}`);
         if (sourceBatch.module_id !== identity.moduleId
-            || (sourceBatch.parent_run_id && sourceBatch.parent_run_id !== parentRunId)) {
+            || sourceBatch.parent_run_id !== parentRunId) {
           const error = new Error('业务身份锚点与来源批次的归属不一致');
           error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
           throw error;
@@ -869,6 +888,9 @@ class ArchiveRepository {
     if (Object.prototype.hasOwnProperty.call(payload, 'batchNumber')) {
       throw new TypeError('batchNumber 只能由存档中心分配');
     }
+    if (Object.prototype.hasOwnProperty.call(payload, 'localDate')) {
+      throw new TypeError('task 批次 localDate 只能由存档中心时钟生成');
+    }
     const moduleId = normalizeModuleId(payload.moduleId);
     const moduleCode = normalizeModuleCode(payload.moduleCode || payload.moduleId);
     const moduleName = requiredText(payload.moduleName || payload.moduleId, 'moduleName', 128);
@@ -876,18 +898,26 @@ class ArchiveRepository {
     const taskKey = requiredText(payload.taskKey, 'taskKey', 128);
     const taskRunId = optionalText(payload.taskRunId, 256);
     const parentRunId = optionalText(payload.parentRunId, 256);
-    const localDate = normalizeLocalDate(payload.localDate);
-    const retentionUntil = normalizeRetentionUntil(payload.retentionUntil, localDate);
     const businessStatus = optionalText(payload.businessStatus, 64);
     const metadataJson = normalizeMetadata(payload.metadata);
     const locked = payload.locked === true ? 1 : 0;
-    const timestamp = this._timestamp();
 
     return withWriteTransaction(this.db, () => {
       const existing = this.db.prepare(`
         SELECT id FROM archive_batches WHERE module_id = ? AND operation_key = ?
       `).get(moduleId, operationKey);
       if (existing) return { created: false, batch: this.getBatch(existing.id) };
+
+      const reservedAt = this.now();
+      const timestamp = dateToIso(reservedAt);
+      const localDate = localDateOf(reservedAt);
+      const retentionUntil = payload.retentionUntil !== undefined
+        ? normalizeRetentionUntil(payload.retentionUntil, localDate)
+        : payload.retentionDays === null || payload.retentionDays === 'permanent'
+          ? null
+          : payload.retentionDays === undefined
+            ? null
+            : addCalendarDays(localDate, payload.retentionDays);
 
       this.db.prepare(`
         INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
@@ -1486,6 +1516,10 @@ class ArchiveRepository {
     return withWriteTransaction(this.db, () => {
       const batch = this.getBatch(id);
       if (!batch) return { status: 'not-found', batchId: id, releasedBlobs: [] };
+      if (batch.taskStatus === BATCH_TASK_STATUSES.RESERVED
+          || batch.taskStatus === BATCH_TASK_STATUSES.RUNNING) {
+        return { status: 'active', batch, releasedBlobs: [] };
+      }
       if (batch.locked && !allowLocked) {
         return { status: 'locked', batch, releasedBlobs: [] };
       }

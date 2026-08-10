@@ -200,6 +200,7 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     assert.equal(reserved.status, 'reserved');
     assert.equal(reserved.batchNumber, '2026-07-20-001');
     assert.equal(reserved.taskStatus, 'reserved');
+    assert.equal(reserved.batch.retentionUntil, '2026-09-18');
     assert.equal(replay.status, 'existing');
     assert.equal(replay.batchId, reserved.batchId);
 
@@ -253,6 +254,53 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     assert.equal(forged.ok, false);
     assert.equal(forged.code, 'ARCHIVE_OPERATION_FAILED');
     assert.equal(fixture.service.repository.getStats().batchCount, 1);
+
+    const forgedDate = await fixture.service.reserveTaskBatch({
+      ...payload,
+      operationKey: 'task-operation-forged-date',
+      localDate: '2099-01-01'
+    });
+    assert.equal(forgedDate.ok, false);
+    assert.equal(forgedDate.code, 'ARCHIVE_OPERATION_FAILED');
+    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原批次可清理', async () => {
+  let currentTime = new Date(2026, 6, 1, 12, 0, 0);
+  const fixture = createFixture({ now: () => currentTime });
+  try {
+    const reserved = await fixture.service.reserveTaskBatch({
+      ...batchPayload('active-retention-task'),
+      taskKey: 'statement:generate',
+      taskRunId: 'active-retention-task-run',
+      retentionUntil: '2026-07-10'
+    });
+    assert.equal(reserved.ok, true);
+
+    const manualDelete = await fixture.service.deleteBatch(reserved.batchId, { force: true });
+    assert.equal(manualDelete.ok, false);
+    assert.equal(manualDelete.status, 'active');
+    assert.equal(manualDelete.code, 'ARCHIVE_BATCH_ACTIVE');
+
+    currentTime = new Date(2026, 6, 20, 12, 0, 0);
+    const activeCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(activeCleanup.ok, false);
+    assert.equal(activeCleanup.status, 'partial');
+    assert.equal(activeCleanup.candidateCount, 1);
+    assert.equal(activeCleanup.deletedBatchCount, 0);
+    assert.equal(activeCleanup.results[0].code, 'ARCHIVE_BATCH_ACTIVE');
+    assert.equal((await fixture.service.getBatch(reserved.batchId)).ok, true);
+
+    const completed = await fixture.service.completeTaskBatch(reserved.batchId);
+    assert.equal(completed.batch.id, reserved.batchId);
+    assert.equal(completed.batch.taskStatus, 'succeeded');
+    const terminalCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(terminalCleanup.ok, true);
+    assert.equal(terminalCleanup.deletedBatchCount, 1);
+    assert.equal((await fixture.service.getBatch(reserved.batchId)).status, 'not-found');
   } finally {
     fixture.close();
   }

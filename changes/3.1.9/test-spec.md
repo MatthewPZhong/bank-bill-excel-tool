@@ -55,3 +55,25 @@
 - smoke：PASS。
 - `check-vars -- --include-minor`：PASS，未命中重要变量。
 - 本 PR 无 UI、业务 action 或文件目录接线，Spec 第七章对应人工操作项留待 PR2—PR7；PR1 的数据库 P0/P1 均已由真实 SQLite 自动化覆盖。
+
+## 6. PR #132 P1 评论增量矩阵
+
+| ID | 优先级 | 场景 | 最小关键断言 |
+| --- | --- | --- | --- |
+| R1 | P0 | active 删除授权 | reserved/running 表驱动拒绝且原批次仍可转 terminal；转 terminal 后可正常删除；service 手工删除与 cleanup 同映射 `ARCHIVE_BATCH_ACTIVE` |
+| R2 | P0 | seed 首迁与重启幂等 | 同模块多条 v1 首迁只取 module max；跨模块 v2 预留后重复 ensure 不推进 module/global cursor；已有 global cursor 不倒退 |
+| R3 | P0 | flow source 血缘 | null/空 parent 的 source batch 以现有冲突码拒绝；既有 exact-parent 成功保持 |
+| R4 | P0 | task 权威日期 | 显式伪造 `localDate` 拒绝且无写入；跨午夜 fake clock 只采样一次，localDate、batchNumber、reservedAt、默认 retention 同源 |
+| R5 | P1 | legacy/现有行为回归 | legacy `createBatch` 仍接受显式 localDate；v1/v2 迁移窗口交错、locked 删除、terminal CAS、artifact/Blob 删除回归不变 |
+
+执行结果在实现完成后增量回填，不用重复排列全部 terminal、force、时区或日期组合。
+
+### 6.1 执行结果
+
+- P0 定向：allocator/repository/service 共 40/40 PASS。
+- P1 archive 回归：allocator、UI contract、repository、controller、operation tracker、outbox、service、source snapshot 共 110/110 PASS。
+- `npm run lint`、相关文件 `node --check`、`git diff --check` 均 PASS。
+- `npm run check:vars -- --include-minor` PASS，脚本未命中重要变量；另已人工按 ArchiveRepository/ArchiveService 审计血缘条目完成关联 review。
+- 完整 `npm run release-check` exit 0：lint PASS；smoke PASS；unit 4816/4816 PASS（304 个测试文件，Node 测试 15177.643ms、runner 15214ms）；integration 48/48 脚本、2459/2459 断言 PASS（386135ms）。
+- team-lead 最终 review：无 P0/P1、无入口旁路、无过度防御；独立复跑两个相关文件 34/34 PASS，git diff/status 边界正确。
+- 本轮无 UI、目录物化或真实业务 action 接线，无新增 GUI 手动项；人工代码 review 由 team-lead 在未提交检查点执行。

@@ -19,6 +19,10 @@
 | terminal task 状态使用最小 CAS | cancel IPC 与原任务 Promise 可乱序完成 | 后返回结果无条件覆盖 | expected 非终态才更新；相同 terminal 幂等，不同 terminal 返回 conflict |
 | task terminal 同事务收敛 archiveStatus | C04 无文件元数据任务没有 artifact 事件触发原 `_refreshBatchStatus`，会永久停在 staging；但登记前 archive failure 也可能留下 0 artifact | 把 task failed/cancelled 直接写成 archive failed/incomplete，或把所有 0 artifact 一律 complete | 0 artifact 且无当前 archive failure 证据/all ready=`complete`，pending=`staging`，failed 或登记失败证据=`incomplete`；累计 failureCount 不阻止真实重试转 complete |
 | task 状态和 archiveStatus 使用独立列/接口 | Spec §4.3、§17.13 | 把 failed/cancelled 塞进 archiveStatus | 保留既有 archive 文件状态与 CHECK |
+| 删除授权由 repository 同时保护 locked 与 active | 手工删除和 `cleanupExpired()` 最终都调用 `ArchiveRepository.deleteBatch`；active 的 reserved/running 尚未形成可删除事实 | 只在 service/UI 拦截，或让 `force` 绕过 active | repository 返回 `active`，service 稳定映射 `ARCHIVE_BATCH_ACTIVE`；force 仍只绕过 locked |
+| cursor seed 先完成 v2 列迁移，再仅回填 v1 module cursor；global seed 独立聚合 module cursor | 首次旧 schema 无 `batch_format_version`，现 SQL又会纳入 v2；batch JOIN 造成 fan-out | 重建 batch 表、按可见 batch max 重算、降低已有 cursor | 不改已有号；重复 ensure 只取 MAX，v2 重启不再推动 module/global cursor |
+| 有 source 的 flow anchor 要求 source module/parent 双严格等值 | 空 parent 不能证明来源属于目标 flow | 把 null/空 parent 当继承证据，或新增 fallback | 继续使用 `ARCHIVE_FLOW_ANCHOR_CONFLICT`；无 source 的新流程 anchor 不受影响 |
+| task 权威时间由 repository 写事务内唯一采样 | localDate、号码和 reservedAt 都在同一预留事务形成；service/repository 双采样会跨午夜错位 | service 先采样再传日期，或继续允许 caller localDate | 显式 task localDate 拒绝；默认 retentionDays 基于同一 localDate；显式 retentionUntil 与 legacy createBatch 兼容语义保留 |
 
 ## Assumptions
 
@@ -45,9 +49,15 @@
 | smoke | PASS | 既有主流程、writer、场景、日志与进度回归 |
 | `check-vars -- --include-minor` | PASS，未命中重要变量 | 无需追加重要变量专项 review |
 | blindspot / reconciliation 复核 | 已修复 latest 伪发行、terminal 迟到覆盖、零文件 staging 悬挂，同时保留登记前失败证据；flow anchor 跨模块串联已拒绝；无金额/币种/匹配/Excel 输出改动 | 主键血缘、状态生命周期、部分失败、并发、兼容和资金边界闭合 |
+| PR #132 P1 定向测试 | `node --test` allocator/repository/service：40/40 PASS；完整 archive 相关 8 文件：110/110 PASS | active 删除、seed 幂等、flow parent 血缘、权威日期与既有 controller/tracker/outbox/service 回归 |
+| PR #132 静态门禁 | ESLint PASS；相关生产/测试 `node --check` PASS；`git diff --check` PASS | 语法、编码规范和补丁空白错误 |
+| PR #132 重要变量复核 | `npm run check:vars -- --include-minor` PASS、脚本无命中；人工按 `ArchiveRepository` / `ArchiveService` Risk-sensitive 条目复核 schema 幂等、序号不复用、Blob 删除顺序和业务/存档隔离 | 未改金额、币种、匹配、artifact/Blob 内容或 Excel 输出；无资金红线人工样本项 |
+| PR #132 完整 release-check | exit 0；lint PASS；smoke PASS；unit 4816/4816 PASS（304 files，Node 测试 15177.643ms、runner 15214ms）；integration 48/48 scripts、2459/2459 assertions PASS（386135ms） | 四项修复之外无 unit/integration/smoke 回归；integration runner 自动生成的 policy 耗时刷新不属于本轮交付范围 |
+| PR #132 team-lead review | 无 P0/P1、无入口旁路、无过度防御；独立复跑两个相关文件 34/34 PASS，git diff/status 边界正确 | 四项修复与测试范围通过最终代码 review |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
 | PR2 各模块采用哪一种稳定 business identity type/value | 后续实现 | PR2 BusinessFlowResolver 按各模块已有 runId/operationToken 显式选择 | 不阻塞 PR1；禁止月份/hash fallback |
+| PR #132 四条 P1 评论是否引入新的产品口径 | PROBE 已消除 | 现有 Spec 与 review 评论已锁定；按定向测试验证 | 不阻塞；无 Spec 偏差 |

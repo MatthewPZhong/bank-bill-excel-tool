@@ -349,14 +349,31 @@ class ArchiveService {
 
   _taskBatchInput(payload = {}) {
     const input = {
-      ...this._batchInput(payload),
+      moduleId: payload.moduleId,
+      moduleCode: payload.moduleCode || deriveModuleCode(payload.moduleId),
+      moduleName: payload.moduleName || payload.moduleId,
       operationKey: payload.operationKey,
       taskKey: payload.taskKey,
       taskRunId: payload.taskRunId,
-      parentRunId: payload.parentRunId
+      parentRunId: payload.parentRunId,
+      businessStatus: payload.businessStatus || '',
+      locked: payload.locked === true,
+      metadata: payload.metadata
     };
     if (Object.prototype.hasOwnProperty.call(payload, 'batchNumber')) {
       input.batchNumber = payload.batchNumber;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'localDate')) {
+      input.localDate = payload.localDate;
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'retentionUntil')) {
+      input.retentionUntil = payload.retentionUntil;
+    } else if (payload.retentionDays === null || payload.retentionDays === 'permanent') {
+      input.retentionDays = null;
+    } else {
+      input.retentionDays = payload.retentionDays === undefined
+        ? this.defaultRetentionDays
+        : Number(payload.retentionDays);
     }
     return input;
   }
@@ -1070,6 +1087,15 @@ class ArchiveService {
         status: 'locked',
         code: 'ARCHIVE_BATCH_LOCKED',
         message: '批次已锁定，请先解除锁定',
+        batch: deleted.batch
+      };
+    }
+    if (deleted.status === 'active') {
+      return {
+        ok: false,
+        status: 'active',
+        code: 'ARCHIVE_BATCH_ACTIVE',
+        message: '批次任务仍在执行，暂不能删除',
         batch: deleted.batch
       };
     }

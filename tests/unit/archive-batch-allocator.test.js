@@ -15,7 +15,7 @@ const {
 } = require('../../src/backend/database/archive-repository');
 
 function createFixture() {
-  let currentTime = new Date('2026-08-10T01:00:00.000Z');
+  let currentTime = new Date(2026, 7, 10, 1, 0, 0);
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   const repository = createArchiveRepository(db, { now: () => currentTime });
@@ -38,7 +38,6 @@ function reserve(repository, overrides = {}) {
     taskRunId: `task-${Math.random()}`,
     operationKey: `operation-${Math.random()}`,
     parentRunId: 'parent-1',
-    localDate: '2026-08-10',
     retentionUntil: '2026-10-09',
     ...overrides
   });
@@ -131,6 +130,15 @@ test('v1 旧库纯加法迁移保持历史身份与 archiveStatus 三态，并�
       INSERT INTO archive_batches (
         batch_number, module_id, module_code, module_name, operation_key,
         local_date, daily_sequence, archive_status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'complete', ?, ?)
+    `).run(
+      'A-20260809-002', 'module-a', 'A', '模块 A', 'legacy-a-2',
+      '2026-08-09', 2, timestamp, timestamp
+    );
+    db.prepare(`
+      INSERT INTO archive_batches (
+        batch_number, module_id, module_code, module_name, operation_key,
+        local_date, daily_sequence, archive_status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'incomplete', ?, ?)
     `).run(
       'B-20260809-001', 'module-b', 'B', '模块 B', 'legacy-b',
@@ -151,7 +159,7 @@ test('v1 旧库纯加法迁移保持历史身份与 archiveStatus 三态，并�
     ensureArchiveMetadataSupport(db);
     ensureArchiveMetadataSupport(db);
     const repository = createArchiveRepository(db, {
-      now: () => new Date('2026-08-10T01:00:00.000Z')
+      now: () => new Date(2026, 7, 9, 12, 0, 0)
     });
     const legacy = repository.getBatch(firstId);
     assert.equal(legacy.batchNumber, 'A-20260809-001');
@@ -179,12 +187,37 @@ test('v1 旧库纯加法迁移保持历史身份与 archiveStatus 三态，并�
       moduleCode: 'A',
       moduleName: '模块 A',
       operationKey: 'first-v2',
-      localDate: '2026-08-09',
       retentionUntil: null
     }).batch;
     assert.equal(next.batchNumber, '2026-08-09-006');
     assert.equal(next.dailySequence, 6);
     assert.equal(next.globalDailySequence, 6);
+    const crossModule = reserve(repository, {
+      moduleId: 'module-b',
+      moduleCode: 'B',
+      moduleName: '模块 B',
+      operationKey: 'second-v2',
+      retentionUntil: null
+    }).batch;
+    assert.equal(crossModule.batchNumber, '2026-08-09-007');
+
+    ensureArchiveMetadataSupport(db);
+    ensureArchiveMetadataSupport(db);
+    assert.deepEqual(
+      db.prepare(`
+        SELECT module_code, last_sequence
+        FROM archive_batch_sequences
+        WHERE local_date = '2026-08-09'
+        ORDER BY module_code
+      `).all().map((row) => ({ ...row })),
+      [
+        { module_code: 'A', last_sequence: 3 },
+        { module_code: 'B', last_sequence: 2 }
+      ]
+    );
+    assert.equal(db.prepare(`
+      SELECT last_sequence FROM archive_daily_sequences WHERE local_date = '2026-08-09'
+    `).get().last_sequence, 7);
 
     assert.throws(
       () => db.prepare(`UPDATE archive_batches SET archive_status = 'failed' WHERE id = ?`).run(firstId),
@@ -231,7 +264,7 @@ test('reserveTaskBatch 使用全局日流水、持久幂等和 v2 DTO，latest �
     assert.equal(first.batch.dailySequence, first.batch.globalDailySequence);
     assert.equal(first.batch.taskStatus, 'reserved');
     assert.equal(first.batch.archiveStatus, 'staging');
-    assert.equal(first.batch.reservedAt, '2026-08-10T01:00:00.000Z');
+    assert.equal(first.batch.reservedAt, new Date(2026, 7, 10, 1, 0, 0).toISOString());
     assert.equal(replay.created, false);
     assert.equal(replay.batch.id, first.batch.id);
 
@@ -244,9 +277,11 @@ test('reserveTaskBatch 使用全局日流水、持久幂等和 v2 DTO，latest �
       SELECT last_sequence FROM archive_daily_sequences WHERE local_date = '2026-08-10'
     `).get().last_sequence, beforeRead);
 
+    assert.equal(repository.deleteBatch(third.batch.id).status, 'active');
+    repository.updateTaskStatus(third.batch.id, 'succeeded');
     assert.equal(repository.deleteBatch(third.batch.id).status, 'deleted');
     assert.equal(repository.getLatestIssuedBatch().batchNumber, '2026-08-10-003');
-    setTime('2026-08-10T01:01:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 1, 0));
     const fourth = reserve(repository, {
       operationKey: 'op-4',
       taskRunId: 'task-4'
@@ -265,6 +300,76 @@ test('reserveTaskBatch 使用全局日流水、持久幂等和 v2 DTO，latest �
   }
 });
 
+test('reserved/running 批次拒绝物理删除，原批次进入终态后才可删除', () => {
+  const { db, repository } = createFixture();
+  try {
+    for (const scenario of [
+      { taskStatus: 'reserved', locked: false },
+      { taskStatus: 'running', locked: true }
+    ]) {
+      const batch = reserve(repository, {
+        operationKey: `delete-active-${scenario.taskStatus}`,
+        taskRunId: `delete-active-task-${scenario.taskStatus}`,
+        locked: scenario.locked
+      }).batch;
+      if (scenario.taskStatus === 'running') {
+        repository.updateTaskStatus(batch.id, 'running');
+      }
+
+      const active = repository.deleteBatch(batch.id, { allowLocked: true });
+      assert.equal(active.status, 'active');
+      assert.equal(active.batch.id, batch.id);
+      assert.equal(repository.getBatch(batch.id).taskStatus, scenario.taskStatus);
+
+      const terminal = repository.updateTaskStatus(batch.id, 'succeeded');
+      assert.equal(terminal.id, batch.id);
+      assert.equal(terminal.taskStatus, 'succeeded');
+      assert.equal(repository.deleteBatch(batch.id, { allowLocked: true }).status, 'deleted');
+    }
+  } finally {
+    db.close();
+  }
+});
+
+test('task 预留拒绝调用方日期，并由事务内单次时钟采样统一日期、号码、时间和默认保留期', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const beforeMidnight = new Date(2026, 7, 10, 23, 59, 59, 900);
+  const afterMidnight = new Date(2026, 7, 11, 0, 0, 0, 100);
+  let clockCalls = 0;
+  const repository = createArchiveRepository(db, {
+    now: () => (clockCalls++ === 0 ? beforeMidnight : afterMidnight)
+  });
+  repository.ensureSchema();
+  const payload = {
+    moduleId: 'statement-generator',
+    moduleCode: 'STATEMENT',
+    moduleName: '网银账单生成',
+    taskKey: 'generate',
+    taskRunId: 'authoritative-clock-task',
+    operationKey: 'authoritative-clock-operation',
+    parentRunId: 'authoritative-clock-parent',
+    retentionDays: 60
+  };
+  try {
+    assert.throws(
+      () => repository.reserveTaskBatch({ ...payload, localDate: '2099-01-01' }),
+      /localDate 只能由存档中心时钟生成/
+    );
+    assert.equal(clockCalls, 0);
+    assert.equal(repository.getStats().batchCount, 0);
+
+    const reserved = repository.reserveTaskBatch(payload).batch;
+    assert.equal(clockCalls, 1);
+    assert.equal(reserved.localDate, '2026-08-10');
+    assert.equal(reserved.batchNumber, '2026-08-10-001');
+    assert.equal(reserved.reservedAt, beforeMidnight.toISOString());
+    assert.equal(reserved.retentionUntil, '2026-10-09');
+  } finally {
+    db.close();
+  }
+});
+
 test('task 状态、时间与失败 DTO 独立于 archiveStatus，parent 关联按日期和全局序号排序', () => {
   const { db, repository, setTime } = createFixture();
   try {
@@ -273,47 +378,45 @@ test('task 状态、时间与失败 DTO 独立于 archiveStatus，parent 关联�
       taskRunId: 'related-task-1',
       parentRunId: 'flow-1'
     }).batch;
-    setTime('2026-08-10T01:01:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 1, 0));
     const second = reserve(repository, {
       operationKey: 'related-2',
       taskRunId: 'related-task-2',
       parentRunId: 'flow-1'
     }).batch;
-    setTime('2026-08-11T01:00:00.000Z');
+    setTime(new Date(2026, 7, 11, 1, 0, 0));
     const third = reserve(repository, {
       operationKey: 'related-3',
       taskRunId: 'related-task-3',
       parentRunId: 'flow-1',
-      localDate: '2026-08-11',
       retentionUntil: '2026-10-10'
     }).batch;
     reserve(repository, {
       operationKey: 'other-flow',
       taskRunId: 'other-flow-task',
       parentRunId: 'flow-2',
-      localDate: '2026-08-11',
       retentionUntil: '2026-10-10'
     });
 
-    setTime('2026-08-10T01:02:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 2, 0));
     const running = repository.updateTaskStatus(first.id, 'running');
     assert.equal(running.taskStatus, 'running');
-    assert.equal(running.startedAt, '2026-08-10T01:02:00.000Z');
+    assert.equal(running.startedAt, new Date(2026, 7, 10, 1, 2, 0).toISOString());
     assert.equal(running.archiveStatus, 'staging');
 
-    setTime('2026-08-10T01:03:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 3, 0));
     const failed = repository.updateTaskStatus(first.id, 'failed', {
       failureCode: 'TASK_FAILED',
       failureMessage: '任务失败'
     });
     assert.equal(failed.taskStatus, 'failed');
-    assert.equal(failed.finishedAt, '2026-08-10T01:03:00.000Z');
+    assert.equal(failed.finishedAt, new Date(2026, 7, 10, 1, 3, 0).toISOString());
     assert.equal(failed.failureCode, 'TASK_FAILED');
     assert.equal(failed.failureMessage, '任务失败');
     assert.equal(failed.artifactCount, 0);
     assert.equal(failed.archiveStatus, 'complete');
 
-    setTime('2026-08-10T01:04:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 4, 0));
     const cancelled = repository.updateTaskStatus(second.id, 'cancelled', {
       code: 'USER_CANCELLED',
       message: '用户取消'
@@ -323,10 +426,10 @@ test('task 状态、时间与失败 DTO 独立于 archiveStatus，parent 关联�
     assert.equal(cancelled.artifactCount, 0);
     assert.equal(cancelled.archiveStatus, 'complete');
 
-    setTime('2026-08-11T01:05:00.000Z');
+    setTime(new Date(2026, 7, 11, 1, 5, 0));
     const succeeded = repository.updateTaskStatus(third.id, 'succeeded');
     assert.equal(succeeded.taskStatus, 'succeeded');
-    assert.equal(succeeded.finishedAt, '2026-08-11T01:05:00.000Z');
+    assert.equal(succeeded.finishedAt, new Date(2026, 7, 11, 1, 5, 0).toISOString());
     assert.equal(succeeded.failureCode, '');
     assert.equal(succeeded.artifactCount, 0);
     assert.equal(succeeded.archiveStatus, 'complete');
@@ -459,7 +562,7 @@ test('task terminal 状态使用 CAS：取消与成功都不能被迟到的相�
       operationKey: 'cancel-race',
       taskRunId: 'cancel-race-task'
     }).batch;
-    setTime('2026-08-10T01:01:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 1, 0));
     const cancelled = repository.transitionTaskStatus(cancelledBatch.id, 'cancelled', {
       expectedStatuses: ['reserved', 'running'],
       code: 'USER_CANCELLED',
@@ -470,7 +573,7 @@ test('task terminal 状态使用 CAS：取消与成功都不能被迟到的相�
     assert.equal(cancelled.batch.archiveStatus, 'complete');
     const cancelledAt = cancelled.batch.finishedAt;
 
-    setTime('2026-08-10T01:02:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 2, 0));
     const lateSuccess = repository.transitionTaskStatus(cancelledBatch.id, 'succeeded', {
       expectedStatuses: ['reserved', 'running']
     });
@@ -489,7 +592,7 @@ test('task terminal 状态使用 CAS：取消与成功都不能被迟到的相�
       operationKey: 'success-race',
       taskRunId: 'success-race-task'
     }).batch;
-    setTime('2026-08-10T01:03:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 3, 0));
     const succeeded = repository.transitionTaskStatus(succeededBatch.id, 'succeeded', {
       expectedStatuses: ['reserved', 'running']
     });
@@ -498,7 +601,7 @@ test('task terminal 状态使用 CAS：取消与成功都不能被迟到的相�
     assert.equal(succeeded.batch.archiveStatus, 'complete');
     const succeededAt = succeeded.batch.finishedAt;
 
-    setTime('2026-08-10T01:04:00.000Z');
+    setTime(new Date(2026, 7, 10, 1, 4, 0));
     const lateCancel = repository.transitionTaskStatus(succeededBatch.id, 'cancelled', {
       expectedStatuses: ['reserved', 'running']
     });
@@ -511,30 +614,28 @@ test('task terminal 状态使用 CAS：取消与成功都不能被迟到的相�
 });
 
 test('跨日从 001 开始，999/1000/1001 不截断', () => {
-  const { db, repository } = createFixture();
+  const { db, repository, setTime } = createFixture();
   try {
     db.prepare(`
       INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
       VALUES ('2026-08-12', 998, '2026-08-12T00:00:00.000Z')
     `).run();
+    setTime(new Date(2026, 7, 12, 12, 0, 0));
     const batch999 = reserve(repository, {
       operationKey: 'seq-999',
-      localDate: '2026-08-12',
       retentionUntil: null
     }).batch;
     const batch1000 = reserve(repository, {
       operationKey: 'seq-1000',
-      localDate: '2026-08-12',
       retentionUntil: null
     }).batch;
     const batch1001 = reserve(repository, {
       operationKey: 'seq-1001',
-      localDate: '2026-08-12',
       retentionUntil: null
     }).batch;
+    setTime(new Date(2026, 7, 13, 12, 0, 0));
     const nextDay = reserve(repository, {
       operationKey: 'next-day',
-      localDate: '2026-08-13',
       retentionUntil: null
     }).batch;
 
@@ -629,7 +730,7 @@ test('业务身份锚点跨 repository 重启可查询、重复绑定幂等且�
   try {
     db.exec('PRAGMA foreign_keys = ON');
     let repository = createArchiveRepository(db, {
-      now: () => new Date('2026-08-10T04:00:00.000Z')
+      now: () => new Date(2026, 7, 10, 4, 0, 0)
     });
     repository.ensureSchema();
     const source = reserve(repository, {
@@ -654,7 +755,7 @@ test('业务身份锚点跨 repository 重启可查询、重复绑定幂等且�
     db = new DatabaseSync(dbPath);
     db.exec('PRAGMA foreign_keys = ON');
     repository = createArchiveRepository(db, {
-      now: () => new Date('2026-08-10T05:00:00.000Z')
+      now: () => new Date(2026, 7, 10, 5, 0, 0)
     });
     repository.ensureSchema();
     assert.equal(repository.findFlowAnchor(identity).parentRunId, 'parent-anchor');
@@ -674,6 +775,23 @@ test('业务身份锚点跨 repository 重启可查询、重复绑定幂等且�
     );
     assert.equal(repository.findFlowAnchor(identity).parentRunId, 'parent-anchor');
 
+    const parentlessSource = reserve(repository, {
+      operationKey: 'anchor-parentless-source',
+      taskRunId: 'anchor-parentless-task',
+      parentRunId: ''
+    }).batch;
+    assert.throws(
+      () => repository.bindFlowAnchor({
+        moduleId: 'statement-generator',
+        identityType: 'business-run-id',
+        identityValue: 'parentless-source-must-not-prove-flow',
+        parentRunId: 'parent-anchor',
+        sourceBatchId: parentlessSource.id
+      }),
+      (error) => error.code === 'ARCHIVE_FLOW_ANCHOR_CONFLICT'
+    );
+
+    repository.updateTaskStatus(source.id, 'succeeded');
     repository.deleteBatch(source.id);
     const afterDelete = repository.findFlowAnchor(identity);
     assert.equal(afterDelete.parentRunId, 'parent-anchor');
@@ -692,7 +810,7 @@ const WORKER_SOURCE = `
   const db = new DatabaseSync(workerData.dbPath);
   db.exec('PRAGMA busy_timeout = 30000');
   const repository = createArchiveRepository(db, {
-    now: () => new Date('2026-08-10T02:00:00.000Z')
+    now: () => new Date(2026, 7, 10, 12, 0, 0)
   });
   try {
     const results = workerData.operations.map((operation) => repository.reserveTaskBatch({
@@ -703,7 +821,6 @@ const WORKER_SOURCE = `
       taskRunId: operation,
       operationKey: operation,
       parentRunId: 'concurrent-flow',
-      localDate: '2026-08-10',
       retentionUntil: null
     }));
     parentPort.postMessage(results.map((result) => ({
@@ -786,7 +903,7 @@ test('14 个范围通过真实多连接并发预留 100 次无重复无丢号，
     db = new DatabaseSync(dbPath);
     db.exec('PRAGMA busy_timeout = 30000');
     const restarted = createArchiveRepository(db, {
-      now: () => new Date('2026-08-10T03:00:00.000Z')
+      now: () => new Date(2026, 7, 10, 3, 0, 0)
     });
     const next = reserve(restarted, {
       operationKey: 'after-restart',
