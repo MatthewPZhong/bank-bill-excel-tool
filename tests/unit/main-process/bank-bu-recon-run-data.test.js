@@ -45,6 +45,36 @@ test('import 落侧库；主库 imports 表恒 0 行', () => {
   assert.equal(mainDb.prepare('SELECT COUNT(*) c FROM bank_bu_recon_bank_imports').get().c, 0, '主库 bank 0 行');
 });
 
+test('导入流程证据来自持久行主键，首次 run 与显式重跑可区分且可跨实例读取', () => {
+  seedMonth('2026-03');
+  const first = bankBuReconRunData.getImportFlowEvidence({
+    userDataDir,
+    mainDb,
+    yearMonth: '2026-03'
+  });
+  assert.equal(first.identity.type, 'bank-bu-import-bundle');
+  assert.match(first.identity.value, /^scope=2026-03\|pending=\d+-\d+-7\|bank=\d+-\d+-7$/);
+  assert.equal(first.hasRun, false);
+
+  bankBuReconRunData.runViaSideDb({ userDataDir, mainDb, yearMonth: '2026-03' });
+  const afterRun = bankBuReconRunData.getImportFlowEvidence({
+    userDataDir,
+    mainDb,
+    yearMonth: '2026-03'
+  });
+  assert.deepEqual(afterRun.identity, first.identity);
+  assert.equal(afterRun.hasRun, true);
+
+  seedMonth('2026-03');
+  const reimported = bankBuReconRunData.getImportFlowEvidence({
+    userDataDir,
+    mainDb,
+    yearMonth: '2026-03'
+  });
+  assert.notEqual(reimported.identity.value, first.identity.value);
+  assert.equal(reimported.hasRun, false);
+});
+
 test('run inline + 主库镜像 runId = 主库镜像 id（非侧库 id）', () => {
   seedMonth('2026-03');
   seedMonth('2026-04');

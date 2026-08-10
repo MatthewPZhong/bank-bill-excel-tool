@@ -96,6 +96,7 @@ function runPipeline({
   files,
   contractModulePath,
   contractOptions,
+  batchContext,
   useWhitelist,
   writeBatch,
   parallel,
@@ -203,6 +204,7 @@ function runPipeline({
         filePath: files[fileIndex],
         contractModulePath,
         contractOptions,
+        batchContext,
         useWhitelist: useWhitelist !== false
       });
     } catch (postErr) {

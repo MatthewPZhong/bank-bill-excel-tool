@@ -53,6 +53,15 @@ function makeBill(date, id, currency) {
 
 const FIXTURE_DATE = '2026-04-15';
 const FIXTURE_MONTH = '2026-04';
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 901,
+  batchNumber: 'ABC-202604-000901',
+  taskRunId: 'task-run-901',
+  taskKey: 'acquiringBillCurrency:run',
+  moduleId: 'acquiring-bill-currency',
+  parentRunId: 'flow-run-901',
+  operationKey: 'run:2026-04:901',
+});
 
 async function writeXlsx(filePath, headers, dataRows) {
   const wb = new ExcelJS.Workbook();
@@ -649,6 +658,7 @@ test.describe('runCheckCore byte-for-byte contract', () => {
         db: ctx.db.db,
         monthKey: FIXTURE_MONTH,
         storageRoot: ctx.tmpdir,
+        batchContext: BATCH_CONTEXT,
         onProgress: (ev) => {
           // stage='sql-joining' 是 COMMIT 之后第一个 onProgress 事件
           //   H1 修复后：此时查 runs，chunk_progress 必须已写入（同事务）
@@ -665,6 +675,40 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       const snapshotProgress = JSON.parse(crashSnapshot);
       assert.equal(snapshotProgress.status, 'in-progress', '5.8 COMMIT 后立即可见的 chunk_progress.status=in-progress');
       assert.equal(snapshotProgress.lastCompletedChunkIndex, -1, '5.9 占位 lastCompletedChunkIndex=-1');
+      assert.equal(snapshotProgress.batchContextVersion, 1, '5.10 初始 batchContext 版本与 run/progress 同事务可见');
+      assert.deepEqual(snapshotProgress.batchContext, BATCH_CONTEXT, '5.11 初始 batchContext 精确 7 字段同事务可见');
+
+      const finalRun = ctx.db.db.prepare(
+        'SELECT chunk_progress FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+      ).get();
+      assert.deepEqual(JSON.parse(finalRun.chunk_progress).batchContext, BATCH_CONTEXT, '5.12 complete 更新保留原 batchContext');
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('T19-session.6b — 初始 progress/context 更新失败时 run 插入一并回滚', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    try {
+      ctx.db.db.exec(`
+        CREATE TRIGGER reject_initial_run_progress
+        BEFORE UPDATE OF chunk_progress ON acquiring_bill_currency_runs
+        BEGIN
+          SELECT RAISE(ABORT, 'SIMULATED_PROGRESS_WRITE_FAILURE');
+        END;
+      `);
+
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          batchContext: BATCH_CONTEXT,
+        }),
+        /SIMULATED_PROGRESS_WRITE_FAILURE/
+      );
+      const count = ctx.db.db.prepare('SELECT COUNT(*) AS count FROM acquiring_bill_currency_runs').get().count;
+      assert.equal(count, 0, 'progress/context 写入失败不得留下无上下文 run');
     } finally {
       ctx.cleanup();
     }

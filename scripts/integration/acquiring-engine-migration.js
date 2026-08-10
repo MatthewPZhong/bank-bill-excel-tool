@@ -49,7 +49,20 @@ async function runChild(opJsonPath, dbPath) {
         importFlowOverwrite: session.importFlowFilesWithOverwrite,
         importBillOverwrite: session.importBillFilesWithOverwrite
       }[o.method];
-      const r = await fn({ db: db.db, monthKey: op.monthKey, filePaths: o.filePaths });
+      const r = await fn({
+        db: db.db,
+        monthKey: op.monthKey,
+        filePaths: o.filePaths,
+        batchContext: {
+          batchId: 319,
+          batchNumber: '2026-08-10-001',
+          taskRunId: 'acquiring-engine-migration',
+          taskKey: `acquiringBillCurrency:${o.method}`,
+          moduleId: 'acquiring-bill-currency',
+          parentRunId: 'acquiring-engine-parent',
+          operationKey: `acquiring-engine-${o.method}`
+        }
+      });
       // 仅取稳定字段对比（totalImported / fileCount / monthKey / deletedCount）；perFileStats 形状两路不同（已知，不比）。
       out.results.push({
         totalImported: r.totalImported,

@@ -455,7 +455,19 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.match(operationLifecycle, /persistedPending\.operationToken !== operationToken/);
     assert.match(operationLifecycle, /persistedPending\.archiveState !== 'durable'/);
     assert.match(operationLifecycle, /pendingBeforeClear\.operationToken !== operationToken/);
-    assert.match(mainProcess, /archiveCenterService\.persistOperationIntent\(\{/);
+    const recoveryStart = mainProcess.indexOf('function persistPositionArchiveIntentIfNeeded');
+    const recoveryEnd = mainProcess.indexOf('function recoverPositionArchiveIntent', recoveryStart);
+    const recoveryFlow = mainProcess.slice(recoveryStart, recoveryEnd);
+    assert.match(
+      recoveryFlow,
+      /const batchContext = pending\.batchContext;[\s\S]*archiveCenterService\.persistAppendIntent\(\{\s*batchContext,/
+    );
+    assert.match(recoveryFlow, /缺少原任务 batchContext，禁止建立幽灵批次/);
+    assert.doesNotMatch(
+      recoveryFlow,
+      /persistOperationIntent|createBatch|findLatest|getLatest/,
+      '平盘恢复只能向 pending 原 batch 追加，不得建批或猜 latest'
+    );
     assert.match(
       mainProcess,
       /const files = requirePositionPendingArchiveFiles\(pending\);[\s\S]*const archiveRequired = pending\.archiveRequired[\s\S]*positionArchiveIntentEvidence\(pending, currentCheckpoint\)/
@@ -478,7 +490,6 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
     assert.match(operationLifecycle, /archiveResult\.persistentRetryAvailable !== true/);
     assert.match(operationLifecycle, /markDurable\(archiveResult\);\s*await cleanup\(runtime\)/);
-    assert.match(mainProcess, /code:\s*'archive-retry-registration-failed'/);
   });
 
   test('管理页侧库恢复失败时显示 detailLines，不只显示总标题', () => {

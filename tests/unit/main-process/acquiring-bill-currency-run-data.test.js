@@ -10,7 +10,12 @@ const path = require('node:path');
 
 const { AppDatabase } = require('../../../src/backend/database');
 const runDataStore = require('../../../src/backend/run-data-store');
+const runRepo = require('../../../src/backend/acquiring-bill-currency-db/run-repository');
+const {
+  createArchiveRepository
+} = require('../../../src/backend/database/archive-repository');
 const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
+const acquiringSession = require('../../../src/main-process/acquiring-bill-currency-session');
 
 const MODULE = runDataStore.MODULE_ACQUIRING;
 const RUNS_TABLE = 'acquiring_bill_currency_runs';
@@ -31,6 +36,64 @@ test.beforeEach(() => {
 test.afterEach(() => {
   try { mainDb.close(); } catch (_) { /* swallow */ }
   try { fs.rmSync(tmpdir, { recursive: true, force: true }); } catch (_) { /* swallow */ }
+});
+
+test.describe('peekImportTarget prepare 只读边界', () => {
+  test('目标侧库不存在时返回 0，且不创建目录或数据库', async () => {
+    const originalPeek = acquiringSession.peekImportTarget;
+    acquiringSession.peekImportTarget = async () => ({ monthKey: '2026-08', existingCount: 0, kind: 'flow' });
+    try {
+      const result = await acquiringRunData.peekImportTarget({
+        userDataDir,
+        kind: 'flow',
+        filePaths: ['/virtual/flow.xlsx'],
+      });
+      assert.deepEqual(result, { monthKey: '2026-08', existingCount: 0, kind: 'flow' });
+      assert.equal(
+        fs.existsSync(runDataStore.sideDbPath(userDataDir, MODULE, '2026-08')),
+        false,
+        'prepare 不得创建目标侧库'
+      );
+      assert.equal(
+        fs.existsSync(runDataStore.moduleDir(userDataDir, MODULE)),
+        false,
+        'prepare 不得创建 run-data 模块目录'
+      );
+    } finally {
+      acquiringSession.peekImportTarget = originalPeek;
+    }
+  });
+
+  test('目标侧库存在时只读查询，不调用会执行 DDL 的 openSideDb', async () => {
+    const sideDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-08');
+    sideDb.prepare(`
+      INSERT INTO acquiring_bill_currency_flow_imports
+        (month_key, source_file, source_row_index, recon_main_id, settle_amount, settle_amount_abs, raw_json)
+      VALUES ('2026-08', 'flow.xlsx', 2, 'M1', '10', '10', '')
+    `).run();
+    sideDb.close();
+
+    const sideDbFilePath = runDataStore.sideDbPath(userDataDir, MODULE, '2026-08');
+    const mtimeBefore = fs.statSync(sideDbFilePath).mtimeMs;
+    const originalPeek = acquiringSession.peekImportTarget;
+    const originalOpenSideDb = runDataStore.openSideDb;
+    acquiringSession.peekImportTarget = async () => ({ monthKey: '2026-08', existingCount: 0, kind: 'flow' });
+    runDataStore.openSideDb = () => {
+      throw new Error('prepare 不得调用 openSideDb');
+    };
+    try {
+      const result = await acquiringRunData.peekImportTarget({
+        userDataDir,
+        kind: 'flow',
+        filePaths: ['/virtual/flow.xlsx'],
+      });
+      assert.deepEqual(result, { monthKey: '2026-08', existingCount: 1, kind: 'flow' });
+      assert.equal(fs.statSync(sideDbFilePath).mtimeMs, mtimeBefore, '只读查询不得修改侧库文件');
+    } finally {
+      runDataStore.openSideDb = originalOpenSideDb;
+      acquiringSession.peekImportTarget = originalPeek;
+    }
+  });
 });
 
 // 建一个该月侧库（含 imports + 一个 run + diff 行）+ 主库镜像行。
@@ -63,6 +126,276 @@ function seedSideMonth(monthKey, { withMirror = true, withFlow = true, withBill 
     });
   }
 }
+
+function seedResumableRun({ source, monthKey, progress, batchContext = null }) {
+  const db = source === 'side'
+    ? runDataStore.openSideDb(userDataDir, MODULE, monthKey)
+    : mainDb;
+  try {
+    const inserted = db.prepare(`
+      INSERT INTO acquiring_bill_currency_runs
+        (month_key, total_bill_rows, matched_rows, mismatch_rows, unmatched_rows, status)
+      VALUES (?, 11, 9, 2, 0, 'failed')
+    `).run(monthKey);
+    const runId = Number(inserted.lastInsertRowid);
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
+      totalChunks: progress.totalChunks,
+      status: progress.status,
+      chunkSize: progress.chunkSize,
+      batchContext
+    });
+    return {
+      runId,
+      dbPath: source === 'side'
+        ? runDataStore.sideDbPath(userDataDir, MODULE, monthKey)
+        : appDb.dbPath
+    };
+  } finally {
+    if (source === 'side') db.close();
+  }
+}
+
+function batchContextFrom(batch) {
+  return Object.freeze({
+    batchId: batch.id,
+    batchNumber: batch.batchNumber,
+    taskRunId: batch.taskRunId,
+    taskKey: batch.taskKey,
+    moduleId: batch.moduleId,
+    parentRunId: batch.parentRunId,
+    operationKey: batch.operationKey
+  });
+}
+
+function reserveResumeBatch(repository, plan, parentRunId) {
+  return repository.reserveTaskBatch({
+    moduleId: 'acquiring-bill-currency',
+    moduleCode: 'ACQUIRING',
+    moduleName: '收单单据币种校验',
+    taskKey: 'acquiringBillCurrency:run:resume',
+    taskRunId: plan.taskRunId,
+    operationKey: plan.operationKey,
+    parentRunId
+  });
+}
+
+test.describe('crash/resume archive identity', () => {
+  test('side 新格式恢复复用精确身份，worker 保持 dbPath/chunk offset，成功只补 main mirror', async () => {
+    const monthKey = '2026-09';
+    const seeded = seedResumableRun({
+      source: 'side',
+      monthKey,
+      progress: {
+        lastCompletedChunkIndex: 3,
+        totalChunks: 8,
+        status: 'partial',
+        chunkSize: 25000
+      }
+    });
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const legacyPlan = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey,
+      runId: seeded.runId
+    });
+    const reserved = reserveResumeBatch(archiveRepository, legacyPlan, 'parent-side-resume');
+    const persistedContext = batchContextFrom(reserved.batch);
+    acquiringRunData.persistRunResumeBatchContext({
+      userDataDir,
+      mainDb,
+      prepared: legacyPlan,
+      batchContext: persistedContext
+    });
+    archiveRepository.transitionTaskStatus(persistedContext.batchId, 'running', {
+      expectedStatuses: ['reserved']
+    });
+    archiveRepository.transitionTaskStatus(persistedContext.batchId, 'failed', {
+      expectedStatuses: ['running'],
+      failureCode: 'WORKER_CRASH',
+      failureMessage: 'worker exited'
+    });
+
+    const prepared = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey,
+      runId: seeded.runId
+    });
+    assert.equal(prepared.source, 'side');
+    assert.equal(prepared.dbPath, seeded.dbPath);
+    assert.deepEqual(prepared.recovery.batchContext, persistedContext);
+    assert.equal(prepared.taskRunId, persistedContext.taskRunId);
+    assert.equal(prepared.operationKey, persistedContext.operationKey);
+    assert.equal(prepared.flowPlan, null, '持久恢复不重新解析 parent flow');
+
+    const latestBefore = archiveRepository.getLatestIssuedBatch();
+    const reopened = archiveRepository.beginTaskRecovery(
+      prepared.recovery.batchContext,
+      { evidence: prepared.recovery.evidence }
+    );
+    assert.equal(reopened.status, 'reopened');
+    assert.equal(archiveRepository.getLatestIssuedBatch().batchNumber, latestBefore.batchNumber);
+    assert.equal(archiveRepository.listBatches().length, 1, '恢复不新增序号/批次');
+
+    let workerPayload = null;
+    const result = await acquiringRunData.resumeRunCheck({
+      prepared,
+      storageRoot: tmpdir,
+      chunkSize: prepared.progress.chunkSize,
+      batchContext: persistedContext,
+      mainDb,
+      dispatchFn: async (payload) => {
+        workerPayload = payload;
+        return {
+          runId: seeded.runId,
+          totalBillRows: 11,
+          matchedRows: 9,
+          mismatchRows: 2,
+          unmatchedRows: 0,
+          diffFilePath: path.join(tmpdir, 'diff.xlsx'),
+          reportFilePath: null
+        };
+      },
+      dispatchCallbacks: {}
+    });
+    assert.equal(result.runId, seeded.runId);
+    assert.equal(workerPayload.__dbPath, seeded.dbPath);
+    assert.deepEqual(workerPayload.batchContext, persistedContext);
+    assert.deepEqual(workerPayload.resumeFromRun, {
+      runId: seeded.runId,
+      lastCompletedChunkIndex: 3
+    });
+    const mirror = mainDb.prepare(`
+      SELECT month_key, side_db_rel_path, mismatch_rows
+      FROM acquiring_bill_currency_runs
+      WHERE month_key = ?
+    `).get(monthKey);
+    assert.equal(mirror.side_db_rel_path, runDataStore.sideDbRelPath(MODULE, monthKey));
+    assert.equal(mirror.mismatch_rows, 2);
+  });
+
+  test('legacy side/main 使用 source+month+runId 稳定预留，reserve→backfill 窗口重试复用', async () => {
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    for (const fixture of [
+      { source: 'side', monthKey: '2026-10' },
+      { source: 'main', monthKey: '2026-11' }
+    ]) {
+      const seeded = seedResumableRun({
+        ...fixture,
+        progress: {
+          lastCompletedChunkIndex: 1,
+          totalChunks: 5,
+          status: 'partial',
+          chunkSize: 10000
+        }
+      });
+      const firstPlan = acquiringRunData.prepareRunResume({
+        userDataDir,
+        mainDb,
+        mainDbPath: appDb.dbPath,
+        monthKey: fixture.monthKey,
+        runId: seeded.runId
+      });
+      assert.equal(firstPlan.recovery.legacy, true);
+      assert.match(firstPlan.operationKey, new RegExp(`${fixture.source}:${fixture.monthKey}:${seeded.runId}$`));
+      assert.equal(
+        firstPlan.flowPlan.flowIdentity.value,
+        `acquiring-run:${fixture.source}:${fixture.monthKey}:${seeded.runId}`
+      );
+      const firstReserve = reserveResumeBatch(
+        archiveRepository,
+        firstPlan,
+        `parent-${fixture.source}`
+      );
+      assert.equal(firstReserve.created, true);
+      const latestAfterFirst = archiveRepository.getLatestIssuedBatch();
+
+      // 模拟进程崩在 reserve 与 batchContext 回填之间：原 run 仍是 legacy，稳定 operation 必须复用。
+      const retryPlan = acquiringRunData.prepareRunResume({
+        userDataDir,
+        mainDb,
+        mainDbPath: appDb.dbPath,
+        monthKey: fixture.monthKey,
+        runId: seeded.runId
+      });
+      assert.equal(retryPlan.taskRunId, firstPlan.taskRunId);
+      assert.equal(retryPlan.operationKey, firstPlan.operationKey);
+      const reused = reserveResumeBatch(
+        archiveRepository,
+        retryPlan,
+        `parent-${fixture.source}`
+      );
+      assert.equal(reused.created, false);
+      assert.equal(reused.batch.id, firstReserve.batch.id);
+      assert.equal(
+        archiveRepository.getLatestIssuedBatch().batchNumber,
+        latestAfterFirst.batchNumber,
+        '稳定 reserve 重放不推进全局序号'
+      );
+
+      const context = batchContextFrom(firstReserve.batch);
+      acquiringRunData.persistRunResumeBatchContext({
+        userDataDir,
+        mainDb,
+        prepared: retryPlan,
+        batchContext: context
+      });
+      const persistedPlan = acquiringRunData.prepareRunResume({
+        userDataDir,
+        mainDb,
+        mainDbPath: appDb.dbPath,
+        monthKey: fixture.monthKey,
+        runId: seeded.runId
+      });
+      assert.deepEqual(persistedPlan.recovery.batchContext, context);
+      assert.equal(persistedPlan.source, fixture.source);
+      if (fixture.source === 'main') {
+        let dispatchedPath = null;
+        await acquiringRunData.resumeRunCheck({
+          prepared: persistedPlan,
+          storageRoot: tmpdir,
+          chunkSize: persistedPlan.progress.chunkSize,
+          batchContext: context,
+          mainDb,
+          dispatchFn: async (payload) => {
+            dispatchedPath = payload.__dbPath;
+            return {
+              runId: seeded.runId,
+              totalBillRows: 11,
+              matchedRows: 9,
+              mismatchRows: 2,
+              unmatchedRows: 0
+            };
+          },
+          dispatchCallbacks: {}
+        });
+        assert.equal(dispatchedPath, appDb.dbPath, 'legacy main 必须继续 dispatch 原主库');
+        const mainRun = mainDb.prepare(`
+          SELECT side_db_rel_path
+          FROM acquiring_bill_currency_runs
+          WHERE id = ?
+        `).get(seeded.runId);
+        assert.equal(mainRun.side_db_rel_path, null, 'legacy main 成功不得伪造 side mirror');
+        assert.equal(
+          fs.existsSync(runDataStore.sideDbPath(userDataDir, MODULE, fixture.monthKey)),
+          false,
+          'legacy main resume 不创建 side DB'
+        );
+      }
+    }
+  });
+});
 
 test.describe('孤儿双向兜底（reconcileOrphans，spec §B.6）', () => {
   test('正常配对（文件+镜像）→ 不删不标失效', () => {

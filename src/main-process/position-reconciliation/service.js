@@ -103,6 +103,36 @@ function requireScopeSelection(payload, actionLabel) {
   return { channels, months };
 }
 
+function legacySourceImportSummary(output) {
+  const results = Array.isArray(output) ? output : [];
+  const successCount = results.filter((result) => result.status === 'ok').length;
+  const failedCount = results.filter((result) => result.status === 'failed').length;
+  const confirmationCount = results.filter(
+    (result) => result.status === 'needs-confirmation'
+  ).length;
+  const hasResult = successCount > 0 || confirmationCount > 0;
+  return {
+    status: hasResult ? 'ok' : 'failed',
+    message: hasResult
+      ? `链接原始表导入完成：成功 ${successCount}，待确认 ${confirmationCount}，失败 ${failedCount}`
+      : '所选链接原始表全部导入失败',
+    results,
+    successCount,
+    failedCount,
+    confirmationCount,
+    archiveDeferred: successCount === 0 && confirmationCount > 0,
+    inputPaths: results
+      .filter((item) => item.status === 'ok')
+      .flatMap((item) => item.inputPaths || []),
+    inputFiles: results
+      .filter((item) => item.status === 'ok')
+      .flatMap((item) => item.inputFiles || []),
+    cleanupPaths: results
+      .filter((item) => item.status === 'ok')
+      .flatMap((item) => item.cleanupPaths || [])
+  };
+}
+
 function assertEngineResultSet(engineRows, bankRows) {
   const results = Array.isArray(engineRows) ? engineRows : [];
   const expected = new Set(bankRows.map((row) => text(row.biz_id)).filter(Boolean));
@@ -728,10 +758,10 @@ class PositionReconciliationService {
     };
   }
 
-  applyBankImport(token) {
+  applyBankImport(token, batchContext) {
     const parsed = this.bankImportTokens.get(text(token));
     if (parsed && parsed.streaming === true) {
-      return this.applyStreamingBankImport(token);
+      return this.applyStreamingBankImport(token, batchContext);
     }
     return this.applyLegacyBankImport(token);
   }
@@ -849,7 +879,7 @@ class PositionReconciliationService {
     };
   }
 
-  async applyStreamingBankImport(token) {
+  async applyStreamingBankImport(token, batchContext) {
     const normalizedToken = text(token);
     const parsed = this.bankImportTokens.get(normalizedToken);
     if (!parsed || parsed.streaming !== true) {
@@ -876,7 +906,8 @@ class PositionReconciliationService {
         engine: this.positionImportEngine,
         userDataDir: this.userDataDir,
         sideDbPath: this.store.dbPath,
-        expectedCheckpoint: baseCheckpoint
+        expectedCheckpoint: baseCheckpoint,
+        batchContext
       }).promise;
       dispatched = this.dispatchTrackedImport({
         engine: this.positionImportEngine,
@@ -886,6 +917,7 @@ class PositionReconciliationService {
         sideDbPath: this.store.dbPath,
         expectedCheckpoint: baseCheckpoint,
         operationToken,
+        batchContext,
         payload: {
           schemaFingerprint: schema.fingerprint,
           preflightReady: parsed.preflightReady
@@ -961,14 +993,39 @@ class PositionReconciliationService {
     return this.prepareLegacySourceImport(filePaths);
   }
 
+  async prepareSourceImportForLifecycle(filePaths) {
+    if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
+      return this.prepareStreamingSourceImportForLifecycle(filePaths);
+    }
+    return this.prepareLegacySourceImportForLifecycle(filePaths);
+  }
+
   prepareLegacySourceImport(filePaths) {
+    const prepared = this.prepareLegacySourceImportForLifecycle(filePaths);
+    return prepared.requiresExecution
+      ? this.executePreparedSourceImport(prepared.plan)
+      : prepared.result;
+  }
+
+  prepareLegacySourceImportForLifecycle(filePaths) {
     this.clearSourceImportTokens();
     const batchToken = crypto.randomUUID();
     const staged = stageInputFiles(this.userDataDir, filePaths, `source-${batchToken}`);
-    return this.prepareLegacyStagedSourceImport(staged);
+    const plan = this.prepareLegacyStagedSourceImportPlan(staged);
+    const requiresExecution = plan.entries.some((entry) => entry.status === 'prepared');
+    return {
+      requiresExecution,
+      plan,
+      inputPaths: plan.entries
+        .filter((entry) => entry.status === 'prepared')
+        .map((entry) => entry.parsed.archivePath),
+      ...(requiresExecution ? {} : {
+        result: legacySourceImportSummary(plan.entries)
+      })
+    };
   }
 
-  prepareLegacyStagedSourceImport(staged, { recordArchiveIntent = true } = {}) {
+  prepareLegacyStagedSourceImportPlan(staged) {
     const results = readSourceFiles(staged, {
       identityMode: this.store.usesModernSourceIdentity()
         ? 'row-hash'
@@ -1009,67 +1066,62 @@ class PositionReconciliationService {
           newValidCount: result.records.filter((record) => text(record.row['账户状态']) === '正常').length
         });
       } else {
-        try {
-          const inputEvidence = stagedInputArchiveFile(result, result.sourceType);
-          if (recordArchiveIntent && this.recordArchiveIntent) {
-            this.recordArchiveIntent([inputEvidence], 'input');
-          }
-          this.assertStagedInputs([result], 'source-auto-apply', { beforeCommit: true });
-          const applied = this.store.applySourceImport(result, {
-            inputEvidence: [inputEvidence]
-          });
-          output.push({
-            status: 'ok',
-            filePath: result.filePath,
-            fileName: result.fileName,
-            archivePath: result.archivePath,
-            stagingDir: result.stagingDir,
-            inputPaths: [result.archivePath],
-            inputFiles: [inputEvidence],
-            originalInputPaths: [result.filePath],
-            cleanupPaths: [result.stagingDir],
-            ...applied
-          });
-        } catch (error) {
-          cleanupStagingPaths([result.stagingDir]);
-          output.push({
-            status: 'failed',
-            filePath: result.filePath,
-            fileName: result.fileName,
-            code: error.code || 'position-source-write-failed',
-            message: error.message || String(error),
-            detailLines: error.detailLines || []
-          });
-        }
+        output.push({ status: 'prepared', parsed: result });
       }
     }
-    const successCount = output.filter((result) => result.status === 'ok').length;
-    const failedCount = output.filter((result) => result.status === 'failed').length;
-    const confirmationCount = output.filter((result) => result.status === 'needs-confirmation').length;
-    const archiveDeferred = successCount === 0 && confirmationCount > 0;
-    return {
-      status: successCount > 0 || confirmationCount > 0 ? 'ok' : 'failed',
-      message: successCount > 0 || confirmationCount > 0
-        ? `链接原始表导入完成：成功 ${successCount}，待确认 ${confirmationCount}，失败 ${failedCount}`
-        : '所选链接原始表全部导入失败',
-      results: output,
-      successCount,
-      failedCount,
-      confirmationCount,
-      archiveDeferred,
-      inputPaths: output
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.inputPaths || []),
-      inputFiles: output
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.inputFiles || []),
-      cleanupPaths: output
-        .filter((item) => item.status === 'ok')
-        .flatMap((item) => item.cleanupPaths || [])
-    };
+    return { engine: 'legacy', entries: output };
+  }
+
+  executePreparedLegacySourceImport(plan) {
+    const output = [];
+    for (const entry of plan.entries) {
+      if (entry.status !== 'prepared') {
+        output.push(entry);
+        continue;
+      }
+      const result = entry.parsed;
+      try {
+        const inputEvidence = stagedInputArchiveFile(result, result.sourceType);
+        if (this.recordArchiveIntent) this.recordArchiveIntent([inputEvidence], 'input');
+        this.assertStagedInputs([result], 'source-auto-apply', { beforeCommit: true });
+        const applied = this.store.applySourceImport(result, {
+          inputEvidence: [inputEvidence]
+        });
+        output.push({
+          status: 'ok',
+          filePath: result.filePath,
+          fileName: result.fileName,
+          archivePath: result.archivePath,
+          stagingDir: result.stagingDir,
+          inputPaths: [result.archivePath],
+          inputFiles: [inputEvidence],
+          originalInputPaths: [result.filePath],
+          cleanupPaths: [result.stagingDir],
+          ...applied
+        });
+      } catch (error) {
+        cleanupStagingPaths([result.stagingDir]);
+        output.push({
+          status: 'failed',
+          filePath: result.filePath,
+          fileName: result.fileName,
+          code: error.code || 'position-source-write-failed',
+          message: error.message || String(error),
+          detailLines: error.detailLines || []
+        });
+      }
+    }
+    return legacySourceImportSummary(output);
   }
 
   async prepareStreamingSourceImport(filePaths) {
+    const prepared = await this.prepareStreamingSourceImportForLifecycle(filePaths);
+    return prepared.requiresExecution
+      ? this.executePreparedSourceImport(prepared.plan)
+      : prepared.result;
+  }
+
+  async prepareStreamingSourceImportForLifecycle(filePaths) {
     if (!this.authorizeStreamingSourceApply) {
       throw new PositionReconciliationError(
         'position-import-intent-not-durable',
@@ -1085,6 +1137,14 @@ class PositionReconciliationService {
     }
     await this.clearSourceImportTokensAsync();
     const allowedSourceTypes = [...this.streamingSourceTypes];
+    let releaseApply;
+    const applyGate = new Promise((resolve) => { releaseApply = resolve; });
+    let resolvePreflight;
+    let rejectPreflight;
+    const preflight = new Promise((resolve, reject) => {
+      resolvePreflight = resolve;
+      rejectPreflight = reject;
+    });
     const dispatched = this.dispatchTrackedImport({
       engine: this.positionImportEngine,
       command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
@@ -1095,6 +1155,7 @@ class PositionReconciliationService {
         preflightOnly: false,
         streamingSourceTypes: allowedSourceTypes
       },
+      onPreflightReady: resolvePreflight,
       authorizeApply: async (preflightReady) => {
         const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
           ? preflightReady.acceptedOrdinaryInputFiles
@@ -1111,10 +1172,40 @@ class PositionReconciliationService {
             '预检后没有可提交的普通链接原始表'
           );
         }
-        return this.authorizeStreamingSourceApply(preflightReady);
+        const batchContext = await applyGate;
+        const grant = await this.authorizeStreamingSourceApply(preflightReady);
+        return { ...grant, batchContext };
       }
     }, '导入链接原始表');
-    const streamed = await dispatched.promise;
+    dispatched.promise.then(
+      (streamed) => resolvePreflight(streamed && streamed.preflightReady
+        ? streamed.preflightReady
+        : streamed),
+      rejectPreflight
+    );
+    const preflightReady = await preflight;
+    const accepted = Array.isArray(preflightReady.acceptedOrdinaryInputFiles)
+      ? preflightReady.acceptedOrdinaryInputFiles
+      : [];
+    if (accepted.length === 0) {
+      const streamed = await dispatched.promise;
+      return {
+        requiresExecution: false,
+        result: this.finalizeStreamingSourceImport(streamed)
+      };
+    }
+    return {
+      requiresExecution: true,
+      inputPaths: accepted.map((file) => file.archivePath).filter(Boolean),
+      plan: {
+        engine: 'streaming',
+        dispatched,
+        releaseApply
+      }
+    };
+  }
+
+  finalizeStreamingSourceImport(streamed) {
     const sourceResults = Array.isArray(streamed.results)
       ? streamed.results
       : (Array.isArray(streamed.orderedFileResults)
@@ -1190,10 +1281,46 @@ class PositionReconciliationService {
     };
   }
 
-  applySourceImport(token) {
+  executePreparedSourceImport(plan, batchContext) {
+    if (plan && plan.engine === 'legacy') {
+      return this.executePreparedLegacySourceImport(plan);
+    }
+    if (plan && plan.engine === 'streaming') {
+      plan.releaseApply(batchContext);
+      return plan.dispatched.promise.then((streamed) => (
+        this.finalizeStreamingSourceImport(streamed)
+      ));
+    }
+    throw new TypeError('链接原始表 lifecycle apply 计划缺失');
+  }
+
+  async abandonPreparedSourceImport(plan) {
+    if (plan && plan.engine === 'streaming') {
+      if (plan.dispatched && typeof plan.dispatched.terminate === 'function') {
+        plan.dispatched.terminate();
+      }
+      try { await plan.dispatched.promise; } catch (_error) { /* worker 已终止并清理 */ }
+      return;
+    }
+    if (!plan || plan.engine !== 'legacy') return;
+    const cleanupPaths = [];
+    for (const entry of plan.entries) {
+      if (entry.status === 'prepared' && entry.parsed && entry.parsed.stagingDir) {
+        cleanupPaths.push(entry.parsed.stagingDir);
+      }
+      if (entry.status === 'needs-confirmation') {
+        const parsed = this.sourceImportTokens.get(text(entry.token));
+        this.sourceImportTokens.delete(text(entry.token));
+        if (parsed && parsed.stagingDir) cleanupPaths.push(parsed.stagingDir);
+      }
+    }
+    await this.cleanupUnprotectedStagingPathsAsync(cleanupPaths);
+  }
+
+  applySourceImport(token, batchContext) {
     const parsed = this.sourceImportTokens.get(text(token));
     if (parsed && parsed.streaming === true) {
-      return this.applyStreamingAccountImport(token);
+      return this.applyStreamingAccountImport(token, batchContext);
     }
     return this.applyLegacySourceImport(token);
   }
@@ -1228,7 +1355,7 @@ class PositionReconciliationService {
     };
   }
 
-  async applyStreamingAccountImport(token) {
+  async applyStreamingAccountImport(token, batchContext) {
     const normalizedToken = text(token);
     const parsed = this.sourceImportTokens.get(normalizedToken);
     if (!parsed || parsed.streaming !== true) {
@@ -1255,7 +1382,8 @@ class PositionReconciliationService {
         engine: this.positionImportEngine,
         userDataDir: this.userDataDir,
         sideDbPath: this.store.dbPath,
-        expectedCheckpoint: baseCheckpoint
+        expectedCheckpoint: baseCheckpoint,
+        batchContext
       }).promise;
       dispatched = this.dispatchTrackedImport({
         engine: this.positionImportEngine,
@@ -1265,6 +1393,7 @@ class PositionReconciliationService {
         sideDbPath: this.store.dbPath,
         expectedCheckpoint: baseCheckpoint,
         operationToken,
+        batchContext,
         payload: {
           schemaFingerprint: schema.fingerprint,
           preflightReady: parsed.preflightReady
@@ -1358,9 +1487,9 @@ class PositionReconciliationService {
     return { status: 'ok', mappings: this.store.listMappings() };
   }
 
-  saveMappings(mappings) {
+  saveMappings(mappings, batchContext) {
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
-      return this.saveMappingsStreamed(mappings);
+      return this.saveMappingsStreamed(mappings, batchContext);
     }
     const result = this.store.saveMappings(mappings);
     return {
@@ -1370,7 +1499,7 @@ class PositionReconciliationService {
     };
   }
 
-  async runStreamingMaintenance(command, payload) {
+  async runStreamingMaintenance(command, payload, batchContext) {
     const baseCheckpoint = this.store.persistenceCheckpoint();
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
@@ -1387,7 +1516,8 @@ class PositionReconciliationService {
       files: [],
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
-      expectedCheckpoint: baseCheckpoint
+      expectedCheckpoint: baseCheckpoint,
+      batchContext
     });
     await schema.promise;
     const dispatched = this.positionImportDispatcher({
@@ -1398,6 +1528,7 @@ class PositionReconciliationService {
       sideDbPath: this.store.dbPath,
       expectedCheckpoint: baseCheckpoint,
       operationToken,
+      batchContext,
       payload,
       featureFlags: { maintenance: true }
     });
@@ -1414,10 +1545,11 @@ class PositionReconciliationService {
     return result;
   }
 
-  async saveMappingsStreamed(mappings) {
+  async saveMappingsStreamed(mappings, batchContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING,
-      { mappings }
+      { mappings },
+      batchContext
     );
     return {
       status: 'ok',
@@ -1426,10 +1558,10 @@ class PositionReconciliationService {
     };
   }
 
-  deleteBank(payload) {
+  deleteBank(payload, batchContext) {
     const selection = requireScopeSelection(payload, '删除');
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
-      return this.deleteBankStreamed(selection);
+      return this.deleteBankStreamed(selection, batchContext);
     }
     const result = this.store.deleteBankScopes(selection);
     if (result.deletedCount === 0) {
@@ -1441,10 +1573,11 @@ class PositionReconciliationService {
     return { status: 'ok', message: `已删除 ${result.deletedCount} 行银行数据`, ...result };
   }
 
-  async deleteBankStreamed(selection) {
+  async deleteBankStreamed(selection, batchContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.DELETE_BANK,
-      selection
+      selection,
+      batchContext
     );
     return {
       status: 'ok',
@@ -1453,14 +1586,17 @@ class PositionReconciliationService {
     };
   }
 
-  deleteSource(payload) {
+  deleteSource(payload, batchContext) {
     const sourceType = text(payload && payload.sourceType);
     const wholeTable = payload && payload.wholeTable === true;
     const months = [...new Set(
       (Array.isArray(payload && payload.months) ? payload.months : []).map(text).filter(Boolean)
     )];
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
-      return this.deleteSourceStreamed({ sourceType, wholeTable, months });
+      return this.deleteSourceStreamed(
+        { sourceType, wholeTable, months },
+        batchContext
+      );
     }
     const result = this.store.deleteSource({ sourceType, wholeTable, months });
     const resolved = Number(result.resolvedFilteredCount) || 0;
@@ -1472,10 +1608,11 @@ class PositionReconciliationService {
     };
   }
 
-  async deleteSourceStreamed(selection) {
+  async deleteSourceStreamed(selection, batchContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
-      selection
+      selection,
+      batchContext
     );
     return {
       status: 'ok',
@@ -1604,6 +1741,19 @@ class PositionReconciliationService {
       filteredSources,
       reportFiles
     });
+  }
+
+  prepareRun(payload = {}) {
+    const selection = requireScopeSelection(payload, '运行');
+    const bankRowCount = this.store.countBankRows({
+      ...selection,
+      statuses: [BANK_STATUSES.UNPROCESSED]
+    });
+    if (bankRowCount === 0) {
+      throw new PositionReconciliationError('position-run-empty', '所选范围没有状态为“未处理”的银行数据');
+    }
+    const existing = this.store.latestPendingRun();
+    return { selection, bankRowCount, existing };
   }
 
   run(payload = {}) {

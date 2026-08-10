@@ -20,6 +20,9 @@ const PENDING_COLUMNS = require('../pending-db/columns');
 const { validateHeaders, computeRowHash } = require('./validator');
 const { readXlsxStreamed } = require('./streaming-xlsx-reader');
 const monthRepo = require('../pending-db/month-repository');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 // 错误数量上限：防止百万级行级错误累积后 emit 巨型 JSON 把 stdout 管道撑爆
 // 超过上限只保留前 N 条 + 剩余计数，N 条里可用 cells 字段导报错 xlsx
@@ -57,6 +60,8 @@ function loadJobMeta() {
 
 async function main() {
   const job = loadJobMeta();
+  const batchContext = freezeWorkerBatchContext(job.batchContext);
+  void batchContext;
   const { dbPath, yearMonth, files, archivePath } = job;
 
   if (!dbPath || !yearMonth || !Array.isArray(files) || files.length === 0) {

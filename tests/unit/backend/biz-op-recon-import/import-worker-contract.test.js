@@ -32,6 +32,16 @@ const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-r
 const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../../../src/backend/biz-op-recon-db/columns');
 
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'bizop-legacy-worker-contract',
+  taskKey: 'bizOpRecon:import:run-biz-op',
+  moduleId: 'biz-op-reconciliation',
+  parentRunId: 'bizop-legacy-parent',
+  operationKey: 'bizop-legacy-operation'
+});
+
 const tmpDirs = [];
 test.after(() => {
   for (const d of tmpDirs) {
@@ -135,6 +145,7 @@ test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu
   const errDirWk = path.join(wk.dir, 'err');
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: errDirWk
   });

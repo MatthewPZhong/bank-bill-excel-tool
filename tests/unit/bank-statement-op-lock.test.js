@@ -98,7 +98,7 @@ describe('bank-statement op-lock — 源码接线 (v3.0.11 至 v3.1.0)', () => {
     for (const operation of POSITION_RECONCILIATION_OPS) {
       const localOperation = operation.replace('position-reconciliation-', '');
       assert.ok(
-        source.includes(`withPositionReconciliationLock('${localOperation}'`),
+        new RegExp(`withPositionReconciliationLock\\(\\s*'${localOperation}'`).test(source),
         `${operation} handler 应走平盘统一锁包装`
       );
     }

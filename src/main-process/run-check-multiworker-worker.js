@@ -38,6 +38,9 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const {
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
 const fs = require('node:fs');
 
 // ─────────────────────────────────────────────────────────────────
@@ -214,6 +217,8 @@ if (!isMainThread) {
           return;
         }
         const { dbPath, selectSql, partColumns } = msg;
+        const batchContext = freezeWorkerBatchContext(msg.batchContext);
+        void batchContext;
         if (!dbPath || typeof dbPath !== 'string') {
           throw new Error('init message 缺 dbPath');
         }

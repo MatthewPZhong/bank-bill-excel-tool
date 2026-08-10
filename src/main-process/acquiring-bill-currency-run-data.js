@@ -22,6 +22,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const session = require('./acquiring-bill-currency-session');
 const importRepo = require('../backend/acquiring-bill-currency-db/import-repository');
@@ -72,7 +73,7 @@ function upsertMainRunMirror(mainDb, { monthKey, relPath, stats, status, diffFil
 // import flow/bill：打开（必要时建）该月侧库，把导入路由到侧库 db / 侧库 dbPath。
 //   引擎路径走侧库 dbPath（worker 自开侧库连接写）；回退路径走侧库 db 句柄（reader-handrolled 直调）。
 //   userDataDir = path.dirname(database.dbPath)。
-async function importFiles({ userDataDir, kind, monthKey, filePaths, onProgress, overwrite = false }) {
+async function importFiles({ userDataDir, kind, monthKey, filePaths, onProgress, overwrite = false, batchContext }) {
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   try {
     const fn = overwrite
@@ -80,7 +81,7 @@ async function importFiles({ userDataDir, kind, monthKey, filePaths, onProgress,
       : (kind === 'flow' ? session.importFlowFiles : session.importBillFiles);
     // session 内部 resolveDbPath(sideDb) → 侧库文件路径 → 引擎 worker 自开侧库连接；
     //   回退路径用 sideDb 句柄直接 INSERT。两路都落侧库。
-    return await fn({ db: sideDb, monthKey, filePaths, onProgress });
+    return await fn({ db: sideDb, monthKey, filePaths, onProgress, batchContext });
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
@@ -95,7 +96,6 @@ async function peekImportTarget({ userDataDir, kind, filePaths }) {
   // 简化：session.peekImportTarget 内 getMonthReadiness 依赖传入 db；这里先用「先解析 monthKey 再查侧库」。
   //   但 session.peekImportTarget 一次性返回 monthKey + existingCount，需 db。故传一个空 in-memory 占位库
   //   只为拿 monthKey（existingCount 占位 0），随后用真实侧库覆盖 existingCount。
-  const { DatabaseSync } = require('node:sqlite');
   const placeholder = new DatabaseSync(':memory:');
   // 占位库需有两表（getMonthReadiness COUNT 用）；建最小 schema（仅 month_key 列即可 COUNT 出 0）。
   placeholder.exec(`
@@ -111,8 +111,11 @@ async function peekImportTarget({ userDataDir, kind, filePaths }) {
   }
   // 真实 existingCount：查该月侧库（不存在 → 0）
   let existingCount = 0;
-  if (runDataStore.sideDbExists(userDataDir, MODULE, monthKey)) {
-    const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  const sideDbFilePath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
+  if (fs.existsSync(sideDbFilePath)) {
+    // prepare 阶段必须严格只读：openSideDb 会 mkdir、执行 PRAGMA 并跑幂等 DDL，不能用于覆盖确认预检。
+    // 这里直接以 readOnly 打开既有侧库；不存在时上面的 exists 分支返回 0，既不建目录也不建库。
+    const sideDb = new DatabaseSync(sideDbFilePath, { readOnly: true });
     try {
       const readiness = importRepo.getMonthReadiness(sideDb, monthKey);
       existingCount = kind === 'flow' ? readiness.flowCount : readiness.billCount;
@@ -129,7 +132,7 @@ async function peekImportTarget({ userDataDir, kind, filePaths }) {
 //   成功后本层把 summary + 路径 + side_db_rel_path 镜像写主库 runs（UI/导出读主库镜像）。
 //   返回 worker 的 result（含侧库 runId / stats / diffFilePath / reportFilePath）。
 //   dispatchFn：注入 runCheckWorkerPool.dispatchRunCheck（main.js 传入，避免本层 require electron 链）。
-async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize, workerCount, tempDir, dispatchFn, dispatchCallbacks, mainDb }) {
+async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize, workerCount, tempDir, batchContext, dispatchFn, dispatchCallbacks, mainDb }) {
   // 确保侧库存在（import 已建；防御性 open 一次建表后立即 close — worker 会自开侧库连接）
   const sideDbFilePath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
   if (!fs.existsSync(sideDbFilePath)) {
@@ -147,6 +150,7 @@ async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize
       chunkSize,
       workerCount,
       tempDir,
+      batchContext,
     },
     dispatchCallbacks
   );
@@ -170,6 +174,214 @@ async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize
     ranAt: new Date().toISOString(),
   });
 
+  return result;
+}
+
+function resumeError(message, code = 'ACQUIRING_RUN_RESUME_INVALID') {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function readResumeTarget(db, { monthKey, runId }) {
+  let run = null;
+  let progress = null;
+  if (runId !== undefined && runId !== null && runId !== '') {
+    const normalizedRunId = Number(runId);
+    if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+      throw resumeError('runId 格式错误');
+    }
+    run = runRepo.getRunById(db, normalizedRunId);
+    if (!run || run.month_key !== monthKey) {
+      throw resumeError(`run ${normalizedRunId} 不存在或不属于月份 ${monthKey}`);
+    }
+    progress = runRepo.getRunChunkProgress(db, normalizedRunId);
+  } else {
+    const candidates = runRepo.listPartialRuns(db, monthKey);
+    if (candidates.length > 0) {
+      run = candidates[0];
+      progress = candidates[0].chunk_progress;
+    }
+  }
+  if (!run || !progress) {
+    throw resumeError(`月份 ${monthKey} 暂无可恢复 run`);
+  }
+  if (!['partial', 'in-progress'].includes(progress.status)) {
+    throw resumeError(`run ${run.id} 状态为 ${progress.status}，无需 resume`);
+  }
+  return { run, progress };
+}
+
+function openResumeSource({ userDataDir, mainDb, mainDbPath, monthKey }) {
+  const sideDbFilePath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
+  if (fs.existsSync(sideDbFilePath)) {
+    const db = new DatabaseSync(sideDbFilePath, { readOnly: true });
+    return { db, dbPath: sideDbFilePath, source: 'side', close: true };
+  }
+  return { db: mainDb, dbPath: mainDbPath, source: 'main', close: false };
+}
+
+function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) {
+  if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+    throw resumeError('monthKey 格式错误（应为 YYYY-MM）');
+  }
+  const source = openResumeSource({ userDataDir, mainDb, mainDbPath, monthKey });
+  try {
+    const target = readResumeTarget(source.db, { monthKey, runId });
+    const batchContext = runRepo.readRunProgressBatchContext(target.progress);
+    // 侧库是在 v3.0.5 引入，早于 v3.1.9 batchContext。升级前已存在的 partial/in-progress
+    // side run 因此可以合法缺少上下文；与主库 legacy run 一样，首次 resume 用稳定 identity
+    // 预留/复用一个兼容批次，并在 worker 开始前回填到原 run。
+    const stableRunIdentity = `${source.source}:${monthKey}:${Number(target.run.id)}`;
+    const evidence = {
+      source: source.source,
+      monthKey,
+      runId: Number(target.run.id)
+    };
+    const recovery = batchContext
+      ? { batchContext, evidence }
+      : {
+        legacy: true,
+        evidence
+      };
+    return {
+      source: source.source,
+      dbPath: source.dbPath,
+      monthKey,
+      runId: Number(target.run.id),
+      progress: { ...target.progress },
+      progressEvidence: JSON.stringify(target.progress),
+      recovery,
+      taskRunId: batchContext
+        ? batchContext.taskRunId
+        : `acquiring-resume:${stableRunIdentity}`,
+      operationKey: batchContext
+        ? batchContext.operationKey
+        : `acquiringBillCurrency:run:resume:${stableRunIdentity}`,
+      flowPlan: batchContext
+        ? null
+        : {
+          startsNewFlow: false,
+          flowIdentity: {
+            type: 'business-run-id',
+            value: `acquiring-run:${stableRunIdentity}`
+          }
+        }
+    };
+  } finally {
+    if (source.close) {
+      try { source.db.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+}
+
+function assertRunResumeFresh({ userDataDir, mainDb, mainDbPath, prepared }) {
+  const source = openResumeSource({
+    userDataDir,
+    mainDb,
+    mainDbPath,
+    monthKey: prepared.monthKey
+  });
+  try {
+    if (source.source !== prepared.source || source.dbPath !== prepared.dbPath) {
+      throw resumeError('恢复数据源在任务开始前已变化');
+    }
+    const target = readResumeTarget(source.db, {
+      monthKey: prepared.monthKey,
+      runId: prepared.runId
+    });
+    if (JSON.stringify(target.progress) !== prepared.progressEvidence) {
+      throw resumeError(`run ${prepared.runId} 的恢复进度在任务开始前已变化`);
+    }
+    const currentContext = runRepo.readRunProgressBatchContext(target.progress);
+    const expectedContext = prepared.recovery.batchContext || null;
+    if (JSON.stringify(currentContext) !== JSON.stringify(expectedContext)) {
+      throw resumeError(`run ${prepared.runId} 的批次上下文在任务开始前已变化`);
+    }
+  } finally {
+    if (source.close) {
+      try { source.db.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+}
+
+function persistRunResumeBatchContext({ userDataDir, mainDb, prepared, batchContext }) {
+  let db = mainDb;
+  let close = false;
+  if (prepared.source === 'side') {
+    db = new DatabaseSync(prepared.dbPath);
+    close = true;
+  }
+  try {
+    const current = runRepo.getRunChunkProgress(db, prepared.runId);
+    if (!current || !['partial', 'in-progress'].includes(current.status)) {
+      throw resumeError(`run ${prepared.runId} 已不可恢复`);
+    }
+    const currentBatchContext = runRepo.readRunProgressBatchContext(current);
+    if (currentBatchContext) {
+      if (JSON.stringify(currentBatchContext) !== JSON.stringify(batchContext)) {
+        throw resumeError(
+          `run ${prepared.runId} 已绑定其它批次上下文`,
+          'ACQUIRING_RUN_BATCH_CONTEXT_CONFLICT'
+        );
+      }
+      return currentBatchContext;
+    }
+    runRepo.setRunChunkProgress(db, {
+      runId: prepared.runId,
+      lastCompletedChunkIndex: current.lastCompletedChunkIndex,
+      totalChunks: current.totalChunks,
+      status: current.status,
+      chunkSize: current.chunkSize,
+      batchContext
+    });
+    return runRepo.readRunProgressBatchContext(
+      runRepo.getRunChunkProgress(db, prepared.runId)
+    );
+  } finally {
+    if (close) {
+      try { db.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+}
+
+async function resumeRunCheck({
+  prepared,
+  storageRoot,
+  chunkSize,
+  batchContext,
+  dispatchFn,
+  dispatchCallbacks,
+  mainDb
+}) {
+  const result = await dispatchFn({
+    __dbPath: prepared.dbPath,
+    monthKey: prepared.monthKey,
+    storageRoot,
+    chunkSize,
+    batchContext,
+    resumeFromRun: {
+      runId: prepared.runId,
+      lastCompletedChunkIndex: prepared.progress.lastCompletedChunkIndex
+    }
+  }, dispatchCallbacks);
+
+  if (prepared.source === 'side') {
+    upsertMainRunMirror(mainDb, {
+      monthKey: prepared.monthKey,
+      relPath: runDataStore.sideDbRelPath(MODULE, prepared.monthKey),
+      stats: {
+        totalBillRows: result.totalBillRows,
+        matchedRows: result.matchedRows,
+        mismatchRows: result.mismatchRows,
+        unmatchedRows: result.unmatchedRows,
+      },
+      status: 'success',
+      diffFilePath: result.diffFilePath || null,
+      reportFilePath: result.reportFilePath || null,
+      ranAt: new Date().toISOString(),
+    });
+  }
   return result;
 }
 
@@ -347,6 +559,10 @@ module.exports = {
   importFiles,
   peekImportTarget,
   runCheckViaSideDb,
+  prepareRunResume,
+  assertRunResumeFresh,
+  persistRunResumeBatchContext,
+  resumeRunCheck,
   listMonthsDualSource,
   getSessionStatusDualSource,
   deleteMonthSideDb,

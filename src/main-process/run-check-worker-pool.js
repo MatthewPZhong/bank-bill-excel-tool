@@ -362,6 +362,7 @@ async function dispatchRunCheck(payload, callbacks = {}) {
       resumeFromRun: payload.resumeFromRun,
       workerCount: payload.workerCount,
       tempDir: payload.tempDir,
+      batchContext: payload.batchContext,
       __forceMultiWorkerForTest: payload.__forceMultiWorkerForTest,
     },
   });

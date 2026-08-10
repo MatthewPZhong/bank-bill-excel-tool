@@ -763,8 +763,7 @@ class PreFundReconciliationService {
     }));
   }
 
-  async export({ outputDirectory, overwrite = false, onProgress } = {}) {
-    const exportDate = this.now();
+  async export({ outputDirectory, overwrite = false, onProgress, exportDate = this.now() } = {}) {
     const plan = this.buildExportPlan(outputDirectory, exportDate);
     if (plan.length === 0) {
       throw new PreFundReconciliationError('pre-fund-export-empty', '本次运行没有可导出的银行渠道');

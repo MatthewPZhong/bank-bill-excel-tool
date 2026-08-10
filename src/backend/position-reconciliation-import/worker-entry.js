@@ -34,6 +34,9 @@ const {
 const {
   ensurePositionLargeImportSchemaAtPath
 } = require('../../main-process/position-reconciliation/large-import-schema');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 function unwrapMessage(eventOrMessage) {
   return eventOrMessage &&
@@ -109,6 +112,9 @@ async function runJob(message) {
     throw error;
   }
   const command = String(message.command || '');
+  const batchContext = command === POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
+    ? null
+    : freezeWorkerBatchContext(message.batchContext);
   if (command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES) {
     if (!message.featureFlags || message.featureFlags.schemaOnly !== true) {
       const error = new Error('平盘 schema 迁移缺少 schemaOnly 授权');
@@ -119,6 +125,7 @@ async function runJob(message) {
       jobId: String(message.jobId || ''),
       cancelToken: { cancelled: false },
       stage: 'schema-migration',
+      batchContext,
       peakRssBytes: process.memoryUsage().rss,
       peakHeapUsedBytes: process.memoryUsage().heapUsed
     };
@@ -151,6 +158,7 @@ async function runJob(message) {
       jobId: String(message.jobId || ''),
       cancelToken: { cancelled: false },
       stage: 'maintenance',
+      batchContext,
       peakRssBytes: process.memoryUsage().rss,
       peakHeapUsedBytes: process.memoryUsage().heapUsed
     };
@@ -220,6 +228,7 @@ async function runJob(message) {
       jobId: String(message.jobId || ''),
       cancelToken: { cancelled: false },
       stage: 'applying',
+      batchContext,
       peakRssBytes: process.memoryUsage().rss,
       peakHeapUsedBytes: process.memoryUsage().heapUsed
     };
@@ -311,6 +320,7 @@ async function runJob(message) {
     jobId: String(message.jobId || ''),
     cancelToken,
     stage: 'staging',
+    batchContext: null,
     resolveApplyGrant,
     rejectApplyGrant,
     peakRssBytes: process.memoryUsage().rss,
@@ -448,7 +458,9 @@ channel.onMessage((message) => {
   if (!message || typeof message !== 'object') return;
   if (message.type === POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED) {
     if (active && active.jobId === String(message.jobId || '')) {
-      active.resolveApplyGrant(message);
+      const batchContext = freezeWorkerBatchContext(message.batchContext);
+      active.batchContext = batchContext;
+      active.resolveApplyGrant({ ...message, batchContext });
     }
     return;
   }

@@ -75,7 +75,7 @@ function resolveDbPath(db) {
 //   返回引擎 result：{ monthKey, fileCount, totalImported, deletedCount, maxParallel }。
 //   onEngineProgress：({ sourceFile, importedCount }) 引擎每 1w 行节流上报（worker → message → 此处转发）。
 //   错误：worker postMessage 'error' → 用 deserializeError 还原（保 name/message/detailLines）→ reject。
-function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptions, mode, monthKey, onEngineProgress }) {
+function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptions, mode, monthKey, batchContext, onEngineProgress }) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -149,7 +149,8 @@ function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptio
         contractModulePath,
         contractOptions: contractOptions || {},
         mode: mode || 'append',
-        monthKey
+        monthKey,
+        batchContext
         // parallel / useWhitelist 用引擎默认（min(4,cpus-2) + 内存闸；契约白名单）。
       }
     });
@@ -208,7 +209,7 @@ function safeBegin(db) {
 // v3.0.3 PR-H：开关分流入口。
 //   USE_BIG_TABLE_IMPORT_ENGINE=true（默认）→ dispatch 引擎 worker（append 模式）。
 //   false 或 db.location() 拿不到 dbPath → 回退 runImportLegacyInTransaction（reader-handrolled 直调旧路径）。
-async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgress }) {
+async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgress, batchContext }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
@@ -230,6 +231,7 @@ async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgr
       contractOptions: { importedAt },
       mode: 'append',
       monthKey,
+      batchContext,
       // progress 形状对齐 renderer：引擎给 { sourceFile, importedCount } → 补 stage/fileIndex/fileCount。
       //   v1 引擎不拆分逐文件 → fileIndex 用「文件数-1」（多文件并行无串行文件指针；renderer 显示 (n/n)）。
       onEngineProgress: (ev) => {
@@ -295,19 +297,19 @@ async function runImportLegacyInTransaction({ db, kind, monthKey, filePaths, onP
   }
 }
 
-async function importFlowFiles({ db, monthKey, filePaths, onProgress }) {
-  return importFilesInTransaction({ db, kind: 'flow', monthKey, filePaths, onProgress });
+async function importFlowFiles({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesInTransaction({ db, kind: 'flow', monthKey, filePaths, onProgress, batchContext });
 }
 
-async function importBillFiles({ db, monthKey, filePaths, onProgress }) {
-  return importFilesInTransaction({ db, kind: 'bill', monthKey, filePaths, onProgress });
+async function importBillFiles({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesInTransaction({ db, kind: 'bill', monthKey, filePaths, onProgress, batchContext });
 }
 
 // fix1（spec §3.4）：覆盖导入 — 先清单侧（流水或单据）再导入；
 // 包在一个大事务里，任一步失败整体 ROLLBACK（旧数据保留）。
 //
 // v3.0.3 PR-H：开关分流入口（同 importFilesInTransaction）。引擎 overwrite 模式：事务内先 DELETE 单侧再 INSERT。
-async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgress }) {
+async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgress, batchContext }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}覆盖导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
@@ -326,6 +328,7 @@ async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgr
       contractOptions: { importedAt },
       mode: 'overwrite',
       monthKey,
+      batchContext,
       onEngineProgress: (ev) => {
         if (typeof onProgress !== 'function') return;
         onProgress({
@@ -394,12 +397,12 @@ async function runImportLegacyWithOverwrite({ db, kind, monthKey, filePaths, onP
   }
 }
 
-async function importFlowFilesWithOverwrite({ db, monthKey, filePaths, onProgress }) {
-  return importFilesWithOverwrite({ db, kind: 'flow', monthKey, filePaths, onProgress });
+async function importFlowFilesWithOverwrite({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesWithOverwrite({ db, kind: 'flow', monthKey, filePaths, onProgress, batchContext });
 }
 
-async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgress }) {
-  return importFilesWithOverwrite({ db, kind: 'bill', monthKey, filePaths, onProgress });
+async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesWithOverwrite({ db, kind: 'bill', monthKey, filePaths, onProgress, batchContext });
 }
 
 // fix1（spec §3.4）+ fix2（spec §3.5）：peek + 已有行预检（不进事务，async）
@@ -563,7 +566,7 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, __forceMultiWorkerForTest }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, batchContext, __forceMultiWorkerForTest }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -667,6 +670,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
         status: 'in-progress',
         chunkSize: effectiveChunkSize, // H4：存原始 chunkSize 供 resume 复用
+        batchContext,
       });
       // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
       //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
@@ -783,6 +787,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         dbPath,
         workerCount: effectiveWorkerCount,
         tempDir: mwTempDir,
+        batchContext,
         cancelToken, // PR #57 review P2：MW 路径接 cancelToken（停派发+abort，<5s 取消语义，对齐单 worker）
         // onChunkDone 仅透传 UI progress（不写 chunk_progress —— complete 在成功后一次性标）
         onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {

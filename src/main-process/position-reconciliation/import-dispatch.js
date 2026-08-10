@@ -347,7 +347,7 @@ function dispatchPositionImportPreflight(input = {}) {
     heartbeatTimer.unref?.();
 
     try {
-      sendToWorker({
+      const startMessage = {
         type: POSITION_IMPORT_MESSAGE_TYPES.START_JOB,
         protocolVersion: POSITION_IMPORT_PROTOCOL_VERSION,
         command: input.command,
@@ -368,7 +368,12 @@ function dispatchPositionImportPreflight(input = {}) {
                   !input.featureFlags || input.featureFlags.preflightOnly !== false
               })
         }
-      });
+      };
+      if (input.command !== POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
+          && input.batchContext) {
+        startMessage.batchContext = input.batchContext;
+      }
+      sendToWorker(startMessage);
     } catch (error) {
       if (typeof worker.kill === 'function') worker.kill();
       recoverOrReject(error);

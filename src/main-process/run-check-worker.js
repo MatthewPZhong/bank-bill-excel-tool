@@ -39,6 +39,9 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const {
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
 
 // ─────────────────────────────────────────────────────────────────
 // 模块级 helpers（unit test 在主线程 require 时只拿这部分；worker 进程内同名）
@@ -159,6 +162,7 @@ if (!isMainThread) {
   //   v2.1.10 T19：payload 新增 resumeFromRun = { runId, lastCompletedChunkIndex }（resume 路径）
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
     const { monthKey, storageRoot, chunkSize, resumeFromRun, workerCount, tempDir, __forceMultiWorkerForTest } = payload || {};
+    const batchContext = freezeWorkerBatchContext(payload && payload.batchContext);
     if (!monthKey) {
       throw new Error('runCheckInWorker：monthKey 必填');
     }
@@ -189,6 +193,7 @@ if (!isMainThread) {
       workerCount,
       dbPath: workerDbPath,
       tempDir,
+      batchContext,
       __forceMultiWorkerForTest,
     });
   }

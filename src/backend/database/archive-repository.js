@@ -431,6 +431,25 @@ function ensureArchiveMetadataSupport(db) {
       CREATE INDEX IF NOT EXISTS idx_archive_flow_anchors_parent_run
         ON archive_flow_anchors(parent_run_id);
 
+      CREATE TABLE IF NOT EXISTS archive_flow_bind_intents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_id TEXT NOT NULL,
+        identity_type TEXT NOT NULL,
+        identity_value TEXT NOT NULL,
+        parent_run_id TEXT NOT NULL,
+        source_batch_id INTEGER NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        last_error_code TEXT,
+        last_error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (module_id, identity_type, identity_value),
+        FOREIGN KEY (source_batch_id) REFERENCES archive_batches(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_flow_bind_intents_source_batch
+        ON archive_flow_bind_intents(source_batch_id);
+
       CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_batches_global_daily_sequence
         ON archive_batches(local_date, global_daily_sequence)
         WHERE global_daily_sequence IS NOT NULL;
@@ -557,6 +576,23 @@ function mapOperationIssuance(row) {
     batchNumber: row.batch_number,
     issuedAt: row.issued_at,
     deletedAt: row.deleted_at || null
+  };
+}
+
+function mapFlowBindIntent(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    moduleId: row.module_id,
+    identityType: row.identity_type,
+    identityValue: row.identity_value,
+    parentRunId: row.parent_run_id,
+    sourceBatchId: Number(row.source_batch_id),
+    attemptCount: Number(row.attempt_count) || 0,
+    lastErrorCode: row.last_error_code || '',
+    lastErrorMessage: row.last_error_message || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -722,10 +758,7 @@ class ArchiveRepository {
 
       const existing = this.findFlowAnchor(identity);
       if (existing) {
-        if (existing.parentRunId !== parentRunId
-            || (sourceBatchId !== null
-              && existing.sourceBatchId !== null
-              && existing.sourceBatchId !== sourceBatchId)) {
+        if (existing.parentRunId !== parentRunId) {
           const error = new Error('业务身份已绑定到不同的任务流程');
           error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
           throw error;
@@ -763,6 +796,130 @@ class ArchiveRepository {
       );
       return { created: true, anchor: this.findFlowAnchor(identity) };
     });
+  }
+
+  listFlowBindIntents(filters = {}) {
+    const where = [];
+    const params = [];
+    if (filters.moduleId !== undefined && filters.moduleId !== null && filters.moduleId !== '') {
+      where.push('module_id = ?');
+      params.push(normalizeModuleId(filters.moduleId));
+    }
+    if (filters.identityType !== undefined
+        || filters.identityValue !== undefined) {
+      const identity = normalizeFlowAnchorIdentity(filters);
+      if (!where.includes('module_id = ?')) {
+        where.push('module_id = ?');
+        params.push(identity.moduleId);
+      }
+      where.push('identity_type = ?', 'identity_value = ?');
+      params.push(identity.identityType, identity.identityValue);
+    }
+    const sqlWhere = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    return this.db.prepare(`
+      SELECT * FROM archive_flow_bind_intents
+      ${sqlWhere}
+      ORDER BY id ASC
+    `).all(...params).map(mapFlowBindIntent);
+  }
+
+  persistFlowBindIntent(payload = {}) {
+    const identity = normalizeFlowAnchorIdentity(payload);
+    const parentRunId = requiredText(payload.parentRunId, 'parentRunId', 256);
+    const sourceBatchId = Number(payload.sourceBatchId);
+    if (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1) {
+      throw new TypeError('sourceBatchId 必须是正安全整数');
+    }
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const sourceBatch = this.db.prepare(`
+        SELECT id, module_id, parent_run_id FROM archive_batches WHERE id = ?
+      `).get(sourceBatchId);
+      if (!sourceBatch) throw new Error(`存档批次不存在：${sourceBatchId}`);
+      if (sourceBatch.module_id !== identity.moduleId
+          || String(sourceBatch.parent_run_id || '') !== parentRunId) {
+        const error = new Error('flow-bind intent 与来源批次的归属不一致');
+        error.code = 'ARCHIVE_FLOW_BIND_INTENT_CONFLICT';
+        throw error;
+      }
+
+      const anchor = this.findFlowAnchor(identity);
+      if (anchor) {
+        if (anchor.parentRunId !== parentRunId) {
+          const error = new Error('flow-bind intent 与已存在身份锚点冲突');
+          error.code = 'ARCHIVE_FLOW_BIND_INTENT_CONFLICT';
+          throw error;
+        }
+        return { created: false, resolved: true, intent: null, anchor };
+      }
+
+      const existing = this.db.prepare(`
+        SELECT * FROM archive_flow_bind_intents
+        WHERE module_id = ? AND identity_type = ? AND identity_value = ?
+      `).get(identity.moduleId, identity.identityType, identity.identityValue);
+      if (existing) {
+        const intent = mapFlowBindIntent(existing);
+        if (intent.parentRunId !== parentRunId) {
+          const error = new Error('业务身份已有不同的 flow-bind intent');
+          error.code = 'ARCHIVE_FLOW_BIND_INTENT_CONFLICT';
+          throw error;
+        }
+        return { created: false, resolved: false, intent };
+      }
+
+      const inserted = this.db.prepare(`
+        INSERT INTO archive_flow_bind_intents (
+          module_id, identity_type, identity_value, parent_run_id,
+          source_batch_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        identity.moduleId,
+        identity.identityType,
+        identity.identityValue,
+        parentRunId,
+        sourceBatchId,
+        timestamp,
+        timestamp
+      );
+      const intent = mapFlowBindIntent(this.db.prepare(`
+        SELECT * FROM archive_flow_bind_intents WHERE id = ?
+      `).get(Number(inserted.lastInsertRowid)));
+      return { created: true, resolved: false, intent };
+    });
+  }
+
+  replayFlowBindIntents(filters = {}) {
+    const intents = this.listFlowBindIntents(filters);
+    const results = [];
+    for (const intent of intents) {
+      try {
+        const bound = this.bindFlowAnchor(intent);
+        this.db.prepare('DELETE FROM archive_flow_bind_intents WHERE id = ?').run(intent.id);
+        results.push({ ok: true, intent, anchor: bound.anchor });
+      } catch (error) {
+        const code = optionalText(
+          error && error.code || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED',
+          128
+        ) || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED';
+        const message = optionalText(
+          error && error.message || 'flow-bind intent 重放失败',
+          512
+        ) || 'flow-bind intent 重放失败';
+        this.db.prepare(`
+          UPDATE archive_flow_bind_intents
+          SET attempt_count = attempt_count + 1,
+              last_error_code = ?, last_error_message = ?, updated_at = ?
+          WHERE id = ?
+        `).run(code, message, this._timestamp(), intent.id);
+        results.push({ ok: false, intent, code, message });
+      }
+    }
+    return {
+      attempted: results.length,
+      replayed: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      results
+    };
   }
 
   listBatches(filters = {}) {
@@ -1041,6 +1198,85 @@ class ArchiveRepository {
     });
   }
 
+  beginTaskRecovery(batchContext = {}, options = {}) {
+    const id = Number(batchContext.batchId);
+    if (!Number.isSafeInteger(id) || id < 1) {
+      throw new TypeError('batchContext.batchId 必须是正安全整数');
+    }
+    const expectedIdentity = {
+      batchNumber: requiredText(batchContext.batchNumber, 'batchContext.batchNumber', 128),
+      taskRunId: requiredText(batchContext.taskRunId, 'batchContext.taskRunId', 256),
+      taskKey: requiredText(batchContext.taskKey, 'batchContext.taskKey', 128),
+      moduleId: normalizeModuleId(batchContext.moduleId),
+      parentRunId: requiredText(batchContext.parentRunId, 'batchContext.parentRunId', 256),
+      operationKey: requiredText(batchContext.operationKey, 'batchContext.operationKey', 256),
+    };
+    const evidence = options.evidence === undefined ? {} : options.evidence;
+    if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+      throw new TypeError('recovery evidence 必须是对象');
+    }
+    const timestamp = this._timestamp();
+
+    return withWriteTransaction(this.db, () => {
+      const current = this.getBatch(id);
+      if (!current) {
+        return { status: 'not-found', updated: false, batch: null };
+      }
+      const mismatchedField = Object.entries(expectedIdentity).find(
+        ([field, value]) => String(current[field] || '') !== String(value)
+      );
+      if (mismatchedField) {
+        return {
+          status: 'identity-conflict',
+          updated: false,
+          mismatchedField: mismatchedField[0],
+          batch: current
+        };
+      }
+      if (current.taskStatus === BATCH_TASK_STATUSES.SUCCEEDED) {
+        return { status: 'succeeded-conflict', updated: false, batch: current };
+      }
+      if (![BATCH_TASK_STATUSES.RUNNING, BATCH_TASK_STATUSES.FAILED, BATCH_TASK_STATUSES.CANCELLED]
+        .includes(current.taskStatus)) {
+        return { status: 'status-conflict', updated: false, batch: current };
+      }
+
+      const previousRecovery = current.metadata && current.metadata.recovery;
+      const previousCount = Number(previousRecovery && previousRecovery.recoveryCount);
+      const recoveryMetadata = {
+        previousTaskStatus: current.taskStatus,
+        previousFailureCode: current.failureCode || '',
+        previousFailureMessage: current.failureMessage || '',
+        previousFinishedAt: current.finishedAt || null,
+        recoveryCount: Number.isSafeInteger(previousCount) && previousCount >= 0
+          ? previousCount + 1
+          : 1,
+        evidence: { ...evidence }
+      };
+      const result = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = 'running',
+            finished_at = NULL,
+            failure_code = NULL,
+            failure_message = NULL,
+            archive_status = 'staging',
+            completed_at = NULL,
+            metadata_json = ?,
+            updated_at = ?
+        WHERE id = ? AND task_status = ?
+      `).run(
+        normalizeMetadata({ ...(current.metadata || {}), recovery: recoveryMetadata }),
+        timestamp,
+        id,
+        current.taskStatus
+      );
+      if (result.changes !== 1) {
+        return { status: 'conflict', updated: false, batch: this.getBatch(id) };
+      }
+      return { status: 'reopened', updated: true, batch: this.getBatch(id) };
+    });
+  }
+
   transitionTaskStatus(batchId, taskStatus, options = {}) {
     const id = Number(batchId);
     const status = normalizeTaskStatus(taskStatus);
@@ -1059,6 +1295,13 @@ class ArchiveRepository {
       options.failureMessage || options.errorMessage || options.message || options.reason,
       512
     );
+    const metadataPatch = options.metadata === undefined
+      ? null
+      : options.metadata;
+    if (metadataPatch !== null
+        && (typeof metadataPatch !== 'object' || Array.isArray(metadataPatch))) {
+      throw new TypeError('terminal metadata patch 必须是对象');
+    }
     const timestamp = this._timestamp();
     const isFinished = status === BATCH_TASK_STATUSES.SUCCEEDED
       || status === BATCH_TASK_STATUSES.FAILED
@@ -1069,6 +1312,18 @@ class ArchiveRepository {
         return { status: 'not-found', updated: false, idempotent: false, batch: null };
       }
       if (current.taskStatus === status) {
+        if (metadataPatch) {
+          this.db.prepare(`
+            UPDATE archive_batches
+            SET metadata_json = ?, updated_at = ?
+            WHERE id = ? AND task_status = ?
+          `).run(
+            normalizeMetadata({ ...(current.metadata || {}), ...metadataPatch }),
+            timestamp,
+            id,
+            status
+          );
+        }
         if (isFinished) this._refreshBatchStatus(id, timestamp, { emptyIsComplete: true });
         return {
           status: 'unchanged',
@@ -1099,7 +1354,8 @@ class ArchiveRepository {
               ELSE started_at
             END,
             finished_at = CASE WHEN ? = 1 THEN ? ELSE finished_at END,
-            failure_code = ?, failure_message = ?, updated_at = ?
+            failure_code = ?, failure_message = ?,
+            metadata_json = COALESCE(?, metadata_json), updated_at = ?
         WHERE id = ? AND task_status = ?
       `).run(
         status,
@@ -1109,6 +1365,9 @@ class ArchiveRepository {
         isFinished ? timestamp : null,
         failureCode || null,
         failureMessage || null,
+        metadataPatch
+          ? normalizeMetadata({ ...(current.metadata || {}), ...metadataPatch })
+          : null,
         timestamp,
         id,
         current.taskStatus

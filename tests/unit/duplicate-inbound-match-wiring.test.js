@@ -4,6 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const {
+  executeIpcTaskInvocation,
+  normalizeIpcTaskHandler,
+  prepareIpcTaskInvocation
+} = require('../../src/main-process/archive-center/ipc-task-contract');
 
 const root = path.resolve(__dirname, '../..');
 const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
@@ -43,6 +48,7 @@ function createMainHandlerHarness(overrides = {}) {
     'return registerDuplicateInboundMatchHandlers;'
   ].join('\n');
   const factory = new Function(
+    'ipcMain',
     'trackedIpcHandle',
     'getDuplicateInboundMatchService',
     'tryAcquireBankStatementOpLock',
@@ -53,7 +59,21 @@ function createMainHandlerHarness(overrides = {}) {
     source
   );
   const register = factory(
-    (channel, _moduleName, _actionName, handler) => handlers.set(channel, handler),
+    { handle: (channel, handler) => handlers.set(channel, handler) },
+    (channel, _moduleName, _actionName, handler) => {
+      const contract = normalizeIpcTaskHandler(handler);
+      handlers.set(channel, async (event, ...args) => {
+        const prepared = await prepareIpcTaskInvocation(contract, event, args);
+        if (!prepared.proceed) return prepared.result;
+        return executeIpcTaskInvocation(
+          contract,
+          event,
+          prepared,
+          prepared.args,
+          {}
+        );
+      });
+    },
     () => service,
     overrides.tryAcquireBankStatementOpLock || (() => ({ acquired: true })),
     overrides.showImportOpenDialog || (async () => ({ canceled: true, filePaths: [] })),
@@ -179,7 +199,7 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       { status: 'cancelled' }
     );
     assert.equal(importCalled, 0);
-    assert.equal(cancelled.calls.released, 1);
+    assert.equal(cancelled.calls.released, 0);
 
     const expectedError = Object.assign(new Error('导入校验失败'), {
       code: 'bad-import',
@@ -232,6 +252,6 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       { status: 'cancelled' }
     );
     assert.equal(exportCalled, 0);
-    assert.equal(exportCancelled.calls.released, 1);
+    assert.equal(exportCancelled.calls.released, 0);
   });
 });

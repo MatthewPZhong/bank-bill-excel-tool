@@ -4,6 +4,10 @@
   const FUND_NATURE_FUNCTION = 'position-fund-nature-check';
   const SOURCE_ACCOUNT = 'bank-account';
 
+  function buildRunReplaceConfirmationRequest(contextId) {
+    return { contextId, confirmReplace: true };
+  }
+
   function escapeHtml(value) {
     return String(value == null ? '' : value)
       .replaceAll('&', '&amp;')
@@ -663,10 +667,10 @@
           if (result && result.status === 'needs-replace-confirmation') {
             const replace = await confirmAction(result.message, '使旧结果失效并运行');
             if (!replace) return;
-            result = await withInflight('正在重新执行平盘资金性质校验…', () => api.run({
-              ...selection,
-              replacePendingRunId: result.pendingRunId
-            }));
+            result = await withInflight(
+              '正在重新执行平盘资金性质校验…',
+              () => api.run(buildRunReplaceConfirmationRequest(result.contextId))
+            );
           }
           if (!result || result.status !== 'ok') {
             showAlert(failureDetailsHtml(result, '平盘资金性质校验失败'), { html: true });
@@ -1700,6 +1704,7 @@
   }
 
   global.__positionReconciliation = {
+    buildRunReplaceConfirmationRequest,
     createPositionReconciliationUI,
     formatUpdatedDate,
     isImportCancelledResult

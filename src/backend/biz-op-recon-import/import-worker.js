@@ -40,6 +40,9 @@ const { validateBizOpRow, validateFlowRow } = require('./validator');
 const { streamBizOpFile, streamFlowFile } = require('./reader-streamed');
 // addOneDay / normalizeBu 单一真理来源在 session.js（资金红线 helper，避免双源漂移）
 const { addOneDay, normalizeBu } = require('../../main-process/biz-op-recon-session');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 // 错误数量上限：防百万级行级错误累积后 emit 巨型 JSON 把 stdout 管道撑爆。
 // 超上限只保留前 N 条带 rawRow（供导报告 xlsx），rowErrorTotal 仍记全量真实数。
@@ -413,6 +416,8 @@ function emitHeaderOrFatal(err) {
 async function main() {
   const job = loadJobMeta();
   if (!job) return;   // I3：loadJobMeta 失败已 emitAndExit（调度退出），不继续
+  const batchContext = freezeWorkerBatchContext(job.batchContext);
+  void batchContext;
   // bizOp 走 filePath（单数，不变）；flow 走 filePaths（v3.0.2 需求1b 多文件合并）。
   const { dbPath, kind, date, filePath } = job;
   const filePaths = Array.isArray(job.filePaths) ? job.filePaths : null;

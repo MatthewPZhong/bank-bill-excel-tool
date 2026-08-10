@@ -1,8 +1,8 @@
-# v3.1.9 PR1 Test Spec
+# v3.1.9 Test Spec
 
 ## 1. 范围
 
-本文件只覆盖确认 Spec §15.1 中 PR1 可承担的批次身份、数据库迁移、状态 DTO 和查询基础。业务 action 接线、策略注册、文件物化、存储迁移、UI 和发布门禁由后续 PR 补充。
+本文件覆盖确认 Spec §15.1 的 PR1 批次身份/迁移，以及 §15.2/§15.3 中 PR2 可承担的任务生命周期、策略注册、worker context 和 12 个既有 archive scope 接线。VCC 财务 OP、工具箱、文件物化、存储迁移和 archive UI 仍由 PR3—PR6 补充。
 
 ## 2. P0 自动化矩阵
 
@@ -38,7 +38,7 @@
 - 现有 `createBatch` 继续生成模块前缀 v1 批次并保留原幂等、保留期、artifact、Blob、删除和重试行为。
 - `archiveStatus` 的 list filter、状态刷新和修复流程不读取 taskStatus 代替。
 
-## 4. 本 PR 明确不测
+## 4. PR1 阶段明确不测（历史边界）
 
 - TaskPolicyRegistry/action inventory（PR2）。
 - VCC 财务 OP、工具箱与 13+1 接线（PR3）。
@@ -139,3 +139,69 @@
 - 既有 containment/protection 定向回归继续覆盖用户路径边界与受保护 staging，不重复物理删除排列。
 - tombstone + cleanup candidate 定向：2/2 PASS；controller、Position lifecycle、renderer Position、archive UI 相关回归：81/81 PASS；既有 protection 定向：2/2 PASS。
 - 相关 4 文件 `node --check`、`npm run lint`、base→working tree/current diff-check PASS；`npm run check:vars -- --include-minor` 自动无命中，人工复核 Position checkpoint/pending 与存档失败隔离边界未漂移。
+## 6. PR2 范围
+
+PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程解析、worker context、12 个既有 archive primary scope 与现有业务 action 接线。VCC 财务 OP、工具箱、13+1、目录物化、存储迁移和 UI 仍由 PR3—PR6 负责。
+
+## 7. PR2 P0 自动化矩阵
+
+| ID | 场景 | 关键断言 |
+| --- | --- | --- |
+| P0-PR2-01 | prepare 取消 | picker / 危险确认取消不调用 BOR、不预留批次、不执行业务 |
+| P0-PR2-02 | 顺序与预留失败 | 严格 `BOR.begin → reserve → started → execute`；reserve/started 失败均不执行 handler/worker，BOR 必释放 |
+| P0-PR2-03 | terminal CAS | success / failed / cancelled 只终结原批次；late success/cancel 不覆盖先到终态 |
+| P0-PR2-04 | policy inventory | 每个 literal IPC 精确落入 reserve、带枚举原因的 exclude 或锁定的 PR3 exact handoff；未知、新增裸 action、wildcard 均失败 |
+| P0-PR2-05 | registry 执行一致性 | reserve policy 只能走受控 lifecycle wrapper；exclude policy 不触发 reserve；query/picker/preview/cancel 原因准确 |
+| P0-PR2-06 | 12 scope | 12 个 primary scope ID/code 唯一；`LINKED/PREFUNDTEMP/POSITIONLINK` 只作 alias，不增加可见 scope；不提前加入 VCC/toolbox |
+| P0-PR2-07 | BusinessFlowResolver 新流程 | 无可证明 identity 时生成新 parent；相同月份/源文件也不复用；显式重新执行生成新 task/operation key |
+| P0-PR2-08 | BusinessFlowResolver 继承 | 显式 parent 或已绑定稳定 businessRunId/operationToken 跨 resolver 重建后继承；跨 module/冲突 fail-closed |
+| P0-PR2-08a | 历史 identity 首次接入 | 稳定业务 identity 查询成功但无 anchor 时建立并立即绑定新 parent；后续跨重启继承；查询失败仍 fail-closed |
+| P0-PR2-09 | 结果后绑定 | runId 仅在业务成功结果后绑定到本次 parent/source batch；失败结果不伪造 anchor |
+| P0-PR2-10 | worker context | context 可 structured-clone/JSON 序列化、冻结且只含 batch/task/module/parent/operation identity；worker 不 reserve |
+| P0-PR2-11 | tracker 退化 | 只解析并追加当前 batch 文件；无 `createBatch`、pendingInputs、activeBatches、latest fallback 或跨 action 内存续接 |
+| P0-PR2-12 | 业务成功、存档失败 | task 保持 succeeded，业务原结果原样返回，archive incomplete/持久重试告警独立记录 |
+| P0-PR2-13 | 业务异常/返回失败 | thrown error 与失败结果均终结为 failed；输入/已产出文件按可得证据追加；批次不删除 |
+| P0-PR2-14 | 取消 | active action 取消只 CAS 当前 batch 为 cancelled，不创建取消批次；无 active batch 时不猜 latest |
+| P0-PR2-15 | 12 模块接线 | 每个现有 primary scope 至少一个真实 mutating action 在业务副作用前取得 batch context；文件 action 追加到本批次 |
+| P0-PR2-16 | 平盘 operation token | 持久 pending / worker 恢复沿用同一 operationKey、batchId、parentRunId；checkpoint 与业务算法不变 |
+| P0-PR2-17 | 大账号交互批次边界 | import preview / validation / cancel / 顺序提取均不 reserve；main 返回 opaque contextId；complete 消费一次真实 context 且只 reserve 一次 |
+| P0-PR2-18 | 大账号源上下文边界 | renderer DTO 不含 filePath/fileRows；extract/complete 只回传 contextId + rowIndexes/assignments；fixed 从服务端 rowsWithEmptyBlocks 过滤；complete 保留数量、账号、币种校验并按 rowIndex 排序 |
+| P0-PR2-19 | prepare 真只读与解析复用 | 收单缺失侧库不建目录/DB，既有侧库用 read-only handle 且不跑 DDL；网银 preview 缓存映射行，execute 不二次完整解析并在 reserve 前校验源新鲜度 |
+| P0-PR2-20 | statement result classifier | execute 仅额外接受 `manual-balance-required`；`needs-selection`、`remember-order-mismatch`、`select-big-account`、`select-export-scope` 穿透时必须拒绝 |
+| P0-PR2-21 | position run 危险替换确认 | selection 校验、已有 pending run 替换确认在 prepare 完成；prepare 只用 channels/months/status COUNT，禁止调用 `getBankRows` 全量解析；首调/取消 0 BOR/reserve/service.run；renderer 二次只提交 opaque `contextId + confirmReplace`；确认后 1 BOR/1 reserve/1 execute，execute 恰好一次全量读取且 classifier 不接受 `needs-replace-confirmation` |
+| P0-PR2-22 | position source 两阶段边界 | picker cancel 与 account-only 预检/取消 0 BOR/reserve/DB apply；legacy ordinary 只生成 plan，streaming ordinary 停在既有授权屏障，均在 reserve/started 且 position outer operation 实际放行后恰好 apply 一次；mixed ordinary 成功不因账户取消回滚，账户确认沿用独立 `source:apply-import` batch；reserve/started 或 position outer callback 前失败清 worker/staging且 0 DB apply |
+| P0-PR2-23 | 真实 worker 拓扑继承 | Pending 留底/default engine/legacy utility、BizOp utility/flow engine/legacy utility、Acquiring import engine/run-check/nested multiworker、Position bank/account/schema/maintenance worker 均继承同一父任务 context；Position ordinary source 的 `START_JOB` 不携带伪 context，只在既有 `APPLY_GRANTED` 屏障后注入；每个 worker 入口重建并冻结恰好 7 字段 DTO，禁止携带 `settleArtifacts` 或自行 reserve |
+| P0-PR2-24 | Acquiring 崩溃恢复身份 | side 存在只读 side，否则读 legacy main；identity 精确包含 `source + monthKey + runId`；新格式 reopen 原 batch 且序号不增，legacy side/main 首次稳定 reserve/backfill、后续 reuse；busy 在 worker/reopen 前返回；worker 使用持久 context/chunkSize/offset/dbPath；side 成功才 upsert main mirror，main 不伪造 side |
+| P0-PR2-25 | Position pending 恢复清理 | direct/outbox 共享 finalizer；archive durable/原 task terminal 后先同步 checkpoint/bootstrap，再精确 clear 当前 operation pending，最后按当前 pending files + committed operation inputs 重算并 best-effort 清未提交输入；失败或 ownership 改变不清理 |
+
+## 8. PR2 P1 回归与人工检查
+
+- 既有 archive repository/service/controller/operation-tracker 单测全绿。
+- business operation registry、position operation lifecycle、worker pool/dispatch 契约全绿。
+- 12 个模块原有 unit/integration/smoke 与 `npm run release-check` 全绿。
+- P0 手工：取消至少一个文件选择和一个危险确认，存档中心运行次数不增加；执行一个成功和一个失败任务，均只出现一个预留批次且状态正确。
+- P1 手工：抽查一个 worker 模块退出/取消路径和一个无文件状态动作；业务结果、原业务状态和输出文件内容不因 lifecycle wrapper 改变。
+- 本 PR 不做 VCC 财务 OP/工具箱、目录浏览、存储地址、UI 布局和 Windows hardlink 验收。
+
+## 9. PR2 执行证据
+
+以下记录 PR2 自动化收口证据；GUI、真实 Electron 崩溃/重启及资金结果人工复核未执行：
+
+- position interactive handler/lifecycle：7/7 PASS；TaskPolicyRegistry：13/13 PASS；覆盖 position outer 拒绝时一次 abandon、实际进入 callback 时正常执行且不 abandon。
+- position service：66/66 PASS，覆盖 run prepare 轻量 COUNT/execute 单次全量读取，以及 legacy/streaming account-only、ordinary-only、mixed、账户取消/确认和 reserve 失败资源清理。
+- position operation lifecycle + legacy import characterization + streaming import preflight：75/75 PASS。
+- position side-DB integration：38/38 PASS。
+- position renderer 既有契约：27/27 PASS；恢复必须使用 pending 原 `batchContext` 调用 `persistAppendIntent`，禁止 create/guess batch；旧 `persistOperationIntent` 字面量契约已退役。
+- worker context + lifecycle/position 聚焦单测：175/175 PASS；覆盖 7 字段 structured clone/refreeze、Pending 真实留底 utility、BizOp 真实 utility、Acquiring run-check 与 nested M=1/2/4、Position source `START_JOB` 无 context / `APPLY_GRANTED` 有父 context，以及 bank/source/account/schema/maintenance 真实 dispatcher 链。
+- TaskPolicyRegistry / main literal 接线：13/13 PASS；把 scoped direct handler 改为 lifecycle object handler 后，reserve/exclude/PR3 exact handoff inventory 仍精确一致。
+- worker 引擎迁移集成：Pending 57/57 PASS、BizOp flow 65/65 PASS、Acquiring 45/45 PASS；default engine 与可达 legacy utility 均收到相同父 context，既有导入结果 parity 不变。
+- Acquiring crash/resume P0-D + reviewer P1 聚焦单测：164/164 PASS（10 suites），其中直接受影响 lifecycle/policy 41/41 PASS；覆盖 side new-format 精确 batch identity/reopen、恢复不增全局序号、side 成功后 main mirror、legacy side/main 首次稳定 reserve/backfill 与第二次 reuse、busy 0 worker/0 reopen、worker 使用持久 7 字段 context 且 `dbPath/chunk offset` 不变；同时锁定 stale legacy existing 在 freshness 失败时 0 recover/0 fail，以及同 runId 跨月、legacy main/side result identity 与 flowPlan 一致。
+- Acquiring 恢复集成回归：engine migration 45/45 PASS；side-DB parity 19/19 PASS；side 存在只恢复 side，否则恢复 legacy main，main source 不伪造 side mirror；runCheck SQL/算法/checkpoint/事务与金额币种语义未改。
+- 静态边界：`npm run lint` PASS；相关生产/测试文件 `node --check` PASS；`git diff --check` PASS；受测 worker 入口中无 `reserveTaskBatch` / `reserveBatch` / `createBatch`，消息/job metadata 中无 `settleArtifacts`。同步 main-thread fallback 不是 worker 边界，不人为增加消息协议；Acquiring compatibility identity 明确包含 `source + monthKey + runId`，不使用月份/hash fallback。
+- Position P0-E 六文件聚焦回归：169/169 PASS；archive center UI contract 18/18、renderer 27/27 均全绿，覆盖 `settleArtifacts → settlePositionArchiveResult → return` barrier、direct/outbox 复用同一 finalizer，以及 `settle original task → checkpoint/bootstrap → clear current pending → cleanup uncommitted inputs` 顺序。
+- Position P0-E 行为回归：streaming preflight、interactive admission、legacy import characterization、TaskLifecycle 合计 87/87 PASS；side-DB parity 38/38 PASS；pending/提交凭证损坏或 ownership 改变继续 fail-closed，cleanup best-effort 不覆盖已完成恢复。
+- Position P0-E inventory/静态门禁：TaskPolicyRegistry + module scope 17/17 PASS；`npm run lint`、相关 `node --check`、`git diff --check` PASS。12 primary scope、literal IPC 与 reserve/exclude/PR3 exact handoff inventory 无旁路。
+- PR2 完整 unit 首轮：4906/4908；仅两项陈旧测试失败。修复后原失败文件 13/13 PASS、直接相关 9 文件 90/90 PASS：Position result-import 生产已走统一锁，仅静态断言未容忍换行；DuplicateInbound 生产注册正常，仅抽取 harness 缺少 `ipcMain` 且仍按旧函数 handler 执行。测试现复用真实 prepare/execute contract，picker 取消保持 0 execute/0 lock；本收口未改生产。
+- 完整自动门禁：`npm run release-check` exit 0；unit 4908/4908；48 个 integration 脚本 2459/2459；smoke、lint PASS。integration runner 只在全绿时自动更新 `rules/integration-test-policy.md` §七，本次生成清单作为证据保留。
+- 提交前变量检查：`npm run check:vars -- --include-minor` exit 2（命中需 review）；Critical 5、Important-skeleton 8、Runtime-state 9、Risk-sensitive 3、Minor 4 已逐项对照 `rules/important-variables.md`。资金算法、金额/币种、行过滤、输出列、模板保留 ID/前缀、错误 schema 和一次性迁移未改；真实变化为 TaskLifecycle、opaque context、worker batch context、freshness 和精确恢复接线。
+- 未完成人工验收：真实 Excel/WPS bill-split 币种/合并结果、Position account-only/mixed/替换 pending GUI 路径、worker 退出/取消抽查，以及 Acquiring side/legacy 的真实 Electron 崩溃重启、offset/main mirror/序号核对。自动门禁通过不替代这些人工项目。

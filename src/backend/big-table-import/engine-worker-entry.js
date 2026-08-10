@@ -24,6 +24,9 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 if (!isMainThread && parentPort) {
   process.on('warning', (warning) => {
@@ -78,6 +81,7 @@ if (!isMainThread && parentPort) {
     activeCancelToken = { cancelled: false };
 
     try {
+      const batchContext = freezeWorkerBatchContext(payload.batchContext);
       const result = await engine.importFiles({
         dbPath: payload.dbPath,
         files: payload.files,
@@ -87,6 +91,7 @@ if (!isMainThread && parentPort) {
         monthKey: payload.monthKey,
         parallel: payload.parallel,
         useWhitelist: payload.useWhitelist,
+        batchContext,
         onProgress: (ev) => {
           try { parentPort.postMessage({ type: 'progress', jobId, payload: ev }); } catch (_e) { /* swallow */ }
         },

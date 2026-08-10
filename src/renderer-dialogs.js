@@ -1,4 +1,8 @@
 (function initRendererDialogs(global) {
+  function buildBalanceSeedConfirmationRequest(contextId) {
+    return { contextId, confirmOverwrite: true };
+  }
+
   function createRendererDialogs(deps) {
     const {
       state,
@@ -731,10 +735,9 @@
               confirmText: '确认覆盖',
               cancelText: '取消',
               onConfirm: async () => {
-                const overwriteResult = await desktopApi.files.saveBalanceSeed({
-                  ...payload,
-                  overwrite: true
-                });
+                const overwriteResult = await desktopApi.files.saveBalanceSeed(
+                  buildBalanceSeedConfirmationRequest(result.contextId)
+                );
                 handleSaveResult(overwriteResult);
               }
             })
@@ -1823,12 +1826,11 @@
             })
           : currentFileRows;
         const result = await desktopApi.files.extractBigAccountOrder({
+          contextId: payload.contextId,
           mode: currentMode,
-          fileRows: extractableRows.map((row) => ({
-            sourceRowNumber: row.sourceRowNumber,
-            fileName: row.fileName,
-            filePath: row.filePath || ''
-          }))
+          rowIndexes: extractableRows.map((row, index) => (
+            Number.isInteger(row.index) ? row.index : index
+          ))
         });
 
         if (result.status === 'error') {
@@ -2028,7 +2030,7 @@
       });
 
       dialog.querySelector('.icon-close').addEventListener('click', () => {
-        desktopApi.files.cancelBigAccountSelection();
+        desktopApi.files.cancelBigAccountSelection(payload.contextId);
         closeModal();
       });
       doneBtn.addEventListener('click', async () => {
@@ -2090,15 +2092,11 @@
           return;
         }
 
-        if (currentMode === 'fixed' && rememberCheckbox.checked) {
-          await desktopApi.bigAccount.saveOrder({ templateId, assignments: finalAssignments, includeFileInfo: true });
-        } else if (currentMode === 'fixed' && !rememberCheckbox.checked) {
-          await desktopApi.bigAccount.saveOrder({ templateId, assignments: [] });
-        }
-
         const result = await desktopApi.files.completeBigAccountSelection({
+          contextId: payload.contextId,
           assignments: finalAssignments,
-          mode: currentMode
+          mode: currentMode,
+          ...(currentMode === 'fixed' ? { rememberOrder: rememberCheckbox.checked } : {})
         });
 
         if (result.status === 'error' && !result.manualBalancePromptReady) {
@@ -5755,6 +5753,7 @@
       });
 
       dialog.querySelector('[data-action="confirm"]').addEventListener('click', () => {
+        desktopApi.files.cancelBigAccountSelection(bigAccountResult.contextId);
         closeModal();
       });
 
@@ -8132,7 +8131,7 @@
               onConfirm: async () => {
                 let applyResult;
                 try {
-                  applyResult = await desktopApi.scenarios.applyImport(result.bundle, {
+                  applyResult = await desktopApi.scenarios.applyImport(result.preparedContextId, {
                     confirmCreateMissingChannels: true
                   });
                 } catch (err) {
@@ -8158,6 +8157,29 @@
                 openModal(reopenScenariosManager());
               }
             }));
+            return;
+          }
+          if (result.status === 'ready-to-apply') {
+            let applyResult;
+            try {
+              applyResult = await desktopApi.scenarios.applyImport(result.preparedContextId, {
+                confirmCreateMissingChannels: false
+              });
+            } catch (err) {
+              openModal(createAlertDialog(
+                `应用导入异常：${err && err.message ? err.message : err}`,
+                { onConfirm: () => openModal(reopenScenariosManager()) }
+              ));
+              return;
+            }
+            if (applyResult && applyResult.status === 'ok') {
+              showImportResultDialog(applyResult);
+            } else {
+              openModal(createAlertDialog(
+                `导入失败：${applyResult?.message || '未知错误'}`,
+                { onConfirm: () => openModal(reopenScenariosManager()) }
+              ));
+            }
             return;
           }
           if (result.status === 'ok') {
@@ -13843,6 +13865,7 @@
   }
 
   global.__rendererDialogs = {
+    buildBalanceSeedConfirmationRequest,
     createRendererDialogs
   };
 }(window));

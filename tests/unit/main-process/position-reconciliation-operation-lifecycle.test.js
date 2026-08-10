@@ -18,6 +18,7 @@ const {
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult,
   runPositionOperationLifecycle,
+  settlePositionRecoveredTask,
   settlePositionArchiveResult
 } = require('../../../src/main-process/position-reconciliation/operation-lifecycle');
 const {
@@ -156,17 +157,21 @@ async function runHarness({
             archiveReference: value.batchId || value.outboxId || ''
           };
         },
+        markIncomplete: (value) => {
+          pending = {
+            ...pending,
+            archiveState: 'incomplete',
+            archiveWarning: value && value.warning
+              ? value.warning
+              : value || null
+          };
+        },
         cleanup: () => {
           cleanupCount += 1;
         },
         reportFailure: (warning) => {
           warnings.push(warning);
-        },
-        registrationFailureResult: (_result, warning) => ({
-          status: 'failed',
-          code: 'archive-retry-registration-failed',
-          message: warning && warning.message ? warning.message : 'archive failed'
-        })
+        }
       });
     },
     readPending: () => pending,
@@ -324,10 +329,11 @@ test('存档失败已形成持久重试后清理函数只处理未受保护暂�
   assert.equal(recovered.pending, null);
   assert.deepEqual(recovered.syncedCheckpoint, checkpoint(1));
   assert.equal(recovered.cleanupCount, 1);
-  assert.deepEqual(recovered.warnings, [{ message: 'archive copy failed' }]);
+  // TaskLifecycle 是唯一告警拥有者；position settle 不重复上报同一存档失败。
+  assert.deepEqual(recovered.warnings, []);
 });
 
-test('正式存档与持久重试都失败时保留 pending 并返回禁止重试错误', async () => {
+test('正式存档与持久重试都失败时原样返回业务成功并保留 incomplete pending', async () => {
   const failed = await runHarness({
     operationToken: 'archive-double-failure',
     baseCheckpoint: checkpoint(0),
@@ -344,12 +350,128 @@ test('正式存档与持久重试都失败时保留 pending 并返回禁止重�
       warning: { message: 'archive and outbox failed' }
     }
   });
-  assert.equal(failed.result.code, 'archive-retry-registration-failed');
+  assert.equal(failed.result.status, 'ok');
+  assert.deepEqual(failed.result.inputPaths, ['/tmp/input.xlsx']);
   assert.equal(failed.pending.operationToken, 'archive-double-failure');
-  assert.equal(failed.pending.archiveState, 'awaiting-intent');
+  assert.equal(failed.pending.archiveState, 'incomplete');
   assert.equal(failed.syncedCheckpoint, null);
   assert.equal(failed.cleanupCount, 0);
-  assert.deepEqual(failed.warnings, [{ message: 'archive and outbox failed' }]);
+  assert.deepEqual(failed.warnings, []);
+});
+
+function recoveredTaskFixture(terminalOutcome) {
+  const calls = [];
+  const batchContext = {
+    batchId: 91,
+    batchNumber: '2026-08-10-091',
+    taskRunId: 'position-operation-91',
+    taskKey: 'position-reconciliation:run',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-parent-91',
+    operationKey: 'position:position-operation-91:run'
+  };
+  const batch = {
+    id: 91,
+    taskStatus: 'running',
+    taskRunId: batchContext.taskRunId,
+    moduleId: batchContext.moduleId,
+    parentRunId: batchContext.parentRunId,
+    operationKey: batchContext.operationKey
+  };
+  const success = async (name, payload) => {
+    calls.push([name, payload]);
+    batch.taskStatus = name;
+    return { ok: true, batch: { ...batch } };
+  };
+  return {
+    calls,
+    pending: {
+      operationToken: batchContext.taskRunId,
+      batchContext,
+      terminalOutcome
+    },
+    archiveService: {
+      getBatch: async () => ({ ok: true, batch: { ...batch } }),
+      completeTaskBatch: (_id, payload) => success('succeeded', payload),
+      failTaskBatch: (_id, payload) => success('failed', payload),
+      cancelTaskBatch: (_id, payload) => success('cancelled', payload)
+    }
+  };
+}
+
+test('启动恢复按持久 succeeded outcome 终结原 task', async () => {
+  const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  const settled = await settlePositionRecoveredTask(fixture);
+  assert.equal(settled.outcome.taskStatus, 'succeeded');
+  assert.deepEqual(fixture.calls.map((call) => call[0]), ['succeeded']);
+});
+
+test('启动恢复按持久 cancelled outcome 终结原 task', async () => {
+  const fixture = recoveredTaskFixture({
+    taskStatus: 'cancelled',
+    code: 'position-import-cancelled',
+    message: '用户取消导入'
+  });
+  const settled = await settlePositionRecoveredTask(fixture);
+  assert.equal(settled.outcome.taskStatus, 'cancelled');
+  assert.deepEqual(fixture.calls.map((call) => call[0]), ['cancelled']);
+  assert.equal(fixture.calls[0][1].reason, '用户取消导入');
+});
+
+test('启动恢复按持久真实异常 outcome 终结原 task 为 failed', async () => {
+  const fixture = recoveredTaskFixture({
+    taskStatus: 'failed',
+    code: 'position-worker-crashed',
+    message: 'utility process exited'
+  });
+  const settled = await settlePositionRecoveredTask(fixture);
+  assert.equal(settled.outcome.taskStatus, 'failed');
+  assert.deepEqual(fixture.calls.map((call) => call[0]), ['failed']);
+  assert.equal(fixture.calls[0][1].code, 'position-worker-crashed');
+});
+
+test('启动恢复通过 ArchiveService facade 读不到原批次时失败', async () => {
+  const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  fixture.archiveService.getBatch = async () => ({
+    ok: false,
+    code: 'ARCHIVE_BATCH_NOT_FOUND',
+    message: '存档批次不存在'
+  });
+  await assert.rejects(
+    settlePositionRecoveredTask(fixture),
+    /存档批次不存在/
+  );
+  assert.deepEqual(fixture.calls, []);
+});
+
+test('启动恢复拒绝终结与持久 batchContext 身份不一致的批次', async () => {
+  const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  const originalGetBatch = fixture.archiveService.getBatch;
+  fixture.archiveService.getBatch = async (batchId) => {
+    const lookup = await originalGetBatch(batchId);
+    return {
+      ...lookup,
+      batch: { ...lookup.batch, operationKey: 'position:another-operation' }
+    };
+  };
+  await assert.rejects(
+    settlePositionRecoveredTask(fixture),
+    /batchContext 与原任务批次身份不一致/
+  );
+  assert.deepEqual(fixture.calls, []);
+});
+
+test('output-only 平盘导出恢复无需伪造 input 提交凭证', () => {
+  const output = {
+    filePath: '/tmp/position-output-only.xlsx',
+    role: 'output',
+    beforeSnapshot: null
+  };
+  const committed = positionCommittedRecoveryArchiveFiles({
+    operationToken: 'position-output-only',
+    archiveFiles: [output]
+  }, []);
+  assert.deepEqual(committed, [output]);
 });
 
 test('损坏存档文件清单在任何 archive 状态下都禁止同步 checkpoint 和清除 pending', async () => {

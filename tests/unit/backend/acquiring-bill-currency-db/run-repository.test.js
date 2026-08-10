@@ -99,6 +99,16 @@ function insertRun(db, monthKey, count) {
   });
 }
 
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 101,
+  batchNumber: 'ABC-202604-000101',
+  taskRunId: 'task-run-101',
+  taskKey: 'acquiringBillCurrency:run',
+  moduleId: 'acquiring-bill-currency',
+  parentRunId: 'flow-run-101',
+  operationKey: 'run:2026-04:101',
+});
+
 // ─────────────────────────────────────────────────────────────────
 // T18 — insertDiffRowsByJoinChunked
 // ─────────────────────────────────────────────────────────────────
@@ -735,6 +745,87 @@ test.describe('T19 — chunk_progress get/set', () => {
     const legacyAfter = runRepo.getRunChunkProgress(db, runIdLegacy);
     assert.strictEqual(legacyAfter.status, 'partial', 'T19.13.8 老 row 兜底后 status=partial');
     assert.strictEqual(legacyAfter.chunkSize, undefined, 'T19.13.9 老 row 兜底后 chunkSize 仍 undefined（不引入回归 — resume handler fallback settings 路径不变）');
+  });
+
+  test('T19.14 — batchContext 按版本持久化，partial/complete 更新不丢失且严格限定 7 字段', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 0);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+      chunkSize: 2000,
+      batchContext: { ...BATCH_CONTEXT, ignored: 'must-not-persist' },
+    });
+
+    const initial = runRepo.getRunChunkProgress(db, runId);
+    assert.equal(initial.batchContextVersion, runRepo.RUN_PROGRESS_BATCH_CONTEXT_VERSION);
+    assert.deepEqual(Object.keys(initial.batchContext).sort(), Object.keys(BATCH_CONTEXT).sort());
+    assert.deepEqual(initial.batchContext, BATCH_CONTEXT);
+    assert.deepEqual(runRepo.readRunProgressBatchContext(initial), BATCH_CONTEXT);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      chunkSize: 2000,
+    });
+    assert.deepEqual(runRepo.getRunChunkProgress(db, runId).batchContext, BATCH_CONTEXT);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 1,
+      totalChunks: 2,
+      status: 'complete',
+      chunkSize: 2000,
+    });
+    assert.deepEqual(runRepo.getRunChunkProgress(db, runId).batchContext, BATCH_CONTEXT);
+  });
+
+  test('T19.15 — 已标记 batchContext 的未知版本或非法内容必须闭锁失败', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 0);
+    const update = db.prepare(`
+      UPDATE acquiring_bill_currency_runs
+      SET chunk_progress = ?
+      WHERE id = ?
+    `);
+
+    update.run(JSON.stringify({
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      batchContextVersion: 2,
+      batchContext: BATCH_CONTEXT,
+    }), runId);
+    assert.throws(
+      () => runRepo.readRunProgressBatchContext(runRepo.getRunChunkProgress(db, runId)),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED'
+    );
+    assert.throws(
+      () => runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: 0,
+        totalChunks: 2,
+        status: 'partial',
+      }),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED'
+    );
+
+    update.run(JSON.stringify({
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      batchContextVersion: runRepo.RUN_PROGRESS_BATCH_CONTEXT_VERSION,
+      batchContext: { ...BATCH_CONTEXT, operationKey: '' },
+    }), runId);
+    assert.throws(
+      () => runRepo.readRunProgressBatchContext(runRepo.getRunChunkProgress(db, runId)),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_INVALID'
+    );
   });
 
 });

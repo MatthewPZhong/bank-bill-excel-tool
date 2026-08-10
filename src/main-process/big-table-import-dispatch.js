@@ -38,6 +38,7 @@ function dispatchEngineImport({
   contractOptions,
   mode,
   monthKey,
+  batchContext,
   resourceLimits,
   onEngineProgress,
   onLog
@@ -119,7 +120,8 @@ function dispatchEngineImport({
         contractModulePath,
         contractOptions: contractOptions || {},
         mode: mode || 'append',
-        monthKey
+        monthKey,
+        batchContext
         // parallel / useWhitelist 用引擎默认（min(4,cpus-2) + 内存闸；契约白名单）。
       }
     });

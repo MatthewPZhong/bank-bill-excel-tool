@@ -6,6 +6,11 @@ const RUNS_TABLE = 'acquiring_bill_currency_runs';
 const DIFF_TABLE = 'acquiring_bill_currency_diff_rows';
 const FLOW_TABLE = 'acquiring_bill_currency_flow_imports';
 const BILL_TABLE = 'acquiring_bill_currency_bill_imports';
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
+
+const RUN_PROGRESS_BATCH_CONTEXT_VERSION = 1;
 
 // ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — chunked 比对 SQL 共用片段（DRY 防漂移）
 //
@@ -376,6 +381,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
   dbPath,
   workerCount,
   tempDir,
+  batchContext,
   onChunkDone = null,
   cancelToken = null,
 } = {}) {
@@ -438,6 +444,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
       targetColumns: MULTIWORKER_TARGET_COLUMNS,
       prefixValues: [runId],
       tempDir,
+      batchContext,
       cancelToken, // PR #57 review P2：cancel 响应透传到 worker 调度（停派发+abort）
       onProgress: (ev) => {
         // 透传到单 worker 同名 onChunkDone（caller 复用 chunk_progress 更新）
@@ -493,7 +500,34 @@ async function insertDiffRowsByJoinMultiWorker(db, {
 //     → diff_rows 行 skip 或重复（与 baseline byte-for-byte 不一致）
 //   修复：把 chunkSize 存进 chunk_progress JSON，resume 时优先复用持久化值（不读当前 settings）
 //   兼容：老 partial run（升级前的 chunk_progress 没 chunkSize 字段）→ resume handler fallback 当前 settings + warning
-function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, status, chunkSize }) {
+function readRunProgressBatchContext(progress) {
+  if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return null;
+  const hasVersion = Object.prototype.hasOwnProperty.call(progress, 'batchContextVersion');
+  const hasContext = Object.prototype.hasOwnProperty.call(progress, 'batchContext');
+  if (!hasVersion && !hasContext) return null;
+  if (progress.batchContextVersion !== RUN_PROGRESS_BATCH_CONTEXT_VERSION) {
+    const error = new Error(`chunk_progress batchContext 版本不兼容：${JSON.stringify(progress.batchContextVersion)}`);
+    error.code = 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED';
+    throw error;
+  }
+  try {
+    return freezeWorkerBatchContext(progress.batchContext, { required: true });
+  } catch (cause) {
+    const error = new Error(`chunk_progress batchContext 非法：${cause.message}`);
+    error.code = 'ACQUIRING_RUN_BATCH_CONTEXT_INVALID';
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function setRunChunkProgress(db, {
+  runId,
+  lastCompletedChunkIndex,
+  totalChunks,
+  status,
+  chunkSize,
+  batchContext
+}) {
   if (!runId || typeof runId !== 'number') {
     throw new Error('setRunChunkProgress: runId 必填');
   }
@@ -508,6 +542,14 @@ function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, 
   // Round 6 H4：chunkSize 可选 — 显式传值才写入；不传时不写（向后兼容旧 caller / 旧 row）
   if (Number.isInteger(chunkSize) && chunkSize > 0) {
     payload.chunkSize = chunkSize;
+  }
+  const existingProgress = getRunChunkProgress(db, runId);
+  const persistedBatchContext = batchContext == null
+    ? readRunProgressBatchContext(existingProgress)
+    : freezeWorkerBatchContext(batchContext, { required: true });
+  if (persistedBatchContext) {
+    payload.batchContextVersion = RUN_PROGRESS_BATCH_CONTEXT_VERSION;
+    payload.batchContext = { ...persistedBatchContext };
   }
   db.prepare(`UPDATE ${RUNS_TABLE} SET chunk_progress = ? WHERE id = ?`).run(JSON.stringify(payload), runId);
 }
@@ -710,8 +752,10 @@ module.exports = {
   buildSelectOnlyChunkSql,
   MULTIWORKER_PART_COLUMNS,
   MULTIWORKER_TARGET_COLUMNS,
+  RUN_PROGRESS_BATCH_CONTEXT_VERSION,
   setRunChunkProgress,
   getRunChunkProgress,
+  readRunProgressBatchContext,
   // v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 partial run（用于 resume handler）
   listPartialRuns,
   computeRunStats,

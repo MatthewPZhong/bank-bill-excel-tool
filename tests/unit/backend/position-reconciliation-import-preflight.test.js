@@ -728,6 +728,60 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(fs.existsSync(jobRoot), false);
   });
 
+  test('普通来源 START/PREFLIGHT 不带批次，APPLY_GRANTED 注入父 action batchContext', async () => {
+    const batchContext = Object.freeze({
+      batchId: 319,
+      batchNumber: '2026-08-10-001',
+      taskRunId: 'position-source-worker-contract',
+      taskKey: 'position-reconciliation:source:prepare-import',
+      moduleId: 'position-reconciliation',
+      parentRunId: 'position-source-parent',
+      operationKey: 'position-source-operation'
+    });
+    const worker = new EventEmitter();
+    let startMessage = null;
+    let applyMessage = null;
+    worker.postMessage = (message) => {
+      if (message.type === POSITION_IMPORT_MESSAGE_TYPES.START_JOB) {
+        startMessage = message;
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
+          jobId: message.jobId,
+          archiveManifestHash: 'source-manifest'
+        }));
+        return;
+      }
+      if (message.type === POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED) {
+        applyMessage = message;
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+          jobId: message.jobId,
+          result: { status: 'ok' }
+        }));
+      }
+    };
+    worker.kill = () => true;
+
+    const job = dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [],
+      userDataDir: '',
+      sideDbPath: '',
+      batchContext,
+      utilityProcess: { fork: () => worker },
+      authorizeApply: () => ({
+        preflightOnly: false,
+        batchContext
+      })
+    });
+    const result = await job.promise;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(Object.hasOwn(startMessage, 'batchContext'), false);
+    assert.deepEqual(applyMessage.batchContext, batchContext);
+  });
+
   test('dispatcher 拒绝重复预检授权并清理第一份预检目录', async (t) => {
     const dir = tempDir(t, 'position-duplicate-preflight-');
     const userDataDir = path.join(dir, 'user-data');

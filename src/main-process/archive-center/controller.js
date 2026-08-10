@@ -114,6 +114,10 @@ class ArchiveCenterController {
     this.onOutboxFlushed = typeof options.onOutboxFlushed === 'function'
       ? options.onOutboxFlushed
       : null;
+    this.onOutboxRecordFlushed = typeof options.onOutboxRecordFlushed === 'function'
+      ? options.onOutboxRecordFlushed
+      : null;
+    this.outboxFlushTail = Promise.resolve();
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
     this.sink = Object.freeze({
@@ -161,7 +165,7 @@ class ArchiveCenterController {
     return [...new Set([...servicePaths, ...outboxPaths])];
   }
 
-  async flushOutbox() {
+  async _flushOutboxUnlocked() {
     if (!this.outboxStore) return { flushed: 0, discarded: 0, remaining: 0 };
     const records = this.outboxStore.list();
     let flushed = 0;
@@ -176,7 +180,15 @@ class ArchiveCenterController {
           payload.operationKey
         );
         if (!(issuance && issuance.deletedAt)) {
-          created = await this.service.createBatch(record.payload);
+          const targetBatchId = Number(payload.targetBatchId);
+          created = Number.isSafeInteger(targetBatchId) && targetBatchId > 0
+            ? await this.service.appendFiles({
+                batchId: targetBatchId,
+                files: payload.files,
+                sourceOperation: payload.sourceOperation,
+                metadata: payload.metadata
+              })
+            : await this.service.createBatch(payload);
         }
       } catch (error) {
         this._warn('存档 outbox 重放失败', error && error.message ? error.message : String(error));
@@ -196,6 +208,18 @@ class ArchiveCenterController {
             '存档 outbox 已建批次但附件登记不完整',
             `outbox=${record.id}，已保留重放任务和源文件`
           );
+          continue;
+        }
+      }
+      if (!operationDeleted && this.onOutboxRecordFlushed) {
+        try {
+          await this.onOutboxRecordFlushed(record, created);
+        } catch (error) {
+          this._warn(
+            '存档 outbox 已追加但关联任务收口失败',
+            error && error.message ? error.message : String(error)
+          );
+          // 关联任务未完成终态 CAS 前保留同一 outbox，下一次重放仍追加原 batch。
           continue;
         }
       }
@@ -225,6 +249,15 @@ class ArchiveCenterController {
       }
     }
     return { flushed, discarded, remaining: this.outboxStore.list().length };
+  }
+
+  async flushOutbox() {
+    const run = this.outboxFlushTail.then(
+      () => this._flushOutboxUnlocked(),
+      () => this._flushOutboxUnlocked()
+    );
+    this.outboxFlushTail = run.catch(() => undefined);
+    return run;
   }
 
   _trackedFilePayload(file, sourceOperation) {
@@ -343,6 +376,51 @@ class ArchiveCenterController {
     };
   }
 
+  persistAppendIntent(payload = {}) {
+    if (!this.outboxStore) throw new Error('存档持久 outbox 尚未初始化');
+    const batchContext = payload.batchContext;
+    const batchId = Number(batchContext && batchContext.batchId);
+    if (!Number.isSafeInteger(batchId) || batchId < 1) {
+      throw new TypeError('恢复追加必须携带原任务 batchContext');
+    }
+    const batch = this.service.repository.getBatch(batchId);
+    if (!batch) throw new Error(`恢复追加的原任务批次不存在：${batchId}`);
+    const expectedOperationKey = String(batchContext.operationKey || '').trim();
+    if (!expectedOperationKey || expectedOperationKey !== String(batch.operationKey || '').trim()) {
+      throw new Error('恢复追加 batchContext.operationKey 与原任务批次不一致');
+    }
+    const expectedParentRunId = String(batchContext.parentRunId || '').trim();
+    if (!expectedParentRunId || expectedParentRunId !== String(batch.parentRunId || '').trim()) {
+      throw new Error('恢复追加 batchContext.parentRunId 与原任务批次不一致');
+    }
+    const files = (Array.isArray(payload.files) ? payload.files : []).map(
+      (file) => this._trackedFilePayload(file, payload.sourceOperation)
+    );
+    if (files.length === 0) throw new Error('恢复追加意图缺少文件');
+    const retryPayload = {
+      ...this._batchPayload({
+        moduleId: batch.moduleId,
+        moduleCode: batch.moduleCode,
+        moduleName: batch.moduleName,
+        operationKey: batch.operationKey,
+        sourceOperation: payload.sourceOperation,
+        metadata: {
+          ...(batch.metadata || {}),
+          ...(payload.metadata || {}),
+          recovered: true
+        }
+      }, files),
+      targetBatchId: batch.id
+    };
+    const record = this._persistOutboxPayload(retryPayload);
+    return {
+      batchId: batch.id,
+      outboxId: outboxBatchId(record.id),
+      operationKey: batch.operationKey,
+      persisted: true
+    };
+  }
+
   async createTrackedBatch(payload = {}) {
     const files = (Array.isArray(payload.files) ? payload.files : []).map(
       (file) => this._trackedFilePayload(file, payload.sourceOperation)
@@ -412,7 +490,7 @@ class ArchiveCenterController {
         ? attached.warning.message
         : '存档批次附件登记不完整';
       try {
-        const record = this._persistOutboxPayload(batchPayload);
+        const record = this._persistOutboxPayload({ ...batchPayload, targetBatchId: batch.id });
         return {
           ...attached,
           batchId: outboxBatchId(record.id),
@@ -527,6 +605,7 @@ class ArchiveCenterController {
           ...(payload.metadata || {})
         }
       }, files);
+      retryPayload.targetBatchId = batch.id;
       try {
         this._persistOutboxPayload(retryPayload);
         return {

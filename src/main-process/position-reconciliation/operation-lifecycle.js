@@ -376,7 +376,7 @@ function positionCommittedRecoveryArchiveFiles(value, committedInputs) {
   return files.filter((file) => {
     if (file.role === 'input') return committedKeys.has(recoveryInputKey(file));
     if (!Array.isArray(file.requiredInputPaths)) {
-      if (pendingInputs.size === 0 || !allInputsCommitted) {
+      if (pendingInputs.size > 0 && !allInputsCommitted) {
         throw recoveryIntegrityError(
           '部分提交恢复遇到未声明输入依赖的输出文件，禁止归入成功批次'
         );
@@ -479,7 +479,29 @@ function assertPositionRecoveryInputsUnchanged(value, assertInput) {
 
 function positionBusinessStateForResult(result, successStatuses) {
   if (result && result.archiveDeferred === true) return 'awaiting-confirmation';
-  return result && successStatuses.has(result.status) ? 'success' : 'not-success';
+  const status = String(result && result.status || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'canceled') return 'cancelled';
+  return result && successStatuses.has(result.status) ? 'success' : 'failed';
+}
+
+function positionTerminalOutcomeForResult(result, successStatuses) {
+  if (result && result.archiveDeferred === true) return null;
+  const status = String(result && result.status || '').trim().toLowerCase();
+  if (status === 'cancelled' || status === 'canceled') {
+    return {
+      taskStatus: 'cancelled',
+      code: String(result && result.code || 'POSITION_OPERATION_CANCELLED'),
+      message: String(result && result.message || '平盘任务已取消')
+    };
+  }
+  if (result && successStatuses.has(result.status)) {
+    return { taskStatus: 'succeeded', code: '', message: '' };
+  }
+  return {
+    taskStatus: 'failed',
+    code: String(result && result.code || 'POSITION_OPERATION_FAILED'),
+    message: String(result && result.message || '平盘任务失败')
+  };
 }
 
 function positionReconciliationFailureResult(error) {
@@ -492,6 +514,96 @@ function positionReconciliationFailureResult(error) {
     message: error && error.message ? String(error.message) : String(error),
     detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
   };
+}
+
+function positionRecoveryTerminalOutcome(pending) {
+  const explicit = pending && pending.terminalOutcome;
+  const explicitStatus = String(explicit && explicit.taskStatus || '').trim().toLowerCase();
+  if (['succeeded', 'failed', 'cancelled'].includes(explicitStatus)) {
+    return {
+      taskStatus: explicitStatus,
+      code: String(explicit.code || ''),
+      message: String(explicit.message || '')
+    };
+  }
+  const businessState = String(pending && pending.businessState || '').trim().toLowerCase();
+  if (businessState === 'success') {
+    return { taskStatus: 'succeeded', code: '', message: '' };
+  }
+  if (businessState === 'cancelled') {
+    return {
+      taskStatus: 'cancelled',
+      code: 'POSITION_OPERATION_CANCELLED',
+      message: '平盘任务已取消'
+    };
+  }
+  if (businessState === 'failed' || businessState === 'not-success') {
+    return {
+      taskStatus: 'failed',
+      code: 'POSITION_OPERATION_FAILED',
+      message: '平盘任务失败'
+    };
+  }
+  return {
+    taskStatus: 'failed',
+    code: 'POSITION_OPERATION_INTERRUPTED',
+    message: '平盘任务在写入终态前中断'
+  };
+}
+
+async function settlePositionRecoveredTask({ pending, archiveService }) {
+  const context = pending && pending.batchContext;
+  const batchId = Number(context && context.batchId);
+  if (!Number.isSafeInteger(batchId) || batchId < 1
+      || !archiveService
+      || typeof archiveService.getBatch !== 'function') {
+    throw new Error('平盘恢复缺少原任务 batchContext 或存档服务');
+  }
+  const lookup = await archiveService.getBatch(batchId);
+  if (!lookup || lookup.ok !== true || !lookup.batch) {
+    throw new Error(lookup && lookup.message
+      ? lookup.message
+      : `平盘恢复的原任务批次不存在：${batchId}`);
+  }
+  const batch = lookup.batch;
+  if (String(batch.operationKey || '') !== String(context.operationKey || '')
+      || String(batch.parentRunId || '') !== String(context.parentRunId || '')
+      || String(batch.taskRunId || '') !== String(context.taskRunId || '')
+      || String(batch.moduleId || '') !== String(context.moduleId || '')) {
+    throw new Error('平盘恢复 batchContext 与原任务批次身份不一致');
+  }
+
+  const outcome = positionRecoveryTerminalOutcome(pending);
+  const metadata = {
+    recoveredPositionOperation: true,
+    positionOperationToken: String(pending.operationToken || ''),
+    positionTerminalOutcome: outcome.taskStatus
+  };
+  let result;
+  if (outcome.taskStatus === 'succeeded') {
+    result = await archiveService.completeTaskBatch(batchId, { metadata });
+  } else if (outcome.taskStatus === 'cancelled') {
+    result = await archiveService.cancelTaskBatch(batchId, {
+      reason: outcome.message || '平盘任务已取消',
+      code: outcome.code || 'POSITION_OPERATION_CANCELLED',
+      metadata
+    });
+  } else {
+    result = await archiveService.failTaskBatch(batchId, {
+      code: outcome.code || 'POSITION_OPERATION_FAILED',
+      message: outcome.message || '平盘任务失败',
+      metadata
+    });
+  }
+  const existingTerminal = result && result.batch
+    && ['succeeded', 'failed', 'cancelled'].includes(result.batch.taskStatus);
+  if (!result || (result.ok === false
+      && !(result.code === 'ARCHIVE_TASK_STATUS_CONFLICT' && existingTerminal))) {
+    throw new Error(result && result.message
+      ? result.message
+      : '平盘恢复无法终结原任务批次');
+  }
+  return { batchId, outcome, result };
 }
 
 function positionArchiveIntentEvidence(pending, currentCheckpoint, {
@@ -540,10 +652,12 @@ async function settlePositionArchiveResult({
   runtime,
   persistRecovery,
   markDurable,
+  markIncomplete,
   cleanup,
-  reportFailure,
-  registrationFailureResult
+  reportFailure
 }) {
+  const setIncomplete = typeof markIncomplete === 'function' ? markIncomplete : () => {};
+  const warn = typeof reportFailure === 'function' ? reportFailure : () => {};
   try {
     const archiveResult = await archiveTask;
     if (archiveResult && archiveResult.handled === false) {
@@ -551,9 +665,9 @@ async function settlePositionArchiveResult({
       markDurable(recoveryIntent || archiveResult);
       await cleanup(runtime);
     } else if (archiveResult && archiveResult.archiveFailed === true) {
-      reportFailure(archiveResult.warning);
       if (archiveResult.persistentRetryAvailable !== true) {
-        return registrationFailureResult(result, archiveResult.warning);
+        setIncomplete(archiveResult);
+        return result;
       }
       markDurable(archiveResult);
       await cleanup(runtime);
@@ -563,8 +677,9 @@ async function settlePositionArchiveResult({
     }
   } catch (error) {
     const warning = { message: error && error.message ? error.message : String(error) };
-    reportFailure(warning);
-    return registrationFailureResult(result, warning);
+    warn(warning);
+    setIncomplete({ warning });
+    return result;
   }
   return result;
 }
@@ -578,7 +693,8 @@ async function runPositionOperationLifecycle({
   readPending,
   syncCheckpoint,
   clearPending,
-  failureResult
+  failureResult,
+  deferPendingClear = false
 }) {
   writeInitialPending(pending);
   return runInContext(async () => {
@@ -595,19 +711,23 @@ async function runPositionOperationLifecycle({
         throw new Error('平盘对账待完成操作所有权已变化，已停止同步 checkpoint');
       }
       requirePositionPendingArchiveFiles(persistedPending);
+      if (persistedPending.archiveRequired && persistedPending.archiveState === 'incomplete') {
+        // 业务结果原样返回；保留 pending 并阻止后续操作，重启后只向原 batch 恢复追加。
+        if (operationError) throw operationError;
+        return result;
+      }
       if (persistedPending.archiveRequired && persistedPending.archiveState !== 'durable') {
         throw new Error('平盘对账存档尚未完成或形成持久重试记录，已停止同步 checkpoint');
       }
       syncCheckpoint();
-      const pendingBeforeClear = readPending();
-      if (!pendingBeforeClear || pendingBeforeClear.operationToken !== operationToken) {
-        throw new Error('平盘对账待完成操作所有权已变化，禁止清理其他操作记录');
+      if (!deferPendingClear) {
+        const pendingBeforeClear = readPending();
+        if (!pendingBeforeClear || pendingBeforeClear.operationToken !== operationToken) {
+          throw new Error('平盘对账待完成操作所有权已变化，禁止清理其他操作记录');
+        }
+        clearPending();
       }
-      clearPending();
     } catch (checkpointError) {
-      if (result && result.code === 'archive-retry-registration-failed') {
-        return result;
-      }
       return failureResult(checkpointError);
     }
     if (operationError) throw operationError;
@@ -626,10 +746,13 @@ module.exports = {
   positionRecoveryCleanupInputPaths,
   positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
+  positionRecoveryTerminalOutcome,
   assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
+  positionTerminalOutcomeForResult,
   positionReconciliationFailureResult,
   runPositionOperationLifecycle,
+  settlePositionRecoveredTask,
   settlePositionArchiveResult
 };

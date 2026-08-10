@@ -698,7 +698,7 @@ function restoreFlowEngineError(err, { writeErrorReport, multiFile = false }) {
 //   成功 → { status:'success', totalCount, validCount }（与旧链路 complete 事件形态一致）。
 //   失败 → 引擎抛 BigTableImportError，restoreFlowEngineError 还原为 rejected/error 形态；report=true 时写失败报告 xlsx。
 //   进度 → 引擎每 1w 行 { sourceFile, importedCount } 适配为现行 onProgress({ type:'progress', dataRows })。
-async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, writeErrorReport, maxRowErrors }) {
+async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, writeErrorReport, maxRowErrors, batchContext }) {
   try {
     const engineResult = await dispatchEngineImport({
       dbPath,
@@ -706,6 +706,7 @@ async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, wri
       contractModulePath: BIZOP_FLOW_CONTRACT_PATH,
       contractOptions: { date },
       mode: 'overwrite',
+      batchContext,
       // monthKey 不传：契约 monthKeyOf=null ⇒ 引擎 baseMonthKey=null 旁路跨月校验（flow 单日由 date 入参）。
       resourceLimits: BIZOP_FLOW_ENGINE_RESOURCE_LIMITS,
       onEngineProgress: (ev) => {
@@ -774,9 +775,9 @@ async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, wri
 // 统一收敛 worker stdout 事件 + 退出码 → 与旧同步 runBizOpImportAsync/runFlowImportAsync 同形返回值。
 //   kind='bizOp'|'flow'；writeErrorReport({ errorRows }) → Promise<errorReportPath>（report=true 时调用）。
 //   bizOp 传 filePath（单数，不变）；flow 传 filePaths（v3.0.2 需求1b 多文件合并，单进程单事务单次 clear）。
-function spawnImportWorker({ kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors }) {
+function spawnImportWorker({ kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors, batchContext }) {
   return new Promise((resolve) => {
-    const jobMeta = { dbPath, kind, date };
+    const jobMeta = { dbPath, kind, date, batchContext };
     if (Array.isArray(filePaths) && filePaths.length > 0) {
       jobMeta.filePaths = filePaths;     // flow：多文件数组
     } else if (filePath) {
@@ -910,7 +911,7 @@ async function runBizOpImportViaWorker(db, params) {
   const {
     date, filePath, dbPath,
     writeBizOpErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors
+    onProgress, maxRowErrors, batchContext
   } = params;
 
   if (!dbPath) {
@@ -920,7 +921,7 @@ async function runBizOpImportViaWorker(db, params) {
 
   return spawnImportWorker({
     kind: 'bizOp',
-    dbPath, date, filePath, onProgress, maxRowErrors,
+    dbPath, date, filePath, onProgress, maxRowErrors, batchContext,
     writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeBizOpErrorReportFileName(firstBu, date);
@@ -937,7 +938,7 @@ async function runFlowImportViaWorker(db, params) {
   const {
     date, filePath, filePaths, dbPath,
     writeFlowErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors
+    onProgress, maxRowErrors, batchContext
   } = params;
 
   // 入参归一：优先 filePaths（多文件）；否则回退单数 filePath。
@@ -962,14 +963,14 @@ async function runFlowImportViaWorker(db, params) {
   //   BIZOP_FLOW_FORCE_LEGACY_IMPORT=1 → 回退旧 import-worker.js（spawnImportWorker，下方）。
   if (USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW) {
     return runFlowImportViaEngine({
-      dbPath, date, filePaths: files, onProgress, maxRowErrors, writeErrorReport
+      dbPath, date, filePaths: files, onProgress, maxRowErrors, writeErrorReport, batchContext
     });
   }
 
   // ── 回退旧链路（BIZOP_FLOW_FORCE_LEGACY_IMPORT=1）：utilityProcess/spawn + import-worker.js 全旧路径 ──
   return spawnImportWorker({
     kind: 'flow',
-    dbPath, date, filePaths: files, onProgress, maxRowErrors,
+    dbPath, date, filePaths: files, onProgress, maxRowErrors, batchContext,
     writeErrorReport
   });
 }

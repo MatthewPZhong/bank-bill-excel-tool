@@ -440,7 +440,8 @@ test('task 状态、时间与失败 DTO 独立于 archiveStatus，parent 关联�
       operationKey: 'related-3',
       taskRunId: 'related-task-3',
       parentRunId: 'flow-1',
-      retentionUntil: '2026-10-10'
+      retentionUntil: '2026-10-10',
+      metadata: { channel: 'vcc:run', retained: 'yes' }
     }).batch;
     reserve(repository, {
       operationKey: 'other-flow',
@@ -478,12 +479,25 @@ test('task 状态、时间与失败 DTO 独立于 archiveStatus，parent 关联�
     assert.equal(cancelled.archiveStatus, 'complete');
 
     setTime(new Date(2026, 7, 11, 1, 5, 0));
-    const succeeded = repository.updateTaskStatus(third.id, 'succeeded');
+    const succeeded = repository.updateTaskStatus(third.id, 'succeeded', {
+      metadata: {
+        resultStatus: 'completed_with_errors',
+        completedWithErrors: true,
+        errorCount: 2
+      }
+    });
     assert.equal(succeeded.taskStatus, 'succeeded');
     assert.equal(succeeded.finishedAt, new Date(2026, 7, 11, 1, 5, 0).toISOString());
     assert.equal(succeeded.failureCode, '');
     assert.equal(succeeded.artifactCount, 0);
     assert.equal(succeeded.archiveStatus, 'complete');
+    assert.deepEqual(succeeded.metadata, {
+      channel: 'vcc:run',
+      retained: 'yes',
+      resultStatus: 'completed_with_errors',
+      completedWithErrors: true,
+      errorCount: 2
+    });
 
     assert.deepEqual(
       repository.listRelatedBatches('flow-1').map((batch) => batch.id),
@@ -847,6 +861,77 @@ test('业务身份锚点跨 repository 重启可查询、重复绑定幂等且�
     const afterDelete = repository.findFlowAnchor(identity);
     assert.equal(afterDelete.parentRunId, 'parent-anchor');
     assert.equal(afterDelete.sourceBatchId, null);
+  } finally {
+    if (db) db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('run→export 两批可幂等绑定同一 identity，flow-bind intent 跨重启重放后不残留', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-flow-intent-'));
+  const dbPath = path.join(tempDir, 'archive.sqlite');
+  let db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    let repository = createArchiveRepository(db, {
+      now: () => new Date('2026-08-10T04:00:00.000Z')
+    });
+    repository.ensureSchema();
+    const runBatch = reserve(repository, {
+      operationKey: 'flow-run',
+      taskRunId: 'flow-run-task',
+      parentRunId: 'flow-parent'
+    }).batch;
+    const exportBatch = reserve(repository, {
+      operationKey: 'flow-export',
+      taskRunId: 'flow-export-task',
+      taskKey: 'export',
+      parentRunId: 'flow-parent'
+    }).batch;
+    const identity = {
+      moduleId: 'statement-generator',
+      identityType: 'business-run-id',
+      identityValue: 'flow-business-run-1',
+      parentRunId: 'flow-parent'
+    };
+    const first = repository.bindFlowAnchor({
+      ...identity,
+      sourceBatchId: runBatch.id
+    });
+    const continued = repository.bindFlowAnchor({
+      ...identity,
+      sourceBatchId: exportBatch.id
+    });
+    assert.equal(first.created, true);
+    assert.equal(continued.created, false);
+    assert.equal(continued.anchor.parentRunId, 'flow-parent');
+    assert.equal(continued.anchor.sourceBatchId, runBatch.id);
+
+    const delayedIdentity = {
+      moduleId: 'statement-generator',
+      identityType: 'business-run-id',
+      identityValue: 'flow-business-run-delayed',
+      parentRunId: 'flow-parent',
+      sourceBatchId: runBatch.id
+    };
+    const persisted = repository.persistFlowBindIntent(delayedIdentity);
+    assert.equal(persisted.created, true);
+    assert.equal(repository.listFlowBindIntents().length, 1);
+
+    db.close();
+    db = new DatabaseSync(dbPath);
+    db.exec('PRAGMA foreign_keys = ON');
+    repository = createArchiveRepository(db, {
+      now: () => new Date('2026-08-10T05:00:00.000Z')
+    });
+    repository.ensureSchema();
+    const replay = repository.replayFlowBindIntents();
+    assert.deepEqual(
+      { attempted: replay.attempted, replayed: replay.replayed, failed: replay.failed },
+      { attempted: 1, replayed: 1, failed: 0 }
+    );
+    assert.equal(repository.listFlowBindIntents().length, 0);
+    assert.equal(repository.findFlowAnchor(delayedIdentity).parentRunId, 'flow-parent');
   } finally {
     if (db) db.close();
     fs.rmSync(tempDir, { recursive: true, force: true });

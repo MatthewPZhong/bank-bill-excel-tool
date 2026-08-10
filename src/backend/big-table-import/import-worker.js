@@ -32,6 +32,9 @@
 
 const path = require('node:path');
 const { parentPort, isMainThread } = require('node:worker_threads');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 const zipReader = require('./zip-reader');
 const rowScanner = require('./row-scanner');
@@ -264,6 +267,8 @@ if (!isMainThread && parentPort) {
     if (!msg || typeof msg !== 'object' || msg.type !== 'parse') return;
     const { jobId, fileIndex, filePath, contractModulePath, contractOptions, useWhitelist } = msg;
     try {
+      const batchContext = freezeWorkerBatchContext(msg.batchContext);
+      void batchContext;
       // require 契约模块（必须可序列化定位：路径 + options）。模块导出可为对象或 (options)=>对象 工厂。
       // eslint-disable-next-line global-require, import/no-dynamic-require
       let contractMod = require(contractModulePath);

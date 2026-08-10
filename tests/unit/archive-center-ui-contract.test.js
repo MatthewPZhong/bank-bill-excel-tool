@@ -37,7 +37,12 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const start = main.indexOf('async function runArchiveAwareOperation');
     const end = main.indexOf('function runRegisteredBusinessOperation', start);
     const operationFlow = main.slice(start, end);
-    assert.match(operationFlow, /return settlePositionArchiveResult\(\{/);
+    const artifactSettleIndex = operationFlow.indexOf('await controls.settleArtifacts');
+    const positionSettleIndex = operationFlow.indexOf('await settlePositionArchiveResult');
+    const returnIndex = operationFlow.indexOf('return settledResult');
+    assert.ok(artifactSettleIndex >= 0, 'position execute 必须先等待 lifecycle artifact barrier');
+    assert.ok(positionSettleIndex > artifactSettleIndex, 'position settle 必须位于 artifact barrier 之后');
+    assert.ok(returnIndex > positionSettleIndex, '业务结果只能在 position settle 完成后返回');
     const settlementStart = positionOperationLifecycle.indexOf(
       'async function settlePositionArchiveResult'
     );
@@ -84,10 +89,13 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*protectedPaths\)/);
   });
 
-  test('异常恢复完成后在清除 pending 后执行受保护目录清理', () => {
+  test('异常恢复按删除证据计算清理候选，并在清除 pending 后执行受保护目录清理', () => {
     const persistenceStart = main.indexOf('function persistPositionArchiveIntentIfNeeded');
     const persistenceEnd = main.indexOf('function recoverPositionArchiveIntent', persistenceStart);
     const persistenceFlow = main.slice(persistenceStart, persistenceEnd);
+    const finalizeStart = main.indexOf('async function finalizeRecoveredPositionPending');
+    const finalizeEnd = main.indexOf('async function finalizePositionOutboxRecord', finalizeStart);
+    const finalizeFlow = main.slice(finalizeStart, finalizeEnd);
     const serviceStart = main.indexOf('function getPositionReconciliationService');
     const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
     const recoveryFlow = main.slice(serviceStart, serviceEnd);
@@ -97,13 +105,40 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       /const archiveResult = readDeletedPositionArchiveResult\(pending\);[\s\S]*?positionRecoveryCleanupInputPaths\([\s\S]*?archiveResult/
     );
     assert.match(
+      finalizeFlow,
+      /positionCommittedRecoveryArchiveFiles\(\s*current,\s*positionReconciliationService\.listCommittedOperationInputs\(operationToken\)\s*\)/
+    );
+    assert.match(
+      finalizeFlow,
+      /positionRecoveryCleanupInputPaths\(\s*current,\s*committedFiles,\s*deletedArchiveResult\s*\)/
+    );
+    assert.doesNotMatch(
       recoveryFlow,
       /cleanupPositionArchiveSourcePaths\(recovery\.cleanupInputPaths\)/
     );
+    const settleIndex = finalizeFlow.indexOf('await settlePositionRecoveredTask');
+    const syncIndex = finalizeFlow.indexOf('syncPositionReconciliationCheckpoint()');
+    const bootstrapClearIndex = finalizeFlow.indexOf(
+      "database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '')"
+    );
+    const pendingClearIndex = finalizeFlow.indexOf('clearPositionPendingOperation(operationToken)');
+    const cleanupIndex = finalizeFlow.indexOf(
+      'await cleanupPositionArchiveSourcePaths(cleanupInputPaths)'
+    );
     assert.ok(
-      recoveryFlow.indexOf("database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '')")
-        < recoveryFlow.indexOf('cleanupPositionArchiveSourcePaths(recovery.cleanupInputPaths)'),
-      '已解决 staging 只能在 checkpoint 同步和 pending 清除后清理'
+      settleIndex >= 0
+        && syncIndex > settleIndex
+        && bootstrapClearIndex > syncIndex
+        && pendingClearIndex > bootstrapClearIndex
+        && cleanupIndex > pendingClearIndex,
+      '未提交 staging 只能在原任务终态、checkpoint 与当前 pending 收口后清理'
+    );
+    assert.match(recoveryFlow, /: finalizeRecoveredPositionPending\(operationToken,/);
+    const outboxStart = main.indexOf('async function finalizePositionOutboxRecord');
+    const outboxEnd = main.indexOf('function persistCurrentPositionArchiveIntentIfNeeded', outboxStart);
+    assert.match(
+      main.slice(outboxStart, outboxEnd),
+      /await finalizeRecoveredPositionPending\(operationToken,/
     );
   });
 

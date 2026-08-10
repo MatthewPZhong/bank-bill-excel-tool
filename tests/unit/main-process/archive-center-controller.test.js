@@ -108,6 +108,7 @@ function createHarness(options = {}) {
     outboxStore: options.outboxStore,
     onOutboxFlushed: options.onOutboxFlushed,
     logWarning: options.logWarning,
+    onOutboxRecordFlushed: options.onOutboxRecordFlushed,
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
@@ -850,6 +851,79 @@ test('部分附件 ready 且后续登记失败时终态保持不完整，原附�
   assert.equal(recovered.batch.taskStatus, 'succeeded');
   assert.equal(recovered.batch.archiveStatus, 'complete');
   assert.equal(recovered.batch.failedArtifactCount, 0);
+});
+
+test('平盘恢复 outbox 只追加原 batch、终结原 task，绝不创建 ghost batch', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-position-original-batch-'));
+  const archiveRoot = path.join(rootDir, 'archive');
+  const outputPath = path.join(rootDir, 'position-result.xlsx');
+  fs.writeFileSync(outputPath, 'position-output');
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const now = () => new Date(2026, 6, 20, 12, 0, 0);
+  const repository = createArchiveRepository(db, { now });
+  const service = createArchiveService({ repository, rootDir: archiveRoot, now });
+  const settings = new Map();
+  const callbackBatchIds = [];
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value)
+    },
+    service,
+    outboxStore,
+    async onOutboxRecordFlushed(record, created) {
+      callbackBatchIds.push(Number(record.payload.targetBatchId));
+      assert.equal(created.batch.id, Number(record.payload.targetBatchId));
+      const terminal = await service.completeTaskBatch(created.batch.id, {
+        metadata: { recoveredPositionOperation: true }
+      });
+      assert.equal(terminal.ok, true);
+    }
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+  await service.initialize();
+  const reserved = await service.reserveTaskBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    taskKey: 'position-reconciliation:run:export',
+    taskRunId: 'position-recovery-token',
+    operationKey: 'position:position-recovery-token:run-export',
+    parentRunId: 'position-parent'
+  });
+  await service.markTaskStarted(reserved.batchId);
+  const batchContext = {
+    batchId: reserved.batchId,
+    batchNumber: reserved.batchNumber,
+    taskRunId: 'position-recovery-token',
+    taskKey: 'position-reconciliation:run:export',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-parent',
+    operationKey: 'position:position-recovery-token:run-export'
+  };
+  const intent = controller.persistAppendIntent({
+    batchContext,
+    sourceOperation: 'position-reconciliation:run:export',
+    metadata: { positionOperationToken: 'position-recovery-token' },
+    files: [{ filePath: outputPath, role: 'output', beforeSnapshot: null }]
+  });
+  assert.equal(intent.batchId, reserved.batchId);
+  assert.equal(outboxStore.list()[0].payload.targetBatchId, reserved.batchId);
+
+  const replay = await controller.flushOutbox();
+  assert.equal(replay.flushed, 1);
+  assert.deepEqual(callbackBatchIds, [reserved.batchId]);
+  assert.equal(repository.listBatches({ limit: 10, offset: 0 }).length, 1);
+  const recovered = repository.getBatchDetail(reserved.batchId);
+  assert.equal(recovered.taskStatus, 'succeeded');
+  assert.equal(recovered.artifacts.length, 1);
+  assert.equal(recovered.artifacts[0].direction, 'output');
+  assert.deepEqual(outboxStore.list(), []);
 });
 
 test('正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试', async () => {

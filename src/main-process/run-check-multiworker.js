@@ -72,7 +72,7 @@ function __test_only_set_worker_script__(scriptPath) {
 // ─────────────────────────────────────────────────────────────────
 
 // 启动单个 worker 并发 init（指向只读主源 dbPath + 注入 selectSql / partColumns）
-function startWorker(dbPath, selectSql, partColumns, initTimeoutMs) {
+function startWorker(dbPath, selectSql, partColumns, batchContext, initTimeoutMs) {
   return new Promise((resolve, reject) => {
     let settled = false;
     let timer = null;
@@ -120,7 +120,7 @@ function startWorker(dbPath, selectSql, partColumns, initTimeoutMs) {
       try { worker.terminate(); } catch (_e) { /* swallow */ }
       reject(new Error(`multiworker init 超时（${initTimeoutMs}ms）— 强制 terminate`));
     }, initTimeoutMs);
-    worker.postMessage({ type: 'init', dbPath, selectSql, partColumns });
+    worker.postMessage({ type: 'init', dbPath, selectSql, partColumns, batchContext });
   });
 }
 
@@ -235,6 +235,7 @@ async function runWriteSplitChunks(opts) {
     targetColumns,
     prefixValues = [],
     tempDir,
+    batchContext,
     onProgress = null,
     cancelToken = null,
     initTimeoutMs = 10000,
@@ -314,7 +315,9 @@ async function runWriteSplitChunks(opts) {
   try {
     // ── 启动 effectiveWorkerCount 个 worker（并发 init）──
     workers = await Promise.all(
-      Array.from({ length: effectiveWorkerCount }, () => startWorker(dbPath, selectSql, partColumns, initTimeoutMs))
+      Array.from({ length: effectiveWorkerCount }, () => (
+        startWorker(dbPath, selectSql, partColumns, batchContext, initTimeoutMs)
+      ))
     );
     // 持久 exit 标记 —— crash 路径下 closePool 据此跳过已死 worker（不空等 'exit' 事件到 timeout）
     for (const w of workers) {
