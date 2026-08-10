@@ -92,3 +92,47 @@
 | 3 | 收紧 source flow anchor | module/parent 主键血缘 | null-parent source 冲突，exact-parent 成功 | 跨流程串联，停止交付 | 回退单个条件 |
 | 4 | 收敛 task 时钟与默认 retention | 日期/号码/时间/保留期同源 | 伪造 localDate 拒绝，跨午夜 fake clock 仅调用一次 | 批次跨日错位，停止交付 | 保留 legacy createBatch，收缩为 task API |
 | 5 | 定向回归与 blindspot 复核 | 不扩大资金/业务行为面 | unit、lint、syntax、diff gate 全绿 | 不交 review | 修复后重跑 |
+
+## PR #132 第二轮评论复核（2026-08-10）
+
+### Task Brief
+
+- Goal: 修复 artifact 登记失败后的完整性收敛、operation key 删除后跨重启幂等、task retention undefined、terminal API 文档契约和 PR 全量 diff gate 五个问题。
+- Context: 基线为 PR1 `e7653c8`；PR2 当前真实调用均使用 positional terminal API，并已为 complete 的第二参数扩展 metadata/options。
+- Constraints: 不新增 timer、lease、latest tracker、fallback 或双形态 overload；artifact 复用既有 failed-artifact/outbox 血缘；operation tombstone 只记录可证明的现存 issuance，不猜已删除历史。
+- Done when: 部分 ready + 登记失败在 terminal 后仍 incomplete 且同一 artifact 恢复后 complete；删除 operation 跨重启重放不分新号，legacy/outbox 不复活或自旋；undefined retention 走既有默认/retentionDays；Spec 与真实 positional API 一致；PR base 到工作树的全量 diff check 通过。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| artifact 登记失败当前只留下 batch 级错误 | `ArchiveService._prepareFileUnlocked` catch 调 `recordBatchFailure`，没有 `archive_artifacts` 行；`_refreshBatchStatus` 在现有 artifact 全 ready 时会清空该错误 | 用既有 artifact identity 直接持久化 failed 行；不另建恢复表，terminal 继续按 artifact 聚合 |
+| controller 已以“结果含 artifact id”判断 durable intent | `filesHaveDurableArtifacts`；缺失时写 filesystem outbox；PR2 outbox 对正式批次追加 `targetBatchId` | failed artifact 行成功写入时无需重复 outbox；DB 无法写入时沿用现有 outbox，不假装数据库不可写也能持久化 |
+| operation 幂等当前只依赖 live batch 唯一索引 | `idx_archive_batches_operation`；`deleteBatch` 删除 batch 后不保留 operation identity | 增加纯加法 issuance 表；建批同事务写、删除同事务 tombstone、ensure 只幂等回填当前可见非空 operation key |
+| legacy outbox 与 PR2 target-batch outbox 都会受删除影响 | PR1 `flushOutbox` 以 operation key 重跑 `createBatch`，会复活 v1；PR2 对 `targetBatchId` 调 `appendFiles`，删除后会 not-found 并永久保留记录 | flush 在任何 replay 前按 module/operation tombstone 判定；命中即删除 outbox 并走既有源路径释放，不调用 create/append |
+| task 显式 `retentionUntil: undefined` 会跳过默认 retentionDays | `_taskBatchInput` 只看 own-property，向 repository 传入 undefined 且不再传 retentionDays | undefined 等同未提供；仅明确 `retentionUntil:null` 或 `retentionDays:null|'permanent'` 表示永久 |
+| terminal API 的真实 canonical 是 positional | PR1/PR2 `completeTaskBatch(batchId, options)`、`failTaskBatch(batchId, failure)`、`cancelTaskBatch(batchId, cancellation)` 调用均为 positional；Spec §5.2 写成 object | 只反向同步 Spec/notes/tests，不新增 object overload，不提前移植 PR2 complete metadata 逻辑 |
+| 既有 diff 证据不是完整 PR gate | `git diff --check 63c1ce4` 精确报 `spec.md:3-9` 七处 trailing whitespace；此前无参数检查只覆盖当时工作区 | 修正文档证据；最终以 merge-base `63c1ce4...` 到 working tree/staged 等价范围检查 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 登记失败的最小持久身份 | 主键血缘 | 高 | 容易 | controller 文件 payload 已稳定生成 artifactKey、方向、角色、路径和 metadata | PROBE | 注入一次正常 payload 的 `addArtifact` 失败，再走 terminal/retry | 直接落同表 failed artifact；不新增 intent 表 |
+| tombstone 是否需要保存完整 batch DTO | 数据模型 | 高 | 一般 | 重放只需判定 module/operation 已发行且已删除；号码审计已有 batch/latest 事实 | PROBE | v2 删除重启重放、v1 outbox 删除重启 | 只存 issuance 的 module/key/batch id/number/issued/deleted 时间，不复制 batch metadata |
+| outbox 命中 tombstone 后如何结束 | 状态生命周期 | 高 | 容易 | 现有成功 flush 会 remove 并释放不再 unresolved 的源路径 | PROBE | 真 outbox 跨 controller/repository 重启 | 视为不可重放的已处理记录：remove、计入 discarded、复用源释放；不建批、不追加、不永久自旋 |
+| `retentionUntil:'permanent'` 是否是既有契约 | 兼容盲区 | 中 | 容易 | 现有永久枚举属于 `retentionDays`；`retentionUntil` 只接受日期/null | ASSUME | 现有 service/repository 测试与 UI 调用 grep | 不扩大字段语义；只修 undefined，保持日期/null 与 retentionDays 枚举分工 |
+
+### BLOCK 问题
+
+无。schema、公共返回和 outbox 清理的互斥方案均可由现有调用链锁定，不需要新增产品选择。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | failed artifact 最小持久化 | 部分 ready 时不能被 terminal 误判 complete | A ready、B 登记失败、terminal incomplete、B retry 后 complete | artifact 完整性仍不可信，停止交付 | 仅回退新 repository 方法与 service 接线 |
+| 2 | issuance/tombstone 与 outbox 前置判定 | 删除后 operation 不复活、不烧号、不自旋 | v2 terminal/delete/restart/replay；legacy outbox delete/restart flush | 幂等主键可复用，停止交付 | 纯加法表与三处事务接线可独立回退 |
+| 3 | 修正 task retention undefined | 默认保留期不被 own-property 绕过 | 单个表驱动覆盖 default/numeric/permanent | 只影响新 task 输入 | 回退一个 input 分支 |
+| 4 | 反向同步 terminal API 与 Markdown | 单一 positional contract、完整 PR diff 可审查 | PR2 调用 grep；base→working tree diff check | 文档继续误导或门禁失败 | 仅文档等价变更 |
+| 5 | 最小定向与静态门禁 | 不扩展行为面 | 定向 unit、node --check、lint、base diff gate 全绿 | 不发未提交检查点 | 修正失败根因，不加兼容分支 |

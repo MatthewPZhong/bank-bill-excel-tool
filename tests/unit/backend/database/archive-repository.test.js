@@ -99,7 +99,8 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
         'archive_batches',
         'archive_blobs',
         'archive_daily_sequences',
-        'archive_flow_anchors'
+        'archive_flow_anchors',
+        'archive_operation_issuances'
       ]
     );
   } finally {

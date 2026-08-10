@@ -268,6 +268,46 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
   }
 });
 
+test('task retentionUntil=undefined 按未提供处理，显式保留期与永久语义保持不变', async () => {
+  const fixture = createFixture();
+  try {
+    const cases = [
+      {
+        name: 'undefined 使用默认值',
+        input: { retentionUntil: undefined },
+        expected: '2026-09-18'
+      },
+      {
+        name: 'undefined 不覆盖 retentionDays',
+        input: { retentionUntil: undefined, retentionDays: 30 },
+        expected: '2026-08-19'
+      },
+      {
+        name: '显式 null 永久保留',
+        input: { retentionUntil: null },
+        expected: null
+      },
+      {
+        name: 'retentionDays permanent 永久保留',
+        input: { retentionDays: 'permanent' },
+        expected: null
+      }
+    ];
+    for (const [index, scenario] of cases.entries()) {
+      const reserved = await fixture.service.reserveTaskBatch({
+        ...batchPayload(`task-retention-${index}`),
+        taskKey: 'statement:generate',
+        taskRunId: `task-retention-run-${index}`,
+        ...scenario.input
+      });
+      assert.equal(reserved.ok, true, scenario.name);
+      assert.equal(reserved.batch.retentionUntil, scenario.expected, scenario.name);
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
 test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原批次可清理', async () => {
   let currentTime = new Date(2026, 6, 1, 12, 0, 0);
   const fixture = createFixture({ now: () => currentTime });
@@ -301,6 +341,15 @@ test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原�
     assert.equal(terminalCleanup.ok, true);
     assert.equal(terminalCleanup.deletedBatchCount, 1);
     assert.equal((await fixture.service.getBatch(reserved.batchId)).status, 'not-found');
+    const replay = await fixture.service.reserveTaskBatch({
+      ...batchPayload('active-retention-task'),
+      taskKey: 'statement:generate',
+      taskRunId: 'active-retention-task-run'
+    });
+    assert.equal(replay.ok, false);
+    assert.equal(replay.status, 'deleted');
+    assert.equal(replay.code, 'ARCHIVE_OPERATION_DELETED');
+    assert.equal(replay.batchId, reserved.batchId);
   } finally {
     fixture.close();
   }

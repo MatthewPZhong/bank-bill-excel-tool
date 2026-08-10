@@ -23,6 +23,10 @@
 | cursor seed 先完成 v2 列迁移，再仅回填 v1 module cursor；global seed 独立聚合 module cursor | 首次旧 schema 无 `batch_format_version`，现 SQL又会纳入 v2；batch JOIN 造成 fan-out | 重建 batch 表、按可见 batch max 重算、降低已有 cursor | 不改已有号；重复 ensure 只取 MAX，v2 重启不再推动 module/global cursor |
 | 有 source 的 flow anchor 要求 source module/parent 双严格等值 | 空 parent 不能证明来源属于目标 flow | 把 null/空 parent 当继承证据，或新增 fallback | 继续使用 `ARCHIVE_FLOW_ANCHOR_CONFLICT`；无 source 的新流程 anchor 不受影响 |
 | task 权威时间由 repository 写事务内唯一采样 | localDate、号码和 reservedAt 都在同一预留事务形成；service/repository 双采样会跨午夜错位 | service 先采样再传日期，或继续允许 caller localDate | 显式 task localDate 拒绝；默认 retentionDays 基于同一 localDate；显式 retentionUntil 与 legacy createBatch 兼容语义保留 |
+| 登记失败的 artifact 复用现有失败血缘 | batch error 不能表达“已成功 A、待恢复 B”的完整集合；现有 retry 已按 `archive_artifacts.status=failed` 工作 | 全局 batch error 永久 sticky，或另建恢复表/循环 | addArtifact 失败后以同 artifact key 登记 failed placeholder 并返回 durable artifact id；placeholder 也失败才沿用 batch error + filesystem outbox，原错误仍返回 |
+| operation issuance 独立于可删除 batch 行 | 删除后仅靠 live batch 无法区分“从未发行”和“已永久删除”，重放会复用 operation key 分新号 | 推进 cursor、保留假 batch、内存 latest/timer | 纯加法 `archive_operation_issuances` 同事务记录发行/删除；create/reserve 先返回 `ARCHIVE_OPERATION_DELETED`，outbox 公共 replay 明确 discarded、告警并释放源路径 |
+| `retentionUntil: undefined` 等同未提供 | task payload 的 own-property 判断把 undefined 错当永久，覆盖 retentionDays/default | 收紧 legacy createBatch 或所有 retention 输入 | 只忽略 task 的 undefined；显式 `retentionUntil:null` 与 `retentionDays:'permanent'` 仍永久，显式日期及 legacy 语义不变 |
+| terminal API 唯一采用 positional batchId | PR1、PR2 真实调用均为 positional，Spec §5.2 的 object 示例与代码不一致 | 双形态 overload 或提前移植 PR2 metadata | `completeTaskBatch(batchId, options)` / `failTaskBatch(batchId, failure)` / `cancelTaskBatch(batchId, cancellation)`；PR1 不提前扩 complete options |
 
 ## Assumptions
 
@@ -33,7 +37,7 @@
 
 ## Deviations
 
-无产品行为偏离。为落实 Spec 已明确的跨重启 parent 恢复与 latest issuance 口径，PR1 追加了纯加法 `archive_flow_anchors` 和日游标上的真实发行事实字段；BusinessFlowResolver 与业务入口接线仍留在 PR2。
+无产品行为偏离。为落实 Spec 已明确的跨重启 parent 恢复与 latest issuance 口径，PR1 追加了纯加法 `archive_flow_anchors`、日游标上的真实发行事实字段，以及防止永久删除后 operation key 复活的 `archive_operation_issuances`；BusinessFlowResolver 与业务入口接线仍留在 PR2。
 
 ## Evidence
 
@@ -50,10 +54,17 @@
 | `check-vars -- --include-minor` | PASS，未命中重要变量 | 无需追加重要变量专项 review |
 | blindspot / reconciliation 复核 | 已修复 latest 伪发行、terminal 迟到覆盖、零文件 staging 悬挂，同时保留登记前失败证据；flow anchor 跨模块串联已拒绝；无金额/币种/匹配/Excel 输出改动 | 主键血缘、状态生命周期、部分失败、并发、兼容和资金边界闭合 |
 | PR #132 P1 定向测试 | `node --test` allocator/repository/service：40/40 PASS；完整 archive 相关 8 文件：110/110 PASS | active 删除、seed 幂等、flow parent 血缘、权威日期与既有 controller/tracker/outbox/service 回归 |
-| PR #132 静态门禁 | ESLint PASS；相关生产/测试 `node --check` PASS；`git diff --check` PASS | 语法、编码规范和补丁空白错误 |
+| PR #132 静态门禁（首轮增量范围） | ESLint PASS；相关生产/测试 `node --check` PASS；当时的 `git diff --check` 仅检查工作区/末次补丁，未覆盖 base→PR 全量，故不作为全量 diff gate 证据 | 语法、编码规范通过；全量补丁空白证据由第二轮 base SHA 门禁补齐 |
 | PR #132 重要变量复核 | `npm run check:vars -- --include-minor` PASS、脚本无命中；人工按 `ArchiveRepository` / `ArchiveService` Risk-sensitive 条目复核 schema 幂等、序号不复用、Blob 删除顺序和业务/存档隔离 | 未改金额、币种、匹配、artifact/Blob 内容或 Excel 输出；无资金红线人工样本项 |
 | PR #132 完整 release-check | exit 0；lint PASS；smoke PASS；unit 4816/4816 PASS（304 files，Node 测试 15177.643ms、runner 15214ms）；integration 48/48 scripts、2459/2459 assertions PASS（386135ms） | 四项修复之外无 unit/integration/smoke 回归；integration runner 自动生成的 policy 耗时刷新不属于本轮交付范围 |
 | PR #132 team-lead review | 无 P0/P1、无入口旁路、无过度防御；独立复跑两个相关文件 34/34 PASS，git diff/status 边界正确 | 四项修复与测试范围通过最终代码 review |
+| PR #132 第二轮评论定向 | allocator/repository/service/controller 共 61/61 PASS（首次扩大到 repository 时仅 schema inventory 陈旧，补入新增 issuance 表后复跑全绿） | failed artifact 血缘、terminal 收敛、删除 tombstone 跨重启、legacy outbox discarded、retention undefined 与既有 repository/service/controller 回归 |
+| PR #132 第二轮静态与全量 diff 门禁 | 相关 3 个生产与 4 个测试文件 `node --check` PASS；ESLint PASS；`git diff --check 63c1ce46357587643e506768f712352cbb6c7127` PASS | base→working tree 的完整 PR 等价范围通过，已包含并修复 Spec 原有行尾空白；不是仅检查工作区/末次提交 |
+| 第二轮 blindspot pass | 真实 create/reserve/delete/cleanup/outbox/retry 链路均回查；issuance read 与 replay 已纳入同一 per-record 错误边界，DB read failure 保留 outbox/源路径并继续；未发现会改变方案的存活盲区 | artifact placeholder 只覆盖合法 payload 后的 addArtifact 失败；非法 expected hash/size 不扩大恢复语义；PR2 targetBatchId 由公共 replay 前置判定自然覆盖 |
+| PR #132 第二轮负责人 full-gate review | 无 P0/P1、无过度防御或重复/不可达防御；负责人独立 archive 8 文件 113/113 PASS、base→working-tree diff-check PASS | 生产状态模型、入口边界和最小测试范围通过未提交代码 review |
+| PR #132 第二轮完整 release-check | exit 0；lint PASS、smoke PASS；unit 4819/4819 PASS（304 files，Node 测试 15377.901125ms、runner 15415ms）；integration 48/48 scripts、2459/2459 assertions PASS（394086ms） | 完整 unit/integration/smoke 回归通过；runner 仅刷新的 `rules/integration-test-policy.md` timestamp/耗时已按 HEAD 精确撤回，未纳入交付 diff |
+| PR #132 第二轮重要变量与人工软复核 | 负责人独立 `npm run check:vars -- --include-minor` exit 0，3 个生产文件自动无命中；人工按 ArchiveRepository/ArchiveService/Controller 软复核 schema 幂等、序号不复用、Blob 删除顺序、业务/存档隔离，以及 controller IPC/retention/skipArchive/部分删除语义，均未发现漂移 | 未改金额、币种、匹配、Excel 输出；identity tombstone 与 failed artifact 仍按风险敏感持久化边界 review |
+| reconciliation 审计红线剩余人工项 | 自动化已覆盖状态与幂等，但不把自动化冒充真实环境验收 | 合并前仍需人工核验：真实 terminal 批次永久删除→重启→同 operation 被拒且不分新号；真实 outbox discard 的 warning 可见且源路径释放；A/B artifact 首次结果集合、模块归属与 ready 内容 SHA 在失败/恢复前后一致 |
 
 ## Remaining Unknowns
 
@@ -61,3 +72,4 @@
 | --- | --- | --- | --- |
 | PR2 各模块采用哪一种稳定 business identity type/value | 后续实现 | PR2 BusinessFlowResolver 按各模块已有 runId/operationToken 显式选择 | 不阻塞 PR1；禁止月份/hash fallback |
 | PR #132 四条 P1 评论是否引入新的产品口径 | PROBE 已消除 | 现有 Spec 与 review 评论已锁定；按定向测试验证 | 不阻塞；无 Spec 偏差 |
+| PR #132 第二轮五条评论是否要求新增恢复系统或双形态 API | PROBE 已消除 | 复用 failed artifact/outbox，新增纯加法 issuance tombstone；terminal 统一 positional | 不阻塞；无 timer/lease/latest tracker/fallback/overload |

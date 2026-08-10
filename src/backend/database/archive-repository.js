@@ -3,6 +3,7 @@
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
 //   archive_batch_sequences 不因批次删除而回退的本地日期流水游标；
+//   archive_operation_issuances 跨永久删除保留 operation key 的发行事实；
 //   archive_artifacts 批次中的逻辑文件及失败重试信息；
 //   archive_blobs     以 SHA-256 寻址的唯一物理文件。
 //
@@ -338,6 +339,30 @@ function ensureArchiveMetadataSupport(db) {
     ]);
 
     db.exec(`
+      CREATE TABLE IF NOT EXISTS archive_operation_issuances (
+        module_id TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        batch_id INTEGER NOT NULL,
+        batch_number TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        deleted_at TEXT,
+        PRIMARY KEY (module_id, operation_key)
+      );
+
+      INSERT INTO archive_operation_issuances (
+        module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+      )
+      SELECT
+        module_id,
+        operation_key,
+        id,
+        batch_number,
+        COALESCE(reserved_at, created_at),
+        NULL
+      FROM archive_batches
+      WHERE operation_key <> ''
+      ON CONFLICT(module_id, operation_key) DO NOTHING;
+
       INSERT INTO archive_batch_sequences (module_code, local_date, last_sequence)
       SELECT module_code, local_date, MAX(daily_sequence)
       FROM archive_batches
@@ -523,6 +548,18 @@ function mapFlowAnchor(row) {
   };
 }
 
+function mapOperationIssuance(row) {
+  if (!row) return null;
+  return {
+    moduleId: row.module_id,
+    operationKey: row.operation_key,
+    batchId: Number(row.batch_id),
+    batchNumber: row.batch_number,
+    issuedAt: row.issued_at,
+    deletedAt: row.deleted_at || null
+  };
+}
+
 const BATCH_SELECT = `
   SELECT
     b.*,
@@ -599,6 +636,16 @@ class ArchiveRepository {
       GROUP BY b.id
     `).get(normalizedModuleId, normalizedOperationKey);
     return mapBatch(row);
+  }
+
+  getOperationIssuance(moduleId, operationKey) {
+    const normalizedModuleId = normalizeModuleId(moduleId);
+    const normalizedOperationKey = requiredText(operationKey, 'operationKey', 256);
+    return mapOperationIssuance(this.db.prepare(`
+      SELECT *
+      FROM archive_operation_issuances
+      WHERE module_id = ? AND operation_key = ?
+    `).get(normalizedModuleId, normalizedOperationKey));
   }
 
   getLatestIssuedBatch() {
@@ -821,6 +868,10 @@ class ArchiveRepository {
 
     return withWriteTransaction(this.db, () => {
       if (operationKey) {
+        const issuance = this.getOperationIssuance(moduleId, operationKey);
+        if (issuance && issuance.deletedAt) {
+          return { created: false, status: 'deleted', batch: null, issuance };
+        }
         const existing = this.db.prepare(`
           SELECT id FROM archive_batches WHERE module_id = ? AND operation_key = ?
         `).get(moduleId, operationKey);
@@ -873,6 +924,14 @@ class ArchiveRepository {
         timestamp,
         timestamp
       );
+      const batchId = Number(result.lastInsertRowid);
+      if (operationKey) {
+        this.db.prepare(`
+          INSERT INTO archive_operation_issuances (
+            module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+          ) VALUES (?, ?, ?, ?, ?, NULL)
+        `).run(moduleId, operationKey, batchId, batchNumber, timestamp);
+      }
       this.db.prepare(`
         INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
         VALUES (?, 1, ?)
@@ -880,7 +939,7 @@ class ArchiveRepository {
           last_sequence = archive_daily_sequences.last_sequence + 1,
           updated_at = excluded.updated_at
       `).run(localDate, timestamp);
-      return { created: true, batch: this.getBatch(Number(result.lastInsertRowid)) };
+      return { created: true, batch: this.getBatch(batchId) };
     });
   }
 
@@ -903,6 +962,10 @@ class ArchiveRepository {
     const locked = payload.locked === true ? 1 : 0;
 
     return withWriteTransaction(this.db, () => {
+      const issuance = this.getOperationIssuance(moduleId, operationKey);
+      if (issuance && issuance.deletedAt) {
+        return { created: false, status: 'deleted', batch: null, issuance };
+      }
       const existing = this.db.prepare(`
         SELECT id FROM archive_batches WHERE module_id = ? AND operation_key = ?
       `).get(moduleId, operationKey);
@@ -961,14 +1024,20 @@ class ArchiveRepository {
         parentRunId || null,
         timestamp
       );
+      const batchId = Number(result.lastInsertRowid);
+      this.db.prepare(`
+        INSERT INTO archive_operation_issuances (
+          module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, NULL)
+      `).run(moduleId, operationKey, batchId, batchNumber, timestamp);
       this.db.prepare(`
         UPDATE archive_daily_sequences
         SET last_issued_batch_id = ?,
             last_issued_batch_number = ?,
             last_issued_at = ?
         WHERE local_date = ?
-      `).run(Number(result.lastInsertRowid), batchNumber, timestamp, localDate);
-      return { created: true, batch: this.getBatch(Number(result.lastInsertRowid)) };
+      `).run(batchId, batchNumber, timestamp, localDate);
+      return { created: true, batch: this.getBatch(batchId) };
     });
   }
 
@@ -1092,6 +1161,60 @@ class ArchiveRepository {
         WHERE id = ?
       `).run(timestamp, id);
       return this.getArtifact(Number(result.lastInsertRowid));
+    });
+  }
+
+  recordArtifactFailure(batchId, payload = {}, failure = {}) {
+    const id = Number(batchId);
+    const timestamp = this._timestamp();
+    const artifact = normalizeArtifactPayload(payload, `artifact-${timestamp}`);
+    const code = requiredText(failure.code || 'ARCHIVE_FILE_FAILED', 'failure.code', 128);
+    const message = requiredText(failure.message || '文件存档失败', 'failure.message', 512);
+    return withWriteTransaction(this.db, () => {
+      if (!this.db.prepare('SELECT id FROM archive_batches WHERE id = ?').get(id)) {
+        throw new Error(`存档批次不存在：${id}`);
+      }
+      const result = this.db.prepare(`
+        INSERT INTO archive_artifacts (
+          batch_id, artifact_key, direction, role, source_operation,
+          original_name, source_path, status, blob_id, attempt_count,
+          last_error_code, last_error_message, metadata_json,
+          created_at, updated_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', NULL, 0, ?, ?, ?, ?, ?, NULL)
+      `).run(
+        id,
+        artifact.artifactKey,
+        artifact.direction,
+        artifact.role,
+        artifact.sourceOperation,
+        artifact.originalName,
+        artifact.sourcePath,
+        code,
+        message,
+        artifact.metadataJson,
+        timestamp,
+        timestamp
+      );
+      this.db.prepare(`
+        UPDATE archive_batches
+        SET archive_status = 'incomplete', failure_count = failure_count + 1,
+            last_error_code = ?, last_error_message = ?,
+            last_failed_operation = ?, last_failed_at = ?,
+            completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        code,
+        message,
+        artifact.sourceOperation,
+        timestamp,
+        timestamp,
+        timestamp,
+        id
+      );
+      return {
+        artifact: this.getArtifact(Number(result.lastInsertRowid)),
+        batch: this.getBatch(id)
+      };
     });
   }
 
@@ -1522,6 +1645,13 @@ class ArchiveRepository {
       }
       if (batch.locked && !allowLocked) {
         return { status: 'locked', batch, releasedBlobs: [] };
+      }
+      if (batch.operationKey) {
+        this.db.prepare(`
+          UPDATE archive_operation_issuances
+          SET deleted_at = COALESCE(deleted_at, ?)
+          WHERE module_id = ? AND operation_key = ?
+        `).run(this._timestamp(), batch.moduleId, batch.operationKey);
       }
       const candidateBlobs = this.db.prepare(`
         SELECT DISTINCT bl.*

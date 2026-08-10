@@ -366,7 +366,8 @@ class ArchiveService {
     if (Object.prototype.hasOwnProperty.call(payload, 'localDate')) {
       input.localDate = payload.localDate;
     }
-    if (Object.prototype.hasOwnProperty.call(payload, 'retentionUntil')) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'retentionUntil')
+        && payload.retentionUntil !== undefined) {
       input.retentionUntil = payload.retentionUntil;
     } else if (payload.retentionDays === null || payload.retentionDays === 'permanent') {
       input.retentionDays = null;
@@ -380,6 +381,18 @@ class ArchiveService {
 
   _createBatchUnlocked(payload = {}) {
     const created = this.repository.createBatch(this._batchInput(payload));
+    if (created.status === 'deleted') {
+      return {
+        ok: false,
+        status: 'deleted',
+        code: 'ARCHIVE_OPERATION_DELETED',
+        message: '该业务操作对应的存档批次已永久删除，不能重新创建',
+        retryable: false,
+        created: false,
+        batchId: created.issuance.batchId,
+        batch: null
+      };
+    }
     return {
       ok: true,
       status: created.created ? 'created' : 'existing',
@@ -392,6 +405,7 @@ class ArchiveService {
   async createBatch(payload = {}) {
     return this._run('createBatch', async () => {
       const created = this._createBatchUnlocked(payload);
+      if (!created.ok) return created;
       if (!Array.isArray(payload.files) || payload.files.length === 0) return created;
       const appended = await this._appendFilesUnlocked(created.batch.id, {
         files: payload.files,
@@ -410,6 +424,18 @@ class ArchiveService {
   async reserveTaskBatch(payload = {}) {
     return this._run('reserveTaskBatch', async () => {
       const reserved = this.repository.reserveTaskBatch(this._taskBatchInput(payload));
+      if (reserved.status === 'deleted') {
+        return {
+          ok: false,
+          status: 'deleted',
+          code: 'ARCHIVE_OPERATION_DELETED',
+          message: '该业务操作对应的存档批次已永久删除，不能重新执行',
+          retryable: false,
+          created: false,
+          batchId: reserved.issuance.batchId,
+          batch: null
+        };
+      }
       return {
         ok: true,
         status: reserved.created ? 'reserved' : 'existing',
@@ -811,6 +837,7 @@ class ArchiveService {
       return { artifact: existingArtifact, filePath };
     }
     let artifact;
+    let artifactPayload = null;
     try {
       const metadata = payload.metadata && typeof payload.metadata === 'object'
         ? { ...payload.metadata }
@@ -840,7 +867,7 @@ class ArchiveService {
         }
         metadata.expectedSizeBytes = expectedSizeBytes;
       }
-      artifact = this.repository.addArtifact(batch.id, {
+      artifactPayload = {
         artifactKey,
         direction: payload.direction || 'input',
         role: payload.role,
@@ -848,14 +875,36 @@ class ArchiveService {
         originalName,
         sourcePath: filePath,
         metadata
-      });
+      };
+      artifact = this.repository.addArtifact(batch.id, artifactPayload);
     } catch (error) {
       const failure = safeFailure(error, '登记', originalName);
-      this.repository.recordBatchFailure(batch.id, {
-        ...failure,
-        sourceOperation: payload.sourceOperation
-      });
-      return { result: { ok: false, status: 'failed', metadataRecorded: true, ...failure } };
+      let recorded = null;
+      if (artifactPayload) {
+        try {
+          recorded = this.repository.recordArtifactFailure(
+            batch.id,
+            artifactPayload,
+            failure
+          );
+        } catch (_artifactMetadataError) {
+          // failed artifact 无法持久化时，沿用 batch 级失败证据；controller 会转入 outbox。
+        }
+      }
+      if (!recorded) {
+        this.repository.recordBatchFailure(batch.id, {
+          ...failure,
+          sourceOperation: payload.sourceOperation
+        });
+      }
+      return { result: {
+        ok: false,
+        status: 'failed',
+        artifact: publicArtifact(recorded && recorded.artifact),
+        batch: recorded ? recorded.batch : this.repository.getBatch(batch.id),
+        metadataRecorded: true,
+        ...failure
+      } };
     }
     return { artifact, filePath };
   }

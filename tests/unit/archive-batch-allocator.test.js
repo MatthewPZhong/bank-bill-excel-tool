@@ -300,6 +300,57 @@ test('reserveTaskBatch 使用全局日流水、持久幂等和 v2 DTO，latest �
   }
 });
 
+test('operationKey 永久删除身份跨重启拒绝重放且不推进全局流水', () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-operation-tombstone-'));
+  const dbPath = path.join(tempDir, 'archive.sqlite');
+  let db = new DatabaseSync(dbPath);
+  try {
+    db.exec('PRAGMA foreign_keys = ON');
+    let repository = createArchiveRepository(db, {
+      now: () => new Date(2026, 7, 10, 1, 0, 0)
+    });
+    repository.ensureSchema();
+    const payload = {
+      operationKey: 'deleted-operation',
+      taskRunId: 'deleted-operation-task',
+      retentionUntil: null
+    };
+    const issued = reserve(repository, payload).batch;
+    repository.updateTaskStatus(issued.id, 'succeeded');
+    assert.equal(repository.deleteBatch(issued.id).status, 'deleted');
+    assert.ok(repository.getOperationIssuance('statement-generator', payload.operationKey).deletedAt);
+    const cursorBeforeRestart = db.prepare(`
+      SELECT last_sequence FROM archive_daily_sequences WHERE local_date = '2026-08-10'
+    `).get().last_sequence;
+
+    db.close();
+    db = new DatabaseSync(dbPath);
+    db.exec('PRAGMA foreign_keys = ON');
+    repository = createArchiveRepository(db, {
+      now: () => new Date(2026, 7, 10, 1, 1, 0)
+    });
+    repository.ensureSchema();
+    const replay = reserve(repository, payload);
+    assert.equal(replay.created, false);
+    assert.equal(replay.status, 'deleted');
+    assert.equal(replay.batch, null);
+    assert.equal(replay.issuance.batchId, issued.id);
+    assert.equal(db.prepare(`
+      SELECT last_sequence FROM archive_daily_sequences WHERE local_date = '2026-08-10'
+    `).get().last_sequence, cursorBeforeRestart);
+
+    const next = reserve(repository, {
+      operationKey: 'operation-after-delete',
+      taskRunId: 'operation-after-delete-task',
+      retentionUntil: null
+    }).batch;
+    assert.equal(next.batchNumber, '2026-08-10-002');
+  } finally {
+    if (db) db.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('reserved/running 批次拒绝物理删除，原批次进入终态后才可删除', () => {
   const { db, repository } = createFixture();
   try {

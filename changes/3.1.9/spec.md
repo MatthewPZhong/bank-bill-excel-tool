@@ -1,12 +1,12 @@
 # v3.1.9 Codex Spec — 存档中心全局批次服务、全任务接入、目录化与设置优化
 
-> status: `confirmed-product-decisions / 待实施`  
-> target-version: `3.1.9`  
-> repository: `MatthewPZhong/bank-bill-excel-tool`  
-> baseline-policy: 基于 **GitHub 默认分支 `main` 的 v3.1.8 当前代码** 开发；开工时再次锁定实际 HEAD SHA  
-> audited-baseline: `main`（`package.json` = `3.1.8`，2026-08-09 复审）  
-> audited-at: `2026-08-09`  
-> suggested-branch: `codex/v3.1.9-global-archive-batches`  
+> - status: `confirmed-product-decisions / 待实施`
+> - target-version: `3.1.9`
+> - repository: `MatthewPZhong/bank-bill-excel-tool`
+> - baseline-policy: 基于 **GitHub 默认分支 `main` 的 v3.1.8 当前代码** 开发；开工时再次锁定实际 HEAD SHA
+> - audited-baseline: `main`（`package.json` = `3.1.8`，2026-08-09 复审）
+> - audited-at: `2026-08-09`
+> - suggested-branch: `codex/v3.1.9-global-archive-batches`
 > nature: 本迭代会改变批次身份分配时点、所有业务任务与存档中心的依赖关系、存档物理目录和存储根目录。不得改变任何模块的金额、币种、匹配、回填、业务归档、人工调整或结果模板规则。
 
 ---
@@ -380,11 +380,13 @@ reserveTaskBatch({
 
 markTaskStarted(batchId)
 appendTaskFiles({ batchId, files, sourceOperation, metadata })
-completeTaskBatch({ batchId, businessResult, metadata })
-failTaskBatch({ batchId, errorCode, errorMessage, metadata })
-cancelTaskBatch({ batchId, reason, metadata })
+completeTaskBatch(batchId, options)
+failTaskBatch(batchId, failure)
+cancelTaskBatch(batchId, cancellation)
 getLatestBatch({ moduleId? })
 ```
+
+三个 terminal 接口以 positional `batchId` 为唯一调用形态；第二参数承载对应完成、失败或取消上下文。PR1 仅实现当前所需字段，后续 PR 可在同一 positional 契约的 options/metadata 内追加字段，不增加 object-form overload。
 
 返回 DTO 至少包含：
 

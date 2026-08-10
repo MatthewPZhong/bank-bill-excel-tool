@@ -72,8 +72,31 @@
 
 - P0 定向：allocator/repository/service 共 40/40 PASS。
 - P1 archive 回归：allocator、UI contract、repository、controller、operation tracker、outbox、service、source snapshot 共 110/110 PASS。
-- `npm run lint`、相关文件 `node --check`、`git diff --check` 均 PASS。
+- `npm run lint`、相关文件 `node --check` PASS；当时的 `git diff --check` 只覆盖工作区/末次补丁，不能证明 base→PR 全量通过，已由第二轮门禁取代。
 - `npm run check:vars -- --include-minor` PASS，脚本未命中重要变量；另已人工按 ArchiveRepository/ArchiveService 审计血缘条目完成关联 review。
 - 完整 `npm run release-check` exit 0：lint PASS；smoke PASS；unit 4816/4816 PASS（304 个测试文件，Node 测试 15177.643ms、runner 15214ms）；integration 48/48 脚本、2459/2459 断言 PASS（386135ms）。
 - team-lead 最终 review：无 P0/P1、无入口旁路、无过度防御；独立复跑两个相关文件 34/34 PASS，git diff/status 边界正确。
 - 本轮无 UI、目录物化或真实业务 action 接线，无新增 GUI 手动项；人工代码 review 由 team-lead 在未提交检查点执行。
+
+## 7. PR #132 第二轮评论增量矩阵
+
+| ID | 优先级 | 场景 | 最小关键断言 |
+| --- | --- | --- | --- |
+| R6 | P0 | artifact 登记完整性 | A ready、B 登记失败会留下带 id 的 failed artifact；task terminal 仍 incomplete 且保留 B 错误；同一 B 重试成功后才 complete |
+| R7 | P0 | operation 删除幂等 | v2 terminal→delete→restart→replay 返回 `ARCHIVE_OPERATION_DELETED` 且不推进 cursor；legacy outbox 在删除/重启后 discarded、告警、释放源路径且不复活批次/自旋 |
+| R8 | P1 | task retention undefined | 表驱动证明 undefined 使用 retentionDays/default；显式 null 或 retentionDays permanent 才永久，显式日期语义不变 |
+| R9 | P1 | terminal API 契约 | 真实 PR1/PR2 调用均保持 positional；Spec §5.2 反向同步，不增加 object overload |
+| R10 | P1 | 全 PR diff gate | 修复 Spec Markdown 行尾空白；以 base `63c1ce46357587643e506768f712352cbb6c7127` 对完整 PR 等价范围执行 `git diff --check` |
+
+执行结果在实现门禁完成后增量回填；不重复排列不可达状态、terminal/force 组合、日期或时区组合。
+
+### 7.1 执行结果
+
+- 定向 allocator/repository/service/controller：61/61 PASS；首次扩大到 repository 时仅发现 schema inventory 陈旧，补入 `archive_operation_issuances` 后同范围复跑全绿。
+- 相关 3 个生产与 4 个测试文件 `node --check` PASS；`npm run lint` PASS。
+- base→working tree 完整 PR 等价范围 `git diff --check 63c1ce46357587643e506768f712352cbb6c7127` PASS；覆盖 12 个 PR 文件，并非仅检查本轮工作区或末次提交。
+- blindspot pass 未发现会改变方案的存活问题；issuance read/replay 共用 per-record 失败边界，失败时 outbox 与源路径保持；非法 expected hash/size 不进入 failed-placeholder 恢复语义。
+- 负责人独立 archive 8 文件 113/113 PASS、base→working-tree diff-check PASS；review 无 P0/P1、无过度防御或重复/不可达防御。
+- 完整 `npm run release-check` exit 0：lint PASS、smoke PASS；unit 4819/4819 PASS（304 files，Node 测试 15377.901125ms、runner 15415ms）；integration 48/48 scripts、2459/2459 assertions PASS（394086ms）。runner-only policy timestamp/耗时 diff 已按 HEAD 精确撤回。
+- 负责人独立 `npm run check:vars -- --include-minor` exit 0（3 个生产文件，自动无命中）；人工软复核 ArchiveRepository/ArchiveService/Controller 的 schema 幂等、序号不复用、Blob 删除顺序、业务/存档隔离，以及 controller IPC/retention/skipArchive/部分删除语义，未发现漂移。
+- ⚠️ reconciliation 审计红线仍待人工：真实 terminal delete→restart→同 operation 被拒且不分新号；真实 outbox warning 可见并释放源路径；A/B artifact 的首次结果集合、模块归属与 ready SHA 在失败/恢复前后一致。以上不得以自动化 PASS 代替人工结论。
