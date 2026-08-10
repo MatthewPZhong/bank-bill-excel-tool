@@ -246,4 +246,6 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - Final gate check-vars：exit 2，仅 Critical `FileValidationError` / `unmatchedRows`；自动证据锁定 assignment 错误 code、Acquiring summary/mirror/原 batch，完整 release-check 的 smoke 用于清单必跑，真实 statement 资金输出仍按 §10.2 人工复核。
 - 最终 12 个实际改动测试文件合跑 273/273 PASS。完整门禁首轮 lint/smoke PASS、unit 4921/4922；唯一失败是静态契约仍按旧 Position finalizer 函数名截取源码，最小对齐现行 `finalizePositionTerminalIntent` 后未改变生产行为。
 - 修正后单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4922/4922（314 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions PASS（304260ms）。runner 自动刷新 `rules/integration-test-policy.md` §七 timestamp/timings，脚本与断言数未变，按全绿生成证据保留。
+- Windows Actions run `31416514064` 首轮 smoke PASS、unit 4920/4922（fail 1、expected platform skip 1）；唯一失败是本文件的静态顺序测试以 LF 字面量查找 final accepted-path guard，在 CRLF checkout 下索引为 `-1`，属于测试可移植性问题而非生产回归。改为行尾/缩进无关 regex 后，仍锁定 resolver → selection freshness → status → `createPreviewSourceFreshnessGuard(selectionResult.filePaths)` 的同一顺序；未改生产或增加平台分支。
+- CI follow-up 本地证据：单文件 11/11、12 个改动测试文件 273/273、lint/node/diff check PASS；单一 session `npm run release-check` exit 0，unit 4922/4922（314 files，0 fail/skip），integration 48/48 scripts、2459/2459 assertions PASS（283436ms）。runner 生成清单仅刷新 timestamp/timings，48/2459 不变并继续保留。
 - 相关生产文件 `node --check`、`git diff --check` PASS。§10.2 人工门禁仍待执行，不以自动证据替代。

@@ -321,10 +321,11 @@ test('statement 全量 preview 探测期间源文件变更会在返回前被拒�
   const selectionIndex = statementPrepare.indexOf('const selectionResult = await');
   const selectionFreshIndex = statementPrepare.indexOf('assertSelectionFresh();', selectionIndex);
   const selectionStatusIndex = statementPrepare.indexOf('if (selectionResult.status', selectionIndex);
-  const sourceGuardIndex = statementPrepare.indexOf(
-    'createPreviewSourceFreshnessGuard(\n    selectionResult.filePaths',
-    selectionIndex
-  );
+  const sourceGuardMatch = /createPreviewSourceFreshnessGuard\(\s*selectionResult\.filePaths/
+    .exec(statementPrepare.slice(selectionIndex));
+  const sourceGuardIndex = sourceGuardMatch
+    ? selectionIndex + sourceGuardMatch.index
+    : -1;
   assert.ok(
     selectionIndex >= 0
       && selectionIndex < selectionFreshIndex
