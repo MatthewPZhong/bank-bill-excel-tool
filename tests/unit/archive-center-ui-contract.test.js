@@ -84,19 +84,26 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(main, /filterStagingPathsWithoutProtectedSources\(targets,\s*protectedPaths\)/);
   });
 
-  test('异常恢复完成后只清理未提交输入，并在清除 pending 后执行受保护目录清理', () => {
+  test('异常恢复完成后在清除 pending 后执行受保护目录清理', () => {
+    const persistenceStart = main.indexOf('function persistPositionArchiveIntentIfNeeded');
+    const persistenceEnd = main.indexOf('function recoverPositionArchiveIntent', persistenceStart);
+    const persistenceFlow = main.slice(persistenceStart, persistenceEnd);
     const serviceStart = main.indexOf('function getPositionReconciliationService');
     const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
     const recoveryFlow = main.slice(serviceStart, serviceEnd);
     assert.match(recoveryFlow, /const recovery = recoverPositionArchiveIntent\(/);
     assert.match(
+      persistenceFlow,
+      /const archiveResult = readDeletedPositionArchiveResult\(pending\);[\s\S]*?positionRecoveryCleanupInputPaths\([\s\S]*?archiveResult/
+    );
+    assert.match(
       recoveryFlow,
-      /cleanupPositionArchiveSourcePaths\(recovery\.uncommittedInputPaths\)/
+      /cleanupPositionArchiveSourcePaths\(recovery\.cleanupInputPaths\)/
     );
     assert.ok(
       recoveryFlow.indexOf("database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '')")
-        < recoveryFlow.indexOf('cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths)'),
-      '未提交 staging 只能在 checkpoint 同步和 pending 清除后清理'
+        < recoveryFlow.indexOf('cleanupPositionArchiveSourcePaths(recovery.cleanupInputPaths)'),
+      '已解决 staging 只能在 checkpoint 同步和 pending 清除后清理'
     );
   });
 

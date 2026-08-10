@@ -125,3 +125,17 @@
 - 保留原 outbox append 断言的最终 test-only 整理后，controller 复跑：19/19 PASS。
 - 负责人最终 review：无 P0/P1、无过度防御；独立复跑 controller、Position lifecycle、renderer Position 三个文件 63/63 PASS。
 - 相关生产/测试 `node --check`、`npm run lint`、base→working tree/当前增量 diff-check PASS；`npm run check:vars -- --include-minor` 自动无命中，另按 controller Important-skeleton 定义位置人工复核 IPC/preload、retention、skipArchive、重试及部分删除语义未漂移。
+
+## 9. PR #132 第四轮评论增量矩阵
+
+| ID | 优先级 | 场景 | 最小关键断言 |
+| --- | --- | --- | --- |
+| R13 | P3 | intent-recorded/durable crash pending 对应 archive tombstone 后 Position lazy recovery | 既有真实 repository/controller 删除返回 deleted；单一 helper 断言证明 deleted 返回全部 pending input，静态接线证明 durable 分支传入同一 deleted 结果；main 先清 pending 再交给既有 containment/protection cleanup |
+
+### 9.1 执行结果
+
+- R13 不新增重复端到端 case：复用既有真实 tombstone controller 用例，并在既有部分提交 fixture 增量断言 deleted cleanup candidates。
+- durable crash 窗口复用同一 helper：最小 UI contract + lifecycle 35/35 PASS；含 controller、renderer Position 的相关回归 81/81 PASS；DB tombstone 读取失败不把 committed staging 纳入本次清理候选，不新增重复状态或重试排列。
+- 既有 containment/protection 定向回归继续覆盖用户路径边界与受保护 staging，不重复物理删除排列。
+- tombstone + cleanup candidate 定向：2/2 PASS；controller、Position lifecycle、renderer Position、archive UI 相关回归：81/81 PASS；既有 protection 定向：2/2 PASS。
+- 相关 4 文件 `node --check`、`npm run lint`、base→working tree/current diff-check PASS；`npm run check:vars -- --include-minor` 自动无命中，人工复核 Position checkpoint/pending 与存档失败隔离边界未漂移。

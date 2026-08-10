@@ -90,7 +90,7 @@ const {
 const {
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
-  positionUncommittedRecoveryInputPaths,
+  positionRecoveryCleanupInputPaths,
   requirePositionPendingArchiveFiles,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
@@ -14784,6 +14784,28 @@ function positionArchiveModule(channel) {
   };
 }
 
+function readDeletedPositionArchiveResult(pending) {
+  try {
+    const center = archiveCenterService || initializeArchiveCenter();
+    const repository = center && center.service && center.service.repository;
+    if (!repository) return null;
+    const moduleId = positionArchiveModule(String(pending.channel || '')).moduleId;
+    const operationKey = `position:${pending.operationToken}:${pending.channel}`;
+    const issuance = repository.getOperationIssuance(moduleId, operationKey);
+    return issuance && issuance.deletedAt
+      ? {
+          batchId: issuance.batchId,
+          operationKey,
+          persisted: false,
+          operationStatus: 'deleted',
+          code: 'ARCHIVE_OPERATION_DELETED'
+        }
+      : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
 function positionArchiveIntentEvidence(pending, currentCheckpoint) {
   return evaluatePositionArchiveIntentEvidence(pending, currentCheckpoint, {
     statSync: fs.statSync,
@@ -14817,11 +14839,13 @@ function persistPositionArchiveIntentIfNeeded(
       { ...pending, archiveFiles: files },
       service.listCommittedOperationInputs(pending.operationToken)
     );
+    const archiveResult = readDeletedPositionArchiveResult(pending);
     return {
-      archiveResult: null,
-      uncommittedInputPaths: positionUncommittedRecoveryInputPaths(
+      archiveResult,
+      cleanupInputPaths: positionRecoveryCleanupInputPaths(
         { ...pending, archiveFiles: files },
-        committedFiles
+        committedFiles,
+        archiveResult
       )
     };
   }
@@ -14830,9 +14854,10 @@ function persistPositionArchiveIntentIfNeeded(
     return options.includeCleanupCandidates === true
       ? {
           archiveResult: null,
-          uncommittedInputPaths: positionUncommittedRecoveryInputPaths(
+          cleanupInputPaths: positionRecoveryCleanupInputPaths(
             { ...pending, archiveFiles: files },
-            []
+            [],
+            null
           )
         }
       : null;
@@ -14844,10 +14869,6 @@ function persistPositionArchiveIntentIfNeeded(
   const committedFiles = positionCommittedRecoveryArchiveFiles(
     { ...pending, archiveFiles: files },
     committedInputs
-  );
-  const uncommittedInputPaths = positionUncommittedRecoveryInputPaths(
-    { ...pending, archiveFiles: files },
-    committedFiles
   );
   if (committedFiles.length === 0 || !archiveCenterService
       || typeof archiveCenterService.persistOperationIntent !== 'function') {
@@ -14869,7 +14890,14 @@ function persistPositionArchiveIntentIfNeeded(
     files: recoveryFiles
   });
   return options.includeCleanupCandidates === true
-    ? { archiveResult, uncommittedInputPaths }
+    ? {
+        archiveResult,
+        cleanupInputPaths: positionRecoveryCleanupInputPaths(
+          { ...pending, archiveFiles: files },
+          committedFiles,
+          archiveResult
+        )
+      }
     : archiveResult;
 }
 
@@ -15030,8 +15058,8 @@ function getPositionReconciliationService() {
       database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
       database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       positionReconciliationService = service;
-      if (recovery && Array.isArray(recovery.uncommittedInputPaths)) {
-        void cleanupPositionArchiveSourcePaths(recovery.uncommittedInputPaths)
+      if (recovery && Array.isArray(recovery.cleanupInputPaths)) {
+        void cleanupPositionArchiveSourcePaths(recovery.cleanupInputPaths)
           .catch(() => undefined);
       }
       const initializationResult = service.store

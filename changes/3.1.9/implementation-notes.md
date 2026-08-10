@@ -102,3 +102,23 @@
 ### Remaining Unknowns
 
 无本轮 BLOCK。flush/delete 竞态在当前生产调用图不可达；若未来增加运行期 flush 入口，应在该新入口设计中重新评估串行化，而不是在 PR1 预造协调机制。
+
+## PR #132 第四轮评论增量
+
+### Decisions
+
+| 决定 | 证据 | 实现约束 |
+| --- | --- | --- |
+| deleted startup recovery 在清除 pending 后清理全部已解决 input | archive cleanup/delete 可先留下 tombstone，而 pending 会让首次 source release 跳过 committed staging；随后 deleted intent 不建 outbox | 用 `positionRecoveryCleanupInputPaths` 复用现有未提交输入 helper；仅 deleted code 以空 retained set 取得全部 pending input，非-deleted/outbox/部分提交与 output 选择不变 |
+| durable pending 恢复前只读既有 issuance tombstone | `markPositionArchiveDurable()` 先于 cleanup/sync/clear；该窗口崩溃后 durable 早返回不会再次调用 controller | durable 分支沿 main 既有 repository 入口查询同一 operation；仅成功读到 deleted 才复用全量 input cleanup，读取失败保守保留 committed staging，不新增 retry/API/状态 |
+| recovery 内部返回字段统一为 `cleanupInputPaths` | deleted 集合不再等同于 uncommitted，旧字段名会误导内部契约 | 只同步 main 内部唯一消费点；仍先清 pending，再走既有 staging-root containment 与 protection filter，不新增清理系统或后台机制 |
+
+### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| review `PRR_kwDORiHOzM8AAAABI_MpjQ` / thread `PRRT_kwDORiHOzM6X63vt` | unresolved、non-outdated；root 确认生产可达 | 修复限定为 deleted recovery 的 committed staging 清理缺口 |
+| 既有真实 repository/controller tombstone 回归 + lifecycle cleanup candidate 断言 | 定向 2/2 PASS；controller 用例保持真实删除后 deleted DTO，既有部分提交 fixture 增量证明 deleted 时返回全部 pending input | 不重复搭 controller/SQLite，不增加 VM/source extraction 或伪 startup 状态 |
+| main startup 顺序与既有 staging 保护回归 | controller/Position lifecycle/renderer/archive UI 81/81 PASS；既有 protection 定向 2/2 PASS | archive UI contract 钉死先清 pending 后调用 `cleanupInputPaths`；containment/protection 继续由既有清理实现与测试负责，不重复物理 rm case |
+| durable crash 窗口补充复核 | 最小 UI contract + lifecycle 35/35 PASS；controller/Position lifecycle/renderer/archive UI 合并回归 81/81 PASS | lifecycle 单一断言证明 deleted 返回全部 input candidates；静态契约证明 durable 分支先取 tombstone 再交同一 helper，未增加重复状态 case 或 VM/SQLite harness |
+| 静态与重要变量门禁 | 相关 4 文件 `node --check`、ESLint、base→working tree/current diff-check PASS；`check-vars -- --include-minor` 自动无命中 | 人工按 Position Risk-sensitive 条目复核 checkpoint/pending 所有权、存档失败隔离与退出顺序；未改 side DB、业务数据、金额/币种/匹配或文件内容 |
