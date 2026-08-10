@@ -49,6 +49,18 @@ const POSITION_IMPORT_MESSAGE_TYPES = Object.freeze({
   CANCEL_ACK: 'CANCEL_ACK'
 });
 
+const POSITION_IMPORT_MUTATING_COMMANDS = Object.freeze([
+  POSITION_IMPORT_COMMANDS.BANK_APPLY,
+  POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+  POSITION_IMPORT_COMMANDS.DELETE_BANK,
+  POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
+  POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING
+]);
+
+function isPositionImportMutatingCommand(command) {
+  return POSITION_IMPORT_MUTATING_COMMANDS.includes(String(command || ''));
+}
+
 function normalizePositionImportEngine(value = process.env.POSITION_IMPORT_ENGINE) {
   const normalized = String(value || '').trim().toLowerCase();
   return Object.values(POSITION_IMPORT_ENGINES).includes(normalized)
@@ -88,7 +100,9 @@ module.exports = {
   POSITION_IMPORT_NON_CANCELLABLE_STAGES,
   POSITION_IMPORT_ENGINES,
   POSITION_IMPORT_COMMANDS,
+  POSITION_IMPORT_MUTATING_COMMANDS,
   POSITION_IMPORT_MESSAGE_TYPES,
+  isPositionImportMutatingCommand,
   isPositionImportCancellationLocked,
   normalizePositionImportEngine,
   normalizePositionStreamingSourceTypes

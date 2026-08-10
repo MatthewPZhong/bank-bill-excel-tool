@@ -118,6 +118,22 @@ test.describe('run-check-worker-pool', () => {
 
   test('1a. resume IPC prepare/execute contract 在 reserve 前取锁并将持久 batchContext 透传到 worker', async () => {
     const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
+    const freshRunStart = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:run'"
+    );
+    const freshRunEnd = mainSource.indexOf(
+      "ipcMain.handle('acquiringBillCurrency:run:cancel'",
+      freshRunStart
+    );
+    const freshRunSource = mainSource.slice(freshRunStart, freshRunEnd);
+    assert.match(freshRunSource, /async prepare\(_event, payload = \{\}\)/);
+    assert.ok(
+      freshRunSource.indexOf("tryAcquireOpLock('run', monthKey)")
+        < freshRunSource.indexOf('async execute(event, prepared, taskContext)'),
+      'fresh run 的 DB/month admission 与月锁必须在 lifecycle reserve 前的 prepare 完成'
+    );
+    assert.match(freshRunSource, /onAbandon:\s*releaseLock/);
+    assert.match(freshRunSource, /finally\s*\{\s*prepared\.releaseLock\(\)/);
     const handlerStart = mainSource.indexOf(
       "trackedIpcHandle('acquiringBillCurrency:run:resume'"
     );

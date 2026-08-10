@@ -353,6 +353,38 @@ test('Acquiring run 结果 identity 按 source + month + runId 隔离并与 lega
     ),
     []
   );
+
+  const exportPolicy = registry.require('acquiringBillCurrency:export');
+  const exportIdentity = {
+    type: 'business-run-id',
+    value: 'acquiring-run:side:2026-07:1'
+  };
+  const exportInvocation = {
+    args: [{ monthKey: '2026-07' }],
+    prepared: {
+      exportPlan: {
+        source: 'side',
+        monthKey: '2026-07',
+        runId: 1,
+        flowIdentity: exportIdentity
+      }
+    }
+  };
+  assert.equal(exportPolicy.startsNewFlow, false);
+  assert.deepEqual(exportPolicy.flowPlanResolver(exportInvocation), {
+    startsNewFlow: false,
+    flowIdentity: exportIdentity
+  });
+  assert.deepEqual(exportPolicy.resultFlowIdentities(
+    { status: 'success', source: 'side', monthKey: '2026-07', runId: 1 },
+    {},
+    exportInvocation
+  ), [exportIdentity]);
+  assert.deepEqual(exportPolicy.resultFlowIdentities(
+    { status: 'success', source: 'side', monthKey: '2026-08', runId: 1 },
+    {},
+    exportInvocation
+  ), []);
 });
 
 test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent', async () => {

@@ -144,6 +144,11 @@ function createHarness(overrides = {}) {
     flowResolver,
     operationTracker,
     createTaskRunId: () => 'task-1',
+    async persistTerminalIntent(payload) {
+      calls.push(['persist-terminal-intent', payload]);
+      if (overrides.persistTerminalIntentError) throw overrides.persistTerminalIntentError;
+      return overrides.persistTerminalIntentResult || { persisted: true };
+    },
     onArchiveWarning: (warning) => warnings.push(warning)
   });
   return { archiveService, calls, lifecycle, warnings };
@@ -599,7 +604,7 @@ test('append 已持久记录 failure 时 lifecycle 不重复 recordFailure 但�
   assert.equal(warnings.length, 1);
 });
 
-test('业务成功但 terminal 返回失败仍保留业务结果并记录不完整', async () => {
+test('业务成功但 terminal 返回失败时持久化同批次终态意图并保留业务结果', async () => {
   const { calls, lifecycle, warnings } = createHarness({
     completeResult: { ok: false, code: 'ARCHIVE_DB_WRITE_FAILED', message: 'write failed' }
   });
@@ -611,7 +616,34 @@ test('业务成功但 terminal 返回失败仍保留业务结果并记录不完�
   });
   assert.equal(actual, expected);
   assert.ok(calls.some((call) => call[0] === 'record-failure'));
+  const persisted = calls.find((call) => call[0] === 'persist-terminal-intent');
+  assert.deepEqual(persisted[1].batchContext, {
+    batchId: 11,
+    batchNumber: '2026-08-10-001',
+    taskRunId: 'task-1',
+    taskKey: POLICY.taskKey,
+    moduleId: POLICY.scopeId,
+    parentRunId: 'parent-1',
+    operationKey: 'reconcile-run:task-1'
+  });
+  assert.equal(persisted[1].terminalOutcome.taskStatus, 'succeeded');
   assert.equal(warnings.some((warning) => warning.code === 'ARCHIVE_DB_WRITE_FAILED'), true);
+});
+
+test('任务终态写入和持久意图登记均失败时 fail-closed', async () => {
+  const { lifecycle } = createHarness({
+    completeResult: { ok: false, code: 'ARCHIVE_DB_WRITE_FAILED', message: 'write failed' },
+    persistTerminalIntentError: new Error('outbox unavailable')
+  });
+  await assert.rejects(lifecycle.run({
+    policy: POLICY,
+    meta: { channel: POLICY.channel },
+    execute: () => ({ status: 'success', value: 9 })
+  }), (error) => (
+    error.code === 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED'
+    && error.businessResult.value === 9
+    && error.cause.message === 'outbox unavailable'
+  ));
 });
 
 test('cancel 先到、success 后到时 terminal CAS 冲突不污染 archive failure', async () => {

@@ -7,6 +7,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const { AppDatabase } = require('../../../src/backend/database');
 const runDataStore = require('../../../src/backend/run-data-store');
@@ -14,6 +15,27 @@ const runRepo = require('../../../src/backend/acquiring-bill-currency-db/run-rep
 const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
+const {
+  createBusinessOperationRegistry
+} = require('../../../src/main-process/business-operation-registry');
+const {
+  createArchiveService
+} = require('../../../src/main-process/archive-center/archive-service');
+const {
+  createBusinessFlowResolver
+} = require('../../../src/main-process/archive-center/business-flow-resolver');
+const {
+  createArchiveCenterController
+} = require('../../../src/main-process/archive-center/controller');
+const {
+  createArchiveOperationTracker
+} = require('../../../src/main-process/archive-center/operation-tracker');
+const {
+  createTaskLifecycle
+} = require('../../../src/main-process/archive-center/task-lifecycle');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/archive-center/task-policy-registry');
 const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
 const acquiringSession = require('../../../src/main-process/acquiring-bill-currency-session');
 
@@ -395,6 +417,218 @@ test.describe('crash/resume archive identity', () => {
       }
     }
   });
+
+  test('side complete 崩溃恢复零 worker 替换旧镜像并复用原批次，exact 镜像严格 no-op', async () => {
+    const monthKey = '2026-12';
+    const diffFilePath = path.join(tmpdir, 'completed-diff.xlsx');
+    const reportFilePath = path.join(tmpdir, 'completed-report.xlsx');
+    fs.writeFileSync(diffFilePath, 'diff');
+    fs.writeFileSync(reportFilePath, 'report');
+    const seeded = seedResumableRun({
+      source: 'side',
+      monthKey,
+      progress: {
+        lastCompletedChunkIndex: 2,
+        totalChunks: 4,
+        status: 'partial',
+        chunkSize: 5000
+      }
+    });
+    const staleMirror = mainDb.prepare(`
+      INSERT INTO acquiring_bill_currency_runs
+        (month_key, ran_at, total_bill_rows, matched_rows, mismatch_rows, unmatched_rows,
+         status, diff_file_path, report_file_path, side_db_rel_path)
+      VALUES (?, '2026-11-30T12:00:00.000Z', 7, 6, 1, 0, 'success', ?, ?, ?)
+    `).run(
+      monthKey,
+      path.join(tmpdir, 'previous-diff.xlsx'),
+      path.join(tmpdir, 'previous-report.xlsx'),
+      runDataStore.sideDbRelPath(MODULE, monthKey)
+    );
+    const staleMirrorId = Number(staleMirror.lastInsertRowid);
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const legacyPlan = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey,
+      runId: seeded.runId
+    });
+    const reserved = reserveResumeBatch(archiveRepository, legacyPlan, 'parent-completed-run');
+    const batchContext = batchContextFrom(reserved.batch);
+    acquiringRunData.persistRunResumeBatchContext({
+      userDataDir,
+      mainDb,
+      prepared: legacyPlan,
+      batchContext
+    });
+    archiveRepository.transitionTaskStatus(batchContext.batchId, 'running', {
+      expectedStatuses: ['reserved']
+    });
+
+    const sideDb = new DatabaseSync(seeded.dbPath);
+    const sideRunBefore = runRepo.getRunById(sideDb, seeded.runId);
+    runRepo.updateRunStatus(sideDb, { runId: seeded.runId, status: 'success' });
+    runRepo.updateRunPaths(sideDb, { runId: seeded.runId, diffFilePath, reportFilePath });
+    runRepo.setRunChunkProgress(sideDb, {
+      runId: seeded.runId,
+      lastCompletedChunkIndex: 3,
+      totalChunks: 4,
+      status: 'complete',
+      chunkSize: 5000
+    });
+    sideDb.close();
+
+    const prepared = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey
+    });
+    assert.equal(prepared.mode, 'completed');
+    assert.deepEqual(prepared.recovery.batchContext, batchContext);
+    assert.equal(prepared.runEvidence.ranAt, sideRunBefore.ran_at);
+    acquiringRunData.assertRunResumeFresh({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      prepared
+    });
+
+    let workerCalls = 0;
+    const recover = (context = batchContext) => acquiringRunData.resumeRunCheck({
+      prepared,
+      storageRoot: tmpdir,
+      chunkSize: prepared.progress.chunkSize,
+      batchContext: context,
+      mainDb,
+      dispatchFn: async () => {
+        workerCalls += 1;
+        throw new Error('completed recovery must not dispatch worker');
+      },
+      dispatchCallbacks: {}
+    });
+    const latestBatchNumber = archiveRepository.getLatestIssuedBatch().batchNumber;
+    const archiveService = createArchiveService({
+      repository: archiveRepository,
+      rootDir: path.join(tmpdir, 'archive-center')
+    });
+    assert.equal((await archiveService.initialize()).available, true);
+    const controller = createArchiveCenterController({ database: appDb, service: archiveService });
+    const operationTracker = createArchiveOperationTracker({ sink: controller.sink });
+    const flowResolver = createBusinessFlowResolver({ archiveService });
+    const lifecycle = createTaskLifecycle({
+      businessOperationRegistry: createBusinessOperationRegistry(),
+      archiveService,
+      flowResolver,
+      operationTracker
+    });
+    const policy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');
+    const invocation = {
+      args: [{ monthKey }],
+      prepared: { resumePlan: prepared }
+    };
+    const first = await lifecycle.run({
+      meta: { channel: policy.channel },
+      policy,
+      args: invocation.args,
+      prepared: invocation.prepared,
+      recovery: prepared.recovery,
+      beforeStart: () => acquiringRunData.assertRunResumeFresh({
+        userDataDir,
+        mainDb,
+        mainDbPath: appDb.dbPath,
+        prepared
+      }),
+      execute: (context) => recover(context),
+      resultClassifier: policy.resultClassifier,
+      resultMetadataResolver: policy.resultMetadataResolver,
+      resultFlowIdentities: (result, context) => (
+        policy.resultFlowIdentities(result, context, invocation)
+      )
+    });
+    const firstMirror = mainDb.prepare(`
+      SELECT * FROM acquiring_bill_currency_runs WHERE month_key = ?
+    `).get(monthKey);
+    const second = await recover();
+    const secondMirror = mainDb.prepare(`
+      SELECT * FROM acquiring_bill_currency_runs WHERE month_key = ?
+    `).get(monthKey);
+
+    assert.equal(workerCalls, 0);
+    assert.equal(first.runId, seeded.runId);
+    assert.deepEqual(second, first);
+    assert.equal(first.diffFilePath, diffFilePath);
+    assert.equal(first.reportFilePath, reportFilePath);
+    const completedBatch = archiveRepository.getBatchDetail(batchContext.batchId);
+    assert.equal(completedBatch.taskStatus, 'succeeded');
+    assert.deepEqual(
+      completedBatch.artifacts.map((artifact) => artifact.originalName).sort(),
+      [path.basename(diffFilePath), path.basename(reportFilePath)].sort()
+    );
+    assert.ok(completedBatch.artifacts.every((artifact) => artifact.status === 'ready'));
+    assert.notEqual(firstMirror.id, staleMirrorId, '恢复应沿正常成功路径替换上一轮 stale mirror');
+    assert.deepEqual(secondMirror, firstMirror, '镜像存在时不得换 row id/ranAt 或重写字段');
+    assert.equal(firstMirror.ran_at, sideRunBefore.ran_at, '替换旧镜像时沿用侧库持久 ran_at');
+    assert.equal(
+      archiveRepository.getLatestIssuedBatch().batchNumber,
+      latestBatchNumber,
+      'completed recovery 不预留新批次/不推进序号'
+    );
+  });
+});
+
+test('acquiring export 从主镜像唯一定位 side/main run 并固定稳定 parent identity', () => {
+  const sideMonth = '2026-07';
+  const sideDiff = path.join(tmpdir, 'side-export.xlsx');
+  fs.writeFileSync(sideDiff, 'side-export');
+  const sideDb = runDataStore.openSideDb(userDataDir, MODULE, sideMonth);
+  const sideRunId = runRepo.insertRun(sideDb, {
+    monthKey: sideMonth,
+    ranAt: '2026-07-31T12:00:00.000Z',
+    totalBillRows: 2,
+    matchedRows: 1,
+    mismatchRows: 1,
+    unmatchedRows: 0,
+    status: 'success'
+  });
+  runRepo.updateRunPaths(sideDb, { runId: sideRunId, diffFilePath: sideDiff, reportFilePath: null });
+  sideDb.close();
+  acquiringRunData.upsertMainRunMirror(mainDb, {
+    monthKey: sideMonth,
+    relPath: runDataStore.sideDbRelPath(MODULE, sideMonth),
+    stats: { totalBillRows: 2, matchedRows: 1, mismatchRows: 1, unmatchedRows: 0 },
+    status: 'success',
+    diffFilePath: sideDiff,
+    reportFilePath: null,
+    ranAt: '2026-07-31T12:01:00.000Z'
+  });
+  const sidePlan = acquiringRunData.prepareRunExport({ userDataDir, mainDb, monthKey: sideMonth });
+  assert.equal(sidePlan.source, 'side');
+  assert.equal(sidePlan.runId, sideRunId);
+  assert.equal(sidePlan.flowIdentity.value, `acquiring-run:side:${sideMonth}:${sideRunId}`);
+  acquiringRunData.assertRunExportFresh({ userDataDir, mainDb, prepared: sidePlan });
+
+  const mainMonth = '2025-12';
+  const mainDiff = path.join(tmpdir, 'main-export.xlsx');
+  fs.writeFileSync(mainDiff, 'main-export');
+  const mainRunId = runRepo.insertRun(mainDb, {
+    monthKey: mainMonth,
+    ranAt: '2025-12-31T12:00:00.000Z',
+    totalBillRows: 3,
+    matchedRows: 3,
+    mismatchRows: 0,
+    unmatchedRows: 0,
+    status: 'success'
+  });
+  runRepo.updateRunPaths(mainDb, { runId: mainRunId, diffFilePath: mainDiff, reportFilePath: null });
+  const mainPlan = acquiringRunData.prepareRunExport({ userDataDir, mainDb, monthKey: mainMonth });
+  assert.equal(mainPlan.source, 'main');
+  assert.equal(mainPlan.runId, mainRunId);
+  assert.equal(mainPlan.flowIdentity.value, `acquiring-run:main:${mainMonth}:${mainRunId}`);
 });
 
 test.describe('孤儿双向兜底（reconcileOrphans，spec §B.6）', () => {

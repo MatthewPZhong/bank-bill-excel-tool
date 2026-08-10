@@ -567,7 +567,15 @@ test('流式来源配置收窄时未启用来源明确失败且不得自动回�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  const result = await service.prepareSourceImport([outboundPath, paymentPath]);
+  const prepared = await service.prepareSourceImportForLifecycle([
+    outboundPath,
+    paymentPath
+  ]);
+  assert.equal(prepared.requiresExecution, true);
+  const result = await service.executePreparedSourceImport(
+    prepared.plan,
+    WORKER_BATCH_CONTEXT
+  );
   assert.equal(result.successCount, 1);
   assert.equal(result.failedCount, 1);
   assert.deepEqual(

@@ -246,3 +246,52 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - Risk-sensitive：`cloneRowsWithMetadata` 与 `normalizeInputFilePaths` 的实现未改，分别以原语义用于 prepared 行克隆和 `dedupe:false` 输入路径归一；`splitTemplateName` 命中的是 balance-seed helper 调用，不是 own-account 一次性迁移实现，`MIGRATION_FLAG_KEY` 与迁移流程未改。没有金额、币种、匹配、行过滤或输出列契约变化。
 - Minor：`getStatementSessionEntries`、`loadEnumValues`、`getSetting` 为 helper 调用重排；`setSetting` 的真实顺序变化只涉及 Position 恢复在 archive durable 后清 checkpoint/bootstrap/current pending，再释放当前 operation 未提交输入，已有 ownership fail-closed 与 lifecycle 测试覆盖。
 - 验证：完整 `npm run release-check` exit 0；unit 4908/4908；48 个 integration 脚本 2459/2459；smoke、lint PASS。仍待人工验证真实 Excel/WPS 账单结果、Position GUI 危险确认，以及 Acquiring Electron 崩溃/重启/取消。
+
+## PR #133 九条 P1 评论 Implementation Notes（实施前）
+
+### Restack Evidence
+
+- PR2 已安全 restack 到 PR1 `4933b7b4a8be73313cffce15c7f84fd021811eaa`，merge-base 精确相同。
+- commit mapping：`be5cfba → 80d6567`，`1687cfa → 8f609a9`；Windows unit runner 的 repo-relative args/cwd 修复保留。
+- 冲突逐项合并了 PR1 tombstone、deleted Position staging、artifact evidence 与 PR2 lifecycle/controller/main/docs；未使用 whole-file ours/theirs。
+- restack 后聚焦 7 个文件、109/109 PASS；`node --check` 与 conflict diff check PASS。tracked clean 时仅存在用户原有 untracked。
+- review `#4897404953` 共 9 个 thread，重读结果全部 `unresolved=true`、`isOutdated=false`。
+
+### Decisions
+
+| ID | 决定 | 代码证据 | 放弃方案/约束 |
+| --- | --- | --- | --- |
+| P1-1 | 用现有 archive outbox 保存原 batch terminal outcome；terminal-only 写入只规范化完整 7-field context，不读取 archive/settings DB；同 operation files/terminal 原子合并，flush 在文件 durable 后精确 CAS | 非 benign terminal failure 时 archive DB 可仍不可读；filesystem outbox 与 `targetBatchId` 可独立跨重启重放 | 不增表、不建第二 tracker、不新建 batch、不加 timer/无限 retry |
+| P1-2 | fresh acquiring run 的 DB/month admission 与现有月锁移到 object `prepare`，用幂等 release 同时接 `onAbandon` 与 execute `finally` | resume handler 已验证同一模式；fresh handler 当前只在 execute 取锁 | 不改 worker pool、runCheck 算法或 cancel protocol |
+| P1-3 | export 只从 prepared 主镜像和精确 side/main run evidence 构造既有 acquiring flow identity；side 必须唯一且逐字段吻合，result identity 复用同一证据 | side fresh run 每次先 `clearRunsByMonth`；主镜像持有 side path/summary/status/output paths；当前裸 mirror ID 与 side run ID 不同 | 不用 latest side run 猜测，不把 export 建成新 parent |
+| P1-4 | Position recovery terminal conflict 只有 actual 与 wanted 相等才幂等接受 | 当前 boolean `existingTerminal` 接受三种任意终态，finalizer 随后会清 pending | 不改 repository CAS；不一致时保留原 pending/checkpoint |
+| P1-5 | mutating START 强制 7-field context；普通来源 START 保持预检无 context，但进入写入的 APPLY_GRANTED 强制 context | worker command 集合明确区分 BANK_PREPARE、schema-only 和五个写命令；source apply 已有 grant 屏障 | 不改变 protocol version；read-only/preflight/schema-only 不强塞 context |
+| P1-6 | scenario context store 增加 read-before source evidence，create 在 parse 后立即对同一 evidence 重校验 | 当前 `create()` 首次 stat 已在 read/parse 之后 | 不做 hash/临时副本；沿用 stat freshness 与 apply/beforeStart 二次检查 |
+| P1-7 | assignment rowIndex 必须是 server expected index 的 exact unique set，再沿用账号/币种校验与排序 | 当前只比较 length，重复 index 会在后续 Map 折叠 | 只拒绝真实 `[0,0]`/`[0,1]` 反例，不改变正常乱序 |
+| P1-8 | statement 用 picker paths guard 固定 duplicate/hash 决策输入，每次 confirm 返回先复核，resolver 返回后再复核整个窗口；随后另以最终 filePaths 建 source guard | 只在 modal 返回检查会漏掉无 duplicate modal 的 hash 期间变化；单一 guard 又会让已移除输入继续影响 execute | 不改 session/replace 算法，不引入 lease/retry |
+| P1-9 | resume 识别有持久 context/输出证据的 side complete run；0 worker 对 stale main mirror 复用 canonical upsert，exact current mirror no-op，返回原输出供 tracker/TaskLifecycle 收口 | progress context 与 run/output 已在 side DB 持久；崩溃时 main 可合法保留上一轮 mirror | legacy complete/context 缺失、输出路径/文件缺失均 fail-closed；不扫描 latest、不分新号、不建启动恢复器 |
+
+### Assumptions / Non-goals
+
+- outbox 是 P1-1 唯一新增持久意图载体；若 artifact retry 与 terminal retry 同时存在，必须落同一 operation record，不能让后写覆盖前写。
+- P1-9 的 `complete` 只代表 SQL chunk 完成，不单独证明 writer 完成；必须同时验证 run 成功状态、持久 output paths 和实际文件，才可返回成功恢复结果。
+- P1-5 account-only/preflight-only grant 不写 DB，保持无 context；只有 `preflightOnly !== true` 的 APPLY_GRANTED 是写入边界。
+- PR3 VCC/toolbox、目录物化、存储迁移、UI redesign 以及真实 Electron 自动 crash harness 均不进入本轮。
+
+### Remaining Unknowns
+
+无实现 BLOCK。P1-1 选择现有 outbox 合并 terminal outcome，P1-9 选择现有 resume/lifecycle；若实现证据迫使新增 schema、second tracker 或 latest fallback，必须停止并重新评审，不能静默扩大状态模型。
+
+### Implementation Evidence（2026-08-11）
+
+- P1-1：terminal-only 写入先用完整 7-field context 规范/校验 identity，再把 operationKey、targetBatchId 与 terminal outcome 原子合并进同一 files outbox record；repository/settings DB 均不可读时仍只靠 filesystem durable。Position route 的 operationToken 只从明示 afterTerminal 写入 record metadata，generic terminal 不猜 route。flush 顺序固定为 artifact→CAS→finalizer→remove；terminal 与 intent 双失败时以 `ARCHIVE_TASK_TERMINAL_INTENT_FAILED` fail-closed。
+- P1-2/P1-3：fresh acquiring run 的 admission/月锁已移到 object prepare，abandon/finally 共享幂等 release；export 只以 prepared side/main evidence 构造 `acquiring-run:${source}:${monthKey}:${runId}`，证据不唯一或不吻合时在 copy/reserve 前拒绝。
+- P1-4/P1-5：Position recovered terminal 只接受 actual/wanted 相同的幂等冲突；worker 恰好对 BANK_APPLY、ACCOUNT_APPLY、DELETE_BANK、DELETE_SOURCE、REBUILD_FUND_TRANSFER_MAPPING 五个 START 强制 context，普通来源仅在 mutating APPLY_GRANTED 强制，schema/read/preflight-only 不扩大。
+- P1-6/P1-8：scenario 在读取前 capture stat、context create 内读后复核并保留 beforeStart；statement selection guard 覆盖 picker paths，在每次 duplicate confirm 和 resolver 返回后复核，最终 source guard 只覆盖 selectionResult.filePaths/preview/beforeStart。
+- P1-7：assignments 必须形成与服务端 expected rows 相同的唯一 index 集；`[0,0]` 对 `[0,1]` 在生成/Map 前以 `BIG_ACCOUNT_SELECTION_INVALID` 拒绝，正常乱序仍排序。
+- P1-9：side complete 只有持久 7-field context、success run 与两份现存 output evidence 完整时可恢复；0 worker 沿 canonical upsert 替换上一轮 stale main mirror，exact current mirror no-op。真实 TaskLifecycle 把两份输出登记到原 batch 并终结 succeeded，batch 序号不增；legacy complete 缺 context 保持 fail-closed。
+- Restack 接线复核：PR1 新增的 deleted Position recovery lookup 曾引用已被 PR2 scope registry 收敛移除的 `positionArchiveModule`；现从该 pending channel 的 exact task policy 读取 `scopeId`，未知 channel 继续 fail-closed，不恢复旧 helper 或复制 scope 映射。
+- 聚焦证据：Phase A lifecycle/controller/outbox 52/52 PASS；Acquiring run-data 18/18 PASS；Phase B worker/Position/scenario/statement 151/151 PASS；大账号/statement 11/11 PASS；最终 12 个实际改动测试文件合跑 273/273 PASS。完整自动门禁见下项；真实 GUI/Electron crash 验收仍按 test-spec 人工门禁待执行。
+- Final review follow-up：controller/acquiring/statement 三文件 49/49 PASS；outbox/lifecycle/policy/run-worker 相关四文件 66/66 PASS；相关 `node --check`、`npm run lint`、`git diff --check` PASS。未新增 timer/retry/批次扫描或测试框架。
+- Final gate `check-vars -- --include-minor`：exit 2 仅命中 Critical `FileValidationError`、`unmatchedRows`。前者只用于新增 assignment exact-set 拒绝，沿用既有 `code/message/detailLines/context` schema 与 catch/writer；后者只用于 Acquiring completed-run summary evidence/canonical main mirror，未改 scenario-dispatcher/reconIdFix 两条同名流水线、`modifiedRows + unmatchedRows = bankRows` 守恒、writer 去内部字段或 runCheck SQL/币种金额算法。按清单必跑 smoke 纳入完整 release-check；真实 Excel/WPS 资金输出仍保留人工门禁。
+- Final release-check：首轮 lint/smoke PASS，unit 4921/4922；唯一失败是 `archive-center-ui-contract` 仍按已替换的旧 Position finalizer 函数名截取源码，判定为陈旧静态测试并只对齐 `finalizePositionTerminalIntent`，未改生产。修正后单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4922/4922（314 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions PASS（304260ms）。runner 全绿后自动刷新 `rules/integration-test-policy.md` §七的 timestamp/timings，脚本与断言数未变，按生成证据约定保留。

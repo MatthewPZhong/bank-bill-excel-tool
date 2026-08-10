@@ -16,13 +16,20 @@ class ScenarioImportContextStore {
     this.contexts = new Map();
   }
 
-  create({ bundle, filePath, missingChannels = [] } = {}) {
+  captureSource(filePath) {
+    const resolvedPath = path.resolve(String(filePath || ''));
+    const sourceSnapshot = sourceSnapshotFromStat(this.statSync(resolvedPath));
+    if (!sourceSnapshot) throw new Error('场景模板源文件不可读');
+    return { filePath: resolvedPath, sourceSnapshot };
+  }
+
+  create({ bundle, filePath, sourceSnapshot, missingChannels = [] } = {}) {
     if (!bundle || !Array.isArray(bundle.channels)) {
       throw new TypeError('场景导入 prepared context 缺少 bundle');
     }
     const resolvedPath = path.resolve(String(filePath || ''));
-    const sourceSnapshot = sourceSnapshotFromStat(this.statSync(resolvedPath));
     if (!sourceSnapshot) throw new Error('场景模板源文件不可读');
+    this.assertUnchanged({ filePath: resolvedPath, sourceSnapshot });
     const id = String(this.createId()).trim();
     if (!id) throw new Error('场景导入 prepared context ID 为空');
     // 单窗口只保留当前一次 preview，避免取消弹窗后无限积累旧 bundle。

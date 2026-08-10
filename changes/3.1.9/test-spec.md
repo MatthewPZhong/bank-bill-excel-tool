@@ -206,3 +206,44 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - 提交前变量检查：`npm run check:vars -- --include-minor` exit 2（命中需 review）；Critical 5、Important-skeleton 8、Runtime-state 9、Risk-sensitive 3、Minor 4 已逐项对照 `rules/important-variables.md`。资金算法、金额/币种、行过滤、输出列、模板保留 ID/前缀、错误 schema 和一次性迁移未改；真实变化为 TaskLifecycle、opaque context、worker batch context、freshness 和精确恢复接线。
 - Windows CI runner follow-up：run `31360364725` 的 smoke 已 PASS，unit 在启动测试前因 314 个绝对路径参数触发 `spawn ENAMETOOLONG`；runner 现只把同一文件列表按原顺序转为仓库相对参数，并以仓库根为 child cwd，仍只执行一次 `node --test`。直接测试 11/11 PASS；独立完整 `npm run release-check` exit 0：lint/smoke PASS、unit 4909/4909、48 个 integration 脚本 2459/2459（总耗时 399674ms）；语法和 diff check PASS。
 - 未完成人工验收：真实 Excel/WPS bill-split 币种/合并结果、Position account-only/mixed/替换 pending GUI 路径、worker 退出/取消抽查，以及 Acquiring side/legacy 的真实 Electron 崩溃重启、offset/main mirror/序号核对。自动门禁通过不替代这些人工项目。
+
+## 10. PR #133 九条 P1 评论计划矩阵
+
+以下是 review 修复的最小计划与执行矩阵；当前自动证据见 §10.3。每项对应真实入口或明确持久状态，不排列不可达组合。
+
+| ID | 优先级 | 真实场景 | 最小关键断言 |
+| --- | --- | --- | --- |
+| R14 | P1 | terminal CAS 首次非 benign DB write failure | repository.getBatch/settings getSetting 同时不可用时，业务只执行一次且 terminal-only intent 仍写入 filesystem outbox；重启 flush 不建新 batch，原 batch 达到目标终态、outbox 移除 |
+| R15 | P1 | fresh acquiring invalid admission / 月锁争用 | 两个代表场景均在 BOR/reserve/worker 前返回，issuance/cursor 不增；正常执行的锁由 execute finally 释放，abandon 路径释放一次 |
+| R16 | P1 | acquiring run → export → 重启 → 重复 export | side 与 legacy main 各以 prepared exact evidence 取得同一 run identity/parent；重复 export 不产生 flow-bind conflict；side 证据不唯一或不匹配时 0 copy/0 reserve |
+| R17 | P1 | Position recovered terminal conflict | wanted/actual 相同幂等成功；选一个不相同代表直接 fail-closed，checkpoint/pending 均保留且不清 staging |
+| R18 | P1 | Position worker 写命令缺 batchContext | 表驱动覆盖 BANK_APPLY、ACCOUNT_APPLY、DELETE_BANK、DELETE_SOURCE、REBUILD_FUND_TRANSFER_MAPPING，均在打开/修改 side DB 前 fatal；普通来源缺 context 的 mutating APPLY_GRANTED 零提交；BANK_PREPARE/schema-only/preflight-only 既有豁免保持 |
+| R19 | P1 | scenario bundle 在 read/parse 窗口替换 | read 前 evidence 属于 A，parse 后文件变为 B 时 context create 拒绝；未替换时 apply 仍归档/应用同一路径证据 |
+| R20 | P1 | 大账号 assignments `[0,0]` 对服务端 expected `[0,1]` | 返回 `BIG_ACCOUNT_SELECTION_INVALID`，不进入生成/Map；既有乱序 `[1,0]` 仍排序为 `[0,1]` |
+| R21 | P1 | statement duplicate/hash 选择窗口替换选中文件 | picker paths guard 每次确认返回先 recheck、再处理 response/replacePaths；resolver 返回后再 recheck 以覆盖无 modal 的 hash 窗口；final paths guard 供 preview/beforeStart，已移除输入不再影响 execute |
+| R22 | P1 | acquiring side worker 成功、main mirror 前崩溃后 resume | 预置上一轮 stale main mirror；真实 side complete context/outputs 恢复 0 worker、0 新 issuance，以 canonical upsert 替换 stale mirror，原输出登记到原 batch并终结 succeeded；第二次 exact no-op |
+
+### 10.1 聚焦与综合门禁
+
+- Phase A：archive lifecycle/controller/repository、task policy/flow resolver、acquiring run-data/worker-pool 与 main handler contract。
+- Phase B：Position operation lifecycle/worker child boundary、scenario context store、statement preview/duplicate selection。
+- Phase C：大账号/statement generation pipeline、Acquiring side-DB parity、Position side-DB parity，以及完整 unit/integration/smoke/lint。
+- 静态门禁：所有涉及生产/测试文件 `node --check`、`git diff --check`、ESLint；生产 worker 继续无 reserve API，runCheck SQL/offset/checkpoint/事务与 Position checkpoint 不变。
+
+### 10.2 人工门禁（自动测试不替代）
+
+- ⚠️ 资金红线：用两个 statement block 的真实 Excel/WPS 文件确认 `[0,0]` 被拒后没有生成错误 MerchantId/Currency 输出，正常 `[0,1]` 输出行数、金额与币种不变。
+- Acquiring Electron：在 worker 成功写出两份文件后、main mirror/archive terminal 前强制退出；重启后从原 run 恢复，核对原批次号、parent、输出 SHA/行数与 main mirror，不出现第二 run/batch。
+- Position GUI：恢复目标终态与现有终态冲突时保留 pending 和可见失败；正确同终态重放后才清 pending/checkpoint bootstrap。
+
+### 10.3 当前自动证据（2026-08-11）
+
+- R14：TaskLifecycle/controller/outbox 聚焦覆盖同 operation files+terminal merge、DB read failure 下 terminal-only filesystem persistence、Position route token、同/异终态 replay，以及 artifact→CAS→finalizer→remove 顺序。
+- R15/R16/R22：completed side 组合用例使用真实 repository/service/controller/tracker/lifecycle，断言 0 worker、stale mirror 被 canonical upsert 替换、第二次 exact no-op、原 batch succeeded、两份 output artifacts ready、issuance 不增。
+- R17-R19/R21：Position worker/operation/service、scenario context、statement selection 聚焦 151/151 PASS；首轮唯一失败为绕过 lifecycle 的陈旧 service 夹具，改走真实 prepare/execute + batchContext 后全绿，未放宽生产约束。
+- R20：statement big-account 11/11 PASS，唯一重复 index 反例与正常乱序共用同一行为测试。
+- Final review follow-up：R14/R21/R22 直接三文件 49/49 PASS，相关 outbox/lifecycle/policy/run-worker 四文件 66/66 PASS；`node --check`、lint、diff check 全绿。
+- Final gate check-vars：exit 2，仅 Critical `FileValidationError` / `unmatchedRows`；自动证据锁定 assignment 错误 code、Acquiring summary/mirror/原 batch，完整 release-check 的 smoke 用于清单必跑，真实 statement 资金输出仍按 §10.2 人工复核。
+- 最终 12 个实际改动测试文件合跑 273/273 PASS。完整门禁首轮 lint/smoke PASS、unit 4921/4922；唯一失败是静态契约仍按旧 Position finalizer 函数名截取源码，最小对齐现行 `finalizePositionTerminalIntent` 后未改变生产行为。
+- 修正后单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4922/4922（314 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions PASS（304260ms）。runner 自动刷新 `rules/integration-test-policy.md` §七 timestamp/timings，脚本与断言数未变，按全绿生成证据保留。
+- 相关生产文件 `node --check`、`git diff --check` PASS。§10.2 人工门禁仍待执行，不以自动证据替代。

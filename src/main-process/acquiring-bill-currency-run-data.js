@@ -183,7 +183,124 @@ function resumeError(message, code = 'ACQUIRING_RUN_RESUME_INVALID') {
   return error;
 }
 
-function readResumeTarget(db, { monthKey, runId }) {
+function runFileEvidence(filePath) {
+  const normalized = String(filePath || '').trim();
+  if (!normalized) return null;
+  let stat;
+  try {
+    stat = fs.statSync(normalized);
+  } catch (_error) {
+    throw resumeError(`run 输出文件不存在：${normalized}`);
+  }
+  if (!stat.isFile()) throw resumeError(`run 输出路径不是文件：${normalized}`);
+  return {
+    filePath: normalized,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs
+  };
+}
+
+function runEvidence(run) {
+  return {
+    id: Number(run.id),
+    monthKey: String(run.month_key || ''),
+    ranAt: String(run.ran_at || ''),
+    totalBillRows: Number(run.total_bill_rows),
+    matchedRows: Number(run.matched_rows),
+    mismatchRows: Number(run.mismatch_rows),
+    unmatchedRows: Number(run.unmatched_rows),
+    status: String(run.status || ''),
+    diffFile: runFileEvidence(run.diff_file_path),
+    reportFile: runFileEvidence(run.report_file_path)
+  };
+}
+
+function sameRunResult(left, right) {
+  return Boolean(
+    left
+    && right
+    && left.month_key === right.month_key
+    && Number(left.total_bill_rows) === Number(right.total_bill_rows)
+    && Number(left.matched_rows) === Number(right.matched_rows)
+    && Number(left.mismatch_rows) === Number(right.mismatch_rows)
+    && Number(left.unmatched_rows) === Number(right.unmatched_rows)
+    && String(left.status || '') === String(right.status || '')
+    && String(left.diff_file_path || '') === String(right.diff_file_path || '')
+    && String(left.report_file_path || '') === String(right.report_file_path || '')
+  );
+}
+
+function prepareRunExport({ userDataDir, mainDb, monthKey }) {
+  if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+    throw resumeError('monthKey 格式错误（应为 YYYY-MM）');
+  }
+  const mirror = runRepo.getLatestRun(mainDb, monthKey);
+  if (!mirror) throw resumeError(`月份 ${monthKey} 暂无 run 记录，请先点「开始运行」`);
+
+  let source = 'main';
+  let run = mirror;
+  let dbPath = '';
+  if (mirror.side_db_rel_path) {
+    const expectedRelPath = runDataStore.sideDbRelPath(MODULE, monthKey);
+    if (mirror.side_db_rel_path !== expectedRelPath) {
+      throw resumeError(`月份 ${monthKey} 的侧库镜像路径与选择结果不一致`);
+    }
+    dbPath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
+    if (!fs.existsSync(dbPath)) throw resumeError(`月份 ${monthKey} 的侧库文件不存在`);
+    const sideDb = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      const candidates = sideDb.prepare(`
+        SELECT * FROM ${RUNS_TABLE} WHERE month_key = ?
+      `).all(monthKey).filter((candidate) => sameRunResult(candidate, mirror));
+      if (candidates.length !== 1) {
+        throw resumeError(`月份 ${monthKey} 的主库镜像无法唯一对应侧库 run`);
+      }
+      [run] = candidates;
+      source = 'side';
+    } finally {
+      try { sideDb.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+  const diffFile = runFileEvidence(run.diff_file_path);
+  if (!diffFile) throw resumeError(`月份 ${monthKey} 的差异表文件不存在，请重新「开始运行」`);
+  const runId = Number(run.id);
+  const flowIdentity = {
+    type: 'business-run-id',
+    value: `acquiring-run:${source}:${monthKey}:${runId}`
+  };
+  return {
+    source,
+    dbPath,
+    monthKey,
+    runId,
+    mirrorId: Number(mirror.id),
+    diffFilePath: diffFile.filePath,
+    evidence: JSON.stringify({
+      source,
+      monthKey,
+      runId,
+      mirrorId: Number(mirror.id),
+      mirror: runEvidence({ ...mirror, report_file_path: null }),
+      sourceRun: runEvidence({ ...run, report_file_path: null })
+    }),
+    flowIdentity,
+    flowPlan: { startsNewFlow: false, flowIdentity }
+  };
+}
+
+function assertRunExportFresh({ userDataDir, mainDb, prepared }) {
+  const current = prepareRunExport({
+    userDataDir,
+    mainDb,
+    monthKey: prepared.monthKey
+  });
+  if (current.evidence !== prepared.evidence
+      || JSON.stringify(current.flowIdentity) !== JSON.stringify(prepared.flowIdentity)) {
+    throw resumeError('收单差异运行结果在导出确认期间已变化，请重新导出');
+  }
+}
+
+function readResumeTarget(db, { monthKey, runId, allowCompleted = false }) {
   let run = null;
   let progress = null;
   if (runId !== undefined && runId !== null && runId !== '') {
@@ -202,11 +319,33 @@ function readResumeTarget(db, { monthKey, runId }) {
       run = candidates[0];
       progress = candidates[0].chunk_progress;
     }
+    if (!run && allowCompleted) {
+      const completed = db.prepare(`
+        SELECT * FROM ${RUNS_TABLE}
+        WHERE month_key = ? AND chunk_progress IS NOT NULL
+      `).all(monthKey).filter((candidate) => {
+        const candidateProgress = runRepo.getRunChunkProgress(db, Number(candidate.id));
+        if (!candidateProgress || candidateProgress.status !== 'complete') return false;
+        try {
+          return Boolean(runRepo.readRunProgressBatchContext(candidateProgress));
+        } catch (_error) {
+          return false;
+        }
+      });
+      if (completed.length > 1) {
+        throw resumeError(`月份 ${monthKey} 存在多个已完成恢复候选，无法确定原任务`);
+      }
+      if (completed.length === 1) {
+        [run] = completed;
+        progress = runRepo.getRunChunkProgress(db, Number(run.id));
+      }
+    }
   }
   if (!run || !progress) {
     throw resumeError(`月份 ${monthKey} 暂无可恢复 run`);
   }
-  if (!['partial', 'in-progress'].includes(progress.status)) {
+  if (!['partial', 'in-progress'].includes(progress.status)
+      && !(allowCompleted && progress.status === 'complete')) {
     throw resumeError(`run ${run.id} 状态为 ${progress.status}，无需 resume`);
   }
   return { run, progress };
@@ -227,8 +366,20 @@ function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) 
   }
   const source = openResumeSource({ userDataDir, mainDb, mainDbPath, monthKey });
   try {
-    const target = readResumeTarget(source.db, { monthKey, runId });
+    const target = readResumeTarget(source.db, {
+      monthKey,
+      runId,
+      allowCompleted: source.source === 'side'
+    });
     const batchContext = runRepo.readRunProgressBatchContext(target.progress);
+    const completed = target.progress.status === 'complete';
+    if (completed && (!batchContext || target.run.status !== 'success')) {
+      throw resumeError(`run ${target.run.id} 已完成但缺少可恢复的原批次证据`);
+    }
+    const completedRunEvidence = completed ? runEvidence(target.run) : null;
+    if (completed && (!completedRunEvidence.diffFile || !completedRunEvidence.reportFile)) {
+      throw resumeError(`run ${target.run.id} 已完成但输出文件证据不完整`);
+    }
     // 侧库是在 v3.0.5 引入，早于 v3.1.9 batchContext。升级前已存在的 partial/in-progress
     // side run 因此可以合法缺少上下文；与主库 legacy run 一样，首次 resume 用稳定 identity
     // 预留/复用一个兼容批次，并在 worker 开始前回填到原 run。
@@ -251,6 +402,8 @@ function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) 
       runId: Number(target.run.id),
       progress: { ...target.progress },
       progressEvidence: JSON.stringify(target.progress),
+      mode: completed ? 'completed' : 'resume',
+      ...(completed ? { runEvidence: completedRunEvidence } : {}),
       recovery,
       taskRunId: batchContext
         ? batchContext.taskRunId
@@ -288,7 +441,8 @@ function assertRunResumeFresh({ userDataDir, mainDb, mainDbPath, prepared }) {
     }
     const target = readResumeTarget(source.db, {
       monthKey: prepared.monthKey,
-      runId: prepared.runId
+      runId: prepared.runId,
+      allowCompleted: prepared.mode === 'completed'
     });
     if (JSON.stringify(target.progress) !== prepared.progressEvidence) {
       throw resumeError(`run ${prepared.runId} 的恢复进度在任务开始前已变化`);
@@ -297,6 +451,10 @@ function assertRunResumeFresh({ userDataDir, mainDb, mainDbPath, prepared }) {
     const expectedContext = prepared.recovery.batchContext || null;
     if (JSON.stringify(currentContext) !== JSON.stringify(expectedContext)) {
       throw resumeError(`run ${prepared.runId} 的批次上下文在任务开始前已变化`);
+    }
+    if (prepared.mode === 'completed'
+        && JSON.stringify(runEvidence(target.run)) !== JSON.stringify(prepared.runEvidence)) {
+      throw resumeError(`run ${prepared.runId} 的已完成结果在任务开始前已变化`);
     }
   } finally {
     if (source.close) {
@@ -354,6 +512,18 @@ async function resumeRunCheck({
   dispatchCallbacks,
   mainDb
 }) {
+  if (prepared.mode === 'completed') {
+    ensureCompletedMainRunMirror(mainDb, prepared);
+    return {
+      runId: prepared.runId,
+      totalBillRows: prepared.runEvidence.totalBillRows,
+      matchedRows: prepared.runEvidence.matchedRows,
+      mismatchRows: prepared.runEvidence.mismatchRows,
+      unmatchedRows: prepared.runEvidence.unmatchedRows,
+      diffFilePath: prepared.runEvidence.diffFile && prepared.runEvidence.diffFile.filePath,
+      reportFilePath: prepared.runEvidence.reportFile && prepared.runEvidence.reportFile.filePath
+    };
+  }
   const result = await dispatchFn({
     __dbPath: prepared.dbPath,
     monthKey: prepared.monthKey,
@@ -383,6 +553,55 @@ async function resumeRunCheck({
     });
   }
   return result;
+}
+
+function mainMirrorMatchesCompletedRun(row, prepared) {
+  const evidence = prepared.runEvidence;
+  return Boolean(
+    row
+    && row.month_key === prepared.monthKey
+    && row.side_db_rel_path === runDataStore.sideDbRelPath(MODULE, prepared.monthKey)
+    && Number(row.total_bill_rows) === evidence.totalBillRows
+    && Number(row.matched_rows) === evidence.matchedRows
+    && Number(row.mismatch_rows) === evidence.mismatchRows
+    && Number(row.unmatched_rows) === evidence.unmatchedRows
+    && String(row.status || '') === evidence.status
+    && String(row.diff_file_path || '') === String(evidence.diffFile && evidence.diffFile.filePath || '')
+    && String(row.report_file_path || '') === String(evidence.reportFile && evidence.reportFile.filePath || '')
+  );
+}
+
+function ensureCompletedMainRunMirror(mainDb, prepared) {
+  if (!prepared || prepared.source !== 'side' || prepared.mode !== 'completed'
+      || !prepared.runEvidence) {
+    throw resumeError('已完成 run 的主库镜像恢复证据不完整');
+  }
+  const existing = mainDb.prepare(`
+    SELECT * FROM ${RUNS_TABLE} WHERE month_key = ?
+  `).all(prepared.monthKey);
+  if (existing.length === 1 && mainMirrorMatchesCompletedRun(existing[0], prepared)) {
+    return { created: false, runId: Number(existing[0].id) };
+  }
+  upsertMainRunMirror(mainDb, {
+    monthKey: prepared.monthKey,
+    relPath: runDataStore.sideDbRelPath(MODULE, prepared.monthKey),
+    stats: {
+      totalBillRows: prepared.runEvidence.totalBillRows,
+      matchedRows: prepared.runEvidence.matchedRows,
+      mismatchRows: prepared.runEvidence.mismatchRows,
+      unmatchedRows: prepared.runEvidence.unmatchedRows
+    },
+    status: prepared.runEvidence.status,
+    diffFilePath: prepared.runEvidence.diffFile && prepared.runEvidence.diffFile.filePath,
+    reportFilePath: prepared.runEvidence.reportFile && prepared.runEvidence.reportFile.filePath,
+    ranAt: prepared.runEvidence.ranAt
+  });
+  return {
+    created: true,
+    runId: Number(mainDb.prepare(`
+      SELECT id FROM ${RUNS_TABLE} WHERE month_key = ?
+    `).get(prepared.monthKey).id)
+  };
 }
 
 // ── 双源读路径（B-D2）──
@@ -560,6 +779,8 @@ module.exports = {
   peekImportTarget,
   runCheckViaSideDb,
   prepareRunResume,
+  prepareRunExport,
+  assertRunExportFresh,
   assertRunResumeFresh,
   persistRunResumeBatchContext,
   resumeRunCheck,

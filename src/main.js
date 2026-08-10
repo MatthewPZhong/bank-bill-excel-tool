@@ -133,6 +133,7 @@ const {
   positionTerminalOutcomeForResult,
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult,
+  positionRecoveryTerminalOutcome,
   runPositionOperationLifecycle,
   settlePositionRecoveredTask,
   settlePositionArchiveResult
@@ -1338,6 +1339,19 @@ function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
       `请选择有效的大账号 / 币种（需要 ${expectedRows.length} 个，当前 ${assignments.length} 个）`
     );
     throw error;
+  }
+  const expectedRowIndexes = new Set(expectedRows.map((row, index) => (
+    Number.isInteger(row.index) ? row.index : index
+  )));
+  const assignmentRowIndexes = new Set(assignments.map((assignment) => assignment.rowIndex));
+  if (
+    assignmentRowIndexes.size !== expectedRowIndexes.size
+    || [...assignmentRowIndexes].some((rowIndex) => !expectedRowIndexes.has(rowIndex))
+  ) {
+    throw new FileValidationError(
+      'BIG_ACCOUNT_SELECTION_INVALID',
+      '请选择有效的大账号 / 币种'
+    );
   }
   const normalizedAssignments = assignments.map((assignment) => {
     const matchedAccount = groupedBigAccounts.find(
@@ -4061,7 +4075,8 @@ function initializeArchiveCenter() {
     service,
     outboxStore: archiveOutbox,
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
-    onOutboxRecordFlushed: finalizePositionOutboxRecord,
+    resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
+    onTerminalIntentFlushed: finalizePositionTerminalIntent,
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
@@ -4081,6 +4096,7 @@ function initializeArchiveCenter() {
     archiveService: service,
     flowResolver,
     operationTracker: archiveOperationTracker,
+    persistTerminalIntent: (payload) => archiveCenterService.persistTaskTerminalIntent(payload),
     onArchiveWarning: reportArchiveFailure
   });
   archiveCenterService.initialize().catch((error) => {
@@ -4557,6 +4573,12 @@ function registerAppHandlers() {
         return { status: 'cancelled' };
       }
       const filePath = choice.filePaths[0];
+      let sourceEvidence;
+      try {
+        sourceEvidence = scenarioImportContextStore.captureSource(filePath);
+      } catch (e) {
+        return { status: 'failed', message: `读取文件失败：${e && e.message ? e.message : e}` };
+      }
 
       let jsonText;
       try {
@@ -4593,7 +4615,6 @@ function registerAppHandlers() {
       } catch (e) {
         return { status: 'failed', message: String(e && e.message ? e.message : e) };
       }
-
       // 扫描缺失渠道（非 builtin 且库内不存在）— 二阶段确认核心数据
       const allChannels = database.listChannels();
       const channelKeyToRecord = new Map(
@@ -4611,6 +4632,7 @@ function registerAppHandlers() {
       const preparedContextId = scenarioImportContextStore.create({
         bundle,
         filePath,
+        sourceSnapshot: sourceEvidence.sourceSnapshot,
         missingChannels
       });
       // picker/解析只是 preview；bundle 留在主进程，renderer 只拿一次性 context ID。
@@ -9135,7 +9157,8 @@ function computeFileHash(filePath) {
 async function resolveImportFileSelection({
   templateName,
   session,
-  filePaths
+  filePaths,
+  assertFreshAfterConfirmation = null
 }) {
   const acceptedPaths = [];
   const replacePaths = [];
@@ -9211,6 +9234,9 @@ async function resolveImportFileSelection({
       message: `检测到重复文件（模板：${templateName}）`,
       detail: `${duplicateDetail}\n\n重复原因：${duplicateReason}`
     });
+    if (typeof assertFreshAfterConfirmation === 'function') {
+      assertFreshAfterConfirmation();
+    }
 
     if (result.response === 1) {
       return {
@@ -10543,6 +10569,10 @@ async function prepareStatementImportFiles(templateId, templateName) {
     return { proceed: false, result: { status: 'cancelled' } };
   }
   const inputFilePaths = normalizeInputFilePaths(result.filePaths, { dedupe: false });
+  const assertSelectionFresh = createPreviewSourceFreshnessGuard(
+    inputFilePaths,
+    '网银明细'
+  );
   const sessionKey = String(templateId || '');
   const existingSession = statementImportSessions.get(sessionKey) || null;
   const previewSession = existingSession || {
@@ -10558,8 +10588,10 @@ async function prepareStatementImportFiles(templateId, templateName) {
   const selectionResult = await resolveImportFileSelection({
     templateName,
     session: previewSession,
-    filePaths: inputFilePaths
+    filePaths: inputFilePaths,
+    assertFreshAfterConfirmation: assertSelectionFresh
   });
+  assertSelectionFresh();
   if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
     return { proceed: false, result: { status: 'cancelled' } };
   }
@@ -15183,14 +15215,37 @@ function registerNewAccountHandlers() {
   //   - op lock + notification 现有路径保留
   //   - N1' idle cleanup 协调（worker busy 时 skip）留 Phase 2 T12 改 setupIdleCleanupTimer
   trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', {
-    async execute(event, _prepared, taskContext, payload = {}) {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { monthKey } = payload || {};
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
-    }
-    const lock = tryAcquireOpLock('run', monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message };
+    async prepare(_event, payload = {}) {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      }
+      const { monthKey } = payload || {};
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
+        };
+      }
+      const lock = tryAcquireOpLock('run', monthKey);
+      if (!lock.acquired) {
+        return { proceed: false, result: { status: 'busy', message: lock.message } };
+      }
+      let released = false;
+      const releaseLock = () => {
+        if (released) return;
+        released = true;
+        releaseOpLock();
+      };
+      return {
+        proceed: true,
+        monthKey,
+        userDataDir: path.dirname(database.dbPath),
+        onAbandon: releaseLock,
+        releaseLock
+      };
+    },
+    async execute(event, prepared, taskContext) {
+    const { monthKey } = prepared;
     let result;
     try {
       const storageRoot = ensureStorageRoot();
@@ -15233,7 +15288,7 @@ function registerNewAccountHandlers() {
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
       result = await acquiringRunData.runCheckViaSideDb({
-        userDataDir: path.dirname(database.dbPath),
+        userDataDir: prepared.userDataDir,
         monthKey,
         storageRoot,
         chunkSize,
@@ -15252,7 +15307,6 @@ function registerNewAccountHandlers() {
         },
       });
     } catch (err) {
-      releaseOpLock();
       // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
       //   CancelError class 注释明确：业务语义=用户主动取消；handler 应识别，不弹错误 Notification
       //   错误 source 失败时仍弹 error；cross-process worker → instanceof 不可靠 → 用 err.name
@@ -15263,12 +15317,13 @@ function registerNewAccountHandlers() {
       // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      prepared.releaseLock();
     }
     // v0.12 fix9：release run lock，setImmediate 异步分批清理（不阻塞 handler return）
     // v2.1.8 N1：β 方案 — cleanup 移出对账链路，runCheck 内已 markCleanupPending=1，
     //   不再 setImmediate 立即触发；交 app.before-quit（主清）+ 进入模块时（兜底清）
     //   保留 result.cleanupNeeded 字段（向后兼容；前端不消费此字段）
-    releaseOpLock();
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
@@ -15449,23 +15504,22 @@ function registerNewAccountHandlers() {
       if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
         return { proceed: false, result: { status: 'error', message: 'monthKey 格式错误' } };
       }
-      const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
-      const latestRun = runRepo.getLatestRun(database.db, monthKey);
-      if (!latestRun) {
+      let exportPlan;
+      try {
+        exportPlan = acquiringRunData.prepareRunExport({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db,
+          monthKey
+        });
+      } catch (error) {
         return {
           proceed: false,
-          result: { status: 'error', message: `月份 ${monthKey} 暂无 run 记录，请先点「开始运行」` }
-        };
-      }
-      if (!latestRun.diff_file_path || !fs.existsSync(latestRun.diff_file_path)) {
-        return {
-          proceed: false,
-          result: { status: 'error', message: `月份 ${monthKey} 的差异表文件不存在，请重新「开始运行」` }
+          result: { status: 'error', message: error && error.message ? error.message : String(error) }
         };
       }
       const res = await dialog.showSaveDialog({
         title: '导出差异表另存为',
-        defaultPath: path.basename(latestRun.diff_file_path),
+        defaultPath: path.basename(exportPlan.diffFilePath),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (res.canceled || !res.filePath) {
@@ -15475,30 +15529,31 @@ function registerNewAccountHandlers() {
         proceed: true,
         outputPaths: [res.filePath],
         monthKey,
-        latestRun,
+        exportPlan,
+        flowPlan: exportPlan.flowPlan,
         savePath: res.filePath,
         beforeStart() {
-          const current = runRepo.getLatestRun(database.db, monthKey);
-          if (!current || Number(current.id) !== Number(latestRun.id)
-              || current.diff_file_path !== latestRun.diff_file_path
-              || !fs.existsSync(latestRun.diff_file_path)) {
-            throw new Error('收单差异运行结果在导出确认期间已变化，请重新导出');
-          }
+          acquiringRunData.assertRunExportFresh({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            prepared: exportPlan
+          });
         }
       };
     },
     async execute(_event, prepared) {
-    const { monthKey, latestRun, savePath } = prepared;
+    const { monthKey, exportPlan, savePath } = prepared;
     const lock = tryAcquireOpLock('export', monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message };
     try {
-      fs.copyFileSync(latestRun.diff_file_path, savePath);
+      fs.copyFileSync(exportPlan.diffFilePath, savePath);
       return {
         status: 'success',
-        runId: latestRun.id,
+        runId: exportPlan.runId,
+        source: exportPlan.source,
         monthKey,
         savedPath: savePath,
-        sourceDiffPath: latestRun.diff_file_path
+        sourceDiffPath: exportPlan.diffFilePath
       };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
@@ -16149,7 +16204,9 @@ function readDeletedPositionArchiveResult(pending) {
     const center = archiveCenterService || initializeArchiveCenter();
     const repository = center && center.service && center.service.repository;
     if (!repository) return null;
-    const moduleId = positionArchiveModule(String(pending.channel || '')).moduleId;
+    const policy = taskPolicyRegistry.get(String(pending.channel || ''));
+    const moduleId = policy && policy.scopeId;
+    if (!moduleId) return null;
     const operationKey = `position:${pending.operationToken}:${pending.channel}`;
     const issuance = repository.getOperationIssuance(moduleId, operationKey);
     return issuance && issuance.deletedAt
@@ -16250,7 +16307,8 @@ function persistPositionArchiveIntentIfNeeded(
     batchContext,
     sourceOperation: String(pending.channel || ''),
     metadata: { positionOperationToken: pending.operationToken, recovered: true },
-    files: recoveryFiles
+    files: recoveryFiles,
+    terminalOutcome: positionOutboxTerminalIntent(pending)
   });
   return options.includeCleanupCandidates === true
     ? {
@@ -16319,7 +16377,7 @@ async function finalizeRecoveredPositionPending(operationToken, options = {}) {
   }
   const center = archiveCenterService || initializeArchiveCenter();
   if (!center || !center.service) throw new Error('平盘恢复缺少存档服务');
-  if (!deletedArchiveResult) {
+  if (!deletedArchiveResult && options.terminalSettled !== true) {
     await settlePositionRecoveredTask({
       pending: current,
       archiveService: center.service
@@ -16350,21 +16408,62 @@ async function finalizeRecoveredPositionPending(operationToken, options = {}) {
   }
 }
 
-async function finalizePositionOutboxRecord(record, created) {
+function positionOutboxTerminalIntent(pending) {
+  const outcome = positionRecoveryTerminalOutcome(pending);
+  const operationToken = String(pending && pending.operationToken || '').trim();
+  return {
+    ...outcome,
+    metadata: {
+      recoveredPositionOperation: true,
+      positionOperationToken: operationToken,
+      positionTerminalOutcome: outcome.taskStatus
+    },
+    afterTerminal: {
+      route: 'position-reconciliation',
+      operationToken
+    }
+  };
+}
+
+function resolvePositionOutboxTerminalIntent(record) {
   const payload = record && record.payload;
   const targetBatchId = Number(payload && payload.targetBatchId);
   const operationToken = String(
     payload && payload.metadata && payload.metadata.positionOperationToken || ''
   ).trim();
-  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1 || !operationToken) return;
+  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1 || !operationToken) return null;
   const pending = readPositionPendingOperation();
-  if (!pending || pending.operationToken !== operationToken) return;
+  if (!pending || pending.operationToken !== operationToken) return null;
   if (Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
+    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
+  }
+  return positionOutboxTerminalIntent(pending);
+}
+
+async function finalizePositionTerminalIntent({ route, record, created }) {
+  if (!route || route.route !== 'position-reconciliation') {
+    throw new Error(`不支持的任务终态收口路由：${route && route.route || '<empty>'}`);
+  }
+  const payload = record && record.payload;
+  const targetBatchId = Number(payload && payload.targetBatchId);
+  const operationToken = String(route.operationToken || '').trim();
+  const recordOperationToken = String(
+    payload && payload.metadata && payload.metadata.positionOperationToken || ''
+  ).trim();
+  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1
+      || !operationToken || recordOperationToken !== operationToken) {
+    throw new Error('平盘任务终态路由与 outbox 身份不一致');
+  }
+  const pending = readPositionPendingOperation();
+  if (!pending) return;
+  if (pending.operationToken !== operationToken
+      || Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
     throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
   }
   await finalizeRecoveredPositionPending(operationToken, {
     archiveDurable: true,
-    archiveReference: created && created.batch && created.batch.id || targetBatchId
+    archiveReference: created && created.batch && created.batch.id || targetBatchId,
+    terminalSettled: true
   });
 }
 
@@ -18094,6 +18193,9 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         : null,
       afterTerminal: isPositionOperation
         ? finalizePositionPendingAfterTaskTerminal
+        : null,
+      afterTerminalIntent: isPositionOperation
+        ? { route: 'position-reconciliation', operationToken: positionOperationToken }
         : null,
       beforeStart: async () => {
         if (typeof prepared.beforeStart === 'function') await prepared.beforeStart();

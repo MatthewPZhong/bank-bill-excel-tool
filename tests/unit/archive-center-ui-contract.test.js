@@ -94,7 +94,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const persistenceEnd = main.indexOf('function recoverPositionArchiveIntent', persistenceStart);
     const persistenceFlow = main.slice(persistenceStart, persistenceEnd);
     const finalizeStart = main.indexOf('async function finalizeRecoveredPositionPending');
-    const finalizeEnd = main.indexOf('async function finalizePositionOutboxRecord', finalizeStart);
+    const finalizeEnd = main.indexOf('function positionOutboxTerminalIntent', finalizeStart);
     const finalizeFlow = main.slice(finalizeStart, finalizeEnd);
     const serviceStart = main.indexOf('function getPositionReconciliationService');
     const serviceEnd = main.indexOf('function syncPositionReconciliationCheckpoint', serviceStart);
@@ -134,7 +134,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       '未提交 staging 只能在原任务终态、checkpoint 与当前 pending 收口后清理'
     );
     assert.match(recoveryFlow, /: finalizeRecoveredPositionPending\(operationToken,/);
-    const outboxStart = main.indexOf('async function finalizePositionOutboxRecord');
+    const outboxStart = main.indexOf('async function finalizePositionTerminalIntent');
     const outboxEnd = main.indexOf('function persistCurrentPositionArchiveIntentIfNeeded', outboxStart);
     assert.match(
       main.slice(outboxStart, outboxEnd),

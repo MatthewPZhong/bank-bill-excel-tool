@@ -596,7 +596,7 @@ async function settlePositionRecoveredTask({ pending, archiveService }) {
     });
   }
   const existingTerminal = result && result.batch
-    && ['succeeded', 'failed', 'cancelled'].includes(result.batch.taskStatus);
+    && result.batch.taskStatus === outcome.taskStatus;
   if (!result || (result.ok === false
       && !(result.code === 'ARCHIVE_TASK_STATUS_CONFLICT' && existingTerminal))) {
     throw new Error(result && result.message

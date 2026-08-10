@@ -81,6 +81,9 @@ class TaskLifecycle {
     this.operationTracker = options.operationTracker;
     this.contextStorage = options.contextStorage || new AsyncLocalStorage();
     this.createTaskRunId = options.createTaskRunId || (() => crypto.randomUUID());
+    this.persistTerminalIntent = typeof options.persistTerminalIntent === 'function'
+      ? options.persistTerminalIntent
+      : null;
     this.onArchiveWarning = typeof options.onArchiveWarning === 'function'
       ? options.onArchiveWarning
       : null;
@@ -552,23 +555,45 @@ class TaskLifecycle {
       }
 
       let terminalCall;
+      let terminalIntent;
       if (terminalStatus === 'cancelled') {
+        terminalIntent = {
+          taskStatus: 'cancelled',
+          code: '',
+          message: '业务任务已取消',
+          metadata: terminalMetadata
+        };
         terminalCall = () => this.archiveService.cancelTaskBatch(batchId, {
-          reason: '业务任务已取消',
+          reason: terminalIntent.message,
           metadata: terminalMetadata
         });
       } else if (terminalStatus === 'failed') {
-        terminalCall = () => this.archiveService.failTaskBatch(batchId, {
+        terminalIntent = {
+          taskStatus: 'failed',
           code: businessError && businessError.code || 'BUSINESS_TASK_FAILED',
           message: businessError && businessError.message || (
             businessResult && businessResult.message || '业务任务失败'
           ),
           metadata: terminalMetadata
+        };
+        terminalCall = () => this.archiveService.failTaskBatch(batchId, {
+          code: terminalIntent.code,
+          message: terminalIntent.message,
+          metadata: terminalMetadata
         });
       } else {
+        terminalIntent = {
+          taskStatus: 'succeeded',
+          code: '',
+          message: '',
+          metadata: terminalMetadata
+        };
         terminalCall = () => this.archiveService.completeTaskBatch(batchId, {
           metadata: terminalMetadata
         });
+      }
+      if (payload.afterTerminalIntent) {
+        terminalIntent.afterTerminal = payload.afterTerminalIntent;
       }
       const terminalOutcome = await this._settleArchiveCall({
         batchId,
@@ -582,6 +607,34 @@ class TaskLifecycle {
           && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
         )
       });
+
+      if (!terminalOutcome.ok) {
+        let persisted = null;
+        let persistenceError = null;
+        try {
+          if (!this.persistTerminalIntent) {
+            throw new Error('任务终态意图持久化接口不可用');
+          }
+          persisted = await this.persistTerminalIntent({
+            batchContext: context,
+            sourceOperation: policy.channel,
+            terminalOutcome: terminalIntent
+          });
+          if (!persisted || persisted.persisted !== true) {
+            throw new Error('任务终态意图未形成持久记录');
+          }
+        } catch (error) {
+          persistenceError = error;
+        }
+        if (persistenceError) {
+          const error = new Error('任务终态写入及持久恢复意图登记均失败');
+          error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+          error.cause = persistenceError;
+          error.businessResult = businessResult;
+          error.businessError = businessError;
+          throw error;
+        }
+      }
 
       if (terminalOutcome.ok && typeof payload.afterTerminal === 'function') {
         await this._settleArchiveCall({

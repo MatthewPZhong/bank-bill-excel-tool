@@ -48,7 +48,7 @@ test('fixed 提取按服务端 rowsWithEmptyBlocks 选择，保留空 block 行'
   assert.deepEqual(selectRows(context, 'unfixed', [0, 1]), context.rows);
 });
 
-test('完成选择保留正常乱序 assignments，并按 rowIndex 排序', () => {
+test('完成选择接受完整乱序 assignments，并拒绝重复 rowIndex', () => {
   class FileValidationError extends Error {
     constructor(code, message) {
       super(message);
@@ -70,6 +70,15 @@ test('完成选择保留正常乱序 assignments，并按 rowIndex 排序', () =
       { rowIndex: 0, merchantId: 'M001', currency: 'USD' }
     ]
   }).normalizedAssignments.map((item) => item.rowIndex), [0, 1]);
+  assert.throws(
+    () => normalize(context, {
+      assignments: [
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' },
+        { rowIndex: 0, merchantId: 'M001', currency: 'USD' }
+      ]
+    }),
+    (error) => error.code === 'BIG_ACCOUNT_SELECTION_INVALID'
+  );
 });
 
 test('大账号 preview DTO 只暴露 contextId 与展示行，不暴露主进程 filePath', () => {
@@ -290,6 +299,38 @@ test('statement 全量 preview 探测期间源文件变更会在返回前被拒�
   assert.match(
     prepareSource,
     /const previewResult = await fileImportHandler\.execute[\s\S]*?previewPrepared\.assertFresh\(\);[\s\S]*?if \(previewResult/
+  );
+
+  const duplicateResolver = mainSource.slice(
+    mainSource.indexOf('async function resolveImportFileSelection'),
+    mainSource.indexOf('function buildScopeSelectionResult')
+  );
+  const confirmationIndex = duplicateResolver.indexOf('await dialog.showMessageBox');
+  const freshnessIndex = duplicateResolver.indexOf('assertFreshAfterConfirmation();');
+  const responseIndex = duplicateResolver.indexOf('if (result.response === 1)');
+  assert.ok(
+    confirmationIndex >= 0
+      && confirmationIndex < freshnessIndex
+      && freshnessIndex < responseIndex,
+    'duplicate confirmation 返回后必须先重校原选择，再处理 response/replacePaths'
+  );
+  const statementPrepare = mainSource.slice(
+    mainSource.indexOf('async function prepareStatementImportFiles'),
+    mainSource.indexOf('function registerFileHandlers')
+  );
+  const selectionIndex = statementPrepare.indexOf('const selectionResult = await');
+  const selectionFreshIndex = statementPrepare.indexOf('assertSelectionFresh();', selectionIndex);
+  const selectionStatusIndex = statementPrepare.indexOf('if (selectionResult.status', selectionIndex);
+  const sourceGuardIndex = statementPrepare.indexOf(
+    'createPreviewSourceFreshnessGuard(\n    selectionResult.filePaths',
+    selectionIndex
+  );
+  assert.ok(
+    selectionIndex >= 0
+      && selectionIndex < selectionFreshIndex
+      && selectionFreshIndex < selectionStatusIndex
+      && selectionStatusIndex < sourceGuardIndex,
+    'selection resolver 返回后须先复核 picker paths，再处理结果并为最终 accepted paths 建 guard'
   );
 });
 

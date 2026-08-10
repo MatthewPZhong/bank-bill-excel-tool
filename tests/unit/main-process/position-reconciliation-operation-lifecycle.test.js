@@ -430,6 +430,29 @@ test('启动恢复按持久真实异常 outcome 终结原 task 为 failed', asyn
   assert.equal(fixture.calls[0][1].code, 'position-worker-crashed');
 });
 
+test('启动恢复仅把与目标一致的既有终态视为幂等，冲突终态 fail-closed', async () => {
+  const same = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  same.archiveService.completeTaskBatch = async () => ({
+    ok: false,
+    code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+    batch: { taskStatus: 'succeeded' }
+  });
+  const settled = await settlePositionRecoveredTask(same);
+  assert.equal(settled.outcome.taskStatus, 'succeeded');
+
+  const conflict = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  conflict.archiveService.completeTaskBatch = async () => ({
+    ok: false,
+    code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+    message: 'already cancelled',
+    batch: { taskStatus: 'cancelled' }
+  });
+  await assert.rejects(
+    settlePositionRecoveredTask(conflict),
+    /already cancelled/
+  );
+});
+
 test('启动恢复通过 ArchiveService facade 读不到原批次时失败', async () => {
   const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
   fixture.archiveService.getBatch = async () => ({

@@ -17,7 +17,24 @@ test('preview 后源文件变化时 apply fail-closed，且 bundle 只来自主�
   fs.writeFileSync(filePath, '{"version":1}', 'utf8');
   const trustedBundle = { channels: [{ name: 'A' }] };
   const store = createScenarioImportContextStore({ createId: () => 'context-1' });
-  const id = store.create({ bundle: trustedBundle, filePath });
+  const beforeRead = store.captureSource(filePath);
+  fs.writeFileSync(filePath, '{"version":2,"changedDuringParse":true}', 'utf8');
+  assert.throws(
+    () => store.create({
+      bundle: trustedBundle,
+      filePath,
+      sourceSnapshot: beforeRead.sourceSnapshot
+    }),
+    (error) => error.code === 'SCENARIO_IMPORT_SOURCE_CHANGED'
+  );
+
+  fs.writeFileSync(filePath, '{"version":1}', 'utf8');
+  const sourceEvidence = store.captureSource(filePath);
+  const id = store.create({
+    bundle: trustedBundle,
+    filePath,
+    sourceSnapshot: sourceEvidence.sourceSnapshot
+  });
   assert.equal(store.require(id).bundle, trustedBundle);
 
   fs.writeFileSync(filePath, '{"version":2,"changed":true}', 'utf8');
@@ -33,9 +50,11 @@ test('缺失渠道必须带确认，成功 consume 后 token 一次性失效', (
   const filePath = path.join(dir, 'bundle.json');
   fs.writeFileSync(filePath, '{}', 'utf8');
   const store = createScenarioImportContextStore({ createId: () => 'context-2' });
+  const sourceEvidence = store.captureSource(filePath);
   const id = store.create({
     bundle: { channels: [] },
     filePath,
+    sourceSnapshot: sourceEvidence.sourceSnapshot,
     missingChannels: [{ name: 'new' }]
   });
   assert.throws(

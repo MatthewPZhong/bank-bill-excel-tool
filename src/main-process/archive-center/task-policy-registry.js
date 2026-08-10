@@ -424,6 +424,49 @@ function acquiringRunResultFlowIdentities(result, _context, invocation = {}, isR
   }];
 }
 
+function acquiringExportPlan(invocation = {}) {
+  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+    ? invocation.prepared
+    : {};
+  const plan = prepared.exportPlan && typeof prepared.exportPlan === 'object'
+    ? prepared.exportPlan
+    : null;
+  if (!plan) return null;
+  const source = String(plan.source || '').trim();
+  const monthKey = String(plan.monthKey || '').trim();
+  const runId = String(plan.runId == null ? '' : plan.runId).trim();
+  if (!['side', 'main'].includes(source) || !/^\d{4}-\d{2}$/.test(monthKey) || !runId) {
+    return null;
+  }
+  const flowIdentity = {
+    type: 'business-run-id',
+    value: `acquiring-run:${source}:${monthKey}:${runId}`
+  };
+  if (JSON.stringify(plan.flowIdentity) !== JSON.stringify(flowIdentity)) return null;
+  return { ...plan, flowIdentity };
+}
+
+function acquiringExportFlowPlan(invocation = {}) {
+  const plan = acquiringExportPlan(invocation);
+  if (!plan) {
+    const error = new TypeError('收单导出缺少已选 run 的稳定流程证据');
+    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+    throw error;
+  }
+  return { startsNewFlow: false, flowIdentity: plan.flowIdentity };
+}
+
+function acquiringExportResultFlowIdentities(result, _context, invocation = {}) {
+  const plan = acquiringExportPlan(invocation);
+  if (!plan || !result || typeof result !== 'object') return [];
+  if (String(result.runId == null ? '' : result.runId).trim() !== String(plan.runId)
+      || String(result.monthKey || '').trim() !== plan.monthKey
+      || String(result.source || '').trim() !== plan.source) {
+    return [];
+  }
+  return [plan.flowIdentity];
+}
+
 async function resolveBankBuImportEvidence(invocation = {}) {
   if (typeof invocation.resolveFlowEvidence !== 'function') return null;
   const evidence = await invocation.resolveFlowEvidence('bank-bu-import-bundle');
@@ -495,6 +538,7 @@ function createReservePolicy(channel, scopeKey) {
   const isBankBuRun = channel === 'bankBuRecon:run';
   const isAcquiringRun = channel === 'acquiringBillCurrency:run';
   const isAcquiringResume = channel === 'acquiringBillCurrency:run:resume';
+  const isAcquiringExport = channel === 'acquiringBillCurrency:export';
   return Object.freeze({
     channel,
     scopeId: scope.id,
@@ -502,15 +546,19 @@ function createReservePolicy(channel, scopeKey) {
     moduleName: scope.name,
     taskKey: channel,
     batchPolicy: 'reserve',
-    startsNewFlow: !CONTINUATION_CHANNELS.has(channel),
+    startsNewFlow: isAcquiringExport ? false : !CONTINUATION_CHANNELS.has(channel),
     flowIdentityResolver: CONTINUATION_CHANNELS.has(channel)
       ? invocationBusinessRunIdentity
       : null,
-    flowPlanResolver: isBankBuRun ? bankBuRunFlowPlan : null,
+    flowPlanResolver: isBankBuRun
+      ? bankBuRunFlowPlan
+      : (isAcquiringExport ? acquiringExportFlowPlan : null),
     resultClassifier: resultClassifierForChannel(channel),
     resultMetadataResolver: standardResultMetadataResolver,
     resultFlowIdentities: isBankBuImport
       ? bankBuImportResultFlowIdentities
+      : isAcquiringExport
+        ? acquiringExportResultFlowIdentities
       : (isAcquiringRun || isAcquiringResume)
         ? (result, context, invocation) => acquiringRunResultFlowIdentities(
             result,
