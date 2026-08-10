@@ -73,3 +73,32 @@
 | PR2 各模块采用哪一种稳定 business identity type/value | 后续实现 | PR2 BusinessFlowResolver 按各模块已有 runId/operationToken 显式选择 | 不阻塞 PR1；禁止月份/hash fallback |
 | PR #132 四条 P1 评论是否引入新的产品口径 | PROBE 已消除 | 现有 Spec 与 review 评论已锁定；按定向测试验证 | 不阻塞；无 Spec 偏差 |
 | PR #132 第二轮五条评论是否要求新增恢复系统或双形态 API | PROBE 已消除 | 复用 failed artifact/outbox，新增纯加法 issuance tombstone；terminal 统一 positional | 不阻塞；无 timer/lease/latest tracker/fallback/overload |
+
+## PR #132 第三轮评论增量
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案 | 实现约束 |
+| --- | --- | --- | --- |
+| `persistOperationIntent()` 在写 outbox 前查询既有 operation issuance | Position 的 UI/IPC 与启动恢复最终都进入该 controller 方法；`getOperationIssuance(...).deletedAt` 已是 create/reserve/flush 的 tombstone 权威 | 另建删除状态、查询 live batch、让 flush 以后再丢弃 | 成功读到 deleted 时返回原 batch id、`persisted:false`、`operationStatus:'deleted'`、`ARCHIVE_OPERATION_DELETED`；不 enqueue/append |
+| issuance read 异常继续使用 filesystem outbox | intent 本身是 archive DB/正式登记失败后的 durable fallback；把 DB read 设为前置条件会破坏恢复链 | read 失败直接抛出、重试查询或另存一份状态 | 复用 `_warn` 后继续 `_persistOutboxPayload`；不重试，且不吞 outbox 自身错误 |
+| deleted intent 作为稳定不可执行证据正常返回 | startup recovery 正常返回后清 pending；operation lifecycle 用返回 batch id 标记既有 durable reference | 抛错导致每次启动继续失败，或返回新 outbox id 假装已登记 | 不新增 `archiveFailed`/retry fallback，不改变原 issuance/cursor |
+| 三条非法 direct/internal 输入及 flush/delete 假设竞态不进入实现 | Position descriptor 由主进程 pending 校验/快照产生且 raw sink 不暴露给 IPC；intent 只取设置 retentionDays；`flushOutbox()` 仅启动 initialize 调用 | 为非法 artifact 参数、显式 artifactKey 碰撞、空 retention 字符串或不可达竞态增加防御与测试 | 文档分别澄清真实 persist 旁路与不可达竞态，不混写成同一修复 |
+
+### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| review `#4897211115` thread-aware 复核 | 四个 thread 均 unresolved、`isOutdated=false`；只有 controller `persistOperationIntent` 有真实 Position 入口 | 严格收缩生产 diff，不把 direct/internal 非法输入提升为生产缺陷 |
+| deleted Position intent 最小真实 SQLite 用例 | 单项 1/1 PASS | terminal/delete/restart 后 intent 返回原 batch deleted 证据，outbox 为空，issuance/cursor 不变 |
+| 既有 DB unavailable outbox 回归 | 与 deleted 场景合跑 2/2 PASS | issuance read 抛错时产生明确 warning，仍追加同一 durable outbox；恢复 DB 后跨重启语义重放并释放源路径 |
+| controller + Position lifecycle/UI 接线回归 | 81/81 PASS | outbox discard、现有重复 intent、Position pending/checkpoint/恢复与 renderer/IPC 静态契约未回归 |
+| archive 相关 8 文件回归 | 113/113 PASS | repository/service/controller/tracker/outbox/source snapshot 与 allocator/UI contract 未回归 |
+| 最终相关 10 文件合并复跑 | 157/157 PASS | 中途修正 DB read 错误边界后，archive 8 文件与 Position lifecycle/renderer 契约共同全绿 |
+| 最终 test-only 断言整理后 controller 复跑 | 19/19 PASS | 保留原 outbox append 覆盖并同时验证 issuance read warning/fallback 后，controller 文件全绿 |
+| 第三轮负责人最终 review | 无 P0/P1、无过度防御；独立复跑 controller、Position lifecycle、renderer Position 三个文件 63/63 PASS | tombstone 短路、DB read fallback 与真实 Position 接线通过提交前 review |
+| 静态与重要变量门禁 | 相关生产/测试 `node --check` PASS；ESLint PASS；`check-vars -- --include-minor` 自动无命中；base→working tree 与当前增量 diff-check PASS | controller 方法不改变 IPC/preload、retention、skipArchive、重试、Blob/序号行为；按 Important-skeleton 定义位置人工复核未见漂移 |
+
+### Remaining Unknowns
+
+无本轮 BLOCK。flush/delete 竞态在当前生产调用图不可达；若未来增加运行期 flush 入口，应在该新入口设计中重新评估串行化，而不是在 PR1 预造协调机制。

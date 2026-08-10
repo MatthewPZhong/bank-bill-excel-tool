@@ -136,3 +136,43 @@
 | 3 | 修正 task retention undefined | 默认保留期不被 own-property 绕过 | 单个表驱动覆盖 default/numeric/permanent | 只影响新 task 输入 | 回退一个 input 分支 |
 | 4 | 反向同步 terminal API 与 Markdown | 单一 positional contract、完整 PR diff 可审查 | PR2 调用 grep；base→working tree diff check | 文档继续误导或门禁失败 | 仅文档等价变更 |
 | 5 | 最小定向与静态门禁 | 不扩展行为面 | 定向 unit、node --check、lint、base diff gate 全绿 | 不发未提交检查点 | 修正失败根因，不加兼容分支 |
+
+## PR #132 第三轮评论复核（2026-08-10）
+
+### Task Brief
+
+- Goal: 阻止平盘恢复入口在同一 operation 已永久删除后重新登记 filesystem outbox。
+- Context: PR1 head 为 `44cdfbc`；review `#4897211115` 的四个 thread 均未过期，其中只有 `persistOperationIntent()` 绕过既有 operation tombstone 存在真实 Position 调用入口。
+- Constraints: 复用 `archive_operation_issuances.deleted_at` 单一权威；不新增状态、fallback 或竞态协调；不为非法 artifact 参数、显式 artifactKey 碰撞、`retentionUntil:''` 添加生产防御或测试。
+- Done when: Position 恢复 intent 在 tombstone 后返回稳定 deleted 结果，不 enqueue/append、不分号、不改变原 issuance；相关真实 SQLite 回归与静态门禁通过。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 真实旁路从 Position IPC/恢复链进入 controller | `trackedIpcHandle` → `runPositionReconciliationOperation` → `runArchiveAwareOperation` / startup recovery → `persistPositionArchiveIntentIfNeeded` → `ArchiveCenterController.persistOperationIntent` | 只在 `_persistOutboxPayload` 前补 tombstone 判定，不泛化其它 controller 输入 |
+| operation tombstone 已有单一持久权威 | `ArchiveRepository.getOperationIssuance(moduleId, operationKey)` 返回 `deletedAt`，create/reserve/flush 已使用同一事实 | 成功读到 deleted 时返回原 `batchId` 与稳定 `ARCHIVE_OPERATION_DELETED`，不得写第二套状态 |
+| intent 是 archive DB 不可用时的 filesystem 兜底 | `persistPositionArchiveIntentIfNeeded` 在正式登记未形成 durable 证据后调用 controller intent；既有 outbox 跨重启恢复 | issuance read 失败不能阻断 outbox；只沿 controller warning 边界继续写，不新增重试 |
+| 三条 direct/internal 输入没有生产入口 | Position 文件 descriptor 由主进程 pending 校验与快照生成；renderer/IPC 不暴露 raw artifact sink；controller intent 固定读取设置中的 retentionDays，不接收 Position retentionUntil | 非法 artifact 参数、显式 artifactKey 碰撞、`retentionUntil:''` 不加代码或测试 |
+| flush/delete 竞态没有真实并发入口 | `flushOutbox()` 仅由 controller `initialize()` 调用；renderer 删除只能在启动初始化后由 IPC 触发 | 与真实 persist 旁路分开记录，不新增 lease/timer/锁或竞态测试 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| persist 的删除判定由谁持有 | 状态所有权 | 高 | 容易 | repository issuance 已由 create/reserve/flush 共用 | PROBE | 真实 repository/service/controller 删除后调用 intent | 已消除：直接查询同一 issuance，不查 live batch |
+| deleted intent 应抛错还是返回终态证据 | 恢复契约 | 高 | 容易 | startup recovery 在正常返回后清 pending；operation lifecycle 用 `batchId` 标记 durable reference | PROBE | 回查两条调用路径及现有 deleted service DTO | 已消除：返回原 batch id、`persisted:false`、deleted/code；不抛错、不造 outbox id |
+| issuance 读取失败是否应阻断 intent | 失败模式 | 高 | 容易 | intent 本身是数据库归档失败后的 filesystem outbox 兜底 | PROBE | 复用既有 DB unavailable→outbox→restart 用例注入 read error | 已消除：warning 后继续 outbox；只有成功读到 deleted 才阻止写入 |
+| 是否需要修 flush/delete 竞态 | 可达性 | 中 | 容易 | 生产仅启动时 flush，未发现运行期调用 | PROBE | 全仓 `flushOutbox` 调用搜索与 main 初始化时序 | 已消除：当前不可达，本轮不修 |
+
+### BLOCK 问题
+
+无。状态权威、真实入口与返回语义均可由仓库锁定。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | intent 写入前查询 tombstone | 删除后的 operation 不复活且 DB 故障仍能持久兜底 | deleted DTO 时 outbox 为空；read error 时 warning 后写 outbox | 任一边界失败即停止交付 | 回退单个 guard/catch |
+| 2 | 扩展既有删除/重启真实 SQLite 用例 | 不烧号、不改原 issuance | cursor/issuance 前后不变 | 状态证据不足，停止交付 | 只保留一个端到端断言链 |
+| 3 | 文档与最小静态/定向门禁 | 三条反证和竞态非目标不漂移 | unit、lint、syntax、base diff、check-vars 通过 | 不发未提交检查点 | 只修真实失败根因 |

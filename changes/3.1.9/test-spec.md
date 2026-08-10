@@ -100,3 +100,28 @@
 - 完整 `npm run release-check` exit 0：lint PASS、smoke PASS；unit 4819/4819 PASS（304 files，Node 测试 15377.901125ms、runner 15415ms）；integration 48/48 scripts、2459/2459 assertions PASS（394086ms）。runner-only policy timestamp/耗时 diff 已按 HEAD 精确撤回。
 - 负责人独立 `npm run check:vars -- --include-minor` exit 0（3 个生产文件，自动无命中）；人工软复核 ArchiveRepository/ArchiveService/Controller 的 schema 幂等、序号不复用、Blob 删除顺序、业务/存档隔离，以及 controller IPC/retention/skipArchive/部分删除语义，未发现漂移。
 - ⚠️ reconciliation 审计红线仍待人工：真实 terminal delete→restart→同 operation 被拒且不分新号；真实 outbox warning 可见并释放源路径；A/B artifact 的首次结果集合、模块归属与 ready SHA 在失败/恢复前后一致。以上不得以自动化 PASS 代替人工结论。
+
+## 8. PR #132 第三轮评论增量矩阵
+
+| ID | 优先级 | 场景 | 最小关键断言 |
+| --- | --- | --- | --- |
+| R11 | P0 | Position tombstone 后登记恢复 intent | 真实 repository/service/controller 在 terminal→delete→restart 后调用 `persistOperationIntent`，返回原 batch 的 `ARCHIVE_OPERATION_DELETED` 且 `persisted=false`；outbox 仍空，issuance/cursor 不变 |
+| R12 | P0 | tombstone 查询时 DB 不可读 | 复用既有 DB unavailable→outbox→restart 场景；issuance read 抛错时 warning 可见并继续追加同一 outbox，DB 恢复后正常重放和释放源路径 |
+
+### 8.1 明确反证与非目标
+
+- 非法 artifact hash/size/role：Position 生产文件证据由主进程 pending parser、manifest 与文件快照生成，renderer/IPC 不暴露 raw archive sink；不增加 direct/internal 输入防御或测试。
+- 显式 artifactKey 碰撞：生产 artifactKey 来自主进程生成的 Position descriptor，业务 IPC 不接受调用方直传 sink payload；不增加人为碰撞分支或测试。
+- `retentionUntil:''`：Position intent 的 controller payload 固定读取已解析的 retentionDays 设置，不传 retentionUntil；不扩大既有字段语义。
+- flush/delete 竞态：当前 `flushOutbox()` 只在 controller 启动初始化调用，运行期删除 IPC 不与其形成真实并发入口；与 R11 的实际 persist 旁路分开记录，本轮不修、不测。
+
+### 8.2 执行结果
+
+- R11 单项真实 SQLite：1/1 PASS。
+- R11 + R12 最小失败边界：2/2 PASS。
+- controller + Position lifecycle/UI 接线相关回归：81/81 PASS。
+- archive 相关 8 文件回归：113/113 PASS。
+- 中途修正 issuance read 错误边界后，相关 10 文件最终合并复跑：157/157 PASS。
+- 保留原 outbox append 断言的最终 test-only 整理后，controller 复跑：19/19 PASS。
+- 负责人最终 review：无 P0/P1、无过度防御；独立复跑 controller、Position lifecycle、renderer Position 三个文件 63/63 PASS。
+- 相关生产/测试 `node --check`、`npm run lint`、base→working tree/当前增量 diff-check PASS；`npm run check:vars -- --include-minor` 自动无命中，另按 controller Important-skeleton 定义位置人工复核 IPC/preload、retention、skipArchive、重试及部分删除语义未漂移。

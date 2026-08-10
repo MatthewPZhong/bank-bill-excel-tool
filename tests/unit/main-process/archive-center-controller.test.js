@@ -107,6 +107,7 @@ function createHarness(options = {}) {
     service,
     outboxStore: options.outboxStore,
     onOutboxFlushed: options.onOutboxFlushed,
+    logWarning: options.logWarning,
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
@@ -490,10 +491,12 @@ test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文�
   const inputPath = path.join(rootDir, 'bank.xlsx');
   const outputPath = path.join(rootDir, 'result.xlsx');
   const releasedPaths = [];
+  const warnings = [];
   const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
   const { controller, service } = createHarness({
     outboxStore,
-    onOutboxFlushed: (paths) => releasedPaths.push(...paths)
+    onOutboxFlushed: (paths) => releasedPaths.push(...paths),
+    logWarning: (message, detail) => warnings.push(`${message} ${detail}`)
   });
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
 
@@ -504,6 +507,7 @@ test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文�
     moduleCode: 'POSITION',
     moduleName: '平盘对账数据处理',
     sourceOperation: 'position-reconciliation:bank:apply-import',
+    operationKey: 'position:operation-1:position-reconciliation:bank:apply-import',
     metadata: { positionOperationToken: 'operation-1' },
     files: [{ filePath: inputPath, role: 'input' }]
   });
@@ -511,6 +515,22 @@ test('存档主库暂不可用时写入 outbox，跨重启重放后解除源文�
   assert.equal(created.archiveFailed, true);
   assert.equal(created.persistentRetryAvailable, true);
 
+  const workingGetOperationIssuance = service.repository.getOperationIssuance;
+  service.repository.getOperationIssuance = () => {
+    throw new Error('archive database busy');
+  };
+  const persistedIntent = controller.persistOperationIntent({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run:export',
+    operationKey: 'position:operation-1:position-reconciliation:bank:apply-import',
+    files: [{ filePath: outputPath, role: 'output' }]
+  });
+  service.repository.getOperationIssuance = workingGetOperationIssuance;
+  assert.equal(persistedIntent.batchId, created.batchId);
+  assert.equal(persistedIntent.persisted, true);
+  assert.match(warnings.join('\n'), /删除状态读取失败，继续登记持久 outbox/);
   const appended = await controller.sink.appendFiles({
     batchId: created.batchId,
     sourceOperation: 'position-reconciliation:run:export',
@@ -596,6 +616,35 @@ test('已永久删除 operation 的 outbox 跨重启后明确丢弃且不复活�
   assert.deepEqual(releasedPaths, [sourcePath]);
   assert.match(warnings.join('\n'), /已永久删除，停止重放/);
   assert.equal(repository.getStats().batchCount, 0);
+
+  const issuanceBeforeIntent = repository.getOperationIssuance(
+    payload.moduleId,
+    payload.operationKey
+  );
+  const cursorBeforeIntent = db.prepare(`
+    SELECT * FROM archive_batch_sequences
+    WHERE module_code = ?
+  `).get(payload.moduleCode);
+  const persistedIntent = controller.persistOperationIntent({
+    ...payload,
+    files: [{ filePath: sourcePath, role: 'input' }]
+  });
+  assert.deepEqual(persistedIntent, {
+    batchId: created.batchId,
+    operationKey: payload.operationKey,
+    persisted: false,
+    operationStatus: 'deleted',
+    code: 'ARCHIVE_OPERATION_DELETED'
+  });
+  assert.deepEqual(outboxStore.list(), []);
+  assert.deepEqual(
+    repository.getOperationIssuance(payload.moduleId, payload.operationKey),
+    issuanceBeforeIntent
+  );
+  assert.deepEqual(db.prepare(`
+    SELECT * FROM archive_batch_sequences
+    WHERE module_code = ?
+  `).get(payload.moduleCode), cursorBeforeIntent);
 
   const directReplay = await controller.sink.createBatch(payload);
   assert.equal(directReplay.archiveFailed, true);

@@ -314,6 +314,27 @@ class ArchiveCenterController {
     );
     if (files.length === 0) throw new Error('存档恢复意图缺少文件');
     const batchPayload = this._batchPayload(payload, files);
+    let issuance;
+    try {
+      issuance = this.service.repository.getOperationIssuance(
+        batchPayload.moduleId,
+        batchPayload.operationKey
+      );
+    } catch (error) {
+      this._warn(
+        '存档 operation 删除状态读取失败，继续登记持久 outbox',
+        error && error.message ? error.message : String(error)
+      );
+    }
+    if (issuance && issuance.deletedAt) {
+      return {
+        batchId: issuance.batchId,
+        operationKey: batchPayload.operationKey,
+        persisted: false,
+        operationStatus: 'deleted',
+        code: 'ARCHIVE_OPERATION_DELETED'
+      };
+    }
     const record = this._persistOutboxPayload(batchPayload);
     return {
       batchId: outboxBatchId(record.id),
