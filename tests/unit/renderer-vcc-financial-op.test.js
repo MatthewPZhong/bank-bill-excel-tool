@@ -213,6 +213,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
     assert.match(vccService, /return runWorker\('inspect', \{ filePaths \}\)/);
     assert.match(vccService, /return runWorker\('delete-data-target'/);
+    for (const serviceCall of [
+      'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',
+      'listDeleteTargets', 'previewDataTargetDeletion', 'latestArchivedRun',
+      'getArchivedRunByMonth'
+    ]) {
+      assert.match(main, new RegExp(`await [^\\n]*${serviceCall}\\(`));
+    }
+    assert.match(vccService, /readWorkerFactory = \(filename, options\) => new Worker\(filename, options\)/);
+    assert.match(vccService, /taskGeneration !== capturedGeneration \|\| activeTask !== capturedTask/);
     assert.doesNotMatch(main, /legacySourceRequest|service\.deleteDatasetData\(payload\)/);
     assert.match(
       vccService,
@@ -272,7 +281,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
   });
 
   test('数据管理左侧解归档、右侧删除导出返回，删除页使用动态统一目标与 token', () => {
-    assert.match(moduleRenderer, /class="dialog-actions split vcc-fin-op-manager-footer"[\s\S]*data-action="unarchive"[^>]*>解归档<\/button>[\s\S]*data-action="delete-dataset"[^>]*>删除<\/button>[\s\S]*data-action="export-dataset"[^>]*>导出<\/button>[\s\S]*data-action="return">返回<\/button>/);
+    assert.match(moduleRenderer, /class="dialog-actions split vcc-fin-op-manager-footer"[\s\S]*data-action="unarchive"[^>]*>正在读取归档…<\/button>[\s\S]*data-action="delete-dataset"[^>]*>删除<\/button>[\s\S]*data-action="export-dataset"[^>]*>导出<\/button>[\s\S]*data-action="return">返回<\/button>/);
     assert.match(moduleRenderer, /暂无已归档结果/);
     assert.match(moduleRenderer, /returnButton\.addEventListener\('click', modal\.close\)/);
     assert.match(moduleRenderer, /title: '删除数据'/);
@@ -296,7 +305,13 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       assert.ok(moduleRenderer.includes(label), `删除目标表缺少 ${label}`);
     }
     assert.match(moduleRenderer, /api\.listDeleteTargets\(\{ targetMonth \}\)/);
-    assert.match(moduleRenderer, /api\.previewDataTargetDeletion\(\{ targetMonth, targetType \}\)/);
+    const deleteDialogSource = moduleRenderer.slice(
+      moduleRenderer.indexOf('function openDatasetDeleteDialog('),
+      moduleRenderer.indexOf('function openDatasetExportDialog(')
+    );
+    assert.doesNotMatch(deleteDialogSource, /api\.previewDataTargetDeletion/);
+    assert.match(deleteDialogSource, /selectCachedDeletePreview\(currentTargets, targetType\)/);
+    assert.match(deleteDialogSource, /targetSelect\.addEventListener\('change', \(\) => modal\.trackPreviewState\(applyCachedPreview\(\)\)\)/);
     assert.match(moduleRenderer, /api\.deleteDataTarget\(\{[\s\S]*expectedPreviewToken: latestPreview\.previewToken,[\s\S]*taskGeneration: latestPreview\.taskGeneration/);
     assert.doesNotMatch(moduleRenderer, /<option[^>]*disabled[^>]*>[^<]*(首月期初初始化数据|财务OP校验结果表)/);
     assert.match(moduleRenderer, /const currentVersion = \+\+previewVersion;/);
@@ -312,6 +327,43 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-delete-form\s*\{[\s\S]*margin-left:\s*20px;[\s\S]*padding:\s*4px 8px 0;/);
     assert.match(styles, /\.vcc-fin-op-delete-fields\s*\{[\s\S]*grid-template-columns:\s*25% 40%;[\s\S]*column-gap:\s*10px;/);
     assert.match(styles, /\.vcc-fin-op-manager-shell\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
+    assert.match(moduleRenderer, /data-field="manager-month" disabled><option value="">正在读取…<\/option>/);
+    assert.match(moduleRenderer, /vcc-fin-op-manager-skeleton/);
+    assert.match(moduleRenderer, /modal\.trackPreviewState\(refreshManagerData\(\{ preferredMonth: initialMonth \}\)\)/);
+    assert.match(moduleRenderer, /unarchiveButton\.textContent = loadingManagerData \? '正在读取归档…' : '解归档'/);
+    assert.doesNotMatch(moduleRenderer, /async function openDataManager/);
+    const managerSource = moduleRenderer.slice(
+      moduleRenderer.indexOf('function openDataManager('),
+      moduleRenderer.indexOf('async function initialize()')
+    );
+    assert.ok(
+      managerSource.indexOf('const modal = mountDialog(')
+        < managerSource.indexOf('await Promise.all([api.listImportMonths(), loadArchivedResultMonths()])'),
+      '数据管理 shell 必须在任何后端 await 前挂载'
+    );
+  });
+
+  test('删除 target 切换只读本次响应缓存并满足 50ms 结构预算', () => {
+    const helperStart = moduleRenderer.indexOf('function selectCachedDeletePreview(');
+    const helperEnd = moduleRenderer.indexOf('function formatAmount(', helperStart);
+    const selectCachedDeletePreview = Function(
+      `'use strict'; ${moduleRenderer.slice(helperStart, helperEnd)}; return selectCachedDeletePreview;`
+    )();
+    const targets = [
+      'recharge_refund', 'fee_fx', 'channel', 'pending_archive_removal',
+      'system_op', 'opening_initialization', 'result'
+    ].map((targetType) => ({
+      targetType,
+      previewToken: `v2:${targetType}`
+    }));
+    const startedAt = performance.now();
+    let selected = null;
+    for (let index = 0; index < 1000; index += 1) {
+      selected = selectCachedDeletePreview(targets, index % 2 === 0 ? 'recharge_refund' : 'result');
+    }
+    const elapsed = performance.now() - startedAt;
+    assert.equal(selected.targetType, 'result');
+    assert.ok(elapsed < 50, `1000 次缓存切换耗时 ${elapsed.toFixed(3)}ms`);
   });
 
   test('解归档复用年月选择器，非尾月展示依赖且执行中禁止关闭', () => {

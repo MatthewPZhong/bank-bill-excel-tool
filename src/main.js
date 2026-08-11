@@ -13783,22 +13783,22 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:archived-months', () => {
+  ipcMain.handle('vccFinancialOp:run:archived-months', async () => {
     try {
       return {
         status: 'success',
-        months: getVccFinancialOpService().listArchivedResultMonths()
+        months: await getVccFinancialOpService().listArchivedResultMonths()
       };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:unarchive-preview', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:run:unarchive-preview', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewUnarchive(payload)
+        ...await getVccFinancialOpService().previewUnarchive(payload)
       };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
@@ -13814,8 +13814,8 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:imports:list-months', () => {
-    return getVccFinancialOpService().listImportMonths();
+  ipcMain.handle('vccFinancialOp:imports:list-months', async () => {
+    return await getVccFinancialOpService().listImportMonths();
   });
 
   ipcMain.handle('vccFinancialOp:imports:list-records', (_event, payload = {}) => {
@@ -13846,22 +13846,22 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:data-manager:delete-targets', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:data-manager:delete-targets', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        targets: getVccFinancialOpService().listDeleteTargets(payload)
+        targets: await getVccFinancialOpService().listDeleteTargets(payload)
       };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
     }
   });
 
-  ipcMain.handle('vccFinancialOp:data-manager:delete-preview', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:data-manager:delete-preview', async (_event, payload = {}) => {
     try {
       return {
         status: 'success',
-        ...getVccFinancialOpService().previewDataTargetDeletion(payload)
+        ...await getVccFinancialOpService().previewDataTargetDeletion(payload)
       };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
@@ -13938,9 +13938,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:latest-archived', () => {
+  ipcMain.handle('vccFinancialOp:run:latest-archived', async () => {
     try {
-      const result = getVccFinancialOpService().latestArchivedRun();
+      const result = await getVccFinancialOpService().latestArchivedRun();
       return result
         ? { ...result, runStatus: result.status, status: 'success' }
         : { status: 'empty' };
@@ -13952,7 +13952,7 @@ function registerNewAccountHandlers() {
   trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', async (_event, payload = {}) => {
     try {
       const service = getVccFinancialOpService();
-      const target = service.getArchivedRunByMonth(payload.targetMonth);
+      const target = await service.getArchivedRunByMonth(payload.targetMonth);
       const subjects = target.subjects;
       if (subjects.length === 1) {
         const choice = await dialog.showSaveDialog(mainWindow, {

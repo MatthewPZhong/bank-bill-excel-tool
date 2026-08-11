@@ -319,3 +319,59 @@
 - Unknowns 中 tracked 复现与 pure classifier 接受真实 migrated fixture 两项已消除；真实生产旧库、Windows、16 GB 与财务人工继续保留 PROBE。
 - 最终本地门禁第二轮 `release-check` 全绿：lint/smoke PASS，unit 4940/4940（317 files，0 fail/skip），integration 48/48 scripts、2459/2459 assertions。首轮唯一失败是既有大文件拆分 RSS 样本恰等于严格 `<150MB` 上限；原脚本独立复跑 31/31、第二轮完整门禁 31/31，确认环境边界波动，未改阈值、未加重试、未改 PR2.5-A 代码。
 - integration runner 只在第二轮全绿后自动刷新 `rules/integration-test-policy.md` §七的 timestamp/timings，总数保持 48/2459；该生成证据按仓库惯例保留，未手工编辑。
+
+## PR2.5-B 读取性能 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：把 VCC 数据管理、归档枚举与破坏性操作 preview 的重读取移出 Main，同一只读快照内集合加载 PR2.5-A 证据并生成 token v2；补齐活动月份、删除目标一次快照、弹窗 shell/cache 和 SQL/响应性证据。
+- Context：基线为 PR2.5-A 冻结头 `26d91e8b673a4e6f306ee608d545efa5d0971e4c`。现有 production 仍在 Main 同步执行 `listArchivedResultMonths()` / `buildOperationState()` / `getEffectiveRunResult()`，数据管理弹窗在月份读取完成前不会挂载。
+- Constraints：read worker 使用 `DatabaseSync(dbPath, { readOnly: true })`、`query_only/foreign_keys/busy_timeout` 和 `BEGIN DEFERRED`；零 migration、DDL、DML、recovery 和业务写。只断言仓库现有 schema/PK/index，不新增表、列或索引。不实现 C1 mutation guard/adjustment/archive 写链，不实现 C2 unarchive/delete 写计划，不改变金额、币种、九币种或导出文件内容，不增加 fallback。
+- Done when：current/legacy 都可枚举和导出；inconsistent 排除并带结构化诊断；active/importing/unresolved/later 只影响 gate，不隐藏月份；archive 0/1/100 候选保持常数 SQL 且零 import rows/opening/N+1；delete targets 一次 evidence；modal 先于后端完成出现且 target change 零 IPC；Main 复核 generation 和 active task identity；自动证据不冒充约 16 GB、Windows packaged 或财务人工验收。
+
+### 已确认事实
+
+| 事实 | 证据 | 对实现的约束 |
+| --- | --- | --- |
+| 数据管理首屏被读取阻塞 | `openDataManager()` 在 `mountDialog()` 前等待 `Promise.all(listImportMonths, listArchivedResultMonths)` | shell、月份 loading、归档按钮 loading 和内容 skeleton 必须先挂载，再启动读取 |
+| 归档枚举是逐月/逐 run 重读取 | `unarchive.js` 先候选 UNION，再逐月 `buildOperationState()`；一致性检查逐 run 调 `getEffectiveRunResult()` | production 枚举/preview 改用 set loader；A 的纯 validator/classifier 是唯一结果语义 |
+| v1 state 会读取禁表 | `buildOperationState()` 包含 opening、source facts 和 `vcc_fin_op_import_rows` | B archive list/preview 的 SQL trace 必须为零 import rows、零 opening |
+| 删除目标重复读取同一月份 | `listDeleteTargets()` 对 source/opening/result 逐项调用 preview，并额外 COUNT runs | 同一 DeleteEvidenceV2 一次读取，内存派生完整 target preview cache |
+| 活动月份当前不完整 | renderer 的月份来自 `listImportMonths()`，repository 只按 import records 分组 | 使用 TechDoc §9.1 的八来源 UNION；active/unresolved/importing 是可见事实和 gate，不是隐藏条件 |
+| Node 只读连接合同本机成立 | `/tmp` probe：Node 24.13.0 / SQLite 3.50.4 上 readOnly、三 PRAGMA、BEGIN DEFERRED 成立；DDL 报 readonly | 作为实现证据；Windows installer/portable 仍需独立 PROBE |
+| 现有 effective index 可覆盖活动月份 | `EXPLAIN QUERY PLAN` 使用 `idx_vcc_fin_op_effective_month_source` covering index | 不新增 migration/index；其他表允许各一次集合扫描，真实大库不达标则阻断并反向同步合同 |
+| worker 会被现有打包规则包含 | `package.json build.files` 已包含 `src/**/*`，现有 VCC worker 同样从 `__dirname` 拉起 | 新 read entry 无额外资源配置；packaged Windows 仍需 runtime 验证 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| token v2 与现有 v1 write 的中间状态 | 合同/安全 | 高 | BLOCK 已由负责人裁决 | B 正式切 v2 preview；B/C1 中间分支不可发布，旧 write 必须 fail-closed 且零业务 DML；禁止兼容桥，C2 才恢复最终提交 |
+| Windows packaged readOnly/query_only/worker | Runtime | 高 | PROBE | installer/portable 验证失败即阻断，不降级到 Main 同步或可写连接 |
+| 约 16 GB 库 P50/P95、WAL 和 event-loop lag | 性能 | 高 | PROBE | B 只提供结构硬门禁、合成 0/1/100 和本机 gross regression；真实副本未达标不得用机器差异关闭 |
+| 目标生产库 legacy-four/trigger | 兼容 | 高 | PROBE | 非标准 legacy 一律 inconsistent；trigger 与写保护留给 C1/C2 只读 inspect/人工门禁 |
+| 主体、九币种、有效余额和跨月血缘 | 资金 | 高 | PROBE / 人工 | ⚠️ 自动测试只证明算法合同；真实导出与备份恢复由财务人工复核 |
+
+当前无待用户确认的 BLOCK。B/C1 intermediate non-release 是阶段合同，不是最终用户行为。
+
+### 精确 Ownership
+
+- 新增 `src/backend/vcc-financial-op/read-schema.js`：只读 schema-ready 断言。
+- 新增 `src/backend/vcc-financial-op/read-snapshot.js`：archive set loader、gate evidence、active months、DeleteEvidenceV2/target previews 和 SQL trace hook。
+- 新增 `src/backend/vcc-financial-op/operation-token-v2.js`：canonical payload、稳定 SHA 和 validated result digest。
+- 新增 `src/main-process/vcc-financial-op-read-worker.js`：五个 read action 的独立 read-only entry。
+- 修改 `src/main-process/vcc-financial-op-service.js`：read dispatch、generation/active identity 复核、活动月份 generation cache、async read API，以及复用现有 `runDirectTask` 的导出二次重查。
+- 修改 `src/main.js`：现有 VCC read/export IPC await async service；不新增通道、preload 或 TaskPolicy。
+- 修改 `src/renderer-vcc-financial-op.js` / `src/styles-vcc-financial-op.css`：shell-first、mutable state、inline retry、target cache 和 refresh-once。
+- 新增/修改聚焦 unit、VCC integration、`scripts/perf/vcc-financial-op-read-performance.js` 与本版本四份管理文档。
+- 明确不修改 `vcc-financial-op-db/migrations.js`、PR2.5-A 四个纯模块、`operation-state.js`、`unarchive.js`、`data-target-deletion.js`、现有 write worker、三份发布用户文档。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 最小成功证据 | 停止条件 |
+| --- | --- | --- | --- |
+| 1 | schema-ready/token/set loader | 缺 schema fail-closed；current/真实 migrated legacy 同一 A classifier；0/1/100 固定 SQL | 需要 migration、新索引、import rows/opening、逐月或逐 run 查询 |
+| 2 | read worker 与 Main freshness | readOnly/BEGIN DEFERRED；unknown action 先拒；worker 返回后 generation/active identity 精确复核 | 需要 TaskLifecycle/batch、retry/lease/timer 或可写连接 |
+| 3 | service/main/export 接线 | 初次导出读取和 `runDirectTask` 内二次重查都消费 B snapshot；legacy 可导出 | 仅初次读取走 B、二次回退 v1/current-only |
+| 4 | renderer shell/cache | mount 早于 await；完整 target response 缓存；state-changed 全量刷新；成功 refresh-once | cache 放宽 token/generation freshness，或 target change 再发 preview IPC |
+| 5 | 聚焦/性能/人工边界 | SQL硬门禁、main lag、target switch、gross budget、intermediate fail-closed 单一真实链 | 小 fixture 被写成 16 GB/Windows/财务验收，或为边界样本加 retry/放宽阈值 |

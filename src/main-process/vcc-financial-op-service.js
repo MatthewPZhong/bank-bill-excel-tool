@@ -33,15 +33,6 @@ const {
   STATE_CHANGED_MESSAGE,
   validateOperationConfirmation
 } = require('../backend/vcc-financial-op/operation-state');
-const {
-  listArchivedResultMonths: listArchivedResultMonthsFromDb,
-  getArchivedRunByMonth: getArchivedRunByMonthFromDb,
-  previewUnarchive: previewUnarchiveFromDb
-} = require('../backend/vcc-financial-op/unarchive');
-const {
-  listDeleteTargets: listDeleteTargetsFromDb,
-  previewDataTargetDeletion: previewDataTargetDeletionFromDb
-} = require('../backend/vcc-financial-op/data-target-deletion');
 const { writeRunWorkbooks } = require('./vcc-financial-op-writer');
 const { writeImportAuditWorkbook } = require('./vcc-financial-op-audit-writer');
 const {
@@ -50,6 +41,7 @@ const {
 } = require('./vcc-financial-op-dataset-writer');
 
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
+const READ_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-read-worker.js');
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -191,6 +183,7 @@ function createVccFinancialOpService({
   appVersion = null,
   buildSha = null,
   workerFactory = (filename, options) => new Worker(filename, options),
+  readWorkerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
   archiveConsistencyLogger = null,
@@ -199,6 +192,8 @@ function createVccFinancialOpService({
   let activeTask = null;
   let taskGeneration = 0;
   let closing = false;
+  let activeMonthsCache = null;
+  const activeReadWorkers = new Set();
   repository.recoverInterruptedImports(database.db);
 
   function acquireTask(action, {
@@ -245,6 +240,7 @@ function createVccFinancialOpService({
     if (activeTask === task) {
       activeTask = null;
       taskGeneration += 1;
+      activeMonthsCache = null;
     }
     task.complete(outcome);
   }
@@ -331,6 +327,67 @@ function createVccFinancialOpService({
       worker.on('error', (error) => finish(error));
       worker.on('exit', (code) => {
         if (!settled) finish(new Error(`VCC 财务OP后台任务退出但未返回结果（code ${code}）`));
+      });
+    });
+  }
+
+  function runReadWorker(action, payload = {}) {
+    if (closing) {
+      return Promise.reject(operationError(
+        'service-closing',
+        'VCC 财务OP服务正在关闭，不能开始新读取。'
+      ));
+    }
+    const capturedGeneration = taskGeneration;
+    const capturedTask = activeTask;
+    return new Promise((resolve, reject) => {
+      let worker;
+      try {
+        worker = readWorkerFactory(READ_WORKER_PATH, {
+          workerData: {
+            action,
+            payload: {
+              ...payload,
+              taskGeneration: capturedGeneration,
+              taskActive: Boolean(capturedTask)
+            },
+            dbPath: database.dbPath
+          }
+        });
+        activeReadWorkers.add(worker);
+      } catch (error) {
+        reject(error);
+        return;
+      }
+      let settled = false;
+      const finish = (error, result) => {
+        if (settled) return;
+        settled = true;
+        activeReadWorkers.delete(worker);
+        if (error) {
+          reject(error);
+          return;
+        }
+        if (taskGeneration !== capturedGeneration || activeTask !== capturedTask) {
+          reject(operationError(STATE_CHANGED_CODE, STATE_CHANGED_MESSAGE, {
+            context: {
+              expectedTaskGeneration: capturedGeneration,
+              actualTaskGeneration: taskGeneration,
+              activeTaskChanged: activeTask !== capturedTask
+            }
+          }));
+          return;
+        }
+        resolve(result);
+      };
+      worker.on('message', (message) => {
+        if (!message || typeof message !== 'object') return;
+        if (message.type === 'result') finish(null, message.result);
+        else if (message.type === 'error') finish(deserializeError(message.error));
+      });
+      worker.on('error', (error) => finish(error));
+      worker.on('exit', (code) => {
+        if (!settled) finish(new Error(`VCC 财务OP只读任务退出但未返回结果（code ${code}）`));
       });
     });
   }
@@ -485,8 +542,16 @@ function createVccFinancialOpService({
     ));
   }
 
-  function listImportMonths() {
-    return repository.listImportMonths(database.db).map((row) => row.yearMonth);
+  async function listImportMonths() {
+    if (activeMonthsCache && activeMonthsCache.taskGeneration === taskGeneration) {
+      return [...activeMonthsCache.months];
+    }
+    const result = await runReadWorker('list-active-months');
+    activeMonthsCache = Object.freeze({
+      taskGeneration: result.taskGeneration,
+      months: Object.freeze([...result.months])
+    });
+    return [...activeMonthsCache.months];
   }
 
   function listImportRecords(yearMonth) {
@@ -494,12 +559,9 @@ function createVccFinancialOpService({
   }
 
   function previewDatasetDeletion(payload = {}) {
-    return previewDataTargetDeletionFromDb(database.db, {
+    return previewDataTargetDeletion({
       targetMonth: payload.targetMonth,
       targetType: payload.sourceType
-    }, {
-      taskActive: Boolean(activeTask),
-      taskGeneration
     });
   }
 
@@ -513,19 +575,41 @@ function createVccFinancialOpService({
     });
   }
 
-  function listArchivedResultMonths() {
-    return listArchivedResultMonthsFromDb(database.db, { logger: archiveConsistencyLogger });
+  async function listArchivedResultMonths(options = {}) {
+    const result = await runReadWorker('list-archive-months', options);
+    for (const diagnostic of result.diagnostics || []) {
+      if (archiveConsistencyLogger) {
+        try { archiveConsistencyLogger(diagnostic); } catch (_error) { /* 诊断日志不可阻断归档枚举 */ }
+      }
+    }
+    return result.months;
   }
 
-  function getArchivedRunByMonth(targetMonth) {
-    return getArchivedRunByMonthFromDb(database.db, targetMonth);
+  async function getArchivedRunByMonth(targetMonth) {
+    const result = await runReadWorker('list-archive-months', { targetMonth });
+    const target = result.months[0] || null;
+    if (target) return target;
+    const diagnostic = result.diagnostics[0] || null;
+    if (diagnostic && diagnostic.hasArchivedEvidence) {
+      throw operationError(
+        'archive-state-inconsistent',
+        `${targetMonth} 的归档结果、主体余额或数据集状态不一致，禁止导出。`,
+        {
+          targetMonth,
+          consistencyReasons: diagnostic.consistencyReasons,
+          context: { targetMonth, consistencyReasons: diagnostic.consistencyReasons }
+        }
+      );
+    }
+    throw operationError(
+      'no-archived-results',
+      `${targetMonth} 暂无已归档财务OP校验结果。`,
+      { targetMonth, context: { targetMonth } }
+    );
   }
 
   function previewUnarchive(payload = {}) {
-    return previewUnarchiveFromDb(database.db, payload.targetMonth, {
-      taskActive: Boolean(activeTask),
-      taskGeneration
-    });
+    return runReadWorker('preview-unarchive', { targetMonth: payload.targetMonth });
   }
 
   function unarchiveMonth(payload = {}) {
@@ -545,18 +629,15 @@ function createVccFinancialOpService({
     });
   }
 
-  function listDeleteTargets(payload = {}) {
-    return listDeleteTargetsFromDb(database.db, payload.targetMonth, {
-      taskActive: Boolean(activeTask),
-      taskGeneration
+  async function listDeleteTargets(payload = {}) {
+    const result = await runReadWorker('list-delete-targets', {
+      targetMonth: payload.targetMonth
     });
+    return result.targets;
   }
 
   function previewDataTargetDeletion(payload = {}) {
-    return previewDataTargetDeletionFromDb(database.db, payload, {
-      taskActive: Boolean(activeTask),
-      taskGeneration
-    });
+    return runReadWorker('preview-delete-target', payload);
   }
 
   function deleteDataTargetData(payload = {}) {
@@ -807,15 +888,15 @@ function createVccFinancialOpService({
     return { targetMonth: yearMonth, results: runs, checks, raw };
   }
 
-  function latestArchivedRun() {
-    const latest = listArchivedResultMonths()[0] || null;
+  async function latestArchivedRun() {
+    const latest = (await listArchivedResultMonths())[0] || null;
     return latest ? getRunReview(latest.runId) : null;
   }
 
   async function exportRun({ targetMonth, outputDirectory, outputPath }) {
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
-      const target = getArchivedRunByMonthFromDb(database.db, targetMonth);
+      const target = await getArchivedRunByMonth(targetMonth);
       return writeRunWorkbooksFn({
         db: database.db,
         runId: target.runId,
@@ -871,6 +952,7 @@ function createVccFinancialOpService({
     getRunResult: getRunReview,
     async terminate() {
       closing = true;
+      await Promise.all([...activeReadWorkers].map((worker) => worker.terminate()));
       await cancelActiveTask();
     },
     _taskStateForTests: () => ({

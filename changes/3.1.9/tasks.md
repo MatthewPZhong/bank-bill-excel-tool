@@ -1,7 +1,8 @@
 # v3.1.9 Tasks
 
 > 本文件按确认 Spec §14 的严格串行顺序维护。PR1/PR2 代码已冻结到
-> `54b6c01fa93751cd723be53af70af726037343b5`；当前仅实施 PR2.5-0 文档合同，PR2 人工验收和后续生产实现仍未完成。
+> `54b6c01fa93751cd723be53af70af726037343b5`；PR2.5-A 已冻结，当前从 A 头实施
+> PR2.5-B 读取性能；PR2 人工验收和后续 C1—PR7 仍未完成。
 
 ## PR1 — 批次身份与数据库迁移
 
@@ -48,7 +49,13 @@
   - [x] Phase 0：在系统临时目录跑通真实 tag migration/import/opening/calculate/archive/current migration 链，核对依赖与 legacy-four shape；仓库零文件改动。
   - [x] Phase 1：实现四个纯合同模块、真实 fixture/manifest、10 个 top-level 聚焦测试与管理文档证据；完整 `release-check` 全绿。
   - [ ] 发布人工/真实环境门禁：目标生产 legacy-four/trigger、主体×九币种与跨月资金结果、Windows packaged runtime、约 16 GB 性能；自动测试不替代。
-- [ ] PR2.5-B：read worker、集合化 evidence、token v2、活动月份/删除目标和读取性能。
+- [x] PR2.5-B：read worker、集合化 evidence、token v2、活动月份/删除目标和读取性能的本地实现与自动证据。
+  - [x] 独立 read-only worker、schema-ready、BEGIN DEFERRED、action allowlist 与 Main generation/active identity 复核。
+  - [x] current/真实 legacy 集合枚举、v2 canonical token、0/1/100 常数 SQL、active visibility 与结构化 inconsistent 诊断。
+  - [x] 一次 DeleteEvidenceV2、renderer shell/loading/skeleton/inline retry、target preview cache 与 refresh-once。
+  - [x] 初次/导出租约内二次 legacy recheck、生产 v2→旧 v1 write 单链 fail-closed，以及旧 v1 实现证据显式隔离。
+  - [x] SQL trace、query-plan、main lag、target cache 与小 fixture gross regression 自动门禁；blindspot/reconciliation/check-vars 已复核，完整 release-check 全绿。
+  - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged 冷/热 P95/WAL、目标生产 legacy/trigger、主体×九币种与跨月资金复核。
 - [ ] PR2.5-C1：mutation guard、adjustment/archive 固定预算与写 worker。
 - [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。
 - [ ] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。

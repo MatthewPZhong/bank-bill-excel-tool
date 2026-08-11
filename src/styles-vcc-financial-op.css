@@ -608,6 +608,35 @@
   overflow: auto;
 }
 
+.vcc-fin-op-manager-skeleton {
+  display: grid;
+  gap: 12px;
+  padding: 28px 20px;
+}
+
+.vcc-fin-op-manager-skeleton span {
+  height: 38px;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #eef1f4 20%, #f8f9fa 50%, #eef1f4 80%);
+  background-size: 200% 100%;
+  animation: vcc-fin-op-skeleton-pulse 1.2s ease-in-out infinite;
+}
+
+.vcc-fin-op-manager-load-error {
+  padding: 42px 20px;
+  color: #a12b20;
+  text-align: center;
+}
+
+.vcc-fin-op-manager-load-error p {
+  margin: 0 0 14px;
+}
+
+@keyframes vcc-fin-op-skeleton-pulse {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
 .vcc-fin-op-record-heading {
   display: flex;
   align-items: center;
