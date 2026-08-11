@@ -1,6 +1,6 @@
 # v3.1.9 Codex Spec — 存档中心全局批次服务、全任务接入、目录化与设置优化
 
-> - status: `confirmed-product-decisions / 待实施`
+> - status: `PR1—PR7 本地实现与自动门禁证据完成 / 待独立评审、用户人工验收、合并与正式发布`
 > - target-version: `3.1.9`
 > - repository: `MatthewPZhong/bank-bill-excel-tool`
 > - baseline-policy: 基于 **GitHub 默认分支 `main` 的 v3.1.8 当前代码** 开发；开工时再次锁定实际 HEAD SHA
@@ -28,7 +28,7 @@
    - **批次已预留、文件归档失败**：业务结果按现有规则保留，批次标记为不完整并进入持久重试。
 8. 所有历史批次、业务事实和审计记录必须可读；不得通过重编号、删除旧表或重写旧 operation key 来“简化”迁移。
 9. 所有新 IPC 都必须经过 preload 白名单、主进程参数校验和退出/迁移互斥；renderer 不得传入任意文件系统路径来绕过 Electron 文件夹选择器。
-10. 完成后必须反向同步：Spec、tasks、test-spec、implementation-notes、CHANGELOG、用户手册、版本功能历史、重要变量清单、预览和发布证据。代码合并前状态保持“待实施 / 待合并”。
+10. 完成后必须反向同步：Spec、tasks、test-spec、implementation-notes、CHANGELOG、用户手册、版本功能历史、重要变量清单、预览和发布证据。PR1—PR6 本地实现完成后可标记“本地实现与自动证据完成”，但代码合并前必须保持“本地发布候选 / 待独立评审、用户人工验收、合并与正式发布”。
 
 ## 0.1 VCC 财务 OP 纠错补遗窄范围 Erratum
 
@@ -1392,8 +1392,8 @@ VCC财务OP主进程 handlers / service / worker
 
 - 版本号 3.1.9；
 - 文档和实施偏差反向同步；
-- release-check、Windows 构建和人工门禁；
-- 正式发布证据。
+- release-check、设置布局/预览、变量门禁与 Windows 交叉构建静态证据已完成；
+- 独立评审、Windows/Excel/WPS/资金人工门禁和正式发布证据仍待完成。
 
 每个 PR 必须可独立评审；后续 PR 不得依赖未提交的本地文件。
 
@@ -1656,27 +1656,23 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 # 18. Codex 完成清单
 
 - [x] C01—C14 已确认并回写（C14=下拉框收起即保存）。
-- [ ] Codex 开工时记录当前 `main` HEAD SHA（版本必须为 v3.1.8 或包含其完整功能）。
-- [ ] 全局日流水和 batch format v2 完成。
-- [ ] `reserveTaskBatch()` 原子分配完成。
-- [ ] task 状态与 archive 状态分离，archiveStatus 保持现库三态。
-- [ ] `parentRunId` / BusinessFlowResolver 生命周期和关联详情 DTO 完成。
-- [ ] 全 action policy registry、裸 IPC 静态 inventory 与 CI 契约完成。
-- [ ] 13 主模块 + 工具箱范围完成。
-- [ ] VCC财务OP全通道登记完成。
-- [ ] 工具箱 merge/split 接入完成。
-- [ ] 历史批次兼容完成。
-- [ ] 年/月/日/批次目录和运行文件完成。
-- [ ] Blob 完整性、去重和重试保留。
-- [ ] 独立 copy 只读保护、外部篡改 repair/fail-closed 与历史 hardlink 脱钩完成。
-- [ ] retention 自动清理同步回收批次目录和空年月日目录。
-- [ ] 存储地址选择、迁移、journal 和恢复完成。
-- [ ] legacy root marker bootstrap 完成；迁移只复制 canonical Blob 并在新根重建 layout。
-- [ ] 统计 DTO 和 UI 完成。
-- [ ] 两行列表、关联任务、按钮、【返回】和“版本管理”完成。
-- [ ] 保留期限即时保存 latest-intent/竞态保护完成。
-- [ ] 测试、预览、Windows 人工门禁完成。
-- [ ] 文档和发布证据反向同步。
+- [x] 开工时已记录 v3.1.8 `main@63c1ce46357587643e506768f712352cbb6c7127` 基线；各串行 PR 的精确冻结头与证据见 preflight/implementation-notes。
+- [x] 全局日流水、batch format v2 与原子任务批次分配完成。
+- [x] task 状态与 archive 状态分离，archiveStatus 保持现库三态。
+- [x] `parentRunId` / BusinessFlowResolver 生命周期和关联详情 DTO 完成。
+- [x] 全 action policy registry、裸 IPC 静态 inventory 与 CI 契约完成。
+- [x] 13 主模块 + 工具箱范围完成。
+- [x] VCC财务OP真实任务全通道登记完成。
+- [x] 工具箱 merge/split 真实输入与最终输出接入完成。
+- [x] 历史批次、标准 v3.1.7 四数据集旧归档兼容完成；未知结构继续阻断。
+- [x] 年/月/日/批次目录、Blob 完整性/去重/重试、独立 copy、历史 hardlink 脱钩、只读、repair/fail-closed 与 retention 目录清理的本地实现和自动证据完成。
+- [x] 存储地址选择、marker、journal、迁移/恢复与 legacy root bootstrap 的本地实现和自动证据完成。
+- [x] 统计 DTO、两行列表、关联任务、按钮、【返回】、“版本管理”和保留期限 latest-intent 的本地实现和自动证据完成。
+- [x] PR1—PR6 聚焦测试、各阶段完整自动门禁和 PR6 预览/布局证据完成，结果见 test-spec/implementation-notes。
+- [x] PR7 最终 `release-check`、设置布局、预览、important-vars、Windows x64 交叉构建、`check:dist` 与更新资产 staging 静态检查完成；本项不替代 Windows runtime 人工验收。
+- [ ] 独立 Sol Ultra 评审、用户 P0/P1 人工验收、合并、tag 和正式发布。
+- [ ] Windows installer/portable runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与资金人工复核。
+- [x] Spec、tasks、test-spec、implementation-notes 和三份用户发布文档已反向同步为本地候选状态；PR7 本地自动门禁与静态构建证据已追加。
 
 ## askUserQuestion 门槛
 

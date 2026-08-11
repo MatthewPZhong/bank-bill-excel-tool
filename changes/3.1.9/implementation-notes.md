@@ -812,6 +812,47 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - 文件/输出血缘审计确认 PR3 登记的 input/output artifact identity、original name、size、SHA、batch/parent/operation/outbox 语义均未改；layout 只增加同 artifact 的派生只读入口。公开 DTO 不暴露内部路径，打开/另存不会把 Excel/WPS 直接指向内部 layout 文件。
 - 本轮不改金额、币种、VCC/Toolbox 业务算法或 Excel 内容。⚠️ Windows packaged、跨卷/网络盘、长根路径、Excel/WPS 原地保存、真实大文件，以及真实输入/输出文件数和内容血缘继续要求人工复核；本机自动化不关闭这些红线。
 
+## PR7 本地发布候选收口（2026-08-11）
+
+### Decisions
+
+- 版本只更新 `package.json`、`package-lock.json` 顶层和根 package 三处为 `3.1.9`；不运行会创建 tag 的版本命令，不改变依赖图。
+- 现有 release-doc test 拆分为当前 v3.1.9 本地候选断言与 v3.1.8 正式发布历史断言。v3.1.8 normalized Spec SHA、人工 6/6、tag、Release 和公开资产证据继续由原测试锁定，不追溯改写。
+- 三份用户文档只新增 v3.1.9 候选入口并更新当前手册的存档中心章节；历史版本条目不重写。用户文案描述批次、任务、VCC/工具箱、目录/迁移和 UI 行为，不暴露内部类名、token、SQL 预算或开发流程标识。
+- PR7 不修改 `src/`、历史 fixture 审计版本、v3.1.8 frozen Spec 或 erratum 副本；若 focused/full gate 发现真实生产回归，立即停止并分类，不为发布通过修改 A—PR6 生产代码。
+- 本地 Windows 交叉构建只作为 artifact/static PROBE；不把 macOS 构建解释为 Windows packaged runtime、session、UNC/网络盘、hardlink 或 Excel/WPS 已验收。
+
+### Assumptions
+
+- 候选文档日期使用本地日期 `2026-08-11`；heading 可带日期，但正文必须明确“本地发布候选，尚未合并或正式发布”。
+- 不新增 `docs/iterations/v3.1.9`；本迭代的现行合同与状态继续由 `changes/3.1.9` 五份管理文档维护。
+- `preview:archive-center` 若位级无变化则不形成 ownership；变量统计和 integration policy 只在对应脚本合法刷新时纳入后续候选提交。
+
+### Evidence（本阶段）
+
+- 编辑前第二次基线核验：branch=`codex/v3.1.9-pr6-archive-ui-stats`，HEAD=`e05c4d01413cf86b0f82a200ef7066f1de227a4f`，parent=`71fcaa3cd6d0e8a19ba84cb94c3726b4d07e7019`，tracked/index clean，无 upstream；随后只创建 `codex/v3.1.9-pr7-release-closeout`。
+- 编辑前 v3.1.8 frozen Spec normalized SHA=`1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`。
+- `node --check tests/unit/vcc-financial-op-release-docs.test.js` PASS。首次 focused release-doc 5/6；唯一失败是用户手册顶栏切到当前 v3.1.9 候选后，v3.1.8 历史资金人工免责声明缺句。分类为历史文案位置变化，将原句恢复到 v3.1.8 历史摘要，测试保护未删除/放宽；第二次 6/6 PASS。
+- 版本/lock 只读检查 3/3=`3.1.9`；基线 lock 仅归一化顶层与根 package 两处版本后与当前 JSON 深比较一致，依赖图无变化。v3.1.8 frozen Spec normalized SHA 仍为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`。
+- 当前 ownership 内 Markdown 相对链接全部解析存在，`git diff --check` PASS。
+- 唯一一次 `release-check` 自然终态 PASS：lint/smoke；unit 5038/5038（329 files）；integration 48/48 scripts、2385/2385 assertions（298984ms），policy 仅在全绿后自动同步。
+- `verify:app-settings-layout` 首次受限环境 `electron exit null`，批准的唯一一次沙箱外重试 6/6 PASS。`preview:archive-center` 成功；新旧图尺寸和内容一致，仅有 0.28856% 像素 RGB 抗锯齿漂移、单通道最大 4/255、alpha 不变，分类 renderer/font/subpixel nondeterminism；最终恢复已保存基线，tracked PNG SHA-256=`d1eae242c8dfc77428c2aae80f2b218f73b6e33323c4d1051b9a8e9fffb86afb` 且零 diff。
+- `scan:vars` 刷新 v3.1.9（320 tracked JS / 4102 top-level names）；`check:vars -- --include-minor` exit 0，`src/` 无改动，零 review 命中。
+- `dist:win` 首次因沙箱内 Wine bind 权限阻断；批准的沙箱外环境重试成功生成 Windows x64 NSIS/portable/blockmap/latest，`check:dist` PASS：asar 62.65 MB、3170 entries、forbidden 0、required 7/7、packaged version 3.1.9。构建全程 `--publish never`；未上传、未发布，且未把 builder 的平台处理日志解释为代码签名。
+- 既有两阶段更新资产合同已核实：electron-builder 为中文品牌原始文件生成 GitHub ASCII safe name metadata，workflow 随后运行 `stage:update-artifacts`。本机 ignored `dist/` 的 3.0.0/3.0.13 等旧产物触发反歧义 guard，分类 local residue/environment；不修改 package/config/check scripts。唯一临时目录 `/private/tmp/pr7-v319-stage.vihzhL` 只复制本次中文 Setup/blockmap/portable/latest 四项，复制前后 size/SHA-256 一致；隔离 staging 与 workflow 等价校验 PASS，ASCII Setup/blockmap/portable 与中文源逐字节相同，`latest.yml` version/path/url/size/SHA-512 与实际 Setup 一致。
+- 最终 ASCII 四项静态证据：`bank-bill-excel-tool-setup-3.1.9.exe` 100313083 bytes / SHA-256 `9df5b1664e64311ffc95061ce00fb49877736847e12d013565ec7fc80aa9f7ee`；对应 blockmap 106325 / `fb808369b28a4861f9535349219141e1b884f96d92be37db691f3375a3624190`；portable 99816214 / `0486cd681981b814fd592512ef320b9d77b0298edb8cd592083be0d720bc3530`；`latest.yml` 369 / `de17fdfcf8051bb48a3862028c512230edd058f59a4d5d310ddfc9f8a24a0a3d`。
+
+### Deviations
+
+无行为或发布合同偏差。布局、Windows 构建的首次失败均为受限环境，按批准只做一次沙箱外重试；预览漂移为渲染非确定性且未纳入提交；本机旧 `dist/` 通过唯一临时目录做非破坏性隔离，没有删除、移动、覆盖旧产物或重复构建。独立 review 与人工验收仍不前移。
+
+### Remaining unknowns / manual gates
+
+- Windows installer/portable 实际 runtime、`createSession/readOnly/query_only/UPDATE FROM`、worker 关闭与写保护仍为 PROBE。
+- 目标生产 legacy-four/trigger、约 16 GB、约 700 万行、跨卷/UNC/网络盘、长路径、hardlink/copy/readonly/repair、Excel/WPS 仍待用户人工。
+- ⚠️ PR2 GUI/崩溃恢复与真实主体×九币种、调整后余额、跨月、归档/解归档/delete、审计、备份恢复和输入输出血缘仍是资金人工红线。
+- 独立 Sol Ultra review、合并、tag、GitHub Release 和公开资产回读未执行。
+
 ### Deviations
 
 - review 反证原 hardlink-first 方案不能用“只读”保证 canonical 与多批次内容隔离；实施改为新 materialization 始终生成独立 copy，历史 hardlink 仅检测并脱钩。主 Spec C11/§8/§9/§15与本记录已同步；Blob/artifact identity、SHA/size、repair 和删除顺序不变。

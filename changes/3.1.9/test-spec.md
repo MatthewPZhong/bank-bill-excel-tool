@@ -517,3 +517,39 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 首次 full lint/smoke PASS、unit 5036/5037；唯一失败是 app-update 旧 static 正则仍要求 archive tab“确认”、下载完成“稍后”，分类 stale test。经批准只机械替换为精确 `closeButton.textContent = '返回'`，同 test 的按钮顺序/status dot/last-checked/observer/下载提示/progress/自动更新开关断言全部保留，最小组 29/29 PASS。第二次且最终 `release-check` exit 0：lint/smoke PASS，unit 5037/5037（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（388472ms）；无第三次 full，runner 仅在全绿后合法同步 policy。
 
 仍开放用户人工门禁：Windows installer/portable 中文字体与原生 select 收起保存、真实盘符/UNC/网络长路径、Excel/WPS 只读副本和另存，以及真实删除后 related live rows、ready 引用总量和不可回退 latest issuance 核对。⚠️ 本轮不改金额、币种、业务算法或 Excel 内容，自动 UI/metadata 证据不关闭既有资金与文件血缘人工红线。
+
+## 二十、PR7 本地发布候选收口矩阵
+
+| ID | 优先级 | 场景 | 最小断言 |
+| --- | --- | --- | --- |
+| REL-01 | P0 | 版本三点一致 | `package.json`、lock 顶层与根 package 精确为 `3.1.9`；依赖图不变；无 tag |
+| REL-02 | P0 | 三份用户发布文档 | CHANGELOG、版本历史、用户手册均有 2026-08-11 本地候选入口；覆盖 PR1—PR6 用户可见行为 |
+| REL-03 | P0 | v3.1.8 历史冻结 | Spec normalized SHA、人工 6/6、annotated tag、Release 和资产断言原样保留 |
+| REL-04 | P0 | 未完成人工门禁 | Windows runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、Excel/WPS 和资金人工明确未通过，不写 released/merged |
+| REL-05 | P1 | 文档结构与链接 | Markdown 行尾、内部链接、版本入口顺序和冻结文件零 diff |
+| REL-06 | P0 | 最终自动门禁 | `release-check`、设置布局、存档预览、scan/check-vars 和 fresh `check:dist` 全部按单次结果记录，不用重跑掩盖首次失败 |
+| REL-07 | P0 | Windows 交叉构建证据 | installer+portable 可生成且包内版本/必需文件/体积通过；macOS 构建不代表 Windows runtime/session/文件系统验收 |
+
+### PR7 最终本地自动证据（2026-08-11）
+
+- 版本只修改 package/lock 三处，不改依赖，不创建 tag。
+- release-doc 测试拆分“当前 3.1.9 本地候选”和“冻结 v3.1.8 正式发布历史”；不新增业务 guard 或组合测试。
+- 三份用户发布文档和五份 v3.1.9 管理文档按本地候选反向同步；`changes/3.1.8/spec.md` 与 erratum 副本保持零修改。
+- `node --check tests/unit/vcc-financial-op-release-docs.test.js` PASS。首次 focused release-doc 为 5/6；唯一失败是用户手册当前版本标题升级后，v3.1.8 历史顶栏里的“自动化与技术 Release 不替代资金人工”句不再存在，分类为历史文案位置变化，不是生产/资金回归。将原句恢复到 v3.1.8 历史摘要，不修改或放宽断言；第二次 6/6 PASS。
+- 只读一致性检查 PASS：版本 3/3=`3.1.9`，将基线 lock 仅归一化两处根版本后与当前深比较一致，依赖图无变化；v3.1.8 frozen Spec normalized SHA 保持 `1f5f0663...bae367d`；本轮 Markdown 相对链接全部存在；`git diff --check` PASS。
+- 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5038/5038（329 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（298984ms），runner 只在全绿后合法刷新 policy。
+- 设置布局首次在受限环境中 6 组均 `electron exit null` 且无 stdout/stderr，分类 environment/PROBE；经批准唯一一次沙箱外重试 6/6 PASS。归档预览命令成功，生成图与基线仅有 0.28856% 像素的 RGB 抗锯齿漂移（单通道最大 4/255、alpha 不变、肉眼布局/内容一致），分类 renderer/font/subpixel nondeterminism；最终 tracked PNG 恢复基线 SHA-256 `d1eae242...86afb` 且零 diff。
+- `scan:vars` PASS：v3.1.9、320 个 tracked JS、4102 个顶层名称；`check:vars -- --include-minor` exit 0，因 `src/` 无改动正常跳过，无 review 命中。
+- `dist:win` 首次在沙箱内被 Wine `bind: Operation not permitted` 阻断，分类 environment/PROBE；经批准沙箱外重试成功生成 3.1.9 x64 NSIS/portable/blockmap/latest，未上传或发布。`check:dist` PASS：app.asar 62.65 MB、3170 entries、禁止路径 0、必需文件 7/7、包内版本 3.1.9。
+- electron-builder 的既有两阶段合同先保留中文品牌产物，再由 `stage:update-artifacts` 生成 ASCII 发布安全名。本机 `dist/` 残留 3.0.0/3.0.13 等 ignored 旧文件使目录级 staging 反歧义 guard 正常拒绝；未删除或覆盖旧产物，也未重建。把本次四项原始文件精确复制到唯一临时隔离目录后，staging 与 release workflow 等价校验 PASS：四项 ASCII 发布资产恰好存在，`latest.yml` version/path/files URL/size/SHA-512 与实际 Setup 一致，三个 ASCII 文件与中文源逐字节一致。
+- ASCII 静态发布资产：Setup 100313083 bytes / SHA-256 `9df5b1664e64311ffc95061ce00fb49877736847e12d013565ec7fc80aa9f7ee`；blockmap 106325 / `fb808369b28a4861f9535349219141e1b884f96d92be37db691f3375a3624190`；portable 99816214 / `0486cd681981b814fd592512ef320b9d77b0298edb8cd592083be0d720bc3530`；`latest.yml` 369 / `de17fdfcf8051bb48a3862028c512230edd058f59a4d5d310ddfc9f8a24a0a3d`。这些仅是 macOS cross-build 静态证据，不代表代码签名或 Windows runtime 已验收。
+
+### 仍待人工且自动测试不替代
+
+- [ ] PR2 GUI、真实崩溃/重启和 statement/Acquiring/Position 资金结果。
+- [ ] Windows installer/portable 实际启动、worker/session、只读连接与受保护写运行时。
+- [ ] 目标生产库标准 v3.1.7 legacy-four 与 trigger 只读检查。
+- [ ] 约 16 GB 冷热性能、WAL、main lag；约 700 万行多 Sheet 工具箱。
+- [ ] 跨盘符、UNC/网络盘、长路径、hardlink/copy/readonly/repair 和存储迁移恢复。
+- [ ] Excel/WPS 打开只读副本、另存、字体/布局/打印和真实文件血缘。
+- [ ] 主体×九币种、调整后余额、跨月期初、归档/解归档/delete、审计及备份恢复资金人工复核。

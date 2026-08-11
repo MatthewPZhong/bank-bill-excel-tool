@@ -1,8 +1,6 @@
 # v3.1.9 Tasks
 
-> 本文件按确认 Spec §14 的严格串行顺序维护。PR1/PR2 代码已冻结到
-> `54b6c01fa93751cd723be53af70af726037343b5`；PR2.5-A 已冻结，当前从 A 头实施
-> PR2.5-B 读取性能；PR2 人工验收和后续 C1—PR7 仍未完成。
+> 本文件按确认 Spec §14 的严格串行顺序维护。PR1—PR6 的本地实现和分阶段自动证据已经完成；当前进入 PR7 本地发布候选收口。PR2 GUI/资金人工、Windows/真实大库/生产库/Excel-WPS 等发布门禁仍未完成，不由既有自动证据替代。
 
 ## PR1 — 批次身份与数据库迁移
 
@@ -65,7 +63,7 @@
   - [x] safe audit-only、unsafe trigger/runtime/schema/session 零数据库 audit、故障注入和生产 Service current 全链聚焦。
   - [x] 机械迁移两条真实 integration 入口并完成最终门禁：lint/smoke、unit 4972/4972、integration 48/48 scripts 与 2372/2372 assertions 全绿。
   - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged P95/WAL/main lag、目标生产 legacy/trigger、主体×九币种与跨月资金复核。
-- [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。
+- [x] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消的本地实现与自动证据完成；约 16 GB 和人工验收仍列于下方未完成项。
   - [x] 复用 C1 单一 policy/registry/guard/claim/dedicated worker；锁内重算 B v2 token，generic destructive route 移除。
   - [x] current `N+7` / 真实 legacy-four `N+6` 解归档，保留 tail/active/unresolved gate 与 Pending 非创建合同。
   - [x] result/opening 五 child 独立 step 及 `1+R+ΣC(+O)` 预算，`first_month` 只读。
@@ -111,4 +109,11 @@
   - [x] 三张确定性 Electron 预览已人工复核；2 viewport×3 zoom、长文本、focus/aria/Tab 顺序、无页面横向溢出与 deferred 竞态 6/6 PASS；Archive 相邻聚焦 221/221 PASS。
   - [x] 首次 full 唯一旧 footer 文案正则经批准机械同步，最小组 29/29；第二次且最终 `release-check` lint/smoke、unit 5037/5037、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 仅在全绿后合法同步。
   - [ ] Windows installer/portable 中文字体与原生 select、真实盘符/网络长路径、Excel/WPS 只读打开/另存、真实批次/关联/删除后 live rows 仍需用户人工验收。
-- [ ] PR7：版本号、发布文档、全门禁与 Windows/财务人工验收。
+- [ ] PR7：版本号、发布文档、最终自动门禁、独立评审与用户人工验收。
+  - [x] `package.json`、`package-lock.json` 顶层及根 package 三处版本精确更新为 `3.1.9`；无依赖变更，不创建 tag。
+  - [x] `CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 同步为本地发布候选，保留 v3.1.8 正式发布历史。
+  - [x] Spec/tasks/test-spec/implementation-notes/preflight 反向同步 PR1—PR6 本地实现与自动证据，状态保持待独立评审、用户人工、合并与正式发布。
+  - [x] PR7 focused 版本/发布文档/Markdown/link/diff 检查；首次 5/6 的历史免责声明缺句已恢复，第二次 6/6 PASS，冻结 hash 与依赖图保持。
+  - [x] 最终 `release-check`、设置布局、存档预览、important-vars、Windows installer+portable 交叉构建、`check:dist` 与隔离 staging 静态检查完成；环境限制和本地旧 `dist/` 残留均已保留分类证据，未改生产配置。
+  - [ ] 独立 Sol Ultra review、PR2 GUI/资金、Windows packaged runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与真实文件/资金血缘人工验收。
+  - [ ] 合并、tag、GitHub Release 和公开资产回读；本地 PR7 不执行这些外部发布动作。

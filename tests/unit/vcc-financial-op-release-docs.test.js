@@ -24,19 +24,39 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.8 版本号与三份用户文档保持正式发布状态', () => {
+test('v3.1.9 版本号与三份用户文档保持本地发布候选状态', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
 
-  assert.equal(packageJson.version, '3.1.8');
-  assert.equal(packageLock.version, '3.1.8');
-  assert.equal(packageLock.packages[''].version, '3.1.8');
+  assert.equal(packageJson.version, '3.1.9');
+  assert.equal(packageLock.version, '3.1.9');
+  assert.equal(packageLock.packages[''].version, '3.1.9');
+  assert.match(changelog, /^## 3\.1\.9 - 2026-08-11$/m);
+  assert.match(history, /^## v3\.1\.9（2026-08-11，本地发布候选）$/m);
+  assert.match(guide, /^版本：`v3\.1\.9`$/m);
+
+  for (const document of [changelog, history, guide]) {
+    assert.match(document, /本地发布候选/);
+    assert.match(document, /尚未合并或正式发布/);
+    assert.match(document, /Windows installer\/portable/);
+    assert.match(document, /Excel\/WPS/);
+    assert.match(document, /约 16 GB/);
+    assert.match(document, /约 700 万行/);
+    assert.match(document, /目标生产库/);
+    assert.match(document, /资金人工/);
+  }
+});
+
+test('v3.1.8 三份用户文档保持正式发布历史', () => {
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+
   assert.match(changelog, /^## 3\.1\.8 - 2026-08-09$/m);
   assert.match(history, /^## v3\.1\.8（2026-08-09）$/m);
-  assert.match(guide, /^版本：`v3\.1\.8`$/m);
   assert.match(guide, /v3\.1\.8 已于 2026-08-09 正式发布/);
   assert.match(changelog, /人工发布门禁 6\/6 通过/);
   assert.match(history, /annotated tag、Windows Release workflow、latest stable Release 和四项公开资产已完成回读/);

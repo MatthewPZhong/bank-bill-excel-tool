@@ -621,3 +621,53 @@
 5. lint/node/diff/check-vars 和 P0→P1 手测；本阶段不 full、不 commit。
 
 Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related 删除刷新、tab/subview/close 生命周期和迁移进度均纳入；不增加不可达 renderer payload 组合。改动不触及金额、币种、匹配、Excel 或业务批次分配；文件总大小只复用 ready artifact 权威血缘，未命中资金红线。
+
+## PR7 本地发布候选收口 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：把 PR1—PR6 的本地实现收口为 v3.1.9 本地发布候选，完成版本、三份用户发布文档、五份管理证据和最小 release-doc 测试；下一阶段再执行全门禁和 Windows artifact PROBE。
+- Context：唯一基线为 `codex/v3.1.9-pr6-archive-ui-stats@e05c4d01413cf86b0f82a200ef7066f1de227a4f`，parent=`71fcaa3cd6d0e8a19ba84cb94c3726b4d07e7019`；tracked/index clean、无 upstream，用户 untracked 保留。
+- Constraints：不改 `src/`、依赖、历史 fixture、v3.1.8 frozen Spec/erratum；不 push/upstream/PR/tag/Release；不把自动化或 macOS 交叉构建写成 Windows/资金人工通过。
+- Done when：版本三点为 3.1.9，三份用户文档同步，管理状态精确，v3.1.8 历史断言保留，focused 文档/version/link/diff 检查通过，并停在代码/文档完成未提交 checkpoint。
+
+### Ownership
+
+- 手工：`package.json`、`package-lock.json`、三份用户发布文档、`changes/3.1.9/{spec,tasks,test-spec,preflight,implementation-notes}.md`、`tests/unit/vcc-financial-op-release-docs.test.js`。
+- 下一阶段合法自动刷新：`rules/integration-test-policy.md`、`docs/analysis/var-reference-stats.{md,json}`；仅实际脚本刷新且内容可解释时纳入。
+- 禁止纳入：`dist/`、`logs/`、ignored `src/build-info.js`、用户 untracked；预览 PNG 无需求变化时不纳入。
+
+### Unknowns Register
+
+| 未知 | 分类 | 处理 |
+| --- | --- | --- |
+| macOS ARM64 能否完成 Windows x64 installer+portable | PROBE | 已确认 Electron/NSIS/Wine 缓存和无签名环境变量；下一阶段真实构建，失败归 environment |
+| preview PNG 是否位级无变化 | PROBE | 下一阶段运行后检查 tracked diff，不把非需求像素差异静默纳入 |
+| integration policy / vars stats 是否刷新 | PROBE | 只接受对应脚本的合法生成差异，记录总数、版本和时间 |
+| v3.1.9 文档日期 | ASSUME | 使用当前本地日期 2026-08-11，并明确候选而非正式发布 |
+| 是否新增 iteration PRD | ASSUME | 不新增；冻结范围只更新现有 `changes/3.1.9` 管理文档 |
+
+当前无 BLOCK。产品合同、版本范围、测试边界和人工门禁均已由 Spec 与负责人批准锁定。
+
+### 自动、构建、评审与人工证据分层
+
+1. 当前阶段：focused release-doc/version、Markdown、内部链接、冻结 hash 和 diff 检查。
+2. 下一阶段自动：`release-check`、设置布局、存档预览、scan/check-vars。
+3. 下一阶段 artifact：fresh `dist:win` 与 `check:dist`；只证明 installer/portable/app.asar 可生成且静态合同成立。
+4. 构建后：由独立 Sol Ultra agents 执行正式 diff review；PR7 owner 不代做负责人 review。
+5. 用户人工：PR2 GUI/资金、Windows runtime、生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 和真实资金/文件血缘。
+6. 外部发布：合并、tag、GitHub Release、上传和公开资产回读均不在本地 PR7 权限内。
+
+### Blindspot / reconciliation 结论
+
+- 旧用户手册将范围写为“12 个模块、VCC 和工具箱不存档”，属于真实入口旁路，PR7 必须按 PR3-VCC/Toolbox 真实任务接线纠正。
+- 现有 release-doc test 将当前 package 版本与 v3.1.8 历史发布证据混在同一测试；PR7 必须拆分当前候选和冻结历史，避免版本 bump 删除历史保护。
+- 旧 `dist/win-unpacked` 是 3.0.x，不能作为证据；fresh 构建后由包内版本检查拒绝陈旧产物。
+- PR7 不触及金额、币种、匹配、计算、Excel writer 或业务事实。⚠️ 所有资金门禁继续 unchecked，自动文档测试和 cross-build 不能关闭。
+
+### 最终本地执行结果
+
+- `release-check`、设置布局 6/6、存档预览、scan/check-vars、Windows x64 installer+portable 交叉构建和 `check:dist` 均取得通过证据；受限环境中的 Electron/Wine 首次失败均单独保留为 environment/PROBE，没有用生产修改掩盖。
+- 预览只出现字体/子像素抗锯齿非确定性，基线 PNG 已精确恢复且不纳入 ownership。变量统计和 integration policy 仅保留对应脚本的合法自动刷新。
+- Windows 更新资产沿用冻结的两阶段合同。因本机 ignored `dist/` 有跨版本残留，使用唯一临时目录非破坏性隔离本次四项原始文件；staging 与 release workflow 等价校验通过，未改 package/config/check scripts，也未删除、移动、覆盖旧产物或重建。
+- 上述只证明 macOS cross-build 的 artifact/static 合同；独立评审、Windows runtime、用户人工、合并、tag、Release、上传和公开回读均未执行。
