@@ -268,3 +268,54 @@
 | 2 | 增加 v3.1.9 窄 erratum 与严格 schedule | C01—C14/PR1/PR2 不漂移，VCC/Toolbox 不混合 | 精确文本检查与人工 diff review | 后续实施边界错误，停止 A | 回退本 PR 文档增量 |
 | 3 | 增量维护 tasks/test/notes | 既有 PR1/PR2 证据和 pending 人工项不被覆盖 | 原证据仍在；A/B/C/PROBE 均未误标完成 | 产生虚假验收，停止交付 | 删除新增节，不改历史节 |
 | 4 | targeted docs gate | 冻结 hash、链接、Markdown 与 docs-only 边界 | normalization、hash/link、diff-check、release-docs 定向测试 | 不进入 review | 修正文档后重跑 |
+
+## PR2.5-A 兼容合同 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：只建立 ArchiveEvidenceV2、生效结果纯校验器、current/legacy/inconsistent classifier、独立 unarchive gate，以及真实 v3.1.7 fixture；不切换现有生产入口。
+- Context：基线为 PR2.5-0 冻结头 `967a3ad91d49c27e62044ee25e57039ca576a0a5`。当前 `unarchive.js` 把 DB 读取、current-only 分类和 gate 耦合，`getEffectiveRunResult()` 仍逐 run 查询；这些读取路径只允许 PR2.5-B 修改。
+- Constraints：四个 `src/backend/vcc-financial-op/` 新模块保持纯函数/DTO 层，零 SQL、零 DatabaseSync、零 task/runtime state、零现有 production consumer 接线；不实现 B 的 loader/worker/token/schema-ready/cache 或 C1/C2 写保护与删除计划。
+- Done when：纯结果证据重算 rowKey、调整 sequence/revision、基础余额公式和九币种有效余额；classifier 精确区分 current-five、legacy-v3.1.7-four 和 inconsistent；gate 与 classifier 正交；真实 tag fixture 经 current migration 后分类 legacy；自动证据不替代真实旧库和财务人工门禁。
+
+### Phase 0 已确认事实
+
+| 事实 | 证据 | 对实现的约束 |
+| --- | --- | --- |
+| tag 与 commit 精确 | `v3.1.7^{commit}=1117c8b7d047cf408807b023368c63123a90d81f` | 生成器必须先核 tag/commit，再从 tag 源调用真实入口 |
+| tag/current 依赖锁一致 | 两份 lock 除根版本号外等价；xlsx 0.18.5、sax 1.6.0、yauzl 3.3.0、buffer-crc32 0.2.13、pend 1.2.0、Electron 36.9.5 均一致 | 生成证据记录 declared/locked/resolved 版本与真实路径，不静默借用未核依赖 |
+| 真实 tag 链可完成 | tag migration → inspect/import 四文件 → initializeOpeningBalances → calculateMonth → archiveRun → close/reopen 全部成功 | 禁止手工 INSERT 业务表模拟旧库 |
+| tag 原始 run 没有三个新列 | `result_revision/input_fingerprint/updated_at` 在 v3.1.7 schema 物理不存在 | manifest 必须区分 column absent 与 SQL NULL |
+| current migration 得到精确 legacy shape | 新列为 `result_revision=0`、`input_fingerprint IS NULL`、`updated_at=archived_at`；四 dataset archived/run 对齐，adjustment/Pending 全 0 | classifier 不以“缺 Pending”单条件猜 legacy，也不放宽为 empty fingerprint |
+| 资金结果可逐坐标解释 | PPHK 九币种：USD 期初100+发生额8=108，EUR 100+3=103，其余100；archive 与 stored calculated balance 一致 | 纯校验器必须重算公式并按 effectiveCalculatedBalance 比 archive |
+
+原型实际运行于 macOS arm64 / Node 24.13.0 / SQLite 3.50.4；同一锁定 Electron 36.9.5 的只读 runtime probe 为 Node 22.19.0 / SQLite 3.50.4。Windows packaged runtime 仍是发布 PROBE，不由本机证据关闭。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| tracked 生成器能否复现同一业务 shape | Fixture | 高 | PROBE：由脚本重新生成 DB/manifest 并校验 manifest 与文件 SHA | 失败即停止，不复制 Phase 0 临时 DB 或手修二进制 |
+| 纯 classifier 是否接受真实 migrated fixture | 兼容 | 高 | PROBE：测试复制 fixture、current migration、close/reopen 后构造同一 ArchiveEvidenceV2 | 不符先修实现或合同，禁止 fallback |
+| 真实生产旧库是否为标准 legacy-four | 数据兼容 | 高 | PROBE / 上线前完整副本只读 inspect | 非标准一律 inconsistent |
+| 主体、九币种、跨月与审计是否符合真实财务事实 | 资金 | 高 | ⚠️ 财务人工复核 | 自动测试不得宣称关闭 |
+
+当前无 BLOCK。Phase 0 首次工作簿把方向写成中文“入/出”，tag importer 以真实 `format_error` 拒绝，属于测试设计错误；改为 tag 合同 `in/out` 后重建全新临时库通过，未手工补表或放宽生产约束。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 最小成功证据 | 停止条件 |
+| --- | --- | --- | --- |
+| 1 | 纯 result evidence | valid adjusted current 与各独立资金/血缘 invariant 的一个 table-driven 反例 | 需要 DB/SQL 或默认容错 |
+| 2 | archive evidence/classifier/gate | current、真实 legacy、单一 Pending SQLite 变异与 gate 正交 | current 失败后尝试 legacy fallback，或 structural reasons 混入 task/later/import |
+| 3 | tag 生成器与 manifest | 真实函数链、schema/counts/run/revisions/九币种/DB SHA 可追溯 | 需要手工业务 INSERT、复制临时 DB 或依赖版本漂移 |
+| 4 | 聚焦门禁与人工边界 | 10 个 top-level 测试、syntax/lint/diff/check-vars；资金人工项保持 pending | 自动 PASS 被写成真实旧库/财务验收结论 |
+
+### Phase 1 收敛证据
+
+- tracked 生成器已从 tag 重新运行真实链并生成 fixture/manifest；未复制 Phase 0 临时 DB，也没有手工业务 INSERT。生成时 DB SHA 为 `6de511e630c420b60fa5dc1d858fd0cd40fb7261b33503756abf6dba6b57952b`，source/current-migrated schema hash 分别为 `237871d5b4534b3c57d8f2059214a75b85a633054494bb3707a0e6f2d23970ba`、`b168643ede7071e5c01c395b11bbc8e4be2a8d1b71e0c2189ac6149016fb83c1`。
+- generator SHA、fixture SHA、依赖版本/相对解析路径、schema/counts/run/revisions/主体×九币种和 current migration probe 均写入 manifest；输入 workbook hash 明确只作当次 generation provenance。
+- pure modules 静态检查为零 SQL/DatabaseSync/现有 production consumer 接线；task/runtime state 只存在于独立 gate evidence DTO，不进入 structural classifier。
+- Unknowns 中 tracked 复现与 pure classifier 接受真实 migrated fixture 两项已消除；真实生产旧库、Windows、16 GB 与财务人工继续保留 PROBE。
+- 最终本地门禁第二轮 `release-check` 全绿：lint/smoke PASS，unit 4940/4940（317 files，0 fail/skip），integration 48/48 scripts、2459/2459 assertions。首轮唯一失败是既有大文件拆分 RSS 样本恰等于严格 `<150MB` 上限；原脚本独立复跑 31/31、第二轮完整门禁 31/31，确认环境边界波动，未改阈值、未加重试、未改 PR2.5-A 代码。
+- integration runner 只在第二轮全绿后自动刷新 `rules/integration-test-policy.md` §七的 timestamp/timings，总数保持 48/2459；该生成证据按仓库惯例保留，未手工编辑。

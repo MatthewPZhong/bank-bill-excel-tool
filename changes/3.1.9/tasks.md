@@ -44,7 +44,10 @@
 
 ## 后续 PR（当前分支不实施，全部串行）
 
-- [ ] PR2.5-A：ArchiveEvidenceV2、生效结果纯校验器、classifier/gate 与真实 v3.1.7 fixture。
+- [x] PR2.5-A：ArchiveEvidenceV2、生效结果纯校验器、classifier/gate 与真实 v3.1.7 fixture；实现与本地自动门禁完成。
+  - [x] Phase 0：在系统临时目录跑通真实 tag migration/import/opening/calculate/archive/current migration 链，核对依赖与 legacy-four shape；仓库零文件改动。
+  - [x] Phase 1：实现四个纯合同模块、真实 fixture/manifest、10 个 top-level 聚焦测试与管理文档证据；完整 `release-check` 全绿。
+  - [ ] 发布人工/真实环境门禁：目标生产 legacy-four/trigger、主体×九币种与跨月资金结果、Windows packaged runtime、约 16 GB 性能；自动测试不替代。
 - [ ] PR2.5-B：read worker、集合化 evidence、token v2、活动月份/删除目标和读取性能。
 - [ ] PR2.5-C1：mutation guard、adjustment/archive 固定预算与写 worker。
 - [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。

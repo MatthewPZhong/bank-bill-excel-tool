@@ -99,7 +99,7 @@
 | 第三轮负责人最终 review | 无 P0/P1、无过度防御；独立复跑 controller、Position lifecycle、renderer Position 三个文件 63/63 PASS | tombstone 短路、DB read fallback 与真实 Position 接线通过提交前 review |
 | 静态与重要变量门禁 | 相关生产/测试 `node --check` PASS；ESLint PASS；`check-vars -- --include-minor` 自动无命中；base→working tree 与当前增量 diff-check PASS | controller 方法不改变 IPC/preload、retention、skipArchive、重试、Blob/序号行为；按 Important-skeleton 定义位置人工复核未见漂移 |
 
-### Remaining Unknowns
+### Remaining Unknowns（Phase 0）
 
 无本轮 BLOCK。flush/delete 竞态在当前生产调用图不可达；若未来增加运行期 flush 入口，应在该新入口设计中重新评估串行化，而不是在 PR1 预造协调机制。
 
@@ -348,3 +348,48 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 | 真实 v3.1.7 fixture、目标 legacy-four 与生产 trigger | PROBE | A 阶段生成真实 fixture；上线前完整副本只读 inspect | 不符不放宽 classifier；阻断对应合并/发布 |
 | packaged runtime `createSession/readOnly/query_only/UPDATE FROM` | PROBE | C1/C2 与 Windows installer/portable feature test | 不可用则阻断，不降级无保护提交 |
 | 约 16 GB 性能与财务人工复核 | PROBE / ⚠️ 人工资金红线 | B/C 性能报告；财务逐主体×九币种、跨月和审计复核 | 阻断发布；自动测试不能替代 |
+
+## PR2.5-A 兼容合同 Implementation Notes（实施中）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| A 只新增四个纯合同模块 | 当前 `unarchive.js` 把 SQL/state/classifier/gate 耦合；TechDoc 把集合读取明确归入 B | 不改现有 unarchive/result/service exports，不提前做 loader/worker/token/cache |
+| result evidence 从 raw rows 重算 | 现有 `result-adjustments.js` 已冻结 rowKey、金额、sequence、metadata、基础/有效余额语义 | 复用 `buildRunRowKey`、金额和九币种语义；不相信 SQL boolean 摘要，不逐 run 查询 |
+| 通用结构检查先于 current/legacy | TechDoc §5.2 要求通用失败直接 inconsistent | 不做 current 失败后 legacy fallback，不按 app version/time/file name 猜测 |
+| fixture 由生成器真实运行 tag | Phase 0 证明 importer 四类、期初、计算、归档链可达 | 不用当前 schema 手工 INSERT，不从临时 probe 复制后二次修补 |
+| manifest 的 DB SHA 是 generation-time 证据 | tag 使用 SQLite localtime，跨时间重生字节可能不同 | 不宣称跨次 DB SHA 恒定；输入 workbook hash只记录本次 provenance，不作为跨次稳定断言 |
+
+### Phase 0 Evidence
+
+- tag close/reopen：schema hash `7d77867f868356074eec0c4428c332ca7f0d36cd770334edc58b28eb9c6a5cb7`，DB SHA `ff6edac077fa9f4f13a72ab2e509e4ccefa01729e869b7a6b9430f1661ca994c`；四 datasets、三 effective/run rows、九 balances、一个 archive，Pending 全 0，adjustment 表尚不存在。
+- current VCC migration close/reopen：schema hash `a6a7b42c08db101b24930ce805580ce1d1adc7e35ee53de17796248bb27fcb05`，DB SHA `438a8952d6e21b3b56eac329d0560c514a3b6ac7a3443edb2793ba1c3c06b3d4`；业务 counts/金额不变，新增 result revision 0、SQL NULL fingerprint、adjustments 0。
+- 首次临时输入失败分类为测试设计错误：方向 token 应为 `in/out`，中文值被 tag importer 正常拒绝；生产合同无需修改。
+
+### Deviations
+
+无。当前实现边界与 TechDoc v1.1、负责人批准的 ownership 和 10 个 top-level 测试计划一致。
+
+### Remaining Unknowns
+
+- tracked fixture/manifest 尚待生成器重新生成，Phase 0 临时 SHA 仅作原型证据。
+- 真实旧库、Windows packaged runtime、约 16 GB 和财务人工复核仍未完成；均不得由 A 的自动测试替代。
+
+### Phase 1 Evidence
+
+- tracked 生成器重新生成 raw fixture/manifest；generation-time DB SHA `6de511e630c420b60fa5dc1d858fd0cd40fb7261b33503756abf6dba6b57952b`。跨时间 SHA 与 Phase 0 不同，符合 tag SQLite localtime 事实，没有回写时间或伪造确定性。
+- `buildArchiveEvidenceV2()` 只排序/派生 rowKey/调用纯 validator；`validateEffectiveResultEvidence()` 从 raw rows、adjustments、stored balances 重算 sequence/revision/base/effective 九币种；classifier 先做通用合同，再按 exact dataset set 进入唯一 current 或 legacy 分支；gate 只消费 contract result 和 UnarchiveGateEvidence。
+- 静态盲区检查确认四个新生产文件无 SQL、DatabaseSync、loader/worker/token/schema/cache、现有 production consumer 或 task 状态读取。`archive-state-inconsistent` / `dataset-archive-state-mismatch` 中的单词 `state` 触发 check-vars Runtime-state 扫描，但未定义或修改 `src/renderer.js` 全局 `state`，属于可忽略同词命中。
+- reconciliation 检查锁定 run/dataset/archive FK、rowKey metadata、subject×currency 唯一、sequence/revision、基础公式、有效余额和 archive 对账；A 零写入、零部分提交。真实主体/九币种/跨月资金复核仍为人工红线。
+- Root diff review 的 P1 metadata probe 把物理可为 NULL 的 `run_rows.source_type` 置空后，发现 evidence builder 在 validator 前抛出既有 `invalid-run-row-metadata`。修复只收敛该精确错误为缺失 rowKey sentinel，并按既有 nullish metadata 语义交给 result validator 记录 violation；其它异常继续抛，classifier 对损坏证据结构化归 `inconsistent`。
+- Root diff review 的 P1 provenance 修复在 A-05 现有正例内同时核对当前 generator 文件 SHA、manifest `generator.sha256` 和 fixture generation-time DB SHA；脚本变化必须重新生成 manifest/fixture，不新增 top-level 测试。
+- Review 修复首次聚焦 17/18：唯一失败是新增 classifier 断言误要求只有一个 reason；缺失基础行同时令 effective archive 金额不符，生产正确返回 `effective-run-result-invalid` 与金额 mismatch，分类为测试设计错误。断言收窄为 review 要求的“不抛、包含通用 reason、contract 为 inconsistent”，未放宽 classifier。
+- 修正后聚焦 18/18 PASS（仍为 10 个 top-level，A-02 八个 table-driven 子项）；相关 `node --check`、`npm run lint`、`git diff --check` PASS。复跑 check-vars 仍只命中 reason/code 中的 Runtime-state 同词 `state`，无代码变量或关联功能变化，沿用既有人工 review 结论。
+- `targetMonth` 被手工错配属于 B loader 尚未接线时的 Service 可构造反例；TechDoc 已要求 B 按 `target_month/run_id` 分组，本 PR 不添加无真实入口证据的 guard/test，留待 B 接线 review。
+- 完整门禁首轮 lint/smoke PASS、unit 4940/4940，integration 47/48；唯一失败为既有 `toolbox-large-split-multi-sheet` 的 tier2 RSS 样本 `[150,135,135]MB` 含一个恰等于严格 `<150MB` 上限，30/31。独立原脚本复跑 31/31（tier1 `[88,88,87]MB`、tier2 `[137,133,137]MB`），分类为环境边界采样，不改阈值、不加 retry、不修改生产或测试。
+- 第二次完整 `npm run release-check` exit 0：lint/smoke PASS；unit 4940/4940（317 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions（311123ms）。runner 全绿后自动刷新 policy §七 timestamp/timings，总数不变并按生成证据保留。
+
+### Remaining Unknowns（收敛后）
+
+- 目标真实生产旧库 legacy-four/trigger、Windows packaged runtime、约 16 GB 与财务人工复核仍未完成；阻断对应 merge/release，不影响 A 纯合同代码 review。
