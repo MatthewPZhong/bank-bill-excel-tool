@@ -642,6 +642,16 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - latest 发行证据和 live status 分离，删除后不从 visible max 倒推；related 删除后由新详情查询只消费剩余 live rows。ready 引用总量、runCount 和 UI 展示不改变 artifact/blob/batch identity、PR4 layout 或 PR5 marker/journal/delegate。
 - 本轮不改金额、币种、业务算法、Excel 内容、TaskLifecycle/terminal CAS 或输入输出 artifact 血缘。⚠️ 自动 metadata/UI 测试不替代真实文件引用计数、删除顺序、输入输出内容与资金人工复核。
 
+### Reviewer-confirmed P1 状态展示修复（2026-08-12）
+
+- 基线为 PR7 本地收口头 `80f54142e815a83516befc89bd6a8da759ff036a`，在同一分支追加独立 review-fix，不切回或重写 PR6 历史。Service `publicBatchDetail` 与 Controller `_mapBatch` 已原样保留 repository `taskStatus`，故 production ownership 只需 renderer 投影，不改 schema、Repository、Service、Controller、TaskLifecycle 或 terminal CAS。
+- 详情“业务状态”新增独立 task 投影：`reserved/running/succeeded/failed/cancelled` 分别为“已预留/运行中/已完成/任务失败/已取消”，可用 `taskStatusText` 时优先显示；仅 legacy 无 task status 时回退 `businessStatusText/businessStatus`。批次列表和详情“存档状态”继续只读 `archiveStatus`，合法 `staging` 映射为 pending/“处理中”，不把任务失败折叠到存档三态。
+- preview API 与 Electron fixture 移除不可能的 batch `archiveStatus='failed'` 及手填“已完成”遮蔽，改为真实组合：failed/cancelled + complete + 空 legacy business status，以及 running + staging。首次 UI static 24/24、Archive 邻接 222/222、Electron 2 viewport×3 zoom 6/6 PASS；详情依次证明“任务失败/存档完成”“已取消/存档完成”“运行中/处理中”，staging 列表同为“处理中”，无 `-`/“状态未知”。
+- 默认与 150% browser 预览因审计文案预期变化而重新生成并人工复核；变化仅为任务/存档状态文字和颜色，严格两行、related、按钮、长文本与布局未漂移。settings preview 不受影响。
+- 最终 `npm run lint`、本轮三个 owned JS 的 `node --check` 与 `git diff --check` PASS。`npm run check:vars:release` 从 peeled v3.1.8 baseline 扫描 75 个生产文件，按既有发布合同 exit 2：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4；本轮只新增 renderer 审计投影，不改变命中项中的持久化状态机、金额/币种、文件身份或输出链路。
+- 本轮唯一一次完整 `npm run release-check` 自然终态 exit 0：lint、smoke PASS；unit 5047/5047（331 files，0 fail/skip，node test 16800.455916ms）；integration 48/48 scripts、2385/2385 assertions（385157ms）。focused、Electron 与 full 均无 production/stale-test/test-design/environment failure；runner 只在全部 integration PASS 后合法自动同步 `rules/integration-test-policy.md` §七。
+- Blindspot 结论：真实数据流仍是 repository task/archive 双状态 → Service/Controller 透传 → renderer 分列展示，无第二状态源、状态推断或入口旁路；legacy fallback 只在 task status 缺失时生效。Reconciliation 结论：本轮仅修审计可见性，不改变金额、币种、方向、业务状态持久化、文件/批次 identity、重试/删除或 Excel 输出；未命中新增资金红线。真实失败/取消批次在 Windows packaged UI 的可见性仍需人工手测。
+
 ### Remaining Unknowns
 
 - Windows packaged 中文字体 fallback、原生 select 收起时点、真实长盘符/网络路径和 Excel/WPS 打开副本仍需人工验收。

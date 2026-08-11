@@ -108,6 +108,7 @@
   - [x] 批次列表严格两行；详情使用 live structured relatedBatches 同日/跨日分组，点击只切 existing selectedBatchId；锁定、打开、另存为文字/图标及无障碍合同完成。
   - [x] 三张确定性 Electron 预览已人工复核；2 viewport×3 zoom、长文本、focus/aria/Tab 顺序、无页面横向溢出与 deferred 竞态 6/6 PASS；Archive 相邻聚焦 221/221 PASS。
   - [x] 首次 full 唯一旧 footer 文案正则经批准机械同步，最小组 29/29；第二次且最终 `release-check` lint/smoke、unit 5037/5037、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 仅在全绿后合法同步。
+  - [x] reviewer P1：详情按真实 taskStatus 显示五态，列表/详情 archiveStatus 保持独立三态且 staging 为“处理中”；真实 fixture、UI static 24/24、Archive 邻接 222/222、Electron 6/6、两张 browser 预览视觉复核及唯一 full（unit 5047/5047、integration 48/48）通过。
   - [ ] Windows installer/portable 中文字体与原生 select、真实盘符/网络长路径、Excel/WPS 只读打开/另存、真实批次/关联/删除后 live rows 仍需用户人工验收。
 - [ ] PR7：版本号、发布文档、最终自动门禁、独立评审与用户人工验收。
   - [x] `package.json`、`package-lock.json` 顶层及根 package 三处版本精确更新为 `3.1.9`；无依赖变更，不创建 tag。

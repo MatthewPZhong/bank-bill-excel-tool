@@ -509,6 +509,7 @@ P0 本机手工/真实 FS 证据已按自动链顺序复核：精确目录和无
 | UI-10 | P1 | renderer/a11y | 操作按钮 | 未锁 `🔒`、已锁 `🔓`；打开为文字“打开”；另存为 `💾`；title/aria 精确；Tab 顺序 related→lock→open→save |
 | UI-11 | P1 | Electron/layout | viewport/zoom/长文本 | 1240×860、1080×760 × 100/125/150%；filters 不裁切、页面无横向溢出、当前/旧批次号可辨识、related 同标题行、actions 不遮挡 |
 | UI-12 | P1 | preview | 可复现视觉证据 | settings、browser、browser 150% 三张仓库资产由确定性 fixture 生成；长路径/模块/旧号/跨日 related/按钮人工复核 |
+| UI-13 | P1 | renderer/status audit | task/archive 独立可见 | 详情 failed/cancelled 分别显示“任务失败/已取消”且 archive complete 仍显示“存档完成”；running+staging 显示“运行中/处理中”；列表第二行只显示 archiveStatus，合法 staging 不得为 `-`/“状态未知” |
 
 执行证据：开工前 repository/service/controller/UI 定向 73/73 PASS。首次 backend 聚焦 55/56，唯一失败为新增第二条 structured related live row 后旧 fixture 仍断言批次数 1，分类 stale test；更新为真实 live 集合后 56/56 PASS。UI 静态首次 15/20 为冻结字符串与 DOM 合同的 stale tests，机械同步后 23/23 PASS。Electron 首两轮分别因异步详情尚未加载就取节点、脚本 `.focus()` 不会触发真实 keyboard modality 而 0/6，均为 test design；改为等待真实详情和 static CSS + activeElement 合同后 6/6 PASS。人工预览另发现 150% 窄宽下 filters 裁切、批次号不可辨识的真实布局问题，响应式修复后加入几何/Tab 代表断言并最终 6/6 PASS。
 
@@ -517,6 +518,8 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 首次 full lint/smoke PASS、unit 5036/5037；唯一失败是 app-update 旧 static 正则仍要求 archive tab“确认”、下载完成“稍后”，分类 stale test。经批准只机械替换为精确 `closeButton.textContent = '返回'`，同 test 的按钮顺序/status dot/last-checked/observer/下载提示/progress/自动更新开关断言全部保留，最小组 29/29 PASS。第二次且最终 `release-check` exit 0：lint/smoke PASS，unit 5037/5037（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（388472ms）；无第三次 full，runner 仅在全绿后合法同步 policy。
 
 仍开放用户人工门禁：Windows installer/portable 中文字体与原生 select 收起保存、真实盘符/UNC/网络长路径、Excel/WPS 只读副本和另存，以及真实删除后 related live rows、ready 引用总量和不可回退 latest issuance 核对。⚠️ 本轮不改金额、币种、业务算法或 Excel 内容，自动 UI/metadata 证据不关闭既有资金与文件血缘人工红线。
+
+Reviewer-confirmed UI-13 增量证据（2026-08-12）：Service/Controller 只读核验确认 `taskStatus` 已真实透传，无后端改动。首次 UI static 24/24、Archive 邻接 222/222、Electron 2 viewport×3 zoom 6/6 PASS；fixture 使用 failed/cancelled+complete+空 legacy business status、running+staging 的真实形状，详情与列表文字精确通过且不出现 `-`/“状态未知”。默认与 150% browser 预览按预期审计文案变化重新生成并人工复核；严格两行、related、retention、a11y、Tab 与布局合同不变。lint、三个 owned JS node-check、diff check PASS；release check-vars 按既有全版本合同 exit 2 并完成 75 个生产文件 review；唯一 full release-check lint/smoke、unit 5047/5047、integration 48/48 scripts（2385/2385 assertions）全绿，policy 仅在全绿后自动同步。真实 Windows packaged 失败/取消批次可见性继续保留人工验收。
 
 ## 二十、PR7 本地发布候选收口矩阵
 
