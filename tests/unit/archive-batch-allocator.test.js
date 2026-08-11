@@ -175,8 +175,7 @@ test('v1 旧库纯加法迁移保持历史身份与 archiveStatus 三态，并�
     assert.equal(artifact.storageRelativePath, '');
     assert.equal(artifact.storageMode, '');
     assert.equal(artifact.safeFileName, '');
-    assert.equal(artifact.artifactOrder, null);
-
+    assert.equal(artifact.artifactOrder, 1);
     assert.deepEqual(
       { ...db.prepare(`SELECT local_date, last_sequence FROM archive_daily_sequences`).get() },
       { local_date: '2026-08-09', last_sequence: 5 }
@@ -228,6 +227,14 @@ test('v1 旧库纯加法迁移保持历史身份与 archiveStatus 三态，并�
       /constraint/i
     );
     assert.equal(repository.getBatch(firstId).archiveStatus, 'complete');
+    const appendedArtifact = repository.addArtifact(firstId, {
+      artifactKey: 'post-migration-artifact',
+      direction: 'output',
+      role: 'result',
+      originalName: 'new.xlsx',
+      sourcePath: '/new.xlsx'
+    });
+    assert.equal(appendedArtifact.artifactOrder, 2);
   } finally {
     db.close();
   }
@@ -567,10 +574,16 @@ test('task terminal 按 artifact 聚合 archiveStatus，且不把业务终态写
       originalName: 'ready.xlsx',
       sourcePath: '/ready.xlsx'
     });
-    repository.completeArtifact(readyArtifact.id, {
+    const readyCompleted = repository.completeArtifact(readyArtifact.id, {
       sha256: 'a'.repeat(64),
       sizeBytes: 1,
       relativePath: 'blobs/aa/ready'
+    });
+    repository.completeMaterialization(readyCompleted.artifact.id, {
+      storageMode: 'copy',
+      storageRelativePath: `2026/2026-08/2026-08-09/${readyBatch.batchNumber}/ready.xlsx`,
+      safeFileName: 'ready.xlsx',
+      artifactOrder: readyCompleted.artifact.artifactOrder
     });
     const readyTerminal = repository.transitionTaskStatus(readyBatch.id, 'cancelled', {
       reason: '用户取消后处理'
@@ -606,10 +619,16 @@ test('task terminal 按 artifact 聚合 archiveStatus，且不把业务终态写
       originalName: 'recovered.xlsx',
       sourcePath: '/recovered.xlsx'
     });
-    repository.completeArtifact(recoveredArtifact.id, {
+    const recoveredComplete = repository.completeArtifact(recoveredArtifact.id, {
       sha256: 'b'.repeat(64),
       sizeBytes: 1,
       relativePath: 'blobs/bb/recovered'
+    });
+    repository.completeMaterialization(recoveredComplete.artifact.id, {
+      storageMode: 'copy',
+      storageRelativePath: `2026/2026-08/2026-08-09/${registrationFailedBatch.batchNumber}/recovered.xlsx`,
+      safeFileName: 'recovered.xlsx',
+      artifactOrder: recoveredComplete.artifact.artifactOrder
     });
     const recovered = repository.getBatch(registrationFailedBatch.id);
     assert.equal(recovered.failureCount, 1);

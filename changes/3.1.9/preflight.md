@@ -492,3 +492,38 @@
 | 3 | normal merge/export artifact | dialog 全 prepare；reserve failure 0 algorithm；N input+全部 final output | tmp 被登记、公开返回 shape 改变或 archive 掩盖业务结果 |
 | 4 | large/multi/publication | side-effect dispatch/worker required exact7；一个 batch/parent 覆盖所有输出 | worker reserve/reopen 或分支创建第二批次 |
 | 5 | 聚焦回归与人工边界 | roundtrip/large/multi-sheet/行数/格式回归、lint/node/diff/check-vars | 自动 PASS 被写成 Windows/Excel/WPS/16GB/资金人工验收 |
+
+## PR4 年/月/日/批次目录化 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：在 canonical SHA-256 Blob 保持唯一完整性真相的前提下，为 ready artifact 建立 `{root}/YYYY/YYYY-MM/YYYY-MM-DD/{batchNumber}/` layout v2，并闭合读取修复、历史续跑和物理回收。
+- Context：PR1/PR2 已提供 Blob 去重、artifact/batch、保留期、手工删除、启动 reconcile 和按 root 串行机制；PR3 已把实际输入/输出交给同一 ArchiveService。
+- Constraints：日期只取 `archive_batches.local_date`，批次目录只用真实 batchNumber；不改 artifact/blob identity、批次号/retention/TaskLifecycle/业务算法；不实现 PR5 root marker/journal/migration/capacity 或 PR6 UI；【打开】与【另存为】仍只交安全副本。
+- Done when：稳定安全命名、hardlink/能力失败 copy、DB size/hash 校验和只读、无空业务目录、layout 失败不回滚 Blob、layout-first read/repair、历史续跑、共享引用安全回收和 durable cleanup-pending 均有真实 FS 证据。
+
+### 已批准 schema 与派生状态
+
+- 复用 `archive_artifacts.storage_relative_path` 作为 layout v2 materialized relative path，绝不新增 `materialized_relative_path` 同义列。
+- 只新增 `materialization_error_code`、`materialization_error_message`、`materialization_failed_at` 三列；`last_error_*` 继续只属于 canonical ingest。
+- `legacy/pending = ready + v1/无有效 path + materialization error null`；`materialized = ready + v2 完整 path/mode/name/order + error null`；`repair-pending = ready + materialization error` 或校验发现 v2 无效后持久化错误。
+- 新增单一 `archive_cleanup_jobs`：一条 job/原 batch，以稳定 JSON arrays 保存 DB-authoritative 相对路径 payload；不加 child table 或第二套 cleanup tracker。
+
+### 调用图与风险优先顺序
+
+`TaskLifecycle/OperationTracker → ArchiveService register/stage/publish → repository.completeArtifact → materialize`
+
+`controller open/saveAs → layout v2 校验 → canonical Blob fallback + 同 artifact repair → readonly/saveAs copy`
+
+`manual delete / cleanupExpired / startup → 同一 root serialization → cleanup job executor`
+
+1. 纯 layout/name/materializer 与真实 FS 测试；稳定 path/name、严格 hardlink fallback、hash/size/readonly先成立。
+2. repository additive schema、artifact order/layout evidence 和 delete txn cleanup job。
+3. service 写入、ready short-circuit 修复、layout-first read、历史 resume、manual/retention/startup 共用物理回收。
+4. 聚焦回归、P0→P1 人工清单、blindspot/reconciliation/check-vars；不运行 full，不提交。
+
+### Unknowns 与人工门禁
+
+- 当前无 BLOCK。hardlink fallback 只接受 `EXDEV/EACCES/EPERM/ENOTSUP/EOPNOTSUPP/ENOSYS/EMLINK` 等真实能力错误；任意其它错误不得降级 copy。
+- Windows hardlink/权限/跨卷、网络盘、长路径、Excel/WPS、真实大文件仍为 PROBE；本机自动测试不得宣称关闭。
+- ⚠️ 文件身份、SHA/size、共享引用、删除顺序、只读与输入/输出血缘是人工复核红线；materialized 文件永不反向吸收为新 Blob/hash。

@@ -575,9 +575,19 @@ storage_mode TEXT NULL      -- hardlink | copy | legacy-blob
 storage_layout_version INTEGER NOT NULL DEFAULT 1
 safe_file_name TEXT NULL
 artifact_order INTEGER NULL
+materialization_error_code TEXT NULL
+materialization_error_message TEXT NULL
+materialization_failed_at TEXT NULL
 ```
 
 `original_name` 继续保留业务文件名；安全目录名不得覆盖原始显示名。
+`storage_relative_path` 是 layout v2 materialized 文件在存档根下的相对路径，不再新增同义路径列。目录化状态由既有 canonical 状态和上述字段派生，不新增第二套状态列：
+
+- `legacy/pending`：artifact 为 `ready`，但仍是 layout v1/无有效路径，且目录化错误为空；
+- `materialized`：artifact 为 `ready`，layout v2 的 path/mode/name/order 完整，且目录化错误为空；
+- `repair-pending`：artifact 为 `ready`，但目录化错误非空，或启动/读取校验发现 v2 证据无效后写入错误。
+
+`last_error_code/last_error_message` 只描述 canonical ingest；目录化失败不得改写 canonical `status/blob_id`。修复成功清空三个 `materialization_error_*` 字段。
 
 ## 6.5 新设置项
 
@@ -862,10 +872,14 @@ YYYY/YYYY-MM/YYYY-MM-DD/{旧批次号}/
 规则：
 
 - 锁定批次仍不得被 `cleanupExpired()` 删除；
-- 物理目录删除失败不得复活已经授权删除的业务元数据，应进入现有/扩展 cleanup-pending 重试证据；
+- 物理目录删除失败不得复活已经授权删除的业务元数据，应进入单一 `archive_cleanup_jobs` cleanup-pending 重试证据；
 - 不允许因为某一批次到期而删除仍被其他批次引用的 Blob；
 - 自动清理、手工删除、存档重试和存储根迁移必须受 maintenance/runtime 锁协调；
 - 空目录回收失败只记清理告警，不得影响其它批次读取。
+
+`archive_cleanup_jobs` 每个原批次最多一条，payload 只保存数据库权威的相对路径：batch id/number/local date/layout dir、materialized relative paths，以及仅最后引用 canonical Blob 的 relative path/hash/size；不得保存绝对路径、`source_path` 或目录扫描猜出的项目。job 插入、issuance tombstone、batch/artifact 删除和最后引用 Blob 元数据删除必须处于同一事务；任一步失败整体回滚。
+
+手工删除、`cleanupExpired()` 与启动续跑共用同一个幂等 executor：先删 job 记录的 materialized files 并尝试 `rmdir` 空 batch/date/month/year，再删最后引用 canonical Blob，最后删除 job。materialized 删除未完成时不得提前删除 canonical fallback。`ENOTEMPTY` 仅表示该层仍被占用；其它失败更新同一 job 的 attempt/error 并在重启后续跑，不递归、不猜目录、不复活元数据。
 
 ---
 

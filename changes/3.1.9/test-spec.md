@@ -433,6 +433,29 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 
 P0/P1 人工检查仍待用户：取消一个真实保存对话框确认运行次数不变；分别观察 pre-critical 与 protected cancel；在存档中心核对一个 metadata-only 和一个多文件结果导出批次。⚠️ 真实主体×九币种、调整后余额、跨月期初、归档/解归档/delete 审计及全部导出文件必须由财务人工复核；Windows packaged、约 16 GB 与目标生产 legacy/trigger 仍为 PROBE。完整自动门禁不能替代上述真实环境和资金人工验收。
 
+## 十八、PR4 年/月/日/批次目录化测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| SL-01 | P0 | layout | 精确日期/批次目录、同批 input/output | 只取 `local_date`；真实 batchNumber；同名稳定 ` (2)`；无 ready 不建业务目录 |
+| SL-02 | P0 | filename | 非法/保留/尾点空格/长名 | Windows-safe、扩展名/短 hash、重启不漂移；历史全-null order 按 id 回填，append 取 max+1 |
+| SL-03 | P0 | materialize | hardlink/copy | 真 hardlink inode+只读+hash；仅能力错误降级流式 copy；EIO 不 fallback；父目录链接不越 root |
+| SL-04 | P0 | failure | materialization 失败 | canonical artifact 保持 ready/blob 不变；batch incomplete、三列 repair evidence；无空业务目录/新 batch/operation |
+| SL-05 | P0 | read/repair | layout→Blob fallback | copy 篡改从 valid canonical 重建且 identity 不变；repair 失败仍由 readonly/saveAs 从 Blob 安全复制 |
+| SL-06 | P0 | integrity | hardlink/canonical 同 inode 污染 | 以 DB size/hash fail-closed；删除坏入口、artifact failed；不接受新 hash，只能可信源重试同 artifact |
+| SL-07 | P0 | history/startup | legacy ready resume | 旧 batchNumber 不改；缺 path/order 可续跑；未物化期间 Blob 可读；staging/orphan 只处理已知安全项 |
+| SL-08 | P0 | delete | shared Blob + last ref | manual 先删本批 layout；其它引用保留 canonical；最后引用才删 canonical；空日/月/年逐级回收 |
+| SL-09 | P0 | cleanup | retention/manual/startup | 同一 executor；job 与 tombstone/metadata/last-ref 删除同事务；目录失败 metadata 不复活、启动幂等续跑 |
+| SL-10 | P1 | open/saveAs | 内部路径隔离 | DTO 不含 materialized/canonical relative path；【打开】仍只读副本，【另存为】仍安全 copy |
+
+自动证据：核心 repository/service/layout/allocator 57/57 PASS；Archive repository/service/controller/outbox/tracker/TaskLifecycle/UI 静态扩大聚焦 184/184 PASS；`npm run lint`、changed JS `node --check` 和 `git diff --check` PASS；`npm run check:vars -- --include-minor` exit 0、未命中重要变量。首次失败分类为 pure filename 样本的 test design；后续仅有 schema inventory、canonical-ready 时间点和历史 order 的 stale tests，无 production regression/environment。
+
+发布前唯一一次 `npm run release-check` 首次即 exit 0：lint/smoke PASS；unit 5013/5013（328 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（297272ms）。runner 仅在全绿后自动同步 integration policy；无失败、重跑或阈值调整。
+
+P0 本机手工/真实 FS 证据已按自动链顺序复核：精确目录和无空目录、hardlink inode/只读/hash、copy repair、hardlink 污染 fail-closed、历史续跑、共享引用与 cleanup-pending 重启恢复均通过。P1 的内部路径隔离和只读/open/saveAs 由真实 Service 测试通过。
+
+仍开放的人工门禁：Windows installer/portable 的 hardlink/readonly/错误码、真实跨卷与网络盘、长根路径、Excel/WPS 原地保存、真实大文件吞吐，以及输入/输出文件数与内容血缘。⚠️ 自动化不关闭 SHA/size、共享引用、删除顺序、只读和输出血缘红线。
+
 ## 十七、PR3-Toolbox TaskLifecycle 测试矩阵
 
 | ID | 优先级 | 层级 | 场景 | 最小断言 |

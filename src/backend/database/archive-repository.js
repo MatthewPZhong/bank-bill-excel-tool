@@ -5,7 +5,8 @@
 //   archive_batch_sequences 不因批次删除而回退的本地日期流水游标；
 //   archive_operation_issuances 跨永久删除保留 operation key 的发行事实；
 //   archive_artifacts 批次中的逻辑文件及失败重试信息；
-//   archive_blobs     以 SHA-256 寻址的唯一物理文件。
+//   archive_blobs     以 SHA-256 寻址的唯一物理文件；
+//   archive_cleanup_jobs 已删批次尚待完成的物理回收证据。
 //
 // 本文件不创建 DatabaseSync。调用方注入已经打开的数据库句柄，并显式调用
 // ensureArchiveMetadataSupport/createArchiveRepository(...).ensureSchema()。
@@ -152,6 +153,15 @@ function parseObjectJson(value) {
   }
 }
 
+function parseArrayJson(value) {
+  try {
+    const parsed = JSON.parse(value || '[]');
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
 function normalizeOriginalName(value) {
   const name = requiredText(value, 'originalName', 255).split(/[\\/]/).pop();
   if (!name || name === '.' || name === '..') throw new TypeError('originalName 非法');
@@ -199,6 +209,12 @@ function formatGlobalBatchNumber(localDate, dailySequence) {
     throw new TypeError('dailySequence 必须是正安全整数');
   }
   return `${date}-${String(sequence).padStart(3, '0')}`;
+}
+
+function layoutRelativeDirectoryForBatch(batch) {
+  const localDate = normalizeLocalDate(batch.localDate);
+  const batchNumber = requiredText(batch.batchNumber, 'batchNumber', 128);
+  return `${localDate.slice(0, 4)}/${localDate.slice(0, 7)}/${localDate}/${batchNumber}`;
 }
 
 function addColumnsIfMissing(db, tableName, definitions) {
@@ -377,8 +393,44 @@ function ensureArchiveMetadataSupport(db) {
       ['storage_mode', 'storage_mode TEXT'],
       ['storage_layout_version', 'storage_layout_version INTEGER NOT NULL DEFAULT 1'],
       ['safe_file_name', 'safe_file_name TEXT'],
-      ['artifact_order', 'artifact_order INTEGER']
+      ['artifact_order', 'artifact_order INTEGER'],
+      ['materialization_error_code', 'materialization_error_code TEXT'],
+      ['materialization_error_message', 'materialization_error_message TEXT'],
+      ['materialization_failed_at', 'materialization_failed_at TEXT']
     ]);
+
+    db.exec(`
+      UPDATE archive_artifacts AS target
+      SET artifact_order = (
+        SELECT COUNT(*)
+        FROM archive_artifacts AS prior
+        WHERE prior.batch_id = target.batch_id AND prior.id <= target.id
+      )
+      WHERE target.artifact_order IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM archive_artifacts AS assigned
+          WHERE assigned.batch_id = target.batch_id
+            AND assigned.artifact_order IS NOT NULL
+        );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archive_cleanup_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id INTEGER NOT NULL UNIQUE,
+        batch_number TEXT NOT NULL,
+        local_date TEXT NOT NULL,
+        layout_relative_dir TEXT NOT NULL,
+        materialized_paths_json TEXT NOT NULL DEFAULT '[]',
+        released_blobs_json TEXT NOT NULL DEFAULT '[]',
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        last_error_code TEXT,
+        last_error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
 
     db.exec(`
       CREATE TABLE IF NOT EXISTS archive_daily_sequences (
@@ -548,9 +600,30 @@ function mapArtifact(row) {
     storageLayoutVersion: Number(row.storage_layout_version) || 1,
     safeFileName: row.safe_file_name || '',
     artifactOrder: row.artifact_order == null ? null : Number(row.artifact_order),
+    materializationErrorCode: row.materialization_error_code || '',
+    materializationErrorMessage: row.materialization_error_message || '',
+    materializationFailedAt: row.materialization_failed_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at || null
+  };
+}
+
+function mapCleanupJob(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    batchId: Number(row.batch_id),
+    batchNumber: row.batch_number,
+    localDate: row.local_date,
+    layoutRelativeDir: row.layout_relative_dir,
+    materializedPaths: parseArrayJson(row.materialized_paths_json),
+    releasedBlobs: parseArrayJson(row.released_blobs_json),
+    attemptCount: Number(row.attempt_count) || 0,
+    lastErrorCode: row.last_error_code || '',
+    lastErrorMessage: row.last_error_message || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
   };
 }
 
@@ -981,6 +1054,48 @@ class ArchiveRepository {
     `).all(Number(batchId)).map(mapArtifact);
   }
 
+  listMaterializationCandidates(limit = 500) {
+    const count = Number(limit);
+    if (!Number.isSafeInteger(count) || count < 1 || count > 5000) {
+      throw new TypeError('limit 必须为 1 到 5000 的安全整数');
+    }
+    const rows = this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      WHERE a.status = 'ready'
+        AND (
+          a.storage_layout_version <> 2
+          OR COALESCE(a.storage_relative_path, '') = ''
+          OR COALESCE(a.storage_mode, '') NOT IN ('hardlink', 'copy')
+          OR COALESCE(a.safe_file_name, '') = ''
+          OR a.artifact_order IS NULL
+          OR a.materialization_error_code IS NOT NULL
+          OR a.materialization_error_message IS NOT NULL
+          OR a.materialization_failed_at IS NOT NULL
+        )
+      ORDER BY a.batch_id ASC, COALESCE(a.artifact_order, a.id) ASC, a.id ASC
+      LIMIT ?
+    `).all(count).map(mapArtifact);
+    return rows.map((artifact) => ({ ...artifact, batch: this.getBatch(artifact.batchId) }));
+  }
+
+  listMaterializedArtifacts() {
+    return this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      WHERE a.status = 'ready'
+        AND a.storage_layout_version = 2
+        AND COALESCE(a.storage_relative_path, '') <> ''
+      ORDER BY a.batch_id ASC, a.artifact_order ASC, a.id ASC
+    `).all().map(mapArtifact);
+  }
+
+  listArtifactsByBlob(blobId) {
+    return this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      WHERE a.blob_id = ?
+      ORDER BY a.id ASC
+    `).all(Number(blobId)).map(mapArtifact);
+  }
+
   listUnresolvedArtifactSourcePaths() {
     return this.db.prepare(`
       SELECT source_path
@@ -1397,11 +1512,17 @@ class ArchiveRepository {
       if (!this.db.prepare('SELECT id FROM archive_batches WHERE id = ?').get(id)) {
         throw new Error(`存档批次不存在：${id}`);
       }
+      const artifactOrder = Number(this.db.prepare(`
+        SELECT COALESCE(MAX(artifact_order), 0) + 1 AS next_order
+        FROM archive_artifacts
+        WHERE batch_id = ?
+      `).get(id).next_order);
       const result = this.db.prepare(`
         INSERT INTO archive_artifacts (
           batch_id, artifact_key, direction, role, source_operation,
-          original_name, source_path, status, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+          original_name, source_path, status, metadata_json, artifact_order,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
       `).run(
         id,
         artifact.artifactKey,
@@ -1411,6 +1532,7 @@ class ArchiveRepository {
         artifact.originalName,
         artifact.sourcePath,
         artifact.metadataJson,
+        artifactOrder,
         timestamp,
         timestamp
       );
@@ -1420,6 +1542,147 @@ class ArchiveRepository {
         WHERE id = ?
       `).run(timestamp, id);
       return this.getArtifact(Number(result.lastInsertRowid));
+    });
+  }
+
+  ensureArtifactOrders(batchId) {
+    const id = Number(batchId);
+    return withWriteTransaction(this.db, () => {
+      const rows = this.db.prepare(`
+        SELECT id, artifact_order
+        FROM archive_artifacts
+        WHERE batch_id = ?
+        ORDER BY id ASC
+      `).all(id);
+      let nextOrder = rows.reduce(
+        (maximum, row) => row.artifact_order == null ? maximum : Math.max(maximum, Number(row.artifact_order)),
+        0
+      );
+      const timestamp = this._timestamp();
+      for (const row of rows) {
+        if (row.artifact_order != null) continue;
+        nextOrder += 1;
+        this.db.prepare(`
+          UPDATE archive_artifacts
+          SET artifact_order = ?, updated_at = ?
+          WHERE id = ? AND artifact_order IS NULL
+        `).run(nextOrder, timestamp, Number(row.id));
+      }
+      return this.listArtifacts(id);
+    });
+  }
+
+  prepareArtifactLayout(artifactId, assignment = {}) {
+    const id = Number(artifactId);
+    const artifactOrder = Number(assignment.artifactOrder);
+    if (!Number.isSafeInteger(artifactOrder) || artifactOrder < 1) {
+      throw new TypeError('artifactOrder 必须是正安全整数');
+    }
+    const safeFileName = requiredText(assignment.safeFileName, 'safeFileName', 255);
+    const storageRelativePath = requiredText(
+      assignment.storageRelativePath,
+      'storageRelativePath',
+      2048
+    );
+    const timestamp = this._timestamp();
+    const result = this.db.prepare(`
+      UPDATE archive_artifacts
+      SET artifact_order = ?, safe_file_name = ?, storage_relative_path = ?, updated_at = ?
+      WHERE id = ?
+    `).run(artifactOrder, safeFileName, storageRelativePath, timestamp, id);
+    return result.changes === 1 ? this.getArtifact(id) : null;
+  }
+
+  completeMaterialization(artifactId, payload = {}) {
+    const id = Number(artifactId);
+    const mode = requiredText(payload.storageMode, 'storageMode', 32);
+    if (!['hardlink', 'copy'].includes(mode)) throw new TypeError(`storageMode 非法：${mode}`);
+    const storageRelativePath = requiredText(
+      payload.storageRelativePath,
+      'storageRelativePath',
+      2048
+    );
+    const safeFileName = requiredText(payload.safeFileName, 'safeFileName', 255);
+    const artifactOrder = Number(payload.artifactOrder);
+    if (!Number.isSafeInteger(artifactOrder) || artifactOrder < 1) {
+      throw new TypeError('artifactOrder 必须是正安全整数');
+    }
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const artifact = this.db.prepare(`
+        SELECT batch_id, status, materialization_error_code,
+               materialization_error_message, materialization_failed_at
+        FROM archive_artifacts
+        WHERE id = ?
+      `).get(id);
+      if (!artifact) return null;
+      if (artifact.status !== ARTIFACT_STATUSES.READY) {
+        throw new Error(`只有 ready artifact 可以完成目录化：${id}`);
+      }
+      this.db.prepare(`
+        UPDATE archive_artifacts
+        SET storage_relative_path = ?, storage_mode = ?, storage_layout_version = 2,
+            safe_file_name = ?, artifact_order = ?,
+            materialization_error_code = NULL,
+            materialization_error_message = NULL,
+            materialization_failed_at = NULL,
+            updated_at = ?
+        WHERE id = ? AND status = 'ready'
+      `).run(storageRelativePath, mode, safeFileName, artifactOrder, timestamp, id);
+      this._refreshBatchStatus(Number(artifact.batch_id), timestamp);
+      return { artifact: this.getArtifact(id), batch: this.getBatch(Number(artifact.batch_id)) };
+    });
+  }
+
+  recordMaterializationFailure(artifactId, failure = {}) {
+    const id = Number(artifactId);
+    const code = requiredText(
+      failure.code || 'ARCHIVE_MATERIALIZATION_FAILED',
+      'failure.code',
+      128
+    );
+    const message = requiredText(
+      failure.message || '存档目录化失败，等待修复',
+      'failure.message',
+      512
+    );
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const artifact = this.db.prepare(`
+        SELECT batch_id, status, materialization_error_code,
+               materialization_error_message, materialization_failed_at
+        FROM archive_artifacts
+        WHERE id = ?
+      `).get(id);
+      if (!artifact) return null;
+      if (artifact.status !== ARTIFACT_STATUSES.READY) return null;
+      this.db.prepare(`
+        UPDATE archive_artifacts
+        SET materialization_error_code = ?, materialization_error_message = ?,
+            materialization_failed_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'ready'
+      `).run(code, message, timestamp, timestamp, id);
+      this.db.prepare(`
+        UPDATE archive_batches
+        SET archive_status = 'incomplete', failure_count = failure_count + ?,
+            last_error_code = ?, last_error_message = ?,
+            last_failed_operation = 'materialization', last_failed_at = ?,
+            completed_at = COALESCE(completed_at, ?), updated_at = ?
+        WHERE id = ?
+      `).run(
+        artifact.materialization_error_code == null
+          && artifact.materialization_error_message == null
+          && artifact.materialization_failed_at == null
+          ? 1
+          : 0,
+        code,
+        message,
+        timestamp,
+        timestamp,
+        timestamp,
+        Number(artifact.batch_id)
+      );
+      return { artifact: this.getArtifact(id), batch: this.getBatch(Number(artifact.batch_id)) };
     });
   }
 
@@ -1433,13 +1696,18 @@ class ArchiveRepository {
       if (!this.db.prepare('SELECT id FROM archive_batches WHERE id = ?').get(id)) {
         throw new Error(`存档批次不存在：${id}`);
       }
+      const artifactOrder = Number(this.db.prepare(`
+        SELECT COALESCE(MAX(artifact_order), 0) + 1 AS next_order
+        FROM archive_artifacts
+        WHERE batch_id = ?
+      `).get(id).next_order);
       const result = this.db.prepare(`
         INSERT INTO archive_artifacts (
           batch_id, artifact_key, direction, role, source_operation,
           original_name, source_path, status, blob_id, attempt_count,
           last_error_code, last_error_message, metadata_json,
-          created_at, updated_at, archived_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', NULL, 0, ?, ?, ?, ?, ?, NULL)
+          artifact_order, created_at, updated_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', NULL, 0, ?, ?, ?, ?, ?, ?, NULL)
       `).run(
         id,
         artifact.artifactKey,
@@ -1451,6 +1719,7 @@ class ArchiveRepository {
         code,
         message,
         artifact.metadataJson,
+        artifactOrder,
         timestamp,
         timestamp
       );
@@ -1482,6 +1751,17 @@ class ArchiveRepository {
       SELECT
         COUNT(*) AS total,
         COALESCE(SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END), 0) AS ready_count,
+        COALESCE(SUM(CASE
+          WHEN status = 'ready'
+           AND storage_layout_version = 2
+           AND COALESCE(storage_relative_path, '') <> ''
+           AND storage_mode IN ('hardlink', 'copy')
+           AND COALESCE(safe_file_name, '') <> ''
+           AND artifact_order IS NOT NULL
+           AND materialization_error_code IS NULL
+           AND materialization_error_message IS NULL
+           AND materialization_failed_at IS NULL
+          THEN 1 ELSE 0 END), 0) AS materialized_count,
         COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
         COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_count
       FROM archive_artifacts
@@ -1489,6 +1769,7 @@ class ArchiveRepository {
     `).get(Number(batchId));
     const total = Number(counts.total) || 0;
     const ready = Number(counts.ready_count) || 0;
+    const materialized = Number(counts.materialized_count) || 0;
     const pending = Number(counts.pending_count) || 0;
     const current = this.db.prepare(`
       SELECT archive_status, completed_at, last_error_code, last_error_message,
@@ -1511,7 +1792,7 @@ class ArchiveRepository {
       ? BATCH_ARCHIVE_STATUSES.COMPLETE
       : BATCH_ARCHIVE_STATUSES.INCOMPLETE;
     let completedAt = timestamp;
-    if (total > 0 && ready === total) {
+    if (total > 0 && ready === total && materialized === total) {
       status = BATCH_ARCHIVE_STATUSES.COMPLETE;
     } else if (pending > 0) {
       status = BATCH_ARCHIVE_STATUSES.STAGING;
@@ -1930,6 +2211,37 @@ class ArchiveRepository {
     });
   }
 
+  listCleanupJobs() {
+    return this.db.prepare(`
+      SELECT * FROM archive_cleanup_jobs ORDER BY id ASC
+    `).all().map(mapCleanupJob);
+  }
+
+  recordCleanupJobFailure(jobId, failure = {}) {
+    const id = Number(jobId);
+    const code = requiredText(failure.code || 'ARCHIVE_CLEANUP_FAILED', 'failure.code', 128);
+    const message = requiredText(
+      failure.message || '存档物理清理失败，等待重试',
+      'failure.message',
+      512
+    );
+    const timestamp = this._timestamp();
+    const result = this.db.prepare(`
+      UPDATE archive_cleanup_jobs
+      SET attempt_count = attempt_count + 1,
+          last_error_code = ?, last_error_message = ?, updated_at = ?
+      WHERE id = ?
+    `).run(code, message, timestamp, id);
+    return result.changes === 1
+      ? mapCleanupJob(this.db.prepare('SELECT * FROM archive_cleanup_jobs WHERE id = ?').get(id))
+      : null;
+  }
+
+  completeCleanupJob(jobId) {
+    const id = Number(jobId);
+    return this.db.prepare('DELETE FROM archive_cleanup_jobs WHERE id = ?').run(id).changes === 1;
+  }
+
   deleteBatch(batchId, options = {}) {
     const id = Number(batchId);
     const allowLocked = options.allowLocked === true;
@@ -1966,6 +2278,12 @@ class ArchiveRepository {
         JOIN archive_blobs bl ON bl.id = a.blob_id
         WHERE a.batch_id = ? AND a.status = 'ready'
       `).get(id).size) || 0;
+      const materializedPaths = this.db.prepare(`
+        SELECT storage_relative_path
+        FROM archive_artifacts
+        WHERE batch_id = ? AND COALESCE(storage_relative_path, '') <> ''
+        ORDER BY artifact_order ASC, id ASC
+      `).all(id).map((row) => String(row.storage_relative_path));
 
       this.db.prepare('DELETE FROM archive_artifacts WHERE batch_id = ?').run(id);
       this.db.prepare('DELETE FROM archive_batches WHERE id = ?').run(id);
@@ -1979,12 +2297,42 @@ class ArchiveRepository {
         this.db.prepare('DELETE FROM archive_blobs WHERE id = ?').run(Number(blob.id));
         releasedBlobs.push(mapBlob({ ...blob, reference_count: 0 }));
       }
+      let cleanupJob = null;
+      if (materializedPaths.length > 0 || releasedBlobs.length > 0) {
+        const timestamp = this._timestamp();
+        const result = this.db.prepare(`
+          INSERT INTO archive_cleanup_jobs (
+            batch_id, batch_number, local_date, layout_relative_dir,
+            materialized_paths_json, released_blobs_json,
+            attempt_count, last_error_code, last_error_message,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, 0, NULL, NULL, ?, ?)
+        `).run(
+          batch.id,
+          batch.batchNumber,
+          batch.localDate,
+          layoutRelativeDirectoryForBatch(batch),
+          JSON.stringify(materializedPaths),
+          JSON.stringify(releasedBlobs.map((blob) => ({
+            relativePath: blob.relativePath,
+            sha256: blob.sha256,
+            sizeBytes: blob.sizeBytes
+          }))),
+          timestamp,
+          timestamp
+        );
+        cleanupJob = mapCleanupJob(
+          this.db.prepare('SELECT * FROM archive_cleanup_jobs WHERE id = ?')
+            .get(Number(result.lastInsertRowid))
+        );
+      }
       return {
         status: 'deleted',
         batch,
         artifactCount,
         logicalBytes,
-        releasedBlobs
+        releasedBlobs,
+        cleanupJob
       };
     });
   }

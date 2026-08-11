@@ -640,3 +640,59 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Deviations
 
 无。
+
+## PR4 年/月/日/批次目录化 Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| `storage_relative_path` 是唯一 layout v2 materialized path | 冻结 Spec §6.4 与现库已经预留该列 | 不新增 `materialized_relative_path`，避免路径双真相 |
+| canonical 与 materialization 状态正交 | `completeArtifact/failArtifact` 的 `last_error_*` 属于 canonical ingest | 只加三个 `materialization_error_*` 列；不加 status 列或第二张状态表；成功修复清空三列 |
+| 删除后由单一 cleanup job 保留物理恢复事实 | 现行 delete txn 删除 batch/artifact/最后引用 Blob metadata 后，startup orphan scan 只认识 canonical Blob | 一条 job/原 batch，payload 只含 DB-authoritative relative paths；无 child table、绝对路径、source path 或扫描猜测 |
+| runtime 与 maintenance 复用同一 root serialization | `ArchiveService` 已有 `ROOT_MUTATION_TAILS/runSerialized(rootDir)` | 只命名并导出既有机制供 PR5 复用，不新建 lock/lease/timer |
+| hardlink fallback 是真实能力降级 | 任意错误 fallback 会掩盖路径、I/O 或完整性故障 | 仅能力错误白名单流式 copy；校验失败保持 repair-pending |
+
+### Assumptions
+
+- 同批文件名按持久化 `artifact_order` 分配，大小写不敏感判重并持久化 `safe_file_name`；历史只在缺值时按稳定 artifact id 顺序补齐，不读取目录猜号。
+- 目录层回收只对 job 冻结的 batch/date/month/year 逐级 `rmdir`；`ENOTEMPTY` 正常保留，其他失败写同一 job warning 并重试。
+- `.staging` 与 `.readonly` 仍是内部目录；“无 ready 不建空目录”只约束业务年/月/日/batch layout。
+
+### Implementation Evidence
+
+- 基线为 `1e96f5f6c5e70051e33c29efb94a13bb97774e51`（parent `df3409b25782ead0ea944c00439dca0149c69a8d`），tracked clean、无 upstream；批准后建立本地分支 `codex/v3.1.9-pr4-storage-layout-materialization`，无 push/PR/GitHub 写入。
+- 基线 repository/service 聚焦测试 30/30 PASS。首次命令使用不存在的旧测试路径，分类 stale test path；按真实文件路径重跑，无产品失败。
+- `storage-layout.js` 只由 `local_date` 与真实 batchNumber 生成 layout v2 路径，所有目标经 root containment；安全文件名覆盖 Windows 非法字符、保留名、尾点/空格、长路径和大小写不敏感重名。分配只使用持久化 `artifact_order/safe_file_name`；历史全-null order 按 artifact id 稳定回填，后续 append 取 `max+1`。
+- `storage-materializer.js` 以 staging→校验→只读→rename 完成物化：同卷优先 hardlink，仅 `EXDEV/EACCES/EPERM/ENOTSUP/EOPNOTSUPP/ENOSYS/EMLINK` 等能力失败降级流式 copy；任何路径、I/O 或 hash 错误不 fallback。写前后都以 DB size/SHA-256 复核，并拒绝符号链接祖先越界。
+- repository 幂等新增恰好三列 `materialization_error_code/message/failed_at` 和单一 `archive_cleanup_jobs`。成功目录化清三列且不改 canonical identity；失败只持久 repair-pending 证据。删除事务原子冻结 layout 文件、精确 batch/date 目录和仅最后引用 Blob 的相对路径/hash/size；job 插入 fault 代表证明 tombstone、batch/artifact/blob metadata 全回滚。
+- Service 写链保持 canonical complete 在先、layout 物化在后；layout 失败不回滚 ready Blob，也不分配新 batch/operation。读取按有效 v2→有效 canonical+同 artifact repair→二者无效 fail-closed；copy 损坏可保持 artifact identity 重建，hardlink/canonical 同 inode 污染只接受可信源重试同 artifact，绝不从 materialized 反向生成 Blob/hash。
+- manual delete、retention `cleanupExpired()` 与 startup 续跑共用既有 root serialization 和同一个 cleanup executor。顺序固定为 materialized files/安全空层级→最后引用 canonical Blob→job；共享 Blob 在其它引用存在时保留，目录失败不复活 metadata 并由同一 job 记录 attempt/error 后重启续跑。
+- 历史 ready artifact 启动时按旧 batchNumber/order 可中断续跑；未完成前仍可从 canonical 打开/另存。无 ready artifact 不创建业务年/月/日/batch 目录；内部 relative path 不进入公开 DTO，【打开】继续生成只读副本，【另存为】继续安全复制。
+- 核心 repository/service/layout/allocator 57/57 PASS；Archive repository/service/controller/outbox/tracker/TaskLifecycle/UI 静态扩大聚焦 184/184 PASS（0 fail/skip）。真实 FS 覆盖 hardlink inode/只读/hash、能力失败 copy、EIO 不 fallback、copy repair、hardlink 污染 fail-closed、链接祖先拒绝、共享 Blob last-ref、空层级清理、cleanup-pending 重启恢复和无 ready 无业务目录。
+- 发布前唯一一次 `npm run release-check` session 首次即 exit 0：lint、smoke PASS；unit 5013/5013（328 files，0 fail/skip，node test 15619.2515ms）；integration 48/48 scripts、2385/2385 assertions（297272ms）。runner 只在全部脚本 PASS 后自动同步 `rules/integration-test-policy.md` §七；无失败、retry、阈值或生产修改。
+- full 后复跑全部 owned JS `node --check`、`git diff --check` 与 ownership 检索均 PASS。`npm run check:vars -- --include-minor` exit 0：扫描四个生产 JS，未命中重要变量。
+
+### Failure Classification
+
+- 最初使用两个不存在的旧测试文件名，分类 stale test path；只改为仓库真实测试入口。
+- pure layout 首跑 4/5：测试把含路径分隔符的 `original_name` 样本误当作 basename 仍会保留前缀，分类 test design；仅修测试样本，不改变既有 basename/safe-name 生产合同。
+- repository 首跑 3/7：旧 schema inventory 未包含 cleanup job，direct repository fixture 把 canonical ready 当成 batch complete，分类 stale tests；fixture 显式 `completeMaterialization`，未恢复错误完成时点。
+- 扩大聚焦首跑 181/183：历史 fixture 仍断言 null order，terminal direct repository fixture 仍只 complete canonical，分类 stale tests；改为稳定回填 order 与显式目录化完成，并锁定后续 append=`max+1`。全程无 production regression/environment。
+
+### Remaining Unknowns
+
+- Windows installer/portable hardlink 只读、权限与跨卷错误码，网络盘能力、长根路径、Excel/WPS 原地保存行为和真实大文件仍为 PROBE。
+- ⚠️ hardlink 共享 inode 污染、canonical SHA/size、共享引用最后释放、metadata→materialized→Blob 删除顺序和输入/输出文件血缘须人工复核。
+
+### Blindspot / Reconciliation Pass
+
+- ownership/入口审计确认所有生产 `completeArtifact` 仍经 ArchiveService；ready short-circuit、detail/open/saveAs、startup reconcile、manual delete 与 retention 都进入同一 Service/root serialization，没有第二把锁、tracker、materialization status 或 cleanup child 表。Controller/TaskLifecycle/OperationTracker 的批次与 outbox identity 未改。
+- 状态与失败审计覆盖 canonical ingest、legacy/pending、materialized、repair-pending、copy 可修复损坏及 hardlink/canonical 共同损坏。三列 materialization error 与 `last_error_*` 分工明确；校验以 DB SHA/size 为准，materialized 从不被吸收成新 Blob/hash。
+- 删除审计确认 job payload 只来自删除事务中的 DB 权威相对路径；先移除该批 materialized，再处理仅最后引用 canonical，最后删 job。精确 batch dir/prefix 校验和非递归空层 `rmdir` 防止越批次回收；metadata 删除后不会因物理失败复活。
+- 文件/输出血缘审计确认 PR3 登记的 input/output artifact identity、original name、size、SHA、batch/parent/operation/outbox 语义均未改；layout 只增加同 artifact 的派生只读入口。公开 DTO 不暴露内部路径，打开/另存不会把 Excel/WPS 直接指向内部 layout 文件。
+- 本轮不改金额、币种、VCC/Toolbox 业务算法或 Excel 内容。⚠️ Windows packaged、跨卷/网络盘、长根路径、Excel/WPS 原地保存、真实大文件，以及真实输入/输出文件数和内容血缘继续要求人工复核；本机自动化不关闭这些红线。
+
+### Deviations
+
+无。
