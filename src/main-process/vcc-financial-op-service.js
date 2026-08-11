@@ -390,7 +390,7 @@ function createVccFinancialOpService({
       normalizedPayload.expectedPreviewToken,
       payload.taskGeneration
     );
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext);
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runWorker(action, {
       ...normalizedPayload,
       batchContext: frozenBatchContext
@@ -467,11 +467,14 @@ function createVccFinancialOpService({
     return runWorker('inspect', { filePaths });
   }
 
-  async function importSelectedFiles(payload, onProgress) {
-    return runWorker('import', payload, onProgress);
+  async function importSelectedFiles(payload, onProgress, batchContext) {
+    return runWorker('import', {
+      ...payload,
+      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
+    }, onProgress);
   }
 
-  async function calculate(payload = {}) {
+  async function calculate(payload = {}, batchContext) {
     const targetMonth = normalizeYearMonth(payload.targetMonth);
     if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
     if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
@@ -479,7 +482,8 @@ function createVccFinancialOpService({
     }
     return runWorker('calculate', {
       targetMonth,
-      expectedInputFingerprint: payload.expectedInputFingerprint
+      expectedInputFingerprint: payload.expectedInputFingerprint,
+      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
     });
   }
 
@@ -497,7 +501,7 @@ function createVccFinancialOpService({
     return { targetMonth, ...preflightCalculation(database.db, targetMonth) };
   }
 
-  async function cancelActiveTask() {
+  async function cancelActiveTask(onCancellationAccepted = null) {
     const task = activeTask;
     if (!task) return { status: 'idle' };
     const worker = task.worker;
@@ -516,6 +520,9 @@ function createVccFinancialOpService({
     }
 
     task.cancelRequested = true;
+    if (typeof onCancellationAccepted === 'function') {
+      await onCancellationAccepted();
+    }
     try {
       worker.postMessage({ type: 'cancel' });
     } catch (_error) {
@@ -568,11 +575,12 @@ function createVccFinancialOpService({
     };
   }
 
-  function archive(payload = {}, onProgress) {
+  function archive(payload = {}, onProgress, batchContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
       payload,
-      onProgress
+      onProgress,
+      batchContext
     );
   }
 
@@ -580,11 +588,12 @@ function createVccFinancialOpService({
     return listAdjustmentOptionsFromDb(database.db, Number(payload.runId));
   }
 
-  function addRunAdjustment(payload = {}, onProgress) {
+  function addRunAdjustment(payload = {}, onProgress, batchContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
       payload,
-      onProgress
+      onProgress,
+      batchContext
     );
   }
 
@@ -597,7 +606,8 @@ function createVccFinancialOpService({
     };
   }
 
-  function initializeOpening(payload) {
+  function initializeOpening(payload, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('initialize-opening', () => (
       initializeOpeningBalances({
         db: database.db,
@@ -631,14 +641,14 @@ function createVccFinancialOpService({
     });
   }
 
-  function deleteDatasetData(payload = {}) {
+  function deleteDatasetData(payload = {}, onProgress, batchContext) {
     return deleteDataTargetData({
       targetMonth: payload.targetMonth,
       targetType: payload.sourceType,
       expectedPreviewToken: payload.expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    });
+    }, onProgress, batchContext);
   }
 
   async function listArchivedResultMonths(options = {}) {
@@ -678,7 +688,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-unarchive', { targetMonth: payload.targetMonth });
   }
 
-  function unarchiveMonth(payload = {}, onProgress) {
+  function unarchiveMonth(payload = {}, onProgress, batchContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -686,7 +696,7 @@ function createVccFinancialOpService({
       targetMonth: payload.targetMonth,
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration
-    }, onProgress);
+    }, onProgress, batchContext);
   }
 
   async function listDeleteTargets(payload = {}) {
@@ -700,7 +710,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-delete-target', payload);
   }
 
-  function deleteDataTargetData(payload = {}, onProgress) {
+  function deleteDataTargetData(payload = {}, onProgress, batchContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -710,7 +720,7 @@ function createVccFinancialOpService({
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    }, onProgress);
+    }, onProgress, batchContext);
   }
 
   function previewDatasetExport(payload = {}) {
@@ -723,12 +733,13 @@ function createVccFinancialOpService({
     );
   }
 
-  function exportDatasetData(payload = {}, onProgress) {
+  function exportDatasetData(payload = {}, onProgress, batchContext) {
     return runWorker('export-dataset', {
       targetMonth: payload.targetMonth,
       sourceType: payload.sourceType,
       targetKind: payload.targetKind,
-      outputPath: payload.outputPath
+      outputPath: payload.outputPath,
+      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
     }, onProgress);
   }
 
@@ -884,7 +895,8 @@ function createVccFinancialOpService({
     };
   }
 
-  function resolveRecord({ recordId, note, action }) {
+  function resolveRecord({ recordId, note, action }, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('resolve-import-record', () => (
       detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
         note,
@@ -947,7 +959,8 @@ function createVccFinancialOpService({
     return latest ? getRunReview(latest.runId) : null;
   }
 
-  async function exportRun({ targetMonth, outputDirectory, outputPath }) {
+  async function exportRun({ targetMonth, outputDirectory, outputPath }, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
       const target = await getArchivedRunByMonth(targetMonth);
@@ -961,7 +974,8 @@ function createVccFinancialOpService({
     });
   }
 
-  async function exportImportAudit(payload) {
+  async function exportImportAudit(payload, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-import-audit', () => (
       writeImportAuditWorkbookFn({
         db: database.db,

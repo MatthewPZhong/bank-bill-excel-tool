@@ -230,13 +230,13 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(moduleRenderer, /progress\.action !== 'unarchive'[\s\S]*?resultOperationProgressMessage\(progress\)[\s\S]*?finally \{\s*stopProgress\(\)/);
     assert.match(moduleRenderer, /progress\.action !== 'delete'[\s\S]*?setDeleteState\(resultOperationProgressMessage\(progress\), 'warning'\)[\s\S]*?finally \{\s*stopProgress\(\)/);
-    assert.match(vccService, /function archive\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
-    assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
+    assert.match(vccService, /function archive\(payload = \{\}, onProgress, batchContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
+    assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress, batchContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
     assert.doesNotMatch(vccService, /archiveRun\(|addRunAdjustmentToDb\(/);
     assert.doesNotMatch(main, /legacySourceRequest|service\.deleteDatasetData\(payload\)/);
     assert.match(
       vccService,
-      /function deleteDatasetData\(payload = \{\}\) \{[\s\S]*?expectedPreviewToken: payload\.expectedPreviewToken,[\s\S]*?taskGeneration: payload\.taskGeneration[\s\S]*?\n  \}/
+      /function deleteDatasetData\(payload = \{\}, onProgress, batchContext\) \{[\s\S]*?expectedPreviewToken: payload\.expectedPreviewToken,[\s\S]*?taskGeneration: payload\.taskGeneration[\s\S]*?onProgress, batchContext[\s\S]*?\n  \}/
     );
     assert.match(preload, /ipcRenderer\.on\('vccFinancialOp:import:progress'/);
     assert.match(preload, /ipcRenderer\.removeListener\('vccFinancialOp:import:progress'/);
@@ -261,6 +261,21 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       resultExportHandler,
       /catch \(error\) \{\s*return vccFinancialOpErrorResult\(error\);\s*\}/,
       '结果导出 IPC 必须返回临时 fail-closed 闸的稳定 code 和上下文'
+    );
+    for (const [channel, nextChannel] of [
+      ['vccFinancialOp:data-manager:export', 'vccFinancialOp:run:get'],
+      ['vccFinancialOp:export:result', 'vccFinancialOp:export:import-audit']
+    ]) {
+      const handlerStart = main.indexOf(`trackedIpcHandle('${channel}'`);
+      const handlerEnd = main.indexOf(`trackedIpcHandle('${nextChannel}'`, handlerStart);
+      const handler = main.slice(handlerStart, handlerEnd);
+      assert.match(handler, /prepare: async[\s\S]*?proceed: false[\s\S]*?execute: async/);
+    }
+    const auditExportStart = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'");
+    const auditExportEnd = main.indexOf('// v2.1.16 阶段一 A4', auditExportStart);
+    assert.match(
+      main.slice(auditExportStart, auditExportEnd),
+      /prepare: async[\s\S]*?proceed: false[\s\S]*?execute: async/
     );
   });
 
@@ -797,7 +812,8 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     const mainEnd = main.indexOf("trackedIpcHandle('vccFinancialOp:export:import-audit'", mainStart);
     const mainExportSource = main.slice(mainStart, mainEnd);
     assert.match(mainExportSource, /getArchivedRunByMonth\(payload\.targetMonth\)/);
-    assert.match(mainExportSource, /exportRun\(\{[\s\S]*targetMonth: target\.targetMonth/);
+    assert.match(mainExportSource, /exportRun\(\{[\s\S]*targetMonth: prepared\.targetMonth/);
+    assert.match(mainExportSource, /prepare: async[\s\S]*?showSaveDialog[\s\S]*?proceed: false[\s\S]*?execute: async/);
     assert.doesNotMatch(mainExportSource, /payload\.runId/);
     assert.match(styles, /vcc-fin-op-full-result-table thead th\.balanced/);
     assert.match(styles, /vcc-fin-op-full-result-table thead th\.unbalanced/);

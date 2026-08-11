@@ -551,3 +551,47 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Deviations
 
 当前无。
+
+## PR3-VCC TaskLifecycle Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| 新增独立 primary scope `vcc-financial-op/VCCFINOP` | VCC 财务OP是 13+1 主模块；既有业务OP scope 为 `vcc-op-calc/VCCOP` | 不把财务OP做 alias/toolbox；既有 `vcc/VCCOP` operation tracker 映射保持不变 |
+| VCC action inventory 精确冻结为 11 reserve、15 exclude | main/preload literal inventory、Spec C03/C04 与负责人裁决一致 | 不使用 wildcard；progress sideband 不进 policy；PR3-Toolbox 三项继续 handoff |
+| 显式业务实例续接稳定 identity，其余动作开启新 parent | runId、import batch/recordId 都由 prepared 或业务结果证明 | 不按月份/latest/hash 猜 parent；重算、每次 import apply、无唯一实例动作均新 parent |
+| reserve 链 worker context 必须 exact7 | PR2 `worker-batch-context` 是唯一 DTO 冻结器 | Main/Service 先 freeze、worker refreeze；read worker 无 context；生产 reserve 链不接受 null |
+| VCC cancel 只在 Service 接受 pre-critical 取消后 CAS 原 batch | C1/C2 claim/critical-ready/protected 协议决定是否还能取消 | protected/direct 阶段只等待业务终态；不先写 cancelled 再发现 protected；不建第二批次 |
+| 文件登记使用业务实际结果 | import result records 提供逐 sourceType 状态，三类 writer 返回最终输出路径 | 五类 import 只登记 success/success_with_skips/all_skipped；失败组不归档；metadata-only 不强制空目录 |
+
+### Implementation Evidence
+
+- 基线精确核为 `e1979c2e8fda87ade96c7f60f7c55f7f834d1034`（parent `f92b8cc81801935ef95683e68671235ba4decf74`），tracked clean、无 upstream；获批后创建本地分支 `codex/v3.1.9-pr3-vcc-task-lifecycle`，无 push/PR/GitHub 写入。
+- `TaskPolicyRegistry` 已将 VCC 11 个实际生产动作接为 reserve，并将 15 个 picker/preview/query/cancel 入口逐项 exclude；既有 `vcc-op-calc/VCCOP` 与 operation tracker `vcc -> VCCOP` 未改，新增 `vccFinancial -> VCCFINOP`。
+- parent 所有权已按裁决实现：calculate/recalculate 与每次 import apply 新建；archive/adjust/unarchive/result export 以 runId 续接；resolve/audit 以 recordId 续接；import 结果绑定 batchId 与 recordId；opening、source/opening/multi-run delete、data export 新建；result delete 仅 prepared 证明唯一 runId 时续接。
+- import/calculate/export generic worker 与 C1/C2 dedicated write worker 都由 Service 冻结、worker 再冻结 exact7；opening/resolve/result export/audit export 等 direct action 在进入业务任务前验证同一 context。缺失或字段不全均拒绝，inspect/read worker 继续无 context。
+- 三个 save/directory dialog 均移到 lifecycle prepare；取消返回 `proceed:false`，因此 0 BOR/0 reserve。reserve 失败代表测试确认 0 execute/0 worker；业务动作仍由 PR2 lifecycle 按 BOR→reserve→started→execute→artifacts→terminal 收口。
+- pre-critical cancel 只取消活动原 batch；protected 后 cancel hook 不执行并等待 worker terminal；late cancel 返回 not-found，succeeded 不被覆盖；worker crash 归 failed。未修改 C1/C2 token/classifier/generation claim/critical-ready/protected、MutationPlan/SQL budget 或通用 TaskLifecycle 核心。
+- 五类 import 输入 artifact 只按成功 record 的 sourceType 登记；失败组仍保留 task failed/cancelled/diagnostic。result export 登记 writer 的全部 `filePaths`，data/audit export 登记 writer `filePath`；opening/adjust/archive/unarchive/delete 等 metadata-only action 不强制物理目录。
+- artifact append 与 terminal 持久化失败代表测试确认业务终态和 archiveStatus 分离，outbox intent 保留原 batchContext/parentRunId/operationKey，reserve 次数仍为 1。
+- 首次 focused 失败分类：operation tracker 局部 payload 引用是 production regression，已修；required context 后旧 unit/direct integration fixture 缺 context 是 stale tests；旧 Archive Center 排除 VCC scope 与旧 export handler 变量断言是 stale tests。未降低生产 required 合同、未增加 renderer/IPC 不可达防御。
+- VCC/Archive 扩大聚焦 unit 460/460 PASS；四条真实 VCC integration 分别 19/19、209/209、77/77、29/29，共 334/334 PASS，覆盖主体×九币种自动回归、调整后余额、跨月期初、revision、归档/解归档/delete 审计与 Excel 回读。本地自动化只作回归证据，不替代资金人工复核。
+- `npm run lint`、changed JS `node --check`、`git diff --check` 均 PASS。`npm run check:vars -- --include-minor` exit 2 是命中 review 的预期结果：仅 Runtime-state `MODULES/app/dialog`，无 Critical/Risk-sensitive。`MODULES` 只移除 Archive Center 对既有 VCC 枚举的过滤，模块路由/启用持久化不变；`app` 只在 prepare 中沿用 `getPath`，未改启动/退出钩子；`dialog` 三个保存选择均在取消时 `proceed:false`，契约测试确认 execute 不在 prepare 前出现。operation tracker 仅增 literal VCC 文件通道和独立 descriptor，不改变 ALS/退出队列或既有 VCCOP 映射。
+- 最终且唯一一次 `npm run release-check` exit 0：lint、smoke PASS；unit 4990/4990（326 files，0 fail/skip，node test 15616.298875ms）；integration 48/48 scripts、2385/2385 assertions（384212ms）。本次 full 无失败、retry、阈值或测试框架修改；runner 仅在全绿后合法刷新 `rules/integration-test-policy.md` §七 timestamp/timings，脚本与断言总数不变，生成结果纳入本分支。
+
+### Remaining Unknowns
+
+- Windows installer/portable 的 worker/context 序列化、session/trigger/total/close 与 production legacy-trigger 仍是 PROBE；不可用开发机 Node 结果代替。
+- 约 16 GB 真实库的冷/热 P50/P95、WAL 与 main lag 未在本分支执行，继续受 C1/C2 发布门禁约束。
+- ⚠️ 真实主体×九币种、调整后余额、跨月期初、归档/解归档/delete 审计和全部导出文件仍须财务人工逐项复核；自动测试不能关闭资金红线。
+
+### Blindspot / Reconciliation Pass
+
+- 入口旁路复核按 literal inventory 对齐 main/preload/policy；所有 VCC 生产 mutation/export action 要么 reserve、要么以明确原因 exclude，progress 不参与批次。Archive Center renderer 已显示新 primary scope，不再静默过滤 VCC 财务OP。
+- 状态复核覆盖 reserve 失败、pre-critical/protected/late cancel、worker crash、first-terminal-wins CAS、artifact/terminal outbox 原批次重放；未新增 tracker、terminal 状态、batch allocator、latest/month fallback 或 retry。
+- 血缘复核保持 run/dataset/revision/record/deletion/audit 和 writer 输出为真实证据；本轮不改金额、币种、九币种集合、跨月公式、schema/migration、C1/C2 写预算或 VCC UI 业务行为。
+
+### Deviations
+
+无。

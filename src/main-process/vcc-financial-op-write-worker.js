@@ -85,9 +85,11 @@ async function enterCriticalSection(action, payload) {
 async function run() {
   const action = workerData && workerData.action;
   if (!WRITE_ACTION_SET.has(action)) throw invalidWriteAction(action);
-  const payload = workerData && workerData.payload || {};
-  const batchContext = freezeWorkerBatchContext(payload.batchContext);
-  void batchContext;
+  const rawPayload = workerData && workerData.payload || {};
+  const payload = {
+    ...rawPayload,
+    batchContext: freezeWorkerBatchContext(rawPayload.batchContext, { required: true })
+  };
   await enterCriticalSection(action, payload);
   const execute = [
     VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,

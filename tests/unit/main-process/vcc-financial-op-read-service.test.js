@@ -57,6 +57,16 @@ function completeRead(worker, result) {
   } });
 }
 
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 51,
+  batchNumber: '2026-08-11-001',
+  taskRunId: 'task-51',
+  taskKey: 'vcc-test',
+  moduleId: 'vcc-financial-op',
+  parentRunId: 'parent-51',
+  operationKey: 'operation-51'
+});
+
 test('B-09 active month cache 按 generation 复用并在写任务释放后失效', async (t) => {
   const readWorkers = [];
   const writeWorkers = [];
@@ -79,7 +89,7 @@ test('B-09 active month cache 按 generation 复用并在写任务释放后失�
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   writeWorkers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
   await calculation;
   const nextRead = service.listImportMonths();
@@ -105,7 +115,7 @@ test('B-10 Main 在 read worker 返回后复核 generation 与 active task ident
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   completeRead(readWorkers[0], { months: [], diagnostics: [] });
   await assert.rejects(archiveRead, (error) => error.code === 'state-changed');
   writeWorkers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
@@ -145,7 +155,7 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
   const exporting = service.exportRun({
     targetMonth: '2026-06',
     outputPath: '/tmp/result.xlsx'
-  });
+  }, BATCH_CONTEXT);
   assert.equal(readWorkers.length, 2);
   assert.equal(readWorkers[1].options.workerData.action, 'list-archive-months');
   assert.equal(readWorkers[1].options.workerData.payload.taskActive, true);

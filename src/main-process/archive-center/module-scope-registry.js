@@ -10,6 +10,7 @@ const PRIMARY_ARCHIVE_SCOPES = Object.freeze([
   Object.freeze({ id: 'biz-op-recon', code: 'BIZOP', name: '业务OP数据核对', kind: 'primary' }),
   Object.freeze({ id: 'acquiring-bill-currency', code: 'ACQUIRING', name: '收单单据币种校验', kind: 'primary' }),
   Object.freeze({ id: 'vcc-op-calc', code: 'VCCOP', name: 'VCC业务OP计算', kind: 'primary' }),
+  Object.freeze({ id: 'vcc-financial-op', code: 'VCCFINOP', name: 'VCC财务OP校验', kind: 'primary' }),
   Object.freeze({ id: 'pre-fund-reconciliation', code: 'PREFUND', name: '前置资金对账', kind: 'primary' }),
   Object.freeze({ id: 'duplicate-inbound-match', code: 'DUPINBOUND', name: '重复入金匹配', kind: 'primary' }),
   Object.freeze({ id: 'position-reconciliation-process', code: 'POSITION', name: '平盘对账数据处理', kind: 'primary' })

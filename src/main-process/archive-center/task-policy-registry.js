@@ -16,33 +16,7 @@ const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
 const PR3_HANDOFF_CHANNELS = Object.freeze([
   'toolbox:merge',
   'toolbox:split:export',
-  'toolbox:split:read',
-  'vccFinancialOp:data-manager:delete',
-  'vccFinancialOp:data-manager:delete-preview',
-  'vccFinancialOp:data-manager:delete-targets',
-  'vccFinancialOp:data-manager:export',
-  'vccFinancialOp:data-manager:export-preview',
-  'vccFinancialOp:data-manager:overview',
-  'vccFinancialOp:export:import-audit',
-  'vccFinancialOp:export:result',
-  'vccFinancialOp:import:apply',
-  'vccFinancialOp:import:pick-files',
-  'vccFinancialOp:imports:get-detail',
-  'vccFinancialOp:imports:list-months',
-  'vccFinancialOp:imports:list-records',
-  'vccFinancialOp:imports:resolve',
-  'vccFinancialOp:opening:initialize',
-  'vccFinancialOp:run:adjustment-add',
-  'vccFinancialOp:run:adjustment-options',
-  'vccFinancialOp:run:archive',
-  'vccFinancialOp:run:archived-months',
-  'vccFinancialOp:run:calculate',
-  'vccFinancialOp:run:get',
-  'vccFinancialOp:run:latest-archived',
-  'vccFinancialOp:run:preflight',
-  'vccFinancialOp:run:unarchive',
-  'vccFinancialOp:run:unarchive-preview',
-  'vccFinancialOp:task:cancel'
+  'toolbox:split:read'
 ]);
 
 const SUPPORT_ACTION_POLICIES = Object.freeze([
@@ -153,6 +127,19 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'vccOpCalc:import:scan',
     'vccOpCalc:run:compute-amounts',
     'vccOpCalc:run:save'
+  ]),
+  VCCFINOP: Object.freeze([
+    'vccFinancialOp:data-manager:delete',
+    'vccFinancialOp:data-manager:export',
+    'vccFinancialOp:export:import-audit',
+    'vccFinancialOp:export:result',
+    'vccFinancialOp:import:apply',
+    'vccFinancialOp:imports:resolve',
+    'vccFinancialOp:opening:initialize',
+    'vccFinancialOp:run:adjustment-add',
+    'vccFinancialOp:run:archive',
+    'vccFinancialOp:run:calculate',
+    'vccFinancialOp:run:unarchive'
   ]),
   ACQUIRING: Object.freeze([
     'acquiringBillCurrency:clearMonth',
@@ -265,7 +252,16 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'template:list',
     'template:list-children',
     'vccOpCalc:balance:get',
-    'vccOpCalc:balance:list-months'
+    'vccOpCalc:balance:list-months',
+    'vccFinancialOp:data-manager:delete-targets',
+    'vccFinancialOp:data-manager:overview',
+    'vccFinancialOp:imports:get-detail',
+    'vccFinancialOp:imports:list-months',
+    'vccFinancialOp:imports:list-records',
+    'vccFinancialOp:run:adjustment-options',
+    'vccFinancialOp:run:archived-months',
+    'vccFinancialOp:run:get',
+    'vccFinancialOp:run:latest-archived'
   ]),
   'file-picker-only': Object.freeze([
     'background:select-file',
@@ -279,21 +275,27 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'pending:import:pick-files',
     'pending:removed:pick-files',
     'scenarios:import-bundle',
-    'vccOpCalc:import:pick-files'
+    'vccOpCalc:import:pick-files',
+    'vccFinancialOp:import:pick-files'
   ]),
   'staging-preflight-only': Object.freeze([
     'position-reconciliation:bank:prepare-import'
   ]),
   'preview-only': Object.freeze([
     'file:extract-big-account-order',
-    'template:preview-delete-bill-split-row'
+    'template:preview-delete-bill-split-row',
+    'vccFinancialOp:data-manager:delete-preview',
+    'vccFinancialOp:data-manager:export-preview',
+    'vccFinancialOp:run:preflight',
+    'vccFinancialOp:run:unarchive-preview'
   ]),
   'cancel-active-task': Object.freeze([
     'acquiringBillCurrency:run:cancel',
     'file:cancel-big-account-selection',
     'position-reconciliation:bank:cancel-import',
     'position-reconciliation:import:cancel',
-    'position-reconciliation:source:cancel-import'
+    'position-reconciliation:source:cancel-import',
+    'vccFinancialOp:task:cancel'
   ]),
   'archive-center-maintenance': Object.freeze([
     'archive-center:delete-batch',
@@ -379,6 +381,103 @@ function statementResultClassifier(result) {
 
 function positionResultClassifier(result) {
   return classifyKnownStatus(result, ['needs-confirmation']);
+}
+
+function vccFinancialOpResultClassifier(result) {
+  const status = String(result && result.status || '').trim().toLowerCase();
+  if (status === 'blocked') return 'failed';
+  return classifyKnownStatus(result, ['calculated', 'initialized', 'all_skipped', 'archived']);
+}
+
+function vccFlowIdentity(kind, value) {
+  const normalized = String(value == null ? '' : value).trim();
+  if (!normalized) {
+    const error = new TypeError(`VCC ${kind} 稳定业务身份缺失`);
+    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+    throw error;
+  }
+  return {
+    type: `vcc-financial-op-${kind}`,
+    value: normalized
+  };
+}
+
+function vccInvocationPayload(invocation = {}) {
+  const args = Array.isArray(invocation.args) ? invocation.args : [];
+  return args[0] && typeof args[0] === 'object' ? args[0] : {};
+}
+
+function vccRunFlowIdentity(invocation = {}) {
+  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+    ? invocation.prepared
+    : {};
+  const payload = vccInvocationPayload(invocation);
+  return vccFlowIdentity('run', prepared.runId ?? payload.runId);
+}
+
+function vccImportRecordFlowIdentity(invocation = {}) {
+  return vccFlowIdentity('import-record', vccInvocationPayload(invocation).recordId);
+}
+
+function vccDeleteFlowPlan(invocation = {}) {
+  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+    ? invocation.prepared
+    : {};
+  const runIds = Array.isArray(prepared.runIds) ? prepared.runIds : [];
+  if (prepared.targetType === 'result' && runIds.length === 1) {
+    return { startsNewFlow: false, flowIdentity: vccFlowIdentity('run', runIds[0]) };
+  }
+  return { startsNewFlow: true, flowIdentity: null };
+}
+
+function vccImportResultFlowIdentities(result) {
+  if (!result || typeof result !== 'object') return [];
+  const identities = [];
+  if (String(result.batchId || '').trim()) {
+    identities.push(vccFlowIdentity('import-batch', result.batchId));
+  }
+  for (const record of Array.isArray(result.records) ? result.records : []) {
+    if (record && String(record.recordId || '').trim()) {
+      identities.push(vccFlowIdentity('import-record', record.recordId));
+    }
+  }
+  return identities;
+}
+
+function vccResultFlowIdentities(channel, result) {
+  if (channel === 'vccFinancialOp:import:apply') {
+    return vccImportResultFlowIdentities(result);
+  }
+  if (!result || typeof result !== 'object' || !String(result.runId || '').trim()) return [];
+  return [vccFlowIdentity('run', result.runId)];
+}
+
+function vccFinancialOpResultMetadata(result) {
+  const source = result && typeof result === 'object' ? result : {};
+  const metadata = standardResultMetadataResolver(source);
+  for (const key of [
+    'runId',
+    'targetMonth',
+    'resultRevision',
+    'batchId',
+    'recordId',
+    'auditId',
+    'deletionId',
+    'deletedRunCount',
+    'deletedDataCount'
+  ]) {
+    const value = source[key];
+    if (value !== undefined && value !== null) metadata[key] = value;
+  }
+  if (source.adjustment && source.adjustment.id !== undefined) {
+    metadata.adjustmentId = source.adjustment.id;
+  }
+  if (Array.isArray(source.initializedSubjects)) {
+    metadata.initializedSubjectCount = source.initializedSubjects.length;
+  }
+  if (Array.isArray(source.filePaths)) metadata.outputFileCount = source.filePaths.length;
+  if (source.filePath) metadata.outputFileCount = 1;
+  return metadata;
 }
 
 function resultBusinessRunIdentities(result) {
@@ -528,6 +627,7 @@ function resultClassifierForChannel(channel) {
     return statementResultClassifier;
   }
   if (channel.startsWith('position-reconciliation:')) return positionResultClassifier;
+  if (channel.startsWith('vccFinancialOp:')) return vccFinancialOpResultClassifier;
   return standardResultClassifier;
 }
 
@@ -539,6 +639,18 @@ function createReservePolicy(channel, scopeKey) {
   const isAcquiringRun = channel === 'acquiringBillCurrency:run';
   const isAcquiringResume = channel === 'acquiringBillCurrency:run:resume';
   const isAcquiringExport = channel === 'acquiringBillCurrency:export';
+  const isVcc = channel.startsWith('vccFinancialOp:');
+  const isVccRunContinuation = [
+    'vccFinancialOp:export:result',
+    'vccFinancialOp:run:adjustment-add',
+    'vccFinancialOp:run:archive',
+    'vccFinancialOp:run:unarchive'
+  ].includes(channel);
+  const isVccImportContinuation = [
+    'vccFinancialOp:export:import-audit',
+    'vccFinancialOp:imports:resolve'
+  ].includes(channel);
+  const isVccDelete = channel === 'vccFinancialOp:data-manager:delete';
   return Object.freeze({
     channel,
     scopeId: scope.id,
@@ -546,16 +658,30 @@ function createReservePolicy(channel, scopeKey) {
     moduleName: scope.name,
     taskKey: channel,
     batchPolicy: 'reserve',
-    startsNewFlow: isAcquiringExport ? false : !CONTINUATION_CHANNELS.has(channel),
-    flowIdentityResolver: CONTINUATION_CHANNELS.has(channel)
-      ? invocationBusinessRunIdentity
-      : null,
+    startsNewFlow: (isAcquiringExport || isVccRunContinuation || isVccImportContinuation)
+      ? false
+      : !CONTINUATION_CHANNELS.has(channel),
+    flowIdentityResolver: isVccRunContinuation
+      ? vccRunFlowIdentity
+      : isVccImportContinuation
+        ? vccImportRecordFlowIdentity
+        : CONTINUATION_CHANNELS.has(channel)
+          ? invocationBusinessRunIdentity
+          : null,
     flowPlanResolver: isBankBuRun
       ? bankBuRunFlowPlan
-      : (isAcquiringExport ? acquiringExportFlowPlan : null),
+      : isAcquiringExport
+        ? acquiringExportFlowPlan
+        : isVccDelete
+          ? vccDeleteFlowPlan
+          : null,
     resultClassifier: resultClassifierForChannel(channel),
-    resultMetadataResolver: standardResultMetadataResolver,
-    resultFlowIdentities: isBankBuImport
+    resultMetadataResolver: isVcc
+      ? vccFinancialOpResultMetadata
+      : standardResultMetadataResolver,
+    resultFlowIdentities: isVcc
+      ? (result) => vccResultFlowIdentities(channel, result)
+      : isBankBuImport
       ? bankBuImportResultFlowIdentities
       : isAcquiringExport
         ? acquiringExportResultFlowIdentities
@@ -644,5 +770,9 @@ module.exports = {
   resultBusinessRunIdentities,
   standardResultMetadataResolver,
   statementResultClassifier,
-  standardResultClassifier
+  standardResultClassifier,
+  vccDeleteFlowPlan,
+  vccFinancialOpResultClassifier,
+  vccImportResultFlowIdentities,
+  vccRunFlowIdentity
 };

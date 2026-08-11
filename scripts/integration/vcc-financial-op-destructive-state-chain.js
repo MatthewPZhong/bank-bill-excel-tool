@@ -46,6 +46,20 @@ const DETAIL_TYPES = Object.freeze([
 let passed = 0;
 let failed = 0;
 const failures = [];
+let lifecycleBatchSequence = 0;
+
+function createBatchContext(taskKey) {
+  lifecycleBatchSequence += 1;
+  return Object.freeze({
+    batchId: lifecycleBatchSequence,
+    batchNumber: `integration-${lifecycleBatchSequence}`,
+    taskRunId: `integration-task-${lifecycleBatchSequence}`,
+    taskKey,
+    moduleId: 'vcc-financial-op',
+    parentRunId: `integration-parent-${lifecycleBatchSequence}`,
+    operationKey: `${taskKey}:integration-${lifecycleBatchSequence}`
+  });
+}
 
 function printable(value) {
   try { return JSON.stringify(value); } catch (_error) { return String(value); }
@@ -410,7 +424,7 @@ async function run() {
         targetMonth: M1,
         expectedPreviewToken: m1Blocked.previewToken,
         taskGeneration: m1Blocked.taskGeneration
-      }),
+      }, undefined, createBatchContext('vccFinancialOp:run:unarchive')),
       'unarchive-not-tail',
       'M1 worker 二次门禁继续阻断非尾月'
     );
@@ -432,7 +446,7 @@ async function run() {
       targetMonth: M2,
       expectedPreviewToken: m2Preview.previewToken,
       taskGeneration: m2Preview.taskGeneration
-    });
+    }, undefined, createBatchContext('vccFinancialOp:run:unarchive'));
     assertEq(m2Unarchived.status, 'unarchived', 'M2 真实 worker 解归档成功');
     assertEq(
       db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id = ?').get(m2RunId).status,
@@ -474,7 +488,7 @@ async function run() {
       expectedPreviewToken: m2DeletePreview.previewToken,
       taskGeneration: m2DeletePreview.taskGeneration,
       reason: '集成链删除 M2 未归档结果'
-    });
+    }, undefined, createBatchContext('vccFinancialOp:data-manager:delete'));
     assertEq(m2Deleted.deletedRunCount, 1, 'M2 删除全部未归档结果');
     assertEq(
       count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs WHERE target_month = ?`, M2),
@@ -496,7 +510,7 @@ async function run() {
       targetMonth: M1,
       expectedPreviewToken: m1Preview.previewToken,
       taskGeneration: m1Preview.taskGeneration
-    });
+    }, undefined, createBatchContext('vccFinancialOp:run:unarchive'));
     assertEq(m1Unarchived.status, 'unarchived', 'M1 解归档成功');
     assertEq(
       count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_archives WHERE target_month = ?`, M1),
@@ -516,7 +530,7 @@ async function run() {
       expectedPreviewToken: openingPreview.previewToken,
       taskGeneration: openingPreview.taskGeneration,
       reason: '集成链删除 M1 首月期初'
-    });
+    }, undefined, createBatchContext('vccFinancialOp:data-manager:delete'));
     assertEq(openingDeleted.deletedOpeningCount, 1, 'M1 全部主体期初整体删除');
     assertEq(openingDeleted.deletedRunCount, 1, 'M1 未归档结果随期初删除');
     assertEq(
@@ -570,7 +584,7 @@ async function run() {
         targetType: 'result',
         expectedPreviewToken: stalePreview.previewToken,
         taskGeneration: stalePreview.taskGeneration
-      }),
+      }, undefined, createBatchContext('vccFinancialOp:data-manager:delete')),
       'state-changed',
       'token 变化后 worker 二次门禁拒绝结果删除'
     );
@@ -609,7 +623,7 @@ async function run() {
       expectedPreviewToken: sourcePreview.previewToken,
       taskGeneration: sourcePreview.taskGeneration,
       reason: '集成链纠正来源数据'
-    });
+    }, undefined, createBatchContext('vccFinancialOp:data-manager:delete'));
     assertEq(sourceDeleted.invalidatedRunCount, 1, '来源删除同步作废 calculated run');
     assertEq(
       count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs WHERE id = ?`, sourceRunId),
@@ -662,7 +676,7 @@ async function run() {
       expectedPreviewToken: systemPreview.previewToken,
       taskGeneration: systemPreview.taskGeneration,
       reason: '集成链纠正系统原表'
-    });
+    }, undefined, createBatchContext('vccFinancialOp:data-manager:delete'));
     assertEq(systemDeleted.deletedDataCount, 1, '系统原表通过 dedicated worker 删除一条 snapshot');
     const acceptedAttempts = db.prepare(`
       SELECT disposition, existing_snapshot_id,

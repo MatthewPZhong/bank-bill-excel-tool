@@ -23,6 +23,15 @@ const LEGACY_FIXTURE_PATH = path.resolve(
   __dirname,
   '../../fixtures/vcc-financial-op/v3.1.7-four-dataset.sqlite'
 );
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 52,
+  batchNumber: '2026-08-11-002',
+  taskRunId: 'task-52',
+  taskKey: 'vccFinancialOp:export:result',
+  moduleId: 'vcc-financial-op',
+  parentRunId: 'parent-52',
+  operationKey: 'operation-52'
+});
 
 function sha256File(filename) {
   return crypto.createHash('sha256').update(fs.readFileSync(filename)).digest('hex');
@@ -141,7 +150,7 @@ test('B-12 真实 legacy fixture 的初读与导出租约内二次重查均可�
   assert.deepEqual(await service.exportRun({
     targetMonth: '2026-06',
     outputPath: '/tmp/legacy-result.xlsx'
-  }), { filePaths: ['/tmp/legacy-result.xlsx'] });
+  }, BATCH_CONTEXT), { filePaths: ['/tmp/legacy-result.xlsx'] });
   assert.equal(writerCalls.length, 1);
   assert.equal(writerCalls[0].runId, 1);
 });

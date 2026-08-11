@@ -21,6 +21,7 @@ const MODULES = Object.freeze({
   bizOp: moduleDescriptor('BIZOP'),
   acquiring: moduleDescriptor('ACQUIRING'),
   vcc: moduleDescriptor('VCCOP'),
+  vccFinancial: moduleDescriptor('VCCFINOP'),
   preFund: moduleDescriptor('PREFUND'),
   duplicateInbound: moduleDescriptor('DUPINBOUND'),
   position: moduleDescriptor('POSITION'),
@@ -86,7 +87,11 @@ const FILE_CHANNELS = new Set([
   'template:export-bundle',
   'template:import',
   'template:import-bundle',
-  'vccOpCalc:import:scan'
+  'vccOpCalc:import:scan',
+  'vccFinancialOp:data-manager:export',
+  'vccFinancialOp:export:import-audit',
+  'vccFinancialOp:export:result',
+  'vccFinancialOp:import:apply'
 ]);
 
 const SELECTED_INPUT_CHANNELS = new Set([
@@ -109,7 +114,8 @@ const SELECTED_INPUT_CHANNELS = new Set([
   'recon-id-fix:import',
   'scenarios:import-bundle-apply',
   'template:import',
-  'template:import-bundle'
+  'template:import-bundle',
+  'vccFinancialOp:import:apply'
 ]);
 
 const PAYLOAD_INPUT_CHANNELS = new Set([
@@ -121,7 +127,8 @@ const PAYLOAD_INPUT_CHANNELS = new Set([
   'pending:import:start',
   'pending:removed:import',
   'scenarios:import-bundle-apply',
-  'vccOpCalc:import:scan'
+  'vccOpCalc:import:scan',
+  'vccFinancialOp:import:apply'
 ]);
 
 const RESULT_OUTPUT_KEYS = Object.freeze({
@@ -155,7 +162,9 @@ const RESULT_OUTPUT_KEYS = Object.freeze({
   'pre-fund-reconciliation:mpt-errors:export': ['filePath', 'savedPath'],
   'recon-id-fix:export': ['mainFilePath', 'unmatchedFilePath'],
   'scenarios:export-bundle': ['filePath', 'savedPath'],
-  'template:export-bundle': ['filePath', 'savedPath']
+  'template:export-bundle': ['filePath', 'savedPath'],
+  'vccFinancialOp:data-manager:export': ['filePath'],
+  'vccFinancialOp:export:import-audit': ['filePath']
 });
 
 function normalizePathList(values) {
@@ -260,6 +269,22 @@ function successfulSelectedPaths(selectedPaths, result) {
     .map(({ filePath }) => filePath);
 }
 
+const VCC_SUCCESSFUL_IMPORT_STATUSES = new Set([
+  'success',
+  'success_with_skips',
+  'all_skipped'
+]);
+
+function successfulVccImportPaths(payload, result) {
+  const successfulTypes = new Set((Array.isArray(result && result.records) ? result.records : [])
+    .filter((record) => VCC_SUCCESSFUL_IMPORT_STATUSES.has(String(record && record.status || '')))
+    .map((record) => String(record.sourceType || ''))
+    .filter(Boolean));
+  return normalizePathList((Array.isArray(payload && payload.files) ? payload.files : [])
+    .filter((file) => file && successfulTypes.has(String(file.sourceType || '')))
+    .map((file) => file.filePath));
+}
+
 function resolveOperationInputPaths(operation = {}) {
   const channel = String(operation.channel || '');
   if (!FILE_CHANNELS.has(channel)) return [];
@@ -278,7 +303,12 @@ function resolveOperationInputPaths(operation = {}) {
   let inputPaths = [];
   if (SELECTED_INPUT_CHANNELS.has(channel)) inputPaths = selected;
   if (PAYLOAD_INPUT_CHANNELS.has(channel)) {
-    inputPaths = normalizePathList([...inputPaths, ...pathsFromPayload(payload)]);
+    const payloadPaths = channel === 'vccFinancialOp:import:apply'
+      ? normalizePathList((Array.isArray(payload.files) ? payload.files : []).map(
+        (file) => file && file.filePath
+      ))
+      : pathsFromPayload(payload);
+    inputPaths = normalizePathList([...inputPaths, ...payloadPaths]);
   }
   return inputPaths;
 }
@@ -302,6 +332,7 @@ function resolveOperationFiles(operation = {}) {
   const channel = String(operation.channel || '');
   if (!FILE_CHANNELS.has(channel)) return [];
   const runtime = operation.runtime || {};
+  const payload = firstPayload(operation.args);
   if (runtime.skipArchive === true) return [];
   let inputPaths = resolveOperationInputPaths(operation);
   if (channel === 'pre-fund-reconciliation:import-mpt'
@@ -316,6 +347,9 @@ function resolveOperationFiles(operation = {}) {
       || channel === 'file:save-balance-seed') {
     inputPaths = normalizePathList(runtime.inputPaths || []);
   }
+  if (channel === 'vccFinancialOp:import:apply') {
+    inputPaths = successfulVccImportPaths(payload, operation.result);
+  }
 
   let outputPaths = normalizePathList(runtime.outputPaths || []);
   if (outputPaths.length === 0 && RESULT_OUTPUT_KEYS[channel]) {
@@ -323,6 +357,14 @@ function resolveOperationFiles(operation = {}) {
   }
   if (channel === 'pre-fund-reconciliation:export') {
     outputPaths = normalizePathList([...outputPaths, ...outputPathsFromFiles(operation.result)]);
+  }
+  if (channel === 'vccFinancialOp:export:result') {
+    outputPaths = normalizePathList([
+      ...outputPaths,
+      ...(Array.isArray(operation.result && operation.result.filePaths)
+        ? operation.result.filePaths
+        : [])
+    ]);
   }
   const inputValues = descriptorsForPaths(runtime.inputFiles, inputPaths);
   const outputValues = Array.isArray(runtime.outputFiles) && runtime.outputFiles.length > 0
@@ -381,5 +423,6 @@ module.exports = {
   normalizePathList,
   resolveOperationInputPaths,
   resolveOperationFiles,
-  selectSuccessfulPathsByResultIndex
+  selectSuccessfulPathsByResultIndex,
+  successfulVccImportPaths
 };

@@ -61,6 +61,16 @@ function createFakeWorkerFactory(workers) {
   };
 }
 
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 61,
+  batchNumber: '2026-08-11-001',
+  taskRunId: 'task-61',
+  taskKey: 'vcc-test',
+  moduleId: 'vcc-financial-op',
+  parentRunId: 'parent-61',
+  operationKey: 'operation-61'
+});
+
 function seedCalculatedReviewRun(db) {
   const revisions = Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]));
   const runId = Number(db.prepare(`
@@ -145,7 +155,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     expectedResultRevision: 0,
     expectedPreviewToken: initialResult.previewTokens.adjustment,
     taskGeneration: initialResult.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(service._taskStateForTests().action, 'add-adjustment');
   assert.throws(
     () => service.addRunAdjustment({
@@ -157,7 +167,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
       expectedResultRevision: 0,
       expectedPreviewToken: initialResult.previewTokens.adjustment,
       taskGeneration: initialResult.taskGeneration
-    }),
+    }, undefined, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task'
   );
   const adjusted = await adding;
@@ -195,7 +205,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     expectedResultRevision: 1,
     expectedPreviewToken: effective.previewTokens.archive,
     taskGeneration: effective.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(archived.status, 'archived');
   const archiveAudit = db.prepare(`
     SELECT app_version, build_sha FROM vcc_fin_op_operation_audit
@@ -211,7 +221,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     targetMonth: '2026-06',
     expectedPreviewToken: unarchivePreview.previewToken,
     taskGeneration: unarchivePreview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(unarchived.status, 'unarchived');
   assert.equal(db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id = ?').get(runId).status, 'calculated');
 });
@@ -243,7 +253,7 @@ test('真实 v3.1.7 legacy preview 经 Service claim 到 dedicated worker 解归
     targetMonth: '2026-06',
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(result.archiveContract, 'legacy-v3.1.7-four-dataset');
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS count FROM vcc_fin_op_datasets
@@ -273,7 +283,7 @@ test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   const primaryError = new Error('replacement-primary-fault');
   primaryError.code = 'SQLITE_CONSTRAINT_TRIGGER';
   primaryError.detailLines = ['旧结果保留，替换事务已回滚'];
@@ -350,7 +360,7 @@ test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 work
     const result = await service.calculate({
       targetMonth: '2026-06',
       expectedInputFingerprint
-    });
+    }, BATCH_CONTEXT);
     assert.equal(result.status, 'blocked');
     assert.equal(result.code, 'preflight-required');
   }
@@ -381,11 +391,12 @@ test('calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版�
     taskGeneration: 999,
     runId: 123,
     unexpectedField: 'must-not-cross-service-boundary'
-  });
+  }, BATCH_CONTEXT);
   assert.equal(workers.length, 1);
   assert.deepEqual(workers[0].options.workerData.payload, {
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64),
+    batchContext: BATCH_CONTEXT,
     taskGeneration: 0,
     appVersion: '3.1.8-trusted',
     buildSha: 'trusted-build-sha'
@@ -660,7 +671,7 @@ test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档�
   assert.throws(() => service.deleteDatasetData({
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE
-  }), (error) => {
+  }, undefined, BATCH_CONTEXT), (error) => {
     assert.equal(error.code, 'state-changed');
     assert.equal(error.message, '数据状态已变化，请刷新并重新确认。');
     return true;
@@ -672,7 +683,7 @@ test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档�
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration,
     reason: 'C2 正式删除链'
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(deleted.deletedDataCount, 1);
   assert.equal(deleted.invalidatedRunCount, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
@@ -733,7 +744,7 @@ test('数据管理有效表通过 worker 流式导出并返回工作簿元数据
   assert.equal(preview.dataCount, 1);
   const result = await service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'check', outputPath
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(result.tableName, 'VCC充值清退明细_校验表');
   assert.equal(result.dataCount, 1);
   assert.equal(result.sheetCount, 1);
@@ -765,17 +776,17 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   assert.equal(service._taskStateForTests().taskGeneration, 0);
   assert.throws(() => service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
-  }), (error) => error.code === 'active-vcc-task');
+  }, undefined, BATCH_CONTEXT), (error) => error.code === 'active-vcc-task');
   await assert.rejects(
     service.resolveRecord({
       recordId: 1,
       note: '不会进入数据库写入',
       action: 'keep_current_effective_dataset'
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task'
   );
 
@@ -787,14 +798,18 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: oldPreview.previewToken,
     taskGeneration: oldPreview.taskGeneration
-  }), (error) => {
+  }, undefined, BATCH_CONTEXT), (error) => {
     assert.equal(error.code, 'state-changed');
     assert.equal(error.message, '数据状态已变化，请刷新并重新确认。');
     return true;
   });
   for (const action of [
-    () => service.unarchiveMonth({ targetMonth: '2026-06' }),
-    () => service.deleteDataTarget({ targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE })
+    () => service.unarchiveMonth({ targetMonth: '2026-06' }, undefined, BATCH_CONTEXT),
+    () => service.deleteDataTarget(
+      { targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE },
+      undefined,
+      BATCH_CONTEXT
+    )
   ]) {
     assert.throws(action, (error) => {
       assert.equal(error.code, 'state-changed');
@@ -828,7 +843,7 @@ test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法
       call: (confirmation) => service.unarchiveMonth({
         targetMonth: '2026-06',
         ...confirmation
-      }),
+      }, undefined, BATCH_CONTEXT),
       token: unarchivePreview.previewToken
     },
     {
@@ -836,7 +851,7 @@ test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法
         targetMonth: '2026-06',
         targetType: SOURCE_TYPES.RECHARGE,
         ...confirmation
-      }),
+      }, undefined, BATCH_CONTEXT),
       token: deletePreview.previewToken
     }
   ];
@@ -888,13 +903,16 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
     targetMonth: '2026-06',
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const worker = workers[0];
   worker.emit('message', { type: 'critical-ready' });
   assert.deepEqual(worker.sentMessages, [{ type: 'critical-ack' }]);
   assert.equal(service._taskStateForTests().protected, true);
   await assert.rejects(
-    service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' }),
+    service.exportRun(
+      { targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' },
+      BATCH_CONTEXT
+    ),
     (error) => error.code === 'active-vcc-task',
     '解归档持有全局租约时必须拒绝结果导出'
   );
@@ -915,7 +933,7 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
     service.calculate({
       targetMonth: '2026-07',
       expectedInputFingerprint: 'a'.repeat(64)
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'service-closing'
   );
 });
@@ -943,10 +961,16 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const rejection = assert.rejects(operation, (error) => error.code === 'operation-cancelled');
-  const cancellation = service.cancelActiveTask();
   const worker = workers[0];
+  const acceptedOrder = [];
+  const cancellation = service.cancelActiveTask(() => {
+    acceptedOrder.push('lifecycle-cancelled');
+    assert.deepEqual(worker.sentMessages, [], '先终结原批次，再通知 worker');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(acceptedOrder, ['lifecycle-cancelled']);
   assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }]);
   worker.emit('message', {
     type: 'error',
@@ -977,7 +1001,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const rejection = assert.rejects(operation, /后台任务退出但未返回结果/);
   const termination = service.terminate();
   const worker = workers[0];
@@ -1086,13 +1110,16 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
       targetMonth: '2026-07',
       runId,
       outputPath: '/tmp/must-not-export.xlsx'
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'archive-state-inconsistent',
     '外部 runId 不得覆盖租约内 targetMonth 解析'
   );
   assert.equal(writerArgs, undefined);
 
-  const exporting = service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' });
+  const exporting = service.exportRun(
+    { targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' },
+    BATCH_CONTEXT
+  );
   await started;
   assert.equal(service._taskStateForTests().action, 'export-result');
   assert.equal(writerArgs.runId, runId, 'runId 必须在租约内由 targetMonth 严格解析');
@@ -1103,7 +1130,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
       targetMonth: '2026-06',
       expectedPreviewToken: unarchivePreview.previewToken,
       taskGeneration: unarchivePreview.taskGeneration
-    }),
+    }, undefined, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task',
     '结果导出持有全局租约时必须拒绝解归档'
   );

@@ -411,3 +411,24 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 
 - 首次完整门禁 lint/smoke、unit 4984/4984 通过，最后一条 historical integration 因 legacy helper 生成 v1 token 而失败，分类 stale integration test；仅机械迁移到真实 `service.previewUnarchive` v2 token/taskGeneration → `service.unarchiveMonth` → 写后 refetch，单脚本 29/29 PASS，未改生产或重试首次 full。
 - 第二次且最终单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4984/4984（325 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（295658ms），其中 destructive 77/77、historical 29/29。runner 仅在全绿终态自动同步 policy §七。
+
+## 十六、PR3-VCC TaskLifecycle 测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| VCC-L01 | P0 | policy/scope | literal inventory | 独立 `vcc-financial-op/VCCFINOP`；既有 VCCOP 不变；11 reserve、15 exclude、toolbox 3 handoff exact |
+| VCC-L02 | P0 | lifecycle | reserve/start failure | BOR 后 reserve；reserve/started 失败均 0 execute/0 worker，原序号保留 |
+| VCC-L03 | P0 | context | generic/dedicated worker | 生产 reserve 链 required exact7；Service freeze、worker refreeze；read worker 无 context |
+| VCC-L04 | P0 | flow | run/import/record/delete | calculate/import 新 parent；run/record 稳定 identity 续接；result delete 仅 prepared 唯一 runId 续接 |
+| VCC-L05 | P0 | artifact | 五类 import | 只登记 success/success_with_skips/all_skipped 对应实际源文件，失败组不登记 |
+| VCC-L06 | P0 | artifact | result/data/audit export | 保存对话框在 prepare；取消 0 BOR/reserve；登记 writer 返回的全部输出 |
+| VCC-L07 | P0 | metadata | opening/adjust/archive/unarchive/delete | 建批并写终态/metadata，不强制空物理目录 |
+| VCC-L08 | P0 | cancel | pre-critical/protected/late | pre-critical CAS 原 batch cancelled；protected 等业务终态；late cancel 不覆盖 |
+| VCC-L09 | P0 | terminal | crash/CAS | worker crash failed；first-terminal-wins；取消不建第二批次 |
+| VCC-L10 | P0 | outbox | artifact/terminal persistence fault | 业务终态与 archiveStatus 分离；intent 复用原 batch/parent/operation key，reserve 仍一次 |
+| VCC-L11 | P1 | renderer/archive UI | module filter | VCC 财务OP作为 primary 出现在存档筛选，业务 UI/路由不变 |
+| VCC-L12 | P1 | funds regression | 九币种/revision/跨月/审计/export | 既有 C1/C2 guard、金额币种、adjustment、归档/解归档/delete 和 Excel 合同不变 |
+
+当前自动证据：VCC/Archive 扩大聚焦 unit 460/460 PASS；四条真实 VCC integration 19/19、209/209、77/77、29/29，共 334/334 PASS；lint、changed JS `node --check`、diff check PASS。首次失败分类包含一个 operation-tracker production regression（局部 payload 引用，已修）及若干 required exact7/旧 UI exclusion 的 stale tests/integration fixtures；生产 required 合同未放宽，未增加 renderer/IPC 不可达防御。`check-vars -- --include-minor` exit 2 仅 Runtime-state `MODULES/app/dialog`，无 Critical/Risk-sensitive；逐项 review 结论记录于 implementation notes。最终且唯一一次 `npm run release-check` exit 0：lint/smoke PASS，unit 4990/4990（326 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（384212ms）；runner 只在全绿后自动同步 policy §七，无 retry 或阈值放宽。
+
+P0/P1 人工检查仍待用户：取消一个真实保存对话框确认运行次数不变；分别观察 pre-critical 与 protected cancel；在存档中心核对一个 metadata-only 和一个多文件结果导出批次。⚠️ 真实主体×九币种、调整后余额、跨月期初、归档/解归档/delete 审计及全部导出文件必须由财务人工复核；Windows packaged、约 16 GB 与目标生产 legacy/trigger 仍为 PROBE。完整自动门禁不能替代上述真实环境和资金人工验收。

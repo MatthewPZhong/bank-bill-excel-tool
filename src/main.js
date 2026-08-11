@@ -51,6 +51,9 @@ const {
   createTaskLifecycle
 } = require('./main-process/archive-center/task-lifecycle');
 const {
+  freezeWorkerBatchContext
+} = require('./main-process/archive-center/worker-batch-context');
+const {
   createIpcTaskContext,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
@@ -532,6 +535,10 @@ function getVccFinancialOpService() {
     });
   }
   return vccFinancialOpService;
+}
+
+function requireVccFinancialOpBatchContext(taskContext) {
+  return freezeWorkerBatchContext(taskContext && taskContext.batchContext, { required: true });
 }
 let lastGeneratedExports = {
   detail: null,
@@ -13708,26 +13715,34 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', async (event, payload = {}) => {
-    try {
-      const result = await getVccFinancialOpService().importSelectedFiles(payload, (progress) => {
-        if (event && event.sender && !event.sender.isDestroyed()) {
-          event.sender.send('vccFinancialOp:import:progress', progress);
-        }
-      });
-      return { status: 'success', ...result };
-    } catch (error) {
-      return {
-        status: 'error',
-        message: error && error.message ? error.message : String(error),
-        detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
-      };
+  trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', {
+    execute: async (event, _prepared, taskContext, payload = {}) => {
+      try {
+        const batchContext = requireVccFinancialOpBatchContext(taskContext);
+        const result = await getVccFinancialOpService().importSelectedFiles(payload, (progress) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccFinancialOp:import:progress', progress);
+          }
+        }, batchContext);
+        return { status: 'success', ...result };
+      } catch (error) {
+        return {
+          status: 'error',
+          message: error && error.message ? error.message : String(error),
+          detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
+        };
+      }
     }
   });
 
   ipcMain.handle('vccFinancialOp:task:cancel', async () => {
     try {
-      return await getVccFinancialOpService().cancelActiveTask();
+      return await getVccFinancialOpService().cancelActiveTask(() => (
+        archiveTaskLifecycle.cancelActive(
+          (context) => context.moduleId === 'vcc-financial-op',
+          '用户取消 VCC 财务OP任务'
+        )
+      ));
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
     }
@@ -13741,31 +13756,43 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:calculate', 'VCC财务OP校验', '开始运行', async (_event, payload = {}) => {
-    try {
-      return await getVccFinancialOpService().calculate(payload);
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+  trackedIpcHandle('vccFinancialOp:run:calculate', 'VCC财务OP校验', '开始运行', {
+    execute: async (_event, _prepared, taskContext, payload = {}) => {
+      try {
+        return await getVccFinancialOpService().calculate(
+          payload,
+          requireVccFinancialOpBatchContext(taskContext)
+        );
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
+      }
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:opening:initialize', 'VCC财务OP校验', '初始化期初财务OP', async (_event, payload = {}) => {
-    try {
-      return await getVccFinancialOpService().initializeOpening(payload);
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+  trackedIpcHandle('vccFinancialOp:opening:initialize', 'VCC财务OP校验', '初始化期初财务OP', {
+    execute: async (_event, _prepared, taskContext, payload = {}) => {
+      try {
+        return await getVccFinancialOpService().initializeOpening(
+          payload,
+          requireVccFinancialOpBatchContext(taskContext)
+        );
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
+      }
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', async (event, payload = {}) => {
-    try {
-      return await getVccFinancialOpService().archive(payload, (progress) => {
-        if (event && event.sender && !event.sender.isDestroyed()) {
-          event.sender.send('vccFinancialOp:operation:progress', progress);
-        }
-      });
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', {
+    execute: async (event, _prepared, taskContext, payload = {}) => {
+      try {
+        return await getVccFinancialOpService().archive(payload, (progress) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccFinancialOp:operation:progress', progress);
+          }
+        }, requireVccFinancialOpBatchContext(taskContext));
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
+      }
     }
   });
 
@@ -13778,16 +13805,18 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', async (event, payload = {}) => {
-    try {
-      const result = await getVccFinancialOpService().addRunAdjustment(payload, (progress) => {
-        if (event && event.sender && !event.sender.isDestroyed()) {
-          event.sender.send('vccFinancialOp:operation:progress', progress);
-        }
-      });
-      return { ...result, operationStatus: result.status, status: 'success' };
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', {
+    execute: async (event, _prepared, taskContext, payload = {}) => {
+      try {
+        const result = await getVccFinancialOpService().addRunAdjustment(payload, (progress) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccFinancialOp:operation:progress', progress);
+          }
+        }, requireVccFinancialOpBatchContext(taskContext));
+        return { ...result, operationStatus: result.status, status: 'success' };
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
+      }
     }
   });
 
@@ -13813,16 +13842,26 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:unarchive', 'VCC财务OP校验', '解归档', async (event, payload = {}) => {
-    try {
-      const result = await getVccFinancialOpService().unarchiveMonth(payload, (progress) => {
-        if (event && event.sender && !event.sender.isDestroyed()) {
-          event.sender.send('vccFinancialOp:operation:progress', progress);
-        }
-      });
-      return { ...result, operationStatus: result.status, status: 'success' };
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+  trackedIpcHandle('vccFinancialOp:run:unarchive', 'VCC财务OP校验', '解归档', {
+    prepare: async (_event, payload = {}) => {
+      try {
+        const preview = await getVccFinancialOpService().previewUnarchive(payload);
+        return { proceed: true, runId: preview.runId };
+      } catch (error) {
+        return { proceed: false, result: vccFinancialOpErrorResult(error) };
+      }
+    },
+    execute: async (event, prepared, taskContext, payload = {}) => {
+      try {
+        const result = await getVccFinancialOpService().unarchiveMonth(payload, (progress) => {
+          if (event && event.sender && !event.sender.isDestroyed()) {
+            event.sender.send('vccFinancialOp:operation:progress', progress);
+          }
+        }, requireVccFinancialOpBatchContext(taskContext));
+        return { ...result, runId: result.runId || prepared.runId, operationStatus: result.status, status: 'success' };
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
+      }
     }
   });
 
@@ -13842,11 +13881,19 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', async (_event, payload = {}) => {
-    try {
-      return { status: 'success', record: await getVccFinancialOpService().resolveRecord(payload) };
-    } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', {
+    execute: async (_event, _prepared, taskContext, payload = {}) => {
+      try {
+        return {
+          status: 'success',
+          record: await getVccFinancialOpService().resolveRecord(
+            payload,
+            requireVccFinancialOpBatchContext(taskContext)
+          )
+        };
+      } catch (error) {
+        return { status: 'error', message: error && error.message ? error.message : String(error) };
+      }
     }
   });
 
@@ -13887,24 +13934,39 @@ function registerNewAccountHandlers() {
     (_result, _event, payload = {}) => (
       (payload.targetType || payload.sourceType) === 'result' ? '删除结果' : '删除数据'
     ),
-    async (event, payload = {}) => {
-    try {
-      const service = getVccFinancialOpService();
-      const result = await service.deleteDataTarget(payload, (progress) => {
-        if (event && event.sender && !event.sender.isDestroyed()) {
-          event.sender.send('vccFinancialOp:operation:progress', progress);
+    {
+      prepare: async (_event, payload = {}) => {
+        try {
+          const preview = await getVccFinancialOpService().previewDataTargetDeletion(payload);
+          return {
+            proceed: true,
+            targetType: preview.targetType,
+            runIds: Array.isArray(preview.runIds) ? preview.runIds.slice() : []
+          };
+        } catch (error) {
+          return { proceed: false, result: vccFinancialOpErrorResult(error) };
         }
-      });
-      return {
-        ...result,
-        targetType: result.targetType || payload.targetType || payload.sourceType,
-        operationStatus: result.status || 'deleted',
-        status: 'success'
-      };
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
+      },
+      execute: async (event, _prepared, taskContext, payload = {}) => {
+        try {
+          const service = getVccFinancialOpService();
+          const result = await service.deleteDataTarget(payload, (progress) => {
+            if (event && event.sender && !event.sender.isDestroyed()) {
+              event.sender.send('vccFinancialOp:operation:progress', progress);
+            }
+          }, requireVccFinancialOpBatchContext(taskContext));
+          return {
+            ...result,
+            targetType: result.targetType || payload.targetType || payload.sourceType,
+            operationStatus: result.status || 'deleted',
+            status: 'success'
+          };
+        } catch (error) {
+          return vccFinancialOpErrorResult(error);
+        }
+      }
     }
-  });
+  );
 
   ipcMain.handle('vccFinancialOp:data-manager:export-preview', (_event, payload = {}) => {
     try {
@@ -13917,29 +13979,45 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', async (_event, payload = {}) => {
-    try {
-      const service = getVccFinancialOpService();
-      const inspection = service.previewDatasetExport(payload);
-      if (!inspection.exportable) {
-        return { status: 'error', message: inspection.message || '当前选择没有可导出的有效数据' };
+  trackedIpcHandle('vccFinancialOp:data-manager:export', 'VCC财务OP校验', '导出数据', {
+    prepare: async (_event, payload = {}) => {
+      try {
+        const inspection = getVccFinancialOpService().previewDatasetExport(payload);
+        if (!inspection.exportable) {
+          return {
+            proceed: false,
+            result: { status: 'error', message: inspection.message || '当前选择没有可导出的有效数据' }
+          };
+        }
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出 VCC 财务OP数据',
+          defaultPath: path.join(
+            app.getPath('documents'),
+            `${inspection.targetMonth}_${sanitizeFileName(inspection.tableName) || 'VCC财务OP数据'}.xlsx`
+          ),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return { proceed: true, outputPaths: [choice.filePath], outputPath: choice.filePath };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: error && error.message ? error.message : String(error) }
+        };
       }
-      const choice = await dialog.showSaveDialog(mainWindow, {
-        title: '导出 VCC 财务OP数据',
-        defaultPath: path.join(
-          app.getPath('documents'),
-          `${inspection.targetMonth}_${sanitizeFileName(inspection.tableName) || 'VCC财务OP数据'}.xlsx`
-        ),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      const result = await service.exportDatasetData({
-        ...payload,
-        outputPath: choice.filePath
-      });
-      return { status: 'success', ...result };
-    } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+    },
+    execute: async (_event, prepared, taskContext, payload = {}) => {
+      try {
+        const result = await getVccFinancialOpService().exportDatasetData({
+          ...payload,
+          outputPath: prepared.outputPath
+        }, undefined, requireVccFinancialOpBatchContext(taskContext));
+        return { status: 'success', ...result };
+      } catch (error) {
+        return { status: 'error', message: error && error.message ? error.message : String(error) };
+      }
     }
   });
 
@@ -13965,62 +14043,94 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', async (_event, payload = {}) => {
-    try {
-      const service = getVccFinancialOpService();
-      const target = await service.getArchivedRunByMonth(payload.targetMonth);
-      const subjects = target.subjects;
-      if (subjects.length === 1) {
-        const choice = await dialog.showSaveDialog(mainWindow, {
-          title: '导出 VCC 财务OP校验结果表',
-          defaultPath: path.join(
-            app.getPath('documents'),
-            `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
-          ),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+  trackedIpcHandle('vccFinancialOp:export:result', 'VCC财务OP校验', '导出校验结果表', {
+    prepare: async (_event, payload = {}) => {
+      try {
+        const target = await getVccFinancialOpService().getArchivedRunByMonth(payload.targetMonth);
+        const subjects = target.subjects;
+        if (subjects.length === 1) {
+          const choice = await dialog.showSaveDialog(mainWindow, {
+            title: '导出 VCC 财务OP校验结果表',
+            defaultPath: path.join(
+              app.getPath('documents'),
+              `${target.targetMonth}_${sanitizeFileName(subjects[0]) || '未命名主体'}_VCC财务OP校验结果表.xlsx`
+            ),
+            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+          });
+          if (choice.canceled || !choice.filePath) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
+          return {
+            proceed: true,
+            runId: target.runId,
+            targetMonth: target.targetMonth,
+            outputPath: choice.filePath,
+            outputPaths: [choice.filePath]
+          };
+        }
+        const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
+          title: '选择各主体校验结果表保存目录',
+          properties: ['openDirectory', 'createDirectory']
         });
-        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-        const result = await service.exportRun({
+        if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return {
+          proceed: true,
+          runId: target.runId,
           targetMonth: target.targetMonth,
-          outputPath: choice.filePath
-        });
+          outputDirectory: choice.filePaths[0]
+        };
+      } catch (error) {
+        return { proceed: false, result: vccFinancialOpErrorResult(error) };
+      }
+    },
+    execute: async (_event, prepared, taskContext) => {
+      try {
+        const result = await getVccFinancialOpService().exportRun({
+          targetMonth: prepared.targetMonth,
+          outputPath: prepared.outputPath,
+          outputDirectory: prepared.outputDirectory
+        }, requireVccFinancialOpBatchContext(taskContext));
         return { status: 'success', ...result };
+      } catch (error) {
+        return vccFinancialOpErrorResult(error);
       }
-      const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
-        title: '选择各主体校验结果表保存目录',
-        properties: ['openDirectory', 'createDirectory']
-      });
-      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-      const result = await service.exportRun({
-        targetMonth: target.targetMonth,
-        outputDirectory: choice.filePaths[0]
-      });
-      return { status: 'success', ...result };
-    } catch (error) {
-      return vccFinancialOpErrorResult(error);
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:export:import-audit', 'VCC财务OP校验', '导出导入审计', async (_event, payload = {}) => {
-    try {
-      const choice = await dialog.showSaveDialog(mainWindow, {
-        title: '导出校验原表导入审计',
-        defaultPath: path.join(
-          app.getPath('documents'),
-          `VCC财务OP导入审计_${payload.recordId || ''}.xlsx`
-        ),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      const result = await getVccFinancialOpService().exportImportAudit({
-        ...payload,
-        outputPath: choice.filePath
-      });
-      return { status: 'success', ...result };
-    } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
+  trackedIpcHandle('vccFinancialOp:export:import-audit', 'VCC财务OP校验', '导出导入审计', {
+    prepare: async (_event, payload = {}) => {
+      try {
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出校验原表导入审计',
+          defaultPath: path.join(
+            app.getPath('documents'),
+            `VCC财务OP导入审计_${payload.recordId || ''}.xlsx`
+          ),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return { proceed: true, outputPath: choice.filePath, outputPaths: [choice.filePath] };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: error && error.message ? error.message : String(error) }
+        };
+      }
+    },
+    execute: async (_event, prepared, taskContext, payload = {}) => {
+      try {
+        const result = await getVccFinancialOpService().exportImportAudit({
+          ...payload,
+          outputPath: prepared.outputPath
+        }, requireVccFinancialOpBatchContext(taskContext));
+        return { status: 'success', ...result };
+      } catch (error) {
+        return { status: 'error', message: error && error.message ? error.message : String(error) };
+      }
     }
   });
 
