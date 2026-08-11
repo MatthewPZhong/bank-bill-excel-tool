@@ -4183,6 +4183,10 @@ function initializeArchiveCenter() {
       message: '存档中心初始化失败，业务功能继续可用',
       details: [error && error.message ? error.message : String(error)]
     });
+    if (error && error.code === 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE') {
+      return { available: false, status: 'unavailable', code: error.code };
+    }
+    throw error;
   });
   return archiveCenterService;
 }

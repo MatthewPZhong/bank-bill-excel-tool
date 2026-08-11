@@ -132,6 +132,14 @@ contextBridge.exposeInMainWorld('desktopApi', {
     selectRetrySources: (batchId) => ipcRenderer.invoke('archive-center:select-retry-sources', batchId),
     retryBatch: (batchId, sourcePaths) => ipcRenderer.invoke('archive-center:retry-batch', batchId, sourcePaths),
     getSettings: () => ipcRenderer.invoke('archive-center:get-settings'),
+    changeStorageLocation: () => ipcRenderer.invoke('archive-center:change-storage-location'),
+    onStorageMigrationProgress: (listener) => {
+      const wrapped = (_event, progress) => {
+        try { listener(progress); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('archive-center:storage-migration-progress', wrapped);
+      return () => ipcRenderer.removeListener('archive-center:storage-migration-progress', wrapped);
+    },
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },

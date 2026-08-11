@@ -764,6 +764,19 @@ td .muted { color: var(--muted); }
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
+.archive-center-storage-location-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.archive-center-storage-location-row .archive-center-settings-note {
+  min-width: 0;
+  flex: 1;
+}
+.archive-center-storage-location-row .secondary-btn {
+  flex: 0 0 auto;
+}
 .archive-center-storage-meter {
   width: 100%;
   height: 8px;

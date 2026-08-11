@@ -596,6 +596,70 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 无。
 
+## PR5 存储根迁移 Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| DB setting 是 archive instance identity 唯一来源 | marker 缺失不能证明实例所有权，反向领养会把未知根变成当前实例 | repository 先 conflict-safe get-or-create `archive_center_instance_id`；marker 只消费 DB UUID，迁移永不改变 |
+| 三类 consumer 共用稳定 runtime delegate | Controller、TaskLifecycle、FlowResolver 与 Main direct access 都持有 Service | 不只替换 Controller.service；delegate 的 repository/root/method 动态解析 current service |
+| maintenance 复用 PR4 root serialization | PR4 已将 runtime write/delete/retry/cleanup 串行到 `runArchiveRootOperation(root)` | admission gate + `archiveOperationTail` drain 后进入同一 root operation；不建第二 root lock |
+| setting 是 crash commit truth | DB txn 与内存引用无法成为同一物理事务 | setting+目标 storage mode 单事务；同步 delegate switch；journal 可落后并由 setting 唯一恢复 |
+| 迁移只复制 canonical | materialized 是可由 DB layout+canonical 重建的派生副本 | 不递归复制旧 layout/.readonly；目标用 PR4 materializer重建并逐 SHA/size 校验 |
+| cleanup 保留未知项 | marker 只能证明 app 根，不授权删除后来混入的未知文件 | 只删 DB 权威 canonical/layout 与 app-owned staging/readonly；marker 最后删，unknown 进入 cleanup-pending |
+
+### Assumptions
+
+- marker 文件名固定 `.archive-root.json`；内容严格为 type/schemaVersion/archiveInstanceId 三字段。
+- 迁移中不安全的根依赖读取返回稳定维护提示；设置读取和进度仍可用。
+- 网络盘不按路径类别推断；必须同时通过原子写探针、容量检查，并按目标卷 hardlink probe 计算缺失空间。
+
+### Implementation Evidence
+
+- 基线 `7c7a8f0788cde5d8163b91106889db27082c743d`（parent `1e96f5f6c5e70051e33c29efb94a13bb97774e51`），tracked clean、无 upstream；批准后建立 `codex/v3.1.9-pr5-storage-root-migration`，未 push/PR。
+- 本机 Node FS probe：`fs.promises.statfs` 提供 `bavail/bsize`，同目录 hardlink 的 device/inode 一致；Windows packaged/网络盘能力仍需人工。
+- repository 以 SQLite 单事务 conflict-safe 持久化实例 UUID；root switch 同事务要求 setting 仍等于期望源根、覆盖全部 ready artifact mode 并清三列 materialization error，任一缺失/冲突整体回滚。repository 聚焦 9/9 PASS。
+- manager 真实 FS 14/14 PASS：legacy bootstrap/unknown 拒绝、正常迁移、precommit Blob 失败续跑、DB commit 后 journal 前崩溃、configured offline 零默认写、post-switch cleanup-pending 重启续跑、maintenance admission/drain/第二迁移，以及 current/ancestor/descendant/foreign marker/probe/capacity 表驱动边界。
+- 正常迁移只读取 source canonical；目标 materialized 全部由 PR4 materializer 从目标 canonical 重建。precommit 遗留 layout 先按 DB hash/size 校验，只有 canonical/layout 的 `dev+ino` 相同才记 hardlink，否则保守记 copy；不从“文件存在”猜 mode。
+- Controller 21/21、renderer/preload/main 静态契约 20/20 PASS。Controller.service、TaskLifecycle、FlowResolver 和 Main 的 repository/openReadonlyCopy/Position terminal 入口都持有同一 delegate；DB commit 到 delegate switch 无 await。startup 现在先等待 journal 按 setting 收敛，才发 `app:init-done` 和启动 post-setup；失败保持 unavailable，不触达默认根。
+- Archive repository/service/layout/controller/outbox/tracker/TaskLifecycle/FlowResolver/Position recovery 扩大聚焦共 185/185 PASS；全部 owned production JS `node --check`、`npm run lint`、`git diff --check` PASS。`npm run smoke` PASS；设置布局沙箱内 Electron exit null 后按环境分类，沙箱外 6 viewport/scale 组合 6/6 PASS。
+- `npm run startup:measure` 5 次 PASS：建窗到可见中位 104.876ms、进程总耗时中位 713.855ms。`npm run check:vars -- --include-minor` exit 2（命中需 review，不是测试失败）：Important-skeleton `ipcRenderer`，Runtime-state `AppDatabase/dialog/state`，Risk-sensitive `ArchiveRepository`，Minor `getSetting`；逐项复核见下。
+- 首次 full 的 lint/smoke PASS、unit 5028/5031；三条失败精确归为两项 production wiring omission：literal `archive-center:change-storage-location` 未登记 exact exclude（两条同根因），以及目录 picker 新增裸 `dialog.showOpenDialog` 绕过 remembered helper。经负责人批准，只补既有 `archive-center-maintenance` exclude 与独立 `archive-center-storage-location` dialog scope；policy/dialog/UI 定向组 55/55 PASS。
+- 第二次且最终单一 `npm run release-check` session exit 0：lint/smoke PASS；unit 5031/5031（329 files，0 fail/skip，node test 16063.808583ms）；integration 48/48 scripts、2385/2385 assertions（304806ms）。未第三次运行、未改阈值；runner 仅在全绿后合法自动同步 `rules/integration-test-policy.md` §七。
+
+### Failure Classification
+
+- manager 首跑 1/5 的三类失败均为 production 边界：macOS `/var` 与 `/private/var` realpath alias 被误判根链接；续跑从内存旧 phase 写回 prepared；configured root 未 canonicalize 导致 setting truth 被误判第三值。分别改为仅拒绝所选根本身为 symlink、journal phase 始终从落盘状态续接、setting 比较前 realpath；最终 14/14 PASS。
+- direct consumer 审计发现 startup 只触发异步 Archive initialize、却立即 `app:init-done`，Position 可在 journal 恢复完成前进入。已将 startup 链改为等待唯一 initialization promise；这是真实主流程时序修复，没有新增第二 recovery 或 fallback。
+- 最终 production diff 审计补齐三项真实冻结边界：setting 已指 target 而 journal 落后时，必须在 target Service 初始化/DB reconcile 前只读校验全部 evidence；旧根 marker 缺失即使为空也不得删；cleanup-pending 未收口前不得覆盖 journal 开第二次迁移。三项均并入原 crash/cleanup/UI 代表测试，不新增 phase×fault 组合。
+- commit-after-crash 测试首次 33/34 失败为夹具直接改写只读 canonical 得到 EACCES；显式临时 chmod 后模拟真实损坏，生产未放宽只读，最终组合 34/34 PASS。
+- 首次 full 的三条 unit 失败不是迁移状态机回归：两条同源于新 mutation IPC 漏登记 literal exclude，一条源于 Main 目录选择绕过既有 remembered dialog helper。最小 wiring 修复后定向 55/55、最终 full 全绿；未增加 lifecycle 状态、fallback 或重复故障矩阵。
+
+### ⚠️ 关联功能 review
+
+- `ipcRenderer`：新增 change invoke 与 progress event 均有 Main handler/send、preload unsubscribe 和 renderer 静态契约；renderer 不传目标路径。
+- `AppDatabase/getSetting/ArchiveRepository`：不新增表或 schema；instance ID 只存轻量 UUID setting；root+ready mode 单事务，批次号、operation/artifact/blob identity、source path、SHA/size 均不改；repository/Service/共享引用/cleanup 回归与 smoke 通过。
+- `dialog`：唯一新增目录选择经 `showImportOpenDialog` 使用独立 `archive-center-storage-location` scope；支持 canceled/空 filePaths，选择值在 Main/manager canonicalize，renderer 不接触路径入参。
+- `state`：只增加设置弹窗局部 `archiveState.storageMigration`，不改顶层模板/当前模块/导出可用性；订阅在弹窗关闭时释放，布局 6/6 通过。
+
+### Remaining Unknowns
+
+- Windows installer/portable 的盘符、junction/UNC、hardlink/readonly 错误码，真实跨卷/网络盘断连与重连、长根路径仍为人工 PROBE。
+- 真实大存档的进度流畅度、吞吐、空间估算以及迁移中退出/更新安装行为仍需 GUI/真实设备验收。
+- ⚠️ canonical SHA/size、artifact 输入输出血缘、共享引用、删除次序与任何资金相关文件内容仍须人工复核；自动测试不关闭文件/资金红线。
+
+### Blindspot / Reconciliation Pass
+
+- 入口 inventory 确认新路径仅为 renderer → preload → Main mutation IPC → Controller → manager；目标路径只来自 Electron directory picker。Controller/TaskLifecycle/FlowResolver/Main direct consumer 不缓存 concrete service，root mutation 仍只有 PR4 serialization。
+- 状态审计以 DB setting 为 commit truth：pre-switch 只认源，post-commit 只认目标，第三值/phase 冲突 fail-closed；cleanup-pending 不回滚。journal 不含 artifact 绝对路径或业务数据。
+- 路径/删除审计覆盖 marker ownership、realpath containment、symlink、unknown、staging/readonly 和已知文件 cleanup；source marker 缺失/冲突时不删，marker 最后删。
+- 本轮不改金额、币种、匹配、行数、TaskLifecycle 状态语义、artifact/blob/operation identity 或业务算法。资金与文件血缘继续人工复核。
+
+### Deviations
+
+无。
+
 ## PR3-Toolbox TaskLifecycle Implementation Notes（本地代码完成）
 
 ### Decisions

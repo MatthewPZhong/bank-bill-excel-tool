@@ -22,6 +22,7 @@ const EXTRA_IMPORT_DIALOG_SCOPES = Object.freeze([
   'position-reconciliation-linked-source',
   'position-reconciliation-result',
   'archive-center-retry-source',
+  'archive-center-storage-location',
   'bank-statement-process-bundle' // 场景包 JSON 导入，与银行对账单 xlsx 目录分开记忆
 ]);
 

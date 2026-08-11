@@ -527,3 +527,50 @@
 - 当前无 BLOCK。hardlink fallback 只接受 `EXDEV/EACCES/EPERM/ENOTSUP/EOPNOTSUPP/ENOSYS/EMLINK` 等真实能力错误；任意其它错误不得降级 copy。
 - Windows hardlink/权限/跨卷、网络盘、长路径、Excel/WPS、真实大文件仍为 PROBE；本机自动测试不得宣称关闭。
 - ⚠️ 文件身份、SHA/size、共享引用、删除顺序、只读与输入/输出血缘是人工复核红线；materialized 文件永不反向吸收为新 Blob/hash。
+
+## PR5 存储根迁移 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：为存档中心提供当前根查看、目录选择、可恢复迁移和最小进度 UI；任何时刻只有一个可写根。
+- Context：PR4 已提供 canonical Blob、layout v2、cleanup job 和 `runArchiveRootOperation(root)`；当前 Main 仍固定默认根，并把同一裸 Service 分别注入 Controller、TaskLifecycle 与 FlowResolver。
+- Constraints：只实现 PR5；不改金额/币种/业务算法、TaskLifecycle/identity、PR6 UI redesign 或 PR7 发布；迁移复用 PR4 根串行化，不建第二套 root lock；未知文件不递归复制或删除。
+- Done when：DB instance ID、marker/bootstrap、外置 journal、canonical-only copy、目标重新 materialize/逐文件校验、single commit/delegate switch、离线根 fail-closed、cleanup-pending 与真实入口 admission 均有代表证据。
+
+### 真实入口与状态所有权
+
+`renderer → preload → Main archive-center IPC → Controller → ArchiveRuntimeDelegate → current ArchiveService`
+
+`runArchiveAwareOperation → TaskLifecycle / FlowResolver → 同一个 ArchiveRuntimeDelegate`
+
+- delegate 的 `.repository`、`rootDir` 与全部方法每次解析当前 Service，覆盖 Main 中 `center.service.repository`、readonly open 和恢复收口等直接访问；不得让任何 consumer 缓存裸旧 Service。
+- maintenance request 先关闭新 mutation admission，再等待 `archiveOperationTail`；随后进入既有 `runArchiveRootOperation(sourceRoot)`。迁移恢复必须在 Position/其它 startup 恢复消费者使用 archive service 前完成。
+- 迁移前在 source root lock 内执行 PR4 reconcile/cleanup，并要求 `archive_cleanup_jobs=0`；否则不写 `prepared`。
+
+### Marker、journal 与 commit truth
+
+- `archive_center_instance_id` 由 repository conflict-safe get-or-create 稳定 UUID；DB setting 是唯一来源。`.archive-root.json` 只含 Spec 三字段，marker 不得反向领养成 DB ID。
+- legacy 当前配置/默认根仅在 DB blob/artifact/cleanup 相对路径解释全集、逐 SHA/size 一致、无 symlink/unknown 后 bootstrap；configured offline 在 Service `_mkdirs` 前 unavailable，默认根零写入。
+- journal：`prepared → copying → materializing-layout → verifying → switched → cleanup-pending → done`，位于 root 外；只保存 migration/instance/root/phase/count/error，不保存业务数据或逐 artifact 绝对路径。
+- commit 是同一 DB 事务更新 `archive_center_storage_root`、全部 ready artifact 的目标 `storage_mode` 并清三列 materialization error；path/name/order/hash/blob/identity 不变。事务返回后 admission 仍关闭，同步切 delegate，再写 `switched`。
+- 恢复以 setting 判定 commit truth：pre-switch phase + `setting==target` 必须验证 target 后继续 switched；第三值或 phase/setting 冲突 fail-closed，绝不猜测或回旧根。
+
+### Unknowns Register
+
+| 未知 | 类型 | 决议/证据 |
+| --- | --- | --- |
+| Controller 切换是否覆盖所有写入口 | PROBE 已收敛 | 否；TaskLifecycle、FlowResolver 和 Main 直接访问持有裸 Service，必须共享稳定 delegate |
+| maintenance 如何等待完整任务 | PROBE 已收敛 | 新 reserve/create admission 先关，现有任务由 `archiveOperationTail` drain，再进入 PR4 root operation |
+| DB commit 与内存 delegate 崩溃窗口 | PROBE 已收敛 | DB setting 是 truth；setting+mode 单事务后同步切 delegate，journal 可落后且按 setting 恢复 |
+| target initialize 是否会误清旧根 cleanup job | PROBE 已收敛 | source reconcile 后 cleanup jobs 必须为 0，才允许 prepared/target initialize |
+| 跨卷/网络/容量如何决定 | PROBE 已收敛 | 原子读写探针、同目标卷 hardlink probe 与 `statfs`；失败即拒绝，无路径猜测/fallback |
+| marker 文件名 | ASSUME 已批准 | `.archive-root.json`；内部低风险合同，内容严格由 Spec/DB ID 冻结 |
+
+当前无 BLOCK。
+
+### 最小故障矩阵与人工红线
+
+- 自动真实 FS：legacy bootstrap/unknown 拒绝；正常 canonical-only 迁移；一个 precommit Blob 失败；一个 DB commit 后 journal 前崩溃；一个 post-switch cleanup 失败；configured offline；maintenance admission；target path/marker/capacity table-driven。
+- 不展开 phase×fault 笛卡尔积。`.readonly` 不迁移，source/target `.staging` 只在所有权与可重做性证明后清理。
+- switched 后只删 DB 权威 source canonical/layout 与 app-owned 临时项；unknown 保留 marker+journal 并进入 cleanup-pending。source marker 最后删除。
+- ⚠️ 人工复核迁移前后每个 DB blob/artifact SHA/size、引用/批次数、实例 ID、target 无 source path、unknown 未删、setting 只切一次；本轮不宣称关闭 Windows/网络盘/Excel/WPS/资金审计红线。

@@ -105,6 +105,69 @@ test('目录化候选按 artifact id 分页，且 materialized 统计与游标�
   }
 });
 
+function ensureAppSettings(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `);
+}
+
+test('archive instance ID conflict-safe get-or-create，root switch 与全部 ready mode 同事务提交', () => {
+  const { db, repository } = createFixture();
+  try {
+    ensureAppSettings(db);
+    const firstInstanceId = repository.getOrCreateArchiveInstanceId();
+    const secondInstanceId = repository.getOrCreateArchiveInstanceId();
+    assert.equal(secondInstanceId, firstInstanceId);
+    assert.match(firstInstanceId, /^[0-9a-f-]{36}$/);
+
+    const batch = createBatch(repository, { operationKey: 'storage-root-switch' }).batch;
+    const artifact = addArtifact(repository, batch.id, { artifactKey: 'storage-root-artifact' });
+    repository.startArtifactAttempt(artifact.id);
+    const completed = repository.completeArtifact(artifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    });
+    const layout = completeLayout(repository, completed.artifact, { storageMode: 'hardlink' });
+    repository.recordMaterializationFailure(layout.artifact.id, {
+      code: 'ARCHIVE_MATERIALIZATION_FAILED',
+      message: '目标模式待提交'
+    });
+    const before = repository.getArtifact(artifact.id);
+
+    const switched = repository.commitStorageRootSwitch({
+      storageRoot: '/new/archive',
+      expectedStoredRoot: null,
+      materializations: [{ artifactId: artifact.id, storageMode: 'copy' }]
+    });
+    const after = repository.getArtifact(artifact.id);
+    assert.equal(switched.materializedArtifactCount, 1);
+    assert.equal(db.prepare(`
+      SELECT setting_value FROM app_settings
+      WHERE setting_key = 'archive_center_storage_root'
+    `).get().setting_value, '/new/archive');
+    assert.equal(after.storageMode, 'copy');
+    assert.equal(after.storageRelativePath, before.storageRelativePath);
+    assert.equal(after.safeFileName, before.safeFileName);
+    assert.equal(after.artifactOrder, before.artifactOrder);
+    assert.equal(after.blob.sha256, before.blob.sha256);
+    assert.equal(after.materializationErrorCode, '');
+
+    assert.throws(() => repository.commitStorageRootSwitch({
+      storageRoot: '/third/archive',
+      expectedStoredRoot: '/stale/archive',
+      materializations: [{ artifactId: artifact.id, storageMode: 'hardlink' }]
+    }), (error) => error.code === 'ARCHIVE_STORAGE_ROOT_CONFLICT');
+    assert.equal(repository.getArtifact(artifact.id).storageMode, 'copy');
+  } finally {
+    db.close();
+  }
+});
+
 test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 succeeded 闭锁', () => {
   const { db, repository } = createFixture();
   try {

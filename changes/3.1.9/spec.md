@@ -593,11 +593,13 @@ materialization_failed_at TEXT NULL
 
 ```text
 archive_center_storage_root
+archive_center_instance_id
 ```
 
 - 未设置时使用当前默认根。
 - 成功迁移后保存规范化绝对路径。
 - 配置路径暂时离线时不得静默改回默认路径。
+- `archive_center_instance_id` 由数据库以 conflict-safe get-or-create 语义先持久化稳定 UUID；根 marker 的 `archiveInstanceId` 只能来自该 setting，迁移不得改变它，marker 也不得反向成为实例 ID 的来源。
 
 ---
 
@@ -949,6 +951,7 @@ renderer 不传目标路径。
 ```
 
 marker 不得含业务数据或源文件绝对路径。
+marker 文件名固定为 `.archive-root.json`；内容只允许上述 `type/schemaVersion/archiveInstanceId` 三个身份字段。
 
 ### 9.3.1 v3.1.8 legacy 根首次启动 bootstrap
 

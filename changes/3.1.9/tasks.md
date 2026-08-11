@@ -94,6 +94,14 @@
   - [x] PR4 核心 57/57、扩大 Archive 184/184、lint/node/diff/check-vars 通过；blindspot/reconciliation 红线未由自动测试关闭。
   - [x] 发布前唯一一次 `release-check` 首次全绿：lint/smoke、unit 5013/5013、integration 48/48 scripts 与 2385/2385 assertions；runner policy 合法自动同步。
   - [ ] Windows installer/portable、真实跨卷/网络盘/长根路径、Excel/WPS、真实大文件和输入输出血缘人工验收。
-- [ ] PR5：存储地址、marker、journal、迁移与恢复。
+- [x] PR5：存储地址、marker、journal、迁移与恢复的本地实现与聚焦自动证据。
+  - [x] 稳定 `archive_center_instance_id`、严格 `.archive-root.json`、legacy 全集/hash bootstrap 与未知/冲突根拒绝已闭合。
+  - [x] `prepared → copying → materializing-layout → verifying → switched → cleanup-pending → done` journal、setting truth 与崩溃恢复已闭合。
+  - [x] 只复制 canonical Blob、目标按 PR4 重建 layout、逐文件 size/SHA 校验和 root/containment/symlink/probe/capacity fail-closed 已闭合。
+  - [x] root setting + 全部 ready `storage_mode` + 三列 materialization error 清理单事务提交；delegate 同步切换，旧根 cleanup 失败不回滚。
+  - [x] Controller/TaskLifecycle/FlowResolver/Main 直接消费者共用稳定 delegate；maintenance 先关 admission、drain，再复用 PR4 root serialization。
+  - [x] Repository/manager/Controller/UI 与 Archive/Position 相邻聚焦 185/185、smoke、lint/node/diff、设置布局 6/6 与 startup measure PASS；check-vars 命中已复核。
+  - [x] 首次 full 的 exact policy/dialog wiring 漏项经批准最小修复，定向 55/55；第二次且最终 `release-check` lint/smoke、unit 5031/5031、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 合法自动同步。
+  - [ ] Windows installer/portable、真实跨卷/网络盘/离线卷恢复、长路径、大存档进度/吞吐与退出/更新安装仍需人工验收。
 - [ ] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent。
 - [ ] PR7：版本号、发布文档、全门禁与 Windows/财务人工验收。
