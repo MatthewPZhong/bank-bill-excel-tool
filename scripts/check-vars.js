@@ -10,7 +10,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
+
+// v3.1.9 的 release hard-node 会扫描多个串行 PR；默认 1MiB buffer 会让
+// 合法的大 diff 以 ENOBUFS 失败，必须为该只读输出显式留足空间。
+const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
 
 const argv = process.argv.slice(2);
 const opt = { since: null, includeMinor: false };
@@ -38,7 +42,11 @@ if (!fs.existsSync(MD_PATH)) {
 let diff;
 try {
   const target = opt.since ? `${opt.since}...HEAD` : 'HEAD';
-  diff = execSync(`git diff ${target} -- src/`, { cwd: REPO_ROOT, encoding: 'utf8' });
+  diff = execFileSync('git', ['diff', target, '--', 'src/'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    maxBuffer: MAX_GIT_OUTPUT_BYTES
+  });
 } catch (e) {
   console.error('[check-vars] git diff 失败：', e.message);
   process.exit(1);
@@ -64,9 +72,10 @@ for (const line of diff.split('\n')) {
 // git diff 不包含未跟踪文件；新模块恰好最常以 untracked src/*.js 出现，硬节点不能漏扫。
 // 这里把未跟踪 JS 的全部源码视为新增 diff 行，行为与文件首次加入 git 后的 diff 一致。
 try {
-  const untracked = execSync('git ls-files --others --exclude-standard -- src', {
+  const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', 'src'], {
     cwd: REPO_ROOT,
-    encoding: 'utf8'
+    encoding: 'utf8',
+    maxBuffer: MAX_GIT_OUTPUT_BYTES
   });
   for (const relativePath of untracked.split('\n').filter((file) => file.endsWith('.js'))) {
     const absolutePath = path.resolve(REPO_ROOT, relativePath);

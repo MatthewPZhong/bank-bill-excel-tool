@@ -667,7 +667,7 @@ Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related
 
 ### 最终本地执行结果
 
-- `release-check`、设置布局 6/6、存档预览、scan/check-vars、Windows x64 installer+portable 交叉构建和 `check:dist` 均取得通过证据；受限环境中的 Electron/Wine 首次失败均单独保留为 environment/PROBE，没有用生产修改掩盖。
+- `release-check`、设置布局 6/6 与存档预览证据仍有效。reviewer P2 已撤回旧 clean-worktree check-vars false-green 及 dirty/pre-commit Windows build/check:dist 作为 final HEAD 证据；变量门禁改由 peeled v3.1.8 baseline review，最终 Windows 静态证据须在 release tooling 修复 commit 后由 clean isolated checkout 生成。
 - 预览只出现字体/子像素抗锯齿非确定性，基线 PNG 已精确恢复且不纳入 ownership。变量统计和 integration policy 仅保留对应脚本的合法自动刷新。
 - Windows 更新资产沿用冻结的两阶段合同。因本机 ignored `dist/` 有跨版本残留，使用唯一临时目录非破坏性隔离本次四项原始文件；staging 与 release workflow 等价校验通过，未改 package/config/check scripts，也未删除、移动、覆盖旧产物或重建。
 - 上述只证明 macOS cross-build 的 artifact/static 合同；独立评审、Windows runtime、用户人工、合并、tag、Release、上传和公开回读均未执行。

@@ -1,10 +1,11 @@
 // 打包产物体积/内容守卫脚本（size-startup-optimization Part A，A-F3）
 //   背景：v3.0.0 app.asar 膨胀到 101MB（开发文档/测试脚本/开发依赖误入包）。
-//   本脚本对构建产物 app.asar 做四类断言，防止瘦身后再次复发：
+//   本脚本对构建产物 app.asar 做五类断言，防止瘦身后再次复发：
 //     断言①：asar 文件体积 ≤ 70MB（阈值常量 MAX_ASAR_BYTES，v3.0.7 按实测校准）。
 //     断言②：禁止路径不得出现在包内（开发文档/脚本/开发依赖/CHANGELOG/README）。
 //     断言③：反向保护——若干运行时必需文件必须存在（防白名单漏列导致打包版缺文件）。
 //     断言④：包内 package.json.version 必须存在且与当前源码一致（防检查陈旧产物）。
+//     断言⑤：包内 build-info commit 必须与当前构建源码 HEAD 一致。
 //   任一断言失败 → 打印逐条明细并 exit 1；全过 → 打印 PASS 摘要（含实测体积）。
 //
 // 用法：
@@ -18,6 +19,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const asar = require('@electron/asar');
 
 // asar 体积上限：70MB（v3.0.7 按实测校准）。
@@ -59,6 +61,7 @@ const REQUIRED_FILES = [
   '/assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx',
   '/COMMON枚举.xlsx',
   '/src/main.js',
+  '/src/build-info.js',
 ];
 
 function formatMB(bytes) {
@@ -143,6 +146,37 @@ function main() {
     );
   }
 
+  // 断言⑤：包内 build-info 必须来自当前源码 HEAD。打包入口会先执行
+  // check-packaged-inputs，再生成 build-info；因此这个提交就是产物的唯一 source identity。
+  let expectedCommit = '';
+  let packagedCommit = '';
+  try {
+    expectedCommit = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: path.join(__dirname, '..'),
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe']
+    }).trim();
+    if (!expectedCommit) failures.push('断言⑤当前构建源码提交缺失或为空');
+  } catch (error) {
+    failures.push('断言⑤无法读取当前构建源码提交：' + (error && error.message ? error.message : String(error)));
+  }
+  try {
+    const buildInfoSource = asar.extractFile(asarPath, 'src/build-info.js').toString('utf8');
+    const assignment = /module\.exports\s*=\s*(\{[\s\S]*\})\s*;?\s*$/.exec(buildInfoSource);
+    const buildInfo = assignment ? JSON.parse(assignment[1]) : null;
+    packagedCommit = buildInfo && typeof buildInfo.commit === 'string'
+      ? buildInfo.commit.trim()
+      : '';
+    if (!packagedCommit) failures.push('断言⑤包内 build-info commit 缺失或为空');
+  } catch (error) {
+    failures.push('断言⑤无法读取包内 build-info：' + (error && error.message ? error.message : String(error)));
+  }
+  if (packagedCommit && expectedCommit && packagedCommit !== expectedCommit) {
+    failures.push(
+      `断言⑤包内构建提交不匹配：app.asar=${packagedCommit}，当前源码=${expectedCommit}`
+    );
+  }
+
   // 输出结论
   if (failures.length > 0) {
     console.error('==== check-dist-size FAIL ====');
@@ -162,6 +196,7 @@ function main() {
   console.log('  包内条目数：' + entries.length);
   console.log('  禁止路径：0 命中；必需文件：' + REQUIRED_FILES.length + '/' + REQUIRED_FILES.length + ' 齐全');
   console.log('  包内版本：' + packagedVersion + '（与当前源码一致）');
+  console.log('  构建提交：' + packagedCommit + '（与当前源码一致）');
 }
 
 main();

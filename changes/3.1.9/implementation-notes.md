@@ -821,6 +821,9 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - 三份用户文档只新增 v3.1.9 候选入口并更新当前手册的存档中心章节；历史版本条目不重写。用户文案描述批次、任务、VCC/工具箱、目录/迁移和 UI 行为，不暴露内部类名、token、SQL 预算或开发流程标识。
 - PR7 不修改 `src/`、历史 fixture 审计版本、v3.1.8 frozen Spec 或 erratum 副本；若 focused/full gate 发现真实生产回归，立即停止并分类，不为发布通过修改 A—PR6 生产代码。
 - 本地 Windows 交叉构建只作为 artifact/static PROBE；不把 macOS 构建解释为 Windows packaged runtime、session、UNC/网络盘、hardlink 或 Excel/WPS 已验收。
+- reviewer P2 修正把 Windows 构建源码定义为“`build.files` 覆盖范围与 HEAD 一致，随后才生成 build-info”；所有本地/CI Windows 构建入口都先 fail-closed，`check:dist` 再核包内 commit 与当前 source HEAD 一致。
+- release important-vars 硬节点固定从 annotated `v3.1.8^{commit}` 扫到 HEAD；普通开发 `check:vars` 仍只扫 HEAD working tree，不扩大日常行为。
+- 最终 clean Windows 静态证据只能在本轮代码/文档 commit 后、无用户 untracked 的独立 checkout 中生成；构建后不再改 tracked 文件，产物明细只作 post-commit 交付报告。
 
 ### Assumptions
 
@@ -837,22 +840,24 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - 当前 ownership 内 Markdown 相对链接全部解析存在，`git diff --check` PASS。
 - 唯一一次 `release-check` 自然终态 PASS：lint/smoke；unit 5038/5038（329 files）；integration 48/48 scripts、2385/2385 assertions（298984ms），policy 仅在全绿后自动同步。
 - `verify:app-settings-layout` 首次受限环境 `electron exit null`，批准的唯一一次沙箱外重试 6/6 PASS。`preview:archive-center` 成功；新旧图尺寸和内容一致，仅有 0.28856% 像素 RGB 抗锯齿漂移、单通道最大 4/255、alpha 不变，分类 renderer/font/subpixel nondeterminism；最终恢复已保存基线，tracked PNG SHA-256=`d1eae242c8dfc77428c2aae80f2b218f73b6e33323c4d1051b9a8e9fffb86afb` 且零 diff。
-- `scan:vars` 刷新 v3.1.9（320 tracked JS / 4102 top-level names）；`check:vars -- --include-minor` exit 0，`src/` 无改动，零 review 命中。
-- `dist:win` 首次因沙箱内 Wine bind 权限阻断；批准的沙箱外环境重试成功生成 Windows x64 NSIS/portable/blockmap/latest，`check:dist` PASS：asar 62.65 MB、3170 entries、forbidden 0、required 7/7、packaged version 3.1.9。构建全程 `--publish never`；未上传、未发布，且未把 builder 的平台处理日志解释为代码签名。
-- 既有两阶段更新资产合同已核实：electron-builder 为中文品牌原始文件生成 GitHub ASCII safe name metadata，workflow 随后运行 `stage:update-artifacts`。本机 ignored `dist/` 的 3.0.0/3.0.13 等旧产物触发反歧义 guard，分类 local residue/environment；不修改 package/config/check scripts。唯一临时目录 `/private/tmp/pr7-v319-stage.vihzhL` 只复制本次中文 Setup/blockmap/portable/latest 四项，复制前后 size/SHA-256 一致；隔离 staging 与 workflow 等价校验 PASS，ASCII Setup/blockmap/portable 与中文源逐字节相同，`latest.yml` version/path/url/size/SHA-512 与实际 Setup 一致。
-- 最终 ASCII 四项静态证据：`bank-bill-excel-tool-setup-3.1.9.exe` 100313083 bytes / SHA-256 `9df5b1664e64311ffc95061ce00fb49877736847e12d013565ec7fc80aa9f7ee`；对应 blockmap 106325 / `fb808369b28a4861f9535349219141e1b884f96d92be37db691f3375a3624190`；portable 99816214 / `0486cd681981b814fd592512ef320b9d77b0298edb8cd592083be0d720bc3530`；`latest.yml` 369 / `de17fdfcf8051bb48a3862028c512230edd058f59a4d5d310ddfc9f8a24a0a3d`。
+- `scan:vars` 的 v3.1.9 报告已覆盖 320 个 tracked JS / 4102 个顶层名称。旧 `check:vars -- --include-minor` 因只扫 clean HEAD working tree 而 exit 0，不能证明 PR1—PR6 无重要变量命中，该 false-green 结论撤回。
+- 首次精确 baseline 扫描 `--since 688ae2c...` 因 `execSync` 默认输出缓冲报 `/bin/sh ENOBUFS`，分类 release-tooling regression；改为无 shell 拼接的 `execFileSync` 并显式 64 MiB buffer 后，`npm run check:vars:release` 成功扫描 peeled `v3.1.8^{commit}` 到 HEAD 的 75 个生产文件，exit 2 为强制 review 命中而非命令故障：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4。
+- important-vars v34 已升格 `freezeWorkerBatchContext`（21/53/5 A-share）及 `TaskLifecycle/TaskPolicyRegistry/BusinessFlowResolver`，并校正 Archive operation/repository/service 的 v3.1.9 九表、全局日批次、稳定 parent、terminal/outbox/cleanup、13 主模块与工具箱合同。其余命中复核结论：模板保留 ID/固定前缀、金额/币种/行过滤和 writer 输出列未改；`FileValidationError/serializeError` 保持既有 schema；`runCheckCore/unmatchedRows` 只接 task context/summary evidence，五阶段 SQL、金额、币种和行守恒未改；session/state/dialog/app 命中为 prepared snapshot、UI/literal 或现有生命周期接线；一次性账户迁移与路径规范化未改语义。
+- reviewer 复核确认旧 Windows 包内 build-info commit 为 `e05c4d0`，不是当时 PR7 HEAD `0b8e66f`，且 `build.files` 把用户未跟踪 xlsx 收入 asar。因此旧 dirty/pre-commit build、隔离 staging 和四项 size/hash 全部撤回为 final HEAD 证据；它们不得用于本轮发布判断，也不得冒充后续 clean isolated build。
+- 新定向 release tooling 组 21/21 PASS；追加 important-vars 契约后 baseline 组 3/3 PASS。覆盖 included untracked/dirty packaged input 阻断、显式 exclude 与 clean CI checkout 放行、包内 source identity mismatch 阻断、构建入口顺序和 peeled baseline SHA 契约。
+- 本轮唯一一次 `npm run release-check` 自然终态 exit 0：lint、smoke PASS；unit 5046/5046（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（299492ms）。无失败或重跑；runner 只在全绿后合法同步 `rules/integration-test-policy.md` §七。
 
 ### Deviations
 
-无行为或发布合同偏差。布局、Windows 构建的首次失败均为受限环境，按批准只做一次沙箱外重试；预览漂移为渲染非确定性且未纳入提交；本机旧 `dist/` 通过唯一临时目录做非破坏性隔离，没有删除、移动、覆盖旧产物或重复构建。独立 review 与人工验收仍不前移。
+reviewer P2 证明旧产物不是 PR7 final source snapshot，原“四项最终静态证据”表述已撤回。这是发布证据与门禁缺口，不改变 A—PR6 业务行为；修复限于 release scripts/workflows/checks/tests、important-vars 与管理证据，不修改 `src/` 或资金算法。预览非确定性结论仍不变；独立 review 与人工验收仍不前移。
 
 ### Remaining unknowns / manual gates
 
 - Windows installer/portable 实际 runtime、`createSession/readOnly/query_only/UPDATE FROM`、worker 关闭与写保护仍为 PROBE。
 - 目标生产 legacy-four/trigger、约 16 GB、约 700 万行、跨卷/UNC/网络盘、长路径、hardlink/copy/readonly/repair、Excel/WPS 仍待用户人工。
 - ⚠️ PR2 GUI/崩溃恢复与真实主体×九币种、调整后余额、跨月、归档/解归档/delete、审计、备份恢复和输入输出血缘仍是资金人工红线。
+- 本轮最终 commit 后仍须在不含用户 untracked 的 clean isolated checkout 完成唯一一次 Windows installer+portable build、ASCII staging 与 `check:dist`；在该 post-commit 证据完成前不得恢复“最终 Windows 静态证据”结论。
 - 独立 Sol Ultra review、合并、tag、GitHub Release 和公开资产回读未执行。
-
 ### Deviations
 
 - review 反证原 hardlink-first 方案不能用“只读”保证 canonical 与多批次内容隔离；实施改为新 materialization 始终生成独立 copy，历史 hardlink 仅检测并脱钩。主 Spec C11/§8/§9/§15与本记录已同步；Blob/artifact identity、SHA/size、repair 和删除顺序不变。

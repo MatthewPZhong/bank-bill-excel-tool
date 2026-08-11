@@ -527,8 +527,8 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 | REL-03 | P0 | v3.1.8 历史冻结 | Spec normalized SHA、人工 6/6、annotated tag、Release 和资产断言原样保留 |
 | REL-04 | P0 | 未完成人工门禁 | Windows runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、Excel/WPS 和资金人工明确未通过，不写 released/merged |
 | REL-05 | P1 | 文档结构与链接 | Markdown 行尾、内部链接、版本入口顺序和冻结文件零 diff |
-| REL-06 | P0 | 最终自动门禁 | `release-check`、设置布局、存档预览、scan/check-vars 和 fresh `check:dist` 全部按单次结果记录，不用重跑掩盖首次失败 |
-| REL-07 | P0 | Windows 交叉构建证据 | installer+portable 可生成且包内版本/必需文件/体积通过；macOS 构建不代表 Windows runtime/session/文件系统验收 |
+| REL-06 | P0 | 最终自动门禁 | `release-check`、设置布局、存档预览、从 peeled v3.1.8 baseline 的 release check-vars 和 fresh `check:dist` 全部按单次结果记录，不用 clean worktree false-green 或重跑掩盖首次失败 |
+| REL-07 | P0 | Windows 交叉构建证据 | 打包前 `build.files` 输入与 HEAD 一致；installer+portable 可生成且包内版本/提交/必需文件/体积通过；macOS 构建不代表 Windows runtime/session/文件系统验收 |
 
 ### PR7 最终本地自动证据（2026-08-11）
 
@@ -539,10 +539,11 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 - 只读一致性检查 PASS：版本 3/3=`3.1.9`，将基线 lock 仅归一化两处根版本后与当前深比较一致，依赖图无变化；v3.1.8 frozen Spec normalized SHA 保持 `1f5f0663...bae367d`；本轮 Markdown 相对链接全部存在；`git diff --check` PASS。
 - 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5038/5038（329 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（298984ms），runner 只在全绿后合法刷新 policy。
 - 设置布局首次在受限环境中 6 组均 `electron exit null` 且无 stdout/stderr，分类 environment/PROBE；经批准唯一一次沙箱外重试 6/6 PASS。归档预览命令成功，生成图与基线仅有 0.28856% 像素的 RGB 抗锯齿漂移（单通道最大 4/255、alpha 不变、肉眼布局/内容一致），分类 renderer/font/subpixel nondeterminism；最终 tracked PNG 恢复基线 SHA-256 `d1eae242...86afb` 且零 diff。
-- `scan:vars` PASS：v3.1.9、320 个 tracked JS、4102 个顶层名称；`check:vars -- --include-minor` exit 0，因 `src/` 无改动正常跳过，无 review 命中。
-- `dist:win` 首次在沙箱内被 Wine `bind: Operation not permitted` 阻断，分类 environment/PROBE；经批准沙箱外重试成功生成 3.1.9 x64 NSIS/portable/blockmap/latest，未上传或发布。`check:dist` PASS：app.asar 62.65 MB、3170 entries、禁止路径 0、必需文件 7/7、包内版本 3.1.9。
-- electron-builder 的既有两阶段合同先保留中文品牌产物，再由 `stage:update-artifacts` 生成 ASCII 发布安全名。本机 `dist/` 残留 3.0.0/3.0.13 等 ignored 旧文件使目录级 staging 反歧义 guard 正常拒绝；未删除或覆盖旧产物，也未重建。把本次四项原始文件精确复制到唯一临时隔离目录后，staging 与 release workflow 等价校验 PASS：四项 ASCII 发布资产恰好存在，`latest.yml` version/path/files URL/size/SHA-512 与实际 Setup 一致，三个 ASCII 文件与中文源逐字节一致。
-- ASCII 静态发布资产：Setup 100313083 bytes / SHA-256 `9df5b1664e64311ffc95061ce00fb49877736847e12d013565ec7fc80aa9f7ee`；blockmap 106325 / `fb808369b28a4861f9535349219141e1b884f96d92be37db691f3375a3624190`；portable 99816214 / `0486cd681981b814fd592512ef320b9d77b0298edb8cd592083be0d720bc3530`；`latest.yml` 369 / `de17fdfcf8051bb48a3862028c512230edd058f59a4d5d310ddfc9f8a24a0a3d`。这些仅是 macOS cross-build 静态证据，不代表代码签名或 Windows runtime 已验收。
+- `scan:vars` 报告仍为 v3.1.9、320 个 tracked JS、4102 个顶层名称。旧 `check:vars -- --include-minor` 只扫 clean HEAD working tree 而 exit 0，遗漏 PR1—PR6，该“无 review 命中”证据撤回。修复后的 `npm run check:vars:release` 从 peeled `v3.1.8^{commit}`=`688ae2c...` 扫 75 个生产文件，exit 2 为清单强制 review：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4；逐项结论见 implementation notes 与 important-vars v34。
+- reviewer P2 定向组 21/21 PASS；important-vars/baseline 契约组 3/3 PASS。included untracked 和 tracked dirty 均阻断；明确 exclude/clean CI fixture 放行；三个本地 dist 入口和两条 Windows workflow 均先 gate、后生成 build-info；`check:dist` 拒绝包内 commit 与当前 source HEAD 不一致。
+- reviewer P2 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5046/5046（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（299492ms）。无失败或重跑，runner 仅在全绿后合法同步 integration policy。
+- reviewer 复核确认旧包内 build-info 为 `e05c4d0`（不是当时 PR7 HEAD `0b8e66f`），并包含 `build.files` 命中的用户未跟踪 xlsx。因此旧 dirty/pre-commit build、临时 staging、四项 size/hash 全部撤回为 final HEAD 证据；不得用于发布判断。
+- 最终 Windows 静态证据待本轮代码/文档提交后在无用户 untracked 的 clean isolated checkout 唯一构建并校验。构建后不再修改 tracked 文档，最终 commit/build-info/四资产/latest 一致性通过交付报告记录；若构建受阻，不使用旧包替代。
 
 ### 仍待人工且自动测试不替代
 

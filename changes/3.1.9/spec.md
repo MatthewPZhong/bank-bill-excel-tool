@@ -1392,7 +1392,7 @@ VCC财务OP主进程 handlers / service / worker
 
 - 版本号 3.1.9；
 - 文档和实施偏差反向同步；
-- release-check、设置布局/预览、变量门禁与 Windows 交叉构建静态证据已完成；
+- release-check、设置布局/预览已完成；变量门禁改为 peeled v3.1.8 baseline review，Windows 最终静态证据须在 release tooling 修复 commit 后由 clean isolated checkout 生成；
 - 独立评审、Windows/Excel/WPS/资金人工门禁和正式发布证据仍待完成。
 
 每个 PR 必须可独立评审；后续 PR 不得依赖未提交的本地文件。
@@ -1576,7 +1576,7 @@ npm run release-check
 npm run verify:app-settings-layout
 npm run preview:archive-center
 npm run scan:vars
-npm run check:vars -- --include-minor
+npm run check:vars:release
 npm run check:dist
 ```
 
@@ -1669,7 +1669,9 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 - [x] 存储地址选择、marker、journal、迁移/恢复与 legacy root bootstrap 的本地实现和自动证据完成。
 - [x] 统计 DTO、两行列表、关联任务、按钮、【返回】、“版本管理”和保留期限 latest-intent 的本地实现和自动证据完成。
 - [x] PR1—PR6 聚焦测试、各阶段完整自动门禁和 PR6 预览/布局证据完成，结果见 test-spec/implementation-notes。
-- [x] PR7 最终 `release-check`、设置布局、预览、important-vars、Windows x64 交叉构建、`check:dist` 与更新资产 staging 静态检查完成；本项不替代 Windows runtime 人工验收。
+- [x] PR7 `release-check`、设置布局、预览与 peeled v3.1.8 baseline important-vars review 完成；旧 clean-worktree false-green 与 dirty/pre-commit 四资产证据已撤回。
+- [x] 打包入口的 `build.files` dirty/untracked fail-closed 和包内 build-info/source HEAD 一致性门禁已实现并有定向回归。
+- [ ] 本轮最终 commit 后由 clean isolated checkout 完成唯一 Windows x64 build、`check:dist` 与 updater staging；本项即使通过也不替代 Windows runtime 人工验收。
 - [ ] 独立 Sol Ultra 评审、用户 P0/P1 人工验收、合并、tag 和正式发布。
 - [ ] Windows installer/portable runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与资金人工复核。
 - [x] Spec、tasks、test-spec、implementation-notes 和三份用户发布文档已反向同步为本地候选状态；PR7 本地自动门禁与静态构建证据已追加。

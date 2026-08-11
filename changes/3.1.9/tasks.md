@@ -114,6 +114,8 @@
   - [x] `CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 同步为本地发布候选，保留 v3.1.8 正式发布历史。
   - [x] Spec/tasks/test-spec/implementation-notes/preflight 反向同步 PR1—PR6 本地实现与自动证据，状态保持待独立评审、用户人工、合并与正式发布。
   - [x] PR7 focused 版本/发布文档/Markdown/link/diff 检查；首次 5/6 的历史免责声明缺句已恢复，第二次 6/6 PASS，冻结 hash 与依赖图保持。
-  - [x] 最终 `release-check`、设置布局、存档预览、important-vars、Windows installer+portable 交叉构建、`check:dist` 与隔离 staging 静态检查完成；环境限制和本地旧 `dist/` 残留均已保留分类证据，未改生产配置。
+  - [x] 原 PR7 `release-check`、设置布局、存档预览与 release tooling P2 定向回归完成；important-vars 已改用 peeled v3.1.8 baseline 扫描并完成 v34 关联 review，旧 clean-worktree false-green 结论撤回。
+  - [x] Windows 构建入口已增加 `build.files` packaged-input fail-closed，`check:dist` 已增加包内 build-info/source HEAD 一致性；旧 dirty/pre-commit 四资产证据撤回。
+  - [ ] 本轮最终 commit 后在无用户 untracked 的 clean isolated checkout 唯一执行 installer+portable build、ASCII staging 与 `check:dist`，构建后不再修改 tracked 文件。
   - [ ] 独立 Sol Ultra review、PR2 GUI/资金、Windows packaged runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与真实文件/资金血缘人工验收。
   - [ ] 合并、tag、GitHub Release 和公开资产回读；本地 PR7 不执行这些外部发布动作。
