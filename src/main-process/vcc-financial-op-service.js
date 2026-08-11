@@ -11,16 +11,13 @@ const {
   getSourceDefinition
 } = require('../backend/vcc-financial-op/definitions');
 const {
-  archiveRun,
   isValidInputFingerprint,
   initializeOpeningBalances,
   preflightCalculation,
   preflightRequiredResult
 } = require('../backend/vcc-financial-op/calculator');
 const {
-  getEffectiveRunResult,
-  listAdjustmentOptions: listAdjustmentOptionsFromDb,
-  addRunAdjustment: addRunAdjustmentToDb
+  listAdjustmentOptions: listAdjustmentOptionsFromDb
 } = require('../backend/vcc-financial-op/result-adjustments');
 const { normalizeYearMonth } = require('../backend/vcc-financial-op/row-mapper');
 const repository = require('../backend/vcc-financial-op-db/repository');
@@ -39,9 +36,16 @@ const {
   CHECK_EXPORT_DEFINITIONS,
   inspectDatasetExport
 } = require('./vcc-financial-op-dataset-writer');
+const {
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
+const {
+  VCC_MUTATION_OPERATIONS
+} = require('../backend/vcc-financial-op/mutation-policy');
 
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
 const READ_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-read-worker.js');
+const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-worker.js');
 
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
@@ -184,9 +188,11 @@ function createVccFinancialOpService({
   buildSha = null,
   workerFactory = (filename, options) => new Worker(filename, options),
   readWorkerFactory = (filename, options) => new Worker(filename, options),
+  writeWorkerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
   archiveConsistencyLogger = null,
+  operationDiagnosticLogger = null,
   cancelTimeoutMs = 120000
 }) {
   let activeTask = null;
@@ -222,6 +228,11 @@ function createVccFinancialOpService({
       kind,
       destructive,
       baseGeneration: taskGeneration,
+      claim: Object.freeze({
+        action,
+        generation: taskGeneration,
+        identity: Object.freeze({})
+      }),
       protected: false,
       phase: kind === 'worker' ? 'pretransaction' : 'direct',
       cancelRequested: false,
@@ -258,11 +269,16 @@ function createVccFinancialOpService({
   }
 
   function runWorker(action, payload, onProgress, options = {}) {
-    const task = acquireTask(action, options);
+    const {
+      workerPath = WORKER_PATH,
+      createWorker = workerFactory,
+      ...taskOptions
+    } = options;
+    const task = acquireTask(action, taskOptions);
     return new Promise((resolve, reject) => {
       let worker;
       try {
-        worker = workerFactory(WORKER_PATH, {
+        worker = createWorker(workerPath, {
           workerData: {
             action,
             payload: {
@@ -297,6 +313,10 @@ function createVccFinancialOpService({
         if (!message || typeof message !== 'object') return;
         if (message.type === 'progress') {
           if (typeof onProgress === 'function') onProgress(message.progress);
+        } else if (message.type === 'diagnostic') {
+          if (operationDiagnosticLogger) {
+            try { operationDiagnosticLogger(message.diagnostic); } catch (_error) { /* 诊断不可阻断业务 */ }
+          }
         } else if (message.type === 'critical-ready') {
           if (!task.destructive) {
             finish(operationError(
@@ -328,6 +348,43 @@ function createVccFinancialOpService({
       worker.on('exit', (code) => {
         if (!settled) finish(new Error(`VCC 财务OP后台任务退出但未返回结果（code ${code}）`));
       });
+    });
+  }
+
+  function normalizeResultWritePayload(action, payload = {}) {
+    const common = {
+      runId: payload.runId,
+      expectedResultRevision: payload.expectedResultRevision,
+      expectedPreviewToken: payload.expectedPreviewToken
+    };
+    if (action === VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT) return common;
+    if (action === VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT) {
+      return {
+        ...common,
+        rowKey: payload.rowKey,
+        currency: payload.currency,
+        adjustmentAmount: payload.adjustmentAmount,
+        reason: payload.reason
+      };
+    }
+    throw operationError('invalid-vcc-write-action', `未知 VCC 结果写入 action：${action || ''}`);
+  }
+
+  function runResultWriteWorker(action, payload = {}, onProgress, batchContext = null) {
+    const normalizedPayload = normalizeResultWritePayload(action, payload);
+    const confirmedGeneration = validateOperationConfirmation(
+      normalizedPayload.expectedPreviewToken,
+      payload.taskGeneration
+    );
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext);
+    return runWorker(action, {
+      ...normalizedPayload,
+      batchContext: frozenBatchContext
+    }, onProgress, {
+      destructive: true,
+      expectedTaskGeneration: confirmedGeneration,
+      workerPath: RESULT_WRITE_WORKER_PATH,
+      createWorker: writeWorkerFactory
     });
   }
 
@@ -497,38 +554,33 @@ function createVccFinancialOpService({
     };
   }
 
-  function archive(payload) {
-    return runDirectTask('archive', () => (
-      archiveRun({
-        db: database.db,
-        runId: Number(payload && payload.runId),
-        expectedResultRevision: payload && payload.expectedResultRevision,
-        appVersion,
-        buildSha
-      })
-    ));
+  function archive(payload = {}, onProgress) {
+    return runResultWriteWorker(
+      VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+      payload,
+      onProgress
+    );
   }
 
   function listAdjustmentOptions(payload = {}) {
     return listAdjustmentOptionsFromDb(database.db, Number(payload.runId));
   }
 
-  function addRunAdjustment(payload = {}) {
-    return runDirectTask('add-adjustment', () => addRunAdjustmentToDb({
-      db: database.db,
-      runId: Number(payload.runId),
-      rowKey: payload.rowKey,
-      currency: payload.currency,
-      adjustmentAmount: payload.adjustmentAmount,
-      reason: payload.reason,
-      expectedResultRevision: payload.expectedResultRevision,
-      appVersion,
-      buildSha
-    }));
+  function addRunAdjustment(payload = {}, onProgress) {
+    return runResultWriteWorker(
+      VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+      payload,
+      onProgress
+    );
   }
 
-  function getRunReview(runId) {
-    return effectiveRunShape(getEffectiveRunResult(database.db, Number(runId)));
+  async function getRunReview(runId) {
+    const snapshot = await runReadWorker('get-run-result', { runId: Number(runId) });
+    return {
+      ...effectiveRunShape(snapshot.effective),
+      previewTokens: snapshot.previewTokens,
+      taskGeneration: snapshot.taskGeneration
+    };
   }
 
   function initializeOpening(payload) {
@@ -962,7 +1014,9 @@ function createVccFinancialOpService({
       action: activeTask ? activeTask.action : null,
       phase: activeTask ? activeTask.phase : null,
       protected: activeTask ? activeTask.protected : false
-    })
+    }),
+    _claimForTests: () => activeTask ? activeTask.claim : null,
+    _runResultWriteWorkerForTests: runResultWriteWorker
   };
 }
 

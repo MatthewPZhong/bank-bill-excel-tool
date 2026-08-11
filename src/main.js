@@ -13757,9 +13757,13 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', async (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:run:archive', 'VCC财务OP校验', '确认归档', async (event, payload = {}) => {
     try {
-      return await getVccFinancialOpService().archive(payload);
+      return await getVccFinancialOpService().archive(payload, (progress) => {
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('vccFinancialOp:operation:progress', progress);
+        }
+      });
     } catch (error) {
       return vccFinancialOpErrorResult(error);
     }
@@ -13774,9 +13778,13 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', async (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:run:adjustment-add', 'VCC财务OP校验', '修改结果', async (event, payload = {}) => {
     try {
-      const result = await getVccFinancialOpService().addRunAdjustment(payload);
+      const result = await getVccFinancialOpService().addRunAdjustment(payload, (progress) => {
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('vccFinancialOp:operation:progress', progress);
+        }
+      });
       return { ...result, operationStatus: result.status, status: 'success' };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
@@ -13927,9 +13935,9 @@ function registerNewAccountHandlers() {
     }
   });
 
-  ipcMain.handle('vccFinancialOp:run:get', (_event, payload = {}) => {
+  ipcMain.handle('vccFinancialOp:run:get', async (_event, payload = {}) => {
     try {
-      const result = getVccFinancialOpService().getRunResult(payload.runId);
+      const result = await getVccFinancialOpService().getRunResult(payload.runId);
       return result
         ? { ...result, runStatus: result.status, status: 'success' }
         : { status: 'error', message: '校验结果不存在' };

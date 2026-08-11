@@ -9,7 +9,8 @@ const {
   previewUnarchiveSnapshot,
   listActiveMonthsSnapshot,
   listDeleteTargetsSnapshot,
-  previewDeleteTargetSnapshot
+  previewDeleteTargetSnapshot,
+  getRunResultSnapshot
 } = require('../backend/vcc-financial-op/read-snapshot');
 
 const READ_ACTIONS = Object.freeze([
@@ -17,7 +18,8 @@ const READ_ACTIONS = Object.freeze([
   'preview-unarchive',
   'list-delete-targets',
   'preview-delete-target',
-  'list-active-months'
+  'list-active-months',
+  'get-run-result'
 ]);
 const READ_ACTION_SET = new Set(READ_ACTIONS);
 
@@ -34,6 +36,7 @@ function runReadAction(db, action, payload, trace) {
   if (action === 'list-delete-targets') return listDeleteTargetsSnapshot(db, options);
   if (action === 'preview-delete-target') return previewDeleteTargetSnapshot(db, options);
   if (action === 'list-active-months') return listActiveMonthsSnapshot(db, options);
+  if (action === 'get-run-result') return getRunResultSnapshot(db, options);
   throw invalidReadAction(action);
 }
 

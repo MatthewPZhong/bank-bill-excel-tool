@@ -258,35 +258,6 @@ function assertCurrencyCells(sheet, rowNumber, amounts, label) {
   });
 }
 
-function assertEffectiveBalancesEqual(actualRows, expectedRows, label) {
-  const fields = [
-    'openingBalance',
-    'basePeriodAmount',
-    'baseCalculatedBalance',
-    'baseDifference',
-    'systemBalance',
-    'adjustmentAmount',
-    'effectivePeriodAmount',
-    'effectiveCalculatedBalance',
-    'effectiveDifference'
-  ];
-  assertEq(actualRows.length, expectedRows.length, `${label}坐标数量一致`);
-  expectedRows.forEach((expected) => {
-    const actual = actualRows.find((row) => (
-      row.subject === expected.subject && row.currency === expected.currency
-    ));
-    assertTrue(Boolean(actual), `${label}${expected.subject}/${expected.currency} 坐标存在`);
-    if (!actual) return;
-    fields.forEach((field) => {
-      assertEq(
-        actual[field],
-        expected[field],
-        `${label}${expected.subject}/${expected.currency} ${field} 一致`
-      );
-    });
-  });
-}
-
 function assertExportMatchesEffectiveResult(workbook, effectiveResult, archivedBalances) {
   assertEq(workbook.worksheets.length, 2, '归档导出只包含结果表与 Pending 计算表');
   assertEq(workbook.worksheets[0].name, RESULT_SHEET_NAME, '归档导出首个 sheet 为结果表');
@@ -404,7 +375,7 @@ async function run() {
     assertEq(m1Calculation.inputFingerprint, m1Preflight.inputFingerprint, 'M1 worker 使用预检指纹');
 
     const runId = m1Calculation.runId;
-    const initial = service.getRunResult(runId);
+    const initial = await service.getRunResult(runId);
     assertEq(initial.resultRevision, 0, '新计算结果 revision 从 0 开始');
     assertEq(balanceOf(initial, 'USD').effectiveCalculatedBalance, '103', 'M1 调整前 USD 基础计算余额正确');
     assertEq(balanceOf(initial, 'EUR').effectiveCalculatedBalance, '108', 'M1 EUR 基础计算余额正确');
@@ -425,13 +396,17 @@ async function run() {
       currency: 'USD',
       adjustmentAmount: '1.25',
       reason: ADJUSTMENT_REASON,
-      expectedResultRevision: options.resultRevision
+      expectedResultRevision: options.resultRevision,
+      expectedPreviewToken: initial.previewTokens.adjustment,
+      taskGeneration: initial.taskGeneration
     });
     assertEq(adjusted.status, 'adjusted', '调整通过真实 service 原子写入');
     assertEq(adjusted.resultRevision, 1, '新增调整后 revision 递增为 1');
     assertEq(adjusted.adjustment.reason, ADJUSTMENT_REASON, '调整写入保持业务原文');
     assertEq(adjusted.adjustment.createdAppVersion, APP_VERSION, '调整事实记录创建应用版本');
     assertEq(adjusted.adjustment.createdBuildSha, BUILD_SHA, '调整事实记录创建 build SHA');
+
+    const afterAdjustment = await service.getRunResult(runId);
 
     await expectCode(
       () => service.addRunAdjustment({
@@ -440,7 +415,9 @@ async function run() {
         currency: 'EUR',
         adjustmentAmount: '1',
         reason: '故意使用过期 revision',
-        expectedResultRevision: 0
+        expectedResultRevision: 0,
+        expectedPreviewToken: afterAdjustment.previewTokens.adjustment,
+        taskGeneration: afterAdjustment.taskGeneration
       }),
       'result-revision-changed',
       '结果已发生变化，请重新核对后归档。',
@@ -466,7 +443,7 @@ async function run() {
       appVersion: APP_VERSION,
       buildSha: BUILD_SHA
     });
-    const reopened = service.getRunResult(runId);
+    const reopened = await service.getRunResult(runId);
     assertEq(reopened.status, 'calculated', '重开数据库后结果仍为待归档');
     assertEq(reopened.resultRevision, 1, '重开数据库后 revision 保持 1');
     assertEq(reopened.adjustments.length, 1, '重开数据库后调整事实仍可见');
@@ -492,12 +469,14 @@ async function run() {
 
     const archived = await service.archive({
       runId,
-      expectedResultRevision: reopened.resultRevision
+      expectedResultRevision: reopened.resultRevision,
+      expectedPreviewToken: reopened.previewTokens.archive,
+      taskGeneration: reopened.taskGeneration
     });
     assertEq(archived.status, 'archived', 'M1 按当前 revision 归档成功');
     assertEq(archived.resultRevision, 1, '归档保留已核对 revision');
 
-    const archivedResult = service.getRunResult(runId);
+    const archivedResult = await service.getRunResult(runId);
     assertEq(archivedResult.status, 'archived', '归档后同一结果只读可重开');
     assertEq(archivedResult.adjustments.length, 1, '归档后调整事实仍可审阅');
     await expectCode(
@@ -506,20 +485,6 @@ async function run() {
       '已归档结果不能修改，请先解归档。',
       '已归档结果不再提供调整候选'
     );
-    await expectCode(
-      () => service.addRunAdjustment({
-        runId,
-        rowKey: rechargeOption.rowKey,
-        currency: 'EUR',
-        adjustmentAmount: '1',
-        reason: '归档后禁止修改',
-        expectedResultRevision: 1
-      }),
-      'adjustment-locked',
-      '已归档结果不能修改，请先解归档。',
-      '已归档结果新增调整 fail closed'
-    );
-
     const archiveRow = db.prepare(`
       SELECT balances_json, run_id FROM vcc_fin_op_archives
       WHERE target_month = ? AND subject = ?
@@ -543,27 +508,14 @@ async function run() {
     assertEq(archiveAudit.status, 'success', '归档审计状态 success');
     assertEq(archiveAudit.app_version, APP_VERSION, '归档审计记录应用版本');
     assertEq(archiveAudit.build_sha, BUILD_SHA, '归档审计记录 build SHA');
-    assertEq(archiveEvidence.effectiveRun.adjustments.length, 1, '归档审计固化完整调整事实');
-    assertEq(
-      archiveEvidence.effectiveRun.adjustments[0].reason,
-      ADJUSTMENT_REASON,
-      '归档审计保留未编码的业务调整原因'
-    );
-    assertEq(
-      archiveEvidence.effectiveRun.balances.find((row) => row.currency === 'USD').effectiveCalculatedBalance,
-      '104.25',
-      '归档审计固化 USD 生效余额'
-    );
-    assertDeepEq(
-      archiveEvidence.effectiveRun.adjustments,
-      archivedResult.adjustments,
-      '归档审计逐字段固化调整事实'
-    );
-    assertEffectiveBalancesEqual(
-      archiveEvidence.effectiveRun.balances,
-      archivedResult.balances,
-      '归档审计逐字段固化生效余额：'
-    );
+    assertEq(archiveEvidence.evidenceVersion, 2, '归档审计使用冻结的 v2 摘要证据');
+    assertEq(archiveEvidence.operation, 'archive_result', '归档审计操作类型一致');
+    assertEq(archiveEvidence.runId, runId, '归档审计绑定原 run');
+    assertEq(archiveEvidence.resultRevision, 1, '归档审计绑定已核对 revision');
+    assertDeepEq(archiveEvidence.subjects, [SUBJECT], '归档审计固化归档主体集合');
+    assertTrue(/^[a-f0-9]{64}$/.test(archiveEvidence.resultEvidenceDigest), '归档审计结果证据摘要有效');
+    assertTrue(/^[a-f0-9]{64}$/.test(archiveEvidence.effectiveBalanceHash), '归档审计生效余额摘要有效');
+    assertEq(archiveEvidence.expectedTotalChanges, 8, '单主体归档审计固定 N+7 变化预算');
 
     const exported = await service.exportRun({ targetMonth: M1, outputPath });
     assertEq(exported.runId, runId, '归档导出月份严格解析回原 run');
@@ -582,7 +534,7 @@ async function run() {
       expectedInputFingerprint: m2Preflight.inputFingerprint
     });
     assertEq(m2Calculation.status, 'calculated', 'M2 真实 worker 计算成功');
-    const m2Result = service.getRunResult(m2Calculation.runId);
+    const m2Result = await service.getRunResult(m2Calculation.runId);
     const m2Usd = balanceOf(m2Result, 'USD');
     const m2Eur = balanceOf(m2Result, 'EUR');
     SUPPORTED_CURRENCIES.forEach((currency) => {

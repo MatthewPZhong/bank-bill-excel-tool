@@ -546,6 +546,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
       const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
       ipcRenderer.on('vccFinancialOp:import:progress', listener);
       return () => ipcRenderer.removeListener('vccFinancialOp:import:progress', listener);
+    },
+    onOperationProgress: (callback) => {
+      const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
+      ipcRenderer.on('vccFinancialOp:operation:progress', listener);
+      return () => ipcRenderer.removeListener('vccFinancialOp:operation:progress', listener);
     }
   },
   // v2.1.6 Module B：收单单据币种校验

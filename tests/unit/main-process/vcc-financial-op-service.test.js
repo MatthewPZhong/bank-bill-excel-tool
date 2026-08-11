@@ -62,15 +62,25 @@ function createFakeWorkerFactory(workers) {
 }
 
 function seedCalculatedReviewRun(db) {
+  const revisions = Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]));
   const runId = Number(db.prepare(`
     INSERT INTO vcc_fin_op_runs (
       target_month, status, input_revisions_json, result_revision,
       input_fingerprint, created_at, updated_at
     ) VALUES (
-      '2026-06', 'calculated', '{"fixture":1}', 0,
-      'fixture-fingerprint', '2026-07-01 09:00:00', '2026-07-01 09:00:00'
+      '2026-06', 'calculated', ?, 0,
+      ?, '2026-07-01 09:00:00', '2026-07-01 09:00:00'
     )
-  `).run().lastInsertRowid);
+  `).run(JSON.stringify(revisions), 'a'.repeat(64)).lastInsertRowid);
+  const insertDataset = db.prepare(`
+    INSERT INTO vcc_fin_op_datasets (
+      target_month, dataset_type, data_status, archived_run_id,
+      revision, generated_at, updated_at
+    ) VALUES ('2026-06', ?, 'unprocessed', NULL, 1, ?, ?)
+  `);
+  for (const sourceType of REQUIRED_DATASET_TYPES) {
+    insertDataset.run(sourceType, '2026-07-01 08:00:00', '2026-07-01 08:00:00');
+  }
   db.prepare(`
     INSERT INTO vcc_fin_op_run_rows (
       run_id, subject, row_kind, source_type,
@@ -100,13 +110,15 @@ function seedCalculatedReviewRun(db) {
   return runId;
 }
 
-test('调整服务查询不占写租约，新增调整独占租约并返回完整生效结果', async (t) => {
-  const db = new DatabaseSync(':memory:');
-  db.exec('PRAGMA foreign_keys = ON');
+test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 token 归档', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-result-service-write-'));
+  const dbPath = path.join(root, 'tool-data.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL');
   ensureVccFinancialOpTablesSupport(db);
   const runId = seedCalculatedReviewRun(db);
   const service = createVccFinancialOpService({
-    database: { db, dbPath: ':memory:' },
+    database: { db, dbPath },
     assetsDir: '',
     appVersion: '3.1.8',
     buildSha: 'service-build'
@@ -114,12 +126,14 @@ test('调整服务查询不占写租约，新增调整独占租约并返回完�
   t.after(async () => {
     await service.terminate();
     db.close();
+    fs.rmSync(root, { recursive: true, force: true });
   });
 
   const initialOptions = service.listAdjustmentOptions({ runId });
   assert.equal(initialOptions.resultRevision, 0);
   assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 options 不计任务 generation');
-  assert.equal(service.getRunResult(runId).review.subjects.length, 1);
+  const initialResult = await service.getRunResult(runId);
+  assert.equal(initialResult.review.subjects.length, 1);
   assert.equal(service._taskStateForTests().taskGeneration, 0, '只读 full result 不计任务 generation');
 
   const adding = service.addRunAdjustment({
@@ -128,17 +142,21 @@ test('调整服务查询不占写租约，新增调整独占租约并返回完�
     currency: 'USD',
     adjustmentAmount: '1',
     reason: '服务层调整',
-    expectedResultRevision: 0
+    expectedResultRevision: 0,
+    expectedPreviewToken: initialResult.previewTokens.adjustment,
+    taskGeneration: initialResult.taskGeneration
   });
   assert.equal(service._taskStateForTests().action, 'add-adjustment');
-  await assert.rejects(
-    service.addRunAdjustment({
+  assert.throws(
+    () => service.addRunAdjustment({
       runId,
       rowKey: initialOptions.options[0].rowKey,
       currency: 'JPY',
       adjustmentAmount: '1',
       reason: '并发写入',
-      expectedResultRevision: 0
+      expectedResultRevision: 0,
+      expectedPreviewToken: initialResult.previewTokens.adjustment,
+      taskGeneration: initialResult.taskGeneration
     }),
     (error) => error.code === 'active-vcc-task'
   );
@@ -153,7 +171,7 @@ test('调整服务查询不占写租约，新增调整独占租约并返回完�
     created_app_version: '3.1.8',
     created_build_sha: 'service-build'
   });
-  const effective = service.getRunResult(runId);
+  const effective = await service.getRunResult(runId);
   assert.equal(effective.resultRevision, 1);
   assert.equal(effective.adjustments.length, 1);
   assert.equal(
@@ -172,13 +190,16 @@ test('调整服务查询不占写租约，新增调整独占租约并返回完�
   const refreshedOptions = service.listAdjustmentOptions({ runId });
   assert.equal(refreshedOptions.options[0].availableCurrencies.includes('USD'), false);
 
-  await assert.rejects(
-    service.archive({ runId, expectedResultRevision: 1 }),
-    (error) => error.code === 'result-input-fingerprint-missing'
-  );
+  const archived = await service.archive({
+    runId,
+    expectedResultRevision: 1,
+    expectedPreviewToken: effective.previewTokens.archive,
+    taskGeneration: effective.taskGeneration
+  });
+  assert.equal(archived.status, 'archived');
   const archiveAudit = db.prepare(`
     SELECT app_version, build_sha FROM vcc_fin_op_operation_audit
-    WHERE operation_type = 'archive_result' AND status = 'rolled_back'
+    WHERE operation_type = 'archive_result' AND status = 'success'
   `).get();
   assert.deepEqual({ ...archiveAudit }, {
     app_version: '3.1.8',

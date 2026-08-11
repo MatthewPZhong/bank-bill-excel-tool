@@ -437,3 +437,57 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Deviations
 
 无行为合同偏离。集成夹具补齐 current provenance、旧写成功链显式标记 legacy，以及 candidate-first query-plan 修正都用于对齐冻结合同；未修改 A 纯模块、旧 write 实现、migration、金额/币种或 C1/C2 范围。
+
+## PR2.5-C1 写保护 Implementation Notes（实施中）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| C1 复用 `activeTask/taskGeneration` 作唯一 claim 所有权 | B 已实现 generation 和进程内 task identity 复核 | 不新增 tracker/lease/TTL/timer/retry；claim 绑 action/generation/object identity 且只 release 一次 |
+| result-write token 扩展 B 单一 v2 实现 | 当前 adjustment/archive preview 只有 revision，无可供锁内精确重算的 token | 不造第二 token/state；`run:get` 走 read worker 并返回两 action token+generation |
+| C1 使用物理独立 write worker | 现 `worker-entry.js` 开库时会 migration，且混合 import/calculate/C2 actions | 新 worker 仅 allow adjustment/archive，critical ack 后才开库，零 migration、零 lifecycle 对象 |
+| 19 表 policy 和 DML step registry 是单一写权限源 | 旧 production DML 散落在 calculator/result-adjustments，且 preserved-state 扫全表 | 旧 helper 可作 legacy/offline 测试保留，不补新防御；生产调用图只允许 worker+registry |
+| 四张大表不建 session | 负责人批准修订与 TechDoc 的大表内存约束 | C1 largeTableScopeProof = approved trigger 0 + immutable registry 零 step 指向大表 + 每 step `.changes` + operation `total_changes` 精确；只小型 protected 表建 empty-session |
+| legacy-four calculated 是 plan 前零 DML 结果 | 纠错 Spec/TechDoc 要求 adjustment/archive 返回 `result-recalculation-required` | token 重算后、plan 前返回；不写 business/success/rollback audit，不 fallback 到 current |
+| 测试去组合爆炸 | 负责人批准要求每个独立不变量一个代表 | registered step 各一 `.changes` mismatch；相同 rollback/audit 语义只测一次；不增不可达 renderer/IPC 反例 |
+
+### Phase 0 Evidence
+
+- 基线已核为 `ac882a3846571ab57692b8be633413e919cf2a54`，tracked clean、无 upstream；已创建本地分支 `codex/v3.1.9-pr2.5-c1-guard-adjustment-archive`，无 push/PR/GitHub 写入。
+- Node 24.13.0 / SQLite 3.50.4 临时内存 probe：`createSession=function`，empty changeset 0 bytes，trigger 写 protected table changeset 28 bytes，statement `.changes=1`时 `total_changes` delta=2，commit/rollback 后 session close 均成功。
+- current migration 内存库枚举得到 19 张 `vcc_fin_op_%` 表、0 个 production VCC trigger。该证据只关闭本机实现未知，Windows packaged 和目标生产 trigger 仍为 PROBE。
+- 真实当前写入路径是 `renderer → preload → main tracked IPC → service.runDirectTask → archiveRun/addRunAdjustment → Main database.db`；旧函数使用全事实 SHA，并且 archive 失败直接尝试无保护 rollback audit。
+
+### Remaining Unknowns
+
+- Windows installer/portable `createSession`/trigger/total/session close 仍须 runtime probe，不可用开发 Node 代替。
+- 目标生产库 trigger、真实 legacy shape、约 16 GB 冷热 P95/WAL/main lag 仍未关闭。
+- ⚠️ 主体×九币种、调整后有效余额、跨月期初、success/rollback audit 和备份恢复必须财务人工复核。
+
+### Implementation Evidence
+
+- 19 表 policy 与七个 SQL step registry 已冻结。adjustment 只允许 `run_adjustments/runs`，固定 `2`；archive 只允许 `operation_audit/archives/runs/datasets`，固定 `N+7`；audit-only 只允许 `operation_audit`，固定 `1`。每个 registered step 都有一项 table-driven `.changes` mismatch 证据。
+- 四张大表 `effective_rows/import_rows/system_snapshots/system_snapshot_attempts` 不创建 session；运行时证明固定为未批准 trigger=0、不可变 registry 零 C1 step 指向它们、逐 step `.changes` 和 operation `total_changes` 精确守恒。其余小型 protected 表使用 empty-session。
+- production 调用图已切为 `renderer token+generation → preload/main progress bridge → Service generation-bound claim → dedicated result write worker → BEGIN IMMEDIATE → B raw evidence/token v2 → A validator → MutationPlan → registry → SQLite`。Service 不再 import/call `archiveRun` 或 `addRunAdjustmentToDb`；旧 helper 仅保留 legacy/offline 测试用途。
+- claim 绑定 action/base generation/进程内 object identity，父进程在发 `critical-ack` 前置 `protected=true`；进入后 cancel/terminate 只等待 terminal，重复 terminal 不重复 release，generation 只推进一次。七字段 context 缺失接受，存在时 Service 与 worker 都按既有 helper 精确 refreeze；worker 不接 reserve/reopen/create batch、service/repository 或 settleArtifacts。
+- adjustment/archive 在同一 `BEGIN IMMEDIATE` 内从 A validator + B set evidence 重算对应 token v2，精确等于 preview 后才生成 plan。真实 legacy fixture 变异为 calculated 后，两 action 都在 plan 前返回 `result-recalculation-required`，业务/success/rollback audit 均为 0 DML。
+- safe revision failure 先回滚业务连接，再以新连接和独立 audit-only plan 写一条 protected rollback audit；audit 注入失败仍上抛原 revision error。`vcc-trigger-policy-violation`、`mutation-guard-unavailable`、`vcc-schema-not-ready` 和 runtime/连接不可信均数据库零 failure audit。实现复核发现业务连接 `createSession/changeset` 原生失败可能未稳定归类，已收敛为 `mutation-guard-unavailable` 并增加零 audit 代表测试。
+- archive postcondition 保存 A 验证后的 `effectiveCalculatedBalance`，测试锁定 PPHK 的 USD=`110`、EUR=`105`、完整九币种、五 dataset 和 success audit `preview_token IS NULL`；未修改金额、币种、跨月公式或 classifier。
+- production Service 真实链完成 `getRunResult token/generation → adjustment worker → refetch 新 token/generation → archive worker`，并核对 adjustment/archive app/build provenance。renderer/main/preload 静态契约锁定两 action payload、progress 过滤/退订、成功 refetch 和 legacy 明确提示。
+- 首次失败均已分类且没有 production regression：两次是同步 fail-closed 被测试误用 `assert.rejects` 的 test design；一次是 `getRunResult` 改为 read worker 后旧测试仍同步读取的 stale test，已按真实调用时间点迁移。当前 guard/result/write/service 聚焦 36/36，renderer/preview/usage 44/44，B read 相关 47/47 PASS；A/B/C1 与 renderer 扩大聚焦 110/110 PASS。
+- `scripts/perf/vcc-financial-op-result-write-performance.js` 对每个样本复制离线 current DB、read worker 取 preview、dedicated worker 归档并测主线程 lag；同时静态禁止旧 full-fact fingerprint helper/Service DML 旁路。小 fixture 五次 worker P95 `75.549ms`、main lag P95/max `2.077ms`、WAL 均 `0→0`、输入 SHA 不变；只作本机 gross evidence，不关闭约 16 GB/Windows 门禁。
+- `npm run lint`、13 个本次生产/脚本文件 `node --check`、`git diff --check` 均 PASS；A/B/C1/renderer 扩大聚焦 110/110，另行 `serialize-error` 17/17 PASS。
+- 首次完整 `release-check` 的 lint/smoke 与 unit 4972/4972 全绿，integration 46/48；两项均分类为 C1 生产合同迁移后的 stale integration：调整归档链仍同步消费 async `getRunResult`/旧 success audit full evidence，历史导出链未携 archive token/generation。只机械迁移为真实 preview → submit → refetch，并按冻结边界删除 renderer/IPC 不可达且与 options guard 重复的 archived direct-Service write 断言；未改生产、阈值或 retry。调整链 297→209 是 success audit 按 TechDoc 从完整 effectiveRun 改为 digest 摘要后，旧九币种×多字段 audit 内嵌重复断言合法移除；金额仍由正式 refetch、archive DB 行和 Excel 回读覆盖。历史链 28→29 增加写后 refetch，因此 integration 总断言 2459→2372。两条脚本分别定向 209/209、29/29 PASS。
+- 第二次且最终单一 session `npm run release-check` exit 0：lint、smoke PASS；unit 4972/4972（324 files，0 fail/skip，node test 15290 ms）；integration 48/48 scripts、2372/2372 assertions（1286511 ms）。runner 仅在全绿后按仓库规则自动同步 `rules/integration-test-policy.md` §七；无重试或门禁放宽。
+
+### Blindspot / Reconciliation Pass
+
+- 入口旁路复核确认 renderer/IPC 可达的 adjustment/archive 只有 C1 worker+registry；`getEffectiveRunResult` 只生成单 run review shape，不参与 token/plan 真相或 fallback。C2 的 unarchive/delete 仍保持 v2 preview → 旧 v1 write fail-closed，本 PR 未桥接或修复。
+- 状态/失败复核覆盖 unknown action 开库前拒绝、stale generation 零 worker、critical 前协作取消、critical 后禁止 terminate、worker error/exit、trigger/runtime/schema/session/rollback/connection close 和 audit-only 二次失败。未增加 TTL、timer、retry、lease 或 fallback。
+- 资金血缘复核保持 run/dataset/revision/fingerprint、rowKey metadata、adjustment sequence、主体×九币种和 A effective balance 为同源证据；archive 不信任 renderer 金额，也不从旧 DB-bound helper 回退。⚠️ 真实主体×九币种、跨月期初、success/rollback audit 与备份恢复仍须财务人工复核。
+- `check-vars -- --include-minor` exit 2（命中需 review，不是测试失败）：Important-skeleton 命中 `ipcRenderer/serializeError`，Runtime-state 命中 `state`。新 progress channel 已同步 main/preload/renderer并有退订契约；序列化仅复用既有双侧 schema且专属测试全绿；`state` 只命中新文件 `operation-state` 路径同词，`src/renderer.js` 顶层全局 state 零改动。无 Critical/Risk-sensitive 命中。
+
+### Deviations
+
+无。负责人批准时对四张大表保护做了必须修订：它们不进入 empty-session，而是使用零目标 DML registry + trigger policy + 逐 step/operation 变化守恒。本节已在任何生产编辑前与 preflight 同步。

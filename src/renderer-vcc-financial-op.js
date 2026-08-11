@@ -713,6 +713,9 @@
   function reviewFailureDisposition(action, code) {
     const normalizedAction = String(action || '');
     const normalizedCode = String(code || '');
+    if (normalizedCode === 'result-recalculation-required') {
+      return Object.freeze({ refetch: false, poisonReview: true, disableModify: true });
+    }
     if (normalizedCode === 'result-revision-changed') {
       return Object.freeze({ refetch: true, poisonReview: false, disableModify: false });
     }
@@ -748,6 +751,18 @@
     const message = error && error.message ? error.message : String(error);
     const detailLines = normalizeResponseDetailLines(error && error.detailLines);
     return [message, ...detailLines].join('；');
+  }
+
+  function resultOperationProgressMessage(progress) {
+    const action = progress && progress.action === 'adjustment' ? '修改结果' : '确认归档';
+    const phase = String(progress && progress.phase || '');
+    const phaseLabels = {
+      validating: '正在校验锁定证据',
+      applying: '正在写入受保护事务',
+      verifying: '正在核对写后状态',
+      completed: '操作完成'
+    };
+    return `${action}：${phaseLabels[phase] || '正在处理'}`;
   }
 
   async function requestRunAdjustment(result, previewResponse = null) {
@@ -933,6 +948,13 @@
         setAdjustmentLocked(true);
         setBusy(true, 'adjustment');
         errorText.hidden = true;
+        const stopProgress = typeof api.onOperationProgress === 'function'
+          ? api.onOperationProgress((progress) => {
+            if (!progress || progress.action !== 'adjustment') return;
+            errorText.textContent = resultOperationProgressMessage(progress);
+            errorText.hidden = false;
+          })
+          : null;
         try {
           const saved = await api.addRunAdjustment({
             runId: result.runId,
@@ -940,7 +962,9 @@
             currency: currencySelect.value,
             adjustmentAmount: amountInput.value.trim(),
             reason,
-            expectedResultRevision: result.resultRevision
+            expectedResultRevision: result.resultRevision,
+            expectedPreviewToken: result.previewTokens && result.previewTokens.adjustment,
+            taskGeneration: result.taskGeneration
           });
           if (!saved || saved.status !== 'success') {
             if (saved && ['result-revision-changed', 'adjustment-locked'].includes(saved.code)) {
@@ -970,6 +994,7 @@
           errorText.textContent = error.message || String(error);
           errorText.hidden = false;
         } finally {
+          if (typeof stopProgress === 'function') stopProgress();
           setBusy(previousBusy.busy, previousBusy.kind);
           if (!outcome) setAdjustmentLocked(false);
         }
@@ -1120,10 +1145,18 @@
         if (archiveBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
         setReviewLocked(true);
         setReviewState('正在按当前结果版本重新核对并归档…', 'warning');
+        const stopProgress = typeof api.onOperationProgress === 'function'
+          ? api.onOperationProgress((progress) => {
+            if (!progress || progress.action !== 'archive') return;
+            setReviewState(resultOperationProgressMessage(progress), 'warning');
+          })
+          : null;
         try {
           const archived = await api.archive({
             runId: currentResult.runId,
-            expectedResultRevision: currentResult.resultRevision
+            expectedResultRevision: currentResult.resultRevision,
+            expectedPreviewToken: currentResult.previewTokens && currentResult.previewTokens.archive,
+            taskGeneration: currentResult.taskGeneration
           });
           if (!archived || archived.status === 'error') {
             throw responseFailure(archived, '归档失败');
@@ -1149,6 +1182,7 @@
             setReviewState(error.message || String(error), 'error');
           }
         } finally {
+          if (typeof stopProgress === 'function') stopProgress();
           if (!completion) setReviewLocked(false);
         }
       });

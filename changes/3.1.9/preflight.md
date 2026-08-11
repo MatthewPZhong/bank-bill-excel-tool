@@ -375,3 +375,55 @@
 | 3 | service/main/export 接线 | 初次导出读取和 `runDirectTask` 内二次重查都消费 B snapshot；legacy 可导出 | 仅初次读取走 B、二次回退 v1/current-only |
 | 4 | renderer shell/cache | mount 早于 await；完整 target response 缓存；state-changed 全量刷新；成功 refresh-once | cache 放宽 token/generation freshness，或 target change 再发 preview IPC |
 | 5 | 聚焦/性能/人工边界 | SQL硬门禁、main lag、target switch、gross budget、intermediate fail-closed 单一真实链 | 小 fixture 被写成 16 GB/Windows/财务验收，或为边界样本加 retry/放宽阈值 |
+
+## PR2.5-C1 写保护 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：为 adjustment/archive 建立单一 table policy/SQL step registry、generation-bound 独占 claim、专用零 migration write worker，并在 `BEGIN IMMEDIATE` 内以 B 的同源 raw evidence 重算 token v2，再生成和执行固定 MutationPlan。
+- Context：基线为 PR2.5-B 冻结头 `ac882a3846571ab57692b8be633413e919cf2a54`。当前两个生产写入在 Main 中走 `runDirectTask`，且使用 `snapshotResultMutationState()` 扫描全部 19 张 VCC 表；旧 rollback audit 也不是受保护的独立事务。
+- Constraints：零 schema/index/migration；不改金额、币种、九币种和跨月公式；不造第二 token/state/tracker；不增加 lease/timer/retry/fallback；不触碰 C2 unarchive/delete 计划或 v2→v1 桥接；不为 renderer/IPC 真实不可达反例加防御。
+- Done when：adjustment 固定总变化 `2`，archive 固定总变化 `N+7`；所有生产 DML 仅来自 registry；同事务 token 与 preview 精确一致；legacy-four calculated 在 plan 前返回 `result-recalculation-required` 且零 DML；safe failure 仅在原事务回滚后走 audit-only，unsafe failure 数据库零失败审计；归档 UI 保持响应。
+
+### 已确认事实与批准修订
+
+| 事实 | 证据 | 对实现的约束 |
+| --- | --- | --- |
+| current migration 产生 19 张 VCC 表、零 production VCC trigger | `ensureVccFinancialOpTablesSupport(:memory:)` 后枚举 `sqlite_schema` | registry 必须 exact-match 19 表；approved trigger set 固定为空，未知表/trigger 首写前失败关闭 |
+| 本机 SQLite session 基础合同成立 | Node 24.13.0 / SQLite 3.50.4：`createSession` 存在，空 changeset=0，trigger 间接写 changeset 非空，`total_changes` 包含 trigger，commit/rollback 后可 close | 开发机 probe 不代替 Windows packaged probe；失败不得降级 |
+| 四张大表不能建普通 protected session | 负责人在 preflight 批准时明确修订 | `effective_rows/import_rows/system_snapshots/system_snapshot_attempts` 的 C1 `largeTableScopeProof` 固定为 approved-trigger=0 + immutable registry 零 C1 step 指向大表 + 每 step `.changes` + operation `total_changes` 精确守恒；只对其余小型 protected 表建 empty-session |
+| 旧 helper 可保留 | 旧 calculator/result-adjustments 测试仍用于 legacy/offline 证据 | 不为旧 helper 补 C1 防御；静态生产调用图必须证明 adjustment/archive 只有 C1 worker+registry 唯一路径 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 当前决定 |
+| --- | --- | --- | --- |
+| result-write preview 尚无 v2 token | PROBE 已收敛 | 高 | 在同一 `operation-token-v2.js` 和 B raw evidence 上扩展 adjustment/archive action；`run:get` 返回 token+generation，不造第二系统 |
+| Windows installer/portable `createSession` | PROBE | 高 | 跑专用 runtime probe；任一合同不成立阻断发布 |
+| 目标生产 trigger/legacy shape | PROBE | 高 | 上线前只读 inspect；未批准 trigger 或非 exact legacy 失败关闭 |
+| 约 16 GB P95/WAL/main lag | PROBE | 高 | 小 fixture 仅 gross regression，真实副本不达标继续定位而不放宽 |
+| 主体×九币种、有效余额、跨月和审计 | PROBE / 人工 | 高 | ⚠️ 资金红线，必须财务人工复核，自动化不关闭 |
+
+当前无 BLOCK。
+
+### 精确 Ownership 与风险优先顺序
+
+- 新增 mutation policy/guard/result-write 纯合同与执行模块、C1 专用 write worker、runtime probe、result-write performance 脚本及聚焦测试。
+- 修改 B token/read snapshot/read worker/read schema，仅扩展 result-write preview；修改 service/main/preload/renderer，仅切换现有 adjustment/archive 入口、progress 和 async `run:get`。
+- 不修改 migrations/schema/index、A 四纯模块/classifier、C2 三个写模块、PR2 TaskLifecycle 或发布文档。七字段 context 只允许缺失或恰好 refreeze，PR3 前不伪造。
+
+| 顺序 | 纵切 | 最小成功证据 | 停止条件 |
+| --- | --- | --- | --- |
+| 1 | policy/registry + runtime/trigger probe | 19 表 exact；四大表零 session；未知表/trigger/runtime 失败前零 DML | 需要 migration、fallback 或大表 session |
+| 2 | result preview token + claim/worker | generation/identity 失效零 worker；critical 前可 cancel、后不 terminate | 需要第二 tracker/lease/timer 或伪 context |
+| 3 | adjustment 2 变化 | 两 step 预算、session/total/postcondition/success evidence 全通过 | 任一 DML 不来自 registry |
+| 4 | archive N+7 | A effective balance、九币种、五 dataset、success audit 精确 | 依赖旧全事实 SHA/preflight scan |
+| 5 | failure audit/UI/perf | safe audit-only；unsafe 0 audit；main lag/P95 门禁 | audit 覆盖原错误、retry 或放宽阈值 |
+
+### 测试边界
+
+- 每个独立写不变量仅一个 table-driven/故障注入代表；不做 step×fault 笛卡尔积。
+- 每个 registered step 按合同各保留一个 `.changes` mismatch；相同 rollback/audit 语义不复制。
+- 四大表用一个代表直接写故障证明 registry/total 守恒，且断言从未 `createSession`。
+- legacy-four adjustment/archive 两 action 使用同一 table-driven 合同；C2 v2→v1 只保留 B 既有中间失败关闭证据。
+- ⚠️ 金额、币种、跨月期初和审计结果必须人工复核。

@@ -222,6 +222,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     }
     assert.match(vccService, /readWorkerFactory = \(filename, options\) => new Worker\(filename, options\)/);
     assert.match(vccService, /taskGeneration !== capturedGeneration \|\| activeTask !== capturedTask/);
+    assert.match(preload, /ipcRenderer\.on\('vccFinancialOp:operation:progress', listener\)/);
+    assert.match(preload, /removeListener\('vccFinancialOp:operation:progress', listener\)/);
+    assert.equal(
+      (main.match(/sender\.send\('vccFinancialOp:operation:progress', progress\)/g) || []).length,
+      2
+    );
+    assert.match(vccService, /function archive\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
+    assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
+    assert.doesNotMatch(vccService, /archiveRun\(|addRunAdjustmentToDb\(/);
     assert.doesNotMatch(main, /legacySourceRequest|service\.deleteDatasetData\(payload\)/);
     assert.match(
       vccService,
@@ -819,6 +828,10 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(adjustmentSource, /duplicateCounts[\s\S]*row\.sourceLabel/);
     assert.match(adjustmentSource, /for \(const currency of CURRENCIES\)[\s\S]*available\.includes\(currency\)/);
     assert.match(adjustmentSource, /rowKey,[\s\S]*expectedResultRevision: result\.resultRevision/);
+    assert.match(adjustmentSource, /expectedPreviewToken: result\.previewTokens && result\.previewTokens\.adjustment/);
+    assert.match(adjustmentSource, /taskGeneration: result\.taskGeneration/);
+    assert.match(adjustmentSource, /api\.onOperationProgress[\s\S]*progress\.action !== 'adjustment'/);
+    assert.match(adjustmentSource, /if \(typeof stopProgress === 'function'\) stopProgress\(\)/);
     assert.match(adjustmentSource, /canClose: \(\) => !saving/);
     assert.match(adjustmentSource, /setAdjustmentLocked\(true\);\s*setBusy\(true, 'adjustment'\)/);
     assert.match(adjustmentSource, /setBusy\(previousBusy\.busy, previousBusy\.kind\)/);
@@ -838,6 +851,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(reviewSource, /modifyBtn\.hidden = !editable/);
     assert.match(reviewSource, /if \(modifyBtn\.disabled \|\| runStatusOf\(currentResult\) !== 'calculated'\) return;/);
     assert.match(reviewSource, /reviewFailureDisposition\('archive', error\.code\)[\s\S]*await refetchCurrentResult/);
+    assert.match(reviewSource, /expectedPreviewToken: currentResult\.previewTokens && currentResult\.previewTokens\.archive/);
+    assert.match(reviewSource, /taskGeneration: currentResult\.taskGeneration/);
+    assert.match(reviewSource, /api\.onOperationProgress[\s\S]*progress\.action !== 'archive'/);
   });
 
   test('结果操作失败策略区分临时失败、无候选、并发归档与结构性归档错误', () => {
@@ -865,6 +881,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     });
     assert.deepEqual(disposition('archive', 'result-input-changed'), {
       refetch: false, poisonReview: true, disableModify: false
+    });
+    assert.deepEqual(disposition('archive', 'result-recalculation-required'), {
+      refetch: false, poisonReview: true, disableModify: true
     });
 
     const reviewStart = moduleRenderer.indexOf('function confirmArchive(');
