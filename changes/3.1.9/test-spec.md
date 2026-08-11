@@ -391,3 +391,23 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - 首次完整门禁 lint/smoke、unit 4972/4972 通过，integration 46/48；两项失败精确分类为陈旧集成测试合同，未改生产、阈值或 retry。机械迁移 async review、真实 preview token/generation、写后 refetch 与 v2 digest audit 后，调整归档链 209/209、历史模板导出链 29/29 PASS；renderer/IPC 不可达的 archived direct-Service write 重复断言按冻结 non-goal 删除，未固化额外 Service 错误码。调整链 297→209 来自完整 effectiveRun audit 被 TechDoc 冻结 digest 摘要替代后移除九币种×多字段重复 audit 断言，资金金额仍由 refetch/archive DB/Excel 三层覆盖；历史链 28→29 增加写后 refetch，故总数 2459→2372，不是门禁弱化。
 - 第二次且最终单一 session `npm run release-check` 全绿：lint/smoke PASS，unit 4972/4972（324 files），integration 48/48 scripts、2372/2372 assertions；runner 只在全绿后自动同步 policy。
 - ⚠️ Windows packaged runtime session/changeset/total/close、目标生产 legacy/trigger、约 16 GB 冷热性能，以及真实主体×九币种、调整后 effective balance、跨月期初、审计和备份恢复仍须人工完成；自动测试不替代资金红线。
+
+## 十五、PR2.5-C2 解归档/删除测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| C2-01 | P0 | policy/guard | C2 large-table scope | operation+registered step+scopeId+preCount/budget exact；四大表无 session；C1 仍零大表 step |
+| C2-02 | P0 | unarchive | current/real legacy production entry | 锁内 B v2 exact compare；current `N+7`、legacy `N+6`；legacy 不造 Pending |
+| C2-03 | P0 | result/opening | 五 child 独立删除 | `1+R+ΣC` / `1+R+ΣC+O`；不依赖 cascade；`first_month` 只读 |
+| C2-04 | P0 | detail | Q/E/D/M 固定 scope | `2+R+ΣC+2Q+E+D+M`；先逐字段物化再清 FK/删事实；D=0 不造 dataset；非目标行保留 |
+| C2-05 | P0 | system | B/A/S/D/M 固定 scope | `2+R+ΣC+B+2A+S+D+M`；缺 accepted 精确补 B；物化 A 后 FK 为 NULL；最终语义 accepted 恰好一条 |
+| C2-06 | P0 | source invariant | M=0 / deletionId | M=0 整事务回滚+单一 safe audit；deletionId 只用 boundary/returned ID 后置核对 |
+| C2-07 | P0 | failure | stale / 中途 fault / unsafe trigger | state-changed 零业务删除；唯一中途 fault 恢复五 child/run；unsafe 零 DB failure audit |
+| C2-08 | P0 | worker/service | dedicated route/claim/context | generic worker 无 destructive action/migration；同一 claim/protected/cancel/release；context 为 null 或 exact 7-field refreeze |
+| C2-09 | P1 | renderer/IPC | 既有 progress channel | main 转发 unarchive/delete；renderer 按 action 过滤、复用现有状态文案、finally 退订 |
+| C2-10 | P0 | integration | 真实 v2 preview→Service→worker | current 跨月 gate/unarchive/result/opening/detail/system；detail Q=1，system B=1/A=1，审计血缘不丢 |
+
+代表性故障不扩展为 step×failure 笛卡尔积；不为 direct Service 伪造、renderer/IPC 生产不可达 payload 增加 guard/test。本机聚焦 195/195、destructive integration 77/77 只是功能/gross evidence。约 16 GB P50/P95/WAL/main lag、Windows packaged `UPDATE ... FROM`/session runtime、目标生产 trigger/legacy 和资金人工复核仍是 PROBE，不得由局部 PASS 关闭。
+
+- 首次完整门禁 lint/smoke、unit 4984/4984 通过，最后一条 historical integration 因 legacy helper 生成 v1 token 而失败，分类 stale integration test；仅机械迁移到真实 `service.previewUnarchive` v2 token/taskGeneration → `service.unarchiveMonth` → 写后 refetch，单脚本 29/29 PASS，未改生产或重试首次 full。
+- 第二次且最终单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4984/4984（325 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（295658ms），其中 destructive 77/77、historical 29/29。runner 仅在全绿终态自动同步 policy §七。

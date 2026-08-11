@@ -111,4 +111,30 @@ test('batchContext 缺失可接受，存在时沿用七字段 refreeze 合同', 
   assert.match(invalid.terminal.error.message, /batchNumber/);
   assert.equal(invalid.messages.some((message) => message.type === 'critical-ready'), false);
   assert.equal(fs.existsSync(missing), false);
+
+  const valid = await runWorker({
+    action: 'delete-data-target',
+    payload: {
+      targetMonth: '2026-07',
+      targetType: 'result',
+      expectedPreviewToken: `v2:${'b'.repeat(64)}`,
+      taskGeneration: 0,
+      batchContext: {
+        batchId: 1,
+        batchNumber: 'B-1',
+        taskRunId: 'run-1',
+        taskKey: 'task-1',
+        moduleId: 'vcc-financial-op',
+        parentRunId: 'parent-1',
+        operationKey: 'delete-result'
+      }
+    },
+    dbPath: missing
+  }, (worker, message) => {
+    if (message && message.type === 'critical-ready') worker.postMessage({ type: 'cancel' });
+  });
+  assert.equal(valid.terminal.type, 'error');
+  assert.equal(valid.terminal.error.code, 'operation-cancelled');
+  assert.equal(valid.messages.some((message) => message.type === 'critical-ready'), true);
+  assert.equal(fs.existsSync(missing), false);
 });

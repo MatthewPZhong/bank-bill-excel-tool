@@ -28,9 +28,6 @@ const {
   buildRunRowKey
 } = require('../../src/backend/vcc-financial-op/result-adjustments');
 const {
-  previewUnarchive: previewLegacyUnarchive
-} = require('../../src/backend/vcc-financial-op/unarchive');
-const {
   parseAdjustmentLineageName
 } = require('../../src/backend/vcc-financial-op/adjustment-lineage');
 const {
@@ -326,10 +323,7 @@ async function run() {
       'defined name 可还原历史调整 rowKey'
     );
 
-    // B/C1 中间分支只保留 v1 preview 作为旧 write 实现证据；生产入口已切 v2 并安全拒绝。
-    const latestPreview = previewLegacyUnarchive(db, LATEST_MONTH, {
-      taskGeneration: service._taskStateForTests().taskGeneration
-    });
+    const latestPreview = await service.previewUnarchive({ targetMonth: LATEST_MONTH });
     assertEq(latestPreview.canUnarchive, true, 'latest 月份可通过真实状态预检解归档');
     const unarchived = await service.unarchiveMonth({
       targetMonth: LATEST_MONTH,

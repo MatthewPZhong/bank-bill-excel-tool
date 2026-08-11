@@ -5,8 +5,7 @@
 //   2. M2 解归档成功且 M1 保持归档，随后删除 M2 全部未归档结果；
 //   3. M1 解归档后删除首月期初，first_month 永久事实与源数据/导入审计计数守恒；
 //   4. preview token 过期时零业务删除并写 rolled_back 审计；
-//   5. 事务中途故障时 run/子表全部回滚，成功审计不残留且 rolled_back 审计完整；
-//   6. 删除来源原表前固化含人工调整的完整 run 证据，并通过真实 worker 透传版本与原因。
+//   5. 删除来源原表前物化有效事实审计血缘，并通过真实 worker 透传版本与原因。
 //
 // 用法：node scripts/integration/vcc-financial-op-destructive-state-chain.js
 
@@ -28,12 +27,6 @@ const {
 const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
-const {
-  previewUnarchive: previewLegacyUnarchive
-} = require('../../src/backend/vcc-financial-op/unarchive');
-const {
-  previewDataTargetDeletion: previewLegacyDataTargetDeletion
-} = require('../../src/backend/vcc-financial-op/data-target-deletion');
 const {
   buildRunRowKey
 } = require('../../src/backend/vcc-financial-op/result-adjustments');
@@ -92,21 +85,6 @@ async function expectCode(action, expectedCode, label) {
   }
 }
 
-async function expectFailure(action, messagePattern, label) {
-  try {
-    await action();
-    assertTrue(false, label, `expected failure matching ${messagePattern}`);
-    return null;
-  } catch (error) {
-    assertTrue(
-      messagePattern.test(String(error && error.message || error)),
-      label,
-      String(error && error.message || error)
-    );
-    return error;
-  }
-}
-
 function balances(base = '100', usd = base) {
   return Object.fromEntries(SUPPORTED_CURRENCIES.map((currency) => [
     currency,
@@ -144,6 +122,16 @@ function seedSourceFacts(db, targetMonth) {
       source_file, sheet_name, source_row, raw_json, disposition
     ) VALUES (?, ?, ?, ?, ?, ?, 'PPHK', 'USD', '10', ?, 'Sheet1', 2, ?, 'accepted')
   `);
+  const insertDuplicateAuditRow = db.prepare(`
+    INSERT INTO vcc_fin_op_import_rows (
+      import_record_id, source_type, target_month,
+      idempotency_key_raw, idempotency_key, content_hash,
+      subject, stat_currency, signed_amount,
+      source_file, sheet_name, source_row, raw_json, disposition,
+      existing_effective_id
+    ) VALUES (?, ?, ?, ?, ?, ?, 'PPHK', 'USD', '10', ?, 'Sheet1', 3, ?,
+              'idempotent_skip', ?)
+  `);
 
   for (const sourceType of DETAIL_TYPES) {
     const fileName = `${targetMonth}-${sourceType}.xlsx`;
@@ -157,7 +145,7 @@ function seedSourceFacts(db, targetMonth) {
       sourceType,
       JSON.stringify([fileName])
     ).lastInsertRowid);
-    insertEffective.run(
+    const effectiveId = Number(insertEffective.run(
       sourceType,
       key,
       key,
@@ -166,7 +154,7 @@ function seedSourceFacts(db, targetMonth) {
       fileName,
       rawJson,
       recordId
-    );
+    ).lastInsertRowid);
     insertImportRow.run(
       recordId,
       sourceType,
@@ -176,6 +164,17 @@ function seedSourceFacts(db, targetMonth) {
       `hash-${key}`,
       fileName,
       rawJson
+    );
+    insertDuplicateAuditRow.run(
+      recordId,
+      sourceType,
+      targetMonth,
+      key,
+      key,
+      `hash-${key}`,
+      `duplicate-${fileName}`,
+      rawJson,
+      effectiveId
     );
   }
 
@@ -383,8 +382,8 @@ async function run() {
     const m2RunId = seedRun(db, M2, 'archived');
     seedDatasets(db, M1, 'archived', m1RunId);
     seedDatasets(db, M2, 'archived', m2RunId);
-    // 让直接 SQL fixture 先走完与正式启动相同的 Pending v2 幂等迁移，
-    // 后续 worker 再次 migration 不应制造 preview token 漂移。
+    // 直接 SQL fixture 在 Service 建立前完成 schema 准备；
+    // C2 dedicated write worker 不执行 migration。
     ensureVccFinancialOpTablesSupport(db);
     const m1SourceBefore = sourceFactCounts(db, M1);
     const m2SourceBefore = sourceFactCounts(db, M2);
@@ -392,12 +391,9 @@ async function run() {
     service = createVccFinancialOpService({
       database: { db, dbPath },
       assetsDir: '',
-      appVersion: '3.1.8',
+      appVersion: '3.1.9',
       buildSha: 'integration-fixture-sha'
     });
-
-    // B/C1 中间分支只把 v1 preview 留作旧 write 实现证据；生产入口 v2 的 fail-closed
-    // 已由 service 单一真实链测试覆盖，C2 才恢复 production preview → write 成功链。
 
     const archivedMonths = await service.listArchivedResultMonths();
     assertDeepEq(
@@ -406,9 +402,7 @@ async function run() {
       '归档枚举仅返回一致月份并按最新优先'
     );
 
-    const m1Blocked = previewLegacyUnarchive(db, M1, {
-      taskGeneration: service._taskStateForTests().taskGeneration
-    });
+    const m1Blocked = await service.previewUnarchive({ targetMonth: M1 });
     assertEq(m1Blocked.code, 'unarchive-not-tail', 'M1 preview 因 M2 依赖阻断');
     assertDeepEq(m1Blocked.dependentMonths, [M2], 'M1 preview 明确返回依赖月份 M2');
     const m1BlockedError = await expectCode(
@@ -432,9 +426,7 @@ async function run() {
       'M1 非尾阻断写入 rolled_back 审计'
     );
 
-    const m2Preview = previewLegacyUnarchive(db, M2, {
-      taskGeneration: service._taskStateForTests().taskGeneration
-    });
+    const m2Preview = await service.previewUnarchive({ targetMonth: M2 });
     assertEq(m2Preview.canUnarchive, true, 'M2 是尾月可解归档');
     const m2Unarchived = await service.unarchiveMonth({
       targetMonth: M2,
@@ -471,11 +463,9 @@ async function run() {
       '解归档 M2 时 M1 归档快照保持完整'
     );
 
-    const m2DeletePreview = previewLegacyDataTargetDeletion(db, {
+    const m2DeletePreview = await service.previewDataTargetDeletion({
       targetMonth: M2,
       targetType: 'result'
-    }, {
-      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(m2DeletePreview.calculatedRunCount, 1, 'M2 删除预览包含一份未归档结果');
     const m2Deleted = await service.deleteDataTarget({
@@ -500,9 +490,7 @@ async function run() {
     );
     assertDeepEq(sourceFactCounts(db, M2), m2SourceBefore, 'M2 结果删除前后源事实和数据集计数守恒');
 
-    const m1Preview = previewLegacyUnarchive(db, M1, {
-      taskGeneration: service._taskStateForTests().taskGeneration
-    });
+    const m1Preview = await service.previewUnarchive({ targetMonth: M1 });
     assertEq(m1Preview.canUnarchive, true, '删除 M2 结果后 M1 成为尾月');
     const m1Unarchived = await service.unarchiveMonth({
       targetMonth: M1,
@@ -516,11 +504,9 @@ async function run() {
       'M1 归档快照全部删除'
     );
 
-    const openingPreview = previewLegacyDataTargetDeletion(db, {
+    const openingPreview = await service.previewDataTargetDeletion({
       targetMonth: M1,
       targetType: 'opening_initialization'
-    }, {
-      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(openingPreview.deletable, true, '解归档后 M1 期初允许删除');
     assertEq(openingPreview.calculatedRunCount, 1, 'M1 期初删除预览包含关联结果');
@@ -561,20 +547,19 @@ async function run() {
     const m1OpeningAudits = operationAudits(db, M1, 'delete_opening_initialization');
     assertEq(m1OpeningAudits.length, 1, 'M1 期初删除仅留一条成功审计');
     assertEq(m1OpeningAudits[0].status, 'success', 'M1 期初删除审计状态 success');
-    assertEq(m1OpeningAudits[0].app_version, '3.1.8', '成功审计记录应用版本');
+    assertEq(m1OpeningAudits[0].app_version, '3.1.9', '成功审计记录应用版本');
     assertEq(m1OpeningAudits[0].build_sha, 'integration-fixture-sha', '成功审计记录 build SHA');
     const openingEvidence = JSON.parse(m1OpeningAudits[0].evidence_json);
-    assertEq(openingEvidence.openings.length, 1, '期初删除审计固化完整期初事实');
-    assertEq(openingEvidence.runs.length, 1, '期初删除审计固化完整结果事实');
+    assertEq(openingEvidence.symbols.O, 1, '期初删除审计锁定 O=1');
+    assertEq(openingEvidence.symbols.R, 1, '期初删除审计锁定 R=1');
+    assertEq(openingEvidence.expectedTotalChanges, 15, '期初删除审计锁定 1+R+ΣC+O 预算');
 
     const staleMonth = '2026-07';
     const staleRunId = seedRun(db, staleMonth, 'calculated');
     seedDatasets(db, staleMonth, 'unprocessed');
-    const stalePreview = previewLegacyDataTargetDeletion(db, {
+    const stalePreview = await service.previewDataTargetDeletion({
       targetMonth: staleMonth,
       targetType: 'result'
-    }, {
-      taskGeneration: service._taskStateForTests().taskGeneration
     });
     db.prepare(`
       UPDATE vcc_fin_op_runs SET updated_at = '2026-08-02 00:00:00' WHERE id = ?
@@ -603,77 +588,19 @@ async function run() {
     assertEq(staleAudits[0].status, 'rolled_back', 'stale token 审计状态 rolled_back');
     assertEq(JSON.parse(staleAudits[0].evidence_json).failure.code, 'state-changed', 'stale 审计记录结构化失败码');
 
-    const faultMonth = '2026-08';
-    const faultRunId = seedRun(db, faultMonth, 'calculated');
-    seedDatasets(db, faultMonth, 'unprocessed');
-    db.exec(`
-      CREATE TRIGGER fail_vcc_result_child_delete
-      BEFORE DELETE ON vcc_fin_op_run_rows
-      WHEN OLD.run_id = ${faultRunId}
-      BEGIN
-        SELECT RAISE(ABORT, 'integration-result-delete-failure');
-      END;
-    `);
-    const faultPreview = previewLegacyDataTargetDeletion(db, {
-      targetMonth: faultMonth,
-      targetType: 'result'
-    }, {
-      taskGeneration: service._taskStateForTests().taskGeneration
-    });
-    await expectFailure(
-      () => service.deleteDataTarget({
-        targetMonth: faultMonth,
-        targetType: 'result',
-        expectedPreviewToken: faultPreview.previewToken,
-        taskGeneration: faultPreview.taskGeneration
-      }),
-      /integration-result-delete-failure/,
-      '事务中途故障透传且不伪装成功'
-    );
-    assertEq(
-      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_runs WHERE id = ?`, faultRunId),
-      1,
-      '故障回滚后 run 保留'
-    );
-    assertEq(
-      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_rows WHERE run_id = ?`, faultRunId),
-      1,
-      '故障回滚后 run rows 保留'
-    );
-    assertEq(
-      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_balances WHERE run_id = ?`, faultRunId),
-      SUPPORTED_CURRENCIES.length,
-      '故障回滚后九币种 balances 保留'
-    );
-    assertEq(
-      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_pending_summary_rows WHERE run_id = ?`, faultRunId),
-      1,
-      '故障回滚后 Pending 汇总保留'
-    );
-    assertEq(
-      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_pending_currency_totals WHERE run_id = ?`, faultRunId),
-      1,
-      '故障回滚后 Pending 币种合计保留'
-    );
-    const faultAudits = operationAudits(db, faultMonth, 'delete_unarchived_result');
-    assertEq(faultAudits.length, 1, '故障事务中的 success 审计随回滚移除');
-    assertEq(faultAudits[0].status, 'rolled_back', '故障后仅保留 rolled_back 审计');
-    assertTrue(
-      JSON.parse(faultAudits[0].evidence_json).failure.message.includes('integration-result-delete-failure'),
-      '故障审计保留原始失败原因'
-    );
-
     const sourceDeleteMonth = '2026-09';
     seedSourceFacts(db, sourceDeleteMonth);
     seedDatasets(db, sourceDeleteMonth, 'unprocessed');
     const sourceRunId = seedRun(db, sourceDeleteMonth, 'calculated', {
       adjustmentAmount: '12.34'
     });
-    const sourcePreview = previewLegacyDataTargetDeletion(db, {
+    db.prepare(`
+      DELETE FROM vcc_fin_op_system_snapshot_attempts
+      WHERE target_month = ? AND disposition = 'accepted'
+    `).run(sourceDeleteMonth);
+    const sourcePreview = await service.previewDataTargetDeletion({
       targetMonth: sourceDeleteMonth,
       targetType: SOURCE_TYPES.RECHARGE
-    }, {
-      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(sourcePreview.deletable, true, '来源原表删除预览可执行');
     const sourceDeleted = await service.deleteDataTarget({
@@ -704,13 +631,68 @@ async function run() {
     );
     const sourceAudits = operationAudits(db, sourceDeleteMonth, 'delete-source-dataset');
     assertDeepEq(sourceAudits.map((row) => row.status), ['success'], '来源删除只保留 success 审计');
-    assertEq(sourceAudits[0].app_version, '3.1.8', '来源删除审计记录应用版本');
+    assertEq(sourceAudits[0].app_version, '3.1.9', '来源删除审计记录应用版本');
     assertEq(sourceAudits[0].build_sha, 'integration-fixture-sha', '来源删除审计记录 build SHA');
     const sourceEvidence = JSON.parse(sourceAudits[0].evidence_json);
     assertEq(sourceEvidence.reason, '集成链纠正来源数据', '来源删除审计保留用户原因');
-    assertEq(sourceEvidence.runs[0].adjustments[0].adjustmentAmount, '12.34', '来源删除审计保留调整金额');
-    assertEq(sourceEvidence.runs[0].adjustments[0].reason, '人工纠错调整', '来源删除审计保留调整原因');
-    assertEq(sourceEvidence.runs[0].balances.length, SUPPORTED_CURRENCIES.length, '来源删除审计保留九币种余额');
+    assertEq(sourceEvidence.symbols.Q, 1, '来源删除审计锁定一条待物化血缘');
+    assertEq(sourceEvidence.symbols.E, 1, '来源删除审计锁定一条有效事实');
+    assertEq(sourceEvidence.symbols.M, 1, '来源删除审计锁定一条成功导入记录');
+    const materializedAudit = db.prepare(`
+      SELECT existing_effective_id, existing_raw_json_snapshot,
+             existing_subject_snapshot, existing_source_file_snapshot,
+             existing_import_record_id_snapshot
+      FROM vcc_fin_op_import_rows
+      WHERE target_month = ? AND source_type = ? AND disposition = 'idempotent_skip'
+    `).get(sourceDeleteMonth, SOURCE_TYPES.RECHARGE);
+    assertEq(materializedAudit.existing_effective_id, null, '物化后有效事实 FK 已清除');
+    assertEq(materializedAudit.existing_raw_json_snapshot, '[]', '物化后保留原始事实');
+    assertEq(materializedAudit.existing_subject_snapshot, 'PPHK', '物化后保留主体');
+    assertEq(materializedAudit.existing_source_file_snapshot, `${sourceDeleteMonth}-${SOURCE_TYPES.RECHARGE}.xlsx`, '物化后保留来源文件');
+    assertTrue(Number.isSafeInteger(Number(materializedAudit.existing_import_record_id_snapshot)), '物化后保留导入记录血缘');
+
+    const systemPreview = await service.previewDataTargetDeletion({
+      targetMonth: sourceDeleteMonth,
+      targetType: SOURCE_TYPES.SYSTEM_OP
+    });
+    assertEq(systemPreview.deletable, true, '系统原表删除 production preview 可执行');
+    const systemDeleted = await service.deleteDataTarget({
+      targetMonth: sourceDeleteMonth,
+      targetType: SOURCE_TYPES.SYSTEM_OP,
+      expectedPreviewToken: systemPreview.previewToken,
+      taskGeneration: systemPreview.taskGeneration,
+      reason: '集成链纠正系统原表'
+    });
+    assertEq(systemDeleted.deletedDataCount, 1, '系统原表通过 dedicated worker 删除一条 snapshot');
+    const acceptedAttempts = db.prepare(`
+      SELECT disposition, existing_snapshot_id,
+             existing_balances_json_snapshot, existing_raw_json_snapshot,
+             existing_source_file_snapshot, existing_sheet_name_snapshot,
+             existing_source_row_snapshot, existing_import_record_id_snapshot
+      FROM vcc_fin_op_system_snapshot_attempts
+      WHERE target_month = ? AND disposition = 'accepted'
+      ORDER BY id
+    `).all(sourceDeleteMonth);
+    assertEq(acceptedAttempts.length, 1, '缺失 accepted 时精确补录 B=1 且最终唯一');
+    assertEq(acceptedAttempts[0].existing_snapshot_id, null, '系统审计物化后清除 snapshot FK');
+    assertEq(acceptedAttempts[0].existing_balances_json_snapshot, JSON.stringify(balances('110')), '系统审计物化九币种余额');
+    assertEq(acceptedAttempts[0].existing_raw_json_snapshot, '{}', '系统审计物化原始事实');
+    assertEq(acceptedAttempts[0].existing_source_file_snapshot, `${sourceDeleteMonth}-system-op.xlsx`, '系统审计物化来源文件');
+    assertEq(acceptedAttempts[0].existing_sheet_name_snapshot, 'Validate', '系统审计物化 sheet');
+    assertEq(acceptedAttempts[0].existing_source_row_snapshot, 3, '系统审计物化来源行');
+    assertTrue(Number.isSafeInteger(Number(acceptedAttempts[0].existing_import_record_id_snapshot)), '系统审计物化导入记录血缘');
+    assertEq(
+      count(db, `SELECT COUNT(*) AS row_count FROM vcc_fin_op_system_snapshots WHERE target_month = ?`, sourceDeleteMonth),
+      0,
+      '系统 snapshot 物化后精确删除'
+    );
+    const systemAudits = operationAudits(db, sourceDeleteMonth, 'delete-source-dataset');
+    const systemEvidence = JSON.parse(systemAudits[systemAudits.length - 1].evidence_json);
+    assertEq(systemEvidence.targetType, SOURCE_TYPES.SYSTEM_OP, '最后一条 source audit 对应系统原表');
+    assertEq(systemEvidence.symbols.B, 1, '系统原表审计锁定 B=1');
+    assertEq(systemEvidence.symbols.A, 1, '系统原表审计锁定 A=1');
+    assertEq(systemEvidence.symbols.S, 1, '系统原表审计锁定 S=1');
+    assertEq(systemEvidence.symbols.M, 1, '系统原表审计锁定 M=1');
   } finally {
     if (service) {
       try { await service.terminate(); } catch (_error) { /* cleanup */ }

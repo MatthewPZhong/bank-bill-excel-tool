@@ -427,3 +427,24 @@
 - 四大表用一个代表直接写故障证明 registry/total 守恒，且断言从未 `createSession`。
 - legacy-four adjustment/archive 两 action 使用同一 table-driven 合同；C2 v2→v1 只保留 B 既有中间失败关闭证据。
 - ⚠️ 金额、币种、跨月期初和审计结果必须人工复核。
+
+## PR2.5-C2 解归档/删除 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：在 C1 单一 mutation policy/registry/guard/claim/dedicated worker 上闭合 current/legacy unarchive 与 result/opening/detail/system delete，并移除旧 generic/full-fact 生产旁路。
+- Context：基线为 C1 冻结头 `f92b8cc81801935ef95683e68671235ba4decf74`。B 已提供 v2 raw evidence/read worker，C1 已提供 19 表 policy、immutable SQL registry、safe audit-only 和 generation claim。
+- Constraints：零 schema/index/migration；零弱 token/full-fact SHA/fallback/retry/lease；worker 不接 repository/service/lifecycle；PR3 前 context 仅允许缺失或 exact 7-field refreeze；不为不可达 payload 增加防御。
+- Done when：同一 `BEGIN IMMEDIATE` 内以 claim base generation 重载 B 全局 active evidence、exact compare token，独立 plan 按 TechDoc 固定公式提交；大表固定 scope/非目标保留；safe/unsafe audit 分流；真实 production integration 覆盖 current/legacy 及 detail/system 血缘。
+
+### Unknowns Register 与决议
+
+| 未知 | 类型 | 决议/证据 |
+| --- | --- | --- |
+| C2 大表如何在不建 session 时放行 | BLOCK 已批准 | operation+registered step+registry scope ID+pre-count/budget exact；仍用 trigger policy、逐 step changes、target exhaustion 和 total delta |
+| token 应使用哪个 generation/active scope | BLOCK 已批准 | 使用 claim base generation 与 B 同源全局 active evidence，不用释放后 generation，不按月收窄 |
+| Windows packaged `UPDATE ... FROM`/session | PROBE | 本机 Node 24.13/SQLite 3.50.4 可用；installer/portable 不可用则阻断，不回退旧相关子查询 |
+| system attempts 无 `existing_snapshot_id` 专用索引 | PROBE | 现有 query plan 为 attempts scan+snapshot PK lookup；必须过约 16 GB 门禁，本 PR 不加 index |
+| 目标 production trigger/legacy 与资金复核 | PROBE/人工 | exact current/four 外一律 fail-closed；未批准 trigger 零 DB audit；主体/币种/跨月/备份恢复必须人工 |
+
+当前无 BLOCK。未关闭 PROBE：Windows packaged runtime、目标 trigger/legacy、约 16 GB P50/P95/WAL/main lag 与资金人工门禁。

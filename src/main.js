@@ -13813,9 +13813,13 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('vccFinancialOp:run:unarchive', 'VCC财务OP校验', '解归档', async (_event, payload = {}) => {
+  trackedIpcHandle('vccFinancialOp:run:unarchive', 'VCC财务OP校验', '解归档', async (event, payload = {}) => {
     try {
-      const result = await getVccFinancialOpService().unarchiveMonth(payload);
+      const result = await getVccFinancialOpService().unarchiveMonth(payload, (progress) => {
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('vccFinancialOp:operation:progress', progress);
+        }
+      });
       return { ...result, operationStatus: result.status, status: 'success' };
     } catch (error) {
       return vccFinancialOpErrorResult(error);
@@ -13883,10 +13887,14 @@ function registerNewAccountHandlers() {
     (_result, _event, payload = {}) => (
       (payload.targetType || payload.sourceType) === 'result' ? '删除结果' : '删除数据'
     ),
-    async (_event, payload = {}) => {
+    async (event, payload = {}) => {
     try {
       const service = getVccFinancialOpService();
-      const result = await service.deleteDataTarget(payload);
+      const result = await service.deleteDataTarget(payload, (progress) => {
+        if (event && event.sender && !event.sender.isDestroyed()) {
+          event.sender.send('vccFinancialOp:operation:progress', progress);
+        }
+      });
       return {
         ...result,
         targetType: result.targetType || payload.targetType || payload.sourceType,

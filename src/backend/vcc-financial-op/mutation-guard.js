@@ -247,12 +247,6 @@ function assertPlanRegistered(plan) {
         `${plan.operation} 不允许修改 ${registered.tableName}。`
       );
     }
-    if (LARGE_TABLE_SCOPE_PROOF_SET.has(registered.tableName)) {
-      throw mutationGuardError(
-        'mutation-table-policy-violation',
-        `C1 MutationPlan 不允许向大表 ${registered.tableName} 注册写入 step。`
-      );
-    }
     if (
       !Array.isArray(plannedStep.bindings)
       || !Number.isSafeInteger(plannedStep.expectedChanges)
@@ -261,6 +255,36 @@ function assertPlanRegistered(plan) {
       throw mutationGuardError(
         'invalid-mutation-plan',
         `MutationPlan step ${plannedStep.stepId} 的绑定或预算无效。`
+      );
+    }
+    if (LARGE_TABLE_SCOPE_PROOF_SET.has(registered.tableName)) {
+      const proof = plannedStep.largeTableScopeProof;
+      if (
+        !registered.largeTableScopeId
+        || !proof
+        || typeof proof !== 'object'
+        || Array.isArray(proof)
+        || Object.keys(proof).sort().join(',') !== 'preCount,scopeId'
+        || proof.scopeId !== registered.largeTableScopeId
+        || !Number.isSafeInteger(proof.preCount)
+        || proof.preCount < 0
+        || proof.preCount !== plannedStep.expectedChanges
+      ) {
+        throw mutationGuardError(
+          'mutation-table-policy-violation',
+          `MutationPlan 大表 step ${plannedStep.stepId} 缺少精确 fixed scope proof。`,
+          {
+            operation: plan.operation,
+            tableName: registered.tableName,
+            expectedScopeId: registered.largeTableScopeId,
+            actualScopeId: proof && proof.scopeId
+          }
+        );
+      }
+    } else if (registered.largeTableScopeId !== null) {
+      throw mutationGuardError(
+        'mutation-table-policy-violation',
+        `小表 step ${plannedStep.stepId} 不得声明 large table scope。`
       );
     }
     expectedTotalChanges += plannedStep.expectedChanges;

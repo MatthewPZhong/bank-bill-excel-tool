@@ -66,6 +66,14 @@
   - [x] 机械迁移两条真实 integration 入口并完成最终门禁：lint/smoke、unit 4972/4972、integration 48/48 scripts 与 2372/2372 assertions 全绿。
   - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged P95/WAL/main lag、目标生产 legacy/trigger、主体×九币种与跨月资金复核。
 - [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。
+  - [x] 复用 C1 单一 policy/registry/guard/claim/dedicated worker；锁内重算 B v2 token，generic destructive route 移除。
+  - [x] current `N+7` / 真实 legacy-four `N+6` 解归档，保留 tail/active/unresolved gate 与 Pending 非创建合同。
+  - [x] result/opening 五 child 独立 step 及 `1+R+ΣC(+O)` 预算，`first_month` 只读。
+  - [x] detail/system 物化、清 FK、删事实/dataset、作废 run children、deletion/success audit 与固定公式；M>0、D=0/1 exact。
+  - [x] safe/unsafe failure、单一中途 fault、large-table 非目标保留、七字段 context、progress 订阅/退订和真实 detail/system production integration。
+  - [x] 本地扩大聚焦 195/195、destructive integration 77/77；blindspot/reconciliation 已复核且资金红线未由自动测试关闭。
+  - [x] historical integration 机械迁移到真实 v2 Service preview/write/refetch；最终单一 `release-check`：lint/smoke、unit 4984/4984、integration 48/48 scripts 与 2385/2385 assertions 全绿。
+  - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged P50/P95/WAL/main lag、`UPDATE ... FROM`/session runtime、目标生产 legacy/trigger、主体×九币种/跨月/审计/备份恢复财务复核。
 - [ ] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。
 - [ ] PR3-Toolbox：工具箱独立生命周期与文件存档接线。
 - [ ] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup。
