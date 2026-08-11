@@ -80,10 +80,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(renderer, /设置，更新已下载/);
     assert.match(renderer, /aria-label="更新下载进度"/);
     assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
-    assert.match(
-      renderer,
-      /closeButton\.textContent = archiveVisible[\s\S]*?\? '确认'[\s\S]*?: \(status\.canRestart \? '稍后' : '确认'\)/
-    );
+    assert.match(renderer, /closeButton\.textContent = '返回'/);
   });
 
   test('preload 仅暴露约定的升级 IPC 能力', () => {

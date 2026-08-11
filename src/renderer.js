@@ -2219,10 +2219,7 @@ function refreshOpenAppUpdateDialog() {
   }
   if (restartButton) restartButton.hidden = !status.canRestart;
   if (closeButton) {
-    const archiveVisible = !dialog.querySelector('[data-pane="archive"]')?.hidden;
-    closeButton.textContent = archiveVisible
-      ? '确认'
-      : (status.canRestart ? '稍后' : '确认');
+    closeButton.textContent = '返回';
   }
   if (navDot) navDot.hidden = status.state !== 'downloaded';
 }
@@ -2468,7 +2465,125 @@ function archiveCenterRetentionText(batch) {
   return batch?.locked === true ? `${String(value)}（已锁定）` : String(value);
 }
 
-function createAppUpdateSettingsDialog() {
+function createArchiveCenterPreviewApi() {
+  const batches = [
+    {
+      internalId: 901,
+      batchId: '2026-08-10-127',
+      batchNumber: '2026-08-10-127',
+      moduleId: MODULES.bankStatementProcess.id,
+      moduleName: '超长模块名称用于验证最小窗口省略与完整标题',
+      archiveStatus: 'complete',
+      locked: true,
+      createdAt: '2026-08-10T06:36:08.000Z'
+    },
+    {
+      internalId: 902,
+      batchId: '2026-08-11-001',
+      batchNumber: '2026-08-11-001',
+      moduleId: MODULES.vccFinancialOp.id,
+      moduleName: MODULES.vccFinancialOp.name,
+      archiveStatus: 'incomplete',
+      createdAt: '2026-08-11T06:37:09.000Z'
+    },
+    {
+      internalId: 903,
+      batchId: '2026-08-11-002',
+      batchNumber: '2026-08-11-002',
+      moduleId: 'toolbox',
+      moduleName: '工具箱',
+      archiveStatus: 'complete',
+      createdAt: '2026-08-11T06:38:10.000Z'
+    },
+    {
+      internalId: 904,
+      batchId: 'BANK-20260720-001',
+      batchNumber: 'BANK-20260720-001',
+      moduleId: MODULES.bankStatementProcess.id,
+      moduleName: MODULES.bankStatementProcess.name,
+      archiveStatus: 'failed',
+      createdAt: '2026-07-20T06:39:11.000Z'
+    }
+  ];
+  const relatedBatches = [
+    { batchId: 901, batchNumber: '2026-08-10-127', localDate: '2026-08-10', globalDailySequence: 127 },
+    { batchId: 902, batchNumber: '2026-08-11-001', localDate: '2026-08-11', globalDailySequence: 1 },
+    { batchId: 903, batchNumber: '2026-08-11-002', localDate: '2026-08-11', globalDailySequence: 2 }
+  ];
+  const storagePath = 'D:\\Finance\\Archive\\超长存档目录\\2026年度\\银行账单生成小助手\\存档中心';
+  return {
+    async listBatches() { return { status: 'success', batches }; },
+    async getBatch(batchId) {
+      const batch = batches.find((item) => String(item.internalId) === String(batchId));
+      return batch ? {
+        status: 'success',
+        batch: {
+          ...batch,
+          parentRunId: 'preview-parent-not-rendered',
+          relatedBatches,
+          businessStatus: '已完成',
+          retentionUntil: '2026-11-09',
+          files: [
+            {
+              fileRefId: 951,
+              fileName: '用于验证超长文件名省略的银行对账处理结果明细.xlsx',
+              direction: 'output',
+              role: 'output',
+              sizeBytes: 12582912,
+              archiveStatus: 'ready'
+            },
+            {
+              fileRefId: 952,
+              fileName: '原始输入账单.xlsx',
+              direction: 'input',
+              role: 'input',
+              sizeBytes: 7340032,
+              archiveStatus: 'ready'
+            }
+          ]
+        }
+      } : { status: 'failed', message: '未找到批次' };
+    },
+    async openFile() { return { status: 'success', message: '预览模式未打开文件' }; },
+    async saveAs() { return { status: 'cancelled' }; },
+    async setLocked() { return { status: 'success' }; },
+    async deleteBatch() { return { status: 'success', metadataDeleted: true }; },
+    async selectRetrySources() { return { status: 'cancelled' }; },
+    async retryBatch() { return { status: 'success' }; },
+    async getSettings() {
+      return {
+        status: 'success',
+        settings: {
+          retentionDays: 180,
+          storageRoot: storagePath,
+          storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
+        }
+      };
+    },
+    async changeStorageLocation() { return { status: 'cancelled' }; },
+    async setRetentionDays(value) {
+      return { status: 'success', settings: { retentionDays: value } };
+    },
+    async getStats() {
+      return {
+        status: 'success',
+        stats: {
+          storagePath,
+          fileTotalBytes: 1325400064,
+          runCount: 128,
+          latestBatchNumber: '2026-08-11-128',
+          latestBatchId: 928,
+          latestBatchStatus: 'succeeded',
+          migrationStatus: { status: 'idle', phase: '', processed: 0, total: 0 }
+        }
+      };
+    },
+    onStorageMigrationProgress() { return () => {}; }
+  };
+}
+
+function createAppUpdateSettingsDialog(options = {}) {
+  const archiveCenterApi = options.archiveCenterApi || null;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   const dialog = document.createElement('section');
@@ -2499,6 +2614,11 @@ function createAppUpdateSettingsDialog() {
     settings: { retentionDays: 60, storageRoot: '', storageMigration: null },
     storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 },
     savedRetentionValue: '60',
+    retentionIntentToken: 0,
+    retentionPendingIntent: null,
+    retentionSaving: false,
+    retentionSavePromise: null,
+    destroyed: false,
     batchFilterTimer: null
   };
 
@@ -2518,7 +2638,7 @@ function createAppUpdateSettingsDialog() {
       <nav class="app-settings-nav" aria-label="设置导航">
         <button class="app-settings-nav-item is-active" type="button" data-tab="update" aria-controls="appUpdatePane" aria-current="page">
           <span class="app-settings-nav-icon" aria-hidden="true">↻</span>
-          <span>自动更新</span>
+          <span>版本管理</span>
           <span class="app-settings-nav-dot" data-role="update-nav-dot" aria-label="更新已下载" hidden></span>
         </button>
         <button class="app-settings-nav-item" type="button" data-tab="archive" aria-controls="archiveCenterPane" aria-current="false">
@@ -2530,7 +2650,7 @@ function createAppUpdateSettingsDialog() {
       <div class="app-settings-main">
         <section id="appUpdatePane" class="app-settings-pane app-update-pane" data-pane="update" aria-labelledby="appUpdatePaneHeading">
           <div class="app-update-pane-scroll">
-            <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">自动更新</h3>
+            <h3 id="appUpdatePaneHeading" class="app-settings-pane-heading">版本管理</h3>
             <div class="app-update-settings-body">
               <div class="app-update-settings-row">
                 <span class="app-update-settings-label">当前版本</span>
@@ -2574,8 +2694,8 @@ function createAppUpdateSettingsDialog() {
                 <h3 id="archiveCenterHeading" class="app-settings-pane-heading">存档中心</h3>
               </div>
               <div class="archive-center-storage-summary" aria-label="存档容量">
-                <span>唯一文件</span>
-                <strong data-role="archive-unique-size">-</strong>
+                <span>文件总大小</span>
+                <strong data-role="archive-file-total-size">-</strong>
                 <button class="archive-center-icon-button" type="button" data-action="open-archive-settings" title="存档设置" aria-label="存档设置">⚙</button>
               </div>
             </header>
@@ -2620,20 +2740,16 @@ function createAppUpdateSettingsDialog() {
             <div class="archive-center-settings-section">
               <h4>存储统计</h4>
               <div class="archive-center-storage-location-row">
-                <p class="archive-center-settings-note" data-role="archive-storage-path">存档位置：-</p>
+                <p class="archive-center-settings-note" data-role="archive-storage-path" title="">存档位置：-</p>
                 <button class="secondary-btn small" type="button" data-action="change-archive-storage">变更</button>
               </div>
               <p class="archive-center-settings-note" data-role="archive-storage-migration" aria-live="polite" hidden></p>
-              <div class="archive-center-storage-meter" aria-label="唯一文件占逻辑文件比例">
-                <div data-role="archive-storage-meter-fill"></div>
-              </div>
               <div class="archive-center-storage-labels">
-                <span>唯一文件 <strong data-role="archive-settings-unique-size">-</strong></span>
-                <span>逻辑文件 <strong data-role="archive-logical-size">-</strong></span>
+                <span>文件总大小 <strong data-role="archive-settings-file-total-size">-</strong></span>
               </div>
               <div class="archive-center-stat-grid">
-                <span>批次 <strong data-role="archive-stat-batches">-</strong></span>
-                <span>文件引用 <strong data-role="archive-stat-files">-</strong></span>
+                <span>运行次数 <strong data-role="archive-stat-runs">-</strong></span>
+                <span>最新批次 <strong data-role="archive-stat-latest">-</strong></span>
               </div>
             </div>
 
@@ -2658,7 +2774,7 @@ function createAppUpdateSettingsDialog() {
             <button class="secondary-btn small" type="button" data-action="check-update">立即检查</button>
             <button class="primary-btn small" type="button" data-action="restart-update" hidden>立即重启升级</button>
           </div>
-          <button class="secondary-btn small" type="button" data-action="confirm-settings" data-role="close-update-dialog">确认</button>
+          <button class="secondary-btn small" type="button" data-action="confirm-settings" data-role="close-update-dialog">返回</button>
         </footer>
       </div>
     </div>
@@ -2679,10 +2795,12 @@ function createAppUpdateSettingsDialog() {
   const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
   const changeStorageButton = dialog.querySelector('[data-action="change-archive-storage"]');
   const storageMigrationText = dialog.querySelector('[data-role="archive-storage-migration"]');
+  const closeDialogButton = dialog.querySelector('[data-action="close"]');
+  const returnButton = dialog.querySelector('[data-role="close-update-dialog"]');
   let unsubscribeStorageMigration = null;
 
   function getArchiveCenterApi() {
-    const api = window.desktopApi?.archiveCenter;
+    const api = archiveCenterApi || window.desktopApi?.archiveCenter;
     if (!api) throw new Error('存档中心服务暂不可用');
     return api;
   }
@@ -2727,18 +2845,50 @@ function createAppUpdateSettingsDialog() {
       const active = batchId === archiveState.selectedBatchId;
       return `
         <button class="archive-center-batch-item${active ? ' is-active' : ''}" type="button" data-batch-id="${escapeHtml(batchId)}" aria-current="${active ? 'true' : 'false'}">
-          <span class="archive-center-batch-item-top">
-            <strong>${escapeHtml(batchNumber || '未命名批次')}</strong>
-            ${batch.locked === true ? '<span class="archive-center-lock-mark" title="已锁定" aria-label="已锁定">◆</span>' : ''}
+          <span class="archive-center-batch-row archive-center-batch-row-primary">
+            <strong data-role="archive-batch-module" title="${escapeHtml(archiveCenterModuleName(batch))}">${escapeHtml(archiveCenterModuleName(batch))}</strong>
+            <span class="archive-center-batch-number-wrap">
+              <span data-role="archive-batch-number" title="${escapeHtml(batchNumber)}">${escapeHtml(batchNumber || '未命名批次')}</span>
+              ${batch.locked === true ? '<span class="archive-center-lock-mark" title="已锁定" aria-label="已锁定">🔒</span>' : ''}
+            </span>
           </span>
-          <span class="archive-center-batch-module">${escapeHtml(archiveCenterModuleName(batch))}</span>
-          <span class="archive-center-batch-meta">
-            <span class="archive-center-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</span>
-            <span>${escapeHtml(archiveCenterBatchTime(batch))}</span>
+          <span class="archive-center-batch-row archive-center-batch-row-secondary">
+            <span class="archive-center-status" data-role="archive-batch-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</span>
+            <time data-role="archive-batch-time" datetime="${escapeHtml(batch.createdAt || '')}">${escapeHtml(archiveCenterBatchTime(batch))}</time>
           </span>
         </button>
       `;
     }).join('');
+  }
+
+  function renderArchiveRelatedBatches(batch) {
+    const related = Array.isArray(batch.relatedBatches) ? batch.relatedBatches : [];
+    if (related.length < 2) return '';
+    const groups = [];
+    for (const item of related) {
+      const localDate = String(item.localDate || '');
+      let group = groups.find((candidate) => candidate.localDate === localDate);
+      if (!group) {
+        group = { localDate, items: [] };
+        groups.push(group);
+      }
+      group.items.push(item);
+    }
+    const groupHtml = groups.map((group) => group.items.map((item, index) => {
+      const sequence = Number(item.globalDailySequence);
+      const sequenceText = Number.isSafeInteger(sequence) && sequence > 0
+        ? String(sequence).padStart(3, '0')
+        : '';
+      const displayText = sequenceText
+        ? (index === 0 ? `${group.localDate}-${sequenceText}` : sequenceText)
+        : String(item.batchNumber || '-');
+      const relatedId = String(item.batchId ?? '');
+      const current = relatedId === archiveState.selectedBatchId;
+      const batchNumber = String(item.batchNumber || displayText);
+      return `<button class="archive-center-related-batch" type="button" data-action="view-related-batch" data-related-batch-id="${escapeHtml(relatedId)}" title="查看关联批次 ${escapeHtml(batchNumber)}" aria-label="查看关联批次 ${escapeHtml(batchNumber)}" aria-current="${current ? 'true' : 'false'}">${escapeHtml(displayText)}</button>`;
+    }).join('<span class="archive-center-related-separator" aria-hidden="true">/</span>'))
+      .join('<span class="archive-center-related-group-separator" aria-hidden="true"> · </span>');
+    return `<nav class="archive-center-related" aria-label="关联任务"><span>关联任务：</span>${groupHtml}</nav>`;
   }
 
   function renderArchiveDetail() {
@@ -2798,8 +2948,8 @@ function createAppUpdateSettingsDialog() {
             <td>
               <div class="archive-center-row-actions">
                 ${ready && fileRefId
-                  ? `<button class="archive-center-icon-button" type="button" data-action="open-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="打开只读副本" aria-label="打开只读副本">↗</button>
-                     <button class="archive-center-icon-button" type="button" data-action="save-as-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="另存为" aria-label="另存为">↓</button>`
+                  ? `<button class="archive-center-icon-button archive-center-text-button" type="button" data-action="open-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="打开只读副本" aria-label="打开只读副本">打开</button>
+                     <button class="archive-center-icon-button" type="button" data-action="save-as-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="另存为" aria-label="另存为">💾</button>`
                   : '<span class="archive-center-no-action">—</span>'}
               </div>
             </td>
@@ -2811,14 +2961,17 @@ function createAppUpdateSettingsDialog() {
     detailPanel.innerHTML = `
       <div class="archive-center-detail-heading">
         <div>
-          <h4>${escapeHtml(batchNumber)}</h4>
+          <div class="archive-center-detail-title-line">
+            <h4 title="${escapeHtml(batchNumber)}">${escapeHtml(batchNumber)}</h4>
+            ${renderArchiveRelatedBatches(batch)}
+          </div>
           <p>${escapeHtml(archiveCenterModuleName(batch))}</p>
         </div>
         <div class="archive-center-detail-actions">
           ${canRetry
             ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" data-retry-mode="${escapeHtml(batch.retryMode || 'same-source')}" title="${retryTitle}" aria-label="${retryTitle}">↻</button>`
             : ''}
-          <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '◇' : '◆'}</button>
+          <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '🔓' : '🔒'}</button>
           <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${locked ? ' disabled' : ''}>×</button>
         </div>
       </div>
@@ -2849,28 +3002,23 @@ function createAppUpdateSettingsDialog() {
     const stats = archiveState.stats && typeof archiveState.stats === 'object'
       ? archiveState.stats
       : {};
-    const uniqueValue = stats.uniqueBytes ?? stats.uniqueSizeBytes ?? stats.uniqueSize;
-    const logicalValue = stats.logicalBytes ?? stats.logicalSizeBytes ?? stats.logicalSize;
-    const uniqueText = formatArchiveCenterBytes(uniqueValue);
-    const logicalText = formatArchiveCenterBytes(logicalValue);
-    const uniqueNumber = Number(uniqueValue);
-    const logicalNumber = Number(logicalValue);
-    const ratio = Number.isFinite(uniqueNumber) && Number.isFinite(logicalNumber) && logicalNumber > 0
-      ? Math.max(0, Math.min(100, (uniqueNumber / logicalNumber) * 100))
-      : 0;
-
-    dialog.querySelector('[data-role="archive-unique-size"]').textContent = uniqueText;
-    dialog.querySelector('[data-role="archive-settings-unique-size"]').textContent = uniqueText;
-    dialog.querySelector('[data-role="archive-logical-size"]').textContent = logicalText;
-    dialog.querySelector('[data-role="archive-stat-batches"]').textContent = String(stats.batchCount ?? '-');
-    dialog.querySelector('[data-role="archive-stat-files"]').textContent = String(
-      stats.fileRefCount ?? stats.fileCount ?? stats.logicalFileCount ?? '-'
+    const fileTotalText = formatArchiveCenterBytes(stats.fileTotalBytes);
+    dialog.querySelector('[data-role="archive-file-total-size"]').textContent = fileTotalText;
+    dialog.querySelector('[data-role="archive-settings-file-total-size"]').textContent = fileTotalText;
+    dialog.querySelector('[data-role="archive-stat-runs"]').textContent = String(stats.runCount ?? '-');
+    dialog.querySelector('[data-role="archive-stat-latest"]').textContent = String(
+      stats.latestBatchNumber || '-'
     );
-    const storageRoot = archiveState.settings?.storageRoot || stats.storagePath;
-    dialog.querySelector('[data-role="archive-storage-path"]').textContent = storageRoot
+    const storageRoot = stats.storagePath || archiveState.settings?.storageRoot || '';
+    const storagePath = dialog.querySelector('[data-role="archive-storage-path"]');
+    storagePath.textContent = storageRoot
       ? `存档位置：${storageRoot}`
       : '存档位置：-';
-    dialog.querySelector('[data-role="archive-storage-meter-fill"]').style.width = `${ratio}%`;
+    storagePath.title = storageRoot;
+    if (stats.migrationStatus && typeof stats.migrationStatus === 'object') {
+      archiveState.storageMigration = { ...stats.migrationStatus };
+      renderStorageMigration();
+    }
   }
 
   function renderArchiveSettings() {
@@ -2884,8 +3032,12 @@ function createAppUpdateSettingsDialog() {
       ? 'permanent'
       : String(retentionDays ?? 60);
     const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent']);
-    archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue) ? retentionValue : '60';
-    retentionSelect.value = archiveState.savedRetentionValue;
+    if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
+      archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue)
+        ? retentionValue
+        : '60';
+      retentionSelect.value = archiveState.savedRetentionValue;
+    }
     if (settings.storageMigration && typeof settings.storageMigration === 'object') {
       archiveState.storageMigration = { ...settings.storageMigration };
     }
@@ -3039,8 +3191,91 @@ function createAppUpdateSettingsDialog() {
   function setArchiveSettingsLoading(loading) {
     archiveState.settingsLoading = loading === true;
     archiveSettingsView.toggleAttribute('aria-busy', archiveState.settingsLoading);
-    const confirmButton = dialog.querySelector('[data-action="confirm-settings"]');
-    if (confirmButton) confirmButton.disabled = archiveState.settingsLoading;
+    retentionSelect.disabled = archiveState.settingsLoading;
+    updateArchiveExitControls();
+  }
+
+  function archiveDialogAlive() {
+    return !archiveState.destroyed && overlay.isConnected;
+  }
+
+  function updateArchiveExitControls() {
+    const busy = archiveState.settingsLoading || archiveState.retentionSaving;
+    returnButton.disabled = busy;
+    closeDialogButton.disabled = busy;
+  }
+
+  function setRetentionSaving(saving) {
+    archiveState.retentionSaving = saving === true;
+    if (archiveDialogAlive()) updateArchiveExitControls();
+  }
+
+  function retentionDaysApiValue(value) {
+    return value === 'permanent' ? null : Number(value);
+  }
+
+  async function drainRetentionIntents() {
+    setRetentionSaving(true);
+    try {
+      const api = getArchiveCenterApi();
+      while (archiveState.retentionPendingIntent && archiveDialogAlive()) {
+        const intent = archiveState.retentionPendingIntent;
+        archiveState.retentionPendingIntent = null;
+        if (intent.value === archiveState.savedRetentionValue) continue;
+
+        let failure = null;
+        try {
+          const result = await api.setRetentionDays(retentionDaysApiValue(intent.value));
+          if (!verifyArchiveCenterAction(result, '保留期限保存失败')) {
+            throw new Error('保留期限保存失败');
+          }
+          archiveState.savedRetentionValue = intent.value;
+          archiveState.settings = {
+            ...archiveState.settings,
+            retentionDays: retentionDaysApiValue(intent.value)
+          };
+        } catch (error) {
+          failure = error;
+        }
+
+        const isLatestIntent = intent.token === archiveState.retentionIntentToken
+          && !archiveState.retentionPendingIntent;
+        if (failure) {
+          if (!isLatestIntent) continue;
+          if (archiveDialogAlive()) {
+            retentionSelect.value = archiveState.savedRetentionValue;
+            showArchiveFeedback(
+              `保留期限保存失败：${archiveCenterErrorText(failure, '未知错误')}`
+            );
+          }
+          continue;
+        }
+        if (isLatestIntent && archiveDialogAlive()) {
+          retentionSelect.value = archiveState.savedRetentionValue;
+          showArchiveFeedback('保留期限已保存', 'success');
+        }
+      }
+    } finally {
+      archiveState.retentionSavePromise = null;
+      setRetentionSaving(false);
+      if (archiveState.retentionPendingIntent && archiveDialogAlive()) {
+        archiveState.retentionSavePromise = drainRetentionIntents();
+      }
+    }
+  }
+
+  function saveRetentionSelection() {
+    if (archiveState.settingsLoading || archiveState.destroyed) return;
+    const value = retentionSelect.value;
+    archiveState.retentionIntentToken += 1;
+    archiveState.retentionPendingIntent = {
+      token: archiveState.retentionIntentToken,
+      value
+    };
+    showArchiveFeedback('正在保存保留期限…', 'info');
+    if (!archiveState.retentionSavePromise) {
+      archiveState.retentionSavePromise = drainRetentionIntents();
+    }
   }
 
   async function loadArchiveSettings() {
@@ -3116,7 +3351,9 @@ function createAppUpdateSettingsDialog() {
     if (!nextOpen) {
       archiveState.settingsRequestId += 1;
       setArchiveSettingsLoading(false);
-      retentionSelect.value = archiveState.savedRetentionValue;
+      if (!archiveState.retentionSaving && !archiveState.retentionPendingIntent) {
+        retentionSelect.value = archiveState.savedRetentionValue;
+      }
     }
     archiveState.archiveSettingsOpen = nextOpen;
     archiveBrowser.hidden = archiveState.archiveSettingsOpen;
@@ -3296,46 +3533,11 @@ function createAppUpdateSettingsDialog() {
     openModal(confirmOverlay);
   }
 
-  async function saveArchiveSettings(button) {
-    if (archiveState.settingsLoading) return false;
-    let api;
-    try {
-      api = getArchiveCenterApi();
-    } catch (error) {
-      showArchiveFeedback(`存档设置保存失败：${archiveCenterErrorText(error, '未知错误')}`);
-      return false;
-    }
-    const retentionValue = retentionSelect.value;
-    if (retentionValue === archiveState.savedRetentionValue) {
-      closeSettingsDialog();
-      return true;
-    }
-
-    button.disabled = true;
-    showArchiveFeedback('正在保存存档设置…', 'info');
-    try {
-      const result = await api.setRetentionDays(
-        retentionValue === 'permanent' ? null : Number(retentionValue)
-      );
-      if (!verifyArchiveCenterAction(result, '保留期限保存失败')) {
-        throw new Error('保留期限保存已取消');
-      }
-      archiveState.savedRetentionValue = retentionValue;
-      archiveState.settings = {
-        ...archiveState.settings,
-        retentionDays: retentionValue === 'permanent' ? null : Number(retentionValue)
-      };
-      closeSettingsDialog();
-      return true;
-    } catch (error) {
-      showArchiveFeedback(`存档设置保存失败：${archiveCenterErrorText(error, '未知错误')}`);
-      return false;
-    } finally {
-      if (button.isConnected) button.disabled = false;
-    }
-  }
-
   function closeSettingsDialog() {
+    if (archiveState.settingsLoading || archiveState.retentionSaving) return false;
+    archiveState.destroyed = true;
+    archiveState.retentionIntentToken += 1;
+    archiveState.retentionPendingIntent = null;
     clearTimeout(archiveState.batchFilterTimer);
     archiveState.listRequestId += 1;
     archiveState.detailRequestId += 1;
@@ -3346,16 +3548,11 @@ function createAppUpdateSettingsDialog() {
       unsubscribeStorageMigration = null;
     }
     closeModal();
+    return true;
   }
 
   dialog.querySelector('[data-action="close"]').addEventListener('click', closeSettingsDialog);
-  dialog.querySelector('[data-action="confirm-settings"]').addEventListener('click', async (event) => {
-    if (archiveState.activeTab === 'archive' && archiveState.archiveSettingsOpen) {
-      await saveArchiveSettings(event.currentTarget);
-      return;
-    }
-    closeSettingsDialog();
-  });
+  dialog.querySelector('[data-action="confirm-settings"]').addEventListener('click', closeSettingsDialog);
   dialog.querySelectorAll('[data-tab]').forEach((button) => {
     button.addEventListener('click', () => setSettingsTab(button.dataset.tab));
   });
@@ -3415,14 +3612,21 @@ function createAppUpdateSettingsDialog() {
     archiveState.selectedBatchId = '';
     loadArchiveBatches();
   });
+  retentionSelect.addEventListener('change', saveRetentionSelection);
+
+  function selectArchiveBatch(batchId) {
+    const nextBatchId = String(batchId || '');
+    if (!nextBatchId || nextBatchId === archiveState.selectedBatchId) return;
+    archiveState.selectedBatchId = nextBatchId;
+    archiveState.detail = null;
+    renderArchiveBatches();
+    loadArchiveDetail(nextBatchId);
+  }
 
   batchList.addEventListener('click', (event) => {
     const button = event.target.closest('[data-batch-id]');
     if (!button) return;
-    archiveState.selectedBatchId = button.dataset.batchId;
-    archiveState.detail = null;
-    renderArchiveBatches();
-    loadArchiveDetail(archiveState.selectedBatchId);
+    selectArchiveBatch(button.dataset.batchId);
   });
 
   archivePane.addEventListener('click', (event) => {
@@ -3436,6 +3640,8 @@ function createAppUpdateSettingsDialog() {
       });
     } else if (action === 'back-to-archive') {
       setArchiveSettingsOpen(false);
+    } else if (action === 'view-related-batch') {
+      selectArchiveBatch(button.dataset.relatedBatchId);
     } else if (action === 'change-archive-storage') {
       changeArchiveStorageLocation();
     } else if (action === 'open-archive-file') {
@@ -3455,6 +3661,7 @@ function createAppUpdateSettingsDialog() {
   const archiveApi = window.desktopApi?.archiveCenter;
   if (archiveApi && typeof archiveApi.onStorageMigrationProgress === 'function') {
     unsubscribeStorageMigration = archiveApi.onStorageMigrationProgress((progress) => {
+      if (!archiveDialogAlive()) return;
       archiveState.storageMigration = progress && typeof progress === 'object'
         ? { ...progress }
         : { status: 'idle', phase: '', processed: 0, total: 0 };
@@ -8447,7 +8654,7 @@ async function applyFullInfo(info) {
     }, 120);
   } else if (info.previewModal === 'archive-center-settings') {
     setTimeout(() => {
-      openModal(createAppUpdateSettingsDialog());
+      openModal(createAppUpdateSettingsDialog({ archiveCenterApi: createArchiveCenterPreviewApi() }));
       requestAnimationFrame(() => {
         const archiveTab = elements.modalRoot
           ?.querySelector('.app-settings-nav-item[data-tab="archive"]')
@@ -8457,6 +8664,15 @@ async function applyFullInfo(info) {
             ?.querySelector('[data-action="open-archive-settings"]')
             ?.click();
         }, 80);
+      });
+    }, 120);
+  } else if (info.previewModal === 'archive-center-browser') {
+    setTimeout(() => {
+      openModal(createAppUpdateSettingsDialog({ archiveCenterApi: createArchiveCenterPreviewApi() }));
+      requestAnimationFrame(() => {
+        elements.modalRoot
+          ?.querySelector('.app-settings-nav-item[data-tab="archive"]')
+          ?.click();
       });
     }, 120);
   } else if (info.previewModal === 'new-account-palette') {

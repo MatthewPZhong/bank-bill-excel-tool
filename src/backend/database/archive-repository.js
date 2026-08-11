@@ -878,15 +878,17 @@ class ArchiveRepository {
   getLatestIssuedBatch() {
     const row = this.db.prepare(`
       SELECT
-        local_date,
-        last_issued_batch_id,
-        last_issued_batch_number,
-        last_issued_at
-      FROM archive_daily_sequences
-      WHERE last_issued_batch_id IS NOT NULL
-        AND last_issued_batch_number IS NOT NULL
-        AND last_issued_at IS NOT NULL
-      ORDER BY last_issued_batch_id DESC
+        d.local_date,
+        d.last_issued_batch_id,
+        d.last_issued_batch_number,
+        d.last_issued_at,
+        b.task_status
+      FROM archive_daily_sequences d
+      LEFT JOIN archive_batches b ON b.id = d.last_issued_batch_id
+      WHERE d.last_issued_batch_id IS NOT NULL
+        AND d.last_issued_batch_number IS NOT NULL
+        AND d.last_issued_at IS NOT NULL
+      ORDER BY d.last_issued_batch_id DESC
       LIMIT 1
     `).get();
     if (!row) return null;
@@ -898,7 +900,8 @@ class ArchiveRepository {
       localDate: row.local_date,
       dailySequence: sequence,
       globalDailySequence: sequence,
-      issuedAt: row.last_issued_at
+      issuedAt: row.last_issued_at,
+      taskStatus: row.task_status || null
     };
   }
 

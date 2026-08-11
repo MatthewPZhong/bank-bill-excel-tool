@@ -134,6 +134,15 @@ function publicBatchDetail(detail) {
   return { ...detail, artifacts: detail.artifacts.map(publicArtifact) };
 }
 
+function publicRelatedBatch(batch) {
+  return {
+    batchId: Number(batch.id),
+    batchNumber: batch.batchNumber,
+    localDate: batch.localDate,
+    globalDailySequence: batch.globalDailySequence
+  };
+}
+
 function deriveModuleCode(moduleId) {
   const normalized = String(moduleId || '')
     .trim()
@@ -1844,6 +1853,11 @@ class ArchiveService {
           }
         }
         detail = this.repository.getBatchDetail(batchId);
+      }
+      if (detail) {
+        detail.relatedBatches = detail.parentRunId
+          ? this.repository.listRelatedBatches(detail.parentRunId).map(publicRelatedBatch)
+          : [];
       }
       return detail
         ? { ok: true, batch: publicBatchDetail(detail) }

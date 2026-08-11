@@ -2,7 +2,7 @@
 
 ## 1. 范围
 
-本文件覆盖确认 Spec §15.1 的 PR1 批次身份/迁移，以及 §15.2/§15.3 中 PR2 可承担的任务生命周期、策略注册、worker context 和 12 个既有 archive scope 接线。VCC 财务 OP、工具箱、文件物化、存储迁移和 archive UI 仍由 PR3—PR6 补充。
+本文件覆盖确认 Spec §15.1 的 PR1 批次身份/迁移，以及 §15.2/§15.3 中 PR2 可承担的任务生命周期、策略注册、worker context 和 12 个既有 archive scope 接线；后续章节继续追加 PR2.5、PR3、PR4、PR5 与 PR6 的冻结矩阵和执行证据。
 
 ## 2. P0 自动化矩阵
 
@@ -492,3 +492,28 @@ P0 本机手工/真实 FS 证据已按自动链顺序复核：精确目录和无
 首次 full 的 lint/smoke PASS、unit 5028/5031；三条失败归为两项真实 production wiring omission：新 storage mutation IPC 的 exact exclude inventory 漏项（两条同根因），以及目录 picker 绕过 remembered dialog helper。经负责人批准最小修复后，policy/dialog/UI 定向组 55/55 PASS。第二次且最终单一 `npm run release-check` session 全绿：lint/smoke PASS，unit 5031/5031（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions；runner policy 仅在全绿后合法自动同步，无第三次 full 或阈值调整。
 
 仍开放 P0/P1 人工门禁：Windows installer/portable、真实系统盘到另一盘符、UNC/网络盘断连重连、长根路径、大存档进度/吞吐、迁移中退出/更新安装，以及迁移后真实打开/另存/锁定/删除/重试。⚠️ canonical/artifact SHA+size、共享引用、删除次序、真实输入输出文件血缘与资金内容必须人工复核。
+
+## 十九、PR6 存档前端与统计测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| UI-01 | P0 | repository | 文件总大小与运行次数 | 只累计全部 ready artifact 引用 size，同 Blob 多引用多计；failed/pending 不计；runCount 包含无文件/失败/取消的未删除批次 |
+| UI-02 | P0 | issuance/repository | latest 删除不回退 | number/id 来自 `last_issued_*`；删除最新 live row 后仍保留发行号/id，status 严格 null；下一号不复用 |
+| UI-03 | P0 | controller | public stats DTO | 精确七字段 `{storagePath,fileTotalBytes,runCount,latestBatchNumber,latestBatchId,latestBatchStatus,migrationStatus}`；无内部 unique/logical/fileRef |
+| UI-04 | P0 | service/detail | structured related | 只按 parent 查询剩余 live rows；结构化 `{batchId,batchNumber,localDate,globalDailySequence}`；不解析 batchNumber、不暴露 parentRunId/task name |
+| UI-05 | P0 | renderer/settings | 统计与路径 | 顶部“文件总大小”；设置位置/变更、大小、运行次数/最新批次；无批次 `-`；长路径 ellipsis+title；PR5 migration progress 保留 |
+| UI-06 | P0 | renderer/retention | 串行 latest-intent | 快速 `60→90→180` 实际 IPC `[60,180]`、最大并发 1；中间失败有 pending 时不回滚/提示；最终失败恢复 last success 并提示 |
+| UI-07 | P0 | renderer/lifecycle | pending/销毁 | 保存 pending 时 Return/X 禁用且点击不关闭；最终 settle 恢复；DOM detach 后旧 Promise 零节点写入 |
+| UI-08 | P1 | renderer/list | 严格两行 | 每项只有模块/批次号、状态/本地 `HH:mm:ss` 两个 direct row；锁标记内联；hover/selected/focus/aria-current 保留 |
+| UI-09 | P1 | renderer/detail | related 显示与跳转 | 至少两项才显示；同日压缩、跨日分组、包含当前；点击只切 selectedBatchId 并复用现有详情链；删除后重新查询只剩 live rows |
+| UI-10 | P1 | renderer/a11y | 操作按钮 | 未锁 `🔒`、已锁 `🔓`；打开为文字“打开”；另存为 `💾`；title/aria 精确；Tab 顺序 related→lock→open→save |
+| UI-11 | P1 | Electron/layout | viewport/zoom/长文本 | 1240×860、1080×760 × 100/125/150%；filters 不裁切、页面无横向溢出、当前/旧批次号可辨识、related 同标题行、actions 不遮挡 |
+| UI-12 | P1 | preview | 可复现视觉证据 | settings、browser、browser 150% 三张仓库资产由确定性 fixture 生成；长路径/模块/旧号/跨日 related/按钮人工复核 |
+
+执行证据：开工前 repository/service/controller/UI 定向 73/73 PASS。首次 backend 聚焦 55/56，唯一失败为新增第二条 structured related live row 后旧 fixture 仍断言批次数 1，分类 stale test；更新为真实 live 集合后 56/56 PASS。UI 静态首次 15/20 为冻结字符串与 DOM 合同的 stale tests，机械同步后 23/23 PASS。Electron 首两轮分别因异步详情尚未加载就取节点、脚本 `.focus()` 不会触发真实 keyboard modality 而 0/6，均为 test design；改为等待真实详情和 static CSS + activeElement 合同后 6/6 PASS。人工预览另发现 150% 窄宽下 filters 裁切、批次号不可辨识的真实布局问题，响应式修复后加入几何/Tab 代表断言并最终 6/6 PASS。
+
+Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/controller/UI/TaskLifecycle/outbox/storage layout/root migration/VCC/toolbox；lint、changed JS `node --check`、diff check 与 smoke PASS。`check-vars -- --include-minor` 仅命中一个 preview facade stub 名和 `MODULES/app/dialog/elements` 通用/只读引用，逐项确认未改 facade inventory、模块状态机、Electron 生命周期/native dialog 或 DOM cache。
+
+首次 full lint/smoke PASS、unit 5036/5037；唯一失败是 app-update 旧 static 正则仍要求 archive tab“确认”、下载完成“稍后”，分类 stale test。经批准只机械替换为精确 `closeButton.textContent = '返回'`，同 test 的按钮顺序/status dot/last-checked/observer/下载提示/progress/自动更新开关断言全部保留，最小组 29/29 PASS。第二次且最终 `release-check` exit 0：lint/smoke PASS，unit 5037/5037（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（388472ms）；无第三次 full，runner 仅在全绿后合法同步 policy。
+
+仍开放用户人工门禁：Windows installer/portable 中文字体与原生 select 收起保存、真实盘符/UNC/网络长路径、Excel/WPS 只读副本和另存，以及真实删除后 related live rows、ready 引用总量和不可回退 latest issuance 核对。⚠️ 本轮不改金额、币种、业务算法或 Excel 内容，自动 UI/metadata 证据不关闭既有资金与文件血缘人工红线。

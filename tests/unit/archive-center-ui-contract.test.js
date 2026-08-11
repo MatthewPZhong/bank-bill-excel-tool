@@ -11,7 +11,7 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
-test.describe('v3.0.25 设置与存档中心静态契约', () => {
+test.describe('v3.1.9 设置与存档中心静态契约', () => {
   const renderer = read('src/renderer.js');
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
@@ -143,12 +143,13 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     );
   });
 
-  test('设置弹窗为双栏导航且默认停留在自动更新', () => {
-    assert.match(renderer, /function createAppUpdateSettingsDialog\(\)/);
+  test('设置弹窗为双栏导航且默认停留在版本管理，内部自动更新名称保留', () => {
+    assert.match(renderer, /function createAppUpdateSettingsDialog\(options = \{\}\)/);
+    assert.match(renderer, /const archiveCenterApi = options\.archiveCenterApi \|\| null/);
     assert.match(renderer, /dialog\.className = 'modal-card app-update-settings-card'/);
     assert.match(
       renderer,
-      /class="app-settings-nav-item is-active"[^>]*data-tab="update"[\s\S]*?<span>自动更新<\/span>/
+      /class="app-settings-nav-item is-active"[^>]*data-tab="update"[\s\S]*?<span>版本管理<\/span>/
     );
     assert.match(
       renderer,
@@ -156,6 +157,8 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     );
     assert.match(renderer, /data-pane="update"/);
     assert.match(renderer, /data-pane="archive"[^>]*hidden/);
+    assert.match(renderer, /id="appUpdatePaneHeading"[^>]*>版本管理<\/h3>/);
+    assert.match(renderer, /data-role="auto-update-toggle" aria-label="自动更新"/);
     assert.match(renderer, /archiveState\.activeTab = tab === 'archive' \? 'archive' : 'update'/);
 
     const modulesStart = renderer.indexOf('const MODULES = Object.freeze({');
@@ -286,11 +289,9 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /data-role="archive-delete-error"/);
     assert.match(renderer, /data-role="archive-feedback"/);
     assert.match(renderer, /if \(isObject && result\.ok === false\)/);
-    assert.match(renderer, /showArchiveFeedback\(`存档设置保存失败：/);
-    assert.match(
-      renderer,
-      /archiveState\.activeTab === 'archive' && archiveState\.archiveSettingsOpen[\s\S]*?saveArchiveSettings\(event\.currentTarget\)/
-    );
+    assert.match(renderer, /retentionSelect\.addEventListener\('change', saveRetentionSelection\)/);
+    assert.match(renderer, /data-action="confirm-settings"[^>]*data-role="close-update-dialog">返回<\/button>/);
+    assert.match(renderer, /data-action="confirm-settings"\]'.*addEventListener\('click', closeSettingsDialog\)/);
     assert.doesNotMatch(renderer, /data-action="(?:save|cancel)-archive-settings"/);
   });
 
@@ -302,10 +303,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /<option value="90">90 天<\/option>/);
     assert.match(renderer, /data-role="archive-retention-days"/);
     assert.match(renderer, /data-role="archive-retention-days" aria-label="保留期限"/);
-    assert.match(
-      renderer,
-      /api\.setRetentionDays\(\s*retentionValue === 'permanent' \? null : Number\(retentionValue\)\s*\)/
-    );
+    assert.match(renderer, /api\.setRetentionDays\(retentionDaysApiValue\(intent\.value\)\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.getStats\(\)/);
     assert.match(renderer, /data-role="archive-storage-path"/);
     assert.match(renderer, /data-role="archive-storage-migration"/);
@@ -313,12 +311,26 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /migration\.phase === 'cleanup-pending'/);
     assert.match(renderer, /`\$\{phaseText\}（\$\{processed\}\/\$\{total\}）`/);
     assert.match(renderer, /running \? '变更中…' : '变更'/);
+    for (const role of [
+      'archive-file-total-size',
+      'archive-settings-file-total-size',
+      'archive-stat-runs',
+      'archive-stat-latest'
+    ]) {
+      assert.match(renderer, new RegExp(`data-role="${role}"`));
+    }
+    assert.match(renderer, /stats\.fileTotalBytes/);
+    assert.match(renderer, /stats\.runCount/);
+    assert.match(renderer, /stats\.latestBatchNumber \|\| '-'/);
+    assert.match(renderer, /storagePath\.title = storageRoot/);
+    assert.doesNotMatch(renderer, /archive-(?:unique|logical)|archive-stat-files|archive-storage-meter/);
+    assert.doesNotMatch(renderer, />唯一文件<|>逻辑文件<|>文件引用</);
     assert.doesNotMatch(renderer, /archive-template-policies|setTemplateExcluded|listTemplatePolicies/);
     assert.doesNotMatch(renderer, /网银账单生成模板|不存档/);
     assert.doesNotMatch(renderer, /锁定批次不参与自动清理。默认保留期为 90 天。|默认保留/);
   });
 
-  test('永久保留值保持为 permanent，返回时丢弃草稿且加载期间禁用确认', () => {
+  test('永久保留值保持为 permanent，加载和即时保存期间禁用返回与关闭入口', () => {
     assert.match(
       renderer,
       /Object\.prototype\.hasOwnProperty\.call\(settings, 'retentionDays'\)[\s\S]*?\? settings\.retentionDays/
@@ -327,27 +339,74 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       renderer,
       /retentionDays === null \|\| retentionDays === 'permanent'[\s\S]*?\? 'permanent'/
     );
-    const openStateStart = renderer.indexOf('function setArchiveSettingsOpen');
-    const tabStateStart = renderer.indexOf('function setSettingsTab', openStateStart);
-    const openStateSource = renderer.slice(openStateStart, tabStateStart);
-    assert.match(openStateSource, /archiveState\.settingsRequestId \+= 1/);
-    assert.match(openStateSource, /retentionSelect\.value = archiveState\.savedRetentionValue/);
-    assert.match(renderer, /confirmButton\.disabled = archiveState\.settingsLoading/);
-    assert.match(renderer, /if \(archiveState\.settingsLoading\) return false/);
+    assert.match(renderer, /const busy = archiveState\.settingsLoading \|\| archiveState\.retentionSaving/);
+    assert.match(renderer, /returnButton\.disabled = busy/);
+    assert.match(renderer, /closeDialogButton\.disabled = busy/);
+    assert.match(renderer, /if \(archiveState\.settingsLoading \|\| archiveState\.retentionSaving\) return false/);
+    assert.match(renderer, /retentionSelect\.disabled = archiveState\.settingsLoading/);
   });
 
-  test('确认按钮保存并关闭，失败时保留弹窗且恢复按钮', () => {
-    const saveStart = renderer.indexOf('async function saveArchiveSettings');
-    const saveEnd = renderer.indexOf('function closeSettingsDialog', saveStart);
-    const saveSource = renderer.slice(saveStart, saveEnd);
-    assert.match(saveSource, /retentionValue === archiveState\.savedRetentionValue[\s\S]*?closeSettingsDialog\(\)/);
-    assert.match(saveSource, /button\.disabled = true/);
-    assert.match(saveSource, /await api\.setRetentionDays/);
-    assert.match(saveSource, /closeSettingsDialog\(\);[\s\S]*?return true/);
-    assert.match(saveSource, /catch \(error\)[\s\S]*?存档设置保存失败/);
-    assert.match(saveSource, /finally \{[\s\S]*?button\.isConnected[\s\S]*?button\.disabled = false/);
-    assert.match(renderer, /data-action="confirm-settings"[^>]*data-role="close-update-dialog">确认<\/button>/);
-    assert.doesNotMatch(renderer, /data-role="close-update-dialog">完成<\/button>/);
+  test('保留期限使用单一串行 latest-intent，旧失败有 pending 时继续且最终失败才恢复', () => {
+    const drainStart = renderer.indexOf('async function drainRetentionIntents');
+    const saveStart = renderer.indexOf('function saveRetentionSelection', drainStart);
+    const drainSource = renderer.slice(drainStart, saveStart);
+    assert.match(renderer, /retentionIntentToken: 0/);
+    assert.match(renderer, /retentionPendingIntent: null/);
+    assert.match(renderer, /retentionSavePromise: null/);
+    assert.match(drainSource, /while \(archiveState\.retentionPendingIntent && archiveDialogAlive\(\)\)/);
+    assert.match(drainSource, /const intent = archiveState\.retentionPendingIntent;[\s\S]*?archiveState\.retentionPendingIntent = null/);
+    assert.match(drainSource, /await api\.setRetentionDays/);
+    assert.match(drainSource, /const isLatestIntent = intent\.token === archiveState\.retentionIntentToken[\s\S]*?&& !archiveState\.retentionPendingIntent/);
+    assert.match(drainSource, /if \(failure\) \{[\s\S]*?if \(!isLatestIntent\) continue;[\s\S]*?retentionSelect\.value = archiveState\.savedRetentionValue/);
+    assert.match(renderer, /archiveState\.retentionIntentToken \+= 1/);
+    assert.match(renderer, /if \(!archiveState\.retentionSavePromise\)/);
+    assert.match(renderer, /!archiveState\.destroyed && overlay\.isConnected/);
+    assert.match(renderer, /archiveState\.destroyed = true/);
+  });
+
+  test('批次列表严格两行并保留状态、时间、锁定、焦点和 aria-current', () => {
+    const listStart = renderer.indexOf('function renderArchiveBatches');
+    const relatedStart = renderer.indexOf('function renderArchiveRelatedBatches', listStart);
+    const listSource = renderer.slice(listStart, relatedStart);
+    assert.match(listSource, /archive-center-batch-row archive-center-batch-row-primary/);
+    assert.match(listSource, /data-role="archive-batch-module"/);
+    assert.match(listSource, /data-role="archive-batch-number" title=/);
+    assert.match(listSource, /archive-center-lock-mark[^>]*title="已锁定"[^>]*>🔒/);
+    assert.match(listSource, /archive-center-batch-row archive-center-batch-row-secondary/);
+    assert.match(listSource, /data-role="archive-batch-status"/);
+    assert.match(listSource, /<time data-role="archive-batch-time"/);
+    assert.doesNotMatch(listSource, /archive-center-batch-module|archive-center-batch-meta/);
+    assert.match(styles, /\.archive-center-batch-item:hover/);
+    assert.match(styles, /\.archive-center-batch-item:focus-visible/);
+    assert.match(styles, /\.archive-center-batch-item\.is-active/);
+    assert.match(listSource, /aria-current="\$\{active \? 'true' : 'false'\}"/);
+  });
+
+  test('详情使用结构化 relatedBatches 同日/跨日分组并只切换现有 selectedBatchId', () => {
+    const relatedStart = renderer.indexOf('function renderArchiveRelatedBatches');
+    const detailStart = renderer.indexOf('function renderArchiveDetail', relatedStart);
+    const relatedSource = renderer.slice(relatedStart, detailStart);
+    assert.match(relatedSource, /Array\.isArray\(batch\.relatedBatches\)/);
+    assert.match(relatedSource, /if \(related\.length < 2\) return ''/);
+    assert.match(relatedSource, /item\.localDate/);
+    assert.match(relatedSource, /item\.globalDailySequence/);
+    assert.match(relatedSource, /padStart\(3, '0'\)/);
+    assert.match(relatedSource, /archive-center-related-group-separator[^>]*> · </);
+    assert.match(relatedSource, /data-action="view-related-batch"/);
+    assert.doesNotMatch(relatedSource, /parentRunId|taskKey|taskRunId|split\(|match\(|exec\(/);
+    assert.match(renderer, /action === 'view-related-batch'[\s\S]*?selectArchiveBatch\(button\.dataset\.relatedBatchId\)/);
+    const selectStart = renderer.indexOf('function selectArchiveBatch');
+    const listClickStart = renderer.indexOf("batchList.addEventListener('click'", selectStart);
+    const selectSource = renderer.slice(selectStart, listClickStart);
+    assert.match(selectSource, /archiveState\.selectedBatchId = nextBatchId/);
+    assert.match(selectSource, /loadArchiveDetail\(nextBatchId\)/);
+    assert.doesNotMatch(selectSource, /reserve|createBatch|Task/);
+  });
+
+  test('详情按钮文案和无障碍名称符合锁定、打开、另存为合同', () => {
+    assert.match(renderer, /title="打开只读副本" aria-label="打开只读副本">打开<\/button>/);
+    assert.match(renderer, /title="另存为" aria-label="另存为">💾<\/button>/);
+    assert.match(renderer, /title="\$\{locked \? '解除锁定' : '锁定批次'\}" aria-label="\$\{locked \? '解除锁定' : '锁定批次'\}">\$\{locked \? '🔓' : '🔒'\}<\/button>/);
   });
 
   test('指定说明被删除，portable 下载提示保留且安装版空说明收起', () => {
