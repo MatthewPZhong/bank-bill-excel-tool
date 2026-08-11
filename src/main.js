@@ -17546,13 +17546,70 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
   return details;
 }
 
-function publishToolboxArtifacts(kind, artifacts, targets) {
+function publishToolboxArtifacts(kind, artifacts, targets, batchContext) {
   return publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
     targets,
-    userDataDir: app.getPath('userData')
+    userDataDir: app.getPath('userData'),
+    batchContext
   });
+}
+
+let toolboxSplitReadContext = null;
+
+function createToolboxSplitReadContext(sourceFilePath) {
+  const resolvedPath = path.resolve(String(sourceFilePath || ''));
+  const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+  if (!snapshot) throw new Error('拆分源文件不可读，请重新选择');
+  const context = Object.freeze({
+    token: randomUUID(),
+    sourceFilePath: resolvedPath,
+    snapshot: Object.freeze({ ...snapshot })
+  });
+  toolboxSplitReadContext = context;
+  return context;
+}
+
+function requireToolboxSplitReadContext(payload = {}) {
+  const token = String(payload.splitReadToken || '').trim();
+  const sourceFilePath = path.resolve(String(payload.sourceFilePath || ''));
+  const context = toolboxSplitReadContext;
+  if (!context || context.token !== token || context.sourceFilePath !== sourceFilePath) {
+    const error = new Error('拆分源文件准备信息已失效，请重新选择');
+    error.code = 'TOOLBOX_SPLIT_READ_CONTEXT_STALE';
+    throw error;
+  }
+  return context;
+}
+
+function clearToolboxSplitReadContext(context) {
+  if (toolboxSplitReadContext === context) toolboxSplitReadContext = null;
+}
+
+function assertToolboxSplitSourceFresh(context) {
+  let stat;
+  try {
+    stat = fs.statSync(context.sourceFilePath);
+  } catch (_error) {
+    clearToolboxSplitReadContext(context);
+    throw new Error('拆分源文件已不存在，请重新选择');
+  }
+  if (!sourceSnapshotMatchesStat(context.snapshot, stat)) {
+    clearToolboxSplitReadContext(context);
+    throw new Error('拆分源文件在读取后已变化，请重新选择');
+  }
+}
+
+function toolboxFinalOutputFiles(files, sourceOperation) {
+  return (Array.isArray(files) ? files : []).map((file) => ({
+    filePath: file.filePath,
+    role: 'output',
+    sourceOperation,
+    originalName: file.fileName || path.basename(file.filePath),
+    expectedSha256: file.sha256,
+    expectedSizeBytes: file.byteSize
+  }));
 }
 
 async function recoverToolboxPublicationsAtStartup() {
@@ -17597,89 +17654,123 @@ function registerToolboxHandlers() {
   // IPC 1 —— 合表：单/多文件 → 每个可见非空 sheet 严格表头校验 → 按文件/标签/行顺序流式写临时 → 另存为。
   //   v3.0.19：.xlsx 逐 sheet 流式，.xls 一次加载工作簿后遍历可见 sheet，CSV 作为单表；隐藏/空 sheet 跳过。
   //   writer 沿用 by-name 格式与超 104 万行自动分页；IPC、默认文件名和前端流程不变。
-  trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', async () => {
-    try {
-      const choice = await showImportOpenDialog('toolbox', {
-        title: '选择要合并的表格（多选，表头需完全一致）',
-        properties: ['openFile', 'multiSelections'],
-        filters: statementFileDialogFilters()
-      });
-      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-      const filePaths = choice.filePaths;
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
-      const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
-      let preserveTempDir = false;
+  trackedIpcHandle('toolbox:merge', '工具箱', '合并表格', {
+    async prepare() {
       try {
-        const writeRes = await toolboxMergeFilesToXlsx({
-          filePaths,
-          savePath: tempPath,
-          sheetBaseName: 'COMMON'
+        const choice = await showImportOpenDialog('toolbox', {
+          title: '选择要合并的表格（多选，表头需完全一致）',
+          properties: ['openFile', 'multiSelections'],
+          filters: statementFileDialogFilters()
         });
-
+        if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
         const saveResult = await dialog.showSaveDialog(mainWindow, {
           defaultPath: toolboxBuildMergeFileName(),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
         if (saveResult.canceled || !saveResult.filePath) {
-          return { status: 'cancelled' };
+          return { proceed: false, result: { status: 'cancelled' } };
         }
-        const publishResult = await publishToolboxArtifacts(
-          'merge',
-          [{
-            sourcePath: tempPath,
-            outputId: 'merge-1',
-            fileName: path.basename(saveResult.filePath),
-            byteSize: writeRes.byteSize,
-            sha256: writeRes.sha256,
-            dataRowCount: writeRes.dataRowCount,
-            sheetCount: writeRes.sheetCount,
-            warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
-            styleStats: writeRes.styleStats || null
-          }],
-          [{ targetPath: saveResult.filePath }]
-        );
-        const publishedFile = publishResult.files[0];
-        appendActivityLogEntry({
-          level: 'info',
-          source: 'main',
-          domain: 'toolbox',
-          message: '工具箱合并表格成功',
-          details: [
-            `合并文件数：${writeRes.fileCount}`,
-            `参与合并 sheet 数：${writeRes.inputSheetCount}`,
-            `数据行数：${writeRes.dataRowCount}`,
-            `输出 sheet 数：${writeRes.sheetCount}`,
-            `导出路径：${publishedFile.filePath}`,
-            ...buildToolboxAuditDetailLines(publishedFile),
-            ...(publishResult.warnings || [])
-          ]
-        });
-        return {
-          status: 'success',
-          filePath: publishedFile.filePath,
-          warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
-          warnings: publishResult.warnings || []
+        const prepared = {
+          proceed: true,
+          inputPaths: choice.filePaths.slice(),
+          outputPaths: [saveResult.filePath],
+          filePaths: choice.filePaths.slice(),
+          savePath: saveResult.filePath
         };
+        prepared.beforeStart = () => {
+          prepared.inputFiles = prepared.filePaths.map((filePath) => {
+            const sourceSnapshot = sourceSnapshotFromStat(fs.statSync(filePath));
+            if (!sourceSnapshot) throw new Error('合并源文件不可读，请重新选择');
+            return {
+              filePath,
+              role: 'input',
+              sourceOperation: 'toolbox:merge',
+              sourceSnapshot
+            };
+          });
+        };
+        return prepared;
       } catch (error) {
-        preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
-        throw error;
-      } finally {
-        if (!preserveTempDir) {
-          cleanupToolboxTemporaryDirectory(tempDir);
-        }
+        return { proceed: false, result: toolboxFailureResult(error) };
       }
-    } catch (error) {
-      return toolboxFailureResult(error);
+    },
+    async execute(_event, prepared, taskContext) {
+      try {
+        const { filePaths, savePath } = prepared;
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+        const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
+        let preserveTempDir = false;
+        try {
+          const writeRes = await toolboxMergeFilesToXlsx({
+            filePaths,
+            savePath: tempPath,
+            sheetBaseName: 'COMMON'
+          });
+
+          const publishResult = await publishToolboxArtifacts(
+            'merge',
+            [{
+              sourcePath: tempPath,
+              outputId: 'merge-1',
+              fileName: path.basename(savePath),
+              byteSize: writeRes.byteSize,
+              sha256: writeRes.sha256,
+              dataRowCount: writeRes.dataRowCount,
+              sheetCount: writeRes.sheetCount,
+              warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+              styleStats: writeRes.styleStats || null
+            }],
+            [{ targetPath: savePath }],
+            taskContext.batchContext
+          );
+          const publishedFile = publishResult.files[0];
+          prepared.outputFiles = toolboxFinalOutputFiles(
+            publishResult.files,
+            'toolbox:merge'
+          );
+          appendActivityLogEntry({
+            level: 'info',
+            source: 'main',
+            domain: 'toolbox',
+            message: '工具箱合并表格成功',
+            details: [
+              `合并文件数：${writeRes.fileCount}`,
+              `参与合并 sheet 数：${writeRes.inputSheetCount}`,
+              `数据行数：${writeRes.dataRowCount}`,
+              `输出 sheet 数：${writeRes.sheetCount}`,
+              `导出路径：${publishedFile.filePath}`,
+              ...buildToolboxAuditDetailLines(publishedFile),
+              ...(publishResult.warnings || [])
+            ]
+          });
+          return {
+            status: 'success',
+            filePath: publishedFile.filePath,
+            warningSummary: publishedFile.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
+            warnings: publishResult.warnings || []
+          };
+        } catch (error) {
+          preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+          throw error;
+        } finally {
+          if (!preserveTempDir) {
+            cleanupToolboxTemporaryDirectory(tempDir);
+          }
+        }
+      } catch (error) {
+        return toolboxFailureResult(error);
+      }
     }
   });
 
   // IPC 2 —— 拆表第一步：单选 → 取表头 + 流式扫一遍累积各字段去重值 → 回传给前端选字段弹框
   //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头 + streamDataRows 逐行喂去重累加器，内存常数），
   //   .csv/.xls 回退全量 extractHeaders + readRows + computeValuesByField。返回契约 {status,sourceFilePath,headers,valuesByField} 不变。
-  trackedIpcHandle('toolbox:split:read', '工具箱', '拆分表格', async () => {
+  ipcMain.handle('toolbox:split:read', async () => {
     try {
+      toolboxSplitReadContext = null;
       const choice = await showImportOpenDialog('toolbox', {
         title: '选择要拆分的表格',
         properties: ['openFile'],
@@ -17689,6 +17780,8 @@ function registerToolboxHandlers() {
         return { status: 'cancelled' };
       }
       const sourceFilePath = choice.filePaths[0];
+      const readStartedSnapshot = sourceSnapshotFromStat(fs.statSync(sourceFilePath));
+      if (!readStartedSnapshot) throw new Error('拆分源文件不可读，请重新选择');
 
       // 普通与 Worker 只区分执行位置，读取、matchValue 和字段去重均走同一 style-aware facade。
       const scanResult = await shouldUseLargeChannel(sourceFilePath)
@@ -17698,7 +17791,18 @@ function registerToolboxHandlers() {
       if (!headers || headers.length === 0) {
         return { status: 'failed', message: '文件为空或不可读，请重新导入', detailLines: [] };
       }
-      return { status: 'success', sourceFilePath, headers, valuesByField };
+      const readContext = createToolboxSplitReadContext(sourceFilePath);
+      if (!sourceSnapshotMatchesStat(readStartedSnapshot, fs.statSync(sourceFilePath))) {
+        clearToolboxSplitReadContext(readContext);
+        throw new Error('拆分源文件在读取过程中已变化，请重新选择');
+      }
+      return {
+        status: 'success',
+        sourceFilePath: readContext.sourceFilePath,
+        splitReadToken: readContext.token,
+        headers,
+        valuesByField
+      };
     } catch (error) {
       return toolboxFailureResult(error);
     }
@@ -17708,63 +17812,130 @@ function registerToolboxHandlers() {
   //   v3.0.8 BUG3：.xlsx 走流式（readHeaderRowStreamed 取表头判字段是否存在 + createRowFilter 逐行过滤 + writeRowsStreamed 逐行写命中行，内存常数），
   //   .csv/.xls 回退全量 readRows + filterRowsByFieldValues。
   //   口径：字段不存在用「表头」判定（开始前，保留现文案）、命中数 0 用「emit 计数（writeRowsStreamed.dataRowCount）」判定（0 不产文件，删临时，保留现文案）。
-  trackedIpcHandle('toolbox:split:export', '工具箱', '拆分表格', async (_event, payload = {}) => {
-    try {
-      const { sourceFilePath, field, values } = payload || {};
-      if (!sourceFilePath || !fs.existsSync(sourceFilePath)) {
-        return { status: 'failed', message: '源文件不存在或已被移动，请重新导入', detailLines: [] };
-      }
-      if (payload && payload.mode === 'multiple') {
-        const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
-        const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
-          title: '选择拆分文件保存目录',
-          properties: ['openDirectory', 'createDirectory']
-        });
-        if (directoryChoice.canceled || !directoryChoice.filePaths || directoryChoice.filePaths.length === 0) {
-          return { status: 'cancelled' };
-        }
-
-        const outputDirectory = directoryChoice.filePaths[0];
-        const targetPlans = groups.map((group) => ({
-          ...group,
-          targetPath: path.join(outputDirectory, group.fileName)
-        }));
-        const invalidTargets = targetPlans.filter((plan) => (
-          fs.existsSync(plan.targetPath) && !fs.lstatSync(plan.targetPath).isFile()
-        ));
-        if (invalidTargets.length > 0) {
+  trackedIpcHandle('toolbox:split:export', '工具箱', '拆分表格', {
+    async prepare(_event, payload = {}) {
+      try {
+        const readContext = requireToolboxSplitReadContext(payload);
+        const { field, values } = payload;
+        if (payload.mode !== 'multiple' && !field) {
           return {
-            status: 'failed',
-            message: '以下目标路径不是可覆盖的普通文件，请修改文件名后重试',
-            detailLines: invalidTargets.map((plan) => plan.targetPath)
+            proceed: false,
+            result: { status: 'failed', message: '未选择拆分字段', detailLines: [] }
           };
         }
-        const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
-        if (conflicts.length > 0) {
-          const overwriteChoice = await dialog.showMessageBox(mainWindow, {
-            type: 'warning',
-            buttons: ['取消', '覆盖全部'],
-            defaultId: 0,
-            cancelId: 0,
-            noLink: true,
-            title: '文件已存在',
-            message: `有 ${conflicts.length} 个目标文件已存在，是否覆盖全部？`,
-            detail: conflicts.map((plan) => plan.fileName).join('\n')
-          });
-          if (!overwriteChoice || overwriteChoice.response !== 1) {
-            return { status: 'cancelled' };
-          }
+        if (payload.mode !== 'multiple' && (!Array.isArray(values) || values.length === 0)) {
+          return {
+            proceed: false,
+            result: { status: 'failed', message: '请至少选择一个值', detailLines: [] }
+          };
         }
+        let outputPaths;
+        let targetPlans = null;
+        let savePath = '';
+        if (payload.mode === 'multiple') {
+          const groups = toolboxNormalizeMultiSplitGroups(payload.groups);
+          const directoryChoice = await showImportOpenDialog('toolbox-split-export-directory', {
+            title: '选择拆分文件保存目录',
+            properties: ['openDirectory', 'createDirectory']
+          });
+          if (directoryChoice.canceled
+              || !directoryChoice.filePaths
+              || directoryChoice.filePaths.length === 0) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
 
-        const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));
-        let preserveTempDir = false;
-        try {
-          const preparedPlans = targetPlans.map((plan, index) => ({
-            ...plan,
-            outputId: plan.outputId || `split-${index + 1}`,
-            temporaryPath: path.join(tempDir, `${String(index + 1).padStart(2, '0')}.xlsx`),
-            matchedCount: 0
+          const outputDirectory = directoryChoice.filePaths[0];
+          targetPlans = groups.map((group) => ({
+            ...group,
+            targetPath: path.join(outputDirectory, group.fileName)
           }));
+          const invalidTargets = targetPlans.filter((plan) => (
+            fs.existsSync(plan.targetPath) && !fs.lstatSync(plan.targetPath).isFile()
+          ));
+          if (invalidTargets.length > 0) {
+            return {
+              proceed: false,
+              result: {
+                status: 'failed',
+                message: '以下目标路径不是可覆盖的普通文件，请修改文件名后重试',
+                detailLines: invalidTargets.map((plan) => plan.targetPath)
+              }
+            };
+          }
+          const conflicts = targetPlans.filter((plan) => fs.existsSync(plan.targetPath));
+          if (conflicts.length > 0) {
+            const overwriteChoice = await dialog.showMessageBox(mainWindow, {
+              type: 'warning',
+              buttons: ['取消', '覆盖全部'],
+              defaultId: 0,
+              cancelId: 0,
+              noLink: true,
+              title: '文件已存在',
+              message: `有 ${conflicts.length} 个目标文件已存在，是否覆盖全部？`,
+              detail: conflicts.map((plan) => plan.fileName).join('\n')
+            });
+            if (!overwriteChoice || overwriteChoice.response !== 1) {
+              return { proceed: false, result: { status: 'cancelled' } };
+            }
+          }
+          outputPaths = targetPlans.map((plan) => plan.targetPath);
+        } else {
+          const saveResult = await dialog.showSaveDialog(mainWindow, {
+            defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
+            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+          });
+          if (saveResult.canceled || !saveResult.filePath) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
+          savePath = saveResult.filePath;
+          outputPaths = [savePath];
+        }
+        const prepared = {
+          proceed: true,
+          inputPaths: [readContext.sourceFilePath],
+          outputPaths,
+          payload,
+          readContext,
+          sourceFilePath: readContext.sourceFilePath,
+          field,
+          values,
+          targetPlans,
+          savePath
+        };
+        prepared.inputFiles = [{
+          filePath: readContext.sourceFilePath,
+          role: 'input',
+          sourceOperation: 'toolbox:split:export',
+          sourceSnapshot: readContext.snapshot
+        }];
+        prepared.beforeStart = () => assertToolboxSplitSourceFresh(readContext);
+        return prepared;
+      } catch (error) {
+        return { proceed: false, result: toolboxFailureResult(error) };
+      }
+    },
+    async execute(_event, prepared, taskContext) {
+      try {
+        const {
+          payload,
+          readContext,
+          sourceFilePath,
+          field,
+          values,
+          targetPlans,
+          savePath
+        } = prepared;
+        if (payload.mode === 'multiple') {
+          const outputDirectory = path.dirname(targetPlans[0].targetPath);
+          const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));
+          let preserveTempDir = false;
+          try {
+            const preparedPlans = targetPlans.map((plan, index) => ({
+              ...plan,
+              outputId: plan.outputId || `split-${index + 1}`,
+              temporaryPath: path.join(tempDir, `${String(index + 1).padStart(2, '0')}.xlsx`),
+              matchedCount: 0
+            }));
 
           let generationResult;
           if (await shouldUseLargeChannel(sourceFilePath)) {
@@ -17777,7 +17948,8 @@ function registerToolboxHandlers() {
                 field: plan.field,
                 values: plan.values,
                 savePath: plan.temporaryPath
-              }))
+              })),
+              batchContext: taskContext.batchContext
             }).promise;
           } else {
             generationResult = await exportToolboxMultiFilters({
@@ -17836,9 +18008,15 @@ function registerToolboxHandlers() {
               warningSummary: plan.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: plan.styleStats || null
             })),
-            preparedPlans.map((plan) => ({ targetPath: plan.targetPath }))
+            preparedPlans.map((plan) => ({ targetPath: plan.targetPath })),
+            taskContext.batchContext
           );
           const files = publishResult.files;
+          prepared.outputFiles = toolboxFinalOutputFiles(
+            files,
+            'toolbox:split:export'
+          );
+          clearToolboxSplitReadContext(readContext);
           const warningSummary = aggregateToolboxWarningSummary(files);
           appendActivityLogEntry({
             level: 'info',
@@ -17858,22 +18036,15 @@ function registerToolboxHandlers() {
             warningSummary,
             warnings: publishResult.warnings || []
           };
-        } catch (error) {
-          preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
-          throw error;
-        } finally {
-          if (!preserveTempDir) {
-            cleanupToolboxTemporaryDirectory(tempDir);
+          } catch (error) {
+            preserveTempDir = shouldPreserveToolboxTemporaryFiles(error);
+            throw error;
+          } finally {
+            if (!preserveTempDir) {
+              cleanupToolboxTemporaryDirectory(tempDir);
+            }
           }
         }
-      }
-      if (!field) {
-        return { status: 'failed', message: '未选择拆分字段', detailLines: [] };
-      }
-      if (!Array.isArray(values) || values.length === 0) {
-        return { status: 'failed', message: '请至少选择一个值', detailLines: [] };
-      }
-
       // v3.0.9 T6：大文件（多 sheet / 单 worksheet 解压 ≥1.5GB 的 .xlsx）走隔离 worker 通道流式过滤写临时 xlsx，再另存为。
       //   fail-closed：路由 false 时落下方现有小文件分支（原样不动）。回传契约与现有分支逐字节一致：
       //   {status:'success',filePath} / {status:'cancelled'} / 0 命中沿用现文案 failed。
@@ -17888,7 +18059,8 @@ function registerToolboxHandlers() {
             filePath: sourceFilePath,
             field,
             values,
-            savePath: tempPath
+            savePath: tempPath,
+            batchContext: taskContext.batchContext
           }).promise;
           const matchedCount = Number(generationResult && generationResult.matchedCount) || 0;
           const inputDataRowCount = Number(
@@ -17898,19 +18070,12 @@ function registerToolboxHandlers() {
             // 0 命中：不弹保存框、不产用户文件（保留现文案，与小文件分支逐字节一致）。临时目录由 finally 清理。
             return { status: 'failed', message: '所选值在源文件中无匹配行，未生成文件', detailLines: [] };
           }
-          const saveResult = await dialog.showSaveDialog(mainWindow, {
-            defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
-            filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-          });
-          if (saveResult.canceled || !saveResult.filePath) {
-            return { status: 'cancelled' };
-          }
           const publishResult = await publishToolboxArtifacts(
             'split-single-large',
             [{
               sourcePath: tempPath,
               outputId: 'split-1',
-              fileName: path.basename(saveResult.filePath),
+              fileName: path.basename(savePath),
               matchedCount,
               byteSize: generationResult.byteSize,
               sha256: generationResult.sha256,
@@ -17919,9 +18084,15 @@ function registerToolboxHandlers() {
               warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: generationResult.styleStats || null
             }],
-            [{ targetPath: saveResult.filePath }]
+            [{ targetPath: savePath }],
+            taskContext.batchContext
           );
           const publishedFile = publishResult.files[0];
+          prepared.outputFiles = toolboxFinalOutputFiles(
+            publishResult.files,
+            'toolbox:split:export'
+          );
+          clearToolboxSplitReadContext(readContext);
           appendActivityLogEntry({
             level: 'info',
             source: 'main',
@@ -17978,19 +18149,12 @@ function registerToolboxHandlers() {
 
       let preserveTempDir = false;
       try {
-        const saveResult = await dialog.showSaveDialog(mainWindow, {
-          defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-        });
-        if (saveResult.canceled || !saveResult.filePath) {
-          return { status: 'cancelled' };
-        }
         const publishResult = await publishToolboxArtifacts(
           'split-single',
           [{
             sourcePath: tempPath,
             outputId: 'split-1',
-            fileName: path.basename(saveResult.filePath),
+            fileName: path.basename(savePath),
             matchedCount,
             byteSize: generationResult.byteSize,
             sha256: generationResult.sha256,
@@ -17999,9 +18163,15 @@ function registerToolboxHandlers() {
             warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             styleStats: generationResult.styleStats || null
           }],
-          [{ targetPath: saveResult.filePath }]
+          [{ targetPath: savePath }],
+          taskContext.batchContext
         );
         const publishedFile = publishResult.files[0];
+        prepared.outputFiles = toolboxFinalOutputFiles(
+          publishResult.files,
+          'toolbox:split:export'
+        );
+        clearToolboxSplitReadContext(readContext);
         appendActivityLogEntry({
           level: 'info',
           source: 'main',
@@ -18036,6 +18206,7 @@ function registerToolboxHandlers() {
       }
     } catch (error) {
       return toolboxFailureResult(error);
+    }
     }
   });
 }
@@ -18504,6 +18675,16 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       },
       runtimeResolver: async ({ result, beforeStartEvidence }) => {
         const runtime = await buildArchiveRuntimeSnapshot(meta.channel, effectiveArgs, result);
+        if (meta.channel === 'toolbox:merge' || meta.channel === 'toolbox:split:export') {
+          runtime.inputPaths = prepared.inputPaths.slice();
+          runtime.inputFiles = Array.isArray(prepared.inputFiles)
+            ? prepared.inputFiles.slice()
+            : [];
+          runtime.outputFiles = Array.isArray(prepared.outputFiles)
+            ? prepared.outputFiles.slice()
+            : [];
+          runtime.outputPaths = runtime.outputFiles.map((file) => file.filePath);
+        }
         const afterSnapshots = captureArchiveSourceSnapshots({
           args: effectiveArgs,
           result,

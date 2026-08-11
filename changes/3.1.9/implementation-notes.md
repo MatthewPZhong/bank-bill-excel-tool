@@ -595,3 +595,48 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Deviations
 
 无。
+
+## PR3-Toolbox TaskLifecycle Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| toolbox 是唯一 utility scope | archive 筛选需可见，但业务模块菜单冻结为 13 primary | 精确 `{toolbox,TOOLBOX,工具箱,utility}`；不改 settings/renderer MODULES，不新增 alias visible item |
+| 三通道 literal policy 为 reserve/exclude/reserve | merge/export 有最终文件副作用；read 只选文件和预览 | 无 wildcard/额外 alias/handoff；split read 不建 batch/parent |
+| split read 证据只保留 Main 单一当前 context | export 必须关联一次明确 read，且重启后失效 | opaque token+path+stat；无 TTL/timer/Map/WeakMap、hash/path/latest fallback |
+| 所有最终输出位置在 prepare 确认 | PR2 明确 dialog 必须在 BOR/reserve 前完成 | merge/save、split save/directory/overwrite 取消均 `proceed:false`；算法不先产用户输出 |
+| 最终 artifact 通过 operation-scoped prepared/runtime 交既有 tracker | publication worker 已返回所有 final path/size/SHA | 不建第二 tracker/evidence store；公开 single result shape 不变；tmp 不登记 |
+| large/multi/publication 只继承 exact7 | PR2 worker-batch-context 是唯一冻结器 | Main freeze、worker refreeze；scanFields 无 context；worker 不 reserve/reopen |
+
+### Evidence
+
+- 基线精确核为 `df3409b25782ead0ea944c00439dca0149c69a8d`（parent `e1979c2e8fda87ade96c7f60f7c55f7f834d1034`），tracked clean、无 upstream；获批后创建本地分支 `codex/v3.1.9-pr3-toolbox-task-lifecycle`，无 push/PR/GitHub 写入。
+- primary scope 保持 13；archive visible scopes 为 13+1 utility。`toolbox:merge`、`toolbox:split:export` 是唯一两个 TOOLBOX reserve action且各自 `startsNewFlow:true`；`toolbox:split:read` 是唯一 toolbox exclude，理由为 preview-only。
+- split read 在扫描开始前和结束后复核 stat，并保存随机 token、resolved source path 与 read-time stat。新 read 清旧；输出 dialog 取消不清；beforeStart missing/mismatch 清并由 lifecycle 将已 reserve 原批次标 failed且0 execute；成功 publication 后清；普通业务失败保留供重试。
+- merge beforeStart 为全部实际输入捕获 source snapshot；split export 使用 read snapshot 作为 input descriptor。publication 返回的全部最终 files 被转为 output descriptors，保留 expected SHA/size；normal/large/multi 均只更新本次 prepared，不登记 generation/tmp。
+- large split export dispatch 和 publication dispatch 要求 exact7，worker 再冻结；scanFields 与启动恢复不伪造 batch。Main 的普通算法只在真实副作用 publication 边界传 context，不建立无用第二状态。
+- 首次 focused 共 80 项出现 3 个失败：visible reserve scope 仍断言 13、renderer 仍以 tracked split-read 定位边界，均为 stale test；multi source slice 被内部 large 判断提前截断为 test design。机械更新真实合同后 80/80 PASS；无 production regression/environment。
+- lifecycle/freshness/worker/publication 代表 51/51 PASS：reserve failure 0 execute/output；freshness failure 终结原 batch；token 覆盖/重试/清除；large normal/multi worker 与 publication exact7；artifact append/outbox 保留业务成功和原 batch。
+- toolbox integrations：roundtrip 30/30、multi-split 17/17、multi-sheet merge 16/16、300k×2 large-file 50/50、500k/1.5m multi-sheet large split 31/31 PASS。large-file 生成 600k 合并输出与 100k 拆分输出，RSS 峰值 642MB；large split 1.5m tier 的 paired RSS 中位增量 137MB，31/31 脚本合同通过。
+- 扩大聚焦 131/131 PASS；archive filter/scope/policy 追加复核 38/38 PASS；`npm run lint`、changed JS `node --check`、`git diff --check` PASS。
+- `npm run check:vars -- --include-minor` 最终 exit 0，仅命中 Runtime-state `MODULES/app/dialog`，无 Critical/Risk-sensitive。`MODULES` 定义与模块路由/启用列表未改，工具箱只追加到存档筛选独立 Map；`app` 只沿用 `getPath('userData')` 向 publication worker 传原 context，启动/退出钩子未改；`dialog` 的 merge/save/directory/overwrite 全移到 prepare 且取消 `proceed:false`，0 BOR/reserve 契约与 UI 静态测试通过。
+- 最终且唯一一次 `npm run release-check` exit 0：lint、smoke PASS；unit 4999/4999（327 files，0 fail/skip，node test 15564.311584ms）；integration 48/48 scripts、2385/2385 assertions（381885ms）。首次 full 无失败、retry、阈值或测试框架修改；runner 仅在全绿后合法自动同步 `rules/integration-test-policy.md` §七 timestamp/timings，脚本与断言总数不变。
+
+### Remaining Unknowns
+
+- Windows installer/portable 的 worker context 序列化、文件选择/覆盖、publication recovery 与路径语义仍是 PROBE。
+- Excel/WPS 实际打开、格式保真、日期系统、超 104 万行/多 sheet、多输出文件逐项可读性仍需人工验收。
+- 约 16GB/700万行真实样本、冷/热耗时和 RSS 阈值仍是性能 PROBE；本机 300k/1.5m 自动脚本不能关闭。
+- ⚠️ 文件数、sheet 数、输入/输出行数守恒和资金相关表格内容/血缘仍须人工复核；自动回读不替代真实业务验收。
+
+### Blindspot / Reconciliation Pass
+
+- literal inventory 已覆盖三个真实入口，无旁路 handoff；split read 是 raw exclude，merge/export 只经现有 `runArchiveAwareOperation → TaskLifecycle`。
+- 状态复核覆盖新 read 覆盖、取消保留、missing/mismatch 清除、成功清除、普通失败保留和重启失效；没有第二 tracker/lifecycle/allocator/terminal 或 latest/path/hash fallback。
+- 输出血缘只使用 publication worker 的最终 descriptors；多输出以同一 batch/parent/context 一次登记，tmp/journal recovery 路径不冒充业务 artifact。archive failure/outbox 不覆盖业务成功，source freshness/business failure 不被 archive 结果掩盖。
+- 核心 merge/split 算法、字段/值选择、sheet/日期/样式、命名、行数与 RSS 阈值未改；资金与人工红线继续开放。
+
+### Deviations
+
+无。

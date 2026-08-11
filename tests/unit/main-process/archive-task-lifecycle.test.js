@@ -14,6 +14,9 @@ const {
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
 } = require('../../../src/main-process/archive-center/ipc-task-contract');
+const {
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/archive-center/task-policy-registry');
 
 const POLICY = Object.freeze({
   channel: 'pending:reconcile:run',
@@ -212,6 +215,57 @@ test('reserve 后业务未开始且直接终态写失败时，把 failed 意图�
     metadata: {}
   });
   assert.equal(calls.some((call) => call[0] === 'execute'), false);
+});
+
+test('toolbox reserve 失败时不进入算法或输出副作用', async () => {
+  const toolboxPolicy = createTaskPolicyRegistry().require('toolbox:split:export');
+  const { calls, lifecycle } = createHarness({
+    reserveResult: {
+      ok: false,
+      code: 'ARCHIVE_BATCH_RESERVATION_FAILED',
+      message: 'reserve failed'
+    }
+  });
+  const result = await lifecycle.run({
+    policy: toolboxPolicy,
+    meta: { channel: toolboxPolicy.channel },
+    execute: () => {
+      calls.push(['unexpected-toolbox-output']);
+      return { status: 'success' };
+    }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'ARCHIVE_BATCH_RESERVATION_FAILED');
+  assert.deepEqual(calls.map((call) => call[0]), [
+    'begin', 'resolve-flow', 'reserve', 'end'
+  ]);
+});
+
+test('toolbox freshness 在 reserve 后失败时终结原批次且不执行算法', async () => {
+  const toolboxPolicy = createTaskPolicyRegistry().require('toolbox:split:export');
+  const { calls, lifecycle } = createHarness();
+  const result = await lifecycle.run({
+    policy: toolboxPolicy,
+    meta: { channel: toolboxPolicy.channel },
+    beforeStart: () => {
+      calls.push(['verify-toolbox-source']);
+      const error = new Error('拆分源文件在读取后已变化，请重新选择');
+      error.code = 'TOOLBOX_SPLIT_SOURCE_CHANGED';
+      throw error;
+    },
+    execute: () => {
+      calls.push(['unexpected-toolbox-output']);
+      return { status: 'success' };
+    }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'TOOLBOX_SPLIT_SOURCE_CHANGED');
+  assert.deepEqual(calls.map((call) => call[0]), [
+    'begin', 'resolve-flow', 'reserve', 'verify-toolbox-source', 'fail', 'end'
+  ]);
+  assert.equal(calls.find((call) => call[0] === 'fail')[1], 11);
 });
 
 test('已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started', async () => {

@@ -13,11 +13,7 @@ const EXCLUDE_REASONS = Object.freeze([
 ]);
 const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
 
-const PR3_HANDOFF_CHANNELS = Object.freeze([
-  'toolbox:merge',
-  'toolbox:split:export',
-  'toolbox:split:read'
-]);
+const PR3_HANDOFF_CHANNELS = Object.freeze([]);
 
 const SUPPORT_ACTION_POLICIES = Object.freeze([
   Object.freeze({
@@ -185,6 +181,10 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'position-reconciliation:source:delete',
     'position-reconciliation:source:export-anomaly',
     'position-reconciliation:source:prepare-import'
+  ]),
+  TOOLBOX: Object.freeze([
+    'toolbox:merge',
+    'toolbox:split:export'
   ])
 });
 
@@ -284,6 +284,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
   'preview-only': Object.freeze([
     'file:extract-big-account-order',
     'template:preview-delete-bill-split-row',
+    'toolbox:split:read',
     'vccFinancialOp:data-manager:delete-preview',
     'vccFinancialOp:data-manager:export-preview',
     'vccFinancialOp:run:preflight',

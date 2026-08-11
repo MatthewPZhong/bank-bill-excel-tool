@@ -18,6 +18,7 @@
 'use strict';
 
 const { Worker } = require('node:worker_threads');
+const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
 
 // 工具箱大文件拆分薄 worker 入口（new Worker 拉起 → 内部跑三种拆分作业）。
 //   解析方式与 big-table-import-dispatch.js 一致（require.resolve 相对本文件定位 backend 下 worker entry）。
@@ -47,7 +48,20 @@ const WORKER_MAX_OLD_GEN_MB = 4096;
 //
 //   错误：worker postMessage 'error' → deserializeError 还原 → reject；未 settled 的非零 exit → reject（兜底）。
 //   清理：done / error / exit 任一 settle 后 postMessage close + terminate worker（不泄漏 worker）。
-function dispatchLargeSplit({ op, filePath, field, values, savePath, groups, onProgress, onLog }) {
+function dispatchLargeSplit({
+  op,
+  filePath,
+  field,
+  values,
+  savePath,
+  groups,
+  batchContext,
+  onProgress,
+  onLog
+}) {
+  const frozenBatchContext = freezeWorkerBatchContext(batchContext, {
+    required: op !== 'scanFields'
+  });
   let worker = null;
   let settled = false;
   let jobId = null;
@@ -121,7 +135,8 @@ function dispatchLargeSplit({ op, filePath, field, values, savePath, groups, onP
       field,
       values,
       savePath,
-      groups
+      groups,
+      batchContext: frozenBatchContext
     });
   });
 

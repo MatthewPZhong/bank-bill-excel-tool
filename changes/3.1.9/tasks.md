@@ -79,7 +79,13 @@
   - [x] generic/dedicated worker required exact7、pre-critical/protected cancel、terminal CAS 和 artifact/terminal outbox 原批次代表测试完成。
   - [x] 扩大聚焦 unit 460/460、四条 VCC integration 334/334、lint/node/diff PASS；check-vars 仅 Runtime-state review 命中；最终唯一 full 为 unit 4990/4990、integration 48/48 scripts 与 2385/2385 assertions 全绿。
   - [ ] 用户 P0/P1 GUI、Windows/16 GB/production legacy-trigger 与主体×九币种/跨月/审计/导出资金人工验收。
-- [ ] PR3-Toolbox：工具箱独立生命周期与文件存档接线。
+- [x] PR3-Toolbox：工具箱独立生命周期与文件存档接线的本地实现与自动证据。
+  - [x] 新增唯一 toolbox utility scope；保持 13 primary 和主模块启用/切换菜单不变；三通道 literal policy 精确闭合。
+  - [x] merge/split export 全部 dialog 移入 prepare；split read 单一 token/stat context 与 reserve 后 freshness fail-closed 已接线。
+  - [x] normal/large/multi/publication 共用原 TaskLifecycle batch/parent/exact7 context；真实输入和全部最终输出由唯一 tracker 登记。
+  - [x] 聚焦 unit、roundtrip、large-file、large-split 与 multi-sheet 回归通过；blindspot/reconciliation 已复核。
+  - [x] 最终唯一一次 `release-check` 全绿：lint/smoke、unit 4999/4999、integration 48/48 scripts 与 2385/2385 assertions；runner policy 合法自动同步。
+  - [ ] 用户 P0/P1 GUI、Windows installer/portable、Excel/WPS、约16GB/700万行与真实文件/sheet/行数/资金输出血缘人工验收。
 - [ ] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup。
 - [ ] PR5：存储地址、marker、journal、迁移与恢复。
 - [ ] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent。

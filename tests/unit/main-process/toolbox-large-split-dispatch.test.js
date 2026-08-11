@@ -30,6 +30,15 @@ const STUB_DONE = path.join(FIXTURES, 'toolbox-split-stub-done.js');
 const STUB_ERROR = path.join(FIXTURES, 'toolbox-split-stub-error.js');
 const STUB_EXIT = path.join(FIXTURES, 'toolbox-split-stub-exit.js');
 const STUB_WRONG_JOBID = path.join(FIXTURES, 'toolbox-split-stub-wrong-jobid.js');
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 41,
+  batchNumber: '2026-08-11-001',
+  taskRunId: 'toolbox-task-1',
+  taskKey: 'toolbox:split:export',
+  moduleId: 'toolbox',
+  parentRunId: 'toolbox-parent-1',
+  operationKey: 'toolbox:split:export:toolbox-task-1'
+});
 
 // ─────────────────────────────────────────────────────────────────
 // A 组：桩 worker 协议
@@ -58,6 +67,7 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
       field: 'A',
       values: ['a1'],
       savePath: '/fake/out.xlsx',
+      batchContext: BATCH_CONTEXT,
       onProgress: (p) => progressEvents.push(p),
       onLog: (e) => logEntries.push(e)
     });
@@ -93,7 +103,13 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
 
   test('A5. jobId 过滤：错 jobId 的 done 被忽略，只认匹配 jobId 的 done', async () => {
     __test_only_set_worker_script__(STUB_WRONG_JOBID);
-    const { promise } = dispatchLargeSplit({ op: 'exportFilter', filePath: '/fake/x.xlsx', field: 'A', values: ['a'] });
+    const { promise } = dispatchLargeSplit({
+      op: 'exportFilter',
+      filePath: '/fake/x.xlsx',
+      field: 'A',
+      values: ['a'],
+      batchContext: BATCH_CONTEXT
+    });
     const result = await promise;
     // 桩 worker 先发 matchedCount:-999（错 jobId，应忽略），再发 matchedCount:7（正确 jobId）。
     assert.deepEqual(result, { matchedCount: 7 }, '应忽略错 jobId 的 done，只 resolve 匹配 jobId 的 result');
@@ -104,6 +120,28 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
     assert.match(DEFAULT_WORKER_ENTRY, /toolbox-xlsx-stream[\\/]large-split-worker\.js$/,
       'DEFAULT_WORKER_ENTRY 应解析到生产 worker 入口');
     assert.ok(fs.existsSync(DEFAULT_WORKER_ENTRY), 'worker entry 文件应真实存在');
+  });
+
+  test('A7. 有输出副作用的 worker dispatch 必须携带 exact7 batchContext', () => {
+    assert.throws(
+      () => dispatchLargeSplit({
+        op: 'exportFilter',
+        filePath: '/fake/x.xlsx',
+        field: 'A',
+        values: ['a'],
+        savePath: '/fake/out.xlsx'
+      }),
+      /batchContext 缺失/
+    );
+    assert.throws(
+      () => dispatchLargeSplit({
+        op: 'exportMultiFilters',
+        filePath: '/fake/x.xlsx',
+        groups: [],
+        batchContext: { batchId: 1 }
+      }),
+      /batchNumber.*不能为空/
+    );
   });
 });
 
@@ -182,7 +220,8 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
       filePath: srcPath,
       field: '渠道',
       values: ['WECHAT'],
-      savePath: outPath
+      savePath: outPath,
+      batchContext: BATCH_CONTEXT
     });
     const result = await promise;
 
@@ -222,7 +261,8 @@ test.describe('T4 toolbox-large-split-dispatch（最小真 worker 冒烟）', ()
         { fileName: 'ALIPAY.xlsx', field: '渠道', values: ['ALIPAY'], savePath: channelPath },
         { fileName: 'USD.xlsx', field: '币种', values: ['USD'], savePath: currencyPath },
         { fileName: 'EMPTY.xlsx', field: '渠道', values: ['NONE'], savePath: emptyPath }
-      ]
+      ],
+      batchContext: BATCH_CONTEXT
     });
     const result = await promise;
 

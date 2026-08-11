@@ -432,3 +432,20 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 当前自动证据：VCC/Archive 扩大聚焦 unit 460/460 PASS；四条真实 VCC integration 19/19、209/209、77/77、29/29，共 334/334 PASS；lint、changed JS `node --check`、diff check PASS。首次失败分类包含一个 operation-tracker production regression（局部 payload 引用，已修）及若干 required exact7/旧 UI exclusion 的 stale tests/integration fixtures；生产 required 合同未放宽，未增加 renderer/IPC 不可达防御。`check-vars -- --include-minor` exit 2 仅 Runtime-state `MODULES/app/dialog`，无 Critical/Risk-sensitive；逐项 review 结论记录于 implementation notes。最终且唯一一次 `npm run release-check` exit 0：lint/smoke PASS，unit 4990/4990（326 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（384212ms）；runner 只在全绿后自动同步 policy §七，无 retry 或阈值放宽。
 
 P0/P1 人工检查仍待用户：取消一个真实保存对话框确认运行次数不变；分别观察 pre-critical 与 protected cancel；在存档中心核对一个 metadata-only 和一个多文件结果导出批次。⚠️ 真实主体×九币种、调整后余额、跨月期初、归档/解归档/delete 审计及全部导出文件必须由财务人工复核；Windows packaged、约 16 GB 与目标生产 legacy/trigger 仍为 PROBE。完整自动门禁不能替代上述真实环境和资金人工验收。
+
+## 十七、PR3-Toolbox TaskLifecycle 测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| TB-L01 | P0 | scope/policy | utility + literal inventory | primary=13、visible=14；toolbox 不进主模块列表；merge/export reserve、read preview exclude exact |
+| TB-L02 | P0 | merge prepare | input/save cancel、reserve failure | 全部 dialog 在 prepare；任一取消 0 BOR/reserve；reserve failure 0 algorithm/output |
+| TB-L03 | P0 | merge artifact | N input + final outputs | beforeStart 捕获全部输入；同一 batch 登记 writer 全部最终输出；tmp 不登记 |
+| TB-L04 | P0 | split read | preview token | raw IPC、0 batch/parent；新读覆盖；opaque token+path+stat；不把 read stat 当可信字节摘要 |
+| TB-L05 | P0 | split freshness | cancel/missing/changed/success/failure | 输出 dialog 取消保留；missing/changed 清 token且原 batch failed、0 output；成功清；普通失败可重试 |
+| TB-L06 | P0 | split branches | normal/large/multi-sheet/multi-output | 一个 export 一个 batch/parent/context；全部最终 outputs；worker 不 reserve/reopen |
+| TB-L07 | P0 | context | large/publication worker | 副作用 dispatch required exact7；Main freeze、worker refreeze；scanFields/restart recovery 不伪造 context |
+| TB-L08 | P0 | artifact/outbox | append/publication/terminal failure | 业务成功不被 archive 失败覆盖；outbox/terminal intent 复用原 batch/parent/operation key |
+| TB-L09 | P1 | renderer/archive UI | token + utility filter | renderer 透传 splitReadToken；archive 筛选显示工具箱；业务模块启用/切换菜单不变 |
+| TB-L10 | P1 | regression | roundtrip/large/multi-sheet/rows/style | 既有格式、sheet、日期、命名、资金与行数守恒回归不变；相同 terminal matrix 不按 worker 分支复制 |
+
+自动证据：扩大聚焦 131/131、archive filter/scope/policy 38/38；五条 toolbox integration 分别 30/30、17/17、16/16、50/50、31/31 PASS。首次 focused 失败分类为两个 stale test 和一个 test design，无 production regression/environment。最终且唯一一次 `release-check` 全绿：lint/smoke PASS，unit 4999/4999（327 files），integration 48/48 scripts、2385/2385 assertions（381885ms）；首次 full 无失败、retry 或阈值放宽，runner 只在全绿后自动同步 policy。Windows packaged、Excel/WPS、约16GB/700万行、真实文件/sheet/行数/资金输出血缘仍是 PROBE/人工门禁，自动 PASS 不关闭。

@@ -694,7 +694,20 @@ async function run() {
     console.log('B2 真 worker exportFilter（new Worker → done→resolve + 产物 readback）...');
     const outWorker = path.join(tmpDir, 'worker-out.xlsx');
     const dExp = dispatchLargeSplit({
-      op: 'exportFilter', filePath: fileWorker, field: SPLIT_FIELD, values: [SPLIT_VALUE], savePath: outWorker
+      op: 'exportFilter',
+      filePath: fileWorker,
+      field: SPLIT_FIELD,
+      values: [SPLIT_VALUE],
+      savePath: outWorker,
+      batchContext: {
+        batchId: 902,
+        batchNumber: 'integration-toolbox-902',
+        taskRunId: 'integration-toolbox-large-split',
+        taskKey: 'toolbox:split:export',
+        moduleId: 'toolbox',
+        parentRunId: 'integration-toolbox-parent-902',
+        operationKey: 'toolbox:split:export:integration-toolbox-large-split'
+      }
     });
     const wExp = await dExp.promise;
     assertEq(wExp.matchedCount, hitW, `B2 worker exportFilter matchedCount = 注入命中数（${hitW}）`);

@@ -166,7 +166,13 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const archiveModulesEnd = renderer.indexOf('const archiveState = {', archiveModulesStart);
     const archiveModulesSource = renderer.slice(archiveModulesStart, archiveModulesEnd);
     assert.match(archiveModulesSource, /Object\.values\(MODULES\)/);
+    assert.match(archiveModulesSource, /\['toolbox', '工具箱'\]/);
     assert.doesNotMatch(archiveModulesSource, /module\.id !== MODULES\.vccFinancialOp\.id/);
+    const mainModulesSource = renderer.slice(
+      renderer.indexOf('const MODULES = Object.freeze({'),
+      renderer.indexOf('\n});', renderer.indexOf('const MODULES = Object.freeze({')) + 4
+    );
+    assert.doesNotMatch(mainModulesSource, /toolbox/);
   });
 
   test('自动更新既有选择器与行为契约继续存在', () => {

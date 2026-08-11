@@ -92,7 +92,7 @@ function literalInvocations(filePath, objectName, methodName) {
   return channels.sort();
 }
 
-test('main literal IPC 与 PR2 policy + PR3 exact handoff 精确相等', () => {
+test('main literal IPC 与 PR3-Toolbox 完成后的 policy 精确相等', () => {
   const inventory = mainIpcInventory();
   const registry = createTaskPolicyRegistry();
   const actual = inventory.map((item) => item.channel).sort();
@@ -105,14 +105,10 @@ test('main literal IPC 与 PR2 policy + PR3 exact handoff 精确相等', () => {
   assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
   assert.deepEqual(expected, actual);
   assert.equal(actual.length, 242);
-  assert.equal(registry.channels('reserve').length, 121);
-  assert.equal(registry.channels('exclude').length, 116);
+  assert.equal(registry.channels('reserve').length, 123);
+  assert.equal(registry.channels('exclude').length, 117);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
-  assert.deepEqual(PR3_HANDOFF_CHANNELS, [
-    'toolbox:merge',
-    'toolbox:split:export',
-    'toolbox:split:read'
-  ]);
+  assert.deepEqual(PR3_HANDOFF_CHANNELS, []);
 });
 
 test('preload 暴露集合与 main literal inventory 精确相等', () => {
@@ -219,6 +215,17 @@ test('FILE_CHANNELS 不得包含 exclude preview/picker，scenario 只登记 app
   assert.equal(FILE_CHANNELS.has('scenarios:import-bundle-apply'), true);
 });
 
+test('工具箱三通道精确登记为两 reserve、一 preview exclude', () => {
+  const registry = createTaskPolicyRegistry();
+  assert.equal(registry.require('toolbox:merge').batchPolicy, 'reserve');
+  assert.equal(registry.require('toolbox:split:export').batchPolicy, 'reserve');
+  assert.equal(registry.require('toolbox:split:read').batchPolicy, 'exclude');
+  assert.equal(registry.require('toolbox:split:read').excludeReason, 'preview-only');
+  assert.equal(FILE_CHANNELS.has('toolbox:merge'), true);
+  assert.equal(FILE_CHANNELS.has('toolbox:split:export'), true);
+  assert.equal(FILE_CHANNELS.has('toolbox:split:read'), false);
+});
+
 test('statement execute 分类器只额外接受补录余额，prepare 交互状态必须拒绝', () => {
   assert.equal(
     statementResultClassifier({ status: 'manual-balance-required' }),
@@ -264,13 +271,18 @@ test('大账号交互只让 import/complete reserve，preview/cancel 精确 excl
   );
 });
 
-test('13 个 primary scope 均有 reserve action，VCC财务独立于VCCOP且不含toolbox', () => {
+test('13 个 primary 与 1 个 toolbox utility 均有 reserve action，VCC财务独立于VCCOP', () => {
   const reserve = createTaskPolicyRegistry().list().filter((policy) => policy.batchPolicy === 'reserve');
-  assert.equal(new Set(reserve.map((policy) => policy.scopeId)).size, 13);
+  const reserveScopeIds = new Set(reserve.map((policy) => policy.scopeId));
+  assert.equal(reserveScopeIds.size, 14);
+  assert.equal(new Set([...reserveScopeIds].filter((scopeId) => scopeId !== 'toolbox')).size, 13);
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('vccFinancialOp:run:calculate').scopeId, 'vcc-financial-op');
   assert.equal(registry.require('vccOpCalc:run:save').scopeId, 'vcc-op-calc');
-  assert.equal(reserve.some((policy) => policy.channel.startsWith('toolbox:')), false);
+  assert.deepEqual(
+    reserve.filter((policy) => policy.scopeId === 'toolbox').map((policy) => policy.channel).sort(),
+    ['toolbox:merge', 'toolbox:split:export']
+  );
 });
 
 test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {

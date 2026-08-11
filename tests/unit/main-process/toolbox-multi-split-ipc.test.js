@@ -13,6 +13,9 @@ const start = mainSource.indexOf("trackedIpcHandle('toolbox:split:export'");
 const end = mainSource.indexOf('\n}\n\n// v2.0.0-beta.4', start);
 const mergeSource = mainSource.slice(mergeStart, start);
 const handlerSource = mainSource.slice(start, end);
+const executeStart = handlerSource.indexOf('async execute(_event, prepared, taskContext)');
+const prepareSource = handlerSource.slice(0, executeStart);
+const executeSource = handlerSource.slice(executeStart);
 const preserveHelperStart = mainSource.indexOf('function shouldPreserveToolboxTemporaryFiles(error)');
 const preserveHelperEnd = mainSource.indexOf(
   '\n}\n\nconst EMPTY_TOOLBOX_WARNING_SUMMARY',
@@ -117,21 +120,22 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
   });
 
   test('合并、多拆、大文件单拆和普通单拆统一保留人工恢复所需 generation 目录', () => {
-    const fieldValidationIndex = handlerSource.indexOf('if (!field)');
-    const multiSource = handlerSource.slice(
-      handlerSource.indexOf("if (payload && payload.mode === 'multiple')"),
-      fieldValidationIndex
-    );
-    const largeStart = handlerSource.indexOf(
+    const multiStart = executeSource.indexOf("if (payload.mode === 'multiple')");
+    const multiLargeStart = executeSource.indexOf(
       'if (await shouldUseLargeChannel(sourceFilePath))',
-      fieldValidationIndex
+      multiStart
     );
-    const normalStart = handlerSource.indexOf(
+    const largeStart = executeSource.indexOf(
+      'if (await shouldUseLargeChannel(sourceFilePath))',
+      multiLargeStart + 1
+    );
+    const normalStart = executeSource.indexOf(
       "const generationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'))",
       largeStart
     );
-    const largeSource = handlerSource.slice(largeStart, normalStart);
-    const normalSource = handlerSource.slice(normalStart);
+    const multiSource = executeSource.slice(multiStart, largeStart);
+    const largeSource = executeSource.slice(largeStart, normalStart);
+    const normalSource = executeSource.slice(normalStart);
 
     for (const [label, source] of [
       ['合并', mergeSource],
@@ -154,10 +158,12 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
     }
   });
 
-  test('多文件分支位于旧单文件 field/values 校验之前', () => {
-    const multiIndex = handlerSource.indexOf("payload.mode === 'multiple'");
-    const oldValidationIndex = handlerSource.indexOf("if (!field)");
-    assert.ok(multiIndex >= 0 && oldValidationIndex > multiIndex);
+  test('单文件字段和值校验只约束单文件模式，且全部发生在 reserve 前 prepare', () => {
+    assert.match(prepareSource, /payload\.mode !== 'multiple' && !field/);
+    assert.match(prepareSource, /payload\.mode !== 'multiple' && \(!Array\.isArray\(values\)/);
+    assert.ok(prepareSource.includes("showImportOpenDialog('toolbox-split-export-directory'"));
+    assert.ok(!executeSource.includes('showSaveDialog'));
+    assert.ok(!executeSource.includes("showImportOpenDialog('toolbox-split-export-directory'"));
   });
 
   test('只选择一次目录，冲突统一确认后才创建临时目录', () => {
