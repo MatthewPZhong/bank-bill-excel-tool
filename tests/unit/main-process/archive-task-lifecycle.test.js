@@ -181,6 +181,39 @@ test('严格按 BOR → reserve → started → execute → append → terminal 
   assert.equal(calls.find((call) => call[0] === 'execute')[1], true);
 });
 
+test('reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox', async () => {
+  const { calls, lifecycle } = createHarness({
+    failResult: {
+      ok: false,
+      code: 'ARCHIVE_DATABASE_BUSY',
+      message: 'terminal write failed'
+    }
+  });
+  const result = await lifecycle.run({
+    policy: POLICY,
+    meta: { channel: POLICY.channel },
+    beforeStart: () => {
+      const error = new Error('source changed');
+      error.code = 'SOURCE_CHANGED';
+      throw error;
+    },
+    execute: () => ({ status: 'success' })
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'SOURCE_CHANGED');
+  const persisted = calls.find((call) => call[0] === 'persist-terminal-intent');
+  assert.ok(persisted);
+  assert.equal(persisted[1].batchContext.batchId, 11);
+  assert.deepEqual(persisted[1].terminalOutcome, {
+    taskStatus: 'failed',
+    code: 'SOURCE_CHANGED',
+    message: 'source changed',
+    metadata: {}
+  });
+  assert.equal(calls.some((call) => call[0] === 'execute'), false);
+});
+
 test('已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started', async () => {
   const { calls, lifecycle } = createHarness();
   const result = await lifecycle.run({

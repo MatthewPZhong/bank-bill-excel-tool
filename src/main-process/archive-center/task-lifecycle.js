@@ -159,6 +159,44 @@ class TaskLifecycle {
     return { ok: false, result, failure };
   }
 
+  async _settlePreExecutionFailure({ context, channel, failure, message }) {
+    const batchId = context.batchId;
+    const terminalOutcome = await this._settleArchiveCall({
+      batchId,
+      channel,
+      code: 'ARCHIVE_TASK_TERMINAL_FAILED',
+      message,
+      invoke: () => this.archiveService.failTaskBatch(batchId, failure)
+    });
+    if (terminalOutcome.ok) return terminalOutcome;
+
+    try {
+      if (!this.persistTerminalIntent) {
+        throw new Error('任务终态意图持久化接口不可用');
+      }
+      const persisted = await this.persistTerminalIntent({
+        batchContext: context,
+        sourceOperation: channel,
+        terminalOutcome: {
+          taskStatus: 'failed',
+          code: String(failure && failure.code || 'ARCHIVE_TASK_PRE_EXECUTION_FAILED'),
+          message: String(failure && failure.message || '任务在业务开始前失败'),
+          metadata: {}
+        }
+      });
+      if (!persisted || persisted.persisted !== true) {
+        throw new Error('任务终态意图未形成持久记录');
+      }
+      return { ...terminalOutcome, terminalIntentPersisted: true };
+    } catch (persistenceError) {
+      const error = new Error('任务开始前终态写入及持久恢复意图登记均失败');
+      error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+      error.cause = persistenceError;
+      error.preExecutionFailure = failure;
+      throw error;
+    }
+  }
+
   async run(payload = {}) {
     const policy = payload.policy || {};
     if (policy.batchPolicy !== 'reserve') {
@@ -304,12 +342,11 @@ class TaskLifecycle {
           })
         });
         if (!initialBind.ok) {
-          await this._settleArchiveCall({
-            batchId,
+          await this._settlePreExecutionFailure({
+            context,
             channel: policy.channel,
-            code: 'ARCHIVE_TASK_TERMINAL_FAILED',
             message: '身份绑定失败后无法终结任务批次',
-            invoke: () => this.archiveService.failTaskBatch(batchId, initialBind.failure)
+            failure: initialBind.failure
           });
           return lifecycleFailure(
             initialBind.failure,
@@ -334,12 +371,11 @@ class TaskLifecycle {
             code: error && error.code || 'ARCHIVE_INPUT_EVIDENCE_FAILED',
             message: error && error.message || '任务输入证据采集失败'
           };
-          await this._settleArchiveCall({
-            batchId,
+          await this._settlePreExecutionFailure({
+            context,
             channel: policy.channel,
-            code: 'ARCHIVE_TASK_TERMINAL_FAILED',
             message: '输入证据采集失败后无法终结任务批次',
-            invoke: () => this.archiveService.failTaskBatch(batchId, evidenceFailure)
+            failure: evidenceFailure
           });
           return lifecycleFailure(
             evidenceFailure,
@@ -389,12 +425,11 @@ class TaskLifecycle {
           code: started && started.code || 'ARCHIVE_TASK_START_FAILED',
           message: started && started.message || '任务批次无法进入运行状态'
         };
-        await this._settleArchiveCall({
-          batchId,
+        await this._settlePreExecutionFailure({
+          context,
           channel: policy.channel,
-          code: 'ARCHIVE_TASK_TERMINAL_FAILED',
           message: '任务开始失败后无法终结任务批次',
-          invoke: () => this.archiveService.failTaskBatch(batchId, startFailure)
+          failure: startFailure
         });
         return lifecycleFailure(
           startFailure,
@@ -484,7 +519,8 @@ class TaskLifecycle {
 
       await settleArtifacts({ result: businessResult, error: businessError });
 
-      if (!businessError && terminalStatus === 'succeeded'
+      if (!businessError
+          && (terminalStatus === 'succeeded' || policy.bindResultFlowIdentitiesOnFailure === true)
           && typeof payload.resultFlowIdentities === 'function') {
         const identityOutcome = await this._settleArchiveCall({
           batchId,

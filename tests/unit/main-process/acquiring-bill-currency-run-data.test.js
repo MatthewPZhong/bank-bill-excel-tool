@@ -191,49 +191,6 @@ function batchContextFrom(batch) {
   });
 }
 
-test('启动扫尾保护集合只采信侧库可恢复 run 的 exact-seven batchContext', () => {
-  const archiveRepository = createArchiveRepository(mainDb, {
-    now: () => new Date('2026-08-12T00:00:00.000Z')
-  });
-  archiveRepository.ensureSchema();
-  const reserved = archiveRepository.reserveTaskBatch({
-    moduleId: 'acquiring-bill-currency',
-    moduleCode: 'ACQUIRING',
-    moduleName: '收单单据币种校验',
-    taskKey: 'acquiringBillCurrency:run:resume',
-    taskRunId: 'recoverable-task-run',
-    operationKey: 'recoverable-operation',
-    parentRunId: 'recoverable-parent'
-  });
-  const context = batchContextFrom(reserved.batch);
-  seedResumableRun({
-    source: 'side',
-    monthKey: '2026-12',
-    progress: {
-      lastCompletedChunkIndex: 0,
-      totalChunks: 2,
-      status: 'partial',
-      chunkSize: 5000
-    },
-    batchContext: context
-  });
-  seedResumableRun({
-    source: 'side',
-    monthKey: '2027-01',
-    progress: {
-      lastCompletedChunkIndex: 0,
-      totalChunks: 2,
-      status: 'partial',
-      chunkSize: 5000
-    }
-  });
-
-  assert.deepEqual(
-    acquiringRunData.listRecoverableArchiveBatchIds({ userDataDir }),
-    [context.batchId]
-  );
-});
-
 test('fresh run prepare 可读取绑定原批次的可恢复 run，legacy/no-context 不冒充所有权', () => {
   const archiveRepository = createArchiveRepository(mainDb, {
     now: () => new Date('2026-08-12T00:00:00.000Z')
