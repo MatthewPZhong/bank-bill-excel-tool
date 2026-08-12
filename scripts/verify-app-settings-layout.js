@@ -108,7 +108,9 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
       batchNumber: '2026-08-10-127',
       moduleId: 'bank-statement-process',
       moduleName: '超长模块名称用于验证最小窗口下省略显示但完整标题仍可访问',
+      taskStatus: 'failed',
       archiveStatus: 'complete',
+      businessStatus: '',
       locked: true,
       createdAt: '2026-08-10T06:36:08.000Z'
     },
@@ -118,7 +120,9 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
       batchNumber: '2026-08-11-001',
       moduleId: 'vcc-financial-op',
       moduleName: 'VCC财务OP校验',
-      archiveStatus: 'incomplete',
+      taskStatus: 'cancelled',
+      archiveStatus: 'complete',
+      businessStatus: '',
       createdAt: '2026-08-11T06:37:09.000Z'
     },
     {
@@ -127,7 +131,9 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
       batchNumber: '2026-08-11-002',
       moduleId: 'toolbox',
       moduleName: '工具箱',
-      archiveStatus: 'complete',
+      taskStatus: 'running',
+      archiveStatus: 'staging',
+      businessStatus: '',
       createdAt: '2026-08-11T06:38:10.000Z'
     },
     {
@@ -136,7 +142,9 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
       batchNumber: 'BANK-20260720-001',
       moduleId: 'bank-statement-process',
       moduleName: '资金对账数据处理',
-      archiveStatus: 'failed',
+      taskStatus: 'succeeded',
+      archiveStatus: 'incomplete',
+      businessStatus: '',
       createdAt: '2026-07-20T06:39:11.000Z'
     }
   ];
@@ -156,7 +164,6 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
               ...batch,
               parentRunId: 'internal-parent-must-not-render',
               relatedBatches,
-              businessStatus: '已完成',
               retentionUntil: '2026-11-09',
               files: [{
                 fileRefId: 501,
@@ -359,20 +366,48 @@ async function verifyArchiveBrowserLayout(failures) {
   if (document.querySelector('.archive-center-detail-heading').textContent.includes('internal-parent')) {
     failures.push('parentRunId rendered in detail');
   }
-  const relatedTarget = document.querySelector('[data-related-batch-id="103"]');
+  const initialTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const initialArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (initialTaskStatus !== '任务失败' || initialArchiveStatus !== '存档完成') {
+    failures.push(`failed task/detail status ${initialTaskStatus}/${initialArchiveStatus}`);
+  }
+  const stagingListStatus = document.querySelector('[data-batch-id="103"] [data-role="archive-batch-status"]');
+  if (stagingListStatus?.dataset.status !== 'pending' || stagingListStatus?.textContent.trim() !== '处理中') {
+    failures.push(`staging list status ${stagingListStatus?.dataset.status}/${stagingListStatus?.textContent.trim()}`);
+  }
+  const initialRunningTarget = document.querySelector('[data-related-batch-id="103"]');
   const focusableOrder = [...document.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled)')];
-  const relatedIndex = focusableOrder.indexOf(relatedTarget);
+  const relatedIndex = focusableOrder.indexOf(initialRunningTarget);
   const lockIndex = focusableOrder.indexOf(document.querySelector('[data-action="toggle-archive-lock"]'));
   const openIndex = focusableOrder.indexOf(document.querySelector('[data-action="open-archive-file"]'));
   const saveIndex = focusableOrder.indexOf(document.querySelector('[data-action="save-as-archive-file"]'));
   if (relatedIndex < 0 || lockIndex <= relatedIndex || openIndex <= lockIndex || saveIndex <= openIndex) {
     failures.push(`detail tab order drifted: related=${relatedIndex}, lock=${lockIndex}, open=${openIndex}, save=${saveIndex}`);
   }
-  relatedTarget.click();
+  document.querySelector('[data-related-batch-id="102"]').click();
+  await waitFor(() => (
+    document.querySelector('.archive-center-detail-heading h4')?.textContent.trim()
+      === '2026-08-11-001'
+  ));
+  const cancelledTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const cancelledArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (cancelledTaskStatus !== '已取消' || cancelledArchiveStatus !== '存档完成') {
+    failures.push(`cancelled task/detail status ${cancelledTaskStatus}/${cancelledArchiveStatus}`);
+  }
+  document.querySelector('[data-related-batch-id="103"]').click();
   await waitFor(() => (
     document.querySelector('.archive-center-detail-heading h4')?.textContent.trim()
       === '2026-08-11-002'
   ));
+  const runningTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const stagingArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (runningTaskStatus !== '运行中' || stagingArchiveStatus !== '处理中') {
+    failures.push(`running task/detail status ${runningTaskStatus}/${stagingArchiveStatus}`);
+  }
+  const statusProjectionText = `${initialTaskStatus}${initialArchiveStatus}${cancelledTaskStatus}${cancelledArchiveStatus}${runningTaskStatus}${stagingArchiveStatus}`;
+  if (statusProjectionText.includes('-') || statusProjectionText.includes('状态未知')) {
+    failures.push(`task/archive status projection is not observable: ${statusProjectionText}`);
+  }
   if (document.querySelectorAll('.archive-center-related-batch[aria-current="true"]').length !== 1) {
     failures.push('related current batch aria state invalid');
   }

@@ -2404,8 +2404,21 @@ function archiveCenterStatusKey(value) {
   if (['success', 'completed', 'complete', 'archived', 'ready'].includes(status)) return 'success';
   if (['incomplete', 'partial', 'retryable'].includes(status)) return 'incomplete';
   if (['failed', 'error'].includes(status)) return 'failed';
-  if (['running', 'retrying', 'pending'].includes(status)) return 'pending';
+  if (['running', 'retrying', 'pending', 'staging'].includes(status)) return 'pending';
   return 'neutral';
+}
+
+function archiveCenterTaskStatusText(item) {
+  const explicit = String(item?.taskStatusText || '').trim();
+  if (explicit) return explicit;
+  const status = String(item?.taskStatus || '').trim().toLowerCase();
+  if (status === 'reserved') return '已预留';
+  if (status === 'running') return '运行中';
+  if (status === 'succeeded') return '已完成';
+  if (status === 'failed') return '任务失败';
+  if (status === 'cancelled') return '已取消';
+  const legacy = item?.businessStatusText ?? item?.businessStatus;
+  return String(legacy || '-');
 }
 
 function archiveCenterStatusText(item) {
@@ -2473,7 +2486,9 @@ function createArchiveCenterPreviewApi() {
       batchNumber: '2026-08-10-127',
       moduleId: MODULES.bankStatementProcess.id,
       moduleName: '超长模块名称用于验证最小窗口省略与完整标题',
+      taskStatus: 'failed',
       archiveStatus: 'complete',
+      businessStatus: '',
       locked: true,
       createdAt: '2026-08-10T06:36:08.000Z'
     },
@@ -2483,7 +2498,9 @@ function createArchiveCenterPreviewApi() {
       batchNumber: '2026-08-11-001',
       moduleId: MODULES.vccFinancialOp.id,
       moduleName: MODULES.vccFinancialOp.name,
-      archiveStatus: 'incomplete',
+      taskStatus: 'cancelled',
+      archiveStatus: 'complete',
+      businessStatus: '',
       createdAt: '2026-08-11T06:37:09.000Z'
     },
     {
@@ -2492,7 +2509,9 @@ function createArchiveCenterPreviewApi() {
       batchNumber: '2026-08-11-002',
       moduleId: 'toolbox',
       moduleName: '工具箱',
-      archiveStatus: 'complete',
+      taskStatus: 'running',
+      archiveStatus: 'staging',
+      businessStatus: '',
       createdAt: '2026-08-11T06:38:10.000Z'
     },
     {
@@ -2501,7 +2520,9 @@ function createArchiveCenterPreviewApi() {
       batchNumber: 'BANK-20260720-001',
       moduleId: MODULES.bankStatementProcess.id,
       moduleName: MODULES.bankStatementProcess.name,
-      archiveStatus: 'failed',
+      taskStatus: 'succeeded',
+      archiveStatus: 'incomplete',
+      businessStatus: '',
       createdAt: '2026-07-20T06:39:11.000Z'
     }
   ];
@@ -2521,7 +2542,6 @@ function createArchiveCenterPreviewApi() {
           ...batch,
           parentRunId: 'preview-parent-not-rendered',
           relatedBatches,
-          businessStatus: '已完成',
           retentionUntil: '2026-11-09',
           files: [
             {
@@ -2976,8 +2996,8 @@ function createAppUpdateSettingsDialog(options = {}) {
         </div>
       </div>
       <div class="archive-center-metadata">
-        <div><span>业务状态</span><strong>${escapeHtml(batch.businessStatusText ?? batch.businessStatus ?? '-')}</strong></div>
-        <div><span>存档状态</span><strong class="archive-center-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</strong></div>
+        <div><span>业务状态</span><strong data-role="archive-task-status">${escapeHtml(archiveCenterTaskStatusText(batch))}</strong></div>
+        <div><span>存档状态</span><strong class="archive-center-status" data-role="archive-detail-status" data-status="${status}">${escapeHtml(archiveCenterStatusText(batch))}</strong></div>
         <div><span>文件</span><strong>${readyCount}/${files.length} 个完成</strong></div>
         <div><span>保留至</span><strong>${escapeHtml(archiveCenterRetentionText(batch))}</strong></div>
       </div>

@@ -382,6 +382,45 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(listSource, /aria-current="\$\{active \? 'true' : 'false'\}"/);
   });
 
+  test('详情独立投影任务状态，列表与详情存档状态支持合法 staging', () => {
+    const statusStart = renderer.indexOf('function archiveCenterStatusKey');
+    const moduleStart = renderer.indexOf('function archiveCenterModuleName', statusStart);
+    const statusSource = renderer.slice(statusStart, moduleStart);
+    assert.match(statusSource, /\['running', 'retrying', 'pending', 'staging'\]/);
+    assert.match(statusSource, /function archiveCenterTaskStatusText\(item\)/);
+    for (const [status, text] of [
+      ['reserved', '已预留'],
+      ['running', '运行中'],
+      ['succeeded', '已完成'],
+      ['failed', '任务失败'],
+      ['cancelled', '已取消']
+    ]) {
+      assert.match(statusSource, new RegExp(`status === '${status}'\\) return '${text}'`));
+    }
+    assert.match(statusSource, /item\?\.businessStatusText \?\? item\?\.businessStatus/);
+
+    const listStart = renderer.indexOf('function renderArchiveBatches');
+    const relatedStart = renderer.indexOf('function renderArchiveRelatedBatches', listStart);
+    const listSource = renderer.slice(listStart, relatedStart);
+    assert.match(listSource, /archiveCenterStatusKey\(batch\.archiveStatus \?\? batch\.status\)/);
+    assert.doesNotMatch(listSource, /taskStatus/);
+
+    const detailStart = renderer.indexOf('function renderArchiveDetail');
+    const statsStart = renderer.indexOf('function renderArchiveStats', detailStart);
+    const detailSource = renderer.slice(detailStart, statsStart);
+    assert.match(detailSource, /data-role="archive-task-status">\$\{escapeHtml\(archiveCenterTaskStatusText\(batch\)\)\}/);
+    assert.match(detailSource, /data-role="archive-detail-status" data-status="\$\{status\}"/);
+    assert.match(detailSource, /archiveCenterStatusKey\(batch\.archiveStatus \?\? batch\.status\)/);
+
+    const previewStart = renderer.indexOf('function createArchiveCenterPreviewApi');
+    const settingsStart = renderer.indexOf('function createAppUpdateSettingsDialog', previewStart);
+    const previewSource = renderer.slice(previewStart, settingsStart);
+    assert.match(previewSource, /taskStatus: 'failed',[\s\S]*?archiveStatus: 'complete',[\s\S]*?businessStatus: ''/);
+    assert.match(previewSource, /taskStatus: 'cancelled',[\s\S]*?archiveStatus: 'complete',[\s\S]*?businessStatus: ''/);
+    assert.match(previewSource, /taskStatus: 'running',[\s\S]*?archiveStatus: 'staging',[\s\S]*?businessStatus: ''/);
+    assert.doesNotMatch(previewSource, /archiveStatus: 'failed'|businessStatus: '已完成'/);
+  });
+
   test('详情使用结构化 relatedBatches 同日/跨日分组并只切换现有 selectedBatchId', () => {
     const relatedStart = renderer.indexOf('function renderArchiveRelatedBatches');
     const detailStart = renderer.indexOf('function renderArchiveDetail', relatedStart);
