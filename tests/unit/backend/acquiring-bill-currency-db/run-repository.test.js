@@ -10,6 +10,7 @@
 //   T18.7：runId 缺失 → throw
 //   T18.8：空 bill 表 → totalChunks=0 / lastCompletedChunkIndex=-1（不触发 onChunkDone）
 //   T18.9：onChunkDone 回调抛错不阻塞主循环
+//   T18.10：chunk INSERT 与 checkpoint 同事务；checkpoint 失败时本 chunk 回滚，resume 不重复
 //   T19.1：getRunChunkProgress 读 NULL 列 → null
 //   T19.2：setRunChunkProgress + getRunChunkProgress round-trip（in-progress / partial / complete）
 //   T19.3：setRunChunkProgress invalid status → throw
@@ -353,6 +354,68 @@ test.describe('T18 — insertDiffRowsByJoinChunked', () => {
     assert.equal(invokeCount, 2, 'onChunkDone 仍被调用 2 次（每 chunk 一次）');
     const diffCount = db.prepare('SELECT COUNT(*) c FROM acquiring_bill_currency_diff_rows').get().c;
     assert.equal(diffCount, 4000, '全部 diff_rows 已写入');
+  });
+
+  test('T18.10 — checkpoint 失败与本 chunk 原子回滚，resume 不重复已提交行', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 4 });
+    const runId = insertRun(db, monthKey, 4);
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+      chunkSize: 2,
+      batchContext: BATCH_CONTEXT,
+    });
+
+    assert.throws(
+      () => runRepo.insertDiffRowsByJoinChunked(db, {
+        runId,
+        monthKey,
+        chunkSize: 2,
+        onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+          if (chunkIndex === 1) throw new Error('simulated-checkpoint-crash');
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: 'in-progress',
+            chunkSize: 2,
+          });
+        },
+      }),
+      /simulated-checkpoint-crash/
+    );
+
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM acquiring_bill_currency_diff_rows WHERE run_id = ?').get(runId).count,
+      2,
+      '第二个 chunk 的数据与失败 checkpoint 一起回滚'
+    );
+    assert.equal(runRepo.getRunChunkProgress(db, runId).lastCompletedChunkIndex, 0);
+
+    const resumed = runRepo.insertDiffRowsByJoinChunked(db, {
+      runId,
+      monthKey,
+      chunkSize: 2,
+      resumeFromChunkIndex: 1,
+      onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: chunkIndex,
+          totalChunks,
+          status: 'complete',
+          chunkSize: 2,
+        });
+      },
+    });
+    assert.equal(resumed.lastCompletedChunkIndex, 1);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM acquiring_bill_currency_diff_rows WHERE run_id = ?').get(runId).count,
+      4,
+      'resume 后总行数精确，不重放已提交 chunk'
+    );
   });
 
 });

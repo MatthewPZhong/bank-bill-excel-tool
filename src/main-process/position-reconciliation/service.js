@@ -552,6 +552,8 @@ class PositionReconciliationService {
       )],
       stage: 'starting',
       cancelAcknowledged: false,
+      cancelAcceptedCallback: null,
+      cancelAcceptedCallbackInvoked: false,
       forceTimer: null
     };
     this.activeImportJobs.set(jobId, active);
@@ -574,7 +576,7 @@ class PositionReconciliationService {
     });
   }
 
-  cancelActiveImport(jobId) {
+  cancelActiveImport(jobId, onCancellationAccepted = null) {
     const normalized = text(jobId);
     const active = this.activeImportJobs.get(normalized);
     if (!active) {
@@ -590,7 +592,12 @@ class PositionReconciliationService {
         message: '数据正在提交，当前阶段无法取消'
       };
     }
+    if (typeof onCancellationAccepted === 'function'
+        && !active.cancelAcceptedCallbackInvoked) {
+      active.cancelAcceptedCallback = onCancellationAccepted;
+    }
     if (active.cancelAcknowledged) {
+      this.notifyImportCancellationAccepted(active, { jobId: normalized, accepted: true });
       return { status: 'stopping', jobId: normalized };
     }
     if (active.cancel) active.cancel();
@@ -615,6 +622,20 @@ class PositionReconciliationService {
     return { status: 'stopping', jobId: normalized };
   }
 
+  notifyImportCancellationAccepted(active, message) {
+    if (!active || active.cancelAcceptedCallbackInvoked
+        || typeof active.cancelAcceptedCallback !== 'function') return;
+    const callback = active.cancelAcceptedCallback;
+    active.cancelAcceptedCallback = null;
+    active.cancelAcceptedCallbackInvoked = true;
+    try {
+      const pending = callback(message);
+      if (pending && typeof pending.catch === 'function') pending.catch(() => undefined);
+    } catch (_error) {
+      // 取消已由 worker 接受；存档终态失败仍由 TaskLifecycle 的恢复路径收口。
+    }
+  }
+
   dispatchTrackedImport(input, label) {
     const dispatched = this.positionImportDispatcher({
       ...input,
@@ -634,6 +655,11 @@ class PositionReconciliationService {
         if (active) {
           const accepted = !message || message.accepted !== false;
           active.cancelAcknowledged = accepted;
+          if (accepted) {
+            this.notifyImportCancellationAccepted(active, message);
+          } else {
+            active.cancelAcceptedCallback = null;
+          }
           if (!accepted && message.stage) {
             active.stage = text(message.stage);
           }

@@ -128,6 +128,13 @@ test.describe('run-check-worker-pool', () => {
     const freshRunSource = mainSource.slice(freshRunStart, freshRunEnd);
     assert.match(freshRunSource, /async prepare\(_event, payload = \{\}\)/);
     assert.ok(
+      freshRunSource.indexOf('acquiringRunData.findBoundResumableRun')
+        < freshRunSource.indexOf("tryAcquireOpLock('run', monthKey)"),
+      'fresh run 必须在月锁/reserve/clear 之前探测已绑定原批次的可恢复 run'
+    );
+    assert.match(freshRunSource, /ACQUIRING_RUN_RESUME_REQUIRED/);
+    assert.match(freshRunSource, /\['reserved', 'running'\]/);
+    assert.ok(
       freshRunSource.indexOf("tryAcquireOpLock('run', monthKey)")
         < freshRunSource.indexOf('async execute(event, prepared, taskContext)'),
       'fresh run 的 DB/month admission 与月锁必须在 lifecycle reserve 前的 prepare 完成'

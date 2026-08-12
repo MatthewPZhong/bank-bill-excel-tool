@@ -15226,6 +15226,49 @@ function registerNewAccountHandlers() {
           result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
         };
       }
+      const resumable = acquiringRunData.findBoundResumableRun({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        mainDbPath: database.dbPath,
+        monthKey
+      });
+      if (resumable) {
+        const repository = archiveCenterService
+          && archiveCenterService.service
+          && archiveCenterService.service.repository;
+        if (!repository) {
+          return {
+            proceed: false,
+            result: {
+              status: 'resume-required',
+              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
+              message: `${monthKey} 存在未完成的可恢复运行；存档身份暂不可核验，请先恢复存档中心后续跑原任务`,
+              runId: resumable.runId
+            }
+          };
+        }
+        const batch = repository
+          ? repository.getBatch(resumable.batchContext.batchId)
+          : null;
+        const sameIdentity = batch
+          && String(batch.taskRunId || '') === resumable.batchContext.taskRunId
+          && String(batch.operationKey || '') === resumable.batchContext.operationKey
+          && String(batch.parentRunId || '') === resumable.batchContext.parentRunId
+          && String(batch.moduleId || '') === resumable.batchContext.moduleId;
+        if (!batch || !sameIdentity || ['reserved', 'running'].includes(String(batch.taskStatus || ''))) {
+          return {
+            proceed: false,
+            result: {
+              status: 'resume-required',
+              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
+              message: !batch || !sameIdentity
+                ? `${monthKey} 的可恢复运行与存档身份不一致，已停止新运行以保留审计证据`
+                : `${monthKey} 存在未完成的可恢复运行，请先续跑原任务`,
+              runId: resumable.runId
+            }
+          };
+        }
+      }
       const lock = tryAcquireOpLock('run', monthKey);
       if (!lock.acquired) {
         return { proceed: false, result: { status: 'busy', message: lock.message } };
@@ -16893,16 +16936,30 @@ function registerPositionReconciliationHandlers() {
     },
     execute: (_event, prepared) => withPositionReconciliationLock(
       'source-anomaly-export',
-      () => getPositionReconciliationService().exportAnomalyReport(
-        prepared.reportKey,
-        prepared.savePath
-      )
+      () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportAnomalyReport(
+          prepared.reportKey,
+          prepared.savePath
+        );
+      }
     )
   });
 
-  ipcMain.handle('position-reconciliation:import:cancel', (_event, jobId) => {
+  ipcMain.handle('position-reconciliation:import:cancel', async (_event, jobId) => {
     try {
-      return getPositionReconciliationService().cancelActiveImport(jobId);
+      const active = positionReconciliationOperationActive;
+      return getPositionReconciliationService().cancelActiveImport(jobId, () => (
+        archiveTaskLifecycle && active
+          ? archiveTaskLifecycle.cancelActive(
+              (context) => Boolean(
+                context.moduleId === 'position-reconciliation-process'
+                && context.taskRunId === active.operationToken
+              ),
+              '用户取消平盘对账导入任务'
+            )
+          : null
+      ));
     } catch (error) {
       return positionReconciliationFailureResult(error);
     }
@@ -17082,10 +17139,13 @@ function registerPositionReconciliationHandlers() {
     },
     execute: (_event, prepared) => withPositionReconciliationLock(
       'result-filtered-export',
-      () => getPositionReconciliationService().exportRunFilteredSources(
-        prepared.runId,
-        prepared.savePath
-      )
+      () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportRunFilteredSources(
+          prepared.runId,
+          prepared.savePath
+        );
+      }
     )
   });
 

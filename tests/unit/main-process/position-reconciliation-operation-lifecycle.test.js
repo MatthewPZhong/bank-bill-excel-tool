@@ -934,6 +934,35 @@ test('主进程异常报告存档意图保留预检声明的输入依赖', () =>
   );
 });
 
+test('异常报告与筛选结果均在 writer 前登记 output intent，取消 ACK 接原批次 CAS', () => {
+  const mainSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../src/main.js'),
+    'utf8'
+  );
+  const anomalyStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:source:export-anomaly'");
+  const cancelStart = mainSource.indexOf("ipcMain.handle('position-reconciliation:import:cancel'", anomalyStart);
+  const filteredStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:run:export-filtered'");
+  const importResultStart = mainSource.indexOf("trackedIpcHandle(\n    'position-reconciliation:run:import-result'", filteredStart);
+  assert.ok(anomalyStart >= 0 && cancelStart > anomalyStart);
+  assert.ok(filteredStart >= 0 && importResultStart > filteredStart);
+  const anomaly = mainSource.slice(anomalyStart, cancelStart);
+  const filtered = mainSource.slice(filteredStart, importResultStart);
+  assert.ok(
+    anomaly.indexOf("recordPositionArchiveIntentFiles([prepared.savePath], 'output')")
+      < anomaly.indexOf('exportAnomalyReport('),
+    '异常报告必须先登记 output intent 再发布'
+  );
+  assert.ok(
+    filtered.indexOf("recordPositionArchiveIntentFiles([prepared.savePath], 'output')")
+      < filtered.indexOf('exportRunFilteredSources('),
+    '筛选结果必须先登记 output intent 再发布'
+  );
+  const cancelEnd = mainSource.indexOf("trackedIpcHandle(\n    'position-reconciliation:mappings:save'", cancelStart);
+  const cancel = mainSource.slice(cancelStart, cancelEnd);
+  assert.match(cancel, /cancelActiveImport\(jobId, \(\) => \([\s\S]*archiveTaskLifecycle\.cancelActive/);
+  assert.match(cancel, /context\.taskRunId === active\.operationToken/);
+});
+
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
   const operationToken = 'operation-rejected';
   let pending = {

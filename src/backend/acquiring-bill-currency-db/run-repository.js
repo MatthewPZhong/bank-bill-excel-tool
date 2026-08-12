@@ -221,6 +221,7 @@ function insertDiffRowsByJoin(db, { runId, monthKey }) {
 //   - db                     : 主进程 / worker 共用的 DatabaseSync 实例
 //   - { runId, monthKey }    : 与 insertDiffRowsByJoin 一致
 //   - chunkSize              : 单 chunk 行数（行/批；默认 100000 由 caller 注入 settings 值）
+//   - onChunkBeforeCommit    : 每 chunk INSERT 后、同事务 COMMIT 前回调；用于把 checkpoint 与数据原子提交
 //   - onChunkDone            : 每 chunk COMMIT 后回调 { chunkIndex, totalChunks, processedRows, insertedDiffRows, elapsedMs }
 //   - cancelToken            : 可选；每 chunk 之间 throwIfCancelled
 //   - resumeFromChunkIndex   : 可选；T19 resume 路径从指定 chunk 起跑（默认 0 = 全新）
@@ -232,6 +233,7 @@ function insertDiffRowsByJoinChunked(db, {
   runId,
   monthKey,
   chunkSize = 100000,
+  onChunkBeforeCommit = null,
   onChunkDone = null,
   cancelToken = null,
   resumeFromChunkIndex = 0,
@@ -310,6 +312,15 @@ function insertDiffRowsByJoinChunked(db, {
     try {
       const result = chunkStmt.run(runId, monthKey, cs, offset);
       chunkInsertedRows = Number(result.changes);
+      if (typeof onChunkBeforeCommit === 'function') {
+        onChunkBeforeCommit({
+          chunkIndex,
+          totalChunks,
+          processedRows: expectedRows,
+          insertedDiffRows: chunkInsertedRows,
+          elapsedMs: Date.now() - chunkT0,
+        });
+      }
       db.exec('COMMIT');
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch (_e) { /* 已 ROLLBACK 或事务已结束 */ }

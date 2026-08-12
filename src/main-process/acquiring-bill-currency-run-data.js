@@ -360,6 +360,32 @@ function openResumeSource({ userDataDir, mainDb, mainDbPath, monthKey }) {
   return { db: mainDb, dbPath: mainDbPath, source: 'main', close: false };
 }
 
+// Fresh run 的 prepare 阶段只读探测已绑定 exact-seven 的可恢复 run。
+// 返回原 batchContext 交由主进程核对权威 taskStatus；legacy/no-context run 不在这里猜测所有权。
+function findBoundResumableRun({ userDataDir, mainDb, mainDbPath, monthKey }) {
+  if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) return null;
+  const source = openResumeSource({ userDataDir, mainDb, mainDbPath, monthKey });
+  try {
+    for (const run of runRepo.listPartialRuns(source.db, monthKey)) {
+      const batchContext = runRepo.readRunProgressBatchContext(run.chunk_progress);
+      if (!batchContext) continue;
+      return {
+        source: source.source,
+        dbPath: source.dbPath,
+        monthKey,
+        runId: Number(run.id),
+        progress: { ...run.chunk_progress },
+        batchContext
+      };
+    }
+    return null;
+  } finally {
+    if (source.close) {
+      try { source.db.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+}
+
 function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) {
   if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
     throw resumeError('monthKey 格式错误（应为 YYYY-MM）');
@@ -779,6 +805,7 @@ module.exports = {
   peekImportTarget,
   runCheckViaSideDb,
   prepareRunResume,
+  findBoundResumableRun,
   prepareRunExport,
   assertRunExportFresh,
   assertRunResumeFresh,

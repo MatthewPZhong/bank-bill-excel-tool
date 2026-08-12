@@ -837,21 +837,18 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         chunkSize: effectiveChunkSize,
         cancelToken,
         resumeFromChunkIndex,
+        // checkpoint 必须与本 chunk 的 INSERT 同一事务提交；这里失败会让本 chunk 整体 ROLLBACK，
+        // 避免硬崩后 checkpoint 落后一批、resume 重放已提交资金差异行。
+        onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
+            chunkSize: effectiveChunkSize,
+          });
+        },
         onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
-          // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
-          // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
-          // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
-          try {
-            runRepo.setRunChunkProgress(db, {
-              runId,
-              lastCompletedChunkIndex: chunkIndex,
-              totalChunks,
-              status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
-              chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
-            });
-          } catch (_progressErr) {
-            // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
-          }
           if (onProgress) {
             onProgress({
               phase: 'run',

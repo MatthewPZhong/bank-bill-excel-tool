@@ -947,13 +947,18 @@ test('流式导入取消由主进程跟踪，汇总与提交阶段拒绝取消',
 
   const first = service.dispatchTrackedImport({ command: 'test-cancel' }, '测试取消');
   const firstJob = jobs.get(first.jobId);
+  let acceptedCancelCallbacks = 0;
   firstJob.input.onProgress({ jobId: first.jobId, stage: 'preflight' });
-  assert.deepEqual(service.cancelActiveImport(first.jobId), {
+  assert.deepEqual(service.cancelActiveImport(first.jobId, () => {
+    acceptedCancelCallbacks += 1;
+  }), {
     status: 'stopping',
     jobId: first.jobId
   });
   assert.equal(firstJob.cancelCount, 1);
+  assert.equal(acceptedCancelCallbacks, 0, '发送取消请求时不得提前终结存档批次');
   firstJob.input.onCancelAck({ jobId: first.jobId });
+  assert.equal(acceptedCancelCallbacks, 1, 'worker 接受取消后才允许终结原存档批次');
   firstJob.resolve({ status: 'cancelled' });
   await first.promise;
 
@@ -963,7 +968,9 @@ test('流式导入取消由主进程跟踪，汇总与提交阶段拒绝取消',
   );
   const racedJob = jobs.get(raced.jobId);
   racedJob.input.onProgress({ jobId: raced.jobId, stage: 'applying' });
-  assert.deepEqual(service.cancelActiveImport(raced.jobId), {
+  assert.deepEqual(service.cancelActiveImport(raced.jobId, () => {
+    acceptedCancelCallbacks += 1;
+  }), {
     status: 'stopping',
     jobId: raced.jobId
   });
@@ -972,6 +979,7 @@ test('流式导入取消由主进程跟踪，汇总与提交阶段拒绝取消',
     stage: 'committing',
     accepted: false
   });
+  assert.equal(acceptedCancelCallbacks, 1, '提交阶段拒绝取消不得写 cancelled 终态');
   assert.equal(service.activeImportJobs.get(raced.jobId).forceTimer, null);
   assert.deepEqual(service.cancelActiveImport(raced.jobId), {
     status: 'not-cancellable',
