@@ -601,12 +601,28 @@ function assertResultMutationPostconditions(db, plan, stepResults) {
 
 function isUnsafeAuditError(error) {
   if (!error) return true;
-  if ([
-    'mutation-guard-unavailable',
-    'vcc-trigger-policy-violation',
-    'vcc-schema-not-ready'
-  ].includes(error.code)) return true;
-  return /^(SQLITE_(?:CORRUPT|IOERR|NOTADB|FULL|CANTOPEN))/.test(String(error.code || ''));
+  const unsafeSqlitePrimaryCodes = new Set([10, 11, 13, 14, 26]);
+  let current = error;
+  const visited = new Set();
+  while (current && typeof current === 'object' && !visited.has(current)) {
+    visited.add(current);
+    if ([
+      'mutation-guard-unavailable',
+      'vcc-trigger-policy-violation',
+      'vcc-schema-not-ready'
+    ].includes(current.code)) return true;
+    if (/^(SQLITE_(?:CORRUPT|IOERR|NOTADB|FULL|CANTOPEN))/.test(String(current.code || ''))) {
+      return true;
+    }
+    const nativeErrcode = Number(current.errcode);
+    if (
+      Number.isSafeInteger(nativeErrcode)
+      && nativeErrcode >= 0
+      && unsafeSqlitePrimaryCodes.has(nativeErrcode & 0xff)
+    ) return true;
+    current = current.cause;
+  }
+  return false;
 }
 
 function rollbackAuditPreviewToken(action, normalizedPayload) {
@@ -704,6 +720,14 @@ function executeLockedResultMutation({
       provenance
     );
     guard = beginMutationGuard(db, plan, hooks.guardOptions || {});
+    emitProgress(
+      onProgress,
+      action,
+      evidence.targetMonth,
+      normalizedPayload.runId,
+      'preserving-audit',
+      false
+    );
     emitProgress(onProgress, action, evidence.targetMonth, normalizedPayload.runId, 'applying', false);
     const stepResults = executeRegisteredMutationSteps(db, guard, hooks);
     assertMutationGuardPostwrite(db, guard);
@@ -823,7 +847,7 @@ function assertRollbackAuditPostcondition(db, plan, stepResults) {
     || boundaryCount !== 1
     || row.target_month !== failurePlan.targetMonth
     || row.operation_type !== failurePlan.operationType
-    || Number(row.run_id) !== failurePlan.runId
+    || (row.run_id === null ? null : Number(row.run_id)) !== failurePlan.runId
     || row.status !== 'rolled_back'
     || row.preview_token !== failurePlan.previewToken
     || row.evidence_json !== JSON.stringify(failurePlan.evidence)
@@ -922,6 +946,14 @@ function executeResultMutationWithSafeAudit({
   if (!primaryError) return result;
   if (primaryError.failureAuditPlan) {
     try {
+      emitProgress(
+        onProgress,
+        action,
+        primaryError.failureAuditPlan.targetMonth,
+        payload && payload.runId,
+        'preserving-audit',
+        false
+      );
       persistRolledBackAuditSafely({
         dbPath,
         failurePlan: primaryError.failureAuditPlan,
@@ -966,6 +998,8 @@ module.exports = {
   assertResultMutationPostconditions,
   executeLockedResultMutation,
   openVccWriteDatabase,
+  isUnsafeAuditError,
+  redactedFailure,
   persistRolledBackAuditSafely,
   executeResultMutationWithSafeAudit
 };

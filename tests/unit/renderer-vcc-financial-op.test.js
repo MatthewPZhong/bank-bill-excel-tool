@@ -375,7 +375,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(elapsed < 50, `1000 次缓存切换耗时 ${elapsed.toFixed(3)}ms`);
   });
 
-  test('解归档复用年月选择器，非尾月展示依赖且执行中禁止关闭', () => {
+  test('解归档复用年月选择器、强制降级警示，并只在 pre-critical 开放取消', () => {
     assert.match(moduleRenderer, /function createArchivedMonthPickerDialog\(/);
     assert.match(moduleRenderer, /title: actionLabel === '导出' \? '请选择要导出的月份' : '请选择月份'/);
     assert.match(moduleRenderer, /data-field="archive-year"[\s\S]*data-field="archive-month"/);
@@ -390,12 +390,49 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /canClose: \(\) => !executing/);
     assert.match(moduleRenderer, /setExecutionLocked\(true\)/);
     assert.match(moduleRenderer, /actionButton\.disabled = locked \|\| !currentSelectionCanExecute/);
+    assert.match(moduleRenderer, /actionLabel: '解归档'/);
+    assert.doesNotMatch(
+      moduleRenderer.slice(
+        moduleRenderer.indexOf('async function openUnarchiveDialog('),
+        moduleRenderer.indexOf('function openArchivedExportDialog(')
+      ),
+      /actionLabel: '删除'/
+    );
+    assert.match(moduleRenderer, /解归档后只能由 v3\.1\.9 及以上版本继续维护/);
+    assert.match(moduleRenderer, /降级前必须恢复完整数据库备份/);
+    assert.match(moduleRenderer, /data-field="archive-picker-confirm"/);
+    assert.match(moduleRenderer, /confirmationSatisfied\(\)/);
+    assert.match(moduleRenderer, /allowOperationCancel: true/);
+    assert.match(moduleRenderer, /controls\.setCancellable\(progress\.cancellable === true\)/);
+    assert.match(moduleRenderer, /await api\.cancelTask\(\)/);
     assert.match(moduleRenderer, /expectedPreviewToken: preview && preview\.previewToken/);
     assert.match(moduleRenderer, /taskGeneration: preview && preview\.taskGeneration/);
     assert.match(moduleRenderer, /catch \(error\) \{[\s\S]*\$\{entry\.targetMonth\} 解归档失败：[\s\S]*throw error/);
     assert.match(moduleRenderer, /await refreshArchivedState\(\)/);
     assert.match(moduleRenderer, /managerState\.section = 'results'/);
     assert.match(styles, /\.vcc-fin-op-archive-picker-fields\s*\{[\s\S]*grid-template-columns:/);
+  });
+
+  test('四类结果写操作呈现审计保全阶段并按 worker cancellable 控制取消', () => {
+    assert.match(moduleRenderer, /'preserving-audit': '正在保全审计证据'/);
+    const adjustmentSource = moduleRenderer.slice(
+      moduleRenderer.indexOf('async function requestRunAdjustment('),
+      moduleRenderer.indexOf('function confirmArchive(')
+    );
+    assert.match(adjustmentSource, /setAdjustmentCancellable\(progress\.cancellable === true\)/);
+    assert.match(adjustmentSource, /await api\.cancelTask\(\)/);
+    const archiveSource = moduleRenderer.slice(
+      moduleRenderer.indexOf('function confirmArchive('),
+      moduleRenderer.indexOf('async function chooseExistingMonth')
+    );
+    assert.match(archiveSource, /setReviewCancellable\(progress\.cancellable === true\)/);
+    assert.match(archiveSource, /await api\.cancelTask\(\)/);
+    const deleteSource = moduleRenderer.slice(
+      moduleRenderer.indexOf('function openDatasetDeleteDialog('),
+      moduleRenderer.indexOf('function openDatasetExportDialog(')
+    );
+    assert.match(deleteSource, /setDeleteCancellable\(progress\.cancellable === true\)/);
+    assert.match(deleteSource, /await api\.cancelTask\(\)/);
   });
 
   test('解归档提交成功后刷新失败只告警关闭，不重新开放破坏性操作', async () => {

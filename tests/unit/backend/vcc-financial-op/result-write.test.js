@@ -19,7 +19,8 @@ const {
   loadResultMutationEvidence
 } = require('../../../../src/backend/vcc-financial-op/read-snapshot');
 const {
-  executeResultMutationWithSafeAudit
+  executeResultMutationWithSafeAudit,
+  isUnsafeAuditError
 } = require('../../../../src/backend/vcc-financial-op/result-write');
 const {
   LEGACY_FIXTURE_PATH,
@@ -257,6 +258,22 @@ test('archive locked plan 精确提交 N+7，并保存 A 验证后的 effectiveC
   db.close();
 });
 
+test('成功写入按冻结契约公开五阶段 progress', (t) => {
+  const dbPath = createTempDb(t);
+  const raw = seedCurrentCalculated(dbPath);
+  const evidence = preview(dbPath, raw.runs[0].id);
+  const phases = [];
+  execute(
+    dbPath,
+    VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+    archivePayload(raw, evidence),
+    { onProgress: (progress) => phases.push(progress.phase) }
+  );
+  assert.deepEqual(phases, [
+    'validating', 'preserving-audit', 'applying', 'verifying', 'committed'
+  ]);
+});
+
 function prepareLegacyCalculated(dbPath) {
   const db = new DatabaseSync(dbPath);
   db.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
@@ -376,6 +393,41 @@ test('unsafe trigger policy 失败数据库零 failure audit', (t) => {
   ), { code: 'vcc-trigger-policy-violation' });
   assert.equal(counts(dbPath).rollbackAudit, 0);
   assert.equal(counts(dbPath).successAudit, 0);
+});
+
+test('node:sqlite ERR_SQLITE_ERROR 的不安全 primary errcode 均禁止 rollback audit', (t) => {
+  for (const errcode of [10, 11, 13, 14, 26, 266]) {
+    const nativeError = Object.assign(new Error(`native sqlite ${errcode}`), {
+      code: 'ERR_SQLITE_ERROR',
+      errcode
+    });
+    assert.equal(isUnsafeAuditError(nativeError), true, `errcode=${errcode}`);
+
+    const dbPath = createTempDb(t);
+    const raw = seedCurrentCalculated(dbPath);
+    const evidence = preview(dbPath, raw.runs[0].id);
+    const before = counts(dbPath);
+    assert.throws(() => execute(
+      dbPath,
+      VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+      archivePayload(raw, evidence),
+      {
+        hooks: {
+          business: {
+            beforeStep() {
+              throw nativeError;
+            }
+          }
+        }
+      }
+    ), (error) => error === nativeError);
+    assert.deepEqual(counts(dbPath), before, `errcode=${errcode} 不得留下业务或审计 DML`);
+  }
+  assert.equal(isUnsafeAuditError({
+    code: 'wrapper',
+    cause: { code: 'ERR_SQLITE_ERROR', errcode: 11 }
+  }), true);
+  assert.equal(isUnsafeAuditError({ code: 'ERR_SQLITE_ERROR', errcode: 19 }), false);
 });
 
 test('业务连接 createSession 不可信时返回 guard-unavailable 且数据库零 audit', (t) => {
