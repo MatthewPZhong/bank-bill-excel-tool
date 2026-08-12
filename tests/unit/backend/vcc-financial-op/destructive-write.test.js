@@ -395,6 +395,59 @@ test('opening delete 复用五 child 显式预算并保持 module first_month �
   verify.close();
 });
 
+test('opening delete 对多期初月与 first-month 冲突均在首写前阻断且零 rollback audit', (t) => {
+  const scenarios = [{
+    reason: 'multiple-opening-months',
+    openingMonths: ['2026-07', '2026-08']
+  }, {
+    reason: 'first-month-opening-conflict',
+    openingMonths: ['2026-08']
+  }];
+  for (const scenario of scenarios) {
+    const dbPath = createTempDb(t);
+    const db = new DatabaseSync(dbPath);
+    db.prepare(`
+      UPDATE vcc_fin_op_module_state SET first_month = '2026-07'
+      WHERE singleton_id = 1
+    `).run();
+    const insertOpening = db.prepare(`
+      INSERT INTO vcc_fin_op_opening_balances (
+        target_month, subject, balances_json, content_hash,
+        initialization_note, initialized_at
+      ) VALUES (?, 'PPHK', '{}', ?, '人工核对', '2026-08-11 09:00:00')
+    `);
+    for (const month of scenario.openingMonths) insertOpening.run(month, `hash-${month}`);
+    const before = {
+      openings: Number(db.prepare(`
+        SELECT COUNT(*) AS count FROM vcc_fin_op_opening_balances
+      `).get().count),
+      audits: Number(db.prepare(`
+        SELECT COUNT(*) AS count FROM vcc_fin_op_operation_audit
+      `).get().count)
+    };
+    db.close();
+
+    const snapshot = deletePreview(dbPath, '2026-07', DELETE_TARGET_TYPES.OPENING);
+    assert.equal(snapshot.deletable, false);
+    assert.equal(snapshot.code, 'vcc-first-month-migration-blocked');
+    assert.match(snapshot.message, new RegExp(scenario.reason === 'multiple-opening-months'
+      ? '多个首月期初初始化月份'
+      : '首月状态.*冲突'));
+    assert.throws(() => executeDelete(dbPath, snapshot), {
+      code: 'vcc-first-month-migration-blocked'
+    });
+
+    const verify = new DatabaseSync(dbPath, { readOnly: true });
+    assert.equal(verify.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_opening_balances
+    `).get().count, before.openings);
+    assert.equal(verify.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_operation_audit
+    `).get().count, before.audits);
+    verify.close();
+  }
+});
+
 test('detail source delete 在清 FK 前物化 Q 行并按 2+R+ΣC+2Q+E+D+M 删除 orphan facts', (t) => {
   const dbPath = createTempDb(t);
   const db = new DatabaseSync(dbPath);

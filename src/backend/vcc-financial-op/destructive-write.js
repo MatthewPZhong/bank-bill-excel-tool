@@ -323,11 +323,15 @@ function assertLockedEvidenceAllowed(action, evidence, normalizedPayload) {
     return;
   }
   if (!evidence.preview.deletable && !evidence.preview.available) {
-    throw destructiveWriteError(
+    const error = destructiveWriteError(
       evidence.preview.code || 'delete-blocked',
       evidence.preview.message || evidence.preview.disabledReason || '当前数据不可删除',
       { preview: evidence.preview }
     );
+    if (evidence.preview.code === 'vcc-first-month-migration-blocked') {
+      error.suppressRollbackAudit = true;
+    }
+    throw error;
   }
 }
 
@@ -1315,6 +1319,7 @@ function executeLockedDestructiveMutation({
         { closeFailures }
       );
     }
+    emitProgress(onProgress, action, normalizedPayload.targetMonth, 'preserving-audit', false);
     db.exec('COMMIT');
     transactionStarted = false;
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'committed', false);
@@ -1340,6 +1345,7 @@ function executeLockedDestructiveMutation({
       && rollbackSucceeded
       && closeFailures.length === 0
       && evidence
+      && error.suppressRollbackAudit !== true
       && !isUnsafeAuditError(error)
     ) {
       error.failureAuditPlan = buildFailureAuditPlan({
@@ -1396,6 +1402,13 @@ function executeDestructiveMutationWithSafeAudit({
   if (!primaryError) return result;
   if (primaryError.failureAuditPlan) {
     try {
+      emitProgress(
+        onProgress,
+        action,
+        primaryError.failureAuditPlan.targetMonth,
+        'preserving-audit',
+        false
+      );
       persistRolledBackAuditSafely({
         dbPath,
         failurePlan: primaryError.failureAuditPlan,

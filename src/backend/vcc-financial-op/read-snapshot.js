@@ -21,6 +21,7 @@ const {
   buildResultMutationTokenV2
 } = require('./operation-token-v2');
 const { getEffectiveRunResult } = require('./result-adjustments');
+const { diagnoseFirstMonthFacts } = require('../vcc-financial-op-db/state-model');
 
 const ARCHIVE_CANDIDATE_SQL = `
   SELECT target_month FROM vcc_fin_op_runs WHERE status = 'archived'
@@ -506,10 +507,12 @@ function loadDeleteEvidenceV2(db, {
     archivedAt: row.archived_at,
     balancesHash: sha256(row.balances_json)
   }));
-  const openingRow = executeQuery(db, trace, 'delete-opening-count', `
-    SELECT COUNT(*) AS row_count
-    FROM vcc_fin_op_opening_balances WHERE target_month = ?
-  `, [month], 'get');
+  const openingRows = executeQuery(db, trace, 'delete-opening-count', `
+    SELECT target_month, COUNT(*) AS row_count
+    FROM vcc_fin_op_opening_balances
+    GROUP BY target_month
+    ORDER BY target_month
+  `);
   const effectiveRows = executeQuery(db, trace, 'delete-effective-counts', `
     SELECT source_type, COUNT(*) AS row_count
     FROM vcc_fin_op_effective_rows WHERE target_month = ?
@@ -536,6 +539,10 @@ function loadDeleteEvidenceV2(db, {
   const effectiveCounts = Object.fromEntries(SOURCE_TARGET_TYPES.map((type) => [type, 0]));
   for (const row of effectiveRows) effectiveCounts[row.source_type] = Number(row.row_count);
   effectiveCounts[SOURCE_TYPES.SYSTEM_OP] = Number(systemRow.row_count);
+  const openingMonths = Object.freeze(openingRows.map((row) => String(row.target_month)));
+  const openingRow = openingRows.find((row) => String(row.target_month) === month) || null;
+  const firstMonth = moduleState.first_month === null ? null : String(moduleState.first_month);
+  const openingDiagnostic = diagnoseFirstMonthFacts({ firstMonth, openingMonths });
   return Object.freeze({
     evidenceVersion: 2,
     targetMonth: month,
@@ -543,7 +550,16 @@ function loadDeleteEvidenceV2(db, {
     datasets: Object.freeze(datasets),
     runs: Object.freeze(runs),
     archives: Object.freeze(archives),
-    openingCount: Number(openingRow.row_count),
+    openingCount: Number(openingRow && openingRow.row_count) || 0,
+    openingMonths,
+    openingDiagnostic: Object.freeze({
+      blocked: openingDiagnostic.blocked,
+      code: openingDiagnostic.code,
+      reason: openingDiagnostic.reason,
+      message: openingDiagnostic.message,
+      firstMonth,
+      openingMonths
+    }),
     effectiveCounts: Object.freeze(effectiveCounts),
     systemSnapshotCount: Number(systemRow.row_count),
     activeBatchIds: Object.freeze(activeBatches.map((row) => String(row.id))),
@@ -558,7 +574,7 @@ function loadDeleteEvidenceV2(db, {
         status: row.status,
         resolutionStatus: row.resolution_status
       }))),
-    firstMonth: moduleState.first_month
+    firstMonth
   });
 }
 
@@ -607,7 +623,10 @@ function deletePreviewForTarget(evidence, targetType, { taskActive = false } = {
     ));
     let code = '';
     let message = '';
-    if (evidence.targetMonth !== evidence.firstMonth) {
+    if (evidence.openingDiagnostic.blocked) {
+      code = evidence.openingDiagnostic.code;
+      message = evidence.openingDiagnostic.message;
+    } else if (evidence.targetMonth !== evidence.firstMonth) {
       code = 'not-first-month';
       message = evidence.firstMonth
         ? `仅首月 ${evidence.firstMonth} 可删除期初初始化数据。`
