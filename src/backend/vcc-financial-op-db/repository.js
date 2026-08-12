@@ -118,6 +118,19 @@ function getImportRecord(db, recordId) {
   return db.prepare('SELECT * FROM vcc_fin_op_import_records WHERE id = ?').get(recordId) || null;
 }
 
+function getImportBatch(db, batchId) {
+  return db.prepare('SELECT * FROM vcc_fin_op_import_batches WHERE id = ?').get(batchId) || null;
+}
+
+function listImportRecordsByBatch(db, batchId) {
+  return db.prepare(`
+    SELECT *
+    FROM vcc_fin_op_import_records
+    WHERE batch_id = ?
+    ORDER BY id
+  `).all(batchId);
+}
+
 function listImportMonths(db) {
   return db.prepare(`
     SELECT target_month AS yearMonth, MAX(started_at) AS latestImportedAt
@@ -285,7 +298,9 @@ module.exports = {
   createImportRecord,
   finishImportRecord,
   addImportError,
+  getImportBatch,
   getImportRecord,
+  listImportRecordsByBatch,
   listImportMonths,
   listImportRecords,
   countImportRowsByDisposition,

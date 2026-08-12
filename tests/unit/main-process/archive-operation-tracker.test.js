@@ -334,9 +334,25 @@ test.describe('stateless archive operation tracker', () => {
       '/tmp/channel.xlsx'
     ]);
     assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:import:apply',
+      args: [{ files }],
+      result: {
+        status: 'error',
+        partialCommitted: true,
+        records: [
+          { sourceType: 'recharge_refund', status: 'success' },
+          { sourceType: 'fee_fx', status: 'failed_validation' }
+        ]
+      }
+    }).map((file) => file.filePath), ['/tmp/recharge.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
       channel: 'vccFinancialOp:export:result',
       result: { status: 'success', filePaths: ['/tmp/a.xlsx', '/tmp/b.xlsx'] }
     }).map((file) => file.filePath), ['/tmp/a.xlsx', '/tmp/b.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:export:result',
+      result: { status: 'error', partialCommitted: true, filePaths: ['/tmp/a.xlsx'] }
+    }).map((file) => file.filePath), ['/tmp/a.xlsx']);
     assert.deepEqual(resolveOperationFiles({
       channel: 'vccFinancialOp:data-manager:export',
       result: { status: 'success', filePath: '/tmp/data.xlsx' }

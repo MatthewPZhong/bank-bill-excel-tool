@@ -13726,11 +13726,11 @@ function registerNewAccountHandlers() {
         }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
-        return {
-          status: 'error',
-          message: error && error.message ? error.message : String(error),
-          detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : []
-        };
+        const failure = vccFinancialOpErrorResult(error);
+        const partial = error && error.partialResult && typeof error.partialResult === 'object'
+          ? error.partialResult
+          : null;
+        return partial ? { ...failure, ...partial, status: 'error' } : failure;
       }
     }
   });

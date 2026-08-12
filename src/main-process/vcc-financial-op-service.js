@@ -25,6 +25,10 @@ const {
   IMPORT_CANCELLED_CODE
 } = require('../backend/vcc-financial-op/detail-importer');
 const {
+  normalizeImportBatchId,
+  storedRecordResult
+} = require('../backend/vcc-financial-op/import-service');
+const {
   operationError,
   STATE_CHANGED_CODE,
   STATE_CHANGED_MESSAGE,
@@ -50,7 +54,7 @@ const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-wo
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
   success: '导入成功',
-  success_with_skips: '成功（含幂等跳过）',
+  success_with_skips: '成功（含跳过/异常过滤）',
   all_skipped: '全部幂等跳过',
   failed_conflict: '失败（幂等冲突）',
   failed_validation: '失败（校验异常）',
@@ -61,6 +65,27 @@ const DATA_STATUS_TEXT = Object.freeze({
   unprocessed: '未处理',
   archived: '已归档'
 });
+
+const SUCCESSFUL_IMPORT_STATUSES = new Set([
+  'success',
+  'success_with_skips',
+  'all_skipped'
+]);
+
+function recoverImportPartialResult(database, batchId, expectedTargetMonth) {
+  const batch = repository.getImportBatch(database.db, batchId);
+  if (!batch || (expectedTargetMonth && batch.target_month !== expectedTargetMonth)) return null;
+  const records = repository.listImportRecordsByBatch(database.db, batchId)
+    .map(storedRecordResult);
+  if (records.length === 0) return null;
+  return Object.freeze({
+    batchId,
+    targetMonth: batch.target_month,
+    status: 'error',
+    partialCommitted: records.some((record) => SUCCESSFUL_IMPORT_STATUSES.has(record.status)),
+    records: Object.freeze(records)
+  });
+}
 
 function parseJson(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -272,6 +297,8 @@ function createVccFinancialOpService({
     const {
       workerPath = WORKER_PATH,
       createWorker = workerFactory,
+      recoverImportBatchId = null,
+      recoverImportTargetMonth = null,
       ...taskOptions
     } = options;
     const task = acquireTask(action, taskOptions);
@@ -301,7 +328,26 @@ function createVccFinancialOpService({
         if (settled) return;
         settled = true;
         if (error) {
-          try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+          if (action === 'import' && recoverImportBatchId) {
+            try {
+              repository.failImportBatch(database.db, recoverImportBatchId, {
+                errorCode: error.code || 'worker-interrupted-import',
+                message: error.message || 'VCC 财务OP导入 worker 异常退出'
+              });
+            } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+            if (!error.partialResult) {
+              try {
+                const partialResult = recoverImportPartialResult(
+                  database,
+                  recoverImportBatchId,
+                  recoverImportTargetMonth
+                );
+                if (partialResult) error.partialResult = partialResult;
+              } catch (_readError) { /* 保留 worker 主错误；下次启动继续恢复 */ }
+            }
+          } else {
+            try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+          }
           releaseTask(task, { type: 'error', error });
           reject(error);
         } else {
@@ -468,10 +514,23 @@ function createVccFinancialOpService({
   }
 
   async function importSelectedFiles(payload, onProgress, batchContext) {
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
+    const importBatchId = normalizeImportBatchId(frozenBatchContext.taskRunId);
+    if (repository.getImportBatch(database.db, importBatchId)) {
+      throw operationError(
+        'vcc-import-batch-id-conflict',
+        `VCC 导入批次号已存在，拒绝把新任务写入既有批次：${importBatchId}`
+      );
+    }
+    const targetMonth = normalizeYearMonth(payload && payload.targetMonth);
     return runWorker('import', {
       ...payload,
-      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
-    }, onProgress);
+      batchId: importBatchId,
+      batchContext: frozenBatchContext
+    }, onProgress, {
+      recoverImportBatchId: importBatchId,
+      recoverImportTargetMonth: targetMonth
+    });
   }
 
   async function calculate(payload = {}, batchContext) {
@@ -527,7 +586,7 @@ function createVccFinancialOpService({
       worker.postMessage({ type: 'cancel' });
     } catch (_error) {
       const outcome = await completion;
-      repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
       if (outcome.type === 'result') return { status: 'completed' };
       if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
         return { status: 'cancelled', forced: false };
@@ -559,10 +618,10 @@ function createVccFinancialOpService({
         };
       }
       if (activeTask === task) await worker.terminate();
-      repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
       return { status: 'cancelled', forced: true };
     }
-    repository.recoverInterruptedImports(database.db);
+    if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
     if (outcome.type === 'result') return { status: 'completed' };
     if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
       return { status: 'cancelled', forced: false };

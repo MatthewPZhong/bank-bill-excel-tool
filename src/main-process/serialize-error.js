@@ -90,6 +90,9 @@ function serializeError(err, depth = 0) {
     structuredImportErrors: err.structuredImportErrors && typeof err.structuredImportErrors === 'object'
       ? safeCloneStructuredImportErrors(err.structuredImportErrors)
       : null,
+    partialResult: err.partialResult && typeof err.partialResult === 'object'
+      ? safeCloneStructuredImportErrors(err.partialResult)
+      : null,
   };
   return out;
 }
@@ -184,6 +187,9 @@ function deserializeError(serialized) {
   }
   if (serialized.structuredImportErrors && typeof serialized.structuredImportErrors === 'object') {
     err.structuredImportErrors = serialized.structuredImportErrors;
+  }
+  if (serialized.partialResult && typeof serialized.partialResult === 'object') {
+    err.partialResult = serialized.partialResult;
   }
   if (serialized.__truncated__) {
     err.__truncated__ = true;

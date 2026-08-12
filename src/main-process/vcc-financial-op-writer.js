@@ -760,7 +760,14 @@ function nextAvailableOutputPath(outputDirectory, baseName, usedNames) {
   return path.join(outputDirectory, fileName);
 }
 
-async function writeRunWorkbooks({ db, runId, outputDirectory, outputPath, assetsDir }) {
+async function writeRunWorkbooks({
+  db,
+  runId,
+  outputDirectory,
+  outputPath,
+  assetsDir,
+  writeSubjectWorkbookFn = writeSubjectWorkbook
+}) {
   const resultTemplatePath = path.join(assetsDir, 'VCC财务OP校验', RESULT_TEMPLATE_FILE_NAME);
   const pendingTemplatePath = path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx');
   // 两份模板必须在解析任何目标输出路径前完整读取；模板异常时不得触碰用户文件。
@@ -783,13 +790,25 @@ async function writeRunWorkbooks({ db, runId, outputDirectory, outputPath, asset
       const baseName = `${data.run.targetMonth}_${sanitizeFilePart(plan.subject)}_VCC财务OP校验结果表`;
       destination = nextAvailableOutputPath(outputDirectory, baseName, usedNames);
     }
-    paths.push(await writeSubjectWorkbook({
-      data,
-      plan,
-      outputPath: destination,
-      resultContract,
-      pendingTemplateSheet
-    }));
+    try {
+      paths.push(await writeSubjectWorkbookFn({
+        data,
+        plan,
+        outputPath: destination,
+        resultContract,
+        pendingTemplateSheet
+      }));
+    } catch (error) {
+      error.partialResult = Object.freeze({
+        status: 'error',
+        partialCommitted: paths.length > 0,
+        runId: Number(runId),
+        targetMonth: data.run.targetMonth,
+        subjects: Object.freeze(data.subjects.slice(0, paths.length)),
+        filePaths: Object.freeze([...paths])
+      });
+      throw error;
+    }
   }
   return {
     runId: Number(runId),

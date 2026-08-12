@@ -12,6 +12,9 @@ const { ensureVccFinancialOpTablesSupport } = require('../../../src/backend/vcc-
 const repository = require('../../../src/backend/vcc-financial-op-db/repository');
 const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
+const {
+  IMPORT_CANCELLED_CODE
+} = require('../../../src/backend/vcc-financial-op/detail-importer');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
 const { serializeError } = require('../../../src/main-process/serialize-error');
 const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
@@ -405,6 +408,163 @@ test('calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版�
   assert.deepEqual(await calculation, { status: 'calculated' });
 });
 
+test('VCC import 以 exact7 taskRunId 固定 batchId，拒绝 renderer 伪造和既有批次复用', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }],
+    batchId: 'renderer-forged-batch'
+  }, undefined, BATCH_CONTEXT);
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].options.workerData.payload.batchId, BATCH_CONTEXT.taskRunId);
+  assert.deepEqual(workers[0].options.workerData.payload.batchContext, BATCH_CONTEXT);
+  workers[0].emit('message', {
+    type: 'result',
+    result: { status: 'success', batchId: BATCH_CONTEXT.taskRunId, records: [] }
+  });
+  assert.equal((await importing).batchId, BATCH_CONTEXT.taskRunId);
+
+  repository.createImportBatch(db, {
+    id: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    fileCount: 1
+  });
+  await assert.rejects(
+    service.importSelectedFiles({
+      targetMonth: '2026-06',
+      files: [{ filePath: '/tmp/other.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+    }, undefined, BATCH_CONTEXT),
+    (error) => error.code === 'vcc-import-batch-id-conflict'
+  );
+  assert.equal(workers.length, 1, '既有 batchId 冲突不得启动 worker 或混入旧 records');
+});
+
+test('VCC import cooperative error 已带 partialResult 时不被空 DB 恢复覆盖', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+  }, undefined, BATCH_CONTEXT);
+  const error = new Error('cooperative fixture cancel');
+  error.code = IMPORT_CANCELLED_CODE;
+  error.partialResult = {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    status: 'error',
+    partialCommitted: true,
+    records: [{ recordId: 9, sourceType: SOURCE_TYPES.RECHARGE, status: 'success' }]
+  };
+  workers[0].emit('message', { type: 'error', error: serializeError(error) });
+  await assert.rejects(importing, (caught) => {
+    assert.deepEqual(caught.partialResult, error.partialResult);
+    return caught.code === IMPORT_CANCELLED_CODE;
+  });
+
+  const beforeTransaction = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+  }, undefined, BATCH_CONTEXT);
+  workers[1].emit('error', new Error('worker failed before import transaction'));
+  await assert.rejects(beforeTransaction, (caught) => {
+    assert.equal(Object.hasOwn(caught, 'partialResult'), false);
+    return /before import transaction/.test(caught.message);
+  });
+});
+
+test('VCC import worker error 只从当前 taskRunId batch 恢复同形 partialResult', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [
+      { filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE },
+      { filePath: '/tmp/system.xlsx', sourceType: SOURCE_TYPES.SYSTEM_OP }
+    ]
+  }, undefined, BATCH_CONTEXT);
+  repository.createImportBatch(db, {
+    id: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    fileCount: 2
+  });
+  const rechargeRecordId = repository.createImportRecord(db, {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['recharge.xlsx']
+  });
+  repository.finishImportRecord(db, rechargeRecordId, {
+    status: 'success',
+    rawCount: 1,
+    insertedCount: 1
+  });
+  repository.createImportRecord(db, {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    sourceFiles: ['system.xlsx']
+  });
+  repository.createImportBatch(db, {
+    id: 'unrelated-worker-error',
+    targetMonth: '2026-05',
+    fileCount: 1
+  });
+  const unrelatedRecordId = repository.createImportRecord(db, {
+    batchId: 'unrelated-worker-error',
+    targetMonth: '2026-05',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['unrelated.xlsx']
+  });
+  workers[0].emit('error', new Error('fixture import worker error'));
+
+  await assert.rejects(importing, (caught) => {
+    assert.equal(caught.partialResult.batchId, BATCH_CONTEXT.taskRunId);
+    assert.equal(caught.partialResult.targetMonth, '2026-06');
+    assert.equal(caught.partialResult.partialCommitted, true);
+    assert.deepEqual(caught.partialResult.records.map((record) => [record.sourceType, record.status]), [
+      [SOURCE_TYPES.RECHARGE, 'success'],
+      [SOURCE_TYPES.SYSTEM_OP, 'failed_validation']
+    ]);
+    return /fixture import worker error/.test(caught.message);
+  });
+  assert.equal(repository.getImportRecord(db, unrelatedRecordId).status, 'importing');
+});
+
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
@@ -579,7 +739,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   assert.equal(detail.summary.status, 'deleted');
   assert.equal(detail.summary.statusText, '已删除');
   assert.equal(detail.summary.originalStatus, 'success_with_skips');
-  assert.equal(detail.summary.originalStatusText, '成功（含幂等跳过）');
+  assert.equal(detail.summary.originalStatusText, '成功（含跳过/异常过滤）');
   assert.ok(detail.summary.datasetDeletedAt);
   assert.ok(detail.summary.datasetDeletionId);
   const listed = service.listImportRecords('2026-06');

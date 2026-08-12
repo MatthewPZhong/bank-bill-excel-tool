@@ -676,6 +676,7 @@ function createReservePolicy(channel, scopeKey) {
           ? vccDeleteFlowPlan
           : null,
     resultClassifier: resultClassifierForChannel(channel),
+    bindResultFlowIdentitiesOnFailure: channel === 'vccFinancialOp:import:apply',
     resultMetadataResolver: isVcc
       ? vccFinancialOpResultMetadata
       : standardResultMetadataResolver,
