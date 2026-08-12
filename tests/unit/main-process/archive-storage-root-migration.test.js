@@ -137,8 +137,18 @@ function managed(rootDir, relativePath) {
 }
 
 function real(rootDir) {
-  return fs.realpathSync(rootDir);
+  // 与 fs.promises.realpath 一样走原生 canonical identity；Windows 不得退回 8.3 short path。
+  return fs.realpathSync.native(rootDir);
 }
+
+test('fixture 与生产 manager 使用相同的 native canonical path identity', async () => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-native-realpath-'));
+  try {
+    assert.equal(real(rootDir), await fs.promises.realpath(rootDir));
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
 
 test('legacy 根经 DB 全集/hash 证明后 bootstrap；未知文件阻止自动认领', async () => {
   const current = await createFixture();
