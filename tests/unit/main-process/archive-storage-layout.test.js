@@ -131,6 +131,32 @@ test('Windows 非法字符、保留名、尾点空格与长文件名得到稳定
   assert.match(first, /-[a-f0-9]{8}\.xlsx$/);
 });
 
+test('Windows 路径预算按 UTF-16 code units 截断 emoji，过长根路径 fail-closed', () => {
+  const batch = { localDate: '2026-08-11', batchNumber: '2026-08-11-127' };
+  const rootDir = path.join(os.tmpdir(), '存档中心');
+  const [assigned] = assignLayoutNames(rootDir, batch, [{
+    id: 91,
+    artifactOrder: 1,
+    artifactKey: 'emoji-output',
+    originalName: `${'😀'.repeat(200)}.xlsx`
+  }]);
+  const absolutePath = path.join(rootDir, ...assigned.storageRelativePath.split('/'));
+  assert.ok(absolutePath.length <= 240);
+  assert.ok(assigned.safeFileName.length <= 160);
+  assert.equal(/[\uD800-\uDBFF]$/.test(assigned.safeFileName), false);
+
+  const longRoot = path.join(os.tmpdir(), 'r'.repeat(230));
+  assert.throws(
+    () => assignLayoutNames(longRoot, batch, [{
+      id: 92,
+      artifactOrder: 1,
+      artifactKey: 'too-long-root',
+      originalName: 'result.xlsx'
+    }]),
+    (error) => error && error.code === 'ARCHIVE_LAYOUT_PATH_TOO_LONG'
+  );
+});
+
 test('真实 hardlink 物化后大小/hash一致且共享 inode 只读', async () => {
   const current = fixture();
   try {

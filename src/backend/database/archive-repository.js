@@ -1054,13 +1054,39 @@ class ArchiveRepository {
     `).all(Number(batchId)).map(mapArtifact);
   }
 
-  listMaterializationCandidates(limit = 500) {
+  listMaterializationCandidates(limit = 500, afterArtifactId = 0) {
     const count = Number(limit);
     if (!Number.isSafeInteger(count) || count < 1 || count > 5000) {
       throw new TypeError('limit 必须为 1 到 5000 的安全整数');
     }
+    const cursor = Number(afterArtifactId);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new TypeError('afterArtifactId 必须为非负安全整数');
+    }
     const rows = this.db.prepare(`
       ${ARTIFACT_SELECT}
+      WHERE a.status = 'ready'
+        AND a.id > ?
+        AND (
+          a.storage_layout_version <> 2
+          OR COALESCE(a.storage_relative_path, '') = ''
+          OR COALESCE(a.storage_mode, '') NOT IN ('hardlink', 'copy')
+          OR COALESCE(a.safe_file_name, '') = ''
+          OR a.artifact_order IS NULL
+          OR a.materialization_error_code IS NOT NULL
+          OR a.materialization_error_message IS NOT NULL
+          OR a.materialization_failed_at IS NOT NULL
+        )
+      ORDER BY a.id ASC
+      LIMIT ?
+    `).all(cursor, count).map(mapArtifact);
+    return rows.map((artifact) => ({ ...artifact, batch: this.getBatch(artifact.batchId) }));
+  }
+
+  countMaterializationCandidates() {
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM archive_artifacts a
       WHERE a.status = 'ready'
         AND (
           a.storage_layout_version <> 2
@@ -1072,10 +1098,8 @@ class ArchiveRepository {
           OR a.materialization_error_message IS NOT NULL
           OR a.materialization_failed_at IS NOT NULL
         )
-      ORDER BY a.batch_id ASC, COALESCE(a.artifact_order, a.id) ASC, a.id ASC
-      LIMIT ?
-    `).all(count).map(mapArtifact);
-    return rows.map((artifact) => ({ ...artifact, batch: this.getBatch(artifact.batchId) }));
+    `).get();
+    return Number(row && row.count) || 0;
   }
 
   listMaterializedArtifacts() {
@@ -1086,6 +1110,54 @@ class ArchiveRepository {
         AND COALESCE(a.storage_relative_path, '') <> ''
       ORDER BY a.batch_id ASC, a.artifact_order ASC, a.id ASC
     `).all().map(mapArtifact);
+  }
+
+  listMaterializedArtifactsPage(limit = 500, afterArtifactId = 0) {
+    const count = Number(limit);
+    if (!Number.isSafeInteger(count) || count < 1 || count > 5000) {
+      throw new TypeError('limit 必须为 1 到 5000 的安全整数');
+    }
+    const cursor = Number(afterArtifactId);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new TypeError('afterArtifactId 必须为非负安全整数');
+    }
+    return this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      WHERE a.status = 'ready'
+        AND a.id > ?
+        AND a.storage_layout_version = 2
+        AND COALESCE(a.storage_relative_path, '') <> ''
+        AND COALESCE(a.storage_mode, '') IN ('hardlink', 'copy')
+        AND COALESCE(a.safe_file_name, '') <> ''
+        AND a.artifact_order IS NOT NULL
+        AND a.materialization_error_code IS NULL
+        AND a.materialization_error_message IS NULL
+        AND a.materialization_failed_at IS NULL
+      ORDER BY a.id ASC
+      LIMIT ?
+    `).all(cursor, count).map(mapArtifact);
+  }
+
+  countMaterializedArtifactsAfter(afterArtifactId = 0) {
+    const cursor = Number(afterArtifactId);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new TypeError('afterArtifactId 必须为非负安全整数');
+    }
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM archive_artifacts a
+      WHERE a.status = 'ready'
+        AND a.id > ?
+        AND a.storage_layout_version = 2
+        AND COALESCE(a.storage_relative_path, '') <> ''
+        AND COALESCE(a.storage_mode, '') IN ('hardlink', 'copy')
+        AND COALESCE(a.safe_file_name, '') <> ''
+        AND a.artifact_order IS NOT NULL
+        AND a.materialization_error_code IS NULL
+        AND a.materialization_error_message IS NULL
+        AND a.materialization_failed_at IS NULL
+    `).get(cursor);
+    return Number(row && row.count) || 0;
   }
 
   listArtifactsByBlob(blobId) {
@@ -2030,6 +2102,37 @@ class ArchiveRepository {
     `).all().map(mapBlob);
   }
 
+  listBlobsPage(limit = 500, afterBlobId = 0) {
+    const count = Number(limit);
+    if (!Number.isSafeInteger(count) || count < 1 || count > 5000) {
+      throw new TypeError('limit 必须为 1 到 5000 的安全整数');
+    }
+    const cursor = Number(afterBlobId);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new TypeError('afterBlobId 必须为非负安全整数');
+    }
+    return this.db.prepare(`
+      SELECT bl.*, COUNT(a.id) AS reference_count
+      FROM archive_blobs bl
+      LEFT JOIN archive_artifacts a ON a.blob_id = bl.id
+      WHERE bl.id > ?
+      GROUP BY bl.id
+      ORDER BY bl.id ASC
+      LIMIT ?
+    `).all(cursor, count).map(mapBlob);
+  }
+
+  countBlobsAfter(afterBlobId = 0) {
+    const cursor = Number(afterBlobId);
+    if (!Number.isSafeInteger(cursor) || cursor < 0) {
+      throw new TypeError('afterBlobId 必须为非负安全整数');
+    }
+    const row = this.db.prepare(`
+      SELECT COUNT(*) AS count FROM archive_blobs WHERE id > ?
+    `).get(cursor);
+    return Number(row && row.count) || 0;
+  }
+
   deleteBlobIfUnreferenced(blobId) {
     const id = Number(blobId);
     return withWriteTransaction(this.db, () => {
@@ -2112,6 +2215,44 @@ class ArchiveRepository {
         this._refreshBatchStatus(batchId, timestamp);
       }
       return { artifactCount: pending.length, batchIds: [...counts.keys()] };
+    });
+  }
+
+  markInterruptedTasks(options = {}) {
+    const excludedBatchIds = new Set(
+      (Array.isArray(options.excludeBatchIds) ? options.excludeBatchIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+    );
+    const rows = this.db.prepare(`
+      SELECT id
+      FROM archive_batches
+      WHERE task_status IN ('reserved', 'running')
+      ORDER BY id
+    `).all().filter((row) => !excludedBatchIds.has(Number(row.id)));
+    if (rows.length === 0) return { taskCount: 0, batchIds: [] };
+    const timestamp = this._timestamp();
+    const code = 'ARCHIVE_TASK_INTERRUPTED';
+    const message = '应用上次异常退出时任务尚未结束，已安全终结；可从原业务入口重新执行';
+    return withWriteTransaction(this.db, () => {
+      const batchIds = [];
+      const update = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = 'failed',
+            finished_at = ?,
+            failure_code = ?,
+            failure_message = ?,
+            updated_at = ?
+        WHERE id = ? AND task_status IN ('reserved', 'running')
+      `);
+      for (const row of rows) {
+        const batchId = Number(row.id);
+        const changed = update.run(timestamp, code, message, timestamp, batchId);
+        if (Number(changed.changes) !== 1) continue;
+        batchIds.push(batchId);
+        this._refreshBatchStatus(batchId, timestamp, { emptyIsComplete: true });
+      }
+      return { taskCount: batchIds.length, batchIds };
     });
   }
 

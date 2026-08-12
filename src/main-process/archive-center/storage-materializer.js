@@ -174,6 +174,27 @@ function createStorageMaterializer(options = {}) {
       const targetPath = resolveManagedRelative(rootDir, relativePath);
       await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
       return verifyFile(targetPath, expected, fsModule);
+    },
+    async verifyMetadata(relativePath, expected) {
+      const targetPath = resolveManagedRelative(rootDir, relativePath);
+      await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
+      try {
+        const stat = await fsModule.promises.lstat(targetPath);
+        if (!stat.isFile()
+            || stat.isSymbolicLink()
+            || Number(stat.size) !== Number(expected.sizeBytes)) {
+          return { valid: false, code: 'ARCHIVE_LAYOUT_SIZE_MISMATCH' };
+        }
+        return { valid: true, stat };
+      } catch (error) {
+        return {
+          valid: false,
+          code: error && error.code === 'ENOENT'
+            ? 'ARCHIVE_LAYOUT_MISSING'
+            : 'ARCHIVE_LAYOUT_READ_FAILED',
+          error
+        };
+      }
     }
   };
 }

@@ -66,6 +66,45 @@ function completeLayout(repository, artifact, overrides = {}) {
   });
 }
 
+test('目录化候选按 artifact id 分页，且 materialized 统计与游标一致', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'materialization-pages' }).batch;
+    const ids = [];
+    for (let index = 0; index < 3; index += 1) {
+      const sha256 = String.fromCharCode(97 + index).repeat(64);
+      const artifact = addArtifact(repository, batch.id, {
+        artifactKey: `materialization-page-${index}`,
+        originalName: `page-${index}.xlsx`
+      });
+      repository.startArtifactAttempt(artifact.id);
+      repository.completeArtifact(artifact.id, {
+        sha256,
+        sizeBytes: index + 1,
+        relativePath: `blobs/sha256/${index}/${sha256}`
+      });
+      ids.push(artifact.id);
+    }
+
+    const first = repository.listMaterializationCandidates(2, 0);
+    const second = repository.listMaterializationCandidates(2, first.at(-1).id);
+    assert.deepEqual([...first, ...second].map((artifact) => artifact.id), ids);
+    assert.equal(repository.countMaterializationCandidates(), 3);
+    completeLayout(repository, first[0]);
+    assert.equal(repository.countMaterializationCandidates(), 2);
+    assert.deepEqual(
+      repository.listMaterializedArtifactsPage(1, 0).map((artifact) => artifact.id),
+      [first[0].id]
+    );
+    assert.equal(repository.countMaterializedArtifactsAfter(0), 1);
+    assert.equal(repository.countMaterializedArtifactsAfter(first[0].id), 0);
+    assert.throws(() => repository.listMaterializedArtifactsPage(1, -1), /afterArtifactId/);
+    assert.throws(() => repository.countMaterializedArtifactsAfter(-1), /afterArtifactId/);
+  } finally {
+    db.close();
+  }
+});
+
 test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 succeeded 闭锁', () => {
   const { db, repository } = createFixture();
   try {
@@ -313,6 +352,60 @@ test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 
       sizeBytes: 5
     }]);
     assert.equal(repository.listCleanupJobs().length, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('Blob 元数据按 id 游标分页，供后台 ownership/完整性扫描有界推进', () => {
+  const { db, repository: repo } = createFixture();
+  try {
+    repo.ensureSchema();
+    const now = '2026-07-20T04:00:00.000Z';
+    for (let index = 0; index < 3; index += 1) {
+      db.prepare(`
+        INSERT INTO archive_blobs(sha256, size_bytes, relative_path, created_at, last_verified_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        String(index + 1).repeat(64),
+        index + 1,
+        `blobs/sha256/${String(index + 1).repeat(2)}/${String(index + 1).repeat(64)}`,
+        now,
+        now
+      );
+    }
+    const first = repo.listBlobsPage(2, 0);
+    assert.deepEqual(first.map((blob) => blob.id), [1, 2]);
+    assert.deepEqual(repo.listBlobsPage(2, first[1].id).map((blob) => blob.id), [3]);
+    assert.equal(repo.countBlobsAfter(0), 3);
+    assert.equal(repo.countBlobsAfter(2), 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('统计大小只累计 ready artifact 引用，failed/pending 即使残留 blob 引用也不计', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'stats-ready-only' }).batch;
+    const artifacts = ['ready', 'failed', 'pending'].map((status) => {
+      const artifact = addArtifact(repository, batch.id, { artifactKey: `stats-${status}` });
+      repository.startArtifactAttempt(artifact.id);
+      const completed = repository.completeArtifact(artifact.id, {
+        sha256: HASH_A,
+        sizeBytes: 5,
+        relativePath: `blobs/sha256/aa/${HASH_A}`
+      });
+      completeLayout(repository, completed.artifact);
+      return completed.artifact;
+    });
+    db.prepare("UPDATE archive_artifacts SET status = 'failed' WHERE id = ?").run(artifacts[1].id);
+    db.prepare("UPDATE archive_artifacts SET status = 'pending' WHERE id = ?").run(artifacts[2].id);
+
+    const stats = repository.getStats();
+    assert.equal(stats.batchCount, 1);
+    assert.equal(stats.logicalBytes, 5);
+    assert.equal(stats.failedFileCount, 1);
   } finally {
     db.close();
   }

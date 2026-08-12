@@ -9,6 +9,8 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
+  DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE,
+  ArchiveService,
   blobRelativePath,
   createArchiveService
 } = require('../../../src/main-process/archive-center/archive-service');
@@ -180,6 +182,393 @@ test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的�
     assert.equal(duplicate.ok, true);
     assert.equal(duplicate.results[0].alreadyArchived, true);
     assert.equal(duplicate.batch.artifactCount, 3);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('默认启动只校验 Blob/layout 元数据，显式 verifyHashes 才流式读取全部内容', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'startup-hash.xlsx', 'startup-hash-content');
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('startup-hash'),
+      filePath: sourcePath,
+      role: 'output'
+    });
+    assert.equal(archived.ok, true);
+
+    let readStreamCount = 0;
+    const countingFs = {
+      ...fs,
+      promises: fs.promises,
+      createReadStream(...args) {
+        readStreamCount += 1;
+        return fs.createReadStream(...args);
+      }
+    };
+    const metadataOnly = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      fsImpl: countingFs,
+      verifyHashesOnStartup: false
+    });
+    const metadataResult = await metadataOnly.initialize();
+    assert.equal(metadataResult.available, true);
+    assert.equal(readStreamCount, 0);
+
+    const fullVerify = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      fsImpl: countingFs,
+      verifyHashesOnStartup: true
+    });
+    const fullResult = await fullVerify.initialize();
+    assert.equal(fullResult.available, true);
+    assert.ok(readStreamCount >= 2, `canonical 与 layout 应执行哈希读取，实际 ${readStreamCount}`);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('5001 个缺失 v2 layout 也只占用首块共享预算并由同一后台队列耗尽', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-materialization-budget-'));
+  const artifactIds = Array.from({ length: 5001 }, (_value, index) => index + 1);
+  const remaining = new Set();
+  const processed = [];
+  const verified = [];
+  const repository = {
+    ensureSchema() {},
+    replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
+    listCleanupJobs() { return []; },
+    markInterruptedArtifacts() { return { artifactCount: 0 }; },
+    repairDanglingArtifactReferences() { return { artifactCount: 0, releasedBlobs: [] }; },
+    listBlobs() { return []; },
+    listMaterializedArtifacts() { return []; },
+    listMaterializedArtifactsPage(limit, afterArtifactId) {
+      return artifactIds
+        .filter((artifactId) => artifactId > afterArtifactId)
+        .slice(0, limit)
+        .map((id) => ({
+          id,
+          blob: { sha256: 'a'.repeat(64), sizeBytes: 1 },
+          storageRelativePath: `2026/missing-${id}.xlsx`,
+          storageMode: 'copy',
+          storageLayoutVersion: 2,
+          safeFileName: `missing-${id}.xlsx`,
+          artifactOrder: id,
+          materializationErrorCode: ''
+        }));
+    },
+    countMaterializedArtifactsAfter(afterArtifactId) {
+      return artifactIds.filter((artifactId) => artifactId > afterArtifactId).length;
+    },
+    recordMaterializationFailure(artifactId) { remaining.add(artifactId); },
+    listMaterializationCandidates(limit, afterArtifactId) {
+      return [...remaining]
+        .filter((artifactId) => artifactId > afterArtifactId)
+        .slice(0, limit)
+        .map((id) => ({ id }));
+    },
+    countMaterializationCandidates() { return remaining.size; }
+  };
+  const service = new ArchiveService({
+    repository,
+    rootDir: path.join(tempDir, 'archive-root')
+  });
+  service.materializer.verifyMetadata = async (relativePath) => {
+    verified.push(relativePath);
+    return {
+      valid: false,
+      code: 'ARCHIVE_LAYOUT_MISSING'
+    };
+  };
+  service._materializeArtifactUnlocked = async (artifactId) => {
+    processed.push(artifactId);
+    remaining.delete(artifactId);
+    return { ok: true };
+  };
+  try {
+    const initialized = await service.initialize({ startBackgroundMaterialization: false });
+    assert.equal(initialized.available, true);
+    assert.equal(verified.length, DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE);
+    assert.equal(processed.length, DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE);
+    assert.equal(
+      initialized.consistency.materializationRemaining,
+      5001 - DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE
+    );
+    assert.equal(service.getMaterializationProgress().status, 'pending');
+
+    await service.resumeBackgroundMaterialization();
+    assert.equal(verified.length, 5001);
+    assert.equal(processed.length, 5001);
+    assert.deepEqual(processed, Array.from({ length: 5001 }, (_value, index) => index + 1));
+    assert.deepEqual(service.getMaterializationProgress(), {
+      status: 'complete',
+      processed: 5001,
+      succeeded: 5001,
+      failed: 0,
+      remaining: 0,
+      cursor: 5001,
+      lastErrorCode: ''
+    });
+  } finally {
+    await service.pauseBackgroundMaterialization();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('5001 个 canonical Blob 的启动元数据校验只读取首块并由后台耗尽', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-blob-budget-'));
+  const blobs = Array.from({ length: 5001 }, (_value, index) => {
+    const id = index + 1;
+    const sha256 = id.toString(16).padStart(64, '0');
+    return {
+      id,
+      sha256,
+      sizeBytes: 1,
+      referenceCount: 1,
+      relativePath: `blobs/sha256/${sha256.slice(0, 2)}/${sha256}`
+    };
+  });
+  let blobLstatCount = 0;
+  const countingPromises = new Proxy(fs.promises, {
+    get(target, property, receiver) {
+      if (property === 'lstat') {
+        return async (filePath) => {
+          if (String(filePath).includes(`${path.sep}blobs${path.sep}sha256${path.sep}`)
+              && path.basename(String(filePath)).length === 64) {
+            blobLstatCount += 1;
+            return {
+              isFile: () => true,
+              isSymbolicLink: () => false,
+              size: 1
+            };
+          }
+          return fs.promises.lstat(filePath);
+        };
+      }
+      return Reflect.get(target, property, receiver);
+    }
+  });
+  const repository = {
+    ensureSchema() {},
+    replayFlowBindIntents() { return { replayed: 0, remaining: 0 }; },
+    listCleanupJobs() { return []; },
+    markInterruptedArtifacts() { return { artifactCount: 0 }; },
+    repairDanglingArtifactReferences() { return { artifactCount: 0, releasedBlobs: [] }; },
+    listBlobs() { return blobs; },
+    listBlobsPage(limit, afterBlobId) {
+      return blobs.filter((blob) => blob.id > afterBlobId).slice(0, limit);
+    },
+    countBlobsAfter(afterBlobId) {
+      return blobs.filter((blob) => blob.id > afterBlobId).length;
+    },
+    listMaterializedArtifacts() { return []; },
+    listMaterializedArtifactsPage() { return []; },
+    countMaterializedArtifactsAfter() { return 0; },
+    listMaterializationCandidates() { return []; },
+    countMaterializationCandidates() { return 0; }
+  };
+  const service = new ArchiveService({
+    repository,
+    rootDir: path.join(tempDir, 'archive-root'),
+    fsImpl: { ...fs, promises: countingPromises }
+  });
+  try {
+    const initialized = await service.initialize({ startBackgroundMaterialization: false });
+    assert.equal(initialized.available, true);
+    assert.equal(blobLstatCount, DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE);
+    assert.equal(
+      initialized.consistency.blobVerificationRemaining,
+      5001 - DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE
+    );
+
+    await service.resumeBackgroundMaterialization();
+    assert.equal(blobLstatCount, 5001);
+    assert.equal(service.blobVerificationRemaining, 0);
+    assert.equal(service.getMaterializationProgress().status, 'complete');
+  } finally {
+    await service.pauseBackgroundMaterialization();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('后台尚未物化的尾部 artifact 仍以 canonical SHA/size 强校验并按需修复打开', async () => {
+  const fixture = createFixture();
+  try {
+    const archived = [];
+    for (let index = 0; index < 2; index += 1) {
+      archived.push(await fixture.service.archiveFile({
+        ...batchPayload(`startup-tail-${index}`),
+        filePath: writeSource(fixture, `startup-tail-${index}.xlsx`, `tail-content-${index}`),
+        role: 'output'
+      }));
+    }
+    fixture.db.prepare(`
+      UPDATE archive_artifacts
+      SET storage_layout_version = 1,
+          storage_relative_path = NULL,
+          storage_mode = NULL,
+          safe_file_name = NULL,
+          artifact_order = NULL
+    `).run();
+
+    let readStreamCount = 0;
+    const countingFs = {
+      ...fs,
+      promises: fs.promises,
+      createReadStream(...args) {
+        readStreamCount += 1;
+        return fs.createReadStream(...args);
+      }
+    };
+    const restarted = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      fsImpl: countingFs,
+      startupMaterializationBatchSize: 1
+    });
+    const initialized = await restarted.initialize({ startBackgroundMaterialization: false });
+    assert.equal(initialized.consistency.materializationRemaining, 1);
+    const readsBeforeOpen = readStreamCount;
+
+    const opened = await restarted.openReadonlyCopy(archived[1].artifact.id);
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    assert.ok(readStreamCount > readsBeforeOpen, '按需打开必须重新读取并校验 canonical 内容');
+    assert.equal(restarted.repository.getArtifact(archived[1].artifact.id).storageLayoutVersion, 2);
+    assert.equal(restarted.repository.countMaterializationCandidates(), 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('后台块中断后重启从 DB 状态与 artifact_id cursor 重新耗尽且不跳项', async () => {
+  const fixture = createFixture();
+  let interrupted;
+  try {
+    const artifactIds = [];
+    for (let index = 0; index < 5; index += 1) {
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload(`startup-resume-${index}`),
+        filePath: writeSource(fixture, `startup-resume-${index}.xlsx`, `resume-${index}`),
+        role: 'output'
+      });
+      artifactIds.push(archived.artifact.id);
+    }
+    fixture.db.prepare(`
+      UPDATE archive_artifacts
+      SET storage_layout_version = 1,
+          storage_relative_path = NULL,
+          storage_mode = NULL,
+          safe_file_name = NULL,
+          artifact_order = NULL
+    `).run();
+
+    interrupted = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      startupMaterializationBatchSize: 1
+    });
+    const first = await interrupted.initialize({ startBackgroundMaterialization: false });
+    assert.equal(first.consistency.materializationProcessedCount, 1);
+
+    let releaseChunk;
+    let markChunkEntered;
+    const chunkGate = new Promise((resolve) => { releaseChunk = resolve; });
+    const chunkEntered = new Promise((resolve) => { markChunkEntered = resolve; });
+    const originalMaterialize = interrupted._materializeArtifactUnlocked.bind(interrupted);
+    interrupted._materializeArtifactUnlocked = async (artifactId) => {
+      if (artifactId === artifactIds[1]) {
+        markChunkEntered();
+        await chunkGate;
+      }
+      return originalMaterialize(artifactId);
+    };
+    const background = interrupted.resumeBackgroundMaterialization();
+    await chunkEntered;
+    const stopped = interrupted.pauseBackgroundMaterialization();
+    releaseChunk();
+    await stopped;
+    await background;
+    assert.deepEqual(
+      {
+        status: interrupted.getMaterializationProgress().status,
+        remaining: interrupted.getMaterializationProgress().remaining,
+        cursor: interrupted.getMaterializationProgress().cursor
+      },
+      { status: 'paused', remaining: 3, cursor: artifactIds[1] }
+    );
+    assert.equal(fixture.service.repository.countMaterializationCandidates(), 3);
+
+    const restarted = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      startupMaterializationBatchSize: 2
+    });
+    const resumed = await restarted.initialize({ startBackgroundMaterialization: false });
+    assert.equal(resumed.consistency.materializationProcessedCount, 0);
+    assert.equal(resumed.consistency.materializationRemaining, 3);
+    await restarted.resumeBackgroundMaterialization();
+    assert.equal(restarted.repository.countMaterializationCandidates(), 0);
+    assert.deepEqual(
+      artifactIds.map((artifactId) => restarted.repository.getArtifact(artifactId).storageLayoutVersion),
+      [2, 2, 2, 2, 2]
+    );
+  } finally {
+    if (interrupted) await interrupted.pauseBackgroundMaterialization();
+    fixture.close();
+  }
+});
+
+test('v2 layout 缺失与 legacy 候选共享前台预算，显式强校验仍全量修复', async () => {
+  const fixture = createFixture();
+  try {
+    const artifactIds = [];
+    for (let index = 0; index < 3; index += 1) {
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload(`v2-missing-${index}`),
+        filePath: writeSource(fixture, `v2-missing-${index}.xlsx`, `v2-missing-${index}`),
+        role: 'output'
+      });
+      artifactIds.push(archived.artifact.id);
+    }
+    fs.rmSync(path.join(fixture.rootDir, '2026'), { recursive: true, force: true });
+
+    const restarted = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      startupMaterializationBatchSize: 1
+    });
+    const initialized = await restarted.initialize({ startBackgroundMaterialization: false });
+    assert.equal(initialized.available, true);
+    assert.equal(initialized.consistency.materializationProcessedCount, 1);
+    assert.equal(initialized.consistency.materializationRemaining, 2);
+    assert.equal(
+      restarted.repository.countMaterializationCandidates(),
+      0,
+      '前台未扫描的 v2 layout 不应先被写成 failure candidate'
+    );
+
+    const tail = await restarted.openReadonlyCopy(artifactIds[2]);
+    assert.equal(tail.ok, true, JSON.stringify(tail));
+    assert.equal(restarted.repository.getArtifact(artifactIds[2]).storageLayoutVersion, 2);
+    assert.equal(restarted.getMaterializationProgress().remaining, 2);
+    await restarted.resumeBackgroundMaterialization();
+    assert.equal(restarted.repository.countMaterializationCandidates(), 0);
+
+    fs.rmSync(path.join(fixture.rootDir, '2026'), { recursive: true, force: true });
+    const fullVerify = createArchiveService({
+      database: fixture.db,
+      rootDir: fixture.rootDir,
+      startupMaterializationBatchSize: 1,
+      verifyHashesOnStartup: true
+    });
+    const verified = await fullVerify.initialize({ startBackgroundMaterialization: false });
+    assert.equal(verified.available, true);
+    assert.equal(verified.consistency.materializationProcessedCount, 3);
+    assert.equal(verified.consistency.materializationRemaining, 0);
+    assert.equal(fullVerify.repository.countMaterializationCandidates(), 0);
   } finally {
     fixture.close();
   }
@@ -829,12 +1218,13 @@ test('initialize 清理 staging/只读副本和孤儿 blob，并把缺失本体�
       now: () => new Date(2026, 6, 20, 12, 5, 0)
     });
     const initialized = await restarted.initialize();
+    await restarted.pauseBackgroundMaterialization();
 
     assert.equal(initialized.available, true);
     assert.equal(initialized.consistency.removedStagingEntries, 1);
     assert.equal(initialized.consistency.removedReadonlyEntries, 1);
     assert.equal(initialized.consistency.invalidBlobCount, 1);
-    assert.equal(initialized.consistency.removedOrphanBlobFiles, 1);
+    assert.equal(initialized.consistency.removedOrphanBlobFiles, 0);
     assert.equal(fs.existsSync(orphanPath), false);
 
     const repaired = await restarted.getBatch(archived.batch.id);

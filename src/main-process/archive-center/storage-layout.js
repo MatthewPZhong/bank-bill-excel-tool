@@ -55,17 +55,25 @@ function splitFileName(fileName) {
 }
 
 function trimToLength(value, maxLength) {
-  return Array.from(value).slice(0, Math.max(0, maxLength)).join('');
+  const source = String(value || '');
+  let end = Math.min(source.length, Math.max(0, maxLength));
+  if (end > 0
+      && end < source.length
+      && /[\uD800-\uDBFF]/.test(source[end - 1])
+      && /[\uDC00-\uDFFF]/.test(source[end])) {
+    end -= 1;
+  }
+  return source.slice(0, end);
 }
 
 function shortenFileName(fileName, maxLength, identity) {
-  if (Array.from(fileName).length <= maxLength) return fileName;
+  if (fileName.length <= maxLength) return fileName;
   const digest = crypto.createHash('sha256').update(String(identity || fileName)).digest('hex').slice(0, 8);
   const { stem, extension } = splitFileName(fileName);
   const suffix = `-${digest}`;
   const extensionBudget = Math.max(0, maxLength - suffix.length - 1);
-  const safeExtension = trimToLength(extension, Math.min(Array.from(extension).length, extensionBudget));
-  const stemBudget = Math.max(1, maxLength - suffix.length - Array.from(safeExtension).length);
+  const safeExtension = trimToLength(extension, Math.min(extension.length, extensionBudget));
+  const stemBudget = Math.max(1, maxLength - suffix.length - safeExtension.length);
   return `${trimToLength(stem, stemBudget)}${suffix}${safeExtension}`;
 }
 
@@ -84,11 +92,13 @@ function addDuplicateSuffix(fileName, occurrence, maxLength, identity) {
   if (occurrence <= 1) return shortenFileName(fileName, maxLength, identity);
   const { stem, extension } = splitFileName(fileName);
   const suffix = ` (${occurrence})`;
-  const stemBudget = Math.max(1, maxLength - Array.from(extension).length - suffix.length);
-  const shortenedStem = Array.from(stem).length > stemBudget
+  const extensionBudget = Math.max(0, maxLength - suffix.length - 1);
+  const safeExtension = trimToLength(extension, Math.min(extension.length, extensionBudget));
+  const stemBudget = Math.max(1, maxLength - safeExtension.length - suffix.length);
+  const shortenedStem = stem.length > stemBudget
     ? shortenFileName(stem, stemBudget, identity)
     : stem;
-  return `${shortenedStem}${suffix}${extension}`;
+  return `${shortenedStem}${suffix}${safeExtension}`;
 }
 
 function availableFileName(originalName, usedNames, options = {}) {
@@ -111,7 +121,14 @@ function fileNameLengthForRoot(rootDir, batchRelativeDir) {
     + 1
     + batchRelativeDir.split('/').join(path.sep).length
     + 1;
-  return Math.min(DEFAULT_FILE_NAME_LENGTH, Math.max(24, MAX_WINDOWS_PATH_LENGTH - prefixLength));
+  const available = MAX_WINDOWS_PATH_LENGTH - prefixLength;
+  if (available < 24) {
+    throw new StorageLayoutError(
+      'ARCHIVE_LAYOUT_PATH_TOO_LONG',
+      '存档根路径过长，无法生成 Windows 可用的批次文件路径'
+    );
+  }
+  return Math.min(DEFAULT_FILE_NAME_LENGTH, available);
 }
 
 function resolveManagedRelative(rootDir, relativePath) {
@@ -157,7 +174,13 @@ function assignLayoutNames(rootDir, batch, artifacts) {
       });
     }
     const storageRelativePath = `${batchDir}/${safeFileName}`;
-    resolveManagedRelative(rootDir, storageRelativePath);
+    const absolutePath = resolveManagedRelative(rootDir, storageRelativePath);
+    if (absolutePath.length > MAX_WINDOWS_PATH_LENGTH) {
+      throw new StorageLayoutError(
+        'ARCHIVE_LAYOUT_PATH_TOO_LONG',
+        '存档文件路径超过 Windows 安全预算'
+      );
+    }
     assignments.push({
       artifactId: Number(artifact.id),
       artifactOrder: Number(artifact.artifactOrder),
