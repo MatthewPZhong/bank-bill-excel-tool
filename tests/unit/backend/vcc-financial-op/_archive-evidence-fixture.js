@@ -332,7 +332,9 @@ function legacyFixtureSha256() {
 }
 
 function currentGeneratorSha256() {
-  return sha256(fs.readFileSync(GENERATOR_PATH));
+  // manifest 记录 Git/LF 规范内容；Windows autocrlf checkout 不能改变 provenance。
+  const canonicalText = fs.readFileSync(GENERATOR_PATH, 'utf8').replace(/\r\n/g, '\n');
+  return sha256(Buffer.from(canonicalText, 'utf8'));
 }
 
 module.exports = {

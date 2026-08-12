@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const fs = require('node:fs');
 const {
   buildArchiveEvidenceV2
 } = require('../../../../src/backend/vcc-financial-op/archive-evidence');
@@ -39,6 +41,13 @@ test('A-05 真实 v3.1.7 fixture 经 current migration 后精确分类 legacy-fo
   assert.equal(manifest.dependencies.locksEqualAfterRootVersionNormalization, true);
   assert.equal(manifest.fixture.generationTimeDbSha256, legacyFixtureSha256());
   assert.equal(manifest.generator.sha256, currentGeneratorSha256());
+  const generatorLf = fs.readFileSync(manifest.generator.path, 'utf8').replace(/\r\n/g, '\n');
+  const generatorCrlf = generatorLf.replace(/\n/g, '\r\n');
+  assert.equal(
+    crypto.createHash('sha256').update(generatorCrlf.replace(/\r\n/g, '\n')).digest('hex'),
+    manifest.generator.sha256,
+    'Windows CRLF checkout 必须归一为同一 generator provenance'
+  );
   assert.match(manifest.fixture.sourceEvidence.schemaHash, /^[0-9a-f]{64}$/);
   assert.equal(manifest.fixture.sourceEvidence.tableCounts.vcc_fin_op_runs, 1);
   assert.equal(manifest.fixture.sourceEvidence.tableCounts.vcc_fin_op_datasets, 4);
