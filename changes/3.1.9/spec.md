@@ -60,7 +60,7 @@
 | C08 | P1 | 历史批次号是否重写为新格式？ | 历史保持原号，仅 v3.1.9 新任务用新格式 | 全量重编号 | **A**，历史批次是审计身份，不应改写 | 决定迁移风险和旧链接兼容性 | 已确认 |
 | C09 | P1 | “文件总大小”的统计口径是什么？ | 所有 ready 运行文件的显示大小之和；同一内容被两个批次引用时计两次 | 实际 Blob 去重后的物理占用 | **A**，最接近用户看到的运行文件总量 | 决定数字是否等于现有 `logicalBytes` 或 `uniqueBytes` | 已确认 |
 | C10 | P1 | 点击【变更】后是否迁移历史存档？ | 完整复制、校验并原子迁移全部历史存档后切换 | 仅新批次写新地址，旧批次仍留旧地址 | **A**，保持单一存档位置和可解释性 | 决定迁移状态机、耗时和磁盘空间要求 | 已确认 |
-| C11 | P1 | 年/月/日/批次目录与现有去重 Blob 如何共存？ | 保留内部 Blob 真相，在批次目录用硬链接；不支持时安全复制 | 删除 Blob 去重，全部改为普通副本 | **A**，保留完整性、重试和共享引用能力 | 决定磁盘占用和删除语义 | 已确认 |
+| C11 | P1 | 年/月/日/批次目录与现有去重 Blob 如何共存？ | 保留内部 Blob 真相，批次目录始终使用独立 copy；历史 hardlink 只识别并脱钩 | 删除 Blob 去重，全部改为无 canonical 真相的普通副本 | **A**，保留完整性、重试和共享引用能力，同时避免批次文件与 canonical 共享 inode | 决定磁盘占用、篡改隔离和删除语义 | 已确认（review 收口） |
 | C12 | P2 | 设置页文案和按钮状态细节 | “版本管理”只改导航及页标题；内部“自动更新”开关仍保留；锁定后反向按钮显示 `🔓` | 页面内所有“自动更新”都改名；锁定/解锁始终显示 `🔒` | **A**，语义清晰且不改变功能名称 | 主要影响 UI 和无障碍文案 | 已确认 |
 | C13 | P2 | 用户选择的地址如何解释？ | 选中的文件夹本身就是存档根目录 | 在选中目录下再自动创建“存档中心”子目录 | **A**，地址显示与实际目录一致 | 决定路径展示和迁移目标 | 已确认 |
 | C14 | P2 | 保留期限如何保存？ | 下拉框选择值后，在下拉框收起/完成选择时立即保存；【返回】仅返回 | 点击【返回】时再保存 | **A（经用户修订）**。即时保存，失败时恢复最近一次已保存值并提示 | 决定设置页保存触发点与失败恢复 | 已确认 |
@@ -571,7 +571,7 @@ COMMIT
 
 ```text
 storage_relative_path TEXT NULL
-storage_mode TEXT NULL      -- hardlink | copy | legacy-blob
+storage_mode TEXT NULL      -- copy；hardlink 仅用于识别并脱钩历史候选
 storage_layout_version INTEGER NOT NULL DEFAULT 1
 safe_file_name TEXT NULL
 artifact_order INTEGER NULL
@@ -806,15 +806,15 @@ v3.1.8 暴露的通道应逐项登记。按 C03/C04 推荐口径：
 每个 ready artifact 在批次目录中提供可读取文件：
 
 1. SHA-256 Blob 仍是完整性真相。
-2. 同一卷且支持时，从 Blob 建硬链接。
-3. 不支持硬链接、跨卷、网络盘或权限受限时，流式复制。
-4. hardlink/copy 完成后复核大小与 SHA-256。
+2. materialized 文件必须与 canonical Blob 拥有独立 inode；不得从 Blob 建 hardlink。
+3. 始终通过 staging 流式 copy 生成，复核大小与 SHA-256、设为只读后原子发布。
+4. 历史 `storage_mode=hardlink` 或检测到与 canonical 共享 inode 时，必须先验证 canonical，再脱钩为独立 copy。
 5. 目录化失败不得把已成功 Blob 误标为丢失；读取可回退 canonical Blob，批次标记待修复。
 6. 用户点击【打开】仍生成只读副本，不直接把内部运行文件交给 Excel/WPS 编辑。
 7. `另存为` 继续走安全复制。
-8. **hardlink 物化文件必须视为不可变存档**：物化完成后设置只读属性/权限；应用自身不得原地写入。
+8. **materialized copy 必须视为不可变存档**：物化完成后设置只读属性/权限；应用自身不得原地写入。
 9. 打开详情、启动一致性检查和 repair 路径发现 materialized 文件大小/hash 与 canonical Blob 元数据不一致时，必须 fail-closed，禁止把 materialized 文件反向吸收为新 Blob。
-10. hardlink 模式下若任一入口被外部程序篡改，canonical Blob 也可能被污染，因此启动/读取前完整性校验必须以数据库记录的 hash + size 为基准；hash 不符时将相关 artifact 标为需修复/不完整，并要求从可信源重试，不得静默“接受新 hash”。
+10. 历史 hardlink 若与 canonical 共享 inode，任一入口的外部篡改都可能污染 canonical；必须以 DB hash + size 验证 canonical，不信任时 fail-closed，不得静默接受新 hash 或从污染文件自修。
 11. copy 模式的 materialized 文件被改写时，只删除并从 canonical Blob 重新物化即可；不得改变 artifact identity。
 12. Windows/Excel/WPS 人工验收必须验证批次目录文件不能被应用原地保存覆盖；需要编辑时只能通过【打开】产生的只读副本或【另存为】导出副本。
 
@@ -933,7 +933,7 @@ renderer 不传目标路径。
 - 属于另一个 archive instance 的根；
 - 只读目录；
 - symlink/junction 绕过后的被拒位置；
-- 空间明显不足的卷；容量预估必须至少覆盖全部 canonical Blob，并根据目标文件系统 hardlink 能力计入 materialized copy 的额外最坏空间，不得只按源目录表面大小估算；
+- 空间明显不足的卷；容量预估必须覆盖全部缺失 canonical Blob 与全部缺失/需脱钩 materialized copy 的额外最坏空间，不得依赖 hardlink 节省空间或只按源目录表面大小估算；
 - 无法完成“创建→写入→flush→重命名→读取→删除”探针的目录。
 
 ## 9.3 根标记
@@ -988,7 +988,7 @@ prepared
 3. 校验源、目标、空间和 marker。
 4. 原子写 journal `prepared`。
 5. **只流式复制 canonical Blob 与根身份所需 marker；不得递归复制旧批次 materialized files。** `.readonly/` 不迁移，`.staging/` 必须在进入 copying 前清空/恢复到可证明安全状态。
-6. 在目标根根据数据库 ready artifact **重新 materialize** 年/月/日/批次目录：同卷 hardlink，跨卷/不支持 hardlink 时 copy。
+6. 在目标根根据库 ready artifact **重新 materialize** 年/月/日/批次目录：始终生成与目标 canonical Blob 独立 inode 的 copy。
 7. 逐 canonical Blob 和重新物化文件校验大小与 SHA-256。
 8. 用目标根初始化新 service 并执行一致性检查。
 9. 在单一提交点保存 `archive_center_storage_root` 并切换 runtime delegate。
@@ -1361,10 +1361,10 @@ VCC财务OP主进程 handlers / service / worker
 
 - layout builder；
 - artifact 物化字段；
-- hardlink/copy；
+- 独立 copy 与历史 hardlink 脱钩；
 - 历史目录化；
 - 删除、读取回退和修复测试；
-- hardlink 只读/篡改检测、retention 自动目录清理。
+- copy 只读/篡改 repair、历史 hardlink 脱钩、retention 自动目录清理。
 
 ## PR5 — 存储地址变更
 
@@ -1476,8 +1476,8 @@ VCC财务OP主进程 handlers / service / worker
 3. 无文件批次不误报失败。
 4. 同名文件稳定追加 `(2)`。
 5. Windows 非法字符、保留名、尾随点/空格、长路径安全。
-6. hardlink 内容一致。
-7. 不支持 hardlink 时回退 copy，hash/大小一致。
+6. materialized copy 与 canonical 不共享 inode，hash/大小一致且只读。
+7. 历史 hardlink 在 canonical 可信时脱钩为 copy；canonical 不可信时 fail-closed。
 8. 目录文件损坏可回退 Blob 并标记修复。
 9. 历史批次保持旧号并可目录化。
 10. 删除批次只删除对应运行文件；共享 Blob 仍被其它批次使用。
@@ -1507,8 +1507,8 @@ VCC财务OP主进程 handlers / service / worker
 18. 配置根离线时不静默回默认。
 19. 迁移期间新任务、删除、重试和第二次迁移被互斥。
 20. 迁移期间退出/更新安装受保护。
-21. 目标支持 hardlink 时容量预估按 canonical Blob + 必要元数据；不支持 hardlink 时计入 materialized copy 最坏空间。
-22. 跨卷迁移不会把旧 hardlink 当普通文件复制两遍；目标侧先有 canonical Blob，再重新 materialize。
+21. 容量预估始终计入缺失 canonical Blob 与 materialized copy 最坏空间；历史 hardlink 脱钩也计入额外副本空间。
+22. 跨卷迁移不会把旧 hardlink 当普通文件复制两遍；目标侧先有 canonical Blob，再重建独立 copy。
 23. `.readonly/` 不迁移；`.staging/` 未清理到安全状态时不得进入 copying。
 
 ## 15.8 统计与 UI
@@ -1534,15 +1534,15 @@ VCC财务OP主进程 handlers / service / worker
 19. 重启后 relatedBatches 与显示保持；删除其中一项后只刷新剩余关联。
 20. 保留期限快速连续选择仅最后一次用户意图生效，旧 Promise 不反写 UI。
 
-## 15.8.1 hardlink / cleanup / legacy root 专项
+## 15.8.1 copy isolation / cleanup / legacy root 专项
 
-- hardlink 物化后只读保护生效；应用不原地写入。
+- materialized copy 与 canonical 拥有独立 inode，且只读保护生效；应用不原地写入。
 - copy 物化被外部修改后从 canonical Blob 可恢复。
-- hardlink/canonical hash 与 DB 记录不符时 fail-closed，不接受新 hash。
+- 历史 hardlink 在 canonical 可信时脱钩为 copy；canonical hash 与 DB 记录不符时 fail-closed，不接受新 hash。
 - `cleanupExpired()` 删除 materialized batch 目录并逐级清空空日期/月/年目录。
 - 一个 Blob 被多个批次引用时，删除/到期单一批次不删除共享 Blob；最后引用消失才删除。
 - v3.1.8 legacy 默认根无 marker 时可在一致性证明成立后 bootstrap；未知/冲突目录不能自动认领。
-- 存储根跨卷迁移只复制 canonical Blob，不把旧 hardlink 作为第二份普通文件复制；目标目录重新 materialize。
+- 存储根跨卷迁移只复制 canonical Blob，不把旧 hardlink 作为第二份普通文件复制；目标目录重建独立 copy。
 
 ## 15.9 既有能力回归
 
@@ -1624,7 +1624,7 @@ node --test tests/unit/vcc-financial-op-archive-integration.test.js
 - [ ] 存档地址变更与历史迁移符合确认结果。
 - [ ] 批次详情批次号右侧按规则显示“关联任务：2026-08-09-001/002/003”，不显示具体任务名和内部 `parentRunId`。
 - [ ] 同流程关联可跨重启恢复；重新开始一轮业务流程不会串入旧关联。
-- [ ] hardlink/copy 批次文件均不可被应用原地修改；外部篡改有完整性告警/修复路径。
+- [ ] materialized copy 不可被应用原地修改；外部篡改有完整性告警/修复路径，历史 hardlink 可安全脱钩。
 - [ ] 删除最新批次后“最新批次”不倒退，下一次发号不复用。
 - [ ] 保留期限快速连续修改最终值等于最后一次选择，【返回】不承担保存。
 
@@ -1645,7 +1645,7 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 9. 自动化、Windows/Excel/WPS 和业务回归门禁通过。
 10. 所有确认项已形成正式决策记录，Spec 与实现无未解释偏差。
 11. `parentRunId` 的创建、继承、重跑、删除和跨重启行为均有契约测试，关联任务 UI 不串流程。
-12. hardlink/copy、retention cleanup、legacy root bootstrap 和跨卷迁移均通过真实文件系统专项测试。
+12. copy 隔离/历史 hardlink 脱钩、retention cleanup、legacy root bootstrap 和跨卷迁移均通过真实文件系统专项测试。
 13. `archiveStatus` 继续严格兼容现库三态 `staging/complete/incomplete`；业务失败只由 `taskStatus=failed` 表达，不偷偷重建旧表扩枚举。
 
 ---
@@ -1665,7 +1665,7 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 - [ ] 历史批次兼容完成。
 - [ ] 年/月/日/批次目录和运行文件完成。
 - [ ] Blob 完整性、去重和重试保留。
-- [ ] hardlink 只读保护、外部篡改检测和 repair/fail-closed 完成。
+- [ ] 独立 copy 只读保护、外部篡改 repair/fail-closed 与历史 hardlink 脱钩完成。
 - [ ] retention 自动清理同步回收批次目录和空年月日目录。
 - [ ] 存储地址选择、迁移、journal 和恢复完成。
 - [ ] legacy root marker bootstrap 完成；迁移只复制 canonical Blob 并在新根重建 layout。
@@ -1681,7 +1681,7 @@ C01—C14 已确认。只有以下情况允许 Codex 再次询问：
 
 1. v3.1.8 最终合并代码出现本文未覆盖的新业务 action，且无法判定其是否应分配批次；
 2. 真实历史存档根被外部程序混入文件，无法通过 marker、数据库和 hash 判断归属；
-3. 目标 Windows 环境明确禁止 hardlink，且复制会违反已确认容量约束；
+3. 目标 Windows 环境无法安全完成流式 copy，且复制会违反已确认容量约束；
 4. 某业务任务在“预留批次前”已经发生不可逆副作用，无法通过重排或兼容层满足需求。
 
 提问前必须给出代码路径、最小复现场景、数据/审计影响和推荐解决方案，不得只说“需求不清楚”。
