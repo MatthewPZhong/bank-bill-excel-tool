@@ -86,7 +86,14 @@
   - [x] 聚焦 unit、roundtrip、large-file、large-split 与 multi-sheet 回归通过；blindspot/reconciliation 已复核。
   - [x] 最终唯一一次 `release-check` 全绿：lint/smoke、unit 4999/4999、integration 48/48 scripts 与 2385/2385 assertions；runner policy 合法自动同步。
   - [ ] 用户 P0/P1 GUI、Windows installer/portable、Excel/WPS、约16GB/700万行与真实文件/sheet/行数/资金输出血缘人工验收。
-- [ ] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup。
+- [x] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup 的本地实现与自动证据。
+  - [x] layout v2 精确按 `local_date/batchNumber` 物化；Windows-safe 稳定命名、历史 order 回填、无 ready 无空业务目录。
+  - [x] canonical Blob 保持唯一真相；hardlink 优先、真实能力错误流式 copy、size/hash/只读、copy repair 与 hardlink 污染 fail-closed 已闭合。
+  - [x] ready 与 repair-pending 正交证据、layout-first read/Blob fallback、历史启动续跑与内部路径不出 DTO 已接线。
+  - [x] manual/retention/startup 共用单一 cleanup job executor；共享 Blob last-ref、目录失败续跑与空年月日回收已覆盖。
+  - [x] PR4 核心 57/57、扩大 Archive 184/184、lint/node/diff/check-vars 通过；blindspot/reconciliation 红线未由自动测试关闭。
+  - [x] 发布前唯一一次 `release-check` 首次全绿：lint/smoke、unit 5013/5013、integration 48/48 scripts 与 2385/2385 assertions；runner policy 合法自动同步。
+  - [ ] Windows installer/portable、真实跨卷/网络盘/长根路径、Excel/WPS、真实大文件和输入输出血缘人工验收。
 - [ ] PR5：存储地址、marker、journal、迁移与恢复。
 - [ ] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent。
 - [ ] PR7：版本号、发布文档、全门禁与 Windows/财务人工验收。

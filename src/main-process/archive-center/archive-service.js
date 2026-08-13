@@ -15,11 +15,22 @@ const {
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('./source-snapshot');
+const {
+  STORAGE_LAYOUT_VERSION,
+  assignLayoutNames,
+  batchRelativeDirectory
+} = require('./storage-layout');
+const {
+  createStorageMaterializer,
+  verifyFile
+} = require('./storage-materializer');
 
 const STAGING_DIR_NAME = '.staging';
 const READONLY_DIR_NAME = '.readonly';
 const BLOB_ROOT_PARTS = Object.freeze(['blobs', 'sha256']);
 const DEFAULT_RETENTION_DAYS = 60;
+const DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE = 64;
+const MAX_MATERIALIZATION_BATCH_SIZE = 5000;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const ROOT_MUTATION_TAILS = new Map();
 
@@ -78,9 +89,22 @@ function safeFailure(error, operation, originalName = '') {
   };
 }
 
+function isFileIntegrityFailure(result) {
+  return result && [
+    'ARCHIVE_LAYOUT_MISSING',
+    'ARCHIVE_LAYOUT_SIZE_MISMATCH',
+    'ARCHIVE_LAYOUT_HASH_MISMATCH'
+  ].includes(result.code);
+}
+
 function publicArtifact(artifact) {
   if (!artifact) return null;
-  const { sourcePath: _sourcePath, blob, ...visible } = artifact;
+  const {
+    sourcePath: _sourcePath,
+    storageRelativePath: _storageRelativePath,
+    blob,
+    ...visible
+  } = artifact;
   if (visible.metadata && typeof visible.metadata === 'object') {
     const {
       sourceSnapshot: _sourceSnapshot,
@@ -137,7 +161,7 @@ function artifactKeyForFile(payload, resolvedFilePath) {
   return `file-${crypto.createHash('sha256').update(identity).digest('hex')}`;
 }
 
-function runSerialized(rootKey, operation) {
+function runArchiveRootOperation(rootKey, operation) {
   const previous = ROOT_MUTATION_TAILS.get(rootKey) || Promise.resolve();
   const result = previous.then(operation, operation);
   const tail = result.catch(() => undefined);
@@ -176,6 +200,14 @@ class ArchiveService {
         || defaultRetentionDays > 36500) {
       throw new TypeError('defaultRetentionDays 必须是 1 到 36500 的安全整数');
     }
+    const startupMaterializationBatchSize = options.startupMaterializationBatchSize === undefined
+      ? DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE
+      : Number(options.startupMaterializationBatchSize);
+    if (!Number.isSafeInteger(startupMaterializationBatchSize)
+        || startupMaterializationBatchSize < 1
+        || startupMaterializationBatchSize > MAX_MATERIALIZATION_BATCH_SIZE) {
+      throw new TypeError('startupMaterializationBatchSize 必须是 1 到 5000 的安全整数');
+    }
 
     this.rootDir = path.resolve(rootDir);
     this.stagingDir = path.join(this.rootDir, STAGING_DIR_NAME);
@@ -186,10 +218,34 @@ class ArchiveService {
     this.opener = options.opener || null;
     this.onSourceReleased = options.onSourceReleased || null;
     this.defaultRetentionDays = defaultRetentionDays;
+    this.startupMaterializationBatchSize = startupMaterializationBatchSize;
     this.verifyHashesOnStartup = options.verifyHashesOnStartup === true;
     this.repository = options.repository || createArchiveRepository(database, { now: this.now });
+    this.materializer = createStorageMaterializer({
+      rootDir: this.rootDir,
+      stagingDir: this.stagingDir,
+      fs: this.fs,
+      materializeCopyFile: options.materializeCopyFile
+    });
     this.initialized = false;
     this.initialization = null;
+    this.materializationGeneration = 0;
+    this.materializationPromise = null;
+    this.blobVerificationCursor = 0;
+    this.blobVerificationRemaining = 0;
+    this.materializationScanCursor = 0;
+    this.materializationCandidateCursor = 0;
+    this.orphanBlobPrefixes = [];
+    this.orphanBlobPrefixCursor = 0;
+    this.materializationProgress = {
+      status: 'idle',
+      processed: 0,
+      succeeded: 0,
+      failed: 0,
+      remaining: 0,
+      cursor: 0,
+      lastErrorCode: ''
+    };
   }
 
   async _releaseSourcePaths(sourcePaths) {
@@ -242,6 +298,433 @@ class ArchiveService {
     await this.fs.promises.mkdir(this.blobRoot, { recursive: true });
   }
 
+  _countMaterializationCandidates() {
+    if (typeof this.repository.countMaterializationCandidates === 'function') {
+      return this.repository.countMaterializationCandidates();
+    }
+    return this.repository.listMaterializationCandidates(1, 0).length;
+  }
+
+  _listMaterializedArtifactPage(limit, afterArtifactId) {
+    if (typeof this.repository.listMaterializedArtifactsPage === 'function') {
+      return this.repository.listMaterializedArtifactsPage(limit, afterArtifactId);
+    }
+    return this.repository.listMaterializedArtifacts()
+      .filter((artifact) => artifact.id > afterArtifactId)
+      .sort((left, right) => left.id - right.id)
+      .slice(0, limit);
+  }
+
+  _countMaterializedArtifactsAfter(afterArtifactId) {
+    if (typeof this.repository.countMaterializedArtifactsAfter === 'function') {
+      return this.repository.countMaterializedArtifactsAfter(afterArtifactId);
+    }
+    return this.repository.listMaterializedArtifacts()
+      .filter((artifact) => artifact.id > afterArtifactId)
+      .length;
+  }
+
+  _countMaterializationWorkRemaining(scanCursor) {
+    return this._countMaterializedArtifactsAfter(scanCursor)
+      + this._countMaterializationCandidates();
+  }
+
+  _listBlobPage(limit, afterBlobId) {
+    if (typeof this.repository.listBlobsPage === 'function') {
+      return this.repository.listBlobsPage(limit, afterBlobId);
+    }
+    return this.repository.listBlobs()
+      .filter((blob) => blob.id > afterBlobId)
+      .sort((left, right) => left.id - right.id)
+      .slice(0, limit);
+  }
+
+  _countBlobsAfter(afterBlobId) {
+    if (typeof this.repository.countBlobsAfter === 'function') {
+      return this.repository.countBlobsAfter(afterBlobId);
+    }
+    return this.repository.listBlobs().filter((blob) => blob.id > afterBlobId).length;
+  }
+
+  async _verifyBlobChunkUnlocked({ afterBlobId, limit, verifyHashes = false }) {
+    const blobs = this._listBlobPage(limit, afterBlobId);
+    const failures = [];
+    let cursor = afterBlobId;
+    let invalidBlobCount = 0;
+    let removedUnreferencedBlobRecords = 0;
+    for (const blob of blobs) {
+      cursor = Math.max(cursor, blob.id);
+      if (blob.referenceCount === 0) {
+        const released = this.repository.deleteBlobIfUnreferenced(blob.id);
+        if (released) {
+          removedUnreferencedBlobRecords += 1;
+          const physical = await this._removeReleasedBlobs([released]);
+          failures.push(...physical.failures);
+        }
+        continue;
+      }
+
+      const expectedRelativePath = blobRelativePath(blob.sha256);
+      let invalidCode = '';
+      let invalidMessage = '';
+      if (blob.relativePath !== expectedRelativePath) {
+        invalidCode = 'ARCHIVE_BLOB_PATH_INVALID';
+        invalidMessage = '存档文件路径元数据不一致，可重试该文件';
+      } else {
+        try {
+          const filePath = this._resolveManagedRelative(blob.relativePath);
+          const stat = await this.fs.promises.lstat(filePath);
+          if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== blob.sizeBytes) {
+            invalidCode = 'ARCHIVE_BLOB_INVALID';
+            invalidMessage = '存档文件缺失或大小不一致，可重试该文件';
+          } else if (verifyHashes) {
+            const actual = await this._hashFile(filePath);
+            if (actual.sha256 !== blob.sha256 || actual.sizeBytes !== blob.sizeBytes) {
+              invalidCode = 'ARCHIVE_BLOB_HASH_MISMATCH';
+              invalidMessage = '存档文件哈希校验失败，可重试该文件';
+            }
+          }
+        } catch (error) {
+          if (error && error.code === 'ENOENT') {
+            invalidCode = 'ARCHIVE_BLOB_MISSING';
+            invalidMessage = '存档文件缺失，可重试该文件';
+          } else {
+            failures.push({
+              code: safeFailure(error, '校验').code,
+              blob: blob.sha256.slice(0, 12)
+            });
+            continue;
+          }
+        }
+      }
+      if (invalidCode) {
+        const invalidation = await this._invalidateBlobUnlocked(blob, {
+          code: invalidCode,
+          message: invalidMessage
+        });
+        if (invalidation.invalidated) invalidBlobCount += 1;
+        failures.push(...invalidation.failures);
+      }
+    }
+    return {
+      cursor,
+      fetched: blobs.length,
+      invalidBlobCount,
+      removedUnreferencedBlobRecords,
+      failures,
+      remaining: this._countBlobsAfter(cursor)
+    };
+  }
+
+  async _listPhysicalBlobPrefixes() {
+    try {
+      const prefixes = await this.fs.promises.readdir(this.blobRoot);
+      return prefixes.filter((prefix) => /^[a-f0-9]{2}$/.test(prefix)).sort();
+    } catch (error) {
+      if (error && error.code === 'ENOENT') return [];
+      throw error;
+    }
+  }
+
+  async _scanOrphanBlobPrefixUnlocked(prefix) {
+    const prefixDir = path.join(this.blobRoot, prefix);
+    const stat = await this.fs.promises.lstat(prefixDir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_BLOB_PATH_INVALID',
+        '存档 Blob 分片目录类型无效'
+      );
+    }
+    const pendingCleanupPaths = new Set(
+      this.repository.listCleanupJobs()
+        .flatMap((job) => job.releasedBlobs.map((blob) => blob.relativePath))
+    );
+    const names = await this.fs.promises.readdir(prefixDir);
+    let removed = 0;
+    const failures = [];
+    for (const name of names) {
+      if (!SHA256_RE.test(name) || !name.startsWith(prefix)) continue;
+      const relativePath = `${BLOB_ROOT_PARTS.join('/')}/${prefix}/${name}`;
+      const known = this.repository.findBlobByHash(name);
+      if ((known && known.relativePath === relativePath) || pendingCleanupPaths.has(relativePath)) {
+        continue;
+      }
+      try {
+        await this.fs.promises.rm(path.join(prefixDir, name), { force: true });
+        removed += 1;
+      } catch (error) {
+        failures.push({ code: safeFailure(error, '清理').code, blob: name.slice(0, 12) });
+      }
+    }
+    return { removed, failures };
+  }
+
+  async _drainOrphanBlobPrefixes() {
+    while (this.orphanBlobPrefixCursor < this.orphanBlobPrefixes.length) {
+      const prefix = this.orphanBlobPrefixes[this.orphanBlobPrefixCursor];
+      await runArchiveRootOperation(this.rootDir, () => (
+        this._scanOrphanBlobPrefixUnlocked(prefix)
+      ));
+      this.orphanBlobPrefixCursor += 1;
+    }
+  }
+
+  async _verifyMaterializedArtifactChunkUnlocked({
+    afterArtifactId,
+    limit,
+    verifyHashes = false,
+    repairInvalid = true
+  }) {
+    const artifacts = this._listMaterializedArtifactPage(limit, afterArtifactId);
+    let cursor = afterArtifactId;
+    let processed = 0;
+    let succeeded = 0;
+    const failures = [];
+    const attemptedIds = new Set();
+    for (const artifact of artifacts) {
+      cursor = Math.max(cursor, artifact.id);
+      const layout = await this.materializer[
+        verifyHashes ? 'verify' : 'verifyMetadata'
+      ](artifact.storageRelativePath, {
+        sha256: artifact.blob.sha256,
+        sizeBytes: artifact.blob.sizeBytes
+      });
+      const requiresIsolation = artifact.storageMode === 'hardlink';
+      if (layout.valid && !requiresIsolation) continue;
+      if (!layout.valid) {
+        this.repository.recordMaterializationFailure(artifact.id, {
+          code: layout.code,
+          message: '目录化文件缺失或损坏，等待修复'
+        });
+      }
+      if (!repairInvalid) continue;
+      attemptedIds.add(artifact.id);
+      processed += 1;
+      const repaired = await this._materializeArtifactUnlocked(artifact.id);
+      if (repaired.ok) succeeded += 1;
+      else failures.push({ code: repaired.code, item: `artifact-${artifact.id}` });
+    }
+    return {
+      cursor,
+      fetched: artifacts.length,
+      scanned: artifacts.length,
+      processed,
+      succeeded,
+      failures,
+      attemptedIds
+    };
+  }
+
+  async _materializationWorkChunkUnlocked({ scanCursor, candidateCursor, limit }) {
+    const scan = await this._verifyMaterializedArtifactChunkUnlocked({
+      afterArtifactId: scanCursor,
+      limit,
+      verifyHashes: false,
+      repairInvalid: true
+    });
+    const candidateLimit = Math.max(0, limit - scan.scanned);
+    const candidates = candidateLimit > 0
+      ? await this._materializeCandidateChunkUnlocked(
+          candidateCursor,
+          candidateLimit,
+          scan.attemptedIds
+        )
+      : {
+          cursor: candidateCursor,
+          fetched: 0,
+          processed: 0,
+          succeeded: 0,
+          failures: []
+        };
+    const nextScanCursor = scan.fetched < limit
+      ? Math.max(scan.cursor, candidates.cursor)
+      : scan.cursor;
+    return {
+      scanCursor: nextScanCursor,
+      candidateCursor: candidates.cursor,
+      fetched: scan.fetched + candidates.fetched,
+      processed: scan.processed + candidates.processed,
+      succeeded: scan.succeeded + candidates.succeeded,
+      failures: [...scan.failures, ...candidates.failures],
+      remaining: this._countMaterializationWorkRemaining(nextScanCursor)
+    };
+  }
+
+  async _materializeCandidateChunkUnlocked(afterArtifactId, limit, attemptedIds = null) {
+    const candidates = this.repository.listMaterializationCandidates(limit, afterArtifactId);
+    let cursor = afterArtifactId;
+    let processed = 0;
+    let succeeded = 0;
+    const failures = [];
+    for (const artifact of candidates) {
+      cursor = Math.max(cursor, artifact.id);
+      if (attemptedIds && attemptedIds.has(artifact.id)) continue;
+      processed += 1;
+      const repaired = await this._materializeArtifactUnlocked(artifact.id);
+      if (repaired.ok) succeeded += 1;
+      else failures.push({ code: repaired.code, item: `artifact-${artifact.id}` });
+    }
+    return {
+      cursor,
+      fetched: candidates.length,
+      processed,
+      succeeded,
+      failures,
+      remaining: this._countMaterializationCandidates()
+    };
+  }
+
+  _setMaterializationProgress(patch = {}) {
+    this.materializationProgress = {
+      ...this.materializationProgress,
+      ...patch
+    };
+    return this.getMaterializationProgress();
+  }
+
+  getMaterializationProgress() {
+    return { ...this.materializationProgress };
+  }
+
+  _hasBackgroundArchiveMaintenance() {
+    return this.blobVerificationRemaining > 0
+      || this._countMaterializationWorkRemaining(this.materializationScanCursor) > 0
+      || this.orphanBlobPrefixCursor < this.orphanBlobPrefixes.length;
+  }
+
+  pauseBackgroundMaterialization() {
+    this.materializationGeneration += 1;
+    if (this.materializationProgress.status === 'running'
+        || this.materializationProgress.status === 'pending') {
+      this._setMaterializationProgress({ status: 'paused' });
+    }
+    const pending = this.materializationPromise || Promise.resolve(this.getMaterializationProgress());
+    return Promise.resolve(pending).then(async (progress) => {
+      await this._drainOrphanBlobPrefixes();
+      return progress;
+    });
+  }
+
+  resumeBackgroundMaterialization() {
+    if (!this.initialized
+        || !this.initialization
+        || this.initialization.available === false
+        || !this._hasBackgroundArchiveMaintenance()) {
+      return this.materializationPromise || Promise.resolve(this.getMaterializationProgress());
+    }
+    if (this.materializationPromise) return this.materializationPromise;
+
+    const generation = ++this.materializationGeneration;
+    // cursor 只在当前 service 实例内生效；新进程/新实例天然从 0 重建。
+    // 同一实例必须续接前台已验证的 cursor，否则每次 resume 都会重扫首页。
+    this._setMaterializationProgress({
+      remaining: this._countMaterializationWorkRemaining(this.materializationScanCursor),
+      cursor: Math.max(this.materializationScanCursor, this.materializationCandidateCursor)
+    });
+    this._setMaterializationProgress({ status: 'running', lastErrorCode: '' });
+    const drain = async () => {
+      try {
+        while (generation === this.materializationGeneration) {
+          const chunk = await runArchiveRootOperation(this.rootDir, async () => {
+            if (generation !== this.materializationGeneration) return null;
+            if (this.blobVerificationRemaining > 0) {
+              const blobs = await this._verifyBlobChunkUnlocked({
+                afterBlobId: this.blobVerificationCursor,
+                limit: this.startupMaterializationBatchSize,
+                verifyHashes: false
+              });
+              return {
+                blobVerificationCursor: blobs.cursor,
+                blobVerificationRemaining: blobs.remaining,
+                scanCursor: this.materializationScanCursor,
+                candidateCursor: this.materializationCandidateCursor,
+                fetched: blobs.fetched,
+                processed: 0,
+                succeeded: 0,
+                failures: blobs.failures,
+                remaining: this._countMaterializationWorkRemaining(
+                  this.materializationScanCursor
+                )
+              };
+            }
+            if (this._countMaterializationWorkRemaining(this.materializationScanCursor) > 0) {
+              const materialization = await this._materializationWorkChunkUnlocked({
+                scanCursor: this.materializationScanCursor,
+                candidateCursor: this.materializationCandidateCursor,
+                limit: this.startupMaterializationBatchSize
+              });
+              return {
+                ...materialization,
+                remaining: materialization.remaining
+              };
+            }
+            if (this.orphanBlobPrefixCursor < this.orphanBlobPrefixes.length) {
+              const prefix = this.orphanBlobPrefixes[this.orphanBlobPrefixCursor];
+              const orphan = await this._scanOrphanBlobPrefixUnlocked(prefix);
+              this.orphanBlobPrefixCursor += 1;
+              return {
+                scanCursor: this.materializationScanCursor,
+                candidateCursor: this.materializationCandidateCursor,
+                fetched: 1,
+                processed: 0,
+                succeeded: 0,
+                failures: orphan.failures,
+                remaining: 0
+              };
+            }
+            return {
+              scanCursor: this.materializationScanCursor,
+              candidateCursor: this.materializationCandidateCursor,
+              fetched: 0,
+              processed: 0,
+              succeeded: 0,
+              failures: [],
+              remaining: 0
+            };
+          });
+          if (!chunk) break;
+          if (Number.isSafeInteger(chunk.blobVerificationCursor)) {
+            this.blobVerificationCursor = chunk.blobVerificationCursor;
+            this.blobVerificationRemaining = chunk.blobVerificationRemaining;
+          }
+          this.materializationScanCursor = chunk.scanCursor;
+          this.materializationCandidateCursor = chunk.candidateCursor;
+          this._setMaterializationProgress({
+            cursor: Math.max(chunk.scanCursor, chunk.candidateCursor),
+            processed: this.materializationProgress.processed + chunk.processed,
+            succeeded: this.materializationProgress.succeeded + chunk.succeeded,
+            failed: this.materializationProgress.failed + chunk.failures.length,
+            remaining: chunk.remaining
+          });
+          if (generation !== this.materializationGeneration
+              || chunk.fetched === 0
+              || !this._hasBackgroundArchiveMaintenance()) break;
+        }
+      } catch (error) {
+        const failure = safeFailure(error, '后台目录化');
+        let remaining = this.materializationProgress.remaining;
+        try {
+          remaining = this._countMaterializationWorkRemaining(this.materializationScanCursor);
+        } catch (_countError) {}
+        return this._setMaterializationProgress({
+          status: 'incomplete',
+          remaining,
+          lastErrorCode: failure.code
+        });
+      }
+      if (generation !== this.materializationGeneration) {
+        return this._setMaterializationProgress({ status: 'paused' });
+      }
+      return this._setMaterializationProgress({
+        status: this.materializationProgress.remaining === 0 ? 'complete' : 'incomplete'
+      });
+    };
+    this.materializationPromise = drain().finally(() => {
+      this.materializationPromise = null;
+    });
+    return this.materializationPromise;
+  }
+
   async _initializeUnlocked() {
     if (this.initialized) return this.initialization;
     try {
@@ -279,6 +762,22 @@ class ArchiveService {
       const consistency = await this._reconcileStartupUnlocked({
         verifyHashes: this.verifyHashesOnStartup
       });
+      this._setMaterializationProgress({
+        status: consistency.materializationRemaining === 0 ? 'complete' : 'pending',
+        processed: consistency.materializationProcessedCount,
+        succeeded: consistency.materializationProcessedCount
+          - consistency.materializationFailureCount,
+        failed: consistency.materializationFailureCount,
+        remaining: consistency.materializationRemaining,
+        cursor: consistency.materializationCursor,
+        lastErrorCode: ''
+      });
+      this.blobVerificationCursor = consistency.blobVerificationCursor;
+      this.blobVerificationRemaining = consistency.blobVerificationRemaining;
+      this.materializationScanCursor = consistency.materializationScanCursor;
+      this.materializationCandidateCursor = consistency.materializationCursor;
+      this.orphanBlobPrefixes = consistency.orphanBlobPrefixes;
+      this.orphanBlobPrefixCursor = consistency.orphanBlobPrefixCursor;
       this.initialization = {
         ok: consistency.failures.length === 0,
         available: true,
@@ -289,6 +788,7 @@ class ArchiveService {
       return this.initialization;
     } catch (error) {
       const failure = safeFailure(error, '初始化');
+      this._setMaterializationProgress({ status: 'incomplete' });
       this.initialization = {
         ok: false,
         available: true,
@@ -311,7 +811,7 @@ class ArchiveService {
   }
 
   async _run(operationName, operation) {
-    return runSerialized(this.rootDir, async () => {
+    return runArchiveRootOperation(this.rootDir, async () => {
       const initialized = await this._initializeUnlocked();
       if (!initialized.available) {
         return {
@@ -334,8 +834,15 @@ class ArchiveService {
     });
   }
 
-  async initialize() {
-    return runSerialized(this.rootDir, async () => this._initializeUnlocked());
+  async initialize(options = {}) {
+    const initialized = await runArchiveRootOperation(
+      this.rootDir,
+      async () => this._initializeUnlocked()
+    );
+    if (options.startBackgroundMaterialization !== false && initialized.available !== false) {
+      this.resumeBackgroundMaterialization();
+    }
+    return initialized;
   }
 
   _batchInput(payload = {}) {
@@ -837,6 +1344,174 @@ class ArchiveService {
     }
   }
 
+  _ensureLayoutAssignmentUnlocked(artifactId) {
+    const current = this.repository.getArtifact(artifactId);
+    if (!current) throw new ArchiveOperationError('ARCHIVE_ARTIFACT_NOT_FOUND', '存档文件不存在');
+    const batch = this.repository.getBatch(current.batchId);
+    if (!batch) throw new ArchiveOperationError('ARCHIVE_BATCH_NOT_FOUND', '存档批次不存在');
+    const artifacts = this.repository.ensureArtifactOrders(batch.id);
+    const assignments = assignLayoutNames(this.rootDir, batch, artifacts);
+    for (const assignment of assignments) {
+      const artifact = artifacts.find((item) => item.id === assignment.artifactId);
+      if (artifact
+          && artifact.storageLayoutVersion === STORAGE_LAYOUT_VERSION
+          && artifact.storageRelativePath
+          && artifact.safeFileName
+          && artifact.artifactOrder != null) {
+        continue;
+      }
+      this.repository.prepareArtifactLayout(assignment.artifactId, assignment);
+    }
+    const artifact = this.repository.getArtifact(current.id);
+    return {
+      artifact,
+      batch,
+      assignment: {
+        artifactId: artifact.id,
+        artifactOrder: artifact.artifactOrder,
+        safeFileName: artifact.safeFileName,
+        storageRelativePath: artifact.storageRelativePath,
+        storageLayoutVersion: STORAGE_LAYOUT_VERSION
+      }
+    };
+  }
+
+  async _invalidateBlobUnlocked(blob, failure) {
+    const artifacts = this.repository.listArtifactsByBlob(blob.id);
+    const invalidated = this.repository.invalidateBlob(blob.id, failure);
+    const paths = [
+      ...artifacts.map((artifact) => artifact.storageRelativePath).filter(Boolean),
+      blob.relativePath
+    ];
+    const failures = [];
+    for (const relativePath of [...new Set(paths)]) {
+      try {
+        await this.materializer.remove(relativePath);
+      } catch (error) {
+        failures.push({ code: safeFailure(error, '清理').code, item: relativePath });
+      }
+    }
+    return { invalidated, failures };
+  }
+
+  _recordMaterializationFailureResult(artifact, error) {
+    const failure = safeFailure(error, '目录化', artifact.originalName);
+    const recorded = this.repository.recordMaterializationFailure(artifact.id, failure);
+    return {
+      ok: false,
+      status: 'repair-pending',
+      canonicalReady: true,
+      artifact: publicArtifact(recorded ? recorded.artifact : artifact),
+      batch: recorded ? recorded.batch : this.repository.getBatch(artifact.batchId),
+      ...failure
+    };
+  }
+
+  async _materializeArtifactUnlocked(artifactId) {
+    let current = this.repository.getArtifact(artifactId);
+    if (!current || current.status !== 'ready' || !current.blob) {
+      return {
+        ok: false,
+        status: 'not-ready',
+        code: 'ARCHIVE_ARTIFACT_NOT_READY',
+        message: '存档文件尚未完成，无法目录化',
+        artifact: publicArtifact(current)
+      };
+    }
+    let prepared;
+    try {
+      prepared = this._ensureLayoutAssignmentUnlocked(current.id);
+    } catch (error) {
+      return this._recordMaterializationFailureResult(current, error);
+    }
+    current = prepared.artifact;
+    const expected = {
+      sha256: current.blob.sha256,
+      sizeBytes: current.blob.sizeBytes
+    };
+    const canonicalPath = this._resolveManagedRelative(current.blob.relativePath);
+    const canonical = await verifyFile(canonicalPath, expected, this.fs);
+    if (!canonical.valid) {
+      if (!isFileIntegrityFailure(canonical)) {
+        return this._recordMaterializationFailureResult(
+          current,
+          canonical.error || new ArchiveOperationError(
+            'ARCHIVE_BLOB_READ_FAILED',
+            'canonical Blob 暂时无法读取'
+          )
+        );
+      }
+      await this._invalidateBlobUnlocked(current.blob, {
+        code: 'ARCHIVE_BLOB_INVALID',
+        message: '存档文件大小或哈希不一致，可从可信源重试该文件'
+      });
+      return {
+        ok: false,
+        status: 'failed',
+        code: 'ARCHIVE_BLOB_INVALID',
+        message: '存档文件大小或哈希不一致，可从可信源重试该文件',
+        artifact: publicArtifact(this.repository.getArtifact(current.id))
+      };
+    }
+
+    try {
+      const existing = await this.materializer.verify(
+        prepared.assignment.storageRelativePath,
+        expected
+      );
+      if (existing.valid) {
+        const sharesCanonicalInode = canonical.stat.dev === existing.stat.dev
+          && canonical.stat.ino === existing.stat.ino;
+        if (!sharesCanonicalInode && current.storageMode !== 'hardlink') {
+          const targetPath = this._resolveManagedRelative(prepared.assignment.storageRelativePath);
+          await this.fs.promises.chmod(targetPath, 0o444);
+          const completed = this.repository.completeMaterialization(current.id, {
+            ...prepared.assignment,
+            storageMode: 'copy'
+          });
+          return {
+            ok: true,
+            status: 'ready',
+            repaired: current.storageLayoutVersion !== STORAGE_LAYOUT_VERSION
+              || Boolean(current.materializationErrorCode)
+              || current.storageMode !== 'copy',
+            artifact: publicArtifact(completed.artifact),
+            batch: completed.batch,
+            storageMode: 'copy',
+            filePath: targetPath
+          };
+        }
+        await this.materializer.remove(prepared.assignment.storageRelativePath);
+      }
+      if (!existing.valid && existing.code !== 'ARCHIVE_LAYOUT_MISSING') {
+        await this.materializer.remove(prepared.assignment.storageRelativePath);
+      }
+
+      const materialized = await this.materializer.materialize({
+        artifactId: current.id,
+        canonicalPath,
+        storageRelativePath: prepared.assignment.storageRelativePath,
+        sha256: expected.sha256,
+        sizeBytes: expected.sizeBytes
+      });
+      const completed = this.repository.completeMaterialization(current.id, {
+        ...prepared.assignment,
+        storageMode: materialized.mode
+      });
+      return {
+        ok: true,
+        status: 'ready',
+        repaired: Boolean(current.materializationErrorCode),
+        artifact: publicArtifact(completed.artifact),
+        batch: completed.batch,
+        storageMode: materialized.mode,
+        filePath: materialized.targetPath
+      };
+    } catch (error) {
+      return this._recordMaterializationFailureResult(current, error);
+    }
+  }
+
   async _archiveArtifactUnlocked(artifact, sourcePath) {
     const originalName = artifact.originalName;
     const previouslyRegisteredSourcePath = artifact.sourcePath;
@@ -862,14 +1537,15 @@ class ArchiveService {
         relativePath: published.relativePath
       });
       await this._releaseSourcePaths([previouslyRegisteredSourcePath, archivedSourcePath]);
+      const materialized = await this._materializeArtifactUnlocked(completed.artifact.id);
       return {
-        ok: true,
-        status: 'ready',
-        artifact: publicArtifact(completed.artifact),
-        batch: completed.batch,
+        ...materialized,
+        artifact: materialized.artifact || publicArtifact(completed.artifact),
+        batch: materialized.batch || this.repository.getBatch(completed.artifact.batchId),
         sha256: completed.blob.sha256,
         sizeBytes: completed.blob.sizeBytes,
-        deduplicated: completed.deduplicated || published.reused
+        deduplicated: completed.deduplicated || published.reused,
+        canonicalReady: true
       };
     } catch (error) {
       if (staged && staged.stagedPath) {
@@ -912,16 +1588,7 @@ class ArchiveService {
     const existingArtifact = this.repository.getArtifactByKey(batch.id, artifactKey);
     if (existingArtifact) {
       if (existingArtifact.status === 'ready' && existingArtifact.blob) {
-        return { result: {
-          ok: true,
-          status: 'ready',
-          alreadyArchived: true,
-          artifact: publicArtifact(existingArtifact),
-          batch: this.repository.getBatch(batch.id),
-          sha256: existingArtifact.blob.sha256,
-          sizeBytes: existingArtifact.blob.sizeBytes,
-          deduplicated: true
-        } };
+        return { artifact: existingArtifact, materializeOnly: true };
       }
       if (existingArtifact.status === 'failed') this.repository.beginBatchRetry(batch.id);
       return { artifact: existingArtifact, filePath };
@@ -1002,6 +1669,17 @@ class ArchiveService {
   async _attachFileUnlocked(batchId, payload = {}) {
     const prepared = this._prepareFileUnlocked(batchId, payload);
     if (prepared.result) return prepared.result;
+    if (prepared.materializeOnly) {
+      const materialized = await this._materializeArtifactUnlocked(prepared.artifact.id);
+      return {
+        ...materialized,
+        alreadyArchived: true,
+        sha256: prepared.artifact.blob.sha256,
+        sizeBytes: prepared.artifact.blob.sizeBytes,
+        deduplicated: true,
+        canonicalReady: true
+      };
+    }
     return this._archiveArtifactUnlocked(prepared.artifact, prepared.filePath);
   }
 
@@ -1031,10 +1709,24 @@ class ArchiveService {
     const results = new Array(preparedFiles.length);
     for (let index = 0; index < preparedFiles.length; index += 1) {
       const prepared = preparedFiles[index];
-      results[index] = prepared.result || await this._archiveArtifactUnlocked(
-        prepared.artifact,
-        prepared.filePath
-      );
+      if (prepared.result) {
+        results[index] = prepared.result;
+      } else if (prepared.materializeOnly) {
+        const materialized = await this._materializeArtifactUnlocked(prepared.artifact.id);
+        results[index] = {
+          ...materialized,
+          alreadyArchived: true,
+          sha256: prepared.artifact.blob.sha256,
+          sizeBytes: prepared.artifact.blob.sizeBytes,
+          deduplicated: true,
+          canonicalReady: true
+        };
+      } else {
+        results[index] = await this._archiveArtifactUnlocked(
+          prepared.artifact,
+          prepared.filePath
+        );
+      }
     }
     const current = this.repository.getBatch(batch.id);
     const succeeded = results.filter((result) => result.ok).length;
@@ -1089,7 +1781,16 @@ class ArchiveService {
         };
       }
       const failedArtifacts = this.repository.listFailedArtifacts(batch.id);
-      if (failedArtifacts.length === 0) {
+      const layoutArtifacts = this.repository.listArtifacts(batch.id).filter((artifact) => (
+        artifact.status === 'ready'
+        && (
+          artifact.storageLayoutVersion !== STORAGE_LAYOUT_VERSION
+          || !artifact.storageRelativePath
+          || artifact.storageMode !== 'copy'
+          || Boolean(artifact.materializationErrorCode)
+        )
+      ));
+      if (failedArtifacts.length === 0 && layoutArtifacts.length === 0) {
         return {
           ok: batch.archiveStatus === 'complete',
           status: 'nothing-to-retry',
@@ -1099,7 +1800,7 @@ class ArchiveService {
           failed: 0
         };
       }
-      this.repository.beginBatchRetry(batch.id);
+      if (failedArtifacts.length > 0) this.repository.beginBatchRetry(batch.id);
       const sourceOverrides = options.sourcePaths && typeof options.sourcePaths === 'object'
         ? options.sourcePaths
         : {};
@@ -1108,6 +1809,9 @@ class ArchiveService {
         const override = sourceOverrides[artifact.id] || sourceOverrides[artifact.artifactKey];
         const sourcePath = override ? path.resolve(String(override)) : artifact.sourcePath;
         results.push(await this._archiveArtifactUnlocked(artifact, sourcePath));
+      }
+      for (const artifact of layoutArtifacts) {
+        results.push(await this._materializeArtifactUnlocked(artifact.id));
       }
       const current = this.repository.getBatch(batch.id);
       const succeeded = results.filter((result) => result.ok).length;
@@ -1132,7 +1836,15 @@ class ArchiveService {
 
   async getBatch(batchId) {
     return this._run('getBatch', async () => {
-      const detail = this.repository.getBatchDetail(batchId);
+      let detail = this.repository.getBatchDetail(batchId);
+      if (detail) {
+        for (const artifact of detail.artifacts) {
+          if (artifact.status === 'ready' && artifact.blob) {
+            await this._readyArtifact(artifact.id);
+          }
+        }
+        detail = this.repository.getBatchDetail(batchId);
+      }
       return detail
         ? { ok: true, batch: publicBatchDetail(detail) }
         : {
@@ -1205,6 +1917,127 @@ class ArchiveService {
     return { deletedBlobFiles, releasedBytes, failures };
   }
 
+  async _removeEmptyLayoutDirectories(job) {
+    const failures = [];
+    let current = this._resolveManagedRelative(job.layoutRelativeDir);
+    for (let depth = 0; depth < 4; depth += 1) {
+      try {
+        await this.fs.promises.rmdir(current);
+      } catch (error) {
+        if (error && error.code === 'ENOENT') {
+          current = path.dirname(current);
+          continue;
+        }
+        if (error && ['ENOTEMPTY', 'EEXIST'].includes(error.code)) break;
+        failures.push({
+          code: safeFailure(error, '清理空目录').code,
+          item: job.batchNumber
+        });
+        break;
+      }
+      current = path.dirname(current);
+    }
+    return failures;
+  }
+
+  async _executeCleanupJobUnlocked(job) {
+    const materializedFailures = [];
+    let deletedMaterializedFiles = 0;
+    let expectedRelativeDir = '';
+    try {
+      expectedRelativeDir = batchRelativeDirectory({
+        localDate: job.localDate,
+        batchNumber: job.batchNumber
+      });
+    } catch (_error) {
+      expectedRelativeDir = '';
+    }
+    if (!expectedRelativeDir || job.layoutRelativeDir !== expectedRelativeDir) {
+      const failure = {
+        code: 'ARCHIVE_CLEANUP_PATH_INVALID',
+        item: job.batchNumber
+      };
+      this.repository.recordCleanupJobFailure(job.id, {
+        code: failure.code,
+        message: `批次 ${job.batchNumber} 的清理路径证据无效`
+      });
+      return {
+        ok: false,
+        status: 'cleanup-pending',
+        deletedMaterializedFiles: 0,
+        deletedBlobFiles: 0,
+        releasedBytes: 0,
+        failures: [failure]
+      };
+    }
+    const layoutPrefix = `${job.layoutRelativeDir}/`;
+    for (const relativePath of job.materializedPaths) {
+      if (!String(relativePath).startsWith(layoutPrefix)) {
+        materializedFailures.push({
+          code: 'ARCHIVE_CLEANUP_PATH_INVALID',
+          item: job.batchNumber
+        });
+        continue;
+      }
+      try {
+        await this.materializer.remove(relativePath);
+        deletedMaterializedFiles += 1;
+      } catch (error) {
+        materializedFailures.push({
+          code: safeFailure(error, '清理目录文件').code,
+          item: job.batchNumber
+        });
+      }
+    }
+    if (materializedFailures.length > 0) {
+      this.repository.recordCleanupJobFailure(job.id, {
+        code: materializedFailures[0].code,
+        message: `批次 ${job.batchNumber} 的目录文件清理待重试`
+      });
+      return {
+        ok: false,
+        status: 'cleanup-pending',
+        deletedMaterializedFiles,
+        deletedBlobFiles: 0,
+        releasedBytes: 0,
+        failures: materializedFailures
+      };
+    }
+
+    const directoryFailures = await this._removeEmptyLayoutDirectories(job);
+    const physical = await this._removeReleasedBlobs(job.releasedBlobs);
+    const failures = [...directoryFailures, ...physical.failures];
+    if (failures.length > 0) {
+      this.repository.recordCleanupJobFailure(job.id, {
+        code: failures[0].code,
+        message: `批次 ${job.batchNumber} 的物理清理待重试`
+      });
+      return {
+        ok: false,
+        status: 'cleanup-pending',
+        deletedMaterializedFiles,
+        ...physical,
+        failures
+      };
+    }
+    this.repository.completeCleanupJob(job.id);
+    return {
+      ok: true,
+      status: 'cleaned',
+      deletedMaterializedFiles,
+      ...physical,
+      failures: []
+    };
+  }
+
+  async _processCleanupJobsUnlocked() {
+    const results = [];
+    for (const job of this.repository.listCleanupJobs()) {
+      results.push(await this._executeCleanupJobUnlocked(job));
+    }
+    return results;
+  }
+
   async _deleteBatchUnlocked(batchId, options = {}) {
     const sourcePaths = this.repository.listArtifacts(batchId)
       .map((artifact) => artifact.sourcePath)
@@ -1239,16 +2072,25 @@ class ArchiveService {
       };
     }
     await this._releaseSourcePaths(sourcePaths);
-    const physical = await this._removeReleasedBlobs(deleted.releasedBlobs);
+    const physical = deleted.cleanupJob
+      ? await this._executeCleanupJobUnlocked(deleted.cleanupJob)
+      : {
+          ok: true,
+          deletedMaterializedFiles: 0,
+          deletedBlobFiles: 0,
+          releasedBytes: 0,
+          failures: []
+        };
     return {
-      ok: physical.failures.length === 0,
-      status: physical.failures.length === 0 ? 'deleted' : 'deleted-cleanup-pending',
+      ok: physical.ok,
+      status: physical.ok ? 'deleted' : 'deleted-cleanup-pending',
       metadataDeleted: true,
       batchId: Number(batchId),
       artifactCount: deleted.artifactCount,
       logicalBytes: deleted.logicalBytes,
       releasedBlobCount: deleted.releasedBlobs.length,
       releasedBytes: physical.releasedBytes,
+      deletedMaterializedFiles: physical.deletedMaterializedFiles,
       failures: physical.failures
     };
   }
@@ -1286,7 +2128,7 @@ class ArchiveService {
   }
 
   async _readyArtifact(artifactId) {
-    const artifact = this.repository.getArtifact(artifactId);
+    let artifact = this.repository.getArtifact(artifactId);
     if (!artifact) {
       return {
         ok: false,
@@ -1302,30 +2144,75 @@ class ArchiveService {
         artifact: publicArtifact(artifact)
       };
     }
-    let filePath;
-    try {
-      filePath = this._resolveManagedRelative(artifact.blob.relativePath);
-      const stat = await this.fs.promises.lstat(filePath);
-      if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== artifact.blob.sizeBytes) {
-        throw new ArchiveOperationError('ARCHIVE_BLOB_INVALID', '存档文件缺失或损坏');
+    const expected = { sha256: artifact.blob.sha256, sizeBytes: artifact.blob.sizeBytes };
+    if (artifact.storageLayoutVersion === STORAGE_LAYOUT_VERSION
+        && artifact.storageRelativePath
+        && artifact.storageMode === 'copy') {
+      try {
+        const layout = await this.materializer.verify(artifact.storageRelativePath, expected);
+        if (layout.valid) {
+          if (artifact.materializationErrorCode) {
+            const completed = this.repository.completeMaterialization(artifact.id, {
+              storageRelativePath: artifact.storageRelativePath,
+              storageMode: artifact.storageMode,
+              safeFileName: artifact.safeFileName,
+              artifactOrder: artifact.artifactOrder
+            });
+            artifact = completed.artifact;
+          }
+          return {
+            ok: true,
+            artifact,
+            filePath: this._resolveManagedRelative(artifact.storageRelativePath)
+          };
+        }
+        this.repository.recordMaterializationFailure(artifact.id, {
+          code: layout.code,
+          message: '目录化文件缺失或损坏，等待从 canonical Blob 修复'
+        });
+      } catch (error) {
+        const failure = safeFailure(error, '校验目录文件', artifact.originalName);
+        this.repository.recordMaterializationFailure(artifact.id, failure);
       }
-    } catch (error) {
-      if (artifact.blobId != null) {
-        try {
-          this.repository.invalidateBlob(artifact.blobId, {
-            code: 'ARCHIVE_BLOB_INVALID',
-            message: '存档文件缺失或损坏，可重试该文件'
-          });
-        } catch (_metadataError) {}
+    }
+
+    const canonicalPath = this._resolveManagedRelative(artifact.blob.relativePath);
+    const canonical = await verifyFile(canonicalPath, expected, this.fs);
+    if (!canonical.valid) {
+      if (!isFileIntegrityFailure(canonical)) {
+        const failure = safeFailure(
+          canonical.error || new ArchiveOperationError(
+            'ARCHIVE_BLOB_READ_FAILED',
+            'canonical Blob 暂时无法读取'
+          ),
+          '读取',
+          artifact.originalName
+        );
+        return { ok: false, artifact: publicArtifact(artifact), ...failure };
       }
+      await this._invalidateBlobUnlocked(artifact.blob, {
+        code: 'ARCHIVE_BLOB_INVALID',
+        message: '存档文件缺失或损坏，可从可信源重试该文件'
+      });
       return {
         ok: false,
         code: 'ARCHIVE_BLOB_INVALID',
-        message: '存档文件缺失或损坏，可重试该文件',
+        message: '存档文件缺失或损坏，可从可信源重试该文件',
         artifact: publicArtifact(this.repository.getArtifact(artifact.id))
       };
     }
-    return { ok: true, artifact, filePath };
+    const repaired = await this._materializeArtifactUnlocked(artifact.id);
+    if (repaired.ok) {
+      artifact = this.repository.getArtifact(artifact.id);
+      return { ok: true, artifact, filePath: repaired.filePath };
+    }
+    artifact = this.repository.getArtifact(artifact.id);
+    return {
+      ok: true,
+      artifact,
+      filePath: canonicalPath,
+      repairPending: true
+    };
   }
 
   async openReadonlyCopy(artifactId, options = {}) {
@@ -1542,6 +2429,8 @@ class ArchiveService {
     const staging = await this._cleanupManagedDirectory(this.stagingDir, STAGING_DIR_NAME);
     const readonly = await this._cleanupManagedDirectory(this.readonlyDir, READONLY_DIR_NAME);
     failures.push(...staging.failures, ...readonly.failures);
+    const cleanupResults = await this._processCleanupJobsUnlocked();
+    for (const result of cleanupResults) failures.push(...result.failures);
 
     const interrupted = this.repository.markInterruptedArtifacts();
     const dangling = this.repository.repairDanglingArtifactReferences();
@@ -1550,91 +2439,134 @@ class ArchiveService {
 
     let removedUnreferencedBlobRecords = 0;
     let invalidBlobCount = 0;
-    const blobs = this.repository.listBlobs();
-    for (const blob of blobs) {
-      if (blob.referenceCount === 0) {
-        const released = this.repository.deleteBlobIfUnreferenced(blob.id);
-        if (released) {
-          removedUnreferencedBlobRecords += 1;
-          const physical = await this._removeReleasedBlobs([released]);
-          failures.push(...physical.failures);
-        }
-        continue;
-      }
+    const drainAllMetadata = options.verifyHashes === true
+      || options.drainMaterializationCandidates === true;
+    let blobVerificationCursor = 0;
+    let blobVerificationRemaining = 0;
+    let blobVerificationBudget = drainAllMetadata
+      ? Number.POSITIVE_INFINITY
+      : this.startupMaterializationBatchSize;
+    do {
+      const blobChunk = await this._verifyBlobChunkUnlocked({
+        afterBlobId: blobVerificationCursor,
+        limit: drainAllMetadata
+          ? MAX_MATERIALIZATION_BATCH_SIZE
+          : Math.min(MAX_MATERIALIZATION_BATCH_SIZE, blobVerificationBudget),
+        verifyHashes: options.verifyHashes === true
+      });
+      blobVerificationCursor = blobChunk.cursor;
+      blobVerificationRemaining = blobChunk.remaining;
+      invalidBlobCount += blobChunk.invalidBlobCount;
+      removedUnreferencedBlobRecords += blobChunk.removedUnreferencedBlobRecords;
+      failures.push(...blobChunk.failures);
+      if (!drainAllMetadata) blobVerificationBudget -= blobChunk.fetched;
+      if (blobChunk.fetched === 0) break;
+    } while (blobVerificationRemaining > 0 && blobVerificationBudget > 0);
 
-      const expectedRelativePath = blobRelativePath(blob.sha256);
-      let invalidCode = '';
-      let invalidMessage = '';
-      let filePath = null;
-      if (blob.relativePath !== expectedRelativePath) {
-        invalidCode = 'ARCHIVE_BLOB_PATH_INVALID';
-        invalidMessage = '存档文件路径元数据不一致，可重试该文件';
-      } else {
-        try {
-          filePath = this._resolveManagedRelative(blob.relativePath);
-          const stat = await this.fs.promises.lstat(filePath);
-          if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== blob.sizeBytes) {
-            invalidCode = 'ARCHIVE_BLOB_INVALID';
-            invalidMessage = '存档文件缺失或大小不一致，可重试该文件';
-          } else if (options.verifyHashes === true) {
-            const actual = await this._hashFile(filePath);
-            if (actual.sha256 !== blob.sha256 || actual.sizeBytes !== blob.sizeBytes) {
-              invalidCode = 'ARCHIVE_BLOB_HASH_MISMATCH';
-              invalidMessage = '存档文件哈希校验失败，可重试该文件';
-            }
-          }
-        } catch (error) {
-          if (error && error.code === 'ENOENT') {
-            invalidCode = 'ARCHIVE_BLOB_MISSING';
-            invalidMessage = '存档文件缺失，可重试该文件';
-          } else {
-            failures.push({
-              code: safeFailure(error, '校验').code,
-              blob: blob.sha256.slice(0, 12)
-            });
-            continue;
-          }
-        }
+    let materializedArtifactCount = 0;
+    let materializationProcessedCount = 0;
+    let materializationFailureCount = 0;
+    const drainAllMaterializationCandidates = options.verifyHashes === true
+      || options.drainMaterializationCandidates === true;
+    let remainingForegroundBudget = drainAllMaterializationCandidates
+      ? Number.POSITIVE_INFINITY
+      : this.startupMaterializationBatchSize;
+    const attemptedMaterializationIds = new Set();
+    let materializedCursor = 0;
+    let materializationScanCursor = 0;
+    let materializationScanExhausted = false;
+    while (remainingForegroundBudget > 0) {
+      const scanLimit = drainAllMaterializationCandidates
+        ? MAX_MATERIALIZATION_BATCH_SIZE
+        : Math.min(MAX_MATERIALIZATION_BATCH_SIZE, remainingForegroundBudget);
+      const scan = await this._verifyMaterializedArtifactChunkUnlocked({
+        afterArtifactId: materializationScanCursor,
+        limit: scanLimit,
+        verifyHashes: options.verifyHashes === true,
+        repairInvalid: true
+      });
+      materializationScanCursor = scan.cursor;
+      materializationProcessedCount += scan.processed;
+      materializedArtifactCount += scan.succeeded;
+      materializationFailureCount += scan.failures.length;
+      failures.push(...scan.failures);
+      for (const artifactId of scan.attemptedIds) attemptedMaterializationIds.add(artifactId);
+      if (!drainAllMaterializationCandidates) {
+        remainingForegroundBudget -= scan.scanned;
       }
-
-      if (invalidCode) {
-        const invalidated = this.repository.invalidateBlob(blob.id, {
-          code: invalidCode,
-          message: invalidMessage
-        });
-        if (invalidated) invalidBlobCount += 1;
-        if (filePath) {
-          try { await this.fs.promises.rm(filePath, { force: true }); } catch (error) {
-            failures.push({
-              code: safeFailure(error, '清理').code,
-              blob: blob.sha256.slice(0, 12)
-            });
-          }
-        }
+      if (scan.fetched === 0 || scan.fetched < scanLimit) {
+        materializationScanExhausted = true;
+        break;
       }
     }
-
-    const referencedPaths = new Set(this.repository.listBlobs().map((blob) => blob.relativePath));
-    const physicalFiles = await this._listPhysicalBlobFiles();
-    let removedOrphanBlobFiles = 0;
-    for (const file of physicalFiles) {
-      if (referencedPaths.has(file.relativePath)) continue;
-      try {
-        await this.fs.promises.rm(file.filePath, { force: true });
-        removedOrphanBlobFiles += 1;
-      } catch (error) {
-        failures.push({
-          code: safeFailure(error, '清理').code,
-          blob: file.sha256.slice(0, 12)
-        });
+    let materializationCursor = 0;
+    while (remainingForegroundBudget > 0) {
+      const chunk = await this._materializeCandidateChunkUnlocked(
+        materializationCursor,
+        drainAllMaterializationCandidates
+          ? MAX_MATERIALIZATION_BATCH_SIZE
+          : Math.min(MAX_MATERIALIZATION_BATCH_SIZE, remainingForegroundBudget),
+        attemptedMaterializationIds
+      );
+      materializationCursor = chunk.cursor;
+      if (materializationScanExhausted) {
+        materializationScanCursor = Math.max(materializationScanCursor, chunk.cursor);
       }
+      materializationProcessedCount += chunk.processed;
+      materializedArtifactCount += chunk.succeeded;
+      materializationFailureCount += chunk.failures.length;
+      failures.push(...chunk.failures);
+      remainingForegroundBudget -= chunk.processed;
+      if (chunk.fetched === 0) break;
+      if (drainAllMaterializationCandidates) continue;
+      if (remainingForegroundBudget <= 0) break;
+    }
+    const materializationRemaining = this._countMaterializationWorkRemaining(
+      materializationScanCursor
+    );
+
+    let removedOrphanBlobFiles = 0;
+    let orphanBlobPrefixes = await this._listPhysicalBlobPrefixes();
+    let orphanBlobPrefixCursor = 0;
+    if (options.verifyHashes === true || options.drainMaterializationCandidates === true) {
+      const pendingCleanupPaths = this.repository.listCleanupJobs()
+        .flatMap((job) => job.releasedBlobs.map((blob) => blob.relativePath));
+      const referencedPaths = new Set([
+        ...this.repository.listBlobs().map((blob) => blob.relativePath),
+        ...pendingCleanupPaths
+      ]);
+      const physicalFiles = await this._listPhysicalBlobFiles();
+      for (const file of physicalFiles) {
+        if (referencedPaths.has(file.relativePath)) continue;
+        try {
+          await this.fs.promises.rm(file.filePath, { force: true });
+          removedOrphanBlobFiles += 1;
+        } catch (error) {
+          failures.push({
+            code: safeFailure(error, '清理').code,
+            blob: file.sha256.slice(0, 12)
+          });
+        }
+      }
+      orphanBlobPrefixCursor = orphanBlobPrefixes.length;
     }
 
     return {
       removedStagingEntries: staging.removed,
       removedReadonlyEntries: readonly.removed,
+      cleanupJobCount: cleanupResults.length,
       interruptedArtifactCount: interrupted.artifactCount,
       repairedArtifactCount: dangling.artifactCount,
+      materializedArtifactCount,
+      materializationProcessedCount,
+      materializationFailureCount,
+      materializationCursor,
+      materializationScanCursor,
+      materializationRemaining,
+      blobVerificationCursor,
+      blobVerificationRemaining,
+      orphanBlobPrefixes,
+      orphanBlobPrefixCursor,
       invalidBlobCount,
       removedUnreferencedBlobRecords,
       removedOrphanBlobFiles,
@@ -1675,10 +2607,13 @@ module.exports = {
   ArchiveService,
   BLOB_ROOT_PARTS,
   DEFAULT_RETENTION_DAYS,
+  DEFAULT_STARTUP_MATERIALIZATION_BATCH_SIZE,
+  MAX_MATERIALIZATION_BATCH_SIZE,
   READONLY_DIR_NAME,
   STAGING_DIR_NAME,
   addCalendarDays,
   blobRelativePath,
   createArchiveService,
-  localDateOf
+  localDateOf,
+  runArchiveRootOperation
 };

@@ -54,6 +54,57 @@ function addArtifact(repository, batchId, overrides = {}) {
   });
 }
 
+function completeLayout(repository, artifact, overrides = {}) {
+  const batch = repository.getBatch(artifact.batchId);
+  const safeFileName = overrides.safeFileName || artifact.originalName;
+  return repository.completeMaterialization(artifact.id, {
+    storageMode: overrides.storageMode || 'copy',
+    storageRelativePath: overrides.storageRelativePath
+      || `${batch.localDate.slice(0, 4)}/${batch.localDate.slice(0, 7)}/${batch.localDate}/${batch.batchNumber}/${safeFileName}`,
+    safeFileName,
+    artifactOrder: artifact.artifactOrder
+  });
+}
+
+test('目录化候选按 artifact id 分页，且 materialized 统计与游标一致', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'materialization-pages' }).batch;
+    const ids = [];
+    for (let index = 0; index < 3; index += 1) {
+      const sha256 = String.fromCharCode(97 + index).repeat(64);
+      const artifact = addArtifact(repository, batch.id, {
+        artifactKey: `materialization-page-${index}`,
+        originalName: `page-${index}.xlsx`
+      });
+      repository.startArtifactAttempt(artifact.id);
+      repository.completeArtifact(artifact.id, {
+        sha256,
+        sizeBytes: index + 1,
+        relativePath: `blobs/sha256/${index}/${sha256}`
+      });
+      ids.push(artifact.id);
+    }
+
+    const first = repository.listMaterializationCandidates(2, 0);
+    const second = repository.listMaterializationCandidates(2, first.at(-1).id);
+    assert.deepEqual([...first, ...second].map((artifact) => artifact.id), ids);
+    assert.equal(repository.countMaterializationCandidates(), 3);
+    completeLayout(repository, first[0]);
+    assert.equal(repository.countMaterializationCandidates(), 2);
+    assert.deepEqual(
+      repository.listMaterializedArtifactsPage(1, 0).map((artifact) => artifact.id),
+      [first[0].id]
+    );
+    assert.equal(repository.countMaterializedArtifactsAfter(0), 1);
+    assert.equal(repository.countMaterializedArtifactsAfter(first[0].id), 0);
+    assert.throws(() => repository.listMaterializedArtifactsPage(1, -1), /afterArtifactId/);
+    assert.throws(() => repository.countMaterializedArtifactsAfter(-1), /afterArtifactId/);
+  } finally {
+    db.close();
+  }
+});
+
 test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 succeeded 闭锁', () => {
   const { db, repository } = createFixture();
   try {
@@ -168,12 +219,20 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
         'archive_batch_sequences',
         'archive_batches',
         'archive_blobs',
+        'archive_cleanup_jobs',
         'archive_daily_sequences',
         'archive_flow_anchors',
         'archive_flow_bind_intents',
         'archive_operation_issuances'
       ]
     );
+    const artifactColumns = new Set(
+      db.prepare('PRAGMA table_info(archive_artifacts)').all().map((row) => row.name)
+    );
+    assert.equal(artifactColumns.has('materialization_error_code'), true);
+    assert.equal(artifactColumns.has('materialization_error_message'), true);
+    assert.equal(artifactColumns.has('materialization_failed_at'), true);
+    assert.equal(artifactColumns.has('materialization_status'), false);
   } finally {
     db.close();
   }
@@ -249,6 +308,9 @@ test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 
       sizeBytes: 5,
       relativePath: `blobs/sha256/aa/${HASH_A}`
     });
+    assert.equal(firstComplete.batch.archiveStatus, 'incomplete');
+    completeLayout(repository, firstComplete.artifact);
+    completeLayout(repository, secondComplete.artifact);
 
     assert.equal(firstComplete.deduplicated, false);
     assert.equal(secondComplete.deduplicated, true);
@@ -268,6 +330,10 @@ test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 
     assert.equal(firstDelete.status, 'deleted');
     assert.equal(firstDelete.releasedBlobs.length, 0);
     assert.equal(repository.findBlobByHash(HASH_A).referenceCount, 1);
+    assert.deepEqual(firstDelete.cleanupJob.releasedBlobs, []);
+    assert.deepEqual(firstDelete.cleanupJob.materializedPaths, [
+      `2026/2026-07/2026-07-20/${firstBatch.batchNumber}/source.xlsx`
+    ]);
 
     repository.setLocked(secondBatch.id, true);
     const lockedDelete = repository.deleteBatch(secondBatch.id);
@@ -280,6 +346,66 @@ test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 
     assert.equal(finalDelete.releasedBlobs.length, 1);
     assert.equal(finalDelete.releasedBlobs[0].sha256, HASH_A);
     assert.equal(repository.findBlobByHash(HASH_A), null);
+    assert.deepEqual(finalDelete.cleanupJob.releasedBlobs, [{
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      sha256: HASH_A,
+      sizeBytes: 5
+    }]);
+    assert.equal(repository.listCleanupJobs().length, 2);
+  } finally {
+    db.close();
+  }
+});
+
+test('Blob 元数据按 id 游标分页，供后台 ownership/完整性扫描有界推进', () => {
+  const { db, repository: repo } = createFixture();
+  try {
+    repo.ensureSchema();
+    const now = '2026-07-20T04:00:00.000Z';
+    for (let index = 0; index < 3; index += 1) {
+      db.prepare(`
+        INSERT INTO archive_blobs(sha256, size_bytes, relative_path, created_at, last_verified_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        String(index + 1).repeat(64),
+        index + 1,
+        `blobs/sha256/${String(index + 1).repeat(2)}/${String(index + 1).repeat(64)}`,
+        now,
+        now
+      );
+    }
+    const first = repo.listBlobsPage(2, 0);
+    assert.deepEqual(first.map((blob) => blob.id), [1, 2]);
+    assert.deepEqual(repo.listBlobsPage(2, first[1].id).map((blob) => blob.id), [3]);
+    assert.equal(repo.countBlobsAfter(0), 3);
+    assert.equal(repo.countBlobsAfter(2), 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('统计大小只累计 ready artifact 引用，failed/pending 即使残留 blob 引用也不计', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'stats-ready-only' }).batch;
+    const artifacts = ['ready', 'failed', 'pending'].map((status) => {
+      const artifact = addArtifact(repository, batch.id, { artifactKey: `stats-${status}` });
+      repository.startArtifactAttempt(artifact.id);
+      const completed = repository.completeArtifact(artifact.id, {
+        sha256: HASH_A,
+        sizeBytes: 5,
+        relativePath: `blobs/sha256/aa/${HASH_A}`
+      });
+      completeLayout(repository, completed.artifact);
+      return completed.artifact;
+    });
+    db.prepare("UPDATE archive_artifacts SET status = 'failed' WHERE id = ?").run(artifacts[1].id);
+    db.prepare("UPDATE archive_artifacts SET status = 'pending' WHERE id = ?").run(artifacts[2].id);
+
+    const stats = repository.getStats();
+    assert.equal(stats.batchCount, 1);
+    assert.equal(stats.logicalBytes, 5);
+    assert.equal(stats.failedFileCount, 1);
   } finally {
     db.close();
   }
@@ -323,11 +449,51 @@ test('失败和重试保留累计元数据，最终完成后恢复批次完成�
 
     assert.equal(completed.artifact.status, 'ready');
     assert.equal(completed.artifact.attemptCount, 2);
-    assert.equal(completed.batch.archiveStatus, 'complete');
-    assert.equal(completed.batch.failureCount, 2);
-    assert.equal(completed.batch.retryCount, 2);
-    assert.equal(completed.batch.lastErrorCode, '');
+    assert.equal(completed.batch.archiveStatus, 'incomplete');
+    const repairPending = repository.recordMaterializationFailure(completed.artifact.id, {
+      code: 'ARCHIVE_MATERIALIZATION_FAILED',
+      message: '目录暂不可写'
+    });
+    assert.equal(repairPending.artifact.status, 'ready');
+    assert.equal(repairPending.artifact.blob.sha256, HASH_B);
+    assert.equal(repairPending.artifact.materializationErrorCode, 'ARCHIVE_MATERIALIZATION_FAILED');
+    const materialized = completeLayout(repository, completed.artifact);
+    assert.equal(materialized.batch.archiveStatus, 'complete');
+    assert.equal(materialized.artifact.materializationErrorCode, '');
+    assert.equal(materialized.batch.failureCount, 3);
+    assert.equal(materialized.batch.retryCount, 2);
+    assert.equal(materialized.batch.lastErrorCode, '');
     assert.deepEqual(repository.listUnresolvedArtifactSourcePaths(), []);
+  } finally {
+    db.close();
+  }
+});
+
+test('cleanup job 插入与批次/artifact/最后引用 Blob 删除同事务回滚', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'cleanup-rollback' }).batch;
+    const artifact = addArtifact(repository, batch.id, { artifactKey: 'cleanup-file' });
+    repository.startArtifactAttempt(artifact.id);
+    const completed = repository.completeArtifact(artifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    });
+    completeLayout(repository, completed.artifact);
+    db.exec(`
+      CREATE TRIGGER reject_archive_cleanup_job
+      BEFORE INSERT ON archive_cleanup_jobs
+      BEGIN
+        SELECT RAISE(ABORT, 'cleanup job unavailable');
+      END;
+    `);
+
+    assert.throws(() => repository.deleteBatch(batch.id), /cleanup job unavailable/);
+    assert.ok(repository.getBatch(batch.id));
+    assert.ok(repository.getArtifact(artifact.id));
+    assert.equal(repository.findBlobByHash(HASH_A).referenceCount, 1);
+    assert.deepEqual(repository.listCleanupJobs(), []);
   } finally {
     db.close();
   }
