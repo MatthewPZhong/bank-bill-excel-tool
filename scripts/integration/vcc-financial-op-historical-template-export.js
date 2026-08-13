@@ -28,6 +28,9 @@ const {
   buildRunRowKey
 } = require('../../src/backend/vcc-financial-op/result-adjustments');
 const {
+  previewUnarchive: previewLegacyUnarchive
+} = require('../../src/backend/vcc-financial-op/unarchive');
+const {
   parseAdjustmentLineageName
 } = require('../../src/backend/vcc-financial-op/adjustment-lineage');
 const {
@@ -170,12 +173,13 @@ function seedArchivedRun(db, targetMonth, {
     INSERT INTO vcc_fin_op_runs (
       target_month, status, input_revisions_json, result_revision,
       input_fingerprint, created_at, updated_at, archived_at
-    ) VALUES (?, 'archived', '{}', ?, ?,
+    ) VALUES (?, 'archived', ?, ?, ?,
               '2026-08-01 08:30:00', '2026-08-01 09:00:00', '2026-08-01 09:30:00')
   `).run(
     targetMonth,
+    JSON.stringify(Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]))),
     adjustmentAmount === null ? 0 : 1,
-    `historical-export-${targetMonth}`
+    'b'.repeat(64)
   ).lastInsertRowid);
   db.prepare(`
     INSERT INTO vcc_fin_op_run_rows (
@@ -215,9 +219,10 @@ function seedArchivedRun(db, targetMonth, {
     db.prepare(`
       INSERT INTO vcc_fin_op_run_adjustments (
         run_id, row_key, subject, source_type, category_major, category_minor,
-        currency, adjustment_amount, reason, sequence
+        currency, adjustment_amount, reason, sequence,
+        created_app_version, created_build_sha
       ) VALUES (?, ?, ?, ?, 'VCC_discharge', 'B2B',
-                'USD', ?, '历史月份人工核对', 1)
+                'USD', ?, '历史月份人工核对', 1, '3.1.8', 'historical-fixture')
     `).run(runId, rowKey, SUBJECT, SOURCE_TYPES.RECHARGE, adjustmentAmount);
   }
 
@@ -284,7 +289,7 @@ async function run() {
       assetsDir: path.resolve(__dirname, '../../assets')
     });
 
-    const months = service.listArchivedResultMonths();
+    const months = await service.listArchivedResultMonths();
     assertEq(months.length, 2, '两个一致归档月份均可导出');
     assertEq(months[0].targetMonth, LATEST_MONTH, '归档月份默认按 latest 倒序展示');
     assertEq(months[0].runId, latest.runId, 'latest 月份指向 latest run');
@@ -321,7 +326,10 @@ async function run() {
       'defined name 可还原历史调整 rowKey'
     );
 
-    const latestPreview = service.previewUnarchive({ targetMonth: LATEST_MONTH });
+    // B/C1 中间分支只保留 v1 preview 作为旧 write 实现证据；生产入口已切 v2 并安全拒绝。
+    const latestPreview = previewLegacyUnarchive(db, LATEST_MONTH, {
+      taskGeneration: service._taskStateForTests().taskGeneration
+    });
     assertEq(latestPreview.canUnarchive, true, 'latest 月份可通过真实状态预检解归档');
     const unarchived = await service.unarchiveMonth({
       targetMonth: LATEST_MONTH,
@@ -329,7 +337,7 @@ async function run() {
       taskGeneration: latestPreview.taskGeneration
     });
     assertEq(unarchived.status, 'unarchived', 'latest 月份通过真实 worker 原子解归档');
-    const afterUnarchive = service.listArchivedResultMonths();
+    const afterUnarchive = await service.listArchivedResultMonths();
     assertEq(afterUnarchive.length, 1, '解归档后月份立即从可导出枚举消失');
     assertEq(afterUnarchive[0].targetMonth, HISTORICAL_MONTH, '解归档后仅保留仍一致归档的历史月份');
 
@@ -366,11 +374,11 @@ async function run() {
       expectedResultRevision: 0
     });
     assertEq(rearchived.status, 'archived', '解归档结果可经正式 service 重新归档');
-    const afterRearchive = service.listArchivedResultMonths();
+    const afterRearchive = await service.listArchivedResultMonths();
     assertEq(afterRearchive.length, 2, '重新归档后月份重新进入可导出枚举');
     assertEq(afterRearchive[0].targetMonth, LATEST_MONTH, '重新归档月份恢复为默认 latest');
     assertEq(
-      service.getArchivedRunByMonth(LATEST_MONTH).runId,
+      (await service.getArchivedRunByMonth(LATEST_MONTH)).runId,
       latest.runId,
       '重新归档月份恢复严格导出 resolver'
     );

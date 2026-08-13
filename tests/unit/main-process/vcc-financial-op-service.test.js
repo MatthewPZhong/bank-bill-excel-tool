@@ -18,6 +18,9 @@ const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-fin
 const {
   previewDataTargetDeletion
 } = require('../../../src/backend/vcc-financial-op/data-target-deletion');
+const {
+  previewUnarchive: previewLegacyUnarchive
+} = require('../../../src/backend/vcc-financial-op/unarchive');
 const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
 
 function deleteWithPreview(db, targetMonth, sourceType) {
@@ -506,7 +509,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   assert.equal(detail.rows[0].existingSource.importRecordId, recordId);
 });
 
-test('数据管理删除通过 worker 执行并返回删除与结果失效计数', async (t) => {
+test('B/C1 中间态生产 v2 删除 preview 被旧 v1 write fail-closed 且零业务 DML', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-delete-worker-'));
   const dbPath = path.join(dir, 'tool-data.sqlite');
   const db = new DatabaseSync(dbPath);
@@ -574,7 +577,7 @@ test('数据管理删除通过 worker 执行并返回删除与结果失效计数
   });
   t.after(() => service.terminate());
 
-  const preview = service.previewDatasetDeletion({
+  const preview = await service.previewDatasetDeletion({
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE
   });
@@ -588,26 +591,20 @@ test('数据管理删除通过 worker 执行并返回删除与结果失效计数
     assert.equal(error.message, '数据状态已变化，请刷新并重新确认。');
     return true;
   });
-  const deleted = await service.deleteDatasetData({
+  assert.match(preview.previewToken, /^v2:/);
+  await assert.rejects(service.deleteDatasetData({
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration,
-    reason: 'worker 链路删除原因'
-  });
-  assert.equal(deleted.deletedDataCount, 1);
-  assert.equal(deleted.invalidatedRunCount, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs').get().n, 0);
-  const operationAudit = db.prepare(`
-    SELECT status, evidence_json, app_version, build_sha
-    FROM vcc_fin_op_operation_audit
-    WHERE operation_type = 'delete-source-dataset'
-  `).get();
-  assert.equal(operationAudit.status, 'success');
-  assert.equal(operationAudit.app_version, '3.1.8');
-  assert.equal(operationAudit.build_sha, 'worker-service-build');
-  assert.equal(JSON.parse(operationAudit.evidence_json).reason, 'worker 链路删除原因');
+    reason: 'B/C1 中间态必须拒绝'
+  }), (error) => error.code === 'state-changed');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_operation_audit WHERE status = 'success'
+  `).get().n, 0, '允许旧 worker 留 rolled_back 诊断，但不得留下 success evidence');
 });
 
 test('数据管理有效表通过 worker 流式导出并返回工作簿元数据', async (t) => {
@@ -679,7 +676,7 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     db.close();
   });
 
-  const oldPreview = service.previewDataTargetDeletion({
+  const oldPreview = previewDataTargetDeletion(db, {
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   assert.equal(oldPreview.taskGeneration, 0);
@@ -740,8 +737,8 @@ test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法
     await service.terminate();
     db.close();
   });
-  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
-  const deletePreview = service.previewDataTargetDeletion({
+  const unarchivePreview = previewLegacyUnarchive(db, '2026-06');
+  const deletePreview = previewDataTargetDeletion(db, {
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   const operations = [
@@ -804,7 +801,7 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
     cancelTimeoutMs: 10
   });
   t.after(() => db.close());
-  const preview = service.previewUnarchive({ targetMonth: '2026-06' });
+  const preview = previewLegacyUnarchive(db, '2026-06');
   const operation = service.unarchiveMonth({
     targetMonth: '2026-06',
     expectedPreviewToken: preview.previewToken,
@@ -856,7 +853,7 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
     await service.terminate();
     db.close();
   });
-  const preview = service.previewDataTargetDeletion({
+  const preview = previewDataTargetDeletion(db, {
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   const operation = service.deleteDataTarget({
@@ -890,7 +887,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
     cancelTimeoutMs: 5
   });
   t.after(() => db.close());
-  const preview = service.previewDataTargetDeletion({
+  const preview = previewDataTargetDeletion(db, {
     targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE
   });
   const operation = service.deleteDataTarget({
@@ -902,6 +899,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
   const rejection = assert.rejects(operation, /后台任务退出但未返回结果/);
   const termination = service.terminate();
   const worker = workers[0];
+  await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }]);
 
   worker.emit('message', { type: 'critical-ready' });
@@ -916,17 +914,23 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
 });
 
 test('无调整的历史归档仍可导出，且直接结果导出持有同一租约', async (t) => {
-  const db = new DatabaseSync(':memory:');
-  db.exec('PRAGMA foreign_keys = ON');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-result-export-read-'));
+  const dbPath = path.join(dir, 'tool-data.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL');
   ensureVccFinancialOpTablesSupport(db);
   const runId = Number(db.prepare(`
     INSERT INTO vcc_fin_op_runs (
-      target_month, status, created_at, updated_at, archived_at
+      target_month, status, input_revisions_json, input_fingerprint,
+      created_at, updated_at, archived_at
     ) VALUES (
-      '2026-06', 'archived', '2026-08-01 08:00:00',
+      '2026-06', 'archived', ?, ?, '2026-08-01 08:00:00',
       '2026-08-01 09:00:00', '2026-08-01 09:00:00'
     )
-  `).run().lastInsertRowid);
+  `).run(
+    JSON.stringify(Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]))),
+    'a'.repeat(64)
+  ).lastInsertRowid);
   db.prepare(`
     INSERT INTO vcc_fin_op_run_rows (
       run_id, subject, row_kind, source_type,
@@ -973,7 +977,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   let writerArgs;
   const started = new Promise((resolve) => { writerStarted = resolve; });
   const service = createVccFinancialOpService({
-    database: { db, dbPath: ':memory:' },
+    database: { db, dbPath },
     assetsDir: '',
     writeRunWorkbooksFn: (args) => {
       writerArgs = args;
@@ -981,18 +985,19 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
       return new Promise((resolve) => { releaseWriter = resolve; });
     }
   });
-  t.after(() => db.close());
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS row_count FROM vcc_fin_op_run_adjustments WHERE run_id = ?
   `).get(runId).row_count, 0, '历史归档没有人工调整');
-  assert.equal(service.latestArchivedRun().runId, runId, '不一致的更新 archived run 不得成为 latest');
-  assert.deepEqual(service.getArchivedRunByMonth('2026-06'), {
+  assert.equal((await service.latestArchivedRun()).runId, runId, '不一致的更新 archived run 不得成为 latest');
+  assert.deepEqual(await service.getArchivedRunByMonth('2026-06'), {
     targetMonth: '2026-06',
     runId,
     archivedAt: '2026-08-01 09:00:00',
     resultRevision: 0,
-    subjects: ['PPHK']
+    subjects: ['PPHK'],
+    archiveContract: 'current-five-dataset'
   });
   await assert.rejects(
     service.exportRun({
@@ -1009,7 +1014,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   await started;
   assert.equal(service._taskStateForTests().action, 'export-result');
   assert.equal(writerArgs.runId, runId, 'runId 必须在租约内由 targetMonth 严格解析');
-  const unarchivePreview = service.previewUnarchive({ targetMonth: '2026-06' });
+  const unarchivePreview = await service.previewUnarchive({ targetMonth: '2026-06' });
   assert.equal(unarchivePreview.code, 'active-vcc-task');
   assert.throws(
     () => service.unarchiveMonth({
@@ -1031,4 +1036,5 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   releaseWriter({ filePaths: ['/tmp/fixture.xlsx'] });
   assert.deepEqual(await exporting, { filePaths: ['/tmp/fixture.xlsx'] });
   await termination;
+  db.close();
 });

@@ -321,3 +321,37 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - 完整门禁首轮 lint/smoke PASS、unit 4940/4940，integration 47/48；唯一失败是既有大文件拆分 RSS 绝对上限样本 `[150,135,135]MB` 中首项恰等于严格 `<150MB`。独立原脚本复跑 31/31，tier2 `[137,133,137]MB`；分类为环境边界采样，未修改阈值、测试或生产代码。
 - 第二轮单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4940/4940（317 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions（311123ms）。runner 仅在全绿后自动刷新 `rules/integration-test-policy.md` §七 timestamp/timings，48/2459 不变并保留生成证据。
 - ⚠️ 自动门禁不替代真实生产 legacy 副本、主体×九币种、跨月血缘、Windows packaged runtime、16 GB 和财务人工验收。
+
+## 13. PR2.5-B 读取性能测试矩阵
+
+### 13.1 最小自动矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| B-01 | P0 | schema/read DB | schema 缺失与 current-ready；readOnly 代表 DML | 缺表/列返回 `vcc-schema-not-ready`；现有 PK/index 通过；query_only/foreign_keys/busy_timeout 生效；DML readonly 拒绝 |
+| B-02 | P0 | set loader | current + active + inconsistent | current 可枚举/token v2；active batch 只改变 gate；破坏 archive 后月份排除并返回结构化 diagnostic |
+| B-03 | P0 | token v2 | canonical 顺序与 generation | 集合重排 token 不变；generation 变化 token 必变；不含 taskActive/opening/source facts |
+| B-04 | P0 | SQL shape | archive 0/1/100 候选 | 均固定 10 SQL；零 import rows/opening；Pending facts 从 candidate 走现有 month/source covering index、禁止 fact scan |
+| B-05 | P0 | active visibility | opening/orphan effective/importing/unresolved | 月份全部可见且倒序；effective 使用现有 covering index |
+| B-06 | P0 | delete evidence | 一次 target set 与单 target refresh | 完整 targets 固定 9 SQL；同 evidence+target token 一致；有效 facts 分组不建临时 B-tree |
+| B-07 | P0 | worker allowlist | unknown action + 不存在 DB path | 开库前返回 `invalid-vcc-read-action` |
+| B-08 | P0 | real worker | migrated v3.1.7 fixture | legacy 可枚举/preview；10/13 SQL；DB SHA 不变；小 fixture worker <500ms、main lag <100ms |
+| B-09 | P0 | service cache | active month generation cache | 同 generation 复用；任一写任务 release 后失效重读 |
+| B-10 | P0 | freshness | read 返回期间 active identity 改变 | Main 返回 `state-changed`，不消费陈旧 DTO |
+| B-11 | P0 | export wiring | 初次读取 + runDirectTask 内重查 | 两次均使用 `list-archive-months`，第二次绑定既有 active task identity |
+| B-12 | P0 | real legacy export | migrated v3.1.7 fixture → service → writer | 初读与租约内重查都得到 legacy contract，runId 精确传给既有 writer |
+
+补充合同证据：renderer 静态/函数级测试锁定 shell 在 backend await 前挂载、月份/归档 loading 和 skeleton、inline retry、target change 零 preview IPC，1000 次七目标 cache 切换 <50ms。生产 v2 preview → 旧 v1 write 只保留一条真实 delete 链，断言 `state-changed`、三张业务表不变且无 success evidence；旧 v1 write 成功/取消/保护测试显式调用 legacy helper，不再代表生产入口。
+
+### 13.2 性能证据口径
+
+- `scripts/perf/vcc-financial-op-read-performance.js` 只接受现存数据库路径，以同一 read worker 输出首次/后续样本、worker/main P50/P95、main lag、SQL trace/query count 与 WAL 前后字节；不运行 migration、不写报告文件、不产生业务 DML。
+- migrated tracked legacy 小 fixture 本机观测：archive 10 SQL、active 1、unarchive 13、delete 9；worker P95 分别约 2ms、0.2ms、3ms、1ms，main max lag约 2ms，WAL 0 增长。该数值只作 gross regression，不是约 16 GB 或 Windows packaged 验收。
+- 硬门禁保持 archive/preview 500ms、delete 2s、main lag <100ms；真实约 16 GB Windows installer/portable 的冷/热 P95、WAL 和 UI shell 仍是发布 PROBE，失败不得加 retry、放宽阈值或回退 Main 同步读取。
+
+### 13.3 人工门禁（自动测试不替代）
+
+- ⚠️ 财务人工必须复核真实主体 × 九币种、调整后有效余额、current/legacy 导出、跨月尾月依赖和备份恢复；本 PR 未改变金额/币种算法，也不据此关闭资金门禁。
+- Windows installer/portable 必须验证 read worker 路径、`readOnly/query_only/BEGIN DEFERRED` 和关闭行为。
+- 目标生产库副本必须只读检查 legacy/trigger shape；非 exact current/legacy 保持 inconsistent，不增加 fallback。
+- B/C1 intermediate non-release；C2 在 `BEGIN IMMEDIATE` 内同源重算 v2 前，生产解归档/删除保持 fail-closed，不作为最终用户行为。

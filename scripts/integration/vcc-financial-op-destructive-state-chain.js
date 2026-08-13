@@ -29,6 +29,12 @@ const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
 const {
+  previewUnarchive: previewLegacyUnarchive
+} = require('../../src/backend/vcc-financial-op/unarchive');
+const {
+  previewDataTargetDeletion: previewLegacyDataTargetDeletion
+} = require('../../src/backend/vcc-financial-op/data-target-deletion');
+const {
   buildRunRowKey
 } = require('../../src/backend/vcc-financial-op/result-adjustments');
 const {
@@ -225,13 +231,16 @@ function seedRun(db, targetMonth, status = 'calculated', { adjustmentAmount = nu
     INSERT INTO vcc_fin_op_runs (
       target_month, status, input_revisions_json, result_revision,
       input_fingerprint, created_at, updated_at, archived_at
-    ) VALUES (?, ?, '{}', ?, ?, '2026-08-01 08:30:00',
+    ) VALUES (?, ?, ?, ?, ?, '2026-08-01 08:30:00',
               '2026-08-01 09:00:00', ?)
   `).run(
     targetMonth,
     status,
+    JSON.stringify(Object.fromEntries(
+      REQUIRED_DATASET_TYPES.map((sourceType, index) => [sourceType, index + 1])
+    )),
     adjustmentAmount === null ? 0 : 1,
-    `fingerprint-${targetMonth}`,
+    'a'.repeat(64),
     status === 'archived' ? '2026-08-01 09:30:00' : null
   ).lastInsertRowid);
   db.prepare(`
@@ -387,14 +396,19 @@ async function run() {
       buildSha: 'integration-fixture-sha'
     });
 
-    const archivedMonths = service.listArchivedResultMonths();
+    // B/C1 中间分支只把 v1 preview 留作旧 write 实现证据；生产入口 v2 的 fail-closed
+    // 已由 service 单一真实链测试覆盖，C2 才恢复 production preview → write 成功链。
+
+    const archivedMonths = await service.listArchivedResultMonths();
     assertDeepEq(
       archivedMonths.map((row) => row.targetMonth),
       [M2, M1],
       '归档枚举仅返回一致月份并按最新优先'
     );
 
-    const m1Blocked = service.previewUnarchive({ targetMonth: M1 });
+    const m1Blocked = previewLegacyUnarchive(db, M1, {
+      taskGeneration: service._taskStateForTests().taskGeneration
+    });
     assertEq(m1Blocked.code, 'unarchive-not-tail', 'M1 preview 因 M2 依赖阻断');
     assertDeepEq(m1Blocked.dependentMonths, [M2], 'M1 preview 明确返回依赖月份 M2');
     const m1BlockedError = await expectCode(
@@ -418,7 +432,9 @@ async function run() {
       'M1 非尾阻断写入 rolled_back 审计'
     );
 
-    const m2Preview = service.previewUnarchive({ targetMonth: M2 });
+    const m2Preview = previewLegacyUnarchive(db, M2, {
+      taskGeneration: service._taskStateForTests().taskGeneration
+    });
     assertEq(m2Preview.canUnarchive, true, 'M2 是尾月可解归档');
     const m2Unarchived = await service.unarchiveMonth({
       targetMonth: M2,
@@ -455,9 +471,11 @@ async function run() {
       '解归档 M2 时 M1 归档快照保持完整'
     );
 
-    const m2DeletePreview = service.previewDataTargetDeletion({
+    const m2DeletePreview = previewLegacyDataTargetDeletion(db, {
       targetMonth: M2,
       targetType: 'result'
+    }, {
+      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(m2DeletePreview.calculatedRunCount, 1, 'M2 删除预览包含一份未归档结果');
     const m2Deleted = await service.deleteDataTarget({
@@ -482,7 +500,9 @@ async function run() {
     );
     assertDeepEq(sourceFactCounts(db, M2), m2SourceBefore, 'M2 结果删除前后源事实和数据集计数守恒');
 
-    const m1Preview = service.previewUnarchive({ targetMonth: M1 });
+    const m1Preview = previewLegacyUnarchive(db, M1, {
+      taskGeneration: service._taskStateForTests().taskGeneration
+    });
     assertEq(m1Preview.canUnarchive, true, '删除 M2 结果后 M1 成为尾月');
     const m1Unarchived = await service.unarchiveMonth({
       targetMonth: M1,
@@ -496,9 +516,11 @@ async function run() {
       'M1 归档快照全部删除'
     );
 
-    const openingPreview = service.previewDataTargetDeletion({
+    const openingPreview = previewLegacyDataTargetDeletion(db, {
       targetMonth: M1,
       targetType: 'opening_initialization'
+    }, {
+      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(openingPreview.deletable, true, '解归档后 M1 期初允许删除');
     assertEq(openingPreview.calculatedRunCount, 1, 'M1 期初删除预览包含关联结果');
@@ -548,9 +570,11 @@ async function run() {
     const staleMonth = '2026-07';
     const staleRunId = seedRun(db, staleMonth, 'calculated');
     seedDatasets(db, staleMonth, 'unprocessed');
-    const stalePreview = service.previewDataTargetDeletion({
+    const stalePreview = previewLegacyDataTargetDeletion(db, {
       targetMonth: staleMonth,
       targetType: 'result'
+    }, {
+      taskGeneration: service._taskStateForTests().taskGeneration
     });
     db.prepare(`
       UPDATE vcc_fin_op_runs SET updated_at = '2026-08-02 00:00:00' WHERE id = ?
@@ -590,9 +614,11 @@ async function run() {
         SELECT RAISE(ABORT, 'integration-result-delete-failure');
       END;
     `);
-    const faultPreview = service.previewDataTargetDeletion({
+    const faultPreview = previewLegacyDataTargetDeletion(db, {
       targetMonth: faultMonth,
       targetType: 'result'
+    }, {
+      taskGeneration: service._taskStateForTests().taskGeneration
     });
     await expectFailure(
       () => service.deleteDataTarget({
@@ -643,9 +669,11 @@ async function run() {
     const sourceRunId = seedRun(db, sourceDeleteMonth, 'calculated', {
       adjustmentAmount: '12.34'
     });
-    const sourcePreview = service.previewDataTargetDeletion({
+    const sourcePreview = previewLegacyDataTargetDeletion(db, {
       targetMonth: sourceDeleteMonth,
       targetType: SOURCE_TYPES.RECHARGE
+    }, {
+      taskGeneration: service._taskStateForTests().taskGeneration
     });
     assertEq(sourcePreview.deletable, true, '来源原表删除预览可执行');
     const sourceDeleted = await service.deleteDataTarget({

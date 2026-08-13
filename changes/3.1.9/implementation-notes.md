@@ -393,3 +393,47 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Remaining Unknowns（收敛后）
 
 - 目标真实生产旧库 legacy-four/trigger、Windows packaged runtime、约 16 GB 与财务人工复核仍未完成；阻断对应 merge/release，不影响 A 纯合同代码 review。
+
+## PR2.5-B 读取性能 Implementation Notes（实施中）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| read/write 使用物理分离 entry | 现有 `worker-entry.js` 打开可写连接并运行 migration；action 配置错误会扩大权限 | 新 read entry 先校验 allowlist，再以 readOnly/query_only 打开；不复用可写 entry 的 `openDb()` |
+| B 零 schema migration | TechDoc 已确认现有 `idx_vcc_fin_op_effective_month_source` 足够，负责人锁定本方案不新增 schema | schema-ready 只断言现有表/列/PK/index；其他表允许一次 set scan，16 GB 不达标则保持 PROBE 并反向同步合同 |
+| archive set loader 保持 A 纯模块不变 | A 已冻结 evidence builder/validator/classifier/gate 为零 SQL 的唯一语义 | 新 SQL 进入独立 `read-snapshot.js`；不把 loader 混入 A 文件，不逐 run 调 `getEffectiveRunResult()` |
+| 导出两次读取都消费 B snapshot | current/legacy 可枚举但二次重查若回到旧 current-only state，legacy 仍不可导出 | 初次对话框读取和现有 `runDirectTask` 内重查复用同一 read action/loader；只复用 activeTask/taskGeneration，不新造 claim/lease/timer |
+| B 正式生成 token v2，旧 v1 write 中间 fail-closed | C2 才拥有 write lock 下同源 v2 重算；兼容桥会形成弱保护 | B/C1 intermediate non-release；只保留一条生产链 0-DML 证据，不改旧 write，不为 target 建重复矩阵 |
+| 删除目标响应就是 preview cache | TechDoc §10/§14 要求共享 DeleteEvidenceV2 后内存派生，target change ≤50ms | renderer 切 target 零 IPC；month/state-changed/refresh 失效整批 cache，submit 仍携 token+generation |
+
+### Remaining Unknowns
+
+- Windows installer/portable 的 worker、readOnly 和 query_only 行为仍为发布 PROBE。
+- 约 16 GB 真实副本的冷/热 P95、WAL 与 main event-loop lag 尚未执行；小 fixture 只作 gross regression，不关闭该项。
+- 目标生产 legacy/trigger、主体×九币种、有效余额、跨月依赖与备份恢复仍需人工复核。
+
+### Implementation Evidence
+
+- `read-schema.js` 只读断言 current migration 已存在的必要表/列/PK，以及唯一性能硬依赖 `idx_vcc_fin_op_effective_month_source`；真实 read handle 设置 `readOnly/query_only/foreign_keys/busy_timeout`，没有调用 migration/recovery/journal mode。unknown action 在开库前 allowlist 拒绝。
+- archive loader 固定 10 个 set query，在同一 `BEGIN DEFERRED` 内按 target_month/run_id 组装 A 的 raw evidence；0/1/100 候选 SQL 数不变，trace 零 `vcc_fin_op_import_rows`、零 opening。query-plan 盲区 probe 首次发现 Pending effective 查询会按 source-leading unique index 扫描全 source 并建 GROUP 临时树；实现随即收窄为 candidate-first `CROSS JOIN` 并显式使用现有 month/source covering index，EXPLAIN 硬断言禁止 fact scan，未增加 migration/index。
+- current 与真实 migrated v3.1.7 legacy 都经同一 A builder/validator/classifier 枚举；active/importing 只改变 gate；破坏 archive 后月份从列表排除并返回 event/month/hasEvidence/reasons 诊断。真实 legacy 初读和既有 `runDirectTask` 内二次重查都可到达既有 writer，文件写出逻辑未改。
+- Main 捕获 generation 与 active task 对象 identity，read worker 返回后精确复核；active month cache 只按 generation 复用，任一写任务 release 后失效。没有新增 claim、lease、timer、TaskLifecycle 或 worker batch context。
+- DeleteEvidenceV2 固定 9 SQL 派生五 source、opening、result 完整 preview；renderer target change 只选 cache item，1000 次七目标函数级切换低于 50ms。数据管理在任一 backend await 前挂载 month/archive loading 与 content skeleton，失败保留 modal + inline retry，成功/破坏性完成只执行一次 months/archive/section refresh。
+- 生产 preview 已正式生成 v2；唯一真实 service delete 链证明旧 v1 write 返回 `state-changed`，effective/run/dataset 三张业务表不变且无 success evidence。旧 worker 允许留下 rolled_back 诊断；既有 v1 成功/取消/保护测试改为显式 legacy helper，记录合同时间点变化，不建立 v1/v2 bridge。
+- 首次旧测试迁移为 33/41：一条 renderer 静态断言仍要求逐 target preview，七条 service 测试仍把 async read 当同步或假设生产 v2 可提交旧 write，均分类为合同时间点变化。专属测试首次 4/6 的两项失败是 opening 测试夹具误用旧列、effective fixture 缺 NOT NULL import_record_id；修正夹具后生产代码未放宽。后续陈旧 current 集成夹具因空 revisions/非 SHA fingerprint 被 B classifier 正确排除，补成真实 current evidence 后收敛。
+- 当前相关自动证据：B-01—B-12 专属 12/12；A/B 合同、service、旧 destructive 保护与 renderer 聚焦合跑 158/158；显式 legacy 破坏性链 64/64、历史 current/legacy 导出链 28/28。15 个本次 JS 文件 `node --check` 与 ESLint、`git diff --check` 均通过。
+- 性能脚本在 current migration 后的 tracked v3.1.7 legacy fixture 上复跑 5 次：archive/active/unarchive preview/delete 的 SQL 数分别稳定为 10/1/13/9，WAL 0→0，最大 main lag 1.760 ms；worker P95 分别 6.661/0.130/2.221/0.780 ms，并独立报告首个与后续样本。该结果只用于结构硬门禁和小 fixture gross regression，不关闭真实约 16 GB、Windows packaged 冷/热 P95。
+
+### Blindspot / Reconciliation Pass
+
+- 真实入口逐段复核为 `renderer-vcc-financial-op → preload 既有 channel → main async IPC → service generation/activeTask 复核 → 独立 read worker → readOnly DB`；没有保留 renderer/IPC 可达的旧 archive/current-only loader 旁路。导出在 picker 初读与 `runDirectTask` 内二次重查均走同一 B action，current/legacy 都到既有 writer。
+- 权限/失败生命周期复核覆盖 unknown action 开库前拒绝、schema-ready 失败关闭、worker error/exit、service closing、read 返回时 generation 或 activeTask identity 改变、缓存失效和 modal inline retry。`serializeError`/`deserializeError` 复用既有双侧 schema，未修改 stack/cause/FileValidationError 字段；renderer `state` 命中是 data-manager dialog 的局部状态，不是 `src/renderer.js` 全局单例。
+- 性能盲区发现并修正了 Pending effective 的 source-leading scan + GROUP 临时树；最终 EXPLAIN 锁 candidate-first 既有 covering index。其余 run rows/balances/adjustments/Pending 表按冻结合同各一次 set scan；若真实 16 GB 不达标，保持 PROBE 并反向同步合同，不擅增 migration/index/retry/阈值放宽。
+- 资金复核确认本 PR 不改金额、币种、九币种算法、rowKey/revision/sequence、archive writer 或破坏性 write；集合 loader 仍把同源 run/dataset/archive/balance/adjustment/Pending raw evidence 交给 A validator/classifier/gate。自动证据覆盖 current/legacy、孤立/不一致排除、active/unresolved/later 只影响 gate、删除目标共享 evidence 与 v2→v1 零业务 DML；目标生产主体×九币种、有效余额、跨月依赖和备份恢复仍是人工资金红线。
+- 最终 `check-vars -- --include-minor` exit 2：Important-skeleton 命中 `serializeError`，Runtime-state 命中 `state`。前者是新 read worker 沿用既有序列化双侧，不改 schema；后者是局部 dialog state 同词误命中。相关 worker error 路径、renderer 重渲染/缓存/导出可用性已纳入聚焦测试，完整 smoke 纳入 release-check。
+- 最终单一 session `npm run release-check` exit 0：lint、smoke PASS；unit 4953/4953（320 files，0 fail/skip，node test 15622 ms）；integration 48/48 scripts、2459/2459 assertions（385077 ms）。本轮无失败、retry、阈值或测试框架修改；runner 只在全绿后自动刷新 `rules/integration-test-policy.md` §七的 timestamp/timings，脚本/断言总数不变，按生成证据约定保留。
+
+### Deviations
+
+无行为合同偏离。集成夹具补齐 current provenance、旧写成功链显式标记 legacy，以及 candidate-first query-plan 修正都用于对齐冻结合同；未修改 A 纯模块、旧 write 实现、migration、金额/币种或 C1/C2 范围。
