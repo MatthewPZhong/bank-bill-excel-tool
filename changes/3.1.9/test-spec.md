@@ -249,3 +249,30 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - Windows Actions run `31416514064` 首轮 smoke PASS、unit 4920/4922（fail 1、expected platform skip 1）；唯一失败是本文件的静态顺序测试以 LF 字面量查找 final accepted-path guard，在 CRLF checkout 下索引为 `-1`，属于测试可移植性问题而非生产回归。改为行尾/缩进无关 regex 后，仍锁定 resolver → selection freshness → status → `createPreviewSourceFreshnessGuard(selectionResult.filePaths)` 的同一顺序；未改生产或增加平台分支。
 - CI follow-up 本地证据：单文件 11/11、12 个改动测试文件 273/273、lint/node/diff check PASS；单一 session `npm run release-check` exit 0，unit 4922/4922（314 files，0 fail/skip），integration 48/48 scripts、2459/2459 assertions PASS（283436ms）。runner 生成清单仅刷新 timestamp/timings，48/2459 不变并继续保留。
 - 相关生产文件 `node --check`、`git diff --check` PASS。§10.2 人工门禁仍待执行，不以自动证据替代。
+
+## 11. PR2.5-0 合同冻结验证
+
+### 11.1 计划矩阵
+
+| ID | 类型 | 场景 | 关键断言 |
+| --- | --- | --- | --- |
+| DOC-01 | P0 | raw source 身份 | Spec/TechDoc raw SHA 与权威值一致；document version/date/source filename 完整记录 |
+| DOC-02 | P0 | 仓库化 normalization | 只把两份文档各 6 个 metadata hard-break 改为 `<br>`；应用同一只读 normalization 后与仓库副本完全一致 |
+| DOC-03 | P0 | 双合同关系 | erratum 索引、v3.1.8 PRD 和 v3.1.9 erratum 链接均存在；Spec 与 TechDoc 明确配套 |
+| DOC-04 | P0 | 历史发布不被追溯改写 | `changes/3.1.8/spec.md` 仍为冻结 SHA `1f5f0663...`，release-docs 定向测试保持全绿；v3.1.8 `6/6 PASS` 只作为历史事实 |
+| DOC-05 | P0 | v3.1.9 窄 erratum | 仅 VCC 归档兼容、操作保护、性能路径被补遗取代；C01—C14、PR1/PR2、金额币种和五表计算保持不变 |
+| DOC-06 | P0 | 严格串行顺序 | normative schedule 与 tasks 均为 `PR2 → PR2.5-0 → PR2.5-A → PR2.5-B → PR2.5-C1 → PR2.5-C2 → PR3-VCC → PR3-Toolbox → PR4 → PR5 → PR6 → PR7`；当前规范计划不再保留合并 PR3 条目，历史/来源事实不重写 |
+| DOC-07 | P1 | 历史证据增量维护 | preflight/notes/test-spec/tasks 的 PR1/PR2 证据仍保留；PR2 manual pending 仍未勾选 |
+| DOC-08 | P0 | 发布 PROBE | 真实 fixture、目标旧库/trigger、Windows runtime、16 GB 和财务人工均明确未完成；失败不得放宽 classifier/guard 或引入 fallback |
+| DOC-09 | P1 | docs-only 边界 | `src/`、`tests/`、`CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 零 diff |
+
+### 11.2 本 PR 已执行证据
+
+- DOC-01/DOC-02：raw SHA、repository copy SHA 与冻结 Spec SHA 均与索引一致；两份 raw source 各检出 6 处 metadata hard-break，只读应用 `两个空格+换行 → <br>+换行` 后与仓库副本 2/2 无差异，仓库副本无行尾空白。
+- DOC-03：九个范围内文档的本地 Markdown 链接 17/17 可解析；索引、PRD 和 v3.1.9 Spec 均可到达配套 Spec/TechDoc。
+- DOC-04：`node --test tests/unit/vcc-financial-op-release-docs.test.js` 5/5 PASS；冻结 `changes/3.1.8/spec.md` 零 diff。
+- DOC-05—DOC-08：精确文本与人工 diff review 确认窄 erratum、严格顺序、PR2 manual pending 和 fail-closed PROBE 均保留；blindspot/reconciliation pass 未发现需新增防御、兼容矩阵或资金自动化结论。
+- DOC-09：tracked 与三个新文档分别通过 Markdown diff-check；`src/`、`tests/` 和三份发布用户文档零 diff。本 PR 未运行完整 `release-check`，不得把历史 PR1/PR2 的完整门禁证据当作本 PR 新执行结果。
+- 提交前 `npm run check:vars -- --include-minor`：负责人执行 exit 0；因 HEAD+working tree 的 `src/` 无改动而 skip，零变量命中，无需关联功能 review。
+
+以下项目仍是计划/发布 PROBE，不得因上述文档检查而标记完成：PR2 人工验收、A/B/C1/C2 实现、真实 v3.1.7 fixture、目标生产库 legacy-four/trigger inspect、约 16 GB 性能、Windows packaged runtime `createSession/readOnly/query_only/UPDATE FROM` 和财务人工复核。

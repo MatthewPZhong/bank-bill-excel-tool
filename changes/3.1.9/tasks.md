@@ -1,7 +1,7 @@
 # v3.1.9 Tasks
 
-> 本文件按确认 Spec §14 的 PR 拆分维护。当前分支基于
-> `98ddcf9fc02193381f7b31fd5e0252de6476479a` 仅实施 PR2；PR3—PR7 保持未实施。
+> 本文件按确认 Spec §14 的严格串行顺序维护。PR1/PR2 代码已冻结到
+> `54b6c01fa93751cd723be53af70af726037343b5`；当前仅实施 PR2.5-0 文档合同，PR2 人工验收和后续生产实现仍未完成。
 
 ## PR1 — 批次身份与数据库迁移
 
@@ -33,10 +33,24 @@
 - [x] 完成 Spec §15.2/§15.3 的 PR2 可承担自动化、`release-check` 与 `check-vars` 关联 review。
 - [ ] 完成 PR2 P0/P1 GUI、真实崩溃/重启与资金结果人工验收；自动门禁通过后等待用户测试。
 
-## 后续 PR（本分支不实施）
+## PR2.5-0 — Spec / TechDoc 合同冻结
 
-- [ ] PR3：VCC 财务 OP 与工具箱真实接入。
+- [x] 在独立 erratum 目录归档纠错 Spec v2、TechDoc v1.1 和 provenance 索引，不修改 v3.1.8 冻结 Spec。
+- [x] 记录 raw/repository 双 SHA 与 12 处 Markdown hard-break 等价格式 normalization。
+- [x] 为 v3.1.9 增加只覆盖 VCC 归档兼容、操作保护和性能路径的窄 erratum。
+- [x] 冻结严格顺序 `PR2 → PR2.5-0 → PR2.5-A → PR2.5-B → PR2.5-C1 → PR2.5-C2 → PR3-VCC → PR3-Toolbox → PR4 → PR5 → PR6 → PR7`。
+- [x] 增量维护 Unknowns Register、决定、计划验收矩阵和发布门禁，不覆盖 PR1/PR2 证据。
+- [x] 完成 source normalization、hash/link、Markdown diff 和冻结 release-docs targeted 验证；完整 `release-check` 未在本 docs-only PR 重跑。
+
+## 后续 PR（当前分支不实施，全部串行）
+
+- [ ] PR2.5-A：ArchiveEvidenceV2、生效结果纯校验器、classifier/gate 与真实 v3.1.7 fixture。
+- [ ] PR2.5-B：read worker、集合化 evidence、token v2、活动月份/删除目标和读取性能。
+- [ ] PR2.5-C1：mutation guard、adjustment/archive 固定预算与写 worker。
+- [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。
+- [ ] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。
+- [ ] PR3-Toolbox：工具箱独立生命周期与文件存档接线。
 - [ ] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup。
 - [ ] PR5：存储地址、marker、journal、迁移与恢复。
 - [ ] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent。
-- [ ] PR7：版本号、发布文档、全门禁与 Windows 人工验收。
+- [ ] PR7：版本号、发布文档、全门禁与 Windows/财务人工验收。

@@ -220,3 +220,51 @@
 | A | P1-1、P1-2、P1-3、P1-9 | terminal intent 跨重启收口原 batch；fresh invalid/busy 0 issuance；run→重复 export 同 parent；complete side crash 恢复 0 worker/0 新号且补 mirror/output/terminal | 任一身份需要 latest 猜测或新恢复系统 |
 | B | P1-4、P1-5、P1-6、P1-8 | Position conflict 保留 pending；真实写命令缺 context 零副作用；scenario/statement 人工确认窗口源变化 fail-closed | 需要改协议版本、checkpoint 或引入 hash/lease |
 | C | P1-7 与综合门禁 | 单一 `[0,0]` 资金反例被拒；聚焦/完整 unit、integration、smoke、lint、syntax、diff/check-vars 通过 | 行集合校验改变正常乱序输出或金额/币种语义 |
+
+## PR2.5-0 纠错合同冻结 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：把 v3.1.8 上线后 VCC 财务 OP 纠错 Spec v2 / TechDoc v1.1 冻结为仓库合同，并只对 v3.1.9 的 VCC 归档兼容、操作保护和性能路径增加窄范围 erratum。
+- Context：实施基线为 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5`；PR2 自动门禁已通过，但 GUI、真实崩溃/重启及资金人工验收仍待完成。
+- Constraints：纯文档；不改生产/测试代码，不改金额、币种、五表计算和 PR1/PR2 合同，不改三份用户发布文档，不追溯声称 v3.1.8 二进制已包含纠错。
+- Done when：来源、版本、日期、raw/repository SHA 和等价格式转换可追溯；v3.1.9 erratum 与严格串行顺序冻结；测试/发布 PROBE 和资金人工门禁不被自动化替代。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 外部 Spec v2 与 TechDoc v1.1 内容已锁定 | raw SHA-256 分别为 `34778f235705ceea9f5a00d732ab3e97d1873d5105e0e4b55908f2ef5917fcf1`、`08e9f90600ec81dd881fdb12e4e2fb8a10b39baa9ec01918a08a05509ee84549` | 不修改产品/技术正文；仓库化转换必须显式留证 |
+| v3.1.8 原 Spec 是发布冻结证据 | `changes/3.1.8/spec.md` 规范化 SHA-256 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`；release-docs 测试锁定该值 | 不向原文件 append；补遗使用独立目录并由 PRD 索引 |
+| raw 两文档各有 6 处 metadata hard-break | header 行尾两个空格会触发 `git diff --check` | 仅把 12 处等价改为 `<br>`，记录 raw/repository 双 SHA，并验证除此之外一致 |
+| 当前 3.1.9 原计划把 VCC 与工具箱合在 PR3 | 本 Spec 原 §14 与 tasks 后续清单 | 仅改 normative schedule 为 PR2.5 四阶段及 PR3-VCC/PR3-Toolbox 独立串行；历史 evidence 不重写 |
+| TechDoc implementation-ready 不等于 merge/release ready | TechDoc §20 与 Definition of Done | runtime、真实旧库、16 GB 和人工资金门禁继续保留为 PROBE |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| PR2 人工 GUI、真实崩溃/重启与资金结果 | 上游基线 | 高 | 一般 | 自动门禁全绿，人工项仍明确 pending | PROBE | 按 PR2 test-spec P0→P1 人工清单 | 未通过则整条 PR2.5+ 堆叠 rebase/重验，禁止合并 |
+| 真实 v3.1.7 归档经 current migration 的精确形态 | 数据兼容 | 高 | 困难 | 当前只有合同，无真实生成 fixture | PROBE | 用 v3.1.7 真实代码生成 fixture + manifest | 不符先修合同或阻断，不放宽 classifier |
+| Windows packaged SQLite 能力 | Runtime | 高 | 一般 | 本机/设计证据不能替代 packaged runtime | PROBE | installer/portable 验证 `createSession/readOnly/query_only/UPDATE FROM` | 任一缺失阻断；不降级无保护提交 |
+| 目标生产库 trigger 与 legacy-four 形态 | 兼容/数据 | 高 | 困难 | 未对一致性生产副本完成本轮 inspect | PROBE | `sqlite_schema` 与完整副本只读报告 | 未批准 trigger 或非标准形态均 fail-closed |
+| 约 16 GB 库的 P95、WAL 和主进程延迟 | 性能 | 高 | 一般 | 设计门禁已定义，目标副本尚未跑 | PROBE | 冷/热基准、SQL trace、event-loop lag | 不达标继续定位，不用机器差异放宽门禁 |
+| 主体、九币种、金额、跨月血缘和审计结果 | 资金 | 高 | 困难 | 自动化不能证明真实财务事实 | PROBE / 人工 | 财务逐项复核与备份恢复演练 | ⚠️ 资金红线；阻断发布，不以 CI 替代 |
+
+### BLOCK 问题
+
+无。仓库化路径、冻结 Spec 保护和窄 erratum 均已由现有证据与评审决定，不需要新增产品选择。
+
+### 保守假设
+
+- `changes/3.1.8/erratum/` 只承载本次两份合同及来源索引，不复制其它版本文档或另造兼容矩阵。
+- 本 PR 未发布新版本且没有用户行为落地，因此不修改 `CHANGELOG.md`、`docs/USER_GUIDE.md` 或 `docs/VERSION_FEATURE_HISTORY.md`；PR7 发布时再按版本规则同步。
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 归档双合同与 provenance | 原文来源、格式转换和合同关系可追溯 | raw/repository SHA、12 处 normalization-only diff、链接存在 | 合同身份不可信，停止交付 | 删除独立 erratum 目录，不碰冻结 Spec |
+| 2 | 增加 v3.1.9 窄 erratum 与严格 schedule | C01—C14/PR1/PR2 不漂移，VCC/Toolbox 不混合 | 精确文本检查与人工 diff review | 后续实施边界错误，停止 A | 回退本 PR 文档增量 |
+| 3 | 增量维护 tasks/test/notes | 既有 PR1/PR2 证据和 pending 人工项不被覆盖 | 原证据仍在；A/B/C/PROBE 均未误标完成 | 产生虚假验收，停止交付 | 删除新增节，不改历史节 |
+| 4 | targeted docs gate | 冻结 hash、链接、Markdown 与 docs-only 边界 | normalization、hash/link、diff-check、release-docs 定向测试 | 不进入 review | 修正文档后重跑 |
