@@ -596,6 +596,61 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 无。
 
+## PR6 前端与统计 Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| Controller 是公开 stats DTO 唯一投影点 | 现 IPC 只调用 `ArchiveCenterController.getStats()`；repo/service 已有内部运维统计 | 不删除 internal stats，不让 renderer 兼容读取 unique/logical/fileRef |
+| latest number/id 与 live status 分开取证 | `last_issued_*` 删除后保留，但 schema 不持久 task status | live row 取现有 `taskStatus`；已删除严格 `null`；不加 schema/terminal transition，不从 visible max 猜 |
+| related 在 Service 详情 DTO 结构化 | repository 已按 parent/date/global sequence 查询 live rows | renderer 不解析 batchNumber、不显示 task name/parentRunId、不建第二查询状态 |
+| retention 使用单一串行 drain + 递增 intent token | IPC 写入若并发会产生最终值乱序；DOM 可在 Promise settle 前销毁 | pending 只保留最新；旧失败有 pending 静默继续；仅最终最新失败回滚提示；销毁后禁止节点写入 |
+
+### Assumptions
+
+- 无 latest issuance 时 Controller 返回空 `latestBatchNumber`、`latestBatchId:null`、`latestBatchStatus:null`，renderer 显示 `-`。
+- migrationStatus 透传 PR5 `StorageRootManager.getMigrationState()`；无 manager 的测试/兼容路径使用 idle public shape。
+- 保留期限 change 事件代表原生下拉选择完成并收起；不额外监听不可稳定区分的 input/blur 组合。
+
+### Evidence
+
+- 基线 `71fcaa3cd6d0e8a19ba84cb94c3726b4d07e7019`（parent `7c7a8f0788cde5d8163b91106889db27082c743d`），tracked clean、无 upstream；批准后只创建本地分支 `codex/v3.1.9-pr6-archive-ui-stats`。
+- 开工前 repository/service/controller/UI 定向 73/73 PASS；Electron 1240×860、1080×760 × 100%/125%/150% 布局基线 6/6 PASS。
+- repository latest issuance 以 daily sequence 为发行真相，LEFT JOIN 当前 live batch 只取现有 `task_status`；删除最新批次后 number/id 不倒退且 status 为 null。统计对 ready artifact 引用逐条求和，同 Blob 多引用多计，failed/pending 不计；runCount 使用未删除批次数。
+- Controller 是公开 stats 的唯一七字段投影；storagePath/migrationStatus 继续来自 PR5 root manager。Service detail 只投影 repository 按 parent/date/global sequence 返回的 live related rows，renderer 不读取内部统计、不解析批次号、不显示 parentRunId/task name。
+- renderer 保持一个 settings/archive dialog 与一个 selectedBatchId 详情链。批次每项仅两个 direct row；related 同日压缩/跨日分组并以按钮切换现有详情；锁定、打开、另存为的可见文字、title/aria、focus 与 aria-current 合同均保留。
+- retention 只有一个串行 drain：pending 意图只保留最新，递增 token 防止 stale settle；`60→90→180` 的实际 IPC 序列为 `[60,180]`、最大并发 1。中间失败且有 pending 时静默继续；最终失败恢复最近成功值并提示；pending Return/X 禁用，dialog detached 后旧 Promise 不写节点。
+- 三张确定性 Electron 预览为 `archive-center-settings.png`、`archive-center-browser.png`、`archive-center-browser-zoom-150.png`。人工查看默认尺寸长路径/两行/related/按钮通过；150% 首次暴露真实 filters 裁切与批次号不可辨识，响应式调整 nav/filter/list/detail 分配后复核通过。
+- Electron 最终覆盖 1240×860、1080×760 × 100/125/150%，并断言 filters 边界、页面无横向溢出、旧/当前批次号可辨识、related 同标题行、actions 无遮挡及 related→lock→open→save Tab 顺序，6/6 PASS。Archive 相邻扩大聚焦 221/221 PASS。
+- 最终 `npm run lint`、五个 changed production/preview JS 的 `node --check`、`git diff --check` 与 `npm run smoke` PASS。`check-vars -- --include-minor` exit 2：Important-skeleton `selectRetrySources` 仅为确定性 preview stub 复用既有 facade 方法，Controller 方法 inventory/main/preload 未改且真实 retry SHA/path 校验未动；Runtime-state `MODULES` 只读生成 preview fixture，`dialog` 为 renderer 局部 factory，`app` 为类名/函数名文本，`elements.modalRoot` 只读启动 preview，模块枚举/路由、Electron app/native dialog、DOM cache 初始化均未改。无 Critical/Risk-sensitive 命中。
+- 发布前首次 `release-check` lint/smoke PASS、unit 5036/5037；唯一失败为旧 app-update static 正则仍要求 archive tab“确认”、下载完成“稍后”，与 PR6 footer 恒为“返回”冻结合同冲突。获批后只机械替换该正则，保留同 test 的按钮顺序、status dot、last-checked、observer、下载提示/progress/自动更新开关断言，最小组 29/29 PASS；未改 production、阈值或首次 full。
+- 第二次且最终 `npm run release-check` exit 0：lint/smoke PASS；unit 5037/5037（329 files，0 fail/skip，node test 15950.83325ms）；integration 48/48 scripts、2385/2385 assertions（388472ms）。无第三次 full；runner 只在全部 integration PASS 后合法自动同步 `rules/integration-test-policy.md` §七。
+
+### Failure Classification
+
+- backend 首跑 55/56：新增第二条 related live row 后旧 fixture 仍断言批次数 1，分类 stale test；改为真实 live 集合 2，未放宽生产合同，随后 56/56 PASS。
+- UI static 首跑 15/20：旧字符串、旧三行 list 和旧按钮合同均为 stale tests；按冻结 PR6 DOM/文案机械同步后 23/23 PASS。
+- Electron 前两轮 0/6：异步详情尚未加载就读取 related 节点，以及脚本 `.focus()` 被误当成真实 keyboard modality，均为 test design；改为等待真实详情，并以静态 `:focus-visible` CSS 合同 + activeElement 验证，不伪造键盘 modality。
+- 150% 可复现预览发现一项真实 production layout：固定 filter/list/nav 宽度使 filter 被 card 裁切、当前号缩到不可辨识。只调整窄视口 CSS 分配与 actions wrap，不改 DOM/Tab 顺序；加入代表几何断言后 6/6 PASS。
+- 首次 full 唯一 unit failure 为 stale test：旧 app-update footer 正则未同步 PR6 恒定“返回”合同；经批准只改该正则并在第二次最终 full 全绿。无 production regression、environment failure 或门禁放宽。
+
+### Blindspot / Reconciliation Pass
+
+- 真实入口仍为 `renderer → preload/main → ArchiveCenterController`；stats 只有 Controller public projection，related 只有 Service detail 查询，retention 只有 dialog 内单一 drain。未新增第二 stats/selected-batch/settings 状态或 IPC 旁路。
+- 生命周期覆盖首次 load、快速覆盖、旧失败+pending、最终失败、pending close、final settle 和 DOM detach；状态写入均以当前 dialog/token 为条件。无 timer/retry/并发 Promise 队列，销毁后不回写隐藏旧状态。
+- latest 发行证据和 live status 分离，删除后不从 visible max 倒推；related 删除后由新详情查询只消费剩余 live rows。ready 引用总量、runCount 和 UI 展示不改变 artifact/blob/batch identity、PR4 layout 或 PR5 marker/journal/delegate。
+- 本轮不改金额、币种、业务算法、Excel 内容、TaskLifecycle/terminal CAS 或输入输出 artifact 血缘。⚠️ 自动 metadata/UI 测试不替代真实文件引用计数、删除顺序、输入输出内容与资金人工复核。
+
+### Remaining Unknowns
+
+- Windows packaged 中文字体 fallback、原生 select 收起时点、真实长盘符/网络路径和 Excel/WPS 打开副本仍需人工验收。
+- 本轮不改变文件/批次审计身份；ready reference 总量、latest issuance 和 related live rows 的自动测试不替代真实存档人工核对。
+
+### Deviations
+
+无。
+
 ## PR5 存储根迁移 Implementation Notes（本地代码完成）
 
 ### Decisions

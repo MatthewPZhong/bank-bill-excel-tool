@@ -606,8 +606,34 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     const latest = await fixture.service.getLatestBatch();
     assert.equal(latest.ok, true);
     assert.equal(latest.latestBatch.batchNumber, reserved.batchNumber);
+    assert.equal(latest.latestBatch.taskStatus, 'failed');
+
+    const relatedReserved = await fixture.service.reserveTaskBatch({
+      ...batchPayload('task-operation-2'),
+      taskKey: 'statement:export',
+      taskRunId: 'task-run-2',
+      parentRunId: 'parent-run-1'
+    });
     const related = await fixture.service.listRelatedBatches('parent-run-1');
-    assert.deepEqual(related.batches.map((batch) => batch.id), [reserved.batchId]);
+    assert.deepEqual(related.batches.map((batch) => batch.id), [
+      reserved.batchId,
+      relatedReserved.batchId
+    ]);
+    const detail = await fixture.service.getBatch(reserved.batchId);
+    assert.deepEqual(detail.batch.relatedBatches, [
+      {
+        batchId: reserved.batchId,
+        batchNumber: reserved.batchNumber,
+        localDate: '2026-07-20',
+        globalDailySequence: 1
+      },
+      {
+        batchId: relatedReserved.batchId,
+        batchNumber: relatedReserved.batchNumber,
+        localDate: '2026-07-20',
+        globalDailySequence: 2
+      }
+    ]);
 
     const anchorInput = {
       moduleId: 'bank-statement',
@@ -642,7 +668,7 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     });
     assert.equal(forged.ok, false);
     assert.equal(forged.code, 'ARCHIVE_OPERATION_FAILED');
-    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+    assert.equal(fixture.service.repository.getStats().batchCount, 2);
 
     const forgedDate = await fixture.service.reserveTaskBatch({
       ...payload,
@@ -651,7 +677,7 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     });
     assert.equal(forgedDate.ok, false);
     assert.equal(forgedDate.code, 'ARCHIVE_OPERATION_FAILED');
-    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+    assert.equal(fixture.service.repository.getStats().batchCount, 2);
   } finally {
     fixture.close();
   }

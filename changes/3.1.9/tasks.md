@@ -103,5 +103,12 @@
   - [x] Repository/manager/Controller/UI 与 Archive/Position 相邻聚焦 185/185、smoke、lint/node/diff、设置布局 6/6 与 startup measure PASS；check-vars 命中已复核。
   - [x] 首次 full 的 exact policy/dialog wiring 漏项经批准最小修复，定向 55/55；第二次且最终 `release-check` lint/smoke、unit 5031/5031、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 合法自动同步。
   - [ ] Windows installer/portable、真实跨卷/网络盘/离线卷恢复、长路径、大存档进度/吞吐与退出/更新安装仍需人工验收。
-- [ ] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent。
+- [x] PR6：统计、批次列表/详情、关联任务 UI、设置页与 latest-intent 的本地实现和自动证据。
+  - [x] Controller 公开统计精确七字段；ready 引用总大小、未删除运行次数和不可回退 latest issuance/live status 已闭合，普通 UI 不读取内部 unique/logical/fileRef 统计。
+  - [x] 设置页“版本管理”/“返回”、位置/变更、文件总大小、运行次数/最新批次与 PR5 迁移进度已接线；长路径保留 ellipsis+title。
+  - [x] retention 使用单一串行 latest-intent；`60→90→180` 只调用 `[60,180]`，旧失败静默续排，最终失败恢复最近成功值，pending Return/X 受控且销毁后不写 DOM。
+  - [x] 批次列表严格两行；详情使用 live structured relatedBatches 同日/跨日分组，点击只切 existing selectedBatchId；锁定、打开、另存为文字/图标及无障碍合同完成。
+  - [x] 三张确定性 Electron 预览已人工复核；2 viewport×3 zoom、长文本、focus/aria/Tab 顺序、无页面横向溢出与 deferred 竞态 6/6 PASS；Archive 相邻聚焦 221/221 PASS。
+  - [x] 首次 full 唯一旧 footer 文案正则经批准机械同步，最小组 29/29；第二次且最终 `release-check` lint/smoke、unit 5037/5037、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 仅在全绿后合法同步。
+  - [ ] Windows installer/portable 中文字体与原生 select、真实盘符/网络长路径、Excel/WPS 只读打开/另存、真实批次/关联/删除后 live rows 仍需用户人工验收。
 - [ ] PR7：版本号、发布文档、全门禁与 Windows/财务人工验收。

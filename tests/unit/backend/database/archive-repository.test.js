@@ -238,6 +238,51 @@ test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 
   }
 });
 
+test('latest issuance 保留已删除批次号与 ID，live status 删除后严格为空且下一号不复用', () => {
+  const { db, repository } = createFixture();
+  try {
+    const first = repository.reserveTaskBatch({
+      moduleId: 'bank-statement',
+      moduleCode: 'BANK',
+      moduleName: '网银账单',
+      operationKey: 'latest-deleted-1',
+      taskKey: 'statement:generate',
+      taskRunId: 'latest-deleted-run-1',
+      parentRunId: 'latest-deleted-parent-1'
+    });
+    repository.transitionTaskStatus(first.batch.id, 'failed', {
+      expectedStatuses: ['reserved'],
+      failureCode: 'EXPECTED_FAILURE'
+    });
+    assert.equal(repository.getLatestIssuedBatch().taskStatus, 'failed');
+
+    const deleted = repository.deleteBatch(first.batch.id);
+    assert.equal(deleted.status, 'deleted');
+    assert.deepEqual(repository.getLatestIssuedBatch(), {
+      batchId: first.batch.id,
+      batchNumber: first.batch.batchNumber,
+      localDate: '2026-07-20',
+      dailySequence: 1,
+      globalDailySequence: 1,
+      issuedAt: first.batch.reservedAt,
+      taskStatus: null
+    });
+
+    const second = repository.reserveTaskBatch({
+      moduleId: 'bank-statement',
+      moduleCode: 'BANK',
+      moduleName: '网银账单',
+      operationKey: 'latest-deleted-2',
+      taskKey: 'statement:generate',
+      taskRunId: 'latest-deleted-run-2',
+      parentRunId: 'latest-deleted-parent-2'
+    });
+    assert.equal(second.batch.batchNumber, '2026-07-20-002');
+  } finally {
+    db.close();
+  }
+});
+
 test('建表幂等，批次按模块代码和本地日期生成独立流水号', () => {
   const fixture = createFixture();
   const { db, repository } = fixture;

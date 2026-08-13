@@ -574,3 +574,50 @@
 - 不展开 phase×fault 笛卡尔积。`.readonly` 不迁移，source/target `.staging` 只在所有权与可重做性证明后清理。
 - switched 后只删 DB 权威 source canonical/layout 与 app-owned 临时项；unknown 保留 marker+journal 并进入 cleanup-pending。source marker 最后删除。
 - ⚠️ 人工复核迁移前后每个 DB blob/artifact SHA/size、引用/批次数、实例 ID、target 无 source path、unknown 未删、setting 只切一次；本轮不宣称关闭 Windows/网络盘/Excel/WPS/资金审计红线。
+
+## PR6 前端与统计 Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：以现有 archive metadata、不可回退 issuance 和 PR5 root manager 为唯一真相，交付精确统计 DTO、两行批次列表、结构化关联任务、设置页即时保存和完整 UI/预览证据。
+- Context：PR1 已持久化 `last_issued_*` 与 `parent_run_id` 查询，PR4 已提供 ready artifact logical size，PR5 已提供稳定 runtime delegate、当前 root 与 migration progress。
+- Constraints：只实现 PR6；不新增 issuance status schema，不改 terminal transition、TaskLifecycle、batch identity、PR4 hash/layout 或 PR5 marker/journal/delegate；普通 UI 不读取 unique/logical/fileRef 内部统计。
+- Done when：Controller 只公开 7-key stats DTO；latest 删除不倒退；related 只由结构化 live rows 生成；retention 串行 latest-intent、最终失败恢复和 DOM 销毁隔离成立；100%/125%/150%、最小窗口、长文本和键盘/aria 均有证据。
+
+### 权威入口与状态所有权
+
+`renderer → preload → Main archive-center IPC → ArchiveCenterController → ArchiveRuntimeDelegate → ArchiveService → ArchiveRepository`
+
+- `ArchiveRepository.getStats().logicalBytes` 已按 ready artifact reference 求和；同 Blob 多引用多计，failed/pending 不计。`batchCount` 是当前未删除批次数。
+- `getLatestIssuedBatch()` 只读 `archive_daily_sequences.last_issued_*`；不得从当前 batch list/max 猜 latest。live row 的现有 `taskStatus` 可随查询补充；已删除 row 的 status 严格为 `null`，不持久化新字段。
+- `ArchiveService.getBatch()` 负责把同一 `parentRunId` 的 live rows 投影为最小 `relatedBatches`；renderer 只按 `localDate/globalDailySequence` 分组与导航，不解析 batchNumber。
+- `ArchiveCenterController.getStats()` 是公开 DTO 唯一投影点；storagePath/migrationStatus 来自 PR5 root manager，repo/service 内部统计可继续保留。
+
+### Retention latest-intent 状态机
+
+`idle(lastPersisted) → saving(token,currentIntent) → [pending 仅保留最新值] → settle → next pending / idle`
+
+- 保存期间不并发写 DB；新选择只覆盖单个 pending latest intent。
+- 旧请求成功可推进最近持久成功值，但只有最新 token 可写 UI；旧请求失败且已有 pending 时不回滚、不显示最终错误，继续最新意图。
+- 只有最新意图最终失败时，恢复最近一次成功值并提示；最终 settle 前【返回】和可关闭入口受控。
+- DOM 销毁后递增失效 token，任何旧 Promise 不再修改节点或反馈。
+
+### Unknowns Register
+
+| 未知 | 类型 | 决议/证据 |
+| --- | --- | --- |
+| latest row 已删除后的 `latestBatchStatus` | BLOCK 已批准关闭 | live 取现有 taskStatus；无 live row 严格 `null`；number/id 仍来自不可回退 issuance；不新增 schema/transition |
+| 底部【返回】是否承担保存 | PROBE 已收敛 | 全局 footer 只返回/关闭；即时保存独立完成，archive 子页现有返回箭头仍回批次浏览 |
+| related 是否解析旧批次号 | PROBE 已收敛 | 禁止；只用结构化 `batchNumber/localDate/globalDailySequence`，历史无 parent 隐藏 |
+
+当前无 BLOCK。
+
+### 风险优先顺序与最小证据
+
+1. repository/service/controller：ready 引用总量、run count、不可回退 latest、exact 7 keys、related live rows。
+2. retention：deferred `60→90→180` 串行、旧失败有 pending、最终失败恢复、返回/关闭与销毁。
+3. list/detail/a11y/CSS：严格两行、长模块/旧号、同日/跨日 related、按钮文案、focus/aria。
+4. Electron/preview：1240×860 与 1080×760，各 100%/125%/150%；真实可复现 archive 设置/浏览器资产。
+5. lint/node/diff/check-vars 和 P0→P1 手测；本阶段不 full、不 commit。
+
+Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related 删除刷新、tab/subview/close 生命周期和迁移进度均纳入；不增加不可达 renderer payload 组合。改动不触及金额、币种、匹配、Excel 或业务批次分配；文件总大小只复用 ready artifact 权威血缘，未命中资金红线。

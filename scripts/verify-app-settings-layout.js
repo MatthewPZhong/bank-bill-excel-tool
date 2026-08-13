@@ -93,37 +93,125 @@ function waitFor(test, timeoutMs = 2000) {
   });
 }
 
-function installDesktopApiStub({ failRetention = false, retentionDays = 60 } = {}) {
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((settle) => { resolve = settle; });
+  return { promise, resolve };
+}
+
+function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } = {}) {
   window.__retentionSaveCalls = [];
+  const batches = [
+    {
+      internalId: 101,
+      batchId: '2026-08-10-127',
+      batchNumber: '2026-08-10-127',
+      moduleId: 'bank-statement-process',
+      moduleName: '超长模块名称用于验证最小窗口下省略显示但完整标题仍可访问',
+      taskStatus: 'failed',
+      archiveStatus: 'complete',
+      businessStatus: '',
+      locked: true,
+      createdAt: '2026-08-10T06:36:08.000Z'
+    },
+    {
+      internalId: 102,
+      batchId: '2026-08-11-001',
+      batchNumber: '2026-08-11-001',
+      moduleId: 'vcc-financial-op',
+      moduleName: 'VCC财务OP校验',
+      taskStatus: 'cancelled',
+      archiveStatus: 'complete',
+      businessStatus: '',
+      createdAt: '2026-08-11T06:37:09.000Z'
+    },
+    {
+      internalId: 103,
+      batchId: '2026-08-11-002',
+      batchNumber: '2026-08-11-002',
+      moduleId: 'toolbox',
+      moduleName: '工具箱',
+      taskStatus: 'running',
+      archiveStatus: 'staging',
+      businessStatus: '',
+      createdAt: '2026-08-11T06:38:10.000Z'
+    },
+    {
+      internalId: 104,
+      batchId: 'BANK-20260720-001',
+      batchNumber: 'BANK-20260720-001',
+      moduleId: 'bank-statement-process',
+      moduleName: '资金对账数据处理',
+      taskStatus: 'succeeded',
+      archiveStatus: 'incomplete',
+      businessStatus: '',
+      createdAt: '2026-07-20T06:39:11.000Z'
+    }
+  ];
+  const relatedBatches = [
+    { batchId: 101, batchNumber: '2026-08-10-127', localDate: '2026-08-10', globalDailySequence: 127 },
+    { batchId: 102, batchNumber: '2026-08-11-001', localDate: '2026-08-11', globalDailySequence: 1 },
+    { batchId: 103, batchNumber: '2026-08-11-002', localDate: '2026-08-11', globalDailySequence: 2 }
+  ];
   const archiveCenter = {
-    async listBatches() { return { status: 'success', batches: [] }; },
-    async getBatch() { return { status: 'failed', message: '未找到批次' }; },
+    async listBatches() { return { status: 'success', batches }; },
+    async getBatch(batchId) {
+      const batch = batches.find((item) => String(item.internalId) === String(batchId));
+      return batch
+        ? {
+            status: 'success',
+            batch: {
+              ...batch,
+              parentRunId: 'internal-parent-must-not-render',
+              relatedBatches,
+              retentionUntil: '2026-11-09',
+              files: [{
+                fileRefId: 501,
+                fileName: '用于验证超长文件名省略但仍可安全打开和另存的对账结果文件.xlsx',
+                direction: 'output',
+                role: 'output',
+                sizeBytes: 4096,
+                archiveStatus: 'ready'
+              }]
+            }
+          }
+        : { status: 'failed', message: '未找到批次' };
+    },
     async openFile() { return { status: 'success' }; },
     async saveAs() { return { status: 'cancelled' }; },
     async setLocked() { return { status: 'success' }; },
     async deleteBatch() { return { status: 'success', metadataDeleted: true }; },
     async retryBatch() { return { status: 'success' }; },
     async getSettings() {
-      return { status: 'success', settings: { retentionDays } };
+      return {
+        status: 'success',
+        settings: {
+          retentionDays,
+          storageRoot: '/very/long/archive/root/用于验证存档位置省略号和完整title/年份/月/日期/批次号',
+          storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
+        }
+      };
     },
     async setRetentionDays(value) {
       window.__retentionSaveCalls.push(value);
-      return failRetention
-        ? { status: 'failed', message: '模拟保存失败' }
-        : { status: 'success', settings: { retentionDays: value } };
+      if (typeof retentionHandler === 'function') return retentionHandler(value);
+      return { status: 'success', settings: { retentionDays: value } };
     },
     async getStats() {
       return {
         status: 'success',
         stats: {
-          batchCount: 0,
-          logicalFileCount: 0,
-          uniqueBytes: 0,
-          logicalBytes: 0,
-          storagePath: '/tmp/archive-center'
+          storagePath: '/very/long/archive/root/用于验证存档位置省略号和完整title/年份/月/日期/批次号',
+          fileTotalBytes: 1325400064,
+          runCount: 128,
+          latestBatchNumber: '2026-08-11-128',
+          latestBatchId: 128,
+          latestBatchStatus: 'succeeded',
+          migrationStatus: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
       };
-    }
+    },
+    onStorageMigrationProgress() { return () => {}; }
   };
   const desktopApi = {
     archiveCenter,
@@ -156,74 +244,205 @@ async function openArchiveSettings() {
   ));
 }
 
-async function verifyArchiveConfirmBehavior(failures) {
-  installDesktopApiStub({ retentionDays: null });
-  let modalRoot = openSettingsDialog();
+function changeRetention(value) {
+  const select = document.querySelector('[data-role="archive-retention-days"]');
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+async function verifyArchiveRetentionBehavior(failures) {
+  const oldFailure = createDeferred();
+  let activeSaves = 0;
+  let maxActiveSaves = 0;
+  installDesktopApiStub({
+    retentionDays: 30,
+    retentionHandler(value) {
+      activeSaves += 1;
+      maxActiveSaves = Math.max(maxActiveSaves, activeSaves);
+      const result = value === 60
+        ? oldFailure.promise
+        : Promise.resolve({ status: 'success', settings: { retentionDays: value } });
+      return result.finally(() => { activeSaves -= 1; });
+    }
+  });
+  openSettingsDialog();
   await openArchiveSettings();
-  const permanentSelect = document.querySelector('[data-role="archive-retention-days"]');
-  if (permanentSelect.value !== 'permanent') {
-    failures.push(`permanent retention rendered as ${permanentSelect.value}`);
-  }
-  permanentSelect.value = '60';
-  document.querySelector('[data-role="close-update-dialog"]').click();
-  await waitFor(() => modalRoot.childElementCount === 0);
+  changeRetention('60');
+  await waitFor(() => JSON.stringify(window.__retentionSaveCalls) === '[60]');
+  changeRetention('90');
+  changeRetention('180');
   if (JSON.stringify(window.__retentionSaveCalls) !== '[60]') {
-    failures.push(`permanent to 60 calls: ${JSON.stringify(window.__retentionSaveCalls)}`);
+    failures.push(`pending intents wrote concurrently: ${JSON.stringify(window.__retentionSaveCalls)}`);
   }
+  const pendingReturn = document.querySelector('[data-role="close-update-dialog"]');
+  const pendingClose = document.querySelector('[data-action="close"]');
+  if (!pendingReturn.disabled || !pendingClose.disabled) failures.push('pending save did not disable Return/X');
+  pendingClose.click();
+  if (document.getElementById('modalRoot').childElementCount !== 1) failures.push('disabled X closed pending dialog');
+  oldFailure.resolve({ status: 'failed', message: '旧请求失败不应成为最终错误' });
+  await waitFor(() => JSON.stringify(window.__retentionSaveCalls) === '[60,180]');
+  await waitFor(() => document.querySelector('[data-role="archive-retention-days"]').value === '180');
+  const oldFailureFeedback = document.querySelector('[data-role="archive-feedback"]').textContent;
+  if (oldFailureFeedback.includes('旧请求失败')) failures.push('stale failed intent rendered final error');
+  if (maxActiveSaves !== 1) failures.push(`retention saves ran concurrently: ${maxActiveSaves}`);
+  if (pendingReturn.disabled || pendingClose.disabled) failures.push('final settle left Return/X disabled');
 
-  installDesktopApiStub();
-  modalRoot = openSettingsDialog();
+  const finalFailure = createDeferred();
+  installDesktopApiStub({ retentionDays: 60, retentionHandler: () => finalFailure.promise });
+  openSettingsDialog();
   await openArchiveSettings();
-  document.querySelector('[data-role="archive-retention-days"]').value = '180';
-  const successConfirmButton = document.querySelector('[data-role="close-update-dialog"]');
-  successConfirmButton.click();
-  successConfirmButton.click();
-  await waitFor(() => modalRoot.childElementCount === 0);
-  if (JSON.stringify(window.__retentionSaveCalls) !== '[180]') {
-    failures.push(`save success calls: ${JSON.stringify(window.__retentionSaveCalls)}`);
-  }
-
-  installDesktopApiStub({ failRetention: true });
-  modalRoot = openSettingsDialog();
-  await openArchiveSettings();
-  document.querySelector('[data-role="archive-retention-days"]').value = '365';
-  const confirmButton = document.querySelector('[data-role="close-update-dialog"]');
-  confirmButton.click();
-  await waitFor(() => document.querySelector('[data-role="archive-feedback"]').textContent.includes('模拟保存失败'));
-  if (modalRoot.childElementCount !== 1) failures.push('save failure closed dialog');
-  if (confirmButton.disabled) failures.push('save failure left confirm disabled');
-  if (JSON.stringify(window.__retentionSaveCalls) !== '[365]') {
-    failures.push(`save failure calls: ${JSON.stringify(window.__retentionSaveCalls)}`);
-  }
-
-  installDesktopApiStub();
-  modalRoot = openSettingsDialog();
-  await openArchiveSettings();
-  document.querySelector('[data-role="close-update-dialog"]').click();
-  await waitFor(() => modalRoot.childElementCount === 0);
-  if (window.__retentionSaveCalls.length !== 0) failures.push('no-change confirm called save API');
-
-  installDesktopApiStub();
-  modalRoot = openSettingsDialog();
-  await openArchiveSettings();
-  document.querySelector('[data-role="archive-retention-days"]').value = '30';
-  document.querySelector('[data-action="back-to-archive"]').click();
-  if (window.__retentionSaveCalls.length !== 0) failures.push('back action saved draft');
+  changeRetention('180');
+  await waitFor(() => window.__retentionSaveCalls.length === 1);
+  finalFailure.resolve({ status: 'failed', message: '最终保存失败' });
+  await waitFor(() => document.querySelector('[data-role="archive-feedback"]').textContent.includes('最终保存失败'));
   if (document.querySelector('[data-role="archive-retention-days"]').value !== '60') {
-    failures.push('back action did not discard retention draft');
+    failures.push('final failure did not restore last persisted value');
   }
+  if (document.querySelector('[data-role="close-update-dialog"]').disabled
+      || document.querySelector('[data-action="close"]').disabled) {
+    failures.push('final failure left Return/X disabled');
+  }
+
+  const destroyedSave = createDeferred();
+  installDesktopApiStub({ retentionDays: 60, retentionHandler: () => destroyedSave.promise });
+  const modalRoot = openSettingsDialog();
+  await openArchiveSettings();
+  changeRetention('90');
+  await waitFor(() => window.__retentionSaveCalls.length === 1);
+  const detachedFeedback = document.querySelector('[data-role="archive-feedback"]');
+  const feedbackBeforeDestroy = detachedFeedback.textContent;
+  modalRoot.innerHTML = '';
+  destroyedSave.resolve({ status: 'failed', message: '销毁后不得写入' });
+  await Promise.resolve();
+  await Promise.resolve();
+  if (detachedFeedback.textContent !== feedbackBeforeDestroy) {
+    failures.push('destroyed dialog promise wrote detached feedback');
+  }
+}
+
+async function verifyArchiveBrowserLayout(failures) {
+  document.querySelector('.app-settings-nav-item[data-tab="archive"]').click();
+  await waitFor(() => document.querySelectorAll('.archive-center-batch-item').length === 4);
+  await waitFor(() => document.querySelectorAll('.archive-center-related-batch').length === 3);
+
+  for (const item of document.querySelectorAll('.archive-center-batch-item')) {
+    const rows = item.querySelectorAll(':scope > .archive-center-batch-row');
+    if (rows.length !== 2) failures.push(`archive batch direct row count ${rows.length}`);
+  }
+  const firstItem = document.querySelector('.archive-center-batch-item');
+  const moduleName = firstItem.querySelector('[data-role="archive-batch-module"]');
+  const batchNumber = firstItem.querySelector('[data-role="archive-batch-number"]');
+  if (!moduleName.title.includes('超长模块名称')) failures.push('long module title missing');
+  if (batchNumber.title !== '2026-08-10-127') failures.push(`batch number title ${batchNumber.title}`);
+  if (batchNumber.scrollWidth > batchNumber.clientWidth + 1) {
+    failures.push('old batch number is not visually identifiable');
+  }
+  firstItem.focus();
+  if (document.activeElement !== firstItem) failures.push('batch item cannot receive keyboard focus');
+
+  const detailTitle = document.querySelector('.archive-center-detail-title-line h4');
+  const related = document.querySelector('.archive-center-related');
+  const detailActions = document.querySelector('.archive-center-detail-actions');
+  if (detailTitle.scrollWidth > detailTitle.clientWidth + 1) {
+    failures.push('current batch number is not visually identifiable');
+  }
+  const titleRect = detailTitle.getBoundingClientRect();
+  const relatedRect = related.getBoundingClientRect();
+  if (Math.abs((titleRect.top + titleRect.bottom) / 2 - (relatedRect.top + relatedRect.bottom) / 2) > 2) {
+    failures.push('related batches left the current-number title line');
+  }
+  const actionsRect = detailActions.getBoundingClientRect();
+  const headingContentRect = detailTitle.parentElement.parentElement.getBoundingClientRect();
+  const actionsOverlapContent = actionsRect.left < headingContentRect.right
+    && actionsRect.right > headingContentRect.left
+    && actionsRect.top < headingContentRect.bottom
+    && actionsRect.bottom > headingContentRect.top;
+  if (actionsOverlapContent) failures.push('detail actions overlap title content');
+
+  const relatedText = document.querySelector('.archive-center-related').textContent.replace(/\s+/g, '');
+  if (relatedText !== '关联任务：2026-08-10-127·2026-08-11-001/002') {
+    failures.push(`related grouped text ${relatedText}`);
+  }
+  if (document.querySelector('.archive-center-detail-heading').textContent.includes('internal-parent')) {
+    failures.push('parentRunId rendered in detail');
+  }
+  const initialTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const initialArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (initialTaskStatus !== '任务失败' || initialArchiveStatus !== '存档完成') {
+    failures.push(`failed task/detail status ${initialTaskStatus}/${initialArchiveStatus}`);
+  }
+  const stagingListStatus = document.querySelector('[data-batch-id="103"] [data-role="archive-batch-status"]');
+  if (stagingListStatus?.dataset.status !== 'pending' || stagingListStatus?.textContent.trim() !== '处理中') {
+    failures.push(`staging list status ${stagingListStatus?.dataset.status}/${stagingListStatus?.textContent.trim()}`);
+  }
+  const initialRunningTarget = document.querySelector('[data-related-batch-id="103"]');
+  const focusableOrder = [...document.querySelectorAll('button:not(:disabled), input:not(:disabled), select:not(:disabled)')];
+  const relatedIndex = focusableOrder.indexOf(initialRunningTarget);
+  const lockIndex = focusableOrder.indexOf(document.querySelector('[data-action="toggle-archive-lock"]'));
+  const openIndex = focusableOrder.indexOf(document.querySelector('[data-action="open-archive-file"]'));
+  const saveIndex = focusableOrder.indexOf(document.querySelector('[data-action="save-as-archive-file"]'));
+  if (relatedIndex < 0 || lockIndex <= relatedIndex || openIndex <= lockIndex || saveIndex <= openIndex) {
+    failures.push(`detail tab order drifted: related=${relatedIndex}, lock=${lockIndex}, open=${openIndex}, save=${saveIndex}`);
+  }
+  document.querySelector('[data-related-batch-id="102"]').click();
+  await waitFor(() => (
+    document.querySelector('.archive-center-detail-heading h4')?.textContent.trim()
+      === '2026-08-11-001'
+  ));
+  const cancelledTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const cancelledArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (cancelledTaskStatus !== '已取消' || cancelledArchiveStatus !== '存档完成') {
+    failures.push(`cancelled task/detail status ${cancelledTaskStatus}/${cancelledArchiveStatus}`);
+  }
+  document.querySelector('[data-related-batch-id="103"]').click();
+  await waitFor(() => (
+    document.querySelector('.archive-center-detail-heading h4')?.textContent.trim()
+      === '2026-08-11-002'
+  ));
+  const runningTaskStatus = document.querySelector('[data-role="archive-task-status"]')?.textContent.trim();
+  const stagingArchiveStatus = document.querySelector('[data-role="archive-detail-status"]')?.textContent.trim();
+  if (runningTaskStatus !== '运行中' || stagingArchiveStatus !== '处理中') {
+    failures.push(`running task/detail status ${runningTaskStatus}/${stagingArchiveStatus}`);
+  }
+  const statusProjectionText = `${initialTaskStatus}${initialArchiveStatus}${cancelledTaskStatus}${cancelledArchiveStatus}${runningTaskStatus}${stagingArchiveStatus}`;
+  if (statusProjectionText.includes('-') || statusProjectionText.includes('状态未知')) {
+    failures.push(`task/archive status projection is not observable: ${statusProjectionText}`);
+  }
+  if (document.querySelectorAll('.archive-center-related-batch[aria-current="true"]').length !== 1) {
+    failures.push('related current batch aria state invalid');
+  }
+
+  const browserRect = document.querySelector('.archive-center-browser').getBoundingClientRect();
+  for (const field of document.querySelectorAll('.archive-center-filters .archive-center-field')) {
+    const rect = field.getBoundingClientRect();
+    if (rect.left < browserRect.left - 1 || rect.right > browserRect.right + 1) {
+      failures.push('archive filter is clipped by browser viewport');
+      break;
+    }
+  }
+
   document.querySelector('[data-action="open-archive-settings"]').click();
-  if (!document.querySelector('[data-role="close-update-dialog"]').disabled) {
-    failures.push('confirm remained enabled while archive settings reloaded');
+  await waitFor(() => (
+    !document.querySelector('[data-archive-view="settings"]').hidden
+    && !document.querySelector('[data-archive-view="settings"]').hasAttribute('aria-busy')
+  ));
+  const storagePath = document.querySelector('[data-role="archive-storage-path"]');
+  if (!storagePath.title.includes('用于验证存档位置省略号')) failures.push('storage path full title missing');
+  if (getComputedStyle(storagePath).textOverflow !== 'ellipsis') failures.push('storage path ellipsis missing');
+  if (document.querySelector('[data-role="archive-stat-runs"]').textContent !== '128') {
+    failures.push('run count not rendered');
   }
-  await waitFor(() => !document.querySelector('[data-archive-view="settings"]').hasAttribute('aria-busy'));
-  if (document.querySelector('[data-role="archive-retention-days"]').value !== '60') {
-    failures.push('reopened archive settings did not restore saved retention');
+  if (document.querySelector('[data-role="archive-stat-latest"]').textContent !== '2026-08-11-128') {
+    failures.push('latest batch not rendered');
   }
-  document.querySelector('[data-role="archive-retention-days"]').value = '180';
-  document.querySelector('[data-action="close"]').click();
-  await waitFor(() => modalRoot.childElementCount === 0);
-  if (window.__retentionSaveCalls.length !== 0) failures.push('close action saved draft');
+  for (const removed of ['唯一文件', '逻辑文件', '文件引用']) {
+    if (document.querySelector('.app-update-settings-card').textContent.includes(removed)) {
+      failures.push(`internal archive term rendered: ${removed}`);
+    }
+  }
+  if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
+    failures.push('archive document horizontal overflow');
+  }
 }
 
 async function measurePage(expectedScaleFactor, runBehavior) {
@@ -252,7 +471,7 @@ async function measurePage(expectedScaleFactor, runBehavior) {
     failures.push(`font sizes toggle=${toggleFontSize}, value=${valueFontSize}`);
   }
   if (!note.hidden || note.textContent !== '') failures.push('NSIS update note should be collapsed');
-  if (confirmButton.textContent.trim() !== '确认') failures.push(`unexpected confirm text ${confirmButton.textContent}`);
+  if (confirmButton.textContent.trim() !== '返回') failures.push(`unexpected return text ${confirmButton.textContent}`);
   if (document.documentElement.scrollWidth > document.documentElement.clientWidth + 1) {
     failures.push('document horizontal overflow');
   }
@@ -268,6 +487,8 @@ async function measurePage(expectedScaleFactor, runBehavior) {
     if (document.body.textContent.includes(text)) failures.push(`removed text remains: ${text}`);
   }
 
+  await verifyArchiveBrowserLayout(failures);
+
   if (runBehavior) {
     applyAppUpdateStatus({
       enabled: true,
@@ -282,14 +503,10 @@ async function measurePage(expectedScaleFactor, runBehavior) {
       busyOperations: [],
       error: ''
     }, { prompt: false });
-    if (confirmButton.textContent.trim() !== '稍后') {
+    if (confirmButton.textContent.trim() !== '返回') {
       failures.push(`downloaded update button text ${confirmButton.textContent}`);
     }
-    document.querySelector('.app-settings-nav-item[data-tab="archive"]').click();
-    if (confirmButton.textContent.trim() !== '确认') {
-      failures.push(`archive tab button text ${confirmButton.textContent}`);
-    }
-    await verifyArchiveConfirmBehavior(failures);
+    await verifyArchiveRetentionBehavior(failures);
   }
 
   return {
@@ -345,10 +562,13 @@ async function runElectronChild() {
       (async () => {
         ${nextFrame.toString()}
         ${waitFor.toString()}
+        ${createDeferred.toString()}
         ${installDesktopApiStub.toString()}
         ${openSettingsDialog.toString()}
         ${openArchiveSettings.toString()}
-        ${verifyArchiveConfirmBehavior.toString()}
+        ${changeRetention.toString()}
+        ${verifyArchiveRetentionBehavior.toString()}
+        ${verifyArchiveBrowserLayout.toString()}
         return (${measurePage.toString()})(${JSON.stringify(scaleFactor)}, ${JSON.stringify(runBehavior)});
       })()
     `);

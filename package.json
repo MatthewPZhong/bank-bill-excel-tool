@@ -35,6 +35,8 @@
     "preview:statement-palette": "node scripts/render-modal-preview.js background-palette statement-palette.png",
     "preview:app-update-settings": "node scripts/render-modal-preview.js app-update-settings app-update-settings.png",
     "preview:archive-center": "node scripts/render-modal-preview.js archive-center-settings archive-center-settings.png",
+    "preview:archive-center-browser": "node scripts/render-modal-preview.js archive-center-browser archive-center-browser.png",
+    "preview:archive-center-browser-zoom-150": "node scripts/render-modal-preview.js archive-center-browser archive-center-browser-zoom-150.png 1.5 1080 760",
     "preview:module-cabinet": "node scripts/render-modal-preview.js module-cabinet module-cabinet.png",
     "preview:new-account-palette": "node scripts/render-modal-preview.js new-account-palette new-account-palette.png",
     "preview:monthly-balance-export": "node scripts/render-modal-preview.js monthly-balance-export-dialog monthly-balance-export.png",
