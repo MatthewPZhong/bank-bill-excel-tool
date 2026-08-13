@@ -3,6 +3,7 @@
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
 //   archive_batch_sequences 不因批次删除而回退的本地日期流水游标；
+//   archive_operation_issuances 跨永久删除保留 operation key 的发行事实；
 //   archive_artifacts 批次中的逻辑文件及失败重试信息；
 //   archive_blobs     以 SHA-256 寻址的唯一物理文件。
 //
@@ -13,6 +14,19 @@ const BATCH_ARCHIVE_STATUSES = Object.freeze({
   STAGING: 'staging',
   COMPLETE: 'complete',
   INCOMPLETE: 'incomplete'
+});
+
+const BATCH_TASK_STATUSES = Object.freeze({
+  RESERVED: 'reserved',
+  RUNNING: 'running',
+  SUCCEEDED: 'succeeded',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled'
+});
+
+const BATCH_FORMAT_VERSIONS = Object.freeze({
+  LEGACY: 1,
+  GLOBAL: 2
 });
 
 const ARTIFACT_STATUSES = Object.freeze({
@@ -109,6 +123,26 @@ function normalizeMetadata(value) {
   return json;
 }
 
+function normalizeTaskStatus(value) {
+  const status = requiredText(value, 'taskStatus', 32).toLowerCase();
+  if (!Object.values(BATCH_TASK_STATUSES).includes(status)) {
+    throw new TypeError(`taskStatus 非法：${status}`);
+  }
+  return status;
+}
+
+function normalizeFlowAnchorIdentity(payload = {}) {
+  const identityType = requiredText(payload.identityType, 'identityType', 64).toLowerCase();
+  if (!/^[a-z][a-z0-9._-]*$/.test(identityType)) {
+    throw new TypeError('identityType 只能包含小写字母、数字、点、下划线和连字符');
+  }
+  return {
+    moduleId: normalizeModuleId(payload.moduleId),
+    identityType,
+    identityValue: requiredText(payload.identityValue, 'identityValue', 1024)
+  };
+}
+
 function parseObjectJson(value) {
   try {
     const parsed = JSON.parse(value);
@@ -130,6 +164,24 @@ function dateToIso(value) {
   return date.toISOString();
 }
 
+function localDateOf(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError('now() 必须返回有效日期');
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function addCalendarDays(localDate, days) {
+  const normalized = normalizeLocalDate(localDate);
+  const count = Number(days);
+  if (!Number.isSafeInteger(count) || count < 1 || count > 36500) {
+    throw new TypeError('retentionDays 必须是 1 到 36500 的安全整数');
+  }
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + count);
+  return date.toISOString().slice(0, 10);
+}
+
 function formatBatchNumber(moduleCode, localDate, dailySequence) {
   const code = normalizeModuleCode(moduleCode);
   const date = normalizeLocalDate(localDate).replace(/-/g, '');
@@ -138,6 +190,26 @@ function formatBatchNumber(moduleCode, localDate, dailySequence) {
     throw new TypeError('dailySequence 必须是正安全整数');
   }
   return `${code}-${date}-${String(sequence).padStart(3, '0')}`;
+}
+
+function formatGlobalBatchNumber(localDate, dailySequence) {
+  const date = normalizeLocalDate(localDate);
+  const sequence = Number(dailySequence);
+  if (!Number.isSafeInteger(sequence) || sequence < 1) {
+    throw new TypeError('dailySequence 必须是正安全整数');
+  }
+  return `${date}-${String(sequence).padStart(3, '0')}`;
+}
+
+function addColumnsIfMissing(db, tableName, definitions) {
+  const columns = new Set(
+    db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => String(row.name))
+  );
+  for (const [columnName, definition] of definitions) {
+    if (columns.has(columnName)) continue;
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${definition}`);
+    columns.add(columnName);
+  }
 }
 
 function withWriteTransaction(db, operation) {
@@ -165,7 +237,8 @@ function withWriteTransaction(db, operation) {
 
 function ensureArchiveMetadataSupport(db) {
   assertDatabase(db);
-  db.exec(`
+  withWriteTransaction(db, () => {
+    db.exec(`
     CREATE TABLE IF NOT EXISTS archive_batches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       batch_number TEXT NOT NULL UNIQUE,
@@ -209,13 +282,6 @@ function ensureArchiveMetadataSupport(db) {
       PRIMARY KEY (module_code, local_date)
     );
 
-    INSERT INTO archive_batch_sequences (module_code, local_date, last_sequence)
-    SELECT module_code, local_date, MAX(daily_sequence)
-    FROM archive_batches
-    GROUP BY module_code, local_date
-    ON CONFLICT(module_code, local_date) DO UPDATE SET
-      last_sequence = MAX(archive_batch_sequences.last_sequence, excluded.last_sequence);
-
     CREATE TABLE IF NOT EXISTS archive_blobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sha256 TEXT NOT NULL UNIQUE,
@@ -256,7 +322,123 @@ function ensureArchiveMetadataSupport(db) {
       WHERE blob_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_archive_artifacts_retry
       ON archive_artifacts(batch_id, status, id);
-  `);
+    `);
+
+    addColumnsIfMissing(db, 'archive_batches', [
+      ['batch_format_version', 'batch_format_version INTEGER NOT NULL DEFAULT 1 CHECK (batch_format_version IN (1, 2))'],
+      ['global_daily_sequence', 'global_daily_sequence INTEGER CHECK (global_daily_sequence IS NULL OR global_daily_sequence > 0)'],
+      ['task_key', 'task_key TEXT'],
+      ['task_run_id', 'task_run_id TEXT'],
+      ['parent_run_id', 'parent_run_id TEXT'],
+      ['task_status', "task_status TEXT NOT NULL DEFAULT 'succeeded' CHECK (task_status IN ('reserved', 'running', 'succeeded', 'failed', 'cancelled'))"],
+      ['reserved_at', 'reserved_at TEXT'],
+      ['started_at', 'started_at TEXT'],
+      ['finished_at', 'finished_at TEXT'],
+      ['failure_code', 'failure_code TEXT'],
+      ['failure_message', 'failure_message TEXT']
+    ]);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archive_operation_issuances (
+        module_id TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        batch_id INTEGER NOT NULL,
+        batch_number TEXT NOT NULL,
+        issued_at TEXT NOT NULL,
+        deleted_at TEXT,
+        PRIMARY KEY (module_id, operation_key)
+      );
+
+      INSERT INTO archive_operation_issuances (
+        module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+      )
+      SELECT
+        module_id,
+        operation_key,
+        id,
+        batch_number,
+        COALESCE(reserved_at, created_at),
+        NULL
+      FROM archive_batches
+      WHERE operation_key <> ''
+      ON CONFLICT(module_id, operation_key) DO NOTHING;
+
+      INSERT INTO archive_batch_sequences (module_code, local_date, last_sequence)
+      SELECT module_code, local_date, MAX(daily_sequence)
+      FROM archive_batches
+      WHERE batch_format_version = 1
+      GROUP BY module_code, local_date
+      ON CONFLICT(module_code, local_date) DO UPDATE SET
+        last_sequence = MAX(archive_batch_sequences.last_sequence, excluded.last_sequence);
+    `);
+
+    addColumnsIfMissing(db, 'archive_artifacts', [
+      ['storage_relative_path', 'storage_relative_path TEXT'],
+      ['storage_mode', 'storage_mode TEXT'],
+      ['storage_layout_version', 'storage_layout_version INTEGER NOT NULL DEFAULT 1'],
+      ['safe_file_name', 'safe_file_name TEXT'],
+      ['artifact_order', 'artifact_order INTEGER']
+    ]);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS archive_daily_sequences (
+        local_date TEXT PRIMARY KEY,
+        last_sequence INTEGER NOT NULL CHECK (last_sequence > 0),
+        updated_at TEXT NOT NULL,
+        -- latest issuance 必须在批次永久删除后保留，因此不引用 archive_batches 外键。
+        last_issued_batch_id INTEGER,
+        last_issued_batch_number TEXT,
+        last_issued_at TEXT
+      );
+
+    `);
+
+    addColumnsIfMissing(db, 'archive_daily_sequences', [
+      ['last_issued_batch_id', 'last_issued_batch_id INTEGER'],
+      ['last_issued_batch_number', 'last_issued_batch_number TEXT'],
+      ['last_issued_at', 'last_issued_at TEXT']
+    ]);
+
+    db.exec(`
+
+      INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
+      SELECT
+        s.local_date,
+        SUM(s.last_sequence),
+        strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      FROM archive_batch_sequences s
+      GROUP BY s.local_date
+      ON CONFLICT(local_date) DO UPDATE SET
+        last_sequence = MAX(archive_daily_sequences.last_sequence, excluded.last_sequence),
+        updated_at = CASE
+          WHEN excluded.last_sequence > archive_daily_sequences.last_sequence
+            THEN excluded.updated_at
+          ELSE archive_daily_sequences.updated_at
+        END;
+
+      CREATE TABLE IF NOT EXISTS archive_flow_anchors (
+        module_id TEXT NOT NULL,
+        identity_type TEXT NOT NULL,
+        identity_value TEXT NOT NULL,
+        parent_run_id TEXT NOT NULL,
+        source_batch_id INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (module_id, identity_type, identity_value),
+        FOREIGN KEY (source_batch_id) REFERENCES archive_batches(id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_flow_anchors_parent_run
+        ON archive_flow_anchors(parent_run_id);
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_archive_batches_global_daily_sequence
+        ON archive_batches(local_date, global_daily_sequence)
+        WHERE global_daily_sequence IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_archive_batches_parent_run
+        ON archive_batches(parent_run_id, local_date, global_daily_sequence)
+        WHERE parent_run_id IS NOT NULL AND parent_run_id <> '';
+    `);
+  });
 }
 
 function mapBatch(row) {
@@ -270,6 +452,19 @@ function mapBatch(row) {
     operationKey: row.operation_key,
     localDate: row.local_date,
     dailySequence: Number(row.daily_sequence),
+    batchFormatVersion: Number(row.batch_format_version) || BATCH_FORMAT_VERSIONS.LEGACY,
+    globalDailySequence: row.global_daily_sequence == null
+      ? null
+      : Number(row.global_daily_sequence),
+    taskKey: row.task_key || '',
+    taskRunId: row.task_run_id || '',
+    parentRunId: row.parent_run_id || '',
+    taskStatus: row.task_status || BATCH_TASK_STATUSES.SUCCEEDED,
+    reservedAt: row.reserved_at || null,
+    startedAt: row.started_at || null,
+    finishedAt: row.finished_at || null,
+    failureCode: row.failure_code || '',
+    failureMessage: row.failure_message || '',
     businessStatus: row.business_status,
     archiveStatus: row.archive_status,
     locked: Number(row.locked) === 1,
@@ -329,9 +524,39 @@ function mapArtifact(row) {
     lastErrorCode: row.last_error_code || '',
     lastErrorMessage: row.last_error_message || '',
     metadata: parseObjectJson(row.metadata_json),
+    storageRelativePath: row.storage_relative_path || '',
+    storageMode: row.storage_mode || '',
+    storageLayoutVersion: Number(row.storage_layout_version) || 1,
+    safeFileName: row.safe_file_name || '',
+    artifactOrder: row.artifact_order == null ? null : Number(row.artifact_order),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at || null
+  };
+}
+
+function mapFlowAnchor(row) {
+  if (!row) return null;
+  return {
+    moduleId: row.module_id,
+    identityType: row.identity_type,
+    identityValue: row.identity_value,
+    parentRunId: row.parent_run_id,
+    sourceBatchId: row.source_batch_id == null ? null : Number(row.source_batch_id),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapOperationIssuance(row) {
+  if (!row) return null;
+  return {
+    moduleId: row.module_id,
+    operationKey: row.operation_key,
+    batchId: Number(row.batch_id),
+    batchNumber: row.batch_number,
+    issuedAt: row.issued_at,
+    deletedAt: row.deleted_at || null
   };
 }
 
@@ -411,6 +636,133 @@ class ArchiveRepository {
       GROUP BY b.id
     `).get(normalizedModuleId, normalizedOperationKey);
     return mapBatch(row);
+  }
+
+  getOperationIssuance(moduleId, operationKey) {
+    const normalizedModuleId = normalizeModuleId(moduleId);
+    const normalizedOperationKey = requiredText(operationKey, 'operationKey', 256);
+    return mapOperationIssuance(this.db.prepare(`
+      SELECT *
+      FROM archive_operation_issuances
+      WHERE module_id = ? AND operation_key = ?
+    `).get(normalizedModuleId, normalizedOperationKey));
+  }
+
+  getLatestIssuedBatch() {
+    const row = this.db.prepare(`
+      SELECT
+        local_date,
+        last_issued_batch_id,
+        last_issued_batch_number,
+        last_issued_at
+      FROM archive_daily_sequences
+      WHERE last_issued_batch_id IS NOT NULL
+        AND last_issued_batch_number IS NOT NULL
+        AND last_issued_at IS NOT NULL
+      ORDER BY last_issued_batch_id DESC
+      LIMIT 1
+    `).get();
+    if (!row) return null;
+    const match = /-(\d+)$/.exec(row.last_issued_batch_number);
+    const sequence = match ? Number(match[1]) : null;
+    return {
+      batchId: row.last_issued_batch_id == null ? null : Number(row.last_issued_batch_id),
+      batchNumber: row.last_issued_batch_number,
+      localDate: row.local_date,
+      dailySequence: sequence,
+      globalDailySequence: sequence,
+      issuedAt: row.last_issued_at
+    };
+  }
+
+  listRelatedBatches(parentRunId) {
+    const normalizedParentRunId = requiredText(parentRunId, 'parentRunId', 256);
+    return this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE b.parent_run_id = ?
+      GROUP BY b.id
+      ORDER BY b.local_date ASC, b.global_daily_sequence ASC, b.id ASC
+    `).all(normalizedParentRunId).map(mapBatch);
+  }
+
+  findFlowAnchor(payload = {}) {
+    const identity = normalizeFlowAnchorIdentity(payload);
+    return mapFlowAnchor(this.db.prepare(`
+      SELECT *
+      FROM archive_flow_anchors
+      WHERE module_id = ? AND identity_type = ? AND identity_value = ?
+    `).get(identity.moduleId, identity.identityType, identity.identityValue));
+  }
+
+  bindFlowAnchor(payload = {}) {
+    const identity = normalizeFlowAnchorIdentity(payload);
+    const parentRunId = requiredText(payload.parentRunId, 'parentRunId', 256);
+    let sourceBatchId = null;
+    if (payload.sourceBatchId !== undefined && payload.sourceBatchId !== null) {
+      sourceBatchId = Number(payload.sourceBatchId);
+      if (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1) {
+        throw new TypeError('sourceBatchId 必须是正安全整数');
+      }
+    }
+    const timestamp = this._timestamp();
+
+    return withWriteTransaction(this.db, () => {
+      if (sourceBatchId !== null) {
+        const sourceBatch = this.db.prepare(`
+          SELECT id, module_id, parent_run_id FROM archive_batches WHERE id = ?
+        `).get(sourceBatchId);
+        if (!sourceBatch) throw new Error(`存档批次不存在：${sourceBatchId}`);
+        if (sourceBatch.module_id !== identity.moduleId
+            || sourceBatch.parent_run_id !== parentRunId) {
+          const error = new Error('业务身份锚点与来源批次的归属不一致');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+      }
+
+      const existing = this.findFlowAnchor(identity);
+      if (existing) {
+        if (existing.parentRunId !== parentRunId
+            || (sourceBatchId !== null
+              && existing.sourceBatchId !== null
+              && existing.sourceBatchId !== sourceBatchId)) {
+          const error = new Error('业务身份已绑定到不同的任务流程');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+        if (existing.sourceBatchId === null && sourceBatchId !== null) {
+          this.db.prepare(`
+            UPDATE archive_flow_anchors
+            SET source_batch_id = ?, updated_at = ?
+            WHERE module_id = ? AND identity_type = ? AND identity_value = ?
+          `).run(
+            sourceBatchId,
+            timestamp,
+            identity.moduleId,
+            identity.identityType,
+            identity.identityValue
+          );
+          return { created: false, anchor: this.findFlowAnchor(identity) };
+        }
+        return { created: false, anchor: existing };
+      }
+
+      this.db.prepare(`
+        INSERT INTO archive_flow_anchors (
+          module_id, identity_type, identity_value, parent_run_id,
+          source_batch_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        identity.moduleId,
+        identity.identityType,
+        identity.identityValue,
+        parentRunId,
+        sourceBatchId,
+        timestamp,
+        timestamp
+      );
+      return { created: true, anchor: this.findFlowAnchor(identity) };
+    });
   }
 
   listBatches(filters = {}) {
@@ -516,6 +868,10 @@ class ArchiveRepository {
 
     return withWriteTransaction(this.db, () => {
       if (operationKey) {
+        const issuance = this.getOperationIssuance(moduleId, operationKey);
+        if (issuance && issuance.deletedAt) {
+          return { created: false, status: 'deleted', batch: null, issuance };
+        }
         const existing = this.db.prepare(`
           SELECT id FROM archive_batches WHERE module_id = ? AND operation_key = ?
         `).get(moduleId, operationKey);
@@ -533,7 +889,19 @@ class ArchiveRepository {
         FROM archive_batch_sequences
         WHERE module_code = ? AND local_date = ?
       `).get(moduleCode, localDate);
-      const dailySequence = Number(sequenceRow.last_sequence);
+      let dailySequence = Number(sequenceRow.last_sequence);
+      while (this.db.prepare(`
+        SELECT 1
+        FROM archive_batches
+        WHERE module_code = ? AND local_date = ? AND daily_sequence = ?
+      `).get(moduleCode, localDate, dailySequence)) {
+        this.db.prepare(`
+          UPDATE archive_batch_sequences
+          SET last_sequence = last_sequence + 1
+          WHERE module_code = ? AND local_date = ?
+        `).run(moduleCode, localDate);
+        dailySequence += 1;
+      }
       const batchNumber = formatBatchNumber(moduleCode, localDate, dailySequence);
       const result = this.db.prepare(`
         INSERT INTO archive_batches (
@@ -556,8 +924,210 @@ class ArchiveRepository {
         timestamp,
         timestamp
       );
-      return { created: true, batch: this.getBatch(Number(result.lastInsertRowid)) };
+      const batchId = Number(result.lastInsertRowid);
+      if (operationKey) {
+        this.db.prepare(`
+          INSERT INTO archive_operation_issuances (
+            module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+          ) VALUES (?, ?, ?, ?, ?, NULL)
+        `).run(moduleId, operationKey, batchId, batchNumber, timestamp);
+      }
+      this.db.prepare(`
+        INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
+        VALUES (?, 1, ?)
+        ON CONFLICT(local_date) DO UPDATE SET
+          last_sequence = archive_daily_sequences.last_sequence + 1,
+          updated_at = excluded.updated_at
+      `).run(localDate, timestamp);
+      return { created: true, batch: this.getBatch(batchId) };
     });
+  }
+
+  reserveTaskBatch(payload = {}) {
+    if (Object.prototype.hasOwnProperty.call(payload, 'batchNumber')) {
+      throw new TypeError('batchNumber 只能由存档中心分配');
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'localDate')) {
+      throw new TypeError('task 批次 localDate 只能由存档中心时钟生成');
+    }
+    const moduleId = normalizeModuleId(payload.moduleId);
+    const moduleCode = normalizeModuleCode(payload.moduleCode || payload.moduleId);
+    const moduleName = requiredText(payload.moduleName || payload.moduleId, 'moduleName', 128);
+    const operationKey = requiredText(payload.operationKey, 'operationKey', 256);
+    const taskKey = requiredText(payload.taskKey, 'taskKey', 128);
+    const taskRunId = optionalText(payload.taskRunId, 256);
+    const parentRunId = optionalText(payload.parentRunId, 256);
+    const businessStatus = optionalText(payload.businessStatus, 64);
+    const metadataJson = normalizeMetadata(payload.metadata);
+    const locked = payload.locked === true ? 1 : 0;
+
+    return withWriteTransaction(this.db, () => {
+      const issuance = this.getOperationIssuance(moduleId, operationKey);
+      if (issuance && issuance.deletedAt) {
+        return { created: false, status: 'deleted', batch: null, issuance };
+      }
+      const existing = this.db.prepare(`
+        SELECT id FROM archive_batches WHERE module_id = ? AND operation_key = ?
+      `).get(moduleId, operationKey);
+      if (existing) return { created: false, batch: this.getBatch(existing.id) };
+
+      const reservedAt = this.now();
+      const timestamp = dateToIso(reservedAt);
+      const localDate = localDateOf(reservedAt);
+      const retentionUntil = payload.retentionUntil !== undefined
+        ? normalizeRetentionUntil(payload.retentionUntil, localDate)
+        : payload.retentionDays === null || payload.retentionDays === 'permanent'
+          ? null
+          : payload.retentionDays === undefined
+            ? null
+            : addCalendarDays(localDate, payload.retentionDays);
+
+      this.db.prepare(`
+        INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
+        VALUES (?, 1, ?)
+        ON CONFLICT(local_date) DO UPDATE SET
+          last_sequence = archive_daily_sequences.last_sequence + 1,
+          updated_at = excluded.updated_at
+      `).run(localDate, timestamp);
+      const sequenceRow = this.db.prepare(`
+        SELECT last_sequence
+        FROM archive_daily_sequences
+        WHERE local_date = ?
+      `).get(localDate);
+      const globalDailySequence = Number(sequenceRow.last_sequence);
+      const batchNumber = formatGlobalBatchNumber(localDate, globalDailySequence);
+      const result = this.db.prepare(`
+        INSERT INTO archive_batches (
+          batch_number, module_id, module_code, module_name, operation_key,
+          local_date, daily_sequence, business_status, archive_status,
+          locked, retention_until, metadata_json, created_at, updated_at,
+          batch_format_version, global_daily_sequence, task_key, task_run_id,
+          parent_run_id, task_status, reserved_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staging', ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, 'reserved', ?)
+      `).run(
+        batchNumber,
+        moduleId,
+        moduleCode,
+        moduleName,
+        operationKey,
+        localDate,
+        globalDailySequence,
+        businessStatus,
+        locked,
+        retentionUntil,
+        metadataJson,
+        timestamp,
+        timestamp,
+        globalDailySequence,
+        taskKey,
+        taskRunId || null,
+        parentRunId || null,
+        timestamp
+      );
+      const batchId = Number(result.lastInsertRowid);
+      this.db.prepare(`
+        INSERT INTO archive_operation_issuances (
+          module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, NULL)
+      `).run(moduleId, operationKey, batchId, batchNumber, timestamp);
+      this.db.prepare(`
+        UPDATE archive_daily_sequences
+        SET last_issued_batch_id = ?,
+            last_issued_batch_number = ?,
+            last_issued_at = ?
+        WHERE local_date = ?
+      `).run(batchId, batchNumber, timestamp, localDate);
+      return { created: true, batch: this.getBatch(batchId) };
+    });
+  }
+
+  transitionTaskStatus(batchId, taskStatus, options = {}) {
+    const id = Number(batchId);
+    const status = normalizeTaskStatus(taskStatus);
+    const rawExpectedStatuses = options.expectedStatuses === undefined
+      ? [BATCH_TASK_STATUSES.RESERVED, BATCH_TASK_STATUSES.RUNNING]
+      : options.expectedStatuses;
+    if (!Array.isArray(rawExpectedStatuses) || rawExpectedStatuses.length === 0) {
+      throw new TypeError('expectedStatuses 必须是非空数组');
+    }
+    const expectedStatuses = [...new Set(rawExpectedStatuses.map(normalizeTaskStatus))];
+    const failureCode = optionalText(
+      options.failureCode || options.errorCode || options.code,
+      128
+    );
+    const failureMessage = optionalText(
+      options.failureMessage || options.errorMessage || options.message || options.reason,
+      512
+    );
+    const timestamp = this._timestamp();
+    const isFinished = status === BATCH_TASK_STATUSES.SUCCEEDED
+      || status === BATCH_TASK_STATUSES.FAILED
+      || status === BATCH_TASK_STATUSES.CANCELLED;
+    return withWriteTransaction(this.db, () => {
+      const current = this.getBatch(id);
+      if (!current) {
+        return { status: 'not-found', updated: false, idempotent: false, batch: null };
+      }
+      if (current.taskStatus === status) {
+        if (isFinished) this._refreshBatchStatus(id, timestamp, { emptyIsComplete: true });
+        return {
+          status: 'unchanged',
+          updated: false,
+          idempotent: true,
+          batch: this.getBatch(id)
+        };
+      }
+      const currentIsTerminal = current.taskStatus === BATCH_TASK_STATUSES.SUCCEEDED
+        || current.taskStatus === BATCH_TASK_STATUSES.FAILED
+        || current.taskStatus === BATCH_TASK_STATUSES.CANCELLED;
+      if (currentIsTerminal || !expectedStatuses.includes(current.taskStatus)) {
+        if (currentIsTerminal) {
+          this._refreshBatchStatus(id, timestamp, { emptyIsComplete: true });
+        }
+        return {
+          status: 'conflict',
+          updated: false,
+          idempotent: false,
+          batch: currentIsTerminal ? this.getBatch(id) : current
+        };
+      }
+      const result = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = ?,
+            started_at = CASE
+              WHEN ? = 'running' THEN COALESCE(started_at, ?)
+              ELSE started_at
+            END,
+            finished_at = CASE WHEN ? = 1 THEN ? ELSE finished_at END,
+            failure_code = ?, failure_message = ?, updated_at = ?
+        WHERE id = ? AND task_status = ?
+      `).run(
+        status,
+        status,
+        timestamp,
+        isFinished ? 1 : 0,
+        isFinished ? timestamp : null,
+        failureCode || null,
+        failureMessage || null,
+        timestamp,
+        id,
+        current.taskStatus
+      );
+      if (result.changes !== 1) {
+        return {
+          status: 'conflict',
+          updated: false,
+          idempotent: false,
+          batch: this.getBatch(id)
+        };
+      }
+      if (isFinished) this._refreshBatchStatus(id, timestamp, { emptyIsComplete: true });
+      return { status: 'updated', updated: true, idempotent: false, batch: this.getBatch(id) };
+    });
+  }
+
+  updateTaskStatus(batchId, taskStatus, options = {}) {
+    return this.transitionTaskStatus(batchId, taskStatus, options).batch;
   }
 
   addArtifact(batchId, payload = {}) {
@@ -594,7 +1164,61 @@ class ArchiveRepository {
     });
   }
 
-  _refreshBatchStatus(batchId, timestamp) {
+  recordArtifactFailure(batchId, payload = {}, failure = {}) {
+    const id = Number(batchId);
+    const timestamp = this._timestamp();
+    const artifact = normalizeArtifactPayload(payload, `artifact-${timestamp}`);
+    const code = requiredText(failure.code || 'ARCHIVE_FILE_FAILED', 'failure.code', 128);
+    const message = requiredText(failure.message || '文件存档失败', 'failure.message', 512);
+    return withWriteTransaction(this.db, () => {
+      if (!this.db.prepare('SELECT id FROM archive_batches WHERE id = ?').get(id)) {
+        throw new Error(`存档批次不存在：${id}`);
+      }
+      const result = this.db.prepare(`
+        INSERT INTO archive_artifacts (
+          batch_id, artifact_key, direction, role, source_operation,
+          original_name, source_path, status, blob_id, attempt_count,
+          last_error_code, last_error_message, metadata_json,
+          created_at, updated_at, archived_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'failed', NULL, 0, ?, ?, ?, ?, ?, NULL)
+      `).run(
+        id,
+        artifact.artifactKey,
+        artifact.direction,
+        artifact.role,
+        artifact.sourceOperation,
+        artifact.originalName,
+        artifact.sourcePath,
+        code,
+        message,
+        artifact.metadataJson,
+        timestamp,
+        timestamp
+      );
+      this.db.prepare(`
+        UPDATE archive_batches
+        SET archive_status = 'incomplete', failure_count = failure_count + 1,
+            last_error_code = ?, last_error_message = ?,
+            last_failed_operation = ?, last_failed_at = ?,
+            completed_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        code,
+        message,
+        artifact.sourceOperation,
+        timestamp,
+        timestamp,
+        timestamp,
+        id
+      );
+      return {
+        artifact: this.getArtifact(Number(result.lastInsertRowid)),
+        batch: this.getBatch(id)
+      };
+    });
+  }
+
+  _refreshBatchStatus(batchId, timestamp, options = {}) {
     const counts = this.db.prepare(`
       SELECT
         COUNT(*) AS total,
@@ -607,13 +1231,49 @@ class ArchiveRepository {
     const total = Number(counts.total) || 0;
     const ready = Number(counts.ready_count) || 0;
     const pending = Number(counts.pending_count) || 0;
-    let status = BATCH_ARCHIVE_STATUSES.INCOMPLETE;
+    const current = this.db.prepare(`
+      SELECT archive_status, completed_at, last_error_code, last_error_message,
+             last_failed_operation, last_failed_at
+      FROM archive_batches
+      WHERE id = ?
+    `).get(Number(batchId));
+    if (!current) return null;
+    const hasCurrentArchiveFailure = current.archive_status === BATCH_ARCHIVE_STATUSES.INCOMPLETE
+      || Boolean(
+        current.last_error_code
+        || current.last_error_message
+        || current.last_failed_operation
+        || current.last_failed_at
+      );
+    const emptyArchiveComplete = total === 0
+      && options.emptyIsComplete === true
+      && !hasCurrentArchiveFailure;
+    let status = emptyArchiveComplete
+      ? BATCH_ARCHIVE_STATUSES.COMPLETE
+      : BATCH_ARCHIVE_STATUSES.INCOMPLETE;
     let completedAt = timestamp;
     if (total > 0 && ready === total) {
       status = BATCH_ARCHIVE_STATUSES.COMPLETE;
     } else if (pending > 0) {
       status = BATCH_ARCHIVE_STATUSES.STAGING;
       completedAt = null;
+    }
+    if (status !== BATCH_ARCHIVE_STATUSES.STAGING
+        && current.archive_status === status
+        && current.completed_at) {
+      completedAt = current.completed_at;
+    }
+    const shouldClearErrors = status === BATCH_ARCHIVE_STATUSES.COMPLETE
+      && Boolean(
+        current.last_error_code
+        || current.last_error_message
+        || current.last_failed_operation
+        || current.last_failed_at
+      );
+    if (current.archive_status === status
+        && (current.completed_at || null) === completedAt
+        && !shouldClearErrors) {
+      return status;
     }
     this.db.prepare(`
       UPDATE archive_batches
@@ -979,8 +1639,19 @@ class ArchiveRepository {
     return withWriteTransaction(this.db, () => {
       const batch = this.getBatch(id);
       if (!batch) return { status: 'not-found', batchId: id, releasedBlobs: [] };
+      if (batch.taskStatus === BATCH_TASK_STATUSES.RESERVED
+          || batch.taskStatus === BATCH_TASK_STATUSES.RUNNING) {
+        return { status: 'active', batch, releasedBlobs: [] };
+      }
       if (batch.locked && !allowLocked) {
         return { status: 'locked', batch, releasedBlobs: [] };
+      }
+      if (batch.operationKey) {
+        this.db.prepare(`
+          UPDATE archive_operation_issuances
+          SET deleted_at = COALESCE(deleted_at, ?)
+          WHERE module_id = ? AND operation_key = ?
+        `).run(this._timestamp(), batch.moduleId, batch.operationKey);
       }
       const candidateBlobs = this.db.prepare(`
         SELECT DISTINCT bl.*
@@ -1057,8 +1728,11 @@ module.exports = {
   ArchiveRepository,
   ARTIFACT_STATUSES,
   BATCH_ARCHIVE_STATUSES,
+  BATCH_FORMAT_VERSIONS,
+  BATCH_TASK_STATUSES,
   createArchiveRepository,
   ensureArchiveMetadataSupport,
   formatBatchNumber,
+  formatGlobalBatchNumber,
   normalizeLocalDate
 };

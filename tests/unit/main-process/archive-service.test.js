@@ -185,6 +185,176 @@ test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的�
   }
 });
 
+test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关联 DTO', async () => {
+  const fixture = createFixture();
+  try {
+    const payload = {
+      ...batchPayload('task-operation-1'),
+      taskKey: 'statement:generate',
+      taskRunId: 'task-run-1',
+      parentRunId: 'parent-run-1'
+    };
+    const reserved = await fixture.service.reserveTaskBatch(payload);
+    const replay = await fixture.service.reserveTaskBatch(payload);
+    assert.equal(reserved.ok, true);
+    assert.equal(reserved.status, 'reserved');
+    assert.equal(reserved.batchNumber, '2026-07-20-001');
+    assert.equal(reserved.taskStatus, 'reserved');
+    assert.equal(reserved.batch.retentionUntil, '2026-09-18');
+    assert.equal(replay.status, 'existing');
+    assert.equal(replay.batchId, reserved.batchId);
+
+    const running = await fixture.service.markTaskStarted(reserved.batchId);
+    assert.equal(running.batch.taskStatus, 'running');
+    const failed = await fixture.service.failTaskBatch(reserved.batchId, {
+      code: 'BUSINESS_FAILED',
+      message: '业务处理失败'
+    });
+    assert.equal(failed.batch.taskStatus, 'failed');
+    assert.equal(failed.batch.failureCode, 'BUSINESS_FAILED');
+    assert.equal(failed.batch.archiveStatus, 'complete');
+
+    const latest = await fixture.service.getLatestBatch();
+    assert.equal(latest.ok, true);
+    assert.equal(latest.latestBatch.batchNumber, reserved.batchNumber);
+    const related = await fixture.service.listRelatedBatches('parent-run-1');
+    assert.deepEqual(related.batches.map((batch) => batch.id), [reserved.batchId]);
+
+    const anchorInput = {
+      moduleId: 'bank-statement',
+      identityType: 'business-run-id',
+      identityValue: 'bank-statement-business-run-20260720-001',
+      parentRunId: 'parent-run-1',
+      sourceBatchId: reserved.batchId
+    };
+    const bound = await fixture.service.bindFlowAnchor(anchorInput);
+    const anchorReplay = await fixture.service.bindFlowAnchor(anchorInput);
+    const found = await fixture.service.findFlowAnchor(anchorInput);
+    assert.equal(bound.status, 'bound');
+    assert.equal(anchorReplay.status, 'existing');
+    assert.deepEqual(found.anchor, bound.anchor);
+    const crossModuleAnchor = await fixture.service.bindFlowAnchor({
+      ...anchorInput,
+      moduleId: 'toolbox'
+    });
+    assert.equal(crossModuleAnchor.ok, false);
+    assert.equal(crossModuleAnchor.code, 'ARCHIVE_FLOW_ANCHOR_CONFLICT');
+    const anchorConflict = await fixture.service.bindFlowAnchor({
+      ...anchorInput,
+      parentRunId: 'different-parent'
+    });
+    assert.equal(anchorConflict.ok, false);
+    assert.equal(anchorConflict.code, 'ARCHIVE_FLOW_ANCHOR_CONFLICT');
+
+    const forged = await fixture.service.reserveTaskBatch({
+      ...payload,
+      operationKey: 'task-operation-forged',
+      batchNumber: '2026-07-20-999'
+    });
+    assert.equal(forged.ok, false);
+    assert.equal(forged.code, 'ARCHIVE_OPERATION_FAILED');
+    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+
+    const forgedDate = await fixture.service.reserveTaskBatch({
+      ...payload,
+      operationKey: 'task-operation-forged-date',
+      localDate: '2099-01-01'
+    });
+    assert.equal(forgedDate.ok, false);
+    assert.equal(forgedDate.code, 'ARCHIVE_OPERATION_FAILED');
+    assert.equal(fixture.service.repository.getStats().batchCount, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('task retentionUntil=undefined 按未提供处理，显式保留期与永久语义保持不变', async () => {
+  const fixture = createFixture();
+  try {
+    const cases = [
+      {
+        name: 'undefined 使用默认值',
+        input: { retentionUntil: undefined },
+        expected: '2026-09-18'
+      },
+      {
+        name: 'undefined 不覆盖 retentionDays',
+        input: { retentionUntil: undefined, retentionDays: 30 },
+        expected: '2026-08-19'
+      },
+      {
+        name: '显式 null 永久保留',
+        input: { retentionUntil: null },
+        expected: null
+      },
+      {
+        name: 'retentionDays permanent 永久保留',
+        input: { retentionDays: 'permanent' },
+        expected: null
+      }
+    ];
+    for (const [index, scenario] of cases.entries()) {
+      const reserved = await fixture.service.reserveTaskBatch({
+        ...batchPayload(`task-retention-${index}`),
+        taskKey: 'statement:generate',
+        taskRunId: `task-retention-run-${index}`,
+        ...scenario.input
+      });
+      assert.equal(reserved.ok, true, scenario.name);
+      assert.equal(reserved.batch.retentionUntil, scenario.expected, scenario.name);
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
+test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原批次可清理', async () => {
+  let currentTime = new Date(2026, 6, 1, 12, 0, 0);
+  const fixture = createFixture({ now: () => currentTime });
+  try {
+    const reserved = await fixture.service.reserveTaskBatch({
+      ...batchPayload('active-retention-task'),
+      taskKey: 'statement:generate',
+      taskRunId: 'active-retention-task-run',
+      retentionUntil: '2026-07-10'
+    });
+    assert.equal(reserved.ok, true);
+
+    const manualDelete = await fixture.service.deleteBatch(reserved.batchId, { force: true });
+    assert.equal(manualDelete.ok, false);
+    assert.equal(manualDelete.status, 'active');
+    assert.equal(manualDelete.code, 'ARCHIVE_BATCH_ACTIVE');
+
+    currentTime = new Date(2026, 6, 20, 12, 0, 0);
+    const activeCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(activeCleanup.ok, false);
+    assert.equal(activeCleanup.status, 'partial');
+    assert.equal(activeCleanup.candidateCount, 1);
+    assert.equal(activeCleanup.deletedBatchCount, 0);
+    assert.equal(activeCleanup.results[0].code, 'ARCHIVE_BATCH_ACTIVE');
+    assert.equal((await fixture.service.getBatch(reserved.batchId)).ok, true);
+
+    const completed = await fixture.service.completeTaskBatch(reserved.batchId);
+    assert.equal(completed.batch.id, reserved.batchId);
+    assert.equal(completed.batch.taskStatus, 'succeeded');
+    const terminalCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(terminalCleanup.ok, true);
+    assert.equal(terminalCleanup.deletedBatchCount, 1);
+    assert.equal((await fixture.service.getBatch(reserved.batchId)).status, 'not-found');
+    const replay = await fixture.service.reserveTaskBatch({
+      ...batchPayload('active-retention-task'),
+      taskKey: 'statement:generate',
+      taskRunId: 'active-retention-task-run'
+    });
+    assert.equal(replay.ok, false);
+    assert.equal(replay.status, 'deleted');
+    assert.equal(replay.code, 'ARCHIVE_OPERATION_DELETED');
+    assert.equal(replay.batchId, reserved.batchId);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('批量复制开始前先登记整批文件，进程中断后不会丢失后续重试线索', async () => {
   const fixture = createFixture();
   try {

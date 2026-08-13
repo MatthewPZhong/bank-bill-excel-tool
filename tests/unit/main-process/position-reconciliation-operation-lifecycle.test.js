@@ -10,6 +10,7 @@ const {
   authorizePositionImportApply,
   assertPositionRecoveryInputsUnchanged,
   positionCommittedRecoveryArchiveFiles,
+  positionRecoveryCleanupInputPaths,
   positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
@@ -519,6 +520,13 @@ test('恢复只保留 side DB 已提交的文件级输入，prepared 输入不�
       ]
     }, filtered),
     [secondPath]
+  );
+  assert.deepEqual(
+    positionRecoveryCleanupInputPaths({
+      operationToken: 'multi-file-operation',
+      archiveFiles: [firstPending, secondPending, outputPending, aggregateOutputPending]
+    }, filtered, { code: 'ARCHIVE_OPERATION_DELETED' }),
+    [firstPath, secondPath]
   );
 });
 

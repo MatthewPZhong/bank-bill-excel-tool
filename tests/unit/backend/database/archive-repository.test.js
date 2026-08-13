@@ -93,7 +93,15 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
     `).all().map((row) => row.name));
     assert.deepEqual(
       [...tables].sort(),
-      ['archive_artifacts', 'archive_batch_sequences', 'archive_batches', 'archive_blobs']
+      [
+        'archive_artifacts',
+        'archive_batch_sequences',
+        'archive_batches',
+        'archive_blobs',
+        'archive_daily_sequences',
+        'archive_flow_anchors',
+        'archive_operation_issuances'
+      ]
     );
   } finally {
     db.close();

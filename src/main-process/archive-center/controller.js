@@ -162,27 +162,45 @@ class ArchiveCenterController {
   }
 
   async flushOutbox() {
-    if (!this.outboxStore) return { flushed: 0, remaining: 0 };
+    if (!this.outboxStore) return { flushed: 0, discarded: 0, remaining: 0 };
     const records = this.outboxStore.list();
     let flushed = 0;
+    let discarded = 0;
     for (const record of records) {
+      const payload = record && record.payload ? record.payload : {};
+      let issuance;
       let created;
       try {
-        created = await this.service.createBatch(record.payload);
+        issuance = this.service.repository.getOperationIssuance(
+          payload.moduleId,
+          payload.operationKey
+        );
+        if (!(issuance && issuance.deletedAt)) {
+          created = await this.service.createBatch(record.payload);
+        }
       } catch (error) {
         this._warn('存档 outbox 重放失败', error && error.message ? error.message : String(error));
         continue;
       }
-      if (!created || !created.batch) continue;
-      if (!outboxFilesHaveDurableArtifacts(record, created)) {
+      const operationDeleted = Boolean(issuance && issuance.deletedAt);
+      if (operationDeleted) {
+        discarded += 1;
         this._warn(
-          '存档 outbox 已建批次但附件登记不完整',
-          `outbox=${record.id}，已保留重放任务和源文件`
+          '存档 outbox 对应批次已永久删除，停止重放',
+          `outbox=${record.id}，批次=${issuance.batchNumber}`
         );
-        continue;
+      } else {
+        if (!created || !created.batch) continue;
+        if (!outboxFilesHaveDurableArtifacts(record, created)) {
+          this._warn(
+            '存档 outbox 已建批次但附件登记不完整',
+            `outbox=${record.id}，已保留重放任务和源文件`
+          );
+          continue;
+        }
       }
       this.outboxStore.remove(record.id);
-      flushed += 1;
+      if (!operationDeleted) flushed += 1;
       if (this.onOutboxFlushed) {
         let releasablePaths;
         try {
@@ -206,7 +224,7 @@ class ArchiveCenterController {
         }
       }
     }
-    return { flushed, remaining: this.outboxStore.list().length };
+    return { flushed, discarded, remaining: this.outboxStore.list().length };
   }
 
   _trackedFilePayload(file, sourceOperation) {
@@ -296,6 +314,27 @@ class ArchiveCenterController {
     );
     if (files.length === 0) throw new Error('存档恢复意图缺少文件');
     const batchPayload = this._batchPayload(payload, files);
+    let issuance;
+    try {
+      issuance = this.service.repository.getOperationIssuance(
+        batchPayload.moduleId,
+        batchPayload.operationKey
+      );
+    } catch (error) {
+      this._warn(
+        '存档 operation 删除状态读取失败，继续登记持久 outbox',
+        error && error.message ? error.message : String(error)
+      );
+    }
+    if (issuance && issuance.deletedAt) {
+      return {
+        batchId: issuance.batchId,
+        operationKey: batchPayload.operationKey,
+        persisted: false,
+        operationStatus: 'deleted',
+        code: 'ARCHIVE_OPERATION_DELETED'
+      };
+    }
     const record = this._persistOutboxPayload(batchPayload);
     return {
       batchId: outboxBatchId(record.id),
@@ -316,6 +355,17 @@ class ArchiveCenterController {
       created = {
         ok: false,
         message: error && error.message ? error.message : String(error)
+      };
+    }
+    if (created && created.code === 'ARCHIVE_OPERATION_DELETED') {
+      return {
+        batchId: created.batchId,
+        archiveFailed: true,
+        persistentRetryAvailable: false,
+        failureRecorded: true,
+        operationStatus: 'deleted',
+        code: created.code,
+        warning: { message: created.message }
       };
     }
     if (!created || !created.batch) {

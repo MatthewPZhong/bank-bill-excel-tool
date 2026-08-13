@@ -418,6 +418,15 @@ function positionUncommittedRecoveryInputPaths(value, committedFiles) {
     .map((file) => path.resolve(file.filePath));
 }
 
+function positionRecoveryCleanupInputPaths(value, committedFiles, archiveResult) {
+  return positionUncommittedRecoveryInputPaths(
+    value,
+    archiveResult && archiveResult.code === 'ARCHIVE_OPERATION_DELETED'
+      ? []
+      : committedFiles
+  );
+}
+
 function positionRecoveryArchiveFiles(value, { captureOutputSnapshot }) {
   const files = requirePositionPendingArchiveFiles(value);
   return files.map((file) => {
@@ -614,6 +623,7 @@ module.exports = {
   positionPreflightAnomalyOutputFiles,
   authorizePositionImportApply,
   positionCommittedRecoveryArchiveFiles,
+  positionRecoveryCleanupInputPaths,
   positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
   assertPositionRecoveryInputsUnchanged,
