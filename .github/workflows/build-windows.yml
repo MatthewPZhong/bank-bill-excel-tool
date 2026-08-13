@@ -56,7 +56,7 @@ jobs:
 
       - name: Build Windows installer
         run: |
-          npm run prebuild:meta
+          npm run prepare:dist
           npx electron-builder --win --x64 --publish never
 
       - name: Check dist size

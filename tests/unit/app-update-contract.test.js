@@ -163,7 +163,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.match(workflow, /Release tag must be annotated/);
     assert.match(workflow, /Package version \$version is not a stable semantic version/);
     assert.match(workflow, /npm run release-check/);
-    assert.match(workflow, /npm run prebuild:meta/);
+    assert.match(workflow, /npm run prepare:dist/);
     assert.match(workflow, /electron-builder --win --x64 --publish never/);
     assert.match(workflow, /npm run stage:update-artifacts/);
     assert.match(workflow, /bank-bill-excel-tool-setup-\$version\.exe/);

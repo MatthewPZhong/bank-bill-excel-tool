@@ -1,6 +1,6 @@
 {
   "name": "bank-bill-excel-tool",
-  "version": "3.1.8",
+  "version": "3.1.9",
   "description": "清结算小助手",
   "main": "src/main.js",
   "author": {
@@ -15,11 +15,13 @@
   "scripts": {
     "start": "electron .",
     "icon:sync": "node scripts/sync-app-icon.js",
+    "check:packaged-inputs": "node scripts/check-packaged-inputs.js",
     "prebuild:meta": "node scripts/gen-build-info.js",
+    "prepare:dist": "npm run check:packaged-inputs && npm run prebuild:meta",
     "stage:update-artifacts": "node scripts/stage-update-artifacts.js",
-    "dist:win": "npm run prebuild:meta && electron-builder --win --x64 --publish never && node scripts/check-dist-size.js",
-    "dist:win:setup": "npm run prebuild:meta && electron-builder --win nsis --x64 --publish never && node scripts/check-dist-size.js",
-    "dist:win:portable": "npm run prebuild:meta && electron-builder --win portable --x64 --publish never && node scripts/check-dist-size.js",
+    "dist:win": "npm run prepare:dist && electron-builder --win --x64 --publish never && node scripts/check-dist-size.js",
+    "dist:win:setup": "npm run prepare:dist && electron-builder --win nsis --x64 --publish never && node scripts/check-dist-size.js",
+    "dist:win:portable": "npm run prepare:dist && electron-builder --win portable --x64 --publish never && node scripts/check-dist-size.js",
     "check:dist": "node scripts/check-dist-size.js",
     "verify:main-panel-alignment": "node scripts/verify-main-panel-alignment.js",
     "verify:app-settings-layout": "node scripts/verify-app-settings-layout.js",
@@ -175,7 +177,8 @@
     "generate:position-import-fixture": "node scripts/generate-position-import-fixture.js",
     "generate:v3.1.7-payment-r5s2-fixed-sample": "node scripts/generate-v3.1.7-payment-r5s2-fixed-sample.js",
     "scan:vars": "node scripts/scan-vars.js",
-    "check:vars": "node scripts/check-vars.js"
+    "check:vars": "node scripts/check-vars.js",
+    "check:vars:release": "node scripts/check-vars.js --since \"v3.1.8^{commit}\" --include-minor"
   },
   "build": {
     "appId": "com.openai.bankbillexceltool",

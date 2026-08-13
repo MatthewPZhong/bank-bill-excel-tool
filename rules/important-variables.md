@@ -9,7 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v33（app v3.1.3 PR-E — 平盘银行/账户流式确认写入、专用 COMMIT 后恢复、百万级管理聚合、磁盘门禁及真实进度/取消） |
+| 当前清单版本 | v34（app v3.1.9 — 全局任务生命周期、稳定关联任务身份、exact-seven worker batch context、存档九表审计血缘与真实归档/恢复/迁移） |
+| v34 本轮 review | 2026-08-11（以 annotated `v3.1.8^{commit}`=`688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa` 为 release baseline，覆盖 PR1—PR6 的 75 个生产文件；升格 `freezeWorkerBatchContext`、`TaskLifecycle`、`TaskPolicyRegistry`、`BusinessFlowResolver`，并校正 Archive operation/repository/service 生命周期条目） |
+| v34 基线数据 | `docs/analysis/var-reference-stats.md`（320 个 tracked JS / 4102 个顶层名称；`freezeWorkerBatchContext` 跨 21 个文件、53 次总引用、5 处声明；报告版本 3.1.9） |
+| v33 历史版本 | app v3.1.3 PR-E — 平盘银行/账户流式确认写入、专用 COMMIT 后恢复、百万级管理聚合、磁盘门禁及真实进度/取消。 |
 | v33 本轮 review | 2026-07-31（覆盖银行整批 scope 替换与 BizId 唯一约束回滚、账户相同物理行独立身份、bank/account 文件凭证和 SQL 聚合恢复、scope covering index、来源摘要事务缓存、维护作业磁盘门禁、750ms monotonic heartbeat、main/worker 提交阶段双重拒绝取消及生产禁用 main 旧 reader 回退） |
 | v32 历史版本 | app v3.1.3 PR-C1 — 平盘百万级导入共享 mutation、`row_hash` 来源身份迁移、archive apply 握手、schema fingerprint 与普通来源 worker exit 证据恢复。 |
 | v32 本轮 review | 2026-07-30（覆盖普通来源 `sourceRecordKey`、链接/消费/运行血缘迁移、迁移磁盘门禁与事务回滚、schema-only checkpoint 不推进、pending manifest 持久化先于 apply、普通来源部分提交恢复及 bank/account fail-closed） |
@@ -57,6 +60,16 @@
 ## 1. Critical — 业务契约锚点
 
 **这批常量 / 类承载业务协议。**一旦修改语义，会引起**跨层联动 + 历史数据失效**，属于高风险区。
+
+### `freezeWorkerBatchContext`（v3.1.9 新增 Critical，A-share 跨进程协议）
+- 定义：`src/main-process/archive-center/worker-batch-context.js`；由 main、TaskLifecycle、归档恢复和各业务 worker/dispatch 共用
+- 当前合同：只接受并冻结 exact-seven `batchId/batchNumber/taskRunId/taskKey/moduleId/parentRunId/operationKey`；`batchId` 必须为正安全整数，其余六项必须为非空字符串；required 调用缺失时 fail-closed
+- 关联功能：worker 跨线程消息、崩溃后恢复、批次终态回写、输入输出 artifact 登记、VCC/Acquiring/Position/Pending/工具箱等任务与原批次的唯一身份；自动统计为 21/53/5，属于真实 A-share
+- 变更 review 要点：
+  - 增删/改名字段必须同步全部 producer、worker entry、持久 checkpoint/recovery 与 controller；禁止 worker 自行补批次、用月份/latest/renderer state 猜身份
+  - 不得放宽正整数/非空/exact-set/frozen 约束，也不得把原始行、文件内容、可变 session 或内部路径塞入 context
+  - 恢复必须沿用已持久化的同一 seven-field context；缺失/陈旧/不一致时阻断业务恢复，不能另分新批次掩盖
+  - 必跑：worker-batch-context、TaskLifecycle、Acquiring resume、Position import、VCC worker、Pending 与工具箱 worker/dispatch 聚焦测试 + `npm run smoke`
 
 ### `FIXED_FIELD_VALUE_PREFIX`
 - 定义：`src/backend/database/utils.js`
@@ -358,6 +371,17 @@
 
 **跨层协作入口。**改函数签名/语义会让上下游解析错位，但不会让历史数据失效。
 
+### `TaskLifecycle`（v3.1.9 新增 Important-skeleton）
+- 定义：`src/main-process/archive-center/task-lifecycle.js`
+- `TaskPolicyRegistry` / `BusinessFlowResolver` — 分别定义全部业务 channel 的 reserve/exclude/support policy，以及跨任务稳定 `parentRunId` 的解析、绑定与 bind-intent 重放
+- 关联功能：13 个主模块与工具箱任务必须先预留全局日批次，再进入 started/terminal；worker、崩溃恢复、取消和输入输出 artifact 都沿同一 batch context 收口
+- 变更 review 要点：
+  - reserve policy 必须显式声明 `startsNewFlow` 与 terminal classifier；预留/输入证据失败时业务不得开始，terminal 只能是 succeeded/failed/cancelled
+  - policy inventory、main wrapper、裸 IPC exclude 与 renderer/preload 入口必须同步；禁止以未登记直连绕过 lifecycle
+  - `BusinessFlowResolver` 只能接受显式 parent 或已持久化的稳定业务身份；禁止月份、文件 hash、renderer/latest state 猜关联任务，bind intent 必须可重放
+  - 活动 batch claim、terminal intent 和恢复要保持幂等；archive 告警不能覆盖已取得的业务结果，也不能把失败任务标成成功
+  - 必跑：task lifecycle/policy/IPC inventory/flow resolver、各 worker recovery 与 archive controller/integration 聚焦测试 + `npm run smoke`
+
 ### `templateRepository`
 - 定义：`src/backend/database.js`（门面）
 - 关联功能：所有模板 CRUD 的唯一入口；`main.js` 里 33 次调用
@@ -598,16 +622,16 @@
 - 变更 review 要点：改启动 / 退出钩子要考虑未保存状态
 
 ### `archiveOperationTracker` / `archiveOperationContext` / `archiveOperationTail`（v3.0.22 新增 Runtime-state）
-- 定义：`src/main.js:395-398`；策略实现为 `src/main-process/archive-center/operation-tracker.js`
-- 关联功能：当前启动周期内捕获 11 个模块的文件选择、成功运行和第一次结果，把业务调用与存档批次绑定，并串行执行后台文件复制
+- 定义：`src/main.js`；策略实现为 `src/main-process/archive-center/operation-tracker.js`，批次身份由 v3.1.9 `TaskLifecycle` 提供
+- 关联功能：当前启动周期内为 13 个主模块与工具箱捕获本次输入/输出，把真实业务调用追加到已预留批次，并串行收口后台文件登记；不再自行持有另一套活动批次分配状态
 - 变更 review 要点：
-  - 活动键必须包含 `moduleId + moduleCode + runKey`；不能把链接表、临时 MPT、资金对账和对账单修复串到同一批次
+  - 批次键必须沿用 lifecycle 的 `moduleId/taskRunId/taskKey/operationKey/parentRunId`；不能把链接表、临时 MPT、资金对账、工具箱和对账单修复串到同一批次
   - 仅 `ARCHIVE_CHANNELS` 白名单进入 AsyncLocalStorage；不能让无关 IPC 参数被闭包或队列长期持有
   - 业务 handler 返回值必须先返回，归档失败只能告警；后台任务只保存轻量文件路径/结果快照，不持有银行行数组
   - 首次结果冻结和当前周期边界不可放宽；无活动批次的历史导出不得建立 output-only 批次
   - 业务成功时必须先固化源文件身份；后台复制前若文件已变化，应标记失败并要求重新执行业务，不能归档变化后的内容
   - 正常退出和在线升级退出必须等待归档队列完整排空；5 秒只用于慢退出告警，不能作为放弃尚未登记任务的上限
-  - 必跑：archive operation tracker 全策略测试 + 11 模块关键集成路径 + 启动性能检查
+  - 必跑：archive operation tracker 全策略测试 + 13 主模块/工具箱关键路径 + TaskLifecycle/worker context + 启动性能检查
 
 ### `AppDatabase` / `AppDatabase.init`（v2.1.7 F7-A1 升格 Important-skeleton ⚠️ 全局影响）
 - 定义：`src/backend/database.js:33` `class AppDatabase`（门面）；`init()` 方法在 `database.js:42` 附近设全局 PRAGMA
@@ -735,17 +759,19 @@
   - 不允许 DROP / 破坏性 ALTER
   - **N4 例外（v2.1.8 破坏性 raw_json rewrite）**：`ensureBillRawJsonV2Slim` 是已立项的破坏性 migration，强制配套 DB 备份 + 事务回滚 + 标志位
 
-### `ArchiveRepository` / `ArchiveService` / `archive_*` 四表（v3.0.22 新增 Risk-sensitive ⚠️ 审计血缘）
+### `ArchiveRepository` / `ArchiveService` / `archive_*` 九表（v3.0.22 新增、v3.1.9 扩展 Risk-sensitive ⚠️ 审计血缘）
 - 定义：`src/backend/database/archive-repository.js`、`src/main-process/archive-center/archive-service.js`
-- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_artifacts` / `archive_blobs` 保存轻量索引，Documents 下 SHA-256 内容寻址 Blob 保存 11 个模块的输入与首次结果字节
+- `ArchiveService` — 唯一业务编排入口，串联 repository、存储物化、任务状态、repair/retention、只读副本和存储根迁移
+- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_daily_sequences` / `archive_operation_issuances` / `archive_artifacts` / `archive_blobs` / `archive_cleanup_jobs` / `archive_flow_anchors` / `archive_flow_bind_intents` 保存轻量索引；Documents 下年/月/日/批次目录与 SHA-256 内容寻址 Blob 保存 13 个主模块及工具箱真实输入/输出
 - 变更 review 要点：
-  - 四表 schema 必须幂等；主库只存元数据，禁止把银行明细、Excel 字节或个人信息写入 SQLite
-  - 批次号由独立 sequence 游标原子递增，删除批次不得回退或复用已展示号码；模块代码和本地日期必须隔离
+  - 九表 schema 必须幂等；主库只存元数据/摘要/任务身份，禁止把银行明细、Excel 字节或个人信息写入 SQLite
+  - 批次号由全局日游标原子递增；删除批次不得回退或复用已展示号码，operation issuance 永久删除后仍须阻止旧 operation key 复活
+  - taskStatus 与 archiveStatus 必须分离；parent/anchor/bind-intent 只能由稳定业务身份推进，terminal/outbox/cleanup 重放必须幂等
   - Blob 发布必须先在同文件系统 staging 流式写入并计算 SHA-256，再原子 rename；不得整文件读入内存或仅按文件名/大小去重
   - 删除顺序必须先移除逻辑引用，最后引用才允许删物理 Blob；部分失败要可修复，不能误删仍被其它批次引用的文件
   - 打开只能暴露只读副本，另存为覆盖失败必须恢复原目标；renderer 不得取得内部相对路径
   - 归档失败不能回滚或改写业务成功状态；日志不得输出源文件绝对路径或表格内容
-  - 必跑：archive repository/service 真实 SQLite + 临时文件测试、共享引用删除、启动修复、失败重试、`npm run smoke`
+  - 必跑：archive repository/service 真实 SQLite + 临时文件测试、全局批次并发、TaskLifecycle/flow anchor、共享引用删除、启动修复、失败重试、storage migration/repair/retention、`npm run smoke`
   - ⚠️ 人工复核：真实输入/结果与 Blob 的 SHA-256、模块归属和首次结果集合；自动测试不能替代
 
 ### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）

@@ -509,6 +509,7 @@ P0 本机手工/真实 FS 证据已按自动链顺序复核：精确目录和无
 | UI-10 | P1 | renderer/a11y | 操作按钮 | 未锁 `🔒`、已锁 `🔓`；打开为文字“打开”；另存为 `💾`；title/aria 精确；Tab 顺序 related→lock→open→save |
 | UI-11 | P1 | Electron/layout | viewport/zoom/长文本 | 1240×860、1080×760 × 100/125/150%；filters 不裁切、页面无横向溢出、当前/旧批次号可辨识、related 同标题行、actions 不遮挡 |
 | UI-12 | P1 | preview | 可复现视觉证据 | settings、browser、browser 150% 三张仓库资产由确定性 fixture 生成；长路径/模块/旧号/跨日 related/按钮人工复核 |
+| UI-13 | P1 | renderer/status audit | task/archive 独立可见 | 详情 failed/cancelled 分别显示“任务失败/已取消”且 archive complete 仍显示“存档完成”；running+staging 显示“运行中/处理中”；列表第二行只显示 archiveStatus，合法 staging 不得为 `-`/“状态未知” |
 
 执行证据：开工前 repository/service/controller/UI 定向 73/73 PASS。首次 backend 聚焦 55/56，唯一失败为新增第二条 structured related live row 后旧 fixture 仍断言批次数 1，分类 stale test；更新为真实 live 集合后 56/56 PASS。UI 静态首次 15/20 为冻结字符串与 DOM 合同的 stale tests，机械同步后 23/23 PASS。Electron 首两轮分别因异步详情尚未加载就取节点、脚本 `.focus()` 不会触发真实 keyboard modality 而 0/6，均为 test design；改为等待真实详情和 static CSS + activeElement 合同后 6/6 PASS。人工预览另发现 150% 窄宽下 filters 裁切、批次号不可辨识的真实布局问题，响应式修复后加入几何/Tab 代表断言并最终 6/6 PASS。
 
@@ -517,3 +518,42 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 首次 full lint/smoke PASS、unit 5036/5037；唯一失败是 app-update 旧 static 正则仍要求 archive tab“确认”、下载完成“稍后”，分类 stale test。经批准只机械替换为精确 `closeButton.textContent = '返回'`，同 test 的按钮顺序/status dot/last-checked/observer/下载提示/progress/自动更新开关断言全部保留，最小组 29/29 PASS。第二次且最终 `release-check` exit 0：lint/smoke PASS，unit 5037/5037（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions（388472ms）；无第三次 full，runner 仅在全绿后合法同步 policy。
 
 仍开放用户人工门禁：Windows installer/portable 中文字体与原生 select 收起保存、真实盘符/UNC/网络长路径、Excel/WPS 只读副本和另存，以及真实删除后 related live rows、ready 引用总量和不可回退 latest issuance 核对。⚠️ 本轮不改金额、币种、业务算法或 Excel 内容，自动 UI/metadata 证据不关闭既有资金与文件血缘人工红线。
+
+Reviewer-confirmed UI-13 增量证据（2026-08-12）：Service/Controller 只读核验确认 `taskStatus` 已真实透传，无后端改动。首次 UI static 24/24、Archive 邻接 222/222、Electron 2 viewport×3 zoom 6/6 PASS；fixture 使用 failed/cancelled+complete+空 legacy business status、running+staging 的真实形状，详情与列表文字精确通过且不出现 `-`/“状态未知”。默认与 150% browser 预览按预期审计文案变化重新生成并人工复核；严格两行、related、retention、a11y、Tab 与布局合同不变。lint、三个 owned JS node-check、diff check PASS；release check-vars 按既有全版本合同 exit 2 并完成 75 个生产文件 review；唯一 full release-check lint/smoke、unit 5047/5047、integration 48/48 scripts（2385/2385 assertions）全绿，policy 仅在全绿后自动同步。真实 Windows packaged 失败/取消批次可见性继续保留人工验收。
+
+## 二十、PR7 本地发布候选收口矩阵
+
+| ID | 优先级 | 场景 | 最小断言 |
+| --- | --- | --- | --- |
+| REL-01 | P0 | 版本三点一致 | `package.json`、lock 顶层与根 package 精确为 `3.1.9`；依赖图不变；无 tag |
+| REL-02 | P0 | 三份用户发布文档 | CHANGELOG、版本历史、用户手册均有 2026-08-11 本地候选入口；覆盖 PR1—PR6 用户可见行为 |
+| REL-03 | P0 | v3.1.8 历史冻结 | Spec normalized SHA、人工 6/6、annotated tag、Release 和资产断言原样保留 |
+| REL-04 | P0 | 未完成人工门禁 | Windows runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、Excel/WPS 和资金人工明确未通过，不写 released/merged |
+| REL-05 | P1 | 文档结构与链接 | Markdown 行尾、内部链接、版本入口顺序和冻结文件零 diff |
+| REL-06 | P0 | 最终自动门禁 | `release-check`、设置布局、存档预览、从 peeled v3.1.8 baseline 的 release check-vars 和 fresh `check:dist` 全部按单次结果记录，不用 clean worktree false-green 或重跑掩盖首次失败 |
+| REL-07 | P0 | Windows 交叉构建证据 | 打包前 `build.files` 输入与 HEAD 一致；installer+portable 可生成且包内版本/提交/必需文件/体积通过；macOS 构建不代表 Windows runtime/session/文件系统验收 |
+
+### PR7 最终本地自动证据（2026-08-11）
+
+- 版本只修改 package/lock 三处，不改依赖，不创建 tag。
+- release-doc 测试拆分“当前 3.1.9 本地候选”和“冻结 v3.1.8 正式发布历史”；不新增业务 guard 或组合测试。
+- 三份用户发布文档和五份 v3.1.9 管理文档按本地候选反向同步；`changes/3.1.8/spec.md` 与 erratum 副本保持零修改。
+- `node --check tests/unit/vcc-financial-op-release-docs.test.js` PASS。首次 focused release-doc 为 5/6；唯一失败是用户手册当前版本标题升级后，v3.1.8 历史顶栏里的“自动化与技术 Release 不替代资金人工”句不再存在，分类为历史文案位置变化，不是生产/资金回归。将原句恢复到 v3.1.8 历史摘要，不修改或放宽断言；第二次 6/6 PASS。
+- 只读一致性检查 PASS：版本 3/3=`3.1.9`，将基线 lock 仅归一化两处根版本后与当前深比较一致，依赖图无变化；v3.1.8 frozen Spec normalized SHA 保持 `1f5f0663...bae367d`；本轮 Markdown 相对链接全部存在；`git diff --check` PASS。
+- 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5038/5038（329 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（298984ms），runner 只在全绿后合法刷新 policy。
+- 设置布局首次在受限环境中 6 组均 `electron exit null` 且无 stdout/stderr，分类 environment/PROBE；经批准唯一一次沙箱外重试 6/6 PASS。归档预览命令成功，生成图与基线仅有 0.28856% 像素的 RGB 抗锯齿漂移（单通道最大 4/255、alpha 不变、肉眼布局/内容一致），分类 renderer/font/subpixel nondeterminism；最终 tracked PNG 恢复基线 SHA-256 `d1eae242...86afb` 且零 diff。
+- `scan:vars` 报告仍为 v3.1.9、320 个 tracked JS、4102 个顶层名称。旧 `check:vars -- --include-minor` 只扫 clean HEAD working tree 而 exit 0，遗漏 PR1—PR6，该“无 review 命中”证据撤回。修复后的 `npm run check:vars:release` 从 peeled `v3.1.8^{commit}`=`688ae2c...` 扫 75 个生产文件，exit 2 为清单强制 review：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4；逐项结论见 implementation notes 与 important-vars v34。
+- reviewer P2 定向组 21/21 PASS；important-vars/baseline 契约组 3/3 PASS。included untracked 和 tracked dirty 均阻断；明确 exclude/clean CI fixture 放行；三个本地 dist 入口和两条 Windows workflow 均先 gate、后生成 build-info；`check:dist` 拒绝包内 commit 与当前 source HEAD 不一致。
+- reviewer P2 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5046/5046（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（299492ms）。无失败或重跑，runner 仅在全绿后合法同步 integration policy。
+- reviewer 复核确认旧包内 build-info 为 `e05c4d0`（不是当时 PR7 HEAD `0b8e66f`），并包含 `build.files` 命中的用户未跟踪 xlsx。因此旧 dirty/pre-commit build、临时 staging、四项 size/hash 全部撤回为 final HEAD 证据；不得用于发布判断。
+- 最终 Windows 静态证据待本轮代码/文档提交后在无用户 untracked 的 clean isolated checkout 唯一构建并校验。构建后不再修改 tracked 文档，最终 commit/build-info/四资产/latest 一致性通过交付报告记录；若构建受阻，不使用旧包替代。
+
+### 仍待人工且自动测试不替代
+
+- [ ] PR2 GUI、真实崩溃/重启和 statement/Acquiring/Position 资金结果。
+- [ ] Windows installer/portable 实际启动、worker/session、只读连接与受保护写运行时。
+- [ ] 目标生产库标准 v3.1.7 legacy-four 与 trigger 只读检查。
+- [ ] 约 16 GB 冷热性能、WAL、main lag；约 700 万行多 Sheet 工具箱。
+- [ ] 跨盘符、UNC/网络盘、长路径、hardlink/copy/readonly/repair 和存储迁移恢复。
+- [ ] Excel/WPS 打开只读副本、另存、字体/布局/打印和真实文件血缘。
+- [ ] 主体×九币种、调整后余额、跨月期初、归档/解归档/delete、审计及备份恢复资金人工复核。

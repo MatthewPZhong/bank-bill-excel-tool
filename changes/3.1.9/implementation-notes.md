@@ -642,6 +642,16 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - latest 发行证据和 live status 分离，删除后不从 visible max 倒推；related 删除后由新详情查询只消费剩余 live rows。ready 引用总量、runCount 和 UI 展示不改变 artifact/blob/batch identity、PR4 layout 或 PR5 marker/journal/delegate。
 - 本轮不改金额、币种、业务算法、Excel 内容、TaskLifecycle/terminal CAS 或输入输出 artifact 血缘。⚠️ 自动 metadata/UI 测试不替代真实文件引用计数、删除顺序、输入输出内容与资金人工复核。
 
+### Reviewer-confirmed P1 状态展示修复（2026-08-12）
+
+- 基线为 PR7 本地收口头 `80f54142e815a83516befc89bd6a8da759ff036a`，在同一分支追加独立 review-fix，不切回或重写 PR6 历史。Service `publicBatchDetail` 与 Controller `_mapBatch` 已原样保留 repository `taskStatus`，故 production ownership 只需 renderer 投影，不改 schema、Repository、Service、Controller、TaskLifecycle 或 terminal CAS。
+- 详情“业务状态”新增独立 task 投影：`reserved/running/succeeded/failed/cancelled` 分别为“已预留/运行中/已完成/任务失败/已取消”，可用 `taskStatusText` 时优先显示；仅 legacy 无 task status 时回退 `businessStatusText/businessStatus`。批次列表和详情“存档状态”继续只读 `archiveStatus`，合法 `staging` 映射为 pending/“处理中”，不把任务失败折叠到存档三态。
+- preview API 与 Electron fixture 移除不可能的 batch `archiveStatus='failed'` 及手填“已完成”遮蔽，改为真实组合：failed/cancelled + complete + 空 legacy business status，以及 running + staging。首次 UI static 24/24、Archive 邻接 222/222、Electron 2 viewport×3 zoom 6/6 PASS；详情依次证明“任务失败/存档完成”“已取消/存档完成”“运行中/处理中”，staging 列表同为“处理中”，无 `-`/“状态未知”。
+- 默认与 150% browser 预览因审计文案预期变化而重新生成并人工复核；变化仅为任务/存档状态文字和颜色，严格两行、related、按钮、长文本与布局未漂移。settings preview 不受影响。
+- 最终 `npm run lint`、本轮三个 owned JS 的 `node --check` 与 `git diff --check` PASS。`npm run check:vars:release` 从 peeled v3.1.8 baseline 扫描 75 个生产文件，按既有发布合同 exit 2：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4；本轮只新增 renderer 审计投影，不改变命中项中的持久化状态机、金额/币种、文件身份或输出链路。
+- 本轮唯一一次完整 `npm run release-check` 自然终态 exit 0：lint、smoke PASS；unit 5047/5047（331 files，0 fail/skip，node test 16800.455916ms）；integration 48/48 scripts、2385/2385 assertions（385157ms）。focused、Electron 与 full 均无 production/stale-test/test-design/environment failure；runner 只在全部 integration PASS 后合法自动同步 `rules/integration-test-policy.md` §七。
+- Blindspot 结论：真实数据流仍是 repository task/archive 双状态 → Service/Controller 透传 → renderer 分列展示，无第二状态源、状态推断或入口旁路；legacy fallback 只在 task status 缺失时生效。Reconciliation 结论：本轮仅修审计可见性，不改变金额、币种、方向、业务状态持久化、文件/批次 identity、重试/删除或 Excel 输出；未命中新增资金红线。真实失败/取消批次在 Windows packaged UI 的可见性仍需人工手测。
+
 ### Remaining Unknowns
 
 - Windows packaged 中文字体 fallback、原生 select 收起时点、真实长盘符/网络路径和 Excel/WPS 打开副本仍需人工验收。
@@ -812,6 +822,52 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - 文件/输出血缘审计确认 PR3 登记的 input/output artifact identity、original name、size、SHA、batch/parent/operation/outbox 语义均未改；layout 只增加同 artifact 的派生只读入口。公开 DTO 不暴露内部路径，打开/另存不会把 Excel/WPS 直接指向内部 layout 文件。
 - 本轮不改金额、币种、VCC/Toolbox 业务算法或 Excel 内容。⚠️ Windows packaged、跨卷/网络盘、长根路径、Excel/WPS 原地保存、真实大文件，以及真实输入/输出文件数和内容血缘继续要求人工复核；本机自动化不关闭这些红线。
 
+## PR7 本地发布候选收口（2026-08-11）
+
+### Decisions
+
+- 版本只更新 `package.json`、`package-lock.json` 顶层和根 package 三处为 `3.1.9`；不运行会创建 tag 的版本命令，不改变依赖图。
+- 现有 release-doc test 拆分为当前 v3.1.9 本地候选断言与 v3.1.8 正式发布历史断言。v3.1.8 normalized Spec SHA、人工 6/6、tag、Release 和公开资产证据继续由原测试锁定，不追溯改写。
+- 三份用户文档只新增 v3.1.9 候选入口并更新当前手册的存档中心章节；历史版本条目不重写。用户文案描述批次、任务、VCC/工具箱、目录/迁移和 UI 行为，不暴露内部类名、token、SQL 预算或开发流程标识。
+- PR7 不修改 `src/`、历史 fixture 审计版本、v3.1.8 frozen Spec 或 erratum 副本；若 focused/full gate 发现真实生产回归，立即停止并分类，不为发布通过修改 A—PR6 生产代码。
+- 本地 Windows 交叉构建只作为 artifact/static PROBE；不把 macOS 构建解释为 Windows packaged runtime、session、UNC/网络盘、hardlink 或 Excel/WPS 已验收。
+- reviewer P2 修正把 Windows 构建源码定义为“`build.files` 覆盖范围与 HEAD 一致，随后才生成 build-info”；所有本地/CI Windows 构建入口都先 fail-closed，`check:dist` 再核包内 commit 与当前 source HEAD 一致。
+- release important-vars 硬节点固定从 annotated `v3.1.8^{commit}` 扫到 HEAD；普通开发 `check:vars` 仍只扫 HEAD working tree，不扩大日常行为。
+- 最终 clean Windows 静态证据只能在本轮代码/文档 commit 后、无用户 untracked 的独立 checkout 中生成；构建后不再改 tracked 文件，产物明细只作 post-commit 交付报告。
+
+### Assumptions
+
+- 候选文档日期使用本地日期 `2026-08-11`；heading 可带日期，但正文必须明确“本地发布候选，尚未合并或正式发布”。
+- 不新增 `docs/iterations/v3.1.9`；本迭代的现行合同与状态继续由 `changes/3.1.9` 五份管理文档维护。
+- `preview:archive-center` 若位级无变化则不形成 ownership；变量统计和 integration policy 只在对应脚本合法刷新时纳入后续候选提交。
+
+### Evidence（本阶段）
+
+- 编辑前第二次基线核验：branch=`codex/v3.1.9-pr6-archive-ui-stats`，HEAD=`e05c4d01413cf86b0f82a200ef7066f1de227a4f`，parent=`71fcaa3cd6d0e8a19ba84cb94c3726b4d07e7019`，tracked/index clean，无 upstream；随后只创建 `codex/v3.1.9-pr7-release-closeout`。
+- 编辑前 v3.1.8 frozen Spec normalized SHA=`1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`。
+- `node --check tests/unit/vcc-financial-op-release-docs.test.js` PASS。首次 focused release-doc 5/6；唯一失败是用户手册顶栏切到当前 v3.1.9 候选后，v3.1.8 历史资金人工免责声明缺句。分类为历史文案位置变化，将原句恢复到 v3.1.8 历史摘要，测试保护未删除/放宽；第二次 6/6 PASS。
+- 版本/lock 只读检查 3/3=`3.1.9`；基线 lock 仅归一化顶层与根 package 两处版本后与当前 JSON 深比较一致，依赖图无变化。v3.1.8 frozen Spec normalized SHA 仍为 `1f5f0663ee35436c8b1f7da628822a4f83a3f70db215cd5ebd60a6720bae367d`。
+- 当前 ownership 内 Markdown 相对链接全部解析存在，`git diff --check` PASS。
+- 唯一一次 `release-check` 自然终态 PASS：lint/smoke；unit 5038/5038（329 files）；integration 48/48 scripts、2385/2385 assertions（298984ms），policy 仅在全绿后自动同步。
+- `verify:app-settings-layout` 首次受限环境 `electron exit null`，批准的唯一一次沙箱外重试 6/6 PASS。`preview:archive-center` 成功；新旧图尺寸和内容一致，仅有 0.28856% 像素 RGB 抗锯齿漂移、单通道最大 4/255、alpha 不变，分类 renderer/font/subpixel nondeterminism；最终恢复已保存基线，tracked PNG SHA-256=`d1eae242c8dfc77428c2aae80f2b218f73b6e33323c4d1051b9a8e9fffb86afb` 且零 diff。
+- `scan:vars` 的 v3.1.9 报告已覆盖 320 个 tracked JS / 4102 个顶层名称。旧 `check:vars -- --include-minor` 因只扫 clean HEAD working tree 而 exit 0，不能证明 PR1—PR6 无重要变量命中，该 false-green 结论撤回。
+- 首次精确 baseline 扫描 `--since 688ae2c...` 因 `execSync` 默认输出缓冲报 `/bin/sh ENOBUFS`，分类 release-tooling regression；改为无 shell 拼接的 `execFileSync` 并显式 64 MiB buffer 后，`npm run check:vars:release` 成功扫描 peeled `v3.1.8^{commit}` 到 HEAD 的 75 个生产文件，exit 2 为强制 review 命中而非命令故障：Critical 6、Important-skeleton 13、Runtime-state 12、Risk-sensitive 5、Minor 4。
+- important-vars v34 已升格 `freezeWorkerBatchContext`（21/53/5 A-share）及 `TaskLifecycle/TaskPolicyRegistry/BusinessFlowResolver`，并校正 Archive operation/repository/service 的 v3.1.9 九表、全局日批次、稳定 parent、terminal/outbox/cleanup、13 主模块与工具箱合同。其余命中复核结论：模板保留 ID/固定前缀、金额/币种/行过滤和 writer 输出列未改；`FileValidationError/serializeError` 保持既有 schema；`runCheckCore/unmatchedRows` 只接 task context/summary evidence，五阶段 SQL、金额、币种和行守恒未改；session/state/dialog/app 命中为 prepared snapshot、UI/literal 或现有生命周期接线；一次性账户迁移与路径规范化未改语义。
+- reviewer 复核确认旧 Windows 包内 build-info commit 为 `e05c4d0`，不是当时 PR7 HEAD `0b8e66f`，且 `build.files` 把用户未跟踪 xlsx 收入 asar。因此旧 dirty/pre-commit build、隔离 staging 和四项 size/hash 全部撤回为 final HEAD 证据；它们不得用于本轮发布判断，也不得冒充后续 clean isolated build。
+- 新定向 release tooling 组 21/21 PASS；追加 important-vars 契约后 baseline 组 3/3 PASS。覆盖 included untracked/dirty packaged input 阻断、显式 exclude 与 clean CI checkout 放行、包内 source identity mismatch 阻断、构建入口顺序和 peeled baseline SHA 契约。
+- 本轮唯一一次 `npm run release-check` 自然终态 exit 0：lint、smoke PASS；unit 5046/5046（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（299492ms）。无失败或重跑；runner 只在全绿后合法同步 `rules/integration-test-policy.md` §七。
+
+### Deviations
+
+reviewer P2 证明旧产物不是 PR7 final source snapshot，原“四项最终静态证据”表述已撤回。这是发布证据与门禁缺口，不改变 A—PR6 业务行为；修复限于 release scripts/workflows/checks/tests、important-vars 与管理证据，不修改 `src/` 或资金算法。预览非确定性结论仍不变；独立 review 与人工验收仍不前移。
+
+### Remaining unknowns / manual gates
+
+- Windows installer/portable 实际 runtime、`createSession/readOnly/query_only/UPDATE FROM`、worker 关闭与写保护仍为 PROBE。
+- 目标生产 legacy-four/trigger、约 16 GB、约 700 万行、跨卷/UNC/网络盘、长路径、hardlink/copy/readonly/repair、Excel/WPS 仍待用户人工。
+- ⚠️ PR2 GUI/崩溃恢复与真实主体×九币种、调整后余额、跨月、归档/解归档/delete、审计、备份恢复和输入输出血缘仍是资金人工红线。
+- 本轮最终 commit 后仍须在不含用户 untracked 的 clean isolated checkout 完成唯一一次 Windows installer+portable build、ASCII staging 与 `check:dist`；在该 post-commit 证据完成前不得恢复“最终 Windows 静态证据”结论。
+- 独立 Sol Ultra review、合并、tag、GitHub Release 和公开资产回读未执行。
 ### Deviations
 
 - review 反证原 hardlink-first 方案不能用“只读”保证 canonical 与多批次内容隔离；实施改为新 materialization 始终生成独立 copy，历史 hardlink 仅检测并脱钩。主 Spec C11/§8/§9/§15与本记录已同步；Blob/artifact identity、SHA/size、repair 和删除顺序不变。
