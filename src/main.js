@@ -335,8 +335,12 @@ const {
   JOURNAL_INDEX_NAME
 } = require('./main-process/toolbox-output-publication');
 const {
-  recoverToolboxPublicationsIntoArchive
+  recoverToolboxPublicationsIntoArchive,
+  toolboxRecoveryOutputFiles: toolboxFinalOutputFiles
 } = require('./main-process/toolbox-archive-recovery');
+const {
+  pathsAlias
+} = require('./main-process/toolbox-target-identity');
 const {
   exportToolboxFilter,
   exportToolboxMultiFilters,
@@ -4140,12 +4144,8 @@ function initializeArchiveCenter() {
     onTerminalIntentFlushed: finalizePositionTerminalIntent,
     recoverInterruptedTaskOwners: [
       {
-        ownerName: 'VCC output publications',
-        recover: async () => recoverToolboxPublicationsIntoArchive({
-          userDataDir: app.getPath('userData'),
-          archiveCenter: archiveCenterService,
-          recoverPublications: recoverToolboxPublicationsAsync
-        })
+        ownerName: 'Toolbox/VCC output publications',
+        recover: recoverToolboxPublicationsAtStartup
       }
     ],
     getProtectedInterruptedTaskBatchIds: () => readPublicationRecoveryBatchIds(
@@ -17546,14 +17546,105 @@ function buildToolboxAuditDetailLines(files, warningSummary = null) {
   return details;
 }
 
-function publishToolboxArtifacts(kind, artifacts, targets, batchContext) {
-  return publishToolboxPublicationAsync({
+async function publishToolboxArtifacts(
+  kind,
+  artifacts,
+  targets,
+  batchContext,
+  options = {}
+) {
+  const targetSnapshots = Array.isArray(options.targetSnapshots)
+    ? options.targetSnapshots
+    : [];
+  const publication = await publishToolboxPublicationAsync({
     taskId: `toolbox-${kind}-${Date.now()}-${randomUUID()}`,
     artifacts,
-    targets,
+    targets: (Array.isArray(targets) ? targets : []).map((target, index) => ({
+      ...(target && typeof target === 'object' ? target : { targetPath: target }),
+      ...(targetSnapshots[index]
+        ? { expectedTargetSnapshot: targetSnapshots[index] }
+        : {})
+    })),
+    protectedSourcePaths: options.protectedSourcePaths,
     userDataDir: app.getPath('userData'),
-    batchContext
+    batchContext,
+    archiveInputFiles: options.archiveInputFiles,
+    requireArchiveHandoff: true,
+    requireValidatedArtifacts: true
   });
+  try {
+    await recoverToolboxPublicationsIntoArchive({
+      userDataDir: app.getPath('userData'),
+      archiveCenter: archiveCenterService,
+      recoverPublications: recoverToolboxPublicationsAsync,
+      taskIds: [publication.taskId]
+    });
+  } catch (error) {
+    publication.pendingArchiveHandoff = true;
+    publication.warnings = [
+      ...(Array.isArray(publication.warnings) ? publication.warnings : []),
+      '正式输出已保存；存档接管尚未完成，后续工具箱发布将暂时受限并自动重试。'
+    ];
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'toolbox',
+      message: '工具箱正式输出已提交，但存档耐久接管待重试',
+      details: [
+        error && error.message ? error.message : String(error),
+        ...(error && Array.isArray(error.detailLines) ? error.detailLines : [])
+      ],
+      stack: error && error.stack ? error.stack : undefined
+    });
+  }
+  return publication;
+}
+
+function captureToolboxTargetSnapshot(targetPath) {
+  const resolvedPath = path.resolve(String(targetPath || ''));
+  try {
+    const stat = fs.lstatSync(resolvedPath);
+    const snapshot = sourceSnapshotFromStat(stat);
+    if (!snapshot) throw new Error(`输出目标不是可覆盖的普通文件：${resolvedPath}`);
+    return Object.freeze({ exists: true, snapshot: Object.freeze(snapshot) });
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return Object.freeze({ exists: false });
+    throw error;
+  }
+}
+
+function captureToolboxTargetSnapshots(targetPaths) {
+  return (Array.isArray(targetPaths) ? targetPaths : []).map(
+    (targetPath) => captureToolboxTargetSnapshot(targetPath)
+  );
+}
+
+function assertToolboxTargetSnapshotsFresh(targetPaths, snapshots) {
+  const paths = Array.isArray(targetPaths) ? targetPaths : [];
+  const expected = Array.isArray(snapshots) ? snapshots : [];
+  if (paths.length !== expected.length) throw new Error('输出目标确认信息已失效，请重新选择');
+  for (let index = 0; index < paths.length; index += 1) {
+    let stat = null;
+    try {
+      stat = fs.lstatSync(paths[index]);
+    } catch (error) {
+      if (!error || error.code !== 'ENOENT') throw error;
+    }
+    const unchanged = expected[index].exists
+      ? Boolean(stat && sourceSnapshotMatchesStat(expected[index].snapshot, stat))
+      : !stat;
+    if (!unchanged) throw new Error(`输出目标在确认后发生变化，请重新确认：${paths[index]}`);
+  }
+}
+
+function assertToolboxTargetsDoNotAliasSources(sourcePaths, targetPaths) {
+  for (const sourcePath of Array.isArray(sourcePaths) ? sourcePaths : []) {
+    for (const targetPath of Array.isArray(targetPaths) ? targetPaths : []) {
+      if (pathsAlias(fs, sourcePath, targetPath)) {
+        throw new Error(`输出文件不能覆盖输入源文件：${targetPath}`);
+      }
+    }
+  }
 }
 
 let toolboxSplitReadContext = null;
@@ -17601,21 +17692,12 @@ function assertToolboxSplitSourceFresh(context) {
   }
 }
 
-function toolboxFinalOutputFiles(files, sourceOperation) {
-  return (Array.isArray(files) ? files : []).map((file) => ({
-    filePath: file.filePath,
-    role: 'output',
-    sourceOperation,
-    originalName: file.fileName || path.basename(file.filePath),
-    expectedSha256: file.sha256,
-    expectedSizeBytes: file.byteSize
-  }));
-}
-
 async function recoverToolboxPublicationsAtStartup() {
   try {
-    const result = await recoverToolboxPublicationsAsync({
-      userDataDir: app.getPath('userData')
+    const result = await recoverToolboxPublicationsIntoArchive({
+      userDataDir: app.getPath('userData'),
+      archiveCenter: archiveCenterService,
+      recoverPublications: recoverToolboxPublicationsAsync
     });
     const recovered = Array.isArray(result.recovered) ? result.recovered : [];
     if (recovered.length > 0) {
@@ -17672,14 +17754,19 @@ function registerToolboxHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
+        assertToolboxTargetsDoNotAliasSources(choice.filePaths, [saveResult.filePath]);
+        const targetSnapshots = captureToolboxTargetSnapshots([saveResult.filePath]);
         const prepared = {
           proceed: true,
           inputPaths: choice.filePaths.slice(),
           outputPaths: [saveResult.filePath],
           filePaths: choice.filePaths.slice(),
-          savePath: saveResult.filePath
+          savePath: saveResult.filePath,
+          targetSnapshots
         };
         prepared.beforeStart = () => {
+          assertToolboxTargetsDoNotAliasSources(prepared.filePaths, [prepared.savePath]);
+          assertToolboxTargetSnapshotsFresh([prepared.savePath], prepared.targetSnapshots);
           prepared.inputFiles = prepared.filePaths.map((filePath) => {
             const sourceSnapshot = sourceSnapshotFromStat(fs.statSync(filePath));
             if (!sourceSnapshot) throw new Error('合并源文件不可读，请重新选择');
@@ -17723,7 +17810,12 @@ function registerToolboxHandlers() {
               styleStats: writeRes.styleStats || null
             }],
             [{ targetPath: savePath }],
-            taskContext.batchContext
+            taskContext.batchContext,
+            {
+              protectedSourcePaths: filePaths,
+              targetSnapshots: prepared.targetSnapshots,
+              archiveInputFiles: prepared.inputFiles
+            }
           );
           const publishedFile = publishResult.files[0];
           prepared.outputFiles = toolboxFinalOutputFiles(
@@ -17890,6 +17982,11 @@ function registerToolboxHandlers() {
           savePath = saveResult.filePath;
           outputPaths = [savePath];
         }
+        assertToolboxTargetsDoNotAliasSources(
+          [readContext.sourceFilePath],
+          outputPaths
+        );
+        const targetSnapshots = captureToolboxTargetSnapshots(outputPaths);
         const prepared = {
           proceed: true,
           inputPaths: [readContext.sourceFilePath],
@@ -17900,7 +17997,8 @@ function registerToolboxHandlers() {
           field,
           values,
           targetPlans,
-          savePath
+          savePath,
+          targetSnapshots
         };
         prepared.inputFiles = [{
           filePath: readContext.sourceFilePath,
@@ -17908,7 +18006,17 @@ function registerToolboxHandlers() {
           sourceOperation: 'toolbox:split:export',
           sourceSnapshot: readContext.snapshot
         }];
-        prepared.beforeStart = () => assertToolboxSplitSourceFresh(readContext);
+        prepared.beforeStart = () => {
+          assertToolboxSplitSourceFresh(readContext);
+          assertToolboxTargetsDoNotAliasSources(
+            [readContext.sourceFilePath],
+            prepared.outputPaths
+          );
+          assertToolboxTargetSnapshotsFresh(
+            prepared.outputPaths,
+            prepared.targetSnapshots
+          );
+        };
         return prepared;
       } catch (error) {
         return { proceed: false, result: toolboxFailureResult(error) };
@@ -18009,7 +18117,12 @@ function registerToolboxHandlers() {
               styleStats: plan.styleStats || null
             })),
             preparedPlans.map((plan) => ({ targetPath: plan.targetPath })),
-            taskContext.batchContext
+            taskContext.batchContext,
+            {
+              protectedSourcePaths: [sourceFilePath],
+              targetSnapshots: prepared.targetSnapshots,
+              archiveInputFiles: prepared.inputFiles
+            }
           );
           const files = publishResult.files;
           prepared.outputFiles = toolboxFinalOutputFiles(
@@ -18085,7 +18198,12 @@ function registerToolboxHandlers() {
               styleStats: generationResult.styleStats || null
             }],
             [{ targetPath: savePath }],
-            taskContext.batchContext
+            taskContext.batchContext,
+            {
+              protectedSourcePaths: [sourceFilePath],
+              targetSnapshots: prepared.targetSnapshots,
+              archiveInputFiles: prepared.inputFiles
+            }
           );
           const publishedFile = publishResult.files[0];
           prepared.outputFiles = toolboxFinalOutputFiles(
@@ -18164,7 +18282,12 @@ function registerToolboxHandlers() {
             styleStats: generationResult.styleStats || null
           }],
           [{ targetPath: savePath }],
-          taskContext.batchContext
+          taskContext.batchContext,
+          {
+            protectedSourcePaths: [sourceFilePath],
+            targetSnapshots: prepared.targetSnapshots,
+            archiveInputFiles: prepared.inputFiles
+          }
         );
         const publishedFile = publishResult.files[0];
         prepared.outputFiles = toolboxFinalOutputFiles(
@@ -19004,7 +19127,6 @@ if (hasSingleInstanceLock) app.whenReady()
   .then(async () => {
     markStartupMetric(STARTUP_METRIC_MARKS.appReady);
     initializeActivityLog();
-    await recoverToolboxPublicationsAtStartup();
 
     // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
     try {
