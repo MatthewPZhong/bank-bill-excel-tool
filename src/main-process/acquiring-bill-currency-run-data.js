@@ -230,6 +230,26 @@ function sameRunResult(left, right) {
   );
 }
 
+function acquiringRunFlowIdentity(db, run, source, monthKey) {
+  const runId = Number(run && run.id);
+  try {
+    const progress = runRepo.getRunChunkProgress(db, runId);
+    const batchContext = runRepo.readRunProgressBatchContext(progress);
+    if (batchContext && batchContext.taskRunId) {
+      return {
+        type: 'business-run-id',
+        value: `acquiring-task:${batchContext.taskRunId}`
+      };
+    }
+  } catch (_error) {
+    // 升级前 run 没有 exact-seven 上下文时保留旧稳定身份；不从月份猜新 parent。
+  }
+  return {
+    type: 'business-run-id',
+    value: `acquiring-run:${source}:${monthKey}:${runId}`
+  };
+}
+
 function prepareRunExport({ userDataDir, mainDb, monthKey }) {
   if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
     throw resumeError('monthKey 格式错误（应为 YYYY-MM）');
@@ -240,6 +260,7 @@ function prepareRunExport({ userDataDir, mainDb, monthKey }) {
   let source = 'main';
   let run = mirror;
   let dbPath = '';
+  let flowIdentity = null;
   if (mirror.side_db_rel_path) {
     const expectedRelPath = runDataStore.sideDbRelPath(MODULE, monthKey);
     if (mirror.side_db_rel_path !== expectedRelPath) {
@@ -257,6 +278,7 @@ function prepareRunExport({ userDataDir, mainDb, monthKey }) {
       }
       [run] = candidates;
       source = 'side';
+      flowIdentity = acquiringRunFlowIdentity(sideDb, run, source, monthKey);
     } finally {
       try { sideDb.close(); } catch (_error) { /* swallow */ }
     }
@@ -264,10 +286,7 @@ function prepareRunExport({ userDataDir, mainDb, monthKey }) {
   const diffFile = runFileEvidence(run.diff_file_path);
   if (!diffFile) throw resumeError(`月份 ${monthKey} 的差异表文件不存在，请重新「开始运行」`);
   const runId = Number(run.id);
-  const flowIdentity = {
-    type: 'business-run-id',
-    value: `acquiring-run:${source}:${monthKey}:${runId}`
-  };
+  if (!flowIdentity) flowIdentity = acquiringRunFlowIdentity(mainDb, run, source, monthKey);
   return {
     source,
     dbPath,
@@ -647,6 +666,44 @@ function listMonthsDualSource({ userDataDir, mainDb }) {
   return Array.from(set).sort().reverse();
 }
 
+// 启动异常任务扫尾前，只读取已经写入侧库 chunk_progress 的 exact-seven 上下文。
+// 这些批次由显式 resume 入口恢复，不能被通用 interrupted sweep 先改成 failed；
+// 损坏或升级前无上下文的记录不猜测批次身份，仍交通用扫尾处理。
+function listRecoverableArchiveBatchIds({ userDataDir }) {
+  const batchIds = new Set();
+  for (const file of runDataStore.listSideDbFiles(userDataDir, MODULE)) {
+    let db = null;
+    try {
+      db = new DatabaseSync(file.path, { readOnly: true });
+      const rows = db.prepare(`
+        SELECT chunk_progress
+        FROM ${RUNS_TABLE}
+        WHERE chunk_progress IS NOT NULL
+      `).all();
+      for (const row of rows) {
+        try {
+          const progress = JSON.parse(row.chunk_progress);
+          if (!progress || !['partial', 'in-progress', 'data-complete', 'complete'].includes(progress.status)) {
+            continue;
+          }
+          const context = runRepo.readRunProgressBatchContext(progress);
+          const batchId = Number(context && context.batchId);
+          if (Number.isSafeInteger(batchId) && batchId > 0) batchIds.add(batchId);
+        } catch (_error) {
+          // 破坏或不兼容的恢复证据必须 fail-closed，不用它保护任何猜测批次。
+        }
+      }
+    } catch (_error) {
+      // 离线/损坏的侧库无法证明恢复所有权；通用任务扫尾仍负责终结残留批次。
+    } finally {
+      if (db) {
+        try { db.close(); } catch (_error) { /* ignore */ }
+      }
+    }
+  }
+  return [...batchIds].sort((left, right) => left - right);
+}
+
 // getSessionStatus：双源——侧库存在 → 读侧库 readiness + 主库 runs 镜像；否则读主库旧表（历史 run 零变化）。
 function getSessionStatusDualSource({ userDataDir, mainDb, monthKey }) {
   if (!monthKey) return { monthKey: null, flowReady: false, billReady: false, latestRun: null };
@@ -812,6 +869,7 @@ module.exports = {
   persistRunResumeBatchContext,
   resumeRunCheck,
   listMonthsDualSource,
+  listRecoverableArchiveBatchIds,
   getSessionStatusDualSource,
   deleteMonthSideDb,
   trimMonthSideDbKeepDiff,

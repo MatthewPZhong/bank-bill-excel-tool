@@ -4,7 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   SOURCE_TYPES,
-  getSourceDefinition
+  getSourceDefinition,
+  normalizeLegacyStoredCurrency
 } = require('../../../../src/backend/vcc-financial-op/definitions');
 const {
   mapDetailRow,
@@ -179,15 +180,29 @@ test('空业务键、跨账期、未知方向和不支持币种进入互斥异�
     订单号: '2', BillDate: '2026-06-01', 公司主体: 'PPHK',
     出入方向: 'IN', 我方币种: 'USD', 我方到账金额: '1'
   });
-  const badCurrency = map(SOURCE_TYPES.RECHARGE, {
+  const cnyCurrency = map(SOURCE_TYPES.RECHARGE, {
     订单号: '3', BillDate: '2026-06-01', 公司主体: 'PPHK',
     出入方向: 'in', 我方币种: 'CNY', 我方到账金额: '1'
+  });
+  const legacyCnhCurrency = map(SOURCE_TYPES.RECHARGE, {
+    订单号: '4', BillDate: '2026-06-01', 公司主体: 'PPHK',
+    出入方向: 'in', 我方币种: 'CNH', 我方到账金额: '1'
   });
 
   assert.equal(blankKey.disposition, 'invalid_key');
   assert.equal(wrongMonth.disposition, 'format_error');
   assert.equal(badDirection.disposition, 'format_error');
-  assert.equal(badCurrency.disposition, 'format_error');
+  assert.equal(cnyCurrency.disposition, null);
+  assert.equal(cnyCurrency.statCurrency, 'CNY');
+  assert.equal(legacyCnhCurrency.disposition, 'format_error');
+  assert.match(legacyCnhCurrency.validationMessage, /CNH.*不在支持币种/);
+});
+
+test('历史读取边界只把精确 CNH 映射为 CNY，不放宽其他非规范币种', () => {
+  assert.equal(normalizeLegacyStoredCurrency('CNH'), 'CNY');
+  assert.equal(normalizeLegacyStoredCurrency(' CNY '), 'CNY');
+  assert.equal(normalizeLegacyStoredCurrency('cnh'), 'cnh');
+  assert.equal(normalizeLegacyStoredCurrency('usd'), 'usd');
 });
 
 test('金额超过两位小数或 Excel 有效数字上限时进入格式异常且不做舍入', () => {

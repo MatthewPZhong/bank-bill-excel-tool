@@ -7,7 +7,7 @@
 > - audited-baseline: `main`（`package.json` = `3.1.8`，2026-08-09 复审）
 > - audited-at: `2026-08-09`
 > - suggested-branch: `codex/v3.1.9-global-archive-batches`
-> nature: 本迭代会改变批次身份分配时点、所有业务任务与存档中心的依赖关系、存档物理目录和存储根目录。不得改变任何模块的金额、币种、匹配、回填、业务归档、人工调整或结果模板规则。
+> nature: 本迭代会改变批次身份分配时点、所有业务任务与存档中心的依赖关系、存档物理目录和存储根目录。除 §0.2 明确冻结的 VCC `CNH → CNY`、结果模板列名与异常数据处置外，不得改变任何模块的金额、其他币种、匹配、回填、业务归档或人工调整规则。
 
 ---
 
@@ -32,15 +32,29 @@
 
 ## 0.1 VCC 财务 OP 纠错补遗窄范围 Erratum
 
-自 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5` 起，v3.1.9 的以下三类合同由 v3.1.8 上线后[纠错补遗](../3.1.8/erratum/README.md)中的 [Spec v2](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md) 和 [TechDoc v1.1](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md)取代：
+自 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5` 起，v3.1.9 的以下三类合同由 v3.1.8 上线后[纠错补遗](../3.1.8/erratum/README.md)中的 [Spec v2.1](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md) 和 [TechDoc v1.2](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md)取代：
 
 1. 标准 v3.1.7 四数据集归档的结构分类与兼容边界；
 2. VCC adjustment、archive、unarchive 和 delete 的操作保护路径；
 3. 数据管理、归档枚举、删除目标和受保护写操作的性能路径。
 
-本 erratum 仅有上述窄效力。第 1 章 C01—C14、PR1 的批次身份合同和 PR2 的 TaskLifecycle/七字段 worker context/终态 CAS 合同保持不变；金额、币种、主体、九币种余额、调整公式、五表新计算规则和结果模板均不改变。
+本 erratum 原有窄效力保持。第 1 章 C01—C14、PR1 的批次身份合同和 PR2 的 TaskLifecycle/七字段 worker context/终态 CAS 合同不变；金额、主体、九币种余额公式、调整公式和五表计算规则不变。币种集合、结果模板币种列及导入异常处置以后续 §0.2 和补遗 Spec v2.1/TechDoc v1.2 为准。
 
 补遗只前向约束 v3.1.9，不追溯改写 v3.1.8 已发布二进制、tag、冻结 Spec/hash 或人工 `6/6 PASS` 历史证据。分类、runtime 或性能 PROBE 失败时必须阻断后续合并/发布，不得放宽 classifier/guard、伪造 Pending、启用无保护提交或新增 fallback。
+
+## 0.2 VCC CNY 与异常数据过滤合同（2026-08-13）
+
+用户确认并已完成本地实现/自动验证：
+
+1. VCC 九币种唯一集合为 `AUD/CAD/CNY/EUR/GBP/HKD/JPY/SGD/USD`；结果表、校验表、期初、归档和导出用 CNY，不再生成 CNH。
+2. “系统财务OP”取消 `CNY → CNH`。新 CNY 原样落库；新 CNH 为不支持币种，按异常主体快照过滤，不自动改写。
+3. 结果模板固定币种列由 CNH 改为 CNY；模板 SHA-256 固定为 `48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053`。
+4. 明细按行过滤 `invalid_key/format_error/idempotent_conflict`；系统财务 OP 按“主体 × 精确九币种快照”过滤。可信范围内的其他正常行/主体必须继续落库并可审计。
+5. 工作簿/Sheet/表头结构不可信、取消、数据库错误、归档门禁等 hard failure 仍整组失败关闭；不得滥用局部过滤。
+6. 历史精确 CNH 兼容采用“小型派生事实原子迁移 + 大表读取/导出边界投影 CNY”；原始大表和 raw_json 不批量改写。CNH/CNY 资金坐标冲突以 `vcc-currency-migration-blocked` 零部分提交失败关闭。
+7. 顶层 lifecycle 非成功或成功但无结构化 import record 必须显示失败；不得兜底成“新增 0、幂等跳过 0”的假成功。
+
+完整产品/技术合同由补遗 [Spec v2.1](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md) §15 与 [TechDoc v1.2](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md) §22 承载。已发布的 `changes/3.1.8/spec.md` 继续保持冻结，不用当前修订追溯重写历史。
 
 ---
 
@@ -51,9 +65,9 @@
 | ID | 优先级 | 需要确认的问题 | 方案 A | 方案 B | 推荐口径 | 影响 | 状态 |
 |---|---:|---|---|---|---|---|---|
 | C01 | P0 | “拿最新批次号”究竟是读取现有最新号，还是申请下一个新号？ | 原子申请并占用下一个新批次号 | 只读取当前最新批次号 | **A**。只读最新号会让并发任务共用批次，无法保证唯一性 | 决定批次服务 API 和并发正确性 | 已确认 |
-| C02 | P0 | 批次粒度是什么？ | 每次实际业务任务调用一个新批次；导入、运行、导出分别计次 | 一个完整业务流程共用一个批次；导入、运行、导出可续写 | **A**，更符合“所有任务执行前取批次号”和“运行次数” | 会改变现有部分模块将导入/运行/导出合并到同批次的行为 | 已确认 |
+| C02 | P0 | 批次粒度是什么？ | 每次实际业务任务调用一个新批次；导入、运行、导出通常分别计次 | 一个完整业务流程共用一个批次；导入、运行、导出可续写 | **A（受 C04 两项窄例外约束）**。凡产生存档 artifact 或独立审计状态的实际任务仍各自计次；`bank-statement:run`、`template:save-mappings` 不计次 | 会改变现有部分模块将导入/运行/导出合并到同批次的行为 | 已确认 |
 | C03 | P0 | “所有任务”是否包含只读查询、文件选择、预览和取消按钮？ | 仅实际处理/写入/导出/删除等任务分配批次；只读查询、选择器、预览不分配 | 所有 IPC/按钮动作都分配 | **A**。避免打开页面、刷新列表也增加运行次数 | 决定运行次数、空批次数量及覆盖清单 | 已确认 |
-| C04 | P0 | 没有输入/输出文件但会改变业务状态的任务是否建批？例如归档、解归档、人工调整、删除 | 建立“仅任务元数据”的批次；无文件时不强制创建物理目录 | 不建批，仅文件处理任务建批 | **A**，与“所有任务”字面要求一致 | 决定存档中心是否同时承担任务审计中心职责 | 已确认 |
+| C04 | P0 | 没有输入/输出文件但会改变业务状态的任务是否建批？例如归档、解归档、人工调整、删除 | 建立“仅任务元数据”的批次；无文件时不强制创建物理目录 | 不建批，仅文件处理任务建批 | **A（2026-08-12 窄化）**。归档、解归档、人工调整、删除等可审计业务状态动作仍建批；`bank-statement:run` 与 `template:save-mappings` 仅产生会话中间结果/配置且无存档文件，不建批、不占号，实际导入/导出仍各自建批 | 决定存档中心是否同时承担任务审计中心职责，并避免无文件中间动作产生空批次 | 已确认 |
 | C05 | P0 | 工具箱在存档中心如何归类？ | 新增 archive scope `toolbox`，显示名“工具箱”，出现在存档筛选，但不进入主模块切换菜单 | 归到现有某个业务模块 | **A**，避免污染任一业务模块统计 | 决定模块注册表是“13 个主模块 + 1 个工具范围” | 已确认 |
 | C06 | P0 | 批次已预留后任务失败或被取消，是否保留批次号？ | 保留失败/已取消批次，序号永不复用；文件选择阶段取消则不预留 | 删除批次并允许复用序号 | **A**，保证审计和并发安全 | 决定状态机和“最新批次”含义 | 已确认 |
 | C07 | P1 | 设置里的“最新批次”显示哪一个？ | 全局最近一次已发放批次，包含成功、失败和取消 | 最近一次成功完成的批次 | **A**，与“最新批次号”及全局序号一致 | 决定统计查询和用户预期 | 已确认 |
@@ -144,7 +158,7 @@ v3.1.9 完成以下能力：
 1. **基线变化**：原 Spec 假设 `main` 仍为 v3.1.7，现已失效；v3.1.9 直接基于当前 v3.1.8 `main`。
 2. **VCC 财务OP接入范围扩大但总体架构不变**：v3.1.8 已形成“导入 → 双层预检 → 计算 → 一次性调整 → 归档/解归档 → 删除 → 历史导出”的持久状态机，因此 3.1.9 必须按真实 action 分类，而不是只接“导入/运行/导出”。
 3. **只读动作必须排除**：`run:preflight`、月份/记录/详情查询、adjustment options、unarchive preview、delete/export preview 等不产生新批次；否则仅打开弹窗就会污染“运行次数”。
-4. **写状态但无文件的动作必须建批**：opening initialize、adjustment add、archive、unarchive、resolve、delete 等按 C04 建“元数据批次”，但不强制创建空物理批次目录。
+4. **可独立审计的无文件业务状态动作必须建批**：opening initialize、adjustment add、archive、unarchive、resolve、delete 等按 C04 建“元数据批次”，但不强制创建空物理批次目录。`bank-statement:run` 只是当前会话导出的中间计算，`template:save-mappings` 只是模板配置保存；两者不生成存档 artifact，按 2026-08-12 用户裁决不建批、不占用批次号。银行对账实际输入与最终输出仍分别由导入、导出动作建批。
 5. **历史导出必须建独立批次**：v3.1.8 支持历史已归档月份导出；每次真实生成结果文件均是新任务、新批次，输出文件归档到该批次。
 6. **取消语义需复用当前受保护后台任务**：`task:cancel` 不创建新批次，只终结当前 active batch 为 cancelled；不得破坏 v3.1.8 worker/租约/退出保护。
 7. **关联任务必须可跨重启恢复**：v3.1.8 已支持重启后恢复已归档结果入口，故 `parentRunId` 必须持久化并尽量绑定业务 run/operation identity。
@@ -809,15 +823,15 @@ v3.1.8 暴露的通道应逐项登记。按 C03/C04 推荐口径：
 
 1. SHA-256 Blob 仍是完整性真相。
 2. materialized 文件必须与 canonical Blob 拥有独立 inode；不得从 Blob 建 hardlink。
-3. 始终通过 staging 流式 copy 生成，复核大小与 SHA-256、设为只读后原子发布。
-4. 历史 `storage_mode=hardlink` 或检测到与 canonical 共享 inode 时，必须先验证 canonical，再脱钩为独立 copy。
+3. 使用 staging 流式复制，校验成功后再原子发布到批次目录。
+4. copy 完成后复核大小与 SHA-256。
 5. 目录化失败不得把已成功 Blob 误标为丢失；读取可回退 canonical Blob，批次标记待修复。
 6. 用户点击【打开】仍生成只读副本，不直接把内部运行文件交给 Excel/WPS 编辑。
 7. `另存为` 继续走安全复制。
-8. **materialized copy 必须视为不可变存档**：物化完成后设置只读属性/权限；应用自身不得原地写入。
+8. materialized copy 完成后设置只读属性/权限；应用自身不得原地写入。
 9. 打开详情、启动一致性检查和 repair 路径发现 materialized 文件大小/hash 与 canonical Blob 元数据不一致时，必须 fail-closed，禁止把 materialized 文件反向吸收为新 Blob。
-10. 历史 hardlink 若与 canonical 共享 inode，任一入口的外部篡改都可能污染 canonical；必须以 DB hash + size 验证 canonical，不信任时 fail-closed，不得静默接受新 hash 或从污染文件自修。
-11. copy 模式的 materialized 文件被改写时，只删除并从 canonical Blob 重新物化即可；不得改变 artifact identity。
+10. 历史 `storage_mode=hardlink` 或检测到与 canonical 共享 inode 时，必须先验证 canonical，再在有界前台/后台 repair 队列中脱钩为独立 copy；不得继续把共享 inode 交给用户入口。
+11. materialized copy 被改写时，只删除并从 canonical Blob 重新物化即可；不得改变 artifact identity，也不得影响引用同一 Blob 的其它批次。
 12. Windows/Excel/WPS 人工验收必须验证批次目录文件不能被应用原地保存覆盖；需要编辑时只能通过【打开】产生的只读副本或【另存为】导出副本。
 
 ## 8.3 文件名
@@ -846,6 +860,8 @@ v3.1.8 暴露的通道应逐项登记。按 C03/C04 推荐口径：
 - 存档中心详情显示“本次任务无运行文件”，而不是“文件存档失败”；
 - 后续若该批次追加文件，再创建目录。
 
+例外：`bank-statement:run` 与 `template:save-mappings` 不属于本节的元数据批次。它们经过业务退出/升级互斥闸门执行，但不进入 TaskLifecycle、不预留批次号。历史已经发放的空批次保留原号，不删除、不重排、不复用。
+
 ## 8.5 历史目录化
 
 - 历史批次号不改写。
@@ -857,6 +873,8 @@ YYYY/YYYY-MM/YYYY-MM-DD/{旧批次号}/
 
 - 旧批次号含模块前缀也直接作为目录名。
 - 迁移可中断续跑；未物化期间继续从 Blob 打开和另存。
+- 普通应用启动的前台预算必须同时限制 v2 artifact metadata 扫描、repair-pending 证据持久化和实际 repair；默认最多处理 64 个 artifact 就允许 runtime delegate/UI 可用。未扫到的剩余 artifact 由同一 root serialization 后台分块续跑，不得在 `initialize()` 返回前全量 `lstat`/写 failure。
+- 按需打开/另存仍对目标 artifact 强校验并可就地修复；存储根迁移切换前的 `verifyHashes=true` 仍必须对权威全集做全量 SHA-256/size 校验，不受 64 条启动预算限制。
 
 ## 8.6 删除与保留期自动清理的目录生命周期
 
@@ -935,7 +953,7 @@ renderer 不传目标路径。
 - 属于另一个 archive instance 的根；
 - 只读目录；
 - symlink/junction 绕过后的被拒位置；
-- 空间明显不足的卷；容量预估必须覆盖全部缺失 canonical Blob 与全部缺失/需脱钩 materialized copy 的额外最坏空间，不得依赖 hardlink 节省空间或只按源目录表面大小估算；
+- 空间明显不足的卷；容量预估必须覆盖全部缺失 canonical Blob 与全部缺失/需脱钩 materialized copy 的额外空间，不得依赖 hardlink 节省空间或只按源目录表面大小估算；
 - 无法完成“创建→写入→flush→重命名→读取→删除”探针的目录。
 
 ## 9.3 根标记
@@ -991,7 +1009,7 @@ prepared
 3. 校验源、目标、空间和 marker。
 4. 原子写 journal `prepared`。
 5. **只流式复制 canonical Blob 与根身份所需 marker；不得递归复制旧批次 materialized files。** `.readonly/` 不迁移，`.staging/` 必须在进入 copying 前清空/恢复到可证明安全状态。
-6. 在目标根根据库 ready artifact **重新 materialize** 年/月/日/批次目录：始终生成与目标 canonical Blob 独立 inode 的 copy。
+6. 在目标根根据数据库 ready artifact **重新 materialize** 年/月/日/批次目录；无论同卷或跨卷均生成与 canonical 独立的 copy。
 7. 逐 canonical Blob 和重新物化文件校验大小与 SHA-256。
 8. 用目标根初始化新 service 并执行一致性检查。
 9. 在单一提交点保存 `archive_center_storage_root` 并切换 runtime delegate。
@@ -1212,6 +1230,8 @@ DTO 必须提供结构化关联数据，不允许 renderer 根据字符串猜测
 - 搜索、列表、详情、锁定、删除、重试、打开和另存同时支持新旧格式。
 - 旧批次缺少 task 元数据时，详情显示现有 source operation 或“历史任务”。
 - 旧 outbox 记录重放后继续绑定原 operation key；不得意外分配新批次。
+- 启动重放后仍留存的普通 retry outbox（例如源文件/存档盘临时不可用、终态冲突）必须继续保护原 batch 和源文件，但不得阻止整个应用/UI 启动；用户需能进入存档中心诊断或重试。
+- 只有无法安全接管的 owner/committed receipt，或无法验证 owner 批次保护集的状态，可以 fail-closed 阻止新业务。Toolbox committed receipt 只能在原 exact7 batch 的全部输入/输出 artifact ready 且 terminal 耐久后明确 ack/删除；普通 outbox `remaining > 0` 不得代替该 owner 证明。
 
 ## 12.2 读取回退
 
@@ -1459,7 +1479,11 @@ VCC财务OP主进程 handlers / service / worker
 5. 数据导出和导入审计导出分别建立任务批次。
 6. preview/list/get 不增加运行次数。
 7. task cancel 只取消活动批次。
-8. VCC 金额、九币种余额、revision、调整序列、业务归档和历史导出与 v3.1.8 完全一致。
+8. 除 §0.2 的 CNY/异常处置修订外，VCC 金额、九币种余额公式、revision、调整序列、业务归档和历史导出语义与 v3.1.8 一致。
+9. 当前九币种精确为 `AUD/CAD/CNY/EUR/GBP/HKD/JPY/SGD/USD`；新系统财务 OP 的 CNY 不再转 CNH，新 CNH 不接受。
+10. 明细混合正常/异常行时正常行进入 effective，异常行留审计；系统混合完整/异常主体时只提交完整主体九币种快照。
+11. 导入摘要分别报告新增、幂等跳过与异常过滤；failed/busy/空 records 不显示零行假成功。
+12. 历史 CNH 升级不得合并冲突资金坐标、批量改写大表或丢失 raw 审计；结果/归档/导出统一投影为 CNY。
 
 ## 15.5 工具箱
 
@@ -1479,8 +1503,8 @@ VCC财务OP主进程 handlers / service / worker
 3. 无文件批次不误报失败。
 4. 同名文件稳定追加 `(2)`。
 5. Windows 非法字符、保留名、尾随点/空格、长路径安全。
-6. materialized copy 与 canonical 不共享 inode，hash/大小一致且只读。
-7. 历史 hardlink 在 canonical 可信时脱钩为 copy；canonical 不可信时 fail-closed。
+6. materialized copy 与 canonical 内容一致且 inode 独立。
+7. copy 完成后 hash/大小一致并设置只读。
 8. 目录文件损坏可回退 Blob 并标记修复。
 9. 历史批次保持旧号并可目录化。
 10. 删除批次只删除对应运行文件；共享 Blob 仍被其它批次使用。
@@ -1511,7 +1535,7 @@ VCC财务OP主进程 handlers / service / worker
 19. 迁移期间新任务、删除、重试和第二次迁移被互斥。
 20. 迁移期间退出/更新安装受保护。
 21. 容量预估始终计入缺失 canonical Blob 与 materialized copy 最坏空间；历史 hardlink 脱钩也计入额外副本空间。
-22. 跨卷迁移不会把旧 hardlink 当普通文件复制两遍；目标侧先有 canonical Blob，再重建独立 copy。
+22. 跨卷迁移只读取源 canonical；目标侧先复制 canonical Blob，再重新生成独立 materialized copy。
 23. `.readonly/` 不迁移；`.staging/` 未清理到安全状态时不得进入 copying。
 
 ## 15.8 统计与 UI
@@ -1539,13 +1563,13 @@ VCC财务OP主进程 handlers / service / worker
 
 ## 15.8.1 copy isolation / cleanup / legacy root 专项
 
-- materialized copy 与 canonical 拥有独立 inode，且只读保护生效；应用不原地写入。
-- copy 物化被外部修改后从 canonical Blob 可恢复。
-- 历史 hardlink 在 canonical 可信时脱钩为 copy；canonical hash 与 DB 记录不符时 fail-closed，不接受新 hash。
+- materialized copy 只读保护生效；应用不原地写入，且与 canonical inode 独立。
+- copy 被外部修改后从 canonical Blob 可恢复；canonical 与引用同 Blob 的其它批次保持不变。
+- 历史 hardlink 在 canonical 可信时脱钩为 copy；canonical hash 与 DB 记录不符时仍 fail-closed，不接受新 hash。
 - `cleanupExpired()` 删除 materialized batch 目录并逐级清空空日期/月/年目录。
 - 一个 Blob 被多个批次引用时，删除/到期单一批次不删除共享 Blob；最后引用消失才删除。
 - v3.1.8 legacy 默认根无 marker 时可在一致性证明成立后 bootstrap；未知/冲突目录不能自动认领。
-- 存储根跨卷迁移只复制 canonical Blob，不把旧 hardlink 作为第二份普通文件复制；目标目录重建独立 copy。
+- 存储根迁移只从源 canonical 读取内容；目标目录重新生成独立 materialized copy。
 
 ## 15.9 既有能力回归
 
@@ -1618,7 +1642,7 @@ node --test tests/unit/vcc-financial-op-archive-integration.test.js
 ## 16.3 产品验收
 
 - [ ] 同日跨模块/工具箱批次号连续且不重复。
-- [ ] 所有实际任务执行前已拿到批次号。
+- [ ] 除 C04 明确的 `bank-statement:run`、`template:save-mappings` 两项 no-archive-artifact 例外外，所有实际归档任务执行前已拿到批次号。
 - [ ] 查询、预览、文件选择是否计次与 C03 一致。
 - [ ] 无文件状态任务是否计次与 C04 一致。
 - [ ] 13 个主模块和工具箱均可在存档中心筛选。
@@ -1627,7 +1651,7 @@ node --test tests/unit/vcc-financial-op-archive-integration.test.js
 - [ ] 存档地址变更与历史迁移符合确认结果。
 - [ ] 批次详情批次号右侧按规则显示“关联任务：2026-08-09-001/002/003”，不显示具体任务名和内部 `parentRunId`。
 - [ ] 同流程关联可跨重启恢复；重新开始一轮业务流程不会串入旧关联。
-- [ ] materialized copy 不可被应用原地修改；外部篡改有完整性告警/修复路径，历史 hardlink 可安全脱钩。
+- [ ] materialized copy 不与 canonical 共享 inode且不可被应用原地修改；外部篡改有完整性告警/修复路径。
 - [ ] 删除最新批次后“最新批次”不倒退，下一次发号不复用。
 - [ ] 保留期限快速连续修改最终值等于最后一次选择，【返回】不承担保存。
 
@@ -1650,6 +1674,7 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 11. `parentRunId` 的创建、继承、重跑、删除和跨重启行为均有契约测试，关联任务 UI 不串流程。
 12. copy 隔离/历史 hardlink 脱钩、retention cleanup、legacy root bootstrap 和跨卷迁移均通过真实文件系统专项测试。
 13. `archiveStatus` 继续严格兼容现库三态 `staging/complete/incomplete`；业务失败只由 `taskStatus=failed` 表达，不偷偷重建旧表扩枚举。
+14. VCC CNY 合同、结果模板 hash、异常过滤单位、数量守恒和历史 CNH fail-closed 迁移符合 §0.2 及补遗 Spec v2.1/TechDoc v1.2。
 
 ---
 
@@ -1682,7 +1707,7 @@ C01—C14 已确认。只有以下情况允许 Codex 再次询问：
 
 1. v3.1.8 最终合并代码出现本文未覆盖的新业务 action，且无法判定其是否应分配批次；
 2. 真实历史存档根被外部程序混入文件，无法通过 marker、数据库和 hash 判断归属；
-3. 目标 Windows 环境无法安全完成流式 copy，且复制会违反已确认容量约束；
+3. 目标 Windows 环境无法完成安全流式 copy，且复制会违反已确认容量约束；
 4. 某业务任务在“预留批次前”已经发生不可逆副作用，无法通过重排或兼容层满足需求。
 
 提问前必须给出代码路径、最小复现场景、数据/审计影响和推荐解决方案，不得只说“需求不清楚”。

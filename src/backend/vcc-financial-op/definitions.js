@@ -17,8 +17,15 @@ const SOURCE_LABELS = Object.freeze({
 });
 
 const SUPPORTED_CURRENCIES = Object.freeze([
-  'AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
+  'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
 ]);
+
+// 仅供读取历史派生事实；新导入仍按 SUPPORTED_CURRENCIES 严格拒绝 CNH。
+function normalizeLegacyStoredCurrency(value) {
+  if (value === null || value === undefined) return value;
+  const currency = String(value).trim();
+  return currency === 'CNH' ? 'CNY' : currency;
+}
 
 const RECHARGE_HEADERS = Object.freeze([
   '穿透节点ID', '对账单ID', 'BillDate', '业务部门', '对手部门', '订单号', '流水对账id',
@@ -154,6 +161,7 @@ module.exports = {
   SOURCE_TYPES,
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES,
+  normalizeLegacyStoredCurrency,
   RECHARGE_HEADERS,
   FEE_FX_HEADERS,
   CHANNEL_HEADERS,

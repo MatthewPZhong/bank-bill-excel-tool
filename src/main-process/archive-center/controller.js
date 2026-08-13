@@ -365,6 +365,8 @@ class ArchiveCenterController {
     let discarded = 0;
     for (const record of records) {
       const payload = record && record.payload ? record.payload : {};
+      let replayRecord = record;
+      let resolvedBatchId = Number(payload.targetBatchId);
       let issuance;
       let created;
       try {
@@ -382,6 +384,18 @@ class ArchiveCenterController {
                 metadata: payload.metadata
               })
             : await this.service.createBatch(payload);
+          if (!(Number.isSafeInteger(resolvedBatchId) && resolvedBatchId > 0)) {
+            resolvedBatchId = Number(created && created.batch && created.batch.id);
+            if (!Number.isSafeInteger(resolvedBatchId) || resolvedBatchId < 1) {
+              throw new Error('存档 outbox 新建批次后未返回有效 batchId');
+            }
+            // 旧版 outbox 可能没有 targetBatchId。批次一旦创建，必须先把真实
+            // batchId 耐久回写，再做终态 CAS；否则重启会反复建 ghost batch，
+            // 或把 terminalOutcome 以 NaN 目标永久留在 outbox。
+            replayRecord = this.outboxStore.merge(record.id, {
+              targetBatchId: resolvedBatchId
+            });
+          }
         }
       } catch (error) {
         this._warn('存档 outbox 重放失败', error && error.message ? error.message : String(error));
@@ -404,8 +418,11 @@ class ArchiveCenterController {
           continue;
         }
       }
-      let terminalOutcome = payload.terminalOutcome
-        ? normalizeTerminalOutcome(payload.terminalOutcome)
+      const replayPayload = replayRecord && replayRecord.payload
+        ? replayRecord.payload
+        : payload;
+      let terminalOutcome = replayPayload.terminalOutcome
+        ? normalizeTerminalOutcome(replayPayload.terminalOutcome)
         : null;
       if (!operationDeleted
           && !terminalOutcome
@@ -413,11 +430,11 @@ class ArchiveCenterController {
           && payload.metadata.positionOperationToken
           && this.resolveOutboxTerminalIntent) {
         try {
-          const resolved = await this.resolveOutboxTerminalIntent(record, created);
+          const resolved = await this.resolveOutboxTerminalIntent(replayRecord, created);
           if (resolved) {
             terminalOutcome = normalizeTerminalOutcome(resolved);
-            this.outboxStore.merge(record.id, {
-              targetBatchId: payload.targetBatchId,
+            replayRecord = this.outboxStore.merge(record.id, {
+              targetBatchId: resolvedBatchId,
               terminalOutcome
             });
           }
@@ -432,7 +449,7 @@ class ArchiveCenterController {
       let terminalResult = null;
       if (!operationDeleted && terminalOutcome) {
         terminalResult = await this._replayTaskTerminal(
-          Number(payload.targetBatchId),
+          resolvedBatchId,
           terminalOutcome
         );
         if (!terminalResult || terminalResult.ok === false) {
@@ -450,7 +467,7 @@ class ArchiveCenterController {
           try {
             await this.onTerminalIntentFlushed({
               route: terminalOutcome.afterTerminal,
-              record,
+              record: replayRecord,
               created,
               terminalResult
             });
@@ -473,7 +490,7 @@ class ArchiveCenterController {
               .filter(Boolean)
               .map((value) => path.resolve(String(value)))
           );
-          releasablePaths = record.payload.files
+          releasablePaths = replayRecord.payload.files
             .map((file) => file.filePath)
             .filter(Boolean)
             .map((value) => path.resolve(String(value)))

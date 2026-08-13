@@ -37,6 +37,35 @@ function executeIpcTaskInvocation(contract, event, prepared, args, taskContext) 
   return contract.execute(event, prepared, taskContext, ...args);
 }
 
+async function executeIpcTaskWithoutBatch({
+  businessOperationRegistry,
+  meta,
+  markExecuteStarted,
+  execute
+} = {}) {
+  if (!businessOperationRegistry
+      || typeof businessOperationRegistry.begin !== 'function'
+      || typeof businessOperationRegistry.end !== 'function') {
+    throw new TypeError('no-batch task 需要 businessOperationRegistry');
+  }
+  if (typeof markExecuteStarted !== 'function' || typeof execute !== 'function') {
+    throw new TypeError('no-batch task 需要 markExecuteStarted/execute');
+  }
+  const operation = businessOperationRegistry.begin(meta || {});
+  if (!operation.accepted) {
+    return {
+      status: 'busy',
+      message: operation.message || '当前暂时不能开始新的任务'
+    };
+  }
+  try {
+    markExecuteStarted();
+    return await execute(null);
+  } finally {
+    businessOperationRegistry.end(operation.token);
+  }
+}
+
 async function prepareIpcTaskInvocation(contract, event, args) {
   if (!contract.prepare) {
     return { proceed: true, args: args.slice(), inputPaths: [], outputPaths: [] };
@@ -67,6 +96,7 @@ async function prepareIpcTaskInvocation(contract, event, args) {
 
 module.exports = {
   createIpcTaskContext,
+  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation

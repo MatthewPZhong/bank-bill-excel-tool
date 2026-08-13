@@ -33,8 +33,7 @@ function text(value) {
 }
 
 function normalizeSystemCurrency(value) {
-  const currency = text(value);
-  return currency === 'CNY' ? 'CNH' : currency;
+  return text(value);
 }
 
 function displayAmountToken(displayValue, rawValue) {
@@ -380,6 +379,13 @@ function systemRowError(message, { sourceRow, fieldName, sheetName } = {}) {
   return error;
 }
 
+function validationUnitCount(entries) {
+  return new Set(entries.map(({ file, error }, index) => (
+    error.validationUnitKey
+      || `${path.basename(file.filePath)}\u0000error:${index}`
+  ))).size;
+}
+
 function rowField(values, header) {
   return (values || [])[SYSTEM_OP_DEFINITION.indexes[header]];
 }
@@ -449,25 +455,7 @@ function buildSubjectSnapshot({
   };
 }
 
-function buildCompleteSnapshots(context, { ignoreErrors = false } = {}) {
-  const snapshots = [];
-  const errors = [];
-  for (const [subject, rows] of context.rowsBySubject) {
-    try {
-      snapshots.push(buildSubjectSnapshot({ ...context, subject, rows }));
-    } catch (error) {
-      errors.push(error);
-    }
-  }
-  if (!ignoreErrors && errors.length > 0) {
-    const error = errors[0];
-    error.parsedSnapshots = snapshots;
-    throw error;
-  }
-  return snapshots;
-}
-
-function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
+function readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetName = '') {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`系统财务OP账期格式无效：${targetMonth}`);
 
@@ -492,121 +480,154 @@ function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
   }
 
   const rowsBySubject = new Map();
+  const invalidSubjects = new Set();
+  const validationErrors = [];
+  let targetMonthRows = 0;
   const snapshotContext = {
     rowsBySubject,
+    invalidSubjects,
+    validationErrors,
     normalizedMonth,
     sourceFile,
     sheetName,
     headerRow: header.rowIndex + 1
   };
-  try {
-    for (let rowIndex = header.rowIndex + 1; rowIndex < displayMatrix.length; rowIndex++) {
-      const displaySourceRow = Array.isArray(displayMatrix[rowIndex]) ? displayMatrix[rowIndex] : [];
-      const rawSourceRow = Array.isArray(rawMatrix[rowIndex]) ? rawMatrix[rowIndex] : [];
-      if (![...displaySourceRow, ...rawSourceRow].some((value) => text(value) !== '')) continue;
-      const sourceRow = rowIndex + 1;
-      const extraColumn = Math.max(displaySourceRow.length, rawSourceRow.length) > SYSTEM_OP_HEADERS.length
-        ? Array.from({ length: Math.max(displaySourceRow.length, rawSourceRow.length) - SYSTEM_OP_HEADERS.length })
-          .findIndex((_unused, offset) => (
-            text(displaySourceRow[SYSTEM_OP_HEADERS.length + offset]) !== ''
-            || text(rawSourceRow[SYSTEM_OP_HEADERS.length + offset]) !== ''
-          ))
-        : -1;
-      if (extraColumn >= 0) {
-        const columnNumber = SYSTEM_OP_HEADERS.length + extraColumn + 1;
-        throw systemRowError(
-          `${sheetName} 第 ${sourceRow} 行存在模板外的第 ${columnNumber} 列数据`,
-          { sourceRow, fieldName: `第${columnNumber}列`, sheetName }
-        );
-      }
+  const rememberError = (error, subject = '') => {
+    error.validationUnitKey = `${sourceFile}\u0000${subject || '<unknown-subject>'}`;
+    if (subject) invalidSubjects.add(subject);
+    validationErrors.push(error);
+  };
 
-      const displayValues = SYSTEM_OP_HEADERS.map((_headerName, index) => (
-        displaySourceRow[index] == null ? '' : displaySourceRow[index]
+  for (let rowIndex = header.rowIndex + 1; rowIndex < displayMatrix.length; rowIndex++) {
+    const displaySourceRow = Array.isArray(displayMatrix[rowIndex]) ? displayMatrix[rowIndex] : [];
+    const rawSourceRow = Array.isArray(rawMatrix[rowIndex]) ? rawMatrix[rowIndex] : [];
+    if (![...displaySourceRow, ...rawSourceRow].some((value) => text(value) !== '')) continue;
+    const sourceRow = rowIndex + 1;
+    const extraColumn = Math.max(displaySourceRow.length, rawSourceRow.length) > SYSTEM_OP_HEADERS.length
+      ? Array.from({ length: Math.max(displaySourceRow.length, rawSourceRow.length) - SYSTEM_OP_HEADERS.length })
+        .findIndex((_unused, offset) => (
+          text(displaySourceRow[SYSTEM_OP_HEADERS.length + offset]) !== ''
+          || text(rawSourceRow[SYSTEM_OP_HEADERS.length + offset]) !== ''
+        ))
+      : -1;
+    if (extraColumn >= 0) {
+      const columnNumber = SYSTEM_OP_HEADERS.length + extraColumn + 1;
+      rememberError(systemRowError(
+        `${sheetName} 第 ${sourceRow} 行存在模板外的第 ${columnNumber} 列数据`,
+        { sourceRow, fieldName: `第${columnNumber}列`, sheetName }
       ));
-      const rawValues = SYSTEM_OP_HEADERS.map((_headerName, index) => (
-        rawSourceRow[index] == null ? '' : rawSourceRow[index]
-      ));
-      const displayDate = rowField(displayValues, SYSTEM_OP_DEFINITION.monthHeader);
-      const rawDate = rowField(rawValues, SYSTEM_OP_DEFINITION.monthHeader);
-      const rowMonth = monthOfDate(displayDate) || monthOfDate(rawDate);
-      if (!rowMonth) {
-        throw systemRowError(
-          `${sheetName} 第 ${sourceRow} 行“账单日期”无法解析为有效日期`,
-          { sourceRow, fieldName: SYSTEM_OP_DEFINITION.monthHeader, sheetName }
-        );
-      }
-      if (rowMonth !== normalizedMonth) continue;
-
-      const subject = text(rowField(displayValues, SYSTEM_OP_DEFINITION.subjectHeader));
-      if (!subject) {
-        throw systemRowError(
-          `${sheetName} 第 ${sourceRow} 行“主体”不能为空`,
-          { sourceRow, fieldName: SYSTEM_OP_DEFINITION.subjectHeader, sheetName }
-        );
-      }
-      const department = text(rowField(displayValues, SYSTEM_OP_DEFINITION.departmentHeader));
-      if (department !== 'VCC') {
-        throw systemRowError(
-          `${sheetName} 第 ${sourceRow} 行“业务部门”必须为 VCC，实际为“${department || '空'}”`,
-          { sourceRow, fieldName: SYSTEM_OP_DEFINITION.departmentHeader, sheetName }
-        );
-      }
-      const sourceCurrency = text(rowField(displayValues, SYSTEM_OP_DEFINITION.currencyHeader));
-      const currency = normalizeSystemCurrency(sourceCurrency);
-      if (!SUPPORTED_CURRENCIES.includes(currency)) {
-        throw systemRowError(
-          `${sheetName} 第 ${sourceRow} 行“币种”仅允许 AUD、CAD、CNY/CNH、EUR、GBP、HKD、JPY、SGD、USD，实际为“${sourceCurrency || '空'}”`,
-          { sourceRow, fieldName: SYSTEM_OP_DEFINITION.currencyHeader, sheetName }
-        );
-      }
-      const displayBalance = rowField(displayValues, SYSTEM_OP_DEFINITION.balanceHeader);
-      const rawBalance = rowField(rawValues, SYSTEM_OP_DEFINITION.balanceHeader);
-      let balance;
-      let balanceEvidence;
-      try {
-        const reading = systemAmountRead(displayBalance, rawBalance, {
-          label: `系统财务OP ${subject} ${sourceCurrency} 财务余额`,
-          field: SYSTEM_OP_DEFINITION.balanceHeader,
-          cell: XLSX.utils.encode_cell({
-            r: rowIndex,
-            c: SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader]
-          }),
-          rawLexicalToken: balanceLexicalTokens && balanceLexicalTokens.has(sourceRow)
-            ? balanceLexicalTokens.get(sourceRow)
-            : undefined
-        });
-        balance = reading.canonicalValue;
-        balanceEvidence = reading.evidence;
-      } catch (error) {
-        const wrapped = systemRowError(
-          `${sheetName} 第 ${sourceRow} 行“财务余额”无效：${error.message}`,
-          { sourceRow, fieldName: SYSTEM_OP_DEFINITION.balanceHeader, sheetName }
-        );
-        wrapped.code = error.code || 'amount-precision-invalid';
-        throw wrapped;
-      }
-
-      if (!rowsBySubject.has(subject)) rowsBySubject.set(subject, []);
-      rowsBySubject.get(subject).push({
-        sourceRow,
-        sourceCurrency,
-        currency,
-        balance,
-        balanceEvidence,
-        displayValues,
-        rawValues
-      });
+      continue;
     }
-  } catch (error) {
-    error.parsedSnapshots = buildCompleteSnapshots(snapshotContext, { ignoreErrors: true });
-    throw error;
+
+    const displayValues = SYSTEM_OP_HEADERS.map((_headerName, index) => (
+      displaySourceRow[index] == null ? '' : displaySourceRow[index]
+    ));
+    const rawValues = SYSTEM_OP_HEADERS.map((_headerName, index) => (
+      rawSourceRow[index] == null ? '' : rawSourceRow[index]
+    ));
+    const displayDate = rowField(displayValues, SYSTEM_OP_DEFINITION.monthHeader);
+    const rawDate = rowField(rawValues, SYSTEM_OP_DEFINITION.monthHeader);
+    const rowMonth = monthOfDate(displayDate) || monthOfDate(rawDate);
+    if (!rowMonth) {
+      rememberError(systemRowError(
+        `${sheetName} 第 ${sourceRow} 行“账单日期”无法解析为有效日期`,
+        { sourceRow, fieldName: SYSTEM_OP_DEFINITION.monthHeader, sheetName }
+      ));
+      continue;
+    }
+    if (rowMonth !== normalizedMonth) continue;
+    targetMonthRows += 1;
+
+    const subject = text(rowField(displayValues, SYSTEM_OP_DEFINITION.subjectHeader));
+    if (!subject) {
+      rememberError(systemRowError(
+        `${sheetName} 第 ${sourceRow} 行“主体”不能为空`,
+        { sourceRow, fieldName: SYSTEM_OP_DEFINITION.subjectHeader, sheetName }
+      ));
+      continue;
+    }
+    const department = text(rowField(displayValues, SYSTEM_OP_DEFINITION.departmentHeader));
+    if (department !== 'VCC') {
+      rememberError(systemRowError(
+        `${sheetName} 第 ${sourceRow} 行“业务部门”必须为 VCC，实际为“${department || '空'}”`,
+        { sourceRow, fieldName: SYSTEM_OP_DEFINITION.departmentHeader, sheetName }
+      ), subject);
+      continue;
+    }
+    const sourceCurrency = text(rowField(displayValues, SYSTEM_OP_DEFINITION.currencyHeader));
+    const currency = normalizeSystemCurrency(sourceCurrency);
+    if (!SUPPORTED_CURRENCIES.includes(currency)) {
+      rememberError(systemRowError(
+        `${sheetName} 第 ${sourceRow} 行“币种”仅允许 ${SUPPORTED_CURRENCIES.join('、')}，实际为“${sourceCurrency || '空'}”`,
+        { sourceRow, fieldName: SYSTEM_OP_DEFINITION.currencyHeader, sheetName }
+      ), subject);
+      continue;
+    }
+    const displayBalance = rowField(displayValues, SYSTEM_OP_DEFINITION.balanceHeader);
+    const rawBalance = rowField(rawValues, SYSTEM_OP_DEFINITION.balanceHeader);
+    let balance;
+    let balanceEvidence;
+    try {
+      const reading = systemAmountRead(displayBalance, rawBalance, {
+        label: `系统财务OP ${subject} ${sourceCurrency} 财务余额`,
+        field: SYSTEM_OP_DEFINITION.balanceHeader,
+        cell: XLSX.utils.encode_cell({
+          r: rowIndex,
+          c: SYSTEM_OP_DEFINITION.indexes[SYSTEM_OP_DEFINITION.balanceHeader]
+        }),
+        rawLexicalToken: balanceLexicalTokens && balanceLexicalTokens.has(sourceRow)
+          ? balanceLexicalTokens.get(sourceRow)
+          : undefined
+      });
+      balance = reading.canonicalValue;
+      balanceEvidence = reading.evidence;
+    } catch (error) {
+      const wrapped = systemRowError(
+        `${sheetName} 第 ${sourceRow} 行“财务余额”无效：${error.message}`,
+        { sourceRow, fieldName: SYSTEM_OP_DEFINITION.balanceHeader, sheetName }
+      );
+      wrapped.code = error.code || 'amount-precision-invalid';
+      rememberError(wrapped, subject);
+      continue;
+    }
+
+    if (!rowsBySubject.has(subject)) rowsBySubject.set(subject, []);
+    rowsBySubject.get(subject).push({
+      sourceRow,
+      sourceCurrency,
+      currency,
+      balance,
+      balanceEvidence,
+      displayValues,
+      rawValues
+    });
   }
 
-  if (rowsBySubject.size === 0) {
+  if (targetMonthRows === 0 && validationErrors.length === 0) {
     throw new Error(`${sourceFile}：未找到“账单日期”属于 ${normalizedMonth} 的系统财务OP数据`);
   }
 
-  return buildCompleteSnapshots(snapshotContext);
+  const snapshots = [];
+  for (const [subject, rows] of rowsBySubject) {
+    if (invalidSubjects.has(subject)) continue;
+    try {
+      snapshots.push(buildSubjectSnapshot({ ...snapshotContext, subject, rows }));
+    } catch (error) {
+      error.validationUnitKey = `${sourceFile}\u0000${subject}`;
+      validationErrors.push(error);
+    }
+  }
+  return { snapshots, validationErrors };
+}
+
+function readSystemOpSnapshots(filePath, targetMonth, preferredSheetName = '') {
+  const result = readSystemOpSnapshotCandidates(filePath, targetMonth, preferredSheetName);
+  if (result.validationErrors.length > 0) {
+    const error = result.validationErrors[0];
+    error.parsedSnapshots = result.snapshots;
+    throw error;
+  }
+  return result.snapshots;
 }
 
 function readSystemOpSnapshot(filePath, targetMonth, subject = '', preferredSheetName = '') {
@@ -659,20 +680,23 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
   const validationErrors = [];
   for (const file of files) {
     try {
-      snapshots.push(...readSystemOpSnapshots(
+      const candidates = readSystemOpSnapshotCandidates(
         file.filePath,
         normalizedMonth,
         file.sheetName
-      ));
+      );
+      snapshots.push(...candidates.snapshots);
+      for (const error of candidates.validationErrors) validationErrors.push({ file, error });
     } catch (error) {
-      if (Array.isArray(error.parsedSnapshots)) snapshots.push(...error.parsedSnapshots);
+      error.hardFailure = true;
       validationErrors.push({ file, error });
     }
   }
-  if (validationErrors.length > 0) {
+  const hardValidationErrors = validationErrors.filter(({ error }) => error.hardFailure);
+  if (hardValidationErrors.length > 0) {
     db.exec('BEGIN IMMEDIATE');
     try {
-      const message = validationErrors.map(({ file, error }) => (
+      const message = hardValidationErrors.map(({ file, error }) => (
         `${path.basename(file.filePath)}：${error.message}`
       )).join('；');
       for (const snapshot of snapshots) {
@@ -695,10 +719,11 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           fieldName: error.fieldName
         });
       }
+      const formatErrorCount = validationUnitCount(validationErrors);
       repository.finishImportRecord(db, recordId, {
         status: 'failed_validation',
-        rawCount: snapshots.length + validationErrors.length,
-        formatErrorCount: validationErrors.length,
+        rawCount: snapshots.length + formatErrorCount,
+        formatErrorCount,
         rolledBackCount: snapshots.length,
         errorMessage: message
       });
@@ -718,7 +743,6 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       bySubject.get(snapshot.subject).push(snapshot);
     }
 
-    let hasConflict = false;
     const classified = [];
     for (const [subject, subjectSnapshots] of bySubject) {
       const existing = db.prepare(`
@@ -730,14 +754,12 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           if (snapshot.contentHash === existing.content_hash) {
             classified.push({ snapshot, disposition: 'idempotent_skip', existing });
           } else {
-            hasConflict = true;
             classified.push({ snapshot, disposition: 'idempotent_conflict', existing });
           }
         }
         continue;
       }
       if (hashes.size > 1) {
-        hasConflict = true;
         for (const snapshot of subjectSnapshots) {
           classified.push({ snapshot, disposition: 'idempotent_conflict', existing });
         }
@@ -760,13 +782,12 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       LIMIT 1
     `).get(normalizedMonth, normalizedMonth, SOURCE_TYPES.SYSTEM_OP));
     if (datasetArchived && classified.some((item) => item.disposition === 'accepted')) {
-      hasConflict = true;
       for (const item of classified) {
         if (item.disposition === 'accepted') item.disposition = 'rolled_back';
       }
     }
 
-    if (hasConflict) {
+    if (datasetArchived && classified.some((item) => item.disposition === 'rolled_back')) {
       let conflictCount = 0;
       let rolledBackCount = 0;
       let skippedCount = 0;
@@ -806,19 +827,18 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
         ));
         if (peer) linkComparison.run(peer.attemptId, current.attemptId);
       }
-      const message = datasetArchived
-        ? `${normalizedMonth} 系统财务OP已归档，禁止新增快照`
-        : '同一账期和主体的系统财务OP余额不一致，整批未导入';
+      const message = `${normalizedMonth} 系统财务OP已归档，禁止新增快照`;
       repository.finishImportRecord(db, recordId, {
-        status: datasetArchived ? 'failed_validation' : 'failed_conflict',
-        rawCount: snapshots.length,
+        status: 'failed_validation',
+        rawCount: snapshots.length + validationUnitCount(validationErrors),
         conflictCount,
+        formatErrorCount: validationUnitCount(validationErrors),
         skippedCount,
         rolledBackCount,
         errorMessage: message
       });
       repository.addImportError(db, recordId, {
-        errorCode: datasetArchived ? 'dataset-archived' : 'system-op-conflict',
+        errorCode: 'dataset-archived',
         message
       });
       db.exec('COMMIT');
@@ -827,6 +847,8 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
 
     let insertedCount = 0;
     let skippedCount = 0;
+    let conflictCount = 0;
+    const insertedAttempts = [];
     for (const item of classified) {
       if (item.disposition === 'accepted') {
         const result = db.prepare(`
@@ -855,8 +877,19 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           '首次成功导入系统财务OP快照'
         );
         insertedCount += 1;
-      } else {
+      } else if (item.disposition === 'idempotent_skip') {
         skippedCount += 1;
+      } else {
+        conflictCount += 1;
+        const attemptId = insertAttempt(
+          db,
+          recordId,
+          item.snapshot,
+          'idempotent_conflict',
+          item.existing && item.existing.id,
+          '同一账期和主体的系统财务OP余额不一致，已过滤该主体快照'
+        );
+        insertedAttempts.push({ attemptId, item });
       }
     }
     for (const item of classified.filter((entry) => entry.disposition === 'idempotent_skip')) {
@@ -872,15 +905,51 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
         '同账期同主体同内容，幂等跳过'
       );
     }
+    const linkComparison = db.prepare(`
+      UPDATE vcc_fin_op_system_snapshot_attempts
+      SET comparison_attempt_id = ?
+      WHERE id = ?
+    `);
+    for (const current of insertedAttempts) {
+      if (current.item.existing) continue;
+      const peer = insertedAttempts.find((candidate) => (
+        candidate.attemptId !== current.attemptId
+        && candidate.item.snapshot.subject === current.item.snapshot.subject
+        && candidate.item.snapshot.contentHash !== current.item.snapshot.contentHash
+      ));
+      if (peer) linkComparison.run(peer.attemptId, current.attemptId);
+    }
+    for (const { file, error } of validationErrors) {
+      repository.addImportError(db, recordId, {
+        errorCode: error.code || 'system-op-validation-error',
+        message: error.message,
+        sourceFile: path.basename(file.filePath),
+        sheetName: error.sheetName || file.sheetName || '',
+        sourceRow: error.sourceRow,
+        fieldName: error.fieldName
+      });
+    }
 
+    const formatErrorCount = validationUnitCount(validationErrors);
+    const filteredCount = conflictCount + formatErrorCount;
     const status = insertedCount === 0
-      ? 'all_skipped'
-      : (skippedCount > 0 ? 'success_with_skips' : 'success');
+      ? (filteredCount > 0
+        ? (conflictCount > 0 ? 'failed_conflict' : 'failed_validation')
+        : 'all_skipped')
+      : (skippedCount > 0 || filteredCount > 0 ? 'success_with_skips' : 'success');
+    const errorParts = [];
+    if (formatErrorCount > 0) errorParts.push(`格式异常 ${formatErrorCount} 个主体快照`);
+    if (conflictCount > 0) errorParts.push(`主体快照冲突 ${conflictCount} 项`);
     repository.finishImportRecord(db, recordId, {
       status,
-      rawCount: snapshots.length,
+      rawCount: snapshots.length + formatErrorCount,
       insertedCount,
-      skippedCount
+      skippedCount,
+      conflictCount,
+      formatErrorCount,
+      errorMessage: errorParts.length > 0
+        ? `系统财务OP已过滤异常数据：${errorParts.join('、')}`
+        : ''
     });
     if (insertedCount > 0) {
       db.prepare(`

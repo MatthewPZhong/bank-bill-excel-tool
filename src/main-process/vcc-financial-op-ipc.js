@@ -34,9 +34,7 @@ function vccFinancialOpErrorResult(error) {
     dependentMonths,
     context,
     ...(partial ? {
-      batchId: partial.batchId || null,
       partialCommitted: partial.partialCommitted === true,
-      records: Array.isArray(partial.records) ? partial.records : [],
       filePaths: Array.isArray(partial.filePaths) ? partial.filePaths : [],
       runId: partial.runId != null ? partial.runId : null,
       targetMonth: partial.targetMonth || null

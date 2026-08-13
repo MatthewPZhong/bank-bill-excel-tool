@@ -53,7 +53,7 @@ function balances(seed = 1) {
 }
 
 function sourceCurrency(currency) {
-  return currency === 'CNH' ? 'CNY' : currency;
+  return currency;
 }
 
 function systemDataRows(snapshots) {
@@ -215,14 +215,14 @@ test('系统财务OP按正式行式模板读取主体、九币种和完整原始
   assert.equal(snapshot.subject, 'PPHK');
   assert.equal(snapshot.sourceRow, 2);
   assert.equal(snapshot.balances.AUD, '1.25');
-  assert.equal(snapshot.balances.CNH, '3.25');
+  assert.equal(snapshot.balances.CNY, '3.25');
   assert.equal(snapshot.balances.USD, '9.25');
   const raw = JSON.parse(snapshot.rawJson);
   assert.deepEqual(raw.displayHeaders, SYSTEM_OP_HEADERS);
   assert.equal(raw.rows.length, 9);
   const cny = raw.rows.find((row) => row.sourceCurrency === 'CNY');
-  assert.equal(cny.normalizedCurrency, 'CNH');
-  assert.equal(Object.hasOwn(snapshot.balances, 'CNY'), false);
+  assert.equal(cny.normalizedCurrency, 'CNY');
+  assert.equal(Object.hasOwn(snapshot.balances, 'CNH'), false);
 });
 
 test('系统财务OP财务余额严格优先使用 Excel raw 数值并记录显示差异', (t) => {
@@ -248,7 +248,7 @@ test('系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本�
   const input = balances();
   input.AUD = 135886024.59;
   input.CAD = '(1,234.56)';
-  input.CNH = '-';
+  input.CNY = '-';
   input.EUR = 3.25;
   const entry = writeWorkbook(t, {
     snapshots: [{ subject: 'PPHK', balances: input }],
@@ -262,7 +262,7 @@ test('系统财务OP raw-first 覆盖大额两位小数、公式缓存、文本�
   const [snapshot] = readSystemOpSnapshots(entry.filePath, '2026-05', entry.sheetName);
   assert.equal(snapshot.balances.AUD, '135886024.59');
   assert.equal(snapshot.balances.CAD, '-1234.56');
-  assert.equal(snapshot.balances.CNH, '0');
+  assert.equal(snapshot.balances.CNY, '0');
   assert.equal(snapshot.balances.EUR, '3.25');
   const raw = JSON.parse(snapshot.rawJson);
   const eur = raw.rows.find((row) => row.normalizedCurrency === 'EUR');
@@ -547,7 +547,7 @@ test('系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余
   }
 });
 
-test('系统财务OP拒绝缺失币种及 CNY/CNH 归一化重复', (t) => {
+test('系统财务OP拒绝缺失币种及旧 CNH 代码', (t) => {
   const missing = writeWorkbook(t, {
     snapshots: [{
       subject: 'PPHK',
@@ -562,14 +562,15 @@ test('系统财务OP拒绝缺失币种及 CNY/CNH 归一化重复', (t) => {
   );
 
   const duplicateRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
-  duplicateRows.push({ ...duplicateRows.find((row) => row.币种 === 'CNY'), 币种: 'CNH' });
-  const duplicate = writeWorkbook(t, {
+  const cnhIndex = duplicateRows.findIndex((row) => row.币种 === 'CNY');
+  duplicateRows[cnhIndex] = { ...duplicateRows[cnhIndex], 币种: 'CNH' };
+  const legacyCnh = writeWorkbook(t, {
     rows: duplicateRows,
-    fileName: 'cny-cnh-duplicate.xlsx'
+    fileName: 'legacy-cnh.xlsx'
   });
   assert.throws(
-    () => readSystemOpSnapshots(duplicate.filePath, '2026-05', duplicate.sheetName),
-    /币种 CNH.*重复/
+    () => readSystemOpSnapshots(legacyCnh.filePath, '2026-05', legacyCnh.sheetName),
+    /币种.*仅允许 AUD、CAD、CNY、EUR/
   );
 });
 
@@ -750,7 +751,7 @@ test('同批同主体系统财务OP异内容冲突互相关联以供双侧核对
   assert.equal(attempts[1].comparison_attempt_id, attempts[0].id);
 });
 
-test('系统快照失败批次中的精确重放仍归类为幂等跳过', (t) => {
+test('系统快照混合精确重放、冲突和新主体时只过滤冲突并提升新主体', (t) => {
   const db = createDb();
   t.after(() => db.close());
   const baseline = writeWorkbook(t, { fileName: 'baseline-system.xlsx' });
@@ -767,21 +768,29 @@ test('系统快照失败批次中的精确重放仍归类为幂等跳过', (t) =
     snapshots: [{ subject: 'PPUS', balances: balances(30) }],
     fileName: 'ppus-2.xlsx'
   });
-  repository.createImportBatch(db, { id: 'mixed-system-batch', targetMonth: '2026-05', fileCount: 3 });
+  const newSubject = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPSG', balances: balances(40) }],
+    fileName: 'ppsg-new.xlsx'
+  });
+  repository.createImportBatch(db, { id: 'mixed-system-batch', targetMonth: '2026-05', fileCount: 4 });
 
   const record = importSystemOpGroup({
     db,
     batchId: 'mixed-system-batch',
     targetMonth: '2026-05',
-    files: [importFile(same), importFile(firstConflict), importFile(secondConflict)]
+    files: [importFile(same), importFile(firstConflict), importFile(secondConflict), importFile(newSubject)]
   });
 
-  assert.equal(record.status, 'failed_conflict');
-  assert.equal(record.raw_count, 3);
+  assert.equal(record.status, 'success_with_skips');
+  assert.equal(record.raw_count, 4);
+  assert.equal(record.inserted_count, 1);
   assert.equal(record.skipped_count, 1);
   assert.equal(record.conflict_count, 2);
   assert.equal(record.rolled_back_count, 0);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 2);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots WHERE subject = 'PPSG'
+  `).get().n, 1);
 });
 
 test('系统快照同主体的精确重放与异内容在失败批次内分别归类', (t) => {
@@ -832,7 +841,7 @@ test('系统快照同主体的精确重放与异内容在失败批次内分别�
   );
 });
 
-test('系统财务OP格式错误记录保留字段、行号并满足快照数守恒', (t) => {
+test('系统财务OP跨文件格式异常只过滤异常数据并提升完整快照', (t) => {
   const db = createDb();
   t.after(() => db.close());
   const validFile = writeWorkbook(t, { fileName: 'valid-system.xlsx' });
@@ -849,15 +858,16 @@ test('系统财务OP格式错误记录保留字段、行号并满足快照数守
     files: [importFile(validFile), importFile(invalidFile)]
   });
 
-  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.status, 'success_with_skips');
   assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 1);
   assert.equal(record.format_error_count, 1);
-  assert.equal(record.rolled_back_count, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 0);
+  assert.equal(record.rolled_back_count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
   const attempt = db.prepare(`
     SELECT disposition, source_file FROM vcc_fin_op_system_snapshot_attempts
   `).get();
-  assert.equal(attempt.disposition, 'rolled_back');
+  assert.equal(attempt.disposition, 'accepted');
   assert.equal(attempt.source_file, 'valid-system.xlsx');
   const error = db.prepare(`
     SELECT source_file, sheet_name, source_row, field_name
@@ -874,7 +884,7 @@ test('系统财务OP格式错误记录保留字段、行号并满足快照数守
   );
 });
 
-test('系统财务OP同文件多主体部分格式错误时保留完整主体的回滚快照', (t) => {
+test('系统财务OP同文件多主体部分格式错误时提升完整主体并过滤异常主体', (t) => {
   const db = createDb();
   t.after(() => db.close());
   const entry = writeWorkbook(t, {
@@ -903,17 +913,18 @@ test('系统财务OP同文件多主体部分格式错误时保留完整主体的
     files: [importFile(entry)]
   });
 
-  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.status, 'success_with_skips');
   assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 1);
   assert.equal(record.format_error_count, 1);
-  assert.equal(record.rolled_back_count, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 0);
+  assert.equal(record.rolled_back_count, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
   const attempt = db.prepare(`
     SELECT subject, disposition, raw_json
     FROM vcc_fin_op_system_snapshot_attempts
   `).get();
   assert.equal(attempt.subject, 'PPHK');
-  assert.equal(attempt.disposition, 'rolled_back');
+  assert.equal(attempt.disposition, 'accepted');
   assert.equal(JSON.parse(attempt.raw_json).rows.length, 9);
   const error = db.prepare(`
     SELECT source_file, source_row, field_name

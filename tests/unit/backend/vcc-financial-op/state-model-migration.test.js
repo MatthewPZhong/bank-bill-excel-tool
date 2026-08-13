@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { AppDatabase } = require('../../../../src/backend/database');
 const {
@@ -84,6 +85,152 @@ test('PR2 schema 首次建库与重复迁移均幂等', (t) => {
     { singleton_id: 1, first_month: null }
   );
   assert.equal(auditCount(db), 0);
+});
+
+test('存量小型 CNH 派生资金事实一次性迁为 CNY 且大表原始行审计保持不变', (t) => {
+  const db = createDb(t);
+  ensureVccFinancialOpTablesSupport(db);
+  const legacyBalances = {
+    AUD: '1', CAD: '2', CNH: '3', EUR: '4', GBP: '5',
+    HKD: '6', JPY: '7', SGD: '8', USD: '9'
+  };
+  const balancesJson = JSON.stringify(legacyBalances);
+  const rawJson = JSON.stringify({
+    rows: [{ sourceCurrency: 'CNY', normalizedCurrency: 'CNH', displayValues: ['CNY'] }]
+  });
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_batches (id, target_month, status)
+    VALUES ('legacy-currency', '2026-05', 'success')
+  `).run();
+  const recordId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_import_records (
+      batch_id, target_month, source_type, status
+    ) VALUES ('legacy-currency', '2026-05', 'system_op', 'success')
+  `).run().lastInsertRowid);
+  const detailRecordId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_import_records (
+      batch_id, target_month, source_type, status
+    ) VALUES ('legacy-currency', '2026-05', 'recharge_refund', 'success')
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_rows (
+      import_record_id, source_type, target_month, idempotency_key_raw,
+      idempotency_key, content_hash, subject, stat_currency, signed_amount,
+      source_file, sheet_name, source_row, raw_json, disposition
+    ) VALUES (?, 'recharge_refund', '2026-05', 'legacy-key',
+              'legacy-key', 'legacy-row-hash', 'PPHK', 'CNH', '2',
+              'legacy-detail.xlsx', 'Sheet1', 2, '["raw-CNH"]', 'accepted')
+  `).run(detailRecordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_effective_rows (
+      source_type, idempotency_key_raw, idempotency_key, content_hash,
+      target_month, subject, stat_currency, signed_amount,
+      source_file, sheet_name, source_row, raw_json, import_record_id
+    ) VALUES ('recharge_refund', 'legacy-key', 'legacy-key', 'legacy-row-hash',
+              '2026-05', 'PPHK', 'CNH', '2',
+              'legacy-detail.xlsx', 'Sheet1', 2, '["raw-CNH"]', ?)
+  `).run(detailRecordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash,
+      source_file, sheet_name, source_row, raw_json, import_record_id
+    ) VALUES ('2026-05', 'PPHK', ?, 'legacy-system-hash',
+              'legacy.xlsx', 'System', 2, ?, ?)
+  `).run(balancesJson, rawJson, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_opening_balances (
+      target_month, subject, balances_json, content_hash, initialization_note
+    ) VALUES ('2026-05', 'PPHK', ?, 'legacy-opening-hash', '历史期初')
+  `).run(balancesJson);
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (target_month, status, input_revisions_json)
+    VALUES ('2026-05', 'calculated', '{}')
+  `).run().lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, 'PPHK', 'CNH', '1', '2', '3', '4', '-1')
+  `).run(runId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_run_rows (
+      run_id, subject, row_kind, source_type, category_major,
+      category_minor, currency, amount
+    ) VALUES (?, 'PPHK', 'classified', 'recharge_refund', '入金', '', 'CNH', '2')
+  `).run(runId);
+  db.prepare(`
+    UPDATE vcc_fin_op_module_state SET currency_contract_version = 1 WHERE singleton_id = 1
+  `).run();
+
+  const first = ensureVccFinancialOpTablesSupport(db);
+  const second = ensureVccFinancialOpTablesSupport(db);
+
+  assert.equal(first.currencyMigration.migrated, true);
+  assert.equal(second.currencyMigration.migrated, false);
+  const system = db.prepare(`
+    SELECT balances_json, content_hash, raw_json FROM vcc_fin_op_system_snapshots
+  `).get();
+  assert.deepEqual(Object.keys(JSON.parse(system.balances_json)), [
+    'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
+  ]);
+  assert.equal(JSON.parse(system.balances_json).CNY, '3');
+  assert.equal(system.raw_json, rawJson);
+  assert.equal(system.content_hash, crypto.createHash('sha256').update(JSON.stringify({
+    targetMonth: '2026-05',
+    subject: 'PPHK',
+    balances: JSON.parse(system.balances_json)
+  }), 'utf8').digest('hex'));
+  const opening = db.prepare(`
+    SELECT balances_json, content_hash FROM vcc_fin_op_opening_balances
+  `).get();
+  assert.equal(opening.content_hash, crypto.createHash('sha256')
+    .update(opening.balances_json, 'utf8').digest('hex'));
+  assert.equal(db.prepare(`SELECT currency FROM vcc_fin_op_run_balances`).get().currency, 'CNY');
+  assert.equal(db.prepare(`SELECT currency FROM vcc_fin_op_run_rows`).get().currency, 'CNY');
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT stat_currency, raw_json FROM vcc_fin_op_import_rows WHERE import_record_id = ?
+    `).get(detailRecordId) },
+    { stat_currency: 'CNH', raw_json: '["raw-CNH"]' }
+  );
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT stat_currency, raw_json FROM vcc_fin_op_effective_rows WHERE import_record_id = ?
+    `).get(detailRecordId) },
+    { stat_currency: 'CNH', raw_json: '["raw-CNH"]' }
+  );
+});
+
+test('同一坐标同时存在 CNY 与 CNH 时迁移失败关闭且零 DML', (t) => {
+  const db = createDb(t);
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_runs (target_month, status, input_revisions_json)
+    VALUES ('2026-05', 'calculated', '{}')
+  `).run().lastInsertRowid);
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_run_balances (
+      run_id, subject, currency, opening_balance, period_amount,
+      calculated_balance, system_balance, difference
+    ) VALUES (?, 'PPHK', ?, '1', '2', '3', '4', '-1')
+  `);
+  insert.run(runId, 'CNH');
+  insert.run(runId, 'CNY');
+  db.prepare(`
+    UPDATE vcc_fin_op_module_state SET currency_contract_version = 1 WHERE singleton_id = 1
+  `).run();
+  const before = db.prepare(`SELECT * FROM vcc_fin_op_run_balances ORDER BY currency`).all()
+    .map((row) => ({ ...row }));
+
+  assert.throws(
+    () => ensureVccFinancialOpTablesSupport(db),
+    (error) => error.code === 'vcc-currency-migration-blocked'
+  );
+  assert.deepEqual(
+    db.prepare(`SELECT * FROM vcc_fin_op_run_balances ORDER BY currency`).all()
+      .map((row) => ({ ...row })),
+    before
+  );
 });
 
 test('存量单一期初月份回填 first_month 且运行列兼容旧表', (t) => {

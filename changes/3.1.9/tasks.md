@@ -24,6 +24,7 @@
 - [x] 建立 `TaskLifecycle`，固定 `BOR.begin → reserve → started → ALS execute → append → terminal CAS → BOR.end` 顺序。
 - [x] 预留失败不执行业务；业务失败/取消保留批次；存档失败不覆盖业务成功结果。
 - [x] 建立精确 `TaskPolicyRegistry`、裸 IPC inventory 与无 wildcard 的 coverage 契约。
+- [x] 按 2026-08-12 用户裁决将 `bank-statement:run`、`template:save-mappings` 收窄为 `no-archive-artifact`：业务仍受退出/升级闸门保护，但不预留批次号；银行对账保留每轮随机稳定身份，每次真实导出各建一个含输出 artifact 的可见批次并续接该轮 parent。
 - [x] 建立 `BusinessFlowResolver`，只使用显式 parent 或持久业务 identity；禁止月份、hash、renderer state fallback。
 - [x] 建立可序列化、只读 worker batch context；worker 只继承父 action，不自行分配批次。
 - [x] 将 operation tracker 收敛为无活动批次内存的文件 resolver / append adapter；禁止成功后建批或 find-latest。
@@ -34,7 +35,7 @@
 
 ## PR2.5-0 — Spec / TechDoc 合同冻结
 
-- [x] 在独立 erratum 目录归档纠错 Spec v2、TechDoc v1.1 和 provenance 索引，不修改 v3.1.8 冻结 Spec。
+- [x] 在独立 erratum 目录归档纠错 Spec v2、TechDoc v1.1 和 provenance 索引，不修改 v3.1.8 冻结 Spec；2026-08-13 按用户新合同将仓库副本增量修订为 v2.1/v1.2，历史原始 SHA 继续留 provenance。
 - [x] 记录 raw/repository 双 SHA 与 12 处 Markdown hard-break 等价格式 normalization。
 - [x] 为 v3.1.9 增加只覆盖 VCC 归档兼容、操作保护和性能路径的窄 erratum。
 - [x] 冻结严格顺序 `PR2 → PR2.5-0 → PR2.5-A → PR2.5-B → PR2.5-C1 → PR2.5-C2 → PR3-VCC → PR3-Toolbox → PR4 → PR5 → PR6 → PR7`。
@@ -84,9 +85,9 @@
   - [x] 聚焦 unit、roundtrip、large-file、large-split 与 multi-sheet 回归通过；blindspot/reconciliation 已复核。
   - [x] 最终唯一一次 `release-check` 全绿：lint/smoke、unit 4999/4999、integration 48/48 scripts 与 2385/2385 assertions；runner policy 合法自动同步。
   - [ ] 用户 P0/P1 GUI、Windows installer/portable、Excel/WPS、约16GB/700万行与真实文件/sheet/行数/资金输出血缘人工验收。
-- [x] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup 的本地实现与自动证据。
+- [x] PR4：年/月/日/批次目录、独立 copy/历史 hardlink 脱钩、repair/cleanup 的本地实现与自动证据。
   - [x] layout v2 精确按 `local_date/batchNumber` 物化；Windows-safe 稳定命名、历史 order 回填、无 ready 无空业务目录。
-  - [x] canonical Blob 保持唯一真相；hardlink 优先、真实能力错误流式 copy、size/hash/只读、copy repair 与 hardlink 污染 fail-closed 已闭合。
+  - [x] canonical Blob 保持唯一真相；materialized 始终流式 copy、size/hash/只读、copy repair、同 Blob 多批次隔离与历史 hardlink 脱钩已闭合。
   - [x] ready 与 repair-pending 正交证据、layout-first read/Blob fallback、历史启动续跑与内部路径不出 DTO 已接线。
   - [x] manual/retention/startup 共用单一 cleanup job executor；共享 Blob last-ref、目录失败续跑与空年月日回收已覆盖。
   - [x] PR4 核心 57/57、扩大 Archive 184/184、lint/node/diff/check-vars 通过；blindspot/reconciliation 红线未由自动测试关闭。
@@ -120,3 +121,36 @@
   - [ ] 本轮最终 commit 后在无用户 untracked 的 clean isolated checkout 唯一执行 installer+portable build、ASCII staging 与 `check:dist`，构建后不再修改 tracked 文件。
   - [ ] 独立 Sol Ultra review、PR2 GUI/资金、Windows packaged runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与真实文件/资金血缘人工验收。
   - [ ] 合并、tag、GitHub Release 和公开资产回读；本地 PR7 不执行这些外部发布动作。
+- [x] 全迭代独立 review 26 项集中修复（基线 `6c431f4`，本地分支 `codex/v3.1.9-review-fixes`）。
+  - [x] RF-01—RF-04：生命周期、terminal outbox、owner-first interrupted recovery、Acquiring/statement flow identity。
+  - [x] RF-05—RF-11：VCC 警告/取消/进度、unsafe audit、opening diagnostic、partial import/export 血缘。
+  - [x] RF-12—RF-15：Toolbox durable receipt、input alias、target freshness、output direction。
+  - [x] RF-16—RF-18：启动 hash、UTF-16 路径预算、历史 materialization 全量续跑。
+  - [x] RF-19—RF-26：active-root symlink、pre-switch read-only、source 可用性、冻结 cleanup inventory、offline/journal/blocked root/marker 恢复。
+  - [x] focused 387/387、关键集成 209/209+77/77+30/30+17/17+16/16、lint/node/diff、VCC 三张 preview、check-vars、blindspot/reconciliation 与唯一 full（unit 5082/5082、integration 48/48/2385）全绿。
+  - [ ] 最终 owned commit 后 clean isolated Windows installer+portable build、ASCII staging 与 `check:dist`。
+  - [ ] ⚠️ Windows/UNC/网络盘/真实 production legacy-trigger/16GB/700万行/Excel-WPS/资金与文件血缘人工复核。
+  - [x] PR3-VCC final P1：exact7 `taskRunId` 固定 import batch；真实 worker 45,000 行 system XLSX 强杀后仅按本 batch 恢复 partial records，并把成功输入及 batch/record identities 交回原 archive parent。
+  - [x] 最终独立 review RF-27—RF-29：普通 retry outbox 不再阻断 UI，committed owner receipt 仍 fail-closed；前台 metadata 扫描+修复共用 64 条预算；Toolbox recovery 必需模块纳入同一 Git ownership。
+
+## VCC CNY 与异常数据过滤修订（2026-08-13）
+
+- [x] 唯一九币种集合将 CNH 替换为 CNY；row mapper、新系统财务 OP 和 renderer/result 均按 CNY 合同。
+- [x] 删除系统财务 OP 的 CNY→CNH 转换；新 CNH 作为异常单位拒绝/过滤，不静默改写。
+- [x] 结果模板固定列改为 CNY，并更新/锁定模板 SHA、样式、named-range 和结果写回契约。
+- [x] 明细异常按行过滤，正常行继续落 effective；系统财务 OP 异常按主体×九币种快照隔离，其他完整主体继续落库。
+- [x] 保留 workbook/Sheet/header、取消、数据库错误和归档门禁等 hard failure 的整组失败关闭；补齐数量守恒和 UI 异常过滤摘要。
+- [x] 历史小型派生事实幂等迁为 CNY；大表/raw_json 不批量改写，calculator/writer 在读取边界解释精确历史 CNH；CNY/CNH 冲突零部分提交。
+- [x] 用户样本 `1433865288349124625_18.xlsx` 以正式 reader/importer 写入临时内存库：2026-07 共 300,000/300,000 accepted、异常 0；未改用户文件和生产数据库。
+- [x] 开发自测完成：VCC 372/372；四条真实集成 19/19、209/209、77/77、29/29；lint、node check、diff check、smoke PASS。
+- [x] 反写补遗 Spec v2.1、TechDoc v1.2、v3.1.9 Spec/test-spec/tasks/implementation-notes；保留 v3.1.8 冻结历史 Spec 不变。
+- [ ] ⚠️ 用户/财务人工核对真实主体 CNY 九币种、混合异常文件去向、历史 CNH 月金额守恒、结果/归档/导出 Excel/WPS 及备份恢复。
+
+## VCC 解归档、初始化状态与结果确认布局收口（2026-08-13）
+
+- [x] 证明解归档置灰来自旧 CNH 派生归档被 CNY classifier 安全排除；保留 fail-closed，不放宽门禁。
+- [x] 增加启动迁移回归：旧 CNH run/archive 迁为 CNY 后月份重新可枚举且 preview 可解归档。
+- [x] VCC 财务 OP、平盘对账数据处理、对账单修复初始化成功时统一保持“欢迎使用小助手”，同时继续同步按钮/session 数据。
+- [x] 结果确认页勾选区与横线增距；【修改结果】与右侧按钮同轴；九币种/调整值统计表头和单元格全部右对齐。
+- [x] 定向 113/113、扩大 443/443、主页面 Electron 6/6 PASS；默认/150%/最小窗口三张结果 preview 人工通过。
+- [ ] ⚠️ 重启开发应用执行真实 DB 启动迁移，并人工核对 2026-06 解归档月份、逐主体九币种金额与审计。

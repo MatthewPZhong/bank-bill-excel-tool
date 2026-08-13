@@ -148,6 +148,7 @@ test('调整血缘 defined name 经 ExcelJS write→reopen 完整保真', async 
 
 test('调整血缘只接受完整 v1:64hex 与九币种', () => {
   assert.throws(() => encodeAdjustmentLineageName('v1:abc', 'USD'), /rowKey 非法/);
-  assert.throws(() => encodeAdjustmentLineageName(TEST_ROW_KEY, 'CNY'), /币种非法/);
+  assert.match(encodeAdjustmentLineageName(TEST_ROW_KEY, 'CNY'), /_CNY$/);
+  assert.throws(() => encodeAdjustmentLineageName(TEST_ROW_KEY, 'CNH'), /币种非法/);
   assert.equal(parseAdjustmentLineageName('VCC_ADJUSTMENT_V1_bad_USD'), null);
 });

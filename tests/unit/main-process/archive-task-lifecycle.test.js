@@ -184,37 +184,33 @@ test('严格按 BOR → reserve → started → execute → append → terminal 
   assert.equal(calls.find((call) => call[0] === 'execute')[1], true);
 });
 
-test('reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox', async () => {
-  const { calls, lifecycle } = createHarness({
-    failResult: {
-      ok: false,
-      code: 'ARCHIVE_DATABASE_BUSY',
-      message: 'terminal write failed'
-    }
+test('显式允许的部分提交失败结果仍绑定业务身份并以 failed 收口', async () => {
+  const { calls, lifecycle } = createHarness();
+  const partialPolicy = Object.freeze({
+    ...POLICY,
+    bindResultFlowIdentitiesOnFailure: true
   });
   const result = await lifecycle.run({
-    policy: POLICY,
-    meta: { channel: POLICY.channel },
-    beforeStart: () => {
-      const error = new Error('source changed');
-      error.code = 'SOURCE_CHANGED';
-      throw error;
-    },
-    execute: () => ({ status: 'success' })
+    policy: partialPolicy,
+    meta: { channel: partialPolicy.channel },
+    execute: () => ({
+      status: 'failed',
+      batchId: 'partial-batch',
+      recordId: 9,
+      partialCommitted: true
+    }),
+    resultFlowIdentities: (value) => [
+      { type: 'partial-batch', value: value.batchId },
+      { type: 'partial-record', value: value.recordId }
+    ]
   });
-
   assert.equal(result.status, 'failed');
-  assert.equal(result.code, 'SOURCE_CHANGED');
-  const persisted = calls.find((call) => call[0] === 'persist-terminal-intent');
-  assert.ok(persisted);
-  assert.equal(persisted[1].batchContext.batchId, 11);
-  assert.deepEqual(persisted[1].terminalOutcome, {
-    taskStatus: 'failed',
-    code: 'SOURCE_CHANGED',
-    message: 'source changed',
-    metadata: {}
-  });
-  assert.equal(calls.some((call) => call[0] === 'execute'), false);
+  const bindCall = calls.find((call) => call[0] === 'bind-flow');
+  assert.deepEqual(bindCall[1].identities, [
+    { type: 'partial-batch', value: 'partial-batch' },
+    { type: 'partial-record', value: 9 }
+  ]);
+  assert.ok(calls.some((call) => call[0] === 'fail'));
 });
 
 test('toolbox reserve 失败时不进入算法或输出副作用', async () => {
@@ -266,6 +262,39 @@ test('toolbox freshness 在 reserve 后失败时终结原批次且不执行算�
     'begin', 'resolve-flow', 'reserve', 'verify-toolbox-source', 'fail', 'end'
   ]);
   assert.equal(calls.find((call) => call[0] === 'fail')[1], 11);
+});
+
+test('reserve 后业务未开始且直接终态写失败时，把 failed 意图持久化到原批次 outbox', async () => {
+  const { calls, lifecycle } = createHarness({
+    failResult: {
+      ok: false,
+      code: 'ARCHIVE_DATABASE_BUSY',
+      message: 'terminal write failed'
+    }
+  });
+  const result = await lifecycle.run({
+    policy: POLICY,
+    meta: { channel: POLICY.channel },
+    beforeStart: () => {
+      const error = new Error('source changed');
+      error.code = 'SOURCE_CHANGED';
+      throw error;
+    },
+    execute: () => ({ status: 'success' })
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'SOURCE_CHANGED');
+  const persisted = calls.find((call) => call[0] === 'persist-terminal-intent');
+  assert.ok(persisted);
+  assert.equal(persisted[1].batchContext.batchId, 11);
+  assert.deepEqual(persisted[1].terminalOutcome, {
+    taskStatus: 'failed',
+    code: 'SOURCE_CHANGED',
+    message: 'source changed',
+    metadata: {}
+  });
+  assert.equal(calls.some((call) => call[0] === 'execute'), false);
 });
 
 test('已持久化 batchContext 恢复直接重开原批次，不解析 flow/不 reserve/不再 started', async () => {

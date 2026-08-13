@@ -115,7 +115,8 @@ function createStorageMaterializer(options = {}) {
     const stagedPath = path.join(stagingDir, `materialized-${Number(payload.artifactId)}-${crypto.randomUUID()}.part`);
     let targetParentCreated = false;
     try {
-      // 批次目录是用户可见副本，必须与 canonical Blob 使用独立 inode。
+      // 用户可见的批次文件必须与 canonical Blob 拥有独立 inode。
+      // chmod 只能降低误写概率，hardlink 不能提供内容隔离。
       await materializeCopyFile(canonicalPath, stagedPath);
 
       const staged = await verifyFile(stagedPath, expected, fsModule);

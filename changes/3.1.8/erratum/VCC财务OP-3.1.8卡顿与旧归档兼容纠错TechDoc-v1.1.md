@@ -1,16 +1,17 @@
-# VCC 财务 OP v3.1.8 卡顿与旧归档兼容纠错 TechDoc v1.1
+# VCC 财务 OP v3.1.8 卡顿与旧归档兼容纠错 TechDoc v1.2
 
-> document-version: `1.1`<br>
-> document-date: `2026-08-10`<br>
+> document-version: `1.2`<br>
+> document-date: `2026-08-13`<br>
 > product-spec: `VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md`<br>
 > implementation-release: `v3.1.9`<br>
 > implementation-baseline-candidate: `1687cfa；仅在 PR2 CI 全绿后冻结`<br>
 > supersedes: `VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.md`<br>
-> status: `implementation-ready；合并/发布 PROBE 仍待完成`
+> amends: `TechDoc v1.1（2026-08-10）；仓库路径为兼容既有链接保持不变`<br>
+> status: `v3.1.9 本地实现与自动验证完成；真实环境/资金人工门禁仍待完成`
 
 ## 0. 文档目的
 
-本文把 Spec v2 转换为可直接实施的技术合同，覆盖：
+本文把 Spec v2.1 转换为可直接实施的技术合同，覆盖：
 
 - 归档结构分类与操作门禁分离；
 - 轻量一致性快照和 preview token v2；
@@ -20,11 +21,11 @@
 - PR2 TaskLifecycle、七字段 worker context、进度和取消；
 - 真实 v3.1.7 fixture、16 GB 基准和发布门禁。
 
-本设计不修改金额、币种、主体、九币种计算、调整公式、跨月期初或五表新计算规则。
+除 §0.3 与 §22 的 CNY/异常数据过滤修订外，本设计不修改金额、主体、九币种计算公式、调整公式、跨月期初或五表计算规则。
 
 ### 0.1 v1.1 修订记录
 
-本次不改变 Spec v2 的产品口径，只关闭进入 C1/C2 前的技术缺口。
+本节记录 2026-08-10 的 v1.1 修订：当时不改变 Spec v2.0 的产品口径，只关闭进入 C1/C2 前的技术缺口；后续产品修订见 §0.3。
 
 | 类别 | v1.1 决定 | 证据/原因 | 放弃的方案 |
 |---|---|---|---|
@@ -47,9 +48,20 @@
 ### 0.2 Task Brief
 
 - **Goal**：让 PR2.5-A/B/C1/C2 能按确定的资金证据、并发和写保护合同实施，并先于 PR3-VCC 落地。
-- **Context**：Spec v2 产品口径已解除 BLOCK；TechDoc v1 的 evidence、row-scope guard 和 PR 边界仍不完整。
-- **Constraints**：不改变 Spec v2、不新增 schema migration、不逐月读取完整结果、不新增 lease/timer/retry、不在 guard 不可信时降级写库。
+- **Context**：Spec v2.1 产品口径已解除 BLOCK；TechDoc v1 的 evidence、row-scope guard 和 PR 边界仍不完整。
+- **Constraints**：除 Spec v2.1 §0.1/§15 明确授权的 CNY 修订外，不改变 Spec；不逐月读取完整结果、不新增 lease/timer/retry、不在 guard 不可信时降级写库。CNY 所需 additive/idempotent migration 仅属于应用启动，见 §22.4。
 - **Done when**：DTO 能证明调整后余额和 legacy Pending 缺失；每个写 operation 有固定 step/scope/budget/postcondition；失败审计安全；A/B 边界不把 610 万行扫描留在主进程；剩余发布未知均有 PROBE 和失败处置。
+
+### 0.3 v1.2 CNY 与异常数据过滤修订
+
+本节落实 Spec v2.1 §0.1/§15，并覆盖 v1.1 中“币种、结果模板和导入处置不变”的冲突表述：
+
+- 当前九币种集合以 `CNY` 取代 `CNH`；“系统财务OP”读取不再执行 `CNY → CNH`。
+- 新导入严格接受 `CNY`、拒绝 `CNH`；历史精确 `CNH` 只在受控迁移或读取/导出边界解释为 `CNY`。
+- 结果模板固定列改为 CNY，模板 hash 与 contract 测试同步更新。
+- 明细以行、系统财务 OP 以主体九币种快照为异常隔离单位；正常单位继续提交，异常单位保留可审计 disposition/error。
+- hard failure、归档门禁、取消和数据库错误继续整组失败关闭；局部过滤不得弱化结构可信度或事务边界。
+- 具体模块、状态、迁移、兼容和验证合同见 §22。
 
 ## 1. 当前实现与根因
 
@@ -1190,7 +1202,7 @@ PR4 及后续只能在上述链路完成并冻结后开始；不得跨过 PR2.5-
 
 ## 21. Definition of Done
 
-- Spec v2 与 TechDoc 已进入仓库并互相引用；
+- Spec v2.1 与 TechDoc v1.2 已进入仓库并互相引用；
 - A/B/C1/C2/PR3-VCC 串行完成；
 - pure classifier 与 gate 无交叉依赖；
 - current/legacy 均从集合化 raw result evidence 重算调整后余额，零逐月/逐 run `getEffectiveRunResult()`；
@@ -1204,3 +1216,80 @@ PR4 及后续只能在上述链路完成并冻结后开始；不得跨过 PR2.5-
 - PR2 TaskLifecycle、七字段 context 和 cancel terminal 无回归；
 - full release-check、check-vars、Windows runtime/build 通过；
 - ⚠️ 财务人员完成主体、九币种、余额、跨月血缘、审计和备份人工复核。
+
+## 22. CNY 与异常数据过滤技术合同
+
+### 22.1 模块边界和唯一币种集合
+
+| 模块 | 技术职责 | 禁止行为 |
+|---|---|---|
+| `vcc-financial-op/definitions.js` | 定义唯一 `SUPPORTED_CURRENCIES=[AUD,CAD,CNY,EUR,GBP,HKD,JPY,SGD,USD]`；提供只读历史精确 CNH→CNY helper | 不对新输入做宽松别名映射；不把 `cnh`、空白或未知值改成 CNY |
+| `row-mapper.js` | 明细新行按唯一集合校验统计/流水/Pending 币种 | 不接受新 CNH |
+| `system-op-importer.js` | `normalizeSystemCurrency()` 为 trim 后 identity；按主体聚合精确九币种候选 | 不再 CNY→CNH；不把残缺主体写入 snapshot |
+| `detail-importer.js` | 行级 staging、disposition、promotion 与计数守恒 | 不因一条可归因异常回滚同文件正常行 |
+| `calculator.js` | 聚合历史 effective facts 时把精确 CNH 投影为 CNY | 不修改原始大表，不合并同时存在的 CNY/CNH 冲突坐标 |
+| `vcc-financial-op-db/migrations.js` | 小型派生事实原子升级和 `currency_contract_version=2` | 不扫描重写大表；不在冲突时择一/相加 |
+| `vcc-financial-op-dataset-writer.js` | 历史校验表/原表展示坐标使用 CNY，原始审计文本保持 | 不把当前 CNY 导出为 CNH |
+| `result-template-contract.js` | 固定模板 path/SHA、表头/命名区域/样式合同 | hash 漂移时不得继续写结果 |
+
+### 22.2 明细导入状态机
+
+```text
+read row
+  ├─ untrusted file/reader/cancel ───────────> group rollback / failed_validation
+  ├─ invalid key/format/currency ───────────> audit row + filtered disposition
+  ├─ same key + same hash ──────────────────> idempotent_skip
+  ├─ same key + different hash ─────────────> idempotent_conflict (filtered)
+  └─ valid unique row ──────────────────────> accepted → effective_rows
+```
+
+实现约束：
+
+1. 所有可读取原行先进入 `vcc_fin_op_import_rows`，保留 `source_file/sheet_name/source_row/raw_json`。
+2. promotion 只选择 `disposition IS NULL` 中每个业务键的首条，写入 effective 后再把同内容余行标为 skip；不得把异常行 promotion。
+3. 记录终态：有新增且有跳过/过滤为 `success_with_skips`；纯新增为 `success`；全同内容为 `all_skipped`；零新增且有异常为 `failed_validation/failed_conflict`。
+4. `raw_count` 必须等于 inserted/skipped/invalid/conflict/format/rolledBack 六类之和；UI 的“异常过滤”是 invalid+conflict+format，不包含正常幂等跳过。
+5. 文件读取中断、取消或无法可靠完成 staging 时，尚未终结的行标 `rolled_back`，不得将部分 staging 误报为 accepted。
+
+### 22.3 系统财务 OP 状态机
+
+系统财务 OP 以 `(targetMonth, subject)` 为资金原子单位：
+
+1. workbook/sheet/header/date-system 先建立可信读取边界；此层失败标 `hardFailure`，整组 rollback。已成功建立读取边界后，可精确归因到某一行的额外列按该行/主体异常隔离。
+2. 目标月内逐行读取主体、部门、币种、余额和 OOXML lexical evidence。`CNY` 保持 CNY；`CNH` 因不在唯一集合而形成 validation error。
+3. 一个主体只在九币种全部存在且唯一、金额均可规范化时生成 candidate snapshot；任一行异常会使该主体进入 `invalidSubjects`，不得生成残缺 candidate。
+4. 其他主体不受该异常主体影响；完整 candidate 在同一事务中按 subject/hash 分类为 accepted、idempotent_skip 或 idempotent_conflict。
+5. validation error 和 conflict 各自写 `vcc_fin_op_import_errors` / snapshot attempt；有 accepted 同时有过滤时 record=`success_with_skips`。
+6. 已归档月份仍是组级业务门禁：任何待新增 snapshot 都不得提交；不可把它当作可忽略异常。
+
+### 22.4 历史迁移和 fail-closed
+
+启动 migration 必须在业务 worker 之前执行，版本键为 `vcc_fin_op_module_state.currency_contract_version=2`：
+
+- 原子改写：system snapshot/attempt 的派生 balances 与 content hash、opening/archive balances、run rows/balances、Pending summary/totals、adjustments 等小型派生事实。
+- 保持不变：`vcc_fin_op_import_rows`、`vcc_fin_op_effective_rows` 的历史币种事实和全部 `raw_json`；避免千万行启动迁移及审计原文变更。
+- 读取兼容：calculator 和 writer 只对精确大写 CNH 调用 `normalizeLegacyStoredCurrency()`，投影为 CNY 后再进入当前九币种校验。
+- 冲突检查必须先于首个 DML。相同资金坐标同时有 CNH/CNY、JSON 同时含两键、缺必要列/币种或无法重算 content hash 时抛 `vcc-currency-migration-blocked`。
+- 整个币种升级在 `BEGIN IMMEDIATE` 中提交；任一异常 rollback，`currency_contract_version` 不推进。禁止部分迁移后继续业务。
+
+### 22.5 结果模板与输出
+
+- 固定模板 `assets/VCC财务OP校验/VCC财务OP校验结果表_模板.xlsx` 的九币种列使用 CNY；SHA-256 固定为 `48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053`。
+- writer 继续验证 Sheet、表头、named range、style 和 template hash；hash 不符时在发布前失败，不覆盖用户既有文件。
+- 当前结果/校验导出不得出现 CNH；历史原表导出可保留 raw_json 中的原始字符串，但其规范统计币种列必须显示 CNY。
+
+### 22.6 测试与证据
+
+最低自动矩阵：
+
+1. CNY 明细/系统输入正例、CNH 新输入反例；exact legacy helper 只映射大写 CNH。
+2. 明细“正常 + invalid key/format/conflict”同组：正常 effective 落库、异常逐行可查、计数守恒。
+3. 系统“完整主体 + 异常主体”同文件：完整九币种 snapshot 落库，异常主体零 snapshot 且错误可查。
+4. hard workbook/表头、取消、归档门禁仍整组失败关闭。
+5. 历史小表迁移、历史大表不改、calculator/writer CNY 投影、CNY+CNH collision 零 DML。
+6. 模板 CNY/header/hash/样式/named-range 回读；历史月份结果导出、调整归档、解归档/delete 回归。
+7. renderer 非成功/空 records 假成功反例，以及新增/跳过/异常过滤摘要。
+
+本地实现证据：用户样本 `1433865288349124625_18.xlsx` 经正式 reader/importer 以 2026-07 导入临时内存库，300,000/300,000 行 accepted、异常 0、币种分布 `AUD 28/CAD 550/EUR 1024/GBP 257/HKD 97/JPY 430/USD 297614`；未写用户生产数据库。VCC 自动回归 372/372，四条集成链 19/19、209/209、77/77、29/29，lint、node check、diff check 与 smoke 全绿。
+
+⚠️ 上述证据不能替代生产数据库、真实主体和财务签字。发布前必须抽查 CNY 系统主体九币种、混合异常导入的正常/异常去向、历史 CNH 月迁移前后金额守恒、结果/归档/导出及 Excel/WPS 显示。

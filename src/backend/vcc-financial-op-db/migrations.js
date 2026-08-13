@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 const {
   SOURCE_TYPES,
   PENDING_HEADERS,
@@ -17,8 +19,301 @@ const {
   readFirstMonthFacts
 } = require('./state-model');
 
+const LEGACY_VCC_CURRENCY = 'CNH';
+const CURRENT_VCC_CURRENCY = 'CNY';
+const VCC_CURRENCY_CONTRACT_VERSION = 2;
+const VCC_CURRENCY_ORDER = Object.freeze([
+  'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
+]);
+
 function tableColumns(db, tableName) {
   return new Set(db.prepare(`PRAGMA table_info(${tableName})`).all().map((row) => row.name));
+}
+
+function currencyMigrationError(message, details = {}) {
+  const error = new Error(message);
+  error.code = 'vcc-currency-migration-blocked';
+  Object.assign(error, details);
+  return error;
+}
+
+function currencyContentHash(targetMonth, subject, balances) {
+  return crypto.createHash('sha256')
+    .update(JSON.stringify({ targetMonth, subject, balances }), 'utf8')
+    .digest('hex');
+}
+
+function normalizeBalancesJsonCurrency(value, tableName, identity) {
+  let parsed;
+  try { parsed = JSON.parse(value); } catch (_error) { parsed = null; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw currencyMigrationError(`${tableName} ${identity} 的 balances_json 不是对象，已阻止 CNH→CNY 升级`);
+  }
+  const hasLegacy = Object.hasOwn(parsed, LEGACY_VCC_CURRENCY);
+  const hasCurrent = Object.hasOwn(parsed, CURRENT_VCC_CURRENCY);
+  if (hasLegacy && hasCurrent) {
+    throw currencyMigrationError(
+      `${tableName} ${identity} 同时包含 CNH 与 CNY，已阻止升级以避免资金币种合并`
+    );
+  }
+  if (!hasLegacy) return { changed: false, balances: parsed, balancesJson: value };
+  const balances = {};
+  for (const currency of VCC_CURRENCY_ORDER) {
+    const sourceCurrency = currency === CURRENT_VCC_CURRENCY ? LEGACY_VCC_CURRENCY : currency;
+    if (!Object.hasOwn(parsed, sourceCurrency)) {
+      throw currencyMigrationError(`${tableName} ${identity} 缺少 ${sourceCurrency}，已阻止 CNH→CNY 升级`);
+    }
+    balances[currency] = parsed[sourceCurrency];
+  }
+  const unexpected = Object.keys(parsed).filter((currency) => (
+    currency !== LEGACY_VCC_CURRENCY && !VCC_CURRENCY_ORDER.includes(currency)
+  ));
+  if (unexpected.length > 0) {
+    throw currencyMigrationError(
+      `${tableName} ${identity} 包含未知币种 ${unexpected.join('、')}，已阻止 CNH→CNY 升级`
+    );
+  }
+  return { changed: true, balances, balancesJson: JSON.stringify(balances) };
+}
+
+function assertNoCurrencyCoordinateCollision(db, tableName, coordinateColumns) {
+  const groupBy = coordinateColumns.join(', ');
+  const collision = db.prepare(`
+    SELECT ${groupBy}
+    FROM ${tableName}
+    WHERE currency IN (?, ?)
+    GROUP BY ${groupBy}
+    HAVING COUNT(DISTINCT currency) > 1
+    LIMIT 1
+  `).get(LEGACY_VCC_CURRENCY, CURRENT_VCC_CURRENCY);
+  if (!collision) return;
+  throw currencyMigrationError(
+    `${tableName} 同一资金坐标同时存在 CNH 与 CNY，已阻止升级`,
+    { tableName, collision: { ...collision } }
+  );
+}
+
+function runRowLogicalCoordinate(row) {
+  return JSON.stringify([
+    row.run_id,
+    String(row.subject ?? ''),
+    String(row.row_kind ?? ''),
+    String(row.source_type ?? ''),
+    String(row.category_major ?? ''),
+    String(row.category_minor ?? '')
+  ]);
+}
+
+function assertNoRunRowCurrencyCollision(db) {
+  const seen = new Map();
+  for (const row of db.prepare(`
+    SELECT id, run_id, subject, row_kind, source_type, category_major, category_minor, currency
+    FROM vcc_fin_op_run_rows
+    WHERE currency IN (?, ?)
+    ORDER BY id
+  `).iterate(LEGACY_VCC_CURRENCY, CURRENT_VCC_CURRENCY)) {
+    const key = runRowLogicalCoordinate(row);
+    const existing = seen.get(key);
+    if (existing && existing.currency !== row.currency) {
+      throw currencyMigrationError(
+        `vcc_fin_op_run_rows 同一结果坐标同时存在 CNH 与 CNY，已阻止升级`,
+        { rowIds: [existing.id, row.id] }
+      );
+    }
+    seen.set(key, row);
+  }
+}
+
+function ensureVccCurrencyContractSupport(db) {
+  const state = db.prepare(`
+    SELECT currency_contract_version
+    FROM vcc_fin_op_module_state
+    WHERE singleton_id = 1
+  `).get();
+  if (Number(state && state.currency_contract_version) >= VCC_CURRENCY_CONTRACT_VERSION) {
+    return {
+      migrated: false,
+      changedRows: 0,
+      contractVersion: VCC_CURRENCY_CONTRACT_VERSION
+    };
+  }
+  const jsonPlans = [];
+  const jsonSources = [
+    {
+      tableName: 'vcc_fin_op_system_snapshots',
+      requiredColumns: ['id', 'target_month', 'subject', 'balances_json', 'content_hash'],
+      sql: `SELECT id, target_month, subject, balances_json
+            FROM vcc_fin_op_system_snapshots
+            WHERE instr(balances_json, '"CNH"') > 0
+            ORDER BY id`,
+      identity: (row) => `id=${row.id}`,
+      update: (row, normalized) => ({
+        sql: 'UPDATE vcc_fin_op_system_snapshots SET balances_json = ?, content_hash = ? WHERE id = ?',
+        params: [
+          normalized.balancesJson,
+          currencyContentHash(row.target_month, row.subject, normalized.balances),
+          row.id
+        ]
+      })
+    },
+    {
+      tableName: 'vcc_fin_op_system_snapshot_attempts',
+      requiredColumns: [
+        'id', 'target_month', 'subject', 'balances_json', 'content_hash',
+        'existing_balances_json_snapshot'
+      ],
+      sql: `SELECT id, target_month, subject, balances_json, existing_balances_json_snapshot
+            FROM vcc_fin_op_system_snapshot_attempts
+            WHERE instr(balances_json, '"CNH"') > 0
+               OR instr(COALESCE(existing_balances_json_snapshot, ''), '"CNH"') > 0
+            ORDER BY id`,
+      identity: (row) => `id=${row.id}`,
+      update: (row, normalized) => {
+        let existing = null;
+        if (row.existing_balances_json_snapshot !== null) {
+          existing = normalizeBalancesJsonCurrency(
+            row.existing_balances_json_snapshot,
+            'vcc_fin_op_system_snapshot_attempts.existing_balances_json_snapshot',
+            `id=${row.id}`
+          );
+        }
+        return {
+          changed: normalized.changed || (existing && existing.changed),
+          sql: `UPDATE vcc_fin_op_system_snapshot_attempts
+                SET balances_json = ?, content_hash = ?, existing_balances_json_snapshot = ?
+                WHERE id = ?`,
+          params: [
+            normalized.balancesJson,
+            currencyContentHash(row.target_month, row.subject, normalized.balances),
+            existing ? existing.balancesJson : null,
+            row.id
+          ]
+        };
+      }
+    },
+    {
+      tableName: 'vcc_fin_op_opening_balances',
+      requiredColumns: ['target_month', 'subject', 'balances_json', 'content_hash'],
+      sql: `SELECT target_month, subject, balances_json
+            FROM vcc_fin_op_opening_balances
+            WHERE instr(balances_json, '"CNH"') > 0
+            ORDER BY target_month, subject`,
+      identity: (row) => `${row.target_month}/${row.subject}`,
+      update: (row, normalized) => ({
+        sql: `UPDATE vcc_fin_op_opening_balances
+              SET balances_json = ?, content_hash = ?
+              WHERE target_month = ? AND subject = ?`,
+        params: [
+          normalized.balancesJson,
+          crypto.createHash('sha256').update(normalized.balancesJson, 'utf8').digest('hex'),
+          row.target_month,
+          row.subject
+        ]
+      })
+    },
+    {
+      tableName: 'vcc_fin_op_archives',
+      requiredColumns: ['target_month', 'subject', 'balances_json'],
+      sql: `SELECT target_month, subject, balances_json
+            FROM vcc_fin_op_archives
+            WHERE instr(balances_json, '"CNH"') > 0
+            ORDER BY target_month, subject`,
+      identity: (row) => `${row.target_month}/${row.subject}`,
+      update: (row, normalized) => ({
+        sql: `UPDATE vcc_fin_op_archives SET balances_json = ?
+              WHERE target_month = ? AND subject = ?`,
+        params: [normalized.balancesJson, row.target_month, row.subject]
+      })
+    }
+  ];
+
+  assertNoCurrencyCoordinateCollision(db, 'vcc_fin_op_run_balances', ['run_id', 'subject']);
+  assertNoCurrencyCoordinateCollision(db, 'vcc_fin_op_pending_currency_totals', ['run_id', 'subject']);
+  assertNoCurrencyCoordinateCollision(db, 'vcc_fin_op_run_adjustments', ['run_id', 'row_key']);
+  assertNoRunRowCurrencyCollision(db);
+
+  for (const source of jsonSources) {
+    const columns = tableColumns(db, source.tableName);
+    const missingColumns = source.requiredColumns.filter((columnName) => !columns.has(columnName));
+    if (missingColumns.length > 0) {
+      // 极老审计表可能只有关联 ID/处置列；没有 balances_json 时不存在可迁币种事实。
+      if (!columns.has('balances_json')) continue;
+      const legacy = db.prepare(`
+        SELECT 1 FROM ${source.tableName}
+        WHERE instr(balances_json, '"CNH"') > 0
+        LIMIT 1
+      `).get();
+      if (legacy) {
+        throw currencyMigrationError(
+          `${source.tableName} 含 CNH 资金事实但缺少迁移列 ${missingColumns.join('、')}，已阻止升级`
+        );
+      }
+      continue;
+    }
+    for (const row of db.prepare(source.sql).iterate()) {
+      const normalized = normalizeBalancesJsonCurrency(
+        row.balances_json,
+        source.tableName,
+        source.identity(row)
+      );
+      const plan = source.update(row, normalized);
+      if (normalized.changed || plan.changed) jsonPlans.push(plan);
+    }
+  }
+
+  const scalarUpdates = [
+    ['vcc_fin_op_run_rows', ['currency']],
+    ['vcc_fin_op_run_balances', ['currency']],
+    ['vcc_fin_op_pending_summary_rows', ['flow_currency', 'pending_currency']],
+    ['vcc_fin_op_pending_currency_totals', ['currency']],
+    ['vcc_fin_op_run_adjustments', ['currency']]
+  ];
+  const scalarMigrationRequired = scalarUpdates.some(([tableName, columnNames]) => {
+    const where = columnNames.map((columnName) => `${columnName} = ?`).join(' OR ');
+    return Boolean(db.prepare(`SELECT 1 FROM ${tableName} WHERE ${where} LIMIT 1`)
+      .get(...columnNames.map(() => LEGACY_VCC_CURRENCY)));
+  });
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    let changedRows = 0;
+    for (const plan of jsonPlans) {
+      changedRows += Number(db.prepare(plan.sql).run(...plan.params).changes) || 0;
+    }
+    if (scalarMigrationRequired) {
+      for (const [tableName, columnNames] of scalarUpdates) {
+        const assignments = columnNames.map((columnName) => (
+          `${columnName} = CASE WHEN ${columnName} = ? THEN ? ELSE ${columnName} END`
+        )).join(', ');
+        const where = columnNames.map((columnName) => `${columnName} = ?`).join(' OR ');
+        const params = columnNames.flatMap(() => [LEGACY_VCC_CURRENCY, CURRENT_VCC_CURRENCY]);
+        changedRows += Number(db.prepare(`
+          UPDATE ${tableName} SET ${assignments} WHERE ${where}
+        `).run(...params, ...columnNames.map(() => LEGACY_VCC_CURRENCY)).changes) || 0;
+      }
+    }
+    for (const [tableName, columnNames] of scalarUpdates) {
+      const where = columnNames.map((columnName) => `${columnName} = ?`).join(' OR ');
+      const legacy = db.prepare(`SELECT 1 FROM ${tableName} WHERE ${where} LIMIT 1`)
+        .get(...columnNames.map(() => LEGACY_VCC_CURRENCY));
+      if (legacy) throw currencyMigrationError(`${tableName} 仍存在 CNH 派生事实，迁移已回滚`);
+    }
+    db.prepare(`
+      UPDATE vcc_fin_op_module_state
+      SET currency_contract_version = ?, updated_at = datetime('now', 'localtime')
+      WHERE singleton_id = 1
+    `).run(VCC_CURRENCY_CONTRACT_VERSION);
+    db.exec('COMMIT');
+    return {
+      migrated: jsonPlans.length > 0 || scalarMigrationRequired,
+      changedRows,
+      contractVersion: VCC_CURRENCY_CONTRACT_VERSION
+    };
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* ignore */ }
+    if (error && error.code === 'vcc-currency-migration-blocked') throw error;
+    throw currencyMigrationError(`CNH→CNY 资金币种迁移失败：${error.message}`, { cause: error });
+  }
 }
 
 function parsePendingRawJson(rawJson, tableName, rowId) {
@@ -229,6 +524,7 @@ function ensureVccFinancialOpStateModelSupport(db) {
       CREATE TABLE IF NOT EXISTS vcc_fin_op_module_state (
         singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
         first_month TEXT,
+        currency_contract_version INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
       );
@@ -272,6 +568,14 @@ function ensureVccFinancialOpStateModelSupport(db) {
       CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_operation_audit_month
         ON vcc_fin_op_operation_audit(target_month, operation_type, created_at DESC, id DESC);
     `);
+
+    const moduleStateColumns = tableColumns(db, 'vcc_fin_op_module_state');
+    if (!moduleStateColumns.has('currency_contract_version')) {
+      db.exec(`
+        ALTER TABLE vcc_fin_op_module_state
+        ADD COLUMN currency_contract_version INTEGER NOT NULL DEFAULT 1
+      `);
+    }
 
     const runColumns = tableColumns(db, 'vcc_fin_op_runs');
     if (!runColumns.has('result_revision')) {
@@ -727,17 +1031,19 @@ function ensureVccFinancialOpTablesSupport(db) {
   }
   ensurePendingRawContractSupport(db);
   const stateDiagnostic = ensureVccFinancialOpStateModelSupport(db);
+  const currencyMigration = ensureVccCurrencyContractSupport(db);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_import_records_dataset_lifecycle
       ON vcc_fin_op_import_records(target_month, source_type, dataset_deleted_at, status);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_attempts_comparison
       ON vcc_fin_op_system_snapshot_attempts(comparison_attempt_id)
   `);
-  return { firstMonthDiagnostic: stateDiagnostic };
+  return { firstMonthDiagnostic: stateDiagnostic, currencyMigration };
 }
 
 module.exports = {
   FIRST_MONTH_DIAGNOSTIC_OPERATION,
+  ensureVccCurrencyContractSupport,
   ensureVccFinancialOpStateModelSupport,
   ensureVccFinancialOpTablesSupport
 };

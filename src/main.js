@@ -42,6 +42,7 @@ const {
 const {
   PR3_HANDOFF_CHANNELS,
   SUPPORT_ACTION_POLICIES,
+  createBankStatementRunFlowIdentity,
   createTaskPolicyRegistry
 } = require('./main-process/archive-center/task-policy-registry');
 const {
@@ -55,6 +56,7 @@ const {
 } = require('./main-process/archive-center/worker-batch-context');
 const {
   createIpcTaskContext,
+  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
@@ -506,6 +508,7 @@ let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
 let archiveStorageRootManager = null;
 let archiveCenterInitializationPromise = null;
+let toolboxStartupRecoveryError = null;
 let archiveOperationTracker = null;
 let archiveTaskLifecycle = null;
 let archiveOperationTail = Promise.resolve();
@@ -4105,7 +4108,7 @@ function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
-function readPublicationRecoveryBatchIds(userDataDir) {
+function readToolboxRecoveryBatchIds(userDataDir) {
   const indexPath = path.join(userDataDir, JOURNAL_INDEX_NAME);
   let parsed;
   try {
@@ -4114,13 +4117,15 @@ function readPublicationRecoveryBatchIds(userDataDir) {
     if (error && error.code === 'ENOENT') {
       return { batchIds: [], sweepUnsafe: false };
     }
+    // 非 ENOENT 读取失败或 JSON 损坏代表 owner 身份不可验证，绝不能降级成
+    // “没有受保护批次”，否则通用 sweep 会把 committed/running 原批次误标 failed。
     return { batchIds: [], sweepUnsafe: true, error };
   }
   if (!parsed || !Array.isArray(parsed.entries)) {
     return {
       batchIds: [],
       sweepUnsafe: true,
-      error: new Error(`输出发布恢复索引结构无效：${indexPath}`)
+      error: new Error(`工具箱发布恢复索引结构无效：${indexPath}`)
     };
   }
   const batchIds = new Set();
@@ -4133,6 +4138,44 @@ function readPublicationRecoveryBatchIds(userDataDir) {
     }
   }
   return { batchIds: [...batchIds], sweepUnsafe: false };
+}
+
+function recoverPositionPendingBeforeInterruptedSweep() {
+  const raw = database && database.db
+    ? database.getSetting(POSITION_SIDE_DB_PENDING_SETTING)
+    : '';
+  if (!raw) return null;
+  // Service 初始化会核 side-db checkpoint、persist append intent，并以同一 pending 原批次收口。
+  return getPositionReconciliationService();
+}
+
+function protectedInterruptedTaskBatchIds() {
+  const batchIds = new Set();
+  try {
+    const pending = readPositionPendingOperation();
+    const context = freezeWorkerBatchContext(pending && pending.batchContext, { required: true });
+    batchIds.add(context.batchId);
+  } catch (_error) {
+    // 无 pending 或证据损坏时不猜测。
+  }
+  for (const batchId of acquiringRunData.listRecoverableArchiveBatchIds({
+    userDataDir: path.dirname(database.dbPath)
+  })) batchIds.add(batchId);
+  const toolboxProtection = readToolboxRecoveryBatchIds(app.getPath('userData'));
+  if (toolboxProtection.sweepUnsafe === true) {
+    return {
+      batchIds: [...batchIds].sort((left, right) => left - right),
+      sweepUnsafe: true,
+      error: toolboxProtection.error
+    };
+  }
+  for (const batchId of toolboxProtection.batchIds) {
+    batchIds.add(batchId);
+  }
+  return {
+    batchIds: [...batchIds].sort((left, right) => left - right),
+    sweepUnsafe: false
+  };
 }
 
 function initializeArchiveCenter() {
@@ -4190,15 +4233,18 @@ function initializeArchiveCenter() {
     onTerminalIntentFlushed: finalizePositionTerminalIntent,
     recoverInterruptedTaskOwners: [
       {
+        ownerName: 'Position',
+        recover: recoverPositionPendingBeforeInterruptedSweep
+      },
+      {
+        // Toolbox 与 VCC 正式输出共用同一 durable publication receipt 恢复根。
         ownerName: 'Toolbox/VCC output publications',
         recover: async () => {
           await recoverToolboxPublicationsAtStartup();
         }
       }
     ],
-    getProtectedInterruptedTaskBatchIds: () => readPublicationRecoveryBatchIds(
-      app.getPath('userData')
-    ),
+    getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
@@ -4223,15 +4269,12 @@ function initializeArchiveCenter() {
   });
   archiveCenterInitializationPromise = archiveCenterService.initialize().catch((error) => {
     appendActivityLogEntry({
-      level: 'warning',
+      level: 'error',
       source: 'main',
       domain: 'archive-center',
-      message: '存档中心初始化失败，业务功能继续可用',
+      message: '存档中心初始化失败，已阻止业务启动',
       details: [error && error.message ? error.message : String(error)]
     });
-    if (error && error.code === 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE') {
-      return { available: false, status: 'unavailable', code: error.code };
-    }
     throw error;
   });
   return archiveCenterService;
@@ -5190,6 +5233,11 @@ function registerAppHandlers() {
         //   runId = bankStatementSession.importedAt（同批 run/export 全程稳定；export 阶段据此判跨期、回写标记）。
         refundHitDepositBizIds: result.refundHitDepositBizIds || [],
         runId: bankStatementSession.importedAt,
+        // 本轮 run 按 C04 窄化不分配存档批次，但 export 仍需稳定区分每次显式重跑。
+        // 仅在当前 processingResult 内保存一次性身份；每次真实 export 各建一个含输出的可见批次，
+        // 并以该身份续接同一轮 parent。
+        // 不以月份、importedAt 或 latest 猜测，也不新增持久 tracker。
+        archiveFlowIdentity: createBankStatementRunFlowIdentity(),
         // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 导出阶段追加 3 核对 sheet（未勾选/无命中时为 []）
         paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
         // v3.0.12 功能1：异常-人工判断命中银行行（🔴 只读）→ 导出阶段写「异常-人工判断」sheet（无命中时为 []）
@@ -13844,11 +13892,18 @@ function registerNewAccountHandlers() {
         }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
-        const failure = vccFinancialOpErrorResult(error);
         const partial = error && error.partialResult && typeof error.partialResult === 'object'
           ? error.partialResult
-          : null;
-        return partial ? { ...failure, ...partial, status: 'error' } : failure;
+          : {};
+        return {
+          status: 'error',
+          message: error && error.message ? error.message : String(error),
+          detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : [],
+          batchId: partial.batchId || null,
+          targetMonth: partial.targetMonth || payload.targetMonth || null,
+          partialCommitted: partial.partialCommitted === true,
+          records: Array.isArray(partial.records) ? partial.records : []
+        };
       }
     }
   });
@@ -14118,7 +14173,12 @@ function registerNewAccountHandlers() {
         if (choice.canceled || !choice.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        return { proceed: true, outputPaths: [choice.filePath], outputPath: choice.filePath };
+        return {
+          proceed: true,
+          outputPaths: [choice.filePath],
+          outputPath: choice.filePath,
+          targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
+        };
       } catch (error) {
         return {
           proceed: false,
@@ -14127,14 +14187,26 @@ function registerNewAccountHandlers() {
       }
     },
     execute: async (_event, prepared, taskContext, payload = {}) => {
+      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
         const result = await getVccFinancialOpService().exportDatasetData({
           ...payload,
-          outputPath: prepared.outputPath
-        }, undefined, requireVccFinancialOpBatchContext(taskContext));
+          outputPath: prepared.outputPath,
+          generationOutputPath: path.join(publicationStagingDirectory, 'dataset.xlsx'),
+          targetSnapshots: prepared.targetSnapshots,
+          onDurableHandoff: (_publication, exportResult) => taskContext.settleArtifacts({
+            result: { status: 'success', filePath: prepared.outputPath }
+          })
+        }, undefined, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
         return { status: 'error', message: error && error.message ? error.message : String(error) };
+      } finally {
+        if (!fs.existsSync(publicationStagingDirectory)
+            || !fs.readdirSync(publicationStagingDirectory).length) {
+          cleanupVccOutputStagingDirectory(publicationStagingDirectory);
+        }
       }
     }
   });
@@ -14183,7 +14255,8 @@ function registerNewAccountHandlers() {
             runId: target.runId,
             targetMonth: target.targetMonth,
             outputPath: choice.filePath,
-            outputPaths: [choice.filePath]
+            outputPaths: [choice.filePath],
+            targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
           };
         }
         const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
@@ -14197,22 +14270,38 @@ function registerNewAccountHandlers() {
           proceed: true,
           runId: target.runId,
           targetMonth: target.targetMonth,
-          outputDirectory: choice.filePaths[0]
+          outputDirectory: choice.filePaths[0],
+          // 多主体文件名由 writer 依据当时目录冲突一次性固定；
+          // 正式 publish 前仍会对每个实际目标执行缺失快照校验。
+          targetSnapshots: null
         };
       } catch (error) {
         return { proceed: false, result: vccFinancialOpErrorResult(error) };
       }
     },
     execute: async (_event, prepared, taskContext) => {
+      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
         const result = await getVccFinancialOpService().exportRun({
           targetMonth: prepared.targetMonth,
           outputPath: prepared.outputPath,
-          outputDirectory: prepared.outputDirectory
-        }, requireVccFinancialOpBatchContext(taskContext));
+          outputDirectory: prepared.outputDirectory,
+          publicationStagingDirectory,
+          targetSnapshots: prepared.targetSnapshots,
+          onDurableHandoff: (_publication, exportResult) => taskContext.settleArtifacts({
+            result: { status: 'success', filePaths: exportResult.filePaths },
+            runtime: { outputPaths: exportResult.filePaths }
+          })
+        }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
         return vccFinancialOpErrorResult(error);
+      } finally {
+        if (!fs.existsSync(publicationStagingDirectory)
+            || !fs.readdirSync(publicationStagingDirectory).length) {
+          cleanupVccOutputStagingDirectory(publicationStagingDirectory);
+        }
       }
     }
   });
@@ -14231,7 +14320,12 @@ function registerNewAccountHandlers() {
         if (choice.canceled || !choice.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        return { proceed: true, outputPath: choice.filePath, outputPaths: [choice.filePath] };
+        return {
+          proceed: true,
+          outputPath: choice.filePath,
+          outputPaths: [choice.filePath],
+          targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
+        };
       } catch (error) {
         return {
           proceed: false,
@@ -14240,14 +14334,26 @@ function registerNewAccountHandlers() {
       }
     },
     execute: async (_event, prepared, taskContext, payload = {}) => {
+      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
         const result = await getVccFinancialOpService().exportImportAudit({
           ...payload,
-          outputPath: prepared.outputPath
-        }, requireVccFinancialOpBatchContext(taskContext));
+          outputPath: prepared.outputPath,
+          generationOutputPath: path.join(publicationStagingDirectory, 'import-audit.xlsx'),
+          targetSnapshots: prepared.targetSnapshots,
+          onDurableHandoff: () => taskContext.settleArtifacts({
+            result: { status: 'success', filePath: prepared.outputPath }
+          })
+        }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
         return { status: 'error', message: error && error.message ? error.message : String(error) };
+      } finally {
+        if (!fs.existsSync(publicationStagingDirectory)
+            || !fs.readdirSync(publicationStagingDirectory).length) {
+          cleanupVccOutputStagingDirectory(publicationStagingDirectory);
+        }
       }
     }
   });
@@ -17620,9 +17726,7 @@ async function publishToolboxArtifacts(
     protectedSourcePaths: options.protectedSourcePaths,
     userDataDir: app.getPath('userData'),
     batchContext,
-    archiveInputFiles: options.archiveInputFiles,
-    requireArchiveHandoff: true,
-    requireValidatedArtifacts: true
+    archiveInputFiles: options.archiveInputFiles
   });
   try {
     await recoverToolboxPublicationsIntoArchive({
@@ -17632,6 +17736,9 @@ async function publishToolboxArtifacts(
       taskIds: [publication.taskId]
     });
   } catch (error) {
+    // 正式目标已经 committed，不能把存档暂时失败重新解释成业务失败并让
+    // TaskLifecycle 把原批次写成 failed。receipt 仍保留并阻止下一次发布；
+    // 当前 lifecycle 继续用冻结 input/output 证据重试，启动 owner 也可再次接管。
     publication.pendingArchiveHandoff = true;
     publication.warnings = [
       ...(Array.isArray(publication.warnings) ? publication.warnings : []),
@@ -17669,6 +17776,36 @@ function captureToolboxTargetSnapshots(targetPaths) {
   return (Array.isArray(targetPaths) ? targetPaths : []).map(
     (targetPath) => captureToolboxTargetSnapshot(targetPath)
   );
+}
+
+function createVccOutputStagingDirectory(batchContext) {
+  const context = freezeWorkerBatchContext(batchContext, { required: true });
+  const root = path.join(
+    app.getPath('userData'),
+    'run-data',
+    'vcc-financial-op',
+    'output-generation'
+  );
+  fs.mkdirSync(root, { recursive: true });
+  return fs.mkdtempSync(path.join(root, `${context.taskRunId.replace(/[^a-zA-Z0-9._-]+/g, '-')}-`));
+}
+
+function cleanupVccOutputStagingDirectory(directoryPath) {
+  if (!directoryPath) return;
+  try {
+    fs.rmSync(directoryPath, { recursive: true, force: true });
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'vcc-financial-op',
+      message: 'VCC 导出临时目录清理失败',
+      details: [
+        `临时目录：${directoryPath}`,
+        `原因：${error && error.message ? error.message : String(error)}`
+      ]
+    });
+  }
 }
 
 function assertToolboxTargetSnapshotsFresh(targetPaths, snapshots) {
@@ -17745,6 +17882,7 @@ function assertToolboxSplitSourceFresh(context) {
 }
 
 async function recoverToolboxPublicationsAtStartup() {
+  toolboxStartupRecoveryError = null;
   try {
     const result = await recoverToolboxPublicationsIntoArchive({
       userDataDir: app.getPath('userData'),
@@ -17764,6 +17902,7 @@ async function recoverToolboxPublicationsAtStartup() {
       });
     }
   } catch (error) {
+    toolboxStartupRecoveryError = error;
     appendActivityLogEntry({
       level: 'error',
       source: 'main',
@@ -18773,8 +18912,21 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       }
       return runRegisteredBusinessOperation(meta, executeBusiness)(event);
     }
+    if (policy.batchPolicy === 'exclude') {
+      if (policy.excludeReason !== 'no-archive-artifact') {
+        throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
+      }
+      return runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
+        executeIpcTaskWithoutBatch({
+          businessOperationRegistry,
+          meta,
+          markExecuteStarted,
+          execute: executeBusiness
+        })
+      ));
+    }
     if (policy.batchPolicy !== 'reserve') {
-      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
+      throw new Error(`不支持的 task batch policy：${meta.channel}`);
     }
 
     const center = archiveCenterService || initializeArchiveCenter();
@@ -19091,7 +19243,7 @@ function registerAllIpcHandlers() {
 
 // 后台 init 链 + 所有 post-setup（database/pendingDb/迁移/模板库 + 孤儿清理/备份保留/idle 计时器/failure listener）。
 //   新时序：createWindow 后调用；完成后 markAppInitDone() → send('app:init-done')。
-//   旧时序：register/createWindow 前调用（同步完成）。
+//   旧时序：register/createWindow 前调用并等待完成。
 //   本函数内所有 setImmediate 后台块 guard `if (!database || !database.db) return`——新时序下 database 已在本函数体内 init，
 //   setImmediate 回调晚于本函数同步体执行，database 已就绪。
 async function runBackgroundInitChain() {
@@ -19104,7 +19256,15 @@ async function runBackgroundInitChain() {
     database.init();
     initializeAppUpdaterService();
     initializeArchiveCenter();
+    // 存档 journal 必须先按 DB setting 收敛到唯一根，才允许 Position 等启动恢复消费者放行。
+    // 初始化抛错会由现有 startup failure 入口退出；不得把已切换 service 上的
+    // outbox/recovery 失败吞成 unavailable 后继续放行业务。
     if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;
+    // Controller 会保留 owner 批次并继续扫尾其它孤儿；Toolbox 固定恢复根损坏
+    // 仍沿用既有 fail-closed 启动合同，不能放行新的工具箱任务。
+    if (toolboxStartupRecoveryError) throw toolboxStartupRecoveryError;
+    // Toolbox committed publication 已作为 ArchiveCenter owner recovery 在通用
+    // interrupted sweep 前写入“附件 + succeeded”耐久 outbox 并完成重放。
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
@@ -19207,7 +19367,8 @@ if (hasSingleInstanceLock) app.whenReady()
       registerAllIpcHandlers();
       createWindow();
       // 后台 init 链：放进 setImmediate 让窗口先渲染（loading 骨架），init 完成后 send('app:init-done')。
-      //   database.init 为同步 API；随后等待存档 journal 恢复。放 setImmediate 让窗口先渲染 loading 态。
+      //   database.init 为同步 API；随后等待存档 journal 恢复。放 setImmediate 让 createWindow 的
+      //   loadFile/ready-to-show 事件循环先跑一拍——窗口 loading 态先可见，再开始初始化。
       setImmediate(async () => {
         try {
           await runBackgroundInitChain();

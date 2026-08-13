@@ -1490,6 +1490,7 @@ class ArchiveService {
             filePath: targetPath
           };
         }
+        // 历史 hardlink 在 canonical 仍可信时原地脱钩为独立 copy。
         await this.materializer.remove(prepared.assignment.storageRelativePath);
       }
       if (!existing.valid && existing.code !== 'ARCHIVE_LAYOUT_MISSING') {

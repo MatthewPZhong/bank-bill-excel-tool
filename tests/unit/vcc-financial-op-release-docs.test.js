@@ -181,6 +181,33 @@ test('Spec 冻结内容哈希跨 LF、CRLF 与 CR checkout 稳定且内容变化
   assert.notEqual(normalizedTextSha256(changedText), FROZEN_SPEC_SHA256);
 });
 
+test('v3.1.9 VCC CNY 与异常过滤修订在 Spec 和 TechDoc 中保持一致', () => {
+  const erratumSpec = read(
+    'changes/3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md'
+  );
+  const erratumTechDoc = read(
+    'changes/3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md'
+  );
+  const currentSpec = read('changes/3.1.9/spec.md');
+  const frozenSpecSha = normalizedTextSha256(readBuffer('changes/3.1.8/spec.md'));
+
+  assert.equal(frozenSpecSha, FROZEN_SPEC_SHA256, '历史 v3.1.8 Spec 不得被当前修订改写');
+  assert.match(erratumSpec, /document-version: `2\.1`/);
+  assert.match(erratumTechDoc, /document-version: `1\.2`/);
+  for (const document of [erratumSpec, erratumTechDoc, currentSpec]) {
+    assert.match(document, /AUD[\s\S]*CAD[\s\S]*CNY[\s\S]*EUR[\s\S]*GBP[\s\S]*HKD[\s\S]*JPY[\s\S]*SGD[\s\S]*USD/);
+    assert.match(document, /CNY.*CNH|CNH.*CNY/);
+    assert.match(document, /异常.*过滤|过滤.*异常/);
+    assert.match(document, /主体.*九币种|九币种.*主体/);
+    assert.match(document, /hard failure|整组失败关闭/);
+    assert.match(document, /vcc-currency-migration-blocked/);
+    assert.match(document, /48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053/);
+  }
+  assert.match(erratumSpec, /rawCount = insertedCount \+ skippedCount/);
+  assert.match(erratumTechDoc, /currency_contract_version=2/);
+  assert.match(currentSpec, /不得显示零行假成功|零行假成功/);
+});
+
 test('v3.1.8 iteration PRD 与 PR 归档锁定人工 6/6 PASS 和正式 Release 证据', () => {
   const prd = read('docs/iterations/v3.1.8/PRD-v3.1.8.md');
   const preflight = read('changes/3.1.8/preflight.md');

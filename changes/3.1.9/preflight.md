@@ -500,7 +500,7 @@
 - Goal：在 canonical SHA-256 Blob 保持唯一完整性真相的前提下，为 ready artifact 建立 `{root}/YYYY/YYYY-MM/YYYY-MM-DD/{batchNumber}/` layout v2，并闭合读取修复、历史续跑和物理回收。
 - Context：PR1/PR2 已提供 Blob 去重、artifact/batch、保留期、手工删除、启动 reconcile 和按 root 串行机制；PR3 已把实际输入/输出交给同一 ArchiveService。
 - Constraints：日期只取 `archive_batches.local_date`，批次目录只用真实 batchNumber；不改 artifact/blob identity、批次号/retention/TaskLifecycle/业务算法；不实现 PR5 root marker/journal/migration/capacity 或 PR6 UI；【打开】与【另存为】仍只交安全副本。
-- Done when：稳定安全命名、hardlink/能力失败 copy、DB size/hash 校验和只读、无空业务目录、layout 失败不回滚 Blob、layout-first read/repair、历史续跑、共享引用安全回收和 durable cleanup-pending 均有真实 FS 证据。
+- Done when：稳定安全命名、与 canonical 独立的 copy、DB size/hash 校验和只读、历史 hardlink 脱钩、无空业务目录、layout 失败不回滚 Blob、layout-first read/repair、历史续跑、共享引用安全回收和 durable cleanup-pending 均有真实 FS 证据。
 
 ### 已批准 schema 与派生状态
 
@@ -517,15 +517,15 @@
 
 `manual delete / cleanupExpired / startup → 同一 root serialization → cleanup job executor`
 
-1. 纯 layout/name/materializer 与真实 FS 测试；稳定 path/name、严格 hardlink fallback、hash/size/readonly先成立。
+1. 纯 layout/name/materializer 与真实 FS 测试；稳定 path/name、copy inode 隔离、hash/size/readonly先成立。
 2. repository additive schema、artifact order/layout evidence 和 delete txn cleanup job。
 3. service 写入、ready short-circuit 修复、layout-first read、历史 resume、manual/retention/startup 共用物理回收。
 4. 聚焦回归、P0→P1 人工清单、blindspot/reconciliation/check-vars；不运行 full，不提交。
 
 ### Unknowns 与人工门禁
 
-- 当前无 BLOCK。hardlink fallback 只接受 `EXDEV/EACCES/EPERM/ENOTSUP/EOPNOTSUPP/ENOSYS/EMLINK` 等真实能力错误；任意其它错误不得降级 copy。
-- Windows hardlink/权限/跨卷、网络盘、长路径、Excel/WPS、真实大文件仍为 PROBE；本机自动测试不得宣称关闭。
+- 当前无 BLOCK。materialized 只允许独立 copy；copy 的路径、I/O 或校验错误直接保留 repair-pending，不得建立共享 inode。
+- Windows copy/权限/跨卷、网络盘、长路径、Excel/WPS、真实大文件与容量仍为 PROBE；本机自动测试不得宣称关闭。
 - ⚠️ 文件身份、SHA/size、共享引用、删除顺序、只读与输入/输出血缘是人工复核红线；materialized 文件永不反向吸收为新 Blob/hash。
 
 ## PR5 存储根迁移 Preflight（2026-08-11）
@@ -563,7 +563,7 @@
 | maintenance 如何等待完整任务 | PROBE 已收敛 | 新 reserve/create admission 先关，现有任务由 `archiveOperationTail` drain，再进入 PR4 root operation |
 | DB commit 与内存 delegate 崩溃窗口 | PROBE 已收敛 | DB setting 是 truth；setting+mode 单事务后同步切 delegate，journal 可落后且按 setting 恢复 |
 | target initialize 是否会误清旧根 cleanup job | PROBE 已收敛 | source reconcile 后 cleanup jobs 必须为 0，才允许 prepared/target initialize |
-| 跨卷/网络/容量如何决定 | PROBE 已收敛 | 原子读写探针、同目标卷 hardlink probe 与 `statfs`；失败即拒绝，无路径猜测/fallback |
+| 跨卷/网络/容量如何决定 | PROBE 已收敛 | 原子读写探针与 `statfs`；容量始终计 canonical + 独立 materialized copy，失败即拒绝，无路径猜测/fallback |
 | marker 文件名 | ASSUME 已批准 | `.archive-root.json`；内部低风险合同，内容严格由 Spec/DB ID 冻结 |
 
 当前无 BLOCK。
@@ -671,3 +671,32 @@ Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related
 - 预览只出现字体/子像素抗锯齿非确定性，基线 PNG 已精确恢复且不纳入 ownership。变量统计和 integration policy 仅保留对应脚本的合法自动刷新。
 - Windows 更新资产沿用冻结的两阶段合同。因本机 ignored `dist/` 有跨版本残留，使用唯一临时目录非破坏性隔离本次四项原始文件；staging 与 release workflow 等价校验通过，未改 package/config/check scripts，也未删除、移动、覆盖旧产物或重建。
 - 上述只证明 macOS cross-build 的 artifact/static 合同；独立评审、Windows runtime、用户人工、合并、tag、Release、上传和公开回读均未执行。
+## 全迭代独立 Review 修复 Preflight（2026-08-12）
+
+### Task Brief
+
+- Goal：一次性修复最终头仍生产可达的 26 项独立 review finding，并保持既有金额、币种、Excel 内容、批次编号及外部发布边界不变。
+- Context：唯一基线为 `codex/v3.1.9-pr7-release-closeout@6c431f400f8a02e33dffd45408effdc4a2002bac`；PR6 P1 与 PR7 两项 P2 已在该基线关闭，其余 finding 均由独立 reviewer 在最终生产调用图上复现或以代码事实证明。
+- Constraints：禁止为 direct-Service、renderer 伪造或理论组合增加防御；不 push/upstream/PR/tag/Release；不触碰用户 untracked；涉及删除、迁移、资金期初、原始输入和输出文件时 fail-closed，自动测试不代替人工资金复核。
+- Done when：RF-01—RF-26 均有最小生产修复与代表回归；无旧入口旁路；聚焦、lint、smoke、unit、integration、Electron/预览（如受影响）、release check-vars 与 final clean isolated Windows build 全部完成；仅 owned 文件本地提交。
+
+### Unknowns Register
+
+| 未知 | 分类 | 当前证据/决定 |
+| --- | --- | --- |
+| 26 项是否存在跨 reviewer 重复 | PROBE 已关闭 | 按最终头触发链去重为 lifecycle 4、VCC 7、Toolbox 4、layout 3、root migration 8；严重度精确为 P1×16/P2×9/P3×1 |
+| lifecycle 启动恢复与业务恢复谁先终结 active task | PROBE | 先盘点 Acquiring/Position/VCC 持久恢复 ownership；仅无可恢复 owner 的残留任务落稳定 interruption terminal，禁止抢先终结可恢复批次 |
+| Toolbox committed receipt 的持久位置 | PROBE | 优先扩展现有 publication journal/receipt 并携 exact7+最终 descriptors；不得新增第二 TaskLifecycle/outbox |
+| PR5 旧根清理 inventory 的持久位置 | PROBE | 优先扩展现有 migration journal，switch 前冻结相对路径集合与完成游标；不得以后续 live DB 重建 |
+| Windows 路径预算口径 | 已确认 | 使用 UTF-16 code units，截断不得切断 surrogate pair；根剩余预算不足最小安全名时前置拒绝 |
+| 金额/币种/业务算法是否需改变 | 已确认不改 | 本轮只改身份、恢复、审计、文件保护、路径与可观测性；任何实际金额、币种、九币种公式、writer 内容偏差均停止并升级为 BLOCK |
+
+当前无产品 BLOCK。高风险内部 persistence 变更只允许 additive/backward-compatible，并须先补恢复测试再接生产入口。
+
+### 风险优先实施顺序
+
+1. lifecycle/identity：先闭合 active task、terminal outbox、Acquiring/statement flow identity，避免后续 artifact 修复绑定错误 parent。
+2. VCC：再闭合取消/进度/unsafe audit/期初诊断与 partial import/export 血缘；资金事实删除均需锁内同源重算。
+3. Toolbox：在 publication 前保护 input/target identity 与 freshness，在 committed 后用 durable receipt 归属原 batch。
+4. layout/root：先降低启动全量读取、修路径与历史续跑，再修迁移 symlink、pre-switch 只读、journal/inventory/offline cleanup。
+5. 最终 blindspot/reconciliation：逐入口反查旁路、故障后 first terminal、行数/文件数守恒、敏感文件清理与人工红线。

@@ -921,7 +921,7 @@ test('outbox 重放在附件元数据登记前失败时保留任务和源文件'
   assert.deepEqual(controller.listUnresolvedSourcePaths(), [inputPath]);
   assert.deepEqual(releasedPaths, []);
 
-  service.createBatch = async () => ({
+  service.appendFiles = async () => ({
     ok: true,
     batch: {
       id: 1,
@@ -1181,6 +1181,46 @@ test('终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序�
   const initializedWithConflict = await controller.initialize();
   assert.equal(initializedWithConflict.ok, true);
   assert.equal(outboxStore.list().length, 1, '普通 terminal conflict 不得让应用陷入启动循环');
+});
+
+test('legacy outbox 首次建批后回写真实 targetBatchId，并在同一批次收口终态', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-legacy-target-'));
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const { controller, service } = createHarness({ outboxStore });
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+
+  const record = outboxStore.enqueue({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '网银账单',
+    taskKey: 'bank-statement:export',
+    taskRunId: 'legacy-task-run',
+    operationKey: 'legacy-outbox-without-target',
+    parentRunId: 'legacy-parent',
+    sourceOperation: 'bank-statement:export',
+    files: [],
+    terminalOutcome: {
+      taskStatus: 'succeeded',
+      code: '',
+      message: '',
+      metadata: { recoveredLegacyOutbox: true }
+    }
+  });
+
+  const originalRemove = outboxStore.remove.bind(outboxStore);
+  let targetBeforeRemove = null;
+  outboxStore.remove = (id) => {
+    targetBeforeRemove = outboxStore.get(id).payload.targetBatchId;
+    return originalRemove(id);
+  };
+
+  const replay = await controller.flushOutbox();
+  assert.equal(replay.flushed, 1);
+  assert.equal(replay.remaining, 0);
+  assert.equal(targetBeforeRemove, 1, 'remove 前必须已耐久回写真实 batchId');
+  assert.equal(service.repository.getBatch(1).taskStatus, 'succeeded');
+  assert.deepEqual(outboxStore.list(), []);
+  assert.equal(record.payload.targetBatchId, undefined, 'fixture 确认是旧版无 target 记录');
 });
 
 test('正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试', async () => {

@@ -12,6 +12,7 @@ const {
   SUPPORT_ACTION_POLICIES,
   bankBuImportResultFlowIdentities,
   bankBuRunFlowPlan,
+  createBankStatementRunFlowIdentity,
   createTaskPolicyRegistry,
   statementResultClassifier
 } = require('../../../src/main-process/archive-center/task-policy-registry');
@@ -105,8 +106,8 @@ test('main literal IPC 与 PR3-Toolbox 完成后的 policy 精确相等', () => 
   assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
   assert.deepEqual(expected, actual);
   assert.equal(actual.length, 243);
-  assert.equal(registry.channels('reserve').length, 123);
-  assert.equal(registry.channels('exclude').length, 118);
+  assert.equal(registry.channels('reserve').length, 121);
+  assert.equal(registry.channels('exclude').length, 120);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
   assert.deepEqual(PR3_HANDOFF_CHANNELS, []);
 });
@@ -330,6 +331,14 @@ test('VCC财务 calculate/import 新建流程，run/record 后续动作按稳定
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('vccFinancialOp:run:calculate').startsNewFlow, true);
   assert.equal(registry.require('vccFinancialOp:import:apply').startsNewFlow, true);
+  assert.equal(
+    registry.require('vccFinancialOp:import:apply').bindResultFlowIdentitiesOnFailure,
+    true
+  );
+  assert.equal(
+    registry.require('vccFinancialOp:run:calculate').bindResultFlowIdentitiesOnFailure,
+    false
+  );
   assert.deepEqual(
     registry.require('vccFinancialOp:run:archive').flowIdentityResolver({ args: [{ runId: 7 }] }),
     { type: 'vcc-financial-op-run', value: '7' }
@@ -384,26 +393,26 @@ test('新 run 显式创建新 flow，带持久 runId 的后续动作显式续接
   }
 });
 
-test('Acquiring run 结果 identity 按 source + month + runId 隔离并与 legacy resume flowPlan 一致', () => {
+test('Acquiring 新 run 以 taskRunId 隔离，legacy resume 仍兼容旧 identity，export 续接精确身份', () => {
   const registry = createTaskPolicyRegistry();
   const runPolicy = registry.require('acquiringBillCurrency:run');
   const july = runPolicy.resultFlowIdentities(
     { status: 'success', runId: 1 },
-    {},
+    { taskRunId: 'task-july' },
     { args: [{ monthKey: '2026-07' }], prepared: {} }
   );
   const august = runPolicy.resultFlowIdentities(
     { status: 'success', runId: 1 },
-    {},
+    { taskRunId: 'task-august' },
     { args: [{ monthKey: '2026-08' }], prepared: {} }
   );
   assert.deepEqual(july, [{
     type: 'business-run-id',
-    value: 'acquiring-run:side:2026-07:1'
+    value: 'acquiring-task:task-july'
   }]);
   assert.deepEqual(august, [{
     type: 'business-run-id',
-    value: 'acquiring-run:side:2026-08:1'
+    value: 'acquiring-task:task-august'
   }]);
   assert.notDeepEqual(july, august);
 
@@ -442,7 +451,7 @@ test('Acquiring run 结果 identity 按 source + month + runId 隔离并与 lega
   const exportPolicy = registry.require('acquiringBillCurrency:export');
   const exportIdentity = {
     type: 'business-run-id',
-    value: 'acquiring-run:side:2026-07:1'
+    value: 'acquiring-task:task-july'
   };
   const exportInvocation = {
     args: [{ monthKey: '2026-07' }],
@@ -470,6 +479,70 @@ test('Acquiring run 结果 identity 按 source + month + runId 隔离并与 lega
     {},
     exportInvocation
   ), []);
+});
+
+test('无存档产物的运行/配置保存不占批次号，银行对账 export 续接当前内存 run 身份', () => {
+  const registry = createTaskPolicyRegistry();
+  const runPolicy = registry.require('bank-statement:run');
+  const mappingPolicy = registry.require('template:save-mappings');
+  const exportPolicy = registry.require('bank-statement:export');
+  assert.deepEqual(
+    [runPolicy.batchPolicy, runPolicy.excludeReason],
+    ['exclude', 'no-archive-artifact']
+  );
+  assert.deepEqual(
+    [mappingPolicy.batchPolicy, mappingPolicy.excludeReason],
+    ['exclude', 'no-archive-artifact']
+  );
+  assert.deepEqual(
+    registry.list()
+      .filter((policy) => policy.excludeReason === 'no-archive-artifact')
+      .map((policy) => policy.channel)
+      .sort(),
+    ['bank-statement:run', 'template:save-mappings']
+  );
+  const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');
+  const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');
+  assert.notDeepEqual(first, rerun);
+  const invocation = {
+    prepared: {
+      inspected: {
+        processingResult: { archiveFlowIdentity: first }
+      }
+    }
+  };
+  assert.equal(exportPolicy.startsNewFlow, false);
+  assert.deepEqual(exportPolicy.flowPlanResolver(invocation), {
+    startsNewFlow: false,
+    flowIdentity: first
+  });
+  assert.deepEqual(
+    exportPolicy.resultFlowIdentities({ status: 'ok' }, {}, invocation),
+    [first]
+  );
+  assert.throws(
+    () => exportPolicy.flowPlanResolver({ prepared: { inspected: { processingResult: {} } } }),
+    (error) => error.code === 'ARCHIVE_FLOW_IDENTITY_REQUIRED'
+  );
+});
+
+test('no-archive-artifact policy 经受控 helper 执行业务但在 archive lifecycle 前返回', () => {
+  const source = fs.readFileSync(MAIN_PATH, 'utf8');
+  const inventory = new Map(mainIpcInventory().map((item) => [item.channel, item]));
+  for (const channel of ['bank-statement:run', 'template:save-mappings']) {
+    assert.equal(inventory.get(channel).kind, 'trackedIpcHandle', channel);
+  }
+  const start = source.indexOf('async function runArchiveAwareOperation');
+  const end = source.indexOf('function runRegisteredBusinessOperation', start);
+  const operationFlow = source.slice(start, end);
+  const noBatchStart = operationFlow.indexOf("policy.excludeReason !== 'no-archive-artifact'");
+  const executeIndex = operationFlow.indexOf('executeIpcTaskWithoutBatch', noBatchStart);
+  const centerIndex = operationFlow.indexOf('const center = archiveCenterService', noBatchStart);
+  assert.ok(noBatchStart >= 0, '受控 helper 必须显式识别 no-archive-artifact');
+  assert.ok(executeIndex > noBatchStart, 'no-batch action 仍必须进入受控业务执行器');
+  assert.ok(centerIndex > executeIndex, 'no-batch action 必须在初始化/预留存档批次前返回');
+  assert.match(operationFlow.slice(noBatchStart, centerIndex), /execute:\s*executeBusiness/);
+  assert.match(source, /archiveFlowIdentity:\s*createBankStatementRunFlowIdentity\(\)/);
 });
 
 test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent', async () => {

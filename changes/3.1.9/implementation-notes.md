@@ -301,7 +301,7 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 ### Baseline
 
-- Goal/spec：[`changes/3.1.8/erratum/README.md`](../3.1.8/erratum/README.md) 所索引的纠错 Spec v2 与 TechDoc v1.1。
+- Goal/spec（当时基线）：[`changes/3.1.8/erratum/README.md`](../3.1.8/erratum/README.md) 所索引的纠错 Spec v2.0 与 TechDoc v1.1；2026-08-13 已按用户新合同增量修订为 v2.1/v1.2，见本文末尾 CNY 记录。
 - Initial plan：从 PR2 冻结头 `54b6c01fa93751cd723be53af70af726037343b5` 开始，仅做九个文档文件的合同冻结与 v3.1.9 窄 erratum。
 - Done when：来源与转换可复核、严格 PR 顺序唯一、PR1/PR2 证据保留、全部剩余 PROBE 和人工资金门禁明确未完成。
 
@@ -311,7 +311,7 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 | --- | --- | --- | --- |
 | 保持 `changes/3.1.8/spec.md` 原 SHA，补遗进入独立目录 | 原 Spec 是已发布合同并被 release-docs 测试锁 hash | 直接 append 已发布 Spec | 历史发布证据不变；PRD 增加前向补遗入口 |
 | raw source 只做 12 处 hard-break 等价格式转换 | 两文档各 6 个 header 行尾双空格会让全量 diff-check 失败 | 逐字节复制并声称 diff-check 通过；顺手格式化全文 | 同时记录 raw/repository SHA，并用 normalization-only diff 证明正文不变 |
-| 只替代 VCC 归档兼容、操作保护和性能路径 | 纠错 Spec v2 §10.1 明确为窄 erratum | 重写 C01—C14 或 PR1/PR2 | 既有全局批次和生命周期合同保持 |
+| 当时只替代 VCC 归档兼容、操作保护和性能路径 | 纠错 Spec v2.0 §10.1 明确为窄 erratum；2026-08-13 用户另批准 CNY/模板/异常处置修订 | 重写 C01—C14 或 PR1/PR2 | 既有全局批次和生命周期合同保持；后续窄增量见 Spec v2.1 |
 | 将后续链拆为 A/B/C1/C2、PR3-VCC、PR3-Toolbox 严格串行 | TechDoc §18 冻结所有权和依赖顺序 | 延续合并 PR3 或并行开发 | 后序只从直接前序冻结头开始；PR2 变化触发整链 rebase |
 | 本 PR 不改三份发布用户文档 | 无新二进制或用户行为落地；版本文档同步属于 PR7 | 提前写 CHANGELOG/手册并暗示已实现 | 避免把合同冻结误写为发布事实 |
 
@@ -369,7 +369,7 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 ### Deviations
 
-无。当前实现边界与 TechDoc v1.1、负责人批准的 ownership 和 10 个 top-level 测试计划一致。
+无。该阶段实现边界与当时 TechDoc v1.1、负责人批准的 ownership 和 10 个 top-level 测试计划一致；后续 v1.2 增量不追溯改写此阶段证据。
 
 ### Remaining Unknowns
 
@@ -678,12 +678,12 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 - marker 文件名固定 `.archive-root.json`；内容严格为 type/schemaVersion/archiveInstanceId 三字段。
 - 迁移中不安全的根依赖读取返回稳定维护提示；设置读取和进度仍可用。
-- 网络盘不按路径类别推断；必须同时通过原子写探针、容量检查，并按目标卷 hardlink probe 计算缺失空间。
+- 网络盘不按路径类别推断；必须同时通过原子写探针和容量检查，空间始终按缺失 canonical Blob + 缺失/需脱钩 materialized copy 最坏值计算，不依赖 hardlink 能力。
 
 ### Implementation Evidence
 
 - 基线 `7c7a8f0788cde5d8163b91106889db27082c743d`（parent `1e96f5f6c5e70051e33c29efb94a13bb97774e51`），tracked clean、无 upstream；批准后建立 `codex/v3.1.9-pr5-storage-root-migration`，未 push/PR。
-- 本机 Node FS probe：`fs.promises.statfs` 提供 `bavail/bsize`，同目录 hardlink 的 device/inode 一致；Windows packaged/网络盘能力仍需人工。
+- 本机 Node FS probe：`fs.promises.statfs` 提供 `bavail/bsize`；同目录 hardlink 的 device/inode 一致也反证了它不能隔离 canonical 与批次文件。Windows packaged/网络盘的 copy/readonly/repair 仍需人工。
 - repository 以 SQLite 单事务 conflict-safe 持久化实例 UUID；root switch 同事务要求 setting 仍等于期望源根、覆盖全部 ready artifact mode 并清三列 materialization error，任一缺失/冲突整体回滚。repository 聚焦 9/9 PASS。
 - manager 真实 FS 14/14 PASS：legacy bootstrap/unknown 拒绝、正常迁移、precommit Blob 失败续跑、DB commit 后 journal 前崩溃、configured offline 零默认写、post-switch cleanup-pending 重启续跑、maintenance admission/drain/第二迁移，以及 current/ancestor/descendant/foreign marker/probe/capacity 表驱动边界。
 - 正常迁移只读取 source canonical；目标 materialized 全部由 PR4 materializer 从目标 canonical 重建。precommit 遗留 layout 先按 DB hash/size 校验，只有 canonical/layout 的 `dev+ino` 相同才记 hardlink，否则保守记 copy；不从“文件存在”猜 mode。
@@ -710,7 +710,7 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 
 ### Remaining Unknowns
 
-- Windows installer/portable 的盘符、junction/UNC、hardlink/readonly 错误码，真实跨卷/网络盘断连与重连、长根路径仍为人工 PROBE。
+- Windows installer/portable 的盘符、junction/UNC、copy/readonly/repair 与历史 hardlink 脱钩，真实跨卷/网络盘断连与重连、长根路径仍为人工 PROBE。
 - 真实大存档的进度流畅度、吞吐、空间估算以及迁移中退出/更新安装行为仍需 GUI/真实设备验收。
 - ⚠️ canonical SHA/size、artifact 输入输出血缘、共享引用、删除次序与任何资金相关文件内容仍须人工复核；自动测试不关闭文件/资金红线。
 
@@ -830,7 +830,7 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 - 现有 release-doc test 拆分为当前 v3.1.9 本地候选断言与 v3.1.8 正式发布历史断言。v3.1.8 normalized Spec SHA、人工 6/6、tag、Release 和公开资产证据继续由原测试锁定，不追溯改写。
 - 三份用户文档只新增 v3.1.9 候选入口并更新当前手册的存档中心章节；历史版本条目不重写。用户文案描述批次、任务、VCC/工具箱、目录/迁移和 UI 行为，不暴露内部类名、token、SQL 预算或开发流程标识。
 - PR7 不修改 `src/`、历史 fixture 审计版本、v3.1.8 frozen Spec 或 erratum 副本；若 focused/full gate 发现真实生产回归，立即停止并分类，不为发布通过修改 A—PR6 生产代码。
-- 本地 Windows 交叉构建只作为 artifact/static PROBE；不把 macOS 构建解释为 Windows packaged runtime、session、UNC/网络盘、hardlink 或 Excel/WPS 已验收。
+- 本地 Windows 交叉构建只作为 artifact/static PROBE；不把 macOS 构建解释为 Windows packaged runtime、session、UNC/网络盘、copy/readonly/repair、历史 hardlink 脱钩或 Excel/WPS 已验收。
 - reviewer P2 修正把 Windows 构建源码定义为“`build.files` 覆盖范围与 HEAD 一致，随后才生成 build-info”；所有本地/CI Windows 构建入口都先 fail-closed，`check:dist` 再核包内 commit 与当前 source HEAD 一致。
 - release important-vars 硬节点固定从 annotated `v3.1.8^{commit}` 扫到 HEAD；普通开发 `check:vars` 仍只扫 HEAD working tree，不扩大日常行为。
 - 最终 clean Windows 静态证据只能在本轮代码/文档 commit 后、无用户 untracked 的独立 checkout 中生成；构建后不再改 tracked 文件，产物明细只作 post-commit 交付报告。
@@ -864,10 +864,265 @@ reviewer P2 证明旧产物不是 PR7 final source snapshot，原“四项最终
 ### Remaining unknowns / manual gates
 
 - Windows installer/portable 实际 runtime、`createSession/readOnly/query_only/UPDATE FROM`、worker 关闭与写保护仍为 PROBE。
-- 目标生产 legacy-four/trigger、约 16 GB、约 700 万行、跨卷/UNC/网络盘、长路径、hardlink/copy/readonly/repair、Excel/WPS 仍待用户人工。
+- 目标生产 legacy-four/trigger、约 16 GB、约 700 万行、跨卷/UNC/网络盘、长路径、copy/readonly/repair 与历史 hardlink 脱钩、Excel/WPS 仍待用户人工。
 - ⚠️ PR2 GUI/崩溃恢复与真实主体×九币种、调整后余额、跨月、归档/解归档/delete、审计、备份恢复和输入输出血缘仍是资金人工红线。
 - 本轮最终 commit 后仍须在不含用户 untracked 的 clean isolated checkout 完成唯一一次 Windows installer+portable build、ASCII staging 与 `check:dist`；在该 post-commit 证据完成前不得恢复“最终 Windows 静态证据”结论。
 - 独立 Sol Ultra review、合并、tag、GitHub Release 和公开资产回读未执行。
-### Deviations
+## 全迭代独立 Review 修复（2026-08-12）
 
-- review 反证原 hardlink-first 方案不能用“只读”保证 canonical 与多批次内容隔离；实施改为新 materialization 始终生成独立 copy，历史 hardlink 仅检测并脱钩。主 Spec C11/§8/§9/§15与本记录已同步；Blob/artifact identity、SHA/size、repair 和删除顺序不变。
+### Decisions
+
+- 基线固定为 `6c431f400f8a02e33dffd45408effdc4a2002bac`，新分支 `codex/v3.1.9-review-fixes`；不重写 PR1—PR7 历史。
+- finding 只按最终头真实入口计数，PR6 已关闭的 taskStatus P1 与 PR7 已关闭的两项 release P2 不重复计入。
+- 26 项编号冻结如下；修复期间若多个 finding 共用一个原语，可共享实现，但每个触发链与代表测试必须独立闭合。
+
+| ID | 等级 | 归属 | 最终头存活问题 |
+| --- | --- | --- | --- |
+| RF-01 | P1 | PR1 | 崩溃遗留 reserved/running task 无启动终结，永久 active/不可删 |
+| RF-02 | P1 | PR2 | reserve 后 beforeStart/start 与 failTaskBatch 双失败无 terminal outbox |
+| RF-03 | P1 | PR2 | Acquiring 同月 clear/rebuild 复用 runId flow identity，export 串入旧 parent |
+| RF-04 | P2 | PR2 | bank-statement run/export 无稳定 continuation identity |
+| RF-05 | P1 | PR2.5-0 | 解归档按钮误标删除且缺最低 v3.1.9/完整备份降级警告 |
+| RF-06 | P2 | PR2.5-0 | adjustment/archive/unarchive/delete 的 pre-critical cancel 无真实 UI 入口 |
+| RF-07 | P3 | PR2.5-0 | 冻结 progress union 的 preserving-audit 阶段未发送/展示 |
+| RF-08 | P1 | C1 | node:sqlite 原生 errcode 的 corruption/I/O 被误判 safe 并继续写 failure audit |
+| RF-09 | P1 | C2 | opening delete 未执行 multiple/conflict migration diagnostic，能删除冲突资金事实 |
+| RF-10 | P1 | PR3-VCC | 多源导入部分提交后异常丢已成功 record/source artifact 与 parent identity |
+| RF-11 | P2 | PR3-VCC | 多主体导出后段失败遗留未登记 partial outputs |
+| RF-12 | P1 | PR3-Toolbox | publication committed 后崩溃缺 durable exact7/output receipt，输出脱离原 batch |
+| RF-13 | P1 | PR3-Toolbox | 输出与业务输入 alias 时先覆盖原输入再 archive fail |
+| RF-14 | P1 | PR3-Toolbox | 覆盖确认后目标被外部修改仍无提示覆盖 |
+| RF-15 | P2 | PR3-Toolbox | Toolbox output descriptor 缺 direction，归档为 input |
+| RF-16 | P1 | PR4 | 默认启动无条件重复 hash Blob 与全部 artifact，规模线性阻塞 ready |
+| RF-17 | P2 | PR4 | Windows 路径预算混用 code point/UTF-16，长根仍强留 24 字符 |
+| RF-18 | P2 | PR4 | 历史 layout 候选静默截断 5000，无完成态/自动续跑 |
+| RF-19 | P1 | PR5 | marker-present active root 跳过内部 symlink/junction，启动清理可越根删除 |
+| RF-20 | P1 | PR5 | switch 前 target 正常 initialize 可因目标故障修改 source 共享 DB |
+| RF-21 | P1 | PR5 | pre-switch 自动续跑失败会清掉已恢复成功的 source delegate |
+| RF-22 | P2 | PR5 | cleanup-pending 从 live DB 重建清单，后续删除/retention 令旧根文件失去血缘 |
+| RF-23 | P1 | PR5 | switched 后旧根暂时离线被当清理成功并删除唯一 journal |
+| RF-24 | P1 | PR5 | 未收口 journal 可被同进程第二次迁移覆盖 |
+| RF-25 | P2 | PR5 | blocked roots 未按 target 同样 canonicalize，可经 `/var`/symlink alias 绕过 |
+| RF-26 | P2 | PR5 | 删除 marker 后 rmdir 的 EBUSY/EPERM/EACCES 未恢复 marker，重启永久 pending |
+
+### Assumptions
+
+- legacy 数据只允许显式兼容 fallback；新 evidence/receipt/journal 字段缺失时按旧安全路径恢复，不从路径、月份或 latest 记录猜身份。
+- committed 文件无法安全回滚时必须持久登记原 batch 的 partial/receipt evidence；不得用“业务失败”掩盖磁盘已存在输出。
+- 旧根物理清理只能使用 switch 时冻结的 app-owned 相对路径；unknown 永不递归删除，离线不等于不存在。
+
+### Remaining Unknowns
+
+- PROBE：真实 Windows junction/UNC/offline volume、Node packaged sqlite errcode/session、16GB/700万行性能。
+- ⚠️ 资金红线，请人工复核：opening 冲突删除阻断、VCC partial import/source records、multi-subject outputs、Toolbox input/output 字节血缘、archive task/parent、旧根敏感文件清理。
+
+### Implementation Evidence
+
+- RF-01—RF-04：repository 新增异常退出 task 收口，Controller 严格按“终态 outbox → 模块 owner 恢复 → 再次 outbox → protected batch → 通用 sweep”排序；Position pending、Acquiring side-run exact-seven 与 Toolbox publication journal 均保留原批次。owner 恢复失败时仍保护其原批次并扫尾其他孤儿；保护清单不可读时宁可跳过本次 sweep，也不猜测性终结。reserve 后 flow-bind/beforeStart/start 与 `failTaskBatch` 双失败会持久化原 batch terminal intent。Acquiring 新 run 使用 `taskRunId`，legacy resume 保留旧 identity；银行对账 run→export 由当前 `processingResult.archiveFlowIdentity` 续接，显式重跑不会串旧 parent。
+- RF-05—RF-11：解归档确认增加最低 v3.1.9、降级前完整数据库备份强制确认，按钮改为“解归档”；四类写操作只在 worker 明示 cancellable 的 pre-critical 开放取消，protected 后关闭；`preserving-audit` 成为真实 worker/UI 阶段。unsafe audit 识别 node:sqlite primary errcode/cause；opening delete 把全局 opening month diagnostic 纳入 preview/token/锁内重算，多月份/first-month 冲突首写前失败且零 rollback audit。多源导入异常返回已提交 records/batch evidence，TaskLifecycle 即使业务终态失败仍绑定已提交 record identity；多主体 writer 后段失败携已发布文件供原 batch 登记。
+- RF-12—RF-15：Toolbox 现有 publication index/journal 持久化 exact-seven、最终 output descriptors、目标确认快照与受保护输入；committed 后 worker 崩溃由 startup recovery 追加回原 batch。Main 与 publication 双层拒绝 exact/case/Unicode/symlink/hardlink 输入输出 alias，确认后目标 create/modify 在首个正式覆盖前 fail-closed；output descriptor 明确 `direction=output`。
+- RF-16—RF-18：普通启动只做 Blob/layout metadata 校验，迁移前仍显式 `verifyHashes=true`；Windows 路径预算统一按 UTF-16 code units、保留 surrogate pair 且剩余预算不足时前置拒绝；历史 materialization 改为 artifact-id cursor 分页直至候选耗尽，不再静默停在 5000。
+- RF-19—RF-26：合法 marker 不再跳过 DB 权威内部路径逐级 symlink/junction 检查；pre-switch target 只读校验，commit 后才启用可修改 reconcile；永久 target fault 的自动续跑保留已验证 source delegate。migration journal 在 switch 前冻结 source cleanup 相对路径，并在 pre-switch retry 时于 maintenance 内按当前 source evidence 重新冻结，覆盖首次失败后新增的合法 batch；post-switch 只消费冻结清单。旧根离线保持 cleanup-pending、任何 unresolved journal 阻止第二迁移覆盖、blocked roots 与 target 统一 realpath/既有祖先 canonicalize、marker 删除后任意 rmdir 失败且 root 仍在时安全恢复 marker。
+- 最终交叉 blindspot 发现 generic interrupted sweep 会抢在 Position/Acquiring/Toolbox owner recovery 前把可恢复任务标 failed；上述 owner-first/protected 顺序是本轮追加修复，代表测试覆盖 owner 成功、owner 失败、保护清单不可读、terminal outbox 已/未重放四类边界。另发现 pre-switch 失败后 source 可继续新增 batch，恢复前须重冻 cleanup inventory；真实 FS 测试已覆盖新增 artifact 被复制并从旧根清理。
+- 同一最终工作树的 changed-unit 合跑 387/387 PASS；关键真实集成链 VCC adjustment/archive 209/209、destructive 77/77，Toolbox roundtrip 30/30、multi-split 17/17、multi-sheet merge 16/16 PASS。`npm run lint`、43 个 changed JS `node --check`、`git diff --check` PASS。
+- 唯一一次 `npm run release-check` 自然 exit 0：lint、smoke PASS；unit 5082/5082（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（392992ms）。无 retry、阈值放宽或测试框架修改；runner 仅全绿后合法刷新 `rules/integration-test-policy.md` §七。
+- VCC 三张受影响预览首次在受限 Electron 环境 `SIGABRT`（页面未启动，分类 environment）；批准的唯一沙箱外重试全部成功。人工视觉复核通过：强制降级警告与“解归档”按钮完整、protected 执行态取消禁用、调整弹窗无溢出；对应 tracked preview 作为本轮可见合同证据保留。
+- `check:vars -- --include-minor` exit 2 为 review 命中：Critical=`freezeWorkerBatchContext`，Important=`TaskLifecycle`，Runtime=`app/archiveOperationTracker/dialog/processingResult/setStatus/state`，Minor=`getSetting`。逐项结论：exact-seven key set/worker refreeze 未放宽；仍只有一个 TaskLifecycle/tracker/terminal；Main 全局状态只增加稳定身份与恢复入口；dialog 状态仅改变 VCC cancellable/警告；setting 只读取 pending/root truth。`check:vars:release` 同样正常 exit 2，75-file v3.1.8 baseline 命中集合与 PR7 review 一致；本轮未改金额、币种、模板常量或 row/writer 语义。
+
+### Failure Classification / Deviations
+
+- 本阶段没有为通过门禁放宽资金、路径、SQLite guard、测试阈值或 legacy classifier。定向开发中出现的差异均由生产入口证据裁决；最终 changed-unit、关键 integration 与 full 均首次全绿。
+- UI preview 的第一次失败是沙箱内 Electron `SIGABRT`，无 DOM/布局失败输出；仅按既有门禁规则做一次沙箱外重试。该环境偏差不用于关闭 Windows/GUI 人工门禁。
+- 启动全量 hash finding 的修复不删除完整性校验：普通 ready 只做 metadata，存储迁移切换前仍强制逐 Blob/artifact SHA-256；这是性能路径与迁移安全路径的明确分工。
+
+### Final Blindspot / Reconciliation Result
+
+- 入口复核覆盖 Renderer→Preload→Main→Service/worker、startup recovery、outbox replay、generic/dedicated worker、Toolbox publication recovery、manual/retention/storage migration；未发现仍可生产到达的第二 lifecycle/token/tracker、旧 destructive write route 或 live-DB cleanup inventory 旁路。
+- first terminal、批次号、parent、exact-seven、artifact direction、partial result/file count 与 source/target identity 均有原批次证据；已提交文件不再被“业务失败”掩盖，未知/离线/alias 状态一律 fail-closed。
+- reconciliation 复核确认金额、币种、九币种公式、期初值计算、Excel 表结构与行内容未改；opening 只新增冲突删除阻断，VCC partial import/export 只补血缘。⚠️ 主体×九币种、调整后余额、跨月期初、归档/解归档/delete、rollback/success audit、备份恢复和真实输入输出逐字节血缘仍须用户/财务人工复核，自动化不关闭该红线。
+
+## PR2.5-0 最终复评 P3：VCC progress 顺序（2026-08-12）
+
+### Decision / Evidence
+
+- 冻结 TechDoc 的成功阶段顺序为 `validating → preserving-audit → applying → verifying → committed`。result 与 destructive 两条写入口只把成功事务内的 `preserving-audit` 事件移动到 MutationPlan/guard 建立后、任何 registered DML 前；SQL、MutationPlan、guard、金额、币种、commit 与 rollback 语义均不改。
+- safe failure 的 rollback audit 仍在业务事务回滚并关闭连接后，由独立安全写入口真实发送 `preserving-audit`；不把回滚失败路径伪装为已固化 success audit。
+- 测试先按冻结顺序失败 2 项（18/20 PASS），actual 均为旧错序 `validating → applying → verifying → preserving-audit → committed`，分类为 production contract regression；生产移动后核心 20/20、扩大 VCC worker/service/renderer 72/72 PASS。owned JS `node --check`、owned ESLint 与 `git diff --check` PASS。
+
+### Remaining Unknown / Reconciliation
+
+- 本修复只改变 worker→renderer 的阶段展示时点，不改变任何数据字段、DML 数量、审计内容或行去向。真实 Windows packaged worker/UI 的阶段观感仍属于既有人工门禁；主体×九币种、归档/解归档/delete 与 success/rollback audit 仍保留资金人工复核红线。
+
+## PR3-VCC 最终复评 P1：强杀后的 partial import 血缘（2026-08-12）
+
+### Decisions / Assumptions
+
+- `vcc_fin_op_import_batches.id` 直接使用同一 archive task 的 exact7 `taskRunId`。该字段已持久化且上限 256 字符；import service 对外部 batch id 按同一长度边界、非空、无首尾空白和控制字符校验，未提供时仍保留独立调用的 UUID 默认。
+- 新任务若遇到已存在的同名 import batch，Service 在启动 worker 前以 `vcc-import-batch-id-conflict` 拒绝；不复用、覆盖或读取既有 records，避免把重试/碰撞静默并入旧资金事实。
+- generic import worker error/exit/forced terminate 后，主进程只按本任务已冻结的 `taskRunId` 调用 `failImportBatch` 并读取该 batch 的 records，构造与 cooperative import error 完全同形的 `partialResult`。batch/record 尚未建立时不挂零 partial；不使用月份、latest 或全局 interrupted sweep 猜测本任务。
+- 取消时既有 TaskLifecycle 会先把 archive batch 标 cancelled；worker 后续强杀错误仍回传 partial business result，让 tracker 登记已成功 source、policy 绑定 batch/record identity，terminal CAS 保留先到的 cancelled，不新增 lifecycle/tracker/恢复器。
+
+### Evidence / Failure classification
+
+- 原 finding 的真实路径为 production regression：第一 source group 已提交有效事实，第二 group 在同步 XLSX 处理中无法及时消费 cancel message；强杀后的 worker exit error 只有全局 recovery，没有业务 partial evidence。
+- 新真实 worker 代表测试使用 45,000 行、超过 6 MB 的 system XLSX，先等待 recharge record=`success` 且 system record=`importing`，再以 5ms timeout 真实 `worker.terminate()`。结果稳定为 batch=`vcc-task-1`、records=`recharge success + system failed_validation`、`partialCommitted=true`；recharge 有效行仍为 1，只有 recharge 输入登记到 archive batch 41，batch 与两个 record identity 均绑定到同一 parent。
+- 同一测试预置无关 importing batch 并确认强杀后仍为 importing，证明没有 global/latest/month 串批；另有 fake worker error、transaction-before-start 零 partial、cooperative partial 不漂移和既有 batch collision 零 worker 回归。
+- focused 54/54 PASS；新增真实强杀单项独立复跑 1/1 PASS。未改五类 importer 事务边界、金额/币种、XLSX 解析算法、120s 默认取消阈值或 Main/tracker/policy。
+- 全量 unit 5092/5092 PASS（331 files），`npm run smoke` PASS；owned ESLint、6 个 JS `node --check` 与全工作树 `git diff --check` PASS。
+- `check-vars -- --include-minor` 在共享 working tree 命中 Critical=`freezeWorkerBatchContext`、Runtime=`app/archiveOperationTracker`。本修复未改 exact-seven 冻结器、app 生命周期或 tracker 结构；只消费已冻结 `taskRunId`，真实 worker/lifecycle/tracker 代表与 smoke 已覆盖原 batch/parent、成功源文件选择和 terminal CAS。
+
+### Reconciliation / Remaining risk
+
+- 已保护主键血缘、部分失败、行去向和重试隔离；成功 record 的金额事实不回滚，失败 record 被明确收口且可审计。
+- ⚠️ 资金红线，请人工复核：Windows packaged 环境中 120s 强杀、真实生产大 XLSX 的同步解析时长，以及 archive 中成功 source 文件与有效数据逐字节血缘仍需人工/财务确认；自动化不替代该门禁。
+
+## PR4 最终复评 P1：启动历史目录化有界续跑（2026-08-12）
+
+### Task Brief / Unknowns
+
+- Goal：避免 `ArchiveService.initialize()` 在同次启动无界 SHA/copy 全部 legacy-ready 或 persisted-v2-invalid artifact，同时保留完整性校验、按需修复与 PR5 迁移强校验。
+- Constraints：不新增 tracker/lock/全局 timer；复用 `runArchiveRootOperation(root)` 串行尾链和 runtime maintenance admission；不改 blob identity/hash/layout/retention。
+- PROBE 已关闭：生产迁移在 `_assertSourceReady()` 显式传 `verifyHashes=true`，因此可以将普通启动与迁移前全量校验分开；`artifact_id` 递增 cursor + DB 候选状态可在进程中断后从 0 重建，无需新持久化游标。
+- ASSUME：普通启动的前台数量预算使用 64 条；该常量只影响启动延迟/后台分块粒度，不影响数据合同，且可通过构造参数在测试中收缩。
+
+### Decisions / Evidence
+
+- 普通 initialize 对 legacy candidate 与 v2 layout missing/size-invalid repair 共用 64 条总预算；v2 全集只按 artifact ID 分页做 metadata 识别，预算外只记录既有 repair-pending evidence，不做 SHA/copy。Root Manager 在 source delegate 切换后才启动 Service 内的唯一后台 drain。每块都通过同一 `runArchiveRootOperation(root)`，状态暴露 `processed/succeeded/failed/remaining/cursor/lastErrorCode`。
+- maintenance 请求先增加取消 generation，等待当前块结束后再 activate/迁移；后续块不会入队。迁移内仍以 `verifyHashes=true` 无界流式校验当前权威全集，后台目录化与 root migration 不并发。
+- 读/detail/open/saveAs 仍由 `_readyArtifact()` 先校验 layout，再对 canonical size+SHA fail-closed，并可对尾部 pending artifact 同 artifact 按需 repair；后台未完不弱化完整性。
+- 代表聚焦测试 107/107 PASS：5001 个 persisted v2 layout 全部缺失时前台只 repair 首块后返回并最终耗尽；真实 FS budget=1 只修 1 个，尾 artifact 强校验打开；块中中断/重启无 ID 跳过；块中迁移先等待，再全量 SHA 校验与切根；repository/service/layout/root-manager/controller 旧合同同组回归。
+- 全量 unit 5100/5100 PASS（331 files）；`npm run smoke`、`npm run lint`、6 个 owned JS `node --check` 与 `git diff --check` PASS。最终启动测量沙箱外 5 轮进程总耗时平均 697.618ms，ready-to-show 平均 185.59ms；此前受限 Electron 环境首次 `SIGABRT` 已分类为 environment。
+- `check-vars -- --include-minor` 在共享 worktree exit 2，自动报告命中其它并行改动的 Critical=`freezeWorkerBatchContext`、Important=`TaskLifecycle`、Runtime=`app/archiveOperationTracker`。本 PR4 owned diff 按定义文件人工命中 Risk-sensitive=`ArchiveRepository/ArchiveService/archive_*`；真实 SQLite/临时文件、共享引用、repair/retention/migration、只读副本与 smoke 均已覆盖，仍保留真实文件 SHA/模块归属人工复核。
+
+### Remaining Risk
+
+- 真实 Windows/UNC/网络盘上单条超大 Blob 的最坏块时间仍取决于磁盘吞吐；数量预算只保证不再随总候选数无界增长，不能取代真实大文件启动/迁移人工门禁。
+- 首次并发用例挂起是测试 gate 以 `/var` 与 macOS `realpath=/private/var` 做词法比较，未命中故障注入；改为真实路径比较后生产时序用例通过，未因测试差异改动任何生产合同。
+- persisted-v2 迁移 fixture 首次因缺少 root marker 触发 PR5 legacy-root 全量所有权校验而 fail-closed；补齐真实已管理根 marker 后通过。该失败证明 legacy 根完整性门禁未被启动预算弱化。
+
+## VCC 2026-07 大文件导入假成功修复（2026-08-12）
+
+### Facts / Decisions
+
+- 用户样本 `1433865288349124625_18.xlsx`（SHA-256 `5c82cf7a87760ca8de213055578c321540bb42623729d3538aa8b423dcea395a`）可被正式 reader 识别为 `channel`；唯一 sheet `1433864828787623937` 表头在第 1 行。流式扫描确认 300,000 条数据全部为 2026-07，业务键全部是 Excel 文本、300,000 个键全唯一，逐行 mapper 300,000/300,000 无 invalid-key/format-error。
+- 实际 DB 在操作后没有 2026-07 import batch/record、没有该文件名、也没有 VCC archive task。启动日志同时证明存档中心以 `ARCHIVE_STORAGE_UNKNOWN_CONTENT` 失败；因此业务 worker 未启动，原 renderer 却只拒绝 `status=error`，把 lifecycle `failed/busy` 的空 records 兜底显示成“新增 0、幂等跳过 0”。
+- renderer 现在只接受顶层 `success/completed_with_errors`，并要求至少一条结构化 import record；其它状态沿用后端 message 显示失败，成功但零 record 也 fail-closed。只有真实导入完成后才更新 lastMonth；失败 record 仍走既有 warning/数据管理审计。
+- 旧存档根无 PR5 marker 时，严格 bootstrap 现在只额外兼容 `blobs/sha256/<两位小写十六进制>` 的空分片目录。walker 必须继续递归确认其为空；分片内任何未知文件/子目录、非法分片名、根级未知内容仍 `ARCHIVE_STORAGE_UNKNOWN_CONTENT`。Blob SHA/size、DB 路径和 marker 写入前的全量验证均未弱化，也不删除残留目录。
+
+### Evidence / Reconciliation
+
+- 测试先红：空合法分片仍被拒；renderer 无 fail-closed helper。生产修复后 storage-root + VCC renderer 定向 52/52 PASS，含空合法分片成功 bootstrap、分片未知文件/非法名称继续拒绝、`failed/busy/success+空 records` 三种假成功反例和真实 mixed success/failure summary。
+- 本修复不改 VCC Excel parser、row mapper、幂等键、金额/币种、事务、有效事实或审计 schema。⚠️ 实际 300,000 行文件重新导入仍需用户明确填写正确公司主体，并在导入后人工核对新增数、主体、币种金额及数据管理审计；自动 probe 使用占位主体，只证明文件结构/账期/键/格式，不替代资金人工确认。
+
+## 存档中心空批次号窄化（2026-08-12）
+
+### Decision / Deviation
+
+- 用户确认 `2026-08-11-005`（`bank-statement:run`）与 `2026-08-11-007`（`template:save-mappings`）所代表的场景不应占用批次号。该裁决窄化原 C02/C04：仅这两个无存档 artifact 的中间计算/配置保存动作改为 `excludeReason=no-archive-artifact`；VCC 归档/解归档/人工调整/delete 等独立审计状态动作仍保留 metadata-only 批次。
+- 历史 005/007 已是不可复用的发行身份，不删除、不重排。修复仅影响后续动作。两项仍经过 BusinessOperationRegistry 的升级/退出 admission，成功结果和 usage stats 不变，但在初始化 ArchiveCenter/TaskLifecycle 之前返回，因此没有 reserve/start/terminal 或空 artifact。
+- `bank-statement:run` 不再拥有 archive batch/taskRunId；每次成功运行在当前内存 `processingResult` 生成一次 `bank-statement-run:<UUID>` 稳定身份。同一轮的每次真实 `bank-statement:export` 各建一个含输出 artifact 的可见批次，并以该身份续接同一 parent；显式重跑生成新身份，不按月份、importedAt 或 latest 猜 parent。
+
+### Evidence / Remaining risk
+
+- policy literal inventory 保持 243 个，预算由 `123 reserve + 118 exclude` 调整为 `121 + 120`。先改测试时 3 项按旧行为失败；实现后策略/IPC contract 聚焦 24/24 PASS，扩大 lifecycle/flow/tracker/BOR/银行对账 seam 为 111/111 PASS。全量 unit 5103/5103（331 files）、smoke PASS，五条银行对账导入/资金/输出 integration 合计 152/152 PASS；lint、changed JS `node --check`、`git diff --check` 全过。覆盖 no-batch 正常执行、taskContext=null、退出闸门拒绝、两项精确 exclude、run 身份重跑隔离及 export 缺身份 fail-closed。
+- `check:vars -- --include-minor --no-pr` 执行成功；共享工作树命中 Critical `freezeWorkerBatchContext`、Important `TaskLifecycle`、Runtime `app/archiveOperationTracker/processingResult/state`。本窄修复只改变 TaskPolicyRegistry/TaskLifecycle 之前的精确 no-batch 分流与 `processingResult.archiveFlowIdentity`；exact7 worker context、operation tracker、Electron 启停和 renderer state 未改，对应 lifecycle/flow/seam/unit/smoke 证据已通过。
+- 资金算法、输入文件、金额/币种、匹配、输出 writer 与 artifact resolver 均未改。⚠️ 人工验收需记录运行前后的最新批次/运行次数不变，再导出并确认只新增一个含真实输出的批次；同时核对导出文件行数、金额和来源血缘。
+
+## 最终独立 review 剩余 3 个 P1（2026-08-12）
+
+### Decisions
+
+- 启动 outbox 改为“普通 retry 与 committed owner receipt 分级”：一般文件缺失、临时存档失败或终态冲突继续保留 outbox、源文件和目标 batch，告警后允许进入存档中心诊断/重试；不得再因 `remaining > 0` 把整个应用退出。Toolbox committed receipt 仍只由 owner 验证原 exact7 batch 的 N 个输入、全部输出和 `succeeded` 后 ack；owner 失败保持 `blocksArchiveStartup=true`。
+- outbox 文件本身损坏/不可读时无法构建可靠保护集：owner 仍逐项执行，但该次跳过 generic interrupted sweep 和 retention cleanup。若 committed owner 未完成仍由 owner 阻断；若只是普通损坏 outbox，保留证据并放行 UI，不猜测/删除。
+- 普通 `ArchiveService.initialize()` 的 64 条预算现同时限制 v2 metadata 扫描、failure 持久化和 repair；未扫到的 artifact 不预先写 failure。后台以单一 root serialization 分块续扫/修复，按需 open/saveAs 仍对单 artifact 强校验。PR5 `verifyHashes=true` 路径仍全量扫描/哈希/修复，不受 64 限制。
+- `src/main-process/toolbox-archive-recovery.js` 是 Main 启动必需生产模块，纳入本次同一 Git ownership，不作 optional/runtime fallback。
+
+### Evidence / Reconciliation
+
+- 测试先红精确复现三个 finding：普通 retry/terminal conflict 仍抛 `ARCHIVE_STARTUP_OUTBOX_REPLAY_FAILED`；5001 个 v2 artifact 在返回前实际调用 `verifyMetadata()` 5001 次；Git 对 Toolbox recovery 模块返回 untracked/pathspec failure。
+- 修复后 repository/controller/service/Toolbox 核心 77/77 PASS；扩大 storage layout/root migration/publication/controller/service/repository 118/118 PASS。5001 代表明确断言 initialize 前只验证 64，后台最终 5001 全部耗尽；普通 retry 保留且 UI 可用，committed receipt 损坏 outbox 代表仍由 Toolbox owner fail-closed。
+- 全量 unit 5103/5103 PASS（331 files）；`npm run smoke`、`npm run lint`、4 个相关生产 JS `node --check`、`git diff --check` 全部通过。`toolbox-archive-recovery.js` 已单独加入 Git 索引，并以 `git ls-files --error-unmatch` 锁定为本次提交输入；其余用户既有 untracked 未暂存。
+- `check-vars -- --include-minor --no-pr` 执行成功；共享工作树命中 Critical=`freezeWorkerBatchContext`、Important=`TaskLifecycle`、Runtime=`app/archiveOperationTracker/processingResult/state`。本三项修复未改 exact7/TaskLifecycle/renderer state；Toolbox receipt 继续逐字段消费 frozen exact7，Main 只收窄启动 admission。owned 定义文件人工命中 Risk-sensitive=`ArchiveRepository/ArchiveService/archive_*`，repository/service/layout/root-migration/Toolbox 真实 SQLite 与文件回归均已覆盖。
+- 本修复不改 artifact/blob SHA-256、输入输出内容、金额币种、TaskLifecycle 批次身份或删除顺序。⚠️ 资金/审计人工门禁仍包含 Toolbox committed crash 前后 N 输入+全输出 SHA/size 与真实网络盘大存档启动/后台续跑。
+
+## 堆叠 PR 评论复核与直接修复（2026-08-13）
+
+### Decisions
+
+- 逐条读取 #132–#145 的 review threads；只有已明确证明 direct/internal 非法输入、无 renderer/IPC 生产入口的旧评论继续按 over-defense 排除。最终头尚未闭合的评论均有真实崩溃恢复、发布血缘、Windows checkout/canonical path 或慢盘启动证据，因此直接修复，不增加理论 payload 组合或第二状态机。
+- Acquiring fresh run 在取得月份锁、TaskLifecycle reserve 和 `clearRunsByMonth()` 前，只读探测带 exact-seven 的 partial run；只在原 archive batch 身份精确匹配且已终态时允许 fresh run，active/missing/mismatch/root-unavailable 均要求先恢复，防止删除唯一恢复身份。chunk INSERT 与 `chunk_progress` 改为同一 SQLite transaction；checkpoint 失败回滚整 chunk。
+- Position 两条可发布 Excel 的旁路在 writer 前登记 output intent。取消请求只在 utility worker 返回 accepted ACK 后回调 `TaskLifecycle.cancelActive()`；发出请求和提交阶段 rejected ACK 都不得提前写 cancelled。
+- VCC v3.1.7 generator provenance 统一按 LF canonical UTF-8 bytes 计算，CRLF checkout 与 manifest 一致；Windows migration fixture 使用 `realpathSync.native()`，与 production `fs.promises.realpath()` 共用 native canonical identity。
+- active archive root marker 已验证后的 ownership 校验拆为固定 64 条前台目录页 + 同 root serialization 后台 cursor。`.staging/.readonly/blobs/blobs/sha256` 与现有 Blob shard 仍在 delegate 激活前同步验证；其它 DB-authoritative ancestor 后台完成后才启动 Service materialization/orphan maintenance。后台发现 symlink/junction 即清空 runtime delegate；迁移 maintenance 先 pause/wait ownership 与 materialization，再全量强校验。
+
+### Evidence / Remaining risk
+
+- checkpoint crash 代表锁定第二 chunk 数据+progress 同 rollback，resume 行数不重复；fresh bound-run helper 锁定 exact-seven/legacy 分支，Main 静态合同锁定 probe 在月锁/reserve 前。Position service 证明请求时 callback=0、accepted ACK 后=1、rejected ACK 后仍不增长；两条 writer intent 的调用顺序有静态入口测试。
+- ownership 50,001 directory evidence 代表前台只处理 64，syscall 不随总量线性增长，后台耗尽到 0；5001 canonical Blob 代表同样只在前台 lstat 64 条，余量与 v2 layout/orphan 分片共用同一 root serialization 后台耗尽。marker-present `.staging`/`blobs` 外部 sentinel、迁移 pause→full SHA、offline/cleanup/journal/blocked canonical 回归保持；显式 `verifyHashes=true` 仍全量同步。
+- 最终单次 `npm run release-check` 全绿：lint/smoke PASS，unit 5117/5117（331 files），integration 48/48 scripts、2385/2385 assertions（392283ms）；runner 只在全绿后合法刷新 policy。`check-vars -- --include-minor --no-pr` 仅命中 Important-skeleton `TaskLifecycle`，已复核 reserve/identity/cancel CAS/terminal 恢复并由上述 smoke 与聚焦测试覆盖。
+- 本组不改变 Acquiring/Position/VCC 金额、币种、匹配公式、Excel writer 或 artifact SHA/size identity。⚠️ 资金/审计人工门禁：真实 chunk hard-kill 后行数/金额守恒、Position accepted-cancel 与两类部分输出归档、Windows checkout/build、网络盘 5k/50k ownership latency 与后台 symlink fail-closed。
+
+## VCC CNY 与异常数据过滤合同修订（2026-08-13）
+
+### Goal / Decisions
+
+- 用户确认 VCC 当前九币种中的 `CNH` 改为 `CNY`；结果模板、校验、期初、调整、归档和导出统一使用 CNY。“系统财务OP”删除 CNY→CNH，CNY 原样进入资金坐标，新 CNH 不再作为别名接受。
+- 异常隔离单位按资金完整性确定：四类明细以单行处置；系统财务 OP 以 `(targetMonth, subject)` 的完整九币种快照处置。异常单位被过滤并留审计，其他可信正常单位继续落库。workbook/Sheet/header、取消、DB、归档门禁仍整组 fail-closed。
+- 历史兼容采用 `currency_contract_version=2`：小型派生结果/余额/调整事实原子迁为 CNY并重算 hash；千万级 import/effective 大表和 raw_json 不批量改写，calculator/writer 只在读取边界映射精确大写 CNH。任何 CNY/CNH 同坐标或畸形 JSON 以 `vcc-currency-migration-blocked` 零部分提交。
+- 固定结果模板列改为 CNY，SHA-256 更新为 `48c8161484128e63a6e3e60724336f2433a8f23687695d980720c59a9dec2053`；artifact-tool render 已人工检查表头、宽度、格式、样式和合并单元格无非预期漂移。
+- renderer 完成摘要分列新增/幂等跳过/异常过滤；顶层 lifecycle 非成功或 success 但无结构化 records 继续 fail-closed，避免复现零行假成功。
+
+### Evidence / Failure classification
+
+- 用户样本 `/Users/pzhong/Downloads/1433865288349124625_18.xlsx` 约 403 MB；正式 inspect 识别为 channel，唯一 sheet `1433864828787623937`、表头第 1 行。正式 import service 写入 `:memory:` SQLite：2026-07 raw=300,000、inserted=300,000、skipped/anomaly=0；effective 币种 `AUD28/CAD550/EUR1024/GBP257/HKD97/JPY430/USD297614`。用户文件与生产 DB 均未写。
+- test-first 覆盖 CNY 接受/CNH 拒绝、明细混合行、系统同文件完整主体+异常主体、历史小表迁移/大表不改、calculator/writer 历史投影、冲突零 DML、模板 CNY/hash 及 renderer 摘要。
+- 首次扩大 VCC 合跑 370/371，唯一失败为真实 legacy compatibility regression：旧 `system_snapshot_attempts` 夹具缺当前派生列，migration 直接准备新 SQL。修复为每个 JSON source 先核 required columns：无 balances_json 即不存在可迁币种事实而跳过；有 CNH balances_json 但缺迁移列则失败关闭。定向复跑 200/200，最终 VCC 372/372 PASS。
+- 四条真实集成链分别 19/19、209/209、77/77、29/29 PASS；`npm run lint`、相关生产 JS `node --check`、`git diff --check`、`npm run smoke` PASS。syntax 检查首次失败仅因命令使用旧 repository 路径，改为真实 `vcc-financial-op-db/repository.js` 后通过，分类 test command error。
+- `check:vars -- --include-minor --no-pr` 按设计 exit 2：共享 worktree 命中 Critical=`freezeWorkerBatchContext`、Important=`TaskLifecycle`、Runtime=`app/archiveOperationTracker/processingResult/state`。本 CNY owned diff 未改变 exact7、TaskLifecycle、app/tracker；币种/迁移定义属于资金敏感人工 review，已由专项 unit/integration/sample/smoke 覆盖自动部分。
+
+### Spec/TechDoc reverse sync / Remaining risk
+
+- 开发测试全部通过后才反写补遗 Spec v2.1 §0.1/§15、TechDoc v1.2 §0.3/§22 和 v3.1.9 Spec §0.2/§15.4；test-spec/tasks 同步验收矩阵与证据。已发布 `changes/3.1.8/spec.md` 保持冻结，避免追溯改写 v3.1.8 历史。
+- ⚠️ 自动证据不能关闭资金红线：真实主体 CNY 九币种、混合异常文件正常/异常去向、历史 CNH 月迁移前后逐主体逐币种金额、结果/归档/导出 Excel/WPS、生产 DB 备份恢复仍须用户/财务人工复核。
+
+## VCC 解归档可用性、初始化文案与结果确认布局收口（2026-08-13）
+
+### Facts / Decisions
+
+- 开发库的 `2026-06` 归档仍保存旧 `CNH` 派生余额；当前 CNY classifier 因 `effective-run-result-invalid` 将其从普通归档月份列表安全排除，所以数据管理页的【解归档】入口置灰。不得放宽 classifier 或绕过 token/尾月门禁；应用启动时沿既有 `currency_contract_version=2` 迁移原子转换小型派生事实后，该月份恢复到解归档列表。
+- VCC 财务 OP、平盘对账数据处理和对账单修复在初始化时仍加载真实归档/session/按钮状态，但成功初始化不再用历史摘要覆盖状态框，统一显示“欢迎使用小助手”；真实读取失败仍保留错误提示，用户动作后的状态反馈仍按原路径显示。
+- 结果确认页只调整展示：确认勾选区与 footer 分隔线的间距增加；移除右侧嵌套 `dialog-actions`，让【修改结果】与【关闭/确认归档】共享同一对齐轨道；九币种、调整值及其表头使用显式统计语义类并统一右对齐、tabular numbers。未改金额、revision、归档门禁或 DML。
+
+### Evidence / Remaining risk
+
+- 新增真实 SQLite 回归：旧 CNH archive/run balance 在迁移前不可枚举，执行生产启动迁移后 archive JSON/run balance 均为 CNY，月份重新可枚举且 unarchive preview=`canUnarchive:true`。
+- 定向回归 113/113 PASS；扩大 VCC/backend/worker/service/renderer 与主页面合同 443/443 PASS。主页面 Electron 1240×860、1080×760 × 100/125/150% 为 6/6 PASS。
+- 结果确认默认、150% 和最小窗口三张 preview 均重新生成并人工复核：footer 横线下移、三按钮同轴、统计表头/数据右对齐，无新增裁切。沙箱内 Electron 首次 `SIGABRT/exit null` 均无断言输出，受控沙箱外复跑通过，分类 environment。
+- ⚠️ 资金红线不变：自动测试只证明历史 CNH 派生事实的结构恢复与金额坐标不合并；真实开发库需重启后让启动迁移执行，并由用户核对迁移前后逐主体逐币种余额、解归档月份与审计。
+
+## 堆叠 PR 最后一轮 review comments（2026-08-13）
+
+### Decisions
+
+- PR2 Acquiring 在最后一块业务数据提交后先进入 `data-complete`，将预定的最终 XLSX 路径写入同一 run checkpoint；writer 成功后再由单一事务同时提交 output path 与 `complete`。writer 已落盘但进程退出时，重启复用原路径继续收口，fresh run 不得清理该 partial run。
+- PR2 Position 只有 utility worker 明确 ACK `accepted=true` 后才持久化 cancellation intent/terminal outbox/CAS；发送请求、rejected ACK 与 IPC 失败都不得提前把原批次标 cancelled。legacy outbox 首次创建正式批次后立即持久化 resolved `targetBatchId`，后续 terminal merge 不再使用空 ID。
+- PR3 VCC result/data/audit export 复用现有 publication worker 与 Archive durable handoff，生成物先写 app 内部临时目录，再以 exact-seven + 全部 output descriptors 发布到用户目标。`after-committed` hard kill 保留 receipt；同一原 batch 的 output artifacts + succeeded 真正落库后才 ack/删 receipt。
+- PR5 pre-switch journal 的 `targetPublishedPaths` 改为每个 canonical/layout 真正原子发布后立即 durable append，不再提前保存计划全集。resume 只删除这份实际清单中已从当前 DB evidence 消失的目标副本；源根删除前另写 `sourceRootRemovalStartedAt`，删除后到 done 之间崩溃可唯一收口。
+- PR4 采纳 reviewer 的完整性 finding：materialized 文件不再 hardlink canonical Blob，统一 staging 流式 copy→size/SHA→只读→原子发布。历史 `storage_mode=hardlink` 在 canonical 可信时由有界前台/后台 repair 队列脱钩；单一批次 copy 被改写不会污染 canonical 或复用同 Blob 的其它批次。PR5 容量始终计入缺失 canonical 与全部缺失/需脱钩 materialized copy。
+- PR3-Toolbox 的 exact head 不再要求后续 PR4/PR5 模块；跨阶段 startup owner 接线只在含对应生产模块的后续堆栈提交出现。该项在 restack 时按 PR 归属复核，不通过 optional require 掩盖缺依赖。
+
+### Evidence / Reconciliation
+
+- PR4/PR5 真实 FS focused 87/87 PASS：独立 copy inode/hash/readonly、copy EIO fail-closed、单一 copy 篡改 repair、同 Blob 两批次隔离、历史 hardlink 脱钩、迁移目标 copy 隔离、实际 target inventory 与 source-root removal checkpoint 均通过。
+- Acquiring repository/session focused 48/48 PASS；VCC/Toolbox/PR5 focused 149/149 PASS；VCC output receipt 3/3 PASS，分别真实覆盖 result/data/audit committed crash、首次恢复与二次幂等。最终全量门禁与 restack 后远端 checks 仍须在最终分支头重新执行，本段不复用此前 release-check 充当新 diff 证据。
+- Spec §8/§9/§15、test-spec、tasks、用户指南、版本历史和 changelog 已 reverse-sync 为 copy isolation 合同。这里的 hardlink 仅指 Toolbox 正式目标的 no-replace 发布协议或输入 alias 检测；不再用于 Archive materialization。
+- review P2 文档收口：主 Spec C11、PR4 决策/证据和 PR5 容量/迁移说明已统一为“新 materialization 始终独立 copy，历史 hardlink 仅检测并脱钩”；本次不改生产实现、Blob/artifact identity、SHA/size、repair 或删除顺序。
+- 本轮不改变金额、币种、业务行、Excel 内容或 canonical SHA/size identity。⚠️ 真实 Windows/UNC/网络盘 copy/readonly/容量、断电恢复，以及 Acquiring/Position/VCC/Toolbox 全部输入输出逐字节血缘仍须用户人工复核。
+
+### Final gates
+
+- 首次 full 在 smoke 阶段停于旧 Acquiring fixture：9 个 smoke `runCheck()` 仍省略新必需的 `storageRoot`，而生产 Main/worker 始终显式传入。机械迁移为真实耐久输出合同并移除重复手工 writer 后，Acquiring smoke 203/203、整套 smoke PASS。
+- 首次全量 unit 5125/5130 的 5 个失败均为同类 stale fixture：多 worker 等价性测试仍用“不传 storageRoot 即只算 DB”的已撤销合同。只补各自临时 root 后定向 21/21、全量 unit 5130/5130 PASS；生产 fail-closed 未放宽。
+- 首次含 integration 的 full 唯一失败为 `acquiring-engine-migration` 43/45：legacy/engine 两个 child 同样漏传 `storageRoot`。机械迁移后定向 45/45 PASS；AST 扫描确认 scripts/tests 已无缺参的 `runCheck/runCheckCore` object-literal 直调。
+- 最终 `npm run release-check` 全绿：lint/smoke PASS，unit 5130/5130（332 files），integration 48/48 scripts、2385/2385 assertions（398937ms）；runner 仅在全绿后合法刷新 policy。
+- 提 PR 前硬节点 `check:vars -- --include-minor` exit 0：命中 Critical `freezeWorkerBatchContext`、Important-skeleton `TaskLifecycle`、Runtime-state `app`。复核确认 exact-seven 字段集合/冻结规则未变，TaskLifecycle reserve/terminal 所有权未复制，`app` 只用于既有 userData 根取得输出 generation 路径；Critical 要求的 smoke 已由最终 full 覆盖。

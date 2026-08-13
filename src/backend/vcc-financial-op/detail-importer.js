@@ -281,6 +281,16 @@ function markExistingIdenticalRows(db, recordId) {
   `).run(recordId);
 }
 
+function filteredRowMessage(sourceType, counts) {
+  const parts = [];
+  if (counts.invalidKeyCount > 0) parts.push(`空键 ${counts.invalidKeyCount} 行`);
+  if (counts.formatErrorCount > 0) parts.push(`格式异常 ${counts.formatErrorCount} 行`);
+  if (counts.conflictCount > 0) parts.push(`幂等冲突 ${counts.conflictCount} 行`);
+  return parts.length > 0
+    ? `${SOURCE_LABELS[sourceType]}已过滤异常数据：${parts.join('、')}`
+    : '';
+}
+
 function promoteRows(db, recordId, targetMonth, sourceType) {
   db.prepare(`
     UPDATE vcc_fin_op_import_rows
@@ -332,16 +342,33 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
 
   const insertedCount = countRows(db, recordId, 'accepted');
   const skippedCount = countRows(db, recordId, 'idempotent_skip');
-  const rawCount = insertedCount + skippedCount;
+  const invalidKeyCount = countRows(db, recordId, 'invalid_key');
+  const conflictCount = countRows(db, recordId, 'idempotent_conflict');
+  const formatErrorCount = countRows(db, recordId, 'format_error');
+  const rolledBackCount = countRows(db, recordId, 'rolled_back');
+  const rawCount = insertedCount + skippedCount + invalidKeyCount
+    + conflictCount + formatErrorCount + rolledBackCount;
+  const filteredCount = invalidKeyCount + conflictCount + formatErrorCount;
   const status = insertedCount === 0
-    ? 'all_skipped'
-    : (skippedCount > 0 ? 'success_with_skips' : 'success');
+    ? (filteredCount > 0
+      ? (conflictCount > 0 ? 'failed_conflict' : 'failed_validation')
+      : 'all_skipped')
+    : (skippedCount > 0 || filteredCount > 0 ? 'success_with_skips' : 'success');
 
   repository.finishImportRecord(db, recordId, {
     status,
     rawCount,
     insertedCount,
-    skippedCount
+    skippedCount,
+    invalidKeyCount,
+    conflictCount,
+    formatErrorCount,
+    rolledBackCount,
+    errorMessage: filteredRowMessage(sourceType, {
+      invalidKeyCount,
+      conflictCount,
+      formatErrorCount
+    })
   });
 
   if (insertedCount > 0) {
@@ -372,18 +399,8 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
 function classifyAndPromote(db, recordId, targetMonth, sourceType) {
   db.exec('BEGIN IMMEDIATE');
   try {
-    const invalidKeyCount = countRows(db, recordId, 'invalid_key');
-    const formatErrorCount = countRows(db, recordId, 'format_error');
-    const conflictCount = markConflictRows(db, recordId, sourceType);
+    markConflictRows(db, recordId, sourceType);
     markExistingIdenticalRows(db, recordId);
-    if (invalidKeyCount > 0 || formatErrorCount > 0 || conflictCount > 0) {
-      const message = conflictCount > 0
-        ? `${SOURCE_LABELS[sourceType]}存在同键异内容冲突，整批未导入`
-        : `${SOURCE_LABELS[sourceType]}存在空键或格式错误，整批未导入`;
-      finalizeFailedRows(db, recordId, sourceType, message);
-      db.exec('COMMIT');
-      return recordResult(db, recordId);
-    }
 
     const candidateCount = Number(db.prepare(`
       SELECT COUNT(*) AS row_count
@@ -401,6 +418,7 @@ function classifyAndPromote(db, recordId, targetMonth, sourceType) {
       return recordResult(db, recordId);
     }
 
+    updateConflictComparisons(db, recordId, sourceType);
     promoteRows(db, recordId, targetMonth, sourceType);
     db.exec('COMMIT');
     return recordResult(db, recordId);

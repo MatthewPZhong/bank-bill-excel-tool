@@ -247,6 +247,63 @@ test('B-02 current archive 集合加载复用 A 合同，并生成稳定 token v
   db.close();
 });
 
+test('B-02a 存量 CNH 归档随启动迁移为 CNY 后重新进入解归档列表', () => {
+  const db = createMigratedDb();
+  const raw = seedCurrentArchive(db);
+  const archiveRow = db.prepare(`
+    SELECT balances_json FROM vcc_fin_op_archives
+    WHERE target_month = ? AND subject = 'PPHK'
+  `).get(raw.targetMonth);
+  const legacyBalances = JSON.parse(archiveRow.balances_json);
+  legacyBalances.CNH = legacyBalances.CNY;
+  delete legacyBalances.CNY;
+  db.prepare(`
+    UPDATE vcc_fin_op_archives SET balances_json = ?
+    WHERE target_month = ? AND subject = 'PPHK'
+  `).run(JSON.stringify(legacyBalances), raw.targetMonth);
+  db.prepare(`
+    UPDATE vcc_fin_op_run_balances SET currency = 'CNH'
+    WHERE run_id = ? AND currency = 'CNY'
+  `).run(raw.runs[0].id);
+  db.prepare(`
+    UPDATE vcc_fin_op_module_state SET currency_contract_version = 1
+    WHERE singleton_id = 1
+  `).run();
+
+  const before = listArchiveMonthsSnapshot(db);
+  assert.equal(before.months.length, 0, '旧 CNH 归档在 CNY 合同下必须先 fail-closed');
+  assert.equal(before.diagnostics[0].targetMonth, raw.targetMonth);
+
+  const migrated = ensureVccFinancialOpTablesSupport(db);
+  assert.equal(migrated.currencyMigration.migrated, true);
+  assert.equal(
+    db.prepare(`
+      SELECT currency FROM vcc_fin_op_run_balances
+      WHERE run_id = ? AND subject = 'PPHK' AND currency = 'CNY'
+    `).get(raw.runs[0].id).currency,
+    'CNY'
+  );
+  assert.equal(
+    Object.hasOwn(JSON.parse(db.prepare(`
+      SELECT balances_json FROM vcc_fin_op_archives
+      WHERE target_month = ? AND subject = 'PPHK'
+    `).get(raw.targetMonth).balances_json), 'CNY'),
+    true
+  );
+
+  const after = listArchiveMonthsSnapshot(db);
+  assert.deepEqual(after.months.map((entry) => entry.targetMonth), [raw.targetMonth]);
+  assert.equal(after.diagnostics.length, 0);
+  const preview = previewUnarchiveSnapshot(db, {
+    targetMonth: raw.targetMonth,
+    taskGeneration: 0,
+    taskActive: false
+  });
+  assert.equal(preview.canUnarchive, true);
+  assert.equal(preview.archiveContract, ARCHIVE_CONTRACTS.CURRENT);
+  db.close();
+});
+
 test('B-03 token canonical payload 对集合顺序稳定，generation 变化必改变 token', () => {
   const archiveEvidence = buildArchiveEvidenceV2(createCurrentRawEvidence());
   const archiveContract = classifyArchiveContract(archiveEvidence);
