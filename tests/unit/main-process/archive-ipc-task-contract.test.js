@@ -5,10 +5,14 @@ const test = require('node:test');
 
 const {
   createIpcTaskContext,
+  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
 } = require('../../../src/main-process/archive-center/ipc-task-contract');
+const {
+  createBusinessOperationRegistry
+} = require('../../../src/main-process/business-operation-registry');
 
 test('普通函数 handler 无 prepare，参数原样进入 execute', async () => {
   const contract = normalizeIpcTaskHandler((_event, value) => value + 1);
@@ -90,4 +94,36 @@ test('prepare stop 原样返回 result，输入输出路径角色分离', async 
   const prepared = await prepareIpcTaskInvocation(ready, {}, [{ savePath: '/tmp/output.xlsx' }]);
   assert.deepEqual(prepared.inputPaths, ['/tmp/input.xlsx']);
   assert.deepEqual(prepared.outputPaths, ['/tmp/output.xlsx']);
+});
+
+test('no-archive-artifact 执行业务但不创建 taskContext，并受退出闸门保护', async () => {
+  const registry = createBusinessOperationRegistry();
+  let executeCount = 0;
+  let marked = false;
+  const result = await executeIpcTaskWithoutBatch({
+    businessOperationRegistry: registry,
+    meta: { channel: 'bank-statement:run' },
+    markExecuteStarted() { marked = true; },
+    async execute(taskContext) {
+      executeCount += 1;
+      assert.equal(taskContext, null);
+      assert.deepEqual(registry.listActive().map((item) => item.channel), ['bank-statement:run']);
+      return { status: 'ok' };
+    }
+  });
+  assert.deepEqual(result, { status: 'ok' });
+  assert.equal(marked, true);
+  assert.equal(executeCount, 1);
+  assert.deepEqual(registry.listActive(), []);
+
+  registry.beginShutdownTransition();
+  marked = false;
+  const blocked = await executeIpcTaskWithoutBatch({
+    businessOperationRegistry: registry,
+    meta: { channel: 'template:save-mappings' },
+    markExecuteStarted() { marked = true; },
+    async execute() { throw new Error('must not execute'); }
+  });
+  assert.equal(blocked.status, 'busy');
+  assert.equal(marked, false);
 });

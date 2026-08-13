@@ -14,6 +14,18 @@ const path = require('node:path');
 const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
 const source = fs.readFileSync(RENDERER_PATH, 'utf8');
 
+describe('模块初始化状态框保持欢迎文案', () => {
+  test('对账单修复首次同步场景与 session 时不覆盖欢迎文案', () => {
+    assert.match(
+      source,
+      /reloadReconIdFixScenarios\(\{[\s\S]*?scenariosChanged: false,[\s\S]*?updateStatus: enteringModule[\s\S]*?\}\)/
+    );
+    assert.match(source, /async function refreshReconIdFixStatus\(\{ updateStatus = true \} = \{\}\)/);
+    assert.match(source, /function updateReconIdFixUi\(\{ updateStatus = true \} = \{\}\)/);
+    assert.match(source, /if \(updateStatus\) updateStatusBox\(elements\.reconIdFixStatusBox, text, tone\)/);
+  });
+});
+
 describe('updateBankStatementUi — N6 状态框换行修复 (v2.1.9 T31)', () => {
   test('外层文案 `已导出：` 后不再有 \\n（删冗余）', () => {
     // 模板字面量 `已导出：\n${...}` 在源码中应为 0 命中

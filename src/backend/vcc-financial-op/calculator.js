@@ -10,7 +10,8 @@ const { canonicalizeVccAmount } = require('./amount-rules');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
-  SUPPORTED_CURRENCIES
+  SUPPORTED_CURRENCIES,
+  normalizeLegacyStoredCurrency
 } = require('./definitions');
 const { normalizeYearMonth } = require('./row-mapper');
 const { DecimalAccumulator, addToAccumulatorMap } = require('./decimal-accumulator');
@@ -546,7 +547,14 @@ function aggregateEffectiveRows(db, targetMonth) {
     ORDER BY id
   `).iterate(targetMonth);
 
-  for (const row of rows) {
+  for (const storedRow of rows) {
+    // 历史明细保持原始审计字节不变，只在计算边界读取为最新 CNY 契约。
+    const row = {
+      ...storedRow,
+      stat_currency: normalizeLegacyStoredCurrency(storedRow.stat_currency),
+      pending_currency: normalizeLegacyStoredCurrency(storedRow.pending_currency),
+      flow_currency: normalizeLegacyStoredCurrency(storedRow.flow_currency)
+    };
     subjects.add(row.subject);
     if (row.source_type !== SOURCE_TYPES.PENDING) {
       const key = movementGroupKey(row);

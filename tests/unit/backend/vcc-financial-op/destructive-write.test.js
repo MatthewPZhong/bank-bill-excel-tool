@@ -143,7 +143,7 @@ function preview(dbPath, targetMonth, taskGeneration = 0) {
   }
 }
 
-function execute(dbPath, targetMonth, snapshot) {
+function execute(dbPath, targetMonth, snapshot, onProgress = null) {
   return executeDestructiveMutationWithSafeAudit({
     dbPath,
     action: VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
@@ -153,7 +153,8 @@ function execute(dbPath, targetMonth, snapshot) {
     },
     taskGeneration: snapshot.taskGeneration,
     appVersion: '3.1.9',
-    buildSha: 'c2-test'
+    buildSha: 'c2-test',
+    onProgress
   });
 }
 
@@ -288,8 +289,17 @@ test('current v2 preview 在锁内重算后按 N+7 解归档', (t) => {
   const snapshot = preview(dbPath, raw.targetMonth);
   assert.equal(snapshot.archiveContract, 'current-five-dataset');
   assert.equal(snapshot.canUnarchive, true);
-  const result = execute(dbPath, raw.targetMonth, snapshot);
+  const phases = [];
+  const result = execute(
+    dbPath,
+    raw.targetMonth,
+    snapshot,
+    (progress) => phases.push(progress.phase)
+  );
   const state = unarchiveState(dbPath, raw.targetMonth);
+  assert.deepEqual(phases, [
+    'validating', 'preserving-audit', 'applying', 'verifying', 'committed'
+  ]);
   assert.equal(result.status, 'unarchived');
   assert.equal(result.archiveContract, 'current-five-dataset');
   assert.equal(state.run.status, 'calculated');

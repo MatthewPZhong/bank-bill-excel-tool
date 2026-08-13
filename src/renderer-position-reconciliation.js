@@ -163,7 +163,7 @@
       if (elements.configBtn) elements.configBtn.disabled = state.inflight;
     }
 
-    async function refresh() {
+    async function refresh({ showSummary = true } = {}) {
       if (!api) return null;
       const result = await api.status();
       if (!result || result.status !== 'ok') {
@@ -173,7 +173,10 @@
         return result;
       }
       state.status = result;
-      setStatus(statusSummary(result), result.pendingRun && result.pendingRun.stale ? 'warning' : 'info');
+      setStatus(
+        showSummary ? statusSummary(result) : '欢迎使用小助手',
+        showSummary && result.pendingRun && result.pendingRun.stale ? 'warning' : 'info'
+      );
       updateControls();
       return result;
     }
@@ -1518,7 +1521,7 @@
 
     async function initialize() {
       bindEvents();
-      await refresh();
+      await refresh({ showSummary: false });
     }
 
     function previewDataManager(initialTab = 'unarchived') {

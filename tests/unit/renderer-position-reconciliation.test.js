@@ -122,6 +122,10 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     assert.ok(panel.includes('class="status-box-content"'));
     assert.ok(panel.includes('class="status-spark"'));
     assert.match(panel, /class="status-box-text">欢迎使用小助手<\/span>/);
+    assert.match(positionRenderer, /async function refresh\(\{ showSummary = true \} = \{\}\)/);
+    assert.match(positionRenderer, /showSummary\s*\?\s*statusSummary\(result\)\s*:\s*'欢迎使用小助手'/);
+    assert.match(positionRenderer, /async function initialize\(\)[\s\S]*await refresh\(\{ showSummary: false \}\)/);
+    assert.match(renderer, /positionReconciliationUI\.refresh\(\{ showSummary: enteringModule \}\)/);
   });
 
   test('SQLite UTC 更新时间按本机时区转换后再显示日期', () => {

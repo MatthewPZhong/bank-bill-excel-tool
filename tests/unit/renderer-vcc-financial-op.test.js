@@ -103,16 +103,17 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
   });
 
   test('导入完成不弹导入记录框并将结果摘要写入主页面状态框', () => {
-    const start = moduleRenderer.indexOf('function formatSystemOpSnapshotCount(');
+    const start = moduleRenderer.indexOf('function requireImportCompletionResult(');
     const end = moduleRenderer.indexOf('function setStatus(', start);
     assert.ok(start >= 0 && end > start);
     const formatter = Function(
       'formatInteger',
       'CURRENCIES',
       `'use strict'; ${moduleRenderer.slice(start, end)}; return buildImportCompletionStatus;`
-    )((value) => String(value), ['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
+    )((value) => String(value), ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
     assert.deepEqual(
       formatter({
+        status: 'completed_with_errors',
         targetMonth: '2026-06',
         records: [
           { status: 'success_with_skips', insertedCount: 10, skippedCount: 2 },
@@ -125,11 +126,15 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       }
     );
     assert.deepEqual(
-      formatter({ records: [{ status: 'success', insertedCount: 5, skippedCount: 0 }] }, '2026-05'),
+      formatter({
+        status: 'success',
+        records: [{ status: 'success', insertedCount: 5, skippedCount: 0 }]
+      }, '2026-05'),
       { message: '2026-05 导入完成：新增 5 行，幂等跳过 0 行', tone: 'success' }
     );
     assert.deepEqual(
       formatter({
+        status: 'success',
         targetMonth: '2026-05',
         records: [{
           sourceType: 'system_op',
@@ -145,6 +150,44 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.deepEqual(
       formatter({
+        status: 'success',
+        targetMonth: '2026-07',
+        records: [{
+          sourceType: 'channel',
+          status: 'success_with_skips',
+          insertedCount: 8,
+          skippedCount: 1,
+          invalidKeyCount: 1,
+          conflictCount: 2,
+          formatErrorCount: 3
+        }]
+      }),
+      {
+        message: '2026-07 导入完成：新增 8 行，幂等跳过 1 行，过滤异常 6 行，详情见数据管理 → 校验原表',
+        tone: 'warning'
+      }
+    );
+    assert.deepEqual(
+      formatter({
+        status: 'success',
+        targetMonth: '2026-07',
+        records: [{
+          sourceType: 'system_op',
+          status: 'success_with_skips',
+          insertedCount: 2,
+          skippedCount: 0,
+          conflictCount: 1,
+          formatErrorCount: 1
+        }]
+      }),
+      {
+        message: '2026-07 导入完成：系统财务OP新增 18 行币种数据（2 个主体快照），幂等跳过 0 行币种数据（0 个主体快照），过滤异常 2 个主体快照，详情见数据管理 → 校验原表',
+        tone: 'warning'
+      }
+    );
+    assert.deepEqual(
+      formatter({
+        status: 'success',
         targetMonth: '2026-05',
         records: [
           { sourceType: 'recharge_refund', status: 'success', insertedCount: 2, skippedCount: 1 },
@@ -156,12 +199,28 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
         tone: 'success'
       }
     );
+    assert.throws(
+      () => formatter({
+        status: 'failed',
+        message: '存档中心无法预留任务批次，业务未开始',
+        records: []
+      }, '2026-07'),
+      /存档中心无法预留任务批次，业务未开始/
+    );
+    assert.throws(
+      () => formatter({ status: 'busy', message: '已有其他任务正在运行' }, '2026-07'),
+      /已有其他任务正在运行/
+    );
+    assert.throws(
+      () => formatter({ status: 'success', records: [] }, '2026-07'),
+      /未生成任何导入记录，业务数据未写入/
+    );
     assert.match(moduleRenderer, /isSystemOpSummary \? '新增币种数据' : '新增'/);
     assert.match(moduleRenderer, /formatSystemOpSnapshotCount\(value, true\)/);
     assert.doesNotMatch(moduleRenderer, /function showImportSummary|function importSummaryHtml|showImportSummary\(result\)/);
     assert.match(
       moduleRenderer,
-      /const completion = buildImportCompletionStatus\(result, month\);\s*setStatus\(completion\.message, completion\.tone\);/
+      /const completion = buildImportCompletionStatus\(result, month\);\s*state\.lastMonth = month;\s*setStatus\(completion\.message, completion\.tone\);/
     );
     assert.match(
       moduleRenderer,
@@ -169,7 +228,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(
       moduleRenderer,
-      /const detailLines = result && Array\.isArray\(result\.detailLines\)[\s\S]*throw new Error\(\[result && result\.message \|\| '导入失败', \.\.\.detailLines\]\.join\('\\n'\)\)/
+      /function requireImportCompletionResult\(result\)[\s\S]*\['success', 'completed_with_errors'\][\s\S]*未生成任何导入记录，业务数据未写入/
     );
     assert.match(
       main,
@@ -689,7 +748,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
   });
 
   test('结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档', () => {
-    assert.match(moduleRenderer, /\['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'\]/);
+    assert.match(moduleRenderer, /\['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'\]/);
     assert.match(moduleRenderer, /<th>主体<\/th><th>大类<\/th><th>分类<\/th>/);
     assert.match(moduleRenderer, /\['effectiveCalculatedBalance', '当月计算财务OP'\]/);
     assert.match(moduleRenderer, /\['systemBalance', '系统财务OP'\]/);
@@ -697,8 +756,28 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(moduleRenderer, /row\.type === 'adjustment'/);
     assert.match(moduleRenderer, /amount === null \|\| amount === undefined \? '-' :/);
     assert.match(moduleRenderer, /balanced \? '-' : formatAmount\(amount\)/);
-    assert.match(moduleRenderer, /<th class="\$\{balanced \? 'balanced' : 'unbalanced'\}">/);
+    assert.match(moduleRenderer, /<th class="vcc-fin-op-stat-heading \$\{balanced \? 'balanced' : 'unbalanced'\}">/);
     assert.match(moduleRenderer, /data-field="archive-confirm"/);
+    assert.match(moduleRenderer, /class="dialog-actions split vcc-fin-op-review-actions"/);
+    assert.match(moduleRenderer, /class="vcc-fin-op-review-actions-right"/);
+    const reviewStart = moduleRenderer.indexOf('function confirmArchive(');
+    const reviewEnd = moduleRenderer.indexOf('async function chooseExistingMonth(', reviewStart);
+    const reviewSource = moduleRenderer.slice(reviewStart, reviewEnd);
+    assert.doesNotMatch(reviewSource, /class="dialog-actions right"/);
+    assert.match(moduleRenderer, /class="number vcc-fin-op-stat-cell"/);
+    assert.match(moduleRenderer, /class="vcc-fin-op-stat-heading \$\{balanced \? 'balanced' : 'unbalanced'\}"/);
+    assert.match(
+      styles,
+      /\.dialog-actions\.split\.vcc-fin-op-review-actions\s*\{[\s\S]*?align-items:\s*center;[\s\S]*?margin-top:\s*26px;/
+    );
+    assert.match(
+      styles,
+      /\.vcc-fin-op-review-actions-right\s*\{[\s\S]*?display:\s*flex;[\s\S]*?align-items:\s*center;/
+    );
+    assert.match(
+      styles,
+      /\.vcc-fin-op-full-result-table \.vcc-fin-op-stat-heading,[\s\S]*?\.vcc-fin-op-full-result-table \.vcc-fin-op-stat-cell\s*\{[\s\S]*?text-align:\s*right;/
+    );
     assert.match(moduleRenderer, /archiveBtn\.disabled = operating \|\| !reviewHealthy \|\| !checkbox\.checked/);
     assert.match(moduleRenderer, /expectedResultRevision: currentResult\.resultRevision/);
     assert.match(moduleRenderer, /reviewFailureDisposition\('archive', error\.code\)/);
@@ -729,10 +808,10 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       (value) => String(value == null ? '' : value),
       (value) => String(value),
       { recharge_refund: 'VCC充值清退明细' },
-      ['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'],
+      ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'],
       require('../../src/shared/vcc-financial-op-difference')
     );
-    const currencies = ['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'];
+    const currencies = ['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'];
     const amounts = (usd, eur = '0') => Object.fromEntries(
       currencies.map((currency) => [currency, currency === 'USD' ? usd : (currency === 'EUR' ? eur : '0')])
     );
@@ -764,12 +843,13 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.ok(output.indexOf('vcc-fin-op-base-row') < output.indexOf('vcc-fin-op-adjustment-row'));
     assert.match(output, /人工调整/);
     assert.match(output, /人工核对/);
-    assert.match(output, /class="number">-<\/td>/);
-    assert.match(output, /class="number">-2<\/td>/);
+    assert.match(output, /class="number vcc-fin-op-stat-cell">-<\/td>/);
+    assert.match(output, /class="number vcc-fin-op-stat-cell">-2<\/td>/);
+    assert.match(output, /class="vcc-fin-op-stat-cell">-<\/td><td>-<\/td>/);
     assert.doesNotMatch(output, /<td class="number (?:balanced|unbalanced)">/);
-    assert.match(output, /<th class="balanced">AUD<\/th>/);
-    assert.match(output, /<th class="unbalanced">EUR<\/th>/);
-    assert.match(output, /<th>调整值<\/th><th>调整原因<\/th>/);
+    assert.match(output, /<th class="vcc-fin-op-stat-heading balanced">AUD<\/th>/);
+    assert.match(output, /<th class="vcc-fin-op-stat-heading unbalanced">EUR<\/th>/);
+    assert.match(output, /<th class="vcc-fin-op-stat-heading">调整值<\/th><th>调整原因<\/th>/);
 
     const badCurrencies = JSON.parse(JSON.stringify(dto));
     badCurrencies.review.currencies = currencies.slice(0, 8);
@@ -859,7 +939,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     applyState([]);
     assert.equal(elements.exportBtn.disabled, true);
     assert.equal(elements.exportBtn.title, '暂无已归档财务OP校验结果');
-    assert.match(moduleRenderer, /initialize\(\)[\s\S]*setStatus\('暂无已归档财务OP校验结果', 'info'\)/);
+    assert.match(moduleRenderer, /async function initialize\(\)[\s\S]*await refreshArchivedState\(\);\s*setStatus\('欢迎使用小助手', 'info'\)/);
   });
 
   test('修改结果固定四级无默认级联，保存锁窗并在成功或 stale 后强制 refetch 清核对', () => {

@@ -100,7 +100,7 @@ function insertFormalSystemSnapshot(db) {
   repository.finishImportRecord(db, recordId, { status: 'success', rawCount: 1, insertedCount: 1 });
   repository.finishImportBatch(db, batchId, 'success');
   const rows = SUPPORTED_CURRENCIES.map((currency, index) => {
-    const sourceCurrency = currency === 'CNH' ? 'CNY' : currency;
+    const sourceCurrency = currency;
     const displayValues = SYSTEM_OP_HEADERS.map((header) => {
       if (header === '账单日期') return '2026-06-30';
       if (header === '主体') return 'PPHK';
@@ -250,9 +250,8 @@ test('系统财务OP原表和校验表仅以 balances_json 覆盖财务余额显
     assert.equal(sheet.getCell(jpyRow, balanceColumn).value, '135886024.59');
     assert.equal(sheet.getCell(jpyRow, endingBalanceColumn).value, '保留显示值');
     for (const currency of SUPPORTED_CURRENCIES) {
-      const displayCurrency = currency === 'CNH' ? 'CNY' : currency;
       const rowNumber = sheet.getColumn(currencyColumn).values
-        .findIndex((value) => value === displayCurrency);
+        .findIndex((value) => value === currency);
       assert.equal(rowNumber > 1, true);
       assert.equal(sheet.getCell(rowNumber, balanceColumn).value, balances[currency]);
     }

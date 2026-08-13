@@ -5,7 +5,7 @@
   if (!api) return;
   const differenceApi = window.__vccFinancialOpDifference;
 
-  const CURRENCIES = Object.freeze(['AUD', 'CAD', 'CNH', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
+  const CURRENCIES = Object.freeze(['AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD']);
   const SOURCE_LABELS = Object.freeze({
     recharge_refund: 'VCC充值清退明细',
     fee_fx: 'VCC费用及换汇明细',
@@ -68,6 +68,25 @@
     return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Number(value) || 0);
   }
 
+  function requireImportCompletionResult(result) {
+    const status = String(result && result.status || '').trim();
+    const detailLines = result && Array.isArray(result.detailLines)
+      ? result.detailLines.filter((line) => String(line || '').trim())
+      : [];
+    if (!result || !['success', 'completed_with_errors'].includes(status)) {
+      const message = result && result.message
+        ? result.message
+        : `导入未开始或未完成（状态：${status || 'unknown'}）`;
+      throw new Error([message, ...detailLines].join('\n'));
+    }
+    if (!Array.isArray(result.records)
+        || result.records.length === 0
+        || result.records.some((record) => !record || typeof record !== 'object')) {
+      throw new Error('导入未生成任何导入记录，业务数据未写入');
+    }
+    return result;
+  }
+
   function selectCachedDeletePreview(targets, targetType) {
     return (Array.isArray(targets) ? targets : [])
       .find((target) => target.targetType === targetType) || null;
@@ -89,38 +108,55 @@
   }
 
   function buildImportCompletionStatus(result, fallbackMonth = '') {
-    const records = Array.isArray(result && result.records) ? result.records : [];
+    const completed = requireImportCompletionResult(result);
+    const records = completed.records;
     const systemRecords = records.filter((record) => record.sourceType === 'system_op');
     const detailRecords = records.filter((record) => record.sourceType !== 'system_op');
     const detailTotals = detailRecords.reduce((summary, record) => ({
       inserted: summary.inserted + (Number(record.insertedCount) || 0),
-      skipped: summary.skipped + (Number(record.skippedCount) || 0)
-    }), { inserted: 0, skipped: 0 });
+      skipped: summary.skipped + (Number(record.skippedCount) || 0),
+      filtered: summary.filtered
+        + (Number(record.invalidKeyCount) || 0)
+        + (Number(record.conflictCount) || 0)
+        + (Number(record.formatErrorCount) || 0)
+    }), { inserted: 0, skipped: 0, filtered: 0 });
     const systemTotals = systemRecords.reduce((summary, record) => ({
       inserted: summary.inserted + (Number(record.insertedCount) || 0),
-      skipped: summary.skipped + (Number(record.skippedCount) || 0)
-    }), { inserted: 0, skipped: 0 });
+      skipped: summary.skipped + (Number(record.skippedCount) || 0),
+      filtered: summary.filtered
+        + (Number(record.invalidKeyCount) || 0)
+        + (Number(record.conflictCount) || 0)
+        + (Number(record.formatErrorCount) || 0)
+    }), { inserted: 0, skipped: 0, filtered: 0 });
     const failedRecordCount = records.filter((record) => String(record.status).startsWith('failed')).length;
-    const month = String(result && result.targetMonth || fallbackMonth || '当前账期');
+    const filteredCount = detailTotals.filtered + systemTotals.filtered;
+    const month = String(completed.targetMonth || fallbackMonth || '当前账期');
     const details = [];
     if (detailRecords.length > 0) {
       const prefix = systemRecords.length > 0 ? '明细' : '';
       details.push(`${prefix}新增 ${formatInteger(detailTotals.inserted)} 行`);
       details.push(`${prefix}幂等跳过 ${formatInteger(detailTotals.skipped)} 行`);
+      if (detailTotals.filtered > 0) {
+        details.push(`${prefix}过滤异常 ${formatInteger(detailTotals.filtered)} 行`);
+      }
     }
     if (systemRecords.length > 0) {
       details.push(`系统财务OP新增 ${formatSystemOpSnapshotCount(systemTotals.inserted)}`);
       const prefix = detailRecords.length > 0 ? '系统财务OP' : '';
       details.push(`${prefix}幂等跳过 ${formatSystemOpSnapshotCount(systemTotals.skipped)}`);
+      if (systemTotals.filtered > 0) {
+        details.push(`${prefix}过滤异常 ${formatInteger(systemTotals.filtered)} 个主体快照`);
+      }
     }
-    if (details.length === 0) details.push('新增 0 行', '幂等跳过 0 行');
-    if (failedRecordCount > 0) {
-      details.push(`待处理异常 ${formatInteger(failedRecordCount)} 条导入记录`);
+    if (failedRecordCount > 0 || filteredCount > 0) {
+      if (failedRecordCount > 0) {
+        details.push(`待处理异常 ${formatInteger(failedRecordCount)} 条导入记录`);
+      }
       details.push('详情见数据管理 → 校验原表');
     }
     return {
       message: `${month} 导入完成：${details.join('，')}`,
-      tone: failedRecordCount > 0 ? 'warning' : 'success'
+      tone: failedRecordCount > 0 || filteredCount > 0 ? 'warning' : 'success'
     };
   }
 
@@ -432,14 +468,8 @@
       } finally {
         if (typeof unsubscribe === 'function') unsubscribe();
       }
-      if (!result || result.status === 'error') {
-        const detailLines = result && Array.isArray(result.detailLines)
-          ? result.detailLines.filter((line) => String(line || '').trim())
-          : [];
-        throw new Error([result && result.message || '导入失败', ...detailLines].join('\n'));
-      }
-      state.lastMonth = month;
       const completion = buildImportCompletionStatus(result, month);
+      state.lastMonth = month;
       setStatus(completion.message, completion.tone);
     } catch (error) {
       if (state.cancelRequested) {
@@ -665,9 +695,9 @@
             </td>
             ${currencies.map((currency) => {
               const amount = currencyAmounts[currency];
-              return `<td class="number">${amount === null || amount === undefined ? '-' : escapeHtml(formatAmount(amount))}</td>`;
+              return `<td class="number vcc-fin-op-stat-cell">${amount === null || amount === undefined ? '-' : escapeHtml(formatAmount(amount))}</td>`;
             }).join('')}
-            <td class="number">${adjustment ? escapeHtml(formatAmount(row.adjustmentAmount)) : '-'}</td>
+            <td class="number vcc-fin-op-stat-cell">${adjustment ? escapeHtml(formatAmount(row.adjustmentAmount)) : '-'}</td>
             <td class="vcc-fin-op-adjustment-reason">${adjustment ? escapeHtml(row.reason) : '-'}</td>
           </tr>
         `;
@@ -683,9 +713,9 @@
               const amount = amounts[currency];
               const balanced = differenceRow && isZeroAmount(amount);
               const display = balanced ? '-' : formatAmount(amount);
-              return `<td class="number">${escapeHtml(display)}</td>`;
+              return `<td class="number vcc-fin-op-stat-cell">${escapeHtml(display)}</td>`;
             }).join('')}
-            <td>-</td><td>-</td>
+            <td class="vcc-fin-op-stat-cell">-</td><td>-</td>
           </tr>
         `;
       }).join('');
@@ -698,9 +728,9 @@
                 <th>主体</th><th>大类</th><th>分类</th>
                 ${currencies.map((currency) => {
                   const balanced = isZeroAmount(summaries.effectiveDifference[currency]);
-                  return `<th class="${balanced ? 'balanced' : 'unbalanced'}">${currency}</th>`;
+                  return `<th class="vcc-fin-op-stat-heading ${balanced ? 'balanced' : 'unbalanced'}">${currency}</th>`;
                 }).join('')}
-                <th>调整值</th><th>调整原因</th>
+                <th class="vcc-fin-op-stat-heading">调整值</th><th>调整原因</th>
               </tr></thead>
               <tbody>${detailRows}${summaryRows}</tbody>
             </table>
@@ -754,7 +784,13 @@
   }
 
   function resultOperationProgressMessage(progress) {
-    const action = progress && progress.action === 'adjustment' ? '修改结果' : '确认归档';
+    const actionLabels = {
+      adjustment: '修改结果',
+      archive: '确认归档',
+      unarchive: '解归档',
+      delete: '删除数据'
+    };
+    const action = actionLabels[progress && progress.action] || '处理数据';
     const phase = String(progress && progress.phase || '');
     const phaseLabels = {
       validating: '正在校验锁定证据',
@@ -1052,8 +1088,8 @@
           <div class="vcc-fin-op-result-scroll" data-role="review-result"></div>
           <label class="vcc-fin-op-confirm-check" data-role="archive-confirm-row"><input type="checkbox" data-field="archive-confirm">已核对当前完整结果，确认归档</label>
           <div class="dialog-actions split vcc-fin-op-review-actions">
-            <div><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
-            <div class="dialog-actions right">
+            <div class="vcc-fin-op-review-actions-left"><button class="secondary-btn small" type="button" data-action="modify-result">修改结果</button></div>
+            <div class="vcc-fin-op-review-actions-right">
               <button class="secondary-btn small" type="button" data-action="cancel">关闭</button>
               <button class="primary-btn small" type="button" data-action="archive" disabled>确认归档</button>
             </div>
@@ -2813,11 +2849,7 @@
   async function initialize() {
     try {
       await refreshArchivedState();
-      if (state.latestArchivedRun) {
-        setStatus(`${state.latestArchivedRun.targetMonth} 已归档，可导出结果`, 'success');
-      } else {
-        setStatus('暂无已归档财务OP校验结果', 'info');
-      }
+      setStatus('欢迎使用小助手', 'info');
     } catch (_error) {
       // 启动时读取历史状态失败不阻断模块使用。
     } finally {

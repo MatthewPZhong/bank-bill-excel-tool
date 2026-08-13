@@ -1298,6 +1298,7 @@ function executeLockedDestructiveMutation({
       ? buildUnarchivePlan(db, evidence, transactionTimestamp, provenance)
       : buildDeletePlan(db, evidence, transactionTimestamp, provenance);
     guard = beginMutationGuard(db, plan, hooks.guardOptions || {});
+    emitProgress(onProgress, action, normalizedPayload.targetMonth, 'preserving-audit', false);
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'applying', false);
     const stepResults = executeRegisteredMutationSteps(db, guard, {
       ...hooks,
@@ -1319,7 +1320,6 @@ function executeLockedDestructiveMutation({
         { closeFailures }
       );
     }
-    emitProgress(onProgress, action, normalizedPayload.targetMonth, 'preserving-audit', false);
     db.exec('COMMIT');
     transactionStarted = false;
     emitProgress(onProgress, action, normalizedPayload.targetMonth, 'committed', false);

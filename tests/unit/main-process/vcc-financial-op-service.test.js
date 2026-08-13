@@ -327,6 +327,28 @@ test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误
   });
 });
 
+test('多主体导出部分发布错误把实际文件路径交给 lifecycle 归档', () => {
+  const error = new Error('第二主体写入失败');
+  error.partialResult = {
+    partialCommitted: true,
+    filePaths: ['/tmp/2026-06_PPHK_VCC财务OP校验结果表.xlsx'],
+    runId: 7,
+    targetMonth: '2026-06'
+  };
+  assert.deepEqual(vccFinancialOpErrorResult(error), {
+    status: 'error',
+    code: null,
+    message: '第二主体写入失败',
+    detailLines: [],
+    dependentMonths: [],
+    context: null,
+    partialCommitted: true,
+    filePaths: ['/tmp/2026-06_PPHK_VCC财务OP校验结果表.xlsx'],
+    runId: 7,
+    targetMonth: '2026-06'
+  });
+});
+
 test('generic worker 不再承载 destructive route，dedicated worker 握手后才执行且零 migration', () => {
   const genericWorkerSource = fs.readFileSync(path.join(
     __dirname,

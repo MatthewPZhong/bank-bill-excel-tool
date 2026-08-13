@@ -66,45 +66,6 @@ function completeLayout(repository, artifact, overrides = {}) {
   });
 }
 
-test('目录化候选按 artifact id 分页，且 materialized 统计与游标一致', () => {
-  const { db, repository } = createFixture();
-  try {
-    const batch = createBatch(repository, { operationKey: 'materialization-pages' }).batch;
-    const ids = [];
-    for (let index = 0; index < 3; index += 1) {
-      const sha256 = String.fromCharCode(97 + index).repeat(64);
-      const artifact = addArtifact(repository, batch.id, {
-        artifactKey: `materialization-page-${index}`,
-        originalName: `page-${index}.xlsx`
-      });
-      repository.startArtifactAttempt(artifact.id);
-      repository.completeArtifact(artifact.id, {
-        sha256,
-        sizeBytes: index + 1,
-        relativePath: `blobs/sha256/${index}/${sha256}`
-      });
-      ids.push(artifact.id);
-    }
-
-    const first = repository.listMaterializationCandidates(2, 0);
-    const second = repository.listMaterializationCandidates(2, first.at(-1).id);
-    assert.deepEqual([...first, ...second].map((artifact) => artifact.id), ids);
-    assert.equal(repository.countMaterializationCandidates(), 3);
-    completeLayout(repository, first[0]);
-    assert.equal(repository.countMaterializationCandidates(), 2);
-    assert.deepEqual(
-      repository.listMaterializedArtifactsPage(1, 0).map((artifact) => artifact.id),
-      [first[0].id]
-    );
-    assert.equal(repository.countMaterializedArtifactsAfter(0), 1);
-    assert.equal(repository.countMaterializedArtifactsAfter(first[0].id), 0);
-    assert.throws(() => repository.listMaterializedArtifactsPage(1, -1), /afterArtifactId/);
-    assert.throws(() => repository.countMaterializedArtifactsAfter(-1), /afterArtifactId/);
-  } finally {
-    db.close();
-  }
-});
-
 function ensureAppSettings(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS app_settings (
@@ -163,6 +124,55 @@ test('archive instance ID conflict-safe get-or-create，root switch 与全部 re
       materializations: [{ artifactId: artifact.id, storageMode: 'hardlink' }]
     }), (error) => error.code === 'ARCHIVE_STORAGE_ROOT_CONFLICT');
     assert.equal(repository.getArtifact(artifact.id).storageMode, 'copy');
+  } finally {
+    db.close();
+  }
+});
+
+test('目录化候选以 artifact id 游标分页，不受单次 5000 上限截断', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, { operationKey: 'materialization-pages' }).batch;
+    const ids = [];
+    for (let index = 0; index < 3; index += 1) {
+      const sha256 = String.fromCharCode(97 + index).repeat(64);
+      const artifact = addArtifact(repository, batch.id, {
+        artifactKey: `materialization-page-${index}`,
+        originalName: `page-${index}.xlsx`
+      });
+      repository.startArtifactAttempt(artifact.id);
+      repository.completeArtifact(artifact.id, {
+        sha256,
+        sizeBytes: index + 1,
+        relativePath: `blobs/sha256/${index}/${sha256}`
+      });
+      ids.push(artifact.id);
+    }
+
+    const first = repository.listMaterializationCandidates(2, 0);
+    const second = repository.listMaterializationCandidates(2, first.at(-1).id);
+    assert.deepEqual([...first, ...second].map((artifact) => artifact.id), ids);
+    assert.equal(repository.countMaterializationCandidates(), 3);
+    completeLayout(repository, first[0]);
+    assert.equal(repository.countMaterializationCandidates(), 2);
+    assert.deepEqual(
+      repository.listMaterializedArtifactsPage(1, 0).map((artifact) => artifact.id),
+      [first[0].id]
+    );
+    assert.equal(repository.countMaterializedArtifactsAfter(0), 1);
+    assert.equal(repository.countMaterializedArtifactsAfter(first[0].id), 0);
+    assert.throws(
+      () => repository.listMaterializationCandidates(2, -1),
+      /afterArtifactId/
+    );
+    assert.throws(
+      () => repository.listMaterializedArtifactsPage(1, -1),
+      /afterArtifactId/
+    );
+    assert.throws(
+      () => repository.countMaterializedArtifactsAfter(-1),
+      /afterArtifactId/
+    );
   } finally {
     db.close();
   }
@@ -233,6 +243,44 @@ test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 
     assert.equal(succeededConflict.batch.taskStatus, 'succeeded');
     assert.equal(repository.getLatestIssuedBatch().batchId, context.batchId, '恢复未分配新批次/流水');
     assert.equal(repository.listBatches().length, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('启动恢复把崩溃遗留 reserved/running 批次终结为 failed，终态批次保持不变', () => {
+  const { db, repository } = createFixture();
+  try {
+    const reserve = (suffix) => repository.reserveTaskBatch({
+      moduleId: 'bank-statement',
+      moduleCode: 'BANK',
+      moduleName: '网银账单',
+      operationKey: `startup-interrupted-${suffix}`,
+      taskKey: 'bank-statement:run',
+      taskRunId: `task-${suffix}`,
+      parentRunId: `parent-${suffix}`
+    }).batch;
+    const reserved = reserve('reserved');
+    const running = reserve('running');
+    const succeeded = reserve('succeeded');
+    repository.transitionTaskStatus(running.id, 'running', { expectedStatuses: ['reserved'] });
+    repository.transitionTaskStatus(succeeded.id, 'succeeded', { expectedStatuses: ['reserved'] });
+
+    const excluded = repository.markInterruptedTasks({ excludeBatchIds: [running.id] });
+    assert.deepEqual(excluded.batchIds, [reserved.id]);
+    assert.equal(excluded.taskCount, 1);
+    assert.equal(repository.getBatch(running.id).taskStatus, 'running');
+    const recovered = repository.markInterruptedTasks();
+    assert.deepEqual(recovered.batchIds, [running.id]);
+    assert.equal(recovered.taskCount, 1);
+    for (const id of recovered.batchIds) {
+      const batch = repository.getBatch(id);
+      assert.equal(batch.taskStatus, 'failed');
+      assert.equal(batch.failureCode, 'ARCHIVE_TASK_INTERRUPTED');
+      assert.ok(batch.finishedAt);
+    }
+    assert.equal(repository.getBatch(succeeded.id).taskStatus, 'succeeded');
+    assert.deepEqual(repository.markInterruptedTasks(), { taskCount: 0, batchIds: [] });
   } finally {
     db.close();
   }

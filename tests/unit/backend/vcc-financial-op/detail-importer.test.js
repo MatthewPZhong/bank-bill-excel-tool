@@ -11,13 +11,17 @@ const { ensureVccFinancialOpTablesSupport } = require('../../../../src/backend/v
 const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
 const {
   SOURCE_TYPES,
+  SUPPORTED_CURRENCIES,
   SYSTEM_OP_HEADERS,
   getSourceDefinition
 } = require('../../../../src/backend/vcc-financial-op/definitions');
 const {
   importDetailBatch
 } = require('../../../../src/backend/vcc-financial-op/detail-importer');
-const { importFiles } = require('../../../../src/backend/vcc-financial-op/import-service');
+const {
+  importFiles,
+  normalizeImportBatchId
+} = require('../../../../src/backend/vcc-financial-op/import-service');
 const {
   inspectSourceFile,
   openWorkbookSheets
@@ -67,6 +71,14 @@ function rechargeRow(overrides = {}) {
 function fileEntry(filePath, sourceType, subject = '') {
   return { filePath, sourceType, subject };
 }
+
+test('外部 VCC import batchId 只接受与 exact7 相同的稳定文本边界', () => {
+  assert.match(normalizeImportBatchId(), /^[0-9a-f-]{36}$/);
+  assert.equal(normalizeImportBatchId('task-run-319'), 'task-run-319');
+  for (const invalid of ['', ' task-run', 'task-run ', 'task\nrun', 319, 'x'.repeat(257)]) {
+    assert.throws(() => normalizeImportBatchId(invalid), /VCC 导入批次号/);
+  }
+});
 
 test('五个内置校验原表模板均与当前导入契约一致', async () => {
   const templateDir = path.join(__dirname, '../../../../assets/VCC财务OP校验');
@@ -222,6 +234,72 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 2);
 });
 
+test('多原表后组运行异常仍返回已提交组及全部 record 的部分结果血缘', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const systemRows = SUPPORTED_CURRENCIES.map((currency, index) => ({
+    账单日期: '2026-06-30',
+    主体: 'PPHK',
+    业务部门: 'VCC',
+    币种: currency,
+    OP发生额: 0,
+    '发生额（入）': 0,
+    '发生额（出）': 0,
+    本期移除Pending金额: 0,
+    调账金额: 0,
+    OP期末余额: 0,
+    pending余额: 0,
+    费用项: 0,
+    财务余额: 100 + index,
+    主体变动发生额: 0,
+    财务主体余额: 100 + index,
+    创建时间: '2026-08-11 09:00:00'
+  }));
+  const systemWorkbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(systemWorkbook, XLSX.utils.aoa_to_sheet([
+    SYSTEM_OP_HEADERS,
+    ...systemRows.map((row) => SYSTEM_OP_HEADERS.map((header) => row[header] ?? ''))
+  ]), 'System');
+  const system = path.join(dir, 'committed-system.xlsx');
+  XLSX.writeFile(systemWorkbook, system);
+  const recharge = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'cancelled-recharge.xlsx', [
+    rechargeRow({ 订单号: 'cancelled-after-system-commit' })
+  ]);
+  let cancellationChecks = 0;
+  let caught;
+  try {
+    await importFiles({
+      db,
+      batchId: 'partial-runtime-failure',
+      targetMonth: '2026-06',
+      files: [
+        fileEntry(system, SOURCE_TYPES.SYSTEM_OP, 'PPHK'),
+        fileEntry(recharge, SOURCE_TYPES.RECHARGE)
+      ],
+      shouldCancel: () => {
+        cancellationChecks += 1;
+        return cancellationChecks >= 2;
+      }
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught);
+  assert.equal(caught.partialResult.batchId, 'partial-runtime-failure');
+  assert.equal(caught.partialResult.partialCommitted, true);
+  assert.deepEqual(caught.partialResult.records.map((record) => [record.sourceType, record.status]), [
+    [SOURCE_TYPES.SYSTEM_OP, 'success'],
+    [SOURCE_TYPES.RECHARGE, 'failed_validation']
+  ]);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots
+  `).get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT status FROM vcc_fin_op_import_batches WHERE id = 'partial-runtime-failure'
+  `).get().status, 'failed');
+});
+
 test('同一原表重复导入时第二次全量幂等跳过且有效事实不增加', async (t) => {
   const db = createDb();
   t.after(() => db.close());
@@ -351,7 +429,7 @@ test('同键异内容阻断整批且不覆盖既有有效行', async (t) => {
   }), /不能超过 500 个字符/);
 });
 
-test('失败批次中的精确重放仍归类为幂等跳过', async (t) => {
+test('混合精确重放、冲突和新行时只过滤异常并提升正常行', async (t) => {
   const db = createDb();
   t.after(() => db.close());
   const dir = tempDir(t);
@@ -372,14 +450,19 @@ test('失败批次中的精确重放仍归类为幂等跳过', async (t) => {
     db, targetMonth: '2026-06', files: [fileEntry(mixed, SOURCE_TYPES.RECHARGE)]
   });
   const record = result.records[0];
-  assert.equal(record.status, 'failed_conflict');
+  assert.equal(record.status, 'success_with_skips');
   assert.equal(record.rawCount, 3);
+  assert.equal(record.insertedCount, 1);
   assert.equal(record.skippedCount, 1);
   assert.equal(record.conflictCount, 1);
-  assert.equal(record.rolledBackCount, 1);
+  assert.equal(record.rolledBackCount, 0);
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
-  `).get().n, 2);
+  `).get().n, 3);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
+    WHERE idempotency_key = 'new-key'
+  `).get().n, 1);
 });
 
 test('同批跨文件同键同内容只新增一次并逐条记录跳过', async (t) => {
@@ -436,7 +519,7 @@ test('通道明细同键改填公司主体时冲突明细明确标识主体差�
   assert.deepEqual(JSON.parse(row.diff_fields_json), ['公司主体（导入指定）']);
 });
 
-test('空键导致逻辑原表整批回滚并满足行数守恒', async (t) => {
+test('空键只过滤异常行，正常行落库并满足行数守恒', async (t) => {
   const db = createDb();
   t.after(() => db.close());
   const dir = tempDir(t);
@@ -451,16 +534,20 @@ test('空键导致逻辑原表整批回滚并满足行数守恒', async (t) => {
   });
   const record = result.records[0];
 
-  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.status, 'success_with_skips');
   assert.equal(record.rawCount, 2);
+  assert.equal(record.insertedCount, 1);
   assert.equal(record.invalidKeyCount, 1);
-  assert.equal(record.rolledBackCount, 1);
+  assert.equal(record.rolledBackCount, 0);
   assert.equal(
     record.rawCount,
     record.insertedCount + record.skippedCount + record.invalidKeyCount
       + record.conflictCount + record.formatErrorCount + record.rolledBackCount
   );
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare(`
+    SELECT idempotency_key FROM vcc_fin_op_effective_rows
+  `).get().idempotency_key, 'valid-2');
 });
 
 test('后续分片损坏时保留此前已读取行的逐行回滚审计', async (t) => {

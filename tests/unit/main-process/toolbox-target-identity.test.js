@@ -2,9 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const {
-  normalizeTargetAliasKey
+  normalizeTargetAliasKey,
+  pathsAlias
 } = require('../../../src/main-process/toolbox-target-identity');
 
 test.describe('toolbox target identity', () => {
@@ -47,5 +51,20 @@ test.describe('toolbox target identity', () => {
         normalizeTargetAliasKey('OFFICE.xlsx', { platform })
       );
     }
+  });
+
+  test('真实 symlink 与 hardlink 均识别为源文件别名', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-path-alias-'));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const source = path.join(root, 'source.xlsx');
+    const symlink = path.join(root, 'source-link.xlsx');
+    const hardlink = path.join(root, 'source-hardlink.xlsx');
+    fs.writeFileSync(source, 'source');
+    fs.symlinkSync(source, symlink);
+    fs.linkSync(source, hardlink);
+
+    assert.equal(pathsAlias(fs, source, symlink), true);
+    assert.equal(pathsAlias(fs, source, hardlink), true);
+    assert.equal(pathsAlias(fs, source, path.join(root, 'other.xlsx')), false);
   });
 });

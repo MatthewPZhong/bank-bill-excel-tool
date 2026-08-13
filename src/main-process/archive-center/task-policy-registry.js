@@ -1,5 +1,7 @@
 'use strict';
 
+const { randomUUID } = require('node:crypto');
+
 const { resolveArchiveScope } = require('./module-scope-registry');
 
 const EXCLUDE_REASONS = Object.freeze([
@@ -7,6 +9,7 @@ const EXCLUDE_REASONS = Object.freeze([
   'file-picker-only',
   'staging-preflight-only',
   'preview-only',
+  'no-archive-artifact',
   'cancel-active-task',
   'archive-center-maintenance',
   'ui-navigation'
@@ -59,7 +62,6 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'template:save-bill-split-row',
     'template:save-bill-split-row-count',
     'template:save-filename-fixed-field',
-    'template:save-mappings',
     'template:set-child-parent',
     'template:set-parent-status'
   ]),
@@ -71,7 +73,6 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'bank-statement:batch-import',
     'bank-statement:export',
     'bank-statement:import',
-    'bank-statement:run',
     'channels:create',
     'channels:delete',
     'channels:update',
@@ -289,6 +290,10 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:data-manager:export-preview',
     'vccFinancialOp:run:preflight',
     'vccFinancialOp:run:unarchive-preview'
+  ]),
+  'no-archive-artifact': Object.freeze([
+    'bank-statement:run',
+    'template:save-mappings'
   ]),
   'cancel-active-task': Object.freeze([
     'acquiringBillCurrency:run:cancel',
@@ -519,9 +524,12 @@ function acquiringRunResultFlowIdentities(result, _context, invocation = {}, isR
   const source = isResume ? String(resumePlan.source || '').trim() : 'side';
   if (source !== 'side' && source !== 'main') return [];
   if (isResume && resumePlan.runId != null && String(resumePlan.runId).trim() !== runId) return [];
+  const taskRunId = String(_context && _context.taskRunId || '').trim();
   return [{
     type: 'business-run-id',
-    value: `acquiring-run:${source}:${monthKey}:${runId}`
+    value: taskRunId
+      ? `acquiring-task:${taskRunId}`
+      : `acquiring-run:${source}:${monthKey}:${runId}`
   }];
 }
 
@@ -539,12 +547,61 @@ function acquiringExportPlan(invocation = {}) {
   if (!['side', 'main'].includes(source) || !/^\d{4}-\d{2}$/.test(monthKey) || !runId) {
     return null;
   }
-  const flowIdentity = {
-    type: 'business-run-id',
-    value: `acquiring-run:${source}:${monthKey}:${runId}`
-  };
-  if (JSON.stringify(plan.flowIdentity) !== JSON.stringify(flowIdentity)) return null;
+  const flowIdentity = plan.flowIdentity;
+  const identityValue = String(flowIdentity && flowIdentity.value || '').trim();
+  const legacyValue = `acquiring-run:${source}:${monthKey}:${runId}`;
+  if (!flowIdentity
+      || flowIdentity.type !== 'business-run-id'
+      || (identityValue !== legacyValue && !identityValue.startsWith('acquiring-task:'))) {
+    return null;
+  }
   return { ...plan, flowIdentity };
+}
+
+function bankStatementFlowIdentity(value) {
+  const identity = value && typeof value === 'object' ? value : null;
+  const identityValue = String(identity && identity.value || '').trim();
+  if (!identity
+      || identity.type !== 'business-run-id'
+      || !identityValue.startsWith('bank-statement-run:')) {
+    return null;
+  }
+  return { type: 'business-run-id', value: identityValue };
+}
+
+function createBankStatementRunFlowIdentity(createId = randomUUID) {
+  if (typeof createId !== 'function') throw new TypeError('createId 必须是函数');
+  const value = String(createId() || '').trim();
+  if (!value) throw new TypeError('银行对账 run 身份不能为空');
+  return Object.freeze({
+    type: 'business-run-id',
+    value: `bank-statement-run:${value}`
+  });
+}
+
+function bankStatementExportFlowPlan(invocation = {}) {
+  const prepared = invocation.prepared && typeof invocation.prepared === 'object'
+    ? invocation.prepared
+    : {};
+  const processingResult = prepared.inspected && prepared.inspected.processingResult;
+  const flowIdentity = bankStatementFlowIdentity(
+    processingResult && processingResult.archiveFlowIdentity
+  );
+  if (!flowIdentity) {
+    const error = new TypeError('银行对账导出缺少本轮运行的稳定流程证据');
+    error.code = 'ARCHIVE_FLOW_IDENTITY_REQUIRED';
+    throw error;
+  }
+  return { startsNewFlow: false, flowIdentity };
+}
+
+function bankStatementExportResultFlowIdentities(result, _context, invocation = {}) {
+  if (!result || String(result.status || '') !== 'ok') return [];
+  try {
+    return [bankStatementExportFlowPlan(invocation).flowIdentity];
+  } catch (_error) {
+    return [];
+  }
 }
 
 function acquiringExportFlowPlan(invocation = {}) {
@@ -641,6 +698,7 @@ function createReservePolicy(channel, scopeKey) {
   const isAcquiringRun = channel === 'acquiringBillCurrency:run';
   const isAcquiringResume = channel === 'acquiringBillCurrency:run:resume';
   const isAcquiringExport = channel === 'acquiringBillCurrency:export';
+  const isBankStatementExport = channel === 'bank-statement:export';
   const isVcc = channel.startsWith('vccFinancialOp:');
   const isVccRunContinuation = [
     'vccFinancialOp:export:result',
@@ -660,7 +718,8 @@ function createReservePolicy(channel, scopeKey) {
     moduleName: scope.name,
     taskKey: channel,
     batchPolicy: 'reserve',
-    startsNewFlow: (isAcquiringExport || isVccRunContinuation || isVccImportContinuation)
+    startsNewFlow: (isAcquiringExport || isBankStatementExport
+      || isVccRunContinuation || isVccImportContinuation)
       ? false
       : !CONTINUATION_CHANNELS.has(channel),
     flowIdentityResolver: isVccRunContinuation
@@ -674,6 +733,8 @@ function createReservePolicy(channel, scopeKey) {
       ? bankBuRunFlowPlan
       : isAcquiringExport
         ? acquiringExportFlowPlan
+        : isBankStatementExport
+          ? bankStatementExportFlowPlan
         : isVccDelete
           ? vccDeleteFlowPlan
           : null,
@@ -688,6 +749,8 @@ function createReservePolicy(channel, scopeKey) {
       ? bankBuImportResultFlowIdentities
       : isAcquiringExport
         ? acquiringExportResultFlowIdentities
+      : isBankStatementExport
+        ? bankStatementExportResultFlowIdentities
       : (isAcquiringRun || isAcquiringResume)
         ? (result, context, invocation) => acquiringRunResultFlowIdentities(
             result,
@@ -767,6 +830,7 @@ module.exports = {
   TaskPolicyRegistry,
   bankBuImportResultFlowIdentities,
   bankBuRunFlowPlan,
+  createBankStatementRunFlowIdentity,
   invocationBusinessRunIdentity,
   positionResultClassifier,
   createTaskPolicyRegistry,

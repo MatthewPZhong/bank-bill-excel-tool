@@ -17,6 +17,7 @@ const {
   nextYearMonth,
   initializeOpeningBalances,
   preflightCalculation,
+  aggregateEffectiveRows,
   calculateMonth,
   archiveRun,
   loadOpeningBalances
@@ -822,6 +823,52 @@ test('逐主体逐币种精确汇总四类发生额并计算系统差异', (t) =
   assert.deepEqual(
     pendingTotals.map((row) => [row.currency, row.amount]),
     [['EUR', '5'], ['USD', '-5']]
+  );
+});
+
+test('历史有效明细的 CNH 只读归一为 CNY 且不改原始事实', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  insertEffective(db, {
+    sourceType: SOURCE_TYPES.RECHARGE,
+    key: 'legacy-cnh-movement',
+    currency: 'CNH',
+    amount: '10',
+    businessSubType: '充值',
+    counterpartyDepartment: 'OPS'
+  });
+  insertEffective(db, {
+    sourceType: SOURCE_TYPES.PENDING,
+    key: 'legacy-cnh-pending',
+    reconType: 'VCC_clearing_credit',
+    pendingCurrency: 'CNH',
+    pendingAmount: '-2',
+    flowCurrency: 'CNH',
+    flowAmount: '5',
+    currencyMismatch: 0,
+    channelName: 'LEGACY'
+  });
+
+  const aggregate = aggregateEffectiveRows(db, '2026-06');
+  const movement = [...aggregate.movementGroups.values()];
+  const pending = [...aggregate.pendingGroups.values()];
+
+  assert.equal(movement.length, 1);
+  assert.equal(movement[0].currency, 'CNY');
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].flowCurrency, 'CNY');
+  assert.equal(pending[0].pendingCurrency, 'CNY');
+  assert.equal(
+    aggregate.pendingCurrencyTotals.get(JSON.stringify(['PPHK', 'CNY'])).value(),
+    '3'
+  );
+  assert.equal(aggregate.periodTotals.get(JSON.stringify(['PPHK', 'CNY'])).value(), '13');
+  assert.deepEqual(
+    { ...db.prepare(`
+      SELECT stat_currency, pending_currency, flow_currency
+      FROM vcc_fin_op_effective_rows ORDER BY id
+    `).all()[0] },
+    { stat_currency: 'CNH', pending_currency: null, flow_currency: null }
   );
 });
 

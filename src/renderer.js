@@ -1595,6 +1595,7 @@ function setNewAccountExportAvailability(enabled = state.canExportNewAccount) {
 
 function setCurrentModule(moduleId, { persist = true } = {}) {
   const previousModuleId = state.currentModule;
+  const enteringModule = previousModuleId !== moduleId;
   state.currentModule = moduleId;
   const moduleDef = Object.values(MODULES).find((m) => m.id === moduleId) || MODULES.statementGenerator;
 
@@ -1623,7 +1624,7 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   if (elements.positionReconciliationModulePanel) {
     elements.positionReconciliationModulePanel.hidden = moduleId !== MODULES.positionReconciliation.id;
     if (moduleId === MODULES.positionReconciliation.id && positionReconciliationUI) {
-      positionReconciliationUI.refresh().catch((error) => {
+      positionReconciliationUI.refresh({ showSummary: enteringModule }).catch((error) => {
         console.warn('refresh position reconciliation status failed:', error);
       });
     }
@@ -1687,7 +1688,10 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   // scenariosChanged: false → 模块切换路径不清 reconIdFixExport（用户跨模块切回应保留导出文案）
   if (moduleId === MODULES.reconIdFix.id) {
     if (typeof reloadReconIdFixScenarios === 'function') {
-      reloadReconIdFixScenarios({ scenariosChanged: false }).catch((error) => {
+      reloadReconIdFixScenarios({
+        scenariosChanged: false,
+        updateStatus: enteringModule
+      }).catch((error) => {
         console.warn('reloadReconIdFixScenarios failed:', error);
       });
     }
@@ -6385,7 +6389,7 @@ function applyPreFundReconciliationPanelPreviewState() {
 // ===== v2.1.0-beta.1 PR-A：单据对账 ReconID 修复模块（spec §六 / §七 / Q4 决策） =====
 // PR-A 仅做骨架：sessionStatus 同步 + 主面板下拉 reload + 4 按钮 binding（导入/运行/导出 PR-B 落地）
 
-async function refreshReconIdFixStatus() {
+async function refreshReconIdFixStatus({ updateStatus = true } = {}) {
   try {
     const status = await window.desktopApi.reconIdFix.sessionStatus();
     if (!status || status.status !== 'ok') {
@@ -6406,7 +6410,7 @@ async function refreshReconIdFixStatus() {
   } catch (error) {
     console.error('refreshReconIdFixStatus failed:', error);
   }
-  updateReconIdFixUi();
+  updateReconIdFixUi({ updateStatus });
 }
 
 // 主面板"场景"下拉刷新（task A9）
@@ -6466,13 +6470,13 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
   // 触发后必然清空），renderer 的 state.reconIdFixResult 跟着置 null
   if (typeof refreshReconIdFixStatus === 'function') {
     try {
-      await refreshReconIdFixStatus();
+      await refreshReconIdFixStatus({ updateStatus: options?.updateStatus !== false });
     } catch (error) {
       console.warn('reloadReconIdFixScenarios → refreshReconIdFixStatus failed:', error);
-      updateReconIdFixUi();
+      updateReconIdFixUi({ updateStatus: options?.updateStatus !== false });
     }
   } else {
-    updateReconIdFixUi();
+    updateReconIdFixUi({ updateStatus: options?.updateStatus !== false });
   }
 }
 
@@ -6518,7 +6522,7 @@ function renderReconIdFixScenarioSelect() {
   select.value = desired;
 }
 
-function updateReconIdFixUi() {
+function updateReconIdFixUi({ updateStatus = true } = {}) {
   if (!elements.reconIdFixStatusBox) return;
   const session = state.reconIdFixSession;
   const result = state.reconIdFixResult;
@@ -6556,7 +6560,7 @@ function updateReconIdFixUi() {
     tone = 'neutral';
   }
   // v2.1.7 round 3 B5：走 updateStatusBox 入口（R3 wiring — spec §9.6.2）
-  updateStatusBox(elements.reconIdFixStatusBox, text, tone);
+  if (updateStatus) updateStatusBox(elements.reconIdFixStatusBox, text, tone);
 
   // 按钮可用性（spec §七 + Q4 决策）
   if (elements.reconIdFixImportBtn) elements.reconIdFixImportBtn.disabled = false;

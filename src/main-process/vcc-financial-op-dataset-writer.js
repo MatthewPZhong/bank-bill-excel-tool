@@ -6,6 +6,7 @@ const {
   SOURCE_TYPES,
   SOURCE_LABELS,
   SUPPORTED_CURRENCIES,
+  normalizeLegacyStoredCurrency,
   SYSTEM_OP_HEADERS,
   SYSTEM_OP_DEFINITION,
   getSourceDefinition,
@@ -137,7 +138,7 @@ function detailCheckValues(row, rawValues) {
     return [
       ...sourceValues,
       required(row.subject, '公司主体'),
-      required(row.stat_currency, '统计币种'),
+      required(normalizeLegacyStoredCurrency(row.stat_currency), '统计币种'),
       required(row.signed_amount, '发生额')
     ];
   }
@@ -294,7 +295,7 @@ function systemSnapshotRows(snapshot) {
         `系统财务OP主体 ${snapshot.subject || snapshot.id} 存在字段不完整的原始行，无法导出`
       );
     }
-    const currency = String(row.normalizedCurrency || '').trim();
+    const currency = normalizeLegacyStoredCurrency(row.normalizedCurrency);
     if (!SUPPORTED_CURRENCIES.includes(currency) || normalizedCurrencies.has(currency)) {
       throw exportError(
         'invalid-export-lineage',
