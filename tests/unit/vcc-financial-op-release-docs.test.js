@@ -24,7 +24,7 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.9 版本号与三份用户文档保持本地发布候选状态', () => {
+test('v3.1.9 版本号与三份用户文档保持正式发布状态和人工验证边界', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -34,19 +34,32 @@ test('v3.1.9 版本号与三份用户文档保持本地发布候选状态', () =
   assert.equal(packageJson.version, '3.1.9');
   assert.equal(packageLock.version, '3.1.9');
   assert.equal(packageLock.packages[''].version, '3.1.9');
-  assert.match(changelog, /^## 3\.1\.9 - 2026-08-11$/m);
-  assert.match(history, /^## v3\.1\.9（2026-08-11，本地发布候选）$/m);
+  assert.match(changelog, /^## 3\.1\.9 - 2026-08-13$/m);
+  assert.match(history, /^## v3\.1\.9（2026-08-13）$/m);
   assert.match(guide, /^版本：`v3\.1\.9`$/m);
 
   for (const document of [changelog, history, guide]) {
-    assert.match(document, /本地发布候选/);
-    assert.match(document, /尚未合并或正式发布/);
+    assert.match(document, /2026-08-13/);
+    assert.match(document, /正式发布/);
+    assert.match(document, /annotated tag/);
+    assert.match(document, /latest stable Release/);
+    assert.match(document, /四项公开资产/);
     assert.match(document, /Windows installer\/portable/);
     assert.match(document, /Excel\/WPS/);
     assert.match(document, /约 16 GB/);
     assert.match(document, /约 700 万行/);
     assert.match(document, /目标生产库/);
-    assert.match(document, /资金人工/);
+    assert.match(document, /资金人工|资金复核/);
+    assert.match(document, /技术 Release 不替代|技术发布不替代/);
+    const currentSectionEnd = document.indexOf(
+      document === changelog
+        ? '## 3.1.8'
+        : document === history
+          ? '## v3.1.8'
+          : '\n---'
+    );
+    const currentSection = document.slice(0, currentSectionEnd);
+    assert.doesNotMatch(currentSection, /本地发布候选|尚未合并或正式发布|当前仍是本地候选/);
   }
 });
 

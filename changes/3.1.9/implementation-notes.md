@@ -1126,3 +1126,23 @@ reviewer P2 证明旧产物不是 PR7 final source snapshot，原“四项最终
 - 首次含 integration 的 full 唯一失败为 `acquiring-engine-migration` 43/45：legacy/engine 两个 child 同样漏传 `storageRoot`。机械迁移后定向 45/45 PASS；AST 扫描确认 scripts/tests 已无缺参的 `runCheck/runCheckCore` object-literal 直调。
 - 最终 `npm run release-check` 全绿：lint/smoke PASS，unit 5130/5130（332 files），integration 48/48 scripts、2385/2385 assertions（398937ms）；runner 仅在全绿后合法刷新 policy。
 - 提 PR 前硬节点 `check:vars -- --include-minor` exit 0：命中 Critical `freezeWorkerBatchContext`、Important-skeleton `TaskLifecycle`、Runtime-state `app`。复核确认 exact-seven 字段集合/冻结规则未变，TaskLifecycle reserve/terminal 所有权未复制，`app` 只用于既有 userData 根取得输出 generation 路径；Critical 要求的 smoke 已由最终 full 覆盖。
+
+## 正式发布与收尾证据（2026-08-13）
+
+### Decisions / External state
+
+- 用户明确授权执行正式发布和收尾发布。技术发布按仓库 runbook 走现有不可替换 tag workflow，不手工上传或覆盖同版本资产；尚未完成的 Windows 实机、生产库、性能、Excel/WPS 和资金人工验证继续保留，不伪装为已通过。
+- PR #132—#145 已按堆叠顺序合入；最终 review 修复 PR #135 于 `2026-08-13T14:24:20Z` 合入，普通 merge commit 为 `3edf0527d6537d29cb19b48bda2a3f91f0ce6e32`。发布前 important-vars 硬节点已刷新统计并完成 baseline review，最终 PR checks 全绿。
+- annotated tag `v3.1.9` 的 tag object 为 `78dcded1ead69b7b07548d52208b0cab01b66b8a`；peeled commit 与发布时 `origin/main` 均为 `3edf0527...e6e32`，没有移动、替换或重建 tag。
+
+### Workflow / public asset evidence
+
+- [Release Windows Packages run 31710724423](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/31710724423) 对 head `3edf0527...e6e32` 自然终态 `success`（2026-08-13T14:32:16Z—15:09:14Z）。tag/main 验证、`npm ci`、`release-check`、主页面验证、packaged-input/build-info、Windows build、`check:dist`、updater staging、Release 发布和公开 Release 验证全部成功。
+- [v3.1.9 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.9) 于 `2026-08-13T15:09:06Z` 发布，`draft=false`、`prerelease=false`，并成为 latest stable Release。
+- 公开资产回读：Setup `100285494` bytes / SHA-256 `e9ec53e09bd5b44de37f2fc0e1924fbdfdfed9411a09b2be3d5eb4977bf29e5a`；portable `99788717` / `a6e2c7878340fc7aad1a44ef2f0904038a38c2a12251bcc2ad534c04573de9f0`；blockmap `105381` / `3d3d1acdc1ed852f50b96d7e721e89a0f25cc2650dd2b8c321fa2422f167aab6`；`latest.yml` `369` / `f93470e674ca41dcebf7c78ad8d21996d3ba396e44335f102582097851f65220`。
+- 匿名 `releases/latest/download/latest.yml` 回读与公开资产 digest 一致；其 `version=3.1.9`、Setup path/url、`size=100285494`、SHA-512 `3Z3RfGl60UdgDhhHRj5nvBHnfYf87E5HjNne2dzpG/XcEildKj3bln/pyFLJsdymnx/EZK/p4TOuwWgYgQLpaQ==` 均与实际 Setup 独立计算结果一致。Setup/portable 公开下载 URL 均能匿名跳转到 GitHub release asset。
+
+### Remaining unknowns / follow-up
+
+- PROBE：真实 Windows installer/portable 首启、升级、SmartScreen、SQLite `createSession/readOnly/query_only/UPDATE FROM`；跨卷、UNC/网络盘、长路径、copy/readonly/repair、离线恢复；约 16 GB VCC 与约 700 万行工具箱性能；Excel/WPS。
+- ⚠️ 资金人工：目标生产 legacy/trigger 只读检查、主体×九币种、历史 CNH→CNY、混合异常去向、跨月期初、调整、归档/解归档/delete、审计、备份恢复及输入输出文件血缘仍未确认。技术 Release 不关闭这些项；应在 v3.1.8→v3.1.9 canary 后补录实机证据，异常时不替换 `v3.1.9` 资产而使用新版本修复。

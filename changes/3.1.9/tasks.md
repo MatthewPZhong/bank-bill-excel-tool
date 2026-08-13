@@ -1,6 +1,6 @@
 # v3.1.9 Tasks
 
-> 本文件按确认 Spec §14 的严格串行顺序维护。PR1—PR6 的本地实现和分阶段自动证据已经完成；当前进入 PR7 本地发布候选收口。PR2 GUI/资金人工、Windows/真实大库/生产库/Excel-WPS 等发布门禁仍未完成，不由既有自动证据替代。
+> 本文件按确认 Spec §14 的严格串行顺序维护。PR1—PR7、独立 review 修复、合并、annotated tag、Windows Release workflow、稳定 Release 与公开资产回读已经完成。PR2 GUI/资金人工、Windows/真实大库/生产库/Excel-WPS 等人工验证仍未完成，不由技术 Release 替代。
 
 ## PR1 — 批次身份与数据库迁移
 
@@ -111,16 +111,17 @@
   - [x] 首次 full 唯一旧 footer 文案正则经批准机械同步，最小组 29/29；第二次且最终 `release-check` lint/smoke、unit 5037/5037、integration 48/48 scripts 与 2385/2385 assertions 全绿，runner policy 仅在全绿后合法同步。
   - [x] reviewer P1：详情按真实 taskStatus 显示五态，列表/详情 archiveStatus 保持独立三态且 staging 为“处理中”；真实 fixture、UI static 24/24、Archive 邻接 222/222、Electron 6/6、两张 browser 预览视觉复核及唯一 full（unit 5047/5047、integration 48/48）通过。
   - [ ] Windows installer/portable 中文字体与原生 select、真实盘符/网络长路径、Excel/WPS 只读打开/另存、真实批次/关联/删除后 live rows 仍需用户人工验收。
-- [ ] PR7：版本号、发布文档、最终自动门禁、独立评审与用户人工验收。
-  - [x] `package.json`、`package-lock.json` 顶层及根 package 三处版本精确更新为 `3.1.9`；无依赖变更，不创建 tag。
-  - [x] `CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 同步为本地发布候选，保留 v3.1.8 正式发布历史。
+- [x] PR7：版本号、发布文档、最终自动门禁、独立评审与正式技术发布。
+  - [x] `package.json`、`package-lock.json` 顶层及根 package 三处版本精确更新为 `3.1.9`；无依赖变更；正式发布阶段另创建 annotated tag。
+  - [x] `CHANGELOG.md`、`docs/USER_GUIDE.md`、`docs/VERSION_FEATURE_HISTORY.md` 先同步本地候选，正式发布后再反写发布状态；v3.1.8 正式发布历史保持不变。
   - [x] Spec/tasks/test-spec/implementation-notes/preflight 反向同步 PR1—PR6 本地实现与自动证据，状态保持待独立评审、用户人工、合并与正式发布。
   - [x] PR7 focused 版本/发布文档/Markdown/link/diff 检查；首次 5/6 的历史免责声明缺句已恢复，第二次 6/6 PASS，冻结 hash 与依赖图保持。
   - [x] 原 PR7 `release-check`、设置布局、存档预览与 release tooling P2 定向回归完成；important-vars 已改用 peeled v3.1.8 baseline 扫描并完成 v34 关联 review，旧 clean-worktree false-green 结论撤回。
   - [x] Windows 构建入口已增加 `build.files` packaged-input fail-closed，`check:dist` 已增加包内 build-info/source HEAD 一致性；旧 dirty/pre-commit 四资产证据撤回。
-  - [ ] 本轮最终 commit 后在无用户 untracked 的 clean isolated checkout 唯一执行 installer+portable build、ASCII staging 与 `check:dist`，构建后不再修改 tracked 文件。
-  - [ ] 独立 Sol Ultra review、PR2 GUI/资金、Windows packaged runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与真实文件/资金血缘人工验收。
-  - [ ] 合并、tag、GitHub Release 和公开资产回读；本地 PR7 不执行这些外部发布动作。
+  - [x] review-fix 最终头在远端 CI 和 tag 发布 workflow 中完成 clean Windows installer+portable build、ASCII staging、`check:dist` 与包内 build-info/source HEAD 校验。
+  - [x] 独立 review 及评论复核完成；PR #132—#145 按堆叠顺序合入，最终 PR #135 将 `main` 收口到 `3edf0527d6537d29cb19b48bda2a3f91f0ce6e32`。
+  - [x] annotated tag `v3.1.9`、Release Windows Packages run `31710724423`、latest stable Release 和四项公开资产回读完成。
+  - [ ] PR2 GUI/资金、Windows packaged runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与真实文件/资金血缘人工验证。
 - [x] 全迭代独立 review 26 项集中修复（基线 `6c431f4`，本地分支 `codex/v3.1.9-review-fixes`）。
   - [x] RF-01—RF-04：生命周期、terminal outbox、owner-first interrupted recovery、Acquiring/statement flow identity。
   - [x] RF-05—RF-11：VCC 警告/取消/进度、unsafe audit、opening diagnostic、partial import/export 血缘。
@@ -128,7 +129,7 @@
   - [x] RF-16—RF-18：启动 hash、UTF-16 路径预算、历史 materialization 全量续跑。
   - [x] RF-19—RF-26：active-root symlink、pre-switch read-only、source 可用性、冻结 cleanup inventory、offline/journal/blocked root/marker 恢复。
   - [x] focused 387/387、关键集成 209/209+77/77+30/30+17/17+16/16、lint/node/diff、VCC 三张 preview、check-vars、blindspot/reconciliation 与唯一 full（unit 5082/5082、integration 48/48/2385）全绿。
-  - [ ] 最终 owned commit 后 clean isolated Windows installer+portable build、ASCII staging 与 `check:dist`。
+  - [x] 最终分支经 CI、合并后 tag workflow 的 clean Windows installer+portable build、ASCII staging 与 `check:dist`。
   - [ ] ⚠️ Windows/UNC/网络盘/真实 production legacy-trigger/16GB/700万行/Excel-WPS/资金与文件血缘人工复核。
   - [x] PR3-VCC final P1：exact7 `taskRunId` 固定 import batch；真实 worker 45,000 行 system XLSX 强杀后仅按本 batch 恢复 partial records，并把成功输入及 batch/record identities 交回原 archive parent。
   - [x] 最终独立 review RF-27—RF-29：普通 retry outbox 不再阻断 UI，committed owner receipt 仍 fail-closed；前台 metadata 扫描+修复共用 64 条预算；Toolbox recovery 必需模块纳入同一 Git ownership。

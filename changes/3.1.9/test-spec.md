@@ -525,21 +525,22 @@ Archive 相邻扩大聚焦 221/221 PASS，覆盖 allocator/repository/service/co
 
 Reviewer-confirmed UI-13 增量证据（2026-08-12）：Service/Controller 只读核验确认 `taskStatus` 已真实透传，无后端改动。首次 UI static 24/24、Archive 邻接 222/222、Electron 2 viewport×3 zoom 6/6 PASS；fixture 使用 failed/cancelled+complete+空 legacy business status、running+staging 的真实形状，详情与列表文字精确通过且不出现 `-`/“状态未知”。默认与 150% browser 预览按预期审计文案变化重新生成并人工复核；严格两行、related、retention、a11y、Tab 与布局合同不变。lint、三个 owned JS node-check、diff check PASS；release check-vars 按既有全版本合同 exit 2 并完成 75 个生产文件 review；唯一 full release-check lint/smoke、unit 5047/5047、integration 48/48 scripts（2385/2385 assertions）全绿，policy 仅在全绿后自动同步。真实 Windows packaged 失败/取消批次可见性继续保留人工验收。
 
-## 二十、PR7 本地发布候选收口矩阵
+## 二十、PR7 发布与正式收口矩阵
 
 | ID | 优先级 | 场景 | 最小断言 |
 | --- | --- | --- | --- |
-| REL-01 | P0 | 版本三点一致 | `package.json`、lock 顶层与根 package 精确为 `3.1.9`；依赖图不变；无 tag |
-| REL-02 | P0 | 三份用户发布文档 | CHANGELOG、版本历史、用户手册均有 2026-08-11 本地候选入口；覆盖 PR1—PR6 用户可见行为 |
+| REL-01 | P0 | 版本、tag 与 main 一致 | `package.json`、lock 顶层与根 package 精确为 `3.1.9`；annotated tag `v3.1.9` peeled commit 与发布时 `main` 均为 `3edf0527...e6e32` |
+| REL-02 | P0 | 三份用户发布文档 | CHANGELOG、版本历史、用户手册均有 2026-08-13 正式发布入口；覆盖 PR1—PR7 用户可见行为并保留人工验证边界 |
 | REL-03 | P0 | v3.1.8 历史冻结 | Spec normalized SHA、人工 6/6、annotated tag、Release 和资产断言原样保留 |
-| REL-04 | P0 | 未完成人工门禁 | Windows runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、Excel/WPS 和资金人工明确未通过，不写 released/merged |
+| REL-04 | P0 | 技术发布与人工验证分层 | 正式技术 Release 已完成；Windows runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、Excel/WPS 和资金人工继续明确未验证 |
 | REL-05 | P1 | 文档结构与链接 | Markdown 行尾、内部链接、版本入口顺序和冻结文件零 diff |
 | REL-06 | P0 | 最终自动门禁 | `release-check`、设置布局、存档预览、从 peeled v3.1.8 baseline 的 release check-vars 和 fresh `check:dist` 全部按单次结果记录，不用 clean worktree false-green 或重跑掩盖首次失败 |
 | REL-07 | P0 | Windows 交叉构建证据 | 打包前 `build.files` 输入与 HEAD 一致；installer+portable 可生成且包内版本/提交/必需文件/体积通过；macOS 构建不代表 Windows runtime/session/文件系统验收 |
+| REL-08 | P0 | 正式 Release 公开回读 | run `31710724423` 成功；Release 非 Draft/非 prerelease；四资产 size/SHA-256 与匿名 `latest.yml` path/url/size/SHA-512 一致 |
 
 ### PR7 最终本地自动证据（2026-08-11）
 
-- 版本只修改 package/lock 三处，不改依赖，不创建 tag。
+- PR7 本地候选阶段只修改 package/lock 三处且不改依赖；正式发布阶段再由受控 workflow 使用 annotated tag。
 - release-doc 测试拆分“当前 3.1.9 本地候选”和“冻结 v3.1.8 正式发布历史”；不新增业务 guard 或组合测试。
 - 三份用户发布文档和五份 v3.1.9 管理文档按本地候选反向同步；当时 `changes/3.1.8/spec.md` 与 erratum 副本保持零修改。2026-08-13 用户批准 CNY 合同后，只修订 erratum 为 v2.1/v1.2，冻结历史 Spec 继续零修改。
 - `node --check tests/unit/vcc-financial-op-release-docs.test.js` PASS。首次 focused release-doc 为 5/6；唯一失败是用户手册当前版本标题升级后，v3.1.8 历史顶栏里的“自动化与技术 Release 不替代资金人工”句不再存在，分类为历史文案位置变化，不是生产/资金回归。将原句恢复到 v3.1.8 历史摘要，不修改或放宽断言；第二次 6/6 PASS。
@@ -551,6 +552,14 @@ Reviewer-confirmed UI-13 增量证据（2026-08-12）：Service/Controller 只�
 - reviewer P2 唯一一次 `npm run release-check` 自然终态全绿：lint、smoke PASS；unit 5046/5046（331 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（299492ms）。无失败或重跑，runner 仅在全绿后合法同步 integration policy。
 - reviewer 复核确认旧包内 build-info 为 `e05c4d0`（不是当时 PR7 HEAD `0b8e66f`），并包含 `build.files` 命中的用户未跟踪 xlsx。因此旧 dirty/pre-commit build、临时 staging、四项 size/hash 全部撤回为 final HEAD 证据；不得用于发布判断。
 - 最终 Windows 静态证据待本轮代码/文档提交后在无用户 untracked 的 clean isolated checkout 唯一构建并校验。构建后不再修改 tracked 文档，最终 commit/build-info/四资产/latest 一致性通过交付报告记录；若构建受阻，不使用旧包替代。
+
+### 正式发布证据（2026-08-13）
+
+- PR #132—#145 已按堆叠顺序合入；最终 review 修复 PR #135 的普通 merge commit 为 `3edf0527d6537d29cb19b48bda2a3f91f0ce6e32`。
+- annotated tag object `78dcded1ead69b7b07548d52208b0cab01b66b8a` 的 peeled commit 与发布时 `origin/main` 均为 `3edf0527...e6e32`。
+- `Release Windows Packages` run `31710724423` 对同一 head SHA 自然终态 `success`；tag/main、release-check、Windows build、`check:dist`、staging、publish 与 public Release verify 全部成功。
+- [v3.1.9 stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.9) 为非 Draft、非 prerelease；Setup/portable/blockmap/`latest.yml` 四项资产已下载并独立计算 SHA-256。
+- 匿名 `releases/latest/download/latest.yml` 回读 SHA-256=`f93470e674ca41dcebf7c78ad8d21996d3ba396e44335f102582097851f65220`；version/path/url/size/SHA-512 与公开 Setup 精确一致，两个 EXE 公开 URL 均返回 GitHub release asset 跳转。
 
 ### 仍待人工且自动测试不替代
 
