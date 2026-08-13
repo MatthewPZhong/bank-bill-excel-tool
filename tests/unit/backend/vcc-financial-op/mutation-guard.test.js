@@ -136,7 +136,7 @@ test('未知 VCC 表与 trigger 均在业务写入前失败关闭', (t) => {
   }
 });
 
-test('registry 只允许 C1 approved table，完整 adjustment 预算为 2', (t) => {
+test('registry 保持 C1 adjustment 预算为 2 且 C1 operation 零大表 step', (t) => {
   const db = createDb(t);
   seedRun(db);
   const plan = adjustmentPlan();
@@ -144,13 +144,33 @@ test('registry 只允许 C1 approved table，完整 adjustment 预算为 2', (t)
   assert.deepEqual(
     new Set(Object.values(MUTATION_SQL_STEP_REGISTRY).map((step) => step.tableName)),
     new Set([
-      'vcc_fin_op_run_adjustments',
-      'vcc_fin_op_runs',
-      'vcc_fin_op_operation_audit',
       'vcc_fin_op_archives',
-      'vcc_fin_op_datasets'
+      'vcc_fin_op_dataset_deletions',
+      'vcc_fin_op_datasets',
+      'vcc_fin_op_effective_rows',
+      'vcc_fin_op_import_records',
+      'vcc_fin_op_import_rows',
+      'vcc_fin_op_opening_balances',
+      'vcc_fin_op_operation_audit',
+      'vcc_fin_op_pending_currency_totals',
+      'vcc_fin_op_pending_summary_rows',
+      'vcc_fin_op_run_adjustments',
+      'vcc_fin_op_run_balances',
+      'vcc_fin_op_run_rows',
+      'vcc_fin_op_runs',
+      'vcc_fin_op_system_snapshot_attempts',
+      'vcc_fin_op_system_snapshots'
     ])
   );
+  for (const operation of [
+    VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+    VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT
+  ]) {
+    assert.equal(Object.values(MUTATION_SQL_STEP_REGISTRY).some((entry) => (
+      LARGE_TABLE_SCOPE_PROOF_TABLES.includes(entry.tableName)
+      && VCC_TABLE_POLICY_REGISTRY[entry.tableName].operations[operation] === 'allowed'
+    )), false);
+  }
 
   db.exec('BEGIN IMMEDIATE');
   const guard = beginMutationGuard(db, plan);
@@ -162,7 +182,7 @@ test('registry 只允许 C1 approved table，完整 adjustment 预算为 2', (t)
   assert.equal(db.prepare('SELECT result_revision FROM vcc_fin_op_runs WHERE id = 1').get().result_revision, 1);
 });
 
-test('未登记 step、大表 step 与额外 protected 写入分别失败关闭', (t) => {
+test('未登记 step、大表 fixed scope 不匹配与额外 protected 写入分别失败关闭', (t) => {
   const db = createDb(t);
   seedRun(db);
   assert.throws(() => assertPlanRegistered({
@@ -171,8 +191,27 @@ test('未登记 step、大表 step 与额外 protected 写入分别失败关闭'
     expectedTotalChanges: 0
   }), { code: 'unregistered-mutation-step' });
 
-  const original = MUTATION_SQL_STEP_REGISTRY['adjustment.insert'];
-  assert.equal(LARGE_TABLE_SCOPE_PROOF_TABLES.includes(original.tableName), false);
+  const largePlan = {
+    operation: VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    targetMonth: '2026-06',
+    runId: null,
+    steps: [{
+      stepId: 'delete.detail-effective',
+      bindings: ['2026-06', 'recharge_refund'],
+      expectedChanges: 0
+    }],
+    expectedTotalChanges: 0
+  };
+  assert.throws(() => assertPlanRegistered(largePlan), {
+    code: 'mutation-table-policy-violation'
+  });
+  assert.doesNotThrow(() => assertPlanRegistered({
+    ...largePlan,
+    steps: [{
+      ...largePlan.steps[0],
+      largeTableScopeProof: { scopeId: 'detail-month-source', preCount: 0 }
+    }]
+  }));
 
   db.exec('BEGIN IMMEDIATE');
   const guard = beginMutationGuard(db, adjustmentPlan());

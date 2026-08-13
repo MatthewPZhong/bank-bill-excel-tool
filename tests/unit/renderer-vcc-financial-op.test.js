@@ -212,7 +212,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
     assert.match(vccService, /return runWorker\('inspect', \{ filePaths \}\)/);
-    assert.match(vccService, /return runWorker\('delete-data-target'/);
+    assert.match(vccService, /return runResultWriteWorker\(VCC_MUTATION_OPERATIONS\.DELETE_DATA_TARGET/);
     for (const serviceCall of [
       'listArchivedResultMonths', 'previewUnarchive', 'listImportMonths',
       'listDeleteTargets', 'previewDataTargetDeletion', 'latestArchivedRun',
@@ -226,8 +226,10 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(preload, /removeListener\('vccFinancialOp:operation:progress', listener\)/);
     assert.equal(
       (main.match(/sender\.send\('vccFinancialOp:operation:progress', progress\)/g) || []).length,
-      2
+      4
     );
+    assert.match(moduleRenderer, /progress\.action !== 'unarchive'[\s\S]*?resultOperationProgressMessage\(progress\)[\s\S]*?finally \{\s*stopProgress\(\)/);
+    assert.match(moduleRenderer, /progress\.action !== 'delete'[\s\S]*?setDeleteState\(resultOperationProgressMessage\(progress\), 'warning'\)[\s\S]*?finally \{\s*stopProgress\(\)/);
     assert.match(vccService, /function archive\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
     assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
     assert.doesNotMatch(vccService, /archiveRun\(|addRunAdjustmentToDb\(/);

@@ -148,3 +148,63 @@ test('结果写 stale generation 与非法 action 均在创建 worker 前 fail-c
   assert.equal(harness.service._claimForTests(), null);
   assert.equal(harness.service._taskStateForTests().taskGeneration, 0);
 });
+
+test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation claim', async () => {
+  const cases = [{
+    action: VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+    call(service) {
+      return service.unarchiveMonth({
+        targetMonth: '2026-06',
+        expectedPreviewToken: `v2:${'b'.repeat(64)}`,
+        taskGeneration: 0
+      });
+    },
+    expectedPayload: {
+      targetMonth: '2026-06',
+      expectedPreviewToken: `v2:${'b'.repeat(64)}`,
+      batchContext: null,
+      taskGeneration: 0,
+      appVersion: null,
+      buildSha: null
+    },
+    result: { status: 'unarchived', targetMonth: '2026-06' }
+  }, {
+    action: VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET,
+    call(service) {
+      return service.deleteDataTarget({
+        targetMonth: '2026-06',
+        targetType: 'result',
+        expectedPreviewToken: `v2:${'c'.repeat(64)}`,
+        taskGeneration: 0,
+        reason: '用户确认删除'
+      });
+    },
+    expectedPayload: {
+      targetMonth: '2026-06',
+      targetType: 'result',
+      expectedPreviewToken: `v2:${'c'.repeat(64)}`,
+      reason: '用户确认删除',
+      batchContext: null,
+      taskGeneration: 0,
+      appVersion: null,
+      buildSha: null
+    },
+    result: { status: 'deleted', targetMonth: '2026-06', targetType: 'result' }
+  }];
+  for (const item of cases) {
+    const harness = createHarness();
+    const operation = item.call(harness.service);
+    const worker = harness.workers[0];
+    assert.equal(path.basename(worker.filename), 'vcc-financial-op-write-worker.js');
+    assert.deepEqual(worker.options.workerData.payload, item.expectedPayload);
+    assert.equal(harness.service._claimForTests().action, item.action);
+    worker.emit('message', { type: 'critical-ready' });
+    assert.equal(harness.service._taskStateForTests().protected, true);
+    assert.deepEqual(worker.sentMessages, [{ type: 'critical-ack' }]);
+    worker.emit('message', { type: 'result', result: item.result });
+    assert.deepEqual(await operation, item.result);
+    assert.equal(harness.service._taskStateForTests().taskGeneration, 1);
+    await harness.service.terminate();
+    harness.db.close();
+  }
+});

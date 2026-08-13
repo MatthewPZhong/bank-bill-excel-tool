@@ -491,3 +491,63 @@ PR2 可承担的实现、静态 inventory 与自动门禁已经收口；GUI、�
 ### Deviations
 
 无。负责人批准时对四张大表保护做了必须修订：它们不进入 empty-session，而是使用零目标 DML registry + trigger policy + 逐 step/operation 变化守恒。本节已在任何生产编辑前与 preflight 同步。
+
+## PR2.5-C2 解归档/删除 Implementation Notes（本地代码完成）
+
+### Decisions
+
+| 决定 | 证据 | 放弃方案/约束 |
+| --- | --- | --- |
+| C2 扩展 C1 单一 policy/registry/guard/claim/write worker | B 已冻结 v2 raw evidence，C1 已冻结 protected write protocol | 不新增 guard、token、tracker、claim、worker entry、TTL、retry 或 fallback |
+| 大表放行绑定 operation、registered step 与固定 scope metadata | C2 必须写四张 large-table-scope-proof 表，C1 又必须继续保持零大表 step | guard 精确核对 registry scope ID、锁前 pre-count 与 step budget；四张大表仍不创建 session |
+| write lock 内使用 claim base generation 重载 B 同源 evidence | token canonical payload 包含 taskGeneration，B 的 active batch evidence 是全局范围 | 不使用释放后 generation，不按目标月收窄 active evidence，不接旧 v1/full-fact SHA |
+| source delete 先物化并逐字段验证，再清 FK/删事实 | import audit 是有效事实删除后的唯一可追溯血缘 | detail 使用单次 `UPDATE ... FROM`；system 先补 B、再物化 A；不回退旧多相关子查询 |
+| deletionId 只作返回值与后置证据 | plan 必须在首写前独立完成，不能执行后回填预算 | import records 固定 SQL 通过 deletion boundary、scope 与事务时间定位唯一新 row；postcondition 再核 returned id |
+| 自动测试按代表场景覆盖，不展开组合爆炸 | 负责人明确禁止为重复、理论、renderer/IPC 不可达 case 增加 guard/test | current/legacy 各一条真实生产入口；共享 failure/audit 语义各保留一个代表 |
+
+### Phase 0 Evidence
+
+- 基线精确核为 `f92b8cc81801935ef95683e68671235ba4decf74`（parent `ac882a3846571ab57692b8be633413e919cf2a54`），tracked clean、无 upstream；获批后创建唯一分支 `codex/v3.1.9-pr2.5-c2-unarchive-delete`。
+- 真实旧旁路为 `Service → generic worker-entry → migration → unarchive/data-target-deletion/dataset-deletion`；C2 将生产入口切到 C1 dedicated worker，并从 generic worker 删除 destructive action 路由。
+- Node 24.13.0 / SQLite 3.50.4 内存 probe 通过 C1 session/trigger/total/close；`UPDATE ... FROM` 语义通过。detail query plan 命中 `idx_vcc_fin_op_import_rows_existing`，system 当前为 attempts scan + snapshot PK lookup。
+- 上述只关闭本机实现未知。Windows packaged runtime、真实 legacy/trigger、约 16 GB P50/P95/WAL/main lag，以及主体×九币种/跨月/审计/备份恢复仍为 PROBE 和资金人工门禁。
+
+### Remaining Unknowns
+
+- Windows installer/portable 的 session/changeset/total/close 与 `UPDATE ... FROM` 仍须 runtime probe；不可用即阻断发布。
+- system attempt 物化在现有无 `existing_snapshot_id` 专用索引的 schema 上须通过约 16 GB 性能门禁；C2 禁止 schema/index migration，也不能回退旧相关子查询。
+- 目标生产库必须只读确认 exact current/legacy 和 trigger shape；非 exact four 或未知 trigger 保持 fail-closed。
+- ⚠️ 真实主体×九币种、跨月 tail/opening、detail/system 审计血缘、部分失败、备份恢复须财务人工复核。
+
+### Implementation Evidence
+
+- C1 的 19 表 `VCC_TABLE_POLICY_REGISTRY` 和 immutable SQL step registry 已扩展为 C2 唯一写权限源。大表 step 必须同时精确匹配 operation、registered step、registry scope ID 和锁内 pre-count/budget；四张大表仍不创建 session，C1 adjustment/archive 仍为零大表 step。
+- current/legacy 解归档在同一 `BEGIN IMMEDIATE` 内以 claim base generation 重载 B 的 archive/global-active/gate evidence，exact compare v2 token 后才生成独立 plan。current 预算 `N+7`，真实 v3.1.7 exact-four 预算 `N+6`；legacy 不创建/更新 Pending dataset/facts。
+- result/opening 删除将 adjustment/row/balance/pending-summary/pending-currency 保留为五个独立 step，再删 runs；预算分别为 `1+R+ΣC` 与 `1+R+ΣC+O`。opening 提交前精确复核 `module_state` 全行未变且 `first_month` 保持目标月。
+- detail source 按 `2+R+ΣC+2Q+E+D+M` 执行 `UPDATE ... FROM` 物化、逐字段复核、清 FK、删 effective/dataset、作废 run children、写 deletion/success audit；测试锁定 D=0 orphan 不造 dataset、M>0 exact，以及非目标月 effective row 保留。
+- system source 按 `2+R+ΣC+B+2A+S+D+M` 先补语义唯一 accepted attempt，再逐字段物化/清 FK/删 snapshot。真实 production Service→dedicated worker integration 锁定 B=1/A=1/S=1/M=1、最终 accepted 恰好一条、九币种/raw/source/import-record snapshot 不丢失。
+- deletionId 只使用锁内 boundary 与 INSERT returned ID 作后置证据；plan/budget 没有在执行后回填。source 成功记录通过 boundary/scope/transaction time 精确绑定单一 deletion row。
+- 生产 unarchive/delete 已从 generic migration worker 切到 C1 dedicated write worker/claim/critical progress/cancel，generic worker 不再包含两个 destructive action。Main 将两者进度转发到既有 channel，renderer 按 action 订阅并在 `finally` 退订，复用现有运行中状态文案。
+- 一个中途 fault 代表在五 child 已执行、runs 删除前注入：业务事务完整回滚、success audit=0，只在独立 protected audit-only 事务中留一条 rolled_back。未建立 step×fault 笛卡尔积。
+- 扩大聚焦覆盖 A/B/C1/C2 相关 archive/read/guard/write/legacy helper/service/renderer/serialize-error，最终 195/195 PASS；真实 destructive integration 增加 system 切片后 77/77 PASS。
+
+### Failure Classification
+
+- detail/system 首跑 4/6：SQLite row 为 null-prototype 而断言用 plain object，分类 test design；仅归一化测试比较形状。
+- M/stale/safe/unsafe 首跑 7/9：共享 rollback audit postcondition 将 SQL NULL run_id 当成数值 0，分类 production regression；改为 nullable exact compare，C1 回归同时通过。
+- production 链首跑 21/25：四项均为旧 B/C1 fail-closed 时点或注入 generic `workerFactory` 的 stale tests；仅迁移到 C2 真实 dedicated route。
+- destructive integration 首跑停在旧 success audit 完整 facts 断言，分类 stale test；迁移为 C2 symbols/digest 合同。第二跑 60/61 暴露 non-tail error 只写 `context.dependentMonths`，统一 IPC 会丢用户依赖提示，分类 production regression；在真实 gate 抛错点恢复顶层字段后通过。
+- 首次完整 `release-check` 的 lint/smoke 与 unit 4984/4984 全绿，integration 前 47 个脚本通过，最后一条 historical integration 仍以 legacy helper 生成 v1 token 提交给 C2 dedicated worker，分类 stale integration test；按授权只机械迁移为 `service.previewUnarchive(targetMonth)` 返回的 v2 token/taskGeneration，再调用 `service.unarchiveMonth` 并写后正式 refetch，单脚本 29/29 PASS。未硬编码 token、未改生产、未重试该次 full。
+
+### Blindspot / Reconciliation Pass
+
+- 入口旁路复核确认 renderer/preload/main 可达的 unarchive/delete 只进入 Service 的同一 generation claim 和 dedicated worker；旧 full-fact SHA/v1 helper 仅剩 legacy/offline 测试用途，generic worker 无 destructive route。
+- 状态/失败复核覆盖 global active/tail/unresolved、claim base generation、critical 前 cancel/后禁 terminate、valid/null 七字段 context、stale 真实状态变更、单一中途 fault、M=0 safe audit 和 unknown trigger unsafe 零 DB audit。未增加 lease/timer/retry/fallback 或不可达 payload 防御。
+- 资金血缘复核确认本轮不改金额/币种/计算公式；删除前物化 raw/subject/source/import-record/time，system 另物化九币种 balances，且 run 五 child、dataset deletion、success/rollback audit 行数守恒。⚠️ 真实大库主体/币种/跨月/备份恢复仍须财务人工复核。
+- 性能证据只保留结构门禁：B 的 archive/unarchive/delete read SQL 预算、detail existing-effective index 与 system attempts scan+snapshot PK query plan。当前工作区没有约 16 GB 离线副本或 Windows packaged runtime，因此未生成 C2 P50/P95/WAL/main-lag 数字，也不用小 fixture 声称关闭 PROBE。
+- `npm run check:vars -- --include-minor` exit 2 是命中 review 的预期结果：仅 Runtime-state `setStatus`/`state`，无 Critical/Risk-sensitive。`src/renderer.js` 全局 state 零改；C2 只复用 VCC module 既有 `setStatus` 调用和文案风格，没有改状态单例生命周期。
+- 第二次且最终单一 session `npm run release-check` exit 0：lint、smoke PASS；unit 4984/4984（325 files，0 fail/skip）；integration 48/48 scripts、2385/2385 assertions（295658ms），其中 destructive 77/77、historical 29/29。runner 只在全部脚本 PASS 后自动同步 `rules/integration-test-policy.md` §七；无 retry、阈值放宽或生产补丁。
+
+### Deviations
+
+当前无。

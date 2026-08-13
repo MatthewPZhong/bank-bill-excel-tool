@@ -10,11 +10,16 @@ const {
 const {
   executeResultMutationWithSafeAudit
 } = require('../backend/vcc-financial-op/result-write');
+const {
+  executeDestructiveMutationWithSafeAudit
+} = require('../backend/vcc-financial-op/destructive-write');
 const { serializeError } = require('./serialize-error');
 
 const WRITE_ACTIONS = Object.freeze([
   VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
-  VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT
+  VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
+  VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH,
+  VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
 ]);
 const WRITE_ACTION_SET = new Set(WRITE_ACTIONS);
 
@@ -31,6 +36,13 @@ function cancelledError() {
   const error = new Error('操作已在进入受保护事务前取消。');
   error.code = 'operation-cancelled';
   return error;
+}
+
+function progressAction(action) {
+  if (action === VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT) return 'adjustment';
+  if (action === VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT) return 'archive';
+  if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) return 'unarchive';
+  return 'delete';
 }
 
 function handleControlMessage(message) {
@@ -50,8 +62,8 @@ async function enterCriticalSection(action, payload) {
   parentPort.postMessage({
     type: 'progress',
     progress: {
-      action: action === VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT ? 'adjustment' : 'archive',
-      targetMonth: '',
+      action: progressAction(action),
+      targetMonth: String(payload.targetMonth || ''),
       runId: Number.isSafeInteger(Number(payload.runId)) ? Number(payload.runId) : null,
       phase: 'validating',
       cancellable: true
@@ -77,7 +89,13 @@ async function run() {
   const batchContext = freezeWorkerBatchContext(payload.batchContext);
   void batchContext;
   await enterCriticalSection(action, payload);
-  return executeResultMutationWithSafeAudit({
+  const execute = [
+    VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
+    VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT
+  ].includes(action)
+    ? executeResultMutationWithSafeAudit
+    : executeDestructiveMutationWithSafeAudit;
+  return execute({
     dbPath: workerData.dbPath,
     action,
     payload,

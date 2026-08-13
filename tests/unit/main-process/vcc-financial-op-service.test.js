@@ -205,6 +205,54 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     app_version: '3.1.8',
     build_sha: 'service-build'
   });
+  const unarchivePreview = await service.previewUnarchive({ targetMonth: '2026-06' });
+  assert.equal(unarchivePreview.canUnarchive, true);
+  const unarchived = await service.unarchiveMonth({
+    targetMonth: '2026-06',
+    expectedPreviewToken: unarchivePreview.previewToken,
+    taskGeneration: unarchivePreview.taskGeneration
+  });
+  assert.equal(unarchived.status, 'unarchived');
+  assert.equal(db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id = ?').get(runId).status, 'calculated');
+});
+
+test('真实 v3.1.7 legacy preview 经 Service claim 到 dedicated worker 解归档', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-legacy-unarchive-service-'));
+  const dbPath = path.join(root, 'tool-data.sqlite');
+  fs.copyFileSync(path.resolve(
+    __dirname,
+    '../../fixtures/vcc-financial-op/v3.1.7-four-dataset.sqlite'
+  ), dbPath);
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL');
+  ensureVccFinancialOpTablesSupport(db);
+  const service = createVccFinancialOpService({
+    database: { db, dbPath },
+    assetsDir: '',
+    appVersion: '3.1.9',
+    buildSha: 'legacy-service-build'
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const preview = await service.previewUnarchive({ targetMonth: '2026-06' });
+  assert.equal(preview.archiveContract, 'legacy-v3.1.7-four-dataset');
+  const result = await service.unarchiveMonth({
+    targetMonth: '2026-06',
+    expectedPreviewToken: preview.previewToken,
+    taskGeneration: preview.taskGeneration
+  });
+  assert.equal(result.archiveContract, 'legacy-v3.1.7-four-dataset');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06'
+  `).get().count, 4);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06' AND dataset_type = 'pending_archive_removal'
+  `).get().count, 0);
 });
 
 test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误和审计上下文', async (t) => {
@@ -266,20 +314,25 @@ test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误
   });
 });
 
-test('破坏性 worker 在 openDb/migration 前完成 critical 握手', () => {
-  const workerSource = fs.readFileSync(path.join(
+test('generic worker 不再承载 destructive route，dedicated worker 握手后才执行且零 migration', () => {
+  const genericWorkerSource = fs.readFileSync(path.join(
     __dirname,
     '../../../src/backend/vcc-financial-op/worker-entry.js'
   ), 'utf8');
-  const runSource = workerSource.slice(
-    workerSource.indexOf('async function run()'),
-    workerSource.indexOf('function finish(')
+  const writeWorkerSource = fs.readFileSync(path.join(
+    __dirname,
+    '../../../src/main-process/vcc-financial-op-write-worker.js'
+  ), 'utf8');
+  const runSource = writeWorkerSource.slice(
+    writeWorkerSource.indexOf('async function run()'),
+    writeWorkerSource.indexOf('function finish(')
   );
-  const handshakeIndex = runSource.indexOf('await enterCriticalSection(workerData.action)');
-  const openDbIndex = runSource.indexOf('const db = openDb(workerData.dbPath)');
+  const handshakeIndex = runSource.indexOf('await enterCriticalSection(action, payload)');
+  const executeIndex = runSource.indexOf('return execute({');
   assert.ok(handshakeIndex >= 0, '破坏性 action 必须等待 critical ACK');
-  assert.ok(openDbIndex > handshakeIndex, 'openDb（含 migration）必须发生在父进程 protected/ACK 之后');
-  assert.doesNotMatch(workerSource, /['"]delete-dataset['"]/, '不得保留绕过统一确认契约的 legacy action');
+  assert.ok(executeIndex > handshakeIndex, '写 executor 必须发生在父进程 protected/ACK 之后');
+  assert.doesNotMatch(writeWorkerSource, /ensureVccFinancialOpTablesSupport|migrations/);
+  assert.doesNotMatch(genericWorkerSource, /unarchive-month|delete-data-target/);
 });
 
 test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 worker', async (t) => {
@@ -530,7 +583,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   assert.equal(detail.rows[0].existingSource.importRecordId, recordId);
 });
 
-test('B/C1 中间态生产 v2 删除 preview 被旧 v1 write fail-closed 且零业务 DML', async (t) => {
+test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档结果', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-delete-worker-'));
   const dbPath = path.join(dir, 'tool-data.sqlite');
   const db = new DatabaseSync(dbPath);
@@ -613,19 +666,27 @@ test('B/C1 中间态生产 v2 删除 preview 被旧 v1 write fail-closed 且零�
     return true;
   });
   assert.match(preview.previewToken, /^v2:/);
-  await assert.rejects(service.deleteDatasetData({
+  const deleted = await service.deleteDatasetData({
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration,
-    reason: 'B/C1 中间态必须拒绝'
-  }), (error) => error.code === 'state-changed');
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs').get().n, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 1);
+    reason: 'C2 正式删除链'
+  });
+  assert.equal(deleted.deletedDataCount, 1);
+  assert.equal(deleted.invalidatedRunCount, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_runs').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_datasets').get().n, 0);
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_operation_audit WHERE status = 'success'
-  `).get().n, 0, '允许旧 worker 留 rolled_back 诊断，但不得留下 success evidence');
+  `).get().n, 1);
+  const record = db.prepare(`
+    SELECT dataset_deleted_at, dataset_deletion_id
+    FROM vcc_fin_op_import_records WHERE id = ?
+  `).get(recordId);
+  assert.ok(record.dataset_deleted_at);
+  assert.ok(record.dataset_deletion_id);
 });
 
 test('数据管理有效表通过 worker 流式导出并返回工作簿元数据', async (t) => {
@@ -818,7 +879,7 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: '',
-    workerFactory: createFakeWorkerFactory(workers),
+    writeWorkerFactory: createFakeWorkerFactory(workers),
     cancelTimeoutMs: 10
   });
   t.after(() => db.close());
@@ -867,7 +928,7 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: '',
-    workerFactory: createFakeWorkerFactory(workers),
+    writeWorkerFactory: createFakeWorkerFactory(workers),
     cancelTimeoutMs: 50
   });
   t.after(async () => {
@@ -904,7 +965,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: '',
-    workerFactory: createFakeWorkerFactory(workers),
+    writeWorkerFactory: createFakeWorkerFactory(workers),
     cancelTimeoutMs: 5
   });
   t.after(() => db.close());

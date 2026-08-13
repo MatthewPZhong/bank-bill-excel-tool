@@ -352,6 +352,20 @@ function createVccFinancialOpService({
   }
 
   function normalizeResultWritePayload(action, payload = {}) {
+    if (action === VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH) {
+      return {
+        targetMonth: payload.targetMonth,
+        expectedPreviewToken: payload.expectedPreviewToken
+      };
+    }
+    if (action === VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET) {
+      return {
+        targetMonth: payload.targetMonth,
+        targetType: payload.targetType || payload.sourceType,
+        expectedPreviewToken: payload.expectedPreviewToken,
+        reason: payload.reason
+      };
+    }
     const common = {
       runId: payload.runId,
       expectedResultRevision: payload.expectedResultRevision,
@@ -664,21 +678,15 @@ function createVccFinancialOpService({
     return runReadWorker('preview-unarchive', { targetMonth: payload.targetMonth });
   }
 
-  function unarchiveMonth(payload = {}) {
+  function unarchiveMonth(payload = {}, onProgress) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
-    const confirmedGeneration = validateOperationConfirmation(
-      expectedPreviewToken,
-      payload.taskGeneration
-    );
-    return runWorker('unarchive-month', {
+    return runResultWriteWorker(VCC_MUTATION_OPERATIONS.UNARCHIVE_MONTH, {
       targetMonth: payload.targetMonth,
-      expectedPreviewToken
-    }, null, {
-      destructive: true,
-      expectedTaskGeneration: confirmedGeneration
-    });
+      expectedPreviewToken,
+      taskGeneration: payload.taskGeneration
+    }, onProgress);
   }
 
   async function listDeleteTargets(payload = {}) {
@@ -692,23 +700,17 @@ function createVccFinancialOpService({
     return runReadWorker('preview-delete-target', payload);
   }
 
-  function deleteDataTargetData(payload = {}) {
+  function deleteDataTargetData(payload = {}, onProgress) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
-    const confirmedGeneration = validateOperationConfirmation(
-      expectedPreviewToken,
-      payload.taskGeneration
-    );
-    return runWorker('delete-data-target', {
+    return runResultWriteWorker(VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET, {
       targetMonth: payload.targetMonth,
       targetType: payload.targetType || payload.sourceType,
       expectedPreviewToken,
+      taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    }, null, {
-      destructive: true,
-      expectedTaskGeneration: confirmedGeneration
-    });
+    }, onProgress);
   }
 
   function previewDatasetExport(payload = {}) {
