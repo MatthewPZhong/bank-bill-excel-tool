@@ -22,6 +22,7 @@ const MODULES = Object.freeze({
   acquiring: moduleDescriptor('ACQUIRING'),
   vcc: moduleDescriptor('VCCOP'),
   vccFinancial: moduleDescriptor('VCCFINOP'),
+  toolbox: moduleDescriptor('TOOLBOX'),
   preFund: moduleDescriptor('PREFUND'),
   duplicateInbound: moduleDescriptor('DUPINBOUND'),
   position: moduleDescriptor('POSITION'),
@@ -87,6 +88,8 @@ const FILE_CHANNELS = new Set([
   'template:export-bundle',
   'template:import',
   'template:import-bundle',
+  'toolbox:merge',
+  'toolbox:split:export',
   'vccOpCalc:import:scan',
   'vccFinancialOp:data-manager:export',
   'vccFinancialOp:export:import-audit',
@@ -115,6 +118,8 @@ const SELECTED_INPUT_CHANNELS = new Set([
   'scenarios:import-bundle-apply',
   'template:import',
   'template:import-bundle',
+  'toolbox:merge',
+  'toolbox:split:export',
   'vccFinancialOp:import:apply'
 ]);
 
@@ -163,6 +168,8 @@ const RESULT_OUTPUT_KEYS = Object.freeze({
   'recon-id-fix:export': ['mainFilePath', 'unmatchedFilePath'],
   'scenarios:export-bundle': ['filePath', 'savedPath'],
   'template:export-bundle': ['filePath', 'savedPath'],
+  'toolbox:merge': ['filePath'],
+  'toolbox:split:export': ['filePath'],
   'vccFinancialOp:data-manager:export': ['filePath'],
   'vccFinancialOp:export:import-audit': ['filePath']
 });

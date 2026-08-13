@@ -2478,8 +2478,10 @@ function createAppUpdateSettingsDialog() {
   dialog.setAttribute('aria-labelledby', 'appUpdateSettingsTitle');
 
   const archiveModules = new Map(
-    Object.values(MODULES)
-      .map((module) => [module.id, module.name])
+    [
+      ...Object.values(MODULES).map((module) => [module.id, module.name]),
+      ['toolbox', '工具箱']
+    ]
   );
   const archiveState = {
     activeTab: 'update',

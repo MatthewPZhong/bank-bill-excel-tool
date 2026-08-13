@@ -124,6 +124,7 @@ describe('T4 拆表一气呵成：导入弹选字段框 + 完成即导出（无�
   test('splitExport 入参用选字段回调的 {源文件, field, values}', () => {
     assert.ok(fn.includes('desktopApi.toolbox.splitExport('), '拆表应调 splitExport()');
     assert.ok(/sourceFilePath:\s*result\.sourceFilePath/.test(fn), 'splitExport 入参 sourceFilePath = result.sourceFilePath');
+    assert.ok(/splitReadToken:\s*result\.splitReadToken/.test(fn), 'splitExport 应透传本次 split read token');
     assert.ok(/values:\s*selectedValues/.test(fn), 'splitExport 入参 values = selectedValues');
   });
 
@@ -230,7 +231,7 @@ describe('v3.0.19 合并 handler 多 Sheet 编排与临时资源生命周期', (
   const MAIN_PATH = path.join(__dirname, '..', '..', 'src', 'main.js');
   const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
   const mergeStart = mainSource.indexOf("trackedIpcHandle('toolbox:merge'");
-  const splitStart = mainSource.indexOf("trackedIpcHandle('toolbox:split:read'", mergeStart);
+  const splitStart = mainSource.indexOf("ipcMain.handle('toolbox:split:read'", mergeStart);
   const mergeHandler = mainSource.slice(mergeStart, splitStart);
 
   test('合并入口委托 strict multi-sheet orchestrator，IPC 名保持不变', () => {

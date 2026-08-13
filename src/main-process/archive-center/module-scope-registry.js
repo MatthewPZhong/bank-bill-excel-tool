@@ -16,14 +16,22 @@ const PRIMARY_ARCHIVE_SCOPES = Object.freeze([
   Object.freeze({ id: 'position-reconciliation-process', code: 'POSITION', name: '平盘对账数据处理', kind: 'primary' })
 ]);
 
+const ARCHIVE_UTILITY_SCOPES = Object.freeze([
+  Object.freeze({ id: 'toolbox', code: 'TOOLBOX', name: '工具箱', kind: 'utility' })
+]);
+
 const ARCHIVE_SCOPE_ALIASES = Object.freeze({
   LINKED: Object.freeze({ scopeId: 'bank-statement-process', code: 'LINKED' }),
   PREFUNDTEMP: Object.freeze({ scopeId: 'pre-fund-reconciliation', code: 'PREFUNDTEMP' }),
   POSITIONLINK: Object.freeze({ scopeId: 'position-reconciliation-process', code: 'POSITIONLINK' })
 });
 
-const SCOPE_BY_ID = new Map(PRIMARY_ARCHIVE_SCOPES.map((scope) => [scope.id, scope]));
-const SCOPE_BY_CODE = new Map(PRIMARY_ARCHIVE_SCOPES.map((scope) => [scope.code, scope]));
+const VISIBLE_ARCHIVE_SCOPES = Object.freeze([
+  ...PRIMARY_ARCHIVE_SCOPES,
+  ...ARCHIVE_UTILITY_SCOPES
+]);
+const SCOPE_BY_ID = new Map(VISIBLE_ARCHIVE_SCOPES.map((scope) => [scope.id, scope]));
+const SCOPE_BY_CODE = new Map(VISIBLE_ARCHIVE_SCOPES.map((scope) => [scope.code, scope]));
 
 function getArchiveScope(value) {
   const key = String(value || '').trim();
@@ -47,11 +55,12 @@ function resolveArchiveScope(value) {
 }
 
 function listVisibleArchiveScopes() {
-  return PRIMARY_ARCHIVE_SCOPES.slice();
+  return VISIBLE_ARCHIVE_SCOPES.slice();
 }
 
 module.exports = {
   ARCHIVE_SCOPE_ALIASES,
+  ARCHIVE_UTILITY_SCOPES,
   PRIMARY_ARCHIVE_SCOPES,
   getArchiveScope,
   listVisibleArchiveScopes,

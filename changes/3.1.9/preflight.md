@@ -448,3 +448,47 @@
 | 目标 production trigger/legacy 与资金复核 | PROBE/人工 | exact current/four 外一律 fail-closed；未批准 trigger 零 DB audit；主体/币种/跨月/备份恢复必须人工 |
 
 当前无 BLOCK。未关闭 PROBE：Windows packaged runtime、目标 trigger/legacy、约 16 GB P50/P95/WAL/main lag 与资金人工门禁。
+
+## PR3-Toolbox TaskLifecycle Preflight（2026-08-11）
+
+### Task Brief
+
+- Goal：把工具箱合并与每次拆分导出接入 PR2 唯一 TaskLifecycle/PolicyRegistry/OperationTracker/ArchiveService，并让工具箱作为可见 utility scope 参与存档筛选。
+- Context：基线为 PR3-VCC 冻结头 `df3409b25782ead0ea944c00439dca0149c69a8d`（parent `e1979c2e8fda87ade96c7f60f7c55f7f834d1034`）。现有三个 handler 中，merge 与 split export 在算法后才选择最终输出位置，split read 没有可供 export 复核的本次读取证据。
+- Constraints：scope 精确 `{toolbox,TOOLBOX,工具箱,utility}`；13 primary 和主模块启用/切换菜单不变；仅 `toolbox:merge`、`toolbox:split:export` reserve，`toolbox:split:read` preview-only exclude；不新增 tracker/lifecycle/allocator/terminal、wildcard/alias、TTL/timer/Map 或 path/latest/hash 猜测；不改格式、sheet、日期、大文件、RSS、命名和输出内容算法。
+- Done when：merge 与每次 export 各自新 parent；全部 dialog 在 prepare，取消 0 BOR/0 reserve；split read 0 batch 并返回 opaque token；export reserve 后 freshness mismatch 使原 batch failed 且 0 业务输出；normal/large/multi/publication 共用同一 exact7 context；同一批登记真实输入与全部最终输出，archive/outbox 失败不覆盖业务成功。
+
+### 入口与 worker 图
+
+`renderer → preload → Main prepare dialogs → TaskLifecycle reserve/beforeStart → normal facade 或 large-split worker → publication worker → OperationTracker → ArchiveService/outbox`
+
+- `toolbox:merge`：Main prepare 选择全部输入和最终保存路径；beforeStart 捕获 N 个输入 stat evidence；execute 沿用 strict multi-sheet merge，publication worker 发布最终文件。
+- `toolbox:split:read`：裸 preview IPC；普通 facade 或 large worker `scanFields`；Main 保存唯一当前 `{token, source path, read-time stat}`，不建 batch/parent。
+- `toolbox:split:export`：Main prepare 校验 token、字段/值并完成保存目录/文件及覆盖确认；beforeStart 复核 read evidence；normal/large/multi 算法与 publication worker 全部继承同一个 lifecycle batchContext。
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 决议/处理 |
+| --- | --- | --- | --- |
+| split read 如何关联后续 export | BLOCK 已批准 | 高 | Main 仅保留一个当前 context；opaque random token+resolved path+read-time stat；新 read 覆盖，重启失效，不按 path/latest 猜 |
+| export 取消/失败何时清 context | BLOCK 已批准 | 高 | 输出 dialog 取消保留；beforeStart 缺失/变化清除；成功 publication 后清除；其他真实业务失败保留重试 |
+| normal 分支如何向 tracker 交最终 descriptors | PROBE 已收敛 | 高 | 使用本次 operation-scoped `prepared.inputFiles/outputFiles` 经既有 runtimeResolver 交唯一 tracker；公开 single 返回 shape 不变；tmp 不登记 |
+| large/multi 是否会产生第二批次 | PROBE 已收敛 | 高 | Main dispatch freeze exact7、worker refreeze；worker 不 reserve/reopen；一个 export 覆盖全部 outputs |
+| Windows/Excel/WPS/约16GB/RSS/真实输出血缘 | PROBE/人工 | 高 | 自动化只作本机 gross/回归证据；发布前人工检查，失败不放宽阈值或回退旧接线 |
+
+当前无 BLOCK。
+
+### Ownership、血缘与风险优先计划
+
+- 修改 archive scope/policy/tracker、Main 三 handler、renderer token 透传、large split dispatch/worker、publication dispatch/worker、聚焦 unit/integration fixture 与本版本管理文档。
+- 不修改 settings/renderer 主模块 `MODULES`、toolbox 核心读写/格式算法、VCC classifier/token/guard、PR4—PR7 目录/迁移/UI/发布范围。
+- 输入仅登记实际选中源文件；输出仅登记 publication worker 返回的最终路径、byte size 与 SHA；generation/tmp 路径不进 artifact。
+- merge 和每个 split export `startsNewFlow:true`；split read 无 parent；失败/取消/部分输出服从 PR2 TaskLifecycle 与现有 publication recovery/outbox，不建幽灵 batch。
+
+| 顺序 | 步骤 | 最小成功证据 | 停止条件 |
+| --- | --- | --- | --- |
+| 1 | utility scope + literal policy | primary=13、visible=14；两 reserve/一 preview exclude exact | toolbox 进入主模块菜单或需要 wildcard/alias |
+| 2 | normal split token/freshness | read 0 batch；取消可重试；changed/missing 在 reserve 后 fail 原 batch且0 execute | 需要第二 evidence store、TTL/Map 或旧证据作字节摘要 |
+| 3 | normal merge/export artifact | dialog 全 prepare；reserve failure 0 algorithm；N input+全部 final output | tmp 被登记、公开返回 shape 改变或 archive 掩盖业务结果 |
+| 4 | large/multi/publication | side-effect dispatch/worker required exact7；一个 batch/parent 覆盖所有输出 | worker reserve/reopen 或分支创建第二批次 |
+| 5 | 聚焦回归与人工边界 | roundtrip/large/multi-sheet/行数/格式回归、lint/node/diff/check-vars | 自动 PASS 被写成 Windows/Excel/WPS/16GB/资金人工验收 |

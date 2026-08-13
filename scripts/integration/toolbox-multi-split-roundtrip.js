@@ -21,6 +21,16 @@ const {
 } = require('../../src/main-process/toolbox-multi-split');
 const { dispatchLargeSplit } = require('../../src/main-process/toolbox-large-split-dispatch');
 
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 901,
+  batchNumber: 'integration-toolbox-901',
+  taskRunId: 'integration-toolbox-multi-split',
+  taskKey: 'toolbox:split:export',
+  moduleId: 'toolbox',
+  parentRunId: 'integration-toolbox-parent-901',
+  operationKey: 'toolbox:split:export:integration-toolbox-multi-split'
+});
+
 let passed = 0;
 let failed = 0;
 const failures = [];
@@ -143,7 +153,8 @@ async function run() {
         { fileName: 'worker-a.xlsx', field: 'Channel', values: ['A'], savePath: workerTargets[0] },
         { fileName: 'worker-usd.xlsx', field: 'Currency', values: ['USD'], savePath: workerTargets[1] },
         { fileName: 'worker-empty.xlsx', field: 'Channel', values: ['NONE'], savePath: workerTargets[2] }
-      ]
+      ],
+      batchContext: WORKER_BATCH_CONTEXT
     }).promise;
     equal(workerResult.files.map((file) => file.matchedCount), [2, 2, 0], '多 sheet worker：三组命中数');
     check(workerTargets.every((filePath) => fs.existsSync(filePath)), '多 sheet worker：全部文件生成');

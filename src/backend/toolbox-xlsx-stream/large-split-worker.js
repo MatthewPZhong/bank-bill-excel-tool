@@ -30,6 +30,9 @@
 'use strict';
 
 const { parentPort, isMainThread } = require('node:worker_threads');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 // ── sharedStrings 护栏阈值（TechDoc §三② / OPEN-T4，具名常量便于实施期按真实数据微调）──────────
 //   解析前读 xl/sharedStrings.xml 的 uncompressedSize；超此上限 → 抛可解释错误（failed 文案），
@@ -178,6 +181,7 @@ if (!isMainThread && parentPort) {
     }
 
     if (msg.type !== 'run') return;
+    freezeWorkerBatchContext(msg.batchContext, { required: msg.op !== 'scanFields' });
 
     const { jobId, op, filePath, field, values, savePath, groups } = msg;
     activeJobId = jobId;

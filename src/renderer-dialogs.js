@@ -11724,8 +11724,8 @@
     //   复用 modal-overlay/modal-card/dialog-* + openModal/closeModal（参考 createModuleCabinetDialog）。
     //   IPC 契约（preload desktopApi.toolbox → main.js trackedIpcHandle）：
     //     merge()       → {status:'success',filePath} / {status:'cancelled'} / {status:'failed',message,detailLines}
-    //     splitRead()   → {status:'success',sourceFilePath,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message,detailLines}
-    //     splitExport({sourceFilePath,field,values} | {sourceFilePath,mode:'multiple',groups}) → 单文件或多文件结果契约
+    //     splitRead()   → {status:'success',sourceFilePath,splitReadToken,headers,valuesByField} / {status:'cancelled'} / {status:'failed',message,detailLines}
+    //     splitExport({sourceFilePath,splitReadToken,field,values} | {sourceFilePath,splitReadToken,mode:'multiple',groups}) → 单文件或多文件结果契约
     //   合表「导入文件」一气呵成；拆表在选字段弹框完成后直接进入单文件另存为或多文件目录导出。
     function createToolboxDialog() {
       const overlay = document.createElement('div');
@@ -11878,11 +11878,13 @@
                 const exportResult = await desktopApi.toolbox.splitExport(isMultiple
                   ? {
                     sourceFilePath: result.sourceFilePath,
+                    splitReadToken: result.splitReadToken,
                     mode: 'multiple',
                     groups: multipleGroups
                   }
                   : {
                     sourceFilePath: result.sourceFilePath,
+                    splitReadToken: result.splitReadToken,
                     field,
                     values: selectedValues
                   });

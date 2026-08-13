@@ -298,12 +298,47 @@ test.describe('stateless archive operation tracker', () => {
     );
   });
 
-  test('PR3-VCC tracker 支持财务文件动作但不改既有VCCOP或toolbox', () => {
+  test('PR3 tracker 同时支持 VCC 财务与 toolbox 文件动作', () => {
     const { tracker } = createHarness();
     assert.equal(tracker.supportsChannel('bank-statement:export'), true);
     assert.equal(tracker.supportsChannel('vccFinancialOp:export:result'), true);
     assert.equal(tracker.supportsChannel('vccOpCalc:import:scan'), true);
-    assert.equal(tracker.supportsChannel('toolbox:merge'), false);
+    assert.equal(tracker.supportsChannel('toolbox:merge'), true);
+    assert.equal(tracker.supportsChannel('toolbox:split:export'), true);
+    assert.equal(tracker.supportsChannel('toolbox:split:read'), false);
+  });
+
+  test('toolbox 同一批登记全部真实输入与最终输出，并保留 writer 摘要', async () => {
+    const { calls, tracker } = createHarness();
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(81),
+      channel: 'toolbox:merge',
+      result: { status: 'success', filePath: '/tmp/public/result.xlsx' },
+      runtime: {
+        inputPaths: ['/tmp/input-a.xlsx', '/tmp/input-b.xlsx'],
+        inputFiles: [
+          { filePath: '/tmp/input-a.xlsx', sourceSnapshot: { sizeBytes: 10, mtimeMs: 20 } },
+          { filePath: '/tmp/input-b.xlsx', sourceSnapshot: { sizeBytes: 30, mtimeMs: 40 } }
+        ],
+        outputPaths: ['/tmp/public/result.xlsx'],
+        outputFiles: [{
+          filePath: '/tmp/public/result.xlsx',
+          expectedSha256: 'a'.repeat(64),
+          expectedSizeBytes: 52
+        }]
+      }
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].batchId, 81);
+    assert.deepEqual(calls[0].files.map((file) => [file.role, file.filePath]), [
+      ['input', '/tmp/input-a.xlsx'],
+      ['input', '/tmp/input-b.xlsx'],
+      ['output', '/tmp/public/result.xlsx']
+    ]);
+    assert.equal(calls[0].files[2].expectedSha256, 'a'.repeat(64));
+    assert.equal(calls[0].files[2].expectedSizeBytes, 52);
+    assert.equal(calls[0].files.some((file) => file.filePath.includes('.toolbox-')), false);
   });
 
   test('VCC财务五类导入只登记成功处理组，三个export登记writer全部输出', () => {
