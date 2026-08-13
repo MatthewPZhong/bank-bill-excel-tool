@@ -287,6 +287,11 @@ test('正常迁移只流式复制 canonical，目标重新 materialize 并原子
       fs.readFileSync(managed(current.targetRoot, after.storageRelativePath), 'utf8'),
       'archive-root-migration-content'
     );
+    assert.equal(after.storageMode, 'copy');
+    assert.notEqual(
+      fs.statSync(managed(current.targetRoot, after.blob.relativePath)).ino,
+      fs.statSync(managed(current.targetRoot, after.storageRelativePath)).ino
+    );
     assert.equal(fs.existsSync(path.join(current.targetRoot, '.readonly', 'transient.xlsx')), false);
     assert.ok(current.progress.some((item) => item.phase === 'copying'));
     assert.ok(current.progress.some((item) => item.phase === 'materializing-layout'));
@@ -366,6 +371,56 @@ test('precommit Blob 失败保持 source/setting，重启从 journal 幂等续�
   }
 });
 
+test('pre-switch 恢复按 journal 目标发布清单清除已删除批次的目标残留', async () => {
+  let interrupted = false;
+  const current = await createFixture({
+    faultInjector(event) {
+      if (event === 'after-copy-blob' && !interrupted) {
+        interrupted = true;
+        const error = new Error('stop after target publish');
+        error.code = 'SIMULATED_CRASH';
+        throw error;
+      }
+    }
+  });
+  try {
+    assert.equal((await current.manager.initialize()).available, true);
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    assert.equal((await current.manager.changeStorageLocation()).status, 'failed');
+
+    const persisted = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    assert.ok(persisted.targetPublishedPaths.includes(current.artifact.blob.relativePath));
+    assert.equal(
+      persisted.targetPublishedPaths.includes(current.artifact.storageRelativePath),
+      false,
+      'journal 只能登记 crash 前真正发布到目标根的路径'
+    );
+    const staleTargetBlob = managed(current.targetRoot, current.artifact.blob.relativePath);
+    assert.equal(fs.existsSync(staleTargetBlob), true);
+
+    const deleted = await current.manager.currentService.deleteBatch(current.artifact.batchId, {
+      force: true
+    });
+    assert.equal(deleted.ok, true, JSON.stringify(deleted));
+    assert.equal(current.repository.getArtifact(current.artifact.id), null);
+
+    const restarted = createManagerForFixture(current);
+    const initialized = await restarted.manager.initialize();
+    assert.equal(initialized.available, true, JSON.stringify(initialized));
+    assert.equal(restarted.runtime.rootDir, real(current.targetRoot));
+    assert.equal(fs.existsSync(staleTargetBlob), false);
+    assert.equal(
+      fs.existsSync(current.journalPath),
+      false,
+      fs.existsSync(current.journalPath)
+        ? fs.readFileSync(current.journalPath, 'utf8')
+        : 'journal removed'
+    );
+  } finally {
+    current.close();
+  }
+});
+
 test('DB commit 后 journal switched 前崩溃以 setting 为 truth，重启只认 target', async () => {
   let failed = false;
   const current = await createFixture({
@@ -429,6 +484,40 @@ test('DB commit 后 journal switched 前崩溃以 setting 为 truth，重启只�
     const recovered = await restarted.initialize();
     assert.equal(recovered.available, true);
     assert.equal(runtime.rootDir, real(current.targetRoot));
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+    assert.equal(fs.existsSync(current.journalPath), false);
+  } finally {
+    current.close();
+  }
+});
+
+test('旧根删除后、done journal 前崩溃凭 durable removal checkpoint 收口', async () => {
+  let interrupted = false;
+  const current = await createFixture({
+    faultInjector(event) {
+      if (event === 'after-source-root-removed' && !interrupted) {
+        interrupted = true;
+        const error = new Error('crash before done journal');
+        error.code = 'SIMULATED_CRASH';
+        throw error;
+      }
+    }
+  });
+  try {
+    assert.equal((await current.manager.initialize()).available, true);
+    fs.mkdirSync(current.targetRoot, { recursive: true });
+    const interruptedResult = await current.manager.changeStorageLocation();
+    assert.equal(interruptedResult.status, 'partial');
+    assert.equal(interruptedResult.code, 'ARCHIVE_STORAGE_CLEANUP_PENDING');
+    assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), real(current.targetRoot));
+    assert.equal(fs.existsSync(current.sourceRoot), false);
+    const persisted = JSON.parse(fs.readFileSync(current.journalPath, 'utf8'));
+    assert.ok(persisted.sourceRootRemovalStartedAt);
+
+    const restarted = createManagerForFixture(current);
+    const initialized = await restarted.manager.initialize();
+    assert.equal(initialized.available, true, JSON.stringify(initialized));
+    assert.equal(restarted.runtime.rootDir, real(current.targetRoot));
     assert.equal(fs.existsSync(current.sourceRoot), false);
     assert.equal(fs.existsSync(current.journalPath), false);
   } finally {

@@ -35,15 +35,6 @@ const PRE_SWITCH_PHASES = new Set([
   'materializing-layout',
   'verifying'
 ]);
-const HARDLINK_CAPABILITY_ERRORS = new Set([
-  'EXDEV',
-  'EACCES',
-  'EPERM',
-  'ENOTSUP',
-  'EOPNOTSUPP',
-  'ENOSYS',
-  'EMLINK'
-]);
 const INTERNAL_TRANSIENT_DIRS = new Set(['.staging', '.readonly']);
 const DEFAULT_STARTUP_OWNERSHIP_BATCH_SIZE = 64;
 
@@ -204,7 +195,25 @@ function validateJournal(journal, instanceId) {
     : Array.isArray(journal.sourceCleanupPaths)
       ? [...new Set(journal.sourceCleanupPaths.map(toRelativePath))].sort()
       : null;
+  const targetPublishedPaths = journal.targetPublishedPaths == null
+    ? null
+    : Array.isArray(journal.targetPublishedPaths)
+      ? [...new Set(journal.targetPublishedPaths.map(toRelativePath))].sort()
+      : null;
   if (journal.sourceCleanupPaths != null && sourceCleanupPaths == null) {
+    throw new ArchiveStorageRootError(
+      'ARCHIVE_STORAGE_JOURNAL_INVALID',
+      '存档迁移恢复记录无效，已停止自动处理'
+    );
+  }
+  if (journal.targetPublishedPaths != null && targetPublishedPaths == null) {
+    throw new ArchiveStorageRootError(
+      'ARCHIVE_STORAGE_JOURNAL_INVALID',
+      '存档迁移恢复记录无效，已停止自动处理'
+    );
+  }
+  if (journal.sourceRootRemovalStartedAt != null
+      && typeof journal.sourceRootRemovalStartedAt !== 'string') {
     throw new ArchiveStorageRootError(
       'ARCHIVE_STORAGE_JOURNAL_INVALID',
       '存档迁移恢复记录无效，已停止自动处理'
@@ -220,7 +229,9 @@ function validateJournal(journal, instanceId) {
     ...journal,
     sourceRoot: normalizeRoot(journal.sourceRoot),
     targetRoot: normalizeRoot(journal.targetRoot),
-    sourceCleanupPaths
+    sourceCleanupPaths,
+    targetPublishedPaths,
+    sourceRootRemovalStartedAt: journal.sourceRootRemovalStartedAt || null
   };
 }
 
@@ -397,6 +408,44 @@ class ArchiveStorageRootManager {
       .filter((relativePath) => !INTERNAL_TRANSIENT_DIRS.has(relativePath.split('/')[0]))
       .map(toRelativePath)
       .sort();
+  }
+
+  _targetPublishedPaths(evidence) {
+    const paths = new Set();
+    for (const blob of evidence.blobs) paths.add(toRelativePath(blob.relativePath));
+    for (const artifact of evidence.artifacts) {
+      if (artifact.storageRelativePath) {
+        paths.add(toRelativePath(artifact.storageRelativePath));
+      }
+    }
+    return [...paths].sort();
+  }
+
+  async _removeEmptyManagedParents(rootDir, relativePaths) {
+    const parents = new Set();
+    for (const relativePath of relativePaths) {
+      for (const parent of parentRelativePaths(relativePath)) parents.add(parent);
+    }
+    for (const relativeDirectory of [...parents].sort((a, b) => b.length - a.length)) {
+      const directory = await this._assertManagedPath(rootDir, relativeDirectory);
+      try {
+        await this.fs.promises.rmdir(directory);
+      } catch (error) {
+        if (!error || !['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+      }
+    }
+  }
+
+  async _reconcilePreSwitchTargetInventory(journal, evidence) {
+    const knownPublished = journal.targetPublishedPaths;
+    if (!Array.isArray(knownPublished)) return;
+    const desired = new Set(this._targetPublishedPaths(evidence));
+    const stale = knownPublished.filter((relativePath) => !desired.has(relativePath));
+    for (const relativePath of stale) {
+      const filePath = await this._assertManagedPath(journal.targetRoot, relativePath);
+      await this.fs.promises.rm(filePath, { force: true });
+    }
+    await this._removeEmptyManagedParents(journal.targetRoot, stale);
   }
 
   async _canonicalizeWithExistingAncestor(value) {
@@ -935,9 +984,7 @@ class ArchiveStorageRootManager {
     const token = crypto.randomUUID();
     const first = path.join(rootDir, `.archive-probe-${token}.tmp`);
     const renamed = path.join(rootDir, `.archive-probe-${token}.ready`);
-    const linked = path.join(rootDir, `.archive-probe-${token}.link`);
     let handle;
-    let hardlinkSupported = false;
     try {
       handle = await this.fs.promises.open(first, 'wx', 0o600);
       await handle.writeFile('archive-storage-probe', 'utf8');
@@ -948,19 +995,12 @@ class ArchiveStorageRootManager {
       if (await this.fs.promises.readFile(renamed, 'utf8') !== 'archive-storage-probe') {
         throw new Error('probe content mismatch');
       }
-      try {
-        await this.fs.promises.link(renamed, linked);
-        hardlinkSupported = true;
-      } catch (error) {
-        if (!error || !HARDLINK_CAPABILITY_ERRORS.has(error.code)) throw error;
-      }
-      await this.fs.promises.rm(linked, { force: true });
       await this.fs.promises.rm(renamed, { force: true });
-      if (await pathExists(this.fs, linked) || await pathExists(this.fs, renamed)) {
+      if (await pathExists(this.fs, renamed)) {
         throw new Error('probe cleanup mismatch');
       }
       await syncDirectory(this.fs, rootDir);
-      return { hardlinkSupported };
+      return {};
     } catch (error) {
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_TARGET_PROBE_FAILED',
@@ -971,7 +1011,7 @@ class ArchiveStorageRootManager {
       if (handle) {
         try { await handle.close(); } catch (_closeError) {}
       }
-      for (const filePath of [first, linked, renamed]) {
+      for (const filePath of [first, renamed]) {
         try { await this.fs.promises.rm(filePath, { force: true }); } catch (_cleanupError) {}
       }
     }
@@ -1007,9 +1047,10 @@ class ArchiveStorageRootManager {
     validateMarker(await this._readMarker(targetRoot), this.instanceId);
 
     const missingCanonicalBytes = await this._missingCanonicalBytes(targetRoot, evidence.blobs);
-    const missingArtifactBytes = probe.hardlinkSupported
-      ? 0
-      : await this._missingArtifactBytes(targetRoot, evidence.artifacts);
+    const missingArtifactBytes = await this._missingArtifactBytes(
+      targetRoot,
+      evidence.artifacts
+    );
     let statfs;
     try {
       statfs = await this.fs.promises.statfs(targetRoot);
@@ -1063,7 +1104,19 @@ class ArchiveStorageRootManager {
         sha256: artifact.blob.sha256,
         sizeBytes: artifact.blob.sizeBytes
       }, this.fs);
-      if (!result.valid) total += artifact.blob.sizeBytes;
+      if (!result.valid) {
+        total += artifact.blob.sizeBytes;
+        continue;
+      }
+      const canonicalPath = await this._assertManagedPath(rootDir, artifact.blob.relativePath);
+      try {
+        const canonicalStat = await this.fs.promises.stat(canonicalPath);
+        if (canonicalStat.dev === result.stat.dev && canonicalStat.ino === result.stat.ino) {
+          total += artifact.blob.sizeBytes;
+        }
+      } catch (error) {
+        if (!error || error.code !== 'ENOENT') throw error;
+      }
     }
     return total;
   }
@@ -1077,6 +1130,8 @@ class ArchiveStorageRootManager {
       sourceRoot: this.currentService.rootDir,
       targetRoot,
       sourceCleanupPaths: this._sourceCleanupPaths(evidence),
+      targetPublishedPaths: [],
+      sourceRootRemovalStartedAt: null,
       phase: 'prepared',
       startedAt: now,
       updatedAt: now,
@@ -1128,7 +1183,15 @@ class ArchiveStorageRootManager {
       }
       copied += 1;
       journal.progress.copiedBlobCount = copied;
+      journal.targetPublishedPaths = [...new Set([
+        ...(journal.targetPublishedPaths || []),
+        toRelativePath(blob.relativePath)
+      ])].sort();
       this._emitProgress('copying', copied, evidence.blobs.length);
+      journal = await this._writeJournal(journal, 'copying', {
+        progress: journal.progress,
+        targetPublishedPaths: journal.targetPublishedPaths
+      });
       await this._inject('after-copy-blob', { copied, blobId: blob.id });
     }
     return this._writeJournal(journal, 'copying', { progress: journal.progress });
@@ -1162,10 +1225,22 @@ class ArchiveStorageRootManager {
       let storageMode;
       if (existing.valid) {
         const canonicalStat = await this.fs.promises.stat(canonicalPath);
-        storageMode = canonicalStat.dev === existing.stat.dev && canonicalStat.ino === existing.stat.ino
-          ? 'hardlink'
-          : 'copy';
-        await this.fs.promises.chmod(targetPath, 0o444);
+        const sharesCanonicalInode = canonicalStat.dev === existing.stat.dev
+          && canonicalStat.ino === existing.stat.ino;
+        if (sharesCanonicalInode) {
+          await this.fs.promises.rm(targetPath, { force: true });
+          const result = await materializer.materialize({
+            artifactId: artifact.id,
+            canonicalPath,
+            storageRelativePath: artifact.storageRelativePath,
+            sha256: artifact.blob.sha256,
+            sizeBytes: artifact.blob.sizeBytes
+          });
+          storageMode = result.mode;
+        } else {
+          storageMode = 'copy';
+          await this.fs.promises.chmod(targetPath, 0o444);
+        }
       } else {
         await this.fs.promises.rm(targetPath, { force: true });
         const result = await materializer.materialize({
@@ -1180,7 +1255,15 @@ class ArchiveStorageRootManager {
       materializations.push({ artifactId: artifact.id, storageMode });
       processed += 1;
       journal.progress.materializedArtifactCount = processed;
+      journal.targetPublishedPaths = [...new Set([
+        ...(journal.targetPublishedPaths || []),
+        toRelativePath(artifact.storageRelativePath)
+      ])].sort();
       this._emitProgress('materializing-layout', processed, evidence.artifacts.length);
+      journal = await this._writeJournal(journal, 'materializing-layout', {
+        progress: journal.progress,
+        targetPublishedPaths: journal.targetPublishedPaths
+      });
     }
     journal = await this._writeJournal(journal, 'materializing-layout', {
       progress: journal.progress
@@ -1255,22 +1338,36 @@ class ArchiveStorageRootManager {
           '当前存档仍有未完成的目录化文件，不能迁移'
         );
       }
-      await this._validateTarget(targetRoot, evidence);
       if (!journal) {
+        await this._validateTarget(targetRoot, evidence);
         journal = this._newJournal(targetRoot, evidence);
         await atomicWriteJson(this.fs, this.journalPath, journal);
         await this._inject('after-prepared', { targetRoot });
       } else {
-        // pre-switch 失败后 source 仍可继续接收新批次；maintenance 已重新排空任务，
-        // 必须在本次切换前用当前权威证据重冻旧根清理集合，不能沿用首次 prepared 快照。
+        // pre-switch 失败后 source 仍可新增或删除批次。清理集合只能单调合并：
+        // 当前证据补进新增路径，旧 checkpoint 则保留已删除批次可能留下的文件/空目录。
+        const sourceCleanupPaths = [...new Set([
+          ...(Array.isArray(journal.sourceCleanupPaths) ? journal.sourceCleanupPaths : []),
+          ...this._sourceCleanupPaths(evidence)
+        ])].sort();
+        // 先按旧 journal 的 durable progress 清掉已经发布、但当前 DB 已删除的
+        // 目标副本；随后才能用当前 evidence 重置下一轮发布计划。
+        await this._reconcilePreSwitchTargetInventory(journal, evidence);
+        const desiredTargetPaths = new Set(this._targetPublishedPaths(evidence));
+        const targetPublishedPaths = (journal.targetPublishedPaths || [])
+          .filter((relativePath) => desiredTargetPaths.has(relativePath));
         journal = await this._writeJournal(journal, journal.phase, {
-          sourceCleanupPaths: this._sourceCleanupPaths(evidence),
+          sourceCleanupPaths,
+          targetPublishedPaths,
           progress: {
             ...journal.progress,
+            copiedBlobCount: 0,
             totalBlobCount: evidence.blobs.length,
+            materializedArtifactCount: 0,
             totalArtifactCount: evidence.artifacts.length
           }
         });
+        await this._validateTarget(targetRoot, evidence);
       }
       this._emitProgress(journal.phase, 0, evidence.blobs.length + evidence.artifacts.length);
       journal = await this._copyBlobs(journal, evidence);
@@ -1313,6 +1410,9 @@ class ArchiveStorageRootManager {
   async _cleanupOldRoot(journal) {
     const rootDir = journal.sourceRoot;
     if (!await pathExists(this.fs, rootDir)) {
+      if (journal.sourceRootRemovalStartedAt) {
+        return { ok: true, journal };
+      }
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_SOURCE_ROOT_OFFLINE',
         '旧存档位置离线或暂时不可见，已保留清理记录',
@@ -1322,7 +1422,7 @@ class ArchiveStorageRootManager {
     const marker = await this._readMarker(rootDir);
     if (marker) {
       validateMarker(marker, this.instanceId);
-    } else {
+    } else if (!journal.sourceRootRemovalStartedAt) {
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_MARKER_MISSING',
         '旧存档根身份标记缺失，已停止自动清理',
@@ -1372,8 +1472,14 @@ class ArchiveStorageRootManager {
         { retryable: true }
       );
     }
-    await this.fs.promises.rm(path.join(rootDir, ROOT_MARKER_FILE), { force: true });
+    if (!journal.sourceRootRemovalStartedAt) {
+      journal = await this._writeJournal(journal, 'cleanup-pending', {
+        sourceRootRemovalStartedAt: new Date().toISOString(),
+        lastError: null
+      });
+    }
     try {
+      await this.fs.promises.rm(path.join(rootDir, ROOT_MARKER_FILE), { force: true });
       await this.fs.promises.rmdir(rootDir);
     } catch (error) {
       if (error && error.code === 'ENOENT') return { ok: true };
@@ -1388,16 +1494,31 @@ class ArchiveStorageRootManager {
           error.markerRestoreError = restoreError;
         }
       }
+      error.cleanupJournal = journal;
       throw error;
     }
-    return { ok: true };
+    return { ok: true, journal };
   }
 
   async _finishCleanup(journal) {
+    let cleanupJournal = journal;
     try {
-      await this._cleanupOldRoot(journal);
+      const cleaned = await this._cleanupOldRoot(journal);
+      cleanupJournal = cleaned && cleaned.journal ? cleaned.journal : journal;
+      await this._inject('after-source-root-removed', {
+        sourceRoot: cleanupJournal.sourceRoot,
+        targetRoot: cleanupJournal.targetRoot
+      });
     } catch (error) {
-      journal = await this._writeJournal(journal, 'cleanup-pending', {
+      cleanupJournal = error && error.cleanupJournal ? error.cleanupJournal : journal;
+      let persistedCleanupJournal = cleanupJournal;
+      try {
+        const persisted = await this._readJournal();
+        if (persisted && persisted.migrationId === journal.migrationId) {
+          persistedCleanupJournal = persisted;
+        }
+      } catch (_readError) {}
+      journal = await this._writeJournal(persistedCleanupJournal, 'cleanup-pending', {
         lastError: {
           code: String(error && error.code || 'ARCHIVE_STORAGE_CLEANUP_FAILED'),
           message: String(error && error.message || '旧存档根清理待重试')
@@ -1412,7 +1533,7 @@ class ArchiveStorageRootManager {
         storageRoot: journal.targetRoot
       };
     }
-    journal = await this._writeJournal(journal, 'done', { lastError: null });
+    journal = await this._writeJournal(cleanupJournal, 'done', { lastError: null });
     this._emitProgress('done', 1, 1, 'done');
     await this.fs.promises.rm(this.journalPath, { force: true });
     return {
