@@ -81,6 +81,53 @@ function importMonth({ userDataDir, yearMonth, pendingRows, bankRows }) {
   }
 }
 
+// 存档流程只使用持久业务行主键证明“当前导入版本”，不把月份本身当作流程身份。
+// 覆盖导入会删除旧行后插入新 AUTOINCREMENT 主键；因此同月重导也会形成新 identity。
+function getImportFlowEvidence({ userDataDir, mainDb, yearMonth }) {
+  let db = mainDb;
+  let sideDb = null;
+  if (runDataStore.sideDbExists(userDataDir, MODULE, yearMonth)) {
+    sideDb = runDataStore.openSideDb(userDataDir, MODULE, yearMonth);
+    db = sideDb;
+  }
+  try {
+    const pending = db.prepare(`
+      SELECT COUNT(*) AS row_count, MIN(id) AS first_id, MAX(id) AS last_id
+      FROM bank_bu_recon_pending_imports
+      WHERE year_month = ?
+    `).get(yearMonth);
+    const bank = db.prepare(`
+      SELECT COUNT(*) AS row_count, MIN(id) AS first_id, MAX(id) AS last_id
+      FROM bank_bu_recon_bank_imports
+      WHERE year_month = ?
+    `).get(yearMonth);
+    const pendingCount = Number(pending && pending.row_count || 0);
+    const bankCount = Number(bank && bank.row_count || 0);
+    if (pendingCount < 1 || bankCount < 1) return null;
+    const run = db.prepare(`
+      SELECT COUNT(*) AS row_count
+      FROM bank_bu_recon_runs
+      WHERE year_month = ?
+    `).get(yearMonth);
+    const identityValue = [
+      `scope=${String(yearMonth)}`,
+      `pending=${Number(pending.first_id)}-${Number(pending.last_id)}-${pendingCount}`,
+      `bank=${Number(bank.first_id)}-${Number(bank.last_id)}-${bankCount}`
+    ].join('|');
+    return {
+      identity: {
+        type: 'bank-bu-import-bundle',
+        value: identityValue
+      },
+      hasRun: Number(run && run.row_count || 0) > 0
+    };
+  } finally {
+    if (sideDb) {
+      try { sideDb.close(); } catch (_error) { /* 只读证据句柄关闭失败不覆盖结果 */ }
+    }
+  }
+}
+
 // ── 写路径：runViaSideDb（侧库 inline 直跑 + 主库镜像）──
 
 // inline 跑对账（bank-bu 无 worker）：open 侧库 → runReconciliation → 侧库 insertRun → 主库镜像 upsert。
@@ -379,6 +426,7 @@ function reconcileOrphans({ userDataDir, mainDb }) {
 module.exports = {
   MODULE,
   importMonth,
+  getImportFlowEvidence,
   runViaSideDb,
   listMonthsDualSource,
   getStatusDualSource,

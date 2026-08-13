@@ -10,6 +10,7 @@
 //   T18.7：runId 缺失 → throw
 //   T18.8：空 bill 表 → totalChunks=0 / lastCompletedChunkIndex=-1（不触发 onChunkDone）
 //   T18.9：onChunkDone 回调抛错不阻塞主循环
+//   T18.10：chunk INSERT 与 checkpoint 同事务；checkpoint 失败时本 chunk 回滚，resume 不重复
 //   T19.1：getRunChunkProgress 读 NULL 列 → null
 //   T19.2：setRunChunkProgress + getRunChunkProgress round-trip（in-progress / partial / complete）
 //   T19.3：setRunChunkProgress invalid status → throw
@@ -98,6 +99,16 @@ function insertRun(db, monthKey, count) {
     status: 'success',
   });
 }
+
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 101,
+  batchNumber: 'ABC-202604-000101',
+  taskRunId: 'task-run-101',
+  taskKey: 'acquiringBillCurrency:run',
+  moduleId: 'acquiring-bill-currency',
+  parentRunId: 'flow-run-101',
+  operationKey: 'run:2026-04:101',
+});
 
 // ─────────────────────────────────────────────────────────────────
 // T18 — insertDiffRowsByJoinChunked
@@ -345,6 +356,68 @@ test.describe('T18 — insertDiffRowsByJoinChunked', () => {
     assert.equal(diffCount, 4000, '全部 diff_rows 已写入');
   });
 
+  test('T18.10 — checkpoint 失败与本 chunk 原子回滚，resume 不重复已提交行', () => {
+    const monthKey = '2026-04';
+    seedMismatchRows(db, { monthKey, count: 4 });
+    const runId = insertRun(db, monthKey, 4);
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+      chunkSize: 2,
+      batchContext: BATCH_CONTEXT,
+    });
+
+    assert.throws(
+      () => runRepo.insertDiffRowsByJoinChunked(db, {
+        runId,
+        monthKey,
+        chunkSize: 2,
+        onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+          if (chunkIndex === 1) throw new Error('simulated-checkpoint-crash');
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: 'in-progress',
+            chunkSize: 2,
+          });
+        },
+      }),
+      /simulated-checkpoint-crash/
+    );
+
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM acquiring_bill_currency_diff_rows WHERE run_id = ?').get(runId).count,
+      2,
+      '第二个 chunk 的数据与失败 checkpoint 一起回滚'
+    );
+    assert.equal(runRepo.getRunChunkProgress(db, runId).lastCompletedChunkIndex, 0);
+
+    const resumed = runRepo.insertDiffRowsByJoinChunked(db, {
+      runId,
+      monthKey,
+      chunkSize: 2,
+      resumeFromChunkIndex: 1,
+      onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: chunkIndex,
+          totalChunks,
+          status: 'complete',
+          chunkSize: 2,
+        });
+      },
+    });
+    assert.equal(resumed.lastCompletedChunkIndex, 1);
+    assert.equal(
+      db.prepare('SELECT COUNT(*) AS count FROM acquiring_bill_currency_diff_rows WHERE run_id = ?').get(runId).count,
+      4,
+      'resume 后总行数精确，不重放已提交 chunk'
+    );
+  });
+
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -379,6 +452,16 @@ test.describe('T19 — chunk_progress get/set', () => {
     progress = runRepo.getRunChunkProgress(db, runId);
     assert.equal(progress.status, 'partial');
     assert.equal(progress.lastCompletedChunkIndex, 1);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 2,
+      totalChunks: 3,
+      status: 'data-complete',
+    });
+    progress = runRepo.getRunChunkProgress(db, runId);
+    assert.equal(progress.status, 'data-complete');
+    assert.equal(progress.lastCompletedChunkIndex, 2);
 
     runRepo.setRunChunkProgress(db, {
       runId,
@@ -664,6 +747,22 @@ test.describe('T19 — chunk_progress get/set', () => {
     assert.strictEqual(recoverable[0].chunk_progress.lastCompletedChunkIndex, -1, 'T19.12.4 lastCompletedChunkIndex=-1（first-chunk 未完成）');
   });
 
+  test('T19.12b — data-complete 在 XLSX 发布前仍属于可恢复 run', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 2,
+      totalChunks: 3,
+      status: 'data-complete',
+      chunkSize: 100000
+    });
+    const recoverable = runRepo.listPartialRuns(db, monthKey);
+    assert.equal(recoverable.length, 1);
+    assert.equal(recoverable[0].id, runId);
+    assert.equal(recoverable[0].chunk_progress.status, 'data-complete');
+  });
+
   // v2.1.10 SR-FIX-1 Round 7 I1：failureListener crash 兜底转 partial 必须透传 chunkSize（资金红线）
   //   触发场景（Codex 5 次复审 finding — Round 6 H4 漏抓 main.js failureListener crash 路径）：
   //     1. worker 跑 chunkSize=100000 到 chunk 2 → onChunkDone 写 progress={..., chunkSize:100000}
@@ -735,6 +834,87 @@ test.describe('T19 — chunk_progress get/set', () => {
     const legacyAfter = runRepo.getRunChunkProgress(db, runIdLegacy);
     assert.strictEqual(legacyAfter.status, 'partial', 'T19.13.8 老 row 兜底后 status=partial');
     assert.strictEqual(legacyAfter.chunkSize, undefined, 'T19.13.9 老 row 兜底后 chunkSize 仍 undefined（不引入回归 — resume handler fallback settings 路径不变）');
+  });
+
+  test('T19.14 — batchContext 按版本持久化，partial/complete 更新不丢失且严格限定 7 字段', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 0);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+      chunkSize: 2000,
+      batchContext: { ...BATCH_CONTEXT, ignored: 'must-not-persist' },
+    });
+
+    const initial = runRepo.getRunChunkProgress(db, runId);
+    assert.equal(initial.batchContextVersion, runRepo.RUN_PROGRESS_BATCH_CONTEXT_VERSION);
+    assert.deepEqual(Object.keys(initial.batchContext).sort(), Object.keys(BATCH_CONTEXT).sort());
+    assert.deepEqual(initial.batchContext, BATCH_CONTEXT);
+    assert.deepEqual(runRepo.readRunProgressBatchContext(initial), BATCH_CONTEXT);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      chunkSize: 2000,
+    });
+    assert.deepEqual(runRepo.getRunChunkProgress(db, runId).batchContext, BATCH_CONTEXT);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 1,
+      totalChunks: 2,
+      status: 'complete',
+      chunkSize: 2000,
+    });
+    assert.deepEqual(runRepo.getRunChunkProgress(db, runId).batchContext, BATCH_CONTEXT);
+  });
+
+  test('T19.15 — 已标记 batchContext 的未知版本或非法内容必须闭锁失败', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 0);
+    const update = db.prepare(`
+      UPDATE acquiring_bill_currency_runs
+      SET chunk_progress = ?
+      WHERE id = ?
+    `);
+
+    update.run(JSON.stringify({
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      batchContextVersion: 2,
+      batchContext: BATCH_CONTEXT,
+    }), runId);
+    assert.throws(
+      () => runRepo.readRunProgressBatchContext(runRepo.getRunChunkProgress(db, runId)),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED'
+    );
+    assert.throws(
+      () => runRepo.setRunChunkProgress(db, {
+        runId,
+        lastCompletedChunkIndex: 0,
+        totalChunks: 2,
+        status: 'partial',
+      }),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED'
+    );
+
+    update.run(JSON.stringify({
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      batchContextVersion: runRepo.RUN_PROGRESS_BATCH_CONTEXT_VERSION,
+      batchContext: { ...BATCH_CONTEXT, operationKey: '' },
+    }), runId);
+    assert.throws(
+      () => runRepo.readRunProgressBatchContext(runRepo.getRunChunkProgress(db, runId)),
+      (error) => error.code === 'ACQUIRING_RUN_BATCH_CONTEXT_INVALID'
+    );
   });
 
 });

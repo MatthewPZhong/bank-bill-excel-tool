@@ -72,6 +72,16 @@ const {
   hashFileSha256Async,
   stageInputFilesAsync
 } = require('../../../src/main-process/position-reconciliation/input-staging');
+
+const MUTATING_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'position-mutating-worker-contract',
+  taskKey: 'position-reconciliation:source:apply-import',
+  moduleId: 'position-reconciliation',
+  parentRunId: 'position-worker-parent',
+  operationKey: 'position-worker-operation'
+});
 const {
   assertPositionImportDiskSpace,
   estimatePositionImportDiskBytes
@@ -728,6 +738,115 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(fs.existsSync(jobRoot), false);
   });
 
+  test('五个业务写命令缺 batchContext 时在启动 worker 前拒绝', () => {
+    let forkCount = 0;
+    for (const command of [
+      POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+      POSITION_IMPORT_COMMANDS.DELETE_BANK,
+      POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
+      POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING
+    ]) {
+      assert.throws(
+        () => dispatchPositionImportPreflight({
+          engine: 'streaming',
+          command,
+          utilityProcess: { fork: () => { forkCount += 1; } }
+        }),
+        /worker batchContext 缺失/
+      );
+    }
+    assert.equal(forkCount, 0);
+  });
+
+  test('普通来源 START/PREFLIGHT 不带批次，APPLY_GRANTED 注入父 action batchContext', async () => {
+    const batchContext = Object.freeze({
+      batchId: 319,
+      batchNumber: '2026-08-10-001',
+      taskRunId: 'position-source-worker-contract',
+      taskKey: 'position-reconciliation:source:prepare-import',
+      moduleId: 'position-reconciliation',
+      parentRunId: 'position-source-parent',
+      operationKey: 'position-source-operation'
+    });
+    const worker = new EventEmitter();
+    let startMessage = null;
+    let applyMessage = null;
+    worker.postMessage = (message) => {
+      if (message.type === POSITION_IMPORT_MESSAGE_TYPES.START_JOB) {
+        startMessage = message;
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
+          jobId: message.jobId,
+          archiveManifestHash: 'source-manifest'
+        }));
+        return;
+      }
+      if (message.type === POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED) {
+        applyMessage = message;
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+          jobId: message.jobId,
+          result: { status: 'ok' }
+        }));
+      }
+    };
+    worker.kill = () => true;
+
+    const job = dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [],
+      userDataDir: '',
+      sideDbPath: '',
+      batchContext,
+      utilityProcess: { fork: () => worker },
+      authorizeApply: () => ({
+        preflightOnly: false,
+        batchContext
+      })
+    });
+    const result = await job.promise;
+
+    assert.equal(result.status, 'ok');
+    assert.equal(Object.hasOwn(startMessage, 'batchContext'), false);
+    assert.deepEqual(applyMessage.batchContext, batchContext);
+  });
+
+  test('普通来源 mutating APPLY_GRANTED 缺 batchContext 时拒绝且不发送提交授权', async () => {
+    const worker = new EventEmitter();
+    const sentTypes = [];
+    worker.postMessage = (message) => {
+      sentTypes.push(message.type);
+      if (message.type === POSITION_IMPORT_MESSAGE_TYPES.START_JOB) {
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.PREFLIGHT_READY,
+          jobId: message.jobId,
+          archiveManifestHash: 'source-manifest'
+        }));
+      } else if (message.type === POSITION_IMPORT_MESSAGE_TYPES.APPLY_REJECTED) {
+        setImmediate(() => worker.emit('message', {
+          type: POSITION_IMPORT_MESSAGE_TYPES.FATAL,
+          jobId: message.jobId,
+          code: message.code,
+          message: message.message
+        }));
+      }
+    };
+    worker.kill = () => true;
+    const job = dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY,
+      files: [],
+      userDataDir: '',
+      sideDbPath: '',
+      utilityProcess: { fork: () => worker },
+      authorizeApply: () => ({ preflightOnly: false })
+    });
+    await assert.rejects(job.promise, /worker batchContext 缺失/);
+    assert.equal(sentTypes.includes(POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED), false);
+  });
+
   test('dispatcher 拒绝重复预检授权并清理第一份预检目录', async (t) => {
     const dir = tempDir(t, 'position-duplicate-preflight-');
     const userDataDir = path.join(dir, 'user-data');
@@ -828,6 +947,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
       command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: '',
       sideDbPath: '',
@@ -889,6 +1009,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const job = dispatchPositionImportPreflight({
       engine: 'streaming',
       command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: '',
       sideDbPath: '',
@@ -973,6 +1094,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       authorizeApply: (ready) => {
         authorizedManifest = ready.archiveManifestHash;
         return {
+          batchContext: MUTATING_BATCH_CONTEXT,
           operationToken: 'apply-grant-operation',
           archiveManifestHash: ready.archiveManifestHash,
           schemaFingerprint: schemaResult.fingerprint,
@@ -1033,6 +1155,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'source-writer-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -1109,6 +1232,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.GATEWAY_OUTBOUND]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'source-writer-repeat-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -1212,6 +1336,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'source-writers-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -1375,6 +1500,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const applied = await dispatchPositionImportPreflight({
       engine: 'streaming',
       command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+      batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: dir,
       sideDbPath,
@@ -1452,6 +1578,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       dispatchPositionImportPreflight({
         engine: 'streaming',
         command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+        batchContext: MUTATING_BATCH_CONTEXT,
         files: [],
         userDataDir: dir,
         sideDbPath,
@@ -1493,6 +1620,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       dispatchPositionImportPreflight({
         engine: 'streaming',
         command: POSITION_IMPORT_COMMANDS.BANK_APPLY,
+        batchContext: MUTATING_BATCH_CONTEXT,
         files: [],
         userDataDir: dir,
         sideDbPath,
@@ -1607,6 +1735,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [...POSITION_IMPORT_STREAMING_SOURCE_ALLOWLIST]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'mixed-ordinary-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schema.fingerprint,
@@ -1648,6 +1777,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     const applied = await dispatchPositionImportPreflight({
       engine: 'streaming',
       command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+      batchContext: MUTATING_BATCH_CONTEXT,
       files: [],
       userDataDir: dir,
       sideDbPath,
@@ -1731,6 +1861,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       dispatchPositionImportPreflight({
         engine: 'streaming',
         command: POSITION_IMPORT_COMMANDS.ACCOUNT_APPLY,
+        batchContext: MUTATING_BATCH_CONTEXT,
         files: [],
         userDataDir: dir,
         sideDbPath,
@@ -1801,6 +1932,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       authorizeApply: (ready) => {
         fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
         return {
+          batchContext: MUTATING_BATCH_CONTEXT,
           operationToken: 'source-recovery-operation',
           archiveManifestHash: ready.archiveManifestHash,
           schemaFingerprint: schemaResult.fingerprint,
@@ -1902,6 +2034,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         );
         fs.appendFileSync(ready.acceptedOrdinaryInputFiles[1].archivePath, 'changed');
         return {
+          batchContext: MUTATING_BATCH_CONTEXT,
           operationToken: 'filter-report-recovery-operation',
           archiveManifestHash: ready.archiveManifestHash,
           schemaFingerprint: schemaResult.fingerprint,
@@ -1987,6 +2120,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'filter-report-complete-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -2105,6 +2239,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
           [1, 1, 2]
         );
         return {
+          batchContext: MUTATING_BATCH_CONTEXT,
           operationToken: 'filter-report-normal-partial-operation',
           archiveManifestHash: ready.archiveManifestHash,
           schemaFingerprint: schemaResult.fingerprint,
@@ -2194,6 +2329,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
           [path.resolve(ready.acceptedOrdinaryInputFiles[0].archivePath)]
         );
         return {
+          batchContext: MUTATING_BATCH_CONTEXT,
           operationToken: 'filter-report-duplicate-only-operation',
           archiveManifestHash: ready.archiveManifestHash,
           schemaFingerprint: schemaResult.fingerprint,
@@ -2433,6 +2569,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.FUND_TRANSFER]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'v314-filter-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -2540,6 +2677,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'v314-all-filtered-operation',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -2574,6 +2712,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'v314-all-filtered-reimport',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,
@@ -2616,6 +2755,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
         streamingSourceTypes: [SOURCE_TYPES.TEST_PAYMENT]
       },
       authorizeApply: (ready) => ({
+        batchContext: MUTATING_BATCH_CONTEXT,
         operationToken: 'v314-all-filtered-corrected',
         archiveManifestHash: ready.archiveManifestHash,
         schemaFingerprint: schemaResult.fingerprint,

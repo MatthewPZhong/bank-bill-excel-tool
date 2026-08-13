@@ -4,6 +4,10 @@
 window.__rendererPending = (function () {
   'use strict';
 
+  function buildPendingImportConfirmationRequest(contextId) {
+    return { contextId, confirmOverwrite: true };
+  }
+
   function createRendererPending(deps) {
     const {
       state,
@@ -386,7 +390,10 @@ window.__rendererPending = (function () {
       openModal(buildImportMonthDialog({
         onConfirm: (yearMonth) => {
           closeModal();
-          startImport(files, yearMonth, false).catch((err) => {
+          startImport(
+            { files, yearMonth },
+            { yearMonth, fileCount: files.length }
+          ).catch((err) => {
             console.error('[pending] startImport error:', err);
           });
         },
@@ -394,16 +401,18 @@ window.__rendererPending = (function () {
       }));
     }
 
-    async function startImport(files, yearMonth, overwriteConfirmed) {
+    async function startImport(request, displayContext) {
+      const yearMonth = displayContext.yearMonth;
+      const fileCount = displayContext.fileCount;
       state.pending.importing = true;
       state.pending.currentYearMonth = yearMonth;
-      state.pending.importingText = `正在导入 ${yearMonth}（${files.length} 个文件）...`;
+      state.pending.importingText = `正在导入 ${yearMonth}（${fileCount} 个文件）...`;
       state.pending.errorReportAvailable = false;
       state.pending.errorMessage = null;
       refreshPendingUi();
 
       try {
-        const result = await desktopApi.pending.startImport({ files, yearMonth, overwriteConfirmed: !!overwriteConfirmed });
+        const result = await desktopApi.pending.startImport(request);
 
         if (result && result.status === 'need-confirm') {
           state.pending.importing = false;
@@ -415,7 +424,10 @@ window.__rendererPending = (function () {
             cancelText: '取消',
             onConfirm: () => {
               closeModal();
-              startImport(files, yearMonth, true).catch((err) => {
+              startImport(
+                buildPendingImportConfirmationRequest(result.contextId),
+                displayContext
+              ).catch((err) => {
                 console.error('[pending] overwrite import error:', err);
               });
             }
@@ -970,5 +982,5 @@ window.__rendererPending = (function () {
     };
   }
 
-  return { createRendererPending };
+  return { buildPendingImportConfirmationRequest, createRendererPending };
 })();

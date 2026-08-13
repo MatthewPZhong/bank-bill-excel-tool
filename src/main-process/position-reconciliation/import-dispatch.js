@@ -11,8 +11,12 @@ const {
   POSITION_IMPORT_MESSAGE_TYPES,
   POSITION_IMPORT_PROGRESS_HEARTBEAT_MS,
   POSITION_IMPORT_PROTOCOL_VERSION,
+  isPositionImportMutatingCommand,
   normalizePositionImportEngine
 } = require('../../backend/position-reconciliation-import/constants');
+const {
+  freezeWorkerBatchContext
+} = require('../archive-center/worker-batch-context');
 const {
   recoverPositionImportWorkerExit
 } = require('./import-recovery');
@@ -131,6 +135,9 @@ function dispatchPositionImportPreflight(input = {}) {
   const jobId = String(input.jobId || crypto.randomUUID());
   const dispatchStartedAt = monotonicNowMs();
   const schemaOnly = input.command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES;
+  const batchContext = freezeWorkerBatchContext(input.batchContext, {
+    required: isPositionImportMutatingCommand(input.command)
+  });
   const utilityProcess = input.utilityProcess || loadUtilityProcess();
   const env = {
     ...process.env,
@@ -281,9 +288,13 @@ function dispatchPositionImportPreflight(input = {}) {
               message: '平盘导入 apply 授权未返回持久化凭证'
             });
           }
+          const grantedBatchContext = freezeWorkerBatchContext(grant.batchContext, {
+            required: grant.preflightOnly !== true
+          });
           applyGrantPayload = grant;
           sendToWorker({
             ...grant,
+            ...(grantedBatchContext ? { batchContext: grantedBatchContext } : {}),
             type: POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED,
             jobId,
             archiveManifestHash: message.archiveManifestHash
@@ -347,7 +358,7 @@ function dispatchPositionImportPreflight(input = {}) {
     heartbeatTimer.unref?.();
 
     try {
-      sendToWorker({
+      const startMessage = {
         type: POSITION_IMPORT_MESSAGE_TYPES.START_JOB,
         protocolVersion: POSITION_IMPORT_PROTOCOL_VERSION,
         command: input.command,
@@ -368,7 +379,12 @@ function dispatchPositionImportPreflight(input = {}) {
                   !input.featureFlags || input.featureFlags.preflightOnly !== false
               })
         }
-      });
+      };
+      if (input.command !== POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
+          && batchContext) {
+        startMessage.batchContext = batchContext;
+      }
+      sendToWorker(startMessage);
     } catch (error) {
       if (typeof worker.kill === 'function') worker.kill();
       recoverOrReject(error);

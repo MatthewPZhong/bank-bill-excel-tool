@@ -176,3 +176,47 @@
 | 1 | intent 写入前查询 tombstone | 删除后的 operation 不复活且 DB 故障仍能持久兜底 | deleted DTO 时 outbox 为空；read error 时 warning 后写 outbox | 任一边界失败即停止交付 | 回退单个 guard/catch |
 | 2 | 扩展既有删除/重启真实 SQLite 用例 | 不烧号、不改原 issuance | cursor/issuance 前后不变 | 状态证据不足，停止交付 | 只保留一个端到端断言链 |
 | 3 | 文档与最小静态/定向门禁 | 三条反证和竞态非目标不漂移 | unit、lint、syntax、base diff、check-vars 通过 | 不发未提交检查点 | 只修真实失败根因 |
+
+## PR #133 九条 P1 评论复核（2026-08-11）
+
+### Task Brief
+
+- Goal: 在 PR2 stacked 到 PR1 最终头后，沿真实 UI/IPC → service/worker → DB/output 入口修复 review `#4897404953` 的九条 P1，保持批次血缘、恢复幂等和资金输出可审计。
+- Context: PR2 已从旧 base `98ddcf9` restack 到 `origin/codex/v3.1.9-pr1-batch-identity@4933b7b`；旧 PR2 commits `be5cfba/1687cfa` 分别重写为 `80d6567/8f609a9`。九个 thread 均为 unresolved、`isOutdated=false`。
+- Constraints: 不新增 timer、lease、generation、第二 tracker、latest fallback、批处理重试或 hash 系统；不改 runCheck SQL/算法、Position checkpoint、金额/币种/匹配和输出格式；每个测试只对应真实入口或明确持久状态。
+- Done when: 九条真实 P1 均以最小改动和最小回归锁定；资金红线完成人工复核清单；自动门禁通过。真实 Electron crash/restart 与 GUI 验收仍单独保留，不以自动测试代替。
+
+### 已确认事实与决定
+
+| ID | 真实入口与证据 | 当前决定 | 明确非目标 |
+| --- | --- | --- | --- |
+| P1-1 | `TaskLifecycle.run()` 的业务结果、artifact 与 flow bind 均完成后写 terminal；非 benign `ok:false` 只 `recordFailure()`，随后释放 BOR，原 batch 可保持 `running/incomplete` | 复用 filesystem outbox；terminal-only intent 只校验已冻结 7-field context、不读取故障中的 archive/settings DB；flush 在附件 durable 后对原 batch 精确 CAS，成功/同终态才移除 | 不建第二 tracker，不加 timer 或无限重试，不新建 batch |
+| P1-2 | `acquiringBillCurrency:run` 仅有 `execute`，DB/month admission 与月锁均发生在 reserve/started 之后 | 改为 object handler；prepare 在 BOR/reserve 前校验并取得现有月锁，`onAbandon` 与 execute `finally` 幂等释放；execute 只用 prepared month | 不排列非法 payload；只锁 invalid month 与真实锁争用代表 |
+| P1-3 | acquiring run 绑定 `acquiring-run:${source}:${monthKey}:${runId}`，export 却 starts-new-flow 并绑定主库镜像裸 ID | export prepare 读取主库选中镜像；side 镜像只在 side DB 中取得唯一且与镜像字段一致的 run，legacy main 直接使用该行；构造完全相同的 flow identity/plan，证据缺失或冲突 fail-closed | 不按月份/latest 猜 side run，不影响 acquiring import/clear |
+| P1-4 | `settlePositionRecoveredTask()` 把任何 terminal conflict 都当幂等成功，随后 finalizer 会清 pending | 仅 `actual taskStatus === wanted taskStatus` 时接受冲突；不一致直接抛错，保持 checkpoint/pending | 不扩通用状态机，不排列无入口状态 |
+| P1-5 | Position worker 对 mutating START 使用 optional `freezeWorkerBatchContext()`；普通来源在 `APPLY_GRANTED` 才越过写屏障 | 对 `BANK_APPLY`、`ACCOUNT_APPLY` 和三个 maintenance 写命令强制 required；`SOURCE_PREPARE_AND_APPLY` 的 START 继续无 context，但真正写入前的 `APPLY_GRANTED` 强制 required | `BANK_PREPARE` 与 schema-only 保持豁免；不改变协议版本或读路径 |
+| P1-6 | scenarios picker 后先 read/parse bundle，再由 context store `statSync` 建基线，可形成内存 A/归档 B | picker 返回后、读取前由 context store 固定 source evidence；read/parse 后 create 时立即重校验，再保留现有 apply/beforeStart freshness | 不为同 inode/mtime 理论碰撞新增 hash/暂存系统 |
+| P1-7 | 大账号 complete 仅比较 assignment 数量；重复 `rowIndex` 会被后续 `Map` 折叠并继续生成资金输出 | 要求 assignment row-index 集合唯一，且与服务端 expected rows 的 index 集合完全相等，再执行账号/币种校验与排序 | 只补 `[0,0]` 对预期 `[0,1]` 的反例；不加重复组合矩阵 |
+| P1-8 | statement duplicate resolver 在算 hash/等待覆盖确认后才创建 freshness baseline | picker paths guard 在每次 duplicate confirmation 返回后立即复核，并在 resolver 整体返回后再复核一次；随后以最终 filePaths 创建 source guard，供 preview/beforeStart 使用 | 不让已从最终 selection 移除的输入继续阻断 execute；不重做会话系统或引入 lease/retry |
+| P1-9 | side worker 先把 progress 写为 `complete` 并持久化 7-field context/输出路径，main mirror 与 archive terminal 在 worker 返回后才完成；main 此时可仍是上一轮 stale mirror | resume 只接受可证明的 side complete run；execute 沿正常成功路径的 canonical upsert 替换 stale mirror，exact current mirror 才 no-op，再由原 TaskLifecycle 登记/终结 | 不给 legacy complete 猜 batch，不分新号、不 find-latest、不新建恢复系统；输出证据缺失 fail-closed |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 当前证据 | 处理 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| terminal intent 与 artifact outbox 如何避免同 operation 覆盖 | 持久状态 | 高 | controller 当前同 operation 只保留一个 outbox，`append()` 只合并 files | PROBE | 在同一 record 原子合并 terminal outcome；flush 顺序固定为 files durable → terminal CAS → Position callback/remove，不创建平行记录 |
+| side export 如何证明主镜像对应的 side run | 主键血缘 | 高 | side 新 run 在事务内先 `clearRunsByMonth`，每月只保留当前 run；主镜像有 side path、summary、状态与输出路径 | PROBE | side 查询必须唯一且逐字段匹配 prepared 主镜像；不以 `ORDER BY latest` 建立身份 |
+| complete recovery 能否在输出未完成时安全收口 | 崩溃窗口 | 高 | progress 可在 writer 前已为 complete，但成功 worker 返回前 run paths 未必齐全 | PROBE | 只有成功状态、两条持久输出路径和文件新鲜度都可证明时进入 completed recovery；否则保持 fail-closed，不伪造成功 |
+| Position APPLY_GRANTED 的 account-only preflight 是否需要 context | 可达性 | 中 | account-only 只结束 preflight、不写库；普通来源有 accepted rows 时才等待 lifecycle apply gate | PROBE | required 只落在实际写入分支；preflight-only grant 保持无批次，测试明确区分 |
+
+### BLOCK 问题
+
+无。九条均有真实入口和单一最小状态所有者；实现开始前不需要新增产品决策。
+
+### 风险优先计划
+
+| 阶段 | 范围 | 最小成功证据 | 停止条件 |
+| --- | --- | --- | --- |
+| A | P1-1、P1-2、P1-3、P1-9 | terminal intent 跨重启收口原 batch；fresh invalid/busy 0 issuance；run→重复 export 同 parent；complete side crash 恢复 0 worker/0 新号且补 mirror/output/terminal | 任一身份需要 latest 猜测或新恢复系统 |
+| B | P1-4、P1-5、P1-6、P1-8 | Position conflict 保留 pending；真实写命令缺 context 零副作用；scenario/statement 人工确认窗口源变化 fail-closed | 需要改协议版本、checkpoint 或引入 hash/lease |
+| C | P1-7 与综合门禁 | 单一 `[0,0]` 资金反例被拒；聚焦/完整 unit、integration、smoke、lint、syntax、diff/check-vars 通过 | 行集合校验改变正常乱序输出或金额/币种语义 |

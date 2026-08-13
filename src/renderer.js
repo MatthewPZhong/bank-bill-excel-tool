@@ -3590,10 +3590,9 @@ function legacyCreateManualBalanceSeedDialog(prompt, draft = {}) {
           confirmText: '确认覆盖',
           cancelText: '取消',
           onConfirm: async () => {
-            const overwriteResult = await window.desktopApi.files.saveBalanceSeed({
-              ...payload,
-              overwrite: true
-            });
+            const overwriteResult = await window.desktopApi.files.saveBalanceSeed(
+              window.__rendererDialogs.buildBalanceSeedConfirmationRequest(result.contextId)
+            );
             closeModal();
             applyStatementResult(overwriteResult);
           }
@@ -7425,7 +7424,7 @@ async function runAcquiringBillCurrencyImport(kind) {
     if (first.status === 'overwrite-required') {
       const ok = window.confirm(
         `检测到月份 ${first.monthKey} 已有 ${first.existingCount} 行${labelTable}数据。\n` +
-        `点击「确定」将先清空该月份的${labelTable}数据，再导入本次选择的 ${first.filePaths.length} 个文件。\n` +
+        `点击「确定」将先清空该月份的${labelTable}数据，再导入本次选择的 ${first.fileCount} 个文件。\n` +
         `（仅清单侧数据，不影响该月份对账历史 / 差异结果）\n\n继续？`
       );
       if (!ok) {
@@ -7433,7 +7432,11 @@ async function runAcquiringBillCurrencyImport(kind) {
         return;
       }
       setAcquiringBillCurrencyStatus(`正在覆盖导入${labelTable}（${monthKey}）...`, 'info');
-      const second = await apiCall({ monthKey, filePaths: first.filePaths, confirmOverwrite: true });
+      const second = await apiCall({
+        monthKey,
+        preparedContextId: first.preparedContextId,
+        confirmOverwrite: true
+      });
       if (second.status === 'cancelled') {
         setAcquiringBillCurrencyStatus('已取消导入', 'info');
         return;

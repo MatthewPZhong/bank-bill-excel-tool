@@ -382,6 +382,7 @@ function exportSingleRun(db, runId, savePath) {
   return {
     status: 'success',
     path: savePath,
+    filePath: savePath,
     runId,
     upperMonth: run.upperMonth,
     lowerMonth: run.lowerMonth,
@@ -499,6 +500,7 @@ function exportAggregate(db, savePath) {
   return {
     status: 'success',
     path: savePath,
+    filePath: savePath,
     runsCount: sortedLatest.length,
     rowCount: flatRows.length,
     fundTypeDiffRowCount,

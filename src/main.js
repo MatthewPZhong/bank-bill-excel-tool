@@ -20,6 +20,13 @@ const pendingRemovedRepo = require('./backend/pending-db/removed-repository');
 const pendingRemovalMatch = require('./backend/pending-reconcile/removal-match');
 const { createPendingSession } = require('./main-process/pending-session');
 const {
+  executePendingImportSubmission,
+  pendingImportError,
+  pendingMonthEvidenceValue,
+  preparePendingImportSubmission,
+  readPendingMonthEvidence
+} = require('./main-process/pending-import-preflight');
+const {
   createAppUpdaterService,
   detectDistribution
 } = require('./main-process/app-updater');
@@ -29,8 +36,29 @@ const {
 } = require('./main-process/business-operation-registry');
 const {
   createArchiveOperationTracker,
+  resolveOperationInputPaths,
   selectSuccessfulPathsByResultIndex
 } = require('./main-process/archive-center/operation-tracker');
+const {
+  PR3_HANDOFF_CHANNELS,
+  SUPPORT_ACTION_POLICIES,
+  createTaskPolicyRegistry
+} = require('./main-process/archive-center/task-policy-registry');
+const {
+  createBusinessFlowResolver
+} = require('./main-process/archive-center/business-flow-resolver');
+const {
+  createTaskLifecycle
+} = require('./main-process/archive-center/task-lifecycle');
+const {
+  createIpcTaskContext,
+  executeIpcTaskInvocation,
+  normalizeIpcTaskHandler,
+  prepareIpcTaskInvocation
+} = require('./main-process/archive-center/ipc-task-contract');
+const {
+  createScenarioImportContextStore
+} = require('./main-process/archive-center/scenario-import-context-store');
 const {
   captureArchiveSourceSnapshots,
   sourceSnapshotFromStat,
@@ -75,6 +103,12 @@ const {
   PositionReconciliationError
 } = require('./main-process/position-reconciliation/common');
 const {
+  createPositionRunTaskContract,
+  createPositionSourceImportTaskContract,
+  executeAfterPositionAdmission,
+  runWithPreparedResourceCleanup
+} = require('./main-process/position-reconciliation/interactive-task-preflight');
+const {
   dispatchPositionLargeImportSchemaMigration
 } = require('./main-process/position-reconciliation/import-dispatch');
 const {
@@ -96,9 +130,13 @@ const {
   positionArchiveIntentEvidence: evaluatePositionArchiveIntentEvidence,
   authorizePositionImportApply,
   positionBusinessStateForResult,
+  positionTerminalOutcomeForResult,
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult,
+  positionRecoveryTerminalOutcome,
+  positionCancellationAcceptedPending,
   runPositionOperationLifecycle,
+  settlePositionRecoveredTask,
   settlePositionArchiveResult
 } = require('./main-process/position-reconciliation/operation-lifecycle');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
@@ -328,9 +366,15 @@ const backupRetention = require('./backend/database/backup-retention');
 const {
   BALANCE_SEED_GENERATION_METHODS,
   findPreviousBalanceSeed,
+  readBalanceSeedRecords,
   upsertBalanceSeedRecord,
   splitTemplateName
 } = require('./backend/balance-seed-store');
+const {
+  balanceSeedRecordsEvidence,
+  prepareManualBalanceSeedSubmission,
+  writeManualBalanceSeedPlan
+} = require('./main-process/manual-balance-seed-preflight');
 const { parseBankAccountExcel } = require('./backend/bank-account-import');
 const { writeOwnAccounts } = require('./backend/own-account-store');
 const {
@@ -436,11 +480,16 @@ let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
 let archiveOperationTracker = null;
+let archiveTaskLifecycle = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
 let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
+const taskPolicyRegistry = createTaskPolicyRegistry();
+const pr3TaskPolicyHandoff = new Set(PR3_HANDOFF_CHANNELS);
+const supportActionChannels = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
+const scenarioImportContextStore = createScenarioImportContextStore();
 const pendingSession = createPendingSession({
   getPendingDb: () => pendingDb,
   getStorageRoot: () => ensureStorageRoot()
@@ -500,7 +549,9 @@ let lastErrorReport = null;
 let activityLogFilePath = '';
 let lastFileImportContext = null;
 let lastManualBalancePrompt = null;
+let lastPendingBalanceSeedConfirmation = null;
 let lastPendingBigAccountSelection = null;
+let lastPendingImportConfirmation = null;
 let fileImportInProgress = false;
 let statementImportSessions = new Map();
 let nextStatementBatchId = 1;
@@ -542,6 +593,43 @@ async function showImportOpenDialog(scope, options) {
     });
   }
   return result;
+}
+
+function createPreviewSourceFreshnessGuard(filePaths, label) {
+  const snapshots = (Array.isArray(filePaths) ? filePaths : []).map((filePath) => {
+    const resolvedPath = path.resolve(String(filePath || ''));
+    const snapshot = sourceSnapshotFromStat(fs.statSync(resolvedPath));
+    if (!snapshot) throw new Error(`${label}源文件不可读`);
+    return { filePath: resolvedPath, snapshot };
+  });
+  return () => {
+    for (const item of snapshots) {
+      let stat;
+      try {
+        stat = fs.statSync(item.filePath);
+      } catch (_error) {
+        throw new Error(`${label}源文件已不存在，请重新选择`);
+      }
+      if (!sourceSnapshotMatchesStat(item.snapshot, stat)) {
+        throw new Error(`${label}源文件在确认期间已变化，请重新选择`);
+      }
+    }
+  };
+}
+
+function createPendingImportFreshnessGuard({ db, yearMonth, files, evidence }) {
+  const expectedEvidence = pendingMonthEvidenceValue(evidence);
+  const assertSourceFresh = createPreviewSourceFreshnessGuard(files, 'Pending 导入');
+  return () => {
+    assertSourceFresh();
+    if (!pendingDb || pendingDb !== db) {
+      throw new Error('Pending 数据库在确认期间已变化，请重新导入');
+    }
+    const currentEvidence = readPendingMonthEvidence(db, pendingMonthRepo, yearMonth);
+    if (pendingMonthEvidenceValue(currentEvidence) !== expectedEvidence) {
+      throw new Error(`Pending 月份 ${yearMonth} 在确认期间已变化，请重新导入`);
+    }
+  };
 }
 
 // v2.1.6 fix3 → fix9 → fix10：收单单据币种校验模块的通用 operation lock
@@ -961,10 +1049,79 @@ function clearLastErrorReport() {
 
 function clearPendingManualBalancePrompt() {
   lastManualBalancePrompt = null;
+  lastPendingBalanceSeedConfirmation = null;
 }
 
-function clearPendingBigAccountSelection() {
+function statementSessionFreshnessEvidence(session) {
+  if (!session) return '';
+  return JSON.stringify({
+    key: normalizeCell(session.key),
+    importCount: Number(session.importCount || 0),
+    currentBatchId: normalizeCell(session.currentBatchId),
+    fileEntries: (Array.isArray(session.fileEntries) ? session.fileEntries : []).map((entry) => ({
+      id: normalizeCell(entry && entry.id),
+      filePath: normalizeCell(entry && entry.filePath),
+      matchedTemplateId: Number(entry && entry.matchedTemplateId || 0)
+    })),
+    batches: (Array.isArray(session.batches) ? session.batches : []).map((batch) => ({
+      id: normalizeCell(batch && batch.id),
+      entryIds: Array.isArray(batch && batch.entryIds)
+        ? batch.entryIds.map((entryId) => normalizeCell(entryId))
+        : []
+    }))
+  });
+}
+
+function createManualBalanceSeedFreshnessGuard({
+  pendingPrompt,
+  importContext,
+  session,
+  plan
+}) {
+  const sessionEvidence = statementSessionFreshnessEvidence(session);
+  const generatedDetail = lastGeneratedExports.detail;
+  const usesRememberedSourceFiles = !importContext.preparedDetailRows
+    && !(isFilenameMappingMode(importContext.templateId) && session);
+  const inputFilePaths = usesRememberedSourceFiles
+    ? normalizeInputFilePaths(importContext.inputFilePaths)
+    : [];
+  const assertSourceFresh = inputFilePaths.length > 0
+    ? createPreviewSourceFreshnessGuard(inputFilePaths, '余额补录')
+    : null;
+
+  return {
+    inputFilePaths,
+    assertFresh() {
+      if (lastManualBalancePrompt !== pendingPrompt
+          || lastFileImportContext !== importContext
+          || lastGeneratedExports.detail !== generatedDetail) {
+        throw new Error('余额补录会话在确认期间已变化，请重新导入');
+      }
+      if (importContext.statementSessionKey) {
+        const currentSession = statementImportSessions.get(importContext.statementSessionKey) || null;
+        if (currentSession !== session
+            || statementSessionFreshnessEvidence(currentSession) !== sessionEvidence) {
+          throw new Error('余额补录账单会话在确认期间已变化，请重新导入');
+        }
+      }
+      if (assertSourceFresh) assertSourceFresh();
+      const currentRecords = readBalanceSeedRecords(plan.storageRoot, plan.bankName);
+      if (balanceSeedRecordsEvidence(currentRecords) !== plan.recordsEvidence) {
+        throw new Error('余额种子在确认期间已变化，请重新补录');
+      }
+    }
+  };
+}
+
+function clearPendingBigAccountSelection(contextId = '') {
+  const normalizedContextId = normalizeCell(contextId);
+  if (normalizedContextId
+      && normalizeCell(lastPendingBigAccountSelection && lastPendingBigAccountSelection.contextId)
+        !== normalizedContextId) {
+    return false;
+  }
   lastPendingBigAccountSelection = null;
+  return true;
 }
 
 function rememberLastFileImportContext(context = null) {
@@ -992,8 +1149,10 @@ function rememberLastFileImportContext(context = null) {
 }
 
 function rememberPendingBigAccountSelection(context = null) {
+  const contextId = context ? randomUUID() : '';
   lastPendingBigAccountSelection = context
     ? {
+        contextId,
         templateId: context.templateId,
         template: context.template,
         mappings: Array.isArray(context.mappings) ? context.mappings.map((mapping) => ({ ...mapping })) : [],
@@ -1040,13 +1199,47 @@ function rememberPendingBigAccountSelection(context = null) {
               fileName: normalizeCell(row.fileName),
               filePath: row.filePath || ''
             }))
-          : undefined
+          : undefined,
+        assertFresh: typeof context.assertFresh === 'function'
+          ? context.assertFresh
+          : null
       }
     : null;
+  return contextId;
+}
+
+function requirePendingBigAccountSelection(contextId) {
+  const normalizedContextId = normalizeCell(contextId);
+  if (!normalizedContextId
+      || !lastPendingBigAccountSelection
+      || normalizeCell(lastPendingBigAccountSelection.contextId) !== normalizedContextId) {
+    return null;
+  }
+  return lastPendingBigAccountSelection;
+}
+
+function createPendingBigAccountSelectionContext(prepared, context) {
+  return {
+    ...context,
+    assertFresh: prepared && typeof prepared.assertFresh === 'function'
+      ? prepared.assertFresh
+      : null
+  };
+}
+
+function stagePendingBigAccountSelection(prepared, context) {
+  const pendingContext = createPendingBigAccountSelectionContext(prepared, context);
+  if (prepared && prepared.previewOnly === true) {
+    prepared.pendingBigAccountSelection = pendingContext;
+    return pendingContext;
+  }
+  const contextId = rememberPendingBigAccountSelection(pendingContext);
+  return requirePendingBigAccountSelection(contextId);
 }
 
 function buildManualBalanceRequiredResult(prompt, generatedFiles) {
   clearLastErrorReport();
+  lastPendingBalanceSeedConfirmation = null;
   const normalizedPrompt = prompt
     ? {
         ...prompt,
@@ -1078,13 +1271,11 @@ function buildManualBalanceRequiredResult(prompt, generatedFiles) {
 }
 
 function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks, bigAccounts = [], fixedAssignments = [], templateId } = {}) {
-  clearLastErrorReport();
   const mapRow = (row, index) => ({
     index: Number.isInteger(row.index) ? row.index : index,
     label: `${index + 1}.`,
     sourceRowNumber: Number(row.sourceRowNumber || 0),
-    fileName: normalizeCell(row.fileName),
-    filePath: row.filePath || ''
+    fileName: normalizeCell(row.fileName)
   });
   return {
     status: 'select-big-account',
@@ -1107,6 +1298,104 @@ function buildBigAccountSelectionRequiredResult({ rows = [], rowsWithEmptyBlocks
       rowIndex: Number(item.rowIndex || 0)
     }))
   };
+}
+
+function buildBigAccountPreviewResult(result, contextId) {
+  const sanitizeRows = (rows) => (Array.isArray(rows) ? rows : []).map((row, index) => ({
+    index: Number.isInteger(row && row.index) ? row.index : index,
+    label: normalizeCell(row && row.label) || `${index + 1}.`,
+    sourceRowNumber: Number(row && row.sourceRowNumber || 0),
+    fileName: normalizeCell(row && row.fileName)
+  }));
+  return {
+    ...result,
+    contextId,
+    rows: sanitizeRows(result && result.rows),
+    rowsWithEmptyBlocks: sanitizeRows(
+      result && (result.rowsWithEmptyBlocks || result.rows)
+    )
+  };
+}
+
+function normalizePendingBigAccountSelection(pendingContext, payload = {}) {
+  const groupedBigAccounts = Array.isArray(pendingContext.bigAccounts)
+    ? pendingContext.bigAccounts
+    : [];
+  const assignments = Array.isArray(payload.assignments)
+    ? payload.assignments.map((item, index) => ({
+        merchantId: normalizeCell(item.merchantId),
+        currency: normalizeCell(item.currency),
+        rowIndex: Number.isInteger(item.index)
+          ? item.index
+          : (Number.isInteger(item.rowIndex) ? item.rowIndex : index)
+      }))
+    : [];
+  const isFixedMode = payload.mode === 'fixed';
+  const expectedRows = isFixedMode
+    ? (pendingContext.rowsWithEmptyBlocks || pendingContext.rows)
+    : pendingContext.rows;
+  if (!assignments.length || assignments.length !== expectedRows.length) {
+    const error = new FileValidationError(
+      'BIG_ACCOUNT_SELECTION_INVALID',
+      `请选择有效的大账号 / 币种（需要 ${expectedRows.length} 个，当前 ${assignments.length} 个）`
+    );
+    throw error;
+  }
+  const expectedRowIndexes = new Set(expectedRows.map((row, index) => (
+    Number.isInteger(row.index) ? row.index : index
+  )));
+  const assignmentRowIndexes = new Set(assignments.map((assignment) => assignment.rowIndex));
+  if (
+    assignmentRowIndexes.size !== expectedRowIndexes.size
+    || [...assignmentRowIndexes].some((rowIndex) => !expectedRowIndexes.has(rowIndex))
+  ) {
+    throw new FileValidationError(
+      'BIG_ACCOUNT_SELECTION_INVALID',
+      '请选择有效的大账号 / 币种'
+    );
+  }
+  const normalizedAssignments = assignments.map((assignment) => {
+    const matchedAccount = groupedBigAccounts.find(
+      (item) => item.merchantId === assignment.merchantId
+    );
+    if (!matchedAccount) {
+      throw new FileValidationError(
+        'BIG_ACCOUNT_SELECTION_INVALID',
+        '请选择有效的大账号 / 币种'
+      );
+    }
+    const availableCurrencies = Array.isArray(matchedAccount.currencies)
+      ? matchedAccount.currencies
+      : [];
+    const normalizedCurrency = matchedAccount.isMultiCurrency
+      ? normalizeCell(assignment.currency)
+      : normalizeCell(availableCurrencies[0] || assignment.currency);
+    if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) {
+      throw new FileValidationError(
+        'BIG_ACCOUNT_SELECTION_INVALID',
+        `大账号 ${matchedAccount.merchantId} 的币种选择无效`
+      );
+    }
+    return {
+      merchantId: matchedAccount.merchantId,
+      currency: normalizedCurrency,
+      rowIndex: assignment.rowIndex
+    };
+  }).sort((left, right) => left.rowIndex - right.rowIndex);
+  return { isFixedMode, normalizedAssignments };
+}
+
+function selectPendingBigAccountRows(pendingContext, mode, rowIndexes = []) {
+  const requestedRowIndexes = new Set(
+    (Array.isArray(rowIndexes) ? rowIndexes : []).filter(Number.isInteger)
+  );
+  const serverRows = mode === 'fixed'
+    ? (pendingContext && (
+        pendingContext.rowsWithEmptyBlocks || pendingContext.rows
+      ))
+    : (pendingContext && pendingContext.rows);
+  return (Array.isArray(serverRows) ? serverRows : [])
+    .filter((row) => requestedRowIndexes.has(Number(row.index)));
 }
 
 function buildPendingBigAccountFileEntries({ template, mappings, orderedTargetFields, inputFilePaths = [] }) {
@@ -1179,10 +1468,11 @@ function resolveGenerationTemplateConfig({ fileEntries = [], fallbackTemplateCon
 function rebuildMatchedTemplateFileEntries({
   fileEntries = [],
   fallbackTemplateConfig,
-  selectedBigAccount = null
+  selectedBigAccount = null,
+  reuseMappedRows = false
 }) {
-  // Rebuild rows from the raw file so child-template mappings and selected big-account values
-  // both flow into the final export rows instead of reusing parent provisional rows.
+  // 默认兼容旧路径从原文件重建；prepare 已产出可信映射行时可直接克隆并注入大账号，
+  // 避免大型文件在 prepare + execute 两阶段做两次完整解析。
   const templateConfigCache = new Map();
 
   return (Array.isArray(fileEntries) ? fileEntries : []).map((entry) => {
@@ -1198,13 +1488,58 @@ function rebuildMatchedTemplateFileEntries({
     const entryIsMultiBigAccount = normalizeCell(entryMerchantMapping?.mappedField)
       === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
     const entrySelectedBigAccount = entryIsMultiBigAccount ? selectedBigAccount : null;
-    const config = buildStatementGenerationConfig({
-      template: entryTemplateConfig.template,
-      mappings: entryTemplateConfig.exportMappings,
-      orderedTargetFields: entryTemplateConfig.exportTargetFields,
-      selectedBigAccount: entrySelectedBigAccount,
-      allowManagedMerchantWithoutSelection: true
-    });
+    let config = null;
+    if (!reuseMappedRows || entrySelectedBigAccount) {
+      config = buildStatementGenerationConfig({
+        template: entryTemplateConfig.template,
+        mappings: entryTemplateConfig.exportMappings,
+        orderedTargetFields: entryTemplateConfig.exportTargetFields,
+        selectedBigAccount: entrySelectedBigAccount,
+        allowManagedMerchantWithoutSelection: true
+      });
+    }
+    const requiresBillSplitRawRebuild = Boolean(
+      reuseMappedRows
+      && entrySelectedBigAccount
+      && config
+      && config.billSplitMerge
+      && config.billSplitMerge.enabled
+    );
+    if (reuseMappedRows && !requiresBillSplitRawRebuild) {
+      const detailRows = cloneRowsWithMetadata(entry.detailRows);
+      if (entrySelectedBigAccount) {
+        const fieldIndexMap = buildFieldIndexMap(detailRows[0] || []);
+        const merchantIdIndex = fieldIndexMap.get('MerchantId');
+        const currencyIndex = fieldIndexMap.get('Currency');
+        const merchantId = normalizeCell(entrySelectedBigAccount.merchantId);
+        const currency = normalizeCell(entrySelectedBigAccount.currency);
+        detailRows.slice(1).forEach((row) => {
+          if (!Array.isArray(row)) return;
+          if (merchantIdIndex !== undefined) row[merchantIdIndex] = merchantId;
+          if (currencyIndex !== undefined) row[currencyIndex] = currency;
+        });
+        if (Array.isArray(detailRows.issues)) {
+          detailRows.issues = detailRows.issues.filter(
+            (issue) => !issue || issue.type !== 'currency-unmapped'
+          );
+        }
+      }
+      const merchantLookupFlags = buildManagedMerchantLookupFlags(
+        entryTemplateConfig.exportMappings
+      );
+      return {
+        filePath: entry.filePath,
+        detailRows,
+        matchedTemplateId: entry.matchedTemplateId || entryTemplateConfig.template.id || null,
+        matchedHeaders: Array.isArray(entry.matchedHeaders)
+          ? entry.matchedHeaders.slice()
+          : (entryTemplateConfig.template.headers || []).slice(),
+        selfInputMerchant: Boolean(entry.selfInputMerchant || merchantLookupFlags.selfInputMerchant),
+        skipDirectMerchantLookup: Boolean(
+          entry.skipDirectMerchantLookup || merchantLookupFlags.skipDirectMerchantLookup
+        )
+      };
+    }
     const merchantLookupFlags = buildManagedMerchantLookupFlags(entryTemplateConfig.exportMappings);
 
     return {
@@ -1537,6 +1872,30 @@ function resolveDirectBigAccountRecognition({
   };
 }
 
+function resolvePreparedDirectBigAccountRecognition({ prepared, recognitionArgs }) {
+  if (!prepared.previewOnly
+      && Object.hasOwn(prepared, 'directBigAccountRecognitionDecision')) {
+    return prepared.directBigAccountRecognitionDecision;
+  }
+  const decision = resolveDirectBigAccountRecognition(recognitionArgs);
+  if (prepared.previewOnly) {
+    prepared.directBigAccountRecognitionDecision = decision;
+  }
+  return decision;
+}
+
+function resolvePreparedFixedBigAccountAutoMatchDecision(prepared, resolveDecision) {
+  if (!prepared.previewOnly
+      && Object.hasOwn(prepared, 'fixedBigAccountAutoMatchDecision')) {
+    return prepared.fixedBigAccountAutoMatchDecision;
+  }
+  const decision = resolveDecision();
+  if (prepared.previewOnly) {
+    prepared.fixedBigAccountAutoMatchDecision = decision;
+  }
+  return decision;
+}
+
 function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
   const { includeEmptyBlocks = false } = options;
   const rows = [];
@@ -1646,6 +2005,10 @@ function createErrorResult({
   templateName = '',
   originalError = null
 }) {
+  const operationContext = archiveOperationContext.getStore();
+  if (operationContext && operationContext.phase === 'prepare') {
+    return createPreflightErrorResult({ message, errorCode, detailLines });
+  }
   const report = createErrorReport({
     step,
     message,
@@ -1673,6 +2036,20 @@ function createErrorResult({
     message,
     errorReportReady: true,
     errorReportFileName: report.fileName
+  };
+}
+
+function createPreflightErrorResult({
+  message,
+  errorCode = 'BUSINESS_ERROR',
+  detailLines = []
+}) {
+  return {
+    status: 'error',
+    message: String(message || '业务校验失败'),
+    errorCode: String(errorCode || 'BUSINESS_ERROR'),
+    detailLines: Array.isArray(detailLines) ? detailLines.slice() : [],
+    errorReportReady: false
   };
 }
 
@@ -3699,6 +4076,8 @@ function initializeArchiveCenter() {
     service,
     outboxStore: archiveOutbox,
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
+    resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
+    onTerminalIntentFlushed: finalizePositionTerminalIntent,
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
@@ -3712,6 +4091,15 @@ function initializeArchiveCenter() {
     }
   });
   archiveOperationTracker = createArchiveOperationTracker({ sink: archiveCenterService.sink });
+  const flowResolver = createBusinessFlowResolver({ archiveService: service });
+  archiveTaskLifecycle = createTaskLifecycle({
+    businessOperationRegistry,
+    archiveService: service,
+    flowResolver,
+    operationTracker: archiveOperationTracker,
+    persistTerminalIntent: (payload) => archiveCenterService.persistTaskTerminalIntent(payload),
+    onArchiveWarning: reportArchiveFailure
+  });
   archiveCenterService.initialize().catch((error) => {
     appendActivityLogEntry({
       level: 'warning',
@@ -4071,92 +4459,111 @@ function registerAppHandlers() {
   //   - bundle 类型互认严格 — reader 必须按顶层 key 区分；误用 bundleVersion=4 文件必报错
   //   - apply 事务包裹保证导入失败不留半状态
   //   - 同名场景跳过 + 收集到冲突清单（D12=a 保守策略）— 不静默覆盖
-  trackedIpcHandle('scenarios:export-bundle', '银行对账单处理', '场景管理', async (_event, payload = {}) => {
-    try {
-      const inputIds = Array.isArray(payload.channelIds) ? payload.channelIds : [];
-      const channelIds = inputIds
-        .map((v) => Number(v))
-        .filter((v) => Number.isFinite(v) && v > 0);
-      if (channelIds.length === 0) {
-        return { status: 'failed', message: '请至少选择一个银行渠道' };
-      }
-
-      // 拉渠道全集 + 过滤所选
-      const allChannels = database.listChannels();
-      const channelById = new Map(allChannels.map((c) => [Number(c.id), c]));
-      const selectedChannels = [];
-      const unknownIds = [];
-      for (const id of channelIds) {
-        if (channelById.has(id)) {
-          selectedChannels.push(channelById.get(id));
-        } else {
-          unknownIds.push(id);
+  trackedIpcHandle('scenarios:export-bundle', '银行对账单处理', '场景管理', {
+    async prepare(_event, payload = {}) {
+      try {
+        const inputIds = Array.isArray(payload.channelIds) ? payload.channelIds : [];
+        const channelIds = [...new Set(inputIds
+          .map((value) => Number(value))
+          .filter((value) => Number.isFinite(value) && value > 0))];
+        if (channelIds.length === 0) {
+          return {
+            proceed: false,
+            result: { status: 'failed', message: '请至少选择一个银行渠道' }
+          };
         }
-      }
-      if (selectedChannels.length === 0) {
-        return { status: 'failed', message: `选中的渠道 id=${unknownIds.join(',')} 不存在` };
-      }
 
-      // 拉各渠道的全部 scenarios（含 disabled）
-      // v2.1.13 PR#58 P2-1（🔴 资金/业务红线）：builtin-fixed 场景附「适用银行渠道」id 列表，
-      //   serializeScenarioBundle 据 channelIdToName 把 id → {name, ownerLocation} 写进 bundle，
-      //   导入端再按名 resolve 回当前库 id，避免「限定渠道的写死场景导入后变成适用全部」的反向 bug。
-      const scenariosByChannel = new Map();
-      let totalScenarios = 0;
-      for (const ch of selectedChannels) {
-        const scenarios = database.listAllScenariosByChannelId(ch.id);
-        for (const s of scenarios) {
-          if (s.category === 'builtin-fixed') {
-            s._applicableChannelIds = database.getScenarioApplicableChannels(s.id);
+        // 选择目标文件属于预备阶段；任何数据库读取、序列化和写盘都必须等任务开始后执行。
+        const dateStr = formatDateYYYYMMDD(new Date());
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: '导出场景模板文件',
+          defaultPath: `scenarios-bundle-${dateStr}.json`,
+          filters: [{ name: 'JSON', extensions: ['json'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+
+        return {
+          proceed: true,
+          args: [payload],
+          outputPaths: [saveResult.filePath],
+          savePath: saveResult.filePath,
+          channelIds
+        };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'failed', message: String(error && error.message ? error.message : error) }
+        };
+      }
+    },
+    async execute(_event, prepared) {
+      try {
+        const allChannels = database.listChannels();
+        const channelById = new Map(allChannels.map((channel) => [Number(channel.id), channel]));
+        const selectedChannels = prepared.channelIds
+          .map((id) => channelById.get(id))
+          .filter(Boolean);
+        if (selectedChannels.length === 0) {
+          return {
+            status: 'failed',
+            message: `选中的渠道 id=${prepared.channelIds.join(',')} 不存在`
+          };
+        }
+
+        // 拉各渠道的全部 scenarios（含 disabled）。builtin-fixed 场景携带适用渠道，
+        // 导入端再按名映射，避免限定渠道在跨库导入后退化为“适用全部”。
+        const scenariosByChannel = new Map();
+        let totalScenarios = 0;
+        for (const channel of selectedChannels) {
+          const scenarios = database.listAllScenariosByChannelId(channel.id);
+          for (const scenario of scenarios) {
+            if (scenario.category === 'builtin-fixed') {
+              scenario._applicableChannelIds = database.getScenarioApplicableChannels(scenario.id);
+            }
           }
+          scenariosByChannel.set(channel.id, scenarios);
+          totalScenarios += scenarios.length;
         }
-        scenariosByChannel.set(ch.id, scenarios);
-        totalScenarios += scenarios.length;
+        const channelIdToName = new Map(
+          allChannels.map((channel) => [
+            Number(channel.id),
+            { name: channel.name, ownerLocation: channel.ownerLocation }
+          ])
+        );
+        const jsonText = serializeScenarioBundle(
+          selectedChannels,
+          scenariosByChannel,
+          app.getVersion(),
+          channelIdToName
+        );
+
+        fs.mkdirSync(path.dirname(prepared.savePath), { recursive: true });
+        fs.writeFileSync(prepared.savePath, jsonText, 'utf8');
+
+        appendActivityLogEntry({
+          level: 'info',
+          message: '导出场景模板文件成功',
+          details: [
+            `导出路径：${prepared.savePath}`,
+            `渠道数：${selectedChannels.length}`,
+            `场景数：${totalScenarios}`
+          ]
+        });
+        return {
+          status: 'ok',
+          filePath: prepared.savePath,
+          exportedChannels: selectedChannels.length,
+          exportedScenarios: totalScenarios
+        };
+      } catch (error) {
+        return { status: 'failed', message: String(error && error.message ? error.message : error) };
       }
-      // channelId → {name, ownerLocation} 全库映射（适用渠道可能指向未被本次导出选中的渠道，故用全集）
-      const channelIdToName = new Map(
-        allChannels.map((c) => [Number(c.id), { name: c.name, ownerLocation: c.ownerLocation }])
-      );
-
-      // 序列化
-      const jsonText = serializeScenarioBundle(selectedChannels, scenariosByChannel, app.getVersion(), channelIdToName);
-
-      // saveDialog 默认文件名（D13=a）
-      const dateStr = formatDateYYYYMMDD(new Date());
-      const defaultFileName = `scenarios-bundle-${dateStr}.json`;
-      const saveResult = await dialog.showSaveDialog(mainWindow, {
-        title: '导出场景模板文件',
-        defaultPath: defaultFileName,
-        filters: [{ name: 'JSON', extensions: ['json'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
-      }
-
-      fs.mkdirSync(path.dirname(saveResult.filePath), { recursive: true });
-      fs.writeFileSync(saveResult.filePath, jsonText, 'utf8');
-
-      appendActivityLogEntry({
-        level: 'info',
-        message: '导出场景模板文件成功',
-        details: [
-          `导出路径：${saveResult.filePath}`,
-          `渠道数：${selectedChannels.length}`,
-          `场景数：${totalScenarios}`
-        ]
-      });
-      return {
-        status: 'ok',
-        filePath: saveResult.filePath,
-        exportedChannels: selectedChannels.length,
-        exportedScenarios: totalScenarios
-      };
-    } catch (error) {
-      return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
 
-  trackedIpcHandle('scenarios:import-bundle', '银行对账单处理', '场景管理', async () => {
+  ipcMain.handle('scenarios:import-bundle', async () => {
     try {
       const choice = await showImportOpenDialog('bank-statement-process-bundle', {
         title: '导入场景模板文件',
@@ -4167,6 +4574,12 @@ function registerAppHandlers() {
         return { status: 'cancelled' };
       }
       const filePath = choice.filePaths[0];
+      let sourceEvidence;
+      try {
+        sourceEvidence = scenarioImportContextStore.captureSource(filePath);
+      } catch (e) {
+        return { status: 'failed', message: `读取文件失败：${e && e.message ? e.message : e}` };
+      }
 
       let jsonText;
       try {
@@ -4203,7 +4616,6 @@ function registerAppHandlers() {
       } catch (e) {
         return { status: 'failed', message: String(e && e.message ? e.message : e) };
       }
-
       // 扫描缺失渠道（非 builtin 且库内不存在）— 二阶段确认核心数据
       const allChannels = database.listChannels();
       const channelKeyToRecord = new Map(
@@ -4218,44 +4630,51 @@ function registerAppHandlers() {
         }
       }
 
-      if (missingChannels.length > 0) {
-        // 不直接 apply；返回 needs-confirm 给 renderer 弹确认框
-        return {
-          status: 'needs-confirm',
-          missingChannels,
-          bundle,
-          filePath
-        };
-      }
-
-      // 无缺失渠道 → 直接 apply
-      const applyResult = applyScenarioBundleImport(bundle, { confirmCreateMissingChannels: false });
-      appendActivityLogEntry({
-        level: 'info',
-        message: '导入场景模板文件成功',
-        details: [
-          `导入路径：${filePath}`,
-          `新增场景数：${applyResult.importedCount}`,
-          `跳过同名场景数：${applyResult.conflicts.length}`,
-          `创建渠道数：${applyResult.createdChannels.length}`,
-          // v2.1.13 PR#58 P2-1：适用渠道还原 warning（匹配不到的渠道）
-          ...(Array.isArray(applyResult.warnings) ? applyResult.warnings : [])
-        ]
+      const preparedContextId = scenarioImportContextStore.create({
+        bundle,
+        filePath,
+        sourceSnapshot: sourceEvidence.sourceSnapshot,
+        missingChannels
       });
-      return Object.assign({ status: 'ok', filePath }, applyResult);
+      // picker/解析只是 preview；bundle 留在主进程，renderer 只拿一次性 context ID。
+      return {
+        status: missingChannels.length > 0 ? 'needs-confirm' : 'ready-to-apply',
+        missingChannels,
+        preparedContextId
+      };
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
   });
 
-  trackedIpcHandle('scenarios:import-bundle-apply', '银行对账单处理', '场景管理', (_event, payload = {}) => {
-    try {
-      const { bundle, confirmCreateMissingChannels } = payload || {};
-      if (!bundle || !Array.isArray(bundle.channels)) {
-        return { status: 'failed', message: 'apply: 缺少有效的 bundle 参数' };
+  trackedIpcHandle('scenarios:import-bundle-apply', '银行对账单处理', '场景管理', {
+    prepare(_event, payload = {}) {
+      try {
+        const context = scenarioImportContextStore.require(payload.preparedContextId, {
+          confirmCreateMissingChannels: payload.confirmCreateMissingChannels === true
+        });
+        return {
+          proceed: true,
+          args: [payload],
+          inputPaths: [context.filePath],
+          scenarioImportContext: context,
+          beforeStart: () => scenarioImportContextStore.assertUnchanged(context)
+        };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'failed', code: error.code, message: error.message }
+        };
       }
+    },
+    execute(_event, prepared, _taskContext, payload = {}) {
+    try {
+      const context = scenarioImportContextStore.consume(payload.preparedContextId, {
+        confirmCreateMissingChannels: payload.confirmCreateMissingChannels === true
+      });
+      const { bundle, filePath } = context;
       const applyResult = applyScenarioBundleImport(bundle, {
-        confirmCreateMissingChannels: confirmCreateMissingChannels === true
+        confirmCreateMissingChannels: payload.confirmCreateMissingChannels === true
       });
       // 导入会变更 scenarios 库 → 双清 processingResult + reconIdFixResult 避免老结果误用
       processingResult = null;
@@ -4264,6 +4683,7 @@ function registerAppHandlers() {
         level: 'info',
         message: '应用场景模板导入成功',
         details: [
+          ...(filePath ? [`导入路径：${filePath}`] : []),
           `新增场景数：${applyResult.importedCount}`,
           `跳过同名场景数：${applyResult.conflicts.length}`,
           `创建渠道数：${applyResult.createdChannels.length}`,
@@ -4271,24 +4691,33 @@ function registerAppHandlers() {
           ...(Array.isArray(applyResult.warnings) ? applyResult.warnings : [])
         ]
       });
-      return Object.assign({ status: 'ok' }, applyResult);
+      return Object.assign({ status: 'ok', filePath: filePath || '' }, applyResult);
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
     }
   });
 
   // v2.0.0-beta.3 PR #32a：银行对账单处理模块 IO + 调度 IPC
-  trackedIpcHandle('bank-statement:import', '银行对账单处理', '导入文件', async () => {
-    try {
+  trackedIpcHandle('bank-statement:import', '银行对账单处理', '导入文件', {
+    async prepare() {
       const choice = await showImportOpenDialog('bank-statement-process', {
         title: '选择银行对账单文件',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      const filePath = choice.filePaths[0];
+      return {
+        proceed: true,
+        inputPaths: [choice.filePaths[0]],
+        filePath: choice.filePaths[0]
+      };
+    },
+    async execute(_event, prepared) {
+    try {
+      const filePath = prepared.filePath;
       const result = readBankStatement(filePath);
       bankStatementSession = {
         filePath: result.filePath,
@@ -4335,19 +4764,28 @@ function registerAppHandlers() {
       }
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
+    }
   });
 
-  trackedIpcHandle('gateway-recon:import', '银行对账单处理', '导入文件', async () => {
-    try {
+  trackedIpcHandle('gateway-recon:import', '银行对账单处理', '导入文件', {
+    async prepare() {
       const choice = await showImportOpenDialog('bank-statement-process', {
         title: '选择资金对账不平结果表',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      const filePath = choice.filePaths[0];
+      return {
+        proceed: true,
+        inputPaths: [choice.filePaths[0]],
+        filePath: choice.filePaths[0]
+      };
+    },
+    async execute(_event, prepared) {
+    try {
+      const filePath = prepared.filePath;
       const result = readGatewayRecon(filePath);
       gatewayReconSession = {
         filePath: result.filePath,
@@ -4371,6 +4809,7 @@ function registerAppHandlers() {
         };
       }
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
+    }
     }
   });
 
@@ -4653,38 +5092,95 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('bank-statement:export', '银行对账单处理', '导出文件', async () => {
+  function inspectBankStatementExportState() {
+    const result = processingResult;
+    if (!result) {
+      return { ok: false, message: '请先点击"开始运行"处理对账单' };
+    }
+    const detailedAllScenarios = database.listScenarios()
+      .map((scenario) => database.getScenario(scenario.id))
+      .filter(Boolean);
+    const detailedEnabled = detailedAllScenarios
+      .filter((scenario) => scenario.enabled === 1 || scenario.enabled === true);
+    const fundTransferPolicyResolution = resolveFundTransferDatePolicy(detailedAllScenarios);
+    const dispatchScenarios = detailedEnabled
+      .filter((scenario) => !C4_CATEGORIES.includes(scenario.category));
+    const currentSnapshot = buildScenariosSnapshot(
+      dispatchScenarios,
+      fundTransferPolicyResolution.policy.signature
+    );
+    if (result.scenariosSnapshot !== currentSnapshot) {
+      return { ok: false, message: '场景已变更，请重新点击"开始运行"再导出' };
+    }
+    const unmatchedCount = Array.isArray(result.unmatchedRows) ? result.unmatchedRows.length : 0;
+    return {
+      ok: true,
+      processingResult: result,
+      bankStatementSession,
+      unmatchedCount,
+      requiresMainOutput: result.modifiedRows.length > 0 || unmatchedCount > 0
+    };
+  }
+
+  trackedIpcHandle('bank-statement:export', '银行对账单处理', '导出文件', {
+    async prepare() {
+      let inspected;
+      try {
+        inspected = inspectBankStatementExportState();
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'failed', message: String(error && error.message ? error.message : error) }
+        };
+      }
+      if (!inspected.ok) {
+        return { proceed: false, result: { status: 'failed', message: inspected.message } };
+      }
+      let mainFilePath = null;
+      if (inspected.requiresMainOutput) {
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: '保存处理结果',
+          defaultPath: path.join(app.getPath('documents'), buildMainOutputFileName()),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        mainFilePath = saveResult.filePath;
+      }
+      return {
+        proceed: true,
+        outputPaths: mainFilePath ? [mainFilePath] : [],
+        mainFilePath,
+        inspected,
+        beforeStart() {
+          const current = inspectBankStatementExportState();
+          if (!current.ok
+              || current.processingResult !== inspected.processingResult
+              || current.bankStatementSession !== inspected.bankStatementSession
+              || current.requiresMainOutput !== inspected.requiresMainOutput) {
+            throw new Error('银行对账导出结果在保存确认期间已变化，请重新导出');
+          }
+        }
+      };
+    },
+    async execute(_event, prepared) {
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 import/run 共享一把）。争用即返回失败。
     const opLock = tryAcquireBankStatementOpLock('export');
     if (!opLock.acquired) {
       return { status: 'failed', message: opLock.message };
     }
     try {
-      if (!processingResult) {
-        return { status: 'failed', message: '请先点击"开始运行"处理对账单' };
-      }
-      // round 3 P1 资金红线（defense in depth）：即使 scenarios:* 4 IPC 入口都清了缓存，
-      // 这里再校验一次 snapshot；任何场景 CRUD/toggle 在 run 之后发生 → snapshot 不一致 → 拒绝
-      const allScenarios = database.listScenarios();
-      const detailedAllScenarios = allScenarios
-        .map((s) => database.getScenario(s.id))
-        .filter(Boolean);
-      const detailedEnabled = detailedAllScenarios
-        .filter((s) => s.enabled === 1 || s.enabled === true);
-      // 与 run 使用同一 resolver。fatal owner/保留签名冲突直接拒绝导出；非 fatal 回退的
-      // raw/effective signature 参与快照，因此非法原值变化也会使旧结果失效。
-      const fundTransferPolicyResolution = resolveFundTransferDatePolicy(detailedAllScenarios);
-      // v2.1.0-beta.1 PR-A round 2 P1：与 bank-statement:run 一致，C4 不参与本模块的 snapshot
-      // 否则用户改 C4 场景会让此处 snapshot 变化 → 误报"场景已变更" → 拒绝导出
-      // v2.1.0-beta.3 PR #39 Finding 1（P1）：扩展到所有 C4 category
-      const dispatchScenarios = detailedEnabled.filter((s) => !C4_CATEGORIES.includes(s.category));
-      const currentSnapshot = buildScenariosSnapshot(
-        dispatchScenarios,
-        fundTransferPolicyResolution.policy.signature
-      );
-      if (processingResult.scenariosSnapshot !== currentSnapshot) {
+      const currentExportState = inspectBankStatementExportState();
+      if (!currentExportState.ok
+          || currentExportState.processingResult !== prepared.inspected.processingResult
+          || currentExportState.bankStatementSession !== prepared.inspected.bankStatementSession) {
         processingResult = null;
-        return { status: 'failed', message: '场景已变更，请重新点击"开始运行"再导出' };
+        return {
+          status: 'failed',
+          message: currentExportState.message
+            || '银行对账导出结果已变化，请重新运行'
+        };
       }
       const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
       // v3.0.4 F2：错误报告改落 error-reports/{date}/（与生成网银账单 .txt、业务OP失败报告共目录）。
@@ -4695,7 +5191,7 @@ function registerAppHandlers() {
       //   保存框触发条件必须涵盖 unmatchedRows，否则全未命中时 mainFilePath=null →
       //   后面 writeBankStatementMainOutput 因缺 mainFilePath 抛错（bank-statement-io.js:205）
       //   提前算 unmatchedCount，保存框 + empty 返回两处共用
-      const unmatchedCount = Array.isArray(processingResult.unmatchedRows) ? processingResult.unmatchedRows.length : 0;
+      const unmatchedCount = currentExportState.unmatchedCount;
 
       // v2.1.8 v2.1.7-minor M-2：errorReport 写入提前到 saveDialog 之前
       //   原顺序：saveDialog → cancel return → errorReport 写（cancel 时 errorReport 漏写）
@@ -4721,24 +5217,8 @@ function registerAppHandlers() {
         });
       }
 
-      // 主输出走 saveDialog（用户另存为）；先弹保存框，让用户选位置
-      // 若 modifiedRows + unmatchedRows 都为空 → 跳过 saveDialog，仅落 error-report（上方已写）
-      let mainFilePath = null;
-      if (processingResult.modifiedRows.length > 0 || unmatchedCount > 0) {
-        const defaultFileName = buildMainOutputFileName();
-        const saveResult = await dialog.showSaveDialog(mainWindow, {
-          title: '保存处理结果',
-          defaultPath: path.join(app.getPath('documents'), defaultFileName),
-          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-        });
-        if (saveResult.canceled || !saveResult.filePath) {
-          // M-2：cancel 时仍 return，但 errorReport 已落盘（上方提前）。
-          //   注（v3.0.4 F2 修正陈旧注释）：renderer cancelled 分支直接 return，UI 不显示任何 error-report 路径——
-          //   错误报告落 error-reports/{date}/，验收只能查文件系统。
-          return { status: 'cancelled', errorReport };
-        }
-        mainFilePath = saveResult.filePath;
-      }
+      // 主输出 savePath 已在 BOR/reserve 前取得；取消时不会落错误报告或业务文件。
+      const mainFilePath = prepared.mainFilePath;
       // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
       //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
       //   有 unmatchedRows 时上方保存框已经弹过（round 8 fix），mainFilePath 非 null，
@@ -4937,6 +5417,7 @@ function registerAppHandlers() {
       // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径）。
       releaseBankStatementOpLock();
     }
+    }
   });
 
   ipcMain.handle('bank-statement:session-status', () => {
@@ -5037,8 +5518,8 @@ function registerAppHandlers() {
     ].join('|');
   }
 
-  trackedIpcHandle('recon-id-fix:import', '对账单 ReconID 修复', '导入文件', async (_event, payload) => {
-    try {
+  trackedIpcHandle('recon-id-fix:import', '对账单 ReconID 修复', '导入文件', {
+    async prepare(_event, payload) {
       // v2.1.0-beta.3 T9：renderer 传 subMode（'business' | 'gateway'，从 state.reconIdFixBillCategory 推导）
       const subMode = (payload && payload.subMode === 'gateway') ? 'gateway' : 'business';
       const dialogTitle = subMode === 'gateway' ? '选择网关对账文件' : '选择单据对账文件';
@@ -5048,9 +5529,19 @@ function registerAppHandlers() {
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      const filePath = choice.filePaths[0];
+      return {
+        proceed: true,
+        args: [payload],
+        inputPaths: [choice.filePaths[0]],
+        filePath: choice.filePaths[0],
+        subMode
+      };
+    },
+    async execute(_event, prepared) {
+    try {
+      const { filePath, subMode } = prepared;
       const result = readReconIdFixFile(filePath, subMode);
       reconIdFixSession = {
         filePath: result.filePath,
@@ -5085,6 +5576,7 @@ function registerAppHandlers() {
         status: 'failed',
         message: String(error && error.message ? error.message : error)
       };
+    }
     }
   });
 
@@ -5172,7 +5664,76 @@ function registerAppHandlers() {
     }
   });
 
-  trackedIpcHandle('recon-id-fix:export', '对账单 ReconID 修复', '导出文件', async () => {
+  trackedIpcHandle('recon-id-fix:export', '对账单 ReconID 修复', '导出文件', {
+    async prepare() {
+      try {
+        const resultSnapshot = reconIdFixResult;
+        if (!resultSnapshot) {
+          return {
+            proceed: false,
+            result: { status: 'failed', message: '请先点击"开始运行"' }
+          };
+        }
+        const scenario = database.getScenario(resultSnapshot.scenarioId);
+        if (!scenario) {
+          return {
+            proceed: false,
+            result: { status: 'failed', code: 'stale-snapshot', message: '场景已删除，请重新选择场景再运行' }
+          };
+        }
+        if (buildReconIdFixSnapshot(scenario) !== resultSnapshot.scenariosSnapshot) {
+          return {
+            proceed: false,
+            result: { status: 'failed', code: 'stale-snapshot', message: '场景已变更，请重新点击"开始运行"再导出' }
+          };
+        }
+        const fixedRows = Array.isArray(resultSnapshot.fixedRows) ? resultSnapshot.fixedRows : [];
+        const unmatchedRows = Array.isArray(resultSnapshot.unmatchedRows) ? resultSnapshot.unmatchedRows : [];
+        if (fixedRows.length === 0 && unmatchedRows.length === 0) {
+          return {
+            proceed: false,
+            result: { status: 'empty', message: '本次运行无修复记录且无未匹配记录，未生成文件' }
+          };
+        }
+        const timestamp = buildReconIdFixTimestampMinute();
+        const exportSubMode = scenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
+        const defaultFileName = (fixedRows.length === 0 && unmatchedRows.length > 0)
+          ? buildReconIdFixUnmatchedReportFileName(resultSnapshot.scenarioName, timestamp, null, exportSubMode)
+          : buildReconIdFixMainOutputFileName(resultSnapshot.scenarioName, timestamp, exportSubMode);
+        const dialogSaveTitle = exportSubMode === 'gateway' ? '保存网关对账修复结果' : '保存单据对账修复结果';
+        const saveResult = await dialog.showSaveDialog(mainWindow, {
+          title: dialogSaveTitle,
+          defaultPath: path.join(app.getPath('documents'), defaultFileName),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (saveResult.canceled || !saveResult.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return {
+          proceed: true,
+          outputPaths: [saveResult.filePath],
+          savePath: saveResult.filePath,
+          resultSnapshot,
+          scenarioSnapshot: resultSnapshot.scenariosSnapshot,
+          beforeStart() {
+            if (reconIdFixResult !== resultSnapshot) {
+              throw new Error('ReconID 修复结果已变化，请重新导出');
+            }
+            const latestScenario = database.getScenario(resultSnapshot.scenarioId);
+            if (!latestScenario
+                || buildReconIdFixSnapshot(latestScenario) !== resultSnapshot.scenariosSnapshot) {
+              throw new Error('场景已变化，请重新运行后导出');
+            }
+          }
+        };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'failed', message: String(error && error.message ? error.message : error) }
+        };
+      }
+    },
+    async execute(_event, prepared) {
     try {
       if (!reconIdFixResult) {
         return { status: 'failed', message: '请先点击"开始运行"' };
@@ -5214,18 +5775,7 @@ function registerAppHandlers() {
       //   另一个固定命名的困惑。
       // v2.1.0-beta.3 T9：按 scenario.category 推导 subMode，影响文件名前缀 + writer 输出列模板
       const exportSubMode = currentScenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
-      const defaultFileName = (fixedRows.length === 0 && unmatchedRows.length > 0)
-        ? buildReconIdFixUnmatchedReportFileName(reconIdFixResult.scenarioName, timestamp, null, exportSubMode)
-        : buildReconIdFixMainOutputFileName(reconIdFixResult.scenarioName, timestamp, exportSubMode);
-      const dialogSaveTitle = exportSubMode === 'gateway' ? '保存网关对账修复结果' : '保存单据对账修复结果';
-      const saveResult = await dialog.showSaveDialog(mainWindow, {
-        title: dialogSaveTitle,
-        defaultPath: path.join(app.getPath('documents'), defaultFileName),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
-      }
+      const savePath = prepared.savePath;
       const ret = {
         status: 'ok',
         mainFilePath: null,
@@ -5242,7 +5792,7 @@ function registerAppHandlers() {
         // 仅 unmatched 分支：用户选定路径就是 unmatched 文件
         const writeUnmResult = await writeUnmatchedReport({
           unmatchedRows,
-          savePath: saveResult.filePath
+          savePath
         });
         ret.unmatchedFilePath = writeUnmResult.filePath;
         ret.unmatchedFileName = writeUnmResult.fileName;
@@ -5251,7 +5801,7 @@ function registerAppHandlers() {
         // 主非空：写主文件（v2.1.0-beta.3 T9 — 传 subMode 选输出列模板 + sheet 名）
         const writeResult = await writeReconIdFixOutput({
           fixedRows,
-          savePath: saveResult.filePath,
+          savePath,
           subMode: exportSubMode
         });
         ret.mainFilePath = writeResult.filePath;
@@ -5261,8 +5811,8 @@ function registerAppHandlers() {
         //   主+unmatched 都非空时，unmatched 文件名联动用户改过的主文件 basename：
         //   `{用户主文件名 stem}-未匹配.xlsx`，写到主文件同目录。
         if (unmatchedRows.length > 0) {
-          const mainSaveDir = path.dirname(saveResult.filePath);
-          const mainBaseName = path.basename(saveResult.filePath);
+          const mainSaveDir = path.dirname(savePath);
+          const mainBaseName = path.basename(savePath);
           const unmatchedFileName = buildReconIdFixUnmatchedReportFileName(
             reconIdFixResult.scenarioName,
             timestamp,
@@ -5283,11 +5833,12 @@ function registerAppHandlers() {
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     }
+    }
   });
 
   // v2.1.0-beta.3 PR #39 Codex#1（P2）：清空 main 端 session + result
   // 用户切换"账单类别"时调用，避免 reloadReconIdFixScenarios 内的 refreshReconIdFixStatus 从 main 拉回旧 session
-  ipcMain.handle('recon-id-fix:clear-session', () => {
+  businessIpcHandle('recon-id-fix:clear-session', '清空会话', () => {
     reconIdFixSession = null;
     reconIdFixResult = null;
     return { status: 'ok' };
@@ -5314,7 +5865,7 @@ function registerAppHandlers() {
     };
   });
 
-  businessIpcHandle('app:save-user-guide', '导出使用手册', async () => {
+  supportIpcHandle('app:save-user-guide', '导出使用手册', async () => {
     try {
       // v2.0.0 GA：默认 HTML（filters 第一项被 saveDialog 当默认；同时 defaultPath 带 .html 后缀加固）
       const result = await dialog.showSaveDialog(mainWindow, {
@@ -5438,7 +5989,7 @@ function registerAppHandlers() {
 }
 
 function registerErrorHandlers() {
-  businessIpcHandle('error:export-last', '导出错误报告', async () => {
+  supportIpcHandle('error:export-last', '导出错误报告', async () => {
     if (!lastErrorReport || !lastErrorReport.filePath || !fs.existsSync(lastErrorReport.filePath)) {
       return {
         status: 'empty',
@@ -5728,7 +6279,7 @@ function registerAccountMappingHandlers() {
     return { status: 'success', rows: uniqueRows };
   });
 
-  ipcMain.handle('account-mapping:distribute-migration', (_event, assignments) => {
+  businessIpcHandle('account-mapping:distribute-migration', '分配迁移映射', (_event, assignments) => {
     // assignments: [{ bankAccountId, clearingAccountId, noCurrency, currency, templateId }]
     if (!Array.isArray(assignments) || assignments.length === 0) {
       return createErrorResult({
@@ -6239,7 +6790,7 @@ function registerTemplateHandlers() {
     return database.listChildTemplates(parentTemplateId);
   });
 
-  ipcMain.handle('template:set-parent-status', (_event, templateId, isParent) => {
+  businessIpcHandle('template:set-parent-status', '设置父模板状态', (_event, templateId, isParent) => {
     try {
       database.setParentStatus(templateId, isParent);
       syncTemplateLibraryFile();
@@ -6256,7 +6807,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:set-child-parent', (_event, templateId, parentTemplateId) => {
+  businessIpcHandle('template:set-child-parent', '设置子模板归属', (_event, templateId, parentTemplateId) => {
     try {
       database.setChildParent(templateId, parentTemplateId);
       syncTemplateLibraryFile();
@@ -6273,18 +6824,23 @@ function registerTemplateHandlers() {
     }
   });
 
-  trackedIpcHandle('template:import', '生成网银账单', '导入模板', async () => {
-    const result = await showImportOpenDialog('template', {
-      properties: ['openFile'],
-      filters: templateFileDialogFilters()
-    });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
-    const selectedPath = result.filePaths[0];
-
+  trackedIpcHandle('template:import', '生成网银账单', '导入模板', {
+    async prepare() {
+      const result = await showImportOpenDialog('template', {
+        properties: ['openFile'],
+        filters: templateFileDialogFilters()
+      });
+      if (result.canceled || result.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        inputPaths: [result.filePaths[0]],
+        selectedPath: result.filePaths[0]
+      };
+    },
+    async execute(_event, prepared) {
+    const selectedPath = prepared.selectedPath;
     try {
       const headers = extractHeaders(selectedPath);
       const templateName = path.parse(selectedPath).name;
@@ -6338,6 +6894,7 @@ function registerTemplateHandlers() {
         originalError: error,
         context: { selectedPath }
       });
+    }
     }
   });
 
@@ -6613,7 +7170,7 @@ function registerTemplateHandlers() {
 
   // v1.5.2 需求 3：保存模板的文件名固定字段
   // payload: { templateId: number, value: string }
-  ipcMain.handle('template:save-filename-fixed-field', (_event, payload = {}) => {
+  businessIpcHandle('template:save-filename-fixed-field', '保存文件名固定字段', (_event, payload = {}) => {
     try {
       const templateId = Number(payload.templateId);
       if (!Number.isFinite(templateId) || templateId <= 0) {
@@ -6636,8 +7193,8 @@ function registerTemplateHandlers() {
     }
   });
 
-  trackedIpcHandle('template:export-bundle', '生成网银账单', '模板管理', async () => {
-    try {
+  trackedIpcHandle('template:export-bundle', '生成网银账单', '模板管理', {
+    async prepare() {
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         defaultPath: 'template-library.json',
         filters: [
@@ -6649,20 +7206,27 @@ function registerTemplateHandlers() {
       });
 
       if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-
-      writeTemplateBundleFile(saveResult.filePath);
+      return {
+        proceed: true,
+        outputPaths: [saveResult.filePath],
+        savePath: saveResult.filePath
+      };
+    },
+    async execute(_event, prepared) {
+    try {
+      writeTemplateBundleFile(prepared.savePath);
       clearLastErrorReport();
       appendActivityLogEntry({
         level: 'info',
         message: '导出模板文件成功',
-        details: [`导出路径：${saveResult.filePath}`]
+        details: [`导出路径：${prepared.savePath}`]
       });
       return {
         status: 'success',
         message: '模板文件导出成功',
-        filePath: saveResult.filePath
+        filePath: prepared.savePath
       };
     } catch (error) {
       return createErrorResult({
@@ -6673,69 +7237,101 @@ function registerTemplateHandlers() {
         originalError: error
       });
     }
+    }
   });
 
-  trackedIpcHandle('template:import-bundle', '生成网银账单', '模板管理', async () => {
-    const enumConfig = getEnumConfig();
+  trackedIpcHandle('template:import-bundle', '生成网银账单', '模板管理', {
+    async prepare() {
+      const enumConfig = getEnumConfig();
+      if (!enumConfig) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: MISSING_ENUM_MESSAGE,
+            errorCode: 'ENUM_MISSING'
+          })
+        };
+      }
 
-    if (!enumConfig) {
-      return createErrorResult({
-        step: '导入模板文件',
-        message: MISSING_ENUM_MESSAGE,
-        errorCode: 'ENUM_MISSING'
+      const result = await showImportOpenDialog('template-bundle', {
+        properties: ['openFile'],
+        filters: [{ name: 'JSON', extensions: ['json'] }]
       });
-    }
+      if (result.canceled || result.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
 
-    const result = await showImportOpenDialog('template-bundle', {
-      properties: ['openFile'],
-      filters: [
-        {
-          name: 'JSON',
-          extensions: ['json']
+      const selectedPath = result.filePaths[0];
+      try {
+        const assertSourceFresh = createPreviewSourceFreshnessGuard(
+          [selectedPath],
+          '模板包'
+        );
+        const enumValues = loadEnumValues(enumConfig.filePath);
+        const importedTemplates = readTemplateBundleFile(selectedPath);
+        const importCandidates = importedTemplates
+          .filter((entry) => entry.name && entry.headers.length);
+        const scanExisting = () => importCandidates
+          .map((entry) => {
+            const existingTemplate = entry.templateKey
+              ? database.getTemplateByKey(entry.templateKey)
+              : database.getTemplateByName(entry.name);
+            return existingTemplate
+              ? `${entry.templateKey || entry.name}:${existingTemplate.id}`
+              : '';
+          });
+        const existingRefs = scanExisting();
+        const existingTemplateNames = importCandidates
+          .filter((_entry, index) => existingRefs[index])
+          .map((entry) => entry.name);
+
+        if (existingTemplateNames.length > 0) {
+          const confirmResult = await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: '导入模板包',
+            message: '以下模板已存在，导入将覆盖现有配置：',
+            detail: existingTemplateNames.map((name) => `• ${name}`).join('\n') + '\n\n是否确认覆盖？',
+            buttons: ['取消', '确认覆盖'],
+            defaultId: 0,
+            cancelId: 0
+          });
+          if (confirmResult.response === 0) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
         }
-      ]
-    });
 
-    if (result.canceled || result.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
-    const selectedPath = result.filePaths[0];
-
+        return {
+          proceed: true,
+          inputPaths: [selectedPath],
+          selectedPath,
+          enumValues,
+          importedTemplates,
+          beforeStart() {
+            assertSourceFresh();
+            if (JSON.stringify(scanExisting()) !== JSON.stringify(existingRefs)) {
+              throw new Error('模板库在确认期间已变化，请重新导入并确认覆盖范围');
+            }
+          }
+        };
+      } catch (error) {
+        const errorResult = error instanceof FileValidationError
+          ? createPreflightErrorResult({
+              message: error.message,
+              errorCode: error.code
+            })
+          : createPreflightErrorResult({
+              message: '模板文件导入失败，请导出报错文件查看详情',
+              errorCode: 'TEMPLATE_BUNDLE_IMPORT_RUNTIME'
+            });
+        return { proceed: false, result: errorResult };
+      }
+    },
+    async execute(_event, prepared) {
+    const { enumValues, importedTemplates, selectedPath } = prepared;
     try {
-      const enumValues = loadEnumValues(enumConfig.filePath);
-      const importedTemplates = readTemplateBundleFile(selectedPath);
       let createdCount = 0;
       let updatedCount = 0;
       let skippedCount = 0;
-
-      // Scan for existing templates with same name before importing
-      const existingTemplateNames = [];
-      importedTemplates.forEach((entry) => {
-        if (!entry.name || !entry.headers.length) return;
-        const existingTemplate = entry.templateKey
-          ? database.getTemplateByKey(entry.templateKey)
-          : database.getTemplateByName(entry.name);
-        if (existingTemplate) {
-          existingTemplateNames.push(entry.name);
-        }
-      });
-
-      if (existingTemplateNames.length > 0) {
-        const confirmResult = await dialog.showMessageBox(mainWindow, {
-          type: 'warning',
-          title: '导入模板包',
-          message: '以下模板已存在，导入将覆盖现有配置：',
-          detail: existingTemplateNames.map((name) => `• ${name}`).join('\n') + '\n\n是否确认覆盖？',
-          buttons: ['取消', '确认覆盖'],
-          defaultId: 0,
-          cancelId: 0
-        });
-
-        if (confirmResult.response === 0) {
-          return { status: 'cancelled' };
-        }
-      }
 
       importedTemplates.forEach((entry) => {
         if (!entry.name || !entry.headers.length) {
@@ -6994,6 +7590,7 @@ function registerTemplateHandlers() {
         context: { selectedPath }
       });
     }
+    }
   });
 
   ipcMain.handle('template:get-amount-split-rules', (_event, templateId) => {
@@ -7034,7 +7631,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-amount-split-rules', (_event, payload = {}) => {
+  businessIpcHandle('template:save-amount-split-rules', '保存发生额拆分规则', (_event, payload = {}) => {
     const templateId = Number(payload.templateId);
     let template = null;
 
@@ -7135,7 +7732,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-mappings', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-mappings', '保存账单拆分映射', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     let template = null;
     try {
@@ -7175,7 +7772,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-row-count', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-row-count', '保存账单拆分行数', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     const nextN = Number(payload?.nextN);
     try {
@@ -7207,7 +7804,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-row', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-row', '保存账单拆分行', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     try {
       validateBillSplitRowPayload(payload?.row);
@@ -7266,7 +7863,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:delete-bill-split-row', (_event, payload = {}) => {
+  businessIpcHandle('template:delete-bill-split-row', '删除账单拆分行', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     const seqNo = Number(payload?.seqNo);
     try {
@@ -7286,7 +7883,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-merge-group', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-merge-group', '保存账单拆分合并组', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     const seqNos = Array.isArray(payload?.seqNos) ? payload.seqNos.map(Number) : [];
     try {
@@ -7328,7 +7925,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:clear-bill-split-merge-groups', (_event, payload = {}) => {
+  businessIpcHandle('template:clear-bill-split-merge-groups', '清空账单拆分合并组', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     try {
       database.clearBillSplitMergeGroups(templateId);
@@ -7346,7 +7943,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-amount-rules', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-amount-rules', '保存账单拆分金额规则', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     let template = null;
     try {
@@ -7396,7 +7993,7 @@ function registerTemplateHandlers() {
     }
   });
 
-  ipcMain.handle('template:save-bill-split-meta', (_event, payload = {}) => {
+  businessIpcHandle('template:save-bill-split-meta', '保存账单拆分配置', (_event, payload = {}) => {
     const templateId = Number(payload?.templateId);
     try {
       const signedAmountSourceField = normalizeCell(payload?.signedAmountSourceField);
@@ -8284,6 +8881,7 @@ function generateMultiTemplateGroupFiles({
   fileEntries,
   fallbackTemplateConfig,
   selectedBigAccount,
+  reuseMappedRows = false,
   session,
   replacePaths,
   inputFilePaths
@@ -8339,7 +8937,8 @@ function generateMultiTemplateGroupFiles({
       ? rebuildMatchedTemplateFileEntries({
           fileEntries: groupEntries,
           fallbackTemplateConfig: groupTemplateConfig,
-          selectedBigAccount
+          selectedBigAccount,
+          reuseMappedRows
         })
       : groupEntries;
 
@@ -8445,7 +9044,7 @@ function prepareGeneratedFiles({
   });
 }
 
-async function exportGeneratedFile(generatedFile, emptyMessage, step) {
+async function exportGeneratedFile(generatedFile, emptyMessage, step, savePath) {
   if (!generatedFile || !generatedFile.filePath || !fs.existsSync(generatedFile.filePath)) {
     return createErrorResult({
       step,
@@ -8455,35 +9054,21 @@ async function exportGeneratedFile(generatedFile, emptyMessage, step) {
     });
   }
 
-  const saveResult = await dialog.showSaveDialog(mainWindow, {
-    defaultPath: generatedFile.fileName,
-    filters: [
-      {
-        name: 'Excel',
-        extensions: ['xlsx']
-      }
-    ]
-  });
-
-  if (saveResult.canceled || !saveResult.filePath) {
-    return { status: 'cancelled' };
-  }
-
   try {
-    fs.copyFileSync(generatedFile.filePath, saveResult.filePath);
+    fs.copyFileSync(generatedFile.filePath, savePath);
     clearLastErrorReport();
     appendActivityLogEntry({
       level: 'info',
       message: `${step}成功`,
       details: [
         `模板名：${generatedFile.templateName || 'N/A'}`,
-        `导出路径：${saveResult.filePath}`
+        `导出路径：${savePath}`
       ]
     });
     return {
       status: 'success',
       message: '文件导出成功',
-      filePath: saveResult.filePath
+      filePath: savePath
     };
   } catch (error) {
     return createErrorResult({
@@ -8494,7 +9079,7 @@ async function exportGeneratedFile(generatedFile, emptyMessage, step) {
       originalError: error,
       context: {
         sourceFilePath: generatedFile.filePath,
-        targetFilePath: saveResult.filePath
+        targetFilePath: savePath
       },
       templateName: generatedFile.templateName || ''
     });
@@ -8573,7 +9158,8 @@ function computeFileHash(filePath) {
 async function resolveImportFileSelection({
   templateName,
   session,
-  filePaths
+  filePaths,
+  assertFreshAfterConfirmation = null
 }) {
   const acceptedPaths = [];
   const replacePaths = [];
@@ -8649,6 +9235,9 @@ async function resolveImportFileSelection({
       message: `检测到重复文件（模板：${templateName}）`,
       detail: `${duplicateDetail}\n\n重复原因：${duplicateReason}`
     });
+    if (typeof assertFreshAfterConfirmation === 'function') {
+      assertFreshAfterConfirmation();
+    }
 
     if (result.response === 1) {
       return {
@@ -8801,7 +9390,117 @@ function getGeneratedStatementExport(kind, scope = 'current') {
   return statementGenerationHelpers.getGeneratedStatementExport(lastGeneratedExports, kind, scope);
 }
 
-async function exportStatementByScope(kind, scope = 'auto') {
+function buildStatementExportPlan(kind, scope = 'auto') {
+  const session = getCurrentStatementSession();
+  const normalizedScope = scope === 'all' || scope === 'current'
+    ? scope
+    : shouldPromptForExportScope(session)
+      ? 'select'
+      : 'current';
+  if (normalizedScope === 'select') {
+    return { stopResult: buildScopeSelectionResult(kind), normalizedScope, session };
+  }
+  const emptyMessage = normalizedScope === 'all'
+    ? `暂无可导出的全部${kind === 'detail' ? '明细' : '余额'}账单`
+    : `暂无可导出的${kind === 'detail' ? '明细' : '余额'}账单`;
+  const generatedFile = getGeneratedStatementExport(kind, normalizedScope);
+  if (generatedFile && generatedFile.filePath && fs.existsSync(generatedFile.filePath)) {
+    return {
+      normalizedScope,
+      session,
+      emptyMessage,
+      generatedFile,
+      defaultFileName: generatedFile.fileName,
+      needsGeneration: false
+    };
+  }
+  if (normalizedScope !== 'all' || !session) {
+    return {
+      stopResult: createPreflightErrorResult({
+        message: emptyMessage,
+        errorCode: 'EXPORT_EMPTY'
+      }),
+      normalizedScope,
+      session
+    };
+  }
+
+  let defaultFileName = '';
+  if (isFilenameMappingMode(session.templateId)) {
+    const groupMap = new Map();
+    for (const entry of getStatementSessionEntries(session, 'all')) {
+      const templateId = entry.matchedTemplateId || 0;
+      if (!groupMap.has(templateId)) groupMap.set(templateId, []);
+      groupMap.get(templateId).push(entry);
+    }
+    const validGroups = [];
+    const allDates = [];
+    for (const [templateId, entries] of groupMap) {
+      const templateConfig = getTemplateMappingConfig(templateId);
+      if (!templateConfig) continue;
+      const config = buildStatementGenerationConfig({
+        template: templateConfig.template,
+        mappings: templateConfig.exportMappings,
+        orderedTargetFields: templateConfig.exportTargetFields,
+        allowManagedMerchantWithoutSelection: true
+      });
+      const preparedBatch = buildPreparedStatementBatchFromEntries({ config, fileEntries: entries });
+      const dates = parseRequiredBillDates(preparedBatch.detailRows);
+      allDates.push(...dates);
+      validGroups.push({ config, dates });
+    }
+    if (validGroups.length === 0) {
+      return {
+        stopResult: createPreflightErrorResult({
+          message: emptyMessage,
+          errorCode: 'EXPORT_EMPTY'
+        }),
+        normalizedScope,
+        session
+      };
+    }
+    if (validGroups.length > 1) {
+      defaultFileName = `${groupMap.size}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(allDates) || getToday()}.xlsx`;
+    } else {
+      defaultFileName = `${validGroups[0].config.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(validGroups[0].dates) || getToday()}.xlsx`;
+    }
+  } else {
+    const templateConfig = getTemplateMappingConfig(session.templateId);
+    if (!templateConfig) {
+      return {
+        stopResult: createPreflightErrorResult({
+          message: '未找到当前模板，请重新选择模板后导入文件',
+          errorCode: 'TEMPLATE_NOT_FOUND'
+        }),
+        normalizedScope,
+        session
+      };
+    }
+    const sessionEntries = getStatementSessionEntries(session, 'all');
+    const generationTemplateConfig = resolveGenerationTemplateConfig({
+      fileEntries: sessionEntries,
+      fallbackTemplateConfig: templateConfig
+    });
+    const { preparedBatch } = buildStatementSessionGenerationContext({
+      session,
+      template: generationTemplateConfig.template,
+      mappings: generationTemplateConfig.exportMappings,
+      orderedTargetFields: generationTemplateConfig.exportTargetFields,
+      scope: 'all'
+    });
+    defaultFileName = `${generationTemplateConfig.template.name}-${kind === 'detail' ? 'COMMON' : 'BALANCE'}-${buildDateRangeLabel(parseRequiredBillDates(preparedBatch.detailRows)) || getToday()}.xlsx`;
+  }
+  return {
+    normalizedScope,
+    session,
+    emptyMessage,
+    generatedFile: null,
+    defaultFileName,
+    needsGeneration: true
+  };
+}
+
+async function exportStatementByScope(kind, scope = 'auto', savePath) {
   const session = getCurrentStatementSession();
 
   const isVirtualTemplate = session && isFilenameMappingMode(session.templateId);
@@ -8939,7 +9638,7 @@ async function exportStatementByScope(kind, scope = 'auto') {
       // 部分 group 模板被删时：先导出文件，再返回带 warning 的 result
       if (skippedGroupNames.length > 0) {
         const step = kind === 'detail' ? '导出明细账单' : '导出余额账单';
-        const exportResult = await exportGeneratedFile(generatedFile, emptyMessage, step);
+        const exportResult = await exportGeneratedFile(generatedFile, emptyMessage, step, savePath);
         if (exportResult.status === 'success') {
           exportResult.message = `文件已导出，但数据不完整：${skippedGroupNames.join('、')} 的模板已被删除，对应文件未包含在导出中。`;
         }
@@ -9022,34 +9721,42 @@ async function exportStatementByScope(kind, scope = 'auto') {
   return exportGeneratedFile(
     generatedFile,
     emptyMessage,
-    kind === 'detail' ? '导出明细账单' : '导出余额账单'
+    kind === 'detail' ? '导出明细账单' : '导出余额账单',
+    savePath
   );
 }
 
 function registerBigAccountHandlers() {
-  businessIpcHandle('big-account:import-bank-info', '导入银行账号信息', async (_event, templateId) => {
-    const template = database.getTemplate(templateId);
-
-    if (!template) {
-      return createErrorResult({
-        step: '导入银行账号信息',
-        message: '未找到对应模板',
-        errorCode: 'TEMPLATE_NOT_FOUND',
-        context: { templateId }
+  businessIpcHandle('big-account:import-bank-info', '导入银行账号信息', {
+    async prepare(_event, templateId) {
+      const template = database.getTemplate(templateId);
+      if (!template) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '未找到对应模板',
+            errorCode: 'TEMPLATE_NOT_FOUND'
+          })
+        };
+      }
+      const result = await showImportOpenDialog('big-account', {
+        properties: ['openFile'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
       });
-    }
-
-    const result = await showImportOpenDialog('big-account', {
-      properties: ['openFile'],
-      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
-    });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
+      if (result.canceled || result.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        inputPaths: [result.filePaths[0]],
+        selectedPath: result.filePaths[0],
+        template
+      };
+    },
+    async execute(_event, prepared) {
+    const { selectedPath, template } = prepared;
     try {
-      const parsed = parseBankAccountExcel(result.filePaths[0]);
+      const parsed = parseBankAccountExcel(selectedPath);
 
       if (!parsed.clientAccounts.length && !parsed.ownAccounts.length) {
         return createErrorResult({
@@ -9096,11 +9803,12 @@ function registerBigAccountHandlers() {
         originalError: error
       });
     }
+    }
   });
 
   // v1.5.3 R2：deprecated。自有账号已合入 template_big_accounts 表，由 saveMappings 统一写回。
   // 保留该 handler 仅作兼容（防止老调用链报错），任何新调用应改走 saveMappings。
-  ipcMain.handle('big-account:save-own-accounts', (_event, payload = {}) => {
+  businessIpcHandle('big-account:save-own-accounts', '保存自有账户', (_event, payload = {}) => {
     try {
       // v2.1.9 SR-log-1：deprecated IPC 调用警告 → 日志上报
       appendActivityLogEntry({
@@ -9166,7 +9874,7 @@ function registerBigAccountHandlers() {
     }
   });
 
-  ipcMain.handle('balance-adjustment:save', (_event, payload = {}) => {
+  businessIpcHandle('balance-adjustment:save', '保存余额调整', (_event, payload = {}) => {
     try {
       const templateName = normalizeCell(payload.templateName);
       if (!templateName) {
@@ -9209,6 +9917,114 @@ function registerBigAccountHandlers() {
   });
 }
 
+function buildBigAccountOrderData(pendingContext, assignments = []) {
+  const data = { assignments };
+  const fileEntries = pendingContext.fileEntries || [];
+  const allMerchantIds = (pendingContext.bigAccounts || [])
+    .map((ba) => normalizeCell(ba.merchantId))
+    .filter((id) => id !== '');
+  const defaultHeaders = pendingContext.template?.headers || [];
+  const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
+
+  data.fileCount = fileEntries.length;
+  data.files = fileEntries.map((entry, fileIndex) => {
+    const entryHeaders = entry.matchedHeaders || defaultHeaders;
+    let fileResult = entry.skipDirectMerchantLookup
+      ? { accounts: [], isSingleAccount: false }
+      : identifyAccountsFromFile({
+          filePath: entry.filePath,
+          detailRows: entry.detailRows,
+          expectedSourceHeaders: entryHeaders,
+          allMerchantIds
+        });
+    // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
+    if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
+      if (entry.matchedTemplateId) {
+        const rawRowsFull = readRows(entry.filePath, { blankrows: true });
+        const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
+        const bankIdToMerchant = new Map();
+        for (const am of acctMappings) {
+          const bankId = normalizeCell(am.bankAccountId);
+          const clearingId = normalizeCell(am.clearingAccountId);
+          if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
+        }
+        if (bankIdToMerchant.size > 0) {
+          const bankIds = [...bankIdToMerchant.keys()];
+          for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
+            const row = rawRowsFull[rowIdx];
+            if (!Array.isArray(row)) continue;
+            for (const cell of row) {
+              const cellStr = normalizeCell(cell);
+              if (!cellStr) continue;
+              for (const bankId of bankIds) {
+                if (matchMerchantIds(cellStr, bankId) !== 'none') {
+                  const clearingId = bankIdToMerchant.get(bankId);
+                  const matched = expandedOptions.find(
+                    (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
+                  );
+                  if (matched) {
+                    fileResult = {
+                      accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }],
+                      isSingleAccount: true
+                    };
+                    break;
+                  }
+                }
+              }
+              if (fileResult.accounts.length > 0) break;
+            }
+          }
+        }
+      }
+    }
+    const accounts = fileResult.accounts.map((identified) => {
+      const matched = expandedOptions.find(
+        (option) => matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
+      );
+      return matched
+        ? { merchantId: matched.merchantId, currency: matched.currency }
+        : { merchantId: identified.merchantId, currency: '' };
+    });
+    return { fileIndex, accountCount: accounts.length, accounts };
+  });
+  return data;
+}
+
+function persistBigAccountOrderAfterGeneration({
+  pendingContext,
+  normalizedAssignments,
+  rememberOrder,
+  result
+}) {
+  if (typeof rememberOrder !== 'boolean') return result;
+  try {
+    const data = rememberOrder
+      ? buildBigAccountOrderData(pendingContext, normalizedAssignments)
+      : { assignments: [] };
+    writeBigAccountOrder(ensureStorageRoot(), pendingContext.templateId, data);
+    return result;
+  } catch (error) {
+    const warning = rememberOrder
+      ? '账单已生成，但大账号顺序保存失败，本次选择未记住。'
+      : '账单已生成，但清除已记住的大账号顺序失败，后续仍可能沿用原顺序。';
+    appendActivityLogEntry({
+      level: 'warning',
+      message: '大账号顺序设置保存失败',
+      details: [warning, error && error.message ? error.message : String(error)]
+    });
+    return {
+      ...result,
+      status: result && result.status === 'success' ? 'warning' : result.status,
+      message: [result && result.message, warning].filter(Boolean).join('\n'),
+      detailLines: [
+        ...(result && Array.isArray(result.detailLines) ? result.detailLines : []),
+        warning
+      ],
+      bigAccountOrderSaveWarning: warning
+    };
+  }
+}
+
 function registerBigAccountOrderHandlers() {
   ipcMain.handle('big-account-mode:load', (_event, templateId) => {
     try {
@@ -9218,7 +10034,7 @@ function registerBigAccountOrderHandlers() {
     }
   });
 
-  ipcMain.handle('big-account-mode:save', (_event, payload = {}) => {
+  businessIpcHandle('big-account-mode:save', '保存大账号模式', (_event, payload = {}) => {
     try {
       writeBigAccountMode(ensureStorageRoot(), payload.templateId, payload.mode);
       return { status: 'success' };
@@ -9235,71 +10051,19 @@ function registerBigAccountOrderHandlers() {
     }
   });
 
-  ipcMain.handle('big-account-order:save', (_event, payload = {}) => {
+  businessIpcHandle('big-account-order:save', '保存大账号顺序', (_event, payload = {}) => {
     try {
       const data = { assignments: payload.assignments || [] };
 
-      if (payload.includeFileInfo && lastPendingBigAccountSelection) {
-        const pendingContext = lastPendingBigAccountSelection;
-        const fileEntries = pendingContext.fileEntries || [];
-        const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
-        const defaultHeaders = pendingContext.template?.headers || [];
-        const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
-
-        data.fileCount = fileEntries.length;
-        data.files = fileEntries.map((entry, fileIndex) => {
-          const entryHeaders = entry.matchedHeaders || defaultHeaders;
-          let fileResult = entry.skipDirectMerchantLookup
-            ? { accounts: [], isSingleAccount: false }
-            : identifyAccountsFromFile({
-                filePath: entry.filePath,
-                detailRows: entry.detailRows,
-                expectedSourceHeaders: entryHeaders,
-                allMerchantIds
-              });
-          // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-          if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-            if (entry.matchedTemplateId) {
-              const rawRowsFull = readRows(entry.filePath, { blankrows: true });
-              const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
-              const bankIdToMerchant = new Map();
-              for (const am of acctMappings) {
-                const bankId = normalizeCell(am.bankAccountId);
-                const clearingId = normalizeCell(am.clearingAccountId);
-                if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-              }
-              if (bankIdToMerchant.size > 0) {
-                const bankIds = [...bankIdToMerchant.keys()];
-                for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
-                  const row = rawRowsFull[rowIdx];
-                  if (!Array.isArray(row)) continue;
-                  for (const cell of row) {
-                    const cellStr = normalizeCell(cell);
-                    if (!cellStr) continue;
-                    for (const bankId of bankIds) {
-                      if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                        const clearingId = bankIdToMerchant.get(bankId);
-                        const matched = expandedOptions.find((o) => matchMerchantIds(clearingId, o.merchantId) !== 'none');
-                        if (matched) {
-                          fileResult = { accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }], isSingleAccount: true };
-                          break;
-                        }
-                      }
-                    }
-                    if (fileResult.accounts.length > 0) break;
-                  }
-                }
-              }
-            }
-          }
-          const accounts = fileResult.accounts.map((identified) => {
-            const matched = expandedOptions.find((o) => matchMerchantIds(identified.merchantId, o.merchantId) !== 'none');
-            return matched
-              ? { merchantId: matched.merchantId, currency: matched.currency }
-              : { merchantId: identified.merchantId, currency: '' };
-          });
-          return { fileIndex, accountCount: accounts.length, accounts };
-        });
+      if (payload.includeFileInfo) {
+        const pendingContext = requirePendingBigAccountSelection(payload.contextId);
+        if (!pendingContext) {
+          return { status: 'error', message: '大账号选择预览已失效，请重新导入文件' };
+        }
+        if (pendingContext.assertFresh) pendingContext.assertFresh();
+        const fileInfoData = buildBigAccountOrderData(pendingContext, data.assignments);
+        data.fileCount = fileInfoData.fileCount;
+        data.files = fileInfoData.files;
       }
 
       writeBigAccountOrder(ensureStorageRoot(), payload.templateId, data);
@@ -9307,6 +10071,23 @@ function registerBigAccountOrderHandlers() {
     } catch (_error) {
       return { status: 'error', message: '大账号选择顺序保存失败' };
     }
+  });
+}
+
+const STATEMENT_IMPORT_PREVIEW_READY = 'statement-import-preview-ready';
+
+function statementImportPreviewReady() {
+  return { status: STATEMENT_IMPORT_PREVIEW_READY };
+}
+
+function statementImportSessionForInvocation(prepared, templateId, templateName) {
+  if (prepared && prepared.previewOnly === true && prepared.previewSession) {
+    return prepared.previewSession;
+  }
+  return getOrCreateStatementImportSession({
+    statementImportSessions,
+    templateId,
+    templateName
   });
 }
 
@@ -9341,7 +10122,109 @@ function matchesTemplateHeaders(filePath, template) {
 // 流程：守卫 → 文件选择 → 文件名匹配（0/>=2 整批截断）→ 表头校验（不一致整批截断）
 //     → 为每个文件构造 provisionalEntry → 聚合大账号（含主模板兜底）→ 复用大账号选择/直接生成流程
 // 整批截断：任一文件校验失败 → 所有文件全部不入库（无部分成功）
-async function handleFilenameMappingImport() {
+function executeFilenameMappingImportPlan(plan) {
+  const {
+    perTemplateConfigCount,
+    trimmedProvisionalEntries,
+    syntheticTemplateConfig,
+    selectedBigAccount,
+    selectionResult
+  } = plan;
+  const session = getOrCreateStatementImportSession({
+    statementImportSessions,
+    templateId: FILENAME_MAPPING_TEMPLATE_ID,
+    templateName: '按文件名映射模板'
+  });
+  if (perTemplateConfigCount > 1) {
+    const { lastResult, lastBatchId, lastGenerationTemplateConfig } = generateMultiTemplateGroupFiles({
+      fileEntries: trimmedProvisionalEntries,
+      fallbackTemplateConfig: syntheticTemplateConfig,
+      selectedBigAccount,
+      reuseMappedRows: true,
+      session,
+      replacePaths: selectionResult.replacePaths,
+      inputFilePaths: selectionResult.filePaths
+    });
+    rememberLastFileImportContext({
+      templateId: FILENAME_MAPPING_TEMPLATE_ID,
+      template: lastGenerationTemplateConfig.template,
+      mappings: lastGenerationTemplateConfig.exportMappings,
+      orderedTargetFields: lastGenerationTemplateConfig.exportTargetFields,
+      inputFilePaths: selectionResult.filePaths,
+      selectedBigAccount,
+      preparedDetailRows: null,
+      scope: 'current',
+      statementSessionKey: session.key,
+      currentBatchId: lastBatchId
+    });
+    return lastResult;
+  }
+
+  const generationTemplateConfig = resolveGenerationTemplateConfig({
+    fileEntries: trimmedProvisionalEntries,
+    fallbackTemplateConfig: syntheticTemplateConfig
+  });
+  const rebuiltFileEntries = rebuildMatchedTemplateFileEntries({
+    fileEntries: trimmedProvisionalEntries,
+    fallbackTemplateConfig: syntheticTemplateConfig,
+    selectedBigAccount,
+    reuseMappedRows: true
+  });
+  const generationMerchantMapping = (generationTemplateConfig.exportMappings || []).find(
+    (mapping) => normalizeCell(mapping.templateField) === 'MerchantId'
+  );
+  const generationIsMultiBigAccount = normalizeCell(generationMerchantMapping?.mappedField)
+    === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
+  const config = buildStatementGenerationConfig({
+    template: generationTemplateConfig.template,
+    mappings: generationTemplateConfig.exportMappings,
+    orderedTargetFields: generationTemplateConfig.exportTargetFields,
+    selectedBigAccount: generationIsMultiBigAccount ? selectedBigAccount : null,
+    allowManagedMerchantWithoutSelection: true
+  });
+  const preparedBatch = buildPreparedStatementBatchFromEntries({
+    config,
+    fileEntries: rebuiltFileEntries
+  });
+  const generatedFiles = {
+    ...generateStatementFiles({ config, preparedBatch, scope: 'current' }),
+    fileEntries: rebuiltFileEntries,
+    preparedBatch
+  };
+  selectionResult.replacePaths.forEach((filePath) => {
+    removeStatementSessionEntriesByFilePath(session, filePath);
+  });
+  const batchId = appendStatementSessionImport({
+    buildBatchId: buildStatementBatchId,
+    lastGeneratedExports,
+    session,
+    fileEntries: generatedFiles.fileEntries.map((entry) => buildStatementFileEntry({
+      ...entry,
+      buildEntryId: buildStatementFileEntryId
+    }))
+  });
+  rememberLastFileImportContext({
+    templateId: FILENAME_MAPPING_TEMPLATE_ID,
+    template: generationTemplateConfig.template,
+    mappings: generationTemplateConfig.exportMappings,
+    orderedTargetFields: generationTemplateConfig.exportTargetFields,
+    inputFilePaths: selectionResult.filePaths,
+    selectedBigAccount,
+    preparedDetailRows: generatedFiles.preparedBatch.detailRows,
+    scope: 'current',
+    statementSessionKey: session.key,
+    currentBatchId: batchId
+  });
+  updateStatementSessionCache(session, batchId, generatedFiles);
+  return buildImportResultFromGeneratedFiles({
+    generatedFiles,
+    templateId: FILENAME_MAPPING_TEMPLATE_ID,
+    templateName: generationTemplateConfig.template.name,
+    inputFilePaths: selectionResult.filePaths
+  });
+}
+
+async function handleFilenameMappingImport(prepared) {
   // ===== 守卫（与旧分支一致）=====
   if (fileImportInProgress) {
     return createErrorResult({
@@ -9373,18 +10256,18 @@ async function handleFilenameMappingImport() {
 
   fileImportInProgress = true;
   try {
-    clearPendingManualBalancePrompt();
-    clearPendingBigAccountSelection();
-
-    // ===== 步骤 0：文件选择 =====
-    const pickResult = await showImportOpenDialog('statement-generator', {
-      properties: ['openFile', 'multiSelections'],
-      filters: statementFileDialogFilters()
-    });
-    if (pickResult.canceled || pickResult.filePaths.length === 0) {
-      return { status: 'cancelled' };
+    if (!prepared.previewOnly) {
+      clearPendingManualBalancePrompt();
+      clearPendingBigAccountSelection();
     }
-    const inputFilePaths = normalizeInputFilePaths(pickResult.filePaths, { dedupe: false });
+    if (!prepared.previewOnly
+        && prepared.statementImportPlan
+        && prepared.statementImportPlan.kind === 'filename-mapping') {
+      return executeFilenameMappingImportPlan(prepared.statementImportPlan);
+    }
+
+    // ===== 步骤 0：文件选择与重复确认已在 reserve 前完成 =====
+    const inputFilePaths = prepared.inputFilePaths;
 
     // ===== 步骤 1：表头 → 模板候选匹配（遍历所有模板，用表头识别）=====
     // 0 命中 → FILENAME_MAPPING_NO_MATCH（整批截断）
@@ -9503,19 +10386,7 @@ async function handleFilenameMappingImport() {
 
     // ===== 步骤 5：session + 文件重复检测（复用 resolveImportFileSelection）=====
     // 用虚拟 ID 作为 session key：同一批「按文件名映射模板」导入共享 session，支持重复文件提示
-    const session = getOrCreateStatementImportSession({
-      statementImportSessions,
-      templateId: FILENAME_MAPPING_TEMPLATE_ID,
-      templateName: virtualTemplateName
-    });
-    const selectionResult = await resolveImportFileSelection({
-      templateName: virtualTemplateName,
-      session,
-      filePaths: inputFilePaths
-    });
-    if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
+    const selectionResult = prepared.selectionResult;
 
     // resolveImportFileSelection 可能剔除重复文件 → 同步裁剪 parentProvisionalEntries
     const acceptedPathSet = new Set(selectionResult.filePaths);
@@ -9546,7 +10417,7 @@ async function handleFilenameMappingImport() {
       }
       const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-      rememberPendingBigAccountSelection({
+      stagePendingBigAccountSelection(prepared, {
         templateId: FILENAME_MAPPING_TEMPLATE_ID,
         template: syntheticTemplateConfig.template,
         mappings: syntheticTemplateConfig.exportMappings,
@@ -9600,7 +10471,7 @@ async function handleFilenameMappingImport() {
         }
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(trimmedProvisionalEntries, { includeEmptyBlocks: true });
 
-        rememberPendingBigAccountSelection({
+        stagePendingBigAccountSelection(prepared, {
           templateId: FILENAME_MAPPING_TEMPLATE_ID,
           template: syntheticTemplateConfig.template,
           mappings: syntheticTemplateConfig.exportMappings,
@@ -9626,101 +10497,25 @@ async function handleFilenameMappingImport() {
       }
     }
 
-    // v1.5.2 #9 修复：多文件匹配不同模板时，按模板分组独立生成，确保余额账单银行名/所在地正确
-    if (perTemplateConfigCache.size > 1) {
-      const { lastResult, lastBatchId, lastGenerationTemplateConfig } = generateMultiTemplateGroupFiles({
-        fileEntries: trimmedProvisionalEntries,
-        fallbackTemplateConfig: syntheticTemplateConfig,
-        selectedBigAccount,
-        session,
-        replacePaths: selectionResult.replacePaths,
-        inputFilePaths: selectionResult.filePaths
-      });
-
-      rememberLastFileImportContext({
-        templateId: FILENAME_MAPPING_TEMPLATE_ID,
-        template: lastGenerationTemplateConfig.template,
-        mappings: lastGenerationTemplateConfig.exportMappings,
-        orderedTargetFields: lastGenerationTemplateConfig.exportTargetFields,
-        inputFilePaths: selectionResult.filePaths,
-        selectedBigAccount,
-        preparedDetailRows: null,
-        scope: 'current',
-        statementSessionKey: session.key,
-        currentBatchId: lastBatchId
-      });
-
-      return lastResult;
-    }
-
-    const generationTemplateConfig = resolveGenerationTemplateConfig({
-      fileEntries: trimmedProvisionalEntries,
-      fallbackTemplateConfig: syntheticTemplateConfig
-    });
-    const rebuiltFileEntries = rebuildMatchedTemplateFileEntries({
-      fileEntries: trimmedProvisionalEntries,
-      fallbackTemplateConfig: syntheticTemplateConfig,
-      selectedBigAccount
-    });
-    const generationMerchantMapping = (generationTemplateConfig.exportMappings || []).find(
-      (m) => normalizeCell(m.templateField) === 'MerchantId'
-    );
-    const generationIsMultiBigAccount = normalizeCell(generationMerchantMapping?.mappedField)
-      === `${FIXED_FIELD_VALUE_PREFIX}${MERCHANT_ID_MULTI_ACCOUNT_MARKER}`;
-    const genConfig = buildStatementGenerationConfig({
-      template: generationTemplateConfig.template,
-      mappings: generationTemplateConfig.exportMappings,
-      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-      selectedBigAccount: generationIsMultiBigAccount ? selectedBigAccount : null,
-      allowManagedMerchantWithoutSelection: true
-    });
-    const preparedBatch = buildPreparedStatementBatchFromEntries({
-      config: genConfig,
-      fileEntries: rebuiltFileEntries
-    });
-    const generatedFiles = {
-      ...generateStatementFiles({ config: genConfig, preparedBatch, scope: 'current' }),
-      fileEntries: rebuiltFileEntries,
-      preparedBatch
-    };
-
-    selectionResult.replacePaths.forEach((filePath) => {
-      removeStatementSessionEntriesByFilePath(session, filePath);
-    });
-
-    const batchId = appendStatementSessionImport({
-      buildBatchId: buildStatementBatchId,
-      lastGeneratedExports,
-      session,
-      fileEntries: generatedFiles.fileEntries.map((entry) => buildStatementFileEntry({
-        ...entry,
-        buildEntryId: buildStatementFileEntryId
-      }))
-    });
-
-    rememberLastFileImportContext({
-      templateId: FILENAME_MAPPING_TEMPLATE_ID,
-      template: generationTemplateConfig.template,
-      mappings: generationTemplateConfig.exportMappings,
-      orderedTargetFields: generationTemplateConfig.exportTargetFields,
-      inputFilePaths: selectionResult.filePaths,
+    const statementImportPlan = {
+      kind: 'filename-mapping',
+      perTemplateConfigCount: perTemplateConfigCache.size,
+      trimmedProvisionalEntries,
+      syntheticTemplateConfig,
       selectedBigAccount,
-      preparedDetailRows: generatedFiles.preparedBatch.detailRows,
-      scope: 'current',
-      statementSessionKey: session.key,
-      currentBatchId: batchId
-    });
-    updateStatementSessionCache(session, batchId, generatedFiles);
-    return buildImportResultFromGeneratedFiles({
-      generatedFiles,
-      templateId: FILENAME_MAPPING_TEMPLATE_ID,
-      templateName: generationTemplateConfig.template.name,
-      inputFilePaths: selectionResult.filePaths
-    });
+      selectionResult
+    };
+    if (prepared.previewOnly) {
+      prepared.statementImportPlan = statementImportPlan;
+      return statementImportPreviewReady();
+    }
+    return executeFilenameMappingImportPlan(statementImportPlan);
   } catch (error) {
-    clearGeneratedExports();
-    clearPendingManualBalancePrompt();
-    clearPendingBigAccountSelection();
+    if (!prepared.previewOnly) {
+      clearGeneratedExports();
+      clearPendingManualBalancePrompt();
+      clearPendingBigAccountSelection();
+    }
 
     if (error instanceof FileValidationError) {
       return createErrorResult({
@@ -9738,6 +10533,12 @@ async function handleFilenameMappingImport() {
       });
     }
 
+    if (prepared.previewOnly) {
+      return createPreflightErrorResult({
+        message: '文件转换错误，请检查导入文件后重试',
+        errorCode: 'FILE_IMPORT_RUNTIME'
+      });
+    }
     const logPath = appendLog(ensureStorageRoot(), error);
     return createErrorResult({
       step: '导入网银明细文件',
@@ -9760,12 +10561,185 @@ async function handleFilenameMappingImport() {
   }
 }
 
+async function prepareStatementImportFiles(templateId, templateName) {
+  const result = await showImportOpenDialog('statement-generator', {
+    properties: ['openFile', 'multiSelections'],
+    filters: statementFileDialogFilters()
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    return { proceed: false, result: { status: 'cancelled' } };
+  }
+  const inputFilePaths = normalizeInputFilePaths(result.filePaths, { dedupe: false });
+  const assertSelectionFresh = createPreviewSourceFreshnessGuard(
+    inputFilePaths,
+    '网银明细'
+  );
+  const sessionKey = String(templateId || '');
+  const existingSession = statementImportSessions.get(sessionKey) || null;
+  const previewSession = existingSession || {
+    key: sessionKey,
+    fileEntries: [],
+    batches: [],
+    importCount: 0
+  };
+  const sessionEvidence = JSON.stringify(previewSession.fileEntries.map((entry) => ({
+    id: entry.id,
+    filePath: entry.filePath
+  })));
+  const selectionResult = await resolveImportFileSelection({
+    templateName,
+    session: previewSession,
+    filePaths: inputFilePaths,
+    assertFreshAfterConfirmation: assertSelectionFresh
+  });
+  assertSelectionFresh();
+  if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
+    return { proceed: false, result: { status: 'cancelled' } };
+  }
+  const assertSourceFresh = createPreviewSourceFreshnessGuard(
+    selectionResult.filePaths,
+    '网银明细'
+  );
+  const assertFresh = () => {
+    assertSourceFresh();
+    const currentSession = statementImportSessions.get(sessionKey) || { fileEntries: [] };
+    const currentEvidence = JSON.stringify(currentSession.fileEntries.map((entry) => ({
+      id: entry.id,
+      filePath: entry.filePath
+    })));
+    if (currentEvidence !== sessionEvidence) {
+      throw new Error('导入会话在重复文件确认期间已变化，请重新选择文件');
+    }
+  };
+  return {
+    proceed: true,
+    inputPaths: selectionResult.filePaths,
+    inputFilePaths,
+    selectionResult,
+    previewSession,
+    assertFresh,
+    beforeStart: assertFresh
+  };
+}
+
 function registerFileHandlers() {
-  trackedIpcHandle('file:import', '生成网银账单', '导入文件', async (_event, templateId) => {
+  const fileImportHandler = {
+    async prepare(_event, templateId) {
+      if (fileImportInProgress) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '上一次导入尚未完成，请稍候',
+            errorCode: 'IMPORT_IN_PROGRESS'
+          })
+        };
+      }
+      if (!getEnumConfig()) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: MISSING_ENUM_MESSAGE,
+            errorCode: 'ENUM_MISSING'
+          })
+        };
+      }
+      const migrationPending = database.getSetting('account_mapping_migration_pending');
+      if (migrationPending === 'true') {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '账户映射数据迁移尚未完成，请先打开「账户映射」页面完成数据分配',
+            errorCode: 'ACCOUNT_MAPPING_MIGRATION_PENDING'
+          })
+        };
+      }
+      let preparedFiles;
+      if (isFilenameMappingMode(templateId)) {
+        preparedFiles = await prepareStatementImportFiles(
+          templateId,
+          '按文件名映射模板'
+        );
+      } else if (!templateId) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '请选择模板',
+            errorCode: 'TEMPLATE_REQUIRED'
+          })
+        };
+      } else {
+        const templateConfig = getTemplateMappingConfig(templateId);
+        if (!templateConfig) {
+          return {
+            proceed: false,
+            result: createPreflightErrorResult({
+              message: '未找到对应模板',
+              errorCode: 'TEMPLATE_NOT_FOUND'
+            })
+          };
+        }
+        preparedFiles = await prepareStatementImportFiles(
+          templateId,
+          templateConfig.template.name
+        );
+      }
+
+      if (!preparedFiles.proceed) return preparedFiles;
+      const previewPrepared = {
+        ...preparedFiles,
+        previewOnly: true,
+        pendingBigAccountSelection: null
+      };
+      const previewResult = await fileImportHandler.execute(
+        _event,
+        previewPrepared,
+        null,
+        templateId
+      );
+      try {
+        previewPrepared.assertFresh();
+      } catch (error) {
+        previewPrepared.previewOnly = false;
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: error && error.message
+              ? error.message
+              : '网银明细源文件在预检期间已变化，请重新选择',
+            errorCode: 'STATEMENT_IMPORT_SOURCE_CHANGED'
+          })
+        };
+      }
+      previewPrepared.previewOnly = false;
+      if (previewResult && previewResult.status === STATEMENT_IMPORT_PREVIEW_READY) {
+        return previewPrepared;
+      }
+      if (previewResult
+          && (previewResult.status === 'select-big-account'
+            || previewResult.status === 'remember-order-mismatch')) {
+        const pendingContext = previewPrepared.pendingBigAccountSelection;
+        if (!pendingContext) {
+          return {
+            proceed: false,
+            result: createPreflightErrorResult({
+              message: '大账号选择预览缺少主进程上下文，请重新导入文件',
+              errorCode: 'BIG_ACCOUNT_SELECTION_CONTEXT_MISSING'
+            })
+          };
+        }
+        const contextId = rememberPendingBigAccountSelection(pendingContext);
+        return {
+          proceed: false,
+          result: buildBigAccountPreviewResult(previewResult, contextId)
+        };
+      }
+      return { proceed: false, result: previewResult };
+    },
+    async execute(_event, prepared, _taskContext, templateId) {
     // v1.5.2 需求 3（G3-7）：虚拟 ID 走独立分支
     // 见 handleFilenameMappingImport（文件名+表头双校验 + 整批截断 + 复用大账号选择流程）
     if (isFilenameMappingMode(templateId)) {
-      return handleFilenameMappingImport();
+      return handleFilenameMappingImport(prepared);
     }
 
     if (fileImportInProgress) {
@@ -9776,38 +10750,14 @@ function registerFileHandlers() {
       });
     }
 
-    if (!getEnumConfig()) {
-      return createErrorResult({
-        step: '导入网银明细文件',
-        message: MISSING_ENUM_MESSAGE,
-        errorCode: 'ENUM_MISSING'
-      });
-    }
-
-    if (!templateId) {
-      return createErrorResult({
-        step: '导入网银明细文件',
-        message: '请选择模板',
-        errorCode: 'TEMPLATE_REQUIRED'
-      });
-    }
-
-    // v1.5.1: 迁移未完成时阻止导入，避免使用未分配的占位映射
-    const migrationPending = database.getSetting('account_mapping_migration_pending');
-    if (migrationPending === 'true') {
-      return createErrorResult({
-        step: '导入网银明细文件',
-        message: '账户映射数据迁移尚未完成，请先打开「账户映射」页面完成数据分配',
-        errorCode: 'ACCOUNT_MAPPING_MIGRATION_PENDING'
-      });
-    }
-
     let templateConfig = null;
     fileImportInProgress = true;
 
     try {
-      clearPendingManualBalancePrompt();
-      clearPendingBigAccountSelection();
+      if (!prepared.previewOnly) {
+        clearPendingManualBalancePrompt();
+        clearPendingBigAccountSelection();
+      }
       templateConfig = getTemplateMappingConfig(templateId);
 
       if (!templateConfig) {
@@ -9819,33 +10769,16 @@ function registerFileHandlers() {
         });
       }
 
-      const result = await showImportOpenDialog('statement-generator', {
-        properties: ['openFile', 'multiSelections'],
-        filters: statementFileDialogFilters()
-      });
-
-      if (result.canceled || result.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-
-      const inputFilePaths = normalizeInputFilePaths(result.filePaths, { dedupe: false });
-      const session = getOrCreateStatementImportSession({
-        statementImportSessions,
+      const inputFilePaths = prepared.inputFilePaths;
+      const session = statementImportSessionForInvocation(
+        prepared,
         templateId,
-        templateName: templateConfig.template.name
-      });
-      const selectionResult = await resolveImportFileSelection({
-        templateName: templateConfig.template.name,
-        session,
-        filePaths: inputFilePaths
-      });
-
-      if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
+        templateConfig.template.name
+      );
+      const selectionResult = prepared.selectionResult;
 
       // v1.5.1: 主模板导入 — 自动匹配子模板
-      if (templateConfig.template.isParent) {
+      if (templateConfig.template.isParent && !selectionResult.parentProvisionalEntries) {
         const childTemplates = database.listChildTemplates(templateId);
         const candidateTemplates = [templateConfig.template, ...childTemplates];
 
@@ -9959,6 +10892,9 @@ function registerFileHandlers() {
             orderedTargetFields: templateConfig.exportTargetFields,
             inputFilePaths: selectionResult.filePaths
           });
+        if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
+          selectionResult.parentProvisionalEntries = provisionalFileEntries;
+        }
         const savedMode = readBigAccountMode(ensureStorageRoot(), templateId);
         const savedOrderConfig = readBigAccountOrder(ensureStorageRoot(), templateId);
 
@@ -9971,117 +10907,131 @@ function registerFileHandlers() {
             // 文件个数不等于"记住顺序"里的文件个数 → 降级为"不固定"模式
             forceUnfixedMode = true;
           } else if (importFileCount === savedOrderConfig.fileCount) {
-            const allMerchantIds = effectiveBigAccounts.map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
-            const defaultExpectedSourceHeaders = templateConfig.template.headers || [];
-            const failedFileNames = [];
+            const autoMatchDecision = resolvePreparedFixedBigAccountAutoMatchDecision(
+              prepared,
+              () => {
+                const allMerchantIds = effectiveBigAccounts
+                  .map((ba) => normalizeCell(ba.merchantId))
+                  .filter((id) => id !== '');
+                const defaultExpectedSourceHeaders = templateConfig.template.headers || [];
+                const failedFileNames = [];
+                const usedSavedIndices = new Set();
+                const fileMatchMap = new Map(); // importIndex → savedFileIndex
 
-            // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
-            const usedSavedIndices = new Set();
-            const fileMatchMap = new Map(); // importIndex → savedFileIndex
+                // 每个导入文件用账户个数+账户号去全部保存文件里找匹配（不按位置对位）
+                provisionalFileEntries.forEach((entry, fileIndex) => {
+                  const entryHeaders = entry.matchedHeaders || defaultExpectedSourceHeaders;
+                  let fileResult = entry.skipDirectMerchantLookup
+                    ? { accounts: [], isSingleAccount: false }
+                    : identifyAccountsFromFile({
+                        filePath: entry.filePath,
+                        detailRows: entry.detailRows,
+                        expectedSourceHeaders: entryHeaders,
+                        allMerchantIds
+                      });
 
-            provisionalFileEntries.forEach((entry, fileIndex) => {
-              const entryHeaders = entry.matchedHeaders || defaultExpectedSourceHeaders;
-              let fileResult = entry.skipDirectMerchantLookup
-                ? { accounts: [], isSingleAccount: false }
-                : identifyAccountsFromFile({
-                    filePath: entry.filePath,
-                    detailRows: entry.detailRows,
-                    expectedSourceHeaders: entryHeaders,
-                    allMerchantIds
-                  });
-
-              // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-              if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-                if (entry.matchedTemplateId) {
-                  const rawRowsFull = readRows(entry.filePath, { blankrows: true });
-                  const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
-                  const bankIdToMerchant = new Map();
-                  for (const am of acctMappings) {
-                    const bankId = normalizeCell(am.bankAccountId);
-                    const clearingId = normalizeCell(am.clearingAccountId);
-                    if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-                  }
-                  if (bankIdToMerchant.size > 0) {
-                    const bankIds = [...bankIdToMerchant.keys()];
-                    const bigAccountOpts = expandBigAccountConfigurations(effectiveBigAccounts);
-                    for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
-                      const row = rawRowsFull[rowIdx];
-                      if (!Array.isArray(row)) continue;
-                      for (const cell of row) {
-                        const cellStr = normalizeCell(cell);
-                        if (!cellStr) continue;
-                        for (const bankId of bankIds) {
-                          if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                            const clearingId = bankIdToMerchant.get(bankId);
-                            const matched = bigAccountOpts.find((o) => matchMerchantIds(clearingId, o.merchantId) !== 'none');
-                            if (matched) {
-                              fileResult = { accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }], isSingleAccount: true };
-                              break;
+                  // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
+                  if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
+                    if (entry.matchedTemplateId) {
+                      const rawRowsFull = readRows(entry.filePath, { blankrows: true });
+                      const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
+                      const bankIdToMerchant = new Map();
+                      for (const am of acctMappings) {
+                        const bankId = normalizeCell(am.bankAccountId);
+                        const clearingId = normalizeCell(am.clearingAccountId);
+                        if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
+                      }
+                      if (bankIdToMerchant.size > 0) {
+                        const bankIds = [...bankIdToMerchant.keys()];
+                        const bigAccountOpts = expandBigAccountConfigurations(effectiveBigAccounts);
+                        for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
+                          const row = rawRowsFull[rowIdx];
+                          if (!Array.isArray(row)) continue;
+                          for (const cell of row) {
+                            const cellStr = normalizeCell(cell);
+                            if (!cellStr) continue;
+                            for (const bankId of bankIds) {
+                              if (matchMerchantIds(cellStr, bankId) !== 'none') {
+                                const clearingId = bankIdToMerchant.get(bankId);
+                                const matched = bigAccountOpts.find(
+                                  (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
+                                );
+                                if (matched) {
+                                  fileResult = {
+                                    accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }],
+                                    isSingleAccount: true
+                                  };
+                                  break;
+                                }
+                              }
                             }
+                            if (fileResult.accounts.length > 0) break;
                           }
                         }
-                        if (fileResult.accounts.length > 0) break;
                       }
                     }
                   }
-                }
-              }
 
-              let matchedSavedIndex = -1;
-              for (let si = 0; si < savedOrderConfig.files.length; si += 1) {
-                if (usedSavedIndices.has(si)) continue;
-                const savedFile = savedOrderConfig.files[si];
+                  let matchedSavedIndex = -1;
+                  for (let si = 0; si < savedOrderConfig.files.length; si += 1) {
+                    if (usedSavedIndices.has(si)) continue;
+                    const savedFile = savedOrderConfig.files[si];
+                    if (fileResult.accounts.length !== savedFile.accountCount) continue;
+                    const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
+                      return fileResult.accounts.some((identified) => (
+                        matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none'
+                      ));
+                    });
+                    if (allAccountsMatch) {
+                      matchedSavedIndex = si;
+                      break;
+                    }
+                  }
 
-                if (fileResult.accounts.length !== savedFile.accountCount) continue;
-
-                const allAccountsMatch = savedFile.accounts.every((savedAccount) => {
-                  return fileResult.accounts.some((identified) => matchMerchantIds(identified.merchantId, savedAccount.merchantId) !== 'none');
+                  if (matchedSavedIndex >= 0) {
+                    usedSavedIndices.add(matchedSavedIndex);
+                    fileMatchMap.set(fileIndex, matchedSavedIndex);
+                  } else {
+                    failedFileNames.push(path.basename(entry.filePath));
+                  }
                 });
 
-                if (allAccountsMatch) {
-                  matchedSavedIndex = si;
-                  break;
+                const reorderedAssignments = [];
+                if (failedFileNames.length === 0
+                    && Array.isArray(savedOrderConfig.assignments)
+                    && savedOrderConfig.assignments.length > 0) {
+                  // 按 fileMatchMap 重排 assignments：按导入文件顺序重组保存的 assignments
+                  const savedFiles = savedOrderConfig.files || [];
+                  const savedAssignments = savedOrderConfig.assignments || [];
+                  const savedFileRanges = [];
+                  let cumulativeIndex = 0;
+                  savedFiles.forEach((savedFile) => {
+                    const count = savedFile.accountCount || 0;
+                    savedFileRanges.push({ start: cumulativeIndex, count });
+                    cumulativeIndex += count;
+                  });
+                  let newRowIndex = 0;
+                  for (let importIdx = 0; importIdx < provisionalFileEntries.length; importIdx += 1) {
+                    const savedIdx = fileMatchMap.get(importIdx);
+                    if (savedIdx === undefined) continue;
+                    const range = savedFileRanges[savedIdx];
+                    if (!range) continue;
+                    const slice = savedAssignments.slice(range.start, range.start + range.count);
+                    slice.forEach((assignment) => {
+                      reorderedAssignments.push({ ...assignment, rowIndex: newRowIndex });
+                      newRowIndex += 1;
+                    });
+                  }
                 }
+                return { failedFileNames, reorderedAssignments };
               }
+            );
+            const { failedFileNames, reorderedAssignments } = autoMatchDecision;
 
-              if (matchedSavedIndex >= 0) {
-                usedSavedIndices.add(matchedSavedIndex);
-                fileMatchMap.set(fileIndex, matchedSavedIndex);
-              } else {
-                failedFileNames.push(path.basename(entry.filePath));
-              }
-            });
+            if (failedFileNames.length === 0 && reorderedAssignments.length > 0) {
 
-            if (failedFileNames.length === 0 && Array.isArray(savedOrderConfig.assignments) && savedOrderConfig.assignments.length > 0) {
-              // 按 fileMatchMap 重排 assignments：按导入文件顺序重组保存的 assignments
-              const savedFiles = savedOrderConfig.files || [];
-              const savedAssignments = savedOrderConfig.assignments || [];
-
-              // 计算每个保存文件的 assignment 范围（基于 accountCount 累加）
-              const savedFileRanges = [];
-              let cumulativeIndex = 0;
-              savedFiles.forEach((sf) => {
-                const count = sf.accountCount || 0;
-                savedFileRanges.push({ start: cumulativeIndex, count });
-                cumulativeIndex += count;
-              });
-
-              // 按导入文件顺序重组
-              const reorderedAssignments = [];
-              let newRowIndex = 0;
-              for (let importIdx = 0; importIdx < provisionalFileEntries.length; importIdx += 1) {
-                const savedIdx = fileMatchMap.get(importIdx);
-                if (savedIdx === undefined) continue;
-                const range = savedFileRanges[savedIdx];
-                if (!range) continue;
-                const slice = savedAssignments.slice(range.start, range.start + range.count);
-                slice.forEach((a) => {
-                  reorderedAssignments.push({ ...a, rowIndex: newRowIndex });
-                  newRowIndex += 1;
-                });
-              }
-
-              rememberPendingBigAccountSelection({
+              // 已保存顺序自动命中时只需本地上下文；仅真正进入人工选择时才持久化 opaque context。
+              const pendingContext = createPendingBigAccountSelectionContext(prepared, {
                 templateId,
                 template: templateConfig.template,
                 mappings: templateConfig.exportMappings,
@@ -10094,11 +11044,12 @@ function registerFileHandlers() {
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }),
               });
 
-              const autoResult = await ipcMain.emit('__internal-complete-big-account-selection__') || null;
+              const autoResult = prepared.previewOnly
+                ? null
+                : await ipcMain.emit('__internal-complete-big-account-selection__') || null;
               if (!autoResult) {
                 try {
                   const directResult = await (async () => {
-                    const pendingContext = lastPendingBigAccountSelection;
                     const isFixedMode = true;
                     const expectedRows = pendingContext.rowsWithEmptyBlocks || pendingContext.rows;
                     const normalizedAssignments = reorderedAssignments
@@ -10129,6 +11080,8 @@ function registerFileHandlers() {
                       });
                       return null;
                     }
+
+                    if (prepared.previewOnly) return statementImportPreviewReady();
 
                     const resolvedFileEntries = applyBigAccountAssignmentsToFileEntries(
                       pendingContext.fileEntries,
@@ -10208,7 +11161,7 @@ function registerFileHandlers() {
             }
 
             if (failedFileNames.length > 0) {
-              rememberPendingBigAccountSelection({
+              stagePendingBigAccountSelection(prepared, {
                 templateId,
                 template: templateConfig.template,
                 mappings: templateConfig.exportMappings,
@@ -10232,15 +11185,13 @@ function registerFileHandlers() {
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName),
-              filePath: row.filePath || ''
+                  fileName: normalizeCell(row.fileName)
                 })),
                 rowsWithEmptyBlocks: buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true }).map((row, index) => ({
                   index: Number.isInteger(row.index) ? row.index : index,
                   label: `${index + 1}.`,
                   sourceRowNumber: Number(row.sourceRowNumber || 0),
-                  fileName: normalizeCell(row.fileName),
-              filePath: row.filePath || ''
+                  fileName: normalizeCell(row.fileName)
                 })),
                 bigAccounts: effectiveBigAccounts.map((item) => ({
                   merchantId: normalizeCell(item.merchantId),
@@ -10274,7 +11225,7 @@ function registerFileHandlers() {
 
         const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
 
-        rememberPendingBigAccountSelection({
+        stagePendingBigAccountSelection(prepared, {
           templateId,
           template: templateConfig.template,
           mappings: templateConfig.exportMappings,
@@ -10308,6 +11259,9 @@ function registerFileHandlers() {
             orderedTargetFields: templateConfig.exportTargetFields,
             inputFilePaths: selectionResult.filePaths
           });
+        if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
+          selectionResult.parentProvisionalEntries = provisionalFileEntries;
+        }
         const totalBlocks = provisionalFileEntries.reduce((sum, entry) => {
           return sum + identifyAccountBlocks(entry.detailRows).length;
         }, 0);
@@ -10344,7 +11298,7 @@ function registerFileHandlers() {
           }
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(provisionalFileEntries, { includeEmptyBlocks: true });
-          rememberPendingBigAccountSelection({
+          stagePendingBigAccountSelection(prepared, {
             templateId,
             template: templateConfig.template,
             mappings: templateConfig.exportMappings,
@@ -10381,11 +11335,17 @@ function registerFileHandlers() {
             orderedTargetFields: templateConfig.exportTargetFields,
             inputFilePaths: selectionResult.filePaths
           });
-        const recognitionResult = resolveDirectBigAccountRecognition({
-          fileEntries: recognitionFileEntries,
-          maintainedBigAccounts: effectiveBigAccounts,
-          fallbackTemplateConfig: templateConfig,
-          templateName: templateConfig.template.name
+        if (prepared.previewOnly && !selectionResult.parentProvisionalEntries) {
+          selectionResult.parentProvisionalEntries = recognitionFileEntries;
+        }
+        const recognitionResult = resolvePreparedDirectBigAccountRecognition({
+          prepared,
+          recognitionArgs: {
+            fileEntries: recognitionFileEntries,
+            maintainedBigAccounts: effectiveBigAccounts,
+            fallbackTemplateConfig: templateConfig,
+            templateName: templateConfig.template.name
+          }
         });
 
         if (recognitionResult.status === 'failed') {
@@ -10410,7 +11370,7 @@ function registerFileHandlers() {
 
           const selectionRowsWithEmpty = buildBigAccountSelectionRows(recognitionFileEntries, { includeEmptyBlocks: true });
 
-          rememberPendingBigAccountSelection({
+          stagePendingBigAccountSelection(prepared, {
             templateId,
             template: templateConfig.template,
             mappings: templateConfig.exportMappings,
@@ -10436,6 +11396,8 @@ function registerFileHandlers() {
         }
       }
 
+      if (prepared.previewOnly) return statementImportPreviewReady();
+
       let generatedFiles;
       if (selectionResult.parentProvisionalEntries) {
         const generationTemplateConfig = resolveGenerationTemplateConfig({
@@ -10445,7 +11407,8 @@ function registerFileHandlers() {
         const rebuiltFileEntries = rebuildMatchedTemplateFileEntries({
           fileEntries: selectionResult.parentProvisionalEntries,
           fallbackTemplateConfig: templateConfig,
-          selectedBigAccount
+          selectedBigAccount,
+          reuseMappedRows: true
         });
         // batch 级 config 也需按实际模板类型决定是否传 selectedBigAccount
         const generationMerchantMapping = (generationTemplateConfig.exportMappings || []).find(
@@ -10524,9 +11487,11 @@ function registerFileHandlers() {
         inputFilePaths: selectionResult.filePaths
       });
     } catch (error) {
-      clearGeneratedExports();
-      clearPendingManualBalancePrompt();
-      clearPendingBigAccountSelection();
+      if (!prepared.previewOnly) {
+        clearGeneratedExports();
+        clearPendingManualBalancePrompt();
+        clearPendingBigAccountSelection();
+      }
 
       if (error instanceof FileValidationError) {
         return createErrorResult({
@@ -10544,6 +11509,12 @@ function registerFileHandlers() {
         });
       }
 
+      if (prepared.previewOnly) {
+        return createPreflightErrorResult({
+          message: '文件转换错误，请检查导入文件后重试',
+          errorCode: 'FILE_IMPORT_RUNTIME'
+        });
+      }
       const logPath = appendLog(ensureStorageRoot(), error);
       return createErrorResult({
         step: '导入网银明细文件',
@@ -10564,16 +11535,73 @@ function registerFileHandlers() {
     } finally {
       fileImportInProgress = false;
     }
-  });
+    }
+  };
+  trackedIpcHandle(
+    'file:import',
+    '生成网银账单',
+    '导入文件',
+    fileImportHandler
+  );
 
-  ipcMain.handle('file:cancel-big-account-selection', () => {
-    clearPendingBigAccountSelection();
+  ipcMain.handle('file:cancel-big-account-selection', (_event, contextId) => {
+    if (!requirePendingBigAccountSelection(contextId)) {
+      return { status: 'not-active' };
+    }
+    clearPendingBigAccountSelection(contextId);
     return { status: 'success' };
   });
 
-  businessIpcHandle('file:complete-big-account-selection', '生成账单', async (_event, payload = {}) => {
-    const pendingContext = lastPendingBigAccountSelection;
-
+  const completeBigAccountSelectionHandler = {
+    prepare(_event, payload = {}) {
+      const contextId = normalizeCell(payload.contextId);
+      const pendingContext = requirePendingBigAccountSelection(contextId);
+      if (!pendingContext) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '当前没有待处理的大账号选择任务，请重新导入文件',
+            errorCode: 'BIG_ACCOUNT_SELECTION_MISSING'
+          })
+        };
+      }
+      try {
+        if (pendingContext.assertFresh) pendingContext.assertFresh();
+        const normalized = normalizePendingBigAccountSelection(pendingContext, payload);
+        return {
+          proceed: true,
+          args: [],
+          inputPaths: pendingContext.inputFilePaths,
+          contextId,
+          pendingContext,
+          ...normalized,
+          rememberOrder: normalized.isFixedMode && typeof payload.rememberOrder === 'boolean'
+            ? payload.rememberOrder
+            : null,
+          beforeStart() {
+            const current = requirePendingBigAccountSelection(contextId);
+            if (current !== pendingContext) {
+              throw new Error('大账号选择上下文已失效，请重新导入文件');
+            }
+            if (pendingContext.assertFresh) pendingContext.assertFresh();
+          }
+        };
+      } catch (error) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: error && error.message
+              ? error.message
+              : '大账号选择无效，请重新选择',
+            errorCode: error && error.code
+              ? error.code
+              : 'BIG_ACCOUNT_SELECTION_INVALID'
+          })
+        };
+      }
+    },
+    async execute(_event, prepared) {
+    const pendingContext = requirePendingBigAccountSelection(prepared.contextId);
     if (!pendingContext) {
       return createErrorResult({
         step: '选择大账号',
@@ -10581,53 +11609,8 @@ function registerFileHandlers() {
         errorCode: 'BIG_ACCOUNT_SELECTION_MISSING'
       });
     }
-
-    const groupedBigAccounts = Array.isArray(pendingContext.bigAccounts) ? pendingContext.bigAccounts : [];
-    const assignments = Array.isArray(payload.assignments)
-      ? payload.assignments.map((item, index) => ({
-          merchantId: normalizeCell(item.merchantId),
-          currency: normalizeCell(item.currency),
-          rowIndex: Number.isInteger(item.index) ? item.index : (Number.isInteger(item.rowIndex) ? item.rowIndex : index)
-        }))
-      : [];
-
-    const isFixedMode = payload.mode === 'fixed';
-    const expectedRows = isFixedMode
-      ? (pendingContext.rowsWithEmptyBlocks || pendingContext.rows)
-      : pendingContext.rows;
-
-    if (!assignments.length || assignments.length !== expectedRows.length) {
-      return createErrorResult({
-        step: '选择大账号',
-        message: `请选择有效的大账号 / 币种（需要 ${expectedRows.length} 个，当前 ${assignments.length} 个）`,
-        errorCode: 'BIG_ACCOUNT_SELECTION_INVALID',
-        templateName: pendingContext.template.name
-      });
-    }
-
-    const normalizedAssignments = assignments.map((assignment) => {
-      const matchedAccount = groupedBigAccounts.find((item) => item.merchantId === assignment.merchantId);
-
-      if (!matchedAccount) {
-        throw new FileValidationError('FILE_READ', '请选择有效的大账号 / 币种');
-      }
-
-      const availableCurrencies = Array.isArray(matchedAccount.currencies) ? matchedAccount.currencies : [];
-      const normalizedCurrency = matchedAccount.isMultiCurrency
-        ? normalizeCell(assignment.currency)
-        : normalizeCell(availableCurrencies[0] || assignment.currency);
-
-      if (!normalizedCurrency || !availableCurrencies.includes(normalizedCurrency)) {
-        throw new FileValidationError('FILE_READ', `大账号 ${matchedAccount.merchantId} 的币种选择无效`);
-      }
-
-      return {
-        merchantId: matchedAccount.merchantId,
-        currency: normalizedCurrency,
-        rowIndex: assignment.rowIndex
-      };
-    }).sort((left, right) => left.rowIndex - right.rowIndex);
-
+    clearPendingBigAccountSelection(prepared.contextId);
+    const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
     try {
       const session = getOrCreateStatementImportSession({
         statementImportSessions,
@@ -10672,8 +11655,12 @@ function registerFileHandlers() {
           statementSessionKey: session.key,
           currentBatchId: lastBatchId,
         });
-        clearPendingBigAccountSelection();
-        return lastResult;
+        return persistBigAccountOrderAfterGeneration({
+          pendingContext,
+          normalizedAssignments,
+          rememberOrder,
+          result: lastResult
+        });
       }
 
       const generationTemplateConfig = resolveGenerationTemplateConfig({
@@ -10724,13 +11711,18 @@ function registerFileHandlers() {
         statementSessionKey: session.key,
         currentBatchId: batchId,
       });
-      clearPendingBigAccountSelection();
       updateStatementSessionCache(session, batchId, generatedFiles);
-      return buildImportResultFromGeneratedFiles({
+      const result = buildImportResultFromGeneratedFiles({
         generatedFiles,
         templateId: pendingContext.templateId,
         templateName: generationTemplateConfig.template.name,
         inputFilePaths: pendingContext.inputFilePaths
+      });
+      return persistBigAccountOrderAfterGeneration({
+        pendingContext,
+        normalizedAssignments,
+        rememberOrder,
+        result
       });
     } catch (error) {
       clearGeneratedExports();
@@ -10770,13 +11762,23 @@ function registerFileHandlers() {
         templateName: pendingContext.template.name
       });
     }
-  });
+    }
+  };
+  businessIpcHandle(
+    'file:complete-big-account-selection',
+    '生成账单',
+    completeBigAccountSelectionHandler
+  );
 
 
-  businessIpcHandle('file:extract-big-account-order', '识别大账号顺序', (_event, payload = {}) => {
-    const pendingContext = lastPendingBigAccountSelection;
+  ipcMain.handle('file:extract-big-account-order', (_event, payload = {}) => {
+    const pendingContext = requirePendingBigAccountSelection(payload.contextId);
     const mode = payload?.mode || 'unfixed';
-    const frontendFileRows = Array.isArray(payload?.fileRows) ? payload.fileRows : [];
+    const selectedServerRows = selectPendingBigAccountRows(
+      pendingContext,
+      mode,
+      payload.rowIndexes
+    );
 
     if (!pendingContext) {
       return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
@@ -10785,6 +11787,16 @@ function registerFileHandlers() {
     const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
     const defaultExpectedSourceHeaders = pendingContext.template?.headers || [];
     const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
+
+    try {
+      if (pendingContext.assertFresh) pendingContext.assertFresh();
+    } catch (error) {
+      return {
+        status: 'error',
+        failedRows: [],
+        message: error && error.message ? error.message : '大账号选择预览已失效，请重新导入文件'
+      };
+    }
 
     // 构建 filePath → matchedHeaders 映射（用于子模板文件的 header 行检测）
     const fileHeadersMap = new Map();
@@ -10800,9 +11812,12 @@ function registerFileHandlers() {
       const ambiguousCurrencyFiles = [];
       let globalIndex = 0;
 
-      if (mode !== 'fixed' && frontendFileRows.length > 0) {
-        // 不固定模式：按前端传来的 fileRows（左侧面板显示的行）逐行提取
-        // 每个 fileRow 有 sourceRowNumber + fileName，根据 sourceRowNumber 在原始文件里找对应的账户号
+      if (selectedServerRows.length === 0) {
+        return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
+      }
+
+      if (mode !== 'fixed') {
+        // 不固定模式：前端只回传 rowIndex；主进程从 pending context 解析出源行信息。
         const fileEntriesByPath = new Map();
         (pendingContext.fileEntries || []).forEach((entry) => {
           fileEntriesByPath.set(entry.filePath, entry);
@@ -10817,15 +11832,15 @@ function registerFileHandlers() {
           fileCache.set(filePath, { rawRows, headerRowNumbers, entry });
         });
 
-        frontendFileRows.forEach((fr) => {
+        selectedServerRows.forEach((fr) => {
+          const serverRowIndex = Number(fr.index);
           const cached = fileCache.get(fr.filePath || '') || fileCache.get(
             // fallback: 按 basename 匹配（兼容旧数据）
             [...fileCache.keys()].find((fp) => path.basename(fp) === fr.fileName) || ''
           );
 
           if (!cached) {
-            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
-            globalIndex += 1;
+            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
             return;
           }
 
@@ -10916,21 +11931,34 @@ function registerFileHandlers() {
             if (matched) {
               accounts.push({ merchantId: matched.merchantId, currency: matched.currency, matchType: bestMatch.matchType, fileName: fr.fileName });
             } else {
-              failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+              failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
             }
           } else if (headerIdx < 0 && !cached.entry?.skipDirectMerchantLookup) {
 
-            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
           } else {
 
-            failedRows.push({ index: globalIndex, fileName: fr.fileName || '' });
+            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
           }
-          globalIndex += 1;
         });
       } else {
-        // 固定模式（或没传 fileRows 的 fallback）：提取全量账户
+        // 固定模式同样只处理 renderer 回传 rowIndex 命中的服务端 rowsWithEmptyBlocks。
+        const requestedRowIndexes = new Set(
+          selectedServerRows.map((row) => Number(row.index))
+        );
         (pendingContext.fileEntries || []).forEach((entry) => {
           const fileName = path.basename(entry.filePath);
+          const blockCount = identifyAccountBlocks(
+            entry.detailRows,
+            { includeEmptyBlocks: true }
+          ).length;
+          const firstServerRowIndex = globalIndex;
+          globalIndex += blockCount;
+          const hasRequestedRow = Array.from(
+            { length: blockCount },
+            (_unused, index) => firstServerRowIndex + index
+          ).some((rowIndex) => requestedRowIndexes.has(rowIndex));
+          if (!hasRequestedRow) return;
           const fileExpectedHeaders = fileHeadersMap.get(entry.filePath) || defaultExpectedSourceHeaders;
           // selfInputMerchant 的文件跳过标准提取（避免 fuzzy match 误匹配），直接走桥接
           let fileResult = entry.skipDirectMerchantLookup
@@ -10989,15 +12017,12 @@ function registerFileHandlers() {
             }
           }
 
-          const rawRows = readRows(entry.filePath, { blankrows: true });
-          const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, fileExpectedHeaders);
-          const blockCount = Math.max(headerRowNumbers.length, fileResult.accounts.length, 1);
-
           for (let bi = 0; bi < blockCount; bi += 1) {
+          const serverRowIndex = firstServerRowIndex + bi;
+          if (!requestedRowIndexes.has(serverRowIndex)) continue;
           const identified = fileResult.accounts[bi];
           if (!identified) {
-            failedRows.push({ index: globalIndex, fileName });
-            globalIndex += 1;
+            failedRows.push({ index: serverRowIndex, fileName });
             continue;
           }
 
@@ -11014,9 +12039,8 @@ function registerFileHandlers() {
               fileName
             });
           } else {
-            failedRows.push({ index: globalIndex, fileName });
+            failedRows.push({ index: serverRowIndex, fileName });
           }
-          globalIndex += 1;
           }
         });
       }
@@ -11036,167 +12060,197 @@ function registerFileHandlers() {
     }
   });
 
-  businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', (_event, payload = {}) => {
-    const pendingPrompt = lastManualBalancePrompt;
-    const importContext = lastFileImportContext;
-
-    if (!pendingPrompt || !importContext) {
-      return createErrorResult({
-        step: '补录上一账单日余额',
-        message: '当前没有待补录的余额校验任务，请重新导入文件',
-        errorCode: 'BALANCE_SEED_CONTEXT_MISSING',
-        templateName: importContext?.template?.name || ''
-      });
-    }
-
-    try {
-      const seedDate = parseDateValue(payload.billDate);
-      const targetDate = parseDateValue(pendingPrompt.targetBillDate);
-      const normalizedSeedDate = seedDate ? formatDateLabel(seedDate) : '';
-      const normalizedTargetDate = targetDate ? formatDateLabel(targetDate) : '';
-      const endBalance = parseNumericValue(payload.endBalance);
-
-      function buildManualBalanceInvalidResult(message) {
+  businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', {
+    async prepare(_event, payload = {}) {
+      const pendingPrompt = lastManualBalancePrompt;
+      const importContext = lastFileImportContext;
+      try {
+        const session = importContext && importContext.statementSessionKey
+          ? statementImportSessions.get(importContext.statementSessionKey) || null
+          : null;
+        const resolution = prepareManualBalanceSeedSubmission({
+          payload,
+          confirmation: lastPendingBalanceSeedConfirmation,
+          pendingPrompt,
+          importContext,
+          generatedExports: lastGeneratedExports,
+          // prepare 只读：不通过 ensureStorageRoot 创建任何目录。
+          storageRoot: getStorageRoot(),
+          session,
+          createContextId: randomUUID,
+          createFreshnessGuard: createManualBalanceSeedFreshnessGuard
+        });
+        lastPendingBalanceSeedConfirmation = resolution.nextConfirmation;
+        return resolution.prepared;
+      } catch (error) {
         return {
-          status: 'manual-balance-invalid',
-          message,
-          detailReady: Boolean(lastGeneratedExports.detail),
-          balanceReady: Boolean(lastGeneratedExports.balance),
-          errorReportReady: false,
-          manualBalancePromptReady: true,
-          manualBalancePrompt: { ...pendingPrompt }
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: error && error.message ? error.message : '余额补录准备失败',
+            errorCode: error && error.code || 'BALANCE_SEED_PREPARE_FAILED',
+            detailLines: Array.isArray(error && error.detailLines) ? error.detailLines : []
+          })
         };
       }
+    },
 
-      if (!normalizedSeedDate) {
-        return buildManualBalanceInvalidResult('请选择上一账单日日期');
+    async execute(_event, prepared) {
+      const { plan, pendingPrompt, importContext, session } = prepared || {};
+      if (!plan || !pendingPrompt || !importContext
+          || (plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
+        throw new TypeError('余额补录 execute 缺少已确认的准备计划');
+      }
+      if (prepared.confirmedOverwrite === true) {
+        // 真实 execute 入口只消费一次主进程确认上下文。
+        lastPendingBalanceSeedConfirmation = null;
       }
 
-      if (normalizedTargetDate && normalizedSeedDate >= normalizedTargetDate) {
-        return buildManualBalanceInvalidResult('上一账单日日期必须早于当前需要校验的账单日期');
-      }
+      try {
+        writeManualBalanceSeedPlan(plan);
+        const seedTemplateName = plan.record.templateName;
+        appendActivityLogEntry({
+          level: 'info',
+          message: '补录上一账单日余额成功',
+          details: [
+            `模板名：${seedTemplateName}`,
+            `银行账号：${plan.record.merchantId}`,
+            `币种：${plan.record.currency || '(空)'}`,
+            `账单日期：${plan.record.billDate}`,
+            `余额：${plan.record.endBalance}`,
+            `生成方式：${BALANCE_SEED_GENERATION_METHODS.manual}`
+          ]
+        });
 
-      if (endBalance === null) {
-        return buildManualBalanceInvalidResult('请输入有效的上一账单日余额');
-      }
-
-      // 用 prompt 里的 templateName（来自实际缺 seed 的组），不用 importContext.template.name（可能是最后一组）
-      const seedTemplateName = pendingPrompt.templateName || importContext.template.name;
-      const upsertResult = upsertBalanceSeedRecord(ensureStorageRoot(), {
-        templateName: seedTemplateName,
-        merchantId: pendingPrompt.merchantId,
-        currency: pendingPrompt.currency,
-        billDate: normalizedSeedDate,
-        endBalance,
-        generationMethod: BALANCE_SEED_GENERATION_METHODS.manual,
-        overwrite: Boolean(payload.overwrite)
-      });
-
-      if (upsertResult.status === 'confirm-overwrite') {
-        return {
-          status: 'confirm-overwrite',
-          message: '该日期的余额已存在，确认覆盖吗？',
-          existingRecord: upsertResult.existingRecord,
-          incomingRecord: upsertResult.incomingRecord
-        };
-      }
-
-      appendActivityLogEntry({
-        level: 'info',
-        message: '补录上一账单日余额成功',
-        details: [
-          `模板名：${seedTemplateName}`,
-          `银行账号：${pendingPrompt.merchantId}`,
-          `币种：${pendingPrompt.currency || '(空)'}`,
-          `账单日期：${normalizedSeedDate}`,
-          `余额：${endBalance}`,
-          `生成方式：${BALANCE_SEED_GENERATION_METHODS.manual}`
-        ]
-      });
-
-      // v1.5.2：虚拟 ID 下走多模板重新生成（避免用单组 importContext 产出不完整余额）
-      const session = importContext.statementSessionKey
-        ? statementImportSessions.get(importContext.statementSessionKey) || null
-        : null;
-
-      if (isFilenameMappingMode(importContext.templateId) && session) {
-        const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
-        if (regenResult.needsSeed) {
-          // 还有其他 group 需要补录 → 返回下一个 prompt
-          return buildManualBalanceRequiredResult(regenResult.prompt, {
-            warnings: regenResult.warnings,
-            balance: null,
-            detail: lastGeneratedExports.detail,
-            balanceRequested: true
+        // v1.5.2：虚拟 ID 下走多模板重新生成（避免用单组 importContext 产出不完整余额）
+        if (isFilenameMappingMode(importContext.templateId) && session) {
+          const regenResult = regenerateVirtualTemplateBalanceFromSession(session, importContext.scope || 'current');
+          if (regenResult.needsSeed) {
+            // 还有其他 group 需要补录 → 返回下一个 prompt
+            return buildManualBalanceRequiredResult(regenResult.prompt, {
+              warnings: regenResult.warnings,
+              balance: null,
+              detail: lastGeneratedExports.detail,
+              balanceRequested: true
+            });
+          }
+          const generatedFiles = regenResult.generatedFiles;
+          lastGeneratedExports.balance = generatedFiles.balance;
+          return buildImportResultFromGeneratedFiles({
+            generatedFiles: { ...generatedFiles, detail: lastGeneratedExports.detail },
+            templateId: FILENAME_MAPPING_TEMPLATE_ID,
+            templateName: '按文件名映射模板',
+            inputFilePaths: importContext.inputFilePaths
           });
         }
-        const generatedFiles = regenResult.generatedFiles;
-        lastGeneratedExports.balance = generatedFiles.balance;
+
+        const generatedFiles = generateFilesFromRememberedContext(importContext);
+
+        if (importContext.scope === 'all') {
+          cacheAllStatementExport('balance', generatedFiles.balance);
+        } else if (session) {
+          updateStatementSessionCache(session, importContext.currentBatchId || session.currentBatchId, generatedFiles);
+        } else {
+          lastGeneratedExports.detail = generatedFiles.detail;
+          lastGeneratedExports.balance = generatedFiles.balance;
+        }
+
         return buildImportResultFromGeneratedFiles({
-          generatedFiles: { ...generatedFiles, detail: lastGeneratedExports.detail },
-          templateId: FILENAME_MAPPING_TEMPLATE_ID,
-          templateName: '按文件名映射模板',
+          generatedFiles,
+          templateId: importContext.templateId,
+          templateName: importContext.template.name,
           inputFilePaths: importContext.inputFilePaths
         });
-      }
+      } catch (error) {
+        if (error instanceof FileValidationError) {
+          clearPendingManualBalancePrompt();
+          return createErrorResult({
+            step: '补录上一账单日余额',
+            message: error.message,
+            errorCode: error.code,
+            detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+            context: {
+              templateName: importContext.template.name,
+              ...(error.context || {})
+            },
+            templateName: importContext.template.name,
+            originalError: error
+          });
+        }
 
-      const generatedFiles = generateFilesFromRememberedContext(importContext);
-
-      if (importContext.scope === 'all') {
-        cacheAllStatementExport('balance', generatedFiles.balance);
-      } else if (session) {
-        updateStatementSessionCache(session, importContext.currentBatchId || session.currentBatchId, generatedFiles);
-      } else {
-        lastGeneratedExports.detail = generatedFiles.detail;
-        lastGeneratedExports.balance = generatedFiles.balance;
-      }
-
-      return buildImportResultFromGeneratedFiles({
-        generatedFiles,
-        templateId: importContext.templateId,
-        templateName: importContext.template.name,
-        inputFilePaths: importContext.inputFilePaths
-      });
-    } catch (error) {
-      if (error instanceof FileValidationError) {
+        const logPath = appendLog(ensureStorageRoot(), error);
         clearPendingManualBalancePrompt();
         return createErrorResult({
           step: '补录上一账单日余额',
-          message: error.message,
-          errorCode: error.code,
-          detailLines: Array.isArray(error.detailLines) ? error.detailLines : [],
+          message: '余额补录失败，请导出报错文件查看详情',
+          errorCode: 'BALANCE_SEED_SAVE_RUNTIME',
+          errorType: '系统错误',
+          detailLines: [`日志文件：${logPath}`],
           context: {
-            templateName: importContext.template.name,
-            ...(error.context || {})
+            templateName: importContext.template.name
           },
           templateName: importContext.template.name,
           originalError: error
         });
       }
-
-      const logPath = appendLog(ensureStorageRoot(), error);
-      clearPendingManualBalancePrompt();
-      return createErrorResult({
-        step: '补录上一账单日余额',
-        message: '余额补录失败，请导出报错文件查看详情',
-        errorCode: 'BALANCE_SEED_SAVE_RUNTIME',
-        errorType: '系统错误',
-        detailLines: [`日志文件：${logPath}`],
-        context: {
-          templateName: importContext.template.name
-        },
-        templateName: importContext.template.name,
-        originalError: error
-      });
     }
   });
 
-  trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', (_event, scope = 'auto') => {
-    return exportStatementByScope('detail', scope);
+  const prepareStatementExport = async (kind, scope) => {
+    let plan;
+    try {
+      plan = buildStatementExportPlan(kind, scope);
+    } catch (error) {
+      return {
+        proceed: false,
+        result: createPreflightErrorResult({
+          message: error && error.message ? error.message : '导出准备失败',
+          errorCode: error && error.code || 'EXPORT_PREPARE_FAILED'
+        })
+      };
+    }
+    if (plan.stopResult) return { proceed: false, result: plan.stopResult };
+    const saveResult = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: plan.defaultFileName,
+      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+    });
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { proceed: false, result: { status: 'cancelled' } };
+    }
+    return {
+      proceed: true,
+      outputPaths: [saveResult.filePath],
+      kind,
+      plan,
+      savePath: saveResult.filePath,
+      beforeStart() {
+        const current = buildStatementExportPlan(kind, plan.normalizedScope);
+        if (current.stopResult
+            || current.session !== plan.session
+            || current.generatedFile !== plan.generatedFile
+            || current.needsGeneration !== plan.needsGeneration
+            || current.defaultFileName !== plan.defaultFileName) {
+          throw new Error('账单导出会话在保存确认期间已变化，请重新导出');
+        }
+      }
+    };
+  };
+
+  trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', {
+    prepare: (_event, scope = 'auto') => prepareStatementExport('detail', scope),
+    execute: (_event, prepared) => exportStatementByScope(
+      'detail',
+      prepared.plan.normalizedScope,
+      prepared.savePath
+    )
   });
 
-  trackedIpcHandle('file:export-balance', '生成网银账单', '导出余额', (_event, scope = 'auto') => {
-    return exportStatementByScope('balance', scope);
+  trackedIpcHandle('file:export-balance', '生成网银账单', '导出余额', {
+    prepare: (_event, scope = 'auto') => prepareStatementExport('balance', scope),
+    execute: (_event, prepared) => exportStatementByScope(
+      'balance',
+      prepared.plan.normalizedScope,
+      prepared.savePath
+    )
   });
 
   // v1.5.3 R1 (T1.3)：月度余额装配 IPC
@@ -11359,53 +12413,65 @@ function registerFileHandlers() {
   //   { status: 'cancelled' }
   //   { status: 'error', errorCode, message }
   // PR #34 self-review：与 file:export-balance 共享"导出余额"功能 key（用户视角都是月度/单批的导出余额操作）
-  trackedIpcHandle('monthly-balance:export', '生成网银账单', '导出余额', async () => {
-    try {
+  trackedIpcHandle('monthly-balance:export', '生成网银账单', '导出余额', {
+    async prepare() {
       const pending = lastGeneratedExports.monthlyBalance;
       if (!pending || !pending.filePath) {
         return {
-          status: 'error',
-          errorCode: 'MONTHLY_BALANCE_NO_PENDING',
-          message: '尚未生成月度余额账单，请先在弹窗中选择模板和时间'
+          proceed: false,
+          result: {
+            status: 'error',
+            errorCode: 'MONTHLY_BALANCE_NO_PENDING',
+            message: '尚未生成月度余额账单，请先在弹窗中选择模板和时间'
+          }
         };
       }
       if (!fs.existsSync(pending.filePath)) {
-        lastGeneratedExports.monthlyBalance = null;
         return {
-          status: 'error',
-          errorCode: 'MONTHLY_BALANCE_FILE_MISSING',
-          message: '临时文件已丢失，请重新生成月度余额账单'
+          proceed: false,
+          result: {
+            status: 'error',
+            errorCode: 'MONTHLY_BALANCE_FILE_MISSING',
+            message: '临时文件已丢失，请重新生成月度余额账单'
+          }
         };
       }
-
       const saveResult = await dialog.showSaveDialog(mainWindow, {
         defaultPath: pending.fileName,
-        filters: [
-          {
-            name: 'Excel',
-            extensions: ['xlsx']
-          }
-        ]
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-
       if (saveResult.canceled || !saveResult.filePath) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-
-      fs.copyFileSync(pending.filePath, saveResult.filePath);
+      return {
+        proceed: true,
+        outputPaths: [saveResult.filePath],
+        pending,
+        savePath: saveResult.filePath,
+        beforeStart() {
+          if (lastGeneratedExports.monthlyBalance !== pending || !fs.existsSync(pending.filePath)) {
+            throw new Error('月度余额待导出文件已变化，请重新选择导出位置');
+          }
+        }
+      };
+    },
+    async execute(_event, prepared) {
+    try {
+      const { pending, savePath } = prepared;
+      fs.copyFileSync(pending.filePath, savePath);
       appendActivityLogEntry({
         level: 'info',
         message: '月度余额账单导出成功',
         details: [
           `模板：${pending.templateLabel}`,
           `年月：${pending.year}-${String(pending.month).padStart(2, '0')}`,
-          `导出路径：${saveResult.filePath}`
+          `导出路径：${savePath}`
         ]
       });
 
       return {
         status: 'success',
-        filePath: saveResult.filePath,
+        filePath: savePath,
         message: '月度余额账单导出成功'
       };
     } catch (error) {
@@ -11416,6 +12482,7 @@ function registerFileHandlers() {
         errorType: '系统错误',
         originalError: error
       });
+    }
     }
   });
 }
@@ -11625,8 +12692,46 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('new-account:export', '新开账户', '导出余额', () => {
-    return exportGeneratedFile(lastGeneratedExports.newAccount, '暂无可导出的新开账户余额账单', '导出新开账户余额账单');
+  trackedIpcHandle('new-account:export', '新开账户', '导出余额', {
+    async prepare() {
+      const generatedFile = lastGeneratedExports.newAccount;
+      if (!generatedFile || !generatedFile.filePath || !fs.existsSync(generatedFile.filePath)) {
+        return {
+          proceed: false,
+          result: createPreflightErrorResult({
+            message: '暂无可导出的新开账户余额账单',
+            errorCode: 'EXPORT_EMPTY'
+          })
+        };
+      }
+      const saveResult = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: generatedFile.fileName,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        outputPaths: [saveResult.filePath],
+        generatedFile,
+        savePath: saveResult.filePath,
+        beforeStart() {
+          if (lastGeneratedExports.newAccount !== generatedFile
+              || !fs.existsSync(generatedFile.filePath)) {
+            throw new Error('新开账户待导出文件已变化，请重新导出');
+          }
+        }
+      };
+    },
+    execute(_event, prepared) {
+      return exportGeneratedFile(
+        prepared.generatedFile,
+        '暂无可导出的新开账户余额账单',
+        '导出新开账户余额账单',
+        prepared.savePath
+      );
+    }
   });
 
   ipcMain.handle('pending:columns', () => PENDING_COLUMNS.slice());
@@ -11675,41 +12780,77 @@ function registerNewAccountHandlers() {
     return { cancelled: false, files: result.filePaths };
   });
 
-  trackedIpcHandle('pending:import:start', '月度 Pending', '导入文件', async (event, payload) => {
-    const { files, yearMonth, overwriteConfirmed = false } = payload || {};
-    if (!Array.isArray(files) || files.length === 0) {
-      return { status: 'error', errors: [{ severity: 'fatal', message: '未选择文件' }] };
-    }
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', errors: [{ severity: 'fatal', message: 'yearMonth 格式错误（应为 YYYY-MM）' }] };
-    }
-    const webContents = event.sender;
-    const dbPath = path.join(app.getPath('userData'), PENDING_DB_FILENAME);
-    return pendingSession.runImport({
-      yearMonth,
-      files,
-      overwriteConfirmed,
-      dbPath,
-      onProgress: (ev) => {
-        try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
+  trackedIpcHandle('pending:import:start', '月度 Pending', '导入文件', {
+    async prepare(_event, payload = {}) {
+      try {
+        const resolution = preparePendingImportSubmission({
+          payload,
+          confirmation: lastPendingImportConfirmation,
+          db: pendingDb,
+          monthRepository: pendingMonthRepo,
+          dbPath: path.join(app.getPath('userData'), PENDING_DB_FILENAME),
+          createContextId: randomUUID,
+          createFreshnessGuard: createPendingImportFreshnessGuard
+        });
+        lastPendingImportConfirmation = resolution.nextConfirmation;
+        return resolution.prepared;
+      } catch (error) {
+        return {
+          proceed: false,
+          result: pendingImportError(
+            error && error.message ? error.message : 'Pending 导入准备失败'
+          )
+        };
       }
-    });
+    },
+
+    async execute(event, prepared, taskContext) {
+      if (prepared.overwriteConfirmed === true) {
+        // 真实 execute 入口只消费一次主进程确认上下文。
+        lastPendingImportConfirmation = null;
+      }
+      const webContents = event.sender;
+      return executePendingImportSubmission({
+        pendingSession,
+        prepared,
+        batchContext: taskContext.batchContext,
+        onProgress: (ev) => {
+          try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
+        }
+      });
+    }
   });
 
-  businessIpcHandle('pending:error:export-report', '导出 Pending 错误报告', async () => {
-    if (!pendingSession.hasPendingErrorReport()) {
-      return { status: 'error', message: '无错误报告' };
-    }
-    const result = await dialog.showSaveDialog({
-      title: '保存 Pending 导入报错文件',
-      defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-    });
-    if (result.canceled || !result.filePath) return { status: 'cancelled' };
+  businessIpcHandle('pending:error:export-report', '导出 Pending 错误报告', {
+    async prepare() {
+      if (!pendingSession.hasPendingErrorReport()) {
+        return { proceed: false, result: { status: 'error', message: '无错误报告' } };
+      }
+      const result = await dialog.showSaveDialog({
+        title: '保存 Pending 导入报错文件',
+        defaultPath: `pending-import-errors-${Date.now()}.xlsx`,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (result.canceled || !result.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        outputPaths: [result.filePath],
+        savePath: result.filePath,
+        beforeStart() {
+          if (!pendingSession.hasPendingErrorReport()) {
+            throw new Error('Pending 错误报告已变化，请重新导出');
+          }
+        }
+      };
+    },
+    async execute(_event, prepared) {
     try {
-      return pendingSession.exportErrorReport(result.filePath);
+      return pendingSession.exportErrorReport(prepared.savePath);
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -11781,37 +12922,64 @@ function registerNewAccountHandlers() {
     }
   });
 
-  trackedIpcHandle('pending:diff:export-single', '月度 Pending', '导出差异', async (_event, payload = {}) => {
-    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
-    const runId = Number(payload.runId);
-    if (!Number.isFinite(runId) || runId <= 0) {
-      return { status: 'error', message: 'runId 无效' };
-    }
-    const saveResult = await dialog.showSaveDialog({
-      title: '保存 Pending 差异文件',
-      defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-    });
-    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+  trackedIpcHandle('pending:diff:export-single', '月度 Pending', '导出差异', {
+    async prepare(_event, payload = {}) {
+      if (!pendingDb) {
+        return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
+      }
+      const runId = Number(payload.runId);
+      if (!Number.isFinite(runId) || runId <= 0) {
+        return { proceed: false, result: { status: 'error', message: 'runId 无效' } };
+      }
+      const saveResult = await dialog.showSaveDialog({
+        title: '保存 Pending 差异文件',
+        defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        outputPaths: [saveResult.filePath],
+        runId,
+        savePath: saveResult.filePath
+      };
+    },
+    async execute(_event, prepared) {
     try {
-      return pendingExportWriter.exportSingleRun(pendingDb, runId, saveResult.filePath);
+      return pendingExportWriter.exportSingleRun(pendingDb, prepared.runId, prepared.savePath);
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
-  trackedIpcHandle('pending:diff:export-aggregate', '月度 Pending', '导出差异', async () => {
-    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
-    const saveResult = await dialog.showSaveDialog({
-      title: '保存 Pending 差异汇总文件',
-      defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-    });
-    if (saveResult.canceled || !saveResult.filePath) return { status: 'cancelled' };
+  trackedIpcHandle('pending:diff:export-aggregate', '月度 Pending', '导出差异', {
+    async prepare() {
+      if (!pendingDb) {
+        return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
+      }
+      const saveResult = await dialog.showSaveDialog({
+        title: '保存 Pending 差异汇总文件',
+        defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+      });
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        outputPaths: [saveResult.filePath],
+        savePath: saveResult.filePath
+      };
+    },
+    async execute(_event, prepared) {
     try {
-      return pendingExportWriter.exportAggregate(pendingDb, saveResult.filePath);
+      return pendingExportWriter.exportAggregate(pendingDb, prepared.savePath);
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -12163,7 +13331,8 @@ function registerNewAccountHandlers() {
 
   // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
-  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', {
+    async execute(event, _prepared, taskContext, payload = {}) {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     const { date, filePath } = payload || {};
     if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
@@ -12181,6 +13350,7 @@ function registerNewAccountHandlers() {
           readBizOpFile,
           writeBizOpErrorReportXlsx,
           errorReportsDir,
+          batchContext: taskContext.batchContext,
           onProgress: (ev) => {
             try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'bizOp' }); }
             catch (_e) { /* swallow */ }
@@ -12195,11 +13365,13 @@ function registerNewAccountHandlers() {
         detailLines: err && err.detailLines ? err.detailLines : []
       };
     }
+    }
   });
 
   // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', async (event, payload = {}) => {
+  trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', {
+    async execute(event, _prepared, taskContext, payload = {}) {
     if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
     // v3.0.2 需求1b：接收 filePaths 数组（多文件合并到同一日期）。
     //   兼容旧入参 filePath（单数）→ 归一为 [filePath]。校验：date 必填 + 至少一个文件。
@@ -12222,6 +13394,7 @@ function registerNewAccountHandlers() {
           readFlowFile,
           writeFlowErrorReportXlsx,
           errorReportsDir,
+          batchContext: taskContext.batchContext,
           onProgress: (ev) => {
             try { event.sender.send('bizOpRecon:import:progress', { ...ev, kind: 'flow' }); }
             catch (_e) { /* swallow */ }
@@ -12235,6 +13408,7 @@ function registerNewAccountHandlers() {
         message: err && err.message ? err.message : String(err),
         detailLines: err && err.detailLines ? err.detailLines : []
       };
+    }
     }
   });
 
@@ -13256,24 +14430,29 @@ function registerNewAccountHandlers() {
   // import：多选 Excel → 逐文件识别 → 命中且支持 → 读行落库 → 汇总 per-file 明细。
   //   数据红线 🔴：gateway-bill 走按 ReconBillBizId 幂等累加 upsert（重导不清空、相同 bizId 覆盖、空 bizId 拒入，v3.0.1，见下方 inline 注释）；
   //     其余 3 张表 replaceLinkedTable 整表覆盖（一张表重导 = 旧数据全删）。不整批回滚。
-  trackedIpcHandle('linked-table:import', '链接表管理', '导入', async () => {
+  trackedIpcHandle('linked-table:import', '链接表管理', '导入', {
+    async prepare() {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      }
+      const res = await showImportOpenDialog('linked-table', {
+        title: '选择链接表文件（可多选）',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (res.canceled || !Array.isArray(res.filePaths) || res.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, inputPaths: res.filePaths, filePaths: res.filePaths };
+    },
+    async execute(_event, prepared) {
     // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
     //   run 全程持锁；本导入若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
     const opLock = tryAcquireBankStatementOpLock('linked-import');
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const res = await showImportOpenDialog('linked-table', {
-      title: '选择链接表文件（可多选）',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
-    });
-    if (res.canceled || !Array.isArray(res.filePaths) || res.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
     const results = [];
-    for (const filePath of res.filePaths) {
+    for (const filePath of prepared.filePaths) {
       const fileName = path.basename(filePath);
       // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
@@ -13360,6 +14539,7 @@ function registerNewAccountHandlers() {
       // v3.0.11 codex-P2 补强：导入结束统一释放互斥锁（含 cancelled / ok / 异常路径）。
       releaseBankStatementOpLock();
     }
+    }
   });
 
   // ==========================================================================
@@ -13407,7 +14587,19 @@ function registerNewAccountHandlers() {
   // v2.1.16 PR#61 F1：统计口径与单选 bank-statement:import 一致用「导入文件」
   //   （usage-stats FUNCTION_REGISTRY 无「批量导入」function → 原口径 incrementFunction 静默丢弃 →
   //    「导入对账单」成功不再计入 .usage-stats.txt；改用已注册的「导入文件」使统计连续）。
-  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', async (event) => {
+  trackedIpcHandle('bank-statement:batch-import', '银行对账单处理', '导入文件', {
+    async prepare() {
+      const choice = await showImportOpenDialog('bank-statement-process', {
+        title: '选择要批量导入的文件（可多选）',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+      });
+      if (choice.canceled || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+    },
+    async execute(event, prepared) {
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 run/export 共享一把）。争用即返回失败，绝不并发撕裂会话态。
     const opLock = tryAcquireBankStatementOpLock('import');
     if (!opLock.acquired) {
@@ -13428,17 +14620,8 @@ function registerNewAccountHandlers() {
       };
     })();
     try {
-    const choice = await showImportOpenDialog('bank-statement-process', {
-      title: '选择要批量导入的文件（可多选）',
-      properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
-    });
-    if (choice.canceled || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
     const results = [];
-    const fileCount = choice.filePaths.length;
+    const fileCount = prepared.filePaths.length;
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -13446,8 +14629,8 @@ function registerNewAccountHandlers() {
     //   被银行对账单分支的「清旧退款」误清掉本批刚导入的退款 session（filePaths 顺序不可控）。
     let refundImportedThisBatch = false;
 
-    for (let fileIndex = 0; fileIndex < choice.filePaths.length; fileIndex++) {
-      const filePath = choice.filePaths[fileIndex];
+    for (let fileIndex = 0; fileIndex < prepared.filePaths.length; fileIndex++) {
+      const filePath = prepared.filePaths[fileIndex];
       const fileName = path.basename(filePath);
       // v3.0.11 需求3（批1 · 导入让出+进度）：每文件开始前让出事件循环（消除大批量导入期窗口「未响应」）+ 上报进度。
       //   yield 放循环体顶部 = 在「上一文件处理完、本文件重活前」让出，等价于「每文件处理完让出」（规避循环内多处 continue）。
@@ -13721,6 +14904,7 @@ function registerNewAccountHandlers() {
       // v3.0.11 需求3（批1）：无论 cancelled / ok / 抛错，导入结束统一释放互斥锁。
       releaseBankStatementOpLock();
     }
+    }
   });
 
   // ============================================================
@@ -13756,12 +14940,13 @@ function registerNewAccountHandlers() {
 
   // fix1（spec §3.4）：importFlow / importBill 改造为三段式
   //   1. 首调（无 payload）：弹 dialog → peek → 查 existingCount → 0 直接进事务；>0 返回 overwrite-required
-  //   2. 二次调（{ filePaths, confirmOverwrite: true }）：跳过 dialog/peek，进"单侧清+导入"事务
+  //   2. 二次调（{ preparedContextId, confirmOverwrite: true }）：复用主进程预检上下文并复核后，进"单侧清+导入"事务
   //   3. 异常分支：cancelled / error 携带 detailLines
   // fix3 → fix9 → fix10：通用 operation lock 提到 module-level（line 200 附近），import/run/export/cleanup
   // 互斥；cleanup 异步后台跑也持锁；fix10 启动钩子也共享同一把锁，避免 cleanup vs 用户首次 import 并发
   const tryAcquireOpLock = tryAcquireAcquiringBillCurrencyOpLock;
   const releaseOpLock = releaseAcquiringBillCurrencyOpLock;
+  const acquiringImportPreviewContexts = new Map();
 
   // v2.1.7 F6：进度事件 forwarder（spec §6.3 改动点 2）
   //   - createImportProgressForwarder：100ms 节流；stage='reading' 切换事件必发（文件切换）
@@ -13821,46 +15006,175 @@ function registerNewAccountHandlers() {
     } catch (_e) { /* swallow — 通知失败不影响业务 return */ }
   }
 
-  async function handleImportFlowOrBill(kind, payload, event) {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const lock = tryAcquireOpLock('import', payload && payload.monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
-    try {
-      return await doHandleImportFlowOrBill(kind, payload, event);
-    } finally {
-      releaseOpLock();
-    }
-  }
-  // fix5（spec v0.8 §3.3）：handler 入参必传 monthKey（用户弹窗选）；peek 校验 xlsx 内月份 = 用户选的月份；不一致整批拒绝
-  // v2.1.7 F6：event 透传 → onProgress forwarder
-  async function doHandleImportFlowOrBill(kind, payload, event) {
+  async function prepareAcquiringImport(kind, payload = {}) {
     const isFlow = kind === 'flow';
-    // v3.0.5 PR-3：写路径切换——import 全部落 per-月侧库（acquiringRunData.importFiles 内部 open 侧库，
-    //   传侧库 db/dbPath 给既有 session import；引擎/回退两路都落侧库；行变换/列契约/错误文案零改动）。
-    const userDataDir = path.dirname(database.dbPath);
-
-    const monthKey = payload && payload.monthKey;
+    if (!database || !database.db) {
+      return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+    }
+    const monthKey = payload.monthKey;
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
       return {
-        status: 'error',
-        message: '缺少月份参数（请先在弹窗中选择对账月份）',
-        detailLines: []
+        proceed: false,
+        result: {
+          status: 'error',
+          message: '缺少月份参数（请先在弹窗中选择对账月份）',
+          detailLines: []
+        }
       };
     }
+    const userDataDir = path.dirname(database.dbPath);
+    let filePaths;
+    let overwrite = false;
+    let previewContext = null;
+    if (payload.confirmOverwrite === true) {
+      previewContext = acquiringImportPreviewContexts.get(
+        String(payload.preparedContextId || '').trim()
+      );
+      if (!previewContext
+          || previewContext.kind !== kind
+          || previewContext.monthKey !== monthKey) {
+        return {
+          proceed: false,
+          result: {
+            status: 'error',
+            message: '覆盖导入预检已失效，请重新选择文件',
+            detailLines: []
+          }
+        };
+      }
+      filePaths = previewContext.filePaths;
+      overwrite = true;
+    } else {
+      const res = await showImportOpenDialog('acquiring-bill-currency', {
+        title: isFlow
+          ? `选择收单流水表（月份 ${monthKey}，可多选）`
+          : `选择收单流水单据表（月份 ${monthKey}，可多选）`,
+        filters: [{ name: 'Excel', extensions: ['xlsx'] }],
+        properties: ['openFile', 'multiSelections']
+      });
+      if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      filePaths = res.filePaths;
+    }
 
-    // 分支 2：renderer 已确认覆盖
-    if (payload.confirmOverwrite === true && Array.isArray(payload.filePaths) && payload.filePaths.length > 0) {
+    let peeked;
+    let assertSourceFresh;
+    try {
+      assertSourceFresh = previewContext
+        ? previewContext.assertSourceFresh
+        : createPreviewSourceFreshnessGuard(filePaths, '收单导入');
+      assertSourceFresh();
+      peeked = await acquiringRunData.peekImportTarget({
+        userDataDir,
+        kind,
+        filePaths
+      });
+      assertSourceFresh();
+    } catch (err) {
+      return {
+        proceed: false,
+        result: {
+          status: 'error',
+          message: err && err.message ? err.message : String(err),
+          detailLines: err && err.detailLines ? err.detailLines : []
+        }
+      };
+    }
+    if (peeked.monthKey !== monthKey) {
+      return {
+        proceed: false,
+        result: {
+          status: 'error',
+          message: `文件月份 ${peeked.monthKey} 与所选月份 ${monthKey} 不一致，请检查选择`,
+          detailLines: [`首文件解析月份：${peeked.monthKey}`, `用户选择月份：${monthKey}`]
+        }
+      };
+    }
+    if (!overwrite && peeked.existingCount > 0) {
+      const preparedContextId = randomUUID();
+      acquiringImportPreviewContexts.clear();
+      acquiringImportPreviewContexts.set(preparedContextId, {
+        kind,
+        monthKey,
+        filePaths: filePaths.slice(),
+        existingCount: peeked.existingCount,
+        assertSourceFresh
+      });
+      return {
+        proceed: false,
+        result: {
+          status: 'overwrite-required',
+          kind,
+          monthKey,
+          existingCount: peeked.existingCount,
+          fileCount: filePaths.length,
+          preparedContextId
+        }
+      };
+    }
+    if (overwrite && peeked.existingCount !== previewContext.existingCount) {
+      return {
+        proceed: false,
+        result: {
+          status: 'error',
+          message: '收单待覆盖数据在确认期间已变化，请重新导入',
+          detailLines: []
+        }
+      };
+    }
+    return {
+      proceed: true,
+      inputPaths: filePaths,
+      kind,
+      monthKey,
+      userDataDir,
+      filePaths,
+      overwrite,
+      preparedContextId: previewContext ? String(payload.preparedContextId) : '',
+      async beforeStart() {
+        assertSourceFresh();
+        const currentPeek = await acquiringRunData.peekImportTarget({
+          userDataDir,
+          kind,
+          filePaths
+        });
+        if (currentPeek.monthKey !== monthKey || currentPeek.existingCount !== peeked.existingCount) {
+          throw new Error('收单导入预检证据在任务开始前已变化，请重新导入');
+        }
+        if (previewContext) {
+          const current = acquiringImportPreviewContexts.get(String(payload.preparedContextId));
+          if (current !== previewContext) {
+            throw new Error('覆盖导入预检已失效，请重新导入');
+          }
+        }
+      }
+    };
+  }
+
+  async function executeAcquiringImport(event, prepared, batchContext) {
+    const lock = tryAcquireOpLock('import', prepared.monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
+    if (prepared.preparedContextId) {
+      acquiringImportPreviewContexts.delete(prepared.preparedContextId);
+    }
+    try {
       try {
         const onProgress = createImportProgressForwarder(event);
         const result = await acquiringRunData.importFiles({
-          userDataDir,
-          kind,
-          monthKey,
-          filePaths: payload.filePaths,
+          userDataDir: prepared.userDataDir,
+          kind: prepared.kind,
+          monthKey: prepared.monthKey,
+          filePaths: prepared.filePaths,
           onProgress,
-          overwrite: true
+          overwrite: prepared.overwrite,
+          batchContext
         });
-        return { status: 'success', overwritten: true, ...result };
+        return {
+          status: 'success',
+          ...(prepared.overwrite ? { overwritten: true } : {}),
+          ...result
+        };
       } catch (err) {
         return {
           status: 'error',
@@ -13868,80 +15182,27 @@ function registerNewAccountHandlers() {
           detailLines: err && err.detailLines ? err.detailLines : []
         };
       }
-    }
-
-    // 分支 1：弹 dialog 选文件
-    const res = await showImportOpenDialog('acquiring-bill-currency', {
-      title: isFlow ? `选择收单流水表（月份 ${monthKey}，可多选）` : `选择收单流水单据表（月份 ${monthKey}，可多选）`,
-      filters: [{ name: 'Excel', extensions: ['xlsx'] }],
-      properties: ['openFile', 'multiSelections']
-    });
-    if (res.canceled || !res.filePaths || res.filePaths.length === 0) {
-      return { status: 'cancelled' };
-    }
-
-    // peek：读首文件 → 表头校验 + 解析首条数据行 monthKey → 与用户选月份比对（existingCount 查侧库）
-    let peeked;
-    try {
-      peeked = await acquiringRunData.peekImportTarget({
-        userDataDir,
-        kind,
-        filePaths: res.filePaths
-      });
-    } catch (err) {
-      return {
-        status: 'error',
-        message: err && err.message ? err.message : String(err),
-        detailLines: err && err.detailLines ? err.detailLines : []
-      };
-    }
-
-    // fix5：文件月份与用户选月份必须一致
-    if (peeked.monthKey !== monthKey) {
-      return {
-        status: 'error',
-        message: `文件月份 ${peeked.monthKey} 与所选月份 ${monthKey} 不一致，请检查选择`,
-        detailLines: [`首文件解析月份：${peeked.monthKey}`, `用户选择月份：${monthKey}`]
-      };
-    }
-
-    if (peeked.existingCount > 0) {
-      return {
-        status: 'overwrite-required',
-        kind,
-        monthKey,
-        existingCount: peeked.existingCount,
-        filePaths: res.filePaths
-      };
-    }
-
-    try {
-      const onProgress = createImportProgressForwarder(event);
-      const result = await acquiringRunData.importFiles({
-        userDataDir,
-        kind,
-        monthKey,
-        filePaths: res.filePaths,
-        onProgress,
-        overwrite: false
-      });
-      return { status: 'success', ...result };
-    } catch (err) {
-      return {
-        status: 'error',
-        message: err && err.message ? err.message : String(err),
-        detailLines: err && err.detailLines ? err.detailLines : []
-      };
+    } finally {
+      releaseOpLock();
     }
   }
 
-  // v2.1.7 F6：trackedIpcHandle 回调收 (event, payload)；event 透传到 handleImportFlowOrBill → forwarder
-  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', async (event, payload = {}) => {
-    return handleImportFlowOrBill('flow', payload, event);
+  trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', {
+    prepare: (_event, payload = {}) => prepareAcquiringImport('flow', payload),
+    execute: (event, prepared, taskContext) => executeAcquiringImport(
+      event,
+      prepared,
+      taskContext.batchContext
+    )
   });
 
-  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', async (event, payload = {}) => {
-    return handleImportFlowOrBill('bill', payload, event);
+  trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', {
+    prepare: (_event, payload = {}) => prepareAcquiringImport('bill', payload),
+    execute: (event, prepared, taskContext) => executeAcquiringImport(
+      event,
+      prepared,
+      taskContext.batchContext
+    )
   });
 
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
@@ -13954,14 +15215,81 @@ function registerNewAccountHandlers() {
   //   - 错误透传：worker error → dispatchRunCheck reject → handler catch → 维持现有 status='error' 返回格式
   //   - op lock + notification 现有路径保留
   //   - N1' idle cleanup 协调（worker busy 时 skip）留 Phase 2 T12 改 setupIdleCleanupTimer
-  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', async (event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { monthKey } = payload || {};
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
-    }
-    const lock = tryAcquireOpLock('run', monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message };
+  trackedIpcHandle('acquiringBillCurrency:run', '收单单据币种校验', '开始运行', {
+    async prepare(_event, payload = {}) {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      }
+      const { monthKey } = payload || {};
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
+        };
+      }
+      const resumable = acquiringRunData.findBoundResumableRun({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        mainDbPath: database.dbPath,
+        monthKey
+      });
+      if (resumable) {
+        const repository = archiveCenterService
+          && archiveCenterService.service
+          && archiveCenterService.service.repository;
+        if (!repository) {
+          return {
+            proceed: false,
+            result: {
+              status: 'resume-required',
+              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
+              message: `${monthKey} 存在未完成的可恢复运行；存档身份暂不可核验，请先恢复存档中心后续跑原任务`,
+              runId: resumable.runId
+            }
+          };
+        }
+        const batch = repository
+          ? repository.getBatch(resumable.batchContext.batchId)
+          : null;
+        const sameIdentity = batch
+          && String(batch.taskRunId || '') === resumable.batchContext.taskRunId
+          && String(batch.operationKey || '') === resumable.batchContext.operationKey
+          && String(batch.parentRunId || '') === resumable.batchContext.parentRunId
+          && String(batch.moduleId || '') === resumable.batchContext.moduleId;
+        if (!batch || !sameIdentity || ['reserved', 'running'].includes(String(batch.taskStatus || ''))) {
+          return {
+            proceed: false,
+            result: {
+              status: 'resume-required',
+              code: 'ACQUIRING_RUN_RESUME_REQUIRED',
+              message: !batch || !sameIdentity
+                ? `${monthKey} 的可恢复运行与存档身份不一致，已停止新运行以保留审计证据`
+                : `${monthKey} 存在未完成的可恢复运行，请先续跑原任务`,
+              runId: resumable.runId
+            }
+          };
+        }
+      }
+      const lock = tryAcquireOpLock('run', monthKey);
+      if (!lock.acquired) {
+        return { proceed: false, result: { status: 'busy', message: lock.message } };
+      }
+      let released = false;
+      const releaseLock = () => {
+        if (released) return;
+        released = true;
+        releaseOpLock();
+      };
+      return {
+        proceed: true,
+        monthKey,
+        userDataDir: path.dirname(database.dbPath),
+        onAbandon: releaseLock,
+        releaseLock
+      };
+    },
+    async execute(event, prepared, taskContext) {
+    const { monthKey } = prepared;
     let result;
     try {
       const storageRoot = ensureStorageRoot();
@@ -14004,12 +15332,13 @@ function registerNewAccountHandlers() {
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
       result = await acquiringRunData.runCheckViaSideDb({
-        userDataDir: path.dirname(database.dbPath),
+        userDataDir: prepared.userDataDir,
         monthKey,
         storageRoot,
         chunkSize,
         workerCount,
         tempDir: mwTempDir,
+        batchContext: taskContext.batchContext,
         mainDb: database.db,
         dispatchFn: runCheckWorkerPool.dispatchRunCheck,
         dispatchCallbacks: {
@@ -14022,7 +15351,6 @@ function registerNewAccountHandlers() {
         },
       });
     } catch (err) {
-      releaseOpLock();
       // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
       //   CancelError class 注释明确：业务语义=用户主动取消；handler 应识别，不弹错误 Notification
       //   错误 source 失败时仍弹 error；cross-process worker → instanceof 不可靠 → 用 err.name
@@ -14033,15 +15361,17 @@ function registerNewAccountHandlers() {
       // v2.1.7 F7-B1：error 路径弹通知（spec §7.5.2）
       notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    } finally {
+      prepared.releaseLock();
     }
     // v0.12 fix9：release run lock，setImmediate 异步分批清理（不阻塞 handler return）
     // v2.1.8 N1：β 方案 — cleanup 移出对账链路，runCheck 内已 markCleanupPending=1，
     //   不再 setImmediate 立即触发；交 app.before-quit（主清）+ 进入模块时（兜底清）
     //   保留 result.cleanupNeeded 字段（向后兼容；前端不消费此字段）
-    releaseOpLock();
     // v2.1.7 F7-B1：success 路径弹通知（spec §7.5.2）
     notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
     return { status: 'success', ...result };
+    }
   });
 
   // v2.1.10 A3 T10：cancel handler（Phase 1 提供 API；Phase 2 T13 完善 graceful cancel）
@@ -14065,171 +15395,215 @@ function registerNewAccountHandlers() {
   //     - 不传 runId：自动找该月最近一个 chunk_progress.status='partial' 的 run
   //     - 传 runId：复用该 runId（caller 已知具体 run；验证 month_key 匹配）
   //   - 返回：与 run handler 一致格式 { status: 'success', runId, ... } / { status: 'error', message }
-  trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', async (event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { monthKey, runId: payloadRunId } = payload || {};
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' };
-    }
-    const lock = tryAcquireOpLock('run', monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message };
-
-    let result;
-    try {
-      const runRepoLocal = require('./backend/acquiring-bill-currency-db/run-repository');
-      // 找出要 resume 的 run
-      let targetRunId = payloadRunId;
-      let progress;
-      if (!targetRunId) {
-        // v2.1.10 SR-FIX-1 round 2 P1-5：扫该月所有可恢复 chunk_progress 的 runs
-        //   原实施只取 getLatestRun → 如最近 run 是 complete（如刚跑完新 run），
-        //   前一个 run 是 partial → 用户无法 resume 前一个 partial
-        //   修复后：listPartialRuns 按 ran_at DESC 返回所有可恢复 → 取第一个（最近可恢复）
-        // v2.1.10 SR-FIX-1 Round 4 F1：listPartialRuns 已扩为返回 partial OR in-progress
-        const partialRuns = runRepoLocal.listPartialRuns(database.db, monthKey);
-        if (!partialRuns || partialRuns.length === 0) {
-          releaseOpLock();
-          return { status: 'error', message: `月份 ${monthKey} 暂无可恢复 run，无法 resume（上次 run 可能已跑完）` };
-        }
-        const latestPartial = partialRuns[0];
-        targetRunId = latestPartial.id;
-        progress = latestPartial.chunk_progress;
-      } else {
-        // caller 已知具体 runId — 直接读 progress（校验 month_key 一致）
-        progress = runRepoLocal.getRunChunkProgress(database.db, targetRunId);
-        if (!progress) {
-          releaseOpLock();
-          return { status: 'error', message: `run ${targetRunId} 无 chunk_progress 记录，无法 resume` };
-        }
+  trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', {
+    async prepare(_event, payload = {}) {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
       }
-      // v2.1.10 SR-FIX-1 Round 4 F1：partial OR in-progress 均允许 resume
-      //   in-progress 场景：first-chunk crash + failureListener 未及时兜底（如重启后还未跑到）
-      //   → 应允许用户直接调 resume 续跑；resume 内部从 lastCompletedChunkIndex+1 起跑（in-progress 初始 -1 → 从 0 起跑 == 重头）
-      if (!['partial', 'in-progress'].includes(progress.status)) {
+      const { monthKey, runId } = payload || {};
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: 'monthKey 格式错误（应为 YYYY-MM）' }
+        };
+      }
+      const lock = tryAcquireOpLock('run', monthKey);
+      if (!lock.acquired) {
+        return { proceed: false, result: { status: 'busy', message: lock.message } };
+      }
+      let released = false;
+      const releaseLock = () => {
+        if (released) return;
+        released = true;
         releaseOpLock();
-        return { status: 'error', message: `run ${targetRunId} 状态为 ${progress.status}，无需 resume` };
+      };
+      try {
+        const resumePlan = acquiringRunData.prepareRunResume({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db,
+          mainDbPath: database.dbPath,
+          monthKey,
+          runId
+        });
+        return {
+          proceed: true,
+          resumePlan,
+          recovery: resumePlan.recovery,
+          taskRunId: resumePlan.taskRunId,
+          operationKey: resumePlan.operationKey,
+          flowPlan: resumePlan.flowPlan,
+          onAbandon: releaseLock,
+          releaseLock,
+          beforeStart: () => acquiringRunData.assertRunResumeFresh({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            mainDbPath: database.dbPath,
+            prepared: resumePlan
+          })
+        };
+      } catch (err) {
+        releaseLock();
+        return {
+          proceed: false,
+          result: { status: 'error', message: err && err.message ? err.message : String(err) }
+        };
       }
-
-      const storageRoot = ensureStorageRoot();
-      const onProgress = createRunProgressForwarder(event);
-      // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
-      //   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
-      //     用户跑到一半 cancel → settings 改 chunk size（如 100000 → 10000）→ resume
-      //     原实现读当前 settings → insertDiffRowsByJoinChunked 用 OFFSET=chunkIndex*chunkSize 计算错位
-      //     → diff_rows 行 skip / 重复（与全新 run byte-for-byte 不一致）
-      //   修复：优先复用 progress.chunkSize（H1 占位 / onChunkDone 持久化）
-      //     - 持久化值缺失（老 partial run）→ fallback 当前 settings + warning log
-      //     - 持久化值与当前 settings 不一致 → warning log（提示用户）；用持久化值（资金红线优先）
-      const currentSettingsChunkSize = typeof database.getAcquiringBillChunkSize === 'function'
-        ? database.getAcquiringBillChunkSize()
-        : undefined;
-      let chunkSize;
-      if (Number.isInteger(progress.chunkSize) && progress.chunkSize > 0) {
-        chunkSize = progress.chunkSize;
-        if (Number.isInteger(currentSettingsChunkSize) && currentSettingsChunkSize !== progress.chunkSize) {
-          // H4：mismatch warning — 用户改 settings 后 resume；用持久化值优先（资金红线）
+    },
+    async execute(event, prepared, taskContext) {
+      const { resumePlan } = prepared;
+      const { monthKey, runId: targetRunId, progress } = resumePlan;
+      let result;
+      try {
+        if (!resumePlan.recovery.batchContext) {
+          acquiringRunData.persistRunResumeBatchContext({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            prepared: resumePlan,
+            batchContext: taskContext.batchContext
+          });
+        }
+        const storageRoot = ensureStorageRoot();
+        const onProgress = createRunProgressForwarder(event);
+        // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
+        //   用户中途修改 settings 时仍必须沿原 chunk offset 继续；老 progress 缺值才 fallback settings。
+        const currentSettingsChunkSize = typeof database.getAcquiringBillChunkSize === 'function'
+          ? database.getAcquiringBillChunkSize()
+          : undefined;
+        let chunkSize;
+        if (Number.isInteger(progress.chunkSize) && progress.chunkSize > 0) {
+          chunkSize = progress.chunkSize;
+          if (Number.isInteger(currentSettingsChunkSize) && currentSettingsChunkSize !== progress.chunkSize) {
+            // H4：mismatch warning — 用户改 settings 后 resume；用持久化值优先（资金红线）
+            try {
+              appendActivityLogEntry({
+                level: 'warning',
+                source: 'main',
+                domain: 'acquiring-bill-currency',
+                message: '[acquiring-bill-currency:resume] chunkSize mismatch — 用持久化值（H4 资金红线护栏）',
+                details: [
+                  `runId=${targetRunId}`,
+                  `monthKey=${monthKey}`,
+                  `progress.chunkSize=${progress.chunkSize}`,
+                  `currentSettings.chunkSize=${currentSettingsChunkSize}`,
+                ],
+              });
+            } catch (_e) { /* swallow */ }
+          }
+        } else {
+          // 老 partial run（升级前的 chunk_progress 没 chunkSize 字段）→ fallback 当前 settings
+          chunkSize = currentSettingsChunkSize;
           try {
             appendActivityLogEntry({
               level: 'warning',
               source: 'main',
               domain: 'acquiring-bill-currency',
-              message: '[acquiring-bill-currency:resume] chunkSize mismatch — 用持久化值（H4 资金红线护栏）',
+              message: '[acquiring-bill-currency:resume] chunk_progress 缺 chunkSize（老 partial run）— fallback settings',
               details: [
                 `runId=${targetRunId}`,
                 `monthKey=${monthKey}`,
-                `progress.chunkSize=${progress.chunkSize}`,
-                `currentSettings.chunkSize=${currentSettingsChunkSize}`,
+                `fallback chunkSize=${chunkSize}`,
               ],
             });
           } catch (_e) { /* swallow */ }
         }
-      } else {
-        // 老 partial run（升级前 chunk_progress 没 chunkSize 字段）→ fallback 当前 settings
-        chunkSize = currentSettingsChunkSize;
-        try {
-          appendActivityLogEntry({
-            level: 'warning',
-            source: 'main',
-            domain: 'acquiring-bill-currency',
-            message: '[acquiring-bill-currency:resume] chunk_progress 缺 chunkSize（老 partial run）— fallback settings',
-            details: [
-              `runId=${targetRunId}`,
-              `monthKey=${monthKey}`,
-              `fallback chunkSize=${chunkSize}`,
-            ],
-          });
-        } catch (_e) { /* swallow */ }
-      }
 
-      // 透传 resumeFromRun = { runId, lastCompletedChunkIndex } → worker → runCheckCore
-      //   runCheckCore 跳过 stage 1-3（复用旧 runId / 旧 stats），stage 4' 从 lastCompletedChunkIndex+1 起跑
-      result = await runCheckWorkerPool.dispatchRunCheck(
-        {
-          __dbPath: database.dbPath,
-          monthKey,
+        result = await acquiringRunData.resumeRunCheck({
+          prepared: resumePlan,
           storageRoot,
           chunkSize,
-          resumeFromRun: {
-            runId: targetRunId,
-            lastCompletedChunkIndex: progress.lastCompletedChunkIndex,
-          },
-        },
-        {
-          onProgress,
-          onLog: (entry) => {
-            try { appendActivityLogEntry(entry || {}); } catch (_e) { /* swallow */ }
-          },
+          batchContext: taskContext.batchContext,
+          mainDb: database.db,
+          dispatchFn: runCheckWorkerPool.dispatchRunCheck,
+          dispatchCallbacks: {
+            onProgress,
+            onLog: (entry) => {
+              try { appendActivityLogEntry(entry || {}); } catch (_e) { /* swallow */ }
+            },
+          }
+        });
+      } catch (err) {
+        // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
+        if (err && err.name === 'CancelError') {
+          notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
+          return { status: 'cancelled', resumed: true, message: err.message, stage: err.stage };
         }
-      );
-    } catch (err) {
-      releaseOpLock();
-      // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
-      if (err && err.name === 'CancelError') {
-        notifyAcquiringBillCurrencyResult(monthKey, 'cancelled', { stage: err.stage });
-        return { status: 'cancelled', resumed: true, message: err.message, stage: err.stage };
+        notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
+        return { status: 'error', message: err && err.message ? err.message : String(err) };
+      } finally {
+        prepared.releaseLock();
       }
-      notifyAcquiringBillCurrencyResult(monthKey, 'error', { message: err && err.message });
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
+      notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
+      return { status: 'success', resumed: true, ...result };
     }
-    releaseOpLock();
-    notifyAcquiringBillCurrencyResult(monthKey, 'success', { mismatchRows: result.mismatchRows });
-    return { status: 'success', resumed: true, ...result };
   });
 
   // v0.8 fix5：export = 另存为最近 run 的 diff.xlsx（fs.copyFile）
   // v0.12 fix9：handler 接入 operation lock
-  trackedIpcHandle('acquiringBillCurrency:export', '收单单据币种校验', '导出差异', async (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { monthKey } = payload || {};
-    if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
-      return { status: 'error', message: 'monthKey 格式错误' };
-    }
-    const lock = tryAcquireOpLock('export', monthKey);
-    if (!lock.acquired) return { status: 'error', message: lock.message };
-    try {
-      const runRepo = require('./backend/acquiring-bill-currency-db/run-repository');
-      const latestRun = runRepo.getLatestRun(database.db, monthKey);
-      if (!latestRun) {
-        return { status: 'error', message: `月份 ${monthKey} 暂无 run 记录，请先点「开始运行」` };
+  trackedIpcHandle('acquiringBillCurrency:export', '收单单据币种校验', '导出差异', {
+    async prepare(_event, payload = {}) {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
       }
-      if (!latestRun.diff_file_path || !fs.existsSync(latestRun.diff_file_path)) {
-        return { status: 'error', message: `月份 ${monthKey} 的差异表文件不存在，请重新「开始运行」` };
+      const { monthKey } = payload || {};
+      if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
+        return { proceed: false, result: { status: 'error', message: 'monthKey 格式错误' } };
       }
-      const defaultName = path.basename(latestRun.diff_file_path);
+      let exportPlan;
+      try {
+        exportPlan = acquiringRunData.prepareRunExport({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db,
+          monthKey
+        });
+      } catch (error) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: error && error.message ? error.message : String(error) }
+        };
+      }
       const res = await dialog.showSaveDialog({
         title: '导出差异表另存为',
-        defaultPath: defaultName,
+        defaultPath: path.basename(exportPlan.diffFilePath),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (res.canceled || !res.filePath) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      fs.copyFileSync(latestRun.diff_file_path, res.filePath);
-      return { status: 'success', savedPath: res.filePath, sourceDiffPath: latestRun.diff_file_path };
+      return {
+        proceed: true,
+        outputPaths: [res.filePath],
+        monthKey,
+        exportPlan,
+        flowPlan: exportPlan.flowPlan,
+        savePath: res.filePath,
+        beforeStart() {
+          acquiringRunData.assertRunExportFresh({
+            userDataDir: path.dirname(database.dbPath),
+            mainDb: database.db,
+            prepared: exportPlan
+          });
+        }
+      };
+    },
+    async execute(_event, prepared) {
+    const { monthKey, exportPlan, savePath } = prepared;
+    const lock = tryAcquireOpLock('export', monthKey);
+    if (!lock.acquired) return { status: 'error', message: lock.message };
+    try {
+      fs.copyFileSync(exportPlan.diffFilePath, savePath);
+      return {
+        status: 'success',
+        runId: exportPlan.runId,
+        source: exportPlan.source,
+        monthKey,
+        savedPath: savePath,
+        sourceDiffPath: exportPlan.diffFilePath
+      };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     } finally {
       releaseOpLock();
+    }
     }
   });
 
@@ -14310,7 +15684,7 @@ function preFundErrorReportFileName(value = new Date()) {
 // v3.0.14：前置资金对账 IPC。所有写/运行/导出与现有资金模块共用 bankStatementOperationLock，
 // 避免 linked_gateway_bill 变更与快照构建交错。
 function registerPreFundReconciliationHandlers() {
-  trackedIpcHandle('pre-fund-reconciliation:session-status', '前置资金对账', '查看状态', async () => {
+  ipcMain.handle('pre-fund-reconciliation:session-status', async () => {
     try {
       return getPreFundReconciliationService().status();
     } catch (error) {
@@ -14318,40 +15692,49 @@ function registerPreFundReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:import-bank', '前置资金对账', '导入银行对账单', async () => {
-    const lock = tryAcquireBankStatementOpLock('pre-fund-import-bank');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('pre-fund-reconciliation:import-bank', '前置资金对账', '导入银行对账单', {
+    async prepare() {
       const choice = await showImportOpenDialog('pre-fund-reconciliation', {
         title: '导入标准银行对账单',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      return getPreFundReconciliationService().importBank(choice.filePaths[0]);
+      return { proceed: true, inputPaths: [choice.filePaths[0]], filePath: choice.filePaths[0] };
+    },
+    async execute(_event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-import-bank');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return getPreFundReconciliationService().importBank(prepared.filePath);
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
     }
+    }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:import-mpt', '前置资金对账', '导入临时网关账单', async (event) => {
-    const lock = tryAcquireBankStatementOpLock('pre-fund-import-mpt');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('pre-fund-reconciliation:import-mpt', '前置资金对账', '导入临时网关账单', {
+    async prepare() {
       const choice = await showImportOpenDialog('pre-fund-reconciliation', {
         title: '导入 MPT 网关账单（可多选）',
         properties: ['openFile', 'multiSelections'],
         filters: [{ name: 'MPT 网关账单', extensions: ['txt', 'gz'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
+      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+    },
+    async execute(event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-import-mpt');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
       return await getPreFundReconciliationService().importMptFiles(
-        choice.filePaths,
+        prepared.filePaths,
         (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
       );
     } catch (error) {
@@ -14359,26 +15742,39 @@ function registerPreFundReconciliationHandlers() {
     } finally {
       releaseBankStatementOpLock();
     }
+    }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:export', '前置资金对账', '导出临时网关错误数据', async (_event, repairTokens = []) => {
-    const lock = tryAcquireBankStatementOpLock('pre-fund-export-mpt-errors');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:export', '前置资金对账', '导出临时网关错误数据', {
+    async prepare(_event, repairTokens = []) {
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: '导出临时网关账单错误数据',
         defaultPath: path.join(app.getPath('documents'), preFundErrorReportFileName()),
         filters: [{ name: 'Excel 工作簿', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return {
+        proceed: true,
+        outputPaths: [choice.filePath],
+        repairTokens: Array.isArray(repairTokens) ? repairTokens.slice() : [],
+        savePath: choice.filePath
+      };
+    },
+    async execute(_event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-export-mpt-errors');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
       return await getPreFundReconciliationService().exportMptErrorData(
-        repairTokens,
-        choice.filePath
+        prepared.repairTokens,
+        prepared.savePath
       );
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 
@@ -14404,7 +15800,7 @@ function registerPreFundReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:temp:list', '前置资金对账', '查看临时链接表', async () => {
+  ipcMain.handle('pre-fund-reconciliation:temp:list', async () => {
     try {
       return { status: 'ok', batches: getPreFundReconciliationService().listTempBatches() };
     } catch (error) {
@@ -14478,44 +15874,89 @@ function registerPreFundReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:export', '前置资金对账', '导出文件', async (event) => {
-    const lock = tryAcquireBankStatementOpLock('pre-fund-export');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('pre-fund-reconciliation:export', '前置资金对账', '导出文件', {
+    async prepare() {
       const choice = await showImportOpenDialog('pre-fund-reconciliation-export', {
         title: '选择前置资金对账导出目录',
         properties: ['openDirectory', 'createDirectory']
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
+      try {
+        const service = getPreFundReconciliationService();
+        const outputDirectory = choice.filePaths[0];
+        const exportDate = new Date();
+        const plan = service.buildExportPlan(outputDirectory, exportDate);
+        if (plan.length === 0) {
+          return {
+            proceed: false,
+            result: preFundFailureResult(Object.assign(
+              new Error('本次运行没有可导出的银行渠道'),
+              { code: 'pre-fund-export-empty' }
+            ))
+          };
+        }
+        const conflicts = plan.filter((item) => fs.existsSync(item.filePath));
+        let overwrite = false;
+        if (conflicts.length > 0) {
+          const conflictNames = conflicts.map((item) => item.fileName).join('\n');
+          const confirm = await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: '文件已存在',
+            message: `以下文件已存在：\n${conflictNames}`,
+            detail: '是否覆盖本次全部冲突文件？取消后不会写入任何文件。',
+            buttons: ['取消', '覆盖全部'],
+            defaultId: 0,
+            cancelId: 0,
+            noLink: true
+          });
+          if (confirm.response !== 1) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
+          overwrite = true;
+        }
+        const conflictPaths = conflicts.map((item) => item.filePath).sort();
+        return {
+          proceed: true,
+          outputPaths: plan.map((item) => item.filePath),
+          outputDirectory,
+          exportDate,
+          overwrite,
+          beforeStart() {
+            const currentPlan = service.buildExportPlan(outputDirectory, exportDate);
+            const currentConflicts = currentPlan
+              .filter((item) => fs.existsSync(item.filePath))
+              .map((item) => item.filePath)
+              .sort();
+            if (JSON.stringify(currentPlan.map((item) => item.filePath))
+                !== JSON.stringify(plan.map((item) => item.filePath))
+                || JSON.stringify(currentConflicts) !== JSON.stringify(conflictPaths)) {
+              throw new Error('前置资金对账导出计划在确认期间已变化，请重新导出');
+            }
+          }
+        };
+      } catch (error) {
+        return { proceed: false, result: preFundFailureResult(error) };
+      }
+    },
+    async execute(event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('pre-fund-export');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
       const service = getPreFundReconciliationService();
       const options = {
-        outputDirectory: choice.filePaths[0],
-        overwrite: false,
+        outputDirectory: prepared.outputDirectory,
+        overwrite: prepared.overwrite,
+        exportDate: prepared.exportDate,
         onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:export-progress', progress)
       };
-      let result = await service.export(options);
-      if (result && result.status === 'conflict') {
-        const conflictNames = result.conflicts.map((item) => item.fileName).join('\n');
-        const confirm = await dialog.showMessageBox(mainWindow, {
-          type: 'warning',
-          title: '文件已存在',
-          message: `以下文件已存在：\n${conflictNames}`,
-          detail: '是否覆盖本次全部冲突文件？取消后不会写入任何文件。',
-          buttons: ['取消', '覆盖全部'],
-          defaultId: 0,
-          cancelId: 0,
-          noLink: true
-        });
-        if (confirm.response !== 1) return { status: 'cancelled' };
-        result = await service.export({ ...options, overwrite: true });
-      }
-      return result;
+      return await service.export(options);
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 }
@@ -14569,7 +16010,7 @@ function sendDuplicateInboundMatchProgress(event, channel, payload) {
 
 // v3.0.15：重复入金匹配与临时 MPT 导入/删除共用资金模块锁，确保运行快照稳定。
 function registerDuplicateInboundMatchHandlers() {
-  trackedIpcHandle('duplicate-inbound-match:session-status', '重复入金匹配', '查看状态', async () => {
+  ipcMain.handle('duplicate-inbound-match:session-status', async () => {
     try {
       return getDuplicateInboundMatchService().status();
     } catch (error) {
@@ -14577,20 +16018,24 @@ function registerDuplicateInboundMatchHandlers() {
     }
   });
 
-  trackedIpcHandle('duplicate-inbound-match:import-files', '重复入金匹配', '导入文件', async (event) => {
-    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-import-files');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('duplicate-inbound-match:import-files', '重复入金匹配', '导入文件', {
+    async prepare() {
       const choice = await showImportOpenDialog('duplicate-inbound-match', {
         title: '同时选择银行对账单和单据对账单',
         properties: ['openFile', 'multiSelections'],
         filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
+      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+    },
+    async execute(event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-import-files');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
       return await getDuplicateInboundMatchService().importFiles(
-        choice.filePaths,
+        prepared.filePaths,
         (progress) => sendDuplicateInboundMatchProgress(
           event,
           'duplicate-inbound-match:import-progress',
@@ -14601,6 +16046,7 @@ function registerDuplicateInboundMatchHandlers() {
       return duplicateInboundMatchFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 
@@ -14622,19 +16068,25 @@ function registerDuplicateInboundMatchHandlers() {
     }
   });
 
-  trackedIpcHandle('duplicate-inbound-match:export', '重复入金匹配', '导出文件', async (event) => {
-    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-export');
-    if (!lock.acquired) return { status: 'busy', message: lock.message };
-    try {
+  trackedIpcHandle('duplicate-inbound-match:export', '重复入金匹配', '导出文件', {
+    async prepare() {
       const service = getDuplicateInboundMatchService();
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: '导出重复入金匹配结果',
         defaultPath: service.buildDefaultFileName(),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      return await service.export({
-        savePath: choice.filePath,
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, outputPaths: [choice.filePath], savePath: choice.filePath };
+    },
+    async execute(event, prepared) {
+    const lock = tryAcquireBankStatementOpLock('duplicate-inbound-export');
+    if (!lock.acquired) return { status: 'busy', message: lock.message };
+    try {
+      return await getDuplicateInboundMatchService().export({
+        savePath: prepared.savePath,
         onProgress: (progress) => sendDuplicateInboundMatchProgress(
           event,
           'duplicate-inbound-match:export-progress',
@@ -14645,6 +16097,7 @@ function registerDuplicateInboundMatchHandlers() {
       return duplicateInboundMatchFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 }
@@ -14755,8 +16208,51 @@ function markPositionBusinessOutcome(result) {
   if (!pending || pending.operationToken !== context.operationToken) return;
   writePositionPendingOperation({
     ...pending,
-    businessState: positionBusinessStateForResult(result, SUCCESS_STATUSES)
+    businessState: positionBusinessStateForResult(result, SUCCESS_STATUSES),
+    terminalOutcome: positionTerminalOutcomeForResult(result, SUCCESS_STATUSES)
   }, context.operationToken);
+}
+
+function persistPositionCancellationAccepted(active) {
+  const operationToken = String(active && active.operationToken || '').trim();
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== operationToken) {
+    throw new Error('平盘取消确认时待完成操作所有权已变化');
+  }
+  const cancellation = positionCancellationAcceptedPending(
+    pending,
+    '用户取消平盘对账导入任务'
+  );
+
+  // SQLite pending 是取消 ACK 的第一份耐久真相。即使随后主进程崩溃，
+  // startup recovery 也会把原 exact-seven 批次收口为 cancelled，而不是 failed。
+  writePositionPendingOperation(cancellation, operationToken);
+
+  // 同时把 cancelled 终态写入既有 Archive outbox；直接 CAS 或后续业务
+  // promise 尚未来得及返回时，仍能在下一次启动重放到同一 batchId。
+  const center = archiveCenterService || initializeArchiveCenter();
+  center.persistTaskTerminalIntent({
+    batchContext: cancellation.batchContext,
+    sourceOperation: String(cancellation.channel || active.channel || 'position-reconciliation'),
+    terminalOutcome: {
+      ...cancellation.terminalOutcome,
+      metadata: { positionCancellationAccepted: true },
+      afterTerminal: {
+        route: 'position-reconciliation',
+        operationToken
+      }
+    }
+  });
+
+  return archiveTaskLifecycle
+    ? archiveTaskLifecycle.cancelActive(
+        (context) => Boolean(
+          context.moduleId === 'position-reconciliation-process'
+          && context.taskRunId === operationToken
+        ),
+        cancellation.terminalOutcome.message
+      )
+    : null;
 }
 
 function markPositionArchiveDurable(archiveResult = {}) {
@@ -14773,15 +16269,20 @@ function markPositionArchiveDurable(archiveResult = {}) {
   }, context.operationToken);
 }
 
-function positionArchiveModule(channel) {
-  const isLink = channel.includes(':source:')
-    || channel.includes(':linked:')
-    || channel.includes(':raw:');
-  return {
-    moduleId: 'position-reconciliation-process',
-    moduleCode: isLink ? 'POSITIONLINK' : 'POSITION',
-    moduleName: '平盘对账数据处理'
-  };
+function markPositionArchiveIncomplete(archiveResult = {}) {
+  const context = positionReconciliationOperationContext.getStore();
+  if (!context) return;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== context.operationToken || !pending.archiveRequired) {
+    return;
+  }
+  writePositionPendingOperation({
+    ...pending,
+    archiveState: 'incomplete',
+    archiveWarning: archiveResult && archiveResult.warning
+      ? String(archiveResult.warning.message || '')
+      : '存档未形成持久重试记录'
+  }, context.operationToken);
 }
 
 function readDeletedPositionArchiveResult(pending) {
@@ -14789,7 +16290,9 @@ function readDeletedPositionArchiveResult(pending) {
     const center = archiveCenterService || initializeArchiveCenter();
     const repository = center && center.service && center.service.repository;
     if (!repository) return null;
-    const moduleId = positionArchiveModule(String(pending.channel || '')).moduleId;
+    const policy = taskPolicyRegistry.get(String(pending.channel || ''));
+    const moduleId = policy && policy.scopeId;
+    if (!moduleId) return null;
     const operationKey = `position:${pending.operationToken}:${pending.channel}`;
     const issuance = repository.getOperationIssuance(moduleId, operationKey);
     return issuance && issuance.deletedAt
@@ -14871,7 +16374,7 @@ function persistPositionArchiveIntentIfNeeded(
     committedInputs
   );
   if (committedFiles.length === 0 || !archiveCenterService
-      || typeof archiveCenterService.persistOperationIntent !== 'function') {
+      || typeof archiveCenterService.persistAppendIntent !== 'function') {
     throw new Error('平盘业务已提交但存档意图不完整，已停止恢复以避免审计文件丢失');
   }
   assertPositionRecoveryInputsUnchanged(
@@ -14882,12 +16385,16 @@ function persistPositionArchiveIntentIfNeeded(
     { archiveFiles: committedFiles },
     { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
   );
-  const archiveResult = archiveCenterService.persistOperationIntent({
-    ...positionArchiveModule(String(pending.channel || '')),
+  const batchContext = pending.batchContext;
+  if (!batchContext || typeof batchContext !== 'object') {
+    throw new Error('平盘业务已提交但缺少原任务 batchContext，禁止建立幽灵批次');
+  }
+  const archiveResult = archiveCenterService.persistAppendIntent({
+    batchContext,
     sourceOperation: String(pending.channel || ''),
-    operationKey: `position:${pending.operationToken}:${pending.channel}`,
     metadata: { positionOperationToken: pending.operationToken, recovered: true },
-    files: recoveryFiles
+    files: recoveryFiles,
+    terminalOutcome: positionOutboxTerminalIntent(pending)
   });
   return options.includeCleanupCandidates === true
     ? {
@@ -14908,6 +16415,142 @@ function recoverPositionArchiveIntent(pending, currentCheckpoint, service) {
     service,
     { includeCleanupCandidates: true }
   );
+}
+
+function clearPositionPendingOperation(operationToken) {
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== operationToken) {
+    throw new Error('平盘待完成操作所有权已变化，禁止清理其他操作记录');
+  }
+  database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
+}
+
+async function finalizePositionPendingAfterTaskTerminal({ context }) {
+  const pending = readPositionPendingOperation();
+  if (!pending) return;
+  if (pending.operationToken !== context.taskRunId
+      || Number(pending.batchContext && pending.batchContext.batchId) !== context.batchId) {
+    throw new Error('平盘任务终态后的 pending 所有权已变化');
+  }
+  if (pending.archiveRequired === true && pending.archiveState !== 'durable') {
+    // 存档尚未完成时保留 pending；后续启动恢复只能追加原 batch。
+    return;
+  }
+  clearPositionPendingOperation(pending.operationToken);
+}
+
+async function finalizeRecoveredPositionPending(operationToken, options = {}) {
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== operationToken) {
+    throw new Error('平盘恢复 pending 所有权已变化');
+  }
+  if (options.archiveDurable === true && pending.archiveRequired === true
+      && pending.archiveState !== 'durable') {
+    writePositionPendingOperation({
+      ...pending,
+      archiveState: 'durable',
+      archiveReference: options.archiveReference || ''
+    }, operationToken);
+  }
+  const current = readPositionPendingOperation();
+  const deletedArchiveResult = options.archiveResult
+    && options.archiveResult.code === 'ARCHIVE_OPERATION_DELETED'
+      ? options.archiveResult
+      : readDeletedPositionArchiveResult(current);
+  if (current.archiveRequired === true && current.archiveState !== 'durable'
+      && !deletedArchiveResult) {
+    throw new Error('平盘恢复存档尚未完成，禁止终结原任务或清理 pending');
+  }
+  const center = archiveCenterService || initializeArchiveCenter();
+  if (!center || !center.service) throw new Error('平盘恢复缺少存档服务');
+  if (!deletedArchiveResult && options.terminalSettled !== true) {
+    await settlePositionRecoveredTask({
+      pending: current,
+      archiveService: center.service
+    });
+  }
+  if (!positionReconciliationService) {
+    throw new Error('平盘侧库尚未初始化，禁止提前清理恢复 pending');
+  }
+  if (typeof positionReconciliationService.listCommittedOperationInputs !== 'function') {
+    throw new Error('平盘侧库无法读取当前操作的文件级提交凭证，禁止清理恢复 pending');
+  }
+  const committedFiles = positionCommittedRecoveryArchiveFiles(
+    current,
+    positionReconciliationService.listCommittedOperationInputs(operationToken)
+  );
+  const cleanupInputPaths = positionRecoveryCleanupInputPaths(
+    current,
+    committedFiles,
+    deletedArchiveResult
+  );
+  syncPositionReconciliationCheckpoint();
+  database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+  clearPositionPendingOperation(operationToken);
+  try {
+    await cleanupPositionArchiveSourcePaths(cleanupInputPaths);
+  } catch (_error) {
+    // 原任务、checkpoint 与 pending 已完成收口；暂存清理失败留待后续启动回收。
+  }
+}
+
+function positionOutboxTerminalIntent(pending) {
+  const outcome = positionRecoveryTerminalOutcome(pending);
+  const operationToken = String(pending && pending.operationToken || '').trim();
+  return {
+    ...outcome,
+    metadata: {
+      recoveredPositionOperation: true,
+      positionOperationToken: operationToken,
+      positionTerminalOutcome: outcome.taskStatus
+    },
+    afterTerminal: {
+      route: 'position-reconciliation',
+      operationToken
+    }
+  };
+}
+
+function resolvePositionOutboxTerminalIntent(record) {
+  const payload = record && record.payload;
+  const targetBatchId = Number(payload && payload.targetBatchId);
+  const operationToken = String(
+    payload && payload.metadata && payload.metadata.positionOperationToken || ''
+  ).trim();
+  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1 || !operationToken) return null;
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== operationToken) return null;
+  if (Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
+    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
+  }
+  return positionOutboxTerminalIntent(pending);
+}
+
+async function finalizePositionTerminalIntent({ route, record, created }) {
+  if (!route || route.route !== 'position-reconciliation') {
+    throw new Error(`不支持的任务终态收口路由：${route && route.route || '<empty>'}`);
+  }
+  const payload = record && record.payload;
+  const targetBatchId = Number(payload && payload.targetBatchId);
+  const operationToken = String(route.operationToken || '').trim();
+  const recordOperationToken = String(
+    payload && payload.metadata && payload.metadata.positionOperationToken || ''
+  ).trim();
+  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1
+      || !operationToken || recordOperationToken !== operationToken) {
+    throw new Error('平盘任务终态路由与 outbox 身份不一致');
+  }
+  const pending = readPositionPendingOperation();
+  if (!pending) return;
+  if (pending.operationToken !== operationToken
+      || Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
+    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
+  }
+  await finalizeRecoveredPositionPending(operationToken, {
+    archiveDurable: true,
+    archiveReference: created && created.batch && created.batch.id || targetBatchId,
+    terminalSettled: true
+  });
 }
 
 function persistCurrentPositionArchiveIntentIfNeeded() {
@@ -15051,16 +16694,37 @@ function getPositionReconciliationService() {
         checkpoint,
         service
       );
-      database.setSetting(
-        POSITION_SIDE_DB_CHECKPOINT_SETTING,
-        JSON.stringify(checkpoint)
-      );
-      database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
-      database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       positionReconciliationService = service;
-      if (recovery && Array.isArray(recovery.cleanupInputPaths)) {
-        void cleanupPositionArchiveSourcePaths(recovery.cleanupInputPaths)
-          .catch(() => undefined);
+      if (pendingSideDbOperation) {
+        const pending = readPositionPendingOperation();
+        const operationToken = String(pending && pending.operationToken || '');
+        const archiveResult = recovery && recovery.archiveResult;
+        const recoveryTask = archiveResult
+          && archiveResult.code !== 'ARCHIVE_OPERATION_DELETED'
+          ? (archiveCenterService || initializeArchiveCenter()).flushOutbox()
+          : finalizeRecoveredPositionPending(operationToken, {
+              archiveDurable: true,
+              archiveReference: archiveResult && archiveResult.batchId
+                || pending && pending.archiveReference
+                || '',
+              archiveResult
+            });
+        trackArchiveOperationPromise(Promise.resolve(recoveryTask).catch((error) => {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'position-reconciliation-recovery',
+            message: '平盘原任务恢复尚未完成，pending 已保留',
+            details: [error && error.message ? error.message : String(error)]
+          });
+        }));
+      } else {
+        database.setSetting(
+          POSITION_SIDE_DB_CHECKPOINT_SETTING,
+          JSON.stringify(checkpoint)
+        );
+        database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
+        database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       }
       const initializationResult = service.store
         && typeof service.store.initializationResult === 'function'
@@ -15100,7 +16764,7 @@ function syncPositionReconciliationCheckpoint() {
   );
 }
 
-async function runPositionReconciliationOperation(channel, operation) {
+async function runPositionReconciliationOperation(channel, operation, options = {}) {
   if (positionReconciliationOperationActive) {
     return {
       status: 'busy',
@@ -15110,7 +16774,7 @@ async function runPositionReconciliationOperation(channel, operation) {
   }
   let service;
   let baseCheckpoint;
-  const operationToken = randomUUID();
+  const operationToken = String(options.operationToken || randomUUID());
   positionReconciliationOperationActive = { operationToken, channel };
   try {
     service = getPositionReconciliationService();
@@ -15127,10 +16791,12 @@ async function runPositionReconciliationOperation(channel, operation) {
       pending: {
         operationToken,
         channel,
+        batchContext: options.batchContext || null,
         baseCheckpoint,
         archiveRequired,
         archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
         businessState: 'running',
+        terminalOutcome: null,
         archiveFiles: []
       },
       writeInitialPending: (pending) => {
@@ -15148,7 +16814,8 @@ async function runPositionReconciliationOperation(channel, operation) {
       clearPending: () => {
         database.setSetting(POSITION_SIDE_DB_PENDING_SETTING, '');
       },
-      failureResult: positionReconciliationFailureResult
+      failureResult: positionReconciliationFailureResult,
+      deferPendingClear: true
     });
   } catch (error) {
     return positionReconciliationFailureResult(error);
@@ -15186,6 +16853,20 @@ function positionReconciliationExportName(prefix) {
 }
 
 function registerPositionReconciliationHandlers() {
+  const sourceImportTaskContract = createPositionSourceImportTaskContract({
+    pickFiles: () => showImportOpenDialog('position-reconciliation-linked-source', {
+      title: '导入链接原始表',
+      properties: ['openFile', 'multiSelections'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
+    }),
+    getService: getPositionReconciliationService,
+    withSourceLock: (task) => withPositionReconciliationLock('source-import', task)
+  });
+  const runTaskContract = createPositionRunTaskContract({
+    getService: getPositionReconciliationService,
+    withRunLock: (task) => withPositionReconciliationLock('run', task),
+    createContextId: randomUUID
+  });
   ipcMain.handle('position-reconciliation:status', () => {
     try {
       return getPositionReconciliationService().status();
@@ -15215,10 +16896,8 @@ function registerPositionReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle(
+  ipcMain.handle(
     'position-reconciliation:bank:prepare-import',
-    '平盘对账数据处理',
-    '导入银行对账单',
     () => withPositionReconciliationLock('bank-import', async () => {
       const choice = await showImportOpenDialog('position-reconciliation-bank', {
         title: '导入平盘银行对账单',
@@ -15236,11 +16915,15 @@ function registerPositionReconciliationHandlers() {
     'position-reconciliation:bank:apply-import',
     '平盘对账数据处理',
     '导入银行对账单',
-    (_event, token) => withPositionReconciliationLock('bank-import-apply', () => {
-      const service = getPositionReconciliationService();
-      recordPositionArchiveIntentFiles(service.bankImportArchiveIntent(token), 'input');
-      return service.applyBankImport(token);
-    })
+    {
+      execute: (_event, _prepared, taskContext, token) => (
+        withPositionReconciliationLock('bank-import-apply', () => {
+          const service = getPositionReconciliationService();
+          recordPositionArchiveIntentFiles(service.bankImportArchiveIntent(token), 'input');
+          return service.applyBankImport(token, taskContext.batchContext);
+        })
+      )
+    }
   );
 
   ipcMain.handle('position-reconciliation:bank:cancel-import', async () => {
@@ -15255,28 +16938,22 @@ function registerPositionReconciliationHandlers() {
     'position-reconciliation:source:prepare-import',
     '平盘对账数据处理',
     '导入链接原始表',
-    () => withPositionReconciliationLock('source-import', async () => {
-      const choice = await showImportOpenDialog('position-reconciliation-linked-source', {
-        title: '导入链接原始表',
-        properties: ['openFile', 'multiSelections'],
-        filters: [{ name: 'Excel', extensions: ['xlsx', 'xls'] }]
-      });
-      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
-      }
-      return getPositionReconciliationService().prepareSourceImport(choice.filePaths);
-    })
+    sourceImportTaskContract
   );
 
   trackedIpcHandle(
     'position-reconciliation:source:apply-import',
     '平盘对账数据处理',
     '导入链接原始表',
-    (_event, token) => withPositionReconciliationLock('source-import-apply', () => {
-      const service = getPositionReconciliationService();
-      recordPositionArchiveIntentFiles(service.sourceImportArchiveIntent(token), 'input');
-      return service.applySourceImport(token);
-    })
+    {
+      execute: (_event, _prepared, taskContext, token) => (
+        withPositionReconciliationLock('source-import-apply', () => {
+          const service = getPositionReconciliationService();
+          recordPositionArchiveIntentFiles(service.sourceImportArchiveIntent(token), 'input');
+          return service.applySourceImport(token, taskContext.batchContext);
+        })
+      )
+    }
   );
 
   ipcMain.handle('position-reconciliation:source:cancel-import', async (_event, token) => {
@@ -15287,22 +16964,38 @@ function registerPositionReconciliationHandlers() {
     }
   });
 
-  ipcMain.handle('position-reconciliation:source:export-anomaly', (_event, reportKey) => (
-    withPositionReconciliationLock('source-anomaly-export', async () => {
+  trackedIpcHandle('position-reconciliation:source:export-anomaly', '平盘对账数据处理', '导出异常报告', {
+    async prepare(_event, reportKey) {
       const service = getPositionReconciliationService();
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: '导出链接原始表异常数据',
         defaultPath: service.defaultAnomalyReportFileName(reportKey),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      return service.exportAnomalyReport(reportKey, choice.filePath);
-    })
-  ));
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, outputPaths: [choice.filePath], reportKey, savePath: choice.filePath };
+    },
+    execute: (_event, prepared) => withPositionReconciliationLock(
+      'source-anomaly-export',
+      () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportAnomalyReport(
+          prepared.reportKey,
+          prepared.savePath
+        );
+      }
+    )
+  });
 
-  ipcMain.handle('position-reconciliation:import:cancel', (_event, jobId) => {
+  ipcMain.handle('position-reconciliation:import:cancel', async (_event, jobId) => {
     try {
-      return getPositionReconciliationService().cancelActiveImport(jobId);
+      const active = positionReconciliationOperationActive;
+      return getPositionReconciliationService().cancelActiveImport(
+        jobId,
+        () => (active ? persistPositionCancellationAccepted(active) : null)
+      );
     } catch (error) {
       return positionReconciliationFailureResult(error);
     }
@@ -15312,95 +17005,132 @@ function registerPositionReconciliationHandlers() {
     'position-reconciliation:mappings:save',
     '平盘对账数据处理',
     '账户映射管理',
-    (_event, mappings) => withPositionReconciliationLock('mapping-save', () => (
-      getPositionReconciliationService().saveMappings(mappings)
-    ))
+    {
+      execute: (_event, _prepared, taskContext, mappings) => (
+        withPositionReconciliationLock('mapping-save', () => (
+          getPositionReconciliationService().saveMappings(
+            mappings,
+            taskContext.batchContext
+          )
+        ))
+      )
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:bank:delete',
     '平盘对账数据处理',
     '删除银行数据',
-    (_event, payload = {}) => withPositionReconciliationLock('bank-delete', () => (
-      getPositionReconciliationService().deleteBank(payload)
-    ))
+    {
+      execute: (_event, _prepared, taskContext, payload = {}) => (
+        withPositionReconciliationLock('bank-delete', () => (
+          getPositionReconciliationService().deleteBank(
+            payload,
+            taskContext.batchContext
+          )
+        ))
+      )
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:source:delete',
     '平盘对账数据处理',
     '删除链接原始表',
-    (_event, payload = {}) => withPositionReconciliationLock('source-delete', () => (
-      getPositionReconciliationService().deleteSource(payload)
-    ))
+    {
+      execute: (_event, _prepared, taskContext, payload = {}) => (
+        withPositionReconciliationLock('source-delete', () => (
+          getPositionReconciliationService().deleteSource(
+            payload,
+            taskContext.batchContext
+          )
+        ))
+      )
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:bank:export',
     '平盘对账数据处理',
     '导出银行数据',
-    (_event, payload = {}) => withPositionReconciliationLock('bank-export', async () => {
+    {
+      async prepare(_event, payload = {}) {
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: '导出平盘银行对账单',
         defaultPath: positionReconciliationExportName('平盘银行对账单'),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      recordPositionArchiveIntentFiles([choice.filePath], 'output');
-      return getPositionReconciliationService().exportBank(payload, choice.filePath);
-    })
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, outputPaths: [choice.filePath], payload, savePath: choice.filePath };
+      },
+      execute: (_event, prepared) => withPositionReconciliationLock('bank-export', async () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportBank(prepared.payload, prepared.savePath);
+      })
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:linked:export',
     '平盘对账数据处理',
     '导出链接对账表',
-    (_event, sourceType, tableName = '平盘链接对账表') => (
-      withPositionReconciliationLock('linked-export', async () => {
+    {
+      async prepare(_event, sourceType, tableName = '平盘链接对账表') {
         const choice = await dialog.showSaveDialog(mainWindow, {
           title: '导出链接对账表',
           defaultPath: positionReconciliationExportName(tableName),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
-        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-        recordPositionArchiveIntentFiles([choice.filePath], 'output');
-        return getPositionReconciliationService().exportLinked(sourceType, choice.filePath);
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return { proceed: true, outputPaths: [choice.filePath], sourceType, savePath: choice.filePath };
+      },
+      execute: (_event, prepared) => withPositionReconciliationLock('linked-export', async () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportLinked(prepared.sourceType, prepared.savePath);
       })
-    )
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:raw:export',
     '平盘对账数据处理',
     '导出链接原始表',
-    (_event, sourceType, tableName = '链接原始表') => (
-      withPositionReconciliationLock('raw-export', async () => {
+    {
+      async prepare(_event, sourceType, tableName = '链接原始表') {
         const choice = await dialog.showSaveDialog(mainWindow, {
           title: '导出链接原始表',
           defaultPath: positionReconciliationExportName(tableName),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
-        if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-        recordPositionArchiveIntentFiles([choice.filePath], 'output');
-        return getPositionReconciliationService().exportRaw(sourceType, choice.filePath);
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return { proceed: true, outputPaths: [choice.filePath], sourceType, savePath: choice.filePath };
+      },
+      execute: (_event, prepared) => withPositionReconciliationLock('raw-export', async () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportRaw(prepared.sourceType, prepared.savePath);
       })
-    )
+    }
   );
 
   trackedIpcHandle(
     'position-reconciliation:run',
     '平盘对账数据处理',
     '开始运行',
-    (_event, payload = {}) => withPositionReconciliationLock('run', () => (
-      getPositionReconciliationService().run(payload)
-    ))
+    runTaskContract
   );
 
   trackedIpcHandle(
     'position-reconciliation:run:export',
     '平盘对账数据处理',
     '导出文件',
-    (_event, payload = {}) => withPositionReconciliationLock('result-export', async () => {
+    {
+      async prepare(_event, payload = {}) {
       const service = getPositionReconciliationService();
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: payload.differencesOnly ? '导出平盘差异数据' : '导出平盘资金性质校验结果',
@@ -15409,48 +17139,81 @@ function registerPositionReconciliationHandlers() {
           : service.defaultResultFileName(),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      recordPositionArchiveIntentFiles([choice.filePath], 'output');
-      return service.exportRun(payload.runId, choice.filePath, {
-        differencesOnly: payload.differencesOnly === true,
-        channels: Array.isArray(payload.channels) ? payload.channels : [],
-        regions: Array.isArray(payload.regions) ? payload.regions : [],
-        months: Array.isArray(payload.months) ? payload.months : [],
-        differenceStatuses: Array.isArray(payload.differenceStatuses)
-          ? payload.differenceStatuses
-          : []
-      });
-    })
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, outputPaths: [choice.filePath], payload, savePath: choice.filePath };
+      },
+      execute: (_event, prepared) => withPositionReconciliationLock('result-export', async () => {
+        const { payload, savePath } = prepared;
+        recordPositionArchiveIntentFiles([savePath], 'output');
+        return getPositionReconciliationService().exportRun(payload.runId, savePath, {
+          differencesOnly: payload.differencesOnly === true,
+          channels: Array.isArray(payload.channels) ? payload.channels : [],
+          regions: Array.isArray(payload.regions) ? payload.regions : [],
+          months: Array.isArray(payload.months) ? payload.months : [],
+          differenceStatuses: Array.isArray(payload.differenceStatuses)
+            ? payload.differenceStatuses
+            : []
+        });
+      })
+    }
   );
 
-  ipcMain.handle('position-reconciliation:run:export-filtered', (_event, runId) => (
-    withPositionReconciliationLock('result-filtered-export', async () => {
+  trackedIpcHandle('position-reconciliation:run:export-filtered', '平盘对账数据处理', '导出筛选结果', {
+    async prepare(_event, runId) {
       const service = getPositionReconciliationService();
       const choice = await dialog.showSaveDialog(mainWindow, {
         title: '导出平盘资金性质校验过滤数据',
         defaultPath: service.defaultFilteredResultFileName(runId),
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
-      if (choice.canceled || !choice.filePath) return { status: 'cancelled' };
-      return service.exportRunFilteredSources(runId, choice.filePath);
-    })
-  ));
+      if (choice.canceled || !choice.filePath) {
+        return { proceed: false, result: { status: 'cancelled' } };
+      }
+      return { proceed: true, outputPaths: [choice.filePath], runId, savePath: choice.filePath };
+    },
+    execute: (_event, prepared) => withPositionReconciliationLock(
+      'result-filtered-export',
+      () => {
+        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
+        return getPositionReconciliationService().exportRunFilteredSources(
+          prepared.runId,
+          prepared.savePath
+        );
+      }
+    )
+  });
 
   trackedIpcHandle(
     'position-reconciliation:run:import-result',
     '平盘对账数据处理',
     '导入修改结果',
-    (_event, runId) => withPositionReconciliationLock('result-import', async () => {
+    {
+      async prepare(_event, runId) {
       const choice = await showImportOpenDialog('position-reconciliation-result', {
         title: '导入修改后的平盘资金性质校验结果',
         properties: ['openFile'],
         filters: [{ name: 'Excel', extensions: ['xlsx'] }]
       });
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { status: 'cancelled' };
+        return { proceed: false, result: { status: 'cancelled' } };
       }
-      return getPositionReconciliationService().importRunResult(runId, choice.filePaths[0]);
-    })
+      return {
+        proceed: true,
+        inputPaths: [choice.filePaths[0]],
+        runId,
+        filePath: choice.filePaths[0]
+      };
+      },
+      execute: (_event, prepared) => withPositionReconciliationLock(
+        'result-import',
+        () => getPositionReconciliationService().importRunResult(
+          prepared.runId,
+          prepared.filePath
+        )
+      )
+    }
   );
 
   trackedIpcHandle(
@@ -16401,69 +18164,223 @@ function reportArchiveFailure(warning) {
   } catch (_error) { /* 存档告警展示失败不得影响业务 */ }
 }
 
-function archiveRegistrationFailureResult(result, warning) {
-  const detail = warning && warning.message
-    ? String(warning.message)
-    : '存档持久重试记录建立失败';
+async function resolveArchiveFlowEvidence(kind, args) {
+  try {
+    if (kind === 'bank-bu-import-bundle') {
+      const payload = args[0] && typeof args[0] === 'object' ? args[0] : {};
+      const yearMonth = String(payload.yearMonth || '').trim();
+      if (!database || !database.db || !/^\d{4}-\d{2}$/.test(yearMonth)) return null;
+      return bankBuReconRunData.getImportFlowEvidence({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        yearMonth
+      });
+    }
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'error',
+      source: 'main',
+      domain: 'archive-center-flow',
+      message: '任务流程证据读取失败，业务未开始',
+      details: [error && error.message ? error.message : String(error)]
+    });
+    throw error;
+  }
+  return null;
+}
+
+async function resolveTaskFlowPlan(policy, invocation) {
+  if (typeof policy.flowPlanResolver === 'function') {
+    const plan = await policy.flowPlanResolver(invocation);
+    if (!plan || typeof plan.startsNewFlow !== 'boolean') {
+      throw new TypeError(`task policy ${policy.channel} flowPlanResolver 返回非法`);
+    }
+    return plan;
+  }
   return {
-    status: 'failed',
-    code: 'archive-retry-registration-failed',
-    message: '业务处理已完成，但存档重试记录建立失败；请勿重复操作，重启软件后先核对业务数据',
-    detailLines: [detail],
-    businessResult: archiveResultSnapshot(result)
+    startsNewFlow: policy.startsNewFlow,
+    flowIdentity: typeof policy.flowIdentityResolver === 'function'
+      ? policy.flowIdentityResolver(invocation)
+      : null
   };
 }
 
-async function runArchiveAwareOperation(meta, event, args, handler) {
-  if (!archiveOperationTracker || !archiveOperationTracker.supportsChannel(meta.channel)) {
-    return handler(event, ...args);
-  }
-  const context = { dialogSelections: [] };
-  return archiveOperationContext.run(context, async () => {
-    const result = await handler(event, ...args);
-    markPositionBusinessOutcome(result);
+function trackArchiveOperationPromise(promise) {
+  const previous = archiveOperationTail;
+  archiveOperationTail = Promise.allSettled([previous, promise]).then(() => undefined);
+  return promise;
+}
 
-    const selectedPaths = context.dialogSelections.flatMap((selection) => selection.filePaths || []);
-    let runtime;
-    try {
-      runtime = await buildArchiveRuntimeSnapshot(meta.channel, args, result);
-      runtime.sourceSnapshots = captureArchiveSourceSnapshots({
-        args,
-        result,
-        selectedPaths,
-        runtime
-      });
-      const positionOperation = positionReconciliationOperationContext.getStore();
-      if (positionOperation) {
-        runtime.metadata = {
-          ...(runtime.metadata || {}),
-          positionOperationToken: positionOperation.operationToken
-        };
+async function runArchiveAwareOperation(meta, event, args, handler) {
+  const contract = normalizeIpcTaskHandler(handler);
+  const dialogContext = { dialogSelections: [], batchContext: null, phase: 'prepare' };
+  return archiveOperationContext.run(dialogContext, async () => {
+    // picker / preview / danger confirmation 必须全部在 BOR.begin 和 reserve 之前完成。
+    const prepared = await prepareIpcTaskInvocation(contract, event, args);
+    dialogContext.phase = 'execute';
+    if (!prepared.proceed) return prepared.result;
+
+    const effectiveArgs = prepared.args;
+    const executeBusiness = (taskContext) => executeIpcTaskInvocation(
+      contract,
+      event,
+      prepared,
+      effectiveArgs,
+      taskContext
+    );
+    const policy = taskPolicyRegistry.get(meta.channel);
+    if (!policy) {
+      if (!pr3TaskPolicyHandoff.has(meta.channel)) {
+        throw new Error(`未登记 task policy：${meta.channel}`);
       }
-    } catch (error) {
-      const warning = { message: error && error.message ? error.message : String(error) };
-      reportArchiveFailure(warning);
-      return archiveRegistrationFailureResult(result, warning);
+      return runRegisteredBusinessOperation(meta, executeBusiness)(event);
+    }
+    if (policy.batchPolicy !== 'reserve') {
+      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
     }
 
-    const archiveTask = archiveOperationTail.then(() => archiveOperationTracker.handleOperation({
-        channel: meta.channel,
-        args,
-        result: archiveResultSnapshot(result),
-        selectedPaths,
-        runtime
-    }));
-    archiveOperationTail = archiveTask.catch(() => undefined);
-    return settlePositionArchiveResult({
-      result,
-      archiveTask,
-      runtime,
-      persistRecovery: persistCurrentPositionArchiveIntentIfNeeded,
-      markDurable: markPositionArchiveDurable,
-      cleanup: cleanupPositionArchiveStaging,
-      reportFailure: reportArchiveFailure,
-      registrationFailureResult: archiveRegistrationFailureResult
-    });
+    const center = archiveCenterService || initializeArchiveCenter();
+    if (!center || !archiveTaskLifecycle) {
+      if (typeof prepared.onAbandon === 'function') await prepared.onAbandon();
+      return {
+        status: 'failed',
+        code: 'ARCHIVE_TASK_LIFECYCLE_UNAVAILABLE',
+        message: '存档中心无法预留任务批次，业务未开始'
+      };
+    }
+
+    const selectedPaths = [
+      ...prepared.inputPaths,
+      ...dialogContext.dialogSelections.flatMap((selection) => selection.filePaths || [])
+    ];
+    const invocation = {
+      args: effectiveArgs,
+      prepared,
+      resolveFlowEvidence: (kind) => resolveArchiveFlowEvidence(kind, effectiveArgs)
+    };
+    const isPositionOperation = meta.channel.startsWith('position-reconciliation:');
+    const positionOperationToken = isPositionOperation ? randomUUID() : '';
+
+    const operationPromise = runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
+      archiveTaskLifecycle.run({
+      meta,
+      policy,
+      args: effectiveArgs,
+      prepared,
+      selectedPathsResolver: () => selectedPaths,
+      recovery: prepared.recovery || undefined,
+      flowPlanResolver: prepared.flowPlan
+        ? () => prepared.flowPlan
+        : () => resolveTaskFlowPlan(policy, invocation),
+      taskRunId: prepared.taskRunId || positionOperationToken || undefined,
+      operationKey: prepared.operationKey || (positionOperationToken
+        ? `position:${positionOperationToken}:${meta.channel}`
+        : undefined),
+      resultClassifier: policy.resultClassifier,
+      resultMetadataResolver: typeof policy.resultMetadataResolver === 'function'
+        ? (result, context, terminal) => policy.resultMetadataResolver(
+            result,
+            context,
+            { ...terminal, invocation }
+          )
+        : null,
+      resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
+        ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
+        : null,
+      afterTerminal: isPositionOperation
+        ? finalizePositionPendingAfterTaskTerminal
+        : null,
+      afterTerminalIntent: isPositionOperation
+        ? { route: 'position-reconciliation', operationToken: positionOperationToken }
+        : null,
+      beforeStart: async () => {
+        if (typeof prepared.beforeStart === 'function') await prepared.beforeStart();
+        return {
+          sourceSnapshots: captureArchiveSourceSnapshots({
+          args: [],
+          result: null,
+          selectedPaths: resolveOperationInputPaths({
+            channel: meta.channel,
+            args: effectiveArgs,
+            prepared,
+            selectedPaths,
+            runtime: { inputPaths: prepared.inputPaths }
+          }),
+            runtime: {}
+          })
+        };
+      },
+      runtimeResolver: async ({ result, beforeStartEvidence }) => {
+        const runtime = await buildArchiveRuntimeSnapshot(meta.channel, effectiveArgs, result);
+        const afterSnapshots = captureArchiveSourceSnapshots({
+          args: effectiveArgs,
+          result,
+          selectedPaths,
+          runtime
+        });
+        runtime.sourceSnapshots = new Map([
+          ...(
+            beforeStartEvidence && beforeStartEvidence.sourceSnapshots
+              ? beforeStartEvidence.sourceSnapshots
+              : []
+          ),
+          ...afterSnapshots
+        ]);
+        if (positionOperationToken) {
+          runtime.metadata = {
+            ...(runtime.metadata || {}),
+            positionOperationToken
+          };
+        }
+        return runtime;
+      },
+      execute: async (batchContext, controls) => {
+        dialogContext.batchContext = batchContext;
+        const taskContext = createIpcTaskContext(batchContext, controls);
+        const executePositionBusiness = async () => {
+          let result;
+          let operationError = null;
+          try {
+            result = await executeBusiness(taskContext);
+          } catch (error) {
+            operationError = error;
+          }
+          markPositionBusinessOutcome(operationError
+            ? positionReconciliationFailureResult(operationError)
+            : result);
+          const settled = await controls.settleArtifacts({
+            result,
+            error: operationError
+          });
+          const settledResult = await settlePositionArchiveResult({
+            result,
+            archiveTask: Promise.resolve(settled.archiveResult),
+            runtime: settled.runtime,
+            persistRecovery: persistCurrentPositionArchiveIntentIfNeeded,
+            markDurable: markPositionArchiveDurable,
+            markIncomplete: markPositionArchiveIncomplete,
+            cleanup: cleanupPositionArchiveStaging,
+            reportFailure: reportArchiveFailure
+          });
+          if (operationError) throw operationError;
+          return settledResult;
+        };
+        return executeAfterPositionAdmission({
+          isPositionOperation,
+          markExecuteStarted,
+          execute: isPositionOperation
+            ? executePositionBusiness
+            : () => executeBusiness(taskContext),
+          admitPosition: (operation) => runPositionReconciliationOperation(
+            meta.channel,
+            operation,
+            { operationToken: positionOperationToken, batchContext }
+          )
+        });
+      }
+      })
+    ));
+    return trackArchiveOperationPromise(operationPromise);
   });
 }
 
@@ -16486,23 +18403,28 @@ function runRegisteredBusinessOperation(meta, handler) {
 
 function businessIpcHandle(channel, label, handler) {
   const meta = { channel, functionKey: label };
-  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, (event, ...args) => {
-    return runArchiveAwareOperation(meta, event, args, handler);
-  }));
+  ipcMain.handle(channel, (event, ...args) => runArchiveAwareOperation(
+    meta, event, args, handler
+  ));
+}
+
+function supportIpcHandle(channel, label, handler) {
+  if (!supportActionChannels.has(channel)) {
+    throw new Error(`未登记 support action：${channel}`);
+  }
+  const meta = { channel, functionKey: label, operationKind: 'support-action' };
+  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
 function trackedIpcHandle(channel, moduleKey, functionKey, handler) {
   const meta = { channel, moduleKey, functionKey };
-  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
-    const execute = () => runArchiveAwareOperation(meta, event, args, handler);
-    const result = channel.startsWith('position-reconciliation:')
-      ? await runPositionReconciliationOperation(channel, execute)
-      : await execute();
+  ipcMain.handle(channel, async (event, ...args) => {
+    const result = await runArchiveAwareOperation(meta, event, args, handler);
     if (isSuccessfulTrackedResult(result, moduleKey)) {
       tickUsageStats(moduleKey, functionKey);
     }
     return result;
-  }));
+  });
 }
 
 function dynamicTrackedIpcHandle(
@@ -16513,14 +18435,14 @@ function dynamicTrackedIpcHandle(
   handler
 ) {
   const meta = { channel, moduleKey, functionKey: operationFunctionKey };
-  ipcMain.handle(channel, runRegisteredBusinessOperation(meta, async (event, ...args) => {
+  ipcMain.handle(channel, async (event, ...args) => {
     const result = await runArchiveAwareOperation(meta, event, args, handler);
     if (isSuccessfulTrackedResult(result, moduleKey)) {
       const usageFunctionKey = resolveUsageFunctionKey(result, event, ...args);
       if (usageFunctionKey) tickUsageStats(moduleKey, usageFunctionKey);
     }
     return result;
-  }));
+  });
 }
 
 function flushUsageStats() {

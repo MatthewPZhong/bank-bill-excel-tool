@@ -258,6 +258,21 @@ class ArchiveService {
       return this.initialization;
     }
 
+    let flowBindReplay;
+    try {
+      flowBindReplay = this.repository.replayFlowBindIntents();
+    } catch (error) {
+      this.initialized = false;
+      const failure = safeFailure(error, '重放业务流程身份');
+      this.initialization = {
+        ok: false,
+        available: false,
+        status: 'unavailable',
+        ...failure
+      };
+      return this.initialization;
+    }
+
     this.initialized = true;
     try {
       await this._mkdirs();
@@ -268,7 +283,8 @@ class ArchiveService {
         ok: consistency.failures.length === 0,
         available: true,
         status: consistency.failures.length === 0 ? 'ready' : 'ready-with-cleanup-warnings',
-        consistency
+        consistency,
+        flowBindReplay
       };
       return this.initialization;
     } catch (error) {
@@ -287,7 +303,8 @@ class ArchiveService {
           removedUnreferencedBlobRecords: 0,
           removedOrphanBlobFiles: 0,
           failures: [{ code: failure.code, item: 'archive-storage' }]
-        }
+        },
+        flowBindReplay
       };
       return this.initialization;
     }
@@ -451,6 +468,48 @@ class ArchiveService {
     });
   }
 
+  async beginTaskRecovery(batchContext, options = {}) {
+    return this._run('beginTaskRecovery', async () => {
+      const recovery = this.repository.beginTaskRecovery(batchContext, options);
+      if (recovery.status === 'not-found') {
+        return {
+          ok: false,
+          status: recovery.status,
+          code: 'ARCHIVE_BATCH_NOT_FOUND',
+          message: '存档批次不存在'
+        };
+      }
+      if (recovery.status !== 'reopened') {
+        const succeeded = recovery.status === 'succeeded-conflict';
+        const identityConflict = recovery.status === 'identity-conflict';
+        return {
+          ok: false,
+          status: recovery.status,
+          code: succeeded
+            ? 'ARCHIVE_TASK_ALREADY_SUCCEEDED'
+            : identityConflict
+              ? 'ARCHIVE_TASK_RECOVERY_IDENTITY_CONFLICT'
+              : 'ARCHIVE_TASK_RECOVERY_STATUS_CONFLICT',
+          message: succeeded
+            ? '已成功任务不能恢复执行'
+            : identityConflict
+              ? '恢复上下文与存档批次身份不一致'
+              : '存档批次当前状态不允许恢复执行',
+          mismatchedField: recovery.mismatchedField,
+          batch: recovery.batch
+        };
+      }
+      return {
+        ok: true,
+        status: recovery.status,
+        batchId: recovery.batch.id,
+        batchNumber: recovery.batch.batchNumber,
+        taskStatus: recovery.batch.taskStatus,
+        batch: recovery.batch
+      };
+    });
+  }
+
   async _setTaskStatus(operation, batchId, taskStatus, options = {}) {
     return this._run(operation, async () => {
       const transition = this.repository.transitionTaskStatus(
@@ -485,8 +544,9 @@ class ArchiveService {
     });
   }
 
-  async completeTaskBatch(batchId) {
+  async completeTaskBatch(batchId, completion = {}) {
     return this._setTaskStatus('completeTaskBatch', batchId, 'succeeded', {
+      ...completion,
       expectedStatuses: ['reserved', 'running']
     });
   }
@@ -541,6 +601,36 @@ class ArchiveService {
         created: bound.created,
         anchor: bound.anchor
       };
+    });
+  }
+
+  async persistFlowBindIntent(payload = {}) {
+    return this._run('persistFlowBindIntent', async () => {
+      const persisted = this.repository.persistFlowBindIntent(payload);
+      return {
+        ok: true,
+        status: persisted.resolved
+          ? 'already-bound'
+          : (persisted.created ? 'persisted' : 'existing'),
+        ...persisted
+      };
+    });
+  }
+
+  async replayFlowBindIntents(payload = {}) {
+    return this._run('replayFlowBindIntents', async () => {
+      const replay = this.repository.replayFlowBindIntents(payload);
+      if (replay.failed > 0) {
+        const failure = replay.results.find((result) => !result.ok);
+        return {
+          ok: false,
+          status: 'failed',
+          code: failure && failure.code || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED',
+          message: failure && failure.message || 'flow-bind intent 重放失败',
+          ...replay
+        };
+      }
+      return { ok: true, status: 'replayed', ...replay };
     });
   }
 

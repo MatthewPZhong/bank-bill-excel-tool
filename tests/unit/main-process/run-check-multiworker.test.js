@@ -32,6 +32,15 @@ const BILL_TABLE = 'acquiring_bill_currency_bill_imports';
 const FLOW_TABLE = 'acquiring_bill_currency_flow_imports';
 const DIFF_TABLE = 'acquiring_bill_currency_diff_rows';
 const MONTH_KEY = '2026-03';
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'acquiring-nested-multiworker-contract',
+  taskKey: 'acquiringBillCurrency:run',
+  moduleId: 'acquiring-bill-currency',
+  parentRunId: 'acquiring-run-parent',
+  operationKey: 'acquiring-run-operation'
+});
 
 const PRAGMA = [
   'PRAGMA foreign_keys = ON;',
@@ -285,6 +294,7 @@ test.describe('run-check-multiworker（plan-b write-splitting）', () => {
           targetColumns: TARGET_COLUMNS,
           prefixValues: [2], // run_id = 2
           tempDir,
+          batchContext: WORKER_BATCH_CONTEXT,
         });
 
         assert.equal(res.totalChunks, totalChunks, 'totalChunks 与 baseline 一致');

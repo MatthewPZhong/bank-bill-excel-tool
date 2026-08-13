@@ -54,6 +54,76 @@ function addArtifact(repository, batchId, overrides = {}) {
   });
 }
 
+test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 succeeded 闭锁', () => {
+  const { db, repository } = createFixture();
+  try {
+    const reserved = repository.reserveTaskBatch({
+      moduleId: 'acquiring-bill-currency',
+      moduleCode: 'ACQUIRING',
+      moduleName: '收单账单币种检查',
+      operationKey: 'run:2026-04:101',
+      taskKey: 'acquiringBillCurrency:run',
+      taskRunId: 'task-run-101',
+      parentRunId: 'parent-run-101'
+    });
+    const context = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: reserved.batch.taskRunId,
+      taskKey: reserved.batch.taskKey,
+      moduleId: reserved.batch.moduleId,
+      parentRunId: reserved.batch.parentRunId,
+      operationKey: reserved.batch.operationKey
+    };
+
+    repository.transitionTaskStatus(context.batchId, 'running', { expectedStatuses: ['reserved'] });
+    const fromRunning = repository.beginTaskRecovery(context, { evidence: { runId: 101 } });
+    assert.equal(fromRunning.status, 'reopened');
+    assert.equal(fromRunning.batch.taskStatus, 'running');
+    assert.deepEqual(fromRunning.batch.metadata.recovery, {
+      previousTaskStatus: 'running',
+      previousFailureCode: '',
+      previousFailureMessage: '',
+      previousFinishedAt: null,
+      recoveryCount: 1,
+      evidence: { runId: 101 }
+    });
+
+    repository.transitionTaskStatus(context.batchId, 'failed', {
+      expectedStatuses: ['running'],
+      failureCode: 'WORKER_CRASH',
+      failureMessage: 'worker exited'
+    });
+    const failedEvidence = repository.getBatch(context.batchId);
+    const fromFailed = repository.beginTaskRecovery(context, { evidence: { runId: 101 } });
+    assert.equal(fromFailed.batch.taskStatus, 'running');
+    assert.equal(fromFailed.batch.metadata.recovery.previousTaskStatus, 'failed');
+    assert.equal(fromFailed.batch.metadata.recovery.previousFailureCode, 'WORKER_CRASH');
+    assert.equal(fromFailed.batch.metadata.recovery.previousFailureMessage, 'worker exited');
+    assert.equal(fromFailed.batch.metadata.recovery.previousFinishedAt, failedEvidence.finishedAt);
+    assert.equal(fromFailed.batch.metadata.recovery.recoveryCount, 2);
+
+    repository.transitionTaskStatus(context.batchId, 'cancelled', { expectedStatuses: ['running'] });
+    const fromCancelled = repository.beginTaskRecovery(context, { evidence: { runId: 101 } });
+    assert.equal(fromCancelled.batch.taskStatus, 'running');
+    assert.equal(fromCancelled.batch.metadata.recovery.previousTaskStatus, 'cancelled');
+    assert.equal(fromCancelled.batch.metadata.recovery.recoveryCount, 3);
+
+    const identityConflict = repository.beginTaskRecovery({ ...context, operationKey: 'forged' });
+    assert.equal(identityConflict.status, 'identity-conflict');
+    assert.equal(identityConflict.mismatchedField, 'operationKey');
+
+    repository.transitionTaskStatus(context.batchId, 'succeeded', { expectedStatuses: ['running'] });
+    const succeededConflict = repository.beginTaskRecovery(context);
+    assert.equal(succeededConflict.status, 'succeeded-conflict');
+    assert.equal(succeededConflict.batch.taskStatus, 'succeeded');
+    assert.equal(repository.getLatestIssuedBatch().batchId, context.batchId, '恢复未分配新批次/流水');
+    assert.equal(repository.listBatches().length, 1);
+  } finally {
+    db.close();
+  }
+});
+
 test('建表幂等，批次按模块代码和本地日期生成独立流水号', () => {
   const fixture = createFixture();
   const { db, repository } = fixture;
@@ -100,6 +170,7 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
         'archive_blobs',
         'archive_daily_sequences',
         'archive_flow_anchors',
+        'archive_flow_bind_intents',
         'archive_operation_issuances'
       ]
     );

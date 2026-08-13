@@ -42,6 +42,12 @@ function normalizeFiles(files) {
   });
 }
 
+function outboxConflict(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 function normalizeRecord(record, fileName = '') {
   if (!record || typeof record !== 'object' || Array.isArray(record)) {
     throw new TypeError(`存档 outbox 记录损坏：${fileName}`);
@@ -147,13 +153,50 @@ class ArchiveOutboxStore {
     return this._writeRecord(record);
   }
 
-  append(id, files) {
+  merge(id, payload = {}) {
     const record = this.get(id);
     if (!record) throw new Error(`存档 outbox 记录不存在：${id}`);
+    const incomingTargetBatchId = Object.prototype.hasOwnProperty.call(payload, 'targetBatchId')
+      ? Number(payload.targetBatchId)
+      : null;
+    if (incomingTargetBatchId !== null
+        && (!Number.isSafeInteger(incomingTargetBatchId) || incomingTargetBatchId < 1)) {
+      throw new TypeError('存档 outbox targetBatchId 必须是正安全整数');
+    }
+    const existingTargetBatchId = Object.prototype.hasOwnProperty.call(
+      record.payload,
+      'targetBatchId'
+    ) ? Number(record.payload.targetBatchId) : null;
+    if (existingTargetBatchId !== null
+        && incomingTargetBatchId !== null
+        && existingTargetBatchId !== incomingTargetBatchId) {
+      throw outboxConflict(
+        'ARCHIVE_OUTBOX_TARGET_BATCH_CONFLICT',
+        '同一 operation 的存档 outbox 指向不同任务批次'
+      );
+    }
+
+    const incomingTerminalOutcome = payload.terminalOutcome;
+    if (incomingTerminalOutcome !== undefined
+        && (!incomingTerminalOutcome
+          || typeof incomingTerminalOutcome !== 'object'
+          || Array.isArray(incomingTerminalOutcome))) {
+      throw new TypeError('存档 outbox terminalOutcome 格式非法');
+    }
+    const existingTerminalOutcome = record.payload.terminalOutcome;
+    if (existingTerminalOutcome !== undefined
+        && incomingTerminalOutcome !== undefined
+        && stableSerialize(existingTerminalOutcome) !== stableSerialize(incomingTerminalOutcome)) {
+      throw outboxConflict(
+        'ARCHIVE_OUTBOX_TERMINAL_CONFLICT',
+        '同一 operation/batch 的任务终态意图冲突'
+      );
+    }
+
     const seen = new Set(record.payload.files.map((file) => (
       `${file.direction || ''}\u0000${file.role || ''}\u0000${file.filePath}`
     )));
-    const appended = normalizeFiles(files).filter((file) => {
+    const appended = normalizeFiles(payload.files).filter((file) => {
       const key = `${file.direction || ''}\u0000${file.role || ''}\u0000${file.filePath}`;
       if (seen.has(key)) return false;
       seen.add(key);
@@ -163,11 +206,21 @@ class ArchiveOutboxStore {
       ...record,
       payload: {
         ...record.payload,
+        ...(existingTargetBatchId === null && incomingTargetBatchId !== null
+          ? { targetBatchId: incomingTargetBatchId }
+          : {}),
+        ...(existingTerminalOutcome === undefined && incomingTerminalOutcome !== undefined
+          ? { terminalOutcome: JSON.parse(JSON.stringify(incomingTerminalOutcome)) }
+          : {}),
         files: [...record.payload.files, ...appended]
       }
     };
     updated.integrityHash = recordIntegrityHash(updated);
     return this._writeRecord(updated);
+  }
+
+  append(id, files) {
+    return this.merge(id, { files });
   }
 
   get(id) {

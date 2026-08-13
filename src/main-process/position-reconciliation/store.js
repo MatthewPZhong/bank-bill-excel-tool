@@ -2128,6 +2128,29 @@ class PositionReconciliationStore {
     }));
   }
 
+  countBankRows({ channels = [], months = [], statuses = [] } = {}) {
+    const clauses = [];
+    const args = [];
+    if (channels.length > 0) {
+      clauses.push(`channel IN (${placeholders(channels)})`);
+      args.push(...channels);
+    }
+    if (months.length > 0) {
+      clauses.push(`month_key IN (${placeholders(months)})`);
+      args.push(...months);
+    }
+    if (statuses.length > 0) {
+      clauses.push(`status IN (${placeholders(statuses)})`);
+      args.push(...statuses);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    return Number(this.db.prepare(`
+      SELECT COUNT(*) AS rowCount
+      FROM position_bank_rows
+      ${where}
+    `).get(...args).rowCount);
+  }
+
   getBankRows({ channels = [], months = [], statuses = [] } = {}) {
     const clauses = [];
     const args = [];

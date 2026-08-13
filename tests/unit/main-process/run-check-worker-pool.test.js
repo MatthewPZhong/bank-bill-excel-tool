@@ -26,7 +26,20 @@ const ExcelJS = require('exceljs');
 const pool = require('../../../src/main-process/run-check-worker-pool');
 const { AppDatabase } = require('../../../src/backend/database');
 const session = require('../../../src/main-process/acquiring-bill-currency-session');
+const runRepo = require('../../../src/backend/acquiring-bill-currency-db/run-repository');
 const { FLOW_HEADERS, BILL_HEADERS } = require('../../../src/backend/acquiring-bill-currency-db/columns');
+
+const MAIN_PATH = path.join(__dirname, '..', '..', '..', 'src', 'main.js');
+
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'acquiring-run-worker-contract',
+  taskKey: 'acquiringBillCurrency:run',
+  moduleId: 'acquiring-bill-currency',
+  parentRunId: 'acquiring-run-parent',
+  operationKey: 'acquiring-run-operation'
+});
 
 // 临时 DB + 测试数据准备
 async function setupTmpDb() {
@@ -87,13 +100,136 @@ test.describe('run-check-worker-pool', () => {
     const ctx = await setupTmpDb();
     try {
       const result = await pool.dispatchRunCheck(
-        { __dbPath: ctx.dbPath, monthKey: '2026-04', storageRoot: ctx.tmpdir },
+        {
+          __dbPath: ctx.dbPath,
+          monthKey: '2026-04',
+          storageRoot: ctx.tmpdir,
+          batchContext: WORKER_BATCH_CONTEXT
+        },
         {}
       );
       assert.equal(typeof result.runId, 'number', 'runId 是 number');
       assert.equal(result.totalBillRows, 2, 'totalBillRows=2');
       assert.equal(result.mismatchRows, 1, 'mismatchRows=1');
     } finally {
+      ctx.cleanup();
+    }
+  });
+
+  test('1a. resume IPC prepare/execute contract 在 reserve 前取锁并将持久 batchContext 透传到 worker', async () => {
+    const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
+    const freshRunStart = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:run'"
+    );
+    const freshRunEnd = mainSource.indexOf(
+      "ipcMain.handle('acquiringBillCurrency:run:cancel'",
+      freshRunStart
+    );
+    const freshRunSource = mainSource.slice(freshRunStart, freshRunEnd);
+    assert.match(freshRunSource, /async prepare\(_event, payload = \{\}\)/);
+    assert.ok(
+      freshRunSource.indexOf('acquiringRunData.findBoundResumableRun')
+        < freshRunSource.indexOf("tryAcquireOpLock('run', monthKey)"),
+      'fresh run 必须在月锁/reserve/clear 之前探测已绑定原批次的可恢复 run'
+    );
+    assert.match(freshRunSource, /ACQUIRING_RUN_RESUME_REQUIRED/);
+    assert.match(freshRunSource, /\['reserved', 'running'\]/);
+    assert.ok(
+      freshRunSource.indexOf("tryAcquireOpLock('run', monthKey)")
+        < freshRunSource.indexOf('async execute(event, prepared, taskContext)'),
+      'fresh run 的 DB/month admission 与月锁必须在 lifecycle reserve 前的 prepare 完成'
+    );
+    assert.match(freshRunSource, /onAbandon:\s*releaseLock/);
+    assert.match(freshRunSource, /finally\s*\{\s*prepared\.releaseLock\(\)/);
+    const handlerStart = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:run:resume'"
+    );
+    const handlerEnd = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:export'",
+      handlerStart
+    );
+    assert.ok(handlerStart >= 0 && handlerEnd > handlerStart, 'main.js 应存在独立 resume handler 段');
+    const handlerSource = mainSource.slice(handlerStart, handlerEnd);
+    assert.match(
+      handlerSource,
+      /async prepare\(_event, payload = \{\}\)/,
+      'resume 必须在 lifecycle 前 prepare'
+    );
+    assert.ok(
+      handlerSource.indexOf("tryAcquireOpLock('run', monthKey)")
+        < handlerSource.indexOf('acquiringRunData.prepareRunResume'),
+      'prepare 必须先取得既有 acquiring operation lock，再解析恢复目标'
+    );
+    assert.match(
+      handlerSource,
+      /async execute\(event, prepared, taskContext\)/,
+      'resume execute 必须取得 prepared plan 与 lifecycle taskContext'
+    );
+    assert.ok(
+      handlerSource.indexOf('persistRunResumeBatchContext')
+        < handlerSource.indexOf('resumeRunCheck'),
+      'legacy batchContext 必须在 worker 前回填'
+    );
+    assert.match(
+      handlerSource,
+      /batchContext:\s*taskContext\.batchContext/,
+      'resume dispatch payload 必须透传父任务 batchContext'
+    );
+    const wrapperStart = mainSource.indexOf('async function runArchiveAwareOperation');
+    const wrapperEnd = mainSource.indexOf('function runRegisteredBusinessOperation', wrapperStart);
+    const wrapperSource = mainSource.slice(wrapperStart, wrapperEnd);
+    assert.match(wrapperSource, /recovery:\s*prepared\.recovery \|\| undefined/);
+    assert.match(wrapperSource, /taskRunId:\s*prepared\.taskRunId \|\|/);
+    assert.match(wrapperSource, /operationKey:\s*prepared\.operationKey \|\|/);
+    assert.match(wrapperSource, /flowPlanResolver:\s*prepared\.flowPlan/);
+
+    const ctx = await setupTmpDb();
+    let sideDb;
+    try {
+      sideDb = new AppDatabase(ctx.dbPath);
+      sideDb.init();
+      const initial = await session.runCheckCore({
+        db: sideDb.db,
+        monthKey: '2026-04',
+        storageRoot: ctx.tmpdir,
+        chunkSize: 1
+      });
+      runRepo.setRunChunkProgress(sideDb.db, {
+        runId: initial.runId,
+        lastCompletedChunkIndex: -1,
+        totalChunks: 2,
+        status: 'partial',
+        chunkSize: 1
+      });
+      sideDb.db.close();
+      sideDb = null;
+
+      const resumePayload = {
+        __dbPath: ctx.dbPath,
+        monthKey: '2026-04',
+        storageRoot: ctx.tmpdir,
+        chunkSize: 1,
+        resumeFromRun: {
+          runId: initial.runId,
+          lastCompletedChunkIndex: -1
+        }
+      };
+      await assert.rejects(
+        () => pool.dispatchRunCheck({
+          ...resumePayload,
+          batchContext: { ...WORKER_BATCH_CONTEXT, batchId: 0 }
+        }, {}),
+        /worker batchContext\.batchId/,
+        '非法探针必须在真实 run worker 入口被拒绝；若中途漏传则会静默成功'
+      );
+
+      const resumed = await pool.dispatchRunCheck({
+        ...resumePayload,
+        batchContext: WORKER_BATCH_CONTEXT
+      }, {});
+      assert.equal(resumed.runId, initial.runId, 'resume 仍复用原 runId');
+    } finally {
+      try { sideDb?.db.close(); } catch (_e) { /* swallow */ }
       ctx.cleanup();
     }
   });

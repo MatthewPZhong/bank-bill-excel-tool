@@ -36,6 +36,15 @@ const ExcelJS = require('exceljs');
 const yazl = require('yazl');
 
 const { FLOW_HEADERS, FLOW_DB_COLUMNS } = require('../../src/backend/biz-op-recon-db/columns');
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'bizop-flow-engine-migration',
+  taskKey: 'bizOpRecon:import:run-flow',
+  moduleId: 'biz-op-reconciliation',
+  parentRunId: 'bizop-flow-engine-parent',
+  operationKey: 'bizop-flow-engine-operation'
+});
 
 // ─────────────────────── 子进程模式：执行一组导入操作 + dump 结果 ───────────────────────
 //   op JSON：{ tmpdir, date, ops:[{ files, seedAux }], dumpAfter:bool }
@@ -67,6 +76,7 @@ async function runChild(opJsonPath, dbPath) {
         dbPath,
         writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
         errorReportsDir,
+        batchContext: WORKER_BATCH_CONTEXT,
         onProgress: null
       });
 

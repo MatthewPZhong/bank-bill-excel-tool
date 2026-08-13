@@ -9,6 +9,9 @@
 const { DatabaseSync } = require('node:sqlite');
 const PENDING_COLUMNS = require('../backend/pending-db/columns');
 const { writeStreamedXlsx } = require('../backend/pending-import/streaming-xlsx-writer');
+const {
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
 
 function emit(ev) { process.stdout.write(JSON.stringify(ev) + '\n'); }
 
@@ -24,6 +27,8 @@ async function main() {
     emit({ type: 'error', message: 'jobMeta 解析失败: ' + err.message });
     process.exit(2);
   }
+  const batchContext = freezeWorkerBatchContext(job.batchContext);
+  void batchContext;
   const { dbPath, yearMonth, archivePath } = job;
   if (!dbPath || !yearMonth || !archivePath) {
     emit({ type: 'error', message: 'jobMeta 字段缺失 (dbPath/yearMonth/archivePath)' });

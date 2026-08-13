@@ -75,7 +75,7 @@ function resolveDbPath(db) {
 //   返回引擎 result：{ monthKey, fileCount, totalImported, deletedCount, maxParallel }。
 //   onEngineProgress：({ sourceFile, importedCount }) 引擎每 1w 行节流上报（worker → message → 此处转发）。
 //   错误：worker postMessage 'error' → 用 deserializeError 还原（保 name/message/detailLines）→ reject。
-function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptions, mode, monthKey, onEngineProgress }) {
+function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptions, mode, monthKey, batchContext, onEngineProgress }) {
   return new Promise((resolve, reject) => {
     let worker;
     try {
@@ -149,7 +149,8 @@ function dispatchEngineImport({ dbPath, files, contractModulePath, contractOptio
         contractModulePath,
         contractOptions: contractOptions || {},
         mode: mode || 'append',
-        monthKey
+        monthKey,
+        batchContext
         // parallel / useWhitelist 用引擎默认（min(4,cpus-2) + 内存闸；契约白名单）。
       }
     });
@@ -208,7 +209,7 @@ function safeBegin(db) {
 // v3.0.3 PR-H：开关分流入口。
 //   USE_BIG_TABLE_IMPORT_ENGINE=true（默认）→ dispatch 引擎 worker（append 模式）。
 //   false 或 db.location() 拿不到 dbPath → 回退 runImportLegacyInTransaction（reader-handrolled 直调旧路径）。
-async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgress }) {
+async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgress, batchContext }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
@@ -230,6 +231,7 @@ async function importFilesInTransaction({ db, kind, monthKey, filePaths, onProgr
       contractOptions: { importedAt },
       mode: 'append',
       monthKey,
+      batchContext,
       // progress 形状对齐 renderer：引擎给 { sourceFile, importedCount } → 补 stage/fileIndex/fileCount。
       //   v1 引擎不拆分逐文件 → fileIndex 用「文件数-1」（多文件并行无串行文件指针；renderer 显示 (n/n)）。
       onEngineProgress: (ev) => {
@@ -295,19 +297,19 @@ async function runImportLegacyInTransaction({ db, kind, monthKey, filePaths, onP
   }
 }
 
-async function importFlowFiles({ db, monthKey, filePaths, onProgress }) {
-  return importFilesInTransaction({ db, kind: 'flow', monthKey, filePaths, onProgress });
+async function importFlowFiles({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesInTransaction({ db, kind: 'flow', monthKey, filePaths, onProgress, batchContext });
 }
 
-async function importBillFiles({ db, monthKey, filePaths, onProgress }) {
-  return importFilesInTransaction({ db, kind: 'bill', monthKey, filePaths, onProgress });
+async function importBillFiles({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesInTransaction({ db, kind: 'bill', monthKey, filePaths, onProgress, batchContext });
 }
 
 // fix1（spec §3.4）：覆盖导入 — 先清单侧（流水或单据）再导入；
 // 包在一个大事务里，任一步失败整体 ROLLBACK（旧数据保留）。
 //
 // v3.0.3 PR-H：开关分流入口（同 importFilesInTransaction）。引擎 overwrite 模式：事务内先 DELETE 单侧再 INSERT。
-async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgress }) {
+async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgress, batchContext }) {
   if (!monthKey) throw new Error(`${kind === 'flow' ? '流水' : '单据'}覆盖导入：monthKey 必填`);
   if (!Array.isArray(filePaths) || filePaths.length === 0) {
     throw new Error(`${kind === 'flow' ? '流水表' : '单据表'}：未选择任何文件`);
@@ -326,6 +328,7 @@ async function importFilesWithOverwrite({ db, kind, monthKey, filePaths, onProgr
       contractOptions: { importedAt },
       mode: 'overwrite',
       monthKey,
+      batchContext,
       onEngineProgress: (ev) => {
         if (typeof onProgress !== 'function') return;
         onProgress({
@@ -394,12 +397,12 @@ async function runImportLegacyWithOverwrite({ db, kind, monthKey, filePaths, onP
   }
 }
 
-async function importFlowFilesWithOverwrite({ db, monthKey, filePaths, onProgress }) {
-  return importFilesWithOverwrite({ db, kind: 'flow', monthKey, filePaths, onProgress });
+async function importFlowFilesWithOverwrite({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesWithOverwrite({ db, kind: 'flow', monthKey, filePaths, onProgress, batchContext });
 }
 
-async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgress }) {
-  return importFilesWithOverwrite({ db, kind: 'bill', monthKey, filePaths, onProgress });
+async function importBillFilesWithOverwrite({ db, monthKey, filePaths, onProgress, batchContext }) {
+  return importFilesWithOverwrite({ db, kind: 'bill', monthKey, filePaths, onProgress, batchContext });
 }
 
 // fix1（spec §3.4）+ fix2（spec §3.5）：peek + 已有行预检（不进事务，async）
@@ -553,7 +556,7 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   - 自适应分片（spec §4 末注 / D31）：多 worker 路径若 caller 没显式给小 chunkSize（即用默认 100000），
 //     按「目标 chunk 数 ≈ 4×workerCount」反推一个更小 chunkSize（POC：chunk 数 >> worker 数才喂得饱并行）；
 //     仅改分片粒度，LIMIT/OFFSET 仍按 id ASC 升序 → 跨 chunk 顺序不变 → byte-for-byte 不受影响
-//   - 多 worker 成功 → 一次性标 chunk_progress complete（多 worker 完成顺序乱，不逐 chunk 标）
+//   - 多 worker 成功 → 一次性标 chunk_progress data-complete（输出发布后才 complete）
 //
 // 流程：
 //   1. 清空该月历史 runs + diff_rows（避免累积）（仅全新 run；resume 跳过）
@@ -561,9 +564,9 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   3. 创建 runs 记录拿 runId（仅全新 run；resume 复用旧 runId）
 //   4'. chunked INSERT diff_rows BY SQL JOIN（spec §3 + §5.2）— 各 chunk 独立 BEGIN/COMMIT（单 / 多 worker 分流）
 //   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
-//   6. SET chunk_progress.status='complete' + 返回 stats + filePaths
+//   6. XLSX 全部发布并回填路径后 SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, __forceMultiWorkerForTest }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, batchContext, __forceMultiWorkerForTest }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -667,6 +670,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         totalChunks: 0,              // 未知；onChunkDone 第一次会算出真实值（与 0-chunk 边界 fallback 一致）
         status: 'in-progress',
         chunkSize: effectiveChunkSize, // H4：存原始 chunkSize 供 resume 复用
+        batchContext,
       });
       // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
       //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
@@ -783,6 +787,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         dbPath,
         workerCount: effectiveWorkerCount,
         tempDir: mwTempDir,
+        batchContext,
         cancelToken, // PR #57 review P2：MW 路径接 cancelToken（停派发+abort，<5s 取消语义，对齐单 worker）
         // onChunkDone 仅透传 UI progress（不写 chunk_progress —— complete 在成功后一次性标）
         onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
@@ -800,14 +805,14 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         },
       });
 
-      // 多 worker 成功 → 一次性标 chunk_progress complete（lastCompletedChunkIndex = totalChunks-1）
+      // 多 worker 成功只代表 DB 数据完整；输出尚未发布，先标 data-complete。
       //   ⚠️ 持久化 chunkSize 用 mwChunkSize（与本次实际分片一致；但 resume 走单 worker 不读它，故仅一致性）
       try {
         runRepo.setRunChunkProgress(db, {
           runId,
           lastCompletedChunkIndex: chunkedResult.lastCompletedChunkIndex,
           totalChunks: chunkedResult.totalChunks,
-          status: 'complete',
+          status: 'data-complete',
           chunkSize: mwChunkSize,
         });
       } catch (_progressErr) {
@@ -832,21 +837,18 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         chunkSize: effectiveChunkSize,
         cancelToken,
         resumeFromChunkIndex,
+        // checkpoint 必须与本 chunk 的 INSERT 同一事务提交；这里失败会让本 chunk 整体 ROLLBACK，
+        // 避免硬崩后 checkpoint 落后一批、resume 重放已提交资金差异行。
+        onChunkBeforeCommit: ({ chunkIndex, totalChunks }) => {
+          runRepo.setRunChunkProgress(db, {
+            runId,
+            lastCompletedChunkIndex: chunkIndex,
+            totalChunks,
+            status: (chunkIndex + 1 >= totalChunks) ? 'data-complete' : 'in-progress',
+            chunkSize: effectiveChunkSize,
+          });
+        },
         onChunkDone: ({ chunkIndex, totalChunks, processedRows, insertedDiffRows: chunkInsertedDiffRows, elapsedMs }) => {
-          // 每 chunk 完成后 — 更新 chunk_progress（in-progress 直至最后一 chunk 改 complete）
-          // 失败不抛（caller catch 写 partial）；progress 回调透传 caller
-          // v2.1.10 SR-FIX-1 Round 6 H4：持续持久化 chunkSize（resume 时复用）
-          try {
-            runRepo.setRunChunkProgress(db, {
-              runId,
-              lastCompletedChunkIndex: chunkIndex,
-              totalChunks,
-              status: (chunkIndex + 1 >= totalChunks) ? 'complete' : 'in-progress',
-              chunkSize: effectiveChunkSize, // H4：每次 onChunkDone 都续写 chunkSize（防 H1 占位被覆盖时丢失）
-            });
-          } catch (_progressErr) {
-            // chunk_progress 写失败不阻断主循环（unit test 防御；生产 SQLITE_BUSY 极少）
-          }
           if (onProgress) {
             onProgress({
               phase: 'run',
@@ -919,8 +921,8 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     });
   }
 
-  // chunked 成功后 — chunk_progress 已被 onChunkDone 标记为 complete（最后一 chunk 时）
-  //   0 chunk 边界（totalChunks=0）— 显式补一次 status='complete'（onChunkDone 不会触发）
+  // chunked 成功后仅代表数据阶段完成；XLSX 及路径还没发布。
+  //   0 chunk 边界（totalChunks=0）— 显式补一次 status='data-complete'。
   // v2.1.10 SR-FIX-1 Round 6 H4：0-chunk 边界也持久化 chunkSize（保持一致性 — complete 状态也带 chunkSize）
   if (chunkedResult.totalChunks === 0) {
     try {
@@ -928,7 +930,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         runId,
         lastCompletedChunkIndex: -1,
         totalChunks: 0,
-        status: 'complete',
+        status: 'data-complete',
         chunkSize: effectiveChunkSize,
       });
     } catch (_progressErr) { /* 不阻塞主流程 */ }
@@ -941,6 +943,10 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
     throw new CancelError('runCheck cancelled at stage=before-writing-xlsx (DB COMMIT 已完成)', { stage: 'before-writing-xlsx' });
   }
 
+  if (!storageRoot) {
+    throw new Error('run 输出发布缺少 storageRoot，数据已保留为 data-complete 可恢复状态');
+  }
+
   // v0.8 fix5：DB 事务成功后同步写盘 diff + report
   const runElapsedMs = Date.now() - runT0;
   let diffFilePath = null;
@@ -950,13 +956,52 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       // v2.1.7 F6 埋点 5/6：写 xlsx
       if (onProgress) onProgress({ phase: 'run', stage: 'writing-xlsx' });
       const writer = require('./acquiring-bill-currency-writer');
-      const out = await writer.writeRunOutputs({ db, runId, monthKey, storageRoot, runElapsedMs });
+      let publishedProgress = runRepo.getRunChunkProgress(db, runId);
+      if (!publishedProgress || publishedProgress.status !== 'data-complete') {
+        throw new Error('run 输出发布前的数据完成证据已变化');
+      }
+      if (!publishedProgress.outputIntent) {
+        const outputIntent = writer.planRunOutputPaths({ monthKey, storageRoot });
+        runRepo.setRunChunkProgress(db, {
+          runId,
+          lastCompletedChunkIndex: publishedProgress.lastCompletedChunkIndex,
+          totalChunks: publishedProgress.totalChunks,
+          status: 'data-complete',
+          chunkSize: publishedProgress.chunkSize,
+          outputIntent
+        });
+        publishedProgress = runRepo.getRunChunkProgress(db, runId);
+      }
+      const out = await writer.writeRunOutputs({
+        db,
+        runId,
+        monthKey,
+        storageRoot,
+        runElapsedMs,
+        outputIntent: publishedProgress.outputIntent
+      });
       diffFilePath = out.diffFilePath;
       reportFilePath = out.reportFilePath;
+      if (path.resolve(diffFilePath) !== path.resolve(publishedProgress.outputIntent.diffFilePath)
+          || path.resolve(reportFilePath)
+            !== path.resolve(publishedProgress.outputIntent.reportFilePath)) {
+        throw new Error('run writer 返回路径与耐久输出意图不一致');
+      }
 
       // v2.1.7 F6 埋点 6/6：回填路径
       if (onProgress) onProgress({ phase: 'run', stage: 'updating-paths' });
-      runRepo.updateRunPaths(db, { runId, diffFilePath, reportFilePath });
+      publishedProgress = runRepo.getRunChunkProgress(db, runId);
+      if (!publishedProgress || publishedProgress.status !== 'data-complete') {
+        throw new Error('run 输出发布前的数据完成证据已变化');
+      }
+      runRepo.completeRunOutputPublication(db, {
+        runId,
+        diffFilePath,
+        reportFilePath,
+        lastCompletedChunkIndex: publishedProgress.lastCompletedChunkIndex,
+        totalChunks: publishedProgress.totalChunks,
+        chunkSize: publishedProgress.chunkSize
+      });
     } catch (writeError) {
       // PR #50 NewF2：写盘失败不回滚 DB；run.status 改 'success-no-files'（数据有效但文件未生成）
       // 让 cleanupOrphanData 识别此状态为「可恢复」不清数据；用户可手动修复路径/权限后重跑 / 重新生成
@@ -1124,7 +1169,7 @@ async function cleanupOrphanData({ db, onProgress }) {
         // chunk_progress 列不存在 / JSON 解析失败 → 视为无 progress，按既有 fileBroken 逻辑当孤儿
         chunkProgress = null;
       }
-      if (chunkProgress && (chunkProgress.status === 'partial' || chunkProgress.status === 'in-progress')) {
+      if (chunkProgress && ['partial', 'in-progress', 'data-complete'].includes(chunkProgress.status)) {
         // 跳过 — 保留供 resume IPC 调用（acquiringBillCurrency:run:resume）
         // partial：cancel / 正常 catch 块写入
         // in-progress：runCheckCore 入口前初始写入（F2）或 onChunkDone 中间状态（worker first-chunk crash 残留）

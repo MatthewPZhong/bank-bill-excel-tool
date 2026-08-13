@@ -183,6 +183,7 @@ async function importFiles({
   monthKey,
   parallel,
   useWhitelist,
+  batchContext,
   onProgress,
   onLog,
   cancelToken
@@ -470,6 +471,7 @@ async function importFiles({
       files,
       contractModulePath,
       contractOptions,
+      batchContext,
       useWhitelist,
       writeBatch,
       parallel,

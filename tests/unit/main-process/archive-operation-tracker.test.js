@@ -1,114 +1,115 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
 const {
-  MODULES,
   createArchiveOperationTracker,
+  resolveOperationInputPaths,
+  resolveOperationFiles,
   selectSuccessfulPathsByResultIndex
 } = require('../../../src/main-process/archive-center/operation-tracker');
+const {
+  captureArchiveSourceSnapshots
+} = require('../../../src/main-process/archive-center/source-snapshot');
+
+function batchContext(batchId) {
+  return {
+    batchId,
+    batchNumber: `2026-08-10-${String(batchId).padStart(3, '0')}`,
+    taskRunId: `task-${batchId}`,
+    taskKey: 'test',
+    moduleId: 'test-module',
+    parentRunId: `parent-${batchId}`,
+    operationKey: `operation-${batchId}`
+  };
+}
 
 function createHarness() {
   const calls = [];
-  let nextId = 1;
   const tracker = createArchiveOperationTracker({
     sink: {
-      async createBatch(payload) {
-        const batchId = `B-${nextId++}`;
-        calls.push({ type: 'create', batchId, payload });
-        return { batchId };
-      },
       async appendFiles(payload) {
-        calls.push({ type: 'append', payload });
-        return { status: 'success' };
+        calls.push(payload);
+        return { archiveFailed: false, attempted: payload.files.length };
       }
     }
   });
-  return { tracker, calls };
+  return { calls, tracker };
 }
 
-test.describe('archive operation tracker', () => {
-  test('临时 MPT 修复按结果下标筛选，同名文件不会互相冒充成功', () => {
-    const sourcePaths = ['/tmp/first/same.gz', '/tmp/second/same.gz'];
-    assert.deepEqual(
-      selectSuccessfulPathsByResultIndex(sourcePaths, [
-        { fileName: 'same.gz', status: 'ok' },
-        { fileName: 'same.gz', status: 'failed' }
-      ]),
-      ['/tmp/first/same.gz']
+test.describe('stateless archive operation tracker', () => {
+  test('只接受 append sink，不提供成功后建批能力', () => {
+    assert.throws(
+      () => createArchiveOperationTracker({ sink: { async createBatch() {} } }),
+      /appendFiles sink/
     );
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', '..', '..', 'src', 'main-process', 'archive-center', 'operation-tracker.js'),
+      'utf8'
+    );
+    assert.doesNotMatch(source, /pendingInputs|activeBatches|getActiveBatch|getPendingSnapshot|findLatest/);
+    assert.doesNotMatch(source, /sink\.createBatch|\.createBatch\(/);
   });
 
-  test('仅声明的存档通道进入归档调度', () => {
-    const { tracker } = createHarness();
-
-    assert.equal(tracker.supportsChannel('bank-statement:run'), true);
-    assert.equal(tracker.supportsChannel('toolbox:merge'), false);
-    assert.equal(tracker.supportsChannel('template:save'), false);
-    assert.equal(tracker.supportsChannel('pending:diff:export-aggregate'), false);
-  });
-
-  test('导入但未运行只保存在内存待办，运行成功才建立批次', async () => {
-    const { tracker, calls } = createHarness();
-
-    await tracker.handleOperation({
+  test('每次只向显式当前 batch 追加，不记忆或回退 latest', async () => {
+    const { calls, tracker } = createHarness();
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(11),
       channel: 'recon-id-fix:import',
-      result: { status: 'ok' },
-      selectedPaths: ['/tmp/input.xlsx']
-    });
-    assert.equal(calls.length, 0);
-
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:run',
+      selectedPaths: ['/tmp/first.xlsx'],
       result: { status: 'ok' }
     });
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].payload.moduleId, MODULES.reconIdFix.id);
-    assert.deepEqual(calls[0].payload.files.map((item) => [item.role, item.filePath]), [
-      ['input', '/tmp/input.xlsx']
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(12),
+      channel: 'recon-id-fix:import',
+      selectedPaths: ['/tmp/second.xlsx'],
+      result: { status: 'ok' }
+    });
+    assert.deepEqual(calls.map((call) => call.batchId), [11, 12]);
+    assert.deepEqual(calls.map((call) => call.files[0].filePath), [
+      '/tmp/first.xlsx',
+      '/tmp/second.xlsx'
     ]);
   });
 
-  test('资金对账批量导入只暂存 processed，linked 成功文件立即独立建批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
+  test('无文件 action 仍正常结束当前任务，不建批或猜历史批次', async () => {
+    const { calls, tracker } = createHarness();
+    const result = await tracker.appendOperationFiles({
+      batchContext: batchContext(21),
+      channel: 'pending:reconcile:run',
+      result: { status: 'success', runId: 3 }
+    });
+    assert.deepEqual(result, { ok: true, handled: false, batchId: 21, attempted: 0 });
+    assert.deepEqual(calls, []);
+  });
+
+  test('资金对账批量导入只登记本次成功处理的输入', async () => {
+    const { calls, tracker } = createHarness();
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(31),
       channel: 'bank-statement:batch-import',
       selectedPaths: ['/tmp/bank.xlsx', '/tmp/gateway.xlsx', '/tmp/bad.xlsx'],
       result: {
         status: 'ok',
         results: [
-          { fileName: 'bank.xlsx', status: 'ok', tableKey: 'bank-statement', outcome: 'processed' },
-          { fileName: 'gateway.xlsx', status: 'ok', tableKey: 'gateway-bill', outcome: 'linked' },
+          { fileName: 'bank.xlsx', status: 'ok' },
+          { fileName: 'gateway.xlsx', status: 'ok' },
           { fileName: 'bad.xlsx', status: 'read-error' }
         ]
       }
     });
-
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].payload.moduleId, MODULES.linkedTable.id);
-    assert.deepEqual(calls[0].payload.files.map((item) => item.filePath), ['/tmp/gateway.xlsx']);
-
-    await tracker.handleOperation({ channel: 'bank-statement:run', result: { status: 'ok' } });
-    assert.equal(calls.length, 2);
-    assert.equal(calls[1].payload.moduleId, MODULES.bankStatement.id);
-    assert.deepEqual(calls[1].payload.files.map((item) => item.filePath), ['/tmp/bank.xlsx']);
+    assert.deepEqual(calls[0].files.map((file) => file.filePath), [
+      '/tmp/bank.xlsx',
+      '/tmp/gateway.xlsx'
+    ]);
   });
 
-  test('资金对账导出按白名单排除错误报告并挂到运行批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'bank-statement:import',
-      result: { status: 'ok' },
-      selectedPaths: ['/tmp/bank.xlsx']
-    });
-    await tracker.handleOperation({
-      channel: 'bank-statement:run',
-      result: { status: 'ok' },
-      runtime: { runKey: 'run-1' }
-    });
-    await tracker.handleOperation({
+  test('资金对账导出按白名单排除错误报告', () => {
+    const files = resolveOperationFiles({
       channel: 'bank-statement:export',
       result: {
         status: 'ok',
@@ -116,166 +117,23 @@ test.describe('archive operation tracker', () => {
         errorReportPath: '/tmp/error.xlsx',
         hitRowsReportPath: '/tmp/hit.xlsx',
         refundBackfillPath: '/tmp/refund.xlsx'
-      },
-      runtime: { runKey: 'run-1' }
+      }
     });
-
-    const append = calls.find((call) => call.type === 'append');
-    assert.ok(append);
-    assert.deepEqual(append.payload.files.map((item) => item.filePath), [
+    assert.deepEqual(files.map((file) => file.filePath), [
       '/tmp/main.xlsx',
       '/tmp/hit.xlsx',
       '/tmp/refund.xlsx'
     ]);
   });
 
-  test('operation-tracker 保留通用 skipArchive 跳过能力', async () => {
-    const { tracker, calls } = createHarness();
-    const result = await tracker.handleOperation({
-      channel: 'file:import',
-      result: { status: 'success', detailReady: true },
-      runtime: {
-        inputPaths: ['/tmp/source.xlsx'],
-        outputPaths: ['/tmp/detail.xlsx'],
-        skipArchive: true
-      }
-    });
-
-    assert.equal(result.skipped, true);
-    assert.equal(calls.length, 0);
-  });
-
-  test('网银与月度余额携带模板元数据时均正常存档', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'file:import',
-      result: { status: 'success', detailReady: true },
-      runtime: {
-        inputPaths: ['/tmp/source.xlsx'],
-        outputPaths: ['/tmp/detail.xlsx'],
-        templateIds: [1, 2]
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'monthly-balance:assemble',
-      result: { status: 'ready' },
-      runtime: {
-        outputPaths: ['/tmp/monthly.xlsx'],
-        templateIds: [1, 2]
-      }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    assert.equal(creates.length, 2);
-    assert.deepEqual(creates[0].payload.files.map((item) => item.filePath), [
-      '/tmp/source.xlsx',
-      '/tmp/detail.xlsx'
-    ]);
-    assert.deepEqual(creates[1].payload.files.map((item) => item.filePath), [
-      '/tmp/monthly.xlsx'
-    ]);
-  });
-
-  test('大账号选择续接成功后才建立网银存档批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'file:import',
-      result: { status: 'big-account-selection-required' },
-      runtime: { inputPaths: ['/tmp/source.xlsx'] }
-    });
-    assert.equal(calls.length, 0);
-
-    await tracker.handleOperation({
-      channel: 'file:complete-big-account-selection',
-      result: { status: 'success', detailReady: true, balanceReady: true },
-      runtime: {
-        inputPaths: ['/tmp/source.xlsx'],
-        outputPaths: ['/tmp/detail.xlsx', '/tmp/balance.xlsx']
-      }
-    });
-    assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].payload.files.map((item) => item.filePath), [
-      '/tmp/source.xlsx',
-      '/tmp/detail.xlsx',
-      '/tmp/balance.xlsx'
-    ]);
-  });
-
-  test('余额补录把新生成余额追加到原导入批次，不重复建立批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'file:import',
-      result: { status: 'manual-balance-required', detailReady: true },
-      runtime: {
-        inputPaths: ['/tmp/source.xlsx'],
-        outputPaths: ['/tmp/detail.xlsx']
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'file:save-balance-seed',
-      result: { status: 'success', detailReady: true, balanceReady: true },
-      runtime: { outputPaths: ['/tmp/detail.xlsx', '/tmp/balance.xlsx'] }
-    });
-
-    assert.equal(calls.filter((call) => call.type === 'create').length, 1);
-    const append = calls.find((call) => call.type === 'append');
-    assert.deepEqual(append.payload.files.map((item) => item.filePath), ['/tmp/balance.xlsx']);
-  });
-
-  test('月度余额独立存档不覆盖普通账单等待补录的活动批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'file:import',
-      result: { status: 'manual-balance-required', detailReady: true },
-      runtime: {
-        inputPaths: ['/tmp/source.xlsx'],
-        outputPaths: ['/tmp/detail.xlsx']
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'monthly-balance:assemble',
-      result: { status: 'ready' },
-      runtime: { outputPaths: ['/tmp/monthly.xlsx'] }
-    });
-    await tracker.handleOperation({
-      channel: 'file:save-balance-seed',
-      result: { status: 'success', detailReady: true, balanceReady: true },
-      runtime: { outputPaths: ['/tmp/detail.xlsx', '/tmp/balance.xlsx'] }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    const append = calls.find((call) => call.type === 'append');
-    assert.equal(creates.length, 2);
-    assert.equal(append.payload.batchId, creates[0].batchId);
-    assert.notEqual(append.payload.batchId, creates[1].batchId);
-    assert.deepEqual(append.payload.files.map((item) => item.filePath), ['/tmp/balance.xlsx']);
-  });
-
-  test('导入成功时的源文件身份快照会跟随待办进入运行批次', async () => {
-    const { tracker, calls } = createHarness();
-    const sourceSnapshot = { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 };
-    const inputPath = path.resolve('/tmp/input.xlsx');
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:import',
-      result: { status: 'ok' },
-      selectedPaths: [inputPath],
-      runtime: { sourceSnapshots: new Map([[inputPath, sourceSnapshot]]) }
-    });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:run',
-      result: { status: 'ok' }
-    });
-
-    assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, sourceSnapshot);
-  });
-
-  test('平盘输入优先携带解析时 snapshot 和 SHA，不被操作完成后的快照覆盖', async () => {
-    const { tracker, calls } = createHarness();
+  test('runtime input descriptor 的解析快照和 SHA 优先保留', async () => {
+    const { calls, tracker } = createHarness();
     const inputPath = path.resolve('/tmp/position-input.xlsx');
     const parsedSnapshot = { sizeBytes: 10, mtimeMs: 20, ctimeMs: 30, ino: 40 };
     const laterSnapshot = { sizeBytes: 10, mtimeMs: 50, ctimeMs: 60, ino: 40 };
     const expectedSha256 = 'b'.repeat(64);
-    await tracker.handleOperation({
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(41),
       channel: 'position-reconciliation:bank:apply-import',
       result: { status: 'ok' },
       runtime: {
@@ -289,509 +147,161 @@ test.describe('archive operation tracker', () => {
         sourceSnapshots: new Map([[inputPath, laterSnapshot]])
       }
     });
-
-    assert.deepEqual(calls[0].payload.files[0].sourceSnapshot, parsedSnapshot);
-    assert.equal(calls[0].payload.files[0].expectedSha256, expectedSha256);
-    assert.equal(calls[0].payload.files[0].sizeBytes, 10);
+    assert.deepEqual(calls[0].files[0].sourceSnapshot, parsedSnapshot);
+    assert.equal(calls[0].files[0].expectedSha256, expectedSha256);
+    assert.equal(calls[0].files[0].sizeBytes, 10);
   });
 
-  test('存档异常转成告警，不向业务调用方抛出', async () => {
-    const warnings = [];
-    const tracker = createArchiveOperationTracker({
-      sink: {
-        async createBatch() { throw new Error('disk full'); },
-        async appendFiles() { throw new Error('disk full'); }
+  test('普通输入可附加调用时捕获的 source snapshot', () => {
+    const inputPath = path.resolve('/tmp/input.xlsx');
+    const snapshot = { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: 4 };
+    const files = resolveOperationFiles({
+      channel: 'recon-id-fix:import',
+      selectedPaths: [inputPath],
+      runtime: { sourceSnapshots: new Map([[inputPath, snapshot]]) }
+    });
+    assert.deepEqual(files[0].sourceSnapshot, snapshot);
+  });
+
+  test('收单、场景与 Pending 导入从 prepared 解析已选择输入文件', () => {
+    const cases = [
+      ['acquiringBillCurrency:importFlow', '/tmp/acquiring-flow.xlsx'],
+      ['acquiringBillCurrency:importBill', '/tmp/acquiring-bill.xlsx'],
+      ['pending:import:start', '/tmp/pending.xlsx'],
+      ['scenarios:import-bundle-apply', '/tmp/scenario-bundle.json']
+    ];
+    for (const [channel, inputPath] of cases) {
+      const files = resolveOperationFiles({
+        channel,
+        prepared: { inputPaths: [inputPath] },
+        result: { status: 'success' }
+      });
+      assert.deepEqual(
+        files.map((file) => [file.role, file.filePath]),
+        [['input', inputPath]],
+        channel
+      );
+    }
+  });
+
+  test('savePath 与 prepare.outputPaths 不进入 beforeStart 输入快照，覆盖后采集新输出', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-output-snapshot-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const outputPath = path.join(dir, 'existing.json');
+    fs.writeFileSync(outputPath, 'old', 'utf8');
+
+    const inputPaths = resolveOperationInputPaths({
+      channel: 'scenarios:export-bundle',
+      args: [{ savePath: outputPath }],
+      prepared: { outputPaths: [outputPath] },
+      selectedPaths: []
+    });
+    assert.deepEqual(inputPaths, []);
+    const before = captureArchiveSourceSnapshots({ selectedPaths: inputPaths });
+    assert.equal(before.has(path.resolve(outputPath)), false);
+
+    fs.writeFileSync(outputPath, 'new-content', 'utf8');
+    const after = captureArchiveSourceSnapshots({
+      result: { filePath: outputPath }
+    });
+    assert.equal(after.get(path.resolve(outputPath)).sizeBytes, 11);
+  });
+
+  test('预存目标文件在 execute 失败时不得因 prepared.outputPaths 被当作本任务输出', (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-old-target-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const outputPath = path.join(dir, 'already-exists.xlsx');
+    fs.writeFileSync(outputPath, 'user-old-file', 'utf8');
+    const files = resolveOperationFiles({
+      channel: 'file:export-detail',
+      prepared: { outputPaths: [outputPath] },
+      result: { status: 'failed', message: 'copy failed' },
+      runtime: {}
+    });
+    assert.deepEqual(files, []);
+  });
+
+  test('临时 MPT 按结果下标筛选，同名文件不互相冒充成功', () => {
+    const sourcePaths = ['/tmp/first/same.gz', '/tmp/second/same.gz'];
+    assert.deepEqual(
+      selectSuccessfulPathsByResultIndex(sourcePaths, [
+        { fileName: 'same.gz', status: 'ok' },
+        { fileName: 'same.gz', status: 'failed' }
+      ]),
+      ['/tmp/first/same.gz']
+    );
+  });
+
+  test('输入和输出均只归入同一个当前批次', async () => {
+    const { calls, tracker } = createHarness();
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(51),
+      channel: 'position-reconciliation:source:prepare-import',
+      runtime: {
+        inputPaths: ['/tmp/source.xlsx'],
+        outputFiles: [{
+          filePath: '/tmp/anomaly.xlsx',
+          artifactKey: 'source-import-anomaly-report'
+        }]
       },
-      onWarning: (warning) => warnings.push(warning)
+      result: { status: 'ok' }
     });
-
-    const result = await tracker.handleOperation({
-      channel: 'new-account:generate',
-      result: { status: 'success' },
-      runtime: { outputPaths: ['/tmp/new-account.xlsx'] }
-    });
-
-    assert.equal(result.archiveFailed, true);
-    assert.equal(result.persistentRetryAvailable, false);
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0].message, /disk full/);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].batchId, 51);
+    assert.deepEqual(calls[0].files.map((file) => [file.role, file.filePath]), [
+      ['input', '/tmp/source.xlsx'],
+      ['output', '/tmp/anomaly.xlsx']
+    ]);
   });
 
-  test('链接表部分文件存档失败会汇总为用户可见告警', async () => {
-    const calls = [];
-    const tracker = createArchiveOperationTracker({
-      sink: {
-        async createBatch(payload) {
-          calls.push(payload);
-          return {
-            batchId: `B-${calls.length}`,
-            archiveFailed: payload.files[0].filePath.endsWith('failed.xlsx'),
-            warning: { message: 'copy failed' }
-          };
-        },
-        async appendFiles() { return { status: 'success' }; }
-      }
-    });
-
-    const result = await tracker.handleOperation({
-      channel: 'linked-table:import',
-      selectedPaths: ['/tmp/ok.xlsx', '/tmp/failed.xlsx'],
-      result: {
-        status: 'ok',
-        results: [
-          { fileName: 'ok.xlsx', status: 'ok' },
-          { fileName: 'failed.xlsx', status: 'ok' }
-        ]
-      }
-    });
-
-    assert.equal(result.archiveFailed, true);
-    assert.match(result.warning.message, /1 个存档批次/);
-  });
-
-  test('收单运行只存一次同路径 diff/report 结果', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'acquiringBillCurrency:importFlow',
-      args: [{ monthKey: '2026-07', filePaths: ['/tmp/flow.xlsx'], confirmOverwrite: true }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'acquiringBillCurrency:run',
-      args: [{ monthKey: '2026-07' }],
+  test('Pending writer 保留 path 同时返回 filePath 后会追加真实成功输出', async () => {
+    const { calls, tracker } = createHarness();
+    await tracker.appendOperationFiles({
+      batchContext: batchContext(52),
+      channel: 'pending:diff:export-single',
       result: {
         status: 'success',
-        runId: 9,
-        diffFilePath: '/tmp/diff.xlsx',
-        reportFilePath: '/tmp/diff.xlsx'
-      }
+        path: '/tmp/pending-diff.xlsx',
+        filePath: '/tmp/pending-diff.xlsx'
+      },
+      runtime: {}
     });
-
     assert.equal(calls.length, 1);
-    assert.deepEqual(calls[0].payload.files.map((item) => item.filePath), [
-      '/tmp/flow.xlsx',
-      '/tmp/diff.xlsx'
+    assert.deepEqual(calls[0].files.map((file) => [file.role, file.filePath]), [
+      ['output', '/tmp/pending-diff.xlsx']
     ]);
   });
 
-  test('同一运行只归档第一次成功结果，后续另存不追加', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:import',
-      result: { status: 'ok' },
-      selectedPaths: ['/tmp/recon.xlsx']
+  test('skipArchive 明确跳过本次文件登记但保留任务批次', async () => {
+    const { calls, tracker } = createHarness();
+    const result = await tracker.appendOperationFiles({
+      batchContext: batchContext(61),
+      channel: 'file:import',
+      runtime: { skipArchive: true, inputPaths: ['/tmp/source.xlsx'] }
     });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:run',
-      result: { status: 'ok' },
-      runtime: { runKey: 'run-1' }
-    });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:export',
-      result: { status: 'ok', mainFilePath: '/tmp/first.xlsx' },
-      runtime: { runKey: 'run-1' }
-    });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:export',
-      result: { status: 'ok', mainFilePath: '/tmp/second.xlsx' },
-      runtime: { runKey: 'run-1' }
-    });
-
-    const appends = calls.filter((call) => call.type === 'append');
-    assert.equal(appends.length, 1);
-    assert.equal(appends[0].payload.files[0].filePath, '/tmp/first.xlsx');
-  });
-
-  test('资金对账页面发起的网关 ReconID 修复归到资金对账模块', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:import',
-      result: { status: 'ok' },
-      selectedPaths: ['/tmp/gateway-recon.xlsx']
-    });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:run',
-      result: { status: 'ok' },
-      runtime: {
-        runKey: 'gateway-run',
-        originModuleId: MODULES.bankStatement.id
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'recon-id-fix:export',
-      result: { status: 'ok', mainFilePath: '/tmp/gateway-fixed.xlsx' },
-      runtime: {
-        runKey: 'gateway-run',
-        originModuleId: MODULES.bankStatement.id
-      }
-    });
-
-    const create = calls.find((call) => call.type === 'create');
-    const append = calls.find((call) => call.type === 'append');
-    assert.equal(create.payload.moduleId, MODULES.bankStatement.id);
-    assert.deepEqual(create.payload.files.map((item) => item.filePath), ['/tmp/gateway-recon.xlsx']);
-    assert.equal(append.payload.batchId, create.batchId);
-  });
-
-  test('聚合与区间导出不进入任何运行批次', async () => {
-    const { tracker, calls } = createHarness();
-    for (const channel of [
-      'pending:diff:export-aggregate',
-      'bankBuRecon:export:aggregate',
-      'bizOpRecon:export:date-range'
-    ]) {
-      const result = await tracker.handleOperation({
-        channel,
-        result: { status: 'success', filePath: `/tmp/${channel}.xlsx` }
-      });
-      assert.equal(result.excluded, true);
-    }
-    assert.equal(calls.length, 0);
-  });
-
-  test('Pending 批次包含上下月与移除文件，仅单次差异进入结果槽', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'pending:import:start',
-      args: [{ yearMonth: '2026-06', files: ['/tmp/upper.xlsx'] }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pending:removed:import',
-      args: [{ yearMonth: '2026-06', files: ['/tmp/removed.xlsx'] }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pending:import:start',
-      args: [{ yearMonth: '2026-05', files: ['/tmp/lower.xlsx'] }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pending:reconcile:run',
-      args: [{ upperMonth: '2026-06', lowerMonth: '2026-05' }],
-      result: { status: 'success', runId: 31 }
-    });
-    await tracker.handleOperation({
-      channel: 'pending:diff:export-single',
-      args: [{ runId: 31 }],
-      result: { status: 'success', filePath: '/tmp/pending-diff.xlsx' }
-    });
-
-    const create = calls.find((call) => call.type === 'create');
-    assert.equal(create.payload.moduleId, MODULES.pending.id);
-    assert.deepEqual(create.payload.files.map((item) => item.filePath), [
-      '/tmp/upper.xlsx',
-      '/tmp/removed.xlsx',
-      '/tmp/lower.xlsx'
-    ]);
-    assert.equal(calls.find((call) => call.type === 'append').payload.files[0].filePath, '/tmp/pending-diff.xlsx');
-  });
-
-  test('银行 BU 与业务 OP 按月份或日期隔离输入并绑定单次输出', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'bankBuRecon:import:run',
-      args: [{ yearMonth: '2026-07', pendingPath: '/tmp/bu-pending.xlsx', bankPath: '/tmp/bu-bank.xlsx' }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'bankBuRecon:run',
-      args: [{ yearMonth: '2026-07' }],
-      result: { status: 'success', runId: 7 }
-    });
-    await tracker.handleOperation({
-      channel: 'bankBuRecon:export:single',
-      args: [{ runId: 7 }],
-      result: { status: 'success', filePath: '/tmp/bu-result.xlsx' }
-    });
-
-    await tracker.handleOperation({
-      channel: 'bizOpRecon:import:run-biz-op',
-      args: [{ date: '2026-07-20', filePath: '/tmp/op.xlsx' }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'bizOpRecon:import:run-flow',
-      args: [{ date: '2026-07-20', filePaths: ['/tmp/flow-a.xlsx', '/tmp/flow-b.xlsx'] }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'bizOpRecon:run',
-      args: [{ date: '2026-07-20', buName: 'BU-A' }],
-      result: { status: 'success', runId: 8 }
-    });
-    await tracker.handleOperation({
-      channel: 'bizOpRecon:export:date',
-      args: [{ runId: 8 }],
-      result: { status: 'success', filePath: '/tmp/op-result.xlsx' }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    assert.deepEqual(creates[0].payload.files.map((item) => item.filePath), [
-      '/tmp/bu-pending.xlsx', '/tmp/bu-bank.xlsx'
-    ]);
-    assert.deepEqual(creates[1].payload.files.map((item) => item.filePath), [
-      '/tmp/op.xlsx', '/tmp/flow-a.xlsx', '/tmp/flow-b.xlsx'
-    ]);
-    assert.equal(calls.filter((call) => call.type === 'append').length, 2);
-  });
-
-  test('VCC 保存只归档流水输入，不虚构结果文件', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'vccOpCalc:import:scan',
-      args: [{ filePaths: ['/tmp/vcc-a.xlsx', '/tmp/vcc-b.xlsx'] }],
-      result: { status: 'success' }
-    });
-    assert.equal(calls.length, 0);
-    await tracker.handleOperation({
-      channel: 'vccOpCalc:run:save',
-      result: { status: 'success', runId: 4 }
-    });
-    assert.deepEqual(calls[0].payload.files.map((item) => [item.role, item.filePath]), [
-      ['input', '/tmp/vcc-a.xlsx'],
-      ['input', '/tmp/vcc-b.xlsx']
-    ]);
-  });
-
-  test('前置资金对账将临时 MPT 独立存档，并把银行输入与首次渠道结果绑定', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:import-mpt',
-      selectedPaths: ['/tmp/inbound.gz', '/tmp/bad.gz'],
-      result: { status: 'ok', results: [{ status: 'ok' }, { status: 'failed' }] }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:import-bank',
-      selectedPaths: ['/tmp/pre-bank.xlsx'],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:run',
-      result: { status: 'success', runId: 'pre-1' }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:export',
-      result: { status: 'success', files: [
-        { filePath: '/tmp/channel-a.xlsx' },
-        { filePath: '/tmp/channel-b.xlsx' }
-      ] }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    assert.equal(creates[0].payload.moduleCode, MODULES.preFundTemp.code);
-    assert.deepEqual(creates[0].payload.files.map((item) => item.filePath), ['/tmp/inbound.gz']);
-    assert.equal(creates[1].payload.moduleCode, MODULES.preFund.code);
-    assert.deepEqual(creates[1].payload.files.map((item) => item.filePath), ['/tmp/pre-bank.xlsx']);
-    assert.deepEqual(calls.find((call) => call.type === 'append').payload.files.map((item) => item.filePath), [
-      '/tmp/channel-a.xlsx', '/tmp/channel-b.xlsx'
-    ]);
-  });
-
-  test('平盘输入、回导和每次结果导出都独立立即存档，不依赖进程内运行批次', async () => {
-    const { tracker, calls } = createHarness();
-
-    await tracker.handleOperation({
-      channel: 'position-reconciliation:source:prepare-import',
-      result: {
-        status: 'ok',
-        results: [
-          { status: 'ok', fileName: 'transfer.xlsx' },
-          { status: 'failed', fileName: 'bad.xlsx' }
-        ]
-      },
-      runtime: {
-        inputPaths: ['/tmp/transfer.xlsx'],
-        outputFiles: [{
-          filePath: '/tmp/position-anomaly.xlsx',
-          artifactKey: 'source-import-anomaly-report',
-          metadata: { displayRole: '异常数据' }
-        }]
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'position-reconciliation:bank:apply-import',
-      result: { status: 'ok' },
-      runtime: {
-        inputPaths: ['/tmp/position-bank.xlsx'],
-        metadata: { scopes: [{ channel: 'DBS', monthKey: '2026-07' }] }
-      }
-    });
-    await tracker.handleOperation({
-      channel: 'position-reconciliation:run:export',
-      result: { status: 'ok', runId: 31 },
-      runtime: { runKey: 31, outputPaths: ['/tmp/position-result.xlsx'] }
-    });
-    await tracker.handleOperation({
-      channel: 'position-reconciliation:run:import-result',
-      result: { status: 'ok', runId: 31 },
-      runtime: { runKey: 31, inputPaths: ['/tmp/position-edited.xlsx'] }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    assert.equal(creates.length, 4);
-    assert.equal(creates[0].payload.locked, true);
-    assert.deepEqual(
-      creates[0].payload.files.map((item) => [item.role, item.filePath, item.artifactKey || '']),
-      [
-        ['input', '/tmp/transfer.xlsx', ''],
-        ['output', '/tmp/position-anomaly.xlsx', 'source-import-anomaly-report']
-      ]
-    );
-    assert.deepEqual(creates.map((call) => call.payload.files[0].filePath), [
-      '/tmp/transfer.xlsx',
-      '/tmp/position-bank.xlsx',
-      '/tmp/position-result.xlsx',
-      '/tmp/position-edited.xlsx'
-    ]);
-    assert.equal(calls.filter((call) => call.type === 'append').length, 0);
-  });
-
-  test('仅待确认的账户表 prepare 阶段不建立空存档批次', async () => {
-    const { tracker, calls } = createHarness();
-    const result = await tracker.handleOperation({
-      channel: 'position-reconciliation:source:prepare-import',
-      result: {
-        status: 'ok',
-        successCount: 0,
-        confirmationCount: 1,
-        archiveDeferred: true,
-        inputPaths: []
-      },
-      runtime: { inputPaths: [] }
-    });
-
-    assert.deepEqual(result, { handled: false });
+    assert.equal(result.handled, false);
     assert.deepEqual(calls, []);
   });
 
-  test('平盘银行批量导入立即存档全部成功输入，跨重启无需恢复范围内存', async () => {
-    const { tracker, calls } = createHarness();
-
-    await tracker.handleOperation({
-      channel: 'position-reconciliation:bank:apply-import',
-      result: { status: 'ok' },
-      runtime: {
-        inputPaths: ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx'],
-        metadata: {
-          scopes: [
-            { channel: 'DBS', monthKey: '2026-07' },
-            { channel: 'MAYBANK', monthKey: '2026-08' }
-          ],
-          scopeInputs: [
-            { channel: 'DBS', monthKey: '2026-07', inputPaths: ['/tmp/dbs.xlsx'] },
-            { channel: 'MAYBANK', monthKey: '2026-08', inputPaths: ['/tmp/maybank.xlsx'] }
-          ]
-        }
-      }
+  test('append sink 异常向 lifecycle 传播，由 lifecycle 统一记录 failure/warning', async () => {
+    const tracker = createArchiveOperationTracker({
+      sink: { async appendFiles() { throw new Error('disk full'); } }
     });
-
-    const importedBatch = calls.find((call) => call.type === 'create');
-    assert.deepEqual(
-      importedBatch.payload.files.map((item) => item.filePath),
-      ['/tmp/dbs.xlsx', '/tmp/maybank.xlsx']
+    await assert.rejects(
+      tracker.appendOperationFiles({
+        batchContext: batchContext(71),
+        channel: 'new-account:generate',
+        result: { status: 'success' },
+        runtime: { outputPaths: ['/tmp/result.xlsx'] }
+      }),
+      /disk full/
     );
   });
 
-  test('临时 MPT 修复不会抢占正式前置资金对账的首次结果', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:import-bank',
-      selectedPaths: ['/tmp/pre-bank.xlsx'],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:run',
-      result: { status: 'success', runId: 'pre-1' }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:mpt-errors:repair',
-      result: { status: 'success' },
-      runtime: { inputPaths: ['/tmp/repaired.gz'] }
-    });
-    await tracker.handleOperation({
-      channel: 'pre-fund-reconciliation:export',
-      result: { status: 'success', files: [{ filePath: '/tmp/result.xlsx' }] }
-    });
-
-    const creates = calls.filter((call) => call.type === 'create');
-    const formalBatch = creates.find((call) => call.payload.moduleCode === MODULES.preFund.code);
-    const tempBatch = creates.find((call) => call.payload.moduleCode === MODULES.preFundTemp.code);
-    const append = calls.find((call) => call.type === 'append');
-    assert.ok(formalBatch);
-    assert.ok(tempBatch);
-    assert.equal(append.payload.batchId, formalBatch.batchId);
-    assert.notEqual(append.payload.batchId, tempBatch.batchId);
-  });
-
-  test('没有本次启动周期输入或结果的历史运行不创建空批次', async () => {
-    const { tracker, calls } = createHarness();
-    const result = await tracker.handleOperation({
-      channel: 'pending:reconcile:run',
-      args: [{ upperMonth: '2026-06', lowerMonth: '2026-05' }],
-      result: { status: 'success', runId: 99 }
-    });
-
-    assert.equal(result.handled, false);
-    assert.equal(result.excluded, 'no-current-session-files');
-    assert.equal(calls.length, 0);
-  });
-
-  test('重启后历史单次结果导出不新建输出-only批次', async () => {
-    const { tracker, calls } = createHarness();
-    const result = await tracker.handleOperation({
-      channel: 'pending:diff:export-single',
-      args: [{ runId: 99 }],
-      result: { status: 'success', filePath: '/tmp/history.xlsx' }
-    });
-
-    assert.equal(result.handled, false);
-    assert.equal(result.excluded, 'no-active-batch');
-    assert.equal(calls.length, 0);
-  });
-
-  test('显式历史运行号找不到批次时不得回退并写入最新批次', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'pending:import:start',
-      args: [{ yearMonth: '2026-06', files: ['/tmp/current.xlsx'] }],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'pending:reconcile:run',
-      args: [{ upperMonth: '2026-06' }],
-      result: { status: 'success', runId: 31 }
-    });
-    const result = await tracker.handleOperation({
-      channel: 'pending:diff:export-single',
-      args: [{ runId: 99 }],
-      result: { status: 'success', filePath: '/tmp/history.xlsx' }
-    });
-
-    assert.equal(result.handled, false);
-    assert.equal(result.excluded, 'no-active-batch');
-    assert.equal(calls.filter((call) => call.type === 'append').length, 0);
-  });
-
-  test('重复入金匹配绑定双输入与首次邮件结果', async () => {
-    const { tracker, calls } = createHarness();
-    await tracker.handleOperation({
-      channel: 'duplicate-inbound-match:import-files',
-      selectedPaths: ['/tmp/bank.xlsx', '/tmp/document.xlsx'],
-      result: { status: 'success' }
-    });
-    await tracker.handleOperation({
-      channel: 'duplicate-inbound-match:run',
-      result: { status: 'success', runId: 'dup-1' }
-    });
-    await tracker.handleOperation({
-      channel: 'duplicate-inbound-match:export',
-      result: { status: 'success', filePath: '/tmp/mail.xlsx' }
-    });
-
-    assert.deepEqual(calls[0].payload.files.map((item) => item.filePath), [
-      '/tmp/bank.xlsx', '/tmp/document.xlsx'
-    ]);
-    assert.equal(calls[1].payload.files[0].filePath, '/tmp/mail.xlsx');
+  test('PR2 tracker 不支持 PR3 VCC 财务或 toolbox 文件动作', () => {
+    const { tracker } = createHarness();
+    assert.equal(tracker.supportsChannel('bank-statement:export'), true);
+    assert.equal(tracker.supportsChannel('vccFinancialOp:export:result'), false);
+    assert.equal(tracker.supportsChannel('toolbox:merge'), false);
   });
 });

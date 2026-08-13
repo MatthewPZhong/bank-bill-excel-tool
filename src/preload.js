@@ -175,8 +175,8 @@ contextBridge.exposeInMainWorld('desktopApi', {
     //   applyImport({ bundle, confirmCreateMissingChannels })：renderer 确认创建缺失渠道后调用 apply
     exportBundle: (channelIds) => ipcRenderer.invoke('scenarios:export-bundle', { channelIds }),
     importBundle: () => ipcRenderer.invoke('scenarios:import-bundle'),
-    applyImport: (bundle, opts = {}) => ipcRenderer.invoke('scenarios:import-bundle-apply', {
-      bundle,
+    applyImport: (preparedContextId, opts = {}) => ipcRenderer.invoke('scenarios:import-bundle-apply', {
+      preparedContextId,
       confirmCreateMissingChannels: opts && opts.confirmCreateMissingChannels === true
     }),
     // v2.1.11 T3（spec §4.5 / 决策 D-T3-2-src=xlsx）：C2 FundType 字段值枚举
@@ -415,7 +415,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
   },
   files: {
     importFile: (templateId) => ipcRenderer.invoke('file:import', templateId),
-    cancelBigAccountSelection: () => ipcRenderer.invoke('file:cancel-big-account-selection'),
+    cancelBigAccountSelection: (contextId) => ipcRenderer.invoke('file:cancel-big-account-selection', contextId),
     completeBigAccountSelection: (payload) => ipcRenderer.invoke('file:complete-big-account-selection', payload),
     extractBigAccountOrder: (payload) => ipcRenderer.invoke('file:extract-big-account-order', payload),
     saveBalanceSeed: (payload) => ipcRenderer.invoke('file:save-balance-seed', payload),

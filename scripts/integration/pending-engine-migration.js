@@ -37,6 +37,15 @@ const ExcelJS = require('exceljs');
 const yazl = require('yazl');
 
 const PENDING_COLUMNS = require('../../src/backend/pending-db/columns');
+const WORKER_BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'pending-engine-migration',
+  taskKey: 'pending:import:start',
+  moduleId: 'pending-reconciliation',
+  parentRunId: 'pending-engine-parent',
+  operationKey: 'pending-engine-operation'
+});
 
 // ─────────────────────── 子进程模式：执行一组导入操作 + dump 结果 ───────────────────────
 //   op JSON：{ tmpdir, yearMonth, ops:[{ files, overwriteConfirmed, seedAux }], dumpAfter:bool }
@@ -72,6 +81,7 @@ async function runChild(opJsonPath, dbPath) {
         files: o.files,
         overwriteConfirmed: o.overwriteConfirmed === true,
         dbPath,
+        batchContext: WORKER_BATCH_CONTEXT,
         onProgress: null
       });
       out.results.push({

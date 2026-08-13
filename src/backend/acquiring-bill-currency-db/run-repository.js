@@ -6,6 +6,11 @@ const RUNS_TABLE = 'acquiring_bill_currency_runs';
 const DIFF_TABLE = 'acquiring_bill_currency_diff_rows';
 const FLOW_TABLE = 'acquiring_bill_currency_flow_imports';
 const BILL_TABLE = 'acquiring_bill_currency_bill_imports';
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
+
+const RUN_PROGRESS_BATCH_CONTEXT_VERSION = 1;
 
 // ⚠️ 资金红线 ⚠️ — v2.1.12 β.1-T2 — chunked 比对 SQL 共用片段（DRY 防漂移）
 //
@@ -123,6 +128,40 @@ function updateRunStatus(db, { runId, status }) {
   db.prepare(`UPDATE ${RUNS_TABLE} SET status = ? WHERE id = ?`).run(status, runId);
 }
 
+// XLSX 已物理发布后，把路径、业务状态和可恢复进度放在同一 SQLite
+// transaction 内收口。任何一步失败都保持 data-complete，resume 可按原
+// exact-seven 批次重新生成输出，不能出现 complete + 路径空缺的中间态。
+function completeRunOutputPublication(db, {
+  runId,
+  diffFilePath,
+  reportFilePath,
+  lastCompletedChunkIndex,
+  totalChunks,
+  chunkSize
+}) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current = getRunChunkProgress(db, runId);
+    if (!current || current.status !== 'data-complete') {
+      throw new Error('completeRunOutputPublication: 当前 run 不是 data-complete');
+    }
+    updateRunPaths(db, { runId, diffFilePath, reportFilePath });
+    updateRunStatus(db, { runId, status: 'success' });
+    setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex,
+      totalChunks,
+      status: 'complete',
+      chunkSize,
+      outputIntent: { diffFilePath, reportFilePath }
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* original error wins */ }
+    throw error;
+  }
+}
+
 // v2.1.8 N1：cleanup 延迟触发标志位（β 方案 — cleanup 移出对账链路）
 //   runCheck 成功后 SET=1 → app.before-quit / 进入模块时检查 → 触发清理 → 完成后 SET=0
 //   幂等：多次 SET 1 等价；mark 时不查重
@@ -216,6 +255,7 @@ function insertDiffRowsByJoin(db, { runId, monthKey }) {
 //   - db                     : 主进程 / worker 共用的 DatabaseSync 实例
 //   - { runId, monthKey }    : 与 insertDiffRowsByJoin 一致
 //   - chunkSize              : 单 chunk 行数（行/批；默认 100000 由 caller 注入 settings 值）
+//   - onChunkBeforeCommit    : 每 chunk INSERT 后、同事务 COMMIT 前回调；用于把 checkpoint 与数据原子提交
 //   - onChunkDone            : 每 chunk COMMIT 后回调 { chunkIndex, totalChunks, processedRows, insertedDiffRows, elapsedMs }
 //   - cancelToken            : 可选；每 chunk 之间 throwIfCancelled
 //   - resumeFromChunkIndex   : 可选；T19 resume 路径从指定 chunk 起跑（默认 0 = 全新）
@@ -227,6 +267,7 @@ function insertDiffRowsByJoinChunked(db, {
   runId,
   monthKey,
   chunkSize = 100000,
+  onChunkBeforeCommit = null,
   onChunkDone = null,
   cancelToken = null,
   resumeFromChunkIndex = 0,
@@ -305,6 +346,15 @@ function insertDiffRowsByJoinChunked(db, {
     try {
       const result = chunkStmt.run(runId, monthKey, cs, offset);
       chunkInsertedRows = Number(result.changes);
+      if (typeof onChunkBeforeCommit === 'function') {
+        onChunkBeforeCommit({
+          chunkIndex,
+          totalChunks,
+          processedRows: expectedRows,
+          insertedDiffRows: chunkInsertedRows,
+          elapsedMs: Date.now() - chunkT0,
+        });
+      }
       db.exec('COMMIT');
     } catch (err) {
       try { db.exec('ROLLBACK'); } catch (_e) { /* 已 ROLLBACK 或事务已结束 */ }
@@ -376,6 +426,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
   dbPath,
   workerCount,
   tempDir,
+  batchContext,
   onChunkDone = null,
   cancelToken = null,
 } = {}) {
@@ -438,6 +489,7 @@ async function insertDiffRowsByJoinMultiWorker(db, {
       targetColumns: MULTIWORKER_TARGET_COLUMNS,
       prefixValues: [runId],
       tempDir,
+      batchContext,
       cancelToken, // PR #57 review P2：cancel 响应透传到 worker 调度（停派发+abort）
       onProgress: (ev) => {
         // 透传到单 worker 同名 onChunkDone（caller 复用 chunk_progress 更新）
@@ -481,10 +533,11 @@ async function insertDiffRowsByJoinMultiWorker(db, {
 }
 
 // v2.1.10 A4 T19 — chunk_progress 列读写 API（JSON 序列化）
-//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete', chunkSize? }
+//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'data-complete' | 'complete', chunkSize? }
 //   - in-progress: 刚开始 chunked stage 4'，totalChunks 已算出（lastCompletedChunkIndex=-1）
 //   - partial: cancel 或 crash 中途；lastCompletedChunkIndex 指向最后一个 COMMIT 的 chunk
-//   - complete: 所有 chunk 都 COMMIT 完毕
+//   - data-complete: 所有 chunk 已 COMMIT，但两份 XLSX 尚未全部发布并回填路径
+//   - complete: 所有 chunk 与两份 XLSX 都已完成
 //
 // v2.1.10 SR-FIX-1 Round 6 H4：新增 chunkSize 字段（资金红线 — 防 resume 时 chunk size 变化导致行 skip/重复）
 //   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
@@ -493,12 +546,40 @@ async function insertDiffRowsByJoinMultiWorker(db, {
 //     → diff_rows 行 skip 或重复（与 baseline byte-for-byte 不一致）
 //   修复：把 chunkSize 存进 chunk_progress JSON，resume 时优先复用持久化值（不读当前 settings）
 //   兼容：老 partial run（升级前的 chunk_progress 没 chunkSize 字段）→ resume handler fallback 当前 settings + warning
-function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, status, chunkSize }) {
+function readRunProgressBatchContext(progress) {
+  if (!progress || typeof progress !== 'object' || Array.isArray(progress)) return null;
+  const hasVersion = Object.prototype.hasOwnProperty.call(progress, 'batchContextVersion');
+  const hasContext = Object.prototype.hasOwnProperty.call(progress, 'batchContext');
+  if (!hasVersion && !hasContext) return null;
+  if (progress.batchContextVersion !== RUN_PROGRESS_BATCH_CONTEXT_VERSION) {
+    const error = new Error(`chunk_progress batchContext 版本不兼容：${JSON.stringify(progress.batchContextVersion)}`);
+    error.code = 'ACQUIRING_RUN_BATCH_CONTEXT_VERSION_UNSUPPORTED';
+    throw error;
+  }
+  try {
+    return freezeWorkerBatchContext(progress.batchContext, { required: true });
+  } catch (cause) {
+    const error = new Error(`chunk_progress batchContext 非法：${cause.message}`);
+    error.code = 'ACQUIRING_RUN_BATCH_CONTEXT_INVALID';
+    error.cause = cause;
+    throw error;
+  }
+}
+
+function setRunChunkProgress(db, {
+  runId,
+  lastCompletedChunkIndex,
+  totalChunks,
+  status,
+  chunkSize,
+  batchContext,
+  outputIntent
+}) {
   if (!runId || typeof runId !== 'number') {
     throw new Error('setRunChunkProgress: runId 必填');
   }
-  if (!status || !['in-progress', 'partial', 'complete'].includes(status)) {
-    throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / complete，收到：${JSON.stringify(status)}`);
+  if (!status || !['in-progress', 'partial', 'data-complete', 'complete'].includes(status)) {
+    throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / data-complete / complete，收到：${JSON.stringify(status)}`);
   }
   const payload = {
     lastCompletedChunkIndex: Number.isFinite(lastCompletedChunkIndex) ? lastCompletedChunkIndex : -1,
@@ -508,6 +589,31 @@ function setRunChunkProgress(db, { runId, lastCompletedChunkIndex, totalChunks, 
   // Round 6 H4：chunkSize 可选 — 显式传值才写入；不传时不写（向后兼容旧 caller / 旧 row）
   if (Number.isInteger(chunkSize) && chunkSize > 0) {
     payload.chunkSize = chunkSize;
+  }
+  const existingProgress = getRunChunkProgress(db, runId);
+  const persistedOutputIntent = outputIntent === undefined
+    ? existingProgress && existingProgress.outputIntent
+    : outputIntent;
+  if (persistedOutputIntent != null) {
+    if (!persistedOutputIntent || typeof persistedOutputIntent !== 'object'
+        || Array.isArray(persistedOutputIntent)) {
+      throw new Error('setRunChunkProgress: outputIntent 格式非法');
+    }
+    const diffFilePath = String(persistedOutputIntent.diffFilePath || '').trim();
+    const reportFilePath = String(
+      persistedOutputIntent.reportFilePath || persistedOutputIntent.diffFilePath || ''
+    ).trim();
+    if (!diffFilePath || !reportFilePath) {
+      throw new Error('setRunChunkProgress: outputIntent 缺少输出路径');
+    }
+    payload.outputIntent = { diffFilePath, reportFilePath };
+  }
+  const persistedBatchContext = batchContext == null
+    ? readRunProgressBatchContext(existingProgress)
+    : freezeWorkerBatchContext(batchContext, { required: true });
+  if (persistedBatchContext) {
+    payload.batchContextVersion = RUN_PROGRESS_BATCH_CONTEXT_VERSION;
+    payload.batchContext = { ...persistedBatchContext };
   }
   db.prepare(`UPDATE ${RUNS_TABLE} SET chunk_progress = ? WHERE id = ?`).run(JSON.stringify(payload), runId);
 }
@@ -530,7 +636,7 @@ function getRunChunkProgress(db, runId) {
 //   修复后：扫该月所有可恢复 run.chunk_progress → 按 ran_at DESC 返回 → caller 取第一个
 //   性能：每月一般 1-2 个 run；扫描成本 O(N)；JSON 解析 cost 小
 //
-// v2.1.10 SR-FIX-1 Round 4 F1：扩为 partial OR in-progress 一起返回
+// v3.1.9：data-complete 也属于可恢复状态；它保留全部 DB 结果，只需重新发布输出。
 //   触发场景：first-chunk crash（onChunkDone 触发前 worker die）+ failureListener 未及时把 in-progress 兜底转 partial
 //     → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
 //     → 用户重启后调 resume → listPartialRuns 不命中 in-progress → 无法 resume
@@ -549,8 +655,7 @@ function listPartialRuns(db, monthKey) {
   for (const row of rows) {
     try {
       const progress = JSON.parse(row.chunk_progress);
-      // v2.1.10 Round 4 F1：partial OR in-progress 均视为可恢复
-      if (progress && (progress.status === 'partial' || progress.status === 'in-progress')) {
+      if (progress && ['partial', 'in-progress', 'data-complete'].includes(progress.status)) {
         result.push({
           id: row.id,
           month_key: row.month_key,
@@ -700,6 +805,7 @@ module.exports = {
   getLatestRun,
   updateRunPaths,
   updateRunStatus,
+  completeRunOutputPublication,
   clearRunsByMonth,
   clearDiffRowsByRunId,
   insertDiffRowsByJoin,
@@ -710,8 +816,10 @@ module.exports = {
   buildSelectOnlyChunkSql,
   MULTIWORKER_PART_COLUMNS,
   MULTIWORKER_TARGET_COLUMNS,
+  RUN_PROGRESS_BATCH_CONTEXT_VERSION,
   setRunChunkProgress,
   getRunChunkProgress,
+  readRunProgressBatchContext,
   // v2.1.10 SR-FIX-1 round 2 P1-5：列出某月所有 partial run（用于 resume handler）
   listPartialRuns,
   computeRunStats,

@@ -84,6 +84,27 @@ function createHarness(options = {}) {
       }
       return { ok: results.every((result) => result.ok), results };
     },
+    async completeTaskBatch(batchId, completion = {}) {
+      const batch = repository.getBatch(batchId);
+      if (!batch) return { ok: false, code: 'ARCHIVE_BATCH_NOT_FOUND' };
+      batch.taskStatus = 'succeeded';
+      batch.metadata = { ...(batch.metadata || {}), ...(completion.metadata || {}) };
+      return { ok: true, batch };
+    },
+    async failTaskBatch(batchId, failure = {}) {
+      const batch = repository.getBatch(batchId);
+      if (!batch) return { ok: false, code: 'ARCHIVE_BATCH_NOT_FOUND' };
+      batch.taskStatus = 'failed';
+      batch.metadata = { ...(batch.metadata || {}), ...(failure.metadata || {}) };
+      return { ok: true, batch };
+    },
+    async cancelTaskBatch(batchId, cancellation = {}) {
+      const batch = repository.getBatch(batchId);
+      if (!batch) return { ok: false, code: 'ARCHIVE_BATCH_NOT_FOUND' };
+      batch.taskStatus = 'cancelled';
+      batch.metadata = { ...(batch.metadata || {}), ...(cancellation.metadata || {}) };
+      return { ok: true, batch };
+    },
     async listBatches() { return { ok: true, batches }; },
     async getBatch(id) {
       const batch = repository.getBatch(id);
@@ -108,6 +129,8 @@ function createHarness(options = {}) {
     outboxStore: options.outboxStore,
     onOutboxFlushed: options.onOutboxFlushed,
     logWarning: options.logWarning,
+    resolveOutboxTerminalIntent: options.resolveOutboxTerminalIntent,
+    onTerminalIntentFlushed: options.onTerminalIntentFlushed,
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
@@ -850,6 +873,167 @@ test('部分附件 ready 且后续登记失败时终态保持不完整，原附�
   assert.equal(recovered.batch.taskStatus, 'succeeded');
   assert.equal(recovered.batch.archiveStatus, 'complete');
   assert.equal(recovered.batch.failedArtifactCount, 0);
+});
+
+test('终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序重放且不建 ghost batch', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-position-original-batch-'));
+  const archiveRoot = path.join(rootDir, 'archive');
+  const outputPath = path.join(rootDir, 'position-result.xlsx');
+  fs.writeFileSync(outputPath, 'position-output');
+  const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const now = () => new Date(2026, 6, 20, 12, 0, 0);
+  const repository = createArchiveRepository(db, { now });
+  const service = createArchiveService({ repository, rootDir: archiveRoot, now });
+  const settings = new Map();
+  const replayOrder = [];
+  const appendFiles = service.appendFiles.bind(service);
+  service.appendFiles = async (payload) => {
+    replayOrder.push('append');
+    return appendFiles(payload);
+  };
+  const completeTaskBatch = service.completeTaskBatch.bind(service);
+  service.completeTaskBatch = async (...args) => {
+    replayOrder.push('terminal');
+    return completeTaskBatch(...args);
+  };
+  const remove = outboxStore.remove.bind(outboxStore);
+  outboxStore.remove = (id) => {
+    replayOrder.push('remove');
+    return remove(id);
+  };
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value)
+    },
+    service,
+    outboxStore,
+    async onTerminalIntentFlushed({ route, record, created }) {
+      replayOrder.push('finalizer');
+      assert.equal(route.route, 'position-reconciliation');
+      assert.equal(created.batch.id, Number(record.payload.targetBatchId));
+    }
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+  await service.initialize();
+  const reserved = await service.reserveTaskBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    taskKey: 'position-reconciliation:run:export',
+    taskRunId: 'position-recovery-token',
+    operationKey: 'position:position-recovery-token:run-export',
+    parentRunId: 'position-parent'
+  });
+  await service.markTaskStarted(reserved.batchId);
+  const batchContext = {
+    batchId: reserved.batchId,
+    batchNumber: reserved.batchNumber,
+    taskRunId: 'position-recovery-token',
+    taskKey: 'position-reconciliation:run:export',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-parent',
+    operationKey: 'position:position-recovery-token:run-export'
+  };
+  const intent = controller.persistAppendIntent({
+    batchContext,
+    sourceOperation: 'position-reconciliation:run:export',
+    metadata: { positionOperationToken: 'position-recovery-token' },
+    files: [{ filePath: outputPath, role: 'output', beforeSnapshot: null }]
+  });
+  const getBatch = repository.getBatch.bind(repository);
+  const getSetting = controller.database.getSetting;
+  repository.getBatch = () => { throw new Error('archive DB unavailable'); };
+  controller.database.getSetting = () => { throw new Error('settings DB unavailable'); };
+  try {
+    controller.persistTaskTerminalIntent({
+      batchContext,
+      sourceOperation: 'position-reconciliation:run:export',
+      terminalOutcome: {
+        taskStatus: 'succeeded',
+        metadata: { recoveredPositionOperation: true },
+        afterTerminal: {
+          route: 'position-reconciliation',
+          operationToken: 'position-recovery-token'
+        }
+      }
+    });
+  } finally {
+    repository.getBatch = getBatch;
+    controller.database.getSetting = getSetting;
+  }
+  assert.equal(intent.batchId, reserved.batchId);
+  const terminalRecord = outboxStore.list()[0];
+  assert.equal(terminalRecord.payload.targetBatchId, reserved.batchId);
+  assert.equal(
+    terminalRecord.payload.metadata.positionOperationToken,
+    terminalRecord.payload.terminalOutcome.afterTerminal.operationToken
+  );
+
+  const replay = await controller.flushOutbox();
+  assert.equal(replay.flushed, 1);
+  assert.deepEqual(replayOrder, ['append', 'terminal', 'finalizer', 'remove']);
+  assert.equal(repository.listBatches({ limit: 10, offset: 0 }).length, 1);
+  const recovered = repository.getBatchDetail(reserved.batchId);
+  assert.equal(recovered.taskStatus, 'succeeded');
+  assert.equal(recovered.artifacts.length, 1);
+  assert.equal(recovered.artifacts[0].direction, 'output');
+  assert.deepEqual(outboxStore.list(), []);
+
+  replayOrder.length = 0;
+  controller.persistTaskTerminalIntent({
+    batchContext,
+    sourceOperation: 'position-reconciliation:run:export',
+    terminalOutcome: terminalRecord.payload.terminalOutcome
+  });
+  const sameTerminalReplay = await controller.flushOutbox();
+  assert.equal(sameTerminalReplay.flushed, 1);
+  assert.deepEqual(replayOrder, ['append', 'terminal', 'finalizer', 'remove']);
+  assert.deepEqual(outboxStore.list(), [], '同终态 replay 幂等完成后应移除 intent');
+
+  const cancelled = await service.reserveTaskBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    taskKey: 'position-reconciliation:run:export',
+    taskRunId: 'position-cancelled-token',
+    operationKey: 'position:position-cancelled-token:run-export',
+    parentRunId: 'position-cancelled-parent'
+  });
+  await service.markTaskStarted(cancelled.batchId);
+  await service.cancelTaskBatch(cancelled.batchId, { reason: 'user cancelled' });
+  controller.persistTaskTerminalIntent({
+    batchContext: {
+      batchId: cancelled.batchId,
+      batchNumber: cancelled.batchNumber,
+      taskRunId: 'position-cancelled-token',
+      taskKey: 'position-reconciliation:run:export',
+      moduleId: 'position-reconciliation-process',
+      parentRunId: 'position-cancelled-parent',
+      operationKey: 'position:position-cancelled-token:run-export'
+    },
+    sourceOperation: 'position-reconciliation:run:export',
+    terminalOutcome: {
+      taskStatus: 'succeeded',
+      metadata: { recoveredPositionOperation: true },
+      afterTerminal: {
+        route: 'position-reconciliation',
+        operationToken: 'position-cancelled-token'
+      }
+    }
+  });
+  replayOrder.length = 0;
+  const conflictingReplay = await controller.flushOutbox();
+  assert.equal(conflictingReplay.flushed, 0);
+  assert.equal(conflictingReplay.remaining, 1);
+  assert.deepEqual(replayOrder, ['append', 'terminal']);
+  assert.equal(repository.getBatch(cancelled.batchId).taskStatus, 'cancelled');
+  assert.equal(outboxStore.list().length, 1, '异终态 intent 必须保留供可见诊断');
 });
 
 test('正式建批或追加的 artifact 与 outbox 同时失败时不得宣称可重试', async () => {

@@ -149,7 +149,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
   //   - 行数 0 → null（无需留底）
   //   - 行数 <= ARCHIVE_WORKER_THRESHOLD → 主进程同步 XLSX（小数据量，测试路径）
   //   - 行数 > threshold → utilityProcess + 流式 writer（不卡主进程 UI）
-  async function archiveExistingMonth(yearMonth, dbPath) {
+  async function archiveExistingMonth(yearMonth, dbPath, batchContext) {
     const db = getPendingDb();
     if (!db) return null;
     const meta = monthRepo.getMonthMeta(db, yearMonth);
@@ -159,7 +159,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
 
     // 大数据量走 worker（Electron 环境才有 utilityProcess；无则 fallback 主进程同步）
     if (meta.rowCount > ARCHIVE_WORKER_THRESHOLD && electronUtilityProcess && dbPath) {
-      return runArchiveInWorker({ dbPath, yearMonth, archivePath });
+      return runArchiveInWorker({ dbPath, yearMonth, archivePath, batchContext });
     }
 
     // 主进程同步兜底（测试 + 小数据量）
@@ -180,9 +180,9 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
   }
 
   // 在 utilityProcess 里跑 archive-worker + 自研流式 xlsx writer；UI 不阻塞
-  function runArchiveInWorker({ dbPath, yearMonth, archivePath }) {
+  function runArchiveInWorker({ dbPath, yearMonth, archivePath, batchContext }) {
     return new Promise((resolve, reject) => {
-      const jobMeta = { dbPath, yearMonth, archivePath };
+      const jobMeta = { dbPath, yearMonth, archivePath, batchContext };
       const worker = electronUtilityProcess.fork(ARCHIVE_WORKER_SCRIPT, [JSON.stringify(jobMeta)], {
         execArgv: [`--max-old-space-size=${NODE_MAX_OLD_SPACE_MB}`],
         env: {
@@ -223,7 +223,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
   //   成功 → { status:'success', yearMonth, rowCount, sourceFiles, archivePath }（与旧链路 complete 事件形态一致）。
   //   失败 → 引擎抛 BigTableImportError，restoreEngineErrors 还原 lastImportErrors 形态后返回 { status:'error', errors }。
   //   进度 → 引擎每 1w 行 { sourceFile, importedCount } 适配为现行 renderer payload（{ type:'progress', file, rowsProcessed, totalInserted }）。
-  async function runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress }) {
+  async function runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress, batchContext }) {
     // importedAt 在 session 侧算好经 contractOptions 注入（事务内收尾 upsertMonthMeta 用，与旧链路 new Date().toISOString() 等价）。
     const importedAt = new Date().toISOString();
     try {
@@ -233,6 +233,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         contractModulePath: PENDING_CONTRACT_PATH,
         contractOptions: { yearMonth, archivePath: archivePath || null, importedAt },
         mode: 'overwrite',
+        batchContext,
         // monthKey 不传：契约 monthKeyOf=null ⇒ 引擎 baseMonthKey=null 旁路跨月校验（pending 单月由 yearMonth 入参）。
         resourceLimits: ENGINE_RESOURCE_LIMITS,
         onEngineProgress: (ev) => {
@@ -284,7 +285,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     }
   }
 
-  async function runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress }) {
+  async function runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress, batchContext }) {
     const db = getPendingDb();
     if (!db) {
       return { status: 'error', errors: [{ severity: 'fatal', message: 'Pending DB 未初始化' }] };
@@ -304,7 +305,7 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     let archivePath = null;
     if (existingCount > 0 && overwriteConfirmed) {
       try {
-        archivePath = await archiveExistingMonth(yearMonth, dbPath);
+        archivePath = await archiveExistingMonth(yearMonth, dbPath, batchContext);
       } catch (err) {
         return { status: 'error', errors: [{ severity: 'fatal', message: '留底失败：' + err.message }] };
       }
@@ -314,12 +315,12 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     //   pending 旧链路 worker.js 无条件 deleteMonth（worker.js:84，不受 overwriteConfirmed 控制）⇒ 引擎统一走
     //   mode='overwrite'（deleteForOverwrite 6 表覆盖删除链）。monthKey 不传（契约 monthKeyOf=null 旁路跨月校验）。
     if (USE_BIG_TABLE_IMPORT_ENGINE_PENDING && dbPath) {
-      return runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress });
+      return runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress, batchContext });
     }
 
     // ── 回退旧链路（PENDING_FORCE_LEGACY_IMPORT=1 或 dbPath 缺失）：utilityProcess/spawn + worker.js 全旧路径 ──
     return new Promise((resolve) => {
-      const jobMeta = { dbPath, yearMonth, files, archivePath };
+      const jobMeta = { dbPath, yearMonth, files, archivePath, batchContext };
 
       let stdoutBuf = '';
       let stderrBuf = '';
@@ -425,7 +426,12 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     XLSX.utils.book_append_sheet(wb, ws, '错误报告');
     applyWatermark(wb);
     XLSX.writeFile(wb, savePath);
-    return { status: 'success', path: savePath, errorCount: lastImportErrors.errors.length };
+    return {
+      status: 'success',
+      path: savePath,
+      filePath: savePath,
+      errorCount: lastImportErrors.errors.length
+    };
   }
 
   function hasPendingErrorReport() { return lastImportErrors !== null; }

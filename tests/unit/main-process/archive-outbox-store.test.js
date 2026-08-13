@@ -44,6 +44,46 @@ test('存档 outbox 跨实例保留文件并支持幂等追加和删除', (t) =>
   assert.deepEqual(reopened.list(), []);
 });
 
+test('同 operation 的文件 outbox 原子合并同批次终态且稳定拒绝冲突', (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-outbox-terminal-'));
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const store = createArchiveOutboxStore(rootDir);
+  const created = store.enqueue({
+    operationKey: 'position:terminal-merge:run',
+    targetBatchId: 71,
+    files: [{ filePath: path.join(rootDir, 'input.xlsx'), role: 'input' }]
+  });
+  const terminalOutcome = {
+    taskStatus: 'succeeded',
+    code: '',
+    message: '',
+    metadata: { recovered: true }
+  };
+
+  store.merge(created.id, {
+    targetBatchId: 71,
+    terminalOutcome,
+    files: [{ filePath: path.join(rootDir, 'output.xlsx'), role: 'output' }]
+  });
+  store.merge(created.id, { targetBatchId: 71, terminalOutcome, files: [] });
+  const [merged] = store.list();
+  assert.equal(merged.payload.targetBatchId, 71);
+  assert.deepEqual(merged.payload.terminalOutcome, terminalOutcome);
+  assert.equal(merged.payload.files.length, 2);
+
+  assert.throws(
+    () => store.merge(created.id, { targetBatchId: 72, terminalOutcome }),
+    (error) => error.code === 'ARCHIVE_OUTBOX_TARGET_BATCH_CONFLICT'
+  );
+  assert.throws(
+    () => store.merge(created.id, {
+      targetBatchId: 71,
+      terminalOutcome: { ...terminalOutcome, taskStatus: 'failed' }
+    }),
+    (error) => error.code === 'ARCHIVE_OUTBOX_TERMINAL_CONFLICT'
+  );
+});
+
 test('存档 outbox 内容被改写但未同步完整性哈希时必须 fail-closed', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-outbox-tamper-'));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
