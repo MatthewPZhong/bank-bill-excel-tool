@@ -298,10 +298,68 @@ test.describe('stateless archive operation tracker', () => {
     );
   });
 
-  test('PR2 tracker 不支持 PR3 VCC 财务或 toolbox 文件动作', () => {
+  test('PR3-VCC tracker 支持财务文件动作但不改既有VCCOP或toolbox', () => {
     const { tracker } = createHarness();
     assert.equal(tracker.supportsChannel('bank-statement:export'), true);
-    assert.equal(tracker.supportsChannel('vccFinancialOp:export:result'), false);
+    assert.equal(tracker.supportsChannel('vccFinancialOp:export:result'), true);
+    assert.equal(tracker.supportsChannel('vccOpCalc:import:scan'), true);
     assert.equal(tracker.supportsChannel('toolbox:merge'), false);
+  });
+
+  test('VCC财务五类导入只登记成功处理组，三个export登记writer全部输出', () => {
+    const files = [
+      { sourceType: 'recharge_refund', filePath: '/tmp/recharge.xlsx' },
+      { sourceType: 'fee_fx', filePath: '/tmp/fee.xlsx' },
+      { sourceType: 'channel', filePath: '/tmp/channel.xlsx' },
+      { sourceType: 'pending_archive_removal', filePath: '/tmp/pending.xlsx' },
+      { sourceType: 'system_op', filePath: '/tmp/system.xlsx' }
+    ];
+    const imported = resolveOperationFiles({
+      channel: 'vccFinancialOp:import:apply',
+      args: [{ files }],
+      result: {
+        status: 'completed_with_errors',
+        records: [
+          { sourceType: 'recharge_refund', status: 'success' },
+          { sourceType: 'fee_fx', status: 'success_with_skips' },
+          { sourceType: 'channel', status: 'all_skipped' },
+          { sourceType: 'pending_archive_removal', status: 'failed_validation' },
+          { sourceType: 'system_op', status: 'failed_conflict' }
+        ]
+      }
+    });
+    assert.deepEqual(imported.map((file) => file.filePath), [
+      '/tmp/recharge.xlsx',
+      '/tmp/fee.xlsx',
+      '/tmp/channel.xlsx'
+    ]);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:import:apply',
+      args: [{ files }],
+      result: {
+        status: 'error',
+        partialCommitted: true,
+        records: [
+          { sourceType: 'recharge_refund', status: 'success' },
+          { sourceType: 'fee_fx', status: 'failed_validation' }
+        ]
+      }
+    }).map((file) => file.filePath), ['/tmp/recharge.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:export:result',
+      result: { status: 'success', filePaths: ['/tmp/a.xlsx', '/tmp/b.xlsx'] }
+    }).map((file) => file.filePath), ['/tmp/a.xlsx', '/tmp/b.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:export:result',
+      result: { status: 'error', partialCommitted: true, filePaths: ['/tmp/a.xlsx'] }
+    }).map((file) => file.filePath), ['/tmp/a.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:data-manager:export',
+      result: { status: 'success', filePath: '/tmp/data.xlsx' }
+    }).map((file) => file.filePath), ['/tmp/data.xlsx']);
+    assert.deepEqual(resolveOperationFiles({
+      channel: 'vccFinancialOp:export:import-audit',
+      result: { status: 'success', filePath: '/tmp/audit.xlsx' }
+    }).map((file) => file.filePath), ['/tmp/audit.xlsx']);
   });
 });

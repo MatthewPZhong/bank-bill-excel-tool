@@ -12,6 +12,9 @@ const { ensureVccFinancialOpTablesSupport } = require('../../../src/backend/vcc-
 const repository = require('../../../src/backend/vcc-financial-op-db/repository');
 const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
+const {
+  IMPORT_CANCELLED_CODE
+} = require('../../../src/backend/vcc-financial-op/detail-importer');
 const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
 const { serializeError } = require('../../../src/main-process/serialize-error');
 const { vccFinancialOpErrorResult } = require('../../../src/main-process/vcc-financial-op-ipc');
@@ -60,6 +63,16 @@ function createFakeWorkerFactory(workers) {
     return worker;
   };
 }
+
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 61,
+  batchNumber: '2026-08-11-001',
+  taskRunId: 'task-61',
+  taskKey: 'vcc-test',
+  moduleId: 'vcc-financial-op',
+  parentRunId: 'parent-61',
+  operationKey: 'operation-61'
+});
 
 function seedCalculatedReviewRun(db) {
   const revisions = Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]));
@@ -145,7 +158,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     expectedResultRevision: 0,
     expectedPreviewToken: initialResult.previewTokens.adjustment,
     taskGeneration: initialResult.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(service._taskStateForTests().action, 'add-adjustment');
   assert.throws(
     () => service.addRunAdjustment({
@@ -157,7 +170,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
       expectedResultRevision: 0,
       expectedPreviewToken: initialResult.previewTokens.adjustment,
       taskGeneration: initialResult.taskGeneration
-    }),
+    }, undefined, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task'
   );
   const adjusted = await adding;
@@ -195,7 +208,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     expectedResultRevision: 1,
     expectedPreviewToken: effective.previewTokens.archive,
     taskGeneration: effective.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(archived.status, 'archived');
   const archiveAudit = db.prepare(`
     SELECT app_version, build_sha FROM vcc_fin_op_operation_audit
@@ -211,7 +224,7 @@ test('结果查询 token 直达 dedicated worker，调整后 refetch 并以新 t
     targetMonth: '2026-06',
     expectedPreviewToken: unarchivePreview.previewToken,
     taskGeneration: unarchivePreview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(unarchived.status, 'unarchived');
   assert.equal(db.prepare('SELECT status FROM vcc_fin_op_runs WHERE id = ?').get(runId).status, 'calculated');
 });
@@ -243,7 +256,7 @@ test('真实 v3.1.7 legacy preview 经 Service claim 到 dedicated worker 解归
     targetMonth: '2026-06',
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(result.archiveContract, 'legacy-v3.1.7-four-dataset');
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS count FROM vcc_fin_op_datasets
@@ -273,7 +286,7 @@ test('计算失败与 rolled_back 审计失败从 worker 到 IPC 保留主错误
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   const primaryError = new Error('replacement-primary-fault');
   primaryError.code = 'SQLITE_CONSTRAINT_TRIGGER';
   primaryError.detailLines = ['旧结果保留，替换事务已回滚'];
@@ -350,7 +363,7 @@ test('运行服务拒绝缺少或无效的预检 fingerprint，且不启动 work
     const result = await service.calculate({
       targetMonth: '2026-06',
       expectedInputFingerprint
-    });
+    }, BATCH_CONTEXT);
     assert.equal(result.status, 'blocked');
     assert.equal(result.code, 'preflight-required');
   }
@@ -381,17 +394,175 @@ test('calculate 仅透传允许字段且 renderer 不能伪造 worker 审计版�
     taskGeneration: 999,
     runId: 123,
     unexpectedField: 'must-not-cross-service-boundary'
-  });
+  }, BATCH_CONTEXT);
   assert.equal(workers.length, 1);
   assert.deepEqual(workers[0].options.workerData.payload, {
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64),
+    batchContext: BATCH_CONTEXT,
     taskGeneration: 0,
     appVersion: '3.1.8-trusted',
     buildSha: 'trusted-build-sha'
   });
   workers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
   assert.deepEqual(await calculation, { status: 'calculated' });
+});
+
+test('VCC import 以 exact7 taskRunId 固定 batchId，拒绝 renderer 伪造和既有批次复用', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }],
+    batchId: 'renderer-forged-batch'
+  }, undefined, BATCH_CONTEXT);
+  assert.equal(workers.length, 1);
+  assert.equal(workers[0].options.workerData.payload.batchId, BATCH_CONTEXT.taskRunId);
+  assert.deepEqual(workers[0].options.workerData.payload.batchContext, BATCH_CONTEXT);
+  workers[0].emit('message', {
+    type: 'result',
+    result: { status: 'success', batchId: BATCH_CONTEXT.taskRunId, records: [] }
+  });
+  assert.equal((await importing).batchId, BATCH_CONTEXT.taskRunId);
+
+  repository.createImportBatch(db, {
+    id: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    fileCount: 1
+  });
+  await assert.rejects(
+    service.importSelectedFiles({
+      targetMonth: '2026-06',
+      files: [{ filePath: '/tmp/other.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+    }, undefined, BATCH_CONTEXT),
+    (error) => error.code === 'vcc-import-batch-id-conflict'
+  );
+  assert.equal(workers.length, 1, '既有 batchId 冲突不得启动 worker 或混入旧 records');
+});
+
+test('VCC import cooperative error 已带 partialResult 时不被空 DB 恢复覆盖', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+  }, undefined, BATCH_CONTEXT);
+  const error = new Error('cooperative fixture cancel');
+  error.code = IMPORT_CANCELLED_CODE;
+  error.partialResult = {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    status: 'error',
+    partialCommitted: true,
+    records: [{ recordId: 9, sourceType: SOURCE_TYPES.RECHARGE, status: 'success' }]
+  };
+  workers[0].emit('message', { type: 'error', error: serializeError(error) });
+  await assert.rejects(importing, (caught) => {
+    assert.deepEqual(caught.partialResult, error.partialResult);
+    return caught.code === IMPORT_CANCELLED_CODE;
+  });
+
+  const beforeTransaction = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
+  }, undefined, BATCH_CONTEXT);
+  workers[1].emit('error', new Error('worker failed before import transaction'));
+  await assert.rejects(beforeTransaction, (caught) => {
+    assert.equal(Object.hasOwn(caught, 'partialResult'), false);
+    return /before import transaction/.test(caught.message);
+  });
+});
+
+test('VCC import worker error 只从当前 taskRunId batch 恢复同形 partialResult', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const workers = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    workerFactory: createFakeWorkerFactory(workers)
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+  const importing = service.importSelectedFiles({
+    targetMonth: '2026-06',
+    files: [
+      { filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE },
+      { filePath: '/tmp/system.xlsx', sourceType: SOURCE_TYPES.SYSTEM_OP }
+    ]
+  }, undefined, BATCH_CONTEXT);
+  repository.createImportBatch(db, {
+    id: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    fileCount: 2
+  });
+  const rechargeRecordId = repository.createImportRecord(db, {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['recharge.xlsx']
+  });
+  repository.finishImportRecord(db, rechargeRecordId, {
+    status: 'success',
+    rawCount: 1,
+    insertedCount: 1
+  });
+  repository.createImportRecord(db, {
+    batchId: BATCH_CONTEXT.taskRunId,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    sourceFiles: ['system.xlsx']
+  });
+  repository.createImportBatch(db, {
+    id: 'unrelated-worker-error',
+    targetMonth: '2026-05',
+    fileCount: 1
+  });
+  const unrelatedRecordId = repository.createImportRecord(db, {
+    batchId: 'unrelated-worker-error',
+    targetMonth: '2026-05',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['unrelated.xlsx']
+  });
+  workers[0].emit('error', new Error('fixture import worker error'));
+
+  await assert.rejects(importing, (caught) => {
+    assert.equal(caught.partialResult.batchId, BATCH_CONTEXT.taskRunId);
+    assert.equal(caught.partialResult.targetMonth, '2026-06');
+    assert.equal(caught.partialResult.partialCommitted, true);
+    assert.deepEqual(caught.partialResult.records.map((record) => [record.sourceType, record.status]), [
+      [SOURCE_TYPES.RECHARGE, 'success'],
+      [SOURCE_TYPES.SYSTEM_OP, 'failed_validation']
+    ]);
+    return /fixture import worker error/.test(caught.message);
+  });
+  assert.equal(repository.getImportRecord(db, unrelatedRecordId).status, 'importing');
 });
 
 test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
@@ -568,7 +739,7 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   assert.equal(detail.summary.status, 'deleted');
   assert.equal(detail.summary.statusText, '已删除');
   assert.equal(detail.summary.originalStatus, 'success_with_skips');
-  assert.equal(detail.summary.originalStatusText, '成功（含幂等跳过）');
+  assert.equal(detail.summary.originalStatusText, '成功（含跳过/异常过滤）');
   assert.ok(detail.summary.datasetDeletedAt);
   assert.ok(detail.summary.datasetDeletionId);
   const listed = service.listImportRecords('2026-06');
@@ -660,7 +831,7 @@ test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档�
   assert.throws(() => service.deleteDatasetData({
     targetMonth: '2026-06',
     sourceType: SOURCE_TYPES.RECHARGE
-  }), (error) => {
+  }, undefined, BATCH_CONTEXT), (error) => {
     assert.equal(error.code, 'state-changed');
     assert.equal(error.message, '数据状态已变化，请刷新并重新确认。');
     return true;
@@ -672,7 +843,7 @@ test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档�
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration,
     reason: 'C2 正式删除链'
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(deleted.deletedDataCount, 1);
   assert.equal(deleted.invalidatedRunCount, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
@@ -733,7 +904,7 @@ test('数据管理有效表通过 worker 流式导出并返回工作簿元数据
   assert.equal(preview.dataCount, 1);
   const result = await service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'check', outputPath
-  });
+  }, undefined, BATCH_CONTEXT);
   assert.equal(result.tableName, 'VCC充值清退明细_校验表');
   assert.equal(result.dataCount, 1);
   assert.equal(result.sheetCount, 1);
@@ -765,17 +936,17 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  });
+  }, BATCH_CONTEXT);
   assert.equal(service._taskStateForTests().taskGeneration, 0);
   assert.throws(() => service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
-  }), (error) => error.code === 'active-vcc-task');
+  }, undefined, BATCH_CONTEXT), (error) => error.code === 'active-vcc-task');
   await assert.rejects(
     service.resolveRecord({
       recordId: 1,
       note: '不会进入数据库写入',
       action: 'keep_current_effective_dataset'
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task'
   );
 
@@ -787,14 +958,18 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: oldPreview.previewToken,
     taskGeneration: oldPreview.taskGeneration
-  }), (error) => {
+  }, undefined, BATCH_CONTEXT), (error) => {
     assert.equal(error.code, 'state-changed');
     assert.equal(error.message, '数据状态已变化，请刷新并重新确认。');
     return true;
   });
   for (const action of [
-    () => service.unarchiveMonth({ targetMonth: '2026-06' }),
-    () => service.deleteDataTarget({ targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE })
+    () => service.unarchiveMonth({ targetMonth: '2026-06' }, undefined, BATCH_CONTEXT),
+    () => service.deleteDataTarget(
+      { targetMonth: '2026-06', targetType: SOURCE_TYPES.RECHARGE },
+      undefined,
+      BATCH_CONTEXT
+    )
   ]) {
     assert.throws(action, (error) => {
       assert.equal(error.code, 'state-changed');
@@ -828,7 +1003,7 @@ test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法
       call: (confirmation) => service.unarchiveMonth({
         targetMonth: '2026-06',
         ...confirmation
-      }),
+      }, undefined, BATCH_CONTEXT),
       token: unarchivePreview.previewToken
     },
     {
@@ -836,7 +1011,7 @@ test('service 在创建破坏性 worker 前按 raw payload 拒绝空串和非法
         targetMonth: '2026-06',
         targetType: SOURCE_TYPES.RECHARGE,
         ...confirmation
-      }),
+      }, undefined, BATCH_CONTEXT),
       token: deletePreview.previewToken
     }
   ];
@@ -888,13 +1063,16 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
     targetMonth: '2026-06',
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const worker = workers[0];
   worker.emit('message', { type: 'critical-ready' });
   assert.deepEqual(worker.sentMessages, [{ type: 'critical-ack' }]);
   assert.equal(service._taskStateForTests().protected, true);
   await assert.rejects(
-    service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' }),
+    service.exportRun(
+      { targetMonth: '2026-06', outputPath: '/tmp/blocked-by-unarchive.xlsx' },
+      BATCH_CONTEXT
+    ),
     (error) => error.code === 'active-vcc-task',
     '解归档持有全局租约时必须拒绝结果导出'
   );
@@ -915,7 +1093,7 @@ test('破坏性 worker 进入 critical-ready 后取消与退出只等待、不 t
     service.calculate({
       targetMonth: '2026-07',
       expectedInputFingerprint: 'a'.repeat(64)
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'service-closing'
   );
 });
@@ -943,10 +1121,16 @@ test('破坏性 worker 在事务前可协作取消且不强杀', async (t) => {
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const rejection = assert.rejects(operation, (error) => error.code === 'operation-cancelled');
-  const cancellation = service.cancelActiveTask();
   const worker = workers[0];
+  const acceptedOrder = [];
+  const cancellation = service.cancelActiveTask(() => {
+    acceptedOrder.push('lifecycle-cancelled');
+    assert.deepEqual(worker.sentMessages, [], '先终结原批次，再通知 worker');
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(acceptedOrder, ['lifecycle-cancelled']);
   assert.deepEqual(worker.sentMessages, [{ type: 'cancel' }]);
   worker.emit('message', {
     type: 'error',
@@ -977,7 +1161,7 @@ test('窗口关闭先取消且 worker 停在未受保护 critical-ready 时，�
     targetType: SOURCE_TYPES.RECHARGE,
     expectedPreviewToken: preview.previewToken,
     taskGeneration: preview.taskGeneration
-  });
+  }, undefined, BATCH_CONTEXT);
   const rejection = assert.rejects(operation, /后台任务退出但未返回结果/);
   const termination = service.terminate();
   const worker = workers[0];
@@ -1086,13 +1270,16 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
       targetMonth: '2026-07',
       runId,
       outputPath: '/tmp/must-not-export.xlsx'
-    }),
+    }, BATCH_CONTEXT),
     (error) => error.code === 'archive-state-inconsistent',
     '外部 runId 不得覆盖租约内 targetMonth 解析'
   );
   assert.equal(writerArgs, undefined);
 
-  const exporting = service.exportRun({ targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' });
+  const exporting = service.exportRun(
+    { targetMonth: '2026-06', outputPath: '/tmp/fixture.xlsx' },
+    BATCH_CONTEXT
+  );
   await started;
   assert.equal(service._taskStateForTests().action, 'export-result');
   assert.equal(writerArgs.runId, runId, 'runId 必须在租约内由 targetMonth 严格解析');
@@ -1103,7 +1290,7 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
       targetMonth: '2026-06',
       expectedPreviewToken: unarchivePreview.previewToken,
       taskGeneration: unarchivePreview.taskGeneration
-    }),
+    }, undefined, BATCH_CONTEXT),
     (error) => error.code === 'active-vcc-task',
     '结果导出持有全局租约时必须拒绝解归档'
   );
@@ -1119,4 +1306,65 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   assert.deepEqual(await exporting, { filePaths: ['/tmp/fixture.xlsx'] });
   await termination;
   db.close();
+});
+
+test('VCC 结果导出在 durable publication 确认后才触发提前附件结算', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-result-durable-publication-'));
+  const dbPath = path.join(dir, 'tool-data.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedCalculatedReviewRun(db);
+  const balances = Object.fromEntries(db.prepare(`
+    SELECT currency, calculated_balance FROM vcc_fin_op_run_balances WHERE run_id = ?
+  `).all(runId).map((row) => [row.currency, row.calculated_balance]));
+  db.prepare(`
+    UPDATE vcc_fin_op_runs SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(runId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
+    VALUES ('2026-06', 'PPHK', ?, ?)
+  `).run(JSON.stringify(balances), runId);
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets
+    SET data_status = 'archived', archived_run_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE target_month = '2026-06'
+  `).run(runId);
+  let publicationPayload;
+  let settlementResult;
+  const service = createVccFinancialOpService({
+    database: { db, dbPath },
+    assetsDir: '',
+    writeRunWorkbooksFn: async () => ({
+      runId,
+      targetMonth: '2026-06',
+      subjects: ['PPHK'],
+      filePaths: ['/tmp/final-vcc-result.xlsx'],
+      generationFilePaths: ['/tmp/generated-vcc-result.xlsx']
+    }),
+    publishOutputFilesFn: async (payload) => {
+      publicationPayload = payload;
+      await payload.onDurableHandoff({ taskId: 'receipt-1' });
+    }
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const result = await service.exportRun({
+    targetMonth: '2026-06',
+    outputPath: '/tmp/final-vcc-result.xlsx',
+    publicationStagingDirectory: '/tmp/vcc-generation',
+    targetSnapshots: [{ exists: false }],
+    onDurableHandoff(_publication, exportResult) {
+      settlementResult = exportResult;
+    }
+  }, BATCH_CONTEXT);
+
+  assert.deepEqual(publicationPayload.batchContext, BATCH_CONTEXT);
+  assert.deepEqual(publicationPayload.targetFilePaths, ['/tmp/final-vcc-result.xlsx']);
+  assert.equal(settlementResult.runId, runId);
+  assert.equal(result.generationFilePaths, undefined);
+  assert.deepEqual(result.filePaths, ['/tmp/final-vcc-result.xlsx']);
 });

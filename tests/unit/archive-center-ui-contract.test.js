@@ -162,10 +162,11 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     const modulesSource = renderer.slice(modulesStart, modulesEnd);
     assert.equal((modulesSource.match(/\n\s+id:\s*'[^']+'/g) || []).length, 13);
     assert.doesNotMatch(modulesSource, /id:\s*'archive-center'/);
-    assert.match(
-      renderer,
-      /const archiveModules = new Map\([\s\S]*?Object\.values\(MODULES\)[\s\S]*?module\.id !== MODULES\.vccFinancialOp\.id/
-    );
+    const archiveModulesStart = renderer.indexOf('const archiveModules = new Map(');
+    const archiveModulesEnd = renderer.indexOf('const archiveState = {', archiveModulesStart);
+    const archiveModulesSource = renderer.slice(archiveModulesStart, archiveModulesEnd);
+    assert.match(archiveModulesSource, /Object\.values\(MODULES\)/);
+    assert.doesNotMatch(archiveModulesSource, /module\.id !== MODULES\.vccFinancialOp\.id/);
   });
 
   test('自动更新既有选择器与行为契约继续存在', () => {

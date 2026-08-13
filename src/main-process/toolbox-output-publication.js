@@ -5,8 +5,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {
   directoryPathAliasKey,
+  pathsAlias,
   targetPathAliasKey
 } = require('./toolbox-target-identity');
+const {
+  freezeWorkerBatchContext
+} = require('./archive-center/worker-batch-context');
+const {
+  normalizeSourceSnapshot,
+  sourceSnapshotMatchesStat
+} = require('./archive-center/source-snapshot');
 
 const JOURNAL_INDEX_NAME = 'toolbox-publish-journal-index.json';
 const JOURNAL_VERSION = 1;
@@ -270,6 +278,44 @@ function validateDiscoverableIndexEntry(runtime, entry, journalPathKey, managedP
       entry.targetAbsolutePaths.length !== entry.stagedAbsolutePaths.length ||
       !Array.isArray(entry.backupAbsolutePaths) ||
       entry.backupAbsolutePaths.length !== entry.stagedAbsolutePaths.length) {
+    return false;
+  }
+  try {
+    if (entry.batchContext !== undefined && entry.batchContext !== null) {
+      freezeWorkerBatchContext(entry.batchContext, { required: true });
+    }
+    const archiveInputFiles = normalizeArchiveInputFiles(entry.archiveInputFiles);
+    const archiveInputsRequired = entry.archiveInputsRequired !== false;
+    if (entry.archiveHandoffRequired !== undefined
+        && typeof entry.archiveHandoffRequired !== 'boolean') {
+      return false;
+    }
+    if (entry.archiveInputsRequired !== undefined
+        && typeof entry.archiveInputsRequired !== 'boolean') {
+      return false;
+    }
+    if (entry.archiveHandoffRequired === true
+        && (!entry.batchContext || (archiveInputsRequired && archiveInputFiles.length === 0))) {
+      return false;
+    }
+  } catch (_error) {
+    return false;
+  }
+  if (entry.outputFiles !== undefined && (
+    !Array.isArray(entry.outputFiles)
+    || entry.outputFiles.length !== entry.targetAbsolutePaths.length
+    || entry.outputFiles.some((file, index) => (
+      !file
+      || file.role !== 'output'
+      || typeof file.filePath !== 'string'
+      || !path.isAbsolute(file.filePath)
+      || targetPathAliasKey(runtime.fsImpl, file.filePath)
+        !== targetPathAliasKey(runtime.fsImpl, entry.targetAbsolutePaths[index])
+      || !Number.isSafeInteger(Number(file.byteSize))
+      || Number(file.byteSize) < 0
+      || !/^[a-f0-9]{64}$/.test(String(file.sha256 || ''))
+    ))
+  )) {
     return false;
   }
   if (!path.basename(entry.journalAbsolutePath).endsWith(
@@ -625,6 +671,31 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
     && value.size >= 0
     && validSha(value.sha256)
   );
+  let batchContextValid = true;
+  try {
+    if (journal.batchContext !== undefined && journal.batchContext !== null) {
+      freezeWorkerBatchContext(journal.batchContext, { required: true });
+    }
+  } catch (_error) {
+    batchContextValid = false;
+  }
+  let archiveHandoffValid = true;
+  try {
+    const archiveInputFiles = normalizeArchiveInputFiles(journal.archiveInputFiles);
+    const archiveInputsRequired = journal.archiveInputsRequired !== false;
+    archiveHandoffValid = (
+      (journal.archiveHandoffRequired === undefined
+        || typeof journal.archiveHandoffRequired === 'boolean')
+      && (journal.archiveInputsRequired === undefined
+        || typeof journal.archiveInputsRequired === 'boolean')
+      && (
+        journal.archiveHandoffRequired !== true
+        || (journal.batchContext && (!archiveInputsRequired || archiveInputFiles.length > 0))
+      )
+    );
+  } catch (_error) {
+    archiveHandoffValid = false;
+  }
   const validStatuses = new Set([
     'preparing',
     'prepared',
@@ -666,6 +737,17 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
           entry.validatedGenerated !== undefined
           && !validGenerated(entry.validatedGenerated)
         )
+        || (
+          entry.expectedTargetSnapshot !== undefined
+          && !(
+            entry.expectedTargetSnapshot
+            && typeof entry.expectedTargetSnapshot.exists === 'boolean'
+            && (
+              entry.expectedTargetSnapshot.exists === false
+              || normalizeSourceSnapshot(entry.expectedTargetSnapshot.snapshot)
+            )
+          )
+        )
         || !entry.metadata
         || typeof entry.metadata !== 'object'
         || targets.has(targetKey)
@@ -690,6 +772,8 @@ function readJournal(runtime, journalPath, expectedTaskId = null) {
     typeof journal.nonce !== 'string'
     || !journal.nonce
     || !validStatuses.has(journal.status)
+    || !batchContextValid
+    || !archiveHandoffValid
     || typeof journal.userDataDir !== 'string'
     || !path.isAbsolute(journal.userDataDir)
     || !entriesValid
@@ -723,6 +807,64 @@ function cloneJsonValue(value) {
   } catch (_error) {
     return undefined;
   }
+}
+
+function normalizeArchiveInputFiles(value, options = {}) {
+  const required = options.required === true;
+  if (value === undefined || value === null) {
+    if (required) throw new TypeError('工具箱存档交接缺少输入文件证据');
+    return [];
+  }
+  if (!Array.isArray(value) || (required && value.length === 0)) {
+    throw new TypeError('工具箱存档交接输入文件证据必须是非空数组');
+  }
+  const seen = new Set();
+  return value.map((file, index) => {
+    if (!file || typeof file !== 'object' || Array.isArray(file)) {
+      throw new TypeError(`工具箱存档交接输入文件 ${index + 1} 格式非法`);
+    }
+    const filePath = String(file.filePath || '').trim();
+    const sourceOperation = String(file.sourceOperation || '').trim();
+    const sourceSnapshot = normalizeSourceSnapshot(file.sourceSnapshot);
+    if (!filePath || !path.isAbsolute(filePath) || !sourceOperation || !sourceSnapshot) {
+      throw new TypeError(`工具箱存档交接输入文件 ${index + 1} 缺少冻结路径、来源或快照`);
+    }
+    const resolvedPath = path.resolve(filePath);
+    const key = `${sourceOperation}\u0000${resolvedPath}`;
+    if (seen.has(key)) {
+      throw new TypeError(`工具箱存档交接输入文件 ${index + 1} 与先前输入重复`);
+    }
+    seen.add(key);
+    const normalized = {
+      filePath: resolvedPath,
+      role: 'input',
+      sourceOperation,
+      originalName: String(file.originalName || path.basename(resolvedPath)),
+      sourceSnapshot
+    };
+    const expectedSha256 = String(file.expectedSha256 || '').trim().toLowerCase();
+    if (expectedSha256) {
+      if (!/^[a-f0-9]{64}$/.test(expectedSha256)) {
+        throw new TypeError(`工具箱存档交接输入文件 ${index + 1} 摘要非法`);
+      }
+      normalized.expectedSha256 = expectedSha256;
+    }
+    if (file.expectedSizeBytes !== undefined && file.expectedSizeBytes !== null) {
+      const expectedSizeBytes = Number(file.expectedSizeBytes);
+      if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+        throw new TypeError(`工具箱存档交接输入文件 ${index + 1} 大小非法`);
+      }
+      normalized.expectedSizeBytes = expectedSizeBytes;
+    }
+    const metadata = cloneJsonValue(file.metadata);
+    if (metadata !== undefined) {
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        throw new TypeError(`工具箱存档交接输入文件 ${index + 1} metadata 非法`);
+      }
+      normalized.metadata = metadata;
+    }
+    return normalized;
+  });
 }
 
 function publicationMetadata(artifact, target, targetPath) {
@@ -804,10 +946,34 @@ function normalizeInputs(artifacts, targets, options = {}) {
       index,
       options.requireValidatedArtifacts === true
     );
+    let expectedTargetSnapshot;
+    if (target && typeof target === 'object'
+        && target.expectedTargetSnapshot !== undefined) {
+      const supplied = target.expectedTargetSnapshot;
+      if (!supplied || typeof supplied.exists !== 'boolean') {
+        throw new ToolboxPublicationError(
+          'TOOLBOX_PUBLICATION_INVALID_INPUT',
+          `第 ${index + 1} 个目标的确认快照无效`
+        );
+      }
+      if (supplied.exists) {
+        const snapshot = normalizeSourceSnapshot(supplied.snapshot);
+        if (!snapshot) {
+          throw new ToolboxPublicationError(
+            'TOOLBOX_PUBLICATION_INVALID_INPUT',
+            `第 ${index + 1} 个目标的确认快照无效`
+          );
+        }
+        expectedTargetSnapshot = { exists: true, snapshot };
+      } else {
+        expectedTargetSnapshot = { exists: false };
+      }
+    }
     return {
       artifactPath: path.resolve(artifactPath),
       targetPath: resolvedTarget,
       ...(validatedGenerated ? { validatedGenerated } : {}),
+      ...(expectedTargetSnapshot ? { expectedTargetSnapshot } : {}),
       metadata: publicationMetadata(artifact, target, resolvedTarget)
     };
   });
@@ -1278,6 +1444,21 @@ function discoverableAnchorsMatchJournal(runtime, indexEntry, journal) {
     return false;
   }
   try {
+    const indexContext = indexEntry.batchContext
+      ? freezeWorkerBatchContext(indexEntry.batchContext, { required: true })
+      : null;
+    const journalContext = journal.batchContext
+      ? freezeWorkerBatchContext(journal.batchContext, { required: true })
+      : null;
+    if (JSON.stringify(indexContext) !== JSON.stringify(journalContext)) return false;
+    if (Boolean(indexEntry.archiveHandoffRequired)
+        !== Boolean(journal.archiveHandoffRequired)) return false;
+    if ((indexEntry.archiveInputsRequired !== false)
+        !== (journal.archiveInputsRequired !== false)) return false;
+    if (JSON.stringify(normalizeArchiveInputFiles(indexEntry.archiveInputFiles))
+        !== JSON.stringify(normalizeArchiveInputFiles(journal.archiveInputFiles))) return false;
+    if (JSON.stringify(indexEntry.outputFiles || [])
+        !== JSON.stringify(buildPublishFiles(journal))) return false;
     return directoryPathAliasKey(runtime.fsImpl, journal.userDataDir) ===
         directoryPathAliasKey(runtime.fsImpl, indexEntry.userDataDir)
       && journal.entries.every((entry, index) => (
@@ -1435,6 +1616,34 @@ function recoverPreparingIntent(runtime, indexEntry, options = {}) {
   return { taskId: indexEntry.taskId, action: recoveredAction, warnings: [] };
 }
 
+function recoveryLineage(value = {}) {
+  const batchContext = value.batchContext
+    ? freezeWorkerBatchContext(value.batchContext, { required: true })
+    : null;
+  const inputFiles = normalizeArchiveInputFiles(value.archiveInputFiles);
+  const files = Array.isArray(value.outputFiles)
+    ? value.outputFiles.map((file) => ({ ...file }))
+    : [];
+  return batchContext && files.length > 0
+    ? { batchContext, inputFiles, files }
+    : {};
+}
+
+function committedRecoveryAccepted(options, recovered) {
+  if (!recovered.batchContext
+      || !Array.isArray(recovered.files)
+      || recovered.files.length === 0) {
+    return true;
+  }
+  const acknowledged = new Set(
+    Array.isArray(options.acknowledgedCommittedTaskIds)
+      ? options.acknowledgedCommittedTaskIds.map(String)
+      : []
+  );
+  if (acknowledged.has(String(recovered.taskId))) return true;
+  return options.deferCommittedRecovery !== true;
+}
+
 function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
   const stateLabel = options.stateLabel || 'finalizing';
   const allowedJournalStatuses = options.allowedJournalStatuses
@@ -1442,6 +1651,7 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
   const recoveredAction = options.recoveredAction || 'commit-cleanup';
   const indexPath = getIndexPath(indexEntry.userDataDir);
   const journalStat = lstatOrNull(runtime.fsImpl, indexEntry.journalAbsolutePath);
+  let lineage = recoveryLineage(indexEntry);
   if (journalStat) {
     if (!journalStat.isFile()) {
       throw new ToolboxPublicationManualRecoveryError(
@@ -1457,6 +1667,11 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
       indexEntry.journalAbsolutePath,
       indexEntry.taskId
     );
+    lineage = recoveryLineage({
+      batchContext: journal.batchContext,
+      archiveInputFiles: journal.archiveInputFiles,
+      outputFiles: buildPublishFiles(journal)
+    });
     if (!discoverableIntentMatchesJournal(
       runtime,
       indexEntry,
@@ -1465,6 +1680,17 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
     )) {
       throwDiscoverableAnchorMismatch(runtime, indexEntry);
     }
+  }
+  const recovered = {
+    taskId: indexEntry.taskId,
+    action: recoveredAction,
+    warnings: [],
+    ...lineage
+  };
+  if (!committedRecoveryAccepted(options, recovered)) {
+    return { ...recovered, action: 'commit-handoff-pending' };
+  }
+  if (journalStat) {
     try {
       runtime.fsImpl.rmSync(indexEntry.journalAbsolutePath, { force: true });
       fsyncDirectory(runtime.fsImpl, path.dirname(indexEntry.journalAbsolutePath));
@@ -1496,10 +1722,10 @@ function recoverFinalizingIntent(runtime, indexEntry, options = {}) {
       }
     );
   }
-  return { taskId: indexEntry.taskId, action: recoveredAction, warnings: [] };
+  return recovered;
 }
 
-function recoverOneJournal(runtime, indexEntry) {
+function recoverOneJournal(runtime, indexEntry, options = {}) {
   if (indexEntry.discoveryState === undefined) {
     throwLegacyIndexManualRecovery(runtime, indexEntry);
   }
@@ -1521,7 +1747,7 @@ function recoverOneJournal(runtime, indexEntry) {
     });
   }
   if (discoveryState === INDEX_DISCOVERY_FINALIZING) {
-    return recoverFinalizingIntent(runtime, indexEntry);
+    return recoverFinalizingIntent(runtime, indexEntry, options);
   }
   const journal = readJournal(
     runtime,
@@ -1578,6 +1804,20 @@ function recoverOneJournal(runtime, indexEntry) {
     return { taskId: journal.taskId, action: 'cancelled-prepared', warnings: [] };
   }
   if (journal.status === 'committed' || journal.status === 'committed-cleanup-pending') {
+    const lineage = recoveryLineage({
+      batchContext: journal.batchContext,
+      archiveInputFiles: journal.archiveInputFiles,
+      outputFiles: buildPublishFiles(journal)
+    });
+    const recovered = {
+      taskId: journal.taskId,
+      action: 'commit-cleanup',
+      warnings: [],
+      ...lineage
+    };
+    if (!committedRecoveryAccepted(options, recovered)) {
+      return { ...recovered, action: 'commit-handoff-pending' };
+    }
     const cleanup = cleanupCommitted(runtime, journal);
     if (!cleanup.complete) {
       throw new ToolboxPublicationManualRecoveryError(
@@ -1588,13 +1828,13 @@ function recoverOneJournal(runtime, indexEntry) {
         }
       );
     }
-    return { taskId: journal.taskId, action: 'commit-cleanup', warnings: cleanup.warnings };
+    return { ...recovered, warnings: cleanup.warnings };
   }
   rollbackUncommitted(runtime, journal);
   return { taskId: journal.taskId, action: 'rolled-back', warnings: [] };
 }
 
-function recoverPendingInternal(runtime, userDataDir) {
+function recoverPendingInternal(runtime, userDataDir, options = {}) {
   const resolvedUserDataDir = path.resolve(userDataDir);
   const { value } = readIndex(runtime, resolvedUserDataDir);
   const recovered = [];
@@ -1607,7 +1847,7 @@ function recoverPendingInternal(runtime, userDataDir) {
     recovered.push(recoverOneJournal(runtime, {
       ...entry,
       userDataDir: resolvedUserDataDir
-    }));
+    }, options));
   }
   return { recovered, skippedActive };
 }
@@ -1620,11 +1860,20 @@ function recoverPendingToolboxPublications(options = {}) {
         '缺少 userDataDir，无法恢复工具箱发布任务'
       );
     }
-    return recoverPendingInternal(createRuntime(options), options.userDataDir);
+    return recoverPendingInternal(createRuntime(options), options.userDataDir, options);
   });
 }
 
-function makeJournal(runtime, taskId, userDataDir, entries) {
+function makeJournal(
+  runtime,
+  taskId,
+  userDataDir,
+  entries,
+  batchContext = null,
+  archiveInputFiles = [],
+  archiveHandoffRequired = false,
+  archiveInputsRequired = true
+) {
   const nonce = runtime.randomUUID();
   const journalDir = path.dirname(entries[0].targetPath);
   const taskSlug = taskId.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 48) || 'task';
@@ -1657,8 +1906,31 @@ function makeJournal(runtime, taskId, userDataDir, entries) {
     createdAt,
     updatedAt: createdAt,
     status: 'preparing',
+    ...(batchContext ? { batchContext: { ...batchContext } } : {}),
+    ...(archiveHandoffRequired
+      ? {
+          archiveHandoffRequired: true,
+          archiveInputsRequired,
+          archiveInputFiles: archiveInputFiles.map((file) => cloneJsonValue(file))
+        }
+      : {}),
     entries: normalizedEntries
   };
+}
+
+function assertExpectedTargetSnapshot(runtime, entry) {
+  const expected = entry.expectedTargetSnapshot;
+  if (!expected) return;
+  const stat = lstatOrNull(runtime.fsImpl, entry.targetPath);
+  const unchanged = expected.exists
+    ? Boolean(stat && sourceSnapshotMatchesStat(expected.snapshot, stat))
+    : !stat;
+  if (!unchanged) {
+    throw new ToolboxPublicationError(
+      'TOOLBOX_PUBLICATION_TARGET_CHANGED_SINCE_CONFIRMATION',
+      `目标在覆盖确认后发生变化，已取消发布：${entry.targetPath}`
+    );
+  }
 }
 
 function ensureTargetParent(runtime, targetPath) {
@@ -1682,10 +1954,23 @@ function pathAliasIsWithinDirectory(fileAliasKey, directoryAliasKey) {
     );
 }
 
-function preflightJournal(runtime, journal) {
+function preflightJournal(runtime, journal, protectedSourcePaths = []) {
   for (const entry of journal.entries) {
     ensureTargetParent(runtime, entry.targetPath);
     assertRegularFile(runtime.fsImpl, entry.artifactPath, '生成产物');
+    assertExpectedTargetSnapshot(runtime, entry);
+    const aliasedSource = protectedSourcePaths.find((sourcePath) => (
+      pathsAlias(runtime.fsImpl, sourcePath, entry.targetPath)
+    ));
+    if (aliasedSource) {
+      throw new ToolboxPublicationError(
+        'TOOLBOX_PUBLICATION_TARGET_ALIASES_SOURCE',
+        `输出目标与输入源文件为同一路径，已阻止覆盖：${entry.targetPath}`,
+        {
+          detailLines: [`输入：${aliasedSource}`, `输出：${entry.targetPath}`]
+        }
+      );
+    }
   }
 
   const managedPaths = [
@@ -1837,7 +2122,23 @@ function prepareToolboxPublication(options = {}) {
     }
     const resolvedUserDataDir = path.resolve(options.userDataDir);
     runtime.fsImpl.mkdirSync(resolvedUserDataDir, { recursive: true });
-    recoverPendingInternal(runtime, resolvedUserDataDir);
+    const startupRecovery = recoverPendingInternal(runtime, resolvedUserDataDir, {
+      deferCommittedRecovery: true
+    });
+    const pendingArchiveHandoffs = startupRecovery.recovered.filter(
+      (item) => item && item.action === 'commit-handoff-pending'
+    );
+    if (pendingArchiveHandoffs.length > 0) {
+      throw new ToolboxPublicationManualRecoveryError(
+        '已有工具箱输出等待存档中心耐久接管，已阻止新的发布任务',
+        {
+          detailLines: pendingArchiveHandoffs.map(
+            (item) => `待接管发布：${item.taskId}`
+          ),
+          recoveryPaths: [getIndexPath(resolvedUserDataDir)]
+        }
+      );
+    }
     if (activeTaskIds.has(taskId)) {
       throw new ToolboxPublicationError(
         'TOOLBOX_PUBLICATION_DUPLICATE_TASK',
@@ -1845,11 +2146,46 @@ function prepareToolboxPublication(options = {}) {
       );
     }
 
+    const archiveHandoffRequired = options.requireArchiveHandoff === true;
+    const archiveInputsRequired = options.allowEmptyArchiveInputs !== true;
+    const batchContext = freezeWorkerBatchContext(options.batchContext, {
+      required: archiveHandoffRequired
+    });
+    const protectedSourcePaths = (Array.isArray(options.protectedSourcePaths)
+      ? options.protectedSourcePaths
+      : [])
+      .map((filePath) => String(filePath || '').trim())
+      .filter(Boolean)
+      .map((filePath) => path.resolve(filePath));
+    const archiveInputFiles = normalizeArchiveInputFiles(options.archiveInputFiles, {
+      required: archiveHandoffRequired && archiveInputsRequired
+    });
+    if (archiveHandoffRequired) {
+      const protectedKeys = new Set(protectedSourcePaths.map(
+        (filePath) => targetPathAliasKey(runtime.fsImpl, filePath)
+      ));
+      const inputKeys = new Set(archiveInputFiles.map(
+        (file) => targetPathAliasKey(runtime.fsImpl, file.filePath)
+      ));
+      if (protectedKeys.size !== inputKeys.size
+          || [...protectedKeys].some((key) => !inputKeys.has(key))) {
+        throw new TypeError('工具箱存档输入证据必须与 prepare 阶段冻结的受保护源文件一致');
+      }
+    }
     const inputs = normalizeInputs(options.artifacts, options.targets, {
       requireValidatedArtifacts: options.requireValidatedArtifacts === true
     });
-    const journal = makeJournal(runtime, taskId, resolvedUserDataDir, inputs);
-    preflightJournal(runtime, journal);
+    const journal = makeJournal(
+      runtime,
+      taskId,
+      resolvedUserDataDir,
+      inputs,
+      batchContext,
+      archiveInputFiles,
+      archiveHandoffRequired,
+      archiveInputsRequired
+    );
+    preflightJournal(runtime, journal, protectedSourcePaths);
     const reservationKeys = reserveTargets(runtime, taskId, journal.entries);
     activeTaskIds.add(taskId);
     let indexRegistered = false;
@@ -1858,6 +2194,12 @@ function prepareToolboxPublication(options = {}) {
       // 先完成只读快照；此阶段尚未在目标目录创建任何 staging byte。
       for (let index = 0; index < journal.entries.length; index += 1) {
         const entry = journal.entries[index];
+        callCheckpoint(runtime, 'prepare:before-generation-inspect', {
+          taskId,
+          index,
+          artifactPath: entry.artifactPath,
+          targetPath: entry.targetPath
+        });
         const generated = inspectRegularFile(runtime.fsImpl, entry.artifactPath);
         if (
           entry.validatedGenerated
@@ -1880,9 +2222,14 @@ function prepareToolboxPublication(options = {}) {
           );
         }
         entry.generated = generated;
+        // 覆盖确认发生在 generation 前；大产物摘要可能持续数百毫秒。目标必须在
+        // 摘要完成后再次与确认快照一致，才能成为本任务可备份的 original。
+        assertExpectedTargetSnapshot(runtime, entry);
         const originalStat = lstatOrNull(runtime.fsImpl, entry.targetPath);
         if (originalStat) {
-          entry.original = { exists: true, ...inspectRegularFile(runtime.fsImpl, entry.targetPath) };
+          const original = inspectRegularFile(runtime.fsImpl, entry.targetPath);
+          assertExpectedTargetSnapshot(runtime, entry);
+          entry.original = { exists: true, ...original };
         }
       }
 
@@ -1897,7 +2244,16 @@ function prepareToolboxPublication(options = {}) {
         nonce: journal.nonce,
         stagedAbsolutePaths: journal.entries.map((entry) => entry.stagedPath),
         targetAbsolutePaths: journal.entries.map((entry) => entry.targetPath),
-        backupAbsolutePaths: journal.entries.map((entry) => entry.backupPath)
+        backupAbsolutePaths: journal.entries.map((entry) => entry.backupPath),
+        ...(journal.batchContext ? { batchContext: { ...journal.batchContext } } : {}),
+        ...(journal.archiveHandoffRequired
+          ? {
+              archiveHandoffRequired: true,
+              archiveInputsRequired: journal.archiveInputsRequired !== false,
+              archiveInputFiles: journal.archiveInputFiles.map((file) => cloneJsonValue(file))
+            }
+          : {}),
+        outputFiles: buildPublishFiles(journal)
       });
       indexRegistered = true;
       callCheckpoint(runtime, 'prepare:after-index-before-journal', {
@@ -2113,11 +2469,30 @@ function buildPublishFiles(journal) {
     sha256: entry.generated.sha256,
     outputId: entry.metadata.outputId,
     warningSummary: entry.metadata.warningSummary,
-    styleStats: entry.metadata.styleStats
+    styleStats: entry.metadata.styleStats,
+    role: 'output',
+    sourceOperation: journal.batchContext
+      ? journal.batchContext.taskKey
+      : 'toolbox:publication'
   }));
 }
 
 function finalizeCommittedPublication(runtime, journal, extraWarnings = []) {
+  if (journal.archiveHandoffRequired === true) {
+    return {
+      taskId: journal.taskId,
+      committed: true,
+      pendingCleanup: true,
+      pendingArchiveHandoff: true,
+      files: buildPublishFiles(journal),
+      batchContext: { ...journal.batchContext },
+      inputFiles: normalizeArchiveInputFiles(journal.archiveInputFiles),
+      warnings: [
+        ...collectMetadataWarnings(journal.entries),
+        ...extraWarnings
+      ]
+    };
+  }
   let cleanup;
   try {
     cleanup = cleanupCommitted(runtime, journal);
@@ -2135,6 +2510,7 @@ function finalizeCommittedPublication(runtime, journal, extraWarnings = []) {
     committed: true,
     pendingCleanup: !cleanup.complete,
     files: buildPublishFiles(journal),
+    ...(journal.batchContext ? { batchContext: { ...journal.batchContext } } : {}),
     warnings: [
       ...collectMetadataWarnings(journal.entries),
       ...extraWarnings,

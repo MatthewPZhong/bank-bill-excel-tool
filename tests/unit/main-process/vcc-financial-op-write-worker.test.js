@@ -44,7 +44,16 @@ function payload() {
     expectedPreviewToken: `v2:${'a'.repeat(64)}`,
     taskGeneration: 0,
     appVersion: '3.1.9',
-    buildSha: 'worker-test'
+    buildSha: 'worker-test',
+    batchContext: {
+      batchId: 1,
+      batchNumber: '2026-08-11-001',
+      taskRunId: 'task-1',
+      taskKey: 'vccFinancialOp:run:archive',
+      moduleId: 'vcc-financial-op',
+      parentRunId: 'parent-1',
+      operationKey: 'operation-1'
+    }
   };
 }
 
@@ -99,9 +108,19 @@ test('critical ack 后新 worker 零 migration，缺 schema fail-closed', async 
   assert.equal(count, 0);
 });
 
-test('batchContext 缺失可接受，存在时沿用七字段 refreeze 合同', async () => {
+test('batchContext 缺失或字段不全均拒绝，完整值沿用七字段 refreeze 合同', async () => {
   const missing = path.join(os.tmpdir(), `vcc-write-worker-context-${process.pid}.sqlite`);
   fs.rmSync(missing, { force: true });
+  const absent = await runWorker({
+    action: 'archive-result',
+    payload: { ...payload(), batchContext: null },
+    dbPath: missing
+  });
+  assert.equal(absent.terminal.type, 'error');
+  assert.match(absent.terminal.error.message, /batchContext/);
+  assert.equal(absent.messages.some((message) => message.type === 'critical-ready'), false);
+  assert.equal(fs.existsSync(missing), false);
+
   const invalid = await runWorker({
     action: 'archive-result',
     payload: { ...payload(), batchContext: { batchId: 1 } },

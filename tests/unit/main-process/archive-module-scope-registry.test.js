@@ -11,12 +11,18 @@ const {
   resolveArchiveScope
 } = require('../../../src/main-process/archive-center/module-scope-registry');
 
-test('PR2 仅登记 12 个唯一 primary archive scope', () => {
-  assert.equal(PRIMARY_ARCHIVE_SCOPES.length, 12);
-  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id)).size, 12);
-  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.code)).size, 12);
+test('PR3-VCC 登记 13 个唯一 primary archive scope', () => {
+  assert.equal(PRIMARY_ARCHIVE_SCOPES.length, 13);
+  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.id)).size, 13);
+  assert.equal(new Set(PRIMARY_ARCHIVE_SCOPES.map((scope) => scope.code)).size, 13);
   assert.ok(PRIMARY_ARCHIVE_SCOPES.every((scope) => scope.kind === 'primary'));
-  assert.equal(getArchiveScope('vcc-financial-op'), null);
+  assert.deepEqual(getArchiveScope('vcc-financial-op'), {
+    id: 'vcc-financial-op',
+    code: 'VCCFINOP',
+    name: 'VCC财务OP校验',
+    kind: 'primary'
+  });
+  assert.equal(getArchiveScope('VCCOP').id, 'vcc-op-calc');
   assert.equal(getArchiveScope('toolbox'), null);
 });
 
@@ -26,7 +32,7 @@ test('内部 alias 解析到 primary，但不增加可见筛选 scope', () => {
     'POSITIONLINK',
     'PREFUNDTEMP'
   ]);
-  assert.equal(listVisibleArchiveScopes().length, 12);
+  assert.equal(listVisibleArchiveScopes().length, 13);
   assert.equal(resolveArchiveScope('LINKED').id, 'bank-statement-process');
   assert.equal(resolveArchiveScope('LINKED').storageCode, 'LINKED');
   assert.equal(resolveArchiveScope('PREFUNDTEMP').id, 'pre-fund-reconciliation');

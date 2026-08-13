@@ -2479,7 +2479,6 @@ function createAppUpdateSettingsDialog() {
 
   const archiveModules = new Map(
     Object.values(MODULES)
-      .filter((module) => module.id !== MODULES.vccFinancialOp.id)
       .map((module) => [module.id, module.name])
   );
   const archiveState = {

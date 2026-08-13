@@ -67,6 +67,16 @@ function archivePayload(overrides = {}) {
   };
 }
 
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 41,
+  batchNumber: '2026-08-11-001',
+  taskRunId: 'task-41',
+  taskKey: 'vccFinancialOp:run:archive',
+  moduleId: 'vcc-financial-op',
+  parentRunId: 'parent-41',
+  operationKey: 'operation-41'
+});
+
 test('结果写 claim 绑定 action/generation/进程内 identity，protected 标记先于 ACK', async (t) => {
   const harness = createHarness();
   t.after(async () => {
@@ -77,7 +87,8 @@ test('结果写 claim 绑定 action/generation/进程内 identity，protected �
   const operation = harness.service._runResultWriteWorkerForTests(
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
     archivePayload(),
-    (entry) => progress.push(entry)
+    (entry) => progress.push(entry),
+    BATCH_CONTEXT
   );
   const worker = harness.workers[0];
   assert.equal(path.basename(worker.filename), 'vcc-financial-op-write-worker.js');
@@ -85,7 +96,7 @@ test('结果写 claim 绑定 action/generation/进程内 identity，protected �
     runId: 7,
     expectedResultRevision: 3,
     expectedPreviewToken: `v2:${'a'.repeat(64)}`,
-    batchContext: null,
+    batchContext: BATCH_CONTEXT,
     taskGeneration: 0,
     appVersion: null,
     buildSha: null
@@ -110,12 +121,16 @@ test('结果写 claim 绑定 action/generation/进程内 identity，protected �
   assert.deepEqual(harness.diagnostics, [{ code: 'fixture-diagnostic' }]);
 
   let cancelSettled = false;
-  const cancellation = harness.service.cancelActiveTask().then((value) => {
+  let acceptedCancellationCount = 0;
+  const cancellation = harness.service.cancelActiveTask(() => {
+    acceptedCancellationCount += 1;
+  }).then((value) => {
     cancelSettled = true;
     return value;
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(cancelSettled, false, 'protected worker 取消必须等待终态');
+  assert.equal(acceptedCancellationCount, 0, 'protected worker 不得触发 lifecycle cancelled');
   assert.equal(worker.terminateCount, 0);
   worker.emit('message', { type: 'result', result: { status: 'archived', runId: 7 } });
   worker.emit('message', { type: 'result', result: { status: 'duplicate-terminal' } });
@@ -136,12 +151,19 @@ test('结果写 stale generation 与非法 action 均在创建 worker 前 fail-c
   assert.throws(
     () => harness.service._runResultWriteWorkerForTests(
       VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
-      archivePayload({ taskGeneration: 1 })
+      archivePayload({ taskGeneration: 1 }),
+      undefined,
+      BATCH_CONTEXT
     ),
     (error) => error.code === 'state-changed'
   );
   assert.throws(
-    () => harness.service._runResultWriteWorkerForTests('not-registered', archivePayload()),
+    () => harness.service._runResultWriteWorkerForTests(
+      'not-registered',
+      archivePayload(),
+      undefined,
+      BATCH_CONTEXT
+    ),
     (error) => error.code === 'invalid-vcc-write-action'
   );
   assert.equal(harness.workers.length, 0);
@@ -157,12 +179,12 @@ test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation 
         targetMonth: '2026-06',
         expectedPreviewToken: `v2:${'b'.repeat(64)}`,
         taskGeneration: 0
-      });
+      }, undefined, BATCH_CONTEXT);
     },
     expectedPayload: {
       targetMonth: '2026-06',
       expectedPreviewToken: `v2:${'b'.repeat(64)}`,
-      batchContext: null,
+      batchContext: BATCH_CONTEXT,
       taskGeneration: 0,
       appVersion: null,
       buildSha: null
@@ -177,14 +199,14 @@ test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation 
         expectedPreviewToken: `v2:${'c'.repeat(64)}`,
         taskGeneration: 0,
         reason: '用户确认删除'
-      });
+      }, undefined, BATCH_CONTEXT);
     },
     expectedPayload: {
       targetMonth: '2026-06',
       targetType: 'result',
       expectedPreviewToken: `v2:${'c'.repeat(64)}`,
       reason: '用户确认删除',
-      batchContext: null,
+      batchContext: BATCH_CONTEXT,
       taskGeneration: 0,
       appVersion: null,
       buildSha: null

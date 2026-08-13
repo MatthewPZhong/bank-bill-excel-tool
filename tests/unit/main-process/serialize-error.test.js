@@ -324,4 +324,16 @@ test.describe('serialize-error', () => {
       }
     });
   });
+
+  test('17. VCC 多组导入的已提交部分结果跨 worker 完整透传', () => {
+    const err = new Error('后组读取失败');
+    err.partialResult = {
+      batchId: 'batch-partial',
+      targetMonth: '2026-06',
+      partialCommitted: true,
+      records: [{ recordId: 1, sourceType: 'recharge_refund', status: 'success' }]
+    };
+    const restored = deserializeError(serializeError(err));
+    assert.deepEqual(restored.partialResult, err.partialResult);
+  });
 });

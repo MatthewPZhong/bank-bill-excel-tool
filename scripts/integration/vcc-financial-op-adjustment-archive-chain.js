@@ -52,6 +52,20 @@ const ADJUSTMENT_REASON =
 let passed = 0;
 let failed = 0;
 const failures = [];
+let lifecycleBatchSequence = 0;
+
+function createBatchContext(taskKey) {
+  lifecycleBatchSequence += 1;
+  return Object.freeze({
+    batchId: lifecycleBatchSequence,
+    batchNumber: `integration-${lifecycleBatchSequence}`,
+    taskRunId: `integration-task-${lifecycleBatchSequence}`,
+    taskKey,
+    moduleId: 'vcc-financial-op',
+    parentRunId: `integration-parent-${lifecycleBatchSequence}`,
+    operationKey: `${taskKey}:integration-${lifecycleBatchSequence}`
+  });
+}
 
 function printable(value) {
   try { return JSON.stringify(value); } catch (_error) { return String(value); }
@@ -361,7 +375,7 @@ async function run() {
       targetMonth: M1,
       entries: [{ subject: SUBJECT, balances: fixedBalances('100') }],
       note: '集成链逐币种核对首月期初'
-    });
+    }, createBatchContext('vccFinancialOp:opening:initialize'));
     assertEq(opening.status, 'initialized', '首月九币种期初真实初始化成功');
 
     const m1Preflight = service.preflightRun({ targetMonth: M1 });
@@ -370,7 +384,7 @@ async function run() {
     const m1Calculation = await service.calculate({
       targetMonth: M1,
       expectedInputFingerprint: m1Preflight.inputFingerprint
-    });
+    }, createBatchContext('vccFinancialOp:run:calculate'));
     assertEq(m1Calculation.status, 'calculated', 'M1 真实 worker 计算成功');
     assertEq(m1Calculation.inputFingerprint, m1Preflight.inputFingerprint, 'M1 worker 使用预检指纹');
 
@@ -399,7 +413,7 @@ async function run() {
       expectedResultRevision: options.resultRevision,
       expectedPreviewToken: initial.previewTokens.adjustment,
       taskGeneration: initial.taskGeneration
-    });
+    }, undefined, createBatchContext('vccFinancialOp:run:adjustment-add'));
     assertEq(adjusted.status, 'adjusted', '调整通过真实 service 原子写入');
     assertEq(adjusted.resultRevision, 1, '新增调整后 revision 递增为 1');
     assertEq(adjusted.adjustment.reason, ADJUSTMENT_REASON, '调整写入保持业务原文');
@@ -418,7 +432,7 @@ async function run() {
         expectedResultRevision: 0,
         expectedPreviewToken: afterAdjustment.previewTokens.adjustment,
         taskGeneration: afterAdjustment.taskGeneration
-      }),
+      }, undefined, createBatchContext('vccFinancialOp:run:adjustment-add')),
       'result-revision-changed',
       '结果已发生变化，请重新核对后归档。',
       '过期 revision 的第二次调整 fail closed'
@@ -472,7 +486,7 @@ async function run() {
       expectedResultRevision: reopened.resultRevision,
       expectedPreviewToken: reopened.previewTokens.archive,
       taskGeneration: reopened.taskGeneration
-    });
+    }, undefined, createBatchContext('vccFinancialOp:run:archive'));
     assertEq(archived.status, 'archived', 'M1 按当前 revision 归档成功');
     assertEq(archived.resultRevision, 1, '归档保留已核对 revision');
 
@@ -517,7 +531,10 @@ async function run() {
     assertTrue(/^[a-f0-9]{64}$/.test(archiveEvidence.effectiveBalanceHash), '归档审计生效余额摘要有效');
     assertEq(archiveEvidence.expectedTotalChanges, 8, '单主体归档审计固定 N+7 变化预算');
 
-    const exported = await service.exportRun({ targetMonth: M1, outputPath });
+    const exported = await service.exportRun(
+      { targetMonth: M1, outputPath },
+      createBatchContext('vccFinancialOp:export:result')
+    );
     assertEq(exported.runId, runId, '归档导出月份严格解析回原 run');
     assertEq(exported.targetMonth, M1, '归档导出返回原目标月份');
     assertEq(exported.filePaths[0], outputPath, '归档导出发布到指定路径');
@@ -532,7 +549,7 @@ async function run() {
     const m2Calculation = await service.calculate({
       targetMonth: M2,
       expectedInputFingerprint: m2Preflight.inputFingerprint
-    });
+    }, createBatchContext('vccFinancialOp:run:calculate'));
     assertEq(m2Calculation.status, 'calculated', 'M2 真实 worker 计算成功');
     const m2Result = await service.getRunResult(m2Calculation.runId);
     const m2Usd = balanceOf(m2Result, 'USD');

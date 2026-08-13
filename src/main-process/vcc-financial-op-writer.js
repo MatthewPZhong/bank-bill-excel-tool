@@ -760,7 +760,15 @@ function nextAvailableOutputPath(outputDirectory, baseName, usedNames) {
   return path.join(outputDirectory, fileName);
 }
 
-async function writeRunWorkbooks({ db, runId, outputDirectory, outputPath, assetsDir }) {
+async function writeRunWorkbooks({
+  db,
+  runId,
+  outputDirectory,
+  outputPath,
+  assetsDir,
+  publicationStagingDirectory = null,
+  writeSubjectWorkbookFn = writeSubjectWorkbook
+}) {
   const resultTemplatePath = path.join(assetsDir, 'VCC财务OP校验', RESULT_TEMPLATE_FILE_NAME);
   const pendingTemplatePath = path.join(assetsDir, 'VCC财务OP校验', '移除归档Pending发生额计算表.xlsx');
   // 两份模板必须在解析任何目标输出路径前完整读取；模板异常时不得触碰用户文件。
@@ -772,30 +780,62 @@ async function writeRunWorkbooks({ db, runId, outputDirectory, outputPath, asset
 
   const data = loadEffectiveRunData(db, Number(runId));
   const plans = data.subjects.map((subject) => buildSubjectRowPlan(data, subject));
-  const paths = [];
   const usedNames = new Set();
-  for (const plan of plans) {
-    let destination;
+  const destinations = plans.map((plan) => {
     if (data.subjects.length === 1 && outputPath) {
-      destination = outputPath;
-    } else {
-      if (!outputDirectory) throw new Error('多主体导出必须指定保存目录');
-      const baseName = `${data.run.targetMonth}_${sanitizeFilePart(plan.subject)}_VCC财务OP校验结果表`;
-      destination = nextAvailableOutputPath(outputDirectory, baseName, usedNames);
+      return path.resolve(outputPath);
     }
-    paths.push(await writeSubjectWorkbook({
-      data,
-      plan,
-      outputPath: destination,
-      resultContract,
-      pendingTemplateSheet
-    }));
+    if (!outputDirectory) throw new Error('多主体导出必须指定保存目录');
+    const baseName = `${data.run.targetMonth}_${sanitizeFilePart(plan.subject)}_VCC财务OP校验结果表`;
+    return path.resolve(nextAvailableOutputPath(outputDirectory, baseName, usedNames));
+  });
+  const deferredPublication = Boolean(publicationStagingDirectory);
+  const generationPaths = [];
+  if (deferredPublication) {
+    fs.mkdirSync(publicationStagingDirectory, { recursive: true });
+  }
+  try {
+    for (let index = 0; index < plans.length; index += 1) {
+      const plan = plans[index];
+      const destination = destinations[index];
+      const generationPath = deferredPublication
+        ? path.join(
+            publicationStagingDirectory,
+            `${String(index + 1).padStart(3, '0')}-${sanitizeFilePart(plan.subject) || '未命名主体'}.xlsx`
+          )
+        : destination;
+      generationPaths.push(await writeSubjectWorkbookFn({
+        data,
+        plan,
+        outputPath: generationPath,
+        resultContract,
+        pendingTemplateSheet
+      }));
+    }
+  } catch (error) {
+    if (deferredPublication) {
+      for (const filePath of generationPaths) {
+        try { fs.rmSync(filePath, { force: true }); } catch (_cleanupError) { /* caller also owns dir */ }
+      }
+    }
+    error.partialResult = Object.freeze({
+      status: 'error',
+      partialCommitted: deferredPublication ? false : generationPaths.length > 0,
+      runId: Number(runId),
+      targetMonth: data.run.targetMonth,
+      subjects: Object.freeze(data.subjects.slice(0, generationPaths.length)),
+      filePaths: Object.freeze(deferredPublication ? [] : [...generationPaths])
+    });
+    throw error;
   }
   return {
     runId: Number(runId),
     targetMonth: data.run.targetMonth,
     subjects: data.subjects,
-    filePaths: paths
+    filePaths: destinations,
+    ...(deferredPublication
+      ? { generationFilePaths: generationPaths.map((filePath) => path.resolve(filePath)) }
+      : {})
   };
 }
 

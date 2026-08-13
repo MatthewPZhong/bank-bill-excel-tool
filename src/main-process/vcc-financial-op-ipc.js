@@ -23,13 +23,24 @@ function vccFinancialOpErrorResult(error) {
     : (context && context.preview && Array.isArray(context.preview.dependentMonths)
       ? context.preview.dependentMonths
       : []);
+  const partial = error && error.partialResult && typeof error.partialResult === 'object'
+    ? error.partialResult
+    : null;
   return {
     status: 'error',
     code: error && error.code ? error.code : null,
     message: error && error.message ? error.message : String(error),
     detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : [],
     dependentMonths,
-    context
+    context,
+    ...(partial ? {
+      batchId: partial.batchId || null,
+      partialCommitted: partial.partialCommitted === true,
+      records: Array.isArray(partial.records) ? partial.records : [],
+      filePaths: Array.isArray(partial.filePaths) ? partial.filePaths : [],
+      runId: partial.runId != null ? partial.runId : null,
+      targetMonth: partial.targetMonth || null
+    } : {})
   };
 }
 

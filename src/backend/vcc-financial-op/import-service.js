@@ -19,8 +19,47 @@ const {
 } = require('./system-op-importer');
 const repository = require('../vcc-financial-op-db/repository');
 
+const IMPORT_BATCH_ID_MAX_LENGTH = 256;
+const IMPORT_BATCH_ID_CONTROL_PATTERN = /[\u0000-\u001f\u007f]/;
+
+function normalizeImportBatchId(value) {
+  const candidate = value === undefined ? crypto.randomUUID() : value;
+  if (typeof candidate !== 'string') {
+    throw new TypeError('VCC 导入批次号必须是字符串');
+  }
+  if (!candidate || candidate !== candidate.trim()) {
+    throw new TypeError('VCC 导入批次号不能为空或包含首尾空白');
+  }
+  if (candidate.length > IMPORT_BATCH_ID_MAX_LENGTH) {
+    throw new TypeError(`VCC 导入批次号不能超过 ${IMPORT_BATCH_ID_MAX_LENGTH} 个字符`);
+  }
+  if (IMPORT_BATCH_ID_CONTROL_PATTERN.test(candidate)) {
+    throw new TypeError('VCC 导入批次号不能包含控制字符');
+  }
+  return candidate;
+}
+
 function detailRecordResult(record) {
   return { ...record, sourceLabel: SOURCE_LABELS[record.sourceType] };
+}
+
+function storedRecordResult(record) {
+  return {
+    recordId: Number(record.id),
+    batchId: record.batch_id,
+    targetMonth: record.target_month,
+    sourceType: record.source_type,
+    sourceLabel: SOURCE_LABELS[record.source_type],
+    status: record.status,
+    rawCount: Number(record.raw_count) || 0,
+    insertedCount: Number(record.inserted_count) || 0,
+    skippedCount: Number(record.skipped_count) || 0,
+    invalidKeyCount: Number(record.invalid_key_count) || 0,
+    conflictCount: Number(record.conflict_count) || 0,
+    formatErrorCount: Number(record.format_error_count) || 0,
+    rolledBackCount: Number(record.rolled_back_count) || 0,
+    errorMessage: record.error_message || ''
+  };
 }
 
 async function inspectFiles(filePaths) {
@@ -33,8 +72,9 @@ async function importFiles({
   files,
   onProgress,
   shouldCancel,
-  batchId = crypto.randomUUID()
+  batchId
 }) {
+  const normalizedBatchId = normalizeImportBatchId(batchId);
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('请选择至少一个原表文件');
@@ -44,7 +84,7 @@ async function importFiles({
     }
   }
   repository.createImportBatch(db, {
-    id: batchId,
+    id: normalizedBatchId,
     targetMonth: normalizedMonth,
     fileCount: files.length
   });
@@ -61,7 +101,7 @@ async function importFiles({
   try {
     for (const [sourceType, sourceFiles] of grouped) {
       recordIds.set(sourceType, repository.createImportRecord(db, {
-        batchId,
+        batchId: normalizedBatchId,
         targetMonth: normalizedMonth,
         sourceType,
         sourceFiles: sourceFiles.map((file) => path.basename(file.filePath))
@@ -72,7 +112,7 @@ async function importFiles({
       if (DETAIL_SOURCE_TYPES.has(sourceType)) {
         const record = await importDetailGroup({
           db,
-          batchId,
+          batchId: normalizedBatchId,
           targetMonth: normalizedMonth,
           sourceType,
           files: sourceFiles,
@@ -84,7 +124,7 @@ async function importFiles({
       } else if (sourceType === SOURCE_TYPES.SYSTEM_OP) {
         records.push(systemRecordResult(importSystemOpGroup({
           db,
-          batchId,
+          batchId: normalizedBatchId,
           targetMonth: normalizedMonth,
           files: sourceFiles,
           recordId: recordIds.get(sourceType)
@@ -100,21 +140,36 @@ async function importFiles({
   const failures = records.filter((record) => record.status.startsWith('failed'));
   if (outerError) {
     try {
-      repository.failImportBatch(db, batchId, {
+      repository.failImportBatch(db, normalizedBatchId, {
         errorCode: outerError.code || 'runtime-import-error',
         message: outerError.message || '导入运行异常，导入事务未完成'
       });
     } catch (finalizeError) {
       outerError.message = `${outerError.message}；失败记录即时收口失败：${finalizeError.message}`;
     }
+    const finalizedRecords = [...recordIds.values()]
+      .map((recordId) => repository.getImportRecord(db, recordId))
+      .filter(Boolean)
+      .map(storedRecordResult);
+    outerError.partialResult = Object.freeze({
+      batchId: normalizedBatchId,
+      targetMonth: normalizedMonth,
+      status: 'error',
+      partialCommitted: finalizedRecords.some((record) => (
+        ['success', 'success_with_skips', 'all_skipped'].includes(record.status)
+      )),
+      records: Object.freeze(finalizedRecords)
+    });
     throw outerError;
   }
   const status = failures.length > 0 ? 'completed_with_errors' : 'success';
-  repository.finishImportBatch(db, batchId, status);
-  return { batchId, targetMonth: normalizedMonth, status, records };
+  repository.finishImportBatch(db, normalizedBatchId, status);
+  return { batchId: normalizedBatchId, targetMonth: normalizedMonth, status, records };
 }
 
 module.exports = {
+  normalizeImportBatchId,
   inspectFiles,
-  importFiles
+  importFiles,
+  storedRecordResult
 };

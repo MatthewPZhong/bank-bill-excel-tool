@@ -33,11 +33,49 @@ function makeRoot(prefix) {
 
 function sha256File(filePath) {
   const hash = crypto.createHash('sha256');
-  hash.update(fs.readFileSync(filePath));
-  return hash.digest('hex');
+  const fd = fs.openSync(filePath, 'r');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let bytesRead;
+    do {
+      bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead > 0) hash.update(buffer.subarray(0, bytesRead));
+    } while (bytesRead > 0);
+    return hash.digest('hex');
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 51,
+  batchNumber: '2026-08-11-002',
+  taskRunId: 'toolbox-task-2',
+  taskKey: 'toolbox:merge',
+  moduleId: 'toolbox',
+  parentRunId: 'toolbox-parent-2',
+  operationKey: 'toolbox:merge:toolbox-task-2'
+});
+
 test.describe('toolbox output publication worker dispatch', () => {
+  test('正式发布必须携带 exact7 batchContext，恢复扫描不伪造新批次', async () => {
+    const dispatcher = createToolboxPublicationDispatcher({
+      workerScriptPath: BUSY_WORKER
+    });
+    assert.throws(
+      () => dispatcher.publish({ taskId: 'missing-context' }),
+      /batchContext 缺失/
+    );
+    assert.throws(
+      () => dispatcher.publish({
+        taskId: 'partial-context',
+        batchContext: { batchId: 1 }
+      }),
+      /batchNumber.*不能为空/
+    );
+    await dispatcher.recover({ userDataDir: 'startup-recovery' });
+  });
+
   test('FIFO 串行发布/恢复作业，同步忙 worker 不阻塞主线程 heartbeat', async () => {
     const dispatcher = createToolboxPublicationDispatcher({
       workerScriptPath: BUSY_WORKER
@@ -101,6 +139,7 @@ test.describe('toolbox output publication worker dispatch', () => {
           }],
           targets: [{ targetPath }],
           userDataDir,
+          batchContext: BATCH_CONTEXT,
           requireValidatedArtifacts: true
         }),
         (error) => {
@@ -130,6 +169,48 @@ test.describe('toolbox output publication worker dispatch', () => {
     }
   });
 
+  test('worker 在 committed 后退出时，恢复 exact7 与输出描述并向原 lifecycle 报成功', async () => {
+    const root = makeRoot('toolbox-publication-dispatch-committed-');
+    const generationDir = path.join(root, 'generation');
+    const outputDir = path.join(root, 'output');
+    const userDataDir = path.join(root, 'user-data');
+    fs.mkdirSync(generationDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
+    const sourcePath = path.join(generationDir, 'result.xlsx');
+    const targetPath = path.join(outputDir, 'result.xlsx');
+    fs.writeFileSync(sourcePath, 'generated-v2');
+    fs.writeFileSync(targetPath, 'original-v1');
+    const sourceStat = fs.statSync(sourcePath);
+    const dispatcher = createToolboxPublicationDispatcher({
+      workerScriptPath: CRASH_RECOVER_WORKER
+    });
+    try {
+      const result = await dispatcher.publish({
+        taskId: 'committed-crash-recover',
+        artifacts: [{
+          sourcePath,
+          byteSize: sourceStat.size,
+          sha256: sha256File(sourcePath),
+          fileName: 'result.xlsx'
+        }],
+        targets: [{ targetPath }],
+        userDataDir,
+        batchContext: BATCH_CONTEXT,
+        requireValidatedArtifacts: true
+      });
+      assert.equal(result.committed, true);
+      assert.equal(result.recoveredAfterWorkerExit, true);
+      assert.deepEqual(result.batchContext, BATCH_CONTEXT);
+      assert.deepEqual(
+        result.files.map((file) => [file.role, file.sourceOperation, file.filePath]),
+        [['output', 'toolbox:merge', targetPath]]
+      );
+      assert.equal(fs.readFileSync(targetPath, 'utf8'), 'generated-v2');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('transport error 必须等原 worker exit 后才启动 recovery worker', async () => {
     const events = [];
     const dispatcher = createToolboxPublicationDispatcher({
@@ -145,6 +226,7 @@ test.describe('toolbox output publication worker dispatch', () => {
         artifacts: [],
         targets: [],
         userDataDir: 'transport-recovery-root',
+        batchContext: BATCH_CONTEXT,
         onProgress(payload) {
           if (payload.checkpoint === 'start') {
             events.push(`start:${payload.context.label}`);
@@ -217,6 +299,7 @@ test.describe('toolbox output publication worker dispatch', () => {
       artifacts: [],
       targets: [],
       userDataDir: 'business-error-root',
+      batchContext: BATCH_CONTEXT,
       onProgress
     });
     const next = dispatcher.recover({
@@ -304,6 +387,7 @@ test.describe('toolbox output publication worker dispatch', () => {
         }],
         targets: [{ targetPath }],
         userDataDir,
+        batchContext: BATCH_CONTEXT,
         requireValidatedArtifacts: true
       });
       assert.equal(result.committed, true);
@@ -315,6 +399,78 @@ test.describe('toolbox output publication worker dispatch', () => {
       );
     } finally {
       clearInterval(timer);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('真实 worker 哈希 256MiB 产物期间目标 A→B，二次确认拒绝覆盖且不留 committed receipt', async () => {
+    const root = makeRoot('toolbox-publication-dispatch-confirmation-race-');
+    const generationDir = path.join(root, 'generation');
+    const outputDir = path.join(root, 'output');
+    const userDataDir = path.join(root, 'user-data');
+    fs.mkdirSync(generationDir, { recursive: true });
+    fs.mkdirSync(outputDir, { recursive: true });
+    const sourcePath = path.join(generationDir, 'large.xlsx');
+    const targetPath = path.join(outputDir, 'confirmed.xlsx');
+    const replacementPath = path.join(outputDir, 'replacement.xlsx');
+    const size = 256 * 1024 * 1024;
+    const fd = fs.openSync(sourcePath, 'w');
+    fs.ftruncateSync(fd, size);
+    fs.closeSync(fd);
+    const sha256 = sha256File(sourcePath);
+    fs.writeFileSync(targetPath, 'CONFIRMED-A');
+    const targetStat = fs.lstatSync(targetPath);
+    const expectedTargetSnapshot = {
+      exists: true,
+      snapshot: {
+        sizeBytes: targetStat.size,
+        mtimeMs: targetStat.mtimeMs,
+        ctimeMs: targetStat.ctimeMs,
+        ino: targetStat.ino
+      }
+    };
+    const dispatcher = createToolboxPublicationDispatcher({
+      workerScriptPath: DEFAULT_WORKER_ENTRY
+    });
+    let targetReplaced = false;
+    try {
+      await assert.rejects(
+        dispatcher.publish({
+          taskId: 'real-worker-confirmation-race',
+          artifacts: [{
+            sourcePath,
+            byteSize: size,
+            sha256,
+            fileName: 'confirmed.xlsx'
+          }],
+          targets: [{ targetPath, expectedTargetSnapshot }],
+          userDataDir,
+          batchContext: BATCH_CONTEXT,
+          requireValidatedArtifacts: true,
+          onProgress(payload) {
+            if (!targetReplaced
+                && payload.checkpoint === 'prepare:before-generation-inspect') {
+              fs.writeFileSync(replacementPath, 'LATEST-B');
+              fs.renameSync(replacementPath, targetPath);
+              targetReplaced = true;
+            }
+          }
+        }),
+        (error) => (
+          error && error.code === 'TOOLBOX_PUBLICATION_TARGET_CHANGED_SINCE_CONFIRMATION'
+        )
+      );
+      assert.equal(targetReplaced, true);
+      assert.equal(fs.readFileSync(targetPath, 'utf8'), 'LATEST-B');
+      const indexPath = path.join(userDataDir, 'toolbox-publish-journal-index.json');
+      if (fs.existsSync(indexPath)) {
+        assert.deepEqual(JSON.parse(fs.readFileSync(indexPath, 'utf8')).entries, []);
+      }
+      assert.deepEqual(
+        fs.readdirSync(outputDir).filter((name) => name.startsWith('.toolbox-publish-')),
+        []
+      );
+    } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

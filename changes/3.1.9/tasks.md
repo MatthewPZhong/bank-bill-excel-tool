@@ -74,7 +74,11 @@
   - [x] 本地扩大聚焦 195/195、destructive integration 77/77；blindspot/reconciliation 已复核且资金红线未由自动测试关闭。
   - [x] historical integration 机械迁移到真实 v2 Service preview/write/refetch；最终单一 `release-check`：lint/smoke、unit 4984/4984、integration 48/48 scripts 与 2385/2385 assertions 全绿。
   - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged P50/P95/WAL/main lag、`UPDATE ... FROM`/session runtime、目标生产 legacy/trigger、主体×九币种/跨月/审计/备份恢复财务复核。
-- [ ] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。
+- [x] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。
+  - [x] 独立 VCCFINOP primary scope、11 reserve/15 exclude、stable run/import/record identity 与三类导出 prepare 已接线；既有 VCCOP/toolbox 不变。
+  - [x] generic/dedicated worker required exact7、pre-critical/protected cancel、terminal CAS 和 artifact/terminal outbox 原批次代表测试完成。
+  - [x] 扩大聚焦 unit 460/460、四条 VCC integration 334/334、lint/node/diff PASS；check-vars 仅 Runtime-state review 命中；最终唯一 full 为 unit 4990/4990、integration 48/48 scripts 与 2385/2385 assertions 全绿。
+  - [ ] 用户 P0/P1 GUI、Windows/16 GB/production legacy-trigger 与主体×九币种/跨月/审计/导出资金人工验收。
 - [ ] PR3-Toolbox：工具箱独立生命周期与文件存档接线。
 - [ ] PR4：年/月/日/批次目录、hardlink/copy、repair/cleanup。
 - [ ] PR5：存储地址、marker、journal、迁移与恢复。

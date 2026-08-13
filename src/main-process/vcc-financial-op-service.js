@@ -25,6 +25,10 @@ const {
   IMPORT_CANCELLED_CODE
 } = require('../backend/vcc-financial-op/detail-importer');
 const {
+  normalizeImportBatchId,
+  storedRecordResult
+} = require('../backend/vcc-financial-op/import-service');
+const {
   operationError,
   STATE_CHANGED_CODE,
   STATE_CHANGED_MESSAGE,
@@ -50,7 +54,7 @@ const RESULT_WRITE_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-write-wo
 const IMPORT_STATUS_TEXT = Object.freeze({
   deleted: '已删除',
   success: '导入成功',
-  success_with_skips: '成功（含幂等跳过）',
+  success_with_skips: '成功（含跳过/异常过滤）',
   all_skipped: '全部幂等跳过',
   failed_conflict: '失败（幂等冲突）',
   failed_validation: '失败（校验异常）',
@@ -61,6 +65,27 @@ const DATA_STATUS_TEXT = Object.freeze({
   unprocessed: '未处理',
   archived: '已归档'
 });
+
+const SUCCESSFUL_IMPORT_STATUSES = new Set([
+  'success',
+  'success_with_skips',
+  'all_skipped'
+]);
+
+function recoverImportPartialResult(database, batchId, expectedTargetMonth) {
+  const batch = repository.getImportBatch(database.db, batchId);
+  if (!batch || (expectedTargetMonth && batch.target_month !== expectedTargetMonth)) return null;
+  const records = repository.listImportRecordsByBatch(database.db, batchId)
+    .map(storedRecordResult);
+  if (records.length === 0) return null;
+  return Object.freeze({
+    batchId,
+    targetMonth: batch.target_month,
+    status: 'error',
+    partialCommitted: records.some((record) => SUCCESSFUL_IMPORT_STATUSES.has(record.status)),
+    records: Object.freeze(records)
+  });
+}
 
 function parseJson(value, fallback) {
   if (value === null || value === undefined || value === '') return fallback;
@@ -191,6 +216,7 @@ function createVccFinancialOpService({
   writeWorkerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  publishOutputFilesFn = null,
   archiveConsistencyLogger = null,
   operationDiagnosticLogger = null,
   cancelTimeoutMs = 120000
@@ -272,6 +298,8 @@ function createVccFinancialOpService({
     const {
       workerPath = WORKER_PATH,
       createWorker = workerFactory,
+      recoverImportBatchId = null,
+      recoverImportTargetMonth = null,
       ...taskOptions
     } = options;
     const task = acquireTask(action, taskOptions);
@@ -301,7 +329,26 @@ function createVccFinancialOpService({
         if (settled) return;
         settled = true;
         if (error) {
-          try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+          if (action === 'import' && recoverImportBatchId) {
+            try {
+              repository.failImportBatch(database.db, recoverImportBatchId, {
+                errorCode: error.code || 'worker-interrupted-import',
+                message: error.message || 'VCC 财务OP导入 worker 异常退出'
+              });
+            } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+            if (!error.partialResult) {
+              try {
+                const partialResult = recoverImportPartialResult(
+                  database,
+                  recoverImportBatchId,
+                  recoverImportTargetMonth
+                );
+                if (partialResult) error.partialResult = partialResult;
+              } catch (_readError) { /* 保留 worker 主错误；下次启动继续恢复 */ }
+            }
+          } else {
+            try { repository.recoverInterruptedImports(database.db); } catch (_recoveryError) { /* 下次启动继续恢复 */ }
+          }
           releaseTask(task, { type: 'error', error });
           reject(error);
         } else {
@@ -390,7 +437,7 @@ function createVccFinancialOpService({
       normalizedPayload.expectedPreviewToken,
       payload.taskGeneration
     );
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext);
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runWorker(action, {
       ...normalizedPayload,
       batchContext: frozenBatchContext
@@ -467,11 +514,27 @@ function createVccFinancialOpService({
     return runWorker('inspect', { filePaths });
   }
 
-  async function importSelectedFiles(payload, onProgress) {
-    return runWorker('import', payload, onProgress);
+  async function importSelectedFiles(payload, onProgress, batchContext) {
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
+    const importBatchId = normalizeImportBatchId(frozenBatchContext.taskRunId);
+    if (repository.getImportBatch(database.db, importBatchId)) {
+      throw operationError(
+        'vcc-import-batch-id-conflict',
+        `VCC 导入批次号已存在，拒绝把新任务写入既有批次：${importBatchId}`
+      );
+    }
+    const targetMonth = normalizeYearMonth(payload && payload.targetMonth);
+    return runWorker('import', {
+      ...payload,
+      batchId: importBatchId,
+      batchContext: frozenBatchContext
+    }, onProgress, {
+      recoverImportBatchId: importBatchId,
+      recoverImportTargetMonth: targetMonth
+    });
   }
 
-  async function calculate(payload = {}) {
+  async function calculate(payload = {}, batchContext) {
     const targetMonth = normalizeYearMonth(payload.targetMonth);
     if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
     if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
@@ -479,7 +542,8 @@ function createVccFinancialOpService({
     }
     return runWorker('calculate', {
       targetMonth,
-      expectedInputFingerprint: payload.expectedInputFingerprint
+      expectedInputFingerprint: payload.expectedInputFingerprint,
+      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
     });
   }
 
@@ -497,7 +561,7 @@ function createVccFinancialOpService({
     return { targetMonth, ...preflightCalculation(database.db, targetMonth) };
   }
 
-  async function cancelActiveTask() {
+  async function cancelActiveTask(onCancellationAccepted = null) {
     const task = activeTask;
     if (!task) return { status: 'idle' };
     const worker = task.worker;
@@ -516,11 +580,14 @@ function createVccFinancialOpService({
     }
 
     task.cancelRequested = true;
+    if (typeof onCancellationAccepted === 'function') {
+      await onCancellationAccepted();
+    }
     try {
       worker.postMessage({ type: 'cancel' });
     } catch (_error) {
       const outcome = await completion;
-      repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
       if (outcome.type === 'result') return { status: 'completed' };
       if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
         return { status: 'cancelled', forced: false };
@@ -552,10 +619,10 @@ function createVccFinancialOpService({
         };
       }
       if (activeTask === task) await worker.terminate();
-      repository.recoverInterruptedImports(database.db);
+      if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
       return { status: 'cancelled', forced: true };
     }
-    repository.recoverInterruptedImports(database.db);
+    if (task.action !== 'import') repository.recoverInterruptedImports(database.db);
     if (outcome.type === 'result') return { status: 'completed' };
     if (outcome.error && [IMPORT_CANCELLED_CODE, 'operation-cancelled'].includes(outcome.error.code)) {
       return { status: 'cancelled', forced: false };
@@ -568,11 +635,12 @@ function createVccFinancialOpService({
     };
   }
 
-  function archive(payload = {}, onProgress) {
+  function archive(payload = {}, onProgress, batchContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
       payload,
-      onProgress
+      onProgress,
+      batchContext
     );
   }
 
@@ -580,11 +648,12 @@ function createVccFinancialOpService({
     return listAdjustmentOptionsFromDb(database.db, Number(payload.runId));
   }
 
-  function addRunAdjustment(payload = {}, onProgress) {
+  function addRunAdjustment(payload = {}, onProgress, batchContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
       payload,
-      onProgress
+      onProgress,
+      batchContext
     );
   }
 
@@ -597,7 +666,8 @@ function createVccFinancialOpService({
     };
   }
 
-  function initializeOpening(payload) {
+  function initializeOpening(payload, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('initialize-opening', () => (
       initializeOpeningBalances({
         db: database.db,
@@ -631,14 +701,14 @@ function createVccFinancialOpService({
     });
   }
 
-  function deleteDatasetData(payload = {}) {
+  function deleteDatasetData(payload = {}, onProgress, batchContext) {
     return deleteDataTargetData({
       targetMonth: payload.targetMonth,
       targetType: payload.sourceType,
       expectedPreviewToken: payload.expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    });
+    }, onProgress, batchContext);
   }
 
   async function listArchivedResultMonths(options = {}) {
@@ -678,7 +748,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-unarchive', { targetMonth: payload.targetMonth });
   }
 
-  function unarchiveMonth(payload = {}, onProgress) {
+  function unarchiveMonth(payload = {}, onProgress, batchContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -686,7 +756,7 @@ function createVccFinancialOpService({
       targetMonth: payload.targetMonth,
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration
-    }, onProgress);
+    }, onProgress, batchContext);
   }
 
   async function listDeleteTargets(payload = {}) {
@@ -700,7 +770,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-delete-target', payload);
   }
 
-  function deleteDataTargetData(payload = {}, onProgress) {
+  function deleteDataTargetData(payload = {}, onProgress, batchContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -710,7 +780,7 @@ function createVccFinancialOpService({
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    }, onProgress);
+    }, onProgress, batchContext);
   }
 
   function previewDatasetExport(payload = {}) {
@@ -723,13 +793,29 @@ function createVccFinancialOpService({
     );
   }
 
-  function exportDatasetData(payload = {}, onProgress) {
+  function exportDatasetData(payload = {}, onProgress, batchContext) {
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runWorker('export-dataset', {
       targetMonth: payload.targetMonth,
       sourceType: payload.sourceType,
       targetKind: payload.targetKind,
-      outputPath: payload.outputPath
-    }, onProgress);
+      outputPath: payload.generationOutputPath || payload.outputPath,
+      batchContext: frozenBatchContext
+    }, onProgress).then(async (result) => {
+      if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: [result.filePath],
+        targetFilePaths: [payload.outputPath],
+        targetSnapshots: payload.targetSnapshots,
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      return { ...result, filePath: path.resolve(payload.outputPath) };
+    });
   }
 
   function getImportRecordDetail({ recordId, tab = 'summary', page = 1, pageSize = 100, key = '', fileName = '' }) {
@@ -884,7 +970,8 @@ function createVccFinancialOpService({
     };
   }
 
-  function resolveRecord({ recordId, note, action }) {
+  function resolveRecord({ recordId, note, action }, batchContext) {
+    freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('resolve-import-record', () => (
       detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
         note,
@@ -947,31 +1034,71 @@ function createVccFinancialOpService({
     return latest ? getRunReview(latest.runId) : null;
   }
 
-  async function exportRun({ targetMonth, outputDirectory, outputPath }) {
+  async function exportRun(payload, batchContext) {
+    const {
+      targetMonth,
+      outputDirectory,
+      outputPath,
+      publicationStagingDirectory,
+      targetSnapshots
+    } = payload || {};
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
       const target = await getArchivedRunByMonth(targetMonth);
-      return writeRunWorkbooksFn({
+      const result = await writeRunWorkbooksFn({
         db: database.db,
         runId: target.runId,
         outputDirectory,
         outputPath,
-        assetsDir
+        assetsDir,
+        publicationStagingDirectory
       });
+      if (!result.generationFilePaths || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: result.generationFilePaths,
+        targetFilePaths: result.filePaths,
+        targetSnapshots: Array.isArray(targetSnapshots)
+          ? targetSnapshots
+          : result.filePaths.map(() => ({ exists: false })),
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      const { generationFilePaths: _generationFilePaths, ...publishedResult } = result;
+      return publishedResult;
     });
   }
 
-  async function exportImportAudit(payload) {
-    return runDirectTask('export-import-audit', () => (
-      writeImportAuditWorkbookFn({
+  async function exportImportAudit(payload, batchContext) {
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
+    return runDirectTask('export-import-audit', async () => {
+      const generationOutputPath = payload.generationOutputPath || payload.outputPath;
+      const result = await writeImportAuditWorkbookFn({
         db: database.db,
         recordId: Number(payload.recordId),
         tab: payload.tab,
-        outputPath: payload.outputPath,
+        outputPath: generationOutputPath,
         key: payload.key,
         fileName: payload.fileName
-      })
-    ));
+      });
+      if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: [result.filePath],
+        targetFilePaths: [payload.outputPath],
+        targetSnapshots: payload.targetSnapshots,
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      return { ...result, filePath: path.resolve(payload.outputPath) };
+    });
   }
 
   return {

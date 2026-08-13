@@ -564,6 +564,71 @@ test('多主体文件名清洗冲突时生成不同输出路径', async (t) => {
   assert.deepEqual(result.subjects, ['A/B', 'A:B']);
 });
 
+test('多主体后续写入失败时错误携带已发布文件供原任务批次登记', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedRun(db, ['PPHK', 'PPUS']);
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-fin-op-partial-output-'));
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true, force: true }));
+  let calls = 0;
+  let caught;
+  try {
+    await writeRunWorkbooks({
+      db,
+      runId,
+      outputDirectory,
+      assetsDir: path.resolve(__dirname, '../../../assets'),
+      writeSubjectWorkbookFn: async ({ outputPath: destination }) => {
+        calls += 1;
+        if (calls === 2) throw new Error('第二主体注入失败');
+        await fs.promises.writeFile(destination, 'first-subject-output');
+        return destination;
+      }
+    });
+  } catch (error) {
+    caught = error;
+  }
+  assert.ok(caught);
+  assert.equal(caught.partialResult.partialCommitted, true);
+  assert.equal(caught.partialResult.filePaths.length, 1);
+  assert.equal(fs.existsSync(caught.partialResult.filePaths[0]), true);
+  assert.equal(caught.partialResult.runId, runId);
+});
+
+test('durable publication 模式只写 generation 目录并返回 N 个正式目标', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedRun(db, ['PPHK', 'PPUS']);
+  const outputDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-fin-op-deferred-output-'));
+  const generationDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-fin-op-generation-'));
+  t.after(() => fs.rmSync(outputDirectory, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(generationDirectory, { recursive: true, force: true }));
+
+  const result = await writeRunWorkbooks({
+    db,
+    runId,
+    outputDirectory,
+    assetsDir: path.resolve(__dirname, '../../../assets'),
+    publicationStagingDirectory: generationDirectory,
+    writeSubjectWorkbookFn: async ({ outputPath: generationPath }) => {
+      fs.writeFileSync(generationPath, path.basename(generationPath));
+      return generationPath;
+    }
+  });
+
+  assert.equal(result.filePaths.length, 2);
+  assert.equal(result.generationFilePaths.length, 2);
+  assert.ok(result.filePaths.every((filePath) => path.dirname(filePath) === outputDirectory));
+  assert.ok(result.generationFilePaths.every(
+    (filePath) => path.dirname(filePath) === generationDirectory && fs.existsSync(filePath)
+  ));
+  assert.deepEqual(fs.readdirSync(outputDirectory), []);
+});
+
 test('自动命名导出不会覆盖目录中已有同名文件', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());

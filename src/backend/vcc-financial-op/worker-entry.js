@@ -7,6 +7,9 @@ const { inspectFiles, importFiles } = require('./import-service');
 const { calculateMonth } = require('./calculator');
 const { writeDatasetWorkbook } = require('../../main-process/vcc-financial-op-dataset-writer');
 const { serializeError } = require('../../main-process/serialize-error');
+const {
+  freezeWorkerBatchContext
+} = require('../../main-process/archive-center/worker-batch-context');
 
 let cancelRequested = false;
 
@@ -30,30 +33,38 @@ function openDb(dbPath) {
 }
 
 async function run() {
+  const action = workerData.action;
+  const rawPayload = workerData.payload || {};
+  const payload = ['import', 'calculate', 'export-dataset'].includes(action)
+    ? {
+        ...rawPayload,
+        batchContext: freezeWorkerBatchContext(rawPayload.batchContext, { required: true })
+      }
+    : rawPayload;
   const db = openDb(workerData.dbPath);
   try {
-    if (workerData.action === 'inspect') {
-      return await inspectFiles(workerData.payload.filePaths);
+    if (action === 'inspect') {
+      return await inspectFiles(payload.filePaths);
     }
-    if (workerData.action === 'import') {
+    if (action === 'import') {
       return await importFiles({
         db,
-        ...workerData.payload,
+        ...payload,
         shouldCancel: () => cancelRequested,
         onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress })
       });
     }
-    if (workerData.action === 'calculate') {
-      return calculateMonth({ db, ...workerData.payload });
+    if (action === 'calculate') {
+      return calculateMonth({ db, ...payload });
     }
-    if (workerData.action === 'export-dataset') {
+    if (action === 'export-dataset') {
       return await writeDatasetWorkbook({
         db,
-        ...workerData.payload,
+        ...payload,
         onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress })
       });
     }
-    throw new Error(`未知 VCC 财务OP worker action：${workerData.action}`);
+    throw new Error(`未知 VCC 财务OP worker action：${action}`);
   } finally {
     db.close();
   }

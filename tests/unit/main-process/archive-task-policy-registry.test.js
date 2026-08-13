@@ -105,10 +105,14 @@ test('main literal IPC 与 PR2 policy + PR3 exact handoff 精确相等', () => {
   assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
   assert.deepEqual(expected, actual);
   assert.equal(actual.length, 242);
-  assert.equal(registry.channels('reserve').length, 110);
-  assert.equal(registry.channels('exclude').length, 101);
+  assert.equal(registry.channels('reserve').length, 121);
+  assert.equal(registry.channels('exclude').length, 116);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
-  assert.equal(PR3_HANDOFF_CHANNELS.length, 29);
+  assert.deepEqual(PR3_HANDOFF_CHANNELS, [
+    'toolbox:merge',
+    'toolbox:split:export',
+    'toolbox:split:read'
+  ]);
 });
 
 test('preload 暴露集合与 main literal inventory 精确相等', () => {
@@ -260,11 +264,80 @@ test('大账号交互只让 import/complete reserve，preview/cancel 精确 excl
   );
 });
 
-test('12 个现有 primary scope 均有 reserve action，PR2 不含 VCC 财务或 toolbox', () => {
+test('13 个 primary scope 均有 reserve action，VCC财务独立于VCCOP且不含toolbox', () => {
   const reserve = createTaskPolicyRegistry().list().filter((policy) => policy.batchPolicy === 'reserve');
-  assert.equal(new Set(reserve.map((policy) => policy.scopeId)).size, 12);
-  assert.equal(reserve.some((policy) => policy.channel.startsWith('vccFinancialOp:')), false);
+  assert.equal(new Set(reserve.map((policy) => policy.scopeId)).size, 13);
+  const registry = createTaskPolicyRegistry();
+  assert.equal(registry.require('vccFinancialOp:run:calculate').scopeId, 'vcc-financial-op');
+  assert.equal(registry.require('vccOpCalc:run:save').scopeId, 'vcc-op-calc');
   assert.equal(reserve.some((policy) => policy.channel.startsWith('toolbox:')), false);
+});
+
+test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {
+  const registry = createTaskPolicyRegistry();
+  const policies = registry.list().filter((policy) => policy.channel.startsWith('vccFinancialOp:'));
+  assert.deepEqual(
+    policies.filter((policy) => policy.batchPolicy === 'reserve').map((policy) => policy.channel).sort(),
+    [
+      'vccFinancialOp:data-manager:delete',
+      'vccFinancialOp:data-manager:export',
+      'vccFinancialOp:export:import-audit',
+      'vccFinancialOp:export:result',
+      'vccFinancialOp:import:apply',
+      'vccFinancialOp:imports:resolve',
+      'vccFinancialOp:opening:initialize',
+      'vccFinancialOp:run:adjustment-add',
+      'vccFinancialOp:run:archive',
+      'vccFinancialOp:run:calculate',
+      'vccFinancialOp:run:unarchive'
+    ]
+  );
+  assert.deepEqual(
+    policies.filter((policy) => policy.batchPolicy === 'exclude').map((policy) => policy.channel).sort(),
+    [
+      'vccFinancialOp:data-manager:delete-preview',
+      'vccFinancialOp:data-manager:delete-targets',
+      'vccFinancialOp:data-manager:export-preview',
+      'vccFinancialOp:data-manager:overview',
+      'vccFinancialOp:import:pick-files',
+      'vccFinancialOp:imports:get-detail',
+      'vccFinancialOp:imports:list-months',
+      'vccFinancialOp:imports:list-records',
+      'vccFinancialOp:run:adjustment-options',
+      'vccFinancialOp:run:archived-months',
+      'vccFinancialOp:run:get',
+      'vccFinancialOp:run:latest-archived',
+      'vccFinancialOp:run:preflight',
+      'vccFinancialOp:run:unarchive-preview',
+      'vccFinancialOp:task:cancel'
+    ]
+  );
+});
+
+test('VCC财务 calculate/import 新建流程，run/record 后续动作按稳定身份续接', () => {
+  const registry = createTaskPolicyRegistry();
+  assert.equal(registry.require('vccFinancialOp:run:calculate').startsNewFlow, true);
+  assert.equal(registry.require('vccFinancialOp:import:apply').startsNewFlow, true);
+  assert.deepEqual(
+    registry.require('vccFinancialOp:run:archive').flowIdentityResolver({ args: [{ runId: 7 }] }),
+    { type: 'vcc-financial-op-run', value: '7' }
+  );
+  assert.deepEqual(
+    registry.require('vccFinancialOp:imports:resolve').flowIdentityResolver({ args: [{ recordId: 9 }] }),
+    { type: 'vcc-financial-op-import-record', value: '9' }
+  );
+  assert.deepEqual(
+    registry.require('vccFinancialOp:data-manager:delete').flowPlanResolver({
+      prepared: { targetType: 'result', runIds: [11] }
+    }),
+    { startsNewFlow: false, flowIdentity: { type: 'vcc-financial-op-run', value: '11' } }
+  );
+  assert.deepEqual(
+    registry.require('vccFinancialOp:data-manager:delete').flowPlanResolver({
+      prepared: { targetType: 'result', runIds: [11, 12] }
+    }),
+    { startsNewFlow: true, flowIdentity: null }
+  );
 });
 
 test('新 run 显式创建新 flow，带持久 runId 的后续动作显式续接', () => {
