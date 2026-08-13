@@ -1,5 +1,7 @@
 'use strict';
 
+const crypto = require('node:crypto');
+
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
 //   archive_batch_sequences 不因批次删除而回退的本地日期流水游标；
@@ -41,6 +43,9 @@ const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
 const MODULE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const MODULE_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ARCHIVE_INSTANCE_ID_SETTING_KEY = 'archive_center_instance_id';
+const ARCHIVE_STORAGE_ROOT_SETTING_KEY = 'archive_center_storage_root';
 
 let savepointSequence = 0;
 
@@ -727,6 +732,119 @@ class ArchiveRepository {
     ensureArchiveMetadataSupport(this.db);
   }
 
+  getOrCreateArchiveInstanceId() {
+    return withWriteTransaction(this.db, () => {
+      const candidate = crypto.randomUUID();
+      const timestamp = this._timestamp();
+      this.db.prepare(`
+        INSERT INTO app_settings (setting_key, setting_value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(setting_key) DO NOTHING
+      `).run(ARCHIVE_INSTANCE_ID_SETTING_KEY, candidate, timestamp);
+      const row = this.db.prepare(`
+        SELECT setting_value AS value
+        FROM app_settings
+        WHERE setting_key = ?
+      `).get(ARCHIVE_INSTANCE_ID_SETTING_KEY);
+      const instanceId = String(row && row.value || '').trim();
+      if (!UUID_RE.test(instanceId)) {
+        const error = new Error('存档实例 ID 无效，无法确认存档根所有权');
+        error.code = 'ARCHIVE_INSTANCE_ID_INVALID';
+        throw error;
+      }
+      return instanceId.toLowerCase();
+    });
+  }
+
+  commitStorageRootSwitch(payload = {}) {
+    const storageRoot = requiredText(payload.storageRoot, 'storageRoot', 4096);
+    const expectedStoredRoot = payload.expectedStoredRoot == null
+      ? null
+      : requiredText(payload.expectedStoredRoot, 'expectedStoredRoot', 4096);
+    const materializations = Array.isArray(payload.materializations)
+      ? payload.materializations
+      : [];
+    const byId = new Map();
+    for (const item of materializations) {
+      const artifactId = Number(item && item.artifactId);
+      const storageMode = requiredText(item && item.storageMode, 'storageMode', 32);
+      if (!Number.isSafeInteger(artifactId) || artifactId < 1) {
+        throw new TypeError('artifactId 必须是正安全整数');
+      }
+      if (!['hardlink', 'copy'].includes(storageMode)) {
+        throw new TypeError(`storageMode 非法：${storageMode}`);
+      }
+      if (byId.has(artifactId)) throw new TypeError(`artifactId 重复：${artifactId}`);
+      byId.set(artifactId, storageMode);
+    }
+
+    return withWriteTransaction(this.db, () => {
+      const stored = this.db.prepare(`
+        SELECT setting_value AS value
+        FROM app_settings
+        WHERE setting_key = ?
+      `).get(ARCHIVE_STORAGE_ROOT_SETTING_KEY);
+      const currentStoredRoot = stored ? String(stored.value) : null;
+      if (currentStoredRoot !== expectedStoredRoot) {
+        const error = new Error('存档根设置已变化，拒绝提交迁移');
+        error.code = 'ARCHIVE_STORAGE_ROOT_CONFLICT';
+        throw error;
+      }
+
+      const readyArtifacts = this.db.prepare(`
+        SELECT id, storage_layout_version, storage_relative_path,
+               safe_file_name, artifact_order
+        FROM archive_artifacts
+        WHERE status = 'ready'
+        ORDER BY id ASC
+      `).all();
+      if (readyArtifacts.length !== byId.size
+          || readyArtifacts.some((artifact) => !byId.has(Number(artifact.id)))) {
+        const error = new Error('目标目录化结果未覆盖全部 ready artifact');
+        error.code = 'ARCHIVE_STORAGE_MATERIALIZATION_INCOMPLETE';
+        throw error;
+      }
+      for (const artifact of readyArtifacts) {
+        if (Number(artifact.storage_layout_version) !== 2
+            || !String(artifact.storage_relative_path || '')
+            || !String(artifact.safe_file_name || '')
+            || !Number.isSafeInteger(Number(artifact.artifact_order))) {
+          const error = new Error(`ready artifact ${artifact.id} 缺少 layout v2 证据`);
+          error.code = 'ARCHIVE_STORAGE_LAYOUT_INCOMPLETE';
+          throw error;
+        }
+      }
+
+      const timestamp = this._timestamp();
+      const updateArtifact = this.db.prepare(`
+        UPDATE archive_artifacts
+        SET storage_mode = ?, materialization_error_code = NULL,
+            materialization_error_message = NULL, materialization_failed_at = NULL,
+            updated_at = ?
+        WHERE id = ? AND status = 'ready'
+      `);
+      for (const artifact of readyArtifacts) {
+        const result = updateArtifact.run(
+          byId.get(Number(artifact.id)),
+          timestamp,
+          Number(artifact.id)
+        );
+        if (result.changes !== 1) throw new Error(`ready artifact ${artifact.id} 更新失败`);
+      }
+      this.db.prepare(`
+        INSERT INTO app_settings (setting_key, setting_value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(setting_key) DO UPDATE
+        SET setting_value = excluded.setting_value,
+            updated_at = excluded.updated_at
+      `).run(ARCHIVE_STORAGE_ROOT_SETTING_KEY, storageRoot, timestamp);
+      return {
+        storageRoot,
+        materializedArtifactCount: readyArtifacts.length
+      };
+    });
+  }
+
   getBatch(batchId) {
     const row = this.db.prepare(`
       ${BATCH_SELECT}
@@ -1158,6 +1276,14 @@ class ArchiveRepository {
         AND a.materialization_failed_at IS NULL
     `).get(cursor);
     return Number(row && row.count) || 0;
+  }
+
+  listReadyArtifacts() {
+    return this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      WHERE a.status = 'ready'
+      ORDER BY a.batch_id ASC, COALESCE(a.artifact_order, a.id) ASC, a.id ASC
+    `).all().map(mapArtifact);
   }
 
   listArtifactsByBlob(blobId) {
@@ -2511,6 +2637,8 @@ function createArchiveRepository(db, options = {}) {
 }
 
 module.exports = {
+  ARCHIVE_INSTANCE_ID_SETTING_KEY,
+  ARCHIVE_STORAGE_ROOT_SETTING_KEY,
   ArchiveRepository,
   ARTIFACT_STATUSES,
   BATCH_ARCHIVE_STATUSES,

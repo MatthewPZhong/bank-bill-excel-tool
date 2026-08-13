@@ -2496,7 +2496,8 @@ function createAppUpdateSettingsDialog() {
     batches: [],
     detail: null,
     stats: null,
-    settings: { retentionDays: 60 },
+    settings: { retentionDays: 60, storageRoot: '', storageMigration: null },
+    storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 },
     savedRetentionValue: '60',
     batchFilterTimer: null
   };
@@ -2618,7 +2619,11 @@ function createAppUpdateSettingsDialog() {
 
             <div class="archive-center-settings-section">
               <h4>存储统计</h4>
-              <p class="archive-center-settings-note" data-role="archive-storage-path">存档位置：-</p>
+              <div class="archive-center-storage-location-row">
+                <p class="archive-center-settings-note" data-role="archive-storage-path">存档位置：-</p>
+                <button class="secondary-btn small" type="button" data-action="change-archive-storage">变更</button>
+              </div>
+              <p class="archive-center-settings-note" data-role="archive-storage-migration" aria-live="polite" hidden></p>
               <div class="archive-center-storage-meter" aria-label="唯一文件占逻辑文件比例">
                 <div data-role="archive-storage-meter-fill"></div>
               </div>
@@ -2672,6 +2677,9 @@ function createAppUpdateSettingsDialog() {
   const moduleFilter = dialog.querySelector('[data-filter="module"]');
   const batchIdFilter = dialog.querySelector('[data-filter="batch-id"]');
   const retentionSelect = dialog.querySelector('[data-role="archive-retention-days"]');
+  const changeStorageButton = dialog.querySelector('[data-action="change-archive-storage"]');
+  const storageMigrationText = dialog.querySelector('[data-role="archive-storage-migration"]');
+  let unsubscribeStorageMigration = null;
 
   function getArchiveCenterApi() {
     const api = window.desktopApi?.archiveCenter;
@@ -2858,8 +2866,9 @@ function createAppUpdateSettingsDialog() {
     dialog.querySelector('[data-role="archive-stat-files"]').textContent = String(
       stats.fileRefCount ?? stats.fileCount ?? stats.logicalFileCount ?? '-'
     );
-    dialog.querySelector('[data-role="archive-storage-path"]').textContent = stats.storagePath
-      ? `存档位置：${stats.storagePath}`
+    const storageRoot = archiveState.settings?.storageRoot || stats.storagePath;
+    dialog.querySelector('[data-role="archive-storage-path"]').textContent = storageRoot
+      ? `存档位置：${storageRoot}`
       : '存档位置：-';
     dialog.querySelector('[data-role="archive-storage-meter-fill"]').style.width = `${ratio}%`;
   }
@@ -2877,6 +2886,58 @@ function createAppUpdateSettingsDialog() {
     const allowedRetentionValues = new Set(['30', '60', '90', '180', '365', 'permanent']);
     archiveState.savedRetentionValue = allowedRetentionValues.has(retentionValue) ? retentionValue : '60';
     retentionSelect.value = archiveState.savedRetentionValue;
+    if (settings.storageMigration && typeof settings.storageMigration === 'object') {
+      archiveState.storageMigration = { ...settings.storageMigration };
+    }
+    renderStorageMigration();
+  }
+
+  function renderStorageMigration() {
+    const migration = archiveState.storageMigration || {};
+    const running = migration.status === 'running';
+    const cleanupPending = migration.phase === 'cleanup-pending';
+    const phases = {
+      prepared: '正在准备迁移',
+      copying: '正在复制存档内容',
+      'materializing-layout': '正在重建存档目录',
+      verifying: '正在校验迁移结果',
+      switched: '已切换存档位置',
+      'cleanup-pending': '新位置已启用，旧位置清理待重试',
+      done: '存档位置变更完成'
+    };
+    changeStorageButton.disabled = running || cleanupPending;
+    changeStorageButton.textContent = cleanupPending ? '待清理' : (running ? '变更中…' : '变更');
+    const phaseText = phases[migration.phase] || '';
+    const total = Number(migration.total) || 0;
+    const processed = Number(migration.processed) || 0;
+    storageMigrationText.hidden = !phaseText;
+    storageMigrationText.textContent = total > 0
+      ? `${phaseText}（${processed}/${total}）`
+      : phaseText;
+  }
+
+  async function changeArchiveStorageLocation() {
+    if (changeStorageButton.disabled) return;
+    changeStorageButton.disabled = true;
+    changeStorageButton.textContent = '变更中…';
+    showArchiveFeedback('请选择新的存档位置…', 'info');
+    try {
+      const result = await getArchiveCenterApi().changeStorageLocation();
+      if (result?.status === 'cancelled') {
+        showArchiveFeedback('', 'info');
+        return;
+      }
+      const cleanupPending = result?.status === 'partial'
+        && result?.code === 'ARCHIVE_STORAGE_CLEANUP_PENDING';
+      if (!cleanupPending && !verifyArchiveCenterAction(result, '存档位置变更失败')) return;
+      showArchiveFeedback(result?.message || '存档位置已变更',
+        cleanupPending ? 'error' : 'success');
+      await loadArchiveSettings();
+    } catch (error) {
+      showArchiveFeedback(`存档位置变更失败：${archiveCenterErrorText(error, '未知错误')}`);
+    } finally {
+      renderStorageMigration();
+    }
   }
 
   async function loadArchiveStats() {
@@ -3280,6 +3341,10 @@ function createAppUpdateSettingsDialog() {
     archiveState.detailRequestId += 1;
     archiveState.settingsRequestId += 1;
     setArchiveSettingsLoading(false);
+    if (unsubscribeStorageMigration) {
+      unsubscribeStorageMigration();
+      unsubscribeStorageMigration = null;
+    }
     closeModal();
   }
 
@@ -3371,6 +3436,8 @@ function createAppUpdateSettingsDialog() {
       });
     } else if (action === 'back-to-archive') {
       setArchiveSettingsOpen(false);
+    } else if (action === 'change-archive-storage') {
+      changeArchiveStorageLocation();
     } else if (action === 'open-archive-file') {
       runArchiveFileAction(button, 'open');
     } else if (action === 'save-as-archive-file') {
@@ -3385,6 +3452,15 @@ function createAppUpdateSettingsDialog() {
   });
 
   overlay.appendChild(dialog);
+  const archiveApi = window.desktopApi?.archiveCenter;
+  if (archiveApi && typeof archiveApi.onStorageMigrationProgress === 'function') {
+    unsubscribeStorageMigration = archiveApi.onStorageMigrationProgress((progress) => {
+      archiveState.storageMigration = progress && typeof progress === 'object'
+        ? { ...progress }
+        : { status: 'idle', phase: '', processed: 0, total: 0 };
+      renderStorageMigration();
+    });
+  }
   requestAnimationFrame(refreshOpenAppUpdateDialog);
   return overlay;
 }

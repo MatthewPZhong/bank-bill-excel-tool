@@ -69,6 +69,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       'archive-center:delete-batch',
       'archive-center:select-retry-sources',
       'archive-center:retry-batch',
+      'archive-center:change-storage-location',
       'archive-center:set-retention-days'
     ]) {
       assert.ok(
@@ -207,6 +208,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       ['selectRetrySources', 'archive-center:select-retry-sources'],
       ['retryBatch', 'archive-center:retry-batch'],
       ['getSettings', 'archive-center:get-settings'],
+      ['changeStorageLocation', 'archive-center:change-storage-location'],
       ['setRetentionDays', 'archive-center:set-retention-days'],
       ['getStats', 'archive-center:get-stats']
     ];
@@ -220,6 +222,10 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       );
     }
     assert.match(preload, /setLocked:\s*\(batchId, locked\)/);
+    assert.match(
+      preload,
+      /onStorageMigrationProgress:\s*\(listener\)[\s\S]*?ipcRenderer\.on\('archive-center:storage-migration-progress', wrapped\)[\s\S]*?removeListener\('archive-center:storage-migration-progress', wrapped\)/
+    );
     assert.doesNotMatch(preload, /listTemplatePolicies|setTemplateExcluded/);
     assert.doesNotMatch(main, /archive-center:(?:list-template-policies|set-template-excluded)/);
   });
@@ -249,6 +255,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       'delete-archive-batch',
       'retry-archive-batch',
       'open-archive-settings',
+      'change-archive-storage',
       'confirm-settings'
     ]) {
       assert.ok(renderer.includes(`data-action="${action}"`), `${action} 应存在`);
@@ -260,6 +267,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(renderer, /getArchiveCenterApi\(\)\.deleteBatch\(batchId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.selectRetrySources\(batchId\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.retryBatch\(batchId, sourcePaths\)/);
+    assert.match(renderer, /getArchiveCenterApi\(\)\.changeStorageLocation\(\)/);
     assert.match(renderer, /batch\.requiresBusinessRerun === true/);
     assert.match(renderer, /需要重新运行业务/);
     assert.match(preload, /retryBatch:\s*\(batchId, sourcePaths\)/);
@@ -286,7 +294,7 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.doesNotMatch(renderer, /data-action="(?:save|cancel)-archive-settings"/);
   });
 
-  test('存档设置仅保留期限与存储统计，模板不存档完全退役', () => {
+  test('存档设置显示位置、迁移进度、期限与统计，模板不存档完全退役', () => {
     for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
@@ -299,6 +307,12 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
       /api\.setRetentionDays\(\s*retentionValue === 'permanent' \? null : Number\(retentionValue\)\s*\)/
     );
     assert.match(renderer, /getArchiveCenterApi\(\)\.getStats\(\)/);
+    assert.match(renderer, /data-role="archive-storage-path"/);
+    assert.match(renderer, /data-role="archive-storage-migration"/);
+    assert.match(renderer, /migration\.status === 'running'/);
+    assert.match(renderer, /migration\.phase === 'cleanup-pending'/);
+    assert.match(renderer, /`\$\{phaseText\}（\$\{processed\}\/\$\{total\}）`/);
+    assert.match(renderer, /running \? '变更中…' : '变更'/);
     assert.doesNotMatch(renderer, /archive-template-policies|setTemplateExcluded|listTemplatePolicies/);
     assert.doesNotMatch(renderer, /网银账单生成模板|不存档/);
     assert.doesNotMatch(renderer, /锁定批次不参与自动清理。默认保留期为 90 天。|默认保留/);
@@ -406,5 +420,28 @@ test.describe('v3.0.25 设置与存档中心静态契约', () => {
     assert.match(styles, /@media \(max-width: 1120px\)/);
     assert.match(styles, /@media \(max-height: 800px\)/);
     assert.match(styles, /\.archive-center-workspace\s*\{[\s\S]*?grid-template-columns:/);
+  });
+
+  test('迁移恢复完成前，Controller、FlowResolver 与 TaskLifecycle 仅共享稳定 delegate', () => {
+    assert.match(main, /const runtimeService = createArchiveRuntimeDelegate\(/);
+    assert.match(main, /service:\s*runtimeService,[\s\S]*?storageRootManager:/);
+    assert.match(main, /createBusinessFlowResolver\(\{ archiveService: runtimeService \}\)/);
+    assert.match(main, /createTaskLifecycle\(\{[\s\S]*?archiveService: runtimeService,/);
+    assert.match(main, /runtimeDelegate:\s*runtimeService/);
+  });
+
+  test('启动放行必须等待 storage journal 恢复，失败时 delegate 保持 unavailable', () => {
+    const initStart = main.indexOf('async function runBackgroundInitChain');
+    const initEnd = main.indexOf('function markAppInitDone', initStart);
+    const initFlow = main.slice(initStart, initEnd);
+    const createIndex = initFlow.indexOf('initializeArchiveCenter()');
+    const recoveryIndex = initFlow.indexOf(
+      'await archiveCenterInitializationPromise',
+      createIndex
+    );
+    const postSetupIndex = initFlow.indexOf('runStartupPostSetup()', recoveryIndex);
+    assert.ok(createIndex >= 0 && recoveryIndex > createIndex && postSetupIndex > recoveryIndex);
+    assert.match(main, /setImmediate\(async \(\) => \{[\s\S]*?await runBackgroundInitChain\(\)/);
+    assert.match(main, /else \{[\s\S]*?await runBackgroundInitChain\(\);[\s\S]*?markAppInitDone\(\)/);
   });
 });

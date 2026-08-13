@@ -71,6 +71,15 @@ const {
   createArchiveService
 } = require('./main-process/archive-center/archive-service');
 const {
+  createArchiveRepository
+} = require('./backend/database/archive-repository');
+const {
+  createArchiveRuntimeDelegate
+} = require('./main-process/archive-center/archive-runtime-delegate');
+const {
+  createArchiveStorageRootManager
+} = require('./main-process/archive-center/storage-root-manager');
+const {
   createArchiveCenterController
 } = require('./main-process/archive-center/controller');
 const {
@@ -495,6 +504,8 @@ let vccFinancialOpService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let archiveCenterService = null;
+let archiveStorageRootManager = null;
+let archiveCenterInitializationPromise = null;
 let archiveOperationTracker = null;
 let archiveTaskLifecycle = null;
 let archiveOperationTail = Promise.resolve();
@@ -4079,6 +4090,10 @@ function registerArchiveCenterHandlers() {
     return callArchiveCenter('retryBatch', batchId, sourcePaths);
   });
   ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
+  archiveCenterMutationIpcHandle('archive-center:change-storage-location',
+    '变更存档位置',
+    () => callArchiveCenter('changeStorageLocation')
+  );
   archiveCenterMutationIpcHandle('archive-center:set-retention-days', '保存存档设置', (_event, retentionDays) => {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
@@ -4122,22 +4137,53 @@ function readPublicationRecoveryBatchIds(userDataDir) {
 
 function initializeArchiveCenter() {
   if (archiveCenterService || !database || !database.db) return archiveCenterService;
-  const archiveRoot = path.join(ensureStorageRoot(), '存档中心');
+  const archiveRoot = path.join(getStorageRoot(), '存档中心');
   const archiveOutbox = createArchiveOutboxStore(path.join(
     path.dirname(database.dbPath),
     'run-data',
     'archive-center',
     'outbox'
   ));
-  const service = createArchiveService({
+  const createService = (rootDir) => createArchiveService({
     database: database.db,
-    rootDir: archiveRoot,
+    rootDir,
     opener: (filePath) => shell.openPath(filePath),
     onSourceReleased: cleanupPositionArchiveSourcePaths
   });
+  const archiveRepository = createArchiveRepository(database.db);
+  const runtimeService = createArchiveRuntimeDelegate({
+    repository: archiveRepository,
+    rootDir: database.getSetting('archive_center_storage_root') || archiveRoot
+  });
+  archiveStorageRootManager = createArchiveStorageRootManager({
+    database,
+    repository: archiveRepository,
+    runtimeDelegate: runtimeService,
+    createService,
+    defaultRoot: archiveRoot,
+    journalPath: path.join(
+      path.dirname(database.dbPath),
+      'run-data',
+      'archive-center',
+      'storage-migration.json'
+    ),
+    blockedRoots: [
+      getAppRootDirectory(),
+      path.dirname(database.dbPath),
+      os.tmpdir()
+    ],
+    waitForArchiveOperations: () => archiveOperationTail,
+    showOpenDialog: (options) => showImportOpenDialog('archive-center-storage-location', options),
+    onProgress: (progress) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('archive-center:storage-migration-progress', progress);
+      }
+    }
+  });
   archiveCenterService = createArchiveCenterController({
     database,
-    service,
+    service: runtimeService,
+    storageRootManager: archiveStorageRootManager,
     outboxStore: archiveOutbox,
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
     resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
@@ -4166,16 +4212,16 @@ function initializeArchiveCenter() {
     }
   });
   archiveOperationTracker = createArchiveOperationTracker({ sink: archiveCenterService.sink });
-  const flowResolver = createBusinessFlowResolver({ archiveService: service });
+  const flowResolver = createBusinessFlowResolver({ archiveService: runtimeService });
   archiveTaskLifecycle = createTaskLifecycle({
     businessOperationRegistry,
-    archiveService: service,
+    archiveService: runtimeService,
     flowResolver,
     operationTracker: archiveOperationTracker,
     persistTerminalIntent: (payload) => archiveCenterService.persistTaskTerminalIntent(payload),
     onArchiveWarning: reportArchiveFailure
   });
-  archiveCenterService.initialize().catch((error) => {
+  archiveCenterInitializationPromise = archiveCenterService.initialize().catch((error) => {
     appendActivityLogEntry({
       level: 'warning',
       source: 'main',
@@ -4183,6 +4229,10 @@ function initializeArchiveCenter() {
       message: '存档中心初始化失败，业务功能继续可用',
       details: [error && error.message ? error.message : String(error)]
     });
+    if (error && error.code === 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE') {
+      return { available: false, status: 'unavailable', code: error.code };
+    }
+    throw error;
   });
   return archiveCenterService;
 }
@@ -19044,7 +19094,7 @@ function registerAllIpcHandlers() {
 //   旧时序：register/createWindow 前调用（同步完成）。
 //   本函数内所有 setImmediate 后台块 guard `if (!database || !database.db) return`——新时序下 database 已在本函数体内 init，
 //   setImmediate 回调晚于本函数同步体执行，database 已就绪。
-function runBackgroundInitChain() {
+async function runBackgroundInitChain() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
     // v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 会同步阻塞主进程（大库分钟级）——新时序下窗口已显示 loading 态，
     //   故在 database.init()（内含 VACUUM）之前发一次状态文案，让 loading 态显示「正在优化数据库…请勿关闭程序」。
@@ -19054,6 +19104,7 @@ function runBackgroundInitChain() {
     database.init();
     initializeAppUpdaterService();
     initializeArchiveCenter();
+    if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
@@ -19156,11 +19207,10 @@ if (hasSingleInstanceLock) app.whenReady()
       registerAllIpcHandlers();
       createWindow();
       // 后台 init 链：放进 setImmediate 让窗口先渲染（loading 骨架），init 完成后 send('app:init-done')。
-      //   init 链本身同步（database.init 是 DatabaseSync 同步 API），但放 setImmediate 让 createWindow 的
-      //   loadFile/ready-to-show 事件循环先跑一拍——窗口 loading 态先可见，再开始压主线程 init。
-      setImmediate(() => {
+      //   database.init 为同步 API；随后等待存档 journal 恢复。放 setImmediate 让窗口先渲染 loading 态。
+      setImmediate(async () => {
         try {
-          runBackgroundInitChain();
+          await runBackgroundInitChain();
         } catch (initErr) {
           handleStartupFailure(initErr);
           return;
@@ -19169,7 +19219,7 @@ if (hasSingleInstanceLock) app.whenReady()
       });
     } else {
       // 旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register → createWindow（v3.0.4 及之前行为）。
-      runBackgroundInitChain();
+      await runBackgroundInitChain();
       registerAllIpcHandlers();
       createWindow();
       markAppInitDone(); // 旧时序窗口建好时 init 已完；置标记保 getInfo 全量（窗口 onInitDone 监听冗余无害）

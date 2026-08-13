@@ -299,6 +299,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:task:cancel'
   ]),
   'archive-center-maintenance': Object.freeze([
+    'archive-center:change-storage-location',
     'archive-center:delete-batch',
     'archive-center:open-file',
     'archive-center:retry-batch',

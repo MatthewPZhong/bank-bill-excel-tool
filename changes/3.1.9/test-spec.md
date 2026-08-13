@@ -472,3 +472,23 @@ P0 本机手工/真实 FS 证据已按自动链顺序复核：精确目录和无
 | TB-L10 | P1 | regression | roundtrip/large/multi-sheet/rows/style | 既有格式、sheet、日期、命名、资金与行数守恒回归不变；相同 terminal matrix 不按 worker 分支复制 |
 
 自动证据：扩大聚焦 131/131、archive filter/scope/policy 38/38；五条 toolbox integration 分别 30/30、17/17、16/16、50/50、31/31 PASS。首次 focused 失败分类为两个 stale test 和一个 test design，无 production regression/environment。最终且唯一一次 `release-check` 全绿：lint/smoke PASS，unit 4999/4999（327 files），integration 48/48 scripts、2385/2385 assertions（381885ms）；首次 full 无失败、retry 或阈值放宽，runner 只在全绿后自动同步 policy。Windows packaged、Excel/WPS、约16GB/700万行、真实文件/sheet/行数/资金输出血缘仍是 PROBE/人工门禁，自动 PASS 不关闭。
+
+## 十八、PR5 存储根迁移测试矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| SR-01 | P0 | repository/FS | instance marker 与 legacy bootstrap | DB 先 conflict-safe 生成稳定 UUID；marker 精确三字段；DB 全集/hash/无 symlink 才 bootstrap；unknown/foreign 拒绝 |
+| SR-02 | P0 | migration | 正常 canonical-only 迁移 | source layout/.readonly 不复制；目标 canonical 先完成，再由 PR4 materializer 重建；逐 Blob/artifact size+SHA；setting/delegate 指向 target |
+| SR-03 | P0 | crash | 一个 precommit Blob failure | setting/source 唯一不变；journal 保留落盘 phase；重启幂等续跑，不凭遗留 layout 猜 hardlink |
+| SR-04 | P0 | crash | DB commit 后、journal switched 前 crash | setting 是唯一 truth；runtime 已同步 target；重启验证 target 后继续 cleanup，绝不回旧根 |
+| SR-05 | P0 | cleanup | post-switch 旧根 cleanup failure | 新根可打开使用；setting/delegate 不回滚；journal cleanup-pending；重启只删 DB 权威项并续跑 |
+| SR-06 | P0 | maintenance | admission/drain/root lock | 请求后新 reserve 与第二迁移被拒；等待既有 archive tail；复用 PR4 root serialization；不双写 |
+| SR-07 | P0 | availability | configured root offline | create service/mkdir 前拒绝；configured/default 均零写入；不静默 fallback |
+| SR-08 | P0 | target validation | current/ancestor/descendant/foreign marker/probe/capacity | 表驱动 fail-closed；同根 no-op；statfs/probe 失败无 fallback；容量按缺失 canonical + 无 hardlink 时缺失 artifact |
+| SR-09 | P1 | runtime/UI | Controller/Main/Preload/renderer | 共享稳定 delegate；startup journal 恢复先于 Position/post-setup；设置显示当前根、变更入口、phase/count 进度和 cleanup-pending |
+
+自动证据：repository 9/9、storage-root manager 14/14、Controller 21/21、UI/Main/Preload 静态契约 20/20 PASS；Archive/Position 相邻扩大聚焦总计 185/185 PASS。owned production JS `node --check`、lint、diff、smoke PASS；设置布局沙箱外 6/6 PASS；startup measure 建窗中位 104.876ms、进程总中位 713.855ms。首次 manager 失败分类为三项 production 边界并修复：macOS realpath alias、journal phase 回退、configured root canonical 比较；direct consumer 审计另修复 startup 未等待 journal 恢复的真实时序缺口。最终 diff 审计补齐 committed-target 先只读验证、marker 缺失不删、cleanup-pending 禁止覆盖 journal；并入原代表测试后组合 34/34 PASS。
+
+首次 full 的 lint/smoke PASS、unit 5028/5031；三条失败归为两项真实 production wiring omission：新 storage mutation IPC 的 exact exclude inventory 漏项（两条同根因），以及目录 picker 绕过 remembered dialog helper。经负责人批准最小修复后，policy/dialog/UI 定向组 55/55 PASS。第二次且最终单一 `npm run release-check` session 全绿：lint/smoke PASS，unit 5031/5031（329 files，0 fail/skip），integration 48/48 scripts、2385/2385 assertions；runner policy 仅在全绿后合法自动同步，无第三次 full 或阈值调整。
+
+仍开放 P0/P1 人工门禁：Windows installer/portable、真实系统盘到另一盘符、UNC/网络盘断连重连、长根路径、大存档进度/吞吐、迁移中退出/更新安装，以及迁移后真实打开/另存/锁定/删除/重试。⚠️ canonical/artifact SHA+size、共享引用、删除次序、真实输入输出文件血缘与资金内容必须人工复核。

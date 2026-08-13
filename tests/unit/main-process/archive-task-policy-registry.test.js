@@ -104,9 +104,9 @@ test('main literal IPC 与 PR3-Toolbox 完成后的 policy 精确相等', () => 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 242);
+  assert.equal(actual.length, 243);
   assert.equal(registry.channels('reserve').length, 123);
-  assert.equal(registry.channels('exclude').length, 117);
+  assert.equal(registry.channels('exclude').length, 118);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
   assert.deepEqual(PR3_HANDOFF_CHANNELS, []);
 });
