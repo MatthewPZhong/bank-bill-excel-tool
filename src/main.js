@@ -4145,7 +4145,9 @@ function initializeArchiveCenter() {
     recoverInterruptedTaskOwners: [
       {
         ownerName: 'Toolbox/VCC output publications',
-        recover: recoverToolboxPublicationsAtStartup
+        recover: async () => {
+          await recoverToolboxPublicationsAtStartup();
+        }
       }
     ],
     getProtectedInterruptedTaskBatchIds: () => readPublicationRecoveryBatchIds(
