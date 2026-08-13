@@ -276,3 +276,48 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - 提交前 `npm run check:vars -- --include-minor`：负责人执行 exit 0；因 HEAD+working tree 的 `src/` 无改动而 skip，零变量命中，无需关联功能 review。
 
 以下项目仍是计划/发布 PROBE，不得因上述文档检查而标记完成：PR2 人工验收、A/B/C1/C2 实现、真实 v3.1.7 fixture、目标生产库 legacy-four/trigger inspect、约 16 GB 性能、Windows packaged runtime `createSession/readOnly/query_only/UPDATE FROM` 和财务人工复核。
+
+## 12. PR2.5-A 兼容合同测试矩阵
+
+### 12.1 最小自动矩阵
+
+计划固定 10 个 top-level `node:test`；不同资金/血缘不变量使用一个 table-driven block，各一个代表，不建立组合矩阵或在 validator/classifier/SQLite 三层重复同一错误。
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| A-01 | P0 | result evidence | 合法 current 调整 | rowKey/metadata/sequence/revision/base formula/九币种全有效，effective balance 加入调整 |
+| A-02 | P0 | result evidence | 独立 violation table | revision/count、sequence 断裂、rowKey 缺失、基础行 metadata 缺失、调整 metadata、currency、base formula、九币种各一个代表 |
+| A-03 | P1 | result evidence | 稳定输入 | 数组稳定排序、同 evidence 结果确定 |
+| A-04 | P0 | classifier | current-five + adjustment | archive 按 effectiveCalculatedBalance 通过 |
+| A-05 | P0 | fixture/classifier | 真实 tag fixture → current migration | exact four、SQL NULL fingerprint、revision/adjustment/Pending 0、九币种一致，分类 legacy |
+| A-06 | P0 | fixture/classifier | 真实 fixture 副本单一 Pending fact 残留 | inconsistent/fail-closed，不改 tracked fixture |
+| A-07 | P1 | classifier | revisions JSON key order | 语义对象键序不影响 current/legacy 分类 |
+| A-08 | P0 | classifier | legacy NULL 与 empty fingerprint | NULL 通过；空字符串 inconsistent；通用 validator violation 只做一条 inconsistent 断言；base archive 反例只在 current effective 用例断言一次 |
+| A-09 | P0 | gate | 固定优先级 | inconsistent → active → unresolved → later → allowed |
+| A-10 | P0 | orthogonality | 同一 legacy contract + gate state | classifier 不变；active/unresolved/later 只改变 gate code/canUnarchive |
+
+### 12.2 Phase 0 原型证据
+
+- 首次 tag importer 三明细失败：测试工作簿方向使用中文“入/出”，真实合同只接受 `in/out`；分类为测试设计错误，修正输入后重建 temp DB 通过，生产代码未改。
+- 成功链：tag migration → inspect/import 四类 → opening balances → calculateMonth → archiveRun → close/reopen；current VCC migration → close/reopen。
+- 依赖：tag/current lock 除根版本号外等价；实际解析 xlsx 0.18.5、sax 1.6.0、yauzl 3.3.0、buffer-crc32 0.2.13、pend 1.2.0。
+- ⚠️ 本机自动证据只证明合同实现和 fixture provenance，不替代真实生产 legacy 副本、主体×九币种、跨月血缘、Windows packaged runtime、16 GB 或财务人工复核。
+
+### 12.3 执行顺序
+
+先运行三个新增测试文件的聚焦门禁并分类所有失败；收敛设计后再运行相关 `node --check`、`npm run lint`、聚焦回归、`git diff --check` 和 `check-vars`。负责人 diff review 前不运行完整 `release-check`；若后续运行导致 integration policy 自动变化，先报告并等待裁决。
+
+### 12.4 当前自动证据
+
+- 首次聚焦：10 个 top-level、含 A-02 七个 table-driven 子项，共 17/17 PASS，0 fail/skip/cancel；本轮无生产回归、陈旧测试或测试设计错误。Phase 0 首次中文方向失败已单独归类为测试设计错误。
+- sequence DTO 复核后改为从全部 raw adjustments 独立计算 `adjustmentSequenceMax/sequenceContinuous`，避免 rowKey/metadata 失败提前影响 sequence 摘要；修正后聚焦仍 17/17 PASS。
+- manifest 的 tag/commit、SQLite、依赖、schema/counts、run/revisions、主体九币种、DB SHA 与 current migration shape 均在真实 fixture 正例内校验；SQLite 变异只保留一个 Pending effective fact 反例。
+- `node --check` 覆盖四个生产模块、生成器、helper 和三个测试文件；`npm run lint`、`git diff --check`、聚焦回归均 PASS。
+- `npm run check:vars -- --include-minor` exit 2，仅 Runtime-state `state` 一项；人工核实只命中两个 reason/code 字符串，renderer 全局 `state` 定义、子字段和重渲染链零改动，无真实关联功能变化。
+- Root diff review P1 修复后，A-02 增加一个物理 NULL `source_type` 的基础行 metadata 代表，断言 builder 不抛且 validator 记录 `invalid-run-row-metadata`；A-08 同一通用 violation 断言确认 classifier 结构化归 `inconsistent`，不增加 SQLite/第二层独立用例。A-05 现有正例增加当前 generator SHA 与 manifest provenance 对比。
+- Review 修复首次聚焦 17/18；唯一失败为新增 classifier 断言错误地要求单一 reason，而基础行缺失还会真实触发 archive 金额 mismatch，属于测试设计错误。改为只断言 review 所需的 `inconsistent` 与包含 `effective-run-result-invalid`；生产分类逻辑未变。
+- 修正后聚焦 18/18 PASS，top-level 仍为 10 个；相关 `node --check`、lint、diff check 均 PASS。check-vars 结果与修复前一致，仅有 reason/code 的 Runtime-state `state` 同词命中，无代码变量变化。
+- 手工错配 `run.targetMonth` 的反例在 B loader 接线前无真实生产调用链；不增加 A 层 guard/test，B 按 `target_month/run_id` 分组时复核。
+- 完整门禁首轮 lint/smoke PASS、unit 4940/4940，integration 47/48；唯一失败是既有大文件拆分 RSS 绝对上限样本 `[150,135,135]MB` 中首项恰等于严格 `<150MB`。独立原脚本复跑 31/31，tier2 `[137,133,137]MB`；分类为环境边界采样，未修改阈值、测试或生产代码。
+- 第二轮单一 session `npm run release-check` exit 0：lint/smoke PASS；unit 4940/4940（317 files，0 fail/skip）；integration 48/48 scripts、2459/2459 assertions（311123ms）。runner 仅在全绿后自动刷新 `rules/integration-test-policy.md` §七 timestamp/timings，48/2459 不变并保留生成证据。
+- ⚠️ 自动门禁不替代真实生产 legacy 副本、主体×九币种、跨月血缘、Windows packaged runtime、16 GB 和财务人工验收。
