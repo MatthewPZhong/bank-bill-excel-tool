@@ -377,14 +377,29 @@ async function writeReportWorkbook({ db, runId, monthKey, savePath, runElapsedMs
   return { filePath: diffFilePath || savePath };
 }
 
-// fix5 + fix13：跑 run 时同步产出 diff（含末尾 summary sheet）；返回路径
-async function writeRunOutputs({ db, runId, monthKey, storageRoot, runElapsedMs }) {
-  const date = new Date();
+function planRunOutputPaths({ monthKey, storageRoot, date = new Date() }) {
   const outputDir = buildOutputDir(storageRoot, date);
   const ts = buildTimestamp(date);
-
   const diffFileName = `acquiring-bill-currency-${monthKey}-diff-${ts}.xlsx`;
   const diffSavePath = path.join(outputDir, diffFileName);
+  return {
+    diffFilePath: diffSavePath,
+    reportFilePath: diffSavePath
+  };
+}
+
+// fix5 + fix13：跑 run 时同步产出 diff（含末尾 summary sheet）；返回路径
+async function writeRunOutputs({
+  db,
+  runId,
+  monthKey,
+  storageRoot,
+  runElapsedMs,
+  outputIntent = null
+}) {
+  const planned = outputIntent || planRunOutputPaths({ monthKey, storageRoot });
+  const diffSavePath = path.resolve(String(planned.diffFilePath || ''));
+  if (!diffSavePath) throw new Error('收单差异输出缺少冻结目标路径');
 
   const diffResult = await writeDiffWorkbook({
     db, runId, monthKey,
@@ -407,6 +422,7 @@ module.exports = {
   writeDiffWorkbook,
   writeReportWorkbook,
   writeRunOutputs,
+  planRunOutputPaths,
   buildOutputDir,
   buildReportDir,
   formatRanAtLocal,

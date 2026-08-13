@@ -506,9 +506,10 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
       const B = await setupRealDb(billCount); // 多 worker
       const tempDir = mw.makeTempDir();
       try {
-        // A：单 worker（default workerCount，storageRoot 省略 → 不写盘，专注 diff_rows 一致性）
+        // A：单 worker（default workerCount，按生产合同同步发布耐久输出）
         const ra = await session.runCheckCore({
           db: A.db.db, monthKey: FIXTURE_MONTH,
+          storageRoot: A.tmpdir,
           chunkSize: 50, // 小 chunk 制造跨 chunk 边界（billCount/50 chunks）
         });
         const snapA = snapshotRun(A.db.db);
@@ -518,6 +519,7 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
         //     GroupB 就失去多 worker 覆盖）；chunkSize:50 与 A 对齐 → billCount/50 个 chunk（≥2）真正跑 M=2 并行。
         const rb = await session.runCheckCore({
           db: B.db.db, monthKey: FIXTURE_MONTH,
+          storageRoot: B.tmpdir,
           chunkSize: 50,
           workerCount: 2, dbPath: B.dbPath, tempDir,
           __forceMultiWorkerForTest: true,
@@ -557,7 +559,12 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
     const ctx = await setupRealDb(120);
     try {
       // 1) 完整单 worker run → 正确 diff 集（runId R / N 行）
-      await session.runCheckCore({ db: ctx.db.db, monthKey: FIXTURE_MONTH, chunkSize: 50 });
+      await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+        chunkSize: 50
+      });
       const snap1 = snapshotRun(ctx.db.db);
       const N = snap1.rows.length;
       const runId = snap1.runId;
@@ -576,6 +583,7 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
       // 3) resume 同 runId（单 worker，lastCompletedChunkIndex=-1 → resumeFromChunkIndex=0 全重跑）
       await session.runCheckCore({
         db: ctx.db.db, monthKey: FIXTURE_MONTH, chunkSize: 50,
+        storageRoot: ctx.tmpdir,
         resumeFromRun: { runId, lastCompletedChunkIndex: -1 },
       });
 
@@ -599,6 +607,7 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
     try {
       const r = await session.runCheckCore({
         db: ctx.db.db, monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
         workerCount: 4, // 给了 workerCount 但故意不给 dbPath → useMultiWorker=false
         chunkSize: 50,
       });
@@ -618,8 +627,19 @@ test.describe('β.1-T2 多 worker contract（Group B：runCheckCore 级 gate）'
     const A = await setupRealDb(90); // 不传 workerCount
     const B = await setupRealDb(90); // 显式 workerCount=1
     try {
-      await session.runCheckCore({ db: A.db.db, monthKey: FIXTURE_MONTH, chunkSize: 30 });
-      await session.runCheckCore({ db: B.db.db, monthKey: FIXTURE_MONTH, workerCount: 1, chunkSize: 30 });
+      await session.runCheckCore({
+        db: A.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: A.tmpdir,
+        chunkSize: 30
+      });
+      await session.runCheckCore({
+        db: B.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: B.tmpdir,
+        workerCount: 1,
+        chunkSize: 30
+      });
       const cmp = compareRows(snapshotRun(A.db.db).rows, snapshotRun(B.db.db).rows);
       assert.equal(cmp.equal, true, `default vs workerCount=1 应完全一致：${cmp.reason}`);
     } finally {

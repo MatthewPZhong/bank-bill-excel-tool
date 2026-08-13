@@ -86,7 +86,7 @@ const CLEAR_STALE_SQL = `
       AND b.month_key NOT IN (
         SELECT DISTINCT month_key FROM acquiring_bill_currency_runs
         WHERE chunk_progress IS NOT NULL
-          AND json_extract(chunk_progress, '$.status') IN ('partial', 'in-progress')
+          AND json_extract(chunk_progress, '$.status') IN ('partial', 'in-progress', 'data-complete')
       )
   )
 `;

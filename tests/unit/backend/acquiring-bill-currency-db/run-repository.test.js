@@ -457,6 +457,16 @@ test.describe('T19 — chunk_progress get/set', () => {
       runId,
       lastCompletedChunkIndex: 2,
       totalChunks: 3,
+      status: 'data-complete',
+    });
+    progress = runRepo.getRunChunkProgress(db, runId);
+    assert.equal(progress.status, 'data-complete');
+    assert.equal(progress.lastCompletedChunkIndex, 2);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 2,
+      totalChunks: 3,
       status: 'complete',
     });
     progress = runRepo.getRunChunkProgress(db, runId);
@@ -735,6 +745,22 @@ test.describe('T19 — chunk_progress get/set', () => {
     assert.strictEqual(recoverable[0].id, runId, 'T19.12.2 命中正确 runId');
     assert.strictEqual(recoverable[0].chunk_progress.status, 'in-progress', 'T19.12.3 chunk_progress.status=in-progress');
     assert.strictEqual(recoverable[0].chunk_progress.lastCompletedChunkIndex, -1, 'T19.12.4 lastCompletedChunkIndex=-1（first-chunk 未完成）');
+  });
+
+  test('T19.12b — data-complete 在 XLSX 发布前仍属于可恢复 run', () => {
+    const monthKey = '2026-04';
+    const runId = insertRun(db, monthKey, 100);
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: 2,
+      totalChunks: 3,
+      status: 'data-complete',
+      chunkSize: 100000
+    });
+    const recoverable = runRepo.listPartialRuns(db, monthKey);
+    assert.equal(recoverable.length, 1);
+    assert.equal(recoverable[0].id, runId);
+    assert.equal(recoverable[0].chunk_progress.status, 'data-complete');
   });
 
   // v2.1.10 SR-FIX-1 Round 7 I1：failureListener crash 兜底转 partial 必须透传 chunkSize（资金红线）

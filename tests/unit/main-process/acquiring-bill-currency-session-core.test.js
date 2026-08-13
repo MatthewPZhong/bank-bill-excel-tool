@@ -29,6 +29,7 @@ const ExcelJS = require('exceljs');
 const { AppDatabase } = require('../../../src/backend/database');
 const session = require('../../../src/main-process/acquiring-bill-currency-session');
 const pool = require('../../../src/main-process/run-check-worker-pool');
+const runRepo = require('../../../src/backend/acquiring-bill-currency-db/run-repository');
 const { FLOW_HEADERS, BILL_HEADERS } = require('../../../src/backend/acquiring-bill-currency-db/columns');
 
 function makeFlow(date, id, flowCcy, billCcy) {
@@ -402,10 +403,10 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       assert.equal(run.diff_file_path, null, 'cancel 在写盘前 — diff_file_path 仍为 NULL');
       assert.equal(run.report_file_path, null, 'cancel 在写盘前 — report_file_path 仍为 NULL');
 
-      // chunk_progress 应标 complete（chunked 已完整跑完，仅写盘被 cancel）
+      // 数据已完成，但 XLSX 尚未发布，不能冒充 complete。
       assert.ok(run.chunk_progress, 'chunk_progress 已写入');
       const progress = JSON.parse(run.chunk_progress);
-      assert.equal(progress.status, 'complete', 'chunked 完整 → chunk_progress.status=complete');
+      assert.equal(progress.status, 'data-complete', 'chunked 完整但输出未发布 → data-complete');
       assert.equal(progress.totalChunks, 1, 'fixture 10 行 / chunkSize 10w = 1 chunk');
       assert.equal(progress.lastCompletedChunkIndex, 0, 'chunk 0 已完成');
 
@@ -428,6 +429,174 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       (err) => err.name === 'CancelError' && err.stage === 'test-stage',
       'cancel 后 throwIfCancelled 抛 CancelError + 带 stage'
     );
+  });
+
+  test('写盘失败保留 data-complete；恢复后两份文件发布完成才切 complete', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    const writer = require('../../../src/main-process/acquiring-bill-currency-writer');
+    const originalWrite = writer.writeRunOutputs;
+    try {
+      writer.writeRunOutputs = async () => {
+        throw new Error('SIMULATED_OUTPUT_PUBLICATION_FAILURE');
+      };
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          batchContext: BATCH_CONTEXT
+        }),
+        /SIMULATED_OUTPUT_PUBLICATION_FAILURE/
+      );
+      const failedRun = ctx.db.db.prepare(
+        'SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+      ).get();
+      const failedProgress = JSON.parse(failedRun.chunk_progress);
+      assert.equal(failedRun.status, 'success-no-files');
+      assert.equal(failedProgress.status, 'data-complete');
+      assert.equal(failedRun.diff_file_path, null);
+      assert.equal(failedRun.report_file_path, null);
+      assert.ok(failedProgress.outputIntent.diffFilePath);
+      assert.equal(
+        failedProgress.outputIntent.reportFilePath,
+        failedProgress.outputIntent.diffFilePath
+      );
+      assert.equal(
+        ctx.db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_diff_rows WHERE run_id = ?')
+          .get(failedRun.id).c,
+        3
+      );
+
+      writer.writeRunOutputs = originalWrite;
+      const recovered = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+        batchContext: BATCH_CONTEXT,
+        resumeFromRun: {
+          runId: failedRun.id,
+          lastCompletedChunkIndex: failedProgress.lastCompletedChunkIndex
+        }
+      });
+      const completedRun = ctx.db.db.prepare(
+        'SELECT * FROM acquiring_bill_currency_runs WHERE id = ?'
+      ).get(failedRun.id);
+      assert.equal(JSON.parse(completedRun.chunk_progress).status, 'complete');
+      assert.equal(completedRun.status, 'success');
+      assert.equal(fs.existsSync(recovered.diffFilePath), true);
+      assert.equal(fs.existsSync(recovered.reportFilePath), true);
+      assert.equal(
+        ctx.db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_diff_rows WHERE run_id = ?')
+          .get(failedRun.id).c,
+        3,
+        '恢复只补输出，不得重复资金差异行'
+      );
+    } finally {
+      writer.writeRunOutputs = originalWrite;
+      ctx.cleanup();
+    }
+  });
+
+  test('writer 已提交后退出时 resume 复用同一耐久目标，不遗留第二份输出', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    const writer = require('../../../src/main-process/acquiring-bill-currency-writer');
+    const originalWrite = writer.writeRunOutputs;
+    let committedPath = '';
+    try {
+      writer.writeRunOutputs = async ({ outputIntent }) => {
+        committedPath = outputIntent.diffFilePath;
+        fs.writeFileSync(committedPath, 'SIMULATED_COMMITTED_XLSX');
+        throw new Error('SIMULATED_EXIT_AFTER_WRITER_COMMIT');
+      };
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          batchContext: BATCH_CONTEXT
+        }),
+        /SIMULATED_EXIT_AFTER_WRITER_COMMIT/
+      );
+      const failedRun = ctx.db.db.prepare(
+        'SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+      ).get();
+      const progress = JSON.parse(failedRun.chunk_progress);
+      assert.equal(progress.status, 'data-complete');
+      assert.equal(progress.outputIntent.diffFilePath, committedPath);
+      assert.equal(fs.existsSync(committedPath), true);
+
+      writer.writeRunOutputs = async ({ outputIntent }) => {
+        assert.equal(outputIntent.diffFilePath, committedPath);
+        fs.writeFileSync(committedPath, 'RECOVERED_XLSX');
+        return {
+          diffFilePath: committedPath,
+          reportFilePath: committedPath,
+          diffRowCount: 3,
+          segmentCount: 1,
+          segmentStats: []
+        };
+      };
+      const recovered = await session.runCheckCore({
+        db: ctx.db.db,
+        monthKey: FIXTURE_MONTH,
+        storageRoot: ctx.tmpdir,
+        batchContext: BATCH_CONTEXT,
+        resumeFromRun: {
+          runId: failedRun.id,
+          lastCompletedChunkIndex: progress.lastCompletedChunkIndex
+        }
+      });
+      assert.equal(recovered.diffFilePath, committedPath);
+      assert.equal(fs.readFileSync(committedPath, 'utf8'), 'RECOVERED_XLSX');
+      const completedProgress = JSON.parse(ctx.db.db.prepare(
+        'SELECT chunk_progress FROM acquiring_bill_currency_runs WHERE id = ?'
+      ).get(failedRun.id).chunk_progress);
+      assert.equal(completedProgress.status, 'complete');
+      const outputDir = path.dirname(committedPath);
+      assert.deepEqual(
+        fs.readdirSync(outputDir).filter((name) => name.endsWith('.xlsx')),
+        [path.basename(committedPath)]
+      );
+    } finally {
+      writer.writeRunOutputs = originalWrite;
+      ctx.cleanup();
+    }
+  });
+
+  test('路径/complete 收口失败原子回滚，run 仍为 data-complete 可恢复', async () => {
+    const ctx = await setupTmpDbWithFixture();
+    const originalComplete = runRepo.completeRunOutputPublication;
+    try {
+      runRepo.completeRunOutputPublication = (db, payload) => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          runRepo.updateRunPaths(db, payload);
+          throw new Error('SIMULATED_COMPLETE_PUBLICATION_FAILURE');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      };
+      await assert.rejects(
+        () => session.runCheckCore({
+          db: ctx.db.db,
+          monthKey: FIXTURE_MONTH,
+          storageRoot: ctx.tmpdir,
+          batchContext: BATCH_CONTEXT
+        }),
+        /SIMULATED_COMPLETE_PUBLICATION_FAILURE/
+      );
+      const run = ctx.db.db.prepare(
+        'SELECT * FROM acquiring_bill_currency_runs ORDER BY id DESC LIMIT 1'
+      ).get();
+      assert.equal(run.status, 'success-no-files');
+      assert.equal(run.diff_file_path, null);
+      assert.equal(run.report_file_path, null);
+      assert.equal(JSON.parse(run.chunk_progress).status, 'data-complete');
+    } finally {
+      runRepo.completeRunOutputPublication = originalComplete;
+      ctx.cleanup();
+    }
   });
 
   test('T13.6 — CancelError 类（name + stage 字段 + 继承 Error）', () => {

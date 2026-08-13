@@ -128,6 +128,40 @@ function updateRunStatus(db, { runId, status }) {
   db.prepare(`UPDATE ${RUNS_TABLE} SET status = ? WHERE id = ?`).run(status, runId);
 }
 
+// XLSX 已物理发布后，把路径、业务状态和可恢复进度放在同一 SQLite
+// transaction 内收口。任何一步失败都保持 data-complete，resume 可按原
+// exact-seven 批次重新生成输出，不能出现 complete + 路径空缺的中间态。
+function completeRunOutputPublication(db, {
+  runId,
+  diffFilePath,
+  reportFilePath,
+  lastCompletedChunkIndex,
+  totalChunks,
+  chunkSize
+}) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const current = getRunChunkProgress(db, runId);
+    if (!current || current.status !== 'data-complete') {
+      throw new Error('completeRunOutputPublication: 当前 run 不是 data-complete');
+    }
+    updateRunPaths(db, { runId, diffFilePath, reportFilePath });
+    updateRunStatus(db, { runId, status: 'success' });
+    setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex,
+      totalChunks,
+      status: 'complete',
+      chunkSize,
+      outputIntent: { diffFilePath, reportFilePath }
+    });
+    db.exec('COMMIT');
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* original error wins */ }
+    throw error;
+  }
+}
+
 // v2.1.8 N1：cleanup 延迟触发标志位（β 方案 — cleanup 移出对账链路）
 //   runCheck 成功后 SET=1 → app.before-quit / 进入模块时检查 → 触发清理 → 完成后 SET=0
 //   幂等：多次 SET 1 等价；mark 时不查重
@@ -499,10 +533,11 @@ async function insertDiffRowsByJoinMultiWorker(db, {
 }
 
 // v2.1.10 A4 T19 — chunk_progress 列读写 API（JSON 序列化）
-//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'complete', chunkSize? }
+//   值结构：{ lastCompletedChunkIndex, totalChunks, status: 'in-progress' | 'partial' | 'data-complete' | 'complete', chunkSize? }
 //   - in-progress: 刚开始 chunked stage 4'，totalChunks 已算出（lastCompletedChunkIndex=-1）
 //   - partial: cancel 或 crash 中途；lastCompletedChunkIndex 指向最后一个 COMMIT 的 chunk
-//   - complete: 所有 chunk 都 COMMIT 完毕
+//   - data-complete: 所有 chunk 已 COMMIT，但两份 XLSX 尚未全部发布并回填路径
+//   - complete: 所有 chunk 与两份 XLSX 都已完成
 //
 // v2.1.10 SR-FIX-1 Round 6 H4：新增 chunkSize 字段（资金红线 — 防 resume 时 chunk size 变化导致行 skip/重复）
 //   触发场景（Codex Round 5 四复审 P2 资金红线 finding）：
@@ -537,13 +572,14 @@ function setRunChunkProgress(db, {
   totalChunks,
   status,
   chunkSize,
-  batchContext
+  batchContext,
+  outputIntent
 }) {
   if (!runId || typeof runId !== 'number') {
     throw new Error('setRunChunkProgress: runId 必填');
   }
-  if (!status || !['in-progress', 'partial', 'complete'].includes(status)) {
-    throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / complete，收到：${JSON.stringify(status)}`);
+  if (!status || !['in-progress', 'partial', 'data-complete', 'complete'].includes(status)) {
+    throw new Error(`setRunChunkProgress: status 必须是 in-progress / partial / data-complete / complete，收到：${JSON.stringify(status)}`);
   }
   const payload = {
     lastCompletedChunkIndex: Number.isFinite(lastCompletedChunkIndex) ? lastCompletedChunkIndex : -1,
@@ -555,6 +591,23 @@ function setRunChunkProgress(db, {
     payload.chunkSize = chunkSize;
   }
   const existingProgress = getRunChunkProgress(db, runId);
+  const persistedOutputIntent = outputIntent === undefined
+    ? existingProgress && existingProgress.outputIntent
+    : outputIntent;
+  if (persistedOutputIntent != null) {
+    if (!persistedOutputIntent || typeof persistedOutputIntent !== 'object'
+        || Array.isArray(persistedOutputIntent)) {
+      throw new Error('setRunChunkProgress: outputIntent 格式非法');
+    }
+    const diffFilePath = String(persistedOutputIntent.diffFilePath || '').trim();
+    const reportFilePath = String(
+      persistedOutputIntent.reportFilePath || persistedOutputIntent.diffFilePath || ''
+    ).trim();
+    if (!diffFilePath || !reportFilePath) {
+      throw new Error('setRunChunkProgress: outputIntent 缺少输出路径');
+    }
+    payload.outputIntent = { diffFilePath, reportFilePath };
+  }
   const persistedBatchContext = batchContext == null
     ? readRunProgressBatchContext(existingProgress)
     : freezeWorkerBatchContext(batchContext, { required: true });
@@ -583,7 +636,7 @@ function getRunChunkProgress(db, runId) {
 //   修复后：扫该月所有可恢复 run.chunk_progress → 按 ran_at DESC 返回 → caller 取第一个
 //   性能：每月一般 1-2 个 run；扫描成本 O(N)；JSON 解析 cost 小
 //
-// v2.1.10 SR-FIX-1 Round 4 F1：扩为 partial OR in-progress 一起返回
+// v3.1.9：data-complete 也属于可恢复状态；它保留全部 DB 结果，只需重新发布输出。
 //   触发场景：first-chunk crash（onChunkDone 触发前 worker die）+ failureListener 未及时把 in-progress 兜底转 partial
 //     → chunk_progress 停留 'in-progress'（Round 3 F2 入口写入）
 //     → 用户重启后调 resume → listPartialRuns 不命中 in-progress → 无法 resume
@@ -602,8 +655,7 @@ function listPartialRuns(db, monthKey) {
   for (const row of rows) {
     try {
       const progress = JSON.parse(row.chunk_progress);
-      // v2.1.10 Round 4 F1：partial OR in-progress 均视为可恢复
-      if (progress && (progress.status === 'partial' || progress.status === 'in-progress')) {
+      if (progress && ['partial', 'in-progress', 'data-complete'].includes(progress.status)) {
         result.push({
           id: row.id,
           month_key: row.month_key,
@@ -753,6 +805,7 @@ module.exports = {
   getLatestRun,
   updateRunPaths,
   updateRunStatus,
+  completeRunOutputPublication,
   clearRunsByMonth,
   clearDiffRowsByRunId,
   insertDiffRowsByJoin,

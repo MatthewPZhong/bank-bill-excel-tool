@@ -134,6 +134,7 @@ const {
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult,
   positionRecoveryTerminalOutcome,
+  positionCancellationAcceptedPending,
   runPositionOperationLifecycle,
   settlePositionRecoveredTask,
   settlePositionArchiveResult
@@ -16212,6 +16213,48 @@ function markPositionBusinessOutcome(result) {
   }, context.operationToken);
 }
 
+function persistPositionCancellationAccepted(active) {
+  const operationToken = String(active && active.operationToken || '').trim();
+  const pending = readPositionPendingOperation();
+  if (!pending || pending.operationToken !== operationToken) {
+    throw new Error('平盘取消确认时待完成操作所有权已变化');
+  }
+  const cancellation = positionCancellationAcceptedPending(
+    pending,
+    '用户取消平盘对账导入任务'
+  );
+
+  // SQLite pending 是取消 ACK 的第一份耐久真相。即使随后主进程崩溃，
+  // startup recovery 也会把原 exact-seven 批次收口为 cancelled，而不是 failed。
+  writePositionPendingOperation(cancellation, operationToken);
+
+  // 同时把 cancelled 终态写入既有 Archive outbox；直接 CAS 或后续业务
+  // promise 尚未来得及返回时，仍能在下一次启动重放到同一 batchId。
+  const center = archiveCenterService || initializeArchiveCenter();
+  center.persistTaskTerminalIntent({
+    batchContext: cancellation.batchContext,
+    sourceOperation: String(cancellation.channel || active.channel || 'position-reconciliation'),
+    terminalOutcome: {
+      ...cancellation.terminalOutcome,
+      metadata: { positionCancellationAccepted: true },
+      afterTerminal: {
+        route: 'position-reconciliation',
+        operationToken
+      }
+    }
+  });
+
+  return archiveTaskLifecycle
+    ? archiveTaskLifecycle.cancelActive(
+        (context) => Boolean(
+          context.moduleId === 'position-reconciliation-process'
+          && context.taskRunId === operationToken
+        ),
+        cancellation.terminalOutcome.message
+      )
+    : null;
+}
+
 function markPositionArchiveDurable(archiveResult = {}) {
   const context = positionReconciliationOperationContext.getStore();
   if (!context) return;
@@ -16949,17 +16992,10 @@ function registerPositionReconciliationHandlers() {
   ipcMain.handle('position-reconciliation:import:cancel', async (_event, jobId) => {
     try {
       const active = positionReconciliationOperationActive;
-      return getPositionReconciliationService().cancelActiveImport(jobId, () => (
-        archiveTaskLifecycle && active
-          ? archiveTaskLifecycle.cancelActive(
-              (context) => Boolean(
-                context.moduleId === 'position-reconciliation-process'
-                && context.taskRunId === active.operationToken
-              ),
-              '用户取消平盘对账导入任务'
-            )
-          : null
-      ));
+      return getPositionReconciliationService().cancelActiveImport(
+        jobId,
+        () => (active ? persistPositionCancellationAccepted(active) : null)
+      );
     } catch (error) {
       return positionReconciliationFailureResult(error);
     }

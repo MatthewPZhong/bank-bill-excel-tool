@@ -551,6 +551,26 @@ function positionRecoveryTerminalOutcome(pending) {
   };
 }
 
+function positionCancellationAcceptedPending(pending, message = '用户取消平盘对账导入任务') {
+  if (!pending || typeof pending !== 'object' || Array.isArray(pending)) {
+    throw new Error('平盘取消确认缺少待完成操作');
+  }
+  const operationToken = String(pending.operationToken || '').trim();
+  const batchId = Number(pending.batchContext && pending.batchContext.batchId);
+  if (!operationToken || !Number.isSafeInteger(batchId) || batchId < 1) {
+    throw new Error('平盘取消确认缺少原任务身份');
+  }
+  return {
+    ...pending,
+    businessState: 'cancelled',
+    terminalOutcome: {
+      taskStatus: 'cancelled',
+      code: 'POSITION_OPERATION_CANCELLED',
+      message: String(message || '用户取消平盘对账导入任务')
+    }
+  };
+}
+
 async function settlePositionRecoveredTask({ pending, archiveService }) {
   const context = pending && pending.batchContext;
   const batchId = Number(context && context.batchId);
@@ -747,6 +767,7 @@ module.exports = {
   positionUncommittedRecoveryInputPaths,
   positionRecoveryArchiveFiles,
   positionRecoveryTerminalOutcome,
+  positionCancellationAcceptedPending,
   assertPositionRecoveryInputsUnchanged,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,

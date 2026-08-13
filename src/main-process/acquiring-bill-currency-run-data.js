@@ -344,7 +344,7 @@ function readResumeTarget(db, { monthKey, runId, allowCompleted = false }) {
   if (!run || !progress) {
     throw resumeError(`月份 ${monthKey} 暂无可恢复 run`);
   }
-  if (!['partial', 'in-progress'].includes(progress.status)
+  if (!['partial', 'in-progress', 'data-complete'].includes(progress.status)
       && !(allowCompleted && progress.status === 'complete')) {
     throw resumeError(`run ${run.id} 状态为 ${progress.status}，无需 resume`);
   }
@@ -498,7 +498,7 @@ function persistRunResumeBatchContext({ userDataDir, mainDb, prepared, batchCont
   }
   try {
     const current = runRepo.getRunChunkProgress(db, prepared.runId);
-    if (!current || !['partial', 'in-progress'].includes(current.status)) {
+    if (!current || !['partial', 'in-progress', 'data-complete'].includes(current.status)) {
       throw resumeError(`run ${prepared.runId} 已不可恢复`);
     }
     const currentBatchContext = runRepo.readRunProgressBatchContext(current);

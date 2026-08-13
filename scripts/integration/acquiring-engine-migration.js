@@ -72,7 +72,11 @@ async function runChild(opJsonPath, dbPath) {
       });
     }
     if (op.runCheck) {
-      const rc = await session.runCheck({ db: db.db, monthKey: op.monthKey });
+      const rc = await session.runCheck({
+        db: db.db,
+        monthKey: op.monthKey,
+        storageRoot: op.tmpdir
+      });
       out.stats = {
         totalBillRows: rc.totalBillRows,
         matchedRows: rc.matchedRows,

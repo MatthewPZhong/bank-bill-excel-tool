@@ -100,15 +100,19 @@ async function caseA_happyPath() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [flowFile] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [billFile] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
 
     assertEq(r.totalBillRows, 5, 'A.totalBillRows');
     assertEq(r.matchedRows, 5, 'A.matchedRows');
     assertEq(r.mismatchRows, 1, 'A.mismatchRows');
     assertEq(r.unmatchedRows, 0, 'A.unmatchedRows');
 
-    // v0.8 fix5：跑 run 时同步产出 diff + report；writeRunOutputs 单文件单 sheet
-    const exp = await writer.writeRunOutputs({ db: db.db, runId: r.runId, monthKey: '2026-03', storageRoot: tmpdir, runElapsedMs: 0 });
+    // runCheck 已按耐久输出意图同步产出 diff + report；直接复核正式产物。
+    const exp = {
+      diffFilePath: r.diffFilePath,
+      reportFilePath: r.reportFilePath,
+      diffRowCount: r.mismatchRows
+    };
     assertTrue(exp.diffFilePath && exp.diffFilePath.endsWith('.xlsx'), 'A.diffFilePath');
     assertEq(exp.diffRowCount, 1, 'A.diffRowCount');
     assertTrue(exp.reportFilePath && fs.existsSync(exp.reportFilePath), 'A.reportFilePath 存在');
@@ -168,7 +172,7 @@ async function caseC_billCurrencyMissing() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
     assertEq(r.mismatchRows, 1, 'C.mismatchRows');
 
     const diff = db.db.prepare('SELECT diff_type FROM acquiring_bill_currency_diff_rows').get();
@@ -190,9 +194,13 @@ async function caseD_multiFile1to1() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'billA.xlsx'), path.join(tmpdir, 'billB.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
-    // v0.8 fix5：合并所有 source_file 到单文件单 sheet
-    const exp = await writer.writeRunOutputs({ db: db.db, runId: r.runId, monthKey: '2026-03', storageRoot: tmpdir, runElapsedMs: 0 });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
+    // 合并所有 source_file 到正式单文件单 sheet 输出。
+    const exp = {
+      diffFilePath: r.diffFilePath,
+      reportFilePath: r.reportFilePath,
+      diffRowCount: r.mismatchRows
+    };
 
     assertEq(exp.diffRowCount, 1, 'D.合并后 1 差异行（来自 billA）');
     assertTrue(exp.diffFilePath && fs.existsSync(exp.diffFilePath), 'D.diff 文件存在');
@@ -219,7 +227,7 @@ async function caseE_currencyCaseNormalize() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
     assertEq(r.mismatchRows, 0, 'E.大小写/空格归一后视为一致');
   } finally {
     cleanup();
@@ -265,7 +273,7 @@ async function caseG_unmatchedNotInDiff() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
 
     assertEq(r.totalBillRows, 2, 'G.totalBillRows');
     assertEq(r.matchedRows, 1, 'G.matchedRows');
@@ -317,7 +325,7 @@ async function caseH2_overwriteImport() {
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
 
     // 跑 1 次 run，留 runs 记录（H2 验证覆盖导入不动 runs）
-    const r1 = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r1 = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
     assertEq(r1.matchedRows, 1, 'H2.先 run 一次（留 runs 记录）');
     const runsBefore = db.db.prepare('SELECT COUNT(*) AS c FROM acquiring_bill_currency_runs').get().c;
     assertEq(runsBefore, 1, 'H2.runs 表 1 条记录');
@@ -459,7 +467,7 @@ async function caseJ_settleCurrencyMatching() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
 
     assertEq(r.totalBillRows, 1, 'J.totalBillRows');
     assertEq(r.matchedRows, 1, 'J.matched=1（按 settle_currency EUR↔EUR 比对）');
@@ -481,7 +489,7 @@ async function caseK_settleCurrencyMismatch() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
     assertEq(r.mismatchRows, 1, 'K.mismatch=1');
 
     const diff = db.db.prepare('SELECT flow_currency, flow_amount_abs, diff_type FROM acquiring_bill_currency_diff_rows').get();
@@ -505,7 +513,7 @@ async function caseL_flowSettleCurrencyEmpty() {
 
     await session.importFlowFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'flow.xlsx')] });
     await session.importBillFiles({ db: db.db, monthKey: '2026-03', filePaths: [path.join(tmpdir, 'bill.xlsx')] });
-    const r = await session.runCheck({ db: db.db, monthKey: '2026-03' });
+    const r = await session.runCheck({ db: db.db, monthKey: '2026-03', storageRoot: tmpdir });
     assertEq(r.mismatchRows, 1, 'L.mismatch=1（流水侧空 ≠ 单据 EUR）');
 
     const diff = db.db.prepare('SELECT flow_currency, diff_type FROM acquiring_bill_currency_diff_rows').get();

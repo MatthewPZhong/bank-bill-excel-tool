@@ -15,6 +15,7 @@ const {
   positionRecoveryArchiveFiles,
   positionArchiveIntentEvidence,
   positionBusinessStateForResult,
+  positionCancellationAcceptedPending,
   positionPersistentStagingProtectionPaths,
   positionReconciliationFailureResult,
   runPositionOperationLifecycle,
@@ -76,6 +77,48 @@ test('用户取消导入返回 cancelled，其他异常仍返回 failed', () => 
     message: '写入失败',
     detailLines: ['detail']
   });
+});
+
+test('worker 接受取消后先把原批次 cancelled 意图写入 pending，供崩溃恢复', async () => {
+  const pending = {
+    operationToken: 'position-cancel-token',
+    channel: 'position-reconciliation:source:apply-import',
+    businessState: 'running',
+    batchContext: {
+      batchId: 91,
+      batchNumber: 'POSITION-20260813-091',
+      taskRunId: 'position-cancel-token',
+      taskKey: 'position-reconciliation:source:apply-import',
+      moduleId: 'position-reconciliation-process',
+      parentRunId: 'position-parent',
+      operationKey: 'position:position-cancel-token:source-apply'
+    }
+  };
+  const cancelled = positionCancellationAcceptedPending(pending);
+  assert.equal(cancelled.businessState, 'cancelled');
+  assert.deepEqual(cancelled.terminalOutcome, {
+    taskStatus: 'cancelled',
+    code: 'POSITION_OPERATION_CANCELLED',
+    message: '用户取消平盘对账导入任务'
+  });
+  assert.deepEqual(cancelled.batchContext, pending.batchContext);
+
+  const calls = [];
+  const settled = await settlePositionRecoveredTask({
+    pending: cancelled,
+    archiveService: {
+      async getBatch() {
+        return { ok: true, batch: { ...pending.batchContext, id: 91, taskStatus: 'running' } };
+      },
+      async cancelTaskBatch(batchId, options) {
+        calls.push({ batchId, options });
+        return { ok: true, batch: { taskStatus: 'cancelled' } };
+      }
+    }
+  });
+  assert.equal(settled.outcome.taskStatus, 'cancelled');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].batchId, 91);
 });
 
 test('暂存保护集合同时包含持久 outbox 与当前主库 pending 输入', () => {
@@ -942,7 +985,10 @@ test('异常报告与筛选结果均在 writer 前登记 output intent，取消 
   const anomalyStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:source:export-anomaly'");
   const cancelStart = mainSource.indexOf("ipcMain.handle('position-reconciliation:import:cancel'", anomalyStart);
   const filteredStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:run:export-filtered'");
-  const importResultStart = mainSource.indexOf("trackedIpcHandle(\n    'position-reconciliation:run:import-result'", filteredStart);
+  const importResultOffset = mainSource.slice(filteredStart).search(
+    /trackedIpcHandle\(\r?\n\s*'position-reconciliation:run:import-result'/
+  );
+  const importResultStart = importResultOffset < 0 ? -1 : filteredStart + importResultOffset;
   assert.ok(anomalyStart >= 0 && cancelStart > anomalyStart);
   assert.ok(filteredStart >= 0 && importResultStart > filteredStart);
   const anomaly = mainSource.slice(anomalyStart, cancelStart);
@@ -957,10 +1003,26 @@ test('异常报告与筛选结果均在 writer 前登记 output intent，取消 
       < filtered.indexOf('exportRunFilteredSources('),
     '筛选结果必须先登记 output intent 再发布'
   );
-  const cancelEnd = mainSource.indexOf("trackedIpcHandle(\n    'position-reconciliation:mappings:save'", cancelStart);
+  const cancelEndOffset = mainSource.slice(cancelStart).search(
+    /trackedIpcHandle\(\r?\n\s*'position-reconciliation:mappings:save'/
+  );
+  const cancelEnd = cancelEndOffset < 0 ? -1 : cancelStart + cancelEndOffset;
   const cancel = mainSource.slice(cancelStart, cancelEnd);
-  assert.match(cancel, /cancelActiveImport\(jobId, \(\) => \([\s\S]*archiveTaskLifecycle\.cancelActive/);
-  assert.match(cancel, /context\.taskRunId === active\.operationToken/);
+  assert.match(cancel, /cancelActiveImport\([\s\S]*persistPositionCancellationAccepted\(active\)/);
+  const persistenceStart = mainSource.indexOf('function persistPositionCancellationAccepted');
+  const persistenceEnd = mainSource.indexOf('\nfunction markPositionArchiveDurable', persistenceStart);
+  assert.ok(persistenceStart >= 0 && persistenceEnd > persistenceStart);
+  const persistence = mainSource.slice(persistenceStart, persistenceEnd);
+  assert.ok(
+    persistence.indexOf('writePositionPendingOperation(cancellation, operationToken)')
+      < persistence.indexOf('center.persistTaskTerminalIntent'),
+    '取消 ACK 必须先写主库 pending，再写 Archive terminal outbox'
+  );
+  assert.ok(
+    persistence.indexOf('center.persistTaskTerminalIntent')
+      < persistence.indexOf('archiveTaskLifecycle.cancelActive'),
+    '两份耐久意图必须先于原批次 CAS'
+  );
 });
 
 test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 grant', () => {
