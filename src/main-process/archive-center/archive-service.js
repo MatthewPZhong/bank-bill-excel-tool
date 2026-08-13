@@ -225,7 +225,7 @@ class ArchiveService {
       rootDir: this.rootDir,
       stagingDir: this.stagingDir,
       fs: this.fs,
-      linkFile: options.linkFile
+      materializeCopyFile: options.materializeCopyFile
     });
     this.initialized = false;
     this.initialization = null;
@@ -489,11 +489,14 @@ class ArchiveService {
         sha256: artifact.blob.sha256,
         sizeBytes: artifact.blob.sizeBytes
       });
-      if (layout.valid) continue;
-      this.repository.recordMaterializationFailure(artifact.id, {
-        code: layout.code,
-        message: '目录化文件缺失或损坏，等待修复'
-      });
+      const requiresIsolation = artifact.storageMode === 'hardlink';
+      if (layout.valid && !requiresIsolation) continue;
+      if (!layout.valid) {
+        this.repository.recordMaterializationFailure(artifact.id, {
+          code: layout.code,
+          message: '目录化文件缺失或损坏，等待修复'
+        });
+      }
       if (!repairInvalid) continue;
       attemptedIds.add(artifact.id);
       processed += 1;
@@ -1457,32 +1460,30 @@ class ArchiveService {
         expected
       );
       if (existing.valid) {
-        let mode = current.storageMode;
-        if (!['hardlink', 'copy'].includes(mode)) {
-          const canonicalStat = canonical.stat;
-          const layoutStat = existing.stat;
-          mode = canonicalStat.dev === layoutStat.dev && canonicalStat.ino === layoutStat.ino
-            ? 'hardlink'
-            : 'copy';
+        const sharesCanonicalInode = canonical.stat.dev === existing.stat.dev
+          && canonical.stat.ino === existing.stat.ino;
+        if (!sharesCanonicalInode && current.storageMode !== 'hardlink') {
+          const targetPath = this._resolveManagedRelative(prepared.assignment.storageRelativePath);
+          await this.fs.promises.chmod(targetPath, 0o444);
+          const completed = this.repository.completeMaterialization(current.id, {
+            ...prepared.assignment,
+            storageMode: 'copy'
+          });
+          return {
+            ok: true,
+            status: 'ready',
+            repaired: current.storageLayoutVersion !== STORAGE_LAYOUT_VERSION
+              || Boolean(current.materializationErrorCode)
+              || current.storageMode !== 'copy',
+            artifact: publicArtifact(completed.artifact),
+            batch: completed.batch,
+            storageMode: 'copy',
+            filePath: targetPath
+          };
         }
-        const targetPath = this._resolveManagedRelative(prepared.assignment.storageRelativePath);
-        await this.fs.promises.chmod(targetPath, 0o444);
-        const completed = this.repository.completeMaterialization(current.id, {
-          ...prepared.assignment,
-          storageMode: mode
-        });
-        return {
-          ok: true,
-          status: 'ready',
-          repaired: current.storageLayoutVersion !== STORAGE_LAYOUT_VERSION
-            || Boolean(current.materializationErrorCode),
-          artifact: publicArtifact(completed.artifact),
-          batch: completed.batch,
-          storageMode: mode,
-          filePath: targetPath
-        };
+        await this.materializer.remove(prepared.assignment.storageRelativePath);
       }
-      if (existing.code !== 'ARCHIVE_LAYOUT_MISSING') {
+      if (!existing.valid && existing.code !== 'ARCHIVE_LAYOUT_MISSING') {
         await this.materializer.remove(prepared.assignment.storageRelativePath);
       }
 
@@ -1785,7 +1786,7 @@ class ArchiveService {
         && (
           artifact.storageLayoutVersion !== STORAGE_LAYOUT_VERSION
           || !artifact.storageRelativePath
-          || !['hardlink', 'copy'].includes(artifact.storageMode)
+          || artifact.storageMode !== 'copy'
           || Boolean(artifact.materializationErrorCode)
         )
       ));
@@ -2146,7 +2147,7 @@ class ArchiveService {
     const expected = { sha256: artifact.blob.sha256, sizeBytes: artifact.blob.sizeBytes };
     if (artifact.storageLayoutVersion === STORAGE_LAYOUT_VERSION
         && artifact.storageRelativePath
-        && ['hardlink', 'copy'].includes(artifact.storageMode)) {
+        && artifact.storageMode === 'copy') {
       try {
         const layout = await this.materializer.verify(artifact.storageRelativePath, expected);
         if (layout.valid) {

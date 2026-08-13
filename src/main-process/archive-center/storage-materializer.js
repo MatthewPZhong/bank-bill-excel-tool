@@ -7,16 +7,6 @@ const { pipeline } = require('node:stream/promises');
 
 const { resolveManagedRelative } = require('./storage-layout');
 
-const HARDLINK_FALLBACK_CODES = new Set([
-  'EXDEV',
-  'EACCES',
-  'EPERM',
-  'ENOTSUP',
-  'EOPNOTSUPP',
-  'ENOSYS',
-  'EMLINK'
-]);
-
 class StorageMaterializationError extends Error {
   constructor(code, message, options = {}) {
     super(message);
@@ -101,7 +91,8 @@ function createStorageMaterializer(options = {}) {
   const fsModule = options.fs || fs;
   const rootDir = path.resolve(options.rootDir || '');
   const stagingDir = path.resolve(options.stagingDir || path.join(rootDir, '.staging'));
-  const linkFile = options.linkFile || ((source, target) => fsModule.promises.link(source, target));
+  const materializeCopyFile = options.materializeCopyFile
+    || ((source, target) => copyStream(source, target, fsModule));
 
   async function materialize(payload) {
     const targetPath = resolveManagedRelative(rootDir, payload.storageRelativePath);
@@ -122,16 +113,10 @@ function createStorageMaterializer(options = {}) {
     await assertNoSymlinkAncestors(fsModule, rootDir, stagingDir);
     await fsModule.promises.mkdir(stagingDir, { recursive: true });
     const stagedPath = path.join(stagingDir, `materialized-${Number(payload.artifactId)}-${crypto.randomUUID()}.part`);
-    let mode = 'hardlink';
     let targetParentCreated = false;
     try {
-      try {
-        await linkFile(canonicalPath, stagedPath);
-      } catch (error) {
-        if (!HARDLINK_FALLBACK_CODES.has(error && error.code)) throw error;
-        mode = 'copy';
-        await copyStream(canonicalPath, stagedPath, fsModule);
-      }
+      // 批次目录是用户可见副本，必须与 canonical Blob 使用独立 inode。
+      await materializeCopyFile(canonicalPath, stagedPath);
 
       const staged = await verifyFile(stagedPath, expected, fsModule);
       if (!staged.valid) {
@@ -146,7 +131,7 @@ function createStorageMaterializer(options = {}) {
       await fsModule.promises.mkdir(path.dirname(targetPath), { recursive: true });
       targetParentCreated = true;
       await fsModule.promises.rename(stagedPath, targetPath);
-      return { mode, targetPath, storageRelativePath: payload.storageRelativePath };
+      return { mode: 'copy', targetPath, storageRelativePath: payload.storageRelativePath };
     } catch (error) {
       try { await fsModule.promises.rm(stagedPath, { force: true }); } catch (_cleanupError) {}
       if (targetParentCreated) {
@@ -200,7 +185,6 @@ function createStorageMaterializer(options = {}) {
 }
 
 module.exports = {
-  HARDLINK_FALLBACK_CODES,
   StorageMaterializationError,
   createStorageMaterializer,
   hashFile,

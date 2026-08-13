@@ -157,10 +157,10 @@ test('Windows 路径预算按 UTF-16 code units 截断 emoji，过长根路径 f
   );
 });
 
-test('真实 hardlink 物化后大小/hash一致且共享 inode 只读', async () => {
+test('目录化始终生成独立 copy，大小/hash一致且只读', async () => {
   const current = fixture();
   try {
-    const content = Buffer.from('hardlink-content');
+    const content = Buffer.from('isolated-copy-content');
     const canonicalPath = path.join(current.rootDir, 'blobs', 'canonical');
     fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
     fs.writeFileSync(canonicalPath, content);
@@ -173,10 +173,10 @@ test('真实 hardlink 物化后大小/hash一致且共享 inode 只读', async (
       sizeBytes: content.length
     });
 
-    assert.equal(result.mode, 'hardlink');
+    assert.equal(result.mode, 'copy');
     const canonicalStat = fs.statSync(canonicalPath);
     const targetStat = fs.statSync(result.targetPath);
-    assert.equal(canonicalStat.ino, targetStat.ino);
+    assert.notEqual(canonicalStat.ino, targetStat.ino);
     assert.equal(targetStat.mode & 0o222, 0);
     assert.equal((await verifyFile(result.targetPath, {
       sha256: hash(content),
@@ -187,39 +187,7 @@ test('真实 hardlink 物化后大小/hash一致且共享 inode 只读', async (
   }
 });
 
-test('hardlink 真实能力错误才降级为流式 copy，校验后文件只读', async () => {
-  const current = fixture();
-  try {
-    const content = Buffer.from('copy-content');
-    const canonicalPath = path.join(current.rootDir, 'blobs', 'canonical');
-    fs.mkdirSync(path.dirname(canonicalPath), { recursive: true });
-    fs.writeFileSync(canonicalPath, content);
-    const materializer = createStorageMaterializer({
-      ...current,
-      async linkFile() {
-        const error = new Error('cross device');
-        error.code = 'EXDEV';
-        throw error;
-      }
-    });
-    const result = await materializer.materialize({
-      artifactId: 2,
-      canonicalPath,
-      storageRelativePath: '2026/2026-08/2026-08-11/2026-08-11-002/output.xlsx',
-      sha256: hash(content),
-      sizeBytes: content.length
-    });
-
-    assert.equal(result.mode, 'copy');
-    assert.notEqual(fs.statSync(canonicalPath).ino, fs.statSync(result.targetPath).ino);
-    assert.equal(fs.statSync(result.targetPath).mode & 0o222, 0);
-    assert.equal(fs.readFileSync(result.targetPath, 'utf8'), 'copy-content');
-  } finally {
-    current.close();
-  }
-});
-
-test('非 hardlink 能力错误不 fallback，失败后不留下空业务目录', async () => {
+test('独立 copy 的 I/O 错误 fail-closed，失败后不留下空业务目录', async () => {
   const current = fixture();
   try {
     const content = Buffer.from('must-not-copy');
@@ -228,7 +196,7 @@ test('非 hardlink 能力错误不 fallback，失败后不留下空业务目录'
     fs.writeFileSync(canonicalPath, content);
     const materializer = createStorageMaterializer({
       ...current,
-      async linkFile() {
+      async materializeCopyFile() {
         const error = new Error('io failure');
         error.code = 'EIO';
         throw error;
@@ -330,15 +298,15 @@ test('无 ready artifact 不建业务目录，后续同批输入输出按真实�
 });
 
 test('目录化能力失败保留 ready Blob，读取时对同 artifact 修复且不新建批次', async () => {
-  let linkUnavailable = true;
+  let copyUnavailable = true;
   const current = serviceFixture({
-    async linkFile(source, target) {
-      if (linkUnavailable) {
+    async materializeCopyFile(source, target) {
+      if (copyUnavailable) {
         const error = new Error('io failure');
         error.code = 'EIO';
         throw error;
       }
-      return fs.promises.link(source, target);
+      return fs.promises.copyFile(source, target, fs.constants.COPYFILE_EXCL);
     }
   });
   try {
@@ -352,7 +320,7 @@ test('目录化能力失败保留 ready Blob，读取时对同 artifact 修复�
     assert.equal(fs.existsSync(path.join(current.rootDir, '2026')), false);
     assert.equal(current.service.repository.listBatches().length, 1);
 
-    linkUnavailable = false;
+    copyUnavailable = false;
     const opened = await current.service.openReadonlyCopy(archived.artifact.id);
     assert.equal(opened.ok, true);
     assert.equal(fs.readFileSync(opened.filePath, 'utf8'), 'repair-source');
@@ -368,13 +336,7 @@ test('目录化能力失败保留 ready Blob，读取时对同 artifact 修复�
 });
 
 test('copy materialized 被篡改后从 valid canonical 修复，artifact/Blob identity 不变', async () => {
-  const current = serviceFixture({
-    async linkFile() {
-      const error = new Error('cross device');
-      error.code = 'EXDEV';
-      throw error;
-    }
-  });
+  const current = serviceFixture();
   try {
     const sourcePath = current.writeSource('copy.xlsx', 'copy-original');
     const archived = await current.service.archiveFile(archivePayload('copy-repair', sourcePath));
@@ -400,37 +362,65 @@ test('copy materialized 被篡改后从 valid canonical 修复，artifact/Blob i
   }
 });
 
-test('hardlink/canonical 同 inode 污染按 DB hash fail-closed，只能从可信源重试', async () => {
+test('修改一个批次目录 copy 不污染 canonical 或复用同 Blob 的其它批次', async () => {
   const current = serviceFixture();
   try {
-    const original = 'hardlink-original';
-    const sourcePath = current.writeSource('hardlink.xlsx', original);
-    const archived = await current.service.archiveFile(archivePayload('hardlink-tamper', sourcePath));
-    const before = current.service.repository.getArtifact(archived.artifact.id);
-    const layoutPath = path.join(current.rootDir, ...before.storageRelativePath.split('/'));
-    const canonicalPath = path.join(current.rootDir, ...before.blob.relativePath.split('/'));
-    assert.equal(fs.statSync(layoutPath).ino, fs.statSync(canonicalPath).ino);
+    const original = 'isolated-original';
+    const firstSource = current.writeSource('first.xlsx', original);
+    const secondSource = current.writeSource('second.xlsx', original);
+    const first = await current.service.archiveFile(archivePayload('copy-isolation-1', firstSource));
+    const second = await current.service.archiveFile(archivePayload('copy-isolation-2', secondSource));
+    const firstArtifact = current.service.repository.getArtifact(first.artifact.id);
+    const secondArtifact = current.service.repository.getArtifact(second.artifact.id);
+    const firstLayout = path.join(current.rootDir, ...firstArtifact.storageRelativePath.split('/'));
+    const secondLayout = path.join(current.rootDir, ...secondArtifact.storageRelativePath.split('/'));
+    const canonicalPath = path.join(current.rootDir, ...firstArtifact.blob.relativePath.split('/'));
+    assert.equal(firstArtifact.blobId, secondArtifact.blobId);
+    assert.notEqual(fs.statSync(firstLayout).ino, fs.statSync(canonicalPath).ino);
+    assert.notEqual(fs.statSync(secondLayout).ino, fs.statSync(canonicalPath).ino);
+
+    fs.chmodSync(firstLayout, 0o644);
+    fs.writeFileSync(firstLayout, 'x'.repeat(Buffer.byteLength(original)));
+    assert.equal(fs.readFileSync(canonicalPath, 'utf8'), original);
+    assert.equal(fs.readFileSync(secondLayout, 'utf8'), original);
+
+    const opened = await current.service.openReadonlyCopy(firstArtifact.id);
+    assert.equal(opened.ok, true);
+    assert.equal(fs.readFileSync(opened.filePath, 'utf8'), original);
+    assert.equal(fs.readFileSync(canonicalPath, 'utf8'), original);
+    assert.equal(fs.readFileSync(secondLayout, 'utf8'), original);
+  } finally {
+    current.close();
+  }
+});
+
+test('历史 hardlink 在启动扫描时脱钩为独立 copy', async () => {
+  const current = serviceFixture();
+  try {
+    const original = 'legacy-hardlink';
+    const sourcePath = current.writeSource('legacy-hardlink.xlsx', original);
+    const archived = await current.service.archiveFile(archivePayload('legacy-hardlink', sourcePath));
+    const artifact = current.service.repository.getArtifact(archived.artifact.id);
+    const layoutPath = path.join(current.rootDir, ...artifact.storageRelativePath.split('/'));
+    const canonicalPath = path.join(current.rootDir, ...artifact.blob.relativePath.split('/'));
     fs.chmodSync(layoutPath, 0o644);
-    fs.writeFileSync(layoutPath, 'x'.repeat(Buffer.byteLength(original)));
+    fs.rmSync(layoutPath);
+    fs.linkSync(canonicalPath, layoutPath);
+    current.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink' WHERE id = ?`)
+      .run(artifact.id);
+    assert.equal(fs.statSync(layoutPath).ino, fs.statSync(canonicalPath).ino);
 
-    const opened = await current.service.openReadonlyCopy(before.id);
-    assert.equal(opened.ok, false);
-    assert.equal(opened.code, 'ARCHIVE_BLOB_INVALID');
-    const invalid = current.service.repository.getArtifact(before.id);
-    assert.equal(invalid.status, 'failed');
-    assert.equal(invalid.blob, null);
-    assert.equal(fs.existsSync(layoutPath), false);
-    assert.equal(fs.existsSync(canonicalPath), false);
-
-    const retried = await current.service.retryBatch(before.batchId);
-    assert.equal(retried.ok, true);
-    const repaired = current.service.repository.getArtifact(before.id);
-    assert.equal(repaired.id, before.id);
-    assert.equal(repaired.blob.sha256, hash(original));
-    assert.equal(fs.readFileSync(
-      path.join(current.rootDir, ...repaired.storageRelativePath.split('/')),
-      'utf8'
-    ), original);
+    const restarted = createArchiveService({
+      database: current.db,
+      rootDir: current.rootDir,
+      startupMaterializationBatchSize: 1
+    });
+    const initialized = await restarted.initialize({ startBackgroundMaterialization: false });
+    assert.equal(initialized.available, true);
+    assert.equal(restarted.repository.getArtifact(artifact.id).storageMode, 'copy');
+    assert.notEqual(fs.statSync(layoutPath).ino, fs.statSync(canonicalPath).ino);
+    assert.equal(fs.readFileSync(layoutPath, 'utf8'), original);
+    assert.equal(fs.readFileSync(canonicalPath, 'utf8'), original);
   } finally {
     current.close();
   }
