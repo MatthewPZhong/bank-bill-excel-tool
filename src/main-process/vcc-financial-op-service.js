@@ -216,6 +216,7 @@ function createVccFinancialOpService({
   writeWorkerFactory = (filename, options) => new Worker(filename, options),
   writeRunWorkbooksFn = writeRunWorkbooks,
   writeImportAuditWorkbookFn = writeImportAuditWorkbook,
+  publishOutputFilesFn = null,
   archiveConsistencyLogger = null,
   operationDiagnosticLogger = null,
   cancelTimeoutMs = 120000
@@ -793,13 +794,28 @@ function createVccFinancialOpService({
   }
 
   function exportDatasetData(payload = {}, onProgress, batchContext) {
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runWorker('export-dataset', {
       targetMonth: payload.targetMonth,
       sourceType: payload.sourceType,
       targetKind: payload.targetKind,
-      outputPath: payload.outputPath,
-      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
-    }, onProgress);
+      outputPath: payload.generationOutputPath || payload.outputPath,
+      batchContext: frozenBatchContext
+    }, onProgress).then(async (result) => {
+      if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: [result.filePath],
+        targetFilePaths: [payload.outputPath],
+        targetSnapshots: payload.targetSnapshots,
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      return { ...result, filePath: path.resolve(payload.outputPath) };
+    });
   }
 
   function getImportRecordDetail({ recordId, tab = 'summary', page = 1, pageSize = 100, key = '', fileName = '' }) {
@@ -1018,33 +1034,71 @@ function createVccFinancialOpService({
     return latest ? getRunReview(latest.runId) : null;
   }
 
-  async function exportRun({ targetMonth, outputDirectory, outputPath }, batchContext) {
-    freezeWorkerBatchContext(batchContext, { required: true });
+  async function exportRun(payload, batchContext) {
+    const {
+      targetMonth,
+      outputDirectory,
+      outputPath,
+      publicationStagingDirectory,
+      targetSnapshots
+    } = payload || {};
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
       const target = await getArchivedRunByMonth(targetMonth);
-      return writeRunWorkbooksFn({
+      const result = await writeRunWorkbooksFn({
         db: database.db,
         runId: target.runId,
         outputDirectory,
         outputPath,
-        assetsDir
+        assetsDir,
+        publicationStagingDirectory
       });
+      if (!result.generationFilePaths || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: result.generationFilePaths,
+        targetFilePaths: result.filePaths,
+        targetSnapshots: Array.isArray(targetSnapshots)
+          ? targetSnapshots
+          : result.filePaths.map(() => ({ exists: false })),
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      const { generationFilePaths: _generationFilePaths, ...publishedResult } = result;
+      return publishedResult;
     });
   }
 
   async function exportImportAudit(payload, batchContext) {
-    freezeWorkerBatchContext(batchContext, { required: true });
-    return runDirectTask('export-import-audit', () => (
-      writeImportAuditWorkbookFn({
+    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
+    return runDirectTask('export-import-audit', async () => {
+      const generationOutputPath = payload.generationOutputPath || payload.outputPath;
+      const result = await writeImportAuditWorkbookFn({
         db: database.db,
         recordId: Number(payload.recordId),
         tab: payload.tab,
-        outputPath: payload.outputPath,
+        outputPath: generationOutputPath,
         key: payload.key,
         fileName: payload.fileName
-      })
-    ));
+      });
+      if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
+      await publishOutputFilesFn({
+        batchContext: frozenBatchContext,
+        generationFilePaths: [result.filePath],
+        targetFilePaths: [payload.outputPath],
+        targetSnapshots: payload.targetSnapshots,
+        onDurableHandoff: (publication) => (
+          typeof payload.onDurableHandoff === 'function'
+            ? payload.onDurableHandoff(publication, result)
+            : undefined
+        )
+      });
+      return { ...result, filePath: path.resolve(payload.outputPath) };
+    });
   }
 
   return {

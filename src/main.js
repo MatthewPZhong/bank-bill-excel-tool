@@ -257,6 +257,9 @@ const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session')
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const { vccFinancialOpErrorResult } = require('./main-process/vcc-financial-op-ipc');
+const {
+  publishVccFinancialOpOutputs
+} = require('./main-process/vcc-financial-op-output-recovery');
 // v2.1.12 流式改造（spec §9）：reader 改 exceljs 流式后，由 session.streamScanAndCompute 内部调用，main 不再直接 import
 const { runAllScenarios, C4_CATEGORIES } = require('./main-process/scenario-dispatcher');
 // v2.1.16-beta.2 T1：5 轮对账编排器（R1→R5；bank-statement:run 接入，dispatcher 仅作 R2）
@@ -328,6 +331,12 @@ const {
   publishToolboxPublicationAsync,
   recoverToolboxPublicationsAsync
 } = require('./main-process/toolbox-output-publication-dispatch');
+const {
+  JOURNAL_INDEX_NAME
+} = require('./main-process/toolbox-output-publication');
+const {
+  recoverToolboxPublicationsIntoArchive
+} = require('./main-process/toolbox-archive-recovery');
 const {
   exportToolboxFilter,
   exportToolboxMultiFilters,
@@ -520,6 +529,20 @@ function getVccFinancialOpService() {
       assetsDir: path.join(__dirname, '../assets'),
       appVersion: pkg.version,
       buildSha: buildInfo.commit,
+      publishOutputFilesFn: (payload) => publishVccFinancialOpOutputs({
+        ...payload,
+        userDataDir: app.getPath('userData'),
+        archiveCenter: archiveCenterService,
+        onHandoffPending: (error) => {
+          appendActivityLogEntry({
+            level: 'error',
+            source: 'main',
+            domain: 'vcc-financial-op',
+            message: 'VCC 正式输出已提交，但存档接管待重试',
+            details: [error && error.message ? error.message : String(error)]
+          });
+        }
+      }),
       archiveConsistencyLogger: ({ targetMonth, consistencyReasons }) => {
         appendActivityLogEntry({
           level: 'warning',
@@ -4063,6 +4086,36 @@ function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
   ipcMain.handle(channel, runRegisteredBusinessOperation(meta, handler));
 }
 
+function readPublicationRecoveryBatchIds(userDataDir) {
+  const indexPath = path.join(userDataDir, JOURNAL_INDEX_NAME);
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return { batchIds: [], sweepUnsafe: false };
+    }
+    return { batchIds: [], sweepUnsafe: true, error };
+  }
+  if (!parsed || !Array.isArray(parsed.entries)) {
+    return {
+      batchIds: [],
+      sweepUnsafe: true,
+      error: new Error(`输出发布恢复索引结构无效：${indexPath}`)
+    };
+  }
+  const batchIds = new Set();
+  for (const entry of parsed.entries) {
+    try {
+      const context = freezeWorkerBatchContext(entry && entry.batchContext, { required: true });
+      batchIds.add(context.batchId);
+    } catch (error) {
+      return { batchIds: [], sweepUnsafe: true, error };
+    }
+  }
+  return { batchIds: [...batchIds], sweepUnsafe: false };
+}
+
 function initializeArchiveCenter() {
   if (archiveCenterService || !database || !database.db) return archiveCenterService;
   const archiveRoot = path.join(ensureStorageRoot(), '存档中心');
@@ -4085,6 +4138,19 @@ function initializeArchiveCenter() {
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
     resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
     onTerminalIntentFlushed: finalizePositionTerminalIntent,
+    recoverInterruptedTaskOwners: [
+      {
+        ownerName: 'VCC output publications',
+        recover: async () => recoverToolboxPublicationsIntoArchive({
+          userDataDir: app.getPath('userData'),
+          archiveCenter: archiveCenterService,
+          recoverPublications: recoverToolboxPublicationsAsync
+        })
+      }
+    ],
+    getProtectedInterruptedTaskBatchIds: () => readPublicationRecoveryBatchIds(
+      app.getPath('userData')
+    ),
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {

@@ -1892,6 +1892,44 @@ class ArchiveRepository {
     });
   }
 
+  markInterruptedTasks(options = {}) {
+    const excludedBatchIds = new Set(
+      (Array.isArray(options.excludeBatchIds) ? options.excludeBatchIds : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isSafeInteger(value) && value > 0)
+    );
+    const rows = this.db.prepare(`
+      SELECT id
+      FROM archive_batches
+      WHERE task_status IN ('reserved', 'running')
+      ORDER BY id
+    `).all().filter((row) => !excludedBatchIds.has(Number(row.id)));
+    if (rows.length === 0) return { taskCount: 0, batchIds: [] };
+    const timestamp = this._timestamp();
+    const code = 'ARCHIVE_TASK_INTERRUPTED';
+    const message = '应用上次异常退出时任务尚未结束，已安全终结；可从原业务入口重新执行';
+    return withWriteTransaction(this.db, () => {
+      const batchIds = [];
+      const update = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = 'failed',
+            finished_at = ?,
+            failure_code = ?,
+            failure_message = ?,
+            updated_at = ?
+        WHERE id = ? AND task_status IN ('reserved', 'running')
+      `);
+      for (const row of rows) {
+        const batchId = Number(row.id);
+        const changed = update.run(timestamp, code, message, timestamp, batchId);
+        if (Number(changed.changes) !== 1) continue;
+        batchIds.push(batchId);
+        this._refreshBatchStatus(batchId, timestamp, { emptyIsComplete: true });
+      }
+      return { taskCount: batchIds.length, batchIds };
+    });
+  }
+
   deleteBatch(batchId, options = {}) {
     const id = Number(batchId);
     const allowLocked = options.allowLocked === true;

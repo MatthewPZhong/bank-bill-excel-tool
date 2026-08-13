@@ -18,6 +18,15 @@ const {
 } = require('../../src/main-process/toolbox-output-publication');
 
 const tmpDirs = [];
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 91,
+  batchNumber: '2026-08-12-001',
+  taskRunId: 'toolbox-publication-91',
+  taskKey: 'toolbox:merge',
+  moduleId: 'toolbox',
+  parentRunId: 'toolbox-parent-91',
+  operationKey: 'toolbox:merge:toolbox-publication-91'
+});
 
 test.after(() => {
   for (const dir of tmpDirs) {
@@ -88,6 +97,69 @@ function recoverInFreshProcess(userDataDir) {
 }
 
 test.describe('toolbox output publication', () => {
+  test('输出目标别名输入源时在任何正式覆盖前 fail-closed', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.outputDir, 'source.xlsx'), 'source');
+    const generated = writeFile(path.join(ctx.generationDir, 'result.xlsx'), 'result');
+    const sourceLink = path.join(ctx.outputDir, 'source-link.xlsx');
+    fs.symlinkSync(source, sourceLink);
+
+    assert.throws(
+      () => prepareToolboxPublication({
+        taskId: 'target-aliases-source',
+        artifacts: [validatedArtifact(generated)],
+        targets: [{ targetPath: source }],
+        protectedSourcePaths: [sourceLink],
+        batchContext: BATCH_CONTEXT,
+        userDataDir: ctx.userDataDir,
+        requireValidatedArtifacts: true
+      }),
+      (error) => error && error.code === 'TOOLBOX_PUBLICATION_TARGET_ALIASES_SOURCE'
+    );
+    assert.equal(fs.readFileSync(source, 'utf8'), 'source');
+    assert.deepEqual(taskFiles(ctx), []);
+  });
+
+  test('覆盖确认后的 absent→created 与 existing→changed 均在 publication 快照前拒绝', () => {
+    for (const initiallyExists of [false, true]) {
+      const ctx = makeContext();
+      const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
+      const target = path.join(ctx.outputDir, 'target.xlsx');
+      let expectedTargetSnapshot = { exists: false };
+      if (initiallyExists) {
+        fs.writeFileSync(target, 'confirmed');
+        const stat = fs.lstatSync(target);
+        expectedTargetSnapshot = {
+          exists: true,
+          snapshot: {
+            sizeBytes: stat.size,
+            mtimeMs: stat.mtimeMs,
+            ctimeMs: stat.ctimeMs,
+            ino: stat.ino
+          }
+        };
+        fs.appendFileSync(target, '-changed');
+      } else {
+        fs.writeFileSync(target, 'created-after-confirmation');
+      }
+
+      assert.throws(
+        () => prepareToolboxPublication({
+          taskId: `target-changed-${initiallyExists}`,
+          artifacts: [validatedArtifact(source)],
+          targets: [{ targetPath: target, expectedTargetSnapshot }],
+          batchContext: BATCH_CONTEXT,
+          userDataDir: ctx.userDataDir,
+          requireValidatedArtifacts: true
+        }),
+        (error) => (
+          error && error.code === 'TOOLBOX_PUBLICATION_TARGET_CHANGED_SINCE_CONFIRMATION'
+        )
+      );
+      assert.deepEqual(taskFiles(ctx), []);
+    }
+  });
+
   test('staging 文件使用 Windows 可执行 fsync 的可写句柄', () => {
     const ctx = makeContext();
     const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'generated');
@@ -1385,6 +1457,7 @@ test.describe('toolbox output publication', () => {
       artifacts: [source],
       targets: [target],
       userDataDir: ctx.userDataDir,
+      batchContext: BATCH_CONTEXT,
       checkpoint(name) {
         if (name === 'publish:after-committed') {
           throw new ToolboxPublicationCrashError(name);
@@ -1400,7 +1473,54 @@ test.describe('toolbox output publication', () => {
 
     const recovered = recoverPendingToolboxPublications({ userDataDir: ctx.userDataDir });
     assert.deepEqual(recovered.recovered.map((item) => item.action), ['commit-cleanup']);
+    assert.deepEqual(recovered.recovered[0].batchContext, BATCH_CONTEXT);
+    assert.equal(recovered.recovered[0].files[0].role, 'output');
+    assert.equal(recovered.recovered[0].files[0].filePath, target);
     assert.equal(fs.readFileSync(target, 'utf8'), 'new');
+    assert.deepEqual(indexValue(ctx).entries, []);
+    assert.deepEqual(taskFiles(ctx), []);
+  });
+
+  test('committed owner 未确认耐久接管时保留 journal，确认后才释放', () => {
+    const ctx = makeContext();
+    const source = writeFile(path.join(ctx.generationDir, 'source.xlsx'), 'new');
+    const target = writeFile(path.join(ctx.outputDir, 'target.xlsx'), 'old');
+    const prepared = prepareToolboxPublication({
+      taskId: 'commit-owner-handoff',
+      artifacts: [validatedArtifact(source)],
+      targets: [target],
+      userDataDir: ctx.userDataDir,
+      batchContext: BATCH_CONTEXT,
+      requireValidatedArtifacts: true,
+      checkpoint(name) {
+        if (name === 'publish:after-committed') {
+          throw new ToolboxPublicationCrashError(name);
+        }
+      }
+    });
+    assert.throws(
+      () => publishPreparedToolboxPublication(prepared),
+      ToolboxPublicationCrashError
+    );
+
+    const deferred = recoverPendingToolboxPublications({
+      userDataDir: ctx.userDataDir,
+      deferCommittedRecovery: true
+    });
+    assert.deepEqual(
+      deferred.recovered.map((item) => item.action),
+      ['commit-handoff-pending']
+    );
+    assert.equal(indexValue(ctx).entries.length, 1);
+    assert.ok(fs.existsSync(prepared.journalPath));
+    assert.equal(fs.readFileSync(target, 'utf8'), 'new');
+
+    const recovered = recoverPendingToolboxPublications({
+      userDataDir: ctx.userDataDir,
+      deferCommittedRecovery: true,
+      acknowledgedCommittedTaskIds: ['commit-owner-handoff']
+    });
+    assert.deepEqual(recovered.recovered.map((item) => item.action), ['commit-cleanup']);
     assert.deepEqual(indexValue(ctx).entries, []);
     assert.deepEqual(taskFiles(ctx), []);
   });

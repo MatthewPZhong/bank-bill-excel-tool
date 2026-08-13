@@ -157,6 +157,27 @@ class ArchiveCenterController {
     this.onTerminalIntentFlushed = typeof options.onTerminalIntentFlushed === 'function'
       ? options.onTerminalIntentFlushed
       : null;
+    this.getProtectedInterruptedTaskBatchIds =
+      typeof options.getProtectedInterruptedTaskBatchIds === 'function'
+        ? options.getProtectedInterruptedTaskBatchIds
+        : null;
+    if (options.recoverInterruptedTaskOwners !== undefined
+        && !Array.isArray(options.recoverInterruptedTaskOwners)) {
+      throw new TypeError('ArchiveCenter owner 恢复配置必须是数组');
+    }
+    this.recoverInterruptedTaskOwners = Array.isArray(options.recoverInterruptedTaskOwners)
+      ? options.recoverInterruptedTaskOwners.map((entry, index) => {
+          if (!entry || typeof entry.recover !== 'function') {
+            throw new TypeError(`ArchiveCenter owner 恢复项 ${index + 1} 缺少 recover`);
+          }
+          return {
+            ownerName: String(entry.ownerName || `owner-${index + 1}`),
+            recover: entry.recover
+          };
+        })
+      : (typeof options.recoverInterruptedTasks === 'function'
+          ? [{ ownerName: 'legacy', recover: options.recoverInterruptedTasks }]
+          : []);
     this.outboxFlushTail = Promise.resolve();
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
@@ -191,10 +212,131 @@ class ArchiveCenterController {
     if (initialized.ok === false) {
       this._warn('存档目录暂不可用，业务成功时仍会登记可重试批次', initialized.message);
     }
-    await this.flushOutbox();
-    const cleanup = await this.service.cleanupExpired();
-    if (cleanup && cleanup.ok === false) {
-      this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
+    const settleOutboxReplay = async (stage, warningMessage) => {
+      try {
+        const replay = await this.flushOutbox();
+        if (!replay || Number(replay.remaining) !== 0) {
+          const remaining = Number(replay && replay.remaining) || 0;
+          this._warn(
+            warningMessage,
+            `存档 outbox ${stage} 重放后仍有 ${remaining} 条未完成记录，已保留供存档中心重试`
+          );
+          return { completed: false, inventorySafe: true, replay };
+        }
+        return { completed: true, inventorySafe: true, replay };
+      } catch (error) {
+        this._warn(warningMessage, error);
+        return { completed: false, inventorySafe: false, error };
+      }
+    };
+    const initialOutboxReplay = await settleOutboxReplay(
+      'initial',
+      '存档 outbox 初始重放失败，仍将尝试各模块恢复'
+    );
+    const blockingOwnerFailures = [];
+    if (this.recoverInterruptedTaskOwners.length > 0) {
+      for (const owner of this.recoverInterruptedTaskOwners) {
+        try {
+          await owner.recover();
+        } catch (error) {
+          // owner 之间必须独立 settle；一个模块失败不能阻断后续模块接管自己的
+          // 原批次。protected batch 列表继续隔离失败 owner 尚未收口的批次。
+          this._warn(
+            `模块任务恢复未完全成功（${owner.ownerName}），已保留原批次等待重试`,
+            error
+          );
+          if (error && error.blocksArchiveStartup === true) {
+            blockingOwnerFailures.push({ ownerName: owner.ownerName, error });
+          }
+        }
+      }
+    }
+    // owner recovery 即使在 publication 收尾阶段失败，也可能已先耐久写入
+    // 原批次的附件/终态 outbox；必须独立重放，不能被 initial flush 短路。
+    const postOwnerOutboxReplay = await settleOutboxReplay(
+      'post-owner',
+      '模块恢复后的存档 outbox 重放未全部完成，已保留供存档中心重试'
+    );
+    if (blockingOwnerFailures.length > 0) {
+      const error = new AggregateError(
+        blockingOwnerFailures.map((failure) => failure.error),
+        '模块恢复尚未完成耐久接管，已阻止业务启动'
+      );
+      error.code = 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED';
+      error.owners = blockingOwnerFailures.map((failure) => failure.ownerName);
+      throw error;
+    }
+    let protectedRecoveryBatchIds = [];
+    let interruptedSweepSafe = true;
+    if (this.getProtectedInterruptedTaskBatchIds) {
+      try {
+        const protection = await this.getProtectedInterruptedTaskBatchIds();
+        if (Array.isArray(protection)) {
+          protectedRecoveryBatchIds = protection;
+        } else if (protection && typeof protection === 'object') {
+          if (protection.sweepUnsafe === true) {
+            const error = protection.error instanceof Error
+              ? protection.error
+              : new Error(protection.message || '模块恢复证据当前不可验证');
+            error.code = error.code || 'ARCHIVE_RECOVERY_EVIDENCE_UNAVAILABLE';
+            throw error;
+          }
+          protectedRecoveryBatchIds = Array.isArray(protection.batchIds)
+            ? protection.batchIds
+            : [];
+        } else {
+          throw new TypeError('模块恢复批次保护证据格式非法');
+        }
+      } catch (error) {
+        // 无法枚举 owner 持有的恢复批次时，宁可保留全部 active 批次等待下次启动，
+        // 也不能让通用 sweep 把其中一个可恢复任务不可逆地标成 failed。
+        interruptedSweepSafe = false;
+        this._warn('无法核对模块恢复批次，已跳过本次异常任务扫尾', error);
+      }
+    }
+    if (!interruptedSweepSafe) {
+      const error = new Error('模块恢复批次证据不可验证，已跳过异常任务扫尾并阻止业务启动');
+      error.code = 'ARCHIVE_STARTUP_RECOVERY_EVIDENCE_UNAVAILABLE';
+      throw error;
+    }
+    let pendingTerminalBatchIds = [];
+    let outboxInventorySafe = initialOutboxReplay.inventorySafe
+      && postOwnerOutboxReplay.inventorySafe;
+    if (this.outboxStore && outboxInventorySafe) {
+      try {
+        pendingTerminalBatchIds = this.outboxStore.list().flatMap((record) => {
+          const payload = record && record.payload;
+          const batchId = Number(payload && payload.targetBatchId);
+          return payload && payload.terminalOutcome
+            && Number.isSafeInteger(batchId) && batchId > 0
+            ? [batchId]
+            : [];
+        });
+      } catch (error) {
+        outboxInventorySafe = false;
+        this._warn('存档 outbox 清单不可读，已跳过本次异常任务与到期清理', error);
+      }
+    }
+    if (interruptedSweepSafe && outboxInventorySafe) {
+      const interrupted = await this.service.markInterruptedTasks({
+        excludeBatchIds: [
+          ...new Set([
+            ...pendingTerminalBatchIds,
+            ...(Array.isArray(protectedRecoveryBatchIds)
+              ? protectedRecoveryBatchIds
+              : [])
+          ].map(Number).filter((batchId) => Number.isSafeInteger(batchId) && batchId > 0))
+        ]
+      });
+      if (interrupted && interrupted.ok === false) {
+        this._warn('存档中心异常任务扫尾未完成', interrupted.message || interrupted.code);
+      }
+    }
+    if (outboxInventorySafe) {
+      const cleanup = await this.service.cleanupExpired();
+      if (cleanup && cleanup.ok === false) {
+        this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
+      }
     }
     return initialized;
   }
@@ -489,6 +631,11 @@ class ArchiveCenterController {
       }
     }
     return batch;
+  }
+
+  getTaskBatchDetailForRecovery(batchContext) {
+    const batch = this._requireTaskBatchContext(batchContext);
+    return this.service.repository.getBatchDetail(batch.id);
   }
 
   persistOperationIntent(payload = {}) {

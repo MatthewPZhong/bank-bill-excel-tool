@@ -1307,3 +1307,64 @@ test('无调整的历史归档仍可导出，且直接结果导出持有同一�
   await termination;
   db.close();
 });
+
+test('VCC 结果导出在 durable publication 确认后才触发提前附件结算', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-result-durable-publication-'));
+  const dbPath = path.join(dir, 'tool-data.sqlite');
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const runId = seedCalculatedReviewRun(db);
+  const balances = Object.fromEntries(db.prepare(`
+    SELECT currency, calculated_balance FROM vcc_fin_op_run_balances WHERE run_id = ?
+  `).all(runId).map((row) => [row.currency, row.calculated_balance]));
+  db.prepare(`
+    UPDATE vcc_fin_op_runs SET status = 'archived', archived_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(runId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_archives (target_month, subject, balances_json, run_id)
+    VALUES ('2026-06', 'PPHK', ?, ?)
+  `).run(JSON.stringify(balances), runId);
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets
+    SET data_status = 'archived', archived_run_id = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE target_month = '2026-06'
+  `).run(runId);
+  let publicationPayload;
+  let settlementResult;
+  const service = createVccFinancialOpService({
+    database: { db, dbPath },
+    assetsDir: '',
+    writeRunWorkbooksFn: async () => ({
+      runId,
+      targetMonth: '2026-06',
+      subjects: ['PPHK'],
+      filePaths: ['/tmp/final-vcc-result.xlsx'],
+      generationFilePaths: ['/tmp/generated-vcc-result.xlsx']
+    }),
+    publishOutputFilesFn: async (payload) => {
+      publicationPayload = payload;
+      await payload.onDurableHandoff({ taskId: 'receipt-1' });
+    }
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const result = await service.exportRun({
+    targetMonth: '2026-06',
+    outputPath: '/tmp/final-vcc-result.xlsx',
+    publicationStagingDirectory: '/tmp/vcc-generation',
+    targetSnapshots: [{ exists: false }],
+    onDurableHandoff(_publication, exportResult) {
+      settlementResult = exportResult;
+    }
+  }, BATCH_CONTEXT);
+
+  assert.deepEqual(publicationPayload.batchContext, BATCH_CONTEXT);
+  assert.deepEqual(publicationPayload.targetFilePaths, ['/tmp/final-vcc-result.xlsx']);
+  assert.equal(settlementResult.runId, runId);
+  assert.equal(result.generationFilePaths, undefined);
+  assert.deepEqual(result.filePaths, ['/tmp/final-vcc-result.xlsx']);
+});

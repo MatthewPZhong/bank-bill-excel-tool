@@ -7,23 +7,33 @@ const {
   recoverPendingToolboxPublications
 } = require('./toolbox-output-publication');
 const { serializeError } = require('./serialize-error');
+const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
 
 function runPublicationOperation(op, payload = {}, onCheckpoint = null) {
   const checkpoint = typeof onCheckpoint === 'function' ? onCheckpoint : null;
   if (op === 'publish') {
+    const batchContext = freezeWorkerBatchContext(payload.batchContext, { required: true });
     const prepared = prepareToolboxPublication({
       taskId: payload.taskId,
       artifacts: payload.artifacts,
       targets: payload.targets,
       userDataDir: payload.userDataDir,
       requireValidatedArtifacts: payload.requireValidatedArtifacts === true,
+      protectedSourcePaths: payload.protectedSourcePaths,
+      batchContext,
+      archiveInputFiles: payload.archiveInputFiles,
+      requireArchiveHandoff: payload.requireArchiveHandoff === true,
+      allowEmptyArchiveInputs: payload.allowEmptyArchiveInputs === true,
       checkpoint
     });
     return publishPreparedToolboxPublication(prepared);
   }
   if (op === 'recover') {
+    if (payload.batchContext) freezeWorkerBatchContext(payload.batchContext, { required: true });
     return recoverPendingToolboxPublications({
       userDataDir: payload.userDataDir,
+      deferCommittedRecovery: payload.deferCommittedRecovery === true,
+      acknowledgedCommittedTaskIds: payload.acknowledgedCommittedTaskIds,
       checkpoint
     });
   }

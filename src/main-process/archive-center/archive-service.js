@@ -1654,6 +1654,16 @@ class ArchiveService {
       };
     });
   }
+
+  async markInterruptedTasks(options = {}) {
+    return this._run('markInterruptedTasks', async () => ({
+      ok: true,
+      status: 'complete',
+      ...this.repository.markInterruptedTasks({
+        excludeBatchIds: options.excludeBatchIds
+      })
+    }));
+  }
 }
 
 function createArchiveService(options = {}) {

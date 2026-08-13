@@ -21,7 +21,12 @@ if (!isMainThread && parentPort) {
         const prepared = prepareToolboxPublication({
           ...message.payload,
           checkpoint(name) {
-            if (name === 'publish:after-publish-rename-before-journal') {
+            const checkpointName = String(message.payload.taskId || '').startsWith(
+              'committed-crash-recover'
+            )
+              ? 'publish:after-committed'
+              : 'publish:after-publish-rename-before-journal';
+            if (name === checkpointName) {
               process.exit(23);
             }
           }
@@ -38,7 +43,11 @@ if (!isMainThread && parentPort) {
     }
     if (message.op === 'recover') {
       try {
-        const result = recoverPendingToolboxPublications({ userDataDir });
+        const result = recoverPendingToolboxPublications({
+          userDataDir,
+          deferCommittedRecovery: message.payload.deferCommittedRecovery === true,
+          acknowledgedCommittedTaskIds: message.payload.acknowledgedCommittedTaskIds
+        });
         fs.mkdirSync(userDataDir, { recursive: true });
         fs.writeFileSync(path.join(userDataDir, 'recovery-ran.txt'), 'recovered');
         parentPort.postMessage({

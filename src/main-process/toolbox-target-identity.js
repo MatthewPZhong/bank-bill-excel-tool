@@ -49,9 +49,43 @@ function directoryPathAliasKey(fsImpl, directoryPath, options = {}) {
   );
 }
 
+function pathAliasKeys(fsImpl, filePath, options = {}) {
+  const keys = new Set([targetPathAliasKey(fsImpl, filePath, options)]);
+  try {
+    const implementation = fsImpl && typeof fsImpl.realpathSync === 'function'
+      ? fsImpl
+      : fs;
+    keys.add(targetPathAliasKey(
+      fsImpl,
+      implementation.realpathSync(path.resolve(String(filePath))),
+      options
+    ));
+  } catch (error) {
+    if (!error || error.code !== 'ENOENT') throw error;
+  }
+  return Array.from(keys);
+}
+
+function pathsAlias(fsImpl, leftPath, rightPath, options = {}) {
+  const leftKeys = new Set(pathAliasKeys(fsImpl, leftPath, options));
+  if (pathAliasKeys(fsImpl, rightPath, options).some((key) => leftKeys.has(key))) {
+    return true;
+  }
+  try {
+    const left = fsImpl.lstatSync(path.resolve(String(leftPath)), { bigint: true });
+    const right = fsImpl.lstatSync(path.resolve(String(rightPath)), { bigint: true });
+    return left.dev === right.dev && left.ino === right.ino;
+  } catch (error) {
+    if (error && error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 module.exports = {
   directoryPathAliasKey,
   normalizeTargetAliasKey,
+  pathAliasKeys,
+  pathsAlias,
   targetPathAliasKey,
   usesCaseInsensitivePathAliases
 };

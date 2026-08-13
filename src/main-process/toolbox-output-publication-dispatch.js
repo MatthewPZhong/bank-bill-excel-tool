@@ -4,6 +4,7 @@ const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { deserializeError } = require('./serialize-error');
 const { JOURNAL_INDEX_NAME } = require('./toolbox-output-publication');
+const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
 
 const DEFAULT_WORKER_ENTRY = require.resolve('./toolbox-output-publication-worker');
 
@@ -129,10 +130,46 @@ function createToolboxPublicationDispatcher(options = {}) {
           const recovery = await runWorkerJob(
             workerScriptPath,
             'recover',
-            { userDataDir: payload.userDataDir },
+            {
+              userDataDir: payload.userDataDir,
+              batchContext: payload.batchContext,
+              deferCommittedRecovery: true
+            },
             onProgress,
             onWorkerExit
           );
+          const recoveredCommit = recovery
+            && Array.isArray(recovery.recovered)
+            && recovery.recovered.find((item) => (
+              item
+              && item.taskId === payload.taskId
+              && item.action === 'commit-handoff-pending'
+              && item.batchContext
+              && Array.isArray(item.files)
+              && item.files.length > 0
+              && JSON.stringify(freezeWorkerBatchContext(
+                item.batchContext,
+                { required: true }
+              )) === JSON.stringify(payload.batchContext)
+            ));
+          if (recoveredCommit) {
+            return {
+              taskId: recoveredCommit.taskId,
+              committed: true,
+              recoveredAfterWorkerExit: true,
+              pendingCleanup: true,
+              pendingArchiveHandoff: true,
+              batchContext: recoveredCommit.batchContext,
+              inputFiles: recoveredCommit.inputFiles,
+              files: recoveredCommit.files,
+              warnings: [
+                '发布进程在提交后异常退出；已从 durable journal 恢复正式输出并沿用原任务批次。',
+                ...(Array.isArray(recoveredCommit.warnings)
+                  ? recoveredCommit.warnings
+                  : [])
+              ]
+            };
+          }
           error.detailLines = [
             ...(Array.isArray(error.detailLines) ? error.detailLines : []),
             '发布进程异常退出后已执行自动恢复；本次任务未报告成功。',
@@ -167,13 +204,22 @@ function createToolboxPublicationDispatcher(options = {}) {
 
   return {
     publish(optionsForPublish = {}) {
+      const batchContext = freezeWorkerBatchContext(
+        optionsForPublish.batchContext,
+        { required: true }
+      );
       return enqueue(
         'publish',
         {
           taskId: optionsForPublish.taskId,
           artifacts: optionsForPublish.artifacts,
           targets: optionsForPublish.targets,
+          protectedSourcePaths: optionsForPublish.protectedSourcePaths,
           userDataDir: optionsForPublish.userDataDir,
+          batchContext,
+          archiveInputFiles: optionsForPublish.archiveInputFiles,
+          requireArchiveHandoff: optionsForPublish.requireArchiveHandoff === true,
+          allowEmptyArchiveInputs: optionsForPublish.allowEmptyArchiveInputs === true,
           requireValidatedArtifacts: optionsForPublish.requireValidatedArtifacts === true
         },
         optionsForPublish.onProgress
@@ -182,7 +228,11 @@ function createToolboxPublicationDispatcher(options = {}) {
     recover(optionsForRecovery = {}) {
       return enqueue(
         'recover',
-        { userDataDir: optionsForRecovery.userDataDir },
+        {
+          userDataDir: optionsForRecovery.userDataDir,
+          deferCommittedRecovery: optionsForRecovery.deferCommittedRecovery === true,
+          acknowledgedCommittedTaskIds: optionsForRecovery.acknowledgedCommittedTaskIds
+        },
         optionsForRecovery.onProgress
       );
     }
@@ -194,7 +244,9 @@ const defaultDispatcher = createToolboxPublicationDispatcher();
 function publishToolboxPublicationAsync(options) {
   return defaultDispatcher.publish({
     ...(options || {}),
-    requireValidatedArtifacts: true
+    requireArchiveHandoff: true,
+    requireValidatedArtifacts: true,
+    allowEmptyArchiveInputs: options && options.allowEmptyArchiveInputs === true
   });
 }
 
