@@ -700,3 +700,23 @@ Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related
 3. Toolbox：在 publication 前保护 input/target identity 与 freshness，在 committed 后用 durable receipt 归属原 batch。
 4. layout/root：先降低启动全量读取、修路径与历史续跑，再修迁移 symlink、pre-switch 只读、journal/inventory/offline cleanup。
 5. 最终 blindspot/reconciliation：逐入口反查旁路、故障后 first terminal、行数/文件数守恒、敏感文件清理与人工红线。
+
+## 正式发布收尾（2026-08-13）
+
+### Task Brief / Decision
+
+- Goal：在全部堆叠 PR 与最终 review 修复合入后，用仓库既有 tag workflow 正式发布 v3.1.9，并把外部 Release 证据反写仓库。
+- Context：发布时 `main=3edf0527d6537d29cb19b48bda2a3f91f0ce6e32`；PR #132—#145 均 merged，最终 PR #135 checks 全绿。
+- Decision：用户授权技术发布；尚未完成的 Windows 实机、生产库、性能、Excel/WPS 与资金人工项不阻断 tag workflow，但必须作为未验证边界公开保留，不写成 PASS。
+
+### Outcome / Verification
+
+- annotated tag `v3.1.9` tag object=`78dcded1ead69b7b07548d52208b0cab01b66b8a`，peeled commit 精确等于发布时 `main=3edf0527...e6e32`。
+- 官方 `Release Windows Packages` run `31710724423` 对该 head 自然终态 success；stable Release 非 Draft、非 prerelease，四项资产均由 workflow 发布。
+- Setup/portable/blockmap/`latest.yml` 的 size 和 SHA-256 已从公开 Release 下载后独立复核；匿名 latest URL 的 version/path/url/size/SHA-512 与实际 Setup 一致，公开 EXE URL 可匿名跳转下载。
+- 发布不改产品代码、依赖、金额/币种/行数或存档身份；收尾分支只更新三份用户文档、五份管理证据和 release-doc 回归。
+
+### Remaining gates
+
+- PROBE：Windows installer/portable runtime 与升级 canary、目标生产 legacy/trigger、约 16 GB/700 万行、UNC/网络盘/长路径、Excel/WPS。
+- ⚠️ 人工资金：主体×九币种、CNY 迁移、混合异常去向、跨月、调整、归档/解归档/delete、审计、备份恢复和文件血缘。任何异常均以新版本修复，不覆盖或替换既有 v3.1.9 tag/Release 资产。

@@ -1696,10 +1696,10 @@ v3.1.9 只有同时满足以下条件才可标记完成：
 - [x] PR1—PR6 聚焦测试、各阶段完整自动门禁和 PR6 预览/布局证据完成，结果见 test-spec/implementation-notes。
 - [x] PR7 `release-check`、设置布局、预览与 peeled v3.1.8 baseline important-vars review 完成；旧 clean-worktree false-green 与 dirty/pre-commit 四资产证据已撤回。
 - [x] 打包入口的 `build.files` dirty/untracked fail-closed 和包内 build-info/source HEAD 一致性门禁已实现并有定向回归。
-- [ ] 本轮最终 commit 后由 clean isolated checkout 完成唯一 Windows x64 build、`check:dist` 与 updater staging；本项即使通过也不替代 Windows runtime 人工验收。
-- [ ] 独立 Sol Ultra 评审、用户 P0/P1 人工验收、合并、tag 和正式发布。
+- [x] 最终远端头由 clean Windows workflow 完成 x64 build、`check:dist` 与 updater staging；本项不替代 Windows runtime 人工验收。
+- [x] 独立 review、堆叠 PR 合并、annotated tag `v3.1.9`、Windows Release workflow、稳定 Release 和公开资产回读完成。
 - [ ] Windows installer/portable runtime、目标生产 legacy/trigger、约 16 GB、约 700 万行、跨卷/网络盘、Excel/WPS 与资金人工复核。
-- [x] Spec、tasks、test-spec、implementation-notes 和三份用户发布文档已反向同步为本地候选状态；PR7 本地自动门禁与静态构建证据已追加。
+- [x] Spec、tasks、test-spec、implementation-notes 和三份用户发布文档已反向同步正式发布状态；未完成人工验证继续明确保留。
 
 ## askUserQuestion 门槛
 
