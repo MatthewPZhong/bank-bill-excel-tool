@@ -144,6 +144,7 @@ class ArchiveCenterController {
     }
     this.database = options.database;
     this.service = options.service;
+    this.storageRootManager = options.storageRootManager || null;
     this.showOpenDialog = options.showOpenDialog || null;
     this.showSaveDialog = options.showSaveDialog || null;
     this.logWarning = options.logWarning || null;
@@ -192,6 +193,14 @@ class ArchiveCenterController {
     try { this.logWarning(message, detail); } catch (_error) { /* logging must not break archive */ }
   }
 
+  _storageMaintenanceFailure(action = '执行该操作') {
+    if (!this.storageRootManager || !this.storageRootManager.isMaintenanceRequested()) return null;
+    return publicFailure({
+      code: 'ARCHIVE_STORAGE_MAINTENANCE',
+      message: `存档位置正在变更，暂不能${action}`
+    }, '存档中心正在维护');
+  }
+
   _rememberBatch(batch) {
     if (batch && batch.batchNumber && batch.id != null) {
       this.batchNumberToId.set(String(batch.batchNumber), Number(batch.id));
@@ -204,7 +213,9 @@ class ArchiveCenterController {
   }
 
   async initialize() {
-    const initialized = await this.service.initialize();
+    const initialized = this.storageRootManager
+      ? await this.storageRootManager.initialize()
+      : await this.service.initialize();
     if (!initialized || initialized.available === false) {
       this._warn('存档中心初始化失败', initialized && initialized.message);
       return initialized;
@@ -1100,6 +1111,8 @@ class ArchiveCenterController {
   }
 
   async setLocked(batchNumberOrId, locked) {
+    const maintenance = this._storageMaintenanceFailure('修改批次锁定状态');
+    if (maintenance) return maintenance;
     const batchId = await this.resolveBatchId(batchNumberOrId);
     if (!batchId) return publicFailure(null, '存档批次不存在');
     const result = await this.service.setLocked(batchId, locked === true);
@@ -1108,6 +1121,8 @@ class ArchiveCenterController {
   }
 
   async deleteBatch(batchNumberOrId) {
+    const maintenance = this._storageMaintenanceFailure('永久删除批次');
+    if (maintenance) return maintenance;
     const batchId = await this.resolveBatchId(batchNumberOrId);
     if (!batchId) return publicFailure(null, '存档批次不存在');
     const result = await this.service.deleteBatch(batchId);
@@ -1131,6 +1146,8 @@ class ArchiveCenterController {
   }
 
   async selectRetrySources(batchNumberOrId) {
+    const maintenance = this._storageMaintenanceFailure('选择重试文件');
+    if (maintenance) return maintenance;
     const batchId = await this.resolveBatchId(batchNumberOrId);
     if (!batchId) return publicFailure(null, '存档批次不存在');
     const batch = this.service.repository.getBatch(batchId);
@@ -1206,6 +1223,8 @@ class ArchiveCenterController {
   }
 
   async retryBatch(batchNumberOrId, sourcePaths = null) {
+    const maintenance = this._storageMaintenanceFailure('重试存档');
+    if (maintenance) return maintenance;
     const batchId = await this.resolveBatchId(batchNumberOrId);
     if (!batchId) return publicFailure(null, '存档批次不存在');
     const batch = this.service.repository.getBatch(batchId);
@@ -1238,12 +1257,16 @@ class ArchiveCenterController {
   }
 
   async openFile(fileRefId) {
+    const maintenance = this._storageMaintenanceFailure('打开存档文件');
+    if (maintenance) return maintenance;
     const result = await this.service.openReadonlyCopy(Number(fileRefId));
     if (!result || result.ok === false) return publicFailure(result, '打开只读副本失败');
     return { status: 'success', message: '已打开只读副本' };
   }
 
   async saveAs(fileRefId) {
+    const maintenance = this._storageMaintenanceFailure('另存存档文件');
+    if (maintenance) return maintenance;
     const artifact = this.service.repository.getArtifact(Number(fileRefId));
     if (!artifact) return publicFailure(null, '存档文件不存在');
     if (typeof this.showSaveDialog !== 'function') {
@@ -1275,9 +1298,22 @@ class ArchiveCenterController {
     return {
       status: 'success',
       settings: {
-        retentionDays: this.getRetentionDays()
+        retentionDays: this.getRetentionDays(),
+        storageRoot: this.storageRootManager
+          ? this.storageRootManager.getCurrentRoot()
+          : this.service.rootDir,
+        storageMigration: this.storageRootManager
+          ? this.storageRootManager.getMigrationState()
+          : { status: 'idle', phase: '', processed: 0, total: 0 }
       }
     };
+  }
+
+  async changeStorageLocation() {
+    if (!this.storageRootManager) {
+      return publicFailure(null, '存档位置变更服务暂不可用');
+    }
+    return this.storageRootManager.changeStorageLocation();
   }
 
   setRetentionDays(value) {
@@ -1293,14 +1329,30 @@ class ArchiveCenterController {
   }
 
   async getStats() {
-    const result = await this.service.getStats();
+    const [result, latestResult] = await Promise.all([
+      this.service.getStats(),
+      this.service.getLatestBatch()
+    ]);
     if (!result || result.ok === false) return publicFailure(result, '存储统计加载失败');
+    if (!latestResult || latestResult.ok === false) {
+      return publicFailure(latestResult, '最新批次加载失败');
+    }
+    const stats = result.stats || {};
+    const latest = latestResult.latestBatch || null;
     return {
       status: 'success',
       stats: {
-        ...(result.stats || {}),
-        fileRefCount: result.stats && result.stats.logicalFileCount,
-        storagePath: this.service.rootDir
+        storagePath: this.storageRootManager
+          ? this.storageRootManager.getCurrentRoot()
+          : this.service.rootDir,
+        fileTotalBytes: Number(stats.logicalBytes) || 0,
+        runCount: Number(stats.batchCount) || 0,
+        latestBatchNumber: latest ? latest.batchNumber : '',
+        latestBatchId: latest ? latest.batchId : null,
+        latestBatchStatus: latest ? latest.taskStatus : null,
+        migrationStatus: this.storageRootManager
+          ? this.storageRootManager.getMigrationState()
+          : { status: 'idle', phase: '', processed: 0, total: 0 }
       }
     };
   }
