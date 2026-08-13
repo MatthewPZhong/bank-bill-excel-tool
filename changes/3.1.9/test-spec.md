@@ -355,3 +355,39 @@ PR2 只覆盖 Spec §14 的任务生命周期、策略注册表、业务流程�
 - Windows installer/portable 必须验证 read worker 路径、`readOnly/query_only/BEGIN DEFERRED` 和关闭行为。
 - 目标生产库副本必须只读检查 legacy/trigger shape；非 exact current/legacy 保持 inconsistent，不增加 fallback。
 - B/C1 intermediate non-release；C2 在 `BEGIN IMMEDIATE` 内同源重算 v2 前，生产解归档/删除保持 fail-closed，不作为最终用户行为。
+
+## 14. PR2.5-C1 写保护测试矩阵
+
+### 14.1 最小自动矩阵
+
+| ID | 优先级 | 层级 | 场景 | 最小断言 |
+| --- | --- | --- | --- | --- |
+| C1-01 | P0 | runtime/guard | createSession、空 changeset、trigger 间接写、total、close | 能力一致；不可信统一 `mutation-guard-unavailable` |
+| C1-02 | P0 | schema/policy | exact 19 表、PK、trigger、四张大表 | 未知表 `vcc-schema-not-ready`；未批准 trigger `vcc-trigger-policy-violation`；大表不建 session |
+| C1-03 | P0 | registry/budget | 七个 registered step table-driven mismatch | 每个 `.changes` 不符立即失败；未登记 step/大表 step/额外写失败关闭 |
+| C1-04 | P0 | adjustment | current locked plan | 只写 adjustment+run，固定 total=2，revision/provenance/唯一 adjustment 精确 |
+| C1-05 | P0 | archive | current locked plan | N+7；五 dataset、run、N archives、success audit；A effective balance/九币种精确 |
+| C1-06 | P0 | legacy | 真实 legacy fixture 变异 calculated，两 action table-driven | token 重算后、plan 前 `result-recalculation-required`；业务/audit 0 DML |
+| C1-07 | P0 | audit | safe failure + audit-only fault | 原事务先回滚；成功只写 1 audit；audit 失败仍抛原错误且零 fallback |
+| C1-08 | P0 | unsafe | trigger 与业务连接 createSession 代表 | 精确错误码；业务/success/failure audit 全 0 |
+| C1-09 | P0 | worker | unknown/cancel/schema/context | unknown 开库前拒绝；critical 前可取消；ACK 后零 migration；七字段缺失/精确 refreeze |
+| C1-10 | P0 | service claim | action/generation/identity/critical/release | protected 先于 ACK；进入后不 terminate；重复 terminal 只 release/推进一次 |
+| C1-11 | P0 | production chain | read preview → adjustment → refetch → archive | 两次均 dedicated worker+claim；token/generation 更新；provenance/success audit 精确 |
+| C1-12 | P1 | renderer/IPC | payload/progress/refetch/legacy | action token+generation；listener finally 退订；成功 refetch；legacy 明确提示 |
+
+相同 rollback/audit 语义只保留一个代表；不建立 step×故障笛卡尔积，不为 renderer/IPC 不可达 payload 增加反例，也不把旧 helper 测试误写成 production C1 证据。
+
+### 14.2 性能证据口径
+
+- `scripts/perf/vcc-financial-op-result-write-performance.js` 只接受离线数据库副本和 calculated run ID；输入存在非空 WAL 时失败关闭。每个样本先复制副本，再由 read worker 取 archive token、dedicated write worker 执行，报告 worker P50/P95、main event-loop lag、WAL 和 progress phase；输入 SHA 必须不变。
+- 脚本静态断言 C1 result-write 不引用旧 `snapshotResultMutationState/assertResultMutationStateUnchanged`，Service 不调用 `archiveRun/addRunAdjustmentToDb`。本机 current 小 fixture 五次 archive：worker P95 `75.549ms`，main lag P95/max `2.077ms`，WAL `0→0`。
+- 硬门禁保持 adjustment/archive P95 ≤2s、main lag P95 <100ms。上述小 fixture 只作 gross regression；真实约 16 GB Windows installer/portable 冷热 P95、WAL 和 UI 响应仍为发布 PROBE，失败不得加 retry、放宽阈值或回退 Main 同步写。
+
+### 14.3 当前执行证据与人工门禁
+
+- guard/result-write/write-worker/claim/service 聚焦最终 36/36 PASS；renderer/preview/usage 44/44 PASS；B read 相关 47/47 PASS；A/B/C1 与 renderer 扩大聚焦 110/110 PASS。首次失败分类只有两个 test design（同步 fail-closed 误用 async 断言）和一个 stale test（`getRunResult` 改 async 后仍同步读取），无 production regression。
+- 当前 production 调用图只允许 `renderer → preload/main → Service claim → vcc-financial-op-write-worker → result-write → registry → SQLite`；旧 calculator/result-adjustments DML 仅作 legacy/offline helper 保留。
+- C2 不在本矩阵：unarchive/delete 仍是 v2 preview → 旧 v1 write fail-closed；不做 bridge、plan 或生产接线。
+- 首次完整门禁 lint/smoke、unit 4972/4972 通过，integration 46/48；两项失败精确分类为陈旧集成测试合同，未改生产、阈值或 retry。机械迁移 async review、真实 preview token/generation、写后 refetch 与 v2 digest audit 后，调整归档链 209/209、历史模板导出链 29/29 PASS；renderer/IPC 不可达的 archived direct-Service write 重复断言按冻结 non-goal 删除，未固化额外 Service 错误码。调整链 297→209 来自完整 effectiveRun audit 被 TechDoc 冻结 digest 摘要替代后移除九币种×多字段重复 audit 断言，资金金额仍由 refetch/archive DB/Excel 三层覆盖；历史链 28→29 增加写后 refetch，故总数 2459→2372，不是门禁弱化。
+- 第二次且最终单一 session `npm run release-check` 全绿：lint/smoke PASS，unit 4972/4972（324 files），integration 48/48 scripts、2372/2372 assertions；runner 只在全绿后自动同步 policy。
+- ⚠️ Windows packaged runtime session/changeset/total/close、目标生产 legacy/trigger、约 16 GB 冷热性能，以及真实主体×九币种、调整后 effective balance、跨月期初、审计和备份恢复仍须人工完成；自动测试不替代资金红线。

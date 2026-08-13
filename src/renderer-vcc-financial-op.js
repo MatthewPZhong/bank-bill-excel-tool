@@ -713,6 +713,9 @@
   function reviewFailureDisposition(action, code) {
     const normalizedAction = String(action || '');
     const normalizedCode = String(code || '');
+    if (normalizedCode === 'result-recalculation-required') {
+      return Object.freeze({ refetch: false, poisonReview: true, disableModify: true });
+    }
     if (normalizedCode === 'result-revision-changed') {
       return Object.freeze({ refetch: true, poisonReview: false, disableModify: false });
     }
@@ -750,6 +753,20 @@
     return [message, ...detailLines].join('；');
   }
 
+  function resultOperationProgressMessage(progress) {
+    const action = progress && progress.action === 'adjustment' ? '修改结果' : '确认归档';
+    const phase = String(progress && progress.phase || '');
+    const phaseLabels = {
+      validating: '正在校验锁定证据',
+      applying: '正在写入受保护事务',
+      verifying: '正在核对写后状态',
+      'preserving-audit': '正在保全审计证据',
+      committed: '操作完成',
+      completed: '操作完成'
+    };
+    return `${action}：${phaseLabels[phase] || '正在处理'}`;
+  }
+
   async function requestRunAdjustment(result, previewResponse = null) {
     const response = previewResponse || await api.listAdjustmentOptions({ runId: result.runId });
     if (!response || response.status !== 'success') {
@@ -779,6 +796,7 @@
     return new Promise((resolve) => {
       let outcome = null;
       let saving = false;
+      let operationCancellable = false;
       const modal = mountDialog({
         title: '修改结果',
         className: 'vcc-fin-op-adjustment-dialog',
@@ -897,11 +915,14 @@
       }
 
       function setAdjustmentLocked(locked) {
+        if (!locked) operationCancellable = false;
         saving = locked;
         for (const control of [
           subjectSelect, majorSelect, minorSelect, currencySelect,
-          amountInput, reasonInput, confirmBtn, cancelBtn, closeBtn
+          amountInput, reasonInput, confirmBtn, closeBtn
         ]) control.disabled = locked;
+        cancelBtn.disabled = locked && !operationCancellable;
+        cancelBtn.textContent = locked && operationCancellable ? '取消操作' : '取消';
         if (!locked) {
           subjectSelect.disabled = false;
           majorSelect.disabled = !subjectSelect.value;
@@ -911,13 +932,33 @@
         }
       }
 
+      function setAdjustmentCancellable(cancellable) {
+        operationCancellable = saving && cancellable === true;
+        cancelBtn.disabled = saving && !operationCancellable;
+        cancelBtn.textContent = operationCancellable ? '取消操作' : '取消';
+      }
+
       subjectSelect.addEventListener('change', renderMajors);
       majorSelect.addEventListener('change', renderMinors);
       minorSelect.addEventListener('change', renderCurrencies);
       currencySelect.addEventListener('change', updateConfirmState);
       amountInput.addEventListener('input', updateConfirmState);
       reasonInput.addEventListener('input', updateConfirmState);
-      cancelBtn.addEventListener('click', modal.close);
+      cancelBtn.addEventListener('click', async () => {
+        if (!saving) {
+          modal.close();
+          return;
+        }
+        if (!operationCancellable) return;
+        setAdjustmentCancellable(false);
+        errorText.textContent = '正在取消修改结果…';
+        errorText.hidden = false;
+        try {
+          await api.cancelTask();
+        } catch (error) {
+          errorText.textContent = `取消失败：${error.message || String(error)}`;
+        }
+      });
       confirmBtn.addEventListener('click', async () => {
         const target = selectedTarget();
         const reason = reasonInput.value.trim();
@@ -933,6 +974,14 @@
         setAdjustmentLocked(true);
         setBusy(true, 'adjustment');
         errorText.hidden = true;
+        const stopProgress = typeof api.onOperationProgress === 'function'
+          ? api.onOperationProgress((progress) => {
+            if (!progress || progress.action !== 'adjustment') return;
+            setAdjustmentCancellable(progress.cancellable === true);
+            errorText.textContent = resultOperationProgressMessage(progress);
+            errorText.hidden = false;
+          })
+          : null;
         try {
           const saved = await api.addRunAdjustment({
             runId: result.runId,
@@ -940,7 +989,9 @@
             currency: currencySelect.value,
             adjustmentAmount: amountInput.value.trim(),
             reason,
-            expectedResultRevision: result.resultRevision
+            expectedResultRevision: result.resultRevision,
+            expectedPreviewToken: result.previewTokens && result.previewTokens.adjustment,
+            taskGeneration: result.taskGeneration
           });
           if (!saved || saved.status !== 'success') {
             if (saved && ['result-revision-changed', 'adjustment-locked'].includes(saved.code)) {
@@ -967,9 +1018,12 @@
             modal.close();
             return;
           }
-          errorText.textContent = error.message || String(error);
+          errorText.textContent = error.code === 'operation-cancelled'
+            ? '修改结果已取消，未写入任何调整。'
+            : (error.message || String(error));
           errorText.hidden = false;
         } finally {
+          if (typeof stopProgress === 'function') stopProgress();
           setBusy(previousBusy.busy, previousBusy.kind);
           if (!outcome) setAdjustmentLocked(false);
         }
@@ -984,6 +1038,7 @@
       let currentResult = initialResult;
       let completion = null;
       let operating = false;
+      let operationCancellable = false;
       let reviewHealthy = true;
       let adjustmentAvailable = true;
       const modal = mountDialog({
@@ -1050,13 +1105,21 @@
       }
 
       function setReviewLocked(locked) {
+        if (!locked) operationCancellable = false;
         operating = locked;
         closeBtn.disabled = locked;
-        cancelBtn.disabled = locked;
+        cancelBtn.disabled = locked && !operationCancellable;
+        cancelBtn.textContent = locked && operationCancellable ? '取消操作' : '关闭';
         modifyBtn.disabled = locked || !reviewHealthy || !adjustmentAvailable
           || runStatusOf(currentResult) !== 'calculated';
         checkbox.disabled = locked || !reviewHealthy || runStatusOf(currentResult) !== 'calculated';
         archiveBtn.disabled = locked || !reviewHealthy || !checkbox.checked;
+      }
+
+      function setReviewCancellable(cancellable) {
+        operationCancellable = operating && cancellable === true;
+        cancelBtn.disabled = operating && !operationCancellable;
+        cancelBtn.textContent = operationCancellable ? '取消操作' : '关闭';
       }
 
       async function refetchCurrentResult(message, tone) {
@@ -1073,7 +1136,20 @@
       checkbox.addEventListener('change', () => {
         archiveBtn.disabled = operating || !reviewHealthy || !checkbox.checked;
       });
-      cancelBtn.addEventListener('click', modal.close);
+      cancelBtn.addEventListener('click', async () => {
+        if (!operating) {
+          modal.close();
+          return;
+        }
+        if (!operationCancellable) return;
+        setReviewCancellable(false);
+        setReviewState('正在取消归档…', 'warning');
+        try {
+          await api.cancelTask();
+        } catch (error) {
+          setReviewState(`取消失败：${error.message || String(error)}`, 'error');
+        }
+      });
       modifyBtn.addEventListener('click', async () => {
         if (modifyBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
         setReviewLocked(true);
@@ -1120,10 +1196,19 @@
         if (archiveBtn.disabled || runStatusOf(currentResult) !== 'calculated') return;
         setReviewLocked(true);
         setReviewState('正在按当前结果版本重新核对并归档…', 'warning');
+        const stopProgress = typeof api.onOperationProgress === 'function'
+          ? api.onOperationProgress((progress) => {
+            if (!progress || progress.action !== 'archive') return;
+            setReviewCancellable(progress.cancellable === true);
+            setReviewState(resultOperationProgressMessage(progress), 'warning');
+          })
+          : null;
         try {
           const archived = await api.archive({
             runId: currentResult.runId,
-            expectedResultRevision: currentResult.resultRevision
+            expectedResultRevision: currentResult.resultRevision,
+            expectedPreviewToken: currentResult.previewTokens && currentResult.previewTokens.archive,
+            taskGeneration: currentResult.taskGeneration
           });
           if (!archived || archived.status === 'error') {
             throw responseFailure(archived, '归档失败');
@@ -1133,6 +1218,10 @@
           modal.close();
         } catch (error) {
           checkbox.checked = false;
+          if (error.code === 'operation-cancelled') {
+            setReviewState('归档已取消，当前结果未发生变化。', 'neutral');
+            return;
+          }
           const disposition = reviewFailureDisposition('archive', error.code);
           if (disposition.refetch) {
             try {
@@ -1149,6 +1238,7 @@
             setReviewState(error.message || String(error), 'error');
           }
         } finally {
+          if (typeof stopProgress === 'function') stopProgress();
           if (!completion) setReviewLocked(false);
         }
       });
@@ -1302,6 +1392,9 @@
       return { outcome: 'success', result, refreshError: null, refreshResult: null };
     } catch (error) {
       const refresh = await refreshAfterExecution();
+      if (error && error.code === 'operation-cancelled') {
+        return { outcome: 'cancelled', result: null, ...refresh };
+      }
       return { outcome: 'error', error, ...refresh };
     }
   }
@@ -1333,7 +1426,9 @@
     previewSelection = null,
     executeSelection,
     onCompleted = null,
-    runningText = '正在处理…'
+    runningText = '正在处理…',
+    confirmationLabel = '',
+    allowOperationCancel = false
   }) {
     const normalizeEntries = normalizeArchivedPickerEntries;
     const groupEntries = (rows) => {
@@ -1358,6 +1453,7 @@
     let previewVersion = 0;
     let pendingPreview = null;
     let previewPending = false;
+    let operationCancellable = false;
     const modal = mountDialog({
       title: actionLabel === '导出' ? '请选择要导出的月份' : '请选择月份',
       className: 'vcc-fin-op-archive-picker-dialog',
@@ -1372,6 +1468,11 @@
           <select class="vcc-fin-op-input" data-field="archive-month"></select>
         </div>
         <p class="vcc-fin-op-delete-state" data-role="archive-picker-state" data-tone="neutral"></p>
+        ${confirmationLabel ? `
+          <label class="vcc-fin-op-confirm-check" data-role="archive-picker-confirm-row">
+            <input type="checkbox" data-field="archive-picker-confirm">${escapeHtml(confirmationLabel)}
+          </label>
+        ` : ''}
         <div class="dialog-actions right">
           <button class="${danger ? 'danger-btn' : 'primary-btn'} small" type="button" data-action="archive-picker-confirm" disabled>${escapeHtml(actionLabel)}</button>
           <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
@@ -1384,6 +1485,11 @@
     const cancelButton = modal.dialog.querySelector('[data-action="cancel"]');
     const closeButton = modal.dialog.querySelector('[data-action="close"]');
     const stateText = modal.dialog.querySelector('[data-role="archive-picker-state"]');
+    const confirmation = modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
+
+    function confirmationSatisfied() {
+      return !confirmation || confirmation.checked === true;
+    }
 
     function setPickerState(message, tone = 'neutral') {
       stateText.textContent = String(message || '');
@@ -1421,6 +1527,7 @@
       const currentVersion = ++previewVersion;
       latestPreview = null;
       currentSelectionCanExecute = false;
+      if (confirmation) confirmation.checked = false;
       actionButton.disabled = true;
       const entry = selectedEntry();
       if (!entry) {
@@ -1431,7 +1538,7 @@
       if (typeof previewSelection !== 'function') {
         setPickerState(`${entry.targetMonth} 已归档，可导出`, 'success');
         currentSelectionCanExecute = true;
-        actionButton.disabled = false;
+        actionButton.disabled = !confirmationSatisfied();
         return { ok: true };
       }
       setPickerState('正在核对归档状态…');
@@ -1480,7 +1587,7 @@
           Object.hasOwn(result, 'canExecute') ? 'success' : 'warning'
         ));
         currentSelectionCanExecute = true;
-        actionButton.disabled = false;
+        actionButton.disabled = !confirmationSatisfied();
         return { ok: true, canExecute: true };
       } catch (error) {
         if (currentVersion === previewVersion) setPickerState(error.message || String(error), 'error');
@@ -1531,9 +1638,17 @@
     function setExecutionLocked(locked) {
       yearSelect.disabled = locked;
       monthSelect.disabled = locked;
-      cancelButton.disabled = locked;
+      if (confirmation) confirmation.disabled = locked;
+      cancelButton.disabled = locked && !operationCancellable;
+      cancelButton.textContent = locked && operationCancellable ? '取消操作' : '取消';
       closeButton.disabled = locked;
-      actionButton.disabled = locked || !currentSelectionCanExecute;
+      actionButton.disabled = locked || !currentSelectionCanExecute || !confirmationSatisfied();
+    }
+
+    function setOperationCancellable(cancellable) {
+      operationCancellable = executing && allowOperationCancel && cancellable === true;
+      cancelButton.disabled = executing && !operationCancellable;
+      cancelButton.textContent = operationCancellable ? '取消操作' : '取消';
     }
 
     yearSelect.addEventListener('change', () => {
@@ -1541,18 +1656,41 @@
       requestPreviewRefresh();
     });
     monthSelect.addEventListener('change', requestPreviewRefresh);
-    cancelButton.addEventListener('click', modal.close);
+    if (confirmation) {
+      confirmation.addEventListener('change', () => {
+        actionButton.disabled = executing || !currentSelectionCanExecute || !confirmationSatisfied();
+      });
+    }
+    cancelButton.addEventListener('click', async () => {
+      if (!executing) {
+        modal.close();
+        return;
+      }
+      if (!operationCancellable) return;
+      setOperationCancellable(false);
+      setPickerState(`正在取消${actionLabel}…`, 'warning');
+      try {
+        await api.cancelTask();
+      } catch (error) {
+        setPickerState(`取消失败：${error.message || String(error)}`, 'error');
+      }
+    });
     actionButton.addEventListener('click', async () => {
       const entry = selectedEntry();
       if (!entry || actionButton.disabled || typeof executeSelection !== 'function') return;
       executing = true;
+      operationCancellable = false;
       setExecutionLocked(true);
       setPickerState(runningText, 'warning');
       const execution = await runArchivedPickerExecution({
         entry,
         preview: latestPreview,
         actionLabel,
-        executeSelection,
+        executeSelection: (selectedEntry, preview) => executeSelection(
+          selectedEntry,
+          preview,
+          { setCancellable: setOperationCancellable }
+        ),
         refreshPreview: requestPreviewRefresh
       });
       if (execution.outcome === 'cancelled') {
@@ -1612,13 +1750,21 @@
       const months = archivedMonths || await loadArchivedResultMonths();
       return createArchivedMonthPickerDialog({
         months,
-        actionLabel: '删除',
-        danger: true,
+        actionLabel: '解归档',
         previewSelection: (entry) => api.previewUnarchive({ targetMonth: entry.targetMonth }),
-        runningText: '正在解归档，请勿关闭窗口…',
-        executeSelection: async (entry, preview) => {
+        runningText: '正在解归档…',
+        confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
+        allowOperationCancel: true,
+        executeSelection: async (entry, preview, controls) => {
           setBusy(true, 'unarchive');
           setStatus(`正在解归档 ${entry.targetMonth}…`, 'info');
+          const stopProgress = typeof api.onOperationProgress === 'function'
+            ? api.onOperationProgress((progress) => {
+              if (!progress || progress.action !== 'unarchive') return;
+              controls.setCancellable(progress.cancellable === true);
+              setStatus(`${entry.targetMonth} ${resultOperationProgressMessage(progress)}`, 'info');
+            })
+            : () => {};
           try {
             return await api.unarchiveMonth({
               targetMonth: entry.targetMonth,
@@ -1629,6 +1775,7 @@
             setStatus(`${entry.targetMonth} 解归档失败：${error.message || String(error)}`, 'error');
             throw error;
           } finally {
+            stopProgress();
             setBusy(false);
           }
         },
@@ -2010,6 +2157,7 @@
       ? availableMonths.map((month) => `<option value="${escapeHtml(month)}"${month === selectedMonth ? ' selected' : ''}>${escapeHtml(month)}</option>`).join('')
       : '<option value="">暂无已导入账期</option>';
     let deleting = false;
+    let operationCancellable = false;
     const modal = mountDialog({
       title: '删除数据',
       className: 'vcc-fin-op-delete-dialog',
@@ -2148,13 +2296,33 @@
 
     targetSelect.addEventListener('change', () => modal.trackPreviewState(applyCachedPreview()));
     monthSelect.addEventListener('change', () => modal.trackPreviewState(loadTargets()));
-    cancelButton.addEventListener('click', modal.close);
+    function setDeleteCancellable(cancellable) {
+      operationCancellable = deleting && cancellable === true;
+      cancelButton.disabled = deleting && !operationCancellable;
+      cancelButton.textContent = operationCancellable ? '取消操作' : '取消';
+    }
+
+    cancelButton.addEventListener('click', async () => {
+      if (!deleting) {
+        modal.close();
+        return;
+      }
+      if (!operationCancellable) return;
+      setDeleteCancellable(false);
+      setDeleteState('正在取消删除…', 'warning');
+      try {
+        await api.cancelTask();
+      } catch (error) {
+        setDeleteState(`取消失败：${error.message || String(error)}`, 'error');
+      }
+    });
     deleteButton.addEventListener('click', async () => {
       const targetMonth = monthSelect.value;
       const targetType = targetSelect.value;
       if (!targetMonth || !targetType || deleteButton.disabled || !latestPreview) return;
       previewVersion += 1;
       deleting = true;
+      operationCancellable = false;
       setBusy(true, 'delete');
       deleteButton.disabled = true;
       cancelButton.disabled = true;
@@ -2164,6 +2332,13 @@
       setDeleteState('正在删除数据…', 'warning');
       const targetLabel = latestPreview.targetLabel || DELETE_TARGET_LABELS[targetType] || targetType;
       setStatus(`正在删除 ${targetMonth} ${targetLabel}…`, 'info');
+      const stopProgress = typeof api.onOperationProgress === 'function'
+        ? api.onOperationProgress((progress) => {
+          if (!progress || progress.action !== 'delete') return;
+          setDeleteCancellable(progress.cancellable === true);
+          setDeleteState(resultOperationProgressMessage(progress), 'warning');
+        })
+        : () => {};
       let result;
       try {
         result = await api.deleteDataTarget({
@@ -2177,15 +2352,23 @@
         }
       } catch (error) {
         deleting = false;
+        operationCancellable = false;
         setBusy(false);
-        setStatus(`删除失败：${error.message || error}`, 'error');
-        showMessage('删除失败', error.message || String(error), 'error');
+        if (error.code === 'operation-cancelled') {
+          setStatus('删除已取消，数据未发生变化', 'info');
+          setDeleteState('删除已取消，数据未发生变化。', 'neutral');
+        } else {
+          setStatus(`删除失败：${error.message || error}`, 'error');
+          showMessage('删除失败', error.message || String(error), 'error');
+        }
         cancelButton.disabled = false;
         closeButton.disabled = false;
         targetSelect.disabled = false;
         monthSelect.disabled = false;
         modal.trackPreviewState(loadTargets());
         return;
+      } finally {
+        stopProgress();
       }
 
       deleting = false;
@@ -2975,8 +3158,8 @@
   function createUnarchivePreviewDialog() {
     return createArchivedMonthPickerDialog({
       months: PREVIEW_ARCHIVED_MONTHS,
-      actionLabel: '删除',
-      danger: true,
+      actionLabel: '解归档',
+      confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
       previewSelection: async (entry) => ({
         status: 'success',
         canUnarchive: entry.targetMonth === '2026-06',
@@ -3114,7 +3297,7 @@
       return waitForArchivedPickerPreview(modal, {
         expectedYear: '2026',
         expectedMonth: '2026-06',
-        expectedConfirmDisabled: false,
+        expectedConfirmDisabled: true,
         stateMessageIncludes: '可解归档'
       });
     },
@@ -3139,19 +3322,23 @@
     openUnarchiveExecuting() {
       const modal = createArchivedMonthPickerDialog({
         months: PREVIEW_ARCHIVED_MONTHS,
-        actionLabel: '删除',
-        danger: true,
+        actionLabel: '解归档',
+        confirmationLabel: '我已确认：解归档后只能由 v3.1.9 及以上版本继续维护；降级前必须恢复完整数据库备份',
         previewSelection: async () => ({
           status: 'success', canUnarchive: true, previewToken: 'preview-token', taskGeneration: 0
         }),
-        runningText: '正在解归档，请勿关闭窗口…',
+        runningText: '正在解归档…',
         executeSelection: () => new Promise(() => {})
       });
       return waitForArchivedPickerPreview(modal, {
         expectedYear: '2026',
         expectedMonth: '2026-06',
-        expectedConfirmDisabled: false
+        expectedConfirmDisabled: true
       }).then(() => {
+        const confirmation = modal && modal.dialog.querySelector('[data-field="archive-picker-confirm"]');
+        if (!confirmation) throw new Error('解归档确认警示缺失');
+        confirmation.checked = true;
+        confirmation.dispatchEvent(new Event('change', { bubbles: true }));
         const button = modal && modal.dialog.querySelector('[data-action="archive-picker-confirm"]');
         if (!button || button.disabled) throw new Error('执行中预览无法启动解归档');
         button.click();

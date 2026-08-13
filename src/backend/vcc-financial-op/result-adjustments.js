@@ -1169,6 +1169,7 @@ module.exports = {
   RESULT_REVISION_CHANGED_MESSAGE,
   buildRunRowKey,
   normalizeAdjustmentAmount,
+  normalizeAdjustmentReason,
   assertExpectedResultRevision,
   getEffectiveRunResult,
   listAdjustmentOptions,

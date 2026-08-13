@@ -369,11 +369,16 @@ async function run() {
       JSON.stringify(rearchivePreflight.revisions),
       latest.runId
     );
+    const rearchivePreview = await service.getRunResult(latest.runId);
     const rearchived = await service.archive({
       runId: latest.runId,
-      expectedResultRevision: 0
+      expectedResultRevision: 0,
+      expectedPreviewToken: rearchivePreview.previewTokens.archive,
+      taskGeneration: rearchivePreview.taskGeneration
     });
     assertEq(rearchived.status, 'archived', '解归档结果可经正式 service 重新归档');
+    const rearchivedResult = await service.getRunResult(latest.runId);
+    assertEq(rearchivedResult.status, 'archived', '重新归档后通过正式只读入口 refetch 最新结果');
     const afterRearchive = await service.listArchivedResultMonths();
     assertEq(afterRearchive.length, 2, '重新归档后月份重新进入可导出枚举');
     assertEq(afterRearchive[0].targetMonth, LATEST_MONTH, '重新归档月份恢复为默认 latest');

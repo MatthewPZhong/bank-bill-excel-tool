@@ -17,8 +17,10 @@ const {
 const {
   sha256,
   buildOperationTokenV2,
-  buildDeleteTargetTokenV2
+  buildDeleteTargetTokenV2,
+  buildResultMutationTokenV2
 } = require('./operation-token-v2');
+const { getEffectiveRunResult } = require('./result-adjustments');
 
 const ARCHIVE_CANDIDATE_SQL = `
   SELECT target_month FROM vcc_fin_op_runs WHERE status = 'archived'
@@ -705,6 +707,116 @@ function previewDeleteTargetSnapshot(db, {
   return deletePreviewForTarget(evidence, String(targetType || sourceType || ''), { taskActive });
 }
 
+function normalizeRunId(runId) {
+  const normalized = Number(runId);
+  if (!Number.isSafeInteger(normalized) || normalized < 1) {
+    throw operationError('invalid-run-id', `财务OP run id 无效：${runId}`);
+  }
+  return normalized;
+}
+
+function loadResultMutationGateEvidence(db, targetMonth, {
+  taskGeneration = 0,
+  trace = null
+} = {}) {
+  const activeBatches = executeQuery(db, trace, 'result-write-active-batches', `
+    SELECT id FROM vcc_fin_op_import_batches
+    WHERE target_month = ? AND status = 'importing'
+    ORDER BY id
+  `, [targetMonth]);
+  const importRecords = executeQuery(db, trace, 'result-write-import-gate', `
+    SELECT id, source_type, status, resolution_status
+    FROM vcc_fin_op_import_records
+    WHERE target_month = ?
+      AND (status = 'importing' OR resolution_status = 'unresolved')
+    ORDER BY id
+  `, [targetMonth]);
+  const [year, month] = targetMonth.split('-').map(Number);
+  const nextMonth = month === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(month + 1).padStart(2, '0')}`;
+  const nextOpeningRows = executeQuery(db, trace, 'result-write-next-opening', `
+    SELECT subject FROM vcc_fin_op_opening_balances
+    WHERE target_month = ?
+    ORDER BY subject
+  `, [nextMonth]);
+  return Object.freeze({
+    taskGeneration: Number(taskGeneration),
+    activeBatchIds: Object.freeze(activeBatches.map((row) => String(row.id))),
+    importingRecordIds: Object.freeze(importRecords
+      .filter((row) => row.status === 'importing')
+      .map((row) => Number(row.id))),
+    unresolvedRecords: Object.freeze(importRecords
+      .filter((row) => row.resolution_status === 'unresolved')
+      .map((row) => Object.freeze({
+        id: Number(row.id),
+        sourceType: row.source_type,
+        status: row.status,
+        resolutionStatus: row.resolution_status
+      }))),
+    nextOpeningSubjects: Object.freeze(nextOpeningRows.map((row) => String(row.subject)))
+  });
+}
+
+function loadResultMutationEvidence(db, {
+  runId,
+  taskGeneration = 0,
+  trace = null
+}) {
+  const normalizedRunId = normalizeRunId(runId);
+  const runTarget = executeQuery(db, trace, 'result-write-run-target', `
+    SELECT target_month FROM vcc_fin_op_runs WHERE id = ?
+  `, [normalizedRunId], 'get');
+  if (!runTarget) throw operationError('result-not-found', `财务OP计算记录不存在：${normalizedRunId}`);
+  const targetMonth = normalizeMonth(String(runTarget.target_month));
+  const [archiveEvidence] = loadArchiveEvidenceSet(db, { targetMonth, trace });
+  const gateEvidence = loadResultMutationGateEvidence(db, targetMonth, {
+    taskGeneration,
+    trace
+  });
+  const adjustmentToken = buildResultMutationTokenV2({
+    action: 'add-adjustment',
+    targetMonth,
+    runId: normalizedRunId,
+    archiveEvidence,
+    gateEvidence
+  });
+  const archiveToken = buildResultMutationTokenV2({
+    action: 'archive-result',
+    targetMonth,
+    runId: normalizedRunId,
+    archiveEvidence,
+    gateEvidence
+  });
+  if (!adjustmentToken || !archiveToken) {
+    throw operationError(
+      'result-evidence-invalid',
+      '财务OP结果证据不完整，已禁止修改或归档。',
+      { runId: normalizedRunId, targetMonth }
+    );
+  }
+  return Object.freeze({
+    runId: normalizedRunId,
+    targetMonth,
+    taskGeneration: Number(taskGeneration),
+    archiveEvidence,
+    gateEvidence,
+    previewTokens: Object.freeze({
+      adjustment: adjustmentToken.previewToken,
+      archive: archiveToken.previewToken
+    })
+  });
+}
+
+function getRunResultSnapshot(db, options) {
+  const evidence = loadResultMutationEvidence(db, options);
+  const effective = getEffectiveRunResult(db, evidence.runId);
+  if (!effective) {
+    throw operationError('result-not-found', `财务OP计算记录不存在：${evidence.runId}`);
+  }
+  return Object.freeze({ ...evidence, effective });
+}
+
 module.exports = {
   ARCHIVE_CANDIDATE_SQL,
   ACTIVE_MONTHS_SQL,
@@ -720,5 +832,8 @@ module.exports = {
   loadDeleteEvidenceV2,
   deletePreviewForTarget,
   listDeleteTargetsSnapshot,
-  previewDeleteTargetSnapshot
+  previewDeleteTargetSnapshot,
+  loadResultMutationGateEvidence,
+  loadResultMutationEvidence,
+  getRunResultSnapshot
 };

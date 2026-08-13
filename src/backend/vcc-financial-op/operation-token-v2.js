@@ -137,6 +137,66 @@ function buildDeleteTargetTokenV2(deleteEvidence, targetType) {
   });
 }
 
+function canonicalResultMutationGateEvidence(gateEvidence) {
+  return {
+    taskGeneration: Number(gateEvidence.taskGeneration),
+    activeBatchIds: [...gateEvidence.activeBatchIds].map(String).sort(),
+    importingRecordIds: [...gateEvidence.importingRecordIds].map(Number).sort((a, b) => a - b),
+    unresolvedRecords: [...gateEvidence.unresolvedRecords].sort((left, right) => (
+      Number(left.id) - Number(right.id)
+    )),
+    nextOpeningSubjects: [...gateEvidence.nextOpeningSubjects].map(String).sort()
+  };
+}
+
+function buildResultMutationTokenV2({
+  action,
+  targetMonth,
+  runId,
+  archiveEvidence,
+  gateEvidence
+}) {
+  if (!['add-adjustment', 'archive-result'].includes(action)) return null;
+  const normalizedRunId = Number(runId);
+  const run = archiveEvidence.runs.find((item) => Number(item.id) === normalizedRunId) || null;
+  const validation = archiveEvidence.resultValidations
+    .find((item) => Number(item.runId) === normalizedRunId) || null;
+  const digests = validatedResultDigest(validation);
+  if (!run || !validation || !digests) return null;
+  const canonicalPayload = {
+    tokenVersion: OPERATION_TOKEN_VERSION,
+    action,
+    targetMonth,
+    scope: { runId: normalizedRunId },
+    structuralEvidence: {
+      run,
+      datasets: archiveEvidence.datasets,
+      archives: archiveEvidence.archives.map((archive) => ({
+        subject: archive.subject,
+        runId: archive.runId,
+        archivedAt: archive.archivedAt,
+        balancesHash: archive.balancesHash
+      })),
+      resultValidationVersion: validation.resultValidationVersion,
+      resultEvidenceDigest: digests.resultEvidenceDigest,
+      effectiveBalanceHash: digests.effectiveBalanceHash,
+      adjustmentCount: validation.adjustmentCount,
+      adjustmentSequenceMax: validation.adjustmentSequenceMax,
+      pendingEffectiveFactCount: archiveEvidence.pendingEffectiveFactCount,
+      pendingChildCounts: {
+        runRows: archiveEvidence.pendingRunRowCount,
+        summaries: archiveEvidence.pendingSummaryCount,
+        currencyTotals: archiveEvidence.pendingCurrencyTotalCount
+      }
+    },
+    gateEvidence: canonicalResultMutationGateEvidence(gateEvidence)
+  };
+  return Object.freeze({
+    canonicalPayload,
+    previewToken: `v${OPERATION_TOKEN_VERSION}:${sha256(stableStringify(canonicalPayload))}`
+  });
+}
+
 module.exports = {
   OPERATION_TOKEN_VERSION,
   canonicalJsonValue,
@@ -145,6 +205,8 @@ module.exports = {
   validatedResultDigest,
   archiveStructuralEvidence,
   canonicalGateEvidence,
+  canonicalResultMutationGateEvidence,
   buildOperationTokenV2,
-  buildDeleteTargetTokenV2
+  buildDeleteTargetTokenV2,
+  buildResultMutationTokenV2
 };

@@ -56,7 +56,15 @@
   - [x] 初次/导出租约内二次 legacy recheck、生产 v2→旧 v1 write 单链 fail-closed，以及旧 v1 实现证据显式隔离。
   - [x] SQL trace、query-plan、main lag、target cache 与小 fixture gross regression 自动门禁；blindspot/reconciliation/check-vars 已复核，完整 release-check 全绿。
   - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged 冷/热 P95/WAL、目标生产 legacy/trigger、主体×九币种与跨月资金复核。
-- [ ] PR2.5-C1：mutation guard、adjustment/archive 固定预算与写 worker。
+- [x] PR2.5-C1：mutation guard、adjustment/archive 固定预算与写 worker的本地实现和自动证据。
+  - [x] 19 表 policy、七个 SQL step registry、小表 empty-session 与四张大表 largeTableScopeProof。
+  - [x] adjustment=`2`、archive=`N+7`、audit-only=`1` 的锁内 plan、逐 step/total budget 与精确 postcondition。
+  - [x] dedicated write worker、generation-bound claim、critical progress/cancel/terminate/单次 release 合同。
+  - [x] `run:get` action token v2、同事务同源重算、legacy calculated plan 前 `result-recalculation-required`/零 DML。
+  - [x] production adjustment/archive 唯一 worker 接线、renderer token/generation/progress/refetch/legacy 提示与本机小 fixture 性能证据。
+  - [x] safe audit-only、unsafe trigger/runtime/schema/session 零数据库 audit、故障注入和生产 Service current 全链聚焦。
+  - [x] 机械迁移两条真实 integration 入口并完成最终门禁：lint/smoke、unit 4972/4972、integration 48/48 scripts 与 2372/2372 assertions 全绿。
+  - [ ] 发布人工/真实环境门禁：约 16 GB Windows packaged P95/WAL/main lag、目标生产 legacy/trigger、主体×九币种与跨月资金复核。
 - [ ] PR2.5-C2：current/legacy unarchive、delete 固定计划、进度/取消和约 16 GB 验收。
 - [ ] PR3-VCC：VCC TaskLifecycle、七字段 context、BOR/cancel/terminal CAS 和 artifact 接线。
 - [ ] PR3-Toolbox：工具箱独立生命周期与文件存档接线。
