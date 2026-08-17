@@ -371,6 +371,7 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
     assert.deepEqual(
       [...tables].sort(),
       [
+        'archive_artifact_holds',
         'archive_artifacts',
         'archive_batch_sequences',
         'archive_batches',
@@ -389,6 +390,63 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
     assert.equal(artifactColumns.has('materialization_error_message'), true);
     assert.equal(artifactColumns.has('materialization_failed_at'), true);
     assert.equal(artifactColumns.has('materialization_status'), false);
+  } finally {
+    db.close();
+  }
+});
+
+test('VCC 有效数据 business hold 不可被用户解锁、手工删除或 retention 绕过', () => {
+  const { db, repository } = createFixture();
+  try {
+    const batch = createBatch(repository, {
+      operationKey: 'vcc-business-hold',
+      moduleId: 'vcc-financial-op',
+      moduleCode: 'VCCFINOP',
+      moduleName: 'VCC财务OP校验',
+      retentionUntil: '2026-07-21'
+    }).batch;
+    const artifact = addArtifact(repository, batch.id, {
+      artifactKey: 'vcc-input',
+      sourceOperation: 'vccFinancialOp:import:apply'
+    });
+    repository.startArtifactAttempt(artifact.id);
+    repository.completeArtifact(artifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    });
+    completeLayout(repository, repository.getArtifact(artifact.id));
+
+    const hold = repository.addArtifactHold(artifact.id, {
+      ownerModule: 'vcc-financial-op',
+      ownerType: 'import-source',
+      ownerId: '17',
+      reason: '当前有效数据仍引用该输入原表'
+    });
+    assert.equal(hold.artifactId, artifact.id);
+    assert.equal(repository.getArtifact(artifact.id).businessHoldCount, 1);
+    assert.equal(repository.getArtifact(artifact.id).businessLocked, true);
+    assert.equal(repository.getBatch(batch.id).businessHoldCount, 1);
+    assert.equal(repository.getBatch(batch.id).businessLocked, true);
+
+    repository.setLocked(batch.id, true);
+    repository.setLocked(batch.id, false);
+    const blocked = repository.deleteBatch(batch.id, { allowLocked: true });
+    assert.equal(blocked.status, 'business-held');
+    assert.deepEqual(blocked.artifactIds, [artifact.id]);
+    assert.equal(repository.listExpiredBatches('2026-07-22').length, 0);
+    assert.ok(repository.getBatch(batch.id));
+
+    assert.equal(repository.releaseArtifactHold({
+      artifactId: artifact.id,
+      ownerModule: 'vcc-financial-op',
+      ownerType: 'import-source',
+      ownerId: '17'
+    }), true);
+    assert.equal(repository.getArtifact(artifact.id).businessLocked, false);
+    assert.equal(repository.getBatch(batch.id).businessLocked, false);
+    assert.equal(repository.listExpiredBatches('2026-07-22').length, 1);
+    assert.equal(repository.deleteBatch(batch.id, { allowLocked: true }).status, 'deleted');
   } finally {
     db.close();
   }

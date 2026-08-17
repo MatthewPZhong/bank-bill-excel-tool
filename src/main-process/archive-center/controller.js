@@ -179,6 +179,21 @@ class ArchiveCenterController {
       : (typeof options.recoverInterruptedTasks === 'function'
           ? [{ ownerName: 'legacy', recover: options.recoverInterruptedTasks }]
           : []);
+    if (options.postOutboxStartupHooks !== undefined
+        && !Array.isArray(options.postOutboxStartupHooks)) {
+      throw new TypeError('ArchiveCenter startup hook 配置必须是数组');
+    }
+    this.postOutboxStartupHooks = Array.isArray(options.postOutboxStartupHooks)
+      ? options.postOutboxStartupHooks.map((entry, index) => {
+          if (!entry || typeof entry.run !== 'function') {
+            throw new TypeError(`ArchiveCenter startup hook ${index + 1} 缺少 run`);
+          }
+          return {
+            hookName: String(entry.hookName || `hook-${index + 1}`),
+            run: entry.run
+          };
+        })
+      : [];
     this.outboxFlushTail = Promise.resolve();
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
@@ -276,6 +291,21 @@ class ArchiveCenterController {
       error.code = 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED';
       error.owners = blockingOwnerFailures.map((failure) => failure.ownerName);
       throw error;
+    }
+    for (const hook of this.postOutboxStartupHooks) {
+      try {
+        await hook.run();
+      } catch (cause) {
+        this._warn(
+          `存档启动校验失败（${hook.hookName}），已跳过异常任务扫尾与到期清理`,
+          cause
+        );
+        const error = new Error(`存档启动校验未完成：${hook.hookName}`);
+        error.code = 'ARCHIVE_STARTUP_HOOK_FAILED';
+        error.hookName = hook.hookName;
+        error.cause = cause;
+        throw error;
+      }
     }
     let protectedRecoveryBatchIds = [];
     let interruptedSweepSafe = true;

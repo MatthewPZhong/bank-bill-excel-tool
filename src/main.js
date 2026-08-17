@@ -267,6 +267,19 @@ const {
 const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session');
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
+const {
+  createVccStorageMigrationCoordinator
+} = require('./main-process/vcc-financial-op-storage-migration');
+const {
+  recoverVccStorageMigration
+} = require('./main-process/vcc-financial-op-storage-rebuild');
+const {
+  buildVccImportArchiveHandoffFiles,
+  buildVccImportArchiveInputFiles,
+  listRecoverableVccImportArchiveBatchIds,
+  recoverVccImportArchiveTasks,
+  reconcileVccImportArchiveLineageAtStartup
+} = require('./main-process/vcc-financial-op-archive-lineage');
 const { vccFinancialOpErrorResult } = require('./main-process/vcc-financial-op-ipc');
 const {
   publishVccFinancialOpOutputs
@@ -503,8 +516,10 @@ let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
 let vccFinancialOpService = null;
+let vccStorageMigrationCoordinator = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
+let appUpdateTransitionToken = null;
 let archiveCenterService = null;
 let archiveStorageRootManager = null;
 let archiveCenterInitializationPromise = null;
@@ -541,6 +556,11 @@ const vccOpCalcSession = createVccOpCalcSession({
 
 function getVccFinancialOpService() {
   if (!database || !database.db) throw new Error('数据库未初始化');
+  if (vccStorageMigrationCoordinator && vccStorageMigrationCoordinator.isActive()) {
+    const error = new Error('VCC 存储正在维护，请稍后重试');
+    error.code = 'vcc-storage-migration-active';
+    throw error;
+  }
   if (!vccFinancialOpService) {
     vccFinancialOpService = createVccFinancialOpService({
       database,
@@ -572,10 +592,73 @@ function getVccFinancialOpService() {
           source: 'main',
           domain: 'vcc-financial-op'
         });
-      }
+      },
+      archiveRepositoryProvider: () => (
+        archiveCenterService
+        && archiveCenterService.service
+        && archiveCenterService.service.repository
+      ),
+      archiveServiceProvider: () => (
+        archiveCenterService && archiveCenterService.service
+      )
     });
   }
   return vccFinancialOpService;
+}
+
+function vccStorageMigrationJournalPath() {
+  return path.join(
+    app.getPath('userData'),
+    'run-data',
+    'vcc-financial-op',
+    'storage-migration.json'
+  );
+}
+
+function getVccStorageMigrationCoordinator() {
+  if (!database || !database.db) throw new Error('数据库未初始化');
+  if (!vccStorageMigrationCoordinator) {
+    vccStorageMigrationCoordinator = createVccStorageMigrationCoordinator({
+      sourcePath: database.dbPath,
+      journalPath: vccStorageMigrationJournalPath(),
+      businessOperationRegistry,
+      archiveStorageRootManager,
+      terminateVccService: async () => {
+        if (!vccFinancialOpService) return;
+        await vccFinancialOpService.terminate();
+        vccFinancialOpService = null;
+      },
+      pauseLocalMaintenance: async () => {
+        const hadIdleTimer = Boolean(idleCleanupTimer);
+        if (idleCleanupTimer) {
+          clearInterval(idleCleanupTimer);
+          idleCleanupTimer = null;
+        }
+        return async () => {
+          if (hadIdleTimer && !idleCleanupTimer && database && database.db) setupIdleCleanupTimer();
+        };
+      },
+      closeDatabase: async () => {
+        if (positionReconciliationService) {
+          syncPositionReconciliationCheckpoint();
+          positionReconciliationService.close();
+          positionReconciliationService = null;
+        }
+        if (database) database.close();
+      },
+      relaunch: async () => {
+        app.relaunch();
+        const timer = setTimeout(() => app.exit(0), 250);
+        if (timer.unref) timer.unref();
+      },
+      onProgress: (progress) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('vccFinancialOp:storage:migration-progress', progress);
+        }
+      }
+    });
+  }
+  return vccStorageMigrationCoordinator;
 }
 
 function requireVccFinancialOpBatchContext(taskContext) {
@@ -3854,14 +3937,25 @@ function createAppUpdateLogger() {
   };
 }
 
+function releaseAppUpdateTransition() {
+  const token = appUpdateTransitionToken;
+  if (token === null) return false;
+  const released = businessOperationRegistry.releaseTransition(token);
+  if (released && appUpdateTransitionToken === token) {
+    appUpdateTransitionToken = null;
+  }
+  return released;
+}
+
 function listUpdateRestartBusyOperations() {
-  const gate = businessOperationRegistry.beginInstallTransition();
+  const gate = businessOperationRegistry.beginInstallTransition('app-updater');
   if (!gate.acquired) {
     const labels = Array.isArray(gate.operations)
       ? gate.operations.map((operation) => operation.label).filter(Boolean)
       : [];
     return labels.length > 0 ? labels : ['升级准备中'];
   }
+  appUpdateTransitionToken = gate.token;
 
   const busy = [];
   if (bankStatementOperationLock.inFlight) busy.push('资金对账数据处理');
@@ -3874,7 +3968,7 @@ function listUpdateRestartBusyOperations() {
     busy.push('收单校验 worker 状态检查');
   }
 
-  if (busy.length > 0) businessOperationRegistry.cancelInstallTransition();
+  if (busy.length > 0) releaseAppUpdateTransition();
   return busy;
 }
 
@@ -3908,9 +4002,12 @@ function initializeAppUpdaterService() {
     callbacks: {
       onStatusChange: sendAppUpdateStatus,
       getBusyOperations: listUpdateRestartBusyOperations,
-      cleanupBeforeRestart: prepareApplicationForQuit,
+      cleanupBeforeRestart: () => prepareApplicationForQuit({
+        transitionOwner: 'app-updater',
+        transitionToken: appUpdateTransitionToken
+      }),
       resumeAfterFailedRestart: resumeApplicationAfterFailedRestart,
-      cancelInstallTransition: () => businessOperationRegistry.cancelInstallTransition()
+      cancelInstallTransition: releaseAppUpdateTransition
     }
   });
   appUpdaterService.initialize().catch((error) => {
@@ -4038,7 +4135,7 @@ function registerAppUpdateHandlers() {
         updateStatus
       };
     } catch (_error) {
-      businessOperationRegistry.cancelInstallTransition();
+      releaseAppUpdateTransition();
       return {
         status: 'error',
         message: '重启升级失败，请稍后重试',
@@ -4089,8 +4186,12 @@ function registerArchiveCenterHandlers() {
     '选择存档恢复文件',
     (_event, batchId) => callArchiveCenter('selectRetrySources', batchId)
   );
-  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', (_event, batchId, sourcePaths) => {
-    return callArchiveCenter('retryBatch', batchId, sourcePaths);
+  archiveCenterMutationIpcHandle('archive-center:retry-batch', '重试存档', async (_event, batchId, sourcePaths) => {
+    const result = await callArchiveCenter('retryBatch', batchId, sourcePaths);
+    if (result && result.status === 'success') {
+      getVccFinancialOpService().syncImportArchiveLineage();
+    }
+    return result;
   });
   ipcMain.handle('archive-center:get-settings', () => callArchiveCenter('getSettings'));
   archiveCenterMutationIpcHandle('archive-center:change-storage-location',
@@ -4149,6 +4250,30 @@ function recoverPositionPendingBeforeInterruptedSweep() {
   return getPositionReconciliationService();
 }
 
+function vccImportArchiveRecoveryOptions() {
+  const archiveRepository = archiveCenterService
+    && archiveCenterService.service
+    && archiveCenterService.service.repository;
+  if (!database || !database.db || !archiveRepository) {
+    throw new Error('VCC 导入 Archive 恢复依赖尚未就绪');
+  }
+  return { db: database.db, archiveRepository };
+}
+
+function recoverVccImportBeforeInterruptedSweep() {
+  // 构造 service 会先把上次崩溃时仍 importing 的业务批次收口为 failed；随后
+  // owner 以同一 exact7 Archive batch 写入耐久 terminal intent。
+  getVccFinancialOpService();
+  return recoverVccImportArchiveTasks({
+    ...vccImportArchiveRecoveryOptions(),
+    archiveCenter: archiveCenterService
+  });
+}
+
+function reconcileVccImportArchiveBeforeRetentionCleanup() {
+  return reconcileVccImportArchiveLineageAtStartup(vccImportArchiveRecoveryOptions());
+}
+
 function protectedInterruptedTaskBatchIds() {
   const batchIds = new Set();
   try {
@@ -4171,6 +4296,17 @@ function protectedInterruptedTaskBatchIds() {
   }
   for (const batchId of toolboxProtection.batchIds) {
     batchIds.add(batchId);
+  }
+  try {
+    for (const batchId of listRecoverableVccImportArchiveBatchIds(
+      vccImportArchiveRecoveryOptions()
+    )) batchIds.add(batchId);
+  } catch (error) {
+    return {
+      batchIds: [...batchIds].sort((left, right) => left - right),
+      sweepUnsafe: true,
+      error
+    };
   }
   return {
     batchIds: [...batchIds].sort((left, right) => left - right),
@@ -4242,8 +4378,16 @@ function initializeArchiveCenter() {
         recover: async () => {
           await recoverToolboxPublicationsAtStartup();
         }
+      },
+      {
+        ownerName: 'VCC import terminal',
+        recover: recoverVccImportBeforeInterruptedSweep
       }
     ],
+    postOutboxStartupHooks: [{
+      hookName: 'VCC import lineage/hold reconcile',
+      run: reconcileVccImportArchiveBeforeRetentionCleanup
+    }],
     getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
@@ -13883,19 +14027,24 @@ function registerNewAccountHandlers() {
 
   trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', {
     execute: async (event, _prepared, taskContext, payload = {}) => {
+      let service = null;
       try {
         const batchContext = requireVccFinancialOpBatchContext(taskContext);
-        const result = await getVccFinancialOpService().importSelectedFiles(payload, (progress) => {
+        service = getVccFinancialOpService();
+        const result = await service.importSelectedFiles(payload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
           }
-        }, batchContext);
-        return { status: 'success', ...result };
+        }, batchContext, taskContext.vccImportArchiveHandoffFiles);
+        const businessResult = { status: 'success', ...result };
+        await taskContext.settleArtifacts({ result: businessResult });
+        service.syncImportArchiveLineage();
+        return businessResult;
       } catch (error) {
         const partial = error && error.partialResult && typeof error.partialResult === 'object'
           ? error.partialResult
           : {};
-        return {
+        const businessResult = {
           status: 'error',
           message: error && error.message ? error.message : String(error),
           detailLines: error && Array.isArray(error.detailLines) ? error.detailLines : [],
@@ -13904,6 +14053,11 @@ function registerNewAccountHandlers() {
           partialCommitted: partial.partialCommitted === true,
           records: Array.isArray(partial.records) ? partial.records : []
         };
+        if (service) {
+          await taskContext.settleArtifacts({ result: businessResult, error });
+          service.syncImportArchiveLineage();
+        }
+        return businessResult;
       }
     }
   });
@@ -14046,14 +14200,6 @@ function registerNewAccountHandlers() {
     return getVccFinancialOpService().listImportRecords(payload.yearMonth);
   });
 
-  ipcMain.handle('vccFinancialOp:imports:get-detail', (_event, payload = {}) => {
-    try {
-      return { status: 'success', ...getVccFinancialOpService().getImportRecordDetail(payload) };
-    } catch (error) {
-      return { status: 'error', message: error && error.message ? error.message : String(error) };
-    }
-  });
-
   trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', {
     execute: async (_event, _prepared, taskContext, payload = {}) => {
       try {
@@ -14075,6 +14221,55 @@ function registerNewAccountHandlers() {
       return { status: 'success', ...getVccFinancialOpService().dataManagerOverview(payload.yearMonth) };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:storage:inspect', () => {
+    try {
+      return getVccStorageMigrationCoordinator().inspect();
+    } catch (error) {
+      return { status: 'error', code: error.code, message: error.message || String(error) };
+    }
+  });
+
+  ipcMain.handle('vccFinancialOp:storage:migrate', async () => {
+    try {
+      const coordinator = getVccStorageMigrationCoordinator();
+      const inspection = coordinator.inspect();
+      if (inspection.status !== 'success') return inspection;
+      if (!inspection.migrationRequired) {
+        return { status: 'success', noChange: true, message: 'VCC 存储已经是最新合同' };
+      }
+      if (!inspection.ready) {
+        return {
+          status: 'error',
+          code: 'vcc-storage-not-ready',
+          message: '仍有未终态导入或 staging 数据，请完成恢复后再优化存储'
+        };
+      }
+      const formatGiB = (bytes) => `${(Number(bytes || 0) / (1024 ** 3)).toFixed(2)} GB`;
+      const confirmation = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: '优化 VCC 存储',
+        message: '将进入维护模式并重建数据库，期间不能开始其他任务。',
+        detail: [
+          `当前数据库：${formatGiB(inspection.sourceBytes)}`,
+          `当前 VCC 核心表：${formatGiB(inspection.vccCoreBytes)}`,
+          `候选数据库保守估算：${formatGiB(inspection.estimatedTargetBytes)}`,
+          '迁移会执行 WAL 截断、完整性检查、逐项守恒验证和原子切换。',
+          '验证失败时旧数据库保持不变；成功后应用会自动重启。'
+        ].join('\n'),
+        buttons: ['开始优化', '取消'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        checkboxLabel: '首次只读校验成功后自动删除旧数据库备份',
+        checkboxChecked: false
+      });
+      if (confirmation.response !== 0) return { status: 'cancelled' };
+      return await coordinator.run({ deleteOldDatabase: confirmation.checkboxChecked === true });
+    } catch (error) {
+      return { status: 'error', code: error.code, message: error.message || String(error) };
     }
   });
 
@@ -14128,6 +14323,7 @@ function registerNewAccountHandlers() {
               event.sender.send('vccFinancialOp:operation:progress', progress);
             }
           }, requireVccFinancialOpBatchContext(taskContext));
+          service.syncImportArchiveLineage();
           return {
             ...result,
             targetType: result.targetType || payload.targetType || payload.sourceType,
@@ -14162,22 +14358,52 @@ function registerNewAccountHandlers() {
             result: { status: 'error', message: inspection.message || '当前选择没有可导出的有效数据' }
           };
         }
+        if (inspection.incomplete) {
+          const confirmation = await dialog.showMessageBox(mainWindow, {
+            type: 'warning',
+            title: '导出不完整校验原表',
+            message: '历史数据存在原表血缘缺口，本次只能导出已覆盖数据和缺口说明。',
+            detail: [
+              `有效总行数：${inspection.totalRows}`,
+              `可导出行数：${inspection.exportableRows}`,
+              `缺失行数：${inspection.missingRows}`,
+              '导出文件将包含“导出说明”sheet，并在文件名中标记“不完整”。'
+            ].join('\n'),
+            buttons: ['继续不完整导出', '取消'],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true
+          });
+          if (confirmation.response !== 0) {
+            return { proceed: false, result: { status: 'cancelled' } };
+          }
+        }
         const choice = await dialog.showSaveDialog(mainWindow, {
           title: '导出 VCC 财务OP数据',
           defaultPath: path.join(
             app.getPath('documents'),
-            `${inspection.targetMonth}_${sanitizeFileName(inspection.tableName) || 'VCC财务OP数据'}.xlsx`
+            `${inspection.targetMonth}_${sanitizeFileName(inspection.tableName) || 'VCC财务OP数据'}${inspection.incomplete ? ' 不完整' : ''}.xlsx`
           ),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
         if (choice.canceled || !choice.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
+        let outputPath = choice.filePath;
+        if (inspection.incomplete && !path.basename(outputPath, path.extname(outputPath)).includes('不完整')) {
+          const extension = path.extname(outputPath) || '.xlsx';
+          outputPath = path.join(
+            path.dirname(outputPath),
+            `${path.basename(outputPath, path.extname(outputPath))} 不完整${extension}`
+          );
+        }
         return {
           proceed: true,
-          outputPaths: [choice.filePath],
-          outputPath: choice.filePath,
-          targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
+          outputPaths: [outputPath],
+          outputPath,
+          expectedInspection: inspection,
+          taskGeneration: inspection.taskGeneration,
+          targetSnapshots: captureToolboxTargetSnapshots([outputPath])
         };
       } catch (error) {
         return {
@@ -14194,6 +14420,8 @@ function registerNewAccountHandlers() {
           ...payload,
           outputPath: prepared.outputPath,
           generationOutputPath: path.join(publicationStagingDirectory, 'dataset.xlsx'),
+          expectedInspection: prepared.expectedInspection,
+          taskGeneration: prepared.taskGeneration,
           targetSnapshots: prepared.targetSnapshots,
           onDurableHandoff: (_publication, exportResult) => taskContext.settleArtifacts({
             result: { status: 'success', filePath: prepared.outputPath }
@@ -14310,10 +14538,10 @@ function registerNewAccountHandlers() {
     prepare: async (_event, payload = {}) => {
       try {
         const choice = await dialog.showSaveDialog(mainWindow, {
-          title: '导出校验原表导入审计',
+          title: '导出 VCC 异常明细',
           defaultPath: path.join(
             app.getPath('documents'),
-            `VCC财务OP导入审计_${payload.recordId || ''}.xlsx`
+            `VCC财务OP异常明细_${payload.recordId || ''}.xlsx`
           ),
           filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
@@ -14340,7 +14568,7 @@ function registerNewAccountHandlers() {
         const result = await getVccFinancialOpService().exportImportAudit({
           ...payload,
           outputPath: prepared.outputPath,
-          generationOutputPath: path.join(publicationStagingDirectory, 'import-audit.xlsx'),
+          generationOutputPath: path.join(publicationStagingDirectory, 'import-anomalies.xlsx'),
           targetSnapshots: prepared.targetSnapshots,
           onDurableHandoff: () => taskContext.settleArtifacts({
             result: { status: 'success', filePath: prepared.outputPath }
@@ -18634,7 +18862,49 @@ function statementArchiveRuntime() {
   };
 }
 
+async function persistVccImportArchiveHandoff(args, batchContext) {
+  const center = archiveCenterService || initializeArchiveCenter();
+  if (!center
+      || typeof center.persistAppendIntent !== 'function'
+      || typeof center.flushOutbox !== 'function') {
+    const error = new Error('VCC 导入输入文件无法形成耐久存档接管，业务未开始');
+    error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_UNAVAILABLE';
+    throw error;
+  }
+  const files = await buildVccImportArchiveHandoffFiles(args, batchContext);
+  const persisted = center.persistAppendIntent({
+    batchContext,
+    sourceOperation: 'vccFinancialOp:import:apply',
+    files,
+    metadata: { vccImportHandoffVersion: 1 }
+  });
+  if (!persisted || persisted.persisted !== true) {
+    const error = new Error('VCC 导入输入文件耐久接管登记失败，业务未开始');
+    error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_FAILED';
+    throw error;
+  }
+  try {
+    // 正常路径尽早形成 ready/failed artifact；即使 Archive 暂不可写，已经 fsync 的
+    // outbox 仍是业务开始前的唯一耐久接管根，启动 owner 会在原批次继续重放。
+    await center.flushOutbox();
+  } catch (error) {
+    appendActivityLogEntry({
+      level: 'warning',
+      source: 'main',
+      domain: 'vcc-financial-op',
+      message: 'VCC 导入输入存档即时重放失败，已保留耐久接管供启动恢复',
+      details: [error && error.message ? error.message : String(error)]
+    });
+  }
+  return files;
+}
+
 async function buildArchiveRuntimeSnapshot(channel, args, result) {
+  if (channel === 'vccFinancialOp:import:apply') {
+    return {
+      inputFiles: buildVccImportArchiveInputFiles(args, result)
+    };
+  }
   if (channel === 'file:import'
       || channel === 'file:complete-big-account-selection'
       || channel === 'file:save-balance-seed') {
@@ -18898,13 +19168,19 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     if (!prepared.proceed) return prepared.result;
 
     const effectiveArgs = prepared.args;
-    const executeBusiness = (taskContext) => executeIpcTaskInvocation(
-      contract,
-      event,
-      prepared,
-      effectiveArgs,
-      taskContext
-    );
+    let vccImportArchiveHandoffFiles = null;
+    const executeBusiness = (taskContext) => {
+      const invocationTaskContext = meta.channel === 'vccFinancialOp:import:apply' && taskContext
+        ? Object.freeze({ ...taskContext, vccImportArchiveHandoffFiles })
+        : taskContext;
+      return executeIpcTaskInvocation(
+        contract,
+        event,
+        prepared,
+        effectiveArgs,
+        invocationTaskContext
+      );
+    };
     const policy = taskPolicyRegistry.get(meta.channel);
     if (!policy) {
       if (!pr3TaskPolicyHandoff.has(meta.channel)) {
@@ -18983,9 +19259,13 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       afterTerminalIntent: isPositionOperation
         ? { route: 'position-reconciliation', operationToken: positionOperationToken }
         : null,
-      beforeStart: async () => {
+      beforeStart: async (batchContext) => {
         if (typeof prepared.beforeStart === 'function') await prepared.beforeStart();
+        vccImportArchiveHandoffFiles = meta.channel === 'vccFinancialOp:import:apply'
+          ? await persistVccImportArchiveHandoff(effectiveArgs, batchContext)
+          : [];
         return {
+          vccImportHandoffFiles: vccImportArchiveHandoffFiles,
           sourceSnapshots: captureArchiveSourceSnapshots({
           args: [],
           result: null,
@@ -19248,6 +19528,9 @@ function registerAllIpcHandlers() {
 //   setImmediate 回调晚于本函数同步体执行，database 已就绪。
 async function runBackgroundInitChain() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
+    // v3.1.10：VCC copy-on-write 迁移恢复必须先于任何数据库连接。
+    // setting 真相仍在主库；journal 只负责 prepared/switching/switched 崩溃窗口收口。
+    recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
     // v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 会同步阻塞主进程（大库分钟级）——新时序下窗口已显示 loading 态，
     //   故在 database.init()（内含 VACUUM）之前发一次状态文案，让 loading 态显示「正在优化数据库…请勿关闭程序」。
     //   仅当 VACUUM 待执行（标志位未写）且库文件较大（>500MB，确实膨胀值得多分钟提示）时发；否则发通用「正在初始化…」。
@@ -19265,6 +19548,9 @@ async function runBackgroundInitChain() {
     if (toolboxStartupRecoveryError) throw toolboxStartupRecoveryError;
     // Toolbox committed publication 已作为 ArchiveCenter owner recovery 在通用
     // interrupted sweep 前写入“附件 + succeeded”耐久 outbox 并完成重放。
+    // VCC 输入文件的 ready artifact 可能来自上次退出后的 outbox/retry；必须在
+    // app:init-done 前绑定 source 与业务 hold，不能留出可删除窗口。
+    getVccFinancialOpService().syncImportArchiveLineage();
     markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
@@ -20063,12 +20349,34 @@ function listPendingCleanupRunsForQuit() {
   return [];
 }
 
-async function prepareApplicationForQuit() {
+async function prepareApplicationForQuit(options = {}) {
   if (quitPreparationComplete) return;
   if (quitPreparationPromise) return quitPreparationPromise;
 
+  const suppliedTransitionToken = options.transitionToken == null
+    ? null
+    : options.transitionToken;
+  const suppliedTransitionOwner = String(options.transitionOwner || '');
+  let acquiredTransitionToken = null;
   quitPreparationPromise = (async () => {
-    businessOperationRegistry.beginShutdownTransition();
+    if (suppliedTransitionToken !== null) {
+      if (suppliedTransitionOwner !== 'app-updater'
+          || suppliedTransitionToken !== appUpdateTransitionToken) {
+        const error = new Error('升级退出未持有匹配的 updater transition lease');
+        error.code = 'APP_UPDATE_TRANSITION_TOKEN_MISMATCH';
+        throw error;
+      }
+      acquiredTransitionToken = suppliedTransitionToken;
+    } else {
+      const transition = businessOperationRegistry.beginShutdownTransition('app-exit');
+      if (!transition.acquired) {
+        const error = new Error(`退出维护闸门正由 ${transition.owner || '其他维护任务'} 持有`);
+        error.code = 'APP_SHUTDOWN_TRANSITION_BUSY';
+        error.transitionOwner = transition.owner || '';
+        throw error;
+      }
+      acquiredTransitionToken = transition.token;
+    }
     const businessDrainTimer = setTimeout(() => {
       appendActivityLogEntry({
         level: 'warning',
@@ -20145,7 +20453,12 @@ async function prepareApplicationForQuit() {
     quitPreparationComplete = true;
   })().finally(() => {
     if (!quitPreparationComplete) {
-      businessOperationRegistry.cancelInstallTransition();
+      if (acquiredTransitionToken !== null
+          && acquiredTransitionToken === appUpdateTransitionToken) {
+        releaseAppUpdateTransition();
+      } else if (acquiredTransitionToken !== null) {
+        businessOperationRegistry.releaseTransition(acquiredTransitionToken);
+      }
       quitPreparationPromise = null;
     }
   });

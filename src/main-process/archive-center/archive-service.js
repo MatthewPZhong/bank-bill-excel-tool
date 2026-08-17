@@ -89,6 +89,42 @@ function safeFailure(error, operation, originalName = '') {
   };
 }
 
+function normalizeExpectedFileEvidence(payload, originalName, sourceSnapshot = null) {
+  const payloadMetadata = payload.metadata && typeof payload.metadata === 'object'
+    ? payload.metadata
+    : {};
+  const expectedShaValue = payload.expectedSha256 ?? payloadMetadata.expectedSha256;
+  const rawExpectedSha256 = expectedShaValue == null
+    ? ''
+    : String(expectedShaValue).trim().toLowerCase();
+  if (rawExpectedSha256 && !SHA256_RE.test(rawExpectedSha256)) {
+    throw new ArchiveOperationError(
+      'ARCHIVE_EXPECTED_SHA_INVALID',
+      `文件“${originalName}”缺少合法的业务解析摘要`
+    );
+  }
+  const rawExpectedSizeBytes = payload.expectedSizeBytes
+    ?? payload.sizeBytes
+    ?? payloadMetadata.expectedSizeBytes
+    ?? (rawExpectedSha256 && sourceSnapshot ? sourceSnapshot.sizeBytes : undefined);
+  let expectedSizeBytes = null;
+  if (rawExpectedSizeBytes !== undefined && rawExpectedSizeBytes !== null) {
+    expectedSizeBytes = Number(rawExpectedSizeBytes);
+    if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_EXPECTED_SIZE_INVALID',
+        `文件“${originalName}”缺少合法的业务解析大小`
+      );
+    }
+  }
+  return {
+    expectedSha256: rawExpectedSha256,
+    expectedSizeBytes,
+    hasExpectedSha256: Boolean(rawExpectedSha256),
+    hasExpectedSizeBytes: expectedSizeBytes !== null
+  };
+}
+
 function isFileIntegrityFailure(result) {
   return result && [
     'ARCHIVE_LAYOUT_MISSING',
@@ -1598,6 +1634,43 @@ class ArchiveService {
     const existingArtifact = this.repository.getArtifactByKey(batch.id, artifactKey);
     if (existingArtifact) {
       if (existingArtifact.status === 'ready' && existingArtifact.blob) {
+        let expected;
+        try {
+          expected = normalizeExpectedFileEvidence(
+            payload,
+            originalName,
+            normalizeSourceSnapshot(payload.sourceSnapshot)
+          );
+        } catch (error) {
+          return { result: {
+            ok: false,
+            status: 'failed',
+            artifact: publicArtifact(existingArtifact),
+            batch,
+            metadataRecorded: false,
+            ...safeFailure(error, '核验', originalName)
+          } };
+        }
+        const expectationConflict = (
+          expected.hasExpectedSha256
+          && String(existingArtifact.blob.sha256 || '').toLowerCase()
+            !== expected.expectedSha256
+        ) || (
+          expected.hasExpectedSizeBytes
+          && Number(existingArtifact.blob.sizeBytes) !== expected.expectedSizeBytes
+        );
+        if (expectationConflict) {
+          return { result: {
+            ok: false,
+            status: 'conflict',
+            code: 'ARCHIVE_READY_ARTIFACT_EXPECTATION_CONFLICT',
+            message: `文件“${originalName}”的既有存档版本与本次业务证据不一致`,
+            retryable: false,
+            artifact: publicArtifact(existingArtifact),
+            batch,
+            metadataRecorded: false
+          } };
+        }
         return { artifact: existingArtifact, materializeOnly: true };
       }
       if (existingArtifact.status === 'failed') this.repository.beginBatchRetry(batch.id);
@@ -1611,29 +1684,9 @@ class ArchiveService {
         : {};
       const sourceSnapshot = normalizeSourceSnapshot(payload.sourceSnapshot);
       if (sourceSnapshot) metadata.sourceSnapshot = sourceSnapshot;
-      const rawExpectedSha256 = payload.expectedSha256 == null
-        ? ''
-        : String(payload.expectedSha256).trim().toLowerCase();
-      if (rawExpectedSha256 && !SHA256_RE.test(rawExpectedSha256)) {
-        throw new ArchiveOperationError(
-          'ARCHIVE_EXPECTED_SHA_INVALID',
-          `文件“${originalName}”缺少合法的业务解析摘要`
-        );
-      }
-      if (rawExpectedSha256) metadata.expectedSha256 = rawExpectedSha256;
-      const rawExpectedSizeBytes = payload.expectedSizeBytes
-        ?? payload.sizeBytes
-        ?? (rawExpectedSha256 && sourceSnapshot ? sourceSnapshot.sizeBytes : undefined);
-      if (rawExpectedSizeBytes !== undefined && rawExpectedSizeBytes !== null) {
-        const expectedSizeBytes = Number(rawExpectedSizeBytes);
-        if (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0) {
-          throw new ArchiveOperationError(
-            'ARCHIVE_EXPECTED_SIZE_INVALID',
-            `文件“${originalName}”缺少合法的业务解析大小`
-          );
-        }
-        metadata.expectedSizeBytes = expectedSizeBytes;
-      }
+      const expected = normalizeExpectedFileEvidence(payload, originalName, sourceSnapshot);
+      if (expected.hasExpectedSha256) metadata.expectedSha256 = expected.expectedSha256;
+      if (expected.hasExpectedSizeBytes) metadata.expectedSizeBytes = expected.expectedSizeBytes;
       artifactPayload = {
         artifactKey,
         direction: payload.direction || 'input',
@@ -2086,6 +2139,16 @@ class ArchiveService {
         batch: deleted.batch
       };
     }
+    if (deleted.status === 'business-held') {
+      return {
+        ok: false,
+        status: 'business-held',
+        code: 'ARCHIVE_BATCH_BUSINESS_HELD',
+        message: '批次输入文件仍被当前有效业务数据引用，不能解锁或删除',
+        batch: deleted.batch,
+        artifactIds: deleted.artifactIds
+      };
+    }
     await this._releaseSourcePaths(sourcePaths);
     const physical = deleted.cleanupJob
       ? await this._executeCleanupJobUnlocked(deleted.cleanupJob)
@@ -2228,6 +2291,22 @@ class ArchiveService {
       filePath: canonicalPath,
       repairPending: true
     };
+  }
+
+  async resolveVerifiedArtifact(artifactId) {
+    return this._run('resolveVerifiedArtifact', async () => {
+      const ready = await this._readyArtifact(artifactId);
+      if (!ready.ok) return ready;
+      return {
+        ok: true,
+        artifactId: Number(ready.artifact.id),
+        filePath: ready.filePath,
+        sha256: ready.artifact.blob.sha256,
+        sizeBytes: ready.artifact.blob.sizeBytes,
+        originalName: ready.artifact.originalName,
+        repairPending: ready.repairPending === true
+      };
+    });
   }
 
   async openReadonlyCopy(artifactId, options = {}) {

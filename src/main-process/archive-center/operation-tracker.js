@@ -355,7 +355,13 @@ function resolveOperationFiles(operation = {}) {
     inputPaths = normalizePathList(runtime.inputPaths || []);
   }
   if (channel === 'vccFinancialOp:import:apply') {
-    inputPaths = successfulVccImportPaths(payload, operation.result);
+    const evidencedInputPaths = normalizePathList(
+      (Array.isArray(runtime.inputFiles) ? runtime.inputFiles : [])
+        .map((item) => item && item.filePath)
+    );
+    inputPaths = evidencedInputPaths.length > 0
+      ? evidencedInputPaths
+      : successfulVccImportPaths(payload, operation.result);
   }
 
   let outputPaths = normalizePathList(runtime.outputPaths || []);

@@ -9,6 +9,11 @@ const {
 } = require('../../../../src/backend/vcc-financial-op-db/migrations');
 const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
 const {
+  VCC_STORAGE_CONTRACT_VERSION,
+  createSlimEffectiveRowsTable,
+  setVccStorageContractVersion
+} = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
+const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES
 } = require('../../../../src/backend/vcc-financial-op/definitions');
@@ -40,6 +45,42 @@ function createDb() {
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
   return db;
+}
+
+function replaceEffectiveRowsWithSlimSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+  `);
+  createSlimEffectiveRowsTable(db, 'vcc_fin_op_effective_rows_v2_test');
+  db.exec(`
+    INSERT INTO vcc_fin_op_effective_rows_v2_test (
+      id, source_type, idempotency_key, content_hash, hash_version,
+      raw_contract_version, legacy_content_hash, target_month, subject,
+      stat_currency, signed_amount, business_department, counterparty_department,
+      business_sub_type, channel_name, mid, recon_type, pending_currency,
+      pending_amount, flow_currency, flow_amount, currency_mismatch,
+      import_record_id, import_source_id, sheet_name, source_row, first_imported_at
+    )
+    SELECT
+      id, source_type, idempotency_key, content_hash, hash_version,
+      raw_contract_version, legacy_content_hash, target_month, subject,
+      stat_currency, signed_amount, business_department, counterparty_department,
+      business_sub_type, channel_name, mid, recon_type, pending_currency,
+      pending_amount, flow_currency, flow_amount, currency_mismatch,
+      import_record_id, import_source_id, sheet_name, source_row, first_imported_at
+    FROM vcc_fin_op_effective_rows;
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE vcc_fin_op_effective_rows;
+    ALTER TABLE vcc_fin_op_effective_rows_v2_test RENAME TO vcc_fin_op_effective_rows;
+  `);
+  setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+  ensureVccFinancialOpTablesSupport(db);
+  db.exec('PRAGMA foreign_keys = ON');
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 }
 
 function fixedBalances(value = '100') {
@@ -824,6 +865,35 @@ test('逐主体逐币种精确汇总四类发生额并计算系统差异', (t) =
     pendingTotals.map((row) => [row.currency, row.amount]),
     [['EUR', '5'], ['USD', '-5']]
   );
+});
+
+test('storage contract v2 slim effective 保持计算、九币种余额与归档语义', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  seedCompleteMonth(db);
+  replaceEffectiveRowsWithSlimSchema(db);
+
+  const calculated = calculateCurrent(db);
+  assert.equal(calculated.status, 'calculated');
+  const byCurrency = Object.fromEntries(calculated.balances.map((row) => [row.currency, row]));
+  assert.equal(byCurrency.USD.calculatedBalance, '103');
+  assert.equal(byCurrency.CNY.calculatedBalance, '100');
+  assert.equal(byCurrency.EUR.calculatedBalance, '108');
+
+  const archived = archiveRun({
+    db,
+    runId: calculated.runId,
+    expectedResultRevision: 0
+  });
+  assert.equal(archived.status, 'archived');
+  assert.equal(JSON.parse(db.prepare(`
+    SELECT balances_json FROM vcc_fin_op_archives
+    WHERE target_month = '2026-06' AND subject = 'PPHK'
+  `).get().balances_json).USD, '103');
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_datasets
+    WHERE target_month = '2026-06' AND data_status = 'archived'
+  `).get().n, 5);
 });
 
 test('历史有效明细的 CNH 只读归一为 CNY 且不改原始事实', (t) => {

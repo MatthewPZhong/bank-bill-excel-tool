@@ -7,6 +7,14 @@ const {
   ensureVccFinancialOpTablesSupport
 } = require('../../../../src/backend/vcc-financial-op-db/migrations');
 const {
+  VCC_STORAGE_CONTRACT_VERSION,
+  VCC_STORAGE_GUARD_TRIGGER_PREFIX,
+  VCC_STORAGE_WRITE_CAPABILITY_FUNCTION,
+  VCC_STORAGE_WRITE_CAPABILITY_TOKEN,
+  setVccStorageContractVersion,
+  vccStorageGuardTriggerDefinition
+} = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
+const {
   VCC_MUTATION_OPERATIONS,
   LARGE_TABLE_SCOPE_PROOF_TABLES,
   VCC_TABLE_POLICY_REGISTRY,
@@ -29,6 +37,17 @@ function createDb(t) {
   ensureVccFinancialOpTablesSupport(db);
   t.after(() => db.close());
   return db;
+}
+
+function enableStorageContractV2(db) {
+  db.exec(`
+    CREATE TABLE app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
 }
 
 function adjustmentPlan() {
@@ -83,7 +102,7 @@ test('mutation runtime probe 验证 session、trigger、total_changes 与关闭�
 
 test('table policy 与 migrated schema exact-match，四张大表不创建 session', (t) => {
   const db = createDb(t);
-  assert.equal(Object.keys(VCC_TABLE_POLICY_REGISTRY).length, 19);
+  assert.equal(Object.keys(VCC_TABLE_POLICY_REGISTRY).length, 23);
   assert.deepEqual(
     Object.entries(VCC_TABLE_POLICY_REGISTRY)
       .filter(([, policy]) => policy.protection === 'large-table-scope-proof')
@@ -91,7 +110,7 @@ test('table policy 与 migrated schema exact-match，四张大表不创建 sessi
       .sort(),
     [...LARGE_TABLE_SCOPE_PROOF_TABLES].sort()
   );
-  assert.deepEqual(assertVccMutationSchema(db), { ready: true, tableCount: 19 });
+  assert.deepEqual(assertVccMutationSchema(db), { ready: true, tableCount: 23 });
 
   const sessionTables = [];
   db.exec('BEGIN IMMEDIATE');
@@ -103,7 +122,7 @@ test('table policy 与 migrated schema exact-match，四张大表不创建 sessi
   });
   db.exec('ROLLBACK');
   closeMutationGuard(guard);
-  assert.equal(sessionTables.length, 13);
+  assert.equal(sessionTables.length, 17);
   for (const tableName of LARGE_TABLE_SCOPE_PROOF_TABLES) {
     assert.equal(sessionTables.includes(tableName), false);
   }
@@ -136,6 +155,56 @@ test('未知 VCC 表与 trigger 均在业务写入前失败关闭', (t) => {
   }
 });
 
+test('storage contract guard 仅在名称、目标表与能力 SQL 全部精确匹配时批准', (t) => {
+  const validDb = createDb(t);
+  enableStorageContractV2(validDb);
+  assert.deepEqual(assertVccTriggerPolicy(validDb), {
+    approved: true,
+    triggerCount: Object.keys(VCC_TABLE_POLICY_REGISTRY).length * 3
+  });
+
+  const forgedNameDb = createDb(t);
+  forgedNameDb.exec(`
+    CREATE TRIGGER ${VCC_STORAGE_GUARD_TRIGGER_PREFIX}forged
+    BEFORE INSERT ON vcc_fin_op_runs
+    BEGIN SELECT RAISE(ABORT, 'forged'); END
+  `);
+  assert.throws(() => assertVccTriggerPolicy(forgedNameDb), {
+    code: 'vcc-trigger-policy-violation'
+  });
+
+  const wrongTableDb = createDb(t);
+  const expected = vccStorageGuardTriggerDefinition('vcc_fin_op_runs', 'insert');
+  wrongTableDb.exec(`
+    CREATE TRIGGER ${expected.name}
+    BEFORE INSERT ON vcc_fin_op_module_state
+    BEGIN
+      SELECT CASE
+        WHEN ${VCC_STORAGE_WRITE_CAPABILITY_FUNCTION}() <> '${VCC_STORAGE_WRITE_CAPABILITY_TOKEN}'
+        THEN RAISE(ABORT, 'VCC storage contract v2 write capability required')
+      END;
+    END
+  `);
+  assert.throws(() => assertVccTriggerPolicy(wrongTableDb), {
+    code: 'vcc-trigger-policy-violation'
+  });
+
+  const wrongSqlDb = createDb(t);
+  wrongSqlDb.exec(`
+    CREATE TRIGGER ${expected.name}
+    BEFORE INSERT ON vcc_fin_op_runs
+    BEGIN
+      SELECT CASE
+        WHEN ${VCC_STORAGE_WRITE_CAPABILITY_FUNCTION}() = '${VCC_STORAGE_WRITE_CAPABILITY_TOKEN}'
+        THEN RAISE(ABORT, 'VCC storage contract v2 write capability required')
+      END;
+    END
+  `);
+  assert.throws(() => assertVccTriggerPolicy(wrongSqlDb), {
+    code: 'vcc-trigger-policy-violation'
+  });
+});
+
 test('registry 保持 C1 adjustment 预算为 2 且 C1 operation 零大表 step', (t) => {
   const db = createDb(t);
   seedRun(db);
@@ -148,6 +217,8 @@ test('registry 保持 C1 adjustment 预算为 2 且 C1 operation 零大表 step'
       'vcc_fin_op_dataset_deletions',
       'vcc_fin_op_datasets',
       'vcc_fin_op_effective_rows',
+      'vcc_fin_op_effective_raw_fallback',
+      'vcc_fin_op_import_anomalies',
       'vcc_fin_op_import_records',
       'vcc_fin_op_import_rows',
       'vcc_fin_op_opening_balances',

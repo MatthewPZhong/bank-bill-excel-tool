@@ -25,6 +25,9 @@ const {
   createArchiveOperationTracker
 } = require('../../../src/main-process/archive-center/operation-tracker');
 const {
+  buildVccImportArchiveHandoffFiles
+} = require('../../../src/main-process/vcc-financial-op-archive-lineage');
+const {
   WORKER_BATCH_CONTEXT_FIELDS
 } = require('../../../src/main-process/archive-center/worker-batch-context');
 const {
@@ -147,6 +150,29 @@ async function waitUntil(check, timeoutMs = 20000) {
   }
   throw new Error('等待真实 VCC worker 状态超时');
 }
+
+test('main 在业务开始前生成 VCC handoff，并把同一不可变证据送入 import worker', () => {
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  const lifecycleStart = mainSource.indexOf('async function runArchiveAwareOperation');
+  const lifecycleEnd = mainSource.indexOf('function runRegisteredBusinessOperation', lifecycleStart);
+  const lifecycleSource = mainSource.slice(lifecycleStart, lifecycleEnd);
+  assert.match(
+    lifecycleSource,
+    /let vccImportArchiveHandoffFiles = null;[\s\S]*?Object\.freeze\(\{ \.\.\.taskContext, vccImportArchiveHandoffFiles \}\)/
+  );
+  assert.match(
+    lifecycleSource,
+    /vccImportArchiveHandoffFiles = meta\.channel === 'vccFinancialOp:import:apply'[\s\S]*?persistVccImportArchiveHandoff\(effectiveArgs, batchContext\)/
+  );
+
+  const handlerStart = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:import:apply'");
+  const handlerEnd = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:run:calculate'", handlerStart);
+  const handlerSource = mainSource.slice(handlerStart, handlerEnd);
+  assert.match(
+    handlerSource,
+    /service\.importSelectedFiles\([\s\S]*?batchContext, taskContext\.vccImportArchiveHandoffFiles\)/
+  );
+});
 
 test('VCC calculate reserve 失败时零 worker，成功时 exact7 贯穿并绑定 run identity', async (t) => {
   const registry = createTaskPolicyRegistry();
@@ -472,14 +498,26 @@ test('真实 worker 强杀后按 taskRunId 恢复 partial records、成功输入
       { filePath: systemPath, sourceType: SOURCE_TYPES.SYSTEM_OP, sheetName: 'System' }
     ]
   };
+  let archiveHandoffFiles = null;
   const lifecycleRun = harness.lifecycle.run({
     meta: { channel: policy.channel },
     policy,
     args: [payload],
+    beforeStart: async (batchContext) => {
+      archiveHandoffFiles = await buildVccImportArchiveHandoffFiles(payload, batchContext);
+    },
     resultFlowIdentities: (result) => policy.resultFlowIdentities(result),
     execute: async (batchContext) => {
       try {
-        return { status: 'success', ...await service.importSelectedFiles(payload, null, batchContext) };
+        return {
+          status: 'success',
+          ...await service.importSelectedFiles(
+            payload,
+            null,
+            batchContext,
+            archiveHandoffFiles
+          )
+        };
       } catch (error) {
         const partial = error && error.partialResult && typeof error.partialResult === 'object'
           ? error.partialResult

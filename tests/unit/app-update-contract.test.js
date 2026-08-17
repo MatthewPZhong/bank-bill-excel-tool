@@ -152,6 +152,26 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.doesNotMatch(checkHandler, /error\.message/);
   });
 
+  test('升级与普通退出只按持有者 token 获取和释放统一维护闸门', () => {
+    const main = read('src/main.js');
+    const updaterStart = main.indexOf('function releaseAppUpdateTransition()');
+    const updaterEnd = main.indexOf('\nfunction getFallbackAppUpdateStatus()', updaterStart);
+    const updaterFlow = main.slice(updaterStart, updaterEnd);
+    assert.match(updaterFlow, /beginInstallTransition\('app-updater'\)/);
+    assert.match(updaterFlow, /appUpdateTransitionToken = gate\.token/);
+    assert.match(updaterFlow, /releaseTransition\(token\)/);
+    assert.match(updaterFlow, /if \(released && appUpdateTransitionToken === token\)/);
+    assert.doesNotMatch(updaterFlow, /cancelInstallTransition\(\s*\)/);
+
+    const quitStart = main.indexOf('async function prepareApplicationForQuit');
+    const quitEnd = main.indexOf('\nfunction resumeApplicationAfterFailedRestart', quitStart);
+    const quitFlow = main.slice(quitStart, quitEnd);
+    assert.match(quitFlow, /beginShutdownTransition\('app-exit'\)/);
+    assert.match(quitFlow, /if \(!transition\.acquired\)/);
+    assert.match(quitFlow, /suppliedTransitionToken !== appUpdateTransitionToken/);
+    assert.match(quitFlow, /releaseTransition\(acquiredTransitionToken\)/);
+  });
+
   test('Windows 发布工作流验证 main、版本、更新哈希并直接发布稳定 Release', () => {
     const workflow = read('.github/workflows/release-windows.yml');
     const ordinaryBuild = read('.github/workflows/build-windows.yml');

@@ -23,6 +23,11 @@ const {
   systemHeaderMismatchDetails
 } = require('./workbook-reader');
 const repository = require('../vcc-financial-op-db/repository');
+const {
+  attachSourceIdentity,
+  assertSourceFileMatchesSync,
+  hashSourceFileSync
+} = require('./source-lineage');
 
 // 低于 2^46 时 IEEE-754 相邻数间距小于 0.01；达到该数量级后，只有
 // SheetJS Number 而没有 OOXML lexical token 时无法证明分币未在解析前合并。
@@ -644,12 +649,13 @@ function readSystemOpSnapshot(filePath, targetMonth, subject = '', preferredShee
 function insertAttempt(db, recordId, snapshot, disposition, existingSnapshotId, message) {
   const result = db.prepare(`
     INSERT INTO vcc_fin_op_system_snapshot_attempts (
-      import_record_id, target_month, subject, balances_json, content_hash,
+      import_record_id, import_source_id, target_month, subject, balances_json, content_hash,
       source_file, sheet_name, source_row, raw_json,
       disposition, existing_snapshot_id, message
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     recordId,
+    snapshot.importSourceId || null,
     snapshot.targetMonth,
     snapshot.subject,
     snapshot.balancesJson,
@@ -665,33 +671,90 @@ function insertAttempt(db, recordId, snapshot, disposition, existingSnapshotId, 
   return Number(result.lastInsertRowid);
 }
 
+function addSystemValidationAnomaly(db, recordId, file, error) {
+  const fieldName = String(error.fieldName || '');
+  const category = [
+    SYSTEM_OP_DEFINITION.subjectHeader,
+    SYSTEM_OP_DEFINITION.departmentHeader
+  ].includes(fieldName)
+    ? 'system_subject_error'
+    : (error.hardFailure ? 'file_failure' : 'format_error');
+  return repository.addImportAnomaly(db, recordId, {
+    importSourceId: file.importSourceId,
+    category,
+    sourceFile: path.basename(file.filePath),
+    sheetName: error.sheetName || file.sheetName || '',
+    sourceRow: error.sourceRow,
+    abnormalFields: fieldName ? [fieldName] : [],
+    description: error.message
+  });
+}
+
+function addSystemConflictAnomaly(db, recordId, item) {
+  return repository.addImportAnomaly(db, recordId, {
+    importSourceId: item.snapshot.importSourceId,
+    category: 'idempotent_conflict',
+    idempotencyKey: item.snapshot.subject,
+    sourceFile: item.snapshot.sourceFile,
+    sheetName: item.snapshot.sheetName,
+    sourceRow: item.snapshot.sourceRow,
+    abnormalFields: ['财务余额'],
+    description: '同一账期和主体的系统财务OP余额不一致',
+    incomingContentHash: item.snapshot.contentHash,
+    existingContentHash: item.existing ? item.existing.content_hash : null,
+    diffFields: ['财务余额']
+  });
+}
+
 function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: preparedRecordId }) {
   const normalizedMonth = normalizeYearMonth(targetMonth);
   if (!normalizedMonth) throw new Error(`系统财务OP账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('系统财务OP至少需要一个文件');
-  const recordId = preparedRecordId || repository.createImportRecord(db, {
-    batchId,
-    targetMonth: normalizedMonth,
-    sourceType: SOURCE_TYPES.SYSTEM_OP,
-    sourceFiles: files.map((file) => path.basename(file.filePath))
-  });
+  let importFiles = files;
+  let recordId = preparedRecordId;
+  if (!recordId) {
+    const hashedFiles = files.map((file) => ({ ...file, ...hashSourceFileSync(file.filePath) }));
+    recordId = repository.createImportRecord(db, {
+      batchId,
+      targetMonth: normalizedMonth,
+      sourceType: SOURCE_TYPES.SYSTEM_OP,
+      sourceFiles: hashedFiles.map((file) => path.basename(file.filePath))
+    });
+    importFiles = hashedFiles.map((file, index) => ({
+      ...file,
+      sourceOrdinal: index + 1,
+      importSourceId: repository.createImportSource(db, recordId, {
+        sourceOrdinal: index + 1,
+        fileName: file.fileName,
+        sha256: file.sha256,
+        sizeBytes: file.sizeBytes
+      })
+    }));
+  }
 
   const snapshots = [];
   const validationErrors = [];
-  for (const file of files) {
+  for (const file of importFiles) {
     try {
       const candidates = readSystemOpSnapshotCandidates(
         file.filePath,
         normalizedMonth,
         file.sheetName
       );
-      snapshots.push(...candidates.snapshots);
+      snapshots.push(...candidates.snapshots.map((snapshot) => ({
+        ...snapshot,
+        importSourceId: file.importSourceId || null
+      })));
       for (const error of candidates.validationErrors) validationErrors.push({ file, error });
     } catch (error) {
+      attachSourceIdentity(error, file);
       error.hardFailure = true;
       validationErrors.push({ file, error });
     }
   }
+  // 系统 OP 解析也是在 worker 中同步完成；在首条业务 DML 前复核完整
+  // SHA/size，避免解析期间替换文件后把错误内容绑定到旧来源身份。
+  for (const file of importFiles) assertSourceFileMatchesSync(file);
   const hardValidationErrors = validationErrors.filter(({ error }) => error.hardFailure);
   if (hardValidationErrors.length > 0) {
     db.exec('BEGIN IMMEDIATE');
@@ -710,14 +773,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
         );
       }
       for (const { file, error } of validationErrors) {
-        repository.addImportError(db, recordId, {
-          errorCode: error.code || 'system-op-validation-error',
-          message: error.message,
-          sourceFile: path.basename(file.filePath),
-          sheetName: error.sheetName || file.sheetName || '',
-          sourceRow: error.sourceRow,
-          fieldName: error.fieldName
-        });
+        addSystemValidationAnomaly(db, recordId, file, error);
       }
       const formatErrorCount = validationUnitCount(validationErrors);
       repository.finishImportRecord(db, recordId, {
@@ -828,6 +884,21 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
         if (peer) linkComparison.run(peer.attemptId, current.attemptId);
       }
       const message = `${normalizedMonth} 系统财务OP已归档，禁止新增快照`;
+      for (const entry of insertedAttempts) {
+        if (entry.disposition === 'idempotent_conflict') {
+          addSystemConflictAnomaly(db, recordId, entry.item);
+        }
+      }
+      if (rolledBackCount > 0) {
+        repository.addImportAnomaly(db, recordId, {
+          category: 'file_failure',
+          sourceFile: snapshots[0] ? snapshots[0].sourceFile : '',
+          description: message
+        });
+      }
+      for (const { file, error } of validationErrors) {
+        addSystemValidationAnomaly(db, recordId, file, error);
+      }
       repository.finishImportRecord(db, recordId, {
         status: 'failed_validation',
         rawCount: snapshots.length + validationUnitCount(validationErrors),
@@ -836,10 +907,6 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
         skippedCount,
         rolledBackCount,
         errorMessage: message
-      });
-      repository.addImportError(db, recordId, {
-        errorCode: 'dataset-archived',
-        message
       });
       db.exec('COMMIT');
       return repository.getImportRecord(db, recordId);
@@ -853,14 +920,15 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       if (item.disposition === 'accepted') {
         const result = db.prepare(`
           INSERT INTO vcc_fin_op_system_snapshots (
-            target_month, subject, balances_json, content_hash,
+            target_month, subject, balances_json, content_hash, import_source_id,
             source_file, sheet_name, source_row, raw_json, import_record_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           item.snapshot.targetMonth,
           item.snapshot.subject,
           item.snapshot.balancesJson,
           item.snapshot.contentHash,
+          item.snapshot.importSourceId || null,
           item.snapshot.sourceFile,
           item.snapshot.sheetName,
           item.snapshot.sourceRow,
@@ -890,6 +958,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
           '同一账期和主体的系统财务OP余额不一致，已过滤该主体快照'
         );
         insertedAttempts.push({ attemptId, item });
+        addSystemConflictAnomaly(db, recordId, item);
       }
     }
     for (const item of classified.filter((entry) => entry.disposition === 'idempotent_skip')) {
@@ -920,14 +989,7 @@ function importSystemOpGroup({ db, batchId, targetMonth, files, recordId: prepar
       if (peer) linkComparison.run(peer.attemptId, current.attemptId);
     }
     for (const { file, error } of validationErrors) {
-      repository.addImportError(db, recordId, {
-        errorCode: error.code || 'system-op-validation-error',
-        message: error.message,
-        sourceFile: path.basename(file.filePath),
-        sheetName: error.sheetName || file.sheetName || '',
-        sourceRow: error.sourceRow,
-        fieldName: error.fieldName
-      });
+      addSystemValidationAnomaly(db, recordId, file, error);
     }
 
     const formatErrorCount = validationUnitCount(validationErrors);
@@ -992,6 +1054,8 @@ function systemRecordResult(record) {
     conflictCount: Number(record.conflict_count) || 0,
     formatErrorCount: Number(record.format_error_count) || 0,
     rolledBackCount: Number(record.rolled_back_count) || 0,
+    anomalyCount: Number(record.anomaly_count) || 0,
+    archiveState: record.archive_state || 'pending',
     errorMessage: record.error_message || ''
   };
 }
@@ -1008,6 +1072,7 @@ module.exports = {
   findSystemHeader,
   meaningfulPreview,
   assertUniqueSystemBusinessSheet,
+  readSystemOpSnapshotCandidates,
   readSystemOpSnapshots,
   readSystemOpSnapshot,
   importSystemOpGroup,

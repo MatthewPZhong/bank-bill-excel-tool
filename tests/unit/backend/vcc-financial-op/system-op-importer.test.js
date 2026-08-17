@@ -27,6 +27,8 @@ const {
   importSystemOpGroup,
   systemRecordResult
 } = require('../../../../src/backend/vcc-financial-op/system-op-importer');
+const { importFiles } = require('../../../../src/backend/vcc-financial-op/import-service');
+const { hashSourceFiles } = require('../../../../src/backend/vcc-financial-op/source-lineage');
 
 const TEMPLATE_PATH = path.join(
   __dirname,
@@ -600,6 +602,8 @@ test('系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
   assert.equal(first.status, 'success');
   assert.equal(same.status, 'all_skipped');
   assert.equal(changed.status, 'failed_conflict');
+  assert.equal(same.anomaly_count, 0);
+  assert.equal(changed.anomaly_count, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots').get().n, 1);
   const stored = db.prepare('SELECT balances_json FROM vcc_fin_op_system_snapshots').get();
   assert.equal(JSON.parse(stored.balances_json).USD, '9.25');
@@ -626,6 +630,14 @@ test('系统财务OP同账期同主体同内容跳过，异内容冲突不覆盖
     SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
     WHERE disposition = 'idempotent_conflict'
   `).get().n, 1);
+  const anomaly = db.prepare(`
+    SELECT category, idempotency_key, abnormal_fields_json, diff_fields_json
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(changed.id);
+  assert.equal(anomaly.category, 'idempotent_conflict');
+  assert.equal(anomaly.idempotency_key, 'PPHK');
+  assert.deepEqual(JSON.parse(anomaly.abnormal_fields_json), ['财务余额']);
+  assert.deepEqual(JSON.parse(anomaly.diff_fields_json), ['财务余额']);
 });
 
 test('系统财务OP校验表生成时间只随新增主体快照刷新', (t) => {
@@ -685,6 +697,10 @@ test('系统财务OP归档后允许精确重放但拒绝新增主体快照', (t)
     snapshots: [{ subject: 'PPUS', balances: balances(20) }],
     fileName: 'archive-new-subject.xlsx'
   });
+  const invalidSubjectFile = writeWorkbook(t, {
+    snapshots: [{ subject: '', balances: balances(30) }],
+    fileName: 'archive-invalid-subject.xlsx'
+  });
 
   repository.createImportBatch(db, { id: 'archive-b1', targetMonth: '2026-05', fileCount: 1 });
   importSystemOpGroup({
@@ -707,9 +723,12 @@ test('系统财务OP归档后允许精确重放但拒绝新增主体快照', (t)
   const replay = importSystemOpGroup({
     db, batchId: 'archive-b2', targetMonth: '2026-05', files: [importFile(sameFile)]
   });
-  repository.createImportBatch(db, { id: 'archive-b3', targetMonth: '2026-05', fileCount: 1 });
+  repository.createImportBatch(db, { id: 'archive-b3', targetMonth: '2026-05', fileCount: 2 });
   const rejected = importSystemOpGroup({
-    db, batchId: 'archive-b3', targetMonth: '2026-05', files: [importFile(newSubjectFile)]
+    db,
+    batchId: 'archive-b3',
+    targetMonth: '2026-05',
+    files: [importFile(newSubjectFile), importFile(invalidSubjectFile)]
   });
 
   assert.equal(replay.status, 'all_skipped');
@@ -720,6 +739,11 @@ test('系统财务OP归档后允许精确重放但拒绝新增主体快照', (t)
     SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
     WHERE import_record_id = ? AND disposition = 'rolled_back'
   `).get(rejected.id).n, 1);
+  assert.equal(rejected.format_error_count, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'system_subject_error'
+  `).get(rejected.id).n, SUPPORTED_CURRENCIES.length);
 });
 
 test('同批同主体系统财务OP异内容冲突互相关联以供双侧核对', (t) => {
@@ -869,14 +893,16 @@ test('系统财务OP跨文件格式异常只过滤异常数据并提升完整快
   `).get();
   assert.equal(attempt.disposition, 'accepted');
   assert.equal(attempt.source_file, 'valid-system.xlsx');
-  const error = db.prepare(`
-    SELECT source_file, sheet_name, source_row, field_name
-    FROM vcc_fin_op_import_errors
-  `).get();
-  assert.equal(error.source_file, 'invalid-system.xlsx');
-  assert.equal(error.sheet_name, 'System');
-  assert.equal(error.source_row, 2);
-  assert.equal(error.field_name, '主体');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors').get().n, 0);
+  const anomaly = db.prepare(`
+    SELECT category, source_file_name, source_row, abnormal_fields_json
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(record.id);
+  assert.equal(record.anomaly_count, SUPPORTED_CURRENCIES.length);
+  assert.equal(anomaly.category, 'system_subject_error');
+  assert.equal(anomaly.source_file_name, 'invalid-system.xlsx');
+  assert.equal(anomaly.source_row, 2);
+  assert.deepEqual(JSON.parse(anomaly.abnormal_fields_json), ['主体']);
   assert.equal(
     record.raw_count,
     record.inserted_count + record.skipped_count + record.invalid_key_count
@@ -926,11 +952,90 @@ test('系统财务OP同文件多主体部分格式错误时提升完整主体并
   assert.equal(attempt.subject, 'PPHK');
   assert.equal(attempt.disposition, 'accepted');
   assert.equal(JSON.parse(attempt.raw_json).rows.length, 9);
-  const error = db.prepare(`
-    SELECT source_file, source_row, field_name
-    FROM vcc_fin_op_import_errors
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors').get().n, 0);
+  const anomaly = db.prepare(`
+    SELECT category, source_file_name, source_row, abnormal_fields_json
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(record.id);
+  assert.equal(anomaly.category, 'system_subject_error');
+  assert.equal(anomaly.source_file_name, 'mixed-subject-validity.xlsx');
+  assert.equal(anomaly.source_row, 11);
+  assert.deepEqual(JSON.parse(anomaly.abnormal_fields_json), ['业务部门']);
+});
+
+test('系统 OP 多文件第二份最终 SHA/size 不一致时 failImportBatch 精确关联失败来源', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const firstFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: balances(10) }],
+    fileName: 'system-first.xlsx'
+  });
+  const secondFile = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+    fileName: 'system-second.xlsx'
+  });
+  const files = [
+    { ...firstFile, sourceType: SOURCE_TYPES.SYSTEM_OP },
+    { ...secondFile, sourceType: SOURCE_TYPES.SYSTEM_OP }
+  ];
+  const hashedFiles = await hashSourceFiles(files);
+  const archiveHandoffFiles = hashedFiles.map((file, index) => ({
+    filePath: file.filePath,
+    sourceType: file.sourceType,
+    sourceOrdinal: index + 1,
+    sha256: file.sha256,
+    sizeBytes: file.sizeBytes,
+    taskRunId: 'system-second-sha-mismatch'
+  }));
+  const originalCreateImportSource = repository.createImportSource;
+  repository.createImportSource = function createAndMutateSecondSource(targetDb, recordId, source) {
+    const sourceId = originalCreateImportSource(targetDb, recordId, source);
+    if (source.sourceOrdinal === 2) fs.appendFileSync(secondFile.filePath, Buffer.from([0]));
+    return sourceId;
+  };
+  let failure;
+  try {
+    await importFiles({
+      db,
+      batchId: 'system-second-sha-mismatch',
+      targetMonth: '2026-05',
+      files,
+      archiveHandoffFiles
+    });
+  } catch (error) {
+    failure = error;
+  } finally {
+    repository.createImportSource = originalCreateImportSource;
+  }
+  assert.ok(failure);
+  assert.equal(failure.code, 'vcc-source-changed');
+  assert.equal(failure.context.sourceOrdinal, 2);
+  assert.equal(failure.context.fileName, 'system-second.xlsx');
+  const record = db.prepare(`
+    SELECT * FROM vcc_fin_op_import_records
+    WHERE batch_id = 'system-second-sha-mismatch'
   `).get();
-  assert.equal(error.source_file, 'mixed-subject-validity.xlsx');
-  assert.equal(error.source_row, 11);
-  assert.equal(error.field_name, '业务部门');
+  const secondSource = db.prepare(`
+    SELECT * FROM vcc_fin_op_import_sources
+    WHERE import_record_id = ? AND source_ordinal = 2
+  `).get(record.id);
+  assert.equal(failure.context.importSourceId, Number(secondSource.id));
+  const restoredFailure = deserializeError(serializeError(failure));
+  assert.deepEqual(restoredFailure.context, {
+    importSourceId: Number(secondSource.id),
+    sourceOrdinal: 2,
+    fileName: 'system-second.xlsx'
+  });
+  const anomaly = db.prepare(`
+    SELECT import_source_id, source_file_name, category
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(record.id);
+  assert.deepEqual({ ...anomaly }, {
+    import_source_id: Number(secondSource.id),
+    source_file_name: 'system-second.xlsx',
+    category: 'file_failure'
+  });
+  const exported = [...repository.iterateExportableImportAnomalies(db, record.id)];
+  assert.equal(exported.length, 1);
+  assert.equal(exported[0].source_file_name, 'system-second.xlsx');
 });

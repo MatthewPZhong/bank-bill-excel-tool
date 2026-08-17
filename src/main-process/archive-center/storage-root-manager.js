@@ -313,6 +313,35 @@ class ArchiveStorageRootManager {
     return state.requested || state.active;
   }
 
+  async beginDatabaseMaintenance(message = '数据库正在维护，请稍后重试') {
+    if (this.migrationPromise || this.isMaintenanceRequested()) {
+      return { acquired: false, reason: 'archive-maintenance-active' };
+    }
+    if (!this.runtimeDelegate.requestMaintenance(message)) {
+      return { acquired: false, reason: 'archive-maintenance-active' };
+    }
+    const sourceService = this.currentService;
+    try {
+      await this.waitForArchiveOperations();
+      if (sourceService && typeof sourceService.pauseBackgroundMaterialization === 'function') {
+        await sourceService.pauseBackgroundMaterialization();
+      }
+      await this.pauseBackgroundOwnershipScan();
+      this.runtimeDelegate.activateMaintenance();
+      return { acquired: true, rootDir: sourceService ? sourceService.rootDir : '' };
+    } catch (error) {
+      this.runtimeDelegate.releaseMaintenance();
+      this._resumeBackgroundArchiveChecks();
+      throw error;
+    }
+  }
+
+  async endDatabaseMaintenance() {
+    this.runtimeDelegate.releaseMaintenance();
+    this._resumeBackgroundArchiveChecks();
+    return { released: true };
+  }
+
   _emitProgress(phase, processed = 0, total = 0, status = 'running') {
     this.publicMigration = {
       status,

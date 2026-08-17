@@ -2873,7 +2873,9 @@ function createAppUpdateSettingsDialog(options = {}) {
             <strong data-role="archive-batch-module" title="${escapeHtml(archiveCenterModuleName(batch))}">${escapeHtml(archiveCenterModuleName(batch))}</strong>
             <span class="archive-center-batch-number-wrap">
               <span data-role="archive-batch-number" title="${escapeHtml(batchNumber)}">${escapeHtml(batchNumber || '未命名批次')}</span>
-              ${batch.locked === true ? '<span class="archive-center-lock-mark" title="已锁定" aria-label="已锁定">🔒</span>' : ''}
+              ${batch.businessLocked === true
+                ? '<span class="archive-center-lock-mark" title="当前有效数据正在引用输入文件" aria-label="业务引用锁">🔒</span>'
+                : (batch.locked === true ? '<span class="archive-center-lock-mark" title="已锁定" aria-label="已锁定">🔒</span>' : '')}
             </span>
           </span>
           <span class="archive-center-batch-row archive-center-batch-row-secondary">
@@ -2937,9 +2939,14 @@ function createAppUpdateSettingsDialog(options = {}) {
         || status === 'failed'
         || status === 'incomplete';
     const locked = batch.locked === true;
+    const businessLocked = batch.businessLocked === true
+      || files.some((file) => file.businessLocked === true);
+    const deletionLocked = locked || businessLocked;
     const selectRetrySource = batch.retryMode === 'select-source';
     const retryTitle = selectRetrySource ? '选择原文件并重试' : '重试失败存档';
-    const deleteTitle = locked ? '请先解除锁定，再永久删除批次' : '永久删除批次';
+    const deleteTitle = businessLocked
+      ? '当前有效数据正在引用输入文件，不能删除批次'
+      : (locked ? '请先解除锁定，再永久删除批次' : '永久删除批次');
     const baseWarning = batch.warning
       ?? batch.warningMessage
       ?? batch.errorMessage
@@ -2975,6 +2982,9 @@ function createAppUpdateSettingsDialog(options = {}) {
                   ? `<button class="archive-center-icon-button archive-center-text-button" type="button" data-action="open-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="打开只读副本" aria-label="打开只读副本">打开</button>
                      <button class="archive-center-icon-button" type="button" data-action="save-as-archive-file" data-file-ref-id="${escapeHtml(fileRefId)}" title="另存为" aria-label="另存为">💾</button>`
                   : '<span class="archive-center-no-action">—</span>'}
+                ${file.businessLocked === true
+                  ? '<button class="archive-center-icon-button" type="button" title="当前有效数据正在引用该输入文件" aria-label="业务引用锁" disabled>🔒</button>'
+                  : ''}
               </div>
             </td>
           </tr>
@@ -2995,8 +3005,8 @@ function createAppUpdateSettingsDialog(options = {}) {
           ${canRetry
             ? `<button class="archive-center-icon-button" type="button" data-action="retry-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" data-retry-mode="${escapeHtml(batch.retryMode || 'same-source')}" title="${retryTitle}" aria-label="${retryTitle}">↻</button>`
             : ''}
-          <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${locked ? '解除锁定' : '锁定批次'}" aria-label="${locked ? '解除锁定' : '锁定批次'}">${locked ? '🔓' : '🔒'}</button>
-          <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${locked ? ' disabled' : ''}>×</button>
+          <button class="archive-center-icon-button" type="button" data-action="toggle-archive-lock" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${businessLocked ? '业务引用锁不能手工解除' : (locked ? '解除锁定' : '锁定批次')}" aria-label="${businessLocked ? '业务引用锁' : (locked ? '解除锁定' : '锁定批次')}"${businessLocked ? ' disabled' : ''}>${businessLocked ? '🔒' : (locked ? '🔓' : '🔒')}</button>
+          <button class="archive-center-icon-button archive-center-icon-button-danger" type="button" data-action="delete-archive-batch" data-batch-id="${escapeHtml(batchId)}" data-batch-number="${escapeHtml(batchNumber)}" title="${deleteTitle}" aria-label="${deleteTitle}"${deletionLocked ? ' disabled' : ''}>×</button>
         </div>
       </div>
       <div class="archive-center-metadata">

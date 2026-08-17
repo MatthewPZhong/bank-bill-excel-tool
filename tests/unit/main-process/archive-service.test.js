@@ -142,6 +142,55 @@ test('stageFile/archiveFile 流式发布并按内容去重，最后引用删除�
   }
 });
 
+test('ready artifact 复用时本次 expected SHA/size 不一致必须显式冲突且保留旧 artifact', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'ready-expected-conflict.xlsx', 'version-A');
+    const expectedASha256 = crypto.createHash('sha256').update('version-A').digest('hex');
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('ready-expected-conflict'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceOperation: 'vccFinancialOp:import:apply',
+      expectedSha256: expectedASha256,
+      expectedSizeBytes: Buffer.byteLength('version-A')
+    });
+    assert.equal(archived.ok, true);
+
+    fs.writeFileSync(sourcePath, 'version-B');
+    const expectedBSha256 = crypto.createHash('sha256').update('version-B').digest('hex');
+    const conflict = await fixture.service.archiveFile({
+      ...batchPayload('ready-expected-conflict'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceOperation: 'vccFinancialOp:import:apply',
+      expectedSha256: expectedBSha256,
+      expectedSizeBytes: Buffer.byteLength('version-B')
+    });
+
+    assert.equal(conflict.ok, false);
+    assert.equal(conflict.code, 'ARCHIVE_READY_ARTIFACT_EXPECTATION_CONFLICT');
+    assert.notEqual(conflict.alreadyArchived, true);
+    const sizeConflict = await fixture.service.archiveFile({
+      ...batchPayload('ready-expected-conflict'),
+      filePath: sourcePath,
+      role: 'input',
+      sourceOperation: 'vccFinancialOp:import:apply',
+      expectedSha256: expectedASha256,
+      expectedSizeBytes: Buffer.byteLength('version-A') + 1
+    });
+    assert.equal(sizeConflict.ok, false);
+    assert.equal(sizeConflict.code, 'ARCHIVE_READY_ARTIFACT_EXPECTATION_CONFLICT');
+    const stored = fixture.service.repository.getArtifact(archived.artifact.id);
+    assert.equal(stored.status, 'ready');
+    assert.equal(stored.blob.sha256, expectedASha256);
+    const blobPath = path.join(fixture.rootDir, ...blobRelativePath(expectedASha256).split('/'));
+    assert.equal(fs.readFileSync(blobPath, 'utf8'), 'version-A');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的批量 sink', async () => {
   const fixture = createFixture();
   try {
@@ -1206,6 +1255,49 @@ test('cleanupExpired 按本地日清理，保留日当天不删且锁定批次�
     assert.equal(unlocked.status, 'unlocked');
     const secondCleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
     assert.equal(secondCleanup.deletedBatchCount, 1);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('业务引用锁在 Service 与公开 DTO 中不可被解锁、强制删除或 retention 绕过', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'vcc-held.xlsx', 'held-vcc-input');
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('vcc-business-hold-service', {
+        moduleId: 'vcc-financial-op',
+        moduleCode: 'VCCFINOP',
+        moduleName: 'VCC财务OP校验',
+        localDate: '2026-07-01',
+        retentionUntil: '2026-07-10'
+      }),
+      filePath: sourcePath,
+      role: 'input',
+      sourceOperation: 'vccFinancialOp:import:apply'
+    });
+    fixture.service.repository.addArtifactHold(archived.artifact.id, {
+      ownerModule: 'vcc-financial-op',
+      ownerType: 'vcc-import-source',
+      ownerId: '17',
+      reason: '当前有效数据仍引用该输入原表'
+    });
+
+    const listed = await fixture.service.listBatches({ moduleId: 'vcc-financial-op' });
+    assert.equal(listed.batches[0].businessLocked, true);
+    const detail = await fixture.service.getBatch(archived.batch.id);
+    assert.equal(detail.batch.businessLocked, true);
+    assert.equal(detail.batch.artifacts[0].businessLocked, true);
+
+    const unlocked = await fixture.service.setLocked(archived.batch.id, false);
+    assert.equal(unlocked.status, 'unlocked');
+    const deleted = await fixture.service.deleteBatch(archived.batch.id, { force: true });
+    assert.equal(deleted.ok, false);
+    assert.equal(deleted.code, 'ARCHIVE_BATCH_BUSINESS_HELD');
+    assert.deepEqual(deleted.artifactIds, [archived.artifact.id]);
+    const cleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
+    assert.equal(cleanup.candidateCount, 0);
+    assert.equal((await fixture.service.getBatch(archived.batch.id)).ok, true);
   } finally {
     fixture.close();
   }
