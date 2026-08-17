@@ -26,6 +26,7 @@
 | 迁移使用 owner/token lease 与 worker ready/ack 锁交接 | 无 owner transition 可互相释放；候选复验后提前释放源锁会吞掉切换前成功写 | UI 约束或 boolean transition | updater/exit/migration 只释放自己的 lease；主库关闭后才 ack worker 释放 `BEGIN IMMEDIATE` |
 | Archive startup 在 retention 前完成 VCC lineage/hold reconcile | ready artifact 与 hold 之间崩溃后，过期清理可先删唯一原件 | 常规启动后异步 sync | 固定 outbox→owners→post replay→VCC hook→sweep/retention；hook 失败阻断 cleanup/admission |
 | bound detail、SYSTEM_OP 与 v1 统一走实体完整性 gate | 本地 `raw_json` 不能掩盖已绑定 artifact 损坏 | SYSTEM_OP/v1 永久绕过 Archive verification | 只有从未有 source 的历史 v1 可走过渡 raw；其余实体故障整次失败 |
+| Windows 数据库文件 fsync 使用可写句柄，PR checkout 保留冻结 tag | Windows `FlushFileBuffers` 对只读文件句柄返回 `EPERM`；v3.1.9 兼容探针必须读取发布 tag | 忽略文件 fsync 或在测试内联网 fetch | 不放宽断电耐久门禁；Windows 候选/切换文件可落盘，CI 可离线加载冻结历史实现 |
 
 ## Assumptions
 
@@ -62,6 +63,8 @@
 | 最终独立 Ultra Review | PASS；原九条及 A→B 反例均独立重放关闭，最终相关198/198；无 surviving P0–P3 | 达到本地 review 合并标准，未访问生产 DB |
 | 修后最终 release-check | lint/smoke PASS；unit 5191/5191（336 files）；integration 48/48 scripts、2385/2385 assertions（368077ms） | 九条 review fix 与 A→B 时序修复合并后的全仓终态；runner 仅在全绿后刷新 policy |
 | 修后最终 check-vars | exit 2 review：Critical `freezeWorkerBatchContext`；Important `ipcRenderer/serializeError/setupIdleCleanupTimer`；Runtime `app/dialog/setStatus/state`；Risk `ArchiveRepository` | exact7 字段未增删且 descriptor 单独冻结；IPC 双端同步；共享错误协议不变；idle timer 只暂停/恢复；退出/更新 lease 精确 owner/token；Archive hold/outbox/Blob SHA+size 身份保持。Critical/Risk 要求的 smoke 已在最终 release-check 通过 |
+| PR #147 首次 Windows CI | release-check 5171/5191；2 项因 shallow checkout 无 `v3.1.9` tag，17 项因 Windows 只读句柄 `fsync` 返回 `EPERM` | CI 首次提供真实 Windows 句柄语义；修复为 smoke checkout `fetch-depth: 0` 与文件 `r+` fsync，目录 fsync 既有明确 errno 容错不变 |
+| PR #147 CI 修复本地复验 | 聚焦 68/68；完整 release-check lint/smoke、unit 5191/5191、integration 48/48 scripts 与 2385/2385 assertions（395255ms）PASS；node/diff/check-vars 收口 | 保持同一耐久与历史兼容合同，等待同一 Windows workflow 远端复验 |
 
 ## Remaining Unknowns
 

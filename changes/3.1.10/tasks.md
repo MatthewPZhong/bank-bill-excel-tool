@@ -28,4 +28,4 @@
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（独立 Ultra Review 已最终 PASS，无 surviving P0–P3；修后 release-check 全绿，等待 GitHub checks；真实库、Windows 与资金人工仍为发布阻断项）
+- 状态：in_progress（独立 Ultra Review 已最终 PASS，无 surviving P0–P3；PR #147 首次 Windows CI 暴露 tag shallow checkout 与文件 fsync 句柄问题，已修并完成本地 release-check，等待远端复验；真实库、packaged Windows 与资金人工仍为发布阻断项）

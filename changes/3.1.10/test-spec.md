@@ -40,6 +40,7 @@
 | 候选 ready 交接 | 复验后并发 mutation/主库 close 失败/ack 后 worker crash | ack 前源锁仍在；关闭失败 abort；未经完整握手不切换 |
 | transition 交叉 | updater↔migration↔普通退出 | owner/token lease 互斥，错误 owner/token 不得释放他方 gate |
 | recovery 删除耐久 | backup/sidecar 删除后再次崩溃 | DB dir fsync 后才 done；journal 删除后 fsync journal dir；二启幂等 |
+| Windows 文件落盘 | 候选库与切换前主文件使用真实 Windows 文件句柄 | 文件以可写句柄 fsync，不因只读句柄 `EPERM` 跳过或中断耐久门禁 |
 | 守恒失败 | 计数/hash/余额注入差异 | 切换前失败；旧库不变 |
 | 成功迁移 | 代表全库 | IDs/结果/九币种/审计守恒；首次只读成功后按用户选择保留或删除旧库；二启幂等 |
 
@@ -83,4 +84,5 @@
 - 独立 Ultra Review：首轮确认 5×P1、4×P2；修后发现并修复 1×P1 A→B 时序；最终 PASS，无 surviving P0–P3，最终复核相关 198/198 PASS。
 - 修后组合证据：migration 28/28+104/104；contract/recovery 116/116+32/32+5/5；archive 71/71+219/219；A→B 124/124+113/113+31/31；最终 unit 5191/5191、lint/smoke/node/diff PASS。
 - 修后唯一完整 `npm run release-check`：lint/smoke PASS；unit 5191/5191（336 files）；integration 48/48 scripts、2385/2385 assertions（368077ms）PASS；runner 仅全绿后自动同步 policy。
+- PR #147 首次 Windows CI 将 19 项失败归并为两个环境合同缺口：shallow checkout 缺冻结 `v3.1.9` tag（2 项）与只读文件句柄 fsync `EPERM`（17 项）；修复后本地聚焦 68/68、完整 release-check 5191/5191 + 48/48/2385 PASS。
 - 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。

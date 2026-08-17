@@ -112,7 +112,10 @@ function fsyncDirectory(directoryPath, fsImpl = fs) {
 function fsyncFile(filePath, fsImpl = fs) {
   let fd;
   try {
-    fd = fsImpl.openSync(filePath, 'r');
+    // Windows 的 FlushFileBuffers 需要可写文件句柄；只读句柄会稳定返回
+    // EPERM。这里同步的是迁移候选/主数据库，维护模式已要求它们可写，
+    // 因此统一使用 r+，不改变文件内容，只保证此前写入真正落盘。
+    fd = fsImpl.openSync(filePath, 'r+');
     fsImpl.fsyncSync(fd);
   } finally {
     if (fd !== undefined) fsImpl.closeSync(fd);

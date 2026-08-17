@@ -12,6 +12,8 @@ test('Windows PR 对任意目标分支跑 release-check、x64 完整构建与 ch
   const workflow = read('.github/workflows/build-windows.yml');
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /pull_request:\s*\n\s*branches:\s*\n\s*- '\*\*'/);
+  const smokeJob = workflow.slice(workflow.indexOf('\n  smoke-test:'), workflow.indexOf('\n  build:'));
+  assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
   assert.match(workflow, /Run release checks\s*\n\s*run: npm run release-check/);
   assert.doesNotMatch(workflow, /if:\s*github\.event_name\s*!=\s*'pull_request'/);
 

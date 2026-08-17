@@ -313,13 +313,16 @@ test('候选库与切换前新旧主文件必须显式 fsync 后才允许 rename
   createLegacyDatabase(sourcePath);
 
   const openedPaths = new Map();
+  const openedFlags = [];
   const fsyncedPaths = [];
   const fsImpl = new Proxy(fs, {
     get(target, property) {
       if (property === 'openSync') {
         return (filePath, ...args) => {
           const fd = target.openSync(filePath, ...args);
-          openedPaths.set(fd, path.resolve(String(filePath)));
+          const resolvedPath = path.resolve(String(filePath));
+          openedPaths.set(fd, resolvedPath);
+          openedFlags.push({ filePath: resolvedPath, flags: args[0] });
           return fd;
         };
       }
@@ -346,8 +349,12 @@ test('候选库与切换前新旧主文件必须显式 fsync 后才允许 rename
     fsImpl
   });
   assert.equal(fsyncedPaths.includes(path.resolve(targetPath)), true);
+  assert.ok(openedFlags.some((entry) => (
+    entry.filePath === path.resolve(targetPath) && entry.flags === 'r+'
+  )));
 
   fsyncedPaths.length = 0;
+  openedFlags.length = 0;
   const journal = createMigrationJournal({
     sourcePath,
     targetPath,
@@ -357,6 +364,11 @@ test('候选库与切换前新旧主文件必须显式 fsync 后才允许 rename
   atomicSwitchVccStorage({ journalPath, journal, fsImpl });
   assert.equal(fsyncedPaths.includes(path.resolve(sourcePath)), true);
   assert.equal(fsyncedPaths.includes(path.resolve(targetPath)), true);
+  for (const databasePath of [sourcePath, targetPath]) {
+    assert.ok(openedFlags.some((entry) => (
+      entry.filePath === path.resolve(databasePath) && entry.flags === 'r+'
+    )));
+  }
 });
 
 test('候选冻结复验完成后仍持有源 BEGIN IMMEDIATE，ack 前并发 mutation 被拒绝', (t) => {
