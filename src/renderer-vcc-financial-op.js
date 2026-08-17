@@ -25,13 +25,6 @@
     opening_initialization: '首月期初初始化数据',
     result: '财务OP校验结果表'
   });
-  const DISPOSITION_LABELS = Object.freeze({
-    idempotent_skip: '幂等跳过',
-    idempotent_conflict: '幂等冲突',
-    invalid_key: '幂等键为空',
-    format_error: '格式异常',
-    rolled_back: '整表回滚'
-  });
   const elements = {
     importBtn: document.getElementById('vccFinancialOpImportBtn'),
     runBtn: document.getElementById('vccFinancialOpRunBtn'),
@@ -1949,6 +1942,15 @@
           </thead>
           <tbody>${records.map((record) => {
             const batchDisplay = String(record.batchId || '').slice(0, 8) || '-';
+            const canExportAnomalies = Number(record.anomalyCount) > 0;
+            const canResolve = record.resolutionStatus === 'unresolved';
+            const archiveText = record.archiveState === 'ready'
+              ? '输入文件已存档'
+              : (record.archiveState === 'failed'
+                ? '输入文件待存档（上次失败）'
+                : (record.archiveState === 'unavailable'
+                  ? '历史或失败输入未绑定'
+                  : '输入文件待存档'));
             return `
               <tr>
                 <td>${escapeHtml(record.targetMonth)}</td>
@@ -1956,189 +1958,21 @@
                 <td>${escapeHtml(record.sourceLabel)}</td>
                 <td title="${escapeHtml((record.sourceFiles || []).join('\n'))}">${escapeHtml(record.sourceFileDisplay || '-')}</td>
                 <td>${escapeHtml(formatDateTime(record.finishedAt || record.startedAt))}</td>
-                <td><span class="vcc-fin-op-state" data-state="${statusTone(record.status)}">${escapeHtml(record.statusText)}</span></td>
-                <td><button class="vcc-fin-op-link-btn" type="button" data-record-id="${record.id}">查看导入明细</button></td>
+                <td>
+                  <span class="vcc-fin-op-state" data-state="${statusTone(record.status)}">${escapeHtml(record.statusText)}</span>
+                  <small class="vcc-fin-op-record-archive-state" title="${escapeHtml(archiveText)}">${escapeHtml(archiveText)}</small>
+                </td>
+                <td>
+                  ${canExportAnomalies ? `<button class="vcc-fin-op-link-btn" type="button" data-export-anomalies="${record.id}">导出明细</button>` : ''}
+                  ${canResolve ? `<button class="vcc-fin-op-link-btn" type="button" data-resolve-record="${record.id}">标记已处理</button>` : ''}
+                  ${!canExportAnomalies && !canResolve ? '<span>-</span>' : ''}
+                </td>
               </tr>
             `;
           }).join('')}</tbody>
         </table>
       </div>
     `;
-  }
-
-  function rowDetailHtml(row) {
-    const incoming = escapeHtml(JSON.stringify(row.incoming || {}, null, 2));
-    const existing = row.existing ? escapeHtml(JSON.stringify(row.existing, null, 2)) : '';
-    const source = row.existingSource
-      ? `${row.existingSource.sourceFile || '-'} / ${row.existingSource.sheetName || '-'} / 第 ${row.existingSource.sourceRow || '-'} 行`
-      : '';
-    return `
-      <details class="vcc-fin-op-row-details">
-        <summary>展开原始数据${row.diffFields && row.diffFields.length ? `（差异字段：${escapeHtml(row.diffFields.join('、'))}）` : ''}</summary>
-        <div class="vcc-fin-op-compare-grid${existing ? '' : ' is-single'}">
-          <section><h4>本次导入</h4><pre>${incoming}</pre></section>
-          ${existing ? `<section><h4>已存在记录</h4><p>${escapeHtml(source)}</p><pre>${existing}</pre></section>` : ''}
-        </div>
-      </details>
-    `;
-  }
-
-  function importRowsTable(rows) {
-    if (!rows.length) return '<div class="vcc-fin-op-empty">当前分类没有数据</div>';
-    return `
-      <div class="vcc-fin-op-table-wrap vcc-fin-op-detail-table-wrap">
-        <table class="vcc-fin-op-table">
-          <thead><tr><th>幂等键</th><th>文件</th><th>sheet</th><th>原表行号</th><th>分类</th><th>异常字段</th><th>说明</th></tr></thead>
-          <tbody>${rows.map((row) => `
-            <tr>
-              <td>${escapeHtml(row.idempotencyKey || '-')}</td>
-              <td>${escapeHtml(row.sourceFile || '-')}</td>
-              <td>${escapeHtml(row.sheetName || '-')}</td>
-              <td class="number">${escapeHtml(row.sourceRow || '-')}</td>
-              <td>${escapeHtml(DISPOSITION_LABELS[row.disposition] || row.disposition)}</td>
-              <td>${escapeHtml(row.validationField || '-')}</td>
-              <td>${escapeHtml(row.message || '-')}</td>
-            </tr>
-            <tr class="vcc-fin-op-expanded-row"><td colspan="7">${rowDetailHtml(row)}</td></tr>
-          `).join('')}</tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function importErrorsTable(errors) {
-    if (!Array.isArray(errors) || errors.length === 0) return '';
-    return `
-      <div class="vcc-fin-op-table-wrap vcc-fin-op-error-list">
-        <table class="vcc-fin-op-table">
-          <thead><tr><th>文件</th><th>sheet</th><th>原表行号</th><th>异常字段</th><th>错误码</th><th>说明</th></tr></thead>
-          <tbody>${errors.map((error) => `
-            <tr>
-              <td>${escapeHtml(error.source_file || '-')}</td>
-              <td>${escapeHtml(error.sheet_name || '-')}</td>
-              <td class="number">${escapeHtml(error.source_row || '-')}</td>
-              <td>${escapeHtml(error.field_name || '-')}</td>
-              <td>${escapeHtml(error.error_code || '-')}</td>
-              <td>${escapeHtml(error.message || '导入异常')}</td>
-            </tr>
-          `).join('')}</tbody>
-        </table>
-      </div>
-    `;
-  }
-
-  function openImportRecordDetail(recordId, onChanged) {
-    const detailState = { tab: 'summary', page: 1, pageSize: 100, key: '', fileName: '' };
-    const modal = mountDialog({
-      title: '导入记录详情',
-      className: 'vcc-fin-op-detail-dialog',
-      bodyHtml: '<div class="vcc-fin-op-loading">正在读取导入记录…</div>'
-    });
-
-    async function load() {
-      const payload = { recordId, ...detailState };
-      const result = await api.getImportDetail(payload);
-      if (!result || result.status !== 'success') {
-        modal.body.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(result && result.message || '读取失败')}</div>`;
-        return;
-      }
-      const summary = result.summary;
-      const isSystemOpSummary = summary.sourceType === 'system_op';
-      const countValue = (value) => (
-        isSystemOpSummary ? formatSystemOpSnapshotCount(value, true) : formatInteger(value)
-      );
-      const summaryStatusText = summary.status === 'deleted'
-        ? `已删除（原导入状态：${summary.originalStatusText || '-'}）`
-        : summary.statusText;
-      const tabs = [
-        ['summary', `概览`],
-        ['skips', `幂等跳过 ${isSystemOpSummary ? `${formatInteger(summary.skippedCount)} 快照` : formatInteger(summary.skippedCount)}`],
-        ['conflicts', `幂等冲突 ${isSystemOpSummary ? `${formatInteger(summary.conflictCount)} 快照` : formatInteger(summary.conflictCount)}`],
-        ['other', `其他异常 ${formatInteger(summary.invalidKeyCount + summary.formatErrorCount + summary.rolledBackCount)}`]
-      ];
-      const summaryHtml = `
-        <div class="vcc-fin-op-metric-grid">
-          <div><span>${isSystemOpSummary ? '原始输入单元' : '原始行'}</span><strong>${formatInteger(summary.rawCount)}</strong></div>
-          <div><span>${isSystemOpSummary ? '新增币种数据' : '新增'}</span><strong>${countValue(summary.insertedCount)}</strong></div>
-          <div><span>${isSystemOpSummary ? '幂等跳过数据' : '幂等跳过'}</span><strong>${countValue(summary.skippedCount)}</strong></div>
-          <div><span>${isSystemOpSummary ? '幂等冲突数据' : '幂等冲突'}</span><strong>${countValue(summary.conflictCount)}</strong></div>
-          <div><span>幂等键为空</span><strong>${formatInteger(summary.invalidKeyCount)}</strong></div>
-          <div><span>格式异常</span><strong>${formatInteger(summary.formatErrorCount)}</strong></div>
-          <div><span>${isSystemOpSummary ? '回滚币种数据' : '回滚行'}</span><strong>${countValue(summary.rolledBackCount)}</strong></div>
-        </div>
-        ${summary.errorMessage ? `<p class="vcc-fin-op-message" data-tone="error">${escapeHtml(summary.errorMessage)}</p>` : ''}
-        ${summary.status === 'deleted' ? `<p class="vcc-fin-op-message">关联有效原表已于 ${escapeHtml(formatDateTime(summary.datasetDeletedAt))} 删除；原导入统计与审计明细继续保留。</p>` : ''}
-        ${importErrorsTable(result.errors || [])}
-        ${summary.resolutionStatus === 'resolved' ? `<p class="vcc-fin-op-resolution">已处理：保留当前有效数据集，本次失败导入不参与计算。${escapeHtml(summary.resolutionNote || '-')}（${escapeHtml(formatDateTime(summary.resolvedAt))}）</p>` : ''}
-      `;
-      const pages = Math.max(1, Math.ceil((result.total || 0) / result.pageSize));
-      const rowsHtml = detailState.tab === 'summary'
-        ? summaryHtml
-        : `
-          <div class="vcc-fin-op-detail-toolbar">
-            <input class="vcc-fin-op-input" type="search" data-filter="key" value="${escapeHtml(detailState.key)}" placeholder="筛选幂等键">
-            <input class="vcc-fin-op-input" type="search" data-filter="file" value="${escapeHtml(detailState.fileName)}" placeholder="筛选文件名">
-            <button class="secondary-btn small" type="button" data-action="search">筛选</button>
-            <button class="secondary-btn small" type="button" data-action="audit">导出当前分类</button>
-          </div>
-          ${detailState.tab === 'other' ? importErrorsTable(result.errors || []) : ''}
-          ${importRowsTable(result.rows || [])}
-          <div class="vcc-fin-op-pagination">
-            <button class="secondary-btn small" type="button" data-page="prev"${result.page <= 1 ? ' disabled' : ''}>上一页</button>
-            <span>第 ${result.page} / ${pages} 页，共 ${formatInteger(result.total)} 行</span>
-            <button class="secondary-btn small" type="button" data-page="next"${result.page >= pages ? ' disabled' : ''}>下一页</button>
-          </div>
-        `;
-      modal.body.innerHTML = `
-        <div class="vcc-fin-op-record-heading">
-          <div><strong>${escapeHtml(summary.sourceLabel)}</strong><span>${escapeHtml(summary.targetMonth)} · ${escapeHtml(summaryStatusText)}</span></div>
-          ${summary.resolutionStatus === 'unresolved' ? '<button class="secondary-btn small" type="button" data-action="resolve">标记异常已处理</button>' : ''}
-        </div>
-        <div class="vcc-fin-op-tabs" role="tablist">
-          ${tabs.map(([tab, label]) => `<button type="button" role="tab" data-tab="${tab}" aria-selected="${detailState.tab === tab}">${escapeHtml(label)}</button>`).join('')}
-        </div>
-        <div class="vcc-fin-op-detail-content">${rowsHtml}</div>
-      `;
-      modal.body.querySelectorAll('[data-tab]').forEach((button) => {
-        button.addEventListener('click', () => {
-          detailState.tab = button.dataset.tab;
-          detailState.page = 1;
-          load();
-        });
-      });
-      const searchBtn = modal.body.querySelector('[data-action="search"]');
-      if (searchBtn) searchBtn.addEventListener('click', () => {
-        detailState.key = modal.body.querySelector('[data-filter="key"]').value.trim();
-        detailState.fileName = modal.body.querySelector('[data-filter="file"]').value.trim();
-        detailState.page = 1;
-        load();
-      });
-      const auditBtn = modal.body.querySelector('[data-action="audit"]');
-      if (auditBtn) auditBtn.addEventListener('click', async () => {
-        auditBtn.disabled = true;
-        try {
-          const exported = await api.exportImportAudit({ recordId, tab: detailState.tab, key: detailState.key, fileName: detailState.fileName });
-          if (exported && exported.status === 'error') showMessage('导出失败', exported.message || '导出失败', 'error');
-        } finally {
-          auditBtn.disabled = false;
-        }
-      });
-      modal.body.querySelectorAll('[data-page]').forEach((button) => {
-        button.addEventListener('click', () => {
-          detailState.page += button.dataset.page === 'next' ? 1 : -1;
-          load();
-        });
-      });
-      const resolveBtn = modal.body.querySelector('[data-action="resolve"]');
-      if (resolveBtn) resolveBtn.addEventListener('click', () => openResolutionDialog(summary, async () => {
-        if (typeof onChanged === 'function') await onChanged();
-        await load();
-      }));
-    }
-
-    load().catch((error) => {
-      modal.body.innerHTML = `<div class="vcc-fin-op-empty">${escapeHtml(error.message || String(error))}</div>`;
-    });
   }
 
   function openResolutionDialog(summary, onResolved) {
@@ -2623,6 +2457,7 @@
           <div class="dialog-actions split vcc-fin-op-manager-footer">
             <div class="vcc-fin-op-manager-footer-left">
               <button class="secondary-btn small is-loading" type="button" data-action="unarchive" disabled title="正在读取已归档结果">正在读取归档…</button>
+              <button class="secondary-btn small" type="button" data-action="optimize-storage" disabled>优化存储</button>
             </div>
             <div class="vcc-fin-op-manager-footer-right">
               <button class="secondary-btn small" type="button" data-action="delete-dataset" disabled>删除</button>
@@ -2637,12 +2472,14 @@
     const managerTitle = modal.dialog.querySelector('[data-role="manager-title"]');
     const monthSelect = modal.dialog.querySelector('[data-field="manager-month"]');
     const unarchiveButton = modal.dialog.querySelector('[data-action="unarchive"]');
+    const optimizeStorageButton = modal.dialog.querySelector('[data-action="optimize-storage"]');
     const deleteButton = modal.dialog.querySelector('[data-action="delete-dataset"]');
     const exportButton = modal.dialog.querySelector('[data-action="export-dataset"]');
     const returnButton = modal.dialog.querySelector('[data-action="return"]');
     let renderVersion = 0;
     let loadVersion = 0;
     let loadingManagerData = true;
+    let storageMigrationActive = false;
 
     attachPreviewStateTracker(modal, () => ({
       modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
@@ -2666,7 +2503,66 @@
       unarchiveButton.title = loadingManagerData
         ? '正在读取已归档结果'
         : (hasArchives ? '解归档已归档结果' : '暂无已归档结果');
+      optimizeStorageButton.disabled = loadingManagerData
+        || storageMigrationActive
+        || typeof api.inspectStorage !== 'function'
+        || typeof api.migrateStorage !== 'function';
+      returnButton.disabled = storageMigrationActive;
     }
+
+    optimizeStorageButton.addEventListener('click', async () => {
+      if (storageMigrationActive) return;
+      storageMigrationActive = true;
+      optimizeStorageButton.textContent = '正在检查…';
+      updateActionButtons();
+      let unsubscribe = null;
+      try {
+        const inspection = await api.inspectStorage();
+        if (!inspection || inspection.status !== 'success') {
+          throw new Error(inspection && inspection.message || '存储状态检查失败');
+        }
+        if (!inspection.migrationRequired) {
+          showMessage('无需优化', 'VCC 存储已经是最新合同。', 'success');
+          return;
+        }
+        if (typeof api.onStorageMigrationProgress === 'function') {
+          unsubscribe = api.onStorageMigrationProgress((progress = {}) => {
+            if (!optimizeStorageButton.isConnected) return;
+            const labels = {
+              waiting: '等待任务…',
+              checkpoint: '收敛 WAL…',
+              copying: '复制数据…',
+              verifying: '验证守恒…',
+              verified: '验证完成…',
+              switching: '切换数据库…',
+              restarting: '正在重启…',
+              failed: '优化失败'
+            };
+            optimizeStorageButton.textContent = labels[progress.phase] || '正在优化…';
+          });
+        }
+        optimizeStorageButton.textContent = '正在优化…';
+        const result = await api.migrateStorage();
+        if (result && result.status === 'cancelled') return;
+        if (!result || result.status !== 'success') {
+          throw new Error(result && result.message || 'VCC 存储优化失败');
+        }
+        if (result.noChange) {
+          showMessage('无需优化', result.message || 'VCC 存储已经是最新合同。', 'success');
+          return;
+        }
+        setStatus('VCC 存储优化完成，应用正在重启', 'success');
+      } catch (error) {
+        showMessage('优化存储失败', error.message || String(error), 'error');
+      } finally {
+        if (typeof unsubscribe === 'function') unsubscribe();
+        storageMigrationActive = false;
+        if (optimizeStorageButton.isConnected) {
+          optimizeStorageButton.textContent = '优化存储';
+          updateActionButtons();
+        }
+      }
+    });
 
     function renderManagerSkeleton() {
       content.setAttribute('aria-busy', 'true');
@@ -2729,8 +2625,26 @@
           if (currentVersion !== renderVersion) return;
           content.innerHTML = rawRecordsTable(records || []);
           content.setAttribute('aria-busy', 'false');
-          content.querySelectorAll('[data-record-id]').forEach((button) => {
-            button.addEventListener('click', () => openImportRecordDetail(Number(button.dataset.recordId), render));
+          content.querySelectorAll('[data-export-anomalies]').forEach((button) => {
+            button.addEventListener('click', async () => {
+              button.disabled = true;
+              try {
+                const exported = await api.exportImportAudit({
+                  recordId: Number(button.dataset.exportAnomalies)
+                });
+                if (exported && exported.status === 'error') {
+                  showMessage('导出失败', exported.message || '导出失败', 'error');
+                }
+              } finally {
+                if (button.isConnected) button.disabled = false;
+              }
+            });
+          });
+          content.querySelectorAll('[data-resolve-record]').forEach((button) => {
+            button.addEventListener('click', () => {
+              const record = (records || []).find((entry) => Number(entry.id) === Number(button.dataset.resolveRecord));
+              if (record) openResolutionDialog(record, render);
+            });
           });
           return;
         }

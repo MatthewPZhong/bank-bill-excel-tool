@@ -152,6 +152,7 @@ function createHarness(options = {}) {
     onTerminalIntentFlushed: options.onTerminalIntentFlushed,
     recoverInterruptedTasks: options.recoverInterruptedTasks,
     recoverInterruptedTaskOwners: options.recoverInterruptedTaskOwners,
+    postOutboxStartupHooks: options.postOutboxStartupHooks,
     getProtectedInterruptedTaskBatchIds: options.getProtectedInterruptedTaskBatchIds,
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
@@ -1560,6 +1561,48 @@ test('多个模块 owner 逐项 settle，失败互不短路且分别上报', asy
   assert.equal(warnings[0][1].code, 'POSITION_RECOVERY_FAILED');
   assert.match(warnings[1][0], /Toolbox/);
   assert.equal(warnings[1][1].code, 'TOOLBOX_RECOVERY_FAILED');
+});
+
+test('startup hook 严格位于 outbox owner 重放后和 retention cleanup 前，失败时 fail-closed', async () => {
+  const order = [];
+  const { controller, service } = createHarness({
+    recoverInterruptedTaskOwners: [{
+      ownerName: 'VCC import terminal',
+      recover: async () => { order.push('owner'); }
+    }],
+    postOutboxStartupHooks: [{
+      hookName: 'VCC lineage/hold reconcile',
+      run: async () => {
+        order.push('hook');
+        const error = new Error('VCC lineage unavailable');
+        error.code = 'VCC_ARCHIVE_LINEAGE_UNAVAILABLE';
+        throw error;
+      }
+    }]
+  });
+  controller.flushOutbox = async () => {
+    order.push(order.includes('owner') ? 'post-owner-outbox' : 'initial-outbox');
+    return { flushed: 0, discarded: 0, remaining: 0 };
+  };
+  service.markInterruptedTasks = async () => {
+    order.push('sweep');
+    return { ok: true, taskCount: 0, batchIds: [] };
+  };
+  service.cleanupExpired = async () => {
+    order.push('cleanup');
+    return { ok: true };
+  };
+
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error && error.code === 'ARCHIVE_STARTUP_HOOK_FAILED'
+  );
+  assert.deepEqual(order, [
+    'initial-outbox',
+    'owner',
+    'post-owner-outbox',
+    'hook'
+  ]);
 });
 
 test('恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止启动', async (t) => {

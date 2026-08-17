@@ -6,9 +6,6 @@ const { deserializeError } = require('./serialize-error');
 const {
   SOURCE_TYPES,
   SOURCE_LABELS,
-  SUPPORTED_CURRENCIES,
-  getRawContractHeaders,
-  getSourceDefinition
 } = require('../backend/vcc-financial-op/definitions');
 const {
   isValidInputFingerprint,
@@ -25,6 +22,7 @@ const {
   IMPORT_CANCELLED_CODE
 } = require('../backend/vcc-financial-op/detail-importer');
 const {
+  freezeImportArchiveHandoffFiles,
   normalizeImportBatchId,
   storedRecordResult
 } = require('../backend/vcc-financial-op/import-service');
@@ -46,6 +44,9 @@ const {
 const {
   VCC_MUTATION_OPERATIONS
 } = require('../backend/vcc-financial-op/mutation-policy');
+const {
+  reconcileVccImportArchiveLineage
+} = require('./vcc-financial-op-archive-lineage');
 
 const WORKER_PATH = path.join(__dirname, '../backend/vcc-financial-op/worker-entry.js');
 const READ_WORKER_PATH = path.join(__dirname, 'vcc-financial-op-read-worker.js');
@@ -76,7 +77,7 @@ function recoverImportPartialResult(database, batchId, expectedTargetMonth) {
   const batch = repository.getImportBatch(database.db, batchId);
   if (!batch || (expectedTargetMonth && batch.target_month !== expectedTargetMonth)) return null;
   const records = repository.listImportRecordsByBatch(database.db, batchId)
-    .map(storedRecordResult);
+    .map((record) => storedRecordResult(record, database.db));
   if (records.length === 0) return null;
   return Object.freeze({
     batchId,
@@ -97,7 +98,7 @@ function parseJson(value, fallback) {
   }
 }
 
-function detailRecordShape(record) {
+function detailRecordShape(record, db) {
   const sourceFiles = parseJson(record.source_files_json, []);
   const originalStatus = record.status;
   const deleted = Boolean(record.dataset_deleted_at);
@@ -124,60 +125,15 @@ function detailRecordShape(record) {
     conflictCount: Number(record.conflict_count) || 0,
     formatErrorCount: Number(record.format_error_count) || 0,
     rolledBackCount: Number(record.rolled_back_count) || 0,
+    anomalyCount: db
+      ? repository.countExportableImportAnomalies(db, record.id)
+      : (Number(record.anomaly_count) || 0),
+    archiveState: record.archive_state || 'pending',
     errorMessage: record.error_message || '',
     resolutionStatus: record.resolution_status || 'not_applicable',
     resolvedAt: record.resolved_at || null,
     resolutionNote: record.resolution_note || '',
     resolutionAction: record.resolution_action || ''
-  };
-}
-
-function rawObject(sourceType, rawJson, assignedSubject = '', rawContractVersion = 1) {
-  const definition = getSourceDefinition(sourceType);
-  const headers = getRawContractHeaders(sourceType, rawContractVersion);
-  const values = parseJson(rawJson, []);
-  if (!definition || !headers || !Array.isArray(values)) return values;
-  const result = Object.fromEntries(headers.map((header, index) => [header, values[index] ?? '']));
-  if (sourceType === SOURCE_TYPES.CHANNEL) result['公司主体（导入指定）'] = assignedSubject || '';
-  return result;
-}
-
-function importRowShape(row) {
-  const existingRawJson = row.existing_raw_json || row.comparison_raw_json || null;
-  return {
-    id: row.id,
-    sourceType: row.source_type,
-    sourceLabel: SOURCE_LABELS[row.source_type] || row.source_type,
-    targetMonth: row.target_month,
-    idempotencyKey: row.idempotency_key || '',
-    disposition: row.disposition,
-    sourceFile: row.source_file,
-    sheetName: row.sheet_name,
-    sourceRow: row.source_row,
-    validationField: row.validation_field || '',
-    message: row.validation_message || '',
-    diffFields: parseJson(row.diff_fields_json, []),
-    incoming: rawObject(
-      row.source_type,
-      row.raw_json,
-      row.subject,
-      row.raw_contract_version
-    ),
-    existing: existingRawJson
-      ? rawObject(
-        row.source_type,
-        existingRawJson,
-        row.existing_subject || row.comparison_subject,
-        row.existing_raw_contract_version || row.comparison_raw_contract_version
-      )
-      : null,
-    existingSource: existingRawJson ? {
-      sourceFile: row.existing_source_file || row.comparison_source_file || '',
-      sheetName: row.existing_sheet_name || row.comparison_sheet_name || '',
-      sourceRow: row.existing_source_row || row.comparison_source_row || null,
-      importRecordId: row.existing_import_record_id || row.comparison_import_record_id || null,
-      importedAt: row.existing_imported_at || row.comparison_created_at || null
-    } : null
   };
 }
 
@@ -219,6 +175,8 @@ function createVccFinancialOpService({
   publishOutputFilesFn = null,
   archiveConsistencyLogger = null,
   operationDiagnosticLogger = null,
+  archiveRepositoryProvider = null,
+  archiveServiceProvider = null,
   cancelTimeoutMs = 120000
 }) {
   let activeTask = null;
@@ -227,6 +185,36 @@ function createVccFinancialOpService({
   let activeMonthsCache = null;
   const activeReadWorkers = new Set();
   repository.recoverInterruptedImports(database.db);
+
+  function syncImportArchiveLineage() {
+    try {
+      const archiveRepository = typeof archiveRepositoryProvider === 'function'
+        ? archiveRepositoryProvider()
+        : null;
+      return reconcileVccImportArchiveLineage({
+        db: database.db,
+        archiveRepository
+      });
+    } catch (error) {
+      if (operationDiagnosticLogger) {
+        try {
+          operationDiagnosticLogger({
+            operation: 'sync-import-archive-lineage',
+            code: error && error.code ? error.code : 'archive-lineage-sync-failed',
+            message: error && error.message ? error.message : String(error)
+          });
+        } catch (_loggerError) { /* diagnostic logger must not change business result */ }
+      }
+      return Object.freeze({
+        available: false,
+        bound: 0,
+        failed: 0,
+        pending: 0,
+        released: 0,
+        error: error && error.message ? error.message : String(error)
+      });
+    }
+  }
 
   function acquireTask(action, {
     kind = 'worker',
@@ -514,7 +502,7 @@ function createVccFinancialOpService({
     return runWorker('inspect', { filePaths });
   }
 
-  async function importSelectedFiles(payload, onProgress, batchContext) {
+  async function importSelectedFiles(payload, onProgress, batchContext, archiveHandoffFiles) {
     const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     const importBatchId = normalizeImportBatchId(frozenBatchContext.taskRunId);
     if (repository.getImportBatch(database.db, importBatchId)) {
@@ -523,11 +511,16 @@ function createVccFinancialOpService({
         `VCC 导入批次号已存在，拒绝把新任务写入既有批次：${importBatchId}`
       );
     }
+    const frozenArchiveHandoffFiles = freezeImportArchiveHandoffFiles(
+      archiveHandoffFiles,
+      importBatchId
+    );
     const targetMonth = normalizeYearMonth(payload && payload.targetMonth);
     return runWorker('import', {
       ...payload,
       batchId: importBatchId,
-      batchContext: frozenBatchContext
+      batchContext: frozenBatchContext,
+      archiveHandoffFiles: frozenArchiveHandoffFiles
     }, onProgress, {
       recoverImportBatchId: importBatchId,
       recoverImportTargetMonth: targetMonth
@@ -691,7 +684,9 @@ function createVccFinancialOpService({
   }
 
   function listImportRecords(yearMonth) {
-    return repository.listImportRecords(database.db, yearMonth).map(detailRecordShape);
+    syncImportArchiveLineage();
+    return repository.listImportRecords(database.db, yearMonth)
+      .map((record) => detailRecordShape(record, database.db));
   }
 
   function previewDatasetDeletion(payload = {}) {
@@ -784,24 +779,115 @@ function createVccFinancialOpService({
   }
 
   function previewDatasetExport(payload = {}) {
-    return inspectDatasetExport(
-      database.db,
-      payload.targetMonth,
-      payload.sourceType,
-      payload.targetKind,
-      { taskActive: Boolean(activeTask) }
-    );
+    syncImportArchiveLineage();
+    return {
+      ...inspectDatasetExport(
+        database.db,
+        payload.targetMonth,
+        payload.sourceType,
+        payload.targetKind,
+        { taskActive: Boolean(activeTask) }
+      ),
+      taskGeneration
+    };
   }
 
-  function exportDatasetData(payload = {}, onProgress, batchContext) {
+  async function resolveDatasetArchiveSources(payload = {}) {
+    const tableName = payload.sourceType === SOURCE_TYPES.SYSTEM_OP
+      ? 'vcc_fin_op_system_snapshots'
+      : 'vcc_fin_op_effective_rows';
+    const columns = database.db.prepare(`PRAGMA table_info(${tableName})`).all();
+    if (!columns.some((column) => column.name === 'import_source_id')) return [];
+    const archiveService = typeof archiveServiceProvider === 'function'
+      ? archiveServiceProvider()
+      : null;
+    const rows = payload.sourceType === SOURCE_TYPES.SYSTEM_OP
+      ? database.db.prepare(`
+          SELECT DISTINCT snapshot.import_source_id AS referenced_source_id,
+                 s.id, s.archive_artifact_id, s.archive_state, s.bound_at,
+                 s.source_file_name, s.source_sha256, s.source_size_bytes
+          FROM vcc_fin_op_system_snapshots AS snapshot
+          LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = snapshot.import_source_id
+          WHERE snapshot.target_month = ? AND snapshot.import_source_id IS NOT NULL
+          ORDER BY snapshot.import_source_id
+        `).all(payload.targetMonth)
+      : database.db.prepare(`
+          SELECT DISTINCT e.import_source_id AS referenced_source_id,
+                 s.id, s.archive_artifact_id, s.archive_state, s.bound_at,
+                 s.source_file_name, s.source_sha256, s.source_size_bytes
+          FROM vcc_fin_op_effective_rows AS e
+          LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = e.import_source_id
+          WHERE e.target_month = ? AND e.source_type = ?
+            AND e.import_source_id IS NOT NULL
+          ORDER BY e.import_source_id
+        `).all(payload.targetMonth, payload.sourceType);
+    if (rows.length === 0) return [];
+    const resolved = [];
+    for (const source of rows) {
+      const sourceId = Number(source.id);
+      if (!Number.isSafeInteger(sourceId) || sourceId < 1) {
+        const error = new Error(`当前有效数据引用的导入来源 ${source.referenced_source_id} 不存在`);
+        error.code = 'archive-lineage-invalid';
+        throw error;
+      }
+      const artifactId = Number(source.archive_artifact_id);
+      const hasArtifact = Number.isSafeInteger(artifactId) && artifactId > 0;
+      const wasBound = hasArtifact || Boolean(source.bound_at) || source.archive_state === 'ready';
+      if (!hasArtifact) {
+        if (wasBound) {
+          const error = new Error(`导入来源 ${sourceId} 的 artifact 绑定已损坏或丢失`);
+          error.code = 'archive-integrity-failure';
+          throw error;
+        }
+        continue;
+      }
+      if (source.archive_state !== 'ready') {
+        const error = new Error(`导入来源 ${sourceId} 的 bound artifact 状态异常`);
+        error.code = 'archive-integrity-failure';
+        throw error;
+      }
+      if (!archiveService || typeof archiveService.resolveVerifiedArtifact !== 'function') {
+        const error = new Error('存档中心暂不可用，无法核验并重建校验原表');
+        error.code = 'archive-storage-unavailable';
+        throw error;
+      }
+      const artifact = await archiveService.resolveVerifiedArtifact(artifactId);
+      if (!artifact || artifact.ok !== true
+          || String(artifact.sha256 || '').toLowerCase() !== String(source.source_sha256).toLowerCase()
+          || Number(artifact.sizeBytes) !== Number(source.source_size_bytes)) {
+        const error = new Error(
+          artifact && artifact.message
+            ? artifact.message
+            : `导入来源 ${source.id} 的存档文件完整性校验失败`
+        );
+        error.code = artifact && artifact.code || 'archive-integrity-failure';
+        throw error;
+      }
+      resolved.push({
+        sourceId,
+        filePath: artifact.filePath,
+        fileName: source.source_file_name,
+        sha256: source.source_sha256,
+        sizeBytes: Number(source.source_size_bytes)
+      });
+    }
+    return resolved;
+  }
+
+  async function exportDatasetData(payload = {}, onProgress, batchContext) {
     const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
+    const archiveSources = await resolveDatasetArchiveSources(payload);
     return runWorker('export-dataset', {
       targetMonth: payload.targetMonth,
       sourceType: payload.sourceType,
       targetKind: payload.targetKind,
       outputPath: payload.generationOutputPath || payload.outputPath,
+      archiveSources,
+      expectedInspection: payload.expectedInspection,
       batchContext: frozenBatchContext
-    }, onProgress).then(async (result) => {
+    }, onProgress, {
+      expectedTaskGeneration: payload.taskGeneration
+    }).then(async (result) => {
       if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
       await publishOutputFilesFn({
         batchContext: frozenBatchContext,
@@ -818,165 +904,13 @@ function createVccFinancialOpService({
     });
   }
 
-  function getImportRecordDetail({ recordId, tab = 'summary', page = 1, pageSize = 100, key = '', fileName = '' }) {
-    const id = Number(recordId);
-    const record = repository.getImportRecord(database.db, id);
-    if (!record) throw new Error(`导入记录不存在：${recordId}`);
-    const summary = detailRecordShape(record);
-    const errors = database.db.prepare(`
-      SELECT * FROM vcc_fin_op_import_errors
-      WHERE import_record_id = ? ORDER BY id
-    `).all(id);
-    if (tab === 'summary') return { summary, errors, rows: [], total: 0, page: 1, pageSize };
-
-    const safePageSize = Math.max(1, Math.min(500, Number(pageSize) || 100));
-    const safePage = Math.max(1, Number(page) || 1);
-    const offset = (safePage - 1) * safePageSize;
-    if (record.source_type === SOURCE_TYPES.SYSTEM_OP) {
-      const systemDisposition = tab === 'skips'
-        ? 'idempotent_skip'
-        : (tab === 'conflicts' ? 'idempotent_conflict' : 'rolled_back');
-      const conditions = ['a.import_record_id = ?', 'a.disposition = ?'];
-      const params = [id, systemDisposition];
-      if (String(key).trim()) {
-        conditions.push('a.subject LIKE ?');
-        params.push(`%${String(key).trim()}%`);
-      }
-      if (String(fileName).trim()) {
-        conditions.push('a.source_file LIKE ?');
-        params.push(`%${String(fileName).trim()}%`);
-      }
-      const where = conditions.join(' AND ');
-      const total = Number(database.db.prepare(`
-        SELECT COUNT(*) AS row_count
-        FROM vcc_fin_op_system_snapshot_attempts a
-        WHERE ${where}
-      `).get(...params).row_count) || 0;
-      const rows = database.db.prepare(`
-        SELECT a.*,
-               COALESCE(e.balances_json, a.existing_balances_json_snapshot) AS existing_balances_json,
-               COALESCE(e.raw_json, a.existing_raw_json_snapshot) AS existing_raw_json,
-               COALESCE(e.source_file, a.existing_source_file_snapshot) AS existing_source_file,
-               COALESCE(e.sheet_name, a.existing_sheet_name_snapshot) AS existing_sheet_name,
-               COALESCE(e.source_row, a.existing_source_row_snapshot) AS existing_source_row,
-               COALESCE(e.import_record_id, a.existing_import_record_id_snapshot) AS existing_import_record_id,
-               COALESCE(e.imported_at, a.existing_imported_at_snapshot) AS existing_imported_at,
-               c.balances_json AS comparison_balances_json,
-               c.raw_json AS comparison_raw_json,
-               c.source_file AS comparison_source_file,
-               c.sheet_name AS comparison_sheet_name,
-               c.source_row AS comparison_source_row,
-               c.import_record_id AS comparison_import_record_id,
-               c.created_at AS comparison_imported_at
-        FROM vcc_fin_op_system_snapshot_attempts a
-        LEFT JOIN vcc_fin_op_system_snapshots e ON e.id = a.existing_snapshot_id
-        LEFT JOIN vcc_fin_op_system_snapshot_attempts c ON c.id = a.comparison_attempt_id
-        WHERE ${where}
-        ORDER BY a.id
-        LIMIT ? OFFSET ?
-      `).all(...params, safePageSize, offset).map((row) => {
-        const incomingBalances = parseJson(row.balances_json, {});
-        const existingBalancesJson = row.existing_balances_json || row.comparison_balances_json;
-        const existingBalances = parseJson(existingBalancesJson, {});
-        return {
-          id: `system-${row.id}`,
-          sourceType: SOURCE_TYPES.SYSTEM_OP,
-          sourceLabel: SOURCE_LABELS[SOURCE_TYPES.SYSTEM_OP],
-          targetMonth: row.target_month,
-          idempotencyKey: `${row.target_month} × ${row.subject}`,
-          disposition: row.disposition,
-          sourceFile: row.source_file,
-          sheetName: row.sheet_name,
-          sourceRow: row.source_row,
-          message: row.message || '',
-          incoming: {
-            balances: incomingBalances,
-            source: parseJson(row.raw_json, {})
-          },
-          existing: existingBalancesJson ? {
-            balances: existingBalances,
-            source: parseJson(row.existing_raw_json || row.comparison_raw_json, {})
-          } : null,
-          existingSource: existingBalancesJson ? {
-            sourceFile: row.existing_source_file || row.comparison_source_file || '',
-            sheetName: row.existing_sheet_name || row.comparison_sheet_name || '',
-            sourceRow: row.existing_source_row || row.comparison_source_row || null,
-            importRecordId: row.existing_import_record_id || row.comparison_import_record_id || null,
-            importedAt: row.existing_imported_at || row.comparison_imported_at || null
-          } : null,
-          diffFields: existingBalancesJson
-            ? SUPPORTED_CURRENCIES.filter((currency) => incomingBalances[currency] !== existingBalances[currency])
-            : []
-        };
-      });
-      return { summary, errors, rows, total, page: safePage, pageSize: safePageSize };
-    }
-
-    const dispositions = tab === 'skips'
-      ? ['idempotent_skip']
-      : (tab === 'conflicts'
-        ? ['idempotent_conflict']
-        : ['invalid_key', 'format_error', 'rolled_back']);
-    const conditions = [
-      'i.import_record_id = ?',
-      `i.disposition IN (${dispositions.map(() => '?').join(', ')})`
-    ];
-    const params = [id, ...dispositions];
-    if (String(key).trim()) {
-      conditions.push('i.idempotency_key LIKE ?');
-      params.push(`%${String(key).trim()}%`);
-    }
-    if (String(fileName).trim()) {
-      conditions.push('i.source_file LIKE ?');
-      params.push(`%${String(fileName).trim()}%`);
-    }
-    const where = conditions.join(' AND ');
-    const total = Number(database.db.prepare(`
-      SELECT COUNT(*) AS row_count FROM vcc_fin_op_import_rows i WHERE ${where}
-    `).get(...params).row_count) || 0;
-    const rows = database.db.prepare(`
-      SELECT i.*,
-             COALESCE(e.raw_json, i.existing_raw_json_snapshot) AS existing_raw_json,
-             COALESCE(e.raw_contract_version, i.existing_raw_contract_version_snapshot) AS existing_raw_contract_version,
-             COALESCE(e.subject, i.existing_subject_snapshot) AS existing_subject,
-             COALESCE(e.source_file, i.existing_source_file_snapshot) AS existing_source_file,
-             COALESCE(e.sheet_name, i.existing_sheet_name_snapshot) AS existing_sheet_name,
-             COALESCE(e.source_row, i.existing_source_row_snapshot) AS existing_source_row,
-             COALESCE(e.import_record_id, i.existing_import_record_id_snapshot) AS existing_import_record_id,
-             COALESCE(e.first_imported_at, i.existing_imported_at_snapshot) AS existing_imported_at,
-             c.raw_json AS comparison_raw_json,
-             c.raw_contract_version AS comparison_raw_contract_version,
-             c.subject AS comparison_subject,
-             c.source_file AS comparison_source_file,
-             c.sheet_name AS comparison_sheet_name,
-             c.source_row AS comparison_source_row,
-             c.import_record_id AS comparison_import_record_id,
-             c.created_at AS comparison_created_at
-      FROM vcc_fin_op_import_rows i
-      LEFT JOIN vcc_fin_op_effective_rows e ON e.id = i.existing_effective_id
-      LEFT JOIN vcc_fin_op_import_rows c ON c.id = i.comparison_import_row_id
-      WHERE ${where}
-      ORDER BY i.id
-      LIMIT ? OFFSET ?
-    `).all(...params, safePageSize, offset).map(importRowShape);
-
-    return {
-      summary,
-      errors,
-      rows,
-      total,
-      page: safePage,
-      pageSize: safePageSize
-    };
-  }
-
   function resolveRecord({ recordId, note, action }, batchContext) {
     freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('resolve-import-record', () => (
       detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
         note,
         action
-      }))
+      }), database.db)
     ));
   }
 
@@ -1124,12 +1058,13 @@ function createVccFinancialOpService({
     deleteDataTarget: deleteDataTargetData,
     previewDatasetExport,
     exportDatasetData,
-    getImportRecordDetail,
+    resolveDatasetArchiveSources,
     resolveRecord,
     dataManagerOverview,
     latestArchivedRun,
     exportRun,
     exportImportAudit,
+    syncImportArchiveLineage,
     getRunResult: getRunReview,
     async terminate() {
       closing = true;

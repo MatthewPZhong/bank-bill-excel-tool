@@ -105,9 +105,9 @@ test('main literal IPC 与 PR3-Toolbox 完成后的 policy 精确相等', () => 
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 243);
+  assert.equal(actual.length, 244);
   assert.equal(registry.channels('reserve').length, 121);
-  assert.equal(registry.channels('exclude').length, 120);
+  assert.equal(registry.channels('exclude').length, 121);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
   assert.deepEqual(PR3_HANDOFF_CHANNELS, []);
 });
@@ -313,7 +313,6 @@ test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {
       'vccFinancialOp:data-manager:export-preview',
       'vccFinancialOp:data-manager:overview',
       'vccFinancialOp:import:pick-files',
-      'vccFinancialOp:imports:get-detail',
       'vccFinancialOp:imports:list-months',
       'vccFinancialOp:imports:list-records',
       'vccFinancialOp:run:adjustment-options',
@@ -322,6 +321,8 @@ test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {
       'vccFinancialOp:run:latest-archived',
       'vccFinancialOp:run:preflight',
       'vccFinancialOp:run:unarchive-preview',
+      'vccFinancialOp:storage:inspect',
+      'vccFinancialOp:storage:migrate',
       'vccFinancialOp:task:cancel'
     ]
   );

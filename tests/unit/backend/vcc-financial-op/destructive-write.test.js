@@ -10,6 +10,11 @@ const {
   ensureVccFinancialOpTablesSupport
 } = require('../../../../src/backend/vcc-financial-op-db/migrations');
 const {
+  VCC_STORAGE_CONTRACT_VERSION,
+  createSlimEffectiveRowsTable,
+  setVccStorageContractVersion
+} = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
+const {
   VCC_MUTATION_OPERATIONS
 } = require('../../../../src/backend/vcc-financial-op/mutation-policy');
 const {
@@ -35,6 +40,42 @@ function createTempDb(t, { legacy = false } = {}) {
   db.close();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return dbPath;
+}
+
+function replaceEffectiveRowsWithSlimSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+  `);
+  createSlimEffectiveRowsTable(db, 'vcc_fin_op_effective_rows_v2_test');
+  db.exec(`
+    INSERT INTO vcc_fin_op_effective_rows_v2_test (
+      id, source_type, idempotency_key, content_hash, hash_version,
+      raw_contract_version, legacy_content_hash, target_month, subject,
+      stat_currency, signed_amount, business_department, counterparty_department,
+      business_sub_type, channel_name, mid, recon_type, pending_currency,
+      pending_amount, flow_currency, flow_amount, currency_mismatch,
+      import_record_id, import_source_id, sheet_name, source_row, first_imported_at
+    )
+    SELECT
+      id, source_type, idempotency_key, content_hash, hash_version,
+      raw_contract_version, legacy_content_hash, target_month, subject,
+      stat_currency, signed_amount, business_department, counterparty_department,
+      business_sub_type, channel_name, mid, recon_type, pending_currency,
+      pending_amount, flow_currency, flow_amount, currency_mismatch,
+      import_record_id, import_source_id, sheet_name, source_row, first_imported_at
+    FROM vcc_fin_op_effective_rows;
+    PRAGMA foreign_keys = OFF;
+    DROP TABLE vcc_fin_op_effective_rows;
+    ALTER TABLE vcc_fin_op_effective_rows_v2_test RENAME TO vcc_fin_op_effective_rows;
+  `);
+  setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+  ensureVccFinancialOpTablesSupport(db);
+  db.exec('PRAGMA foreign_keys = ON');
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 }
 
 function seedCurrentArchived(dbPath) {
@@ -541,6 +582,72 @@ test('detail source delete 在清 FK 前物化 Q 行并按 2+R+ΣC+2Q+E+D+M 删�
   `).get();
   assert.equal(JSON.parse(audit.evidence_json).orphanDataset, true);
   assert.equal(JSON.parse(audit.evidence_json).expectedTotalChanges, 12);
+  verify.close();
+});
+
+test('storage contract v2 slim effective 删除同步清 fallback 与异常引用且不依赖 legacy raw', (t) => {
+  const dbPath = createTempDb(t);
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON');
+  seedCalculatedRunWithChildren(db, '2026-07');
+  const recordId = seedSuccessfulImportRecord(db, '2026-07', 'recharge_refund');
+  seedDataset(db, '2026-07', 'recharge_refund', 8);
+  const sourceId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_import_sources (
+      import_record_id, source_ordinal, source_file_name,
+      source_sha256, source_size_bytes, archive_state
+    ) VALUES (?, 1, 'slim.xlsx', ?, 128, 'pending')
+  `).run(recordId, 'a'.repeat(64)).lastInsertRowid);
+  const effectiveId = Number(db.prepare(`
+    INSERT INTO vcc_fin_op_effective_rows (
+      source_type, idempotency_key_raw, idempotency_key, content_hash,
+      raw_contract_version, target_month, subject, stat_currency, signed_amount,
+      source_file, sheet_name, source_row, raw_json,
+      import_record_id, import_source_id, first_imported_at
+    ) VALUES ('recharge_refund', 'slim-key', 'slim-key', ?, 1,
+              '2026-07', 'PPHK', 'USD', '10', 'slim.xlsx', 'Sheet1', 2,
+              '["slim-key"]', ?, ?, '2026-08-17 08:05:00')
+  `).run('b'.repeat(64), recordId, sourceId).lastInsertRowid);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_effective_raw_fallback (
+      effective_row_id, import_source_id, raw_contract_version, raw_json
+    ) VALUES (?, ?, 1, '["slim-key"]')
+  `).run(effectiveId, sourceId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_anomalies (
+      import_record_id, import_source_id, effective_row_id,
+      source_type, target_month, idempotency_key,
+      source_file_name, sheet_name, source_row, category,
+      abnormal_fields_json, description, diff_fields_json
+    ) VALUES (?, ?, ?, 'recharge_refund', '2026-07', 'slim-key',
+              'slim.xlsx', 'Sheet1', 2, 'idempotent_conflict',
+              '["业务内容"]', '冲突证据', '["业务内容"]')
+  `).run(recordId, sourceId, effectiveId);
+  replaceEffectiveRowsWithSlimSchema(db);
+  db.close();
+
+  const snapshot = deletePreview(dbPath, '2026-07', 'recharge_refund');
+  assert.equal(snapshot.deletable, true);
+  const result = executeDelete(dbPath, snapshot);
+  assert.equal(result.deletedDataCount, 1);
+  assert.equal(result.deletedImportRecordCount, 1);
+
+  const verify = new DatabaseSync(dbPath, { readOnly: true });
+  assert.equal(verify.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
+    WHERE target_month = '2026-07' AND source_type = 'recharge_refund'
+  `).get().n, 0);
+  assert.equal(verify.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_effective_raw_fallback
+  `).get().n, 0);
+  assert.equal(verify.prepare(`
+    SELECT effective_row_id FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(recordId).effective_row_id, null);
+  assert.equal(verify.prepare(`
+    SELECT dataset_deletion_id IS NOT NULL AS deleted
+    FROM vcc_fin_op_import_records WHERE id = ?
+  `).get(recordId).deleted, 1);
   verify.close();
 });
 

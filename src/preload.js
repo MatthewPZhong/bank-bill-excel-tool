@@ -538,9 +538,10 @@ contextBridge.exposeInMainWorld('desktopApi', {
     exportResult: (payload) => ipcRenderer.invoke('vccFinancialOp:export:result', payload),
     listImportMonths: () => ipcRenderer.invoke('vccFinancialOp:imports:list-months'),
     listImportRecords: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:list-records', payload),
-    getImportDetail: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:get-detail', payload),
     resolveImportRecord: (payload) => ipcRenderer.invoke('vccFinancialOp:imports:resolve', payload),
     dataManagerOverview: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:overview', payload),
+    inspectStorage: () => ipcRenderer.invoke('vccFinancialOp:storage:inspect'),
+    migrateStorage: () => ipcRenderer.invoke('vccFinancialOp:storage:migrate'),
     listDeleteTargets: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-targets', payload),
     previewDataTargetDeletion: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete-preview', payload),
     deleteDataTarget: (payload) => ipcRenderer.invoke('vccFinancialOp:data-manager:delete', payload),
@@ -559,6 +560,11 @@ contextBridge.exposeInMainWorld('desktopApi', {
       const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
       ipcRenderer.on('vccFinancialOp:operation:progress', listener);
       return () => ipcRenderer.removeListener('vccFinancialOp:operation:progress', listener);
+    },
+    onStorageMigrationProgress: (callback) => {
+      const listener = (_event, data) => { if (typeof callback === 'function') callback(data); };
+      ipcRenderer.on('vccFinancialOp:storage:migration-progress', listener);
+      return () => ipcRenderer.removeListener('vccFinancialOp:storage:migration-progress', listener);
     }
   },
   // v2.1.6 Module B：收单单据币种校验

@@ -8,6 +8,11 @@ const {
   APPROVED_VCC_TRIGGERS,
   MUTATION_SQL_STEP_REGISTRY
 } = require('./mutation-policy');
+const {
+  VCC_STORAGE_GUARD_TRIGGER_PREFIX,
+  registerVccStorageWriteCapability,
+  vccStorageGuardTriggerDefinition
+} = require('../vcc-financial-op-db/storage-contract');
 
 const LARGE_TABLE_SCOPE_PROOF_SET = new Set(LARGE_TABLE_SCOPE_PROOF_TABLES);
 const APPROVED_TRIGGER_SET = new Set(APPROVED_VCC_TRIGGERS);
@@ -214,9 +219,30 @@ function vccTriggers(db) {
   }));
 }
 
+function canonicalTriggerSql(sql) {
+  return String(sql || '').replace(/\s+/g, ' ').trim().replace(/;$/, '');
+}
+
+function isApprovedStorageContractTrigger(trigger) {
+  if (!trigger.name.startsWith(VCC_STORAGE_GUARD_TRIGGER_PREFIX)) return false;
+  if (!Object.hasOwn(VCC_TABLE_POLICY_REGISTRY, trigger.tableName)) return false;
+  for (const operation of ['insert', 'update', 'delete']) {
+    const expected = vccStorageGuardTriggerDefinition(trigger.tableName, operation);
+    if (trigger.name !== expected.name) continue;
+    return canonicalTriggerSql(trigger.sql) === canonicalTriggerSql(expected.sql);
+  }
+  return false;
+}
+
 function assertVccTriggerPolicy(db) {
+  // Dedicated result/destructive workers 裸开 DatabaseSync；它们必须在首写前
+  // 经同一策略检查显式取得 contract-v2 连接能力。
+  registerVccStorageWriteCapability(db);
   const triggers = vccTriggers(db);
-  const unknown = triggers.filter((trigger) => !APPROVED_TRIGGER_SET.has(trigger.name));
+  const unknown = triggers.filter((trigger) => (
+    !APPROVED_TRIGGER_SET.has(trigger.name)
+    && !isApprovedStorageContractTrigger(trigger)
+  ));
   if (unknown.length > 0) {
     throw mutationGuardError(
       'vcc-trigger-policy-violation',

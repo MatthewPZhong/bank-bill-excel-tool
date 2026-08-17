@@ -15,10 +15,11 @@ function createBusinessOperationRegistry() {
   const activeOperations = new Map();
   const idleWaiters = new Set();
   let nextToken = 1;
-  let installTransitionActive = false;
+  let nextTransitionToken = 1;
+  let transitionLease = null;
 
   function begin(meta) {
-    if (installTransitionActive) {
+    if (transitionLease) {
       return {
         accepted: false,
         status: 'busy',
@@ -44,32 +45,45 @@ function createBusinessOperationRegistry() {
     return Array.from(activeOperations.values(), (operation) => ({ ...operation }));
   }
 
-  function beginInstallTransition() {
-    if (installTransitionActive) {
+  function acquireTransition(owner, options = {}) {
+    const normalizedOwner = String(owner || '').trim();
+    if (!normalizedOwner) throw new TypeError('业务 transition lease 缺少 owner');
+    if (transitionLease) {
       return {
         acquired: false,
-        reason: 'install-transition-active',
+        reason: 'transition-active',
+        owner: transitionLease.owner,
         operations: listActive()
       };
     }
 
-    installTransitionActive = true;
     const operations = listActive();
-    if (operations.length > 0) {
-      installTransitionActive = false;
+    if (options.requireIdle === true && operations.length > 0) {
       return { acquired: false, reason: 'business-busy', operations };
     }
 
-    return { acquired: true, operations: [] };
+    const token = nextTransitionToken;
+    nextTransitionToken += 1;
+    transitionLease = { owner: normalizedOwner, token };
+    return { acquired: true, owner: normalizedOwner, token, operations };
   }
 
-  function cancelInstallTransition() {
-    installTransitionActive = false;
+  function releaseTransition(token) {
+    if (!transitionLease || transitionLease.token !== token) return false;
+    transitionLease = null;
+    return true;
   }
 
-  function beginShutdownTransition() {
-    installTransitionActive = true;
-    return { operations: listActive() };
+  function beginInstallTransition(owner = 'app-updater') {
+    return acquireTransition(owner, { requireIdle: true });
+  }
+
+  function cancelInstallTransition(token) {
+    return releaseTransition(token);
+  }
+
+  function beginShutdownTransition(owner = 'app-shutdown') {
+    return acquireTransition(owner, { requireIdle: false });
   }
 
   function waitForIdle() {
@@ -81,11 +95,13 @@ function createBusinessOperationRegistry() {
     begin,
     end,
     listActive,
+    acquireTransition,
+    releaseTransition,
     beginInstallTransition,
     beginShutdownTransition,
     waitForIdle,
     cancelInstallTransition,
-    isInstallTransitionActive: () => installTransitionActive
+    isInstallTransitionActive: () => Boolean(transitionLease)
   };
 }
 

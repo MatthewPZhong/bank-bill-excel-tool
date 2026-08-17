@@ -341,7 +341,7 @@ test.describe('stateless archive operation tracker', () => {
     assert.equal(calls[0].files.some((file) => file.filePath.includes('.toolbox-')), false);
   });
 
-  test('VCC财务五类导入只登记成功处理组，三个export登记writer全部输出', () => {
+  test('VCC财务导入优先登记全部终态证据，旧调用仅登记成功组；三个export登记writer全部输出', () => {
     const files = [
       { sourceType: 'recharge_refund', filePath: '/tmp/recharge.xlsx' },
       { sourceType: 'fee_fx', filePath: '/tmp/fee.xlsx' },
@@ -368,6 +368,32 @@ test.describe('stateless archive operation tracker', () => {
       '/tmp/fee.xlsx',
       '/tmp/channel.xlsx'
     ]);
+    const evidencedImport = resolveOperationFiles({
+      channel: 'vccFinancialOp:import:apply',
+      args: [{ files }],
+      result: {
+        status: 'completed_with_errors',
+        records: [
+          { sourceType: 'recharge_refund', status: 'success' },
+          { sourceType: 'fee_fx', status: 'success_with_skips' },
+          { sourceType: 'channel', status: 'all_skipped' },
+          { sourceType: 'pending_archive_removal', status: 'failed_validation' },
+          { sourceType: 'system_op', status: 'failed_conflict' }
+        ]
+      },
+      runtime: {
+        inputFiles: files.map((file, index) => ({
+          filePath: file.filePath,
+          expectedSha256: String(index + 1).repeat(64),
+          expectedSizeBytes: index + 10
+        }))
+      }
+    });
+    assert.deepEqual(evidencedImport.map((file) => file.filePath), files.map((file) => file.filePath));
+    assert.equal(evidencedImport[3].expectedSha256, '4'.repeat(64));
+    assert.equal(evidencedImport[3].expectedSizeBytes, 13);
+    assert.equal(evidencedImport[4].expectedSha256, '5'.repeat(64));
+    assert.equal(evidencedImport[4].expectedSizeBytes, 14);
     assert.deepEqual(resolveOperationFiles({
       channel: 'vccFinancialOp:import:apply',
       args: [{ files }],

@@ -54,6 +54,9 @@ const VCC_TABLE_POLICY_REGISTRY = Object.freeze({
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
   ]),
   vcc_fin_op_import_batches: tablePolicy('vcc_fin_op_import_batches', ['id'], 'metadata'),
+  vcc_fin_op_import_anomalies: tablePolicy('vcc_fin_op_import_anomalies', ['id'], 'audit', [
+    VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
+  ]),
   vcc_fin_op_import_errors: tablePolicy('vcc_fin_op_import_errors', ['id'], 'audit'),
   vcc_fin_op_import_records: tablePolicy('vcc_fin_op_import_records', ['id'], 'metadata', [
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
@@ -61,6 +64,14 @@ const VCC_TABLE_POLICY_REGISTRY = Object.freeze({
   vcc_fin_op_import_rows: tablePolicy('vcc_fin_op_import_rows', ['id'], 'audit', [
     VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET
   ]),
+  vcc_fin_op_import_sources: tablePolicy('vcc_fin_op_import_sources', ['id'], 'metadata'),
+  vcc_fin_op_import_staging_rows: tablePolicy('vcc_fin_op_import_staging_rows', ['id'], 'transient'),
+  vcc_fin_op_effective_raw_fallback: tablePolicy(
+    'vcc_fin_op_effective_raw_fallback',
+    ['effective_row_id'],
+    'transient',
+    [VCC_MUTATION_OPERATIONS.DELETE_DATA_TARGET]
+  ),
   vcc_fin_op_module_state: tablePolicy('vcc_fin_op_module_state', ['singleton_id'], 'metadata'),
   vcc_fin_op_opening_balances: tablePolicy(
     'vcc_fin_op_opening_balances',
@@ -342,17 +353,40 @@ const MUTATION_SQL_STEP_REGISTRY = Object.freeze({
       WHERE target_month = ? AND source_type = ?
     `
   }),
+  'delete.detail-clear-anomaly-effective': step({
+    tableName: 'vcc_fin_op_import_anomalies',
+    mutation: 'update',
+    sql: `
+      UPDATE vcc_fin_op_import_anomalies
+      SET effective_row_id = NULL
+      WHERE effective_row_id IN (
+        SELECT id FROM vcc_fin_op_effective_rows
+        WHERE target_month = ? AND source_type = ?
+      )
+    `
+  }),
+  'delete.detail-fallback': step({
+    tableName: 'vcc_fin_op_effective_raw_fallback',
+    mutation: 'delete',
+    sql: `
+      DELETE FROM vcc_fin_op_effective_raw_fallback
+      WHERE effective_row_id IN (
+        SELECT id FROM vcc_fin_op_effective_rows
+        WHERE target_month = ? AND source_type = ?
+      )
+    `
+  }),
   'delete.system-backfill': step({
     tableName: 'vcc_fin_op_system_snapshot_attempts',
     mutation: 'insert',
     largeTableScopeId: 'system-missing-accepted',
     sql: `
       INSERT INTO vcc_fin_op_system_snapshot_attempts (
-        import_record_id, target_month, subject, balances_json, content_hash,
+        import_record_id, import_source_id, target_month, subject, balances_json, content_hash,
         source_file, sheet_name, source_row, raw_json,
         disposition, existing_snapshot_id, message, created_at
       )
-      SELECT snapshot.import_record_id, snapshot.target_month, snapshot.subject,
+      SELECT snapshot.import_record_id, snapshot.import_source_id, snapshot.target_month, snapshot.subject,
              snapshot.balances_json, snapshot.content_hash,
              snapshot.source_file, snapshot.sheet_name, snapshot.source_row,
              snapshot.raw_json, 'accepted', snapshot.id,

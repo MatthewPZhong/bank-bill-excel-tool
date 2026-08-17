@@ -106,6 +106,12 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
   });
 
   const replayRecordId = seedRecord(db, 'replay-batch');
+  const replaySourceId = repository.createImportSource(db, replayRecordId, {
+    sourceOrdinal: 1,
+    fileName: 'new-46.xlsx',
+    sha256: 'b'.repeat(64),
+    sizeBytes: 1
+  });
   const mapped = mapDetailRow({
     sourceType: SOURCE_TYPES.PENDING,
     values: values(PENDING_HEADERS, pendingFields()),
@@ -115,8 +121,9 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
     sourceRow: 2,
     keyCellType: 's'
   });
-  db.prepare(repository.IMPORT_ROW_INSERT_SQL)
-    .run(...mappedRowToInsertParams(replayRecordId, mapped));
+  const replayParams = mappedRowToInsertParams(replayRecordId, mapped);
+  db.prepare(repository.STAGING_ROW_INSERT_SQL)
+    .run(replayParams[0], replaySourceId, ...replayParams.slice(1));
   const replay = classifyAndPromote(
     db,
     replayRecordId,
@@ -129,6 +136,13 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
     SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows
     WHERE source_type = ? AND idempotency_key = 'PENDING-1'
   `).get(SOURCE_TYPES.PENDING).n, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows
+  `).get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(replayRecordId).n, 0);
 });
 
 test('未知 Pending raw_json 列数阻断迁移且不修改历史 hash', (t) => {

@@ -215,8 +215,7 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       () => formatter({ status: 'success', records: [] }, '2026-07'),
       /未生成任何导入记录，业务数据未写入/
     );
-    assert.match(moduleRenderer, /isSystemOpSummary \? '新增币种数据' : '新增'/);
-    assert.match(moduleRenderer, /formatSystemOpSnapshotCount\(value, true\)/);
+    assert.match(moduleRenderer, /formatSystemOpSnapshotCount\(systemTotals\.inserted\)/);
     assert.doesNotMatch(moduleRenderer, /function showImportSummary|function importSummaryHtml|showImportSummary\(result\)/);
     assert.match(
       moduleRenderer,
@@ -252,7 +251,6 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:unarchive',
       'vccFinancialOp:imports:list-months',
       'vccFinancialOp:imports:list-records',
-      'vccFinancialOp:imports:get-detail',
       'vccFinancialOp:imports:resolve',
       'vccFinancialOp:data-manager:overview',
       'vccFinancialOp:data-manager:delete-targets',
@@ -263,7 +261,9 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:get',
       'vccFinancialOp:run:latest-archived',
       'vccFinancialOp:export:result',
-      'vccFinancialOp:export:import-audit'
+      'vccFinancialOp:export:import-audit',
+      'vccFinancialOp:storage:inspect',
+      'vccFinancialOp:storage:migrate'
     ];
     for (const channel of channels) {
       assert.ok(preload.includes(`ipcRenderer.invoke('${channel}'`), `preload 缺少 ${channel}`);
@@ -707,44 +707,39 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     })) assert.ok(moduleRenderer.includes(label), `校验表导出目标缺少 ${label}`);
   });
 
-  test('有效原表删除后列表显示已删除，详情保留原导入状态和删除时间', () => {
+  test('有效原表删除后列表保留文件级删除状态且不再打开逐行详情', () => {
     assert.match(vccService, /deleted:\s*'已删除'/);
     assert.match(vccService, /status:\s*deleted \? 'deleted' : originalStatus/);
     assert.match(vccService, /originalStatusText:/);
     assert.match(vccService, /datasetDeletedAt:/);
     assert.match(moduleRenderer, /if \(status === 'deleted'\) return 'deleted'/);
-    assert.match(moduleRenderer, /已删除（原导入状态：\$\{summary\.originalStatusText \|\| '-'\}）/);
-    assert.match(moduleRenderer, /原导入统计与审计明细继续保留/);
+    assert.doesNotMatch(moduleRenderer, /openImportRecordDetail|getImportDetail/);
+    assert.match(moduleRenderer, /record\.archiveState === 'ready'/);
   });
 
-  test('校验原表直接进入按单一月份筛选的七列导入记录', () => {
+  test('校验原表直接进入按单一月份筛选的七列导入记录并按异常显示导出', () => {
     assert.match(moduleRenderer, /<option value="">暂无已导入账期<\/option>/);
     assert.doesNotMatch(moduleRenderer, /全部月份/);
     assert.match(
       moduleRenderer,
       /<tr><th>账期<\/th><th>导入批次<\/th><th>原表类型<\/th><th>来源文件<\/th><th>导入时间<\/th><th>导入状态<\/th><th>操作<\/th><\/tr>/
     );
-    assert.match(moduleRenderer, />查看导入明细<\/button>/);
+    assert.doesNotMatch(moduleRenderer, /查看导入明细/);
+    assert.match(moduleRenderer, /Number\(record\.anomalyCount\) > 0/);
+    assert.match(moduleRenderer, />导出明细<\/button>/);
+    assert.match(moduleRenderer, />标记已处理<\/button>/);
+    assert.match(moduleRenderer, /输入文件待存档/);
     assert.match(moduleRenderer, /listImportRecords\(\{ yearMonth: month \}\)/);
   });
 
-  test('导入详情保留四页签、双侧原始数据、筛选、导出和人工处置留痕', () => {
-    for (const label of ['概览', '幂等跳过', '幂等冲突', '其他异常']) {
-      assert.ok(moduleRenderer.includes(label), `缺少 ${label} 页签`);
-    }
-    assert.match(moduleRenderer, /<h4>本次导入<\/h4>/);
-    assert.match(moduleRenderer, /<h4>已存在记录<\/h4>/);
-    assert.match(moduleRenderer, /placeholder="筛选幂等键"/);
-    assert.match(moduleRenderer, /placeholder="筛选文件名"/);
-    assert.match(moduleRenderer, />导出当前分类<\/button>/);
+  test('异常审计仅保留六列导出入口与文件级人工处置', () => {
+    assert.doesNotMatch(moduleRenderer, /getImportDetail/);
+    assert.doesNotMatch(moduleRenderer, /openImportRecordDetail/);
+    assert.doesNotMatch(moduleRenderer, /导出当前分类/);
     assert.match(moduleRenderer, /api\.exportImportAudit\(/);
     assert.match(moduleRenderer, /action: 'keep_current_effective_dataset'/);
     assert.match(moduleRenderer, /data-field="resolution-confirm"/);
     assert.match(moduleRenderer, /本次失败导入不参与计算/);
-    assert.match(moduleRenderer, /<th>文件<\/th><th>sheet<\/th><th>原表行号<\/th><th>异常字段<\/th><th>错误码<\/th><th>说明<\/th>/);
-    assert.match(moduleRenderer, /detailState\.tab === 'other' \? importErrorsTable/);
-    assert.match(moduleRenderer, /row\.sheetName \|\| '-'/);
-    assert.match(moduleRenderer, /row\.validationField \|\| '-'/);
   });
 
   test('结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档', () => {

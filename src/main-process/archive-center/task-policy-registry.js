@@ -256,13 +256,13 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccOpCalc:balance:list-months',
     'vccFinancialOp:data-manager:delete-targets',
     'vccFinancialOp:data-manager:overview',
-    'vccFinancialOp:imports:get-detail',
     'vccFinancialOp:imports:list-months',
     'vccFinancialOp:imports:list-records',
     'vccFinancialOp:run:adjustment-options',
     'vccFinancialOp:run:archived-months',
     'vccFinancialOp:run:get',
-    'vccFinancialOp:run:latest-archived'
+    'vccFinancialOp:run:latest-archived',
+    'vccFinancialOp:storage:inspect'
   ]),
   'file-picker-only': Object.freeze([
     'background:select-file',
@@ -311,7 +311,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:save-as',
     'archive-center:select-retry-sources',
     'archive-center:set-locked',
-    'archive-center:set-retention-days'
+    'archive-center:set-retention-days',
+    'vccFinancialOp:storage:migrate'
   ]),
   'ui-navigation': Object.freeze([
     'app-update:check-now',

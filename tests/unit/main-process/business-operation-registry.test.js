@@ -31,10 +31,11 @@ test('tracks active operations and releases them by token', () => {
 test('install transition is atomic and rejects new operations', () => {
   const registry = createBusinessOperationRegistry();
 
-  assert.deepEqual(registry.beginInstallTransition(), {
-    acquired: true,
-    operations: []
-  });
+  const transition = registry.beginInstallTransition('app-updater');
+  assert.equal(transition.acquired, true);
+  assert.equal(transition.owner, 'app-updater');
+  assert.equal(typeof transition.token, 'number');
+  assert.deepEqual(transition.operations, []);
 
   const blocked = registry.begin({ channel: 'file:import' });
   assert.deepEqual(blocked, {
@@ -43,7 +44,7 @@ test('install transition is atomic and rejects new operations', () => {
     message: INSTALL_BUSY_MESSAGE
   });
 
-  registry.cancelInstallTransition();
+  assert.equal(registry.cancelInstallTransition(transition.token), true);
   assert.equal(registry.begin({ channel: 'file:import' }).accepted, true);
 });
 
@@ -66,7 +67,9 @@ test('shutdown transition blocks new work and resolves only after active operati
   const first = registry.begin({ channel: 'position-reconciliation:run:export' });
   const second = registry.begin({ channel: 'position-reconciliation:source:prepare-import' });
 
-  const transition = registry.beginShutdownTransition();
+  const transition = registry.beginShutdownTransition('app-exit');
+  assert.equal(transition.acquired, true);
+  assert.equal(transition.owner, 'app-exit');
   assert.equal(transition.operations.length, 2);
   assert.equal(registry.begin({ channel: 'file:import' }).accepted, false);
 
@@ -80,4 +83,29 @@ test('shutdown transition blocks new work and resolves only after active operati
   registry.end(second.token);
   await waiting;
   assert.equal(drained, true);
+  assert.equal(registry.releaseTransition(transition.token), true);
+});
+
+test('updater 与 migration lease 双向互斥，且只能由匹配 token 释放', () => {
+  const registry = createBusinessOperationRegistry();
+  const updater = registry.beginInstallTransition('app-updater');
+  assert.equal(updater.acquired, true);
+
+  const migrationBlocked = registry.beginShutdownTransition('vcc-storage-migration');
+  assert.equal(migrationBlocked.acquired, false);
+  assert.equal(migrationBlocked.reason, 'transition-active');
+  assert.equal(migrationBlocked.owner, 'app-updater');
+  assert.equal(registry.releaseTransition('stale-token'), false);
+  assert.equal(registry.isInstallTransitionActive(), true);
+  assert.equal(registry.releaseTransition(updater.token), true);
+
+  const migration = registry.beginShutdownTransition('vcc-storage-migration');
+  assert.equal(migration.acquired, true);
+  const updaterBlocked = registry.beginInstallTransition('app-updater');
+  assert.equal(updaterBlocked.acquired, false);
+  assert.equal(updaterBlocked.reason, 'transition-active');
+  assert.equal(updaterBlocked.owner, 'vcc-storage-migration');
+  assert.equal(registry.cancelInstallTransition(updater.token), false);
+  assert.equal(registry.isInstallTransitionActive(), true);
+  assert.equal(registry.releaseTransition(migration.token), true);
 });

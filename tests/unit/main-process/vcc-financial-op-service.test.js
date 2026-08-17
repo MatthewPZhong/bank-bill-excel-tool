@@ -9,8 +9,15 @@ const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../../src/backend/vcc-financial-op-db/migrations');
+const {
+  registerVccStorageWriteCapability
+} = require('../../../src/backend/vcc-financial-op-db/storage-contract');
 const repository = require('../../../src/backend/vcc-financial-op-db/repository');
-const { SOURCE_TYPES, SUPPORTED_CURRENCIES } = require('../../../src/backend/vcc-financial-op/definitions');
+const {
+  SOURCE_TYPES,
+  SUPPORTED_CURRENCIES,
+  getSourceDefinition
+} = require('../../../src/backend/vcc-financial-op/definitions');
 const { REQUIRED_DATASET_TYPES } = require('../../../src/backend/vcc-financial-op/calculator');
 const {
   IMPORT_CANCELLED_CODE
@@ -25,6 +32,12 @@ const {
   previewUnarchive: previewLegacyUnarchive
 } = require('../../../src/backend/vcc-financial-op/unarchive');
 const { createVccFinancialOpService } = require('../../../src/main-process/vcc-financial-op-service');
+const {
+  buildVccImportArchiveHandoffFiles
+} = require('../../../src/main-process/vcc-financial-op-archive-lineage');
+const {
+  createArchiveService
+} = require('../../../src/main-process/archive-center/archive-service');
 
 function deleteWithPreview(db, targetMonth, sourceType) {
   const preview = previewDataTargetDeletion(db, { targetMonth, targetType: sourceType });
@@ -73,6 +86,42 @@ const BATCH_CONTEXT = Object.freeze({
   parentRunId: 'parent-61',
   operationKey: 'operation-61'
 });
+
+async function writeRechargeWorkbook(filePath, orderId) {
+  const definition = getSourceDefinition(SOURCE_TYPES.RECHARGE);
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet('sheet1');
+  worksheet.addRow(definition.headers);
+  const row = {
+    订单号: orderId,
+    BillDate: '2026-06-09',
+    业务部门: 'VCC',
+    对手部门: 'OPS',
+    业务子类型: '充值',
+    出入方向: 'in',
+    公司主体: 'PPHK',
+    我方币种: 'USD',
+    我方到账金额: '10.25'
+  };
+  worksheet.addRow(definition.headers.map((header) => row[header] ?? ''));
+  await workbook.xlsx.writeFile(filePath);
+}
+
+function fakeArchiveHandoffFiles(files, batchContext = BATCH_CONTEXT) {
+  const ordinals = new Map();
+  return files.map((file, index) => {
+    const sourceOrdinal = (ordinals.get(file.sourceType) || 0) + 1;
+    ordinals.set(file.sourceType, sourceOrdinal);
+    return {
+      filePath: path.resolve(file.filePath),
+      sourceType: file.sourceType,
+      sourceOrdinal,
+      sha256: String(index + 1).padStart(64, '0'),
+      sizeBytes: index + 1,
+      taskRunId: batchContext.taskRunId
+    };
+  });
+}
 
 function seedCalculatedReviewRun(db) {
   const revisions = Object.fromEntries(REQUIRED_DATASET_TYPES.map((type) => [type, 1]));
@@ -445,14 +494,30 @@ test('VCC import 以 exact7 taskRunId 固定 batchId，拒绝 renderer 伪造和
     db.close();
   });
 
+  const importFiles = [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }];
+  await assert.rejects(
+    service.importSelectedFiles({
+      targetMonth: '2026-06',
+      files: importFiles
+    }, undefined, BATCH_CONTEXT),
+    (error) => error && error.code === 'vcc-import-handoff-mismatch'
+  );
+  assert.equal(workers.length, 0, '缺少业务前耐久证据不得启动 worker');
+
+  const archiveHandoffFiles = fakeArchiveHandoffFiles(importFiles);
   const importing = service.importSelectedFiles({
     targetMonth: '2026-06',
-    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }],
+    files: importFiles,
     batchId: 'renderer-forged-batch'
-  }, undefined, BATCH_CONTEXT);
+  }, undefined, BATCH_CONTEXT, archiveHandoffFiles);
   assert.equal(workers.length, 1);
   assert.equal(workers[0].options.workerData.payload.batchId, BATCH_CONTEXT.taskRunId);
   assert.deepEqual(workers[0].options.workerData.payload.batchContext, BATCH_CONTEXT);
+  assert.deepEqual(workers[0].options.workerData.payload.archiveHandoffFiles, archiveHandoffFiles);
+  assert.deepEqual(
+    Object.keys(workers[0].options.workerData.payload.archiveHandoffFiles[0]),
+    ['filePath', 'sourceType', 'sourceOrdinal', 'sha256', 'sizeBytes', 'taskRunId']
+  );
   workers[0].emit('message', {
     type: 'result',
     result: { status: 'success', batchId: BATCH_CONTEXT.taskRunId, records: [] }
@@ -464,14 +529,93 @@ test('VCC import 以 exact7 taskRunId 固定 batchId，拒绝 renderer 伪造和
     targetMonth: '2026-06',
     fileCount: 1
   });
+  const otherFiles = [{ filePath: '/tmp/other.xlsx', sourceType: SOURCE_TYPES.RECHARGE }];
   await assert.rejects(
     service.importSelectedFiles({
       targetMonth: '2026-06',
-      files: [{ filePath: '/tmp/other.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
-    }, undefined, BATCH_CONTEXT),
+      files: otherFiles
+    }, undefined, BATCH_CONTEXT, fakeArchiveHandoffFiles(otherFiles)),
     (error) => error.code === 'vcc-import-batch-id-conflict'
   );
   assert.equal(workers.length, 1, '既有 batchId 冲突不得启动 worker 或混入旧 records');
+});
+
+test('真实 worker 在建 batch 前拒绝同路径已归档 A 被替换为 B，全部业务表保持零写入', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-handoff-source-swap-'));
+  const dbPath = path.join(root, 'tool-data.sqlite');
+  const db = new DatabaseSync(dbPath);
+  registerVccStorageWriteCapability(db);
+  db.exec('PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL');
+  ensureVccFinancialOpTablesSupport(db);
+  const archiveService = createArchiveService({
+    database: db,
+    rootDir: path.join(root, 'archive')
+  });
+  await archiveService.initialize();
+  const reserved = await archiveService.reserveTaskBatch({
+    moduleId: 'vcc-financial-op',
+    moduleCode: 'VCCFINOP',
+    moduleName: 'VCC财务OP校验',
+    taskKey: 'vccFinancialOp:import:apply',
+    taskRunId: 'vcc-handoff-source-swap',
+    operationKey: 'vccFinancialOp:import:apply:vcc-handoff-source-swap',
+    parentRunId: 'vcc-handoff-source-swap-flow'
+  });
+  await archiveService.markTaskStarted(reserved.batchId);
+  const batchContext = Object.freeze({
+    batchId: reserved.batch.id,
+    batchNumber: reserved.batch.batchNumber,
+    taskRunId: reserved.batch.taskRunId,
+    taskKey: reserved.batch.taskKey,
+    moduleId: reserved.batch.moduleId,
+    parentRunId: reserved.batch.parentRunId,
+    operationKey: reserved.batch.operationKey
+  });
+  const firstPath = path.join(root, 'first.xlsx');
+  const secondPath = path.join(root, 'second.xlsx');
+  await writeRechargeWorkbook(firstPath, 'HANDOFF-A-1');
+  await writeRechargeWorkbook(secondPath, 'HANDOFF-A-2');
+  const files = [firstPath, secondPath].map((filePath) => ({
+    filePath,
+    sourceType: SOURCE_TYPES.RECHARGE
+  }));
+  const archiveHandoffFiles = await buildVccImportArchiveHandoffFiles({ files }, batchContext);
+  const archived = await archiveService.appendFiles({
+    batchId: batchContext.batchId,
+    sourceOperation: 'vccFinancialOp:import:apply',
+    files: archiveHandoffFiles
+  });
+  assert.equal(archived.ok, true);
+  assert.equal(archived.results.every((result) => result.status === 'ready'), true);
+  const originalSecondSha = archiveHandoffFiles[1].expectedSha256;
+  await writeRechargeWorkbook(secondPath, 'HANDOFF-B-2');
+
+  const service = createVccFinancialOpService({
+    database: { db, dbPath },
+    assetsDir: ''
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  await assert.rejects(
+    service.importSelectedFiles({ targetMonth: '2026-06', files }, undefined, batchContext, archiveHandoffFiles),
+    (error) => error && error.code === 'vcc-import-handoff-mismatch'
+  );
+  for (const tableName of [
+    'vcc_fin_op_import_batches',
+    'vcc_fin_op_import_records',
+    'vcc_fin_op_import_sources',
+    'vcc_fin_op_effective_rows'
+  ]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${tableName}`).get().n, 0, tableName);
+  }
+  const archiveArtifacts = archiveService.repository.listArtifacts(batchContext.batchId);
+  assert.equal(archiveArtifacts.length, 2);
+  assert.equal(archiveArtifacts[1].status, 'ready');
+  assert.equal(archiveArtifacts[1].blob.sha256, originalSecondSha);
 });
 
 test('VCC import cooperative error 已带 partialResult 时不被空 DB 恢复覆盖', async (t) => {
@@ -488,10 +632,11 @@ test('VCC import cooperative error 已带 partialResult 时不被空 DB 恢复�
     await service.terminate();
     db.close();
   });
+  const files = [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }];
   const importing = service.importSelectedFiles({
     targetMonth: '2026-06',
-    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
-  }, undefined, BATCH_CONTEXT);
+    files
+  }, undefined, BATCH_CONTEXT, fakeArchiveHandoffFiles(files));
   const error = new Error('cooperative fixture cancel');
   error.code = IMPORT_CANCELLED_CODE;
   error.partialResult = {
@@ -509,8 +654,8 @@ test('VCC import cooperative error 已带 partialResult 时不被空 DB 恢复�
 
   const beforeTransaction = service.importSelectedFiles({
     targetMonth: '2026-06',
-    files: [{ filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE }]
-  }, undefined, BATCH_CONTEXT);
+    files
+  }, undefined, BATCH_CONTEXT, fakeArchiveHandoffFiles(files));
   workers[1].emit('error', new Error('worker failed before import transaction'));
   await assert.rejects(beforeTransaction, (caught) => {
     assert.equal(Object.hasOwn(caught, 'partialResult'), false);
@@ -532,13 +677,14 @@ test('VCC import worker error 只从当前 taskRunId batch 恢复同形 partialR
     await service.terminate();
     db.close();
   });
+  const files = [
+    { filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE },
+    { filePath: '/tmp/system.xlsx', sourceType: SOURCE_TYPES.SYSTEM_OP }
+  ];
   const importing = service.importSelectedFiles({
     targetMonth: '2026-06',
-    files: [
-      { filePath: '/tmp/recharge.xlsx', sourceType: SOURCE_TYPES.RECHARGE },
-      { filePath: '/tmp/system.xlsx', sourceType: SOURCE_TYPES.SYSTEM_OP }
-    ]
-  }, undefined, BATCH_CONTEXT);
+    files
+  }, undefined, BATCH_CONTEXT, fakeArchiveHandoffFiles(files));
   repository.createImportBatch(db, {
     id: BATCH_CONTEXT.taskRunId,
     targetMonth: '2026-06',
@@ -587,65 +733,17 @@ test('VCC import worker error 只从当前 taskRunId batch 恢复同形 partialR
   assert.equal(repository.getImportRecord(db, unrelatedRecordId).status, 'importing');
 });
 
-test('系统财务OP导入详情按主体筛选、分页并返回既有快照血缘', (t) => {
+test('Service 不再暴露逐行导入详情分页接口', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
-  repository.createImportBatch(db, { id: 'system-detail', targetMonth: '2026-06', fileCount: 3 });
-  const recordId = repository.createImportRecord(db, {
-    batchId: 'system-detail', targetMonth: '2026-06', sourceType: SOURCE_TYPES.SYSTEM_OP,
-    sourceFiles: ['pphk-1.xlsx', 'pphk-2.xlsx', 'ppus.xlsx']
-  });
-  repository.finishImportRecord(db, recordId, {
-    status: 'all_skipped', rawCount: 3, skippedCount: 3
-  });
-  const snapshotId = Number(db.prepare(`
-    INSERT INTO vcc_fin_op_system_snapshots (
-      target_month, subject, balances_json, content_hash,
-      source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES ('2026-06', 'PPHK', '{"USD":"1"}', 'existing-hash',
-      'original.xlsx', 'Validate', 3, '{"source":"original"}', ?)
-  `).run(recordId).lastInsertRowid);
-  const insertAttempt = db.prepare(`
-    INSERT INTO vcc_fin_op_system_snapshot_attempts (
-      import_record_id, target_month, subject, balances_json, content_hash,
-      source_file, sheet_name, source_row, raw_json, disposition, existing_snapshot_id
-    ) VALUES (?, '2026-06', ?, ?, ?, ?, 'Validate', 3, '{}', 'idempotent_skip', ?)
-  `);
-  insertAttempt.run(recordId, 'PPHK', '{"USD":"1"}', 'hash-hk-1', 'pphk-1.xlsx', snapshotId);
-  insertAttempt.run(recordId, 'PPHK', '{"USD":"1"}', 'hash-hk-2', 'pphk-2.xlsx', snapshotId);
-  insertAttempt.run(recordId, 'PPUS', '{"USD":"2"}', 'hash-us', 'ppus.xlsx', null);
-
   const service = createVccFinancialOpService({
     database: { db, dbPath: ':memory:' },
     assetsDir: ''
   });
   t.after(() => service.terminate());
-  const first = service.getImportRecordDetail({
-    recordId, tab: 'skips', key: 'PPHK', page: 1, pageSize: 1
-  });
-  const second = service.getImportRecordDetail({
-    recordId, tab: 'skips', key: 'PPHK', page: 2, pageSize: 1
-  });
-
-  assert.equal(first.total, 2);
-  assert.equal(first.rows.length, 1);
-  assert.equal(second.rows.length, 1);
-  assert.notEqual(first.rows[0].sourceFile, second.rows[0].sourceFile);
-  assert.equal(first.rows[0].idempotencyKey, '2026-06 × PPHK');
-  assert.equal(first.rows[0].existing.balances.USD, '1');
-  assert.equal(first.rows[0].existingSource.sourceFile, 'original.xlsx');
-  db.prepare(`
-    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
-    VALUES ('2026-06', ?)
-  `).run(SOURCE_TYPES.SYSTEM_OP);
-  deleteWithPreview(db, '2026-06', SOURCE_TYPES.SYSTEM_OP);
-  const afterDeletion = service.getImportRecordDetail({
-    recordId, tab: 'skips', key: 'PPHK', page: 1, pageSize: 1
-  });
-  assert.equal(afterDeletion.rows[0].existing.balances.USD, '1');
-  assert.equal(afterDeletion.rows[0].existingSource.sourceFile, 'original.xlsx');
+  assert.equal(service.getImportRecordDetail, undefined);
 });
 
 test('数据管理概览不再暴露独立期初余额审计卡片', (t) => {
@@ -707,7 +805,7 @@ test('数据管理校验表返回独立生成时间', (t) => {
   );
 });
 
-test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t) => {
+test('删除有效明细后导入记录列表仍保留文件级状态与归档字段', (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
@@ -723,23 +821,14 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
     status: 'success_with_skips', rawCount: 2, insertedCount: 1, skippedCount: 1
   });
   repository.finishImportBatch(db, 'detail-audit-delete', 'success');
-  const effectiveId = Number(db.prepare(`
+  db.prepare(`
     INSERT INTO vcc_fin_op_effective_rows (
       source_type, idempotency_key_raw, idempotency_key, content_hash,
       target_month, subject, source_file, sheet_name, source_row, raw_json,
       import_record_id
     ) VALUES (?, '0000123', '0000123', 'same-hash', '2026-06', 'PPHK',
       'original.xlsx', '明细', 8, '["","","","","","0000123"]', ?)
-  `).run(SOURCE_TYPES.RECHARGE, recordId).lastInsertRowid);
-  db.prepare(`
-    INSERT INTO vcc_fin_op_import_rows (
-      import_record_id, source_type, target_month,
-      idempotency_key_raw, idempotency_key, content_hash,
-      subject, source_file, sheet_name, source_row, raw_json,
-      disposition, existing_effective_id
-    ) VALUES (?, ?, '2026-06', '0000123', '0000123', 'same-hash', 'PPHK',
-      'retry.xlsx', '明细', 9, '["","","","","","0000123"]', 'idempotent_skip', ?)
-  `).run(recordId, SOURCE_TYPES.RECHARGE, effectiveId);
+  `).run(SOURCE_TYPES.RECHARGE, recordId);
   db.prepare(`
     INSERT INTO vcc_fin_op_datasets (
       target_month, dataset_type, generated_at, updated_at
@@ -752,28 +841,51 @@ test('删除有效明细后查看导入明细仍返回幂等对比侧血缘', (t
   t.after(() => service.terminate());
 
   deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
-  const detail = service.getImportRecordDetail({
-    recordId,
-    tab: 'skips',
-    page: 1,
-    pageSize: 10
-  });
-  assert.equal(detail.summary.status, 'deleted');
-  assert.equal(detail.summary.statusText, '已删除');
-  assert.equal(detail.summary.originalStatus, 'success_with_skips');
-  assert.equal(detail.summary.originalStatusText, '成功（含跳过/异常过滤）');
-  assert.ok(detail.summary.datasetDeletedAt);
-  assert.ok(detail.summary.datasetDeletionId);
   const listed = service.listImportRecords('2026-06');
   assert.equal(listed[0].status, 'deleted');
   assert.equal(listed[0].statusText, '已删除');
-  assert.equal(detail.total, 1);
-  assert.equal(detail.rows[0].idempotencyKey, '0000123');
-  assert.equal(detail.rows[0].existing['订单号'], '0000123');
-  assert.equal(detail.rows[0].existingSource.sourceFile, 'original.xlsx');
-  assert.equal(detail.rows[0].existingSource.sheetName, '明细');
-  assert.equal(detail.rows[0].existingSource.sourceRow, 8);
-  assert.equal(detail.rows[0].existingSource.importRecordId, recordId);
+  assert.equal(listed[0].originalStatus, 'success_with_skips');
+  assert.ok(listed[0].datasetDeletedAt);
+  assert.ok(listed[0].datasetDeletionId);
+  assert.equal(listed[0].anomalyCount, 0);
+  assert.equal(listed[0].archiveState, 'pending');
+});
+
+test('显式重建前导入记录 DTO 仍暴露 v1 历史异常的可导出数量', (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  repository.createImportBatch(db, {
+    id: 'legacy-anomaly-dto', targetMonth: '2026-06', fileCount: 1
+  });
+  const recordId = repository.createImportRecord(db, {
+    batchId: 'legacy-anomaly-dto',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['legacy.xlsx']
+  });
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_rows (
+      import_record_id, source_type, target_month,
+      idempotency_key_raw, idempotency_key, content_hash,
+      source_file, sheet_name, source_row, raw_json,
+      disposition, validation_field, validation_message, diff_fields_json
+    ) VALUES (?, ?, '2026-06', 'bad', 'bad', ?, 'legacy.xlsx',
+              '明细', 3, '{}', 'format_error', '金额', '金额格式错误', '[]')
+  `).run(recordId, SOURCE_TYPES.RECHARGE, 'a'.repeat(64));
+  repository.finishImportRecord(db, recordId, {
+    status: 'failed_validation', rawCount: 1, formatErrorCount: 1,
+    errorMessage: '历史文件导入失败'
+  });
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: ''
+  });
+  t.after(() => service.terminate());
+
+  const [record] = service.listImportRecords('2026-06');
+  assert.equal(record.anomalyCount, 2);
 });
 
 test('生产 v2 删除 preview 经 dedicated worker 删除 source 与未归档结果', async (t) => {
@@ -924,8 +1036,11 @@ test('数据管理有效表通过 worker 流式导出并返回工作簿元数据
   });
   assert.equal(preview.exportable, true);
   assert.equal(preview.dataCount, 1);
+  assert.equal(preview.taskGeneration, 0);
   const result = await service.exportDatasetData({
-    targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'check', outputPath
+    targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'check', outputPath,
+    expectedInspection: preview,
+    taskGeneration: preview.taskGeneration
   }, undefined, BATCH_CONTEXT);
   assert.equal(result.tableName, 'VCC充值清退明细_校验表');
   assert.equal(result.dataCount, 1);
@@ -934,6 +1049,89 @@ test('数据管理有效表通过 worker 流式导出并返回工作簿元数据
   await workbook.xlsx.readFile(outputPath);
   assert.equal(workbook.worksheets[0].getCell('A2').value, '000123');
   assert.equal(workbook.worksheets[0].getCell('J2').value, '10');
+});
+
+test('v1 detail 与 SYSTEM_OP 的 bound source 均调用 Archive 实体核验，损坏时整次拒绝', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const insertBoundSource = (batchId, sourceType, artifactId, fileName) => {
+    repository.createImportBatch(db, { id: batchId, targetMonth: '2026-06', fileCount: 1 });
+    const recordId = repository.createImportRecord(db, {
+      batchId,
+      targetMonth: '2026-06',
+      sourceType,
+      sourceFiles: [fileName]
+    });
+    const sourceId = repository.createImportSource(db, recordId, {
+      sourceOrdinal: 1,
+      fileName,
+      sha256: String(artifactId).padStart(64, 'a').slice(-64),
+      sizeBytes: artifactId
+    });
+    db.prepare(`
+      UPDATE vcc_fin_op_import_sources
+      SET archive_state = 'ready', archive_artifact_id = ?
+      WHERE id = ?
+    `).run(artifactId, sourceId);
+    repository.finishImportRecord(db, recordId, {
+      status: 'success', rawCount: 1, insertedCount: 1
+    });
+    repository.finishImportBatch(db, batchId, 'success');
+    return { recordId, sourceId };
+  };
+  const detail = insertBoundSource(
+    'verify-v1-detail', SOURCE_TYPES.RECHARGE, 901, 'detail.xlsx'
+  );
+  db.prepare(`
+    INSERT INTO vcc_fin_op_effective_rows (
+      source_type, idempotency_key_raw, idempotency_key, content_hash,
+      target_month, subject, source_file, sheet_name, source_row, raw_json,
+      import_record_id, import_source_id
+    ) VALUES (?, 'BOUND-DETAIL', 'BOUND-DETAIL', ?, '2026-06', 'PPHK',
+      'detail.xlsx', 'Sheet1', 2, '[]', ?, ?)
+  `).run(SOURCE_TYPES.RECHARGE, 'a'.repeat(64), detail.recordId, detail.sourceId);
+  const system = insertBoundSource(
+    'verify-v1-system', SOURCE_TYPES.SYSTEM_OP, 902, 'system.xlsx'
+  );
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash, source_file,
+      sheet_name, source_row, raw_json, import_record_id, import_source_id
+    ) VALUES ('2026-06', 'PPHK', '{}', ?, 'system.xlsx',
+      'System', 2, '{}', ?, ?)
+  `).run('b'.repeat(64), system.recordId, system.sourceId);
+
+  const verificationCalls = [];
+  const service = createVccFinancialOpService({
+    database: { db, dbPath: ':memory:' },
+    assetsDir: '',
+    archiveServiceProvider: () => ({
+      resolveVerifiedArtifact: async (artifactId) => {
+        verificationCalls.push(artifactId);
+        return {
+          ok: false,
+          code: 'ARCHIVE_BLOB_CORRUPT',
+          message: 'artifact blob corrupt'
+        };
+      }
+    })
+  });
+  t.after(async () => {
+    await service.terminate();
+    db.close();
+  });
+
+  for (const [sourceType, artifactId] of [
+    [SOURCE_TYPES.RECHARGE, 901],
+    [SOURCE_TYPES.SYSTEM_OP, 902]
+  ]) {
+    await assert.rejects(
+      service.resolveDatasetArchiveSources({ targetMonth: '2026-06', sourceType }),
+      (error) => error && error.code === 'ARCHIVE_BLOB_CORRUPT'
+    );
+    assert.equal(verificationCalls.at(-1), artifactId);
+  }
 });
 
 test('全局任务租约拒绝并发并仅在任务释放后推进 generation', async (t) => {
@@ -960,7 +1158,7 @@ test('全局任务租约拒绝并发并仅在任务释放后推进 generation', 
     expectedInputFingerprint: 'a'.repeat(64)
   }, BATCH_CONTEXT);
   assert.equal(service._taskStateForTests().taskGeneration, 0);
-  assert.throws(() => service.exportDatasetData({
+  await assert.rejects(service.exportDatasetData({
     targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE, targetKind: 'raw'
   }, undefined, BATCH_CONTEXT), (error) => error.code === 'active-vcc-task');
   await assert.rejects(

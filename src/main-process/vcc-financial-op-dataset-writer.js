@@ -14,9 +14,15 @@ const {
 } = require('../backend/vcc-financial-op/definitions');
 const { canonicalizeVccAmount } = require('../backend/vcc-financial-op/amount-rules');
 const {
+  mapDetailRow,
   normalizeYearMonth,
   pendingCanonicalValues
 } = require('../backend/vcc-financial-op/row-mapper');
+const { streamDetailRows } = require('../backend/vcc-financial-op/workbook-reader');
+const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
+const {
+  readSystemOpSnapshots
+} = require('../backend/vcc-financial-op/system-op-importer');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
 const MAX_DATA_ROWS_PER_SHEET = 1048575;
@@ -345,12 +351,21 @@ function exportHeaders(scope) {
   return [...definition.sourceHeaders, ...definition.derivedHeaders];
 }
 
-function *iterateDatasetRows(db, scope) {
+function tableHasColumn(db, tableName, columnName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all()
+    .some((row) => row.name === columnName);
+}
+
+function *iterateLegacyDatasetRows(db, scope) {
   if (scope.sourceType === SOURCE_TYPES.SYSTEM_OP) {
+    const sourceFilter = tableHasColumn(db, 'vcc_fin_op_system_snapshots', 'import_source_id')
+      ? 'AND import_source_id IS NULL'
+      : '';
     const snapshots = db.prepare(`
       SELECT id, subject, balances_json, raw_json
       FROM vcc_fin_op_system_snapshots
       WHERE target_month = ?
+        ${sourceFilter}
       ORDER BY id
     `).iterate(scope.targetMonth);
     for (const snapshot of snapshots) {
@@ -359,12 +374,17 @@ function *iterateDatasetRows(db, scope) {
     return;
   }
 
+  if (!tableHasColumn(db, 'vcc_fin_op_effective_rows', 'raw_json')) return;
+  const sourceFilter = tableHasColumn(db, 'vcc_fin_op_effective_rows', 'import_source_id')
+    ? 'AND import_source_id IS NULL'
+    : '';
   const rows = db.prepare(`
     SELECT id, source_type, raw_json, raw_contract_version,
            subject, stat_currency, signed_amount,
            pending_amount, flow_amount, currency_mismatch
     FROM vcc_fin_op_effective_rows
     WHERE target_month = ? AND source_type = ?
+      ${sourceFilter}
     ORDER BY id
   `).iterate(scope.targetMonth, scope.sourceType);
   for (const row of rows) {
@@ -383,16 +403,175 @@ function countDatasetRows(db, scope) {
       WHERE target_month = ? AND source_type = ?
     `).get(scope.targetMonth, scope.sourceType).row_count) || 0;
   }
-  let count = 0;
-  for (const snapshot of db.prepare(`
-    SELECT id, subject, balances_json, raw_json
+  return (Number(db.prepare(`
+    SELECT COUNT(*) AS row_count
     FROM vcc_fin_op_system_snapshots
     WHERE target_month = ?
-    ORDER BY id
-  `).iterate(scope.targetMonth)) {
-    count += systemSnapshotRows(snapshot).length;
+  `).get(scope.targetMonth).row_count) || 0) * SUPPORTED_CURRENCIES.length;
+}
+
+function detailLineageInspection(db, scope) {
+  const totalRows = countDatasetRows(db, scope);
+  const hasSourceId = tableHasColumn(db, 'vcc_fin_op_effective_rows', 'import_source_id');
+  const hasRawJson = tableHasColumn(db, 'vcc_fin_op_effective_rows', 'raw_json');
+  if (!hasSourceId) {
+    return {
+      totalRows,
+      exportableRows: hasRawJson ? totalRows : 0,
+      missingRows: hasRawJson ? 0 : totalRows,
+      missingByImportRecord: [],
+      integrityFailureRows: 0,
+      integrityFailureSourceIds: []
+    };
   }
-  return count;
+  const legacyExportable = hasRawJson ? 'e.import_source_id IS NULL' : '0';
+  const boundReady = `
+    s.id IS NOT NULL
+    AND s.archive_state = 'ready'
+    AND s.archive_artifact_id IS NOT NULL
+  `;
+  const retryableFallback = `
+    s.id IS NOT NULL
+    AND s.archive_artifact_id IS NULL
+    AND s.bound_at IS NULL
+    AND s.archive_state <> 'ready'
+    AND f.effective_row_id IS NOT NULL
+  `;
+  const integrityFailure = `
+    (e.import_source_id IS NOT NULL AND s.id IS NULL)
+    OR (
+      s.id IS NOT NULL
+      AND (s.archive_artifact_id IS NOT NULL OR s.bound_at IS NOT NULL OR s.archive_state = 'ready')
+      AND NOT (${boundReady})
+    )
+  `;
+  const exportable = `(${legacyExportable}) OR (${boundReady}) OR (${retryableFallback})`;
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) AS total_rows,
+      COALESCE(SUM(CASE WHEN ${exportable} THEN 1 ELSE 0 END), 0) AS exportable_rows,
+      COALESCE(SUM(CASE WHEN ${integrityFailure} THEN 1 ELSE 0 END), 0)
+        AS integrity_failure_rows
+    FROM vcc_fin_op_effective_rows e
+    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
+    WHERE e.target_month = ? AND e.source_type = ?
+  `).get(scope.targetMonth, scope.sourceType);
+  const exportableRows = Number(counts.exportable_rows) || 0;
+  const integrityFailures = db.prepare(`
+    SELECT COALESCE(s.id, e.import_source_id) AS source_id, COUNT(*) AS row_count
+    FROM vcc_fin_op_effective_rows e
+    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
+    WHERE e.target_month = ? AND e.source_type = ?
+      AND (${integrityFailure})
+    GROUP BY COALESCE(s.id, e.import_source_id)
+    ORDER BY COALESCE(s.id, e.import_source_id)
+  `).all(scope.targetMonth, scope.sourceType);
+  const integrityFailureRows = Number(counts.integrity_failure_rows) || 0;
+  const missingByImportRecord = db.prepare(`
+    SELECT e.import_record_id AS import_record_id, COUNT(*) AS missing_rows
+    FROM vcc_fin_op_effective_rows e
+    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    LEFT JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
+    WHERE e.target_month = ? AND e.source_type = ?
+      AND NOT (${exportable})
+      AND NOT (${integrityFailure})
+    GROUP BY e.import_record_id
+    ORDER BY e.import_record_id
+  `).all(scope.targetMonth, scope.sourceType).map((row) => ({
+    importRecordId: Number(row.import_record_id),
+    missingRows: Number(row.missing_rows) || 0
+  }));
+  return {
+    totalRows,
+    exportableRows,
+    missingRows: Math.max(0, totalRows - exportableRows - integrityFailureRows),
+    missingByImportRecord,
+    integrityFailureRows,
+    integrityFailureSourceIds: integrityFailures.map((row) => Number(row.source_id))
+  };
+}
+
+function systemLineageInspection(db, scope) {
+  const hasSourceId = tableHasColumn(db, 'vcc_fin_op_system_snapshots', 'import_source_id');
+  if (!hasSourceId) {
+    let totalRows = 0;
+    for (const values of iterateLegacyDatasetRows(db, scope)) {
+      if (values) totalRows += 1;
+    }
+    return {
+      totalRows,
+      exportableRows: totalRows,
+      missingRows: 0,
+      missingByImportRecord: [],
+      integrityFailureRows: 0,
+      integrityFailureSourceIds: []
+    };
+  }
+  let legacyRows = 0;
+  for (const values of iterateLegacyDatasetRows(db, scope)) {
+    if (values) legacyRows += 1;
+  }
+  const boundReady = `
+    s.id IS NOT NULL
+    AND s.archive_state = 'ready'
+    AND s.archive_artifact_id IS NOT NULL
+  `;
+  const integrityFailure = `
+    (snapshot.import_source_id IS NOT NULL AND s.id IS NULL)
+    OR (
+      s.id IS NOT NULL
+      AND (s.archive_artifact_id IS NOT NULL OR s.bound_at IS NOT NULL OR s.archive_state = 'ready')
+      AND NOT (${boundReady})
+    )
+  `;
+  const counts = db.prepare(`
+    SELECT
+      COUNT(*) AS snapshot_count,
+      COALESCE(SUM(CASE WHEN ${boundReady} THEN 1 ELSE 0 END), 0)
+        AS ready_snapshot_count,
+      COALESCE(SUM(CASE WHEN ${integrityFailure} THEN 1 ELSE 0 END), 0)
+        AS integrity_snapshot_count
+    FROM vcc_fin_op_system_snapshots AS snapshot
+    LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = snapshot.import_source_id
+    WHERE snapshot.target_month = ?
+  `).get(scope.targetMonth);
+  const totalRows = (Number(counts.snapshot_count) || 0) * SUPPORTED_CURRENCIES.length;
+  const readyRows = (Number(counts.ready_snapshot_count) || 0) * SUPPORTED_CURRENCIES.length;
+  const integrityFailureRows = (Number(counts.integrity_snapshot_count) || 0)
+    * SUPPORTED_CURRENCIES.length;
+  const exportableRows = legacyRows + readyRows;
+  const missingByImportRecord = db.prepare(`
+    SELECT snapshot.import_record_id AS import_record_id, COUNT(*) AS missing_snapshots
+    FROM vcc_fin_op_system_snapshots AS snapshot
+    LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = snapshot.import_source_id
+    WHERE snapshot.target_month = ?
+      AND snapshot.import_source_id IS NOT NULL
+      AND NOT (${boundReady})
+      AND NOT (${integrityFailure})
+    GROUP BY snapshot.import_record_id
+    ORDER BY snapshot.import_record_id
+  `).all(scope.targetMonth).map((row) => ({
+    importRecordId: Number(row.import_record_id),
+    missingRows: (Number(row.missing_snapshots) || 0) * SUPPORTED_CURRENCIES.length
+  }));
+  const integrityFailures = db.prepare(`
+    SELECT COALESCE(s.id, snapshot.import_source_id) AS source_id
+    FROM vcc_fin_op_system_snapshots AS snapshot
+    LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = snapshot.import_source_id
+    WHERE snapshot.target_month = ? AND (${integrityFailure})
+    GROUP BY COALESCE(s.id, snapshot.import_source_id)
+    ORDER BY COALESCE(s.id, snapshot.import_source_id)
+  `).all(scope.targetMonth);
+  return {
+    totalRows,
+    exportableRows,
+    missingRows: Math.max(0, totalRows - exportableRows - integrityFailureRows),
+    missingByImportRecord,
+    integrityFailureRows,
+    integrityFailureSourceIds: integrityFailures.map((row) => Number(row.source_id))
+  };
 }
 
 function inspectDatasetExport(db, targetMonth, sourceType, targetKind, { taskActive = false } = {}) {
@@ -403,23 +582,310 @@ function inspectDatasetExport(db, targetMonth, sourceType, targetKind, { taskAct
     ORDER BY started_at, id
     LIMIT 1
   `).get() || null;
-  const dataCount = countDatasetRows(db, scope);
+  const lineage = scope.sourceType === SOURCE_TYPES.SYSTEM_OP
+    ? systemLineageInspection(db, scope)
+    : detailLineageInspection(db, scope);
   let code = '';
   let message = '';
   if (taskActive || activeBatch) {
     code = 'active-task';
     message = '当前仍有 VCC 财务OP任务或原表导入进行中，禁止导出';
-  } else if (dataCount === 0) {
+  } else if (lineage.integrityFailureRows > 0) {
+    code = 'archive-integrity-failure';
+    message = `已有 ${lineage.integrityFailureRows} 行绑定的输入 artifact 完整性异常，禁止降级为部分导出`;
+  } else if (lineage.totalRows === 0) {
     code = 'no-data';
     message = '当前选择没有可导出的有效数据';
   }
   return {
     ...scope,
-    dataCount,
+    dataCount: lineage.totalRows,
+    totalRows: lineage.totalRows,
+    exportableRows: lineage.exportableRows,
+    missingRows: lineage.missingRows,
+    incomplete: lineage.integrityFailureRows === 0 && lineage.missingRows > 0,
+    missingByImportRecord: lineage.missingByImportRecord,
     exportable: !code,
     code,
     message
   };
+}
+
+function exportInspectionEvidence(inspection = {}) {
+  const missingByImportRecord = Array.isArray(inspection.missingByImportRecord)
+    ? inspection.missingByImportRecord.map((entry) => ({
+        importRecordId: Number(entry.importRecordId),
+        missingRows: Number(entry.missingRows) || 0
+      }))
+    : [];
+  return Object.freeze({
+    targetMonth: String(inspection.targetMonth || ''),
+    sourceType: String(inspection.sourceType || ''),
+    targetKind: String(inspection.targetKind || ''),
+    totalRows: Number(inspection.totalRows) || 0,
+    exportableRows: Number(inspection.exportableRows) || 0,
+    missingRows: Number(inspection.missingRows) || 0,
+    incomplete: inspection.incomplete === true,
+    missingByImportRecord: Object.freeze(missingByImportRecord)
+  });
+}
+
+function assertExportInspectionEvidence(inspection, expectedInspection) {
+  if (!expectedInspection) return;
+  const actual = exportInspectionEvidence(inspection);
+  const expected = exportInspectionEvidence(expectedInspection);
+  if (JSON.stringify(actual) === JSON.stringify(expected)) return;
+  throw exportError(
+    'export-preview-state-changed',
+    '导出确认后有效数据或原表血缘覆盖范围已变化，请重新预览并确认'
+  );
+}
+
+function detailRowValuesFromRaw(expected, rawValues, scope) {
+  return scope.targetKind === EXPORT_KINDS.RAW
+    ? rawValues
+    : detailCheckValues(expected, rawValues);
+}
+
+function assertMappedLineage(expected, mapped) {
+  if (mapped.disposition
+      || mapped.idempotencyKey !== expected.idempotency_key
+      || mapped.contentHash !== expected.content_hash
+      || Number(mapped.hashVersion) !== Number(expected.hash_version)) {
+    throw exportError(
+      'archive-row-integrity-failure',
+      `导入记录 ${expected.import_record_id} 原表第 ${expected.source_row} 行与当前有效数据的幂等键或内容哈希不一致`
+    );
+  }
+}
+
+function mapStoredRaw(expected, rawJson) {
+  const rawValues = parseJson(rawJson, null);
+  if (!Array.isArray(rawValues)) {
+    throw exportError('invalid-export-lineage', `有效行 ${expected.id} 的临时原始值无效`);
+  }
+  const mapped = mapDetailRow({
+    sourceType: expected.source_type,
+    values: rawValues,
+    targetMonth: expected.target_month,
+    assignedSubject: expected.subject,
+    sourceFile: expected.source_file_name || '',
+    sheetName: expected.sheet_name,
+    sourceRow: expected.source_row
+  });
+  assertMappedLineage(expected, mapped);
+  return mapped.values;
+}
+
+async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
+  for (const values of iterateLegacyDatasetRows(db, scope)) emit(values);
+
+  // fallback 只服务尚未成功存档的新导入；ready 来源始终强制走 artifact，
+  // 不允许用残留 fallback 掩盖已绑定文件的完整性故障。
+  const fallbackRows = db.prepare(`
+    SELECT e.*, s.source_file_name, f.raw_json AS fallback_raw_json
+    FROM vcc_fin_op_effective_rows e
+    LEFT JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    JOIN vcc_fin_op_effective_raw_fallback f ON f.effective_row_id = e.id
+    WHERE e.target_month = ? AND e.source_type = ?
+      AND e.import_source_id IS NOT NULL
+      AND s.archive_artifact_id IS NULL
+      AND s.bound_at IS NULL
+      AND s.archive_state <> 'ready'
+    ORDER BY e.id
+  `).iterate(scope.targetMonth, scope.sourceType);
+  for (const expected of fallbackRows) {
+    const rawValues = mapStoredRaw(expected, expected.fallback_raw_json);
+    emit(detailRowValuesFromRaw(expected, rawValues, scope));
+  }
+
+  const sourceById = new Map((archiveSources || []).map((source) => [Number(source.sourceId), source]));
+  const sourceGroups = db.prepare(`
+    SELECT e.import_source_id AS source_id, COUNT(*) AS row_count
+    FROM vcc_fin_op_effective_rows e
+    JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    WHERE e.target_month = ? AND e.source_type = ?
+      AND s.archive_state = 'ready' AND s.archive_artifact_id IS NOT NULL
+    GROUP BY e.import_source_id
+    ORDER BY e.import_source_id
+  `).all(scope.targetMonth, scope.sourceType);
+  const coordinateRowsSql = `
+    SELECT e.*, s.source_file_name
+    FROM vcc_fin_op_effective_rows e
+    JOIN vcc_fin_op_import_sources s ON s.id = e.import_source_id
+    WHERE e.import_source_id = ? AND e.target_month = ? AND e.source_type = ?
+      AND e.sheet_name = ?
+    ORDER BY e.source_row, e.id
+  `;
+
+  for (const group of sourceGroups) {
+    const sourceId = Number(group.source_id);
+    const expectedCount = Number(group.row_count) || 0;
+    const source = sourceById.get(sourceId);
+    if (!source) {
+      throw exportError('archive-lineage-unavailable', `导入来源 ${sourceId} 缺少已核验的存档文件`);
+    }
+    const actual = await hashSourceFile(source.filePath);
+    if (actual.sha256 !== String(source.sha256).toLowerCase()
+        || actual.sizeBytes !== Number(source.sizeBytes)) {
+      throw exportError('archive-integrity-failure', `导入来源 ${sourceId} 的存档文件 SHA-256 或大小不一致`);
+    }
+    const duplicateCoordinate = db.prepare(`
+      SELECT sheet_name, source_row, COUNT(*) AS row_count
+      FROM vcc_fin_op_effective_rows
+      WHERE import_source_id = ? AND target_month = ? AND source_type = ?
+      GROUP BY sheet_name, source_row
+      HAVING COUNT(*) <> 1
+      LIMIT 1
+    `).get(sourceId, scope.targetMonth, scope.sourceType);
+    if (duplicateCoordinate) {
+      throw exportError(
+        'archive-row-integrity-failure',
+        `导入来源 ${sourceId} 的 ${duplicateCoordinate.sheet_name} 第 ${duplicateCoordinate.source_row} 行存在重复有效血缘`
+      );
+    }
+    const expectedSheets = db.prepare(`
+      SELECT sheet_name, COUNT(*) AS row_count
+      FROM vcc_fin_op_effective_rows
+      WHERE import_source_id = ? AND target_month = ? AND source_type = ?
+      GROUP BY sheet_name
+      ORDER BY sheet_name
+    `).all(sourceId, scope.targetMonth, scope.sourceType);
+    const cursors = new Map(expectedSheets.map((sheet) => {
+      const statement = db.prepare(coordinateRowsSql);
+      const iterator = statement.iterate(
+        sourceId,
+        scope.targetMonth,
+        scope.sourceType,
+        sheet.sheet_name
+      );
+      return [sheet.sheet_name, {
+        statement,
+        iterator,
+        next: iterator.next(),
+        expectedCount: Number(sheet.row_count) || 0,
+        seenCount: 0
+      }];
+    }));
+    let seenCount = 0;
+    await streamDetailRows(source.filePath, scope.sourceType, {
+      onDataRow: (input) => {
+        const cursor = cursors.get(input.sheetName);
+        if (!cursor || cursor.next.done) return;
+        const expected = cursor.next.value;
+        if (Number(input.rowR) < Number(expected.source_row)) return;
+        if (Number(input.rowR) > Number(expected.source_row)) {
+          throw exportError(
+            'archive-row-integrity-failure',
+            `导入来源 ${sourceId} 缺少 ${input.sheetName} 第 ${expected.source_row} 行`
+          );
+        }
+        const mapped = mapDetailRow({
+          sourceType: scope.sourceType,
+          values: input.values,
+          targetMonth: scope.targetMonth,
+          assignedSubject: expected.subject,
+          sourceFile: input.sourceFile,
+          sheetName: input.sheetName,
+          sourceRow: input.rowR,
+          keyCellType: input.keyCellType
+        });
+        assertMappedLineage(expected, mapped);
+        emit(detailRowValuesFromRaw(expected, mapped.values, scope));
+        cursor.seenCount += 1;
+        seenCount += 1;
+        cursor.next = cursor.iterator.next();
+      }
+    });
+    const incompleteCursor = [...cursors.values()].find((cursor) => (
+      !cursor.next.done || cursor.seenCount !== cursor.expectedCount
+    ));
+    if (incompleteCursor || seenCount !== expectedCount) {
+      throw exportError(
+        'archive-row-integrity-failure',
+        `导入来源 ${sourceId} 缺少 ${Math.max(0, expectedCount - seenCount)} 条当前有效行的原表位置`
+      );
+    }
+  }
+}
+
+async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
+  for (const values of iterateLegacyDatasetRows(db, scope)) emit(values);
+
+  const sourceById = new Map((archiveSources || []).map((source) => [
+    Number(source.sourceId),
+    source
+  ]));
+  const sourceIds = db.prepare(`
+    SELECT snapshot.import_source_id AS source_id
+    FROM vcc_fin_op_system_snapshots AS snapshot
+    JOIN vcc_fin_op_import_sources AS source ON source.id = snapshot.import_source_id
+    WHERE snapshot.target_month = ?
+      AND source.archive_state = 'ready'
+      AND source.archive_artifact_id IS NOT NULL
+    GROUP BY snapshot.import_source_id
+    ORDER BY snapshot.import_source_id
+  `).all(scope.targetMonth).map((row) => Number(row.source_id));
+
+  for (const sourceId of sourceIds) {
+    const source = sourceById.get(sourceId);
+    if (!source) {
+      throw exportError('archive-lineage-unavailable', `系统财务OP导入来源 ${sourceId} 缺少已核验存档文件`);
+    }
+    const actualHash = await hashSourceFile(source.filePath);
+    if (actualHash.sha256 !== String(source.sha256 || '').toLowerCase()
+        || actualHash.sizeBytes !== Number(source.sizeBytes)) {
+      throw exportError(
+        'archive-integrity-failure',
+        `系统财务OP导入来源 ${sourceId} 的存档文件 SHA-256 或大小不一致`
+      );
+    }
+    let actualSnapshots;
+    try {
+      actualSnapshots = readSystemOpSnapshots(source.filePath, scope.targetMonth);
+    } catch (cause) {
+      const error = exportError(
+        'archive-row-integrity-failure',
+        `系统财务OP导入来源 ${sourceId} 无法按原导入合同重读`
+      );
+      error.cause = cause;
+      throw error;
+    }
+    const actualBySubject = new Map();
+    for (const snapshot of actualSnapshots) {
+      if (actualBySubject.has(snapshot.subject)) {
+        throw exportError(
+          'archive-row-integrity-failure',
+          `系统财务OP导入来源 ${sourceId} 的主体 ${snapshot.subject} 重复`
+        );
+      }
+      actualBySubject.set(snapshot.subject, snapshot);
+    }
+    const expectedSnapshots = db.prepare(`
+      SELECT id, subject, content_hash, source_file, sheet_name, source_row
+      FROM vcc_fin_op_system_snapshots
+      WHERE target_month = ? AND import_source_id = ?
+      ORDER BY id
+    `).all(scope.targetMonth, sourceId);
+    for (const expected of expectedSnapshots) {
+      const actual = actualBySubject.get(expected.subject);
+      if (!actual
+          || actual.contentHash !== expected.content_hash
+          || actual.sheetName !== expected.sheet_name
+          || Number(actual.sourceRow) !== Number(expected.source_row)) {
+        throw exportError(
+          'archive-row-integrity-failure',
+          `系统财务OP导入来源 ${sourceId} 的主体 ${expected.subject} 与当前有效快照血缘不一致`
+        );
+      }
+      for (const values of systemSnapshotRows({
+        id: expected.id,
+        subject: actual.subject,
+        balances_json: actual.balancesJson,
+        raw_json: actual.rawJson
+      })) emit(values);
+    }
+  }
 }
 
 function styleHeader(row) {
@@ -445,6 +911,26 @@ function createWorksheet(workbook, scope, headers, index) {
   styleHeader(headerRow);
   headerRow.commit();
   return sheet;
+}
+
+function createIncompleteExplanationSheet(workbook, inspection) {
+  const sheet = workbook.addWorksheet('导出说明');
+  sheet.columns = [{ width: 28 }, { width: 60 }];
+  const header = sheet.addRow(['项目', '说明']);
+  styleHeader(header);
+  header.commit();
+  sheet.addRow(['导出状态', '不完整（历史血缘缺口）']).commit();
+  sheet.addRow(['有效总行数', inspection.totalRows]).commit();
+  sheet.addRow(['可导出行数', inspection.exportableRows]).commit();
+  sheet.addRow(['缺失行数', inspection.missingRows]).commit();
+  sheet.addRow(['覆盖率', `${((inspection.exportableRows / inspection.totalRows) * 100).toFixed(2)}%`]).commit();
+  for (const missing of inspection.missingByImportRecord || []) {
+    sheet.addRow([
+      `导入记录 ${missing.importRecordId}`,
+      `缺少 ${missing.missingRows} 行可核验原表血缘`
+    ]).commit();
+  }
+  sheet.commit();
 }
 
 async function abortWorkbook(workbook) {
@@ -481,6 +967,8 @@ async function writeDatasetWorkbook({
   sourceType,
   targetKind,
   outputPath,
+  archiveSources = [],
+  expectedInspection = null,
   onProgress,
   maxDataRowsPerSheet = MAX_DATA_ROWS_PER_SHEET
 }) {
@@ -495,9 +983,12 @@ async function writeDatasetWorkbook({
   try {
     const inspection = inspectDatasetExport(db, targetMonth, sourceType, targetKind);
     if (!inspection.exportable) throw exportError(inspection.code, inspection.message);
+    assertExportInspectionEvidence(inspection, expectedInspection);
     const headers = exportHeaders(inspection);
     let writtenRows = 0;
-    let sheetCount = 1;
+    let sheetCount = inspection.incomplete
+      ? (inspection.exportableRows > 0 ? 2 : 1)
+      : 1;
 
     const publishedPath = await writeXlsxAtomically({
       outputPath,
@@ -508,25 +999,40 @@ async function writeDatasetWorkbook({
           useSharedStrings: false
         });
         try {
-          let sheet = createWorksheet(workbook, inspection, headers, sheetCount);
+          if (inspection.incomplete) createIncompleteExplanationSheet(workbook, inspection);
+          let dataSheetIndex = 1;
+          let sheet = inspection.exportableRows > 0
+            ? createWorksheet(workbook, inspection, headers, dataSheetIndex)
+            : null;
           let rowsInSheet = 0;
-          for (const values of iterateDatasetRows(db, inspection)) {
+          const writeValues = (values) => {
+            if (!sheet) {
+              throw exportError('export-count-mismatch', '零覆盖导出不得写入伪造数据行');
+            }
             if (rowsInSheet >= safeSheetLimit) {
               sheet.commit();
+              dataSheetIndex += 1;
               sheetCount += 1;
               rowsInSheet = 0;
-              sheet = createWorksheet(workbook, inspection, headers, sheetCount);
+              sheet = createWorksheet(workbook, inspection, headers, dataSheetIndex);
             }
             sheet.addRow(values).commit();
             rowsInSheet += 1;
             writtenRows += 1;
             if (writtenRows % 50000 === 0 && typeof onProgress === 'function') {
-              onProgress({ processedRows: writtenRows, totalRows: inspection.dataCount });
+              onProgress({ processedRows: writtenRows, totalRows: inspection.exportableRows });
             }
+          };
+          if (inspection.exportableRows > 0) {
+            if (inspection.sourceType === SOURCE_TYPES.SYSTEM_OP) {
+              await emitReconstructedSystemRows(db, inspection, archiveSources, writeValues);
+            } else {
+              await emitReconstructedDetailRows(db, inspection, archiveSources, writeValues);
+            }
+            sheet.commit();
           }
-          sheet.commit();
-          if (writtenRows !== inspection.dataCount) {
-            throw exportError('export-count-mismatch', '导出行数与有效数据不一致，未生成文件');
+          if (writtenRows !== inspection.exportableRows) {
+            throw exportError('export-count-mismatch', '导出行数与可导出血缘统计不一致，未生成文件');
           }
           await workbook.commit();
         } catch (error) {
@@ -545,6 +1051,10 @@ async function writeDatasetWorkbook({
       targetKind: inspection.targetKind,
       tableName: inspection.tableName,
       dataCount: writtenRows,
+      totalRows: inspection.totalRows,
+      exportableRows: writtenRows,
+      missingRows: inspection.missingRows,
+      incomplete: inspection.incomplete,
       sheetCount,
       filePath: path.resolve(publishedPath)
     };
@@ -562,5 +1072,6 @@ module.exports = {
   CHECK_EXPORT_DEFINITIONS,
   normalizeDatasetExportScope,
   inspectDatasetExport,
+  exportInspectionEvidence,
   writeDatasetWorkbook
 };

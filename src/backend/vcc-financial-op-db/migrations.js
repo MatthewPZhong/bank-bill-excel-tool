@@ -18,6 +18,12 @@ const {
   diagnoseFirstMonthFacts,
   readFirstMonthFacts
 } = require('./state-model');
+const {
+  ensureVccStorageSideTables,
+  getVccStorageContractVersion,
+  installVccStorageWriteGuards,
+  registerVccStorageWriteCapability
+} = require('./storage-contract');
 
 const LEGACY_VCC_CURRENCY = 'CNH';
 const CURRENT_VCC_CURRENCY = 'CNY';
@@ -381,7 +387,7 @@ function pendingSnapshotVersion(rawJson, rowId) {
     .rawContractVersion;
 }
 
-function ensurePendingRawContractSupport(db) {
+function ensurePendingRawContractSupport(db, options = {}) {
   db.exec('BEGIN IMMEDIATE');
   try {
     const importColumns = tableColumns(db, 'vcc_fin_op_import_rows');
@@ -400,8 +406,12 @@ function ensurePendingRawContractSupport(db) {
     }
 
     // 先构造完整计划；任一未知 raw_json 会在首条 UPDATE 前抛错并回滚加列。
+    // storage contract v2 已物理移除 effective.raw_json；其内容哈希在 COW
+    // 切换前已逐 id 守恒验证，不得再走旧 raw 重算路径。
     const importPlan = pendingMigrationPlan(db, 'vcc_fin_op_import_rows');
-    const effectivePlan = pendingMigrationPlan(db, 'vcc_fin_op_effective_rows');
+    const effectivePlan = options.skipEffectiveRawMigration === true
+      ? []
+      : pendingMigrationPlan(db, 'vcc_fin_op_effective_rows');
     const snapshotPlan = db.prepare(`
       SELECT id, existing_raw_json_snapshot
       FROM vcc_fin_op_import_rows
@@ -627,6 +637,13 @@ function ensureVccFinancialOpStateModelSupport(db) {
 }
 
 function ensureVccFinancialOpTablesSupport(db) {
+  // contract-v2 的触发器调用连接本地能力函数。必须先注册再执行任何
+  // VCC DML；3.1.9 连接没有该函数，因此只能读、不能降级写。
+  registerVccStorageWriteCapability(db);
+  const hasSettings = Boolean(db.prepare(`
+    SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'
+  `).get());
+  const storageContractVersion = hasSettings ? getVccStorageContractVersion(db) : 1;
   db.exec(`
     CREATE TABLE IF NOT EXISTS vcc_fin_op_import_batches (
       id TEXT PRIMARY KEY,
@@ -1029,7 +1046,10 @@ function ensureVccFinancialOpTablesSupport(db) {
       db.exec(`ALTER TABLE vcc_fin_op_system_snapshot_attempts ADD COLUMN ${name} ${type}`);
     }
   }
-  ensurePendingRawContractSupport(db);
+  ensurePendingRawContractSupport(db, {
+    skipEffectiveRawMigration: storageContractVersion >= 2
+  });
+  ensureVccStorageSideTables(db);
   const stateDiagnostic = ensureVccFinancialOpStateModelSupport(db);
   const currencyMigration = ensureVccCurrencyContractSupport(db);
   db.exec(`
@@ -1038,6 +1058,7 @@ function ensureVccFinancialOpTablesSupport(db) {
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_attempts_comparison
       ON vcc_fin_op_system_snapshot_attempts(comparison_attempt_id)
   `);
+  if (storageContractVersion >= 2) installVccStorageWriteGuards(db);
   return { firstMonthDiagnostic: stateDiagnostic, currencyMigration };
 }
 

@@ -445,7 +445,10 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
   test('详情按钮文案和无障碍名称符合锁定、打开、另存为合同', () => {
     assert.match(renderer, /title="打开只读副本" aria-label="打开只读副本">打开<\/button>/);
     assert.match(renderer, /title="另存为" aria-label="另存为">💾<\/button>/);
-    assert.match(renderer, /title="\$\{locked \? '解除锁定' : '锁定批次'\}" aria-label="\$\{locked \? '解除锁定' : '锁定批次'\}">\$\{locked \? '🔓' : '🔒'\}<\/button>/);
+    assert.match(renderer, /file\.businessLocked === true[\s\S]*?aria-label="业务引用锁" disabled>🔒<\/button>/);
+    assert.match(renderer, /businessLocked \? '业务引用锁不能手工解除'/);
+    assert.match(renderer, /businessLocked \? '🔒' : \(locked \? '🔓' : '🔒'\)/);
+    assert.match(renderer, /deletionLocked \? ' disabled' : ''/);
   });
 
   test('指定说明被删除，portable 下载提示保留且安装版空说明收起', () => {

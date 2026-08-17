@@ -7,191 +7,250 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const ExcelJS = require('exceljs');
 const { DatabaseSync } = require('node:sqlite');
-const { ensureVccFinancialOpTablesSupport } = require('../../../src/backend/vcc-financial-op-db/migrations');
-const repository = require('../../../src/backend/vcc-financial-op-db/repository');
-const {
-  SOURCE_TYPES,
-  PENDING_HEADERS,
-  PENDING_V1_HEADERS,
-  getSourceDefinition
-} = require('../../../src/backend/vcc-financial-op/definitions');
-const { deleteDataset } = require('../../../src/backend/vcc-financial-op/dataset-deletion');
-const {
-  previewDataTargetDeletion
-} = require('../../../src/backend/vcc-financial-op/data-target-deletion');
-const { writeImportAuditWorkbook } = require('../../../src/main-process/vcc-financial-op-audit-writer');
 
-function deleteWithPreview(db, targetMonth, sourceType) {
-  const preview = previewDataTargetDeletion(db, { targetMonth, targetType: sourceType });
-  return deleteDataset({
-    db,
-    targetMonth,
-    sourceType,
-    expectedPreviewToken: preview.previewToken,
-    taskGeneration: preview.taskGeneration
+const {
+  ensureVccFinancialOpTablesSupport
+} = require('../../../src/backend/vcc-financial-op-db/migrations');
+const repository = require('../../../src/backend/vcc-financial-op-db/repository');
+const { SOURCE_TYPES } = require('../../../src/backend/vcc-financial-op/definitions');
+const {
+  ANOMALY_HEADERS,
+  writeImportAuditWorkbook
+} = require('../../../src/main-process/vcc-financial-op-audit-writer');
+
+function createRecord(db, options = {}) {
+  repository.createImportBatch(db, {
+    id: options.batchId || 'batch-audit',
+    targetMonth: '2026-07',
+    fileCount: 1
+  });
+  return repository.createImportRecord(db, {
+    batchId: options.batchId || 'batch-audit',
+    targetMonth: '2026-07',
+    sourceType: options.sourceType || SOURCE_TYPES.RECHARGE,
+    sourceFiles: [options.fileName || 'source.xlsx']
   });
 }
 
-test('幂等审计导出保留原表字段、前导零键和新旧双侧血缘', async (t) => {
+function tempOutput(t, fileName = 'anomalies.xlsx') {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-anomaly-export-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  return path.join(directory, fileName);
+}
+
+test('异常明细只导出固定六列并保留前导零幂等键与差异字段', async (t) => {
   const db = new DatabaseSync(':memory:');
   t.after(() => db.close());
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
-  repository.createImportBatch(db, { id: 'batch-1', targetMonth: '2026-06', fileCount: 2 });
-  const recordId = repository.createImportRecord(db, {
-    batchId: 'batch-1', targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE,
-    sourceFiles: ['first.xlsx', 'again.xlsx']
+  const recordId = createRecord(db);
+  repository.addImportAnomaly(db, recordId, {
+    sourceType: SOURCE_TYPES.RECHARGE,
+    targetMonth: '2026-07',
+    idempotencyKey: '000123',
+    sourceFile: 'source.xlsx',
+    sourceRow: 18,
+    category: 'idempotent_conflict',
+    abnormalFields: ['订单号'],
+    diffFields: ['我方到账金额', '订单号'],
+    description: '相同幂等键对应内容不一致',
+    incomingContentHash: 'a'.repeat(64),
+    existingContentHash: 'b'.repeat(64)
   });
   repository.finishImportRecord(db, recordId, {
-    status: 'all_skipped', rawCount: 1, skippedCount: 1
+    status: 'failed_conflict', rawCount: 1, conflictCount: 1, anomalyCount: 1
   });
-  repository.finishImportBatch(db, 'batch-1', 'success');
-  const definition = getSourceDefinition(SOURCE_TYPES.RECHARGE);
-  const raw = definition.headers.map((header) => header === '订单号' ? '000123' : '');
-  const effectiveId = Number(db.prepare(`
-    INSERT INTO vcc_fin_op_effective_rows (
-      source_type, idempotency_key_raw, idempotency_key, content_hash,
-      target_month, subject, source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES (?, '000123', '000123', 'hash', '2026-06', 'PPHK', 'first.xlsx', 'sheet1', 2, ?, ?)
-  `).run(SOURCE_TYPES.RECHARGE, JSON.stringify(raw), recordId).lastInsertRowid);
+  const outputPath = tempOutput(t);
+
+  const result = await writeImportAuditWorkbook({ db, recordId, outputPath });
+  assert.deepEqual(result, {
+    filePath: path.resolve(outputPath), recordId, rowCount: 1, sheetCount: 1
+  });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(outputPath);
+  const sheet = workbook.getWorksheet('异常明细');
+  assert.deepEqual(sheet.getRow(1).values.slice(1), [...ANOMALY_HEADERS]);
+  assert.equal(sheet.getCell('A2').value, '000123');
+  assert.equal(sheet.getCell('B2').value, 'source.xlsx');
+  assert.equal(sheet.getCell('C2').value, 18);
+  assert.equal(sheet.getCell('D2').value, '幂等冲突');
+  assert.equal(sheet.getCell('E2').value, '订单号、我方到账金额');
+  assert.equal(sheet.getCell('F2').value, '相同幂等键对应内容不一致');
+});
+
+test('多文件第二份失败在六列导出中保持精确文件归属', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  repository.createImportBatch(db, {
+    id: 'batch-second-source', targetMonth: '2026-07', fileCount: 2
+  });
+  const recordId = repository.createImportRecord(db, {
+    batchId: 'batch-second-source',
+    targetMonth: '2026-07',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['first.xlsx', 'second.xlsx']
+  });
+  repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1, fileName: 'first.xlsx', sha256: 'a'.repeat(64), sizeBytes: 1
+  });
+  const secondSourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 2, fileName: 'second.xlsx', sha256: 'b'.repeat(64), sizeBytes: 2
+  });
+  const anomalyCount = repository.addFileFailureAnomaly(db, recordId, {
+    importSourceId: secondSourceId,
+    sourceOrdinal: 2,
+    fileName: 'second.xlsx',
+    message: '最终 SHA/size 与首次读取不一致'
+  });
+  repository.finishImportRecord(db, recordId, {
+    status: 'failed_validation', rawCount: 1, rolledBackCount: 1, anomalyCount
+  });
+  const outputPath = tempOutput(t, 'second-source.xlsx');
+  await writeImportAuditWorkbook({ db, recordId, outputPath });
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(outputPath);
+  const sheet = workbook.getWorksheet('异常明细');
+  assert.deepEqual(sheet.getRow(1).values.slice(1), [...ANOMALY_HEADERS]);
+  assert.equal(sheet.getCell('A2').value == null, true);
+  assert.equal(sheet.getCell('B2').value, 'second.xlsx');
+  assert.equal(sheet.getCell('C2').value == null, true);
+  assert.equal(sheet.getCell('D2').value, '文件级失败');
+  assert.equal(sheet.getCell('E2').value == null, true);
+  assert.equal(sheet.getCell('F2').value, '最终 SHA/size 与首次读取不一致');
+});
+
+test('部分成功与系统主体异常可导出，纯幂等跳过不生成逐行审计', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const recordId = createRecord(db, {
+    batchId: 'batch-system', sourceType: SOURCE_TYPES.SYSTEM_OP, fileName: 'system.xlsx'
+  });
+  repository.addImportAnomaly(db, recordId, {
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    targetMonth: '2026-07',
+    idempotencyKey: 'UNKNOWN',
+    sourceFile: 'system.xlsx',
+    sourceRow: 3,
+    category: 'system_subject_error',
+    abnormalFields: ['公司主体'],
+    description: '系统财务OP包含未知主体'
+  });
+  repository.finishImportRecord(db, recordId, {
+    status: 'success_with_skips', rawCount: 2, insertedCount: 1,
+    formatErrorCount: 1, anomalyCount: 1
+  });
+  const outputPath = tempOutput(t, 'system.xlsx');
+  const result = await writeImportAuditWorkbook({ db, recordId, outputPath });
+  assert.equal(result.rowCount, 1);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(outputPath);
+  assert.equal(workbook.getWorksheet('异常明细').getCell('D2').value, '系统主体异常');
+
+  const skipRecordId = createRecord(db, { batchId: 'batch-skip' });
+  repository.finishImportRecord(db, skipRecordId, {
+    status: 'all_skipped', rawCount: 10, skippedCount: 10, anomalyCount: 0
+  });
+  await assert.rejects(
+    writeImportAuditWorkbook({ db, recordId: skipRecordId, outputPath: tempOutput(t, 'skip.xlsx') }),
+    (error) => error.code === 'no-import-anomalies'
+  );
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM vcc_fin_op_import_rows WHERE import_record_id = ?
+  `).get(skipRecordId).count, 0);
+});
+
+test('超过 Excel 单 sheet 行限时按同一固定表头稳定分 sheet', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const recordId = createRecord(db, { batchId: 'batch-pages' });
+  for (let index = 1; index <= 3; index += 1) {
+    repository.addImportAnomaly(db, recordId, {
+      sourceType: SOURCE_TYPES.RECHARGE,
+      targetMonth: '2026-07',
+      idempotencyKey: `KEY-${index}`,
+      sourceFile: 'source.xlsx',
+      sourceRow: index + 1,
+      category: 'format_error',
+      abnormalFields: ['金额'],
+      description: `第 ${index} 行金额格式错误`
+    });
+  }
+  repository.finishImportRecord(db, recordId, {
+    status: 'failed_validation', rawCount: 3, formatErrorCount: 3, anomalyCount: 3
+  });
+  const outputPath = tempOutput(t, 'pages.xlsx');
+  const result = await writeImportAuditWorkbook({
+    db, recordId, outputPath, maxDataRowsPerSheet: 2
+  });
+  assert.equal(result.rowCount, 3);
+  assert.equal(result.sheetCount, 2);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(outputPath);
+  assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), ['异常明细', '异常明细-2']);
+  for (const sheet of workbook.worksheets) {
+    assert.deepEqual(sheet.getRow(1).values.slice(1), [...ANOMALY_HEADERS]);
+  }
+});
+
+test('显式重建前 v1 历史异常仍按六列导出且不恢复逐行成功审计', async (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  ensureVccFinancialOpTablesSupport(db);
+  const recordId = createRecord(db, {
+    batchId: 'legacy-anomaly', fileName: 'legacy-source.xlsx'
+  });
   db.prepare(`
     INSERT INTO vcc_fin_op_import_rows (
       import_record_id, source_type, target_month,
       idempotency_key_raw, idempotency_key, content_hash,
       source_file, sheet_name, source_row, raw_json,
-      disposition, existing_effective_id, validation_message
-    ) VALUES (?, ?, '2026-06', '000123', '000123', 'hash',
-      'again.xlsx', 'sheet1', 2, ?, 'idempotent_skip', ?, '同键同内容')
-  `).run(recordId, SOURCE_TYPES.RECHARGE, JSON.stringify(raw), effectiveId);
-  db.prepare(`
-    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
-    VALUES ('2026-06', ?)
-  `).run(SOURCE_TYPES.RECHARGE);
-  deleteWithPreview(db, '2026-06', SOURCE_TYPES.RECHARGE);
-
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-audit-output-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const outputPath = path.join(dir, 'audit.xlsx');
-  const result = await writeImportAuditWorkbook({ db, recordId, tab: 'skips', outputPath });
-  assert.equal(result.rowCount, 1);
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(outputPath);
-  const sheet = workbook.getWorksheet('导入审计');
-  const headers = sheet.getRow(1).values.slice(1);
-  assert.ok(headers.includes('订单号'));
-  assert.ok(headers.includes('审计_幂等键'));
-  assert.ok(headers.includes('已保留_订单号'));
-  const orderIndex = headers.indexOf('订单号') + 1;
-  const auditKeyIndex = headers.indexOf('审计_幂等键') + 1;
-  const existingOrderIndex = headers.indexOf('已保留_订单号') + 1;
-  assert.equal(sheet.getCell(2, orderIndex).value, '000123');
-  assert.equal(sheet.getCell(2, auditKeyIndex).value, '000123');
-  assert.equal(sheet.getCell(2, existingOrderIndex).value, '000123');
-});
-
-test('系统财务OP审计导出遵守主体和文件名筛选', async (t) => {
-  const db = new DatabaseSync(':memory:');
-  t.after(() => db.close());
-  db.exec('PRAGMA foreign_keys = ON');
-  ensureVccFinancialOpTablesSupport(db);
-  repository.createImportBatch(db, { id: 'batch-system', targetMonth: '2026-06', fileCount: 2 });
-  const recordId = repository.createImportRecord(db, {
-    batchId: 'batch-system', targetMonth: '2026-06', sourceType: SOURCE_TYPES.SYSTEM_OP,
-    sourceFiles: ['pphk.xlsx', 'ppus.xlsx']
-  });
-  repository.finishImportRecord(db, recordId, {
-    status: 'all_skipped', rawCount: 2, skippedCount: 2
-  });
-  repository.finishImportBatch(db, 'batch-system', 'success');
-  const existingId = Number(db.prepare(`
-    INSERT INTO vcc_fin_op_system_snapshots (
-      target_month, subject, balances_json, content_hash,
-      source_file, sheet_name, source_row, raw_json, import_record_id
-    ) VALUES ('2026-06', 'PPHK', '{"USD":"1"}', 'existing-hash',
-      'original.xlsx', 'Validate', 3, '{}', ?)
-  `).run(recordId).lastInsertRowid);
-  const insert = db.prepare(`
-    INSERT INTO vcc_fin_op_system_snapshot_attempts (
-      import_record_id, target_month, subject, balances_json, content_hash,
-      source_file, sheet_name, source_row, raw_json, disposition, existing_snapshot_id
-    ) VALUES (?, '2026-06', ?, '{"USD":"2"}', ?, ?, 'Validate', 3, '{}', 'idempotent_skip', ?)
-  `);
-  insert.run(recordId, 'PPHK', 'hash-hk', 'pphk.xlsx', existingId);
-  insert.run(recordId, 'PPUS', 'hash-us', 'ppus.xlsx', null);
-  db.prepare(`
-    INSERT INTO vcc_fin_op_datasets (target_month, dataset_type)
-    VALUES ('2026-06', ?)
-  `).run(SOURCE_TYPES.SYSTEM_OP);
-  deleteWithPreview(db, '2026-06', SOURCE_TYPES.SYSTEM_OP);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-system-audit-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const outputPath = path.join(dir, 'system-audit.xlsx');
-
-  const result = await writeImportAuditWorkbook({
-    db, recordId, tab: 'skips', outputPath, key: 'PPHK', fileName: 'pphk'
-  });
-  assert.equal(result.rowCount, 1);
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(outputPath);
-  const sheet = workbook.getWorksheet('系统OP快照审计');
-  assert.equal(sheet.rowCount, 2);
-  assert.equal(sheet.getCell('B2').value, 'PPHK');
-  assert.equal(sheet.getCell('C2').value, 'pphk.xlsx');
-  const headers = sheet.getRow(1).values.slice(1);
-  const existingBalanceColumn = headers.indexOf('已保留_余额快照') + 1;
-  const existingFileColumn = headers.indexOf('已保留_来源文件') + 1;
-  const differenceCurrencyColumn = headers.indexOf('差异币种') + 1;
-  assert.equal(sheet.getCell(2, existingBalanceColumn).value, '{"USD":"1"}');
-  assert.equal(sheet.getCell(2, existingFileColumn).value, 'original.xlsx');
-  assert.equal(sheet.getCell(2, differenceCurrencyColumn).value, 'USD');
-});
-
-test('历史 Pending 审计按 v1 的 48 列表头解释且不与新 46 列错位', async (t) => {
-  const db = new DatabaseSync(':memory:');
-  t.after(() => db.close());
-  db.exec('PRAGMA foreign_keys = ON');
-  ensureVccFinancialOpTablesSupport(db);
-  repository.createImportBatch(db, { id: 'pending-v1-audit', targetMonth: '2026-06', fileCount: 1 });
-  const recordId = repository.createImportRecord(db, {
-    batchId: 'pending-v1-audit',
-    targetMonth: '2026-06',
-    sourceType: SOURCE_TYPES.PENDING,
-    sourceFiles: ['legacy.xlsx']
-  });
-  repository.finishImportRecord(db, recordId, {
-    status: 'failed_validation', rawCount: 1, formatErrorCount: 1
-  });
-  repository.finishImportBatch(db, 'pending-v1-audit', 'completed_with_errors');
-  const raw = PENDING_V1_HEADERS.map((header) => {
-    if (header === 'PendingBizId') return 'LEGACY-1';
-    if (header === '是否错币') return '旧错币值';
-    if (header === '金额差') return '旧金额差值';
-    if (header === '流水_币种') return 'USD';
-    return '';
-  });
+      disposition, validation_field, validation_message, diff_fields_json
+    ) VALUES (?, ?, '2026-07', ' bad ', 'bad', ?,
+              'legacy-source.xlsx', '明细', 9, '{"订单号":""}',
+              'invalid_key', '订单号', '幂等键为空', '[]')
+  `).run(recordId, SOURCE_TYPES.RECHARGE, 'a'.repeat(64));
   db.prepare(`
     INSERT INTO vcc_fin_op_import_rows (
-      import_record_id, source_type, target_month, idempotency_key_raw, idempotency_key,
-      content_hash, hash_version, raw_contract_version, subject,
-      source_file, sheet_name, source_row, raw_json, disposition, validation_message
-    ) VALUES (?, ?, '2026-06', 'LEGACY-1', 'LEGACY-1', 'v2-hash', 2, 1, 'PPHK',
-      'legacy.xlsx', 'Pending', 2, ?, 'format_error', '历史审计')
-  `).run(recordId, SOURCE_TYPES.PENDING, JSON.stringify(raw));
+      import_record_id, source_type, target_month,
+      idempotency_key_raw, idempotency_key, content_hash,
+      source_file, sheet_name, source_row, raw_json,
+      disposition, diff_fields_json
+    ) VALUES (?, ?, '2026-07', 'ok', 'ok', ?,
+              'legacy-source.xlsx', '明细', 10, '{"订单号":"ok"}',
+              'idempotent_skip', '[]')
+  `).run(recordId, SOURCE_TYPES.RECHARGE, 'b'.repeat(64));
+  repository.finishImportRecord(db, recordId, {
+    status: 'failed_validation',
+    rawCount: 1,
+    invalidKeyCount: 1,
+    errorMessage: '历史导入校验失败'
+  });
+  assert.equal(db.prepare(`
+    SELECT anomaly_count FROM vcc_fin_op_import_records WHERE id = ?
+  `).get(recordId).anomaly_count, 0);
+  assert.equal(repository.countExportableImportAnomalies(db, recordId), 2);
 
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-pending-v1-audit-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const outputPath = path.join(dir, 'pending-v1.xlsx');
-  await writeImportAuditWorkbook({ db, recordId, tab: 'other', outputPath });
+  const outputPath = tempOutput(t, 'legacy-anomalies.xlsx');
+  const result = await writeImportAuditWorkbook({ db, recordId, outputPath });
+  assert.equal(result.rowCount, 2);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(outputPath);
-  const sheet = workbook.getWorksheet('导入审计');
-  const headers = sheet.getRow(1).values.slice(1);
-  assert.equal(headers.slice(0, PENDING_V1_HEADERS.length).length, 48);
-  assert.ok(headers.includes('是否错币'));
-  assert.ok(headers.includes('金额差'));
-  assert.equal(headers.slice(0, PENDING_V1_HEADERS.length).includes(PENDING_HEADERS[45]), true);
-  assert.equal(sheet.getCell(2, headers.indexOf('是否错币') + 1).value, '旧错币值');
-  assert.equal(sheet.getCell(2, headers.indexOf('金额差') + 1).value, '旧金额差值');
-  assert.equal(sheet.getCell(2, headers.indexOf('流水_币种') + 1).value, 'USD');
+  const sheet = workbook.getWorksheet('异常明细');
+  assert.deepEqual(sheet.getRow(1).values.slice(1), [...ANOMALY_HEADERS]);
+  assert.deepEqual(sheet.getRow(2).values.slice(1), [
+    'bad', 'legacy-source.xlsx', 9, '空键/非法键', '订单号', '幂等键为空'
+  ]);
+  assert.equal(sheet.getCell('A3').value == null, true);
+  assert.equal(sheet.getCell('B3').value, 'legacy-source.xlsx');
+  assert.equal(sheet.getCell('C3').value == null, true);
+  assert.equal(sheet.getCell('D3').value, '文件级失败');
+  assert.equal(sheet.getCell('E3').value == null, true);
+  assert.equal(sheet.getCell('F3').value, '历史导入校验失败');
 });

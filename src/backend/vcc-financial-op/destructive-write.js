@@ -339,6 +339,11 @@ function countRows(db, sql, params = []) {
   return Number(db.prepare(sql).get(...params).row_count);
 }
 
+function tableHasColumn(db, tableName, columnName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all()
+    .some((row) => row.name === columnName);
+}
+
 function loadRunDeletionScope(db, targetMonth) {
   const runIds = db.prepare(`
     SELECT id FROM vcc_fin_op_runs
@@ -520,19 +525,33 @@ function detailSourceScope(db, targetMonth, sourceType) {
     SELECT COUNT(*) AS row_count FROM vcc_fin_op_effective_rows
     WHERE target_month = ? AND source_type = ?
   `, [targetMonth, sourceType]);
-  const Q = countRows(db, `
-    SELECT COUNT(*) AS row_count FROM vcc_fin_op_import_rows AS audit
-    JOIN vcc_fin_op_effective_rows AS effective
-      ON effective.id = audit.existing_effective_id
+  const legacyRaw = tableHasColumn(db, 'vcc_fin_op_effective_rows', 'raw_json');
+  const Q = legacyRaw ? countRows(db, `
+      SELECT COUNT(*) AS row_count FROM vcc_fin_op_import_rows AS audit
+      JOIN vcc_fin_op_effective_rows AS effective
+        ON effective.id = audit.existing_effective_id
+      WHERE effective.target_month = ? AND effective.source_type = ?
+    `, [targetMonth, sourceType]) : 0;
+  const F = countRows(db, `
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_effective_raw_fallback AS fallback
+    JOIN vcc_fin_op_effective_rows AS effective ON effective.id = fallback.effective_row_id
     WHERE effective.target_month = ? AND effective.source_type = ?
   `, [targetMonth, sourceType]);
-  return Object.freeze({ E, Q });
+  const A = countRows(db, `
+    SELECT COUNT(*) AS row_count
+    FROM vcc_fin_op_import_anomalies AS anomaly
+    JOIN vcc_fin_op_effective_rows AS effective ON effective.id = anomaly.effective_row_id
+    WHERE effective.target_month = ? AND effective.source_type = ?
+  `, [targetMonth, sourceType]);
+  return Object.freeze({ E, Q, F, A, legacyRaw });
 }
 
 function semanticAcceptedCondition() {
   return `
     attempt.disposition = 'accepted'
     AND attempt.import_record_id IS snapshot.import_record_id
+    AND attempt.import_source_id IS snapshot.import_source_id
     AND attempt.target_month IS snapshot.target_month
     AND attempt.subject IS snapshot.subject
     AND attempt.balances_json IS snapshot.balances_json
@@ -648,7 +667,7 @@ function buildSourceDeletePlan(db, evidence, transactionTimestamp, provenance) {
     });
   }
   const sourceChanges = detail
-    ? (2 * sourceScope.Q) + sourceScope.E
+    ? (2 * sourceScope.Q) + sourceScope.A + sourceScope.F + sourceScope.E
     : sourceScope.B + (2 * sourceScope.A) + sourceScope.S;
   const expectedTotalChanges = 2 + runScope.R + runScope.childTotal + sourceChanges + D + M;
   const operationType = DELETE_SUCCESS_OPERATION_TYPES.source;
@@ -656,7 +675,7 @@ function buildSourceDeletePlan(db, evidence, transactionTimestamp, provenance) {
     R: runScope.R,
     ...runScope.childCounts,
     ...(detail
-      ? { Q: sourceScope.Q, E: sourceScope.E }
+      ? { Q: sourceScope.Q, A_anomaly: sourceScope.A, F: sourceScope.F, E: sourceScope.E }
       : { B: sourceScope.B, A: sourceScope.A, S: sourceScope.S }),
     D,
     M
@@ -687,19 +706,33 @@ function buildSourceDeletePlan(db, evidence, transactionTimestamp, provenance) {
     })
   }, ...runDeletionSteps(evidence.targetMonth, runScope)];
   if (detail) {
+    if (sourceScope.legacyRaw) {
+      steps.push(
+        largeStep(
+          'delete.detail-snapshot',
+          sourceScope.Q,
+          [evidence.targetMonth, sourceType],
+          'detail-existing-effective'
+        ),
+        largeStep(
+          'delete.detail-clear-fk',
+          sourceScope.Q,
+          [evidence.targetMonth, sourceType],
+          'detail-existing-effective'
+        )
+      );
+    }
     steps.push(
-      largeStep(
-        'delete.detail-snapshot',
-        sourceScope.Q,
-        [evidence.targetMonth, sourceType],
-        'detail-existing-effective'
-      ),
-      largeStep(
-        'delete.detail-clear-fk',
-        sourceScope.Q,
-        [evidence.targetMonth, sourceType],
-        'detail-existing-effective'
-      ),
+      {
+        stepId: 'delete.detail-clear-anomaly-effective',
+        expectedChanges: sourceScope.A,
+        bindings: [evidence.targetMonth, sourceType]
+      },
+      {
+        stepId: 'delete.detail-fallback',
+        expectedChanges: sourceScope.F,
+        bindings: [evidence.targetMonth, sourceType]
+      },
       largeStep(
         'delete.detail-effective',
         sourceScope.E,
@@ -773,7 +806,15 @@ function buildSourceDeletePlan(db, evidence, transactionTimestamp, provenance) {
       vcc_fin_op_operation_audit: { inserts: 1, updates: 0, deletes: 0, protection: 'planned-scope' },
       ...runDeletionTableBudgets(runScope),
       ...(detail ? {
-        vcc_fin_op_import_rows: { inserts: 0, updates: 2 * sourceScope.Q, deletes: 0, protection: 'planned-scope' },
+        ...(sourceScope.legacyRaw ? {
+          vcc_fin_op_import_rows: { inserts: 0, updates: 2 * sourceScope.Q, deletes: 0, protection: 'planned-scope' }
+        } : {}),
+        vcc_fin_op_import_anomalies: {
+          inserts: 0, updates: sourceScope.A, deletes: 0, protection: 'planned-scope'
+        },
+        vcc_fin_op_effective_raw_fallback: {
+          inserts: 0, updates: 0, deletes: sourceScope.F, protection: 'planned-scope'
+        },
         vcc_fin_op_effective_rows: { inserts: 0, updates: 0, deletes: sourceScope.E, protection: 'planned-scope' }
       } : {
         vcc_fin_op_system_snapshot_attempts: {

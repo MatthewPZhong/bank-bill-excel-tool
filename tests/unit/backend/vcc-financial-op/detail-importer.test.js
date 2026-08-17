@@ -1,6 +1,8 @@
 'use strict';
 
 const fs = require('node:fs');
+const childProcess = require('node:child_process');
+const Module = require('node:module');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -8,6 +10,11 @@ const assert = require('node:assert/strict');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
 const { ensureVccFinancialOpTablesSupport } = require('../../../../src/backend/vcc-financial-op-db/migrations');
+const {
+  VCC_STORAGE_CONTRACT_VERSION,
+  createSlimEffectiveRowsTable,
+  setVccStorageContractVersion
+} = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
 const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
 const {
   SOURCE_TYPES,
@@ -16,22 +23,56 @@ const {
   getSourceDefinition
 } = require('../../../../src/backend/vcc-financial-op/definitions');
 const {
+  importDetailGroup,
   importDetailBatch
 } = require('../../../../src/backend/vcc-financial-op/detail-importer');
 const {
   importFiles,
   normalizeImportBatchId
 } = require('../../../../src/backend/vcc-financial-op/import-service');
+const { hashSourceFiles } = require('../../../../src/backend/vcc-financial-op/source-lineage');
 const {
   inspectSourceFile,
   openWorkbookSheets
 } = require('../../../../src/backend/vcc-financial-op/workbook-reader');
+
+const REPO_ROOT = path.resolve(__dirname, '../../../..');
+
+function loadV319Module(relativePath) {
+  const source = childProcess.execFileSync(
+    'git',
+    ['show', `v3.1.9:${relativePath}`],
+    { cwd: REPO_ROOT, encoding: 'utf8' }
+  );
+  const filename = path.join(REPO_ROOT, relativePath);
+  const loaded = new Module(filename, module);
+  loaded.filename = filename;
+  loaded.paths = Module._nodeModulePaths(path.dirname(filename));
+  loaded._compile(source, filename);
+  return loaded.exports;
+}
 
 function createDb() {
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   ensureVccFinancialOpTablesSupport(db);
   return db;
+}
+
+function replaceEmptyEffectiveRowsWithSlimSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+    );
+  `);
+  db.exec('PRAGMA foreign_keys = OFF; DROP TABLE vcc_fin_op_effective_rows;');
+  createSlimEffectiveRowsTable(db);
+  setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+  ensureVccFinancialOpTablesSupport(db);
+  db.exec('PRAGMA foreign_keys = ON');
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
 }
 
 function tempDir(t) {
@@ -72,12 +113,60 @@ function fileEntry(filePath, sourceType, subject = '') {
   return { filePath, sourceType, subject };
 }
 
+async function archiveHandoffForFiles(files, taskRunId) {
+  const hashed = await hashSourceFiles(files);
+  const ordinals = new Map();
+  return hashed.map((file) => {
+    const sourceOrdinal = (ordinals.get(file.sourceType) || 0) + 1;
+    ordinals.set(file.sourceType, sourceOrdinal);
+    return {
+      filePath: file.filePath,
+      sourceType: file.sourceType,
+      sourceOrdinal,
+      sha256: file.sha256,
+      sizeBytes: file.sizeBytes,
+      taskRunId
+    };
+  });
+}
+
 test('外部 VCC import batchId 只接受与 exact7 相同的稳定文本边界', () => {
   assert.match(normalizeImportBatchId(), /^[0-9a-f-]{36}$/);
   assert.equal(normalizeImportBatchId('task-run-319'), 'task-run-319');
   for (const invalid of ['', ' task-run', 'task-run ', 'task\nrun', 319, 'x'.repeat(257)]) {
     assert.throws(() => normalizeImportBatchId(invalid), /VCC 导入批次号/);
   }
+});
+
+test('storage contract v2 slim effective 仍可导入、幂等重放并只暂存 fallback', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  replaceEmptyEffectiveRowsWithSlimSchema(db);
+  const dir = tempDir(t);
+  const filePath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'slim.xlsx', [rechargeRow()]);
+
+  const first = await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(filePath, SOURCE_TYPES.RECHARGE)]
+  });
+  assert.equal(first.records[0].status, 'success');
+  assert.equal(first.records[0].insertedCount, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_raw_fallback').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+
+  const second = await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(filePath, SOURCE_TYPES.RECHARGE)]
+  });
+  assert.equal(second.records[0].status, 'all_skipped');
+  assert.equal(second.records[0].skippedCount, 1);
+  assert.equal(second.records[0].anomalyCount, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
 });
 
 test('五个内置校验原表模板均与当前导入契约一致', async () => {
@@ -215,14 +304,16 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
     rechargeRow({ 订单号: 'service-fee', 业务子类型: '手续费' })
   ]);
 
+  const files = [
+    fileEntry(recharge, SOURCE_TYPES.RECHARGE),
+    fileEntry(fee, SOURCE_TYPES.FEE_FX)
+  ];
   const result = await importFiles({
     db,
     batchId: 'multi-source-service',
     targetMonth: '2026-06',
-    files: [
-      fileEntry(recharge, SOURCE_TYPES.RECHARGE),
-      fileEntry(fee, SOURCE_TYPES.FEE_FX)
-    ]
+    files,
+    archiveHandoffFiles: await archiveHandoffForFiles(files, 'multi-source-service')
   });
 
   assert.equal(result.status, 'success');
@@ -232,6 +323,21 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
     SELECT COUNT(*) AS n FROM vcc_fin_op_import_records WHERE batch_id = 'multi-source-service'
   `).get().n, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 2);
+  const sources = db.prepare(`
+    SELECT source_file_name, source_sha256, source_size_bytes, archive_state
+    FROM vcc_fin_op_import_sources
+    ORDER BY id
+  `).all();
+  assert.equal(sources.length, 2);
+  assert.deepEqual(sources.map((row) => row.source_file_name), ['recharge.xlsx', 'fee.xlsx']);
+  assert.ok(sources.every((row) => /^[a-f0-9]{64}$/.test(row.source_sha256)));
+  assert.ok(sources.every((row) => Number(row.source_size_bytes) > 0));
+  assert.ok(sources.every((row) => row.archive_state === 'pending'));
+  assert.ok(result.records.every((record) => (
+    record.archiveState === 'pending'
+      && record.anomalyCount === 0
+      && record.sourceFiles.length === 1
+  )));
 });
 
 test('多原表后组运行异常仍返回已提交组及全部 record 的部分结果血缘', async (t) => {
@@ -269,17 +375,19 @@ test('多原表后组运行异常仍返回已提交组及全部 record 的部分
   let cancellationChecks = 0;
   let caught;
   try {
+    const files = [
+      fileEntry(system, SOURCE_TYPES.SYSTEM_OP, 'PPHK'),
+      fileEntry(recharge, SOURCE_TYPES.RECHARGE)
+    ];
     await importFiles({
       db,
       batchId: 'partial-runtime-failure',
       targetMonth: '2026-06',
-      files: [
-        fileEntry(system, SOURCE_TYPES.SYSTEM_OP, 'PPHK'),
-        fileEntry(recharge, SOURCE_TYPES.RECHARGE)
-      ],
+      files,
+      archiveHandoffFiles: await archiveHandoffForFiles(files, 'partial-runtime-failure'),
       shouldCancel: () => {
         cancellationChecks += 1;
-        return cancellationChecks >= 2;
+        return cancellationChecks >= 3;
       }
     });
   } catch (error) {
@@ -295,6 +403,13 @@ test('多原表后组运行异常仍返回已提交组及全部 record 的部分
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshots
   `).get().n, 1);
+  const systemLineage = db.prepare(`
+    SELECT source.source_file_name, source.source_sha256
+    FROM vcc_fin_op_system_snapshots snapshot
+    JOIN vcc_fin_op_import_sources source ON source.id = snapshot.import_source_id
+  `).get();
+  assert.equal(systemLineage.source_file_name, 'committed-system.xlsx');
+  assert.match(systemLineage.source_sha256, /^[a-f0-9]{64}$/);
   assert.equal(db.prepare(`
     SELECT status FROM vcc_fin_op_import_batches WHERE id = 'partial-runtime-failure'
   `).get().status, 'failed');
@@ -321,15 +436,18 @@ test('同一原表重复导入时第二次全量幂等跳过且有效事实不�
   assert.equal(first.records[0].insertedCount, 1);
   assert.equal(second.records[0].status, 'all_skipped');
   assert.equal(second.records[0].skippedCount, 1);
+  assert.equal(second.records[0].anomalyCount, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
-  const skip = db.prepare(`
-    SELECT i.idempotency_key, i.raw_json, e.raw_json AS existing_raw_json
-    FROM vcc_fin_op_import_rows i
-    JOIN vcc_fin_op_effective_rows e ON e.id = i.existing_effective_id
-    WHERE i.disposition = 'idempotent_skip'
-  `).get();
-  assert.equal(skip.idempotency_key, '000123');
-  assert.equal(skip.raw_json, skip.existing_raw_json);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(second.records[0].recordId).n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows
+  `).get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_effective_raw_fallback
+  `).get().n, 1);
 });
 
 test('校验表生成时间仅在实际新增有效明细时刷新', async (t) => {
@@ -401,11 +519,12 @@ test('同键异内容阻断整批且不覆盖既有有效行', async (t) => {
   assert.equal(effective.signed_amount, '10.25');
   assert.equal(effective.source_file, 'original.xlsx');
   const conflict = db.prepare(`
-    SELECT diff_fields_json, existing_effective_id
-    FROM vcc_fin_op_import_rows WHERE disposition = 'idempotent_conflict'
+    SELECT diff_fields_json, effective_row_id
+    FROM vcc_fin_op_import_anomalies WHERE category = 'idempotent_conflict'
   `).get();
-  assert.ok(conflict.existing_effective_id);
+  assert.ok(conflict.effective_row_id);
   assert.deepEqual(JSON.parse(conflict.diff_fields_json), ['我方到账金额']);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
   assert.throws(() => repository.resolveImportRecord(db, result.records[0].recordId, {
     note: '已核对'
   }), /必须明确确认保留当前有效数据集/);
@@ -465,7 +584,7 @@ test('混合精确重放、冲突和新行时只过滤异常并提升正常行',
   `).get().n, 1);
 });
 
-test('同批跨文件同键同内容只新增一次并逐条记录跳过', async (t) => {
+test('同批跨文件同键同内容只新增一次且幂等跳过仅累计计数', async (t) => {
   const db = createDb();
   t.after(() => db.close());
   const dir = tempDir(t);
@@ -483,8 +602,10 @@ test('同批跨文件同键同内容只新增一次并逐条记录跳过', async
   assert.equal(result.records[0].skippedCount, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 1);
   assert.equal(db.prepare(`
-    SELECT COUNT(*) AS n FROM vcc_fin_op_import_rows WHERE disposition = 'idempotent_skip'
-  `).get().n, 1);
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(result.records[0].recordId).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
 });
 
 test('通道明细同键改填公司主体时冲突明细明确标识主体差异', async (t) => {
@@ -513,8 +634,8 @@ test('通道明细同键改填公司主体时冲突明细明确标识主体差�
 
   assert.equal(conflict.records[0].status, 'failed_conflict');
   const row = db.prepare(`
-    SELECT diff_fields_json FROM vcc_fin_op_import_rows
-    WHERE import_record_id = ? AND disposition = 'idempotent_conflict'
+    SELECT diff_fields_json FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'idempotent_conflict'
   `).get(conflict.records[0].recordId);
   assert.deepEqual(JSON.parse(row.diff_fields_json), ['公司主体（导入指定）']);
 });
@@ -550,7 +671,7 @@ test('空键只过滤异常行，正常行落库并满足行数守恒', async (t
   `).get().idempotency_key, 'valid-2');
 });
 
-test('后续分片损坏时保留此前已读取行的逐行回滚审计', async (t) => {
+test('后续分片损坏时只保留回滚计数和一条文件级失败事件', async (t) => {
   const db = createDb();
   t.after(() => db.close());
   const dir = tempDir(t);
@@ -566,21 +687,32 @@ test('后续分片损坏时保留此前已读取行的逐行回滚审计', async
       fileEntry(broken, SOURCE_TYPES.RECHARGE)
     ]
   });
+  const record = result.records[0];
 
-  assert.equal(result.records[0].status, 'failed_validation');
-  assert.equal(result.records[0].rawCount, 1);
-  assert.equal(result.records[0].rolledBackCount, 1);
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.rawCount, 1);
+  assert.equal(record.rolledBackCount, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
-  const auditRow = db.prepare(`
-    SELECT disposition, source_file, raw_json
-    FROM vcc_fin_op_import_rows
-  `).get();
-  assert.equal(auditRow.disposition, 'rolled_back');
-  assert.equal(auditRow.source_file, 'valid.xlsx');
-  assert.match(auditRow.raw_json, /000123/);
+  const anomaly = db.prepare(`
+    SELECT category, source_file_name, description
+    FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(record.recordId);
+  assert.equal(anomaly.category, 'file_failure');
+  assert.equal(anomaly.source_file_name, 'broken.xlsx');
+  assert.match(anomaly.description, /无法读取|不是有效的 Excel|zip/i);
+  repository.addFileFailureAnomaly(db, record.recordId, {
+    sourceFile: 'broken.xlsx',
+    message: '重复恢复调用不得制造第二条文件级失败'
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'file_failure'
+  `).get(record.recordId).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
 });
 
-test('协作式取消保留已读取行的回滚审计且不提升有效事实', async (t) => {
+test('协作式取消只保留已读取行汇总和一条文件级失败事件', async (t) => {
   const db = createDb();
   t.after(() => db.close());
   const dir = tempDir(t);
@@ -606,18 +738,19 @@ test('协作式取消保留已读取行的回滚审计且不提升有效事实',
 
   const record = db.prepare('SELECT * FROM vcc_fin_op_import_records').get();
   assert.equal(record.status, 'failed_validation');
-  assert.equal(record.raw_count, 2);
-  assert.equal(record.rolled_back_count, 2);
+  assert.ok(record.raw_count > 0);
+  assert.equal(record.rolled_back_count, record.raw_count);
   assert.match(record.error_message, /导入已取消/);
   assert.equal(db.prepare(`
-    SELECT COUNT(*) AS n FROM vcc_fin_op_import_rows
-    WHERE disposition = 'rolled_back'
-  `).get().n, 2);
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'file_failure'
+  `).get(record.id).n, 1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
   assert.equal(db.prepare('SELECT status FROM vcc_fin_op_import_batches').get().status, 'failed');
 });
 
-test('导入开始前取消也为每个已识别原表类型保留失败记录', async (t) => {
+test('导入开始前取消不创建空批次或导入记录', async (t) => {
   const db = createDb();
   t.after(() => db.close());
 
@@ -635,24 +768,218 @@ test('导入开始前取消也为每个已识别原表类型保留失败记录',
     /导入已取消/
   );
 
-  const records = db.prepare(`
-    SELECT source_type, status, raw_count, rolled_back_count, resolution_status
-    FROM vcc_fin_op_import_records
-    WHERE batch_id = 'cancel-before-first-source'
-    ORDER BY source_type
-  `).all();
-  assert.equal(records.length, 2);
-  assert.deepEqual(records.map((row) => row.source_type), [
-    SOURCE_TYPES.RECHARGE,
-    SOURCE_TYPES.SYSTEM_OP
-  ].sort());
-  assert.ok(records.every((row) => row.status === 'failed_validation'));
-  assert.ok(records.every((row) => row.raw_count === 0 && row.rolled_back_count === 0));
-  assert.ok(records.every((row) => row.resolution_status === 'unresolved'));
   assert.equal(db.prepare(`
-    SELECT status FROM vcc_fin_op_import_batches WHERE id = 'cancel-before-first-source'
-  `).get().status, 'failed');
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors').get().n, 2);
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_batches WHERE id = 'cancel-before-first-source'
+  `).get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_records WHERE batch_id = 'cancel-before-first-source'
+  `).get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors').get().n, 0);
+});
+
+test('业务前 handoff 多文件顺序或路径与 worker 首次 hash 不一致时零业务写入', async (t) => {
+  const dir = tempDir(t);
+  const firstPath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'handoff-first.xlsx', [
+    rechargeRow({ 订单号: 'HANDOFF-FIRST' })
+  ]);
+  const secondPath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'handoff-second.xlsx', [
+    rechargeRow({ 订单号: 'HANDOFF-SECOND' })
+  ]);
+  const files = [
+    fileEntry(firstPath, SOURCE_TYPES.RECHARGE),
+    fileEntry(secondPath, SOURCE_TYPES.RECHARGE)
+  ];
+  const hashed = await hashSourceFiles(files);
+  const archiveHandoffFiles = hashed.map((file, index) => ({
+    filePath: file.filePath,
+    sourceType: file.sourceType,
+    sourceOrdinal: index + 1,
+    sha256: file.sha256,
+    sizeBytes: file.sizeBytes,
+    taskRunId: 'handoff-order-mismatch'
+  })).reverse();
+  const db = createDb();
+  t.after(() => db.close());
+
+  await assert.rejects(
+    importFiles({
+      db,
+      batchId: 'handoff-order-mismatch',
+      targetMonth: '2026-06',
+      files,
+      archiveHandoffFiles
+    }),
+    (error) => error && error.code === 'vcc-import-handoff-mismatch'
+  );
+  for (const tableName of [
+    'vcc_fin_op_import_batches',
+    'vcc_fin_op_import_records',
+    'vcc_fin_op_import_sources',
+    'vcc_fin_op_effective_rows'
+  ]) {
+    assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${tableName}`).get().n, 0, tableName);
+  }
+});
+
+test('解析完成后的来源 SHA 不一致时正常行不落库且只留文件级失败', async (t) => {
+  const dir = tempDir(t);
+  const filePath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'changed-after-hash.xlsx', [
+    rechargeRow({ 订单号: 'SOURCE-CHANGED' })
+  ]);
+  const db = createDb();
+  t.after(() => db.close());
+  repository.createImportBatch(db, {
+    id: 'source-changed-batch',
+    targetMonth: '2026-06',
+    fileCount: 1
+  });
+  const recordId = repository.createImportRecord(db, {
+    batchId: 'source-changed-batch',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: [path.basename(filePath)]
+  });
+  const importSourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: path.basename(filePath),
+    sha256: '0'.repeat(64),
+    sizeBytes: fs.statSync(filePath).size
+  });
+  const record = await importDetailGroup({
+    db,
+    batchId: 'source-changed-batch',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    files: [{
+      filePath,
+      sourceType: SOURCE_TYPES.RECHARGE,
+      subject: '',
+      fileName: path.basename(filePath),
+      sha256: '0'.repeat(64),
+      sizeBytes: fs.statSync(filePath).size,
+      importSourceId
+    }],
+    recordId
+  });
+  assert.equal(record.status, 'failed_validation');
+  assert.match(record.errorMessage, /读取期间原表发生变化/);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'file_failure'
+  `).get(recordId).n, 1);
+});
+
+test('多文件第二份最终 SHA 不一致时异常精确归属 source id/ordinal/文件名', async (t) => {
+  const dir = tempDir(t);
+  const firstPath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'first-stable.xlsx', [
+    rechargeRow({ 订单号: 'FIRST-STABLE' })
+  ]);
+  const secondPath = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'second-changed.xlsx', [
+    rechargeRow({ 订单号: 'SECOND-CHANGED' })
+  ]);
+  const db = createDb();
+  t.after(() => db.close());
+  repository.createImportBatch(db, {
+    id: 'multi-source-changed', targetMonth: '2026-06', fileCount: 2
+  });
+  const recordId = repository.createImportRecord(db, {
+    batchId: 'multi-source-changed',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['first-stable.xlsx', 'second-changed.xlsx']
+  });
+  const firstSourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: 'first-stable.xlsx',
+    sha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(firstPath)).digest('hex'),
+    sizeBytes: fs.statSync(firstPath).size
+  });
+  const secondSourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 2,
+    fileName: 'second-changed.xlsx',
+    sha256: '0'.repeat(64),
+    sizeBytes: fs.statSync(secondPath).size
+  });
+  const record = await importDetailGroup({
+    db,
+    batchId: 'multi-source-changed',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    recordId,
+    files: [
+      {
+        ...fileEntry(firstPath, SOURCE_TYPES.RECHARGE),
+        fileName: 'first-stable.xlsx',
+        sha256: require('node:crypto').createHash('sha256').update(fs.readFileSync(firstPath)).digest('hex'),
+        sizeBytes: fs.statSync(firstPath).size,
+        sourceOrdinal: 1,
+        importSourceId: firstSourceId
+      },
+      {
+        ...fileEntry(secondPath, SOURCE_TYPES.RECHARGE),
+        fileName: 'second-changed.xlsx',
+        sha256: '0'.repeat(64),
+        sizeBytes: fs.statSync(secondPath).size,
+        sourceOrdinal: 2,
+        importSourceId: secondSourceId
+      }
+    ]
+  });
+  assert.equal(record.status, 'failed_validation');
+  assert.equal(record.rawCount, 2);
+  assert.equal(record.rolledBackCount, 2);
+  const anomaly = db.prepare(`
+    SELECT import_source_id, source_file_name, category
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(recordId);
+  assert.deepEqual({ ...anomaly }, {
+    import_source_id: secondSourceId,
+    source_file_name: 'second-changed.xlsx',
+    category: 'file_failure'
+  });
+  const exported = [...repository.iterateExportableImportAnomalies(db, recordId)];
+  assert.equal(exported.length, 1);
+  assert.equal(exported[0].source_file_name, 'second-changed.xlsx');
+});
+
+test('文件级失败拒绝关联其他 record 或 batch 的 import source', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  for (const batchId of ['source-owner-a', 'source-owner-b']) {
+    repository.createImportBatch(db, { id: batchId, targetMonth: '2026-06', fileCount: 1 });
+  }
+  const recordA = repository.createImportRecord(db, {
+    batchId: 'source-owner-a', targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE, sourceFiles: ['a.xlsx']
+  });
+  const recordB = repository.createImportRecord(db, {
+    batchId: 'source-owner-b', targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE, sourceFiles: ['b.xlsx']
+  });
+  const sourceB = repository.createImportSource(db, recordB, {
+    sourceOrdinal: 1,
+    fileName: 'b.xlsx',
+    sha256: 'b'.repeat(64),
+    sizeBytes: 2
+  });
+  assert.throws(() => repository.addFileFailureAnomaly(db, recordA, {
+    importSourceId: sourceB,
+    sourceOrdinal: 1,
+    fileName: 'b.xlsx',
+    message: '不应跨 record 关联'
+  }), /不属于目标导入记录/);
+  assert.throws(() => repository.failImportBatch(db, 'source-owner-a', {
+    importSourceId: sourceB,
+    sourceOrdinal: 1,
+    fileName: 'b.xlsx',
+    message: '不应跨 batch 关联'
+  }), /不属于目标导入批次/);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
+  `).get().n, 0);
+  assert.equal(repository.getImportRecord(db, recordA).status, 'importing');
 });
 
 test('任一选中分片只有表头时整批回滚并标明空分片文件', async (t) => {
@@ -677,11 +1004,15 @@ test('任一选中分片只有表头时整批回滚并标明空分片文件', as
   assert.equal(record.rolledBackCount, 1);
   assert.match(record.errorMessage, /empty\.xlsx.*没有数据行/);
   const error = db.prepare(`
-    SELECT source_file, error_code FROM vcc_fin_op_import_errors
-    WHERE import_record_id = ?
+    SELECT source_file_name, category, description FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'file_failure'
   `).get(record.recordId);
-  assert.equal(error.source_file, 'empty.xlsx');
-  assert.equal(error.error_code, 'empty-source-shard');
+  assert.equal(error.source_file_name, 'empty.xlsx');
+  assert.equal(error.category, 'file_failure');
+  assert.match(error.description, /没有数据行/);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors WHERE import_record_id = ?
+  `).get(record.recordId).n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
 });
 
@@ -735,10 +1066,10 @@ test('工作簿中的长文本键可导入，数值型键整批拒绝', async (t
   assert.equal(rejected.records[0].status, 'failed_validation');
   assert.equal(rejected.records[0].invalidKeyCount, 1);
   const invalid = db.prepare(`
-    SELECT validation_message FROM vcc_fin_op_import_rows
-    WHERE import_record_id = ? AND disposition = 'invalid_key'
+    SELECT description FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'invalid_key'
   `).get(rejected.records[0].recordId);
-  assert.match(invalid.validation_message, /必须在 Excel 中存为文本/);
+  assert.match(invalid.description, /必须在 Excel 中存为文本/);
 });
 
 test('不同原表类型使用独立幂等命名空间', async (t) => {
@@ -837,14 +1168,23 @@ test('异常退出恢复不会把暂存行提升为有效事实', (t) => {
     batchId: 'interrupted', targetMonth: '2026-06', sourceType: SOURCE_TYPES.RECHARGE,
     sourceFiles: ['x.xlsx']
   });
+  const sourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: 'x.xlsx',
+    sha256: 'a'.repeat(64),
+    sizeBytes: 1
+  });
   db.prepare(`
-    INSERT INTO vcc_fin_op_import_rows (
-      import_record_id, source_type, target_month, source_file, sheet_name, source_row,
+    INSERT INTO vcc_fin_op_import_staging_rows (
+      import_record_id, import_source_id, source_type, target_month, source_file, sheet_name, source_row,
       raw_json, disposition, validation_field, validation_message
     ) VALUES
-      (?, ?, '2026-06', 'x.xlsx', 'sheet1', 2, '[]', NULL, NULL, NULL),
-      (?, ?, '2026-06', 'x.xlsx', 'sheet1', 3, '[]', 'invalid_key', '订单号', '订单号不能为空')
-  `).run(recordId, SOURCE_TYPES.RECHARGE, recordId, SOURCE_TYPES.RECHARGE);
+      (?, ?, ?, '2026-06', 'x.xlsx', 'sheet1', 2, '[]', NULL, NULL, NULL),
+      (?, ?, ?, '2026-06', 'x.xlsx', 'sheet1', 3, '[]', 'invalid_key', '订单号', '订单号不能为空')
+  `).run(
+    recordId, sourceId, SOURCE_TYPES.RECHARGE,
+    recordId, sourceId, SOURCE_TYPES.RECHARGE
+  );
 
   assert.equal(repository.recoverInterruptedImports(db), 1);
   const record = repository.getImportRecord(db, recordId);
@@ -858,6 +1198,135 @@ test('异常退出恢复不会把暂存行提升为有效事实', (t) => {
       + record.conflict_count + record.format_error_count + record.rolled_back_count
   );
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+  assert.deepEqual(db.prepare(`
+    SELECT category FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? ORDER BY id
+  `).all(recordId).map((row) => row.category).sort(), ['file_failure', 'invalid_key']);
+});
+
+test('直接升级会接管 v3.1.9 importing 宽行并转换 compact anomaly 后清理', (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec('PRAGMA foreign_keys = ON');
+  const legacyMigrations = loadV319Module('src/backend/vcc-financial-op-db/migrations.js');
+  const legacyRepository = loadV319Module('src/backend/vcc-financial-op-db/repository.js');
+  legacyMigrations.ensureVccFinancialOpTablesSupport(db);
+  legacyRepository.createImportBatch(db, {
+    id: 'v319-interrupted', targetMonth: '2026-06', fileCount: 2
+  });
+  const recordId = legacyRepository.createImportRecord(db, {
+    batchId: 'v319-interrupted',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.RECHARGE,
+    sourceFiles: ['first.xlsx', 'second.xlsx']
+  });
+  const insertLegacy = db.prepare(legacyRepository.IMPORT_ROW_INSERT_SQL);
+  const addLegacyRow = (index, disposition, options = {}) => insertLegacy.run(
+    recordId,
+    SOURCE_TYPES.RECHARGE,
+    '2026-06',
+    options.rawKey || `legacy-${index}`,
+    options.key || `legacy-${index}`,
+    String(index).repeat(64).slice(0, 64),
+    1,
+    1,
+    'PPHK',
+    'USD',
+    '10.00',
+    'VCC',
+    'OPS',
+    '充值',
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    options.sourceFile || 'first.xlsx',
+    'sheet1',
+    index + 1,
+    JSON.stringify([`legacy-${index}`]),
+    disposition,
+    options.field || null,
+    options.message || null
+  );
+  addLegacyRow(1, null);
+  addLegacyRow(2, 'idempotent_skip');
+  addLegacyRow(3, 'invalid_key', {
+    rawKey: '', key: null, field: '订单号', message: '订单号不能为空'
+  });
+  addLegacyRow(4, 'format_error', {
+    field: '我方到账金额', message: '金额格式错误'
+  });
+  addLegacyRow(5, 'idempotent_conflict', {
+    field: 'idempotency_key', message: '同键异内容'
+  });
+  addLegacyRow(6, 'rolled_back', { message: '旧版已回滚' });
+  legacyRepository.addImportError(db, recordId, {
+    errorCode: 'legacy-file-failure',
+    message: 'second.xlsx 读取失败',
+    sourceFile: 'second.xlsx'
+  });
+
+  ensureVccFinancialOpTablesSupport(db);
+  assert.equal(repository.recoverInterruptedImports(db), 1);
+  const record = repository.getImportRecord(db, recordId);
+  assert.equal(record.status, 'failed_conflict');
+  assert.deepEqual({
+    raw: record.raw_count,
+    inserted: record.inserted_count,
+    skipped: record.skipped_count,
+    invalidKey: record.invalid_key_count,
+    conflict: record.conflict_count,
+    formatError: record.format_error_count,
+    rolledBack: record.rolled_back_count,
+    anomaly: record.anomaly_count,
+    archiveState: record.archive_state
+  }, {
+    raw: 6,
+    inserted: 0,
+    skipped: 1,
+    invalidKey: 1,
+    conflict: 1,
+    formatError: 1,
+    rolledBack: 2,
+    anomaly: 4,
+    archiveState: 'unavailable'
+  });
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_rows WHERE import_record_id = ?
+  `).get(recordId).n, 0);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows WHERE import_record_id = ?
+  `).get(recordId).n, 0);
+  assert.deepEqual(db.prepare(`
+    SELECT category, source_file_name, source_row, abnormal_fields_json, description
+    FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? ORDER BY id
+  `).all(recordId).map((row) => ({
+    ...row,
+    abnormal_fields_json: JSON.parse(row.abnormal_fields_json)
+  })), [
+    {
+      category: 'invalid_key', source_file_name: 'first.xlsx', source_row: 4,
+      abnormal_fields_json: ['订单号'], description: '订单号不能为空'
+    },
+    {
+      category: 'format_error', source_file_name: 'first.xlsx', source_row: 5,
+      abnormal_fields_json: ['我方到账金额'], description: '金额格式错误'
+    },
+    {
+      category: 'idempotent_conflict', source_file_name: 'first.xlsx', source_row: 6,
+      abnormal_fields_json: ['idempotency_key'], description: '同键异内容'
+    },
+    {
+      category: 'file_failure', source_file_name: 'second.xlsx', source_row: null,
+      abnormal_fields_json: [], description: 'second.xlsx 读取失败'
+    }
+  ]);
 });
 
 test('运行期非预期异常立即收口当前批次且不影响其他导入记录', async (t) => {
@@ -906,7 +1375,13 @@ test('运行期非预期异常立即收口当前批次且不影响其他导入�
   assert.equal(record.resolution_status, 'unresolved');
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors WHERE import_record_id = ?
-  `).get(record.id).n, 1);
+  `).get(record.id).n, 0);
+  const anomaly = db.prepare(`
+    SELECT category, description FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ?
+  `).get(record.id);
+  assert.equal(anomaly.category, 'file_failure');
+  assert.match(anomaly.description, /forced effective-row failure/);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
   assert.equal(repository.getImportRecord(db, unrelatedRecordId).status, 'importing');
   assert.equal(db.prepare(`

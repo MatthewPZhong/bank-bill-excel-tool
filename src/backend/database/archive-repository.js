@@ -149,6 +149,14 @@ function normalizeFlowAnchorIdentity(payload = {}) {
   };
 }
 
+function normalizeArtifactHoldIdentity(payload = {}) {
+  return {
+    ownerModule: normalizeModuleId(payload.ownerModule),
+    ownerType: requiredText(payload.ownerType, 'ownerType', 64).toLowerCase(),
+    ownerId: requiredText(payload.ownerId, 'ownerId', 256)
+  };
+}
+
 function parseObjectJson(value) {
   try {
     const parsed = JSON.parse(value);
@@ -343,6 +351,21 @@ function ensureArchiveMetadataSupport(db) {
       WHERE blob_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_archive_artifacts_retry
       ON archive_artifacts(batch_id, status, id);
+
+    CREATE TABLE IF NOT EXISTS archive_artifact_holds (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      artifact_id INTEGER NOT NULL,
+      owner_module TEXT NOT NULL,
+      owner_type TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (artifact_id) REFERENCES archive_artifacts(id) ON DELETE RESTRICT,
+      UNIQUE (artifact_id, owner_module, owner_type, owner_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_archive_artifact_holds_owner
+      ON archive_artifact_holds(owner_module, owner_type, owner_id);
     `);
 
     addColumnsIfMissing(db, 'archive_batches', [
@@ -559,7 +582,9 @@ function mapBatch(row) {
     readyArtifactCount: Number(row.ready_artifact_count) || 0,
     failedArtifactCount: Number(row.failed_artifact_count) || 0,
     pendingArtifactCount: Number(row.pending_artifact_count) || 0,
-    logicalBytes: Number(row.logical_bytes) || 0
+    logicalBytes: Number(row.logical_bytes) || 0,
+    businessHoldCount: Number(row.business_hold_count) || 0,
+    businessLocked: Number(row.business_hold_count) > 0
   };
 }
 
@@ -584,6 +609,7 @@ function mapArtifact(row) {
     sizeBytes: Number(row.blob_size_bytes) || 0,
     relativePath: row.blob_relative_path
   };
+  const businessHoldCount = Number(row.business_hold_count) || 0;
   return {
     id: Number(row.id),
     batchId: Number(row.batch_id),
@@ -610,7 +636,22 @@ function mapArtifact(row) {
     materializationFailedAt: row.materialization_failed_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    archivedAt: row.archived_at || null
+    archivedAt: row.archived_at || null,
+    businessHoldCount,
+    businessLocked: businessHoldCount > 0
+  };
+}
+
+function mapArtifactHold(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    artifactId: Number(row.artifact_id),
+    ownerModule: row.owner_module,
+    ownerType: row.owner_type,
+    ownerId: row.owner_id,
+    reason: row.reason,
+    createdAt: row.created_at
   };
 }
 
@@ -681,7 +722,11 @@ const BATCH_SELECT = `
     COALESCE(SUM(CASE WHEN a.status = 'ready' THEN 1 ELSE 0 END), 0) AS ready_artifact_count,
     COALESCE(SUM(CASE WHEN a.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_artifact_count,
     COALESCE(SUM(CASE WHEN a.status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_artifact_count,
-    COALESCE(SUM(CASE WHEN a.status = 'ready' THEN bl.size_bytes ELSE 0 END), 0) AS logical_bytes
+    COALESCE(SUM(CASE WHEN a.status = 'ready' THEN bl.size_bytes ELSE 0 END), 0) AS logical_bytes,
+    (SELECT COUNT(*)
+       FROM archive_artifacts held_artifact
+       JOIN archive_artifact_holds hold ON hold.artifact_id = held_artifact.id
+      WHERE held_artifact.batch_id = b.id) AS business_hold_count
   FROM archive_batches b
   LEFT JOIN archive_artifacts a ON a.batch_id = b.id
   LEFT JOIN archive_blobs bl ON bl.id = a.blob_id
@@ -693,7 +738,9 @@ const ARTIFACT_SELECT = `
     bl.id AS blob_row_id,
     bl.sha256 AS blob_sha256,
     bl.size_bytes AS blob_size_bytes,
-    bl.relative_path AS blob_relative_path
+    bl.relative_path AS blob_relative_path,
+    (SELECT COUNT(*) FROM archive_artifact_holds h WHERE h.artifact_id = a.id)
+      AS business_hold_count
   FROM archive_artifacts a
   LEFT JOIN archive_blobs bl ON bl.id = a.blob_id
 `;
@@ -2198,11 +2245,92 @@ class ArchiveRepository {
     return this.getBatch(id);
   }
 
+  addArtifactHold(artifactId, payload = {}) {
+    const id = Number(artifactId);
+    if (!Number.isSafeInteger(id) || id < 1) throw new TypeError('artifactId 必须是正安全整数');
+    const identity = normalizeArtifactHoldIdentity(payload);
+    const reason = requiredText(payload.reason, 'reason', 512);
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const artifact = this.db.prepare('SELECT id, status FROM archive_artifacts WHERE id = ?').get(id);
+      if (!artifact) throw new Error(`存档 artifact 不存在：${id}`);
+      if (artifact.status !== ARTIFACT_STATUSES.READY) {
+        throw new Error(`只有 ready artifact 可以建立业务引用锁：${id}`);
+      }
+      this.db.prepare(`
+        INSERT INTO archive_artifact_holds (
+          artifact_id, owner_module, owner_type, owner_id, reason, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(artifact_id, owner_module, owner_type, owner_id) DO UPDATE SET
+          reason = excluded.reason
+      `).run(
+        id,
+        identity.ownerModule,
+        identity.ownerType,
+        identity.ownerId,
+        reason,
+        timestamp
+      );
+      return mapArtifactHold(this.db.prepare(`
+        SELECT * FROM archive_artifact_holds
+        WHERE artifact_id = ? AND owner_module = ? AND owner_type = ? AND owner_id = ?
+      `).get(id, identity.ownerModule, identity.ownerType, identity.ownerId));
+    });
+  }
+
+  releaseArtifactHold(payload = {}) {
+    const id = Number(payload.artifactId);
+    if (!Number.isSafeInteger(id) || id < 1) throw new TypeError('artifactId 必须是正安全整数');
+    const identity = normalizeArtifactHoldIdentity(payload);
+    return this.db.prepare(`
+      DELETE FROM archive_artifact_holds
+      WHERE artifact_id = ? AND owner_module = ? AND owner_type = ? AND owner_id = ?
+    `).run(id, identity.ownerModule, identity.ownerType, identity.ownerId).changes === 1;
+  }
+
+  listArtifactHolds(artifactId) {
+    const id = Number(artifactId);
+    if (!Number.isSafeInteger(id) || id < 1) throw new TypeError('artifactId 必须是正安全整数');
+    return this.db.prepare(`
+      SELECT * FROM archive_artifact_holds WHERE artifact_id = ? ORDER BY id
+    `).all(id).map(mapArtifactHold);
+  }
+
+  listArtifactHoldsByOwner(ownerModule, ownerType) {
+    const identity = normalizeArtifactHoldIdentity({
+      ownerModule,
+      ownerType,
+      ownerId: 'inventory'
+    });
+    return this.db.prepare(`
+      SELECT * FROM archive_artifact_holds
+      WHERE owner_module = ? AND owner_type = ?
+      ORDER BY id
+    `).all(identity.ownerModule, identity.ownerType).map(mapArtifactHold);
+  }
+
+  listArtifactsBySourceOperation(moduleId, sourceOperation) {
+    const normalizedModuleId = normalizeModuleId(moduleId);
+    const operation = requiredText(sourceOperation, 'sourceOperation', 256);
+    return this.db.prepare(`
+      ${ARTIFACT_SELECT}
+      JOIN archive_batches b ON b.id = a.batch_id
+      WHERE b.module_id = ? AND a.source_operation = ?
+      ORDER BY a.id
+    `).all(normalizedModuleId, operation).map(mapArtifact);
+  }
+
   listExpiredBatches(asOfLocalDate) {
     const date = normalizeLocalDate(asOfLocalDate, 'asOfLocalDate');
     return this.db.prepare(`
       ${BATCH_SELECT}
       WHERE b.locked = 0
+        AND NOT EXISTS (
+          SELECT 1
+          FROM archive_artifacts held_artifact
+          JOIN archive_artifact_holds hold ON hold.artifact_id = held_artifact.id
+          WHERE held_artifact.batch_id = b.id
+        )
         AND b.retention_until IS NOT NULL
         AND b.retention_until < ?
       GROUP BY b.id
@@ -2486,6 +2614,21 @@ class ArchiveRepository {
       }
       if (batch.locked && !allowLocked) {
         return { status: 'locked', batch, releasedBlobs: [] };
+      }
+      const heldArtifacts = this.db.prepare(`
+        SELECT DISTINCT a.id
+        FROM archive_artifacts a
+        JOIN archive_artifact_holds h ON h.artifact_id = a.id
+        WHERE a.batch_id = ?
+        ORDER BY a.id
+      `).all(id).map((row) => Number(row.id));
+      if (heldArtifacts.length > 0) {
+        return {
+          status: 'business-held',
+          batch,
+          artifactIds: heldArtifacts,
+          releasedBlobs: []
+        };
       }
       if (batch.operationKey) {
         this.db.prepare(`

@@ -15,6 +15,12 @@ const {
   pendingCanonicalValues
 } = require('./row-mapper');
 const { inspectSourceFiles, streamDetailRows } = require('./workbook-reader');
+const {
+  attachSourceIdentity,
+  assertSourceFileMatchesSync,
+  hashSourceFiles,
+  sourceIdentityFromError
+} = require('./source-lineage');
 const repository = require('../vcc-financial-op-db/repository');
 
 const DETAIL_SOURCE_TYPES = new Set([
@@ -109,30 +115,47 @@ function recordResult(db, recordId) {
     conflictCount: Number(row.conflict_count) || 0,
     formatErrorCount: Number(row.format_error_count) || 0,
     rolledBackCount: Number(row.rolled_back_count) || 0,
+    anomalyCount: Number(row.anomaly_count) || 0,
+    archiveState: row.archive_state || repository.refreshImportRecordArchiveState(db, recordId),
+    sourceFiles: repository.listImportSources(db, recordId),
     errorMessage: row.error_message || ''
   };
 }
 
+function hasEffectiveRawJson(db) {
+  return db.prepare('PRAGMA table_info(vcc_fin_op_effective_rows)').all()
+    .some((row) => row.name === 'raw_json');
+}
+
 function updateConflictComparisons(db, recordId, sourceType) {
+  if (!hasEffectiveRawJson(db)) {
+    db.prepare(`
+      UPDATE vcc_fin_op_import_staging_rows
+      SET diff_fields_json = '["业务内容"]'
+      WHERE import_record_id = ? AND disposition = 'idempotent_conflict'
+        AND existing_effective_id IS NOT NULL
+    `).run(recordId);
+    return;
+  }
   const conflictRows = db.prepare(`
     SELECT i.id, i.idempotency_key, i.content_hash, i.raw_json, i.raw_contract_version, i.subject,
            i.existing_effective_id, e.raw_json AS existing_raw_json,
            e.raw_contract_version AS existing_raw_contract_version,
            e.subject AS existing_subject
-    FROM vcc_fin_op_import_rows i
+    FROM vcc_fin_op_import_staging_rows i
     LEFT JOIN vcc_fin_op_effective_rows e ON e.id = i.existing_effective_id
     WHERE i.import_record_id = ? AND i.disposition = 'idempotent_conflict'
     ORDER BY i.id
   `).all(recordId);
   const findPeer = db.prepare(`
     SELECT id, raw_json, raw_contract_version, subject
-    FROM vcc_fin_op_import_rows
+    FROM vcc_fin_op_import_staging_rows
     WHERE import_record_id = ? AND idempotency_key = ? AND content_hash <> ?
     ORDER BY id
     LIMIT 1
   `);
   const update = db.prepare(`
-    UPDATE vcc_fin_op_import_rows
+    UPDATE vcc_fin_op_import_staging_rows
     SET comparison_import_row_id = ?, diff_fields_json = ?
     WHERE id = ?
   `);
@@ -169,7 +192,7 @@ function updateConflictComparisons(db, recordId, sourceType) {
 function countRows(db, recordId, disposition) {
   const row = db.prepare(`
     SELECT COUNT(*) AS row_count
-    FROM vcc_fin_op_import_rows
+    FROM vcc_fin_op_import_staging_rows
     WHERE import_record_id = ? AND disposition = ?
   `).get(recordId, disposition);
   return Number(row.row_count) || 0;
@@ -190,7 +213,7 @@ function hasArchivedDataset(db, targetMonth, sourceType) {
 
 function finalizeFailedRows(db, recordId, sourceType, message) {
   db.prepare(`
-    UPDATE vcc_fin_op_import_rows
+    UPDATE vcc_fin_op_import_staging_rows
     SET disposition = 'rolled_back', validation_message = COALESCE(validation_message, ?)
     WHERE import_record_id = ? AND disposition IS NULL
   `).run(message, recordId);
@@ -203,6 +226,8 @@ function finalizeFailedRows(db, recordId, sourceType, message) {
   const skippedCount = countRows(db, recordId, 'idempotent_skip');
   const rawCount = invalidKeyCount + conflictCount + formatErrorCount + rolledBackCount + skippedCount;
   const status = conflictCount > 0 ? 'failed_conflict' : 'failed_validation';
+  repository.persistStagingAnomalies(db, recordId);
+  const anomalyCount = repository.addFileFailureAnomaly(db, recordId, { message });
   repository.finishImportRecord(db, recordId, {
     status,
     rawCount,
@@ -211,13 +236,15 @@ function finalizeFailedRows(db, recordId, sourceType, message) {
     formatErrorCount,
     skippedCount,
     rolledBackCount,
+    anomalyCount,
     errorMessage: message
   });
+  repository.clearImportStagingRows(db, recordId);
 }
 
 function markConflictRows(db, recordId, sourceType) {
   db.prepare(`
-    UPDATE vcc_fin_op_import_rows AS incoming
+    UPDATE vcc_fin_op_import_staging_rows AS incoming
     SET disposition = 'idempotent_conflict',
         existing_effective_id = (
           SELECT effective.id
@@ -241,13 +268,13 @@ function markConflictRows(db, recordId, sourceType) {
 
   const mixedKeys = db.prepare(`
     SELECT idempotency_key
-    FROM vcc_fin_op_import_rows
+    FROM vcc_fin_op_import_staging_rows
     WHERE import_record_id = ? AND disposition IS NULL
     GROUP BY idempotency_key
     HAVING COUNT(DISTINCT content_hash) > 1
   `).all(recordId).map((row) => row.idempotency_key);
   const markMixed = db.prepare(`
-    UPDATE vcc_fin_op_import_rows
+    UPDATE vcc_fin_op_import_staging_rows
     SET disposition = 'idempotent_conflict',
         validation_field = 'idempotency_key',
         validation_message = '同一导入批次内业务键相同但原始业务内容不一致'
@@ -259,7 +286,7 @@ function markConflictRows(db, recordId, sourceType) {
 
 function markExistingIdenticalRows(db, recordId) {
   db.prepare(`
-    UPDATE vcc_fin_op_import_rows AS incoming
+    UPDATE vcc_fin_op_import_staging_rows AS incoming
     SET disposition = 'idempotent_skip',
         existing_effective_id = (
           SELECT effective.id
@@ -293,41 +320,81 @@ function filteredRowMessage(sourceType, counts) {
 
 function promoteRows(db, recordId, targetMonth, sourceType) {
   db.prepare(`
-    UPDATE vcc_fin_op_import_rows
+    UPDATE vcc_fin_op_import_staging_rows
     SET disposition = 'accepted'
     WHERE id IN (
       SELECT MIN(id)
-      FROM vcc_fin_op_import_rows
+      FROM vcc_fin_op_import_staging_rows
       WHERE import_record_id = ? AND disposition IS NULL
       GROUP BY idempotency_key
     )
   `).run(recordId);
 
+  if (hasEffectiveRawJson(db)) {
+    db.prepare(`
+      INSERT INTO vcc_fin_op_effective_rows (
+        source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+        raw_contract_version,
+        target_month, subject, stat_currency, signed_amount,
+        business_department, counterparty_department, business_sub_type,
+        channel_name, mid, recon_type,
+        pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
+        source_file, sheet_name, source_row, raw_json, import_record_id, import_source_id
+      )
+      SELECT
+        source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+        raw_contract_version,
+        target_month, subject, stat_currency, signed_amount,
+        business_department, counterparty_department, business_sub_type,
+        channel_name, mid, recon_type,
+        pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
+        source_file, sheet_name, source_row, raw_json, import_record_id, import_source_id
+      FROM vcc_fin_op_import_staging_rows
+      WHERE import_record_id = ? AND disposition = 'accepted'
+      ORDER BY id
+    `).run(recordId);
+  } else {
+    db.prepare(`
+      INSERT INTO vcc_fin_op_effective_rows (
+        source_type, idempotency_key, content_hash, hash_version, raw_contract_version,
+        target_month, subject, stat_currency, signed_amount,
+        business_department, counterparty_department, business_sub_type,
+        channel_name, mid, recon_type,
+        pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
+        import_record_id, import_source_id, sheet_name, source_row
+      )
+      SELECT
+        source_type, idempotency_key, content_hash, hash_version, raw_contract_version,
+        target_month, subject, stat_currency, signed_amount,
+        business_department, counterparty_department, business_sub_type,
+        channel_name, mid, recon_type,
+        pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
+        import_record_id, import_source_id, sheet_name, source_row
+      FROM vcc_fin_op_import_staging_rows
+      WHERE import_record_id = ? AND disposition = 'accepted'
+      ORDER BY id
+    `).run(recordId);
+  }
+
   db.prepare(`
-    INSERT INTO vcc_fin_op_effective_rows (
-      source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
-      raw_contract_version,
-      target_month, subject, stat_currency, signed_amount,
-      business_department, counterparty_department, business_sub_type,
-      channel_name, mid, recon_type,
-      pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
-      source_file, sheet_name, source_row, raw_json, import_record_id
+    INSERT INTO vcc_fin_op_effective_raw_fallback (
+      effective_row_id, import_source_id, raw_contract_version, raw_json
     )
-    SELECT
-      source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
-      raw_contract_version,
-      target_month, subject, stat_currency, signed_amount,
-      business_department, counterparty_department, business_sub_type,
-      channel_name, mid, recon_type,
-      pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
-      source_file, sheet_name, source_row, raw_json, import_record_id
-    FROM vcc_fin_op_import_rows
-    WHERE import_record_id = ? AND disposition = 'accepted'
-    ORDER BY id
+    SELECT effective.id, staging.import_source_id,
+           staging.raw_contract_version, staging.raw_json
+    FROM vcc_fin_op_import_staging_rows staging
+    JOIN vcc_fin_op_effective_rows effective
+      ON effective.source_type = staging.source_type
+     AND effective.idempotency_key = staging.idempotency_key
+    WHERE staging.import_record_id = ? AND staging.disposition = 'accepted'
+    ON CONFLICT(effective_row_id) DO UPDATE SET
+      import_source_id = excluded.import_source_id,
+      raw_contract_version = excluded.raw_contract_version,
+      raw_json = excluded.raw_json
   `).run(recordId);
 
   db.prepare(`
-    UPDATE vcc_fin_op_import_rows AS incoming
+    UPDATE vcc_fin_op_import_staging_rows AS incoming
     SET disposition = 'idempotent_skip',
         existing_effective_id = (
           SELECT effective.id
@@ -355,6 +422,7 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
       : 'all_skipped')
     : (skippedCount > 0 || filteredCount > 0 ? 'success_with_skips' : 'success');
 
+  const anomalyCount = repository.persistStagingAnomalies(db, recordId);
   repository.finishImportRecord(db, recordId, {
     status,
     rawCount,
@@ -364,6 +432,7 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     conflictCount,
     formatErrorCount,
     rolledBackCount,
+    anomalyCount,
     errorMessage: filteredRowMessage(sourceType, {
       invalidKeyCount,
       conflictCount,
@@ -390,10 +459,7 @@ function promoteRows(db, recordId, targetMonth, sourceType) {
     `).run(targetMonth, sourceType, recordId);
   }
 
-  db.prepare(`
-    DELETE FROM vcc_fin_op_import_rows
-    WHERE import_record_id = ? AND disposition = 'accepted'
-  `).run(recordId);
+  repository.clearImportStagingRows(db, recordId);
 }
 
 function classifyAndPromote(db, recordId, targetMonth, sourceType) {
@@ -404,16 +470,12 @@ function classifyAndPromote(db, recordId, targetMonth, sourceType) {
 
     const candidateCount = Number(db.prepare(`
       SELECT COUNT(*) AS row_count
-      FROM vcc_fin_op_import_rows
+      FROM vcc_fin_op_import_staging_rows
       WHERE import_record_id = ? AND disposition IS NULL
     `).get(recordId).row_count) || 0;
     if (candidateCount > 0 && hasArchivedDataset(db, targetMonth, sourceType)) {
       const message = `${targetMonth} 已归档，禁止向 ${SOURCE_LABELS[sourceType]} 新增有效数据`;
       finalizeFailedRows(db, recordId, sourceType, message);
-      repository.addImportError(db, recordId, {
-        errorCode: 'dataset-archived',
-        message
-      });
       db.exec('COMMIT');
       return recordResult(db, recordId);
     }
@@ -443,17 +505,32 @@ async function importDetailGroup({
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('逻辑原表至少需要一个文件');
 
-  const recordId = preparedRecordId || repository.createImportRecord(db, {
-    batchId,
-    targetMonth: normalizedMonth,
-    sourceType,
-    sourceFiles: sourceFileNames(files)
-  });
-  const insert = db.prepare(repository.IMPORT_ROW_INSERT_SQL);
+  let importFiles = files;
+  let recordId = preparedRecordId;
+  if (!recordId) {
+    const hashedFiles = await hashSourceFiles(files);
+    recordId = repository.createImportRecord(db, {
+      batchId,
+      targetMonth: normalizedMonth,
+      sourceType,
+      sourceFiles: sourceFileNames(hashedFiles)
+    });
+    importFiles = hashedFiles.map((file, index) => ({
+      ...file,
+      sourceOrdinal: index + 1,
+      importSourceId: repository.createImportSource(db, recordId, {
+        sourceOrdinal: index + 1,
+        fileName: file.fileName,
+        sha256: file.sha256,
+        sizeBytes: file.sizeBytes
+      })
+    }));
+  }
+  const insert = db.prepare(repository.STAGING_ROW_INSERT_SQL);
   let rawCount = 0;
   db.exec('BEGIN IMMEDIATE');
   try {
-    for (const file of files) {
+    for (const file of importFiles) {
       throwIfCancelled(shouldCancel);
       let fileResult;
       try {
@@ -470,7 +547,11 @@ async function importDetailGroup({
               sourceRow: rowR,
               keyCellType
             });
-            insert.run(...mappedRowToInsertParams(recordId, mapped));
+            if (!Number.isSafeInteger(Number(file.importSourceId))) {
+              throw new Error(`VCC 导入来源未登记：${path.basename(file.filePath)}`);
+            }
+            const params = mappedRowToInsertParams(recordId, mapped);
+            insert.run(params[0], Number(file.importSourceId), ...params.slice(1));
             rawCount += 1;
             if (rawCount % STAGING_COMMIT_INTERVAL === 0) {
               commitStagingProgress(db, recordId, rawCount);
@@ -488,15 +569,16 @@ async function importDetailGroup({
           }
         });
       } catch (error) {
-        if (!error.sourceFile) error.sourceFile = path.basename(file.filePath);
-        throw error;
+        throw attachSourceIdentity(error, file);
       }
       if (fileResult.rowCount === 0) {
         const error = new Error(`${fileResult.sourceFile}：${SOURCE_LABELS[sourceType]}没有数据行`);
         error.code = 'empty-source-shard';
-        error.sourceFile = fileResult.sourceFile;
-        throw error;
+        throw attachSourceIdentity(error, file);
       }
+      // 首次 SHA 记录与实际解析必须属于同一份字节内容。解析完成后、任何
+      // effective 提升前再次全量核对；不一致只会留下文件级失败事件。
+      assertSourceFileMatchesSync(file);
     }
     throwIfCancelled(shouldCancel);
     if (rawCount === 0) throw new Error(`${SOURCE_LABELS[sourceType]}没有有效数据行`);
@@ -505,43 +587,46 @@ async function importDetailGroup({
     const wasCancelled = error && error.code === IMPORT_CANCELLED_CODE;
     try {
       db.prepare(`
-        UPDATE vcc_fin_op_import_rows
+        UPDATE vcc_fin_op_import_staging_rows
         SET disposition = 'rolled_back',
             validation_message = COALESCE(validation_message, '原表读取未完成，整表未导入')
         WHERE import_record_id = ? AND disposition IS NULL
       `).run(recordId);
-      repository.addImportError(db, recordId, {
-        errorCode: error.code || 'file-validation-error',
-        message: error.message,
-        sourceFile: error.sourceFile
-      });
       const invalidKeyCount = countRows(db, recordId, 'invalid_key');
       const formatErrorCount = countRows(db, recordId, 'format_error');
       const rolledBackCount = countRows(db, recordId, 'rolled_back');
+      repository.persistStagingAnomalies(db, recordId);
+      const anomalyCount = repository.addFileFailureAnomaly(db, recordId, {
+        ...sourceIdentityFromError(error),
+        message: error.message
+      });
       repository.finishImportRecord(db, recordId, {
         status: 'failed_validation',
         rawCount,
         invalidKeyCount,
         formatErrorCount,
         rolledBackCount,
+        anomalyCount,
         errorMessage: error.message
       });
+      repository.clearImportStagingRows(db, recordId);
       db.exec('COMMIT');
     } catch (persistError) {
       safeRollback(db);
       db.exec('BEGIN IMMEDIATE');
       try {
-        repository.addImportError(db, recordId, {
-          errorCode: error.code || 'file-validation-error',
-          message: `${error.message}；逐行审计保存失败：${persistError.message}`,
-          sourceFile: error.sourceFile
+        const anomalyCount = repository.addFileFailureAnomaly(db, recordId, {
+          ...sourceIdentityFromError(error),
+          message: `${error.message}；异常分类保存失败：${persistError.message}`
         });
         repository.finishImportRecord(db, recordId, {
           status: 'failed_validation',
           rawCount,
           rolledBackCount: rawCount,
+          anomalyCount,
           errorMessage: error.message
         });
+        repository.clearImportStagingRows(db, recordId);
         db.exec('COMMIT');
       } catch (fallbackError) {
         safeRollback(db);
@@ -567,8 +652,10 @@ async function importDetailBatch({
   if (!normalizedMonth) throw new Error(`导入账期格式无效：${targetMonth}`);
   if (!Array.isArray(files) || files.length === 0) throw new Error('请选择至少一个原表文件');
 
+  throwIfCancelled(shouldCancel);
+  const hashedFiles = await hashSourceFiles(files);
   const grouped = new Map();
-  for (const file of files) {
+  for (const file of hashedFiles) {
     if (!DETAIL_SOURCE_TYPES.has(file.sourceType)) {
       throw new Error(`明细导入批次包含非明细原表：${file.sourceType || 'unknown'}`);
     }
@@ -579,7 +666,7 @@ async function importDetailBatch({
   repository.createImportBatch(db, {
     id: batchId,
     targetMonth: normalizedMonth,
-    fileCount: files.length
+    fileCount: hashedFiles.length
   });
 
   const records = [];
@@ -587,12 +674,23 @@ async function importDetailBatch({
   let outerError = null;
   try {
     for (const [sourceType, sourceFiles] of grouped) {
-      recordIds.set(sourceType, repository.createImportRecord(db, {
+      const recordId = repository.createImportRecord(db, {
         batchId,
         targetMonth: normalizedMonth,
         sourceType,
         sourceFiles: sourceFileNames(sourceFiles)
-      }));
+      });
+      recordIds.set(sourceType, recordId);
+      grouped.set(sourceType, sourceFiles.map((file, index) => ({
+        ...file,
+        sourceOrdinal: index + 1,
+        importSourceId: repository.createImportSource(db, recordId, {
+          sourceOrdinal: index + 1,
+          fileName: file.fileName,
+          sha256: file.sha256,
+          sizeBytes: file.sizeBytes
+        })
+      })));
     }
     for (const [sourceType, sourceFiles] of grouped) {
       throwIfCancelled(shouldCancel);
@@ -616,7 +714,8 @@ async function importDetailBatch({
     try {
       repository.failImportBatch(db, batchId, {
         errorCode: outerError.code || 'runtime-import-error',
-        message: outerError.message || '导入运行异常，导入事务未完成'
+        message: outerError.message || '导入运行异常，导入事务未完成',
+        ...sourceIdentityFromError(outerError)
       });
     } catch (finalizeError) {
       outerError.message = `${outerError.message}；失败记录即时收口失败：${finalizeError.message}`;
