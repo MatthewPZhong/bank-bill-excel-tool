@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-// v3.1.9 的 release hard-node 会扫描多个串行 PR；默认 1MiB buffer 会让
+// release hard-node 会扫描自上一正式版本以来的多个串行 PR；默认 1MiB buffer 会让
 // 合法的大 diff 以 ENOBUFS 失败，必须为该只读输出显式留足空间。
 const MAX_GIT_OUTPUT_BYTES = 64 * 1024 * 1024;
 

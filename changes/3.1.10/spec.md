@@ -1,6 +1,6 @@
 # v3.1.10 Spec — VCC 财务 OP 存储、原表血缘与异常审计瘦身
 
-> status: apply
+> status: implemented / release candidate / 真实库、Windows packaged 与资金人工门禁待关闭
 > owner: VCC 财务 OP / 存档中心
 > created: 2026-08-16
 > updated: 2026-08-17
@@ -215,3 +215,10 @@
 真实库门禁：迁移前后逐表 `dbstat`；VCC 核心目标约 4.3–4.6GB且下降至少75%；整库和外部存档分别报告。
 
 ⚠️ 资金红线人工复核：按主体×`AUD/CAD/CNY/EUR/GBP/HKD/JPY/SGD/USD` 抽查有效行、金额、幂等冲突、部分导出缺口、删除审计和 archive SHA 血缘。该人工项未通过前不得正式发布。
+
+## 9. 发布候选状态（2026-08-17）
+
+- 功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；最新 Windows PR workflow、完整自动回归和最终 reviewer 均已通过。
+- `package.json`、三份用户发布文档、release baseline 与管理证据进入 v3.1.10 发布候选收口；候选提交不得写成已正式发布，也不得提前创建 tag。
+- 以下三项仍为正式发布阻断：真实约 27.42 GB 副本迁移后 VCC 核心约 4.3–4.6 GB且至少下降75%；Windows installer/portable 的 SQLite切换、WAL和文件占用；主体×九币种资金事实与 artifact SHA 血缘人工签字。
+- 三项均通过，或发布负责人按 Windows Release Runbook 在稳定 GitHub 评论中明确记录批准人、具体豁免范围、理由与发布后补做项后，才可创建 annotated `v3.1.10` tag。豁免只允许技术资产生成，不得把被豁免项写成已验证。

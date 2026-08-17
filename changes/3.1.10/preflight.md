@@ -5,7 +5,7 @@
 - Goal: 用存档 artifact 作为原始输入长期真相，瘦身 VCC 有效事实/导入审计，并提供显式 copy-on-write 物理迁移。
 - Context: 基线 `646bcf4`；当前 VCC 27.42GB 核心表大量重复 `raw_json` 与永久逐行审计；存档中心已有 SHA Blob、重试、TaskLifecycle 和 root maintenance。
 - Constraints: 不触碰生产库；不改 CNY 九币种、金额公式、幂等键、业务状态、归档/解归档/调整；不伪造历史血缘；迁移失败保持旧库。
-- Done when: Spec 数据/状态合同落地；新导入不永久保存正常审计原始行；artifact/fallback/hold闭环；完整与部分原表导出闭环；迁移守恒与故障矩阵通过；真实库门禁和人工资金复核明确开放。
+- Done when: Spec 数据/状态合同落地；新导入不永久保存正常审计原始行；artifact/fallback/hold闭环；完整与部分原表导出闭环；迁移守恒与故障矩阵通过；发布候选自动门禁闭合；真实库、Windows packaged 和人工资金复核通过或按 runbook 留下明确豁免证据后才正式发布。
 
 ## 已确认事实
 
@@ -41,3 +41,9 @@
 | 4 | 导出+UI | 用户可见血缘与异常合同 | 六列Excel/部分说明/完整性失败 | 不开放按钮 | 保留旧接口直至迁移完成 |
 | 5 | copy-on-write迁移 | 现有库物理缩小与守恒 | 故障注入+双启动+dbstat | 旧库继续唯一有效 | 删除临时目标，不切换 |
 | 6 | 全回归/人工门禁 | 资金与发布风险 | release-check+真实库/Windows/人工清单 | 阻断发布 | 不放宽阈值/守恒 |
+
+## 发布候选收口（2026-08-17）
+
+- 功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 全绿，最终 reviewer 对 `01d24e5ca9` 未发现新问题。
+- 版本化收口只修改版本号、三份发布文档、release baseline、变量统计与3.1.10管理证据；不改 VCC 生产算法、schema、迁移状态机或金额币种合同。
+- 真实约27.42GB副本迁移、Windows installer/portable SQLite/WAL与主体×九币种资金人工仍是发布阻断；候选 PR 合并不等于三项通过，也不等于正式 Release。

@@ -28,4 +28,4 @@
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（PR #147 第三轮 2×P1+1×P2 已红绿闭合；核心27/27、相邻118/118、release-check 5198/5198 + 48/48/2385 全绿；待远端 Windows CI 与 review 复验；真实库、packaged Windows 与资金人工仍为发布阻断项）
+- 状态：in_progress（功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 与最终 reviewer 均通过；发布候选版本号、三份用户文档、release baseline、5201/5201 + 48/48 全量回归及两组 Electron 6/6 布局门禁已闭合，尚待干净候选 Windows 构建与远端候选 PR。真实约27.42GB副本至少下降75%、packaged Windows SQLite/WAL与主体×九币种资金人工仍为发布阻断项；关闭或按 runbook 留痕豁免前不创建 tag/Release）

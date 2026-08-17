@@ -7,23 +7,23 @@ const { execFileSync } = require('node:child_process');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '../../..');
-const V318_COMMIT = '688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa';
+const V319_COMMIT = '3edf0527d6537d29cb19b48bda2a3f91f0ce6e32';
 
-test('release check-vars 固定 peeled v3.1.8 基线且不扩大普通开发扫描', (t) => {
+test('release check-vars 固定 peeled v3.1.9 基线且不扩大普通开发扫描', (t) => {
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(packageJson.scripts['check:vars'], 'node scripts/check-vars.js');
   assert.equal(
     packageJson.scripts['check:vars:release'],
-    'node scripts/check-vars.js --since "v3.1.8^{commit}" --include-minor'
+    'node scripts/check-vars.js --since "v3.1.9^{commit}" --include-minor'
   );
 
   try {
-    const peeled = execFileSync('git', ['rev-parse', 'v3.1.8^{commit}'], {
+    const peeled = execFileSync('git', ['rev-parse', 'v3.1.9^{commit}'], {
       cwd: ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe']
     }).trim();
-    assert.equal(peeled, V318_COMMIT);
+    assert.equal(peeled, V319_COMMIT);
   } catch (error) {
     if (error.status === 128) {
       t.diagnostic('当前 checkout 未拉取 tag；静态 release baseline 契约仍已验证');
@@ -40,7 +40,7 @@ test('check-vars 为跨 PR baseline diff 配置显式大输出缓冲并禁用 sh
   assert.doesNotMatch(source, /execSync\(`git diff/);
 });
 
-test('v3.1.9 A-share 与任务生命周期候选已进入 important-vars 清单', () => {
+test('v3.1.10 storage contract、迁移与 Archive 血缘已进入 important-vars 清单', () => {
   const importantVariables = fs.readFileSync(
     path.join(ROOT, 'rules/important-variables.md'),
     'utf8'
@@ -51,9 +51,15 @@ test('v3.1.9 A-share 与任务生命周期候选已进入 important-vars 清单'
     'TaskPolicyRegistry',
     'BusinessFlowResolver',
     'ArchiveRepository',
-    'ArchiveService'
+    'ArchiveService',
+    'VCC_STORAGE_CONTRACT_VERSION',
+    'registerVccStorageWriteCapability',
+    'buildVccStorageCandidate',
+    'recoverVccStorageMigration',
+    'buildVccImportArchiveHandoffFiles',
+    'archive_artifact_holds'
   ]) {
     assert.match(importantVariables, new RegExp('`' + name + '`'));
   }
-  assert.match(importantVariables, /当前清单版本 \| v34（app v3\.1\.9/);
+  assert.match(importantVariables, /当前清单版本 \| v35（app v3\.1\.10/);
 });

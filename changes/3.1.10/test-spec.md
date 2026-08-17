@@ -1,6 +1,6 @@
 # Test Spec — v3.1.10 VCC storage compaction
 
-> status: apply
+> status: implemented / release candidate gates in progress
 > created: 2026-08-16
 
 ## 1. 测试目标
@@ -99,4 +99,9 @@
 - 第二轮 review 修后最终 `npm run release-check`：lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）PASS；check-vars 0 命中。
 - PR #147 第三轮 review 4 条代表先红 23/27；补齐存档根 worker 透传、historical canonical 物理复验、target 残留候选接管与 switched 复验回滚后，核心 27/27、Archive/迁移相邻 118/118 PASS。
 - 第三轮 review 修后唯一完整 `npm run release-check`：lint/smoke PASS；unit 5198/5198（336 files）；integration 48/48 scripts、2385/2385 assertions（396171ms）PASS；runner 仅全绿后自动同步 policy。
-- 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。
+- PR #147 最新头继续关闭 canonical 同大小替换 TOCTOU 与 `switching` 不可读候选恢复；最终本地 release-check lint/smoke PASS、unit 5200/5200（336 files）、integration 48/48 scripts、2385/2385 assertions（388948ms）PASS。
+- PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 的 release-check、SQLite teardown、主面板、installer/portable、`check:dist` 与 staging 全部 PASS；最终 Codex reviewer 对 head `01d24e5ca9` 未发现新问题。
+- v3.1.10 发布候选本地聚焦 release/update/Windows contract 20/20 PASS；唯一完整 `release-check` lint/smoke PASS、unit 5201/5201（336 files）、integration 48/48 scripts、2385/2385 assertions（388698ms）PASS；runner 仅全绿后刷新 policy。
+- Electron 发布布局门禁：主面板 1240×860、1080×760 × 100/125/150% 为 6/6 PASS；设置/存档中心相同 6 组合为 6/6 PASS。主面板首次受限环境 `electron exit null`，沙箱外唯一重试通过，未发现页面断言失败。
+- `check:vars:release` 以 `v3.1.9^{commit}` 为冻结基线，命中 2 Critical / 3 Important / 4 Runtime / 3 Risk；逐项已纳入 v35 清单并完成关联 review，同次 smoke PASS。候选 working diff 不改 `src`，普通 check-vars 为 0 命中。
+- 发布候选仍未关闭：真实约 27.42 GB 库迁移前后逐表 `dbstat` 且核心至少下降75%；Windows installer/portable 实际文件切换与 WAL/占用；主体×九币种及 artifact SHA 人工复核。自动化和构建成功不替代这三项。
