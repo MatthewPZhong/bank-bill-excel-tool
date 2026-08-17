@@ -83,6 +83,10 @@
 | PR #147 最新头 review P1 最终门禁 | Archive/迁移相邻 119/119；release-check lint/smoke PASS、unit 5199/5199（336 files）、integration 48/48 scripts、2385/2385 assertions（306394ms）；check-vars 0 命中 | 二次实体验证与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
 | PR #147 最新头复审 P2 | `switching` 活动候选改写为非 SQLite 后恢复测试先红（`file is not a database`），接入 rolling-back executor 后代表用例转绿 | journal 尚未 switched 时不可读候选不再压住完整 v1 backup 形成启动循环 |
 | PR #147 最新头复审 P2 最终门禁 | Archive/迁移相邻 120/120；release-check lint/smoke PASS、unit 5200/5200（336 files）、integration 48/48 scripts、2385/2385 assertions（388948ms）；check-vars 0 命中 | switching 不可读恢复修复与文档同步后的全仓终态；runner 仅在全绿后刷新 policy |
+| PR #147 合并与远端终态 | `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 全绿；最终 Codex reviewer 对 `01d24e5ca9` 未发现新问题 | 功能实现、Windows 静态构建与独立代码复核闭合；不替代三项人工/真实环境发布门禁 |
+| v3.1.10 发布候选决策 | 版本化与用户文档可以作为独立候选 PR 合入；真实库压缩率与资金签字必须 PASS，只有 Windows packaged gate 可按 Windows Runbook 以稳定 GitHub 评论记录批准人、范围、理由和 follow-up 后豁免 | 保持 Spec“未通过不得正式发布”；Windows Runbook 不被错误扩大到数据/资金红线，候选文档不误报正式发布或人工通过 |
+| v3.1.10 发布候选本地门禁 | 聚焦 release/update/Windows contract 20/20；唯一 `release-check` lint/smoke PASS、unit 5201/5201（336 files）、integration 48/48 scripts、2385/2385 assertions（388698ms）；主面板与设置布局各 6/6 PASS | 版本化、文档、更新合同、全仓与 2 viewport × 3 scale Electron 布局闭合；主面板首次受限环境 `electron exit null`，沙箱外唯一重试通过，分类 environment |
+| v3.1.10 release check-vars | `v3.1.9^{commit}` 基线命中 Critical `VCC_STORAGE_CONTRACT_VERSION/freezeWorkerBatchContext`、Important `ipcRenderer/serializeError/setupIdleCleanupTimer`、Runtime `app/dialog/setStatus/state`、Risk `ArchiveRepository/archive_artifact_holds/buildVccImportArchiveHandoffFiles`；候选 working diff 的 `src` 命中为 0 | v35 清单已登记 contract-v2、exact7、Archive hold/输入 handoff 与 COW；未改变金额/币种/任务身份字段，Critical/Risk 所需 smoke 已由同次 release-check 通过 |
 
 ## Remaining Unknowns
 

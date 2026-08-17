@@ -24,43 +24,69 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.9 版本号与三份用户文档保持正式发布状态和人工验证边界', () => {
+test('v3.1.10 版本号与三份用户文档保持发布候选状态和三项发布阻断', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
 
-  assert.equal(packageJson.version, '3.1.9');
-  assert.equal(packageLock.version, '3.1.9');
-  assert.equal(packageLock.packages[''].version, '3.1.9');
-  assert.match(changelog, /^## 3\.1\.9 - 2026-08-13$/m);
-  assert.match(history, /^## v3\.1\.9（2026-08-13）$/m);
-  assert.match(guide, /^版本：`v3\.1\.9`$/m);
+  assert.equal(packageJson.version, '3.1.10');
+  assert.equal(packageLock.version, '3.1.10');
+  assert.equal(packageLock.packages[''].version, '3.1.10');
+  assert.match(changelog, /^## 3\.1\.10 - 2026-08-17$/m);
+  assert.match(history, /^## v3\.1\.10（2026-08-17，发布候选）$/m);
+  assert.match(guide, /^版本：`v3\.1\.10`$/m);
 
   for (const document of [changelog, history, guide]) {
-    assert.match(document, /2026-08-13/);
-    assert.match(document, /正式发布/);
-    assert.match(document, /annotated tag/);
-    assert.match(document, /latest stable Release/);
-    assert.match(document, /四项公开资产/);
+    assert.match(document, /发布候选/);
+    assert.match(document, /PR #147/);
+    assert.match(document, /27\.42\s*GB/);
+    assert.match(document, /4\.3[–-]4\.6\s*GB/);
+    assert.match(document, /至少\s*75%|下降\s*75%/);
     assert.match(document, /Windows installer\/portable/);
-    assert.match(document, /Excel\/WPS/);
-    assert.match(document, /约 16 GB/);
-    assert.match(document, /约 700 万行/);
-    assert.match(document, /目标生产库/);
-    assert.match(document, /资金人工|资金复核/);
-    assert.match(document, /技术 Release 不替代|技术发布不替代/);
+    assert.match(document, /WAL|SQLite/);
+    assert.match(document, /主体×九币种|主体.*九币种/);
+    assert.match(document, /不得正式发布|尚未正式发布|不创建.*tag|未创建.*tag/);
     const currentSectionEnd = document.indexOf(
       document === changelog
-        ? '## 3.1.8'
+        ? '## 3.1.9'
         : document === history
-          ? '## v3.1.8'
+          ? '## v3.1.9'
           : '\n---'
     );
     const currentSection = document.slice(0, currentSectionEnd);
-    assert.doesNotMatch(currentSection, /本地发布候选|尚未合并或正式发布|当前仍是本地候选/);
+    assert.doesNotMatch(currentSection, /已于 2026-08-17 正式发布|latest stable Release|四项公开资产.*完成回读/);
   }
+});
+
+test('v3.1.9 三份用户文档保持正式发布历史', () => {
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+
+  assert.match(changelog, /^## 3\.1\.9 - 2026-08-13$/m);
+  assert.match(history, /^## v3\.1\.9（2026-08-13）$/m);
+  assert.match(guide, /v3\.1\.9 已于 2026-08-13 正式发布/);
+  for (const document of [changelog, history, guide]) {
+    assert.match(document, /annotated tag/);
+    assert.match(document, /latest stable Release/);
+    assert.match(document, /四项公开资产/);
+  }
+});
+
+test('v3.1.10 只允许豁免 Windows packaged 门禁，真实库与资金签字不可豁免', () => {
+  const spec = read('changes/3.1.10/spec.md');
+  const preflight = read('changes/3.1.10/preflight.md');
+  const tasks = read('changes/3.1.10/tasks.md');
+
+  for (const document of [spec, preflight, tasks]) {
+    assert.match(document, /真实库|27\.42GB|27\.42 GB/);
+    assert.match(document, /资金|九币种/);
+    assert.match(document, /不可豁免|不得使用 Windows Release Runbook 豁免|必须通过/);
+    assert.match(document, /Windows.*Runbook.*豁免|Windows packaged.*Runbook|packaged Windows.*Runbook/);
+  }
+  assert.doesNotMatch(spec, /三项均通过，或.*Windows Release Runbook/);
 });
 
 test('v3.1.8 三份用户文档保持正式发布历史', () => {

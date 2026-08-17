@@ -9,7 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v34（app v3.1.9 — 全局任务生命周期、稳定关联任务身份、exact-seven worker batch context、存档九表审计血缘与真实归档/恢复/迁移） |
+| 当前清单版本 | v35（app v3.1.10 — VCC storage contract v2、精简事实/异常审计、Archive source/hold 血缘与 copy-on-write 原子迁移） |
+| v35 本轮 review | 2026-08-17（以 annotated `v3.1.9^{commit}`=`3edf0527d6537d29cb19b48bda2a3f91f0ce6e32` 为 release baseline，覆盖 28 个生产文件；升格 VCC storage capability/guard、VCC COW migration/recovery、import source/Archive hold/durable handoff，并把 Archive 元数据合同从九表扩为十表） |
+| v35 基线数据 | `docs/analysis/var-reference-stats.md`（328 个 tracked JS / 4299 个顶层名称；A-share 623 / A-pair 912 / A-local 2598 / B 1535；报告版本 3.1.10） |
+| v34 历史版本 | app v3.1.9 — 全局任务生命周期、稳定关联任务身份、exact-seven worker batch context、存档九表审计血缘与真实归档/恢复/迁移。 |
 | v34 本轮 review | 2026-08-11（以 annotated `v3.1.8^{commit}`=`688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa` 为 release baseline，覆盖 PR1—PR6 的 75 个生产文件；升格 `freezeWorkerBatchContext`、`TaskLifecycle`、`TaskPolicyRegistry`、`BusinessFlowResolver`，并校正 Archive operation/repository/service 生命周期条目） |
 | v34 基线数据 | `docs/analysis/var-reference-stats.md`（320 个 tracked JS / 4102 个顶层名称；`freezeWorkerBatchContext` 跨 21 个文件、53 次总引用、5 处声明；报告版本 3.1.9） |
 | v33 历史版本 | app v3.1.3 PR-E — 平盘银行/账户流式确认写入、专用 COMMIT 后恢复、百万级管理聚合、磁盘门禁及真实进度/取消。 |
@@ -70,6 +73,16 @@
   - 不得放宽正整数/非空/exact-set/frozen 约束，也不得把原始行、文件内容、可变 session 或内部路径塞入 context
   - 恢复必须沿用已持久化的同一 seven-field context；缺失/陈旧/不一致时阻断业务恢复，不能另分新批次掩盖
   - 必跑：worker-batch-context、TaskLifecycle、Acquiring resume、Position import、VCC worker、Pending 与工具箱 worker/dispatch 聚焦测试 + `npm run smoke`
+
+### `VCC_STORAGE_CONTRACT_VERSION` / `registerVccStorageWriteCapability` / `installVccStorageWriteGuards` / `setVccStorageContractVersion`（v3.1.10 新增 Critical）
+- 定义：`src/backend/vcc-financial-op-db/storage-contract.js`；当前持久合同版本为 `2`，连接能力函数为 `vcc_storage_write_capability_v2()`，guard trigger 前缀为 `vcc_storage_contract_v2_guard_`
+- 关联功能：v3.1.10 精简 VCC 表结构、旧版降级写阻断、generic/dedicated worker 首写能力、候选库 marker 与 23 张 `vcc_fin_op_*` 表 I/U/D 保护
+- 变更 review 要点：
+  - marker 与 exact trigger 安装必须在同一 SAVEPOINT 原子边界；任何表缺 trigger、错表或非 canonical SQL 都必须失败关闭
+  - 每个新版写连接必须在 VCC DML 前显式注册 connection-local capability；不得默认放行、不得依赖进程全局布尔值
+  - mutation guard 只能按 exact trigger name/target/SQL 放行该前缀，不能宽泛忽略未知 trigger
+  - 合同版本升格必须另立迁移与兼容 Spec；已发布 v3.1.9 必须继续无法写 contract-v2 库
+  - 必跑：storage-contract、migrations、generic/dedicated mutation、v3.1.9 downgrade probe、COW candidate 与 `npm run smoke`
 
 ### `FIXED_FIELD_VALUE_PREFIX`
 - 定义：`src/backend/database/utils.js`
@@ -759,20 +772,41 @@
   - 不允许 DROP / 破坏性 ALTER
   - **N4 例外（v2.1.8 破坏性 raw_json rewrite）**：`ensureBillRawJsonV2Slim` 是已立项的破坏性 migration，强制配套 DB 备份 + 事务回滚 + 标志位
 
-### `ArchiveRepository` / `ArchiveService` / `archive_*` 九表（v3.0.22 新增、v3.1.9 扩展 Risk-sensitive ⚠️ 审计血缘）
+### VCC storage COW migration / recovery（v3.1.10 新增 Risk-sensitive ⚠️🔴 数据迁移红线）
+- 定义：`createVccStorageMigrationCoordinator`、`buildVccStorageCandidate`、`recoverVccStorageMigration` 及其 worker/ready-ack 协议，位于 `src/main-process/vcc-financial-op-storage-migration*.js` 与 `vcc-financial-op-storage-rebuild.js`
+- 关联功能：显式维护模式、WAL checkpoint、空间预检、VCC v1→contract-v2 copy-on-write 重建、六类计数/哈希/九币种/Archive 守恒、原子切换、首次只读校验与崩溃回滚
+- 变更 review 要点：
+  - worker 完整复验后仍须持有源 `BEGIN IMMEDIATE`；coordinator 关闭全部主库连接并持 mutation lease 后才 ack 释放，禁止候选复验后出现成功写被覆盖
+  - `prepared/copying/verifying/switching/switched/reopen-verified/rolling-back/rolled-back/done` journal 只能按唯一物理真相推进；候选不可读、rename/fsync失败和二次崩溃必须恢复完整 v1 或明确停止
+  - 迁移不得改变有效主键/内容哈希、各月来源行数、结果、调整、归档或九币种余额；压缩率低于75%不得切换
+  - updater/exit/migration 使用 owner/token lease，只能释放自己的 token；旧库删除必须由用户选择且在首次只读校验后执行
+  - 必跑：真实 SQLite COW 故障矩阵、worker ready/ack、recovery 双启动、business-operation-registry、app update/exit、Archive lineage/hold、资金回归与 `npm run smoke`
+
+### `ArchiveRepository` / `ArchiveService` / `archive_*` 十表（v3.0.22 新增、v3.1.9/v3.1.10 扩展 Risk-sensitive ⚠️ 审计血缘）
 - 定义：`src/backend/database/archive-repository.js`、`src/main-process/archive-center/archive-service.js`
 - `ArchiveService` — 唯一业务编排入口，串联 repository、存储物化、任务状态、repair/retention、只读副本和存储根迁移
-- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_daily_sequences` / `archive_operation_issuances` / `archive_artifacts` / `archive_blobs` / `archive_cleanup_jobs` / `archive_flow_anchors` / `archive_flow_bind_intents` 保存轻量索引；Documents 下年/月/日/批次目录与 SHA-256 内容寻址 Blob 保存 13 个主模块及工具箱真实输入/输出
+- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_daily_sequences` / `archive_operation_issuances` / `archive_artifacts` / `archive_blobs` / `archive_cleanup_jobs` / `archive_flow_anchors` / `archive_flow_bind_intents` / `archive_artifact_holds` 保存轻量索引；Documents 下年/月/日/批次目录与 SHA-256 内容寻址 Blob 保存 13 个主模块及工具箱真实输入/输出
 - 变更 review 要点：
-  - 九表 schema 必须幂等；主库只存元数据/摘要/任务身份，禁止把银行明细、Excel 字节或个人信息写入 SQLite
+  - 十表 schema 必须幂等；主库只存元数据/摘要/任务身份，禁止把银行明细、Excel 字节或个人信息写入 SQLite
   - 批次号由全局日游标原子递增；删除批次不得回退或复用已展示号码，operation issuance 永久删除后仍须阻止旧 operation key 复活
   - taskStatus 与 archiveStatus 必须分离；parent/anchor/bind-intent 只能由稳定业务身份推进，terminal/outbox/cleanup 重放必须幂等
   - Blob 发布必须先在同文件系统 staging 流式写入并计算 SHA-256，再原子 rename；不得整文件读入内存或仅按文件名/大小去重
   - 删除顺序必须先移除逻辑引用，最后引用才允许删物理 Blob；部分失败要可修复，不能误删仍被其它批次引用的文件
+  - `archive_artifact_holds` 是业务引用锁，不等于用户 lock；manual delete、unlock 与 retention 都不得绕过，只有对应有效数据删除或严格 lineage reconcile 才能释放
   - 打开只能暴露只读副本，另存为覆盖失败必须恢复原目标；renderer 不得取得内部相对路径
   - 归档失败不能回滚或改写业务成功状态；日志不得输出源文件绝对路径或表格内容
   - 必跑：archive repository/service 真实 SQLite + 临时文件测试、全局批次并发、TaskLifecycle/flow anchor、共享引用删除、启动修复、失败重试、storage migration/repair/retention、`npm run smoke`
   - ⚠️ 人工复核：真实输入/结果与 Blob 的 SHA-256、模块归属和首次结果集合；自动测试不能替代
+
+### `buildVccImportArchiveHandoffFiles` / `reconcileVccImportArchiveLineage*` / `vcc_fin_op_import_sources`（v3.1.10 新增 Risk-sensitive ⚠️🔴 审计血缘）
+- 定义：`src/main-process/vcc-financial-op-archive-lineage.js`、VCC repository/schema 与 Main/Service startup hook
+- 关联功能：业务开始前输入 path/name/sourceType/ordinal/SHA/size 的 durable handoff；业务终态后 source→artifact 绑定、fallback 清理、business hold 建立；崩溃重启同原 task batch 收口
+- 变更 review 要点：
+  - worker 首次 hash 后、首笔业务 DML 前必须精确比较 taskRunId、路径、类型、ordinal 顺序、SHA和大小；缺失、重复或 A→B 变化均须零业务写
+  - startup 固定 outbox→owners→post replay→VCC lineage/hold hook→sweep/retention；hook 失败时不得先清理可能被有效数据引用的 artifact
+  - ready artifact 快路径必须匹配本次 expected SHA/size；不得仅凭 path/artifactKey 返回 alreadyArchived
+  - source/artifact/hold/fallback 重放必须幂等，禁止按月份、文件名或 latest 猜身份；SQLite 不存完整 Excel 字节
+  - 必跑：archive-lineage 真实 SQLite+FS、actual worker A→B、crash双启动、hold manual/retention、dataset artifact corruption、TaskLifecycle/outbox 与 `npm run smoke`
 
 ### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）
 - 定义：`src/backend/database/migrations.js:803` `function ensureBillRawJsonV2Slim(db, dbPath)`

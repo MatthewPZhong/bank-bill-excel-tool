@@ -9,6 +9,32 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.1.10（2026-08-17，发布候选）
+
+v3.1.10 将 VCC 财务 OP 的长期原始数据真相从 SQLite 大字段转移到存档 artifact，并把逐行导入审计收敛为真正异常；同时提供显式、可恢复的 copy-on-write 物理重建。功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`，但当前仍是发布候选，尚未创建正式 tag 或 Release。
+
+**精简存储和可解释血缘**
+
+- 有效行只保留计算、校验、幂等和最小来源字段；纯幂等跳过、正常回滚不再永久保存逐行原始值。真正的格式、键、内容冲突和系统主体异常进入紧凑异常表。
+- 输入文件以 SHA-256、大小、导入记录和 Archive artifact 绑定；当前有效行对应的 artifact 由 business hold 保护。业务成功而存档失败时暂存 fallback，重试通过同一 SHA/size 后清除。
+- 业务前 durable handoff、worker 首写前复核和 ready artifact expected SHA/size 冲突检查共同关闭“同路径 A→B”窗口；contract-v2 trigger 阻止 v3.1.9 连接继续写新 VCC 合同。
+
+**异常明细和校验原表导出**
+
+- 移除永久逐行“查看导入明细”，只在存在真正异常或文件级失败时提供六列【导出明细】；纯成功、纯幂等跳过不显示。
+- 校验原表从已验证 artifact 按当前 effective 行重建。历史缺口允许二次确认后的部分导出，文件名和“导出说明”明确标出不完整；已绑定 artifact 损坏、SHA/大小或行级哈希不符则整次失败。
+
+**维护模式物理重建**
+
+- 【优化存储】先收敛 WAL、检查空间/完整性并阻止新任务，再创建候选库并验证六类计数、哈希集合、各月来源、结果、调整、归档、九币种余额、artifact 和 hold。
+- journal 与 worker ready/ack 写锁交接覆盖切换和崩溃恢复。切换前失败保留旧库，切换后首次只读校验失败进入受控回滚；旧库仅按用户明确选择删除。
+
+**候选状态和发布阻断**
+
+- 当前生产库只读 `dbstat` 显示 VCC 核心约 27.42 GB，新结构预计约 4.3–4.6 GB；必须在真实副本验证至少下降 75%。
+- PR #147 Windows CI 已通过 installer/portable 构建和静态检查，但 Windows installer/portable 实际 SQLite 切换、WAL 与文件占用仍未签字。
+- 主体×九币种的有效行、金额、幂等冲突、部分导出、删除审计和 archive SHA 血缘仍待财务人工复核。三项发布红线未关闭前不得正式发布。
+
 ## v3.1.9（2026-08-13）
 
 v3.1.9 把存档中心升级为全部业务任务共用的批次与运行文件中心，并补齐 VCC财务OP校验、工具箱、目录化存储、位置迁移和统计界面。该版本已于 2026-08-13 通过受控 Windows Release workflow 正式发布。
