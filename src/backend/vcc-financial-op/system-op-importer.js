@@ -1072,6 +1072,7 @@ module.exports = {
   findSystemHeader,
   meaningfulPreview,
   assertUniqueSystemBusinessSheet,
+  readSystemOpSnapshotCandidates,
   readSystemOpSnapshots,
   readSystemOpSnapshot,
   importSystemOpGroup,

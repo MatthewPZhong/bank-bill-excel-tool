@@ -975,6 +975,56 @@ test('switching 与 switched 崩溃窗口均按 journal 唯一恢复，重开失
   });
 });
 
+test('重开失败后先持久化回滚路径，候选移动后崩溃仍能恢复完整旧库', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'rollback-crash.sqlite');
+  const targetPath = path.join(directory, 'rollback-crash.next.sqlite');
+  const backupPath = path.join(directory, 'rollback-crash.backup.sqlite');
+  const journalPath = path.join(directory, 'run-data', 'rollback-crash.json');
+  createLegacyDatabase(sourcePath);
+  buildVccStorageCandidate({ sourcePath, targetPath, availableBytes: 1024 ** 4 });
+  const journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    migrationId: 'rollback-candidate-move-crash'
+  });
+
+  assert.throws(() => atomicSwitchVccStorage({
+    journalPath,
+    journal,
+    faultInjector(checkpoint) {
+      if (checkpoint === 'after-target-rename') {
+        const candidate = new DatabaseSync(sourcePath);
+        candidate.prepare(`
+          DELETE FROM app_settings WHERE setting_key = 'vcc_storage_contract_version'
+        `).run();
+        candidate.close();
+      }
+      if (checkpoint === 'after-failed-candidate-rename') {
+        throw new Error('crash after failed candidate rename');
+      }
+    }
+  }), (error) => error.code === 'vcc-storage-switch-recovery-failed');
+
+  const pending = readJournal(journalPath);
+  assert.equal(pending.phase, 'rolling-back');
+  assert.match(path.basename(pending.failedCandidatePath), /^rollback-crash\.next\.sqlite\.failed-\d+$/);
+  assert.equal(fs.existsSync(sourcePath), false);
+  assert.equal(fs.existsSync(backupPath), true);
+  assert.equal(fs.existsSync(pending.failedCandidatePath), true);
+
+  assert.deepEqual(recoverVccStorageMigration({ journalPath }), {
+    status: 'rolled-back',
+    sourcePath
+  });
+  const db = new DatabaseSync(sourcePath, { readOnly: true });
+  try { assert.equal(storageContractVersion(db), 1); } finally { db.close(); }
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.equal(fs.existsSync(pending.failedCandidatePath), false);
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
 test('recovery 删除备份后先 fsync DB 目录，删除 journal 后 fsync journal 目录，done 可幂等补删', (t) => {
   const directory = tempDir(t);
   const journalDirectory = path.join(directory, 'run-data');

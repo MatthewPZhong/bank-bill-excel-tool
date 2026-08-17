@@ -153,6 +153,7 @@
 3. 首个 sheet 为“导出说明”，记录覆盖率和按 import record 汇总的缺失数；
 4. 零覆盖时仍只允许生成说明 sheet，不伪造数据；
 5. 已绑定 artifact 损坏、SHA 不符、定位行幂等键或内容哈希不符均是完整性故障，整次失败，不得降级成部分导出；该规则同样适用于 SYSTEM_OP 和仍含 `raw_json` 的 v1 过渡行。只有从未存在 import source 的历史 v1 行可走独立 raw fallback 合同。
+6. `SYSTEM_OP success_with_skips` 绑定 artifact 后，重读必须复用导入候选解析，只导出并逐项核验已提交的有效主体；同文件中已记录为 anomaly 的其他异常主体不得再次否决有效主体，但任何已提交主体缺失或其内容哈希、sheet、原表行号不一致仍整次失败。
 
 ## 6. 历史迁移
 
@@ -196,7 +197,7 @@
 
 ### 6.4 Journal 与原子切换
 
-迁移 journal 覆盖 `prepared/copying/verifying/switching/switched/reopen-verified/done`。worker 完成候选复制与完整复验后进入 `ready`，但必须继续持有源库 `BEGIN IMMEDIATE`；coordinator 关闭所有主库连接并保持 mutation lease 后才发送 ack，worker 收到 ack 才释放源锁并允许切换。切换采用同目录原子 rename：保留源库作为带 migration id 的旧文件，激活新库，重新打开并执行首次只读校验；只有用户在维护确认框中明确选择“校验成功后删除旧数据库”时，才自动删除旧数据库及其 sidecar，否则保留带 migration id 的备份。删除旧库与 sidecar 后必须先 fsync 数据库目录，再推进 journal；删除 journal 后也必须 fsync journal 目录。任一切换前失败保持旧库不变；崩溃恢复以 journal、活动文件身份和 schema marker 唯一判定，不猜测。
+迁移 journal 覆盖 `prepared/copying/verifying/switching/switched/reopen-verified/rolling-back/rolled-back/done`。worker 完成候选复制与完整复验后进入 `ready`，但必须继续持有源库 `BEGIN IMMEDIATE`；coordinator 关闭所有主库连接并保持 mutation lease 后才发送 ack，worker 收到 ack 才释放源锁并允许切换。切换采用同目录原子 rename：保留源库作为带 migration id 的旧文件，激活新库，重新打开并执行首次只读校验；只有用户在维护确认框中明确选择“校验成功后删除旧数据库”时，才自动删除旧数据库及其 sidecar，否则保留带 migration id 的备份。切换后复验失败时，必须先把 `rolling-back` 与受控失败候选路径持久化，再移动失败候选和恢复备份；任一中间崩溃均由该记录唯一续跑，恢复完成后进入 `rolled-back`。删除旧库与 sidecar 后必须先 fsync 数据库目录，再推进 journal；删除 journal 后也必须 fsync journal 目录。任一切换前失败保持旧库不变；崩溃恢复以 journal、活动文件身份和 schema marker 唯一判定，不猜测。
 
 ## 7. 兼容与安全
 

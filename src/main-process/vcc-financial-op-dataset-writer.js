@@ -21,7 +21,7 @@ const {
 const { streamDetailRows } = require('../backend/vcc-financial-op/workbook-reader');
 const { hashSourceFile } = require('../backend/vcc-financial-op/source-lineage');
 const {
-  readSystemOpSnapshots
+  readSystemOpSnapshotCandidates
 } = require('../backend/vcc-financial-op/system-op-importer');
 const { writeXlsxAtomically } = require('./vcc-financial-op-output-publication');
 
@@ -865,7 +865,13 @@ async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
     }
     let actualSnapshots;
     try {
-      actualSnapshots = readSystemOpSnapshots(source.filePath, scope.targetMonth);
+      // 导入允许同一文件中的完整主体成功、异常主体过滤并记录 anomaly。
+      // 重建只核已提交主体的完整血缘，不能让同一文件中已经审计的无关异常
+      // 再次否决这些有效主体。
+      actualSnapshots = readSystemOpSnapshotCandidates(
+        source.filePath,
+        scope.targetMonth
+      ).snapshots;
     } catch (cause) {
       const error = exportError(
         'archive-row-integrity-failure',

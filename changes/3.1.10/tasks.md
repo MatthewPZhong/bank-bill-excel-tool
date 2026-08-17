@@ -18,14 +18,14 @@
 ## Task 4 — 导出与UI
 - 目标：删除详情分页，六列异常导出，完整/部分原表重建与提示。
 - 验证：writer Excel回读、renderer/main/preload/service合同与完整性故障。
-- 状态：done（本地实现与聚焦证据；PR review 补齐 SYSTEM_OP 未绑定原件临时 fallback）
+- 状态：done（本地实现与聚焦证据；PR review 补齐 SYSTEM_OP 未绑定原件临时 fallback，以及 `success_with_skips` 绑定后的有效主体重建）
 
 ## Task 5 — Copy-on-write迁移
 - 目标：维护准入、checkpoint/space、转换/守恒、journal/原子切换/删旧库。
 - 验证：故障注入、双启动、真实副本dbstat。
-- 状态：done（真实库dbstat/Windows仍为发布门禁）
+- 状态：done（回滚前持久化 `rolling-back` 与 failed path；失败候选移动后崩溃可恢复；真实库dbstat/Windows仍为发布门禁）
 
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（PR #147 首次 Windows CI 的 tag/fsync 问题及两项 review P2 已修；第二轮唯一失败为 Windows test teardown 的 SQLite `EBUSY`，已固定先 close 再删目录，等待最终远端复验；真实库、packaged Windows 与资金人工仍为发布阻断项）
+- 状态：in_progress（PR #147 Windows tag/fsync/teardown 问题及两轮 review 共四项 P2 已修；最新 review 两项先红 28/30、相邻修后 67/67，最终 release-check 5195/5195 + 48/48/2385 全绿，等待远端 Windows/review 复验；真实库、packaged Windows 与资金人工仍为发布阻断项）

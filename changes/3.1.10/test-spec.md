@@ -32,6 +32,7 @@
 | 完整性故障 | artifact/hash/row错位 | 整次失败，不降级部分导出 |
 | SYSTEM_OP/v1 bound 完整性 | bound artifact failed/corrupt | 不得借 raw_json 降级；只有无 source 历史 v1 可走过渡导出 |
 | SYSTEM_OP 临时 fallback | 新导入 source 为 pending/failed、从未绑定 artifact | preview 9/9 可导出；从 snapshot raw 完整重建；曾绑定故障仍禁止降级 |
+| SYSTEM_OP 绑定后含已审计异常 | 同一 artifact 含有效主体与异常主体，record=`success_with_skips` | 只导出已提交有效主体；SHA/主体/hash/sheet/row 仍严格一致；异常主体不二次否决 |
 | v3.1.9 降级写 | contract-v2 库由已发布旧连接打开 | 所有 VCC I/U/D fail-closed；新版连接正常工作 |
 | v3.1.9 importing 升级恢复 | legacy import_rows 已分块提交后崩溃 | rolled_back/异常/六类计数守恒，旧正常宽行清理 |
 | 多文件末次 SHA 失败 | ordinal 2 在读取后变化 | anomaly/source/六列文件名精确指向 ordinal 2 |
@@ -39,6 +40,7 @@
 | checkpoint busy | WAL未收口 | 迁移拒绝；旧库不变 |
 | copy中断 | 故障注入 | journal可恢复/安全重做；旧库唯一有效 |
 | 切换窗口崩溃 | rename前/后/reopen前 | journal唯一判定；不双写、不误删旧库 |
+| 切换后回滚崩溃 | `rolling-back` 已落盘后、失败候选移动后、备份恢复前 | failed path 可解释；旧 v1 备份恢复；失败候选清理；二启幂等 |
 | 候选 ready 交接 | 复验后并发 mutation/主库 close 失败/ack 后 worker crash | ack 前源锁仍在；关闭失败 abort；未经完整握手不切换 |
 | transition 交叉 | updater↔migration↔普通退出 | owner/token lease 互斥，错误 owner/token 不得释放他方 gate |
 | recovery 删除耐久 | backup/sidecar 删除后再次崩溃 | DB dir fsync 后才 done；journal 删除后 fsync journal dir；二启幂等 |
@@ -89,4 +91,6 @@
 - PR #147 首次 Windows CI 将 19 项失败归并为两个环境合同缺口：shallow checkout 缺冻结 `v3.1.9` tag（2 项）与只读文件句柄 fsync `EPERM`（17 项）；修复后本地聚焦 68/68、完整 release-check 5191/5191 + 48/48/2385 PASS。
 - PR #147 首轮 review 两项 P2 均为真实合同缺口：新增 red tests 后 47/49；修复同批 peer evidence 与 SYSTEM_OP 临时 fallback 后，相关 detail/system/dataset/rebuild 91/91 PASS；最终 release-check lint/smoke、unit 5193/5193、integration 48/48 与 2385/2385（305367ms）PASS。
 - PR #147 第二轮 Windows CI 唯一失败为测试 teardown 顺序：contract-v2 业务断言通过后，先删仍打开的 SQLite 报 `EBUSY`；修为单一 hook 中先 close current/legacy 连接再删除目录，生产 trigger 合同不变。
+- PR #147 第二轮 review 两项 P2 先红 28/30；补齐 `rolling-back` durable path 与 SYSTEM_OP candidate 重建后，相邻 migration/import/export 67/67、lint/node/diff PASS。
+- 第二轮 review 修后最终 `npm run release-check`：lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）PASS；check-vars 0 命中。
 - 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。

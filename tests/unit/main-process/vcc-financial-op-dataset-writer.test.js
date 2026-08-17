@@ -21,6 +21,7 @@ const {
 const { mapDetailRow } = require('../../../src/backend/vcc-financial-op/row-mapper');
 const { hashSourceFile } = require('../../../src/backend/vcc-financial-op/source-lineage');
 const {
+  readSystemOpSnapshotCandidates,
   readSystemOpSnapshots
 } = require('../../../src/backend/vcc-financial-op/system-op-importer');
 const {
@@ -181,7 +182,7 @@ async function writeRechargeWorkbook(filePath, rows) {
   await workbook.xlsx.writeFile(filePath);
 }
 
-function writeSystemOpWorkbook(filePath) {
+function writeSystemOpWorkbook(filePath, options = {}) {
   const rows = SUPPORTED_CURRENCIES.map((currency, index) => {
     const values = {
       账单日期: '2026-06-30',
@@ -203,6 +204,16 @@ function writeSystemOpWorkbook(filePath) {
     };
     return SYSTEM_OP_HEADERS.map((header) => values[header] ?? '');
   });
+  if (options.includeInvalidSubject === true) {
+    const invalidValues = {
+      账单日期: '2026-06-30',
+      主体: 'PPUS',
+      业务部门: 'OTHER',
+      币种: 'CNY',
+      财务余额: '20'
+    };
+    rows.push(SYSTEM_OP_HEADERS.map((header) => invalidValues[header] ?? ''));
+  }
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(
     workbook,
@@ -935,6 +946,81 @@ test('SYSTEM_OP 绑定 ready artifact 后从核验文件重建，损坏文件整
     archiveSources
   }), (error) => error.code === 'archive-integrity-failure');
   assert.equal(fs.readFileSync(protectedPath, 'utf8'), 'keep');
+});
+
+test('SYSTEM_OP success_with_skips 绑定 artifact 后仍导出已提交的有效主体', async (t) => {
+  const { db, dir } = openFixture(t);
+  const sourcePath = path.join(dir, 'system-with-invalid-subject.xlsx');
+  writeSystemOpWorkbook(sourcePath, { includeInvalidSubject: true });
+  const candidates = readSystemOpSnapshotCandidates(sourcePath, '2026-06');
+  assert.equal(candidates.snapshots.length, 1);
+  assert.equal(candidates.snapshots[0].subject, 'PPHK');
+  assert.equal(candidates.validationErrors.length, 1);
+  const snapshot = candidates.snapshots[0];
+  const hashed = await hashSourceFile(sourcePath);
+  const archiveBlobPath = path.join(dir, hashed.sha256);
+  fs.copyFileSync(sourcePath, archiveBlobPath);
+
+  repository.createImportBatch(db, {
+    id: 'bound-system-with-skips', targetMonth: '2026-06', fileCount: 1
+  });
+  const recordId = repository.createImportRecord(db, {
+    batchId: 'bound-system-with-skips',
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    sourceFiles: [path.basename(sourcePath)]
+  });
+  const sourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: path.basename(sourcePath),
+    sha256: hashed.sha256,
+    sizeBytes: hashed.sizeBytes
+  });
+  db.prepare(`
+    UPDATE vcc_fin_op_import_sources
+    SET archive_state = 'ready', archive_artifact_id = 802
+    WHERE id = ?
+  `).run(sourceId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash, import_source_id,
+      source_file, sheet_name, source_row, raw_json, import_record_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '{}', ?)
+  `).run(
+    snapshot.targetMonth,
+    snapshot.subject,
+    snapshot.balancesJson,
+    snapshot.contentHash,
+    sourceId,
+    snapshot.sourceFile,
+    snapshot.sheetName,
+    snapshot.sourceRow,
+    recordId
+  );
+  repository.finishImportRecord(db, recordId, {
+    status: 'success_with_skips', rawCount: 2, insertedCount: 1, formatErrorCount: 1
+  });
+  repository.finishImportBatch(db, 'bound-system-with-skips', 'completed_with_errors');
+
+  const outputPath = path.join(dir, 'bound-system-with-skips-output.xlsx');
+  const result = await writeDatasetWorkbook({
+    db,
+    targetMonth: '2026-06',
+    sourceType: SOURCE_TYPES.SYSTEM_OP,
+    targetKind: EXPORT_KINDS.RAW,
+    outputPath,
+    archiveSources: [{
+      sourceId,
+      filePath: archiveBlobPath,
+      fileName: path.basename(sourcePath),
+      sha256: hashed.sha256,
+      sizeBytes: hashed.sizeBytes
+    }]
+  });
+  assert.equal(result.dataCount, SUPPORTED_CURRENCIES.length);
+  const { sheet } = await readSheet(outputPath);
+  assert.equal(sheet.rowCount, SUPPORTED_CURRENCIES.length + 1);
+  assert.equal(sheet.getCell(2, SYSTEM_OP_DEFINITION.indexes['主体'] + 1).value, 'PPHK');
 });
 
 test('二次确认后的覆盖范围变化必须在写文件前失败', async (t) => {

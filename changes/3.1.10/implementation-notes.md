@@ -29,6 +29,8 @@
 | Windows 数据库文件 fsync 使用可写句柄，PR checkout 保留冻结 tag | Windows `FlushFileBuffers` 对只读文件句柄返回 `EPERM`；v3.1.9 兼容探针必须读取发布 tag | 忽略文件 fsync 或在测试内联网 fetch | 不放宽断电耐久门禁；Windows 候选/切换文件可落盘，CI 可离线加载冻结历史实现 |
 | 同批同键冲突持久化对端 staging 哈希与逐字段差异 | compact anomaly 若只关联 effective，会让两个首次出现的冲突行都缺 existing hash | 只写通用“业务内容”或保存完整 raw | 异常导出可双侧核对，仍不永久保存完整原始行 |
 | SYSTEM_OP 未绑定原件时以 snapshot raw 作为临时 fallback | 新导入业务成功后，Archive pending/failed 窗口仍须满足“尚未归档可完整导出” | 将九币种误计为历史缺口或放宽已绑定故障 | 从未绑定时完整导出；一旦有 artifact/bound 证据仍整次失败关闭 |
+| SYSTEM_OP artifact 重建复用候选解析 | `success_with_skips` 的同一工作簿可同时含有效主体与已审计异常主体，严格整文件 reader 会错误否决有效主体 | 绑定后重新要求工作簿零异常 | 只提升并严格核对 DB 已提交主体；无关异常保留 anomaly，不放宽 SHA/主体/hash/sheet/row 门禁 |
+| 切换失败候选移动前先持久化 `rolling-back` | 候选移走后、备份恢复前崩溃会让 `switching` journal 无法解释文件状态 | 依赖 rename 很快完成或启动时猜文件 | journal 先保存受控 failed path；候选移动、备份恢复、cleanup 任一窗口均可幂等续跑 |
 
 ## Assumptions
 
@@ -69,6 +71,8 @@
 | PR #147 CI 修复本地复验 | 聚焦 68/68；完整 release-check lint/smoke、unit 5191/5191、integration 48/48 scripts 与 2385/2385 assertions（395255ms）PASS；node/diff/check-vars 收口 | 保持同一耐久与历史兼容合同，等待同一 Windows workflow 远端复验 |
 | PR #147 首轮 review 两项 P2 | 两项先红 47/49，再修后 detail/system/rebuild 相关 91/91 PASS；最终 release-check lint/smoke、unit 5193/5193、integration 48/48 与 2385/2385（305367ms）PASS | contract-v2 同批冲突保存 peer hash+精确 diff；SYSTEM_OP pending/failed 且从未绑定时以 raw fallback 完整导出，bound 故障门禁不放宽 |
 | PR #147 第二轮 Windows CI | 5191/5193；唯一失败为 storage-contract test teardown 在 Windows 先删仍打开的 SQLite，报 `EBUSY`；业务断言本身通过 | 合并为单一 after hook，固定关闭 current/legacy 两连接后才删除临时目录；不改或放宽 production capability trigger |
+| PR #147 第二轮 review 两项 P2 | 新增两条 red tests 后 28/30；修后 migration/system 相邻 67/67 PASS，lint/node/diff PASS | rollback journal 先落盘再移动失败候选；SYSTEM_OP `success_with_skips` 绑定后按 candidate API 重建有效主体 |
+| PR #147 第二轮 review 最终门禁 | release-check lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）；check-vars 0 命中 | 两项修复合并后的本地最终头全仓回归，等待 Windows 最新头与 review 复验 |
 
 ## Remaining Unknowns
 

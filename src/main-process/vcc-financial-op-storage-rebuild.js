@@ -1449,6 +1449,113 @@ function verifyReopenedDatabase(dbPath) {
   }
 }
 
+function beginRollbackJournal(journalPath, journal, error, fsImpl = fs) {
+  let suffix = Date.now();
+  let failedCandidatePath = `${journal.targetPath}.failed-${suffix}`;
+  while (fsImpl.existsSync(failedCandidatePath)) {
+    suffix += 1;
+    failedCandidatePath = `${journal.targetPath}.failed-${suffix}`;
+  }
+  return updateJournal(journalPath, journal, 'rolling-back', {
+    failedCandidatePath,
+    lastError: {
+      code: error && error.code ? error.code : 'switch-failed',
+      message: error && error.message ? error.message : String(error)
+    }
+  }, fsImpl);
+}
+
+function completeRollbackJournal(journalPath, journal, options = {}) {
+  const fsImpl = options.fsImpl || fs;
+  const failedCandidatePath = journal.failedCandidatePath;
+  if (!isOwnedFailedCandidate(journal, failedCandidatePath)) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-journal-invalid',
+      '回滚记录缺少安全的失败候选路径，已停止自动恢复'
+    );
+  }
+  if (fsImpl.existsSync(journal.targetPath)) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-recovery-conflict',
+      '回滚期间候选路径重新出现，已停止自动恢复'
+    );
+  }
+
+  let sourceExists = fsImpl.existsSync(journal.sourcePath);
+  let backupExists = fsImpl.existsSync(journal.backupPath);
+  let failedCandidateExists = fsImpl.existsSync(failedCandidatePath);
+  if (backupExists) {
+    if (sourceExists) {
+      if (failedCandidateExists) {
+        throw new VccStorageMigrationError(
+          'vcc-storage-recovery-conflict',
+          '回滚期间同时存在活动候选与失败候选，已停止自动恢复'
+        );
+      }
+      fsImpl.renameSync(journal.sourcePath, failedCandidatePath);
+      fsyncDirectory(path.dirname(journal.sourcePath), fsImpl);
+      invokeFault(options.faultInjector, 'after-failed-candidate-rename');
+      sourceExists = false;
+      failedCandidateExists = true;
+    } else if (!failedCandidateExists) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-recovery-conflict',
+        '回滚期间活动库与失败候选均不存在，已停止自动恢复'
+      );
+    }
+    fsImpl.renameSync(journal.backupPath, journal.sourcePath);
+    fsyncDirectory(path.dirname(journal.sourcePath), fsImpl);
+    invokeFault(options.faultInjector, 'after-rollback-source-restore');
+    sourceExists = true;
+    backupExists = false;
+  }
+  if (!sourceExists || backupExists) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-recovery-conflict',
+      '回滚后的旧数据库文件状态不唯一，已停止自动恢复'
+    );
+  }
+
+  const db = openReadOnlyDatabase(journal.sourcePath);
+  try {
+    assertIntegrity(db, '已恢复的旧数据库');
+    if (storageContractVersion(db) !== 1) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-rollback-contract-mismatch',
+        '回滚后的数据库合同版本不是 v1'
+      );
+    }
+  } finally {
+    db.close();
+  }
+
+  let cleanupError = null;
+  if (fsImpl.existsSync(failedCandidatePath)) {
+    try {
+      cleanupDatabaseCandidate(failedCandidatePath, fsImpl);
+      fsyncDirectory(path.dirname(failedCandidatePath), fsImpl);
+    } catch (error) {
+      cleanupError = error;
+    }
+  }
+  const rolledBack = updateJournal(journalPath, journal, 'rolled-back', {
+    failedCandidatePath: cleanupError ? failedCandidatePath : null,
+    lastError: {
+      ...(journal.lastError || {}),
+      cleanupCode: cleanupError && cleanupError.code ? cleanupError.code : null,
+      cleanupMessage: cleanupError ? cleanupError.message || String(cleanupError) : null
+    }
+  }, fsImpl);
+  if (cleanupError) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-failed-candidate-cleanup-failed',
+      '旧数据库已恢复，但失败候选库尚未清理；下次启动将继续处理',
+      { cleanupCause: cleanupError, failedCandidatePath }
+    );
+  }
+  return rolledBack;
+}
+
 function createMigrationJournal(options) {
   const now = options.now || new Date();
   return {
@@ -1529,39 +1636,13 @@ function atomicSwitchVccStorage(options) {
         { cause: error, sourcePath, backupPath }
       );
     }
-    let failedCandidatePath = null;
     try {
-      if (fsImpl.existsSync(sourcePath)) {
-        failedCandidatePath = `${targetPath}.failed-${Date.now()}`;
-        fsImpl.renameSync(sourcePath, failedCandidatePath);
-      }
-      if (fsImpl.existsSync(backupPath)) fsImpl.renameSync(backupPath, sourcePath);
-      fsyncDirectory(path.dirname(sourcePath), fsImpl);
-      let cleanupError = null;
-      if (failedCandidatePath) {
-        try {
-          cleanupDatabaseCandidate(failedCandidatePath, fsImpl);
-          failedCandidatePath = null;
-        } catch (candidateError) {
-          cleanupError = candidateError;
-        }
-      }
-      updateJournal(journalPath, journal, 'rolled-back', {
-        failedCandidatePath,
-        lastError: {
-          code: error.code || 'switch-failed',
-          message: error.message || String(error),
-          cleanupCode: cleanupError && cleanupError.code ? cleanupError.code : null,
-          cleanupMessage: cleanupError ? cleanupError.message || String(cleanupError) : null
-        }
-      }, fsImpl);
-      if (cleanupError) {
-        throw new VccStorageMigrationError(
-          'vcc-storage-failed-candidate-cleanup-failed',
-          '旧数据库已恢复，但失败候选库尚未清理；下次启动将继续处理',
-          { cause: error, cleanupCause: cleanupError, failedCandidatePath }
-        );
-      }
+      journal = beginRollbackJournal(journalPath, journal, error, fsImpl);
+      invokeFault(options.faultInjector, 'after-rollback-journal');
+      completeRollbackJournal(journalPath, journal, {
+        fsImpl,
+        faultInjector: options.faultInjector
+      });
     } catch (restoreError) {
       if (restoreError && restoreError.code === 'vcc-storage-failed-candidate-cleanup-failed') {
         throw restoreError;
@@ -1633,12 +1714,19 @@ function recoverVccStorageMigration(options) {
       if (version === VCC_STORAGE_CONTRACT_VERSION) {
         journal = updateJournal(journalPath, journal, 'switched', {}, fsImpl);
       } else {
-        if (targetExists) {
-          cleanupDatabaseCandidate(journal.targetPath, fsImpl);
-          fsyncDirectory(path.dirname(journal.targetPath), fsImpl);
-        }
-        removeJournalDurably(journalPath, fsImpl);
-        return { status: 'rolled-back', sourcePath: journal.sourcePath };
+        journal = beginRollbackJournal(
+          journalPath,
+          journal,
+          new VccStorageMigrationError(
+            'vcc-storage-reopen-contract-mismatch',
+            'switching 恢复时活动候选不符合 v2 合同'
+          ),
+          fsImpl
+        );
+        journal = completeRollbackJournal(journalPath, journal, {
+          fsImpl,
+          faultInjector: options.faultInjector
+        });
       }
     } else {
       throw new VccStorageMigrationError(
@@ -1646,6 +1734,12 @@ function recoverVccStorageMigration(options) {
         '迁移原子切换恢复状态不唯一，已停止自动处理'
       );
     }
+  }
+  if (journal.phase === 'rolling-back') {
+    journal = completeRollbackJournal(journalPath, journal, {
+      fsImpl,
+      faultInjector: options.faultInjector
+    });
   }
   if (journal.phase === 'switched' || journal.phase === 'reopen-verified') {
     verifyReopenedDatabase(journal.sourcePath);
