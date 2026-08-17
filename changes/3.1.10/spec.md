@@ -177,7 +177,7 @@
 - 以 v3.1.10 schema 创建 VCC 表；
 - 保留所有业务 ID、run/result/adjustment/archive/operation audit；
 - 把旧 effective 行转换为 slim effective；
-- 把严格可证明的历史来源绑定至 import source/artifact/hold；
+- 把严格可证明的历史来源绑定至 import source/artifact/hold；除 flow、record、文件名和数据库 SHA/size 唯一外，还必须从当前存档根按受控相对路径打开 canonical Blob，重新流式计算物理 SHA-256 并核对实际大小；根不可用、文件缺失或实体不一致均保持 `unavailable`，不得仅信任数据库 `ready` 元数据；
 - 把严格异常转换为 compact anomaly；
 - 原样保留过渡期已存在的 import source/anomaly/fallback；若 ready artifact 的 SHA/size 已验证，则重建时创建 hold 并删除对应 fallback；
 - 不复制旧永久 `idempotent_skip`/正常 `rolled_back` 逐行审计；
@@ -192,12 +192,12 @@
 - effective 的主键集合、`source_type+idempotency_key+content_hash` 集合不变；
 - 各月×来源行数不变；
 - 所有 run 结果、调整、归档、九币种余额与计算摘要不变；
-- artifact 绑定、SHA/size 和 business hold 一致；
+- artifact 绑定、SHA/size 和 business hold 一致；历史新绑定还必须已通过 canonical Blob 物理大小与 SHA-256 复验；
 - staging 为空；升级前历史不新增 fallback；升级后过渡期已有 fallback 必须守恒，只有对应 ready artifact 的 SHA/size 已验证时才可删除并建立 hold。
 
 ### 6.4 Journal 与原子切换
 
-迁移 journal 覆盖 `prepared/copying/verifying/switching/switched/reopen-verified/rolling-back/rolled-back/done`。worker 完成候选复制与完整复验后进入 `ready`，但必须继续持有源库 `BEGIN IMMEDIATE`；coordinator 关闭所有主库连接并保持 mutation lease 后才发送 ack，worker 收到 ack 才释放源锁并允许切换。切换采用同目录原子 rename：保留源库作为带 migration id 的旧文件，激活新库，重新打开并执行首次只读校验；只有用户在维护确认框中明确选择“校验成功后删除旧数据库”时，才自动删除旧数据库及其 sidecar，否则保留带 migration id 的备份。切换后复验失败时，必须先把 `rolling-back` 与受控失败候选路径持久化，再移动失败候选和恢复备份；任一中间崩溃均由该记录唯一续跑，恢复完成后进入 `rolled-back`。删除旧库与 sidecar 后必须先 fsync 数据库目录，再推进 journal；删除 journal 后也必须 fsync journal 目录。任一切换前失败保持旧库不变；崩溃恢复以 journal、活动文件身份和 schema marker 唯一判定，不猜测。
+迁移 journal 覆盖 `prepared/copying/verifying/switching/switched/reopen-verified/rolling-back/rolled-back/done`。worker 完成候选复制与完整复验后进入 `ready`，但必须继续持有源库 `BEGIN IMMEDIATE`；coordinator 关闭所有主库连接并保持 mutation lease 后才发送 ack，worker 收到 ack 才释放源锁并允许切换。切换采用同目录原子 rename：保留源库作为带 migration id 的旧文件，激活新库，重新打开并执行首次只读校验；只有用户在维护确认框中明确选择“校验成功后删除旧数据库”时，才自动删除旧数据库及其 sidecar，否则保留带 migration id 的备份。切换后复验失败时，必须先把 `rolling-back` 与受控失败候选路径持久化，再移动失败候选和恢复备份；如果首次 `target→source` rename 失败而候选仍合法停留在 `targetPath`，回滚必须先把该已知候选接管到受控失败路径，再恢复 v1 备份。启动恢复在 journal 仍为 `switched` 且首次只读复验失败时也必须执行同一回滚，不得永久卡在无效 v2；只有已持久化 `reopen-verified` 后，新库才成为不可回退的唯一真相。任一中间崩溃均由该记录唯一续跑，恢复完成后进入 `rolled-back`。删除旧库与 sidecar 后必须先 fsync 数据库目录，再推进 journal；删除 journal 后也必须 fsync journal 目录。任一切换前失败保持旧库不变；崩溃恢复以 journal、活动文件身份和 schema marker 唯一判定，不猜测。
 
 ## 7. 兼容与安全
 

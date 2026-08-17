@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -106,7 +107,7 @@ function createLegacyDatabase(filePath) {
   return { recordId };
 }
 
-function seedExactHistoricalArchive(filePath, recordId) {
+function seedExactHistoricalArchive(filePath, recordId, options = {}) {
   const db = new DatabaseSync(filePath);
   const repository = createArchiveRepository(db, {
     now: () => new Date('2026-08-16T10:00:00.000Z')
@@ -138,13 +139,22 @@ function seedExactHistoricalArchive(filePath, recordId) {
     sourcePath: '/historical/source.xlsx'
   });
   repository.startArtifactAttempt(artifact.id);
+  const blobBytes = options.blobBytes || Buffer.from('historical-vcc-source');
+  const sha256 = crypto.createHash('sha256').update(blobBytes).digest('hex');
+  const relativePath = `blobs/sha256/${sha256.slice(0, 2)}/${sha256}`;
+  let blobPath = '';
+  if (options.archiveRootDir) {
+    blobPath = path.join(options.archiveRootDir, ...relativePath.split('/'));
+    fs.mkdirSync(path.dirname(blobPath), { recursive: true });
+    fs.writeFileSync(blobPath, blobBytes);
+  }
   repository.completeArtifact(artifact.id, {
-    sha256: 'c'.repeat(64),
-    sizeBytes: 456,
-    relativePath: `blobs/sha256/cc/${'c'.repeat(64)}`
+    sha256,
+    sizeBytes: blobBytes.length,
+    relativePath
   });
   db.close();
-  return { artifactId: artifact.id };
+  return { artifactId: artifact.id, blobPath, sha256, sizeBytes: blobBytes.length };
 }
 
 test('copy-on-write 重建移除逐行 raw，只迁移真正异常且保持计数与结果身份', (t) => {
@@ -536,14 +546,18 @@ test('copy-on-write 保留已删除记录留下的 AUTOINCREMENT 高水位', (t)
 
 test('历史来源仅在 flow identity、文件名、artifact、SHA 和大小唯一时绑定并建立 hold', (t) => {
   const directory = tempDir(t);
+  const archiveRootDir = path.join(directory, 'archive-root');
   const sourcePath = path.join(directory, 'tool-data.sqlite');
   const targetPath = path.join(directory, 'tool-data.sqlite.vcc-next');
   const { recordId } = createLegacyDatabase(sourcePath);
-  const { artifactId } = seedExactHistoricalArchive(sourcePath, recordId);
+  const { artifactId, sha256, sizeBytes } = seedExactHistoricalArchive(sourcePath, recordId, {
+    archiveRootDir
+  });
 
   const result = buildVccStorageCandidate({
     sourcePath,
     targetPath,
+    archiveRootDir,
     availableBytes: 1024 ** 4
   });
   assert.deepEqual(result.historicalLineage, {
@@ -559,8 +573,8 @@ test('历史来源仅在 flow identity、文件名、artifact、SHA 和大小唯
       FROM vcc_fin_op_import_sources WHERE import_record_id = ?
     `).get(recordId) };
     assert.equal(source.source_file_name, 'source.xlsx');
-    assert.equal(source.source_sha256, 'c'.repeat(64));
-    assert.equal(source.source_size_bytes, 456);
+    assert.equal(source.source_sha256, sha256);
+    assert.equal(source.source_size_bytes, sizeBytes);
     assert.equal(source.archive_artifact_id, artifactId);
     assert.equal(source.archive_state, 'ready');
     assert.equal(db.prepare(`
@@ -571,6 +585,43 @@ test('历史来源仅在 flow identity、文件名、artifact、SHA 和大小唯
       WHERE artifact_id = ? AND owner_module = 'vcc-financial-op'
         AND owner_type = 'vcc-import-source' AND owner_id = ?
     `).get(artifactId, String(source.id)).count, 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('历史 ready artifact 的物理 SHA 不一致时不得绑定或建立 hold', (t) => {
+  const directory = tempDir(t);
+  const archiveRootDir = path.join(directory, 'archive-root');
+  const sourcePath = path.join(directory, 'tool-data.sqlite');
+  const targetPath = path.join(directory, 'tool-data.sqlite.vcc-next');
+  const { recordId } = createLegacyDatabase(sourcePath);
+  const seeded = seedExactHistoricalArchive(sourcePath, recordId, { archiveRootDir });
+  fs.writeFileSync(seeded.blobPath, Buffer.alloc(seeded.sizeBytes, 0x58));
+
+  const result = buildVccStorageCandidate({
+    sourcePath,
+    targetPath,
+    archiveRootDir,
+    availableBytes: 1024 ** 4
+  });
+  assert.deepEqual(result.historicalLineage, {
+    boundSources: 0,
+    boundRecords: 0,
+    unavailableRecords: 1
+  });
+  const db = new DatabaseSync(targetPath, { readOnly: true });
+  try {
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_import_sources WHERE import_record_id = ?
+    `).get(recordId).count, 0);
+    assert.equal(db.prepare(`
+      SELECT archive_state FROM vcc_fin_op_import_records WHERE id = ?
+    `).get(recordId).archive_state, 'unavailable');
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM archive_artifact_holds
+      WHERE owner_module = 'vcc-financial-op'
+    `).get().count, 0);
   } finally {
     db.close();
   }
@@ -1022,6 +1073,90 @@ test('重开失败后先持久化回滚路径，候选移动后崩溃仍能恢�
   try { assert.equal(storageContractVersion(db), 1); } finally { db.close(); }
   assert.equal(fs.existsSync(backupPath), false);
   assert.equal(fs.existsSync(pending.failedCandidatePath), false);
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
+test('旧库已备份但候选仍在 target 时，回滚先接管候选再恢复旧库', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'target-busy.sqlite');
+  const targetPath = path.join(directory, 'target-busy.next.sqlite');
+  const backupPath = path.join(directory, 'target-busy.backup.sqlite');
+  const journalPath = path.join(directory, 'run-data', 'target-busy.json');
+  createLegacyDatabase(sourcePath);
+  buildVccStorageCandidate({ sourcePath, targetPath, availableBytes: 1024 ** 4 });
+  const journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    migrationId: 'target-busy-rollback'
+  });
+  let blocked = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'renameSync') {
+        return (from, to) => {
+          if (!blocked
+              && path.resolve(String(from)) === path.resolve(targetPath)
+              && path.resolve(String(to)) === path.resolve(sourcePath)) {
+            blocked = true;
+            const error = new Error('candidate busy');
+            error.code = 'EBUSY';
+            throw error;
+          }
+          return target.renameSync(from, to);
+        };
+      }
+      return Reflect.get(target, property);
+    }
+  });
+
+  assert.throws(() => atomicSwitchVccStorage({
+    journalPath,
+    journal,
+    fsImpl
+  }), (error) => error.code === 'EBUSY');
+  const db = new DatabaseSync(sourcePath, { readOnly: true });
+  try { assert.equal(storageContractVersion(db), 1); } finally { db.close(); }
+  assert.equal(fs.existsSync(targetPath), false);
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.equal(readJournal(journalPath).phase, 'rolled-back');
+  assert.deepEqual(recoverVccStorageMigration({ journalPath }), {
+    status: 'rolled-back',
+    sourcePath
+  });
+});
+
+test('switched journal 的活动候选复验失败时恢复完整 v1 备份', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'switched-invalid.sqlite');
+  const targetPath = path.join(directory, 'switched-invalid.next.sqlite');
+  const backupPath = path.join(directory, 'switched-invalid.backup.sqlite');
+  const journalPath = path.join(directory, 'run-data', 'switched-invalid.json');
+  createLegacyDatabase(sourcePath);
+  buildVccStorageCandidate({ sourcePath, targetPath, availableBytes: 1024 ** 4 });
+  let journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    migrationId: 'switched-invalid-recovery'
+  });
+  journal = updateJournal(journalPath, journal, 'switching');
+  fs.renameSync(sourcePath, backupPath);
+  fs.renameSync(targetPath, sourcePath);
+  journal = updateJournal(journalPath, journal, 'switched');
+  const candidate = new DatabaseSync(sourcePath);
+  candidate.prepare(`
+    DELETE FROM app_settings WHERE setting_key = 'vcc_storage_contract_version'
+  `).run();
+  candidate.close();
+
+  assert.deepEqual(recoverVccStorageMigration({ journalPath }), {
+    status: 'rolled-back',
+    sourcePath
+  });
+  const db = new DatabaseSync(sourcePath, { readOnly: true });
+  try { assert.equal(storageContractVersion(db), 1); } finally { db.close(); }
+  assert.equal(fs.existsSync(backupPath), false);
   assert.equal(fs.existsSync(journalPath), false);
 });
 

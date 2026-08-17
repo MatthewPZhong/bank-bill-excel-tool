@@ -35,6 +35,7 @@ function workerFactoryFor(outcome, calls) {
     calls.push('worker-created');
     const worker = new EventEmitter();
     worker.postMessage = (message) => {
+      if (Array.isArray(outcome.messages)) outcome.messages.push({ ...message });
       calls.push(`worker-post:${message.action}`);
       if (message.action === 'release') {
         if (outcome.exitOnRelease === true) {
@@ -71,7 +72,7 @@ function maintenanceHarness(calls) {
   return {
     async beginDatabaseMaintenance() {
       calls.push('archive-maintenance-begin');
-      return { acquired: true };
+      return { acquired: true, rootDir: '/archive-root' };
     },
     async endDatabaseMaintenance() {
       calls.push('archive-maintenance-end');
@@ -122,6 +123,7 @@ test('维护迁移先阻止新任务并等待活动任务，再暂停存档与�
   const registry = createBusinessOperationRegistry();
   const active = registry.begin({ channel: 'vccFinancialOp:run:calculate' });
   const calls = [];
+  const messages = [];
   const coordinator = createVccStorageMigrationCoordinator({
     sourcePath,
     journalPath,
@@ -129,7 +131,8 @@ test('维护迁移先阻止新任务并等待活动任务，再暂停存档与�
     archiveStorageRootManager: maintenanceHarness(calls),
     workerFactory: workerFactoryFor({
       type: 'complete',
-      result: { noChange: true, contractVersion: 2 }
+      result: { noChange: true, contractVersion: 2 },
+      messages
     }, calls),
     async pauseLocalMaintenance() {
       calls.push('local-maintenance-pause');
@@ -158,6 +161,7 @@ test('维护迁移先阻止新任务并等待活动任务，再暂停存档与�
     'archive-maintenance-end'
   ]);
   assert.equal(fs.existsSync(journalPath), false);
+  assert.equal(messages[0].archiveRootDir, '/archive-root');
   assert.equal(registry.begin({ channel: 'toolbox:merge' }).accepted, true);
 });
 

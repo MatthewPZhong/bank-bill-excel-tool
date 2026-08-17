@@ -31,6 +31,8 @@
 | SYSTEM_OP 未绑定原件时以 snapshot raw 作为临时 fallback | 新导入业务成功后，Archive pending/failed 窗口仍须满足“尚未归档可完整导出” | 将九币种误计为历史缺口或放宽已绑定故障 | 从未绑定时完整导出；一旦有 artifact/bound 证据仍整次失败关闭 |
 | SYSTEM_OP artifact 重建复用候选解析 | `success_with_skips` 的同一工作簿可同时含有效主体与已审计异常主体，严格整文件 reader 会错误否决有效主体 | 绑定后重新要求工作簿零异常 | 只提升并严格核对 DB 已提交主体；无关异常保留 anomaly，不放宽 SHA/主体/hash/sheet/row 门禁 |
 | 切换失败候选移动前先持久化 `rolling-back` | 候选移走后、备份恢复前崩溃会让 `switching` journal 无法解释文件状态 | 依赖 rename 很快完成或启动时猜文件 | journal 先保存受控 failed path；候选移动、备份恢复、cleanup 任一窗口均可幂等续跑 |
+| 历史 exact binder 必须物理复验 canonical Blob | `ready` 与数据库 SHA/size 只证明曾经发布成功，不能证明迁移时磁盘实体仍完整 | 直接信任 artifact/blob metadata | coordinator 把维护中的真实存档根传入 worker；受控路径逐文件流式 SHA/size，不一致保持 unavailable 且不建 hold |
+| `switched` 只有复验成功后才成为不可回退真相 | target rename 失败可把候选留在 target；进程也可在写 `switched` 后、复验前崩溃 | 目标仍在即冲突、或恢复时反复验证坏 v2 | 同一 rolling-back executor 接管 target/source 两种候选位置并恢复完整 v1；`reopen-verified` 之后仍禁止回退 |
 
 ## Assumptions
 
@@ -73,6 +75,8 @@
 | PR #147 第二轮 Windows CI | 5191/5193；唯一失败为 storage-contract test teardown 在 Windows 先删仍打开的 SQLite，报 `EBUSY`；业务断言本身通过 | 合并为单一 after hook，固定关闭 current/legacy 两连接后才删除临时目录；不改或放宽 production capability trigger |
 | PR #147 第二轮 review 两项 P2 | 新增两条 red tests 后 28/30；修后 migration/system 相邻 67/67 PASS，lint/node/diff PASS | rollback journal 先落盘再移动失败候选；SYSTEM_OP `success_with_skips` 绑定后按 candidate API 重建有效主体 |
 | PR #147 第二轮 review 最终门禁 | release-check lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）；check-vars 0 命中 | 两项修复合并后的本地最终头全仓回归，等待 Windows 最新头与 review 复验 |
+| PR #147 第三轮 review 三项 | 4 条代表红测确认：存档根未传 worker、损坏 historical Blob 仍绑定、target 保留候选无法回滚、`switched` 坏候选不恢复；修复后核心 27/27、Archive/迁移相邻 118/118 PASS | historical binder 物理 SHA/size；target/source 双候选位置统一回滚；`switched` 复验失败恢复 v1 |
+| PR #147 第三轮 review 最终门禁 | release-check lint/smoke PASS；unit 5198/5198（336 files）；integration 48/48 scripts、2385/2385 assertions（396171ms） | 三项 review 修复与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
 
 ## Remaining Unknowns
 

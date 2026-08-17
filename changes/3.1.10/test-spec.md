@@ -41,6 +41,8 @@
 | copy中断 | 故障注入 | journal可恢复/安全重做；旧库唯一有效 |
 | 切换窗口崩溃 | rename前/后/reopen前 | journal唯一判定；不双写、不误删旧库 |
 | 切换后回滚崩溃 | `rolling-back` 已落盘后、失败候选移动后、备份恢复前 | failed path 可解释；旧 v1 备份恢复；失败候选清理；二启幂等 |
+| target rename 被占用 | source 已备份、候选仍在 target | rolling-back 先接管 target 候选，再恢复 v1；原始文件错误可见但数据库可继续使用 |
+| switched 首次复验失败 | journal 已 switched、完整 v1 备份仍在 | 同一回滚链恢复 v1、清候选并幂等收口；不得永久保留坏 v2 |
 | 候选 ready 交接 | 复验后并发 mutation/主库 close 失败/ack 后 worker crash | ack 前源锁仍在；关闭失败 abort；未经完整握手不切换 |
 | transition 交叉 | updater↔migration↔普通退出 | owner/token lease 互斥，错误 owner/token 不得释放他方 gate |
 | recovery 删除耐久 | backup/sidecar 删除后再次崩溃 | DB dir fsync 后才 done；journal 删除后 fsync journal dir；二启幂等 |
@@ -58,7 +60,7 @@
 | 归档批次混合artifact | 任一业务hold阻断整批删除并解释原因 |
 | fallback按需导出 | 未归档新行仍可完整导出；绑定后fallback归零 |
 | v1过渡期重建 | 未归档fallback原样保留；ready+SHA/size匹配者清fallback并建hold |
-| 历史exact binder | 只绑定flow+record+SHA唯一匹配；歧义保持unavailable |
+| 历史exact binder | 只绑定flow+record+SHA唯一匹配，且 canonical Blob 物理大小/SHA复验通过；歧义、缺失或损坏均保持unavailable且不建hold |
 | 迁移已有archive cleanup/outbox | 维护准入等待/拒绝，不吞待办 |
 | 大文件流式导出 | 主进程响应、内存、输出行数与hash守恒 |
 | dbstat目标 | 核心约4.3–4.6GB且下降>=75%，外部存档分列 |
@@ -93,4 +95,6 @@
 - PR #147 第二轮 Windows CI 唯一失败为测试 teardown 顺序：contract-v2 业务断言通过后，先删仍打开的 SQLite 报 `EBUSY`；修为单一 hook 中先 close current/legacy 连接再删除目录，生产 trigger 合同不变。
 - PR #147 第二轮 review 两项 P2 先红 28/30；补齐 `rolling-back` durable path 与 SYSTEM_OP candidate 重建后，相邻 migration/import/export 67/67、lint/node/diff PASS。
 - 第二轮 review 修后最终 `npm run release-check`：lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）PASS；check-vars 0 命中。
+- PR #147 第三轮 review 4 条代表先红 23/27；补齐存档根 worker 透传、historical canonical 物理复验、target 残留候选接管与 switched 复验回滚后，核心 27/27、Archive/迁移相邻 118/118 PASS。
+- 第三轮 review 修后唯一完整 `npm run release-check`：lint/smoke PASS；unit 5198/5198（336 files）；integration 48/48 scripts、2385/2385 assertions（396171ms）PASS；runner 仅全绿后自动同步 policy。
 - 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。

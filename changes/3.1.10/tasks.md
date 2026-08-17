@@ -3,7 +3,7 @@
 ## Task 1 — 合同与schema
 - 目标：冻结v2表、DTO、索引、兼容marker。
 - 验证：schema/foreign key/index测试。
-- 状态：done（本地实现与聚焦证据）
+- 状态：done（本地实现与聚焦证据；历史 exact binder 仅在 canonical Blob 物理 SHA/size 复验通过后绑定）
 
 ## Task 2 — 导入纵切
 - 目标：staging分类、slim effective、compact anomaly、fallback与计数守恒。
@@ -23,9 +23,9 @@
 ## Task 5 — Copy-on-write迁移
 - 目标：维护准入、checkpoint/space、转换/守恒、journal/原子切换/删旧库。
 - 验证：故障注入、双启动、真实副本dbstat。
-- 状态：done（回滚前持久化 `rolling-back` 与 failed path；失败候选移动后崩溃可恢复；真实库dbstat/Windows仍为发布门禁）
+- 状态：done（回滚前持久化 `rolling-back` 与 failed path；target/source 两种候选位置及 `switched` 首次复验失败均恢复 v1；真实库dbstat/Windows仍为发布门禁）
 
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（PR #147 Windows tag/fsync/teardown 问题及两轮 review 共四项 P2 已修；最新 review 两项先红 28/30、相邻修后 67/67，最终 release-check 5195/5195 + 48/48/2385 全绿，等待远端 Windows/review 复验；真实库、packaged Windows 与资金人工仍为发布阻断项）
+- 状态：in_progress（PR #147 第三轮 2×P1+1×P2 已红绿闭合；核心27/27、相邻118/118、release-check 5198/5198 + 48/48/2385 全绿；待远端 Windows CI 与 review 复验；真实库、packaged Windows 与资金人工仍为发布阻断项）

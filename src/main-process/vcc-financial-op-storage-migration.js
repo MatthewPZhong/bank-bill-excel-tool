@@ -88,7 +88,8 @@ function runMigrationWorker(options) {
     worker.postMessage({
       action: 'build',
       sourcePath: options.sourcePath,
-      targetPath: options.targetPath
+      targetPath: options.targetPath,
+      archiveRootDir: options.archiveRootDir
     });
   }).finally(() => {
     if (typeof worker.terminate === 'function') worker.terminate().catch(() => undefined);
@@ -153,6 +154,7 @@ function createVccStorageMigrationCoordinator(options = {}) {
         migrationId: `vcc-storage-${now}`
       });
       let archiveMaintenance = false;
+      let archiveRootDir = '';
       let localResume = null;
       let databaseClosed = false;
       try {
@@ -171,6 +173,7 @@ function createVccStorageMigrationCoordinator(options = {}) {
             );
           }
           archiveMaintenance = true;
+          archiveRootDir = String(maintenance.rootDir || '');
         }
         if (typeof options.pauseLocalMaintenance === 'function') {
           localResume = await options.pauseLocalMaintenance();
@@ -179,6 +182,7 @@ function createVccStorageMigrationCoordinator(options = {}) {
         const result = await runMigrationWorker({
           sourcePath,
           targetPath,
+          archiveRootDir,
           workerPath: options.workerPath,
           workerFactory: options.workerFactory,
           onProgress: (progress) => {

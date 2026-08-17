@@ -33,6 +33,7 @@ if (parentPort) {
       const result = buildVccStorageCandidate({
         sourcePath: message.sourcePath,
         targetPath: message.targetPath,
+        archiveRootDir: message.archiveRootDir,
         onProgress: (progress) => parentPort.postMessage({ type: 'progress', progress }),
         holdSourceLockUntilAck: (candidate) => {
           parentPort.postMessage({ type: 'ready', result: candidate });

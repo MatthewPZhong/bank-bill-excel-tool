@@ -1,8 +1,11 @@
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
+
+const { resolveManagedRelative } = require('./archive-center/storage-layout');
 
 const {
   VCC_STORAGE_CONTRACT_VERSION,
@@ -660,7 +663,44 @@ function activeHistoricalSourceNames(targetDb, recordId) {
   return names;
 }
 
-function bindExactHistoricalImportSources(targetDb) {
+function physicallyVerifyHistoricalArtifact(artifact, options = {}) {
+  const archiveRootDir = String(options.archiveRootDir || '').trim();
+  if (!archiveRootDir) return false;
+  const fsImpl = options.fsImpl || fs;
+  const expectedSha256 = String(artifact.sha256 || '').toLowerCase();
+  const expectedSizeBytes = Number(artifact.size_bytes);
+  if (!SHA256_RE.test(expectedSha256)
+      || !Number.isSafeInteger(expectedSizeBytes)
+      || expectedSizeBytes < 0) return false;
+
+  let fileDescriptor = null;
+  try {
+    const artifactPath = resolveManagedRelative(archiveRootDir, artifact.relative_path);
+    const leaf = fsImpl.lstatSync(artifactPath);
+    if (!leaf.isFile() || leaf.isSymbolicLink() || Number(leaf.size) !== expectedSizeBytes) {
+      return false;
+    }
+    fileDescriptor = fsImpl.openSync(artifactPath, 'r');
+    const digest = crypto.createHash('sha256');
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    let totalBytes = 0;
+    while (true) {
+      const bytesRead = fsImpl.readSync(fileDescriptor, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      totalBytes += bytesRead;
+      digest.update(buffer.subarray(0, bytesRead));
+    }
+    return totalBytes === expectedSizeBytes && digest.digest('hex') === expectedSha256;
+  } catch (_error) {
+    return false;
+  } finally {
+    if (fileDescriptor !== null) {
+      try { fsImpl.closeSync(fileDescriptor); } catch (_error) {}
+    }
+  }
+}
+
+function bindExactHistoricalImportSources(targetDb, options = {}) {
   const requiredTables = [
     'archive_artifacts',
     'archive_batches',
@@ -698,7 +738,7 @@ function bindExactHistoricalImportSources(targetDb) {
 
   const artifacts = targetDb.prepare(`
     SELECT artifact.id, artifact.batch_id, artifact.original_name,
-           blob.sha256, blob.size_bytes
+           blob.sha256, blob.size_bytes, blob.relative_path
     FROM main.archive_artifacts AS artifact
     JOIN main.archive_blobs AS blob ON blob.id = artifact.blob_id
     WHERE artifact.status = 'ready'
@@ -727,6 +767,7 @@ function bindExactHistoricalImportSources(targetDb) {
     FROM main.vcc_fin_op_import_sources
     WHERE archive_artifact_id IS NOT NULL
   `).all().map((row) => Number(row.id)));
+  const verifiedArtifacts = new Map();
 
   const insertSource = targetDb.prepare(`
     INSERT INTO main.vcc_fin_op_import_sources (
@@ -757,6 +798,11 @@ function bindExactHistoricalImportSources(targetDb) {
               || !SHA256_RE.test(sha256)
               || !Number.isSafeInteger(sizeBytes)
               || sizeBytes < 0) return null;
+          const artifactId = Number(artifact.id);
+          if (!verifiedArtifacts.has(artifactId)) {
+            verifiedArtifacts.set(artifactId, physicallyVerifyHistoricalArtifact(artifact, options));
+          }
+          if (!verifiedArtifacts.get(artifactId)) return null;
           return { name, artifact, sha256, sizeBytes };
         })
       : null;
@@ -1316,7 +1362,10 @@ function buildVccStorageCandidate(options) {
     emitProgress(onProgress, 'copying', processed, tables.length + 4, '转换异常审计');
     const migratedLegacyErrors = migrateLegacyImportErrors(targetDb);
     const migratedFailures = migrateFileFailures(targetDb);
-    const historicalLineage = bindExactHistoricalImportSources(targetDb);
+    const historicalLineage = bindExactHistoricalImportSources(targetDb, {
+      archiveRootDir: options.archiveRootDir,
+      fsImpl
+    });
     const removedReadyFallbacks = removeVerifiedReadyFallbacks(targetDb);
     refreshImportRecordSummaries(targetDb);
     reconcileVccHolds(targetDb);
@@ -1474,16 +1523,22 @@ function completeRollbackJournal(journalPath, journal, options = {}) {
       '回滚记录缺少安全的失败候选路径，已停止自动恢复'
     );
   }
-  if (fsImpl.existsSync(journal.targetPath)) {
-    throw new VccStorageMigrationError(
-      'vcc-storage-recovery-conflict',
-      '回滚期间候选路径重新出现，已停止自动恢复'
-    );
-  }
-
   let sourceExists = fsImpl.existsSync(journal.sourcePath);
   let backupExists = fsImpl.existsSync(journal.backupPath);
   let failedCandidateExists = fsImpl.existsSync(failedCandidatePath);
+  const targetExists = fsImpl.existsSync(journal.targetPath);
+  if (targetExists) {
+    if (sourceExists || !backupExists || failedCandidateExists) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-recovery-conflict',
+        '回滚期间候选路径与数据库状态冲突，已停止自动恢复'
+      );
+    }
+    fsImpl.renameSync(journal.targetPath, failedCandidatePath);
+    fsyncDirectory(path.dirname(journal.targetPath), fsImpl);
+    invokeFault(options.faultInjector, 'after-failed-candidate-rename');
+    failedCandidateExists = true;
+  }
   if (backupExists) {
     if (sourceExists) {
       if (failedCandidateExists) {
@@ -1741,9 +1796,21 @@ function recoverVccStorageMigration(options) {
       faultInjector: options.faultInjector
     });
   }
-  if (journal.phase === 'switched' || journal.phase === 'reopen-verified') {
+  if (journal.phase === 'switched') {
+    try {
+      const reopened = verifyReopenedDatabase(journal.sourcePath);
+      journal = updateJournal(journalPath, journal, 'reopen-verified', { reopened }, fsImpl);
+    } catch (error) {
+      if (!fsImpl.existsSync(journal.backupPath)) throw error;
+      journal = beginRollbackJournal(journalPath, journal, error, fsImpl);
+      journal = completeRollbackJournal(journalPath, journal, {
+        fsImpl,
+        faultInjector: options.faultInjector
+      });
+    }
+  }
+  if (journal.phase === 'reopen-verified') {
     verifyReopenedDatabase(journal.sourcePath);
-    journal = updateJournal(journalPath, journal, 'reopen-verified', {}, fsImpl);
     if (deleteOldDatabaseDurably(journal, fsImpl)) {
       invokeFault(options.faultInjector, 'after-recovery-backup-delete');
     }
