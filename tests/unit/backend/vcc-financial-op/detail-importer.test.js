@@ -608,6 +608,46 @@ test('同批跨文件同键同内容只新增一次且幂等跳过仅累计计�
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
 });
 
+test('同批跨文件同键异内容为每条异常保留对端哈希和精确差异字段', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  replaceEmptyEffectiveRowsWithSlimSchema(db);
+  const dir = tempDir(t);
+  const one = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'conflict-1.xlsx', [
+    rechargeRow({ 订单号: 'same-batch-conflict', 我方到账金额: '10.25' })
+  ]);
+  const two = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'conflict-2.xlsx', [
+    rechargeRow({ 订单号: 'same-batch-conflict', 我方到账金额: '99.99' })
+  ]);
+
+  const result = await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(one, SOURCE_TYPES.RECHARGE), fileEntry(two, SOURCE_TYPES.RECHARGE)]
+  });
+
+  assert.equal(result.records[0].status, 'failed_conflict');
+  assert.equal(result.records[0].conflictCount, 2);
+  const anomalies = db.prepare(`
+    SELECT incoming_content_hash, existing_content_hash, diff_fields_json
+    FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'idempotent_conflict'
+    ORDER BY source_row, id
+  `).all(result.records[0].recordId);
+  assert.equal(anomalies.length, 2);
+  assert.deepEqual(
+    new Set(anomalies.map((row) => row.incoming_content_hash)),
+    new Set(anomalies.map((row) => row.existing_content_hash))
+  );
+  for (const anomaly of anomalies) {
+    assert.ok(anomaly.existing_content_hash);
+    assert.notEqual(anomaly.existing_content_hash, anomaly.incoming_content_hash);
+    assert.deepEqual(JSON.parse(anomaly.diff_fields_json), ['我方到账金额']);
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+});
+
 test('通道明细同键改填公司主体时冲突明细明确标识主体差异', async (t) => {
   const db = createDb();
   t.after(() => db.close());

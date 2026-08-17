@@ -129,12 +129,47 @@ function hasEffectiveRawJson(db) {
 
 function updateConflictComparisons(db, recordId, sourceType) {
   if (!hasEffectiveRawJson(db)) {
-    db.prepare(`
-      UPDATE vcc_fin_op_import_staging_rows
-      SET diff_fields_json = '["业务内容"]'
+    const conflictRows = db.prepare(`
+      SELECT id, idempotency_key, content_hash, raw_json, raw_contract_version,
+             subject, existing_effective_id
+      FROM vcc_fin_op_import_staging_rows
       WHERE import_record_id = ? AND disposition = 'idempotent_conflict'
-        AND existing_effective_id IS NOT NULL
-    `).run(recordId);
+      ORDER BY id
+    `).all(recordId);
+    const findPeer = db.prepare(`
+      SELECT id, raw_json, raw_contract_version, subject
+      FROM vcc_fin_op_import_staging_rows
+      WHERE import_record_id = ? AND idempotency_key = ? AND content_hash <> ?
+      ORDER BY id
+      LIMIT 1
+    `);
+    const update = db.prepare(`
+      UPDATE vcc_fin_op_import_staging_rows
+      SET comparison_import_row_id = ?, diff_fields_json = ?
+      WHERE id = ?
+    `);
+    for (const row of conflictRows) {
+      if (row.existing_effective_id !== null) {
+        update.run(null, '["业务内容"]', row.id);
+        continue;
+      }
+      const peer = findPeer.get(recordId, row.idempotency_key, row.content_hash);
+      update.run(
+        peer ? peer.id : null,
+        JSON.stringify(peer
+          ? diffFieldNames(
+              sourceType,
+              row.raw_json,
+              peer.raw_json,
+              row.subject,
+              peer.subject,
+              row.raw_contract_version,
+              peer.raw_contract_version
+            )
+          : ['业务内容']),
+        row.id
+      );
+    }
     return;
   }
   const conflictRows = db.prepare(`

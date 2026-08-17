@@ -518,6 +518,12 @@ function systemLineageInspection(db, scope) {
     AND s.archive_state = 'ready'
     AND s.archive_artifact_id IS NOT NULL
   `;
+  const retryableFallback = `
+    s.id IS NOT NULL
+    AND s.archive_artifact_id IS NULL
+    AND s.bound_at IS NULL
+    AND s.archive_state <> 'ready'
+  `;
   const integrityFailure = `
     (snapshot.import_source_id IS NOT NULL AND s.id IS NULL)
     OR (
@@ -529,8 +535,8 @@ function systemLineageInspection(db, scope) {
   const counts = db.prepare(`
     SELECT
       COUNT(*) AS snapshot_count,
-      COALESCE(SUM(CASE WHEN ${boundReady} THEN 1 ELSE 0 END), 0)
-        AS ready_snapshot_count,
+      COALESCE(SUM(CASE WHEN (${boundReady}) OR (${retryableFallback}) THEN 1 ELSE 0 END), 0)
+        AS exportable_snapshot_count,
       COALESCE(SUM(CASE WHEN ${integrityFailure} THEN 1 ELSE 0 END), 0)
         AS integrity_snapshot_count
     FROM vcc_fin_op_system_snapshots AS snapshot
@@ -538,17 +544,18 @@ function systemLineageInspection(db, scope) {
     WHERE snapshot.target_month = ?
   `).get(scope.targetMonth);
   const totalRows = (Number(counts.snapshot_count) || 0) * SUPPORTED_CURRENCIES.length;
-  const readyRows = (Number(counts.ready_snapshot_count) || 0) * SUPPORTED_CURRENCIES.length;
+  const sourceExportableRows = (Number(counts.exportable_snapshot_count) || 0)
+    * SUPPORTED_CURRENCIES.length;
   const integrityFailureRows = (Number(counts.integrity_snapshot_count) || 0)
     * SUPPORTED_CURRENCIES.length;
-  const exportableRows = legacyRows + readyRows;
+  const exportableRows = legacyRows + sourceExportableRows;
   const missingByImportRecord = db.prepare(`
     SELECT snapshot.import_record_id AS import_record_id, COUNT(*) AS missing_snapshots
     FROM vcc_fin_op_system_snapshots AS snapshot
     LEFT JOIN vcc_fin_op_import_sources AS s ON s.id = snapshot.import_source_id
     WHERE snapshot.target_month = ?
       AND snapshot.import_source_id IS NOT NULL
-      AND NOT (${boundReady})
+      AND NOT ((${boundReady}) OR (${retryableFallback}))
       AND NOT (${integrityFailure})
     GROUP BY snapshot.import_record_id
     ORDER BY snapshot.import_record_id
@@ -811,6 +818,22 @@ async function emitReconstructedDetailRows(db, scope, archiveSources, emit) {
 
 async function emitReconstructedSystemRows(db, scope, archiveSources, emit) {
   for (const values of iterateLegacyDatasetRows(db, scope)) emit(values);
+
+  // 新导入在 artifact 尚未成功绑定时，system snapshot.raw_json 是其临时原表
+  // fallback。只要曾绑定过 artifact，就仍按完整性故障失败关闭，不能回退到 raw。
+  const fallbackSnapshots = db.prepare(`
+    SELECT snapshot.id, snapshot.subject, snapshot.balances_json, snapshot.raw_json
+    FROM vcc_fin_op_system_snapshots AS snapshot
+    JOIN vcc_fin_op_import_sources AS source ON source.id = snapshot.import_source_id
+    WHERE snapshot.target_month = ?
+      AND source.archive_artifact_id IS NULL
+      AND source.bound_at IS NULL
+      AND source.archive_state <> 'ready'
+    ORDER BY snapshot.id
+  `).iterate(scope.targetMonth);
+  for (const snapshot of fallbackSnapshots) {
+    for (const values of systemSnapshotRows(snapshot)) emit(values);
+  }
 
   const sourceById = new Map((archiveSources || []).map((source) => [
     Number(source.sourceId),

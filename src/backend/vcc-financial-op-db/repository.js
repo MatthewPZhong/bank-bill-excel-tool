@@ -237,10 +237,12 @@ function persistStagingAnomalies(db, recordId) {
       END,
       COALESCE(staging.validation_message, '导入异常'),
       staging.content_hash,
-      effective.content_hash,
+      COALESCE(effective.content_hash, comparison.content_hash),
       COALESCE(staging.diff_fields_json, '[]')
     FROM vcc_fin_op_import_staging_rows staging
     LEFT JOIN vcc_fin_op_effective_rows effective ON effective.id = staging.existing_effective_id
+    LEFT JOIN vcc_fin_op_import_staging_rows comparison
+      ON comparison.id = staging.comparison_import_row_id
     WHERE staging.import_record_id = ?
       AND staging.disposition IN ('invalid_key', 'format_error', 'idempotent_conflict')
       AND NOT EXISTS (

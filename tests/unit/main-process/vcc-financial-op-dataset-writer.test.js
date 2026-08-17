@@ -795,6 +795,63 @@ test('v1 detail 与 SYSTEM_OP 一旦有 source/artifact 绑定，failed artifact
   }
 });
 
+test('SYSTEM_OP 新导入待存档或存档失败时从临时 raw fallback 完整导出', async (t) => {
+  const { db, dir } = openFixture(t);
+  insertFormalSystemSnapshot(db);
+  const record = db.prepare(`
+    SELECT id FROM vcc_fin_op_import_records WHERE batch_id = 'batch-system'
+  `).get();
+  const sourceId = repository.createImportSource(db, record.id, {
+    sourceOrdinal: 1,
+    fileName: 'system-pending.xlsx',
+    sha256: 'a'.repeat(64),
+    sizeBytes: 1024
+  });
+  db.prepare(`
+    UPDATE vcc_fin_op_system_snapshots SET import_source_id = ?
+    WHERE import_record_id = ?
+  `).run(sourceId, record.id);
+
+  for (const archiveState of ['pending', 'failed']) {
+    db.prepare(`
+      UPDATE vcc_fin_op_import_sources
+      SET archive_state = ?, archive_artifact_id = NULL, bound_at = NULL
+      WHERE id = ?
+    `).run(archiveState, sourceId);
+    const preview = inspectDatasetExport(
+      db,
+      '2026-06',
+      SOURCE_TYPES.SYSTEM_OP,
+      EXPORT_KINDS.RAW
+    );
+    assert.deepEqual({
+      totalRows: preview.totalRows,
+      exportableRows: preview.exportableRows,
+      missingRows: preview.missingRows,
+      incomplete: preview.incomplete
+    }, {
+      totalRows: SUPPORTED_CURRENCIES.length,
+      exportableRows: SUPPORTED_CURRENCIES.length,
+      missingRows: 0,
+      incomplete: false
+    });
+
+    const outputPath = path.join(dir, `system-${archiveState}-fallback.xlsx`);
+    const result = await writeDatasetWorkbook({
+      db,
+      targetMonth: '2026-06',
+      sourceType: SOURCE_TYPES.SYSTEM_OP,
+      targetKind: EXPORT_KINDS.RAW,
+      outputPath,
+      archiveSources: []
+    });
+    assert.equal(result.dataCount, SUPPORTED_CURRENCIES.length);
+    const { sheet } = await readSheet(outputPath);
+    assert.equal(sheet.rowCount, SUPPORTED_CURRENCIES.length + 1);
+    assert.equal(sheet.getCell(2, SYSTEM_OP_DEFINITION.indexes['主体'] + 1).value, 'PPHK');
+  }
+});
+
 test('SYSTEM_OP 绑定 ready artifact 后从核验文件重建，损坏文件整次失败', async (t) => {
   const { db, dir } = openFixture(t);
   const sourcePath = path.join(dir, 'bound-system.xlsx');

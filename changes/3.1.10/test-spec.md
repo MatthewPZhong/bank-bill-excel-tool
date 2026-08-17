@@ -17,6 +17,7 @@
 | 成功含异常 | 正常+invalid/format/conflict | 正常有效；异常compact记录；六类计数守恒 |
 | 全幂等 | 全部同key同hash | 只增skipped_count；0 anomaly/0逐行audit/0按钮 |
 | 冲突 | 同key不同hash | 保留旧effective；compact conflict含比较hash/diff |
+| 同批首次冲突 | 同一批两个新文件同key不同hash | 两侧 anomaly 均保存对端 hash 和精确 diff；0 effective；不保存完整 raw |
 | 取消/崩溃 | staging中断 | 有效数据不部分提交；staging清空；文件级failure一条 |
 | 存档绑定 | 正确/错误SHA | 正确ready+hold+清fallback；错误拒绝且fallback保留 |
 | pre-business handoff | A 已持久归档后同路径替换为 B | worker 首次 hash 后、建 batch 前拒绝；业务表 0 写；A artifact 不覆盖 |
@@ -30,6 +31,7 @@
 | 零覆盖 | 全部unavailable | 说明sheet；0数据；不得声称完整 |
 | 完整性故障 | artifact/hash/row错位 | 整次失败，不降级部分导出 |
 | SYSTEM_OP/v1 bound 完整性 | bound artifact failed/corrupt | 不得借 raw_json 降级；只有无 source 历史 v1 可走过渡导出 |
+| SYSTEM_OP 临时 fallback | 新导入 source 为 pending/failed、从未绑定 artifact | preview 9/9 可导出；从 snapshot raw 完整重建；曾绑定故障仍禁止降级 |
 | v3.1.9 降级写 | contract-v2 库由已发布旧连接打开 | 所有 VCC I/U/D fail-closed；新版连接正常工作 |
 | v3.1.9 importing 升级恢复 | legacy import_rows 已分块提交后崩溃 | rolled_back/异常/六类计数守恒，旧正常宽行清理 |
 | 多文件末次 SHA 失败 | ordinal 2 在读取后变化 | anomaly/source/六列文件名精确指向 ordinal 2 |
@@ -85,4 +87,5 @@
 - 修后组合证据：migration 28/28+104/104；contract/recovery 116/116+32/32+5/5；archive 71/71+219/219；A→B 124/124+113/113+31/31；最终 unit 5191/5191、lint/smoke/node/diff PASS。
 - 修后唯一完整 `npm run release-check`：lint/smoke PASS；unit 5191/5191（336 files）；integration 48/48 scripts、2385/2385 assertions（368077ms）PASS；runner 仅全绿后自动同步 policy。
 - PR #147 首次 Windows CI 将 19 项失败归并为两个环境合同缺口：shallow checkout 缺冻结 `v3.1.9` tag（2 项）与只读文件句柄 fsync `EPERM`（17 项）；修复后本地聚焦 68/68、完整 release-check 5191/5191 + 48/48/2385 PASS。
+- PR #147 首轮 review 两项 P2 均为真实合同缺口：新增 red tests 后 47/49；修复同批 peer evidence 与 SYSTEM_OP 临时 fallback 后，相关 detail/system/dataset/rebuild 91/91 PASS；最终 release-check lint/smoke、unit 5193/5193、integration 48/48 与 2385/2385（305367ms）PASS。
 - 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。
