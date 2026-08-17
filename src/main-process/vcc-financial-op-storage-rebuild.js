@@ -1793,17 +1793,21 @@ function recoverVccStorageMigration(options) {
       fsyncDirectory(path.dirname(journal.sourcePath), fsImpl);
       journal = updateJournal(journalPath, journal, 'switched', {}, fsImpl);
     } else if (sourceExists && backupExists) {
-      const version = (() => {
+      let version = null;
+      let candidateError = null;
+      try {
         const db = openReadOnlyDatabase(journal.sourcePath);
-        try { return storageContractVersion(db); } finally { db.close(); }
-      })();
-      if (version === VCC_STORAGE_CONTRACT_VERSION) {
+        try { version = storageContractVersion(db); } finally { db.close(); }
+      } catch (error) {
+        candidateError = error;
+      }
+      if (!candidateError && version === VCC_STORAGE_CONTRACT_VERSION) {
         journal = updateJournal(journalPath, journal, 'switched', {}, fsImpl);
       } else {
         journal = beginRollbackJournal(
           journalPath,
           journal,
-          new VccStorageMigrationError(
+          candidateError || new VccStorageMigrationError(
             'vcc-storage-reopen-contract-mismatch',
             'switching 恢复时活动候选不符合 v2 合同'
           ),

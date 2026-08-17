@@ -43,6 +43,7 @@
 | 切换后回滚崩溃 | `rolling-back` 已落盘后、失败候选移动后、备份恢复前 | failed path 可解释；旧 v1 备份恢复；失败候选清理；二启幂等 |
 | target rename 被占用 | source 已备份、候选仍在 target | rolling-back 先接管 target 候选，再恢复 v1；原始文件错误可见但数据库可继续使用 |
 | switched 首次复验失败 | journal 已 switched、完整 v1 备份仍在 | 同一回滚链恢复 v1、清候选并幂等收口；不得永久保留坏 v2 |
+| switching 活动候选不可读 | target 已 rename 到 source、journal 尚未 switched、完整 v1 备份仍在 | 捕获 open/query/合同错误并进入同一 rolling-back；恢复 v1，二启不循环失败 |
 | 候选 ready 交接 | 复验后并发 mutation/主库 close 失败/ack 后 worker crash | ack 前源锁仍在；关闭失败 abort；未经完整握手不切换 |
 | transition 交叉 | updater↔migration↔普通退出 | owner/token lease 互斥，错误 owner/token 不得释放他方 gate |
 | recovery 删除耐久 | backup/sidecar 删除后再次崩溃 | DB dir fsync 后才 done；journal 删除后 fsync journal dir；二启幂等 |

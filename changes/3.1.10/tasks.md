@@ -23,7 +23,7 @@
 ## Task 5 — Copy-on-write迁移
 - 目标：维护准入、checkpoint/space、转换/守恒、journal/原子切换/删旧库。
 - 验证：故障注入、双启动、真实副本dbstat。
-- 状态：done（回滚前持久化 `rolling-back` 与 failed path；target/source 两种候选位置及 `switched` 首次复验失败均恢复 v1；真实库dbstat/Windows仍为发布门禁）
+- 状态：done（回滚前持久化 `rolling-back` 与 failed path；target/source 两种候选位置、`switching` 不可读候选及 `switched` 首次复验失败均恢复 v1；真实库dbstat/Windows仍为发布门禁）
 
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。

@@ -34,6 +34,7 @@
 | 历史 exact binder 必须物理复验 canonical Blob | `ready` 与数据库 SHA/size 只证明曾经发布成功，不能证明迁移时磁盘实体仍完整 | 直接信任 artifact/blob metadata | coordinator 把维护中的真实存档根传入 worker；受控路径逐文件流式 SHA/size，不一致保持 unavailable 且不建 hold |
 | 历史新绑定 artifact 在切换边界二次物理复验 | 初次 hash 后仍有候选复制、守恒与压缩率验证窗口；同步盘/网络盘可在此期间同大小替换原件 | 只依赖迁移早期的一次物理 hash | worker 在全部候选门禁后、发送 `ready` 前再次流式核 SHA/size；变化即清候选并保留 v1/raw_json |
 | `switched` 只有复验成功后才成为不可回退真相 | target rename 失败可把候选留在 target；进程也可在写 `switched` 后、复验前崩溃 | 目标仍在即冲突、或恢复时反复验证坏 v2 | 同一 rolling-back executor 接管 target/source 两种候选位置并恢复完整 v1；`reopen-verified` 之后仍禁止回退 |
+| `switching` 恢复读取候选失败也必须回滚 | target 已激活但 journal 尚未推进时，候选 open/query 失败会在完整 backup 存在时形成永久启动循环 | 只处理可打开但 marker 错误的候选 | 捕获候选实体读取与合同错误，先落 rolling-back 再复用同一 executor 恢复 v1 |
 
 ## Assumptions
 
@@ -80,6 +81,8 @@
 | PR #147 第三轮 review 最终门禁 | release-check lint/smoke PASS；unit 5198/5198（336 files）；integration 48/48 scripts、2385/2385 assertions（396171ms） | 三项 review 修复与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
 | PR #147 最新头 review P1 | 同大小替换 canonical Blob 的 TOCTOU 代表测试先红（旧实现未抛错），切换边界二次 SHA/size 复验后 storage rebuild 19/19 PASS | 历史原件初次验证后变化不得随候选切换丢失最后 raw 表示 |
 | PR #147 最新头 review P1 最终门禁 | Archive/迁移相邻 119/119；release-check lint/smoke PASS、unit 5199/5199（336 files）、integration 48/48 scripts、2385/2385 assertions（306394ms）；check-vars 0 命中 | 二次实体验证与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
+| PR #147 最新头复审 P2 | `switching` 活动候选改写为非 SQLite 后恢复测试先红（`file is not a database`），接入 rolling-back executor 后代表用例转绿 | journal 尚未 switched 时不可读候选不再压住完整 v1 backup 形成启动循环 |
+| PR #147 最新头复审 P2 最终门禁 | Archive/迁移相邻 120/120；release-check lint/smoke PASS、unit 5200/5200（336 files）、integration 48/48 scripts、2385/2385 assertions（388948ms）；check-vars 0 命中 | switching 不可读恢复修复与文档同步后的全仓终态；runner 仅在全绿后刷新 policy |
 
 ## Remaining Unknowns
 

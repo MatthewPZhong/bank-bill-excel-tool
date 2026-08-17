@@ -1215,6 +1215,35 @@ test('switched journal 的活动候选复验失败时恢复完整 v1 备份', (t
   assert.equal(fs.existsSync(journalPath), false);
 });
 
+test('switching journal 的活动候选不可读时恢复完整 v1 备份', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'switching-unreadable.sqlite');
+  const targetPath = path.join(directory, 'switching-unreadable.next.sqlite');
+  const backupPath = path.join(directory, 'switching-unreadable.backup.sqlite');
+  const journalPath = path.join(directory, 'run-data', 'switching-unreadable.json');
+  createLegacyDatabase(sourcePath);
+  buildVccStorageCandidate({ sourcePath, targetPath, availableBytes: 1024 ** 4 });
+  let journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    migrationId: 'switching-unreadable-recovery'
+  });
+  journal = updateJournal(journalPath, journal, 'switching');
+  fs.renameSync(sourcePath, backupPath);
+  fs.renameSync(targetPath, sourcePath);
+  fs.writeFileSync(sourcePath, Buffer.from('not-a-sqlite-candidate'));
+
+  assert.deepEqual(recoverVccStorageMigration({ journalPath }), {
+    status: 'rolled-back',
+    sourcePath
+  });
+  const db = new DatabaseSync(sourcePath, { readOnly: true });
+  try { assert.equal(storageContractVersion(db), 1); } finally { db.close(); }
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
 test('recovery 删除备份后先 fsync DB 目录，删除 journal 后 fsync journal 目录，done 可幂等补删', (t) => {
   const directory = tempDir(t);
   const journalDirectory = path.join(directory, 'run-data');
