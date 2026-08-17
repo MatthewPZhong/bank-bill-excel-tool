@@ -3,7 +3,7 @@
 ## Task 1 — 合同与schema
 - 目标：冻结v2表、DTO、索引、兼容marker。
 - 验证：schema/foreign key/index测试。
-- 状态：done（本地实现与聚焦证据；历史 exact binder 仅在 canonical Blob 物理 SHA/size 复验通过后绑定）
+- 状态：done（本地实现与聚焦证据；历史 exact binder 仅在 canonical Blob 初次及切换边界物理 SHA/size 双重复验通过后绑定）
 
 ## Task 2 — 导入纵切
 - 目标：staging分类、slim effective、compact anomaly、fallback与计数守恒。

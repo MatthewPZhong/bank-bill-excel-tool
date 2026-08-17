@@ -32,6 +32,7 @@
 | SYSTEM_OP artifact 重建复用候选解析 | `success_with_skips` 的同一工作簿可同时含有效主体与已审计异常主体，严格整文件 reader 会错误否决有效主体 | 绑定后重新要求工作簿零异常 | 只提升并严格核对 DB 已提交主体；无关异常保留 anomaly，不放宽 SHA/主体/hash/sheet/row 门禁 |
 | 切换失败候选移动前先持久化 `rolling-back` | 候选移走后、备份恢复前崩溃会让 `switching` journal 无法解释文件状态 | 依赖 rename 很快完成或启动时猜文件 | journal 先保存受控 failed path；候选移动、备份恢复、cleanup 任一窗口均可幂等续跑 |
 | 历史 exact binder 必须物理复验 canonical Blob | `ready` 与数据库 SHA/size 只证明曾经发布成功，不能证明迁移时磁盘实体仍完整 | 直接信任 artifact/blob metadata | coordinator 把维护中的真实存档根传入 worker；受控路径逐文件流式 SHA/size，不一致保持 unavailable 且不建 hold |
+| 历史新绑定 artifact 在切换边界二次物理复验 | 初次 hash 后仍有候选复制、守恒与压缩率验证窗口；同步盘/网络盘可在此期间同大小替换原件 | 只依赖迁移早期的一次物理 hash | worker 在全部候选门禁后、发送 `ready` 前再次流式核 SHA/size；变化即清候选并保留 v1/raw_json |
 | `switched` 只有复验成功后才成为不可回退真相 | target rename 失败可把候选留在 target；进程也可在写 `switched` 后、复验前崩溃 | 目标仍在即冲突、或恢复时反复验证坏 v2 | 同一 rolling-back executor 接管 target/source 两种候选位置并恢复完整 v1；`reopen-verified` 之后仍禁止回退 |
 
 ## Assumptions
@@ -77,6 +78,8 @@
 | PR #147 第二轮 review 最终门禁 | release-check lint/smoke PASS；unit 5195/5195（336 files）；integration 48/48 scripts、2385/2385 assertions（304013ms）；check-vars 0 命中 | 两项修复合并后的本地最终头全仓回归，等待 Windows 最新头与 review 复验 |
 | PR #147 第三轮 review 三项 | 4 条代表红测确认：存档根未传 worker、损坏 historical Blob 仍绑定、target 保留候选无法回滚、`switched` 坏候选不恢复；修复后核心 27/27、Archive/迁移相邻 118/118 PASS | historical binder 物理 SHA/size；target/source 双候选位置统一回滚；`switched` 复验失败恢复 v1 |
 | PR #147 第三轮 review 最终门禁 | release-check lint/smoke PASS；unit 5198/5198（336 files）；integration 48/48 scripts、2385/2385 assertions（396171ms） | 三项 review 修复与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
+| PR #147 最新头 review P1 | 同大小替换 canonical Blob 的 TOCTOU 代表测试先红（旧实现未抛错），切换边界二次 SHA/size 复验后 storage rebuild 19/19 PASS | 历史原件初次验证后变化不得随候选切换丢失最后 raw 表示 |
+| PR #147 最新头 review P1 最终门禁 | Archive/迁移相邻 119/119；release-check lint/smoke PASS、unit 5199/5199（336 files）、integration 48/48 scripts、2385/2385 assertions（306394ms）；check-vars 0 命中 | 二次实体验证与文档同步后的本地最终头全仓回归；runner 仅在全绿后刷新 policy |
 
 ## Remaining Unknowns
 

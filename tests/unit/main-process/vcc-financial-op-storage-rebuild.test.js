@@ -627,6 +627,61 @@ test('历史 ready artifact 的物理 SHA 不一致时不得绑定或建立 hold
   }
 });
 
+test('历史 artifact 在首次物理校验后变化时切换前再次校验并保留旧库', (t) => {
+  const directory = tempDir(t);
+  const archiveRootDir = path.join(directory, 'archive-root');
+  const sourcePath = path.join(directory, 'tool-data.sqlite');
+  const targetPath = path.join(directory, 'tool-data.sqlite.vcc-next');
+  const { recordId } = createLegacyDatabase(sourcePath);
+  const seeded = seedExactHistoricalArchive(sourcePath, recordId, { archiveRootDir });
+  const openedPaths = new Map();
+  let replacedAfterFirstVerification = false;
+  const fsImpl = new Proxy(fs, {
+    get(target, property) {
+      if (property === 'openSync') {
+        return (filePath, ...args) => {
+          const fd = target.openSync(filePath, ...args);
+          openedPaths.set(fd, path.resolve(String(filePath)));
+          return fd;
+        };
+      }
+      if (property === 'closeSync') {
+        return (fd) => {
+          const openedPath = openedPaths.get(fd);
+          openedPaths.delete(fd);
+          const result = target.closeSync(fd);
+          if (!replacedAfterFirstVerification
+              && openedPath === path.resolve(seeded.blobPath)) {
+            target.writeFileSync(seeded.blobPath, Buffer.alloc(seeded.sizeBytes, 0x59));
+            replacedAfterFirstVerification = true;
+          }
+          return result;
+        };
+      }
+      return Reflect.get(target, property);
+    }
+  });
+
+  assert.throws(() => buildVccStorageCandidate({
+    sourcePath,
+    targetPath,
+    archiveRootDir,
+    availableBytes: 1024 ** 4,
+    fsImpl
+  }), (error) => error && error.code === 'vcc-storage-historical-artifact-changed');
+  assert.equal(replacedAfterFirstVerification, true);
+  assert.equal(fs.existsSync(targetPath), false);
+
+  const sourceDb = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    assert.equal(sourceDb.prepare(`
+      SELECT raw_json FROM vcc_fin_op_effective_rows WHERE import_record_id = ?
+    `).get(recordId).raw_json, '{"订单号":"raw-key","我方到账金额":"10.25"}');
+  } finally {
+    sourceDb.close();
+  }
+});
+
 test('历史来源存在同名多候选 artifact 时不猜测绑定且不建立 hold', (t) => {
   const directory = tempDir(t);
   const sourcePath = path.join(directory, 'tool-data.sqlite');

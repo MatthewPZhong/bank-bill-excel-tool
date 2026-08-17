@@ -780,6 +780,9 @@ function bindExactHistoricalImportSources(targetDb, options = {}) {
   let boundSources = 0;
   let boundRecords = 0;
   let unavailableRecords = 0;
+  const boundArtifactEvidence = Array.isArray(options.boundArtifactEvidence)
+    ? options.boundArtifactEvidence
+    : null;
 
   for (const record of candidates) {
     const sourceNames = record.sourceNames;
@@ -846,12 +849,31 @@ function bindExactHistoricalImportSources(targetDb, options = {}) {
         SET import_source_id = ?
         WHERE import_record_id = ? AND source_file_name = ? AND import_source_id IS NULL
       `).run(sourceId, Number(record.id), match.name);
+      if (boundArtifactEvidence) {
+        boundArtifactEvidence.push(Object.freeze({
+          id: Number(match.artifact.id),
+          sha256: match.sha256,
+          size_bytes: match.sizeBytes,
+          relative_path: String(match.artifact.relative_path || '')
+        }));
+      }
       boundSources += 1;
     }
     boundRecords += 1;
   }
 
   return { boundSources, boundRecords, unavailableRecords };
+}
+
+function revalidateHistoricalArtifactEvidence(artifacts, options = {}) {
+  for (const artifact of artifacts) {
+    if (physicallyVerifyHistoricalArtifact(artifact, options)) continue;
+    throw new VccStorageMigrationError(
+      'vcc-storage-historical-artifact-changed',
+      '历史存档原件在迁移期间发生变化，旧数据库保持不变',
+      { artifactId: Number(artifact.id) }
+    );
+  }
 }
 
 function refreshImportRecordSummaries(targetDb) {
@@ -1362,9 +1384,11 @@ function buildVccStorageCandidate(options) {
     emitProgress(onProgress, 'copying', processed, tables.length + 4, '转换异常审计');
     const migratedLegacyErrors = migrateLegacyImportErrors(targetDb);
     const migratedFailures = migrateFileFailures(targetDb);
+    const boundHistoricalArtifacts = [];
     const historicalLineage = bindExactHistoricalImportSources(targetDb, {
       archiveRootDir: options.archiveRootDir,
-      fsImpl
+      fsImpl,
+      boundArtifactEvidence: boundHistoricalArtifacts
     });
     const removedReadyFallbacks = removeVerifiedReadyFallbacks(targetDb);
     refreshImportRecordSummaries(targetDb);
@@ -1427,6 +1451,13 @@ function buildVccStorageCandidate(options) {
         { oldCoreBytes: estimate.oldCoreBytes, newCoreBytes, reductionRatio }
       );
     }
+    invokeFault(faultInjector, 'before-historical-artifact-revalidation', {
+      artifactCount: boundHistoricalArtifacts.length
+    });
+    revalidateHistoricalArtifactEvidence(boundHistoricalArtifacts, {
+      archiveRootDir: options.archiveRootDir,
+      fsImpl
+    });
     processed += 1;
     const result = {
       noChange: false,

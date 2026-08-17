@@ -177,7 +177,7 @@
 - 以 v3.1.10 schema 创建 VCC 表；
 - 保留所有业务 ID、run/result/adjustment/archive/operation audit；
 - 把旧 effective 行转换为 slim effective；
-- 把严格可证明的历史来源绑定至 import source/artifact/hold；除 flow、record、文件名和数据库 SHA/size 唯一外，还必须从当前存档根按受控相对路径打开 canonical Blob，重新流式计算物理 SHA-256 并核对实际大小；根不可用、文件缺失或实体不一致均保持 `unavailable`，不得仅信任数据库 `ready` 元数据；
+- 把严格可证明的历史来源绑定至 import source/artifact/hold；除 flow、record、文件名和数据库 SHA/size 唯一外，还必须从当前存档根按受控相对路径打开 canonical Blob，重新流式计算物理 SHA-256 并核对实际大小；候选库完成全部守恒与压缩率验证后、进入 worker `ready`/切换边界前，必须对本次新绑定的历史 artifact 再做一次物理大小与 SHA-256 流式复验；任一次根不可用、文件缺失、实体不一致或迁移期间发生变化均保持旧库不变，不得仅信任数据库 `ready` 元数据；
 - 把严格异常转换为 compact anomaly；
 - 原样保留过渡期已存在的 import source/anomaly/fallback；若 ready artifact 的 SHA/size 已验证，则重建时创建 hold 并删除对应 fallback；
 - 不复制旧永久 `idempotent_skip`/正常 `rolled_back` 逐行审计；
@@ -192,7 +192,7 @@
 - effective 的主键集合、`source_type+idempotency_key+content_hash` 集合不变；
 - 各月×来源行数不变；
 - 所有 run 结果、调整、归档、九币种余额与计算摘要不变；
-- artifact 绑定、SHA/size 和 business hold 一致；历史新绑定还必须已通过 canonical Blob 物理大小与 SHA-256 复验；
+- artifact 绑定、SHA/size 和 business hold 一致；历史新绑定还必须在初次绑定与切换边界两次通过 canonical Blob 物理大小与 SHA-256 复验；
 - staging 为空；升级前历史不新增 fallback；升级后过渡期已有 fallback 必须守恒，只有对应 ready artifact 的 SHA/size 已验证时才可删除并建立 hold。
 
 ### 6.4 Journal 与原子切换

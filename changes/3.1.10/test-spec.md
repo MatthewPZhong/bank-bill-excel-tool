@@ -61,6 +61,7 @@
 | fallback按需导出 | 未归档新行仍可完整导出；绑定后fallback归零 |
 | v1过渡期重建 | 未归档fallback原样保留；ready+SHA/size匹配者清fallback并建hold |
 | 历史exact binder | 只绑定flow+record+SHA唯一匹配，且 canonical Blob 物理大小/SHA复验通过；歧义、缺失或损坏均保持unavailable且不建hold |
+| 历史artifact迁移中变化 | 初次物理复验后、候选守恒完成前同大小替换 canonical Blob | 切换边界二次流式SHA/大小复验拒绝候选；旧库/raw_json保留；候选清理 |
 | 迁移已有archive cleanup/outbox | 维护准入等待/拒绝，不吞待办 |
 | 大文件流式导出 | 主进程响应、内存、输出行数与hash守恒 |
 | dbstat目标 | 核心约4.3–4.6GB且下降>=75%，外部存档分列 |
