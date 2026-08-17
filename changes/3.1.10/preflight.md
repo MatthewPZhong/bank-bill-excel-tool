@@ -42,8 +42,10 @@
 | 5 | copy-on-write迁移 | 现有库物理缩小与守恒 | 故障注入+双启动+dbstat | 旧库继续唯一有效 | 删除临时目标，不切换 |
 | 6 | 全回归/人工门禁 | 资金与发布风险 | release-check+真实库/Windows/人工清单 | 阻断发布 | 不放宽阈值/守恒 |
 
-## 发布候选收口（2026-08-17）
+## 正式发布收口（2026-08-17）
 
 - 功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 全绿，最终 reviewer 对 `01d24e5ca9` 未发现新问题。
-- 版本化收口只修改版本号、三份发布文档、release baseline、变量统计与3.1.10管理证据；不改 VCC 生产算法、schema、迁移状态机或金额币种合同。
-- 真实约27.42GB副本迁移、Windows installer/portable SQLite/WAL与主体×九币种资金人工仍是发布阻断；候选 PR 合并不等于三项通过，也不等于正式 Release。
+- 发布收口 PR #148 已合入 `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`；该 PR 只修改版本号、三份发布文档、release baseline、变量统计与3.1.10管理证据，不改 VCC 生产算法、schema、迁移状态机或金额币种合同。
+- 用户已明确确认真实约27.42GB副本迁移/至少下降75%、Windows installer/portable SQLite/WAL、主体×九币种及 artifact SHA 人工三项均 PASS，Windows 未使用 Runbook 豁免。
+- annotated tag `v3.1.10`、Release workflow `32005912319`、latest stable Release 与四项公开资产回读已完成；本次样本结论不泛化为未来数据和环境的永久豁免。
+- 发布证据分支只修正 Windows 测试对 64 位 inode/file ID 的 Number 精度假设，并记录外部发布事实；不修改 `src`、数据库、资金算法、tag 或 Release 资产。

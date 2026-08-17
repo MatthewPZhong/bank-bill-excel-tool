@@ -1,6 +1,6 @@
 # v3.1.10 Spec — VCC 财务 OP 存储、原表血缘与异常审计瘦身
 
-> status: implemented / release candidate / 真实库、Windows packaged 与资金人工门禁待关闭
+> status: released / 三项人工发布门禁已确认 PASS
 > owner: VCC 财务 OP / 存档中心
 > created: 2026-08-16
 > updated: 2026-08-17
@@ -216,9 +216,9 @@
 
 ⚠️ 资金红线人工复核：按主体×`AUD/CAD/CNY/EUR/GBP/HKD/JPY/SGD/USD` 抽查有效行、金额、幂等冲突、部分导出缺口、删除审计和 archive SHA 血缘。该人工项未通过前不得正式发布。
 
-## 9. 发布候选状态（2026-08-17）
+## 9. 正式发布状态（2026-08-17）
 
-- 功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；最新 Windows PR workflow、完整自动回归和最终 reviewer 均已通过。
-- `package.json`、三份用户发布文档、release baseline 与管理证据进入 v3.1.10 发布候选收口；候选提交不得写成已正式发布，也不得提前创建 tag。
-- 以下三项仍为正式发布阻断：真实约 27.42 GB 副本迁移后 VCC 核心约 4.3–4.6 GB且至少下降75%；Windows installer/portable 的 SQLite切换、WAL和文件占用；主体×九币种资金事实与 artifact SHA 血缘人工签字。
-- 真实库压缩率与主体×九币种资金签字必须通过，不得使用 Windows Release Runbook 豁免。仅 Windows installer/portable 验证可按该 Runbook 在稳定 GitHub 评论中记录批准人、具体范围、理由与发布后补做项后转为发布后跟进；该豁免只允许继续生成技术资产，不得写成已验证。
+- 功能 PR #147 与发布收口 PR #148 已合入；PR #148 的 merge commit 为 `35f11e153962c34cba0e9d4c7084e9df85c9f209`。
+- 真实库压缩率与主体×九币种资金签字不可豁免；用户于 2026-08-17 明确确认包括这两项在内的三项发布门禁全部 PASS：真实约 27.42 GB 副本迁移后的逐表 `dbstat` 与至少下降 75% 目标、Windows installer/portable 的 SQLite切换/WAL/文件占用与恢复、主体×九币种资金事实与 artifact SHA 血缘人工签字。Windows 门禁未使用 Runbook 豁免。
+- annotated tag `v3.1.10` 指向上述 `main` merge commit；Release workflow `32005912319` 全绿，latest stable Release 与 Setup/portable/blockmap/`latest.yml` 四项公开资产完成独立回读。
+- 本次发布结论不改变 §8 的资金与文件完整性合同，也不把本次样本签字泛化为未来月份、主体、输入来源或存储环境的永久豁免。
