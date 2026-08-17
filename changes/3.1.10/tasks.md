@@ -28,4 +28,4 @@
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（PR #147 首次 Windows CI 的 tag/fsync 问题已修；首轮 review 两项 P2 已先红后绿，相关 91/91 与最终 release-check 5193/5193、48/48、2385/2385 全绿，等待远端复验；真实库、packaged Windows 与资金人工仍为发布阻断项）
+- 状态：in_progress（PR #147 首次 Windows CI 的 tag/fsync 问题及两项 review P2 已修；第二轮唯一失败为 Windows test teardown 的 SQLite `EBUSY`，已固定先 close 再删目录，等待最终远端复验；真实库、packaged Windows 与资金人工仍为发布阻断项）

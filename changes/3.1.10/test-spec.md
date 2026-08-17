@@ -88,4 +88,5 @@
 - 修后唯一完整 `npm run release-check`：lint/smoke PASS；unit 5191/5191（336 files）；integration 48/48 scripts、2385/2385 assertions（368077ms）PASS；runner 仅全绿后自动同步 policy。
 - PR #147 首次 Windows CI 将 19 项失败归并为两个环境合同缺口：shallow checkout 缺冻结 `v3.1.9` tag（2 项）与只读文件句柄 fsync `EPERM`（17 项）；修复后本地聚焦 68/68、完整 release-check 5191/5191 + 48/48/2385 PASS。
 - PR #147 首轮 review 两项 P2 均为真实合同缺口：新增 red tests 后 47/49；修复同批 peer evidence 与 SYSTEM_OP 临时 fallback 后，相关 detail/system/dataset/rebuild 91/91 PASS；最终 release-check lint/smoke、unit 5193/5193、integration 48/48 与 2385/2385（305367ms）PASS。
+- PR #147 第二轮 Windows CI 唯一失败为测试 teardown 顺序：contract-v2 业务断言通过后，先删仍打开的 SQLite 报 `EBUSY`；修为单一 hook 中先 close current/legacy 连接再删除目录，生产 trigger 合同不变。
 - 尚未关闭：真实约 27GB 库迁移前后 `dbstat`、Windows installer/portable 文件切换与 WAL、主体×九币种及 artifact SHA 人工复核。

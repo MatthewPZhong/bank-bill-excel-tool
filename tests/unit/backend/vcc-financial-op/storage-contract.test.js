@@ -218,9 +218,14 @@ test('v1 历史终态记录没有 source 时标记 unavailable，不冒充待存
 
 test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实 repository 降级写', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-contract-v2-guard-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const dbPath = path.join(dir, 'tool-data.sqlite');
-  const db = new DatabaseSync(dbPath);
+  let db = new DatabaseSync(dbPath);
+  let legacyDb = null;
+  t.after(() => {
+    if (legacyDb) legacyDb.close();
+    if (db) db.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   db.exec(`
     PRAGMA foreign_keys = ON;
     CREATE TABLE app_settings (
@@ -243,11 +248,11 @@ test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实
   const systemPath = path.join(dir, 'system.xlsx');
   writeSystemOpFixture(systemPath);
   db.close();
+  db = null;
 
   const legacyRepository = loadV319Module('src/backend/vcc-financial-op-db/repository.js');
   const legacySystemImporter = loadV319SystemImporter(legacyRepository);
-  const legacyDb = new DatabaseSync(dbPath);
-  t.after(() => legacyDb.close());
+  legacyDb = new DatabaseSync(dbPath);
   for (const scenario of [
     {
       name: '空数据集批次',

@@ -68,6 +68,7 @@
 | PR #147 首次 Windows CI | release-check 5171/5191；2 项因 shallow checkout 无 `v3.1.9` tag，17 项因 Windows 只读句柄 `fsync` 返回 `EPERM` | CI 首次提供真实 Windows 句柄语义；修复为 smoke checkout `fetch-depth: 0` 与文件 `r+` fsync，目录 fsync 既有明确 errno 容错不变 |
 | PR #147 CI 修复本地复验 | 聚焦 68/68；完整 release-check lint/smoke、unit 5191/5191、integration 48/48 scripts 与 2385/2385 assertions（395255ms）PASS；node/diff/check-vars 收口 | 保持同一耐久与历史兼容合同，等待同一 Windows workflow 远端复验 |
 | PR #147 首轮 review 两项 P2 | 两项先红 47/49，再修后 detail/system/rebuild 相关 91/91 PASS；最终 release-check lint/smoke、unit 5193/5193、integration 48/48 与 2385/2385（305367ms）PASS | contract-v2 同批冲突保存 peer hash+精确 diff；SYSTEM_OP pending/failed 且从未绑定时以 raw fallback 完整导出，bound 故障门禁不放宽 |
+| PR #147 第二轮 Windows CI | 5191/5193；唯一失败为 storage-contract test teardown 在 Windows 先删仍打开的 SQLite，报 `EBUSY`；业务断言本身通过 | 合并为单一 after hook，固定关闭 current/legacy 两连接后才删除临时目录；不改或放宽 production capability trigger |
 
 ## Remaining Unknowns
 
