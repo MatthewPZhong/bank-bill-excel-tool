@@ -87,12 +87,37 @@
 | v3.1.10 发布候选决策 | 版本化与用户文档可以作为独立候选 PR 合入；真实库压缩率与资金签字必须 PASS，只有 Windows packaged gate 可按 Windows Runbook 以稳定 GitHub 评论记录批准人、范围、理由和 follow-up 后豁免 | 保持 Spec“未通过不得正式发布”；Windows Runbook 不被错误扩大到数据/资金红线，候选文档不误报正式发布或人工通过 |
 | v3.1.10 发布候选本地门禁 | 聚焦 release/update/Windows contract 20/20；唯一 `release-check` lint/smoke PASS、unit 5201/5201（336 files）、integration 48/48 scripts、2385/2385 assertions（388698ms）；主面板与设置布局各 6/6 PASS | 版本化、文档、更新合同、全仓与 2 viewport × 3 scale Electron 布局闭合；主面板首次受限环境 `electron exit null`，沙箱外唯一重试通过，分类 environment |
 | v3.1.10 release check-vars | `v3.1.9^{commit}` 基线命中 Critical `VCC_STORAGE_CONTRACT_VERSION/freezeWorkerBatchContext`、Important `ipcRenderer/serializeError/setupIdleCleanupTimer`、Runtime `app/dialog/setStatus/state`、Risk `ArchiveRepository/archive_artifact_holds/buildVccImportArchiveHandoffFiles`；候选 working diff 的 `src` 命中为 0 | v35 清单已登记 contract-v2、exact7、Archive hold/输入 handoff 与 COW；未改变金额/币种/任务身份字段，Critical/Risk 所需 smoke 已由同次 release-check 通过 |
+| v3.1.10 三项人工发布门禁 | 用户于 2026-08-17 明确确认真实约27.42GB副本迁移/逐表dbstat与至少下降75%、Windows installer/portable SQLite/WAL/文件占用与恢复、主体×九币种及artifact SHA血缘均为 PASS；Windows 未使用 Runbook 豁免 | 数据、环境与资金三条发布红线均由实际验收关闭；不把本次样本泛化为未来数据或环境永久免检 |
+| v3.1.10 正式发布 | PR #148 merge commit `35f11e153962c34cba0e9d4c7084e9df85c9f209`；annotated tag `v3.1.10`；Release workflow `32005912319` 全绿；latest stable Release 与四项公开资产完成独立回读 | 技术发布与人工门禁均闭合；Release 资产不可变，后续证据修正只走独立 PR，不移动 tag/替换资产 |
+| Windows inode 测试精度 | `archive-storage-layout` 在 Windows 将 64 位 file ID 读成 JS Number，超过 `MAX_SAFE_INTEGER` 后不同 inode 可能舍入成同值；Release workflow 独立全绿，生产 copy/hash/readonly 逻辑未失败 | 测试统一用 `fs.statSync(..., { bigint: true }).ino` 比较真实 file ID；分类为 test design，不改生产实现或已发布资产 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| Windows SQLite切换、WAL与文件占用 | PROBE | packaged installer/portable手工验证 | 未通过阻断发布 |
+| Windows SQLite切换、WAL与文件占用 | CLOSED | packaged installer/portable手工验证已确认 PASS | 本次发布未使用豁免；未来环境变化继续抽查 |
 | 真实历史exact binder覆盖率 | PROBE | 只读副本报告 | 不影响安全；影响部分导出比例 |
-| 真实库迁移后dbstat/耗时/空间 | PROBE | 用户副本维护迁移 | 未达75%阻断发布 |
-| 主体×九币种资金事实 | BLOCK-at-release | 财务人工复核 | 未签字阻断发布 |
+| 真实库迁移后dbstat/耗时/空间 | CLOSED | 用户副本维护迁移已确认 PASS | 本次达到至少下降75%门禁；未来大库继续单独报告 |
+| 主体×九币种资金事实 | CLOSED | 财务人工复核已确认 PASS | 本次签字闭合；未来月份/主体继续抽查 |
+
+## 正式发布与收尾证据（2026-08-17）
+
+### Decisions / external state
+
+- 用户明确确认真实库压缩、Windows packaged SQLite/WAL 与主体×九币种/文件血缘三项发布门禁全部 PASS；Windows 门禁未使用 Runbook 豁免。发布继续使用仓库既有不可替换 tag workflow，不手工上传或覆盖同版本资产。
+- 发布收口 PR [#148](https://github.com/MatthewPZhong/bank-bill-excel-tool/pull/148) 于 2026-08-17 合入，普通 merge commit 为 `35f11e153962c34cba0e9d4c7084e9df85c9f209`。annotated tag `v3.1.10` 的 tag object 为 `a43fb698166b7e0f709502af99ac8c50f0d39dc9`，peeled commit 精确等于发布时 `main`。
+- [Release Windows Packages run 32005912319](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32005912319) 自然终态 success：tag/main 验证、依赖安装、完整 release checks、布局、packaged input/build-info、Windows build、`check:dist`、ASCII staging、Release 发布与公开 Release 验证全部成功。
+
+### Public asset evidence
+
+- [v3.1.10 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.10) 于 `2026-08-17T08:04:40Z` 发布，`draft=false`、`prerelease=false`，并成为 latest stable Release。
+- `bank-bill-excel-tool-setup-3.1.10.exe`：`100316382` bytes，SHA-256 `5c5a7b0788aed99dd2643e5149df140cfab080324214825999b5819a4af51c3d`。
+- `bank-bill-excel-tool-portable-3.1.10.exe`：`99819607` bytes，SHA-256 `6bc87d097c240eea0f7beac37a93b43ece9c695bacde87faa4b6ee96f5c485b6`。
+- `bank-bill-excel-tool-setup-3.1.10.exe.blockmap`：`105901` bytes，SHA-256 `9461c31d59c1fc32776dd5f319e6ccf8f22456cb8b93a2572d11e2bc82df27c3`。
+- `latest.yml`：`372` bytes，SHA-256 `fa339938b7de7420ec6717310c9db6ed8ae80bdc61bd69488b69fdca6645eb9c`；workflow 已核对其中 version/path/url/size/SHA-512 与实际 ASCII Setup 一致。
+
+### Post-release test evidence
+
+- merge-to-main workflow `32004489013` 的唯一失败发生在 test-only inode 断言：Windows 64 位 file ID 超过 `Number.MAX_SAFE_INTEGER`，两个不同 ID 可舍入成同一 Number；同一提交的正式 Release workflow 独立完整通过，生产独立 copy、SHA、只读与构建合同没有失败。
+- 发布证据分支只把 inode/file ID 比较改为 BigInt，并同步正式发布证据；不改 `src`、数据库合同、金额币种、迁移状态机、tag 或 Release 资产。
+- 发布证据分支唯一完整 `npm run release-check` 自然终态全绿：lint/smoke PASS，unit 5202/5202（336 files），integration 48/48 scripts、2385/2385 assertions（389757ms）；runner 仅在全绿后刷新 policy。

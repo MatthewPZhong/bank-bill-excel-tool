@@ -24,7 +24,7 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.10 版本号与三份用户文档保持发布候选状态和三项发布阻断', () => {
+test('v3.1.10 版本号与三份用户文档保持正式发布状态和三项门禁结论', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -35,19 +35,22 @@ test('v3.1.10 版本号与三份用户文档保持发布候选状态和三项发
   assert.equal(packageLock.version, '3.1.10');
   assert.equal(packageLock.packages[''].version, '3.1.10');
   assert.match(changelog, /^## 3\.1\.10 - 2026-08-17$/m);
-  assert.match(history, /^## v3\.1\.10（2026-08-17，发布候选）$/m);
+  assert.match(history, /^## v3\.1\.10（2026-08-17）$/m);
   assert.match(guide, /^版本：`v3\.1\.10`$/m);
 
   for (const document of [changelog, history, guide]) {
-    assert.match(document, /发布候选/);
-    assert.match(document, /PR #147/);
+    assert.match(document, /已于 2026-08-17[\s\S]{0,80}正式发布/);
+    assert.match(document, /PR #148/);
     assert.match(document, /27\.42\s*GB/);
-    assert.match(document, /4\.3[–-]4\.6\s*GB/);
     assert.match(document, /至少\s*75%|下降\s*75%/);
     assert.match(document, /Windows installer\/portable/);
     assert.match(document, /WAL|SQLite/);
     assert.match(document, /主体×九币种|主体.*九币种/);
-    assert.match(document, /不得正式发布|尚未正式发布|不创建.*tag|未创建.*tag/);
+    assert.match(document, /三项[\s\S]{0,80}PASS|三项发布门禁均已通过/);
+    assert.match(document, /Windows[\s\S]{0,80}未使用.*豁免|Windows 门禁未使用豁免/);
+    assert.match(document, /annotated tag/);
+    assert.match(document, /latest stable Release/);
+    assert.match(document, /四项公开资产/);
     const currentSectionEnd = document.indexOf(
       document === changelog
         ? '## 3.1.9'
@@ -56,7 +59,7 @@ test('v3.1.10 版本号与三份用户文档保持发布候选状态和三项发
           : '\n---'
     );
     const currentSection = document.slice(0, currentSectionEnd);
-    assert.doesNotMatch(currentSection, /已于 2026-08-17 正式发布|latest stable Release|四项公开资产.*完成回读/);
+    assert.doesNotMatch(currentSection, /当前为发布候选|尚未创建正式 tag|不得创建正式 tag\/Release|三项.*未关闭/);
   }
 });
 
@@ -75,7 +78,7 @@ test('v3.1.9 三份用户文档保持正式发布历史', () => {
   }
 });
 
-test('v3.1.10 只允许豁免 Windows packaged 门禁，真实库与资金签字不可豁免', () => {
+test('v3.1.10 记录真实库与资金不可豁免且 Windows 门禁本次未使用豁免', () => {
   const spec = read('changes/3.1.10/spec.md');
   const preflight = read('changes/3.1.10/preflight.md');
   const tasks = read('changes/3.1.10/tasks.md');
@@ -84,7 +87,8 @@ test('v3.1.10 只允许豁免 Windows packaged 门禁，真实库与资金签字
     assert.match(document, /真实库|27\.42GB|27\.42 GB/);
     assert.match(document, /资金|九币种/);
     assert.match(document, /不可豁免|不得使用 Windows Release Runbook 豁免|必须通过/);
-    assert.match(document, /Windows.*Runbook.*豁免|Windows packaged.*Runbook|packaged Windows.*Runbook/);
+    assert.match(document, /Windows[\s\S]{0,100}未使用.*豁免|Windows 门禁未使用.*豁免/);
+    assert.match(document, /PASS|均已通过/);
   }
   assert.doesNotMatch(spec, /三项均通过，或.*Windows Release Runbook/);
 });

@@ -2,7 +2,7 @@
 
 ## 3.1.10 - 2026-08-17
 
-> v3.1.10 当前为发布候选。功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`，Windows PR 构建、完整自动回归和最终代码复核均已通过；尚未创建 `v3.1.10` tag 或正式 GitHub Release。
+> v3.1.10 已于 2026-08-17 通过受控 Windows Release workflow 正式发布。功能 PR #147 与发布收口 PR #148 已合入 `main`；annotated tag、latest stable Release 和四项公开资产均已完成独立回读。
 
 ### v3.1.10 · VCC 存储与异常审计瘦身
 
@@ -22,11 +22,11 @@
 - **资金与审计守恒**：切换前核对六类导入计数、有效主键和内容哈希、各月各来源行数、计算结果、人工调整、归档状态、九币种余额、artifact 绑定和 hold。任一项不一致时保留旧库，候选不会接管。
 - **可恢复原子切换**：journal 覆盖复制、验证、切换、首次只读校验和回滚窗口；切换前 worker 持有源写锁，主连接关闭后才释放。旧数据库是否删除由用户明确勾选，失败或崩溃按 durable 状态恢复，不猜测新旧真相。
 
-### v3.1.10 · 发布候选边界
+### v3.1.10 · 正式发布与验收结论
 
-- 生产库只读 `dbstat` 显示现有 VCC 核心表约 27.42 GB；新结构预计约 4.3–4.6 GB。该数字仍是投影目标，不是迁移完成证明；必须用真实副本验证至少下降 75%，否则不得正式发布。
-- PR #147 最新 Windows CI 已通过 release-check、SQLite teardown、安装版/便携版构建、`check:dist` 和更新资产 staging；这不替代在 Windows installer/portable 中实际完成 SQLite 切换、WAL 与文件占用测试。
-- 主体×九币种的有效行、金额、冲突保旧、部分导出缺口、删除审计和 archive SHA 血缘仍需财务人工签字。真实库压缩、Windows packaged 运行和资金复核三项未关闭前，不创建正式 tag/Release，也不宣称 v3.1.10 已正式发布。
+- **三项发布门禁均已通过**：用户于 2026-08-17 明确确认真实约 27.42 GB 数据库副本迁移后的逐表 `dbstat` 与至少下降 75% 目标、Windows installer/portable 的 SQLite/WAL/文件占用与恢复、主体×九币种及 archive SHA 血缘人工复核全部 PASS；Windows 门禁未使用豁免。
+- **正式发布完成**：PR #148 以 merge commit `35f11e153962c34cba0e9d4c7084e9df85c9f209` 合入 `main`；annotated tag `v3.1.10`、Release workflow `32005912319`、latest stable Release 和 Setup/portable/blockmap/`latest.yml` 四项公开资产均已完成回读。
+- 自动化、技术 Release 与本次人工签字只证明本次发布样本和环境；后续新月份、新主体、新输入来源或存储环境变化仍需按同一资金与文件血缘口径持续抽查。
 
 ## 3.1.9 - 2026-08-13
 

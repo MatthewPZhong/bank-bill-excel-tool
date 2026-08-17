@@ -43,6 +43,10 @@ function hash(content) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
 
+function fileId(filePath) {
+  return fs.statSync(filePath, { bigint: true }).ino;
+}
+
 function serviceFixture(options = {}) {
   const current = fixture();
   const db = new DatabaseSync(':memory:');
@@ -174,9 +178,8 @@ test('目录化始终生成独立 copy，大小/hash一致且只读', async () =
     });
 
     assert.equal(result.mode, 'copy');
-    const canonicalStat = fs.statSync(canonicalPath);
     const targetStat = fs.statSync(result.targetPath);
-    assert.notEqual(canonicalStat.ino, targetStat.ino);
+    assert.notEqual(fileId(canonicalPath), fileId(result.targetPath));
     assert.equal(targetStat.mode & 0o222, 0);
     assert.equal((await verifyFile(result.targetPath, {
       sha256: hash(content),
@@ -376,8 +379,8 @@ test('修改一个批次目录 copy 不污染 canonical 或复用同 Blob 的其
     const secondLayout = path.join(current.rootDir, ...secondArtifact.storageRelativePath.split('/'));
     const canonicalPath = path.join(current.rootDir, ...firstArtifact.blob.relativePath.split('/'));
     assert.equal(firstArtifact.blobId, secondArtifact.blobId);
-    assert.notEqual(fs.statSync(firstLayout).ino, fs.statSync(canonicalPath).ino);
-    assert.notEqual(fs.statSync(secondLayout).ino, fs.statSync(canonicalPath).ino);
+    assert.notEqual(fileId(firstLayout), fileId(canonicalPath));
+    assert.notEqual(fileId(secondLayout), fileId(canonicalPath));
 
     fs.chmodSync(firstLayout, 0o644);
     fs.writeFileSync(firstLayout, 'x'.repeat(Buffer.byteLength(original)));
@@ -408,7 +411,7 @@ test('历史 hardlink 在启动扫描时脱钩为独立 copy', async () => {
     fs.linkSync(canonicalPath, layoutPath);
     current.db.prepare(`UPDATE archive_artifacts SET storage_mode = 'hardlink' WHERE id = ?`)
       .run(artifact.id);
-    assert.equal(fs.statSync(layoutPath).ino, fs.statSync(canonicalPath).ino);
+    assert.equal(fileId(layoutPath), fileId(canonicalPath));
 
     const restarted = createArchiveService({
       database: current.db,
@@ -418,7 +421,7 @@ test('历史 hardlink 在启动扫描时脱钩为独立 copy', async () => {
     const initialized = await restarted.initialize({ startBackgroundMaterialization: false });
     assert.equal(initialized.available, true);
     assert.equal(restarted.repository.getArtifact(artifact.id).storageMode, 'copy');
-    assert.notEqual(fs.statSync(layoutPath).ino, fs.statSync(canonicalPath).ino);
+    assert.notEqual(fileId(layoutPath), fileId(canonicalPath));
     assert.equal(fs.readFileSync(layoutPath, 'utf8'), original);
     assert.equal(fs.readFileSync(canonicalPath, 'utf8'), original);
   } finally {

@@ -9,9 +9,9 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.1.10（2026-08-17，发布候选）
+## v3.1.10（2026-08-17）
 
-v3.1.10 将 VCC 财务 OP 的长期原始数据真相从 SQLite 大字段转移到存档 artifact，并把逐行导入审计收敛为真正异常；同时提供显式、可恢复的 copy-on-write 物理重建。功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`，但当前仍是发布候选，尚未创建正式 tag 或 Release。
+v3.1.10 将 VCC 财务 OP 的长期原始数据真相从 SQLite 大字段转移到存档 artifact，并把逐行导入审计收敛为真正异常；同时提供显式、可恢复的 copy-on-write 物理重建。该版本已于 2026-08-17 通过受控 Windows Release workflow 正式发布。
 
 **精简存储和可解释血缘**
 
@@ -29,11 +29,11 @@ v3.1.10 将 VCC 财务 OP 的长期原始数据真相从 SQLite 大字段转移�
 - 【优化存储】先收敛 WAL、检查空间/完整性并阻止新任务，再创建候选库并验证六类计数、哈希集合、各月来源、结果、调整、归档、九币种余额、artifact 和 hold。
 - journal 与 worker ready/ack 写锁交接覆盖切换和崩溃恢复。切换前失败保留旧库，切换后首次只读校验失败进入受控回滚；旧库仅按用户明确选择删除。
 
-**候选状态和发布阻断**
+**发布状态和验收结论**
 
-- 当前生产库只读 `dbstat` 显示 VCC 核心约 27.42 GB，新结构预计约 4.3–4.6 GB；必须在真实副本验证至少下降 75%。
-- PR #147 Windows CI 已通过 installer/portable 构建和静态检查，但 Windows installer/portable 实际 SQLite 切换、WAL 与文件占用仍未签字。
-- 主体×九币种的有效行、金额、幂等冲突、部分导出、删除审计和 archive SHA 血缘仍待财务人工复核。三项发布红线未关闭前不得正式发布。
+- 用户于 2026-08-17 明确确认三项发布门禁均为 PASS：真实约 27.42 GB 副本迁移后的逐表 `dbstat` 与至少下降 75% 目标、Windows installer/portable 的 SQLite/WAL/文件占用与恢复、主体×九币种和 archive SHA 血缘人工复核；Windows 门禁未使用豁免。
+- 功能 PR #147 与发布收口 PR #148 已合入；PR #148 的 merge commit 为 `35f11e153962c34cba0e9d4c7084e9df85c9f209`。annotated tag `v3.1.10`、Release workflow `32005912319`、latest stable Release 和四项公开资产均已完成独立回读。
+- 本次签字不自动覆盖未来月份、主体、输入来源或存储环境；后续处理仍应持续抽查资金事实、异常处分和文件 SHA 血缘。
 
 ## v3.1.9（2026-08-13）
 

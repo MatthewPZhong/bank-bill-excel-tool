@@ -23,9 +23,9 @@
 ## Task 5 — Copy-on-write迁移
 - 目标：维护准入、checkpoint/space、转换/守恒、journal/原子切换/删旧库。
 - 验证：故障注入、双启动、真实副本dbstat。
-- 状态：done（回滚前持久化 `rolling-back` 与 failed path；target/source 两种候选位置、`switching` 不可读候选及 `switched` 首次复验失败均恢复 v1；真实库dbstat/Windows仍为发布门禁）
+- 状态：done（回滚前持久化 `rolling-back` 与 failed path；target/source 两种候选位置、`switching` 不可读候选及 `switched` 首次复验失败均恢复 v1；真实库dbstat/Windows门禁已在正式发布前人工确认 PASS）
 
 ## Task 6 — 发布门禁
 - 目标：回归、性能、important vars、文档和人工清单。
 - 验证：lint/node/diff/check-vars/release-check/Windows/资金人工。
-- 状态：in_progress（功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；Windows workflow `31993149328` 与最终 reviewer 均通过；发布候选版本号、三份用户文档、release baseline、5201/5201 + 48/48 全量回归及两组 Electron 6/6 布局门禁已闭合，尚待干净候选 Windows 构建与远端候选 PR。真实约27.42GB副本至少下降75%与主体×九币种资金人工必须通过、不可豁免；packaged Windows SQLite/WAL 须通过或按 Windows Runbook 单独留痕豁免。条件未满足前不创建 tag/Release）
+- 状态：done（真实库与资金门禁不可豁免；功能 PR #147 与发布收口 PR #148 已合入；用户明确确认真实约27.42GB副本迁移/至少下降75%、packaged Windows SQLite/WAL 与主体×九币种/artifact SHA 三项均 PASS，Windows 门禁未使用 Runbook 豁免；`main@35f11e153962c34cba0e9d4c7084e9df85c9f209`、annotated tag `v3.1.10`、Release workflow `32005912319`、latest stable Release 与四项公开资产均完成回读）
