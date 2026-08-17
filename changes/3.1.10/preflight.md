@@ -5,7 +5,7 @@
 - Goal: 用存档 artifact 作为原始输入长期真相，瘦身 VCC 有效事实/导入审计，并提供显式 copy-on-write 物理迁移。
 - Context: 基线 `646bcf4`；当前 VCC 27.42GB 核心表大量重复 `raw_json` 与永久逐行审计；存档中心已有 SHA Blob、重试、TaskLifecycle 和 root maintenance。
 - Constraints: 不触碰生产库；不改 CNY 九币种、金额公式、幂等键、业务状态、归档/解归档/调整；不伪造历史血缘；迁移失败保持旧库。
-- Done when: Spec 数据/状态合同落地；新导入不永久保存正常审计原始行；artifact/fallback/hold闭环；完整与部分原表导出闭环；迁移守恒与故障矩阵通过；发布候选自动门禁闭合；真实库、Windows packaged 和人工资金复核通过或按 runbook 留下明确豁免证据后才正式发布。
+- Done when: Spec 数据/状态合同落地；新导入不永久保存正常审计原始行；artifact/fallback/hold闭环；完整与部分原表导出闭环；迁移守恒与故障矩阵通过；发布候选自动门禁闭合；真实库压缩率与人工资金复核必须通过，Windows packaged 须通过或按 Windows Runbook 单独留痕豁免后才正式发布。
 
 ## 已确认事实
 

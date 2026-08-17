@@ -75,6 +75,20 @@ test('v3.1.9 三份用户文档保持正式发布历史', () => {
   }
 });
 
+test('v3.1.10 只允许豁免 Windows packaged 门禁，真实库与资金签字不可豁免', () => {
+  const spec = read('changes/3.1.10/spec.md');
+  const preflight = read('changes/3.1.10/preflight.md');
+  const tasks = read('changes/3.1.10/tasks.md');
+
+  for (const document of [spec, preflight, tasks]) {
+    assert.match(document, /真实库|27\.42GB|27\.42 GB/);
+    assert.match(document, /资金|九币种/);
+    assert.match(document, /不可豁免|不得使用 Windows Release Runbook 豁免|必须通过/);
+    assert.match(document, /Windows.*Runbook.*豁免|Windows packaged.*Runbook|packaged Windows.*Runbook/);
+  }
+  assert.doesNotMatch(spec, /三项均通过，或.*Windows Release Runbook/);
+});
+
 test('v3.1.8 三份用户文档保持正式发布历史', () => {
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');

@@ -104,4 +104,5 @@
 - v3.1.10 发布候选本地聚焦 release/update/Windows contract 20/20 PASS；唯一完整 `release-check` lint/smoke PASS、unit 5201/5201（336 files）、integration 48/48 scripts、2385/2385 assertions（388698ms）PASS；runner 仅全绿后刷新 policy。
 - Electron 发布布局门禁：主面板 1240×860、1080×760 × 100/125/150% 为 6/6 PASS；设置/存档中心相同 6 组合为 6/6 PASS。主面板首次受限环境 `electron exit null`，沙箱外唯一重试通过，未发现页面断言失败。
 - `check:vars:release` 以 `v3.1.9^{commit}` 为冻结基线，命中 2 Critical / 3 Important / 4 Runtime / 3 Risk；逐项已纳入 v35 清单并完成关联 review，同次 smoke PASS。候选 working diff 不改 `src`，普通 check-vars 为 0 命中。
+- 发布豁免边界：真实库压缩率与主体×九币种资金签字不可豁免；Windows Runbook 只允许对 Windows packaged 验证单独留痕转为发布后跟进。
 - 发布候选仍未关闭：真实约 27.42 GB 库迁移前后逐表 `dbstat` 且核心至少下降75%；Windows installer/portable 实际文件切换与 WAL/占用；主体×九币种及 artifact SHA 人工复核。自动化和构建成功不替代这三项。

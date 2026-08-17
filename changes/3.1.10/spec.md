@@ -221,4 +221,4 @@
 - 功能 PR #147 已合入 `main@f75af1ed4eb2cd7cead8ffd6562174b2fc24ee6e`；最新 Windows PR workflow、完整自动回归和最终 reviewer 均已通过。
 - `package.json`、三份用户发布文档、release baseline 与管理证据进入 v3.1.10 发布候选收口；候选提交不得写成已正式发布，也不得提前创建 tag。
 - 以下三项仍为正式发布阻断：真实约 27.42 GB 副本迁移后 VCC 核心约 4.3–4.6 GB且至少下降75%；Windows installer/portable 的 SQLite切换、WAL和文件占用；主体×九币种资金事实与 artifact SHA 血缘人工签字。
-- 三项均通过，或发布负责人按 Windows Release Runbook 在稳定 GitHub 评论中明确记录批准人、具体豁免范围、理由与发布后补做项后，才可创建 annotated `v3.1.10` tag。豁免只允许技术资产生成，不得把被豁免项写成已验证。
+- 真实库压缩率与主体×九币种资金签字必须通过，不得使用 Windows Release Runbook 豁免。仅 Windows installer/portable 验证可按该 Runbook 在稳定 GitHub 评论中记录批准人、具体范围、理由与发布后补做项后转为发布后跟进；该豁免只允许继续生成技术资产，不得写成已验证。
