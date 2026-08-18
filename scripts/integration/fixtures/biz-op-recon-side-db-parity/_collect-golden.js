@@ -17,7 +17,8 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { AppDatabase } = require('../../../../src/backend/database');
-const session = require('../../../../src/main-process/biz-op-recon-session');
+const sessionApi = require('../../../../src/main-process/biz-op-recon-session');
+const session = { ...sessionApi, runReconciliation: sessionApi.runLegacyReconciliation };
 const importsRepo = require('../../../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');

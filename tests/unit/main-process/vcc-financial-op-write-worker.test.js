@@ -45,9 +45,7 @@ function payload() {
     taskGeneration: 0,
     appVersion: '3.1.9',
     buildSha: 'worker-test',
-    batchContext: {
-      batchId: 1,
-      batchNumber: '2026-08-11-001',
+    operationContext: {
       taskRunId: 'task-1',
       taskKey: 'vccFinancialOp:run:archive',
       moduleId: 'vcc-financial-op',
@@ -108,26 +106,26 @@ test('critical ack 后新 worker 零 migration，缺 schema fail-closed', async 
   assert.equal(count, 0);
 });
 
-test('batchContext 缺失或字段不全均拒绝，完整值沿用七字段 refreeze 合同', async () => {
+test('operationContext 缺失或字段不全均拒绝，完整值沿用 exact-5 refreeze 合同', async () => {
   const missing = path.join(os.tmpdir(), `vcc-write-worker-context-${process.pid}.sqlite`);
   fs.rmSync(missing, { force: true });
   const absent = await runWorker({
     action: 'archive-result',
-    payload: { ...payload(), batchContext: null },
+    payload: { ...payload(), operationContext: null },
     dbPath: missing
   });
   assert.equal(absent.terminal.type, 'error');
-  assert.match(absent.terminal.error.message, /batchContext/);
+  assert.match(absent.terminal.error.message, /operationContext/);
   assert.equal(absent.messages.some((message) => message.type === 'critical-ready'), false);
   assert.equal(fs.existsSync(missing), false);
 
   const invalid = await runWorker({
     action: 'archive-result',
-    payload: { ...payload(), batchContext: { batchId: 1 } },
+    payload: { ...payload(), operationContext: { taskRunId: 'task-1' } },
     dbPath: missing
   });
   assert.equal(invalid.terminal.type, 'error');
-  assert.match(invalid.terminal.error.message, /batchNumber/);
+  assert.match(invalid.terminal.error.message, /exact-5/);
   assert.equal(invalid.messages.some((message) => message.type === 'critical-ready'), false);
   assert.equal(fs.existsSync(missing), false);
 
@@ -138,9 +136,7 @@ test('batchContext 缺失或字段不全均拒绝，完整值沿用七字段 ref
       targetType: 'result',
       expectedPreviewToken: `v2:${'b'.repeat(64)}`,
       taskGeneration: 0,
-      batchContext: {
-        batchId: 1,
-        batchNumber: 'B-1',
+      operationContext: {
         taskRunId: 'run-1',
         taskKey: 'task-1',
         moduleId: 'vcc-financial-op',

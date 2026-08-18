@@ -1,5 +1,6 @@
 'use strict';
 
+const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
 const { FileValidationError } = require('./file-service/common');
@@ -121,6 +122,19 @@ function normalizeImportOptions(options = {}) {
   return { skipInvalidRows, expectedContentHash };
 }
 
+function freezeDatasetSeedV1(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+      || Object.keys(raw).length !== 2
+      || typeof raw.datasetId !== 'string' || !raw.datasetId.trim()
+      || typeof raw.producerTaskRunId !== 'string' || !raw.producerTaskRunId.trim()) {
+    throw new TypeError('前置资金 MPT 导入缺少 exact v1 dataset seed');
+  }
+  return Object.freeze({
+    datasetId: raw.datasetId,
+    producerTaskRunId: raw.producerTaskRunId
+  });
+}
+
 function rowAggregateError(parsed) {
   const samples = Array.isArray(parsed.rowErrorSamples) ? parsed.rowErrorSamples : [];
   const detailLines = samples.map((issue) => (
@@ -213,6 +227,10 @@ function mapBatchRow(row, monthKey) {
     rowCount: row.row_count,
     excludedRowCount: Number(row.excluded_row_count) || 0,
     importMode: row.import_mode || 'strict',
+    datasetId: row.dataset_id || null,
+    producerTaskRunId: row.producer_task_run_id || null,
+    datasetVersion: Number(row.dataset_version),
+    archiveContractVersion: Number(row.archive_contract_version) === 1 ? 1 : 0,
     importedAt: row.imported_at,
   };
 }
@@ -298,13 +316,23 @@ class PreFundReconciliationStore {
   async importFile(filePath, options = {}) {
     const fileMetadata = parseMptFileName(filePath);
     const importOptions = normalizeImportOptions(options);
+    const datasetSeed = freezeDatasetSeedV1(options.datasetSeed);
     return withMutationLock(
       this.userDataDir,
-      () => this._importFileUnlocked(filePath, fileMetadata, importOptions)
+      () => this._importFileUnlocked(filePath, fileMetadata, importOptions, datasetSeed)
     );
   }
 
-  async _importFileUnlocked(filePath, fileMetadata, importOptions) {
+  async importLegacyFile(filePath, options = {}) {
+    const fileMetadata = parseMptFileName(filePath);
+    const importOptions = normalizeImportOptions(options);
+    return withMutationLock(
+      this.userDataDir,
+      () => this._importFileUnlocked(filePath, fileMetadata, importOptions, null)
+    );
+  }
+
+  async _importFileUnlocked(filePath, fileMetadata, importOptions, datasetSeed) {
     const db = runDataStore.openSideDb(this.userDataDir, MODULE, fileMetadata.monthKey);
     ensureRepairSchema(db);
     let transactionStarted = false;
@@ -476,13 +504,19 @@ class PreFundReconciliationStore {
 
       db.prepare(`
         UPDATE pre_fund_reconciliation_gateway_batches
-        SET content_hash = ?, row_count = ?, excluded_row_count = ?, import_mode = ?
+        SET content_hash = ?, row_count = ?, excluded_row_count = ?, import_mode = ?,
+            dataset_id = ?, producer_task_run_id = ?, dataset_version = ?,
+            archive_contract_version = ?
         WHERE id = ?
       `).run(
         parsed.contentHash,
         parsed.validRowCount,
         parsed.rowErrorCount,
         importOptions.skipInvalidRows ? 'exclude-invalid-rows' : 'strict',
+        datasetSeed ? datasetSeed.datasetId : randomUUID(),
+        datasetSeed ? datasetSeed.producerTaskRunId : null,
+        replacedBatch ? Number(replacedBatch.dataset_version) + 1 : (datasetSeed ? 1 : 0),
+        datasetSeed ? 1 : 0,
         incomingBatchId
       );
       db.exec('COMMIT');
@@ -509,7 +543,7 @@ class PreFundReconciliationStore {
     const sourceType = normalizeSourceTypeFilter(options);
     const out = [];
     for (const file of this._listTargetFiles(options.monthKey)) {
-      const db = runDataStore.openExistingSideDb(file.path);
+      const db = runDataStore.openSideDb(this.userDataDir, MODULE, file.monthKey);
       try {
         const clauses = [];
         const params = [];

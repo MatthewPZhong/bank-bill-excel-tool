@@ -252,6 +252,191 @@ test('copy-on-write 重建移除逐行 raw，只迁移真正异常且保持计�
   }
 });
 
+test('reset-only COW 清空全部 VCC 表并保留非 VCC、Archive 与自增高水位', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'tool-data.sqlite');
+  const targetPath = path.join(directory, 'tool-data.sqlite.vcc-reset-next');
+  const backupPath = path.join(directory, 'tool-data.sqlite.pre-vcc-reset.bak');
+  const journalPath = path.join(directory, 'run-data', 'vcc-reset.json');
+  const { recordId } = createLegacyDatabase(sourcePath);
+  seedExactHistoricalArchive(sourcePath, recordId);
+
+  const sourceBefore = new DatabaseSync(sourcePath, { readOnly: true });
+  const sourceSequences = sourceBefore.prepare(`
+    SELECT name, seq FROM sqlite_sequence
+    WHERE name GLOB 'vcc_fin_op_*'
+    ORDER BY name
+  `).all().map((row) => ({ name: String(row.name), seq: Number(row.seq) }));
+  const archiveBefore = {
+    batches: Number(sourceBefore.prepare('SELECT COUNT(*) AS count FROM archive_batches').get().count),
+    artifacts: Number(sourceBefore.prepare('SELECT COUNT(*) AS count FROM archive_artifacts').get().count),
+    anchors: Number(sourceBefore.prepare('SELECT COUNT(*) AS count FROM archive_flow_anchors').get().count),
+    issuances: Number(sourceBefore.prepare('SELECT COUNT(*) AS count FROM archive_operation_issuances').get().count)
+  };
+  sourceBefore.close();
+
+  const result = buildVccStorageCandidate({
+    sourcePath,
+    targetPath,
+    resetVccData: true,
+    availableBytes: 1024 ** 4
+  });
+  assert.equal(result.resetVccData, true);
+  assert.equal(result.sourceEffectiveCount, 1);
+  assert.equal(result.effectiveCount, 0);
+  assert.equal(result.migratedAnomalies, 0);
+
+  let targetDb = new DatabaseSync(targetPath, { readOnly: true });
+  try {
+    assert.equal(storageContractVersion(targetDb), 2);
+    const nonEmptyVcc = targetDb.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
+        AND sql IS NOT NULL
+    `).all().filter((row) => Number(targetDb.prepare(
+      `SELECT COUNT(*) AS count FROM "${String(row.name).replaceAll('"', '""')}"`
+    ).get().count) > 0);
+    assert.deepEqual(nonEmptyVcc, []);
+    assert.deepEqual(targetDb.prepare(`
+      SELECT id, payload FROM non_vcc_business_fixture ORDER BY id
+    `).all().map((row) => ({ ...row })), [
+      { id: 1, payload: 'must-survive' },
+      { id: 2, payload: 'also-survives' }
+    ]);
+    assert.deepEqual({
+      batches: Number(targetDb.prepare('SELECT COUNT(*) AS count FROM archive_batches').get().count),
+      artifacts: Number(targetDb.prepare('SELECT COUNT(*) AS count FROM archive_artifacts').get().count),
+      anchors: Number(targetDb.prepare('SELECT COUNT(*) AS count FROM archive_flow_anchors').get().count),
+      issuances: Number(targetDb.prepare('SELECT COUNT(*) AS count FROM archive_operation_issuances').get().count)
+    }, archiveBefore);
+    for (const sourceSequence of sourceSequences) {
+      const targetSequence = targetDb.prepare(`
+        SELECT seq FROM sqlite_sequence WHERE name = ?
+      `).get(sourceSequence.name);
+      assert.ok(targetSequence, sourceSequence.name);
+      assert.ok(Number(targetSequence.seq) >= sourceSequence.seq, sourceSequence.name);
+    }
+    const effectiveColumns = new Set(targetDb.prepare(
+      'PRAGMA table_info(vcc_fin_op_effective_rows)'
+    ).all().map((row) => row.name));
+    for (const removed of ['raw_json', 'idempotency_key_raw', 'source_file']) {
+      assert.equal(effectiveColumns.has(removed), false, removed);
+    }
+  } finally {
+    targetDb.close();
+  }
+
+  const journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    journalPath,
+    resetVccData: true,
+    migrationId: 'reset-only-switch'
+  });
+  const switched = atomicSwitchVccStorage({ journalPath, journal });
+  assert.equal(switched.status, 'success');
+  assert.equal(switched.oldDatabaseDeleted, false);
+  assert.equal(fs.existsSync(backupPath), true);
+  assert.equal(fs.existsSync(journalPath), false);
+
+  targetDb = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    assert.equal(storageContractVersion(targetDb), 2);
+    for (const row of targetDb.prepare(`
+      SELECT name FROM sqlite_master
+      WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
+    `).all()) {
+      assert.equal(Number(targetDb.prepare(
+        `SELECT COUNT(*) AS count FROM "${String(row.name).replaceAll('"', '""')}"`
+      ).get().count), 0, row.name);
+    }
+  } finally {
+    targetDb.close();
+  }
+  const backupDb = new DatabaseSync(backupPath, { readOnly: true });
+  try {
+    assert.equal(storageContractVersion(backupDb), 1);
+    assert.equal(Number(backupDb.prepare(
+      'SELECT COUNT(*) AS count FROM vcc_fin_op_effective_rows'
+    ).get().count), 1);
+  } finally {
+    backupDb.close();
+  }
+});
+
+test('reset-only 遇到 VCC artifact hold 时保持源库不变且不创建候选', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'tool-data.sqlite');
+  const targetPath = path.join(directory, 'tool-data.sqlite.vcc-reset-next');
+  const { recordId } = createLegacyDatabase(sourcePath);
+  const archive = seedExactHistoricalArchive(sourcePath, recordId);
+  const sourceDb = new DatabaseSync(sourcePath);
+  sourceDb.prepare(`
+    INSERT INTO archive_artifact_holds (
+      artifact_id, owner_module, owner_type, owner_id, reason, created_at
+    ) VALUES (
+      ?, 'vcc-financial-op', 'vcc-import-source', '1', 'active fixture',
+      '2026-08-17T00:00:00.000Z'
+    )
+  `).run(archive.artifactId);
+  sourceDb.close();
+
+  assert.throws(() => buildVccStorageCandidate({
+    sourcePath,
+    targetPath,
+    resetVccData: true,
+    availableBytes: 1024 ** 4
+  }), (error) => error.code === 'vcc-storage-reset-active-holds');
+  assert.equal(fs.existsSync(targetPath), false);
+  const reopened = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    assert.equal(storageContractVersion(reopened), 1);
+    assert.equal(Number(reopened.prepare(
+      'SELECT COUNT(*) AS count FROM vcc_fin_op_effective_rows'
+    ).get().count), 1);
+  } finally {
+    reopened.close();
+  }
+});
+
+test('reset journal 在切换后发现候选仍有 VCC 行时自动恢复完整 v1', (t) => {
+  const directory = tempDir(t);
+  const sourcePath = path.join(directory, 'tool-data.sqlite');
+  const targetPath = path.join(directory, 'tool-data.sqlite.normal-next');
+  const backupPath = path.join(directory, 'tool-data.sqlite.backup');
+  const journalPath = path.join(directory, 'run-data', 'reset-reopen.json');
+  createLegacyDatabase(sourcePath);
+  buildVccStorageCandidate({ sourcePath, targetPath, availableBytes: 1024 ** 4 });
+  const journal = createMigrationJournal({
+    sourcePath,
+    targetPath,
+    backupPath,
+    resetVccData: true,
+    migrationId: 'reset-reopen-must-be-empty'
+  });
+
+  assert.throws(() => atomicSwitchVccStorage({
+    journalPath,
+    journal
+  }), (error) => error.code === 'vcc-storage-reset-vcc-data-not-empty');
+  const sourceDb = new DatabaseSync(sourcePath, { readOnly: true });
+  try {
+    assert.equal(storageContractVersion(sourceDb), 1);
+    assert.equal(Number(sourceDb.prepare(
+      'SELECT COUNT(*) AS count FROM vcc_fin_op_effective_rows'
+    ).get().count), 1);
+  } finally {
+    sourceDb.close();
+  }
+  assert.equal(fs.existsSync(backupPath), false);
+  assert.deepEqual(recoverVccStorageMigration({ journalPath }), {
+    status: 'rolled-back',
+    sourcePath
+  });
+  assert.equal(fs.existsSync(journalPath), false);
+});
+
 test('旧版 rolled_back 文件级错误每个导入记录只迁移一条失败事件', (t) => {
   const directory = tempDir(t);
   const sourcePath = path.join(directory, 'tool-data.sqlite');

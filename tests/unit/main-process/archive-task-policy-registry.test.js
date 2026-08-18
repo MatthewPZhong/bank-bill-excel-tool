@@ -7,8 +7,10 @@ const test = require('node:test');
 const acorn = require('acorn');
 
 const {
+  EXCLUDED_CHANNELS_BY_REASON,
   EXCLUDE_REASONS,
-  PR3_HANDOFF_CHANNELS,
+  FILE_ACTION_CHANNELS,
+  NO_FILE_ACTION_CHANNELS,
   SUPPORT_ACTION_POLICIES,
   bankBuImportResultFlowIdentities,
   bankBuRunFlowPlan,
@@ -93,23 +95,22 @@ function literalInvocations(filePath, objectName, methodName) {
   return channels.sort();
 }
 
-test('main literal IPC 与 PR3-Toolbox 完成后的 policy 精确相等', () => {
+test('main literal IPC 与 policy/support 精确相等', () => {
   const inventory = mainIpcInventory();
   const registry = createTaskPolicyRegistry();
   const actual = inventory.map((item) => item.channel).sort();
   const expected = [
     ...registry.channels(),
-    ...SUPPORT_ACTION_POLICIES.map((policy) => policy.channel),
-    ...PR3_HANDOFF_CHANNELS
+    ...SUPPORT_ACTION_POLICIES.map((policy) => policy.channel)
   ].sort();
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
-  assert.equal(new Set(expected).size, expected.length, 'policy/handoff 不应重复登记');
+  assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 244);
-  assert.equal(registry.channels('reserve').length, 121);
-  assert.equal(registry.channels('exclude').length, 121);
+  assert.equal(actual.length, 241);
+  assert.equal(registry.channels('reserve').length, 63);
+  assert.equal(registry.channels('no-file').length, 59);
+  assert.equal(registry.channels('exclude').length, 117);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
-  assert.deepEqual(PR3_HANDOFF_CHANNELS, []);
 });
 
 test('preload 暴露集合与 main literal inventory 精确相等', () => {
@@ -145,21 +146,20 @@ test('非 literal direct ipcMain.handle 只存在于已知受控 helper 定义',
   ]);
 });
 
-test('reserve policy 只能经受控 helper，裸 IPC 只能是明确 exclude 或 PR3 handoff', () => {
+test('reserve policy 只能经受控 helper，裸 IPC 只能是明确 exclude', () => {
   const registry = createTaskPolicyRegistry();
-  const handoff = new Set(PR3_HANDOFF_CHANNELS);
   const support = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
   const violations = [];
   for (const registration of mainIpcInventory()) {
     const policy = registry.get(registration.channel);
-    if (handoff.has(registration.channel)) continue;
     if (support.has(registration.channel)) {
       if (registration.kind !== 'supportIpcHandle') {
         violations.push(`${registration.channel}@${registration.line}:support-helper-required`);
       }
       continue;
     }
-    if (policy.batchPolicy === 'reserve' && !CONTROLLED_HELPERS.has(registration.kind)) {
+    if (['reserve', 'no-file'].includes(policy.batchPolicy)
+        && !CONTROLLED_HELPERS.has(registration.kind)) {
       violations.push(`${registration.channel}@${registration.line}:${registration.kind}`);
     }
     if (registration.kind === 'ipcMain.handle' && policy.batchPolicy !== 'exclude') {
@@ -201,10 +201,71 @@ test('exclude 只允许有限原因，所有 policy 都是 literal 且无 wildca
     if (policy.batchPolicy === 'exclude') {
       assert.equal(reasons.has(policy.excludeReason), true, policy.channel);
     } else {
-      assert.equal(policy.batchPolicy, 'reserve');
+      assert.equal(['reserve', 'no-file'].includes(policy.batchPolicy), true);
       assert.equal(typeof policy.resultClassifier, 'function');
       assert.equal(typeof policy.startsNewFlow, 'boolean');
+      if (policy.taskKind === 'file') {
+        assert.equal(typeof policy.filePlanResolver, 'function', policy.channel);
+        assert.ok(policy.filePlanSourceKind, policy.channel);
+        assert.equal(['eager', 'deferred'].includes(policy.allocation), true, policy.channel);
+      } else {
+        assert.equal(policy.taskKind, 'no-file');
+        assert.equal(policy.allocation, 'none');
+        assert.equal(policy.filePlanResolver, null);
+      }
     }
+  }
+});
+
+test('63 file 与 59 no-file mutation 逐项显式分类且精确闭合', () => {
+  const registry = createTaskPolicyRegistry();
+  const fileChannels = new Set(FILE_ACTION_CHANNELS);
+  const noFileChannels = new Set(NO_FILE_ACTION_CHANNELS);
+  const excludeInventory = Object.values(EXCLUDED_CHANNELS_BY_REASON).flat();
+  const excludeChannels = new Set(excludeInventory);
+  assert.equal(fileChannels.size, 63);
+  assert.equal(noFileChannels.size, 59);
+  assert.equal(excludeInventory.length, 117);
+  assert.equal(excludeChannels.size, 117);
+  assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
+  assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
+  assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
+  assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
+  assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
+  assert.equal(registry.channels('exclude').length, 117);
+  assert.equal(registry.list().length, 63 + 59 + 117);
+});
+
+test('dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径', () => {
+  const source = fs.readFileSync(MAIN_PATH, 'utf8');
+  const dialogStart = source.indexOf('async function showImportOpenDialog(scope, options)');
+  const dialogEnd = source.indexOf('\nfunction createPreviewSourceFreshnessGuard', dialogStart);
+  const wrapper = source.slice(dialogStart, dialogEnd);
+  assert.match(wrapper, /properties\.includes\('openFile'\)/);
+  assert.match(wrapper, /properties\.includes\('openDirectory'\)/);
+  assert.match(wrapper, /selectsFiles === selectsDirectories/);
+  assert.match(wrapper, /kind,/);
+
+  const runnerStart = source.indexOf('async function runArchiveAwareOperation(');
+  const runnerEnd = source.indexOf('\nfunction trackedIpcHandle', runnerStart);
+  const runner = source.slice(runnerStart, runnerEnd);
+  assert.doesNotMatch(runner, /dialogSelections\.flatMap|selection\.kind === 'file'/);
+  assert.match(runner, /useLegacyExistingBatchRecovery = prepared\.legacyExistingBatchRecovery === true/);
+  assert.match(runner, /selectedPathsResolver: useLegacyExistingBatchRecovery \? \(\) => \[\] : null/);
+});
+
+test('Acquiring/VCC OP operation owner 由 object handler 实际消费 exact-5 context', () => {
+  const source = fs.readFileSync(MAIN_PATH, 'utf8');
+  for (const channel of [
+    'acquiringBillCurrency:clearMonth',
+    'vccOpCalc:run:compute-amounts',
+    'vccOpCalc:run:save'
+  ]) {
+    const start = source.indexOf(`('${channel}',`);
+    const next = source.indexOf('\n  });', start);
+    const handler = source.slice(start, next);
+    assert.match(handler, /execute:\s*\([^)]*taskContext/);
+    assert.match(handler, /taskContext\.operationContext\.taskRunId/);
   }
 });
 
@@ -272,32 +333,37 @@ test('大账号交互只让 import/complete reserve，preview/cancel 精确 excl
   );
 });
 
-test('13 个 primary 与 1 个 toolbox utility 均有 reserve action，VCC财务独立于VCCOP', () => {
-  const reserve = createTaskPolicyRegistry().list().filter((policy) => policy.batchPolicy === 'reserve');
-  const reserveScopeIds = new Set(reserve.map((policy) => policy.scopeId));
-  assert.equal(reserveScopeIds.size, 14);
-  assert.equal(new Set([...reserveScopeIds].filter((scopeId) => scopeId !== 'toolbox')).size, 13);
+test('13 个 primary 与 1 个 toolbox utility 均有受控 task，VCC财务独立于VCCOP', () => {
+  const controlled = createTaskPolicyRegistry().list()
+    .filter((policy) => ['reserve', 'no-file'].includes(policy.batchPolicy));
+  const controlledScopeIds = new Set(controlled.map((policy) => policy.scopeId));
+  assert.equal(controlledScopeIds.size, 14);
+  assert.equal(new Set([...controlledScopeIds].filter((scopeId) => scopeId !== 'toolbox')).size, 13);
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('vccFinancialOp:run:calculate').scopeId, 'vcc-financial-op');
   assert.equal(registry.require('vccOpCalc:run:save').scopeId, 'vcc-op-calc');
   assert.deepEqual(
-    reserve.filter((policy) => policy.scopeId === 'toolbox').map((policy) => policy.channel).sort(),
+    controlled.filter((policy) => policy.scopeId === 'toolbox').map((policy) => policy.channel).sort(),
     ['toolbox:merge', 'toolbox:split:export']
   );
 });
 
-test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {
+test('VCC财务 4 file + 6 no-file + 14 exclude literal inventory 精确闭合', () => {
   const registry = createTaskPolicyRegistry();
   const policies = registry.list().filter((policy) => policy.channel.startsWith('vccFinancialOp:'));
   assert.deepEqual(
     policies.filter((policy) => policy.batchPolicy === 'reserve').map((policy) => policy.channel).sort(),
     [
-      'vccFinancialOp:data-manager:delete',
       'vccFinancialOp:data-manager:export',
       'vccFinancialOp:export:import-audit',
       'vccFinancialOp:export:result',
-      'vccFinancialOp:import:apply',
-      'vccFinancialOp:imports:resolve',
+      'vccFinancialOp:import:apply'
+    ]
+  );
+  assert.deepEqual(
+    policies.filter((policy) => policy.batchPolicy === 'no-file').map((policy) => policy.channel).sort(),
+    [
+      'vccFinancialOp:data-manager:delete',
       'vccFinancialOp:opening:initialize',
       'vccFinancialOp:run:adjustment-add',
       'vccFinancialOp:run:archive',
@@ -321,14 +387,12 @@ test('VCC财务 11 reserve + 15 exclude literal inventory 精确闭合', () => {
       'vccFinancialOp:run:latest-archived',
       'vccFinancialOp:run:preflight',
       'vccFinancialOp:run:unarchive-preview',
-      'vccFinancialOp:storage:inspect',
-      'vccFinancialOp:storage:migrate',
       'vccFinancialOp:task:cancel'
     ]
   );
 });
 
-test('VCC财务 calculate/import 新建流程，run/record 后续动作按稳定身份续接', () => {
+test('VCC财务 calculate/import 新建流程，run 后续动作按稳定身份续接', () => {
   const registry = createTaskPolicyRegistry();
   assert.equal(registry.require('vccFinancialOp:run:calculate').startsNewFlow, true);
   assert.equal(registry.require('vccFinancialOp:import:apply').startsNewFlow, true);
@@ -344,10 +408,7 @@ test('VCC财务 calculate/import 新建流程，run/record 后续动作按稳定
     registry.require('vccFinancialOp:run:archive').flowIdentityResolver({ args: [{ runId: 7 }] }),
     { type: 'vcc-financial-op-run', value: '7' }
   );
-  assert.deepEqual(
-    registry.require('vccFinancialOp:imports:resolve').flowIdentityResolver({ args: [{ recordId: 9 }] }),
-    { type: 'vcc-financial-op-import-record', value: '9' }
-  );
+  assert.throws(() => registry.require('vccFinancialOp:imports:resolve'), /未登记/);
   assert.deepEqual(
     registry.require('vccFinancialOp:data-manager:delete').flowPlanResolver({
       prepared: { targetType: 'result', runIds: [11] }
@@ -482,25 +543,25 @@ test('Acquiring 新 run 以 taskRunId 隔离，legacy resume 仍兼容旧 identi
   ), []);
 });
 
-test('无存档产物的运行/配置保存不占批次号，银行对账 export 续接当前内存 run 身份', () => {
+test('无文件运行/配置使用 Task Run 但不占批次号，银行对账 export 续接当前内存 run 身份', () => {
   const registry = createTaskPolicyRegistry();
   const runPolicy = registry.require('bank-statement:run');
   const mappingPolicy = registry.require('template:save-mappings');
   const exportPolicy = registry.require('bank-statement:export');
   assert.deepEqual(
-    [runPolicy.batchPolicy, runPolicy.excludeReason],
-    ['exclude', 'no-archive-artifact']
+    [runPolicy.batchPolicy, runPolicy.taskKind, runPolicy.allocation],
+    ['no-file', 'no-file', 'none']
   );
   assert.deepEqual(
-    [mappingPolicy.batchPolicy, mappingPolicy.excludeReason],
-    ['exclude', 'no-archive-artifact']
+    [mappingPolicy.batchPolicy, mappingPolicy.taskKind, mappingPolicy.allocation],
+    ['no-file', 'no-file', 'none']
   );
   assert.deepEqual(
     registry.list()
-      .filter((policy) => policy.excludeReason === 'no-archive-artifact')
+      .filter((policy) => policy.batchPolicy === 'no-file')
       .map((policy) => policy.channel)
-      .sort(),
-    ['bank-statement:run', 'template:save-mappings']
+      .length,
+    59
   );
   const first = createBankStatementRunFlowIdentity(() => 'ephemeral-run-1');
   const rerun = createBankStatementRunFlowIdentity(() => 'ephemeral-run-2');
@@ -527,7 +588,7 @@ test('无存档产物的运行/配置保存不占批次号，银行对账 export
   );
 });
 
-test('no-archive-artifact policy 经受控 helper 执行业务但在 archive lifecycle 前返回', () => {
+test('no-file policy 经受控 helper 进入 operation-only lifecycle', () => {
   const source = fs.readFileSync(MAIN_PATH, 'utf8');
   const inventory = new Map(mainIpcInventory().map((item) => [item.channel, item]));
   for (const channel of ['bank-statement:run', 'template:save-mappings']) {
@@ -536,14 +597,108 @@ test('no-archive-artifact policy 经受控 helper 执行业务但在 archive lif
   const start = source.indexOf('async function runArchiveAwareOperation');
   const end = source.indexOf('function runRegisteredBusinessOperation', start);
   const operationFlow = source.slice(start, end);
-  const noBatchStart = operationFlow.indexOf("policy.excludeReason !== 'no-archive-artifact'");
-  const executeIndex = operationFlow.indexOf('executeIpcTaskWithoutBatch', noBatchStart);
-  const centerIndex = operationFlow.indexOf('const center = archiveCenterService', noBatchStart);
-  assert.ok(noBatchStart >= 0, '受控 helper 必须显式识别 no-archive-artifact');
-  assert.ok(executeIndex > noBatchStart, 'no-batch action 仍必须进入受控业务执行器');
-  assert.ok(centerIndex > executeIndex, 'no-batch action 必须在初始化/预留存档批次前返回');
-  assert.match(operationFlow.slice(noBatchStart, centerIndex), /execute:\s*executeBusiness/);
-  assert.match(source, /archiveFlowIdentity:\s*createBankStatementRunFlowIdentity\(\)/);
+  assert.match(operationFlow, /policy\.batchPolicy === 'no-file'/);
+  assert.match(operationFlow, /archiveTaskLifecycle\.runOperationOnly/);
+  assert.doesNotMatch(operationFlow, /policy\.excludeReason !== 'no-archive-artifact'/);
+  assert.match(source, /const flowIdentity = createBankStatementRunFlowIdentity\(\)/);
+  assert.match(source, /flowPlan:\s*Object\.freeze\(\{ startsNewFlow: true, flowIdentity \}\)/);
+  assert.match(source, /archiveFlowIdentity:\s*prepared\.flowPlan\.flowIdentity/);
+});
+
+test('首批 simple eager file action 逐项接入 literal FilePlan 与显式 settle', () => {
+  const source = fs.readFileSync(MAIN_PATH, 'utf8');
+  const pendingPreflightSource = fs.readFileSync(
+    path.join(__dirname, '..', '..', '..', 'src', 'main-process', 'pending-import-preflight.js'),
+    'utf8'
+  );
+  const channels = [
+    'monthly-balance:export',
+    'new-account:export',
+    'bank-statement:import',
+    'bank-statement:batch-import',
+    'bank-statement:export',
+    'bankBuRecon:import:run',
+    'bankBuRecon:export:single',
+    'bankBuRecon:export:aggregate',
+    'bizOpRecon:import:run-biz-op',
+    'bizOpRecon:import:run-flow',
+    'bizOpRecon:export:date',
+    'bizOpRecon:export:date-range',
+    'big-account:import-bank-info',
+    'duplicate-inbound-match:export',
+    'duplicate-inbound-match:import-files',
+    'gateway-recon:import',
+    'linked-table:import',
+    'pending:diff:export-single',
+    'pending:diff:export-aggregate',
+    'pending:error:export-report',
+    'pending:import:start',
+    'pending:removed:import',
+    'pre-fund-reconciliation:mpt-errors:export',
+    'pre-fund-reconciliation:mpt-errors:repair',
+    'pre-fund-reconciliation:export',
+    'pre-fund-reconciliation:import-bank',
+    'pre-fund-reconciliation:import-mpt',
+    'scenarios:export-bundle',
+    'scenarios:import-bundle-apply',
+    'recon-id-fix:import',
+    'recon-id-fix:export',
+    'template:import',
+    'template:import-bundle',
+    'template:export-bundle',
+    'vccOpCalc:import:scan'
+  ];
+  const inputChannels = new Set([
+    'bank-statement:import',
+    'bank-statement:batch-import',
+    'bankBuRecon:import:run',
+    'big-account:import-bank-info',
+    'bizOpRecon:import:run-biz-op',
+    'bizOpRecon:import:run-flow',
+    'duplicate-inbound-match:import-files',
+    'gateway-recon:import',
+    'linked-table:import',
+    'pending:import:start',
+    'pending:removed:import',
+    'pre-fund-reconciliation:import-bank',
+    'pre-fund-reconciliation:import-mpt',
+    'pre-fund-reconciliation:mpt-errors:repair',
+    'recon-id-fix:import',
+    'scenarios:import-bundle-apply',
+    'template:import',
+    'template:import-bundle',
+    'vccOpCalc:import:scan'
+  ]);
+  for (const channel of channels) {
+    const start = source.indexOf(`('${channel}',`);
+    const end = source.indexOf('\n  });', start);
+    const handler = source.slice(start, end);
+    assert.ok(start >= 0 && end > start, channel);
+    if (channel === 'pending:import:start') {
+      assert.match(handler, /preparePendingImportSubmission\(/, channel);
+      assert.match(pendingPreflightSource, /filePlan:\s*pendingImportFilePlan\(/, channel);
+      assert.match(pendingPreflightSource, /role:\s*'input'/, channel);
+    } else {
+      assert.match(handler, /filePlan:\s*\{/i, channel);
+    }
+    assert.match(handler, /taskContext\.fileEvidence/, channel);
+    const expectedRole = inputChannels.has(channel) ? 'input' : 'output';
+    if (channel !== 'pending:import:start') {
+      assert.match(handler, new RegExp(`role:\\s*'${expectedRole}'`), channel);
+    }
+    if (expectedRole === 'output') {
+      assert.match(handler, /taskContext\.settleArtifacts\(/, channel);
+    }
+    const executeStart = handler.indexOf('execute');
+    const executeSource = handler.slice(executeStart);
+    assert.doesNotMatch(
+      executeSource,
+      /prepared\.(?:inputPaths|outputPaths|savePath|filePaths|selectedPath|outputDirectory)/,
+      channel
+    );
+  }
+  assert.doesNotMatch(source, /atomicFileLifecycleChannels/);
+  assert.match(source, /const runFileLifecycle = !useLegacyExistingBatchRecovery[\s\S]*?runDeferredFileTask[\s\S]*?runFileTask[\s\S]*?archiveTaskLifecycle\.run/);
 });
 
 test('Bank BU 首次运行续接持久导入身份，显式重跑创建新 parent', async () => {

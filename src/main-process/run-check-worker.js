@@ -161,7 +161,7 @@ if (!isMainThread) {
   //   v2.1.10 T18：payload 新增 chunkSize（caller 从 settings 注入；spec §3.2 默认 100000）
   //   v2.1.10 T19：payload 新增 resumeFromRun = { runId, lastCompletedChunkIndex }（resume 路径）
   async function runCheckInWorker(workerDb, payload, jobId, cancelToken) {
-    const { monthKey, storageRoot, chunkSize, resumeFromRun, workerCount, tempDir, __forceMultiWorkerForTest } = payload || {};
+    const { monthKey, storageRoot, chunkSize, resumeFromRun, workerCount, tempDir, outputIntent, __forceMultiWorkerForTest } = payload || {};
     const batchContext = freezeWorkerBatchContext(payload && payload.batchContext);
     if (!monthKey) {
       throw new Error('runCheckInWorker：monthKey 必填');
@@ -194,6 +194,7 @@ if (!isMainThread) {
       dbPath: workerDbPath,
       tempDir,
       batchContext,
+      outputIntent,
       __forceMultiWorkerForTest,
     });
   }

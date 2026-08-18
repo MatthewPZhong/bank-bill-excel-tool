@@ -56,6 +56,7 @@ async function runChild(opJsonPath, dbPath) {
   const { ensureBizOpReconTablesSupport } = require('../../src/backend/biz-op-recon-db/migrations');
   const session = require('../../src/main-process/biz-op-recon-session');
   const writer = require('../../src/main-process/biz-op-recon-writer');
+  const datasetHeadRepository = require('../../src/backend/biz-op-recon-db/dataset-head-repository');
 
   // 先建库 + migrate（引擎 worker 自开同一 dbPath；主连接用于 dump / 种关联表）。
   const db = new DatabaseSync(dbPath);
@@ -66,9 +67,11 @@ async function runChild(opJsonPath, dbPath) {
 
   const out = { ok: true, results: [], dump: null };
   try {
-    for (const o of op.ops) {
+    for (let operationIndex = 0; operationIndex < op.ops.length; operationIndex += 1) {
+      const o = op.ops[operationIndex];
       // 可选：种关联表数据（覆盖删除链验证；先于覆盖重导）。
       if (o.seedAux) seedAuxTables(db, op.date);
+      const previousHead = datasetHeadRepository.getHead(db, 'flow', op.date);
 
       const r = await session.runFlowImportViaWorker(db, {
         date: op.date,
@@ -77,6 +80,12 @@ async function runChild(opJsonPath, dbPath) {
         writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
         errorReportsDir,
         batchContext: WORKER_BATCH_CONTEXT,
+        datasetSeed: {
+          datasetId: `bizop-flow-engine-migration:${op.date}:${operationIndex + 1}`,
+          producerTaskRunId: WORKER_BATCH_CONTEXT.taskRunId,
+          expectedDatasetId: previousHead ? previousHead.datasetId : null,
+          expectedDatasetVersion: previousHead ? previousHead.datasetVersion : 0
+        },
         onProgress: null
       });
 

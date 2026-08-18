@@ -60,8 +60,73 @@ function insertRun(db, payload) {
   return Number(result.lastInsertRowid);
 }
 
+function insertArchiveRun(db, payload) {
+  const {
+    date,
+    buName,
+    stats = {},
+    archiveTaskRunId
+  } = payload;
+  const stmt = db.prepare(`
+    INSERT INTO ${RUNS_TABLE}
+      (data_date, bu_name, status,
+       t1_op_total, t2_op_total, flow_total,
+       amount_diff_count, multi_op_account_count, t2_anomaly_account_count,
+       t1_not_t2_count, t2_not_t1_count, export_path,
+       archive_contract_version, archive_task_run_id, archive_terminal_ack_at)
+    VALUES (?, ?, 'success', ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, NULL)
+  `);
+  const result = stmt.run(
+    date,
+    buName,
+    stats.t1OpTotal,
+    stats.t2OpTotal,
+    stats.flowTotal,
+    stats.amountDiffCount,
+    stats.multiOpAccountCount,
+    stats.t2AnomalyAccountCount,
+    stats.t1NotT2Count,
+    stats.t2NotT1Count,
+    archiveTaskRunId
+  );
+  return Number(result.lastInsertRowid);
+}
+
 function getRunById(db, runId) {
   return db.prepare(`SELECT * FROM ${RUNS_TABLE} WHERE id = ?`).get(runId) || null;
+}
+
+function getRunByArchiveTaskRunId(db, taskRunId) {
+  return db.prepare(`
+    SELECT * FROM ${RUNS_TABLE}
+    WHERE archive_contract_version = 1 AND archive_task_run_id = ?
+  `).get(taskRunId) || null;
+}
+
+function listUnacknowledgedArchiveRuns(db) {
+  return db.prepare(`
+    SELECT * FROM ${RUNS_TABLE}
+    WHERE archive_contract_version = 1
+      AND archive_task_run_id IS NOT NULL
+      AND archive_task_run_id <> ''
+      AND archive_terminal_ack_at IS NULL
+    ORDER BY id
+  `).all();
+}
+
+function acknowledgeArchiveTerminal(db, runId, taskRunId, acknowledgedAt = new Date().toISOString()) {
+  const result = db.prepare(`
+    UPDATE ${RUNS_TABLE}
+    SET archive_terminal_ack_at = ?
+    WHERE id = ? AND archive_contract_version = 1
+      AND archive_task_run_id = ? AND archive_terminal_ack_at IS NULL
+  `).run(acknowledgedAt, runId, taskRunId);
+  if (Number(result.changes) === 1) return getRunById(db, runId);
+  const existing = getRunById(db, runId);
+  if (existing && existing.archive_task_run_id === taskRunId && existing.archive_terminal_ack_at) {
+    return existing;
+  }
+  throw new Error('Biz OP run receipt 与 Archive TaskRun 不一致');
 }
 
 function listRunsByDateBu(db, date, buName) {
@@ -248,8 +313,12 @@ function clearRunsAndDiffsByDate(db, date) {
 }
 
 module.exports = {
+  acknowledgeArchiveTerminal,
+  insertArchiveRun,
   insertRun,
+  getRunByArchiveTaskRunId,
   getRunById,
+  listUnacknowledgedArchiveRuns,
   listRunsByDateBu,
   updateRunExportPath,
   listSuccessDates,

@@ -62,11 +62,19 @@ function rawOf(bizId) {
   return r ? JSON.parse(r.raw_json) : null;
 }
 
+function legacyUpsert(rows, options = {}) {
+  return repo.upsertLinkedGatewayBill(db, rows, { ...options, legacySource: true });
+}
+
+function legacyUpsertStreaming(feedRows, options = {}) {
+  return repo.upsertLinkedGatewayBillStreaming(db, feedRows, { ...options, legacySource: true });
+}
+
 test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1 task2）', () => {
   // UT-UPSERT-1：同一 bizId 连导 2 次 → 仅 1 行且为最新值
   test('UT-UPSERT-1：幂等——同一 ReconBillBizId 连导 2 次仅 1 行、值更新为最新', () => {
-    repo.upsertLinkedGatewayBill(db, [gwRow('BIZ-A', 'R-A1', '2026-01-01', { Amount: '100' })]);
-    const r1 = repo.upsertLinkedGatewayBill(db, [gwRow('BIZ-A', 'R-A2', '2026-02-02', { Amount: '200' })]);
+    legacyUpsert([gwRow('BIZ-A', 'R-A1', '2026-01-01', { Amount: '100' })]);
+    const r1 = legacyUpsert([gwRow('BIZ-A', 'R-A2', '2026-02-02', { Amount: '200' })]);
 
     assert.equal(tableRowCount(), 1, '同 bizId 连导 2 次表内仅 1 行');
     const raw = rawOf('BIZ-A');
@@ -82,8 +90,8 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
   // UT-UPSERT-2：先 A 再 B → 2 行（A 不被删，证无整表 DELETE）
   test('UT-UPSERT-2：累加不覆盖——先 {BIZ-A} 再 {BIZ-B} → 2 行，A 仍在', () => {
-    repo.upsertLinkedGatewayBill(db, [gwRow('BIZ-A', 'R-A', '2026-01-01')]);
-    repo.upsertLinkedGatewayBill(db, [gwRow('BIZ-B', 'R-B', '2026-01-02')]);
+    legacyUpsert([gwRow('BIZ-A', 'R-A', '2026-01-01')]);
+    legacyUpsert([gwRow('BIZ-B', 'R-B', '2026-01-02')]);
 
     assert.equal(tableRowCount(), 2, '第二批不删第一批 → 2 行（证无整表 DELETE）');
     assert.deepEqual(allRows().map((r) => r.recon_bill_biz_id), ['BIZ-A', 'BIZ-B'], 'A、B 都在');
@@ -91,14 +99,14 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
   // UT-UPSERT-3：{A,B} 后 {B,C} → overwriteCount=1、upserted=2
   test('UT-UPSERT-3：overwriteCount——{A,B} 后 {B,C} 命中 B → overwriteCount=1、upserted=2', () => {
-    const first = repo.upsertLinkedGatewayBill(db, [
+    const first = legacyUpsert([
       gwRow('BIZ-A', 'R-A', '2026-01-01'),
       gwRow('BIZ-B', 'R-B', '2026-01-02')
     ]);
     assert.equal(first.overwriteCount, 0, '首批全新 → overwriteCount=0');
     assert.equal(first.upserted, 2, '首批 upserted=2');
 
-    const second = repo.upsertLinkedGatewayBill(db, [
+    const second = legacyUpsert([
       gwRow('BIZ-B', 'R-B2', '2026-01-03'),
       gwRow('BIZ-C', 'R-C', '2026-01-04')
     ]);
@@ -109,7 +117,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
   // UT-UPSERT-4：空键拒入 + 带空格有效键 TRIM 入库
   test('UT-UPSERT-4：空键拒入（空串/缺字段/纯空白）；带空格有效键 TRIM 入库', () => {
-    const res = repo.upsertLinkedGatewayBill(db, [
+    const res = legacyUpsert([
       gwRow('', 'R-empty', '2026-01-01'),          // 空串 → 拒
       gwRow(undefined, 'R-missing', '2026-01-02'),  // 缺字段 → 拒
       gwRow('   ', 'R-blank', '2026-01-03'),        // 纯空白 → 拒
@@ -126,12 +134,12 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
   // UT-UPSERT-5：meta 全表重算（跨 2 批不同 bill_date）
   test('UT-UPSERT-5：meta 全表重算——rowCount/dataDateMin/Max 跨两批为全表口径', () => {
-    repo.upsertLinkedGatewayBill(db, [
+    legacyUpsert([
       gwRow('BIZ-A', 'R-A', '2026-03-15'),
       gwRow('BIZ-B', 'R-B', '2026-03-20')
     ], { sourceFileName: 'gw-batch1.xlsx' });
 
-    const r2 = repo.upsertLinkedGatewayBill(db, [
+    const r2 = legacyUpsert([
       gwRow('BIZ-C', 'R-C', '2026-01-05'), // 更早 → 拉低 min
       gwRow('BIZ-D', 'R-D', '2026-05-30')  // 更晚 → 拉高 max
     ], { sourceFileName: 'gw-batch2.xlsx' });
@@ -155,7 +163,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
       gwRow('BIZ-A', 'R-A1', '2026-01-01'),
       gwRow('BIZ-B', 'R-B', '2026-01-02')
     ];
-    const first = await repo.upsertLinkedGatewayBillStreaming(db, async (upsertOne) => {
+    const first = await legacyUpsertStreaming(async (upsertOne) => {
       rows.forEach(upsertOne);
     });
     assert.equal(first.upserted, 2, '流式首批 upserted=2');
@@ -163,7 +171,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
     assert.equal(tableRowCount(), 2, '流式首批 2 行入库');
 
     // 再流式喂同 bizId（幂等覆盖）+ 1 新 + 1 空键
-    const second = await repo.upsertLinkedGatewayBillStreaming(db, async (upsertOne) => {
+    const second = await legacyUpsertStreaming(async (upsertOne) => {
       [
         gwRow('BIZ-A', 'R-A2', '2026-02-02'), // 覆盖
         gwRow('BIZ-C', 'R-C', '2026-01-03'),  // 新增
@@ -178,7 +186,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
     // feedRows 非函数 → 守卫抛错
     await assert.rejects(
-      () => repo.upsertLinkedGatewayBillStreaming(db, null),
+      () => legacyUpsertStreaming(null),
       /feedRows/,
       '流式版 feedRows 非函数 → 守卫抛错'
     );
@@ -187,7 +195,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
   // UT-UPSERT-7：🔴 R-4 流式中途 throw → 整批 ROLLBACK，表保持调用前状态
   test('UT-UPSERT-7：ROLLBACK（R-4）——流式 feedRows 中途 throw → 整批回滚，表不变', async () => {
     // 先成功 upsert 2 行
-    repo.upsertLinkedGatewayBill(db, [
+    legacyUpsert([
       gwRow('BIZ-A', 'R-A', '2026-01-01'),
       gwRow('BIZ-B', 'R-B', '2026-01-02')
     ]);
@@ -197,7 +205,7 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
 
     // 流式：喂 1 行成功后 throw → 整批回滚（那 1 行不入、A/B 不变）
     await assert.rejects(
-      () => repo.upsertLinkedGatewayBillStreaming(db, async (upsertOne) => {
+      () => legacyUpsertStreaming(async (upsertOne) => {
         upsertOne(gwRow('BIZ-C', 'R-C', '2026-01-03')); // 这行不应最终入库
         throw new Error('boom: 模拟流式中途失败');
       }),
@@ -217,7 +225,70 @@ test.describe('linked-table-repository — 网关对账单幂等 upsert（v3.0.1
     assert.equal(metaAfter.dataDateMax, metaBefore.dataDateMax, 'meta.dataDateMax 未变');
 
     // 表仍可继续正常 upsert（事务已干净回滚，无残留 BEGIN）
-    assert.doesNotThrow(() => repo.upsertLinkedGatewayBill(db, [gwRow('BIZ-D', 'R-D', '2026-01-04')]), '回滚后可继续 upsert');
+    assert.doesNotThrow(() => legacyUpsert([gwRow('BIZ-D', 'R-D', '2026-01-04')]), '回滚后可继续 upsert');
     assert.equal(tableRowCount(), 3, '回滚后续 upsert 正常 → A、B、D 共 3 行');
+  });
+
+  test('v1 同一文件重复幂等键时每次物理 upsert 换 nonce，最终来源身份不降级', () => {
+    repo.upsertLinkedGatewayBill(db, [
+      gwRow('BIZ-DUP', 'R-OLD', '2026-07-01'),
+      gwRow('BIZ-DUP', 'R-NEW', '2026-07-02')
+    ], {
+      sourceIdentity: {
+        datasetId: 'gateway-dataset-v1',
+        producerTaskRunId: 'gateway-task-v1',
+        sourceContractVersion: 1
+      }
+    });
+
+    const row = db.prepare(`
+      SELECT reconciliation_id, source_dataset_id, source_task_run_id,
+             source_contract_version, source_write_nonce
+      FROM linked_gateway_bill
+      WHERE recon_bill_biz_id = 'BIZ-DUP'
+    `).get();
+    assert.equal(row.reconciliation_id, 'R-NEW');
+    assert.equal(row.source_dataset_id, 'gateway-dataset-v1');
+    assert.equal(row.source_task_run_id, 'gateway-task-v1');
+    assert.equal(row.source_contract_version, 1);
+    assert.match(row.source_write_nonce, /^[0-9a-f-]{36}$/);
+  });
+
+  test('旧 binary 未换 nonce 的业务列 UPDATE 仅将命中行来源降为 v0', () => {
+    const sourceIdentity = {
+      datasetId: 'gateway-dataset-v1',
+      producerTaskRunId: 'gateway-task-v1',
+      sourceContractVersion: 1
+    };
+    repo.upsertLinkedGatewayBill(db, [
+      gwRow('BIZ-OLD', 'R-OLD', '2026-07-01'),
+      gwRow('BIZ-KEEP', 'R-KEEP', '2026-07-01')
+    ], { sourceIdentity });
+
+    db.prepare(`
+      UPDATE linked_gateway_bill
+      SET reconciliation_id = ?, raw_json = ?, imported_at = ?
+      WHERE recon_bill_biz_id = ?
+    `).run('R-OLD-BINARY', JSON.stringify(gwRow('BIZ-OLD', 'R-OLD-BINARY', '2026-07-02')), '2026-07-02T00:00:00.000Z', 'BIZ-OLD');
+
+    const rows = db.prepare(`
+      SELECT recon_bill_biz_id, source_dataset_id, source_task_run_id, source_contract_version
+      FROM linked_gateway_bill
+      ORDER BY recon_bill_biz_id
+    `).all().map((row) => ({ ...row }));
+    assert.deepEqual(rows, [
+      {
+        recon_bill_biz_id: 'BIZ-KEEP',
+        source_dataset_id: 'gateway-dataset-v1',
+        source_task_run_id: 'gateway-task-v1',
+        source_contract_version: 1
+      },
+      {
+        recon_bill_biz_id: 'BIZ-OLD',
+        source_dataset_id: null,
+        source_task_run_id: null,
+        source_contract_version: 0
+      }
+    ]);
   });
 });

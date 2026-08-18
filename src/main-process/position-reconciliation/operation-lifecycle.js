@@ -6,10 +6,27 @@ const {
   normalizeSourceSnapshot
 } = require('../archive-center/source-snapshot');
 const {
+  freezePersistedTaskOwner
+} = require('../archive-center/worker-operation-context');
+const {
   normalizePositionCheckpoint
 } = require('./side-db-mutation');
 
 const SHA256_RE = /^[a-f0-9]{64}$/;
+
+function positionPendingOwner(pending) {
+  if (pending && pending.owner) {
+    return freezePersistedTaskOwner(pending.owner, { required: true });
+  }
+  if (pending && pending.batchContext) {
+    return freezePersistedTaskOwner({
+      version: 1,
+      kind: 'file-batch',
+      batchContext: pending.batchContext
+    }, { required: true });
+  }
+  throw new Error('平盘 pending 缺少持久 owner');
+}
 
 function parsePositionPendingArchiveFiles(value) {
   if (value === null || value === undefined || value === '') return [];
@@ -30,13 +47,19 @@ function parsePositionPendingArchiveFiles(value) {
     const role = String(file.role || '').trim();
     if (role === 'input') {
       const sourceSnapshot = normalizeSourceSnapshot(file.sourceSnapshot);
-      const sha256 = String(file.sha256 || '').trim().toLowerCase();
-      const sizeBytes = Number(file.sizeBytes);
-      if (!sourceSnapshot
-          || !SHA256_RE.test(sha256)
-          || !Number.isSafeInteger(sizeBytes)
-          || sizeBytes < 0
-          || sourceSnapshot.sizeBytes !== sizeBytes) {
+      const hasManifestIdentity = typeof file.artifactKey === 'string'
+        && file.artifactKey.trim() !== ''
+        && typeof file.sourceOperation === 'string'
+        && file.sourceOperation.trim() !== '';
+      const hasHashEvidence = file.sha256 !== undefined || file.sizeBytes !== undefined;
+      const sha256 = hasHashEvidence ? String(file.sha256 || '').trim().toLowerCase() : '';
+      const sizeBytes = hasHashEvidence ? Number(file.sizeBytes) : null;
+      if (!sourceSnapshot || (hasHashEvidence && (
+        !SHA256_RE.test(sha256)
+        || !Number.isSafeInteger(sizeBytes)
+        || sizeBytes < 0
+        || sourceSnapshot.sizeBytes !== sizeBytes
+      )) || (!hasHashEvidence && !hasManifestIdentity)) {
         return null;
       }
       files.push({
@@ -44,8 +67,7 @@ function parsePositionPendingArchiveFiles(value) {
         filePath: file.filePath.trim(),
         role,
         sourceSnapshot,
-        sha256,
-        sizeBytes
+        ...(hasHashEvidence ? { sha256, sizeBytes } : {})
       });
       continue;
     }
@@ -150,7 +172,6 @@ function positionPreflightAnomalyOutputFiles(preflightReady) {
       filePath: file.filePath,
       role: 'output',
       beforeSnapshot: file.sourceSnapshot || null,
-      sourceSnapshot: file.sourceSnapshot,
       sha256: file.expectedSha256 || file.sha256,
       sizeBytes: file.sizeBytes
     }))
@@ -159,16 +180,13 @@ function positionPreflightAnomalyOutputFiles(preflightReady) {
 
 function assertSameArchiveInputEvidence(actualFiles, expectedFiles) {
   const actualInputs = actualFiles.filter((file) => file.role === 'input');
-  if (actualInputs.length !== expectedFiles.length) {
-    throw new Error('平盘导入 pending 的输入文件清单与预检 manifest 不一致');
-  }
-  const expectedByKey = new Map(expectedFiles.map((file) => [
+  const actualByKey = new Map(actualInputs.map((file) => [
     recoveryInputKey(file),
     file
   ]));
-  for (const actual of actualInputs) {
-    const expected = expectedByKey.get(recoveryInputKey(actual));
-    if (!expected
+  for (const expected of expectedFiles) {
+    const actual = actualByKey.get(recoveryInputKey(expected));
+    if (!actual
         || String(actual.sourceType || '').trim() !== String(expected.sourceType || '').trim()
         || actual.sha256 !== expected.sha256
         || actual.sizeBytes !== expected.sizeBytes
@@ -556,8 +574,13 @@ function positionCancellationAcceptedPending(pending, message = '用户取消平
     throw new Error('平盘取消确认缺少待完成操作');
   }
   const operationToken = String(pending.operationToken || '').trim();
-  const batchId = Number(pending.batchContext && pending.batchContext.batchId);
-  if (!operationToken || !Number.isSafeInteger(batchId) || batchId < 1) {
+  const owner = positionPendingOwner(pending);
+  const ownerTaskRunId = owner && owner.kind === 'operation'
+    ? String(owner.operationContext && owner.operationContext.taskRunId || '')
+    : owner && owner.kind === 'file-batch'
+      ? String(owner.batchContext && owner.batchContext.taskRunId || '')
+      : '';
+  if (!operationToken || ownerTaskRunId !== operationToken) {
     throw new Error('平盘取消确认缺少原任务身份');
   }
   return {
@@ -572,20 +595,43 @@ function positionCancellationAcceptedPending(pending, message = '用户取消平
 }
 
 async function settlePositionRecoveredTask({ pending, archiveService }) {
-  const context = pending && pending.batchContext;
+  const owner = positionPendingOwner(pending);
+  if (owner && owner.kind === 'operation') {
+    const context = owner.operationContext;
+    const taskRun = archiveService && archiveService.repository
+      && archiveService.repository.getTaskRun(context.taskRunId);
+    if (!taskRun
+        || taskRun.operationKey !== context.operationKey
+        || taskRun.parentRunId !== context.parentRunId
+        || taskRun.moduleId !== context.moduleId) {
+      throw new Error('平盘恢复 operationContext 与原 Task Run 身份不一致');
+    }
+    const outcome = positionRecoveryTerminalOutcome(pending);
+    const result = await archiveService.finishTaskRun(context.taskRunId, {
+      ...outcome,
+      metadata: {
+        recoveredPositionOperation: true,
+        positionOperationToken: String(pending.operationToken || ''),
+        positionTerminalOutcome: outcome.taskStatus
+      }
+    });
+    const existingTerminal = result && result.taskRun
+      && result.taskRun.status === outcome.taskStatus;
+    if (!result || (result.ok === false && !existingTerminal)) {
+      throw new Error(result && result.message || '平盘 operation Task Run 恢复终态失败');
+    }
+    return result;
+  }
+  const context = owner && owner.batchContext;
   const batchId = Number(context && context.batchId);
   if (!Number.isSafeInteger(batchId) || batchId < 1
       || !archiveService
-      || typeof archiveService.getBatch !== 'function') {
+      || !archiveService.repository
+      || typeof archiveService.repository.getBatch !== 'function') {
     throw new Error('平盘恢复缺少原任务 batchContext 或存档服务');
   }
-  const lookup = await archiveService.getBatch(batchId);
-  if (!lookup || lookup.ok !== true || !lookup.batch) {
-    throw new Error(lookup && lookup.message
-      ? lookup.message
-      : `平盘恢复的原任务批次不存在：${batchId}`);
-  }
-  const batch = lookup.batch;
+  const batch = archiveService.repository.getBatch(batchId);
+  if (!batch) throw new Error(`平盘恢复的原任务批次不存在：${batchId}`);
   if (String(batch.operationKey || '') !== String(context.operationKey || '')
       || String(batch.parentRunId || '') !== String(context.parentRunId || '')
       || String(batch.taskRunId || '') !== String(context.taskRunId || '')
@@ -600,7 +646,13 @@ async function settlePositionRecoveredTask({ pending, archiveService }) {
     positionTerminalOutcome: outcome.taskStatus
   };
   let result;
-  if (outcome.taskStatus === 'succeeded') {
+  if (batch.metadata && batch.metadata._fileManifest) {
+    result = await archiveService.finishFileTask(
+      context.taskRunId,
+      batchId,
+      { ...outcome, metadata }
+    );
+  } else if (outcome.taskStatus === 'succeeded') {
     result = await archiveService.completeTaskBatch(batchId, { metadata });
   } else if (outcome.taskStatus === 'cancelled') {
     result = await archiveService.cancelTaskBatch(batchId, {

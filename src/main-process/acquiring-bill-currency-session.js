@@ -566,7 +566,7 @@ function adaptiveChunkSizeForMultiWorker({ totalBillRows, workerCount, requested
 //   5. 调 writer 同步生成 diff.xlsx + report.xlsx；UPDATE runs.diff_file_path/report_file_path 回填
 //   6. XLSX 全部发布并回填路径后 SET chunk_progress.status='complete' + 返回 stats + filePaths
 // 关键不变量：写盘失败不应回滚 DB 事务（数据已 COMMIT 有效）；写盘错误仅 throw 给 caller
-async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, batchContext, __forceMultiWorkerForTest }) {
+async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken, chunkSize, resumeFromRun, workerCount, dbPath, tempDir, batchContext, outputIntent, __forceMultiWorkerForTest }) {
   if (!monthKey) {
     throw new Error('runCheck：monthKey 必填');
   }
@@ -671,6 +671,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
         status: 'in-progress',
         chunkSize: effectiveChunkSize, // H4：存原始 chunkSize 供 resume 复用
         batchContext,
+        outputIntent,
       });
       // v2.1.10 A4 T18：主事务 COMMIT — 让 stage 4' chunked 各 chunk 独立 BEGIN/COMMIT
       //   Round 6 H1：COMMIT 之前 setRunChunkProgress 已写入 → runs 行与 chunk_progress 同事务原子可见
@@ -960,7 +961,7 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
       if (!publishedProgress || publishedProgress.status !== 'data-complete') {
         throw new Error('run 输出发布前的数据完成证据已变化');
       }
-      if (!publishedProgress.outputIntent) {
+      if (!publishedProgress.outputIntent && !batchContext) {
         const outputIntent = writer.planRunOutputPaths({ monthKey, storageRoot });
         runRepo.setRunChunkProgress(db, {
           runId,
@@ -971,6 +972,9 @@ async function runCheckCore({ db, monthKey, storageRoot, onProgress, cancelToken
           outputIntent
         });
         publishedProgress = runRepo.getRunChunkProgress(db, runId);
+      }
+      if (!publishedProgress.outputIntent) {
+        throw new Error('run 输出发布缺少 TaskRun 前冻结的 output intent');
       }
       const out = await writer.writeRunOutputs({
         db,

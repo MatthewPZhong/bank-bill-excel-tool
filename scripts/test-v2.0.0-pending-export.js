@@ -30,7 +30,7 @@ function insertRows(db, yearMonth, rows) {
   const insertRow = monthRepo.createRowInserter(db);
   db.exec('BEGIN');
   rows.forEach((r, i) => insertRow(yearMonth, `hash-${yearMonth}-${i}`, r));
-  monthRepo.upsertMonthMeta(db, { yearMonth, rowCount: rows.length, sourceFiles: [] });
+  monthRepo.upsertMonthMetaLegacy(db, { yearMonth, rowCount: rows.length, sourceFiles: [] });
   db.exec('COMMIT');
 }
 
@@ -57,7 +57,7 @@ try {
   ]);
 
   const rule = { matchFields: ['order_no'], compareFields: ['金额'] };
-  const reconcileResult = engine.runReconciliation(db, {
+  const reconcileResult = engine.runLegacyReconciliation(db, {
     upperMonth: '2026-09',
     lowerMonth: '2026-10',
     rule
@@ -135,13 +135,13 @@ try {
     insertRows(db, '2026-08', [
       sampleRow({ orderNo: 'B001', amount: '10', currency: 'USD', fundType: '提现' })
     ]);
-    engine.runReconciliation(db, {
+    engine.runLegacyReconciliation(db, {
       upperMonth: '2026-08', lowerMonth: '2026-09',
       rule: { matchFields: ['order_no'], compareFields: ['金额'] }
     });
 
     const out = path.join(TMP, 'aggregate.xlsx');
-    const r = writer.exportAggregate(db, out);
+    const r = writer.exportAggregateLegacy(db, out);
     check('status=success', r.status === 'success');
     check('runsCount = 2', r.runsCount === 2, `got ${r.runsCount}`);
 
@@ -156,7 +156,7 @@ try {
   console.log('[T3] compareFields 含 pending资金类型 → 专门 sheet（无变更时空表）');
   {
     const out = path.join(TMP, 'single-with-fundtype-cf-empty.xlsx');
-    const res = engine.runReconciliation(db, {
+    const res = engine.runLegacyReconciliation(db, {
       upperMonth: '2026-09',
       lowerMonth: '2026-10',
       rule: { matchFields: ['order_no'], compareFields: ['金额', 'pending资金类型'] }
@@ -181,7 +181,7 @@ try {
     insertRows(db, '2026-12', [
       sampleRow({ orderNo: 'A002', amount: '200', currency: 'USD', fundType: '退票' })
     ]);
-    const res = engine.runReconciliation(db, {
+    const res = engine.runLegacyReconciliation(db, {
       upperMonth: '2026-11',
       lowerMonth: '2026-12',
       rule: { matchFields: ['order_no'], compareFields: ['pending资金类型'] }
@@ -214,20 +214,20 @@ try {
     insertRows(db, '2026-05', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'USD', fundType: '提现' })]);
     insertRows(db, '2026-06', [sampleRow({ orderNo: 'X001', amount: '100', currency: 'CNY', fundType: '提现' })]);
     // run A：compareFields=[金额]，金额无变化 → changed=0（但进并集里让 headers 含 金额_before/after/金额_diff）
-    engine.runReconciliation(db, {
+    engine.runLegacyReconciliation(db, {
       upperMonth: '2026-05', lowerMonth: '2026-06',
       rule: { matchFields: ['order_no'], compareFields: ['金额'] }
     });
     insertRows(db, '2027-01', [sampleRow({ orderNo: 'Z001', amount: '500', currency: 'USD', fundType: '提现' })]);
     insertRows(db, '2027-02', [sampleRow({ orderNo: 'Z001', amount: '888', currency: 'EUR', fundType: '提现' })]);
     // run B：compareFields=[币种]，币种 USD→EUR changed=1（金额虽差但不在本 run 规则里）
-    engine.runReconciliation(db, {
+    engine.runLegacyReconciliation(db, {
       upperMonth: '2027-01', lowerMonth: '2027-02',
       rule: { matchFields: ['order_no'], compareFields: ['币种'] }
     });
 
     const out = path.join(TMP, 'aggregate-run-independence.xlsx');
-    const r = writer.exportAggregate(db, out);
+    const r = writer.exportAggregateLegacy(db, out);
     check('aggregate status=success', r.status === 'success');
 
     const wb = XLSX.readFile(out);

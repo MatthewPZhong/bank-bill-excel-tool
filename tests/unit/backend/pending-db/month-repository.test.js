@@ -6,7 +6,7 @@ const {
   countRowsInMonth,
   getMonthMeta,
   listMonths,
-  upsertMonthMeta,
+  upsertMonthMetaLegacy: upsertMonthMeta,
   deleteMonth,
   createRowInserter
 } = require('../../../../src/backend/pending-db/month-repository');

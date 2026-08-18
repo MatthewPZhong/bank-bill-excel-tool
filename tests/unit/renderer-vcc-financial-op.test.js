@@ -251,7 +251,6 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:unarchive',
       'vccFinancialOp:imports:list-months',
       'vccFinancialOp:imports:list-records',
-      'vccFinancialOp:imports:resolve',
       'vccFinancialOp:data-manager:overview',
       'vccFinancialOp:data-manager:delete-targets',
       'vccFinancialOp:data-manager:delete-preview',
@@ -261,13 +260,19 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       'vccFinancialOp:run:get',
       'vccFinancialOp:run:latest-archived',
       'vccFinancialOp:export:result',
-      'vccFinancialOp:export:import-audit',
-      'vccFinancialOp:storage:inspect',
-      'vccFinancialOp:storage:migrate'
+      'vccFinancialOp:export:import-audit'
     ];
     for (const channel of channels) {
       assert.ok(preload.includes(`ipcRenderer.invoke('${channel}'`), `preload 缺少 ${channel}`);
       assert.ok(main.includes(`'${channel}'`), `main 缺少 ${channel}`);
+    }
+    for (const removedChannel of [
+      'vccFinancialOp:imports:resolve',
+      'vccFinancialOp:storage:inspect',
+      'vccFinancialOp:storage:migrate'
+    ]) {
+      assert.equal(preload.includes(removedChannel), false, `preload 不应保留 ${removedChannel}`);
+      assert.equal(main.includes(removedChannel), false, `main 不应保留 ${removedChannel}`);
     }
     assert.match(main, /await vccFinancialOpService\.terminate\(\)/);
     assert.match(vccService, /return runWorker\('inspect', \{ filePaths \}\)/);
@@ -289,13 +294,13 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     );
     assert.match(moduleRenderer, /progress\.action !== 'unarchive'[\s\S]*?resultOperationProgressMessage\(progress\)[\s\S]*?finally \{\s*stopProgress\(\)/);
     assert.match(moduleRenderer, /progress\.action !== 'delete'[\s\S]*?setDeleteState\(resultOperationProgressMessage\(progress\), 'warning'\)[\s\S]*?finally \{\s*stopProgress\(\)/);
-    assert.match(vccService, /function archive\(payload = \{\}, onProgress, batchContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
-    assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress, batchContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
+    assert.match(vccService, /function archive\(payload = \{\}, onProgress, operationContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ARCHIVE_RESULT/);
+    assert.match(vccService, /function addRunAdjustment\(payload = \{\}, onProgress, operationContext\)[\s\S]*VCC_MUTATION_OPERATIONS\.ADD_ADJUSTMENT/);
     assert.doesNotMatch(vccService, /archiveRun\(|addRunAdjustmentToDb\(/);
     assert.doesNotMatch(main, /legacySourceRequest|service\.deleteDatasetData\(payload\)/);
     assert.match(
       vccService,
-      /function deleteDatasetData\(payload = \{\}, onProgress, batchContext\) \{[\s\S]*?expectedPreviewToken: payload\.expectedPreviewToken,[\s\S]*?taskGeneration: payload\.taskGeneration[\s\S]*?onProgress, batchContext[\s\S]*?\n  \}/
+      /function deleteDatasetData\(payload = \{\}, onProgress, operationContext\) \{[\s\S]*?expectedPreviewToken: payload\.expectedPreviewToken,[\s\S]*?taskGeneration: payload\.taskGeneration[\s\S]*?onProgress, operationContext[\s\S]*?\n  \}/
     );
     assert.match(preload, /ipcRenderer\.on\('vccFinancialOp:import:progress'/);
     assert.match(preload, /ipcRenderer\.removeListener\('vccFinancialOp:import:progress'/);
@@ -413,13 +418,34 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-delete-fields\s*\{[\s\S]*grid-template-columns:\s*25% 40%;[\s\S]*column-gap:\s*10px;/);
     assert.match(styles, /\.vcc-fin-op-manager-shell\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/);
     assert.match(moduleRenderer, /data-field="manager-month" disabled><option value="">正在读取…<\/option>/);
-    assert.match(moduleRenderer, /vcc-fin-op-manager-skeleton/);
     assert.match(moduleRenderer, /modal\.trackPreviewState\(refreshManagerData\(\{ preferredMonth: initialMonth \}\)\)/);
     assert.match(moduleRenderer, /unarchiveButton\.textContent = loadingManagerData \? '正在读取归档…' : '解归档'/);
     assert.doesNotMatch(moduleRenderer, /async function openDataManager/);
     const managerSource = moduleRenderer.slice(
       moduleRenderer.indexOf('function openDataManager('),
       moduleRenderer.indexOf('async function initialize()')
+    );
+    const initialShellSource = managerSource.slice(
+      managerSource.indexOf('const modal = mountDialog('),
+      managerSource.indexOf("const content = modal.dialog.querySelector('[data-role=\"manager-content\"]')")
+    );
+    assert.doesNotMatch(initialShellSource, /vcc-fin-op-manager-skeleton/);
+    assert.match(managerSource, /const managerSkeletonDelayMs = 150;/);
+    assert.match(managerSource, /onClose: clearManagerSkeletonTimer/);
+    assert.match(
+      managerSource,
+      /managerSkeletonTimer = setTimeout\(\(\) => \{[\s\S]*currentLoadVersion !== loadVersion[\s\S]*!loadingManagerData[\s\S]*!content\.isConnected[\s\S]*renderManagerSkeleton\(\);[\s\S]*\}, managerSkeletonDelayMs\);/
+    );
+    const refreshManagerStart = managerSource.indexOf('async function refreshManagerData(');
+    const refreshManagerSource = managerSource.slice(
+      refreshManagerStart,
+      managerSource.indexOf("modal.dialog.querySelectorAll('[data-section]')", refreshManagerStart)
+    );
+    assert.match(refreshManagerSource, /scheduleManagerSkeleton\(currentVersion\);/);
+    assert.doesNotMatch(refreshManagerSource, /^\s*renderManagerSkeleton\(\);/m);
+    assert.ok(
+      (refreshManagerSource.match(/clearManagerSkeletonTimer\(\);/g) || []).length >= 2,
+      '数据读取成功或失败后都必须取消延迟骨架计时器'
     );
     assert.ok(
       managerSource.indexOf('const modal = mountDialog(')
@@ -707,14 +733,19 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     })) assert.ok(moduleRenderer.includes(label), `校验表导出目标缺少 ${label}`);
   });
 
-  test('有效原表删除后列表保留文件级删除状态且不再打开逐行详情', () => {
+  test('有效原表删除后列表保留删除状态且不再打开逐行详情或显示存档小字', () => {
     assert.match(vccService, /deleted:\s*'已删除'/);
     assert.match(vccService, /status:\s*deleted \? 'deleted' : originalStatus/);
     assert.match(vccService, /originalStatusText:/);
     assert.match(vccService, /datasetDeletedAt:/);
     assert.match(moduleRenderer, /if \(status === 'deleted'\) return 'deleted'/);
     assert.doesNotMatch(moduleRenderer, /openImportRecordDetail|getImportDetail/);
-    assert.match(moduleRenderer, /record\.archiveState === 'ready'/);
+    assert.doesNotMatch(moduleRenderer, /vcc-fin-op-record-archive-state|archiveStateHtml|archiveText/);
+    assert.doesNotMatch(moduleRenderer, /输入文件已存档|输入文件待存档|历史或失败输入未绑定/);
+    const rawRecordsStart = moduleRenderer.indexOf('function rawRecordsTable(');
+    const rawRecordsEnd = moduleRenderer.indexOf('function openDatasetDeleteDialog(', rawRecordsStart);
+    assert.ok(rawRecordsStart >= 0 && rawRecordsEnd > rawRecordsStart);
+    assert.doesNotMatch(moduleRenderer.slice(rawRecordsStart, rawRecordsEnd), /<small\b/);
   });
 
   test('校验原表直接进入按单一月份筛选的七列导入记录并按异常显示导出', () => {
@@ -727,19 +758,23 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.doesNotMatch(moduleRenderer, /查看导入明细/);
     assert.match(moduleRenderer, /Number\(record\.anomalyCount\) > 0/);
     assert.match(moduleRenderer, />导出明细<\/button>/);
-    assert.match(moduleRenderer, />标记已处理<\/button>/);
-    assert.match(moduleRenderer, /输入文件待存档/);
+    assert.doesNotMatch(moduleRenderer, /标记已处理|data-resolve-record/);
+    assert.doesNotMatch(moduleRenderer, /<small[^>]*vcc-fin-op-record-archive-state/);
     assert.match(moduleRenderer, /listImportRecords\(\{ yearMonth: month \}\)/);
   });
 
-  test('异常审计仅保留六列导出入口与文件级人工处置', () => {
+  test('数据管理不再暴露 VCC 优化存储入口', () => {
+    assert.doesNotMatch(moduleRenderer, /optimize-storage|优化存储|inspectStorage|migrateStorage/);
+    assert.doesNotMatch(preload, /vccFinancialOp:storage:migration-progress/);
+  });
+
+  test('异常审计仅保留六列导出入口，不再提供人工处置', () => {
     assert.doesNotMatch(moduleRenderer, /getImportDetail/);
     assert.doesNotMatch(moduleRenderer, /openImportRecordDetail/);
     assert.doesNotMatch(moduleRenderer, /导出当前分类/);
     assert.match(moduleRenderer, /api\.exportImportAudit\(/);
-    assert.match(moduleRenderer, /action: 'keep_current_effective_dataset'/);
-    assert.match(moduleRenderer, /data-field="resolution-confirm"/);
-    assert.match(moduleRenderer, /本次失败导入不参与计算/);
+    assert.doesNotMatch(moduleRenderer, /openResolutionDialog|resolveImportRecord/);
+    assert.doesNotMatch(moduleRenderer, /keep_current_effective_dataset|resolution-confirm/);
   });
 
   test('结果确认读取完整后端 review、按生效差异展示并在页内带 revision 归档', () => {
@@ -1054,13 +1089,11 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
       code: 'missing-datasets',
       issues: [
         { code: 'empty-dataset', message: 'Pending 校验表没有有效数据。' },
-        { code: 'invalid-system-snapshot', message: 'PPHK 系统财务OP缺少 USD 余额。' },
-        { code: 'unresolved-imports', message: '仍有 1 条未处理失败记录。' }
+        { code: 'invalid-system-snapshot', message: 'PPHK 系统财务OP缺少 USD 余额。' }
       ]
     }), [
       'Pending 校验表没有有效数据。',
-      'PPHK 系统财务OP缺少 USD 余额。',
-      '仍有 1 条未处理失败记录。'
+      'PPHK 系统财务OP缺少 USD 余额。'
     ].join('\n'));
   });
 

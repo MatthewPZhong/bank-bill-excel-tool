@@ -31,8 +31,9 @@ const orchSrc = fs
 describe('需求3：bank-statement:run handler 进度转发器内联（not-defined 事故回归）', () => {
   test('handler 改 async 并取 event（进度转发需要 event.sender）', () => {
     assert.ok(
-      mainSrc.includes("trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', async (event) =>"),
-      'bank-statement:run handler 必须是 async (event) =>（需求3 异步化 + 取 event 供进度转发）'
+      mainSrc.includes("trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', {")
+        && mainSrc.includes('async execute(event, prepared, taskContext)'),
+      'bank-statement:run object handler.execute 必须是 async 并取 event（进度转发依赖）'
     );
   });
 

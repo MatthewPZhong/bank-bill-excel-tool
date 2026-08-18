@@ -97,9 +97,6 @@ function previewOpeningDeletion(db, target, state, { taskActive }) {
   } else if (taskActive || state.sourceFacts.activeImportBatchCount > 0) {
     code = 'active-vcc-task';
     message = '已有 VCC 财务OP任务正在运行，请完成后重试。';
-  } else if (state.sourceFacts.unresolvedImportCount > 0) {
-    code = 'unresolved-imports';
-    message = '该月仍有未处理的导入异常，禁止删除首月期初初始化数据。';
   }
   return {
     targetType: target.targetType,

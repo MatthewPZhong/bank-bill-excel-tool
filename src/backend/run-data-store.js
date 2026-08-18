@@ -25,7 +25,9 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
+const { ensureBizOpReconTablesSupport } = require('./biz-op-recon-db/migrations');
 
 // 主库 init 的 PRAGMA 顺序（database.js:113-122）+ worker 追加 busy_timeout（run-check-worker.js:49-57）。
 //   侧库被主进程直连（cleanup / 孤儿扫描 / retention）与 worker 直连（runCheck / import 引擎）双方打开，
@@ -291,6 +293,61 @@ const SIDE_DB_DDL_BIZ_OP = `
   CREATE INDEX IF NOT EXISTS idx_biz_op_flow_imports_account
     ON biz_op_recon_flow_imports(data_date, account_no);
 
+  CREATE TABLE IF NOT EXISTS biz_op_recon_dataset_heads (
+    dataset_kind TEXT NOT NULL CHECK (dataset_kind IN ('op', 'flow')),
+    data_date TEXT NOT NULL,
+    normalized_bu TEXT NOT NULL DEFAULT '',
+    dataset_id TEXT NOT NULL,
+    producer_task_run_id TEXT,
+    dataset_version INTEGER NOT NULL CHECK (dataset_version >= 0),
+    archive_contract_version INTEGER NOT NULL DEFAULT 0
+      CHECK (archive_contract_version IN (0, 1)),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (dataset_kind, data_date, normalized_bu),
+    UNIQUE (dataset_id)
+  );
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_op_head_on_insert
+  AFTER INSERT ON biz_op_recon_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'op' AND data_date = NEW.data_date
+      AND normalized_bu = LOWER(TRIM(NEW.bu_name));
+  END;
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_op_head_on_update
+  AFTER UPDATE ON biz_op_recon_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'op'
+      AND ((data_date = OLD.data_date AND normalized_bu = LOWER(TRIM(OLD.bu_name)))
+        OR (data_date = NEW.data_date AND normalized_bu = LOWER(TRIM(NEW.bu_name))));
+  END;
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_op_head_on_delete
+  AFTER DELETE ON biz_op_recon_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'op' AND data_date = OLD.data_date
+      AND normalized_bu = LOWER(TRIM(OLD.bu_name));
+  END;
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_flow_head_on_insert
+  AFTER INSERT ON biz_op_recon_flow_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'flow' AND data_date = NEW.data_date AND normalized_bu = '';
+  END;
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_flow_head_on_update
+  AFTER UPDATE ON biz_op_recon_flow_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'flow' AND normalized_bu = ''
+      AND data_date IN (OLD.data_date, NEW.data_date);
+  END;
+  CREATE TRIGGER IF NOT EXISTS invalidate_biz_flow_head_on_delete
+  AFTER DELETE ON biz_op_recon_flow_imports
+  BEGIN
+    DELETE FROM biz_op_recon_dataset_heads
+    WHERE dataset_kind = 'flow' AND data_date = OLD.data_date AND normalized_bu = '';
+  END;
+
   CREATE TABLE IF NOT EXISTS biz_op_recon_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     data_date TEXT NOT NULL,
@@ -305,12 +362,30 @@ const SIDE_DB_DDL_BIZ_OP = `
     t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0,
     t1_not_t2_count INTEGER NOT NULL DEFAULT 0,
     t2_not_t1_count INTEGER NOT NULL DEFAULT 0,
-    export_path TEXT
+    export_path TEXT,
+    archive_contract_version INTEGER NOT NULL DEFAULT 0
+      CHECK (archive_contract_version IN (0, 1)),
+    archive_task_run_id TEXT,
+    archive_terminal_ack_at TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_biz_op_runs_date_bu
     ON biz_op_recon_runs(data_date, bu_name, run_at DESC);
   CREATE INDEX IF NOT EXISTS idx_biz_op_runs_status
     ON biz_op_recon_runs(status, data_date);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_biz_op_runs_archive_task
+    ON biz_op_recon_runs(archive_task_run_id)
+    WHERE archive_contract_version = 1
+      AND archive_task_run_id IS NOT NULL
+      AND archive_task_run_id <> '';
+  CREATE INDEX IF NOT EXISTS idx_biz_op_runs_unacked_archive
+    ON biz_op_recon_runs(archive_terminal_ack_at, id)
+    WHERE archive_contract_version = 1 AND archive_terminal_ack_at IS NULL;
+  CREATE TRIGGER IF NOT EXISTS protect_biz_op_unacked_archive_run
+  BEFORE DELETE ON biz_op_recon_runs
+  WHEN OLD.archive_contract_version = 1 AND OLD.archive_terminal_ack_at IS NULL
+  BEGIN
+    SELECT RAISE(ABORT, 'Biz OP run Archive terminal 尚未确认，禁止覆盖来源数据');
+  END;
 
   CREATE TABLE IF NOT EXISTS biz_op_recon_diff_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -459,6 +534,11 @@ const SIDE_DB_DDL_PRE_FUND_GATEWAY = `
     row_count INTEGER NOT NULL,
     excluded_row_count INTEGER NOT NULL DEFAULT 0,
     import_mode TEXT NOT NULL DEFAULT 'strict',
+    dataset_id TEXT,
+    producer_task_run_id TEXT,
+    dataset_version INTEGER NOT NULL DEFAULT 0 CHECK (dataset_version >= 0),
+    archive_contract_version INTEGER NOT NULL DEFAULT 0
+      CHECK (archive_contract_version IN (0, 1)),
     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (source_type, source_batch),
     UNIQUE (source_file_name)
@@ -526,6 +606,10 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
     bank_files_json TEXT NOT NULL,
     status TEXT NOT NULL,
     summary_json TEXT NOT NULL DEFAULT '{}',
+    archive_contract_version INTEGER NOT NULL DEFAULT 0
+      CHECK (archive_contract_version IN (0, 1)),
+    archive_task_run_id TEXT,
+    archive_terminal_ack_at TEXT,
     error_message TEXT,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     finished_at TEXT
@@ -624,6 +708,94 @@ const SIDE_DB_DDL_PRE_FUND_RUNS = `
   CREATE INDEX IF NOT EXISTS idx_pre_fund_unbalanced_channel
     ON pre_fund_reconciliation_unbalanced_rows(run_id, channel, bank_ordinal);
 `;
+
+function hasTableColumn(db, table, column) {
+  return db.prepare(`PRAGMA table_info(${table})`).all()
+    .some((entry) => entry.name === column);
+}
+
+function ensurePreFundGatewayArchiveSupport(db) {
+  db.exec(SIDE_DB_DDL_PRE_FUND_GATEWAY);
+  const columns = [
+    ['dataset_id', 'TEXT'],
+    ['producer_task_run_id', 'TEXT'],
+    ['dataset_version', 'INTEGER NOT NULL DEFAULT 0 CHECK (dataset_version >= 0)'],
+    [
+      'archive_contract_version',
+      'INTEGER NOT NULL DEFAULT 0 CHECK (archive_contract_version IN (0, 1))'
+    ]
+  ];
+  for (const [column, definition] of columns) {
+    if (!hasTableColumn(db, 'pre_fund_reconciliation_gateway_batches', column)) {
+      db.exec(`ALTER TABLE pre_fund_reconciliation_gateway_batches ADD COLUMN ${column} ${definition}`);
+    }
+  }
+  const legacyRows = db.prepare(`
+    SELECT id FROM pre_fund_reconciliation_gateway_batches
+    WHERE dataset_id IS NULL OR dataset_id = ''
+    ORDER BY id ASC
+  `).all();
+  if (legacyRows.length > 0) {
+    const backfill = db.prepare(`
+      UPDATE pre_fund_reconciliation_gateway_batches
+      SET dataset_id = ?, producer_task_run_id = NULL,
+          dataset_version = 0, archive_contract_version = 0
+      WHERE id = ?
+    `);
+    db.exec('BEGIN');
+    try {
+      for (const row of legacyRows) backfill.run(randomUUID(), row.id);
+      db.exec('COMMIT');
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* 原错误优先 */ }
+      throw error;
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pre_fund_gateway_batches_dataset
+      ON pre_fund_reconciliation_gateway_batches(dataset_id)
+      WHERE dataset_id IS NOT NULL AND dataset_id <> '';
+    CREATE TRIGGER IF NOT EXISTS trg_pre_fund_gateway_batch_legacy_update
+    AFTER UPDATE OF source_date, source_file_name, source_file_sequence,
+                    content_hash, declared_row_count, row_count,
+                    excluded_row_count, import_mode
+    ON pre_fund_reconciliation_gateway_batches
+    WHEN OLD.archive_contract_version = 1
+      AND NEW.dataset_id IS OLD.dataset_id
+      AND NEW.producer_task_run_id IS OLD.producer_task_run_id
+      AND NEW.dataset_version = OLD.dataset_version
+      AND NEW.archive_contract_version = OLD.archive_contract_version
+    BEGIN
+      UPDATE pre_fund_reconciliation_gateway_batches
+      SET dataset_id = NULL, producer_task_run_id = NULL,
+          dataset_version = OLD.dataset_version + 1, archive_contract_version = 0
+      WHERE id = NEW.id;
+    END;
+  `);
+}
+
+function ensurePreFundRunArchiveSupport(db) {
+  db.exec(SIDE_DB_DDL_PRE_FUND_RUNS);
+  const columns = [
+    [
+      'archive_contract_version',
+      'INTEGER NOT NULL DEFAULT 0 CHECK (archive_contract_version IN (0, 1))'
+    ],
+    ['archive_task_run_id', 'TEXT'],
+    ['archive_terminal_ack_at', 'TEXT']
+  ];
+  for (const [column, definition] of columns) {
+    if (!hasTableColumn(db, 'pre_fund_reconciliation_runs', column)) {
+      db.exec(`ALTER TABLE pre_fund_reconciliation_runs ADD COLUMN ${column} ${definition}`);
+    }
+  }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pre_fund_runs_archive_task
+      ON pre_fund_reconciliation_runs(archive_task_run_id)
+      WHERE archive_contract_version = 1
+        AND archive_task_run_id IS NOT NULL AND archive_task_run_id <> '';
+  `);
+}
 
 // 重复入金匹配当前会话侧库。一个导入会话对应一组银行+单据输入；每次 run 只保留最新结果。
 // 银行原始 46 列、单据身份字段和人工判定行均只存在本侧库，不进入 tool-data.sqlite。
@@ -746,7 +918,15 @@ function openSideDb(userDataDir, module, monthKey) {
   const filePath = sideDbPath(userDataDir, module, monthKey);
   const db = new DatabaseSync(filePath);
   for (const sql of SIDE_DB_PRAGMA_STATEMENTS) db.exec(sql);
-  db.exec(MODULE_DDL[module]);
+  if (module === MODULE_BIZ_OP) {
+    ensureBizOpReconTablesSupport(db);
+  } else if (module === MODULE_PRE_FUND_RECONCILIATION) {
+    ensurePreFundGatewayArchiveSupport(db);
+  } else if (module === MODULE_PRE_FUND_RECONCILIATION_RESULTS) {
+    ensurePreFundRunArchiveSupport(db);
+  } else {
+    db.exec(MODULE_DDL[module]);
+  }
   return db;
 }
 
@@ -846,4 +1026,6 @@ module.exports = {
   SIDE_DB_DDL_PRE_FUND_GATEWAY,
   SIDE_DB_DDL_PRE_FUND_RUNS,
   SIDE_DB_DDL_DUPLICATE_INBOUND_MATCH,
+  ensurePreFundGatewayArchiveSupport,
+  ensurePreFundRunArchiveSupport,
 };

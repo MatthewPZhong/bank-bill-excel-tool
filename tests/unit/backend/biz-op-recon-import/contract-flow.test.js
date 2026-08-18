@@ -10,10 +10,11 @@
 //   - deleteForOverwrite = clearRunsAndDiffsByDate + flow clearByDate 2 段共 3 条 SQL（顺序敏感，闭包 date）
 //   - cellsOf 从 30 参 params 逆推 28 列 cells（E4 cells 缺口补丁）
 //   - maxCollectedErrors=1000 / captureRowValues=true / monthKeyOf=null
-//   - 不声明 dedupeKeyOf / finalizeForCommit / rejectEmptyFiles（flow 无跨文件去重 / 无月元数据 / 空文件由 session 判）
+//   - finalizeForCommit 事务内写 v1 flow dataset head；不声明 dedupeKeyOf / rejectEmptyFiles
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { DatabaseSync } = require('node:sqlite');
 
 const {
   FLOW_HEADERS,
@@ -21,9 +22,18 @@ const {
 } = require('../../../../src/backend/biz-op-recon-db/columns');
 const { validateContract } = require('../../../../src/backend/big-table-import/contract');
 const contractMod = require('../../../../src/backend/biz-op-recon-import/contract-flow');
+const { ensureBizOpReconTablesSupport } = require('../../../../src/backend/biz-op-recon-db/migrations');
 
 function mkContract(opts = {}) {
-  return contractMod.createContract({ date: opts.date || '2026-06-10' });
+  return contractMod.createContract({
+    date: opts.date || '2026-06-10',
+    datasetSeed: opts.datasetSeed || {
+      datasetId: 'flow-dataset-1',
+      producerTaskRunId: 'flow-import-task-1',
+      expectedDatasetId: null,
+      expectedDatasetVersion: 0
+    }
+  });
 }
 
 // 合法流水行的 28 列值（表头序）：direction='入' / recon_amount 数值 / account_no 非空，其余任意。
@@ -48,11 +58,111 @@ test('flow 契约通过 validateContract（whitelist=null 旁路第 1 层防护�
   assert.equal(v.captureRowValues, true);
   assert.equal(v.maxCollectedErrors, 1000);
   assert.equal(typeof v.cellsOf, 'function');
-  // flow 不声明这些扩展（确认未误带）。
+  // flow 不声明跨文件去重；dataset head 由事务收尾写入。
   assert.equal(typeof v.dedupeKeyOf, 'undefined');
-  assert.equal(typeof v.finalizeForCommit, 'undefined');
+  assert.equal(typeof v.finalizeForCommit, 'function');
   // validateContract 把未声明的 rejectEmptyFiles 归一为 false（空文件 parity 改由 session 按总行数判，见 contract-flow 头注）。
   assert.equal(v.rejectEmptyFiles, false);
+});
+
+test('finalizeForCommit 以冻结 seed 写下一版 flow dataset head', () => {
+  const rawSeed = {
+    datasetId: 'flow-dataset-frozen',
+    producerTaskRunId: 'flow-import-task-frozen',
+    expectedDatasetId: 'flow-dataset-v6',
+    expectedDatasetVersion: 6
+  };
+  const c = mkContract({ date: '2026-06-11', datasetSeed: rawSeed });
+  rawSeed.datasetId = 'mutated-after-contract';
+  rawSeed.expectedDatasetVersion = 99;
+
+  const statements = c.finalizeForCommit();
+  assert.equal(statements.length, 1);
+  assert.match(statements[0].sql, /INSERT INTO biz_op_recon_dataset_heads/);
+  assert.match(statements[0].sql, /VALUES \('flow', \?, '', \?, \?, \?, 1, \?\)/);
+  assert.deepEqual(statements[0].params.slice(0, 4), [
+    '2026-06-11',
+    'flow-dataset-frozen',
+    'flow-import-task-frozen',
+    7
+  ]);
+  assert.ok(!Number.isNaN(Date.parse(statements[0].params[4])));
+});
+
+test('engine worker contract 边界拒绝 missing 或 malformed v1 seed', () => {
+  assert.throws(
+    () => contractMod.createContract({ date: '2026-06-10' }),
+    /exact v1 dataset seed/
+  );
+  assert.throws(
+    () => contractMod.createContract({
+      date: '2026-06-10',
+      datasetSeed: {
+        datasetId: 'flow-dataset',
+        producerTaskRunId: 'flow-task',
+        expectedDatasetId: 'old-dataset',
+        expectedDatasetVersion: '1'
+      }
+    }),
+    /exact v1 dataset seed/
+  );
+});
+
+test('v0 head 可被首个 v1 transaction 精确覆盖；过期 seed 在业务删除前 fail-closed', () => {
+  const db = new DatabaseSync(':memory:');
+  ensureBizOpReconTablesSupport(db);
+  db.prepare(`
+    INSERT INTO biz_op_recon_dataset_heads (
+      dataset_kind, data_date, normalized_bu, dataset_id,
+      producer_task_run_id, dataset_version, archive_contract_version, updated_at
+    ) VALUES ('flow', '2026-06-12', '', 'legacy-v0', NULL, 0, 0, '2026-06-12T00:00:00.000Z')
+  `).run();
+
+  const c = mkContract({
+    date: '2026-06-12',
+    datasetSeed: {
+      datasetId: 'first-v1',
+      producerTaskRunId: 'flow-task-v1',
+      expectedDatasetId: 'legacy-v0',
+      expectedDatasetVersion: 0
+    }
+  });
+  db.exec('BEGIN');
+  for (const statement of c.deleteForOverwrite()) {
+    db.prepare(statement.sql).run(...statement.params);
+  }
+  for (const statement of c.finalizeForCommit()) {
+    db.prepare(statement.sql).run(...statement.params);
+  }
+  db.exec('COMMIT');
+  assert.deepEqual(
+    { ...db.prepare(`SELECT dataset_id, dataset_version, archive_contract_version
+      FROM biz_op_recon_dataset_heads WHERE dataset_kind = 'flow'`).get() },
+    { dataset_id: 'first-v1', dataset_version: 1, archive_contract_version: 1 }
+  );
+
+  const stale = mkContract({
+    date: '2026-06-12',
+    datasetSeed: {
+      datasetId: 'stale-v1',
+      producerTaskRunId: 'stale-task',
+      expectedDatasetId: 'legacy-v0',
+      expectedDatasetVersion: 0
+    }
+  });
+  db.exec('BEGIN');
+  assert.throws(() => {
+    for (const statement of stale.deleteForOverwrite()) {
+      db.prepare(statement.sql).run(...statement.params);
+    }
+  }, /constraint/i);
+  db.exec('ROLLBACK');
+  assert.equal(
+    db.prepare(`SELECT dataset_id FROM biz_op_recon_dataset_heads
+      WHERE dataset_kind = 'flow'`).get().dataset_id,
+    'first-v1'
+  );
+  db.close();
 });
 
 test('expectedHeaders = FLOW_HEADERS（28 列，顺序一致）', () => {
@@ -121,22 +231,25 @@ test('mapRow 三态：账户编号为空 → { error }', () => {
   assert.equal(m.error.reason, '账户编号为空');
 });
 
-test('🔴 deleteForOverwrite = clearRunsAndDiffsByDate + flow clearByDate（3 条 SQL，顺序敏感，闭包 date）', () => {
+test('🔴 deleteForOverwrite 先核对 head，再按 diff → run → flow 顺序覆盖', () => {
   const c = mkContract({ date: '2026-06-10' });
   const dels = c.deleteForOverwrite();
-  assert.equal(dels.length, 3, '必须恰好 3 条 DELETE（diff_rows → runs → flow 主表）');
+  assert.equal(dels.length, 6);
+  assert.match(dels[0].sql, /CREATE TEMP TABLE/);
+  assert.match(dels[2].sql, /biz_op_recon_dataset_heads/);
+  const businessDeletes = dels.slice(3);
   // 1) 先删该 date 的 diff_rows（run_id IN 该 date runs）
-  assert.match(dels[0].sql, /DELETE FROM biz_op_recon_diff_rows/);
-  assert.match(dels[0].sql, /SELECT id FROM biz_op_recon_runs/);
-  assert.match(dels[0].sql, /WHERE data_date = \?/);
-  assert.deepEqual(dels[0].params, ['2026-06-10']);
+  assert.match(businessDeletes[0].sql, /DELETE FROM biz_op_recon_diff_rows/);
+  assert.match(businessDeletes[0].sql, /SELECT id FROM biz_op_recon_runs/);
+  assert.match(businessDeletes[0].sql, /WHERE data_date = \?/);
+  assert.deepEqual(businessDeletes[0].params, ['2026-06-10']);
   // 2) 删该 date 的 runs（跨所有 BU）
-  assert.match(dels[1].sql, /DELETE FROM biz_op_recon_runs/);
-  assert.match(dels[1].sql, /WHERE data_date = \?/);
-  assert.deepEqual(dels[1].params, ['2026-06-10']);
+  assert.match(businessDeletes[1].sql, /DELETE FROM biz_op_recon_runs/);
+  assert.match(businessDeletes[1].sql, /WHERE data_date = \?/);
+  assert.deepEqual(businessDeletes[1].params, ['2026-06-10']);
   // 3) 删该 date 的流水主表行
-  assert.equal(dels[2].sql, 'DELETE FROM biz_op_recon_flow_imports WHERE data_date = ?');
-  assert.deepEqual(dels[2].params, ['2026-06-10']);
+  assert.equal(businessDeletes[2].sql, 'DELETE FROM biz_op_recon_flow_imports WHERE data_date = ?');
+  assert.deepEqual(businessDeletes[2].params, ['2026-06-10']);
 });
 
 test('cellsOf 从 30 参 params 逆推 28 列 cells（E4 cells 缺口补丁）', () => {

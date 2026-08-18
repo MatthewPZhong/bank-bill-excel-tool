@@ -114,7 +114,7 @@ async function streamUpsert(appDb, filePath) {
   return appDb.upsertLinkedGatewayBillStreaming(async (writeOne) => {
     const { matched } = await streamLinkedRowsToInsert(filePath, SIG, writeOne, (x) => x);
     assertTrue(matched, '流内定位到网关表头');
-  }, { sourceFileName: path.basename(filePath) });
+  }, { sourceFileName: path.basename(filePath), legacySource: true });
 }
 
 // 构一行网关数据（仅填关键字段 + 少量列；其余留空）。
@@ -208,7 +208,10 @@ async function run() {
     assertEq(dArr.streamingEligible, false, 'Step5.多sheet streamingEligible=false（数组路径）');
     const arrRows = readGatewayRowsAsObjects(fileArr, dArr.sheetName);
     assertEq(arrRows.length, 2, 'Step5.数组路径读出 2 行');
-    const r5 = appDb.upsertLinkedGatewayBill(arrRows, { sourceFileName: 'gw-multi.xlsx' });
+    const r5 = appDb.upsertLinkedGatewayBill(arrRows, {
+      sourceFileName: 'gw-multi.xlsx',
+      legacySource: true
+    });
     assertEq(r5.overwriteCount, 1, 'Step5.数组路径 overwriteCount=1（B-2 命中）');
     assertEq(r5.rowCount, 7, 'Step5.数组路径累加 rowCount=7（6+1 新 B-7）');
     assertEq(r5.rejectedEmptyCount, 0, 'Step5.数组路径 rejectedEmptyCount=0');

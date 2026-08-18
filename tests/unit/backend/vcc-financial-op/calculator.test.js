@@ -158,7 +158,7 @@ function insertSystemSnapshot(db, { subject, balances = fixedBalances('100'), ke
   );
 }
 
-function seedCompleteMonth(db, { includeOpening = true, unresolved = false } = {}) {
+function seedCompleteMonth(db, { includeOpening = true, legacyUnresolved = false } = {}) {
   for (const sourceType of [
     SOURCE_TYPES.RECHARGE,
     SOURCE_TYPES.FEE_FX,
@@ -213,7 +213,7 @@ function seedCompleteMonth(db, { includeOpening = true, unresolved = false } = {
     `).run(JSON.stringify(fixedBalances('100')), previousRunId);
   }
 
-  if (unresolved) {
+  if (legacyUnresolved) {
     const batchId = 'failed-batch';
     repository.createImportBatch(db, { id: batchId, targetMonth: '2026-06', fileCount: 1 });
     const failedId = repository.createImportRecord(db, {
@@ -223,6 +223,9 @@ function seedCompleteMonth(db, { includeOpening = true, unresolved = false } = {
     repository.finishImportRecord(db, failedId, {
       status: 'failed_conflict', rawCount: 1, conflictCount: 1, errorMessage: '冲突'
     });
+    db.prepare(`
+      UPDATE vcc_fin_op_import_records SET resolution_status = 'unresolved' WHERE id = ?
+    `).run(failedId);
     repository.finishImportBatch(db, batchId, 'completed_with_errors', '冲突');
     return failedId;
   }
@@ -323,10 +326,10 @@ test('缺表与缺上月归档并存时主 code 保持缺表且一次展示全�
   `).get().n, 0);
 });
 
-test('运行前预检一次返回空表、损坏系统快照和未处理失败记录的全部问题', (t) => {
+test('运行前预检返回空表和损坏系统快照，旧 unresolved 失败记录只保留审计', (t) => {
   const db = createDb();
   t.after(() => db.close());
-  const failedId = seedCompleteMonth(db, { unresolved: true });
+  const failedId = seedCompleteMonth(db, { legacyUnresolved: true });
   db.prepare(`
     DELETE FROM vcc_fin_op_effective_rows
     WHERE source_type = ?
@@ -345,12 +348,11 @@ test('运行前预检一次返回空表、损坏系统快照和未处理失败�
   assert.deepEqual(preflight.missing, ['VCC_移除归档Pending账单_校验表']);
   assert.deepEqual(preflight.issues.map((issue) => issue.code), [
     'empty-dataset',
-    'invalid-system-snapshot',
-    'unresolved-imports'
+    'invalid-system-snapshot'
   ]);
   assert.match(preflight.issues[1].message, /PPHK/);
   assert.match(preflight.issues[1].message, /USD/);
-  assert.deepEqual(preflight.issues[2].recordIds, [failedId]);
+  assert.equal(preflight.issues.some((issue) => issue.recordIds?.includes(failedId)), false);
   assert.equal(preflight.message, preflight.issues.map((issue) => issue.message).join('\n'));
 });
 
@@ -942,21 +944,13 @@ test('历史有效明细的 CNH 只读归一为 CNY 且不改原始事实', (t) 
   );
 });
 
-test('未处理失败导入阻断计算，人工处理后可重新运行', (t) => {
+test('旧 unresolved 失败导入不再阻断计算且无需人工处理', (t) => {
   const db = createDb();
   t.after(() => db.close());
-  const failedId = seedCompleteMonth(db, { unresolved: true });
-  const blocked = calculateCurrent(db);
-  assert.equal(blocked.status, 'blocked');
-  assert.equal(blocked.code, 'unresolved-imports');
-  assert.equal(blocked.unresolved[0].id, failedId);
-
-  repository.resolveImportRecord(db, failedId, {
-    note: '已核对既有有效行，无需覆盖',
-    action: 'keep_current_effective_dataset'
-  });
+  const failedId = seedCompleteMonth(db, { legacyUnresolved: true });
   const calculated = calculateCurrent(db);
   assert.equal(calculated.status, 'calculated');
+  assert.equal(repository.getImportRecord(db, failedId).resolution_status, 'unresolved');
 });
 
 test('未结束导入批次阻断计算和归档，即使尚未生成原表记录', (t) => {

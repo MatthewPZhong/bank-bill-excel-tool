@@ -3,6 +3,12 @@
 const crypto = require('node:crypto');
 const { AsyncLocalStorage } = require('node:async_hooks');
 const { freezeWorkerBatchContext } = require('./worker-batch-context');
+const { freezeWorkerOperationContext } = require('./worker-operation-context');
+const {
+  artifactManifestFromFilePlan,
+  assertFilePlanFresh
+} = require('./file-plan');
+const { normalizeLineageIntentsV1 } = require('./task-lineage');
 
 const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
 
@@ -36,12 +42,33 @@ function createWorkerBatchContextFromBatch(batch) {
   });
 }
 
+function createWorkerOperationContextFromTask(taskRun) {
+  if (!taskRun || typeof taskRun !== 'object') {
+    throw new TypeError('Task Run 身份缺失');
+  }
+  return freezeWorkerOperationContext({
+    taskRunId: taskRun.taskRunId,
+    taskKey: taskRun.taskKey,
+    moduleId: taskRun.moduleId,
+    parentRunId: taskRun.parentRunId,
+    operationKey: taskRun.operationKey
+  }, { required: true });
+}
+
 function lifecycleFailure(result, fallbackCode, fallbackMessage) {
   return {
     status: 'failed',
     code: String(result && result.code || fallbackCode),
     message: String(result && result.message || fallbackMessage)
   };
+}
+
+function taskPayloadMetadata(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('task metadata 必须是对象');
+  }
+  return value;
 }
 
 class TaskLifecycle {
@@ -53,6 +80,14 @@ class TaskLifecycle {
     }
     const service = options.archiveService;
     for (const method of [
+      'beginTaskRun',
+      'markTaskRunStarted',
+      'finishTaskRun',
+      'reserveFileTaskBatch',
+      'beginFileTaskRecovery',
+      'startFileTask',
+      'settleManifestArtifacts',
+      'finishFileTask',
       'reserveTaskBatch',
       'beginTaskRecovery',
       'markTaskStarted',
@@ -89,6 +124,7 @@ class TaskLifecycle {
       : null;
     this.activeTasks = new Map();
     this.activeBatchIds = new Set();
+    this.activeFileTaskRunIds = new Set();
   }
 
   getContext() {
@@ -120,6 +156,487 @@ class TaskLifecycle {
         code: error && error.code || 'ARCHIVE_FAILURE_RECORD_FAILED',
         message: error && error.message || '存档失败记录写入失败'
       });
+    }
+  }
+
+  async _finishOperationTask(context, channel, terminalOutcome) {
+    let result;
+    try {
+      result = await this.archiveService.finishTaskRun(
+        context.taskRunId,
+        terminalOutcome
+      );
+    } catch (error) {
+      result = {
+        ok: false,
+        code: error && error.code || 'ARCHIVE_TASK_TERMINAL_FAILED',
+        message: error && error.message || 'Task Run 终态写入失败'
+      };
+    }
+    if (result && result.ok !== false) return { ok: true, result };
+    const current = result && result.taskRun;
+    if (result && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
+        && current
+        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.status)) {
+      return { ok: true, benign: true, result };
+    }
+    if (!this.persistTerminalIntent) {
+      const error = new Error('Task Run 终态写入失败且持久恢复接口不可用');
+      error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+      throw error;
+    }
+    const persisted = await this.persistTerminalIntent({
+      owner: {
+        version: 1,
+        kind: 'operation',
+        operationContext: context
+      },
+      sourceOperation: channel,
+      terminalOutcome: {
+        ...terminalOutcome,
+        metadata: terminalOutcome.metadata || {}
+      }
+    });
+    if (!persisted || persisted.persisted !== true) {
+      const error = new Error('Task Run 终态意图未形成持久记录');
+      error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+      throw error;
+    }
+    return { ok: false, persisted: true, result };
+  }
+
+  async _finishFileTask(context, channel, terminalOutcome) {
+    let result;
+    try {
+      result = await this.archiveService.finishFileTask(
+        context.taskRunId,
+        context.batchId,
+        terminalOutcome
+      );
+    } catch (error) {
+      result = {
+        ok: false,
+        code: error && error.code || 'ARCHIVE_TASK_TERMINAL_FAILED',
+        message: error && error.message || 'File Task 终态写入失败'
+      };
+    }
+    if (result && result.ok !== false) return { ok: true, result };
+    const current = result && result.taskRun;
+    if (result && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
+        && current
+        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.status)) {
+      return { ok: true, benign: true, result };
+    }
+    if (!this.persistTerminalIntent) {
+      const error = new Error('File Task 终态写入失败且持久恢复接口不可用');
+      error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+      throw error;
+    }
+    const persisted = await this.persistTerminalIntent({
+      owner: {
+        version: 1,
+        kind: 'file-batch',
+        batchContext: context
+      },
+      sourceOperation: channel,
+      terminalOutcome
+    });
+    if (!persisted || persisted.persisted !== true) {
+      const error = new Error('File Task 终态意图未形成持久记录');
+      error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+      throw error;
+    }
+    return { ok: false, persisted: true, result };
+  }
+
+  async runFileTask(payload = {}) {
+    const policy = payload.policy || {};
+    if (policy.batchPolicy !== 'reserve' || policy.taskKind !== 'file') {
+      throw new TypeError('runFileTask 只能执行 file reserve policy');
+    }
+    if (policy.allocation !== 'eager') {
+      throw new TypeError('runFileTask 当前入口只接受 eager file policy');
+    }
+    if (typeof payload.execute !== 'function') throw new TypeError('execute 必须是函数');
+    if (typeof payload.filePlanResolver !== 'function') {
+      throw new TypeError('file task 必须显式提供 filePlanResolver');
+    }
+    const payloadMetadata = taskPayloadMetadata(payload.metadata);
+    const resultClassifier = payload.resultClassifier || policy.resultClassifier;
+    const operation = this.businessOperationRegistry.begin(payload.meta || { channel: policy.channel });
+    if (!operation.accepted) {
+      return { status: 'busy', message: operation.message || '当前暂时不能开始新的任务' };
+    }
+    let context = null;
+    try {
+      const recoveryContext = payload.recovery && payload.recovery.batchContext
+        ? createWorkerBatchContext(payload.recovery.batchContext)
+        : null;
+      let flow = null;
+      let begun;
+      let lineageIntents = Object.freeze([]);
+      if (recoveryContext) {
+        begun = {
+          ok: true,
+          taskRun: {
+            taskRunId: recoveryContext.taskRunId,
+            moduleId: recoveryContext.moduleId,
+            taskKey: recoveryContext.taskKey,
+            operationKey: recoveryContext.operationKey,
+            parentRunId: recoveryContext.parentRunId
+          }
+        };
+      } else {
+        const flowPlan = typeof payload.flowPlanResolver === 'function'
+          ? await payload.flowPlanResolver()
+          : { startsNewFlow: policy.startsNewFlow, flowIdentity: payload.flowIdentity };
+        if (!flowPlan || typeof flowPlan.startsNewFlow !== 'boolean') {
+          throw new TypeError('flowPlanResolver 必须返回 startsNewFlow:boolean');
+        }
+        flow = await this.flowResolver.resolve({
+          moduleId: policy.scopeId,
+          explicitParentRunId: payload.explicitParentRunId,
+          identity: flowPlan.flowIdentity,
+          startsNewFlow: flowPlan.startsNewFlow
+        });
+        const taskRunId = String(payload.taskRunId || this.createTaskRunId()).trim();
+        const operationKey = String(payload.operationKey || `${policy.taskKey}:${taskRunId}`).trim();
+        lineageIntents = normalizeLineageIntentsV1(
+          typeof payload.lineageIntentsResolver === 'function'
+            ? await payload.lineageIntentsResolver({ flow, taskRunId, operationKey })
+            : payload.lineageIntents
+        );
+        begun = await this.archiveService.beginTaskRun({
+          taskRunId,
+          moduleId: policy.scopeId,
+          taskKey: policy.taskKey,
+          operationKey,
+          parentRunId: flow.parentRunId,
+          metadata: { ...payloadMetadata, channel: policy.channel, flowSource: flow.source },
+          lineageIntents
+        });
+        if (!begun || begun.ok === false || !begun.taskRun) {
+          return lifecycleFailure(begun, 'ARCHIVE_TASK_RUN_BEGIN_FAILED', '内部 Task Run 建立失败');
+        }
+      }
+      let filePlan;
+      let manifest;
+      try {
+        filePlan = await payload.filePlanResolver({ taskRun: begun.taskRun });
+        manifest = artifactManifestFromFilePlan(filePlan);
+      } catch (error) {
+        if (!recoveryContext) {
+          await this._finishOperationTask(
+            createWorkerOperationContextFromTask(begun.taskRun),
+            policy.channel,
+            {
+              taskStatus: 'failed',
+              code: error.code || 'ARCHIVE_FILE_PLAN_INVALID',
+              message: error.message || 'FilePlan 形成失败',
+              metadata: {}
+            }
+          );
+        }
+        return lifecycleFailure(error, 'ARCHIVE_FILE_PLAN_INVALID', 'FilePlan 形成失败');
+      }
+      if (recoveryContext) {
+        try {
+          assertFilePlanFresh(filePlan);
+        } catch (error) {
+          return lifecycleFailure(error, error.code, error.message);
+        }
+      }
+      const reserved = recoveryContext
+        ? await this.archiveService.beginFileTaskRecovery(recoveryContext, {
+            manifestIdentity: manifest.identity
+          })
+        : await this.archiveService.reserveFileTaskBatch({
+            taskRun: begun.taskRun,
+            manifest,
+            moduleCode: policy.moduleCode,
+            moduleName: policy.moduleName,
+            metadata: { ...payloadMetadata, channel: policy.channel, flowSource: flow.source }
+          });
+      if (!reserved || reserved.ok === false || !reserved.batch) {
+        if (!recoveryContext) {
+          await this._finishOperationTask(
+            createWorkerOperationContextFromTask(begun.taskRun),
+            policy.channel,
+            {
+              taskStatus: 'failed',
+              code: reserved && reserved.code || 'ARCHIVE_BATCH_RESERVATION_FAILED',
+              message: reserved && reserved.message || 'File Batch 原子预留失败',
+              metadata: {}
+            }
+          );
+        }
+        return lifecycleFailure(reserved, 'ARCHIVE_BATCH_RESERVATION_FAILED', 'File Batch 原子预留失败');
+      }
+      context = createWorkerBatchContextFromBatch(reserved.batch);
+      this.activeTasks.set(operation.token, context);
+      this.activeBatchIds.add(context.batchId);
+      this.activeFileTaskRunIds.add(context.taskRunId);
+
+      if (!recoveryContext && flow.source === 'new' && flow.identity) {
+        const initialBind = await this._bindOperationFlowIdentities(
+          createWorkerOperationContextFromTask(begun.taskRun),
+          policy,
+          [flow.identity]
+        );
+        if (initialBind.persisted || !initialBind.ok) {
+          const error = initialBind.error || initialBind.bindError;
+          await this._finishFileTask(context, policy.channel, {
+            taskStatus: 'failed',
+            code: error.code || 'ARCHIVE_FLOW_BIND_FAILED',
+            message: error.message || '新业务流程身份绑定失败',
+            metadata: {}
+          });
+          return lifecycleFailure(error, 'ARCHIVE_FLOW_BIND_FAILED', '新业务流程身份绑定失败');
+        }
+      }
+
+      let fileEvidence = Object.freeze({
+        filePlan,
+        inputFiles: filePlan.inputs,
+        targetSnapshots: Object.freeze(filePlan.outputs.map((item) => item.targetSnapshot))
+      });
+      try {
+        if (!recoveryContext) assertFilePlanFresh(filePlan);
+      } catch (error) {
+        await this._finishFileTask(context, policy.channel, {
+          taskStatus: 'failed',
+          code: error.code,
+          message: error.message,
+          metadata: {}
+        });
+        return lifecycleFailure(error, error.code, error.message);
+      }
+      if (typeof payload.beforeStart === 'function') {
+        try {
+          const evidence = await payload.beforeStart(context, fileEvidence);
+          if (evidence !== undefined) {
+            if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+              throw new TypeError('beforeStart evidence 必须是对象');
+            }
+            fileEvidence = Object.freeze({ ...fileEvidence, ...evidence });
+          }
+        } catch (error) {
+          await this._finishFileTask(context, policy.channel, {
+            taskStatus: 'failed',
+            code: error.code || 'ARCHIVE_INPUT_EVIDENCE_FAILED',
+            message: error.message || '文件 evidence 采集失败',
+            metadata: {}
+          });
+          return lifecycleFailure(error, 'ARCHIVE_INPUT_EVIDENCE_FAILED', '文件 evidence 采集失败');
+        }
+      }
+      const started = await this.archiveService.startFileTask(context.taskRunId, context.batchId);
+      if (!started || started.ok === false) {
+        await this._finishFileTask(context, policy.channel, {
+          taskStatus: 'failed',
+          code: started && started.code || 'ARCHIVE_TASK_START_FAILED',
+          message: started && started.message || 'File Task 无法开始',
+          metadata: {}
+        });
+        return lifecycleFailure(started, 'ARCHIVE_TASK_START_FAILED', 'File Task 无法开始');
+      }
+
+      let settlementPromise = null;
+      let settlementFiles = [];
+      const settleArtifacts = (outcome = {}) => {
+        if (!settlementPromise) {
+          settlementFiles = Array.isArray(outcome.files) ? outcome.files : [];
+          settlementPromise = this.archiveService.settleManifestArtifacts({
+            batchContext: context,
+            files: settlementFiles
+          });
+        }
+        return settlementPromise;
+      };
+      let businessResult;
+      let businessError = null;
+      try {
+        businessResult = await this.contextStorage.run(
+          context,
+          () => payload.execute(context, { fileEvidence, lineageIntents, settleArtifacts })
+        );
+      } catch (error) {
+        businessError = error;
+      }
+      let terminalStatus = 'failed';
+      if (!businessError) {
+        try {
+          terminalStatus = taskResultStatus(businessResult, resultClassifier);
+        } catch (error) {
+          businessError = error;
+        }
+      }
+      const settled = await settleArtifacts({
+        files: filePlan.inputs.map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      if (!settled || settled.ok === false) {
+        this._warn({
+          channel: policy.channel,
+          code: settled && settled.code || 'ARCHIVE_TASK_SETTLE_FAILED',
+          message: settled && settled.message || 'manifest artifact 未全部完成归档'
+        });
+      }
+
+      if (!businessError && terminalStatus === 'succeeded'
+          && typeof payload.resultFlowIdentities === 'function') {
+        try {
+          const identities = await payload.resultFlowIdentities(businessResult, context);
+          if (identities && identities.length) {
+            const resultBind = await this._bindFileFlowIdentities(context, policy, identities);
+            if (resultBind.persisted) {
+              this._warn({
+                channel: policy.channel,
+                code: resultBind.bindError.code || 'ARCHIVE_FLOW_BIND_FAILED',
+                message: resultBind.bindError.message || '业务结果身份绑定失败'
+              });
+            } else if (!resultBind.ok) {
+              businessError = resultBind.error;
+              terminalStatus = 'failed';
+            }
+          }
+        } catch (error) {
+          this._warn({
+            channel: policy.channel,
+            code: error.code || 'ARCHIVE_FLOW_BIND_FAILED',
+            message: error.message || '业务结果身份绑定失败'
+          });
+        }
+      }
+      let terminalMetadata = {};
+      const metadataResolver = payload.resultMetadataResolver || policy.resultMetadataResolver;
+      if (typeof metadataResolver === 'function') {
+        try {
+          const resolvedMetadata = await metadataResolver(
+            businessResult,
+            context,
+            { error: businessError, terminalStatus }
+          );
+          if (!resolvedMetadata || typeof resolvedMetadata !== 'object'
+              || Array.isArray(resolvedMetadata)) {
+            throw new TypeError('resultMetadataResolver 必须返回对象');
+          }
+          terminalMetadata = resolvedMetadata;
+        } catch (error) {
+          this._warn({ channel: policy.channel, code: error.code, message: error.message });
+        }
+      }
+      const terminalOutcome = terminalStatus === 'cancelled'
+        ? { taskStatus: 'cancelled', code: '', message: '业务任务已取消', metadata: terminalMetadata }
+        : terminalStatus === 'failed'
+          ? {
+              taskStatus: 'failed',
+              code: businessError && businessError.code || 'BUSINESS_TASK_FAILED',
+              message: businessError && businessError.message
+                || businessResult && businessResult.message || '业务任务失败',
+              metadata: terminalMetadata
+            }
+          : { taskStatus: 'succeeded', code: '', message: '', metadata: terminalMetadata };
+      if (payload.afterTerminalIntent) {
+        terminalOutcome.afterTerminal = payload.afterTerminalIntent;
+      }
+      let terminalSettled = false;
+      if (terminalStatus === 'succeeded' && (!settled || settled.durable !== true)) {
+        if (!this.persistTerminalIntent) {
+          const error = new Error('File Task artifact 未 durable 且持久恢复接口不可用');
+          error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+          throw error;
+        }
+        const persisted = await this.persistTerminalIntent({
+          owner: {
+            version: 1,
+            kind: 'file-batch',
+            batchContext: context
+          },
+          sourceOperation: policy.channel,
+          settleFiles: settlementFiles,
+          terminalOutcome
+        });
+        if (!persisted || persisted.persisted !== true) {
+          const error = new Error('File Task artifact 未 durable 且未形成恢复记录');
+          error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+          throw error;
+        }
+      } else {
+        const finished = await this._finishFileTask(context, policy.channel, terminalOutcome);
+        terminalSettled = finished.ok === true;
+      }
+      if (terminalSettled && typeof payload.afterTerminal === 'function') {
+        try {
+          await payload.afterTerminal({ context, terminalStatus, businessResult, businessError });
+        } catch (error) {
+          this._warn({
+            channel: policy.channel,
+            code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED',
+            message: error.message || '任务终态后清理失败'
+          });
+        }
+      }
+      if (businessError) throw businessError;
+      return businessResult;
+    } finally {
+      if (context) {
+        this.activeTasks.delete(operation.token);
+        this.activeBatchIds.delete(context.batchId);
+        this.activeFileTaskRunIds.delete(context.taskRunId);
+      }
+      this.businessOperationRegistry.end(operation.token);
+    }
+  }
+
+  async _bindFileFlowIdentities(context, policy, identities) {
+    try {
+      const anchors = await this.flowResolver.bind({
+        moduleId: policy.scopeId,
+        parentRunId: context.parentRunId,
+        sourceBatchId: context.batchId,
+        identities
+      });
+      return { ok: true, anchors };
+    } catch (bindError) {
+      try {
+        const intents = await this.flowResolver.persistBindIntent({
+          moduleId: policy.scopeId,
+          parentRunId: context.parentRunId,
+          sourceBatchId: context.batchId,
+          identities
+        });
+        return { ok: true, persisted: true, intents, bindError };
+      } catch (persistenceError) {
+        persistenceError.bindError = bindError;
+        return { ok: false, error: persistenceError };
+      }
+    }
+  }
+
+  async _bindOperationFlowIdentities(context, policy, identities) {
+    try {
+      const anchors = await this.flowResolver.bind({
+        moduleId: policy.scopeId,
+        parentRunId: context.parentRunId,
+        sourceTaskRunId: context.taskRunId,
+        sourceBatchId: null,
+        identities
+      });
+      return { ok: true, anchors };
+    } catch (bindError) {
+      try {
+        const intents = await this.flowResolver.persistBindIntent({
+          moduleId: policy.scopeId,
+          parentRunId: context.parentRunId,
+          sourceTaskRunId: context.taskRunId,
+          sourceBatchId: null,
+          identities
+        });
+        return { ok: true, persisted: true, intents, bindError };
+      } catch (persistenceError) {
+        persistenceError.bindError = bindError;
+        return { ok: false, error: persistenceError };
+      }
     }
   }
 
@@ -203,6 +720,7 @@ class TaskLifecycle {
       throw new TypeError('TaskLifecycle 只能执行 reserve policy');
     }
     if (typeof payload.execute !== 'function') throw new TypeError('execute 必须是函数');
+    const payloadMetadata = taskPayloadMetadata(payload.metadata);
     const resultClassifier = payload.resultClassifier || policy.resultClassifier;
     if (typeof resultClassifier !== 'function') {
       throw new TypeError('reserve task policy 必须显式提供 resultClassifier');
@@ -298,7 +816,7 @@ class TaskLifecycle {
           operationKey,
           parentRunId: flow.parentRunId,
           metadata: {
-            ...(payload.metadata || {}),
+            ...payloadMetadata,
             channel: policy.channel,
             flowSource: flow.source
           }
@@ -700,6 +1218,377 @@ class TaskLifecycle {
     }
   }
 
+  async runOperationOnly(payload = {}) {
+    return this._runTaskWithoutInitialBatch(payload, false);
+  }
+
+  async runDeferredFileTask(payload = {}) {
+    return this._runTaskWithoutInitialBatch(payload, true);
+  }
+
+  async _runTaskWithoutInitialBatch(payload = {}, deferredFile = false) {
+    const policy = payload.policy || {};
+    if (deferredFile) {
+      if (policy.batchPolicy !== 'reserve'
+          || policy.taskKind !== 'file'
+          || policy.allocation !== 'deferred') {
+        throw new TypeError('runDeferredFileTask 只能执行 deferred file policy');
+      }
+    } else if (policy.batchPolicy !== 'no-file' || policy.taskKind !== 'no-file') {
+      throw new TypeError('runOperationOnly 只能执行 no-file policy');
+    }
+    if (deferredFile && typeof payload.filePlanResolver !== 'function') {
+      throw new TypeError('deferred file task 必须显式提供 filePlanResolver');
+    }
+    const preparedFilePlan = payload.prepared && payload.prepared.filePlan;
+    if (!deferredFile && preparedFilePlan) {
+      throw new TypeError('no-file policy 不能丢弃 filePlan');
+    }
+    if (typeof payload.execute !== 'function') throw new TypeError('execute 必须是函数');
+    const payloadMetadata = taskPayloadMetadata(payload.metadata);
+    const resultClassifier = payload.resultClassifier || policy.resultClassifier;
+    let startsNewFlow = Object.prototype.hasOwnProperty.call(payload, 'startsNewFlow')
+      ? payload.startsNewFlow
+      : policy.startsNewFlow;
+    let flowIdentity = payload.flowIdentity;
+    const operation = this.businessOperationRegistry.begin(payload.meta || { channel: policy.channel });
+    if (!operation.accepted) {
+      return { status: 'busy', message: operation.message || '当前暂时不能开始新的任务' };
+    }
+    let context = null;
+    let batchContext = null;
+    let promotedManifest = null;
+    try {
+      if (typeof payload.flowPlanResolver === 'function') {
+        const plan = await payload.flowPlanResolver();
+        if (!plan || typeof plan.startsNewFlow !== 'boolean') {
+          throw new TypeError('flowPlanResolver 必须返回 startsNewFlow:boolean');
+        }
+        startsNewFlow = plan.startsNewFlow;
+        flowIdentity = plan.flowIdentity;
+      }
+      const flow = await this.flowResolver.resolve({
+        moduleId: policy.scopeId,
+        explicitParentRunId: payload.explicitParentRunId,
+        identity: flowIdentity,
+        startsNewFlow
+      });
+      const taskRunId = String(payload.taskRunId || this.createTaskRunId()).trim();
+      const operationKey = String(payload.operationKey || `${policy.taskKey}:${taskRunId}`).trim();
+      const lineageIntents = normalizeLineageIntentsV1(
+        typeof payload.lineageIntentsResolver === 'function'
+          ? await payload.lineageIntentsResolver({ flow, taskRunId, operationKey })
+          : payload.lineageIntents
+      );
+      const begun = await this.archiveService.beginTaskRun({
+        taskRunId,
+        moduleId: policy.scopeId,
+        taskKey: policy.taskKey,
+        operationKey,
+        parentRunId: flow.parentRunId,
+        metadata: {
+          ...payloadMetadata,
+          channel: policy.channel,
+          flowSource: flow.source
+        },
+        lineageIntents
+      });
+      if (!begun || begun.ok === false || !begun.taskRun) {
+        return lifecycleFailure(begun, 'ARCHIVE_TASK_RUN_BEGIN_FAILED', '内部 Task Run 建立失败');
+      }
+      let initialFilePlan = preparedFilePlan;
+      if (deferredFile) {
+        try {
+          initialFilePlan = await payload.filePlanResolver({ taskRun: begun.taskRun });
+          if (!initialFilePlan) throw new TypeError('deferred filePlan resolver 未返回 plan');
+        } catch (error) {
+          await this._finishOperationTask(
+            createWorkerOperationContextFromTask(begun.taskRun),
+            policy.channel,
+            {
+              taskStatus: 'failed',
+              code: error.code || 'ARCHIVE_FILE_PLAN_INVALID',
+              message: error.message || 'Deferred FilePlan 形成失败',
+              metadata: {}
+            }
+          );
+          return lifecycleFailure(error, 'ARCHIVE_FILE_PLAN_INVALID', 'Deferred FilePlan 形成失败');
+        }
+      }
+      context = createWorkerOperationContextFromTask(begun.taskRun);
+      this.activeTasks.set(operation.token, context);
+
+      if (flow.source === 'new' && flow.identity) {
+        const initialBind = await this._bindOperationFlowIdentities(
+          context,
+          policy,
+          [flow.identity]
+        );
+        if (initialBind.persisted || !initialBind.ok) {
+          const error = initialBind.error || initialBind.bindError;
+          await this._finishOperationTask(context, policy.channel, {
+            taskStatus: 'failed',
+            code: error.code || 'ARCHIVE_FLOW_BIND_FAILED',
+            message: error.message || '新业务流程身份绑定失败'
+          });
+          return lifecycleFailure(error, 'ARCHIVE_FLOW_BIND_FAILED', '新业务流程身份绑定失败');
+        }
+      }
+
+      let fileEvidence = deferredFile
+        ? Object.freeze({
+            filePlan: initialFilePlan,
+            inputFiles: initialFilePlan.inputs,
+            targetSnapshots: Object.freeze([])
+          })
+        : Object.freeze({});
+      if (typeof payload.beforeStart === 'function') {
+        try {
+          const evidence = await payload.beforeStart(context);
+          if (evidence !== undefined) {
+            if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
+              throw new TypeError('beforeStart evidence 必须是对象');
+            }
+            fileEvidence = Object.freeze({ ...fileEvidence, ...evidence });
+          }
+        } catch (error) {
+          await this._finishOperationTask(context, policy.channel, {
+            taskStatus: 'failed',
+            code: error.code || 'ARCHIVE_INPUT_EVIDENCE_FAILED',
+            message: error.message || '任务输入证据采集失败'
+          });
+          return lifecycleFailure(error, 'ARCHIVE_INPUT_EVIDENCE_FAILED', '任务输入证据采集失败');
+        }
+      }
+      const started = await this.archiveService.markTaskRunStarted(context.taskRunId);
+      if (!started || started.ok === false) {
+        await this._finishOperationTask(context, policy.channel, {
+          taskStatus: 'failed',
+          code: started && started.code || 'ARCHIVE_TASK_START_FAILED',
+          message: started && started.message || 'Task Run 无法进入运行状态'
+        });
+        return lifecycleFailure(started, 'ARCHIVE_TASK_START_FAILED', 'Task Run 无法进入运行状态');
+      }
+
+      let settlementPromise = null;
+      let settlementFiles = [];
+      const ensureFileBatch = async (manifest) => {
+        const reserved = await this.archiveService.reserveFileTaskBatch({
+          taskRun: begun.taskRun,
+          manifest,
+          moduleCode: policy.moduleCode,
+          moduleName: policy.moduleName,
+          metadata: { ...payloadMetadata, channel: policy.channel, flowSource: flow.source }
+        });
+        if (!reserved || reserved.ok === false || !reserved.batch) {
+          const error = new Error(
+            reserved && reserved.message || 'Deferred File Batch 原子预留失败'
+          );
+          error.code = reserved && reserved.code || 'ARCHIVE_BATCH_RESERVATION_FAILED';
+          throw error;
+        }
+        batchContext = createWorkerBatchContextFromBatch(reserved.batch);
+        promotedManifest = manifest;
+        const promotedPlan = Object.freeze({
+          version: 1,
+          allocation: 'eager',
+          inputs: manifest.inputs,
+          outputs: manifest.outputs
+        });
+        assertFilePlanFresh(promotedPlan);
+        this.activeTasks.set(operation.token, batchContext);
+        this.activeBatchIds.add(batchContext.batchId);
+        this.activeFileTaskRunIds.add(batchContext.taskRunId);
+        return batchContext;
+      };
+      const settleArtifacts = (outcome = {}) => {
+        if (!batchContext) return Promise.resolve({ handled: false });
+        if (!settlementPromise) {
+          settlementFiles = Array.isArray(outcome.files) ? outcome.files : [];
+          settlementPromise = this.archiveService.settleManifestArtifacts({
+            batchContext,
+            files: settlementFiles
+          });
+        }
+        return settlementPromise;
+      };
+      let businessResult;
+      let businessError = null;
+      try {
+        businessResult = await this.contextStorage.run(
+          context,
+          () => payload.execute(context, {
+            fileEvidence,
+            lineageIntents,
+            ensureFileBatch: deferredFile ? ensureFileBatch : undefined,
+            settleArtifacts
+          })
+        );
+      } catch (error) {
+        businessError = error;
+      }
+      let terminalStatus = 'failed';
+      if (!businessError) {
+        try {
+          terminalStatus = taskResultStatus(businessResult, resultClassifier);
+        } catch (error) {
+          businessError = error;
+        }
+      }
+      let settled = { handled: false };
+      if (batchContext) {
+        settled = await settleArtifacts({
+          files: promotedManifest.inputs.map((item) => ({ artifactKey: item.artifactKey }))
+        });
+        if (!settled || settled.ok === false) {
+          this._warn({
+            channel: policy.channel,
+            code: settled && settled.code || 'ARCHIVE_TASK_SETTLE_FAILED',
+            message: settled && settled.message || 'manifest artifact 未全部完成归档'
+          });
+        }
+      }
+
+      let resultIdentityFailure = null;
+      if (!businessError
+          && (terminalStatus === 'succeeded' || policy.bindResultFlowIdentitiesOnFailure === true)
+          && typeof payload.resultFlowIdentities === 'function') {
+        let identities = null;
+        try {
+          identities = await payload.resultFlowIdentities(businessResult, context);
+        } catch (error) {
+          this._warn({
+            channel: policy.channel,
+            code: error.code || 'ARCHIVE_FLOW_IDENTITY_RESOLVE_FAILED',
+            message: error.message || '业务结果身份解析失败'
+          });
+        }
+        if (identities && identities.length) {
+          const resultBind = batchContext
+            ? await this._bindFileFlowIdentities(batchContext, policy, identities)
+            : await this._bindOperationFlowIdentities(context, policy, identities);
+          if (resultBind.persisted) {
+            this._warn({
+              channel: policy.channel,
+              code: resultBind.bindError.code || 'ARCHIVE_FLOW_BIND_FAILED',
+              message: resultBind.bindError.message || '业务结果身份绑定失败'
+            });
+          } else if (!resultBind.ok) {
+            resultIdentityFailure = resultBind.error;
+            terminalStatus = 'failed';
+            this._warn({
+              channel: policy.channel,
+              code: resultBind.error.code || 'ARCHIVE_FLOW_BIND_INTENT_FAILED',
+              message: resultBind.error.message || '业务结果身份持久化失败'
+            });
+          }
+        }
+      }
+
+      let terminalMetadata = {};
+      const resultMetadataResolver = payload.resultMetadataResolver
+        || policy.resultMetadataResolver;
+      if (typeof resultMetadataResolver === 'function') {
+        try {
+          const resolvedMetadata = await resultMetadataResolver(
+            businessResult,
+            context,
+            { error: businessError, terminalStatus }
+          );
+          if (!resolvedMetadata || typeof resolvedMetadata !== 'object'
+              || Array.isArray(resolvedMetadata)) {
+            throw new TypeError('resultMetadataResolver 必须返回对象');
+          }
+          terminalMetadata = resolvedMetadata;
+        } catch (error) {
+          this._warn({
+            channel: policy.channel,
+            code: error.code || 'ARCHIVE_RESULT_METADATA_FAILED',
+            message: error.message || '任务结果元数据生成失败'
+          });
+        }
+      }
+
+      const terminalIntent = terminalStatus === 'cancelled'
+        ? {
+            taskStatus: 'cancelled',
+            code: '',
+            message: '业务任务已取消',
+            metadata: terminalMetadata
+          }
+        : terminalStatus === 'failed'
+          ? {
+              taskStatus: 'failed',
+              code: resultIdentityFailure && resultIdentityFailure.code
+                || businessError && businessError.code
+                || 'BUSINESS_TASK_FAILED',
+              message: resultIdentityFailure && resultIdentityFailure.message
+                || businessError && businessError.message
+                || businessResult && businessResult.message
+                || '业务任务失败',
+              metadata: terminalMetadata
+            }
+          : {
+              taskStatus: 'succeeded',
+              code: '',
+              message: '',
+              metadata: terminalMetadata
+            };
+      if (payload.afterTerminalIntent) {
+        terminalIntent.afterTerminal = payload.afterTerminalIntent;
+      }
+      let finished;
+      if (batchContext && terminalStatus === 'succeeded' && settled.durable !== true) {
+        if (!this.persistTerminalIntent) {
+          const error = new Error('Deferred File Task artifact 未 durable 且持久恢复接口不可用');
+          error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+          throw error;
+        }
+        const persisted = await this.persistTerminalIntent({
+          owner: { version: 1, kind: 'file-batch', batchContext },
+          sourceOperation: policy.channel,
+          settleFiles: settlementFiles,
+          terminalOutcome: terminalIntent
+        });
+        if (!persisted || persisted.persisted !== true) {
+          const error = new Error('Deferred File Task artifact 未 durable 且未形成恢复记录');
+          error.code = 'ARCHIVE_TASK_TERMINAL_INTENT_FAILED';
+          throw error;
+        }
+        finished = { ok: false, persisted: true };
+      } else {
+        finished = batchContext
+          ? await this._finishFileTask(batchContext, policy.channel, terminalIntent)
+          : await this._finishOperationTask(context, policy.channel, terminalIntent);
+      }
+      if (finished.ok === true && typeof payload.afterTerminal === 'function') {
+        try {
+          await payload.afterTerminal({
+            context: batchContext || context,
+            terminalStatus,
+            businessResult,
+            businessError
+          });
+        } catch (error) {
+          this._warn({
+            channel: policy.channel,
+            code: error.code || 'ARCHIVE_TASK_AFTER_TERMINAL_FAILED',
+            message: error.message || '任务终态后清理失败'
+          });
+        }
+      }
+      if (businessError) throw businessError;
+      return businessResult;
+    } finally {
+      if (context) this.activeTasks.delete(operation.token);
+      if (batchContext) {
+        this.activeBatchIds.delete(batchContext.batchId);
+        this.activeFileTaskRunIds.delete(batchContext.taskRunId);
+      }
+      this.businessOperationRegistry.end(operation.token);
+    }
+  }
+
   async cancelActive(predicate = null, reason = '用户取消任务') {
     const matches = [...this.activeTasks.values()].filter((context) => (
       typeof predicate !== 'function' || predicate(context)
@@ -708,9 +1597,29 @@ class TaskLifecycle {
       return { status: 'not-found', cancelled: false };
     }
     const context = matches[0];
-    const result = await this.archiveService.cancelTaskBatch(context.batchId, { reason });
+    const operationOnly = !Object.prototype.hasOwnProperty.call(context, 'batchId');
+    const fileTask = !operationOnly && this.activeFileTaskRunIds.has(context.taskRunId);
+    const terminalOutcome = {
+      taskStatus: 'cancelled',
+      code: '',
+      message: reason,
+      metadata: {}
+    };
+    const result = operationOnly
+      ? await this.archiveService.finishTaskRun(context.taskRunId, terminalOutcome)
+      : fileTask
+        ? await this.archiveService.finishFileTask(
+            context.taskRunId,
+            context.batchId,
+            terminalOutcome
+          )
+        : await this.archiveService.cancelTaskBatch(context.batchId, { reason });
     if (result && result.ok === false) {
-      const alreadyCancelled = result.batch && result.batch.taskStatus === 'cancelled';
+      const alreadyCancelled = operationOnly
+        ? result.taskRun && result.taskRun.status === 'cancelled'
+        : fileTask
+          ? result.taskRun && result.taskRun.status === 'cancelled'
+          : result.batch && result.batch.taskStatus === 'cancelled';
       return {
         status: alreadyCancelled ? 'cancelled' : 'conflict',
         cancelled: alreadyCancelled,
@@ -730,5 +1639,6 @@ module.exports = {
   TaskLifecycle,
   createTaskLifecycle,
   createWorkerBatchContext,
+  createWorkerOperationContextFromTask,
   taskResultStatus
 };

@@ -9,6 +9,30 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
+## v3.1.11（未发布）
+
+v3.1.11 同时收口存档中心的文件批次合同与 VCC storage contract-v1 升级边界：前端只显示至少一项真实文件证据的批次，无文件操作不发号；VCC 只允许可证明为空的 v1 自动升级为空 v2，任何非空 v1 都会在写入前停止。
+
+**存档中心文件批次**
+
+- 只有非空文件 manifest 与 File Batch 原子建立时才分配 `YYYY-MM-DD-NNN`；纯计算、确认、调整、归档、解归档、删除和配置保存只写内部 Task Run，不显示卡片、不推进序号。
+- list/get/stats/latest/related 统一排除零 artifact 历史批次。已有真实文件证据的失败/取消文件任务仍按事实显示；取消 picker、deferred 零输出和 manifest 事务失败不占号。
+- 关联任务沿用现有平铺列表。同 parent 关系继续兼容普通流程；Biz OP、Pending、前置资金对账以精确 dataset/run lineage 返回直接一跳输入与输出，不按日期、月份或 latest 猜测，不递归扩散。
+- 63 file / 59 no-file / 117 exclude action 全部显式闭合；临时 allow-list 删除。Statement、Position、Acquiring、VCC 和 Toolbox 的文件路径只来自冻结 FilePlan。
+- VCC import 在业务前 settle 输入并持久化真实 artifactId；ID 缺失或 owner、source operation、SHA/大小不符时 fail-closed。VCC output 与 Toolbox committed receipt 由原 File Task 跨重启接管。
+- 017/018 只允许精确指纹 repair；001 保留失败输入证据，不伪造输出或成功状态。
+
+**VCC 存储与界面**
+
+- 空 v1 启动时原子替换为空的精简 effective schema，写入 contract-v2 marker、安装连接能力 guard，并回读外键和字段；重复启动幂等。
+- 全新安装在首次初始化中直接得到无业务/审计数据的 v2；旧空 v1 静默升级为同一状态。两种情况都不会出现升级按钮、进度条、迁移弹窗或额外状态提示；正常初始化产生的空 module-state 结构单例不代表历史数据恢复。
+- 非空 VCC 表、非空固定首月或未知非空 VCC 表都会触发 fail-closed；软件不会自动搬迁或删除历史财务数据，也不会继续按 v1 写入。
+- 数据管理移除【优化存储】及对应 preload/main IPC。COW rebuild、journal recovery 和 v2 guard 仍作为内部恢复与一次性维护基础。
+- 导入记录不再显示任何原始文件存档状态小字；内部 artifact 状态、失败主状态、计数和异常导出仍保留。
+- 移除【标记已处理】及对应弹窗、IPC/API 和 unresolved 操作门禁。失败尝试不进入有效数据集，运行继续使用此前已生效的数据；旧处置字段只作兼容保留。
+- 数据管理弹窗保持立即打开；快速读取不再闪现三条横向骨架，读取超过 150ms 才显示加载占位，读取完成、失败或关闭后自动清理。
+- 当前机器既有非空 v1 已使用一次性 reset-only COW 完成处理，清空范围仅为 `vcc_fin_op_*` 业务/审计行；活动库由 36.44 GB 缩至 2.84 GB，切换后独立复验时 23 张 VCC 表合计 0 行，Archive batch/artifact/Blob/flow/issuance、其它模块和自增高水位守恒；后续启动可创建空的 module-state 结构单例。同目录 JSON 审计报告继续保留；旧 v1 备份在独立复验后按用户再次明确授权永久删除，回收约 33.94 GiB，当前机器不再具备旧 v1 整库回退能力。这不是发布给所有用户的自动 migration。
+
 ## v3.1.10（2026-08-17）
 
 v3.1.10 将 VCC 财务 OP 的长期原始数据真相从 SQLite 大字段转移到存档 artifact，并把逐行导入审计收敛为真正异常；同时提供显式、可恢复的 copy-on-write 物理重建。该版本已于 2026-08-17 通过受控 Windows Release workflow 正式发布。

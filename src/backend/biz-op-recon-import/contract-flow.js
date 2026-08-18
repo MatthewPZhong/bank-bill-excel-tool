@@ -50,6 +50,7 @@ const {
 } = require('../biz-op-recon-db/columns');
 const { validateFlowHeaders, validateFlowRow } = require('./validator');
 const { normalizeCell } = require('../file-service/common');
+const { freezeFlowDatasetSeedV1 } = require('../biz-op-recon-db/dataset-head-repository');
 
 // 错误累积上限：与旧链路 import-worker.js DEFAULT_MAX_ROW_ERRORS=1000 同口径（spec E4 / R-7）。
 const FLOW_MAX_COLLECTED_ERRORS = 1000;
@@ -78,12 +79,14 @@ function buildFlowDbRow(values, rowR) {
   return row;
 }
 
-// 契约工厂：contractOptions = { date }
+// 契约工厂：contractOptions = { date, datasetSeed }
 //   - date：单日 key（UI 入参；INSERT data_date + deleteForOverwrite 条件）。流水不分 BU，按 date 级覆盖。
+//   - datasetSeed：Task Run seed + prepare 时 head；此处是 engine worker 的序列化边界。
 //   返回引擎契约对象（schema 见 big-table-import/contract.js）。
 function createContract(options = {}) {
   const opts = options || {};
   const date = opts.date != null ? String(opts.date) : '';
+  const datasetSeed = freezeFlowDatasetSeedV1(opts.datasetSeed);
 
   return {
     expectedHeaders: FLOW_HEADERS,           // 28 列
@@ -136,6 +139,37 @@ function createContract(options = {}) {
     //   后续所有文件的行在同一事务内累加 INSERT，不再 clear——与旧链路 `cleared` 函数级单次 clear byte-for-byte 等价。
     deleteForOverwrite() {
       return [
+        // 同一 BEGIN 内先核对 prepare 时 head。临时 CHECK 表仅服务本契约：若并发任务已提交新 head，
+        // 此 INSERT 触发约束失败，业务 DELETE/INSERT 尚未开始。
+        {
+          sql: 'CREATE TEMP TABLE IF NOT EXISTS biz_op_flow_head_guard (ok INTEGER NOT NULL CHECK (ok = 1))',
+          params: []
+        },
+        {
+          sql: 'DELETE FROM biz_op_flow_head_guard',
+          params: []
+        },
+        {
+          sql: `INSERT INTO biz_op_flow_head_guard (ok)
+    SELECT CASE WHEN (
+      (? IS NULL AND NOT EXISTS (
+        SELECT 1 FROM biz_op_recon_dataset_heads
+        WHERE dataset_kind = 'flow' AND data_date = ? AND normalized_bu = ''
+      )) OR (? IS NOT NULL AND EXISTS (
+        SELECT 1 FROM biz_op_recon_dataset_heads
+        WHERE dataset_kind = 'flow' AND data_date = ? AND normalized_bu = ''
+          AND dataset_id = ? AND dataset_version = ?
+      ))
+    ) THEN 1 ELSE 0 END`,
+          params: [
+            datasetSeed.expectedDatasetId,
+            date,
+            datasetSeed.expectedDatasetId,
+            date,
+            datasetSeed.expectedDatasetId,
+            datasetSeed.expectedDatasetVersion
+          ]
+        },
         // 1a) 先删该 date 的 diff_rows（run_id IN 该 date 的 runs；FK 顺序，先 rows 后 runs）
         {
           sql: `DELETE FROM biz_op_recon_diff_rows
@@ -157,6 +191,30 @@ function createContract(options = {}) {
           params: [date]
         }
       ];
+    },
+
+    // 流水行与 v1 dataset head 在同一引擎事务提交。旧 binary 的行级 trigger 会先清理旧 head，
+    // 新链在所有行写入完成后以本次 Task Run 身份重建 head，避免内容与生产者身份分离。
+    finalizeForCommit() {
+      return [{
+        sql: `INSERT INTO biz_op_recon_dataset_heads (
+          dataset_kind, data_date, normalized_bu, dataset_id,
+          producer_task_run_id, dataset_version, archive_contract_version, updated_at
+        ) VALUES ('flow', ?, '', ?, ?, ?, 1, ?)
+        ON CONFLICT(dataset_kind, data_date, normalized_bu) DO UPDATE SET
+          dataset_id = excluded.dataset_id,
+          producer_task_run_id = excluded.producer_task_run_id,
+          dataset_version = excluded.dataset_version,
+          archive_contract_version = excluded.archive_contract_version,
+          updated_at = excluded.updated_at`,
+        params: [
+          date,
+          datasetSeed.datasetId,
+          datasetSeed.producerTaskRunId,
+          datasetSeed.expectedDatasetVersion + 1,
+          new Date().toISOString()
+        ]
+      }];
     },
 
     // ── F1（PR #71 SR）批级空数据整批拒绝（🔴 数据丢失回归修复）──

@@ -1,77 +1,21 @@
 'use strict';
 
-const path = require('node:path');
-
 const vccRepository = require('../backend/vcc-financial-op-db/repository');
 const { hashSourceFiles } = require('../backend/vcc-financial-op/source-lineage');
 const {
   freezeWorkerBatchContext
 } = require('./archive-center/worker-batch-context');
-
 const VCC_ARCHIVE_MODULE_ID = 'vcc-financial-op';
 const VCC_IMPORT_SOURCE_OPERATION = 'vccFinancialOp:import:apply';
 const VCC_IMPORT_HOLD_TYPE = 'vcc-import-source';
-const SHA256_RE = /^[a-f0-9]{64}$/;
-
 function payloadFromArgs(args) {
   if (Array.isArray(args)) return args[0] && typeof args[0] === 'object' ? args[0] : {};
   return args && typeof args === 'object' ? args : {};
 }
 
-function buildVccImportArchiveInputFiles(args, result) {
-  const payload = payloadFromArgs(args);
-  const selectedFiles = Array.isArray(payload.files) ? payload.files : [];
-  const records = Array.isArray(result && result.records) ? result.records : [];
-  const descriptors = [];
-  for (const record of records) {
-    const sourceType = String(record.sourceType || '');
-    const physicalFiles = selectedFiles.filter((file) => (
-      file && String(file.sourceType || '') === sourceType
-    ));
-    const sources = (Array.isArray(record.sourceFiles) ? record.sourceFiles : [])
-      .slice()
-      .sort((left, right) => Number(left.sourceOrdinal) - Number(right.sourceOrdinal));
-    if (physicalFiles.length !== sources.length) {
-      throw new Error(`${sourceType} 导入来源数量与存档证据不一致`);
-    }
-    for (let index = 0; index < sources.length; index += 1) {
-      const source = sources[index];
-      const selected = physicalFiles[index];
-      const filePath = path.resolve(String(selected.filePath || ''));
-      const expectedSha256 = String(source.sha256 || '').toLowerCase();
-      const expectedSizeBytes = Number(source.sizeBytes);
-      if (!filePath
-          || !Number.isSafeInteger(Number(source.id))
-          || !Number.isSafeInteger(Number(record.recordId))
-          || !SHA256_RE.test(expectedSha256)
-          || !Number.isSafeInteger(expectedSizeBytes)
-          || expectedSizeBytes < 0
-          || path.basename(filePath) !== String(source.fileName || '')) {
-        throw new Error(`${sourceType} 导入来源缺少可核验的存档证据`);
-      }
-      descriptors.push(Object.freeze({
-        filePath,
-        role: 'input',
-        originalName: source.fileName,
-        expectedSha256,
-        expectedSizeBytes,
-        metadata: Object.freeze({
-          vccImportBatchId: String(result.batchId || record.batchId || ''),
-          vccImportRecordId: Number(record.recordId),
-          vccImportSourceId: Number(source.id),
-          vccSourceType: sourceType,
-          vccSourceOrdinal: Number(source.sourceOrdinal)
-        })
-      }));
-    }
-  }
-  return Object.freeze(descriptors);
-}
-
 async function buildVccImportArchiveHandoffFiles(args, batchContext) {
-  const context = freezeWorkerBatchContext(batchContext, { required: true });
-  if (context.moduleId !== VCC_ARCHIVE_MODULE_ID
-      || context.taskKey !== VCC_IMPORT_SOURCE_OPERATION) {
+  if (batchContext.moduleId !== VCC_ARCHIVE_MODULE_ID
+      || batchContext.taskKey !== VCC_IMPORT_SOURCE_OPERATION) {
     throw new Error('VCC 导入耐久接管上下文与任务身份不一致');
   }
   const payload = payloadFromArgs(args);
@@ -92,8 +36,8 @@ async function buildVccImportArchiveHandoffFiles(args, batchContext) {
       expectedSizeBytes: file.sizeBytes,
       metadata: Object.freeze({
         vccImportHandoffVersion: 1,
-        vccTaskRunId: context.taskRunId,
-        vccImportBatchId: context.taskRunId,
+        vccTaskRunId: batchContext.taskRunId,
+        vccImportBatchId: batchContext.taskRunId,
         vccSourceType: sourceType,
         vccSourceOrdinal: sourceOrdinal
       })
@@ -160,7 +104,7 @@ function markReadySourceUnavailable(db, source) {
   vccRepository.refreshImportRecordArchiveState(db, Number(source.import_record_id));
 }
 
-function bindReadyArtifact(db, archiveRepository, source, artifact) {
+function bindReadyArtifact(db, archiveRepository, source, artifact, options = {}) {
   const metadata = artifact.metadata && typeof artifact.metadata === 'object'
     ? artifact.metadata
     : {};
@@ -175,7 +119,10 @@ function bindReadyArtifact(db, archiveRepository, source, artifact) {
       && String(metadata.vccSourceType || '') === String(source.source_type)
       && Number(metadata.vccSourceOrdinal) === Number(source.source_ordinal)
       && String(artifact.originalName || '') === String(source.source_file_name || '');
-  const exact = identityExact
+  const artifactIdentityExact = options.hasPersistedArtifactIdentity === true
+    ? options.persistedArtifactIdentityExact === true
+    : identityExact;
+  const exact = artifactIdentityExact
     && blob
     && String(blob.sha256 || '').toLowerCase() === String(source.source_sha256).toLowerCase()
     && Number(blob.sizeBytes) === Number(source.source_size_bytes);
@@ -245,6 +192,22 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
   );
   const artifactBySource = new Map();
   const duplicateSourceIds = new Set();
+  const persistedArtifactIdentityExact = new Set();
+  const persistedArtifactSourceIds = new Set();
+  for (const source of sources) {
+    const artifactId = Number(source.archive_artifact_id);
+    if (!Number.isSafeInteger(artifactId) || artifactId < 1) continue;
+    persistedArtifactSourceIds.add(Number(source.id));
+    const artifact = archiveRepository.getArtifact(artifactId);
+    if (!artifact) continue;
+    artifactBySource.set(Number(source.id), artifact);
+    const batch = archiveRepository.getBatch(artifact.batchId);
+    if (batch
+        && batch.taskRunId === source.batch_id
+        && artifact.sourceOperation === VCC_IMPORT_SOURCE_OPERATION) {
+      persistedArtifactIdentityExact.add(Number(source.id));
+    }
+  }
   for (const artifact of artifacts) {
     const metadata = artifact && artifact.metadata && typeof artifact.metadata === 'object'
       ? artifact.metadata
@@ -262,6 +225,7 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
     }
     if (!source) continue;
     const sourceId = Number(source.id);
+    if (persistedArtifactSourceIds.has(sourceId)) continue;
     if (artifactBySource.has(sourceId)) duplicateSourceIds.add(sourceId);
     else artifactBySource.set(sourceId, artifact);
   }
@@ -299,7 +263,10 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
       }
       continue;
     }
-    const result = bindReadyArtifact(db, archiveRepository, source, artifact);
+    const result = bindReadyArtifact(db, archiveRepository, source, artifact, {
+      hasPersistedArtifactIdentity: persistedArtifactSourceIds.has(sourceId),
+      persistedArtifactIdentityExact: persistedArtifactIdentityExact.has(sourceId)
+    });
     if (result.bound) bound += 1;
     if (result.failed) failed += 1;
     if (result.released) released += 1;
@@ -407,8 +374,20 @@ function recoverVccImportArchiveTasks({ db, archiveRepository, archiveCenter }) 
       db,
       archiveRepository
     })) {
+      const batchContext = batchContextFromArchiveBatch(archiveBatch);
+      const manifestOwned = Boolean(
+        archiveBatch.metadata && archiveBatch.metadata._fileManifest
+      );
       const persisted = archiveCenter.persistTaskTerminalIntent({
-        batchContext: batchContextFromArchiveBatch(archiveBatch),
+        ...(manifestOwned
+          ? {
+              owner: {
+                version: 1,
+                kind: 'file-batch',
+                batchContext
+              }
+            }
+          : { batchContext }),
         sourceOperation: VCC_IMPORT_SOURCE_OPERATION,
         terminalOutcome
       });
@@ -447,7 +426,6 @@ module.exports = {
   VCC_IMPORT_HOLD_TYPE,
   VCC_IMPORT_SOURCE_OPERATION,
   buildVccImportArchiveHandoffFiles,
-  buildVccImportArchiveInputFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
   reconcileVccImportArchiveLineageAtStartup,

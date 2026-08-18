@@ -121,8 +121,8 @@ function readGatewayRecon(filePath) {
 }
 
 // ===== 文件名规则 =====
-function buildTimestamp() {
-  const d = new Date();
+function buildTimestamp(date = new Date()) {
+  const d = date;
   const pad = (n) => String(n).padStart(2, '0');
   return [
     d.getFullYear(),
@@ -135,8 +135,8 @@ function buildTimestamp() {
 }
 
 // 主输出文件名时间戳：精度到分钟（YYYYMMDDHHmm，12 位）
-function buildTimestampMinute() {
-  const d = new Date();
+function buildTimestampMinute(date = new Date()) {
+  const d = date;
   const pad = (n) => String(n).padStart(2, '0');
   return [
     d.getFullYear(),
@@ -147,8 +147,8 @@ function buildTimestampMinute() {
   ].join('');
 }
 
-function buildDateDir() {
-  const d = new Date();
+function buildDateDir(date = new Date()) {
+  const d = date;
   const pad = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
@@ -189,8 +189,8 @@ function buildMainOutputFileName(timestamp = buildTimestampMinute()) {
 
 // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件时间戳，精度到分钟（YYYY_MM_DD_HHMM，下划线分隔）
 //   与 buildTimestampMinute（YYYYMMDDHHmm，无分隔）独立，专供剔除文件名使用
-function buildTimestampMinuteUnderscore() {
-  const d = new Date();
+function buildTimestampMinuteUnderscore(date = new Date()) {
+  const d = date;
   const pad = (n) => String(n).padStart(2, '0');
   return [
     d.getFullYear(),
@@ -255,30 +255,35 @@ async function writeBankStatementMainOutput({ modifiedRows, headers, mainFilePat
 //   enrich 落 io 层（纯函数，可被 unit/smoke 直接覆盖；main.js IPC handler 难单测）。
 async function writeErrorReportOutput({ warnings, exportRootDir, timestamp, bankRows }) {
   if (!Array.isArray(warnings) || warnings.length === 0) return null;
-  let enrichedWarnings = warnings;
-  if (Array.isArray(bankRows) && bankRows.length > 0) {
-    // _rowId → ReconciliationId（判空 String(v).trim()：ReconciliationId 可能是 number）
-    const reconIdByRowId = new Map();
-    for (const r of bankRows) {
-      if (!r || r._rowId === undefined || r._rowId === null) continue;
-      const v = r.ReconciliationId;
-      if (v === undefined || v === null) continue;
-      if (String(v).trim() === '') continue;
-      reconIdByRowId.set(r._rowId, v);
-    }
-    enrichedWarnings = warnings.map((w) => {
-      if (!w || w.rowId === undefined || w.rowId === null) return w;
-      const reconciliationId = reconIdByRowId.get(w.rowId);
-      if (reconciliationId === undefined) return w;
-      return { ...w, reconciliationId };
-    });
-  }
   const ts = timestamp ?? buildTimestamp();
   const dir = ensureDateDir(exportRootDir);
-  const fileName = `${ts}-error-report.xlsx`;
-  const savePath = path.join(dir, fileName);
-  const result = await writeErrorReport(enrichedWarnings, savePath);
-  return { ...result, fileName };
+  return writeErrorReportOutputToPath({
+    warnings,
+    outputPath: path.join(dir, `${ts}-error-report.xlsx`),
+    bankRows
+  });
+}
+
+async function writeErrorReportOutputToPath({ warnings, outputPath, bankRows }) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return null;
+  let enrichedWarnings = warnings;
+  if (Array.isArray(bankRows) && bankRows.length > 0) {
+    const reconIdByRowId = new Map();
+    for (const row of bankRows) {
+      if (!row || row._rowId === undefined || row._rowId === null) continue;
+      const reconciliationId = row.ReconciliationId;
+      if (reconciliationId === undefined || reconciliationId === null
+          || String(reconciliationId).trim() === '') continue;
+      reconIdByRowId.set(row._rowId, reconciliationId);
+    }
+    enrichedWarnings = warnings.map((warning) => {
+      if (!warning || warning.rowId === undefined || warning.rowId === null) return warning;
+      const reconciliationId = reconIdByRowId.get(warning.rowId);
+      return reconciliationId === undefined ? warning : { ...warning, reconciliationId };
+    });
+  }
+  const result = await writeErrorReport(enrichedWarnings, outputPath);
+  return { ...result, fileName: path.basename(outputPath) };
 }
 
 module.exports = {
@@ -288,6 +293,7 @@ module.exports = {
   readGatewayRecon,
   writeBankStatementMainOutput,
   writeErrorReportOutput,
+  writeErrorReportOutputToPath,
   buildMainOutputFileName,
   buildTimestamp,
   buildTimestampMinute,

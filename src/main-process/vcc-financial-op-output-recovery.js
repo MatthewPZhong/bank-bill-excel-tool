@@ -11,10 +11,6 @@ const {
 const {
   recoverToolboxPublicationsIntoArchive
 } = require('./toolbox-archive-recovery');
-const {
-  freezeWorkerBatchContext
-} = require('./archive-center/worker-batch-context');
-
 async function hashRegularFile(filePath) {
   const resolved = path.resolve(String(filePath || ''));
   const stat = await fs.promises.stat(resolved);
@@ -41,7 +37,7 @@ function normalizedTargetSnapshot(value, index) {
 }
 
 async function publishVccFinancialOpOutputs(options = {}) {
-  const batchContext = freezeWorkerBatchContext(options.batchContext, { required: true });
+  const batchContext = options.batchContext;
   const generationPaths = Array.isArray(options.generationFilePaths)
     ? options.generationFilePaths.map((filePath) => path.resolve(String(filePath || '')))
     : [];
@@ -89,12 +85,16 @@ async function publishVccFinancialOpOutputs(options = {}) {
   }
 
   try {
-    await recoverIntoArchive({
-      userDataDir: options.userDataDir,
-      archiveCenter: options.archiveCenter,
-      recoverPublications,
-      taskIds: [publication.taskId]
-    });
+    if (typeof options.settleManifestArtifacts === 'function') {
+      await options.settleManifestArtifacts(publication, inspected);
+    } else {
+      await recoverIntoArchive({
+        userDataDir: options.userDataDir,
+        archiveCenter: options.archiveCenter,
+        recoverPublications,
+        taskIds: [publication.taskId]
+      });
+    }
     if (typeof options.onDurableHandoff === 'function') {
       await options.onDurableHandoff(publication);
     }

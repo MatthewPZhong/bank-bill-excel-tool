@@ -19,6 +19,11 @@ function freezeWorkerBatchContext(value, options = {}) {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('worker batchContext 必须是对象');
   }
+  const keys = Object.keys(value).sort();
+  const expected = [...WORKER_BATCH_CONTEXT_FIELDS].sort();
+  if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
+    throw new TypeError('worker batchContext 必须只包含 exact-7 字段');
+  }
   const batchId = Number(value.batchId);
   if (!Number.isSafeInteger(batchId) || batchId < 1) {
     throw new TypeError('worker batchContext.batchId 必须是正安全整数');

@@ -10,6 +10,9 @@
 //
 // ⚠️ 不动现有 pending_rows / diff_rows / diff_runs；本表为增量。
 
+const { randomUUID } = require('node:crypto');
+const { identityFromPendingDatasetSeed } = require('./dataset-identity');
+
 // 索引列写入顺序（与 migrations.js removed_pending_rows 列对齐）
 const INDEX_COLUMNS = Object.freeze([
   'order_no',
@@ -31,7 +34,25 @@ function indexValue(row, field) {
 
 // 同月先删后插（幂等）。调用方无需自开事务——本函数内部包一个事务保证原子。
 // 返回 { deleted, inserted }
-function replaceByMonth(db, yearMonth, rows, sourceFile) {
+function getMonthHead(db, yearMonth) {
+  const row = db.prepare(`
+    SELECT year_month, dataset_id, producer_task_run_id, dataset_version,
+           archive_contract_version, updated_at
+    FROM pending_removed_months
+    WHERE year_month = ?
+  `).get(yearMonth);
+  if (!row) return null;
+  return {
+    yearMonth: row.year_month,
+    datasetId: row.dataset_id,
+    producerTaskRunId: row.producer_task_run_id || null,
+    datasetVersion: Number(row.dataset_version) || 0,
+    archiveContractVersion: Number(row.archive_contract_version) || 0,
+    updatedAt: row.updated_at
+  };
+}
+
+function replaceByMonthWithIdentity(db, yearMonth, rows, sourceFile, datasetIdentity) {
   if (!yearMonth) throw new Error('replaceByMonth: yearMonth 必填');
   const list = Array.isArray(rows) ? rows : [];
   const createdAt = new Date().toISOString();
@@ -45,6 +66,7 @@ function replaceByMonth(db, yearMonth, rows, sourceFile) {
 
   db.exec('BEGIN');
   try {
+    const identity = datasetIdentity;
     const delResult = db
       .prepare('DELETE FROM removed_pending_rows WHERE year_month = ?')
       .run(yearMonth);
@@ -65,12 +87,90 @@ function replaceByMonth(db, yearMonth, rows, sourceFile) {
       );
       inserted += 1;
     }
+    db.prepare(`
+      INSERT INTO pending_removed_months (
+        year_month, dataset_id, producer_task_run_id, dataset_version,
+        archive_contract_version, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(year_month) DO UPDATE SET
+        dataset_id = excluded.dataset_id,
+        producer_task_run_id = excluded.producer_task_run_id,
+        dataset_version = excluded.dataset_version,
+        archive_contract_version = excluded.archive_contract_version,
+        updated_at = excluded.updated_at
+    `).run(
+      yearMonth,
+      identity.datasetId,
+      identity.producerTaskRunId,
+      identity.datasetVersion,
+      identity.archiveContractVersion,
+      createdAt
+    );
     db.exec('COMMIT');
     return { deleted: Number(delResult.changes) || 0, inserted };
   } catch (err) {
     try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
     throw err;
   }
+}
+
+function replaceByMonth(db, yearMonth, rows, sourceFile, datasetIdentity) {
+  return replaceByMonthWithIdentity(db, yearMonth, rows, sourceFile, datasetIdentity);
+}
+
+function replaceByMonthWithSeed(db, yearMonth, rows, sourceFile, datasetSeed) {
+  if (!yearMonth) throw new Error('replaceByMonth: yearMonth 必填');
+  const list = Array.isArray(rows) ? rows : [];
+  const createdAt = new Date().toISOString();
+  const src = sourceFile == null ? null : String(sourceFile);
+  const insertStmt = db.prepare(
+    `INSERT INTO removed_pending_rows
+       (year_month, source_file, raw_json, order_no, recon_id, \`金额\`, channel, merchant_id, bank_ref, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+
+  db.exec('BEGIN');
+  try {
+    const identity = identityFromPendingDatasetSeed(getMonthHead(db, yearMonth), datasetSeed);
+    const delResult = db.prepare('DELETE FROM removed_pending_rows WHERE year_month = ?').run(yearMonth);
+    let inserted = 0;
+    for (const row of list) {
+      const raw = row && row.raw && typeof row.raw === 'object' ? row.raw : {};
+      insertStmt.run(
+        yearMonth, src, JSON.stringify(raw),
+        indexValue(row, 'order_no'), indexValue(row, 'recon_id'), indexValue(row, '金额'),
+        indexValue(row, 'channel'), indexValue(row, 'merchant_id'), indexValue(row, 'bank_ref'), createdAt
+      );
+      inserted += 1;
+    }
+    db.prepare(`
+      INSERT INTO pending_removed_months (
+        year_month, dataset_id, producer_task_run_id, dataset_version,
+        archive_contract_version, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?)
+      ON CONFLICT(year_month) DO UPDATE SET
+        dataset_id = excluded.dataset_id,
+        producer_task_run_id = excluded.producer_task_run_id,
+        dataset_version = excluded.dataset_version,
+        archive_contract_version = 1,
+        updated_at = excluded.updated_at
+    `).run(yearMonth, identity.datasetId, identity.producerTaskRunId, identity.datasetVersion, createdAt);
+    db.exec('COMMIT');
+    return { deleted: Number(delResult.changes) || 0, inserted };
+  } catch (err) {
+    try { db.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+    throw err;
+  }
+}
+
+function replaceByMonthLegacy(db, yearMonth, rows, sourceFile) {
+  const currentHead = getMonthHead(db, yearMonth);
+  return replaceByMonthWithIdentity(db, yearMonth, rows, sourceFile, {
+    datasetId: randomUUID(),
+    producerTaskRunId: null,
+    datasetVersion: currentHead ? currentHead.datasetVersion + 1 : 0,
+    archiveContractVersion: 0
+  });
 }
 
 // 解析 raw_json → 对象（损坏 JSON 返回 {}，不抛）
@@ -117,7 +217,10 @@ function countByMonth(db, yearMonth) {
 
 module.exports = {
   replaceByMonth,
+  replaceByMonthWithSeed,
+  replaceByMonthLegacy,
   listByMonth,
   countByMonth,
+  getMonthHead,
   INDEX_COLUMNS
 };

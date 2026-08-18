@@ -22,7 +22,10 @@ function mapMirror(row) {
     sideDbRelPath: row.side_db_rel_path,
     errorMessage: row.error_message || '',
     startedAt: row.started_at,
-    finishedAt: row.finished_at
+    finishedAt: row.finished_at,
+    archiveContractVersion: Number(row.archive_contract_version) === 1 ? 1 : 0,
+    archiveTaskRunId: row.archive_task_run_id || null,
+    archiveTerminalAckAt: row.archive_terminal_ack_at || null
   };
 }
 
@@ -30,8 +33,28 @@ function createRunMirror(db, payload = {}) {
   const result = db.prepare(`
     INSERT INTO pre_fund_reconciliation_run_mirrors (
       month_key, side_run_id, scenario, status, summary_json,
-      snapshot_hash, bank_files_json, side_db_rel_path
-    ) VALUES (?, ?, ?, 'running', '{}', ?, ?, ?)
+      snapshot_hash, bank_files_json, side_db_rel_path,
+      archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+    ) VALUES (?, ?, ?, 'running', '{}', ?, ?, ?, 1, ?, NULL)
+  `).run(
+    String(payload.monthKey || ''),
+    Number(payload.sideRunId),
+    String(payload.scenario || ''),
+    String(payload.snapshotHash || ''),
+    JSON.stringify(Array.isArray(payload.bankFiles) ? payload.bankFiles : []),
+    String(payload.sideDbRelPath || ''),
+    payload.archiveReceipt.archiveTaskRunId
+  );
+  return Number(result.lastInsertRowid);
+}
+
+function createLegacyRunMirror(db, payload = {}) {
+  const result = db.prepare(`
+    INSERT INTO pre_fund_reconciliation_run_mirrors (
+      month_key, side_run_id, scenario, status, summary_json,
+      snapshot_hash, bank_files_json, side_db_rel_path,
+      archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+    ) VALUES (?, ?, ?, 'running', '{}', ?, ?, ?, 0, NULL, NULL)
   `).run(
     String(payload.monthKey || ''),
     Number(payload.sideRunId),
@@ -82,6 +105,26 @@ function getRunMirror(db, mirrorId) {
   );
 }
 
+function getRunMirrorByArchiveTaskRunId(db, taskRunId) {
+  return mapMirror(db.prepare(`
+    SELECT * FROM pre_fund_reconciliation_run_mirrors
+    WHERE archive_contract_version = 1 AND archive_task_run_id = ?
+  `).get(taskRunId));
+}
+
+function acknowledgeArchiveTerminal(db, mirrorId, taskRunId) {
+  const result = db.prepare(`
+    UPDATE pre_fund_reconciliation_run_mirrors
+    SET archive_terminal_ack_at = COALESCE(archive_terminal_ack_at, CURRENT_TIMESTAMP)
+    WHERE id = ? AND status = 'success'
+      AND archive_contract_version = 1 AND archive_task_run_id = ?
+  `).run(Number(mirrorId), taskRunId);
+  if (result.changes !== 1) {
+    throw new Error(`前置资金主库 run 镜像 #${mirrorId} 的 Archive receipt 身份不一致`);
+  }
+  return getRunMirror(db, mirrorId);
+}
+
 function listRunMirrors(db) {
   return db.prepare(`
     SELECT *
@@ -91,10 +134,13 @@ function listRunMirrors(db) {
 }
 
 module.exports = {
+  acknowledgeArchiveTerminal,
+  createLegacyRunMirror,
   createRunMirror,
   finishRunMirror,
   failRunMirror,
   markRunMirrorUnavailable,
   getRunMirror,
+  getRunMirrorByArchiveTaskRunId,
   listRunMirrors
 };

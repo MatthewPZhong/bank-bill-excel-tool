@@ -69,6 +69,47 @@ test.describe('insertRun / getRunById', () => {
   });
 });
 
+test.describe('v1 Archive run receipt', () => {
+  test('按 TaskRun 唯一持久、查询并幂等 ack', () => {
+    const stats = {
+      t1OpTotal: 3,
+      t2OpTotal: 2,
+      flowTotal: 1,
+      amountDiffCount: 1,
+      multiOpAccountCount: 0,
+      t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0,
+      t2NotT1Count: 0
+    };
+    const id = runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats, archiveTaskRunId: 'biz-run-task-1'
+    });
+    const run = runRepo.getRunByArchiveTaskRunId(db, 'biz-run-task-1');
+    assert.equal(run.id, id);
+    assert.equal(run.archive_contract_version, 1);
+    assert.equal(run.archive_terminal_ack_at, null);
+    assert.deepEqual(runRepo.listUnacknowledgedArchiveRuns(db).map((item) => item.id), [id]);
+
+    runRepo.acknowledgeArchiveTerminal(db, id, 'biz-run-task-1', '2026-05-22T10:00:00.000Z');
+    runRepo.acknowledgeArchiveTerminal(db, id, 'biz-run-task-1', '2026-05-22T10:00:01.000Z');
+    assert.equal(runRepo.getRunById(db, id).archive_terminal_ack_at, '2026-05-22T10:00:00.000Z');
+    assert.equal(runRepo.listUnacknowledgedArchiveRuns(db).length, 0);
+  });
+
+  test('同一 TaskRun 不能产生第二条业务 run receipt', () => {
+    const stats = {
+      t1OpTotal: 0, t2OpTotal: 0, flowTotal: 0, amountDiffCount: 0,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0, t1NotT2Count: 0, t2NotT1Count: 0
+    };
+    runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats, archiveTaskRunId: 'same-task'
+    });
+    assert.throws(() => runRepo.insertArchiveRun(db, {
+      date: '2026-05-23', buName: 'BU-A', stats, archiveTaskRunId: 'same-task'
+    }), /UNIQUE/);
+  });
+});
+
 test.describe('listRunsByDateBu', () => {
   test('LOWER+TRIM 过滤', () => {
     runRepo.insertRun(db, { date: '2026-05-22', buName: 'BU-A' });

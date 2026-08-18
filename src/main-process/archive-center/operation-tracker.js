@@ -4,6 +4,7 @@ const path = require('node:path');
 
 const { resolveArchiveScope } = require('./module-scope-registry');
 const { sourceSnapshotForPath } = require('./source-snapshot');
+const { createTaskPolicyRegistry } = require('./task-policy-registry');
 
 function moduleDescriptor(scopeKey) {
   const scope = resolveArchiveScope(scopeKey);
@@ -31,71 +32,11 @@ const MODULES = Object.freeze({
   preFundTemp: moduleDescriptor('PREFUNDTEMP')
 });
 
-const FILE_CHANNELS = new Set([
-  'acquiringBillCurrency:export',
-  'acquiringBillCurrency:importBill',
-  'acquiringBillCurrency:importFlow',
-  'acquiringBillCurrency:run',
-  'acquiringBillCurrency:run:resume',
-  'bank-statement:batch-import',
-  'bank-statement:export',
-  'bank-statement:import',
-  'bankBuRecon:export:aggregate',
-  'bankBuRecon:export:single',
-  'bankBuRecon:import:run',
-  'big-account:import-bank-info',
-  'bizOpRecon:export:date',
-  'bizOpRecon:export:date-range',
-  'bizOpRecon:import:run-biz-op',
-  'bizOpRecon:import:run-flow',
-  'duplicate-inbound-match:export',
-  'duplicate-inbound-match:import-files',
-  'file:complete-big-account-selection',
-  'file:export-balance',
-  'file:export-detail',
-  'file:import',
-  'file:save-balance-seed',
-  'gateway-recon:import',
-  'linked-table:import',
-  'monthly-balance:assemble',
-  'monthly-balance:export',
-  'new-account:export',
-  'new-account:generate',
-  'pending:diff:export-aggregate',
-  'pending:diff:export-single',
-  'pending:error:export-report',
-  'pending:import:start',
-  'pending:removed:import',
-  'position-reconciliation:bank:apply-import',
-  'position-reconciliation:bank:export',
-  'position-reconciliation:linked:export',
-  'position-reconciliation:raw:export',
-  'position-reconciliation:run:export',
-  'position-reconciliation:run:export-filtered',
-  'position-reconciliation:run:import-result',
-  'position-reconciliation:source:apply-import',
-  'position-reconciliation:source:export-anomaly',
-  'position-reconciliation:source:prepare-import',
-  'pre-fund-reconciliation:export',
-  'pre-fund-reconciliation:import-bank',
-  'pre-fund-reconciliation:import-mpt',
-  'pre-fund-reconciliation:mpt-errors:export',
-  'pre-fund-reconciliation:mpt-errors:repair',
-  'recon-id-fix:export',
-  'recon-id-fix:import',
-  'scenarios:export-bundle',
-  'scenarios:import-bundle-apply',
-  'template:export-bundle',
-  'template:import',
-  'template:import-bundle',
-  'toolbox:merge',
-  'toolbox:split:export',
-  'vccOpCalc:import:scan',
-  'vccFinancialOp:data-manager:export',
-  'vccFinancialOp:export:import-audit',
-  'vccFinancialOp:export:result',
-  'vccFinancialOp:import:apply'
-]);
+const FILE_CHANNELS = new Set(
+  createTaskPolicyRegistry().list()
+    .filter((policy) => policy.taskKind === 'file')
+    .map((policy) => policy.channel)
+);
 
 const SELECTED_INPUT_CHANNELS = new Set([
   'acquiringBillCurrency:importBill',

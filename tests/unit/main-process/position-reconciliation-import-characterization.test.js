@@ -383,7 +383,11 @@ test.describe('v3.1.3 旧平盘导入 characterization', () => {
     assert.equal(prepared.successCount, 4);
     assert.equal(prepared.confirmationCount, 1);
     const account = prepared.results[4];
-    service.applySourceImport(account.token);
+    service.applySourceImport(
+      account.token,
+      undefined,
+      service.sourceImportArchiveIntent(account.token).map((file) => file.filePath)
+    );
 
     assert.deepEqual(
       service.store.listRawSummary().map((item) => [item.sourceType, item.rowCount]),

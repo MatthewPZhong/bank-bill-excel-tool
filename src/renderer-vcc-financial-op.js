@@ -504,9 +504,6 @@
     if (result.code === 'missing-datasets') {
       return `缺少必需原表：${(result.missing || []).join('、') || '未知'}。请补齐后重新运行。`;
     }
-    if (result.code === 'unresolved-imports') {
-      return `账期内仍有 ${Array.isArray(result.unresolved) ? result.unresolved.length : 0} 条未处理的失败导入记录。请在数据管理的“导入记录”中处理后重新运行。`;
-    }
     if (result.code === 'month-already-archived') {
       return `${result.targetMonth} 已归档，原表和结果均不可再次计算或改写。`;
     }
@@ -1943,14 +1940,6 @@
           <tbody>${records.map((record) => {
             const batchDisplay = String(record.batchId || '').slice(0, 8) || '-';
             const canExportAnomalies = Number(record.anomalyCount) > 0;
-            const canResolve = record.resolutionStatus === 'unresolved';
-            const archiveText = record.archiveState === 'ready'
-              ? '输入文件已存档'
-              : (record.archiveState === 'failed'
-                ? '输入文件待存档（上次失败）'
-                : (record.archiveState === 'unavailable'
-                  ? '历史或失败输入未绑定'
-                  : '输入文件待存档'));
             return `
               <tr>
                 <td>${escapeHtml(record.targetMonth)}</td>
@@ -1960,12 +1949,10 @@
                 <td>${escapeHtml(formatDateTime(record.finishedAt || record.startedAt))}</td>
                 <td>
                   <span class="vcc-fin-op-state" data-state="${statusTone(record.status)}">${escapeHtml(record.statusText)}</span>
-                  <small class="vcc-fin-op-record-archive-state" title="${escapeHtml(archiveText)}">${escapeHtml(archiveText)}</small>
                 </td>
                 <td>
                   ${canExportAnomalies ? `<button class="vcc-fin-op-link-btn" type="button" data-export-anomalies="${record.id}">导出明细</button>` : ''}
-                  ${canResolve ? `<button class="vcc-fin-op-link-btn" type="button" data-resolve-record="${record.id}">标记已处理</button>` : ''}
-                  ${!canExportAnomalies && !canResolve ? '<span>-</span>' : ''}
+                  ${!canExportAnomalies ? '<span>-</span>' : ''}
                 </td>
               </tr>
             `;
@@ -1973,51 +1960,6 @@
         </table>
       </div>
     `;
-  }
-
-  function openResolutionDialog(summary, onResolved) {
-    const modal = mountDialog({
-      title: '标记导入异常已处理',
-      className: 'vcc-fin-op-compact-dialog',
-      bodyHtml: `
-        <p class="vcc-fin-op-message" data-tone="warning">本次失败导入的数据未生效。标记已处理后，计算将继续使用此前已生效的数据；请写明核对结论。</p>
-        <label class="vcc-fin-op-field"><span>处理说明</span><textarea class="vcc-fin-op-input vcc-fin-op-textarea" data-field="note" rows="4" maxlength="500"></textarea></label>
-        <label class="vcc-fin-op-confirm-check"><input type="checkbox" data-field="resolution-confirm">已确认保留当前有效数据集，本次失败导入不参与计算</label>
-        <p class="vcc-fin-op-field-error" data-role="error" hidden></p>
-        <div class="dialog-actions right">
-          <button class="secondary-btn small" type="button" data-action="cancel">取消</button>
-          <button class="primary-btn small" type="button" data-action="confirm">确认已处理</button>
-        </div>
-      `
-    });
-    modal.dialog.querySelector('[data-action="cancel"]').addEventListener('click', modal.close);
-    modal.dialog.querySelector('[data-action="confirm"]').addEventListener('click', async () => {
-      const button = modal.dialog.querySelector('[data-action="confirm"]');
-      const note = modal.dialog.querySelector('[data-field="note"]').value.trim();
-      const confirmed = modal.dialog.querySelector('[data-field="resolution-confirm"]').checked;
-      const error = modal.dialog.querySelector('[data-role="error"]');
-      if (!note || !confirmed) {
-        error.textContent = !note ? '请填写处理说明' : '请确认本次失败导入不参与计算';
-        error.hidden = false;
-        return;
-      }
-      button.disabled = true;
-      try {
-        const result = await api.resolveImportRecord({
-          recordId: summary.id,
-          note,
-          action: 'keep_current_effective_dataset'
-        });
-        if (!result || result.status !== 'success') throw new Error(result && result.message || '处理失败');
-        modal.close();
-        if (typeof onResolved === 'function') await onResolved();
-      } catch (cause) {
-        error.textContent = cause.message || String(cause);
-        error.hidden = false;
-      } finally {
-        button.disabled = false;
-      }
-    });
   }
 
   function openDatasetDeleteDialog({ months, initialMonth = '', onDeleted, previewResult = null }) {
@@ -2426,14 +2368,22 @@
     let months = [];
     let archivedMonths = [];
     const titles = { results: '结果表', checks: '校验表', raw: '导入记录' };
+    const managerSkeletonDelayMs = 150;
+    let managerSkeletonTimer = null;
     const managerState = {
       month: '',
       section: Object.hasOwn(titles, initialSection) ? initialSection : 'results'
     };
+    function clearManagerSkeletonTimer() {
+      if (managerSkeletonTimer === null) return;
+      clearTimeout(managerSkeletonTimer);
+      managerSkeletonTimer = null;
+    }
     const modal = mountDialog({
       title: '数据管理',
       className: 'vcc-fin-op-manager-dialog',
       initialFocusSelector: '[data-field="manager-month"]:not(:disabled)',
+      onClose: clearManagerSkeletonTimer,
       bodyHtml: `
         <div class="vcc-fin-op-manager-shell">
           <div class="position-manager-layout vcc-fin-op-manager-layout">
@@ -2447,17 +2397,12 @@
                 <h3 data-role="manager-title">${escapeHtml(titles[managerState.section])}</h3>
                 <label><span>月份账期</span><select class="vcc-fin-op-input" data-field="manager-month" disabled><option value="">正在读取…</option></select></label>
               </div>
-              <div class="vcc-fin-op-manager-content" data-role="manager-content" aria-busy="true">
-                <div class="vcc-fin-op-manager-skeleton" aria-label="正在读取数据管理内容">
-                  <span></span><span></span><span></span>
-                </div>
-              </div>
+              <div class="vcc-fin-op-manager-content" data-role="manager-content" aria-busy="true"></div>
             </section>
           </div>
           <div class="dialog-actions split vcc-fin-op-manager-footer">
             <div class="vcc-fin-op-manager-footer-left">
               <button class="secondary-btn small is-loading" type="button" data-action="unarchive" disabled title="正在读取已归档结果">正在读取归档…</button>
-              <button class="secondary-btn small" type="button" data-action="optimize-storage" disabled>优化存储</button>
             </div>
             <div class="vcc-fin-op-manager-footer-right">
               <button class="secondary-btn small" type="button" data-action="delete-dataset" disabled>删除</button>
@@ -2472,14 +2417,12 @@
     const managerTitle = modal.dialog.querySelector('[data-role="manager-title"]');
     const monthSelect = modal.dialog.querySelector('[data-field="manager-month"]');
     const unarchiveButton = modal.dialog.querySelector('[data-action="unarchive"]');
-    const optimizeStorageButton = modal.dialog.querySelector('[data-action="optimize-storage"]');
     const deleteButton = modal.dialog.querySelector('[data-action="delete-dataset"]');
     const exportButton = modal.dialog.querySelector('[data-action="export-dataset"]');
     const returnButton = modal.dialog.querySelector('[data-action="return"]');
     let renderVersion = 0;
     let loadVersion = 0;
     let loadingManagerData = true;
-    let storageMigrationActive = false;
 
     attachPreviewStateTracker(modal, () => ({
       modalPresent: Boolean(modal.dialog && modal.dialog.isConnected),
@@ -2503,66 +2446,7 @@
       unarchiveButton.title = loadingManagerData
         ? '正在读取已归档结果'
         : (hasArchives ? '解归档已归档结果' : '暂无已归档结果');
-      optimizeStorageButton.disabled = loadingManagerData
-        || storageMigrationActive
-        || typeof api.inspectStorage !== 'function'
-        || typeof api.migrateStorage !== 'function';
-      returnButton.disabled = storageMigrationActive;
     }
-
-    optimizeStorageButton.addEventListener('click', async () => {
-      if (storageMigrationActive) return;
-      storageMigrationActive = true;
-      optimizeStorageButton.textContent = '正在检查…';
-      updateActionButtons();
-      let unsubscribe = null;
-      try {
-        const inspection = await api.inspectStorage();
-        if (!inspection || inspection.status !== 'success') {
-          throw new Error(inspection && inspection.message || '存储状态检查失败');
-        }
-        if (!inspection.migrationRequired) {
-          showMessage('无需优化', 'VCC 存储已经是最新合同。', 'success');
-          return;
-        }
-        if (typeof api.onStorageMigrationProgress === 'function') {
-          unsubscribe = api.onStorageMigrationProgress((progress = {}) => {
-            if (!optimizeStorageButton.isConnected) return;
-            const labels = {
-              waiting: '等待任务…',
-              checkpoint: '收敛 WAL…',
-              copying: '复制数据…',
-              verifying: '验证守恒…',
-              verified: '验证完成…',
-              switching: '切换数据库…',
-              restarting: '正在重启…',
-              failed: '优化失败'
-            };
-            optimizeStorageButton.textContent = labels[progress.phase] || '正在优化…';
-          });
-        }
-        optimizeStorageButton.textContent = '正在优化…';
-        const result = await api.migrateStorage();
-        if (result && result.status === 'cancelled') return;
-        if (!result || result.status !== 'success') {
-          throw new Error(result && result.message || 'VCC 存储优化失败');
-        }
-        if (result.noChange) {
-          showMessage('无需优化', result.message || 'VCC 存储已经是最新合同。', 'success');
-          return;
-        }
-        setStatus('VCC 存储优化完成，应用正在重启', 'success');
-      } catch (error) {
-        showMessage('优化存储失败', error.message || String(error), 'error');
-      } finally {
-        if (typeof unsubscribe === 'function') unsubscribe();
-        storageMigrationActive = false;
-        if (optimizeStorageButton.isConnected) {
-          optimizeStorageButton.textContent = '优化存储';
-          updateActionButtons();
-        }
-      }
-    });
 
     function renderManagerSkeleton() {
       content.setAttribute('aria-busy', 'true');
@@ -2571,6 +2455,17 @@
           <span></span><span></span><span></span>
         </div>
       `;
+    }
+
+    function scheduleManagerSkeleton(currentLoadVersion) {
+      clearManagerSkeletonTimer();
+      content.setAttribute('aria-busy', 'true');
+      content.innerHTML = '';
+      managerSkeletonTimer = setTimeout(() => {
+        managerSkeletonTimer = null;
+        if (currentLoadVersion !== loadVersion || !loadingManagerData || !content.isConnected) return;
+        renderManagerSkeleton();
+      }, managerSkeletonDelayMs);
     }
 
     function populateMonthSelect(preferredMonth = '') {
@@ -2640,12 +2535,6 @@
               }
             });
           });
-          content.querySelectorAll('[data-resolve-record]').forEach((button) => {
-            button.addEventListener('click', () => {
-              const record = (records || []).find((entry) => Number(entry.id) === Number(button.dataset.resolveRecord));
-              if (record) openResolutionDialog(record, render);
-            });
-          });
           return;
         }
         const overview = previewData
@@ -2680,12 +2569,13 @@
       const currentVersion = ++loadVersion;
       loadingManagerData = true;
       updateActionButtons();
-      renderManagerSkeleton();
+      scheduleManagerSkeleton(currentVersion);
       try {
         const nextData = previewData
           ? [previewData.months || [], previewData.archivedMonths || []]
           : await Promise.all([api.listImportMonths(), loadArchivedResultMonths()]);
         if (currentVersion !== loadVersion) return;
+        clearManagerSkeletonTimer();
         months = Array.isArray(nextData[0]) ? nextData[0] : [];
         archivedMonths = Array.isArray(nextData[1]) ? nextData[1] : [];
         populateMonthSelect(preferredMonth);
@@ -2695,6 +2585,7 @@
         await render();
       } catch (error) {
         if (currentVersion !== loadVersion) return;
+        clearManagerSkeletonTimer();
         months = [];
         archivedMonths = [];
         populateMonthSelect('');
@@ -2956,7 +2847,8 @@
         sourceFileDisplay: 'VCC通道明细_01.xlsx',
         finishedAt: '2026-07-02 09:46:03',
         status: 'failed_conflict',
-        statusText: '失败（幂等冲突）'
+        statusText: '失败（幂等冲突）',
+        anomalyCount: 3
       }, {
         id: 40,
         batchId: '62850680-950d-4abd-babb-400000000001',

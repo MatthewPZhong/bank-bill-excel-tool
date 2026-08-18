@@ -12,6 +12,7 @@ const path = require('node:path');
 const { AppDatabase } = require('../../../src/backend/database');
 const runDataStore = require('../../../src/backend/run-data-store');
 const bizOpReconRunData = require('../../../src/main-process/biz-op-recon-run-data');
+const datasetHeads = require('../../../src/backend/biz-op-recon-db/dataset-head-repository');
 const importsRepo = require('../../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../../src/backend/biz-op-recon-db/run-repository');
@@ -23,6 +24,7 @@ let tmpdir;
 let appDb;
 let mainDb;
 let userDataDir;
+let taskSequence;
 
 test.beforeEach(() => {
   tmpdir = fs.mkdtempSync(path.join(os.tmpdir(), 'bizop-rundata-test-'));
@@ -30,6 +32,7 @@ test.beforeEach(() => {
   appDb = new AppDatabase(path.join(tmpdir, 'tool-data.sqlite'));
   appDb.init();
   mainDb = appDb.db;
+  taskSequence = 0;
 });
 test.afterEach(() => {
   try { mainDb.close(); } catch (_) { /* swallow */ }
@@ -40,12 +43,52 @@ test.afterEach(() => {
 function seedSide(monthKey, { date, t2Date, t1, t2, flow }) {
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   try {
-    if (t2 && t2.length) importsRepo.insertRows(sideDb, t2Date, t2);
-    if (t1 && t1.length) importsRepo.insertRows(sideDb, date, t1);
-    if (flow && flow.length) flowRepo.insertRows(sideDb, date, flow);
+    if (t2 && t2.length) {
+      importsRepo.insertRows(sideDb, t2Date, t2);
+      datasetHeads.writeHead(sideDb, {
+        kind: 'op', dataDate: t2Date, buName: t2[0].bu_name,
+        identity: {
+          datasetId: `${monthKey}:${t2Date}:op`, producerTaskRunId: `${monthKey}:t2-import`,
+          datasetVersion: 1, archiveContractVersion: 1
+        }
+      });
+    }
+    if (t1 && t1.length) {
+      importsRepo.insertRows(sideDb, date, t1);
+      datasetHeads.writeHead(sideDb, {
+        kind: 'op', dataDate: date, buName: t1[0].bu_name,
+        identity: {
+          datasetId: `${monthKey}:${date}:op`, producerTaskRunId: `${monthKey}:t1-import`,
+          datasetVersion: 1, archiveContractVersion: 1
+        }
+      });
+    }
+    if (flow && flow.length) {
+      flowRepo.insertRows(sideDb, date, flow);
+      datasetHeads.writeHead(sideDb, {
+        kind: 'flow', dataDate: date,
+        identity: {
+          datasetId: `${monthKey}:${date}:flow`, producerTaskRunId: `${monthKey}:flow-import`,
+          datasetVersion: 1, archiveContractVersion: 1
+        }
+      });
+    }
   } finally {
     sideDb.close();
   }
+}
+
+function runCurrent({ date, buName }) {
+  const plan = bizOpReconRunData.prepareRunLineage({ userDataDir, date, buName });
+  taskSequence += 1;
+  return bizOpReconRunData.runViaSideDb({
+    userDataDir,
+    mainDb,
+    date,
+    buName,
+    taskRunId: `biz-run-task-${taskSequence}`,
+    expectedDatasets: plan.expectedDatasets
+  });
 }
 
 test('monthOf：date → YYYY-MM', () => {
@@ -58,8 +101,8 @@ test('runViaSideDb inline + 主库镜像 runId 唯一（跨月）+ 主库 4 表 
   const fx5 = shared.buildSingleDayFixture('2026-05-15', '2026-05-14', 'BU-A');
   seedSide('2026-03', fx3);
   seedSide('2026-05', fx5);
-  const r3 = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-03-15', buName: 'BU-A' });
-  const r5 = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-05-15', buName: 'BU-A' });
+  const r3 = runCurrent({ date: '2026-03-15', buName: 'BU-A' });
+  const r5 = runCurrent({ date: '2026-05-15', buName: 'BU-A' });
   // 两月侧库各自 run id=1，主库镜像 id 递增 → runId 不同。
   assert.notEqual(r3.runId, r5.runId, '跨月 runId 不同（主库镜像 id）');
   // 主库 4 表 0 行。
@@ -76,8 +119,8 @@ test('导出 openExportContextByRun：主库镜像 runId → 侧库内 run id �
   const fx5 = shared.buildSingleDayFixture('2026-05-15', '2026-05-14', 'BU-A');
   seedSide('2026-03', fx);
   seedSide('2026-05', fx5);
-  bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-03-15', buName: 'BU-A' });
-  const r5 = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-05-15', buName: 'BU-A' });
+  runCurrent({ date: '2026-03-15', buName: 'BU-A' });
+  const r5 = runCurrent({ date: '2026-05-15', buName: 'BU-A' });
   // r5 主库镜像 id=2，但 5 月侧库内 run id=1 → exportRunId 必须是侧库 id（能查到 diff）。
   const ctx = bizOpReconRunData.openExportContextByRun({ userDataDir, mainDb, runId: r5.runId });
   try {
@@ -94,8 +137,8 @@ test('🔴 codex P2：buildRangeExportDb date-range 跨月导出不抛（SIDE_DB
   const fx5 = shared.buildSingleDayFixture('2026-05-15', '2026-05-14', 'BU-A');
   seedSide('2026-03', fx3);
   seedSide('2026-05', fx5);
-  bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-03-15', buName: 'BU-A' });
-  bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-05-15', buName: 'BU-A' });
+  runCurrent({ date: '2026-03-15', buName: 'BU-A' });
+  runCurrent({ date: '2026-05-15', buName: 'BU-A' });
   // 修复前：memDb.exec(runDataStore.SIDE_DB_DDL_BIZ_OP) 中常量未导出 = undefined → exec 抛错。
   let memDb;
   assert.doesNotThrow(() => {
@@ -114,6 +157,30 @@ test('🔴 codex P2：buildRangeExportDb date-range 跨月导出不抛（SIDE_DB
   }
 });
 
+test('frozen single/range locator 缺 exact source row 时 fail-closed，不生成静默少行数据', () => {
+  const fx = shared.buildSingleDayFixture('2026-03-15', '2026-03-14', 'BU-A');
+  seedSide('2026-03', fx);
+  const current = runCurrent({ date: '2026-03-15', buName: 'BU-A' });
+  const locator = bizOpReconRunData.freezeRunLocator({
+    userDataDir,
+    mainDb,
+    runId: current.runId
+  });
+  const sideDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-03');
+  try {
+    const diff = runRepo.getDiffRowsByRun(sideDb, locator.sideRunId)[0];
+    assert.ok(diff && diff.source_row_id);
+    sideDb.prepare('DELETE FROM biz_op_recon_imports WHERE id = ?').run(diff.source_row_id);
+  } finally {
+    sideDb.close();
+  }
+  assert.throws(() => bizOpReconRunData.buildFrozenRangeExportDb({
+    userDataDir,
+    mainDb,
+    runLocators: [locator]
+  }), /缺少 source row/);
+});
+
 test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 T-2 冗余副本', async () => {
   const D = '2026-06-30';
   const monthKey = '2026-06';
@@ -123,9 +190,16 @@ test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 
   const curSide = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   try { importsRepo.insertRows(curSide, D, [dRow]); } finally { curSide.close(); }
   // mock worker：返回 success + buName，触发编排层月末跨月补清/冗余。
-  const mockWorker = async () => ({ status: 'success', buName: 'BU-C', validCount: 1 });
+  const mockWorker = async (db, { datasetSeed }) => {
+    datasetHeads.writeHead(db, {
+      kind: 'op', dataDate: D, buName: 'BU-C',
+      identity: datasetHeads.nextDatasetIdentity(null, datasetSeed.producerTaskRunId, () => datasetSeed.datasetId)
+    });
+    return { status: 'success', buName: 'BU-C', validCount: 1 };
+  };
   const res = await bizOpReconRunData.runBizOpImport({
-    userDataDir, runBizOpImportViaWorker: mockWorker, params: { date: D, filePath: 'x.xlsx' }
+    userDataDir, runBizOpImportViaWorker: mockWorker,
+    params: { date: D, filePath: 'x.xlsx', batchContext: { taskRunId: 'biz-import-task' } }
   });
   assert.equal(res.status, 'success');
   // 下月侧库含 D 的 T-2 冗余副本。
@@ -144,7 +218,8 @@ test('月末导入 rejected → 不补清不冗余（未改数据）', async () 
   const nextMonth = '2026-07';
   const mockWorker = async () => ({ status: 'rejected', errorReportPath: null, errorRows: [] });
   await bizOpReconRunData.runBizOpImport({
-    userDataDir, runBizOpImportViaWorker: mockWorker, params: { date: D, filePath: 'x.xlsx' }
+    userDataDir, runBizOpImportViaWorker: mockWorker,
+    params: { date: D, filePath: 'x.xlsx', batchContext: { taskRunId: 'biz-import-task' } }
   });
   // 下月侧库不应被建（无冗余写入）。注意 runBizOpImport 会 ensureSideDbExists(month(D))，但不碰下月。
   assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, nextMonth), false, 'rejected 不建下月侧库');
@@ -163,7 +238,11 @@ test('月初对账单库自洽：T-2 冗余副本在当月侧库 → 对账读�
     importsRepo.insertRows(sep, monthStart, [t1Row]);
     flowRepo.insertRows(sep, monthStart, [flowRow]);
   } finally { sep.close(); }
-  const r = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: monthStart, buName: 'BU-D' });
+  const plan = bizOpReconRunData.prepareRunLineage({ userDataDir, date: monthStart, buName: 'BU-D' });
+  const r = bizOpReconRunData.runViaSideDb({
+    userDataDir, mainDb, date: monthStart, buName: 'BU-D',
+    taskRunId: 'biz-month-start-run', expectedDatasets: plan.expectedDatasets
+  });
   assert.equal(r.stats.t2OpTotal, 1, '读到 T-2 冗余副本');
   assert.equal(r.stats.amountDiffCount, 0, 'T-2 副本正确参与计算 → 无差异');
 });
@@ -199,7 +278,7 @@ test('孤儿兜底①：空壳删 / 有 imports 保留；②有镜像无文件�
   // 有 imports + run 镜像。
   const fx = shared.buildSingleDayFixture('2026-03-15', '2026-03-14', 'BU-A');
   seedSide('2026-03', fx);
-  const r = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: '2026-03-15', buName: 'BU-A' });
+  const r = runCurrent({ date: '2026-03-15', buName: 'BU-A' });
   // 删 3 月侧库文件（模拟用户删）→ 有镜像无文件。
   runDataStore.deleteSideDb(userDataDir, MODULE, '2026-03');
   const stats = bizOpReconRunData.reconcileOrphans({ userDataDir, mainDb });

@@ -20,6 +20,14 @@ function createHarness() {
       calls.push({ type: 'persist-intent', payload });
       return { ok: true, status: 'persisted', intent: payload };
     },
+    async replayTaskFlowBindIntents(identity) {
+      calls.push({ type: 'replay-task', identity });
+      return { ok: true, replayed: 0 };
+    },
+    async persistTaskFlowBindIntent(payload) {
+      calls.push({ type: 'persist-task-intent', payload });
+      return { ok: true, status: 'persisted', intent: payload };
+    },
     async findFlowAnchor(identity) {
       calls.push({ type: 'find', identity });
       return { ok: true, anchor: anchors.get(JSON.stringify(identity)) || null };
@@ -129,7 +137,9 @@ test('锚点冲突 fail-closed，不回退新流程', async () => {
   const resolver = createBusinessFlowResolver({
     archiveService: {
       async replayFlowBindIntents() { return { ok: true, replayed: 0 }; },
+      async replayTaskFlowBindIntents() { return { ok: true, replayed: 0 }; },
       async persistFlowBindIntent() { throw new Error('unused'); },
+      async persistTaskFlowBindIntent() { throw new Error('unused'); },
       async findFlowAnchor() { return { ok: false, message: 'db unavailable' }; },
       async bindFlowAnchor() { throw new Error('unused'); }
     },

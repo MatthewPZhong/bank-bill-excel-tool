@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const rds = require('../../../src/backend/run-data-store');
 
@@ -169,13 +170,14 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
     assert.equal(rds.MODULE_DUPLICATE_INBOUND_MATCH, 'duplicate-inbound-match');
   });
 
-  test('biz-op 侧库 DDL 建 4 表（imports/flow_imports/runs/diff_rows）', () => {
+  test('biz-op 侧库 DDL 建业务表与 dataset heads', () => {
     const db = rds.openSideDb(tmpdir, rds.MODULE_BIZ_OP, '2026-03');
     try {
       const tables = db.prepare(
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'biz_op_recon_%' ORDER BY name"
       ).all().map((r) => r.name);
       assert.deepEqual(tables, [
+        'biz_op_recon_dataset_heads',
         'biz_op_recon_diff_rows',
         'biz_op_recon_flow_imports',
         'biz_op_recon_imports',
@@ -184,6 +186,7 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
       // runs 含 t2_anomaly_account_count（新库建表即含）。
       const cols = db.prepare("PRAGMA table_info(biz_op_recon_runs)").all().map((c) => c.name);
       assert.ok(cols.includes('t2_anomaly_account_count'), 'runs 含 t2_anomaly_account_count');
+      assert.ok(cols.includes('archive_task_run_id'), 'runs 含 Archive receipt');
       // diff_rows FK 引用 runs（无 CASCADE，与主库一致）。
       const fks = db.prepare("PRAGMA foreign_key_list('biz_op_recon_diff_rows')").all();
       assert.equal(fks.length, 1, 'diff_rows 1 个 FK（runs）');
@@ -191,6 +194,48 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
       assert.equal(fks[0].on_delete, 'NO ACTION', 'biz-op diff_rows FK 无 CASCADE（与主库 byte-for-byte）');
     } finally {
       db.close();
+    }
+  });
+
+  test('旧 Biz OP side DB 先 additive migrate receipt 列，再创建新索引', () => {
+    const filePath = rds.sideDbPath(tmpdir, rds.MODULE_BIZ_OP, '2026-04');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const legacyDb = new DatabaseSync(filePath);
+    legacyDb.exec(`
+      CREATE TABLE biz_op_recon_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        data_date TEXT NOT NULL,
+        bu_name TEXT NOT NULL,
+        run_at TEXT NOT NULL DEFAULT (datetime('now')),
+        status TEXT NOT NULL DEFAULT 'success',
+        t1_op_total INTEGER NOT NULL DEFAULT 0,
+        t2_op_total INTEGER NOT NULL DEFAULT 0,
+        flow_total INTEGER NOT NULL DEFAULT 0,
+        amount_diff_count INTEGER NOT NULL DEFAULT 0,
+        multi_op_account_count INTEGER NOT NULL DEFAULT 0,
+        t2_anomaly_account_count INTEGER NOT NULL DEFAULT 0,
+        t1_not_t2_count INTEGER NOT NULL DEFAULT 0,
+        t2_not_t1_count INTEGER NOT NULL DEFAULT 0,
+        export_path TEXT
+      );
+      INSERT INTO biz_op_recon_runs (data_date, bu_name) VALUES ('2026-04-01', 'BU-A');
+    `);
+    legacyDb.close();
+
+    const upgraded = rds.openSideDb(tmpdir, rds.MODULE_BIZ_OP, '2026-04');
+    try {
+      const columns = upgraded.prepare('PRAGMA table_info(biz_op_recon_runs)').all()
+        .map((column) => column.name);
+      assert.ok(columns.includes('archive_contract_version'));
+      assert.ok(columns.includes('archive_task_run_id'));
+      assert.ok(columns.includes('archive_terminal_ack_at'));
+      assert.ok(upgraded.prepare(`SELECT 1 FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_biz_op_runs_archive_task'`).get());
+      const historical = upgraded.prepare('SELECT * FROM biz_op_recon_runs WHERE id = 1').get();
+      assert.equal(historical.archive_contract_version, 0);
+      assert.equal(historical.archive_task_run_id, null);
+    } finally {
+      upgraded.close();
     }
   });
 
@@ -210,6 +255,94 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
       assert.equal(bankCols, 48, 'bank_imports 列数（44 数据 + id/year_month/row_index/imported_at = 48）');
     } finally {
       db.close();
+    }
+  });
+
+  test('旧 Pre-fund MPT 侧库升级后逐批回填 canonical v0 dataset UUID', () => {
+    const module = rds.MODULE_PRE_FUND_RECONCILIATION;
+    const filePath = rds.sideDbPath(tmpdir, module, '2026-05');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const legacyDb = new DatabaseSync(filePath);
+    legacyDb.exec(`
+      CREATE TABLE pre_fund_reconciliation_gateway_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        source_type TEXT NOT NULL,
+        source_batch TEXT NOT NULL,
+        source_date TEXT NOT NULL,
+        source_file_name TEXT NOT NULL,
+        source_file_sequence TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        declared_row_count INTEGER NOT NULL,
+        row_count INTEGER NOT NULL,
+        excluded_row_count INTEGER NOT NULL DEFAULT 0,
+        import_mode TEXT NOT NULL DEFAULT 'strict',
+        imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (source_type, source_batch),
+        UNIQUE (source_file_name)
+      );
+      INSERT INTO pre_fund_reconciliation_gateway_batches
+        (source_type, source_batch, source_date, source_file_name,
+         source_file_sequence, content_hash, declared_row_count, row_count)
+      VALUES
+        ('inbound', 'B-1', '2026-05-01', 'a.txt', '1', 'hash-a', 1, 1),
+        ('outbound', 'B-2', '2026-05-01', 'b.txt', '2', 'hash-b', 1, 1);
+    `);
+    legacyDb.close();
+
+    const upgraded = rds.openSideDb(tmpdir, module, '2026-05');
+    try {
+      const rows = upgraded.prepare(`
+        SELECT dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+        FROM pre_fund_reconciliation_gateway_batches ORDER BY id
+      `).all();
+      assert.equal(rows.length, 2);
+      assert.ok(rows.every((row) => /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(row.dataset_id)));
+      assert.notEqual(rows[0].dataset_id, rows[1].dataset_id);
+      assert.ok(rows.every((row) => row.producer_task_run_id === null
+        && row.dataset_version === 0
+        && row.archive_contract_version === 0));
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  test('旧 Pre-fund results 侧库先 additive migrate receipt 列，再创建唯一索引', () => {
+    const module = rds.MODULE_PRE_FUND_RECONCILIATION_RESULTS;
+    const filePath = rds.sideDbPath(tmpdir, module, '2026-06');
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const legacyDb = new DatabaseSync(filePath);
+    legacyDb.exec(`
+      CREATE TABLE pre_fund_reconciliation_runs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scenario TEXT NOT NULL,
+        snapshot_json TEXT NOT NULL,
+        bank_files_json TEXT NOT NULL,
+        status TEXT NOT NULL,
+        summary_json TEXT NOT NULL DEFAULT '{}',
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finished_at TEXT
+      );
+      INSERT INTO pre_fund_reconciliation_runs
+        (scenario, snapshot_json, bank_files_json, status)
+      VALUES ('missing-gateway', '{}', '[]', 'success');
+    `);
+    legacyDb.close();
+
+    const upgraded = rds.openSideDb(tmpdir, module, '2026-06');
+    try {
+      const columns = upgraded.prepare('PRAGMA table_info(pre_fund_reconciliation_runs)').all()
+        .map((column) => column.name);
+      assert.ok(columns.includes('archive_contract_version'));
+      assert.ok(columns.includes('archive_task_run_id'));
+      assert.ok(columns.includes('archive_terminal_ack_at'));
+      assert.ok(upgraded.prepare(`SELECT 1 FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_pre_fund_runs_archive_task'`).get());
+      const historical = upgraded.prepare('SELECT * FROM pre_fund_reconciliation_runs WHERE id = 1').get();
+      assert.equal(historical.archive_contract_version, 0);
+      assert.equal(historical.archive_task_run_id, null);
+    } finally {
+      upgraded.close();
     }
   });
 

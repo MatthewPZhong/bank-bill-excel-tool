@@ -249,7 +249,7 @@ test.describe('DuplicateInboundMatchService', () => {
         clientId: 'IGNORED-CLIENT-B', accId: 'IGNORED-ACCOUNT-B'
       })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
 
     const imported = await service.importFiles([bankFile, documentFile]);
     assert.equal(imported.bank.rowCount, 6);
@@ -326,7 +326,7 @@ test.describe('DuplicateInboundMatchService', () => {
         reconId: 'DOCUMENT-MISSING-RECON-2', orderId: 'ORDER-NOT-FOUND', batchSeq: '2'
       })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
 
     const result = await service.run();
@@ -467,7 +467,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'SUCCESS-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'SUCCESS-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     await service.run();
     assert.equal(service.status().canExport, true);
@@ -487,7 +487,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'SUCCESS-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'SUCCESS-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     await service.run();
     assert.equal(service.status().canExport, true);
@@ -509,7 +509,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'MIRROR-IMPORT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'MIRROR-IMPORT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     await service.run();
 
@@ -545,7 +545,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'MIRROR-RUN-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'MIRROR-RUN-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     const completed = await service.run();
     const oldSideRunId = service.lastRun.sideRunId;
@@ -598,14 +598,14 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'SUCCESS-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'SUCCESS-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(firstMpt);
+    await service.tempStore.importLegacyFile(firstMpt);
     await service.importFiles([bankFile, documentFile]);
     await service.run();
     assert.equal(service.status().canExport, true);
 
     const outboundMpt = path.join(userDataDir, 'MPT_OUTBOUND_GATEWAY_20260714001.txt');
     writeOutboundMptFile(outboundMpt, '20260714', [outboundMptRow()]);
-    await service.tempStore.importFile(outboundMpt);
+    await service.tempStore.importLegacyFile(outboundMpt);
     assert.equal(service.status().run.stale, false);
     assert.equal(service.status().canExport, true);
 
@@ -617,7 +617,7 @@ test.describe('DuplicateInboundMatchService', () => {
         reconId: 'UNRELATED', batchSeq: '1'
       })
     ]);
-    await service.tempStore.importFile(secondMpt);
+    await service.tempStore.importLegacyFile(secondMpt);
     const status = service.status();
     assert.equal(status.run.stale, true);
     assert.equal(status.canExport, false);
@@ -634,7 +634,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'SIDE-RUN-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'SIDE-RUN-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     const completed = await service.run();
 
@@ -686,7 +686,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'MISSING-RESULT-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'MISSING-RESULT-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(mptFile);
+    await service.tempStore.importLegacyFile(mptFile);
     await service.importFiles([bankFile, documentFile]);
     const completed = await service.run();
 
@@ -726,7 +726,7 @@ test.describe('DuplicateInboundMatchService', () => {
       inboundMptRow({ reconId: 'SUCCESS-RECON-1', orderId: 'ORDER-1', batchSeq: '1' }),
       inboundMptRow({ reconId: 'SUCCESS-RECON-2', orderId: 'ORDER-2', batchSeq: '2' })
     ]);
-    await service.tempStore.importFile(firstMpt);
+    await service.tempStore.importLegacyFile(firstMpt);
     await service.importFiles([bankFile, documentFile]);
     await service.run();
     assert.equal(service.status().canExport, true);
@@ -735,7 +735,7 @@ test.describe('DuplicateInboundMatchService', () => {
     writeMptFile(replacement, '20260714', [
       inboundMptRow({ reconId: 'UNRELATED', orderId: 'REPLACEMENT', batchSeq: '1' })
     ]);
-    const replaced = await service.tempStore.importFile(replacement);
+    const replaced = await service.tempStore.importLegacyFile(replacement);
     assert.equal(replaced.status, 'replaced');
     assert.equal(service.status().run.stale, true);
     assert.equal(service.status().canExport, false);

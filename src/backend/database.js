@@ -720,7 +720,7 @@ class AppDatabase {
 
   // v3.1.6：VCC财务OP校验表（与旧 VCC业务OP计算完全隔离）。
   ensureVccFinancialOpTablesSupport() {
-    return ensureVccFinancialOpTablesSupport(this.db);
+    return ensureVccFinancialOpTablesSupport(this.db, { autoUpgradeEmptyV1: true });
   }
 
   // v2.1.3 T1：业务OP数据核对模块 4 张表（imports / flow_imports / runs / diff_rows）
@@ -1384,6 +1384,10 @@ class AppDatabase {
     return linkedTableRepository.iterateGatewayBillRows(this.db);
   }
 
+  listGatewayBillSourceTags() {
+    return linkedTableRepository.listGatewayBillSourceTags(this.db);
+  }
+
   getGatewayBillRawJsonById(rowId) {
     return linkedTableRepository.getGatewayBillRawJsonById(this.db, rowId);
   }
@@ -1526,6 +1530,10 @@ class AppDatabase {
     return preFundReconciliationRunRepository.createRunMirror(this.db, payload);
   }
 
+  createLegacyPreFundReconciliationRunMirror(payload) {
+    return preFundReconciliationRunRepository.createLegacyRunMirror(this.db, payload);
+  }
+
   finishPreFundReconciliationRunMirror(mirrorId, summary) {
     return preFundReconciliationRunRepository.finishRunMirror(this.db, mirrorId, summary);
   }
@@ -1545,6 +1553,18 @@ class AppDatabase {
 
   getPreFundReconciliationRunMirror(mirrorId) {
     return preFundReconciliationRunRepository.getRunMirror(this.db, mirrorId);
+  }
+
+  getPreFundReconciliationRunMirrorByTaskRun(taskRunId) {
+    return preFundReconciliationRunRepository.getRunMirrorByArchiveTaskRunId(this.db, taskRunId);
+  }
+
+  acknowledgePreFundReconciliationRunMirror(mirrorId, taskRunId) {
+    return preFundReconciliationRunRepository.acknowledgeArchiveTerminal(
+      this.db,
+      mirrorId,
+      taskRunId
+    );
   }
 
   listPreFundReconciliationRunMirrors() {

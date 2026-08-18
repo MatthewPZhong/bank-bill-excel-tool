@@ -248,6 +248,88 @@ test('任务恢复复用原批次身份，running/failed/cancelled 可重开而 
   }
 });
 
+test('新 File Task 仅按 exact owner + manifest 将 interrupted 原子恢复，终态不复活且不发新号', () => {
+  const { db, repository } = createFixture();
+  try {
+    const taskRun = repository.beginTaskRun({
+      taskRunId: 'file-task-recovery-1',
+      moduleId: 'acquiring-bill-currency',
+      taskKey: 'acquiringBillCurrency:run:resume',
+      operationKey: 'acquiring-resume:1',
+      parentRunId: 'parent-acquiring-1'
+    }).taskRun;
+    const manifest = {
+      version: 1,
+      identity: 'manifest-acquiring-1',
+      inputs: [],
+      outputs: [{
+        artifactKey: 'output-key-1',
+        direction: 'output',
+        role: 'output',
+        sourceOperation: 'acquiringBillCurrency:run',
+        originalName: 'diff.xlsx',
+        filePath: '/private/diff.xlsx',
+        aliasKey: '/private/diff.xlsx',
+        targetSnapshot: { existed: false, snapshot: null }
+      }]
+    };
+    const reserved = repository.reserveFileTaskBatch({
+      taskRun,
+      manifest,
+      moduleCode: 'ACQUIRING',
+      moduleName: '收单单据币种校验',
+      metadata: {}
+    });
+    const context = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: reserved.batch.taskRunId,
+      taskKey: reserved.batch.taskKey,
+      moduleId: reserved.batch.moduleId,
+      parentRunId: reserved.batch.parentRunId,
+      operationKey: reserved.batch.operationKey
+    };
+    const issuanceBefore = repository.getLatestIssuedBatch();
+
+    const preStartContinuation = repository.beginFileTaskRecovery(context, {
+      manifestIdentity: manifest.identity
+    });
+    assert.equal(preStartContinuation.status, 'unchanged');
+    assert.equal(preStartContinuation.taskRun.status, 'prepared');
+    assert.equal(preStartContinuation.batch.taskStatus, 'reserved');
+    repository.startFileTask(taskRun.taskRunId, reserved.batch.id);
+
+    repository.markInterruptedTasks();
+    const conflict = repository.beginFileTaskRecovery(context, {
+      manifestIdentity: 'forged-manifest'
+    });
+    assert.equal(conflict.status, 'manifest-conflict');
+    assert.equal(repository.getTaskRun(taskRun.taskRunId).status, 'interrupted');
+
+    const recovered = repository.beginFileTaskRecovery(context, {
+      manifestIdentity: manifest.identity
+    });
+    assert.equal(recovered.status, 'reopened');
+    assert.equal(recovered.taskRun.status, 'running');
+    assert.equal(recovered.batch.taskStatus, 'running');
+    assert.equal(repository.getLatestIssuedBatch().batchId, issuanceBefore.batchId);
+    assert.equal(repository.listBatches().length, 1);
+
+    repository.finishFileTask(taskRun.taskRunId, reserved.batch.id, {
+      taskStatus: 'cancelled',
+      code: 'ARCHIVE_TASK_CANCELLED',
+      message: 'cancelled'
+    });
+    const terminal = repository.beginFileTaskRecovery(context, {
+      manifestIdentity: manifest.identity
+    });
+    assert.equal(terminal.status, 'status-conflict');
+    assert.equal(terminal.taskRun.status, 'cancelled');
+  } finally {
+    db.close();
+  }
+});
+
 test('启动恢复把崩溃遗留 reserved/running 批次终结为 failed，终态批次保持不变', () => {
   const { db, repository } = createFixture();
   try {
@@ -280,7 +362,11 @@ test('启动恢复把崩溃遗留 reserved/running 批次终结为 failed，终�
       assert.ok(batch.finishedAt);
     }
     assert.equal(repository.getBatch(succeeded.id).taskStatus, 'succeeded');
-    assert.deepEqual(repository.markInterruptedTasks(), { taskCount: 0, batchIds: [] });
+    assert.deepEqual(repository.markInterruptedTasks(), {
+      taskCount: 0,
+      batchIds: [],
+      taskRunIds: []
+    });
   } finally {
     db.close();
   }
@@ -380,7 +466,11 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
         'archive_daily_sequences',
         'archive_flow_anchors',
         'archive_flow_bind_intents',
-        'archive_operation_issuances'
+        'archive_maintenance_audits',
+        'archive_operation_issuances',
+        'archive_task_flow_bind_intents',
+        'archive_task_lineage',
+        'archive_task_runs'
       ]
     );
     const artifactColumns = new Set(
@@ -390,6 +480,23 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
     assert.equal(artifactColumns.has('materialization_error_message'), true);
     assert.equal(artifactColumns.has('materialization_failed_at'), true);
     assert.equal(artifactColumns.has('materialization_status'), false);
+    const taskRunIndex = db.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_archive_batches_task_run'
+    `).get();
+    assert.match(taskRunIndex.sql, /ON archive_batches\(task_run_id\)/);
+    assert.match(taskRunIndex.sql, /task_run_id IS NOT NULL AND task_run_id <> ''/);
+    const taskRunLookupPlan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT id FROM archive_batches
+      WHERE task_run_id IS NOT NULL
+        AND task_run_id <> ''
+        AND task_run_id = ?
+    `).all('missing-task-run');
+    assert.equal(
+      taskRunLookupPlan.some((row) => String(row.detail).includes('idx_archive_batches_task_run')),
+      true
+    );
   } finally {
     db.close();
   }

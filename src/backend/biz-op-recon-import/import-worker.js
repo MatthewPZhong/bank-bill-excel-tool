@@ -34,6 +34,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const { ensureBizOpReconTablesSupport } = require('../biz-op-recon-db/migrations');
 const importsRepository = require('../biz-op-recon-db/imports-repository');
+const datasetHeadRepository = require('../biz-op-recon-db/dataset-head-repository');
 const flowImportsRepository = require('../biz-op-recon-db/flow-imports-repository');
 const runRepository = require('../biz-op-recon-db/run-repository');
 const { validateBizOpRow, validateFlowRow } = require('./validator');
@@ -121,12 +122,13 @@ function openDb(dbPath) {
 //   BEGIN → 流式读：第一个数据行定 firstBu → 事务内执行 clear（date,BU）+（D+1,BU）+ clearByDateBu →
 //   逐行（含首行）BU 一致 + validateBizOpRow，累积 errorRows，通过的行 bu_name=firstBu 后 INSERT →
 //   流完：errorRows 非空 → ROLLBACK + emit rejected（不入任何行）/ 全通过 → COMMIT + emit complete。
-async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
+async function runBizOpImport(db, { date, filePath, maxRowErrors, datasetSeed }) {
   let firstBu = null;
   let buNormalized = null;
   let cleared = false;
   let dataRowCount = 0;
   let insertedCount = 0;
+  let datasetIdentity = null;
   let firstEmptyRowIndex = 0;
   let firstBuEmpty = false;      // 首行 bu_name 空（与旧同步语义对齐：只此一条错误，不写报告，不校验后续行）
   let insertFatal = null;        // I1：流式中途 clear/INSERT 等事务内 DB 写失败（系统错，区别于表头/读取错）
@@ -156,6 +158,11 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
             return;
           }
           buNormalized = normalizeBu(firstBu);
+          datasetIdentity = datasetHeadRepository.nextDatasetIdentity(
+            datasetHeadRepository.getHead(db, 'op', date, firstBu),
+            datasetSeed.producerTaskRunId,
+            () => datasetSeed.datasetId
+          );
           // 资金红线 ② v2.1.3 PR #45 round 4 P1 fix：同清 (date,BU) + (D+1,BU)
           // I1（β.2 review fix）：clear 是事务内 DB 写，可能抛 SQLITE_BUSY 等系统错。单独 try 标 insertFatal，
           //   否则异常冒泡到流式 reader 会被 wrapReadError 包成带 header-mismatch code 的 FileValidationError，
@@ -262,6 +269,9 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
 
   // 全部通过 → COMMIT（cleared 必为 true，因为 dataRowCount>0 且首行非空已 clear）
   void cleared;
+  datasetHeadRepository.writeHead(db, {
+    kind: 'op', dataDate: date, buName: firstBu, identity: datasetIdentity
+  });
   db.exec('COMMIT');
   return emitAndExit({ type: 'complete', status: 'success', buName: firstBu, validCount: insertedCount }, 0);
 }
@@ -278,7 +288,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors }) {
 //   若循环调用本函数（每文件各跑一次 BEGIN+clear+COMMIT），第 2 个文件的 clearByDate 会清掉第 1 个
 //   文件已插入的行 → 静默丢数据（资金事故）。故必须单事务遍历所有文件。
 //   单文件场景（filePaths 长度 1）byte-for-byte 等价旧单文件行为（clear 一次、行数一致、错误报告一致）。
-async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
+async function runFlowImport(db, { date, filePaths, maxRowErrors, datasetSeed }) {
   // 兼容防御：仅传 filePath（旧单数）时归一为单元素数组（不应发生，入口已校验 filePaths）。
   const files = Array.isArray(filePaths) ? filePaths : [];
   const multiFile = files.length > 1;   // 多文件才在错误原因里标注来源文件名（单文件保回归）
@@ -288,6 +298,7 @@ async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
   let cleared = false;           // 🔴 函数级：跨所有文件只 clear 一次（首个数据行触发）
   let insertFatal = null;        // I1：流式中途 clear/INSERT 事务内 DB 写失败（系统错）
   let progressBase = 0;          // 已读完文件的累计数据行数（多文件进度全局累加，避免切文件时倒退）
+  let datasetIdentity = null;
   const errorRows = [];
   let rowErrorTotal = 0;
 
@@ -295,6 +306,13 @@ async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
 
   db.exec('BEGIN');
   try {
+    const previous = datasetHeadRepository.getHead(db, 'flow', date);
+    datasetHeadRepository.assertExpectedHead(previous, datasetSeed);
+    datasetIdentity = datasetHeadRepository.nextDatasetIdentity(
+      previous,
+      datasetSeed.producerTaskRunId,
+      () => datasetSeed.datasetId
+    );
     for (const filePath of files) {
       const sourceName = path.basename(filePath);   // 来源文件名（多文件错误定位用）
       const fileMeta = await streamFlowFile(filePath, {
@@ -381,6 +399,9 @@ async function runFlowImport(db, { date, filePaths, maxRowErrors }) {
   }
 
   void cleared;
+  datasetHeadRepository.writeHead(db, {
+    kind: 'flow', dataDate: date, identity: datasetIdentity
+  });
   db.exec('COMMIT');
   return emitAndExit({ type: 'complete', status: 'success', totalCount: insertedCount, validCount: insertedCount }, 0);
 }
@@ -438,6 +459,12 @@ async function main() {
   if (kind === 'flow' && (!filePaths || filePaths.length === 0)) {
     return emitAndExit({ type: 'fatal', message: 'jobMeta 缺字段（flow 需非空 filePaths 数组）' }, 2);
   }
+  const datasetSeed = kind === 'bizOp'
+    ? datasetHeadRepository.freezeDatasetSeedV1(job.datasetSeed)
+    : null;
+  const flowDatasetSeed = kind === 'flow'
+    ? datasetHeadRepository.freezeFlowDatasetSeedV1(job.datasetSeed)
+    : null;
 
   let db;
   try {
@@ -448,9 +475,9 @@ async function main() {
 
   try {
     if (kind === 'bizOp') {
-      await runBizOpImport(db, { date, filePath, maxRowErrors });
+      await runBizOpImport(db, { date, filePath, maxRowErrors, datasetSeed });
     } else {
-      await runFlowImport(db, { date, filePaths, maxRowErrors });
+      await runFlowImport(db, { date, filePaths, maxRowErrors, datasetSeed: flowDatasetSeed });
     }
     // runXxxImport 内各路径均已 emitAndExit（调度退出）；此处自然返回，finally 关库后事件循环 drain 即退出
   } catch (err) {

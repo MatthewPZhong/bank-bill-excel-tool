@@ -24,19 +24,33 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.10 版本号与三份用户文档保持正式发布状态和三项门禁结论', () => {
+test('v3.1.11 版本号与三份用户文档保持未发布候选状态', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
 
-  assert.equal(packageJson.version, '3.1.10');
-  assert.equal(packageLock.version, '3.1.10');
-  assert.equal(packageLock.packages[''].version, '3.1.10');
+  assert.equal(packageJson.version, '3.1.11');
+  assert.equal(packageLock.version, '3.1.11');
+  assert.equal(packageLock.packages[''].version, '3.1.11');
+  assert.match(changelog, /^## 3\.1\.11 - 未发布$/m);
+  assert.match(history, /^## v3\.1\.11（未发布）$/m);
+  assert.match(guide, /^版本：`v3\.1\.11`$/m);
+  for (const document of [changelog, history, guide]) {
+    assert.match(document, /真实文件证据|非空文件清单|有文件才建批次/);
+    assert.match(document, /不占用批次号|不推进序号|不推进批次号/);
+    assert.match(document, /未发布/);
+  }
+});
+
+test('v3.1.10 三份用户文档保持正式发布历史和三项门禁结论', () => {
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+
   assert.match(changelog, /^## 3\.1\.10 - 2026-08-17$/m);
   assert.match(history, /^## v3\.1\.10（2026-08-17）$/m);
-  assert.match(guide, /^版本：`v3\.1\.10`$/m);
 
   for (const document of [changelog, history, guide]) {
     assert.match(document, /已于 2026-08-17[\s\S]{0,80}正式发布/);
@@ -51,15 +65,6 @@ test('v3.1.10 版本号与三份用户文档保持正式发布状态和三项门
     assert.match(document, /annotated tag/);
     assert.match(document, /latest stable Release/);
     assert.match(document, /四项公开资产/);
-    const currentSectionEnd = document.indexOf(
-      document === changelog
-        ? '## 3.1.9'
-        : document === history
-          ? '## v3.1.9'
-          : '\n---'
-    );
-    const currentSection = document.slice(0, currentSectionEnd);
-    assert.doesNotMatch(currentSection, /当前为发布候选|尚未创建正式 tag|不得创建正式 tag\/Release|三项.*未关闭/);
   }
 });
 

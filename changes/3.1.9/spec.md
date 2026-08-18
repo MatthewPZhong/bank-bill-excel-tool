@@ -56,6 +56,14 @@
 
 完整产品/技术合同由补遗 [Spec v2.1](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错Spec-v2.md) §15 与 [TechDoc v1.2](../3.1.8/erratum/VCC财务OP-3.1.8卡顿与旧归档兼容纠错TechDoc-v1.1.md) §22 承载。已发布的 `changes/3.1.8/spec.md` 继续保持冻结，不用当前修订追溯重写历史。
 
+## 0.3 存档中心“有文件才有前端批次”前向补遗（2026-08-17）
+
+用户最终确认：**前端出现的每个批次必须至少有一项真实文件内容；没有文件内容的动作全部不显示，且新动作不得占用批次号。** 本补遗的完整合同见 §19，并前向取代 C02/C04/C06/C07、§3.1.1 第 4 项、§8.4、§10.2、§11.2、§15.2/§15.5/§15.8、§16.3 和 §17 中与“无文件元数据批次仍公开展示或计次”冲突的旧口径。其余批次身份、并发唯一性、Blob、artifact、恢复、锁定、保留期和文件完整性合同不变。
+
+本补遗不追溯改写 v3.1.9/v3.1.10 已发布二进制，也不重编号、复用或伪装历史已发放号码。历史零文件批次只从前端列表、详情入口、统计和关联任务中隐藏；数据库审计事实与发行游标保留。新版本从入口上阻止无文件动作申请号码，确保后续不再产生这类号码空洞。
+
+基于远端 `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec` 的独立实施合同见 [存档中心“有文件才有批次” Spec](../archive-center-file-batch-contract/spec.md)。本节与 §19 保留排查收口记录；若生命周期、operation context 或测试门禁存在表述差异，以该独立 Spec 为准。
+
 ---
 
 # 1. 已确认产品决策
@@ -1711,3 +1719,74 @@ C01—C14 已确认。只有以下情况允许 Codex 再次询问：
 4. 某业务任务在“预留批次前”已经发生不可逆副作用，无法通过重排或兼容层满足需求。
 
 提问前必须给出代码路径、最小复现场景、数据/审计影响和推荐解决方案，不得只说“需求不清楚”。
+
+---
+
+# 19. 存档中心非空文件批次收口（2026-08-17 前向方案）
+
+## 19.1 最终产品口径
+
+1. 存档中心前端只展示“文件批次”。文件批次必须拥有至少一个有效文件 artifact；只有业务元数据、状态变化、日志或内部 task 记录不构成文件内容。
+2. 有效文件 artifact 必须指向用户选择的输入普通文件或本次任务计划生成的输出普通文件。目录选择、保存目录、按钮事件、预览、配置变化、业务状态动作和合成占位行均不得作为 artifact。
+3. `pending/ready/failed` 的有效文件 artifact 都算批次内容：`pending/failed` 仍提供文件名、方向、失败原因和恢复入口，不能因归档尚未完成而隐藏。零 artifact 才是前端空批次。
+4. 纯状态/配置/计算动作不进入可见批次生命周期、不申请全局批次号。它们继续使用各模块现有业务审计表、operation audit 和活动日志；本迭代不新增“非点击事件时间线”。
+5. 选择器、预览、取消以及在申请批次前失败的校验继续不建批、不占号。
+6. 文件任务在业务开始前必须形成非空 `artifactManifest`。批次号分配与 manifest 中至少一项 artifact intent 的持久化必须处于同一原子事务；事务失败时号码游标与批次记录一起回滚。禁止先发号、再等待任务结束判断有没有文件。
+7. 输入文件在原子预留前完成普通文件检查与初始快照，业务开始前再次校验新鲜度；输出可先登记明确的路径/文件名 intent，生成后再绑定大小、SHA-256 和 Blob。任务后续失败时，已登记的真实文件 intent 留在失败批次中供诊断或重试。
+8. 无法在业务开始前证明至少一个真实输入或输出 intent 的 action 必须登记为 `no-archive-artifact`，或先完成无副作用预检再决定是否申请文件批次；不得用空 metadata 批次兜底。
+
+## 19.2 历史数据、统计与关联任务
+
+1. 历史 `artifactCount=0` 批次保留数据库记录、operation issuance、task 终态和原批次号，但从 `listBatches`、公共 `getBatch`、运行次数、最新批次以及关联任务候选中排除。内部恢复/审计读取不使用公共可见过滤器。
+2. 历史号码不重排、不回收、不复用，因此旧日期可能存在序号间隙；这是已发行身份的兼容边界。新版本起无文件动作不再推进序号。
+3. “运行次数”改为当前未删除的可见文件批次数；“最新批次”改为最新可见文件批次。文件总大小继续只累计 ready artifact 的逻辑大小。
+4. `parentRunId` 仍是内部流程身份，但关联任务只列同一 parent 下的可见文件批次。隐藏状态动作不显示、不占关联位置；过滤后仅剩一个文件批次时隐藏“关联任务”。
+5. 无文件动作若产生后续导出所需的稳定业务 identity，应由业务 flow anchor 或后续首个文件批次绑定该 identity，禁止通过“最近一个隐藏批次”猜 parent。`archive_flow_anchors.source_batch_id` 可空或指向首个真实文件批次。
+6. 截至 2026-08-17 的只读实库样本共有 95 个批次，其中 34 个为零 artifact。前端迁移后统一隐藏这 34 个，但不删除、不重编号；8 个只有失败文件 artifact 的历史批次继续显示，以保留文件级错误和重试入口。
+
+## 19.3 `2026-08-13-017` / `2026-08-13-018` 排查结论与处置
+
+两个批次都不是空批次，真实业务也已经成功：每批各有一个 ready 输入和两个 ready 输出。`archiveStatus=incomplete` 来自额外误登记的保存目录：
+
+- `2026-08-13-017` 把 `~/Downloads` 当成第二个 input，失败码为 `ARCHIVE_SOURCE_NOT_FILE`；
+- `2026-08-13-018` 把 `~/Downloads/VCC通道明细_2026-07_PPHK` 当成第二个 input，失败码相同。
+
+根因是 `showImportOpenDialog()` 把 `openDirectory` 与 `openFile` 都放进 `dialogSelections`，`runArchiveAwareOperation()` 又把全部 dialog selection 合并到 `selectedPaths`；工具箱多文件拆分选取的是输出目录，却被通用 operation tracker 解释为输入文件。
+
+前向修复：
+
+1. 归档输入证据只接受显式 `prepared.inputPaths/inputFiles` 和属性包含 `openFile` 的选择；`openDirectory/createDirectory` 只参与目标规划，禁止进入 input resolver。
+2. 工具箱拆分发布继续以一项冻结输入证据和全部输出 descriptor 作为权威 manifest；通用 dialog fallback 不得重复追加。
+3. 对历史两批执行一次精确、可审计修复：仅清理/隔离满足“`toolbox:split:export` + direction=input + `ARCHIVE_SOURCE_NOT_FILE` + 路径为该批输出父目录”的伪 artifact，保留一个真实输入和两个真实输出，并重算 `archiveStatus=complete`。修复前备份数据库；不得按错误码批量删除其他失败文件。
+4. 两个原批次号、task 终态、文件 SHA-256 和 `parentRunId` 均保持不变，仍作为有内容的成功批次显示。
+
+## 19.4 `2026-08-17-001` 工具箱合表排查结论与处置
+
+该批次有两个 ready 输入、零输出，`taskStatus=failed`、`archiveStatus=complete`，错误为“工具箱存档交接缺少输入文件证据”。它是有内容的失败批次，不应被空批次过滤隐藏。
+
+根因是对象身份丢失：合表 `prepare` 创建原对象 P0，`prepareIpcTaskInvocation()` 通过对象展开返回规范化副本 P1；箭头函数 `beforeStart` 仍把 `inputFiles` 写入 P0，而 execute/publication 读取 P1，故发布阶段收到 `undefined`。通用 operation tracker 又根据 P1 中仍存在的 `inputPaths` 归档了两份源文件，所以最终形成“输入齐全、输出缺失”的失败批次。
+
+前向修复：
+
+1. `beforeStart` 必须显式返回结构化 evidence；任务生命周期把 `inputFiles` 写入规范化后的 P1，并把同一 evidence 传给 runtime/publication。禁止依赖闭包静默修改 prepare 原对象，也不取消 IPC 契约的防御性复制。
+2. Toolbox publication 在生成正式目标前继续强制校验：输入 evidence 非空、与 `protectedSourcePaths` 一一对应、每项具备路径/来源/快照。校验失败仍发生在 journal 和目标 staging 之前。
+3. 原失败任务没有 publication journal，临时输出已清理；不得伪造输出、补写成功或把后来重跑的文件回填到旧批次。修复后由用户重新执行，生成新的文件批次；旧批次保留为“失败、2 输入、0 输出”。
+4. 此对象复制问题只命中当前合表路径；拆表在规范化复制前已设置 `inputFiles`，但仍纳入端到端回归以防共享生命周期修改造成回归。
+
+## 19.5 风险优先实施顺序
+
+1. **先冻结可见性和发号不变量**：建立 valid artifact manifest 判定及 server-side 可见过滤；统计、详情和 related 共用同一 predicate，禁止 renderer 单独过滤。
+2. **再改批次预留边界**：盘点所有 reserve action；纯状态动作改为 `no-archive-artifact`，文件 action 在同一事务中完成“发号 + 至少一个 artifact intent”。若某入口无法预声明文件，先重排无副作用预检，不得放宽非空合同。
+3. **修工具箱两条证据链**：过滤 directory selection；把合表 `beforeStart` evidence 显式传给规范化对象和 publication。
+4. **历史兼容**：隐藏零 artifact 批次；精确修复 017/018 的两个目录伪 artifact；001 保持失败且可见。任何历史修复先备份并输出命中/跳过计数，二次执行必须幂等。
+5. **关联与统计**：只按可见文件批次计算 `runCount/latest/related`，同时验证 stable business identity 不依赖隐藏批次。
+6. **自动与人工验收**：执行 §15 对应专项、`release-check`、`check-vars`；用真实 UI 核对零文件动作不增号、017/018 恢复完整、001 仍可解释且合表重跑成功。
+
+## 19.6 明确非目标
+
+- 不新增状态动作时间线、不可点击事件或第二套任务审计 UI；
+- 不删除普通业务审计、operation audit 或活动日志；
+- 不把目录、日志、数据库记录或 placeholder 包装成文件内容；
+- 不重编号、压缩或复用历史批次号；
+- 不改金额、币种、匹配、Excel 内容或工具箱合并/拆分算法；
+- 不把新输出回填到已失败的旧任务批次。

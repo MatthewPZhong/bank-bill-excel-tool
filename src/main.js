@@ -18,6 +18,7 @@ const pendingExportWriter = require('./backend/pending-export/writer');
 const pendingRemovedReader = require('./backend/pending-import/removed-reader');
 const pendingRemovedRepo = require('./backend/pending-db/removed-repository');
 const pendingRemovalMatch = require('./backend/pending-reconcile/removal-match');
+const { createPendingDatasetSeed } = require('./backend/pending-db/dataset-identity');
 const { createPendingSession } = require('./main-process/pending-session');
 const {
   executePendingImportSubmission,
@@ -26,6 +27,21 @@ const {
   preparePendingImportSubmission,
   readPendingMonthEvidence
 } = require('./main-process/pending-import-preflight');
+const {
+  acknowledgePendingRunByTaskRun,
+  finalizePendingTerminalIntent,
+  pendingAggregateRunSelection,
+  pendingRunLineagePlan,
+  pendingRunTerminalRoute,
+  publicPendingRun,
+  recoverPendingRunReceipts,
+  runOutputLineageIntent
+} = require('./main-process/pending-archive-lineage');
+const {
+  finalizePreFundTerminalIntent,
+  preFundRunTerminalRoute,
+  recoverPreFundRunReceipts
+} = require('./main-process/pre-fund-archive-lineage');
 const {
   createAppUpdaterService,
   detectDistribution
@@ -40,7 +56,6 @@ const {
   selectSuccessfulPathsByResultIndex
 } = require('./main-process/archive-center/operation-tracker');
 const {
-  PR3_HANDOFF_CHANNELS,
   SUPPORT_ACTION_POLICIES,
   createBankStatementRunFlowIdentity,
   createTaskPolicyRegistry
@@ -55,8 +70,10 @@ const {
   freezeWorkerBatchContext
 } = require('./main-process/archive-center/worker-batch-context');
 const {
+  freezePersistedTaskOwner
+} = require('./main-process/archive-center/worker-operation-context');
+const {
   createIpcTaskContext,
-  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
@@ -69,6 +86,10 @@ const {
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('./main-process/archive-center/source-snapshot');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('./main-process/archive-center/file-plan');
 const {
   createArchiveService
 } = require('./main-process/archive-center/archive-service');
@@ -155,6 +176,11 @@ const {
 } = require('./main-process/position-reconciliation/operation-lifecycle');
 // v3.0.5 PR-4（Part B Phase 2）：biz-op / bank-bu per-月侧库编排层（import/run/status/导出/孤儿 路由侧库）
 const bizOpReconRunData = require('./main-process/biz-op-recon-run-data');
+const {
+  bizOpRunOutputIntent,
+  bizOpRunTerminalRoute,
+  publicBizOpRun
+} = require('./main-process/biz-op-archive-lineage');
 const bankBuReconRunData = require('./main-process/bank-bu-recon-run-data');
 // v2.1.10 N4-cont-1 T23 (Phase 4)：raw_json idle 自动清理函数
 //   - 复用 v2.1.9 N1' idle 30min cleanup 计时器（spec §4.3.1）
@@ -268,14 +294,13 @@ const { createVccOpCalcSession } = require('./main-process/vcc-op-calc-session')
 // v3.1.6：VCC财务OP校验（四类明细幂等、逐币种计算、系统OP比较与归档）。
 const { createVccFinancialOpService } = require('./main-process/vcc-financial-op-service');
 const {
-  createVccStorageMigrationCoordinator
-} = require('./main-process/vcc-financial-op-storage-migration');
+  planRunWorkbookOutputPaths
+} = require('./main-process/vcc-financial-op-writer');
 const {
   recoverVccStorageMigration
 } = require('./main-process/vcc-financial-op-storage-rebuild');
 const {
   buildVccImportArchiveHandoffFiles,
-  buildVccImportArchiveInputFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
   reconcileVccImportArchiveLineageAtStartup
@@ -325,8 +350,11 @@ const {
   readBankStatement,
   readGatewayRecon,
   writeBankStatementMainOutput,
-  writeErrorReportOutput,
+  writeErrorReportOutputToPath,
   buildMainOutputFileName,
+  buildTimestamp,
+  buildTimestampMinuteUnderscore,
+  buildDateDir,
   // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件名 formatter（YYYY_MM_DD_HHMM）
   buildPlatformCleanupFileName,
   // v2.1.16-beta.4 R5 场景4：中台退款订单回填文件名 formatter（YYYY_MM_DD_HHMM）
@@ -379,7 +407,10 @@ const { dispatchLargeSplit } = require('./main-process/toolbox-large-split-dispa
 //   v2.1.8 主输出 Sheet 3 撤除 → 改独立报表 命中场景行-{basename}-{ts}.xlsx
 //   v3.0.4 F2：落位由 error-reports/{date}/ 改为 bank-statement-process/{date}/（与错误报告目录互换）
 //   失败 graceful：不阻塞主对账流程，仅 log 警告（spec §5.4）
-const { writeScenarioHitRows } = require('./main-process/scenario-hit-rows-writer');
+const {
+  writeScenarioHitRows,
+  buildOriginalBaseName: buildScenarioHitRowsBaseName
+} = require('./main-process/scenario-hit-rows-writer');
 // v2.1.16-beta.2 R5 场景3：中台加款单剔除文件 writer（仿 scenario-hit-rows-writer）
 //   导出阶段：R5 场景3 有剔除行产出时，落主输出同目录（主输出为空则落 exportRootDir 日期目录）
 //   失败 graceful：不阻塞主对账流程，仅 log 警告
@@ -516,7 +547,6 @@ let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
 let vccFinancialOpService = null;
-let vccStorageMigrationCoordinator = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
 let appUpdateTransitionToken = null;
@@ -532,7 +562,6 @@ const positionReconciliationOperationContext = new AsyncLocalStorage();
 let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
-const pr3TaskPolicyHandoff = new Set(PR3_HANDOFF_CHANNELS);
 const supportActionChannels = new Set(SUPPORT_ACTION_POLICIES.map((policy) => policy.channel));
 const scenarioImportContextStore = createScenarioImportContextStore();
 const pendingSession = createPendingSession({
@@ -556,11 +585,6 @@ const vccOpCalcSession = createVccOpCalcSession({
 
 function getVccFinancialOpService() {
   if (!database || !database.db) throw new Error('数据库未初始化');
-  if (vccStorageMigrationCoordinator && vccStorageMigrationCoordinator.isActive()) {
-    const error = new Error('VCC 存储正在维护，请稍后重试');
-    error.code = 'vcc-storage-migration-active';
-    throw error;
-  }
   if (!vccFinancialOpService) {
     vccFinancialOpService = createVccFinancialOpService({
       database,
@@ -615,55 +639,6 @@ function vccStorageMigrationJournalPath() {
   );
 }
 
-function getVccStorageMigrationCoordinator() {
-  if (!database || !database.db) throw new Error('数据库未初始化');
-  if (!vccStorageMigrationCoordinator) {
-    vccStorageMigrationCoordinator = createVccStorageMigrationCoordinator({
-      sourcePath: database.dbPath,
-      journalPath: vccStorageMigrationJournalPath(),
-      businessOperationRegistry,
-      archiveStorageRootManager,
-      terminateVccService: async () => {
-        if (!vccFinancialOpService) return;
-        await vccFinancialOpService.terminate();
-        vccFinancialOpService = null;
-      },
-      pauseLocalMaintenance: async () => {
-        const hadIdleTimer = Boolean(idleCleanupTimer);
-        if (idleCleanupTimer) {
-          clearInterval(idleCleanupTimer);
-          idleCleanupTimer = null;
-        }
-        return async () => {
-          if (hadIdleTimer && !idleCleanupTimer && database && database.db) setupIdleCleanupTimer();
-        };
-      },
-      closeDatabase: async () => {
-        if (positionReconciliationService) {
-          syncPositionReconciliationCheckpoint();
-          positionReconciliationService.close();
-          positionReconciliationService = null;
-        }
-        if (database) database.close();
-      },
-      relaunch: async () => {
-        app.relaunch();
-        const timer = setTimeout(() => app.exit(0), 250);
-        if (timer.unref) timer.unref();
-      },
-      onProgress: (progress) => {
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('vccFinancialOp:storage:migration-progress', progress);
-        }
-      }
-    });
-  }
-  return vccStorageMigrationCoordinator;
-}
-
-function requireVccFinancialOpBatchContext(taskContext) {
-  return freezeWorkerBatchContext(taskContext && taskContext.batchContext, { required: true });
-}
 let lastGeneratedExports = {
   detail: null,
   balance: null,
@@ -708,6 +683,15 @@ let startupMetricsReported = false;
 let lastOwnAccountsMigrationError = null;
 
 async function showImportOpenDialog(scope, options) {
+  const properties = Array.isArray(options && options.properties)
+    ? options.properties
+    : [];
+  const selectsFiles = properties.includes('openFile');
+  const selectsDirectories = properties.includes('openDirectory');
+  if (selectsFiles === selectsDirectories) {
+    throw new TypeError('导入选择框必须且只能声明 openFile 或 openDirectory');
+  }
+  const kind = selectsFiles ? 'file' : 'directory';
   const result = await showRememberedImportOpenDialog({
     dialog,
     browserWindow: mainWindow,
@@ -719,8 +703,9 @@ async function showImportOpenDialog(scope, options) {
   if (context && result && !result.canceled && Array.isArray(result.filePaths)) {
     context.dialogSelections.push({
       scope,
+      kind,
       filePaths: result.filePaths.slice(),
-      properties: Array.isArray(options && options.properties) ? options.properties.slice() : []
+      properties: properties.slice()
     });
   }
   return result;
@@ -3081,6 +3066,16 @@ function buildOutputFilePath({ kind, outputFileName }) {
   };
 }
 
+function buildStatementDeferredOutputManifest(filePath, sourceOperation) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  return artifactManifestFromFilePlan(normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{ filePath, role: 'output', sourceOperation }]
+  }));
+}
+
 function buildStatementOutputFilePath({
   kind,
   templateName,
@@ -4250,6 +4245,37 @@ function recoverPositionPendingBeforeInterruptedSweep() {
   return getPositionReconciliationService();
 }
 
+function recoverPendingRunsBeforeInterruptedSweep() {
+  if (!pendingDb || !archiveCenterService) {
+    throw new Error('Pending run Archive 恢复依赖尚未就绪');
+  }
+  return recoverPendingRunReceipts({
+    db: pendingDb,
+    archiveService: archiveCenterService.service
+  });
+}
+
+function recoverBizOpRunsBeforeInterruptedSweep() {
+  if (!database || !database.db || !archiveCenterService) {
+    throw new Error('Biz OP run Archive 恢复依赖尚未就绪');
+  }
+  return bizOpReconRunData.recoverRunReceipts({
+    userDataDir: path.dirname(database.dbPath),
+    mainDb: database.db,
+    archiveService: archiveCenterService.service
+  });
+}
+
+function recoverPreFundRunsBeforeInterruptedSweep() {
+  if (!archiveCenterService) {
+    throw new Error('前置资金 run Archive 恢复依赖尚未就绪');
+  }
+  return recoverPreFundRunReceipts({
+    service: getPreFundReconciliationService(),
+    archiveService: archiveCenterService.service
+  });
+}
+
 function vccImportArchiveRecoveryOptions() {
   const archiveRepository = archiveCenterService
     && archiveCenterService.service
@@ -4278,8 +4304,8 @@ function protectedInterruptedTaskBatchIds() {
   const batchIds = new Set();
   try {
     const pending = readPositionPendingOperation();
-    const context = freezeWorkerBatchContext(pending && pending.batchContext, { required: true });
-    batchIds.add(context.batchId);
+    const owner = positionPendingOwner(pending);
+    if (owner.kind === 'file-batch') batchIds.add(owner.batchContext.batchId);
   } catch (_error) {
     // 无 pending 或证据损坏时不猜测。
   }
@@ -4357,7 +4383,8 @@ function initializeArchiveCenter() {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('archive-center:storage-migration-progress', progress);
       }
-    }
+    },
+    deferStartupRecovery: true
   });
   archiveCenterService = createArchiveCenterController({
     database,
@@ -4366,8 +4393,20 @@ function initializeArchiveCenter() {
     outboxStore: archiveOutbox,
     onOutboxFlushed: cleanupPositionArchiveSourcePaths,
     resolveOutboxTerminalIntent: resolvePositionOutboxTerminalIntent,
-    onTerminalIntentFlushed: finalizePositionTerminalIntent,
+    onTerminalIntentFlushed: finalizeArchiveTerminalIntent,
     recoverInterruptedTaskOwners: [
+      {
+        ownerName: 'Pending runs',
+        recover: recoverPendingRunsBeforeInterruptedSweep
+      },
+      {
+        ownerName: 'Biz OP runs',
+        recover: recoverBizOpRunsBeforeInterruptedSweep
+      },
+      {
+        ownerName: 'Pre-fund runs',
+        recover: recoverPreFundRunsBeforeInterruptedSweep
+      },
       {
         ownerName: 'Position',
         recover: recoverPositionPendingBeforeInterruptedSweep
@@ -4799,9 +4838,17 @@ function registerAppHandlers() {
         return {
           proceed: true,
           args: [payload],
-          outputPaths: [saveResult.filePath],
-          savePath: saveResult.filePath,
-          channelIds
+          channelIds,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: saveResult.filePath,
+              role: 'output',
+              sourceOperation: 'scenarios:export-bundle'
+            }]
+          }
         };
       } catch (error) {
         return {
@@ -4810,8 +4857,9 @@ function registerAppHandlers() {
         };
       }
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
       try {
+        const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
         const allChannels = database.listChannels();
         const channelById = new Map(allChannels.map((channel) => [Number(channel.id), channel]));
         const selectedChannels = prepared.channelIds
@@ -4851,21 +4899,25 @@ function registerAppHandlers() {
           channelIdToName
         );
 
-        fs.mkdirSync(path.dirname(prepared.savePath), { recursive: true });
-        fs.writeFileSync(prepared.savePath, jsonText, 'utf8');
+        fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+        fs.writeFileSync(outputPath, jsonText, 'utf8');
+        await taskContext.settleArtifacts({
+          files: taskContext.fileEvidence.filePlan.outputs
+            .map((item) => ({ artifactKey: item.artifactKey }))
+        });
 
         appendActivityLogEntry({
           level: 'info',
           message: '导出场景模板文件成功',
           details: [
-            `导出路径：${prepared.savePath}`,
+            `导出路径：${outputPath}`,
             `渠道数：${selectedChannels.length}`,
             `场景数：${totalScenarios}`
           ]
         });
         return {
           status: 'ok',
-          filePath: prepared.savePath,
+          filePath: outputPath,
           exportedChannels: selectedChannels.length,
           exportedScenarios: totalScenarios
         };
@@ -4968,8 +5020,17 @@ function registerAppHandlers() {
         return {
           proceed: true,
           args: [payload],
-          inputPaths: [context.filePath],
           scenarioImportContext: context,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [{
+              filePath: context.filePath,
+              role: 'input',
+              sourceOperation: 'scenarios:import-bundle-apply'
+            }],
+            outputs: []
+          },
           beforeStart: () => scenarioImportContextStore.assertUnchanged(context)
         };
       } catch (error) {
@@ -4979,12 +5040,13 @@ function registerAppHandlers() {
         };
       }
     },
-    execute(_event, prepared, _taskContext, payload = {}) {
+    execute(_event, prepared, taskContext, payload = {}) {
     try {
       const context = scenarioImportContextStore.consume(payload.preparedContextId, {
         confirmCreateMissingChannels: payload.confirmCreateMissingChannels === true
       });
-      const { bundle, filePath } = context;
+      const { bundle } = context;
+      const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
       const applyResult = applyScenarioBundleImport(bundle, {
         confirmCreateMissingChannels: payload.confirmCreateMissingChannels === true
       });
@@ -5023,13 +5085,21 @@ function registerAppHandlers() {
       }
       return {
         proceed: true,
-        inputPaths: [choice.filePaths[0]],
-        filePath: choice.filePaths[0]
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath: choice.filePaths[0],
+            role: 'input',
+            sourceOperation: 'bank-statement:import'
+          }],
+          outputs: []
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, _prepared, taskContext) {
     try {
-      const filePath = prepared.filePath;
+      const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
       const result = readBankStatement(filePath);
       bankStatementSession = {
         filePath: result.filePath,
@@ -5091,13 +5161,21 @@ function registerAppHandlers() {
       }
       return {
         proceed: true,
-        inputPaths: [choice.filePaths[0]],
-        filePath: choice.filePaths[0]
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath: choice.filePaths[0],
+            role: 'input',
+            sourceOperation: 'gateway-recon:import'
+          }],
+          outputs: []
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, _prepared, taskContext) {
     try {
-      const filePath = prepared.filePath;
+      const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
       const result = readGatewayRecon(filePath);
       gatewayReconSession = {
         filePath: result.filePath,
@@ -5144,7 +5222,15 @@ function registerAppHandlers() {
   //   数据准备阶段边界 + 编排器轮次边界 await 让出事件循环（消除运行期窗口「未响应」）。
   //   结果零变化（golden 字节一致）—— 只插 yield/进度，不改任何数据准备值、轮次顺序、引擎入参、匹配逻辑。
   //   processingResult 仍在 run 全程完成后一次性赋值（中途 yield 期间无并发 run：handler 入口 session 守卫 + 无新并发入口）。
-  trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', async (event) => {
+  trackedIpcHandle('bank-statement:run', '银行对账单处理', '开始运行', {
+    async prepare() {
+      const flowIdentity = createBankStatementRunFlowIdentity();
+      return {
+        proceed: true,
+        flowPlan: Object.freeze({ startsNewFlow: true, flowIdentity })
+      };
+    },
+    async execute(event, prepared) {
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁。争用即返回失败，绝不与 import/export 并发撕裂会话态。
     const opLock = tryAcquireBankStatementOpLock('run');
     if (!opLock.acquired) {
@@ -5381,7 +5467,7 @@ function registerAppHandlers() {
         // 仅在当前 processingResult 内保存一次性身份；每次真实 export 各建一个含输出的可见批次，
         // 并以该身份续接同一轮 parent。
         // 不以月份、importedAt 或 latest 猜测，也不新增持久 tracker。
-        archiveFlowIdentity: createBankStatementRunFlowIdentity(),
+        archiveFlowIdentity: prepared.flowPlan.flowIdentity,
         // v3.0.4 块 F 修订 R2 Q14：Payment线下调拨匹配对 → 导出阶段追加 3 核对 sheet（未勾选/无命中时为 []）
         paymentOfflineMatchedPairs: result.paymentOfflineMatchedPairs || [],
         // v3.0.12 功能1：异常-人工判断命中银行行（🔴 只读）→ 导出阶段写「异常-人工判断」sheet（无命中时为 []）
@@ -5406,6 +5492,7 @@ function registerAppHandlers() {
     } finally {
       // v3.0.11 需求3（批1）：无论成功/失败/中途让出，run 结束统一释放互斥锁。
       releaseBankStatementOpLock();
+    }
     }
   });
 
@@ -5453,6 +5540,11 @@ function registerAppHandlers() {
       if (!inspected.ok) {
         return { proceed: false, result: { status: 'failed', message: inspected.message } };
       }
+      const exportMoment = new Date();
+      const storageRoot = getStorageRoot();
+      const dateDir = buildDateDir(exportMoment);
+      const timestamp = buildTimestamp(exportMoment);
+      const minuteTimestamp = buildTimestampMinuteUnderscore(exportMoment);
       let mainFilePath = null;
       if (inspected.requiresMainOutput) {
         const saveResult = await dialog.showSaveDialog(mainWindow, {
@@ -5465,11 +5557,79 @@ function registerAppHandlers() {
         }
         mainFilePath = saveResult.filePath;
       }
+      const outputKinds = [];
+      const outputs = [];
+      const addOutput = (kind, filePath) => {
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        outputKinds.push(kind);
+        outputs.push({
+          filePath,
+          role: 'output',
+          sourceOperation: 'bank-statement:export'
+        });
+      };
+      if (inspected.processingResult.errorReport.length > 0) {
+        addOutput(
+          'error-report',
+          path.join(storageRoot, 'error-reports', dateDir, `${timestamp}-error-report.xlsx`)
+        );
+      }
+      if (mainFilePath) addOutput('main', mainFilePath);
+      const hitScenarioRows = inspected.processingResult.modifiedRows.filter(
+        (row) => row && row._hitScenarioId !== undefined && row._hitScenarioId !== null
+      );
+      if (mainFilePath && hitScenarioRows.length > 0) {
+        const baseName = buildScenarioHitRowsBaseName(inspected.bankStatementSession.filePath);
+        addOutput(
+          'hit-scenarios',
+          path.join(
+            storageRoot,
+            'bank-statement-process',
+            dateDir,
+            `命中场景行-${baseName}-${timestamp}.xlsx`
+          )
+        );
+      }
+      if (mainFilePath
+          && Array.isArray(inspected.processingResult.platformCleanupRows)
+          && inspected.processingResult.platformCleanupRows.length > 0) {
+        addOutput(
+          'platform-cleanup',
+          path.join(path.dirname(mainFilePath), buildPlatformCleanupFileName(minuteTimestamp))
+        );
+      }
+      const hasRefundOutput = mainFilePath
+        && ((Array.isArray(inspected.processingResult.refundBackfillRows)
+              && inspected.processingResult.refundBackfillRows.length > 0)
+          || (Array.isArray(inspected.processingResult.refundUnmatchedRows)
+              && inspected.processingResult.refundUnmatchedRows.length > 0));
+      if (hasRefundOutput) {
+        addOutput(
+          'refund-backfill',
+          path.join(path.dirname(mainFilePath), buildRefundBackfillFileName(minuteTimestamp))
+        );
+      }
+      if (outputs.length === 0) {
+        return {
+          proceed: false,
+          result: {
+            status: 'empty',
+            message: '无修改记录，未生成主输出文件',
+            errorReportPath: null,
+            errorReportName: null
+          }
+        };
+      }
       return {
         proceed: true,
-        outputPaths: mainFilePath ? [mainFilePath] : [],
-        mainFilePath,
         inspected,
+        outputKinds: Object.freeze(outputKinds),
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs
+        },
         beforeStart() {
           const current = inspectBankStatementExportState();
           if (!current.ok
@@ -5481,13 +5641,17 @@ function registerAppHandlers() {
         }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 import/run 共享一把）。争用即返回失败。
     const opLock = tryAcquireBankStatementOpLock('export');
     if (!opLock.acquired) {
       return { status: 'failed', message: opLock.message };
     }
     try {
+      const outputByKind = new Map(prepared.outputKinds.map((kind, index) => [
+        kind,
+        taskContext.fileEvidence.filePlan.outputs[index].filePath
+      ]));
       const currentExportState = inspectBankStatementExportState();
       if (!currentExportState.ok
           || currentExportState.processingResult !== prepared.inspected.processingResult
@@ -5499,11 +5663,6 @@ function registerAppHandlers() {
             || '银行对账导出结果已变化，请重新运行'
         };
       }
-      const exportRootDir = path.join(ensureStorageRoot(), 'bank-statement-process');
-      // v3.0.4 F2：错误报告改落 error-reports/{date}/（与生成网银账单 .txt、业务OP失败报告共目录）。
-      //   ⚠️ exportRootDir 本体绝不能改——R5 场景3/4 落位兜底依赖它（下方 cleanupDir/refundDir）。
-      const errorReportRootDir = path.join(ensureStorageRoot(), 'error-reports');
-
       // v2.1.7 round 8 F8 fix（PR #51 reviewer round 2 Finding 1）：
       //   保存框触发条件必须涵盖 unmatchedRows，否则全未命中时 mainFilePath=null →
       //   后面 writeBankStatementMainOutput 因缺 mainFilePath 抛错（bank-statement-io.js:205）
@@ -5520,10 +5679,9 @@ function registerAppHandlers() {
       //  modifiedRows 可能为空但 warnings 非空）
       let errorReport = null;
       if (processingResult.errorReport.length > 0) {
-        errorReport = await writeErrorReportOutput({
+        errorReport = await writeErrorReportOutputToPath({
           warnings: processingResult.errorReport,
-          // v3.0.4 F2：错误报告落 error-reports/{date}/（命中场景行报表则改落 bank-statement-process/）。
-          exportRootDir: errorReportRootDir,
+          outputPath: outputByKind.get('error-report'),
           // v3.0.4 F3：传全量银行行（modifiedRows + unmatchedRows，F8 行数守恒契约全覆盖）→
           //   io 层按 _rowId → ReconciliationId enrich，error-report 第 3 列显示对账ID 而非内部 row_N。
           //   ⚠️ unmatchedRows 必含：R5s4 warning 行多在 unmatchedRows（不产 modifications），缺则覆盖不全。
@@ -5535,7 +5693,7 @@ function registerAppHandlers() {
       }
 
       // 主输出 savePath 已在 BOR/reserve 前取得；取消时不会落错误报告或业务文件。
-      const mainFilePath = prepared.mainFilePath;
+      const mainFilePath = outputByKind.get('main');
       // v2.1.7 round 7 F8 fix（PR #51 reviewer P1 / self-review I-5）+ round 8 (Finding 1 follow-up)：
       //   仅当 modifiedRows + unmatchedRows 都为 0 才 return empty；
       //   有 unmatchedRows 时上方保存框已经弹过（round 8 fix），mainFilePath 非 null，
@@ -5589,7 +5747,7 @@ function registerAppHandlers() {
           hitRowsReport = await writeScenarioHitRows(
             hitScenarioRows,
             originalFilePath,
-            { exportRoot: ensureStorageRoot(), channels }
+            { outputPath: outputByKind.get('hit-scenarios'), channels }
           );
         } catch (e) {
           // graceful — log 警告但不阻塞主流程返回
@@ -5608,9 +5766,10 @@ function registerAppHandlers() {
       let platformCleanupReport = null;
       if (Array.isArray(processingResult.platformCleanupRows) && processingResult.platformCleanupRows.length > 0) {
         try {
-          const cleanupDir = mainFilePath ? path.dirname(mainFilePath) : exportRootDir;
-          const cleanupPath = path.join(cleanupDir, buildPlatformCleanupFileName());
-          platformCleanupReport = await writePlatformCleanupOutput(processingResult.platformCleanupRows, cleanupPath);
+          platformCleanupReport = await writePlatformCleanupOutput(
+            processingResult.platformCleanupRows,
+            outputByKind.get('platform-cleanup')
+          );
         } catch (e) {
           appendActivityLogEntry({
             level: 'warning',
@@ -5674,12 +5833,10 @@ function registerAppHandlers() {
       let refundBackfillReport = null;
       if (refundBackfillRowsForExport.length > 0 || refundUnmatchedRowsForExport.length > 0) {
         try {
-          const refundDir = mainFilePath ? path.dirname(mainFilePath) : exportRootDir;
-          const refundPath = path.join(refundDir, buildRefundBackfillFileName());
           refundBackfillReport = await writeRefundBackfillOutput(
             refundBackfillRowsForExport,
             refundUnmatchedRowsForExport,
-            refundPath
+            outputByKind.get('refund-backfill')
           );
         } catch (e) {
           appendActivityLogEntry({
@@ -5731,6 +5888,10 @@ function registerAppHandlers() {
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
     } finally {
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       // v3.0.11 需求3（批1）：导出结束统一释放互斥锁（含 cancelled / empty / ok 各早返回路径）。
       releaseBankStatementOpLock();
     }
@@ -5851,14 +6012,23 @@ function registerAppHandlers() {
       return {
         proceed: true,
         args: [payload],
-        inputPaths: [choice.filePaths[0]],
-        filePath: choice.filePaths[0],
-        subMode
+        subMode,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath: choice.filePaths[0],
+            role: 'input',
+            sourceOperation: 'recon-id-fix:import'
+          }],
+          outputs: []
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      const { filePath, subMode } = prepared;
+      const { subMode } = prepared;
+      const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
       const result = readReconIdFixFile(filePath, subMode);
       reconIdFixSession = {
         filePath: result.filePath,
@@ -6026,12 +6196,32 @@ function registerAppHandlers() {
         if (saveResult.canceled || !saveResult.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
+        const outputPaths = [saveResult.filePath];
+        if (fixedRows.length > 0 && unmatchedRows.length > 0) {
+          outputPaths.push(path.join(
+            path.dirname(saveResult.filePath),
+            buildReconIdFixUnmatchedReportFileName(
+              resultSnapshot.scenarioName,
+              timestamp,
+              path.basename(saveResult.filePath),
+              exportSubMode
+            )
+          ));
+        }
         return {
           proceed: true,
-          outputPaths: [saveResult.filePath],
-          savePath: saveResult.filePath,
           resultSnapshot,
           scenarioSnapshot: resultSnapshot.scenariosSnapshot,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: outputPaths.map((filePath) => ({
+              filePath,
+              role: 'output',
+              sourceOperation: 'recon-id-fix:export'
+            }))
+          },
           beforeStart() {
             if (reconIdFixResult !== resultSnapshot) {
               throw new Error('ReconID 修复结果已变化，请重新导出');
@@ -6050,7 +6240,7 @@ function registerAppHandlers() {
         };
       }
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
       if (!reconIdFixResult) {
         return { status: 'failed', message: '请先点击"开始运行"' };
@@ -6085,14 +6275,15 @@ function registerAppHandlers() {
         };
       }
       // 同步生成 timestamp，主+unmatched 共用
-      const timestamp = buildReconIdFixTimestampMinute();
       // PR #36 self-review round 5（P3-A，2026-05-09）：
       //   fixedRows 空 + unmatched 非空时，saveDialog 默认名直接用 unmatched 名，
       //   让"用户选的路径"语义对得上"实际写出的文件"——避免用户选 A.xlsx 但桌面上是
       //   另一个固定命名的困惑。
       // v2.1.0-beta.3 T9：按 scenario.category 推导 subMode，影响文件名前缀 + writer 输出列模板
       const exportSubMode = currentScenario.category === 'gateway-recon-id-fix' ? 'gateway' : 'business';
-      const savePath = prepared.savePath;
+      const outputPaths = taskContext.fileEvidence.filePlan.outputs
+        .map((item) => item.filePath);
+      const savePath = outputPaths[0];
       const ret = {
         status: 'ok',
         mainFilePath: null,
@@ -6128,15 +6319,7 @@ function registerAppHandlers() {
         //   主+unmatched 都非空时，unmatched 文件名联动用户改过的主文件 basename：
         //   `{用户主文件名 stem}-未匹配.xlsx`，写到主文件同目录。
         if (unmatchedRows.length > 0) {
-          const mainSaveDir = path.dirname(savePath);
-          const mainBaseName = path.basename(savePath);
-          const unmatchedFileName = buildReconIdFixUnmatchedReportFileName(
-            reconIdFixResult.scenarioName,
-            timestamp,
-            mainBaseName,
-            exportSubMode
-          );
-          const unmatchedSavePath = path.join(mainSaveDir, unmatchedFileName);
+          const unmatchedSavePath = outputPaths[1];
           const writeUnmResult = await writeUnmatchedReport({
             unmatchedRows,
             savePath: unmatchedSavePath
@@ -6146,6 +6329,10 @@ function registerAppHandlers() {
           ret.unmatchedCount = writeUnmResult.rowCount;
         }
       }
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       return ret;
     } catch (error) {
       return { status: 'failed', message: String(error && error.message ? error.message : error) };
@@ -7152,12 +7339,20 @@ function registerTemplateHandlers() {
       }
       return {
         proceed: true,
-        inputPaths: [result.filePaths[0]],
-        selectedPath: result.filePaths[0]
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath: result.filePaths[0],
+            role: 'input',
+            sourceOperation: 'template:import'
+          }],
+          outputs: []
+        }
       };
     },
-    async execute(_event, prepared) {
-    const selectedPath = prepared.selectedPath;
+    async execute(_event, prepared, taskContext) {
+    const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       const headers = extractHeaders(selectedPath);
       const templateName = path.parse(selectedPath).name;
@@ -7186,7 +7381,6 @@ function registerTemplateHandlers() {
         message: '导入模板文件成功',
         details: [`模板名：${templateName}`, `源文件：${selectedPath}`]
       });
-
       return {
         status: 'success',
         message: '模板导入成功，请在模板管理中维护映射关系',
@@ -7527,23 +7721,36 @@ function registerTemplateHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [saveResult.filePath],
-        savePath: saveResult.filePath
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'template:export-bundle'
+          }]
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      writeTemplateBundleFile(prepared.savePath);
+      const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
+      writeTemplateBundleFile(outputPath);
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       clearLastErrorReport();
       appendActivityLogEntry({
         level: 'info',
         message: '导出模板文件成功',
-        details: [`导出路径：${prepared.savePath}`]
+        details: [`导出路径：${outputPath}`]
       });
       return {
         status: 'success',
         message: '模板文件导出成功',
-        filePath: prepared.savePath
+        filePath: outputPath
       };
     } catch (error) {
       return createErrorResult({
@@ -7619,10 +7826,18 @@ function registerTemplateHandlers() {
 
         return {
           proceed: true,
-          inputPaths: [selectedPath],
-          selectedPath,
           enumValues,
           importedTemplates,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [{
+              filePath: selectedPath,
+              role: 'input',
+              sourceOperation: 'template:import-bundle'
+            }],
+            outputs: []
+          },
           beforeStart() {
             assertSourceFresh();
             if (JSON.stringify(scanExisting()) !== JSON.stringify(existingRefs)) {
@@ -7643,8 +7858,9 @@ function registerTemplateHandlers() {
         return { proceed: false, result: errorResult };
       }
     },
-    async execute(_event, prepared) {
-    const { enumValues, importedTemplates, selectedPath } = prepared;
+    async execute(_event, prepared, taskContext) {
+    const { enumValues, importedTemplates } = prepared;
+    const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       let createdCount = 0;
       let updatedCount = 0;
@@ -10065,13 +10281,22 @@ function registerBigAccountHandlers() {
       }
       return {
         proceed: true,
-        inputPaths: [result.filePaths[0]],
-        selectedPath: result.filePaths[0],
-        template
+        template,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath: result.filePaths[0],
+            role: 'input',
+            sourceOperation: 'big-account:import-bank-info'
+          }],
+          outputs: []
+        }
       };
     },
-    async execute(_event, prepared) {
-    const { selectedPath, template } = prepared;
+    async execute(_event, prepared, taskContext) {
+    const { template } = prepared;
+    const selectedPath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       const parsed = parseBankAccountExcel(selectedPath);
 
@@ -10930,12 +11155,51 @@ async function prepareStatementImportFiles(templateId, templateName) {
   };
   return {
     proceed: true,
-    inputPaths: selectionResult.filePaths,
-    inputFilePaths,
+    filePlan: {
+      version: 1,
+      allocation: 'eager',
+      inputs: selectionResult.filePaths.map((filePath) => ({
+        filePath,
+        role: 'input',
+        sourceOperation: 'file:import'
+      })),
+      outputs: []
+    },
+    inputFilePaths: selectionResult.filePaths,
     selectionResult,
     previewSession,
     assertFresh,
     beforeStart: assertFresh
+  };
+}
+
+function bindStatementImportPreparedToFileEvidence(prepared, filePlan) {
+  const inputFilePaths = filePlan.inputs.map((item) => item.filePath);
+  const sourcePaths = prepared.selectionResult.filePaths;
+  const frozenPathBySource = new Map(
+    sourcePaths.map((filePath, index) => [filePath, inputFilePaths[index]])
+  );
+  const bindEntries = (entries) => entries && entries.map((entry) => ({
+    ...entry,
+    filePath: frozenPathBySource.get(entry.filePath)
+  }));
+  const selectionResult = {
+    ...prepared.selectionResult,
+    filePaths: inputFilePaths,
+    parentProvisionalEntries: bindEntries(prepared.selectionResult.parentProvisionalEntries)
+  };
+  const statementImportPlan = prepared.statementImportPlan
+    ? {
+        ...prepared.statementImportPlan,
+        trimmedProvisionalEntries: bindEntries(prepared.statementImportPlan.trimmedProvisionalEntries),
+        selectionResult
+      }
+    : null;
+  return {
+    ...prepared,
+    inputFilePaths,
+    selectionResult,
+    ...(statementImportPlan ? { statementImportPlan } : {})
   };
 }
 
@@ -11052,7 +11316,13 @@ function registerFileHandlers() {
       }
       return { proceed: false, result: previewResult };
     },
-    async execute(_event, prepared, _taskContext, templateId) {
+    async execute(_event, prepared, taskContext, templateId) {
+    if (!prepared.previewOnly) {
+      prepared = bindStatementImportPreparedToFileEvidence(
+        prepared,
+        taskContext.fileEvidence.filePlan
+      );
+    }
     // v1.5.2 需求 3（G3-7）：虚拟 ID 走独立分支
     // 见 handleFilenameMappingImport（文件名+表头双校验 + 整批截断 + 复用大账号选择流程）
     if (isFilenameMappingMode(templateId)) {
@@ -11888,10 +12158,19 @@ function registerFileHandlers() {
         return {
           proceed: true,
           args: [],
-          inputPaths: pendingContext.inputFilePaths,
           contextId,
           pendingContext,
           ...normalized,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: pendingContext.inputFilePaths.map((filePath) => ({
+              filePath,
+              role: 'input',
+              sourceOperation: 'file:complete-big-account-selection'
+            })),
+            outputs: []
+          },
           rememberOrder: normalized.isFixedMode && typeof payload.rememberOrder === 'boolean'
             ? payload.rememberOrder
             : null,
@@ -11917,15 +12196,25 @@ function registerFileHandlers() {
         };
       }
     },
-    async execute(_event, prepared) {
-    const pendingContext = requirePendingBigAccountSelection(prepared.contextId);
-    if (!pendingContext) {
+    async execute(_event, prepared, taskContext) {
+    const storedPendingContext = requirePendingBigAccountSelection(prepared.contextId);
+    if (!storedPendingContext) {
       return createErrorResult({
         step: '选择大账号',
         message: '当前没有待处理的大账号选择任务，请重新导入文件',
         errorCode: 'BIG_ACCOUNT_SELECTION_MISSING'
       });
     }
+    const inputFilePaths = taskContext.fileEvidence.filePlan.inputs
+      .map((item) => item.filePath);
+    const pendingContext = {
+      ...storedPendingContext,
+      inputFilePaths,
+      fileEntries: storedPendingContext.fileEntries.map((entry, index) => ({
+        ...entry,
+        filePath: inputFilePaths[index]
+      }))
+    };
     clearPendingBigAccountSelection(prepared.contextId);
     const { isFixedMode, normalizedAssignments, rememberOrder } = prepared;
     try {
@@ -12398,7 +12687,20 @@ function registerFileHandlers() {
           createFreshnessGuard: createManualBalanceSeedFreshnessGuard
         });
         lastPendingBalanceSeedConfirmation = resolution.nextConfirmation;
-        return resolution.prepared;
+        if (!resolution.prepared.proceed) return resolution.prepared;
+        return {
+          ...resolution.prepared,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: resolution.prepared.inputFilePaths.map((filePath) => ({
+              filePath,
+              role: 'input',
+              sourceOperation: 'file:save-balance-seed'
+            })),
+            outputs: []
+          }
+        };
       } catch (error) {
         return {
           proceed: false,
@@ -12411,8 +12713,13 @@ function registerFileHandlers() {
       }
     },
 
-    async execute(_event, prepared) {
-      const { plan, pendingPrompt, importContext, session } = prepared || {};
+    async execute(_event, prepared, taskContext) {
+      const inputFilePaths = taskContext.fileEvidence.filePlan.inputs
+        .map((item) => item.filePath);
+      const { plan, pendingPrompt, session } = prepared || {};
+      const importContext = prepared && prepared.importContext
+        ? { ...prepared.importContext, inputFilePaths }
+        : null;
       if (!plan || !pendingPrompt || !importContext
           || (plan.existingIndex >= 0 && prepared.confirmedOverwrite !== true)) {
         throw new TypeError('余额补录 execute 缺少已确认的准备计划');
@@ -12535,10 +12842,18 @@ function registerFileHandlers() {
     }
     return {
       proceed: true,
-      outputPaths: [saveResult.filePath],
       kind,
       plan,
-      savePath: saveResult.filePath,
+      filePlan: {
+        version: 1,
+        allocation: 'eager',
+        inputs: [],
+        outputs: [{
+          filePath: saveResult.filePath,
+          role: 'output',
+          sourceOperation: kind === 'detail' ? 'file:export-detail' : 'file:export-balance'
+        }]
+      },
       beforeStart() {
         const current = buildStatementExportPlan(kind, plan.normalizedScope);
         if (current.stopResult
@@ -12554,20 +12869,34 @@ function registerFileHandlers() {
 
   trackedIpcHandle('file:export-detail', '生成网银账单', '导出明细', {
     prepare: (_event, scope = 'auto') => prepareStatementExport('detail', scope),
-    execute: (_event, prepared) => exportStatementByScope(
-      'detail',
-      prepared.plan.normalizedScope,
-      prepared.savePath
-    )
+    async execute(_event, prepared, taskContext) {
+      const result = exportStatementByScope(
+        'detail',
+        prepared.plan.normalizedScope,
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
+      );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return result;
+    }
   });
 
   trackedIpcHandle('file:export-balance', '生成网银账单', '导出余额', {
     prepare: (_event, scope = 'auto') => prepareStatementExport('balance', scope),
-    execute: (_event, prepared) => exportStatementByScope(
-      'balance',
-      prepared.plan.normalizedScope,
-      prepared.savePath
-    )
+    async execute(_event, prepared, taskContext) {
+      const result = exportStatementByScope(
+        'balance',
+        prepared.plan.normalizedScope,
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
+      );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return result;
+    }
   });
 
   // v1.5.3 R1 (T1.3)：月度余额装配 IPC
@@ -12579,7 +12908,14 @@ function registerFileHandlers() {
   //   { status: 'empty', message }
   //   { status: 'error', errorCode, message }
   // 注意：校验类错误（E1/E2/E3/E4）不走 createErrorResult 避免误触发错误报告；前端通过 createAlertDialog 弹窗
-  businessIpcHandle('monthly-balance:assemble', '装配月度余额', async (_event, payload = {}) => {
+  trackedIpcHandle('monthly-balance:assemble', '装配月度余额', '装配月度余额', {
+    prepare: (_event, payload = {}) => ({
+      proceed: true,
+      payload,
+      filePlan: { version: 1, allocation: 'deferred', inputs: [], outputs: [] }
+    }),
+    async execute(_event, prepared, taskContext) {
+    const payload = prepared.payload;
     try {
       const templateScopeRaw = payload && typeof payload.templateScope === 'string' ? payload.templateScope : '';
       const templateNameRaw = payload && typeof payload.templateName === 'string' ? payload.templateName : '';
@@ -12615,7 +12951,7 @@ function registerFileHandlers() {
         };
       }
 
-      const storageRoot = ensureStorageRoot();
+      const storageRoot = getStorageRoot();
       const useAll = templateScopeRaw === 'all' || templateScopeRaw === ALL_BANKS_TEMPLATE_SCOPE;
       const assembleScope = useAll ? ALL_BANKS_TEMPLATE_SCOPE : templateNameRaw.trim();
 
@@ -12664,16 +13000,25 @@ function registerFileHandlers() {
         kind: 'balance',
         outputFileName: publicFileName
       });
+      const promotionManifest = buildStatementDeferredOutputManifest(
+        output.outputFilePath,
+        'monthly-balance:assemble'
+      );
+      await taskContext.ensureFileBatch(promotionManifest);
+      const promotedOutputPath = promotionManifest.outputs[0].filePath;
 
       writeBalanceWorkbook({
         templateFilePath: balanceTemplatePath,
         records,
         templateFields: balanceTemplateFields,
-        outputFilePath: output.outputFilePath
+        outputFilePath: promotedOutputPath
+      });
+      await taskContext.settleArtifacts({
+        files: promotionManifest.outputs.map((item) => ({ artifactKey: item.artifactKey }))
       });
 
       lastGeneratedExports.monthlyBalance = {
-        filePath: output.outputFilePath,
+        filePath: promotedOutputPath,
         fileName: publicFileName,
         templateScope: assembleScope,
         templateLabel,
@@ -12696,7 +13041,7 @@ function registerFileHandlers() {
           `年月：${yearRaw}-${String(monthRaw).padStart(2, '0')}`,
           `记录数：${assembled.records.length}`,
           `缺失大账号数：${assembled.stats.missingAccounts.length}`,
-          `临时文件：${output.outputFilePath}`
+          `临时文件：${promotedOutputPath}`
         ]
       });
 
@@ -12720,6 +13065,7 @@ function registerFileHandlers() {
         errorType: '系统错误',
         originalError: error
       });
+    }
     }
   });
 
@@ -12762,9 +13108,17 @@ function registerFileHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [saveResult.filePath],
         pending,
-        savePath: saveResult.filePath,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'monthly-balance:export'
+          }]
+        },
         beforeStart() {
           if (lastGeneratedExports.monthlyBalance !== pending || !fs.existsSync(pending.filePath)) {
             throw new Error('月度余额待导出文件已变化，请重新选择导出位置');
@@ -12772,10 +13126,15 @@ function registerFileHandlers() {
         }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      const { pending, savePath } = prepared;
+      const { pending } = prepared;
+      const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
       fs.copyFileSync(pending.filePath, savePath);
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       appendActivityLogEntry({
         level: 'info',
         message: '月度余额账单导出成功',
@@ -12805,7 +13164,14 @@ function registerFileHandlers() {
 }
 
 function registerNewAccountHandlers() {
-  trackedIpcHandle('new-account:generate', '新开账户', '生成余额账单', (_event, payload = {}) => {
+  trackedIpcHandle('new-account:generate', '新开账户', '生成余额账单', {
+    prepare: (_event, payload = {}) => ({
+      proceed: true,
+      payload,
+      filePlan: { version: 1, allocation: 'deferred', inputs: [], outputs: [] }
+    }),
+    async execute(_event, prepared, taskContext) {
+    const payload = prepared.payload;
     const accounts = normalizeNewAccountAccounts(payload);
 
     if (!accounts.length) {
@@ -12923,19 +13289,28 @@ function registerNewAccountHandlers() {
         kind: 'new-account',
         outputFileName: `${nameParts.join('-')}.xlsx`
       });
+      const promotionManifest = buildStatementDeferredOutputManifest(
+        output.outputFilePath,
+        'new-account:generate'
+      );
+      await taskContext.ensureFileBatch(promotionManifest);
+      const promotedOutputPath = promotionManifest.outputs[0].filePath;
 
       writeBalanceWorkbook({
         templateFilePath: balanceTemplatePath,
         records: generated.records,
         templateFields: balanceTemplateFields,
-        outputFilePath: output.outputFilePath
+        outputFilePath: promotedOutputPath
+      });
+      await taskContext.settleArtifacts({
+        files: promotionManifest.outputs.map((item) => ({ artifactKey: item.artifactKey }))
       });
 
       lastGeneratedExports = {
         detail: lastGeneratedExports.detail,
         balance: lastGeneratedExports.balance,
         newAccount: {
-          filePath: output.outputFilePath,
+          filePath: promotedOutputPath,
           fileName: output.outputFileName,
           templateName: NEW_ACCOUNT_EXPORT_NAME
         }
@@ -13007,6 +13382,7 @@ function registerNewAccountHandlers() {
         }
       });
     }
+    }
   });
 
   trackedIpcHandle('new-account:export', '新开账户', '导出余额', {
@@ -13030,9 +13406,17 @@ function registerNewAccountHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [saveResult.filePath],
         generatedFile,
-        savePath: saveResult.filePath,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'new-account:export'
+          }]
+        },
         beforeStart() {
           if (lastGeneratedExports.newAccount !== generatedFile
               || !fs.existsSync(generatedFile.filePath)) {
@@ -13041,13 +13425,18 @@ function registerNewAccountHandlers() {
         }
       };
     },
-    execute(_event, prepared) {
-      return exportGeneratedFile(
+    async execute(_event, prepared, taskContext) {
+      const result = exportGeneratedFile(
         prepared.generatedFile,
         '暂无可导出的新开账户余额账单',
         '导出新开账户余额账单',
-        prepared.savePath
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return result;
     }
   });
 
@@ -13130,7 +13519,13 @@ function registerNewAccountHandlers() {
       return executePendingImportSubmission({
         pendingSession,
         prepared,
+        filePaths: taskContext.fileEvidence.filePlan.inputs
+          .map((item) => item.filePath),
         batchContext: taskContext.batchContext,
+        datasetSeed: createPendingDatasetSeed(
+          prepared.evidence.meta,
+          taskContext.batchContext.taskRunId
+        ),
         onProgress: (ev) => {
           try { webContents.send('pending:import:progress', ev); } catch (_e) { /* swallow */ }
         }
@@ -13153,8 +13548,16 @@ function registerNewAccountHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [result.filePath],
-        savePath: result.filePath,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: result.filePath,
+            role: 'output',
+            sourceOperation: 'pending:error:export-report'
+          }]
+        },
         beforeStart() {
           if (!pendingSession.hasPendingErrorReport()) {
             throw new Error('Pending 错误报告已变化，请重新导出');
@@ -13162,26 +13565,59 @@ function registerNewAccountHandlers() {
         }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      return pendingSession.exportErrorReport(prepared.savePath);
+      const exported = pendingSession.exportErrorReport(
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
+      );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return exported;
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
     }
   });
 
-  trackedIpcHandle('pending:reconcile:run', '月度 Pending', '开始运行', (_event, payload = {}) => {
-    if (!pendingDb) throw new Error('Pending DB 未初始化');
-    const rule = pendingRuleRepo.getRule(pendingDb);
-    if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
-      throw new Error('规则未设置（matchFields 为空）');
-    }
+  trackedIpcHandle('pending:reconcile:run', '月度 Pending', '开始运行', {
+    prepare(_event, payload = {}) {
+      if (!pendingDb) throw new Error('Pending DB 未初始化');
+      const rule = pendingRuleRepo.getRule(pendingDb);
+      if (!rule || !rule.matchFields || rule.matchFields.length === 0) {
+        throw new Error('规则未设置（matchFields 为空）');
+      }
+      const taskRunId = randomUUID();
+      const lineagePlan = pendingRunLineagePlan(pendingDb, payload);
+      return {
+        proceed: true,
+        taskRunId,
+        upperMonth: payload.upperMonth,
+        lowerMonth: payload.lowerMonth,
+        rule: {
+          matchFields: rule.matchFields.slice(),
+          compareFields: rule.compareFields.slice()
+        },
+        lineageIntents: lineagePlan.lineageIntents,
+        expectedDatasets: lineagePlan.expectedDatasets,
+        afterTerminal: ({ context, terminalStatus }) => terminalStatus === 'succeeded'
+          ? acknowledgePendingRunByTaskRun(pendingDb, context.taskRunId)
+          : null,
+        afterTerminalIntent: pendingRunTerminalRoute(taskRunId)
+      };
+    },
+    execute(_event, prepared, taskContext) {
     // PR #34 round 4 P2：包一层 status 让 trackedIpcHandle 能识别成功
     const result = pendingReconcileEngine.runReconciliation(pendingDb, {
-      upperMonth: payload.upperMonth,
-      lowerMonth: payload.lowerMonth,
-      rule
+      upperMonth: prepared.upperMonth,
+      lowerMonth: prepared.lowerMonth,
+      rule: prepared.rule,
+      archiveReceipt: {
+        archiveContractVersion: 1,
+        archiveTaskRunId: taskContext.operationContext.taskRunId
+      },
+      expectedDatasets: prepared.expectedDatasets
     });
 
     // v2.1.11 T2（D-T2-2 对账后自动匹配）：若该 upperMonth 有移除归档数据 → 用同一套 matchFields
@@ -13191,9 +13627,9 @@ function registerNewAccountHandlers() {
     let removalMatchResult = null;
     try {
       if (result && result.runId
-          && pendingRemovedRepo.countByMonth(pendingDb, payload.upperMonth) > 0) {
+          && pendingRemovedRepo.countByMonth(pendingDb, prepared.upperMonth) > 0) {
         removalMatchResult = pendingRemovalMatch.matchRemoval(
-          pendingDb, result.runId, payload.upperMonth, rule.matchFields
+          pendingDb, result.runId, prepared.upperMonth, prepared.rule.matchFields
         );
       }
     } catch (matchErr) {
@@ -13214,17 +13650,20 @@ function registerNewAccountHandlers() {
     }
 
     return { status: 'success', ...result, removalMatch: removalMatchResult };
+    }
   });
 
   ipcMain.handle('pending:diff:runs-list', () => {
     if (!pendingDb) return [];
-    try { return pendingDiffRepo.listAllRuns(pendingDb); } catch (_e) { return []; }
+    try { return pendingDiffRepo.listAllRuns(pendingDb).map(publicPendingRun); } catch (_e) { return []; }
   });
 
   ipcMain.handle('pending:diff:runs-for-month-pair', (_event, payload = {}) => {
     if (!pendingDb) return [];
     try {
-      return pendingDiffRepo.listRunsForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+      return pendingDiffRepo.listRunsForMonthPair(
+        pendingDb, payload.upperMonth, payload.lowerMonth
+      ).map(publicPendingRun);
     } catch (_e) {
       return [];
     }
@@ -13233,7 +13672,11 @@ function registerNewAccountHandlers() {
   ipcMain.handle('pending:diff:latest-run-for', (_event, payload = {}) => {
     if (!pendingDb) return null;
     try {
-      return pendingDiffRepo.getLatestRunForMonthPair(pendingDb, payload.upperMonth, payload.lowerMonth);
+      return publicPendingRun(
+        pendingDiffRepo.getLatestRunForMonthPair(
+          pendingDb, payload.upperMonth, payload.lowerMonth
+        )
+      );
     } catch (_e) {
       return null;
     }
@@ -13248,6 +13691,10 @@ function registerNewAccountHandlers() {
       if (!Number.isFinite(runId) || runId <= 0) {
         return { proceed: false, result: { status: 'error', message: 'runId 无效' } };
       }
+      const run = pendingDiffRepo.getRunById(pendingDb, runId);
+      if (!run) {
+        return { proceed: false, result: { status: 'error', message: `run #${runId} 不存在` } };
+      }
       const saveResult = await dialog.showSaveDialog({
         title: '保存 Pending 差异文件',
         defaultPath: payload.defaultFileName || `月度Pending差异-run${runId}.xlsx`,
@@ -13258,14 +13705,32 @@ function registerNewAccountHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [saveResult.filePath],
         runId,
-        savePath: saveResult.filePath
+        lineageIntents: [runOutputLineageIntent(run)],
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'pending:diff:export-single'
+          }]
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      return pendingExportWriter.exportSingleRun(pendingDb, prepared.runId, prepared.savePath);
+      const result = pendingExportWriter.exportSingleRun(
+        pendingDb,
+        prepared.runId,
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
+      );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return result;
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
@@ -13277,6 +13742,10 @@ function registerNewAccountHandlers() {
       if (!pendingDb) {
         return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
       }
+      const selection = pendingAggregateRunSelection(pendingDb);
+      if (selection.runIds.length === 0) {
+        return { proceed: false, result: { status: 'error', message: '暂无运算 record' } };
+      }
       const saveResult = await dialog.showSaveDialog({
         title: '保存 Pending 差异汇总文件',
         defaultPath: `月度Pending差异-汇总-${new Date().toISOString().slice(0, 10)}.xlsx`,
@@ -13287,13 +13756,32 @@ function registerNewAccountHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [saveResult.filePath],
-        savePath: saveResult.filePath
+        runIds: selection.runIds,
+        lineageIntents: selection.lineageIntents,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: saveResult.filePath,
+            role: 'output',
+            sourceOperation: 'pending:diff:export-aggregate'
+          }]
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     try {
-      return pendingExportWriter.exportAggregate(pendingDb, prepared.savePath);
+      const result = pendingExportWriter.exportAggregateRuns(
+        pendingDb,
+        prepared.runIds,
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
+      );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return result;
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
@@ -13319,15 +13807,35 @@ function registerNewAccountHandlers() {
     return { cancelled: false, files: result.filePaths };
   });
 
-  trackedIpcHandle('pending:removed:import', '月度 Pending', '导入移除核对', (_event, payload = {}) => {
-    if (!pendingDb) return { status: 'error', message: 'Pending DB 未初始化' };
-    const { yearMonth, files } = payload || {};
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
-    }
-    if (!Array.isArray(files) || files.length === 0) {
-      return { status: 'error', message: '未选择移除归档文件' };
-    }
+  trackedIpcHandle('pending:removed:import', '月度 Pending', '导入移除核对', {
+    prepare(_event, payload = {}) {
+      const { yearMonth, files } = payload || {};
+      if (!pendingDb) return { proceed: false, result: { status: 'error', message: 'Pending DB 未初始化' } };
+      if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+        return { proceed: false, result: { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' } };
+      }
+      if (!Array.isArray(files) || files.length === 0) {
+        return { proceed: false, result: { status: 'error', message: '未选择移除归档文件' } };
+      }
+      return {
+        proceed: true,
+        yearMonth,
+        expectedDatasetHead: pendingRemovedRepo.getMonthHead(pendingDb, yearMonth),
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: files.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'pending:removed:import'
+          })),
+          outputs: []
+        }
+      };
+    },
+    execute(_event, prepared, taskContext) {
+    const { yearMonth } = prepared;
+    const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     // 多文件合并解析；任一文件解析失败（表头不符/空文件）→ 整体报错，不入库（资金红线：避免半写）
     const allRows = [];
     const sourceNames = [];
@@ -13345,7 +13853,16 @@ function registerNewAccountHandlers() {
       };
     }
     try {
-      const result = pendingRemovedRepo.replaceByMonth(pendingDb, yearMonth, allRows, sourceNames.join(', '));
+      const result = pendingRemovedRepo.replaceByMonthWithSeed(
+        pendingDb,
+        yearMonth,
+        allRows,
+        sourceNames.join(', '),
+        createPendingDatasetSeed(
+          prepared.expectedDatasetHead,
+          taskContext.batchContext.taskRunId
+        )
+      );
       return {
         status: 'success',
         yearMonth,
@@ -13355,6 +13872,7 @@ function registerNewAccountHandlers() {
       };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -13424,17 +13942,38 @@ function registerNewAccountHandlers() {
     return { status: 'success', filePath: res.filePaths[0] };
   });
 
-  trackedIpcHandle('bankBuRecon:import:run', '月度银行对账单BU回填校验', '导入文件', async (_event, payload = {}) => {
-    const { yearMonth, pendingPath, bankPath } = payload || {};
-    if (!database || !database.db) {
-      return { status: 'error', message: '数据库未初始化' };
-    }
-    if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
-      return { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' };
-    }
-    if (!pendingPath || !bankPath) {
-      return { status: 'error', message: '缺少文件路径' };
-    }
+  trackedIpcHandle('bankBuRecon:import:run', '月度银行对账单BU回填校验', '导入文件', {
+    prepare(_event, payload = {}) {
+      const { yearMonth, pendingPath, bankPath } = payload || {};
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      }
+      if (!yearMonth || !/^\d{4}-\d{2}$/.test(yearMonth)) {
+        return { proceed: false, result: { status: 'error', message: 'yearMonth 格式错误（应为 YYYY-MM）' } };
+      }
+      if (!pendingPath || !bankPath) {
+        return { proceed: false, result: { status: 'error', message: '缺少文件路径' } };
+      }
+      return {
+        proceed: true,
+        args: [payload],
+        yearMonth,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [pendingPath, bankPath].map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'bankBuRecon:import:run'
+          })),
+          outputs: []
+        }
+      };
+    },
+    async execute(_event, prepared, taskContext) {
+    const { yearMonth } = prepared;
+    const [pendingPath, bankPath] = taskContext.fileEvidence.filePlan.inputs
+      .map((item) => item.filePath);
     try {
       const pendingResult = readPendingGuanliFile(pendingPath);
       const bankResult = readBankFile(bankPath);
@@ -13457,6 +13996,7 @@ function registerNewAccountHandlers() {
         };
       }
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -13492,14 +14032,29 @@ function registerNewAccountHandlers() {
   });
 
   // v0.5: 单月导出到用户指定路径（替代旧 bankBuRecon:export）
-  trackedIpcHandle('bankBuRecon:export:single', '月度银行对账单BU回填校验', '导出差异', async (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { runId, savePath } = payload || {};
-    const runIdNum = Number(runId);
-    if (!Number.isFinite(runIdNum) || runIdNum <= 0) {
-      return { status: 'error', message: 'runId 无效' };
-    }
-    if (!savePath) return { status: 'error', message: '保存路径未指定' };
+  trackedIpcHandle('bankBuRecon:export:single', '月度银行对账单BU回填校验', '导出差异', {
+    prepare(_event, payload = {}) {
+      const runIdNum = Number(payload && payload.runId);
+      const savePath = payload && payload.savePath;
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      if (!Number.isFinite(runIdNum) || runIdNum <= 0) {
+        return { proceed: false, result: { status: 'error', message: 'runId 无效' } };
+      }
+      if (!savePath) return { proceed: false, result: { status: 'error', message: '保存路径未指定' } };
+      return {
+        proceed: true,
+        runIdNum,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bankBuRecon:export:single' }]
+        }
+      };
+    },
+    async execute(_event, prepared, taskContext) {
+    const { runIdNum } = prepared;
+    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
     // v3.0.5 PR-4：run 校验 + 导出数据均走主库镜像 + 侧库重跑（lastRunCache 侧库化失效 → 重跑路径）。
     const userDataDir = path.dirname(database.dbPath);
     const run = bankBuReconRunData.getMirrorRun({ mainDb: database.db, runId: runIdNum });
@@ -13524,17 +14079,35 @@ function registerNewAccountHandlers() {
         overrideSavePath: savePath
       });
       bankBuReconRunData.recordExportPath({ mainDb: database.db, runId: runIdNum, exportPath: exp.filePath });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       return { status: 'success', filePath: exp.filePath };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     }
+    }
   });
 
   // v0.5: 跨月汇总导出到用户指定路径
-  trackedIpcHandle('bankBuRecon:export:aggregate', '月度银行对账单BU回填校验', '导出差异', async (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { savePath } = payload || {};
-    if (!savePath) return { status: 'error', message: '保存路径未指定' };
+  trackedIpcHandle('bankBuRecon:export:aggregate', '月度银行对账单BU回填校验', '导出差异', {
+    prepare(_event, payload = {}) {
+      const savePath = payload && payload.savePath;
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      if (!savePath) return { proceed: false, result: { status: 'error', message: '保存路径未指定' } };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bankBuRecon:export:aggregate' }]
+        }
+      };
+    },
+    async execute(_event, _prepared, taskContext) {
+    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
     try {
       // v3.0.5 PR-4：跨月汇总逐月 open 侧库重跑（侧库 + 历史主库 run 双源）。
       const { months, skippedMonths } = bankBuReconRunData.aggregateExportData({
@@ -13548,9 +14121,14 @@ function registerNewAccountHandlers() {
         matchedMonths: months,
         savePath
       });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       return { status: 'success', filePath: exp.filePath, skippedMonths, includedMonths: months.map((m) => m.yearMonth) };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -13649,10 +14227,24 @@ function registerNewAccountHandlers() {
   // 业务OP 导入（#1 双重校验 + #4 替换原子事务 + #5 整批拒绝 + #15 清空旧 runs）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数（rejected/error 不计，spec D6）
   trackedIpcHandle('bizOpRecon:import:run-biz-op', '业务OP数据核对', '导入文件', {
-    async execute(event, _prepared, taskContext, payload = {}) {
-    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
-    const { date, filePath } = payload || {};
-    if (!date || !filePath) return { status: 'error', message: '入参缺失（date / filePath）' };
+    prepare(_event, payload = {}) {
+      const { date, filePath } = payload || {};
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
+      if (!date || !filePath) return { proceed: false, result: { status: 'error', message: '入参缺失（date / filePath）' } };
+      return {
+        proceed: true,
+        date,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{ filePath, role: 'input', sourceOperation: 'bizOpRecon:import:run-biz-op' }],
+          outputs: []
+        }
+      };
+    },
+    async execute(event, prepared, taskContext) {
+    const { date } = prepared;
+    const filePath = taskContext.fileEvidence.filePlan.inputs[0].filePath;
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
       // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径；
@@ -13688,15 +14280,33 @@ function registerNewAccountHandlers() {
   // 流水对账单 导入（#3 出入方向枚举 + #5 整批拒绝）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
   trackedIpcHandle('bizOpRecon:import:run-flow', '业务OP数据核对', '导入文件', {
-    async execute(event, _prepared, taskContext, payload = {}) {
-    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
+    prepare(_event, payload = {}) {
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
     // v3.0.2 需求1b：接收 filePaths 数组（多文件合并到同一日期）。
     //   兼容旧入参 filePath（单数）→ 归一为 [filePath]。校验：date 必填 + 至少一个文件。
     const { date, filePaths, filePath } = payload || {};
     const files = Array.isArray(filePaths) && filePaths.length > 0
       ? filePaths
       : (filePath ? [filePath] : []);
-    if (!date || files.length === 0) return { status: 'error', message: '入参缺失（date / filePaths）' };
+      if (!date || files.length === 0) return { proceed: false, result: { status: 'error', message: '入参缺失（date / filePaths）' } };
+      return {
+        proceed: true,
+        date,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: files.map((inputPath) => ({
+            filePath: inputPath,
+            role: 'input',
+            sourceOperation: 'bizOpRecon:import:run-flow'
+          })),
+          outputs: []
+        }
+      };
+    },
+    async execute(event, prepared, taskContext) {
+    const { date } = prepared;
+    const files = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     try {
       const errorReportsDir = path.join(ensureStorageRoot(), 'error-reports');
       // v3.0.5 PR-4：导入落 per-月侧库（编排层把 worker dbPath 覆盖为 month(date) 侧库路径）。
@@ -13770,22 +14380,55 @@ function registerNewAccountHandlers() {
 
   // 跑对账（#3/#6/#7/#10 拍板）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:run', '业务OP数据核对', '开始运行', (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
-    const { date, buName } = payload || {};
-    if (!date || !buName) return { status: 'error', message: '入参缺失（date / buName）' };
-    try {
-      // v3.0.5 PR-4：inline 侧库直跑（runReconciliation 在 month(date) 侧库 db 上跑，算法零改动；
-      //   月初 T-2 由月末导入写入的冗余副本保证在库 → 单库自洽）+ 主库 runs 镜像。
-      const { runId, stats } = bizOpReconRunData.runViaSideDb({
+  trackedIpcHandle('bizOpRecon:run', '业务OP数据核对', '开始运行', {
+    prepare(_event, payload = {}) {
+      if (!database || !database.db) {
+        return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
+      }
+      const { date, buName } = payload || {};
+      if (!date || !buName) {
+        return {
+          proceed: false,
+          result: { status: 'error', message: '入参缺失（date / buName）' }
+        };
+      }
+      const taskRunId = randomUUID();
+      const plan = bizOpReconRunData.prepareRunLineage({
         userDataDir: path.dirname(database.dbPath),
-        mainDb: database.db,
         date,
         buName
       });
-      return { runId, status: 'success', stats };
-    } catch (err) {
-      return { status: 'error', message: err && err.message ? err.message : String(err) };
+      return {
+        proceed: true,
+        taskRunId,
+        date,
+        buName,
+        lineageIntents: plan.lineageIntents,
+        expectedDatasets: plan.expectedDatasets,
+        afterTerminal: ({ terminalStatus }) => terminalStatus === 'succeeded'
+          ? bizOpReconRunData.acknowledgeRunByTaskRun({
+              userDataDir: path.dirname(database.dbPath),
+              mainDb: database.db,
+              taskRunId
+            })
+          : null,
+        afterTerminalIntent: bizOpRunTerminalRoute(taskRunId)
+      };
+    },
+    execute(_event, prepared, taskContext) {
+      try {
+        const { runId, stats } = bizOpReconRunData.runViaSideDb({
+          userDataDir: path.dirname(database.dbPath),
+          mainDb: database.db,
+          date: prepared.date,
+          buName: prepared.buName,
+          taskRunId: taskContext.operationContext.taskRunId,
+          expectedDatasets: prepared.expectedDatasets
+        });
+        return { runId, status: 'success', stats };
+      } catch (err) {
+        return { status: 'error', message: err && err.message ? err.message : String(err) };
+      }
     }
   });
 
@@ -13820,53 +14463,116 @@ function registerNewAccountHandlers() {
 
   // 导出指定日期（#14 拍板 A sheet 名 ISO）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:export:date', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
-    const { runId, savePath } = payload || {};
-    if (!runId || !savePath) return { status: 'error', message: '入参缺失（runId / savePath）' };
+  trackedIpcHandle('bizOpRecon:export:date', '业务OP数据核对', '导出差异', {
+    prepare(_event, payload = {}) {
+      const { runId, savePath } = payload || {};
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
+      if (!runId || !savePath) return { proceed: false, result: { status: 'error', message: '入参缺失（runId / savePath）' } };
+      const runLocator = bizOpReconRunData.freezeRunLocator({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        runId
+      });
+      return {
+        proceed: true,
+        runLocator,
+        lineageIntents: [bizOpRunOutputIntent(runLocator)],
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date' }]
+        }
+      };
+    },
+    async execute(_event, prepared, taskContext) {
+    const { runLocator } = prepared;
+    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
     // v3.0.5 PR-4：导出走侧库——主库镜像拿 (date,BU)+side_db_rel_path → open 该月侧库给 writer
     //   （writer 读 diff_rows + getRowById(imports) 全在侧库；月初跨月 T-2 行由冗余副本在库 → byte-for-byte）。
     const userDataDir = path.dirname(database.dbPath);
-    const ctx = bizOpReconRunData.openExportContextByRun({ userDataDir, mainDb: database.db, runId });
-    if (!ctx || !ctx.run) return { status: 'error', message: `run #${runId} 不存在` };
+    let exportDb = null;
     try {
+      exportDb = bizOpReconRunData.buildFrozenRangeExportDb({
+        userDataDir,
+        mainDb: database.db,
+        runLocators: [runLocator]
+      });
       const result = await writeBizOpSingleDateDiffWorkbook({
-        db: ctx.db,
-        date: ctx.run.data_date,
-        buName: ctx.run.bu_name,
-        // v3.0.5 PR-4：writer getDiffRowsByRun 用侧库内 run id（ctx.exportRunId），非主库镜像 id。
-        runId: ctx.exportRunId,
+        db: exportDb,
+        date: runLocator.date,
+        buName: runLocator.buName,
+        runId: runLocator.sideRunId,
         savePath
       });
-      bizOpReconRunData.recordExportPath({ mainDb: database.db, runId, exportPath: result.filePath });
+      bizOpReconRunData.recordExportPath({
+        mainDb: database.db,
+        runId: runLocator.mirrorRunId,
+        exportPath: result.filePath
+      });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
       return { status: 'success', filePath: result.filePath, rowCount: result.rowCount };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
     } finally {
-      if (ctx && ctx.sideDb) { try { ctx.sideDb.close(); } catch (_e) { /* swallow */ } }
+      if (exportDb) { try { exportDb.close(); } catch (_e) { /* swallow */ } }
+    }
     }
   });
 
   // 导出指定日期区间（v2.1.3-fix6 拍板回滚：单 sheet 合并 + 第 1 列 Billdate 区分日期）
   // PR #45 round 3 P2：trackedIpcHandle 接入；仅 status='success' 计数
-  trackedIpcHandle('bizOpRecon:export:date-range', '业务OP数据核对', '导出差异', async (_event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未就绪' };
-    const { buName, startDate, endDate, savePath } = payload || {};
-    if (!buName || !startDate || !endDate || !savePath) {
-      return { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' };
-    }
+  trackedIpcHandle('bizOpRecon:export:date-range', '业务OP数据核对', '导出差异', {
+    prepare(_event, payload = {}) {
+      const { buName, startDate, endDate, savePath } = payload || {};
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未就绪' } };
+      if (!buName || !startDate || !endDate || !savePath) {
+        return { proceed: false, result: { status: 'error', message: '入参缺失（buName / startDate / endDate / savePath）' } };
+      }
+      const selection = bizOpReconRunData.freezeRangeRunSelection({
+        userDataDir: path.dirname(database.dbPath),
+        mainDb: database.db,
+        buName,
+        startDate,
+        endDate
+      });
+      return {
+        proceed: true,
+        buName,
+        startDate,
+        endDate,
+        runLocators: selection.runLocators,
+        lineageIntents: selection.lineageIntents,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{ filePath: savePath, role: 'output', sourceOperation: 'bizOpRecon:export:date-range' }]
+        }
+      };
+    },
+    async execute(_event, prepared, taskContext) {
+    const { buName, startDate, endDate } = prepared;
+    const savePath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
     // v3.0.5 PR-4：区间导出跨多日多月——构造临时内存合并 db（把区间内 success run 的 runs/diff_rows/imports
     //   从各月侧库 + 主库历史合并进内存 db，保 id/source_row_id 映射），writer 在合并 db 上跑（writer 零改动）。
     let memDb = null;
     try {
-      memDb = bizOpReconRunData.buildRangeExportDb({
+      memDb = bizOpReconRunData.buildFrozenRangeExportDb({
         userDataDir: path.dirname(database.dbPath),
         mainDb: database.db,
-        buName, startDate, endDate
+        runLocators: prepared.runLocators
       });
       const result = await writeBizOpDateRangeDiffWorkbook({
         db: memDb,
         buName, startDate, endDate, savePath
+      });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
       });
       return {
         status: 'success',
@@ -13879,6 +14585,7 @@ function registerNewAccountHandlers() {
     } finally {
       if (memDb) { try { memDb.close(); } catch (_e) { /* swallow */ } }
     }
+    }
   });
 
   // 运行历史（debug 用，可选）
@@ -13888,7 +14595,8 @@ function registerNewAccountHandlers() {
     const { date, buName } = payload || {};
     if (!date || !buName) return [];
     try {
-      return bizOpReconRunData.listRunsDualSource({ mainDb: database.db, date, buName });
+      return bizOpReconRunData.listRunsDualSource({ mainDb: database.db, date, buName })
+        .map(publicBizOpRun);
     } catch (_e) {
       return [];
     }
@@ -13916,12 +14624,29 @@ function registerNewAccountHandlers() {
 
   // 读多文件 → 统计总条数 + 定月份（供 F1）。
   // 整批拒绝（资金红线 🔴）：非法方向 / 非数值金额 / 空账单日期 / 多月份混杂 → status:'rejected' + errorRows。
-  trackedIpcHandle('vccOpCalc:import:scan', 'VCC业务OP计算', '导入文件', async (event, payload = {}) => {
-    if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
-    const { filePaths } = payload || {};
-    if (!Array.isArray(filePaths) || filePaths.length === 0) {
-      return { status: 'error', message: '未选择文件' };
-    }
+  trackedIpcHandle('vccOpCalc:import:scan', 'VCC业务OP计算', '导入文件', {
+    prepare(_event, payload = {}) {
+      const { filePaths } = payload || {};
+      if (!database || !database.db) return { proceed: false, result: { status: 'error', message: '数据库未初始化' } };
+      if (!Array.isArray(filePaths) || filePaths.length === 0) {
+        return { proceed: false, result: { status: 'error', message: '未选择文件' } };
+      }
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'vccOpCalc:import:scan'
+          })),
+          outputs: []
+        }
+      };
+    },
+    async execute(event, _prepared, taskContext) {
+    const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
     // 流式读取+聚合（spec §9 大文件路径，合并 scan+compute，不存全量行）；进度推送 renderer。
     // 表头校验失败 → FileValidationError；非法行/多月份混杂 → ok:false + errorRows（整批拒绝）。
     let result;
@@ -13949,31 +14674,50 @@ function registerNewAccountHandlers() {
       return { status: 'rejected', errorRows: result.errorRows, errorCount: result.errorCount };
     }
     return { status: 'success', yearMonth: result.yearMonth, totalRows: result.totalRows, fileCount: filePaths.length };
+    }
   });
 
   // 统计发生额出/入/总额 + perFile（供 F2，不落库）。复用 scan 缓存的 rows（资金红线：同口径整批校验）。
-  trackedIpcHandle('vccOpCalc:run:compute-amounts', 'VCC业务OP计算', '开始运行', (_event, _payload = {}) => {
+  trackedIpcHandle('vccOpCalc:run:compute-amounts', 'VCC业务OP计算', '开始运行', {
+    execute: (_event, _prepared, taskContext, _payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     // 流式改造（spec §9）：scan 阶段已合并统计并缓存 lastComputeCache，这里直接返回缓存（不重读文件）
     const cache = vccOpCalcSession.getComputeCache();
     if (!cache) return { status: 'error', message: '无统计结果（请先导入文件）' };
+    appendActivityLogEntry({
+      level: 'info',
+      source: 'main',
+      domain: 'vcc-op-calc',
+      message: 'VCC 业务 OP 发生额统计完成',
+      details: [`Task Run：${taskContext.operationContext.taskRunId}`]
+    });
     return {
       status: 'success',
       yearMonth: cache.yearMonth,
       totals: cache.totals,
       perFile: cache.perFile
     };
+    }
   });
 
   // 收 beginOp → 算 endOp = beginOp + 发生额 → 原子落表 A/B（资金红线 🔴）。返回 { runId, endOp }。
-  trackedIpcHandle('vccOpCalc:run:save', 'VCC业务OP计算', '开始运行', (_event, payload = {}) => {
+  trackedIpcHandle('vccOpCalc:run:save', 'VCC业务OP计算', '开始运行', {
+    execute: (_event, _prepared, taskContext, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { beginOp } = payload || {};
     try {
       const saved = vccOpCalcSession.saveRun({ beginOp });
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'vcc-op-calc',
+        message: 'VCC 业务 OP 计算结果保存成功',
+        details: [`Task Run：${taskContext.operationContext.taskRunId}`, `业务运行：${saved.runId}`]
+      });
       return { status: 'success', ...saved };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 
@@ -14026,18 +14770,72 @@ function registerNewAccountHandlers() {
   });
 
   trackedIpcHandle('vccFinancialOp:import:apply', 'VCC财务OP校验', '导入文件', {
-    execute: async (event, _prepared, taskContext, payload = {}) => {
+    prepare: async (_event, payload = {}) => {
+      const inspectedFiles = payload.files;
+      const fileDescriptors = Object.freeze(inspectedFiles.map((file) => {
+        const { filePath: _filePath, ...descriptor } = file;
+        return Object.freeze(descriptor);
+      }));
+      return {
+        proceed: true,
+        fileDescriptors,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: inspectedFiles.map((file) => ({
+            filePath: file.filePath,
+            role: 'input',
+            sourceOperation: 'vccFinancialOp:import:apply'
+          })),
+          outputs: []
+        },
+        beforeStart: async (batchContext, fileEvidence) => {
+          const files = fileDescriptors.map((descriptor, index) => ({
+            ...descriptor,
+            filePath: fileEvidence.filePlan.inputs[index].filePath
+          }));
+          return {
+            vccImportArchiveHandoffFiles: await prepareVccImportArchiveHandoff(
+              { ...payload, files },
+              batchContext
+            )
+          };
+        }
+      };
+    },
+    execute: async (event, prepared, taskContext, payload = {}) => {
       let service = null;
       try {
-        const batchContext = requireVccFinancialOpBatchContext(taskContext);
+        const batchContext = taskContext.batchContext;
+        const files = prepared.fileDescriptors.map((descriptor, index) => ({
+          ...descriptor,
+          filePath: taskContext.fileEvidence.filePlan.inputs[index].filePath
+        }));
+        const businessPayload = { ...payload, files };
         service = getVccFinancialOpService();
-        const result = await service.importSelectedFiles(payload, (progress) => {
+        const handoffFiles = taskContext.fileEvidence.vccImportArchiveHandoffFiles;
+        const settled = await taskContext.settleArtifacts({
+          files: taskContext.fileEvidence.filePlan.inputs.map((item, index) => ({
+            artifactKey: item.artifactKey,
+            expectedSha256: handoffFiles[index].expectedSha256,
+            expectedSizeBytes: handoffFiles[index].expectedSizeBytes
+          }))
+        });
+        if (!settled || settled.ok !== true || settled.durable !== true) {
+          const error = new Error('VCC 导入输入文件未全部形成 ready 存档，业务未开始');
+          error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_FAILED';
+          throw error;
+        }
+        const workerHandoffFiles = handoffFiles.map((file, index) => Object.freeze({
+          ...file,
+          archiveArtifactId: settled.results[index].artifact.id
+        }));
+        const result = await service.importSelectedFiles(businessPayload, (progress) => {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:import:progress', progress);
           }
-        }, batchContext, taskContext.vccImportArchiveHandoffFiles);
+        }, batchContext, workerHandoffFiles);
         const businessResult = { status: 'success', ...result };
-        await taskContext.settleArtifacts({ result: businessResult });
         service.syncImportArchiveLineage();
         return businessResult;
       } catch (error) {
@@ -14054,7 +14852,6 @@ function registerNewAccountHandlers() {
           records: Array.isArray(partial.records) ? partial.records : []
         };
         if (service) {
-          await taskContext.settleArtifacts({ result: businessResult, error });
           service.syncImportArchiveLineage();
         }
         return businessResult;
@@ -14088,7 +14885,7 @@ function registerNewAccountHandlers() {
       try {
         return await getVccFinancialOpService().calculate(
           payload,
-          requireVccFinancialOpBatchContext(taskContext)
+          taskContext.operationContext
         );
       } catch (error) {
         return vccFinancialOpErrorResult(error);
@@ -14101,7 +14898,7 @@ function registerNewAccountHandlers() {
       try {
         return await getVccFinancialOpService().initializeOpening(
           payload,
-          requireVccFinancialOpBatchContext(taskContext)
+          taskContext.operationContext
         );
       } catch (error) {
         return vccFinancialOpErrorResult(error);
@@ -14116,7 +14913,7 @@ function registerNewAccountHandlers() {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:operation:progress', progress);
           }
-        }, requireVccFinancialOpBatchContext(taskContext));
+        }, taskContext.operationContext);
       } catch (error) {
         return vccFinancialOpErrorResult(error);
       }
@@ -14139,7 +14936,7 @@ function registerNewAccountHandlers() {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:operation:progress', progress);
           }
-        }, requireVccFinancialOpBatchContext(taskContext));
+        }, taskContext.operationContext);
         return { ...result, operationStatus: result.status, status: 'success' };
       } catch (error) {
         return vccFinancialOpErrorResult(error);
@@ -14184,7 +14981,7 @@ function registerNewAccountHandlers() {
           if (event && event.sender && !event.sender.isDestroyed()) {
             event.sender.send('vccFinancialOp:operation:progress', progress);
           }
-        }, requireVccFinancialOpBatchContext(taskContext));
+        }, taskContext.operationContext);
         return { ...result, runId: result.runId || prepared.runId, operationStatus: result.status, status: 'success' };
       } catch (error) {
         return vccFinancialOpErrorResult(error);
@@ -14200,76 +14997,11 @@ function registerNewAccountHandlers() {
     return getVccFinancialOpService().listImportRecords(payload.yearMonth);
   });
 
-  trackedIpcHandle('vccFinancialOp:imports:resolve', 'VCC财务OP校验', '标记导入异常已处理', {
-    execute: async (_event, _prepared, taskContext, payload = {}) => {
-      try {
-        return {
-          status: 'success',
-          record: await getVccFinancialOpService().resolveRecord(
-            payload,
-            requireVccFinancialOpBatchContext(taskContext)
-          )
-        };
-      } catch (error) {
-        return { status: 'error', message: error && error.message ? error.message : String(error) };
-      }
-    }
-  });
-
   ipcMain.handle('vccFinancialOp:data-manager:overview', (_event, payload = {}) => {
     try {
       return { status: 'success', ...getVccFinancialOpService().dataManagerOverview(payload.yearMonth) };
     } catch (error) {
       return { status: 'error', message: error && error.message ? error.message : String(error) };
-    }
-  });
-
-  ipcMain.handle('vccFinancialOp:storage:inspect', () => {
-    try {
-      return getVccStorageMigrationCoordinator().inspect();
-    } catch (error) {
-      return { status: 'error', code: error.code, message: error.message || String(error) };
-    }
-  });
-
-  ipcMain.handle('vccFinancialOp:storage:migrate', async () => {
-    try {
-      const coordinator = getVccStorageMigrationCoordinator();
-      const inspection = coordinator.inspect();
-      if (inspection.status !== 'success') return inspection;
-      if (!inspection.migrationRequired) {
-        return { status: 'success', noChange: true, message: 'VCC 存储已经是最新合同' };
-      }
-      if (!inspection.ready) {
-        return {
-          status: 'error',
-          code: 'vcc-storage-not-ready',
-          message: '仍有未终态导入或 staging 数据，请完成恢复后再优化存储'
-        };
-      }
-      const formatGiB = (bytes) => `${(Number(bytes || 0) / (1024 ** 3)).toFixed(2)} GB`;
-      const confirmation = await dialog.showMessageBox(mainWindow, {
-        type: 'warning',
-        title: '优化 VCC 存储',
-        message: '将进入维护模式并重建数据库，期间不能开始其他任务。',
-        detail: [
-          `当前数据库：${formatGiB(inspection.sourceBytes)}`,
-          `当前 VCC 核心表：${formatGiB(inspection.vccCoreBytes)}`,
-          `候选数据库保守估算：${formatGiB(inspection.estimatedTargetBytes)}`,
-          '迁移会执行 WAL 截断、完整性检查、逐项守恒验证和原子切换。',
-          '验证失败时旧数据库保持不变；成功后应用会自动重启。'
-        ].join('\n'),
-        buttons: ['开始优化', '取消'],
-        defaultId: 1,
-        cancelId: 1,
-        noLink: true,
-        checkboxLabel: '首次只读校验成功后自动删除旧数据库备份',
-        checkboxChecked: false
-      });
-      if (confirmation.response !== 0) return { status: 'cancelled' };
-      return await coordinator.run({ deleteOldDatabase: confirmation.checkboxChecked === true });
-    } catch (error) {
-      return { status: 'error', code: error.code, message: error.message || String(error) };
     }
   });
 
@@ -14322,7 +15054,7 @@ function registerNewAccountHandlers() {
             if (event && event.sender && !event.sender.isDestroyed()) {
               event.sender.send('vccFinancialOp:operation:progress', progress);
             }
-          }, requireVccFinancialOpBatchContext(taskContext));
+          }, taskContext.operationContext);
           service.syncImportArchiveLineage();
           return {
             ...result,
@@ -14399,11 +15131,19 @@ function registerNewAccountHandlers() {
         }
         return {
           proceed: true,
-          outputPaths: [outputPath],
-          outputPath,
           expectedInspection: inspection,
           taskGeneration: inspection.taskGeneration,
-          targetSnapshots: captureToolboxTargetSnapshots([outputPath])
+          vccOutputPublicationTaskIds: [],
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: outputPath,
+              role: 'output',
+              sourceOperation: 'vccFinancialOp:data-manager:export'
+            }]
+          }
         };
       } catch (error) {
         return {
@@ -14413,19 +15153,20 @@ function registerNewAccountHandlers() {
       }
     },
     execute: async (_event, prepared, taskContext, payload = {}) => {
-      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const batchContext = taskContext.batchContext;
+      const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
       const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
         const result = await getVccFinancialOpService().exportDatasetData({
           ...payload,
-          outputPath: prepared.outputPath,
+          outputPath,
           generationOutputPath: path.join(publicationStagingDirectory, 'dataset.xlsx'),
           expectedInspection: prepared.expectedInspection,
           taskGeneration: prepared.taskGeneration,
-          targetSnapshots: prepared.targetSnapshots,
-          onDurableHandoff: (_publication, exportResult) => taskContext.settleArtifacts({
-            result: { status: 'success', filePath: prepared.outputPath }
-          })
+          targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+          onDurableHandoff: (publication, _exportResult, evidence) => (
+            settleVccOutputPublication(prepared, taskContext, publication, evidence)
+          )
         }, undefined, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
@@ -14478,13 +15219,27 @@ function registerNewAccountHandlers() {
           if (choice.canceled || !choice.filePath) {
             return { proceed: false, result: { status: 'cancelled' } };
           }
+          const outputPaths = planRunWorkbookOutputPaths({
+            targetMonth: target.targetMonth,
+            subjects,
+            outputPath: choice.filePath
+          });
           return {
             proceed: true,
             runId: target.runId,
             targetMonth: target.targetMonth,
-            outputPath: choice.filePath,
-            outputPaths: [choice.filePath],
-            targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
+            subjects: Object.freeze(subjects.slice()),
+            vccOutputPublicationTaskIds: [],
+            filePlan: {
+              version: 1,
+              allocation: 'eager',
+              inputs: [],
+              outputs: outputPaths.map((filePath) => ({
+                filePath,
+                role: 'output',
+                sourceOperation: 'vccFinancialOp:export:result'
+              }))
+            }
           };
         }
         const choice = await showImportOpenDialog('vcc-financial-op-export-directory', {
@@ -14494,33 +15249,47 @@ function registerNewAccountHandlers() {
         if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
+        const outputPaths = planRunWorkbookOutputPaths({
+          targetMonth: target.targetMonth,
+          subjects,
+          outputDirectory: choice.filePaths[0]
+        });
         return {
           proceed: true,
           runId: target.runId,
           targetMonth: target.targetMonth,
-          outputDirectory: choice.filePaths[0],
-          // 多主体文件名由 writer 依据当时目录冲突一次性固定；
-          // 正式 publish 前仍会对每个实际目标执行缺失快照校验。
-          targetSnapshots: null
+          subjects: Object.freeze(subjects.slice()),
+          vccOutputPublicationTaskIds: [],
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: outputPaths.map((filePath) => ({
+              filePath,
+              role: 'output',
+              sourceOperation: 'vccFinancialOp:export:result'
+            }))
+          }
         };
       } catch (error) {
         return { proceed: false, result: vccFinancialOpErrorResult(error) };
       }
     },
     execute: async (_event, prepared, taskContext) => {
-      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const batchContext = taskContext.batchContext;
       const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
+        const outputPaths = taskContext.fileEvidence.filePlan.outputs.map((item) => item.filePath);
         const result = await getVccFinancialOpService().exportRun({
           targetMonth: prepared.targetMonth,
-          outputPath: prepared.outputPath,
-          outputDirectory: prepared.outputDirectory,
+          expectedRunId: prepared.runId,
+          expectedSubjects: prepared.subjects,
+          outputPaths,
           publicationStagingDirectory,
-          targetSnapshots: prepared.targetSnapshots,
-          onDurableHandoff: (_publication, exportResult) => taskContext.settleArtifacts({
-            result: { status: 'success', filePaths: exportResult.filePaths },
-            runtime: { outputPaths: exportResult.filePaths }
-          })
+          targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+          onDurableHandoff: (publication, _exportResult, evidence) => (
+            settleVccOutputPublication(prepared, taskContext, publication, evidence)
+          )
         }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
@@ -14550,9 +15319,17 @@ function registerNewAccountHandlers() {
         }
         return {
           proceed: true,
-          outputPath: choice.filePath,
-          outputPaths: [choice.filePath],
-          targetSnapshots: captureToolboxTargetSnapshots([choice.filePath])
+          vccOutputPublicationTaskIds: [],
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: choice.filePath,
+              role: 'output',
+              sourceOperation: 'vccFinancialOp:export:import-audit'
+            }]
+          }
         };
       } catch (error) {
         return {
@@ -14562,17 +15339,18 @@ function registerNewAccountHandlers() {
       }
     },
     execute: async (_event, prepared, taskContext, payload = {}) => {
-      const batchContext = requireVccFinancialOpBatchContext(taskContext);
+      const batchContext = taskContext.batchContext;
+      const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
       const publicationStagingDirectory = createVccOutputStagingDirectory(batchContext);
       try {
         const result = await getVccFinancialOpService().exportImportAudit({
           ...payload,
-          outputPath: prepared.outputPath,
+          outputPath,
           generationOutputPath: path.join(publicationStagingDirectory, 'import-anomalies.xlsx'),
-          targetSnapshots: prepared.targetSnapshots,
-          onDurableHandoff: () => taskContext.settleArtifacts({
-            result: { status: 'success', filePath: prepared.outputPath }
-          })
+          targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+          onDurableHandoff: (publication, _exportResult, evidence) => (
+            settleVccOutputPublication(prepared, taskContext, publication, evidence)
+          )
         }, batchContext);
         return { status: 'success', ...result };
       } catch (error) {
@@ -14722,7 +15500,14 @@ function registerNewAccountHandlers() {
   //   抛错：落库/读行阶段异常向外抛（由调用方 try/catch 记 write-error，与原 handler 同口径）；
   //         派生阶段异常已在各派生函数内部 try/catch 兜住（记 created:false），不外抛、不阻断落库本身。
   //   🔴 async：流式落库路径含 await（upsert*Streaming / replaceLinkedTableStreaming），调用方须 await。
-  async function importLinkedFileToRepo({ filePath, fileName, detected, repoKey, signature }) {
+  async function importLinkedFileToRepo({
+    filePath,
+    fileName,
+    detected,
+    repoKey,
+    signature,
+    sourceIdentity
+  }) {
     // 🔴 v2.1.16-beta.3 ②：裁列必须在 44 列校验之后。readLinkedRowsAsObjects 内部走
     //   detector L1/L2 + expectedHeaders zip 校验，异构文件读不出 44 列对象（前面 detector 已拦截）。
     //   入金表（bank-deposit）：按 13 字段名 pick 裁列（pickBankDepositFields，非索引切片）；
@@ -14745,7 +15530,10 @@ function registerNewAccountHandlers() {
         }
       };
       if (isGatewayBill) {
-        ret = await database.upsertLinkedGatewayBillStreaming(feedRows, { sourceFileName: fileName });
+        ret = await database.upsertLinkedGatewayBillStreaming(feedRows, {
+          sourceFileName: fileName,
+          sourceIdentity
+        });
       } else if (isBankDeposit) {
         ret = await database.upsertLinkedBankDepositStreaming(feedRows, { sourceFileName: fileName });
       } else {
@@ -14763,7 +15551,10 @@ function registerNewAccountHandlers() {
         ? rows.map((r) => pickBankDepositFields(r))
         : rows;
       if (isGatewayBill) {
-        ret = database.upsertLinkedGatewayBill(rowsToWrite, { sourceFileName: fileName });
+        ret = database.upsertLinkedGatewayBill(rowsToWrite, {
+          sourceFileName: fileName,
+          sourceIdentity
+        });
       } else if (isBankDeposit) {
         ret = database.upsertLinkedBankDeposit(rowsToWrite, { sourceFileName: fileName });
       } else if (isFxSettlement) {
@@ -15021,16 +15812,28 @@ function registerNewAccountHandlers() {
       if (res.canceled || !Array.isArray(res.filePaths) || res.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, inputPaths: res.filePaths, filePaths: res.filePaths };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: res.filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'linked-table:import'
+          })),
+          outputs: []
+        }
+      };
     },
-    async execute(_event, prepared) {
+    async execute(_event, _prepared, taskContext) {
     // v3.0.11 codex-P2 补强（🔴 资金红线）：纳入 bankStatementOperationLock —— 链接表是 bank-statement run（R1-R5）输入，
     //   run 全程持锁；本导入若在 run 数据准备让出窗口内并发执行会撕裂快照。争用即返回失败，finally 释放。
     const opLock = tryAcquireBankStatementOpLock('linked-import');
     if (!opLock.acquired) return { status: 'failed', message: opLock.message };
     try {
     const results = [];
-    for (const filePath of prepared.filePaths) {
+    for (const filePath of taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)) {
       const fileName = path.basename(filePath);
       // 识别：链接表导入候选集（4 张 linked 签名 + 入金表签名；detector 默认含全部，这里收窄）。
       //   v2.1.16-beta.3 ②：入金表与主表同构 44 列，但主表签名不在此集合 → 入金表唯一命中、不 ambiguous。
@@ -15084,7 +15887,18 @@ function registerNewAccountHandlers() {
       // 读行 → 对象数组 → 落库 + 派生（v3.0.7 需求2d：整段抽至 importLinkedFileToRepo 共享函数，
       //   供「链接表管理」与「导入文件」通用导入零复制复用；落库/派生/缓存清理口径字节级 parity）。
       try {
-        const okResult = await importLinkedFileToRepo({ filePath, fileName, detected, repoKey, signature });
+        const okResult = await importLinkedFileToRepo({
+          filePath,
+          fileName,
+          detected,
+          repoKey,
+          signature,
+          sourceIdentity: repoKey === 'gateway-bill' ? {
+            datasetId: randomUUID(),
+            producerTaskRunId: taskContext.batchContext.taskRunId,
+            sourceContractVersion: 1
+          } : undefined
+        });
         results.push(okResult);
       } catch (err) {
         results.push({
@@ -15175,9 +15989,21 @@ function registerNewAccountHandlers() {
       if (choice.canceled || !Array.isArray(choice.filePaths) || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: choice.filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'bank-statement:batch-import'
+          })),
+          outputs: []
+        }
+      };
     },
-    async execute(event, prepared) {
+    async execute(event, _prepared, taskContext) {
     // v3.0.11 需求3（批1 · 🔴 资金红线）：统一互斥锁（与 run/export 共享一把）。争用即返回失败，绝不并发撕裂会话态。
     const opLock = tryAcquireBankStatementOpLock('import');
     if (!opLock.acquired) {
@@ -15199,7 +16025,8 @@ function registerNewAccountHandlers() {
     })();
     try {
     const results = [];
-    const fileCount = prepared.filePaths.length;
+    const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
+    const fileCount = filePaths.length;
     // 本批是否已建立/合并过银行对账单 session（用于：① 第一个建 vs 后续合并的分支；
     //   ② processingResult / gatewayReconSession 整批只清一次）。
     let bankStatementMerged = false;
@@ -15207,8 +16034,8 @@ function registerNewAccountHandlers() {
     //   被银行对账单分支的「清旧退款」误清掉本批刚导入的退款 session（filePaths 顺序不可控）。
     let refundImportedThisBatch = false;
 
-    for (let fileIndex = 0; fileIndex < prepared.filePaths.length; fileIndex++) {
-      const filePath = prepared.filePaths[fileIndex];
+    for (let fileIndex = 0; fileIndex < filePaths.length; fileIndex++) {
+      const filePath = filePaths[fileIndex];
       const fileName = path.basename(filePath);
       // v3.0.11 需求3（批1 · 导入让出+进度）：每文件开始前让出事件循环（消除大批量导入期窗口「未响应」）+ 上报进度。
       //   yield 放循环体顶部 = 在「上一文件处理完、本文件重活前」让出，等价于「每文件处理完让出」（规避循环内多处 continue）。
@@ -15459,7 +16286,12 @@ function registerNewAccountHandlers() {
             fileName,
             detected,
             repoKey: linkedRepoKey,
-            signature: linkedSignature
+            signature: linkedSignature,
+            sourceIdentity: linkedRepoKey === 'gateway-bill' ? {
+              datasetId: randomUUID(),
+              producerTaskRunId: taskContext.batchContext.taskRunId,
+              sourceContractVersion: 1
+            } : undefined
           });
           results.push(okResult);
         } catch (linkedErr) {
@@ -15703,19 +16535,29 @@ function registerNewAccountHandlers() {
     }
     return {
       proceed: true,
-      inputPaths: filePaths,
       kind,
       monthKey,
       userDataDir,
-      filePaths,
+      filePlan: {
+        version: 1,
+        allocation: 'eager',
+        inputs: filePaths.map((filePath) => ({
+          filePath,
+          role: 'input',
+          sourceOperation: isFlow
+            ? 'acquiringBillCurrency:importFlow'
+            : 'acquiringBillCurrency:importBill'
+        })),
+        outputs: []
+      },
       overwrite,
       preparedContextId: previewContext ? String(payload.preparedContextId) : '',
-      async beforeStart() {
-        assertSourceFresh();
+      async beforeStart(_batchContext, fileEvidence) {
+        const frozenPaths = fileEvidence.filePlan.inputs.map((item) => item.filePath);
         const currentPeek = await acquiringRunData.peekImportTarget({
           userDataDir,
           kind,
-          filePaths
+          filePaths: frozenPaths
         });
         if (currentPeek.monthKey !== monthKey || currentPeek.existingCount !== peeked.existingCount) {
           throw new Error('收单导入预检证据在任务开始前已变化，请重新导入');
@@ -15730,7 +16572,7 @@ function registerNewAccountHandlers() {
     };
   }
 
-  async function executeAcquiringImport(event, prepared, batchContext) {
+  async function executeAcquiringImport(event, prepared, taskContext) {
     const lock = tryAcquireOpLock('import', prepared.monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message, detailLines: [] };
     if (prepared.preparedContextId) {
@@ -15739,14 +16581,15 @@ function registerNewAccountHandlers() {
     try {
       try {
         const onProgress = createImportProgressForwarder(event);
+        const filePaths = taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath);
         const result = await acquiringRunData.importFiles({
           userDataDir: prepared.userDataDir,
           kind: prepared.kind,
           monthKey: prepared.monthKey,
-          filePaths: prepared.filePaths,
+          filePaths,
           onProgress,
           overwrite: prepared.overwrite,
-          batchContext
+          batchContext: taskContext.batchContext
         });
         return {
           status: 'success',
@@ -15767,20 +16610,12 @@ function registerNewAccountHandlers() {
 
   trackedIpcHandle('acquiringBillCurrency:importFlow', '收单单据币种校验', '导入流水表', {
     prepare: (_event, payload = {}) => prepareAcquiringImport('flow', payload),
-    execute: (event, prepared, taskContext) => executeAcquiringImport(
-      event,
-      prepared,
-      taskContext.batchContext
-    )
+    execute: (event, prepared, taskContext) => executeAcquiringImport(event, prepared, taskContext)
   });
 
   trackedIpcHandle('acquiringBillCurrency:importBill', '收单单据币种校验', '导入单据表', {
     prepare: (_event, payload = {}) => prepareAcquiringImport('bill', payload),
-    execute: (event, prepared, taskContext) => executeAcquiringImport(
-      event,
-      prepared,
-      taskContext.batchContext
-    )
+    execute: (event, prepared, taskContext) => executeAcquiringImport(event, prepared, taskContext)
   });
 
   // v0.8 fix5：runCheck 改 async，传 storageRoot 让 session 同步产出 diff.xlsx + report.xlsx
@@ -15862,6 +16697,23 @@ function registerNewAccountHandlers() {
         proceed: true,
         monthKey,
         userDataDir: path.dirname(database.dbPath),
+        filePlanResolver() {
+          const storageRoot = ensureStorageRoot();
+          const outputIntent = acquiringBillCurrencyWriter.planRunOutputPaths({
+            monthKey,
+            storageRoot
+          });
+          return normalizeFilePlanV1({
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: outputIntent.diffFilePath,
+              role: 'output',
+              sourceOperation: 'acquiringBillCurrency:run'
+            }]
+          });
+        },
         onAbandon: releaseLock,
         releaseLock
       };
@@ -15909,6 +16761,7 @@ function registerNewAccountHandlers() {
       //   - dbPath 切月：worker pool dispatchRunCheck 内检测 workerDbPath≠新侧库 → 重启 worker 重 init
       //   - onLog：worker 内 appendModuleLog → message pipe → 主进程 appendActivityLogEntry
       //   - chunkSize / workerCount / tempDir 透传不变（多 worker 子 worker 也用侧库 dbPath）
+      const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
       result = await acquiringRunData.runCheckViaSideDb({
         userDataDir: prepared.userDataDir,
         monthKey,
@@ -15917,6 +16770,7 @@ function registerNewAccountHandlers() {
         workerCount,
         tempDir: mwTempDir,
         batchContext: taskContext.batchContext,
+        outputIntent: { diffFilePath: outputPath, reportFilePath: outputPath },
         mainDb: database.db,
         dispatchFn: runCheckWorkerPool.dispatchRunCheck,
         dispatchCallbacks: {
@@ -15927,6 +16781,11 @@ function registerNewAccountHandlers() {
             } catch (_e) { /* swallow — log forwarder 失败不阻塞业务 */ }
           },
         },
+      });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs.map((item) => ({
+          artifactKey: item.artifactKey
+        }))
       });
     } catch (err) {
       // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（spec §2.4 设计契约）
@@ -15969,9 +16828,8 @@ function registerNewAccountHandlers() {
   // v2.1.10 A4 T19：resume handler — 续跑 chunk_progress.status='partial' 的 run
   //   - renderer 暂不暴露 UI（spec §三 / PRD §四 — v2.1.11+ 评估 UI）
   //   - IPC 通道留好供 Phase 4-6 / SR-FIX 阶段加 UI；本 handler 用作集成测试 / 高级用户调用
-  //   - payload: { monthKey, runId? }
-  //     - 不传 runId：自动找该月最近一个 chunk_progress.status='partial' 的 run
-  //     - 传 runId：复用该 runId（caller 已知具体 run；验证 month_key 匹配）
+  //   - payload: { monthKey, runId }
+  //     - runId 必填：只恢复 caller 显式选定的 run，不按月份/latest 猜候选
   //   - 返回：与 run handler 一致格式 { status: 'success', runId, ... } / { status: 'error', message }
   trackedIpcHandle('acquiringBillCurrency:run:resume', '收单单据币种校验', '续跑（chunked resume）', {
     async prepare(_event, payload = {}) {
@@ -16003,21 +16861,162 @@ function registerNewAccountHandlers() {
           monthKey,
           runId
         });
+        const repository = archiveCenterService
+          && archiveCenterService.service
+          && archiveCenterService.service.repository;
+        const oldOwner = resumePlan.recovery.batchContext;
+        const oldBatch = oldOwner && repository && repository.getBatch(oldOwner.batchId);
+        const oldTaskRun = oldOwner && repository && repository.getTaskRun(oldOwner.taskRunId);
+        const exactBatchOwner = !oldOwner || (oldBatch
+          && String(oldBatch.batchNumber) === oldOwner.batchNumber
+          && String(oldBatch.taskRunId) === oldOwner.taskRunId
+          && String(oldBatch.taskKey) === oldOwner.taskKey
+          && String(oldBatch.moduleId) === oldOwner.moduleId
+          && String(oldBatch.parentRunId) === oldOwner.parentRunId
+          && String(oldBatch.operationKey) === oldOwner.operationKey);
+        if (!exactBatchOwner) {
+          throw new Error('恢复 run 的持久 owner 与 Archive 身份不一致');
+        }
+        const legacyExistingBatchRecovery = Boolean(oldOwner && oldBatch && !oldTaskRun);
+        const recoverOriginal = oldTaskRun
+          && ['prepared', 'running', 'interrupted'].includes(oldTaskRun.status);
+        const transferOwner = !oldOwner
+          || (oldTaskRun && ['failed', 'cancelled'].includes(oldTaskRun.status));
+        if (!recoverOriginal && !transferOwner && !legacyExistingBatchRecovery) {
+          throw new Error(`Task Run ${oldTaskRun.status} 不允许 resume`);
+        }
+        if ((recoverOriginal || (transferOwner && oldOwner)) && !resumePlan.outputIntent) {
+          throw new Error('Atomic File Task 恢复缺少持久输出意图');
+        }
+        let legacyOutputIntent = resumePlan.outputIntent;
+        const originalManifestOutput = recoverOriginal
+          ? (() => {
+              const artifacts = repository.listArtifacts(oldBatch.id);
+              if (artifacts.length !== 1
+                  || artifacts[0].direction !== 'output'
+                  || artifacts[0].sourcePath !== resumePlan.outputIntent.diffFilePath) {
+                throw new Error('恢复 run 的 Archive manifest 与持久输出意图不一致');
+              }
+              return {
+                filePath: artifacts[0].sourcePath,
+                role: artifacts[0].role,
+                sourceOperation: artifacts[0].sourceOperation,
+                artifactKey: artifacts[0].artifactKey
+              };
+            })()
+          : null;
         return {
           proceed: true,
           resumePlan,
-          recovery: resumePlan.recovery,
-          taskRunId: resumePlan.taskRunId,
-          operationKey: resumePlan.operationKey,
-          flowPlan: resumePlan.flowPlan,
+          ...(legacyExistingBatchRecovery
+            ? {}
+            : recoverOriginal
+              ? {
+                  filePlan: {
+                    version: 1,
+                    allocation: 'eager',
+                    inputs: [],
+                    outputs: [originalManifestOutput]
+                  }
+                }
+              : resumePlan.outputIntent
+                ? {
+                    filePlan: {
+                      version: 1,
+                      allocation: 'eager',
+                      inputs: [],
+                      outputs: [{
+                        filePath: resumePlan.outputIntent.diffFilePath,
+                        role: 'output',
+                        sourceOperation: 'acquiringBillCurrency:run:resume'
+                      }]
+                    }
+                  }
+                : {
+                    filePlanResolver() {
+                      const outputIntent = acquiringBillCurrencyWriter.planRunOutputPaths({
+                        monthKey,
+                        storageRoot: ensureStorageRoot()
+                      });
+                      return normalizeFilePlanV1({
+                        version: 1,
+                        allocation: 'eager',
+                        inputs: [],
+                        outputs: [{
+                          filePath: outputIntent.diffFilePath,
+                          role: 'output',
+                          sourceOperation: 'acquiringBillCurrency:run:resume'
+                        }]
+                      });
+                    }
+                  }),
+          ...(legacyExistingBatchRecovery
+            ? {
+                legacyExistingBatchRecovery: true,
+                recovery: resumePlan.recovery,
+                taskRunId: oldOwner.taskRunId,
+                operationKey: oldOwner.operationKey,
+                legacyResumeOutputIntent: () => legacyOutputIntent,
+                beforeStart: () => {
+                  acquiringRunData.assertRunResumeFresh({
+                    userDataDir: path.dirname(database.dbPath),
+                    mainDb: database.db,
+                    mainDbPath: database.dbPath,
+                    prepared: resumePlan
+                  });
+                  if (!legacyOutputIntent) {
+                    legacyOutputIntent = resumePlan.mode === 'completed'
+                      ? {
+                          diffFilePath: resumePlan.runEvidence.diffFile.filePath,
+                          reportFilePath: resumePlan.runEvidence.diffFile.filePath
+                        }
+                      : acquiringBillCurrencyWriter.planRunOutputPaths({
+                          monthKey,
+                          storageRoot: ensureStorageRoot()
+                        });
+                    acquiringRunData.transferRunResumeOwner({
+                      mainDb: database.db,
+                      prepared: resumePlan,
+                      previousBatchContext: oldOwner,
+                      nextBatchContext: oldOwner,
+                      nextOutputIntent: legacyOutputIntent
+                    });
+                  }
+                }
+              }
+            : recoverOriginal
+            ? {
+                recovery: resumePlan.recovery,
+                taskRunId: oldOwner.taskRunId,
+                operationKey: oldOwner.operationKey,
+                assertPreRecoveryFresh: () => acquiringRunData.assertRunResumeFresh({
+                  userDataDir: path.dirname(database.dbPath),
+                  mainDb: database.db,
+                  mainDbPath: database.dbPath,
+                  prepared: resumePlan
+                })
+              }
+            : {
+                flowPlan: oldOwner
+                  ? { startsNewFlow: false, flowIdentity: null }
+                  : resumePlan.flowPlan,
+                explicitParentRunId: oldOwner ? oldOwner.parentRunId : undefined,
+                beforeStart(nextBatchContext, fileEvidence) {
+                  const outputPath = fileEvidence.filePlan.outputs[0].filePath;
+                  acquiringRunData.transferRunResumeOwner({
+                    mainDb: database.db,
+                    prepared: resumePlan,
+                    previousBatchContext: oldOwner || null,
+                    nextBatchContext,
+                    nextOutputIntent: {
+                      diffFilePath: outputPath,
+                      reportFilePath: outputPath
+                    }
+                  });
+                }
+              }),
           onAbandon: releaseLock,
-          releaseLock,
-          beforeStart: () => acquiringRunData.assertRunResumeFresh({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            mainDbPath: database.dbPath,
-            prepared: resumePlan
-          })
+          releaseLock
         };
       } catch (err) {
         releaseLock();
@@ -16032,14 +17031,6 @@ function registerNewAccountHandlers() {
       const { monthKey, runId: targetRunId, progress } = resumePlan;
       let result;
       try {
-        if (!resumePlan.recovery.batchContext) {
-          acquiringRunData.persistRunResumeBatchContext({
-            userDataDir: path.dirname(database.dbPath),
-            mainDb: database.db,
-            prepared: resumePlan,
-            batchContext: taskContext.batchContext
-          });
-        }
         const storageRoot = ensureStorageRoot();
         const onProgress = createRunProgressForwarder(event);
         // v2.1.10 SR-FIX-1 Round 6 H4：resume 时 chunkSize 优先从 chunk_progress 复用
@@ -16085,11 +17076,18 @@ function registerNewAccountHandlers() {
           } catch (_e) { /* swallow */ }
         }
 
+        const outputIntent = prepared.legacyExistingBatchRecovery
+          ? prepared.legacyResumeOutputIntent()
+          : {
+              diffFilePath: taskContext.fileEvidence.filePlan.outputs[0].filePath,
+              reportFilePath: taskContext.fileEvidence.filePlan.outputs[0].filePath
+            };
         result = await acquiringRunData.resumeRunCheck({
           prepared: resumePlan,
           storageRoot,
           chunkSize,
           batchContext: taskContext.batchContext,
+          outputIntent,
           mainDb: database.db,
           dispatchFn: runCheckWorkerPool.dispatchRunCheck,
           dispatchCallbacks: {
@@ -16099,6 +17097,13 @@ function registerNewAccountHandlers() {
             },
           }
         });
+        if (!prepared.legacyExistingBatchRecovery) {
+          await taskContext.settleArtifacts({
+            files: taskContext.fileEvidence.filePlan.outputs.map((item) => ({
+              artifactKey: item.artifactKey
+            }))
+          });
+        }
       } catch (err) {
         // v2.1.10 SR-FIX-1 round 2 P1-4：CancelError 走 cancelled 路径（同 run handler）
         if (err && err.name === 'CancelError') {
@@ -16149,11 +17154,19 @@ function registerNewAccountHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [res.filePath],
         monthKey,
         exportPlan,
         flowPlan: exportPlan.flowPlan,
-        savePath: res.filePath,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: res.filePath,
+            role: 'output',
+            sourceOperation: 'acquiringBillCurrency:export'
+          }]
+        },
         beforeStart() {
           acquiringRunData.assertRunExportFresh({
             userDataDir: path.dirname(database.dbPath),
@@ -16163,18 +17176,20 @@ function registerNewAccountHandlers() {
         }
       };
     },
-    async execute(_event, prepared) {
-    const { monthKey, exportPlan, savePath } = prepared;
+    async execute(_event, prepared, taskContext) {
+    const { monthKey, exportPlan } = prepared;
+    const output = taskContext.fileEvidence.filePlan.outputs[0];
     const lock = tryAcquireOpLock('export', monthKey);
     if (!lock.acquired) return { status: 'error', message: lock.message };
     try {
-      fs.copyFileSync(exportPlan.diffFilePath, savePath);
+      fs.copyFileSync(exportPlan.diffFilePath, output.filePath);
+      await taskContext.settleArtifacts({ files: [{ artifactKey: output.artifactKey }] });
       return {
         status: 'success',
         runId: exportPlan.runId,
         source: exportPlan.source,
         monthKey,
-        savedPath: savePath,
+        savedPath: output.filePath,
         sourceDiffPath: exportPlan.diffFilePath
       };
     } catch (err) {
@@ -16185,7 +17200,8 @@ function registerNewAccountHandlers() {
     }
   });
 
-  businessIpcHandle('acquiringBillCurrency:clearMonth', '清空月份数据', (_event, payload = {}) => {
+  businessIpcHandle('acquiringBillCurrency:clearMonth', '清空月份数据', {
+    execute: (_event, _prepared, taskContext, payload = {}) => {
     if (!database || !database.db) return { status: 'error', message: '数据库未初始化' };
     const { monthKey } = payload || {};
     if (!monthKey || !/^\d{4}-\d{2}$/.test(monthKey)) {
@@ -16201,9 +17217,17 @@ function registerNewAccountHandlers() {
         acquiringRunData.deleteMonthSideDb({ userDataDir, mainDb: database.db, monthKey });
       }
       acquiringBillCurrencySession.clearMonth({ db: database.db, monthKey });
+      appendActivityLogEntry({
+        level: 'info',
+        source: 'main',
+        domain: 'acquiring-bill-currency',
+        message: '清空收单单据币种校验月份数据成功',
+        details: [`月份：${monthKey}`, `Task Run：${taskContext.operationContext.taskRunId}`]
+      });
       return { status: 'success' };
     } catch (err) {
       return { status: 'error', message: err && err.message ? err.message : String(err) };
+    }
     }
   });
 }
@@ -16225,7 +17249,7 @@ function getPreFundReconciliationService() {
 function schedulePreFundReconciliationStartupCleanup() {
   setImmediate(() => {
     try {
-      getPreFundReconciliationService();
+      getPreFundReconciliationService().reconcilePersistedRunMirrors();
     } catch (error) {
       appendActivityLogEntry({
         level: 'error',
@@ -16280,13 +17304,30 @@ function registerPreFundReconciliationHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, inputPaths: [choice.filePaths[0]], filePath: choice.filePaths[0] };
+      const filePath = choice.filePaths[0];
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{
+            filePath,
+            role: 'input',
+            sourceOperation: 'pre-fund-reconciliation:import-bank'
+          }],
+          outputs: []
+        }
+      };
     },
-    async execute(_event, prepared) {
+    async execute(_event, _prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-import-bank');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return getPreFundReconciliationService().importBank(prepared.filePath);
+      const imported = getPreFundReconciliationService().importBank(
+        taskContext.fileEvidence.filePlan.inputs[0].filePath,
+        taskContext.batchContext.taskRunId
+      );
+      return imported;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
@@ -16305,16 +17346,36 @@ function registerPreFundReconciliationHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: choice.filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'pre-fund-reconciliation:import-mpt'
+          })),
+          outputs: []
+        }
+      };
     },
-    async execute(event, prepared) {
+    async execute(event, _prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-import-mpt');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return await getPreFundReconciliationService().importMptFiles(
-        prepared.filePaths,
-        (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
+      const imported = await getPreFundReconciliationService().importMptFiles(
+        taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath),
+        {
+          producerTaskRunId: taskContext.batchContext.taskRunId,
+          onProgress: (progress) => sendPreFundProgress(
+            event,
+            'pre-fund-reconciliation:import-progress',
+            progress
+          )
+        }
       );
+      return imported;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
@@ -16335,19 +17396,32 @@ function registerPreFundReconciliationHandlers() {
       }
       return {
         proceed: true,
-        outputPaths: [choice.filePath],
         repairTokens: Array.isArray(repairTokens) ? repairTokens.slice() : [],
-        savePath: choice.filePath
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: choice.filePath,
+            role: 'output',
+            sourceOperation: 'pre-fund-reconciliation:mpt-errors:export'
+          }]
+        }
       };
     },
-    async execute(_event, prepared) {
+    async execute(_event, prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-export-mpt-errors');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return await getPreFundReconciliationService().exportMptErrorData(
+      const exported = await getPreFundReconciliationService().exportMptErrorData(
         prepared.repairTokens,
-        prepared.savePath
+        taskContext.fileEvidence.filePlan.outputs[0].filePath
       );
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return exported;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
@@ -16356,25 +17430,49 @@ function registerPreFundReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:repair', '前置资金对账', '删除临时网关错误数据并重跑', async (event, repairTokens = []) => {
+  trackedIpcHandle('pre-fund-reconciliation:mpt-errors:repair', '前置资金对账', '删除临时网关错误数据并重跑', {
+    async prepare(_event, repairTokens = []) {
+      const tokens = Array.isArray(repairTokens) ? repairTokens.slice() : [];
+      const failures = getPreFundReconciliationService().resolveMptImportFailures(tokens);
+      return {
+        proceed: true,
+        repairTokens: tokens,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: failures.map((failure) => ({
+            filePath: failure.filePath,
+            role: 'input',
+            sourceOperation: 'pre-fund-reconciliation:mpt-errors:repair'
+          })),
+          outputs: []
+        }
+      };
+    },
+    async execute(event, prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-repair-mpt-errors');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
       const service = getPreFundReconciliationService();
-      const sourcePaths = service.resolveMptImportFailures(repairTokens).map((failure) => failure.filePath);
       const result = await service.retryMptImportFailures(
-        repairTokens,
-        (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:import-progress', progress)
+        prepared.repairTokens,
+        {
+          filePaths: taskContext.fileEvidence.filePlan.inputs
+            .map((item) => item.filePath),
+          producerTaskRunId: taskContext.batchContext.taskRunId,
+          onProgress: (progress) => sendPreFundProgress(
+            event,
+            'pre-fund-reconciliation:import-progress',
+            progress
+          )
+        }
       );
-      Object.defineProperty(result, 'archivedSourcePaths', {
-        value: selectSuccessfulPathsByResultIndex(sourcePaths, result.results),
-        enumerable: false
-      });
       return result;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 
@@ -16437,18 +17535,38 @@ function registerPreFundReconciliationHandlers() {
     }
   });
 
-  trackedIpcHandle('pre-fund-reconciliation:run', '前置资金对账', '开始运行', async (event, payload = {}) => {
+  trackedIpcHandle('pre-fund-reconciliation:run', '前置资金对账', '开始运行', {
+    prepare(_event, payload = {}) {
+      const service = getPreFundReconciliationService();
+      const taskRunId = randomUUID();
+      const plan = service.prepareRunLineage();
+      return {
+        proceed: true,
+        taskRunId,
+        scenario: payload && payload.scenario,
+        lineageIntents: plan.lineageIntents,
+        expectedDatasets: plan.expectedDatasets,
+        afterTerminal: ({ terminalStatus }) => terminalStatus === 'succeeded'
+          ? service.acknowledgeRunByTaskRun(taskRunId)
+          : null,
+        afterTerminalIntent: preFundRunTerminalRoute(taskRunId)
+      };
+    },
+    async execute(event, prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-run');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
       return await getPreFundReconciliationService().run({
-        scenario: payload && payload.scenario,
+        scenario: prepared.scenario,
+        taskRunId: taskContext.operationContext.taskRunId,
+        expectedDatasets: prepared.expectedDatasets,
         onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:run-progress', progress)
       });
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();
+    }
     }
   });
 
@@ -16465,7 +17583,8 @@ function registerPreFundReconciliationHandlers() {
         const service = getPreFundReconciliationService();
         const outputDirectory = choice.filePaths[0];
         const exportDate = new Date();
-        const plan = service.buildExportPlan(outputDirectory, exportDate);
+        const runLocator = service.lastRunLocator();
+        const plan = service.buildExportPlan(outputDirectory, exportDate, runLocator);
         if (plan.length === 0) {
           return {
             proceed: false,
@@ -16494,22 +17613,27 @@ function registerPreFundReconciliationHandlers() {
           }
           overwrite = true;
         }
-        const conflictPaths = conflicts.map((item) => item.filePath).sort();
         return {
           proceed: true,
-          outputPaths: plan.map((item) => item.filePath),
-          outputDirectory,
           exportDate,
           overwrite,
+          runLocator,
+          lineageIntents: [service.lastRunLineageIntent()],
+          flowPlan: service.lastRunBusinessFlowPlan(runLocator),
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: plan.map((item) => ({
+              filePath: item.filePath,
+              role: 'output',
+              sourceOperation: 'pre-fund-reconciliation:export'
+            }))
+          },
           beforeStart() {
-            const currentPlan = service.buildExportPlan(outputDirectory, exportDate);
-            const currentConflicts = currentPlan
-              .filter((item) => fs.existsSync(item.filePath))
-              .map((item) => item.filePath)
-              .sort();
+            const currentPlan = service.buildExportPlan(outputDirectory, exportDate, runLocator);
             if (JSON.stringify(currentPlan.map((item) => item.filePath))
-                !== JSON.stringify(plan.map((item) => item.filePath))
-                || JSON.stringify(currentConflicts) !== JSON.stringify(conflictPaths)) {
+                !== JSON.stringify(plan.map((item) => item.filePath))) {
               throw new Error('前置资金对账导出计划在确认期间已变化，请重新导出');
             }
           }
@@ -16518,18 +17642,27 @@ function registerPreFundReconciliationHandlers() {
         return { proceed: false, result: preFundFailureResult(error) };
       }
     },
-    async execute(event, prepared) {
+    async execute(event, prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('pre-fund-export');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
       const service = getPreFundReconciliationService();
+      const outputPaths = taskContext.fileEvidence.filePlan.outputs
+        .map((item) => item.filePath);
       const options = {
-        outputDirectory: prepared.outputDirectory,
+        outputDirectory: path.dirname(outputPaths[0]),
+        outputPaths,
         overwrite: prepared.overwrite,
+        runLocator: prepared.runLocator,
         exportDate: prepared.exportDate,
         onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:export-progress', progress)
       };
-      return await service.export(options);
+      const exported = await service.export(options);
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return exported;
     } catch (error) {
       return preFundFailureResult(error);
     } finally {
@@ -16606,20 +17739,33 @@ function registerDuplicateInboundMatchHandlers() {
       if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, inputPaths: choice.filePaths, filePaths: choice.filePaths };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: choice.filePaths.map((filePath) => ({
+            filePath,
+            role: 'input',
+            sourceOperation: 'duplicate-inbound-match:import-files'
+          })),
+          outputs: []
+        }
+      };
     },
-    async execute(event, prepared) {
+    async execute(event, _prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('duplicate-inbound-import-files');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return await getDuplicateInboundMatchService().importFiles(
-        prepared.filePaths,
+      const imported = await getDuplicateInboundMatchService().importFiles(
+        taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath),
         (progress) => sendDuplicateInboundMatchProgress(
           event,
           'duplicate-inbound-match:import-progress',
           progress
         )
       );
+      return imported;
     } catch (error) {
       return duplicateInboundMatchFailureResult(error);
     } finally {
@@ -16657,20 +17803,37 @@ function registerDuplicateInboundMatchHandlers() {
       if (choice.canceled || !choice.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, outputPaths: [choice.filePath], savePath: choice.filePath };
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: choice.filePath,
+            role: 'output',
+            sourceOperation: 'duplicate-inbound-match:export'
+          }]
+        }
+      };
     },
-    async execute(event, prepared) {
+    async execute(event, prepared, taskContext) {
     const lock = tryAcquireBankStatementOpLock('duplicate-inbound-export');
     if (!lock.acquired) return { status: 'busy', message: lock.message };
     try {
-      return await getDuplicateInboundMatchService().export({
-        savePath: prepared.savePath,
+      const exported = await getDuplicateInboundMatchService().export({
+        savePath: taskContext.fileEvidence.filePlan.outputs[0].filePath,
         onProgress: (progress) => sendDuplicateInboundMatchProgress(
           event,
           'duplicate-inbound-match:export-progress',
           progress
         )
       });
+      await taskContext.settleArtifacts({
+        files: taskContext.fileEvidence.filePlan.outputs
+          .map((item) => ({ artifactKey: item.artifactKey }))
+      });
+      return exported;
     } catch (error) {
       return duplicateInboundMatchFailureResult(error);
     } finally {
@@ -16695,6 +17858,31 @@ function readPositionPendingOperation() {
     throw new Error('主库中的平盘待完成操作记录格式非法');
   }
   return pending;
+}
+
+function positionPendingOwner(pending) {
+  if (pending && pending.owner) {
+    return freezePersistedTaskOwner(pending.owner, { required: true });
+  }
+  if (pending && pending.batchContext) {
+    return freezePersistedTaskOwner({
+      version: 1,
+      kind: 'file-batch',
+      batchContext: pending.batchContext
+    }, { required: true });
+  }
+  throw new Error('平盘 pending 缺少持久 owner');
+}
+
+function samePositionPendingOwner(left, right) {
+  if (!left || !right || left.kind !== right.kind) return false;
+  const leftContext = left.kind === 'operation'
+    ? left.operationContext
+    : left.batchContext;
+  const rightContext = right.kind === 'operation'
+    ? right.operationContext
+    : right.batchContext;
+  return Object.keys(leftContext).every((key) => leftContext[key] === rightContext[key]);
 }
 
 function writePositionPendingOperation(pending, operationToken) {
@@ -16747,12 +17935,17 @@ function recordPositionArchiveIntentFiles(filePaths, role, explicitOperationToke
           sourceType: String(descriptor.sourceType || '').trim(),
           sourceSnapshot: descriptor.sourceSnapshot,
           sha256: descriptor.expectedSha256 || descriptor.sha256,
-          sizeBytes: descriptor.sizeBytes
+          sizeBytes: descriptor.sizeBytes,
+          artifactKey: String(descriptor.artifactKey || '').trim(),
+          sourceOperation: String(descriptor.sourceOperation || '').trim(),
+          originalName: String(descriptor.originalName || path.basename(filePath))
         }
       : {
           filePath,
           role,
-          beforeSnapshot: capturePositionArchiveFileSnapshot(filePath),
+          beforeSnapshot: Object.prototype.hasOwnProperty.call(descriptor, 'beforeSnapshot')
+            ? descriptor.beforeSnapshot
+            : capturePositionArchiveFileSnapshot(filePath),
           ...(descriptor.sourceSnapshot ? {
             sourceSnapshot: descriptor.sourceSnapshot,
             sha256: descriptor.expectedSha256 || descriptor.sha256,
@@ -16779,15 +17972,41 @@ function recordPositionArchiveIntentFiles(filePaths, role, explicitOperationToke
   }, operationToken);
 }
 
-function markPositionBusinessOutcome(result) {
+function recordPositionFilePlanIntent(filePlan, evidence = {}) {
+  const inputEvidence = evidence.inputs || [];
+  const outputEvidence = evidence.outputs || [];
+  recordPositionArchiveIntentFiles(filePlan.inputs.map((item, index) => ({
+    ...inputEvidence[index],
+    filePath: item.filePath,
+    role: 'input',
+    sourceSnapshot: item.sourceSnapshot,
+    artifactKey: item.artifactKey,
+    sourceOperation: item.sourceOperation,
+    originalName: item.originalName
+  })), 'input');
+  recordPositionArchiveIntentFiles(filePlan.outputs.map((item, index) => ({
+    ...outputEvidence[index],
+    filePath: item.filePath,
+    role: 'output',
+    beforeSnapshot: item.targetSnapshot.exists ? item.targetSnapshot.snapshot : null,
+    artifactKey: item.artifactKey,
+    sourceOperation: item.sourceOperation,
+    originalName: item.originalName
+  })), 'output');
+}
+
+function markPositionBusinessOutcome(result, { terminalForCurrentTask = false } = {}) {
   const context = positionReconciliationOperationContext.getStore();
   if (!context) return;
   const pending = readPositionPendingOperation();
   if (!pending || pending.operationToken !== context.operationToken) return;
+  const terminalResult = terminalForCurrentTask && result && result.archiveDeferred === true
+    ? { ...result, archiveDeferred: false }
+    : result;
   writePositionPendingOperation({
     ...pending,
-    businessState: positionBusinessStateForResult(result, SUCCESS_STATUSES),
-    terminalOutcome: positionTerminalOutcomeForResult(result, SUCCESS_STATUSES)
+    businessState: positionBusinessStateForResult(terminalResult, SUCCESS_STATUSES),
+    terminalOutcome: positionTerminalOutcomeForResult(terminalResult, SUCCESS_STATUSES)
   }, context.operationToken);
 }
 
@@ -16803,14 +18022,14 @@ function persistPositionCancellationAccepted(active) {
   );
 
   // SQLite pending 是取消 ACK 的第一份耐久真相。即使随后主进程崩溃，
-  // startup recovery 也会把原 exact-seven 批次收口为 cancelled，而不是 failed。
+  // startup recovery 也会按原 operation/file owner 收口为 cancelled，而不是 failed。
   writePositionPendingOperation(cancellation, operationToken);
 
   // 同时把 cancelled 终态写入既有 Archive outbox；直接 CAS 或后续业务
-  // promise 尚未来得及返回时，仍能在下一次启动重放到同一 batchId。
+  // promise 尚未来得及返回时，仍能在下一次启动重放到同一 Task Run。
   const center = archiveCenterService || initializeArchiveCenter();
   center.persistTaskTerminalIntent({
-    batchContext: cancellation.batchContext,
+    owner: positionPendingOwner(cancellation),
     sourceOperation: String(cancellation.channel || active.channel || 'position-reconciliation'),
     terminalOutcome: {
       ...cancellation.terminalOutcome,
@@ -16946,6 +18165,31 @@ function persistPositionArchiveIntentIfNeeded(
   if (!service || typeof service.listCommittedOperationInputs !== 'function') {
     throw new Error('平盘业务已提交但无法读取文件级提交凭证，已停止恢复');
   }
+  const owner = positionPendingOwner(pending);
+  const rawBatch = owner.kind === 'file-batch'
+    && archiveCenterService
+    && archiveCenterService.service
+    && archiveCenterService.service.repository.getBatch(owner.batchContext.batchId);
+  const manifestOwned = Boolean(
+    rawBatch && rawBatch.metadata && rawBatch.metadata._fileManifest
+  );
+  if (manifestOwned) {
+    const archiveResult = archiveCenterService.persistTaskTerminalIntent({
+      owner,
+      sourceOperation: String(pending.channel || ''),
+      settleFiles: files.map((file) => ({
+        artifactKey: file.artifactKey,
+        ...(file.sha256 ? {
+          expectedSha256: file.sha256,
+          expectedSizeBytes: file.sizeBytes
+        } : {})
+      })),
+      terminalOutcome: positionOutboxTerminalIntent(pending)
+    });
+    return options.includeCleanupCandidates === true
+      ? { archiveResult, cleanupInputPaths: [] }
+      : archiveResult;
+  }
   const committedInputs = service.listCommittedOperationInputs(pending.operationToken);
   const committedFiles = positionCommittedRecoveryArchiveFiles(
     { ...pending, archiveFiles: files },
@@ -16963,12 +18207,11 @@ function persistPositionArchiveIntentIfNeeded(
     { archiveFiles: committedFiles },
     { captureOutputSnapshot: capturePositionArchiveFileSnapshot }
   );
-  const batchContext = pending.batchContext;
-  if (!batchContext || typeof batchContext !== 'object') {
+  if (owner.kind !== 'file-batch') {
     throw new Error('平盘业务已提交但缺少原任务 batchContext，禁止建立幽灵批次');
   }
   const archiveResult = archiveCenterService.persistAppendIntent({
-    batchContext,
+    batchContext: owner.batchContext,
     sourceOperation: String(pending.channel || ''),
     metadata: { positionOperationToken: pending.operationToken, recovered: true },
     files: recoveryFiles,
@@ -17006,15 +18249,29 @@ function clearPositionPendingOperation(operationToken) {
 async function finalizePositionPendingAfterTaskTerminal({ context }) {
   const pending = readPositionPendingOperation();
   if (!pending) return;
-  if (pending.operationToken !== context.taskRunId
-      || Number(pending.batchContext && pending.batchContext.batchId) !== context.batchId) {
+  const owner = positionPendingOwner(pending);
+  const ownerMatches = owner.kind === 'operation'
+    ? owner.operationContext.taskRunId === context.taskRunId
+    : owner.batchContext.taskRunId === context.taskRunId
+      && owner.batchContext.batchId === context.batchId;
+  if (pending.operationToken !== context.taskRunId || !ownerMatches) {
     throw new Error('平盘任务终态后的 pending 所有权已变化');
   }
-  if (pending.archiveRequired === true && pending.archiveState !== 'durable') {
+  if (pending.archiveRequired === true
+      && owner.kind === 'file-batch'
+      && pending.archiveState !== 'durable') {
+    writePositionPendingOperation({
+      ...pending,
+      archiveState: 'durable',
+      archiveReference: context.batchId
+    }, pending.operationToken);
+  }
+  const terminalPending = readPositionPendingOperation();
+  if (terminalPending.archiveRequired === true && terminalPending.archiveState !== 'durable') {
     // 存档尚未完成时保留 pending；后续启动恢复只能追加原 batch。
     return;
   }
-  clearPositionPendingOperation(pending.operationToken);
+  clearPositionPendingOperation(terminalPending.operationToken);
 }
 
 async function finalizeRecoveredPositionPending(operationToken, options = {}) {
@@ -17053,15 +18310,22 @@ async function finalizeRecoveredPositionPending(operationToken, options = {}) {
   if (typeof positionReconciliationService.listCommittedOperationInputs !== 'function') {
     throw new Error('平盘侧库无法读取当前操作的文件级提交凭证，禁止清理恢复 pending');
   }
-  const committedFiles = positionCommittedRecoveryArchiveFiles(
-    current,
-    positionReconciliationService.listCommittedOperationInputs(operationToken)
-  );
-  const cleanupInputPaths = positionRecoveryCleanupInputPaths(
-    current,
-    committedFiles,
-    deletedArchiveResult
-  );
+  const currentOwner = positionPendingOwner(current);
+  const currentBatch = currentOwner.kind === 'file-batch'
+    ? center.service.repository.getBatch(currentOwner.batchContext.batchId)
+    : null;
+  const cleanupInputPaths = currentBatch
+    && currentBatch.metadata
+    && currentBatch.metadata._fileManifest
+      ? []
+      : positionRecoveryCleanupInputPaths(
+          current,
+          positionCommittedRecoveryArchiveFiles(
+            current,
+            positionReconciliationService.listCommittedOperationInputs(operationToken)
+          ),
+          deletedArchiveResult
+        );
   syncPositionReconciliationCheckpoint();
   database.setSetting(POSITION_SIDE_DB_BOOTSTRAP_SETTING, '');
   clearPositionPendingOperation(operationToken);
@@ -17098,7 +18362,8 @@ function resolvePositionOutboxTerminalIntent(record) {
   if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1 || !operationToken) return null;
   const pending = readPositionPendingOperation();
   if (!pending || pending.operationToken !== operationToken) return null;
-  if (Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
+  const owner = positionPendingOwner(pending);
+  if (owner.kind !== 'file-batch' || Number(owner.batchContext.batchId) !== targetBatchId) {
     throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
   }
   return positionOutboxTerminalIntent(pending);
@@ -17110,25 +18375,66 @@ async function finalizePositionTerminalIntent({ route, record, created }) {
   }
   const payload = record && record.payload;
   const targetBatchId = Number(payload && payload.targetBatchId);
+  const recordOwner = payload && payload.owner
+    ? freezePersistedTaskOwner(payload.owner, { required: true })
+    : null;
   const operationToken = String(route.operationToken || '').trim();
   const recordOperationToken = String(
     payload && payload.metadata && payload.metadata.positionOperationToken || ''
   ).trim();
-  if (!Number.isSafeInteger(targetBatchId) || targetBatchId < 1
-      || !operationToken || recordOperationToken !== operationToken) {
+  if (!operationToken || recordOperationToken !== operationToken) {
     throw new Error('平盘任务终态路由与 outbox 身份不一致');
   }
   const pending = readPositionPendingOperation();
   if (!pending) return;
-  if (pending.operationToken !== operationToken
-      || Number(pending.batchContext && pending.batchContext.batchId) !== targetBatchId) {
+  const pendingOwner = positionPendingOwner(pending);
+  if (pending.operationToken !== operationToken) {
+    throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
+  }
+  if (recordOwner) {
+    if (!samePositionPendingOwner(recordOwner, pendingOwner)
+        || (recordOwner.kind === 'operation'
+          ? recordOwner.operationContext.taskRunId !== operationToken
+          : recordOwner.batchContext.taskRunId !== operationToken
+            || recordOwner.batchContext.batchId !== targetBatchId)) {
+      throw new Error('平盘 outbox owner 与 pending 原任务不一致');
+    }
+  } else if (pendingOwner.kind !== 'file-batch'
+      || !Number.isSafeInteger(targetBatchId)
+      || targetBatchId < 1
+      || pendingOwner.batchContext.batchId !== targetBatchId) {
     throw new Error('平盘 outbox 目标批次与 pending 原任务不一致');
   }
   await finalizeRecoveredPositionPending(operationToken, {
     archiveDurable: true,
-    archiveReference: created && created.batch && created.batch.id || targetBatchId,
+    archiveReference: recordOwner && recordOwner.kind === 'operation'
+      ? recordOwner.operationContext.taskRunId
+      : created && created.batch && created.batch.id || targetBatchId,
     terminalSettled: true
   });
+}
+
+async function finalizeArchiveTerminalIntent(payload) {
+  if (payload && payload.route && payload.route.route === 'pending-run') {
+    return finalizePendingTerminalIntent({
+      ...payload,
+      db: pendingDb
+    });
+  }
+  if (payload && payload.route && payload.route.route === 'biz-op-run') {
+    return bizOpReconRunData.finalizeRunTerminalIntent({
+      ...payload,
+      userDataDir: path.dirname(database.dbPath),
+      mainDb: database.db
+    });
+  }
+  if (payload && payload.route && payload.route.route === 'pre-fund-run') {
+    return finalizePreFundTerminalIntent({
+      ...payload,
+      service: getPreFundReconciliationService()
+    });
+  }
+  return finalizePositionTerminalIntent(payload);
 }
 
 function persistCurrentPositionArchiveIntentIfNeeded() {
@@ -17369,7 +18675,9 @@ async function runPositionReconciliationOperation(channel, operation, options = 
       pending: {
         operationToken,
         channel,
-        batchContext: options.batchContext || null,
+        owner: options.operationContext
+          ? { version: 1, kind: 'operation', operationContext: options.operationContext }
+          : { version: 1, kind: 'file-batch', batchContext: options.batchContext },
         baseCheckpoint,
         archiveRequired,
         archiveState: archiveRequired ? 'awaiting-intent' : 'not-required',
@@ -17494,11 +18802,38 @@ function registerPositionReconciliationHandlers() {
     '平盘对账数据处理',
     '导入银行对账单',
     {
+      prepare: (_event, token) => {
+        const files = getPositionReconciliationService().bankImportArchiveIntent(token);
+        return {
+          proceed: true,
+          positionArchiveEvidence: Object.freeze({
+            inputs: Object.freeze(files.map((file) => Object.freeze({
+              sourceType: file.sourceType,
+              sha256: file.expectedSha256 || file.sha256,
+              sizeBytes: file.sizeBytes
+            }))),
+            outputs: Object.freeze([])
+          }),
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: files.map((file) => ({
+              filePath: file.filePath,
+              originalName: file.originalName,
+              role: 'input',
+              sourceOperation: 'position-reconciliation:bank:apply-import'
+            })),
+            outputs: []
+          }
+        };
+      },
       execute: (_event, _prepared, taskContext, token) => (
         withPositionReconciliationLock('bank-import-apply', () => {
-          const service = getPositionReconciliationService();
-          recordPositionArchiveIntentFiles(service.bankImportArchiveIntent(token), 'input');
-          return service.applyBankImport(token, taskContext.batchContext);
+          return getPositionReconciliationService().applyBankImport(
+            token,
+            taskContext.batchContext,
+            taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
+          );
         })
       )
     }
@@ -17524,11 +18859,38 @@ function registerPositionReconciliationHandlers() {
     '平盘对账数据处理',
     '导入链接原始表',
     {
+      prepare: (_event, token) => {
+        const files = getPositionReconciliationService().sourceImportArchiveIntent(token);
+        return {
+          proceed: true,
+          positionArchiveEvidence: Object.freeze({
+            inputs: Object.freeze(files.map((file) => Object.freeze({
+              sourceType: file.sourceType,
+              sha256: file.expectedSha256 || file.sha256,
+              sizeBytes: file.sizeBytes
+            }))),
+            outputs: Object.freeze([])
+          }),
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: files.map((file) => ({
+              filePath: file.filePath,
+              originalName: file.originalName,
+              role: 'input',
+              sourceOperation: 'position-reconciliation:source:apply-import'
+            })),
+            outputs: []
+          }
+        };
+      },
       execute: (_event, _prepared, taskContext, token) => (
         withPositionReconciliationLock('source-import-apply', () => {
-          const service = getPositionReconciliationService();
-          recordPositionArchiveIntentFiles(service.sourceImportArchiveIntent(token), 'input');
-          return service.applySourceImport(token, taskContext.batchContext);
+          return getPositionReconciliationService().applySourceImport(
+            token,
+            taskContext.batchContext,
+            taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath)
+          );
         })
       )
     }
@@ -17553,16 +18915,29 @@ function registerPositionReconciliationHandlers() {
       if (choice.canceled || !choice.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, outputPaths: [choice.filePath], reportKey, savePath: choice.filePath };
+      return {
+        proceed: true,
+        reportKey,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: choice.filePath,
+            role: 'output',
+            sourceOperation: 'position-reconciliation:source:export-anomaly'
+          }]
+        }
+      };
     },
-    execute: (_event, prepared) => withPositionReconciliationLock(
+    execute: (_event, prepared, taskContext) => withPositionReconciliationLock(
       'source-anomaly-export',
-      () => {
-        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
-        return getPositionReconciliationService().exportAnomalyReport(
+      async () => {
+        const result = await getPositionReconciliationService().exportAnomalyReport(
           prepared.reportKey,
-          prepared.savePath
+          taskContext.fileEvidence.filePlan.outputs[0].filePath
         );
+        return result;
       }
     )
   });
@@ -17588,7 +18963,7 @@ function registerPositionReconciliationHandlers() {
         withPositionReconciliationLock('mapping-save', () => (
           getPositionReconciliationService().saveMappings(
             mappings,
-            taskContext.batchContext
+            taskContext.operationContext
           )
         ))
       )
@@ -17604,7 +18979,7 @@ function registerPositionReconciliationHandlers() {
         withPositionReconciliationLock('bank-delete', () => (
           getPositionReconciliationService().deleteBank(
             payload,
-            taskContext.batchContext
+            taskContext.operationContext
           )
         ))
       )
@@ -17620,7 +18995,7 @@ function registerPositionReconciliationHandlers() {
         withPositionReconciliationLock('source-delete', () => (
           getPositionReconciliationService().deleteSource(
             payload,
-            taskContext.batchContext
+            taskContext.operationContext
           )
         ))
       )
@@ -17633,19 +19008,35 @@ function registerPositionReconciliationHandlers() {
     '导出银行数据',
     {
       async prepare(_event, payload = {}) {
-      const choice = await dialog.showSaveDialog(mainWindow, {
-        title: '导出平盘银行对账单',
-        defaultPath: positionReconciliationExportName('平盘银行对账单'),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (choice.canceled || !choice.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      return { proceed: true, outputPaths: [choice.filePath], payload, savePath: choice.filePath };
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: '导出平盘银行对账单',
+          defaultPath: positionReconciliationExportName('平盘银行对账单'),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return {
+          proceed: true,
+          payload,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: choice.filePath,
+              role: 'output',
+              sourceOperation: 'position-reconciliation:bank:export'
+            }]
+          }
+        };
       },
-      execute: (_event, prepared) => withPositionReconciliationLock('bank-export', async () => {
-        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
-        return getPositionReconciliationService().exportBank(prepared.payload, prepared.savePath);
+      execute: (_event, prepared, taskContext) => withPositionReconciliationLock('bank-export', async () => {
+        const result = await getPositionReconciliationService().exportBank(
+          prepared.payload,
+          taskContext.fileEvidence.filePlan.outputs[0].filePath
+        );
+        return result;
       })
     }
   );
@@ -17664,11 +19055,27 @@ function registerPositionReconciliationHandlers() {
         if (choice.canceled || !choice.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        return { proceed: true, outputPaths: [choice.filePath], sourceType, savePath: choice.filePath };
+        return {
+          proceed: true,
+          sourceType,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: choice.filePath,
+              role: 'output',
+              sourceOperation: 'position-reconciliation:linked:export'
+            }]
+          }
+        };
       },
-      execute: (_event, prepared) => withPositionReconciliationLock('linked-export', async () => {
-        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
-        return getPositionReconciliationService().exportLinked(prepared.sourceType, prepared.savePath);
+      execute: (_event, prepared, taskContext) => withPositionReconciliationLock('linked-export', async () => {
+        const result = await getPositionReconciliationService().exportLinked(
+          prepared.sourceType,
+          taskContext.fileEvidence.filePlan.outputs[0].filePath
+        );
+        return result;
       })
     }
   );
@@ -17687,11 +19094,27 @@ function registerPositionReconciliationHandlers() {
         if (choice.canceled || !choice.filePath) {
           return { proceed: false, result: { status: 'cancelled' } };
         }
-        return { proceed: true, outputPaths: [choice.filePath], sourceType, savePath: choice.filePath };
+        return {
+          proceed: true,
+          sourceType,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: choice.filePath,
+              role: 'output',
+              sourceOperation: 'position-reconciliation:raw:export'
+            }]
+          }
+        };
       },
-      execute: (_event, prepared) => withPositionReconciliationLock('raw-export', async () => {
-        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
-        return getPositionReconciliationService().exportRaw(prepared.sourceType, prepared.savePath);
+      execute: (_event, prepared, taskContext) => withPositionReconciliationLock('raw-export', async () => {
+        const result = await getPositionReconciliationService().exportRaw(
+          prepared.sourceType,
+          taskContext.fileEvidence.filePlan.outputs[0].filePath
+        );
+        return result;
       })
     }
   );
@@ -17709,31 +19132,48 @@ function registerPositionReconciliationHandlers() {
     '导出文件',
     {
       async prepare(_event, payload = {}) {
-      const service = getPositionReconciliationService();
-      const choice = await dialog.showSaveDialog(mainWindow, {
-        title: payload.differencesOnly ? '导出平盘差异数据' : '导出平盘资金性质校验结果',
-        defaultPath: payload.differencesOnly
-          ? positionReconciliationExportName('平盘资金性质校验差异数据')
-          : service.defaultResultFileName(),
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (choice.canceled || !choice.filePath) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      return { proceed: true, outputPaths: [choice.filePath], payload, savePath: choice.filePath };
-      },
-      execute: (_event, prepared) => withPositionReconciliationLock('result-export', async () => {
-        const { payload, savePath } = prepared;
-        recordPositionArchiveIntentFiles([savePath], 'output');
-        return getPositionReconciliationService().exportRun(payload.runId, savePath, {
-          differencesOnly: payload.differencesOnly === true,
-          channels: Array.isArray(payload.channels) ? payload.channels : [],
-          regions: Array.isArray(payload.regions) ? payload.regions : [],
-          months: Array.isArray(payload.months) ? payload.months : [],
-          differenceStatuses: Array.isArray(payload.differenceStatuses)
-            ? payload.differenceStatuses
-            : []
+        const service = getPositionReconciliationService();
+        const choice = await dialog.showSaveDialog(mainWindow, {
+          title: payload.differencesOnly ? '导出平盘差异数据' : '导出平盘资金性质校验结果',
+          defaultPath: payload.differencesOnly
+            ? positionReconciliationExportName('平盘资金性质校验差异数据')
+            : service.defaultResultFileName(),
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
         });
+        if (choice.canceled || !choice.filePath) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return {
+          proceed: true,
+          payload,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [],
+            outputs: [{
+              filePath: choice.filePath,
+              role: 'output',
+              sourceOperation: 'position-reconciliation:run:export'
+            }]
+          }
+        };
+      },
+      execute: (_event, prepared, taskContext) => withPositionReconciliationLock('result-export', async () => {
+        const { payload } = prepared;
+        const result = await getPositionReconciliationService().exportRun(
+          payload.runId,
+          taskContext.fileEvidence.filePlan.outputs[0].filePath,
+          {
+            differencesOnly: payload.differencesOnly === true,
+            channels: Array.isArray(payload.channels) ? payload.channels : [],
+            regions: Array.isArray(payload.regions) ? payload.regions : [],
+            months: Array.isArray(payload.months) ? payload.months : [],
+            differenceStatuses: Array.isArray(payload.differenceStatuses)
+              ? payload.differenceStatuses
+              : []
+          }
+        );
+        return result;
       })
     }
   );
@@ -17749,16 +19189,29 @@ function registerPositionReconciliationHandlers() {
       if (choice.canceled || !choice.filePath) {
         return { proceed: false, result: { status: 'cancelled' } };
       }
-      return { proceed: true, outputPaths: [choice.filePath], runId, savePath: choice.filePath };
+      return {
+        proceed: true,
+        runId,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [],
+          outputs: [{
+            filePath: choice.filePath,
+            role: 'output',
+            sourceOperation: 'position-reconciliation:run:export-filtered'
+          }]
+        }
+      };
     },
-    execute: (_event, prepared) => withPositionReconciliationLock(
+    execute: (_event, prepared, taskContext) => withPositionReconciliationLock(
       'result-filtered-export',
-      () => {
-        recordPositionArchiveIntentFiles([prepared.savePath], 'output');
-        return getPositionReconciliationService().exportRunFilteredSources(
+      async () => {
+        const result = await getPositionReconciliationService().exportRunFilteredSources(
           prepared.runId,
-          prepared.savePath
+          taskContext.fileEvidence.filePlan.outputs[0].filePath
         );
+        return result;
       }
     )
   });
@@ -17769,26 +19222,34 @@ function registerPositionReconciliationHandlers() {
     '导入修改结果',
     {
       async prepare(_event, runId) {
-      const choice = await showImportOpenDialog('position-reconciliation-result', {
-        title: '导入修改后的平盘资金性质校验结果',
-        properties: ['openFile'],
-        filters: [{ name: 'Excel', extensions: ['xlsx'] }]
-      });
-      if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
-        return { proceed: false, result: { status: 'cancelled' } };
-      }
-      return {
-        proceed: true,
-        inputPaths: [choice.filePaths[0]],
-        runId,
-        filePath: choice.filePaths[0]
-      };
+        const choice = await showImportOpenDialog('position-reconciliation-result', {
+          title: '导入修改后的平盘资金性质校验结果',
+          properties: ['openFile'],
+          filters: [{ name: 'Excel', extensions: ['xlsx'] }]
+        });
+        if (choice.canceled || !choice.filePaths || choice.filePaths.length === 0) {
+          return { proceed: false, result: { status: 'cancelled' } };
+        }
+        return {
+          proceed: true,
+          runId,
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: [{
+              filePath: choice.filePaths[0],
+              role: 'input',
+              sourceOperation: 'position-reconciliation:run:import-result'
+            }],
+            outputs: []
+          }
+        };
       },
-      execute: (_event, prepared) => withPositionReconciliationLock(
+      execute: (_event, prepared, taskContext) => withPositionReconciliationLock(
         'result-import',
         () => getPositionReconciliationService().importRunResult(
           prepared.runId,
-          prepared.filePath
+          taskContext.fileEvidence.filePlan.inputs[0].filePath
         )
       )
     }
@@ -17957,12 +19418,31 @@ async function publishToolboxArtifacts(
     archiveInputFiles: options.archiveInputFiles
   });
   try {
-    await recoverToolboxPublicationsIntoArchive({
-      userDataDir: app.getPath('userData'),
-      archiveCenter: archiveCenterService,
-      recoverPublications: recoverToolboxPublicationsAsync,
-      taskIds: [publication.taskId]
-    });
+    if (typeof options.settleManifestArtifacts === 'function') {
+      const plan = options.fileEvidence && options.fileEvidence.filePlan;
+      if (!plan || plan.outputs.length !== publication.files.length) {
+        throw new Error('工具箱 publication 与 manifest output 数量不一致');
+      }
+      const files = [
+        ...plan.inputs.map((item) => ({ artifactKey: item.artifactKey })),
+        ...plan.outputs.map((item, index) => ({
+          artifactKey: item.artifactKey,
+          expectedSha256: publication.files[index].sha256,
+          expectedSizeBytes: publication.files[index].byteSize
+        }))
+      ];
+      const settled = await options.settleManifestArtifacts({ files });
+      if (!settled || settled.durable !== true) {
+        throw new Error('工具箱 manifest artifact 尚未全部 durable');
+      }
+    } else {
+      await recoverToolboxPublicationsIntoArchive({
+        userDataDir: app.getPath('userData'),
+        archiveCenter: archiveCenterService,
+        recoverPublications: recoverToolboxPublicationsAsync,
+        taskIds: [publication.taskId]
+      });
+    }
   } catch (error) {
     // 正式目标已经 committed，不能把存档暂时失败重新解释成业务失败并让
     // TaskLifecycle 把原批次写成 failed。receipt 仍保留并阻止下一次发布；
@@ -17987,6 +19467,24 @@ async function publishToolboxArtifacts(
   return publication;
 }
 
+async function acknowledgeToolboxPublicationReceipts(taskIds) {
+  const requested = [...new Set((Array.isArray(taskIds) ? taskIds : []).map(String))];
+  if (requested.length === 0) return;
+  const finalized = await recoverToolboxPublicationsAsync({
+    userDataDir: app.getPath('userData'),
+    deferCommittedRecovery: true,
+    acknowledgedCommittedTaskIds: requested
+  });
+  const cleaned = new Set((Array.isArray(finalized && finalized.recovered)
+    ? finalized.recovered
+    : []).filter((item) => item && item.action === 'commit-cleanup')
+    .map((item) => String(item.taskId)));
+  const missing = requested.filter((taskId) => !cleaned.has(taskId));
+  if (missing.length > 0) {
+    throw new Error(`工具箱 publication receipt 未完成确认清理：${missing.join('、')}`);
+  }
+}
+
 function captureToolboxTargetSnapshot(targetPath) {
   const resolvedPath = path.resolve(String(targetPath || ''));
   try {
@@ -18007,7 +19505,6 @@ function captureToolboxTargetSnapshots(targetPaths) {
 }
 
 function createVccOutputStagingDirectory(batchContext) {
-  const context = freezeWorkerBatchContext(batchContext, { required: true });
   const root = path.join(
     app.getPath('userData'),
     'run-data',
@@ -18015,7 +19512,7 @@ function createVccOutputStagingDirectory(batchContext) {
     'output-generation'
   );
   fs.mkdirSync(root, { recursive: true });
-  return fs.mkdtempSync(path.join(root, `${context.taskRunId.replace(/[^a-zA-Z0-9._-]+/g, '-')}-`));
+  return fs.mkdtempSync(path.join(root, `${batchContext.taskRunId.replace(/[^a-zA-Z0-9._-]+/g, '-')}-`));
 }
 
 function cleanupVccOutputStagingDirectory(directoryPath) {
@@ -18095,7 +19592,7 @@ function clearToolboxSplitReadContext(context) {
   if (toolboxSplitReadContext === context) toolboxSplitReadContext = null;
 }
 
-function assertToolboxSplitSourceFresh(context) {
+function assertToolboxSplitSourceFresh(context, sourceEvidence) {
   let stat;
   try {
     stat = fs.statSync(context.sourceFilePath);
@@ -18103,7 +19600,10 @@ function assertToolboxSplitSourceFresh(context) {
     clearToolboxSplitReadContext(context);
     throw new Error('拆分源文件已不存在，请重新选择');
   }
-  if (!sourceSnapshotMatchesStat(context.snapshot, stat)) {
+  if (!sourceEvidence
+      || sourceEvidence.filePath !== context.sourceFilePath
+      || !sourceSnapshotMatchesStat(context.snapshot, stat)
+      || !sourceSnapshotMatchesStat(sourceEvidence.sourceSnapshot, stat)) {
     clearToolboxSplitReadContext(context);
     throw new Error('拆分源文件在读取后已变化，请重新选择');
   }
@@ -18174,28 +19674,23 @@ function registerToolboxHandlers() {
           return { proceed: false, result: { status: 'cancelled' } };
         }
         assertToolboxTargetsDoNotAliasSources(choice.filePaths, [saveResult.filePath]);
-        const targetSnapshots = captureToolboxTargetSnapshots([saveResult.filePath]);
+        const inputFiles = Object.freeze(choice.filePaths.map((filePath) => Object.freeze({
+          filePath,
+          role: 'input',
+          sourceOperation: 'toolbox:merge'
+        })));
         const prepared = {
           proceed: true,
-          inputPaths: choice.filePaths.slice(),
-          outputPaths: [saveResult.filePath],
-          filePaths: choice.filePaths.slice(),
-          savePath: saveResult.filePath,
-          targetSnapshots
-        };
-        prepared.beforeStart = () => {
-          assertToolboxTargetsDoNotAliasSources(prepared.filePaths, [prepared.savePath]);
-          assertToolboxTargetSnapshotsFresh([prepared.savePath], prepared.targetSnapshots);
-          prepared.inputFiles = prepared.filePaths.map((filePath) => {
-            const sourceSnapshot = sourceSnapshotFromStat(fs.statSync(filePath));
-            if (!sourceSnapshot) throw new Error('合并源文件不可读，请重新选择');
-            return {
-              filePath,
-              role: 'input',
-              sourceOperation: 'toolbox:merge',
-              sourceSnapshot
-            };
-          });
+          filePlan: {
+            version: 1,
+            allocation: 'eager',
+            inputs: inputFiles,
+            outputs: [{
+              filePath: saveResult.filePath,
+              role: 'output',
+              sourceOperation: 'toolbox:merge'
+            }]
+          }
         };
         return prepared;
       } catch (error) {
@@ -18204,7 +19699,8 @@ function registerToolboxHandlers() {
     },
     async execute(_event, prepared, taskContext) {
       try {
-        const { filePaths, savePath } = prepared;
+        const filePaths = taskContext.fileEvidence.inputFiles.map((file) => file.filePath);
+        const outputPath = taskContext.fileEvidence.filePlan.outputs[0].filePath;
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
@@ -18220,7 +19716,7 @@ function registerToolboxHandlers() {
             [{
               sourcePath: tempPath,
               outputId: 'merge-1',
-              fileName: path.basename(savePath),
+              fileName: path.basename(outputPath),
               byteSize: writeRes.byteSize,
               sha256: writeRes.sha256,
               dataRowCount: writeRes.dataRowCount,
@@ -18228,14 +19724,17 @@ function registerToolboxHandlers() {
               warningSummary: writeRes.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: writeRes.styleStats || null
             }],
-            [{ targetPath: savePath }],
+            [{ targetPath: outputPath }],
             taskContext.batchContext,
             {
               protectedSourcePaths: filePaths,
-              targetSnapshots: prepared.targetSnapshots,
-              archiveInputFiles: prepared.inputFiles
+              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+              archiveInputFiles: taskContext.fileEvidence.inputFiles,
+              settleManifestArtifacts: taskContext.settleArtifacts,
+              fileEvidence: taskContext.fileEvidence
             }
           );
+          prepared.toolboxPublicationTaskIds = [publishResult.taskId];
           const publishedFile = publishResult.files[0];
           prepared.outputFiles = toolboxFinalOutputFiles(
             publishResult.files,
@@ -18390,6 +19889,10 @@ function registerToolboxHandlers() {
             }
           }
           outputPaths = targetPlans.map((plan) => plan.targetPath);
+          targetPlans = groups.map((group, index) => ({
+            ...group,
+            outputId: `split-${index + 1}`
+          }));
         } else {
           const saveResult = await dialog.showSaveDialog(mainWindow, {
             defaultPath: toolboxBuildSplitFileName(values, sanitizeFileName),
@@ -18405,36 +19908,33 @@ function registerToolboxHandlers() {
           [readContext.sourceFilePath],
           outputPaths
         );
-        const targetSnapshots = captureToolboxTargetSnapshots(outputPaths);
         const prepared = {
           proceed: true,
-          inputPaths: [readContext.sourceFilePath],
-          outputPaths,
           payload,
           readContext,
-          sourceFilePath: readContext.sourceFilePath,
           field,
           values,
-          targetPlans,
-          savePath,
-          targetSnapshots
+          targetPlans
         };
-        prepared.inputFiles = [{
+        const inputFiles = Object.freeze([Object.freeze({
           filePath: readContext.sourceFilePath,
           role: 'input',
-          sourceOperation: 'toolbox:split:export',
-          sourceSnapshot: readContext.snapshot
-        }];
-        prepared.beforeStart = () => {
-          assertToolboxSplitSourceFresh(readContext);
-          assertToolboxTargetsDoNotAliasSources(
-            [readContext.sourceFilePath],
-            prepared.outputPaths
-          );
-          assertToolboxTargetSnapshotsFresh(
-            prepared.outputPaths,
-            prepared.targetSnapshots
-          );
+          sourceOperation: 'toolbox:split:export'
+        })]);
+        prepared.filePlan = {
+          version: 1,
+          allocation: 'eager',
+          inputs: inputFiles,
+          outputs: outputPaths.map((filePath) => ({
+            filePath,
+            role: 'output',
+            sourceOperation: 'toolbox:split:export'
+          }))
+        };
+        prepared.beforeStart = (_batchContext, planEvidence) => {
+          const sourceEvidence = planEvidence.inputFiles[0];
+          assertToolboxSplitSourceFresh(readContext, sourceEvidence);
+          return {};
         };
         return prepared;
       } catch (error) {
@@ -18446,20 +19946,21 @@ function registerToolboxHandlers() {
         const {
           payload,
           readContext,
-          sourceFilePath,
           field,
           values,
-          targetPlans,
-          savePath
+          targetPlans
         } = prepared;
+        const sourceFilePath = taskContext.fileEvidence.inputFiles[0].filePath;
+        const outputPaths = taskContext.fileEvidence.filePlan.outputs
+          .map((item) => item.filePath);
         if (payload.mode === 'multiple') {
-          const outputDirectory = path.dirname(targetPlans[0].targetPath);
+          const outputDirectory = path.dirname(outputPaths[0]);
           const tempDir = fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'));
           let preserveTempDir = false;
           try {
             const preparedPlans = targetPlans.map((plan, index) => ({
               ...plan,
-              outputId: plan.outputId || `split-${index + 1}`,
+              targetPath: outputPaths[index],
               temporaryPath: path.join(tempDir, `${String(index + 1).padStart(2, '0')}.xlsx`),
               matchedCount: 0
             }));
@@ -18539,10 +20040,13 @@ function registerToolboxHandlers() {
             taskContext.batchContext,
             {
               protectedSourcePaths: [sourceFilePath],
-              targetSnapshots: prepared.targetSnapshots,
-              archiveInputFiles: prepared.inputFiles
+              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+              archiveInputFiles: taskContext.fileEvidence.inputFiles,
+              settleManifestArtifacts: taskContext.settleArtifacts,
+              fileEvidence: taskContext.fileEvidence
             }
           );
+          prepared.toolboxPublicationTaskIds = [publishResult.taskId];
           const files = publishResult.files;
           prepared.outputFiles = toolboxFinalOutputFiles(
             files,
@@ -18582,6 +20086,7 @@ function registerToolboxHandlers() {
       //   {status:'success',filePath} / {status:'cancelled'} / 0 命中沿用现文案 failed。
       //   🔴 修 B20：try/finally 可靠清 mkdtemp 临时目录（含 dispatch reject / worker crash；外层 catch→toolboxFailureResult 兜异常）。
       if (await shouldUseLargeChannel(sourceFilePath)) {
+        const outputPath = outputPaths[0];
         const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-large-'));
         const tempPath = path.join(tempDir, `toolbox-${Date.now()}.xlsx`);
         let preserveTempDir = false;
@@ -18607,7 +20112,7 @@ function registerToolboxHandlers() {
             [{
               sourcePath: tempPath,
               outputId: 'split-1',
-              fileName: path.basename(savePath),
+              fileName: path.basename(outputPath),
               matchedCount,
               byteSize: generationResult.byteSize,
               sha256: generationResult.sha256,
@@ -18616,14 +20121,17 @@ function registerToolboxHandlers() {
               warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
               styleStats: generationResult.styleStats || null
             }],
-            [{ targetPath: savePath }],
+            [{ targetPath: outputPath }],
             taskContext.batchContext,
             {
               protectedSourcePaths: [sourceFilePath],
-              targetSnapshots: prepared.targetSnapshots,
-              archiveInputFiles: prepared.inputFiles
+              targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+              archiveInputFiles: taskContext.fileEvidence.inputFiles,
+              settleManifestArtifacts: taskContext.settleArtifacts,
+              fileEvidence: taskContext.fileEvidence
             }
           );
+          prepared.toolboxPublicationTaskIds = [publishResult.taskId];
           const publishedFile = publishResult.files[0];
           prepared.outputFiles = toolboxFinalOutputFiles(
             publishResult.files,
@@ -18663,6 +20171,7 @@ function registerToolboxHandlers() {
       }
 
       const generationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-'));
+      const outputPath = outputPaths[0];
       const tempPath = path.join(generationDir, `toolbox-${Date.now()}.xlsx`);
       let generationResult;
       try {
@@ -18691,7 +20200,7 @@ function registerToolboxHandlers() {
           [{
             sourcePath: tempPath,
             outputId: 'split-1',
-            fileName: path.basename(savePath),
+            fileName: path.basename(outputPath),
             matchedCount,
             byteSize: generationResult.byteSize,
             sha256: generationResult.sha256,
@@ -18700,14 +20209,17 @@ function registerToolboxHandlers() {
             warningSummary: generationResult.warningSummary || EMPTY_TOOLBOX_WARNING_SUMMARY,
             styleStats: generationResult.styleStats || null
           }],
-          [{ targetPath: savePath }],
+          [{ targetPath: outputPath }],
           taskContext.batchContext,
           {
             protectedSourcePaths: [sourceFilePath],
-            targetSnapshots: prepared.targetSnapshots,
-            archiveInputFiles: prepared.inputFiles
+            targetSnapshots: taskContext.fileEvidence.targetSnapshots,
+            archiveInputFiles: taskContext.fileEvidence.inputFiles,
+            settleManifestArtifacts: taskContext.settleArtifacts,
+            fileEvidence: taskContext.fileEvidence
           }
         );
+        prepared.toolboxPublicationTaskIds = [publishResult.taskId];
         const publishedFile = publishResult.files[0];
         prepared.outputFiles = toolboxFinalOutputFiles(
           publishResult.files,
@@ -18782,208 +20294,22 @@ function isSuccessfulTrackedResult(result, moduleKey) {
   return moduleKey === 'VCC财务OP校验' && VCC_USAGE_SUCCESS_STATUSES.has(result.status);
 }
 
-function archiveOutputPaths(files) {
-  const values = Array.isArray(files) ? files : [];
-  const seen = new Set();
-  const output = [];
-  for (const item of values) {
-    const filePath = typeof item === 'string' ? item : item && item.filePath;
-    const normalized = String(filePath || '').trim();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    output.push(normalized);
-  }
-  return output;
+async function prepareVccImportArchiveHandoff(args, batchContext) {
+  return buildVccImportArchiveHandoffFiles(args, batchContext);
 }
 
-function archiveResultSnapshot(result) {
-  if (!result || typeof result !== 'object') return result;
-  const snapshot = {};
-  const scalarKeys = [
-    'status', 'detailReady', 'balanceReady', 'runId', 'mirrorId', 'id',
-    'filePath', 'savedPath', 'savePath', 'mainFilePath', 'hitRowsReportPath',
-    'platformCleanupPath', 'refundBackfillPath', 'unmatchedFilePath',
-    'diffFilePath', 'reportFilePath'
-  ];
-  for (const key of scalarKeys) {
-    const value = result[key];
-    if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) {
-      snapshot[key] = value;
-    }
-  }
-  if (Array.isArray(result.results)) {
-    snapshot.results = result.results.map((item) => {
-      if (!item || typeof item !== 'object') return {};
-      return {
-        fileName: item.fileName,
-        status: item.status,
-        tableKey: item.tableKey,
-        outcome: item.outcome,
-        rowCount: item.rowCount,
-        alsoLinked: item.alsoLinked && typeof item.alsoLinked === 'object'
-          ? { error: item.alsoLinked.error || '', rowCount: item.alsoLinked.rowCount }
-          : item.alsoLinked
-      };
-    });
-  }
-  if (Array.isArray(result.files)) {
-    snapshot.files = result.files.map((item) => (
-      typeof item === 'string'
-        ? item
-        : { filePath: item && (item.filePath || item.savedPath || item.path) }
-    ));
-  }
-  return snapshot;
-}
-
-function statementArchiveRuntime() {
-  const session = getCurrentStatementSession();
-  const fileEntries = session ? getStatementSessionEntries(session, 'current') : [];
-  const inputPaths = lastFileImportContext && Array.isArray(lastFileImportContext.inputFilePaths)
-    ? lastFileImportContext.inputFilePaths.slice()
-    : fileEntries.map((entry) => entry && entry.filePath).filter(Boolean);
-  const templateIds = new Set();
-  const contextTemplateId = Number(lastFileImportContext && lastFileImportContext.templateId);
-  if (Number.isInteger(contextTemplateId) && contextTemplateId > 0) templateIds.add(contextTemplateId);
-  for (const entry of fileEntries) {
-    const templateId = Number(entry && entry.matchedTemplateId);
-    if (Number.isInteger(templateId) && templateId > 0) templateIds.add(templateId);
-  }
-  const detail = getGeneratedStatementExport('detail', 'current') || lastGeneratedExports.detail;
-  const balance = getGeneratedStatementExport('balance', 'current') || lastGeneratedExports.balance;
-  const ids = Array.from(templateIds);
-  return {
-    inputPaths,
-    outputPaths: archiveOutputPaths([detail, balance]),
-    templateIds: ids,
-    templateNames: ids.map((templateId) => database && database.getTemplate(templateId))
-      .filter(Boolean)
-      .map((template) => template.name)
-  };
-}
-
-async function persistVccImportArchiveHandoff(args, batchContext) {
-  const center = archiveCenterService || initializeArchiveCenter();
-  if (!center
-      || typeof center.persistAppendIntent !== 'function'
-      || typeof center.flushOutbox !== 'function') {
-    const error = new Error('VCC 导入输入文件无法形成耐久存档接管，业务未开始');
-    error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_UNAVAILABLE';
-    throw error;
-  }
-  const files = await buildVccImportArchiveHandoffFiles(args, batchContext);
-  const persisted = center.persistAppendIntent({
-    batchContext,
-    sourceOperation: 'vccFinancialOp:import:apply',
-    files,
-    metadata: { vccImportHandoffVersion: 1 }
+async function settleVccOutputPublication(prepared, taskContext, publication, evidence) {
+  prepared.vccOutputPublicationTaskIds.push(publication.taskId);
+  const settled = await taskContext.settleArtifacts({
+    files: taskContext.fileEvidence.filePlan.outputs.map((item, index) => ({
+      artifactKey: item.artifactKey,
+      expectedSha256: evidence[index].sha256,
+      expectedSizeBytes: evidence[index].byteSize
+    }))
   });
-  if (!persisted || persisted.persisted !== true) {
-    const error = new Error('VCC 导入输入文件耐久接管登记失败，业务未开始');
-    error.code = 'VCC_IMPORT_ARCHIVE_HANDOFF_FAILED';
-    throw error;
+  if (!settled || settled.durable !== true) {
+    throw new Error('VCC 输出 manifest artifact 尚未全部 durable');
   }
-  try {
-    // 正常路径尽早形成 ready/failed artifact；即使 Archive 暂不可写，已经 fsync 的
-    // outbox 仍是业务开始前的唯一耐久接管根，启动 owner 会在原批次继续重放。
-    await center.flushOutbox();
-  } catch (error) {
-    appendActivityLogEntry({
-      level: 'warning',
-      source: 'main',
-      domain: 'vcc-financial-op',
-      message: 'VCC 导入输入存档即时重放失败，已保留耐久接管供启动恢复',
-      details: [error && error.message ? error.message : String(error)]
-    });
-  }
-  return files;
-}
-
-async function buildArchiveRuntimeSnapshot(channel, args, result) {
-  if (channel === 'vccFinancialOp:import:apply') {
-    return {
-      inputFiles: buildVccImportArchiveInputFiles(args, result)
-    };
-  }
-  if (channel === 'file:import'
-      || channel === 'file:complete-big-account-selection'
-      || channel === 'file:save-balance-seed') {
-    return statementArchiveRuntime();
-  }
-  if (channel === 'monthly-balance:assemble') {
-    const pending = lastGeneratedExports.monthlyBalance;
-    const templateIds = pending && Array.isArray(pending.templateIds) ? pending.templateIds : [];
-    return {
-      outputPaths: archiveOutputPaths([pending]),
-      templateIds,
-      metadata: pending ? {
-        year: pending.year,
-        month: pending.month,
-        templateScope: pending.templateScope
-      } : {}
-    };
-  }
-  if (channel === 'new-account:generate') {
-    return { outputPaths: archiveOutputPaths([lastGeneratedExports.newAccount]) };
-  }
-  if (channel === 'bank-statement:run' || channel === 'bank-statement:export') {
-    return { runKey: processingResult && processingResult.runId };
-  }
-  if (channel === 'recon-id-fix:run' || channel === 'recon-id-fix:export') {
-    return {
-      runKey: reconIdFixResult && reconIdFixResult.ranAt,
-      originModuleId: reconIdFixResult && reconIdFixResult.originModuleId
-    };
-  }
-  if (channel === 'pre-fund-reconciliation:mpt-errors:repair') {
-    const paths = result && Array.isArray(result.archivedSourcePaths) ? result.archivedSourcePaths : [];
-    return { inputPaths: paths };
-  }
-  if (channel === 'position-reconciliation:bank:apply-import') {
-    return {
-      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
-      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
-      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : [],
-      metadata: {
-        scopes: result && Array.isArray(result.scopes) ? result.scopes : [],
-        scopeInputs: result && Array.isArray(result.scopeInputs) ? result.scopeInputs : []
-      }
-    };
-  }
-  if (channel === 'position-reconciliation:source:prepare-import') {
-    return {
-      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
-      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
-      outputPaths: result && Array.isArray(result.outputPaths) ? result.outputPaths : [],
-      outputFiles: result && Array.isArray(result.outputFiles) ? result.outputFiles : [],
-      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
-    };
-  }
-  if (channel === 'position-reconciliation:source:apply-import') {
-    return {
-      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
-      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
-      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
-    };
-  }
-  if (channel === 'position-reconciliation:run:export'
-      || channel === 'position-reconciliation:bank:export'
-      || channel === 'position-reconciliation:linked:export'
-      || channel === 'position-reconciliation:raw:export') {
-    return {
-      runKey: result && result.runId,
-      outputPaths: archiveOutputPaths([result && result.filePath])
-    };
-  }
-  if (channel === 'position-reconciliation:run:import-result') {
-    return {
-      runKey: result && result.runId,
-      inputPaths: result && Array.isArray(result.inputPaths) ? result.inputPaths : [],
-      inputFiles: result && Array.isArray(result.inputFiles) ? result.inputFiles : [],
-      cleanupPaths: result && Array.isArray(result.cleanupPaths) ? result.cleanupPaths : []
-    };
-  }
-  return {};
 }
 
 function positionArchiveStagingRoot() {
@@ -19168,40 +20494,21 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     if (!prepared.proceed) return prepared.result;
 
     const effectiveArgs = prepared.args;
-    let vccImportArchiveHandoffFiles = null;
-    const executeBusiness = (taskContext) => {
-      const invocationTaskContext = meta.channel === 'vccFinancialOp:import:apply' && taskContext
-        ? Object.freeze({ ...taskContext, vccImportArchiveHandoffFiles })
-        : taskContext;
-      return executeIpcTaskInvocation(
-        contract,
-        event,
-        prepared,
-        effectiveArgs,
-        invocationTaskContext
-      );
-    };
+    const executeBusiness = (taskContext) => executeIpcTaskInvocation(
+      contract,
+      event,
+      prepared,
+      effectiveArgs,
+      taskContext
+    );
     const policy = taskPolicyRegistry.get(meta.channel);
     if (!policy) {
-      if (!pr3TaskPolicyHandoff.has(meta.channel)) {
-        throw new Error(`未登记 task policy：${meta.channel}`);
-      }
-      return runRegisteredBusinessOperation(meta, executeBusiness)(event);
+      throw new Error(`未登记 task policy：${meta.channel}`);
     }
     if (policy.batchPolicy === 'exclude') {
-      if (policy.excludeReason !== 'no-archive-artifact') {
-        throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
-      }
-      return runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-        executeIpcTaskWithoutBatch({
-          businessOperationRegistry,
-          meta,
-          markExecuteStarted,
-          execute: executeBusiness
-        })
-      ));
+      throw new Error(`受控业务 helper 不得执行 exclude policy：${meta.channel}`);
     }
-    if (policy.batchPolicy !== 'reserve') {
+    if (!['reserve', 'no-file'].includes(policy.batchPolicy)) {
       throw new Error(`不支持的 task batch policy：${meta.channel}`);
     }
 
@@ -19215,10 +20522,6 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
       };
     }
 
-    const selectedPaths = [
-      ...prepared.inputPaths,
-      ...dialogContext.dialogSelections.flatMap((selection) => selection.filePaths || [])
-    ];
     const invocation = {
       args: effectiveArgs,
       prepared,
@@ -19227,18 +20530,87 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     const isPositionOperation = meta.channel.startsWith('position-reconciliation:');
     const positionOperationToken = isPositionOperation ? randomUUID() : '';
 
+    if (policy.batchPolicy === 'no-file') {
+      const operationPromise = runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
+        archiveTaskLifecycle.runOperationOnly({
+          meta,
+          policy,
+          args: effectiveArgs,
+          prepared,
+          lineageIntents: prepared.lineageIntents,
+          flowPlanResolver: prepared.flowPlan
+            ? () => prepared.flowPlan
+            : () => resolveTaskFlowPlan(policy, invocation),
+          taskRunId: prepared.taskRunId || positionOperationToken || undefined,
+          operationKey: prepared.operationKey || (positionOperationToken
+            ? `position:${positionOperationToken}:${meta.channel}`
+            : undefined),
+          resultClassifier: policy.resultClassifier,
+          resultMetadataResolver: typeof policy.resultMetadataResolver === 'function'
+            ? (result, context, terminal) => policy.resultMetadataResolver(
+                result,
+                context,
+                { ...terminal, invocation }
+              )
+            : null,
+          resultFlowIdentities: typeof policy.resultFlowIdentities === 'function'
+            ? (result, context) => policy.resultFlowIdentities(result, context, invocation)
+            : null,
+          afterTerminal: isPositionOperation
+            ? finalizePositionPendingAfterTaskTerminal
+            : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
+          afterTerminalIntent: isPositionOperation
+            ? { route: 'position-reconciliation', operationToken: positionOperationToken }
+            : (prepared.afterTerminalIntent || null),
+          beforeStart: typeof prepared.beforeStart === 'function'
+            ? async (operationContext) => prepared.beforeStart(operationContext)
+            : null,
+          execute: async (operationContext, controls) => {
+            const taskContext = createIpcTaskContext(operationContext, controls);
+            return executeAfterPositionAdmission({
+              isPositionOperation,
+              markExecuteStarted,
+              execute: () => executeBusiness(taskContext),
+              admitPosition: (operation) => runPositionReconciliationOperation(
+                meta.channel,
+                operation,
+                { operationToken: positionOperationToken, operationContext }
+              )
+            });
+          }
+        })
+      ));
+      return trackArchiveOperationPromise(operationPromise);
+    }
+
+    const useLegacyExistingBatchRecovery = prepared.legacyExistingBatchRecovery === true;
+    const runFileLifecycle = !useLegacyExistingBatchRecovery
+      ? (policy.allocation === 'deferred'
+          ? archiveTaskLifecycle.runDeferredFileTask.bind(archiveTaskLifecycle)
+          : archiveTaskLifecycle.runFileTask.bind(archiveTaskLifecycle))
+      : archiveTaskLifecycle.run.bind(archiveTaskLifecycle);
     const operationPromise = runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-      archiveTaskLifecycle.run({
+      runFileLifecycle({
       meta,
       policy,
       args: effectiveArgs,
       prepared,
-      selectedPathsResolver: () => selectedPaths,
+      lineageIntents: prepared.lineageIntents,
+      filePlanResolver: !useLegacyExistingBatchRecovery
+        ? ({ taskRun }) => policy.filePlanResolver({
+            channel: meta.channel,
+            args: effectiveArgs,
+            prepared,
+            taskRun
+          })
+        : null,
+      selectedPathsResolver: useLegacyExistingBatchRecovery ? () => [] : null,
       recovery: prepared.recovery || undefined,
       flowPlanResolver: prepared.flowPlan
         ? () => prepared.flowPlan
         : () => resolveTaskFlowPlan(policy, invocation),
       taskRunId: prepared.taskRunId || positionOperationToken || undefined,
+      explicitParentRunId: prepared.explicitParentRunId || undefined,
       operationKey: prepared.operationKey || (positionOperationToken
         ? `position:${positionOperationToken}:${meta.channel}`
         : undefined),
@@ -19255,17 +20627,26 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
         : null,
       afterTerminal: isPositionOperation
         ? finalizePositionPendingAfterTaskTerminal
-        : null,
+        : (meta.channel === 'toolbox:merge' || meta.channel === 'toolbox:split:export')
+          ? () => acknowledgeToolboxPublicationReceipts(
+              prepared.toolboxPublicationTaskIds || []
+            )
+          : meta.channel.startsWith('vccFinancialOp:export:')
+              || meta.channel === 'vccFinancialOp:data-manager:export'
+            ? () => acknowledgeToolboxPublicationReceipts(
+                prepared.vccOutputPublicationTaskIds || []
+              )
+          : (typeof prepared.afterTerminal === 'function' ? prepared.afterTerminal : null),
       afterTerminalIntent: isPositionOperation
         ? { route: 'position-reconciliation', operationToken: positionOperationToken }
-        : null,
-      beforeStart: async (batchContext) => {
-        if (typeof prepared.beforeStart === 'function') await prepared.beforeStart();
-        vccImportArchiveHandoffFiles = meta.channel === 'vccFinancialOp:import:apply'
-          ? await persistVccImportArchiveHandoff(effectiveArgs, batchContext)
-          : [];
+        : (prepared.afterTerminalIntent || null),
+      beforeStart: async (batchContext, filePlanEvidence) => {
+        const preparedEvidence = typeof prepared.beforeStart === 'function'
+          ? await prepared.beforeStart(batchContext, filePlanEvidence)
+          : null;
+        if (!useLegacyExistingBatchRecovery) return preparedEvidence || {};
         return {
-          vccImportHandoffFiles: vccImportArchiveHandoffFiles,
+          ...(preparedEvidence || {}),
           sourceSnapshots: captureArchiveSourceSnapshots({
           args: [],
           result: null,
@@ -19273,51 +20654,59 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
             channel: meta.channel,
             args: effectiveArgs,
             prepared,
-            selectedPaths,
+            selectedPaths: [],
             runtime: { inputPaths: prepared.inputPaths }
           }),
             runtime: {}
           })
         };
       },
-      runtimeResolver: async ({ result, beforeStartEvidence }) => {
-        const runtime = await buildArchiveRuntimeSnapshot(meta.channel, effectiveArgs, result);
-        if (meta.channel === 'toolbox:merge' || meta.channel === 'toolbox:split:export') {
-          runtime.inputPaths = prepared.inputPaths.slice();
-          runtime.inputFiles = Array.isArray(prepared.inputFiles)
-            ? prepared.inputFiles.slice()
-            : [];
-          runtime.outputFiles = Array.isArray(prepared.outputFiles)
-            ? prepared.outputFiles.slice()
-            : [];
-          runtime.outputPaths = runtime.outputFiles.map((file) => file.filePath);
-        }
-        const afterSnapshots = captureArchiveSourceSnapshots({
-          args: effectiveArgs,
-          result,
-          selectedPaths,
-          runtime
-        });
-        runtime.sourceSnapshots = new Map([
-          ...(
-            beforeStartEvidence && beforeStartEvidence.sourceSnapshots
-              ? beforeStartEvidence.sourceSnapshots
-              : []
-          ),
-          ...afterSnapshots
-        ]);
-        if (positionOperationToken) {
-          runtime.metadata = {
-            ...(runtime.metadata || {}),
-            positionOperationToken
-          };
-        }
-        return runtime;
-      },
+      runtimeResolver: null,
       execute: async (batchContext, controls) => {
         dialogContext.batchContext = batchContext;
         const taskContext = createIpcTaskContext(batchContext, controls);
         const executePositionBusiness = async () => {
+          if (!useLegacyExistingBatchRecovery) {
+            recordPositionFilePlanIntent(
+              taskContext.fileEvidence.filePlan,
+              prepared.positionArchiveEvidence
+            );
+            let result;
+            let operationError = null;
+            try {
+              result = await executeBusiness(taskContext);
+            } catch (error) {
+              operationError = error;
+            }
+            markPositionBusinessOutcome(
+              operationError ? positionReconciliationFailureResult(operationError) : result,
+              { terminalForCurrentTask: true }
+            );
+            const settled = await controls.settleArtifacts({
+              files: [
+                ...taskContext.fileEvidence.filePlan.inputs,
+                ...taskContext.fileEvidence.filePlan.outputs
+              ].map((item) => ({ artifactKey: item.artifactKey }))
+            });
+            if (settled && settled.durable === true) {
+              markPositionArchiveDurable({ batchId: batchContext.batchId });
+              await cleanupPositionArchiveStaging({
+                cleanupPaths: result && Array.isArray(result.cleanupPaths)
+                  ? result.cleanupPaths
+                  : []
+              });
+            } else {
+              markPositionArchiveIncomplete({
+                warning: {
+                  message: settled && settled.message
+                    ? settled.message
+                    : 'manifest artifact 尚未形成耐久结果'
+                }
+              });
+            }
+            if (operationError) throw operationError;
+            return result;
+          }
           let result;
           let operationError = null;
           try {
@@ -19538,6 +20927,21 @@ async function runBackgroundInitChain() {
     database = new AppDatabase(dataPath);
     database.init();
     initializeAppUpdaterService();
+    try {
+      pendingDb = openPendingDb(app.getPath('userData'));
+    } catch (pendingDbErr) {
+      pendingDb = null;
+      try {
+        appendActivityLogEntry({
+          level: 'error',
+          message: 'Pending DB 初始化失败（v2.0.0）',
+          details: [String(pendingDbErr && pendingDbErr.stack ? pendingDbErr.stack : pendingDbErr)]
+        });
+      } catch (_logErr) {
+        // 日志失败不覆盖真实启动错误。
+      }
+      throw pendingDbErr;
+    }
     initializeArchiveCenter();
     // 存档 journal 必须先按 DB setting 收敛到唯一根，才允许 Position 等启动恢复消费者放行。
     // 初始化抛错会由现有 startup failure 入口退出；不得把已切换 service 上的
@@ -19562,21 +20966,6 @@ async function runBackgroundInitChain() {
 
     // v2.0.0-beta.2 D16：风格-背景色联动（仅魔法值场景）
     ensureBackgroundColorMatchesStyle();
-
-    try {
-      pendingDb = openPendingDb(app.getPath('userData'));
-    } catch (pendingDbErr) {
-      pendingDb = null;
-      try {
-        appendActivityLogEntry({
-          level: 'error',
-          message: 'Pending DB 初始化失败（v2.0.0）',
-          details: [String(pendingDbErr && pendingDbErr.stack ? pendingDbErr.stack : pendingDbErr)]
-        });
-      } catch (_logErr) {
-        // swallow
-      }
-    }
 
     // v1.5.3 R2（D15）：一次性迁移 own-accounts/*.json → template_big_accounts
     // 失败不阻塞启动：异常由迁移模块内部捕获，返回 status='failed' 时记录到

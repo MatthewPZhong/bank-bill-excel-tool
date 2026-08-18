@@ -87,26 +87,40 @@ test('run-data-store 注册临时 MPT 模块并建立批次/明细/错误审计�
   }
 });
 
-test('旧月侧库读取保持只读兼容，首次导入时幂等补修复列和错误审计表', async () => {
+test('旧月侧库 listBatches 先 additive migrate 并回填 v0 UUID，首次导入继续可用', async () => {
   const legacyDb = runDataStore.openSideDb(tmpdir, MODULE, '2026-07');
   try {
     legacyDb.exec(`
       DROP TABLE pre_fund_reconciliation_gateway_excluded_rows;
+      DROP TRIGGER trg_pre_fund_gateway_batch_legacy_update;
+      DROP INDEX idx_pre_fund_gateway_batches_dataset;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN archive_contract_version;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN dataset_version;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN producer_task_run_id;
+      ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN dataset_id;
       ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN import_mode;
       ALTER TABLE pre_fund_reconciliation_gateway_batches DROP COLUMN excluded_row_count;
+      INSERT INTO pre_fund_reconciliation_gateway_batches
+        (source_type, source_batch, source_date, source_file_name,
+         source_file_sequence, content_hash, declared_row_count, row_count)
+      VALUES ('MPT_INBOUND_GATEWAY', 'LEGACY-BATCH', '2026-07-01',
+              'legacy.txt', '1', 'legacy-hash', 0, 0);
     `);
   } finally {
     legacyDb.close();
   }
   const store = new PreFundReconciliationStore(tmpdir);
-  assert.deepEqual(store.listBatches(), []);
+  const historical = store.listBatches()[0];
+  assert.match(historical.datasetId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.equal(historical.producerTaskRunId, null);
+  assert.equal(historical.archiveContractVersion, 0);
 
   const filePath = writeFixture(
     'MPT_INBOUND_GATEWAY_20260708_090.txt',
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'LEGACY-UPGRADE' })]
   );
-  const imported = await store.importFile(filePath);
+  const imported = await store.importLegacyFile(filePath);
   assert.equal(imported.batch.importMode, 'strict');
   assert.equal(imported.batch.excludedRowCount, 0);
 
@@ -141,8 +155,8 @@ test('不同 sourceType+sourceBatch 追加，跨实例可 list，规范行按稳
     [outboundRow({ reconId: 'R-O-1' })]
   );
 
-  assert.equal((await store.importFile(inbound)).status, 'imported');
-  assert.equal((await store.importFile(outbound)).status, 'imported');
+  assert.equal((await store.importLegacyFile(inbound)).status, 'imported');
+  assert.equal((await store.importLegacyFile(outbound)).status, 'imported');
 
   const reopened = new PreFundReconciliationStore(tmpdir);
   const batches = reopened.listBatches();
@@ -168,7 +182,7 @@ test('不同 sourceType+sourceBatch 追加，跨实例可 list，规范行按稳
 
 test('重复入金查询跨全部月份只返回精确 INBOUND-VA 条件且每月份一次批量读取', async () => {
   const store = new PreFundReconciliationStore(tmpdir);
-  await store.importFile(writeFixture(
+  await store.importLegacyFile(writeFixture(
     'MPT_INBOUND_GATEWAY_20260708_110.txt',
     ['20260708', 'MPT_INBOUND_20260708', '2'],
     [
@@ -176,7 +190,7 @@ test('重复入金查询跨全部月份只返回精确 INBOUND-VA 条件且每�
       inboundRow({ reconId: 'R-LOOKUP', tradeType: 'Inbound-OTHER', orderId: 'WRONG-TRADE' })
     ]
   ));
-  await store.importFile(writeFixture(
+  await store.importLegacyFile(writeFixture(
     'MPT_INBOUND_GATEWAY_20260801_111.txt',
     ['20260801', 'MPT_INBOUND_20260801', '1'],
     [inboundRow({
@@ -189,7 +203,7 @@ test('重复入金查询跨全部月份只返回精确 INBOUND-VA 条件且每�
       orderId: 'OI-AUG'
     })]
   ));
-  await store.importFile(writeFixture(
+  await store.importLegacyFile(writeFixture(
     'MPT_OUTBOUND_GATEWAY_20260707112.txt',
     ['20260707', 'MPT_OUTBOUND_20260707', '1'],
     [outboundRow({ reconId: 'R-LOOKUP', channel: 'CITI', merchantId: 'M1' })]
@@ -236,7 +250,7 @@ test('重复入金查询跨全部月份只返回精确 INBOUND-VA 条件且每�
 
 test('重复入金查询的空 reconciliationId 不进入候选池', async () => {
   const store = new PreFundReconciliationStore(tmpdir);
-  await store.importFile(writeFixture(
+  await store.importLegacyFile(writeFixture(
     'MPT_INBOUND_GATEWAY_20260708_114.txt',
     ['20260708', 'MPT_INBOUND_20260708', '2'],
     [
@@ -263,7 +277,7 @@ test('重复银行查询键共享有界 MPT 多候选集合，不按 N×K 展开
     orderId: `ORDER-${index + 1}`,
     batchSeq: String(index + 1)
   }));
-  await store.importFile(writeFixture(
+  await store.importLegacyFile(writeFixture(
     'MPT_INBOUND_GATEWAY_20260708_113.txt',
     ['20260708', 'MPT_INBOUND_20260708', String(rows.length)],
     rows
@@ -309,8 +323,8 @@ test('同文件同 hash 为 no-op；同文件名不同 hash 拒绝且旧数据�
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'ORIGINAL' })]
   );
-  assert.equal((await store.importFile(filePath)).status, 'imported');
-  assert.equal((await store.importFile(filePath)).status, 'noop');
+  assert.equal((await store.importLegacyFile(filePath)).status, 'imported');
+  assert.equal((await store.importLegacyFile(filePath)).status, 'noop');
 
   writeFixture(
     fileName,
@@ -318,10 +332,49 @@ test('同文件同 hash 为 no-op；同文件名不同 hash 拒绝且旧数据�
     [inboundRow({ reconId: 'CHANGED' })]
   );
   await assert.rejects(
-    () => store.importFile(filePath),
+    () => store.importLegacyFile(filePath),
     (error) => error.code === 'MPT_FILE_IDENTITY_CONFLICT'
   );
   assert.deepEqual([...store.iterateRows()].map((row) => row.reconciliationId), ['ORIGINAL']);
+});
+
+test('v1 MPT 同 hash noop 保留原 tag，物理替换才写入新 dataset 并递增 version', async () => {
+  const store = new PreFundReconciliationStore(tmpdir);
+  const firstPath = writeFixture(
+    'MPT_INBOUND_GATEWAY_20260708_210.txt',
+    ['20260708', 'MPT_INBOUND_20260708', '1'],
+    [inboundRow({ reconId: 'V1-OLD' })]
+  );
+  await store.importFile(firstPath, {
+    datasetSeed: { datasetId: 'mpt-dataset-1', producerTaskRunId: 'mpt-task-1' }
+  });
+  const first = store.listBatches()[0];
+  assert.equal(first.datasetId, 'mpt-dataset-1');
+  assert.equal(first.datasetVersion, 1);
+  assert.equal(first.archiveContractVersion, 1);
+
+  const noop = await store.importFile(firstPath, {
+    datasetSeed: { datasetId: 'mpt-dataset-unused', producerTaskRunId: 'mpt-task-unused' }
+  });
+  assert.equal(noop.status, 'noop');
+  const afterNoop = store.listBatches()[0];
+  assert.equal(afterNoop.datasetId, 'mpt-dataset-1');
+  assert.equal(afterNoop.producerTaskRunId, 'mpt-task-1');
+  assert.equal(afterNoop.datasetVersion, 1);
+
+  const replacement = writeFixture(
+    'MPT_INBOUND_GATEWAY_20260708_211.txt',
+    ['20260708', 'MPT_INBOUND_20260708', '1'],
+    [inboundRow({ reconId: 'V1-NEW' })]
+  );
+  await store.importFile(replacement, {
+    datasetSeed: { datasetId: 'mpt-dataset-2', producerTaskRunId: 'mpt-task-2' }
+  });
+  const replaced = store.listBatches()[0];
+  assert.equal(replaced.datasetId, 'mpt-dataset-2');
+  assert.equal(replaced.producerTaskRunId, 'mpt-task-2');
+  assert.equal(replaced.datasetVersion, 2);
+  assert.equal(replaced.archiveContractVersion, 1);
 });
 
 test('同批次更高序号原子替换，更低序号拒绝', async () => {
@@ -331,7 +384,7 @@ test('同批次更高序号原子替换，更低序号拒绝', async () => {
     ['20260708', 'MPT_INBOUND_20260708', '2'],
     [inboundRow({ reconId: 'OLD-1' }), inboundRow({ reconId: 'OLD-2' })]
   );
-  await store.importFile(oldPath);
+  await store.importLegacyFile(oldPath);
   const originalBatchId = store.listBatches()[0].id;
 
   const newerPath = writeFixture(
@@ -339,7 +392,7 @@ test('同批次更高序号原子替换，更低序号拒绝', async () => {
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'NEW' })]
   );
-  const replaced = await store.importFile(newerPath);
+  const replaced = await store.importLegacyFile(newerPath);
   assert.equal(replaced.status, 'replaced');
   assert.equal(replaced.replacedFileName, path.basename(oldPath));
   assert.equal(replaced.batch.id, originalBatchId, '替换保留 batch.id，候选稳定顺序不漂移');
@@ -351,7 +404,7 @@ test('同批次更高序号原子替换，更低序号拒绝', async () => {
     [inboundRow({ reconId: 'STALE' })]
   );
   await assert.rejects(
-    () => store.importFile(stalePath),
+    () => store.importLegacyFile(stalePath),
     (error) => error.code === 'MPT_BATCH_SEQUENCE_STALE'
   );
   assert.deepEqual([...store.iterateRows()].map((row) => row.reconciliationId), ['NEW']);
@@ -369,8 +422,8 @@ test('替换较早导入批次后仍保持其在其它临时批次之前', async
     ['20260709', 'MPT_INBOUND_20260709', '1'],
     [inboundRow({ batchNo: 'MPT_INBOUND_20260709', billDate: '2026-07-09', reconId: 'SECOND' })]
   );
-  await store.importFile(first);
-  await store.importFile(second);
+  await store.importLegacyFile(first);
+  await store.importLegacyFile(second);
   const originalIds = store.listBatches().map((batch) => batch.id);
 
   const replacement = writeFixture(
@@ -378,7 +431,7 @@ test('替换较早导入批次后仍保持其在其它临时批次之前', async
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'FIRST-NEW' })]
   );
-  await store.importFile(replacement);
+  await store.importLegacyFile(replacement);
 
   assert.deepEqual(store.listBatches().map((batch) => batch.id), originalIds);
   assert.deepEqual(
@@ -394,7 +447,7 @@ test('更高序号文件尾部校验失败时，已写批次回滚且旧批次�
     ['20260708', 'MPT_INBOUND_20260708', '2'],
     [inboundRow({ reconId: 'OLD-1' }), inboundRow({ reconId: 'OLD-2' })]
   );
-  await store.importFile(oldPath);
+  await store.importLegacyFile(oldPath);
 
   const brokenPath = writeFixture(
     'MPT_INBOUND_GATEWAY_20260708_401.txt',
@@ -402,7 +455,7 @@ test('更高序号文件尾部校验失败时，已写批次回滚且旧批次�
     [inboundRow({ reconId: 'NEW-1' }), inboundRow({ reconId: 'NEW-2', amount: 'bad' })]
   );
   await assert.rejects(
-    () => store.importFile(brokenPath),
+    () => store.importLegacyFile(brokenPath),
     (error) => error.code === 'MPT_ROW_ERRORS'
       && error.rowErrorCount === 1
       && error.rowErrorSamples[0].code === 'MPT_DECIMAL_INVALID'
@@ -426,7 +479,7 @@ test('严格导入汇总明细错误并整批回滚，逻辑删除重跑只落�
 
   let strictError;
   await assert.rejects(
-    () => store.importFile(filePath),
+    () => store.importLegacyFile(filePath),
     (error) => {
       strictError = error;
       return error.code === 'MPT_ROW_ERRORS'
@@ -438,7 +491,7 @@ test('严格导入汇总明细错误并整批回滚，逻辑删除重跑只落�
   assert.deepEqual(store.listBatches(), [], '严格导入失败不得留下批次或有效行');
 
   await assert.rejects(
-    () => store.importFile(filePath, {
+    () => store.importLegacyFile(filePath, {
       skipInvalidRows: true,
       expectedContentHash: '0'.repeat(64)
     }),
@@ -446,7 +499,7 @@ test('严格导入汇总明细错误并整批回滚，逻辑删除重跑只落�
   );
   assert.deepEqual(store.listBatches(), [], '源文件哈希不符不得留下重跑结果');
 
-  const repaired = await store.importFile(filePath, {
+  const repaired = await store.importLegacyFile(filePath, {
     skipInvalidRows: true,
     expectedContentHash: strictError.contentHash
   });
@@ -488,11 +541,11 @@ test('更高序号逻辑删除重跑失败时恢复原批次和原错误审计',
     [inboundRow({ reconId: 'OLD-VALID' }), inboundRow({ reconId: 'OLD-BAD', amount: 'bad' })]
   );
   let oldError;
-  await assert.rejects(() => store.importFile(oldPath), (error) => {
+  await assert.rejects(() => store.importLegacyFile(oldPath), (error) => {
     oldError = error;
     return error.code === 'MPT_ROW_ERRORS';
   });
-  await store.importFile(oldPath, {
+  await store.importLegacyFile(oldPath, {
     skipInvalidRows: true,
     expectedContentHash: oldError.contentHash
   });
@@ -503,7 +556,7 @@ test('更高序号逻辑删除重跑失败时恢复原批次和原错误审计',
     [inboundRow({ reconId: 'NEW-VALID' }), inboundRow({ reconId: 'NEW-BAD', amount: 'bad' })]
   );
   let newerError;
-  await assert.rejects(() => store.importFile(newerPath), (error) => {
+  await assert.rejects(() => store.importLegacyFile(newerPath), (error) => {
     newerError = error;
     return error.code === 'MPT_ROW_ERRORS';
   });
@@ -513,7 +566,7 @@ test('更高序号逻辑删除重跑失败时恢复原批次和原错误审计',
     'utf8'
   );
   await assert.rejects(
-    () => store.importFile(newerPath, {
+    () => store.importLegacyFile(newerPath, {
       skipInvalidRows: true,
       expectedContentHash: newerError.contentHash
     }),
@@ -536,7 +589,7 @@ test('更高序号 gzip 在尾部截断时整批回滚，旧批次保持可用',
     ['20260707', 'MPT_OUTBOUND_20260707', '1'],
     [outboundRow({ reconId: 'OLD-GZIP' })]
   );
-  await store.importFile(oldPath);
+  await store.importLegacyFile(oldPath);
 
   const truncatedPath = writeFixture(
     'MPT_OUTBOUND_GATEWAY_20260707901.gz',
@@ -546,7 +599,7 @@ test('更高序号 gzip 在尾部截断时整批回滚，旧批次保持可用',
   const gzip = fs.readFileSync(truncatedPath);
   fs.writeFileSync(truncatedPath, gzip.subarray(0, gzip.length - 4));
   await assert.rejects(
-    () => store.importFile(truncatedPath),
+    () => store.importLegacyFile(truncatedPath),
     (error) => error.code === 'MPT_GZIP_INVALID'
   );
 
@@ -561,7 +614,7 @@ test('分批 DB 写入中途失败时外层事务回滚，旧批次保持完整'
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'OLD-DB' })]
   );
-  await store.importFile(oldPath);
+  await store.importLegacyFile(oldPath);
 
   const db = runDataStore.openSideDb(tmpdir, MODULE, '2026-07');
   db.exec(`
@@ -579,7 +632,7 @@ test('分批 DB 写入中途失败时外层事务回滚，旧批次保持完整'
     ['20260708', 'MPT_INBOUND_20260708', '2'],
     [inboundRow({ reconId: 'NEW-DB-1' }), inboundRow({ reconId: 'NEW-DB-2' })]
   );
-  await assert.rejects(() => store.importFile(replacement), /synthetic row insert failure/);
+  await assert.rejects(() => store.importLegacyFile(replacement), /synthetic row insert failure/);
 
   assert.deepEqual([...store.iterateRows()].map((row) => row.reconciliationId), ['OLD-DB']);
   assert.equal(store.listBatches()[0].sourceFileSequence, '1000');
@@ -597,8 +650,8 @@ test('删除单批次不影响其它批次；clear 回收临时月库且不影�
     ['20260707', 'MPT_OUTBOUND_20260707', '1'],
     [outboundRow()]
   );
-  await store.importFile(inbound);
-  await store.importFile(outbound);
+  await store.importLegacyFile(inbound);
+  await store.importLegacyFile(outbound);
   const resultDb = runDataStore.openSideDb(
     tmpdir,
     runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
@@ -648,8 +701,8 @@ test('按账单月份分库，跨月迭代按 monthKey 稳定排序', async () =
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow({ reconId: 'JUL' })]
   );
-  await store.importFile(august);
-  await store.importFile(july);
+  await store.importLegacyFile(august);
+  await store.importLegacyFile(july);
 
   assert.deepEqual(
     runDataStore.listSideDbFiles(tmpdir, MODULE).map((file) => file.monthKey).sort(),
@@ -694,7 +747,7 @@ test('按 sourceDate 闭区间跨月统计/删除，边界命中且范围外批�
     }
   ];
   for (const fixture of fixtures) {
-    await store.importFile(writeFixture(
+    await store.importLegacyFile(writeFixture(
       fixture.fileName,
       [fixture.compactDate, fixture.batch, String(fixture.rows.length)],
       fixture.rows
@@ -752,8 +805,8 @@ test('同月 INBOUND/OUTBOUND 按 sourceType 逻辑隔离统计和删除', async
       reconId: 'OUTBOUND-KEEP-SEPARATE'
     })]
   );
-  await store.importFile(inbound);
-  await store.importFile(outbound);
+  await store.importLegacyFile(inbound);
+  await store.importLegacyFile(outbound);
 
   assert.deepEqual(store.countByDateRange('2026-07-08', '2026-07-08'), {
     batchCount: 2,
@@ -776,7 +829,7 @@ test('同月 INBOUND/OUTBOUND 按 sourceType 逻辑隔离统计和删除', async
   ]);
   assert.equal(runDataStore.sideDbExists(tmpdir, MODULE, '2026-07'), true, '另一逻辑表有数据时月库保留');
 
-  assert.equal((await store.importFile(inbound)).status, 'imported');
+  assert.equal((await store.importLegacyFile(inbound)).status, 'imported');
   const reverseDeleted = await store.deleteByDateRange('2026-07-08', '2026-07-08', {
     sourceType: SOURCE_TYPE_OUTBOUND
   });
@@ -812,7 +865,7 @@ test('并发导入由共享 mutation lock 串行化，最终保留最高文件�
     [inboundRow({ reconId: 'HIGH' })]
   );
 
-  const results = await Promise.allSettled([storeA.importFile(lower), storeB.importFile(higher)]);
+  const results = await Promise.allSettled([storeA.importLegacyFile(lower), storeB.importLegacyFile(higher)]);
   assert.ok(results.some((result) => result.status === 'fulfilled'));
   assert.deepEqual([...storeA.iterateRows()].map((row) => row.reconciliationId), ['HIGH']);
   assert.equal(storeA.listBatches()[0].sourceFileSequence, '801');
@@ -831,7 +884,7 @@ test('主库 linked_gateway_bill 内容不受导入、替换、删除影响', as
     ['20260708', 'MPT_INBOUND_20260708', '1'],
     [inboundRow()]
   );
-  await store.importFile(filePath);
+  await store.importLegacyFile(filePath);
   await store.clearAll();
 
   const check = new DatabaseSync(mainDbPath, { readOnly: true });

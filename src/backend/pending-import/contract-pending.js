@@ -30,6 +30,7 @@
 'use strict';
 
 const PENDING_COLUMNS = require('../pending-db/columns');
+const { freezePendingDatasetSeedV1 } = require('../pending-db/dataset-identity');
 const { validateHeaders, computeRowHash } = require('./validator');
 
 // 错误累积上限：与旧链路 worker.js MAX_ROW_ERRORS_EMITTED=1000 同口径（spec E4）。
@@ -68,6 +69,7 @@ function createContract(options = {}) {
   const yearMonth = opts.yearMonth != null ? String(opts.yearMonth) : '';
   const archivePath = opts.archivePath != null ? String(opts.archivePath) : null;
   const importedAt = opts.importedAt != null ? String(opts.importedAt) : '';
+  const datasetSeed = freezePendingDatasetSeedV1(opts.datasetSeed);
 
   return {
     expectedHeaders: PENDING_COLUMNS,        // 31 列
@@ -119,6 +121,33 @@ function createContract(options = {}) {
     //   对照 month-repository.js:77-93 逐字（含子查询 SELECT id FROM diff_runs WHERE upper_month=? OR lower_month=?）。
     deleteForOverwrite() {
       return [
+        {
+          sql: 'CREATE TEMP TABLE IF NOT EXISTS pending_month_head_guard (ok INTEGER NOT NULL CHECK (ok = 1))',
+          params: []
+        },
+        {
+          sql: 'DELETE FROM pending_month_head_guard',
+          params: []
+        },
+        {
+          sql: `INSERT INTO pending_month_head_guard (ok)
+    SELECT CASE WHEN (
+      (? IS NULL AND NOT EXISTS (
+        SELECT 1 FROM pending_months WHERE year_month = ?
+      )) OR (? IS NOT NULL AND EXISTS (
+        SELECT 1 FROM pending_months
+        WHERE year_month = ? AND dataset_id = ? AND dataset_version = ?
+      ))
+    ) THEN 1 ELSE 0 END`,
+          params: [
+            datasetSeed.expectedDatasetId,
+            yearMonth,
+            datasetSeed.expectedDatasetId,
+            yearMonth,
+            datasetSeed.expectedDatasetId,
+            datasetSeed.expectedDatasetVersion
+          ]
+        },
         // 1) 先删 pending_removal_matches（依赖 diff_runs.id；必须在删 diff_runs 之前）
         {
           sql: `DELETE FROM pending_removal_matches WHERE run_id IN (
@@ -143,12 +172,17 @@ function createContract(options = {}) {
           sql: 'DELETE FROM removed_pending_rows WHERE year_month = ?',
           params: [yearMonth]
         },
-        // 5) 删该月 pending 行
+        // 5) removed 行被覆盖删除时，其 dataset head 同事务删除，不能留下幽灵来源。
+        {
+          sql: 'DELETE FROM pending_removed_months WHERE year_month = ?',
+          params: [yearMonth]
+        },
+        // 6) 删该月 pending 行
         {
           sql: 'DELETE FROM pending_rows WHERE year_month = ?',
           params: [yearMonth]
         },
-        // 6) 删该月月元数据
+        // 7) 删该月月元数据
         {
           sql: 'DELETE FROM pending_months WHERE year_month = ?',
           params: [yearMonth]
@@ -166,19 +200,29 @@ function createContract(options = {}) {
       const sf = Array.isArray(sourceFiles) ? sourceFiles : [];
       return [
         {
-          sql: `INSERT INTO pending_months (year_month, imported_at, row_count, source_files, archive_path)
-     VALUES (?, ?, ?, ?, ?)
+          sql: `INSERT INTO pending_months (
+       year_month, imported_at, row_count, source_files, archive_path,
+       dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(year_month) DO UPDATE SET
        imported_at = excluded.imported_at,
        row_count = excluded.row_count,
        source_files = excluded.source_files,
-       archive_path = excluded.archive_path`,
+       archive_path = excluded.archive_path,
+       dataset_id = excluded.dataset_id,
+       producer_task_run_id = excluded.producer_task_run_id,
+       dataset_version = excluded.dataset_version,
+       archive_contract_version = excluded.archive_contract_version`,
           params: [
             yearMonth,
             importedAt,
             Number(totalImported) || 0,
             JSON.stringify(sf),
-            archivePath || null
+            archivePath || null,
+            datasetSeed.datasetId,
+            datasetSeed.producerTaskRunId,
+            datasetSeed.expectedDatasetVersion + 1,
+            1
           ]
         }
       ];

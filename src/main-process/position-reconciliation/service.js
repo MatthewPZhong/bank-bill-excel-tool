@@ -784,15 +784,15 @@ class PositionReconciliationService {
     };
   }
 
-  applyBankImport(token, batchContext) {
+  applyBankImport(token, batchContext, inputPaths) {
     const parsed = this.bankImportTokens.get(text(token));
     if (parsed && parsed.streaming === true) {
-      return this.applyStreamingBankImport(token, batchContext);
+      return this.applyStreamingBankImport(token, batchContext, inputPaths);
     }
-    return this.applyLegacyBankImport(token);
+    return this.applyLegacyBankImport(token, inputPaths);
   }
 
-  applyLegacyBankImport(token) {
+  applyLegacyBankImport(token, inputPaths) {
     const parsed = this.bankImportTokens.get(text(token));
     if (!parsed) {
       throw new PositionReconciliationError(
@@ -801,11 +801,16 @@ class PositionReconciliationService {
       );
     }
     this.bankImportTokens.delete(text(token));
+    const files = parsed.files.map((file, index) => ({
+      ...file,
+      archivePath: inputPaths[index],
+      filePath: inputPaths[index]
+    }));
     let result;
     try {
-      this.assertStagedInputs(parsed.files, 'bank-apply', { beforeCommit: true });
+      this.assertStagedInputs(files, 'bank-apply', { beforeCommit: true });
       result = this.store.replaceBankScopes(parsed, {
-        inputEvidence: parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank'))
+        inputEvidence: files.map((file) => stagedInputArchiveFile(file, 'position-bank'))
       });
     } catch (error) {
       cleanupStagingPaths(parsed.stagingDirs);
@@ -815,10 +820,10 @@ class PositionReconciliationService {
       const key = scopeKey(scope.channel, scope.monthKey);
       return {
         ...scope,
-        inputPaths: parsed.files
+        inputPaths: files
           .filter((file) => Array.isArray(file.scopes) && file.scopes.includes(key))
           .map((file) => file.archivePath),
-        inputFiles: parsed.files
+        inputFiles: files
           .filter((file) => Array.isArray(file.scopes) && file.scopes.includes(key))
           .map((file) => stagedInputArchiveFile(file, 'position-bank'))
       };
@@ -826,8 +831,8 @@ class PositionReconciliationService {
     return {
       status: 'ok',
       message: `已导入 ${result.rowCount} 行平盘银行对账单`,
-      inputPaths: parsed.files.map((file) => file.archivePath),
-      inputFiles: parsed.files.map((file) => stagedInputArchiveFile(file, 'position-bank')),
+      inputPaths: files.map((file) => file.archivePath),
+      inputFiles: files.map((file) => stagedInputArchiveFile(file, 'position-bank')),
       originalInputPaths: parsed.files.map((file) => file.filePath),
       cleanupPaths: parsed.stagingDirs,
       scopeInputs,
@@ -905,7 +910,7 @@ class PositionReconciliationService {
     };
   }
 
-  async applyStreamingBankImport(token, batchContext) {
+  async applyStreamingBankImport(token, batchContext, inputPaths) {
     const normalizedToken = text(token);
     const parsed = this.bankImportTokens.get(normalizedToken);
     if (!parsed || parsed.streaming !== true) {
@@ -915,6 +920,9 @@ class PositionReconciliationService {
       );
     }
     this.bankImportTokens.delete(normalizedToken);
+    parsed.preflightReady.acceptedBankFiles.forEach((file, index) => {
+      file.archivePath = inputPaths[index];
+    });
     const baseCheckpoint = this.store.persistenceCheckpoint();
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
@@ -1029,7 +1037,10 @@ class PositionReconciliationService {
   prepareLegacySourceImport(filePaths) {
     const prepared = this.prepareLegacySourceImportForLifecycle(filePaths);
     return prepared.requiresExecution
-      ? this.executePreparedSourceImport(prepared.plan)
+      ? this.executePreparedSourceImport(prepared.plan, undefined, {
+          executionInputPaths: prepared.inputPaths,
+          outputs: []
+        })
       : prepared.result;
   }
 
@@ -1098,14 +1109,20 @@ class PositionReconciliationService {
     return { engine: 'legacy', entries: output };
   }
 
-  executePreparedLegacySourceImport(plan) {
+  executePreparedLegacySourceImport(plan, inputPaths) {
     const output = [];
+    let inputIndex = 0;
     for (const entry of plan.entries) {
       if (entry.status !== 'prepared') {
         output.push(entry);
         continue;
       }
-      const result = entry.parsed;
+      const result = {
+        ...entry.parsed,
+        archivePath: inputPaths[inputIndex],
+        filePath: inputPaths[inputIndex]
+      };
+      inputIndex += 1;
       try {
         const inputEvidence = stagedInputArchiveFile(result, result.sourceType);
         if (this.recordArchiveIntent) this.recordArchiveIntent([inputEvidence], 'input');
@@ -1143,7 +1160,10 @@ class PositionReconciliationService {
   async prepareStreamingSourceImport(filePaths) {
     const prepared = await this.prepareStreamingSourceImportForLifecycle(filePaths);
     return prepared.requiresExecution
-      ? this.executePreparedSourceImport(prepared.plan)
+      ? this.executePreparedSourceImport(prepared.plan, undefined, {
+          executionInputPaths: prepared.inputPaths,
+          outputs: []
+        })
       : prepared.result;
   }
 
@@ -1226,7 +1246,8 @@ class PositionReconciliationService {
       plan: {
         engine: 'streaming',
         dispatched,
-        releaseApply
+        releaseApply,
+        preflightReady
       }
     };
   }
@@ -1307,11 +1328,31 @@ class PositionReconciliationService {
     };
   }
 
-  executePreparedSourceImport(plan, batchContext) {
+  executePreparedSourceImport(plan, batchContext, fileEvidence) {
+    const inputPaths = fileEvidence.executionInputPaths;
     if (plan && plan.engine === 'legacy') {
-      return this.executePreparedLegacySourceImport(plan);
+      return this.executePreparedLegacySourceImport(plan, inputPaths);
     }
     if (plan && plan.engine === 'streaming') {
+      plan.preflightReady.acceptedOrdinaryInputFiles.forEach((file, index) => {
+        file.archivePath = inputPaths[index];
+      });
+      const outputByPath = new Map(fileEvidence.outputs.map((item) => [
+        path.resolve(item.filePath),
+        item
+      ]));
+      for (const collection of [
+        plan.preflightReady.outputFiles,
+        plan.preflightReady.anomalyReports,
+        plan.preflightReady.orderedFileResults
+          .map((item) => item.anomalyReport)
+          .filter(Boolean)
+      ]) {
+        for (const report of collection || []) {
+          const output = outputByPath.get(path.resolve(report.filePath));
+          if (output) report.artifactKey = output.artifactKey;
+        }
+      }
       plan.releaseApply(batchContext);
       return plan.dispatched.promise.then((streamed) => (
         this.finalizeStreamingSourceImport(streamed)
@@ -1343,15 +1384,15 @@ class PositionReconciliationService {
     await this.cleanupUnprotectedStagingPathsAsync(cleanupPaths);
   }
 
-  applySourceImport(token, batchContext) {
+  applySourceImport(token, batchContext, inputPaths) {
     const parsed = this.sourceImportTokens.get(text(token));
     if (parsed && parsed.streaming === true) {
-      return this.applyStreamingAccountImport(token, batchContext);
+      return this.applyStreamingAccountImport(token, batchContext, inputPaths);
     }
-    return this.applyLegacySourceImport(token);
+    return this.applyLegacySourceImport(token, inputPaths);
   }
 
-  applyLegacySourceImport(token) {
+  applyLegacySourceImport(token, inputPaths) {
     const parsed = this.sourceImportTokens.get(text(token));
     if (!parsed) {
       throw new PositionReconciliationError(
@@ -1360,11 +1401,16 @@ class PositionReconciliationService {
       );
     }
     this.sourceImportTokens.delete(text(token));
+    const authoritative = {
+      ...parsed,
+      archivePath: inputPaths[0],
+      filePath: inputPaths[0]
+    };
     let result;
     try {
-      this.assertStagedInputs([parsed], 'source-apply', { beforeCommit: true });
-      result = this.store.applySourceImport(parsed, {
-        inputEvidence: [stagedInputArchiveFile(parsed, parsed.sourceType)]
+      this.assertStagedInputs([authoritative], 'source-apply', { beforeCommit: true });
+      result = this.store.applySourceImport(authoritative, {
+        inputEvidence: [stagedInputArchiveFile(authoritative, parsed.sourceType)]
       });
     } catch (error) {
       cleanupStagingPaths([parsed.stagingDir]);
@@ -1373,15 +1419,15 @@ class PositionReconciliationService {
     return {
       status: 'ok',
       message: `已导入 ${result.rowCount} 行${result.sourceName}`,
-      inputPaths: [parsed.archivePath],
-      inputFiles: [stagedInputArchiveFile(parsed, parsed.sourceType)],
+      inputPaths: [authoritative.archivePath],
+      inputFiles: [stagedInputArchiveFile(authoritative, parsed.sourceType)],
       originalInputPaths: [parsed.filePath],
       cleanupPaths: [parsed.stagingDir],
       ...result
     };
   }
 
-  async applyStreamingAccountImport(token, batchContext) {
+  async applyStreamingAccountImport(token, batchContext, inputPaths) {
     const normalizedToken = text(token);
     const parsed = this.sourceImportTokens.get(normalizedToken);
     if (!parsed || parsed.streaming !== true) {
@@ -1391,6 +1437,8 @@ class PositionReconciliationService {
       );
     }
     this.sourceImportTokens.delete(normalizedToken);
+    parsed.descriptor.archivePath = inputPaths[0];
+    parsed.preflightReady.accountConfirmationDescriptor.archivePath = inputPaths[0];
     const baseCheckpoint = this.store.persistenceCheckpoint();
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
@@ -1513,9 +1561,9 @@ class PositionReconciliationService {
     return { status: 'ok', mappings: this.store.listMappings() };
   }
 
-  saveMappings(mappings, batchContext) {
+  saveMappings(mappings, operationContext) {
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
-      return this.saveMappingsStreamed(mappings, batchContext);
+      return this.saveMappingsStreamed(mappings, operationContext);
     }
     const result = this.store.saveMappings(mappings);
     return {
@@ -1525,7 +1573,7 @@ class PositionReconciliationService {
     };
   }
 
-  async runStreamingMaintenance(command, payload, batchContext) {
+  async runStreamingMaintenance(command, payload, operationContext) {
     const baseCheckpoint = this.store.persistenceCheckpoint();
     const operationToken = text(
       this.operationTokenProvider ? this.operationTokenProvider() : ''
@@ -1543,7 +1591,7 @@ class PositionReconciliationService {
       userDataDir: this.userDataDir,
       sideDbPath: this.store.dbPath,
       expectedCheckpoint: baseCheckpoint,
-      batchContext
+      operationContext
     });
     await schema.promise;
     const dispatched = this.positionImportDispatcher({
@@ -1554,7 +1602,7 @@ class PositionReconciliationService {
       sideDbPath: this.store.dbPath,
       expectedCheckpoint: baseCheckpoint,
       operationToken,
-      batchContext,
+      operationContext,
       payload,
       featureFlags: { maintenance: true }
     });
@@ -1571,11 +1619,11 @@ class PositionReconciliationService {
     return result;
   }
 
-  async saveMappingsStreamed(mappings, batchContext) {
+  async saveMappingsStreamed(mappings, operationContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.REBUILD_FUND_TRANSFER_MAPPING,
       { mappings },
-      batchContext
+      operationContext
     );
     return {
       status: 'ok',
@@ -1584,10 +1632,10 @@ class PositionReconciliationService {
     };
   }
 
-  deleteBank(payload, batchContext) {
+  deleteBank(payload, operationContext) {
     const selection = requireScopeSelection(payload, '删除');
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
-      return this.deleteBankStreamed(selection, batchContext);
+      return this.deleteBankStreamed(selection, operationContext);
     }
     const result = this.store.deleteBankScopes(selection);
     if (result.deletedCount === 0) {
@@ -1599,11 +1647,11 @@ class PositionReconciliationService {
     return { status: 'ok', message: `已删除 ${result.deletedCount} 行银行数据`, ...result };
   }
 
-  async deleteBankStreamed(selection, batchContext) {
+  async deleteBankStreamed(selection, operationContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.DELETE_BANK,
       selection,
-      batchContext
+      operationContext
     );
     return {
       status: 'ok',
@@ -1612,7 +1660,7 @@ class PositionReconciliationService {
     };
   }
 
-  deleteSource(payload, batchContext) {
+  deleteSource(payload, operationContext) {
     const sourceType = text(payload && payload.sourceType);
     const wholeTable = payload && payload.wholeTable === true;
     const months = [...new Set(
@@ -1621,7 +1669,7 @@ class PositionReconciliationService {
     if (this.positionImportEngine === POSITION_IMPORT_ENGINES.STREAMING) {
       return this.deleteSourceStreamed(
         { sourceType, wholeTable, months },
-        batchContext
+        operationContext
       );
     }
     const result = this.store.deleteSource({ sourceType, wholeTable, months });
@@ -1634,11 +1682,11 @@ class PositionReconciliationService {
     };
   }
 
-  async deleteSourceStreamed(selection, batchContext) {
+  async deleteSourceStreamed(selection, operationContext) {
     const result = await this.runStreamingMaintenance(
       POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
       selection,
-      batchContext
+      operationContext
     );
     return {
       status: 'ok',

@@ -58,22 +58,25 @@ const BATCH_CONTEXT = Object.freeze({
 });
 
 test.describe('toolbox output publication worker dispatch', () => {
-  test('正式发布必须携带 exact7 batchContext，恢复扫描不伪造新批次', async () => {
-    const dispatcher = createToolboxPublicationDispatcher({
-      workerScriptPath: BUSY_WORKER
-    });
-    assert.throws(
-      () => dispatcher.publish({ taskId: 'missing-context' }),
+  test('正式发布 exact7 只在 structured-clone receiver 校验，恢复扫描不伪造新批次', async () => {
+    const dispatcher = createToolboxPublicationDispatcher();
+    await assert.rejects(
+      dispatcher.publish({ taskId: 'missing-context' }),
       /batchContext 缺失/
     );
-    assert.throws(
-      () => dispatcher.publish({
+    await assert.rejects(
+      dispatcher.publish({
         taskId: 'partial-context',
         batchContext: { batchId: 1 }
       }),
-      /batchNumber.*不能为空/
+      /exact-7/
     );
-    await dispatcher.recover({ userDataDir: 'startup-recovery' });
+    const root = makeRoot('toolbox-dispatch-recovery-');
+    try {
+      await dispatcher.recover({ userDataDir: root });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('FIFO 串行发布/恢复作业，同步忙 worker 不阻塞主线程 heartbeat', async () => {

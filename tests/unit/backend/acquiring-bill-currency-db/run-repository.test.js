@@ -840,13 +840,22 @@ test.describe('T19 — chunk_progress get/set', () => {
     const monthKey = '2026-04';
     const runId = insertRun(db, monthKey, 0);
 
-    runRepo.setRunChunkProgress(db, {
+    assert.throws(() => runRepo.setRunChunkProgress(db, {
       runId,
       lastCompletedChunkIndex: -1,
       totalChunks: 0,
       status: 'in-progress',
       chunkSize: 2000,
       batchContext: { ...BATCH_CONTEXT, ignored: 'must-not-persist' },
+    }), /exact-7/);
+
+    runRepo.setRunChunkProgress(db, {
+      runId,
+      lastCompletedChunkIndex: -1,
+      totalChunks: 0,
+      status: 'in-progress',
+      chunkSize: 2000,
+      batchContext: BATCH_CONTEXT,
     });
 
     const initial = runRepo.getRunChunkProgress(db, runId);

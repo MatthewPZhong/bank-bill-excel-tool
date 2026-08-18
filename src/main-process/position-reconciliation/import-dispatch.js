@@ -15,9 +15,6 @@ const {
   normalizePositionImportEngine
 } = require('../../backend/position-reconciliation-import/constants');
 const {
-  freezeWorkerBatchContext
-} = require('../archive-center/worker-batch-context');
-const {
   recoverPositionImportWorkerExit
 } = require('./import-recovery');
 const {
@@ -135,9 +132,14 @@ function dispatchPositionImportPreflight(input = {}) {
   const jobId = String(input.jobId || crypto.randomUUID());
   const dispatchStartedAt = monotonicNowMs();
   const schemaOnly = input.command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES;
-  const batchContext = freezeWorkerBatchContext(input.batchContext, {
-    required: isPositionImportMutatingCommand(input.command)
-  });
+  const batchContext = input.batchContext || null;
+  const operationContext = input.operationContext || null;
+  if (batchContext && operationContext) {
+    throw new TypeError('平盘 worker owner 只能是 batchContext 或 operationContext 之一');
+  }
+  if (isPositionImportMutatingCommand(input.command) && !batchContext && !operationContext) {
+    throw new TypeError('平盘 mutating worker 缺少持久 owner context');
+  }
   const utilityProcess = input.utilityProcess || loadUtilityProcess();
   const env = {
     ...process.env,
@@ -288,9 +290,13 @@ function dispatchPositionImportPreflight(input = {}) {
               message: '平盘导入 apply 授权未返回持久化凭证'
             });
           }
-          const grantedBatchContext = freezeWorkerBatchContext(grant.batchContext, {
-            required: grant.preflightOnly !== true
-          });
+          const grantedBatchContext = grant.batchContext || null;
+          if (grant.preflightOnly !== true && !grantedBatchContext) {
+            throw fatalError({
+              code: 'position-import-intent-not-durable',
+              message: '平盘导入 apply 授权缺少持久 batch owner'
+            });
+          }
           applyGrantPayload = grant;
           sendToWorker({
             ...grant,
@@ -384,6 +390,7 @@ function dispatchPositionImportPreflight(input = {}) {
           && batchContext) {
         startMessage.batchContext = batchContext;
       }
+      if (operationContext) startMessage.operationContext = operationContext;
       sendToWorker(startMessage);
     } catch (error) {
       if (typeof worker.kill === 'function') worker.kill();

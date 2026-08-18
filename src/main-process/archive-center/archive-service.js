@@ -24,6 +24,10 @@ const {
   createStorageMaterializer,
   verifyFile
 } = require('./storage-materializer');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('./file-plan');
 
 const STAGING_DIR_NAME = '.staging';
 const READONLY_DIR_NAME = '.readonly';
@@ -89,6 +93,45 @@ function safeFailure(error, operation, originalName = '') {
   };
 }
 
+function legacyFileTaskIdentity(moduleId, operationKey) {
+  const digest = crypto.createHash('sha256')
+    .update(`${String(moduleId || '')}\u0000${String(operationKey || '')}`)
+    .digest('hex');
+  return {
+    taskRunId: `legacy-file-${digest}`,
+    parentRunId: `legacy-parent-${digest}`
+  };
+}
+
+function legacyManifestFs(fsImpl, inputSources) {
+  const persistedByPath = new Map();
+  for (const source of inputSources) {
+    const snapshot = normalizeSourceSnapshot(source && source.sourceSnapshot);
+    if (snapshot) persistedByPath.set(path.resolve(String(source.filePath || '')), snapshot);
+  }
+  return {
+    realpathSync: (...args) => fsImpl.realpathSync(...args),
+    statSync: (...args) => fsImpl.statSync(...args),
+    lstatSync(filePath, options) {
+      try {
+        return fsImpl.lstatSync(filePath, options);
+      } catch (error) {
+        const snapshot = persistedByPath.get(path.resolve(String(filePath || '')));
+        if (!error || error.code !== 'ENOENT' || !snapshot) throw error;
+        return {
+          size: snapshot.sizeBytes,
+          mtimeMs: snapshot.mtimeMs,
+          ctimeMs: snapshot.ctimeMs,
+          ino: snapshot.ino,
+          dev: 0,
+          isFile: () => true,
+          isSymbolicLink: () => false
+        };
+      }
+    }
+  };
+}
+
 function normalizeExpectedFileEvidence(payload, originalName, sourceSnapshot = null) {
   const payloadMetadata = payload.metadata && typeof payload.metadata === 'object'
     ? payload.metadata
@@ -133,6 +176,14 @@ function isFileIntegrityFailure(result) {
   ].includes(result.code);
 }
 
+function publicMetadata(value, omittedKeys = []) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const omitted = new Set(omittedKeys);
+  return Object.fromEntries(
+    Object.entries(value).filter(([key]) => !omitted.has(key))
+  );
+}
+
 function publicArtifact(artifact) {
   if (!artifact) return null;
   const {
@@ -141,18 +192,31 @@ function publicArtifact(artifact) {
     blob,
     ...visible
   } = artifact;
-  if (visible.metadata && typeof visible.metadata === 'object') {
-    const {
-      sourceSnapshot: _sourceSnapshot,
-      expectedSha256: _expectedSha256,
-      expectedSizeBytes: _expectedSizeBytes,
-      ...metadata
-    } = visible.metadata;
-    visible.metadata = metadata;
-  }
+  visible.metadata = publicMetadata(visible.metadata, [
+    'aliasKey',
+    'sourceSnapshot',
+    'targetSnapshot',
+    'expectedSha256',
+    'expectedSizeBytes'
+  ]);
   if (!blob) return { ...visible, blob: null };
   const { relativePath: _relativePath, ...publicBlob } = blob;
   return { ...visible, blob: publicBlob };
+}
+
+function publicBatch(batch) {
+  if (!batch) return null;
+  const {
+    taskRunId: _taskRunId,
+    taskKey: _taskKey,
+    operationKey: _operationKey,
+    parentRunId: _parentRunId,
+    ...visible
+  } = batch;
+  return {
+    ...visible,
+    metadata: publicMetadata(batch.metadata, ['_fileManifest'])
+  };
 }
 
 function isPathInside(rootPath, candidatePath) {
@@ -166,8 +230,9 @@ function isPathInside(rootPath, candidatePath) {
 
 function publicBatchDetail(detail) {
   if (!detail) return null;
-  if (!Array.isArray(detail.artifacts)) return { ...detail };
-  return { ...detail, artifacts: detail.artifacts.map(publicArtifact) };
+  const visible = publicBatch(detail);
+  if (!Array.isArray(detail.artifacts)) return visible;
+  return { ...visible, artifacts: detail.artifacts.map(publicArtifact) };
 }
 
 function publicRelatedBatch(batch) {
@@ -770,7 +835,7 @@ class ArchiveService {
     return this.materializationPromise;
   }
 
-  async _initializeUnlocked() {
+  async _initializeUnlocked(options = {}) {
     if (this.initialized) return this.initialization;
     try {
       this.repository.ensureSchema();
@@ -786,24 +851,19 @@ class ArchiveService {
       return this.initialization;
     }
 
-    let flowBindReplay;
-    try {
-      flowBindReplay = this.repository.replayFlowBindIntents();
-    } catch (error) {
-      this.initialized = false;
-      const failure = safeFailure(error, '重放业务流程身份');
-      this.initialization = {
-        ok: false,
-        available: false,
-        status: 'unavailable',
-        ...failure
-      };
-      return this.initialization;
-    }
-
     this.initialized = true;
     try {
       await this._mkdirs();
+      if (options.deferStartupRecovery === true) {
+        this.initialization = {
+          ok: true,
+          available: true,
+          status: 'ready-for-owner-recovery',
+          deferredStartupRecovery: true
+        };
+        return this.initialization;
+      }
+      const flowBindReplay = this.repository.replayFlowBindIntents();
       const consistency = await this._reconcileStartupUnlocked({
         verifyHashes: this.verifyHashesOnStartup
       });
@@ -849,7 +909,7 @@ class ArchiveService {
           removedOrphanBlobFiles: 0,
           failures: [{ code: failure.code, item: 'archive-storage' }]
         },
-        flowBindReplay
+        flowBindReplay: null
       };
       return this.initialization;
     }
@@ -882,38 +942,14 @@ class ArchiveService {
   async initialize(options = {}) {
     const initialized = await runArchiveRootOperation(
       this.rootDir,
-      async () => this._initializeUnlocked()
+      async () => this._initializeUnlocked(options)
     );
-    if (options.startBackgroundMaterialization !== false && initialized.available !== false) {
+    if (options.startBackgroundMaterialization !== false
+        && options.deferStartupRecovery !== true
+        && initialized.available !== false) {
       this.resumeBackgroundMaterialization();
     }
     return initialized;
-  }
-
-  _batchInput(payload = {}) {
-    const localDate = payload.localDate || localDateOf(this.now());
-    let retentionUntil = payload.retentionUntil;
-    if (retentionUntil === undefined) {
-      if (payload.retentionDays === null || payload.retentionDays === 'permanent') {
-        retentionUntil = null;
-      } else {
-        const retentionDays = payload.retentionDays === undefined
-          ? this.defaultRetentionDays
-          : Number(payload.retentionDays);
-        retentionUntil = addCalendarDays(localDate, retentionDays);
-      }
-    }
-    return {
-      moduleId: payload.moduleId,
-      moduleCode: payload.moduleCode || deriveModuleCode(payload.moduleId),
-      moduleName: payload.moduleName || payload.moduleId,
-      operationKey: payload.operationKey || crypto.randomUUID(),
-      localDate,
-      retentionUntil,
-      businessStatus: payload.businessStatus || '',
-      locked: payload.locked === true,
-      metadata: payload.metadata
-    };
   }
 
   _taskBatchInput(payload = {}) {
@@ -948,44 +984,186 @@ class ArchiveService {
     return input;
   }
 
-  _createBatchUnlocked(payload = {}) {
-    const created = this.repository.createBatch(this._batchInput(payload));
-    if (created.status === 'deleted') {
-      return {
-        ok: false,
-        status: 'deleted',
-        code: 'ARCHIVE_OPERATION_DELETED',
-        message: '该业务操作对应的存档批次已永久删除，不能重新创建',
-        retryable: false,
-        created: false,
-        batchId: created.issuance.batchId,
-        batch: null
-      };
-    }
-    return {
-      ok: true,
-      status: created.created ? 'created' : 'existing',
-      created: created.created,
-      batchId: created.batch.id,
-      batch: created.batch
-    };
-  }
-
   async createBatch(payload = {}) {
     return this._run('createBatch', async () => {
-      const created = this._createBatchUnlocked(payload);
-      if (!created.ok) return created;
-      if (!Array.isArray(payload.files) || payload.files.length === 0) return created;
-      const appended = await this._appendFilesUnlocked(created.batch.id, {
-        files: payload.files,
-        sourceOperation: payload.sourceOperation,
+      if (!Array.isArray(payload.files) || payload.files.length === 0) {
+        const error = new TypeError('createBatch(files) 需要非空文件清单');
+        error.code = 'ARCHIVE_FILE_MANIFEST_EMPTY';
+        throw error;
+      }
+      const inputs = [];
+      const outputs = [];
+      const inputSources = [];
+      const outputSources = [];
+      for (const value of payload.files) {
+        const file = value && typeof value === 'object' && !Array.isArray(value)
+          ? value
+          : { filePath: value };
+        const direction = String(file.direction || 'input');
+        if (!['input', 'output'].includes(direction)) {
+          throw new TypeError(`legacy file direction 非法：${direction}`);
+        }
+        const item = {
+          filePath: file.filePath,
+          originalName: file.originalName,
+          role: file.role,
+          sourceOperation: file.sourceOperation || payload.sourceOperation
+        };
+        if (direction === 'output') {
+          outputs.push(item);
+          outputSources.push(file);
+        } else {
+          inputs.push(item);
+          inputSources.push(file);
+        }
+      }
+      const normalizedPlan = normalizeFilePlanV1({
+        version: 1,
+        allocation: 'eager',
+        inputs,
+        outputs
+      }, { fsImpl: legacyManifestFs(this.fs, inputSources) });
+      const filePlan = Object.freeze({
+        ...normalizedPlan,
+        inputs: Object.freeze(normalizedPlan.inputs.map((item, index) => {
+          const persistedSnapshot = inputSources[index].sourceSnapshot;
+          if (persistedSnapshot === undefined) return item;
+          const expectedSnapshot = normalizeSourceSnapshot(persistedSnapshot);
+          if (!expectedSnapshot) throw new TypeError('legacy sourceSnapshot 格式非法');
+          return Object.freeze({
+            ...item,
+            sourceSnapshot: Object.freeze({ ...expectedSnapshot })
+          });
+        }))
+      });
+      const manifest = artifactManifestFromFilePlan(filePlan);
+      const operationKey = String(payload.operationKey || crypto.randomUUID()).trim();
+      const issuance = this.repository.getOperationIssuance(payload.moduleId, operationKey);
+      if (issuance && issuance.deletedAt) {
+        return {
+          ok: false,
+          status: 'deleted',
+          code: 'ARCHIVE_OPERATION_DELETED',
+          message: '该业务操作对应的存档批次已永久删除，不能重新创建',
+          retryable: false,
+          created: false,
+          batchId: issuance.batchId,
+          batch: null
+        };
+      }
+      const legacyIdentity = legacyFileTaskIdentity(payload.moduleId, operationKey);
+      const begun = this.repository.beginTaskRun({
+        taskRunId: payload.taskRunId || legacyIdentity.taskRunId,
+        moduleId: payload.moduleId,
+        taskKey: payload.taskKey || payload.sourceOperation,
+        operationKey,
+        parentRunId: payload.parentRunId || legacyIdentity.parentRunId,
         metadata: payload.metadata
       });
+      let reserved;
+      const existingBatch = this.repository.getBatchByOperationKey(
+        begun.taskRun.moduleId,
+        begun.taskRun.operationKey
+      );
+      if (existingBatch && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+        begun.taskRun.status
+      )) {
+        const existingIdentity = existingBatch.metadata
+          && existingBatch.metadata._fileManifest
+          && existingBatch.metadata._fileManifest.identity;
+        if (existingIdentity !== manifest.identity) {
+          const error = new Error('同 operation key 的文件 manifest 已变化');
+          error.code = 'ARCHIVE_MANIFEST_IDENTITY_CONFLICT';
+          throw error;
+        }
+        reserved = { created: false, batch: existingBatch };
+      } else {
+        reserved = this.repository.reserveFileTaskBatch({
+          taskRun: begun.taskRun,
+          manifest,
+          moduleCode: payload.moduleCode,
+          moduleName: payload.moduleName,
+          businessStatus: payload.businessStatus,
+          locked: payload.locked,
+          retentionDays: payload.retentionDays === undefined
+            ? this.defaultRetentionDays
+            : payload.retentionDays,
+          metadata: payload.metadata
+        });
+      }
+      if (reserved.status === 'deleted') {
+        return {
+          ok: false,
+          status: 'deleted',
+          code: 'ARCHIVE_OPERATION_DELETED',
+          message: '该业务操作对应的存档批次已永久删除，不能重新创建',
+          retryable: false,
+          created: false,
+          batchId: reserved.issuance && reserved.issuance.batchId,
+          batch: null
+        };
+      }
+      const batch = reserved.batch;
+      const taskAlreadyTerminal = ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+        begun.taskRun.status
+      );
+      if (!taskAlreadyTerminal) {
+        const started = this._startFileTaskUnlocked(begun.taskRun.taskRunId, batch.id);
+        if (!started.ok) throw new Error(started.message);
+      }
+      const batchContext = {
+        batchId: batch.id,
+        batchNumber: batch.batchNumber,
+        taskRunId: batch.taskRunId,
+        taskKey: batch.taskKey,
+        moduleId: batch.moduleId,
+        parentRunId: batch.parentRunId,
+        operationKey: batch.operationKey
+      };
+      const settleFiles = [
+        ...filePlan.inputs.map((item, index) => ({ item, source: inputSources[index] })),
+        ...filePlan.outputs.map((item, index) => ({ item, source: outputSources[index] }))
+      ].map(({ item, source }) => ({
+        artifactKey: item.artifactKey,
+        ...(source.expectedSha256 !== undefined
+          ? {
+              expectedSha256: source.expectedSha256,
+              expectedSizeBytes: source.expectedSizeBytes
+                ?? source.sizeBytes
+                ?? source.sourceSnapshot?.sizeBytes
+                ?? item.sourceSnapshot?.sizeBytes
+            }
+          : {})
+      }));
+      const settled = await this._settleManifestArtifactsUnlocked({
+        batchContext,
+        files: settleFiles
+      });
+      if (taskAlreadyTerminal) {
+        settled.results = settled.results.map((result) => (
+          result && result.status === 'ready'
+            ? { ...result, alreadyArchived: true }
+            : result
+        ));
+      }
+      if (!taskAlreadyTerminal && settled.durable === true) {
+        const terminal = payload.terminalOutcome && payload.terminalOutcome.taskStatus
+          ? payload.terminalOutcome
+          : { taskStatus: 'succeeded', metadata: {} };
+        const finished = this._finishFileTaskUnlocked(
+          begun.taskRun.taskRunId,
+          batch.id,
+          terminal
+        );
+        if (!finished.ok) throw new Error(finished.message);
+      }
+      const current = this.repository.getBatch(batch.id);
       return {
-        ...appended,
-        created: created.created,
-        creationStatus: created.status,
-        batchId: created.batch.id
+        ...settled,
+        batch: current,
+        created: reserved.created,
+        creationStatus: reserved.created ? 'created' : 'existing',
+        batchId: batch.id
       };
     });
   }
@@ -1017,6 +1195,259 @@ class ArchiveService {
         archiveStatus: reserved.batch.archiveStatus,
         batch: reserved.batch
       };
+    });
+  }
+
+  async beginTaskRun(payload = {}) {
+    return this._run('beginTaskRun', async () => {
+      const result = this.repository.beginTaskRun(payload);
+      return {
+        ok: true,
+        status: result.created ? 'prepared' : 'existing',
+        created: result.created,
+        taskRun: result.taskRun,
+        lineage: result.lineage
+      };
+    });
+  }
+
+  async reserveFileTaskBatch(payload = {}) {
+    return this._run('reserveFileTaskBatch', async () => {
+      const metadata = payload.metadata === undefined ? {} : payload.metadata;
+      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+        throw new TypeError('metadata 必须是对象');
+      }
+      const result = this.repository.reserveFileTaskBatch({
+        ...payload,
+        metadata,
+        retentionDays: payload.retentionDays === undefined
+          ? this.defaultRetentionDays
+          : payload.retentionDays
+      });
+      if (result.status === 'deleted') {
+        return {
+          ok: false,
+          status: 'deleted',
+          code: 'ARCHIVE_OPERATION_DELETED',
+          message: '该业务操作对应的存档批次已永久删除，不能重新执行',
+          created: false,
+          batch: null
+        };
+      }
+      return {
+        ok: true,
+        status: result.created ? 'reserved' : 'existing',
+        created: result.created,
+        batchId: result.batch.id,
+        batchNumber: result.batch.batchNumber,
+        batch: result.batch
+      };
+    });
+  }
+
+  async startFileTask(taskRunId, batchId) {
+    return this._run(
+      'startFileTask',
+      async () => this._startFileTaskUnlocked(taskRunId, batchId)
+    );
+  }
+
+  _startFileTaskUnlocked(taskRunId, batchId) {
+    const result = this.repository.startFileTask(taskRunId, batchId);
+    return ['updated', 'unchanged'].includes(result.status)
+      ? { ok: true, ...result }
+      : {
+          ok: false,
+          ...result,
+          code: result.status === 'not-found'
+            ? 'ARCHIVE_TASK_RUN_NOT_FOUND'
+            : 'ARCHIVE_TASK_STATUS_CONFLICT',
+          message: 'File Task 当前状态不能开始执行'
+        };
+  }
+
+  async finishFileTask(taskRunId, batchId, outcome = {}) {
+    return this._run(
+      'finishFileTask',
+      async () => this._finishFileTaskUnlocked(taskRunId, batchId, outcome)
+    );
+  }
+
+  _finishFileTaskUnlocked(taskRunId, batchId, outcome = {}) {
+    const result = this.repository.finishFileTask(taskRunId, batchId, outcome);
+    return ['updated', 'unchanged'].includes(result.status)
+      ? { ok: true, ...result }
+      : {
+          ok: false,
+          ...result,
+          code: result.status === 'not-found'
+            ? 'ARCHIVE_TASK_RUN_NOT_FOUND'
+            : 'ARCHIVE_TASK_STATUS_CONFLICT',
+          message: 'File Task 终态发生冲突'
+        };
+  }
+
+  async _settleManifestArtifactsUnlocked(payload = {}) {
+      const batchContext = payload.batchContext;
+      const batchId = Number(batchContext && batchContext.batchId);
+      if (!Number.isSafeInteger(batchId) || batchId < 1) {
+        throw new TypeError('settleManifestArtifacts 需要 batchContext');
+      }
+      if (!Array.isArray(payload.files)) {
+        throw new TypeError('settleManifestArtifacts.files 必须是数组');
+      }
+      const batch = this.repository.getBatch(batchId);
+      if (!batch) {
+        return {
+          ok: false,
+          status: 'not-found',
+          code: 'ARCHIVE_BATCH_NOT_FOUND',
+          message: '存档批次不存在'
+        };
+      }
+      if (!(batch.metadata && batch.metadata._fileManifest)) {
+        throw new TypeError('settleManifestArtifacts 只接受 manifest v1 batch');
+      }
+      if (batch.taskRunId !== batchContext.taskRunId
+          || batch.operationKey !== batchContext.operationKey) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_TASK_IDENTITY_CONFLICT',
+          'settle owner 与 File Batch 身份不一致'
+        );
+      }
+      const artifacts = this.repository.listArtifacts(batch.id);
+      const byKey = new Map(artifacts.map((artifact) => [artifact.artifactKey, artifact]));
+      const seen = new Set();
+      const results = [];
+      for (const file of payload.files) {
+        const artifactKey = String(file && file.artifactKey || '').trim();
+        if (!artifactKey || seen.has(artifactKey) || !byKey.has(artifactKey)) {
+          throw new ArchiveOperationError(
+            'ARCHIVE_MANIFEST_ARTIFACT_UNKNOWN',
+            'settle 只能引用 manifest 中唯一的 artifactKey'
+          );
+        }
+        seen.add(artifactKey);
+        const artifact = byKey.get(artifactKey);
+        const hasExpectedSha256 = file.expectedSha256 !== undefined;
+        const hasExpectedSizeBytes = file.expectedSizeBytes !== undefined;
+        if (hasExpectedSha256 !== hasExpectedSizeBytes) {
+          throw new TypeError('settle evidence 必须同时包含 SHA-256 与大小');
+        }
+        const expectedSha256 = hasExpectedSha256
+          ? String(file.expectedSha256).trim().toLowerCase()
+          : '';
+        const expectedSizeBytes = hasExpectedSizeBytes
+          ? Number(file.expectedSizeBytes)
+          : null;
+        if ((expectedSha256 && !SHA256_RE.test(expectedSha256))
+            || (expectedSizeBytes !== null
+              && (!Number.isSafeInteger(expectedSizeBytes) || expectedSizeBytes < 0))) {
+          throw new TypeError('settle evidence 格式非法');
+        }
+        if (artifact.status === 'ready') {
+          const matches = (!expectedSha256 || artifact.blob.sha256 === expectedSha256)
+            && (expectedSizeBytes === null || artifact.blob.sizeBytes === expectedSizeBytes);
+          if (!matches) {
+            throw new ArchiveOperationError(
+              'ARCHIVE_READY_ARTIFACT_EXPECTATION_CONFLICT',
+              `文件“${artifact.originalName}”的既有存档版本与本次业务证据不一致`
+            );
+          }
+          results.push({
+            ok: true,
+            status: 'ready',
+            artifact: publicArtifact(artifact),
+            sha256: artifact.blob.sha256,
+            sizeBytes: artifact.blob.sizeBytes,
+            deduplicated: true
+          });
+        } else {
+          results.push(await this._archiveArtifactUnlocked(
+            artifact,
+            artifact.sourcePath,
+            expectedSha256
+              ? { expectedSha256, expectedSizeBytes }
+              : {}
+          ));
+        }
+      }
+      const current = this.repository.getBatch(batch.id);
+      return {
+        ok: results.every((result) => result && result.ok !== false),
+        durable: results.every((result) => (
+          result && (result.ok !== false || result.metadataRecorded === true)
+        )),
+        status: current.archiveStatus,
+        batchId: batch.id,
+        batch: current,
+        attempted: results.length,
+        succeeded: results.filter((result) => result && result.ok !== false).length,
+        failed: results.filter((result) => !result || result.ok === false).length,
+        results
+      };
+  }
+
+  async settleManifestArtifacts(payload = {}) {
+    return this._run(
+      'settleManifestArtifacts',
+      async () => this._settleManifestArtifactsUnlocked(payload)
+    );
+  }
+
+  async markTaskRunStarted(taskRunId) {
+    return this._run('markTaskRunStarted', async () => {
+      const result = this.repository.transitionTaskRun(taskRunId, 'running', {
+        expectedStatuses: ['prepared']
+      });
+      return result.status === 'updated' || result.status === 'unchanged'
+        ? { ok: true, ...result }
+        : {
+            ok: false,
+            ...result,
+            code: result.status === 'not-found'
+              ? 'ARCHIVE_TASK_RUN_NOT_FOUND'
+              : 'ARCHIVE_TASK_STATUS_CONFLICT',
+            message: 'Task Run 当前状态不能开始执行'
+          };
+    });
+  }
+
+  async finishTaskRun(taskRunId, outcome = {}) {
+    const status = String(outcome.taskStatus || 'failed');
+    return this._run('finishTaskRun', async () => {
+      const result = this.repository.transitionTaskRun(taskRunId, status, {
+        expectedStatuses: ['prepared', 'running'],
+        failureCode: outcome.code,
+        failureMessage: outcome.message,
+        metadata: outcome.metadata
+      });
+      return result.status === 'updated' || result.status === 'unchanged'
+        ? { ok: true, ...result }
+        : {
+            ok: false,
+            ...result,
+            code: result.status === 'not-found'
+              ? 'ARCHIVE_TASK_RUN_NOT_FOUND'
+              : 'ARCHIVE_TASK_STATUS_CONFLICT',
+            message: 'Task Run 终态发生冲突'
+          };
+    });
+  }
+
+  async beginTaskRunRecovery(taskRunId) {
+    return this._run('beginTaskRunRecovery', async () => {
+      const result = this.repository.transitionTaskRun(taskRunId, 'running', { recovery: true });
+      return result.status === 'updated' || result.status === 'unchanged'
+        ? { ok: true, ...result }
+        : {
+            ok: false,
+            ...result,
+            code: result.status === 'not-found'
+              ? 'ARCHIVE_TASK_RUN_NOT_FOUND'
+              : 'ARCHIVE_TASK_STATUS_CONFLICT',
+            message: 'Task Run 当前状态不能恢复执行'
+          };
     });
   }
 
@@ -1058,6 +1489,29 @@ class ArchiveService {
         batchNumber: recovery.batch.batchNumber,
         taskStatus: recovery.batch.taskStatus,
         batch: recovery.batch
+      };
+    });
+  }
+
+  async beginFileTaskRecovery(batchContext, options = {}) {
+    return this._run('beginFileTaskRecovery', async () => {
+      const recovery = this.repository.beginFileTaskRecovery(batchContext, options);
+      if (recovery.status === 'reopened' || recovery.status === 'unchanged') {
+        return { ok: true, ...recovery };
+      }
+      return {
+        ok: false,
+        ...recovery,
+        code: recovery.status === 'not-found'
+          ? 'ARCHIVE_BATCH_NOT_FOUND'
+          : recovery.status === 'identity-conflict'
+            ? 'ARCHIVE_TASK_RECOVERY_IDENTITY_CONFLICT'
+            : recovery.status === 'manifest-conflict'
+              ? 'ARCHIVE_MANIFEST_IDENTITY_CONFLICT'
+              : 'ARCHIVE_TASK_RECOVERY_STATUS_CONFLICT',
+        message: recovery.status === 'manifest-conflict'
+          ? '恢复 FilePlan 与原批次 manifest 不一致'
+          : 'File Task 当前状态或持久身份不允许恢复执行'
       };
     });
   }
@@ -1118,19 +1572,25 @@ class ArchiveService {
   }
 
   async getLatestBatch() {
-    return this._run('getLatestBatch', async () => ({
-      ok: true,
-      status: 'success',
-      latestBatch: this.repository.getLatestIssuedBatch()
-    }));
+    return this._run('getLatestBatch', async () => {
+      const latest = publicBatch(this.repository.getLatestVisibleBatch());
+      return {
+        ok: true,
+        status: 'success',
+        latestBatch: latest ? { ...latest, batchId: latest.id } : null
+      };
+    });
   }
 
-  async listRelatedBatches(parentRunId) {
-    return this._run('listRelatedBatches', async () => ({
-      ok: true,
-      status: 'success',
-      batches: this.repository.listRelatedBatches(parentRunId)
-    }));
+  async listRelatedBatches(batchId) {
+    return this._run('listRelatedBatches', async () => {
+      const batches = this.repository.listVisibleRelatedBatchesForBatch(batchId);
+      return {
+        ok: true,
+        status: 'success',
+        batches: batches.length >= 2 ? batches.map(publicRelatedBatch) : []
+      };
+    });
   }
 
   async findFlowAnchor(payload = {}) {
@@ -1183,6 +1643,35 @@ class ArchiveService {
         };
       }
       return { ok: true, status: 'replayed', ...replay };
+    });
+  }
+
+  async persistTaskFlowBindIntent(payload = {}) {
+    return this._run('persistTaskFlowBindIntent', async () => {
+      const persisted = this.repository.persistTaskFlowBindIntent(payload);
+      return {
+        ok: true,
+        status: persisted.resolved
+          ? 'already-bound'
+          : (persisted.created ? 'persisted' : 'existing'),
+        ...persisted
+      };
+    });
+  }
+
+  async replayTaskFlowBindIntents(payload = {}) {
+    return this._run('replayTaskFlowBindIntents', async () => {
+      const replay = this.repository.replayTaskFlowBindIntents(payload);
+      const failure = replay.results.find((result) => !result.ok);
+      return replay.failed === 0
+        ? { ok: true, status: 'replayed', ...replay }
+        : {
+            ok: false,
+            status: 'failed',
+            code: failure.code,
+            message: failure.message,
+            ...replay
+          };
     });
   }
 
@@ -1558,21 +2047,24 @@ class ArchiveService {
     }
   }
 
-  async _archiveArtifactUnlocked(artifact, sourcePath) {
+  async _archiveArtifactUnlocked(artifact, sourcePath, expectedEvidence = {}) {
     const originalName = artifact.originalName;
     const previouslyRegisteredSourcePath = artifact.sourcePath;
     let staged = null;
     try {
-      const started = this.repository.startArtifactAttempt(artifact.id, { sourcePath });
+      const started = this.repository.startArtifactAttempt(artifact.id, {
+        sourcePath,
+        ...expectedEvidence
+      });
       const archivedSourcePath = sourcePath || started.sourcePath;
       staged = await this._stageSourceFile(
         archivedSourcePath,
         originalName,
-        artifact.metadata && artifact.metadata.sourceSnapshot,
-        artifact.metadata && artifact.metadata.expectedSha256,
-        artifact.metadata && (
-          artifact.metadata.expectedSizeBytes
-          ?? artifact.metadata.sourceSnapshot?.sizeBytes
+        started.metadata && started.metadata.sourceSnapshot,
+        started.metadata && started.metadata.expectedSha256,
+        started.metadata && (
+          started.metadata.expectedSizeBytes
+          ?? started.metadata.sourceSnapshot?.sizeBytes
         )
       );
       const published = await this._publishStagedBlob(staged);
@@ -1597,7 +2089,15 @@ class ArchiveService {
       if (staged && staged.stagedPath) {
         try { await this.fs.promises.rm(staged.stagedPath, { force: true }); } catch (_cleanupError) {}
       }
-      const failure = safeFailure(error, '存档', originalName);
+      const failure = artifact.direction === 'output'
+          && error
+          && ['ENOENT', 'ARCHIVE_ENOENT'].includes(error.code)
+        ? {
+            code: 'ARCHIVE_OUTPUT_NOT_PRODUCED',
+            message: '任务预期输出文件未形成可归档内容',
+            retryable: false
+          }
+        : safeFailure(error, '存档', originalName);
       let recorded = null;
       try {
         recorded = this.repository.failArtifact(artifact.id, {
@@ -1760,6 +2260,12 @@ class ArchiveService {
         message: '存档批次不存在'
       };
     }
+    if (batch.metadata && batch.metadata._fileManifest) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_MANIFEST_ARTIFACT_UNKNOWN',
+        'manifest v1 batch 只能按已登记 artifactKey settle'
+      );
+    }
     const files = Array.isArray(payload.files) ? payload.files : [];
     const preparedFiles = files.map((file) => {
       const spec = file && typeof file === 'object' ? file : { filePath: file };
@@ -1812,19 +2318,16 @@ class ArchiveService {
   }
 
   async archiveFile(payload = {}) {
-    return this._run('archiveFile', async () => {
-      const created = this._createBatchUnlocked(payload);
-      if (!created.ok) return created;
-      const attached = await this._attachFileUnlocked(created.batch.id, {
-        ...payload,
-        artifactKey: payload.artifactKey || 'primary'
-      });
-      return {
-        ...attached,
-        created: created.created,
-        batch: attached.batch || this.repository.getBatch(created.batch.id)
-      };
+    const sourceOperation = payload.sourceOperation || 'archiveFile';
+    const created = await this.createBatch({
+      ...payload,
+      sourceOperation,
+      files: [{ ...payload, sourceOperation }]
     });
+    const first = created && Array.isArray(created.results) ? created.results[0] : null;
+    return first
+      ? { ...created, ...first, batch: created.batch }
+      : created;
   }
 
   // main 可把单文件业务直接接到 stageFile；语义等同 archiveFile（建批次 + 附件）。
@@ -1857,7 +2360,7 @@ class ArchiveService {
         return {
           ok: batch.archiveStatus === 'complete',
           status: 'nothing-to-retry',
-          batch,
+          batch: publicBatch(batch),
           attempted: 0,
           succeeded: 0,
           failed: 0
@@ -1881,7 +2384,7 @@ class ArchiveService {
       return {
         ok: results.every((result) => result.ok),
         status: current.archiveStatus,
-        batch: current,
+        batch: publicBatch(current),
         attempted: results.length,
         succeeded,
         failed: results.length - succeeded,
@@ -1893,24 +2396,25 @@ class ArchiveService {
   async listBatches(filters = {}) {
     return this._run('listBatches', async () => ({
       ok: true,
-      batches: this.repository.listBatches(filters)
+      batches: this.repository.listVisibleBatches(filters).map(publicBatch)
     }));
   }
 
   async getBatch(batchId) {
     return this._run('getBatch', async () => {
-      let detail = this.repository.getBatchDetail(batchId);
+      let detail = this.repository.getVisibleBatchDetail(batchId);
       if (detail) {
         for (const artifact of detail.artifacts) {
           if (artifact.status === 'ready' && artifact.blob) {
             await this._readyArtifact(artifact.id);
           }
         }
-        detail = this.repository.getBatchDetail(batchId);
+        detail = this.repository.getVisibleBatchDetail(batchId);
       }
       if (detail) {
-        detail.relatedBatches = detail.parentRunId
-          ? this.repository.listRelatedBatches(detail.parentRunId).map(publicRelatedBatch)
+        const related = this.repository.listVisibleRelatedBatchesForBatch(detail.id);
+        detail.relatedBatches = related.length >= 2
+          ? related.map(publicRelatedBatch)
           : [];
       }
       return detail
@@ -1928,7 +2432,7 @@ class ArchiveService {
     return this._run('setLocked', async () => {
       const batch = this.repository.setLocked(batchId, locked === true);
       return batch
-        ? { ok: true, status: batch.locked ? 'locked' : 'unlocked', batch }
+        ? { ok: true, status: batch.locked ? 'locked' : 'unlocked', batch: publicBatch(batch) }
         : {
             ok: false,
             status: 'not-found',
@@ -1958,7 +2462,7 @@ class ArchiveService {
       return {
         ok: true,
         status: 'updated',
-        batch: this.repository.setRetentionUntil(batch.id, retentionUntil)
+        batch: publicBatch(this.repository.setRetentionUntil(batch.id, retentionUntil))
       };
     });
   }
@@ -2201,7 +2705,7 @@ class ArchiveService {
   async getStats() {
     return this._run('getStats', async () => ({
       ok: true,
-      stats: this.repository.getStats()
+      stats: this.repository.getVisibleStats()
     }));
   }
 
@@ -2686,7 +3190,8 @@ class ArchiveService {
       ok: true,
       status: 'complete',
       ...this.repository.markInterruptedTasks({
-        excludeBatchIds: options.excludeBatchIds
+        excludeBatchIds: options.excludeBatchIds,
+        excludeTaskRunIds: options.excludeTaskRunIds
       })
     }));
   }
@@ -2709,5 +3214,7 @@ module.exports = {
   blobRelativePath,
   createArchiveService,
   localDateOf,
+  publicArtifact,
+  publicBatch,
   runArchiveRootOperation
 };

@@ -70,7 +70,10 @@ function createMainHandlerHarness(overrides = {}) {
           event,
           prepared,
           prepared.args,
-          {}
+          {
+            fileEvidence: { filePlan: prepared.filePlan },
+            settleArtifacts: async () => ({ ok: true, durable: true })
+          }
         );
       });
     },
@@ -206,7 +209,10 @@ test.describe('重复入金匹配 UI / preload / IPC 接线', () => {
       detailLines: ['第 3 行 BizId 为空']
     });
     const failed = createMainHandlerHarness({
-      showImportOpenDialog: async () => ({ canceled: false, filePaths: ['/tmp/bank.xlsx', '/tmp/doc.xlsx'] }),
+      showImportOpenDialog: async () => ({
+        canceled: false,
+        filePaths: [__filename, path.join(root, 'src', 'main.js')]
+      }),
       service: {
         importFiles: async () => { throw expectedError; }
       }

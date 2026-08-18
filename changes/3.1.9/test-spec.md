@@ -636,3 +636,36 @@ Reviewer-confirmed UI-13 增量证据（2026-08-12）：Service/Controller 只�
 | VUI-05 | P1 | Electron/preview | 默认/150%/最小窗口 | 无新增裁切或溢出；三按钮、分隔线和统计列视觉合同稳定 |
 
 自动证据（2026-08-13）：定向 113/113、扩大 443/443 PASS；主页面 2 viewport×3 zoom 6/6 PASS；三张 VCC 结果 preview 生成并人工通过。真实开发库启动迁移与逐主体九币种金额仍需用户人工复核。
+
+## 二十四、存档中心非空文件批次前向收口（2026-08-17）
+
+本节验证 Spec §0.3/§19，取代旧测试中“无文件元数据任务仍作为公开批次计次”的冲突断言。
+
+| ID | 优先级 | 场景 | 最小断言 |
+| --- | --- | --- | --- |
+| NFB-01 | P0 | 纯状态/配置/计算 action | action 仍受 BOR/升级/退出闸门与业务审计保护，但不调用 batch reserve、不写 issuance、不推进全局序号，前端运行次数/最新批次不变 |
+| NFB-02 | P0 | 文件任务原子预留 | 非空 valid `artifactManifest` 才可预留；批次、序号与至少一个 pending/ready artifact intent 同事务提交，任一步失败全部回滚 |
+| NFB-03 | P0 | 瞬时并发读取 | 在业务执行和文件落盘期间刷新存档中心，已公开批次始终至少有一行真实文件 intent，不出现短暂空卡 |
+| NFB-04 | P0 | manifest 合法性 | `openFile` 输入和明确输出文件可进入；`openDirectory/createDirectory`、日志、数据库记录、placeholder 与 metadata-only 不能进入 |
+| NFB-05 | P0 | 文件失败仍可见 | 仅有 pending/failed 的合法文件 artifact 时批次仍显示，并保留错误、重试和 task 终态；不能因没有 ready Blob 隐藏 |
+| NFB-06 | P0 | 历史零 artifact 过滤 | list/get/stats/latest/related 统一排除零 artifact 批次；内部 repository/恢复读取仍可访问；历史记录、issuance 和 sequence 不删除、不复用 |
+| NFB-07 | P0 | 关联任务过滤 | 同 parent 的 `文件A—无文件状态B—文件C` 只显示 A/C；仅剩一个可见文件批次时隐藏关联任务；跨重启一致 |
+| NFB-08 | P0 | 无文件动作后的首次导出 | 稳定业务 identity 由 flow anchor 或首个文件批次绑定；后续多次导出关联一致，不通过 latest/隐藏批次猜 parent |
+| NFB-09 | P0 | 历史统计 | 代表库 95 批中 34 个零 artifact 不计 runCount/latest；8 个 failed-only 文件批次继续可见；文件总大小仍只累计 ready 引用 |
+| NFB-10 | P0 | Toolbox split 目录选择 | 多文件拆分的保存目录不进入 selected input；归档结果精确为一个输入 + N 个输出，不产生 `ARCHIVE_SOURCE_NOT_FILE` 目录 artifact |
+| NFB-11 | P0 | `2026-08-13-017` / `2026-08-13-018` 修复 | 只命中两个满足完整指纹的目录伪 artifact；每批保留 1 input + 2 output、task succeeded、archive complete、原号/SHA/parent 不变；二次执行 0 变更 |
+| NFB-12 | P0 | Toolbox merge evidence 对象传播 | `prepare` 经规范化复制后，`beforeStart` 返回的 N 项 `inputFiles` 在 execute/runtime/publication 中为同一结构化 evidence；不得只修改原对象 |
+| NFB-13 | P0 | 合表 publication 前置拒绝 | evidence 缺失、为空、与 protected paths 不一致时，在 journal/target staging 前失败，既有目标不变、临时目录按既有策略清理 |
+| NFB-14 | P0 | 合表正常闭环 | 两输入合表得到同一新批次的 2 input + 1 output，task succeeded/archive complete；用户目标与归档 artifact SHA/size 一致 |
+| NFB-15 | P0 | `2026-08-17-001` 历史保留 | 旧批次继续显示 failed、2 input、0 output；不补写成功、不伪造 output、不创建恢复 journal；修复后重跑使用新批次 |
+| NFB-16 | P1 | 旧号与新发号 | 隐藏历史零文件批次造成的旧序号间隙保留；新版本的无文件动作不产生新间隙，并发文件任务仍全局唯一 |
+| NFB-17 | P1 | 公共入口旁路 | renderer 不能通过本地过滤重新暴露空批次；按 batch number 直查、刷新详情、删除后 related 重算均使用同一 server-side visibility predicate |
+| NFB-18 | P1 | 无事件时间线 | 存档中心不新增状态动作时间线或不可点击事件；业务模块原 operation audit/activity log 回归不丢失 |
+
+### 实施阶段证据要求
+
+1. 先用独立事务测试证明“发号 + artifact intent”原子性，再迁移 action policy；禁止仅在 renderer 过滤后宣称满足“不占号”。
+2. 对全部 reserve action 生成 inventory：每项必须归为 `file-manifest` 或 `no-archive-artifact`，未知 action CI 失败；输出无法预声明的入口必须先做无副作用 preflight。
+3. 历史修复必须在数据库副本上先跑 dry-run，报告命中批次、artifact、保留文件数和跳过原因；备份、执行、二次幂等及 SQLite 完整性检查均通过后才可作用于真实库。
+4. 聚焦测试至少覆盖 allocator/repository/controller/UI/TaskLifecycle/operation-tracker/toolbox publication；随后执行 `npm run release-check` 与 `npm run check:vars`。
+5. 手工验收：连续执行状态动作时最新批次与运行次数不变；执行拆表、合表成功/失败后，每张可见卡均有文件行且号码行为符合 Spec §19。

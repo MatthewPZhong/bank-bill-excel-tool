@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
-  createRun,
+  createLegacyRun: createRun,
   updateRunStats,
   getRunById,
   listAllRuns,

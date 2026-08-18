@@ -265,6 +265,7 @@ class ArchiveStorageRootManager {
     this.fs = options.fsImpl || fs;
     this.createMaterializer = options.createMaterializer || createStorageMaterializer;
     this.faultInjector = typeof options.faultInjector === 'function' ? options.faultInjector : null;
+    this.deferStartupRecovery = options.deferStartupRecovery === true;
     const startupOwnershipBatchSize = options.startupOwnershipBatchSize === undefined
       ? DEFAULT_STARTUP_OWNERSHIP_BATCH_SIZE
       : Number(options.startupOwnershipBatchSize);
@@ -704,6 +705,10 @@ class ArchiveStorageRootManager {
     return this.ownershipPromise;
   }
 
+  resumeBackgroundArchiveChecks() {
+    this._resumeBackgroundArchiveChecks();
+  }
+
   async _assertOwnershipScanComplete(rootDir) {
     if (!this.ownershipScan
         || comparablePath(this.ownershipScan.rootDir) !== comparablePath(rootDir)
@@ -855,7 +860,10 @@ class ArchiveStorageRootManager {
   }
 
   async _initializeExistingService(service) {
-    const initialized = await service.initialize({ startBackgroundMaterialization: false });
+    const initialized = await service.initialize({
+      startBackgroundMaterialization: false,
+      deferStartupRecovery: this.deferStartupRecovery
+    });
     if (!initialized || initialized.available === false) {
       throw new ArchiveStorageRootError(
         initialized && initialized.code || 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE',
@@ -892,7 +900,7 @@ class ArchiveStorageRootManager {
         this.runtimeDelegate.switchService(active.service);
         initialized = active.initialized;
       }
-      this._resumeBackgroundArchiveChecks();
+      if (!this.deferStartupRecovery) this._resumeBackgroundArchiveChecks();
       return initialized;
     })().catch((error) => {
       this.runtimeDelegate.clearService(

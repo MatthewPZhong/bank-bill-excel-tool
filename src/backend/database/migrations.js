@@ -3433,6 +3433,39 @@ function ensureLinkedTableSupport(db) {
           .run(gwRowCount, gwRange && gwRange.mn != null ? gwRange.mn : null, gwRange && gwRange.mx != null ? gwRange.mx : null);
       }
     }
+    if (!hasColumn(db, 'linked_gateway_bill', 'source_dataset_id')) {
+      db.exec('ALTER TABLE linked_gateway_bill ADD COLUMN source_dataset_id TEXT;');
+    }
+    if (!hasColumn(db, 'linked_gateway_bill', 'source_task_run_id')) {
+      db.exec('ALTER TABLE linked_gateway_bill ADD COLUMN source_task_run_id TEXT;');
+    }
+    if (!hasColumn(db, 'linked_gateway_bill', 'source_contract_version')) {
+      db.exec(`
+        ALTER TABLE linked_gateway_bill ADD COLUMN source_contract_version INTEGER NOT NULL DEFAULT 0
+          CHECK (source_contract_version IN (0, 1));
+      `);
+    }
+    if (!hasColumn(db, 'linked_gateway_bill', 'source_write_nonce')) {
+      db.exec('ALTER TABLE linked_gateway_bill ADD COLUMN source_write_nonce TEXT;');
+    }
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_linked_gateway_bill_source_dataset
+        ON linked_gateway_bill(source_dataset_id)
+        WHERE source_dataset_id IS NOT NULL AND source_dataset_id <> '';
+    `);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_linked_gateway_bill_legacy_source_invalidate
+      AFTER UPDATE OF reconciliation_id, bill_date, raw_json, imported_at ON linked_gateway_bill
+      WHEN OLD.source_contract_version = 1
+       AND NEW.source_write_nonce IS OLD.source_write_nonce
+      BEGIN
+        UPDATE linked_gateway_bill
+        SET source_dataset_id = NULL,
+            source_task_run_id = NULL,
+            source_contract_version = 0
+        WHERE id = NEW.id;
+      END;
+    `);
 
     // 残留旧列名迁移：中间 beta 构建曾用 business_date，已改名 transaction_date；
     //   CREATE TABLE IF NOT EXISTS 不迁移已存在表 → 显式 RENAME（幂等：仅旧列在 ∧ 新列不在时执行）。
@@ -3818,12 +3851,35 @@ function ensurePreFundReconciliationRunMetadataSupport(db) {
       side_db_rel_path TEXT NOT NULL,
       error_message TEXT,
       started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      finished_at TEXT
+      finished_at TEXT,
+      archive_contract_version INTEGER NOT NULL DEFAULT 0
+        CHECK (archive_contract_version IN (0, 1)),
+      archive_task_run_id TEXT,
+      archive_terminal_ack_at TEXT
     );
+  `);
+  if (!hasColumn(db, 'pre_fund_reconciliation_run_mirrors', 'archive_contract_version')) {
+    db.exec(`
+      ALTER TABLE pre_fund_reconciliation_run_mirrors
+      ADD COLUMN archive_contract_version INTEGER NOT NULL DEFAULT 0
+        CHECK (archive_contract_version IN (0, 1));
+    `);
+  }
+  if (!hasColumn(db, 'pre_fund_reconciliation_run_mirrors', 'archive_task_run_id')) {
+    db.exec('ALTER TABLE pre_fund_reconciliation_run_mirrors ADD COLUMN archive_task_run_id TEXT;');
+  }
+  if (!hasColumn(db, 'pre_fund_reconciliation_run_mirrors', 'archive_terminal_ack_at')) {
+    db.exec('ALTER TABLE pre_fund_reconciliation_run_mirrors ADD COLUMN archive_terminal_ack_at TEXT;');
+  }
+  db.exec(`
     CREATE INDEX IF NOT EXISTS idx_pre_fund_run_mirrors_status
       ON pre_fund_reconciliation_run_mirrors(status, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_pre_fund_run_mirrors_side_run
       ON pre_fund_reconciliation_run_mirrors(month_key, side_run_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pre_fund_run_mirrors_archive_task
+      ON pre_fund_reconciliation_run_mirrors(archive_task_run_id)
+      WHERE archive_contract_version = 1
+        AND archive_task_run_id IS NOT NULL AND archive_task_run_id <> '';
   `);
 }
 

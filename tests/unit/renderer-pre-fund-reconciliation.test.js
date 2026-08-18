@@ -130,6 +130,43 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     }
   });
 
+  test('run/export 精确血缘与 startup owner 顺序在 main seam 闭合', () => {
+    const runStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:run'");
+    const exportStart = main.indexOf("trackedIpcHandle('pre-fund-reconciliation:export'");
+    const exportEnd = main.indexOf('\nfunction getDuplicateInboundMatchService()', exportStart);
+    assert.ok(runStart >= 0 && exportStart > runStart && exportEnd > exportStart);
+    const runHandler = main.slice(runStart, exportStart);
+    const exportHandler = main.slice(exportStart, exportEnd);
+    assert.match(runHandler, /const taskRunId = randomUUID\(\)/);
+    assert.match(runHandler, /const plan = service\.prepareRunLineage\(\)/);
+    assert.match(runHandler, /lineageIntents:\s*plan\.lineageIntents/);
+    assert.match(runHandler, /expectedDatasets:\s*plan\.expectedDatasets/);
+    assert.match(runHandler, /taskRunId:\s*taskContext\.operationContext\.taskRunId/);
+    assert.match(runHandler, /terminalStatus === 'succeeded'[\s\S]*acknowledgeRunByTaskRun/);
+
+    assert.match(exportHandler, /const runLocator = service\.lastRunLocator\(\)/);
+    assert.match(exportHandler, /lineageIntents:\s*\[service\.lastRunLineageIntent\(\)\]/);
+    assert.match(exportHandler, /flowPlan:\s*service\.lastRunBusinessFlowPlan\(runLocator\)/);
+    assert.match(exportHandler, /filePlan:[\s\S]*outputs:\s*plan\.map/);
+    assert.match(exportHandler, /taskContext\.fileEvidence\.filePlan\.outputs/);
+    assert.match(exportHandler, /runLocator:\s*prepared\.runLocator/);
+    assert.match(exportHandler, /taskContext\.settleArtifacts\(/);
+    assert.doesNotMatch(
+      exportHandler.slice(exportHandler.indexOf('async execute')),
+      /service\.lastRun(?:Locator)?\(/,
+      'execute 不得按后来 lastRun/latest 重选业务 run'
+    );
+
+    const pendingOwner = main.indexOf("ownerName: 'Pending runs'");
+    const bizOwner = main.indexOf("ownerName: 'Biz OP runs'");
+    const preFundOwner = main.indexOf("ownerName: 'Pre-fund runs'");
+    const positionOwner = main.indexOf("ownerName: 'Position'");
+    assert.ok(pendingOwner < bizOwner && bizOwner < preFundOwner && preFundOwner < positionOwner);
+    const archiveAwait = main.indexOf('if (archiveCenterInitializationPromise) await archiveCenterInitializationPromise;');
+    const cleanupSchedule = main.indexOf('schedulePreFundReconciliationStartupCleanup();', archiveAwait);
+    assert.ok(archiveAwait >= 0 && cleanupSchedule > archiveAwait);
+  });
+
   test('临时链接表首页复用标准链接表结构，且不提供账户映射', () => {
     assert.ok(dialogs.includes('function createPreFundTempManagerDialog('));
     assert.match(dialogs, /createPreFundTempManagerDialog,/);

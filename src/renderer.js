@@ -2951,9 +2951,10 @@ function createAppUpdateSettingsDialog(options = {}) {
       ?? batch.warningMessage
       ?? batch.errorMessage
       ?? batch.lastErrorMessage
+      ?? batch.failureMessage
       ?? '';
     const warning = batch.requiresBusinessRerun === true
-      ? [baseWarning, '该批次缺少可验证的业务内容摘要，需要重新运行业务。']
+      ? [baseWarning, batch.rerunHint || '该批次缺少可验证的业务内容摘要，需要重新运行业务。']
         .filter(Boolean)
         .join('；')
       : baseWarning;

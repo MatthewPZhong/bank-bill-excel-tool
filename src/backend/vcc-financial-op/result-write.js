@@ -192,9 +192,6 @@ function assertCurrentCalculatedEvidence(evidence, normalizedPayload, action) {
     if (gate.activeBatchIds.length > 0 || gate.importingRecordIds.length > 0) {
       throw resultWriteError('active-imports', '当前账期仍有原表正在导入，禁止归档。');
     }
-    if (gate.unresolvedRecords.length > 0) {
-      throw resultWriteError('unresolved-imports', '仍有未处理的失败导入记录，禁止归档。');
-    }
     if (gate.nextOpeningSubjects.length > 0) {
       throw resultWriteError(
         'next-opening-already-initialized',

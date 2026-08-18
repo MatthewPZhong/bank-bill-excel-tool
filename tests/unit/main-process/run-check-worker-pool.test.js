@@ -104,7 +104,11 @@ test.describe('run-check-worker-pool', () => {
           __dbPath: ctx.dbPath,
           monthKey: '2026-04',
           storageRoot: ctx.tmpdir,
-          batchContext: WORKER_BATCH_CONTEXT
+          batchContext: WORKER_BATCH_CONTEXT,
+          outputIntent: {
+            diffFilePath: path.join(ctx.tmpdir, 'frozen-worker-output.xlsx'),
+            reportFilePath: path.join(ctx.tmpdir, 'frozen-worker-output.xlsx')
+          }
         },
         {}
       );
@@ -165,11 +169,18 @@ test.describe('run-check-worker-pool', () => {
       /async execute\(event, prepared, taskContext\)/,
       'resume execute 必须取得 prepared plan 与 lifecycle taskContext'
     );
+    assert.doesNotMatch(handlerSource, /persistRunResumeBatchContext/);
+    assert.match(handlerSource, /filePlanResolver\(\)[\s\S]*planRunOutputPaths/);
+    assert.match(handlerSource, /beforeStart\(nextBatchContext, fileEvidence\)/);
     assert.ok(
-      handlerSource.indexOf('persistRunResumeBatchContext')
+      handlerSource.indexOf('transferRunResumeOwner')
         < handlerSource.indexOf('resumeRunCheck'),
-      'legacy batchContext 必须在 worker 前回填'
+      '新 owner 必须在 worker 前以 side DB CAS 接管'
     );
+    assert.match(handlerSource, /sourceOperation:\s*artifacts\[0\]\.sourceOperation/);
+    assert.match(handlerSource, /explicitParentRunId:\s*oldOwner \? oldOwner\.parentRunId/);
+    assert.doesNotMatch(handlerSource, /nextTaskRunId|nextOperationKey/);
+    assert.match(handlerSource, /if \(!prepared\.legacyExistingBatchRecovery\)[\s\S]*settleArtifacts/);
     assert.match(
       handlerSource,
       /batchContext:\s*taskContext\.batchContext/,
@@ -232,6 +243,45 @@ test.describe('run-check-worker-pool', () => {
       try { sideDb?.db.close(); } catch (_e) { /* swallow */ }
       ctx.cleanup();
     }
+  });
+
+  test('1b. Acquiring 五条 file action 只从冻结 FilePlan 消费路径并按 exact-7 透传 worker owner', () => {
+    const mainSource = fs.readFileSync(MAIN_PATH, 'utf8');
+    const importStart = mainSource.indexOf('async function prepareAcquiringImport');
+    const importEnd = mainSource.indexOf("trackedIpcHandle('acquiringBillCurrency:run'", importStart);
+    const importSource = mainSource.slice(importStart, importEnd);
+    assert.match(importSource, /filePlan:\s*\{[\s\S]*inputs:\s*filePaths\.map/);
+    assert.match(importSource, /taskContext\.fileEvidence\.filePlan\.inputs\.map/);
+    assert.match(importSource, /batchContext:\s*taskContext\.batchContext/);
+    assert.doesNotMatch(importSource, /const filePaths = prepared\.filePaths/);
+
+    const runStart = mainSource.indexOf("trackedIpcHandle('acquiringBillCurrency:run'");
+    const runEnd = mainSource.indexOf("ipcMain.handle('acquiringBillCurrency:run:cancel'", runStart);
+    const runSource = mainSource.slice(runStart, runEnd);
+    assert.match(runSource, /filePlanResolver\(\)[\s\S]*planRunOutputPaths/);
+    assert.match(runSource, /taskContext\.fileEvidence\.filePlan\.outputs\[0\]\.filePath/);
+    assert.match(runSource, /settleArtifacts\([\s\S]*artifactKey/);
+
+    const resumeStart = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:run:resume'"
+    );
+    const resumeEnd = mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:export'",
+      resumeStart
+    );
+    const resumeSource = mainSource.slice(resumeStart, resumeEnd);
+    assert.match(resumeSource, /sourceOperation:\s*artifacts\[0\]\.sourceOperation/);
+    assert.match(resumeSource, /artifactKey:\s*artifacts\[0\]\.artifactKey/);
+    assert.match(resumeSource, /previousBatchContext:\s*oldOwner \|\| null/);
+    assert.match(resumeSource, /nextOutputIntent:\s*\{[\s\S]*diffFilePath:\s*outputPath/);
+
+    const exportSource = mainSource.slice(resumeEnd, mainSource.indexOf(
+      "trackedIpcHandle('acquiringBillCurrency:retention:cleanup'",
+      resumeEnd
+    ));
+    assert.match(exportSource, /const output = taskContext\.fileEvidence\.filePlan\.outputs\[0\]/);
+    assert.match(exportSource, /fs\.copyFileSync\(exportPlan\.diffFilePath, output\.filePath\)/);
+    assert.doesNotMatch(exportSource, /prepared\.(?:savePath|outputPaths)/);
   });
 
   test('2. dispatchRunCheck 错误透传（monthKey 缺失）', async () => {

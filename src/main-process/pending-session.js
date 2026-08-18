@@ -39,7 +39,7 @@ const ARCHIVE_WORKER_THRESHOLD = 50000;
 
 // ════════════════════════════════════════════════════════════════════════════════
 // v3.0.4 块 B（PR-C）：pending 导入迁移大表导入引擎（JSZip→yauzl 基座，300w 设计目标解锁；
-//   child_process→worker_threads 拓扑统一；多文件并行）。🔴🔴 资金红线（pending_rows 真理源 + 6 表覆盖删除链）。
+//   child_process→worker_threads 拓扑统一；多文件并行）。🔴🔴 资金红线（pending_rows 真理源 + 7 表覆盖删除链）。
 //
 // 🔴 单行回退开关：USE_BIG_TABLE_IMPORT_ENGINE_PENDING=false 即回退原 utilityProcess + worker.js 全旧链路
 //   （worker.js / month-repository.js / 旧 reader 一字不改保留可达）。出引擎相关问题时拨 false 一行即恢复 v3.0.3 行为。
@@ -219,11 +219,19 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
   }
 
   // ── v3.0.4 块 B（PR-C）：引擎路径导入实现 ──
-  //   dispatch 引擎 worker（mode='overwrite'，6 表覆盖删除链 + 33 参 INSERT + 跨文件 sha 去重 + 事务内月元数据收尾）。
+  //   dispatch 引擎 worker（mode='overwrite'，7 表覆盖删除链 + 33 参 INSERT + 跨文件 sha 去重 + 事务内月元数据收尾）。
   //   成功 → { status:'success', yearMonth, rowCount, sourceFiles, archivePath }（与旧链路 complete 事件形态一致）。
   //   失败 → 引擎抛 BigTableImportError，restoreEngineErrors 还原 lastImportErrors 形态后返回 { status:'error', errors }。
   //   进度 → 引擎每 1w 行 { sourceFile, importedCount } 适配为现行 renderer payload（{ type:'progress', file, rowsProcessed, totalInserted }）。
-  async function runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress, batchContext }) {
+  async function runImportViaEngine({
+    yearMonth,
+    files,
+    archivePath,
+    dbPath,
+    onProgress,
+    batchContext,
+    datasetSeed
+  }) {
     // importedAt 在 session 侧算好经 contractOptions 注入（事务内收尾 upsertMonthMeta 用，与旧链路 new Date().toISOString() 等价）。
     const importedAt = new Date().toISOString();
     try {
@@ -231,7 +239,12 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
         dbPath,
         files,
         contractModulePath: PENDING_CONTRACT_PATH,
-        contractOptions: { yearMonth, archivePath: archivePath || null, importedAt },
+        contractOptions: {
+          yearMonth,
+          archivePath: archivePath || null,
+          importedAt,
+          datasetSeed
+        },
         mode: 'overwrite',
         batchContext,
         // monthKey 不传：契约 monthKeyOf=null ⇒ 引擎 baseMonthKey=null 旁路跨月校验（pending 单月由 yearMonth 入参）。
@@ -285,7 +298,15 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
     }
   }
 
-  async function runImport({ yearMonth, files, overwriteConfirmed, dbPath, onProgress, batchContext }) {
+  async function runImport({
+    yearMonth,
+    files,
+    overwriteConfirmed,
+    dbPath,
+    onProgress,
+    batchContext,
+    datasetSeed
+  }) {
     const db = getPendingDb();
     if (!db) {
       return { status: 'error', errors: [{ severity: 'fatal', message: 'Pending DB 未初始化' }] };
@@ -313,14 +334,29 @@ function createPendingSession({ getPendingDb, getStorageRoot }) {
 
     // ── v3.0.4 块 B（PR-C）：引擎路径（默认）。dbPath 必须（引擎 worker 自开连接）；缺则回退旧链路（兜底安全）。
     //   pending 旧链路 worker.js 无条件 deleteMonth（worker.js:84，不受 overwriteConfirmed 控制）⇒ 引擎统一走
-    //   mode='overwrite'（deleteForOverwrite 6 表覆盖删除链）。monthKey 不传（契约 monthKeyOf=null 旁路跨月校验）。
+    //   mode='overwrite'（deleteForOverwrite 7 表覆盖删除链）。monthKey 不传（契约 monthKeyOf=null 旁路跨月校验）。
     if (USE_BIG_TABLE_IMPORT_ENGINE_PENDING && dbPath) {
-      return runImportViaEngine({ yearMonth, files, archivePath, dbPath, onProgress, batchContext });
+      return runImportViaEngine({
+        yearMonth,
+        files,
+        archivePath,
+        dbPath,
+        onProgress,
+        batchContext,
+        datasetSeed
+      });
     }
 
     // ── 回退旧链路（PENDING_FORCE_LEGACY_IMPORT=1 或 dbPath 缺失）：utilityProcess/spawn + worker.js 全旧路径 ──
     return new Promise((resolve) => {
-      const jobMeta = { dbPath, yearMonth, files, archivePath, batchContext };
+      const jobMeta = {
+        dbPath,
+        yearMonth,
+        files,
+        archivePath,
+        batchContext,
+        datasetSeed
+      };
 
       let stdoutBuf = '';
       let stderrBuf = '';

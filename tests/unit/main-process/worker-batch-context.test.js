@@ -26,14 +26,17 @@ const BATCH_CONTEXT = Object.freeze({
   operationKey: 'operation-worker-319'
 });
 
-test('worker entry helper 从 structured clone 重建只含 7 字段的冻结 DTO', () => {
+test('worker entry helper 拒绝 structured clone 夹带字段，并重建 exact-7 冻结 DTO', () => {
   const cloned = structuredClone({ ...BATCH_CONTEXT, settleArtifacts: 'must-not-cross' });
-  const context = freezeWorkerBatchContext(cloned, { required: true });
+  assert.throws(
+    () => freezeWorkerBatchContext(cloned, { required: true }),
+    /exact-7/
+  );
+  const context = freezeWorkerBatchContext(structuredClone(BATCH_CONTEXT), { required: true });
   assert.deepEqual(Object.keys(context), WORKER_BATCH_CONTEXT_FIELDS);
   assert.deepEqual(context, BATCH_CONTEXT);
   assert.equal(Object.isFrozen(context), true);
   assert.notEqual(context, cloned);
-  assert.equal(Object.hasOwn(context, 'settleArtifacts'), false);
 });
 
 test('Pending 留底真实 child worker 接收 batchContext 后仍完成原有导出', (t) => {

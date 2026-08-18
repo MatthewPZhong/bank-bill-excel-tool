@@ -175,9 +175,6 @@ function previewUnarchive(db, targetMonth, {
   } else if (taskActive || state.sourceFacts.activeImportBatchCount > 0) {
     code = 'active-vcc-task';
     message = '已有 VCC 财务OP任务正在运行，请完成后重试。';
-  } else if (state.sourceFacts.unresolvedImportCount > 0) {
-    code = 'unresolved-imports';
-    message = `${month} 仍有未处理的导入异常，禁止解归档。`;
   } else if (dependentMonths.length > 0) {
     code = 'unarchive-not-tail';
     message = `该月之后仍存在已归档或已计算月份：${dependentMonths.join('、')}，请从最新月份开始处理。`;

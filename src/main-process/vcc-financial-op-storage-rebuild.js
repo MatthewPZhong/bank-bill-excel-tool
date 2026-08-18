@@ -17,6 +17,7 @@ const PRE_SWITCH_PHASES = new Set(['prepared', 'copying', 'verifying']);
 const JOURNAL_SCHEMA_VERSION = 1;
 const MIN_REDUCTION_GATE_BYTES = 1024 * 1024 * 1024;
 const MIN_VCC_CORE_REDUCTION_RATIO = 0.75;
+const VCC_TABLE_PREFIX = 'vcc_fin_op_';
 const EXPECTED_CURRENCIES = Object.freeze([
   'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
 ]);
@@ -290,6 +291,23 @@ function assertSourceReady(sourceDb) {
   return { noChange: false, contractVersion: version };
 }
 
+function assertVccResetSourceReady(sourceDb) {
+  if (!tableExists(sourceDb, 'archive_artifact_holds')) return { vccArtifactHoldCount: 0 };
+  const vccArtifactHoldCount = Number(sourceDb.prepare(`
+    SELECT COUNT(*) AS count
+    FROM archive_artifact_holds
+    WHERE owner_module = 'vcc-financial-op'
+  `).get().count) || 0;
+  if (vccArtifactHoldCount > 0) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-reset-active-holds',
+      `仍有 ${vccArtifactHoldCount} 条 VCC artifact business hold，禁止猜测清理`,
+      { vccArtifactHoldCount }
+    );
+  }
+  return { vccArtifactHoldCount };
+}
+
 function collectDbstat(db) {
   try {
     const rows = db.prepare(`
@@ -330,7 +348,7 @@ function vccCoreBytes(dbstat) {
   return names.reduce((total, name) => total + (Number(dbstat[name]) || 0), 0);
 }
 
-function migrationEstimate(sourceDb, sourcePath) {
+function migrationEstimate(sourceDb, sourcePath, options = {}) {
   const beforeDbstat = collectDbstat(sourceDb);
   const sourceBytes = safeStatSize(sourcePath);
   const oldCoreBytes = vccCoreBytes(beforeDbstat);
@@ -347,8 +365,11 @@ function migrationEstimate(sourceDb, sourcePath) {
   const anomalyCount = Number(recordTotals.invalid_count) + Number(recordTotals.conflict_count)
     + Number(recordTotals.format_count);
   const nonCoreBytes = Math.max(0, sourceBytes - oldCoreBytes);
-  const projectedEffectiveBytes = Math.max(effectiveCount * 384, Math.floor(oldCoreBytes * 0.08));
-  const projectedAnomalyBytes = anomalyCount * 640;
+  const resetVccData = options.resetVccData === true;
+  const projectedEffectiveBytes = resetVccData
+    ? 0
+    : Math.max(effectiveCount * 384, Math.floor(oldCoreBytes * 0.08));
+  const projectedAnomalyBytes = resetVccData ? 0 : anomalyCount * 640;
   const estimatedTargetBytes = Math.ceil(
     nonCoreBytes + projectedEffectiveBytes + projectedAnomalyBytes + 512 * 1024 * 1024
   );
@@ -1031,6 +1052,176 @@ function validatePreservedNonVccTables(targetDb) {
   }
 }
 
+function validateExactlyPreservedNonVccTables(targetDb) {
+  const tableNames = targetDb.prepare('PRAGMA source_db.table_list').all()
+    .filter((row) => String(row.type) === 'table')
+    .map((row) => String(row.name))
+    .filter((tableName) => !tableName.startsWith('sqlite_'))
+    .filter((tableName) => !tableName.startsWith(VCC_TABLE_PREFIX))
+    .sort();
+  for (const tableName of tableNames) {
+    if (tableName !== 'app_settings') {
+      if (exactTableMismatch(targetDb, tableName)) {
+        throw new VccStorageMigrationError(
+          'vcc-storage-reset-non-vcc-table-mismatch',
+          `${tableName} 非 VCC 数据未精确守恒`,
+          { tableName }
+        );
+      }
+      continue;
+    }
+    const sourceColumns = new Set(tableColumns(targetDb, tableName, 'source_db'));
+    const columns = tableColumns(targetDb, tableName)
+      .filter((column) => sourceColumns.has(column));
+    const projection = columns.map(quoteIdentifier).join(', ');
+    const settingKey = 'vcc_storage_contract_version';
+    const mismatch = targetDb.prepare(`
+      SELECT 1 AS mismatch FROM (
+        SELECT ${projection} FROM source_db.app_settings WHERE setting_key <> ?
+        EXCEPT
+        SELECT ${projection} FROM main.app_settings WHERE setting_key <> ?
+      ) LIMIT 1
+    `).get(settingKey, settingKey) || targetDb.prepare(`
+      SELECT 1 AS mismatch FROM (
+        SELECT ${projection} FROM main.app_settings WHERE setting_key <> ?
+        EXCEPT
+        SELECT ${projection} FROM source_db.app_settings WHERE setting_key <> ?
+      ) LIMIT 1
+    `).get(settingKey, settingKey);
+    if (mismatch) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-reset-non-vcc-table-mismatch',
+        'app_settings 除 VCC contract marker 外未精确守恒',
+        { tableName }
+      );
+    }
+  }
+}
+
+function vccTableRowCounts(db, schema = 'main', rowCountOverrides = {}) {
+  return db.prepare(`
+    SELECT name FROM ${quoteIdentifier(schema)}.sqlite_master
+    WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
+    ORDER BY name
+  `).all().map((row) => {
+    const tableName = String(row.name);
+    const rowCount = Object.prototype.hasOwnProperty.call(rowCountOverrides, tableName)
+      ? Number(rowCountOverrides[tableName]) || 0
+      : Number(db.prepare(`
+          SELECT COUNT(*) AS count
+          FROM ${quoteIdentifier(schema)}.${quoteIdentifier(tableName)}
+        `).get().count) || 0;
+    return Object.freeze({ tableName, rowCount });
+  });
+}
+
+function tableRowCountsByGlob(db, globPattern, schema = 'main') {
+  return db.prepare(`
+    SELECT name FROM ${quoteIdentifier(schema)}.sqlite_master
+    WHERE type = 'table' AND name GLOB ?
+    ORDER BY name
+  `).all(globPattern).map((row) => {
+    const tableName = String(row.name);
+    const rowCount = Number(db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM ${quoteIdentifier(schema)}.${quoteIdentifier(tableName)}
+    `).get().count) || 0;
+    return Object.freeze({ tableName, rowCount });
+  });
+}
+
+function vccSequenceHighWatermarks(db, schema = 'main') {
+  if (!tableExists(db, 'sqlite_sequence', schema)) return [];
+  return db.prepare(`
+    SELECT name AS table_name, seq
+    FROM ${quoteIdentifier(schema)}.sqlite_sequence
+    WHERE name GLOB 'vcc_fin_op_*'
+    ORDER BY name
+  `).all().map((row) => Object.freeze({
+    tableName: String(row.table_name),
+    sequence: Number(row.seq) || 0
+  }));
+}
+
+function assertVccTablesEmpty(db, label = '数据库', schema = 'main') {
+  const counts = vccTableRowCounts(db, schema);
+  const nonEmptyTables = counts.filter((entry) => entry.rowCount > 0);
+  if (nonEmptyTables.length > 0) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-reset-vcc-data-not-empty',
+      `${label}仍有 VCC 业务/审计数据，禁止切换`,
+      { nonEmptyTables }
+    );
+  }
+  return counts;
+}
+
+function assertSlimEffectiveRowsSchema(db) {
+  const columns = new Set(tableColumns(db, 'vcc_fin_op_effective_rows'));
+  for (const removedColumn of ['raw_json', 'idempotency_key_raw', 'source_file']) {
+    if (columns.has(removedColumn)) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-reset-effective-schema-wide',
+        `空 v2 effective_rows 仍存在旧字段 ${removedColumn}`
+      );
+    }
+  }
+  for (const requiredColumn of [
+    'id', 'source_type', 'idempotency_key', 'content_hash', 'target_month',
+    'import_record_id', 'import_source_id', 'sheet_name', 'source_row'
+  ]) {
+    if (!columns.has(requiredColumn)) {
+      throw new VccStorageMigrationError(
+        'vcc-storage-reset-effective-schema-missing',
+        `空 v2 effective_rows 缺少字段 ${requiredColumn}`
+      );
+    }
+  }
+}
+
+function assertVccGuardTriggers(db) {
+  const tableCount = vccTableRowCounts(db).length;
+  const triggerCount = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM sqlite_master
+    WHERE type = 'trigger' AND name GLOB 'vcc_storage_contract_v2_guard_*'
+  `).get().count) || 0;
+  if (triggerCount !== tableCount * 3) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-reset-guard-mismatch',
+      `空 v2 写保护触发器不完整（${triggerCount}/${tableCount * 3}）`,
+      { tableCount, triggerCount }
+    );
+  }
+}
+
+function assertPreservedAutoincrementHighWatermarks(targetDb) {
+  if (!tableExists(targetDb, 'sqlite_sequence', 'source_db')
+      || !tableExists(targetDb, 'sqlite_sequence')) return;
+  const sequenceMismatch = targetDb.prepare(`
+    SELECT source.name, source.seq AS source_seq, target.seq AS target_seq
+    FROM source_db.sqlite_sequence AS source
+    JOIN main.sqlite_master AS table_schema
+      ON table_schema.type = 'table' AND table_schema.name = source.name
+    LEFT JOIN main.sqlite_sequence AS target ON target.name = source.name
+    WHERE target.seq IS NULL OR target.seq < source.seq
+    LIMIT 1
+  `).get();
+  if (sequenceMismatch) {
+    throw new VccStorageMigrationError(
+      'vcc-storage-sequence-mismatch',
+      `${sequenceMismatch.name} 自增序列高水位不守恒`
+    );
+  }
+}
+
+function validateResetAttachedTarget(targetDb) {
+  validateExactlyPreservedNonVccTables(targetDb);
+  assertPreservedAutoincrementHighWatermarks(targetDb);
+  assertVccTablesEmpty(targetDb, '候选数据库');
+  assertSlimEffectiveRowsSchema(targetDb);
+  assertVccGuardTriggers(targetDb);
+}
+
 function validateAttachedTarget(targetDb) {
   validatePreservedNonVccTables(targetDb);
   const sourceEffectiveCount = Number(targetDb.prepare(
@@ -1094,24 +1285,7 @@ function validateAttachedTarget(targetDb) {
     );
   }
 
-  if (tableExists(targetDb, 'sqlite_sequence', 'source_db')
-      && tableExists(targetDb, 'sqlite_sequence')) {
-    const sequenceMismatch = targetDb.prepare(`
-      SELECT source.name, source.seq AS source_seq, target.seq AS target_seq
-      FROM source_db.sqlite_sequence AS source
-      JOIN main.sqlite_master AS table_schema
-        ON table_schema.type = 'table' AND table_schema.name = source.name
-      LEFT JOIN main.sqlite_sequence AS target ON target.name = source.name
-      WHERE target.seq IS NULL OR target.seq < source.seq
-      LIMIT 1
-    `).get();
-    if (sequenceMismatch) {
-      throw new VccStorageMigrationError(
-        'vcc-storage-sequence-mismatch',
-        `${sequenceMismatch.name} 自增序列高水位不守恒`
-      );
-    }
-  }
+  assertPreservedAutoincrementHighWatermarks(targetDb);
 
   const counterProjection = ['id', ...IMPORT_COUNTER_COLUMNS].map(quoteIdentifier).join(', ');
   const countersMismatch = targetDb.prepare(`
@@ -1319,6 +1493,7 @@ function buildVccStorageCandidate(options) {
   const fsImpl = options.fsImpl || fs;
   const onProgress = options.onProgress;
   const faultInjector = options.faultInjector;
+  const resetVccData = options.resetVccData === true;
   if (!sourcePath || !targetPath || sourcePath === targetPath
       || path.dirname(sourcePath) !== path.dirname(targetPath)) {
     throw new TypeError('VCC storage rebuild 要求同目录、不同名的 source/target');
@@ -1348,8 +1523,27 @@ function buildVccStorageCandidate(options) {
     sourceLocked = true;
     sourceDb = openReadOnlyDatabase(sourcePath);
     const readiness = assertSourceReady(sourceDb);
-    if (readiness.noChange) return { noChange: true, contractVersion: readiness.contractVersion };
-    const estimate = migrationEstimate(sourceDb, sourcePath);
+    if (readiness.noChange) {
+      if (resetVccData) {
+        throw new VccStorageMigrationError(
+          'vcc-storage-reset-requires-v1',
+          '一次性 VCC 重置只允许处理 storage contract v1'
+        );
+      }
+      return { noChange: true, contractVersion: readiness.contractVersion };
+    }
+    let resetReadiness = resetVccData ? assertVccResetSourceReady(sourceDb) : null;
+    const estimate = migrationEstimate(sourceDb, sourcePath, { resetVccData });
+    if (resetVccData) {
+      resetReadiness = Object.freeze({
+        ...resetReadiness,
+        sourceVccTableRowCounts: vccTableRowCounts(sourceDb, 'main', {
+          vcc_fin_op_effective_rows: estimate.effectiveCount
+        }),
+        sourceArchiveTableRowCounts: tableRowCountsByGlob(sourceDb, 'archive_*'),
+        sourceVccSequenceHighWatermarks: vccSequenceHighWatermarks(sourceDb)
+      });
+    }
     const freeBytes = assertFreeSpace(
       path.dirname(sourcePath),
       estimate.requiredFreeBytes,
@@ -1371,37 +1565,62 @@ function buildVccStorageCandidate(options) {
     emitProgress(onProgress, 'copying', 0, tables.length + 4, '正在复制数据库');
     let processed = 0;
     for (const tableName of tables) {
-      const copied = tableName === 'vcc_fin_op_effective_rows'
-        ? copySlimEffectiveRows(targetDb)
-        : copyRegularTable(targetDb, tableName);
+      const copied = resetVccData && tableName.startsWith(VCC_TABLE_PREFIX)
+        ? 0
+        : (tableName === 'vcc_fin_op_effective_rows'
+          ? copySlimEffectiveRows(targetDb)
+          : copyRegularTable(targetDb, tableName));
       processed += 1;
       emitProgress(onProgress, 'copying', processed, tables.length + 4, tableName);
       invokeFault(faultInjector, 'after-table-copy', { tableName, copied, processed });
     }
     const preservedSequenceCount = preserveAutoincrementHighWatermarks(targetDb);
-    const migratedAnomalies = migrateLegacyAnomalies(targetDb);
+    const migratedAnomalies = resetVccData ? 0 : migrateLegacyAnomalies(targetDb);
     processed += 1;
-    emitProgress(onProgress, 'copying', processed, tables.length + 4, '转换异常审计');
-    const migratedLegacyErrors = migrateLegacyImportErrors(targetDb);
-    const migratedFailures = migrateFileFailures(targetDb);
+    emitProgress(
+      onProgress,
+      'copying',
+      processed,
+      tables.length + 4,
+      resetVccData ? '确认 VCC 表不复制业务行' : '转换异常审计'
+    );
+    const migratedLegacyErrors = resetVccData ? 0 : migrateLegacyImportErrors(targetDb);
+    const migratedFailures = resetVccData ? 0 : migrateFileFailures(targetDb);
     const boundHistoricalArtifacts = [];
-    const historicalLineage = bindExactHistoricalImportSources(targetDb, {
-      archiveRootDir: options.archiveRootDir,
-      fsImpl,
-      boundArtifactEvidence: boundHistoricalArtifacts
-    });
-    const removedReadyFallbacks = removeVerifiedReadyFallbacks(targetDb);
-    refreshImportRecordSummaries(targetDb);
-    reconcileVccHolds(targetDb);
+    const historicalLineage = resetVccData
+      ? Object.freeze({ matched: 0, bound: 0, unavailable: 0 })
+      : bindExactHistoricalImportSources(targetDb, {
+          archiveRootDir: options.archiveRootDir,
+          fsImpl,
+          boundArtifactEvidence: boundHistoricalArtifacts
+        });
+    const removedReadyFallbacks = resetVccData ? 0 : removeVerifiedReadyFallbacks(targetDb);
+    if (!resetVccData) {
+      refreshImportRecordSummaries(targetDb);
+      reconcileVccHolds(targetDb);
+    }
     processed += 1;
-    emitProgress(onProgress, 'copying', processed, tables.length + 4, '刷新血缘状态');
+    emitProgress(
+      onProgress,
+      'copying',
+      processed,
+      tables.length + 4,
+      resetVccData ? '保留非 VCC 与 Archive 证据' : '刷新血缘状态'
+    );
     setVccStorageContractVersion(targetDb, VCC_STORAGE_CONTRACT_VERSION);
     createSecondarySchema(sourceDb, targetDb);
     const userVersion = pragmaValue(sourceDb, 'user_version');
     targetDb.exec(`PRAGMA user_version = ${userVersion}`);
     processed += 1;
-    emitProgress(onProgress, 'verifying', processed, tables.length + 4, '验证业务守恒');
-    validateAttachedTarget(targetDb);
+    emitProgress(
+      onProgress,
+      'verifying',
+      processed,
+      tables.length + 4,
+      resetVccData ? '验证非 VCC 守恒与 VCC 空表' : '验证业务守恒'
+    );
+    if (resetVccData) validateResetAttachedTarget(targetDb);
+    else validateAttachedTarget(targetDb);
     invokeFault(faultInjector, 'before-target-commit');
     targetDb.exec('COMMIT');
     // 仅统计候选库；裸 ANALYZE 会连 attached source 一起尝试写 sqlite_stat，
@@ -1435,6 +1654,11 @@ function buildVccStorageCandidate(options) {
       ).get().count) !== 0) {
         throw new VccStorageMigrationError('vcc-storage-staging-not-empty', '候选数据库 staging 未清空');
       }
+      if (resetVccData) {
+        assertVccTablesEmpty(verificationDb, '已落盘候选数据库');
+        assertSlimEffectiveRowsSchema(verificationDb);
+        assertVccGuardTriggers(verificationDb);
+      }
       afterDbstat = collectDbstat(verificationDb);
     } finally {
       verificationDb.close();
@@ -1451,16 +1675,19 @@ function buildVccStorageCandidate(options) {
         { oldCoreBytes: estimate.oldCoreBytes, newCoreBytes, reductionRatio }
       );
     }
-    invokeFault(faultInjector, 'before-historical-artifact-revalidation', {
-      artifactCount: boundHistoricalArtifacts.length
-    });
-    revalidateHistoricalArtifactEvidence(boundHistoricalArtifacts, {
-      archiveRootDir: options.archiveRootDir,
-      fsImpl
-    });
+    if (!resetVccData) {
+      invokeFault(faultInjector, 'before-historical-artifact-revalidation', {
+        artifactCount: boundHistoricalArtifacts.length
+      });
+      revalidateHistoricalArtifactEvidence(boundHistoricalArtifacts, {
+        archiveRootDir: options.archiveRootDir,
+        fsImpl
+      });
+    }
     processed += 1;
     const result = {
       noChange: false,
+      resetVccData,
       sourcePath,
       targetPath,
       sourceBytes: estimate.sourceBytes,
@@ -1474,8 +1701,11 @@ function buildVccStorageCandidate(options) {
       preservedSequenceCount,
       historicalLineage,
       removedReadyFallbacks,
-      effectiveCount: estimate.effectiveCount,
-      anomalyCount: estimate.anomalyCount,
+      effectiveCount: resetVccData ? 0 : estimate.effectiveCount,
+      anomalyCount: resetVccData ? 0 : estimate.anomalyCount,
+      sourceEffectiveCount: estimate.effectiveCount,
+      sourceAnomalyCount: estimate.anomalyCount,
+      resetReadiness,
       beforeDbstat: collectDbstatFromPath(sourcePath),
       afterDbstat
     };
@@ -1504,7 +1734,7 @@ function buildVccStorageCandidate(options) {
   }
 }
 
-function verifyReopenedDatabase(dbPath) {
+function verifyReopenedDatabase(dbPath, options = {}) {
   const db = openReadOnlyDatabase(dbPath);
   try {
     assertIntegrity(db, '切换后数据库');
@@ -1523,7 +1753,16 @@ function verifyReopenedDatabase(dbPath) {
         '切换后只读复验发现 staging 未清空'
       );
     }
-    return { ok: true, contractVersion: VCC_STORAGE_CONTRACT_VERSION };
+    if (options.expectEmptyVcc === true) {
+      assertVccTablesEmpty(db, '切换后数据库');
+      assertSlimEffectiveRowsSchema(db);
+      assertVccGuardTriggers(db);
+    }
+    return {
+      ok: true,
+      contractVersion: VCC_STORAGE_CONTRACT_VERSION,
+      vccTablesEmpty: options.expectEmptyVcc === true
+    };
   } finally {
     db.close();
   }
@@ -1652,6 +1891,7 @@ function createMigrationJournal(options) {
     backupPath: path.resolve(options.backupPath),
     phase: 'prepared',
     deleteOldDatabase: options.deleteOldDatabase === true,
+    resetVccData: options.resetVccData === true,
     startedAt: now.toISOString(),
     updatedAt: now.toISOString(),
     lastError: null
@@ -1702,7 +1942,9 @@ function atomicSwitchVccStorage(options) {
     fsyncDirectory(path.dirname(sourcePath), fsImpl);
     journal = updateJournal(journalPath, journal, 'switched', {}, fsImpl);
     invokeFault(options.faultInjector, 'after-target-rename');
-    const reopened = verifyReopenedDatabase(sourcePath);
+    const reopened = verifyReopenedDatabase(sourcePath, {
+      expectEmptyVcc: journal.resetVccData === true
+    });
     journal = updateJournal(journalPath, journal, 'reopen-verified', { reopened }, fsImpl);
     // 从这一刻起，新库已经完成只读完整性复验，journal 也已持久化唯一
     // authoritative 状态。后续只剩旧库清理与 journal 收口；任何失败都必须
@@ -1833,7 +2075,9 @@ function recoverVccStorageMigration(options) {
   }
   if (journal.phase === 'switched') {
     try {
-      const reopened = verifyReopenedDatabase(journal.sourcePath);
+      const reopened = verifyReopenedDatabase(journal.sourcePath, {
+        expectEmptyVcc: journal.resetVccData === true
+      });
       journal = updateJournal(journalPath, journal, 'reopen-verified', { reopened }, fsImpl);
     } catch (error) {
       if (!fsImpl.existsSync(journal.backupPath)) throw error;
@@ -1845,7 +2089,9 @@ function recoverVccStorageMigration(options) {
     }
   }
   if (journal.phase === 'reopen-verified') {
-    verifyReopenedDatabase(journal.sourcePath);
+    verifyReopenedDatabase(journal.sourcePath, {
+      expectEmptyVcc: journal.resetVccData === true
+    });
     if (deleteOldDatabaseDurably(journal, fsImpl)) {
       invokeFault(options.faultInjector, 'after-recovery-backup-delete');
     }
@@ -1854,7 +2100,9 @@ function recoverVccStorageMigration(options) {
     return { status: 'completed', sourcePath: journal.sourcePath };
   }
   if (journal.phase === 'done') {
-    verifyReopenedDatabase(journal.sourcePath);
+    verifyReopenedDatabase(journal.sourcePath, {
+      expectEmptyVcc: journal.resetVccData === true
+    });
     if (deleteOldDatabaseDurably(journal, fsImpl)) {
       invokeFault(options.faultInjector, 'after-recovery-backup-delete');
     }

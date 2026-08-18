@@ -17,7 +17,11 @@ const assert = require('node:assert/strict');
 const { DatabaseSync } = require('node:sqlite');
 
 const { runMigrations } = require('../../../../src/backend/pending-db/migrations');
-const removedRepo = require('../../../../src/backend/pending-db/removed-repository');
+const removedRepository = require('../../../../src/backend/pending-db/removed-repository');
+const removedRepo = {
+  ...removedRepository,
+  replaceByMonth: removedRepository.replaceByMonthLegacy
+};
 const removalMatch = require('../../../../src/backend/pending-reconcile/removal-match');
 
 const UPPER_MONTH = '2026-04';

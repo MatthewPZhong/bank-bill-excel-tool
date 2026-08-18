@@ -10,9 +10,11 @@ const { DatabaseSync } = require('node:sqlite');
 
 const { BANK_STATEMENT_FIELDS } = require('../../../src/constants/bank-statement-fields');
 const {
+  ensureLinkedTableSupport,
   ensurePreFundReconciliationRunMetadataSupport
 } = require('../../../src/backend/database/migrations');
 const mirrorRepository = require('../../../src/backend/database/pre-fund-reconciliation-run-repository');
+const linkedTableRepository = require('../../../src/backend/database/linked-table-repository');
 const runDataStore = require('../../../src/backend/run-data-store');
 const {
   INBOUND_FIELDS,
@@ -47,16 +49,112 @@ function attachRunMirrorRepository(database) {
   const mirrorDb = new DatabaseSync(':memory:');
   ensurePreFundReconciliationRunMetadataSupport(mirrorDb);
   mirrorDatabases.push(mirrorDb);
-  return Object.assign(database, {
+  const attached = Object.assign(database, {
     _mirrorDb: mirrorDb,
     createPreFundReconciliationRunMirror: (payload) => mirrorRepository.createRunMirror(mirrorDb, payload),
     finishPreFundReconciliationRunMirror: (id, summary) => mirrorRepository.finishRunMirror(mirrorDb, id, summary),
+    getPreFundReconciliationRunMirrorByTaskRun: (taskRunId) => (
+      mirrorRepository.getRunMirrorByArchiveTaskRunId(mirrorDb, taskRunId)
+    ),
+    acknowledgePreFundReconciliationRunMirror: (id, taskRunId) => (
+      mirrorRepository.acknowledgeArchiveTerminal(mirrorDb, id, taskRunId)
+    ),
     failPreFundReconciliationRunMirror: (id, error) => mirrorRepository.failRunMirror(mirrorDb, id, error),
     markPreFundReconciliationRunMirrorUnavailable: (id, status, message) => (
       mirrorRepository.markRunMirrorUnavailable(mirrorDb, id, status, message)
     ),
     listPreFundReconciliationRunMirrors: () => mirrorRepository.listRunMirrors(mirrorDb)
   });
+  if (typeof attached.listGatewayBillSourceTags !== 'function') {
+    attached.listGatewayBillSourceTags = () => {
+      const counts = new Map();
+      for (const row of attached.iterateGatewayBillRows()) {
+        const tag = {
+          datasetId: row.sourceDatasetId || null,
+          producerTaskRunId: row.sourceTaskRunId || null,
+          sourceContractVersion: row.sourceContractVersion === 1 ? 1 : 0
+        };
+        const key = JSON.stringify(tag);
+        const existing = counts.get(key) || { ...tag, rowCount: 0 };
+        existing.rowCount += 1;
+        counts.set(key, existing);
+      }
+      return [...counts.values()];
+    };
+  }
+  return attached;
+}
+
+const fakeGatewayReadRepository = {
+  getLinkedTableMeta: (database) => database.getLinkedTableMeta('gateway-bill'),
+  listGatewayBillSourceTags: (database) => database.listGatewayBillSourceTags(),
+  iterateGatewayBillRows: (database) => database.iterateGatewayBillRows(),
+  getGatewayBillRawJsonById: (database, id) => database.getGatewayBillRawJsonById(id)
+};
+
+function makeService(options) {
+  return createPreFundReconciliationService({
+    ...options,
+    openGatewayReadSnapshot: () => ({ db: options.database, close() {} }),
+    gatewayReadRepository: fakeGatewayReadRepository
+  });
+}
+
+let producerSequence = 0;
+
+function nextTaskRunId(label) {
+  producerSequence += 1;
+  return `${label}-task-${producerSequence}`;
+}
+
+function importBankV1(service, filePath) {
+  return service.importBank(filePath, nextTaskRunId('bank-import'));
+}
+
+function importMptV1(service, filePaths) {
+  return service.importMptFiles(filePaths, { producerTaskRunId: nextTaskRunId('mpt-import') });
+}
+
+function retryMptV1(service, tokens) {
+  const filePaths = tokens.map((token) => {
+    const failure = service.mptImportFailures.get(token);
+    return failure ? failure.filePath : '';
+  });
+  return service.retryMptImportFailures(tokens, {
+    filePaths,
+    producerTaskRunId: nextTaskRunId('mpt-repair')
+  });
+}
+
+function runV1(service, options = {}) {
+  const plan = service.prepareRunLineage();
+  return service.run({
+    ...options,
+    taskRunId: nextTaskRunId('pre-fund-run'),
+    expectedDatasets: plan.expectedDatasets
+  });
+}
+
+function exportV1(service, options) {
+  return service.export({ ...options, runLocator: service.lastRunLocator() });
+}
+
+function assertPublicResultHasNoArchiveIdentity(value) {
+  const serialized = JSON.stringify(value);
+  for (const field of [
+    'datasetId',
+    'producerTaskRunId',
+    'datasetVersion',
+    'archiveContractVersion',
+    'archiveTaskRunId',
+    'archiveTerminalAckAt',
+    'mirrorRunId',
+    'sideRunId',
+    'runLocator',
+    'lineageIntents'
+  ]) {
+    assert.equal(serialized.includes(`"${field}"`), false, `公共结果不应包含 ${field}`);
+  }
 }
 
 function inboundMptRow(overrides = {}) {
@@ -147,19 +245,19 @@ test.describe('PreFundReconciliationService', () => {
       }),
       iterateGatewayBillRows: () => persistentRows.values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
 
-    const imported = service.importBank(bankFile);
+    const imported = importBankV1(service, bankFile);
     assert.equal(imported.acceptedRows, 2);
     assert.equal(imported.excludedEmptyIdRows, 1);
     assert.equal(imported.skippedZeroRows, 1);
 
-    const result = await service.run();
+    const result = await runV1(service);
     assert.equal(result.summary.bankInputRows, 4);
     assert.equal(result.summary.bankValidRows, 2);
     assert.equal(result.summary.linkedGatewayRawRows, 2);
@@ -226,15 +324,15 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 4, updatedAt: 'x' }),
       iterateGatewayBillRows: () => persistentRows.values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const result = await service.run();
+    const result = await runV1(service);
     assert.equal(result.summary.matchedPairs, 1);
     assert.equal(result.summary.unmatchedBankRows, 3);
     assert.equal(result.summary.unusedGatewayRows, 3);
@@ -266,14 +364,14 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 2, updatedAt: 'x' }),
       iterateGatewayBillRows: () => persistentRows.values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx')
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const result = await service.run();
+    const result = await runV1(service);
     assert.equal(result.summary.matchedPairs, 1);
     assert.equal(result.summary.unusedGatewayRows, 1);
     const exports = [...service.runStore.iterateChannelExports(result.monthKey, service.lastRun.sideRunId)];
@@ -298,14 +396,14 @@ test.describe('PreFundReconciliationService', () => {
         }
       }].values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx')
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const result = await service.run();
+    const result = await runV1(service);
     assert.equal(result.summary.bankSkippedZeroRows, 1);
     assert.equal(result.summary.channelCount, 0);
     assert.equal(service.status().canExport, false);
@@ -335,15 +433,23 @@ test.describe('PreFundReconciliationService', () => {
     }
     const database = attachRunMirrorRepository({
       getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount, updatedAt: 'x' }),
+      listGatewayBillSourceTags: () => [{
+        datasetId: null,
+        producerTaskRunId: null,
+        sourceContractVersion: 0,
+        rowCount
+      }],
       iterateGatewayBillRows: () => persistentRows()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx')
     });
     service.runStore = {
+      assertAllRunDataClearable() {},
       clearAllRunData: () => ({ deletedFiles: 0, deletedRuns: 0 }),
+      deleteAllRunDataAfterArchivePreflight: () => ({ deletedFiles: 0, deletedRuns: 0 }),
       open: () => ({
         exec() {},
         prepare: () => ({ run: () => ({ changes: 1 }) }),
@@ -375,9 +481,9 @@ test.describe('PreFundReconciliationService', () => {
       failRun() {},
       summarizeChannels: () => []
     };
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const result = await service.run();
+    const result = await runV1(service);
 
     assert.equal(yieldedRows, rowCount);
     assert.equal(insertedRows, rowCount);
@@ -398,19 +504,19 @@ test.describe('PreFundReconciliationService', () => {
         row: { Billdate: '2026-07-01', reconciliationid: '', amount: '1' }
       }].values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx')
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
     await assert.rejects(
-      () => service.run(),
+      () => runV1(service),
       (error) => error && error.code === 'pre-fund-gateway-pool-empty'
     );
     assert.equal(service.status().canExport, false);
-    assert.equal(mirrorRepository.listRunMirrors(database._mirrorDb)[0].status, 'failed');
+    assert.equal(mirrorRepository.listRunMirrors(database._mirrorDb).length, 0);
   });
 
   test('same-month temporary MPT runs and exports the real five-sheet template, then OUTBOUND deletion invalidates export without deleting INBOUND', async () => {
@@ -437,26 +543,40 @@ test.describe('PreFundReconciliationService', () => {
       }),
       iterateGatewayBillRows: () => [][Symbol.iterator]()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
 
-    service.importBank(bankFile);
-    const importedMpt = await service.importMptFiles([mptFile, outboundFile]);
+    importBankV1(service, bankFile);
+    const importedMpt = await importMptV1(service, [mptFile, outboundFile]);
     assert.equal(importedMpt.successCount, 2, JSON.stringify(importedMpt));
     assert.equal(importedMpt.results[0].sourceType, SOURCE_TYPE_INBOUND);
     assert.equal(importedMpt.results[0].rowCount, 1, '导入汇总显示实际落库行数');
     assert.equal(importedMpt.results[1].sourceType, SOURCE_TYPE_OUTBOUND);
-    const run = await service.run();
+    assert.equal(Object.hasOwn(importedMpt.results[0], 'batch'), false);
+    assertPublicResultHasNoArchiveIdentity(importedMpt);
+    const publicBatch = service.listTempBatches()[0];
+    for (const internalField of [
+      'datasetId',
+      'producerTaskRunId',
+      'datasetVersion',
+      'archiveContractVersion'
+    ]) {
+      assert.equal(Object.prototype.hasOwnProperty.call(publicBatch, internalField), false);
+    }
+    const run = await runV1(service);
+    assertPublicResultHasNoArchiveIdentity(run);
+    assertPublicResultHasNoArchiveIdentity(service.status());
     assert.equal(run.summary.matchedPairs, 1);
     assert.equal(run.summary.unmatchedBankRows, 1);
     assert.equal(run.summary.tempGatewayRawRows, 2);
 
     const outputDirectory = path.join(userDataDir, 'exports');
-    const exported = await service.export({ outputDirectory });
+    const exported = await exportV1(service, { outputDirectory });
+    assertPublicResultHasNoArchiveIdentity(exported);
     assert.equal(exported.status, 'ok');
     assert.equal(exported.files.length, 1);
     assert.equal(exported.files[0].fileName, '资金对账不平_CIT_2026年07月10日.xlsx');
@@ -513,7 +633,7 @@ test.describe('PreFundReconciliationService', () => {
     assert.equal(service.status().run.stale, true);
     assert.equal(service.status().canExport, false);
     await assert.rejects(
-      () => service.export({ outputDirectory: path.join(userDataDir, 'exports-2') }),
+      () => exportV1(service, { outputDirectory: path.join(userDataDir, 'exports-2') }),
       (error) => error && error.code === 'pre-fund-run-stale'
     );
   });
@@ -531,13 +651,13 @@ test.describe('PreFundReconciliationService', () => {
       }),
       iterateGatewayBillRows: () => [][Symbol.iterator]()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
     });
 
-    const imported = await service.importMptFiles([mptFile]);
+    const imported = await importMptV1(service, [mptFile]);
     assert.equal(imported.successCount, 0);
     assert.equal(imported.failedCount, 1);
     assert.equal(imported.results[0].code, 'MPT_ROW_ERRORS');
@@ -553,7 +673,8 @@ test.describe('PreFundReconciliationService', () => {
     assert.equal(exported.errorRowCount, 1);
     assert.deepEqual(XLSX.readFile(errorReportPath).SheetNames, ['INBOUND错误数据']);
 
-    const repaired = await service.retryMptImportFailures([repairToken]);
+    const repaired = await retryMptV1(service, [repairToken]);
+    assertPublicResultHasNoArchiveIdentity(repaired);
     assert.equal(repaired.status, 'ok');
     assert.equal(repaired.successCount, 1);
     assert.equal(repaired.importedRowCount, 1);
@@ -576,7 +697,7 @@ test.describe('PreFundReconciliationService', () => {
       'MPT_DECIMAL_INVALID'
     ]);
     await assert.rejects(
-      () => service.retryMptImportFailures([repairToken]),
+      () => retryMptV1(service, [repairToken]),
       (error) => error.code === 'pre-fund-mpt-failure-token-expired'
     );
   });
@@ -590,16 +711,16 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ rowCount: 0 }),
       iterateGatewayBillRows: () => [][Symbol.iterator]()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
     });
-    const first = await service.importMptFiles([broken]);
+    const first = await importMptV1(service, [broken]);
     const oldToken = first.results[0].repairToken;
     assert.ok(oldToken);
 
-    const second = await service.importMptFiles([valid]);
+    const second = await importMptV1(service, [valid]);
     assert.equal(second.successCount, 1);
     await assert.rejects(
       () => service.exportMptErrorData([oldToken], path.join(userDataDir, 'expired.xlsx')),
@@ -610,7 +731,7 @@ test.describe('PreFundReconciliationService', () => {
   test('逻辑删除重跑发现源文件变化时作废旧令牌且不反复提供修复操作', async () => {
     const broken = path.join(userDataDir, 'MPT_INBOUND_GATEWAY_20260708_908.txt');
     writeMptFile(broken, [inboundMptRow({ amount: 'bad' })]);
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database: attachRunMirrorRepository({
         getLinkedTableMeta: () => ({ rowCount: 0 }),
@@ -618,24 +739,24 @@ test.describe('PreFundReconciliationService', () => {
       }),
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx')
     });
-    const imported = await service.importMptFiles([broken]);
+    const imported = await importMptV1(service, [broken]);
     const repairToken = imported.results[0].repairToken;
     fs.writeFileSync(broken, fs.readFileSync(broken, 'utf8').replace('bad', 'changed'), 'utf8');
 
-    const retried = await service.retryMptImportFailures([repairToken]);
+    const retried = await retryMptV1(service, [repairToken]);
     assert.equal(retried.successCount, 0);
     assert.equal(retried.failedCount, 1);
     assert.equal(retried.results[0].code, 'MPT_REPAIR_SOURCE_CHANGED');
     assert.equal(retried.results[0].canRepair, undefined);
     assert.equal(retried.results[0].repairToken, undefined);
     await assert.rejects(
-      () => service.retryMptImportFailures([repairToken]),
+      () => retryMptV1(service, [repairToken]),
       (error) => error.code === 'pre-fund-mpt-failure-token-expired'
     );
   });
 
   test('逻辑删除重跑遇到旧批次序号时终止失败令牌', async () => {
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database: attachRunMirrorRepository({
         getLinkedTableMeta: () => ({ rowCount: 0 }),
@@ -657,7 +778,7 @@ test.describe('PreFundReconciliationService', () => {
       throw error;
     };
 
-    const retried = await service.retryMptImportFailures([repairToken]);
+    const retried = await retryMptV1(service, [repairToken]);
     assert.equal(retried.results[0].code, 'MPT_BATCH_SEQUENCE_STALE');
     assert.equal(retried.results[0].canRepair, undefined);
     assert.equal(service.mptImportFailures.has(repairToken), false);
@@ -687,32 +808,33 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ ...linkedMeta }),
       iterateGatewayBillRows: () => persistentRows.values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
 
-    service.importBank(bankFile);
-    await service.run();
+    importBankV1(service, bankFile);
+    await runV1(service);
     assert.equal(service.status().canExport, true);
 
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
     assert.equal(service.status().run.stale, true);
     assert.equal(service.status().canExport, false);
     await assert.rejects(
-      () => service.export({ outputDirectory: path.join(userDataDir, 'bank-stale') }),
+      () => exportV1(service, { outputDirectory: path.join(userDataDir, 'bank-stale') }),
       (error) => error && error.code === 'pre-fund-run-stale'
     );
 
-    await service.run();
+    service.acknowledgeRunByTaskRun(service.lastRun.archiveTaskRunId);
+    await runV1(service);
     assert.equal(service.status().canExport, true);
     linkedMeta.updatedAt = 'v2';
     assert.equal(service.status().run.stale, true);
     assert.equal(service.status().canExport, false);
     await assert.rejects(
-      () => service.export({ outputDirectory: path.join(userDataDir, 'gateway-stale') }),
+      () => exportV1(service, { outputDirectory: path.join(userDataDir, 'gateway-stale') }),
       (error) => error && error.code === 'pre-fund-run-stale'
     );
   });
@@ -749,21 +871,21 @@ test.describe('PreFundReconciliationService', () => {
         return rawById.get(id) || null;
       }
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const run = await service.run();
+    const run = await runV1(service);
     assert.equal(run.summary.gatewayCollapsedDuplicateRows, 1);
     assert.equal(run.summary.duplicateGroupCount, 1);
     assert.equal(rawLookupCount, 1, '同一重复组只回读一次保留行 raw');
     assert.deepEqual(run.channelSummaries.map((item) => item.channel), ['BANK-FIRST', 'DUP-ONLY']);
 
-    const exported = await service.export({ outputDirectory: path.join(userDataDir, 'duplicate-exports') });
+    const exported = await exportV1(service, { outputDirectory: path.join(userDataDir, 'duplicate-exports') });
     assert.deepEqual(exported.files.map((file) => file.channel), ['BANK-FIRST', 'DUP-ONLY']);
     const bankWorkbook = XLSX.readFile(exported.files[0].filePath, { raw: false });
     const duplicateWorkbook = XLSX.readFile(exported.files[1].filePath, { raw: false });
@@ -803,18 +925,18 @@ test.describe('PreFundReconciliationService', () => {
         }
       }][Symbol.iterator]()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
     service.runStore.finishRun = () => {
       throw new Error('injected-finalize-failure');
     };
 
-    await assert.rejects(() => service.run(), /injected-finalize-failure/);
+    await assert.rejects(() => runV1(service), /injected-finalize-failure/);
     assert.equal(service.lastRun, null);
 
     const resultDb = service.runStore.open('2026-07');
@@ -834,11 +956,125 @@ test.describe('PreFundReconciliationService', () => {
         );
       }
       assert.equal(
-        resultDb.prepare('SELECT status FROM pre_fund_reconciliation_runs ORDER BY id DESC LIMIT 1').get().status,
-        'failed'
+        Number(resultDb.prepare('SELECT COUNT(*) AS count FROM pre_fund_reconciliation_runs').get().count),
+        0
       );
     } finally {
       resultDb.close();
+    }
+  });
+
+  test('run 使用独立主库读快照，共享连接写入独立提交且 side rollback 不回滚该写入', async () => {
+    const mainDbPath = path.join(userDataDir, 'main.sqlite');
+    const mainDb = new DatabaseSync(mainDbPath);
+    mainDb.exec('PRAGMA journal_mode = WAL;');
+    ensureLinkedTableSupport(mainDb);
+    ensurePreFundReconciliationRunMetadataSupport(mainDb);
+    mainDb.exec('CREATE TABLE isolation_probe (value TEXT NOT NULL);');
+    const gatewayRows = [];
+    for (let index = 0; index < 5000; index += 1) {
+      gatewayRows.push({
+        ReconBillBizId: `B-${index}`,
+        reconciliationid: `R-${index}`,
+        Billdate: '2026-07-01',
+        Channel: 'CIT',
+        currency: 'USD',
+        amount: '1',
+        TradeType: 'Inbound-VA'
+      });
+    }
+    gatewayRows.push({
+      ReconBillBizId: 'B-DUP-KEPT',
+      reconciliationid: 'R-DUP',
+      Billdate: '2026-07-01',
+      Channel: 'CIT',
+      currency: 'USD',
+      amount: '1',
+      TradeType: 'Inbound-VA',
+      Extra: 'snapshot-old'
+    });
+    linkedTableRepository.upsertLinkedGatewayBill(mainDb, gatewayRows, {
+      sourceIdentity: {
+        datasetId: 'snapshot-gateway-dataset',
+        producerTaskRunId: 'snapshot-gateway-producer',
+        sourceContractVersion: 1
+      }
+    });
+    const database = {
+      dbPath: mainDbPath,
+      db: mainDb,
+      getLinkedTableMeta: (tableKey) => linkedTableRepository.getLinkedTableMeta(mainDb, tableKey),
+      listGatewayBillSourceTags: () => linkedTableRepository.listGatewayBillSourceTags(mainDb),
+      createPreFundReconciliationRunMirror: (payload) => mirrorRepository.createRunMirror(mainDb, payload),
+      finishPreFundReconciliationRunMirror: (id, summary) => mirrorRepository.finishRunMirror(mainDb, id, summary),
+      getPreFundReconciliationRunMirrorByTaskRun: (taskRunId) => (
+        mirrorRepository.getRunMirrorByArchiveTaskRunId(mainDb, taskRunId)
+      ),
+      acknowledgePreFundReconciliationRunMirror: (id, taskRunId) => (
+        mirrorRepository.acknowledgeArchiveTerminal(mainDb, id, taskRunId)
+      ),
+      failPreFundReconciliationRunMirror: (id, error) => mirrorRepository.failRunMirror(mainDb, id, error),
+      markPreFundReconciliationRunMirrorUnavailable: (id, status, message) => (
+        mirrorRepository.markRunMirrorUnavailable(mainDb, id, status, message)
+      ),
+      listPreFundReconciliationRunMirrors: () => mirrorRepository.listRunMirrors(mainDb)
+    };
+    writeBankFile(bankFile, [
+      bankRow({ Channel: 'CIT', Currency: 'USD', 'Credit Amount': '0', ReconciliationId: 'R-ZERO' })
+    ]);
+    let snapshotDb = null;
+    const service = createPreFundReconciliationService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx'),
+      openGatewayReadSnapshot() {
+        snapshotDb = new DatabaseSync(mainDbPath, { readOnly: true });
+        snapshotDb.exec('PRAGMA query_only = ON;');
+        snapshotDb.exec('BEGIN');
+        return {
+          db: snapshotDb,
+          close() {
+            snapshotDb.exec('ROLLBACK');
+            snapshotDb.close();
+          }
+        };
+      }
+    });
+    importBankV1(service, bankFile);
+    const originalFinishRun = service.runStore.finishRun.bind(service.runStore);
+    service.runStore.finishRun = (sideDb, runId, stats) => {
+      const sourceId = mainDb.prepare(`
+        SELECT id FROM linked_gateway_bill WHERE recon_bill_biz_id = 'B-DUP-KEPT'
+      `).get().id;
+      const snapshotRaw = linkedTableRepository.getGatewayBillRawJsonById(snapshotDb, sourceId);
+      assert.equal(JSON.parse(snapshotRaw).Extra, 'snapshot-old');
+      originalFinishRun(sideDb, runId, stats);
+      throw new Error('injected-after-snapshot-proof');
+    };
+
+    try {
+      await assert.rejects(
+        () => runV1(service, {
+          onProgress(progress) {
+            if (progress.stage !== 'gateway-pool' || progress.current !== 5000) return;
+            mainDb.prepare('INSERT INTO isolation_probe (value) VALUES (?)').run('committed');
+            const changed = { ...gatewayRows[5000], Extra: 'shared-new' };
+            mainDb.prepare(`
+              UPDATE linked_gateway_bill
+              SET raw_json = ?, imported_at = ?
+              WHERE recon_bill_biz_id = 'B-DUP-KEPT'
+            `).run(JSON.stringify(changed), '2026-07-02T00:00:00.000Z');
+          }
+        }),
+        /injected-after-snapshot-proof/
+      );
+      assert.equal(mainDb.prepare('SELECT COUNT(*) AS count FROM isolation_probe').get().count, 1);
+      const current = mainDb.prepare(`
+        SELECT raw_json FROM linked_gateway_bill WHERE recon_bill_biz_id = 'B-DUP-KEPT'
+      `).get();
+      assert.equal(JSON.parse(current.raw_json).Extra, 'shared-new');
+    } finally {
+      mainDb.close();
     }
   });
 
@@ -847,11 +1083,11 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 0 }),
       iterateGatewayBillRows: () => [][Symbol.iterator]()
     });
-    const runningId = database.createPreFundReconciliationRunMirror({
+    const runningId = mirrorRepository.createLegacyRunMirror(database._mirrorDb, {
       monthKey: '2026-06', sideRunId: 1, scenario: 'missing-gateway', snapshotHash: 'a',
       sideDbRelPath: 'run-data/pre-fund-reconciliation/month-2026-06.sqlite'
     });
-    const missingId = database.createPreFundReconciliationRunMirror({
+    const missingId = mirrorRepository.createLegacyRunMirror(database._mirrorDb, {
       monthKey: '2026-05', sideRunId: 2, scenario: 'missing-gateway', snapshotHash: 'b',
       sideDbRelPath: 'run-data/pre-fund-reconciliation/month-2026-05.sqlite'
     });
@@ -867,7 +1103,7 @@ test.describe('PreFundReconciliationService', () => {
       VALUES (3, 'missing-gateway', '{}', '[]', 'success', '{}')
     `).run();
     expiringSideDb.close();
-    const expiringId = database.createPreFundReconciliationRunMirror({
+    const expiringId = mirrorRepository.createLegacyRunMirror(database._mirrorDb, {
       monthKey: '2026-04', sideRunId: 3, scenario: 'missing-gateway', snapshotHash: 'c',
       sideDbRelPath: runDataStore.sideDbRelPath(
         runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
@@ -876,11 +1112,12 @@ test.describe('PreFundReconciliationService', () => {
     });
     database.finishPreFundReconciliationRunMirror(expiringId, { matchedPairs: 1 });
 
-    createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx')
     });
+    service.reconcilePersistedRunMirrors();
 
     assert.equal(mirrorRepository.getRunMirror(database._mirrorDb, runningId).status, 'interrupted');
     assert.equal(mirrorRepository.getRunMirror(database._mirrorDb, missingId).status, 'missing-side-db');
@@ -892,6 +1129,57 @@ test.describe('PreFundReconciliationService', () => {
       ).length,
       0
     );
+  });
+
+  test('recovery 以 TaskRun 定位同月复用 sideRunId，并闭合缺失或 running 的精确镜像', () => {
+    const database = attachRunMirrorRepository({
+      getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 0 }),
+      iterateGatewayBillRows: () => [][Symbol.iterator]()
+    });
+    const service = makeService({
+      userDataDir,
+      database,
+      templatePath: path.join(userDataDir, 'unused.xlsx')
+    });
+    const oldId = mirrorRepository.createLegacyRunMirror(database._mirrorDb, {
+      monthKey: '2026-07', sideRunId: 1, scenario: 'missing-gateway',
+      snapshotHash: 'old', sideDbRelPath: 'result.sqlite'
+    });
+    mirrorRepository.finishRunMirror(database._mirrorDb, oldId, { matchedPairs: 0 });
+
+    const missingReceipt = {
+      id: 1,
+      monthKey: '2026-07',
+      scenario: 'missing-gateway',
+      summary: { matchedPairs: 1 },
+      snapshot: { source: 'new' },
+      bankFiles: ['bank.xlsx'],
+      sideDbRelPath: 'result.sqlite',
+      archiveTaskRunId: 'task-new-missing'
+    };
+    const recoveredMissing = service.recoverRunMirror(missingReceipt, { createIfMissing: true });
+    assert.notEqual(recoveredMissing.id, oldId);
+    assert.equal(recoveredMissing.archiveTaskRunId, 'task-new-missing');
+    assert.equal(recoveredMissing.status, 'success');
+
+    const runningReceipt = {
+      ...missingReceipt,
+      archiveTaskRunId: 'task-new-running',
+      summary: { matchedPairs: 2 }
+    };
+    const runningId = mirrorRepository.createRunMirror(database._mirrorDb, {
+      monthKey: runningReceipt.monthKey,
+      sideRunId: runningReceipt.id,
+      scenario: runningReceipt.scenario,
+      snapshotHash: 'running',
+      bankFiles: runningReceipt.bankFiles,
+      sideDbRelPath: runningReceipt.sideDbRelPath,
+      archiveReceipt: { archiveTaskRunId: runningReceipt.archiveTaskRunId }
+    });
+    const recoveredRunning = service.recoverRunMirror(runningReceipt, { createIfMissing: true });
+    assert.equal(recoveredRunning.id, runningId);
+    assert.equal(recoveredRunning.status, 'success');
+    assert.deepEqual(recoveredRunning.summary, { matchedPairs: 2 });
   });
 
   test('new run supersedes the previous mirror and replaces the whole result side DB', async () => {
@@ -911,19 +1199,79 @@ test.describe('PreFundReconciliationService', () => {
       getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 1, updatedAt: 'x' }),
       iterateGatewayBillRows: () => persistentRows.values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
-    service.importBank(bankFile);
+    importBankV1(service, bankFile);
 
-    const first = await service.run();
-    const second = await service.run();
+    const first = await runV1(service);
+    const firstLocator = service.lastRunLocator();
+    const firstLineage = service.lastRunLineageIntent();
+    const firstPlan = service.buildExportPlan(path.join(userDataDir, 'same-name'));
+    const firstSidePath = runDataStore.sideDbPath(
+      userDataDir,
+      runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+      first.monthKey
+    );
+    const firstSideStat = fs.statSync(firstSidePath);
+    await assert.rejects(() => runV1(service), /Archive terminal 尚未确认/);
+    assert.equal(
+      mirrorRepository.getRunMirror(database._mirrorDb, first.runId).status,
+      'success',
+      '未 ACK 时新 run 不先改主库 mirror'
+    );
+    assert.equal(fs.statSync(firstSidePath).ino, firstSideStat.ino, '未 ACK 时不删除结果侧库');
+    const acknowledgeSide = service.runStore.acknowledgeArchiveTerminal.bind(service.runStore);
+    service.runStore.acknowledgeArchiveTerminal = () => {
+      throw new Error('injected-side-ack-failure');
+    };
+    assert.throws(
+      () => service.acknowledgeRunByTaskRun(firstLocator.archiveTaskRunId),
+      /injected-side-ack-failure/
+    );
+    const mainAcknowledgedAt = mirrorRepository.getRunMirror(
+      database._mirrorDb,
+      first.runId
+    ).archiveTerminalAckAt;
+    assert.ok(mainAcknowledgedAt, '跨库 ACK 固定先提交 main mirror');
+    assert.equal(
+      service.runStore.getRunByArchiveTaskRunId(firstLocator.archiveTaskRunId)
+        .archiveTerminalAckAt,
+      null,
+      'side ACK 失败时保留未确认 receipt 供重放'
+    );
+    service.runStore.acknowledgeArchiveTerminal = acknowledgeSide;
+    service.acknowledgeRunByTaskRun(firstLocator.archiveTaskRunId);
+    assert.equal(
+      mirrorRepository.getRunMirror(database._mirrorDb, first.runId).archiveTerminalAckAt,
+      mainAcknowledgedAt,
+      '重放 main ACK 幂等且不会改写首次确认时间'
+    );
+    assert.ok(
+      service.runStore.getRunByArchiveTaskRunId(firstLocator.archiveTaskRunId)
+        .archiveTerminalAckAt
+    );
+    const second = await runV1(service);
+    const secondLocator = service.lastRunLocator();
+    const secondLineage = service.lastRunLineageIntent();
+    const secondPlan = service.buildExportPlan(path.join(userDataDir, 'same-name'));
     const mirrors = mirrorRepository.listRunMirrors(database._mirrorDb);
     assert.deepEqual(mirrors.map((mirror) => mirror.status), ['superseded', 'success']);
     assert.notEqual(first.runId, second.runId);
+    assert.equal(firstLocator.sideRunId, secondLocator.sideRunId, '结果侧库重建后 sideRunId 可复用');
+    assert.notEqual(firstLocator.mirrorRunId, secondLocator.mirrorRunId);
+    assert.notEqual(firstLineage.lineageKey, secondLineage.lineageKey);
+    assert.deepEqual(firstPlan.map((item) => item.filePath), secondPlan.map((item) => item.filePath));
+    await assert.rejects(
+      () => service.export({
+        outputDirectory: path.join(userDataDir, 'same-name'),
+        runLocator: firstLocator
+      }),
+      /run 已变化/
+    );
 
     const files = runDataStore.listSideDbFiles(
       userDataDir,
@@ -954,14 +1302,14 @@ test.describe('PreFundReconciliationService', () => {
         }
       }].values()
     });
-    const service = createPreFundReconciliationService({
+    const service = makeService({
       userDataDir,
       database,
       templatePath: path.join(userDataDir, 'unused.xlsx'),
       now: () => new Date(2026, 6, 10, 12, 0, 0)
     });
-    service.importBank(bankFile);
-    const run = await service.run();
+    importBankV1(service, bankFile);
+    const run = await runV1(service);
     const resultPath = runDataStore.sideDbPath(
       userDataDir,
       runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
@@ -988,7 +1336,7 @@ test.describe('PreFundReconciliationService', () => {
     service.now = () => new Date(2026, 6, 10, 12, 0, 0);
     service.templatePath = path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx');
     service.lastRun = { monthKey: '2026-07', sideRunId: 1 };
-    service.buildExportPlan = () => [{ channel: 'RACE', fileName, filePath }];
+    service._buildExportPlanForCurrentRun = () => [{ channel: 'RACE', fileName, filePath }];
     service.runStore = {
       *iterateChannelExports() {
         yield {
@@ -1012,7 +1360,7 @@ test.describe('PreFundReconciliationService', () => {
     };
     try {
       await assert.rejects(
-        () => service.export({ outputDirectory }),
+        () => exportV1(service, { outputDirectory }),
         /目标文件已存在，未覆盖/
       );
     } finally {
@@ -1034,7 +1382,7 @@ test.describe('PreFundReconciliationService', () => {
     service.now = () => new Date(2026, 6, 10, 12, 0, 0);
     service.templatePath = path.resolve(__dirname, '../../../assets/资金对账导出不平.xlsx');
     service.lastRun = { monthKey: '2026-07', sideRunId: 1 };
-    service.buildExportPlan = () => [{ channel: 'FALLBACK', fileName, filePath }];
+    service._buildExportPlanForCurrentRun = () => [{ channel: 'FALLBACK', fileName, filePath }];
     service.runStore = {
       *iterateChannelExports() {
         yield {
@@ -1055,7 +1403,7 @@ test.describe('PreFundReconciliationService', () => {
     };
     let exported;
     try {
-      exported = await service.export({ outputDirectory, overwrite: true });
+      exported = await exportV1(service, { outputDirectory, overwrite: true });
     } finally {
       fs.linkSync = originalLinkSync;
     }
@@ -1077,7 +1425,8 @@ test.describe('PreFundReconciliationService', () => {
 
     const service = Object.create(PreFundReconciliationService.prototype);
     service.now = () => new Date(2026, 6, 10, 12, 0, 0);
-    service.buildExportPlan = () => [
+    service.lastRun = { monthKey: '2026-07', sideRunId: 1, archiveTaskRunId: 'export-task' };
+    service._buildExportPlanForCurrentRun = () => [
       { channel: 'A', fileName: 'first.xlsx', filePath: firstPath },
       { channel: 'B', fileName: 'second.xlsx', filePath: secondPath }
     ];
@@ -1089,7 +1438,7 @@ test.describe('PreFundReconciliationService', () => {
     };
     try {
       await assert.rejects(
-        () => service.export({ outputDirectory, overwrite: true }),
+        () => exportV1(service, { outputDirectory, overwrite: true }),
         /simulated second backup failure/
       );
     } finally {

@@ -53,7 +53,13 @@ function buildChangedClause(compareFields, leftAlias, rightAlias) {
     .join(' OR ');
 }
 
-function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
+function runReconciliationCore(db, {
+  upperMonth,
+  lowerMonth,
+  rule,
+  archiveReceipt,
+  expectedDatasets = null
+}) {
   const matchFields = Array.isArray(rule && rule.matchFields) ? rule.matchFields : [];
   const compareFields = Array.isArray(rule && rule.compareFields) ? rule.compareFields : [];
 
@@ -75,7 +81,32 @@ function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
 
   db.exec('BEGIN');
   try {
-    const runId = diffRepo.createRun(db, { upperMonth, lowerMonth, ruleSnapshot });
+    if (archiveReceipt.archiveContractVersion === 1) {
+      const currentUpper = db.prepare(
+        'SELECT dataset_id FROM pending_months WHERE year_month = ?'
+      ).get(upperMonth);
+      const currentLower = db.prepare(
+        'SELECT dataset_id FROM pending_months WHERE year_month = ?'
+      ).get(lowerMonth);
+      const currentRemoved = db.prepare(
+        'SELECT dataset_id FROM pending_removed_months WHERE year_month = ?'
+      ).get(upperMonth);
+      if (!expectedDatasets
+          || !currentUpper || currentUpper.dataset_id !== expectedDatasets.upper.datasetId
+          || !currentLower || currentLower.dataset_id !== expectedDatasets.lower.datasetId
+          || (currentRemoved ? currentRemoved.dataset_id : null) !== expectedDatasets.removedDatasetId) {
+        throw new Error('Pending 来源 dataset 在运算开始前已变化，请重新运行');
+      }
+    }
+    const createRun = archiveReceipt.archiveContractVersion === 1
+      ? diffRepo.createRun
+      : diffRepo.createLegacyRun;
+    const runId = createRun(db, {
+      upperMonth,
+      lowerMonth,
+      ruleSnapshot,
+      archiveReceipt
+    });
 
     // === 多轮配对：tmp_pairs(upper_id, lower_id) 累积已配对的 pair ===
     // UNIQUE 约束防单行被多轮重复配对
@@ -183,8 +214,34 @@ function runReconciliation(db, { upperMonth, lowerMonth, rule }) {
   }
 }
 
+function runReconciliation(db, payload) {
+  const receipt = payload && payload.archiveReceipt;
+  const expected = payload && payload.expectedDatasets;
+  if (!receipt || receipt.archiveContractVersion !== 1
+      || typeof receipt.archiveTaskRunId !== 'string' || !receipt.archiveTaskRunId.trim()
+      || !expected || !expected.upper || !expected.lower
+      || typeof expected.upper.datasetId !== 'string' || !expected.upper.datasetId.trim()
+      || typeof expected.lower.datasetId !== 'string' || !expected.lower.datasetId.trim()
+      || (expected.removedDatasetId !== null
+        && (typeof expected.removedDatasetId !== 'string' || !expected.removedDatasetId.trim()))) {
+    throw new TypeError('Pending reconcile 必须携带 v1 Archive receipt 与 frozen dataset heads');
+  }
+  return runReconciliationCore(db, payload);
+}
+
+function runLegacyReconciliation(db, payload) {
+  return runReconciliationCore(db, {
+    ...payload,
+    archiveReceipt: {
+      archiveContractVersion: 0,
+      archiveTaskRunId: null
+    }
+  });
+}
+
 module.exports = {
   runReconciliation,
+  runLegacyReconciliation,
   ensureMatchIndex,
   // 暴露给测试的内部函数
   __internal: {

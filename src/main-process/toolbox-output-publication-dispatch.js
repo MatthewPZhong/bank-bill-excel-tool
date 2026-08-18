@@ -204,10 +204,6 @@ function createToolboxPublicationDispatcher(options = {}) {
 
   return {
     publish(optionsForPublish = {}) {
-      const batchContext = freezeWorkerBatchContext(
-        optionsForPublish.batchContext,
-        { required: true }
-      );
       return enqueue(
         'publish',
         {
@@ -216,7 +212,7 @@ function createToolboxPublicationDispatcher(options = {}) {
           targets: optionsForPublish.targets,
           protectedSourcePaths: optionsForPublish.protectedSourcePaths,
           userDataDir: optionsForPublish.userDataDir,
-          batchContext,
+          batchContext: optionsForPublish.batchContext,
           archiveInputFiles: optionsForPublish.archiveInputFiles,
           requireArchiveHandoff: optionsForPublish.requireArchiveHandoff === true,
           allowEmptyArchiveInputs: optionsForPublish.allowEmptyArchiveInputs === true,

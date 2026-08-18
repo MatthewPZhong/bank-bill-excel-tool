@@ -9,6 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
+const { AppDatabase } = require('../../../../src/backend/database');
 const {
   ensureVccFinancialOpTablesSupport
 } = require('../../../../src/backend/vcc-financial-op-db/migrations');
@@ -17,6 +18,7 @@ const {
   ensureVccStorageSideTables,
   createSlimEffectiveRowsTable,
   getVccStorageContractVersion,
+  inspectVccStorageData,
   registerVccStorageWriteCapability,
   setVccStorageContractVersion
 } = require('../../../../src/backend/vcc-financial-op-db/storage-contract');
@@ -180,6 +182,233 @@ test('storage contract marker 仅显式写入并拒绝未来版本', () => {
       WHERE setting_key = 'vcc_storage_contract_version'
     `).run();
     assert.throws(() => getVccStorageContractVersion(db), /高于当前程序/);
+  } finally {
+    db.close();
+  }
+});
+
+test('正式启动把 fresh/empty v1 原子升级为空 v2 并保持二次幂等', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    const first = ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
+    assert.equal(first.storageContractMigration.upgraded, true);
+    assert.equal(getVccStorageContractVersion(db), VCC_STORAGE_CONTRACT_VERSION);
+    assert.equal(inspectVccStorageData(db).empty, true);
+    const effectiveColumns = columns(db, 'vcc_fin_op_effective_rows');
+    for (const removed of ['raw_json', 'idempotency_key_raw', 'source_file']) {
+      assert.equal(effectiveColumns.has(removed), false, removed);
+    }
+    const vccTableCount = Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'table' AND name GLOB 'vcc_fin_op_*'
+    `).get().count);
+    const guardCount = Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'trigger' AND name LIKE 'vcc_storage_contract_v2_guard_%'
+    `).get().count);
+    assert.equal(guardCount, vccTableCount * 3);
+
+    const second = ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
+    assert.equal(second.storageContractMigration.upgraded, false);
+    assert.equal(second.storageContractMigration.fromVersion, VCC_STORAGE_CONTRACT_VERSION);
+  } finally {
+    db.close();
+  }
+});
+
+test('已有结构但业务行为空的 v1 升级时保留 effective 自增高水位', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    ensureVccFinancialOpTablesSupport(db);
+    db.prepare(`
+      INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
+      VALUES ('sequence-fixture', '2026-08', 1)
+    `).run();
+    const recordId = Number(db.prepare(`
+      INSERT INTO vcc_fin_op_import_records (
+        batch_id, target_month, source_type, source_files_json
+      ) VALUES ('sequence-fixture', '2026-08', 'recharge_refund', '["source.xlsx"]')
+    `).run().lastInsertRowid);
+    db.prepare(`
+      INSERT INTO vcc_fin_op_effective_rows (
+        source_type, idempotency_key_raw, idempotency_key, content_hash,
+        target_month, subject, source_file, sheet_name, source_row, raw_json,
+        import_record_id
+      ) VALUES (
+        'recharge_refund', 'raw', 'key', ?, '2026-08', 'PPHK',
+        'source.xlsx', 'Sheet1', 2, '{}', ?
+      )
+    `).run('a'.repeat(64), recordId);
+    db.exec(`
+      DELETE FROM vcc_fin_op_effective_rows;
+      DELETE FROM vcc_fin_op_import_records;
+      DELETE FROM vcc_fin_op_import_batches;
+    `);
+    const beforeSequence = Number(db.prepare(`
+      SELECT seq FROM sqlite_sequence WHERE name = 'vcc_fin_op_effective_rows'
+    `).get().seq);
+
+    const result = ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true });
+    assert.equal(result.storageContractMigration.upgraded, true);
+    assert.equal(Number(db.prepare(`
+      SELECT seq FROM sqlite_sequence WHERE name = 'vcc_fin_op_effective_rows'
+    `).get().seq), beforeSequence);
+  } finally {
+    db.close();
+  }
+});
+
+test('非空 v1 在首笔兼容迁移前 fail-closed 且不写 marker', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    ensureVccFinancialOpTablesSupport(db);
+    db.prepare(`
+      INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
+      VALUES ('must-survive', '2026-08', 0)
+    `).run();
+    const beforeSql = db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_effective_rows'
+    `).get().sql;
+
+    assert.throws(
+      () => ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true }),
+      (error) => error && error.code === 'vcc-storage-v1-data-present'
+        && error.nonEmptyTables.some((entry) => entry.tableName === 'vcc_fin_op_import_batches')
+    );
+    assert.equal(getVccStorageContractVersion(db), 1);
+    assert.equal(db.prepare(`
+      SELECT id FROM vcc_fin_op_import_batches WHERE id = 'must-survive'
+    `).get().id, 'must-survive');
+    assert.equal(db.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vcc_fin_op_effective_rows'
+    `).get().sql, beforeSql);
+  } finally {
+    db.close();
+  }
+});
+
+test('AppDatabase 正式启动接入非空 v1 门禁并保留原业务行', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-nonempty-v1-startup-'));
+  const dbPath = path.join(directory, 'tool-data.sqlite');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let seed = new DatabaseSync(dbPath);
+  seed.exec(`
+    CREATE TABLE app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  ensureVccFinancialOpTablesSupport(seed);
+  seed.prepare(`
+    INSERT INTO vcc_fin_op_import_batches (id, target_month, file_count)
+    VALUES ('startup-must-survive', '2026-08', 0)
+  `).run();
+  seed.close();
+  seed = null;
+
+  const appDb = new AppDatabase(dbPath);
+  try {
+    assert.throws(
+      () => appDb.init(),
+      (error) => error && error.code === 'vcc-storage-v1-data-present'
+    );
+  } finally {
+    appDb.close();
+  }
+  const reopened = new DatabaseSync(dbPath, { readOnly: true });
+  try {
+    assert.equal(getVccStorageContractVersion(reopened), 1);
+    assert.equal(reopened.prepare(`
+      SELECT id FROM vcc_fin_op_import_batches WHERE id = 'startup-must-survive'
+    `).get().id, 'startup-must-survive');
+  } finally {
+    reopened.close();
+  }
+});
+
+test('非空 first_month 也属于 v1 业务状态并阻止自动升级', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    ensureVccFinancialOpTablesSupport(db);
+    db.prepare(`
+      UPDATE vcc_fin_op_module_state SET first_month = '2026-08' WHERE singleton_id = 1
+    `).run();
+    assert.throws(
+      () => ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true }),
+      (error) => error && error.code === 'vcc-storage-v1-data-present'
+        && error.moduleStateFirstMonth === '2026-08'
+    );
+    assert.equal(getVccStorageContractVersion(db), 1);
+  } finally {
+    db.close();
+  }
+});
+
+test('空 v1 升级末端校验失败时回滚 slim schema、marker 和 guards', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    ensureVccFinancialOpTablesSupport(db);
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE unrelated_parent (id INTEGER PRIMARY KEY);
+      CREATE TABLE unrelated_child (
+        id INTEGER PRIMARY KEY,
+        parent_id INTEGER NOT NULL REFERENCES unrelated_parent(id)
+      );
+      INSERT INTO unrelated_child (id, parent_id) VALUES (1, 999);
+      PRAGMA foreign_keys = ON;
+    `);
+
+    assert.throws(
+      () => ensureVccFinancialOpTablesSupport(db, { autoUpgradeEmptyV1: true }),
+      (error) => error && error.code === 'vcc-storage-empty-upgrade-foreign-key-failed'
+    );
+    assert.equal(getVccStorageContractVersion(db), 1);
+    assert.equal(columns(db, 'vcc_fin_op_effective_rows').has('raw_json'), true);
+    assert.equal(Number(db.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'trigger' AND name LIKE 'vcc_storage_contract_v2_guard_%'
+    `).get().count), 0);
   } finally {
     db.close();
   }

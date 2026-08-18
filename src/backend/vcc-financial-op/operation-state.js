@@ -246,15 +246,14 @@ function snapshotSourceFacts(db, targetMonth) {
     count: Number(row.row_count) || 0
   }));
   const importRecords = db.prepare(`
-    SELECT source_type, status, resolution_status, COUNT(*) AS row_count
+    SELECT source_type, status, COUNT(*) AS row_count
     FROM vcc_fin_op_import_records
     WHERE target_month = ?
-    GROUP BY source_type, status, resolution_status
-    ORDER BY source_type, status, resolution_status
+    GROUP BY source_type, status
+    ORDER BY source_type, status
   `).all(targetMonth).map((row) => ({
     sourceType: row.source_type,
     status: row.status,
-    resolutionStatus: row.resolution_status,
     count: Number(row.row_count) || 0
   }));
   const systemAttempts = db.prepare(`
@@ -277,11 +276,6 @@ function snapshotSourceFacts(db, targetMonth) {
       FROM vcc_fin_op_import_errors error
       JOIN vcc_fin_op_import_records record ON record.id = error.import_record_id
       WHERE record.target_month = ?
-    `, targetMonth),
-    unresolvedImportCount: countRows(db, `
-      SELECT COUNT(*) AS row_count
-      FROM vcc_fin_op_import_records
-      WHERE target_month = ? AND resolution_status = 'unresolved'
     `, targetMonth),
     activeImportBatchCount: countRows(db, `
       SELECT COUNT(*) AS row_count

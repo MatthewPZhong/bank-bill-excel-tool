@@ -143,6 +143,13 @@ test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execu
   const exportExecute = exportSource.indexOf('async execute(_event, prepared, taskContext)');
   const mergePrepareSource = mergeSource.slice(0, mergeExecute);
   const exportPrepareSource = exportSource.slice(0, exportExecute);
+  const mergeExecuteSource = mergeSource.slice(mergeExecute);
+  const exportExecuteSource = exportSource.slice(exportExecute);
+  const publicationStart = mainSource.indexOf('async function publishToolboxArtifacts(');
+  const publicationEnd = mainSource.indexOf('\nfunction ', publicationStart + 1);
+  const publicationSource = mainSource.slice(publicationStart, publicationEnd);
+  assert.match(publicationSource, /settled\.durable !== true/);
+  assert.doesNotMatch(publicationSource, /settled\.ok === false/);
 
   assert.ok(!readSource.includes("trackedIpcHandle('toolbox:split:read'"));
   assert.ok(!readSource.includes('batchContext'));
@@ -151,17 +158,25 @@ test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execu
   assert.ok(mergePrepareSource.match(/proceed: false/g).length >= 2);
   assert.ok(!mergePrepareSource.includes('toolboxMergeFilesToXlsx'));
   assert.ok(mergePrepareSource.includes('assertToolboxTargetsDoNotAliasSources'));
-  assert.ok(mergePrepareSource.includes('captureToolboxTargetSnapshots'));
-  assert.ok(mergePrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
+  assert.ok(mergePrepareSource.includes('filePlan'));
+  assert.ok(!mergePrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
   assert.ok(mergeSource.indexOf('toolboxMergeFilesToXlsx') > mergeExecute);
   assert.ok(exportPrepareSource.includes("showImportOpenDialog('toolbox-split-export-directory'"));
   assert.ok(exportPrepareSource.includes('showSaveDialog'));
   assert.ok(exportPrepareSource.match(/proceed: false/g).length >= 4);
   assert.ok(!exportPrepareSource.includes('exportToolboxFilter'));
   assert.ok(exportPrepareSource.includes('assertToolboxTargetsDoNotAliasSources'));
-  assert.ok(exportPrepareSource.includes('captureToolboxTargetSnapshots'));
-  assert.ok(exportPrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
+  assert.ok(exportPrepareSource.includes('filePlan'));
+  assert.ok(!exportPrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
   assert.ok(exportSource.indexOf('exportToolboxFilter') > exportExecute);
+  assert.match(mergeExecuteSource, /fileEvidence\.filePlan\.outputs\[0\]\.filePath/);
+  assert.doesNotMatch(mergeExecuteSource, /prepared\.(?:savePath|outputPaths|filePaths|inputPaths)/);
+  assert.match(exportExecuteSource, /fileEvidence\.filePlan\.outputs/);
+  assert.doesNotMatch(
+    exportExecuteSource,
+    /prepared\.(?:savePath|outputPaths|filePaths|inputPaths|outputDirectory)/
+  );
+  assert.doesNotMatch(exportExecuteSource, /targetPlans\[[^\]]+\]\.targetPath/);
 });
 
 test('committed 恢复输出携 exact7 回原批次，output descriptor 显式标记方向', () => {
@@ -606,8 +621,7 @@ test('损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启
     assert.deepEqual(error.owners, ['Toolbox']);
     return true;
   });
-  assert.equal(toolboxRecoveryCalls, 1, 'initial outbox 失败后仍必须调用 Toolbox owner');
-  assert.ok(blockedStartup.warnings.some(([message]) => /初始重放失败/.test(message)));
+  assert.equal(toolboxRecoveryCalls, 1, '损坏 outbox 读取前必须先调用 Toolbox owner');
   assert.ok(blockedStartup.warnings.some(([message]) => /Toolbox/.test(message)));
   assert.ok(blockedStartup.warnings.some(([message]) => /模块恢复后的.*重放未全部完成/.test(message)));
 
@@ -1041,7 +1055,10 @@ test('split export freshness 发现源变化后清除 token，要求重新选择
     fs.appendFileSync(sourcePath, '-changed');
 
     assert.throws(
-      () => harness.assertToolboxSplitSourceFresh(context),
+      () => harness.assertToolboxSplitSourceFresh(context, {
+        filePath: sourcePath,
+        sourceSnapshot: context.snapshot
+      }),
       /读取后已变化/
     );
     assert.throws(

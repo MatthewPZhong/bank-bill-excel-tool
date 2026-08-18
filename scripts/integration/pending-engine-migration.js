@@ -55,6 +55,7 @@ async function runChild(opJsonPath, dbPath) {
   const op = JSON.parse(fs.readFileSync(opJsonPath, 'utf8'));
   const { DatabaseSync } = require('node:sqlite');
   const { runMigrations } = require('../../src/backend/pending-db/migrations');
+  const monthRepository = require('../../src/backend/pending-db/month-repository');
   const { createPendingSession } = require('../../src/main-process/pending-session');
 
   // 先建库 + migrate（引擎 worker 自开同一 dbPath；session 主连接用于 countRowsInMonth / 种子）。
@@ -71,17 +72,30 @@ async function runChild(opJsonPath, dbPath) {
 
   const out = { ok: true, results: [], lastError: null, dump: null };
   try {
-    for (const o of op.ops) {
+    for (let operationIndex = 0; operationIndex < op.ops.length; operationIndex += 1) {
+      const o = op.ops[operationIndex];
       // 可选：种关联表数据（R-1 覆盖删除链验证；先于覆盖重导）。
       if (o.seedAux) {
         seedAuxTables(db, op.yearMonth);
       }
+      const taskRunId = `pending-engine-migration-${operationIndex + 1}`;
+      const current = monthRepository.getMonthMeta(db, op.yearMonth);
       const r = await session.runImport({
         yearMonth: op.yearMonth,
         files: o.files,
         overwriteConfirmed: o.overwriteConfirmed === true,
         dbPath,
-        batchContext: WORKER_BATCH_CONTEXT,
+        batchContext: {
+          ...WORKER_BATCH_CONTEXT,
+          taskRunId,
+          operationKey: `pending-engine-operation-${operationIndex + 1}`
+        },
+        datasetSeed: {
+          datasetId: `pending-engine-dataset-${operationIndex + 1}`,
+          producerTaskRunId: taskRunId,
+          expectedDatasetId: current ? current.datasetId : null,
+          expectedDatasetVersion: current ? current.datasetVersion : 0
+        },
         onProgress: null
       });
       out.results.push({

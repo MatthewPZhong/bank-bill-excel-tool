@@ -7,8 +7,12 @@ const {
   parseOutboxBatchId
 } = require('./outbox-store');
 const {
-  freezeWorkerBatchContext
-} = require('./worker-batch-context');
+  freezePersistedTaskOwner
+} = require('./worker-operation-context');
+const {
+  publicArtifact,
+  publicBatch
+} = require('./archive-service');
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
 const ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY = 'archive_center_excluded_template_ids';
@@ -26,17 +30,6 @@ function artifactSupportsReplacementRetry(artifact) {
     && Number.isSafeInteger(expectedSizeBytes)
     && expectedSizeBytes >= 0
   );
-}
-
-function publicArtifactMetadata(metadata) {
-  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return {};
-  const {
-    sourceSnapshot: _sourceSnapshot,
-    expectedSha256: _expectedSha256,
-    expectedSizeBytes: _expectedSizeBytes,
-    ...visible
-  } = metadata;
-  return visible;
 }
 
 function parseRetentionDays(value) {
@@ -116,10 +109,22 @@ function normalizeTerminalOutcome(value) {
     }
     const route = String(value.afterTerminal.route || '').trim();
     if (!route) throw new TypeError('任务终态意图 afterTerminal.route 为空');
-    afterTerminal = {
-      route,
-      operationToken: String(value.afterTerminal.operationToken || '').trim()
-    };
+    if (route === 'position-reconciliation') {
+      afterTerminal = {
+        route,
+        operationToken: String(value.afterTerminal.operationToken || '').trim()
+      };
+    } else if (route === 'pending-run') {
+      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
+      if (!taskRunId) throw new TypeError('Pending terminal route.taskRunId 为空');
+      afterTerminal = { route, taskRunId };
+    } else if (route === 'biz-op-run') {
+      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
+      if (!taskRunId) throw new TypeError('Biz OP terminal route.taskRunId 为空');
+      afterTerminal = { route, taskRunId };
+    } else {
+      throw new TypeError(`不支持的任务终态 afterTerminal route：${route}`);
+    }
   }
   return {
     taskStatus,
@@ -230,7 +235,7 @@ class ArchiveCenterController {
   async initialize() {
     const initialized = this.storageRootManager
       ? await this.storageRootManager.initialize()
-      : await this.service.initialize();
+      : await this.service.initialize({ deferStartupRecovery: true });
     if (!initialized || initialized.available === false) {
       this._warn('存档中心初始化失败', initialized && initialized.message);
       return initialized;
@@ -255,10 +260,6 @@ class ArchiveCenterController {
         return { completed: false, inventorySafe: false, error };
       }
     };
-    const initialOutboxReplay = await settleOutboxReplay(
-      'initial',
-      '存档 outbox 初始重放失败，仍将尝试各模块恢复'
-    );
     const blockingOwnerFailures = [];
     if (this.recoverInterruptedTaskOwners.length > 0) {
       for (const owner of this.recoverInterruptedTaskOwners) {
@@ -292,20 +293,13 @@ class ArchiveCenterController {
       error.owners = blockingOwnerFailures.map((failure) => failure.ownerName);
       throw error;
     }
-    for (const hook of this.postOutboxStartupHooks) {
-      try {
-        await hook.run();
-      } catch (cause) {
-        this._warn(
-          `存档启动校验失败（${hook.hookName}），已跳过异常任务扫尾与到期清理`,
-          cause
-        );
-        const error = new Error(`存档启动校验未完成：${hook.hookName}`);
-        error.code = 'ARCHIVE_STARTUP_HOOK_FAILED';
-        error.hookName = hook.hookName;
-        error.cause = cause;
-        throw error;
-      }
+    const batchFlowReplay = await this.service.replayFlowBindIntents();
+    const taskFlowReplay = await this.service.replayTaskFlowBindIntents();
+    if (!batchFlowReplay || batchFlowReplay.ok === false
+        || !taskFlowReplay || taskFlowReplay.ok === false) {
+      const error = new Error('业务流程身份 intent 启动重放未完成');
+      error.code = 'ARCHIVE_FLOW_BIND_REPLAY_FAILED';
+      throw error;
     }
     let protectedRecoveryBatchIds = [];
     let interruptedSweepSafe = true;
@@ -341,8 +335,8 @@ class ArchiveCenterController {
       throw error;
     }
     let pendingTerminalBatchIds = [];
-    let outboxInventorySafe = initialOutboxReplay.inventorySafe
-      && postOwnerOutboxReplay.inventorySafe;
+    let pendingTerminalTaskRunIds = [];
+    let outboxInventorySafe = postOwnerOutboxReplay.inventorySafe;
     if (this.outboxStore && outboxInventorySafe) {
       try {
         pendingTerminalBatchIds = this.outboxStore.list().flatMap((record) => {
@@ -352,6 +346,15 @@ class ArchiveCenterController {
             && Number.isSafeInteger(batchId) && batchId > 0
             ? [batchId]
             : [];
+        });
+        pendingTerminalTaskRunIds = this.outboxStore.list().flatMap((record) => {
+          const owner = record && record.payload && record.payload.owner;
+          const taskRunId = owner && owner.kind === 'operation'
+            ? String(owner.operationContext && owner.operationContext.taskRunId || '').trim()
+            : owner && owner.kind === 'file-batch'
+              ? String(owner.batchContext && owner.batchContext.taskRunId || '').trim()
+              : '';
+          return taskRunId ? [taskRunId] : [];
         });
       } catch (error) {
         outboxInventorySafe = false;
@@ -367,10 +370,32 @@ class ArchiveCenterController {
               ? protectedRecoveryBatchIds
               : [])
           ].map(Number).filter((batchId) => Number.isSafeInteger(batchId) && batchId > 0))
-        ]
+        ],
+        excludeTaskRunIds: pendingTerminalTaskRunIds
       });
       if (interrupted && interrupted.ok === false) {
         this._warn('存档中心异常任务扫尾未完成', interrupted.message || interrupted.code);
+      }
+    }
+    if (outboxInventorySafe) {
+      const reconciled = await this.service.reconcileStartup();
+      if (reconciled && reconciled.ok === false) {
+        this._warn('存档原始存储维护未完全成功', reconciled.status || reconciled.code);
+      }
+    }
+    for (const hook of this.postOutboxStartupHooks) {
+      try {
+        await hook.run();
+      } catch (cause) {
+        this._warn(
+          `存档启动校验失败（${hook.hookName}），已阻止到期清理`,
+          cause
+        );
+        const error = new Error(`存档启动校验未完成：${hook.hookName}`);
+        error.code = 'ARCHIVE_STARTUP_HOOK_FAILED';
+        error.hookName = hook.hookName;
+        error.cause = cause;
+        throw error;
       }
     }
     if (outboxInventorySafe) {
@@ -378,6 +403,11 @@ class ArchiveCenterController {
       if (cleanup && cleanup.ok === false) {
         this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
       }
+    }
+    if (this.storageRootManager) {
+      this.storageRootManager.resumeBackgroundArchiveChecks();
+    } else {
+      this.service.resumeBackgroundMaterialization();
     }
     return initialized;
   }
@@ -395,6 +425,75 @@ class ArchiveCenterController {
     let discarded = 0;
     for (const record of records) {
       const payload = record && record.payload ? record.payload : {};
+      const persistedOwner = payload.owner
+        ? freezePersistedTaskOwner(payload.owner, { required: true })
+        : null;
+      if (persistedOwner && persistedOwner.kind === 'operation') {
+        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
+        const terminalResult = await this._replayOperationTerminal(
+          persistedOwner.operationContext,
+          terminalOutcome
+        );
+        if (!terminalResult || terminalResult.ok === false) {
+          this._warn(
+            '存档 outbox 的 Task Run 终态收口失败',
+            terminalResult && terminalResult.message || 'Task Run 终态写入失败'
+          );
+          continue;
+        }
+        if (!await this._finalizeOwnerTerminal(record, terminalOutcome, terminalResult)) continue;
+        this.outboxStore.remove(record.id);
+        flushed += 1;
+        continue;
+      }
+      if (persistedOwner
+          && persistedOwner.version === 1
+          && persistedOwner.kind === 'file-batch') {
+        const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
+        const batchContext = persistedOwner.batchContext;
+        const existingTaskRun = this.service.repository.getTaskRun(batchContext.taskRunId);
+        const alreadyTerminal = existingTaskRun
+          && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(existingTaskRun.status);
+        if (terminalOutcome.taskStatus === 'succeeded' && !alreadyTerminal) {
+          const artifacts = this.service.repository.listArtifacts(batchContext.batchId);
+          if (artifacts.some((artifact) => artifact.status === 'pending')) {
+            const settlement = await this.service.settleManifestArtifacts({
+              batchContext,
+              files: payload.settleFiles
+            });
+            if (!settlement || settlement.durable !== true) {
+              this._warn(
+                '存档 outbox 的 File Task artifact 尚未全部 durable',
+                settlement && settlement.message || `batch=${batchContext.batchId}`
+              );
+              continue;
+            }
+          }
+        }
+        const terminalResult = await this.service.finishFileTask(
+          batchContext.taskRunId,
+          batchContext.batchId,
+          terminalOutcome
+        );
+        const benignTerminal = terminalResult
+          && terminalResult.ok === false
+          && terminalResult.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
+          && terminalResult.taskRun
+          && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
+            terminalResult.taskRun.status
+          );
+        if ((!terminalResult || terminalResult.ok === false) && !benignTerminal) {
+          this._warn(
+            '存档 outbox 的 File Task 终态收口失败',
+            terminalResult && terminalResult.message || 'File Task 终态写入失败'
+          );
+          continue;
+        }
+        if (!await this._finalizeOwnerTerminal(record, terminalOutcome, terminalResult)) continue;
+        this.outboxStore.remove(record.id);
+        flushed += 1;
+        continue;
+      }
       let replayRecord = record;
       let resolvedBatchId = Number(payload.targetBatchId);
       let issuance;
@@ -406,6 +505,10 @@ class ArchiveCenterController {
         );
         if (!(issuance && issuance.deletedAt)) {
           const targetBatchId = Number(payload.targetBatchId);
+          if (!(Number.isSafeInteger(targetBatchId) && targetBatchId > 0)
+              && (!Array.isArray(payload.files) || payload.files.length === 0)) {
+            throw new TypeError('legacy outbox 无 owner/target 时必须包含非空 files');
+          }
           created = Number.isSafeInteger(targetBatchId) && targetBatchId > 0
             ? await this.service.appendFiles({
                 batchId: targetBatchId,
@@ -499,6 +602,7 @@ class ArchiveCenterController {
               route: terminalOutcome.afterTerminal,
               record: replayRecord,
               created,
+              terminalOutcome,
               terminalResult
             });
           } catch (error) {
@@ -571,6 +675,56 @@ class ArchiveCenterController {
       return { ...result, ok: true, replayed: true };
     }
     return result;
+  }
+
+  async _replayOperationTerminal(operationContext, terminalOutcome) {
+    let result;
+    try {
+      result = await this.service.finishTaskRun(
+        operationContext.taskRunId,
+        terminalOutcome
+      );
+    } catch (error) {
+      return {
+        ok: false,
+        code: error && error.code || 'ARCHIVE_TASK_TERMINAL_FAILED',
+        message: error && error.message || 'Task Run 终态写入失败'
+      };
+    }
+    if (result && result.ok === false
+        && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
+        && result.taskRun
+        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(result.taskRun.status)) {
+      return { ...result, ok: true, replayed: true };
+    }
+    return result;
+  }
+
+  async _finalizeOwnerTerminal(record, terminalOutcome, terminalResult) {
+    if (!terminalOutcome.afterTerminal) return true;
+    if (!this.onTerminalIntentFlushed) {
+      this._warn(
+        '存档 outbox 原任务已终结但缺少 afterTerminal 路由',
+        terminalOutcome.afterTerminal.route
+      );
+      return false;
+    }
+    try {
+      await this.onTerminalIntentFlushed({
+        route: terminalOutcome.afterTerminal,
+        record,
+        created: { batch: terminalResult && terminalResult.batch || null },
+        terminalOutcome,
+        terminalResult
+      });
+      return true;
+    } catch (error) {
+      this._warn(
+        '存档 outbox 原任务已终结但业务恢复收口失败',
+        error && error.message ? error.message : String(error)
+      );
+      return false;
+    }
   }
 
   async flushOutbox() {
@@ -768,12 +922,19 @@ class ArchiveCenterController {
 
   persistTaskTerminalIntent(payload = {}) {
     if (!this.outboxStore) throw new Error('存档持久 outbox 尚未初始化');
-    const batchContext = freezeWorkerBatchContext(payload.batchContext, { required: true });
+    const owner = payload.owner
+      ? freezePersistedTaskOwner(payload.owner, { required: true })
+      : freezePersistedTaskOwner(payload.batchContext, { required: true });
     const terminalOutcome = normalizeTerminalOutcome(payload.terminalOutcome);
     const sourceOperation = String(payload.sourceOperation || 'archive');
+    const ownerContext = owner.kind === 'operation'
+      ? owner.operationContext
+      : owner.batchContext;
     const retryPayload = {
-      moduleId: batchContext.moduleId,
-      operationKey: batchContext.operationKey,
+      ...(owner.version === 1 ? { version: 2 } : {}),
+      ...(owner.version === 1 ? { owner } : {}),
+      moduleId: ownerContext.moduleId,
+      operationKey: ownerContext.operationKey,
       sourceOperation,
       ...(terminalOutcome.afterTerminal
           && terminalOutcome.afterTerminal.route === 'position-reconciliation'
@@ -784,14 +945,16 @@ class ArchiveCenterController {
           }
         : {}),
       files: [],
-      targetBatchId: batchContext.batchId,
+      ...(owner.kind === 'file-batch' ? { targetBatchId: owner.batchContext.batchId } : {}),
+      ...(Array.isArray(payload.settleFiles) ? { settleFiles: payload.settleFiles } : {}),
       terminalOutcome
     };
     const record = this._persistOutboxPayload(retryPayload);
     return {
-      batchId: batchContext.batchId,
+      ...(owner.kind === 'file-batch' ? { batchId: owner.batchContext.batchId } : {}),
+      ...(owner.kind === 'operation' ? { taskRunId: owner.operationContext.taskRunId } : {}),
       outboxId: outboxBatchId(record.id),
-      operationKey: batchContext.operationKey,
+      operationKey: ownerContext.operationKey,
       persisted: true
     };
   }
@@ -800,6 +963,15 @@ class ArchiveCenterController {
     const files = (Array.isArray(payload.files) ? payload.files : []).map(
       (file) => this._trackedFilePayload(file, payload.sourceOperation)
     );
+    if (files.length === 0) {
+      return {
+        archiveFailed: true,
+        persistentRetryAvailable: false,
+        failureRecorded: false,
+        code: 'ARCHIVE_FILE_MANIFEST_EMPTY',
+        warning: { message: '没有可登记的存档文件，未创建批次或重试任务' }
+      };
+    }
     const batchPayload = this._batchPayload(payload, files);
     let created;
     try {
@@ -935,7 +1107,13 @@ class ArchiveCenterController {
         };
       }
     }
-    const resolvedBatchId = await this.resolveBatchId(payload.batchId);
+    const numericBatchId = Number(payload.batchId);
+    const ownedBatch = Number.isSafeInteger(numericBatchId) && numericBatchId > 0
+      ? this.service.repository.getBatch(numericBatchId)
+      : null;
+    const resolvedBatchId = ownedBatch
+      ? ownedBatch.id
+      : await this.resolveBatchId(payload.batchId);
     if (!resolvedBatchId) {
       return {
         archiveFailed: true,
@@ -1019,26 +1197,26 @@ class ArchiveCenterController {
   async resolveBatchId(value) {
     const text = String(value == null ? '' : value).trim();
     if (!text) return null;
-    if (this.batchNumberToId.has(text)) return this.batchNumberToId.get(text);
+    if (this.batchNumberToId.has(text)) {
+      const cachedId = this.batchNumberToId.get(text);
+      const cached = this.service.repository.getVisibleBatch(cachedId);
+      if (cached) return cached.id;
+      this.batchNumberToId.delete(text);
+    }
 
     const numeric = Number(text);
     if (Number.isSafeInteger(numeric) && numeric > 0) {
-      const direct = this.service.repository.getBatch(numeric);
+      const direct = this.service.repository.getVisibleBatch(numeric);
       if (direct) {
         this._rememberBatch(direct);
         return direct.id;
       }
     }
 
-    let offset = 0;
-    while (offset < 100000) {
-      const page = await this.service.listBatches({ limit: 1000, offset });
-      if (!page || page.ok === false) return null;
-      const batches = Array.isArray(page.batches) ? page.batches : [];
-      for (const batch of batches) this._rememberBatch(batch);
-      if (this.batchNumberToId.has(text)) return this.batchNumberToId.get(text);
-      if (batches.length < 1000) break;
-      offset += batches.length;
+    const directByNumber = this.service.repository.getVisibleBatchByNumber(text);
+    if (directByNumber) {
+      this._rememberBatch(directByNumber);
+      return directByNumber.id;
     }
     return null;
   }
@@ -1046,20 +1224,24 @@ class ArchiveCenterController {
   _mapBatch(batch) {
     this._rememberBatch(batch);
     const capability = this._retryCapability(batch);
-    const { artifacts: _artifacts, ...visibleBatch } = batch;
+    const sanitized = publicBatch(batch);
+    const { artifacts: _artifacts, ...visibleBatch } = sanitized;
     return {
       ...visibleBatch,
       batchId: batch.batchNumber,
       internalId: batch.id,
       ...capability,
-      warningMessage: batch.lastErrorMessage || ''
+      rerunHint: capability.requiresBusinessRerun === true && batch.moduleId === 'toolbox'
+        ? '请从工具箱重新执行'
+        : '',
+      warningMessage: batch.lastErrorMessage || batch.failureMessage || ''
     };
   }
 
   _mapArtifact(artifact) {
     const rawArtifact = this.service.repository.getArtifact(Number(artifact && artifact.id));
-    const visibleMetadata = publicArtifactMetadata(artifact && artifact.metadata);
-    const { sourcePath: _sourcePath, ...visibleArtifact } = artifact || {};
+    const visibleArtifact = publicArtifact(artifact) || {};
+    const visibleMetadata = visibleArtifact.metadata || {};
     return {
       ...visibleArtifact,
       metadata: visibleMetadata,
@@ -1087,6 +1269,19 @@ class ArchiveCenterController {
       Number(batch && batch.failedArtifactCount) || 0,
       failedArtifacts.length
     );
+    const outputNotProduced = failedArtifacts.some(
+      (artifact) => artifact.lastErrorCode === 'ARCHIVE_OUTPUT_NOT_PRODUCED'
+    ) || batch && batch.lastErrorCode === 'ARCHIVE_OUTPUT_NOT_PRODUCED';
+    const businessFailedWithoutArchiveFailure = batch
+      && batch.taskStatus === 'failed'
+      && failedCount === 0;
+    if (outputNotProduced || businessFailedWithoutArchiveFailure) {
+      return {
+        canRetry: false,
+        retryMode: 'rerun-business',
+        requiresBusinessRerun: true
+      };
+    }
     if (failedCount === 0) {
       return {
         canRetry: false,

@@ -26,7 +26,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('deduplicates gateway fingerprint, consumes once, and streams channel outputs', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, {
+    const runId = store.createLegacyRun(db, {
       scenario: 'missing-gateway',
       snapshot: { bankRevision: 1 },
       bankFiles: ['bank.xlsx']
@@ -130,10 +130,36 @@ test.describe('PreFundReconciliationRunStore', () => {
     assert.equal(store.getRun('2026-07', runId), null);
   });
 
-  test('fails visibly instead of exporting a blank row when result JSON is corrupted', () => {
+  test('未确认 v1 success receipt 禁止删除结果侧库，确认后允许回收', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
     const runId = store.createRun(db, {
+      scenario: 'missing-gateway',
+      snapshot: {},
+      bankFiles: ['bank.xlsx'],
+      archiveReceipt: { archiveTaskRunId: 'pre-fund-task-1' }
+    });
+    store.finishRun(db, runId, {});
+    db.close();
+
+    assert.throws(
+      () => store.clearAllRunData(),
+      /Archive terminal 尚未确认/
+    );
+    assert.equal(runDataStore.sideDbExists(
+      userDataDir,
+      runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+      '2026-07'
+    ), true);
+
+    store.acknowledgeArchiveTerminal('2026-07', runId, 'pre-fund-task-1');
+    assert.deepEqual(store.clearAllRunData(), { deletedFiles: 1, deletedRuns: 1 });
+  });
+
+  test('fails visibly instead of exporting a blank row when result JSON is corrupted', () => {
+    const store = createPreFundReconciliationRunStore(userDataDir);
+    const db = store.open('2026-07');
+    const runId = store.createLegacyRun(db, {
       scenario: 'missing-gateway',
       snapshot: {},
       bankFiles: ['bank.xlsx']
@@ -198,7 +224,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('corrupted duplicate result JSON fails visibly', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
+    const runId = store.createLegacyRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
     const candidate = {
       sourcePriority: 0,
       sourceOrder: 0,
@@ -230,7 +256,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('missing kept raw snapshot fails visibly', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
+    const runId = store.createLegacyRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
     const candidate = {
       sourcePriority: 1,
       sourceOrder: 0,
@@ -262,7 +288,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('corrupted kept or folded raw JSON fails visibly before export', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
+    const runId = store.createLegacyRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
     const candidate = {
       sourcePriority: 1,
       sourceOrder: 0,
@@ -298,7 +324,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('rejects a kept raw resolver result that does not match the staged candidate hash', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
+    const runId = store.createLegacyRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
     const candidate = {
       sourcePriority: 1,
       sourceOrder: 0,
@@ -327,7 +353,7 @@ test.describe('PreFundReconciliationRunStore', () => {
   test('large unique candidate pool never persists raw snapshots; first duplicate resolves kept raw once', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');
-    const runId = store.createRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
+    const runId = store.createLegacyRun(db, { scenario: 'missing-gateway', snapshot: {}, bankFiles: [] });
     let resolverCalls = 0;
     const insert = store.createGatewayCandidateInserter(db, runId, {
       resolveKeptRawJson() {

@@ -18,7 +18,11 @@ function createDb() {
       bill_date TEXT,
       raw_json TEXT NOT NULL,
       imported_at TEXT NOT NULL,
-      recon_bill_biz_id TEXT
+      recon_bill_biz_id TEXT,
+      source_dataset_id TEXT,
+      source_task_run_id TEXT,
+      source_contract_version INTEGER NOT NULL DEFAULT 0,
+      source_write_nonce TEXT
     );
   `);
   return db;

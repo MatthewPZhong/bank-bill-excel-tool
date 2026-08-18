@@ -17,6 +17,10 @@ const { DatabaseSync } = require('node:sqlite');
 
 const { runMigrations } = require('../pending-db/migrations');
 const PENDING_COLUMNS = require('../pending-db/columns');
+const {
+  freezePendingDatasetSeedV1,
+  identityFromPendingDatasetSeed
+} = require('../pending-db/dataset-identity');
 const { validateHeaders, computeRowHash } = require('./validator');
 const { readXlsxStreamed } = require('./streaming-xlsx-reader');
 const monthRepo = require('../pending-db/month-repository');
@@ -68,6 +72,7 @@ async function main() {
     emit({ type: 'error', errors: [{ severity: 'fatal', message: 'jobMeta 缺字段（dbPath / yearMonth / files）' }] });
     process.exit(2);
   }
+  const datasetSeed = freezePendingDatasetSeedV1(job.datasetSeed);
 
   // DB 先开；需要流式 INSERT（边读边写），否则 allRows 在内存里 300 万行 × 31 列会 OOM
   let db;
@@ -86,6 +91,10 @@ async function main() {
   let hasFatal = false;
 
   db.exec('BEGIN');
+  const datasetIdentity = identityFromPendingDatasetSeed(
+    monthRepo.getMonthMeta(db, yearMonth),
+    datasetSeed
+  );
   monthRepo.deleteMonth(db, yearMonth);
   const insertRow = monthRepo.createRowInserter(db);
 
@@ -176,7 +185,8 @@ async function main() {
       yearMonth,
       rowCount: totalInserted,
       sourceFiles,
-      archivePath: archivePath || null
+      archivePath: archivePath || null,
+      datasetIdentity
     });
     db.exec('COMMIT');
     emit({ type: 'complete', rowCount: totalInserted, sourceFiles });

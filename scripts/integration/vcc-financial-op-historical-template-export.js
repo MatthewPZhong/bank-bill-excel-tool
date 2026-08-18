@@ -46,11 +46,9 @@ let passed = 0;
 const failures = [];
 let lifecycleBatchSequence = 0;
 
-function createBatchContext(taskKey) {
+function createOperationContext(taskKey) {
   lifecycleBatchSequence += 1;
   return Object.freeze({
-    batchId: lifecycleBatchSequence,
-    batchNumber: `integration-${lifecycleBatchSequence}`,
     taskRunId: `integration-task-${lifecycleBatchSequence}`,
     taskKey,
     moduleId: 'vcc-financial-op',
@@ -308,8 +306,11 @@ async function run() {
 
     const exported = await service.exportRun({
       targetMonth: HISTORICAL_MONTH,
-      outputPath
-    }, createBatchContext('vccFinancialOp:export:result'));
+      expectedRunId: historical.runId,
+      expectedSubjects: months[1].subjects,
+      outputPaths: [outputPath],
+      targetSnapshots: [{ exists: false }]
+    }, createOperationContext('vccFinancialOp:export:result'));
     assertEq(exported.runId, historical.runId, '历史 targetMonth 严格解析为历史 runId');
     assertEq(exported.targetMonth, HISTORICAL_MONTH, '导出返回历史目标月份');
     assertTrue(exported.runId !== latest.runId, '历史导出没有回退到 latest run');
@@ -343,7 +344,7 @@ async function run() {
       targetMonth: LATEST_MONTH,
       expectedPreviewToken: latestPreview.previewToken,
       taskGeneration: latestPreview.taskGeneration
-    }, undefined, createBatchContext('vccFinancialOp:run:unarchive'));
+    }, undefined, createOperationContext('vccFinancialOp:run:unarchive'));
     assertEq(unarchived.status, 'unarchived', 'latest 月份通过真实 worker 原子解归档');
     const afterUnarchive = await service.listArchivedResultMonths();
     assertEq(afterUnarchive.length, 1, '解归档后月份立即从可导出枚举消失');
@@ -354,8 +355,11 @@ async function run() {
     try {
       await service.exportRun({
         targetMonth: LATEST_MONTH,
-        outputPath: removedOutputPath
-      }, createBatchContext('vccFinancialOp:export:result'));
+        expectedRunId: latest.runId,
+        expectedSubjects: months[0].subjects,
+        outputPaths: [removedOutputPath],
+        targetSnapshots: [{ exists: false }]
+      }, createOperationContext('vccFinancialOp:export:result'));
     } catch (error) {
       removedExportError = error;
     }
@@ -383,7 +387,7 @@ async function run() {
       expectedResultRevision: 0,
       expectedPreviewToken: rearchivePreview.previewTokens.archive,
       taskGeneration: rearchivePreview.taskGeneration
-    }, undefined, createBatchContext('vccFinancialOp:run:archive'));
+    }, undefined, createOperationContext('vccFinancialOp:run:archive'));
     assertEq(rearchived.status, 'archived', '解归档结果可经正式 service 重新归档');
     const rearchivedResult = await service.getRunResult(latest.runId);
     assertEq(rearchivedResult.status, 'archived', '重新归档后通过正式只读入口 refetch 最新结果');

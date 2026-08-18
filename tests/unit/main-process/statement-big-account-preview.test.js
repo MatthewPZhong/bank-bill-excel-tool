@@ -10,6 +10,10 @@ const {
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('../../../src/main-process/archive-center/source-snapshot');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 const MAIN_PATH = path.join(ROOT, 'src', 'main.js');
@@ -453,4 +457,95 @@ test('选择结果构造不清 lastErrorReport，renderer 只回传 contextId + 
     completeHandler,
     /const result = buildImportResultFromGeneratedFiles\([\s\S]*?persistBigAccountOrderAfterGeneration\(\{[\s\S]*?result/
   );
+});
+
+test('Statement 五条 eager action 只以冻结 FilePlan 作为业务文件路径权威', () => {
+  const importPrepare = functionSource('prepareStatementImportFiles');
+  const bindPrepared = functionSource('bindStatementImportPreparedToFileEvidence');
+  assert.match(importPrepare, /filePlan:\s*\{[\s\S]*?allocation:\s*'eager'[\s\S]*?sourceOperation:\s*'file:import'/);
+  assert.doesNotMatch(importPrepare, /inputPaths\s*:/);
+  assert.match(bindPrepared, /filePlan\.inputs\.map\(\(item\) => item\.filePath\)/);
+
+  const importHandler = mainSource.slice(
+    mainSource.indexOf('const fileImportHandler ='),
+    mainSource.indexOf("trackedIpcHandle(\n    'file:import'")
+  );
+  assert.match(
+    importHandler,
+    /bindStatementImportPreparedToFileEvidence\(\s*prepared,\s*taskContext\.fileEvidence\.filePlan\s*\)/
+  );
+
+  const completeHandler = mainSource.slice(
+    mainSource.indexOf('const completeBigAccountSelectionHandler ='),
+    mainSource.indexOf("businessIpcHandle(\n    'file:complete-big-account-selection'")
+  );
+  assert.match(completeHandler, /sourceOperation:\s*'file:complete-big-account-selection'/);
+  assert.match(completeHandler, /taskContext\.fileEvidence\.filePlan\.inputs/);
+
+  const manualBalanceHandler = mainSource.slice(
+    mainSource.indexOf("businessIpcHandle('file:save-balance-seed'"),
+    mainSource.indexOf('function resolveStatementExportSession', mainSource.indexOf("businessIpcHandle('file:save-balance-seed'"))
+  );
+  assert.match(manualBalanceHandler, /sourceOperation:\s*'file:save-balance-seed'/);
+  assert.match(manualBalanceHandler, /taskContext\.fileEvidence\.filePlan\.inputs\.map/);
+
+  const exportPrepareStart = mainSource.indexOf('const prepareStatementExport =');
+  const exportPrepare = mainSource.slice(
+    exportPrepareStart,
+    mainSource.indexOf("trackedIpcHandle('file:export-detail'", exportPrepareStart)
+  );
+  assert.match(exportPrepare, /sourceOperation:\s*kind === 'detail' \? 'file:export-detail' : 'file:export-balance'/);
+  assert.doesNotMatch(exportPrepare, /outputPaths\s*:|savePath\s*:/);
+  for (const channel of ['file:export-detail', 'file:export-balance']) {
+    const start = mainSource.indexOf(`trackedIpcHandle('${channel}'`);
+    const end = mainSource.indexOf('\n  });', start);
+    const handler = mainSource.slice(start, end);
+    assert.match(handler, /taskContext\.fileEvidence\.filePlan\.outputs\[0\]\.filePath/, channel);
+    assert.match(handler, /taskContext\.settleArtifacts\(/, channel);
+  }
+});
+
+test('两个 deferred action 仅在非空结果确定具体 output 后 promote，写盘与证据同一路径', () => {
+  const deferredManifest = loadFunction(
+    'buildStatementDeferredOutputManifest',
+    ['fs', 'path', 'artifactManifestFromFilePlan', 'normalizeFilePlanV1'],
+    [fs, path, artifactManifestFromFilePlan, normalizeFilePlanV1]
+  );
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-deferred-output-'));
+  try {
+    const outputPath = path.join(root, 'exports', '2026-08-18', 'balance', 'result.xlsx');
+    assert.equal(fs.existsSync(path.dirname(outputPath)), false);
+    const manifest = deferredManifest(outputPath, 'monthly-balance:assemble');
+    assert.equal(fs.existsSync(path.dirname(outputPath)), true);
+    assert.equal(fs.existsSync(outputPath), false);
+    assert.equal(manifest.outputs[0].filePath, outputPath);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+
+  const monthlyStart = mainSource.indexOf("trackedIpcHandle('monthly-balance:assemble'");
+  const monthlyEnd = mainSource.indexOf("trackedIpcHandle('monthly-balance:export'", monthlyStart);
+  const monthly = mainSource.slice(monthlyStart, monthlyEnd);
+  assert.match(monthly, /allocation:\s*'deferred'/);
+  assert.ok(monthly.indexOf('if (!assembled.records.length)') < monthly.indexOf('buildStatementDeferredOutputManifest('));
+  assert.doesNotMatch(
+    monthly.slice(0, monthly.indexOf('if (!assembled.records.length)')),
+    /ensureStorageRoot\(|mkdirSync\(/
+  );
+  assert.ok(monthly.indexOf('await taskContext.ensureFileBatch(promotionManifest)') < monthly.indexOf('writeBalanceWorkbook({'));
+  assert.match(monthly, /const promotedOutputPath = promotionManifest\.outputs\[0\]\.filePath/);
+  assert.doesNotMatch(monthly, /filePath:\s*output\.outputFilePath|临时文件：\$\{output\.outputFilePath\}/);
+
+  const accountStart = mainSource.indexOf("trackedIpcHandle('new-account:generate'");
+  const accountEnd = mainSource.indexOf("trackedIpcHandle('new-account:export'", accountStart);
+  const account = mainSource.slice(accountStart, accountEnd);
+  assert.match(account, /allocation:\s*'deferred'/);
+  assert.ok(account.indexOf('buildNewAccountBalanceRecords({') < account.indexOf('buildStatementDeferredOutputManifest('));
+  assert.ok(account.indexOf('await taskContext.ensureFileBatch(promotionManifest)') < account.indexOf('writeBalanceWorkbook({'));
+  assert.match(account, /filePath:\s*promotedOutputPath/);
+  assert.doesNotMatch(account, /filePath:\s*output\.outputFilePath/);
+
+  assert.doesNotMatch(mainSource, /atomicFileLifecycleChannels/);
+  assert.match(mainSource, /policy\.allocation === 'deferred'[\s\S]*?runDeferredFileTask/);
+  assert.match(mainSource, /archiveTaskLifecycle\.runFileTask/);
 });

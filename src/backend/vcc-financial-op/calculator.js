@@ -94,15 +94,6 @@ function datasetSnapshot(db, targetMonth) {
   };
 }
 
-function unresolvedImports(db, targetMonth) {
-  return db.prepare(`
-    SELECT id, source_type, status, error_message
-    FROM vcc_fin_op_import_records
-    WHERE target_month = ? AND resolution_status = 'unresolved'
-    ORDER BY id
-  `).all(targetMonth);
-}
-
 function activeImportBatches(db, targetMonth) {
   return db.prepare(`
     SELECT b.id, b.started_at, COUNT(r.id) AS record_count
@@ -315,7 +306,6 @@ function preflightCalculation(db, targetMonth) {
     .filter((row) => row.data_status === 'archived')
     .map((row) => row.dataset_type);
   const activeImports = activeImportBatches(db, targetMonth);
-  const unresolved = unresolvedImports(db, targetMonth);
   const detailSubjects = db.prepare(`
     SELECT DISTINCT subject
     FROM vcc_fin_op_effective_rows
@@ -362,7 +352,6 @@ function preflightCalculation(db, targetMonth) {
       revision: item.revision
     })),
     system: systemRows.map((row) => [row.subject, row.content_hash]),
-    unresolved: unresolved.map((row) => row.id),
     firstMonth: moduleState.firstMonth,
     opening: manualOpeningRows.map((row) => [row.subject, row.content_hash]),
     previousArchive: previousArchiveRows.map((row) => [
@@ -425,14 +414,6 @@ function preflightCalculation(db, targetMonth) {
       labels
     });
   }
-  if (unresolved.length > 0) {
-    issues.push({
-      code: 'unresolved-imports',
-      message: `账期内仍有 ${unresolved.length} 条未处理的失败导入记录，请在数据管理的“导入记录”中处理后重新运行。`,
-      count: unresolved.length,
-      recordIds: unresolved.map((row) => row.id)
-    });
-  }
   const systemDataset = datasets.find((item) => item.sourceType === SOURCE_TYPES.SYSTEM_OP);
   const canCheckSystemSubjects = systemDataset && systemDataset.datasetExists && systemDataset.rowCount > 0;
   if (canCheckSystemSubjects && missingSystemSubjects.length > 0) {
@@ -468,7 +449,6 @@ function preflightCalculation(db, targetMonth) {
       )),
       archived: archived.map((sourceType) => SOURCE_LABELS[sourceType]),
       activeImports,
-      unresolved,
       invalidSystemSubjects,
       missingSystemSubjects,
       unexpectedSystemSubjects,
@@ -1365,8 +1345,6 @@ function archiveRun({
     if (activeImportBatches(db, targetMonth).length > 0) {
       throw new Error('当前账期仍有原表正在导入，禁止归档');
     }
-    const unresolved = unresolvedImports(db, targetMonth);
-    if (unresolved.length > 0) throw new Error('仍有未处理的失败导入记录，禁止归档');
     const currentInputs = preflightCalculation(db, targetMonth);
     if (!currentInputs.ok) {
       throw createVccStateError(
@@ -1577,7 +1555,6 @@ module.exports = {
   parseBalancesJson,
   datasetSnapshot,
   activeImportBatches,
-  unresolvedImports,
   preflightCalculation,
   isValidInputFingerprint,
   preflightRequiredResult,

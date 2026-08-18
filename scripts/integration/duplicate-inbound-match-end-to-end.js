@@ -144,8 +144,8 @@ async function run() {
         reconId: 'RECON-2', orderId: 'ORDER-JULY', batchSeq: '1'
       })
     ]);
-    await service.tempStore.importFile(juneMpt);
-    await service.tempStore.importFile(julyMpt);
+    await service.tempStore.importLegacyFile(juneMpt);
+    await service.tempStore.importLegacyFile(julyMpt);
     assertEq(service.tempStore.listBatches().length, 2, 'MPT 两个月份批次均持久化');
 
     const bankFile = path.join(root, '银行对账单.xlsx');
@@ -193,7 +193,7 @@ async function run() {
         reconId: 'UNRELATED', orderId: 'UNRELATED', batchSeq: '1'
       })
     ]);
-    await service.tempStore.importFile(extraMpt);
+    await service.tempStore.importLegacyFile(extraMpt);
     assertTrue(service.status().run.stale, 'MPT 快照变化后旧结果标记 stale');
     assertTrue(!service.status().canExport, 'MPT 快照变化后禁止旧结果导出');
 

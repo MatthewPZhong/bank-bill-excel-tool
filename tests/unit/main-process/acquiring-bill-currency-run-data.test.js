@@ -34,6 +34,10 @@ const {
   createTaskLifecycle
 } = require('../../../src/main-process/archive-center/task-lifecycle');
 const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
+const {
   createTaskPolicyRegistry
 } = require('../../../src/main-process/archive-center/task-policy-registry');
 const acquiringRunData = require('../../../src/main-process/acquiring-bill-currency-run-data');
@@ -166,7 +170,13 @@ function seedResumableRun({ source, monthKey, progress, batchContext = null }) {
       totalChunks: progress.totalChunks,
       status: progress.status,
       chunkSize: progress.chunkSize,
-      batchContext
+      batchContext,
+      outputIntent: Object.prototype.hasOwnProperty.call(progress, 'outputIntent')
+        ? progress.outputIntent
+        : {
+            diffFilePath: path.join(tmpdir, `${source}-${monthKey}-frozen.xlsx`),
+            reportFilePath: path.join(tmpdir, `${source}-${monthKey}-frozen.xlsx`)
+          }
     });
     return {
       runId,
@@ -281,6 +291,10 @@ test('fresh run prepare 可读取绑定原批次的可恢复 run，legacy/no-con
         totalChunks: 3,
         status: 'partial',
         chunkSize: 5000,
+        outputIntent: {
+          diffFilePath: path.join(tmpdir, 'side-2026-10-frozen.xlsx'),
+          reportFilePath: path.join(tmpdir, 'side-2026-10-frozen.xlsx')
+        },
         batchContextVersion: 1,
         batchContext: context
       },
@@ -306,21 +320,81 @@ test('fresh run prepare 可读取绑定原批次的可恢复 run，legacy/no-con
   }), null);
 });
 
-function reserveResumeBatch(repository, plan, parentRunId) {
-  return repository.reserveTaskBatch({
+test('resume 只接受显式 runId，不按月份选 latest/partial 候选', () => {
+  seedResumableRun({
+    source: 'main',
+    monthKey: '2027-01',
+    progress: {
+      lastCompletedChunkIndex: 0,
+      totalChunks: 2,
+      status: 'partial',
+      chunkSize: 5000
+    }
+  });
+  assert.throws(
+    () => acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey: '2027-01'
+    }),
+    /runId 必填/
+  );
+});
+
+function reserveAtomicResumeBatch(repository, {
+  taskRunId,
+  operationKey,
+  parentRunId,
+  outputPath,
+  sourceOperation = 'acquiringBillCurrency:run:resume',
+  start = true
+}) {
+  const filePlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [],
+    outputs: [{ filePath: outputPath, role: 'output', sourceOperation }]
+  });
+  const taskRun = repository.beginTaskRun({
+    taskRunId,
     moduleId: 'acquiring-bill-currency',
+    taskKey: 'acquiringBillCurrency:run:resume',
+    operationKey,
+    parentRunId
+  }).taskRun;
+  const reserved = repository.reserveFileTaskBatch({
+    taskRun,
+    manifest: artifactManifestFromFilePlan(filePlan),
     moduleCode: 'ACQUIRING',
     moduleName: '收单单据币种校验',
-    taskKey: 'acquiringBillCurrency:run:resume',
-    taskRunId: plan.taskRunId,
-    operationKey: plan.operationKey,
-    parentRunId
+    metadata: {}
   });
+  if (start) repository.startFileTask(taskRunId, reserved.batch.id);
+  return {
+    taskRun,
+    batch: reserved.batch,
+    context: batchContextFrom(reserved.batch),
+    filePlan,
+    manifestIdentity: artifactManifestFromFilePlan(filePlan).identity
+  };
 }
 
 test.describe('crash/resume archive identity', () => {
   test('side 新格式恢复复用精确身份，worker 保持 dbPath/chunk offset，成功只补 main mirror', async () => {
     const monthKey = '2026-09';
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const outputPath = path.join(tmpdir, 'side-resume-output.xlsx');
+    const owner = reserveAtomicResumeBatch(archiveRepository, {
+      taskRunId: 'side-resume-task',
+      operationKey: 'side-resume-operation',
+      parentRunId: 'parent-side-resume',
+      outputPath,
+      sourceOperation: 'acquiringBillCurrency:run:resume'
+    });
     const seeded = seedResumableRun({
       source: 'side',
       monthKey,
@@ -328,36 +402,12 @@ test.describe('crash/resume archive identity', () => {
         lastCompletedChunkIndex: 3,
         totalChunks: 8,
         status: 'partial',
-        chunkSize: 25000
-      }
+        chunkSize: 25000,
+        outputIntent: { diffFilePath: outputPath, reportFilePath: outputPath }
+      },
+      batchContext: owner.context
     });
-    const archiveRepository = createArchiveRepository(mainDb, {
-      now: () => new Date('2026-08-10T10:00:00.000Z')
-    });
-    archiveRepository.ensureSchema();
-    const legacyPlan = acquiringRunData.prepareRunResume({
-      userDataDir,
-      mainDb,
-      mainDbPath: appDb.dbPath,
-      monthKey,
-      runId: seeded.runId
-    });
-    const reserved = reserveResumeBatch(archiveRepository, legacyPlan, 'parent-side-resume');
-    const persistedContext = batchContextFrom(reserved.batch);
-    acquiringRunData.persistRunResumeBatchContext({
-      userDataDir,
-      mainDb,
-      prepared: legacyPlan,
-      batchContext: persistedContext
-    });
-    archiveRepository.transitionTaskStatus(persistedContext.batchId, 'running', {
-      expectedStatuses: ['reserved']
-    });
-    archiveRepository.transitionTaskStatus(persistedContext.batchId, 'failed', {
-      expectedStatuses: ['running'],
-      failureCode: 'WORKER_CRASH',
-      failureMessage: 'worker exited'
-    });
+    archiveRepository.markInterruptedTasks();
 
     const prepared = acquiringRunData.prepareRunResume({
       userDataDir,
@@ -368,17 +418,21 @@ test.describe('crash/resume archive identity', () => {
     });
     assert.equal(prepared.source, 'side');
     assert.equal(prepared.dbPath, seeded.dbPath);
-    assert.deepEqual(prepared.recovery.batchContext, persistedContext);
-    assert.equal(prepared.taskRunId, persistedContext.taskRunId);
-    assert.equal(prepared.operationKey, persistedContext.operationKey);
+    assert.deepEqual(prepared.recovery.batchContext, owner.context);
+    assert.equal(prepared.taskRunId, owner.context.taskRunId);
+    assert.equal(prepared.operationKey, owner.context.operationKey);
     assert.equal(prepared.flowPlan, null, '持久恢复不重新解析 parent flow');
 
     const latestBefore = archiveRepository.getLatestIssuedBatch();
-    const reopened = archiveRepository.beginTaskRecovery(
-      prepared.recovery.batchContext,
-      { evidence: prepared.recovery.evidence }
-    );
+    const reopened = archiveRepository.beginFileTaskRecovery(prepared.recovery.batchContext, {
+      manifestIdentity: owner.manifestIdentity
+    });
     assert.equal(reopened.status, 'reopened');
+    assert.equal(
+      archiveRepository.listArtifacts(owner.batch.id)[0].sourceOperation,
+      'acquiringBillCurrency:run:resume',
+      '恢复上一次 resume 必须保留原 manifest descriptor'
+    );
     assert.equal(archiveRepository.getLatestIssuedBatch().batchNumber, latestBefore.batchNumber);
     assert.equal(archiveRepository.listBatches().length, 1, '恢复不新增序号/批次');
 
@@ -387,7 +441,8 @@ test.describe('crash/resume archive identity', () => {
       prepared,
       storageRoot: tmpdir,
       chunkSize: prepared.progress.chunkSize,
-      batchContext: persistedContext,
+      batchContext: owner.context,
+      outputIntent: prepared.outputIntent,
       mainDb,
       dispatchFn: async (payload) => {
         workerPayload = payload;
@@ -405,7 +460,7 @@ test.describe('crash/resume archive identity', () => {
     });
     assert.equal(result.runId, seeded.runId);
     assert.equal(workerPayload.__dbPath, seeded.dbPath);
-    assert.deepEqual(workerPayload.batchContext, persistedContext);
+    assert.deepEqual(workerPayload.batchContext, owner.context);
     assert.deepEqual(workerPayload.resumeFromRun, {
       runId: seeded.runId,
       lastCompletedChunkIndex: 3
@@ -419,7 +474,7 @@ test.describe('crash/resume archive identity', () => {
     assert.equal(mirror.mismatch_rows, 2);
   });
 
-  test('legacy side/main 使用 source+month+runId 稳定预留，reserve→backfill 窗口重试复用', async () => {
+  test('legacy no-owner 以新 File Task CAS 接管，重放不能覆盖新 owner/progress/output intent', () => {
     const archiveRepository = createArchiveRepository(mainDb, {
       now: () => new Date('2026-08-10T10:00:00.000Z')
     });
@@ -434,7 +489,8 @@ test.describe('crash/resume archive identity', () => {
           lastCompletedChunkIndex: 1,
           totalChunks: 5,
           status: 'partial',
-          chunkSize: 10000
+          chunkSize: 10000,
+          outputIntent: null
         }
       });
       const firstPlan = acquiringRunData.prepareRunResume({
@@ -444,50 +500,37 @@ test.describe('crash/resume archive identity', () => {
         monthKey: fixture.monthKey,
         runId: seeded.runId
       });
-      assert.equal(firstPlan.recovery.legacy, true);
-      assert.match(firstPlan.operationKey, new RegExp(`${fixture.source}:${fixture.monthKey}:${seeded.runId}$`));
+      assert.equal(firstPlan.recovery.batchContext, null);
+      assert.equal(firstPlan.outputIntent, null);
+      assert.equal(firstPlan.taskRunId, null);
+      assert.equal(firstPlan.operationKey, null);
       assert.equal(
         firstPlan.flowPlan.flowIdentity.value,
         `acquiring-run:${fixture.source}:${fixture.monthKey}:${seeded.runId}`
       );
-      const firstReserve = reserveResumeBatch(
-        archiveRepository,
-        firstPlan,
-        `parent-${fixture.source}`
-      );
-      assert.equal(firstReserve.created, true);
-      const latestAfterFirst = archiveRepository.getLatestIssuedBatch();
-
-      // 模拟进程崩在 reserve 与 batchContext 回填之间：原 run 仍是 legacy，稳定 operation 必须复用。
-      const retryPlan = acquiringRunData.prepareRunResume({
-        userDataDir,
-        mainDb,
-        mainDbPath: appDb.dbPath,
-        monthKey: fixture.monthKey,
-        runId: seeded.runId
+      const outputPath = path.join(tmpdir, `${fixture.source}-transferred.xlsx`);
+      const next = reserveAtomicResumeBatch(archiveRepository, {
+        taskRunId: `${fixture.source}-new-task`,
+        operationKey: `${fixture.source}-new-operation`,
+        parentRunId: `parent-${fixture.source}`,
+        outputPath,
+        start: false
       });
-      assert.equal(retryPlan.taskRunId, firstPlan.taskRunId);
-      assert.equal(retryPlan.operationKey, firstPlan.operationKey);
-      const reused = reserveResumeBatch(
-        archiveRepository,
-        retryPlan,
-        `parent-${fixture.source}`
-      );
-      assert.equal(reused.created, false);
-      assert.equal(reused.batch.id, firstReserve.batch.id);
-      assert.equal(
-        archiveRepository.getLatestIssuedBatch().batchNumber,
-        latestAfterFirst.batchNumber,
-        '稳定 reserve 重放不推进全局序号'
-      );
-
-      const context = batchContextFrom(firstReserve.batch);
-      acquiringRunData.persistRunResumeBatchContext({
-        userDataDir,
+      const outputIntent = { diffFilePath: outputPath, reportFilePath: outputPath };
+      acquiringRunData.transferRunResumeOwner({
         mainDb,
-        prepared: retryPlan,
-        batchContext: context
+        prepared: firstPlan,
+        previousBatchContext: null,
+        nextBatchContext: next.context,
+        nextOutputIntent: outputIntent
       });
+      const afterCasCrashRecovery = archiveRepository.beginFileTaskRecovery(next.context, {
+        manifestIdentity: next.manifestIdentity
+      });
+      assert.equal(afterCasCrashRecovery.status, 'unchanged');
+      assert.equal(afterCasCrashRecovery.taskRun.status, 'prepared');
+      assert.equal(afterCasCrashRecovery.batch.taskStatus, 'reserved');
+      archiveRepository.startFileTask(next.context.taskRunId, next.context.batchId);
       const persistedPlan = acquiringRunData.prepareRunResume({
         userDataDir,
         mainDb,
@@ -495,50 +538,308 @@ test.describe('crash/resume archive identity', () => {
         monthKey: fixture.monthKey,
         runId: seeded.runId
       });
-      assert.deepEqual(persistedPlan.recovery.batchContext, context);
+      assert.deepEqual(persistedPlan.recovery.batchContext, next.context);
+      assert.deepEqual(persistedPlan.outputIntent, outputIntent);
       assert.equal(persistedPlan.source, fixture.source);
-      if (fixture.source === 'main') {
-        let dispatchedPath = null;
-        await acquiringRunData.resumeRunCheck({
-          prepared: persistedPlan,
+      assert.throws(
+        () => acquiringRunData.transferRunResumeOwner({
+          mainDb,
+          prepared: firstPlan,
+          previousBatchContext: null,
+          nextBatchContext: next.context,
+          nextOutputIntent: outputIntent
+        }),
+        /owner.*已变化/
+      );
+    }
+  });
+
+  test('owner transfer 在 progress 或 output intent 变化时原子拒绝，不回填新 owner', () => {
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    for (const fixture of [
+      { monthKey: '2027-02', changedChunk: 2, changedOutput: null },
+      {
+        monthKey: '2027-03',
+        changedChunk: 1,
+        changedOutput: {
+          diffFilePath: path.join(tmpdir, 'changed-output.xlsx'),
+          reportFilePath: path.join(tmpdir, 'changed-output.xlsx')
+        }
+      }
+    ]) {
+      const seeded = seedResumableRun({
+        source: 'main',
+        monthKey: fixture.monthKey,
+        progress: {
+          lastCompletedChunkIndex: 1,
+          totalChunks: 5,
+          status: 'partial',
+          chunkSize: 10000,
+          outputIntent: null
+        }
+      });
+      const prepared = acquiringRunData.prepareRunResume({
+        userDataDir,
+        mainDb,
+        mainDbPath: appDb.dbPath,
+        monthKey: fixture.monthKey,
+        runId: seeded.runId
+      });
+      runRepo.setRunChunkProgress(mainDb, {
+        runId: seeded.runId,
+        lastCompletedChunkIndex: fixture.changedChunk,
+        totalChunks: 5,
+        status: 'partial',
+        chunkSize: 10000,
+        outputIntent: fixture.changedOutput
+      });
+      const next = reserveAtomicResumeBatch(archiveRepository, {
+        taskRunId: `changed-${fixture.monthKey}`,
+        operationKey: `changed-operation-${fixture.monthKey}`,
+        parentRunId: `changed-parent-${fixture.monthKey}`,
+        outputPath: path.join(tmpdir, `next-${fixture.monthKey}.xlsx`),
+        start: false
+      });
+      assert.throws(
+        () => acquiringRunData.transferRunResumeOwner({
+          mainDb,
+          prepared,
+          previousBatchContext: null,
+          nextBatchContext: next.context,
+          nextOutputIntent: {
+            diffFilePath: next.filePlan.outputs[0].filePath,
+            reportFilePath: next.filePlan.outputs[0].filePath
+          }
+        }),
+        /恢复进度.*已变化/
+      );
+      assert.equal(
+        runRepo.readRunProgressBatchContext(
+          runRepo.getRunChunkProgress(mainDb, seeded.runId)
+        ),
+        null
+      );
+    }
+  });
+
+  test('cancelled owner 的手工 resume 新建 File Task，CAS 后保持 parent 但不复用旧号码/owner', async () => {
+    const monthKey = '2027-04';
+    const oldOutputPath = path.join(tmpdir, 'cancelled-output.xlsx');
+    const newOutputPath = path.join(tmpdir, 'resumed-output.xlsx');
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const old = reserveAtomicResumeBatch(archiveRepository, {
+      taskRunId: 'cancelled-old-task',
+      operationKey: 'cancelled-old-operation',
+      parentRunId: 'cancelled-shared-parent',
+      outputPath: oldOutputPath,
+      sourceOperation: 'acquiringBillCurrency:run'
+    });
+    const seeded = seedResumableRun({
+      source: 'side',
+      monthKey,
+      progress: {
+        lastCompletedChunkIndex: 1,
+        totalChunks: 3,
+        status: 'partial',
+        chunkSize: 5000,
+        outputIntent: {
+          diffFilePath: oldOutputPath,
+          reportFilePath: oldOutputPath
+        }
+      },
+      batchContext: old.context
+    });
+    archiveRepository.finishFileTask(old.context.taskRunId, old.context.batchId, {
+      taskStatus: 'cancelled',
+      code: 'ARCHIVE_TASK_CANCELLED',
+      message: 'cancelled'
+    });
+    const prepared = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey,
+      runId: seeded.runId
+    });
+    const nextPlan = normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{
+        filePath: newOutputPath,
+        role: 'output',
+        sourceOperation: 'acquiringBillCurrency:run:resume'
+      }]
+    });
+    const archiveService = createArchiveService({
+      repository: archiveRepository,
+      rootDir: path.join(tmpdir, 'archive-center-transfer')
+    });
+    assert.equal((await archiveService.initialize()).available, true);
+    const lifecycle = createTaskLifecycle({
+      businessOperationRegistry: createBusinessOperationRegistry(),
+      archiveService,
+      flowResolver: createBusinessFlowResolver({ archiveService }),
+      operationTracker: createArchiveOperationTracker({
+        sink: createArchiveCenterController({ database: appDb, service: archiveService }).sink
+      })
+    });
+    const policy = createTaskPolicyRegistry().require('acquiringBillCurrency:run:resume');
+    const resumed = await lifecycle.runFileTask({
+      meta: { channel: policy.channel },
+      policy,
+      explicitParentRunId: old.context.parentRunId,
+      flowPlanResolver: () => ({ startsNewFlow: false, flowIdentity: null }),
+      filePlanResolver: () => nextPlan,
+      beforeStart: (nextContext) => acquiringRunData.transferRunResumeOwner({
+        mainDb,
+        prepared,
+        previousBatchContext: old.context,
+        nextBatchContext: nextContext,
+        nextOutputIntent: {
+          diffFilePath: newOutputPath,
+          reportFilePath: newOutputPath
+        }
+      }),
+      execute: async (nextContext, controls) => {
+        const result = await acquiringRunData.resumeRunCheck({
+          prepared,
           storageRoot: tmpdir,
-          chunkSize: persistedPlan.progress.chunkSize,
-          batchContext: context,
+          chunkSize: prepared.progress.chunkSize,
+          batchContext: nextContext,
+          outputIntent: {
+            diffFilePath: newOutputPath,
+            reportFilePath: newOutputPath
+          },
           mainDb,
           dispatchFn: async (payload) => {
-            dispatchedPath = payload.__dbPath;
+            fs.writeFileSync(payload.outputIntent.diffFilePath, 'resumed');
             return {
               runId: seeded.runId,
               totalBillRows: 11,
               matchedRows: 9,
               mismatchRows: 2,
-              unmatchedRows: 0
+              unmatchedRows: 0,
+              diffFilePath: newOutputPath,
+              reportFilePath: newOutputPath
             };
           },
           dispatchCallbacks: {}
         });
-        assert.equal(dispatchedPath, appDb.dbPath, 'legacy main 必须继续 dispatch 原主库');
-        const mainRun = mainDb.prepare(`
-          SELECT side_db_rel_path
-          FROM acquiring_bill_currency_runs
-          WHERE id = ?
-        `).get(seeded.runId);
-        assert.equal(mainRun.side_db_rel_path, null, 'legacy main 成功不得伪造 side mirror');
-        assert.equal(
-          fs.existsSync(runDataStore.sideDbPath(userDataDir, MODULE, fixture.monthKey)),
-          false,
-          'legacy main resume 不创建 side DB'
-        );
+        await controls.settleArtifacts({
+          files: nextPlan.outputs.map((item) => ({ artifactKey: item.artifactKey }))
+        });
+        return { status: 'success', ...result };
       }
-    }
+    });
+    assert.equal(resumed.status, 'success');
+    const batches = archiveRepository.listBatches({ moduleId: 'acquiring-bill-currency' });
+    assert.equal(batches.length, 2);
+    const next = batches.find((batch) => batch.id !== old.context.batchId);
+    assert.equal(next.parentRunId, old.context.parentRunId);
+    assert.notEqual(next.taskRunId, old.context.taskRunId);
+    assert.notEqual(next.operationKey, old.context.operationKey);
+    assert.notEqual(next.batchNumber, old.context.batchNumber);
+    assert.equal(archiveRepository.getBatch(old.context.batchId).taskStatus, 'cancelled');
+    assert.deepEqual(
+      runRepo.readRunProgressBatchContext(
+        (() => {
+          const sideDb = new DatabaseSync(seeded.dbPath, { readOnly: true });
+          try {
+            return runRepo.getRunChunkProgress(sideDb, seeded.runId);
+          } finally {
+            sideDb.close();
+          }
+        })()
+      ),
+      batchContextFrom(next)
+    );
+  });
+
+  test('failed owner 也只能 CAS 转移到新 File Task，旧批次终态不变', () => {
+    const monthKey = '2027-05';
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const oldPath = path.join(tmpdir, 'failed-old-output.xlsx');
+    const old = reserveAtomicResumeBatch(archiveRepository, {
+      taskRunId: 'failed-old-task',
+      operationKey: 'failed-old-operation',
+      parentRunId: 'failed-shared-parent',
+      outputPath: oldPath
+    });
+    const seeded = seedResumableRun({
+      source: 'main',
+      monthKey,
+      progress: {
+        lastCompletedChunkIndex: 0,
+        totalChunks: 2,
+        status: 'partial',
+        chunkSize: 5000,
+        outputIntent: { diffFilePath: oldPath, reportFilePath: oldPath }
+      },
+      batchContext: old.context
+    });
+    archiveRepository.finishFileTask(old.context.taskRunId, old.context.batchId, {
+      taskStatus: 'failed',
+      code: 'WORKER_FAILED',
+      message: 'worker failed'
+    });
+    const prepared = acquiringRunData.prepareRunResume({
+      userDataDir,
+      mainDb,
+      mainDbPath: appDb.dbPath,
+      monthKey,
+      runId: seeded.runId
+    });
+    const nextPath = path.join(tmpdir, 'failed-next-output.xlsx');
+    const next = reserveAtomicResumeBatch(archiveRepository, {
+      taskRunId: 'failed-next-task',
+      operationKey: 'failed-next-operation',
+      parentRunId: old.context.parentRunId,
+      outputPath: nextPath,
+      start: false
+    });
+    acquiringRunData.transferRunResumeOwner({
+      mainDb,
+      prepared,
+      previousBatchContext: old.context,
+      nextBatchContext: next.context,
+      nextOutputIntent: { diffFilePath: nextPath, reportFilePath: nextPath }
+    });
+    assert.equal(archiveRepository.getBatch(old.context.batchId).taskStatus, 'failed');
+    assert.deepEqual(
+      runRepo.readRunProgressBatchContext(runRepo.getRunChunkProgress(mainDb, seeded.runId)),
+      next.context
+    );
+    assert.equal(next.context.parentRunId, old.context.parentRunId);
+    assert.notEqual(next.context.batchNumber, old.context.batchNumber);
+    assert.notEqual(next.context.taskRunId, old.context.taskRunId);
   });
 
   test('side complete 崩溃恢复零 worker 替换旧镜像并复用原批次，exact 镜像严格 no-op', async () => {
     const monthKey = '2026-12';
     const diffFilePath = path.join(tmpdir, 'completed-diff.xlsx');
-    const reportFilePath = path.join(tmpdir, 'completed-report.xlsx');
     fs.writeFileSync(diffFilePath, 'diff');
-    fs.writeFileSync(reportFilePath, 'report');
+    const reportFilePath = diffFilePath;
+    const archiveRepository = createArchiveRepository(mainDb, {
+      now: () => new Date('2026-08-10T10:00:00.000Z')
+    });
+    archiveRepository.ensureSchema();
+    const owner = reserveAtomicResumeBatch(archiveRepository, {
+      taskRunId: 'completed-resume-task',
+      operationKey: 'completed-resume-operation',
+      parentRunId: 'parent-completed-run',
+      outputPath: diffFilePath,
+      sourceOperation: 'acquiringBillCurrency:run'
+    });
     const seeded = seedResumableRun({
       source: 'side',
       monthKey,
@@ -546,8 +847,10 @@ test.describe('crash/resume archive identity', () => {
         lastCompletedChunkIndex: 2,
         totalChunks: 4,
         status: 'partial',
-        chunkSize: 5000
-      }
+        chunkSize: 5000,
+        outputIntent: { diffFilePath, reportFilePath }
+      },
+      batchContext: owner.context
     });
     const staleMirror = mainDb.prepare(`
       INSERT INTO acquiring_bill_currency_runs
@@ -561,29 +864,6 @@ test.describe('crash/resume archive identity', () => {
       runDataStore.sideDbRelPath(MODULE, monthKey)
     );
     const staleMirrorId = Number(staleMirror.lastInsertRowid);
-    const archiveRepository = createArchiveRepository(mainDb, {
-      now: () => new Date('2026-08-10T10:00:00.000Z')
-    });
-    archiveRepository.ensureSchema();
-    const legacyPlan = acquiringRunData.prepareRunResume({
-      userDataDir,
-      mainDb,
-      mainDbPath: appDb.dbPath,
-      monthKey,
-      runId: seeded.runId
-    });
-    const reserved = reserveResumeBatch(archiveRepository, legacyPlan, 'parent-completed-run');
-    const batchContext = batchContextFrom(reserved.batch);
-    acquiringRunData.persistRunResumeBatchContext({
-      userDataDir,
-      mainDb,
-      prepared: legacyPlan,
-      batchContext
-    });
-    archiveRepository.transitionTaskStatus(batchContext.batchId, 'running', {
-      expectedStatuses: ['reserved']
-    });
-
     const sideDb = new DatabaseSync(seeded.dbPath);
     const sideRunBefore = runRepo.getRunById(sideDb, seeded.runId);
     runRepo.updateRunStatus(sideDb, { runId: seeded.runId, status: 'success' });
@@ -596,15 +876,17 @@ test.describe('crash/resume archive identity', () => {
       chunkSize: 5000
     });
     sideDb.close();
+    archiveRepository.markInterruptedTasks();
 
     const prepared = acquiringRunData.prepareRunResume({
       userDataDir,
       mainDb,
       mainDbPath: appDb.dbPath,
-      monthKey
+      monthKey,
+      runId: seeded.runId
     });
     assert.equal(prepared.mode, 'completed');
-    assert.deepEqual(prepared.recovery.batchContext, batchContext);
+    assert.deepEqual(prepared.recovery.batchContext, owner.context);
     assert.equal(prepared.runEvidence.ranAt, sideRunBefore.ran_at);
     acquiringRunData.assertRunResumeFresh({
       userDataDir,
@@ -614,11 +896,12 @@ test.describe('crash/resume archive identity', () => {
     });
 
     let workerCalls = 0;
-    const recover = (context = batchContext) => acquiringRunData.resumeRunCheck({
+    const recover = (context = owner.context) => acquiringRunData.resumeRunCheck({
       prepared,
       storageRoot: tmpdir,
       chunkSize: prepared.progress.chunkSize,
       batchContext: context,
+      outputIntent: prepared.outputIntent,
       mainDb,
       dispatchFn: async () => {
         workerCalls += 1;
@@ -646,19 +929,39 @@ test.describe('crash/resume archive identity', () => {
       args: [{ monthKey }],
       prepared: { resumePlan: prepared }
     };
-    const first = await lifecycle.run({
+    const recoveryFilePlan = normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{
+        filePath: diffFilePath,
+        role: owner.filePlan.outputs[0].role,
+        sourceOperation: owner.filePlan.outputs[0].sourceOperation,
+        artifactKey: owner.filePlan.outputs[0].artifactKey
+      }]
+    });
+    const first = await lifecycle.runFileTask({
       meta: { channel: policy.channel },
       policy,
       args: invocation.args,
       prepared: invocation.prepared,
       recovery: prepared.recovery,
-      beforeStart: () => acquiringRunData.assertRunResumeFresh({
-        userDataDir,
-        mainDb,
-        mainDbPath: appDb.dbPath,
-        prepared
-      }),
-      execute: (context) => recover(context),
+      filePlanResolver: () => {
+        acquiringRunData.assertRunResumeFresh({
+          userDataDir,
+          mainDb,
+          mainDbPath: appDb.dbPath,
+          prepared
+        });
+        return recoveryFilePlan;
+      },
+      execute: async (context, controls) => {
+        const result = await recover(context);
+        await controls.settleArtifacts({
+          files: recoveryFilePlan.outputs.map((item) => ({ artifactKey: item.artifactKey }))
+        });
+        return result;
+      },
       resultClassifier: policy.resultClassifier,
       resultMetadataResolver: policy.resultMetadataResolver,
       resultFlowIdentities: (result, context) => (
@@ -678,11 +981,11 @@ test.describe('crash/resume archive identity', () => {
     assert.deepEqual(second, first);
     assert.equal(first.diffFilePath, diffFilePath);
     assert.equal(first.reportFilePath, reportFilePath);
-    const completedBatch = archiveRepository.getBatchDetail(batchContext.batchId);
+    const completedBatch = archiveRepository.getBatchDetail(owner.context.batchId);
     assert.equal(completedBatch.taskStatus, 'succeeded');
     assert.deepEqual(
       completedBatch.artifacts.map((artifact) => artifact.originalName).sort(),
-      [path.basename(diffFilePath), path.basename(reportFilePath)].sort()
+      [path.basename(diffFilePath)]
     );
     assert.ok(completedBatch.artifacts.every((artifact) => artifact.status === 'ready'));
     assert.notEqual(firstMirror.id, staleMirrorId, '恢复应沿正常成功路径替换上一轮 stale mirror');

@@ -138,13 +138,86 @@ function createPositionSourceImportTaskContract({
       }
       const service = getService();
       const preparedImport = await service.prepareSourceImportForLifecycle(choice.filePaths);
-      if (!preparedImport.requiresExecution) {
-        return { proceed: false, result: preparedImport.result };
+      const plan = preparedImport.plan;
+      const preflightReady = plan && plan.preflightReady;
+      const legacyEntries = plan && plan.engine === 'legacy' ? plan.entries : [];
+      const staged = plan && plan.engine === 'streaming'
+        ? [
+            ...(preflightReady.acceptedOrdinaryInputFiles || []),
+            ...(preflightReady.accountConfirmationDescriptor
+              ? [preflightReady.accountConfirmationDescriptor]
+              : [])
+          ]
+        : legacyEntries
+          .filter((entry) => entry.parsed && entry.parsed.archivePath)
+          .map((entry) => entry.parsed);
+      const resultFiles = !plan && preparedImport.result
+        ? (preparedImport.result.results || []).filter((item) => item.archivePath)
+        : [];
+      const stagedFiles = staged.length > 0 ? staged : resultFiles;
+      const selectedCount = choice.filePaths.length;
+      const executionInputIndexes = [];
+      if (plan && plan.engine === 'streaming') {
+        for (let index = 0; index < (preflightReady.acceptedOrdinaryInputFiles || []).length; index += 1) {
+          executionInputIndexes.push(selectedCount + index);
+        }
+      } else if (plan && plan.engine === 'legacy') {
+        let stagedIndex = 0;
+        for (const entry of legacyEntries) {
+          if (!entry.parsed || !entry.parsed.archivePath) continue;
+          if (entry.status === 'prepared') executionInputIndexes.push(selectedCount + stagedIndex);
+          stagedIndex += 1;
+        }
       }
+      const outputFiles = preflightReady && Array.isArray(preflightReady.outputFiles)
+        ? preflightReady.outputFiles
+        : preparedImport.result && Array.isArray(preparedImport.result.outputFiles)
+          ? preparedImport.result.outputFiles
+          : [];
       return {
         proceed: true,
-        inputPaths: preparedImport.inputPaths,
         preparedImport,
+        executionInputIndexes: Object.freeze(executionInputIndexes),
+        positionArchiveEvidence: Object.freeze({
+          inputs: Object.freeze([
+            ...choice.filePaths.map(() => Object.freeze({})),
+            ...stagedFiles.map((file) => Object.freeze({
+              sourceType: file.sourceType,
+              sha256: file.stagedSha256,
+              sizeBytes: file.stagedSizeBytes
+            }))
+          ]),
+          outputs: Object.freeze(outputFiles.map((file) => Object.freeze({
+            sourceSnapshot: file.sourceSnapshot,
+            sha256: file.expectedSha256 || file.sha256,
+            sizeBytes: file.sizeBytes,
+            requiredInputPaths: file.requiredInputPaths,
+            metadata: file.metadata
+          })))
+        }),
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [
+            ...choice.filePaths.map((filePath) => ({
+              filePath,
+              role: 'input',
+              sourceOperation: 'position-reconciliation:source:prepare-import'
+            })),
+            ...stagedFiles.map((file) => ({
+              filePath: file.archivePath,
+              role: 'input',
+              originalName: file.fileName,
+              sourceOperation: 'position-reconciliation:source:prepare-import'
+            }))
+          ],
+          outputs: outputFiles.map((file) => ({
+            filePath: file.filePath,
+            role: 'output',
+            originalName: file.originalName,
+            sourceOperation: 'position-reconciliation:source:prepare-import'
+          }))
+        },
         onAbandon: () => service.abandonPreparedSourceImport(preparedImport.plan)
       };
     },
@@ -152,15 +225,24 @@ function createPositionSourceImportTaskContract({
       const service = getService();
       let applyEntered = false;
       try {
-        return await withSourceLock(() => {
-          applyEntered = true;
-          return service.executePreparedSourceImport(
-            prepared.preparedImport.plan,
-            taskContext.batchContext
-          );
-        });
+        const result = prepared.preparedImport.requiresExecution
+          ? await withSourceLock(() => {
+              applyEntered = true;
+              return service.executePreparedSourceImport(
+                prepared.preparedImport.plan,
+                taskContext.batchContext,
+                {
+                  executionInputPaths: prepared.executionInputIndexes.map(
+                    (index) => taskContext.fileEvidence.filePlan.inputs[index].filePath
+                  ),
+                  outputs: taskContext.fileEvidence.filePlan.outputs
+                }
+              );
+            })
+          : prepared.preparedImport.result;
+        return result;
       } finally {
-        if (!applyEntered) {
+        if (prepared.preparedImport.requiresExecution && !applyEntered) {
           await service.abandonPreparedSourceImport(prepared.preparedImport.plan);
         }
       }

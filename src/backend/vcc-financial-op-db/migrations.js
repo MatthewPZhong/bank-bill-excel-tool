@@ -19,10 +19,12 @@ const {
   readFirstMonthFacts
 } = require('./state-model');
 const {
+  assertEmptyVccStorageForUpgrade,
   ensureVccStorageSideTables,
   getVccStorageContractVersion,
   installVccStorageWriteGuards,
-  registerVccStorageWriteCapability
+  registerVccStorageWriteCapability,
+  upgradeEmptyVccStorageContract
 } = require('./storage-contract');
 
 const LEGACY_VCC_CURRENCY = 'CNH';
@@ -636,7 +638,7 @@ function ensureVccFinancialOpStateModelSupport(db) {
   }
 }
 
-function ensureVccFinancialOpTablesSupport(db) {
+function ensureVccFinancialOpTablesSupport(db, options = {}) {
   // contract-v2 的触发器调用连接本地能力函数。必须先注册再执行任何
   // VCC DML；3.1.9 连接没有该函数，因此只能读、不能降级写。
   registerVccStorageWriteCapability(db);
@@ -644,6 +646,12 @@ function ensureVccFinancialOpTablesSupport(db) {
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'app_settings'
   `).get());
   const storageContractVersion = hasSettings ? getVccStorageContractVersion(db) : 1;
+  const shouldAutoUpgradeEmptyV1 = options.autoUpgradeEmptyV1 === true
+    && hasSettings
+    && storageContractVersion === 1;
+  // 正式 AppDatabase 启动在任何 VCC schema/DML 前先做只读判定。
+  // 非空 v1 不能进入后续兼容迁移，更不能被自动清空。
+  if (shouldAutoUpgradeEmptyV1) assertEmptyVccStorageForUpgrade(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS vcc_fin_op_import_batches (
       id TEXT PRIMARY KEY,
@@ -1058,8 +1066,15 @@ function ensureVccFinancialOpTablesSupport(db) {
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_attempts_comparison
       ON vcc_fin_op_system_snapshot_attempts(comparison_attempt_id)
   `);
+  const storageContractMigration = shouldAutoUpgradeEmptyV1
+    ? upgradeEmptyVccStorageContract(db)
+    : Object.freeze({
+        upgraded: false,
+        fromVersion: storageContractVersion,
+        toVersion: storageContractVersion
+      });
   if (storageContractVersion >= 2) installVccStorageWriteGuards(db);
-  return { firstMonthDiagnostic: stateDiagnostic, currencyMigration };
+  return { firstMonthDiagnostic: stateDiagnostic, currencyMigration, storageContractMigration };
 }
 
 module.exports = {

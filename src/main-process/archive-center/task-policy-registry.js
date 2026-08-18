@@ -3,20 +3,21 @@
 const { randomUUID } = require('node:crypto');
 
 const { resolveArchiveScope } = require('./module-scope-registry');
+const {
+  TASK_FILE_PLAN_DEFINITIONS,
+  getTaskFilePlanDefinition
+} = require('./task-file-plan-registry');
 
 const EXCLUDE_REASONS = Object.freeze([
   'read-only-query',
   'file-picker-only',
   'staging-preflight-only',
   'preview-only',
-  'no-archive-artifact',
   'cancel-active-task',
   'archive-center-maintenance',
   'ui-navigation'
 ]);
 const EXCLUDE_REASON_SET = new Set(EXCLUDE_REASONS);
-
-const PR3_HANDOFF_CHANNELS = Object.freeze([]);
 
 const SUPPORT_ACTION_POLICIES = Object.freeze([
   Object.freeze({
@@ -29,6 +30,86 @@ const SUPPORT_ACTION_POLICIES = Object.freeze([
     kind: 'support-action',
     reason: 'diagnostic-report-export'
   })
+]);
+
+const FILE_ACTION_CHANNELS = Object.freeze(Object.keys(TASK_FILE_PLAN_DEFINITIONS));
+const NO_FILE_ACTION_CHANNELS = Object.freeze([
+  'account-mapping:distribute-migration',
+  'account-mapping:save',
+  'balance-adjustment:save',
+  'big-account-mode:save',
+  'big-account-order:save',
+  'big-account:save-own-accounts',
+  'template:clear-bill-split-merge-groups',
+  'template:delete',
+  'template:delete-bill-split-row',
+  'template:rename',
+  'template:save-amount-split-rules',
+  'template:save-bill-split-amount-rules',
+  'template:save-bill-split-mappings',
+  'template:save-bill-split-merge-group',
+  'template:save-bill-split-meta',
+  'template:save-bill-split-row',
+  'template:save-bill-split-row-count',
+  'template:save-filename-fixed-field',
+  'template:set-child-parent',
+  'template:set-parent-status',
+  'channels:create',
+  'channels:delete',
+  'channels:update',
+  'fund-transfer-account-mapping:save',
+  'scenarios:batch-delete',
+  'scenarios:create',
+  'scenarios:delete',
+  'scenarios:set-applicable-channels',
+  'scenarios:toggle-enabled',
+  'scenarios:transfer',
+  'scenarios:update',
+  'linked-table:delete-by-date-range',
+  'recon-id-fix:clear-session',
+  'recon-id-fix:run',
+  'pending:reconcile:run',
+  'pending:rule:save',
+  'bankBuRecon:run',
+  'bizOpRecon:run',
+  'vccOpCalc:run:compute-amounts',
+  'vccOpCalc:run:save',
+  'vccFinancialOp:data-manager:delete',
+  'vccFinancialOp:opening:initialize',
+  'vccFinancialOp:run:adjustment-add',
+  'vccFinancialOp:run:archive',
+  'vccFinancialOp:run:calculate',
+  'vccFinancialOp:run:unarchive',
+  'acquiringBillCurrency:clearMonth',
+  'pre-fund-reconciliation:run',
+  'pre-fund-reconciliation:temp:clear',
+  'pre-fund-reconciliation:temp:delete',
+  'pre-fund-reconciliation:temp:delete-by-date-range',
+  'duplicate-inbound-match:run',
+  'position-reconciliation:bank:delete',
+  'position-reconciliation:mappings:save',
+  'position-reconciliation:run',
+  'position-reconciliation:run:confirm',
+  'position-reconciliation:source:delete',
+  'bank-statement:run',
+  'template:save-mappings'
+]);
+const NO_FILE_ACTION_SET = new Set(NO_FILE_ACTION_CHANNELS);
+const OPERATION_WORKER_ACTIONS = new Set([
+  'acquiringBillCurrency:clearMonth',
+  'position-reconciliation:bank:delete',
+  'position-reconciliation:mappings:save',
+  'position-reconciliation:run',
+  'position-reconciliation:run:confirm',
+  'position-reconciliation:source:delete',
+  'vccOpCalc:run:compute-amounts',
+  'vccOpCalc:run:save',
+  'vccFinancialOp:data-manager:delete',
+  'vccFinancialOp:opening:initialize',
+  'vccFinancialOp:run:adjustment-add',
+  'vccFinancialOp:run:archive',
+  'vccFinancialOp:run:calculate',
+  'vccFinancialOp:run:unarchive'
 ]);
 
 const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
@@ -47,6 +128,7 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'file:save-balance-seed',
     'monthly-balance:assemble',
     'monthly-balance:export',
+    'template:save-mappings',
     'template:clear-bill-split-merge-groups',
     'template:delete',
     'template:delete-bill-split-row',
@@ -73,6 +155,7 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'bank-statement:batch-import',
     'bank-statement:export',
     'bank-statement:import',
+    'bank-statement:run',
     'channels:create',
     'channels:delete',
     'channels:update',
@@ -131,7 +214,6 @@ const RESERVE_CHANNELS_BY_SCOPE = Object.freeze({
     'vccFinancialOp:export:import-audit',
     'vccFinancialOp:export:result',
     'vccFinancialOp:import:apply',
-    'vccFinancialOp:imports:resolve',
     'vccFinancialOp:opening:initialize',
     'vccFinancialOp:run:adjustment-add',
     'vccFinancialOp:run:archive',
@@ -261,8 +343,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:run:adjustment-options',
     'vccFinancialOp:run:archived-months',
     'vccFinancialOp:run:get',
-    'vccFinancialOp:run:latest-archived',
-    'vccFinancialOp:storage:inspect'
+    'vccFinancialOp:run:latest-archived'
   ]),
   'file-picker-only': Object.freeze([
     'background:select-file',
@@ -291,10 +372,6 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'vccFinancialOp:run:preflight',
     'vccFinancialOp:run:unarchive-preview'
   ]),
-  'no-archive-artifact': Object.freeze([
-    'bank-statement:run',
-    'template:save-mappings'
-  ]),
   'cancel-active-task': Object.freeze([
     'acquiringBillCurrency:run:cancel',
     'file:cancel-big-account-selection',
@@ -311,8 +388,7 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:save-as',
     'archive-center:select-retry-sources',
     'archive-center:set-locked',
-    'archive-center:set-retention-days',
-    'vccFinancialOp:storage:migrate'
+    'archive-center:set-retention-days'
   ]),
   'ui-navigation': Object.freeze([
     'app-update:check-now',
@@ -707,18 +783,33 @@ function createReservePolicy(channel, scopeKey) {
     'vccFinancialOp:run:archive',
     'vccFinancialOp:run:unarchive'
   ].includes(channel);
-  const isVccImportContinuation = [
-    'vccFinancialOp:export:import-audit',
-    'vccFinancialOp:imports:resolve'
-  ].includes(channel);
+  const isVccImportContinuation = channel === 'vccFinancialOp:export:import-audit';
   const isVccDelete = channel === 'vccFinancialOp:data-manager:delete';
+  const fileDefinition = getTaskFilePlanDefinition(channel);
+  const isNoFileAction = NO_FILE_ACTION_SET.has(channel);
+  if (Boolean(fileDefinition) === isNoFileAction) {
+    throw new TypeError(`mutation action 必须且只能登记一种 task kind：${channel}`);
+  }
+  const taskKind = fileDefinition ? 'file' : 'no-file';
   return Object.freeze({
     channel,
     scopeId: scope.id,
     moduleCode: scope.storageCode,
     moduleName: scope.name,
     taskKey: channel,
-    batchPolicy: 'reserve',
+    batchPolicy: taskKind === 'file' ? 'reserve' : 'no-file',
+    taskKind,
+    allocation: fileDefinition ? fileDefinition.allocation : 'none',
+    filePlanSourceKind: fileDefinition ? fileDefinition.sourceKind : null,
+    filePlanResolver: fileDefinition ? fileDefinition.filePlanResolver : null,
+    promotionManifestResolver: fileDefinition
+      ? fileDefinition.promotionManifestResolver
+      : null,
+    workerContext: fileDefinition
+      ? fileDefinition.workerContext
+      : OPERATION_WORKER_ACTIONS.has(channel)
+        ? 'operation'
+        : 'none',
     startsNewFlow: (isAcquiringExport || isBankStatementExport
       || isVccRunContinuation || isVccImportContinuation)
       ? false
@@ -767,23 +858,40 @@ function createExcludePolicy(channel, excludeReason) {
   if (!EXCLUDE_REASON_SET.has(excludeReason)) {
     throw new TypeError(`不支持的 excludeReason：${excludeReason}`);
   }
-  return Object.freeze({ channel, batchPolicy: 'exclude', excludeReason });
+  return Object.freeze({
+    channel,
+    batchPolicy: 'exclude',
+    taskKind: 'exclude',
+    workerContext: 'none',
+    excludeReason
+  });
 }
 
 function buildPolicies() {
   const policies = new Map();
   const add = (policy) => {
     if (policies.has(policy.channel)) throw new Error(`Task policy 重复：${policy.channel}`);
-    if (PR3_HANDOFF_CHANNELS.includes(policy.channel)) {
-      throw new Error(`PR3 handoff 不得在 PR2 注册：${policy.channel}`);
-    }
     policies.set(policy.channel, policy);
   };
   for (const [scopeKey, channels] of Object.entries(RESERVE_CHANNELS_BY_SCOPE)) {
     for (const channel of channels) add(createReservePolicy(channel, scopeKey));
   }
   for (const [reason, channels] of Object.entries(EXCLUDED_CHANNELS_BY_REASON)) {
-    for (const channel of channels) add(createExcludePolicy(channel, reason));
+    for (const channel of channels) {
+      add(createExcludePolicy(channel, reason));
+    }
+  }
+  const classifiedChannels = new Set([
+    ...FILE_ACTION_CHANNELS,
+    ...NO_FILE_ACTION_CHANNELS
+  ]);
+  const registeredMutationChannels = [...policies.values()]
+    .filter((policy) => policy.taskKind === 'file' || policy.taskKind === 'no-file')
+    .map((policy) => policy.channel);
+  if (classifiedChannels.size !== FILE_ACTION_CHANNELS.length + NO_FILE_ACTION_CHANNELS.length
+      || registeredMutationChannels.length !== classifiedChannels.size
+      || registeredMutationChannels.some((channel) => !classifiedChannels.has(channel))) {
+    throw new TypeError('mutation action 的 file/no-file literal inventory 未精确闭合');
   }
   return policies;
 }
@@ -825,7 +933,8 @@ module.exports = {
   ARCHIVE_TASK_POLICIES,
   EXCLUDED_CHANNELS_BY_REASON,
   EXCLUDE_REASONS,
-  PR3_HANDOFF_CHANNELS,
+  FILE_ACTION_CHANNELS,
+  NO_FILE_ACTION_CHANNELS,
   RESERVE_CHANNELS_BY_SCOPE,
   SUPPORT_ACTION_POLICIES,
   TaskPolicyRegistry,

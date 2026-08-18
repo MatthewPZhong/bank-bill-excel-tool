@@ -21,6 +21,10 @@ function indexExists(db, name) {
   return !!row;
 }
 
+function triggerExists(db, name) {
+  return !!db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name = ?").get(name);
+}
+
 function columnNames(db, table) {
   return db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
 }
@@ -66,6 +70,27 @@ test.describe('migration — removed_pending_rows / pending_removal_matches', ()
     assert.ok(indexExists(db, 'idx_removed_order'));
     assert.ok(indexExists(db, 'idx_removed_recon'));
     assert.ok(indexExists(db, 'idx_prm_run'));
+  });
+
+  test('Archive lineage additive 列、removed head、receipt 唯一索引与 rollback triggers 存在', () => {
+    runMigrations(db);
+    for (const column of [
+      'dataset_id', 'producer_task_run_id', 'dataset_version', 'archive_contract_version'
+    ]) {
+      assert.ok(columnNames(db, 'pending_months').includes(column));
+    }
+    for (const column of [
+      'archive_contract_version', 'archive_task_run_id', 'archive_terminal_ack_at'
+    ]) {
+      assert.ok(columnNames(db, 'diff_runs').includes(column));
+    }
+    assert.ok(tableExists(db, 'pending_removed_months'));
+    assert.ok(indexExists(db, 'idx_pending_months_dataset'));
+    assert.ok(indexExists(db, 'idx_diff_runs_archive_task'));
+    assert.ok(triggerExists(db, 'invalidate_pending_month_v1_on_legacy_update'));
+    assert.ok(triggerExists(db, 'invalidate_pending_removed_head_on_insert'));
+    assert.ok(triggerExists(db, 'invalidate_pending_removed_head_on_update'));
+    assert.ok(triggerExists(db, 'invalidate_pending_removed_head_on_delete'));
   });
 
   test('幂等：连跑 2 次不报错，表/索引仍在', () => {

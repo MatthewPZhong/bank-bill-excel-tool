@@ -20,12 +20,15 @@ const {
   createArchiveOutboxStore
 } = require('../../../src/main-process/archive-center/outbox-store');
 const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
+const {
   ensureVccFinancialOpTablesSupport
 } = require('../../../src/backend/vcc-financial-op-db/migrations');
 const vccRepository = require('../../../src/backend/vcc-financial-op-db/repository');
 const {
   buildVccImportArchiveHandoffFiles,
-  buildVccImportArchiveInputFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
   reconcileVccImportArchiveLineageAtStartup,
@@ -86,15 +89,28 @@ function seedSource(db) {
   return { recordId, sourceId, effectiveId };
 }
 
-function seedReadyArtifact(archiveRepository, { recordId, sourceId }) {
+function seedReadyArtifact(
+  archiveRepository,
+  { recordId, sourceId },
+  { taskRunId = 'task-run-vcc-import', suffix = 'exact' } = {}
+) {
   const batch = archiveRepository.createBatch({
     moduleId: 'vcc-financial-op',
     moduleCode: 'VCCFINOP',
     moduleName: 'VCC财务OP校验',
-    operationKey: 'vcc-import-task-run',
+    operationKey: `vcc-import-task-run-${suffix}`,
+    taskKey: 'vccFinancialOp:import:apply',
+    taskRunId,
+    parentRunId: 'vcc-import-parent',
     localDate: '2026-08-16',
     retentionUntil: '2026-11-14'
   }).batch;
+  archiveRepository.db.prepare(`
+    UPDATE archive_batches
+    SET task_key = 'vccFinancialOp:import:apply', task_run_id = ?,
+        parent_run_id = 'vcc-import-parent', task_status = 'succeeded'
+    WHERE id = ?
+  `).run(taskRunId, batch.id);
   const artifact = archiveRepository.addArtifact(batch.id, {
     artifactKey: 'input:source.xlsx',
     direction: 'input',
@@ -113,62 +129,16 @@ function seedReadyArtifact(archiveRepository, { recordId, sourceId }) {
     }
   });
   archiveRepository.startArtifactAttempt(artifact.id);
-  return archiveRepository.completeArtifact(artifact.id, {
+  const ready = archiveRepository.completeArtifact(artifact.id, {
     sha256: SHA_A,
     sizeBytes: 123,
     relativePath: `blobs/sha256/aa/${SHA_A}`
   }).artifact;
+  archiveRepository.db.prepare(`
+    UPDATE archive_batches SET task_status = 'succeeded' WHERE id = ?
+  `).run(batch.id);
+  return ready;
 }
-
-test('VCC 导入结果为成功和失败来源都生成 exact SHA/size 与业务身份 descriptor', () => {
-  const descriptors = buildVccImportArchiveInputFiles([{
-    files: [
-      { filePath: '/tmp/source.xlsx', sourceType: 'recharge_refund' },
-      { filePath: '/tmp/failed.xlsx', sourceType: 'fee_fx' }
-    ]
-  }], {
-    batchId: 'task-run-vcc-import',
-    records: [
-      {
-        recordId: 7,
-        sourceType: 'recharge_refund',
-        status: 'success',
-        sourceFiles: [{
-          id: 11,
-          sourceOrdinal: 1,
-          fileName: 'source.xlsx',
-          sha256: SHA_A,
-          sizeBytes: 123
-        }]
-      },
-      {
-        recordId: 8,
-        sourceType: 'fee_fx',
-        status: 'failed_validation',
-        sourceFiles: [{
-          id: 12,
-          sourceOrdinal: 1,
-          fileName: 'failed.xlsx',
-          sha256: 'b'.repeat(64),
-          sizeBytes: 456
-        }]
-      }
-    ]
-  });
-  assert.equal(descriptors.length, 2);
-  assert.equal(descriptors[0].expectedSha256, SHA_A);
-  assert.equal(descriptors[0].expectedSizeBytes, 123);
-  assert.deepEqual(descriptors[0].metadata, {
-    vccImportBatchId: 'task-run-vcc-import',
-    vccImportRecordId: 7,
-    vccImportSourceId: 11,
-    vccSourceType: 'recharge_refund',
-    vccSourceOrdinal: 1
-  });
-  assert.equal(descriptors[1].originalName, 'failed.xlsx');
-  assert.equal(descriptors[1].expectedSha256, 'b'.repeat(64));
-  assert.equal(descriptors[1].metadata.vccImportRecordId, 8);
-});
 
 test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁，删除有效行后自动释放', (t) => {
   const { db, archiveRepository } = fixture(t);
@@ -232,7 +202,57 @@ test('artifact SHA 不符时绑定失败且 fallback 保留', (t) => {
   assert.equal(archiveRepository.listArtifactHolds(artifact.id).length, 0);
 });
 
-test('业务终态落库但首次 settle 前崩溃时，耐久输入意图在首次启动恢复原 source 与任务终态', async (t) => {
+test('v1 source 的 exact artifactId 缺失或 owner 错误时不改绑相似 metadata artifact', (t) => {
+  {
+    const { db, archiveRepository } = fixture(t);
+    const source = seedSource(db);
+    const matching = seedReadyArtifact(archiveRepository, source, { suffix: 'missing' });
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.prepare(`
+      UPDATE vcc_fin_op_import_sources
+      SET archive_artifact_id = 999999, archive_state = 'ready'
+      WHERE id = ?
+    `).run(source.sourceId);
+    db.exec('PRAGMA foreign_keys = ON');
+
+    const result = reconcileVccImportArchiveLineage({ db, archiveRepository });
+    assert.equal(result.pending, 1);
+    const stored = db.prepare(`
+      SELECT archive_artifact_id, archive_state FROM vcc_fin_op_import_sources WHERE id = ?
+    `).get(source.sourceId);
+    assert.equal(stored.archive_artifact_id, null);
+    assert.equal(stored.archive_state, 'unavailable');
+    assert.equal(archiveRepository.listArtifactHolds(matching.id).length, 0);
+  }
+
+  {
+    const { db, archiveRepository } = fixture(t);
+    const source = seedSource(db);
+    const matching = seedReadyArtifact(archiveRepository, source, { suffix: 'matching' });
+    const wrongOwner = seedReadyArtifact(archiveRepository, source, {
+      taskRunId: 'another-vcc-task-run',
+      suffix: 'wrong-owner'
+    });
+    db.prepare(`
+      UPDATE vcc_fin_op_import_sources
+      SET archive_artifact_id = ?, archive_state = 'ready'
+      WHERE id = ?
+    `).run(wrongOwner.id, source.sourceId);
+
+    const result = reconcileVccImportArchiveLineage({ db, archiveRepository });
+    assert.equal(result.failed, 1);
+    const stored = db.prepare(`
+      SELECT archive_artifact_id, archive_state, last_error_code
+      FROM vcc_fin_op_import_sources WHERE id = ?
+    `).get(source.sourceId);
+    assert.equal(Number(stored.archive_artifact_id), wrongOwner.id);
+    assert.equal(stored.archive_state, 'failed');
+    assert.equal(stored.last_error_code, 'archive-lineage-mismatch');
+    assert.equal(archiveRepository.listArtifactHolds(matching.id).length, 0);
+  }
+});
+
+test('业务提交 artifactId 后崩溃，启动先终结原 FileTask 再补 exact hold', async (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-import-handoff-recovery-'));
   const db = new DatabaseSync(path.join(rootDir, 'tool-data.sqlite'));
   db.exec('PRAGMA foreign_keys = ON');
@@ -258,16 +278,38 @@ test('业务终态落库但首次 settle 前崩溃时，耐久输入意图在首
   });
 
   await archiveService.initialize();
-  const reserved = await archiveService.reserveTaskBatch({
+  const firstPath = path.join(rootDir, 'first.xlsx');
+  const secondPath = path.join(rootDir, 'second.xlsx');
+  fs.writeFileSync(firstPath, 'first-vcc-source');
+  fs.writeFileSync(secondPath, 'second-vcc-source');
+  const files = [firstPath, secondPath].map((filePath) => ({
+    filePath,
+    sourceType: 'recharge_refund'
+  }));
+  const taskRun = (await archiveService.beginTaskRun({
     moduleId: 'vcc-financial-op',
-    moduleCode: 'VCCFINOP',
-    moduleName: 'VCC财务OP校验',
     taskKey: 'vccFinancialOp:import:apply',
     taskRunId: 'vcc-crash-after-business-terminal',
     operationKey: 'vccFinancialOp:import:apply:vcc-crash-after-business-terminal',
     parentRunId: 'vcc-import-flow'
+  })).taskRun;
+  const filePlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: files.map((file) => ({
+      filePath: file.filePath,
+      role: 'input',
+      sourceOperation: 'vccFinancialOp:import:apply'
+    })),
+    outputs: []
   });
-  await archiveService.markTaskStarted(reserved.batchId);
+  const reserved = await archiveService.reserveFileTaskBatch({
+    taskRun,
+    manifest: artifactManifestFromFilePlan(filePlan),
+    moduleCode: 'VCCFINOP',
+    moduleName: 'VCC财务OP校验'
+  });
+  await archiveService.startFileTask(taskRun.taskRunId, reserved.batchId);
   const batchContext = {
     batchId: reserved.batch.id,
     batchNumber: reserved.batch.batchNumber,
@@ -277,30 +319,29 @@ test('业务终态落库但首次 settle 前崩溃时，耐久输入意图在首
     parentRunId: reserved.batch.parentRunId,
     operationKey: reserved.batch.operationKey
   };
-  const firstPath = path.join(rootDir, 'first.xlsx');
-  const secondPath = path.join(rootDir, 'second.xlsx');
-  fs.writeFileSync(firstPath, 'first-vcc-source');
-  fs.writeFileSync(secondPath, 'second-vcc-source');
-  const files = [firstPath, secondPath].map((filePath) => ({
-    filePath,
-    sourceType: 'recharge_refund'
-  }));
-  const handoffFiles = await buildVccImportArchiveHandoffFiles({ files }, batchContext);
-  assert.deepEqual(handoffFiles.map((file) => file.metadata.vccSourceOrdinal), [1, 2]);
-  assert.equal(handoffFiles.every((file) => file.metadata.vccTaskRunId === batchContext.taskRunId), true);
-
-  const preCrashController = createArchiveCenterController({
-    database,
-    service: archiveService,
-    outboxStore
-  });
-  const persisted = preCrashController.persistAppendIntent({
+  const preparedHandoff = await buildVccImportArchiveHandoffFiles({ files }, batchContext);
+  const settled = await archiveService.settleManifestArtifacts({
     batchContext,
-    sourceOperation: 'vccFinancialOp:import:apply',
-    files: handoffFiles
+    files: filePlan.inputs.map((item, index) => ({
+      artifactKey: item.artifactKey,
+      expectedSha256: preparedHandoff[index].expectedSha256,
+      expectedSizeBytes: preparedHandoff[index].expectedSizeBytes
+    }))
   });
-  assert.equal(persisted.persisted, true);
-  assert.equal(outboxStore.list().length, 1);
+  assert.equal(settled.ok, true);
+  assert.equal(settled.durable, true);
+  const handoffFiles = preparedHandoff.map((file, index) => ({
+    ...file,
+    archiveArtifactId: settled.results[index].artifact.id
+  }));
+  for (let index = 0; index < handoffFiles.length; index += 1) {
+    const handoff = handoffFiles[index];
+    const artifact = archiveRepository.getArtifact(handoff.archiveArtifactId);
+    assert.equal(artifact.batchId, batchContext.batchId);
+    assert.equal(artifact.sourceOperation, 'vccFinancialOp:import:apply');
+    assert.equal(artifact.blob.sha256, handoff.expectedSha256);
+    assert.equal(artifact.blob.sizeBytes, handoff.expectedSizeBytes);
+  }
 
   vccRepository.createImportBatch(db, {
     id: batchContext.taskRunId,
@@ -317,12 +358,37 @@ test('业务终态落库但首次 settle 前崩溃时，耐久输入意图在首
     sourceOrdinal: index + 1,
     fileName: file.originalName,
     sha256: file.expectedSha256,
-    sizeBytes: file.expectedSizeBytes
+    sizeBytes: file.expectedSizeBytes,
+    archiveArtifactId: file.archiveArtifactId
   }));
+  sourceIds.forEach((sourceId, index) => {
+    db.prepare(`
+      INSERT INTO vcc_fin_op_effective_rows (
+        source_type, idempotency_key_raw, idempotency_key, content_hash,
+        target_month, subject, stat_currency, signed_amount,
+        source_file, sheet_name, source_row, raw_json, import_record_id, import_source_id
+      ) VALUES (
+        'recharge_refund', ?, ?, ?, '2026-07', 'PPHK', 'USD', '10',
+        ?, 'sheet1', 2, ?, ?, ?
+      )
+    `).run(
+      `CRASH-${index + 1}`,
+      `CRASH-${index + 1}`,
+      String(index + 1).repeat(64),
+      handoffFiles[index].originalName,
+      JSON.stringify([`CRASH-${index + 1}`]),
+      recordId,
+      sourceId
+    );
+  });
   vccRepository.finishImportRecord(db, recordId, {
     status: 'success', rawCount: 2, insertedCount: 2
   });
   vccRepository.finishImportBatch(db, batchContext.taskRunId, 'success');
+  assert.deepEqual(db.prepare(`
+    SELECT archive_artifact_id FROM vcc_fin_op_import_sources ORDER BY source_ordinal
+  `).all().map((row) => Number(row.archive_artifact_id)), handoffFiles.map((file) => file.archiveArtifactId));
+  assert.equal(archiveRepository.listArtifactHolds(handoffFiles[0].archiveArtifactId).length, 0);
 
   let startupController;
   const createStartupController = () => {
@@ -362,6 +428,9 @@ test('业务终态落库但首次 settle 前崩溃时，耐久输入意图在首
     hasArtifact: Number.isSafeInteger(Number(row.archive_artifact_id))
   })), sourceIds.map((id) => ({ id, archiveState: 'ready', hasArtifact: true })));
   assert.equal(outboxStore.list().length, 0);
+  for (const artifactId of handoffFiles.map((file) => file.archiveArtifactId)) {
+    assert.equal(archiveRepository.listArtifactHolds(artifactId).length, 1);
+  }
 
   const firstArtifactIds = db.prepare(`
     SELECT archive_artifact_id FROM vcc_fin_op_import_sources ORDER BY source_ordinal

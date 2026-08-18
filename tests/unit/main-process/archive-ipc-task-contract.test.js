@@ -1,18 +1,29 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
   createIpcTaskContext,
-  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation
 } = require('../../../src/main-process/archive-center/ipc-task-contract');
-const {
-  createBusinessOperationRegistry
-} = require('../../../src/main-process/business-operation-registry');
+
+function batchContext(batchId) {
+  return Object.freeze({
+    batchId,
+    batchNumber: `2026-08-17-${String(batchId).padStart(3, '0')}`,
+    taskRunId: `task-${batchId}`,
+    taskKey: 'toolbox:merge',
+    moduleId: 'toolbox',
+    parentRunId: `parent-${batchId}`,
+    operationKey: `operation-${batchId}`
+  });
+}
 
 test('普通函数 handler 无 prepare，参数原样进入 execute', async () => {
   const contract = normalizeIpcTaskHandler((_event, value) => value + 1);
@@ -24,16 +35,16 @@ test('普通函数 handler 无 prepare，参数原样进入 execute', async () =
     outputPaths: []
   });
   const taskContext = createIpcTaskContext(
-    Object.freeze({ batchId: 1 }),
+    batchContext(1),
     { settleArtifacts: async () => ({}) }
   );
   assert.equal(executeIpcTaskInvocation(contract, {}, prepared, prepared.args, taskContext), 5);
 });
 
 test('对象 handler execute 稳定收到冻结 taskContext 与 artifact barrier', async () => {
-  const batchContext = Object.freeze({ batchId: 7, taskKey: 'toolbox:merge' });
+  const persistedBatchContext = batchContext(7);
   const settleArtifacts = async () => ({ durable: true });
-  const taskContext = createIpcTaskContext(batchContext, { settleArtifacts });
+  const taskContext = createIpcTaskContext(persistedBatchContext, { settleArtifacts });
   let received = null;
   const contract = normalizeIpcTaskHandler({
     prepare(_event, payload) {
@@ -53,7 +64,7 @@ test('对象 handler execute 稳定收到冻结 taskContext 与 artifact barrier
     taskContext
   ), 9);
   assert.equal(Object.isFrozen(taskContext), true);
-  assert.equal(received.context.batchContext, batchContext);
+  assert.deepEqual(received.context.batchContext, persistedBatchContext);
   assert.equal(received.context.settleArtifacts, settleArtifacts);
   assert.deepEqual(received.payload, { value: 9 });
 });
@@ -96,34 +107,48 @@ test('prepare stop 原样返回 result，输入输出路径角色分离', async 
   assert.deepEqual(prepared.outputPaths, ['/tmp/output.xlsx']);
 });
 
-test('no-archive-artifact 执行业务但不创建 taskContext，并受退出闸门保护', async () => {
-  const registry = createBusinessOperationRegistry();
-  let executeCount = 0;
-  let marked = false;
-  const result = await executeIpcTaskWithoutBatch({
-    businessOperationRegistry: registry,
-    meta: { channel: 'bank-statement:run' },
-    markExecuteStarted() { marked = true; },
-    async execute(taskContext) {
-      executeCount += 1;
-      assert.equal(taskContext, null);
-      assert.deepEqual(registry.listActive().map((item) => item.channel), ['bank-statement:run']);
-      return { status: 'ok' };
-    }
+test('prepare 是普通 eager FilePlan 的唯一规范化冻结边界', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-ipc-plan-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const inputPath = path.join(directory, 'input.xlsx');
+  const outputPath = path.join(directory, 'output.xlsx');
+  fs.writeFileSync(inputPath, 'input');
+  const contract = normalizeIpcTaskHandler({
+    async prepare() {
+      return {
+        proceed: true,
+        filePlan: {
+          version: 1,
+          allocation: 'eager',
+          inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'test:run' }],
+          outputs: [{ filePath: outputPath, role: 'output', sourceOperation: 'test:run' }]
+        }
+      };
+    },
+    async execute() { return { status: 'success' }; }
   });
-  assert.deepEqual(result, { status: 'ok' });
-  assert.equal(marked, true);
-  assert.equal(executeCount, 1);
-  assert.deepEqual(registry.listActive(), []);
 
-  registry.beginShutdownTransition();
-  marked = false;
-  const blocked = await executeIpcTaskWithoutBatch({
-    businessOperationRegistry: registry,
-    meta: { channel: 'template:save-mappings' },
-    markExecuteStarted() { marked = true; },
-    async execute() { throw new Error('must not execute'); }
+  const prepared = await prepareIpcTaskInvocation(contract, {}, []);
+  assert.equal(Object.isFrozen(prepared.filePlan), true);
+  assert.equal(Object.isFrozen(prepared.filePlan.inputs), true);
+  assert.equal(Object.isFrozen(prepared.filePlan.inputs[0].sourceSnapshot), true);
+  assert.equal(prepared.filePlan.inputs[0].sourceSnapshot.sizeBytes, 5);
+  assert.throws(() => {
+    prepared.filePlan.inputs[0].sourceSnapshot.sizeBytes = 99;
+  }, TypeError);
+  assert.equal(prepared.filePlan.outputs[0].targetSnapshot.exists, false);
+
+  const malformed = normalizeIpcTaskHandler({
+    async prepare() {
+      return {
+        proceed: true,
+        filePlan: { version: 1, allocation: 'eager', inputs: null, outputs: [] }
+      };
+    },
+    async execute() { return { status: 'success' }; }
   });
-  assert.equal(blocked.status, 'busy');
-  assert.equal(marked, false);
+  await assert.rejects(
+    prepareIpcTaskInvocation(malformed, {}, []),
+    /inputs\/outputs 必须是数组/
+  );
 });

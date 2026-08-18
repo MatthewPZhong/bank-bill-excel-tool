@@ -21,6 +21,12 @@ const {
 const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
+const {
+  finalizePendingTerminalIntent
+} = require('../../../src/main-process/pending-archive-lineage');
+const {
+  finalizeRunTerminalIntent: finalizeBizOpRunTerminalIntent
+} = require('../../../src/main-process/biz-op-recon-run-data');
 
 function createHarness(options = {}) {
   const settings = new Map(options.initialSettings || []);
@@ -34,6 +40,18 @@ function createHarness(options = {}) {
   };
   const repository = {
     getBatch: (id) => batches.find((batch) => batch.id === Number(id)) || null,
+    getVisibleBatch: (id) => {
+      const batch = batches.find((item) => item.id === Number(id)) || null;
+      return batch && [...artifacts.values()].some((artifact) => artifact.batchId === batch.id)
+        ? batch
+        : null;
+    },
+    getVisibleBatchByNumber: (batchNumber) => {
+      const batch = batches.find((item) => item.batchNumber === String(batchNumber)) || null;
+      return batch && [...artifacts.values()].some((artifact) => artifact.batchId === batch.id)
+        ? batch
+        : null;
+    },
     getArtifact: (id) => artifacts.get(Number(id)) || null,
     getOperationIssuance: () => null,
     listFailedArtifacts: (batchId) => [...artifacts.values()].filter((artifact) => (
@@ -44,8 +62,12 @@ function createHarness(options = {}) {
     rootDir: '/tmp/archive-center',
     repository,
     async initialize() { return { ok: true, available: true }; },
+    async replayFlowBindIntents() { return { ok: true, replayed: 0, remaining: 0 }; },
+    async replayTaskFlowBindIntents() { return { ok: true, replayed: 0, remaining: 0 }; },
     async markInterruptedTasks() { return { ok: true, taskCount: 0, batchIds: [] }; },
+    async reconcileStartup() { return { ok: true, status: 'complete' }; },
     async cleanupExpired() { return { ok: true }; },
+    resumeBackgroundMaterialization() {},
     async createBatch(payload) {
       const batch = {
         id: batches.length + 1,
@@ -53,6 +75,9 @@ function createHarness(options = {}) {
         moduleId: payload.moduleId,
         moduleCode: payload.moduleCode,
         moduleName: payload.moduleName,
+        taskRunId: 'private-task-run',
+        taskKey: 'private-task-key',
+        parentRunId: 'private-parent-run',
         operationKey: payload.operationKey,
         metadata: payload.metadata,
         archiveStatus: 'complete',
@@ -71,10 +96,13 @@ function createHarness(options = {}) {
         id,
         batchId,
         originalName: payload.originalName,
+        sourcePath: payload.filePath,
+        storageRelativePath: 'BANK/2026/07/20/private.xlsx',
         direction: payload.direction,
         role: payload.role,
         status: 'ready',
-        blob: { sizeBytes: 12 }
+        metadata: payload.metadata || {},
+        blob: { sizeBytes: 12, relativePath: 'blobs/sha256/private' }
       });
       return { ok: true, artifact: artifacts.get(id) };
     },
@@ -109,6 +137,13 @@ function createHarness(options = {}) {
       batch.taskStatus = 'cancelled';
       batch.metadata = { ...(batch.metadata || {}), ...(cancellation.metadata || {}) };
       return { ok: true, batch };
+    },
+    finishTaskRunCalls: [],
+    async finishTaskRun(taskRunId, outcome) {
+      this.finishTaskRunCalls.push({ taskRunId, outcome });
+      return typeof options.finishTaskRun === 'function'
+        ? options.finishTaskRun(taskRunId, outcome)
+        : { ok: true, taskRun: { taskRunId, status: outcome.taskStatus } };
     },
     async listBatches() { return { ok: true, batches }; },
     async getBatch(id) {
@@ -157,27 +192,82 @@ function createHarness(options = {}) {
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
-  return { controller, database, service, settings, templates };
+  return { controller, database, service, settings, templates, artifacts, batches };
 }
 
 test('tracker sink 建批次、归档文件并向 UI 映射批次号与文件字段', async () => {
-  const { controller } = createHarness();
+  const { controller, artifacts } = createHarness();
   const created = await controller.sink.createBatch({
     moduleId: 'bank-statement',
     moduleCode: 'BANK',
     moduleName: '资金对账数据处理',
     sourceOperation: 'bank-statement:run',
-    files: [{ filePath: '/tmp/bank.xlsx', role: 'input' }]
+    metadata: { _fileManifest: { identity: 'private' }, visible: true },
+    files: [{
+      filePath: '/tmp/bank.xlsx',
+      role: 'input',
+      metadata: {
+        aliasKey: 'private-alias',
+        targetSnapshot: { exists: false },
+        sourceSnapshot: { sizeBytes: 12 },
+        visible: true
+      }
+    }]
   });
 
   assert.equal(created.batchNumber, 'BANK-20260720-001');
   assert.equal(created.archiveFailed, false);
   const listed = await controller.listBatches({ date: '2026-07-20', batchId: 'BANK-' });
   assert.equal(listed.batches[0].batchId, 'BANK-20260720-001');
+  assert.equal('_fileManifest' in listed.batches[0].metadata, false);
+  for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+    assert.equal(key in listed.batches[0], false, key);
+  }
   const detail = await controller.getBatch('BANK-20260720-001');
+  for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+    assert.equal(key in detail.batch, false, key);
+  }
   assert.equal(detail.batch.files[0].fileName, 'bank.xlsx');
   assert.equal(detail.batch.files[0].direction, '输入');
   assert.equal(detail.batch.files[0].sizeBytes, 12);
+  assert.equal('sourcePath' in detail.batch.files[0], false);
+  assert.equal('storageRelativePath' in detail.batch.files[0], false);
+  assert.equal('relativePath' in detail.batch.files[0].blob, false);
+  assert.equal('aliasKey' in detail.batch.files[0].metadata, false);
+  assert.equal('targetSnapshot' in detail.batch.files[0].metadata, false);
+  const locked = await controller.setLocked('BANK-20260720-001', true);
+  assert.equal('_fileManifest' in locked.batch.metadata, false);
+  for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+    assert.equal(key in locked.batch, false, key);
+  }
+  artifacts.get(1).status = 'failed';
+  artifacts.get(1).lastErrorCode = 'ARCHIVE_EIO';
+  const retried = await controller.retryBatch('BANK-20260720-001');
+  assert.equal('_fileManifest' in retried.batch.metadata, false);
+  for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+    assert.equal(key in retried.batch, false, key);
+  }
+});
+
+test('tracked batch 无候选文件时不建批次、不发 pseudo batch 且不写 outbox', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-empty-tracked-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const { controller, batches } = createHarness({ outboxStore });
+  const result = await controller.sink.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '网银账单',
+    operationKey: 'tracked-empty-files',
+    sourceOperation: 'bank-statement:run',
+    files: []
+  });
+  assert.equal(result.archiveFailed, true);
+  assert.equal(result.code, 'ARCHIVE_FILE_MANIFEST_EMPTY');
+  assert.equal(result.batchId, undefined);
+  assert.equal(result.persistentRetryAvailable, false);
+  assert.equal(batches.length, 0);
+  assert.deepEqual(outboxStore.list(), []);
 });
 
 test('保留期默认 60 天并支持新增枚举，既有合法值保持兼容', () => {
@@ -190,6 +280,216 @@ test('保留期默认 60 天并支持新增枚举，既有合法值保持兼容'
   assert.equal(controller.setRetentionDays(45).status, 'failed');
   assert.equal(controller.setRetentionDays(null).status, 'success');
   assert.equal(settings.get(ARCHIVE_RETENTION_SETTING_KEY), 'permanent');
+});
+
+test('operation owner 终态 outbox 只重放 Task Run CAS，不创建空 batch', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-operation-outbox-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const { controller, service } = createHarness({ outboxStore });
+  const persisted = controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'task-operation-only-1',
+        taskKey: 'pending:query',
+        moduleId: 'pending-reconciliation',
+        parentRunId: 'parent-operation-only-1',
+        operationKey: 'operation-only-1'
+      }
+    },
+    sourceOperation: 'pending:reconcile:query',
+    terminalOutcome: {
+      taskStatus: 'failed',
+      code: 'DB_TEMPORARY',
+      message: 'terminal retry',
+      metadata: {}
+    }
+  });
+  assert.equal(persisted.taskRunId, 'task-operation-only-1');
+  assert.equal(outboxStore.list()[0].payload.targetBatchId, undefined);
+
+  const flushed = await controller.flushOutbox();
+  assert.deepEqual(flushed, { flushed: 1, discarded: 0, remaining: 0 });
+  assert.equal(service.finishTaskRunCalls.length, 1);
+  assert.equal(service.finishTaskRunCalls[0].taskRunId, 'task-operation-only-1');
+  assert.equal(await service.listBatches().then((value) => value.batches.length), 0);
+});
+
+test('operation owner 取消终态重放后执行 finalizer，失败时保留 outbox 供二启重试', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-operation-finalizer-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const finalized = [];
+  let failFinalizer = true;
+  const { controller, service } = createHarness({
+    outboxStore,
+    onTerminalIntentFlushed: async (payload) => {
+      finalized.push(payload.route);
+      if (failFinalizer) throw new Error('position pending unavailable');
+    }
+  });
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'position-operation-cancelled',
+        taskKey: 'position-reconciliation:mappings:save',
+        moduleId: 'position-reconciliation-process',
+        parentRunId: 'position-parent-cancelled',
+        operationKey: 'position:operation-cancelled:mappings-save'
+      }
+    },
+    sourceOperation: 'position-reconciliation:mappings:save',
+    terminalOutcome: {
+      taskStatus: 'cancelled',
+      code: 'POSITION_OPERATION_CANCELLED',
+      message: '用户取消平盘任务',
+      metadata: {},
+      afterTerminal: {
+        route: 'position-reconciliation',
+        operationToken: 'position-operation-cancelled'
+      }
+    }
+  });
+
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 0,
+    discarded: 0,
+    remaining: 1
+  });
+  assert.equal(outboxStore.list().length, 1);
+  failFinalizer = false;
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 1,
+    discarded: 0,
+    remaining: 0
+  });
+  assert.equal(service.finishTaskRunCalls.length, 2);
+  assert.deepEqual(finalized, [
+    { route: 'position-reconciliation', operationToken: 'position-operation-cancelled' },
+    { route: 'position-reconciliation', operationToken: 'position-operation-cancelled' }
+  ]);
+});
+
+test('Pending operation terminal route 以 TaskRun identity 持久并在重放后调用 finalizer', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-pending-finalizer-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const finalized = [];
+  const { controller } = createHarness({
+    outboxStore,
+    onTerminalIntentFlushed: async (payload) => finalized.push(payload)
+  });
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'pending-run-task-outbox',
+        taskKey: 'pending:reconcile:run',
+        moduleId: 'pending-reconciliation',
+        parentRunId: 'pending-parent-outbox',
+        operationKey: 'pending:run:outbox'
+      }
+    },
+    sourceOperation: 'pending:reconcile:run',
+    terminalOutcome: {
+      taskStatus: 'succeeded',
+      metadata: {},
+      afterTerminal: {
+        route: 'pending-run',
+        taskRunId: 'pending-run-task-outbox'
+      }
+    }
+  });
+  assert.deepEqual(
+    outboxStore.list()[0].payload.terminalOutcome.afterTerminal,
+    { route: 'pending-run', taskRunId: 'pending-run-task-outbox' }
+  );
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 1,
+    discarded: 0,
+    remaining: 0
+  });
+  assert.deepEqual(finalized[0].route, {
+    route: 'pending-run', taskRunId: 'pending-run-task-outbox'
+  });
+  assert.equal(finalized[0].terminalOutcome.taskStatus, 'succeeded');
+});
+
+test('failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-failed-receipt-finalizer-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const finalized = [];
+  const forbiddenDb = new Proxy({}, {
+    get() {
+      throw new Error('failed terminal 不得读取或确认业务 receipt');
+    }
+  });
+  const { controller, service } = createHarness({
+    outboxStore,
+    onTerminalIntentFlushed: async (payload) => {
+      finalized.push(payload.route.route);
+      if (payload.route.route === 'pending-run') {
+        return finalizePendingTerminalIntent({ ...payload, db: forbiddenDb });
+      }
+      return finalizeBizOpRunTerminalIntent({
+        ...payload,
+        userDataDir: '/path/must/not/be/read',
+        mainDb: forbiddenDb
+      });
+    }
+  });
+
+  for (const entry of [
+    {
+      taskRunId: 'pending-run-failed-no-receipt',
+      taskKey: 'pending:reconcile:run',
+      moduleId: 'pending-reconciliation',
+      route: 'pending-run'
+    },
+    {
+      taskRunId: 'biz-op-run-failed-no-receipt',
+      taskKey: 'bizOpRecon:run',
+      moduleId: 'biz-op-reconciliation',
+      route: 'biz-op-run'
+    }
+  ]) {
+    controller.persistTaskTerminalIntent({
+      owner: {
+        version: 1,
+        kind: 'operation',
+        operationContext: {
+          taskRunId: entry.taskRunId,
+          taskKey: entry.taskKey,
+          moduleId: entry.moduleId,
+          parentRunId: `${entry.taskRunId}:parent`,
+          operationKey: `${entry.taskRunId}:operation`
+        }
+      },
+      sourceOperation: entry.taskKey,
+      terminalOutcome: {
+        taskStatus: 'failed',
+        code: 'BUSINESS_OPERATION_FAILED',
+        message: '业务在 receipt 提交前失败',
+        metadata: {},
+        afterTerminal: { route: entry.route, taskRunId: entry.taskRunId }
+      }
+    });
+  }
+
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 2,
+    discarded: 0,
+    remaining: 0
+  });
+  assert.deepEqual(finalized.sort(), ['biz-op-run', 'pending-run']);
+  assert.equal(service.finishTaskRunCalls.length, 2);
+  assert.deepEqual(outboxStore.list(), []);
 });
 
 test('控制器启动时将有效、损坏和空模板排除设置统一归一化为空数组', () => {
@@ -236,6 +536,7 @@ test('存储根 manager 先于 service 初始化，设置/变更透传且 mainte
     getCurrentRoot: () => '/new/archive-root',
     getMigrationState: () => ({ status: 'running', phase: 'copying', processed: 1, total: 2 }),
     isMaintenanceRequested: () => maintenance,
+    resumeBackgroundArchiveChecks() {},
     async changeStorageLocation() {
       calls.push('change-storage');
       return { status: 'success', message: '存档位置已变更' };
@@ -267,7 +568,8 @@ test('存储根 manager 先于 service 初始化，设置/变更透传且 mainte
     moduleCode: 'BANK',
     moduleName: '网银账单',
     operationKey: 'maintenance-controller-batch',
-    files: []
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/maintenance-controller.xlsx', role: 'input' }]
   });
   maintenance = true;
   assert.equal((await controller.deleteBatch(created.batchId)).code, 'ARCHIVE_STORAGE_MAINTENANCE');
@@ -436,6 +738,91 @@ test('业务完成后源文件已变化的批次要求重新执行业务，不�
   assert.equal(listed.batches[0].canRetry, false);
   assert.equal(listed.batches[0].retryMode, 'rerun-business');
   assert.equal(listed.batches[0].requiresBusinessRerun, true);
+});
+
+test('未产出 output 与业务失败但归档输入完整均提示从原入口重跑', async () => {
+  const output = createHarness();
+  const outputCreated = await output.controller.sink.createBatch({
+    moduleId: 'bank-statement',
+    moduleCode: 'BANK',
+    moduleName: '资金对账数据处理',
+    sourceOperation: 'bank-statement:export',
+    files: [{ filePath: '/tmp/missing-output.xlsx', role: 'output' }]
+  });
+  Object.assign(output.service.repository.getBatch(outputCreated.batchId), {
+    archiveStatus: 'incomplete',
+    failedArtifactCount: 1,
+    lastErrorCode: 'ARCHIVE_OUTPUT_NOT_PRODUCED'
+  });
+  Object.assign(output.service.repository.getArtifact(1), {
+    status: 'failed',
+    lastErrorCode: 'ARCHIVE_OUTPUT_NOT_PRODUCED'
+  });
+  const outputDto = (await output.controller.listBatches({})).batches[0];
+  assert.equal(outputDto.canRetry, false);
+  assert.equal(outputDto.retryMode, 'rerun-business');
+  assert.equal(outputDto.requiresBusinessRerun, true);
+
+  const business = createHarness();
+  const businessCreated = await business.controller.sink.createBatch({
+    moduleId: 'position-reconciliation-process',
+    moduleCode: 'POSITION',
+    moduleName: '平盘对账数据处理',
+    sourceOperation: 'position-reconciliation:run',
+    files: [
+      { filePath: '/tmp/position-input-1.xlsx', role: 'input' },
+      { filePath: '/tmp/position-input-2.xlsx', role: 'input' }
+    ]
+  });
+  Object.assign(business.service.repository.getBatch(businessCreated.batchId), {
+    taskStatus: 'failed',
+    archiveStatus: 'complete',
+    failedArtifactCount: 0,
+    failureMessage: '原业务校验失败：账单币种不一致'
+  });
+  const businessDto = (await business.controller.listBatches({})).batches[0];
+  assert.equal(businessDto.canRetry, false);
+  assert.equal(businessDto.retryMode, 'rerun-business');
+  assert.equal(businessDto.requiresBusinessRerun, true);
+  assert.equal(businessDto.warningMessage, '原业务校验失败：账单币种不一致');
+  const detail = await business.controller.getBatch(businessCreated.batchId);
+  assert.equal(detail.batch.files.length, 2);
+  assert.deepEqual(detail.batch.files.map((file) => file.role), ['input', 'input']);
+  assert.equal(detail.batch.warningMessage, '原业务校验失败：账单币种不一致');
+
+  const toolbox = createHarness();
+  const historical001 = await toolbox.controller.sink.createBatch({
+    moduleId: 'toolbox',
+    moduleCode: 'TOOLBOX',
+    moduleName: '工具箱',
+    sourceOperation: 'toolbox:merge',
+    files: [
+      { filePath: '/tmp/toolbox-merge-input-1.xlsx', role: 'input' },
+      { filePath: '/tmp/toolbox-merge-input-2.xlsx', role: 'input' }
+    ]
+  });
+  Object.assign(toolbox.service.repository.getBatch(historical001.batchId), {
+    batchNumber: '2026-08-17-001',
+    taskStatus: 'failed',
+    archiveStatus: 'complete',
+    readyArtifactCount: 2,
+    failedArtifactCount: 0,
+    failureMessage: '工具箱存档交接缺少输入文件证据'
+  });
+  const historicalDto = (await toolbox.controller.listBatches({})).batches[0];
+  assert.equal(historicalDto.canRetry, false);
+  assert.equal(historicalDto.retryMode, 'rerun-business');
+  assert.equal(historicalDto.requiresBusinessRerun, true);
+  assert.equal(historicalDto.batchNumber, '2026-08-17-001');
+  assert.equal(historicalDto.taskStatus, 'failed');
+  assert.equal(historicalDto.archiveStatus, 'complete');
+  assert.equal(historicalDto.failedArtifactCount, 0);
+  assert.equal(historicalDto.rerunHint, '请从工具箱重新执行');
+  assert.equal(historicalDto.warningMessage, '工具箱存档交接缺少输入文件证据');
+  const historicalDetail = await toolbox.controller.getBatch(historical001.batchId);
+  assert.equal(historicalDetail.batch.files.length, 2);
+  assert.deepEqual(historicalDetail.batch.files.map((file) => file.direction), ['输入', '输入']);
+  assert.equal(historicalDetail.batch.rerunHint, '请从工具箱重新执行');
 });
 
 test('源文件变化但保留业务摘要时允许选择等价副本，且不向页面暴露摘要', async () => {
@@ -752,7 +1139,10 @@ test('已永久删除 operation 的 outbox 跨重启后明确丢弃且不复活�
   let outboxStore = createArchiveOutboxStore(outboxRoot);
   let controller = createArchiveCenterController({ database, service, outboxStore });
   await service.initialize();
-  const created = await controller.sink.createBatch(payload);
+  const created = await controller.sink.createBatch({
+    ...payload,
+    files: [{ filePath: sourcePath, role: 'input' }]
+  });
   controller.persistOperationIntent({
     ...payload,
     files: [{ filePath: sourcePath, role: 'input' }]
@@ -813,7 +1203,10 @@ test('已永久删除 operation 的 outbox 跨重启后明确丢弃且不复活�
     WHERE module_code = ?
   `).get(payload.moduleCode), cursorBeforeIntent);
 
-  const directReplay = await controller.sink.createBatch(payload);
+  const directReplay = await controller.sink.createBatch({
+    ...payload,
+    files: [{ filePath: sourcePath, role: 'input' }]
+  });
   assert.equal(directReplay.archiveFailed, true);
   assert.equal(directReplay.operationStatus, 'deleted');
   assert.equal(directReplay.code, 'ARCHIVE_OPERATION_DELETED');
@@ -1184,7 +1577,7 @@ test('终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序�
   assert.equal(outboxStore.list().length, 1, '普通 terminal conflict 不得让应用陷入启动循环');
 });
 
-test('legacy outbox 首次建批后回写真实 targetBatchId，并在同一批次收口终态', async (t) => {
+test('legacy outbox 无 owner/target 且 files=[] 时拒绝发号并保留诊断记录', async (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-legacy-target-'));
   const outboxStore = createArchiveOutboxStore(path.join(rootDir, 'outbox'));
   const { controller, service } = createHarness({ outboxStore });
@@ -1208,19 +1601,11 @@ test('legacy outbox 首次建批后回写真实 targetBatchId，并在同一批�
     }
   });
 
-  const originalRemove = outboxStore.remove.bind(outboxStore);
-  let targetBeforeRemove = null;
-  outboxStore.remove = (id) => {
-    targetBeforeRemove = outboxStore.get(id).payload.targetBatchId;
-    return originalRemove(id);
-  };
-
   const replay = await controller.flushOutbox();
-  assert.equal(replay.flushed, 1);
-  assert.equal(replay.remaining, 0);
-  assert.equal(targetBeforeRemove, 1, 'remove 前必须已耐久回写真实 batchId');
-  assert.equal(service.repository.getBatch(1).taskStatus, 'succeeded');
-  assert.deepEqual(outboxStore.list(), []);
+  assert.equal(replay.flushed, 0);
+  assert.equal(replay.remaining, 1);
+  assert.equal((await service.getStats()).stats.batchCount, 0);
+  assert.equal(outboxStore.list().length, 1);
   assert.equal(record.payload.targetBatchId, undefined, 'fixture 确认是旧版无 target 记录');
 });
 
@@ -1353,14 +1738,16 @@ test('启动先重放持久终态，再扫尾无终态任务；未重放终态�
     moduleCode: 'BANK',
     moduleName: '网银账单',
     operationKey: 'startup-terminal-completed',
-    files: []
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/startup-terminal-completed.xlsx', role: 'input' }]
   });
   const pending = await controller.sink.createBatch({
     moduleId: 'bank-statement',
     moduleCode: 'BANK',
     moduleName: '网银账单',
     operationKey: 'startup-terminal-pending',
-    files: []
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/startup-terminal-pending.xlsx', role: 'input' }]
   });
   service.repository.getBatch(completed.batchId).taskStatus = 'running';
   service.repository.getBatch(pending.batchId).taskStatus = 'running';
@@ -1433,14 +1820,16 @@ test('启动先给模块 owner 恢复原批次，再仅扫尾无人认领任务'
     moduleCode: 'POSITION',
     moduleName: '平盘资金性质校验',
     operationKey: 'position-owner-recovery',
-    files: []
+    sourceOperation: 'position-reconciliation:run',
+    files: [{ filePath: '/tmp/position-owner-recovery.xlsx', role: 'input' }]
   });
   const orphan = await controller.sink.createBatch({
     moduleId: 'bank-statement',
     moduleCode: 'BANK',
     moduleName: '网银账单',
     operationKey: 'orphan-running-task',
-    files: []
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/orphan-running-task.xlsx', role: 'input' }]
   });
   protectedBatchId = recoverable.batchId;
   service.repository.getBatch(recoverable.batchId).taskStatus = 'running';
@@ -1488,14 +1877,16 @@ test('模块 owner 恢复失败时保留其原批次且仍扫尾其他孤儿任�
     moduleCode: 'POSITION',
     moduleName: '平盘资金性质校验',
     operationKey: 'position-owner-recovery-failure',
-    files: []
+    sourceOperation: 'position-reconciliation:run',
+    files: [{ filePath: '/tmp/position-owner-recovery-failure.xlsx', role: 'input' }]
   });
   const orphan = await controller.sink.createBatch({
     moduleId: 'bank-statement',
     moduleCode: 'BANK',
     moduleName: '网银账单',
     operationKey: 'orphan-after-owner-recovery-failure',
-    files: []
+    sourceOperation: 'bank-statement:run',
+    files: [{ filePath: '/tmp/orphan-owner-recovery-failure.xlsx', role: 'input' }]
   });
   protectedBatchId = recoverable.batchId;
   service.repository.getBatch(recoverable.batchId).taskStatus = 'running';
@@ -1563,7 +1954,7 @@ test('多个模块 owner 逐项 settle，失败互不短路且分别上报', asy
   assert.equal(warnings[1][1].code, 'TOOLBOX_RECOVERY_FAILED');
 });
 
-test('startup hook 严格位于 outbox owner 重放后和 retention cleanup 前，失败时 fail-closed', async () => {
+test('startup hook 严格位于 owner/outbox/flow/sweep/raw maintenance 后和 retention 前', async () => {
   const order = [];
   const { controller, service } = createHarness({
     recoverInterruptedTaskOwners: [{
@@ -1581,12 +1972,24 @@ test('startup hook 严格位于 outbox owner 重放后和 retention cleanup 前�
     }]
   });
   controller.flushOutbox = async () => {
-    order.push(order.includes('owner') ? 'post-owner-outbox' : 'initial-outbox');
+    order.push('post-owner-outbox');
     return { flushed: 0, discarded: 0, remaining: 0 };
+  };
+  service.replayFlowBindIntents = async () => {
+    order.push('batch-flow');
+    return { ok: true, replayed: 0, remaining: 0 };
+  };
+  service.replayTaskFlowBindIntents = async () => {
+    order.push('task-flow');
+    return { ok: true, replayed: 0, remaining: 0 };
   };
   service.markInterruptedTasks = async () => {
     order.push('sweep');
     return { ok: true, taskCount: 0, batchIds: [] };
+  };
+  service.reconcileStartup = async () => {
+    order.push('raw-maintenance');
+    return { ok: true, status: 'complete' };
   };
   service.cleanupExpired = async () => {
     order.push('cleanup');
@@ -1598,10 +2001,66 @@ test('startup hook 严格位于 outbox owner 重放后和 retention cleanup 前�
     (error) => error && error.code === 'ARCHIVE_STARTUP_HOOK_FAILED'
   );
   assert.deepEqual(order, [
-    'initial-outbox',
     'owner',
     'post-owner-outbox',
+    'batch-flow',
+    'task-flow',
+    'sweep',
+    'raw-maintenance',
     'hook'
+  ]);
+});
+
+test('无 StorageRootManager 时 defer 初始化后按固定顺序恢复，最后才启动后台维护', async () => {
+  const order = [];
+  const { controller, service } = createHarness({
+    recoverInterruptedTaskOwners: [{
+      ownerName: 'owner',
+      recover: async () => { order.push('owner'); }
+    }]
+  });
+  service.initialize = async (options) => {
+    assert.equal(options.deferStartupRecovery, true);
+    order.push('foundation');
+    return { ok: true, available: true };
+  };
+  controller.flushOutbox = async () => {
+    order.push('outbox');
+    return { flushed: 0, discarded: 0, remaining: 0 };
+  };
+  service.replayFlowBindIntents = async () => {
+    order.push('batch-flow');
+    return { ok: true };
+  };
+  service.replayTaskFlowBindIntents = async () => {
+    order.push('task-flow');
+    return { ok: true };
+  };
+  service.markInterruptedTasks = async () => {
+    order.push('sweep');
+    return { ok: true };
+  };
+  service.reconcileStartup = async () => {
+    order.push('raw-maintenance');
+    return { ok: true };
+  };
+  service.cleanupExpired = async () => {
+    order.push('retention');
+    return { ok: true };
+  };
+  service.resumeBackgroundMaterialization = () => { order.push('background'); };
+
+  await controller.initialize();
+  assert.deepEqual(order, [
+    'foundation',
+    'owner',
+    'outbox',
+    'batch-flow',
+    'task-flow',
+    'sweep',
+    'raw-maintenance',
+    'retention',
+    'background'
   ]);
 });
 
@@ -1623,7 +2082,8 @@ test('恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止�
     moduleCode: 'ACQUIRING',
     moduleName: '收单账单币种校验',
     operationKey: 'recoverable-evidence-offline',
-    files: []
+    sourceOperation: 'acquiringBillCurrency:run',
+    files: [{ filePath: '/tmp/acquiring-recovery-evidence.xlsx', role: 'input' }]
   });
   service.repository.getBatch(active.batchId).taskStatus = 'running';
   let sweepCalls = 0;

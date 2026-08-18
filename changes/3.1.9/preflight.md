@@ -720,3 +720,55 @@ Blindspot 与 reconciliation 结论：公开 DTO、latest 删除旁路、related
 
 - PROBE：Windows installer/portable runtime 与升级 canary、目标生产 legacy/trigger、约 16 GB/700 万行、UNC/网络盘/长路径、Excel/WPS。
 - ⚠️ 人工资金：主体×九币种、CNY 迁移、混合异常去向、跨月、调整、归档/解归档/delete、审计、备份恢复和文件血缘。任何异常均以新版本修复，不覆盖或替换既有 v3.1.9 tag/Release 资产。
+
+## 存档中心非空文件批次收口 Preflight（2026-08-17）
+
+### Task Brief
+
+- Goal：前端只展示至少含一个真实文件 artifact 的批次；无文件动作不显示且未来不占批次号，同时修复 Toolbox split 目录误归档与 merge 输入证据丢失。
+- Context：v3.1.10 实库已有历史空批次和三类代表异常；现行 v3.1.9 C04 仍允许 metadata-only 批次，与用户最终口径冲突。
+- Constraints：不重编号/复用历史发行号，不删除真实文件 artifact，不伪造 Toolbox 输出，不新增状态事件时间线，不改变金额/币种/匹配/Excel 内容或业务审计。
+- Done when：Spec §19、Test Spec §二十四和 Tasks 同步；新发号与非空 manifest 原子；公共 list/get/stats/latest/related 口径统一；017/018 精确修复；001 保留可解释失败；自动与人工门禁完成。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| 实库 95 个批次中 34 个零 artifact，另有 8 个 failed-only 文件批次 | `tool-data.sqlite` 只读聚合 | 可见条件不能写成 `readyArtifactCount>0`；failed 文件仍需展示/重试 |
+| `2026-08-13-017` / `2026-08-13-018` 各有 1 个 ready input、2 个 ready output 和 1 个失败目录 input | 批次 66/67、artifact 90—97 | 两批不是空批次；只修伪目录行，不动真实文件或批次号 |
+| 目录来自 `showImportOpenDialog` 的 `openDirectory` selection 被并入 `selectedPaths` | `src/main.js` dialog context 与 Toolbox split prepare | 输入解析必须区分 file/directory 角色，不能继续全量合并 dialog selections |
+| `2026-08-17-001` 有 2 个 ready input、0 output，task failed/archive complete | 批次 95、artifact 133/134、error log | 它是有内容失败批次，必须显示且不得伪造输出 |
+| merge `beforeStart` 写 P0，execute/publication 读规范化 P1 | 最小复现 `sameObject=false`，P1 `inputFiles=undefined` | evidence 必须显式返回并落在规范化对象，不能靠闭包副作用 |
+| publication 校验在 journal/target staging 前拒绝 | Toolbox publication 调用顺序，journal index 为空 | 修复后继续 fail-closed；旧 001 没有可自动恢复的输出 |
+| 历史 operation issuance 与日序号是持久审计身份 | repository schema/allocator | 历史只能隐藏，不能安全重排或复用；“不占号”从新版本入口保证 |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- |
+| 全量 reserve action 中哪些能在业务前形成 manifest | 已知未知 | 高 | PROBE | 由 policy registry + literal IPC 生成 inventory，逐项核对 prepare/result | 未证明者不得实施 reserve；先重排无副作用 preflight |
+| output-only action 是否存在业务前无法确定文件名/路径 | 已知未知 | 高 | PROBE | 扫描 writer 调用和 save/directory plan | 优先预登记 output intent；仍无法证明则归 no-archive-artifact，不允许空批次 |
+| 无文件 action 移除 batch 后 flow parent 如何继承 | 已知未知 | 高 | PROBE | 对 VCC calculate→export、statement run→export 做跨重启契约 | stable business anchor 或首个文件批次绑定，禁止 latest fallback |
+| failed/pending 文件是否算“有内容” | 隐性偏好 | 中 | ASSUME | 对照当前详情文件行、错误和重试入口 | 算内容；隐藏会丢可操作恢复证据，且不属于“内容为空” |
+| 历史零文件号是否追溯回收 | 兼容边界 | 高 | 已确认约束 | 检查 issuance、parent、外部显示/日志引用 | 不回收、不重排；历史允许号码间隙，未来不再新增 |
+| `2026-08-13-017` / `2026-08-13-018` 伪 artifact 如何历史修复 | 数据迁移 | 高 | PROBE | DB 副本 dry-run + exact fingerprint + 二次执行 | 只精确清理/隔离两行并重算，不按错误码泛化删除 |
+
+当前无 BLOCK。若 inventory 发现某个主要文件流程既无法在副作用前形成任何真实 manifest、又不能安全重排 preflight，必须升级为 BLOCK，不得以 metadata-only 批次绕过。
+
+### 风险优先计划
+
+1. 先锁 valid artifact/visibility predicate，并在 repository/controller/stats/related 层写一致性红测。
+2. 再锁原子 reserve+manifest 和 action inventory；这是满足“不占号”的关键，不以 renderer hide 代替。
+3. 验证 no-file action 的 stable flow identity，再迁移 policy，防止关联任务串流或断链。
+4. 修 Toolbox directory role 和 merge evidence 传递，覆盖正常、失败、崩溃前置边界。
+5. 在数据库副本 dry-run 历史过滤及 `2026-08-13-017` / `2026-08-13-018` 修复；`2026-08-17-001` 只做只读验收。
+6. 扩大 Archive/Toolbox/业务回归、release-check/check-vars 和真实 UI 手工检查；任何真实 artifact、SHA 或关联关系偏差停止上线。
+
+### Blindspot Pass 结论
+
+- 仅 renderer 隐藏会造成分页、统计、latest、直查和 related 口径分裂，已改为唯一 server-side predicate。
+- 任务结束后再删除空批次无法撤销已发行号码，并会破坏并发/operation issuance，已改为业务前非空 manifest 原子预留。
+- 将“有内容”误定义为 ready-only 会隐藏 failed-only 历史批次及其重试入口，已明确三种 artifact 状态均可见。
+- 移除 no-file batch 可能让 flow identity 失去 parent 来源，已列为实施前 P0 PROBE，不允许 latest fallback。
+- `2026-08-13-017` / `2026-08-13-018` 若按 `ARCHIVE_SOURCE_NOT_FILE` 泛删会误伤真实源文件失败，历史修复必须同时匹配 channel/direction/目录/输出父目录和批次号。
+- `2026-08-17-001` 若被当空批次隐藏会丢掉两份已归档输入及真实失败事实；若回填后续输出会篡改 task 血缘，均已禁止。

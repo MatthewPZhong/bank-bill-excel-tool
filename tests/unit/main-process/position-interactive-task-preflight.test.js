@@ -29,6 +29,8 @@ const POLICY = Object.freeze({
   moduleName: '平盘对账数据处理',
   taskKey: 'position-reconciliation:test',
   batchPolicy: 'reserve',
+  taskKind: 'file',
+  allocation: 'eager',
   startsNewFlow: true,
   resultClassifier(result) {
     if (result && result.status === 'ok') return 'succeeded';
@@ -39,12 +41,36 @@ const POLICY = Object.freeze({
 
 function createLifecycleHarness({ reserveOk = true } = {}) {
   const calls = [];
+  const settledFiles = [];
   const lifecycle = createTaskLifecycle({
     businessOperationRegistry: {
       begin() { calls.push('bor-begin'); return { accepted: true, token: 'bor-1' }; },
       end() { calls.push('bor-end'); }
     },
     archiveService: {
+      async beginTaskRun(payload) {
+        calls.push('begin-task-run');
+        return { ok: true, taskRun: { ...payload, status: 'prepared' } };
+      },
+      async markTaskRunStarted() { return { ok: true }; },
+      async reserveFileTaskBatch({ taskRun }) {
+        calls.push('reserve');
+        return reserveOk
+          ? { ok: true, batch: { id: 1, batchNumber: 'position-1', ...taskRun } }
+          : { ok: false, code: 'reserve-failed', message: 'reserve failed' };
+      },
+      async beginFileTaskRecovery() { throw new Error('unexpected file recovery'); },
+      async startFileTask() { calls.push('started'); return { ok: true }; },
+      async settleManifestArtifacts(payload) {
+        calls.push('settle');
+        settledFiles.push(payload.files);
+        return { ok: true, durable: true };
+      },
+      async finishFileTask(_taskRunId, _batchId, outcome) {
+        calls.push(outcome.taskStatus === 'succeeded' ? 'complete' : outcome.taskStatus);
+        return { ok: true };
+      },
+      async finishTaskRun() { return { ok: true }; },
       async reserveTaskBatch(payload) {
         calls.push('reserve');
         return reserveOk
@@ -85,18 +111,22 @@ function createLifecycleHarness({ reserveOk = true } = {}) {
     },
     createTaskRunId: () => 'position-task-1'
   });
-  return { calls, lifecycle };
+  return { calls, lifecycle, settledFiles };
 }
 
 async function invoke(contract, args, harness) {
   const normalized = normalizeIpcTaskHandler(contract);
   const prepared = await prepareIpcTaskInvocation(normalized, {}, args);
   if (!prepared.proceed) return { prepared, result: prepared.result };
+  const lifecycleRun = prepared.filePlan
+    ? harness.lifecycle.runFileTask.bind(harness.lifecycle)
+    : harness.lifecycle.run.bind(harness.lifecycle);
   const result = await runWithPreparedResourceCleanup(prepared, (markExecuteStarted) => (
-    harness.lifecycle.run({
+    lifecycleRun({
       policy: POLICY,
       meta: { channel: POLICY.channel },
       prepared,
+      filePlanResolver: prepared.filePlan ? () => prepared.filePlan : undefined,
       execute: (batchContext, controls) => {
         markExecuteStarted();
         return executeIpcTaskInvocation(
@@ -213,7 +243,7 @@ test('source picker cancel 在 getService/BOR/reserve 前停止', async () => {
   assert.deepEqual(harness.calls, []);
 });
 
-test('source account-only 预检/取消 0 lifecycle，ordinary 与 mixed 各执行一次', async () => {
+test('source account-only、ordinary 与 mixed 均由真实输入 File Task 收口', async () => {
   for (const fixture of [
     { name: 'account-only', requiresExecution: false, execute: 0 },
     { name: 'ordinary-only', requiresExecution: true, execute: 1 },
@@ -251,7 +281,7 @@ test('source account-only 预检/取消 0 lifecycle，ordinary 与 mixed 各执�
       abandonPreparedSourceImport() { throw new Error('正常执行不应 abandon'); }
     };
     const contract = createPositionSourceImportTaskContract({
-      pickFiles: async () => ({ canceled: false, filePaths: ['/input/source.xlsx'] }),
+      pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
       getService: () => service,
       withSourceLock: (task) => task()
     });
@@ -263,8 +293,8 @@ test('source account-only 预检/取消 0 lifecycle，ordinary 与 mixed 各执�
       assert.equal(receivedBatchContext.batchId, 1, fixture.name);
       assert.equal(Object.isFrozen(receivedBatchContext), true, fixture.name);
     }
-    assert.equal(harness.calls.filter((item) => item === 'reserve').length, fixture.execute);
-    assert.equal(harness.calls.filter((item) => item === 'complete').length, fixture.execute);
+    assert.equal(harness.calls.filter((item) => item === 'reserve').length, 1);
+    assert.equal(harness.calls.filter((item) => item === 'complete').length, 1);
   }
 });
 
@@ -276,14 +306,23 @@ test('source reserve 失败会 abandon prepared worker/staging 且 0 apply', asy
       return {
         requiresExecution: true,
         inputPaths: ['/staging/source.xlsx'],
-        plan: { engine: 'streaming' }
+        plan: {
+          engine: 'streaming',
+          preflightReady: {
+            acceptedOrdinaryInputFiles: [{
+              archivePath: path.resolve(__dirname, '../../../src/main-process/position-reconciliation/service.js')
+            }],
+            accountConfirmationDescriptor: null,
+            outputFiles: []
+          }
+        }
       };
     },
     executePreparedSourceImport() { applyCount += 1; return { status: 'ok' }; },
     async abandonPreparedSourceImport() { abandonCount += 1; }
   };
   const contract = createPositionSourceImportTaskContract({
-    pickFiles: async () => ({ canceled: false, filePaths: ['/input/source.xlsx'] }),
+    pickFiles: async () => ({ canceled: false, filePaths: [__filename] }),
     getService: () => service,
     withSourceLock: (task) => task()
   });
@@ -294,6 +333,56 @@ test('source reserve 失败会 abandon prepared worker/staging 且 0 apply', asy
   assert.equal(harness.calls.includes('started'), false);
   assert.equal(applyCount, 0);
   assert.equal(abandonCount, 1);
+});
+
+test('source mixed preflight 把全部选择、实际 staging 与 anomaly output 固定为同一 manifest', async () => {
+  const selectedA = __filename;
+  const selectedB = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/common.js');
+  const staged = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/service.js');
+  const anomaly = path.resolve(__dirname, '../../../src/main-process/position-reconciliation/operation-lifecycle.js');
+  const service = {
+    async prepareSourceImportForLifecycle() {
+      return {
+        requiresExecution: true,
+        plan: {
+          engine: 'streaming',
+          preflightReady: {
+            acceptedOrdinaryInputFiles: [{
+              archivePath: staged,
+              fileName: 'staged.xlsx',
+              sourceType: 'fund-transfer'
+            }],
+            accountConfirmationDescriptor: null,
+            orderedFileResults: [
+              { status: 'ok', archivePath: staged },
+              { status: 'failed', fileName: 'rejected.xlsx' }
+            ],
+            outputFiles: [{ filePath: anomaly }]
+          }
+        }
+      };
+    },
+    executePreparedSourceImport(_plan, _batchContext, fileEvidence) {
+      assert.deepEqual(fileEvidence.executionInputPaths, [staged]);
+      assert.equal(fileEvidence.outputs.length, 1);
+      return { status: 'ok', successCount: 1, failedCount: 1 };
+    },
+    abandonPreparedSourceImport() { throw new Error('正常执行不应 abandon'); }
+  };
+  const contract = createPositionSourceImportTaskContract({
+    pickFiles: async () => ({ canceled: false, filePaths: [selectedA, selectedB] }),
+    getService: () => service,
+    withSourceLock: (task) => task()
+  });
+  const harness = createLifecycleHarness();
+  const { prepared, result } = await invoke(contract, [], harness);
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(
+    prepared.filePlan.inputs.map((item) => item.filePath),
+    [selectedA, selectedB, staged].map((value) => path.resolve(value))
+  );
+  assert.deepEqual(prepared.filePlan.outputs.map((item) => item.filePath), [anomaly]);
+  assert.equal(prepared.filePlan.inputs.length + prepared.filePlan.outputs.length, 4);
 });
 
 test('position outer 拒绝时 abandon；实际进入业务 callback 后正常执行且不 abandon', async () => {

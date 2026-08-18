@@ -21,6 +21,7 @@
 //       YYYY-MM-DD 字符串再做字符串 min/max（不能直接用 .value：其对 `2026/03/10` 保留斜杠，
 //       与 `-` 格式混用会让字符串比较错乱）。解析失败 / 空值跳过，不参与 min/max。
 
+const { randomUUID } = require('node:crypto');
 const { normalizeDateExportValue } = require('../file-service/normalizers');
 const { BANK_STATEMENT_FIELDS } = require('../../constants/bank-statement-fields');
 // v3.0.5 需求2：fx 主表 upsert 幂等键 = normalizeTransactionNo(交易编号)，单一真相下沉自 engine-utils
@@ -284,6 +285,9 @@ function normalizeSourceFileName(options) {
 //     本函数保持「同步函数同步返回」契约不变，事务骨架 6 行同步直写，对外行为字节不变
 //     （gateway-bill / mid-allocation / fx-settlement / bank-deposit 均用它；row_count = 喂入次数 = safeRows.length）。
 function replaceLinkedTable(db, tableKey, rows, options = {}) {
+  if (tableKey === 'gateway-bill') {
+    throw new TypeError('gateway-bill 必须通过带 source identity 的专用 upsert 写入');
+  }
   const def = getDef(tableKey);
   if (!def.supported) {
     // fx-option 模板缺失：明确拒绝（A4 也不会产出 fx-option，双保险）
@@ -325,6 +329,9 @@ function replaceLinkedTable(db, tableKey, rows, options = {}) {
 //   行为契约对齐 replaceLinkedTable：返回 { tableKey, rowCount, dataDateMin, dataDateMax, updatedAt }，
 //     row_count = 实际喂入 insertOne 的次数。
 async function replaceLinkedTableStreaming(db, tableKey, feedRows, options = {}) {
+  if (tableKey === 'gateway-bill') {
+    throw new TypeError('gateway-bill 必须通过带 source identity 的专用 upsert 写入');
+  }
   const def = getDef(tableKey);
   if (!def.supported) {
     throw new Error('外汇期权表模板缺失，暂未支持');
@@ -380,16 +387,34 @@ async function replaceLinkedTableStreaming(db, tableKey, feedRows, options = {})
 //   🔴 DO UPDATE 不写 idKeyColumn 本身（它是 ON CONFLICT 的判定键，不变）。
 //   counters.overwriteCount：本批命中已存在键（被覆盖）的次数；upsert 前用 existsStmt 判定
 //     （.changes 区分不了 INSERT/UPDATE，故必须先 SELECT 1 判存在）。
-function buildLinkedUpsertContext(db, tableKey, { keyExtractor, idKeyColumn }, importedAt) {
+function buildLinkedUpsertContext(
+  db,
+  tableKey,
+  { keyExtractor, idKeyColumn, sourceIdentity = null },
+  importedAt
+) {
   const def = getDef(tableKey);
+  const sourceColumns = sourceIdentity
+    ? ', source_dataset_id, source_task_run_id, source_contract_version, source_write_nonce'
+    : '';
+  const sourceValues = sourceIdentity ? ', ?, ?, ?, ?' : '';
+  const sourceUpdates = sourceIdentity
+    ? `,
+      source_dataset_id = excluded.source_dataset_id,
+      source_task_run_id = excluded.source_task_run_id,
+      source_contract_version = excluded.source_contract_version,
+      source_write_nonce = excluded.source_write_nonce`
+    : '';
   const upsertSql = `
-    INSERT INTO ${def.table} (${idKeyColumn}, ${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO ${def.table} (
+      ${idKeyColumn}, ${def.keyColumn}, ${def.dateColumn}, raw_json, imported_at${sourceColumns}
+    )
+    VALUES (?, ?, ?, ?, ?${sourceValues})
     ON CONFLICT(${idKeyColumn}) DO UPDATE SET
       ${def.keyColumn} = excluded.${def.keyColumn},
       ${def.dateColumn} = excluded.${def.dateColumn},
       raw_json = excluded.raw_json,
-      imported_at = excluded.imported_at
+      imported_at = excluded.imported_at${sourceUpdates}
   `;
   const upsertStmt = db.prepare(upsertSql);
   const existsStmt = db.prepare(`SELECT 1 FROM ${def.table} WHERE ${idKeyColumn} = ? LIMIT 1`);
@@ -406,7 +431,16 @@ function buildLinkedUpsertContext(db, tableKey, { keyExtractor, idKeyColumn }, i
     const dateIso = normalizeDateForRange(obj[def.dateHeader]); // 日期列 → YYYY-MM-DD / null
     const rawJson = JSON.stringify(obj);
     const existed = existsStmt.get(idKey) !== undefined; // upsert 前先判（区分 INSERT/UPDATE）
-    upsertStmt.run(idKey, keyValue, dateIso, rawJson, importedAt);
+    const params = [idKey, keyValue, dateIso, rawJson, importedAt];
+    if (sourceIdentity) {
+      params.push(
+        sourceIdentity.datasetId,
+        sourceIdentity.producerTaskRunId,
+        sourceIdentity.sourceContractVersion,
+        randomUUID()
+      );
+    }
+    upsertStmt.run(...params);
     if (existed) counters.overwriteCount += 1;
     counters.upserted += 1;
   };
@@ -436,13 +470,40 @@ function recomputeLinkedMeta(db, tableKey, sourceFileName, importedAt) {
 //   upsertOne(row) 逐行：取 ReconBillBizId 幂等键 → 空键拒入 → ON CONFLICT DO UPDATE 覆盖。
 //   🔴 v3.0.5 泛化重构：行为字节不变（idKeyColumn='recon_bill_biz_id'、keyExtractor=obj.ReconBillBizId），
 //     既有 v3.0.1 单测 parity 为锁。
-function buildGatewayUpsertContext(db, importedAt) {
+function buildGatewayUpsertContext(db, importedAt, sourceIdentity) {
   return buildLinkedUpsertContext(
     db,
     'gateway-bill',
-    { keyExtractor: (obj) => obj.ReconBillBizId, idKeyColumn: 'recon_bill_biz_id' },
+    {
+      keyExtractor: (obj) => obj.ReconBillBizId,
+      idKeyColumn: 'recon_bill_biz_id',
+      sourceIdentity
+    },
     importedAt
   );
+}
+
+function gatewaySourceIdentity(options) {
+  if (options && options.legacySource === true) {
+    return Object.freeze({
+      datasetId: null,
+      producerTaskRunId: null,
+      sourceContractVersion: 0
+    });
+  }
+  const raw = options && options.sourceIdentity;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+      || Object.keys(raw).length !== 3
+      || typeof raw.datasetId !== 'string' || !raw.datasetId.trim()
+      || typeof raw.producerTaskRunId !== 'string' || !raw.producerTaskRunId.trim()
+      || raw.sourceContractVersion !== 1) {
+    throw new TypeError('网关链接表导入缺少 exact v1 source identity');
+  }
+  return Object.freeze({
+    datasetId: raw.datasetId,
+    producerTaskRunId: raw.producerTaskRunId,
+    sourceContractVersion: 1
+  });
 }
 
 // 网关 meta 全表重算（薄封装，委托泛化内核）。🔴 v3.0.5 泛化重构：行为字节不变。
@@ -619,7 +680,11 @@ function upsertLinkedGatewayBill(db, rows, options = {}) {
   const safeRows = Array.isArray(rows) ? rows : [];
   const sourceFileName = normalizeSourceFileName(options);
   const importedAt = new Date().toISOString();
-  const { upsertOne, counters } = buildGatewayUpsertContext(db, importedAt);
+  const { upsertOne, counters } = buildGatewayUpsertContext(
+    db,
+    importedAt,
+    gatewaySourceIdentity(options)
+  );
 
   db.exec('BEGIN');
   let metaState;
@@ -655,7 +720,11 @@ async function upsertLinkedGatewayBillStreaming(db, feedRows, options = {}) {
   }
   const sourceFileName = normalizeSourceFileName(options);
   const importedAt = new Date().toISOString();
-  const { upsertOne, counters } = buildGatewayUpsertContext(db, importedAt);
+  const { upsertOne, counters } = buildGatewayUpsertContext(
+    db,
+    importedAt,
+    gatewaySourceIdentity(options)
+  );
 
   db.exec('BEGIN');
   let metaState;
@@ -938,7 +1007,8 @@ function* iterateGatewayBillRows(db) {
   const def = getDef('gateway-bill');
   if (!def.supported) return;
   const cursor = db.prepare(`
-    SELECT id, reconciliation_id, bill_date, recon_bill_biz_id, raw_json
+    SELECT id, reconciliation_id, bill_date, recon_bill_biz_id, raw_json,
+           source_dataset_id, source_task_run_id, source_contract_version
     FROM ${def.table}
     ORDER BY id ASC
   `).iterate();
@@ -951,6 +1021,9 @@ function* iterateGatewayBillRows(db) {
           reconciliationId: record.reconciliation_id,
           billDate: record.bill_date,
           reconBillBizId: record.recon_bill_biz_id,
+          sourceDatasetId: record.source_dataset_id || null,
+          sourceTaskRunId: record.source_task_run_id || null,
+          sourceContractVersion: Number(record.source_contract_version) === 1 ? 1 : 0,
           row: null,
           rawJsonInvalid: true
         };
@@ -961,6 +1034,9 @@ function* iterateGatewayBillRows(db) {
         reconciliationId: record.reconciliation_id,
         billDate: record.bill_date,
         reconBillBizId: record.recon_bill_biz_id,
+        sourceDatasetId: record.source_dataset_id || null,
+        sourceTaskRunId: record.source_task_run_id || null,
+        sourceContractVersion: Number(record.source_contract_version) === 1 ? 1 : 0,
         rawJson: record.raw_json,
         row
       };
@@ -970,11 +1046,29 @@ function* iterateGatewayBillRows(db) {
         reconciliationId: record.reconciliation_id,
         billDate: record.bill_date,
         reconBillBizId: record.recon_bill_biz_id,
+        sourceDatasetId: record.source_dataset_id || null,
+        sourceTaskRunId: record.source_task_run_id || null,
+        sourceContractVersion: Number(record.source_contract_version) === 1 ? 1 : 0,
         row: null,
         rawJsonInvalid: true
       };
     }
   }
+}
+
+function listGatewayBillSourceTags(db) {
+  return db.prepare(`
+    SELECT source_dataset_id, source_task_run_id, source_contract_version,
+           COUNT(*) AS row_count
+    FROM linked_gateway_bill
+    GROUP BY source_dataset_id, source_task_run_id, source_contract_version
+    ORDER BY source_contract_version ASC, source_dataset_id ASC, source_task_run_id ASC
+  `).all().map((row) => ({
+    datasetId: row.source_dataset_id || null,
+    producerTaskRunId: row.source_task_run_id || null,
+    sourceContractVersion: Number(row.source_contract_version) === 1 ? 1 : 0,
+    rowCount: Number(row.row_count)
+  }));
 }
 
 function getGatewayBillRawJsonById(db, rowId) {
@@ -1729,6 +1823,7 @@ module.exports = {
   deleteBankDepositByDateRange,
   readLinkedTableRows,
   iterateGatewayBillRows,
+  listGatewayBillSourceTags,
   getGatewayBillRawJsonById,
   // v3.0.0 块 B / PR-3：ADM 派生内存优化（Channel=ADM 下推过滤 + 轻量存在性探测）
   readBankDepositAdmCandidates,

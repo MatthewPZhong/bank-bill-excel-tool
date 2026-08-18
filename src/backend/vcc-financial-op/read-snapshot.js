@@ -40,7 +40,7 @@ const ACTIVE_MONTHS_SQL = `
   UNION
   SELECT target_month FROM vcc_fin_op_import_records
   WHERE status = 'importing'
-     OR resolution_status = 'unresolved'
+     OR status IN ('failed_conflict', 'failed_validation')
      OR (
        status IN ('success', 'success_with_skips', 'all_skipped')
        AND dataset_deleted_at IS NULL
@@ -347,10 +347,9 @@ function loadUnarchiveGateEvidence(db, targetMonth, {
     ORDER BY id
   `);
   const importRecords = executeQuery(db, trace, 'unarchive-import-gate', `
-    SELECT id, source_type, status, resolution_status
+    SELECT id, status
     FROM vcc_fin_op_import_records
-    WHERE target_month = ?
-      AND (status = 'importing' OR resolution_status = 'unresolved')
+    WHERE target_month = ? AND status = 'importing'
     ORDER BY id
   `, [targetMonth]);
   const laterRows = executeQuery(db, trace, 'unarchive-later-dependencies', `
@@ -400,17 +399,7 @@ function loadUnarchiveGateEvidence(db, targetMonth, {
     taskGeneration: Number(taskGeneration),
     taskActive: Boolean(taskActive),
     activeBatchIds: Object.freeze(activeBatches.map((row) => String(row.id))),
-    importingRecordIds: Object.freeze(importRecords
-      .filter((row) => row.status === 'importing')
-      .map((row) => Number(row.id))),
-    unresolvedRecords: Object.freeze(importRecords
-      .filter((row) => row.resolution_status === 'unresolved')
-      .map((row) => Object.freeze({
-        id: Number(row.id),
-        sourceType: row.source_type,
-        status: row.status,
-        resolutionStatus: row.resolution_status
-      }))),
+    importingRecordIds: Object.freeze(importRecords.map((row) => Number(row.id))),
     laterDependencies: Object.freeze([...laterByMonth.values()].map((item) => Object.freeze({
       ...item,
       runs: Object.freeze(item.runs),
@@ -527,10 +516,9 @@ function loadDeleteEvidenceV2(db, {
     WHERE status = 'importing' ORDER BY id
   `);
   const importRecords = executeQuery(db, trace, 'delete-import-gate', `
-    SELECT id, source_type, status, resolution_status
+    SELECT id, status
     FROM vcc_fin_op_import_records
-    WHERE target_month = ?
-      AND (status = 'importing' OR resolution_status = 'unresolved')
+    WHERE target_month = ? AND status = 'importing'
     ORDER BY id
   `, [month]);
   const moduleState = executeQuery(db, trace, 'delete-module-state', `
@@ -563,17 +551,7 @@ function loadDeleteEvidenceV2(db, {
     effectiveCounts: Object.freeze(effectiveCounts),
     systemSnapshotCount: Number(systemRow.row_count),
     activeBatchIds: Object.freeze(activeBatches.map((row) => String(row.id))),
-    importingRecordIds: Object.freeze(importRecords
-      .filter((row) => row.status === 'importing')
-      .map((row) => Number(row.id))),
-    unresolvedRecords: Object.freeze(importRecords
-      .filter((row) => row.resolution_status === 'unresolved')
-      .map((row) => Object.freeze({
-        id: Number(row.id),
-        sourceType: row.source_type,
-        status: row.status,
-        resolutionStatus: row.resolution_status
-      }))),
+    importingRecordIds: Object.freeze(importRecords.map((row) => Number(row.id))),
     firstMonth
   });
 }
@@ -643,9 +621,6 @@ function deletePreviewForTarget(evidence, targetType, { taskActive = false } = {
     } else if (activeExists) {
       code = 'active-vcc-task';
       message = '已有 VCC 财务OP任务正在运行，请完成后重试。';
-    } else if (evidence.unresolvedRecords.length > 0) {
-      code = 'unresolved-imports';
-      message = '该月仍有未处理的导入异常，禁止删除首月期初初始化数据。';
     }
     preview = {
       targetType,
@@ -744,10 +719,9 @@ function loadResultMutationGateEvidence(db, targetMonth, {
     ORDER BY id
   `, [targetMonth]);
   const importRecords = executeQuery(db, trace, 'result-write-import-gate', `
-    SELECT id, source_type, status, resolution_status
+    SELECT id, status
     FROM vcc_fin_op_import_records
-    WHERE target_month = ?
-      AND (status = 'importing' OR resolution_status = 'unresolved')
+    WHERE target_month = ? AND status = 'importing'
     ORDER BY id
   `, [targetMonth]);
   const [year, month] = targetMonth.split('-').map(Number);
@@ -762,17 +736,7 @@ function loadResultMutationGateEvidence(db, targetMonth, {
   return Object.freeze({
     taskGeneration: Number(taskGeneration),
     activeBatchIds: Object.freeze(activeBatches.map((row) => String(row.id))),
-    importingRecordIds: Object.freeze(importRecords
-      .filter((row) => row.status === 'importing')
-      .map((row) => Number(row.id))),
-    unresolvedRecords: Object.freeze(importRecords
-      .filter((row) => row.resolution_status === 'unresolved')
-      .map((row) => Object.freeze({
-        id: Number(row.id),
-        sourceType: row.source_type,
-        status: row.status,
-        resolutionStatus: row.resolution_status
-      }))),
+    importingRecordIds: Object.freeze(importRecords.map((row) => Number(row.id))),
     nextOpeningSubjects: Object.freeze(nextOpeningRows.map((row) => String(row.subject)))
   });
 }

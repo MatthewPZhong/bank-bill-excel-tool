@@ -760,11 +760,22 @@ function nextAvailableOutputPath(outputDirectory, baseName, usedNames) {
   return path.join(outputDirectory, fileName);
 }
 
+function planRunWorkbookOutputPaths({ targetMonth, subjects, outputDirectory, outputPath }) {
+  const plannedSubjects = Array.isArray(subjects) ? subjects : [];
+  if (plannedSubjects.length === 1 && outputPath) {
+    return Object.freeze([path.resolve(outputPath)]);
+  }
+  const usedNames = new Set();
+  return Object.freeze(plannedSubjects.map((subject) => {
+    const baseName = `${targetMonth}_${sanitizeFilePart(subject)}_VCC财务OP校验结果表`;
+    return path.resolve(nextAvailableOutputPath(outputDirectory, baseName, usedNames));
+  }));
+}
+
 async function writeRunWorkbooks({
   db,
   runId,
-  outputDirectory,
-  outputPath,
+  outputPaths,
   assetsDir,
   publicationStagingDirectory = null,
   writeSubjectWorkbookFn = writeSubjectWorkbook
@@ -780,15 +791,7 @@ async function writeRunWorkbooks({
 
   const data = loadEffectiveRunData(db, Number(runId));
   const plans = data.subjects.map((subject) => buildSubjectRowPlan(data, subject));
-  const usedNames = new Set();
-  const destinations = plans.map((plan) => {
-    if (data.subjects.length === 1 && outputPath) {
-      return path.resolve(outputPath);
-    }
-    if (!outputDirectory) throw new Error('多主体导出必须指定保存目录');
-    const baseName = `${data.run.targetMonth}_${sanitizeFilePart(plan.subject)}_VCC财务OP校验结果表`;
-    return path.resolve(nextAvailableOutputPath(outputDirectory, baseName, usedNames));
-  });
+  const destinations = outputPaths.map((filePath) => path.resolve(filePath));
   const deferredPublication = Boolean(publicationStagingDirectory);
   const generationPaths = [];
   if (deferredPublication) {
@@ -858,5 +861,6 @@ module.exports = {
   validateStagedWorkbook,
   assertAdjustmentLineage,
   nextAvailableOutputPath,
+  planRunWorkbookOutputPaths,
   writeRunWorkbooks
 };

@@ -283,7 +283,7 @@ async function run() {
       { reconciliationid: 'GR-1', ReconBillBizId: 'GB-1', Billdate: '2026-02-10' },
       { reconciliationid: 'GR-2', ReconBillBizId: 'GB-2', Billdate: '2026-03-20' },
       { reconciliationid: 'GR-3', ReconBillBizId: 'GB-3', Billdate: '2026-09-01' }
-    ], { sourceFileName: 'gw.xlsx' });
+    ], { sourceFileName: 'gw.xlsx', legacySource: true });
     // 缺省 tableKey（不传）→ gateway 删除。
     const gwSe = {};
     const gwDel = mirrorDeleteHandler(appDb, { start: '2026-02-01', end: '2026-03-31' }, gwSe);

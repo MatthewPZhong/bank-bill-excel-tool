@@ -3,6 +3,7 @@
 const ADMISSION_METHODS = new Set([
   'archiveFile',
   'attachFile',
+  'beginTaskRun',
   'beginTaskRecovery',
   'createBatch',
   'reserveTaskBatch',
