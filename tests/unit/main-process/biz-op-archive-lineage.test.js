@@ -351,6 +351,150 @@ test('Biz 主库 mirror 覆盖遇未 ACK receipt 时保留原镜像', (t) => {
   assert.equal(runs.listRunsByDateBu(appDb.db, '2026-05-22', 'BU-A').length, 1);
 });
 
+test('Biz side receipt 后主库 mirror 失败时精确删除本 TaskRun 的 run/diff 再允许 failed', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-mirror-compensation-'));
+  const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
+  appDb.init();
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const repository = createArchiveRepository(appDb.db);
+  repository.ensureSchema();
+  repository.beginTaskRun(archiveTaskPayload('biz-mirror-failed-task'));
+  repository.transitionTaskRun('biz-mirror-failed-task', 'running');
+
+  const sideDb = runDataStore.openSideDb(
+    directory,
+    runDataStore.MODULE_BIZ_OP,
+    '2026-05'
+  );
+  try {
+    seedSources(sideDb);
+  } finally {
+    sideDb.close();
+  }
+  const relPath = runDataStore.sideDbRelPath(runDataStore.MODULE_BIZ_OP, '2026-05');
+  const blockingMirrorId = runData.upsertMainRunMirror(appDb.db, {
+    date: '2026-05-22',
+    buName: 'BU-A',
+    relPath,
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 0,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    },
+    status: 'success',
+    archiveTaskRunId: 'biz-existing-unack-mirror'
+  });
+  const plan = runData.prepareRunLineage({
+    userDataDir: directory,
+    date: '2026-05-22',
+    buName: 'BU-A'
+  });
+
+  assert.throws(() => runData.runViaSideDb({
+    userDataDir: directory,
+    mainDb: appDb.db,
+    date: '2026-05-22',
+    buName: 'BU-A',
+    taskRunId: 'biz-mirror-failed-task',
+    expectedDatasets: plan.expectedDatasets
+  }), /未 ACK/);
+  repository.transitionTaskRun('biz-mirror-failed-task', 'failed');
+
+  const verifySide = runDataStore.openSideDb(
+    directory,
+    runDataStore.MODULE_BIZ_OP,
+    '2026-05'
+  );
+  try {
+    assert.equal(runs.getRunByArchiveTaskRunId(verifySide, 'biz-mirror-failed-task'), null);
+    assert.equal(verifySide.prepare('SELECT COUNT(*) AS count FROM biz_op_recon_diff_rows').get().count, 0);
+  } finally {
+    verifySide.close();
+  }
+  assert.equal(repository.getTaskRun('biz-mirror-failed-task').status, 'failed');
+  assert.equal(runs.listRunsByDateBu(appDb.db, '2026-05-22', 'BU-A').length, 1);
+  assert.equal(runs.getRunById(appDb.db, blockingMirrorId).archive_task_run_id, 'biz-existing-unack-mirror');
+});
+
+test('Biz 精确补偿事务失败时保留 interrupted owner，既有启动恢复可收口 receipt', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-compensation-recovery-'));
+  const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
+  appDb.init();
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const repository = createArchiveRepository(appDb.db);
+  repository.ensureSchema();
+  repository.beginTaskRun(archiveTaskPayload('biz-compensation-recovery-task'));
+  repository.transitionTaskRun('biz-compensation-recovery-task', 'running');
+  const sideDb = runDataStore.openSideDb(
+    directory,
+    runDataStore.MODULE_BIZ_OP,
+    '2026-05'
+  );
+  try {
+    seedSources(sideDb);
+  } finally {
+    sideDb.close();
+  }
+  const relPath = runDataStore.sideDbRelPath(runDataStore.MODULE_BIZ_OP, '2026-05');
+  const blockingMirrorId = runData.upsertMainRunMirror(appDb.db, {
+    date: '2026-05-22',
+    buName: 'BU-A',
+    relPath,
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 0,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    },
+    status: 'success',
+    archiveTaskRunId: 'biz-compensation-blocker'
+  });
+  const plan = runData.prepareRunLineage({
+    userDataDir: directory,
+    date: '2026-05-22',
+    buName: 'BU-A'
+  });
+  const originalDelete = runs.deleteArchiveRunByTaskRunId;
+  runs.deleteArchiveRunByTaskRunId = () => {
+    throw new Error('forced exact compensation failure');
+  };
+  t.after(() => { runs.deleteArchiveRunByTaskRunId = originalDelete; });
+
+  assert.throws(() => runData.runViaSideDb({
+    userDataDir: directory,
+    mainDb: appDb.db,
+    date: '2026-05-22',
+    buName: 'BU-A',
+    taskRunId: 'biz-compensation-recovery-task',
+    expectedDatasets: plan.expectedDatasets
+  }), (error) => error.code === 'BIZ_OP_MIRROR_COMPENSATION_FAILED'
+    && error.preserveArchiveTaskRun === true);
+  const service = archiveService(repository);
+  const interrupted = await service.finishTaskRun('biz-compensation-recovery-task', {
+    taskStatus: 'interrupted',
+    code: 'BIZ_OP_MIRROR_COMPENSATION_FAILED',
+    message: 'forced exact compensation failure',
+    metadata: { bizOpRunReceiptPending: true }
+  });
+  assert.equal(interrupted.ok, true);
+  assert.equal(repository.getTaskRun('biz-compensation-recovery-task').status, 'interrupted');
+
+  runs.deleteArchiveRunByTaskRunId = originalDelete;
+  runs.acknowledgeArchiveTerminal(appDb.db, blockingMirrorId, 'biz-compensation-blocker');
+  const recovered = await runData.recoverRunReceipts({
+    userDataDir: directory,
+    mainDb: appDb.db,
+    archiveService: service
+  });
+  assert.equal(recovered.recovered, 1);
+  assert.equal(repository.getTaskRun('biz-compensation-recovery-task').status, 'succeeded');
+});
+
 test('Biz 显式重跑在新 side receipt 后崩溃时，可替换同日已 ack 旧 mirror', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-rerun-recovery-'));
   const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
@@ -416,6 +560,8 @@ test('Biz main seam 冻结三源与 export locator，owner 排在通用 sweep �
   const runHandlerStart = mainSource.indexOf("trackedIpcHandle('bizOpRecon:run'");
   const runHandlerEnd = mainSource.indexOf("ipcMain.handle('bizOpRecon:export:list-success-dates'", runHandlerStart);
   assert.doesNotMatch(mainSource.slice(runHandlerStart, runHandlerEnd), /runLocator\s*}/);
+  assert.match(mainSource.slice(runHandlerStart, runHandlerEnd),
+    /preserveArchiveTaskRun[\s\S]*?finishTaskRun\([\s\S]*?taskStatus:\s*'interrupted'/);
 });
 
 test('Biz failed terminal outbox 无成功 receipt 时 finalizer no-op', () => {

@@ -139,6 +139,18 @@ function dumpFlow(db, date) {
   }));
 }
 
+function dumpBizOpWriteState(db) {
+  return {
+    imports: db.prepare('SELECT * FROM biz_op_recon_imports ORDER BY id').all(),
+    runs: db.prepare('SELECT * FROM biz_op_recon_runs ORDER BY id').all(),
+    diffs: db.prepare('SELECT * FROM biz_op_recon_diff_rows ORDER BY id').all(),
+    heads: db.prepare(`
+      SELECT * FROM biz_op_recon_dataset_heads
+      ORDER BY dataset_kind, data_date, normalized_bu
+    `).all()
+  };
+}
+
 // ---------------- ① 业务OP 成功：worker vs 同步同输出 ----------------
 test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu/落库内容一致', async () => {
   const date = '2026-06-10';
@@ -209,6 +221,90 @@ test('bizOp worker 落库前 bu_name 改写为 firstBu（trim 保大小写，与
   assert.equal(stored.length, 3);
   for (const r of stored) assert.equal(r.bu_name, 'BU-X', '每行 bu_name=BU-X');
   wk.db.close();
+});
+
+test('bizOp 月末 worker 提交前命中下月未 ACK receipt 时两库写集合均零变化', async () => {
+  const date = '2026-06-30';
+  const nextDate = '2026-07-01';
+  const current = freshDb();
+  const next = freshDb();
+  const oldCurrentRow = {
+    _rowIndex: 2,
+    bu_name: 'BU-A',
+    account_no: 'CURRENT-OLD',
+    begin_balance: '0',
+    amount: '1',
+    amount_in: '1',
+    amount_out: '0',
+    end_balance: '1'
+  };
+  importsRepo.insertRows(current.db, date, [oldCurrentRow]);
+  datasetHeadRepo.writeHead(current.db, {
+    kind: 'op', dataDate: date, buName: 'BU-A',
+    identity: {
+      datasetId: 'current-old-dataset', producerTaskRunId: 'current-old-task',
+      datasetVersion: 1, archiveContractVersion: 1
+    }
+  });
+  const currentRunId = runRepo.insertArchiveRun(current.db, {
+    date,
+    buName: 'BU-A',
+    archiveTaskRunId: 'current-acked-run',
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    }
+  });
+  runRepo.insertDiffRows(current.db, currentRunId, date, 'BU-A', [
+    { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+  ]);
+  runRepo.acknowledgeArchiveTerminal(current.db, currentRunId, 'current-acked-run');
+
+  importsRepo.insertRows(next.db, date, [{ ...oldCurrentRow, account_no: 'NEXT-OLD' }]);
+  datasetHeadRepo.writeHead(next.db, {
+    kind: 'op', dataDate: date, buName: 'BU-A',
+    identity: {
+      datasetId: 'next-old-dataset', producerTaskRunId: 'next-old-task',
+      datasetVersion: 1, archiveContractVersion: 1
+    }
+  });
+  const pendingRunId = runRepo.insertArchiveRun(next.db, {
+    date,
+    buName: 'BU-A',
+    archiveTaskRunId: 'next-unack-run',
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    }
+  });
+  runRepo.insertDiffRows(next.db, pendingRunId, date, 'BU-A', [
+    { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+  ]);
+  const beforeCurrent = dumpBizOpWriteState(current.db);
+  const beforeNext = dumpBizOpWriteState(next.db);
+  const filePath = await writeXlsx(BIZ_OP_HEADERS, [
+    bizOpRowArray('BU-A', 'CURRENT-NEW', { begin: 0, amount: 10, end: 10 })
+  ]);
+
+  const result = await session.runBizOpImportViaWorker(current.db, {
+    date,
+    filePath,
+    dbPath: current.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed('month-end-blocked-task'),
+    monthEndAdmission: { dbPath: next.dbPath, date, nextDate },
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(current.dir, 'err')
+  });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.message, /未 ACK/);
+  assert.deepEqual(dumpBizOpWriteState(current.db), beforeCurrent);
+  assert.deepEqual(dumpBizOpWriteState(next.db), beforeNext);
+  current.db.close();
+  next.db.close();
 });
 
 // ---------------- ② 业务OP 校验失败整批拒绝 ----------------

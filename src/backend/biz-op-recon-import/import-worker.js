@@ -40,7 +40,11 @@ const runRepository = require('../biz-op-recon-db/run-repository');
 const { validateBizOpRow, validateFlowRow } = require('./validator');
 const { streamBizOpFile, streamFlowFile } = require('./reader-streamed');
 // addOneDay / normalizeBu 单一真理来源在 session.js（资金红线 helper，避免双源漂移）
-const { addOneDay, normalizeBu } = require('../../main-process/biz-op-recon-session');
+const {
+  addOneDay,
+  assertBizOpMonthEndAdmission,
+  normalizeBu
+} = require('../../main-process/biz-op-recon-session');
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
@@ -122,7 +126,13 @@ function openDb(dbPath) {
 //   BEGIN → 流式读：第一个数据行定 firstBu → 事务内执行 clear（date,BU）+（D+1,BU）+ clearByDateBu →
 //   逐行（含首行）BU 一致 + validateBizOpRow，累积 errorRows，通过的行 bu_name=firstBu 后 INSERT →
 //   流完：errorRows 非空 → ROLLBACK + emit rejected（不入任何行）/ 全通过 → COMMIT + emit complete。
-async function runBizOpImport(db, { date, filePath, maxRowErrors, datasetSeed }) {
+async function runBizOpImport(db, {
+  date,
+  filePath,
+  maxRowErrors,
+  datasetSeed,
+  monthEndAdmission
+}) {
   let firstBu = null;
   let buNormalized = null;
   let cleared = false;
@@ -269,6 +279,7 @@ async function runBizOpImport(db, { date, filePath, maxRowErrors, datasetSeed })
 
   // 全部通过 → COMMIT（cleared 必为 true，因为 dataRowCount>0 且首行非空已 clear）
   void cleared;
+  assertBizOpMonthEndAdmission(monthEndAdmission, firstBu);
   datasetHeadRepository.writeHead(db, {
     kind: 'op', dataDate: date, buName: firstBu, identity: datasetIdentity
   });
@@ -475,7 +486,13 @@ async function main() {
 
   try {
     if (kind === 'bizOp') {
-      await runBizOpImport(db, { date, filePath, maxRowErrors, datasetSeed });
+      await runBizOpImport(db, {
+        date,
+        filePath,
+        maxRowErrors,
+        datasetSeed,
+        monthEndAdmission: job.monthEndAdmission || null
+      });
     } else {
       await runFlowImport(db, { date, filePaths, maxRowErrors, datasetSeed: flowDatasetSeed });
     }

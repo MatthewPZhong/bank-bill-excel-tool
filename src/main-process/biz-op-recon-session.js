@@ -20,6 +20,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 // v2.1.12-beta β.2-T2：导入 worker 化 spawn 方（纯 Node 测试路径用；Electron 走 utilityProcess）
 const { spawn } = require('node:child_process');
 
@@ -110,6 +111,27 @@ function addOneDay(yyyymmdd) {
   const d = new Date(yyyymmdd + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+// 月末 OP 当前月事务的提交前门禁。调用方只在已存在的下月侧库上形成内部 intent；
+// 这里复用 date+BU guard 只读 D/D+1，不创建数据、不按月份或 latest 推断 owner。
+function assertBizOpMonthEndAdmission(monthEndAdmission, buName) {
+  if (!monthEndAdmission) return;
+  const db = new DatabaseSync(monthEndAdmission.dbPath, { readOnly: true });
+  try {
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
+      db,
+      monthEndAdmission.date,
+      buName
+    );
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
+      db,
+      monthEndAdmission.nextDate,
+      buName
+    );
+  } finally {
+    db.close();
+  }
 }
 
 function formatTimestamp(date = new Date()) {
@@ -531,6 +553,7 @@ async function runBizOpImportAsync(db, params) {
     runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
     importsRepository.clearByDateBu(db, date, firstBu);
     importsRepository.insertRows(db, date, rows);
+    assertBizOpMonthEndAdmission(params.monthEndAdmission, firstBu);
     datasetHeadRepository.writeHead(db, {
       kind: 'op', dataDate: date, buName: firstBu, identity
     });
@@ -846,11 +869,14 @@ async function runFlowImportViaEngine({
 //   bizOp 传 filePath（单数，不变）；flow 传 filePaths（v3.0.2 需求1b 多文件合并，单进程单事务单次 clear）。
 function spawnImportWorker({
   kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors,
-  batchContext, datasetSeed
+  batchContext, datasetSeed, monthEndAdmission
 }) {
   return new Promise((resolve) => {
     const jobMeta = { dbPath, kind, date, batchContext };
     if (kind === 'bizOp') jobMeta.datasetSeed = datasetSeed;
+    if (kind === 'bizOp' && monthEndAdmission) {
+      jobMeta.monthEndAdmission = monthEndAdmission;
+    }
     if (kind === 'flow') jobMeta.datasetSeed = datasetSeed;
     if (Array.isArray(filePaths) && filePaths.length > 0) {
       jobMeta.filePaths = filePaths;     // flow：多文件数组
@@ -985,7 +1011,7 @@ async function runBizOpImportViaWorker(db, params) {
   const {
     date, filePath, dbPath,
     writeBizOpErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors, batchContext, datasetSeed
+    onProgress, maxRowErrors, batchContext, datasetSeed, monthEndAdmission
   } = params;
 
   if (!dbPath) {
@@ -996,6 +1022,7 @@ async function runBizOpImportViaWorker(db, params) {
   return spawnImportWorker({
     kind: 'bizOp',
     dbPath, date, filePath, onProgress, maxRowErrors, batchContext, datasetSeed,
+    monthEndAdmission,
     writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeBizOpErrorReportFileName(firstBu, date);
@@ -1154,6 +1181,7 @@ module.exports = {
   parseSignedAmount,
   subOneDay,
   addOneDay,
+  assertBizOpMonthEndAdmission,
   formatTimestamp,
   formatDateCompact,
   formatTimeCompact,

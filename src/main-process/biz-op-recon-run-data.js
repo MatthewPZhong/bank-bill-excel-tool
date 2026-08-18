@@ -114,13 +114,28 @@ function upsertMainRunMirror(mainDb, {
 async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) {
   const { date } = params;
   const monthKey = monthOf(date);
+  const nextDate = session.addOneDay(date);
+  const nextMonth = monthOf(nextDate);
   // 确保该月侧库存在（worker 也会建，但先建保证后续 readback / 补清能 open）。
   const sideDbPath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
   ensureSideDbExists(userDataDir, monthKey);
 
   // worker 在 month(date) 侧库内：清 (date,BU)+(D+1,BU) + clearByDateBu(date,BU) + INSERT（同月 D+1 已被清）。
+  // 月末且下月侧库已存在时，worker 在当前月 COMMIT 前按首个 BU 只读复核下月 D/D+1；
+  // 成功后下月复制事务仍会复核一次，覆盖两次检查之间的并发变化。
   //   传侧库 db 句柄作无 dbPath fallback 用（worker 入口优先 dbPath）；getDb 返回侧库连接。
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  let monthEndAdmission = null;
+  if (nextMonth !== monthKey
+      && runDataStore.sideDbExists(userDataDir, MODULE, nextMonth)) {
+    const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+    nextSideDb.close();
+    monthEndAdmission = {
+      dbPath: runDataStore.sideDbPath(userDataDir, MODULE, nextMonth),
+      date,
+      nextDate
+    };
+  }
   let result;
   try {
     result = await runBizOpImportViaWorker(sideDb, {
@@ -129,7 +144,8 @@ async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) 
       datasetSeed: {
         datasetId: randomUUID(),
         producerTaskRunId: params.batchContext.taskRunId
-      }
+      },
+      monthEndAdmission
     });
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
@@ -138,8 +154,6 @@ async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) 
   // 仅成功导入才处理跨月（rejected/error 未改任何数据，无需补清/冗余）。
   if (result && result.status === 'success') {
     const firstBu = result.buName;
-    const nextDate = session.addOneDay(date);
-    const nextMonth = monthOf(nextDate);
     if (nextMonth !== monthKey) {
       // 🔴 月末跨月：worker 清不到 D+1 月侧库——编排层补清 + 冗余副本。
       handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, nextDate, firstBu });
@@ -255,19 +269,51 @@ function runViaSideDb({ userDataDir, mainDb, date, buName, taskRunId, expectedDa
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
   // 主库镜像（summary + side_db_rel_path + status）；返回 mirrorId 作对外 runId（UI/导出用）。
-  const runId = upsertMainRunMirror(mainDb, {
-    date,
-    buName,
-    relPath: runDataStore.sideDbRelPath(MODULE, monthKey),
-    stats: out.stats,
-    status: 'success',
-    archiveTaskRunId: taskRunId
-  });
+  let runId;
+  try {
+    runId = upsertMainRunMirror(mainDb, {
+      date,
+      buName,
+      relPath: runDataStore.sideDbRelPath(MODULE, monthKey),
+      stats: out.stats,
+      status: 'success',
+      archiveTaskRunId: taskRunId
+    });
+  } catch (mirrorError) {
+    try {
+      deleteSideRunReceiptByTaskRunId({ userDataDir, monthKey, taskRunId });
+    } catch (compensationError) {
+      compensationError.code = 'BIZ_OP_MIRROR_COMPENSATION_FAILED';
+      compensationError.preserveArchiveTaskRun = true;
+      compensationError.cause = mirrorError;
+      throw compensationError;
+    }
+    throw mirrorError;
+  }
   return {
     runId,
     stats: out.stats,
     runLocator: `biz-op:${runDataStore.sideDbRelPath(MODULE, monthKey)}#${out.runId}`
   };
+}
+
+function deleteSideRunReceiptByTaskRunId({ userDataDir, monthKey, taskRunId }) {
+  const sideDb = runDataStore.openExistingSideDb(
+    runDataStore.sideDbPath(userDataDir, MODULE, monthKey)
+  );
+  try {
+    sideDb.exec('BEGIN');
+    try {
+      const deleted = runRepository.deleteArchiveRunByTaskRunId(sideDb, taskRunId);
+      sideDb.exec('COMMIT');
+      return deleted;
+    } catch (error) {
+      sideDb.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    sideDb.close();
+  }
 }
 
 function prepareRunLineage({ userDataDir, date, buName }) {

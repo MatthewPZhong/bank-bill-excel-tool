@@ -157,6 +157,35 @@ function acknowledgeArchiveTerminal(db, runId, taskRunId, acknowledgedAt = new D
   throw new Error('Biz OP run receipt 与 Archive TaskRun 不一致');
 }
 
+function deleteArchiveRunByTaskRunId(db, taskRunId) {
+  const run = getRunByArchiveTaskRunId(db, taskRunId);
+  if (!run) {
+    throw new Error('Biz OP side run receipt 不存在，无法执行精确补偿');
+  }
+  // rollback trigger 禁止直接删除未 ACK receipt；精确补偿事务内先临时 ACK 本 TaskRun，
+  // 随后删除其 diff/run。任一步失败由调用方 ROLLBACK，不会持久留下伪 ACK。
+  const unlocked = Number(db.prepare(`
+    UPDATE ${RUNS_TABLE}
+    SET archive_terminal_ack_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND archive_contract_version = 1
+      AND archive_task_run_id = ? AND archive_terminal_ack_at IS NULL
+  `).run(run.id, taskRunId).changes || 0);
+  if (unlocked !== 1) {
+    throw new Error('Biz OP side run receipt 精确补偿发生身份冲突');
+  }
+  const diffRowsDeleted = Number(db.prepare(
+    `DELETE FROM ${DIFF_TABLE} WHERE run_id = ?`
+  ).run(run.id).changes || 0);
+  const runsDeleted = Number(db.prepare(`
+    DELETE FROM ${RUNS_TABLE}
+    WHERE id = ? AND archive_contract_version = 1 AND archive_task_run_id = ?
+  `).run(run.id, taskRunId).changes || 0);
+  if (runsDeleted !== 1) {
+    throw new Error('Biz OP side run receipt 精确补偿发生身份冲突');
+  }
+  return { runId: run.id, diffRowsDeleted, runsDeleted };
+}
+
 function listRunsByDateBu(db, date, buName) {
   return db.prepare(`
     SELECT * FROM ${RUNS_TABLE}
@@ -346,6 +375,7 @@ function clearRunsAndDiffsByDate(db, date) {
 
 module.exports = {
   acknowledgeArchiveTerminal,
+  deleteArchiveRunByTaskRunId,
   assertNoUnacknowledgedArchiveRunByDate,
   assertNoUnacknowledgedArchiveRunByDateBu,
   insertArchiveRun,

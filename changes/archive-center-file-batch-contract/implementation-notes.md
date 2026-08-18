@@ -238,3 +238,25 @@
 | `npm run check:vars` | PASS；扫描 7 个当前生产改动文件，未命中自动清单 | 人工 review 仍按 Risk-sensitive Biz OP 清理范围和 Critical 默认 Flow 引擎边界执行，不以名称扫描替代资金复核 |
 | `npm run release-check` | PASS：ESLint、Smoke、5363/5363 unit、48/48 integration（2393/2393） | 第六轮修复与前三条本地 P1 共同进入完整发布回归；集成清单保留新增 8 条断言，纯时间戳/耗时刷新已还原 |
 | reconciliation blindspot pass（血缘、覆盖幂等、部分失败、行数/金额/币种） | 无新 BLOCK；未改金额、币种、方向、匹配、行映射或 DELETE 顺序 | ⚠️ 未 ACK receipt 属资金审计血缘红线；发布前仍需用真实或脱敏 Biz OP 库人工复核 guard scope、owner ACK 恢复及 OP/Flow 覆盖后的行数与输出 |
+
+### Seventh review round（input head `250b1349ff9be315111d4fe9999958cf63927a7c`）
+
+#### Deviations and decisions
+
+| 项目 | 结论 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| 第六轮“月末只保证下月事务零变化”已被新 P1 证据推翻 | Spec/TechDoc 已先反向同步：worker 在解析并校验首个 BU 后、当前月 COMMIT 前只读检查既有下月侧库 D/D+1 的 date+BU guard；下月写事务仍复检 | 当前月先提交后再处理下月；跨库 transaction；按 date/latest 回滚 | 已存在未 ACK receipt 时当前月与下月 imports/runs/diffs/heads 全部零变化；两次检查间的并发变化仍由下月既有事务 fail-closed，不建设通用跨库框架 |
+| side receipt 已提交但 main mirror 写失败时做单用途精确补偿 | 在 side DB 单事务内按 `archive_task_run_id` 临时写 ACK 以通过既有 DELETE trigger，随后删除本 run 的 diff 与 run；事务失败会整体回滚，不留下伪 ACK | 按 date/BU/latest 删除；开放 failed/cancelled recovery；通用跨库补偿队列 | 精确补偿成功后才允许 TaskRun failed；补偿自身失败时 main 把 TaskRun 转为既有 interrupted，receipt 由既有 owner 恢复，不新增状态边 |
+| admission 只在 TaskLifecycle 已规范化的内部路径传递 | `monthEndAdmission` 只含 next side DB path、D 与 D+1；worker/sync 写边界执行一次，不在 repository 多层重复校验 | 新增通用 DTO validator、为不存在下月库预建占位库、在多层重复 normalize | 保持“禁止过度防御”：只有 SQLite/worker 边界与真实未 ACK 事故 guard；无 placeholder、fallback 或不可能状态组合 |
+
+#### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| 新故障注入：Biz OP 月末 worker / mirror compensation / compensation recovery | PASS | 真实 worker 在当前月 COMMIT 前命中下月未 ACK receipt，两库四类写集合 byte-for-byte 不变；mirror 故障只删本 TaskRun side run/diff；补偿故障保持 interrupted 并由启动 owner 收口 |
+| Biz OP 11 个 unit 文件宽回归 | 194/194 PASS | schema/head、OP/Flow import、worker、run receipt/lineage、run-data、金额与日期规则无回归 |
+| `bizop-flow-engine-migration.js` / Biz OP smoke / side-db parity | 73/73、171/171、16/16 PASS | 默认/legacy Flow、资金算法和侧库镜像 parity 保持 |
+| `npm run release-check` | PASS：ESLint、Smoke、5366/5366 unit、48/48 integration（2393/2393） | 第七轮两项 P1、三条新增故障测试及全文档合同进入完整发布回归；integration runner 的纯时间戳/耗时刷新已还原 |
+| `npm run scan:vars` | PASS：v3.1.11、337 个 tracked JS、4458 个顶层名称；A-share/A-pair/A-local/B 为 649/947/2695/1596 | 自动统计与 v36 基线同步；untracked/generated 继续排除 |
+| `npm run check:vars` | PASS；命中 Important-skeleton `normalizeBu` 与 Risk-sensitive `addOneDay` | 两者实现均未改；date+BU SQL 继续使用 `LOWER(TRIM)`，D+1 继续使用单源 UTC helper；Biz smoke、月末跨月、大小写 BU 与 release-check 已覆盖 |
+| reconciliation blindspot pass（主键血缘、月末时间边界、重跑/部分失败、审计去向） | 无新增自动化 BLOCK；未改金额、币种、方向、匹配、行映射或业务数据行数算法 | ⚠️ 未 ACK receipt、精确补偿和跨月 tag 属资金审计红线；合并前仍需真实或脱敏 Biz OP 库人工复核 D/D+1 guard scope、补偿前后 run/diff 行数、owner ACK 与输出血缘 |

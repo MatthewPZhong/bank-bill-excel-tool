@@ -14422,7 +14422,7 @@ function registerNewAccountHandlers() {
         afterTerminalIntent: bizOpRunTerminalRoute(taskRunId)
       };
     },
-    execute(_event, prepared, taskContext) {
+    async execute(_event, prepared, taskContext) {
       try {
         const { runId, stats } = bizOpReconRunData.runViaSideDb({
           userDataDir: path.dirname(database.dbPath),
@@ -14434,6 +14434,20 @@ function registerNewAccountHandlers() {
         });
         return { runId, status: 'success', stats };
       } catch (err) {
+        if (err && err.preserveArchiveTaskRun === true) {
+          // 精确补偿自身失败时保留 side receipt，并复用既有 interrupted owner 恢复；
+          // TaskLifecycle 随后的 failed terminal 会因状态冲突保持 interrupted，不开放 failed recovery。
+          const interrupted = await archiveCenterService.finishTaskRun(
+            taskContext.operationContext.taskRunId,
+            {
+              taskStatus: 'interrupted',
+              code: err.code,
+              message: err.message,
+              metadata: { bizOpRunReceiptPending: true }
+            }
+          );
+          if (!interrupted || interrupted.ok === false) throw err;
+        }
         return { status: 'error', message: err && err.message ? err.message : String(err) };
       }
     }

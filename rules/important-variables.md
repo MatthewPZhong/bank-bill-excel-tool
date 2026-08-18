@@ -11,7 +11,7 @@
 |---|---|
 | 当前清单版本 | v36（app v3.1.11 — Task Run/File Batch 解耦、非空 FilePlan 原子发号、精确 dataset/run lineage、Archive 十四表与 017/018 定点维护） |
 | v36 本轮 review | 2026-08-18（以 `origin/main@35f11e153962c34cba0e9d4c7084e9df85c9f209` 为代码基线，复核共享工作树 63 file / 59 no-file / 117 exclude、TaskLifecycle/Archive/VCC/Position/Acquiring/Pending/Biz OP/Pre-fund 跨层合同；不 rebase、不覆盖既有改动） |
-| v36 基线数据 | `docs/analysis/var-reference-stats.md`（337 个 git-tracked JS / 4452 个顶层名称；A-share 648 / A-pair 945 / A-local 2693 / B 1593；报告版本 3.1.11） |
+| v36 基线数据 | `docs/analysis/var-reference-stats.md`（337 个 git-tracked JS / 4458 个顶层名称；A-share 649 / A-pair 947 / A-local 2695 / B 1596；报告版本 3.1.11） |
 | v35 历史版本 | app v3.1.10 — VCC storage contract v2、精简事实/异常审计、Archive source/hold 血缘与 copy-on-write 原子迁移。 |
 | v35 本轮 review | 2026-08-17（以 annotated `v3.1.9^{commit}`=`3edf0527d6537d29cb19b48bda2a3f91f0ce6e32` 为 release baseline，覆盖 28 个生产文件；升格 VCC storage capability/guard、VCC COW migration/recovery、import source/Archive hold/durable handoff，并把 Archive 元数据合同从九表扩为十表） |
 | v35 基线数据 | `docs/analysis/var-reference-stats.md`（当时 328 个 tracked JS / 4299 个顶层名称；A-share 623 / A-pair 912 / A-local 2598 / B 1535；报告版本 3.1.10） |
@@ -929,11 +929,11 @@
 ### `addOneDay`（v2.1.3 业务OP D → D+1 日期加一 helper，**round 4 P1 资金红线 ⚠️ 新增**）
 - 定义：`src/main-process/biz-op-recon-session.js`（**单源**，与 `subOneDay` 双源不同 — addOneDay 仅在业务OP 重导清逻辑使用，无 backend 反向依赖问题）
 - 实现：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`（与 `subOneDay` 对偶；UTC 处理避免本地时区抢跑/滞后导致跨日错位）
-- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync` 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
+- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync`/worker 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run；per-month 编排层还用同一 helper 形成月末 D/D+1 下月 admission（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
 - 变更 review 要点：
   - **资金红线**（round 4 P1 新增）：时区错乱直接错日期 → 漏清下一日 (date+1) run（用 setDate 在 UTC+12 滞后到 date）或误清后天 (date+2) run（在 UTC-12 抢跑到 date+2）→ stale 差异表 = 资金事故
   - **必须 UTC 实现**：不能改用 `setDate(getDate() + 1)`（本地时区版）；与 `subOneDay` UTC 实现完全对偶
-  - **单源**：addOneDay 仅在业务OP 重导清逻辑使用（仅 `runBizOpImportAsync` 调用），无 listReadyDates 一类的双源场景；改实现只动 `src/main-process/biz-op-recon-session.js` 一处
+  - **单源**：addOneDay 的实现只在 `src/main-process/biz-op-recon-session.js`；同步导入、worker 与 per-month 编排均引用该单源，无 listReadyDates 一类的第二份实现
   - **维护检查**：改实现后 `grep -n "function addOneDay" src/` 确认仅 1 处命中（如出现 2 处 → 评估是否可合并 / 是否双源同步）
   - **与 `subOneDay` 对照**：subOneDay 双源（session.js + run-repository.js）；addOneDay 单源（仅 session.js）— 业务边界不同
   - round 4 P1 升格 Risk-sensitive（与 `subOneDay` round 2 R2-M4 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）

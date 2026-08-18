@@ -10,7 +10,7 @@
 | 关联 Spec | `changes/archive-center-file-batch-contract/spec.md`（NFB-01～NFB-28） |
 | 产品代码基线 | `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10） |
 | 当前 PR merge base | `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 发布证据；无 `src/` 产品代码变化） |
-| 复审取证 head | `001b8059ced56b9d70602c79cdd97d375020c969`（2026-08-18，第六轮；历史 head 见 implementation notes） |
+| 复审取证 head | `250b1349ff9be315111d4fe9999958cf63927a7c`（2026-08-18，第七轮输入；历史 head 见 implementation notes） |
 | 目标发布 | v3.1.11 |
 | 实施执行 | 已由 `gpt-5.6-sol`、`high reasoning` 的 dev agent 按本合同执行；主 agent 独立审查和验收 |
 | 质量门 | 专项测试、`npm run release-check`、`npm run check:vars`、真实数据库/UI 验收、文件血缘与资金人工复核 |
@@ -395,7 +395,7 @@ archive_terminal_ack_at TEXT
 
 OP 成功替换按 `(data_date, normalizeBu(bu))` 写新 dataset UUID；Flow 按 `data_date` 写新 UUID。删除旧行、插入新行和替换 head 必须在同一业务事务。月末复制 head 时保留原 datasetId、producer、datasetVersion 和 contractVersion。历史已有 OP/Flow 分组在各 side DB 建 v0 head：生成 datasetId，producer 为空；不为历史 run 伪造 TaskRun。
 
-任何 `archive_contract_version = 1 AND archive_terminal_ack_at IS NULL` 的 Biz OP run 都必须保留到 module owner 完成 Archive terminal 与 ACK。实际 admission 边界固定为：OP 覆盖检查 `(D, normalized BU)` 与受 T-2 影响的 `(D+1, normalized BU)`；Flow 覆盖检查 `D` 的全部 BU；月末复制在下月侧库检查被清理的 `(D/D+1, normalized BU)`；新 side run 与主库 mirror 替换检查同 `(D, normalized BU)`。这些检查必须位于调用方已有 SQLite transaction 内、早于任何 diff/run/import/head/mirror DELETE 或新 run INSERT；拒绝时当前受保护事务零变化，月末跨库路径不新增跨库回滚框架。已有 DELETE trigger 只作最后一道约束，不代替 admission 检查；历史 v0 和已 ACK run 继续按原逻辑覆盖。
+任何 `archive_contract_version = 1 AND archive_terminal_ack_at IS NULL` 的 Biz OP run 都必须保留到 module owner 完成 Archive terminal 与 ACK。实际 admission 边界固定为：OP 覆盖检查 `(D, normalized BU)` 与受 T-2 影响的 `(D+1, normalized BU)`；Flow 覆盖检查 `D` 的全部 BU；月末 OP worker 在解析并校验首个 BU 后、当前月事务提交前，只读检查下月侧库 `(D/D+1, normalized BU)`，命中即回滚当前月；通过后，下月复制事务在首个写入前再次复用相同门禁以关闭并发窗口；新 side run 与主库 mirror 替换检查同 `(D, normalized BU)`。这些检查必须早于各自受保护事务的提交或首个持久写入，拒绝时当前月与下月受影响的 diff/run/import/head/mirror 零变化；不新增跨库事务或通用补偿框架。若 side run receipt 已提交而 main mirror 写入失败，`runViaSideDb()` 必须先在 side DB 单事务按 `archive_task_run_id` 精确删除本次 run 与 diff，才允许 TaskRun 进入 failed；补偿事务本身失败时由 main 将该 TaskRun 转为既有 `interrupted`，保留 receipt 给启动 owner 精确恢复，不产生 failed receipt，不新增状态边。不得按日期、BU 或 latest 清理，不得扩大 failed/cancelled recovery。已有 DELETE trigger 只作最后一道约束，不代替 admission 检查；历史 v0 和已 ACK run 继续按原逻辑覆盖。
 
 Biz run locator 为 `biz-op:<sideDbRelPath>#<runId>`；date export 冻结一个 locator，date-range export 在 prepare 内冻结查询实际返回的全部 locator。
 
@@ -1057,7 +1057,7 @@ Flow import TaskRun -> Flow head     ┘       └-> date/range export TaskRun(s
 - import 成功事务替换业务行与 head；覆盖导入换 tag，月末副本保留 tag。
 - Biz run prepare 解析 T1/T2/Flow 三个 head，按角色冻结三个 `dataset-input` intent；业务 run row 与 Archive TaskRun identity 一一对应。
 - date export 冻结一个 `run-output`；range export 冻结查询实际采用的全部 run locator，writer 只用冻结集合。
-- 未 ACK v1 run receipt 会在 OP/Flow 覆盖、月末下月清理、同日同 BU side run admission 和主库 mirror 替换前按对应范围 fail-closed；不新增锁、latest/date fallback 或跨模块 receipt 框架。
+- 未 ACK v1 run receipt 会在 OP/Flow 覆盖、月末当前月提交前预检与下月写事务复检、同日同 BU side run admission 和主库 mirror 替换前按对应范围 fail-closed；mirror 写失败仅按本 TaskRun 精确删除 side run/diff 后允许 failed，不新增锁、latest/date fallback、failed recovery 边或跨模块 receipt 框架。
 
 #### 8.3.2 Pending
 
@@ -1412,7 +1412,7 @@ apply 前要求应用退出，并先用 SQLite 一致性快照生成 backup。�
 | NFB-09 | compatibility fixture | 95 批样本：34 hidden、61 visible；53 ready-any + 8 failed-only 均保留；raw 95 |
 | NFB-10 | repository/controller contract | visible 在 pagination 前；numeric/cache/batch number 无旁路 |
 | NFB-11 | flow/lineage/related | A(file)-B(no-file)-C(file) 只显示 A/C；同一导入被多 run 复用与汇总导出多 run 只返回 pivot 的直接邻域，不递归扩散；平铺去重，单项隐藏 |
-| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 阻断 OP/Flow 覆盖、下月侧库清理、同范围新 run/mirror 且受保护事务零变化；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
+| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 在当前月提交前阻断月末 OP 导入并保证两个月侧库零变化，同时阻断 OP/Flow 覆盖、下月写事务、同范围新 run/mirror；main mirror 故障后精确补偿本 TaskRun 的 side run/diff，禁止形成 failed TaskRun + unack receipt；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
 | NFB-13 | worker lifecycle | VCC/Position no-file worker 运行、取消、退出、interrupted，无伪号码 |
 | NFB-14 | persisted context/retry | 旧 exact-7 可恢复；新 exact-5 envelope 不混读；Acquiring interrupted exact recovery 不发号，cancelled/failed partial 由新 owner CAS 接管且原失败批次不变 |
 | NFB-15 | outbox/create paths | 空 files 不建 batch；全部新建入口走原子 manifest primitive |
