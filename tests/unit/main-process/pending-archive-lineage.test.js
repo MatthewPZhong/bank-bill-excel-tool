@@ -446,12 +446,14 @@ test('Pending owner 在 result flow bind 崩溃窗口持久 task-owned intent �
 
 test('single export 的所有 DB 读取固定在同一 SQLite snapshot，释放后才写文件', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-export-snapshot-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const dbPath = path.join(directory, 'pending.sqlite');
   const db = new DatabaseSync(dbPath);
   const concurrent = new DatabaseSync(dbPath);
-  t.after(() => db.close());
-  t.after(() => concurrent.close());
+  t.after(() => {
+    concurrent.close();
+    db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   runMigrations(db);
   db.exec('PRAGMA journal_mode = WAL');
   concurrent.exec('PRAGMA journal_mode = WAL');

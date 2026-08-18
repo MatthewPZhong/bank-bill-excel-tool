@@ -155,10 +155,12 @@ test('历史 v0 dataset 只形成 producer=null 的直接 intent', () => {
 
 test('Biz owner 在 sweep 前按 exact side receipt 修复 mirror、flow anchor、terminal 并 ack', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-owner-recovery-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
   appDb.init();
-  t.after(() => appDb.db.close());
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   const repository = createArchiveRepository(appDb.db);
   repository.ensureSchema();
   const task = repository.beginTaskRun(archiveTaskPayload('biz-recovery-task')).taskRun;
@@ -193,10 +195,12 @@ test('Biz owner 在 sweep 前按 exact side receipt 修复 mirror、flow anchor�
 
 test('Biz owner 遇 failed TaskRun 先 fail-closed，不创建主库 mirror', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-owner-conflict-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
   appDb.init();
-  t.after(() => appDb.db.close());
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   const repository = createArchiveRepository(appDb.db);
   repository.ensureSchema();
   repository.beginTaskRun(archiveTaskPayload('biz-failed-task'));
@@ -217,10 +221,12 @@ test('Biz owner 遇 failed TaskRun 先 fail-closed，不创建主库 mirror', as
 
 test('Biz main 已 ack 而 side 未 ack 时，不用旧 receipt 回滚后写的新 mirror', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-owner-ack-window-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
   appDb.init();
-  t.after(() => appDb.db.close());
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   const repository = createArchiveRepository(appDb.db);
   repository.ensureSchema();
   const task = repository.beginTaskRun(archiveTaskPayload('biz-old-task')).taskRun;
@@ -255,10 +261,12 @@ test('Biz main 已 ack 而 side 未 ack 时，不用旧 receipt 回滚后写的�
 
 test('Biz 显式重跑在新 side receipt 后崩溃时，可替换同日已 ack 旧 mirror', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-rerun-recovery-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
   appDb.init();
-  t.after(() => appDb.db.close());
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   const repository = createArchiveRepository(appDb.db);
   repository.ensureSchema();
   for (const taskRunId of ['biz-old-run', 'biz-new-run']) {
@@ -331,12 +339,14 @@ test('Biz failed terminal outbox 无成功 receipt 时 finalizer no-op', () => {
 
 test('Biz OP import 在同一 transaction 派生 version，并发覆盖使旧 snapshot fail-closed', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-import-toctou-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const dbPath = path.join(directory, 'biz.sqlite');
   const db = new DatabaseSync(dbPath);
   const concurrent = new DatabaseSync(dbPath);
-  t.after(() => db.close());
-  t.after(() => concurrent.close());
+  t.after(() => {
+    concurrent.close();
+    db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   ensureBizOpReconTablesSupport(db);
   ensureBizOpReconTablesSupport(concurrent);
   db.exec('PRAGMA journal_mode = WAL');
@@ -379,12 +389,14 @@ test('Biz OP import 在同一 transaction 派生 version，并发覆盖使旧 sn
 
 test('Biz run 从 head 校验到三表读取/receipt 写入共享 snapshot，并发换 head 不落 run', (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-run-toctou-'));
-  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const dbPath = path.join(directory, 'biz.sqlite');
   const db = new DatabaseSync(dbPath);
   const concurrent = new DatabaseSync(dbPath);
-  t.after(() => db.close());
-  t.after(() => concurrent.close());
+  t.after(() => {
+    concurrent.close();
+    db.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
   ensureBizOpReconTablesSupport(db);
   ensureBizOpReconTablesSupport(concurrent);
   db.exec('PRAGMA journal_mode = WAL');

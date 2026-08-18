@@ -29,7 +29,10 @@ function createFixture(t) {
     now: () => new Date('2026-08-18T10:00:00.000Z')
   });
   repository.ensureSchema();
-  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  t.after(() => {
+    if (db.isOpen) db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
   return { db, dbPath, repository, rootDir };
 }
 
@@ -228,9 +231,15 @@ test('repository 只修完整 017 指纹，保留三项真实证据/failureCount
   assert.equal(audit.repair_key, repaired.repairKey);
   assert.equal(audit.batch_number, seeded.batchNumber);
   assert.equal(audit.app_version, '3.1.11-test');
-  assert.equal(JSON.parse(audit.before_json).artifacts.length, 4);
-  assert.equal(JSON.parse(audit.after_json).artifacts.length, 3);
-  assert.match(audit.before_json, new RegExp(seeded.outputDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  const beforeAudit = JSON.parse(audit.before_json);
+  const afterAudit = JSON.parse(audit.after_json);
+  assert.equal(beforeAudit.artifacts.length, 4);
+  assert.equal(afterAudit.artifacts.length, 3);
+  const pseudoArtifact = beforeAudit.artifacts.find(
+    (artifact) => artifact.id === seeded.pseudoArtifactId
+  );
+  assert.ok(pseudoArtifact);
+  assert.equal(path.resolve(pseudoArtifact.sourcePath), path.resolve(seeded.outputDir));
 
   const second = fixture.repository.repairSplitDirectoryArtifact('2026-08-13-017', {
     appVersion: '3.1.11-test'
