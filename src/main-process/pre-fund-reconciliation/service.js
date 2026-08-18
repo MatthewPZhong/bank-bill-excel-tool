@@ -101,6 +101,18 @@ function rollbackQuietly(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* no active transaction */ }
 }
 
+function compensateRunReceiptAfterMirrorFailure(runStore, db, taskRunId) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const deleted = runStore.deleteArchiveRunByTaskRunId(db, taskRunId);
+    db.exec('COMMIT');
+    return deleted;
+  } catch (error) {
+    rollbackQuietly(db);
+    throw error;
+  }
+}
+
 function bankContext(row, index, fileName) {
   return {
     fileName,
@@ -916,22 +928,34 @@ class PreFundReconciliationService {
       this.runStore.finishRun(db, sideRunId, stats);
       db.exec('COMMIT');
       sideTransactionStarted = false;
-      mirrorRunId = this.database.createPreFundReconciliationRunMirror({
-        monthKey,
-        sideRunId,
-        scenario,
-        snapshotHash: stableHash(snapshot),
-        bankFiles: [this.bankSession.fileName],
-        sideDbRelPath: runDataStore.sideDbRelPath(
-          runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
-          monthKey
-        ),
-        archiveReceipt: {
-          archiveContractVersion: 1,
-          archiveTaskRunId: taskRunId
+      try {
+        mirrorRunId = this.database.createPreFundReconciliationRunMirror({
+          monthKey,
+          sideRunId,
+          scenario,
+          snapshotHash: stableHash(snapshot),
+          bankFiles: [this.bankSession.fileName],
+          sideDbRelPath: runDataStore.sideDbRelPath(
+            runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+            monthKey
+          ),
+          archiveReceipt: {
+            archiveContractVersion: 1,
+            archiveTaskRunId: taskRunId
+          }
+        });
+        this.database.finishPreFundReconciliationRunMirror(mirrorRunId, stats);
+      } catch (mirrorError) {
+        try {
+          compensateRunReceiptAfterMirrorFailure(this.runStore, db, taskRunId);
+        } catch (compensationError) {
+          compensationError.code = 'PRE_FUND_MIRROR_COMPENSATION_FAILED';
+          compensationError.preserveArchiveTaskRun = true;
+          compensationError.cause = mirrorError;
+          throw compensationError;
         }
-      });
-      this.database.finishPreFundReconciliationRunMirror(mirrorRunId, stats);
+        throw mirrorError;
+      }
       this.lastRun = {
         monthKey,
         runId: mirrorRunId,
@@ -951,7 +975,7 @@ class PreFundReconciliationService {
       };
     } catch (error) {
       if (sideTransactionStarted) rollbackQuietly(db);
-      if (mirrorRunId !== null) {
+      if (mirrorRunId !== null && error.preserveArchiveTaskRun !== true) {
         try {
           this.database.failPreFundReconciliationRunMirror(mirrorRunId, error);
         } catch (_mirrorError) { /* 原始错误优先 */ }

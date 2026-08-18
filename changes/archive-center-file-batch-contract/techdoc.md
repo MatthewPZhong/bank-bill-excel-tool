@@ -439,6 +439,8 @@ nonce 只用于既定 rollback 合同：旧 binary 的 `ON CONFLICT DO UPDATE` �
 
 内存 bank session 增加 `{datasetId, producerTaskRunId, archiveContractVersion:1}`；session 不跨重启，保持现有生命周期。results side DB 的 `pre_fund_reconciliation_runs` 与主库 `pre_fund_reconciliation_run_mirrors` 都 additive 增加 `archive_contract_version`、`archive_task_run_id`、`archive_terminal_ack_at`，主库对 v1 TaskRun 建 partial unique index；历史 mirror/run 保持 v0/null，不伪造身份。现有流程会在下一轮前删除 results side DB，side `runId` 因此会在同月重用；`resultsDbRelPath + sideRunId` 只用于 receipt/结果读取，恢复按 TaskRun 查主库 mirror 后再核对 side location。持久 run locator 使用不会随结果回收重用的主库 run mirror id，格式为 `pre-fund:<mirrorRunId>`。
 
+side run 业务事务 COMMIT 后，主库 mirror 的 create/finish 必须作为独立 handoff 处理。handoff 失败时，service 在原 results side DB 连接开启新事务，只按 `archive_task_run_id` 定位 `archive_contract_version=1`、`status='success'`、未 ACK 的本次 run，并删除该 run；所有候选、重复审计、平账和不平账结果依赖既有 `ON DELETE CASCADE` 同事务删除。只有该精确补偿 COMMIT 后，错误才按普通 failed 返回。补偿事务失败必须整体回滚并给错误标记 `preserveArchiveTaskRun`；main 在返回业务错误前把同 TaskRun CAS 为 `interrupted`，且不得调用 `failPreFundReconciliationRunMirror()` 改写可能已存在的 running/success mirror。startup owner 随后按 receipt TaskRun identity 创建或完成 mirror、提交 Archive terminal 并 ACK。不得新增通用补偿队列、按 month/latest 清理、重复 DTO 校验或 failed/cancelled recovery edge。
+
 Pre-fund terminal ack 的跨库顺序固定为 main mirror → side receipt。若在两次 ack 之间崩溃，side receipt 仍会进入 owner 扫描，owner 对 main ack 幂等重放后再 ack side。开始新 run 或启动旧结果回收前先证明所有 v1 success receipt 已 ack；检查失败时不得先把 main mirror 标为 superseded/expired，也不得删除 side DB。
 
 三类 run receipt 的共同状态顺序：
@@ -1436,7 +1438,7 @@ apply 前要求应用退出，并先用 SQLite 一致性快照生成 backup。�
 | NFB-09 | compatibility fixture | 95 批样本：34 hidden、61 visible；53 ready-any + 8 failed-only 均保留；raw 95 |
 | NFB-10 | repository/controller contract | visible 在 pagination 前；numeric/cache/batch number 无旁路 |
 | NFB-11 | flow/lineage/related | A(file)-B(no-file)-C(file) 只显示 A/C；同一导入被多 run 复用与汇总导出多 run 只返回 pivot 的直接邻域，不递归扩散；平铺去重，单项隐藏 |
-| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 在当前月提交前阻断月末 OP 导入并保证两个月侧库零变化；current COMMIT 后崩溃可按 exact copy intent 恢复，下月写失败/并发 receipt 保留 owner 并阻止 D+1 run，target terminal 后才删除 intent；main mirror 故障后精确补偿本 TaskRun 的 side run/diff，禁止形成 failed TaskRun + unack receipt；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
+| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 在当前月提交前阻断月末 OP 导入并保证两个月侧库零变化；current COMMIT 后崩溃可按 exact copy intent 恢复，下月写失败/并发 receipt 保留 owner 并阻止 D+1 run，target terminal 后才删除 intent；Biz OP/Pre-fund main mirror 故障后精确补偿本 TaskRun 的 side run/结果，补偿失败保持 interrupted owner，禁止形成 failed TaskRun + unack receipt；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
 | NFB-13 | worker lifecycle | VCC/Position no-file worker 运行、取消、退出、interrupted，无伪号码 |
 | NFB-14 | persisted context/retry | 旧 exact-7 可恢复；新 exact-5 envelope 不混读；Acquiring interrupted exact recovery 不发号，cancelled/failed partial 由新 owner CAS 接管且原失败批次不变 |
 | NFB-15 | outbox/create paths | 空 files 不建 batch；全部新建入口走原子 manifest primitive |

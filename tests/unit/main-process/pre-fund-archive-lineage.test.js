@@ -7,6 +7,7 @@ const {
   finalizePreFundTerminalIntent,
   preFundRunLineagePlan,
   preFundRunOutputIntent,
+  preservePreFundRunOwnerAfterMirrorCompensationFailure,
   recoverPreFundRunReceipts
 } = require('../../../src/main-process/pre-fund-archive-lineage');
 
@@ -180,4 +181,33 @@ test('failed terminal outbox replay 对 Pre-fund receipt 无副作用', () => {
   });
   assert.equal(result, null);
   assert.equal(acknowledged, false);
+});
+
+test('mirror 补偿失败在返回业务错误前把同一 Pre-fund TaskRun 保持为 interrupted', async () => {
+  const calls = [];
+  const error = Object.assign(new Error('side compensation failed'), {
+    code: 'PRE_FUND_MIRROR_COMPENSATION_FAILED',
+    preserveArchiveTaskRun: true
+  });
+  const preserved = await preservePreFundRunOwnerAfterMirrorCompensationFailure({
+    error,
+    taskRunId: 'pre-fund-run-task',
+    archiveService: {
+      async finishTaskRun(taskRunId, outcome) {
+        calls.push({ taskRunId, outcome });
+        return { ok: true, taskRun: { taskRunId, status: 'interrupted' } };
+      }
+    }
+  });
+
+  assert.equal(preserved, true);
+  assert.deepEqual(calls, [{
+    taskRunId: 'pre-fund-run-task',
+    outcome: {
+      taskStatus: 'interrupted',
+      code: 'PRE_FUND_MIRROR_COMPENSATION_FAILED',
+      message: 'side compensation failed',
+      metadata: { preFundRunReceiptPending: true }
+    }
+  }]);
 });

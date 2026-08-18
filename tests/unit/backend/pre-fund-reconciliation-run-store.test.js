@@ -156,6 +156,76 @@ test.describe('PreFundReconciliationRunStore', () => {
     assert.deepEqual(store.clearAllRunData(), { deletedFiles: 1, deletedRuns: 1 });
   });
 
+  test('mirror handoff 失败只按 TaskRun 精确删除本次 success receipt 及级联结果', () => {
+    const store = createPreFundReconciliationRunStore(userDataDir);
+    const db = store.open('2026-07');
+    const runId = store.createRun(db, {
+      scenario: 'missing-gateway',
+      snapshot: {},
+      bankFiles: ['bank.xlsx'],
+      archiveReceipt: { archiveTaskRunId: 'pre-fund-compensation-task' }
+    });
+    const candidate = {
+      sourcePriority: 0,
+      sourceOrder: 0,
+      source: '现有网关账单',
+      reconciliationId: 'R-COMPENSATE',
+      fingerprint: '["same"]',
+      fields: {
+        date: '2026-07-01', channel: 'CIT', amount: '10', currency: 'USD', tradeType: 'Inbound-VA'
+      },
+      name: 'Kept',
+      cardNo: '1',
+      location: { linkedTableRowId: 1 },
+      rawJson: '{"kind":"kept"}'
+    };
+    store.insertGatewayCandidate(db, runId, candidate);
+    store.insertGatewayCandidate(db, runId, {
+      ...candidate,
+      sourceOrder: 1,
+      name: 'Folded',
+      location: { linkedTableRowId: 2 },
+      rawJson: '{"kind":"folded"}'
+    }, {
+      resolveKeptRawJson: () => candidate.rawJson
+    });
+    store.insertBalancedRow(db, {
+      runId, channel: 'CIT', bankOrdinal: 0, outputRow: { result: 'balanced' }
+    });
+    store.insertUnbalancedRow(db, {
+      runId,
+      channel: 'CIT',
+      bankOrdinal: 1,
+      outputRow: { result: 'unbalanced' },
+      channelOutputRow: { channel: 'CIT' }
+    });
+    store.finishRun(db, runId, {});
+
+    assert.throws(
+      () => store.deleteArchiveRunByTaskRunId(db, 'another-task'),
+      /receipt 不存在/
+    );
+    db.exec('BEGIN IMMEDIATE');
+    assert.deepEqual(
+      store.deleteArchiveRunByTaskRunId(db, 'pre-fund-compensation-task'),
+      { runId, runsDeleted: 1 }
+    );
+    db.exec('COMMIT');
+
+    for (const table of [
+      'pre_fund_reconciliation_runs',
+      'pre_fund_reconciliation_gateway_pool',
+      'pre_fund_reconciliation_gateway_candidate_snapshots',
+      'pre_fund_reconciliation_duplicate_groups',
+      'pre_fund_reconciliation_folded_gateway_rows',
+      'pre_fund_reconciliation_balanced_rows',
+      'pre_fund_reconciliation_unbalanced_rows'
+    ]) {
+      assert.equal(db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, table);
+    }
+    db.close();
+  });
+
   test('fails visibly instead of exporting a blank row when result JSON is corrupted', () => {
     const store = createPreFundReconciliationRunStore(userDataDir);
     const db = store.open('2026-07');

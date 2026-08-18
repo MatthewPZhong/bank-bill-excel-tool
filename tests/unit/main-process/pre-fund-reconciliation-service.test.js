@@ -157,6 +157,44 @@ function assertPublicResultHasNoArchiveIdentity(value) {
   }
 }
 
+function prepareMirrorFailureRun({ userDataDir, bankFile }) {
+  writeBankFile(bankFile, [
+    bankRow({
+      BillDate: '2026-07-01',
+      ValueDate: '2026-07-02',
+      Channel: 'CIT',
+      Currency: 'USD',
+      'Credit Amount': '10',
+      ReconciliationId: 'R-MIRROR-FAILURE'
+    })
+  ]);
+  const persistentRows = [{
+    id: 1,
+    reconciliationId: 'R-MIRROR-FAILURE',
+    row: {
+      Billdate: '2026-07-01',
+      Channel: 'CIT',
+      reconciliationid: 'R-MIRROR-FAILURE',
+      currency: 'USD',
+      amount: '10',
+      OrderId: 'G-MIRROR-FAILURE',
+      TradeType: 'Inbound-VA'
+    }
+  }];
+  const database = attachRunMirrorRepository({
+    getLinkedTableMeta: () => ({ tableKey: 'gateway-bill', rowCount: 1, updatedAt: 'mirror-failure' }),
+    iterateGatewayBillRows: () => persistentRows.values()
+  });
+  const service = makeService({
+    userDataDir,
+    database,
+    templatePath: path.join(userDataDir, 'unused.xlsx'),
+    now: () => new Date(2026, 6, 10, 12, 0, 0)
+  });
+  importBankV1(service, bankFile);
+  return { database, service, expectedDatasets: service.prepareRunLineage().expectedDatasets };
+}
+
 function inboundMptRow(overrides = {}) {
   const values = {
     batchNo: 'MPT_INBOUND_20260708', billDate: '2026-07-08', channel: 'CIT', merchantId: 'M-1',
@@ -285,6 +323,68 @@ test.describe('PreFundReconciliationService', () => {
     assert.equal(mirror.status, 'success');
     assert.equal(mirror.sideRunId, 1);
     assert.equal(mirror.summary.matchedPairs, 1);
+  });
+
+  test('main mirror create 失败时按 TaskRun 精确补偿 side receipt 与全部结果', async () => {
+    const { database, service, expectedDatasets } = prepareMirrorFailureRun({ userDataDir, bankFile });
+    const taskRunId = 'pre-fund-mirror-create-failure';
+    database.createPreFundReconciliationRunMirror = () => {
+      throw new Error('injected-main-mirror-create-failure');
+    };
+
+    await assert.rejects(
+      () => service.run({ taskRunId, expectedDatasets }),
+      /injected-main-mirror-create-failure/
+    );
+    assert.equal(service.runStore.getRunByArchiveTaskRunId(taskRunId), null);
+    assert.deepEqual(mirrorRepository.listRunMirrors(database._mirrorDb), []);
+
+    const sideDb = service.runStore.open('2026-07');
+    try {
+      for (const table of [
+        'pre_fund_reconciliation_runs',
+        'pre_fund_reconciliation_gateway_pool',
+        'pre_fund_reconciliation_balanced_rows',
+        'pre_fund_reconciliation_unbalanced_rows'
+      ]) {
+        assert.equal(sideDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, table);
+      }
+    } finally {
+      sideDb.close();
+    }
+  });
+
+  test('mirror finish 与 side 补偿同时失败时保留 receipt/running mirror 供 owner 恢复', async () => {
+    const { database, service, expectedDatasets } = prepareMirrorFailureRun({ userDataDir, bankFile });
+    const taskRunId = 'pre-fund-mirror-compensation-failure';
+    const finishMirror = database.finishPreFundReconciliationRunMirror;
+    const deleteReceipt = service.runStore.deleteArchiveRunByTaskRunId;
+    database.finishPreFundReconciliationRunMirror = () => {
+      throw new Error('injected-main-mirror-finish-failure');
+    };
+    service.runStore.deleteArchiveRunByTaskRunId = () => {
+      throw new Error('injected-side-compensation-failure');
+    };
+
+    await assert.rejects(
+      () => service.run({ taskRunId, expectedDatasets }),
+      (error) => error.code === 'PRE_FUND_MIRROR_COMPENSATION_FAILED'
+        && error.preserveArchiveTaskRun === true
+        && error.cause.message === 'injected-main-mirror-finish-failure'
+    );
+    const receipt = service.runStore.getRunByArchiveTaskRunId(taskRunId);
+    assert.equal(receipt.status, 'success');
+    assert.equal(receipt.archiveTerminalAckAt, null);
+    assert.equal(
+      mirrorRepository.getRunMirrorByArchiveTaskRunId(database._mirrorDb, taskRunId).status,
+      'running'
+    );
+
+    database.finishPreFundReconciliationRunMirror = finishMirror;
+    service.runStore.deleteArchiveRunByTaskRunId = deleteReceipt;
+    const recovered = service.recoverRunMirror(receipt, { createIfMissing: true });
+    assert.equal(recovered.status, 'success');
+    assert.equal(recovered.archiveTaskRunId, taskRunId);
   });
 
   test('production side-DB path only consumes candidates matching ID, channel, amount and currency', async () => {

@@ -440,6 +440,7 @@ VCC Financial 的文件 handoff 进一步固定为精确指针合同：
 - `linked_gateway_bill` 行保存其当前来源 datasetId/TaskRun/version；后续覆盖只更新实际命中的行，历史大表行保持 v0/null，不做伪造回填。
 - `linked_gateway_bill` 另保留不公开的逐行 write nonce：当前版本每次物理 upsert 都更新 nonce；旧 binary 回滚写入不会更新 nonce，再次前滚时只把这些实际被旧写命中的行降为 v0/null。同一 v1 文件内重复 `ReconBillBizId` 仍保留本次真实 tag，nonce 不参与 lineage 或公共 DTO。
 - run 冻结当前银行 session、实际 MPT batches 与所读取 gateway 行的 distinct tag；results side DB 的 `pre_fund_reconciliation_runs` 与主库 `pre_fund_reconciliation_run_mirrors` 都记录 Archive contract version、TaskRun identity 和 terminal ack，恢复按 TaskRun 精确核对两侧身份；导出只关联本次真实 run。
+- side success receipt 提交后，如果同 TaskRun 的主库 mirror 创建或完成失败，必须先在 results side DB 单事务按 `archive_task_run_id` 精确删除本次 run 及全部级联结果，才允许 TaskRun 进入 failed。若该补偿事务自身失败，必须保留 receipt 与现有 mirror 现场，并把 TaskRun 保持为 `interrupted`，交给既有 Pre-fund startup owner 精确恢复；不得把 mirror 标为 failed、按月份/latest 删除或开放 failed/cancelled recovery。
 - Pre-fund terminal ack 固定先写主库 mirror、再写 side receipt；main 已 ack/side 未 ack 可幂等重放，禁止先 ack side 后丢失 owner 扫描入口。未 ack receipt 存在时，开始新 run 不得先修改旧 mirror 或删除 results side DB。
 - Pre-fund 的持久 run identity 使用主库 run mirror id。结果侧库会在下一轮前整库回收，`sideDbRelPath + sideRunId` 可在同月重用，只作为 receipt/结果读取定位，不得作为 `run-output.lineageKey`；lineage key 固定为 `pre-fund:<mirrorRunId>`。
 
@@ -685,7 +686,7 @@ prepared.inputPaths + 所有 dialogSelections.filePaths
 | NFB-09 | P0 | 历史过滤 | 95 批样本中 34 个零 artifact 不出现在 list/get/stats/latest/related；raw 仍可读 |
 | NFB-10 | P0 | 统计/分页/直查 | filter 在 SQL pagination 前；cache、internal id、batch number 不能旁路可见性 |
 | NFB-11 | P0 | related | `文件A—无文件B—文件C` 只显示 A/C；复用同一导入的多个 run 与汇总导出的多个 run 仅返回各 pivot run 的直接输入/输出；不递归扩散；单项隐藏、跨重启一致 |
-| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag且旧 committed lineage 不变；Biz OP 未 ACK receipt 在当前月提交前阻断月末 OP 导入且两个月侧库零变化；current COMMIT 后的 exact copy intent 可在崩溃/下月失败/并发 receipt 后重放，并在完成前阻止 source 覆盖和 D+1/同 BU run；side receipt 后的 mirror 故障只精确删除本 TaskRun 的 side run/diff 后才允许 failed；legacy producer 为空不伪造关联；无 date/month/latest fallback |
+| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag且旧 committed lineage 不变；Biz OP 未 ACK receipt 在当前月提交前阻断月末 OP 导入且两个月侧库零变化；current COMMIT 后的 exact copy intent 可在崩溃/下月失败/并发 receipt 后重放，并在完成前阻止 source 覆盖和 D+1/同 BU run；Biz OP 与 Pre-fund 在 side receipt 后遇到 mirror 故障时，只精确删除本 TaskRun 的 side run/结果后才允许 failed，补偿失败则保持 interrupted owner；legacy producer 为空不伪造关联；无 date/month/latest fallback |
 | NFB-13 | P0 | operation context | VCC/Position no-file worker 正常运行、取消、退出、interrupted；无伪 batch number |
 | NFB-14 | P0 | 恢复/重跑 owner | 旧 exact-7 persisted batchContext 继续恢复；新 operation context 版本不混读；Acquiring interrupted resume 复用原 owner/不发号，cancelled/failed partial resume 以新 owner CAS 接管/发新号，原失败批次不变 |
 | NFB-15 | P0 | outbox/旁路 | 空 files outbox 不能新建 batch；legacy createBatch 也走原子 manifest primitive |

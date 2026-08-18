@@ -100,6 +100,22 @@ function preFundRunTerminalRoute(taskRunId) {
   return Object.freeze({ route: 'pre-fund-run', taskRunId });
 }
 
+async function preservePreFundRunOwnerAfterMirrorCompensationFailure({
+  error,
+  archiveService,
+  taskRunId
+}) {
+  if (error.preserveArchiveTaskRun !== true) return false;
+  const interrupted = await archiveService.finishTaskRun(taskRunId, {
+    taskStatus: 'interrupted',
+    code: error.code,
+    message: error.message,
+    metadata: { preFundRunReceiptPending: true }
+  });
+  if (interrupted.ok === false) throw error;
+  return true;
+}
+
 function recoveryError(message) {
   const error = new Error(message);
   error.blocksArchiveStartup = true;
@@ -195,5 +211,6 @@ module.exports = {
   preFundRunLineagePlan,
   preFundRunOutputIntent,
   preFundRunTerminalRoute,
+  preservePreFundRunOwnerAfterMirrorCompensationFailure,
   recoverPreFundRunReceipts
 };

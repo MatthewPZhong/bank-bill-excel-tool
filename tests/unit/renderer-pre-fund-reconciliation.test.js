@@ -143,6 +143,10 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(runHandler, /expectedDatasets:\s*plan\.expectedDatasets/);
     assert.match(runHandler, /taskRunId:\s*taskContext\.operationContext\.taskRunId/);
     assert.match(runHandler, /terminalStatus === 'succeeded'[\s\S]*acknowledgeRunByTaskRun/);
+    assert.match(
+      runHandler,
+      /catch \(error\)[\s\S]*preservePreFundRunOwnerAfterMirrorCompensationFailure\([\s\S]*taskContext\.operationContext\.taskRunId[\s\S]*preFundFailureResult\(error\)/
+    );
 
     assert.match(exportHandler, /const runLocator = service\.lastRunLocator\(\)/);
     assert.match(exportHandler, /lineageIntents:\s*\[service\.lastRunLineageIntent\(\)\]/);

@@ -40,6 +40,7 @@ const {
 const {
   finalizePreFundTerminalIntent,
   preFundRunTerminalRoute,
+  preservePreFundRunOwnerAfterMirrorCompensationFailure,
   recoverPreFundRunReceipts
 } = require('./main-process/pre-fund-archive-lineage');
 const {
@@ -17624,6 +17625,11 @@ function registerPreFundReconciliationHandlers() {
         onProgress: (progress) => sendPreFundProgress(event, 'pre-fund-reconciliation:run-progress', progress)
       });
     } catch (error) {
+      await preservePreFundRunOwnerAfterMirrorCompensationFailure({
+        error,
+        archiveService: archiveCenterService.service,
+        taskRunId: taskContext.operationContext.taskRunId
+      });
       return preFundFailureResult(error);
     } finally {
       releaseBankStatementOpLock();

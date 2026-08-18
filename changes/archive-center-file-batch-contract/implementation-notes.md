@@ -299,3 +299,41 @@
 | `npm run check:vars` | 预期 exit 2：命中 `normalizeBu`、`addOneDay`、`subOneDay`、`clearRunsAndDiffsByDateBu` | 实现未改金额/币种/方向；UTC 日期 helper、normalized BU scope、D/D+1 guard 与原号恢复均有专项证据 |
 
 reconciliation blindspot pass：自动化未发现新增 BLOCK；source row/head/intent、target row/head、Archive TaskRun/FileBatch 以 taskRunId + datasetId/version 精确闭合，失败路径不产生 latest/date/month 猜测或新批次号。⚠️ 该改动仍命中 Biz OP 跨月清理与未 ACK receipt 资金红线；合并前必须用真实或脱敏库人工核对 D/D+1、normalized BU、source/target 行数、dataset tag、原批次号和 Archive input evidence。
+
+### Ninth review round（input head `5511a2ca7c2b33964b64d34ecf646f4655f26194`）
+
+#### Task brief and unknowns
+
+- Goal：关闭 Pre-fund side success receipt 已 COMMIT、主库 mirror create/finish 失败后形成 `failed TaskRun + unack receipt` 的 P1。
+- Constraints：只按当前 `archive_task_run_id` 补偿；不改金额、币种、方向、匹配或公共 DTO；不增加通用 retry/queue、month/latest fallback、重复内部校验或 failed/cancelled recovery。
+- Done when：精确补偿成功后 side run 与全部级联结果归零并允许 failed；补偿失败时 receipt/mirror 现场保留、TaskRun 为 interrupted，startup owner 可恢复到 succeeded/ACK。
+
+| 未知 | 分类/结论 | 证据 | 决定 |
+| --- | --- | --- | --- |
+| side run 的全部结果是否可随单次 exact delete 原子清理 | PROBE → closed | results DDL 中 gateway pool、candidate snapshots、duplicate groups、balanced/unbalanced rows 均以 `run_id` 或其父记录 `ON DELETE CASCADE` | 在原 side DB 新事务按 TaskRun 唯一 receipt 删除 run；不逐表建设补偿框架 |
+| mirror finish 失败且 mirror row 已存在时，补偿失败后能否恢复 | PROBE → closed | `recoverRunMirror()` 已按 receipt TaskRun 校验 running mirror 并 finish；不存在 mirror 时可按 receipt 创建 | preserve 路径不调用 fail mirror；保留 running/不存在两种真实现场给既有 owner |
+| 普通 handler error 是否会把 preserve owner 终结为 failed | PROBE → closed | operation TaskLifecycle 会按返回状态写 failed，现有 Biz OP seam 已先把 TaskRun CAS 为 interrupted，使迟到 failed 因终态冲突不覆盖 owner | Pre-fund main 仅在 `preserveArchiveTaskRun=true` 时采用同一单用途 interrupted handoff |
+
+#### Decisions
+
+- Spec/TechDoc 已把既有 side-receipt mirror 补偿合同明确扩写到 Pre-fund 小节；这是遗漏实现的闭合，不改变状态机或用户可见行为。
+- 精确删除入口只接受 v1、success、未 ACK 且 TaskRun identity 匹配的真实 receipt；校验在 run-store 持久化边界一次完成。
+- 补偿失败优先保留 side receipt 和可能已存在的 mirror，不再执行当前 catch 中的 `failPreFundReconciliationRunMirror()`；原 mirror 错误通过 `cause` 保留诊断。
+
+#### Implementation
+
+- `PreFundReconciliationRunStore.deleteArchiveRunByTaskRunId()` 在调用方 `BEGIN IMMEDIATE` 内定位当前 v1 success/unack receipt，并只按其 `id + archive_task_run_id` 删除 run；既有外键级联清理候选池、重复审计、平账和不平账结果。
+- service 在 side success COMMIT 后把 mirror create/finish 作为同一个 handoff 边界；任一步失败先执行上述补偿。补偿成功后走原普通失败路径；补偿失败写入 `PRE_FUND_MIRROR_COMPENSATION_FAILED + preserveArchiveTaskRun` 并保留 receipt/mirror。
+- main 的 Pre-fund run catch 只对该 marker 调用 Archive `finishTaskRun(...interrupted)`，随后仍返回原业务错误；TaskLifecycle 的迟到 failed terminal 无法覆盖 interrupted owner，startup 继续复用既有 receipt recovery。
+
+#### Evidence
+
+| 检查 | 结果 | 结论 |
+| --- | --- | --- |
+| Pre-fund 聚焦 store/service/lineage/renderer | 48/48 PASS | mirror create 失败精确补偿；finish + compensation 双失败保留 success receipt/running mirror；main seam 先写 interrupted；全部级联结果归零 |
+| Pre-fund 13-file 宽 unit | 176/176 PASS | 严格 1:1、十进制金额、币种/方向、规则资格、候选顺序、重复审计、行数守恒、MPT 生命周期和输出契约无回归 |
+| output contract / side DB parity / linked gateway upsert | 15/15、69/69、40/40 PASS | 21 列输出、results/MPT 侧库隔离、持久 gateway 行语义保持 |
+| `npm run release-check` | PASS：lint、smoke、5376/5376 unit、48 scripts / 2393/2393 integration | 全量门禁闭合；integration policy 的纯时间戳/耗时刷新已还原，不进入本轮 diff |
+| `npm run check:vars` | 预期 exit 2：Risk-sensitive `MODULE_PRE_FUND_RECONCILIATION_RESULTS` | DDL、runId 命名空间和匹配算法未改；results 只在 mirror handoff 失败时按 exact TaskRun 删除，side DB parity 与 smoke 已覆盖 |
+
+reconciliation blindspot pass：本轮不改输入、匹配键、金额、币种、方向、手续费、规则、候选消费顺序或输出；side run 与 mirror/Archive TaskRun 只通过唯一 `archive_task_run_id` 闭合，补偿成功满足全部结果行随 run 原子归零，补偿失败满足 receipt/mirror/TaskRun 可审计且不进入 failed owner。无新增自动化 BLOCK。⚠️ 这是跨库部分失败与结果删除的资金红线；合并前仍需用真实或脱敏 Pre-fund 库人工核对 mirror create/finish 故障下的 side run/候选/平账/不平账行数、mirror status、TaskRun status 与 startup ACK。

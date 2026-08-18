@@ -601,6 +601,28 @@ class PreFundReconciliationRunStore {
     }
   }
 
+  deleteArchiveRunByTaskRunId(db, taskRunId) {
+    const run = db.prepare(`
+      SELECT id
+      FROM pre_fund_reconciliation_runs
+      WHERE archive_contract_version = 1
+        AND archive_task_run_id = ?
+        AND archive_terminal_ack_at IS NULL
+        AND status = 'success'
+    `).get(taskRunId);
+    if (!run) {
+      throw new Error('前置资金 side run receipt 不存在，无法执行精确补偿');
+    }
+    const deleted = db.prepare(`
+      DELETE FROM pre_fund_reconciliation_runs
+      WHERE id = ? AND archive_task_run_id = ?
+    `).run(run.id, taskRunId);
+    if (Number(deleted.changes) !== 1) {
+      throw new Error('前置资金 side run receipt 精确补偿发生身份冲突');
+    }
+    return { runId: Number(run.id), runsDeleted: 1 };
+  }
+
   listChannels(monthKey, runId) {
     assertRunIdentity(monthKey, runId);
     const db = this.open(monthKey);
