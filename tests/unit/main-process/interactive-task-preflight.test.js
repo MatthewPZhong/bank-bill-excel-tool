@@ -397,7 +397,7 @@ test('Pending 无效输入与 need-confirm 均 0 BOR/reserve/worker，取消不�
   assert.equal(workerCount, 0);
 });
 
-test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/worker', async (t) => {
+test('Pending 确认只用 opaque context，main v1 datasetSeed 经 preflight 原样传到 session', async (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-preflight-file-plan-'));
   const inputPath = path.join(rootDir, 'a.xlsx');
   fs.writeFileSync(inputPath, 'pending');
@@ -425,12 +425,20 @@ test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/wor
       return { status: 'success' };
     }
   };
+  const datasetSeed = Object.freeze({
+    datasetId: 'pending-dataset-v1',
+    producerTaskRunId: 'task-1',
+    expectedDatasetId: 'pending-dataset-v0',
+    expectedDatasetVersion: 0
+  });
+  assert.match(mainSource, /executePendingImportSubmission\(\{[\s\S]*?datasetSeed:\s*createPendingDatasetSeed\(/);
   const result = await invokePrepared(harness, confirmed.prepared, async (prepared, taskContext) => {
     return executePendingImportSubmission({
       pendingSession: fakePendingSession,
       prepared,
       filePaths: taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath),
       batchContext: taskContext.batchContext,
+      datasetSeed,
       onProgress: (event) => progressEvents.push(event)
     });
   });
@@ -448,6 +456,8 @@ test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/wor
   assert.equal(runImportCalls[0].dbPath, '/data/pending.sqlite');
   assert.equal(runImportCalls[0].batchContext.batchId, 1);
   assert.equal(Object.isFrozen(runImportCalls[0].batchContext), true);
+  assert.equal(runImportCalls[0].datasetSeed, datasetSeed);
+  assert.equal(Object.hasOwn(runImportCalls[0], 'datasetIdentity'), false);
   assert.deepEqual(progressEvents, [{ type: 'progress', rowsProcessed: 1 }]);
 });
 

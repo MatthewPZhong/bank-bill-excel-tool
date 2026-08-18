@@ -114,3 +114,25 @@
 | Acquiring cancelled/failed partial 的 side owner transfer 是否跨崩溃闭合 | 已关闭 + ⚠️ 资金红线 | interrupted、prepared/reserved continuation、cancelled/failed owner transfer、legacy no-owner、complete crash、progress/outputIntent 冲突及 side/main parity 均已通过专项；最终全量门禁继续回归 | 任一后续回归失败即重开；禁止扩大 TaskRun recovery edge或退回 month/latest fallback |
 | 真实 95 批数据库及 017/018/001 样本是否在本机可用 | PROBE | 最终门禁前只读定位副本；无副本则输出可执行人工步骤，不伪造结果 | 缺少真实样本不阻止代码完成，但阻止宣称真实数据库验收通过 |
 | Biz OP smoke fixture 是否已按 exact v1 Archive receipt 新合同升级 | 已关闭 | fixture 已迁到 exact v1 receipt，独立 171/171；`npm run smoke` 整体 PASS | 后续 production contract 改动继续由 smoke 回归；不得恢复缺 identity 时的 v0 fallback |
+
+## PR #150 review fixes（2026-08-18）
+
+### Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| operation/file lifecycle、owner outbox 与 Toolbox 的异终态 CAS conflict 不执行 `afterTerminal`/不 ACK | cancel-wins 后已有耐久终态；只有当前状态等于本次请求才是幂等成功。真实 no-file/file lifecycle、owner outbox 与 Toolbox 迟到 success 测试证明 cancelled 不被覆盖 | 把任意终态当 benign；为 legacy `run()` 制造 main 不传入的 `afterTerminal` 组合 | 已存在的异终态 owner outbox 保留诊断且不 finalizer/ACK；同终态 replay 仍幂等；legacy Acquiring adapter 保持基线语义 |
+| Pending 大表覆盖在现有 transaction head guard 中同时拒绝关联未 ACK v1 run | `month-repository.deleteMonth` 已有相同 `diff_runs` 谓词；合并进现有 CHECK INSERT 可在七条业务 DELETE 前失败 | 新增锁/扫描框架；改写已有 temp guard DDL/清理语义 | 拒绝时 `diff_runs`/`diff_rows`/`pending_rows`/`pending_months` 行数全部不变 |
+
+### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| `node --test tests/unit/main-process/interactive-task-preflight.test.js tests/unit/backend/pending-import/contract-pending.test.js tests/unit/main-process/archive-task-lifecycle.test.js tests/unit/main-process/archive-center-controller.test.js tests/unit/main-process/toolbox-archive-integration.test.js` | 125/125 PASS | main 调用形态与 preflight→session `datasetSeed` 原样贯穿；Pre-fund route 规范化；operation/file lifecycle、owner outbox 与 Toolbox cancel-wins 不 finalizer/ACK；Pending 覆盖拒绝时零变化 |
+| `node scripts/integration/pending-engine-migration.js` | 57/57 PASS | Pending 大表引擎覆盖事务、新旧路径 parity 与未 ACK guard 无回归 |
+| `node --test tests/unit/main-process/pre-fund-archive-lineage.test.js tests/unit/main-process/pending-archive-lineage.test.js` | 19/19 PASS | Pending/Pre-fund exact dataset/run receipt、terminal route/finalizer 与 ACK 语义 |
+| 5 个修改生产 JS + 5 个聚焦测试 `node --check`；`git diff --check` | PASS | 语法与空白错误 |
+| reconciliation blindspot pass（主键血缘/幂等重复/部分失败/行数去向） | 无新 BLOCK；命中人工资金/审计复核门禁 | 未改金额、币种、方向或匹配算法；改动涉及任务 owner 幂等与 Pending 整月覆盖，自动化不代替真实样本人工复核 |
+| `npm run release-check` | PASS：lint、smoke、5351/5351 unit、48/48 integration（2385/2385） | PR review 修复进入全量回归；包含 Pending、Pre-fund、Toolbox、Acquiring、Position、Biz OP 与 VCC 链路 |
+| `npm run scan:vars` | PASS：337 个 tracked JS / 4452 个顶层名称；A-share 648 / A-pair 945 / A-local 2693 / B 1593 | 刷新最后 9 个源码文件进入 Git 后的 v3.1.11 真实统计，并反向同步 important-variables v36 元数据 |
+| `npm run check:vars` | PASS：当前 5 个生产修复文件未新增清单命中 | 仍按人工 review 覆盖 TaskLifecycle/Archive owner 终态与 Pending 整月覆盖，不以扫描结果替代资金审计门禁 |

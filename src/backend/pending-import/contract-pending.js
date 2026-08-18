@@ -138,6 +138,11 @@ function createContract(options = {}) {
         SELECT 1 FROM pending_months
         WHERE year_month = ? AND dataset_id = ? AND dataset_version = ?
       ))
+    ) AND NOT EXISTS (
+      SELECT 1 FROM diff_runs
+      WHERE (upper_month = ? OR lower_month = ?)
+        AND archive_contract_version = 1
+        AND archive_terminal_ack_at IS NULL
     ) THEN 1 ELSE 0 END`,
           params: [
             datasetSeed.expectedDatasetId,
@@ -145,7 +150,9 @@ function createContract(options = {}) {
             datasetSeed.expectedDatasetId,
             yearMonth,
             datasetSeed.expectedDatasetId,
-            datasetSeed.expectedDatasetVersion
+            datasetSeed.expectedDatasetVersion,
+            yearMonth,
+            yearMonth
           ]
         },
         // 1) 先删 pending_removal_matches（依赖 diff_runs.id；必须在删 diff_runs 之前）

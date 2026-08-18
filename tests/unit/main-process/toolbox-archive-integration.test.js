@@ -896,6 +896,77 @@ test('正常 worker committed 后 receipt 保留 N 个输入与全部输出，�
   secondStartup.db.close();
 });
 
+test('工具箱 publication cancel-wins 后迟到 success 不 ACK committed receipt', async () => {
+  let acknowledgeCalls = 0;
+  let finishCalls = 0;
+  const batchContext = {
+    batchId: 91,
+    batchNumber: '2026-08-18-091',
+    taskRunId: 'toolbox-cancel-wins-run',
+    taskKey: 'toolbox:merge',
+    moduleId: 'toolbox',
+    parentRunId: 'toolbox-cancel-wins-parent',
+    operationKey: 'toolbox:cancel-wins'
+  };
+  const recoverPublications = async (options = {}) => {
+    if (Array.isArray(options.acknowledgedCommittedTaskIds)) {
+      acknowledgeCalls += 1;
+      return { recovered: [], skippedActive: [] };
+    }
+    return {
+      recovered: [{
+        action: 'commit-handoff-pending',
+        taskId: 'toolbox-cancel-wins-publication',
+        batchContext,
+        inputFiles: [],
+        files: []
+      }],
+      skippedActive: []
+    };
+  };
+  const archiveCenter = {
+    persistAppendIntent() {
+      throw new Error('manifest publication 不应走 legacy append');
+    },
+    async flushOutbox() {
+      throw new Error('异终态不应触发 outbox ACK 链');
+    },
+    service: {
+      repository: {
+        getBatch: () => ({ metadata: { _fileManifest: { artifactKeys: [] } } }),
+        getTaskRun: () => ({ taskRunId: batchContext.taskRunId, status: 'running' }),
+        getBatchDetail: () => ({
+          metadata: { _fileManifest: { artifactKeys: [] } },
+          artifacts: []
+        })
+      },
+      async settleManifestArtifacts() {
+        return { ok: true, durable: true };
+      },
+      async finishFileTask() {
+        finishCalls += 1;
+        return {
+          ok: false,
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          taskRun: { taskRunId: batchContext.taskRunId, status: 'cancelled' }
+        };
+      }
+    }
+  };
+  await assert.rejects(
+    recoverToolboxPublicationsIntoArchive({
+      userDataDir: '/tmp/toolbox-cancel-wins',
+      archiveCenter,
+      recoverPublications
+    }),
+    (error) => error
+      && error.blocksArchiveStartup === true
+      && /终态收口失败/.test(error.message)
+  );
+  assert.equal(finishCalls, 1);
+  assert.equal(acknowledgeCalls, 0);
+});
+
 test('恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成原批次恢复', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-index-eio-recovery-'));
   const userDataDir = path.join(root, 'user-data');

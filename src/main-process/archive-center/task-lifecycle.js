@@ -176,9 +176,10 @@ class TaskLifecycle {
     if (result && result.ok !== false) return { ok: true, result };
     const current = result && result.taskRun;
     if (result && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
-        && current
-        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.status)) {
-      return { ok: true, benign: true, result };
+        && current) {
+      return current.status === terminalOutcome.taskStatus
+        ? { ok: true, benign: true, result }
+        : { ok: false, conflict: true, result };
     }
     if (!this.persistTerminalIntent) {
       const error = new Error('Task Run 终态写入失败且持久恢复接口不可用');
@@ -223,9 +224,10 @@ class TaskLifecycle {
     if (result && result.ok !== false) return { ok: true, result };
     const current = result && result.taskRun;
     if (result && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
-        && current
-        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(current.status)) {
-      return { ok: true, benign: true, result };
+        && current) {
+      return current.status === terminalOutcome.taskStatus
+        ? { ok: true, benign: true, result }
+        : { ok: false, conflict: true, result };
     }
     if (!this.persistTerminalIntent) {
       const error = new Error('File Task 终态写入失败且持久恢复接口不可用');

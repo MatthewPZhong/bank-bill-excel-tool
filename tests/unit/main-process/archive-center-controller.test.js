@@ -53,6 +53,12 @@ function createHarness(options = {}) {
         : null;
     },
     getArtifact: (id) => artifacts.get(Number(id)) || null,
+    getTaskRun: (taskRunId) => typeof options.getTaskRun === 'function'
+      ? options.getTaskRun(taskRunId)
+      : null,
+    listArtifacts: (batchId) => [...artifacts.values()].filter(
+      (artifact) => artifact.batchId === Number(batchId)
+    ),
     getOperationIssuance: () => null,
     listFailedArtifacts: (batchId) => [...artifacts.values()].filter((artifact) => (
       artifact.batchId === Number(batchId) && artifact.status === 'failed'
@@ -143,6 +149,13 @@ function createHarness(options = {}) {
       this.finishTaskRunCalls.push({ taskRunId, outcome });
       return typeof options.finishTaskRun === 'function'
         ? options.finishTaskRun(taskRunId, outcome)
+        : { ok: true, taskRun: { taskRunId, status: outcome.taskStatus } };
+    },
+    finishFileTaskCalls: [],
+    async finishFileTask(taskRunId, batchId, outcome) {
+      this.finishFileTaskCalls.push({ taskRunId, batchId, outcome });
+      return typeof options.finishFileTask === 'function'
+        ? options.finishFileTask(taskRunId, batchId, outcome)
         : { ok: true, taskRun: { taskRunId, status: outcome.taskStatus } };
     },
     async listBatches() { return { ok: true, batches }; },
@@ -418,6 +431,137 @@ test('Pending operation terminal route 以 TaskRun identity 持久并在重放�
     route: 'pending-run', taskRunId: 'pending-run-task-outbox'
   });
   assert.equal(finalized[0].terminalOutcome.taskStatus, 'succeeded');
+});
+
+test('Pre-fund terminal route 只规范非空 TaskRun identity', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-pre-fund-finalizer-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const finalized = [];
+  const { controller } = createHarness({
+    outboxStore,
+    onTerminalIntentFlushed: async (payload) => finalized.push(payload)
+  });
+  const owner = {
+    version: 1,
+    kind: 'operation',
+    operationContext: {
+      taskRunId: 'pre-fund-run-task-outbox',
+      taskKey: 'pre-fund-reconciliation:run',
+      moduleId: 'pre-fund-reconciliation',
+      parentRunId: 'pre-fund-parent-outbox',
+      operationKey: 'pre-fund:run:outbox'
+    }
+  };
+  controller.persistTaskTerminalIntent({
+    owner,
+    sourceOperation: 'pre-fund-reconciliation:run',
+    terminalOutcome: {
+      taskStatus: 'succeeded',
+      metadata: {},
+      afterTerminal: {
+        route: 'pre-fund-run',
+        taskRunId: '  pre-fund-run-task-outbox  ',
+        ignored: true
+      }
+    }
+  });
+  assert.deepEqual(outboxStore.list()[0].payload.terminalOutcome.afterTerminal, {
+    route: 'pre-fund-run',
+    taskRunId: 'pre-fund-run-task-outbox'
+  });
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 1,
+    discarded: 0,
+    remaining: 0
+  });
+  assert.deepEqual(finalized[0].route, {
+    route: 'pre-fund-run',
+    taskRunId: 'pre-fund-run-task-outbox'
+  });
+  assert.throws(() => controller.persistTaskTerminalIntent({
+    owner,
+    sourceOperation: 'pre-fund-reconciliation:run',
+    terminalOutcome: {
+      taskStatus: 'succeeded',
+      metadata: {},
+      afterTerminal: { route: 'pre-fund-run', taskRunId: '   ' }
+    }
+  }), /Pre-fund terminal route\.taskRunId 为空/);
+});
+
+test('operation/file owner cancel-wins 时迟到 success 不 finalizer、不移除 outbox', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-owner-terminal-conflict-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const finalized = [];
+  const { controller, service } = createHarness({
+    outboxStore,
+    getTaskRun: (taskRunId) => ({ taskRunId, status: 'cancelled' }),
+    finishTaskRun: (taskRunId) => ({
+      ok: false,
+      code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+      taskRun: { taskRunId, status: 'cancelled' }
+    }),
+    finishFileTask: (taskRunId) => ({
+      ok: false,
+      code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+      taskRun: { taskRunId, status: 'cancelled' }
+    }),
+    onTerminalIntentFlushed: async (payload) => finalized.push(payload)
+  });
+  const terminalOutcome = {
+    taskStatus: 'succeeded',
+    metadata: {},
+    afterTerminal: { route: 'pending-run', taskRunId: 'owner-conflict-operation' }
+  };
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'owner-conflict-operation',
+        taskKey: 'pending:reconcile:run',
+        moduleId: 'pending-reconciliation',
+        parentRunId: 'owner-conflict-parent',
+        operationKey: 'owner-conflict:operation'
+      }
+    },
+    sourceOperation: 'pending:reconcile:run',
+    terminalOutcome
+  });
+  controller.persistTaskTerminalIntent({
+    owner: {
+      version: 1,
+      kind: 'file-batch',
+      batchContext: {
+        batchId: 77,
+        batchNumber: '2026-08-18-077',
+        taskRunId: 'owner-conflict-file',
+        taskKey: 'position-reconciliation:run:export',
+        moduleId: 'position-reconciliation-process',
+        parentRunId: 'owner-conflict-parent',
+        operationKey: 'owner-conflict:file'
+      }
+    },
+    sourceOperation: 'position-reconciliation:run:export',
+    terminalOutcome: {
+      ...terminalOutcome,
+      afterTerminal: {
+        route: 'position-reconciliation',
+        operationToken: 'owner-conflict-file'
+      }
+    }
+  });
+  assert.deepEqual(await controller.flushOutbox(), {
+    flushed: 0,
+    discarded: 0,
+    remaining: 2
+  });
+  assert.equal(finalized.length, 0);
+  assert.equal(service.finishTaskRunCalls.length, 1);
+  assert.equal(service.finishFileTaskCalls.length, 1);
+  assert.equal(outboxStore.list().length, 2);
 });
 
 test('failed/no-receipt terminal outbox 重放只收口 TaskRun，Pending/Biz finalizer 均无业务副作用', async (t) => {

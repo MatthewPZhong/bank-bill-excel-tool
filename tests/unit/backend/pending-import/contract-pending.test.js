@@ -27,7 +27,7 @@ function mkContract(opts = {}) {
     yearMonth: opts.yearMonth || '2026-06',
     archivePath: opts.archivePath !== undefined ? opts.archivePath : null,
     importedAt: opts.importedAt || '2026-06-11T00:00:00.000Z',
-    datasetSeed: {
+    datasetSeed: opts.datasetSeed || {
       datasetId: 'pending-dataset-test',
       producerTaskRunId: 'pending-import-task-test',
       expectedDatasetId: null,
@@ -145,8 +145,10 @@ test('🔴 deleteForOverwrite 同事务清 7 项并包含 removed dataset head�
   const c = mkContract({ yearMonth: '2026-06' });
   const dels = c.deleteForOverwrite();
   assert.equal(dels.length, 10, 'head guard 后必须恰好 7 条业务 DELETE');
-  assert.match(dels[0].sql, /CREATE TEMP TABLE/);
+  assert.match(dels[0].sql, /CREATE TEMP TABLE IF NOT EXISTS pending_month_head_guard/);
   assert.match(dels[2].sql, /pending_months/);
+  assert.match(dels[2].sql, /archive_contract_version = 1/);
+  assert.match(dels[2].sql, /archive_terminal_ack_at IS NULL/);
   const businessDeletes = dels.slice(3);
   // 顺序：matches → diff rows/runs → removed rows/head → pending rows/month
   assert.match(businessDeletes[0].sql, /DELETE FROM pending_removal_matches WHERE run_id IN \(/);
@@ -158,6 +160,58 @@ test('🔴 deleteForOverwrite 同事务清 7 项并包含 removed dataset head�
   assert.equal(businessDeletes[4].sql, 'DELETE FROM pending_removed_months WHERE year_month = ?');
   assert.equal(businessDeletes[5].sql, 'DELETE FROM pending_rows WHERE year_month = ?');
   assert.equal(businessDeletes[6].sql, 'DELETE FROM pending_months WHERE year_month = ?');
+});
+
+test('🔴 deleteForOverwrite 在任何业务 DELETE 前拒绝未 ACK v1 run，diff/pending 零变化', () => {
+  const db = new DatabaseSync(':memory:');
+  runMigrations(db);
+  db.prepare(`INSERT INTO pending_months (
+    year_month, imported_at, row_count, source_files,
+    dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+  ) VALUES (?, ?, 1, '[]', ?, ?, 1, 1)`).run(
+    '2026-06', '2026-06-11T00:00:00.000Z', 'pending-current-v1', 'pending-producer-v1'
+  );
+  const values = new Array(31).fill('').map((_, index) => `guard-${index}`);
+  const initialContract = mkContract({ yearMonth: '2026-06' });
+  const mapped = initialContract.mapRow({ values });
+  db.prepare(initialContract.insertSql).run(...mapped.params);
+  const runId = Number(db.prepare(`INSERT INTO diff_runs (
+    upper_month, lower_month, rule_snapshot, created_at,
+    stat_new, stat_missing, stat_changed,
+    archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+  ) VALUES (?, ?, '{}', ?, 0, 0, 0, 1, ?, NULL)`).run(
+    '2026-06', '2026-05', '2026-06-12T00:00:00.000Z', 'pending-run-unacked'
+  ).lastInsertRowid);
+  db.prepare(`INSERT INTO diff_rows (run_id, type) VALUES (?, 'new')`).run(runId);
+  const before = {
+    runs: db.prepare('SELECT COUNT(*) AS n FROM diff_runs').get().n,
+    diffs: db.prepare('SELECT COUNT(*) AS n FROM diff_rows').get().n,
+    rows: db.prepare('SELECT COUNT(*) AS n FROM pending_rows').get().n,
+    months: db.prepare('SELECT COUNT(*) AS n FROM pending_months').get().n
+  };
+  const overwrite = mkContract({
+    yearMonth: '2026-06',
+    datasetSeed: {
+      datasetId: 'pending-next-v1',
+      producerTaskRunId: 'pending-next-task',
+      expectedDatasetId: 'pending-current-v1',
+      expectedDatasetVersion: 1
+    }
+  });
+  db.exec('BEGIN');
+  assert.throws(() => {
+    for (const statement of overwrite.deleteForOverwrite()) {
+      db.prepare(statement.sql).run(...statement.params);
+    }
+  }, /constraint/i);
+  db.exec('ROLLBACK');
+  assert.deepEqual({
+    runs: db.prepare('SELECT COUNT(*) AS n FROM diff_runs').get().n,
+    diffs: db.prepare('SELECT COUNT(*) AS n FROM diff_rows').get().n,
+    rows: db.prepare('SELECT COUNT(*) AS n FROM pending_rows').get().n,
+    months: db.prepare('SELECT COUNT(*) AS n FROM pending_months').get().n
+  }, before);
+  db.close();
 });
 
 test('finalizeForCommit = upsertMonthMeta（rowCount/sourceFiles/archivePath/importedAt 字段）', () => {

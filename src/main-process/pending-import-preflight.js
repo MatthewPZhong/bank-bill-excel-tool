@@ -175,7 +175,7 @@ function executePendingImportSubmission({
   filePaths,
   onProgress,
   batchContext,
-  datasetIdentity
+  datasetSeed
 } = {}) {
   if (!prepared || !Array.isArray(filePaths) || filePaths.length === 0 || !prepared.yearMonth
       || (prepared.evidence && prepared.evidence.existingCount > 0
@@ -192,7 +192,7 @@ function executePendingImportSubmission({
     dbPath: prepared.dbPath,
     onProgress,
     batchContext,
-    datasetIdentity
+    datasetSeed
   });
 }
 

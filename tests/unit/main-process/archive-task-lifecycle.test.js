@@ -157,6 +157,9 @@ function createHarness(overrides = {}) {
     },
     async finishFileTask(taskRunId, batchId, outcome) {
       calls.push(['finish-file-task', taskRunId, batchId, outcome]);
+      if (typeof overrides.finishFileTask === 'function') {
+        return overrides.finishFileTask(taskRunId, batchId, outcome);
+      }
       return overrides.finishFileTaskResult || { ok: true };
     },
     async reserveTaskBatch(payload) {
@@ -397,13 +400,15 @@ test('File Task interrupted recovery 复用原 exact owner 与 manifest，不 be
   }
 });
 
-test('file task 取消只调用 finishFileTask，不走 legacy cancelTaskBatch', async (t) => {
+test('file task cancel-wins 后迟到 success 不执行 afterTerminal', async (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-file-cancel-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const inputPath = path.join(tempDir, 'input.xlsx');
   const outputPath = path.join(tempDir, 'output.xlsx');
   fs.writeFileSync(inputPath, 'input');
   let release;
+  let terminal = 'running';
+  let afterTerminalCalls = 0;
   const { calls, lifecycle } = createHarness({
     reserveFileTask(payload) {
       return {
@@ -419,21 +424,35 @@ test('file task 取消只调用 finishFileTask，不走 legacy cancelTaskBatch',
         }
       };
     },
-    finishFileTaskResult: { ok: true }
+    finishFileTask(_taskRunId, _batchId, outcome) {
+      if (terminal !== 'running') {
+        return {
+          ok: false,
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          taskRun: { status: terminal }
+        };
+      }
+      terminal = outcome.taskStatus;
+      return { ok: true, taskRun: { status: terminal } };
+    }
   });
   const pending = lifecycle.runFileTask({
     policy: FILE_POLICY,
     flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
     filePlanResolver: () => normalizedToolboxPlan(inputPath, outputPath),
-    execute: () => new Promise((resolve) => { release = resolve; })
+    execute: () => new Promise((resolve) => { release = resolve; }),
+    afterTerminal: () => { afterTerminalCalls += 1; }
   });
   while (!release) await new Promise((resolve) => setImmediate(resolve));
   const cancelled = await lifecycle.cancelActive(null, '用户取消');
   assert.equal(cancelled.cancelled, true);
   assert.equal(calls.filter((call) => call[0] === 'finish-file-task').length, 1);
   assert.equal(calls.some((call) => call[0] === 'cancel'), false);
-  release({ status: 'cancelled' });
+  release({ status: 'success' });
   await pending;
+  assert.equal(terminal, 'cancelled');
+  assert.equal(afterTerminalCalls, 0);
+  assert.equal(calls.some((call) => call[0] === 'persist-terminal-intent'), false);
 });
 
 test('file task 成功但 manifest 未 durable 时只写 file-owner outbox，不提前终结', async (t) => {
@@ -820,9 +839,10 @@ test('no-file result bind 与 intent 同时失败改写 failed terminal；CAS �
   assert.equal('lineageIntents' in persisted[1], false);
 });
 
-test('no-file cancel 先到终态后，迟到 success 保持 cancelled 且不写 success outbox', async () => {
+test('no-file cancel 先到终态后，迟到 success 保持 cancelled 且不执行 afterTerminal', async () => {
   let terminal = 'running';
   let release;
+  let afterTerminalCalls = 0;
   const { calls, lifecycle } = createHarness({
     finishTaskRun(_taskRunId, outcome) {
       if (terminal !== 'running') {
@@ -839,7 +859,8 @@ test('no-file cancel 先到终态后，迟到 success 保持 cancelled 且不写
   const pending = lifecycle.runOperationOnly({
     policy: NO_FILE_POLICY,
     meta: { channel: NO_FILE_POLICY.channel },
-    execute: () => new Promise((resolve) => { release = resolve; })
+    execute: () => new Promise((resolve) => { release = resolve; }),
+    afterTerminal: () => { afterTerminalCalls += 1; }
   });
   while (!release) await new Promise((resolve) => setImmediate(resolve));
   const cancelled = await lifecycle.cancelActive(null, 'user cancelled');
@@ -847,6 +868,7 @@ test('no-file cancel 先到终态后，迟到 success 保持 cancelled 且不写
   release({ status: 'success' });
   await pending;
   assert.equal(terminal, 'cancelled');
+  assert.equal(afterTerminalCalls, 0);
   assert.equal(calls.some((call) => call[0] === 'persist-terminal-intent'), false);
 });
 

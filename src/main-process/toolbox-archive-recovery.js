@@ -195,10 +195,16 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
     for (const item of manifestPending) {
       const context = item.batchContext;
       const existingTaskRun = archiveCenter.service.repository.getTaskRun(context.taskRunId);
-      if (!existingTaskRun
-          || !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
-            existingTaskRun.status
-          )) {
+      const existingTerminalStatus = existingTaskRun
+        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(existingTaskRun.status)
+        ? existingTaskRun.status
+        : null;
+      if (existingTerminalStatus && existingTerminalStatus !== 'succeeded') {
+        throw new Error(
+          `工具箱发布 ${item.taskId} 的 File Task 已进入冲突终态 ${existingTerminalStatus}`
+        );
+      }
+      if (!existingTerminalStatus) {
         const rawDetail = archiveCenter.service.repository.getBatchDetail(context.batchId);
         const pendingArtifacts = Array.isArray(rawDetail && rawDetail.artifacts)
           ? rawDetail.artifacts
@@ -252,9 +258,7 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
           && finished.ok === false
           && finished.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
           && finished.taskRun
-          && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
-            finished.taskRun.status
-          );
+          && finished.taskRun.status === 'succeeded';
         if ((!finished || finished.ok === false) && !benign) {
           throw new Error(`工具箱发布 ${item.taskId} 的 File Task 终态收口失败`);
         }

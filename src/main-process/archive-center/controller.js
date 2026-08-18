@@ -122,6 +122,10 @@ function normalizeTerminalOutcome(value) {
       const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
       if (!taskRunId) throw new TypeError('Biz OP terminal route.taskRunId 为空');
       afterTerminal = { route, taskRunId };
+    } else if (route === 'pre-fund-run') {
+      const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
+      if (!taskRunId) throw new TypeError('Pre-fund terminal route.taskRunId 为空');
+      afterTerminal = { route, taskRunId };
     } else {
       throw new TypeError(`不支持的任务终态 afterTerminal route：${route}`);
     }
@@ -479,9 +483,7 @@ class ArchiveCenterController {
           && terminalResult.ok === false
           && terminalResult.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
           && terminalResult.taskRun
-          && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(
-            terminalResult.taskRun.status
-          );
+          && terminalResult.taskRun.status === terminalOutcome.taskStatus;
         if ((!terminalResult || terminalResult.ok === false) && !benignTerminal) {
           this._warn(
             '存档 outbox 的 File Task 终态收口失败',
@@ -694,7 +696,7 @@ class ArchiveCenterController {
     if (result && result.ok === false
         && result.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
         && result.taskRun
-        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(result.taskRun.status)) {
+        && result.taskRun.status === terminalOutcome.taskStatus) {
       return { ...result, ok: true, replayed: true };
     }
     return result;
