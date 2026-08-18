@@ -31,6 +31,7 @@ const importsRepo = require('../../../../src/backend/biz-op-recon-db/imports-rep
 const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');
 const datasetHeadRepo = require('../../../../src/backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../../../../src/backend/biz-op-recon-db/month-end-copy-intent-repository');
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../../../src/backend/biz-op-recon-db/columns');
 
 const WORKER_BATCH_CONTEXT = Object.freeze({
@@ -294,7 +295,12 @@ test('bizOp 月末 worker 提交前命中下月未 ACK receipt 时两库写集�
     dbPath: current.dbPath,
     batchContext: WORKER_BATCH_CONTEXT,
     datasetSeed: nextBizOpDatasetSeed('month-end-blocked-task'),
-    monthEndAdmission: { dbPath: next.dbPath, date, nextDate },
+    monthEndCopyPlan: {
+      targetDbPath: next.dbPath,
+      targetMonth: '2026-07',
+      dataDate: date,
+      nextDate
+    },
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(current.dir, 'err')
   });
@@ -305,6 +311,38 @@ test('bizOp 月末 worker 提交前命中下月未 ACK receipt 时两库写集�
   assert.deepEqual(dumpBizOpWriteState(next.db), beforeNext);
   current.db.close();
   next.db.close();
+});
+
+test('bizOp 月末 worker 成功 COMMIT 时同事务持久 exact copy intent', async () => {
+  const date = '2026-08-31';
+  const taskRunId = 'biz-op-worker-month-end-success';
+  const current = freshDb();
+  const filePath = await writeXlsx(BIZ_OP_HEADERS, [
+    bizOpRowArray('BU-MONTH-END', 'ACC-MONTH-END', { begin: 0, amount: 25, end: 25 })
+  ]);
+  const result = await session.runBizOpImportViaWorker(current.db, {
+    date,
+    filePath,
+    dbPath: current.dbPath,
+    batchContext: { ...WORKER_BATCH_CONTEXT, taskRunId },
+    datasetSeed: nextBizOpDatasetSeed(taskRunId),
+    monthEndCopyPlan: {
+      targetDbPath: path.join(current.dir, 'month-2026-09.sqlite'),
+      targetMonth: '2026-09',
+      dataDate: date,
+      nextDate: '2026-09-01'
+    },
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(current.dir, 'err')
+  });
+  assert.equal(result.status, 'success');
+  const head = datasetHeadRepo.getHead(current.db, 'op', date, 'BU-MONTH-END');
+  const intent = monthEndCopyIntents.getByTaskRunId(current.db, taskRunId);
+  assert.equal(intent.datasetId, head.datasetId);
+  assert.equal(intent.datasetVersion, head.datasetVersion);
+  assert.equal(intent.producerTaskRunId, taskRunId);
+  assert.equal(intent.targetMonth, '2026-09');
+  current.db.close();
 });
 
 // ---------------- ② 业务OP 校验失败整批拒绝 ----------------

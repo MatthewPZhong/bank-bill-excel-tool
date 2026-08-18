@@ -273,6 +273,7 @@ const { readPendingGuanliFile, readBankFile } = require('./backend/bank-bu-recon
 // v2.1.3-fix7-M1：删 makeSingleDateDiffFileName / makeDateRangeDiffFileName 死 import
 // （文件名生成在 ipc handler 内部直接 require session 调用，main.js 顶层无引用）
 const {
+  addOneDay: addBizOpOneDay,
   createBizOpReconSession,
   // v2.1.12-beta β.2-T2：默认走 worker 化导入入口（流式 + 边读边插，解决百万行 OOM/卡主线程）
   //   旧同步 runBizOpImportAsync/runFlowImportAsync 保留作 contract 基线 / 无 dbPath 兜底（worker 入口内部回退）
@@ -4270,7 +4271,13 @@ function recoverBizOpRunsBeforeInterruptedSweep() {
     userDataDir: path.dirname(database.dbPath),
     mainDb: database.db,
     archiveService: archiveCenterService.service
-  });
+  }).then(async (runReceipts) => ({
+    runReceipts,
+    monthEndCopies: await bizOpReconRunData.recoverMonthEndCopyIntents({
+      userDataDir: path.dirname(database.dbPath),
+      archiveService: archiveCenterService.service
+    })
+  }));
 }
 
 function recoverPreFundRunsBeforeInterruptedSweep() {
@@ -14241,6 +14248,17 @@ function registerNewAccountHandlers() {
       return {
         proceed: true,
         date,
+        afterTerminal: ({ context, terminalStatus }) => (
+          terminalStatus === 'succeeded'
+          && bizOpReconRunData.monthOf(date)
+            !== bizOpReconRunData.monthOf(addBizOpOneDay(date))
+            ? bizOpReconRunData.acknowledgeMonthEndCopyIntent({
+                userDataDir: path.dirname(database.dbPath),
+                dataDate: date,
+                sourceTaskRunId: context.taskRunId
+              })
+            : null
+        ),
         filePlan: {
           version: 1,
           allocation: 'eager',
@@ -14275,6 +14293,28 @@ function registerNewAccountHandlers() {
       });
       return result;
     } catch (err) {
+      if (err && err.preserveArchiveFileTask === true) {
+        try {
+          await taskContext.settleArtifacts({
+            files: taskContext.fileEvidence.filePlan.inputs
+              .map((item) => ({ artifactKey: item.artifactKey }))
+          });
+        } catch (_settleError) { /* terminal 仍必须保留为 interrupted owner */ }
+        const interrupted = await archiveCenterService.service.finishFileTask(
+          taskContext.batchContext.taskRunId,
+          taskContext.batchContext.batchId,
+          {
+            taskStatus: 'interrupted',
+            code: 'ARCHIVE_TASK_INTERRUPTED',
+            message: err.message,
+            metadata: {
+              bizOpMonthEndCopyPending: true,
+              bizOpMonthEndCopyFailureCode: err.code || 'BIZ_OP_MONTH_END_COPY_PENDING'
+            }
+          }
+        );
+        if (!interrupted || interrupted.ok === false) throw err;
+      }
       return {
         status: 'error',
         message: err && err.message ? err.message : String(err),
@@ -14437,7 +14477,7 @@ function registerNewAccountHandlers() {
         if (err && err.preserveArchiveTaskRun === true) {
           // 精确补偿自身失败时保留 side receipt，并复用既有 interrupted owner 恢复；
           // TaskLifecycle 随后的 failed terminal 会因状态冲突保持 interrupted，不开放 failed recovery。
-          const interrupted = await archiveCenterService.finishTaskRun(
+          const interrupted = await archiveCenterService.service.finishTaskRun(
             taskContext.operationContext.taskRunId,
             {
               taskStatus: 'interrupted',

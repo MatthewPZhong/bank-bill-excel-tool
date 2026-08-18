@@ -1,16 +1,16 @@
 {
   "meta": {
     "version": "3.1.11",
-    "scannedAt": "2026-08-18T14:41:31.681Z",
+    "scannedAt": "2026-08-18T16:42:17.510Z",
     "root": "src",
     "sourceSet": "git-tracked-js",
-    "totalFiles": 337,
-    "totalTopLevelNames": 4458,
+    "totalFiles": 338,
+    "totalTopLevelNames": 4476,
     "buckets": {
-      "shared": 649,
-      "paired": 947,
-      "local": 2695,
-      "crossFile": 1596
+      "shared": 655,
+      "paired": 950,
+      "local": 2704,
+      "crossFile": 1605
     }
   },
   "A": {
@@ -727,6 +727,10 @@
             "count": 2
           },
           {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 2
+          },
+          {
             "file": "src/backend/biz-op-recon-db/run-repository.js",
             "count": 18
           },
@@ -1083,8 +1087,8 @@
             "count": 10
           }
         ],
-        "totalHits": 1153,
-        "fileSpan": 99
+        "totalHits": 1155,
+        "fileSpan": 100
       },
       {
         "name": "fs",
@@ -1385,7 +1389,7 @@
           },
           {
             "file": "src/main-process/biz-op-recon-session.js",
-            "count": 1
+            "count": 2
           },
           {
             "file": "src/main-process/biz-op-recon-writer.js",
@@ -1536,7 +1540,7 @@
             "count": 3
           }
         ],
-        "totalHits": 515,
+        "totalHits": 516,
         "fileSpan": 89
       },
       {
@@ -3272,6 +3276,144 @@
         "fileSpan": 34
       },
       {
+        "name": "list",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/fund-transfer-account-mapping-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/database/linked-table-repository.js",
+            "count": 6
+          },
+          {
+            "file": "src/backend/pending-db/removed-repository.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/operation-tracker.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/archive-center/outbox-store.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/archive-center/task-policy-registry.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/boc-fx-link-builder.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/reconciliation-orchestrator.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/boc-dispatch-order-fix.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/engine-utils.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/vcc-financial-op-storage-rebuild.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/vcc-op-calc-session.js",
+            "count": 6
+          },
+          {
+            "file": "src/preload.js",
+            "count": 7
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 43
+          },
+          {
+            "file": "src/renderer-vcc-financial-op.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 43
+          }
+        ],
+        "totalHits": 172,
+        "fileSpan": 32
+      },
+      {
         "name": "normalizeCell",
         "defFiles": [
           "src/backend/balance-adjustment-store.js",
@@ -4748,7 +4890,7 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 1
+            "count": 3
           },
           {
             "file": "src/main-process/pending-archive-lineage.js",
@@ -4779,7 +4921,7 @@
             "count": 1
           }
         ],
-        "totalHits": 236,
+        "totalHits": 238,
         "fileSpan": 16
       },
       {
@@ -6515,6 +6657,60 @@
         "fileSpan": 10
       },
       {
+        "name": "runDataStore",
+        "defFiles": [
+          "src/backend/duplicate-inbound-match-store.js",
+          "src/backend/pre-fund-reconciliation-run-store.js",
+          "src/backend/pre-fund-reconciliation-store.js",
+          "src/main-process/acquiring-bill-currency-run-data.js",
+          "src/main-process/bank-bu-recon-run-data.js",
+          "src/main-process/biz-op-recon-run-data.js",
+          "src/main-process/duplicate-inbound-match/service.js",
+          "src/main-process/pre-fund-reconciliation/service.js",
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/duplicate-inbound-match-store.js",
+            "count": 33
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 16
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 22
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-run-data.js",
+            "count": 23
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-run-data.js",
+            "count": 19
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 52
+          },
+          {
+            "file": "src/main-process/duplicate-inbound-match/service.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 4
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 173,
+        "fileSpan": 9
+      },
+      {
         "name": "active",
         "defFiles": [
           "src/backend/position-reconciliation-import/worker-entry.js"
@@ -6561,60 +6757,6 @@
         "fileSpan": 9
       },
       {
-        "name": "runDataStore",
-        "defFiles": [
-          "src/backend/duplicate-inbound-match-store.js",
-          "src/backend/pre-fund-reconciliation-run-store.js",
-          "src/backend/pre-fund-reconciliation-store.js",
-          "src/main-process/acquiring-bill-currency-run-data.js",
-          "src/main-process/bank-bu-recon-run-data.js",
-          "src/main-process/biz-op-recon-run-data.js",
-          "src/main-process/duplicate-inbound-match/service.js",
-          "src/main-process/pre-fund-reconciliation/service.js",
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/duplicate-inbound-match-store.js",
-            "count": 33
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 16
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 22
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-run-data.js",
-            "count": 23
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-run-data.js",
-            "count": 19
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 45
-          },
-          {
-            "file": "src/main-process/duplicate-inbound-match/service.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 4
-          },
-          {
-            "file": "src/main.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 166,
-        "fileSpan": 9
-      },
-      {
         "name": "session",
         "defFiles": [
           "src/main-process/acquiring-bill-currency-run-data.js",
@@ -6636,7 +6778,7 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 13
+            "count": 17
           },
           {
             "file": "src/main-process/manual-balance-seed-preflight.js",
@@ -6659,7 +6801,53 @@
             "count": 6
           }
         ],
-        "totalHits": 83,
+        "totalHits": 87,
+        "fileSpan": 9
+      },
+      {
+        "name": "remove",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/archive-center/archive-service.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/controller.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/archive-center/outbox-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/archive-center/storage-materializer.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 42
+          },
+          {
+            "file": "src/renderer-position-reconciliation.js",
+            "count": 19
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 80,
         "fileSpan": 9
       },
       {
@@ -8017,6 +8205,48 @@
         "fileSpan": 8
       },
       {
+        "name": "create",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/big-table-import/row-scanner.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+            "count": 4
+          },
+          {
+            "file": "src/main-process/archive-center/scenario-import-context-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/toolbox.js",
+            "count": 2
+          },
+          {
+            "file": "src/preload.js",
+            "count": 2
+          },
+          {
+            "file": "src/renderer-dialogs.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 17,
+        "fileSpan": 8
+      },
+      {
         "name": "readRows",
         "defFiles": [
           "src/backend/bank-account-import.js",
@@ -8218,14 +8448,14 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 33
+            "count": 40
           },
           {
             "file": "src/main-process/duplicate-inbound-match/service.js",
             "count": 3
           }
         ],
-        "totalHits": 118,
+        "totalHits": 125,
         "fileSpan": 7
       },
       {
@@ -8356,6 +8586,44 @@
         "fileSpan": 7
       },
       {
+        "name": "openSideDb",
+        "defFiles": [
+          "src/backend/run-data-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/duplicate-inbound-match-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/run-data-store.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-run-data.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-run-data.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 19
+          }
+        ],
+        "totalHits": 38,
+        "fileSpan": 7
+      },
+      {
         "name": "parseNumericValue",
         "defFiles": [
           "src/backend/balance-seed-store.js",
@@ -8392,44 +8660,6 @@
           }
         ],
         "totalHits": 35,
-        "fileSpan": 7
-      },
-      {
-        "name": "openSideDb",
-        "defFiles": [
-          "src/backend/run-data-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/duplicate-inbound-match-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 2
-          },
-          {
-            "file": "src/backend/run-data-store.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-run-data.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-run-data.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 15
-          }
-        ],
-        "totalHits": 34,
         "fileSpan": 7
       },
       {
@@ -8623,10 +8853,10 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 3
+            "count": 5
           }
         ],
-        "totalHits": 19,
+        "totalHits": 21,
         "fileSpan": 7
       },
       {
@@ -9011,7 +9241,7 @@
           },
           {
             "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 11
+            "count": 16
           },
           {
             "file": "src/main-process/position-reconciliation/common.js",
@@ -9026,7 +9256,7 @@
             "count": 3
           }
         ],
-        "totalHits": 23,
+        "totalHits": 28,
         "fileSpan": 6
       },
       {
@@ -9205,6 +9435,40 @@
         "fileSpan": 6
       },
       {
+        "name": "listSideDbFiles",
+        "defFiles": [
+          "src/backend/run-data-store.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 4
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/backend/run-data-store.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/acquiring-bill-currency-run-data.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-run-data.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 6
+          }
+        ],
+        "totalHits": 18,
+        "fileSpan": 6
+      },
+      {
         "name": "parseDateValue",
         "defFiles": [
           "src/backend/file-service/normalizers.js"
@@ -9236,40 +9500,6 @@
           }
         ],
         "totalHits": 18,
-        "fileSpan": 6
-      },
-      {
-        "name": "listSideDbFiles",
-        "defFiles": [
-          "src/backend/run-data-store.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 4
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 1
-          },
-          {
-            "file": "src/backend/run-data-store.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/acquiring-bill-currency-run-data.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-run-data.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 17,
         "fileSpan": 6
       },
       {
@@ -10520,6 +10750,36 @@
         "fileSpan": 5
       },
       {
+        "name": "getHead",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/dataset-head-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/dataset-head-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-archive-lineage.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 5
+      },
+      {
         "name": "positionCheckpointsEqual",
         "defFiles": [
           "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -10577,36 +10837,6 @@
           }
         ],
         "totalHits": 16,
-        "fileSpan": 5
-      },
-      {
-        "name": "getHead",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/dataset-head-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/dataset-head-repository.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-archive-lineage.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 5
-          }
-        ],
-        "totalHits": 15,
         "fileSpan": 5
       },
       {
@@ -12162,6 +12392,33 @@
         "fileSpan": 4
       },
       {
+        "name": "normalizeBu",
+        "defFiles": [
+          "src/main-process/bank-bu-recon-session.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 8
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 11
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 7
+          }
+        ],
+        "totalHits": 29,
+        "fileSpan": 4
+      },
+      {
         "name": "tableColumns",
         "defFiles": [
           "src/backend/vcc-financial-op-db/migrations.js",
@@ -12292,33 +12549,6 @@
           {
             "file": "src/renderer.js",
             "count": 1
-          }
-        ],
-        "totalHits": 26,
-        "fileSpan": 4
-      },
-      {
-        "name": "normalizeBu",
-        "defFiles": [
-          "src/main-process/bank-bu-recon-session.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/bank-bu-recon-session.js",
-            "count": 8
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 10
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 5
           }
         ],
         "totalHits": 26,
@@ -14190,6 +14420,32 @@
         "fileSpan": 4
       },
       {
+        "name": "addOneDay",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 8,
+        "fileSpan": 4
+      },
+      {
         "name": "BUSINESS_BILL_FIELDS",
         "defFiles": [
           "src/constants/recon-id-fix-fields.js",
@@ -15848,6 +16104,30 @@
         "fileSpan": 3
       },
       {
+        "name": "datasetHeadRepository",
+        "defFiles": [
+          "src/backend/biz-op-recon-import/import-worker.js",
+          "src/main-process/biz-op-recon-run-data.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 10
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 11
+          }
+        ],
+        "totalHits": 26,
+        "fileSpan": 3
+      },
+      {
         "name": "DELETE_TARGET_TYPES",
         "defFiles": [
           "src/backend/vcc-financial-op/data-target-deletion.js",
@@ -15887,30 +16167,6 @@
           {
             "file": "src/backend/vcc-financial-op/workbook-reader.js",
             "count": 14
-          }
-        ],
-        "totalHits": 25,
-        "fileSpan": 3
-      },
-      {
-        "name": "datasetHeadRepository",
-        "defFiles": [
-          "src/backend/biz-op-recon-import/import-worker.js",
-          "src/main-process/biz-op-recon-run-data.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 10
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 4
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 11
           }
         ],
         "totalHits": 25,
@@ -15978,6 +16234,30 @@
           {
             "file": "src/main-process/position-reconciliation/matching-engine.js",
             "count": 14
+          }
+        ],
+        "totalHits": 23,
+        "fileSpan": 3
+      },
+      {
+        "name": "TABLE",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "src/backend/biz-op-recon-db/imports-repository.js",
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+            "count": 7
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/imports-repository.js",
+            "count": 10
+          },
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 6
           }
         ],
         "totalHits": 23,
@@ -20740,6 +21020,29 @@
         "fileSpan": 3
       },
       {
+        "name": "subOneDay",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 3
+      },
+      {
         "name": "SUPPORTED_EXTENSIONS",
         "defFiles": [
           "src/backend/file-service/common.js"
@@ -20961,28 +21264,6 @@
           },
           {
             "file": "src/main-process/toolbox-large-split-dispatch.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 3
-      },
-      {
-        "name": "addOneDay",
-        "defFiles": [
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-import/import-worker.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 1
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
             "count": 2
           }
         ],
@@ -22099,6 +22380,28 @@
         "fileSpan": 3
       },
       {
+        "name": "assertNoPending",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 3
+      },
+      {
         "name": "BALANCE_SEED_GENERATION_METHODS",
         "defFiles": [
           "src/backend/balance-seed-store.js"
@@ -23085,25 +23388,6 @@
           {
             "file": "src/renderer-dialogs.js",
             "count": 15
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 2
-      },
-      {
-        "name": "TABLE",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/flow-imports-repository.js",
-          "src/backend/biz-op-recon-db/imports-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
-            "count": 7
-          },
-          {
-            "file": "src/backend/biz-op-recon-db/imports-repository.js",
-            "count": 10
           }
         ],
         "totalHits": 17,
@@ -24097,6 +24381,25 @@
           {
             "file": "src/backend/file-service/normalizers.js",
             "count": 2
+          }
+        ],
+        "totalHits": 9,
+        "fileSpan": 2
+      },
+      {
+        "name": "monthEndCopyIntents",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js",
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 6
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 3
           }
         ],
         "totalHits": 9,
@@ -25919,6 +26222,24 @@
           },
           {
             "file": "src/main-process/bank-bu-recon-session.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
+        "name": "BIZ_OP_MODULE_ID",
+        "defFiles": [
+          "src/main-process/biz-op-archive-lineage.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-archive-lineage.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 4
           }
         ],
@@ -28625,24 +28946,6 @@
         "fileSpan": 2
       },
       {
-        "name": "BIZ_OP_MODULE_ID",
-        "defFiles": [
-          "src/main-process/biz-op-archive-lineage.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/biz-op-archive-lineage.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
         "name": "BOC_PAYMENT_DETAIL_KEYWORD",
         "defFiles": [
           "src/constants/boc-fx-link-fields.js",
@@ -29203,6 +29506,24 @@
           {
             "file": "src/backend/database/template-repository.js",
             "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
+        "name": "getByTaskRunId",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 3
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 2
           }
         ],
         "totalHits": 5,
@@ -30138,6 +30459,24 @@
         "fileSpan": 2
       },
       {
+        "name": "previousDate",
+        "defFiles": [
+          "src/main-process/biz-op-archive-lineage.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-archive-lineage.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 2
+      },
+      {
         "name": "PROGRESS_INTERVAL",
         "defFiles": [
           "src/backend/vcc-op-calc-import/reader.js",
@@ -30607,25 +30946,6 @@
           {
             "file": "src/backend/biz-op-recon-import/reader-streamed.js",
             "count": 3
-          }
-        ],
-        "totalHits": 5,
-        "fileSpan": 2
-      },
-      {
-        "name": "subOneDay",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/run-repository.js",
-          "src/main-process/biz-op-recon-session.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 3
-          },
-          {
-            "file": "src/main-process/biz-op-recon-session.js",
-            "count": 2
           }
         ],
         "totalHits": 5,
@@ -31179,6 +31499,24 @@
       },
       {
         "name": "assertBizOpMonthEndAdmission",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "assertNoPendingMonthEndCopy",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
         ],
@@ -34811,6 +35149,24 @@
           {
             "file": "src/renderer.js",
             "count": 3
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 2
+      },
+      {
+        "name": "recordMonthEndCopyIntent",
+        "defFiles": [
+          "src/main-process/biz-op-recon-session.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-import/import-worker.js",
+            "count": 2
+          },
+          {
+            "file": "src/main-process/biz-op-recon-session.js",
+            "count": 2
           }
         ],
         "totalHits": 4,
@@ -41087,6 +41443,20 @@
         "fileSpan": 1
       },
       {
+        "name": "monthEndCopyConflict",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 13
+          }
+        ],
+        "totalHits": 13,
+        "fileSpan": 1
+      },
+      {
         "name": "normalizeArgb",
         "defFiles": [
           "src/backend/toolbox-format/style-registry.js"
@@ -46953,6 +47323,20 @@
         "fileSpan": 1
       },
       {
+        "name": "acknowledgeMonthEndCopyIntent",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
         "name": "acknowledgePendingRun",
         "defFiles": [
           "src/main-process/pending-archive-lineage.js"
@@ -47072,6 +47456,20 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-financial-op/operation-state.js",
+            "count": 4
+          }
+        ],
+        "totalHits": 4,
+        "fileSpan": 1
+      },
+      {
+        "name": "applyMonthEndCopyIntent",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 4
           }
         ],
@@ -52350,6 +52748,20 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-financial-op/import-service.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertIntentHead",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 3
           }
         ],
@@ -58461,6 +58873,20 @@
         "fileSpan": 1
       },
       {
+        "name": "mapIntent",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
         "name": "mappedAccount",
         "defFiles": [
           "src/main-process/position-reconciliation/derivation.js"
@@ -60064,6 +60490,20 @@
         "refFiles": [
           {
             "file": "src/main-process/pending-archive-lineage.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 1
+      },
+      {
+        "name": "pendingError",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
             "count": 3
           }
         ],
@@ -65587,6 +66027,20 @@
         "fileSpan": 1
       },
       {
+        "name": "assertNoPendingMonthEndCopyForRun",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "assertNoRunRowCurrencyCollision",
         "defFiles": [
           "src/backend/vcc-financial-op-db/migrations.js"
@@ -65902,6 +66356,20 @@
         "refFiles": [
           {
             "file": "src/main-process/toolbox-output-publication.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "assertTargetCopyApplied",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 2
           }
         ],
@@ -66336,6 +66804,20 @@
         "refFiles": [
           {
             "file": "src/backend/biz-op-recon-db/columns.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "BIZ_OP_IMPORT_TASK_KEY",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 2
           }
         ],
@@ -68807,6 +69289,20 @@
         "fileSpan": 1
       },
       {
+        "name": "fileBatchOwnerForCopyIntent",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "filteredCollisionError",
         "defFiles": [
           "src/backend/position-reconciliation-import/preflight.js"
@@ -69654,20 +70150,6 @@
         "refFiles": [
           {
             "file": "src/renderer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
-        "name": "handleMonthEndCrossMonth",
-        "defFiles": [
-          "src/main-process/biz-op-recon-run-data.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 2
           }
         ],
@@ -73763,20 +74245,6 @@
         "fileSpan": 1
       },
       {
-        "name": "previousDate",
-        "defFiles": [
-          "src/main-process/biz-op-archive-lineage.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main-process/biz-op-archive-lineage.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "preWarm",
         "defFiles": [
           "src/main-process/run-check-worker-pool.js"
@@ -74372,6 +74840,20 @@
         "refFiles": [
           {
             "file": "src/main-process/vcc-financial-op-service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
+        "name": "recoverMonthEndCopyIntents",
+        "defFiles": [
+          "src/main-process/biz-op-recon-run-data.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
             "count": 2
           }
         ],
@@ -78341,6 +78823,10 @@
           "count": 2
         },
         {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 2
+        },
+        {
           "file": "src/backend/biz-op-recon-db/run-repository.js",
           "count": 18
         },
@@ -78697,8 +79183,8 @@
           "count": 10
         }
       ],
-      "totalHits": 1153,
-      "fileSpan": 99
+      "totalHits": 1155,
+      "fileSpan": 100
     },
     {
       "name": "fs",
@@ -78999,7 +79485,7 @@
         },
         {
           "file": "src/main-process/biz-op-recon-session.js",
-          "count": 1
+          "count": 2
         },
         {
           "file": "src/main-process/biz-op-recon-writer.js",
@@ -79150,7 +79636,7 @@
           "count": 3
         }
       ],
-      "totalHits": 515,
+      "totalHits": 516,
       "fileSpan": 89
     },
     {
@@ -80886,6 +81372,144 @@
       "fileSpan": 34
     },
     {
+      "name": "list",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/fund-transfer-account-mapping-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/database/linked-table-repository.js",
+          "count": 6
+        },
+        {
+          "file": "src/backend/pending-db/removed-repository.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/operation-tracker.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/archive-center/outbox-store.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/archive-center/task-policy-registry.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/boc-fx-link-builder.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/reconciliation-orchestrator.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/boc-dispatch-order-fix.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/c1-extract-recon-id.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/scenario-engines/c2-offset-bill-mark.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c3-gateway-recon-join.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/scenario-engines/c4-recon-id-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/dbs-charge-fund-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/engine-utils.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/scenario-engines/jpm-dispatch-order-fix.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r1-recon-id-match.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r4-fund-nature-check.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-platform-inbound-cleanup.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/scenario-engines/r5-refund-order-backfill.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/vcc-financial-op-storage-rebuild.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/vcc-op-calc-session.js",
+          "count": 6
+        },
+        {
+          "file": "src/preload.js",
+          "count": 7
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 43
+        },
+        {
+          "file": "src/renderer-vcc-financial-op.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 43
+        }
+      ],
+      "totalHits": 172,
+      "fileSpan": 32
+    },
+    {
       "name": "normalizeCell",
       "defFiles": [
         "src/backend/balance-adjustment-store.js",
@@ -82362,7 +82986,7 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 1
+          "count": 3
         },
         {
           "file": "src/main-process/pending-archive-lineage.js",
@@ -82393,7 +83017,7 @@
           "count": 1
         }
       ],
-      "totalHits": 236,
+      "totalHits": 238,
       "fileSpan": 16
     },
     {
@@ -84129,6 +84753,60 @@
       "fileSpan": 10
     },
     {
+      "name": "runDataStore",
+      "defFiles": [
+        "src/backend/duplicate-inbound-match-store.js",
+        "src/backend/pre-fund-reconciliation-run-store.js",
+        "src/backend/pre-fund-reconciliation-store.js",
+        "src/main-process/acquiring-bill-currency-run-data.js",
+        "src/main-process/bank-bu-recon-run-data.js",
+        "src/main-process/biz-op-recon-run-data.js",
+        "src/main-process/duplicate-inbound-match/service.js",
+        "src/main-process/pre-fund-reconciliation/service.js",
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/duplicate-inbound-match-store.js",
+          "count": 33
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 16
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 22
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-run-data.js",
+          "count": 23
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-run-data.js",
+          "count": 19
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 52
+        },
+        {
+          "file": "src/main-process/duplicate-inbound-match/service.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 4
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 173,
+      "fileSpan": 9
+    },
+    {
       "name": "active",
       "defFiles": [
         "src/backend/position-reconciliation-import/worker-entry.js"
@@ -84175,60 +84853,6 @@
       "fileSpan": 9
     },
     {
-      "name": "runDataStore",
-      "defFiles": [
-        "src/backend/duplicate-inbound-match-store.js",
-        "src/backend/pre-fund-reconciliation-run-store.js",
-        "src/backend/pre-fund-reconciliation-store.js",
-        "src/main-process/acquiring-bill-currency-run-data.js",
-        "src/main-process/bank-bu-recon-run-data.js",
-        "src/main-process/biz-op-recon-run-data.js",
-        "src/main-process/duplicate-inbound-match/service.js",
-        "src/main-process/pre-fund-reconciliation/service.js",
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/duplicate-inbound-match-store.js",
-          "count": 33
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 16
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 22
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-run-data.js",
-          "count": 23
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-run-data.js",
-          "count": 19
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 45
-        },
-        {
-          "file": "src/main-process/duplicate-inbound-match/service.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 4
-        },
-        {
-          "file": "src/main.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 166,
-      "fileSpan": 9
-    },
-    {
       "name": "session",
       "defFiles": [
         "src/main-process/acquiring-bill-currency-run-data.js",
@@ -84250,7 +84874,7 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 13
+          "count": 17
         },
         {
           "file": "src/main-process/manual-balance-seed-preflight.js",
@@ -84273,7 +84897,53 @@
           "count": 6
         }
       ],
-      "totalHits": 83,
+      "totalHits": 87,
+      "fileSpan": 9
+    },
+    {
+      "name": "remove",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/archive-center/archive-service.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/controller.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/archive-center/outbox-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/archive-center/storage-materializer.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 42
+        },
+        {
+          "file": "src/renderer-position-reconciliation.js",
+          "count": 19
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 80,
       "fileSpan": 9
     },
     {
@@ -85631,6 +86301,48 @@
       "fileSpan": 8
     },
     {
+      "name": "create",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/big-table-import/row-scanner.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/toolbox-xlsx-stream/bounded-values-accumulator.js",
+          "count": 4
+        },
+        {
+          "file": "src/main-process/archive-center/scenario-import-context-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/toolbox.js",
+          "count": 2
+        },
+        {
+          "file": "src/preload.js",
+          "count": 2
+        },
+        {
+          "file": "src/renderer-dialogs.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 17,
+      "fileSpan": 8
+    },
+    {
       "name": "readRows",
       "defFiles": [
         "src/backend/bank-account-import.js",
@@ -85832,14 +86544,14 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 33
+          "count": 40
         },
         {
           "file": "src/main-process/duplicate-inbound-match/service.js",
           "count": 3
         }
       ],
-      "totalHits": 118,
+      "totalHits": 125,
       "fileSpan": 7
     },
     {
@@ -85970,6 +86682,44 @@
       "fileSpan": 7
     },
     {
+      "name": "openSideDb",
+      "defFiles": [
+        "src/backend/run-data-store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/duplicate-inbound-match-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/run-data-store.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-run-data.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-run-data.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 19
+        }
+      ],
+      "totalHits": 38,
+      "fileSpan": 7
+    },
+    {
       "name": "parseNumericValue",
       "defFiles": [
         "src/backend/balance-seed-store.js",
@@ -86006,44 +86756,6 @@
         }
       ],
       "totalHits": 35,
-      "fileSpan": 7
-    },
-    {
-      "name": "openSideDb",
-      "defFiles": [
-        "src/backend/run-data-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/duplicate-inbound-match-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 2
-        },
-        {
-          "file": "src/backend/run-data-store.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-run-data.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-run-data.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 15
-        }
-      ],
-      "totalHits": 34,
       "fileSpan": 7
     },
     {
@@ -86237,10 +86949,10 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 3
+          "count": 5
         }
       ],
-      "totalHits": 19,
+      "totalHits": 21,
       "fileSpan": 7
     },
     {
@@ -86625,7 +87337,7 @@
         },
         {
           "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 11
+          "count": 16
         },
         {
           "file": "src/main-process/position-reconciliation/common.js",
@@ -86640,7 +87352,7 @@
           "count": 3
         }
       ],
-      "totalHits": 23,
+      "totalHits": 28,
       "fileSpan": 6
     },
     {
@@ -86819,6 +87531,40 @@
       "fileSpan": 6
     },
     {
+      "name": "listSideDbFiles",
+      "defFiles": [
+        "src/backend/run-data-store.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 4
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/backend/run-data-store.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/acquiring-bill-currency-run-data.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-run-data.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 6
+        }
+      ],
+      "totalHits": 18,
+      "fileSpan": 6
+    },
+    {
       "name": "parseDateValue",
       "defFiles": [
         "src/backend/file-service/normalizers.js"
@@ -86850,40 +87596,6 @@
         }
       ],
       "totalHits": 18,
-      "fileSpan": 6
-    },
-    {
-      "name": "listSideDbFiles",
-      "defFiles": [
-        "src/backend/run-data-store.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 4
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 1
-        },
-        {
-          "file": "src/backend/run-data-store.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/acquiring-bill-currency-run-data.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-run-data.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 5
-        }
-      ],
-      "totalHits": 17,
       "fileSpan": 6
     },
     {
@@ -88134,6 +88846,36 @@
       "fileSpan": 5
     },
     {
+      "name": "getHead",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/dataset-head-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/dataset-head-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-archive-lineage.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 16,
+      "fileSpan": 5
+    },
+    {
       "name": "positionCheckpointsEqual",
       "defFiles": [
         "src/main-process/position-reconciliation/side-db-mutation.js"
@@ -88191,36 +88933,6 @@
         }
       ],
       "totalHits": 16,
-      "fileSpan": 5
-    },
-    {
-      "name": "getHead",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/dataset-head-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/dataset-head-repository.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/biz-op-recon-import/import-worker.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-archive-lineage.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 5
-        }
-      ],
-      "totalHits": 15,
       "fileSpan": 5
     },
     {
@@ -89776,6 +90488,33 @@
       "fileSpan": 4
     },
     {
+      "name": "normalizeBu",
+      "defFiles": [
+        "src/main-process/bank-bu-recon-session.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 8
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 11
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 7
+        }
+      ],
+      "totalHits": 29,
+      "fileSpan": 4
+    },
+    {
       "name": "tableColumns",
       "defFiles": [
         "src/backend/vcc-financial-op-db/migrations.js",
@@ -89906,33 +90645,6 @@
         {
           "file": "src/renderer.js",
           "count": 1
-        }
-      ],
-      "totalHits": 26,
-      "fileSpan": 4
-    },
-    {
-      "name": "normalizeBu",
-      "defFiles": [
-        "src/main-process/bank-bu-recon-session.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/import-worker.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/bank-bu-recon-session.js",
-          "count": 8
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 10
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 5
         }
       ],
       "totalHits": 26,
@@ -91804,6 +92516,32 @@
       "fileSpan": 4
     },
     {
+      "name": "addOneDay",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 8,
+      "fileSpan": 4
+    },
+    {
       "name": "BUSINESS_BILL_FIELDS",
       "defFiles": [
         "src/constants/recon-id-fix-fields.js",
@@ -93462,6 +94200,30 @@
       "fileSpan": 3
     },
     {
+      "name": "datasetHeadRepository",
+      "defFiles": [
+        "src/backend/biz-op-recon-import/import-worker.js",
+        "src/main-process/biz-op-recon-run-data.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 10
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 11
+        }
+      ],
+      "totalHits": 26,
+      "fileSpan": 3
+    },
+    {
       "name": "DELETE_TARGET_TYPES",
       "defFiles": [
         "src/backend/vcc-financial-op/data-target-deletion.js",
@@ -93501,30 +94263,6 @@
         {
           "file": "src/backend/vcc-financial-op/workbook-reader.js",
           "count": 14
-        }
-      ],
-      "totalHits": 25,
-      "fileSpan": 3
-    },
-    {
-      "name": "datasetHeadRepository",
-      "defFiles": [
-        "src/backend/biz-op-recon-import/import-worker.js",
-        "src/main-process/biz-op-recon-run-data.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/import-worker.js",
-          "count": 10
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 4
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 11
         }
       ],
       "totalHits": 25,
@@ -93592,6 +94330,30 @@
         {
           "file": "src/main-process/position-reconciliation/matching-engine.js",
           "count": 14
+        }
+      ],
+      "totalHits": 23,
+      "fileSpan": 3
+    },
+    {
+      "name": "TABLE",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/flow-imports-repository.js",
+        "src/backend/biz-op-recon-db/imports-repository.js",
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
+          "count": 7
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/imports-repository.js",
+          "count": 10
+        },
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 6
         }
       ],
       "totalHits": 23,
@@ -98354,6 +99116,29 @@
       "fileSpan": 3
     },
     {
+      "name": "subOneDay",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 3
+    },
+    {
       "name": "SUPPORTED_EXTENSIONS",
       "defFiles": [
         "src/backend/file-service/common.js"
@@ -98575,28 +99360,6 @@
         },
         {
           "file": "src/main-process/toolbox-large-split-dispatch.js",
-          "count": 2
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 3
-    },
-    {
-      "name": "addOneDay",
-      "defFiles": [
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-import/import-worker.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 1
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
           "count": 2
         }
       ],
@@ -99713,6 +100476,28 @@
       "fileSpan": 3
     },
     {
+      "name": "assertNoPending",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 3
+    },
+    {
       "name": "BALANCE_SEED_GENERATION_METHODS",
       "defFiles": [
         "src/backend/balance-seed-store.js"
@@ -100697,25 +101482,6 @@
         {
           "file": "src/renderer-dialogs.js",
           "count": 15
-        }
-      ],
-      "totalHits": 17,
-      "fileSpan": 2
-    },
-    {
-      "name": "TABLE",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/flow-imports-repository.js",
-        "src/backend/biz-op-recon-db/imports-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/flow-imports-repository.js",
-          "count": 7
-        },
-        {
-          "file": "src/backend/biz-op-recon-db/imports-repository.js",
-          "count": 10
         }
       ],
       "totalHits": 17,
@@ -101709,6 +102475,25 @@
         {
           "file": "src/backend/file-service/normalizers.js",
           "count": 2
+        }
+      ],
+      "totalHits": 9,
+      "fileSpan": 2
+    },
+    {
+      "name": "monthEndCopyIntents",
+      "defFiles": [
+        "src/main-process/biz-op-recon-run-data.js",
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 6
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 3
         }
       ],
       "totalHits": 9,
@@ -103531,6 +104316,24 @@
         },
         {
           "file": "src/main-process/bank-bu-recon-session.js",
+          "count": 4
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
+      "name": "BIZ_OP_MODULE_ID",
+      "defFiles": [
+        "src/main-process/biz-op-archive-lineage.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-archive-lineage.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
           "count": 4
         }
       ],
@@ -106237,24 +107040,6 @@
       "fileSpan": 2
     },
     {
-      "name": "BIZ_OP_MODULE_ID",
-      "defFiles": [
-        "src/main-process/biz-op-archive-lineage.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main-process/biz-op-archive-lineage.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
       "name": "BOC_PAYMENT_DETAIL_KEYWORD",
       "defFiles": [
         "src/constants/boc-fx-link-fields.js",
@@ -106815,6 +107600,24 @@
         {
           "file": "src/backend/database/template-repository.js",
           "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
+      "name": "getByTaskRunId",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/month-end-copy-intent-repository.js",
+          "count": 3
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 2
         }
       ],
       "totalHits": 5,
@@ -107750,6 +108553,24 @@
       "fileSpan": 2
     },
     {
+      "name": "previousDate",
+      "defFiles": [
+        "src/main-process/biz-op-archive-lineage.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/biz-op-archive-lineage.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 2
+    },
+    {
       "name": "PROGRESS_INTERVAL",
       "defFiles": [
         "src/backend/vcc-op-calc-import/reader.js",
@@ -108219,25 +109040,6 @@
         {
           "file": "src/backend/biz-op-recon-import/reader-streamed.js",
           "count": 3
-        }
-      ],
-      "totalHits": 5,
-      "fileSpan": 2
-    },
-    {
-      "name": "subOneDay",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/run-repository.js",
-        "src/main-process/biz-op-recon-session.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 3
-        },
-        {
-          "file": "src/main-process/biz-op-recon-session.js",
-          "count": 2
         }
       ],
       "totalHits": 5,
@@ -108791,6 +109593,24 @@
     },
     {
       "name": "assertBizOpMonthEndAdmission",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "assertNoPendingMonthEndCopy",
       "defFiles": [
         "src/main-process/biz-op-recon-session.js"
       ],
@@ -112423,6 +113243,24 @@
         {
           "file": "src/renderer.js",
           "count": 3
+        }
+      ],
+      "totalHits": 4,
+      "fileSpan": 2
+    },
+    {
+      "name": "recordMonthEndCopyIntent",
+      "defFiles": [
+        "src/main-process/biz-op-recon-session.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-import/import-worker.js",
+          "count": 2
+        },
+        {
+          "file": "src/main-process/biz-op-recon-session.js",
+          "count": 2
         }
       ],
       "totalHits": 4,

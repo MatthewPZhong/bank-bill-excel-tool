@@ -348,6 +348,18 @@ const SIDE_DB_DDL_BIZ_OP = `
     WHERE dataset_kind = 'flow' AND data_date = OLD.data_date AND normalized_bu = '';
   END;
 
+  CREATE TABLE IF NOT EXISTS biz_op_recon_month_end_copy_intents (
+    source_task_run_id TEXT PRIMARY KEY,
+    data_date TEXT NOT NULL,
+    normalized_bu TEXT NOT NULL,
+    dataset_id TEXT NOT NULL UNIQUE,
+    dataset_version INTEGER NOT NULL CHECK (dataset_version >= 1),
+    producer_task_run_id TEXT NOT NULL,
+    target_month TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (data_date, normalized_bu)
+  );
+
   CREATE TABLE IF NOT EXISTS biz_op_recon_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     data_date TEXT NOT NULL,

@@ -176,6 +176,20 @@ function ensureBizOpReconTablesSupport(db) {
       END;
     `);
 
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS biz_op_recon_month_end_copy_intents (
+        source_task_run_id TEXT PRIMARY KEY,
+        data_date TEXT NOT NULL,
+        normalized_bu TEXT NOT NULL,
+        dataset_id TEXT NOT NULL UNIQUE,
+        dataset_version INTEGER NOT NULL CHECK (dataset_version >= 1),
+        producer_task_run_id TEXT NOT NULL,
+        target_month TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (data_date, normalized_bu)
+      );
+    `);
+
     // 表 3：对账运行记录（spec §4.3）
     // status: 永远 'success'（系统错误直接 throw 给 IPC handler，不落 runs）
     db.exec(`

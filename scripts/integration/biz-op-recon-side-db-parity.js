@@ -211,17 +211,31 @@ async function main() {
       //   手动调用复制逻辑等价——通过 runBizOpImport 的 mock worker 验证）。
       // 用 mock worker（直接返回 success + buName）触发编排层补清/冗余。
       const mockWorker = async (db, workerParams) => {
-        datasetHeadRepo.writeHead(db, {
-          kind: 'op',
-          dataDate: D,
-          buName: BU,
-          identity: datasetHeadRepo.nextDatasetIdentity(
+        db.exec('BEGIN');
+        try {
+          session.assertNoPendingMonthEndCopy(db, D, BU);
+          session.assertBizOpMonthEndAdmission(workerParams.monthEndCopyPlan, BU);
+          const identity = datasetHeadRepo.nextDatasetIdentity(
             datasetHeadRepo.getHead(db, 'op', D, BU),
             workerParams.datasetSeed.producerTaskRunId,
             () => workerParams.datasetSeed.datasetId
-          )
-        });
-        return { status: 'success', buName: BU, validCount: 1 };
+          );
+          datasetHeadRepo.writeHead(db, {
+            kind: 'op', dataDate: D, buName: BU, identity
+          });
+          session.recordMonthEndCopyIntent(
+            db,
+            workerParams.monthEndCopyPlan,
+            D,
+            BU,
+            identity
+          );
+          db.exec('COMMIT');
+          return { status: 'success', buName: BU, validCount: 1 };
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
       };
       await bizOpReconRunData.runBizOpImport({
         userDataDir,
@@ -234,6 +248,11 @@ async function main() {
       try { copyRows = importsRepo.getRowsByDateBu(nextSide, D, BU); } finally { try { nextSide.close(); } catch (_e) { /* swallow */ } }
       assertEq(copyRows.length, 1, '🔴 C 月末 D 导入后下月侧库含 D 的 T-2 冗余副本（行数）');
       assertEq(copyRows[0] ? copyRows[0].account_no : null, 'ACCX', '🔴 C T-2 冗余副本账户号正确');
+      bizOpReconRunData.acknowledgeMonthEndCopyIntent({
+        userDataDir,
+        dataDate: D,
+        sourceTaskRunId: BATCH_CONTEXT.taskRunId
+      });
       bizOpReconRunData.deleteMonthSideDb({ userDataDir, mainDb, monthKey });
       bizOpReconRunData.deleteMonthSideDb({ userDataDir, mainDb, monthKey: nextMonth });
     }

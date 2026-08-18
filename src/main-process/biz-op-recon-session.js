@@ -26,6 +26,7 @@ const { spawn } = require('node:child_process');
 
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const datasetHeadRepository = require('../backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../backend/biz-op-recon-db/month-end-copy-intent-repository');
 const flowImportsRepository = require('../backend/biz-op-recon-db/flow-imports-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
@@ -113,25 +114,42 @@ function addOneDay(yyyymmdd) {
   return d.toISOString().slice(0, 10);
 }
 
-// 月末 OP 当前月事务的提交前门禁。调用方只在已存在的下月侧库上形成内部 intent；
-// 这里复用 date+BU guard 只读 D/D+1，不创建数据、不按月份或 latest 推断 owner。
-function assertBizOpMonthEndAdmission(monthEndAdmission, buName) {
-  if (!monthEndAdmission) return;
-  const db = new DatabaseSync(monthEndAdmission.dbPath, { readOnly: true });
+function assertNoPendingMonthEndCopy(db, dataDate, buName) {
+  monthEndCopyIntents.assertNoPending(db, dataDate, normalizeBu(buName));
+}
+
+// 月末 OP 当前月事务的提交前门禁。目标库尚不存在时没有历史 receipt 可检查；
+// source transaction 仍会写 durable copy intent，覆盖随后建库/并发/崩溃窗口。
+function assertBizOpMonthEndAdmission(monthEndCopyPlan, buName) {
+  if (!monthEndCopyPlan || !fs.existsSync(monthEndCopyPlan.targetDbPath)) return;
+  const db = new DatabaseSync(monthEndCopyPlan.targetDbPath, { readOnly: true });
   try {
     runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
       db,
-      monthEndAdmission.date,
+      monthEndCopyPlan.dataDate,
       buName
     );
     runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
       db,
-      monthEndAdmission.nextDate,
+      monthEndCopyPlan.nextDate,
       buName
     );
   } finally {
     db.close();
   }
+}
+
+function recordMonthEndCopyIntent(db, monthEndCopyPlan, dataDate, buName, identity) {
+  if (!monthEndCopyPlan) return null;
+  return monthEndCopyIntents.create(db, {
+    sourceTaskRunId: identity.producerTaskRunId,
+    dataDate,
+    normalizedBu: normalizeBu(buName),
+    datasetId: identity.datasetId,
+    datasetVersion: identity.datasetVersion,
+    producerTaskRunId: identity.producerTaskRunId,
+    targetMonth: monthEndCopyPlan.targetMonth
+  });
 }
 
 function formatTimestamp(date = new Date()) {
@@ -549,14 +567,16 @@ async function runBizOpImportAsync(db, params) {
       datasetSeed.producerTaskRunId,
       () => datasetSeed.datasetId
     );
+    assertNoPendingMonthEndCopy(db, date, firstBu);
     runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
     runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
     importsRepository.clearByDateBu(db, date, firstBu);
     importsRepository.insertRows(db, date, rows);
-    assertBizOpMonthEndAdmission(params.monthEndAdmission, firstBu);
+    assertBizOpMonthEndAdmission(params.monthEndCopyPlan, firstBu);
     datasetHeadRepository.writeHead(db, {
       kind: 'op', dataDate: date, buName: firstBu, identity
     });
+    recordMonthEndCopyIntent(db, params.monthEndCopyPlan, date, firstBu, identity);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -869,13 +889,13 @@ async function runFlowImportViaEngine({
 //   bizOp 传 filePath（单数，不变）；flow 传 filePaths（v3.0.2 需求1b 多文件合并，单进程单事务单次 clear）。
 function spawnImportWorker({
   kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors,
-  batchContext, datasetSeed, monthEndAdmission
+  batchContext, datasetSeed, monthEndCopyPlan
 }) {
   return new Promise((resolve) => {
     const jobMeta = { dbPath, kind, date, batchContext };
     if (kind === 'bizOp') jobMeta.datasetSeed = datasetSeed;
-    if (kind === 'bizOp' && monthEndAdmission) {
-      jobMeta.monthEndAdmission = monthEndAdmission;
+    if (kind === 'bizOp' && monthEndCopyPlan) {
+      jobMeta.monthEndCopyPlan = monthEndCopyPlan;
     }
     if (kind === 'flow') jobMeta.datasetSeed = datasetSeed;
     if (Array.isArray(filePaths) && filePaths.length > 0) {
@@ -1011,7 +1031,7 @@ async function runBizOpImportViaWorker(db, params) {
   const {
     date, filePath, dbPath,
     writeBizOpErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors, batchContext, datasetSeed, monthEndAdmission
+    onProgress, maxRowErrors, batchContext, datasetSeed, monthEndCopyPlan
   } = params;
 
   if (!dbPath) {
@@ -1022,7 +1042,7 @@ async function runBizOpImportViaWorker(db, params) {
   return spawnImportWorker({
     kind: 'bizOp',
     dbPath, date, filePath, onProgress, maxRowErrors, batchContext, datasetSeed,
-    monthEndAdmission,
+    monthEndCopyPlan,
     writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeBizOpErrorReportFileName(firstBu, date);
@@ -1181,7 +1201,9 @@ module.exports = {
   parseSignedAmount,
   subOneDay,
   addOneDay,
+  assertNoPendingMonthEndCopy,
   assertBizOpMonthEndAdmission,
+  recordMonthEndCopyIntent,
   formatTimestamp,
   formatDateCompact,
   formatTimeCompact,

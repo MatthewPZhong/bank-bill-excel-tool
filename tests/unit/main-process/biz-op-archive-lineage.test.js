@@ -540,7 +540,7 @@ test('Biz 显式重跑在新 side receipt 后崩溃时，可替换同日已 ack 
   assert.equal(repository.getTaskRun('biz-new-run').status, 'succeeded');
 });
 
-test('Biz main seam 冻结三源与 export locator，owner 排在通用 sweep 前', () => {
+test('Biz main seam 冻结三源/export locator，run 与月末 copy owner 排在通用 sweep 前', () => {
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
   assert.match(mainSource,
     /prepareRunLineage\(\{[\s\S]*?lineageIntents:\s*plan\.lineageIntents[\s\S]*?expectedDatasets:\s*plan\.expectedDatasets/);
@@ -556,12 +556,29 @@ test('Biz main seam 冻结三源与 export locator，owner 排在通用 sweep �
   const ownerEnd = mainSource.indexOf('postOutboxStartupHooks:', ownerStart);
   const owners = mainSource.slice(ownerStart, ownerEnd);
   assert.ok(owners.indexOf("ownerName: 'Pending runs'") < owners.indexOf("ownerName: 'Biz OP runs'"));
+  const bizOwnerStart = mainSource.indexOf('function recoverBizOpRunsBeforeInterruptedSweep()');
+  const bizOwnerEnd = mainSource.indexOf('function recoverPreFundRunsBeforeInterruptedSweep()', bizOwnerStart);
+  const bizOwner = mainSource.slice(bizOwnerStart, bizOwnerEnd);
+  assert.ok(
+    bizOwner.indexOf('recoverRunReceipts') < bizOwner.indexOf('recoverMonthEndCopyIntents'),
+    '先恢复 Biz run receipt，再恢复月末 copy intent'
+  );
   assert.match(mainSource, /return bizOpReconRunData\.finalizeRunTerminalIntent\(/);
   const runHandlerStart = mainSource.indexOf("trackedIpcHandle('bizOpRecon:run'");
   const runHandlerEnd = mainSource.indexOf("ipcMain.handle('bizOpRecon:export:list-success-dates'", runHandlerStart);
   assert.doesNotMatch(mainSource.slice(runHandlerStart, runHandlerEnd), /runLocator\s*}/);
   assert.match(mainSource.slice(runHandlerStart, runHandlerEnd),
-    /preserveArchiveTaskRun[\s\S]*?finishTaskRun\([\s\S]*?taskStatus:\s*'interrupted'/);
+    /preserveArchiveTaskRun[\s\S]*?archiveCenterService\.service\.finishTaskRun\([\s\S]*?taskStatus:\s*'interrupted'/);
+  const importHandlerStart = mainSource.indexOf("trackedIpcHandle('bizOpRecon:import:run-biz-op'");
+  const importHandlerEnd = mainSource.indexOf(
+    "trackedIpcHandle('bizOpRecon:import:run-flow'",
+    importHandlerStart
+  );
+  const importHandler = mainSource.slice(importHandlerStart, importHandlerEnd);
+  assert.match(importHandler,
+    /afterTerminal:[\s\S]*?terminalStatus\s*===\s*'succeeded'[\s\S]*?addBizOpOneDay\(date\)[\s\S]*?acknowledgeMonthEndCopyIntent/);
+  assert.match(importHandler,
+    /preserveArchiveFileTask[\s\S]*?settleArtifacts\([\s\S]*?archiveCenterService\.service\.finishFileTask\([\s\S]*?taskStatus:\s*'interrupted'[\s\S]*?code:\s*'ARCHIVE_TASK_INTERRUPTED'/);
 });
 
 test('Biz failed terminal outbox 无成功 receipt 时 finalizer no-op', () => {

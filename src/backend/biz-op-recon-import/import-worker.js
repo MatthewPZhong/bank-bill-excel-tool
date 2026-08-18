@@ -43,6 +43,8 @@ const { streamBizOpFile, streamFlowFile } = require('./reader-streamed');
 const {
   addOneDay,
   assertBizOpMonthEndAdmission,
+  assertNoPendingMonthEndCopy,
+  recordMonthEndCopyIntent,
   normalizeBu
 } = require('../../main-process/biz-op-recon-session');
 const {
@@ -131,7 +133,7 @@ async function runBizOpImport(db, {
   filePath,
   maxRowErrors,
   datasetSeed,
-  monthEndAdmission
+  monthEndCopyPlan
 }) {
   let firstBu = null;
   let buNormalized = null;
@@ -178,6 +180,7 @@ async function runBizOpImport(db, {
           //   否则异常冒泡到流式 reader 会被 wrapReadError 包成带 header-mismatch code 的 FileValidationError，
           //   被误判成「表头/读取失败」（旧同步路是直接抛原始 DB 错）。
           try {
+            assertNoPendingMonthEndCopy(db, date, firstBu);
             runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
             runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
             importsRepository.clearByDateBu(db, date, firstBu);
@@ -279,10 +282,11 @@ async function runBizOpImport(db, {
 
   // 全部通过 → COMMIT（cleared 必为 true，因为 dataRowCount>0 且首行非空已 clear）
   void cleared;
-  assertBizOpMonthEndAdmission(monthEndAdmission, firstBu);
+  assertBizOpMonthEndAdmission(monthEndCopyPlan, firstBu);
   datasetHeadRepository.writeHead(db, {
     kind: 'op', dataDate: date, buName: firstBu, identity: datasetIdentity
   });
+  recordMonthEndCopyIntent(db, monthEndCopyPlan, date, firstBu, datasetIdentity);
   db.exec('COMMIT');
   return emitAndExit({ type: 'complete', status: 'success', buName: firstBu, validCount: insertedCount }, 0);
 }
@@ -491,7 +495,7 @@ async function main() {
         filePath,
         maxRowErrors,
         datasetSeed,
-        monthEndAdmission: job.monthEndAdmission || null
+        monthEndCopyPlan: job.monthEndCopyPlan || null
       });
     } else {
       await runFlowImport(db, { date, filePaths, maxRowErrors, datasetSeed: flowDatasetSeed });

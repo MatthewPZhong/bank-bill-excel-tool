@@ -423,7 +423,9 @@ VCC Financial 的文件 handoff 进一步固定为精确指针合同：
 - 月末数据复制到下月侧库时原样保留 datasetId、producer 和 version，不把复制误记为新导入。
 - run 在开始前冻结 T1 OP、T2 OP、Flow 三个 tag 并写 `dataset-input` planned lineage；缺任一真实 head 时按原业务规则拒绝，不按日期找“最近导入”。
 - `biz_op_recon_runs` 记录 Archive contract version、TaskRun identity 和 terminal ack。日期导出冻结一个真实 run；区间导出冻结全部实际采用的 run locator，并分别写 `run-output` lineage。
-- `archive_terminal_ack_at IS NULL` 的 v1 run receipt 是跨库成功事实的唯一恢复入口；OP/Flow 覆盖、月末下月清理和同日同 BU 新 run 必须按真实影响范围拒绝。月末 OP 导入在 worker 解析并校验首个 BU 后、当前月事务提交前，只读检查下月侧库 `(D, normalized BU)` 与 `(D+1, normalized BU)`；命中时回滚当前月事务，因此当前月与下月的 run、diff、import、dataset head 都零变化。通过预检后，下月复制事务仍在首个 DELETE/INSERT 前复用相同门禁，防止两次检查之间的并发变化；不新增跨库事务或通用补偿框架。新 side run 已提交而同 TaskRun 主库 mirror 写入失败时，在 TaskRun 进入 failed 前按 `archive_task_run_id` 于 side DB 单事务删除本次 run 及其 diff；若该精确补偿事务自身失败，TaskRun 保持为现有 `interrupted` 可恢复 owner，由既有启动 owner 按 receipt 收口，不得进入 failed。禁止按日期、BU、latest 清理，也禁止开放 failed/cancelled recovery。历史 v0 和已 ACK run 保持既有覆盖/重跑语义。
+- `archive_terminal_ack_at IS NULL` 的 v1 run receipt 是跨库 run 成功事实的唯一恢复入口；OP/Flow 覆盖、月末下月清理和同日同 BU 新 run 必须按真实影响范围拒绝。月末 OP 导入在 worker 解析并校验首个 BU 后、当前月事务提交前，只读检查下月侧库 `(D, normalized BU)` 与 `(D+1, normalized BU)`；命中时回滚当前月事务，因此当前月与下月的 run、diff、import、dataset head 都零变化。
+- 月末当前月 imports/head 同一事务还必须写入单用途 exact copy intent，冻结 `sourceTaskRunId + D + normalized BU + datasetId/version/producer + targetMonth`。下月事务按 intent 精确、幂等复制并继续复用 D/D+1 receipt guard；copy 成功后 intent 保留到 Archive File Task 成功终态，随后删除。进程退出、下月 SQLite 失败或两次 guard 间出现并发 receipt 时 intent 必须保留；startup 在通用 interrupted sweep 前先收口 Biz OP run receipts，再重放 copy intent。未完成 intent 阻止对应 source dataset 覆盖和 D+1/同 BU run，不新增跨库事务、通用补偿框架或 date/month/latest 反查。
+- 新 side run 已提交而同 TaskRun 主库 mirror 写入失败时，在 TaskRun 进入 failed 前按 `archive_task_run_id` 于 side DB 单事务删除本次 run 及其 diff；若该精确补偿事务自身失败，TaskRun 保持为现有 `interrupted` 可恢复 owner，由既有启动 owner 按 receipt 收口，不得进入 failed。禁止按日期、BU、latest 清理，也禁止开放 failed/cancelled recovery。历史 v0 和已 ACK run 保持既有覆盖/重跑语义。
 
 #### Pending
 
@@ -683,7 +685,7 @@ prepared.inputPaths + 所有 dialogSelections.filePaths
 | NFB-09 | P0 | 历史过滤 | 95 批样本中 34 个零 artifact 不出现在 list/get/stats/latest/related；raw 仍可读 |
 | NFB-10 | P0 | 统计/分页/直查 | filter 在 SQL pagination 前；cache、internal id、batch number 不能旁路可见性 |
 | NFB-11 | P0 | related | `文件A—无文件B—文件C` 只显示 A/C；复用同一导入的多个 run 与汇总导出的多个 run 仅返回各 pivot run 的直接输入/输出；不递归扩散；单项隐藏、跨重启一致 |
-| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag 且旧 committed lineage 不变；Biz OP 未 ACK receipt 在当前月提交前阻断月末 OP 导入且两个月侧库零变化，并阻断 OP/Flow 覆盖、下月侧库清理与同范围新 run；side receipt 后的 mirror 故障只精确删除本 TaskRun 的 side run/diff 后才允许 failed；legacy producer 为空不伪造关联；无 date/month/latest fallback |
+| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag且旧 committed lineage 不变；Biz OP 未 ACK receipt 在当前月提交前阻断月末 OP 导入且两个月侧库零变化；current COMMIT 后的 exact copy intent 可在崩溃/下月失败/并发 receipt 后重放，并在完成前阻止 source 覆盖和 D+1/同 BU run；side receipt 后的 mirror 故障只精确删除本 TaskRun 的 side run/diff 后才允许 failed；legacy producer 为空不伪造关联；无 date/month/latest fallback |
 | NFB-13 | P0 | operation context | VCC/Position no-file worker 正常运行、取消、退出、interrupted；无伪 batch number |
 | NFB-14 | P0 | 恢复/重跑 owner | 旧 exact-7 persisted batchContext 继续恢复；新 operation context 版本不混读；Acquiring interrupted resume 复用原 owner/不发号，cancelled/failed partial resume 以新 owner CAS 接管/发新号，原失败批次不变 |
 | NFB-15 | P0 | outbox/旁路 | 空 files outbox 不能新建 batch；legacy createBatch 也走原子 manifest primitive |

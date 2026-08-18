@@ -6,8 +6,8 @@
 - Initial plan/technical contract: `changes/archive-center-file-batch-contract/techdoc.md`
 - Product code baseline: `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10 release commit）。
 - Current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
-- Previous review evidence head: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`（2026-08-18 前一轮复审所用快照）。
-- Current review evidence head: `001b8059ced56b9d70602c79cdd97d375020c969`（2026-08-18 本轮复审所用快照；历史复审 head 不覆盖）。
+- Earlier review evidence heads: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`、`001b8059ced56b9d70602c79cdd97d375020c969`、`250b1349ff9be315111d4fe9999958cf63927a7c`（历史复审快照，不覆盖）。
+- Current review evidence head: `01a6640dca1b6a02f6d05f20556e5994f9ef1855`（2026-08-18 第八轮复审输入）。
 - Do not rebase or overwrite the existing dirty worktree.
 - Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收和文件血缘人工门禁全部闭合。
 
@@ -260,3 +260,42 @@
 | `npm run scan:vars` | PASS：v3.1.11、337 个 tracked JS、4458 个顶层名称；A-share/A-pair/A-local/B 为 649/947/2695/1596 | 自动统计与 v36 基线同步；untracked/generated 继续排除 |
 | `npm run check:vars` | PASS；命中 Important-skeleton `normalizeBu` 与 Risk-sensitive `addOneDay` | 两者实现均未改；date+BU SQL 继续使用 `LOWER(TRIM)`，D+1 继续使用单源 UTC helper；Biz smoke、月末跨月、大小写 BU 与 release-check 已覆盖 |
 | reconciliation blindspot pass（主键血缘、月末时间边界、重跑/部分失败、审计去向） | 无新增自动化 BLOCK；未改金额、币种、方向、匹配、行映射或业务数据行数算法 | ⚠️ 未 ACK receipt、精确补偿和跨月 tag 属资金审计红线；合并前仍需真实或脱敏 Biz OP 库人工复核 D/D+1 guard scope、补偿前后 run/diff 行数、owner ACK 与输出血缘 |
+
+### Eighth review round（input head `01a6640dca1b6a02f6d05f20556e5994f9ef1855`）
+
+#### Unknowns register and decisions
+
+| 项目 | 分类/结论 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| current COMMIT 后到 target COMMIT 前没有 durable owner | PROBE → closed：source imports/head 同事务写单用途 exact copy intent；target COMMIT 后 intent 继续保留到 Archive File Task terminal | 仅增加第三次 precheck、跨库 transaction、按 date/month/latest 恢复 | 崩溃、target SQLite 失败或并发 receipt 都留下可重放 owner，不再形成无 owner 分叉 |
+| copy intent 与 Archive File Task 的终态顺序 | PROBE → closed：`target COMMIT → File Task succeeded → delete intent`；running/interrupted 由 startup exact recovery，succeeded 只核 target 后清 intent | target COMMIT 后立即删 intent、扩大 failed/cancelled recovery | 每个崩溃点至少保留 intent 或 Archive terminal；不新增状态边 |
+| run receipt 与 copy intent 的 startup 顺序 | PROBE → closed：同一 Biz OP owner 先恢复/ACK run receipts，再重放 copy intents，最后才进入 generic sweep | copy 先执行导致未 ACK receipt 自锁、全库轮询 | 并发 receipt 可先收口，再由既有覆盖语义完成 target copy |
+| D+1 run 与 source reimport admission | PROBE → closed：run 在 lineage prepare 边界查 previous-month exact intent；source import 在当前月写事务首个业务清理前查同 date+normalized BU intent | execute 层重复 guard、按 target head 猜是否完成 | 防止冻结旧 T-2 或覆盖 intent 对应 source；正常路径只校验一次 |
+
+#### Deviation
+
+第七轮“当前月 precheck + target transaction recheck 已覆盖并发窗口”的结论被第八轮崩溃证据推翻。Spec/TechDoc 已先反向同步为 single-purpose durable copy intent；不改变公开 DTO、金额/币种/匹配算法、File Batch 发号合同或 failed/cancelled recovery 边。
+
+#### Implementation
+
+- Biz OP side DB additive 增加 `biz_op_recon_month_end_copy_intents` 与单用途 repository；正常 worker 和同步 fallback 都在 source imports/head 同一事务写 exact intent，历史库只建空表、不回填。
+- `runBizOpImport()` 在 source success 后按 intent 执行 target 单事务；worker 已 COMMIT 但 success receipt 丢失时，只在 exact `sourceTaskRunId` intent 已存在的事实下保留 File Task owner。
+- target 失败由 main 将 File Task 写为既有 `interrupted`，batch failure code 固定为恢复状态机要求的 `ARCHIVE_TASK_INTERRUPTED`，原业务失败码只记内部 metadata；startup 复用原 manifest artifact keys、原 batch 和原批次号恢复。
+- Biz owner 顺序固定为 run receipts → month-end copy intents → generic sweep。source reimport 在首个业务清理前拒绝同 scope intent；D+1 run 在 lineage prepare 边界拒绝 previous-month exact intent。
+
+#### Evidence
+
+| 检查 | 结果 | 结论 |
+| --- | --- | --- |
+| Biz OP unit（12 files） | 219/219 PASS | schema、worker/sync、金额校验、D/D+1 清理、lineage、崩溃/并发/SQLite fault 均通过 |
+| Archive core（6 files） | 190/190 PASS | interrupted exact owner、manifest settle、outbox、可见性和 63 file / 59 no-file inventory 无回归 |
+| `bizop-flow-engine-migration.js` | 73/73 PASS | Flow 大表/legacy parity 不受 copy intent 影响 |
+| `biz-op-recon-side-db-parity.js` | 16/16 PASS | 月末副本、月初 T-2 与主/侧库语义保持 |
+| Biz OP smoke | 171/171 PASS | 金额、BU、D/D+1 与导出既有 smoke 全绿 |
+| `npm run smoke` | PASS | Risk-sensitive 硬门禁全绿 |
+| `npm run release-check` | PASS：unit 5371/5371；integration 48 scripts / 2393/2393 | lint、smoke、全量 unit 与 integration 全绿；integration policy 清单已由 runner 自动同步 |
+| 最终 `npm run test:unit`（补入 worker commit 回归后） | 5372/5372 PASS | 新增 source imports/head/intent 同事务提交的真实 worker 回归后，全量 unit 再次闭合 |
+| `npm run scan:vars`（临时 index 计入新 repository） | PASS：338 files / 4476 names；A-share/A-pair/A-local/B = 655/950/2704/1605 | 自动统计已刷新；真实暂存区未改变 |
+| `npm run check:vars` | 预期 exit 2：命中 `normalizeBu`、`addOneDay`、`subOneDay`、`clearRunsAndDiffsByDateBu` | 实现未改金额/币种/方向；UTC 日期 helper、normalized BU scope、D/D+1 guard 与原号恢复均有专项证据 |
+
+reconciliation blindspot pass：自动化未发现新增 BLOCK；source row/head/intent、target row/head、Archive TaskRun/FileBatch 以 taskRunId + datasetId/version 精确闭合，失败路径不产生 latest/date/month 猜测或新批次号。⚠️ 该改动仍命中 Biz OP 跨月清理与未 ACK receipt 资金红线；合并前必须用真实或脱敏库人工核对 D/D+1、normalized BU、source/target 行数、dataset tag、原批次号和 Archive input evidence。

@@ -393,9 +393,33 @@ archive_task_run_id TEXT,
 archive_terminal_ack_at TEXT
 ```
 
+各月 Biz OP side DB additive 新增单用途表：
+
+```sql
+CREATE TABLE biz_op_recon_month_end_copy_intents (
+  source_task_run_id TEXT PRIMARY KEY,
+  data_date TEXT NOT NULL,
+  normalized_bu TEXT NOT NULL,
+  dataset_id TEXT NOT NULL UNIQUE,
+  dataset_version INTEGER NOT NULL CHECK (dataset_version >= 1),
+  producer_task_run_id TEXT NOT NULL,
+  target_month TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (data_date, normalized_bu)
+);
+```
+
+该表不回填历史数据，也不跨库声明外键。`source_task_run_id` 是唯一 owner；其余列是复制所需的冻结身份，不允许在恢复时按日期、月份或 latest 重新推导 dataset。
+
 OP 成功替换按 `(data_date, normalizeBu(bu))` 写新 dataset UUID；Flow 按 `data_date` 写新 UUID。删除旧行、插入新行和替换 head 必须在同一业务事务。月末复制 head 时保留原 datasetId、producer、datasetVersion 和 contractVersion。历史已有 OP/Flow 分组在各 side DB 建 v0 head：生成 datasetId，producer 为空；不为历史 run 伪造 TaskRun。
 
-任何 `archive_contract_version = 1 AND archive_terminal_ack_at IS NULL` 的 Biz OP run 都必须保留到 module owner 完成 Archive terminal 与 ACK。实际 admission 边界固定为：OP 覆盖检查 `(D, normalized BU)` 与受 T-2 影响的 `(D+1, normalized BU)`；Flow 覆盖检查 `D` 的全部 BU；月末 OP worker 在解析并校验首个 BU 后、当前月事务提交前，只读检查下月侧库 `(D/D+1, normalized BU)`，命中即回滚当前月；通过后，下月复制事务在首个写入前再次复用相同门禁以关闭并发窗口；新 side run 与主库 mirror 替换检查同 `(D, normalized BU)`。这些检查必须早于各自受保护事务的提交或首个持久写入，拒绝时当前月与下月受影响的 diff/run/import/head/mirror 零变化；不新增跨库事务或通用补偿框架。若 side run receipt 已提交而 main mirror 写入失败，`runViaSideDb()` 必须先在 side DB 单事务按 `archive_task_run_id` 精确删除本次 run 与 diff，才允许 TaskRun 进入 failed；补偿事务本身失败时由 main 将该 TaskRun 转为既有 `interrupted`，保留 receipt 给启动 owner 精确恢复，不产生 failed receipt，不新增状态边。不得按日期、BU 或 latest 清理，不得扩大 failed/cancelled recovery。已有 DELETE trigger 只作最后一道约束，不代替 admission 检查；历史 v0 和已 ACK run 继续按原逻辑覆盖。
+任何 `archive_contract_version = 1 AND archive_terminal_ack_at IS NULL` 的 Biz OP run 都必须保留到 module owner 完成 Archive terminal 与 ACK。实际 admission 边界固定为：OP 覆盖检查 `(D, normalized BU)` 与受 T-2 影响的 `(D+1, normalized BU)`；Flow 覆盖检查 `D` 的全部 BU；月末 OP worker 在解析并校验首个 BU 后、当前月事务提交前，只读检查下月侧库 `(D/D+1, normalized BU)`，命中即回滚当前月；新 side run 与主库 mirror 替换检查同 `(D, normalized BU)`。
+
+月末 worker 在写入本次 OP dataset head 后、同一当前月 transaction COMMIT 前插入 exact copy intent；同 `(D, normalized BU)` 已有 intent 时必须在任何来源 DELETE/INSERT 前拒绝。主进程用该 intent 从 source side DB 读取并核对 exact dataset head/rows，在 target side DB 单事务内再次执行 D/D+1 receipt guard、替换冗余 imports/head；target COMMIT 后不立即删除 intent。正常路径由 File Task 成功 `afterTerminal` 删除；copy 失败把本 File Task 保持为既有 `interrupted` owner；崩溃路径由 Biz OP startup owner 在 run receipt recovery 之后、generic sweep 之前按 intent 重放。owner 对 `running/interrupted` File Task 形成或复核 exact batch/manifest、settle input evidence、写 `succeeded` terminal 后再删除 intent；若 TaskRun 已 `succeeded`，只核对 target head 与 intent 一致后删除。任一步失败均保留 intent 并阻断 startup。
+
+`prepareRunLineage(D+1, BU)` 必须先到 previous-month side DB 检查 `(D, normalized BU, targetMonth)` intent；存在即拒绝，不得冻结旧 T-2 head。通过预检后出现并发 receipt 时，target transaction fail-closed 且 intent 保留，因此不会形成无 owner 的两库分叉。不新增跨库事务、通用 intent 框架或 date/month/latest fallback。
+
+若 side run receipt 已提交而 main mirror 写入失败，`runViaSideDb()` 必须先在 side DB 单事务按 `archive_task_run_id` 精确删除本次 run 与 diff，才允许 TaskRun 进入 failed；补偿事务本身失败时由 main 将该 TaskRun 转为既有 `interrupted`，保留 receipt 给启动 owner 精确恢复，不产生 failed receipt，不新增状态边。不得按日期、BU 或 latest 清理，不得扩大 failed/cancelled recovery。已有 DELETE trigger 只作最后一道约束，不代替 admission 检查；历史 v0 和已 ACK run 继续按原逻辑覆盖。
 
 Biz run locator 为 `biz-op:<sideDbRelPath>#<runId>`；date export 冻结一个 locator，date-range export 在 prepare 内冻结查询实际返回的全部 locator。
 
@@ -1412,7 +1436,7 @@ apply 前要求应用退出，并先用 SQLite 一致性快照生成 backup。�
 | NFB-09 | compatibility fixture | 95 批样本：34 hidden、61 visible；53 ready-any + 8 failed-only 均保留；raw 95 |
 | NFB-10 | repository/controller contract | visible 在 pagination 前；numeric/cache/batch number 无旁路 |
 | NFB-11 | flow/lineage/related | A(file)-B(no-file)-C(file) 只显示 A/C；同一导入被多 run 复用与汇总导出多 run 只返回 pivot 的直接邻域，不递归扩散；平铺去重，单项隐藏 |
-| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 在当前月提交前阻断月末 OP 导入并保证两个月侧库零变化，同时阻断 OP/Flow 覆盖、下月写事务、同范围新 run/mirror；main mirror 故障后精确补偿本 TaskRun 的 side run/diff，禁止形成 failed TaskRun + unack receipt；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
+| NFB-12 | flow/lineage/restart | batchless parent 兼容；覆盖导入换 tag 且旧 committed edge 不变；Biz 未 ACK receipt 在当前月提交前阻断月末 OP 导入并保证两个月侧库零变化；current COMMIT 后崩溃可按 exact copy intent 恢复，下月写失败/并发 receipt 保留 owner 并阻止 D+1 run，target terminal 后才删除 intent；main mirror 故障后精确补偿本 TaskRun 的 side run/diff，禁止形成 failed TaskRun + unack receipt；MPT noop/Biz 月末副本保留 tag；legacy null producer 不伪造；无 date/month/latest fallback |
 | NFB-13 | worker lifecycle | VCC/Position no-file worker 运行、取消、退出、interrupted，无伪号码 |
 | NFB-14 | persisted context/retry | 旧 exact-7 可恢复；新 exact-5 envelope 不混读；Acquiring interrupted exact recovery 不发号，cancelled/failed partial 由新 owner CAS 接管且原失败批次不变 |
 | NFB-15 | outbox/create paths | 空 files 不建 batch；全部新建入口走原子 manifest primitive |

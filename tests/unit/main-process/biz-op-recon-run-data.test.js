@@ -10,10 +10,16 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { AppDatabase } = require('../../../src/backend/database');
+const { createArchiveService } = require('../../../src/main-process/archive-center/archive-service');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
 const runDataStore = require('../../../src/backend/run-data-store');
 const bizOpReconRunData = require('../../../src/main-process/biz-op-recon-run-data');
 const session = require('../../../src/main-process/biz-op-recon-session');
 const datasetHeads = require('../../../src/backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../../../src/backend/biz-op-recon-db/month-end-copy-intent-repository');
 const importsRepo = require('../../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../../src/backend/biz-op-recon-db/run-repository');
@@ -102,6 +108,46 @@ function dumpSideOverwriteState(db) {
       ORDER BY dataset_kind, data_date, normalized_bu
     `).all()
   };
+}
+
+async function createRunningBizOpImportFileTask(taskRunId, inputPath) {
+  const rootDir = path.join(userDataDir, 'archive-root');
+  const service = createArchiveService({ database: mainDb, rootDir });
+  await service.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
+  const taskRun = (await service.beginTaskRun({
+    taskRunId,
+    moduleId: 'biz-op-recon',
+    taskKey: 'bizOpRecon:import:run-biz-op',
+    operationKey: `bizOpRecon:import:run-biz-op:${taskRunId}`,
+    parentRunId: `biz-op-import:${taskRunId}`
+  })).taskRun;
+  const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceOperation: 'bizOpRecon:import:run-biz-op'
+    }],
+    outputs: []
+  }));
+  const reserved = await service.reserveFileTaskBatch({
+    taskRun,
+    manifest,
+    moduleCode: 'BIZOP',
+    moduleName: '业务OP数据核对'
+  });
+  const batchContext = {
+    batchId: reserved.batch.id,
+    batchNumber: reserved.batch.batchNumber,
+    taskRunId: taskRun.taskRunId,
+    taskKey: taskRun.taskKey,
+    moduleId: taskRun.moduleId,
+    parentRunId: taskRun.parentRunId,
+    operationKey: taskRun.operationKey
+  };
+  await service.startFileTask(taskRunId, reserved.batch.id);
+  return { batchContext, manifest, reserved, rootDir, service, taskRun };
 }
 
 test('monthOf：date → YYYY-MM', () => {
@@ -203,18 +249,41 @@ test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 
   const curSide = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   try { importsRepo.insertRows(curSide, D, [dRow]); } finally { curSide.close(); }
   // mock worker：返回 success + buName，触发编排层月末跨月补清/冗余。
-  const mockWorker = async (db, { datasetSeed }) => {
-    datasetHeads.writeHead(db, {
-      kind: 'op', dataDate: D, buName: 'BU-C',
-      identity: datasetHeads.nextDatasetIdentity(null, datasetSeed.producerTaskRunId, () => datasetSeed.datasetId)
-    });
-    return { status: 'success', buName: 'BU-C', validCount: 1 };
+  const mockWorker = async (db, { datasetSeed, monthEndCopyPlan }) => {
+    db.exec('BEGIN');
+    try {
+      session.assertNoPendingMonthEndCopy(db, D, 'BU-C');
+      const identity = datasetHeads.nextDatasetIdentity(
+        null,
+        datasetSeed.producerTaskRunId,
+        () => datasetSeed.datasetId
+      );
+      session.assertBizOpMonthEndAdmission(monthEndCopyPlan, 'BU-C');
+      datasetHeads.writeHead(db, {
+        kind: 'op', dataDate: D, buName: 'BU-C', identity
+      });
+      session.recordMonthEndCopyIntent(db, monthEndCopyPlan, D, 'BU-C', identity);
+      db.exec('COMMIT');
+      return { status: 'success', buName: 'BU-C', validCount: 1 };
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   };
   const res = await bizOpReconRunData.runBizOpImport({
     userDataDir, runBizOpImportViaWorker: mockWorker,
     params: { date: D, filePath: 'x.xlsx', batchContext: { taskRunId: 'biz-import-task' } }
   });
   assert.equal(res.status, 'success');
+  const sourceAfterCopy = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  try {
+    const sourceHead = datasetHeads.getHead(sourceAfterCopy, 'op', D, 'BU-C');
+    const intent = monthEndCopyIntents.getByTaskRunId(sourceAfterCopy, 'biz-import-task');
+    assert.equal(intent.datasetId, sourceHead.datasetId);
+    assert.equal(intent.producerTaskRunId, 'biz-import-task');
+  } finally {
+    sourceAfterCopy.close();
+  }
   // 下月侧库含 D 的 T-2 冗余副本。
   const nextSide = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
   try {
@@ -223,6 +292,17 @@ test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 
     assert.equal(copy[0].account_no, 'ACCX', '副本账户号');
   } finally {
     nextSide.close();
+  }
+  assert.deepEqual(bizOpReconRunData.acknowledgeMonthEndCopyIntent({
+    userDataDir,
+    dataDate: D,
+    sourceTaskRunId: 'biz-import-task'
+  }), { removed: 1 });
+  const sourceAfterTerminal = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  try {
+    assert.equal(monthEndCopyIntents.getByTaskRunId(sourceAfterTerminal, 'biz-import-task'), null);
+  } finally {
+    sourceAfterTerminal.close();
   }
 });
 
@@ -311,22 +391,25 @@ test('月末下月侧库有未 ACK receipt 时补清事务零变化', async () =
     nextSide.close();
   }
 
-  const mockWorker = async (db, { datasetSeed, monthEndAdmission }) => {
+  const mockWorker = async (db, { datasetSeed, monthEndCopyPlan }) => {
     db.exec('BEGIN');
     try {
+      session.assertNoPendingMonthEndCopy(db, D, 'BU-C');
       runRepo.clearRunsAndDiffsByDateBu(db, D, 'BU-C');
       runRepo.clearRunsAndDiffsByDateBu(db, nextDate, 'BU-C');
       importsRepo.clearByDateBu(db, D, 'BU-C');
       importsRepo.insertRows(db, D, [currentRow]);
-      session.assertBizOpMonthEndAdmission(monthEndAdmission, 'BU-C');
+      session.assertBizOpMonthEndAdmission(monthEndCopyPlan, 'BU-C');
+      const identity = datasetHeads.nextDatasetIdentity(
+        datasetHeads.getHead(db, 'op', D, 'BU-C'),
+        datasetSeed.producerTaskRunId,
+        () => datasetSeed.datasetId
+      );
       datasetHeads.writeHead(db, {
         kind: 'op', dataDate: D, buName: 'BU-C',
-        identity: datasetHeads.nextDatasetIdentity(
-          datasetHeads.getHead(db, 'op', D, 'BU-C'),
-          datasetSeed.producerTaskRunId,
-          () => datasetSeed.datasetId
-        )
+        identity
       });
+      session.recordMonthEndCopyIntent(db, monthEndCopyPlan, D, 'BU-C', identity);
       db.exec('COMMIT');
       return { status: 'success', buName: 'BU-C', validCount: 1 };
     } catch (error) {
@@ -351,6 +434,547 @@ test('月末下月侧库有未 ACK receipt 时补清事务零变化', async () =
     assert.deepEqual(dumpSideOverwriteState(verifySide), before);
   } finally {
     verifySide.close();
+  }
+});
+
+test('月末 source COMMIT 后崩溃由原 File Task/批次号恢复 target copy 并清 intent', async () => {
+  const date = '2026-06-30';
+  const nextDate = '2026-07-01';
+  const taskRunId = 'biz-month-end-crash-task';
+  const inputPath = path.join(tmpdir, 'biz-month-end-crash.xlsx');
+  fs.writeFileSync(inputPath, 'frozen archive evidence');
+  const originalOwner = await createRunningBizOpImportFileTask(taskRunId, inputPath);
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-06');
+  try {
+    const imported = await session.runBizOpImportAsync(sourceDb, {
+      date,
+      filePath: inputPath,
+      readBizOpFile: () => ({
+        rows: [shared.makeBizOp({
+          rowIndex: 2,
+          bu: 'BU-R',
+          account: 'ACC-RECOVERY',
+          begin: 0,
+          amtIn: 88,
+          amtOut: 0,
+          end: 88,
+          billDate: date
+        })]
+      }),
+      writeBizOpErrorReportXlsx: async () => { throw new Error('unexpected report'); },
+      errorReportsDir: tmpdir,
+      datasetSeed: { datasetId: 'biz-month-end-recovery-dataset', producerTaskRunId: taskRunId },
+      monthEndCopyPlan: {
+        targetDbPath: runDataStore.sideDbPath(userDataDir, MODULE, '2026-07'),
+        targetMonth: '2026-07',
+        dataDate: date,
+        nextDate
+      }
+    });
+    assert.equal(imported.status, 'success');
+    assert.equal(monthEndCopyIntents.getByTaskRunId(sourceDb, taskRunId).datasetId,
+      'biz-month-end-recovery-dataset');
+  } finally {
+    sourceDb.close();
+  }
+  assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-07'), false);
+  const sequenceBefore = mainDb.prepare(`
+    SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
+    FROM archive_daily_sequences
+  `).all();
+
+  const restarted = createArchiveService({ database: mainDb, rootDir: originalOwner.rootDir });
+  await restarted.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
+  assert.equal(restarted.repository.getTaskRun(taskRunId).status, 'running');
+  assert.deepEqual(await bizOpReconRunData.recoverMonthEndCopyIntents({
+    userDataDir,
+    archiveService: restarted
+  }), { recovered: 1 });
+
+  const recoveredTask = restarted.repository.getTaskRun(taskRunId);
+  const recoveredBatch = restarted.repository.getBatch(originalOwner.reserved.batch.id);
+  assert.equal(recoveredTask.status, 'succeeded');
+  assert.equal(recoveredBatch.taskStatus, 'succeeded');
+  assert.equal(recoveredBatch.id, originalOwner.reserved.batch.id);
+  assert.equal(recoveredBatch.batchNumber, originalOwner.reserved.batch.batchNumber);
+  assert.deepEqual(mainDb.prepare(`
+    SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
+    FROM archive_daily_sequences
+  `).all(), sequenceBefore, '恢复不得发新批次号');
+  assert.equal(restarted.repository.listArtifacts(recoveredBatch.id)[0].status, 'ready');
+
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-07');
+  try {
+    const copiedRows = importsRepo.getRowsByDateBu(targetDb, date, 'BU-R');
+    assert.equal(copiedRows.length, 1);
+    assert.equal(copiedRows[0].account_no, 'ACC-RECOVERY');
+    assert.equal(datasetHeads.getHead(targetDb, 'op', date, 'BU-R').datasetId,
+      'biz-month-end-recovery-dataset');
+  } finally {
+    targetDb.close();
+  }
+  const sourceAfterRecovery = runDataStore.openSideDb(userDataDir, MODULE, '2026-06');
+  try {
+    assert.equal(monthEndCopyIntents.getByTaskRunId(sourceAfterRecovery, taskRunId), null);
+  } finally {
+    sourceAfterRecovery.close();
+  }
+  const targetBeforeSucceededReplay = runDataStore.openSideDb(userDataDir, MODULE, '2026-07');
+  let succeededTargetState;
+  try {
+    succeededTargetState = dumpSideOverwriteState(targetBeforeSucceededReplay);
+  } finally {
+    targetBeforeSucceededReplay.close();
+  }
+  const sourceForSucceededReplay = runDataStore.openSideDb(userDataDir, MODULE, '2026-06');
+  try {
+    const head = datasetHeads.getHead(sourceForSucceededReplay, 'op', date, 'BU-R');
+    monthEndCopyIntents.create(sourceForSucceededReplay, {
+      sourceTaskRunId: taskRunId,
+      dataDate: date,
+      normalizedBu: 'bu-r',
+      datasetId: head.datasetId,
+      datasetVersion: head.datasetVersion,
+      producerTaskRunId: head.producerTaskRunId,
+      targetMonth: '2026-07'
+    });
+  } finally {
+    sourceForSucceededReplay.close();
+  }
+  assert.deepEqual(await bizOpReconRunData.recoverMonthEndCopyIntents({
+    userDataDir,
+    archiveService: restarted
+  }), { recovered: 1 }, 'terminal 后删除 intent 前崩溃只核对 target 并清 intent');
+  const targetAfterSucceededReplay = runDataStore.openSideDb(userDataDir, MODULE, '2026-07');
+  try {
+    assert.deepEqual(dumpSideOverwriteState(targetAfterSucceededReplay), succeededTargetState);
+  } finally {
+    targetAfterSucceededReplay.close();
+  }
+  assert.deepEqual(mainDb.prepare(`
+    SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
+    FROM archive_daily_sequences
+  `).all(), sequenceBefore);
+  assert.deepEqual(await bizOpReconRunData.recoverMonthEndCopyIntents({
+    userDataDir,
+    archiveService: restarted
+  }), { recovered: 0 });
+});
+
+test('月末 worker 已提交 source+intent 但 success 回执丢失时保留 File Task owner', async () => {
+  const date = '2026-10-31';
+  const taskRunId = 'biz-month-end-worker-receipt-lost';
+  const mockWorker = async (db, { datasetSeed, monthEndCopyPlan }) => {
+    db.exec('BEGIN');
+    try {
+      importsRepo.insertRows(db, date, [shared.makeBizOp({
+        rowIndex: 2,
+        bu: 'BU-WORKER',
+        account: 'SOURCE-COMMITTED',
+        begin: 0,
+        amtIn: 12,
+        amtOut: 0,
+        end: 12,
+        billDate: date
+      })]);
+      const identity = datasetHeads.nextDatasetIdentity(
+        null,
+        datasetSeed.producerTaskRunId,
+        () => datasetSeed.datasetId
+      );
+      datasetHeads.writeHead(db, {
+        kind: 'op', dataDate: date, buName: 'BU-WORKER', identity
+      });
+      session.recordMonthEndCopyIntent(
+        db,
+        monthEndCopyPlan,
+        date,
+        'BU-WORKER',
+        identity
+      );
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    const error = new Error('worker exited before complete receipt');
+    error.code = 'WORKER_EXITED';
+    throw error;
+  };
+
+  await assert.rejects(bizOpReconRunData.runBizOpImport({
+    userDataDir,
+    runBizOpImportViaWorker: mockWorker,
+    params: {
+      date,
+      filePath: 'worker-receipt-lost.xlsx',
+      batchContext: { taskRunId }
+    }
+  }), (error) => {
+    assert.equal(error.code, 'WORKER_EXITED');
+    assert.equal(error.preserveArchiveFileTask, true);
+    return true;
+  });
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-10');
+  try {
+    assert.equal(monthEndCopyIntents.getByTaskRunId(sourceDb, taskRunId).targetMonth, '2026-11');
+  } finally {
+    sourceDb.close();
+  }
+  assert.equal(runDataStore.sideDbExists(userDataDir, MODULE, '2026-11'), false);
+});
+
+test('月末 copy 失败形成 interrupted owner 后仍以原 File Batch 恢复', async () => {
+  const date = '2026-12-31';
+  const nextDate = '2027-01-01';
+  const taskRunId = 'biz-month-end-interrupted-owner';
+  const inputPath = path.join(tmpdir, 'biz-month-end-interrupted.xlsx');
+  fs.writeFileSync(inputPath, 'interrupted archive evidence');
+  const owner = await createRunningBizOpImportFileTask(taskRunId, inputPath);
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, '2026-12');
+  try {
+    await session.runBizOpImportAsync(sourceDb, {
+      date,
+      filePath: inputPath,
+      readBizOpFile: () => ({ rows: [shared.makeBizOp({
+        rowIndex: 2,
+        bu: 'BU-INTERRUPTED',
+        account: 'SOURCE-INTERRUPTED',
+        begin: 0,
+        amtIn: 31,
+        amtOut: 0,
+        end: 31,
+        billDate: date
+      })] }),
+      writeBizOpErrorReportXlsx: async () => { throw new Error('unexpected report'); },
+      errorReportsDir: tmpdir,
+      datasetSeed: { datasetId: 'interrupted-copy-dataset', producerTaskRunId: taskRunId },
+      monthEndCopyPlan: {
+        targetDbPath: runDataStore.sideDbPath(userDataDir, MODULE, '2027-01'),
+        targetMonth: '2027-01',
+        dataDate: date,
+        nextDate
+      }
+    });
+  } finally {
+    sourceDb.close();
+  }
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, '2027-01');
+  let targetRunId;
+  try {
+    targetRunId = runRepo.insertArchiveRun(targetDb, {
+      date,
+      buName: 'BU-INTERRUPTED',
+      archiveTaskRunId: 'target-owner-before-copy',
+      stats: {
+        t1OpTotal: 1,
+        t2OpTotal: 1,
+        flowTotal: 1,
+        amountDiffCount: 0,
+        multiOpAccountCount: 0,
+        t2AnomalyAccountCount: 0,
+        t1NotT2Count: 0,
+        t2NotT1Count: 0
+      }
+    });
+  } finally {
+    targetDb.close();
+  }
+  assert.throws(() => bizOpReconRunData.applyMonthEndCopyIntent({
+    userDataDir,
+    sourceMonth: '2026-12',
+    sourceTaskRunId: taskRunId
+  }), /未 ACK/);
+  const settled = await owner.service.settleManifestArtifacts({
+    batchContext: owner.batchContext,
+    files: [{ artifactKey: owner.manifest.inputs[0].artifactKey }]
+  });
+  assert.equal(settled.durable, true);
+  const interrupted = await owner.service.finishFileTask(
+    taskRunId,
+    owner.reserved.batch.id,
+    {
+      taskStatus: 'interrupted',
+      code: 'ARCHIVE_TASK_INTERRUPTED',
+      message: 'target receipt pending'
+    }
+  );
+  assert.equal(interrupted.ok, true);
+  assert.equal(interrupted.taskRun.status, 'interrupted');
+  const targetForAck = runDataStore.openSideDb(userDataDir, MODULE, '2027-01');
+  try {
+    runRepo.acknowledgeArchiveTerminal(targetForAck, targetRunId, 'target-owner-before-copy');
+  } finally {
+    targetForAck.close();
+  }
+  const sequenceBefore = mainDb.prepare(`
+    SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
+    FROM archive_daily_sequences
+  `).all();
+
+  const restarted = createArchiveService({ database: mainDb, rootDir: owner.rootDir });
+  await restarted.initialize({ deferStartupRecovery: true, startBackgroundMaterialization: false });
+  assert.deepEqual(await bizOpReconRunData.recoverMonthEndCopyIntents({
+    userDataDir,
+    archiveService: restarted
+  }), { recovered: 1 });
+  const recoveredBatch = restarted.repository.getBatch(owner.reserved.batch.id);
+  assert.equal(recoveredBatch.batchNumber, owner.reserved.batch.batchNumber);
+  assert.equal(recoveredBatch.taskStatus, 'succeeded');
+  assert.equal(restarted.repository.getTaskRun(taskRunId).status, 'succeeded');
+  assert.deepEqual(mainDb.prepare(`
+    SELECT local_date, last_sequence, last_issued_batch_id, last_issued_batch_number
+    FROM archive_daily_sequences
+  `).all(), sequenceBefore);
+});
+
+test('月末 source precheck 后并发出现未 ACK receipt 时保留 intent，阻断覆盖与 D+1 run', async () => {
+  const date = '2026-06-30';
+  const nextDate = '2026-07-01';
+  const taskRunId = 'biz-month-end-race-task';
+  const targetMonth = '2026-07';
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, targetMonth);
+  try {
+    importsRepo.insertRows(targetDb, date, [shared.makeBizOp({
+      rowIndex: 2,
+      bu: 'BU-RACE',
+      account: 'TARGET-OLD',
+      begin: 0,
+      amtIn: 5,
+      amtOut: 0,
+      end: 5,
+      billDate: date
+    })]);
+    datasetHeads.writeHead(targetDb, {
+      kind: 'op',
+      dataDate: date,
+      buName: 'BU-RACE',
+      identity: {
+        datasetId: 'target-old-dataset',
+        datasetVersion: 1,
+        producerTaskRunId: 'target-old-task',
+        archiveContractVersion: 1
+      }
+    });
+  } finally {
+    targetDb.close();
+  }
+
+  let targetBeforeCopy;
+  const currentRow = shared.makeBizOp({
+    rowIndex: 2,
+    bu: 'BU-RACE',
+    account: 'SOURCE-NEW',
+    begin: 0,
+    amtIn: 20,
+    amtOut: 0,
+    end: 20,
+    billDate: date
+  });
+  const mockWorker = async (db, { datasetSeed, monthEndCopyPlan }) => {
+    db.exec('BEGIN');
+    try {
+      session.assertNoPendingMonthEndCopy(db, date, 'BU-RACE');
+      importsRepo.clearByDateBu(db, date, 'BU-RACE');
+      importsRepo.insertRows(db, date, [currentRow]);
+      session.assertBizOpMonthEndAdmission(monthEndCopyPlan, 'BU-RACE');
+      const identity = datasetHeads.nextDatasetIdentity(
+        datasetHeads.getHead(db, 'op', date, 'BU-RACE'),
+        datasetSeed.producerTaskRunId,
+        () => datasetSeed.datasetId
+      );
+      datasetHeads.writeHead(db, {
+        kind: 'op', dataDate: date, buName: 'BU-RACE', identity
+      });
+      session.recordMonthEndCopyIntent(db, monthEndCopyPlan, date, 'BU-RACE', identity);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+
+    const concurrentTarget = runDataStore.openSideDb(userDataDir, MODULE, targetMonth);
+    try {
+      runRepo.insertArchiveRun(concurrentTarget, {
+        date,
+        buName: 'BU-RACE',
+        archiveTaskRunId: 'concurrent-target-run',
+        stats: {
+          t1OpTotal: 1,
+          t2OpTotal: 1,
+          flowTotal: 1,
+          amountDiffCount: 1,
+          multiOpAccountCount: 0,
+          t2AnomalyAccountCount: 0,
+          t1NotT2Count: 0,
+          t2NotT1Count: 0
+        }
+      });
+      targetBeforeCopy = dumpSideOverwriteState(concurrentTarget);
+    } finally {
+      concurrentTarget.close();
+    }
+    return { status: 'success', buName: 'BU-RACE', validCount: 1 };
+  };
+
+  await assert.rejects(bizOpReconRunData.runBizOpImport({
+    userDataDir,
+    runBizOpImportViaWorker: mockWorker,
+    params: {
+      date,
+      filePath: 'race.xlsx',
+      batchContext: { taskRunId }
+    }
+  }), (error) => {
+    assert.equal(error.preserveArchiveFileTask, true);
+    assert.match(error.message, /未 ACK/);
+    return true;
+  });
+
+  const targetAfterFailure = runDataStore.openSideDb(userDataDir, MODULE, targetMonth);
+  try {
+    assert.deepEqual(dumpSideOverwriteState(targetAfterFailure), targetBeforeCopy);
+  } finally {
+    targetAfterFailure.close();
+  }
+
+  const sourceAfterFailure = runDataStore.openSideDb(userDataDir, MODULE, '2026-06');
+  try {
+    const pendingIntent = monthEndCopyIntents.getByTaskRunId(sourceAfterFailure, taskRunId);
+    assert.ok(pendingIntent.datasetId);
+    assert.equal(pendingIntent.producerTaskRunId, taskRunId);
+    const sourceBeforeOverwrite = dumpSideOverwriteState(sourceAfterFailure);
+    await assert.rejects(session.runBizOpImportAsync(sourceAfterFailure, {
+      date,
+      filePath: 'replacement.xlsx',
+      readBizOpFile: () => ({ rows: [{ ...currentRow, account_no: 'SOURCE-REPLACEMENT' }] }),
+      writeBizOpErrorReportXlsx: async () => { throw new Error('unexpected report'); },
+      errorReportsDir: tmpdir,
+      datasetSeed: { datasetId: 'replacement-dataset', producerTaskRunId: 'replacement-task' },
+      monthEndCopyPlan: {
+        targetDbPath: runDataStore.sideDbPath(userDataDir, MODULE, targetMonth),
+        targetMonth,
+        dataDate: date,
+        nextDate
+      }
+    }), (error) => error.code === 'BIZ_OP_MONTH_END_COPY_PENDING');
+    assert.deepEqual(dumpSideOverwriteState(sourceAfterFailure), sourceBeforeOverwrite);
+    assert.deepEqual(monthEndCopyIntents.getByTaskRunId(sourceAfterFailure, taskRunId), pendingIntent);
+  } finally {
+    sourceAfterFailure.close();
+  }
+  assert.throws(() => bizOpReconRunData.prepareRunLineage({
+    userDataDir,
+    date: nextDate,
+    buName: 'BU-RACE'
+  }), (error) => error.code === 'BIZ_OP_MONTH_END_COPY_PENDING');
+});
+
+test('月末 target SQLite 写失败时回滚目标库并保留 source copy intent', async (t) => {
+  const date = '2026-08-31';
+  const nextDate = '2026-09-01';
+  const taskRunId = 'biz-month-end-target-failure';
+  const targetMonth = '2026-09';
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, targetMonth);
+  let targetBefore;
+  try {
+    importsRepo.insertRows(targetDb, date, [shared.makeBizOp({
+      rowIndex: 2,
+      bu: 'BU-EIO',
+      account: 'TARGET-UNCHANGED',
+      begin: 0,
+      amtIn: 7,
+      amtOut: 0,
+      end: 7,
+      billDate: date
+    })]);
+    datasetHeads.writeHead(targetDb, {
+      kind: 'op',
+      dataDate: date,
+      buName: 'BU-EIO',
+      identity: {
+        datasetId: 'target-before-eio',
+        datasetVersion: 1,
+        producerTaskRunId: 'target-before-eio-task',
+        archiveContractVersion: 1
+      }
+    });
+    targetBefore = dumpSideOverwriteState(targetDb);
+  } finally {
+    targetDb.close();
+  }
+
+  const originalInsertRows = importsRepo.insertRows;
+  t.after(() => { importsRepo.insertRows = originalInsertRows; });
+  const mockWorker = async (db, { datasetSeed, monthEndCopyPlan }) => {
+    db.exec('BEGIN');
+    try {
+      const row = shared.makeBizOp({
+        rowIndex: 2,
+        bu: 'BU-EIO',
+        account: 'SOURCE-EIO',
+        begin: 0,
+        amtIn: 11,
+        amtOut: 0,
+        end: 11,
+        billDate: date
+      });
+      originalInsertRows(db, date, [row]);
+      session.assertBizOpMonthEndAdmission(monthEndCopyPlan, 'BU-EIO');
+      const identity = datasetHeads.nextDatasetIdentity(
+        null,
+        datasetSeed.producerTaskRunId,
+        () => datasetSeed.datasetId
+      );
+      datasetHeads.writeHead(db, {
+        kind: 'op', dataDate: date, buName: 'BU-EIO', identity
+      });
+      session.recordMonthEndCopyIntent(db, monthEndCopyPlan, date, 'BU-EIO', identity);
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+    importsRepo.insertRows = () => {
+      const error = new Error('injected target SQLite write failure');
+      error.code = 'SQLITE_IOERR';
+      throw error;
+    };
+    return { status: 'success', buName: 'BU-EIO', validCount: 1 };
+  };
+
+  try {
+    await assert.rejects(bizOpReconRunData.runBizOpImport({
+      userDataDir,
+      runBizOpImportViaWorker: mockWorker,
+      params: {
+        date,
+        filePath: 'target-eio.xlsx',
+        batchContext: { taskRunId }
+      }
+    }), (error) => {
+      assert.equal(error.code, 'SQLITE_IOERR');
+      assert.equal(error.preserveArchiveFileTask, true);
+      return true;
+    });
+  } finally {
+    importsRepo.insertRows = originalInsertRows;
+  }
+
+  const targetAfter = runDataStore.openSideDb(userDataDir, MODULE, targetMonth);
+  try {
+    assert.deepEqual(dumpSideOverwriteState(targetAfter), targetBefore);
+  } finally {
+    targetAfter.close();
+  }
+  const sourceAfter = runDataStore.openSideDb(userDataDir, MODULE, '2026-08');
+  try {
+    assert.equal(
+      monthEndCopyIntents.getByTaskRunId(sourceAfter, taskRunId).producerTaskRunId,
+      taskRunId
+    );
+  } finally {
+    sourceAfter.close();
   }
 });
 

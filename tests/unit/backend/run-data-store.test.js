@@ -181,6 +181,7 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
         'biz_op_recon_diff_rows',
         'biz_op_recon_flow_imports',
         'biz_op_recon_imports',
+        'biz_op_recon_month_end_copy_intents',
         'biz_op_recon_runs',
       ]);
       // runs 含 t2_anomaly_account_count（新库建表即含）。
@@ -192,6 +193,19 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
       assert.equal(fks.length, 1, 'diff_rows 1 个 FK（runs）');
       assert.equal(fks[0].table, 'biz_op_recon_runs');
       assert.equal(fks[0].on_delete, 'NO ACTION', 'biz-op diff_rows FK 无 CASCADE（与主库 byte-for-byte）');
+      const intentColumns = db.prepare(
+        "PRAGMA table_info(biz_op_recon_month_end_copy_intents)"
+      ).all().map((column) => column.name);
+      assert.deepEqual(intentColumns, [
+        'source_task_run_id',
+        'data_date',
+        'normalized_bu',
+        'dataset_id',
+        'dataset_version',
+        'producer_task_run_id',
+        'target_month',
+        'created_at'
+      ]);
     } finally {
       db.close();
     }
@@ -234,6 +248,9 @@ test.describe('PR-4 biz-op / bank-bu 模块侧库', () => {
       const historical = upgraded.prepare('SELECT * FROM biz_op_recon_runs WHERE id = 1').get();
       assert.equal(historical.archive_contract_version, 0);
       assert.equal(historical.archive_task_run_id, null);
+      assert.equal(upgraded.prepare(
+        'SELECT COUNT(*) AS count FROM biz_op_recon_month_end_copy_intents'
+      ).get().count, 0, '历史库 additive migration 不伪造 copy intent');
     } finally {
       upgraded.close();
     }

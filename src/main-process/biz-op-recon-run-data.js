@@ -35,6 +35,7 @@ const { randomUUID } = require('node:crypto');
 const session = require('./biz-op-recon-session');
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
 const datasetHeadRepository = require('../backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../backend/biz-op-recon-db/month-end-copy-intent-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
 const runDataStore = require('../backend/run-data-store');
 const { appendModuleLog } = require('../backend/logger');
@@ -47,6 +48,7 @@ const {
 
 const MODULE = runDataStore.MODULE_BIZ_OP;
 const RUNS_TABLE = 'biz_op_recon_runs';
+const BIZ_OP_IMPORT_TASK_KEY = 'bizOpRecon:import:run-biz-op';
 
 // date（YYYY-MM-DD）→ monthKey（YYYY-MM）。
 function monthOf(date) {
@@ -125,14 +127,16 @@ async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) 
   // 成功后下月复制事务仍会复核一次，覆盖两次检查之间的并发变化。
   //   传侧库 db 句柄作无 dbPath fallback 用（worker 入口优先 dbPath）；getDb 返回侧库连接。
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
-  let monthEndAdmission = null;
-  if (nextMonth !== monthKey
-      && runDataStore.sideDbExists(userDataDir, MODULE, nextMonth)) {
-    const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
-    nextSideDb.close();
-    monthEndAdmission = {
-      dbPath: runDataStore.sideDbPath(userDataDir, MODULE, nextMonth),
-      date,
+  let monthEndCopyPlan = null;
+  if (nextMonth !== monthKey) {
+    if (runDataStore.sideDbExists(userDataDir, MODULE, nextMonth)) {
+      const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+      nextSideDb.close();
+    }
+    monthEndCopyPlan = {
+      targetDbPath: runDataStore.sideDbPath(userDataDir, MODULE, nextMonth),
+      targetMonth: nextMonth,
+      dataDate: date,
       nextDate
     };
   }
@@ -145,56 +149,110 @@ async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) 
         datasetId: randomUUID(),
         producerTaskRunId: params.batchContext.taskRunId
       },
-      monthEndAdmission
+      monthEndCopyPlan
     });
+  } catch (error) {
+    if (monthEndCopyPlan
+        && monthEndCopyIntents.getByTaskRunId(sideDb, params.batchContext.taskRunId)) {
+      error.preserveArchiveFileTask = true;
+    }
+    throw error;
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
 
   // 仅成功导入才处理跨月（rejected/error 未改任何数据，无需补清/冗余）。
   if (result && result.status === 'success') {
-    const firstBu = result.buName;
-    if (nextMonth !== monthKey) {
-      // 🔴 月末跨月：worker 清不到 D+1 月侧库——编排层补清 + 冗余副本。
-      handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, nextDate, firstBu });
+    if (monthEndCopyPlan) {
+      try {
+        applyMonthEndCopyIntent({
+          userDataDir,
+          sourceMonth: monthKey,
+          sourceTaskRunId: params.batchContext.taskRunId
+        });
+      } catch (error) {
+        error.preserveArchiveFileTask = true;
+        throw error;
+      }
     }
   }
   return result;
 }
 
-// 月末 D 跨月处理：
-//   ① 补清 month(D+1) 侧库的 (D,BU)[旧冗余副本] + (D+1,BU) 旧 runs/diff（重导刷新一致）。
-//   ② 把 month(D) 侧库内刚导入的 (D,BU) imports 行冗余复制进 month(D+1) 侧库（作 D+1 对账 T-2 基线）。
-//   逐表事务：在 month(D+1) 侧库内单事务完成 clear + 冗余 insert（任一失败 ROLLBACK，不留半成品）。
-function handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, nextDate, firstBu }) {
-  // 读 month(D) 侧库内 (D,BU) imports 行（worker 已 bu_name 改写为 firstBu）。
-  const curSideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+function monthEndCopyConflict(message, cause) {
+  const error = new Error(message);
+  error.code = 'BIZ_OP_MONTH_END_COPY_RECOVERY_CONFLICT';
+  error.blocksArchiveStartup = true;
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function assertIntentHead(intent, head, location) {
+  if (!head
+      || head.datasetId !== intent.datasetId
+      || head.datasetVersion !== intent.datasetVersion
+      || head.producerTaskRunId !== intent.producerTaskRunId
+      || head.archiveContractVersion !== 1) {
+    throw monthEndCopyConflict(`Biz OP 月末复制 ${location} dataset identity 不一致`);
+  }
+}
+
+// exact intent 是 source COMMIT 与 target COMMIT 之间的 durable owner。
+// target transaction 可重复执行；intent 只在 Archive File Task terminal 后由 caller 删除。
+function applyMonthEndCopyIntent({ userDataDir, sourceMonth, sourceTaskRunId }) {
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, sourceMonth);
+  let intent;
   let dRows;
   let sourceHead;
   try {
-    dRows = importsRepository.getRowsByDateBu(curSideDb, date, firstBu);
-    sourceHead = datasetHeadRepository.getHead(curSideDb, 'op', date, firstBu);
+    intent = monthEndCopyIntents.getByTaskRunId(sourceDb, sourceTaskRunId);
+    if (!intent) {
+      throw monthEndCopyConflict('Biz OP 月末复制 intent 不存在');
+    }
+    if (monthOf(intent.dataDate) !== sourceMonth
+        || monthOf(session.addOneDay(intent.dataDate)) !== intent.targetMonth) {
+      throw monthEndCopyConflict('Biz OP 月末复制 intent 月份身份不一致');
+    }
+    dRows = importsRepository.getRowsByDateBu(
+      sourceDb,
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    sourceHead = datasetHeadRepository.getHead(
+      sourceDb,
+      'op',
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    assertIntentHead(intent, sourceHead, 'source');
+    if (dRows.length === 0) {
+      throw monthEndCopyConflict('Biz OP 月末复制 source rows 不存在');
+    }
   } finally {
-    try { curSideDb.close(); } catch (_e) { /* swallow */ }
+    try { sourceDb.close(); } catch (_e) { /* swallow */ }
   }
 
-  const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+  const sourceBu = dRows[0].bu_name;
+  const nextDate = session.addOneDay(intent.dataDate);
+  const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, intent.targetMonth);
   try {
     nextSideDb.exec('BEGIN');
     try {
-      // ① 清下月旧冗余副本 (D,BU) + 下月 (D+1,BU) 旧 runs/diff（D+1 既是 D+1 当日 T-1 又会被本月 D 当 T-2）。
-      //   先清 runs/diff（FK 顺序），再清 imports。
-      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, date, firstBu);
-      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, nextDate, firstBu);
-      importsRepository.clearByDateBu(nextSideDb, date, firstBu);
-      // ② 冗余复制 (D,BU) 行进下月侧库（imports insertRows 用 _rowIndex，保 row_index 一致）。
+      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, intent.dataDate, sourceBu);
+      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, nextDate, sourceBu);
+      importsRepository.clearByDateBu(nextSideDb, intent.dataDate, sourceBu);
       const copyRows = dRows.map((r) => importRowToReaderShape(r));
-      importsRepository.insertRows(nextSideDb, date, copyRows);
+      importsRepository.insertRows(nextSideDb, intent.dataDate, copyRows);
       datasetHeadRepository.writeHead(nextSideDb, {
         kind: 'op',
-        dataDate: date,
-        buName: firstBu,
-        identity: sourceHead
+        dataDate: intent.dataDate,
+        buName: sourceBu,
+        identity: {
+          datasetId: intent.datasetId,
+          datasetVersion: intent.datasetVersion,
+          producerTaskRunId: intent.producerTaskRunId,
+          archiveContractVersion: 1
+        }
       });
       nextSideDb.exec('COMMIT');
     } catch (err) {
@@ -207,8 +265,60 @@ function handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, next
   appendModuleLog({
     level: 'info', source: 'main', domain: 'biz-op-recon',
     message: '[biz-op-recon] 月末跨月冗余副本写入下月侧库（D 作 D+1 对账 T-2 基线）',
-    details: [`date=${date}`, `bu=${firstBu}`, `from=${monthKey}`, `to=${nextMonth}`, `rows=${dRows.length}`]
+    details: [
+      `date=${intent.dataDate}`,
+      `bu=${sourceBu}`,
+      `from=${sourceMonth}`,
+      `to=${intent.targetMonth}`,
+      `taskRunId=${intent.sourceTaskRunId}`,
+      `rows=${dRows.length}`
+    ]
   });
+  return intent;
+}
+
+function acknowledgeMonthEndCopyIntent({ userDataDir, dataDate, sourceTaskRunId }) {
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, monthOf(dataDate));
+  try {
+    return { removed: monthEndCopyIntents.remove(sourceDb, sourceTaskRunId) };
+  } finally {
+    sourceDb.close();
+  }
+}
+
+function assertTargetCopyApplied({ userDataDir, intent }) {
+  if (!runDataStore.sideDbExists(userDataDir, MODULE, intent.targetMonth)) {
+    throw monthEndCopyConflict('Biz OP 月末复制 target side DB 不存在');
+  }
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, intent.targetMonth);
+  try {
+    const head = datasetHeadRepository.getHead(
+      targetDb,
+      'op',
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    assertIntentHead(intent, head, 'target');
+  } finally {
+    targetDb.close();
+  }
+}
+
+function assertNoPendingMonthEndCopyForRun({ userDataDir, date, buName }) {
+  const previousDate = session.subOneDay(date);
+  const sourceMonth = monthOf(previousDate);
+  if (sourceMonth === monthOf(date)
+      || !runDataStore.sideDbExists(userDataDir, MODULE, sourceMonth)) return;
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, sourceMonth);
+  try {
+    monthEndCopyIntents.assertNoPending(
+      sourceDb,
+      previousDate,
+      session.normalizeBu(buName)
+    );
+  } finally {
+    sourceDb.close();
+  }
 }
 
 // DB imports 行（含 id/data_date/bu_name/row_index/imported_at 元数据）→ insertRows 可消费的 reader 风格行。
@@ -317,6 +427,7 @@ function deleteSideRunReceiptByTaskRunId({ userDataDir, monthKey, taskRunId }) {
 }
 
 function prepareRunLineage({ userDataDir, date, buName }) {
+  assertNoPendingMonthEndCopyForRun({ userDataDir, date, buName });
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthOf(date));
   try {
     return bizOpRunLineagePlan(sideDb, { date, buName });
@@ -859,6 +970,107 @@ async function recoverRunReceipts({ userDataDir, mainDb, archiveService }) {
   return { recovered };
 }
 
+function fileBatchOwnerForCopyIntent(archiveService, taskRun) {
+  const batch = archiveService.repository.getBatchByOperationKey(
+    taskRun.moduleId,
+    taskRun.operationKey
+  );
+  if (!batch || batch.taskRunId !== taskRun.taskRunId) {
+    throw monthEndCopyConflict('Biz OP 月末复制的 Archive File Batch 身份不一致');
+  }
+  return {
+    batch,
+    batchContext: {
+      batchId: batch.id,
+      batchNumber: batch.batchNumber,
+      taskRunId: batch.taskRunId,
+      taskKey: batch.taskKey,
+      moduleId: batch.moduleId,
+      parentRunId: batch.parentRunId,
+      operationKey: batch.operationKey
+    },
+    manifest: batch.metadata._fileManifest
+  };
+}
+
+async function recoverMonthEndCopyIntents({ userDataDir, archiveService }) {
+  let recovered = 0;
+  for (const file of runDataStore.listSideDbFiles(userDataDir, MODULE)) {
+    const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, file.monthKey);
+    let intents;
+    try {
+      intents = monthEndCopyIntents.list(sourceDb);
+    } finally {
+      sourceDb.close();
+    }
+    for (const intent of intents) {
+      try {
+        const taskRun = archiveService.repository.getTaskRun(intent.sourceTaskRunId);
+        if (!taskRun || taskRun.moduleId !== BIZ_OP_MODULE_ID
+            || taskRun.taskKey !== BIZ_OP_IMPORT_TASK_KEY) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive TaskRun 身份不一致');
+        }
+        if (taskRun.status === 'succeeded') {
+          assertTargetCopyApplied({ userDataDir, intent });
+          acknowledgeMonthEndCopyIntent({
+            userDataDir,
+            dataDate: intent.dataDate,
+            sourceTaskRunId: intent.sourceTaskRunId
+          });
+          recovered += 1;
+          continue;
+        }
+        if (!['running', 'interrupted'].includes(taskRun.status)) {
+          throw monthEndCopyConflict(
+            `Biz OP 月末复制的 Archive TaskRun 已由 ${taskRun.status} 终结`
+          );
+        }
+        const owner = fileBatchOwnerForCopyIntent(archiveService, taskRun);
+        const reopened = await archiveService.beginFileTaskRecovery(owner.batchContext, {
+          manifestIdentity: owner.manifest.identity
+        });
+        if (!reopened || reopened.ok === false) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive File Task 无法恢复');
+        }
+        const settled = await archiveService.settleManifestArtifacts({
+          batchContext: owner.batchContext,
+          files: owner.manifest.artifactKeys
+            .map((artifactKey) => ({ artifactKey }))
+        });
+        if (!settled || settled.durable !== true) {
+          throw monthEndCopyConflict('Biz OP 月末复制的输入 evidence 未形成耐久结果');
+        }
+        applyMonthEndCopyIntent({
+          userDataDir,
+          sourceMonth: file.monthKey,
+          sourceTaskRunId: intent.sourceTaskRunId
+        });
+        const finished = await archiveService.finishFileTask(
+          intent.sourceTaskRunId,
+          owner.batch.id,
+          {
+            taskStatus: 'succeeded',
+            metadata: { bizOpMonthEndCopyRecovered: true }
+          }
+        );
+        if (!finished || finished.ok === false) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive terminal 未完成');
+        }
+        acknowledgeMonthEndCopyIntent({
+          userDataDir,
+          dataDate: intent.dataDate,
+          sourceTaskRunId: intent.sourceTaskRunId
+        });
+        recovered += 1;
+      } catch (error) {
+        if (error && error.blocksArchiveStartup === true) throw error;
+        throw monthEndCopyConflict('Biz OP 月末复制恢复失败', error);
+      }
+    }
+  }
+  return { recovered };
+}
+
 // ── retention / 孤儿双向兜底 ──
 
 // 确保该月侧库存在（建表）。
@@ -953,6 +1165,8 @@ module.exports = {
   runFlowImport,
   runViaSideDb,
   prepareRunLineage,
+  applyMonthEndCopyIntent,
+  acknowledgeMonthEndCopyIntent,
   getStatusDualSource,
   listBuDualSource,
   checkSingleDayDualSource,
@@ -970,6 +1184,7 @@ module.exports = {
   acknowledgeRunByTaskRun,
   finalizeRunTerminalIntent,
   recoverRunReceipts,
+  recoverMonthEndCopyIntents,
   deleteMonthSideDb,
   reconcileOrphans,
   upsertMainRunMirror
