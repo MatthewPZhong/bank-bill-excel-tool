@@ -1,7 +1,9 @@
 # 存档中心“有文件才有批次” Spec
 
 > status: draft / implementation in progress
-> baseline: `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`
+> product code baseline: `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`
+> current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`
+> review evidence head (2026-08-18): `458e73f0f2861cacc0579a4bac20b45900bdb3b3`
 > baseline version: `3.1.10`（正式发布后的远端 `main`）
 > target version: 3.1.11
 > owner: 存档中心 / 全局任务生命周期 / 工具箱
@@ -64,15 +66,15 @@
 
 ## 2. 远端基线与已确认事实
 
-### 2.1 基线锁定
+### 2.1 基线分层
 
-2026-08-17 通过本地远端追踪引用与 Git 对象回读确认：
+2026-08-18 对当前 PR Git DAG 与相关提交内容只读复核后，基线分为三层：
 
-- 默认分支：`main`；
-- 远端 HEAD：`35f11e153962c34cba0e9d4c7084e9df85c9f209`；
-- `package.json.version`：`3.1.10`；
-- 该提交为 PR #148 的 v3.1.10 release commit；当前工作分支与 `origin/main` 的 merge-base 也是该提交；
-- 不 rebase、不覆盖当前脏工作树。以下“远端事实”以该提交为基线；“实施进度”以当前共享工作树为准，两者不得混写。
+- v3.1.10 产品代码基线：`35f11e153962c34cba0e9d4c7084e9df85c9f209`，即 PR #148 的 release commit，`package.json.version=3.1.10`；
+- 当前 PR merge base：`6f1c09236a6c36f72eb82d61dc14508adfe20eec`，即 PR #149 的发布证据合并；相对产品代码基线只修改发布文档、规则和测试，没有 `src/` 产品代码变化；
+- 本轮复审取证 head：`458e73f0f2861cacc0579a4bac20b45900bdb3b3`，用于固定最新评论所审查的实现快照，不作为产品代码基线。
+
+2026-08-17 初稿生成时，本地 `origin/main` 尚指向 `35f11e…` 且对象库中尚无 `6f1c092…`；该记录只保留为历史时点事实，不能继续描述当前 PR。当前工作树不 rebase、不覆盖既有未跟踪文件；以下“远端产品事实”以 `35f11e…` 为准，“PR 差异”从 `6f1c092…` 计算，“实施进度”以当前共享工作树为准，三者不得混写。
 
 ### 2.2 当前代码事实
 

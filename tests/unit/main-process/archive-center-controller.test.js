@@ -387,6 +387,39 @@ test('operation owner 取消终态重放后执行 finalizer，失败时保留 ou
   ]);
 });
 
+test('Position terminal route 拒绝空 operationToken 且不写 outbox', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-position-empty-token-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const outboxStore = createArchiveOutboxStore(directory);
+  const { controller } = createHarness({ outboxStore });
+  const owner = {
+    version: 1,
+    kind: 'operation',
+    operationContext: {
+      taskRunId: 'position-empty-token-task',
+      taskKey: 'position-reconciliation:run',
+      moduleId: 'position-reconciliation-process',
+      parentRunId: 'position-empty-token-parent',
+      operationKey: 'position:empty-token'
+    }
+  };
+  for (const operationToken of ['', '   ']) {
+    assert.throws(() => controller.persistTaskTerminalIntent({
+      owner,
+      sourceOperation: 'position-reconciliation:run',
+      terminalOutcome: {
+        taskStatus: 'succeeded',
+        metadata: {},
+        afterTerminal: { route: 'position-reconciliation', operationToken }
+      }
+    }), {
+      name: 'TypeError',
+      message: 'Position terminal route.operationToken 为空'
+    });
+  }
+  assert.deepEqual(outboxStore.list(), []);
+});
+
 test('Pending operation terminal route 以 TaskRun identity 持久并在重放后调用 finalizer', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-pending-finalizer-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

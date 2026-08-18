@@ -8,7 +8,9 @@
 | 作者 | 主 agent（技术合同与质量把控） |
 | 状态 | 代码与自动门禁已完成；真实数据库/UI 与人工资金血缘待验收 |
 | 关联 Spec | `changes/archive-center-file-batch-contract/spec.md`（NFB-01～NFB-28） |
-| 代码基线 | `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10） |
+| 产品代码基线 | `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10） |
+| 当前 PR merge base | `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 发布证据；无 `src/` 产品代码变化） |
+| 复审取证 head | `458e73f0f2861cacc0579a4bac20b45900bdb3b3`（2026-08-18） |
 | 目标发布 | v3.1.11 |
 | 实施执行 | 已由 `gpt-5.6-sol`、`high reasoning` 的 dev agent 按本合同执行；主 agent 独立审查和验收 |
 | 质量门 | 专项测试、`npm run release-check`、`npm run check:vars`、真实数据库/UI 验收、文件血缘与资金人工复核 |
@@ -737,7 +739,7 @@ type TerminalOutboxRecord = {
   version: 2;
   owner: PersistedTaskOwner;
   terminalOutcome: {
-    taskStatus: 'succeeded' | 'failed' | 'cancelled' | 'interrupted';
+    taskStatus: 'succeeded' | 'failed' | 'cancelled';
     code: string;
     message: string;
     metadata: object;
@@ -748,6 +750,7 @@ type TerminalOutboxRecord = {
 
 - operation owner：只重放 Task Run terminal 与其已持久化 planned lineage，不创建 batch。
 - file-batch owner：先确认 manifest artifact 已 durable，再原子终结 Task Run + batch + 已持久化 planned lineage。
+- terminal outbox 只承载 `succeeded/failed/cancelled`；`interrupted` 由启动时 module owner recovery 或 ownerless sweep 处理，不持久为 `TerminalOutboxRecord`。
 - `files=[]` 且没有 target owner 的旧 outbox 不能创建 batch。
 - legacy outbox 有非空 files、无 targetBatchId 时，由 files 形成 manifest 并调用原子 reserve；创建后先耐久回写真实 batchId，再继续 settle。
 - manifest v1 新 batch 的 append 只能 settle；历史无 manifest batch 保留现有 legacy append 供原批次恢复。

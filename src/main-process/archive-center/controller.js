@@ -110,10 +110,9 @@ function normalizeTerminalOutcome(value) {
     const route = String(value.afterTerminal.route || '').trim();
     if (!route) throw new TypeError('任务终态意图 afterTerminal.route 为空');
     if (route === 'position-reconciliation') {
-      afterTerminal = {
-        route,
-        operationToken: String(value.afterTerminal.operationToken || '').trim()
-      };
+      const operationToken = String(value.afterTerminal.operationToken || '').trim();
+      if (!operationToken) throw new TypeError('Position terminal route.operationToken 为空');
+      afterTerminal = { route, operationToken };
     } else if (route === 'pending-run') {
       const taskRunId = String(value.afterTerminal.taskRunId || '').trim();
       if (!taskRunId) throw new TypeError('Pending terminal route.taskRunId 为空');

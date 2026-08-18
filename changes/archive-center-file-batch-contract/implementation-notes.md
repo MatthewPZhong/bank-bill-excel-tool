@@ -4,13 +4,17 @@
 
 - Goal/spec: `changes/archive-center-file-batch-contract/spec.md`
 - Initial plan/technical contract: `changes/archive-center-file-batch-contract/techdoc.md`
-- Code baseline: remote `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`; current branch merge-base is the same commit and package version starts at `3.1.10`. Do not rebase or overwrite the existing dirty worktree.
+- Product code baseline: `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10 release commit）。
+- Current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
+- Review evidence head: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`（2026-08-18 最新复审所用快照）。
+- Do not rebase or overwrite the existing dirty worktree.
 - Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收和文件血缘人工门禁全部闭合。
 
 ## Decisions
 
 | 决定 | 原因与证据 | 放弃的方案 | 影响 |
 | --- | --- | --- | --- |
+| 产品代码基线、PR merge base 与复审 head 分层记录 | Git 回读证明 `35f11e…` 是 v3.1.10 产品 release commit；`6f1c092…` 是只追加发布证据、规则和测试的 PR #149 merge，也是当前 PR merge base；最新评论审查 `458e73f…` | 把三者都称作“当前代码基线”，或把 2026-08-17 的本地追踪引用快照继续写成当前事实 | 远端产品事实按 `35f11e…`，PR diff 按 `6f1c092…`，复审结论固定到 `458e73f…`；不改变运行时行为 |
 | Task Run 与 File Batch 解耦；只有非空 `ArtifactManifestV1` 可原子发号 | Spec §4～5、TechDoc §2～5；现状 121 个 reserve action 与 63 个 file action 不一致 | renderer 隐藏、先建空 batch 再补 artifact | no-file action 保留任务控制能力，但不建批次、不占号 |
 | 初始 `filePlan v1` 与发号用 `ArtifactManifestV1` 是两个不可混用 DTO | deferred 初始计划允许为空，发号 manifest 永远非空；合并会迫使内部层增加例外 guard | 一个 DTO 同时承载空计划和非空 manifest | eager/deferred 的合法状态由合同表达，repository 不重复文件校验 |
 | 公共查询新增 visible 方法，现有 repository 方法保持 raw/internal | storage rebuild、hold、recovery、repair 必须看到历史空批次 | 修改现有 raw 方法或仅在 renderer 过滤 | list/get/stats/latest/related 统一 SQL predicate，内部维护语义不变 |
@@ -40,7 +44,7 @@
 
 | 假设 | 依据 | 失效影响 | 验证与回滚 |
 | --- | --- | --- | --- |
-| 本地 `origin/main` 追踪引用是本轮远端代码基线 | `git rev-parse origin/main` 与 `git merge-base HEAD origin/main` 均为 `35f11e1539…`；`git show origin/main:package.json` 为 3.1.10 | 若后续远端再次推进，当前实现仍应保持锁定基线而非静默换底 | 发布前可只读 fetch 复核；不 rebase、不用远端覆盖共享脏工作树 |
+| v3.1.10 产品事实仍以 `35f11e…` 为代码基线 | `6f1c092…` 相对 `35f11e…` 没有 `src/` 变化，只追加发布证据、规则和测试；当前 PR merge base 已独立记录为 `6f1c092…` | 若后续 `main` 再推进，只影响 PR DAG/合并判断，不应静默改写本 Spec 描述的 v3.1.10 产品实现 | 发布前只读复核 merge base；不 rebase、不用远端覆盖共享工作树 |
 | 版本发布仍按仓库惯例同步 `package.json`、lockfile 和三份发布文档 | 用户已锁定 v3.1.11；AGENTS.md 规定版本迭代文档三件套 | 若本次只要求代码不发布，版本文件会扩大 diff | 在最终 release 阶段集中修改；可独立回退该机械 commit |
 | 当前机器 reset 不需要删除 Archive Center 中既有 VCC 文件、批次和流程证据 | 用户本轮要求清空的是 VCC 校验原表/校验表/结果表；既有 artifact 仍是独立审计证据，且用户接受了保留边界 | 若业务后续要求连存档文件一起删除，空间与审计验收口径会改变 | 本轮逐表证明 Archive 数据守恒；若要删除存档，必须另起显式破坏性任务 |
 
@@ -48,7 +52,7 @@
 
 | 偏离 | 原合同 | 新合同与同步状态 | 影响 |
 | --- | --- | --- | --- |
-| 文档代码基线纠正 | 初稿引用本地不存在的 `main@6f1c092…` | Spec/TechDoc/Baseline 已同步为当前 `origin/main@35f11e1539…` | 不改变产品行为；后续证据区分远端基线与当前共享工作树 |
+| 文档代码基线纠正 | 2026-08-17 初稿时本地尚无 `6f1c092…`，曾把 `35f11e…` 同时写成产品基线与当前分支 merge base；PR 建立后的 Git DAG 证明两者不同 | Spec/TechDoc/Baseline 已分层为产品代码 `35f11e…`、PR merge base `6f1c092…`、复审取证 head `458e73f…`；原“本地不存在”只保留为历史时点证据 | 不改变产品行为；reviewer 可精确判断 release evidence 是否包含在 PR base |
 | v3.1.10 的普通用户显式历史迁移入口在 v3.1.11 移除 | 已发布版本允许在数据管理执行【优化存储】，3.1.11 原 Spec 把 storage migration 视为继续存在的内部 raw consumer | Spec §1/§8.4/§16 与 TechDoc §8.4 已前向同步；不追改 v3.1.10 已发布事实 | exclude inventory 119→117；main/preload/renderer 通道删除，recovery/rebuild 内核保留 |
 | 当前机器执行一次性真实库重置 | 原 Spec §16 写明本阶段不直接修改真实数据库 | Spec §8.4/§16 已限定为当前机器、副本 rehearsal、备份和逐表门禁后的唯一例外 | 不能泛化为产品 migration；执行证据和备份路径必须记录 |
 | 本机 reset 的旧库由“默认保留”变为复验后永久删除 | 原合同只承诺 maintenance CLI 不自动删除，执行结束时报告也记录备份已保留 | 用户于 2026-08-18 对精确文件再次授权删除；Spec §1/§8.4/§13/§16、TechDoc §0/§8.4/§15～17、发布三文档已反向同步 | 产品默认与其它用户行为不变；只改变当前机器的最终回退状态，旧 v1 不再可恢复，JSON 审计保持不可变 |
@@ -59,7 +63,8 @@
 
 | 证据 | 结果 | 覆盖的行为/风险 |
 | --- | --- | --- |
-| 基线只读复核（2026-08-17） | `origin/main=35f11e153962c34cba0e9d4c7084e9df85c9f209`；HEAD merge-base 相同；远端 `package.json.version=3.1.10`；旧文档 SHA `6f1c092…` 在本地对象库不存在 | 文档基线纠正；本轮不 rebase、不覆盖共享脏工作树 |
+| 基线只读复核（2026-08-17 历史时点） | 当时本地 `origin/main=35f11e153962c34cba0e9d4c7084e9df85c9f209`、HEAD merge-base 相同、`package.json.version=3.1.10`，本地对象库尚无 `6f1c092…` | 仅解释初稿为何曾锁到 `35f11e…`；不得继续当作当前 PR DAG 事实 |
+| PR 基线复核（2026-08-18） | 当前 `origin/main` 与 `git merge-base HEAD origin/main` 均为 `6f1c09236a6c36f72eb82d61dc14508adfe20eec`；当前复审输入 head 为 `458e73f0f2861cacc0579a4bac20b45900bdb3b3`；`35f11e…` 到 `6f1c092…` 无 `src/` 路径 | 证明产品代码基线、PR merge base、复审快照必须分层；关闭最新评论 P2 文档混淆 |
 | 用户确认精确数据血缘续作方案（2026-08-17） | 批准 `archive_task_lineage`、三模块 dataset/run receipt、bounded related、剩余 27 action、3.1.11 发布门禁 | 关闭原 Biz OP/Pending/Pre-fund stable identity BLOCK；禁止退回 date/month/latest 或 same-parent-only |
 | TechDoc 合同检查脚本（人工处置移除前） | 63 file + 60 no-file action、NFB-01～28、引用路径/符号和空白检查通过 | 后续由 59 no-file 新证据取代当前 inventory 结论；原结果仅作为阶段记录 |
 | `git diff --check`（TechDoc 生成阶段） | PASS | 文档格式 |
@@ -136,3 +141,29 @@
 | `npm run release-check` | PASS：lint、smoke、5351/5351 unit、48/48 integration（2385/2385） | PR review 修复进入全量回归；包含 Pending、Pre-fund、Toolbox、Acquiring、Position、Biz OP 与 VCC 链路 |
 | `npm run scan:vars` | PASS：337 个 tracked JS / 4452 个顶层名称；A-share 648 / A-pair 945 / A-local 2693 / B 1593 | 刷新最后 9 个源码文件进入 Git 后的 v3.1.11 真实统计，并反向同步 important-variables v36 元数据 |
 | `npm run check:vars` | PASS：当前 5 个生产修复文件未新增清单命中 | 仍按人工 review 覆盖 TaskLifecycle/Archive owner 终态与 Pending 整月覆盖，不以扫描结果替代资金审计门禁 |
+
+### Follow-up review scope（2026-08-18）
+
+| 项目 | 决定与依据 | 当前 PR 处置 |
+| --- | --- | --- |
+| P2 基线混淆 | Git DAG 与路径 diff 已证明产品代码基线、PR merge base、复审 head 是三种不同事实 | Spec、TechDoc 与本文件同步分层；解除 Draft 前必须保留该区分 |
+| Position terminal route 空 `operationToken` | 该值会进入持久 outbox，空值可造成 TaskRun 已终结而 finalizer 永久失败；这是单一真实持久化信任边界 | 仅在 `normalizeTerminalOutcome()` 的 Position route 分支 trim 后 fail-fast，并以不写 outbox 的 negative test 覆盖；下游不重复校验 |
+| Terminal outbox 的 `interrupted` 文档漂移 | runtime normalizer 只接受 `succeeded/failed/cancelled`；`interrupted` 已由 startup owner/sweep 独立处理 | TechDoc 收紧状态集合，不为匹配旧文档扩大运行时状态机 |
+
+### Remaining follow-ups（非当前合并阻断）
+
+| 项目 | 处理 | 负责人/下一步 | 合并影响 |
+| --- | --- | --- | --- |
+| FilePlan alias 检查在多输出任务中的同步 FS 调用复杂度 | PROBE | 独立性能任务先测量 Toolbox multi-split prepare 的输出规模、调用数与 UI 阻塞，再评估一次性缓存 alias key/`dev:ino`；不建设通用路径框架 | 不阻止当前 PR；若实测达到用户可感知阻塞，再以独立性能合同处理 |
+| Toolbox publication recovery 的终态失败诊断不足 | PROBE | 独立可观测性任务保留 fail-closed 与状态机，只补底层 code/message/current/requested status 的结构化诊断和故障测试 | 不阻止当前 PR；不得借诊断改动把 conflict 当成功或 ACK receipt |
+| `archive_task_runs` / lineage 暂无清理策略 | PROBE | 发布后先采集总行数、日增量、terminal/未完成 owner 比例与 DB 占用，再设计只清理无引用 terminal TaskRun 的 maintenance | 不阻止当前 PR；本版不增加按天数 DELETE，不放宽 owner/lineage 外键 |
+
+### Follow-up review evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| Git DAG / path diff 只读复核 | `origin/main` 与当前 PR merge base 均为 `6f1c09236a6c36f72eb82d61dc14508adfe20eec`；复审输入 head 为 `458e73f0f2861cacc0579a4bac20b45900bdb3b3`；`35f11e…` 到 `6f1c092…` 无 `src/` 变化 | P2 三层基线表述可由 Git 复现，不把发布证据 commit 误当产品源码基线 |
+| `node --test tests/unit/main-process/archive-center-controller.test.js` | 39/39 PASS | Position 正常 terminal route 保持；空字符串/纯空白 token 在 outbox 写入前 fail-fast，且不生成持久记录；其它 route 与 cancel-wins 重放继续通过 |
+| `npm run check:vars` | PASS；仅识别 `src/main-process/archive-center/controller.js`，未命中重要变量 | 本次未改变重要变量、任务状态集合或 Position 业务数据字段；仍以终态/恢复专项代替变量名推断 |
+| reconciliation blindspot pass | 无新增 BLOCK 或资金红线 | 未改金额、币种、方向、匹配、行数或业务主键；只收紧 terminal intent 持久化 identity，真实数据库与资金血缘人工门禁不变 |
+| `npm run release-check` | PASS：ESLint、Smoke、5352/5352 unit、48/48 integration（2385/2385） | 文档同步与 Position terminal 边界进入完整发布回归；runner 的纯耗时清单刷新已还原，不进入本次 diff |
