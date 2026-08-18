@@ -160,6 +160,11 @@ function createContract(options = {}) {
         WHERE dataset_kind = 'flow' AND data_date = ? AND normalized_bu = ''
           AND dataset_id = ? AND dataset_version = ?
       ))
+    ) AND NOT EXISTS (
+      SELECT 1 FROM biz_op_recon_runs
+      WHERE data_date = ?
+        AND archive_contract_version = 1
+        AND archive_terminal_ack_at IS NULL
     ) THEN 1 ELSE 0 END`,
           params: [
             datasetSeed.expectedDatasetId,
@@ -167,7 +172,8 @@ function createContract(options = {}) {
             datasetSeed.expectedDatasetId,
             date,
             datasetSeed.expectedDatasetId,
-            datasetSeed.expectedDatasetVersion
+            datasetSeed.expectedDatasetVersion,
+            date
           ]
         },
         // 1a) 先删该 date 的 diff_rows（run_id IN 该 date 的 runs；FK 顺序，先 rows 后 runs）

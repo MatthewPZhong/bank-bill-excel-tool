@@ -23,6 +23,8 @@ const {
 const { validateContract } = require('../../../../src/backend/big-table-import/contract');
 const contractMod = require('../../../../src/backend/biz-op-recon-import/contract-flow');
 const { ensureBizOpReconTablesSupport } = require('../../../../src/backend/biz-op-recon-db/migrations');
+const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-repository');
+const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');
 
 function mkContract(opts = {}) {
   return contractMod.createContract({
@@ -48,6 +50,15 @@ function validFlowValues(overrides = {}) {
     if (idx >= 0) v[idx] = overrides[k];
   }
   return v;
+}
+
+function dumpOverwriteState(db) {
+  return {
+    flow: db.prepare('SELECT * FROM biz_op_recon_flow_imports ORDER BY id').all(),
+    runs: db.prepare('SELECT * FROM biz_op_recon_runs ORDER BY id').all(),
+    diffs: db.prepare('SELECT * FROM biz_op_recon_diff_rows ORDER BY id').all(),
+    heads: db.prepare('SELECT * FROM biz_op_recon_dataset_heads ORDER BY dataset_kind, data_date').all()
+  };
 }
 
 test('flow 契约通过 validateContract（whitelist=null 旁路第 1 层防护）', () => {
@@ -165,6 +176,54 @@ test('v0 head 可被首个 v1 transaction 精确覆盖；过期 seed 在业务�
   db.close();
 });
 
+test('Flow overwrite 遇同日未 ACK v1 receipt 时 run/diff/import/head 零变化', () => {
+  const date = '2026-06-13';
+  const db = new DatabaseSync(':memory:');
+  ensureBizOpReconTablesSupport(db);
+  flowRepo.insertRows(db, date, [{
+    _rowIndex: 2, bu_dept: 'BU-A', direction: '入', account_no: 'ACC-OLD', recon_amount: '10'
+  }]);
+  db.prepare(`
+    INSERT INTO biz_op_recon_dataset_heads (
+      dataset_kind, data_date, normalized_bu, dataset_id,
+      producer_task_run_id, dataset_version, archive_contract_version, updated_at
+    ) VALUES ('flow', ?, '', 'flow-old', 'flow-old-task', 1, 1, '2026-06-13T00:00:00.000Z')
+  `).run(date);
+  const runId = runRepo.insertArchiveRun(db, {
+    date,
+    buName: 'BU-A',
+    archiveTaskRunId: 'flow-pending-run',
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    }
+  });
+  runRepo.insertDiffRows(db, runId, date, 'BU-A', [
+    { source_table: 'flow', source_row_id: 1, multi_op_flag: 'N' }
+  ]);
+  const before = dumpOverwriteState(db);
+  const contract = mkContract({
+    date,
+    datasetSeed: {
+      datasetId: 'flow-replacement',
+      producerTaskRunId: 'flow-replacement-task',
+      expectedDatasetId: 'flow-old',
+      expectedDatasetVersion: 1
+    }
+  });
+
+  db.exec('BEGIN');
+  assert.throws(() => {
+    for (const statement of contract.deleteForOverwrite()) {
+      db.prepare(statement.sql).run(...statement.params);
+    }
+  }, /constraint/i);
+  db.exec('ROLLBACK');
+  assert.deepEqual(dumpOverwriteState(db), before);
+  db.close();
+});
+
 test('expectedHeaders = FLOW_HEADERS（28 列，顺序一致）', () => {
   const c = mkContract();
   assert.deepEqual(c.expectedHeaders, FLOW_HEADERS);
@@ -237,6 +296,8 @@ test('🔴 deleteForOverwrite 先核对 head，再按 diff → run → flow 顺�
   assert.equal(dels.length, 6);
   assert.match(dels[0].sql, /CREATE TEMP TABLE/);
   assert.match(dels[2].sql, /biz_op_recon_dataset_heads/);
+  assert.match(dels[2].sql, /archive_contract_version = 1/);
+  assert.match(dels[2].sql, /archive_terminal_ack_at IS NULL/);
   const businessDeletes = dels.slice(3);
   // 1) 先删该 date 的 diff_rows（run_id IN 该 date runs）
   assert.match(businessDeletes[0].sql, /DELETE FROM biz_op_recon_diff_rows/);

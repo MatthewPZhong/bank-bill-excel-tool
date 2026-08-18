@@ -173,7 +173,7 @@ test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁�
     SELECT archive_artifact_id, archive_state, last_error_code
     FROM vcc_fin_op_import_sources WHERE id = ?
   `).get(source.sourceId) }, {
-    archive_artifact_id: null,
+    archive_artifact_id: artifact.id,
     archive_state: 'unavailable',
     last_error_code: 'archive-artifact-unavailable'
   });
@@ -215,13 +215,30 @@ test('v1 source 的 exact artifactId 缺失或 owner 错误时不改绑相似 me
     `).run(source.sourceId);
     db.exec('PRAGMA foreign_keys = ON');
 
-    const result = reconcileVccImportArchiveLineage({ db, archiveRepository });
-    assert.equal(result.pending, 1);
-    const stored = db.prepare(`
+    const first = reconcileVccImportArchiveLineage({ db, archiveRepository });
+    assert.equal(first.pending, 1);
+    const storedAfterFirst = db.prepare(`
       SELECT archive_artifact_id, archive_state FROM vcc_fin_op_import_sources WHERE id = ?
     `).get(source.sourceId);
-    assert.equal(stored.archive_artifact_id, null);
-    assert.equal(stored.archive_state, 'unavailable');
+    assert.equal(storedAfterFirst.archive_artifact_id, 999999);
+    assert.equal(storedAfterFirst.archive_state, 'unavailable');
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_effective_raw_fallback
+      WHERE import_source_id = ?
+    `).get(source.sourceId).count, 1);
+    assert.equal(archiveRepository.listArtifactHolds(matching.id).length, 0);
+
+    const second = reconcileVccImportArchiveLineage({ db, archiveRepository });
+    assert.equal(second.pending, 1);
+    const storedAfterSecond = db.prepare(`
+      SELECT archive_artifact_id, archive_state FROM vcc_fin_op_import_sources WHERE id = ?
+    `).get(source.sourceId);
+    assert.equal(storedAfterSecond.archive_artifact_id, 999999);
+    assert.equal(storedAfterSecond.archive_state, 'unavailable');
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_effective_raw_fallback
+      WHERE import_source_id = ?
+    `).get(source.sourceId).count, 1);
     assert.equal(archiveRepository.listArtifactHolds(matching.id).length, 0);
   }
 

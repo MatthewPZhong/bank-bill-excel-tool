@@ -3,7 +3,7 @@
 > status: draft / implementation in progress
 > product code baseline: `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`
 > current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`
-> review evidence head (2026-08-18): `458e73f0f2861cacc0579a4bac20b45900bdb3b3`
+> review evidence head (2026-08-18): `001b8059ced56b9d70602c79cdd97d375020c969`
 > baseline version: `3.1.10`（正式发布后的远端 `main`）
 > target version: 3.1.11
 > owner: 存档中心 / 全局任务生命周期 / 工具箱
@@ -72,7 +72,7 @@
 
 - v3.1.10 产品代码基线：`35f11e153962c34cba0e9d4c7084e9df85c9f209`，即 PR #148 的 release commit，`package.json.version=3.1.10`；
 - 当前 PR merge base：`6f1c09236a6c36f72eb82d61dc14508adfe20eec`，即 PR #149 的发布证据合并；相对产品代码基线只修改发布文档、规则和测试，没有 `src/` 产品代码变化；
-- 本轮复审取证 head：`458e73f0f2861cacc0579a4bac20b45900bdb3b3`，用于固定最新评论所审查的实现快照，不作为产品代码基线。
+- 本轮复审取证 head：`001b8059ced56b9d70602c79cdd97d375020c969`，用于固定第六轮评论所审查的实现快照，不作为产品代码基线；前一轮 `458e73f…` 只保留在 implementation notes 的历史证据中。
 
 2026-08-17 初稿生成时，本地 `origin/main` 尚指向 `35f11e…` 且对象库中尚无 `6f1c092…`；该记录只保留为历史时点事实，不能继续描述当前 PR。当前工作树不 rebase、不覆盖既有未跟踪文件；以下“远端产品事实”以 `35f11e…` 为准，“PR 差异”从 `6f1c092…` 计算，“实施进度”以当前共享工作树为准，三者不得混写。
 
@@ -423,6 +423,7 @@ VCC Financial 的文件 handoff 进一步固定为精确指针合同：
 - 月末数据复制到下月侧库时原样保留 datasetId、producer 和 version，不把复制误记为新导入。
 - run 在开始前冻结 T1 OP、T2 OP、Flow 三个 tag 并写 `dataset-input` planned lineage；缺任一真实 head 时按原业务规则拒绝，不按日期找“最近导入”。
 - `biz_op_recon_runs` 记录 Archive contract version、TaskRun identity 和 terminal ack。日期导出冻结一个真实 run；区间导出冻结全部实际采用的 run locator，并分别写 `run-output` lineage。
+- `archive_terminal_ack_at IS NULL` 的 v1 run receipt 是跨库成功事实的唯一恢复入口；OP/Flow 覆盖、月末下月清理和同日同 BU 新 run 必须在各自既有业务事务的任何 DELETE/INSERT 前按真实影响范围拒绝。拒绝时当前受保护事务内的 run、diff、import、dataset head 与主库 mirror 均零变化；月末跨库路径特指下月侧库清理事务零变化，不为此新增跨库回滚框架。历史 v0 和已 ACK run 保持既有覆盖/重跑语义。
 
 #### Pending
 
@@ -682,7 +683,7 @@ prepared.inputPaths + 所有 dialogSelections.filePaths
 | NFB-09 | P0 | 历史过滤 | 95 批样本中 34 个零 artifact 不出现在 list/get/stats/latest/related；raw 仍可读 |
 | NFB-10 | P0 | 统计/分页/直查 | filter 在 SQL pagination 前；cache、internal id、batch number 不能旁路可见性 |
 | NFB-11 | P0 | related | `文件A—无文件B—文件C` 只显示 A/C；复用同一导入的多个 run 与汇总导出的多个 run 仅返回各 pivot run 的直接输入/输出；不递归扩散；单项隐藏、跨重启一致 |
-| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag 且旧 committed lineage 不变；legacy producer 为空不伪造关联；无 date/month/latest fallback |
+| NFB-12 | P0 | batchless/lineage | no-file run 继承正确 parent；dataset 覆盖产生新 tag 且旧 committed lineage 不变；Biz OP 未 ACK receipt 阻断 OP/Flow 覆盖、下月侧库清理与同范围新 run，受保护事务零变化；legacy producer 为空不伪造关联；无 date/month/latest fallback |
 | NFB-13 | P0 | operation context | VCC/Position no-file worker 正常运行、取消、退出、interrupted；无伪 batch number |
 | NFB-14 | P0 | 恢复/重跑 owner | 旧 exact-7 persisted batchContext 继续恢复；新 operation context 版本不混读；Acquiring interrupted resume 复用原 owner/不发号，cancelled/failed partial resume 以新 owner CAS 接管/发新号，原失败批次不变 |
 | NFB-15 | P0 | outbox/旁路 | 空 files outbox 不能新建 batch；legacy createBatch 也走原子 manifest primitive |

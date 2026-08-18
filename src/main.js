@@ -546,6 +546,7 @@ let pendingDb = null;
 let preFundReconciliationService = null;
 let duplicateInboundMatchService = null;
 let positionReconciliationService = null;
+let positionPendingRecoveryPromise = null;
 let vccFinancialOpService = null;
 let appUpdaterService = null;
 let appUpdaterStartupScheduled = false;
@@ -4236,13 +4237,19 @@ function readToolboxRecoveryBatchIds(userDataDir) {
   return { batchIds: [...batchIds], sweepUnsafe: false };
 }
 
-function recoverPositionPendingBeforeInterruptedSweep() {
+async function recoverPositionPendingBeforeInterruptedSweep() {
   const raw = database && database.db
     ? database.getSetting(POSITION_SIDE_DB_PENDING_SETTING)
     : '';
   if (!raw) return null;
   // Service 初始化会核 side-db checkpoint、persist append intent，并以同一 pending 原批次收口。
-  return getPositionReconciliationService();
+  try {
+    getPositionReconciliationService();
+    return await positionPendingRecoveryPromise;
+  } catch (error) {
+    error.blocksArchiveStartup = true;
+    throw error;
+  }
 }
 
 function recoverPendingRunsBeforeInterruptedSweep() {
@@ -18593,15 +18600,25 @@ function getPositionReconciliationService() {
                 || '',
               archiveResult
             });
-        trackArchiveOperationPromise(Promise.resolve(recoveryTask).catch((error) => {
-          appendActivityLogEntry({
-            level: 'error',
-            source: 'main',
-            domain: 'position-reconciliation-recovery',
-            message: '平盘原任务恢复尚未完成，pending 已保留',
-            details: [error && error.message ? error.message : String(error)]
+        positionPendingRecoveryPromise = Promise.resolve(recoveryTask)
+          .then((result) => {
+            const unresolved = readPositionPendingOperation();
+            if (unresolved && unresolved.operationToken === operationToken) {
+              throw new Error('平盘原任务恢复尚未完成，pending 已保留');
+            }
+            return result;
+          })
+          .catch((error) => {
+            appendActivityLogEntry({
+              level: 'error',
+              source: 'main',
+              domain: 'position-reconciliation-recovery',
+              message: '平盘原任务恢复尚未完成，pending 已保留',
+              details: [error && error.message ? error.message : String(error)]
+            });
+            throw error;
           });
-        }));
+        trackArchiveOperationPromise(positionPendingRecoveryPromise);
       } else {
         database.setSetting(
           POSITION_SIDE_DB_CHECKPOINT_SETTING,

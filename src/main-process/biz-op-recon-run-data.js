@@ -67,6 +67,7 @@ function upsertMainRunMirror(mainDb, {
   let mirrorId;
   mainDb.exec('BEGIN');
   try {
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(mainDb, date, buName);
     // 月级覆盖按 (date,BU)：用 LOWER(TRIM(bu_name)) 与对账 normalizeBu 语义一致（防大小写副本残留）。
     mainDb.prepare(
       `DELETE FROM ${RUNS_TABLE} WHERE data_date = ? AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`

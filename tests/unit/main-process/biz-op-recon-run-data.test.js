@@ -91,6 +91,18 @@ function runCurrent({ date, buName }) {
   });
 }
 
+function dumpSideOverwriteState(db) {
+  return {
+    imports: db.prepare('SELECT * FROM biz_op_recon_imports ORDER BY id').all(),
+    runs: db.prepare('SELECT * FROM biz_op_recon_runs ORDER BY id').all(),
+    diffs: db.prepare('SELECT * FROM biz_op_recon_diff_rows ORDER BY id').all(),
+    heads: db.prepare(`
+      SELECT * FROM biz_op_recon_dataset_heads
+      ORDER BY dataset_kind, data_date, normalized_bu
+    `).all()
+  };
+}
+
 test('monthOf：date → YYYY-MM', () => {
   assert.equal(bizOpReconRunData.monthOf('2026-03-15'), '2026-03');
   assert.equal(bizOpReconRunData.monthOf('2026-12-31'), '2026-12');
@@ -210,6 +222,86 @@ test('月末跨月：runBizOpImport（mock worker success）→ 下月侧库写 
     assert.equal(copy[0].account_no, 'ACCX', '副本账户号');
   } finally {
     nextSide.close();
+  }
+});
+
+test('月末下月侧库有未 ACK receipt 时补清事务零变化', async () => {
+  const D = '2026-06-30';
+  const nextDate = '2026-07-01';
+  const monthKey = '2026-06';
+  const nextMonth = '2026-07';
+  const currentRow = shared.makeBizOp({
+    rowIndex: 2, bu: 'BU-C', account: 'ACC-NEW', begin: 0,
+    amtIn: 100, amtOut: 0, end: 100, billDate: D
+  });
+  const currentSide = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  try {
+    importsRepo.insertRows(currentSide, D, [currentRow]);
+  } finally {
+    currentSide.close();
+  }
+
+  const nextSide = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+  let before;
+  try {
+    importsRepo.insertRows(nextSide, D, [shared.makeBizOp({
+      rowIndex: 2, bu: 'BU-C', account: 'ACC-OLD', begin: 0,
+      amtIn: 1, amtOut: 0, end: 1, billDate: D
+    })]);
+    importsRepo.insertRows(nextSide, nextDate, [shared.makeBizOp({
+      rowIndex: 2, bu: 'BU-C', account: 'ACC-NEXT', begin: 1,
+      amtIn: 1, amtOut: 0, end: 2, billDate: nextDate
+    })]);
+    datasetHeads.writeHead(nextSide, {
+      kind: 'op', dataDate: D, buName: 'BU-C',
+      identity: {
+        datasetId: 'next-side-old', producerTaskRunId: 'next-side-old-task',
+        datasetVersion: 1, archiveContractVersion: 1
+      }
+    });
+    datasetHeads.writeHead(nextSide, {
+      kind: 'op', dataDate: nextDate, buName: 'BU-C',
+      identity: {
+        datasetId: 'next-side-next-date', producerTaskRunId: 'next-side-next-task',
+        datasetVersion: 1, archiveContractVersion: 1
+      }
+    });
+    const runId = runRepo.insertArchiveRun(nextSide, {
+      date: D,
+      buName: 'BU-C',
+      archiveTaskRunId: 'next-side-pending-run',
+      stats: {
+        t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+        multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+        t1NotT2Count: 0, t2NotT1Count: 0
+      }
+    });
+    runRepo.insertDiffRows(nextSide, runId, D, 'BU-C', [
+      { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+    ]);
+    before = dumpSideOverwriteState(nextSide);
+  } finally {
+    nextSide.close();
+  }
+
+  const mockWorker = async (db, { datasetSeed }) => {
+    datasetHeads.writeHead(db, {
+      kind: 'op', dataDate: D, buName: 'BU-C',
+      identity: datasetHeads.nextDatasetIdentity(null, datasetSeed.producerTaskRunId, () => datasetSeed.datasetId)
+    });
+    return { status: 'success', buName: 'BU-C', validCount: 1 };
+  };
+  await assert.rejects(bizOpReconRunData.runBizOpImport({
+    userDataDir,
+    runBizOpImportViaWorker: mockWorker,
+    params: { date: D, filePath: 'x.xlsx', batchContext: { taskRunId: 'biz-import-task' } }
+  }), /未 ACK/);
+
+  const verifySide = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+  try {
+    assert.deepEqual(dumpSideOverwriteState(verifySide), before);
+  } finally {
+    verifySide.close();
   }
 });
 

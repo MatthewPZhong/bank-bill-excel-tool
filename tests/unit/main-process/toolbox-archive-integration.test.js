@@ -117,7 +117,7 @@ function buildSplitReadContextHarness() {
 
 function buildToolboxRecoveryBatchIdsReader(fsImpl = fs) {
   const start = mainSource.indexOf('function readToolboxRecoveryBatchIds(userDataDir)');
-  const end = mainSource.indexOf('\nfunction recoverPositionPendingBeforeInterruptedSweep()', start);
+  const end = mainSource.indexOf('\nasync function recoverPositionPendingBeforeInterruptedSweep()', start);
   assert.ok(start >= 0 && end > start, '应定位 Toolbox recovery index 读取实现');
   const source = mainSource.slice(start, end);
   return Function(
@@ -127,6 +127,25 @@ function buildToolboxRecoveryBatchIdsReader(fsImpl = fs) {
     'freezeWorkerBatchContext',
     `${source}\nreturn readToolboxRecoveryBatchIds;`
   )(fsImpl, path, JOURNAL_INDEX_NAME, freezeWorkerBatchContext);
+}
+
+function buildPositionPendingRecoveryOwner({ database, getService, recoveryPromise }) {
+  const start = mainSource.indexOf('async function recoverPositionPendingBeforeInterruptedSweep()');
+  const end = mainSource.indexOf('\nfunction recoverPendingRunsBeforeInterruptedSweep()', start);
+  assert.ok(start >= 0 && end > start, '应定位 Position pending owner recovery');
+  const source = mainSource.slice(start, end);
+  return Function(
+    'database',
+    'POSITION_SIDE_DB_PENDING_SETTING',
+    'getPositionReconciliationService',
+    'positionPendingRecoveryPromise',
+    `${source}\nreturn recoverPositionPendingBeforeInterruptedSweep;`
+  )(
+    database,
+    'position_reconciliation_side_db_pending_v1',
+    getService,
+    recoveryPromise
+  );
 }
 
 test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execute 前完成', () => {
@@ -215,6 +234,73 @@ test('committed 恢复输出携 exact7 回原批次，output descriptor 显式�
       < startupSource.indexOf('if (toolboxStartupRecoveryError) throw toolboxStartupRecoveryError'),
     'Toolbox owner 失败必须在 ArchiveCenter 保留批次后继续阻断启动放行'
   );
+});
+
+test('Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-owner-recovery-failure-'));
+  const db = new DatabaseSync(path.join(root, 'tool-data.sqlite'));
+  t.after(() => {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const pendingRaw = JSON.stringify({ operationToken: 'position-pending-recovery' });
+  const settings = new Map([
+    ['position_reconciliation_side_db_pending_v1', pendingRaw]
+  ]);
+  let rejectRecovery;
+  const recoveryPromise = new Promise((_resolve, reject) => {
+    rejectRecovery = reject;
+  });
+  let serviceCalls = 0;
+  let markOwnerEntered;
+  const ownerEntered = new Promise((resolve) => {
+    markOwnerEntered = resolve;
+  });
+  const recover = buildPositionPendingRecoveryOwner({
+    database: {
+      db,
+      getSetting: (key) => settings.get(key) || ''
+    },
+    getService: () => {
+      serviceCalls += 1;
+      markOwnerEntered();
+      return {};
+    },
+    recoveryPromise
+  });
+  assert.match(
+    mainSource,
+    /positionPendingRecoveryPromise = Promise\.resolve\(recoveryTask\)[\s\S]*?readPositionPendingOperation\(\)/
+  );
+
+  const service = createArchiveService({
+    database: db,
+    rootDir: path.join(root, 'archive')
+  });
+  let sweepCalls = 0;
+  service.markInterruptedTasks = async () => {
+    sweepCalls += 1;
+    return { ok: true, taskCount: 0, batchIds: [] };
+  };
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value),
+      listTemplates: () => []
+    },
+    service,
+    recoverInterruptedTaskOwners: [{ ownerName: 'Position', recover }]
+  });
+  const initializing = controller.initialize();
+  await ownerEntered;
+  assert.equal(serviceCalls, 1);
+  rejectRecovery(new Error('position recovery async failure'));
+  await assert.rejects(
+    initializing,
+    (error) => error && error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+  );
+  assert.equal(sweepCalls, 0);
+  assert.equal(settings.get('position_reconciliation_side_db_pending_v1'), pendingRaw);
 });
 
 test('after-committed 崩溃首次完整启动即归档 ready + task succeeded，第二次启动幂等', async (t) => {

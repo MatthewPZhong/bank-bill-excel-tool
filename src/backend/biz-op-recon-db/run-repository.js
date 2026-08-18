@@ -15,6 +15,33 @@ const DIFF_TABLE = 'biz_op_recon_diff_rows';
 const IMPORTS_TABLE = 'biz_op_recon_imports';
 const FLOW_TABLE = 'biz_op_recon_flow_imports';
 
+function assertNoUnacknowledgedArchiveRunByDateBu(db, date, buName) {
+  const pendingReceipt = db.prepare(`
+    SELECT 1 FROM ${RUNS_TABLE}
+    WHERE data_date = ?
+      AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?))
+      AND archive_contract_version = 1
+      AND archive_terminal_ack_at IS NULL
+    LIMIT 1
+  `).get(date, buName);
+  if (pendingReceipt) {
+    throw new Error('Biz OP 同日同业务方存在未 ACK Archive run receipt，禁止写入');
+  }
+}
+
+function assertNoUnacknowledgedArchiveRunByDate(db, date) {
+  const pendingReceipt = db.prepare(`
+    SELECT 1 FROM ${RUNS_TABLE}
+    WHERE data_date = ?
+      AND archive_contract_version = 1
+      AND archive_terminal_ack_at IS NULL
+    LIMIT 1
+  `).get(date);
+  if (pendingReceipt) {
+    throw new Error('Biz OP 当日存在未 ACK Archive run receipt，禁止覆盖流水');
+  }
+}
+
 function insertRun(db, payload) {
   const {
     date,
@@ -67,6 +94,7 @@ function insertArchiveRun(db, payload) {
     stats = {},
     archiveTaskRunId
   } = payload;
+  assertNoUnacknowledgedArchiveRunByDateBu(db, date, buName);
   const stmt = db.prepare(`
     INSERT INTO ${RUNS_TABLE}
       (data_date, bu_name, status,
@@ -262,6 +290,8 @@ function getDiffRowsByRun(db, runId) {
 // FK 顺序：先 diff_rows，再 runs（diff_rows.run_id FK runs.id）
 // 调用方应包在更大的事务里（与 imports.clearByDateBu 同事务）
 function clearRunsAndDiffsByDateBu(db, date, buName) {
+  assertNoUnacknowledgedArchiveRunByDateBu(db, date, buName);
+
   // 先删 diff_rows（按 run_id IN ...）
   const diffDel = db.prepare(`
     DELETE FROM ${DIFF_TABLE}
@@ -294,6 +324,8 @@ function clearRunsAndDiffsByDateBu(db, date, buName) {
 // FK 顺序：与 ByDateBu 一致，先 diff_rows 再 runs
 // 调用方：runFlowImportAsync（事务内）
 function clearRunsAndDiffsByDate(db, date) {
+  assertNoUnacknowledgedArchiveRunByDate(db, date);
+
   // 先删 diff_rows（按 run_id IN ...）
   const diffDel = db.prepare(`
     DELETE FROM ${DIFF_TABLE}
@@ -314,6 +346,8 @@ function clearRunsAndDiffsByDate(db, date) {
 
 module.exports = {
   acknowledgeArchiveTerminal,
+  assertNoUnacknowledgedArchiveRunByDate,
+  assertNoUnacknowledgedArchiveRunByDateBu,
   insertArchiveRun,
   insertRun,
   getRunByArchiveTaskRunId,

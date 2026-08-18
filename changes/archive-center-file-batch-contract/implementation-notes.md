@@ -6,7 +6,8 @@
 - Initial plan/technical contract: `changes/archive-center-file-batch-contract/techdoc.md`
 - Product code baseline: `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10 release commit）。
 - Current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
-- Review evidence head: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`（2026-08-18 最新复审所用快照）。
+- Previous review evidence head: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`（2026-08-18 前一轮复审所用快照）。
+- Current review evidence head: `001b8059ced56b9d70602c79cdd97d375020c969`（2026-08-18 本轮复审所用快照；历史复审 head 不覆盖）。
 - Do not rebase or overwrite the existing dirty worktree.
 - Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收和文件血缘人工门禁全部闭合。
 
@@ -167,3 +168,73 @@
 | `npm run check:vars` | PASS；仅识别 `src/main-process/archive-center/controller.js`，未命中重要变量 | 本次未改变重要变量、任务状态集合或 Position 业务数据字段；仍以终态/恢复专项代替变量名推断 |
 | reconciliation blindspot pass | 无新增 BLOCK 或资金红线 | 未改金额、币种、方向、匹配、行数或业务主键；只收紧 terminal intent 持久化 identity，真实数据库与资金血缘人工门禁不变 |
 | `npm run release-check` | PASS：ESLint、Smoke、5352/5352 unit、48/48 integration（2385/2385） | 文档同步与 Position terminal 边界进入完整发布回归；runner 的纯耗时清单刷新已还原，不进入本次 diff |
+
+### Current review round（head `001b8059ced56b9d70602c79cdd97d375020c969`）
+
+#### Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| VCC v1 source 的 positive `archive_artifact_id` 即使目标 artifact 缺失也保持不可变 | 该 ID 是业务提交时持久化的精确文件证据；清为 null 会让第二次 reconcile 把 v1 source 重新放入历史 metadata/handoff 匹配 | 清空 ID 后按文件名、TaskRun、source type/ordinal 重新匹配相似 artifact | 缺失时只把 source 标为 `unavailable` 并保留错误；后续重放仍 fail-closed，不改绑、不新增 hold、不删除 raw fallback |
+| Position startup owner 必须等待同一 pending 的实际恢复完成，operation TaskRun 只从 `interrupted` reopen | service 对象创建完成不等于 terminal/finalizer 已完成；通用 sweep 会把未受 batch-id 保护的 operation TaskRun 标为 interrupted | 后台 catch 后继续启动、按 outbox 全局 remaining 猜 Position 是否完成、直接对 interrupted TaskRun 写终态 | owner Promise 完成后仍存在同 operationToken pending 即阻止启动；`interrupted → running → terminal` 使用既有 recovery edge，prepared/running 不增加恢复调用 |
+
+#### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| `node --test tests/unit/main-process/vcc-financial-op-archive-lineage.test.js tests/unit/main-process/position-reconciliation-operation-lifecycle.test.js tests/unit/main-process/toolbox-archive-integration.test.js` | 44/44 PASS | VCC 连续两次 reconcile 保留 exact ID、相似 artifact hold=0、raw fallback 不变；Position 异步 owner 失败保留 pending、阻止 generic sweep；interrupted operation 按 reopen→terminal 收口 |
+| Archive/Position/VCC/Toolbox 9 文件宽回归 | 276/276 PASS | TaskLifecycle、Archive service/controller、Position side service、VCC import/service 与 Toolbox owner 顺序无回归 |
+| 3 个生产 JS + 3 个专项测试 `node --check`；相关 `git diff --check` | PASS | 语法与空白错误 |
+| `npm run check:vars` | PASS；3 个生产文件未命中 important variables | 未改变清单中的金额、币种、匹配、业务主键或公共状态变量；仍以恢复/血缘专项验证实际状态转换 |
+| `npm run release-check` | PASS：ESLint、Smoke、5354/5354 unit、48/48 integration（2385/2385） | 两条 P1 修复进入完整发布回归；integration runner 的纯耗时清单已从最终 diff 还原 |
+| reconciliation blindspot pass（主键血缘、重跑幂等、状态部分失败、审计去向） | 自动化未发现新的金额/币种/方向/匹配变化；VCC exact evidence 不再因二次恢复静默换绑 | ⚠️ 文件审计血缘红线仍需用真实或脱敏 VCC 库人工确认 unavailable source 保留旧 artifact ID；自动化不替代该门禁 |
+
+### Fifth review round（head `001b8059ced56b9d70602c79cdd97d375020c969`）
+
+#### Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| VCC import 的 `metadata.batchId === taskRunId` 只在 public batch DTO 边界精确移除 | 正常成功导入会把 TaskRun UUID 作为业务 result `batchId` 写入 raw metadata；顶层 TaskRun 字段虽已隐藏，该别名仍会从 list/detail 暴露且与公共 batch ID 同名异义 | 删除全部 metadata `batchId`、建设通用 allowlist、修改 VCC 内部 import result/flow identity | raw/internal metadata 与精确 flow identity 保留；只有等于非空 raw TaskRun identity 的别名不进入公共 DTO，不同值的业务 metadata 不受影响 |
+
+#### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| `node --test tests/unit/main-process/archive-service.test.js` | 43/43 PASS | 真实 VCC input-only File Task 成功后，public list/detail 不返回 TaskRun 同值 `metadata.batchId`；raw batch/detail 保留；异值业务 metadata 继续公开 |
+| `node --check src/main-process/archive-center/archive-service.js tests/unit/main-process/archive-service.test.js`；限定 `git diff --check` | PASS | 公共边界实现与专项测试语法、空白错误 |
+| reconciliation blindspot pass（主键血缘、可观测性与隐私） | 无新增资金红线或 BLOCK | 只改变公共 DTO 投影，不改 VCC 原始文件、金额、币种、匹配、业务入库、flow identity 或 raw 审计 metadata |
+| Archive/Position/VCC/Toolbox 9 文件宽回归 | 277/277 PASS | 三条当前 P1 修复共同进入 TaskLifecycle、Archive service/controller、Position、VCC 与 Toolbox owner 组合验证 |
+| `npm run check:vars` | PASS；4 个生产文件未命中 important variables | 未改变清单中的金额、币种、匹配、业务主键或公共状态变量；专项状态/血缘验证仍保留 |
+| `npm run release-check` | PASS：ESLint、Smoke、5355/5355 unit、48/48 integration（2385/2385） | 本轮公共 DTO 修复进入完整发布回归；integration runner 的纯时间戳/耗时刷新已从最终 diff 还原 |
+
+### Sixth review round（head `001b8059ced56b9d70602c79cdd97d375020c969`）
+
+#### Unknowns register
+
+| 项目 | 分类 | 结论 |
+| --- | --- | --- |
+| OP 覆盖范围 | PROBE → closed | 真实影响范围是 `(D, normalized BU)` 与作为 T-2 的 `(D+1, normalized BU)`；复用既有两次清理调用，不新增范围推断 |
+| Flow 默认引擎旁路 | PROBE → closed | 默认大表引擎使用 `contract-flow.js` 的 SQL 契约，不调用 run repository；必须在既有 head CHECK 中加入 date 级未 ACK receipt 条件 |
+| 月末跨库原子范围 | PROBE → closed | 当前可保证的是下月侧库既有单事务内 imports/runs/diffs/heads 零变化；不新增跨库事务或补偿框架 |
+| 新 run 与主库 mirror | PROBE → closed | side run 首次写入与 main mirror 替换均以 `(date, normalized BU)` 为真实写范围，在各自已有 transaction 中阻断 |
+
+#### Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| 用两个单用途 repository guard 保护 date+BU 与 date 范围，并只在真实写入口调用 | 未 ACK v1 receipt 是崩溃后 module owner 恢复 Archive terminal 的唯一精确事实；保护点必须早于首个业务 DELETE/INSERT | 为所有 repository 方法重复校验、增加通用 receipt 框架、按 latest/date 猜恢复对象 | OP 同步/worker 清理、Flow legacy 清理、新 side run 与 main mirror 复用同一范围语义；历史 v0 和已 ACK receipt 不受影响 |
+| Flow 默认引擎只扩展既有 head guard CASE | 该路径的覆盖 SQL 是有意独立的引擎契约；在现有 transaction guard 中加入同日未 ACK 查询即可在首个持久 DELETE 前拒绝 | 为引擎再复制 repository 层、引入锁或第二套状态机 | engine/legacy 两路失败后旧流水、run/diff 与 dataset head 均保持不变 |
+| 月末失败只承诺下月侧库事务零变化 | 当前 handler 先完成当月导入，再在下月侧库单独事务补清/复制；评论所指的数据丢失发生在下月清理 | 为该评论扩展跨数据库回滚或预检协议 | 下月 imports/runs/diffs/heads 回滚；当月已成功导入不被虚假回滚 |
+
+#### Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| Biz OP 本轮 4 个聚焦 unit 文件 | 70/70 PASS | 同范围新 run、OP 重导、Flow 覆盖、main mirror、月末下月侧库均在未 ACK receipt 下 fail-closed 且受保护表零变化 |
+| Biz OP 11 个 unit 文件宽回归 | 191/191 PASS | schema/head、两类 import、worker contract、lineage、run-data 与既有金额/日期规则无回归 |
+| `bizop-flow-engine-migration.js` / Biz OP smoke / side-db parity | 73/73、171/171、16/16 PASS | 默认引擎与 legacy Flow 语义一致；Biz OP 资金算法与侧库镜像兼容保持 |
+| 3 个生产 JS + 4 个 unit + 1 个 integration `node --check`；`git diff --check` | PASS | 语法与空白错误；实现只增加真实 admission guard，无 fallback、retry、锁或重复 DTO 校验 |
+| `npm run check:vars` | PASS；扫描 7 个当前生产改动文件，未命中自动清单 | 人工 review 仍按 Risk-sensitive Biz OP 清理范围和 Critical 默认 Flow 引擎边界执行，不以名称扫描替代资金复核 |
+| `npm run release-check` | PASS：ESLint、Smoke、5363/5363 unit、48/48 integration（2393/2393） | 第六轮修复与前三条本地 P1 共同进入完整发布回归；集成清单保留新增 8 条断言，纯时间戳/耗时刷新已还原 |
+| reconciliation blindspot pass（血缘、覆盖幂等、部分失败、行数/金额/币种） | 无新 BLOCK；未改金额、币种、方向、匹配、行映射或 DELETE 顺序 | ⚠️ 未 ACK receipt 属资金审计血缘红线；发布前仍需用真实或脱敏 Biz OP 库人工复核 guard scope、owner ACK 恢复及 OP/Flow 覆盖后的行数与输出 |

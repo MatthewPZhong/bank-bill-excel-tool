@@ -95,7 +95,7 @@ function markSourceFailure(db, source, code, message) {
 function markReadySourceUnavailable(db, source) {
   db.prepare(`
     UPDATE vcc_fin_op_import_sources
-    SET archive_artifact_id = NULL, archive_state = 'unavailable',
+    SET archive_state = 'unavailable',
         last_error_code = 'archive-artifact-unavailable',
         last_error_message = '已绑定的输入文件存档已不存在',
         updated_at = datetime('now', 'localtime')

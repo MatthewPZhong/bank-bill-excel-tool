@@ -71,6 +71,7 @@ async function runChild(opJsonPath, dbPath) {
       const o = op.ops[operationIndex];
       // 可选：种关联表数据（覆盖删除链验证；先于覆盖重导）。
       if (o.seedAux) seedAuxTables(db, op.date);
+      if (o.seedUnackReceipt) seedUnacknowledgedReceipt(db, op.date);
       const previousHead = datasetHeadRepository.getHead(db, 'flow', op.date);
 
       const r = await session.runFlowImportViaWorker(db, {
@@ -161,7 +162,13 @@ function dumpDb(db) {
     runs: db.prepare('SELECT COUNT(*) AS n FROM biz_op_recon_runs').get().n,
     diff_rows: db.prepare('SELECT COUNT(*) AS n FROM biz_op_recon_diff_rows').get().n
   };
-  return { flow_rows, counts };
+  const heads = db.prepare(`
+    SELECT dataset_kind, data_date, normalized_bu, dataset_id,
+      producer_task_run_id, dataset_version, archive_contract_version
+    FROM biz_op_recon_dataset_heads
+    ORDER BY dataset_kind, data_date, normalized_bu
+  `).all();
+  return { flow_rows, counts, heads };
 }
 
 // 种关联表数据（覆盖删除链验证用）：该 date 的 runs + diff_rows（重导后应被 clearRunsAndDiffsByDate 清空）。
@@ -173,6 +180,20 @@ function seedAuxTables(db, date) {
     INSERT INTO biz_op_recon_diff_rows (run_id, data_date, bu_name, source_table, source_row_id, multi_op_flag)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(runId, date, 'BU-OLD', 'biz_op_recon_imports', 1, '否');
+}
+
+function seedUnacknowledgedReceipt(db, date) {
+  const runId = Number(db.prepare(`
+    INSERT INTO biz_op_recon_runs (
+      data_date, bu_name, status, flow_total,
+      archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+    ) VALUES (?, 'BU-A', 'success', 1, 1, 'bizop-flow-pending-receipt', NULL)
+  `).run(date).lastInsertRowid);
+  db.prepare(`
+    INSERT INTO biz_op_recon_diff_rows (
+      run_id, data_date, bu_name, source_table, source_row_id, multi_op_flag
+    ) VALUES (?, ?, 'BU-A', 'biz_op_recon_flow_imports', 1, '否')
+  `).run(runId, date);
 }
 
 // ─────────────────────── 主进程模式 ───────────────────────
@@ -516,6 +537,29 @@ async function main() {
         m1Report && m1Report.cells[bizIdx] === 'biz-P1',
         '🔴 ⑩ rawRow biz_id 前后空格被归一（"  biz-P1  "→"biz-P1"）', m1Report ? JSON.stringify(m1Report.cells[bizIdx]) : 'no-report-row'
       );
+    }
+
+    // ════════════ ⑪ 未 ACK v1 receipt 阻止覆盖，legacy / engine 均保持四表零变化 ════════════
+    {
+      const fInit = path.join(tmpdir, 'flowReceiptInit.xlsx');
+      const fOver = path.join(tmpdir, 'flowReceiptOver.xlsx');
+      await writeXlsx(fInit, FLOW_HEADERS, [makeFlowRow('A1')]);
+      await writeXlsx(fOver, FLOW_HEADERS, [makeFlowRow('A2')]);
+      const r = runBothPaths({
+        tmpdir, date: '2026-06-14', tag: 'case11', dumpAfter: true,
+        ops: [
+          { files: [fInit] },
+          { files: [fOver], seedUnackReceipt: true }
+        ]
+      });
+      assertEq(r.engine.results[1].status, 'error', '⑪ engine 未 ACK receipt 拒绝覆盖');
+      assertEq(r.legacy.results[1].status, 'error', '⑪ legacy 未 ACK receipt 拒绝覆盖');
+      assertEq(r.engine.dump.flow_rows.map((row) => row.biz_id), ['biz-A1'], '🔴 ⑪ engine 保留原流水');
+      assertEq(r.legacy.dump.flow_rows.map((row) => row.biz_id), ['biz-A1'], '⑪ legacy 保留原流水');
+      assertEq(r.engine.dump.counts, { runs: 1, diff_rows: 1 }, '🔴 ⑪ engine 保留 run/diff receipt');
+      assertEq(r.legacy.dump.counts, { runs: 1, diff_rows: 1 }, '⑪ legacy 保留 run/diff receipt');
+      assertEq(r.engine.dump.heads, r.legacy.dump.heads, '🔴 ⑪ flow dataset head 两路均未推进');
+      assertEq(r.engine.dump.flow_rows, r.legacy.dump.flow_rows, '🔴 ⑪ 未 ACK 失败后流水两路一致');
     }
 
     console.log(`bizop-flow-engine-migration: ${passed}/${passed + failed} PASS`);

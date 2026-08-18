@@ -213,9 +213,13 @@ function publicBatch(batch) {
     parentRunId: _parentRunId,
     ...visible
   } = batch;
+  const omittedMetadataKeys = ['_fileManifest'];
+  if (batch.taskRunId && batch.metadata.batchId === batch.taskRunId) {
+    omittedMetadataKeys.push('batchId');
+  }
   return {
     ...visible,
-    metadata: publicMetadata(batch.metadata, ['_fileManifest'])
+    metadata: publicMetadata(batch.metadata, omittedMetadataKeys)
   };
 }
 

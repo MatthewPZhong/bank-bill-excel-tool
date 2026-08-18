@@ -24,6 +24,18 @@ function identity(datasetId, producerTaskRunId, datasetVersion = 1) {
   return { datasetId, producerTaskRunId, datasetVersion, archiveContractVersion: 1 };
 }
 
+function dumpBizOpState(db) {
+  return {
+    imports: db.prepare('SELECT * FROM biz_op_recon_imports ORDER BY id').all(),
+    runs: db.prepare('SELECT * FROM biz_op_recon_runs ORDER BY id').all(),
+    diffs: db.prepare('SELECT * FROM biz_op_recon_diff_rows ORDER BY id').all(),
+    heads: db.prepare(`
+      SELECT * FROM biz_op_recon_dataset_heads
+      ORDER BY dataset_kind, data_date, normalized_bu
+    `).all()
+  };
+}
+
 function seedSources(db) {
   imports.insertRows(db, '2026-05-22', [{
     _rowIndex: 1, bu_name: 'BU-A', account_no: 'A-1', end_balance: '110'
@@ -120,6 +132,58 @@ test('Biz run 冻结三源 lineage，并在同一事务写 v1 receipt', () => {
   assert.equal(receipt.archive_contract_version, 1);
   assert.equal(receipt.archive_task_run_id, 'biz-run-task');
   assert.equal(receipt.archive_terminal_ack_at, null);
+  db.close();
+});
+
+test('Biz 同日同规范化 BU rerun 遇未 ACK receipt 时不落第二个 run/diff', () => {
+  const db = new DatabaseSync(':memory:');
+  ensureBizOpReconTablesSupport(db);
+  seedSources(db);
+  const plan = lineage.bizOpRunLineagePlan(db, { date: '2026-05-22', buName: 'BU-A' });
+  session.runReconciliation(db, {
+    date: '2026-05-22',
+    buName: 'BU-A',
+    archiveReceipt: { archiveContractVersion: 1, archiveTaskRunId: 'biz-first-run' },
+    expectedDatasets: plan.expectedDatasets
+  });
+  const before = dumpBizOpState(db);
+
+  assert.throws(() => session.runReconciliation(db, {
+    date: '2026-05-22',
+    buName: '  bu-a  ',
+    archiveReceipt: { archiveContractVersion: 1, archiveTaskRunId: 'biz-late-run' },
+    expectedDatasets: plan.expectedDatasets
+  }), /未 ACK/);
+  assert.deepEqual(dumpBizOpState(db), before);
+  db.close();
+});
+
+test('Biz OP 重导遇未 ACK receipt 时 imports/run/diff/head 零变化', async () => {
+  const db = new DatabaseSync(':memory:');
+  ensureBizOpReconTablesSupport(db);
+  seedSources(db);
+  const plan = lineage.bizOpRunLineagePlan(db, { date: '2026-05-22', buName: 'BU-A' });
+  session.runReconciliation(db, {
+    date: '2026-05-22',
+    buName: 'BU-A',
+    archiveReceipt: { archiveContractVersion: 1, archiveTaskRunId: 'biz-pending-run' },
+    expectedDatasets: plan.expectedDatasets
+  });
+  const before = dumpBizOpState(db);
+  const replacement = shared.makeBizOp({
+    rowIndex: 2, bu: ' bu-a ', account: 'A-2', begin: 0,
+    amtIn: 20, amtOut: 0, end: 20, billDate: '2026-05-22'
+  });
+
+  await assert.rejects(session.runBizOpImportAsync(db, {
+    date: '2026-05-22',
+    filePath: '/tmp/biz-op-reimport.xlsx',
+    readBizOpFile: () => ({ rows: [replacement] }),
+    writeBizOpErrorReportXlsx: async () => { throw new Error('unexpected report'); },
+    errorReportsDir: '/tmp',
+    datasetSeed: { datasetId: 'replacement-op', producerTaskRunId: 'replacement-op-task' }
+  }), /未 ACK/);
+  assert.deepEqual(dumpBizOpState(db), before);
   db.close();
 });
 
@@ -257,6 +321,34 @@ test('Biz main 已 ack 而 side 未 ack 时，不用旧 receipt 回滚后写的�
   });
   assert.equal(runs.getRunById(appDb.db, newerMirrorId).archive_task_run_id, 'biz-new-task');
   assert.equal(runs.getRunByArchiveTaskRunId(appDb.db, task.taskRunId), null);
+});
+
+test('Biz 主库 mirror 覆盖遇未 ACK receipt 时保留原镜像', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'biz-mirror-unack-'));
+  const appDb = new AppDatabase(path.join(directory, 'tool-data.sqlite'));
+  appDb.init();
+  t.after(() => {
+    appDb.close();
+    fs.rmSync(directory, { recursive: true, force: true });
+  });
+  const relPath = runDataStore.sideDbRelPath(runDataStore.MODULE_BIZ_OP, '2026-05');
+  const stats = {
+    t1OpTotal: 3, t2OpTotal: 2, flowTotal: 1, amountDiffCount: 1,
+    multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+    t1NotT2Count: 0, t2NotT1Count: 0
+  };
+  const mirrorId = runData.upsertMainRunMirror(appDb.db, {
+    date: '2026-05-22', buName: 'BU-A', relPath,
+    stats, status: 'success', archiveTaskRunId: 'biz-pending-mirror'
+  });
+  const before = { ...runs.getRunById(appDb.db, mirrorId) };
+
+  assert.throws(() => runData.upsertMainRunMirror(appDb.db, {
+    date: '2026-05-22', buName: '  bu-a ', relPath,
+    stats: { ...stats, flowTotal: 99 }, status: 'success', archiveTaskRunId: 'biz-late-mirror'
+  }), /未 ACK/);
+  assert.deepEqual({ ...runs.getRunById(appDb.db, mirrorId) }, before);
+  assert.equal(runs.listRunsByDateBu(appDb.db, '2026-05-22', 'BU-A').length, 1);
 });
 
 test('Biz 显式重跑在新 side receipt 后崩溃时，可替换同日已 ack 旧 mirror', async (t) => {

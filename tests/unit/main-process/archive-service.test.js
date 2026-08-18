@@ -274,6 +274,83 @@ test('public list/detail 剔除 manifest、alias 与 source/target snapshot', as
   }
 });
 
+test('public VCC File Task 隐藏与 taskRunId 同值的 metadata.batchId，保留 raw 与业务异值', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'vcc-public-input.xlsx', 'vcc-input');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'vcc-public-file-task',
+      taskKey: 'vccFinancialOp:import:apply',
+      moduleId: 'vcc-financial-op',
+      parentRunId: 'vcc-public-parent',
+      operationKey: 'vcc-public-file-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{
+        filePath: inputPath,
+        role: 'input',
+        sourceOperation: 'vccFinancialOp:import:apply'
+      }],
+      outputs: []
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'VCCFINOP',
+      moduleName: 'VCC财务OP校验'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: manifest.inputs[0].artifactKey }]
+    });
+    assert.equal(settled.durable, true);
+    const finished = await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id, {
+      taskStatus: 'succeeded',
+      metadata: { batchId: task.taskRunId }
+    });
+    assert.equal(finished.ok, true);
+
+    const listed = await fixture.service.listBatches({ moduleId: task.moduleId });
+    const publicListBatch = listed.batches.find((batch) => batch.id === reserved.batch.id);
+    const publicDetail = await fixture.service.getBatch(reserved.batch.id);
+    assert.equal('taskRunId' in publicListBatch, false);
+    assert.equal('batchId' in publicListBatch.metadata, false);
+    assert.equal('taskRunId' in publicDetail.batch, false);
+    assert.equal('batchId' in publicDetail.batch.metadata, false);
+
+    const rawBatch = fixture.repository.getBatch(reserved.batch.id);
+    const rawDetail = fixture.repository.getBatchDetail(reserved.batch.id);
+    assert.equal(rawBatch.metadata.batchId, task.taskRunId);
+    assert.equal(rawDetail.metadata.batchId, task.taskRunId);
+
+    const businessBatchId = 'vcc-business-import-batch';
+    fixture.db.prepare('UPDATE archive_batches SET metadata_json = ? WHERE id = ?').run(
+      JSON.stringify({ ...rawBatch.metadata, batchId: businessBatchId }),
+      reserved.batch.id
+    );
+    const relisted = await fixture.service.listBatches({ moduleId: task.moduleId });
+    const publicBusinessBatch = relisted.batches.find((batch) => batch.id === reserved.batch.id);
+    const businessDetail = await fixture.service.getBatch(reserved.batch.id);
+    assert.equal(publicBusinessBatch.metadata.batchId, businessBatchId);
+    assert.equal(businessDetail.batch.metadata.batchId, businessBatchId);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('File Batch 保留期由 service 统一应用默认、永久与显式天数语义', async () => {
   const fixture = createFixture();
   try {

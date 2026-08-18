@@ -606,6 +606,15 @@ async function settlePositionRecoveredTask({ pending, archiveService }) {
         || taskRun.moduleId !== context.moduleId) {
       throw new Error('平盘恢复 operationContext 与原 Task Run 身份不一致');
     }
+    if (taskRun.status === 'interrupted') {
+      const reopened = await archiveService.beginTaskRunRecovery(context.taskRunId);
+      if (!reopened || reopened.ok === false
+          || !reopened.taskRun
+          || reopened.taskRun.taskRunId !== context.taskRunId
+          || reopened.taskRun.status !== 'running') {
+        throw new Error(reopened && reopened.message || '平盘 operation Task Run 恢复运行态失败');
+      }
+    }
     const outcome = positionRecoveryTerminalOutcome(pending);
     const result = await archiveService.finishTaskRun(context.taskRunId, {
       ...outcome,

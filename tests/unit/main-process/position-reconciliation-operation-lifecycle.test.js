@@ -127,6 +127,51 @@ test('worker 接受 no-file 取消后把 operation owner cancelled 意图写入 
   assert.equal(calls[0].outcome.taskStatus, 'cancelled');
 });
 
+test('interrupted operation owner 启动恢复先 reopen running 再写终态', async () => {
+  const operationContext = {
+    taskRunId: 'position-interrupted-token',
+    taskKey: 'position-reconciliation:run',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-interrupted-parent',
+    operationKey: 'position:position-interrupted-token:run'
+  };
+  let status = 'interrupted';
+  const calls = [];
+  const settled = await settlePositionRecoveredTask({
+    pending: {
+      operationToken: operationContext.taskRunId,
+      businessState: 'success',
+      owner: {
+        version: 1,
+        kind: 'operation',
+        operationContext
+      }
+    },
+    archiveService: {
+      repository: {
+        getTaskRun() {
+          return { ...operationContext, status };
+        }
+      },
+      async beginTaskRunRecovery(taskRunId) {
+        calls.push(['reopen', taskRunId]);
+        status = 'running';
+        return { ok: true, taskRun: { ...operationContext, status } };
+      },
+      async finishTaskRun(taskRunId, outcome) {
+        calls.push(['finish', taskRunId, outcome.taskStatus]);
+        status = outcome.taskStatus;
+        return { ok: true, taskRun: { ...operationContext, status } };
+      }
+    }
+  });
+  assert.equal(settled.taskRun.status, 'succeeded');
+  assert.deepEqual(calls, [
+    ['reopen', operationContext.taskRunId],
+    ['finish', operationContext.taskRunId, 'succeeded']
+  ]);
+});
+
 test('暂存保护集合同时包含持久 outbox 与当前主库 pending 输入', () => {
   assert.deepEqual(positionPersistentStagingProtectionPaths(
     ['/tmp/outbox.xlsx'],

@@ -141,7 +141,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 | `bank-statement-universal-import-routing.js` | 20 | 20 | 320 |
 | `big-table-import-engine.js` | 19 | 19 | 7642 |
 | `biz-op-recon-side-db-parity.js` | 16 | 16 | 313 |
-| `bizop-flow-engine-migration.js` | 65 | 65 | 5343 |
+| `bizop-flow-engine-migration.js` | 73 | 73 | 5343 |
 | `duplicate-inbound-match-end-to-end.js` | 28 | 28 | 355 |
 | `fund-transfer-recon-account-mapping.js` | 19 | 19 | 209 |
 | `gateway-channel-filter-equivalence.js` | 23 | 23 | 213 |
@@ -178,7 +178,7 @@ run().catch((e) => { console.error('FATAL', e); process.exit(1); });
 | `vcc-financial-op-destructive-state-chain.js` | 77 | 77 | 1472 |
 | `vcc-financial-op-effective-result.js` | 19 | 19 | 189 |
 | `vcc-financial-op-historical-template-export.js` | 29 | 29 | 1067 |
-| **合计** | **2385** | **2385** | **302301** |
+| **合计** | **2393** | **2393** | **302301** |
 
 > 同步策略：runner 末尾全 PASS 时 in-place 替换本章节；任一脚本 FAIL → 本章节不更新（避免被损坏数据覆盖）。
 
