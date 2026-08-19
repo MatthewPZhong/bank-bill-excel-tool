@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const ExcelJS = require('exceljs');
+const XLSX = require('xlsx');
 const { DatabaseSync } = require('node:sqlite');
 
 const {
@@ -25,8 +26,12 @@ const repository = require('../../src/backend/vcc-financial-op-db/repository');
 const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES,
-  PENDING_HEADERS
+  PENDING_HEADERS,
+  getSourceDefinition
 } = require('../../src/backend/vcc-financial-op/definitions');
+const {
+  importDetailGroup
+} = require('../../src/backend/vcc-financial-op/detail-importer');
 const {
   REQUIRED_DATASET_TYPES
 } = require('../../src/backend/vcc-financial-op/calculator');
@@ -40,6 +45,9 @@ const {
 const {
   createVccFinancialOpService
 } = require('../../src/main-process/vcc-financial-op-service');
+const {
+  writeDatasetWorkbook
+} = require('../../src/main-process/vcc-financial-op-dataset-writer');
 
 const M1 = '2026-05';
 const M2 = '2026-06';
@@ -188,14 +196,47 @@ function insertEffectiveRow(db, targetMonth, fields) {
   );
 }
 
-function seedMonth(db, targetMonth, systemBalances) {
-  insertEffectiveRow(db, targetMonth, {
-    sourceType: SOURCE_TYPES.RECHARGE,
-    statCurrency: 'USD',
-    signedAmount: '10',
-    businessSubType: '充值',
-    counterpartyDepartment: 'OPS'
+async function importRechargeRows(db, tempDir, targetMonth) {
+  const definition = getSourceDefinition(SOURCE_TYPES.RECHARGE);
+  const row = (key, currency, amount) => ({
+    订单号: key,
+    BillDate: `${targetMonth}-09`,
+    业务部门: 'VCC',
+    对手部门: 'OPS',
+    业务子类型: '充值',
+    出入方向: 'in',
+    公司主体: SUBJECT,
+    我方币种: currency,
+    我方到账金额: amount
   });
+  const rows = [
+    row(`${targetMonth}-recharge-usd`, 'USD', '10'),
+    row(`${targetMonth}-recharge-cny`, 'CNY', '2'),
+    row(`${targetMonth}-recharge-cnh`, 'CNH', '3')
+  ];
+  const matrix = [
+    definition.headers,
+    ...rows.map((fields) => definition.headers.map((header) => fields[header] || ''))
+  ];
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(matrix), '充值');
+  const filePath = path.join(tempDir, `${targetMonth}-recharge-cnh.xlsx`);
+  XLSX.writeFile(workbook, filePath);
+  const batchId = `adjustment-chain-${targetMonth}-${SOURCE_TYPES.RECHARGE}`;
+  repository.createImportBatch(db, { id: batchId, targetMonth, fileCount: 1 });
+  const result = await importDetailGroup({
+    db,
+    batchId,
+    targetMonth,
+    sourceType: SOURCE_TYPES.RECHARGE,
+    files: [{ filePath, sourceType: SOURCE_TYPES.RECHARGE, subject: '' }]
+  });
+  repository.finishImportBatch(db, batchId, result.status.startsWith('failed') ? 'failed' : 'success');
+  return { result, filePath };
+}
+
+async function seedMonth(db, tempDir, targetMonth, systemBalances) {
+  const rechargeImport = await importRechargeRows(db, tempDir, targetMonth);
   insertEffectiveRow(db, targetMonth, {
     sourceType: SOURCE_TYPES.FEE_FX,
     statCurrency: 'USD',
@@ -240,10 +281,13 @@ function seedMonth(db, targetMonth, systemBalances) {
       target_month, dataset_type, data_status, revision
     ) VALUES (?, ?, 'unprocessed', 1)
   `);
-  for (const sourceType of REQUIRED_DATASET_TYPES) insertDataset.run(targetMonth, sourceType);
+  for (const sourceType of REQUIRED_DATASET_TYPES) {
+    if (sourceType !== SOURCE_TYPES.RECHARGE) insertDataset.run(targetMonth, sourceType);
+  }
 
   // 直接 SQL fixture 也走与正式启动相同的 Pending v2 幂等迁移。
   ensureVccFinancialOpTablesSupport(db);
+  return rechargeImport;
 }
 
 function balanceOf(result, currency) {
@@ -277,6 +321,13 @@ function assertExportMatchesEffectiveResult(workbook, effectiveResult, archivedB
 
   const review = effectiveResult.review.subjects.find((item) => item.subject === SUBJECT);
   const sheet = workbook.getWorksheet(RESULT_SHEET_NAME);
+  assertDeepEq(
+    Array.from({ length: SUPPORTED_CURRENCIES.length }, (_unused, index) => (
+      sheet.getCell(1, index + 4).value
+    )),
+    SUPPORTED_CURRENCIES,
+    '结果 Excel 规范币种列固定为九币种且不含 CNH'
+  );
   const expectedRows = [
     {
       type: 'opening',
@@ -355,13 +406,41 @@ async function run() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vcc-adjustment-archive-chain-'));
   const dbPath = path.join(tempDir, 'tool-data.sqlite');
   const outputPath = path.join(tempDir, 'archived-adjusted-result.xlsx');
+  const rechargeRawPath = path.join(tempDir, 'recharge-raw.xlsx');
+  const rechargeCheckPath = path.join(tempDir, 'recharge-check.xlsx');
   const assetsDir = path.resolve(__dirname, '../../assets');
   let db = null;
   let service = null;
   console.log('==== VCC 财务OP结果调整与跨月归档链集成验证 ====');
   try {
     db = openDatabase(dbPath);
-    seedMonth(db, M1, fixedBalances('100', { USD: '104.25', EUR: '108' }));
+    const m1Recharge = await seedMonth(
+      db,
+      tempDir,
+      M1,
+      fixedBalances('100', { CNY: '105', USD: '104.25', EUR: '108' })
+    );
+    assertEq(m1Recharge.result.status, 'success', '真实 XLSX 充值原表导入成功');
+    assertEq(m1Recharge.result.rawCount, 3, '真实 XLSX 三行原始充值行数守恒');
+    assertEq(m1Recharge.result.insertedCount, 3, '真实 XLSX 三行均提升为有效事实');
+    const importedRecharge = db.prepare(`
+      SELECT stat_currency, signed_amount, raw_json, hash_version
+      FROM vcc_fin_op_effective_rows
+      WHERE target_month = ? AND source_type = ?
+      ORDER BY id
+    `).all(M1, SOURCE_TYPES.RECHARGE);
+    assertDeepEq(
+      importedRecharge.map((row) => [row.stat_currency, row.signed_amount]),
+      [['USD', '10'], ['CNY', '2'], ['CNY', '3']],
+      'CNY/CNH 不同键在业务事实层同归 CNY 且金额逐行不丢失'
+    );
+    assertTrue(importedRecharge.every((row) => Number(row.hash_version) === 2), '新导入统一写规范哈希 v2');
+    const rechargeCurrencyIndex = getSourceDefinition(SOURCE_TYPES.RECHARGE).indexes.我方币种;
+    assertDeepEq(
+      importedRecharge.map((row) => JSON.parse(row.raw_json)[rechargeCurrencyIndex]),
+      ['USD', 'CNY', 'CNH'],
+      '有效事实 raw_json 保留 CNH 原始币种'
+    );
 
     service = createVccFinancialOpService({
       database: { db, dbPath },
@@ -391,6 +470,18 @@ async function run() {
     assertEq(initial.resultRevision, 0, '新计算结果 revision 从 0 开始');
     assertEq(balanceOf(initial, 'USD').effectiveCalculatedBalance, '103', 'M1 调整前 USD 基础计算余额正确');
     assertEq(balanceOf(initial, 'EUR').effectiveCalculatedBalance, '108', 'M1 EUR 基础计算余额正确');
+    assertEq(balanceOf(initial, 'CNY').effectivePeriodAmount, '5', 'M1 CNY 汇总合并 CNY+CNH 金额且守恒');
+    assertDeepEq(
+      Object.fromEntries(SUPPORTED_CURRENCIES.map((currency) => [
+        currency,
+        balanceOf(initial, currency).effectivePeriodAmount
+      ])),
+      Object.fromEntries(SUPPORTED_CURRENCIES.map((currency) => [
+        currency,
+        ({ CNY: '5', USD: '3', EUR: '8' })[currency] || '0'
+      ])),
+      '新增 CNY/CNH 只影响 CNY，其他八币种发生额保持既有口径'
+    );
 
     const options = service.listAdjustmentOptions({ runId });
     const rechargeOption = options.options.find((row) => (
@@ -506,6 +597,8 @@ async function run() {
     assertDeepEq(Object.keys(archivedBalances), SUPPORTED_CURRENCIES, '归档快照完整保存九币种');
     assertEq(archivedBalances.USD, '104.25', '归档快照使用调整后 USD 生效余额');
     assertEq(archivedBalances.EUR, '108', '归档快照保留 EUR 生效余额');
+    assertEq(archivedBalances.CNY, '105', '归档快照 CNY 保留 CNY+CNH 合并余额');
+    assertTrue(!Object.hasOwn(archivedBalances, 'CNH'), '归档快照不扩展 CNH 第十币种');
     assertEq(
       Number(db.prepare(`
         SELECT COUNT(*) AS row_count FROM vcc_fin_op_datasets
@@ -546,7 +639,37 @@ async function run() {
     await workbook.xlsx.readFile(outputPath);
     assertExportMatchesEffectiveResult(workbook, archivedResult, archivedBalances);
 
-    seedMonth(db, M2, fixedBalances('100', { USD: '107.25', EUR: '116' }));
+    for (const [targetKind, datasetPath] of [
+      ['raw', rechargeRawPath],
+      ['check', rechargeCheckPath]
+    ]) {
+      const written = await writeDatasetWorkbook({
+        db,
+        targetMonth: M1,
+        sourceType: SOURCE_TYPES.RECHARGE,
+        targetKind,
+        outputPath: datasetPath
+      });
+      assertEq(written.dataCount, 3, `${targetKind} 派生 Excel 行数守恒`);
+      const datasetWorkbook = new ExcelJS.Workbook();
+      await datasetWorkbook.xlsx.readFile(datasetPath);
+      const datasetSheet = datasetWorkbook.worksheets[0];
+      const headers = datasetSheet.getRow(1).values.slice(1);
+      const currencyColumn = headers.indexOf('我方币种') + 1;
+      assertTrue(currencyColumn > 0, `${targetKind} 派生 Excel 保留原始币种列`);
+      assertDeepEq(
+        [2, 3, 4].map((rowNumber) => datasetSheet.getCell(rowNumber, currencyColumn).value),
+        ['USD', 'CNY', 'CNH'],
+        `${targetKind} 派生 Excel 原始列仍可审计 CNH`
+      );
+    }
+
+    await seedMonth(
+      db,
+      tempDir,
+      M2,
+      fixedBalances('100', { CNY: '110', USD: '107.25', EUR: '116' })
+    );
     const m2Preflight = service.preflightRun({ targetMonth: M2 });
     assertEq(m2Preflight.ok, true, 'M2 在 M1 归档后预检通过');
     assertEq(m2Preflight.openingState.source, 'previous_archive', 'M2 期初来源明确为上月归档');

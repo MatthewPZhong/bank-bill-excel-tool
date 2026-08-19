@@ -549,7 +549,7 @@ test('系统财务OP拒绝非法日期、非VCC部门、空主体和空财务余
   }
 });
 
-test('系统财务OP拒绝缺失币种及旧 CNH 代码', (t) => {
+test('系统财务OP缺失规范币种仍拒绝，CNH 作为 CNY 业务行且原始审计保留 CNH', (t) => {
   const missing = writeWorkbook(t, {
     snapshots: [{
       subject: 'PPHK',
@@ -563,16 +563,400 @@ test('系统财务OP拒绝缺失币种及旧 CNH 代码', (t) => {
     /缺少系统财务OP币种：USD/
   );
 
-  const duplicateRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
-  const cnhIndex = duplicateRows.findIndex((row) => row.币种 === 'CNY');
-  duplicateRows[cnhIndex] = { ...duplicateRows[cnhIndex], 币种: 'CNH' };
-  const legacyCnh = writeWorkbook(t, {
-    rows: duplicateRows,
-    fileName: 'legacy-cnh.xlsx'
+  const cnhRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  const cnhIndex = cnhRows.findIndex((row) => row.币种 === 'CNY');
+  cnhRows[cnhIndex] = { ...cnhRows[cnhIndex], 币种: ' CNH ' };
+  const cnhEntry = writeWorkbook(t, {
+    rows: cnhRows,
+    fileName: 'incoming-cnh.xlsx'
   });
+  const [snapshot] = readSystemOpSnapshots(cnhEntry.filePath, '2026-05', cnhEntry.sheetName);
+  assert.equal(snapshot.balances.CNY, '3.25');
+  assert.equal(Object.hasOwn(snapshot.balances, 'CNH'), false);
+  const raw = JSON.parse(snapshot.rawJson);
+  const cnhAuditRow = raw.rows.find((row) => row.sourceCurrency === 'CNH');
+  assert.equal(cnhAuditRow.normalizedCurrency, 'CNY');
+  assert.equal(cnhAuditRow.displayValues[SYSTEM_OP_HEADERS.indexOf('币种')], ' CNH ');
+
+  const lowerRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  lowerRows[cnhIndex] = { ...lowerRows[cnhIndex], 币种: 'cnh' };
+  const lowerCnh = writeWorkbook(t, { rows: lowerRows, fileName: 'lower-cnh.xlsx' });
   assert.throws(
-    () => readSystemOpSnapshots(legacyCnh.filePath, '2026-05', legacyCnh.sheetName),
-    /币种.*仅允许 AUD、CAD、CNY、EUR/
+    () => readSystemOpSnapshots(lowerCnh.filePath, '2026-05', lowerCnh.sheetName),
+    /币种.*cnh.*仅允许|币种.*仅允许.*cnh/
+  );
+  const mixedRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  mixedRows[cnhIndex] = { ...mixedRows[cnhIndex], 币种: 'Cnh' };
+  const mixedCnh = writeWorkbook(t, { rows: mixedRows, fileName: 'mixed-cnh.xlsx' });
+  assert.throws(
+    () => readSystemOpSnapshots(mixedCnh.filePath, '2026-05', mixedCnh.sheetName),
+    /币种.*Cnh.*仅允许|币种.*仅允许.*Cnh/
+  );
+});
+
+test('系统 OP 同主体 CNY+CNH 归一后仅拒绝该主体，其他完整主体继续', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const badRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  const cnyRow = badRows.find((row) => row.币种 === 'CNY');
+  badRows.push({ ...cnyRow, 币种: 'CNH' });
+  const goodRows = systemDataRows([{ subject: 'PPUS', balances: balances(20) }]);
+  const entry = writeWorkbook(t, {
+    rows: [...badRows, ...goodRows],
+    fileName: 'duplicate-normalized-cny.xlsx'
+  });
+
+  repository.createImportBatch(db, {
+    id: 'duplicate-normalized-cny', targetMonth: '2026-05', fileCount: 1
+  });
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'duplicate-normalized-cny',
+    targetMonth: '2026-05',
+    files: [importFile(entry)]
+  });
+
+  assert.equal(record.status, 'success_with_skips');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 1);
+  assert.equal(record.format_error_count, 1);
+  assert.equal(record.rolled_back_count, 0);
+  assert.deepEqual(
+    db.prepare('SELECT subject FROM vcc_fin_op_system_snapshots ORDER BY subject')
+      .all().map((row) => row.subject),
+    ['PPUS']
+  );
+  const anomaly = db.prepare(`
+    SELECT category, source_row, abnormal_fields_json, description
+    FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+  `).get(record.id);
+  assert.equal(anomaly.category, 'format_error');
+  assert.deepEqual(JSON.parse(anomaly.abnormal_fields_json), ['币种']);
+  assert.match(anomaly.description, /币种 CNY.*重复/);
+  const rejectedAudit = db.prepare(`
+    SELECT disposition, raw_json FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ? AND subject = 'PPHK'
+  `).get(record.id);
+  assert.equal(rejectedAudit.disposition, 'rolled_back');
+  const auditRows = JSON.parse(rejectedAudit.raw_json).rows;
+  assert.ok(auditRows.some((row) => row.sourceCurrency === 'CNY' && row.normalizedCurrency === 'CNY'));
+  assert.ok(auditRows.some((row) => row.sourceCurrency === 'CNH' && row.normalizedCurrency === 'CNY'));
+});
+
+test('系统 OP 跨文件同主体 CNY+CNH 无论余额是否相同均主体级拒绝，完整其他主体继续', (t) => {
+  for (const [suffix, cnhSeed] of [['same', 1], ['different', 99]]) {
+    const db = createDb();
+    t.after(() => db.close());
+    const cny = writeWorkbook(t, {
+      snapshots: [{ subject: 'PPHK', balances: balances(1) }],
+      fileName: `cross-file-cny-${suffix}.xlsx`
+    });
+    const cnhRows = systemDataRows([{ subject: 'PPHK', balances: balances(cnhSeed) }]);
+    const cnyIndex = cnhRows.findIndex((row) => row.币种 === 'CNY');
+    cnhRows[cnyIndex] = { ...cnhRows[cnyIndex], 币种: 'CNH' };
+    const cnh = writeWorkbook(t, {
+      rows: cnhRows,
+      fileName: `cross-file-cnh-${suffix}.xlsx`
+    });
+    const good = writeWorkbook(t, {
+      snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+      fileName: `cross-file-good-${suffix}.xlsx`
+    });
+    const batchId = `cross-file-normalized-duplicate-${suffix}`;
+    repository.createImportBatch(db, { id: batchId, targetMonth: '2026-05', fileCount: 3 });
+
+    const record = importSystemOpGroup({
+      db,
+      batchId,
+      targetMonth: '2026-05',
+      files: [importFile(cny), importFile(cnh), importFile(good)]
+    });
+
+    assert.equal(record.status, 'success_with_skips', suffix);
+    assert.equal(record.raw_count, 2, suffix);
+    assert.equal(record.inserted_count, 1, suffix);
+    assert.equal(record.format_error_count, 1, suffix);
+    assert.equal(record.conflict_count, 0, suffix);
+    assert.deepEqual(
+      db.prepare('SELECT subject FROM vcc_fin_op_system_snapshots ORDER BY subject')
+        .all().map((row) => row.subject),
+      ['PPUS'],
+      suffix
+    );
+    const anomaly = db.prepare(`
+      SELECT category, description FROM vcc_fin_op_import_anomalies
+      WHERE import_record_id = ?
+    `).get(record.id);
+    assert.equal(anomaly.category, 'format_error', suffix);
+    assert.match(anomaly.description, /CNH 归一为 CNY.*同批 CNY 重复/, suffix);
+    const rejectedAudits = db.prepare(`
+      SELECT disposition, raw_json FROM vcc_fin_op_system_snapshot_attempts
+      WHERE import_record_id = ? AND subject = 'PPHK' ORDER BY id
+    `).all(record.id);
+    assert.equal(rejectedAudits.length, 2, suffix);
+    assert.ok(rejectedAudits.every((row) => row.disposition === 'rolled_back'), suffix);
+    const sourceTokens = rejectedAudits.flatMap((row) => (
+      JSON.parse(row.raw_json).rows.map((auditRow) => auditRow.sourceCurrency)
+    ));
+    assert.ok(sourceTokens.includes('CNY') && sourceTokens.includes('CNH'), suffix);
+  }
+});
+
+test('系统 OP 跨文件软错主体仍参与 CNY/CNH 并集且完整同主体不会旁路提升', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const cny = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPHK', balances: balances(1) }],
+    fileName: 'soft-error-cny.xlsx'
+  });
+  const cnhRows = systemDataRows([{ subject: 'PPHK', balances: balances(1) }]);
+  const cnyIndex = cnhRows.findIndex((row) => row.币种 === 'CNY');
+  const usdIndex = cnhRows.findIndex((row) => row.币种 === 'USD');
+  cnhRows[cnyIndex] = { ...cnhRows[cnyIndex], 币种: 'CNH' };
+  cnhRows[usdIndex] = { ...cnhRows[usdIndex], 财务余额: '' };
+  const softError = writeWorkbook(t, {
+    rows: cnhRows,
+    fileName: 'soft-error-cnh.xlsx'
+  });
+  const good = writeWorkbook(t, {
+    snapshots: [{ subject: 'PPUS', balances: balances(20) }],
+    fileName: 'soft-error-good.xlsx'
+  });
+  repository.createImportBatch(db, {
+    id: 'soft-error-normalized-duplicate', targetMonth: '2026-05', fileCount: 3
+  });
+
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'soft-error-normalized-duplicate',
+    targetMonth: '2026-05',
+    files: [importFile(cny), importFile(softError), importFile(good)]
+  });
+
+  assert.equal(record.status, 'success_with_skips');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 1);
+  assert.equal(record.format_error_count, 1);
+  assert.deepEqual(
+    db.prepare('SELECT subject FROM vcc_fin_op_system_snapshots ORDER BY subject')
+      .all().map((row) => row.subject),
+    ['PPUS']
+  );
+  const rejectedAudits = db.prepare(`
+    SELECT raw_json FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ? AND subject = 'PPHK' ORDER BY id
+  `).all(record.id);
+  assert.equal(rejectedAudits.length, 2);
+  const auditRows = rejectedAudits.flatMap((row) => JSON.parse(row.raw_json).rows);
+  assert.equal(auditRows.length, 18);
+  assert.ok(auditRows.some((row) => row.sourceCurrency === 'CNY'));
+  assert.ok(auditRows.some((row) => row.sourceCurrency === 'CNH'));
+  assert.ok(auditRows.every((row) => row.normalizedCurrency !== 'CNH'));
+  const rejectedUsd = auditRows.find((row) => (
+    row.sourceCurrency === 'USD'
+    && row.displayValues[SYSTEM_OP_HEADERS.indexOf('财务余额')] === ''
+  ));
+  assert.equal(rejectedUsd.normalizedCurrency, 'USD');
+  assert.match(rejectedUsd.balanceEvidence.validationMessage, /财务余额.*无效/);
+});
+
+test('系统 OP 模板外列异常先保留标准列审计并拒绝同主体全部快照', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const badRows = systemDataRows([{ subject: 'PPHK', balances: balances(1) }]);
+  const cnyRow = badRows.find((row) => row.币种 === 'CNY');
+  badRows.push({ ...cnyRow, 币种: 'CNH' });
+  const goodRows = systemDataRows([{ subject: 'PPUS', balances: balances(20) }]);
+  const allRows = [...badRows, ...goodRows];
+  const cnhSourceRow = 1 + badRows.length;
+  const entry = writeWorkbook(t, {
+    rows: allRows,
+    fileName: 'extra-column-cnh-audit.xlsx',
+    mutateSheet(sheet) {
+      sheet[`Q${cnhSourceRow}`] = { t: 's', v: 'extra-value' };
+      sheet['!ref'] = `A1:Q${allRows.length + 1}`;
+    }
+  });
+  repository.createImportBatch(db, {
+    id: 'extra-column-cnh-audit', targetMonth: '2026-05', fileCount: 1
+  });
+
+  const record = importSystemOpGroup({
+    db,
+    batchId: 'extra-column-cnh-audit',
+    targetMonth: '2026-05',
+    files: [importFile(entry)]
+  });
+
+  assert.equal(record.status, 'success_with_skips');
+  assert.equal(record.raw_count, 2);
+  assert.equal(record.inserted_count, 1);
+  assert.equal(record.format_error_count, 1);
+  assert.deepEqual(
+    db.prepare('SELECT subject FROM vcc_fin_op_system_snapshots ORDER BY subject')
+      .all().map((row) => row.subject),
+    ['PPUS']
+  );
+  const rejected = db.prepare(`
+    SELECT disposition, raw_json FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ? AND subject = 'PPHK'
+  `).get(record.id);
+  assert.equal(rejected.disposition, 'rolled_back');
+  const auditRows = JSON.parse(rejected.raw_json).rows;
+  assert.equal(auditRows.length, 10);
+  assert.ok(auditRows.some((row) => (
+    row.sourceCurrency === 'CNY' && row.normalizedCurrency === 'CNY'
+  )));
+  assert.ok(auditRows.some((row) => (
+    row.sourceCurrency === 'CNH' && row.normalizedCurrency === 'CNY'
+  )));
+  const extraAnomaly = db.prepare(`
+    SELECT source_row, abnormal_fields_json FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND description LIKE '%模板外%'
+  `).get(record.id);
+  assert.equal(extraAnomaly.source_row, cnhSourceRow);
+  assert.deepEqual(JSON.parse(extraAnomaly.abnormal_fields_json), ['第17列']);
+});
+
+test('系统 OP 非目标月、非法日期或目标月空主体的模板外列保持单条 unknown 基线异常', (t) => {
+  const cases = [
+    {
+      suffix: 'other-month',
+      row: { date: '2026-04-30', subject: 'PPHK' }
+    },
+    {
+      suffix: 'invalid-date',
+      row: { date: 'bad-date', subject: 'PPHK' }
+    },
+    {
+      suffix: 'blank-subject',
+      row: { date: '2026-05-31', subject: '' }
+    }
+  ];
+  for (const testCase of cases) {
+    const db = createDb();
+    t.after(() => db.close());
+    const goodRows = systemDataRows([{ subject: 'PPUS', balances: balances(20) }]);
+    const extraRow = {
+      ...systemDataRows([{ subject: testCase.row.subject, balances: balances(1) }])[0],
+      账单日期: testCase.row.date,
+      主体: testCase.row.subject
+    };
+    const rows = [...goodRows, extraRow];
+    const sourceRow = rows.length + 1;
+    const entry = writeWorkbook(t, {
+      rows,
+      fileName: `extra-column-${testCase.suffix}.xlsx`,
+      mutateSheet(sheet) {
+        sheet[`Q${sourceRow}`] = { t: 's', v: 'extra-value' };
+        sheet['!ref'] = `A1:Q${sourceRow}`;
+      }
+    });
+    const batchId = `extra-column-${testCase.suffix}`;
+    repository.createImportBatch(db, { id: batchId, targetMonth: '2026-05', fileCount: 1 });
+
+    const record = importSystemOpGroup({
+      db,
+      batchId,
+      targetMonth: '2026-05',
+      files: [importFile(entry)]
+    });
+
+    assert.equal(record.status, 'success_with_skips', testCase.suffix);
+    assert.equal(record.raw_count, 2, testCase.suffix);
+    assert.equal(record.inserted_count, 1, testCase.suffix);
+    assert.equal(record.format_error_count, 1, testCase.suffix);
+    assert.equal(record.anomaly_count, 1, testCase.suffix);
+    assert.deepEqual(
+      db.prepare('SELECT subject FROM vcc_fin_op_system_snapshots').all().map((row) => row.subject),
+      ['PPUS'],
+      testCase.suffix
+    );
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS n FROM vcc_fin_op_system_snapshot_attempts
+      WHERE import_record_id = ? AND subject = 'PPHK'
+    `).get(record.id).n, 0, testCase.suffix);
+    const anomaly = db.prepare(`
+      SELECT category, source_row, abnormal_fields_json, description
+      FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
+    `).get(record.id);
+    assert.equal(anomaly.category, 'format_error', testCase.suffix);
+    assert.equal(anomaly.source_row, sourceRow, testCase.suffix);
+    assert.deepEqual(JSON.parse(anomaly.abnormal_fields_json), ['第17列'], testCase.suffix);
+    assert.match(anomaly.description, /模板外的第 17 列/, testCase.suffix);
+  }
+});
+
+test('系统 OP 跨文件纯 CNY 或纯 CNH 重复维持既有幂等分类，不误判归一双写', (t) => {
+  for (const sourceToken of ['CNY', 'CNH']) {
+    const db = createDb();
+    t.after(() => db.close());
+    const makeRows = () => {
+      const rows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+      if (sourceToken === 'CNH') {
+        const index = rows.findIndex((row) => row.币种 === 'CNY');
+        rows[index] = { ...rows[index], 币种: 'CNH' };
+      }
+      return rows;
+    };
+    const first = writeWorkbook(t, {
+      rows: makeRows(), fileName: `pure-${sourceToken}-first.xlsx`
+    });
+    const second = writeWorkbook(t, {
+      rows: makeRows(), fileName: `pure-${sourceToken}-second.xlsx`
+    });
+    const batchId = `pure-${sourceToken}-duplicates`;
+    repository.createImportBatch(db, { id: batchId, targetMonth: '2026-05', fileCount: 2 });
+
+    const record = importSystemOpGroup({
+      db, batchId, targetMonth: '2026-05', files: [importFile(first), importFile(second)]
+    });
+
+    assert.equal(record.status, 'success_with_skips', sourceToken);
+    assert.equal(record.raw_count, 2, sourceToken);
+    assert.equal(record.inserted_count, 1, sourceToken);
+    assert.equal(record.skipped_count, 1, sourceToken);
+    assert.equal(record.format_error_count, 0, sourceToken);
+    assert.equal(record.conflict_count, 0, sourceToken);
+  }
+});
+
+test('系统 OP 历史 CNY 与新 CNH 规范余额相同则幂等跳过且不改历史审计', (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const cnyEntry = writeWorkbook(t, { fileName: 'system-cny.xlsx' });
+  const cnhRows = systemDataRows([{ subject: 'PPHK', balances: balances() }]);
+  const cnyIndex = cnhRows.findIndex((row) => row.币种 === 'CNY');
+  cnhRows[cnyIndex] = { ...cnhRows[cnyIndex], 币种: 'CNH' };
+  const cnhEntry = writeWorkbook(t, { rows: cnhRows, fileName: 'system-cnh.xlsx' });
+
+  repository.createImportBatch(db, { id: 'system-cny', targetMonth: '2026-05', fileCount: 1 });
+  const first = importSystemOpGroup({
+    db, batchId: 'system-cny', targetMonth: '2026-05', files: [importFile(cnyEntry)]
+  });
+  const original = db.prepare(`
+    SELECT content_hash, raw_json FROM vcc_fin_op_system_snapshots WHERE subject = 'PPHK'
+  `).get();
+  repository.createImportBatch(db, { id: 'system-cnh', targetMonth: '2026-05', fileCount: 1 });
+  const replay = importSystemOpGroup({
+    db, batchId: 'system-cnh', targetMonth: '2026-05', files: [importFile(cnhEntry)]
+  });
+
+  assert.equal(first.status, 'success');
+  assert.equal(replay.status, 'all_skipped');
+  assert.equal(replay.skipped_count, 1);
+  const stored = db.prepare(`
+    SELECT content_hash, raw_json FROM vcc_fin_op_system_snapshots WHERE subject = 'PPHK'
+  `).get();
+  assert.equal(stored.content_hash, original.content_hash);
+  assert.equal(stored.raw_json, original.raw_json);
+  const replayAudit = db.prepare(`
+    SELECT raw_json FROM vcc_fin_op_system_snapshot_attempts
+    WHERE import_record_id = ? AND disposition = 'idempotent_skip'
+  `).get(replay.id);
+  assert.equal(
+    JSON.parse(replayAudit.raw_json).rows.find((row) => row.sourceCurrency === 'CNH').normalizedCurrency,
+    'CNY'
   );
 });
 
@@ -948,10 +1332,18 @@ test('系统财务OP同文件多主体部分格式错误时提升完整主体并
   const attempt = db.prepare(`
     SELECT subject, disposition, raw_json
     FROM vcc_fin_op_system_snapshot_attempts
+    WHERE disposition = 'accepted'
   `).get();
   assert.equal(attempt.subject, 'PPHK');
   assert.equal(attempt.disposition, 'accepted');
   assert.equal(JSON.parse(attempt.raw_json).rows.length, 9);
+  const rejectedAttempt = db.prepare(`
+    SELECT subject, disposition, raw_json
+    FROM vcc_fin_op_system_snapshot_attempts
+    WHERE disposition = 'rolled_back'
+  `).get();
+  assert.equal(rejectedAttempt.subject, 'PPUS');
+  assert.equal(JSON.parse(rejectedAttempt.raw_json).rows.length, 9);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors').get().n, 0);
   const anomaly = db.prepare(`
     SELECT category, source_file_name, source_row, abnormal_fields_json

@@ -16,9 +16,9 @@ const {
   getSourceDefinition
 } = require('./definitions');
 
-const HASH_VERSION = 1;
-const PENDING_HASH_VERSION = 2;
-const CURRENCY_SET = new Set(SUPPORTED_CURRENCIES);
+const HASH_VERSION = 2;
+const PENDING_HASH_VERSION = 3;
+const INCOMING_CURRENCY_SET = new Set([...SUPPORTED_CURRENCIES, 'CNH']);
 const TEXT_CELL_TYPES = new Set(['s', 'inlineStr', 'str']);
 
 function text(value) {
@@ -95,12 +95,15 @@ function requireText(value, field) {
   return normalized;
 }
 
-function requireSupportedCurrency(value, field) {
-  const currency = requireText(value, field);
-  if (!CURRENCY_SET.has(currency)) {
-    throw new Error(`${field}“${currency}”不在支持币种 ${SUPPORTED_CURRENCIES.join('、')} 中`);
+function normalizeIncomingVccCurrency(value, field) {
+  const sourceToken = requireText(value, field);
+  if (!INCOMING_CURRENCY_SET.has(sourceToken)) {
+    throw new Error(`${field}“${sourceToken}”不在支持币种 ${[...SUPPORTED_CURRENCIES, 'CNH'].join('、')} 中`);
   }
-  return currency;
+  return {
+    sourceToken,
+    businessCurrency: sourceToken === 'CNH' ? 'CNY' : sourceToken
+  };
 }
 
 function rowValue(values, definition, header) {
@@ -133,6 +136,32 @@ function pendingContentHash(values, rawContractVersion) {
   return crypto.createHash('sha256')
     .update(JSON.stringify(pendingCanonicalValues(values, rawContractVersion)), 'utf8')
     .digest('hex');
+}
+
+function canonicalCurrencyCellValue(value) {
+  const raw = rawText(value);
+  return text(raw) === 'CNH' ? raw.replace('CNH', 'CNY') : raw;
+}
+
+function applyCanonicalCurrencyHash(row, currencyHeaders, assignedSubject = row.subject) {
+  const canonicalHashValues = [...row.values];
+  for (const header of currencyHeaders) {
+    const index = row.definition.indexes[header];
+    canonicalHashValues[index] = canonicalCurrencyCellValue(canonicalHashValues[index]);
+  }
+  row.contentHash = row.sourceType === SOURCE_TYPES.PENDING
+    ? pendingContentHash(canonicalHashValues, PENDING_RAW_CONTRACT_V2)
+    : contentHash(row.sourceType, JSON.stringify(canonicalHashValues), assignedSubject);
+  return row;
+}
+
+function channelCurrencyHeaderForHash(row) {
+  const channelName = text(rowValue(row.values, row.definition, '通道名称'));
+  if (!channelName) return null;
+  if (channelName === 'CITI') return '交易币种';
+  const billDate = normalizeDate(rowValue(row.values, row.definition, 'billdate'));
+  if (!billDate) return null;
+  return billDate > monthEndIso(row.targetMonth) ? '清算币种' : '结算币种';
 }
 
 function baseMappedRow({
@@ -240,7 +269,10 @@ function mapNonChannel(row) {
   try {
     const direction = requireText(rowValue(row.values, d, '出入方向'), '出入方向');
     const amount = parseAmount(rowValue(row.values, d, '我方到账金额'), '我方到账金额');
-    row.statCurrency = requireSupportedCurrency(rowValue(row.values, d, '我方币种'), '我方币种');
+    row.statCurrency = normalizeIncomingVccCurrency(
+      rowValue(row.values, d, '我方币种'),
+      '我方币种'
+    ).businessCurrency;
     row.signedAmount = signByDirection(amount, direction, '我方到账金额');
     row.businessDepartment = text(rowValue(row.values, d, '业务部门'));
     row.counterpartyDepartment = row.sourceType === SOURCE_TYPES.RECHARGE
@@ -258,26 +290,33 @@ function mapNonChannel(row) {
 function mapChannel(row) {
   const d = row.definition;
   try {
-    const direction = requireText(rowValue(row.values, d, '借贷方向'), '借贷方向');
+    const directionValue = rowValue(row.values, d, '借贷方向');
     row.channelName = requireText(rowValue(row.values, d, '通道名称'), '通道名称');
     row.mid = text(rowValue(row.values, d, 'MID'));
     row.businessDepartment = text(rowValue(row.values, d, '部门'));
 
-    let amount;
+    let currencyHeader;
+    let amountHeader;
     if (row.channelName === 'CITI') {
-      row.statCurrency = requireSupportedCurrency(rowValue(row.values, d, '交易币种'), '交易币种');
-      amount = parseAmount(rowValue(row.values, d, '交易金额'), '交易金额');
+      currencyHeader = '交易币种';
+      amountHeader = '交易金额';
     } else {
       const billDate = normalizeDate(rowValue(row.values, d, 'billdate'));
       if (!billDate) throw new Error('billdate无法解析为有效日期');
       if (billDate > monthEndIso(row.targetMonth)) {
-        row.statCurrency = requireSupportedCurrency(rowValue(row.values, d, '清算币种'), '清算币种');
-        amount = parseAmount(rowValue(row.values, d, '清算金额'), '清算金额');
+        currencyHeader = '清算币种';
+        amountHeader = '清算金额';
       } else {
-        row.statCurrency = requireSupportedCurrency(rowValue(row.values, d, '结算币种'), '结算币种');
-        amount = parseAmount(rowValue(row.values, d, '实际到账金额'), '实际到账金额');
+        currencyHeader = '结算币种';
+        amountHeader = '实际到账金额';
       }
     }
+    row.statCurrency = normalizeIncomingVccCurrency(
+      rowValue(row.values, d, currencyHeader),
+      currencyHeader
+    ).businessCurrency;
+    const direction = requireText(directionValue, '借贷方向');
+    const amount = parseAmount(rowValue(row.values, d, amountHeader), amountHeader);
     row.signedAmount = signByDirection(amount, direction, '通道发生额');
     return row;
   } catch (error) {
@@ -294,8 +333,14 @@ function mapPending(row) {
   try {
     row.reconType = requireText(rowValue(row.values, d, '对账类型'), '对账类型');
     row.channelName = text(rowValue(row.values, d, 'channel'));
-    row.pendingCurrency = requireSupportedCurrency(rowValue(row.values, d, '币种'), '币种');
-    row.flowCurrency = requireSupportedCurrency(rowValue(row.values, d, '流水_币种'), '流水_币种');
+    row.pendingCurrency = normalizeIncomingVccCurrency(
+      rowValue(row.values, d, '币种'),
+      '币种'
+    ).businessCurrency;
+    row.flowCurrency = normalizeIncomingVccCurrency(
+      rowValue(row.values, d, '流水_币种'),
+      '流水_币种'
+    ).businessCurrency;
     const pending = parseAmount(rowValue(row.values, d, '金额'), '金额');
     const flow = parseAmount(rowValue(row.values, d, '流水_对账金额'), '流水_对账金额');
 
@@ -324,6 +369,14 @@ function mapDetailRow(input) {
   const targetMonth = normalizeYearMonth(input && input.targetMonth);
   if (!targetMonth) throw new Error(`导入账期格式无效：${input && input.targetMonth}`);
   let row = baseMappedRow({ ...input, targetMonth });
+  if (row.sourceType === SOURCE_TYPES.RECHARGE || row.sourceType === SOURCE_TYPES.FEE_FX) {
+    applyCanonicalCurrencyHash(row, ['我方币种']);
+  } else if (row.sourceType === SOURCE_TYPES.PENDING) {
+    applyCanonicalCurrencyHash(row, ['币种', '流水_币种']);
+  } else if (row.sourceType === SOURCE_TYPES.CHANNEL) {
+    const currencyHeader = channelCurrencyHeaderForHash(row);
+    if (currencyHeader) applyCanonicalCurrencyHash(row, [currencyHeader], input.assignedSubject);
+  }
   row = validateCommon(row, input.assignedSubject);
   if (row.disposition) return row;
 
@@ -380,6 +433,7 @@ module.exports = {
   contentHash,
   pendingCanonicalValues,
   pendingContentHash,
+  normalizeIncomingVccCurrency,
   mapDetailRow,
   mappedRowToInsertParams
 };
