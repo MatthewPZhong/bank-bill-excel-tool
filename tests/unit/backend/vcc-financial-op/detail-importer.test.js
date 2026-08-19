@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const crypto = require('node:crypto');
 const childProcess = require('node:child_process');
 const Module = require('node:module');
 const os = require('node:os');
@@ -26,6 +27,7 @@ const {
   importDetailGroup,
   importDetailBatch
 } = require('../../../../src/backend/vcc-financial-op/detail-importer');
+const { mapDetailRow } = require('../../../../src/backend/vcc-financial-op/row-mapper');
 const {
   importFiles,
   normalizeImportBatchId
@@ -453,6 +455,106 @@ test('同一原表重复导入时第二次全量幂等跳过且有效事实不�
   `).get().n, 1);
 });
 
+test('历史 CNY content hash 可由同位置 CNH 精确重放，历史行与 raw audit 不改写', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const cnyFile = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'historical-cny.xlsx', [
+    rechargeRow({ 订单号: 'historical-currency-key', 我方币种: ' CNY ' })
+  ]);
+  const cnhFile = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'incoming-cnh.xlsx', [
+    rechargeRow({ 订单号: 'historical-currency-key', 我方币种: ' CNH ' })
+  ]);
+  const changedFile = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'incoming-cnh-changed.xlsx', [
+    rechargeRow({
+      订单号: 'historical-currency-key', 我方币种: ' CNH ', 我方到账金额: '10.26'
+    })
+  ]);
+
+  const first = await importDetailBatch({
+    db, targetMonth: '2026-06', files: [fileEntry(cnyFile, SOURCE_TYPES.RECHARGE)]
+  });
+  const original = db.prepare(`
+    SELECT id, content_hash, hash_version, stat_currency, raw_json
+    FROM vcc_fin_op_effective_rows
+  `).get();
+  db.prepare('UPDATE vcc_fin_op_effective_rows SET hash_version = 1 WHERE id = ?').run(original.id);
+
+  const replay = await importDetailBatch({
+    db, targetMonth: '2026-06', files: [fileEntry(cnhFile, SOURCE_TYPES.RECHARGE)]
+  });
+  const conflict = await importDetailBatch({
+    db, targetMonth: '2026-06', files: [fileEntry(changedFile, SOURCE_TYPES.RECHARGE)]
+  });
+
+  assert.equal(first.records[0].insertedCount, 1);
+  assert.equal(replay.records[0].status, 'all_skipped');
+  assert.equal(replay.records[0].skippedCount, 1);
+  assert.equal(conflict.records[0].status, 'failed_conflict');
+  assert.equal(conflict.records[0].conflictCount, 1);
+  const stored = db.prepare(`
+    SELECT content_hash, hash_version, stat_currency, raw_json
+    FROM vcc_fin_op_effective_rows WHERE id = ?
+  `).get(original.id);
+  assert.equal(stored.content_hash, original.content_hash);
+  assert.equal(stored.hash_version, 1);
+  assert.equal(stored.stat_currency, 'CNY');
+  assert.equal(JSON.parse(stored.raw_json)[getSourceDefinition(SOURCE_TYPES.RECHARGE).indexes.我方币种], ' CNY ');
+  const anomaly = db.prepare(`
+    SELECT diff_fields_json FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? AND category = 'idempotent_conflict'
+  `).get(conflict.records[0].recordId);
+  assert.deepEqual(JSON.parse(anomaly.diff_fields_json), ['我方币种', '我方到账金额']);
+});
+
+test('新批次 CNY/CNH 同键只写一行，不同键金额按同一 CNY 分组事实入库并满足行数守恒', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const sameCny = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'same-cny.xlsx', [
+    rechargeRow({ 订单号: 'same-currency-key', 我方币种: 'CNY' })
+  ]);
+  const sameCnh = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'same-cnh.xlsx', [
+    rechargeRow({ 订单号: 'same-currency-key', 我方币种: 'CNH' })
+  ]);
+  const extraCnh = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'extra-cnh.xlsx', [
+    rechargeRow({ 订单号: 'extra-cnh-key', 我方币种: 'CNH', 我方到账金额: '20.5' })
+  ]);
+
+  const result = await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [
+      fileEntry(sameCny, SOURCE_TYPES.RECHARGE),
+      fileEntry(sameCnh, SOURCE_TYPES.RECHARGE),
+      fileEntry(extraCnh, SOURCE_TYPES.RECHARGE)
+    ]
+  });
+  const record = result.records[0];
+  assert.equal(record.rawCount, 3);
+  assert.equal(record.insertedCount, 2);
+  assert.equal(record.skippedCount, 1);
+  assert.equal(record.conflictCount, 0);
+  assert.equal(
+    record.rawCount,
+    record.insertedCount + record.skippedCount + record.invalidKeyCount
+      + record.conflictCount + record.formatErrorCount + record.rolledBackCount
+  );
+  const effective = db.prepare(`
+    SELECT idempotency_key, stat_currency, signed_amount, hash_version, raw_json
+    FROM vcc_fin_op_effective_rows ORDER BY idempotency_key
+  `).all();
+  assert.deepEqual(
+    effective.map((row) => [row.idempotency_key, row.stat_currency, row.signed_amount, row.hash_version]),
+    [
+      ['extra-cnh-key', 'CNY', '20.5', 2],
+      ['same-currency-key', 'CNY', '10.25', 2]
+    ]
+  );
+  const cnhRaw = effective.find((row) => row.idempotency_key === 'extra-cnh-key').raw_json;
+  assert.equal(JSON.parse(cnhRaw)[getSourceDefinition(SOURCE_TYPES.RECHARGE).indexes.我方币种], 'CNH');
+});
+
 test('校验表生成时间仅在实际新增有效明细时刷新', async (t) => {
   const db = createDb();
   t.after(() => db.close());
@@ -696,6 +798,75 @@ test('空键只过滤异常行，正常行落库并满足行数守恒', async (t
   assert.equal(db.prepare(`
     SELECT idempotency_key FROM vcc_fin_op_effective_rows
   `).get().idempotency_key, 'valid-2');
+});
+
+test('CNH 后续金额或方向校验失败时 anomaly 仍使用独立可复算的 canonical hash', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const invalidRows = [
+    rechargeRow({
+      订单号: 'cnh-invalid-precision', 我方币种: ' CNH ', 我方到账金额: '1.234'
+    }),
+    rechargeRow({
+      订单号: 'cnh-invalid-direction', 我方币种: 'CNH', 出入方向: 'IN'
+    })
+  ];
+  const filePath = writeSourceFile(
+    dir,
+    SOURCE_TYPES.RECHARGE,
+    'cnh-invalid-after-currency.xlsx',
+    invalidRows
+  );
+
+  const result = await importDetailBatch({
+    db, targetMonth: '2026-06', files: [fileEntry(filePath, SOURCE_TYPES.RECHARGE)]
+  });
+
+  assert.equal(result.records[0].status, 'failed_validation');
+  assert.equal(result.records[0].formatErrorCount, 2);
+  const definition = getSourceDefinition(SOURCE_TYPES.RECHARGE);
+  const expected = invalidRows.map((fields, index) => {
+    const rawValues = definition.headers.map((header) => (
+      Object.hasOwn(fields, header) ? String(fields[header]) : ''
+    ));
+    const canonicalValues = [...rawValues];
+    const currencyIndex = definition.indexes.我方币种;
+    canonicalValues[currencyIndex] = canonicalValues[currencyIndex].replace('CNH', 'CNY');
+    const mapped = mapDetailRow({
+      sourceType: SOURCE_TYPES.RECHARGE,
+      values: rawValues,
+      targetMonth: '2026-06',
+      sourceFile: 'cnh-invalid-after-currency.xlsx',
+      sheetName: 'sheet1',
+      sourceRow: index + 2,
+      keyCellType: 's'
+    });
+    return {
+      key: fields.订单号,
+      hash: crypto.createHash('sha256')
+        .update(JSON.stringify(canonicalValues), 'utf8')
+        .digest('hex'),
+      rawJson: JSON.stringify(rawValues),
+      mapped
+    };
+  });
+  const anomalies = db.prepare(`
+    SELECT idempotency_key, incoming_content_hash, category
+    FROM vcc_fin_op_import_anomalies
+    WHERE import_record_id = ? ORDER BY idempotency_key
+  `).all(result.records[0].recordId);
+  assert.deepEqual(
+    anomalies.map((row) => [row.idempotency_key, row.incoming_content_hash, row.category]),
+    expected.sort((left, right) => left.key.localeCompare(right.key))
+      .map((entry) => [entry.key, entry.hash, 'format_error'])
+  );
+  for (const entry of expected) {
+    assert.equal(entry.mapped.hashVersion, 2);
+    assert.equal(entry.mapped.contentHash, entry.hash);
+    assert.equal(entry.mapped.rawJson, entry.rawJson);
+    assert.match(entry.mapped.rawJson, /CNH/);
+  }
 });
 
 test('后续分片损坏时只保留回滚计数和一条文件级失败事件', async (t) => {

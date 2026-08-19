@@ -20,7 +20,8 @@ const SUPPORTED_CURRENCIES = Object.freeze([
   'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
 ]);
 
-// 仅供读取历史派生事实；新导入仍按 SUPPORTED_CURRENCIES 严格拒绝 CNH。
+// SUPPORTED_CURRENCIES 是规范业务/九币种输出域；新导入词法接受范围由
+// row-mapper 的 normalizeIncomingVccCurrency 单独管理，不把 CNH 扩进输出域。
 function normalizeLegacyStoredCurrency(value) {
   if (value === null || value === undefined) return value;
   const currency = String(value).trim();

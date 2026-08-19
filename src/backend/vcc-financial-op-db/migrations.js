@@ -10,7 +10,6 @@ const {
   PENDING_RAW_CONTRACT_V2
 } = require('../vcc-financial-op/definitions');
 const {
-  PENDING_HASH_VERSION,
   pendingContentHash
 } = require('../vcc-financial-op/row-mapper');
 const {
@@ -30,6 +29,9 @@ const {
 const LEGACY_VCC_CURRENCY = 'CNH';
 const CURRENT_VCC_CURRENCY = 'CNY';
 const VCC_CURRENCY_CONTRACT_VERSION = 2;
+// v3.1.8 的 48/46 列 Pending 一次性迁移合同永久冻结为 hash v2。
+// 新导入 hash version 即使继续升级，也不得借启动迁移改写既有 v2 或新版本行。
+const LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION = 2;
 const VCC_CURRENCY_ORDER = Object.freeze([
   'AUD', 'CAD', 'CNY', 'EUR', 'GBP', 'HKD', 'JPY', 'SGD', 'USD'
 ]);
@@ -371,9 +373,9 @@ function pendingMigrationPlan(db, tableName) {
   return db.prepare(`
     SELECT id, raw_json, content_hash, hash_version, raw_contract_version
     FROM ${tableName}
-    WHERE source_type = ?
+    WHERE source_type = ? AND hash_version < ?
     ORDER BY id
-  `).all(SOURCE_TYPES.PENDING).map((row) => {
+  `).all(SOURCE_TYPES.PENDING, LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION).map((row) => {
     const parsed = parsePendingRawJson(row.raw_json, tableName, row.id);
     return {
       ...row,
@@ -433,7 +435,7 @@ function ensurePendingRawContractSupport(db, options = {}) {
       for (const row of importPlan) {
         updateImport.run(
           row.desiredContentHash,
-          PENDING_HASH_VERSION,
+          LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION,
           row.desiredRawContractVersion,
           row.id
         );
@@ -451,9 +453,9 @@ function ensurePendingRawContractSupport(db, options = {}) {
       `);
       for (const row of effectivePlan) {
         updateEffective.run(
-          PENDING_HASH_VERSION,
+          LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION,
           row.desiredContentHash,
-          PENDING_HASH_VERSION,
+          LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION,
           row.desiredRawContractVersion,
           row.id
         );
@@ -476,11 +478,11 @@ function ensurePendingRawContractSupport(db, options = {}) {
         FROM ${tableName}
         WHERE source_type = ?
       `).all(SOURCE_TYPES.PENDING).map((row) => [Number(row.id), row]));
-      if (stored.size !== plan.length || plan.some((expected) => {
+      if (plan.some((expected) => {
         const actual = stored.get(Number(expected.id));
         return !actual
           || actual.content_hash !== expected.desiredContentHash
-          || Number(actual.hash_version) !== PENDING_HASH_VERSION
+          || Number(actual.hash_version) !== LEGACY_PENDING_RAW_CONTRACT_HASH_VERSION
           || Number(actual.raw_contract_version) !== expected.desiredRawContractVersion;
       })) {
         throw new Error(`${tableName} Pending v2 哈希迁移提交前断言失败`);

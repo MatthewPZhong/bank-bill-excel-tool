@@ -108,3 +108,62 @@
 | PR1 首轮 Review findings | CLOSED | 原 Dev 逐项修复，同一 Reviewer 多轮复审后确认无阻塞 P3+ | 仍保留 Windows 真实银行样本人工复核，不阻塞代码合并 |
 | PR1 bridge 归属 P1 | CLOSED | 两阶段归属、空槽 fail-closed、正反真实 CSV 与 Reviewer 复审均通过 | ⚠️ 账号归属资金红线仍需发布前人工签字 |
 | PR1 bigint stat 兼容回归 | CI GATE | 精度转换、本地门禁与 Reviewer Round 5 已通过；PR #152 以最新 Windows required check 为合并真相 | required check 未绿不合并；生产 matcher 合同未改，Windows picker/final 均使用 BigInt Stats |
+
+## PR2 — VCC CNH→CNY
+
+### Task Brief
+
+- Goal：仅对 v3.1.12 后新导入的 VCC 财务 OP 数据，将标准大写 `CNH` 在业务层归一为 `CNY`，保留原始审计，并维持九币种输出。
+- Context：明细业务字段与 content hash 在 `row-mapper.js` 形成；detail importer 的 staging/同批/effective 幂等判定统一使用 `content_hash`；系统 OP 已按主体隔离校验错误。
+- Constraints：不迁移/回填/重算历史；不放宽小写/混合大小写；规范哈希只投影本行实际参与业务的币种单元格，并保留原单元格首尾空格；不得改 PR1 行为。
+- Done when：四类实际明细币种入口、Pending 双侧、系统 OP、幂等 skip/conflict、raw audit、金额/行数守恒和九币种输出均有自动化证据；人工资金复核项明确保留。
+
+### Unknowns Register
+
+| 未知 | 处理 | 证据/结论 | 合并影响 |
+| --- | --- | --- | --- |
+| detail importer 是否存在绕过 canonical content hash 的比较入口 | PROBE → CLOSED | `markConflictRows`、`markExistingIdenticalRows`、同批 mixed key 与 promote 均读取 mapper 写入的 `content_hash` | mapper 单点形成规范哈希即可，无需改 importer SQL |
+| 通道未选中币种列是否会参与校验或哈希 | PROBE → CLOSED | `mapChannel` 已按 CITI / billdate 月末分支只读取一个币种字段；红测需证明其他两列脏值不影响结果与哈希 | 必须按实际分支投影，禁止全行 CNH 替换 |
+| 系统 OP 坏主体是否会阻断其他主体 | PROBE → CLOSED | `rowsBySubject` + `invalidSubjects` + per-subject `buildSubjectSnapshot` try/catch 已隔离；import 统计以 `validationUnitCount` 按主体计 | 复用现有主体级失败，不改批次失败策略 |
+| 历史 CNY hash 能否与新 canonical hash 兼容 | PROBE → CLOSED | CNY 原单元格字节不改时 hash 算法和 payload 结构不变；历史 CNY exact replay / 新 CNH 同位置投影红绿测试已验证 | 不新增兼容 hash 列 |
+| Pending current hash version 升级是否会污染一次性历史 raw-contract 迁移 | PROBE → CLOSED | `migrations.js` 原先直接引用 current `PENDING_HASH_VERSION` 且遍历全部 Pending 行，会把历史 v2/新 v3 重写 | 旧迁移冻结 v2 且仅处理 `<2`；既有 v2 与新 v3 启动零改写 |
+| dataset writer 是否用 current mapper version 校验历史 artifact/fallback | PROBE → CLOSED | ready artifact 与 fallback 两路都强制 `mapped.hashVersion === stored.hash_version`；版本升级会误拒历史 v1/v2，历史 CNH 的 current hash 也不同 | 按 stored version 使用对应旧/新算法严格重算，不跳过 hash、不更新 stored 行 |
+| 系统 OP 同主体 CNY/CNH 是否可跨文件绕过重复拒绝 | PROBE → CLOSED | 单文件 `buildSubjectSnapshot` 查重，但多文件各自成完整 snapshot 后只按余额 hash 分类；相同余额会 accepted+skip | 批次主体分类前汇总 sourceCurrency 证据；仅 CNY+CNH 双写主体转 validation error |
+| 系统 OP 某文件同主体另有软错时，完整文件快照是否会旁路提升 | PROBE → CLOSED | 完整 CNY 文件可产 snapshot，而 CNH 文件因 USD 空余额不产 snapshot；只扫 snapshot 会错误提升 CNY 文件 | 独立 `auditRowsBySubject` 在主体/币种识别后即保留行证据；同批以主体的 validation/CNY+CNH 并集先排除所有该主体 snapshot |
+| 通道 early anomaly 能否在 common 校验前确定 canonical 字段且保留 assigned subject | PROBE → CLOSED | CITI 仅由通道名确定交易币种；非 CITI 仅由有效 billdate 确定清算/结算；early hash 若使用尚未赋值的 `row.subject` 会丢失主体边界 | 只有 key 与分支足以确定时提前投影，并显式沿用调用方 assignedSubject；无法确定时保持 raw hash，禁止猜测 |
+
+### PR2 Decisions
+
+| 决定 | 原因与证据 | 放弃的方案 | 影响 |
+| --- | --- | --- | --- |
+| 在 row mapper 共享词法函数中返回 source token 与 business currency | TechDoc D-05～D-08；system importer 可复用相同严格大小写合同 | 在 calculator/output 末端转换；对全行所有 CNH 做替换 | 新业务字段入库即为 CNY，raw JSON 不变 |
+| mapper 只对实际参与币种索引构造 canonical hash 副本 | 保持未选中脏列现有行为与其他原文字节冲突合同 | trim 全行、重写 raw JSON、额外兼容 hash 列 | CNY 原文 hash 不变；仅同位置 CNH token 投影 |
+| 旧 Pending raw-contract 迁移版本在 migration 内具名冻结为 v2，并只处理 `<2` | current version 继续升高不能成为历史重写开关 | 继续 import current version；仅冻结数字但仍遍历全部行 | 待补旧行迁至 v2；既有 v2、新 v3 和 raw audit 完全不动 |
+| dataset writer 依据 stored hash version 选择重算算法 | 导出仍需强 lineage integrity，不能把版本不等当内容损坏，也不能跳过 hash | 放宽/忽略 hash；把历史行更新到 current；新增兼容列 | 普通 v1、Pending v2 与 current v2/v3 均可从 ready/fallback 精确重建 |
+| 系统 OP snapshot 暂存 sourceCurrency evidence 供批次级双写检测 | snapshot 的 canonical balances/hash 已丢失 CNY/CNH 写法差异 | 把所有同主体多文件都拒绝；仅比较余额 hash | 只拒 CNY+CNH 双写；纯 CNY/CNY、CNH/CNH 继续既有 skip/conflict |
+| 被主体级拒绝的系统 OP 行写入 `system_snapshot_attempts` 的 rolled_back raw audit | anomaly 表没有 raw JSON；原文件 artifact 不能替代逐行 source/normalized 证据 | 给 anomaly 表加列；只留错误描述；丢弃软错行 | 不写有效 snapshot；同文件/跨文件每个来源均可查询完整 raw JSON，坏余额行也保留原值与 validation evidence |
+| 在既有 adjustment/archive 集成链中把充值 fixture 替换为真实 XLSX import | 复用现有计算、结果、归档、Excel 断言，避免复制整套夹具 | 新建重复的全链脚本；仅 SQL seed | 三行 USD/CNY/CNH 从真实 parser 进入，CNY+CNH 合并为 CNY=5，raw/check 仍显示 CNH，结果与归档仅九币种 |
+
+### PR2 Evidence
+
+| 证据 | 结果 | 覆盖的行为/风险 |
+| --- | --- | --- |
+| PR2 修改前定向基线：`node --test tests/unit/backend/vcc-financial-op/row-mapper.test.js tests/unit/backend/vcc-financial-op/detail-importer.test.js tests/unit/backend/vcc-financial-op/system-op-importer.test.js` | 72/72 PASS | mapper、detail importer、system importer 当前基线；旧测试仍明确拒绝 CNH，作为红测改造起点 |
+| PR2 首轮红测 | 71 PASS / 8 FAIL（预期失败） | CNH 词法、业务归一、canonical hash、Pending、system 主体重复的生产缺口得到可重复证据 |
+| PR2 聚焦回归：mapper + system importer | 48/48 PASS | 完整字段矩阵、trim/大小写、未选中通道列、CITI/non-CITI early anomaly hash、assignedSubject hash、同/跨文件双写、软错主体并集、完整 raw audit |
+| PR2 最终扩展 unit：`node --test tests/unit/backend/vcc-financial-op/*.test.js tests/unit/main-process/vcc-financial-op-dataset-writer.test.js tests/unit/main-process/vcc-financial-op-service.test.js` | 367/367 PASS | VCC importer/calculator/result/output、Pending 冻结迁移、system 主体审计与历史 dataset writer lineage |
+| PR2 真实 XLSX 派生链：`node scripts/integration/vcc-financial-op-adjustment-archive-chain.js` | 226/226 PASS | XLSX 三行导入→CNY/CNH 金额合并→九币种计算/复核→raw/check Excel 保留 CNH→结果 Excel/归档无 CNH→跨月继承 |
+| PR2 相关 integration | destructive state 77/77、effective result 19/19、historical template export 29/29，均 exit 0 | 归档/解归档、结果读取、历史月份模板导出没有回归 |
+| PR2 smoke/lint/diff | `npm run smoke` PASS；`npm run lint` exit 0；`git diff --check` exit 0 | 全局 smoke、生产源码静态检查与补丁格式 |
+| PR2 important variables | `npm run check:vars`：改动 5 个 `src` 文件，未命中任何重要变量 | 无额外 Important-skeleton / Runtime-state / Risk-sensitive review 清单 |
+| PR2 Review Round 1 | 关闭 P1：第 17+ 列错误不再早于标准列审计，完整 CNY snapshot + extra-column CNH 行会主体级拒绝且 raw audit 保留 10 行；关闭 P3：通道 invalid_key 只要实际币种列可判定也使用 canonical hash | 聚焦 mapper/system 50/50 PASS；扩展 unit 366/366、真实派生链 226/226、lint/diff 均 exit 0 |
+| PR2 Review Round 2 | 收窄第 17+ 列兼容边界：仅目标月且主体可识别时保留标准列审计并归属主体；其他月份、非法日期、目标月空主体恢复单条 unknown 第17列异常，不新增日期/主体双 anomaly | 四条真实 workbook 边界（含原 PPHK/CNH 旁路反例）通过；聚焦 51/51、扩展 unit 367/367、lint/diff 均 exit 0 |
+| PR2 Review Round 3 最终复审 | P0/P1/P2/P3 均为 0，当前实际 diff 无阻塞 P3+；独立 live audit 同样未发现可达问题 | Reviewer 聚焦 110/110、扩展 VCC 367/367、真实 XLSX 全链 226/226，lint、全部改动 JS `node --check`、diff check 均通过；保留发布前人工资金红线 |
+| PR2 根侧完整发布门禁 | `npm run release-check` exit 0：lint、smoke、全量 unit 5418/5418、48 个 integration 2410/2410 全部通过；`npm run check:vars` 未命中重要变量 | GitHub PR/Windows required check 前的本地合并门禁已满足；自动同步的集成测试清单随新增 17 条断言一并提交 |
+
+### PR2 Remaining / Human Review
+
+| 项目 | 状态 | 发布要求 |
+| --- | --- | --- |
+| 真实资金样本逐入口核对：recharge、fee_fx、CITI、非 CITI 清算/结算、Pending 双侧、system | ⚠️ FUND RED LINE | 人工核对源行数、主体、正负号、分币金额、source/normalized currency、幂等 disposition、raw/check 与最终九币种 Excel；未签字不得发布 |
+| PR2 行为偏差 | NONE | 固定 Spec/TechDoc 合同未改变；历史 hash/记录/读取只做版本感知兼容，不迁移/回填 |
