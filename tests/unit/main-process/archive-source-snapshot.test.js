@@ -38,6 +38,13 @@ test('inode 使用无损十进制 token，并兼容旧数字型快照', () => {
     ctimeMs: 56987.654321,
     ino: 42
   }).ino, '42');
+  const unsafeNumberSnapshot = normalizeSourceSnapshot({
+    sizeBytes: 12,
+    mtimeMs: 34123.456789,
+    ctimeMs: 56987.654321,
+    ino: Number.MAX_SAFE_INTEGER + 2
+  });
+  assert.equal(Object.hasOwn(unsafeNumberSnapshot, 'ino'), false);
   assert.equal(sourceSnapshotMatchesStat({
     sizeBytes: 12,
     mtimeMs: 34123.456789,
@@ -46,7 +53,7 @@ test('inode 使用无损十进制 token，并兼容旧数字型快照', () => {
   }, stat), true);
 });
 
-test('bigint Stats 与普通 Stats 的时间快照严格等价', (t) => {
+test('bigint Stats 与普通 Stats 严格等价，允许普通 Stats 省略不可靠 inode', (t) => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-source-stat-time-'));
   t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
   const filePath = path.join(tempDir, 'source.xlsx');
@@ -57,7 +64,20 @@ test('bigint Stats 与普通 Stats 的时间快照严格等价', (t) => {
   const regularSnapshot = sourceSnapshotFromStat(regularStat);
   const bigintSnapshot = sourceSnapshotFromStat(bigintStat);
 
-  assert.deepEqual(bigintSnapshot, regularSnapshot);
+  assert.deepEqual({
+    sizeBytes: bigintSnapshot.sizeBytes,
+    mtimeMs: bigintSnapshot.mtimeMs,
+    ctimeMs: bigintSnapshot.ctimeMs
+  }, {
+    sizeBytes: regularSnapshot.sizeBytes,
+    mtimeMs: regularSnapshot.mtimeMs,
+    ctimeMs: regularSnapshot.ctimeMs
+  });
+  if (regularSnapshot.ino === undefined) {
+    assert.equal(Object.hasOwn(regularSnapshot, 'ino'), false);
+  } else {
+    assert.equal(bigintSnapshot.ino, regularSnapshot.ino);
+  }
   assert.equal(sourceSnapshotMatchesStat(bigintSnapshot, regularStat), true);
   assert.equal(sourceSnapshotMatchesStat(regularSnapshot, bigintStat), true);
 });

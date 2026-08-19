@@ -92,6 +92,8 @@
 | PR1 ArchiveService 隔离复跑 | `archive-service.test.js` 全文件 43/43 PASS；曾加 DEBUG 的“业务引用锁”“blob 元数据失败恢复”两场景循环 20 次，40/40 PASS | 排除 ARCHIVE_SOURCE_CHANGED 误报对 service hold/retry 状态机的随机污染 |
 | PR1 六文件聚焦复跑 | 首次发现旧测试 fixture 仍手写 `Number(mtimeNs)/1e6`，唯一失败 1/151；fixture 改为公共 snapshot 后单次 151/151 PASS，整组循环 10 次 1510/1510 PASS | 覆盖 FilePlan、source snapshot、task lifecycle、operation tracker、Position 与 Statement；仓库 `src/tests` 已无目标 DEBUG 或有损时间公式 |
 | PR1 Review Round 4 最终复审 | P0/P1/P2/P3 均无发现，明确“无阻塞 P3+”；APFS 2000 次采样旧公式 mismatch 506、新公式 0；跨 BigInt/普通 stat 1000 次误报 0，真实变化仍严格失败 | bigint 时间换算、inode string、FilePlan/ArchiveService/Statement reader 共用快照合同与 DEBUG 清理均独立通过 |
+| PR #152 Windows CI inode 兼容红测 | Windows 普通 Stats 返回 unsafe Number inode `23362423067021943`，按既有合同省略；BigInt Stats 保留 string，旧测试因 whole-object deepEqual 失败，但 size/mtime/ctime 严格一致且双向 matcher 均应成功 | 测试改为严格比较三项，普通 snapshot 有可靠 inode 时再要求相等、否则明确断言缺失；synthetic safe/unsafe inode 与真实变化 false 均保留；Source Snapshot/FilePlan/ArchiveService/Statement 合跑 91/91 PASS，node check/diff check PASS |
+| PR1 Review Round 5 | P0/P1/P2/P3 均无发现，明确“无阻塞 P3+”；独立 Windows 合成 probe 证明 unsafe regular inode 省略、BigInt inode 精确保留、跨 Stats 双向兼容，且 final FilePlan 对同 size/time 的 inode+1 仍拒绝 | 本轮仅修测试与记录，生产合同未改；聚焦 123/123 PASS，无 DEBUG/console 残留 |
 
 ## Remaining unknowns
 
@@ -105,4 +107,4 @@
 | GitHub CLI 鉴权 | CLOSED/降级路径 | `gh auth status` token 失效，但 git push 凭据可用，且已确认 GitHub connector 提供 create/merge PR | PR 创建与合并走 connector；CLI 仅作为不可用 fallback，不阻塞流程 |
 | PR1 首轮 Review findings | CLOSED | 原 Dev 逐项修复，同一 Reviewer 多轮复审后确认无阻塞 P3+ | 仍保留 Windows 真实银行样本人工复核，不阻塞代码合并 |
 | PR1 bridge 归属 P1 | CLOSED | 两阶段归属、空槽 fail-closed、正反真实 CSV 与 Reviewer 复审均通过 | ⚠️ 账号归属资金红线仍需发布前人工签字 |
-| PR1 bigint stat 兼容回归 | CLOSED | 精度转换、测试 fixture、DEBUG 清理、全量门禁与 Reviewer Round 4 均通过 | Windows/NTFS 实机时间与 file ID 对拍留在发布环境验证 |
+| PR1 bigint stat 兼容回归 | CI GATE | 精度转换、本地门禁与 Reviewer Round 5 已通过；PR #152 以最新 Windows required check 为合并真相 | required check 未绿不合并；生产 matcher 合同未改，Windows picker/final 均使用 BigInt Stats |
