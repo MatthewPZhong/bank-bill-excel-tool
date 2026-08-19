@@ -10,8 +10,8 @@
 | 字段 | 值 |
 |---|---|
 | 当前清单版本 | v36（app v3.1.11 — Task Run/File Batch 解耦、非空 FilePlan 原子发号、精确 dataset/run lineage、Archive 十四表与 017/018 定点维护） |
-| v36 本轮 review | 2026-08-18（以 `origin/main@35f11e153962c34cba0e9d4c7084e9df85c9f209` 为代码基线，复核共享工作树 63 file / 59 no-file / 117 exclude、TaskLifecycle/Archive/VCC/Position/Acquiring/Pending/Biz OP/Pre-fund 跨层合同；不 rebase、不覆盖既有改动） |
-| v36 基线数据 | `docs/analysis/var-reference-stats.md`（337 个 git-tracked JS / 4458 个顶层名称；A-share 649 / A-pair 947 / A-local 2695 / B 1596；报告版本 3.1.11） |
+| v36 本轮 review | 2026-08-19（产品代码基线 `35f11e153962c34cba0e9d4c7084e9df85c9f209`、PR merge base `6f1c09236a6c36f72eb82d61dc14508adfe20eec`；复核 63 file / 59 no-file / 117 exclude、TaskLifecycle/Archive/VCC/Position/Acquiring/Pending/Biz OP/Pre-fund 跨层合同；不 rebase、不覆盖既有改动） |
+| v36 基线数据 | `docs/analysis/var-reference-stats.md`（338 个 git-tracked JS / 4478 个顶层名称；A-share 656 / A-pair 950 / A-local 2705 / B 1606；报告版本 3.1.11） |
 | v35 历史版本 | app v3.1.10 — VCC storage contract v2、精简事实/异常审计、Archive source/hold 血缘与 copy-on-write 原子迁移。 |
 | v35 本轮 review | 2026-08-17（以 annotated `v3.1.9^{commit}`=`3edf0527d6537d29cb19b48bda2a3f91f0ce6e32` 为 release baseline，覆盖 28 个生产文件；升格 VCC storage capability/guard、VCC COW migration/recovery、import source/Archive hold/durable handoff，并把 Archive 元数据合同从九表扩为十表） |
 | v35 基线数据 | `docs/analysis/var-reference-stats.md`（当时 328 个 tracked JS / 4299 个顶层名称；A-share 623 / A-pair 912 / A-local 2598 / B 1535；报告版本 3.1.10） |

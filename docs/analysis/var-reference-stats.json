@@ -1,16 +1,16 @@
 {
   "meta": {
     "version": "3.1.11",
-    "scannedAt": "2026-08-18T16:42:17.510Z",
+    "scannedAt": "2026-08-19T01:57:12.691Z",
     "root": "src",
     "sourceSet": "git-tracked-js",
     "totalFiles": 338,
-    "totalTopLevelNames": 4476,
+    "totalTopLevelNames": 4478,
     "buckets": {
-      "shared": 655,
+      "shared": 656,
       "paired": 950,
-      "local": 2704,
-      "crossFile": 1605
+      "local": 2705,
+      "crossFile": 1606
     }
   },
   "A": {
@@ -840,7 +840,7 @@
           },
           {
             "file": "src/backend/pre-fund-reconciliation-run-store.js",
-            "count": 15
+            "count": 20
           },
           {
             "file": "src/backend/pre-fund-reconciliation-store.js",
@@ -1087,7 +1087,7 @@
             "count": 10
           }
         ],
-        "totalHits": 1155,
+        "totalHits": 1160,
         "fileSpan": 100
       },
       {
@@ -15730,6 +15730,32 @@
         "fileSpan": 4
       },
       {
+        "name": "deleteArchiveRunByTaskRunId",
+        "defFiles": [
+          "src/backend/biz-op-recon-db/run-repository.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/biz-op-recon-db/run-repository.js",
+            "count": 2
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-run-store.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/biz-op-recon-run-data.js",
+            "count": 1
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 5,
+        "fileSpan": 4
+      },
+      {
         "name": "extractHeaders",
         "defFiles": [
           "src/main-process/toolbox-stream-io.js"
@@ -17037,6 +17063,30 @@
         "fileSpan": 3
       },
       {
+        "name": "rollbackQuietly",
+        "defFiles": [
+          "src/backend/duplicate-inbound-match-store.js",
+          "src/backend/pre-fund-reconciliation-store.js",
+          "src/main-process/pre-fund-reconciliation/service.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/backend/duplicate-inbound-match-store.js",
+            "count": 3
+          },
+          {
+            "file": "src/backend/pre-fund-reconciliation-store.js",
+            "count": 5
+          },
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 3
+          }
+        ],
+        "totalHits": 11,
+        "fileSpan": 3
+      },
+      {
         "name": "setRunChunkProgress",
         "defFiles": [
           "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -17211,30 +17261,6 @@
           {
             "file": "src/main-process/run-check-worker.js",
             "count": 3
-          }
-        ],
-        "totalHits": 10,
-        "fileSpan": 3
-      },
-      {
-        "name": "rollbackQuietly",
-        "defFiles": [
-          "src/backend/duplicate-inbound-match-store.js",
-          "src/backend/pre-fund-reconciliation-store.js",
-          "src/main-process/pre-fund-reconciliation/service.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/duplicate-inbound-match-store.js",
-            "count": 3
-          },
-          {
-            "file": "src/backend/pre-fund-reconciliation-store.js",
-            "count": 5
-          },
-          {
-            "file": "src/main-process/pre-fund-reconciliation/service.js",
-            "count": 2
           }
         ],
         "totalHits": 10,
@@ -37615,24 +37641,6 @@
         "fileSpan": 2
       },
       {
-        "name": "deleteArchiveRunByTaskRunId",
-        "defFiles": [
-          "src/backend/biz-op-recon-db/run-repository.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/backend/biz-op-recon-db/run-repository.js",
-            "count": 2
-          },
-          {
-            "file": "src/main-process/biz-op-recon-run-data.js",
-            "count": 1
-          }
-        ],
-        "totalHits": 3,
-        "fileSpan": 2
-      },
-      {
         "name": "deleteMonth",
         "defFiles": [
           "src/backend/pending-db/month-repository.js"
@@ -39182,6 +39190,24 @@
           },
           {
             "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 1
+          }
+        ],
+        "totalHits": 3,
+        "fileSpan": 2
+      },
+      {
+        "name": "preservePreFundRunOwnerAfterMirrorCompensationFailure",
+        "defFiles": [
+          "src/main-process/pre-fund-archive-lineage.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-archive-lineage.js",
+            "count": 2
+          },
+          {
+            "file": "src/main.js",
             "count": 1
           }
         ],
@@ -67763,6 +67789,20 @@
         "fileSpan": 1
       },
       {
+        "name": "compensateRunReceiptAfterMirrorFailure",
+        "defFiles": [
+          "src/main-process/pre-fund-reconciliation/service.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main-process/pre-fund-reconciliation/service.js",
+            "count": 2
+          }
+        ],
+        "totalHits": 2,
+        "fileSpan": 1
+      },
+      {
         "name": "computeT1Op",
         "defFiles": [
           "src/main-process/biz-op-recon-session.js"
@@ -78936,7 +78976,7 @@
         },
         {
           "file": "src/backend/pre-fund-reconciliation-run-store.js",
-          "count": 15
+          "count": 20
         },
         {
           "file": "src/backend/pre-fund-reconciliation-store.js",
@@ -79183,7 +79223,7 @@
           "count": 10
         }
       ],
-      "totalHits": 1155,
+      "totalHits": 1160,
       "fileSpan": 100
     },
     {
@@ -93826,6 +93866,32 @@
       "fileSpan": 4
     },
     {
+      "name": "deleteArchiveRunByTaskRunId",
+      "defFiles": [
+        "src/backend/biz-op-recon-db/run-repository.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/biz-op-recon-db/run-repository.js",
+          "count": 2
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-run-store.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/biz-op-recon-run-data.js",
+          "count": 1
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 5,
+      "fileSpan": 4
+    },
+    {
       "name": "extractHeaders",
       "defFiles": [
         "src/main-process/toolbox-stream-io.js"
@@ -95133,6 +95199,30 @@
       "fileSpan": 3
     },
     {
+      "name": "rollbackQuietly",
+      "defFiles": [
+        "src/backend/duplicate-inbound-match-store.js",
+        "src/backend/pre-fund-reconciliation-store.js",
+        "src/main-process/pre-fund-reconciliation/service.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/backend/duplicate-inbound-match-store.js",
+          "count": 3
+        },
+        {
+          "file": "src/backend/pre-fund-reconciliation-store.js",
+          "count": 5
+        },
+        {
+          "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 3
+        }
+      ],
+      "totalHits": 11,
+      "fileSpan": 3
+    },
+    {
       "name": "setRunChunkProgress",
       "defFiles": [
         "src/backend/acquiring-bill-currency-db/run-repository.js"
@@ -95307,30 +95397,6 @@
         {
           "file": "src/main-process/run-check-worker.js",
           "count": 3
-        }
-      ],
-      "totalHits": 10,
-      "fileSpan": 3
-    },
-    {
-      "name": "rollbackQuietly",
-      "defFiles": [
-        "src/backend/duplicate-inbound-match-store.js",
-        "src/backend/pre-fund-reconciliation-store.js",
-        "src/main-process/pre-fund-reconciliation/service.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/duplicate-inbound-match-store.js",
-          "count": 3
-        },
-        {
-          "file": "src/backend/pre-fund-reconciliation-store.js",
-          "count": 5
-        },
-        {
-          "file": "src/main-process/pre-fund-reconciliation/service.js",
-          "count": 2
         }
       ],
       "totalHits": 10,
@@ -115709,24 +115775,6 @@
       "fileSpan": 2
     },
     {
-      "name": "deleteArchiveRunByTaskRunId",
-      "defFiles": [
-        "src/backend/biz-op-recon-db/run-repository.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/backend/biz-op-recon-db/run-repository.js",
-          "count": 2
-        },
-        {
-          "file": "src/main-process/biz-op-recon-run-data.js",
-          "count": 1
-        }
-      ],
-      "totalHits": 3,
-      "fileSpan": 2
-    },
-    {
       "name": "deleteMonth",
       "defFiles": [
         "src/backend/pending-db/month-repository.js"
@@ -117276,6 +117324,24 @@
         },
         {
           "file": "src/main-process/pre-fund-reconciliation/service.js",
+          "count": 1
+        }
+      ],
+      "totalHits": 3,
+      "fileSpan": 2
+    },
+    {
+      "name": "preservePreFundRunOwnerAfterMirrorCompensationFailure",
+      "defFiles": [
+        "src/main-process/pre-fund-archive-lineage.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main-process/pre-fund-archive-lineage.js",
+          "count": 2
+        },
+        {
+          "file": "src/main.js",
           "count": 1
         }
       ],

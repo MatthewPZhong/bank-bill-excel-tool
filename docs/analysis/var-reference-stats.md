@@ -5,16 +5,16 @@
 | 字段 | 值 |
 |---|---|
 | 版本 | v3.1.11 |
-| 扫描时间 | 2026-8-19 00:42:17 |
+| 扫描时间 | 2026-8-19 09:57:12 |
 | 扫描目录 | `src/` |
 | 源码集合 | Git 已跟踪 `.js`（排除 ignored/generated/untracked） |
 | JS 文件数 | 338 |
-| 顶层声明总数 | 4476 |
-| ≥2 次引用 | 4309 |
-| 跨 ≥3 文件 (A-share) | 655 |
+| 顶层声明总数 | 4478 |
+| ≥2 次引用 | 4311 |
+| 跨 ≥3 文件 (A-share) | 656 |
 | 跨 2 文件 (A-pair) | 950 |
-| 单文件 (A-local) | 2704 |
-| 跨文件合计 (B) | 1605 |
+| 单文件 (A-local) | 2705 |
+| 跨文件合计 (B) | 1606 |
 
 ---
 
@@ -23,7 +23,7 @@
 | 名字 | 跨度 | 总次数 | 声明数 | 声明位置（首个） |
 |---|---:|---:|---:|---|
 | `path` | 132 | 801 | 126 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
-| `run` | 100 | 1155 | 3 | src/backend/vcc-financial-op/worker-entry.js |
+| `run` | 100 | 1160 | 3 | src/backend/vcc-financial-op/worker-entry.js |
 | `fs` | 89 | 516 | 88 | src/backend/balance-adjustment-store.js |
 | `parse` | 58 | 121 | 1 | src/backend/usage-stats.js |
 | `crypto` | 54 | 156 | 54 | src/backend/database/archive-repository.js |
@@ -359,6 +359,7 @@
 | `StringDecoder` | 4 | 6 | 4 | src/backend/acquiring-bill-currency-import/reader-handrolled.js |
 | `batchDelete` | 4 | 5 | 1 | src/backend/database/scenarios-repository.js |
 | `clearByDateBu` | 4 | 5 | 1 | src/backend/biz-op-recon-db/imports-repository.js |
+| `deleteArchiveRunByTaskRunId` | 4 | 5 | 1 | src/backend/biz-op-recon-db/run-repository.js |
 | `extractHeaders` | 4 | 5 | 1 | src/main-process/toolbox-stream-io.js |
 | `failImportBatch` | 4 | 5 | 1 | src/backend/vcc-financial-op-db/repository.js |
 | `ToolboxXlsxFormatError` | 3 | 124 | 1 | src/backend/toolbox-format/xlsx-sheet-scanner.js |
@@ -416,6 +417,7 @@
 | `parseDecimalLexical` | 3 | 11 | 1 | src/backend/toolbox-format/number-date.js |
 | `previewDataTargetDeletion` | 3 | 11 | 1 | src/backend/vcc-financial-op/data-target-deletion.js |
 | `processingResult` | 3 | 11 | 1 | src/main.js |
+| `rollbackQuietly` | 3 | 11 | 3 | src/backend/duplicate-inbound-match-store.js |
 | `setRunChunkProgress` | 3 | 11 | 1 | src/backend/acquiring-bill-currency-db/run-repository.js |
 | `assertCurrentPositionCheckpointHistory` | 3 | 10 | 1 | src/main-process/position-reconciliation/side-db-mutation.js |
 | `bankAmountAbs` | 3 | 10 | 2 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js |
@@ -424,7 +426,6 @@
 | `finishImportRecord` | 3 | 10 | 1 | src/backend/vcc-financial-op-db/repository.js |
 | `operations` | 3 | 10 | 1 | src/backend/vcc-financial-op/mutation-policy.js |
 | `PRAGMA_STATEMENTS` | 3 | 10 | 3 | src/backend/big-table-import/engine.js |
-| `rollbackQuietly` | 3 | 10 | 3 | src/backend/duplicate-inbound-match-store.js |
 | `addToAccumulatorMap` | 3 | 9 | 2 | src/backend/vcc-financial-op/calculator.js |
 | `amountEqual` | 3 | 9 | 3 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js |
 | `attachSourceIdentity` | 3 | 9 | 1 | src/backend/vcc-financial-op/source-lineage.js |
@@ -1487,7 +1488,6 @@
 | `createRowInserter` | 3 | src/backend/pending-db/month-repository.js |
 | `createStatementGenerationHelpers` | 3 | src/main-process/statement-generation.js |
 | `createTaskLifecycle` | 3 | src/main-process/archive-center/task-lifecycle.js |
-| `deleteArchiveRunByTaskRunId` | 3 | src/backend/biz-op-recon-db/run-repository.js |
 | `deleteMonth` | 3 | src/backend/pending-db/month-repository.js |
 | `deleteMonthBySide` | 3 | src/backend/acquiring-bill-currency-db/import-repository.js |
 | `detectBundleType` | 3 | src/backend/scenarios-bundle-io.js |
@@ -1574,6 +1574,7 @@
 | `prepareManualBalanceSeedSubmission` | 3 | src/main-process/manual-balance-seed-preflight.js |
 | `preparePendingImportSubmission` | 3 | src/main-process/pending-import-preflight.js |
 | `prepareRunLineage` | 3 | src/main-process/biz-op-recon-run-data.js |
+| `preservePreFundRunOwnerAfterMirrorCompensationFailure` | 3 | src/main-process/pre-fund-archive-lineage.js |
 | `publicBizOpRun` | 3 | src/main-process/biz-op-archive-lineage.js |
 | `publicPendingRun` | 3 | src/main-process/pending-archive-lineage.js |
 | `readBankFile` | 3 | src/backend/bank-bu-recon-import/reader.js |
@@ -4657,7 +4658,7 @@
 | 名字 | 跨度 | 总次数 | 声明数 | 前三引用位置 |
 |---|---:|---:|---:|---|
 | `path` | 132 | 801 | 126 | src/main-process/toolbox-output-publication.js(68), src/main-process/position-reconciliation/input-staging.js(42), src/main-process/archive-center/storage-root-manager.js(38) |
-| `run` | 100 | 1155 | 3 | src/main-process/position-reconciliation/store.js(89), src/backend/database/archive-repository.js(85), src/backend/database/migrations.js(59) |
+| `run` | 100 | 1160 | 3 | src/main-process/position-reconciliation/store.js(89), src/backend/database/archive-repository.js(85), src/backend/database/migrations.js(59) |
 | `fs` | 89 | 516 | 88 | src/main-process/archive-center/storage-root-manager.js(68), src/main-process/archive-center/archive-service.js(55), src/main-process/position-reconciliation/input-staging.js(21) |
 | `parse` | 58 | 121 | 1 | src/backend/database/linked-table-repository.js(12), src/backend/database/migrations.js(11), src/backend/vcc-financial-op/calculator.js(6) |
 | `crypto` | 54 | 156 | 54 | src/main-process/archive-center/archive-service.js(9), src/main-process/position-reconciliation/service.js(8), src/main-process/pre-fund-reconciliation/service.js(7) |
@@ -4993,6 +4994,7 @@
 | `StringDecoder` | 4 | 6 | 4 | src/backend/biz-op-recon-import/reader-streamed.js(2), src/backend/vcc-op-calc-import/reader.js(2), src/backend/acquiring-bill-currency-import/reader-handrolled.js(1) |
 | `batchDelete` | 4 | 5 | 1 | src/backend/database/scenarios-repository.js(2), src/backend/database.js(1), src/preload.js(1) |
 | `clearByDateBu` | 4 | 5 | 1 | src/backend/biz-op-recon-db/imports-repository.js(2), src/backend/biz-op-recon-import/import-worker.js(1), src/main-process/biz-op-recon-run-data.js(1) |
+| `deleteArchiveRunByTaskRunId` | 4 | 5 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/backend/pre-fund-reconciliation-run-store.js(1), src/main-process/biz-op-recon-run-data.js(1) |
 | `extractHeaders` | 4 | 5 | 1 | src/backend/file-service.js(2), src/main-process/statement-generation.js(1), src/main-process/toolbox-stream-io.js(1) |
 | `failImportBatch` | 4 | 5 | 1 | src/backend/vcc-financial-op-db/repository.js(2), src/backend/vcc-financial-op/detail-importer.js(1), src/backend/vcc-financial-op/import-service.js(1) |
 | `ToolboxXlsxFormatError` | 3 | 124 | 1 | src/backend/toolbox-format/xlsx-sheet-scanner.js(69), src/backend/toolbox-format/xlsx-pass.js(50), src/backend/position-reconciliation-import/xlsx-reader.js(5) |
@@ -5050,6 +5052,7 @@
 | `parseDecimalLexical` | 3 | 11 | 1 | src/backend/toolbox-format/number-date.js(5), src/backend/toolbox-format/xlsx-sheet-scanner.js(4), src/backend/toolbox-format/model.js(2) |
 | `previewDataTargetDeletion` | 3 | 11 | 1 | src/backend/vcc-financial-op/data-target-deletion.js(7), src/main-process/vcc-financial-op-service.js(3), src/preload.js(1) |
 | `processingResult` | 3 | 11 | 1 | src/renderer.js(6), src/main-process/archive-center/task-policy-registry.js(4), src/main.js(1) |
+| `rollbackQuietly` | 3 | 11 | 3 | src/backend/pre-fund-reconciliation-store.js(5), src/backend/duplicate-inbound-match-store.js(3), src/main-process/pre-fund-reconciliation/service.js(3) |
 | `setRunChunkProgress` | 3 | 11 | 1 | src/main-process/acquiring-bill-currency-session.js(7), src/backend/acquiring-bill-currency-db/run-repository.js(3), src/main-process/acquiring-bill-currency-run-data.js(1) |
 | `assertCurrentPositionCheckpointHistory` | 3 | 10 | 1 | src/main-process/position-reconciliation/large-import-schema.js(4), src/main-process/position-reconciliation/side-db-mutation.js(4), src/main-process/position-reconciliation/store.js(2) |
 | `bankAmountAbs` | 3 | 10 | 2 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js(5), src/main-process/scenario-engines/r5-refund-order-backfill.js(3), src/main-process/scenario-engines/dbs-charge-fund-check.js(2) |
@@ -5058,7 +5061,6 @@
 | `finishImportRecord` | 3 | 10 | 1 | src/backend/vcc-financial-op/detail-importer.js(4), src/backend/vcc-financial-op-db/repository.js(3), src/backend/vcc-financial-op/system-op-importer.js(3) |
 | `operations` | 3 | 10 | 1 | src/main-process/business-operation-registry.js(5), src/backend/vcc-financial-op/mutation-policy.js(3), src/backend/vcc-financial-op/mutation-guard.js(2) |
 | `PRAGMA_STATEMENTS` | 3 | 10 | 3 | src/main-process/run-check-multiworker-worker.js(4), src/backend/big-table-import/engine.js(3), src/main-process/run-check-worker.js(3) |
-| `rollbackQuietly` | 3 | 10 | 3 | src/backend/pre-fund-reconciliation-store.js(5), src/backend/duplicate-inbound-match-store.js(3), src/main-process/pre-fund-reconciliation/service.js(2) |
 | `addToAccumulatorMap` | 3 | 9 | 2 | src/backend/vcc-financial-op/calculator.js(5), src/backend/vcc-financial-op/decimal-accumulator.js(2), src/backend/vcc-financial-op/result-adjustments.js(2) |
 | `amountEqual` | 3 | 9 | 3 | src/main-process/scenario-engines/r5-fund-transfer-backfill.js(3), src/main-process/scenario-engines/r5-fund-transfer-recon-backfill.js(3), src/main-process/scenario-engines/r5-payment-offline-allocation-backfill.js(3) |
 | `attachSourceIdentity` | 3 | 9 | 1 | src/backend/vcc-financial-op/source-lineage.js(4), src/backend/vcc-financial-op/detail-importer.js(3), src/backend/vcc-financial-op/system-op-importer.js(2) |
@@ -6116,7 +6118,6 @@
 | `createRowInserter` | 2 | 3 | 1 | src/backend/pending-db/month-repository.js(2), src/backend/pending-import/worker.js(1) |
 | `createStatementGenerationHelpers` | 2 | 3 | 1 | src/main-process/statement-generation.js(2), src/main.js(1) |
 | `createTaskLifecycle` | 2 | 3 | 1 | src/main-process/archive-center/task-lifecycle.js(2), src/main.js(1) |
-| `deleteArchiveRunByTaskRunId` | 2 | 3 | 1 | src/backend/biz-op-recon-db/run-repository.js(2), src/main-process/biz-op-recon-run-data.js(1) |
 | `deleteMonth` | 2 | 3 | 1 | src/backend/pending-db/month-repository.js(2), src/backend/pending-import/worker.js(1) |
 | `deleteMonthBySide` | 2 | 3 | 1 | src/backend/acquiring-bill-currency-db/import-repository.js(2), src/main-process/acquiring-bill-currency-session.js(1) |
 | `detectBundleType` | 2 | 3 | 1 | src/backend/scenarios-bundle-io.js(2), src/main.js(1) |
@@ -6203,6 +6204,7 @@
 | `prepareManualBalanceSeedSubmission` | 2 | 3 | 1 | src/main-process/manual-balance-seed-preflight.js(2), src/main.js(1) |
 | `preparePendingImportSubmission` | 2 | 3 | 1 | src/main-process/pending-import-preflight.js(2), src/main.js(1) |
 | `prepareRunLineage` | 2 | 3 | 1 | src/main-process/biz-op-recon-run-data.js(2), src/main-process/pre-fund-reconciliation/service.js(1) |
+| `preservePreFundRunOwnerAfterMirrorCompensationFailure` | 2 | 3 | 1 | src/main-process/pre-fund-archive-lineage.js(2), src/main.js(1) |
 | `publicBizOpRun` | 2 | 3 | 1 | src/main-process/biz-op-archive-lineage.js(2), src/main.js(1) |
 | `publicPendingRun` | 2 | 3 | 1 | src/main-process/pending-archive-lineage.js(2), src/main.js(1) |
 | `readBankFile` | 2 | 3 | 2 | src/backend/bank-bu-recon-import/reader.js(2), src/main.js(1) |

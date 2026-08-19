@@ -6,8 +6,8 @@
 - Initial plan/technical contract: `changes/archive-center-file-batch-contract/techdoc.md`
 - Product code baseline: `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10 release commit）。
 - Current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
-- Earlier review evidence heads: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`、`001b8059ced56b9d70602c79cdd97d375020c969`、`250b1349ff9be315111d4fe9999958cf63927a7c`（历史复审快照，不覆盖）。
-- Current review evidence head: `01a6640dca1b6a02f6d05f20556e5994f9ef1855`（2026-08-18 第八轮复审输入）。
+- Earlier review evidence heads: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`、`001b8059ced56b9d70602c79cdd97d375020c969`、`250b1349ff9be315111d4fe9999958cf63927a7c`、`01a6640dca1b6a02f6d05f20556e5994f9ef1855`、`5511a2ca7c2b33964b64d34ecf646f4655f26194`（历史复审快照，不覆盖）。
+- Current review evidence head: `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（2026-08-19 第十轮复审输入）。
 - Do not rebase or overwrite the existing dirty worktree.
 - Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收和文件血缘人工门禁全部闭合。
 
@@ -337,3 +337,16 @@ reconciliation blindspot pass：自动化未发现新增 BLOCK；source row/head
 | `npm run check:vars` | 预期 exit 2：Risk-sensitive `MODULE_PRE_FUND_RECONCILIATION_RESULTS` | DDL、runId 命名空间和匹配算法未改；results 只在 mirror handoff 失败时按 exact TaskRun 删除，side DB parity 与 smoke 已覆盖 |
 
 reconciliation blindspot pass：本轮不改输入、匹配键、金额、币种、方向、手续费、规则、候选消费顺序或输出；side run 与 mirror/Archive TaskRun 只通过唯一 `archive_task_run_id` 闭合，补偿成功满足全部结果行随 run 原子归零，补偿失败满足 receipt/mirror/TaskRun 可审计且不进入 failed owner。无新增自动化 BLOCK。⚠️ 这是跨库部分失败与结果删除的资金红线；合并前仍需用真实或脱敏 Pre-fund 库人工核对 mirror create/finish 故障下的 side run/候选/平账/不平账行数、mirror status、TaskRun status 与 startup ACK。
+
+### Tenth review round（input head `1df4004c53550bf75d9f73a2d544414b6f8c52b4`）
+
+#### Decisions and evidence
+
+| 项目 | 事实与证据 | 决定 |
+| --- | --- | --- |
+| 最终变量统计过期 | `npm run scan:vars` 在 Git tracked source set 上得到 338 files / 4478 names，A-share/A-pair/A-local/B 为 656/950/2705/1606；原产物仍为 4476/655/950/2704/1605 | 提交自动生成的 `var-reference-stats.md/json` 并同步 important-variables v36 元数据；不手改扫描结果，不把 untracked JS 纳入统计 |
+| integration policy 是否属于本次生成产物 | 当前 HEAD 实跑 `npm run scan:vars` 只写 `docs/analysis/var-reference-stats.md/json`，`rules/integration-test-policy.md` 保持 clean | 不制造未由命令产生的 policy/timing diff；后续只有 integration runner 产生真实断言清单变化时才提交 |
+| full-PR important variables 证据过窄 | `npm run check:vars -- --since 6f1c09236a6c36f72eb82d61dc14508adfe20eec` 按设计 exit 2，命中 6 Critical、7 Important-skeleton、8 Runtime-state、11 Risk-sensitive、1 Minor | PR body 改为完整 base-to-head 结果；不再用最后一个局部提交的两项命中代表整份 PR |
+| 现场固定计数随正常活动漂移 | 2026-08-17 快照为 95/34/53/8；reviewer 2026-08-19 只读快照为 98/36/54/8，且两者都满足 `visible = total - zeroArtifact = readyVisible + failedOnlyVisible` | Spec/TechDoc 将 release gate 改为同一 canary 副本冻结 baseline 后做前后等式与非目标数据守恒；历史数字仅保留为带日期 evidence |
+
+本轮只刷新生成证据和验收口径，不修改运行时代码、Schema、金额、币种、方向、匹配、File Batch 可见性 SQL 或 repair 逻辑。reconciliation blindspot pass 未发现新增自动化测试缺口；⚠️ 真实/脱敏数据库的文件血缘、行数、金额和 repair 非目标数据仍须人工复核，统计等式不能替代资金签字。

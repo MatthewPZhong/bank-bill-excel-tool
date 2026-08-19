@@ -3,12 +3,12 @@
 > status: draft / implementation in progress
 > product code baseline: `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`
 > current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`
-> review evidence head (2026-08-18): `250b1349ff9be315111d4fe9999958cf63927a7c`
+> review evidence head (2026-08-19): `1df4004c53550bf75d9f73a2d544414b6f8c52b4`
 > baseline version: `3.1.10`（正式发布后的远端 `main`）
 > target version: 3.1.11
 > owner: 存档中心 / 全局任务生命周期 / 工具箱
 > created: 2026-08-17
-> last updated: 2026-08-18
+> last updated: 2026-08-19
 > authority: 本文件是该需求后续实现、测试和验收的独立前向合同；不追溯改写 v3.1.9/v3.1.10 已发布二进制和历史发行事实。
 
 ---
@@ -72,7 +72,7 @@
 
 - v3.1.10 产品代码基线：`35f11e153962c34cba0e9d4c7084e9df85c9f209`，即 PR #148 的 release commit，`package.json.version=3.1.10`；
 - 当前 PR merge base：`6f1c09236a6c36f72eb82d61dc14508adfe20eec`，即 PR #149 的发布证据合并；相对产品代码基线只修改发布文档、规则和测试，没有 `src/` 产品代码变化；
-- 本轮复审取证 head：`001b8059ced56b9d70602c79cdd97d375020c969`，用于固定第六轮评论所审查的实现快照，不作为产品代码基线；前一轮 `458e73f…` 只保留在 implementation notes 的历史证据中。
+- 当前复审取证 head：`1df4004c53550bf75d9f73a2d544414b6f8c52b4`，用于固定第十轮评论所审查的实现快照，不作为产品代码基线；此前各轮 head 只保留在 implementation notes 的历史证据中。
 
 2026-08-17 初稿生成时，本地 `origin/main` 尚指向 `35f11e…` 且对象库中尚无 `6f1c092…`；该记录只保留为历史时点事实，不能继续描述当前 PR。当前工作树不 rebase、不覆盖既有未跟踪文件；以下“远端产品事实”以 `35f11e…` 为准，“PR 差异”从 `6f1c092…` 计算，“实施进度”以当前共享工作树为准，三者不得混写。
 
@@ -91,20 +91,22 @@
 
 当前共享工作树的最终 registry checkpoint 为：59/59 no-file 已切换到无编号 Task Run；63/63 file action 已进入原子文件生命周期；117/117 exclude 与前两类互斥闭合，临时 file allow-list 已删除。该状态不是远端 v3.1.10 的既有行为，并已由 literal inventory 与完整 release-check 实测，不能靠文档常量宣称完成。
 
-### 2.3 当前真实数据库样本
+### 2.3 历史真实数据库只读快照（2026-08-17）
 
-对当前用户 `tool-data.sqlite` 执行 `query_only` 只读聚合，结果为：
+2026-08-17 对当时的当前用户 `tool-data.sqlite` 执行 `query_only` 只读聚合，结果为：
 
 | 指标 | 数量 | 结论 |
 | --- | ---: | --- |
-| 全部 batch | 95 | 当前公共统计基数 |
+| 全部 batch | 95 | 该时点 raw 统计基数 |
 | 零 artifact batch | 34 | 迁移后应隐藏，但不删除、不重编号 |
 | 至少一个 ready artifact 的 batch | 53 | 正常可打开文件批次 |
 | 有 artifact、但没有 ready artifact 的 batch | 8 | 均为真实 failed-only 文件证据，不能按 ready-only 隐藏 |
 
 这 8 个 failed-only 批次共有 13 个 `ARCHIVE_BLOB_MISSING` 文件 artifact（9 input、4 output）。因此公共可见条件必须是“至少有一个有效文件 artifact”，不能是 `readyArtifactCount > 0`。
 
-34 个零 artifact 批次中，32 个业务成功、2 个业务失败；代表 task 包括 VCC calculate/archive/unarchive、场景开关、业务对账 run、数据删除，以及两次 `vccFinancialOp:import:apply`。这证明空批次既来自纯无文件 action，也来自文件 action 在 artifact 追加前失败的生命周期窗口。
+该时点 34 个零 artifact 批次中，32 个业务成功、2 个业务失败；代表 task 包括 VCC calculate/archive/unarchive、场景开关、业务对账 run、数据删除，以及两次 `vccFinancialOp:import:apply`。这证明空批次既来自纯无文件 action，也来自文件 action 在 artifact 追加前失败的生命周期窗口。
+
+2026-08-19 的后续只读快照已随正常活动增长为 `98 total / 36 zero-artifact / 54 ready-visible / 8 failed-only-visible`（可见合计 62）。两组数字都只是带时间戳的现场 evidence，不是固定 release expected。Canary 必须先冻结同一数据库副本并记录四项 baseline，再在升级/repair 后对同一副本验证 `visible = total - zeroArtifact = readyVisible + failedOnlyVisible`，同时确认非目标 batch/artifact/Blob/hold 与号码不变。
 
 ---
 
@@ -476,7 +478,7 @@ SQL 必须先套 visible predicate，再做 `ORDER BY/LIMIT/OFFSET`；不能取 
 
 ### 8.3 历史行为
 
-- 当前 34 个零 artifact batch 从公共视图隐藏；数据库记录、operation issuance、task 终态和序号游标保留；
+- 2026-08-17 历史快照中的 34 个零 artifact batch 从公共视图隐藏；数据库记录、operation issuance、task 终态和序号游标保留；
 - 公共直链变为 not-found 是有意兼容变化；内部诊断仍能按 raw id 读取；
 - 隐藏批次不计 runCount、不参与 latest、不参与 related；
 - retention cleanup 是否最终删除 raw metadata 沿用现有内部策略，但不能回收号码；
@@ -713,7 +715,7 @@ prepared.inputPaths + 所有 dialogSelections.filePaths
 
 ### 13.2 真实数据库/UI
 
-1. 数据库副本先验证 95/34/53/8 口径、SQLite integrity、foreign keys 和 query plan；
+1. Canary 开始时冻结一个数据库副本，记录 `total/zeroArtifact/readyVisible/failedOnlyVisible` 四项 baseline；升级与 repair 后对同一副本验证 `visible = total - zeroArtifact = readyVisible + failedOnlyVisible`，四项可见性分类与非目标 batch/artifact/Blob/hold/号码前后守恒，并同时检查 SQLite integrity、foreign keys 和 query plan；
 2. 连续执行至少三种 no-file action，确认 UI count/latest/sequence 不变；
 3. 执行 input-only、output-only、input+output、failed-only、cancelled 和 crash-recovery 场景；
 4. dry-run 与执行 017/018 repair，并回读三个真实 artifact 的 SHA/hold；

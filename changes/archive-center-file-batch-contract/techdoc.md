@@ -3,14 +3,14 @@
 | 项目 | 内容 |
 | --- | --- |
 | 版本 | v3.1.11 |
-| 文档版本 | v1.3 |
-| 日期 | 2026-08-18 |
+| 文档版本 | v1.4 |
+| 日期 | 2026-08-19 |
 | 作者 | 主 agent（技术合同与质量把控） |
 | 状态 | 代码与自动门禁已完成；真实数据库/UI 与人工资金血缘待验收 |
 | 关联 Spec | `changes/archive-center-file-batch-contract/spec.md`（NFB-01～NFB-28） |
 | 产品代码基线 | `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10） |
 | 当前 PR merge base | `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 发布证据；无 `src/` 产品代码变化） |
-| 复审取证 head | `250b1349ff9be315111d4fe9999958cf63927a7c`（2026-08-18，第七轮输入；历史 head 见 implementation notes） |
+| 复审取证 head | `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（2026-08-19，第十轮输入；历史 head 见 implementation notes） |
 | 目标发布 | v3.1.11 |
 | 实施执行 | 已由 `gpt-5.6-sol`、`high reasoning` 的 dev agent 按本合同执行；主 agent 独立审查和验收 |
 | 质量门 | 专项测试、`npm run release-check`、`npm run check:vars`、真实数据库/UI 验收、文件血缘与资金人工复核 |
@@ -1013,7 +1013,7 @@ ORDER BY b.local_date DESC, b.global_daily_sequence DESC, b.id DESC
 LIMIT ? OFFSET ?;
 ```
 
-复用 `idx_archive_artifacts_batch(batch_id,id)` 完成 EXISTS；direct related 使用 `archive_task_lineage` consumer/producer 索引与 `archive_batches(task_run_id)` partial index。真实 95 批数据库和放大 fixture 必须检查 `EXPLAIN QUERY PLAN`，禁止先取固定上限再在 JS 过滤。
+复用 `idx_archive_artifacts_batch(batch_id,id)` 完成 EXISTS；direct related 使用 `archive_task_lineage` consumer/producer 索引与 `archive_batches(task_run_id)` partial index。历史 95 批样本、canary 冻结副本和放大 fixture 都必须检查 `EXPLAIN QUERY PLAN`，禁止先取固定上限再在 JS 过滤。
 
 ### 7.5 UI 状态
 
@@ -1487,7 +1487,7 @@ git diff --check
 
 真实数据库/UI：
 
-1. 副本检查 95/34/53/8、foreign keys、integrity 和 query plan；
+1. Canary 开始时冻结一个数据库副本并记录 `total/zeroArtifact/readyVisible/failedOnlyVisible`；升级与 repair 后对同一副本验证 `visible = total - zeroArtifact = readyVisible + failedOnlyVisible`、四项分类与非目标 batch/artifact/Blob/hold/号码前后守恒，并检查 foreign keys、integrity 和 query plan；历史 `95/34/53/8` 仅作为 2026-08-17 evidence，不作为固定 expected；
 2. 连续执行至少三种 no-file action，确认 count/latest/sequence 不变；
 3. 执行 input-only、output-only、input+output、failed-only、cancelled、crash recovery；
 4. 017/018 dry-run、apply、二次 dry-run及三文件 SHA/hold 回读；
