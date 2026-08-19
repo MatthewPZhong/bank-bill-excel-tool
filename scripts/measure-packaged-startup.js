@@ -5,7 +5,10 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createProcessAdapter } = require('./startup-process-adapter');
+const {
+  DEFAULT_EXTERNAL_TIMEOUT_MS,
+  createProcessAdapter
+} = require('./startup-process-adapter');
 
 const REQUIRED_VARIANTS = Object.freeze([
   '3.1.11-installer',
@@ -1027,11 +1030,15 @@ async function measureSample(variant, round, options, dependencies = {}) {
     }
     const externalFullReadyMs = Number((now() - handle.processCreatedAt).toFixed(3));
     evidence.externalFullReadyMs = externalFullReadyMs;
-    const processIds = await adapter.refreshTree(handle, { timeoutMs: remainingMs(5000) });
+    const processIds = await adapter.refreshTree(handle, {
+      timeoutMs: remainingMs(DEFAULT_EXTERNAL_TIMEOUT_MS)
+    });
     if (processIds.length === 0) {
       throw codedError('PROCESS_TREE_CLOSE_TARGET_MISSING', 'ready 后没有 token-matched owned live process');
     }
-    const closeEvidence = await adapter.gracefulClose(handle, { timeoutMs: remainingMs(5000) });
+    const closeEvidence = await adapter.gracefulClose(handle, {
+      timeoutMs: remainingMs(DEFAULT_EXTERNAL_TIMEOUT_MS)
+    });
     if (!closeEvidence || !Array.isArray(closeEvidence.acceptedPids)
         || closeEvidence.acceptedPids.length === 0) {
       throw codedError('PROCESS_TREE_CLOSE_NOT_ACCEPTED', '没有 owned 主窗口接受 graceful close');

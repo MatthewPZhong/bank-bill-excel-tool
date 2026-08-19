@@ -4,6 +4,8 @@ const { execFile, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const path = require('node:path');
 
+const DEFAULT_EXTERNAL_TIMEOUT_MS = 15000;
+
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -29,7 +31,7 @@ function withHardTimeout(promise, timeoutMs, code, message) {
 }
 
 function execFileAsync(file, args, options = {}) {
-  const timeoutMs = Math.max(1, Number(options.timeoutMs) || 5000);
+  const timeoutMs = Math.max(1, Number(options.timeoutMs) || DEFAULT_EXTERNAL_TIMEOUT_MS);
   return new Promise((resolve, reject) => {
     execFile(file, args, {
       windowsHide: true,
@@ -48,7 +50,7 @@ async function windowsProcessSnapshot(options = {}) {
     '-NoProfile',
     '-NonInteractive',
     '-Command',
-    `Get-CimInstance Win32_Process | ForEach-Object {
+    `Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine | ForEach-Object {
       [PSCustomObject]@{
         ProcessId = $_.ProcessId
         ParentProcessId = $_.ParentProcessId
@@ -76,7 +78,10 @@ function createProcessAdapter(options = {}) {
   const runFile = options.execFileAsync || execFileAsync;
   const now = options.now || (() => Number(process.hrtime.bigint()) / 1e6);
   const wait = options.delay || delay;
-  const externalTimeoutMs = Math.max(1, Number(options.externalTimeoutMs) || 5000);
+  const externalTimeoutMs = Math.max(
+    1,
+    Number(options.externalTimeoutMs) || DEFAULT_EXTERNAL_TIMEOUT_MS
+  );
   const cleanupTimeoutMs = Math.max(1, Number(options.cleanupTimeoutMs) || 15000);
   const nonceFactory = options.nonceFactory || (() => crypto.randomUUID());
   const tokenOf = (item) => [
@@ -419,6 +424,7 @@ $receipts | ConvertTo-Json -Compress
 }
 
 module.exports = {
+  DEFAULT_EXTERNAL_TIMEOUT_MS,
   createProcessAdapter,
   execFileAsync,
   windowsProcessSnapshot,
