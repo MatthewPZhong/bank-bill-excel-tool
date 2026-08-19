@@ -385,3 +385,29 @@ reconciliation blindspot pass：本轮不改输入、匹配键、金额、币种
 - 发布证据分支在正式状态文档与防回退测试写入后再次执行唯一完整 `npm run release-check`：lint/smoke PASS、unit 5376/5376、integration 48/48 scripts 与 2393/2393 assertions（372338ms）；runner 只改写本机时间戳/耗时的清单已还原，不进入证据 diff。
 - `npm run scan:vars` 复核仍为 338 files / 4478 names、A-share/A-pair/A-local/B = 656/950/2705/1606，只有扫描时间戳变化，已还原不进入 diff；`npm run check:vars -- --include-minor` 因证据分支无 `src/` diff 按设计跳过并 exit 0。完整 PR 的重要变量扫描、资金链 review 和相关专项证据已在上文及 PR #150 留档；`git diff --check` PASS。
 - blindspot pass 与 reconciliation blindspot pass 未发现新的自动化 BLOCK；金额、币种、方向、匹配和业务行算法未改。资金红线已由上述真实副本人工复核关闭，但该签字不泛化为后续新月份、新主体、新输入来源或新环境。
+
+## v3.1.11 随包指南偏差与 v3.1.12 纠正（2026-08-19）
+
+### Unknowns register and decision
+
+| 项目 | 分类/结论 | 证据 | 决定 |
+| --- | --- | --- | --- |
+| 发布后补写的 v3.1.11 正式状态是否已进入已发布应用 | PROBE → 否 | annotated `v3.1.11` 指向 `782415ae…`；该 commit 的 `docs/USER_GUIDE.md` 仍写“未发布候选”，而 `package.json` 将 `docs/USER_GUIDE.md` 打入应用，`src/main.js` 会导出该文件 | 不把 PR #151 的仓库文档更新误称为旧安装包修复 |
+| 能否替换 v3.1.11 同版本资产 | BLOCKed by release contract | Windows Runbook 明确禁止替换或覆盖已发布同版本资产 | 保留 v3.1.11 tag/Release/资产不变，通过 v3.1.12 更高补丁版本交付 |
+| v3.1.12 是否需要业务或 schema 改动 | PROBE → 否 | 缺陷只来自随包文档的时间状态；当前纠正分支相对 `main@782415ae…` 无 `src/` diff | 只改版本元数据、三份发布文档、Runbook、生成统计和发布合同测试 |
+
+### Deviation
+
+原发布收尾方案把正式 Release 事实放在 tag 之后的证据 PR；这对仓库记录有效，但不能改变已经从 tag 构建的安装包，因此 v3.1.11 的随包指南仍保留发布前状态。纠正方案不移动 tag、不替换资产：v3.1.12 在 tag 前把指南改为稳定表述，只声明应用版本，并以 GitHub Releases 作为公开稳定版、资产和发布时间的真相源。
+
+### Acceptance boundary
+
+- v3.1.12 不修改业务源码、数据库、资金规则、文件生命周期或 Excel 输出；v3.1.11 的真实数据库/UI/血缘与 Windows 验收记录继续有效，但不能替代 v3.1.12 候选包中版本号和随包指南的最小回读。
+- 合并门禁为三份发布文档与 package/lockfile 一致、发布合同测试、`scan:vars`、`check:vars`、完整 `release-check`、PR CI 和 `git diff --check`；annotated tag 与正式 Release 必须在合并后另按 Windows Runbook 执行。
+
+### Evidence
+
+- 发布文档合同与 check-vars 合同：14/14 PASS；测试同时锁定 `package.json.build.files` 包含 `docs/USER_GUIDE.md`，以及应用内导出入口继续读取该文件。
+- `npm run scan:vars`：v3.1.12，338 files / 4478 names，A-share/A-pair/A-local/B = 656/950/2705/1606；数量与 v3.1.11 相同，只更新报告版本与扫描时间。
+- `npm run check:vars -- --include-minor`：相对 HEAD 与 working tree 无 `src/` diff，按设计跳过并 exit 0；v37 清单明确继承 v36 运行时变量。
+- `npm run release-check`：lint/smoke PASS、unit 5377/5377、integration 48/48 scripts / 2393/2393 assertions PASS；integration runner 产生的纯时间戳与耗时刷新已还原，不进入纠正 diff。

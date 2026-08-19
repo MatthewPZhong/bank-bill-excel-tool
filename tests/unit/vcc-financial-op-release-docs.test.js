@@ -24,19 +24,45 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.11 版本号与三份用户文档保持正式发布状态和人工门禁结论', () => {
+test('v3.1.12 版本号与三份用户文档在打 tag 前保持稳定的随包说明', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
+  const mainSource = read('src/main.js');
 
-  assert.equal(packageJson.version, '3.1.11');
-  assert.equal(packageLock.version, '3.1.11');
-  assert.equal(packageLock.packages[''].version, '3.1.11');
+  assert.equal(packageJson.version, '3.1.12');
+  assert.equal(packageLock.version, '3.1.12');
+  assert.equal(packageLock.packages[''].version, '3.1.12');
+  assert.ok(packageJson.build.files.includes('docs/USER_GUIDE.md'));
+  assert.match(mainSource, /path\.join\(app\.getAppPath\(\), 'docs', 'USER_GUIDE\.md'\)/);
+  assert.match(changelog, /^## 3\.1\.12 - 2026-08-19$/m);
+  assert.match(history, /^## v3\.1\.12（2026-08-19）$/m);
+  assert.match(guide, /^版本：`v3\.1\.12`$/m);
+
+  const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.11'));
+  const currentHistory = history.slice(0, history.indexOf('## v3.1.11'));
+  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
+  for (const currentSection of [currentChangelog, currentHistory, currentGuide]) {
+    assert.match(currentSection, /GitHub Releases/);
+    assert.match(currentSection, /打 tag 前|tag 前/);
+    assert.doesNotMatch(
+      currentSection,
+      /v3\.1\.12 当前为未发布候选|v3\.1\.12（未发布|## 3\.1\.12 - 未发布/
+    );
+  }
+  assert.match(guide, /不改变业务功能、数据或输出/);
+});
+
+test('v3.1.11 三份用户文档保留正式发布证据并记录随包指南缺陷', () => {
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
+
   assert.match(changelog, /^## 3\.1\.11 - 2026-08-19$/m);
   assert.match(history, /^## v3\.1\.11（2026-08-19）$/m);
-  assert.match(guide, /^版本：`v3\.1\.11`$/m);
   for (const document of [changelog, history, guide]) {
     assert.match(document, /真实文件证据|非空文件清单|有文件才建批次/);
     assert.match(document, /不占用批次号|不推进序号|不推进批次号/);
@@ -50,12 +76,10 @@ test('v3.1.11 版本号与三份用户文档保持正式发布状态和人工门
     assert.match(document, /latest stable Release/);
     assert.match(document, /四项公开资产/);
   }
-
-  const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.10'));
-  const currentHistory = history.slice(0, history.indexOf('## v3.1.10'));
-  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
-  for (const currentSection of [currentChangelog, currentHistory, currentGuide]) {
-    assert.doesNotMatch(currentSection, /未发布候选|当前为未发布|尚未正式发布/);
+  for (const document of [changelog, history, guide, runbook]) {
+    assert.match(document, /v3\.1\.11[\s\S]{0,160}未发布候选|未发布候选[\s\S]{0,160}v3\.1\.11/);
+    assert.match(document, /不替换|不覆盖|不可变发布规则/);
+    assert.match(document, /v3\.1\.12|更高补丁版本/);
   }
 });
 

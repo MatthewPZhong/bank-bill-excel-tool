@@ -72,3 +72,10 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 - `latest.yml` 的 version/path/size 与 Setup 一致，SHA-512 为 `d1MSPttwUnICShPzJnBJDhOfSlgAHRnsaFdpbnNVwFUzudQzgNkJ4mq1HetVHvPzSN1SPpmCNV3KLSaaXzE9KQ==`；Release 为公开、非 draft、非 prerelease 且是 latest stable。
 - 四项资产的公开 URL 均以无凭据 HEAD 请求跟随重定向得到 HTTP 200；独立下载的 `latest.yml` 与 blockmap SHA-256 和 GitHub asset digest 一致。
 - 发布负责人已确认 Windows 10/11 Setup、portable、SmartScreen 和 `3.1.10 -> 3.1.11` 离线覆盖安装全部 PASS，未使用发布前豁免。`production/latest` 在线 canary 必须在公开 Release 存在后另行执行；实际通过前不公告“在线升级已验证”。
+- 已知随包文档问题：tag commit 中的 `docs/USER_GUIDE.md` 仍把 v3.1.11 写成“未发布候选”；发布后证据 PR 无法进入既有安装包。按本 Runbook 的不可变发布规则，不替换 v3.1.11 资产，改由 v3.1.12 更高补丁版本交付修正。
+
+## v3.1.12 纠正发布准备
+
+- v3.1.12 只提升应用版本并修正随包用户指南；不修改业务源码、schema、资金口径或文件输出。
+- 随包指南必须在 tag 前使用稳定表述：明确应用版本，但把公开 stable、资产和发布时间交给 GitHub Releases 作为真相源，避免再次把发布后事实补进仓库却无法进入已发布二进制。
+- 只能在 `package.json`、lockfile、三份发布文档和完整门禁随同一 `main` commit 闭合后创建 annotated `v3.1.12`；发布完成后的 workflow、资产摘要与在线 canary 另按“发布后”步骤记录。
