@@ -82,7 +82,7 @@ function parseCsvText(content, { blankrows = false } = {}) {
 // v2.1.16 PR#61 F4：可选 sheetName —— 缺省 = 第一个 sheet（行为与历史完全一致）。
 //   传入 sheetName 时读指定 sheet（detector 多 sheet 扫描用）；sheet 不存在抛 FILE_READ。
 //   ⚠️ CSV 无 sheet 概念：传 sheetName 也忽略，仍解析整份 CSV（detector 对 CSV 走单次默认读取）。
-function readWorkbookRows(filePath, { blankrows = false, sheetName, maxRows = 0 } = {}) {
+function readWorkbookRowsUnchecked(filePath, { blankrows = false, sheetName, maxRows = 0 } = {}) {
   ensureSupportedFile(filePath);
 
   if (!fs.existsSync(filePath) || fs.statSync(filePath).size === 0) {
@@ -160,6 +160,30 @@ function readWorkbookRows(filePath, { blankrows = false, sheetName, maxRows = 0 
   }
 }
 
+function readWorkbookRows(filePath, options = {}) {
+  const readGuard = options && options.readGuard;
+  const token = readGuard && typeof readGuard.beforeRead === 'function'
+    ? readGuard.beforeRead(filePath)
+    : undefined;
+  let rows;
+  try {
+    rows = readWorkbookRowsUnchecked(filePath, options);
+  } catch (error) {
+    if (readGuard && typeof readGuard.afterRead === 'function') {
+      try {
+        readGuard.afterRead(token, filePath);
+      } catch (stabilityError) {
+        throw stabilityError;
+      }
+    }
+    throw error;
+  }
+  if (readGuard && typeof readGuard.afterRead === 'function') {
+    readGuard.afterRead(token, filePath);
+  }
+  return rows;
+}
+
 // 判定是否为内存/容量类错误（大文件全量读触顶）：RangeError（含 Array buffer / string length / array length）
 //   或 message 命中 V8 OOM 关键字。命中 → 回"文件过大"真实文案而非"文件为空或不可读"。
 function isMemoryLimitError(error) {
@@ -169,8 +193,8 @@ function isMemoryLimitError(error) {
   return /array buffer allocation failed|invalid (string|array) length|out of memory|heap (out of memory|limit)|cannot allocate|allocation failed/i.test(message);
 }
 
-function readRows(filePath, { blankrows = false, maxRows = 0 } = {}) {
-  const rows = readWorkbookRows(filePath, { blankrows, maxRows });
+function readRows(filePath, { blankrows = false, maxRows = 0, readGuard } = {}) {
+  const rows = readWorkbookRows(filePath, { blankrows, maxRows, readGuard });
 
   if (!Array.isArray(rows) || rows.length === 0 || !rows.some(isRowMeaningful)) {
     throw new FileValidationError('FILE_READ', '文件为空或不可读，请重新导入');
@@ -274,8 +298,10 @@ function findHeaderMatchPosition(rowsCells, normalizedExpectedHeaders) {
 }
 
 // v2.1.16 PR#61 F4：可选第三参 { sheetName } 透传给 readWorkbookRows（缺省读第一个 sheet，行为不变）。
-function readRowsWithMetadata(filePath, expectedHeaders = [], { sheetName } = {}) {
-  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName });
+function readRowsWithMetadata(filePath, expectedHeaders = [], options = {}) {
+  const { sheetName, readGuard, onWorkbookRows } = options;
+  const rawRows = readWorkbookRows(filePath, { blankrows: true, sheetName, readGuard });
+  if (typeof onWorkbookRows === 'function') onWorkbookRows(rawRows);
   const normalizedExpectedHeaders = Array.isArray(expectedHeaders)
     ? expectedHeaders.map((header) => normalizeCell(header)).filter((header) => header !== '')
     : [];

@@ -32,18 +32,33 @@ function normalizeSourceSnapshot(value) {
   if (!Number.isFinite(mtimeMs) || mtimeMs < 0) return null;
   if (!Number.isFinite(ctimeMs) || ctimeMs < 0) return null;
   const snapshot = { sizeBytes, mtimeMs, ctimeMs };
-  const inode = Number(value.ino);
-  if (Number.isSafeInteger(inode) && inode >= 0) snapshot.ino = inode;
+  let inode;
+  if (typeof value.ino === 'bigint' && value.ino >= 0n) {
+    inode = value.ino.toString(10);
+  } else if (typeof value.ino === 'string' && /^\d+$/.test(value.ino)) {
+    inode = BigInt(value.ino).toString(10);
+  } else if (Number.isSafeInteger(value.ino) && value.ino >= 0) {
+    inode = String(value.ino);
+  }
+  if (inode !== undefined) snapshot.ino = inode;
   return snapshot;
+}
+
+function statTimeMs(stat, millisecondKey, nanosecondKey) {
+  if (typeof stat[nanosecondKey] === 'bigint') {
+    const nanoseconds = stat[nanosecondKey];
+    return Number(nanoseconds / 1000000n) + Number(nanoseconds % 1000000n) / 1e6;
+  }
+  return Number(stat[millisecondKey]);
 }
 
 function sourceSnapshotFromStat(stat) {
   if (!stat || typeof stat.isFile !== 'function' || !stat.isFile()) return null;
   return normalizeSourceSnapshot({
     sizeBytes: Number(stat.size),
-    mtimeMs: Number(stat.mtimeMs),
-    ctimeMs: Number(stat.ctimeMs),
-    ino: Number(stat.ino)
+    mtimeMs: statTimeMs(stat, 'mtimeMs', 'mtimeNs'),
+    ctimeMs: statTimeMs(stat, 'ctimeMs', 'ctimeNs'),
+    ino: stat.ino
   });
 }
 
