@@ -9,7 +9,15 @@
 - `docs/VERSION_FEATURE_HISTORY.md`
 - `docs/USER_GUIDE.md`
 
-## v3.1.11（未发布）
+## v3.1.12（2026-08-19）
+
+v3.1.12 是 v3.1.11 的文档纠正版。v3.1.11 的 Windows 资产已按不可变发布规则保留，但其安装包内用户指南仍固化了打 tag 前的“未发布候选”文字；本版在 tag 前把随包指南改为稳定、不会随发布阶段过期的说明，并通过更高补丁版本交付。
+
+- `package.json`、lockfile 和三份发布文档统一为 `3.1.12`；用户指南明确当前应用版本，公开稳定版与资产状态以 GitHub Releases 为准。
+- v3.1.11 的 tag、Release、资产摘要与人工验收仍作为历史事实保留，不移动旧 tag、不替换旧资产，也不把仓库后补文档误称为已经进入旧安装包。
+- 本版不修改 `src/`、数据库 schema、存档中心、任务/文件血缘、资金口径或 Excel 输出；业务行为与 v3.1.11 相同。
+
+## v3.1.11（2026-08-19）
 
 v3.1.11 同时收口存档中心的文件批次合同与 VCC storage contract-v1 升级边界：前端只显示至少一项真实文件证据的批次，无文件操作不发号；VCC 只允许可证明为空的 v1 自动升级为空 v2，任何非空 v1 都会在写入前停止。
 
@@ -32,6 +40,13 @@ v3.1.11 同时收口存档中心的文件批次合同与 VCC storage contract-v1
 - 移除【标记已处理】及对应弹窗、IPC/API 和 unresolved 操作门禁。失败尝试不进入有效数据集，运行继续使用此前已生效的数据；旧处置字段只作兼容保留。
 - 数据管理弹窗保持立即打开；快速读取不再闪现三条横向骨架，读取超过 150ms 才显示加载占位，读取完成、失败或关闭后自动清理。
 - 当前机器既有非空 v1 已使用一次性 reset-only COW 完成处理，清空范围仅为 `vcc_fin_op_*` 业务/审计行；活动库由 36.44 GB 缩至 2.84 GB，切换后独立复验时 23 张 VCC 表合计 0 行，Archive batch/artifact/Blob/flow/issuance、其它模块和自增高水位守恒；后续启动可创建空的 module-state 结构单例。同目录 JSON 审计报告继续保留；旧 v1 备份在独立复验后按用户再次明确授权永久删除，回收约 33.94 GiB，当前机器不再具备旧 v1 整库回退能力。这不是发布给所有用户的自动 migration。
+
+**正式发布与验收**
+
+- 发布负责人于 2026-08-19 明确确认真实数据库副本、存档中心 UI、017/018/001、Biz OP/Pending/前置资金对账、VCC/Position/Acquiring 的文件与资金血缘门禁全部 PASS；原生产数据库未修改。
+- Windows 10/11 Setup、portable、SmartScreen 实际提示和 `3.1.10 -> 3.1.11` 离线覆盖安装全部 PASS，未使用 Windows Runbook 豁免。
+- PR #150 以 merge commit `782415ae1f606da2adebe881ba7ab56b1b045137` 合入 `main`；annotated tag `v3.1.11`、Release workflow `32219459465`、latest stable Release 与四项公开资产均已完成回读。
+- 发布 commit 的完整门禁为 lint/smoke PASS、unit 5376/5376、integration 48/48 脚本与 2393/2393 断言 PASS。
 
 ## v3.1.10（2026-08-17）
 

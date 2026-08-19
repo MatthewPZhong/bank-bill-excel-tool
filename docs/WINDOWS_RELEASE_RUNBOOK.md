@@ -63,3 +63,19 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 - 线上 `latest.yml` 与 Setup SHA-512 已回读确认一致；portable 的大小、PE 头和 SHA-256 与 GitHub asset digest 一致。按不可变发布规则不修改 v3.0.18 已发布资产。
 - 后续版本必须使用 ASCII portable staging 名，避免重复出现发布后名称漂移。
 - 真实 Windows `3.0.18 -> 后继 stable` 必须等后继版本资产存在后执行。
+
+## v3.1.11 发布记录
+
+- Release：[v3.1.11](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.11)，annotated tag object `e17f29d262c48c59d162b7a61e18bce2b802c308` peeled 后精确指向发布时 `main@782415ae1f606da2adebe881ba7ab56b1b045137`。
+- Windows workflow [32219459465](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32219459465) 全绿，已完成 tag/main、release-check、布局、构建、应用检查、staging、更新元数据、Release 发布与回读。
+- Setup `100359253` bytes / SHA-256 `c68ab388561c18fe3a77c074cba4709c6c61e40a57c88328a260033820880206`；portable `99862407` bytes / SHA-256 `68e61d634ea81ff4d56abc7fabb8aac71f758b731d29745f405f6c044bd52e5f`；blockmap `105645` bytes / SHA-256 `0e73c8d2077c278a0067fd0aa27ee67d83fdb36e5559c946b0aa4b08b2f935e6`；`latest.yml` `372` bytes / SHA-256 `728f5ba06a594e7b408d0e7a162241d35f68ad9762037e994f1ee0125abe998d`。
+- `latest.yml` 的 version/path/size 与 Setup 一致，SHA-512 为 `d1MSPttwUnICShPzJnBJDhOfSlgAHRnsaFdpbnNVwFUzudQzgNkJ4mq1HetVHvPzSN1SPpmCNV3KLSaaXzE9KQ==`；Release 为公开、非 draft、非 prerelease 且是 latest stable。
+- 四项资产的公开 URL 均以无凭据 HEAD 请求跟随重定向得到 HTTP 200；独立下载的 `latest.yml` 与 blockmap SHA-256 和 GitHub asset digest 一致。
+- 发布负责人已确认 Windows 10/11 Setup、portable、SmartScreen 和 `3.1.10 -> 3.1.11` 离线覆盖安装全部 PASS，未使用发布前豁免。`production/latest` 在线 canary 必须在公开 Release 存在后另行执行；实际通过前不公告“在线升级已验证”。
+- 已知随包文档问题：tag commit 中的 `docs/USER_GUIDE.md` 仍把 v3.1.11 写成“未发布候选”；发布后证据 PR 无法进入既有安装包。按本 Runbook 的不可变发布规则，不替换 v3.1.11 资产，改由 v3.1.12 更高补丁版本交付修正。
+
+## v3.1.12 纠正发布准备
+
+- v3.1.12 只提升应用版本并修正随包用户指南；不修改业务源码、schema、资金口径或文件输出。
+- 随包指南必须在 tag 前使用稳定表述：明确应用版本，但把公开 stable、资产和发布时间交给 GitHub Releases 作为真相源，避免再次把发布后事实补进仓库却无法进入已发布二进制。
+- 只能在 `package.json`、lockfile、三份发布文档和完整门禁随同一 `main` commit 闭合后创建 annotated `v3.1.12`；发布完成后的 workflow、资产摘要与在线 canary 另按“发布后”步骤记录。

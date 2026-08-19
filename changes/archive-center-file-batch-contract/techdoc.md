@@ -3,14 +3,14 @@
 | 项目 | 内容 |
 | --- | --- |
 | 版本 | v3.1.11 |
-| 文档版本 | v1.4 |
+| 文档版本 | v1.5 |
 | 日期 | 2026-08-19 |
 | 作者 | 主 agent（技术合同与质量把控） |
-| 状态 | 代码与自动门禁已完成；真实数据库/UI 与人工资金血缘待验收 |
+| 状态 | 已发布；自动门禁、真实数据库/UI、文件与资金血缘、Windows 发布前人工门禁全部 PASS |
 | 关联 Spec | `changes/archive-center-file-batch-contract/spec.md`（NFB-01～NFB-28） |
 | 产品代码基线 | `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10） |
-| 当前 PR merge base | `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 发布证据；无 `src/` 产品代码变化） |
-| 复审取证 head | `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（2026-08-19，第十轮输入；历史 head 见 implementation notes） |
+| 实现 merge/release commit | `main@782415ae1f606da2adebe881ba7ab56b1b045137`（PR #150） |
+| 复审取证 head | `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（2026-08-19，第十轮历史输入；此前 head 见 implementation notes） |
 | 目标发布 | v3.1.11 |
 | 实施执行 | 已由 `gpt-5.6-sol`、`high reasoning` 的 dev agent 按本合同执行；主 agent 独立审查和验收 |
 | 质量门 | 专项测试、`npm run release-check`、`npm run check:vars`、真实数据库/UI 验收、文件血缘与资金人工复核 |
@@ -1522,7 +1522,7 @@ git diff --check
 5. **Policy + public query（代码闭合）**：63 file、59 no-file、117 exclude 与 list/get/stats/latest/related 已按同一可见性合同启用；最终 release gate 继续回归。
 6. **Toolbox/历史兼容**：保持 selection role、immutable evidence、committed receipt；数据库副本验证 017/018 maintenance 与 001 展示。
 7. **VCC v1 收口（已完成 checkpoint）**：保持新装/空 v1 无感收口、非空 v1 fail-closed 与 reset-only COW 门禁；本机 reset、复验、备份最终处置和审计证据均已闭合，不让后续存档中心改动覆盖。
-8. **发布收口**：最后统一 3.1.11、lockfile、三份发布文档、full gate、scan/check vars、真实 UI/DB 和人工血缘复核。
+8. **发布收口（已完成）**：版本、lockfile、三份发布文档、full gate、scan/check vars、真实 UI/DB、人工血缘和 Windows 发布前门禁已闭合；annotated `v3.1.11` 精确指向 `main@782415ae…`，正式 Release workflow 与四项公开资产已回读。
 
 不引入运行时 feature flag 或双写框架。阶段隔离靠小 commit、测试和未接生产入口的内部 adapter；最终 v3.1.11 一次切公共口径，避免半切状态。
 
@@ -1567,7 +1567,7 @@ TechDoc 定稿后，使用 `gpt-5.6-sol`、`high reasoning` 的 dev agent 逐阶
 | T9 | visible public query/controller/UI + direct lineage related | NFB-06～12、22～24、28 | done（统一 visible predicate、直接一跳 related、平铺 UI 与 public DTO privacy 已闭合） |
 | T10 | Toolbox merge/split evidence/publication | NFB-16、18～20 | done（保持回归） |
 | T11 | 017/018 maintenance + 001 fixture | NFB-17、21、28 | done（默认 dry-run、apply backup、精确指纹/audit/幂等；001 严格只读） |
-| T12 | release docs/full gate/manual checklist | release-check/check-vars/人工签字 | in progress（自动 release-check 已通过；真实副本/UI 与资金人工签字待完成） |
+| T12 | release docs/full gate/manual checklist | release-check/check-vars/人工签字 | done（真实副本/UI、资金与文件血缘、Windows 发布前门禁均由发布负责人确认 PASS；未使用豁免；正式 Release 与公开资产已回读） |
 | T13 | VCC 空 v1 升级、入口移除与当前机 reset | storage contract/COW/UI/真实库逐表回读/备份最终处置 | done（478/478、25/25、真实库与 JSON 证据） |
 | T14 | VCC 数据管理首帧骨架去闪烁 | 150ms 延迟、版本/连接守卫、成功失败关闭清理、renderer 定向测试 | done |
 
