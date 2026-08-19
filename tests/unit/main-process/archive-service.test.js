@@ -2059,6 +2059,47 @@ test('initialize 清理 staging/只读副本和孤儿 blob，并把缺失本体�
   }
 });
 
+test('recoverStartupSafety 只收口中断状态，不删除未知 staging/readonly、cleanup job 或 Blob', async () => {
+  const fixture = createFixture();
+  try {
+    const initialized = await fixture.service.initialize({ deferStartupRecovery: true });
+    assert.equal(initialized.ok, true);
+    const stagingPath = path.join(fixture.rootDir, '.staging', 'unknown-user-file.part');
+    const readonlyPath = path.join(fixture.rootDir, '.readonly', 'unknown-user-copy.xlsx');
+    const layoutPath = path.join(fixture.rootDir, 'BANK', '2026', '07', '20', 'preserve.xlsx');
+    const blobPath = path.join(fixture.rootDir, 'blobs', 'sha256', 'aa', 'preserve-blob');
+    for (const filePath of [stagingPath, readonlyPath, layoutPath, blobPath]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `preserve:${path.basename(filePath)}`);
+    }
+    fixture.db.prepare(`
+      INSERT INTO archive_cleanup_jobs (
+        batch_id, batch_number, local_date, layout_relative_dir,
+        materialized_paths_json, released_blobs_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      999,
+      'BANK-20260720-999',
+      '2026-07-20',
+      'BANK/2026/07/20/BANK-20260720-999',
+      JSON.stringify(['BANK/2026/07/20/preserve.xlsx']),
+      JSON.stringify([{ relativePath: 'blobs/sha256/aa/preserve-blob' }]),
+      '2026-07-20 12:00:00',
+      '2026-07-20 12:00:00'
+    );
+    const result = await fixture.service.recoverStartupSafety();
+    assert.equal(result.ok, true);
+    assert.equal(result.interruptedArtifactCount, 0);
+    assert.equal(fixture.repository.listCleanupJobs().length, 1);
+    for (const filePath of [stagingPath, readonlyPath, layoutPath, blobPath]) {
+      assert.equal(fs.existsSync(filePath), true, `${filePath} 启动不得删除`);
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
 test('openReadonlyCopy 和 saveAs 只复制存档内容，不暴露或改写 blob', async () => {
   const fixture = createFixture();
   try {

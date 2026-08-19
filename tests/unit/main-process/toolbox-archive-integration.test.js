@@ -226,8 +226,8 @@ test('committed 恢复输出携 exact7 回原批次，output descriptor 显式�
     /archiveCenterService\.initialize\(\)\.catch\(\(error\) => \{[\s\S]*?throw error;/,
     'ArchiveCenter initialize reject 不得降级成可继续的 unavailable 结果'
   );
-  const startupStart = mainSource.indexOf('async function runBackgroundInitChain()');
-  const startupEnd = mainSource.indexOf('\n// init 完成标记', startupStart);
+  const startupStart = mainSource.indexOf('async function initializeApplication()');
+  const startupEnd = mainSource.indexOf('\nif (hasSingleInstanceLock) app.whenReady()', startupStart);
   const startupSource = mainSource.slice(startupStart, startupEnd);
   assert.ok(
     startupSource.indexOf('await archiveCenterInitializationPromise')
@@ -422,7 +422,7 @@ test('after-committed 崩溃首次完整启动即归档 ready + task succeeded�
   secondStartup.db.close();
 });
 
-test('Position owner 失败不阻断 Toolbox 同次恢复，后续同目标发布不丢旧 artifact', async (t) => {
+test('Position owner 失败仍完成 Toolbox 同次恢复，但统一阻断启动且不丢旧 artifact', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-owner-settle-recovery-'));
   const userDataDir = path.join(root, 'user-data');
   const outputDir = path.join(root, 'outputs');
@@ -530,7 +530,11 @@ test('Position owner 失败不阻断 Toolbox 同次恢复，后续同目标发�
     logWarning: (...args) => warnings.push(args)
   });
 
-  await controller.initialize();
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+      && error.owners.includes('Position')
+  );
 
   const repository = createArchiveRepository(db);
   const recoveredOld = repository.getBatchDetail(oldReserved.batchId);
@@ -703,8 +707,7 @@ test('损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启
   const blockedStartup = openStartup(() => { toolboxRecoveryCalls += 1; });
   const startupAdmission = blockedStartup.controller.initialize();
   await assert.rejects(startupAdmission, (error) => {
-    assert.equal(error.code, 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED');
-    assert.deepEqual(error.owners, ['Toolbox']);
+    assert.equal(error.code, 'ARCHIVE_STARTUP_OUTBOX_FAILED');
     return true;
   });
   assert.equal(toolboxRecoveryCalls, 1, '损坏 outbox 读取前必须先调用 Toolbox owner');
@@ -737,7 +740,7 @@ test('损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启
         parentRunId: 'toolbox-must-stay-blocked-parent'
       });
     })(),
-    (error) => error && error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+    (error) => error && error.code === 'ARCHIVE_STARTUP_OUTBOX_FAILED'
   );
   assert.equal(newOperationStarted, false, '启动 admission 失败后不得 reserve/publish 新任务');
   blockedStartup.db.close();

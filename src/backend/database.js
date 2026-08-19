@@ -103,6 +103,10 @@ const duplicateInboundMatchRunRepository = require('./database/duplicate-inbound
 const { createBackup: createBackupImpl } = require('./database/backup');
 // v2.1.9 SR-log-1 (T32h)：替换 console.error → appendModuleLog 双写
 const { appendModuleLog } = require('./logger');
+const {
+  runStartupPhaseSync,
+  startStartupPhase
+} = require('./startup-phase');
 
 // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库标志位 + 磁盘安全余量比例
 //   标志位沿用 settings-repository 单键布尔范式（值 '1' = 已执行；缺失 = 未执行）。
@@ -131,10 +135,14 @@ class AppDatabase {
     this.db = null;
   }
 
-  init() {
-    fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
-    this.db = new DatabaseSync(this.dbPath);
-    this.db.exec('PRAGMA foreign_keys = ON;');
+  init(options = {}) {
+    const onStartupPhase = typeof options.onStartupPhase === 'function'
+      ? options.onStartupPhase
+      : null;
+    runStartupPhaseSync('database-open', () => {
+      fs.mkdirSync(path.dirname(this.dbPath), { recursive: true });
+      this.db = new DatabaseSync(this.dbPath);
+      this.db.exec('PRAGMA foreign_keys = ON;');
     // v2.1.7 F7-A1：全局 SQL 调优（影响 bank-bu-recon / biz-op-recon / acquiring-bill-currency 三套业务引擎）
     //   PRAGMA 顺序固定：foreign_keys → journal_mode(WAL) → synchronous(NORMAL) → cache_size → mmap_size → temp_store
     //   ⚠️ synchronous=NORMAL 必须在 WAL 之后（DELETE/FULL 模式下 NORMAL 不安全；spec §7.3 关键不变量）
@@ -143,8 +151,12 @@ class AppDatabase {
     this.db.exec('PRAGMA synchronous = NORMAL;');      // WAL 下安全 + 性能 2-3 倍
     this.db.exec('PRAGMA cache_size = -65536;');       // 64MB 页缓存（负数 = KB；-65536 = 64MB）
     this.db.exec('PRAGMA mmap_size = 268435456;');     // 256MB 内存映射（64-bit 环境）
-    this.db.exec('PRAGMA temp_store = MEMORY;');       // v3.0.3 PR-C（W1）：临时表/排序驻内存，避开 Windows %TEMP% 落盘 + Defender 过滤链（4 处 PRAGMA 同步，加在 mmap_size 之后）
-    this.db.exec(`
+      this.db.exec('PRAGMA temp_store = MEMORY;');       // v3.0.3 PR-C（W1）：临时表/排序驻内存，避开 Windows %TEMP% 落盘 + Defender 过滤链（4 处 PRAGMA 同步，加在 mmap_size 之后）
+      this.db.prepare('SELECT 1 AS sqlite_ready').get();
+    }, { onRecord: onStartupPhase });
+
+    runStartupPhaseSync('database-migrations', () => {
+      this.db.exec(`
       CREATE TABLE IF NOT EXISTS templates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         template_key TEXT,
@@ -583,14 +595,18 @@ class AppDatabase {
     // v3.0.12 功能2（批A）：账户映射管理全局表（幂等 CREATE IF NOT EXISTS，无依赖、不进 ALL_TABLE_KEYS；批B 才接对账）
     this.ensureFundTransferAccountMappingSupport();
     this.ensurePreFundReconciliationRunMetadataSupport();
-    this.ensureDuplicateInboundMatchRunMetadataSupport();
+      this.ensureDuplicateInboundMatchRunMetadataSupport();
+    }, { onRecord: onStartupPhase });
+
+    const finishVacuumPhase = startStartupPhase('database-vacuum', onStartupPhase);
     // v3.0.5 PR-2（Part B Phase 0 / B-D6）：一次性 VACUUM 主库（止血回收历史删除空洞）
-    //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再 ANALYZE 重统计）
+    //   必须在所有 ensure*Support / migrate* 之后（VACUUM 重建文件，之后再执行有界 optimize）
     //   迁移式幂等：标志位已写则跳过；成功才写标志、磁盘不足/失败不写标志 → 下次重试。
     //   ⚠️ 同步阻塞，15GB 预期分钟级；本阶段无用户可见进度框（窗口在 init 完成后才建，Phase 3 未做）。
     try {
       const vacuumResult = this.runOneTimeVacuumIfNeeded();
       if (vacuumResult && vacuumResult.status === 'vacuumed') {
+        finishVacuumPhase('success');
         appendModuleLog({
           level: 'info',
           source: 'main',
@@ -603,6 +619,7 @@ class AppDatabase {
           ]
         });
       } else if (vacuumResult && vacuumResult.status === 'insufficient-disk') {
+        finishVacuumPhase('skipped');
         appendModuleLog({
           level: 'warning',
           source: 'main',
@@ -615,6 +632,7 @@ class AppDatabase {
           ]
         });
       } else if (vacuumResult && vacuumResult.status === 'failed') {
+        finishVacuumPhase('failed', { error: vacuumResult.error });
         appendModuleLog({
           level: 'error',
           source: 'main',
@@ -628,8 +646,20 @@ class AppDatabase {
           stack: vacuumResult.error && vacuumResult.error.stack ? vacuumResult.error.stack : undefined
         });
       }
+      if (vacuumResult && vacuumResult.status === 'already-done') {
+        finishVacuumPhase('skipped');
+      }
+      if (!vacuumResult || ![
+        'vacuumed',
+        'insufficient-disk',
+        'failed',
+        'already-done'
+      ].includes(vacuumResult.status)) {
+        finishVacuumPhase('skipped');
+      }
       // already-done：稳态正常路径（每次启动重复触达）→ 静默，不打 log 防噪音
     } catch (vacuumErr) {
+      finishVacuumPhase('failed', { error: vacuumErr });
       // 防御：runOneTimeVacuumIfNeeded 自身异常也不阻塞启动，下次重试
       appendModuleLog({
         level: 'error',
@@ -641,10 +671,10 @@ class AppDatabase {
       });
     }
 
-    // v2.1.7 F7-A2：启动期 ANALYZE — 让规划器统计所有索引（含 idx_acquiring_bill_currency_bill_source_file）
-    //   必须在所有 ensure*Support / migrate* 之后（否则统计的是旧 schema）
-    //   ANALYZE 幂等可重复；用户 DB 体量下开销 < 100ms（spec §7.9）
-    this.db.exec('ANALYZE;');
+    // v3.1.12：有界增量统计。错误必须上抛并进入统一启动失败路径。
+    runStartupPhaseSync('database-optimize', () => {
+      this.db.exec('PRAGMA optimize=0x10002;');
+    }, { onRecord: onStartupPhase });
   }
 
   close() {

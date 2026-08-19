@@ -112,7 +112,7 @@ test.describe('前置资金对账 UI / preload / IPC 接线', () => {
     assert.match(main, /temp:count-by-date-range'[\s\S]*countTempByDateRange\(payload\)/);
     assert.match(main, /temp:delete-by-date-range'[\s\S]*tryAcquireBankStatementOpLock\('pre-fund-delete-temp-by-date-range'\)[\s\S]*deleteTempByDateRange\(payload\)/);
     assert.match(main, /function schedulePreFundReconciliationStartupCleanup\(\)[\s\S]*getPreFundReconciliationService\(\)/);
-    assert.match(main, /database\.init\(\);[\s\S]*schedulePreFundReconciliationStartupCleanup\(\)/);
+    assert.match(main, /database\.init\(\{ onStartupPhase: recordStartupPhase \}\);[\s\S]*schedulePreFundReconciliationStartupCleanup\(\)/);
     assert.match(preload, /countTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
     assert.match(preload, /deleteTempByDateRange:\s*\(start, end, sourceType\)[\s\S]*\{ start, end, sourceType \}/);
     assert.match(preload, /exportMptErrors:\s*\(repairTokens\)[\s\S]*mpt-errors:export/);

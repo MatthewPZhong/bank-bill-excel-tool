@@ -50,27 +50,31 @@ function tableHasColumn(db, tableName, columnName) {
     .some((row) => row.name === columnName);
 }
 
-function activeReferenceCount(db, sourceId) {
-  let total = Number(db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM vcc_fin_op_effective_raw_fallback
-    WHERE import_source_id = ?
-  `).get(sourceId).count) || 0;
-  if (tableHasColumn(db, 'vcc_fin_op_effective_rows', 'import_source_id')) {
-    total += Number(db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM vcc_fin_op_effective_rows
-      WHERE import_source_id = ?
-    `).get(sourceId).count) || 0;
+function activeReferenceCounts(db) {
+  const branches = [];
+  for (const tableName of [
+    'vcc_fin_op_effective_raw_fallback',
+    'vcc_fin_op_effective_rows',
+    'vcc_fin_op_system_snapshots'
+  ]) {
+    if (!tableHasColumn(db, tableName, 'import_source_id')) continue;
+    branches.push(`
+      SELECT import_source_id, COUNT(*) AS reference_count
+      FROM ${tableName}
+      WHERE import_source_id IS NOT NULL
+      GROUP BY import_source_id
+    `);
   }
-  if (tableHasColumn(db, 'vcc_fin_op_system_snapshots', 'import_source_id')) {
-    total += Number(db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM vcc_fin_op_system_snapshots
-      WHERE import_source_id = ?
-    `).get(sourceId).count) || 0;
-  }
-  return total;
+  if (branches.length === 0) return new Map();
+  const rows = db.prepare(`
+    SELECT import_source_id, SUM(reference_count) AS reference_count
+    FROM (${branches.join('\nUNION ALL\n')})
+    GROUP BY import_source_id
+  `).all();
+  return new Map(rows.map((row) => [
+    Number(row.import_source_id),
+    Number(row.reference_count) || 0
+  ]));
 }
 
 function holdIdentity(sourceId, artifactId) {
@@ -136,7 +140,7 @@ function bindReadyArtifact(db, archiveRepository, source, artifact, options = {}
     return { bound: false, failed: true };
   }
 
-  const references = activeReferenceCount(db, Number(source.id));
+  const references = Number(options.activeReferenceCounts?.get(Number(source.id))) || 0;
   let released = false;
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -181,6 +185,7 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
     JOIN vcc_fin_op_import_records AS record ON record.id = source.import_record_id
     ORDER BY source.id
   `).all();
+  const referenceCounts = activeReferenceCounts(db);
   const sourceById = new Map(sources.map((source) => [Number(source.id), source]));
   const sourceByHandoffIdentity = new Map(sources.map((source) => [
     [source.batch_id, source.source_type, source.source_ordinal].join('\u0000'),
@@ -265,7 +270,8 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
     }
     const result = bindReadyArtifact(db, archiveRepository, source, artifact, {
       hasPersistedArtifactIdentity: persistedArtifactSourceIds.has(sourceId),
-      persistedArtifactIdentityExact: persistedArtifactIdentityExact.has(sourceId)
+      persistedArtifactIdentityExact: persistedArtifactIdentityExact.has(sourceId),
+      activeReferenceCounts: referenceCounts
     });
     if (result.bound) bound += 1;
     if (result.failed) failed += 1;
@@ -278,7 +284,7 @@ function reconcileVccImportArchiveLineage({ db, archiveRepository }) {
   )) {
     const sourceId = Number(hold.ownerId);
     const source = sourceById.get(sourceId);
-    if (!source || activeReferenceCount(db, sourceId) === 0) {
+    if (!source || (Number(referenceCounts.get(sourceId)) || 0) === 0) {
       if (archiveRepository.releaseArtifactHold(holdIdentity(sourceId, hold.artifactId))) released += 1;
     }
   }
@@ -426,6 +432,7 @@ module.exports = {
   VCC_IMPORT_HOLD_TYPE,
   VCC_IMPORT_SOURCE_OPERATION,
   buildVccImportArchiveHandoffFiles,
+  activeReferenceCounts,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
   reconcileVccImportArchiveLineageAtStartup,

@@ -3176,6 +3176,21 @@ class ArchiveService {
     };
   }
 
+  async recoverStartupSafety() {
+    return this._run('recoverStartupSafety', async () => {
+      // 启动 admission 只允许收口数据库内的 interrupted 状态。任何目录扫描、
+      // cleanup journal、dangling/blob 修复或物理删除都由 PR4 首进维护接管；
+      // 未知 staging/readonly 项没有 durable owner 时尤其不得删除。
+      const interrupted = this.repository.markInterruptedArtifacts();
+      return {
+        ok: true,
+        status: 'complete',
+        interruptedArtifactCount: interrupted.artifactCount,
+        deferredPhysicalRecovery: true
+      };
+    });
+  }
+
   async reconcileStartup(options = {}) {
     return this._run('reconcileStartup', async () => {
       const consistency = await this._reconcileStartupUnlocked({
