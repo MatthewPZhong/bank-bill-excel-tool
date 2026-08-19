@@ -37,7 +37,7 @@ const INPUT_EVIDENCE = Object.freeze({
     sizeBytes: 10,
     mtimeMs: 20,
     ctimeMs: 30,
-    ino: 40
+    ino: '40'
   }),
   sha256: 'a'.repeat(64),
   sizeBytes: 10

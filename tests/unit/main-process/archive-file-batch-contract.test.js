@@ -16,6 +16,9 @@ const {
   normalizeFilePlanV1
 } = require('../../../src/main-process/archive-center/file-plan');
 const {
+  sourceSnapshotFromStat
+} = require('../../../src/main-process/archive-center/source-snapshot');
+const {
   freezePersistedTaskOwner,
   freezeWorkerOperationContext
 } = require('../../../src/main-process/archive-center/worker-operation-context');
@@ -707,6 +710,188 @@ test('FilePlan reserve 后 freshness 只复核冻结 input 与 target identity',
     () => assertFilePlanFresh(existingPlan),
     (error) => error && error.code === 'ARCHIVE_TARGET_CHANGED'
   );
+});
+
+test('FilePlan input 可继承 picker snapshot，并只在最终 freshness 使用定制失败合同', (t) => {
+  const fixture = createFixture(t);
+  const pickerStat = fs.lstatSync(fixture.inputPath, { bigint: true });
+  const pickerSnapshot = sourceSnapshotFromStat(pickerStat);
+  fs.appendFileSync(fixture.inputPath, '-changed-during-preview');
+
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: pickerSnapshot,
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  });
+
+  assert.deepEqual(plan.inputs[0].sourceSnapshot, pickerSnapshot);
+  assert.throws(
+    () => assertFilePlanFresh(plan),
+    (error) => error
+      && error.code === 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION'
+      && error.message === '网银明细源文件在确认期间已变化，请重新选择'
+  );
+
+  const missingPath = path.join(fixture.directory, 'missing-after-picker.xlsx');
+  fs.writeFileSync(missingPath, 'picked');
+  const missingStat = fs.lstatSync(missingPath, { bigint: true });
+  const missingPlan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: missingPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: sourceSnapshotFromStat(missingStat),
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  });
+  fs.unlinkSync(missingPath);
+  assert.throws(
+    () => assertFilePlanFresh(missingPlan),
+    (error) => error
+      && error.code === 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION'
+      && error.message === '网银明细源文件在确认期间已变化，请重新选择'
+  );
+});
+
+test('提供 picker snapshot 时 normalize 不读源，最终 freshness 恰好比较一次', (t) => {
+  const fixture = createFixture(t);
+  const pickerStat = fs.lstatSync(fixture.inputPath, { bigint: true });
+  const pickerSnapshot = sourceSnapshotFromStat(pickerStat);
+  let comparisonCount = 0;
+  const fsImpl = Object.create(fs);
+  fsImpl.lstatSync = (...args) => {
+    comparisonCount += 1;
+    return fs.lstatSync(...args);
+  };
+
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: pickerSnapshot,
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  }, { fsImpl });
+
+  assert.equal(comparisonCount, 0);
+  assert.equal(assertFilePlanFresh(plan, { fsImpl }), plan);
+  assert.equal(comparisonCount, 1);
+});
+
+test('supplied snapshot 的父目录消失时仍形成 plan，并保留多输入与 alias 防护', (t) => {
+  const fixture = createFixture(t);
+  const vanishedParent = path.join(fixture.directory, 'vanished-parent');
+  fs.mkdirSync(vanishedParent);
+  const vanishedInput = path.join(vanishedParent, 'statement.xlsx');
+  fs.writeFileSync(vanishedInput, 'statement');
+  const vanishedStat = fs.lstatSync(vanishedInput, { bigint: true });
+  const vanishedSnapshot = sourceSnapshotFromStat(vanishedStat);
+  fs.renameSync(vanishedParent, path.join(fixture.directory, 'moved-parent'));
+
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [
+      {
+        filePath: vanishedInput,
+        role: 'input',
+        sourceOperation: 'file:import',
+        sourceSnapshot: vanishedSnapshot
+      },
+      {
+        filePath: fixture.inputPath,
+        role: 'input',
+        sourceOperation: 'file:import'
+      }
+    ],
+    outputs: []
+  });
+  assert.equal(plan.inputs.length, 2);
+  assert.throws(
+    () => assertFilePlanFresh(plan),
+    (error) => error && error.code === 'ARCHIVE_INPUT_CHANGED'
+  );
+
+  assert.throws(() => normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: plan.inputs[1].sourceSnapshot
+    }],
+    outputs: [{
+      filePath: fixture.inputPath,
+      role: 'output',
+      sourceOperation: 'file:import'
+    }]
+  }), /输出目标不能覆盖或别名指向输入文件/);
+
+  const suppliedHardlink = path.join(fixture.directory, 'supplied-hardlink.xlsx');
+  fs.linkSync(fixture.inputPath, suppliedHardlink);
+  assert.throws(() => normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: plan.inputs[1].sourceSnapshot
+    }],
+    outputs: [{
+      filePath: suppliedHardlink,
+      role: 'output',
+      sourceOperation: 'file:import'
+    }]
+  }), /输出目标不能覆盖或别名指向输入文件/);
+});
+
+test('FilePlan 拒绝非法 picker snapshot，未提供 snapshot 的旧调用保持 normalize 时捕获', (t) => {
+  const fixture = createFixture(t);
+  assert.throws(() => normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: fixture.inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: { sizeBytes: -1, mtimeMs: 1, ctimeMs: 1 }
+    }],
+    outputs: []
+  }), /sourceSnapshot/);
+
+  const legacy = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{ filePath: fixture.inputPath, role: 'input', sourceOperation: 'toolbox:merge' }],
+    outputs: []
+  });
+  assert.equal(legacy.inputs[0].sourceSnapshot.sizeBytes, 5);
+  assert.equal(Object.hasOwn(legacy.inputs[0], 'freshnessFailure'), false);
 });
 
 test('task-owned 与 batch-owned flow intent 跨表幂等复用且不产生双 owner', (t) => {

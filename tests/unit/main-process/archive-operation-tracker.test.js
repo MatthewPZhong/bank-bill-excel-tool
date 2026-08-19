@@ -154,7 +154,7 @@ test.describe('stateless archive operation tracker', () => {
 
   test('普通输入可附加调用时捕获的 source snapshot', () => {
     const inputPath = path.resolve('/tmp/input.xlsx');
-    const snapshot = { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: 4 };
+    const snapshot = { sizeBytes: 1, mtimeMs: 2, ctimeMs: 3, ino: '4' };
     const files = resolveOperationFiles({
       channel: 'recon-id-fix:import',
       selectedPaths: [inputPath],

@@ -50,9 +50,14 @@ function buildMappedRows({
   billSplitMerge = null,
   expectedSourceHeaders = [],
   selectedBigAccount = null,
-  dateParseOrder = 'auto'
+  dateParseOrder = 'auto',
+  readOptions = {}
 }) {
-  const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(inputFilePath, expectedSourceHeaders);
+  const { rows, rowNumbers, headerBreaks = [] } = readRowsWithMetadata(
+    inputFilePath,
+    expectedSourceHeaders,
+    readOptions
+  );
   const sourceHeaders = rows[0] || [];
   const sourceIndexByField = new Map();
   const issues = [];
