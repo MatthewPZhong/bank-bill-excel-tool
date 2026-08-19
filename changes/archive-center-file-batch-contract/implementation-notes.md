@@ -5,11 +5,12 @@
 - Goal/spec: `changes/archive-center-file-batch-contract/spec.md`
 - Initial plan/technical contract: `changes/archive-center-file-batch-contract/techdoc.md`
 - Product code baseline: `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`（v3.1.10 release commit）。
-- Current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
+- Implementation PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`（PR #149 release evidence；相对产品代码基线无 `src/` 变化）。
+- Implementation merge/release commit: `main@782415ae1f606da2adebe881ba7ab56b1b045137`（PR #150）；annotated `v3.1.11` peeled 后精确指向该 commit。
 - Earlier review evidence heads: `458e73f0f2861cacc0579a4bac20b45900bdb3b3`、`001b8059ced56b9d70602c79cdd97d375020c969`、`250b1349ff9be315111d4fe9999958cf63927a7c`、`01a6640dca1b6a02f6d05f20556e5994f9ef1855`、`5511a2ca7c2b33964b64d34ecf646f4655f26194`（历史复审快照，不覆盖）。
 - Current review evidence head: `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（2026-08-19 第十轮复审输入）。
-- Do not rebase or overwrite the existing dirty worktree.
-- Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收和文件血缘人工门禁全部闭合。
+- 发布证据使用从精确 merge commit 创建的隔离 worktree，不 rebase、不覆盖原工作树中的用户未跟踪文件。
+- Done when: TechDoc §19、NFB-01～NFB-28、`npm run release-check`、`npm run check:vars`、真实 UI/数据库验收、文件与资金血缘、Windows 候选门禁及正式 Release 全部闭合。
 
 ## Decisions
 
@@ -115,10 +116,10 @@
 | --- | --- | --- | --- |
 | 63 个 file action 是否都能在不可逆副作用前形成准确 manifest | 已关闭 | 63/63 literal FilePlan 与统一 lifecycle 静态合同已通过；VCC 最后 4 条的 import artifactId、三类 output receipt 与故障注入专项已通过 | 最终 full gate 任一回归失败即重开；禁止恢复 allow-list、空 manifest 或 result-path fallback |
 | 三模块 dataset head、run receipt 与 Archive TaskRun 的跨库崩溃窗口是否闭合 | 已关闭 | Pending、Biz OP、Pre-fund 均已通过业务 commit 后/Archive terminal 前 owner-first recovery、partial ack replay 与 mismatch fail-closed；最终 NFB-11/12 和真实数据库门禁继续回归 | 任一后续回归失败即重开，不允许 date/month/latest 修补 |
-| linked gateway 部分覆盖是否只更新实际命中行的来源 tag | PROBE + ⚠️ 资金红线 | 新旧集合部分重叠 fixture + distinct tag/行数守恒 + 人工复核 | 未通过不得发布；不能批量给未命中历史行换 tag |
+| linked gateway 部分覆盖是否只更新实际命中行的来源 tag | 已关闭 + ⚠️ 资金红线 | 新旧集合部分重叠 fixture、distinct tag/行数守恒、真实副本人工复核均 PASS | v3.1.11 发布门禁已闭合；未来业务键或覆盖算法变化时重新开启，不能批量给未命中历史行换 tag |
 | exact-7 `batchContext` 的全部持久 consumer 是否已正确分成 file owner 与 operation owner | 已关闭（专项） | VCC/Position/Acquiring/Biz OP/Pending 的 worker、receipt、outbox 与恢复测试已通过；no-file sender 使用 exact-5，file publication/recovery 使用 exact-7 | 最终 full gate 继续回归；不得在 service/sender 恢复重复 context 校验 |
 | Acquiring cancelled/failed partial 的 side owner transfer 是否跨崩溃闭合 | 已关闭 + ⚠️ 资金红线 | interrupted、prepared/reserved continuation、cancelled/failed owner transfer、legacy no-owner、complete crash、progress/outputIntent 冲突及 side/main parity 均已通过专项；最终全量门禁继续回归 | 任一后续回归失败即重开；禁止扩大 TaskRun recovery edge或退回 month/latest fallback |
-| 真实 95 批数据库及 017/018/001 样本是否在本机可用 | PROBE | 最终门禁前只读定位副本；无副本则输出可执行人工步骤，不伪造结果 | 缺少真实样本不阻止代码完成，但阻止宣称真实数据库验收通过 |
+| 真实批次数据库及 017/018/001 样本是否在本机可用 | 已关闭 | 在生产库副本上完成可见性、017/018 精确 repair、001 只读保留与真实业务 rerun；原生产数据库未修改 | 副本与真实样本门禁 PASS；后续版本继续使用新冻结副本，不能复用本次签字 |
 | Biz OP smoke fixture 是否已按 exact v1 Archive receipt 新合同升级 | 已关闭 | fixture 已迁到 exact v1 receipt，独立 171/171；`npm run smoke` 整体 PASS | 后续 production contract 改动继续由 smoke 回归；不得恢复缺 identity 时的 v0 fallback |
 
 ## PR #150 review fixes（2026-08-18）
@@ -350,3 +351,37 @@ reconciliation blindspot pass：本轮不改输入、匹配键、金额、币种
 | 现场固定计数随正常活动漂移 | 2026-08-17 快照为 95/34/53/8；reviewer 2026-08-19 只读快照为 98/36/54/8，且两者都满足 `visible = total - zeroArtifact = readyVisible + failedOnlyVisible` | Spec/TechDoc 将 release gate 改为同一 canary 副本冻结 baseline 后做前后等式与非目标数据守恒；历史数字仅保留为带日期 evidence |
 
 本轮只刷新生成证据和验收口径，不修改运行时代码、Schema、金额、币种、方向、匹配、File Batch 可见性 SQL 或 repair 逻辑。reconciliation blindspot pass 未发现新增自动化测试缺口；⚠️ 真实/脱敏数据库的文件血缘、行数、金额和 repair 非目标数据仍须人工复核，统计等式不能替代资金签字。
+
+## 发布人工验收证据（2026-08-19）
+
+### Decisions / external state
+
+- 发布负责人明确回复“全部 PASS”，确认 Windows 10/11 Setup、portable、SmartScreen 实际提示及 `3.1.10 -> 3.1.11` 离线覆盖安装门禁通过；本次未使用 Windows Runbook 豁免。
+- PR #150 已以 merge commit `782415ae1f606da2adebe881ba7ab56b1b045137` 合入 `main`。annotated tag `v3.1.11` 的 tag object 为 `e17f29d262c48c59d162b7a61e18bce2b802c308`，peeled commit 精确等于该 merge commit。
+- [Release Windows Packages run 32219459465](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32219459465) 于 `2026-08-19T06:03:11Z` 自然终态 success；tag/main、完整 release-check、布局、packaged inputs、Windows build、`check:dist`、ASCII staging、更新元数据、Release 发布和发布后回读各步骤全部成功。
+- 所有数据库与 UI 验收均在冻结副本或隔离 userData 中执行，原生产数据库未写入；临时验收产物不进入仓库或 Release。
+- Windows Runbook“发布后”第 2 项的 `production/latest` 在线 canary 只能在公开 Release 存在后执行，本节不把发布前离线覆盖安装冒充线上更新。该项不移动 tag、不替换资产，但在实际通过前阻止对外公告“在线升级已验证”。
+
+### Public asset evidence
+
+- [v3.1.11 Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.11) 于 `2026-08-19T06:03:05Z` 发布，`draft=false`、`prerelease=false`，并成为 latest stable Release。
+- `bank-bill-excel-tool-setup-3.1.11.exe`：`100359253` bytes，SHA-256 `c68ab388561c18fe3a77c074cba4709c6c61e40a57c88328a260033820880206`。
+- `bank-bill-excel-tool-portable-3.1.11.exe`：`99862407` bytes，SHA-256 `68e61d634ea81ff4d56abc7fabb8aac71f758b731d29745f405f6c044bd52e5f`。
+- `bank-bill-excel-tool-setup-3.1.11.exe.blockmap`：`105645` bytes，SHA-256 `0e73c8d2077c278a0067fd0aa27ee67d83fdb36e5559c946b0aa4b08b2f935e6`。
+- `latest.yml`：`372` bytes，SHA-256 `728f5ba06a594e7b408d0e7a162241d35f68ad9762037e994f1ee0125abe998d`；独立下载回读为 version `3.1.11`、path `bank-bill-excel-tool-setup-3.1.11.exe`、size `100359253`、Setup SHA-512 `d1MSPttwUnICShPzJnBJDhOfSlgAHRnsaFdpbnNVwFUzudQzgNkJ4mq1HetVHvPzSN1SPpmCNV3KLSaaXzE9KQ==`，与 workflow 的实际 Setup 校验值一致。
+- 四项公开资产 URL 均在不带 GitHub 凭据的 HEAD 请求中跟随重定向得到 HTTP 200；`latest.yml` 与 blockmap 的独立下载 SHA-256 和 GitHub public asset digest 一致。
+
+### Database, UI and lineage evidence
+
+- 真实数据库副本的 list/get/stats/latest/related 统一排除零 artifact 批次；no-file Task Run 不写 File Batch、issuance 或 sequence。cancelled 文件任务保留 1 项真实 artifact；interrupted 文件任务使用原 TaskRun、原 File Batch 和原号码恢复，恢复前后 batch 数与 sequence cursor 不变。
+- `017/018` 只命中精确指纹并按合同 repair；`001` 保持 task failed、archive complete、`2 input + 0 output`，随后真实 Toolbox rerun 新建成功批次并得到 `2 input + 1 output`，实际输出与归档 output 的 SHA-256/size 相同。旧 `001` batch/artifact 行不变；共享 Blob 只因 rerun 实体验证更新 `last_verified_at`，内容 SHA、size、path 与 created 时间不变。
+- Biz OP、Pending、Pre-fund 真实 SQLite 验收得到 15 个 Task Run、12 个可见 File Batch、12 个 artifact 和 12 条 committed lineage；Biz 同一导入被两个 run 复用、汇总导出关联两个 run，related 仅返回直接一跳邻域。Pre-fund 样本满足 bank `4 = 3 matched + 1 unmatched`、gateway `4 = 3 matched + 1 unused`，币种与方向异常按原合同进入不平结果。
+- VCC 与 Position 的 v3.1.10/v3.1.11 输出 SHA-256 完全一致；Acquiring 业务结果 sheet 完全一致，整份 XLSX 仅有运行耗时、临时路径和 app version 三类预期审计元数据差异。VCC/Position/Acquiring 的 TaskRun、parent、File Batch、artifact owner 与输出均已回读；SQLite `integrity_check=ok` 且无外键错误。
+- 代表性 15 个 Excel sheet 已做结构、公式错误和视觉预览检查，公式错误为 0；Toolbox `001` rerun、Biz OP、Pending、Pre-fund、VCC、Position、Acquiring 输出均可读且未发现新增布局异常。
+
+### Automated evidence
+
+- 精确 merge commit 的 `npm run release-check` 自然终态 PASS：lint/smoke PASS，unit 5376/5376（343 files），integration 48/48 scripts、2393/2393 assertions。
+- 发布证据分支在正式状态文档与防回退测试写入后再次执行唯一完整 `npm run release-check`：lint/smoke PASS、unit 5376/5376、integration 48/48 scripts 与 2393/2393 assertions（372338ms）；runner 只改写本机时间戳/耗时的清单已还原，不进入证据 diff。
+- `npm run scan:vars` 复核仍为 338 files / 4478 names、A-share/A-pair/A-local/B = 656/950/2705/1606，只有扫描时间戳变化，已还原不进入 diff；`npm run check:vars -- --include-minor` 因证据分支无 `src/` diff 按设计跳过并 exit 0。完整 PR 的重要变量扫描、资金链 review 和相关专项证据已在上文及 PR #150 留档；`git diff --check` PASS。
+- blindspot pass 与 reconciliation blindspot pass 未发现新的自动化 BLOCK；金额、币种、方向、匹配和业务行算法未改。资金红线已由上述真实副本人工复核关闭，但该签字不泛化为后续新月份、新主体、新输入来源或新环境。

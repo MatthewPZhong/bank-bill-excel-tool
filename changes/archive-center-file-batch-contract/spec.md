@@ -1,9 +1,10 @@
 # 存档中心“有文件才有批次” Spec
 
-> status: draft / implementation in progress
+> status: released / 自动门禁、真实数据库与 UI、资金血缘及 Windows 发布前人工门禁全部 PASS
 > product code baseline: `MatthewPZhong/bank-bill-excel-tool` `main@35f11e153962c34cba0e9d4c7084e9df85c9f209`
-> current PR merge base: `main@6f1c09236a6c36f72eb82d61dc14508adfe20eec`
-> review evidence head (2026-08-19): `1df4004c53550bf75d9f73a2d544414b6f8c52b4`
+> implementation merge/release commit: `main@782415ae1f606da2adebe881ba7ab56b1b045137`（PR #150）
+> review evidence head (2026-08-19): `1df4004c53550bf75d9f73a2d544414b6f8c52b4`（历史复审输入）
+> release tag: annotated `v3.1.11`（peeled commit 与上述 `main` 一致）
 > baseline version: `3.1.10`（正式发布后的远端 `main`）
 > target version: 3.1.11
 > owner: 存档中心 / 全局任务生命周期 / 工具箱
@@ -68,13 +69,14 @@
 
 ### 2.1 基线分层
 
-2026-08-18 对当前 PR Git DAG 与相关提交内容只读复核后，基线分为三层：
+2026-08-19 对实现 PR、合并后 `main` 与发布 tag 只读复核后，基线分为四层：
 
 - v3.1.10 产品代码基线：`35f11e153962c34cba0e9d4c7084e9df85c9f209`，即 PR #148 的 release commit，`package.json.version=3.1.10`；
-- 当前 PR merge base：`6f1c09236a6c36f72eb82d61dc14508adfe20eec`，即 PR #149 的发布证据合并；相对产品代码基线只修改发布文档、规则和测试，没有 `src/` 产品代码变化；
-- 当前复审取证 head：`1df4004c53550bf75d9f73a2d544414b6f8c52b4`，用于固定第十轮评论所审查的实现快照，不作为产品代码基线；此前各轮 head 只保留在 implementation notes 的历史证据中。
+- 实现 PR merge base：`6f1c09236a6c36f72eb82d61dc14508adfe20eec`，即 PR #149 的发布证据合并；相对产品代码基线只修改发布文档、规则和测试，没有 `src/` 产品代码变化；
+- 复审取证 head：`1df4004c53550bf75d9f73a2d544414b6f8c52b4`，用于固定第十轮评论所审查的实现快照，不作为发布基线；此前各轮 head 只保留在 implementation notes 的历史证据中；
+- v3.1.11 实现与发布 commit：`782415ae1f606da2adebe881ba7ab56b1b045137`，即 PR #150 merge commit；annotated tag `v3.1.11` peeled 后精确指向该 commit。
 
-2026-08-17 初稿生成时，本地 `origin/main` 尚指向 `35f11e…` 且对象库中尚无 `6f1c092…`；该记录只保留为历史时点事实，不能继续描述当前 PR。当前工作树不 rebase、不覆盖既有未跟踪文件；以下“远端产品事实”以 `35f11e…` 为准，“PR 差异”从 `6f1c092…` 计算，“实施进度”以当前共享工作树为准，三者不得混写。
+2026-08-17 初稿生成时，本地 `origin/main` 尚指向 `35f11e…` 且对象库中尚无 `6f1c092…`；该记录只保留为历史时点事实。以下“原问题事实”仍以 v3.1.10 产品基线 `35f11e…` 为准，“实现差异”从 `6f1c092…` 计算，“发布结果”以 `782415ae…` 与 annotated `v3.1.11` 为准，四者不得混写。
 
 ### 2.2 当前代码事实
 
