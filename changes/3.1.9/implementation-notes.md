@@ -1146,3 +1146,38 @@ reviewer P2 证明旧产物不是 PR7 final source snapshot，原“四项最终
 
 - PROBE：真实 Windows installer/portable 首启、升级、SmartScreen、SQLite `createSession/readOnly/query_only/UPDATE FROM`；跨卷、UNC/网络盘、长路径、copy/readonly/repair、离线恢复；约 16 GB VCC 与约 700 万行工具箱性能；Excel/WPS。
 - ⚠️ 资金人工：目标生产 legacy/trigger 只读检查、主体×九币种、历史 CNH→CNY、混合异常去向、跨月期初、调整、归档/解归档/delete、审计、备份恢复及输入输出文件血缘仍未确认。技术 Release 不关闭这些项；应在 v3.1.8→v3.1.9 canary 后补录实机证据，异常时不替换 `v3.1.9` 资产而使用新版本修复。
+
+## 存档中心非空文件批次方案反向同步（2026-08-17）
+
+### Decisions
+
+- 用户最终口径是“前端批次必须有真实文件内容；无内容隐藏且新动作不占号”。有效 pending/ready/failed 文件 artifact 都算内容；目录、metadata、状态动作和 placeholder 不算。
+- 不采用“把隐藏操作显示成批次详情中的不可点击事件时间线”。无文件动作继续留在业务 audit/activity log，但不进入存档中心前端和全局批次号序列。
+- 新文件批次以非空 `artifactManifest` 为准，批次/序号与至少一个 artifact intent 原子持久化；禁止任务结束后再删空批次冒充“不占号”。
+- 历史零 artifact 批次只从公共 list/get/stats/latest/related 隐藏，发行记录和序号不回收；旧号码间隙保留。
+- 关联任务只包含可见文件批次。无文件动作移除后，流程继承必须依赖稳定业务 identity/flow anchor 或首个文件批次，禁止 latest fallback。
+- `2026-08-13-017` / `2026-08-13-018` 保留为成功文件批次，精确清理/隔离误登记的输出目录 artifact；`2026-08-17-001` 保留为失败、2 输入、0 输出，不回填后来重跑结果。
+
+### Deviations
+
+- 原 C04 只排除 `bank-statement:run` 和 `template:save-mappings`，其余无文件状态动作仍建 metadata-only 批次；现由 Spec §0.3/§19 前向取代为“所有无文件动作均不公开建批、不发号”。
+- 原统计 `runCount` 包含无文件/失败/取消批次，`latest` 读取最后发行号；新口径只统计/显示有效文件批次。失败或取消若有合法文件 artifact 仍计入。
+- 原 `selectedPaths` 将所有 dialog selection 视为输入；新口径按选择角色过滤目录，并优先使用 prepared 的显式输入 manifest。
+- 原 merge `beforeStart` 依赖闭包修改 prepare 对象；新口径要求显式 evidence 传递到规范化对象，保留对象防御性复制。
+
+### Evidence
+
+- 2026-08-17 只读实库：95 个批次，34 个零 artifact，53 个至少一个 ready artifact，另有 8 个 failed-only 文件批次。该分布证明可见性不能使用 ready-only 判定。
+- `2026-08-13-017`：batch 66，artifact 90—93；真实 input/output/output 均 ready，`~/Downloads` 目录 artifact 失败。`2026-08-13-018`：batch 67，artifact 94—97；真实 input/output/output 均 ready，输出目录 artifact 失败。两批 task succeeded、archive incomplete。
+- `2026-08-17-001`：batch 95，artifact 133/134 为两项 ready input，output=0；task failed、archive complete，错误日志时间 `2026-08-17T17:17:43.114+08:00`。
+- `2026-08-17-001` 的两份源文件仍存在，当前 SHA-256 与归档 Blob 完全一致；排除用户漏选、源文件丢失或内容损坏。
+- 最小复现：`prepareIpcTaskInvocation()` 返回新对象，`sameObject=false`；箭头 `beforeStart` 修改原对象后，规范化对象的 `inputFiles` 仍为 `undefined`。
+- 现有相关 IPC/Toolbox archive 测试 14/14 PASS，但未覆盖 after-normalization 的 late evidence 传播，已在 Test Spec NFB-12/14 补回归门禁。
+- Toolbox publication 在 normalize input evidence 时即失败，早于 journal 创建和 target staging；现场 journal index 为空、临时目录已清理，因此 001 没有可恢复的正式输出。
+
+### Remaining Unknowns
+
+- PROBE：全量 reserve action 的 manifest 能力与 no-file 分类；任何主要文件入口无法在副作用前形成 manifest 时升级为 BLOCK。
+- PROBE：无文件 action 移除 batch 后，VCC calculate→export 等跨重启 flow identity 的 anchor 来源；禁止以 hidden/latest batch 临时兜底。
+- PROBE：`2026-08-13-017` / `2026-08-13-018` 历史修复先在数据库副本 dry-run，验证 exact fingerprint、备份、二次幂等和完整性后才可执行真实数据修改。
+- 本轮只更新方案、测试矩阵和任务清单；生产代码与用户数据库尚未修改，所有任务状态保持待实施。

@@ -38,6 +38,9 @@ const {
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
+const {
+  freezeWorkerOperationContext
+} = require('../../main-process/archive-center/worker-operation-context');
 
 function unwrapMessage(eventOrMessage) {
   return eventOrMessage &&
@@ -115,9 +118,16 @@ async function runJob(message) {
   const command = String(message.command || '');
   const batchContext = command === POSITION_IMPORT_COMMANDS.SOURCE_PREPARE_AND_APPLY
     ? null
-    : freezeWorkerBatchContext(message.batchContext, {
-        required: isPositionImportMutatingCommand(command)
-      });
+    : freezeWorkerBatchContext(message.batchContext, { required: false });
+  const operationContext = freezeWorkerOperationContext(message.operationContext, {
+    required: false
+  });
+  if (batchContext && operationContext) {
+    throw new TypeError('平盘 worker owner 只能是 batchContext 或 operationContext 之一');
+  }
+  if (isPositionImportMutatingCommand(command) && !batchContext && !operationContext) {
+    throw new TypeError('平盘 mutating worker 缺少持久 owner context');
+  }
   if (command === POSITION_IMPORT_COMMANDS.ENSURE_LARGE_IMPORT_INDEXES) {
     if (!message.featureFlags || message.featureFlags.schemaOnly !== true) {
       const error = new Error('平盘 schema 迁移缺少 schemaOnly 授权');
@@ -129,6 +139,7 @@ async function runJob(message) {
       cancelToken: { cancelled: false },
       stage: 'schema-migration',
       batchContext,
+      operationContext,
       peakRssBytes: process.memoryUsage().rss,
       peakHeapUsedBytes: process.memoryUsage().heapUsed
     };
@@ -162,6 +173,7 @@ async function runJob(message) {
       cancelToken: { cancelled: false },
       stage: 'maintenance',
       batchContext,
+      operationContext,
       peakRssBytes: process.memoryUsage().rss,
       peakHeapUsedBytes: process.memoryUsage().heapUsed
     };

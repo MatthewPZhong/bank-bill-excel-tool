@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 
 const { readBankStatement } = require('../bank-statement-io');
 const {
@@ -12,6 +13,7 @@ const {
   createPreFundReconciliationRunStore
 } = require('../../backend/pre-fund-reconciliation-run-store');
 const runDataStore = require('../../backend/run-data-store');
+const linkedTableRepository = require('../../backend/database/linked-table-repository');
 const {
   BANK_ROW_CLASSIFICATION,
   classifyBankRow,
@@ -38,6 +40,12 @@ const {
 } = require('./excel-writer');
 const { writeMptErrorReport } = require('./mpt-error-report-writer');
 const { MPT_SCHEMAS } = require('./mpt-schema');
+const {
+  freezeGatewayTags,
+  gatewayTagKey,
+  preFundRunLineagePlan,
+  preFundRunOutputIntent
+} = require('../pre-fund-archive-lineage');
 
 const SCENARIO_MISSING_GATEWAY = 'missing-gateway';
 const PROGRESS_INTERVAL = 5000;
@@ -93,6 +101,18 @@ function rollbackQuietly(db) {
   try { db.exec('ROLLBACK'); } catch (_error) { /* no active transaction */ }
 }
 
+function compensateRunReceiptAfterMirrorFailure(runStore, db, taskRunId) {
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const deleted = runStore.deleteArchiveRunByTaskRunId(db, taskRunId);
+    db.exec('COMMIT');
+    return deleted;
+  } catch (error) {
+    rollbackQuietly(db);
+    throw error;
+  }
+}
+
 function bankContext(row, index, fileName) {
   return {
     fileName,
@@ -101,8 +121,47 @@ function bankContext(row, index, fileName) {
   };
 }
 
+function mptBatchIdentity(batch) {
+  return JSON.stringify([
+    batch.monthKey,
+    batch.id,
+    batch.datasetId,
+    batch.producerTaskRunId,
+    batch.datasetVersion,
+    batch.archiveContractVersion
+  ]);
+}
+
+function assertSameIdentitySet(actual, expected, keyOf, label) {
+  const actualKeys = actual.map(keyOf).sort();
+  const expectedKeys = expected.map(keyOf).sort();
+  if (JSON.stringify(actualKeys) !== JSON.stringify(expectedKeys)) {
+    throw new Error(`前置资金 ${label} dataset 在 prepare 后已变化，请重新运行`);
+  }
+}
+
+function openMainDatabaseReadSnapshot(dbPath) {
+  const db = new DatabaseSync(dbPath, { readOnly: true });
+  db.exec('PRAGMA query_only = ON;');
+  db.exec('BEGIN');
+  return {
+    db,
+    close() {
+      try { db.exec('ROLLBACK'); } catch (_error) { /* snapshot 已结束 */ }
+      db.close();
+    }
+  };
+}
+
 class PreFundReconciliationService {
-  constructor({ userDataDir, database, templatePath, now = () => new Date() }) {
+  constructor({
+    userDataDir,
+    database,
+    templatePath,
+    now = () => new Date(),
+    openGatewayReadSnapshot = () => openMainDatabaseReadSnapshot(database.dbPath),
+    gatewayReadRepository = linkedTableRepository
+  }) {
     if (!userDataDir || typeof userDataDir !== 'string') {
       throw new TypeError('前置资金对账 service 需要 userDataDir');
     }
@@ -110,6 +169,8 @@ class PreFundReconciliationService {
     const mirrorMethods = [
       'createPreFundReconciliationRunMirror',
       'finishPreFundReconciliationRunMirror',
+      'getPreFundReconciliationRunMirrorByTaskRun',
+      'acknowledgePreFundReconciliationRunMirror',
       'failPreFundReconciliationRunMirror',
       'markPreFundReconciliationRunMirrorUnavailable',
       'listPreFundReconciliationRunMirrors'
@@ -123,16 +184,18 @@ class PreFundReconciliationService {
     this.database = database;
     this.templatePath = templatePath;
     this.now = now;
+    this.openGatewayReadSnapshot = openGatewayReadSnapshot;
+    this.gatewayReadRepository = gatewayReadRepository;
     this.tempStore = createPreFundReconciliationStore(userDataDir);
     this.runStore = createPreFundReconciliationRunStore(userDataDir);
     this.bankSession = null;
     this.bankRevision = 0;
     this.lastRun = null;
     this.mptImportFailures = new Map();
-    this.reconcilePersistedRunMirrors();
   }
 
   reconcilePersistedRunMirrors() {
+    this.runStore.assertAllRunDataClearable();
     const mirrors = this.database.listPreFundReconciliationRunMirrors();
     for (const mirror of mirrors) {
       if (mirror.status === 'running') {
@@ -160,10 +223,11 @@ class PreFundReconciliationService {
         );
       }
     }
-    this.runStore.clearAllRunData();
+    this.runStore.deleteAllRunDataAfterArchivePreflight();
   }
 
   revokePreviousRunResults() {
+    this.runStore.assertAllRunDataClearable();
     for (const mirror of this.database.listPreFundReconciliationRunMirrors()) {
       if (mirror.status !== 'success') continue;
       this.database.markPreFundReconciliationRunMirrorUnavailable(
@@ -172,10 +236,10 @@ class PreFundReconciliationService {
         '已开始新的前置资金对账运行，旧结果已回收'
       );
     }
-    return this.runStore.clearAllRunData();
+    return this.runStore.deleteAllRunDataAfterArchivePreflight();
   }
 
-  importBank(filePath) {
+  importBank(filePath, producerTaskRunId) {
     const parsed = readBankStatement(filePath);
     const rows = parsed.rows.map((row, index) => ({
       ...row,
@@ -213,6 +277,9 @@ class PreFundReconciliationService {
       fileName: parsed.fileName,
       importedAt: this.now().toISOString(),
       revision: this.bankRevision,
+      datasetId: crypto.randomUUID(),
+      producerTaskRunId,
+      archiveContractVersion: 1,
       rows,
       summary
     };
@@ -228,22 +295,27 @@ class PreFundReconciliationService {
     };
   }
 
-  async importMptFiles(filePaths, onProgress) {
-    const paths = Array.isArray(filePaths) ? filePaths : [];
+  async importMptFiles(filePaths, { onProgress, producerTaskRunId } = {}) {
+    const paths = filePaths;
     this.mptImportFailures.clear();
     const results = [];
     for (let index = 0; index < paths.length; index += 1) {
       const filePath = paths[index];
       if (onProgress) onProgress({ stage: 'mpt-import', current: index + 1, total: paths.length, fileName: path.basename(filePath) });
       try {
-        const imported = await this.tempStore.importFile(filePath);
+        const imported = await this.tempStore.importFile(filePath, {
+          datasetSeed: {
+            datasetId: crypto.randomUUID(),
+            producerTaskRunId
+          }
+        });
         results.push({
-          ...imported,
           status: 'ok',
           importStatus: imported.status,
           fileName: path.basename(filePath),
-          sourceType: imported.batch ? imported.batch.sourceType : '',
-          rowCount: imported.batch ? imported.batch.rowCount : 0
+          sourceType: imported.batch.sourceType,
+          rowCount: imported.batch.rowCount,
+          excludedRowCount: imported.batch.excludedRowCount
         });
       } catch (error) {
         let repair = {};
@@ -316,28 +388,36 @@ class PreFundReconciliationService {
     return { status: 'ok', ...result };
   }
 
-  async retryMptImportFailures(repairTokens, onProgress) {
+  async retryMptImportFailures(
+    repairTokens,
+    { filePaths, onProgress, producerTaskRunId } = {}
+  ) {
     const failures = this.resolveMptImportFailures(repairTokens);
     const results = [];
     for (let index = 0; index < failures.length; index += 1) {
       const failure = failures[index];
+      const filePath = filePaths[index];
       if (onProgress) {
         onProgress({
           stage: 'mpt-repair',
           current: index + 1,
           total: failures.length,
-          fileName: path.basename(failure.filePath)
+          fileName: path.basename(filePath)
         });
       }
       try {
-        const imported = await this.tempStore.importFile(failure.filePath, {
+        const imported = await this.tempStore.importFile(filePath, {
           skipInvalidRows: true,
-          expectedContentHash: failure.contentHash
+          expectedContentHash: failure.contentHash,
+          datasetSeed: {
+            datasetId: crypto.randomUUID(),
+            producerTaskRunId
+          }
         });
         this.mptImportFailures.delete(failure.failureId);
         results.push({
           status: 'ok',
-          fileName: path.basename(failure.filePath),
+          fileName: path.basename(filePath),
           sourceType: imported.batch.sourceType,
           importStatus: imported.status,
           rowCount: imported.batch.rowCount,
@@ -346,7 +426,7 @@ class PreFundReconciliationService {
       } catch (error) {
         const terminalFailure = TERMINAL_MPT_REPAIR_CODES.has(error && error.code);
         if (terminalFailure) this.mptImportFailures.delete(failure.failureId);
-        results.push(errorResult(failure.filePath, error, terminalFailure ? {} : {
+        results.push(errorResult(filePath, error, terminalFailure ? {} : {
           canRepair: true,
           repairToken: failure.failureId,
           sourceType: failure.sourceType,
@@ -366,7 +446,21 @@ class PreFundReconciliationService {
   }
 
   listTempBatches() {
-    return this.tempStore.listBatches();
+    return this.tempStore.listBatches().map((batch) => ({
+      id: batch.id,
+      monthKey: batch.monthKey,
+      sourceType: batch.sourceType,
+      sourceBatch: batch.sourceBatch,
+      sourceDate: batch.sourceDate,
+      sourceFileName: batch.sourceFileName,
+      sourceFileSequence: batch.sourceFileSequence,
+      contentHash: batch.contentHash,
+      declaredRowCount: batch.declaredRowCount,
+      rowCount: batch.rowCount,
+      excludedRowCount: batch.excludedRowCount,
+      importMode: batch.importMode,
+      importedAt: batch.importedAt
+    }));
   }
 
   async deleteTempBatch(payload) {
@@ -389,7 +483,7 @@ class PreFundReconciliationService {
     return result;
   }
 
-  buildSourceSnapshot() {
+  buildSourceSnapshot(gatewayDb = null) {
     const batches = this.tempStore.listBatches().map((batch) => ({
       monthKey: batch.monthKey,
       sourceType: batch.sourceType,
@@ -398,7 +492,9 @@ class PreFundReconciliationService {
       contentHash: batch.contentHash,
       rowCount: batch.rowCount
     }));
-    const linkedMeta = this.database.getLinkedTableMeta('gateway-bill');
+    const linkedMeta = gatewayDb
+      ? this.gatewayReadRepository.getLinkedTableMeta(gatewayDb, 'gateway-bill')
+      : this.database.getLinkedTableMeta('gateway-bill');
     return {
       scenario: SCENARIO_MISSING_GATEWAY,
       bankRevision: this.bankSession ? this.bankSession.revision : null,
@@ -413,16 +509,120 @@ class PreFundReconciliationService {
     };
   }
 
-  resolveKeptRawJson({ source, location = {} }) {
+  prepareRunLineage() {
+    return preFundRunLineagePlan({
+      bankSession: this.bankSession,
+      mptBatches: this.tempStore.listBatches(),
+      gatewayTags: this.database.listGatewayBillSourceTags()
+    });
+  }
+
+  lastRunLineageIntent() {
+    if (!this.lastRun) throw new Error('前置资金 run 不存在');
+    return preFundRunOutputIntent({
+      mirrorRunId: this.lastRun.runId,
+      archiveTaskRunId: this.lastRun.archiveTaskRunId
+    });
+  }
+
+  getRunReceiptByTaskRun(taskRunId) {
+    return this.runStore.getRunByArchiveTaskRunId(taskRunId);
+  }
+
+  acknowledgeRunByTaskRun(taskRunId) {
+    const receipt = this.getRunReceiptByTaskRun(taskRunId);
+    if (!receipt) throw new Error('前置资金 TaskRun 对应的业务 run receipt 不存在');
+    const mirror = this.database.getPreFundReconciliationRunMirrorByTaskRun(taskRunId);
+    if (!mirror
+        || mirror.status !== 'success'
+        || mirror.monthKey !== receipt.monthKey
+        || mirror.sideRunId !== receipt.id
+        || mirror.sideDbRelPath !== receipt.sideDbRelPath) {
+      throw new Error('前置资金 TaskRun 对应的主库 run 镜像身份不一致');
+    }
+    this.database.acknowledgePreFundReconciliationRunMirror(mirror.id, taskRunId);
+    return this.runStore.acknowledgeArchiveTerminal(
+      receipt.monthKey,
+      receipt.id,
+      taskRunId
+    );
+  }
+
+  recoverRunMirror(receipt, { createIfMissing }) {
+    let mirror = this.database.getPreFundReconciliationRunMirrorByTaskRun(
+      receipt.archiveTaskRunId
+    );
+    if (mirror) {
+      if (mirror.monthKey !== receipt.monthKey
+          || mirror.sideRunId !== receipt.id
+          || mirror.scenario !== receipt.scenario
+          || mirror.sideDbRelPath !== receipt.sideDbRelPath) {
+        throw new Error(`前置资金 run #${receipt.id} 的主库镜像身份冲突`);
+      }
+      if (mirror.status === 'running' && createIfMissing) {
+        mirror = this.database.finishPreFundReconciliationRunMirror(mirror.id, receipt.summary);
+      } else if (mirror.status !== 'success') {
+        throw new Error(`前置资金 run #${receipt.id} 的主库镜像状态冲突：${mirror.status}`);
+      }
+      return mirror;
+    }
+    if (!createIfMissing) {
+      throw new Error(`前置资金 run #${receipt.id} 的主库镜像不存在`);
+    }
+    const mirrorId = this.database.createPreFundReconciliationRunMirror({
+      monthKey: receipt.monthKey,
+      sideRunId: receipt.id,
+      scenario: receipt.scenario,
+      snapshotHash: stableHash(receipt.snapshot),
+      bankFiles: receipt.bankFiles,
+      sideDbRelPath: receipt.sideDbRelPath,
+      archiveReceipt: {
+        archiveContractVersion: 1,
+        archiveTaskRunId: receipt.archiveTaskRunId
+      }
+    });
+    return this.database.finishPreFundReconciliationRunMirror(mirrorId, receipt.summary);
+  }
+
+  lastRunLocator() {
+    if (!this.lastRun) throw new Error('前置资金 run 不存在');
+    return Object.freeze({
+      mirrorRunId: this.lastRun.runId,
+      monthKey: this.lastRun.monthKey,
+      sideRunId: this.lastRun.sideRunId,
+      archiveTaskRunId: this.lastRun.archiveTaskRunId
+    });
+  }
+
+  assertLastRunLocator(locator) {
+    if (!locator || !this.lastRun
+        || locator.mirrorRunId !== this.lastRun.runId
+        || locator.monthKey !== this.lastRun.monthKey
+        || locator.sideRunId !== this.lastRun.sideRunId
+        || locator.archiveTaskRunId !== this.lastRun.archiveTaskRunId) {
+      throw new Error('前置资金导出所绑定的 run 已变化，请重新导出');
+    }
+    return this.lastRun;
+  }
+
+  lastRunBusinessFlowPlan(locator) {
+    const run = this.assertLastRunLocator(locator);
+    return Object.freeze({
+      startsNewFlow: false,
+      flowIdentity: Object.freeze({
+        type: 'business-run-id',
+        value: String(run.runId)
+      })
+    });
+  }
+
+  resolveKeptRawJson({ source, location = {} }, gatewayDb) {
     const sourceRecordId = location.sourceRecordId;
     if (source === GATEWAY_SOURCE.TEMPORARY) {
       return this.tempStore.getRawJsonById(location.monthKey, sourceRecordId);
     }
     if (source === GATEWAY_SOURCE.PERSISTENT) {
-      if (typeof this.database.getGatewayBillRawJsonById !== 'function') {
-        throw new TypeError('前置资金对账 database 缺少 getGatewayBillRawJsonById');
-      }
-      return this.database.getGatewayBillRawJsonById(sourceRecordId);
+      return this.gatewayReadRepository.getGatewayBillRawJsonById(gatewayDb, sourceRecordId);
     }
     throw new TypeError(`未知网关来源，无法回读原始JSON：${String(source)}`);
   }
@@ -513,7 +713,12 @@ class PreFundReconciliationService {
     };
   }
 
-  async run({ scenario = SCENARIO_MISSING_GATEWAY, onProgress } = {}) {
+  async run({
+    scenario = SCENARIO_MISSING_GATEWAY,
+    onProgress,
+    taskRunId,
+    expectedDatasets
+  } = {}) {
     if (scenario !== SCENARIO_MISSING_GATEWAY) {
       throw new PreFundReconciliationError(
         'pre-fund-scenario-unsupported',
@@ -523,16 +728,28 @@ class PreFundReconciliationService {
     if (!this.bankSession) {
       throw new PreFundReconciliationError('pre-fund-bank-session-missing', '请先导入标准银行对账单');
     }
+    if (this.bankSession.datasetId !== expectedDatasets.bankDatasetId) {
+      throw new Error('前置资金银行 session dataset 在 prepare 后已变化，请重新运行');
+    }
+    assertSameIdentitySet(
+      this.tempStore.listBatches(),
+      expectedDatasets.mptBatches,
+      mptBatchIdentity,
+      'MPT'
+    );
 
     // 新 run 开始即撤销旧结果的导出资格；失败时也不能回退导出旧快照。
     this.lastRun = null;
     this.revokePreviousRunResults();
 
-    const snapshot = this.buildSourceSnapshot();
     const monthKey = localMonthKey(this.now());
     const db = this.runStore.open(monthKey);
+    let gatewaySnapshot = null;
+    let linkedDb = null;
+    let snapshot = null;
     let sideRunId = null;
     let mirrorRunId = null;
+    let sideTransactionStarted = false;
     const stats = {
       bankInputRows: 0,
       bankValidRows: 0,
@@ -558,25 +775,28 @@ class PreFundReconciliationService {
     };
 
     try {
+      gatewaySnapshot = this.openGatewayReadSnapshot();
+      linkedDb = gatewaySnapshot.db;
+      snapshot = this.buildSourceSnapshot(linkedDb);
+      assertSameIdentitySet(
+        freezeGatewayTags(this.gatewayReadRepository.listGatewayBillSourceTags(linkedDb)),
+        expectedDatasets.gatewayTags,
+        gatewayTagKey,
+        'linked gateway'
+      );
+      db.exec('BEGIN IMMEDIATE');
+      sideTransactionStarted = true;
       sideRunId = this.runStore.createRun(db, {
         scenario,
         snapshot,
-        bankFiles: [this.bankSession.fileName]
-      });
-      mirrorRunId = this.database.createPreFundReconciliationRunMirror({
-        monthKey,
-        sideRunId,
-        scenario,
-        snapshotHash: stableHash(snapshot),
         bankFiles: [this.bankSession.fileName],
-        sideDbRelPath: runDataStore.sideDbRelPath(
-          runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
-          monthKey
-        )
+        archiveReceipt: {
+          archiveContractVersion: 1,
+          archiveTaskRunId: taskRunId
+        }
       });
-      db.exec('BEGIN IMMEDIATE');
       const insertCandidate = this.runStore.createGatewayCandidateInserter(db, sideRunId, {
-        resolveKeptRawJson: (kept) => this.resolveKeptRawJson(kept)
+        resolveKeptRawJson: (kept) => this.resolveKeptRawJson(kept, linkedDb)
       });
       let sourceOrder = 0;
 
@@ -614,7 +834,7 @@ class PreFundReconciliationService {
         'tempGatewayRawRows'
       );
       await ingestGatewayRows(
-        this.database.iterateGatewayBillRows(),
+        this.gatewayReadRepository.iterateGatewayBillRows(linkedDb),
         GATEWAY_SOURCE.PERSISTENT,
         1,
         'linkedGatewayRawRows'
@@ -707,14 +927,43 @@ class PreFundReconciliationService {
       stats.channelCount = channelSummaries.length;
       this.runStore.finishRun(db, sideRunId, stats);
       db.exec('COMMIT');
-      this.database.finishPreFundReconciliationRunMirror(mirrorRunId, stats);
+      sideTransactionStarted = false;
+      try {
+        mirrorRunId = this.database.createPreFundReconciliationRunMirror({
+          monthKey,
+          sideRunId,
+          scenario,
+          snapshotHash: stableHash(snapshot),
+          bankFiles: [this.bankSession.fileName],
+          sideDbRelPath: runDataStore.sideDbRelPath(
+            runDataStore.MODULE_PRE_FUND_RECONCILIATION_RESULTS,
+            monthKey
+          ),
+          archiveReceipt: {
+            archiveContractVersion: 1,
+            archiveTaskRunId: taskRunId
+          }
+        });
+        this.database.finishPreFundReconciliationRunMirror(mirrorRunId, stats);
+      } catch (mirrorError) {
+        try {
+          compensateRunReceiptAfterMirrorFailure(this.runStore, db, taskRunId);
+        } catch (compensationError) {
+          compensationError.code = 'PRE_FUND_MIRROR_COMPENSATION_FAILED';
+          compensationError.preserveArchiveTaskRun = true;
+          compensationError.cause = mirrorError;
+          throw compensationError;
+        }
+        throw mirrorError;
+      }
       this.lastRun = {
         monthKey,
         runId: mirrorRunId,
         sideRunId,
         snapshot,
         summary: stats,
-        channelSummaries
+        channelSummaries,
+        archiveTaskRunId: taskRunId
       };
       if (onProgress) onProgress({ stage: 'done', current: stats.bankInputRows, total: stats.bankInputRows });
       return {
@@ -725,25 +974,20 @@ class PreFundReconciliationService {
         channelSummaries
       };
     } catch (error) {
-      rollbackQuietly(db);
-      if (sideRunId !== null) {
-        try { this.runStore.failRun(db, sideRunId, error); } catch (_failError) { /* 原始错误优先 */ }
-      }
-      if (mirrorRunId !== null) {
+      if (sideTransactionStarted) rollbackQuietly(db);
+      if (mirrorRunId !== null && error.preserveArchiveTaskRun !== true) {
         try {
           this.database.failPreFundReconciliationRunMirror(mirrorRunId, error);
         } catch (_mirrorError) { /* 原始错误优先 */ }
       }
       throw error;
     } finally {
+      if (gatewaySnapshot) gatewaySnapshot.close();
       db.close();
     }
   }
 
-  buildExportPlan(outputDirectory, exportDate = this.now()) {
-    if (!this.lastRun) {
-      throw new PreFundReconciliationError('pre-fund-run-missing', '请先运行前置资金对账');
-    }
+  _buildExportPlanForCurrentRun(outputDirectory, exportDate, runLocator) {
     const availability = this.inspectLastRunAvailability();
     if (!availability.available) {
       this.recordLastRunUnavailable(availability);
@@ -755,7 +999,7 @@ class PreFundReconciliationService {
     if (this.isLastRunStale()) {
       throw new PreFundReconciliationError('pre-fund-run-stale', '数据来源已变化，请重新运行后再导出');
     }
-    const channels = this.runStore.listChannels(this.lastRun.monthKey, this.lastRun.sideRunId);
+    const channels = this.runStore.listChannels(runLocator.monthKey, runLocator.sideRunId);
     return channels.map((channel) => ({
       channel,
       fileName: buildChannelFileName(channel, exportDate),
@@ -763,10 +1007,30 @@ class PreFundReconciliationService {
     }));
   }
 
-  async export({ outputDirectory, overwrite = false, onProgress, exportDate = this.now() } = {}) {
-    const plan = this.buildExportPlan(outputDirectory, exportDate);
+  buildExportPlan(outputDirectory, exportDate = this.now(), runLocator = this.lastRunLocator()) {
+    this.assertLastRunLocator(runLocator);
+    return this._buildExportPlanForCurrentRun(outputDirectory, exportDate, runLocator);
+  }
+
+  async export({
+    outputDirectory,
+    outputPaths,
+    runLocator,
+    overwrite = false,
+    onProgress,
+    exportDate = this.now()
+  } = {}) {
+    this.assertLastRunLocator(runLocator);
+    let plan = this._buildExportPlanForCurrentRun(outputDirectory, exportDate, runLocator);
     if (plan.length === 0) {
       throw new PreFundReconciliationError('pre-fund-export-empty', '本次运行没有可导出的银行渠道');
+    }
+    if (outputPaths !== undefined) {
+      plan = plan.map((item, index) => ({
+        ...item,
+        filePath: outputPaths[index],
+        fileName: path.basename(outputPaths[index])
+      }));
     }
     const conflicts = plan.filter((item) => fs.existsSync(item.filePath));
     if (conflicts.length > 0 && !overwrite) {
@@ -799,8 +1063,8 @@ class PreFundReconciliationService {
             };
           }
         }(this.runStore.iterateChannelExports(
-          this.lastRun.monthKey,
-          this.lastRun.sideRunId
+          runLocator.monthKey,
+          runLocator.sideRunId
         ))),
         onFilePublished: (publication) => {
           publishedFiles.set(publication.filePath, publication.identity);

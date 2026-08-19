@@ -67,9 +67,7 @@ function archivePayload(overrides = {}) {
   };
 }
 
-const BATCH_CONTEXT = Object.freeze({
-  batchId: 41,
-  batchNumber: '2026-08-11-001',
+const OPERATION_CONTEXT = Object.freeze({
   taskRunId: 'task-41',
   taskKey: 'vccFinancialOp:run:archive',
   moduleId: 'vcc-financial-op',
@@ -88,7 +86,7 @@ test('结果写 claim 绑定 action/generation/进程内 identity，protected �
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
     archivePayload(),
     (entry) => progress.push(entry),
-    BATCH_CONTEXT
+    OPERATION_CONTEXT
   );
   const worker = harness.workers[0];
   assert.equal(path.basename(worker.filename), 'vcc-financial-op-write-worker.js');
@@ -96,7 +94,7 @@ test('结果写 claim 绑定 action/generation/进程内 identity，protected �
     runId: 7,
     expectedResultRevision: 3,
     expectedPreviewToken: `v2:${'a'.repeat(64)}`,
-    batchContext: BATCH_CONTEXT,
+    operationContext: OPERATION_CONTEXT,
     taskGeneration: 0,
     appVersion: null,
     buildSha: null
@@ -153,7 +151,7 @@ test('结果写 stale generation 与非法 action 均在创建 worker 前 fail-c
       VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
       archivePayload({ taskGeneration: 1 }),
       undefined,
-      BATCH_CONTEXT
+      OPERATION_CONTEXT
     ),
     (error) => error.code === 'state-changed'
   );
@@ -162,7 +160,7 @@ test('结果写 stale generation 与非法 action 均在创建 worker 前 fail-c
       'not-registered',
       archivePayload(),
       undefined,
-      BATCH_CONTEXT
+      OPERATION_CONTEXT
     ),
     (error) => error.code === 'invalid-vcc-write-action'
   );
@@ -179,12 +177,12 @@ test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation 
         targetMonth: '2026-06',
         expectedPreviewToken: `v2:${'b'.repeat(64)}`,
         taskGeneration: 0
-      }, undefined, BATCH_CONTEXT);
+      }, undefined, OPERATION_CONTEXT);
     },
     expectedPayload: {
       targetMonth: '2026-06',
       expectedPreviewToken: `v2:${'b'.repeat(64)}`,
-      batchContext: BATCH_CONTEXT,
+      operationContext: OPERATION_CONTEXT,
       taskGeneration: 0,
       appVersion: null,
       buildSha: null
@@ -199,14 +197,14 @@ test('unarchive/delete 公共入口复用同一 dedicated worker 与 generation 
         expectedPreviewToken: `v2:${'c'.repeat(64)}`,
         taskGeneration: 0,
         reason: '用户确认删除'
-      }, undefined, BATCH_CONTEXT);
+      }, undefined, OPERATION_CONTEXT);
     },
     expectedPayload: {
       targetMonth: '2026-06',
       targetType: 'result',
       expectedPreviewToken: `v2:${'c'.repeat(64)}`,
       reason: '用户确认删除',
-      batchContext: BATCH_CONTEXT,
+      operationContext: OPERATION_CONTEXT,
       taskGeneration: 0,
       appVersion: null,
       buildSha: null

@@ -132,7 +132,7 @@ async function peekImportTarget({ userDataDir, kind, filePaths }) {
 //   成功后本层把 summary + 路径 + side_db_rel_path 镜像写主库 runs（UI/导出读主库镜像）。
 //   返回 worker 的 result（含侧库 runId / stats / diffFilePath / reportFilePath）。
 //   dispatchFn：注入 runCheckWorkerPool.dispatchRunCheck（main.js 传入，避免本层 require electron 链）。
-async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize, workerCount, tempDir, batchContext, dispatchFn, dispatchCallbacks, mainDb }) {
+async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize, workerCount, tempDir, batchContext, outputIntent, dispatchFn, dispatchCallbacks, mainDb }) {
   // 确保侧库存在（import 已建；防御性 open 一次建表后立即 close — worker 会自开侧库连接）
   const sideDbFilePath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
   if (!fs.existsSync(sideDbFilePath)) {
@@ -151,6 +151,7 @@ async function runCheckViaSideDb({ userDataDir, monthKey, storageRoot, chunkSize
       workerCount,
       tempDir,
       batchContext,
+      outputIntent,
     },
     dispatchCallbacks
   );
@@ -320,47 +321,16 @@ function assertRunExportFresh({ userDataDir, mainDb, prepared }) {
 }
 
 function readResumeTarget(db, { monthKey, runId, allowCompleted = false }) {
-  let run = null;
-  let progress = null;
-  if (runId !== undefined && runId !== null && runId !== '') {
-    const normalizedRunId = Number(runId);
-    if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
-      throw resumeError('runId 格式错误');
-    }
-    run = runRepo.getRunById(db, normalizedRunId);
-    if (!run || run.month_key !== monthKey) {
-      throw resumeError(`run ${normalizedRunId} 不存在或不属于月份 ${monthKey}`);
-    }
-    progress = runRepo.getRunChunkProgress(db, normalizedRunId);
-  } else {
-    const candidates = runRepo.listPartialRuns(db, monthKey);
-    if (candidates.length > 0) {
-      run = candidates[0];
-      progress = candidates[0].chunk_progress;
-    }
-    if (!run && allowCompleted) {
-      const completed = db.prepare(`
-        SELECT * FROM ${RUNS_TABLE}
-        WHERE month_key = ? AND chunk_progress IS NOT NULL
-      `).all(monthKey).filter((candidate) => {
-        const candidateProgress = runRepo.getRunChunkProgress(db, Number(candidate.id));
-        if (!candidateProgress || candidateProgress.status !== 'complete') return false;
-        try {
-          return Boolean(runRepo.readRunProgressBatchContext(candidateProgress));
-        } catch (_error) {
-          return false;
-        }
-      });
-      if (completed.length > 1) {
-        throw resumeError(`月份 ${monthKey} 存在多个已完成恢复候选，无法确定原任务`);
-      }
-      if (completed.length === 1) {
-        [run] = completed;
-        progress = runRepo.getRunChunkProgress(db, Number(run.id));
-      }
-    }
+  const normalizedRunId = Number(runId);
+  if (!Number.isSafeInteger(normalizedRunId) || normalizedRunId < 1) {
+    throw resumeError('runId 必填且必须是正整数');
   }
-  if (!run || !progress) {
+  const run = runRepo.getRunById(db, normalizedRunId);
+  if (!run || run.month_key !== monthKey) {
+    throw resumeError(`run ${normalizedRunId} 不存在或不属于月份 ${monthKey}`);
+  }
+  const progress = runRepo.getRunChunkProgress(db, normalizedRunId);
+  if (!progress) {
     throw resumeError(`月份 ${monthKey} 暂无可恢复 run`);
   }
   if (!['partial', 'in-progress', 'data-complete'].includes(progress.status)
@@ -417,6 +387,13 @@ function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) 
       allowCompleted: source.source === 'side'
     });
     const batchContext = runRepo.readRunProgressBatchContext(target.progress);
+    const outputIntent = target.progress.outputIntent || null;
+    if (outputIntent
+        && (!String(outputIntent.diffFilePath || '').trim()
+          || String(outputIntent.reportFilePath || '').trim()
+            !== String(outputIntent.diffFilePath || '').trim())) {
+      throw resumeError(`run ${target.run.id} 缺少唯一持久输出意图`);
+    }
     const completed = target.progress.status === 'complete';
     if (completed && (!batchContext || target.run.status !== 'success')) {
       throw resumeError(`run ${target.run.id} 已完成但缺少可恢复的原批次证据`);
@@ -425,21 +402,6 @@ function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) 
     if (completed && (!completedRunEvidence.diffFile || !completedRunEvidence.reportFile)) {
       throw resumeError(`run ${target.run.id} 已完成但输出文件证据不完整`);
     }
-    // 侧库是在 v3.0.5 引入，早于 v3.1.9 batchContext。升级前已存在的 partial/in-progress
-    // side run 因此可以合法缺少上下文；与主库 legacy run 一样，首次 resume 用稳定 identity
-    // 预留/复用一个兼容批次，并在 worker 开始前回填到原 run。
-    const stableRunIdentity = `${source.source}:${monthKey}:${Number(target.run.id)}`;
-    const evidence = {
-      source: source.source,
-      monthKey,
-      runId: Number(target.run.id)
-    };
-    const recovery = batchContext
-      ? { batchContext, evidence }
-      : {
-        legacy: true,
-        evidence
-      };
     return {
       source: source.source,
       dbPath: source.dbPath,
@@ -449,26 +411,77 @@ function prepareRunResume({ userDataDir, mainDb, mainDbPath, monthKey, runId }) 
       progressEvidence: JSON.stringify(target.progress),
       mode: completed ? 'completed' : 'resume',
       ...(completed ? { runEvidence: completedRunEvidence } : {}),
-      recovery,
-      taskRunId: batchContext
-        ? batchContext.taskRunId
-        : `acquiring-resume:${stableRunIdentity}`,
-      operationKey: batchContext
-        ? batchContext.operationKey
-        : `acquiringBillCurrency:run:resume:${stableRunIdentity}`,
+      recovery: { batchContext },
+      taskRunId: batchContext ? batchContext.taskRunId : null,
+      operationKey: batchContext ? batchContext.operationKey : null,
       flowPlan: batchContext
         ? null
         : {
-          startsNewFlow: false,
-          flowIdentity: {
-            type: 'business-run-id',
-            value: `acquiring-run:${stableRunIdentity}`
+            startsNewFlow: false,
+            flowIdentity: {
+              type: 'business-run-id',
+              value: `acquiring-run:${source.source}:${monthKey}:${Number(target.run.id)}`
+            }
+          },
+      outputIntent: outputIntent
+        ? {
+            diffFilePath: String(outputIntent.diffFilePath),
+            reportFilePath: String(outputIntent.reportFilePath)
           }
-        }
+        : null
     };
   } finally {
     if (source.close) {
       try { source.db.close(); } catch (_error) { /* swallow */ }
+    }
+  }
+}
+
+function transferRunResumeOwner({
+  mainDb,
+  prepared,
+  previousBatchContext,
+  nextBatchContext,
+  nextOutputIntent
+}) {
+  let db = mainDb;
+  let close = false;
+  if (prepared.source === 'side') {
+    db = new DatabaseSync(prepared.dbPath);
+    close = true;
+  }
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = runRepo.getRunChunkProgress(db, prepared.runId);
+      if (JSON.stringify(current) !== prepared.progressEvidence) {
+        throw resumeError(`run ${prepared.runId} 的恢复进度在 owner transfer 前已变化`);
+      }
+      const currentOwner = runRepo.readRunProgressBatchContext(current);
+      if (JSON.stringify(currentOwner) !== JSON.stringify(previousBatchContext)) {
+        throw resumeError(
+          `run ${prepared.runId} 的 File Task owner 在 transfer 前已变化`,
+          'ACQUIRING_RUN_BATCH_CONTEXT_CONFLICT'
+        );
+      }
+      runRepo.setRunChunkProgress(db, {
+        runId: prepared.runId,
+        lastCompletedChunkIndex: current.lastCompletedChunkIndex,
+        totalChunks: current.totalChunks,
+        status: current.status,
+        chunkSize: current.chunkSize,
+        outputIntent: nextOutputIntent,
+        batchContext: nextBatchContext
+      });
+      db.exec('COMMIT');
+      return nextBatchContext;
+    } catch (error) {
+      try { db.exec('ROLLBACK'); } catch (_rollbackError) {}
+      throw error;
+    }
+  } finally {
+    if (close) {
+      try { db.close(); } catch (_error) {}
     }
   }
 }
@@ -508,51 +521,12 @@ function assertRunResumeFresh({ userDataDir, mainDb, mainDbPath, prepared }) {
   }
 }
 
-function persistRunResumeBatchContext({ userDataDir, mainDb, prepared, batchContext }) {
-  let db = mainDb;
-  let close = false;
-  if (prepared.source === 'side') {
-    db = new DatabaseSync(prepared.dbPath);
-    close = true;
-  }
-  try {
-    const current = runRepo.getRunChunkProgress(db, prepared.runId);
-    if (!current || !['partial', 'in-progress', 'data-complete'].includes(current.status)) {
-      throw resumeError(`run ${prepared.runId} 已不可恢复`);
-    }
-    const currentBatchContext = runRepo.readRunProgressBatchContext(current);
-    if (currentBatchContext) {
-      if (JSON.stringify(currentBatchContext) !== JSON.stringify(batchContext)) {
-        throw resumeError(
-          `run ${prepared.runId} 已绑定其它批次上下文`,
-          'ACQUIRING_RUN_BATCH_CONTEXT_CONFLICT'
-        );
-      }
-      return currentBatchContext;
-    }
-    runRepo.setRunChunkProgress(db, {
-      runId: prepared.runId,
-      lastCompletedChunkIndex: current.lastCompletedChunkIndex,
-      totalChunks: current.totalChunks,
-      status: current.status,
-      chunkSize: current.chunkSize,
-      batchContext
-    });
-    return runRepo.readRunProgressBatchContext(
-      runRepo.getRunChunkProgress(db, prepared.runId)
-    );
-  } finally {
-    if (close) {
-      try { db.close(); } catch (_error) { /* swallow */ }
-    }
-  }
-}
-
 async function resumeRunCheck({
   prepared,
   storageRoot,
   chunkSize,
   batchContext,
+  outputIntent,
   dispatchFn,
   dispatchCallbacks,
   mainDb
@@ -575,6 +549,7 @@ async function resumeRunCheck({
     storageRoot,
     chunkSize,
     batchContext,
+    outputIntent,
     resumeFromRun: {
       runId: prepared.runId,
       lastCompletedChunkIndex: prepared.progress.lastCompletedChunkIndex
@@ -866,7 +841,7 @@ module.exports = {
   prepareRunExport,
   assertRunExportFresh,
   assertRunResumeFresh,
-  persistRunResumeBatchContext,
+  transferRunResumeOwner,
   resumeRunCheck,
   listMonthsDualSource,
   listRecoverableArchiveBatchIds,

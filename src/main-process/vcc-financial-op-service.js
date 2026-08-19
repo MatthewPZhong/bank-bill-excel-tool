@@ -39,9 +39,6 @@ const {
   inspectDatasetExport
 } = require('./vcc-financial-op-dataset-writer');
 const {
-  freezeWorkerBatchContext
-} = require('./archive-center/worker-batch-context');
-const {
   VCC_MUTATION_OPERATIONS
 } = require('../backend/vcc-financial-op/mutation-policy');
 const {
@@ -129,11 +126,7 @@ function detailRecordShape(record, db) {
       ? repository.countExportableImportAnomalies(db, record.id)
       : (Number(record.anomaly_count) || 0),
     archiveState: record.archive_state || 'pending',
-    errorMessage: record.error_message || '',
-    resolutionStatus: record.resolution_status || 'not_applicable',
-    resolvedAt: record.resolved_at || null,
-    resolutionNote: record.resolution_note || '',
-    resolutionAction: record.resolution_action || ''
+    errorMessage: record.error_message || ''
   };
 }
 
@@ -419,16 +412,15 @@ function createVccFinancialOpService({
     throw operationError('invalid-vcc-write-action', `未知 VCC 结果写入 action：${action || ''}`);
   }
 
-  function runResultWriteWorker(action, payload = {}, onProgress, batchContext = null) {
+  function runResultWriteWorker(action, payload = {}, onProgress, operationContext = null) {
     const normalizedPayload = normalizeResultWritePayload(action, payload);
     const confirmedGeneration = validateOperationConfirmation(
       normalizedPayload.expectedPreviewToken,
       payload.taskGeneration
     );
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runWorker(action, {
       ...normalizedPayload,
-      batchContext: frozenBatchContext
+      operationContext
     }, onProgress, {
       destructive: true,
       expectedTaskGeneration: confirmedGeneration,
@@ -503,8 +495,7 @@ function createVccFinancialOpService({
   }
 
   async function importSelectedFiles(payload, onProgress, batchContext, archiveHandoffFiles) {
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
-    const importBatchId = normalizeImportBatchId(frozenBatchContext.taskRunId);
+    const importBatchId = normalizeImportBatchId(batchContext.taskRunId);
     if (repository.getImportBatch(database.db, importBatchId)) {
       throw operationError(
         'vcc-import-batch-id-conflict',
@@ -519,7 +510,7 @@ function createVccFinancialOpService({
     return runWorker('import', {
       ...payload,
       batchId: importBatchId,
-      batchContext: frozenBatchContext,
+      batchContext,
       archiveHandoffFiles: frozenArchiveHandoffFiles
     }, onProgress, {
       recoverImportBatchId: importBatchId,
@@ -527,7 +518,7 @@ function createVccFinancialOpService({
     });
   }
 
-  async function calculate(payload = {}, batchContext) {
+  async function calculate(payload = {}, operationContext) {
     const targetMonth = normalizeYearMonth(payload.targetMonth);
     if (!targetMonth) throw new Error(`计算账期格式无效：${payload.targetMonth || ''}`);
     if (!isValidInputFingerprint(payload.expectedInputFingerprint)) {
@@ -536,7 +527,7 @@ function createVccFinancialOpService({
     return runWorker('calculate', {
       targetMonth,
       expectedInputFingerprint: payload.expectedInputFingerprint,
-      batchContext: freezeWorkerBatchContext(batchContext, { required: true })
+      operationContext
     });
   }
 
@@ -628,12 +619,12 @@ function createVccFinancialOpService({
     };
   }
 
-  function archive(payload = {}, onProgress, batchContext) {
+  function archive(payload = {}, onProgress, operationContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,
       payload,
       onProgress,
-      batchContext
+      operationContext
     );
   }
 
@@ -641,12 +632,12 @@ function createVccFinancialOpService({
     return listAdjustmentOptionsFromDb(database.db, Number(payload.runId));
   }
 
-  function addRunAdjustment(payload = {}, onProgress, batchContext) {
+  function addRunAdjustment(payload = {}, onProgress, operationContext) {
     return runResultWriteWorker(
       VCC_MUTATION_OPERATIONS.ADD_ADJUSTMENT,
       payload,
       onProgress,
-      batchContext
+      operationContext
     );
   }
 
@@ -659,8 +650,7 @@ function createVccFinancialOpService({
     };
   }
 
-  function initializeOpening(payload, batchContext) {
-    freezeWorkerBatchContext(batchContext, { required: true });
+  function initializeOpening(payload, operationContext) {
     return runDirectTask('initialize-opening', () => (
       initializeOpeningBalances({
         db: database.db,
@@ -696,14 +686,14 @@ function createVccFinancialOpService({
     });
   }
 
-  function deleteDatasetData(payload = {}, onProgress, batchContext) {
+  function deleteDatasetData(payload = {}, onProgress, operationContext) {
     return deleteDataTargetData({
       targetMonth: payload.targetMonth,
       targetType: payload.sourceType,
       expectedPreviewToken: payload.expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    }, onProgress, batchContext);
+    }, onProgress, operationContext);
   }
 
   async function listArchivedResultMonths(options = {}) {
@@ -743,7 +733,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-unarchive', { targetMonth: payload.targetMonth });
   }
 
-  function unarchiveMonth(payload = {}, onProgress, batchContext) {
+  function unarchiveMonth(payload = {}, onProgress, operationContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -751,7 +741,7 @@ function createVccFinancialOpService({
       targetMonth: payload.targetMonth,
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration
-    }, onProgress, batchContext);
+    }, onProgress, operationContext);
   }
 
   async function listDeleteTargets(payload = {}) {
@@ -765,7 +755,7 @@ function createVccFinancialOpService({
     return runReadWorker('preview-delete-target', payload);
   }
 
-  function deleteDataTargetData(payload = {}, onProgress, batchContext) {
+  function deleteDataTargetData(payload = {}, onProgress, operationContext) {
     const expectedPreviewToken = Object.prototype.hasOwnProperty.call(payload, 'expectedPreviewToken')
       ? payload.expectedPreviewToken
       : payload.previewToken;
@@ -775,7 +765,7 @@ function createVccFinancialOpService({
       expectedPreviewToken,
       taskGeneration: payload.taskGeneration,
       reason: payload.reason
-    }, onProgress, batchContext);
+    }, onProgress, operationContext);
   }
 
   function previewDatasetExport(payload = {}) {
@@ -875,7 +865,6 @@ function createVccFinancialOpService({
   }
 
   async function exportDatasetData(payload = {}, onProgress, batchContext) {
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     const archiveSources = await resolveDatasetArchiveSources(payload);
     return runWorker('export-dataset', {
       targetMonth: payload.targetMonth,
@@ -884,34 +873,24 @@ function createVccFinancialOpService({
       outputPath: payload.generationOutputPath || payload.outputPath,
       archiveSources,
       expectedInspection: payload.expectedInspection,
-      batchContext: frozenBatchContext
+      batchContext
     }, onProgress, {
       expectedTaskGeneration: payload.taskGeneration
     }).then(async (result) => {
       if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
       await publishOutputFilesFn({
-        batchContext: frozenBatchContext,
+        batchContext,
         generationFilePaths: [result.filePath],
         targetFilePaths: [payload.outputPath],
         targetSnapshots: payload.targetSnapshots,
-        onDurableHandoff: (publication) => (
+        settleManifestArtifacts: (publication, artifactEvidence) => (
           typeof payload.onDurableHandoff === 'function'
-            ? payload.onDurableHandoff(publication, result)
+            ? payload.onDurableHandoff(publication, result, artifactEvidence)
             : undefined
         )
       });
       return { ...result, filePath: path.resolve(payload.outputPath) };
     });
-  }
-
-  function resolveRecord({ recordId, note, action }, batchContext) {
-    freezeWorkerBatchContext(batchContext, { required: true });
-    return runDirectTask('resolve-import-record', () => (
-      detailRecordShape(repository.resolveImportRecord(database.db, Number(recordId), {
-        note,
-        action
-      }), database.db)
-    ));
   }
 
   function dataManagerOverview(yearMonth) {
@@ -971,34 +950,35 @@ function createVccFinancialOpService({
   async function exportRun(payload, batchContext) {
     const {
       targetMonth,
-      outputDirectory,
-      outputPath,
+      expectedRunId,
+      expectedSubjects,
+      outputPaths,
       publicationStagingDirectory,
       targetSnapshots
     } = payload || {};
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-result', async () => {
       // 对话框确认与真正写文件之间可能发生解归档，因此必须在拿到全局租约后重查。
       const target = await getArchivedRunByMonth(targetMonth);
+      if (Number(target.runId) !== Number(expectedRunId)
+          || JSON.stringify(target.subjects) !== JSON.stringify(expectedSubjects)) {
+        throw operationError('state-changed', '归档结果在导出确认后已变化，请重新选择');
+      }
       const result = await writeRunWorkbooksFn({
         db: database.db,
         runId: target.runId,
-        outputDirectory,
-        outputPath,
+        outputPaths,
         assetsDir,
         publicationStagingDirectory
       });
       if (!result.generationFilePaths || typeof publishOutputFilesFn !== 'function') return result;
       await publishOutputFilesFn({
-        batchContext: frozenBatchContext,
+        batchContext,
         generationFilePaths: result.generationFilePaths,
         targetFilePaths: result.filePaths,
-        targetSnapshots: Array.isArray(targetSnapshots)
-          ? targetSnapshots
-          : result.filePaths.map(() => ({ exists: false })),
-        onDurableHandoff: (publication) => (
+        targetSnapshots,
+        settleManifestArtifacts: (publication, artifactEvidence) => (
           typeof payload.onDurableHandoff === 'function'
-            ? payload.onDurableHandoff(publication, result)
+            ? payload.onDurableHandoff(publication, result, artifactEvidence)
             : undefined
         )
       });
@@ -1008,7 +988,6 @@ function createVccFinancialOpService({
   }
 
   async function exportImportAudit(payload, batchContext) {
-    const frozenBatchContext = freezeWorkerBatchContext(batchContext, { required: true });
     return runDirectTask('export-import-audit', async () => {
       const generationOutputPath = payload.generationOutputPath || payload.outputPath;
       const result = await writeImportAuditWorkbookFn({
@@ -1021,13 +1000,13 @@ function createVccFinancialOpService({
       });
       if (!payload.generationOutputPath || typeof publishOutputFilesFn !== 'function') return result;
       await publishOutputFilesFn({
-        batchContext: frozenBatchContext,
+        batchContext,
         generationFilePaths: [result.filePath],
         targetFilePaths: [payload.outputPath],
         targetSnapshots: payload.targetSnapshots,
-        onDurableHandoff: (publication) => (
+        settleManifestArtifacts: (publication, artifactEvidence) => (
           typeof payload.onDurableHandoff === 'function'
-            ? payload.onDurableHandoff(publication, result)
+            ? payload.onDurableHandoff(publication, result, artifactEvidence)
             : undefined
         )
       });
@@ -1059,7 +1038,6 @@ function createVccFinancialOpService({
     previewDatasetExport,
     exportDatasetData,
     resolveDatasetArchiveSources,
-    resolveRecord,
     dataManagerOverview,
     latestArchivedRun,
     exportRun,

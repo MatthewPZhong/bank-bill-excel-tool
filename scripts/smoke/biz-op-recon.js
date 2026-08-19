@@ -20,17 +20,20 @@
 //   Q 业务OP 重导清"下一日 / 同 BU"的旧 runs/diff_rows（PR #45 round 4 P1 fix，资金红线 ⚠️）
 
 const assert = require('node:assert/strict');
+const { randomUUID } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const ExcelJS = require('exceljs');
 
 const { AppDatabase } = require('../../src/backend/database');
-const session = require('../../src/main-process/biz-op-recon-session');
+const sessionApi = require('../../src/main-process/biz-op-recon-session');
+const session = { ...sessionApi, runReconciliation: sessionApi.runLegacyReconciliation };
 const writer = require('../../src/main-process/biz-op-recon-writer');
 const importsRepo = require('../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../src/backend/biz-op-recon-db/run-repository');
+const datasetHeadRepo = require('../../src/backend/biz-op-recon-db/dataset-head-repository');
 const { validateBizOpRow, validateFlowRow } = require('../../src/backend/biz-op-recon-import/validator');
 
 // 工厂函数：构造一行业务OP（22 个非必填字段 + 必填字段）
@@ -110,6 +113,25 @@ async function runBizOpReconSmokeTests() {
   const appDb = new AppDatabase(tmpDb);
   appDb.init();
   const db = appDb.db;
+
+  let datasetTaskSequence = 0;
+  function nextBizOpDatasetSeed(caseName) {
+    datasetTaskSequence += 1;
+    return {
+      datasetId: randomUUID(),
+      producerTaskRunId: `smoke-biz-op:${caseName}:${datasetTaskSequence}`
+    };
+  }
+  function nextFlowDatasetSeed(date, caseName) {
+    datasetTaskSequence += 1;
+    const previous = datasetHeadRepo.getHead(db, 'flow', date);
+    return {
+      datasetId: randomUUID(),
+      producerTaskRunId: `smoke-biz-op:${caseName}:${datasetTaskSequence}`,
+      expectedDatasetId: previous ? previous.datasetId : null,
+      expectedDatasetVersion: previous ? previous.datasetVersion : 0
+    };
+  }
 
   let count = 0;
   function check(label, cond, msg) {
@@ -347,6 +369,7 @@ async function runBizOpReconSmokeTests() {
   const resE = await session.runBizOpImportAsync(db, {
     date: '2026-05-13',
     filePath: tmpXlsxE,
+    datasetSeed: nextBizOpDatasetSeed('case-e-rejected'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -537,6 +560,7 @@ async function runBizOpReconSmokeTests() {
   const resH1 = await session.runBizOpImportAsync(db, {
     date: '2026-06-01',
     filePath: tmpXlsxH,
+    datasetSeed: nextBizOpDatasetSeed('case-h-reimport'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -873,6 +897,7 @@ async function runBizOpReconSmokeTests() {
   const resM = await session.runBizOpImportAsync(db, {
     date: '2026-05-20',
     filePath: tmpXlsxM,
+    datasetSeed: nextBizOpDatasetSeed('case-m-reimport'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -993,6 +1018,7 @@ async function runBizOpReconSmokeTests() {
   const resO1 = await session.runBizOpImportAsync(db, {
     date: '2026-06-20',
     filePath: tmpXlsxO1,
+    datasetSeed: nextBizOpDatasetSeed('case-o-first'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1001,6 +1027,7 @@ async function runBizOpReconSmokeTests() {
   const resO2 = await session.runBizOpImportAsync(db, {
     date: '2026-06-20',
     filePath: tmpXlsxO2,
+    datasetSeed: nextBizOpDatasetSeed('case-o-second'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1114,6 +1141,7 @@ async function runBizOpReconSmokeTests() {
   const resP_flow2 = await session.runFlowImportAsync(db, {
     date: '2026-07-10',
     filePath: tmpXlsxFlowP,
+    datasetSeed: nextFlowDatasetSeed('2026-07-10', 'case-p-reimport'),
     readFlowFile,
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1234,6 +1262,7 @@ async function runBizOpReconSmokeTests() {
   const resQ_reimport = await session.runBizOpImportAsync(db, {
     date: '2026-07-09',
     filePath: tmpXlsxQ,
+    datasetSeed: nextBizOpDatasetSeed('case-q-reimport'),
     readBizOpFile,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1317,6 +1346,7 @@ async function runBizOpReconSmokeTests() {
     const resR_multi = await session.runFlowImportAsync(db, {
       date: RDATE,
       filePaths: [rFileA, rFileB],
+      datasetSeed: nextFlowDatasetSeed(RDATE, 'case-r-multi'),
       readFlowFile,
       writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
       errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1350,6 +1380,7 @@ async function runBizOpReconSmokeTests() {
     const resR_reject = await session.runFlowImportAsync(db, {
       date: RDATE2,
       filePaths: [rFileC, rFileD],
+      datasetSeed: nextFlowDatasetSeed(RDATE2, 'case-r-rejected'),
       readFlowFile,
       writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
       errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1379,6 +1410,7 @@ async function runBizOpReconSmokeTests() {
     const resR_single = await session.runFlowImportAsync(db, {
       date: RDATE3,
       filePaths: [rFileE],
+      datasetSeed: nextFlowDatasetSeed(RDATE3, 'case-r-single'),
       readFlowFile,
       writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
       errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1393,6 +1425,7 @@ async function runBizOpReconSmokeTests() {
     const resR_singleBad = await session.runFlowImportAsync(db, {
       date: '2026-08-18',
       filePaths: [rFileF],
+      datasetSeed: nextFlowDatasetSeed('2026-08-18', 'case-r-single-rejected'),
       readFlowFile,
       writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
       errorReportsDir: path.join(tmpRoot, 'error-reports')
@@ -1407,6 +1440,7 @@ async function runBizOpReconSmokeTests() {
     const resR_legacy = await session.runFlowImportAsync(db, {
       date: '2026-08-19',
       filePath: rFileE,   // 旧单数入参
+      datasetSeed: nextFlowDatasetSeed('2026-08-19', 'case-r-legacy-shape'),
       readFlowFile,
       writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
       errorReportsDir: path.join(tmpRoot, 'error-reports')

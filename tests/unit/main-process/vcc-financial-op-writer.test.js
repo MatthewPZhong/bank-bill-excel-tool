@@ -20,7 +20,8 @@ const {
   buildSubjectRowPlan,
   validateStagedWorkbook,
   assertAdjustmentLineage,
-  writeRunWorkbooks
+  planRunWorkbookOutputPaths,
+  writeRunWorkbooks: writeRunWorkbooksExact
 } = require('../../../src/main-process/vcc-financial-op-writer');
 const {
   writeXlsxAtomically
@@ -35,6 +36,17 @@ const {
   encodeAdjustmentLineageName,
   parseAdjustmentLineageName
 } = require('../../../src/backend/vcc-financial-op/adjustment-lineage');
+
+async function writeRunWorkbooks(options) {
+  const data = loadEffectiveRunData(options.db, Number(options.runId));
+  const outputPaths = planRunWorkbookOutputPaths({
+    targetMonth: data.run.targetMonth,
+    subjects: data.subjects,
+    outputDirectory: options.outputDirectory,
+    outputPath: options.outputPath
+  });
+  return writeRunWorkbooksExact({ ...options, outputPaths });
+}
 
 test('effective DTO 行模型保留基础/调整相邻顺序并使用生效汇总', () => {
   const zeroes = Object.fromEntries(SUPPORTED_CURRENCIES.map((currency) => [currency, '0']));

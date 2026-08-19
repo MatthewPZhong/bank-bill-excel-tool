@@ -21,6 +21,20 @@ const {
 const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
+const {
+  createTaskLifecycle
+} = require('../../../src/main-process/archive-center/task-lifecycle');
+const {
+  createBusinessFlowResolver
+} = require('../../../src/main-process/archive-center/business-flow-resolver');
+const {
+  createBankStatementRunFlowIdentity,
+  createTaskPolicyRegistry
+} = require('../../../src/main-process/archive-center/task-policy-registry');
 
 function createFixture(options = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-service-'));
@@ -37,6 +51,7 @@ function createFixture(options = {}) {
   });
   return {
     db,
+    repository: service.repository,
     rootDir,
     service,
     sourceDir,
@@ -58,11 +73,584 @@ function batchPayload(operationKey, overrides = {}) {
   };
 }
 
+function createLegacyEmptyBatch(fixture, operationKey) {
+  fixture.repository.ensureSchema();
+  return fixture.repository.createBatch({
+    ...batchPayload(operationKey),
+    localDate: '2026-07-20',
+    retentionUntil: '2026-09-18'
+  }).batch;
+}
+
 function writeSource(fixture, name, content) {
   const filePath = path.join(fixture.sourceDir, name);
   fs.writeFileSync(filePath, content);
   return filePath;
 }
+
+test('deferred 零输出不占号，跨日 promote 以实际建批日形成 running batch', async () => {
+  let now = new Date(2026, 7, 17, 23, 59, 59);
+  const fixture = createFixture({ now: () => now });
+  try {
+    await fixture.service.initialize();
+    const zeroTask = (await fixture.service.beginTaskRun({
+      taskRunId: 'deferred-zero-task',
+      taskKey: 'monthly-balance:assemble',
+      moduleId: 'bank-statement',
+      parentRunId: 'deferred-parent',
+      operationKey: 'deferred-zero-operation'
+    })).taskRun;
+    await fixture.service.markTaskRunStarted(zeroTask.taskRunId);
+    await fixture.service.finishTaskRun(zeroTask.taskRunId, { taskStatus: 'failed' });
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_daily_sequences').get().count, 0);
+
+    const promotedTask = (await fixture.service.beginTaskRun({
+      taskRunId: 'deferred-promoted-task',
+      taskKey: 'new-account:generate',
+      moduleId: 'new-account',
+      parentRunId: 'deferred-parent',
+      operationKey: 'deferred-promoted-operation'
+    })).taskRun;
+    await fixture.service.markTaskRunStarted(promotedTask.taskRunId);
+    now = new Date(2026, 7, 18, 0, 0, 1);
+    const outputPath = path.join(fixture.sourceDir, 'promoted.xlsx');
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{
+        filePath: outputPath,
+        role: 'output',
+        sourceOperation: 'new-account:generate'
+      }]
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: promotedTask,
+      manifest,
+      moduleCode: 'NEWACCOUNT',
+      moduleName: '新开账户'
+    });
+    assert.equal(reserved.batch.localDate, '2026-08-18');
+    assert.equal(reserved.batch.globalDailySequence, 1);
+    assert.equal(reserved.batch.taskStatus, 'running');
+    assert.ok(reserved.batch.startedAt);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Bank Statement run TaskRun 与重启后重复 export File Batch 持久继承 parent，rerun 新建 parent', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    let parentSequence = 0;
+    let taskSequence = 0;
+    const createLifecycle = () => createTaskLifecycle({
+      businessOperationRegistry: {
+        begin() { return { accepted: true, token: `operation-${taskSequence + 1}` }; },
+        end() {}
+      },
+      archiveService: fixture.service,
+      flowResolver: createBusinessFlowResolver({
+        archiveService: fixture.service,
+        createParentRunId: () => `bank-parent-${++parentSequence}`
+      }),
+      operationTracker: { async appendOperationFiles() { return { archiveFailed: false }; } },
+      createTaskRunId: () => `bank-task-${++taskSequence}`
+    });
+    const registry = createTaskPolicyRegistry();
+    const runPolicy = registry.require('bank-statement:run');
+    const exportPolicy = registry.require('bank-statement:export');
+    const firstIdentity = createBankStatementRunFlowIdentity(() => 'durable-run-1');
+    await createLifecycle().runOperationOnly({
+      policy: runPolicy,
+      meta: { channel: runPolicy.channel },
+      flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: firstIdentity }),
+      execute: () => ({ status: 'ok' })
+    });
+
+    for (let index = 0; index < 2; index += 1) {
+      const outputPath = path.join(fixture.sourceDir, `bank-export-${index}.xlsx`);
+      const filePlan = normalizeFilePlanV1({
+        version: 1,
+        allocation: 'eager',
+        inputs: [],
+        outputs: [{ filePath: outputPath, role: 'output', sourceOperation: exportPolicy.channel }]
+      });
+      await createLifecycle().runFileTask({
+        policy: exportPolicy,
+        meta: { channel: exportPolicy.channel },
+        flowPlanResolver: () => ({ startsNewFlow: false, flowIdentity: firstIdentity }),
+        filePlanResolver: () => filePlan,
+        execute: async (_context, controls) => {
+          fs.writeFileSync(outputPath, `export-${index}`);
+          await controls.settleArtifacts({
+            files: filePlan.outputs.map((item) => ({ artifactKey: item.artifactKey }))
+          });
+          return { status: 'ok' };
+        }
+      });
+    }
+
+    const secondIdentity = createBankStatementRunFlowIdentity(() => 'durable-run-2');
+    await createLifecycle().runOperationOnly({
+      policy: runPolicy,
+      meta: { channel: runPolicy.channel },
+      flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: secondIdentity }),
+      execute: () => ({ status: 'ok' })
+    });
+    const firstRun = fixture.repository.getTaskRun('bank-task-1');
+    const rawBatches = fixture.repository.listBatches({ limit: 100 });
+    const firstExport = rawBatches.find((batch) => batch.taskRunId === 'bank-task-2');
+    const repeatedExport = rawBatches.find((batch) => batch.taskRunId === 'bank-task-3');
+    const rerun = fixture.repository.getTaskRun('bank-task-4');
+    assert.equal(firstRun.parentRunId, 'bank-parent-1');
+    assert.equal(firstExport.parentRunId, firstRun.parentRunId);
+    assert.equal(repeatedExport.parentRunId, firstRun.parentRunId);
+    assert.equal(rerun.parentRunId, 'bank-parent-2');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('public list/detail 剔除 manifest、alias 与 source/target snapshot', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'manifest-input.xlsx', 'input');
+    const outputPath = path.join(fixture.sourceDir, 'manifest-output.xlsx');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'public-manifest-task',
+      taskKey: 'toolbox:merge',
+      moduleId: 'toolbox',
+      parentRunId: 'public-manifest-parent',
+      operationKey: 'public-manifest-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{
+        filePath: inputPath,
+        role: 'toolbox-merge-source',
+        sourceOperation: 'toolbox:merge'
+      }],
+      outputs: [{
+        filePath: outputPath,
+        role: 'toolbox-merge-output',
+        sourceOperation: 'toolbox:merge'
+      }]
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'TOOLBOX',
+      moduleName: '工具箱'
+    });
+    const listed = await fixture.service.listBatches({ moduleId: 'toolbox' });
+    assert.equal('_fileManifest' in listed.batches[0].metadata, false);
+    for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+      assert.equal(key in listed.batches[0], false, key);
+    }
+    const detail = await fixture.service.getBatch(reserved.batchId);
+    assert.equal('_fileManifest' in detail.batch.metadata, false);
+    for (const key of ['taskRunId', 'taskKey', 'operationKey', 'parentRunId']) {
+      assert.equal(key in detail.batch, false, key);
+    }
+    for (const artifact of detail.batch.artifacts) {
+      assert.equal('sourcePath' in artifact, false);
+      assert.equal('aliasKey' in artifact.metadata, false);
+      assert.equal('sourceSnapshot' in artifact.metadata, false);
+      assert.equal('targetSnapshot' in artifact.metadata, false);
+    }
+    const raw = fixture.repository.getBatchDetail(reserved.batchId);
+    assert.equal(Boolean(raw.metadata._fileManifest), true);
+    assert.equal(Boolean(raw.artifacts[0].metadata.aliasKey), true);
+    assert.equal(raw.taskRunId, task.taskRunId);
+    assert.equal(raw.taskKey, task.taskKey);
+    assert.equal(raw.operationKey, task.operationKey);
+    assert.equal(raw.parentRunId, task.parentRunId);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('public VCC File Task 隐藏与 taskRunId 同值的 metadata.batchId，保留 raw 与业务异值', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'vcc-public-input.xlsx', 'vcc-input');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'vcc-public-file-task',
+      taskKey: 'vccFinancialOp:import:apply',
+      moduleId: 'vcc-financial-op',
+      parentRunId: 'vcc-public-parent',
+      operationKey: 'vcc-public-file-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{
+        filePath: inputPath,
+        role: 'input',
+        sourceOperation: 'vccFinancialOp:import:apply'
+      }],
+      outputs: []
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'VCCFINOP',
+      moduleName: 'VCC财务OP校验'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: manifest.inputs[0].artifactKey }]
+    });
+    assert.equal(settled.durable, true);
+    const finished = await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id, {
+      taskStatus: 'succeeded',
+      metadata: { batchId: task.taskRunId }
+    });
+    assert.equal(finished.ok, true);
+
+    const listed = await fixture.service.listBatches({ moduleId: task.moduleId });
+    const publicListBatch = listed.batches.find((batch) => batch.id === reserved.batch.id);
+    const publicDetail = await fixture.service.getBatch(reserved.batch.id);
+    assert.equal('taskRunId' in publicListBatch, false);
+    assert.equal('batchId' in publicListBatch.metadata, false);
+    assert.equal('taskRunId' in publicDetail.batch, false);
+    assert.equal('batchId' in publicDetail.batch.metadata, false);
+
+    const rawBatch = fixture.repository.getBatch(reserved.batch.id);
+    const rawDetail = fixture.repository.getBatchDetail(reserved.batch.id);
+    assert.equal(rawBatch.metadata.batchId, task.taskRunId);
+    assert.equal(rawDetail.metadata.batchId, task.taskRunId);
+
+    const businessBatchId = 'vcc-business-import-batch';
+    fixture.db.prepare('UPDATE archive_batches SET metadata_json = ? WHERE id = ?').run(
+      JSON.stringify({ ...rawBatch.metadata, batchId: businessBatchId }),
+      reserved.batch.id
+    );
+    const relisted = await fixture.service.listBatches({ moduleId: task.moduleId });
+    const publicBusinessBatch = relisted.batches.find((batch) => batch.id === reserved.batch.id);
+    const businessDetail = await fixture.service.getBatch(reserved.batch.id);
+    assert.equal(publicBusinessBatch.metadata.batchId, businessBatchId);
+    assert.equal(businessDetail.batch.metadata.batchId, businessBatchId);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('File Batch 保留期由 service 统一应用默认、永久与显式天数语义', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const cases = [
+      { label: 'default', retentionDays: undefined, expected: '2026-09-18' },
+      { label: 'permanent', retentionDays: 'permanent', expected: null },
+      { label: 'seven-days', retentionDays: 7, expected: '2026-07-27' }
+    ];
+    for (const item of cases) {
+      const inputPath = writeSource(fixture, `${item.label}.xlsx`, item.label);
+      const task = (await fixture.service.beginTaskRun({
+        taskRunId: `retention-${item.label}-task`,
+        taskKey: 'toolbox:merge',
+        moduleId: 'toolbox',
+        parentRunId: `retention-${item.label}-parent`,
+        operationKey: `retention-${item.label}-operation`
+      })).taskRun;
+      const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+        version: 1,
+        allocation: 'eager',
+        inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'toolbox:merge' }],
+        outputs: []
+      }));
+      const reserved = await fixture.service.reserveFileTaskBatch({
+        taskRun: task,
+        manifest,
+        moduleCode: 'TOOLBOX',
+        moduleName: '工具箱',
+        ...(item.retentionDays === undefined ? {} : { retentionDays: item.retentionDays })
+      });
+      assert.equal(reserved.ok, true);
+      assert.equal(reserved.batch.retentionUntil, item.expected);
+    }
+  } finally {
+    fixture.close();
+  }
+});
+
+test('manifest settle 只接受已登记 key，并以 publication SHA/size 校验输出 Blob', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'settle-input.xlsx', 'input-evidence');
+    const outputPath = path.join(fixture.sourceDir, 'settle-output.xlsx');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'settle-task',
+      taskKey: 'toolbox:merge',
+      moduleId: 'toolbox',
+      parentRunId: 'settle-parent',
+      operationKey: 'settle-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'toolbox:merge' }],
+      outputs: [{ filePath: outputPath, role: 'output', sourceOperation: 'toolbox:merge' }]
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'TOOLBOX',
+      moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    fs.writeFileSync(outputPath, 'published-output');
+    const outputBytes = fs.readFileSync(outputPath);
+    const outputSha256 = crypto.createHash('sha256').update(outputBytes).digest('hex');
+
+    const unknown = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: 'unknown' }]
+    });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.code, 'ARCHIVE_MANIFEST_ARTIFACT_UNKNOWN');
+
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [
+        { artifactKey: manifest.inputs[0].artifactKey },
+        {
+          artifactKey: manifest.outputs[0].artifactKey,
+          expectedSha256: outputSha256,
+          expectedSizeBytes: outputBytes.length
+        }
+      ]
+    });
+    assert.equal(settled.ok, true);
+    const outputArtifact = fixture.repository.listArtifacts(reserved.batch.id)
+      .find((artifact) => artifact.direction === 'output');
+    assert.equal(outputArtifact.status, 'ready');
+    assert.equal(outputArtifact.blob.sha256, outputSha256);
+    assert.equal(outputArtifact.blob.sizeBytes, outputBytes.length);
+
+    const mismatched = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{
+        artifactKey: manifest.outputs[0].artifactKey,
+        expectedSha256: '0'.repeat(64),
+        expectedSizeBytes: outputBytes.length
+      }]
+    });
+    assert.equal(mismatched.ok, false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('manifest settle 在 attempt 前耐久保存 evidence，失败后的无参 retry 继续校验', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const inputPath = writeSource(fixture, 'durable-input.xlsx', 'input');
+    const outputPath = writeSource(fixture, 'durable-output.xlsx', 'actual-output');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'durable-evidence-task',
+      taskKey: 'toolbox:merge',
+      moduleId: 'toolbox',
+      parentRunId: 'durable-evidence-parent',
+      operationKey: 'durable-evidence-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{ filePath: inputPath, role: 'input', sourceOperation: 'toolbox:merge' }],
+      outputs: [{ filePath: outputPath, role: 'output', sourceOperation: 'toolbox:merge' }]
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'TOOLBOX',
+      moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    const expectedSha256 = '0'.repeat(64);
+    const expectedSizeBytes = fs.statSync(outputPath).size;
+    const first = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{
+        artifactKey: manifest.outputs[0].artifactKey,
+        expectedSha256,
+        expectedSizeBytes
+      }]
+    });
+    assert.equal(first.ok, false);
+    const afterFirst = fixture.repository.getArtifactByKey(
+      reserved.batch.id,
+      manifest.outputs[0].artifactKey
+    );
+    assert.equal(afterFirst.metadata.expectedSha256, expectedSha256);
+    assert.equal(afterFirst.metadata.expectedSizeBytes, expectedSizeBytes);
+
+    const retried = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: manifest.outputs[0].artifactKey }]
+    });
+    assert.equal(retried.ok, false);
+    assert.equal(
+      fixture.repository.getArtifactByKey(reserved.batch.id, manifest.outputs[0].artifactKey)
+        .metadata.expectedSha256,
+      expectedSha256
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('显式 settle 的 eager output 未形成时耐久记为 OUTPUT_NOT_PRODUCED 并允许业务成功终结', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const outputPath = path.join(fixture.sourceDir, 'missing-output.xlsx');
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'missing-output-task',
+      taskKey: 'toolbox:merge',
+      moduleId: 'toolbox',
+      parentRunId: 'missing-output-parent',
+      operationKey: 'missing-output-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{ filePath: outputPath, role: 'output', sourceOperation: 'toolbox:merge' }]
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'TOOLBOX',
+      moduleName: '工具箱'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: [{ artifactKey: manifest.outputs[0].artifactKey }]
+    });
+    assert.equal(settled.ok, false);
+    assert.equal(settled.durable, true);
+    assert.equal(settled.results[0].code, 'ARCHIVE_OUTPUT_NOT_PRODUCED');
+    const finished = await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id, {
+      taskStatus: 'succeeded',
+      metadata: {}
+    });
+    assert.equal(finished.ok, true);
+    assert.equal(finished.taskRun.status, 'succeeded');
+    assert.equal(finished.batch.taskStatus, 'succeeded');
+    assert.equal(finished.batch.archiveStatus, 'incomplete');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('Bank Statement 多输出 graceful 子报表失败时其 artifact failed、其余 ready，业务仍 succeeded', async () => {
+  const fixture = createFixture();
+  try {
+    await fixture.service.initialize();
+    const outputPaths = ['main.xlsx', 'hit.xlsx', 'refund.xlsx']
+      .map((name) => path.join(fixture.sourceDir, name));
+    const task = (await fixture.service.beginTaskRun({
+      taskRunId: 'bank-multi-output-task',
+      taskKey: 'bank-statement:export',
+      moduleId: 'bank-statement-process',
+      parentRunId: 'bank-multi-output-parent',
+      operationKey: 'bank-multi-output-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: outputPaths.map((filePath) => ({
+        filePath,
+        role: 'output',
+        sourceOperation: 'bank-statement:export'
+      }))
+    }));
+    const reserved = await fixture.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'FUNDRECON',
+      moduleName: '银行对账单处理'
+    });
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    await fixture.service.startFileTask(task.taskRunId, reserved.batch.id);
+    fs.writeFileSync(outputPaths[0], 'main');
+    fs.writeFileSync(outputPaths[2], 'refund');
+    const settled = await fixture.service.settleManifestArtifacts({
+      batchContext,
+      files: manifest.outputs.map((item) => ({ artifactKey: item.artifactKey }))
+    });
+    assert.equal(settled.ok, false);
+    assert.equal(settled.durable, true);
+    const finished = await fixture.service.finishFileTask(task.taskRunId, reserved.batch.id, {
+      taskStatus: 'succeeded',
+      metadata: {}
+    });
+    assert.equal(finished.taskRun.status, 'succeeded');
+    assert.equal(finished.batch.archiveStatus, 'incomplete');
+    assert.deepEqual(
+      fixture.repository.listArtifacts(reserved.batch.id).map((artifact) => artifact.status),
+      ['ready', 'failed', 'ready']
+    );
+  } finally {
+    fixture.close();
+  }
+});
 
 test('stageFile/archiveFile 流式发布并按内容去重，最后引用删除才移除本体', async () => {
   const fixture = createFixture();
@@ -191,7 +779,7 @@ test('ready artifact 复用时本次 expected SHA/size 不一致必须显式冲�
   }
 });
 
-test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的批量 sink', async () => {
+test('createBatch(files) 走原子 manifest，形成后拒绝 append 未登记 artifact', async () => {
   const fixture = createFixture();
   try {
     const inputPath = writeSource(fixture, 'batch-input.xlsx', 'input');
@@ -213,24 +801,126 @@ test('createBatch(files) 与 appendFiles 可直接作为 operation tracker 的�
     assert.equal(created.succeeded, 2);
     assert.equal(created.batch.archiveStatus, 'complete');
     assert.equal(created.batch.retentionUntil, '2026-09-18');
+    assert.equal(created.batch.batchFormatVersion, 2);
+    assert.equal(created.batch.taskStatus, 'succeeded');
+    assert.equal(
+      fixture.repository.getTaskRun(created.batch.taskRunId).status,
+      'succeeded'
+    );
+    assert.equal(created.batch.metadata._fileManifest.artifactKeys.length, 2);
 
     const appended = await fixture.service.appendFiles({
       batchId: created.batchId,
       sourceOperation: 'business:export',
       files: [{ filePath: extraPath, role: 'output', direction: 'output' }]
     });
-    assert.equal(appended.ok, true);
-    assert.equal(appended.attempted, 1);
-    assert.equal(appended.batch.artifactCount, 3);
+    assert.equal(appended.ok, false);
+    assert.equal(appended.code, 'ARCHIVE_MANIFEST_ARTIFACT_UNKNOWN');
+    assert.equal(fixture.repository.getBatch(created.batchId).artifactCount, 2);
+  } finally {
+    fixture.close();
+  }
+});
 
-    const duplicate = await fixture.service.appendFiles({
-      batchId: created.batchId,
-      sourceOperation: 'business:export',
-      files: [{ filePath: extraPath, role: 'output', direction: 'output' }]
+test('legacy createBatch(files) 空清单拒绝，首批 artifact 故障不出 ghost 且不消耗批次号', async () => {
+  const fixture = createFixture();
+  try {
+    const empty = await fixture.service.createBatch({
+      ...batchPayload('legacy-empty-files'),
+      sourceOperation: 'business:run',
+      files: []
     });
-    assert.equal(duplicate.ok, true);
-    assert.equal(duplicate.results[0].alreadyArchived, true);
-    assert.equal(duplicate.batch.artifactCount, 3);
+    assert.equal(empty.ok, false);
+    assert.equal(empty.code, 'ARCHIVE_FILE_MANIFEST_EMPTY');
+    const outputPath = writeSource(fixture, 'legacy-fault-output.xlsx', 'output');
+    fixture.db.exec(`
+      CREATE TRIGGER fail_legacy_manifest_output
+      BEFORE INSERT ON archive_artifacts
+      WHEN NEW.role = 'output'
+      BEGIN
+        SELECT RAISE(ABORT, 'legacy manifest artifact fault');
+      END
+    `);
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('legacy-reserve-fault'),
+      sourceOperation: 'business:run',
+      filePath: outputPath,
+      role: 'output',
+      direction: 'output'
+    });
+    assert.equal(failed.ok, false);
+    assert.match(failed.message, /执行失败/);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_batches').get().count, 0);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_artifacts').get().count, 0);
+    assert.equal(
+      fixture.db.prepare('SELECT COUNT(*) count FROM archive_operation_issuances').get().count,
+      0
+    );
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) count FROM archive_daily_sequences').get().count, 0);
+
+    fixture.db.exec('DROP TRIGGER fail_legacy_manifest_output');
+    const created = await fixture.service.createBatch({
+      ...batchPayload('legacy-after-reserve-fault'),
+      sourceOperation: 'business:run',
+      files: [{ filePath: outputPath, role: 'output', direction: 'output' }]
+    });
+    assert.equal(created.batch.dailySequence, 1);
+    assert.match(created.batch.batchNumber, /-001$/);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('legacy createBatch(files) settle 失败耐久为 incomplete 并终结 Task Run', async () => {
+  const fixture = createFixture();
+  try {
+    const missingOutput = path.join(fixture.sourceDir, 'legacy-missing-output.xlsx');
+    const created = await fixture.service.createBatch({
+      ...batchPayload('legacy-missing-output'),
+      sourceOperation: 'business:run',
+      files: [{ filePath: missingOutput, role: 'output', direction: 'output' }]
+    });
+    assert.equal(created.ok, false);
+    assert.equal(created.failed, 1);
+    assert.equal(created.results[0].code, 'ARCHIVE_OUTPUT_NOT_PRODUCED');
+    assert.equal(created.results[0].metadataRecorded, true);
+    assert.equal(created.batch.archiveStatus, 'incomplete');
+    assert.equal(created.batch.taskStatus, 'succeeded');
+    assert.equal(
+      fixture.repository.getTaskRun(created.batch.taskRunId).status,
+      'succeeded'
+    );
+  } finally {
+    fixture.close();
+  }
+});
+
+test('legacy outbox 的持久 sourceSnapshot 不会按当前文件静默重建基线', async () => {
+  const fixture = createFixture();
+  try {
+    const sourcePath = writeSource(fixture, 'legacy-snapshot.xlsx', 'original');
+    const sourceSnapshot = sourceSnapshotFromStat(fs.statSync(sourcePath));
+    const expectedSha256 = crypto.createHash('sha256').update('original').digest('hex');
+    fs.writeFileSync(sourcePath, 'replaced');
+
+    const created = await fixture.service.createBatch({
+      ...batchPayload('legacy-persisted-snapshot'),
+      sourceOperation: 'business:run',
+      files: [{
+        filePath: sourcePath,
+        role: 'input',
+        sourceSnapshot,
+        expectedSha256
+      }]
+    });
+
+    assert.equal(created.ok, false);
+    assert.equal(created.results[0].code, 'ARCHIVE_SOURCE_CHANGED');
+    assert.equal(created.results[0].metadataRecorded, true);
+    assert.equal(created.batch.archiveStatus, 'incomplete');
+    assert.equal(created.batch.taskStatus, 'succeeded');
+    const rawArtifact = fixture.repository.listArtifacts(created.batch.id)[0];
+    assert.deepEqual(rawArtifact.metadata.sourceSnapshot, sourceSnapshot);
   } finally {
     fixture.close();
   }
@@ -652,6 +1342,13 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
     assert.equal(failed.batch.failureCode, 'BUSINESS_FAILED');
     assert.equal(failed.batch.archiveStatus, 'complete');
 
+    const firstSource = path.join(fixture.rootDir, 'first-visible.xlsx');
+    fs.writeFileSync(firstSource, 'first');
+    await fixture.service.appendFiles({
+      batchId: reserved.batchId,
+      files: [{ filePath: firstSource, role: 'input' }]
+    });
+
     const latest = await fixture.service.getLatestBatch();
     assert.equal(latest.ok, true);
     assert.equal(latest.latestBatch.batchNumber, reserved.batchNumber);
@@ -663,8 +1360,14 @@ test('task 批次服务保留预留幂等、状态更新、latest 与 parent 关
       taskRunId: 'task-run-2',
       parentRunId: 'parent-run-1'
     });
-    const related = await fixture.service.listRelatedBatches('parent-run-1');
-    assert.deepEqual(related.batches.map((batch) => batch.id), [
+    const secondSource = path.join(fixture.rootDir, 'second-visible.xlsx');
+    fs.writeFileSync(secondSource, 'second');
+    await fixture.service.appendFiles({
+      batchId: relatedReserved.batchId,
+      files: [{ filePath: secondSource, role: 'input' }]
+    });
+    const related = await fixture.service.listRelatedBatches(reserved.batchId);
+    assert.deepEqual(related.batches.map((batch) => batch.batchId), [
       reserved.batchId,
       relatedReserved.batchId
     ]);
@@ -796,7 +1499,7 @@ test('手工删除与 cleanupExpired 共用 active 授权，任务终结后原�
     assert.equal(activeCleanup.candidateCount, 1);
     assert.equal(activeCleanup.deletedBatchCount, 0);
     assert.equal(activeCleanup.results[0].code, 'ARCHIVE_BATCH_ACTIVE');
-    assert.equal((await fixture.service.getBatch(reserved.batchId)).ok, true);
+    assert.equal(fixture.repository.getBatch(reserved.batchId).id, reserved.batchId);
 
     const completed = await fixture.service.completeTaskBatch(reserved.batchId);
     assert.equal(completed.batch.id, reserved.batchId);
@@ -859,8 +1562,7 @@ test('存档失败以明确结果返回且不泄露绝对路径，修复源文�
   const fixture = createFixture();
   try {
     const missingPath = path.join(fixture.sourceDir, 'private-customer-source.xlsx');
-    const created = await fixture.service.createBatch(batchPayload('retry-batch'));
-    assert.equal(created.ok, true);
+    const created = { batch: createLegacyEmptyBatch(fixture, 'retry-batch') };
 
     let failure;
     await assert.doesNotReject(async () => {
@@ -917,7 +1619,7 @@ test('源文件仅在存档成功或批次删除后释放，失败重试期间�
   });
   try {
     const retryPath = path.join(fixture.sourceDir, 'position-retry.xlsx');
-    const retryBatch = await fixture.service.createBatch(batchPayload('position-retry-source'));
+    const retryBatch = { batch: createLegacyEmptyBatch(fixture, 'position-retry-source') };
     const failed = await fixture.service.attachFile(retryBatch.batch.id, {
       filePath: retryPath,
       role: 'input',
@@ -932,7 +1634,7 @@ test('源文件仅在存档成功或批次删除后释放，失败重试期间�
     assert.deepEqual(releasedPaths, [retryPath]);
 
     const deletePath = path.join(fixture.sourceDir, 'position-delete.xlsx');
-    const deleteBatch = await fixture.service.createBatch(batchPayload('position-delete-source'));
+    const deleteBatch = { batch: createLegacyEmptyBatch(fixture, 'position-delete-source') };
     const deleteFailure = await fixture.service.attachFile(deleteBatch.batch.id, {
       filePath: deletePath,
       role: 'input',
@@ -956,7 +1658,7 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
   });
   try {
     const sharedRetryPath = path.join(fixture.sourceDir, 'position-shared-retry.xlsx');
-    const failedBatch = await fixture.service.createBatch(batchPayload('position-shared-failed'));
+    const failedBatch = { batch: createLegacyEmptyBatch(fixture, 'position-shared-failed') };
     const failed = await fixture.service.attachFile(failedBatch.batch.id, {
       filePath: sharedRetryPath,
       role: 'input',
@@ -965,7 +1667,7 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.equal(failed.ok, false);
 
     fs.writeFileSync(sharedRetryPath, 'shared-retry-source');
-    const completedBatch = await fixture.service.createBatch(batchPayload('position-shared-complete'));
+    const completedBatch = { batch: createLegacyEmptyBatch(fixture, 'position-shared-complete') };
     const completed = await fixture.service.attachFile(completedBatch.batch.id, {
       filePath: sharedRetryPath,
       role: 'input',
@@ -984,8 +1686,12 @@ test('同一源文件仍被其它未完成 artifact 引用时不得提前释放'
     assert.deepEqual(releasedPaths, [sharedRetryPath, replacementPath]);
 
     const sharedDeletePath = path.join(fixture.sourceDir, 'position-shared-delete.xlsx');
-    const firstDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-first'));
-    const secondDeleteBatch = await fixture.service.createBatch(batchPayload('position-shared-delete-second'));
+    const firstDeleteBatch = {
+      batch: createLegacyEmptyBatch(fixture, 'position-shared-delete-first')
+    };
+    const secondDeleteBatch = {
+      batch: createLegacyEmptyBatch(fixture, 'position-shared-delete-second')
+    };
     const firstDeleteFailure = await fixture.service.attachFile(firstDeleteBatch.batch.id, {
       filePath: sharedDeletePath,
       role: 'input',
@@ -1211,35 +1917,34 @@ test('有业务 SHA 时仍拒绝存档读取期间发生变化且不留下 part 
 });
 
 test('cleanupExpired 按本地日清理，保留日当天不删且锁定批次跳过', async () => {
-  const fixture = createFixture();
+  let currentTime = new Date(2026, 6, 1, 12, 0, 0);
+  const fixture = createFixture({ now: () => currentTime });
   try {
     const sourcePath = writeSource(fixture, 'retention.xlsx', 'retention-content');
     const expired = await fixture.service.archiveFile({
       ...batchPayload('expired', {
-        localDate: '2026-07-01',
-        retentionUntil: '2026-07-19'
+        retentionDays: 18
       }),
       filePath: sourcePath,
       role: 'output'
     });
     const boundary = await fixture.service.archiveFile({
       ...batchPayload('boundary', {
-        localDate: '2026-07-01',
-        retentionUntil: '2026-07-20'
+        retentionDays: 19
       }),
       filePath: sourcePath,
       role: 'output'
     });
     const locked = await fixture.service.archiveFile({
       ...batchPayload('locked', {
-        localDate: '2026-07-01',
-        retentionUntil: '2026-07-10',
+        retentionDays: 9,
         locked: true
       }),
       filePath: sourcePath,
       role: 'output'
     });
 
+    currentTime = new Date(2026, 6, 20, 12, 0, 0);
     const cleanup = await fixture.service.cleanupExpired({ asOfLocalDate: '2026-07-20' });
     assert.equal(cleanup.ok, true);
     assert.equal(cleanup.candidateCount, 1);

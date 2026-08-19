@@ -14,17 +14,25 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const { DatabaseSync } = require('node:sqlite');
 
 const PENDING_COLUMNS = require('../../../../src/backend/pending-db/columns');
 const { computeRowHash } = require('../../../../src/backend/pending-import/validator');
 const { validateContract } = require('../../../../src/backend/big-table-import/contract');
 const contractMod = require('../../../../src/backend/pending-import/contract-pending');
+const { runMigrations } = require('../../../../src/backend/pending-db/migrations');
 
 function mkContract(opts = {}) {
   return contractMod.createContract({
     yearMonth: opts.yearMonth || '2026-06',
     archivePath: opts.archivePath !== undefined ? opts.archivePath : null,
-    importedAt: opts.importedAt || '2026-06-11T00:00:00.000Z'
+    importedAt: opts.importedAt || '2026-06-11T00:00:00.000Z',
+    datasetSeed: opts.datasetSeed || {
+      datasetId: 'pending-dataset-test',
+      producerTaskRunId: 'pending-import-task-test',
+      expectedDatasetId: null,
+      expectedDatasetVersion: 0
+    }
   });
 }
 
@@ -37,6 +45,76 @@ test('pending 契约通过 validateContract（whitelist=null 旁路第 1 层防�
   assert.equal(v.captureRowValues, true);
   assert.equal(v.maxCollectedErrors, 1000);
   assert.equal(typeof v.cellsOf, 'function');
+});
+
+test('engine worker contract 边界只接受 exact v1 dataset seed 并冻结副本', () => {
+  const seed = {
+    datasetId: 'pending-dataset-boundary',
+    producerTaskRunId: 'pending-import-task-boundary',
+    expectedDatasetId: 'pending-dataset-v0',
+    expectedDatasetVersion: 0
+  };
+  const contract = contractMod.createContract({
+    yearMonth: '2026-06',
+    importedAt: '2026-06-11T00:00:00.000Z',
+    datasetSeed: seed
+  });
+  seed.datasetId = 'mutated-after-boundary';
+  assert.equal(contract.finalizeForCommit({ totalInserted: 0, sourceFiles: [] })[0].params[5],
+    'pending-dataset-boundary');
+  assert.throws(() => contractMod.createContract({
+    yearMonth: '2026-06',
+    importedAt: '2026-06-11T00:00:00.000Z',
+    datasetSeed: { ...seed, extra: true }
+  }), /exact v1 dataset seed/);
+});
+
+test('ordinary import 在同一 transaction 拒绝 stale head，v0 head 精确递增到 v1', () => {
+  const db = new DatabaseSync(':memory:');
+  runMigrations(db);
+  db.prepare(`INSERT INTO pending_months (
+    year_month, imported_at, row_count, source_files,
+    dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+  ) VALUES ('2026-06', '2026-06-01T00:00:00.000Z', 0, '[]', 'legacy-v0', NULL, 0, 0)`).run();
+  const current = contractMod.createContract({
+    yearMonth: '2026-06',
+    importedAt: '2026-06-11T00:00:00.000Z',
+    datasetSeed: {
+      datasetId: 'first-v1',
+      producerTaskRunId: 'pending-task-v1',
+      expectedDatasetId: 'legacy-v0',
+      expectedDatasetVersion: 0
+    }
+  });
+  db.exec('BEGIN');
+  for (const statement of current.deleteForOverwrite()) db.prepare(statement.sql).run(...statement.params);
+  for (const statement of current.finalizeForCommit({ totalImported: 0, sourceFiles: [] })) {
+    db.prepare(statement.sql).run(...statement.params);
+  }
+  db.exec('COMMIT');
+  assert.deepEqual({ ...db.prepare(`SELECT dataset_id, dataset_version, archive_contract_version
+    FROM pending_months WHERE year_month = '2026-06'`).get() }, {
+    dataset_id: 'first-v1', dataset_version: 1, archive_contract_version: 1
+  });
+
+  const stale = contractMod.createContract({
+    yearMonth: '2026-06',
+    importedAt: '2026-06-12T00:00:00.000Z',
+    datasetSeed: {
+      datasetId: 'stale-v1',
+      producerTaskRunId: 'stale-task',
+      expectedDatasetId: 'legacy-v0',
+      expectedDatasetVersion: 0
+    }
+  });
+  db.exec('BEGIN');
+  assert.throws(() => {
+    for (const statement of stale.deleteForOverwrite()) db.prepare(statement.sql).run(...statement.params);
+  }, /constraint/i);
+  db.exec('ROLLBACK');
+  assert.equal(db.prepare(`SELECT dataset_id FROM pending_months WHERE year_month = '2026-06'`).get().dataset_id,
+    'first-v1');
+  db.close();
 });
 
 test('expectedHeaders = PENDING_COLUMNS（31 列，顺序一致）', () => {
@@ -63,35 +141,88 @@ test('insertSql 与 month-repository.createRowInserter byte-for-byte 同源', ()
   assert.equal(mkContract().insertSql, expected);
 });
 
-test('🔴 deleteForOverwrite = deleteMonth 6 条 SQL+参数+顺序逐字平移（R-1 Codex PR #55 Finding 1 红线）', () => {
+test('🔴 deleteForOverwrite 同事务清 7 项并包含 removed dataset head（R-1 红线）', () => {
   const c = mkContract({ yearMonth: '2026-06' });
   const dels = c.deleteForOverwrite();
-  assert.equal(dels.length, 6, '必须恰好 6 条 DELETE');
-  // 顺序：pending_removal_matches → diff_rows → diff_runs → removed_pending_rows → pending_rows → pending_months
-  assert.match(dels[0].sql, /DELETE FROM pending_removal_matches WHERE run_id IN \(/);
-  assert.match(dels[0].sql, /SELECT id FROM diff_runs WHERE upper_month = \? OR lower_month = \?/);
-  assert.deepEqual(dels[0].params, ['2026-06', '2026-06']);
-  assert.match(dels[1].sql, /DELETE FROM diff_rows WHERE run_id IN \(/);
-  assert.match(dels[1].sql, /SELECT id FROM diff_runs WHERE upper_month = \? OR lower_month = \?/);
-  assert.deepEqual(dels[1].params, ['2026-06', '2026-06']);
-  assert.equal(dels[2].sql, 'DELETE FROM diff_runs WHERE upper_month = ? OR lower_month = ?');
-  assert.deepEqual(dels[2].params, ['2026-06', '2026-06']);
-  assert.equal(dels[3].sql, 'DELETE FROM removed_pending_rows WHERE year_month = ?');
-  assert.deepEqual(dels[3].params, ['2026-06']);
-  assert.equal(dels[4].sql, 'DELETE FROM pending_rows WHERE year_month = ?');
-  assert.deepEqual(dels[4].params, ['2026-06']);
-  assert.equal(dels[5].sql, 'DELETE FROM pending_months WHERE year_month = ?');
-  assert.deepEqual(dels[5].params, ['2026-06']);
+  assert.equal(dels.length, 10, 'head guard 后必须恰好 7 条业务 DELETE');
+  assert.match(dels[0].sql, /CREATE TEMP TABLE IF NOT EXISTS pending_month_head_guard/);
+  assert.match(dels[2].sql, /pending_months/);
+  assert.match(dels[2].sql, /archive_contract_version = 1/);
+  assert.match(dels[2].sql, /archive_terminal_ack_at IS NULL/);
+  const businessDeletes = dels.slice(3);
+  // 顺序：matches → diff rows/runs → removed rows/head → pending rows/month
+  assert.match(businessDeletes[0].sql, /DELETE FROM pending_removal_matches WHERE run_id IN \(/);
+  assert.match(businessDeletes[0].sql, /SELECT id FROM diff_runs WHERE upper_month = \? OR lower_month = \?/);
+  assert.deepEqual(businessDeletes[0].params, ['2026-06', '2026-06']);
+  assert.match(businessDeletes[1].sql, /DELETE FROM diff_rows WHERE run_id IN \(/);
+  assert.equal(businessDeletes[2].sql, 'DELETE FROM diff_runs WHERE upper_month = ? OR lower_month = ?');
+  assert.equal(businessDeletes[3].sql, 'DELETE FROM removed_pending_rows WHERE year_month = ?');
+  assert.equal(businessDeletes[4].sql, 'DELETE FROM pending_removed_months WHERE year_month = ?');
+  assert.equal(businessDeletes[5].sql, 'DELETE FROM pending_rows WHERE year_month = ?');
+  assert.equal(businessDeletes[6].sql, 'DELETE FROM pending_months WHERE year_month = ?');
+});
+
+test('🔴 deleteForOverwrite 在任何业务 DELETE 前拒绝未 ACK v1 run，diff/pending 零变化', () => {
+  const db = new DatabaseSync(':memory:');
+  runMigrations(db);
+  db.prepare(`INSERT INTO pending_months (
+    year_month, imported_at, row_count, source_files,
+    dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+  ) VALUES (?, ?, 1, '[]', ?, ?, 1, 1)`).run(
+    '2026-06', '2026-06-11T00:00:00.000Z', 'pending-current-v1', 'pending-producer-v1'
+  );
+  const values = new Array(31).fill('').map((_, index) => `guard-${index}`);
+  const initialContract = mkContract({ yearMonth: '2026-06' });
+  const mapped = initialContract.mapRow({ values });
+  db.prepare(initialContract.insertSql).run(...mapped.params);
+  const runId = Number(db.prepare(`INSERT INTO diff_runs (
+    upper_month, lower_month, rule_snapshot, created_at,
+    stat_new, stat_missing, stat_changed,
+    archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+  ) VALUES (?, ?, '{}', ?, 0, 0, 0, 1, ?, NULL)`).run(
+    '2026-06', '2026-05', '2026-06-12T00:00:00.000Z', 'pending-run-unacked'
+  ).lastInsertRowid);
+  db.prepare(`INSERT INTO diff_rows (run_id, type) VALUES (?, 'new')`).run(runId);
+  const before = {
+    runs: db.prepare('SELECT COUNT(*) AS n FROM diff_runs').get().n,
+    diffs: db.prepare('SELECT COUNT(*) AS n FROM diff_rows').get().n,
+    rows: db.prepare('SELECT COUNT(*) AS n FROM pending_rows').get().n,
+    months: db.prepare('SELECT COUNT(*) AS n FROM pending_months').get().n
+  };
+  const overwrite = mkContract({
+    yearMonth: '2026-06',
+    datasetSeed: {
+      datasetId: 'pending-next-v1',
+      producerTaskRunId: 'pending-next-task',
+      expectedDatasetId: 'pending-current-v1',
+      expectedDatasetVersion: 1
+    }
+  });
+  db.exec('BEGIN');
+  assert.throws(() => {
+    for (const statement of overwrite.deleteForOverwrite()) {
+      db.prepare(statement.sql).run(...statement.params);
+    }
+  }, /constraint/i);
+  db.exec('ROLLBACK');
+  assert.deepEqual({
+    runs: db.prepare('SELECT COUNT(*) AS n FROM diff_runs').get().n,
+    diffs: db.prepare('SELECT COUNT(*) AS n FROM diff_rows').get().n,
+    rows: db.prepare('SELECT COUNT(*) AS n FROM pending_rows').get().n,
+    months: db.prepare('SELECT COUNT(*) AS n FROM pending_months').get().n
+  }, before);
+  db.close();
 });
 
 test('finalizeForCommit = upsertMonthMeta（rowCount/sourceFiles/archivePath/importedAt 字段）', () => {
   const c = mkContract({ yearMonth: '2026-06', archivePath: '/a/b.xlsx', importedAt: '2026-06-11T00:00:00.000Z' });
   const fin = c.finalizeForCommit({ totalImported: 42, sourceFiles: ['x.xlsx', 'y.xlsx'] });
   assert.equal(fin.length, 1);
-  assert.match(fin[0].sql, /INSERT INTO pending_months \(year_month, imported_at, row_count, source_files, archive_path\)/);
+  assert.match(fin[0].sql, /dataset_id, producer_task_run_id, dataset_version, archive_contract_version/);
   assert.match(fin[0].sql, /ON CONFLICT\(year_month\) DO UPDATE SET/);
   assert.deepEqual(fin[0].params, [
-    '2026-06', '2026-06-11T00:00:00.000Z', 42, JSON.stringify(['x.xlsx', 'y.xlsx']), '/a/b.xlsx'
+    '2026-06', '2026-06-11T00:00:00.000Z', 42, JSON.stringify(['x.xlsx', 'y.xlsx']), '/a/b.xlsx',
+    'pending-dataset-test', 'pending-import-task-test', 1, 1
   ]);
 });
 

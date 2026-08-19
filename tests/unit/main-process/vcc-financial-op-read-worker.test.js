@@ -149,8 +149,12 @@ test('B-12 真实 legacy fixture 的初读与导出租约内二次重查均可�
   assert.equal(target.runId, 1);
   assert.deepEqual(await service.exportRun({
     targetMonth: '2026-06',
-    outputPath: '/tmp/legacy-result.xlsx'
+    expectedRunId: target.runId,
+    expectedSubjects: target.subjects,
+    outputPaths: ['/tmp/legacy-result.xlsx'],
+    targetSnapshots: [{ exists: false }]
   }, BATCH_CONTEXT), { filePaths: ['/tmp/legacy-result.xlsx'] });
   assert.equal(writerCalls.length, 1);
   assert.equal(writerCalls[0].runId, 1);
+  assert.deepEqual(writerCalls[0].outputPaths, ['/tmp/legacy-result.xlsx']);
 });

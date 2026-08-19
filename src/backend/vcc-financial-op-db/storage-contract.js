@@ -50,6 +50,57 @@ function vccTableNames(db) {
   `).all().map((row) => assertTableName(row.name));
 }
 
+function inspectVccStorageData(db) {
+  assertDatabase(db);
+  const tableCounts = [];
+  const nonEmptyTables = [];
+  let moduleStateFirstMonth = null;
+  let structuralModuleState = false;
+  for (const tableName of vccTableNames(db)) {
+    const rowCount = Number(db.prepare(`
+      SELECT COUNT(*) AS row_count FROM ${assertTableName(tableName)}
+    `).get().row_count) || 0;
+    const count = Object.freeze({ tableName, rowCount });
+    tableCounts.push(count);
+    if (rowCount === 0) continue;
+    if (tableName === 'vcc_fin_op_module_state' && rowCount === 1) {
+      const columns = tableColumns(db, tableName);
+      if (columns.has('singleton_id') && columns.has('first_month')) {
+        const row = db.prepare(`
+          SELECT singleton_id, first_month FROM vcc_fin_op_module_state LIMIT 1
+        `).get();
+        moduleStateFirstMonth = row && row.first_month === null
+          ? null
+          : String(row && row.first_month || '');
+        structuralModuleState = Number(row && row.singleton_id) === 1
+          && row.first_month === null;
+        if (structuralModuleState) continue;
+      }
+    }
+    nonEmptyTables.push(count);
+  }
+  return Object.freeze({
+    empty: nonEmptyTables.length === 0,
+    structuralModuleState,
+    moduleStateFirstMonth,
+    tableCounts: Object.freeze(tableCounts),
+    nonEmptyTables: Object.freeze(nonEmptyTables)
+  });
+}
+
+function assertEmptyVccStorageForUpgrade(db) {
+  const assessment = inspectVccStorageData(db);
+  if (assessment.empty) return assessment;
+  const summary = assessment.nonEmptyTables
+    .map((entry) => `${entry.tableName}=${entry.rowCount}`)
+    .join('、');
+  const error = new Error(`检测到非空 VCC storage contract v1，禁止自动迁移或清空（${summary}）`);
+  error.code = 'vcc-storage-v1-data-present';
+  error.nonEmptyTables = assessment.nonEmptyTables;
+  error.moduleStateFirstMonth = assessment.moduleStateFirstMonth;
+  throw error;
+}
+
 function guardTriggerName(tableName, operation) {
   return assertTableName(`${VCC_STORAGE_GUARD_TRIGGER_PREFIX}${tableName}_${operation}`);
 }
@@ -359,6 +410,95 @@ function setVccStorageContractVersion(db, version) {
   return normalized;
 }
 
+function restoreAutoincrementSequence(db, tableName, sequence) {
+  if (!Number.isSafeInteger(sequence) || sequence < 0) return;
+  const existing = db.prepare(`
+    SELECT seq FROM sqlite_sequence WHERE name = ?
+  `).get(tableName);
+  if (existing) {
+    db.prepare('UPDATE sqlite_sequence SET seq = ? WHERE name = ?').run(sequence, tableName);
+  } else {
+    db.prepare('INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)').run(tableName, sequence);
+  }
+}
+
+function upgradeEmptyVccStorageContract(db) {
+  assertDatabase(db);
+  const currentVersion = getVccStorageContractVersion(db);
+  if (currentVersion >= VCC_STORAGE_CONTRACT_VERSION) {
+    return Object.freeze({
+      upgraded: false,
+      fromVersion: currentVersion,
+      toVersion: currentVersion,
+      assessment: inspectVccStorageData(db)
+    });
+  }
+  const initialAssessment = assertEmptyVccStorageForUpgrade(db);
+  db.exec('SAVEPOINT vcc_empty_storage_contract_v2_upgrade');
+  try {
+    const beforeReplace = assertEmptyVccStorageForUpgrade(db);
+    const sequenceRow = db.prepare(`
+      SELECT seq FROM sqlite_sequence WHERE name = 'vcc_fin_op_effective_rows'
+    `).get();
+    const effectiveSequence = sequenceRow ? Number(sequenceRow.seq) : null;
+    db.exec('DROP TABLE vcc_fin_op_effective_rows');
+    createSlimEffectiveRowsTable(db);
+    db.exec(`
+      CREATE INDEX idx_vcc_fin_op_effective_month_source
+        ON vcc_fin_op_effective_rows(target_month, source_type, subject, stat_currency);
+      CREATE INDEX idx_vcc_fin_op_effective_pending
+        ON vcc_fin_op_effective_rows(
+          target_month, source_type, subject, pending_currency, flow_currency
+        );
+      CREATE INDEX idx_vcc_fin_op_effective_source_coordinate
+        ON vcc_fin_op_effective_rows(
+          import_source_id, target_month, source_type, sheet_name, source_row, id
+        );
+    `);
+    restoreAutoincrementSequence(db, 'vcc_fin_op_effective_rows', effectiveSequence);
+    setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+
+    const effectiveColumns = tableColumns(db, 'vcc_fin_op_effective_rows');
+    for (const removedColumn of ['raw_json', 'idempotency_key_raw', 'source_file']) {
+      if (effectiveColumns.has(removedColumn)) {
+        throw new Error(`VCC 空库升级后仍存在旧字段 ${removedColumn}`);
+      }
+    }
+    const foreignKeyFailures = db.prepare('PRAGMA foreign_key_check').all();
+    if (foreignKeyFailures.length > 0) {
+      const error = new Error('VCC 空库升级后的 foreign_key_check 未通过');
+      error.code = 'vcc-storage-empty-upgrade-foreign-key-failed';
+      error.failures = foreignKeyFailures.slice(0, 20);
+      throw error;
+    }
+    const triggerCount = Number(db.prepare(`
+      SELECT COUNT(*) AS trigger_count
+      FROM sqlite_master
+      WHERE type = 'trigger' AND name LIKE ?
+    `).get(`${VCC_STORAGE_GUARD_TRIGGER_PREFIX}%`).trigger_count) || 0;
+    const expectedTriggerCount = vccTableNames(db).length * 3;
+    if (triggerCount !== expectedTriggerCount) {
+      throw new Error(`VCC 空库升级写保护不完整（${triggerCount}/${expectedTriggerCount}）`);
+    }
+    db.exec('RELEASE SAVEPOINT vcc_empty_storage_contract_v2_upgrade');
+    return Object.freeze({
+      upgraded: true,
+      fromVersion: currentVersion,
+      toVersion: VCC_STORAGE_CONTRACT_VERSION,
+      assessment: beforeReplace,
+      initialAssessment
+    });
+  } catch (error) {
+    try {
+      db.exec(`
+        ROLLBACK TO SAVEPOINT vcc_empty_storage_contract_v2_upgrade;
+        RELEASE SAVEPOINT vcc_empty_storage_contract_v2_upgrade;
+      `);
+    } catch (_rollbackError) { /* preserve original error */ }
+    throw error;
+  }
+}
+
 module.exports = {
   VCC_STORAGE_CONTRACT_SETTING_KEY,
   VCC_STORAGE_CONTRACT_VERSION,
@@ -366,10 +506,13 @@ module.exports = {
   VCC_STORAGE_WRITE_CAPABILITY_FUNCTION,
   VCC_STORAGE_WRITE_CAPABILITY_TOKEN,
   createSlimEffectiveRowsTable,
+  assertEmptyVccStorageForUpgrade,
   ensureVccStorageSideTables,
   getVccStorageContractVersion,
+  inspectVccStorageData,
   installVccStorageWriteGuards,
   registerVccStorageWriteCapability,
   setVccStorageContractVersion,
+  upgradeEmptyVccStorageContract,
   vccStorageGuardTriggerDefinition
 };

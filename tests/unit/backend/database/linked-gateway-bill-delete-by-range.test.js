@@ -63,7 +63,7 @@ function seedRows(sourceFileName) {
     gwRow('B-3', 'R-3', '2026-03-20'),
     gwRow('B-4', 'R-4', '2026-04-25'),
     gwRow('B-NULL', 'R-NULL', '')        // 无日期 → bill_date 落库 null（范围匹配不到）
-  ], sourceFileName ? { sourceFileName } : {});
+  ], { sourceFileName: sourceFileName || undefined, legacySource: true });
 }
 
 test.describe('linked-table-repository — 网关对账单按日期范围统计 / 删除（v3.0.1 task4）', () => {

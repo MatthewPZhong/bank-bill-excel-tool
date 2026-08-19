@@ -10,6 +10,9 @@ const { serializeError } = require('../../main-process/serialize-error');
 const {
   freezeWorkerBatchContext
 } = require('../../main-process/archive-center/worker-batch-context');
+const {
+  freezeWorkerOperationContext
+} = require('../../main-process/archive-center/worker-operation-context');
 
 let cancelRequested = false;
 
@@ -35,11 +38,19 @@ function openDb(dbPath) {
 async function run() {
   const action = workerData.action;
   const rawPayload = workerData.payload || {};
-  const payload = ['import', 'calculate', 'export-dataset'].includes(action)
+  const payload = ['import', 'export-dataset'].includes(action)
     ? {
         ...rawPayload,
         batchContext: freezeWorkerBatchContext(rawPayload.batchContext, { required: true })
       }
+    : action === 'calculate'
+      ? {
+          ...rawPayload,
+          operationContext: freezeWorkerOperationContext(
+            rawPayload.operationContext,
+            { required: true }
+          )
+        }
     : rawPayload;
   const db = openDb(workerData.dbPath);
   try {

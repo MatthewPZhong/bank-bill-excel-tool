@@ -15,18 +15,51 @@ function mapRun(row) {
     createdAt: row.created_at,
     statNew: Number(row.stat_new) || 0,
     statMissing: Number(row.stat_missing) || 0,
-    statChanged: Number(row.stat_changed) || 0
+    statChanged: Number(row.stat_changed) || 0,
+    archiveContractVersion: Number(row.archive_contract_version) || 0,
+    archiveTaskRunId: row.archive_task_run_id || null,
+    archiveTerminalAckAt: row.archive_terminal_ack_at || null
   };
 }
 
-function createRun(db, { upperMonth, lowerMonth, ruleSnapshot }) {
+function createRunWithReceipt(db, {
+  upperMonth,
+  lowerMonth,
+  ruleSnapshot,
+  archiveReceipt
+}) {
   const createdAt = new Date().toISOString();
   const snapshotJson = JSON.stringify(ruleSnapshot || {});
+  const receipt = archiveReceipt;
   const result = db.prepare(
-    `INSERT INTO diff_runs (upper_month, lower_month, rule_snapshot, created_at, stat_new, stat_missing, stat_changed)
-     VALUES (?, ?, ?, ?, 0, 0, 0)`
-  ).run(upperMonth, lowerMonth, snapshotJson, createdAt);
+    `INSERT INTO diff_runs (
+       upper_month, lower_month, rule_snapshot, created_at,
+       stat_new, stat_missing, stat_changed,
+       archive_contract_version, archive_task_run_id, archive_terminal_ack_at
+     ) VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, NULL)`
+  ).run(
+    upperMonth,
+    lowerMonth,
+    snapshotJson,
+    createdAt,
+    receipt.archiveContractVersion,
+    receipt.archiveTaskRunId
+  );
   return Number(result.lastInsertRowid);
+}
+
+function createRun(db, payload) {
+  return createRunWithReceipt(db, payload);
+}
+
+function createLegacyRun(db, payload) {
+  return createRunWithReceipt(db, {
+    ...payload,
+    archiveReceipt: {
+      archiveContractVersion: 0,
+      archiveTaskRunId: null
+    }
+  });
 }
 
 function updateRunStats(db, runId, { statNew = 0, statMissing = 0, statChanged = 0 }) {
@@ -59,6 +92,54 @@ function getLatestRunForMonthPair(db, upperMonth, lowerMonth) {
   );
 }
 
+function listLatestRunsByMonthPair(db) {
+  const latestByPair = new Map();
+  for (const run of listAllRuns(db)) {
+    const key = `${run.upperMonth}\u0000${run.lowerMonth}`;
+    if (!latestByPair.has(key)) latestByPair.set(key, run);
+  }
+  return [...latestByPair.values()].sort((left, right) => {
+    if (left.lowerMonth !== right.lowerMonth) return left.lowerMonth < right.lowerMonth ? -1 : 1;
+    if (left.upperMonth !== right.upperMonth) return left.upperMonth < right.upperMonth ? -1 : 1;
+    return left.id - right.id;
+  });
+}
+
+function listUnacknowledgedArchiveRuns(db) {
+  return db.prepare(`
+    SELECT * FROM diff_runs
+    WHERE archive_contract_version = 1
+      AND archive_task_run_id IS NOT NULL
+      AND archive_task_run_id <> ''
+      AND archive_terminal_ack_at IS NULL
+    ORDER BY id
+  `).all().map(mapRun);
+}
+
+function getRunByArchiveTaskRunId(db, taskRunId) {
+  return mapRun(db.prepare(`
+    SELECT * FROM diff_runs
+    WHERE archive_contract_version = 1 AND archive_task_run_id = ?
+  `).get(taskRunId));
+}
+
+function acknowledgeArchiveTerminal(db, runId, taskRunId, acknowledgedAt = new Date().toISOString()) {
+  const result = db.prepare(`
+    UPDATE diff_runs
+    SET archive_terminal_ack_at = ?
+    WHERE id = ?
+      AND archive_contract_version = 1
+      AND archive_task_run_id = ?
+      AND archive_terminal_ack_at IS NULL
+  `).run(acknowledgedAt, runId, taskRunId);
+  if (Number(result.changes) === 1) return getRunById(db, runId);
+  const existing = getRunById(db, runId);
+  if (existing && existing.archiveContractVersion === 1
+      && existing.archiveTaskRunId === taskRunId
+      && existing.archiveTerminalAckAt) return existing;
+  throw new Error('Pending run receipt 与 Archive TaskRun 身份不一致');
+}
+
 function listDiffRows(db, runId, type) {
   const sql = type
     ? 'SELECT id, run_id, type, upper_row_id, lower_row_id FROM diff_rows WHERE run_id = ? AND type = ? ORDER BY id'
@@ -77,10 +158,15 @@ function listDiffRows(db, runId, type) {
 
 module.exports = {
   createRun,
+  createLegacyRun,
   updateRunStats,
   getRunById,
   listAllRuns,
   listRunsForMonthPair,
   getLatestRunForMonthPair,
+  listLatestRunsByMonthPair,
+  listUnacknowledgedArchiveRuns,
+  getRunByArchiveTaskRunId,
+  acknowledgeArchiveTerminal,
   listDiffRows
 };

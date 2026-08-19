@@ -169,7 +169,7 @@ async function run() {
     assertEq(parsed.totalRows, 2, 'Step2.解析 2 数据行');
     assertEq(parsed.sourceSheetName, '1405800876820465666', 'Step2.取第一个数字 sheet 名（D-T2-4）');
 
-    const repl = removedRepo.replaceByMonth(db, UPPER, parsed.rows, parsed.fileName);
+    const repl = removedRepo.replaceByMonthLegacy(db, UPPER, parsed.rows, parsed.fileName);
     assertEq(repl.inserted, 2, 'Step2.入库 2 行');
     assertEq(removedRepo.countByMonth(db, UPPER), 2, 'Step2.countByMonth=2');
 
@@ -178,7 +178,7 @@ async function run() {
     // ============================================================
     ruleRepo.upsertRule(db, { matchFields: ['order_no'], compareFields: [] });
     const rule = ruleRepo.getRule(db);
-    const reconResult = reconcileEngine.runReconciliation(db, { upperMonth: UPPER, lowerMonth: LOWER, rule });
+    const reconResult = reconcileEngine.runLegacyReconciliation(db, { upperMonth: UPPER, lowerMonth: LOWER, rule });
     assertEq(reconResult.statMissing, 2, 'Step3.missing = 2（O2 O3）');
     assertTrue(reconResult.runId > 0, 'Step3.runId 有效');
     const runId = reconResult.runId;
@@ -264,7 +264,7 @@ async function run() {
     insertPending(db, U2, 'A1');
     insertPending(db, U2, 'A2');
     insertPending(db, L2, 'A1');
-    const recon2 = reconcileEngine.runReconciliation(db, { upperMonth: U2, lowerMonth: L2, rule });
+    const recon2 = reconcileEngine.runLegacyReconciliation(db, { upperMonth: U2, lowerMonth: L2, rule });
     const exp2 = exportWriter.exportSingleRun(db, recon2.runId, exportNoRemovedFile);
     assertEq(exp2.removalReconcileAppended, false, 'Step7.无移除数据 → 不追加移除核对 sheet（零变化）');
     const back2 = readBackXlsx(exportNoRemovedFile);
@@ -310,12 +310,12 @@ async function run() {
     // 断言 removed reader 金额产出显示格式（带千分位/尾零）—— 与 pending 口径不一致
     assertEq(parsedNum.rows.map((r) => r['金额']), ['1,234.50', '1,000.00'],
       'Step8.removed reader 金额 = 显示格式串（千分位+尾零，与 pending 口径不同）');
-    removedRepo.replaceByMonth(db, U3, parsedNum.rows, parsedNum.fileName);
+    removedRepo.replaceByMonthLegacy(db, U3, parsedNum.rows, parsedNum.fileName);
 
     // 对账（金额做 matchField）→ missing；matchRemoval 金额归一化后应全配
     ruleRepo.upsertRule(db, { matchFields: ['金额'], compareFields: [] });
     const ruleNum = ruleRepo.getRule(db);
-    const reconNum = reconcileEngine.runReconciliation(db, { upperMonth: U3, lowerMonth: L3, rule: ruleNum });
+    const reconNum = reconcileEngine.runLegacyReconciliation(db, { upperMonth: U3, lowerMonth: L3, rule: ruleNum });
     assertEq(reconNum.statMissing, 2, 'Step8.upper 2 行全 missing');
     const mrNum = removalMatch.matchRemoval(db, reconNum.runId, U3, ruleNum.matchFields);
     assertEq(mrNum.matchedCount, 2, 'Step8.🔴 金额格式不一致仍配上 2 对（C1 归一化）');
@@ -363,12 +363,12 @@ async function run() {
     const parsedCmp = removedReader.readRemovedPendingFile(removedCmpFile);
     // removed reader 金额显示格式：VOK="1,234.50"、VDIFF="600.00"
     assertEq(parsedCmp.rows.map((r) => r['金额']), ['1,234.50', '600.00'], 'Step9.removed 金额显示格式');
-    removedRepo.replaceByMonth(db, U4, parsedCmp.rows, parsedCmp.fileName);
+    removedRepo.replaceByMonthLegacy(db, U4, parsedCmp.rows, parsedCmp.fileName);
 
     // 规则：order_no 配对 + compareFields=['金额'] 内容核对
     ruleRepo.upsertRule(db, { matchFields: ['order_no'], compareFields: ['金额'] });
     const ruleCmp = ruleRepo.getRule(db);
-    const reconCmp = reconcileEngine.runReconciliation(db, { upperMonth: U4, lowerMonth: L4, rule: ruleCmp });
+    const reconCmp = reconcileEngine.runLegacyReconciliation(db, { upperMonth: U4, lowerMonth: L4, rule: ruleCmp });
     assertEq(reconCmp.statMissing, 2, 'Step9.upper 2 行全 missing');
     const mrCmp = removalMatch.matchRemoval(db, reconCmp.runId, U4, ruleCmp.matchFields);
     assertEq(mrCmp.matchedCount, 2, 'Step9.order_no 配上 2 对（VOK / VDIFF）');
@@ -419,12 +419,12 @@ async function run() {
     // 导入移除归档：F2 命中 missing F2
     writeRemovedXlsx(removedF1File, ['F2']);
     const parsedF1 = removedReader.readRemovedPendingFile(removedF1File);
-    removedRepo.replaceByMonth(db, U5, parsedF1.rows, parsedF1.fileName);
+    removedRepo.replaceByMonthLegacy(db, U5, parsedF1.rows, parsedF1.fileName);
     assertEq(removedRepo.countByMonth(db, U5), 1, 'Step10.移除归档入库 countByMonth=1');
 
     ruleRepo.upsertRule(db, { matchFields: ['order_no'], compareFields: [] });
     const ruleF1 = ruleRepo.getRule(db);
-    const reconF1 = reconcileEngine.runReconciliation(db, { upperMonth: U5, lowerMonth: L5, rule: ruleF1 });
+    const reconF1 = reconcileEngine.runLegacyReconciliation(db, { upperMonth: U5, lowerMonth: L5, rule: ruleF1 });
     assertEq(reconF1.statMissing, 2, 'Step10.missing = 2（F2 F3）');
     const mrF1 = removalMatch.matchRemoval(db, reconF1.runId, U5, ruleF1.matchFields);
     assertEq(mrF1.matchedCount, 1, 'Step10.matchRemoval 配上 1 对（F2）');

@@ -64,6 +64,11 @@ const BATCH_CONTEXT = Object.freeze({
   operationKey: 'run:2026-04:901',
 });
 
+function frozenOutputIntent(rootDir) {
+  const filePath = path.join(rootDir, 'frozen-acquiring-output.xlsx');
+  return { diffFilePath: filePath, reportFilePath: filePath };
+}
+
 async function writeXlsx(filePath, headers, dataRows) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Sheet1');
@@ -444,7 +449,8 @@ test.describe('runCheckCore byte-for-byte contract', () => {
           db: ctx.db.db,
           monthKey: FIXTURE_MONTH,
           storageRoot: ctx.tmpdir,
-          batchContext: BATCH_CONTEXT
+          batchContext: BATCH_CONTEXT,
+          outputIntent: frozenOutputIntent(ctx.tmpdir)
         }),
         /SIMULATED_OUTPUT_PUBLICATION_FAILURE/
       );
@@ -513,7 +519,8 @@ test.describe('runCheckCore byte-for-byte contract', () => {
           db: ctx.db.db,
           monthKey: FIXTURE_MONTH,
           storageRoot: ctx.tmpdir,
-          batchContext: BATCH_CONTEXT
+          batchContext: BATCH_CONTEXT,
+          outputIntent: frozenOutputIntent(ctx.tmpdir)
         }),
         /SIMULATED_EXIT_AFTER_WRITER_COMMIT/
       );
@@ -554,7 +561,7 @@ test.describe('runCheckCore byte-for-byte contract', () => {
       assert.equal(completedProgress.status, 'complete');
       const outputDir = path.dirname(committedPath);
       assert.deepEqual(
-        fs.readdirSync(outputDir).filter((name) => name.endsWith('.xlsx')),
+        fs.readdirSync(outputDir).filter((name) => name === path.basename(committedPath)),
         [path.basename(committedPath)]
       );
     } finally {
@@ -582,7 +589,8 @@ test.describe('runCheckCore byte-for-byte contract', () => {
           db: ctx.db.db,
           monthKey: FIXTURE_MONTH,
           storageRoot: ctx.tmpdir,
-          batchContext: BATCH_CONTEXT
+          batchContext: BATCH_CONTEXT,
+          outputIntent: frozenOutputIntent(ctx.tmpdir)
         }),
         /SIMULATED_COMPLETE_PUBLICATION_FAILURE/
       );
@@ -828,6 +836,7 @@ test.describe('runCheckCore byte-for-byte contract', () => {
         monthKey: FIXTURE_MONTH,
         storageRoot: ctx.tmpdir,
         batchContext: BATCH_CONTEXT,
+        outputIntent: frozenOutputIntent(ctx.tmpdir),
         onProgress: (ev) => {
           // stage='sql-joining' 是 COMMIT 之后第一个 onProgress 事件
           //   H1 修复后：此时查 runs，chunk_progress 必须已写入（同事务）

@@ -139,7 +139,11 @@ async function run() {
 
     const preparedBank = service.prepareBankImport([bankPath]);
     assertEq(preparedBank.rowCount, 1, '银行文件预解析得到一行');
-    assertEq(service.applyBankImport(preparedBank.token).rowCount, 1, '银行数据写入 side DB');
+    assertEq(service.applyBankImport(
+      preparedBank.token,
+      undefined,
+      service.bankImportArchiveIntent(preparedBank.token).map((file) => file.filePath)
+    ).rowCount, 1, '银行数据写入 side DB');
 
     await expectErrorCode(
       () => service.prepareBankImport([invalidBankPath]),

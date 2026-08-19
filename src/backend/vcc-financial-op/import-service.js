@@ -87,6 +87,10 @@ function freezeImportArchiveHandoffFiles(value, batchId) {
     if (taskRunId !== normalizedBatchId) {
       throw importHandoffMismatch(`第 ${index + 1} 项任务身份无效`);
     }
+    const archiveArtifactId = Number(entry.archiveArtifactId);
+    if (!Number.isSafeInteger(archiveArtifactId) || archiveArtifactId < 1) {
+      throw importHandoffMismatch(`第 ${index + 1} 项 artifact 身份无效`);
+    }
     const expectedOrdinal = (ordinals.get(sourceType) || 0) + 1;
     ordinals.set(sourceType, expectedOrdinal);
     if (sourceOrdinal !== expectedOrdinal) {
@@ -104,7 +108,8 @@ function freezeImportArchiveHandoffFiles(value, batchId) {
       sourceOrdinal,
       sha256,
       sizeBytes,
-      taskRunId
+      taskRunId,
+      archiveArtifactId
     });
   });
   return Object.freeze(descriptors);
@@ -135,7 +140,7 @@ function detailRecordResult(record, db) {
     ...record,
     sourceLabel: SOURCE_LABELS[record.sourceType],
     anomalyCount: Number(record.anomalyCount) || 0,
-    archiveState: record.archiveState || repository.refreshImportRecordArchiveState(db, record.recordId),
+    archiveState: repository.refreshImportRecordArchiveState(db, record.recordId),
     sourceFiles
   };
 }
@@ -156,7 +161,7 @@ function storedRecordResult(record, db) {
     formatErrorCount: Number(record.format_error_count) || 0,
     rolledBackCount: Number(record.rolled_back_count) || 0,
     anomalyCount: Number(record.anomaly_count) || 0,
-    archiveState: record.archive_state || repository.refreshImportRecordArchiveState(db, Number(record.id)),
+    archiveState: repository.refreshImportRecordArchiveState(db, Number(record.id)),
     sourceFiles: repository.listImportSources(db, Number(record.id)),
     errorMessage: record.error_message || ''
   };
@@ -186,15 +191,23 @@ async function importFiles({
   }
   throwIfCancelled(shouldCancel);
   const hashedFiles = await hashSourceFiles(files);
-  assertImportArchiveHandoffMatches(hashedFiles, archiveHandoffFiles, normalizedBatchId);
+  const handoffDescriptors = assertImportArchiveHandoffMatches(
+    hashedFiles,
+    archiveHandoffFiles,
+    normalizedBatchId
+  );
+  const exactFiles = hashedFiles.map((file, index) => ({
+    ...file,
+    archiveArtifactId: handoffDescriptors[index].archiveArtifactId
+  }));
   repository.createImportBatch(db, {
     id: normalizedBatchId,
     targetMonth: normalizedMonth,
-    fileCount: hashedFiles.length
+    fileCount: exactFiles.length
   });
 
   const grouped = new Map();
-  for (const file of hashedFiles) {
+  for (const file of exactFiles) {
     if (!grouped.has(file.sourceType)) grouped.set(file.sourceType, []);
     grouped.get(file.sourceType).push(file);
   }
@@ -218,7 +231,8 @@ async function importFiles({
           sourceOrdinal: index + 1,
           fileName: file.fileName,
           sha256: file.sha256,
-          sizeBytes: file.sizeBytes
+          sizeBytes: file.sizeBytes,
+          archiveArtifactId: file.archiveArtifactId
         })
       })));
     }

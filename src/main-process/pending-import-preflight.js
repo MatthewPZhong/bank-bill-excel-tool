@@ -31,7 +31,11 @@ function readPendingMonthEvidence(db, monthRepository, yearMonth) {
       importedAt: meta.importedAt,
       rowCount: meta.rowCount,
       sourceFiles: Array.isArray(meta.sourceFiles) ? meta.sourceFiles.slice() : [],
-      archivePath: meta.archivePath || null
+      archivePath: meta.archivePath || null,
+      datasetId: meta.datasetId || null,
+      producerTaskRunId: meta.producerTaskRunId || null,
+      datasetVersion: Number(meta.datasetVersion) || 0,
+      archiveContractVersion: Number(meta.archiveContractVersion) || 0
     } : null
   };
 }
@@ -50,6 +54,19 @@ function buildPendingImportConfirmationResult(yearMonth, evidence, contextId) {
     existingRowCount: evidence.existingCount,
     existingImportedAt: evidence.meta ? evidence.meta.importedAt : null,
     contextId
+  };
+}
+
+function pendingImportFilePlan(files) {
+  return {
+    version: 1,
+    allocation: 'eager',
+    inputs: files.map((filePath) => ({
+      filePath,
+      role: 'input',
+      sourceOperation: 'pending:import:start'
+    })),
+    outputs: []
   };
 }
 
@@ -92,9 +109,12 @@ function preparePendingImportSubmission({
       nextConfirmation: confirmation,
       prepared: {
         proceed: true,
-        ...confirmation,
+        yearMonth: confirmation.yearMonth,
+        evidence: confirmation.evidence,
+        dbPath: confirmation.dbPath,
+        assertFresh: confirmation.assertFresh,
         overwriteConfirmed: true,
-        inputPaths: confirmation.files,
+        filePlan: pendingImportFilePlan(confirmation.files),
         beforeStart: confirmation.assertFresh
       }
     };
@@ -138,9 +158,12 @@ function preparePendingImportSubmission({
     nextConfirmation: null,
     prepared: {
       proceed: true,
-      ...preparedPlan,
+      yearMonth,
+      evidence,
+      dbPath,
+      assertFresh,
       overwriteConfirmed: false,
-      inputPaths: files,
+      filePlan: pendingImportFilePlan(files),
       beforeStart: assertFresh
     }
   };
@@ -149,10 +172,12 @@ function preparePendingImportSubmission({
 function executePendingImportSubmission({
   pendingSession,
   prepared,
+  filePaths,
   onProgress,
-  batchContext
+  batchContext,
+  datasetSeed
 } = {}) {
-  if (!prepared || !Array.isArray(prepared.files) || !prepared.yearMonth
+  if (!prepared || !Array.isArray(filePaths) || filePaths.length === 0 || !prepared.yearMonth
       || (prepared.evidence && prepared.evidence.existingCount > 0
         && prepared.overwriteConfirmed !== true)) {
     throw new TypeError('Pending 导入 execute 缺少已确认的准备计划');
@@ -162,11 +187,12 @@ function executePendingImportSubmission({
   }
   return pendingSession.runImport({
     yearMonth: prepared.yearMonth,
-    files: prepared.files,
+    files: filePaths,
     overwriteConfirmed: prepared.overwriteConfirmed === true,
     dbPath: prepared.dbPath,
     onProgress,
-    batchContext
+    batchContext,
+    datasetSeed
   });
 }
 

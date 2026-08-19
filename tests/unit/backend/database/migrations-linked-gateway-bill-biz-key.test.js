@@ -134,9 +134,39 @@ test.describe('migrations — linked_gateway_bill recon_bill_biz_id 幂等键 + 
     assert.doesNotThrow(() => ensureLinkedTableSupport(db), '含空/重复键旧库迁移不抛错（AC1-6）');
 
     assert.ok(colNames(db).includes('recon_bill_biz_id'), '迁移后含 recon_bill_biz_id 列');
+    for (const column of [
+      'source_dataset_id',
+      'source_task_run_id',
+      'source_contract_version',
+      'source_write_nonce'
+    ]) {
+      assert.ok(colNames(db).includes(column), `迁移后含 ${column} 列`);
+    }
     // 空键(id=3) + 缺键(id=4) 删 2 行；重复 BIZ-1(id=1) 删 1 行 → 剩 2 行
     assert.equal(rowCount(db), 2, '空键 + 缺键 + 重复键清洗后剩 2 行');
     assert.deepEqual(bizValues(db), ['BIZ-1', 'BIZ-2'], '回填值 = 去重后的 BIZ-1 / BIZ-2');
+    assert.deepEqual(
+      db.prepare(`
+        SELECT source_dataset_id, source_task_run_id,
+               source_contract_version, source_write_nonce
+        FROM linked_gateway_bill ORDER BY id ASC
+      `).all().map((row) => ({ ...row })),
+      [
+        {
+          source_dataset_id: null,
+          source_task_run_id: null,
+          source_contract_version: 0,
+          source_write_nonce: null
+        },
+        {
+          source_dataset_id: null,
+          source_task_run_id: null,
+          source_contract_version: 0,
+          source_write_nonce: null
+        }
+      ],
+      '历史保留行只标记 v0/null，不伪造 producer 或 nonce'
+    );
 
     // 重复键保留最大 id（id=2 的 R1b，非 id=1 的 R1）
     const biz1 = db.prepare("SELECT reconciliation_id FROM linked_gateway_bill WHERE recon_bill_biz_id = 'BIZ-1'").get();
@@ -182,5 +212,16 @@ test.describe('migrations — linked_gateway_bill recon_bill_biz_id 幂等键 + 
     assert.doesNotThrow(() => ensureLinkedTableSupport(db), '第二次 ensure 不报错');
     assert.equal(rowCount(db), count1, '幂等：第二次不再删数据（守卫 hasColumn 跳过整块）');
     assert.deepEqual(bizValues(db), biz1, '幂等：recon_bill_biz_id 值不变');
+    assert.equal(
+      db.prepare(`
+        SELECT COUNT(*) AS count FROM linked_gateway_bill
+        WHERE source_contract_version <> 0
+           OR source_dataset_id IS NOT NULL
+           OR source_task_run_id IS NOT NULL
+           OR source_write_nonce IS NOT NULL
+      `).get().count,
+      0,
+      '幂等 ensure 不给历史行伪回填 v1 identity/nonce'
+    );
   });
 });

@@ -84,6 +84,34 @@ test('同 operation 的文件 outbox 原子合并同批次终态且稳定拒绝�
   );
 });
 
+test('磁盘 record v1 与 owner terminal payload v2 是独立版本层', (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-outbox-version-layers-'));
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
+  const store = createArchiveOutboxStore(rootDir);
+  const created = store.enqueue({
+    version: 2,
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext: {
+        taskRunId: 'task-version-layers',
+        taskKey: 'pending:reconcile:run',
+        moduleId: 'pending-reconciliation',
+        parentRunId: 'parent-version-layers',
+        operationKey: 'operation-version-layers'
+      }
+    },
+    terminalOutcome: { taskStatus: 'failed', code: 'TEST', message: 'test', metadata: {} },
+    files: []
+  });
+  const diskRecord = JSON.parse(
+    fs.readFileSync(path.join(rootDir, `${created.id}.json`), 'utf8')
+  );
+  assert.equal(diskRecord.version, 1);
+  assert.equal(diskRecord.payload.version, 2);
+  assert.equal(store.list()[0].payload.owner.kind, 'operation');
+});
+
 test('存档 outbox 内容被改写但未同步完整性哈希时必须 fail-closed', (t) => {
   const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-outbox-tamper-'));
   t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));

@@ -14,14 +14,16 @@ const {
 test('VCC 财务OP现有成功动作及解归档/删除结果均已注册', () => {
   assert.deepEqual(FUNCTION_REGISTRY['VCC财务OP校验'], [
     '导入文件', '开始运行', '初始化期初财务OP', '确认归档',
-    '修改结果', '标记导入异常已处理', '删除数据', '导出数据',
+    '修改结果', '删除数据', '导出数据',
     '导出校验结果表', '导出导入审计', '解归档', '删除结果'
   ]);
   const stats = defaultStats();
   incrementFunction(stats, 'VCC财务OP校验', '修改结果');
+  incrementFunction(stats, 'VCC财务OP校验', '标记导入异常已处理');
   incrementFunction(stats, 'VCC财务OP校验', '解归档');
   incrementFunction(stats, 'VCC财务OP校验', '删除结果');
   assert.equal(stats.modules['VCC财务OP校验']['修改结果'], 1);
+  assert.equal(stats.modules['VCC财务OP校验']['标记导入异常已处理'], undefined);
   assert.equal(stats.modules['VCC财务OP校验']['解归档'], 1);
   assert.equal(stats.modules['VCC财务OP校验']['删除结果'], 1);
   assert.match(serialize(stats), /\[VCC财务OP校验\][\s\S]*修改结果=1[\s\S]*解归档=1[\s\S]*删除结果=1/);

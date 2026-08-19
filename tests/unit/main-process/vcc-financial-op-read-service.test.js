@@ -66,6 +66,13 @@ const BATCH_CONTEXT = Object.freeze({
   parentRunId: 'parent-51',
   operationKey: 'operation-51'
 });
+const OPERATION_CONTEXT = Object.freeze({
+  taskRunId: BATCH_CONTEXT.taskRunId,
+  taskKey: BATCH_CONTEXT.taskKey,
+  moduleId: BATCH_CONTEXT.moduleId,
+  parentRunId: BATCH_CONTEXT.parentRunId,
+  operationKey: BATCH_CONTEXT.operationKey
+});
 
 test('B-09 active month cache 按 generation 复用并在写任务释放后失效', async (t) => {
   const readWorkers = [];
@@ -89,7 +96,7 @@ test('B-09 active month cache 按 generation 复用并在写任务释放后失�
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  }, BATCH_CONTEXT);
+  }, OPERATION_CONTEXT);
   writeWorkers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
   await calculation;
   const nextRead = service.listImportMonths();
@@ -115,7 +122,7 @@ test('B-10 Main 在 read worker 返回后复核 generation 与 active task ident
   const calculation = service.calculate({
     targetMonth: '2026-06',
     expectedInputFingerprint: 'a'.repeat(64)
-  }, BATCH_CONTEXT);
+  }, OPERATION_CONTEXT);
   completeRead(readWorkers[0], { months: [], diagnostics: [] });
   await assert.rejects(archiveRead, (error) => error.code === 'state-changed');
   writeWorkers[0].emit('message', { type: 'result', result: { status: 'calculated' } });
@@ -154,7 +161,10 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
 
   const exporting = service.exportRun({
     targetMonth: '2026-06',
-    outputPath: '/tmp/result.xlsx'
+    expectedRunId: archive.runId,
+    expectedSubjects: archive.subjects,
+    outputPaths: ['/tmp/result.xlsx'],
+    targetSnapshots: [{ exists: false }]
   }, BATCH_CONTEXT);
   assert.equal(readWorkers.length, 2);
   assert.equal(readWorkers[1].options.workerData.action, 'list-archive-months');
@@ -163,5 +173,6 @@ test('B-11 结果导出初读和 runDirectTask 内二次重查都消费同一 B 
   assert.deepEqual(await exporting, { filePaths: ['/tmp/result.xlsx'] });
   assert.equal(writerCalls.length, 1);
   assert.equal(writerCalls[0].runId, 17);
+  assert.deepEqual(writerCalls[0].outputPaths, ['/tmp/result.xlsx']);
   assert.equal(service._taskStateForTests().taskGeneration, 1);
 });

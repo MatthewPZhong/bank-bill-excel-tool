@@ -152,7 +152,9 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
     ? opts.timestamp
     : buildTimestamp();
   const baseName = buildOriginalBaseName(originalFilePath);
-  const fileName = `命中场景行-${baseName}-${timestamp}.xlsx`;
+  const fileName = typeof opts.outputPath === 'string' && opts.outputPath
+    ? path.basename(opts.outputPath)
+    : `命中场景行-${baseName}-${timestamp}.xlsx`;
 
   // v2.1.9 D16=b：归一化 channels → Map<id, label>；null = caller 未传，writer 回退 _hitChannelKey
   const channelsLabelMap = normalizeChannelsToLabelMap(opts.channels);
@@ -160,7 +162,9 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
   // 计算报表目录（spec §5.1）
   //   opts.reportDir 优先（测试 / 自定义路径）；否则 opts.exportRoot + DEFAULT_REPORT_SUBDIR + {date}
   let reportDir;
-  if (typeof opts.reportDir === 'string' && opts.reportDir) {
+  if (typeof opts.outputPath === 'string' && opts.outputPath) {
+    reportDir = path.dirname(opts.outputPath);
+  } else if (typeof opts.reportDir === 'string' && opts.reportDir) {
     reportDir = opts.reportDir;
   } else {
     if (!opts.exportRoot || typeof opts.exportRoot !== 'string') {
@@ -170,7 +174,9 @@ async function writeScenarioHitRows(modifiedRows, originalFilePath, opts = {}) {
   }
   fs.mkdirSync(reportDir, { recursive: true });
 
-  const finalPath = path.join(reportDir, fileName);
+  const finalPath = typeof opts.outputPath === 'string' && opts.outputPath
+    ? opts.outputPath
+    : path.join(reportDir, fileName);
   const tmpPath = `${finalPath}.tmp`;
 
   // 构造 workbook + sheet

@@ -3,6 +3,7 @@
 // pending_rows：31 列数据 + row_hash
 
 const PENDING_COLUMNS = require('./columns');
+const { randomUUID } = require('node:crypto');
 
 function countRowsInMonth(db, yearMonth) {
   const row = db
@@ -14,7 +15,9 @@ function countRowsInMonth(db, yearMonth) {
 function getMonthMeta(db, yearMonth) {
   const row = db
     .prepare(
-      'SELECT year_month, imported_at, row_count, source_files, archive_path FROM pending_months WHERE year_month = ?'
+      `SELECT year_month, imported_at, row_count, source_files, archive_path,
+              dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+       FROM pending_months WHERE year_month = ?`
     )
     .get(yearMonth);
   if (!row) return null;
@@ -30,7 +33,11 @@ function getMonthMeta(db, yearMonth) {
     importedAt: row.imported_at,
     rowCount: row.row_count,
     sourceFiles,
-    archivePath: row.archive_path || null
+    archivePath: row.archive_path || null,
+    datasetId: row.dataset_id || null,
+    producerTaskRunId: row.producer_task_run_id || null,
+    datasetVersion: Number(row.dataset_version) || 0,
+    archiveContractVersion: Number(row.archive_contract_version) || 0
   };
 }
 
@@ -41,23 +48,57 @@ function listMonths(db) {
     .map((r) => r.year_month);
 }
 
-function upsertMonthMeta(db, { yearMonth, rowCount, sourceFiles, archivePath }) {
+function writeMonthMeta(db, {
+  yearMonth,
+  rowCount,
+  sourceFiles,
+  archivePath,
+  datasetIdentity
+}) {
   const importedAt = new Date().toISOString();
+  const identity = datasetIdentity;
   db.prepare(
-    `INSERT INTO pending_months (year_month, imported_at, row_count, source_files, archive_path)
-     VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO pending_months (
+       year_month, imported_at, row_count, source_files, archive_path,
+       dataset_id, producer_task_run_id, dataset_version, archive_contract_version
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(year_month) DO UPDATE SET
        imported_at = excluded.imported_at,
        row_count = excluded.row_count,
        source_files = excluded.source_files,
-       archive_path = excluded.archive_path`
+       archive_path = excluded.archive_path,
+       dataset_id = excluded.dataset_id,
+       producer_task_run_id = excluded.producer_task_run_id,
+       dataset_version = excluded.dataset_version,
+       archive_contract_version = excluded.archive_contract_version`
   ).run(
     yearMonth,
     importedAt,
     Number(rowCount) || 0,
     JSON.stringify(Array.isArray(sourceFiles) ? sourceFiles : []),
-    archivePath || null
+    archivePath || null,
+    identity.datasetId,
+    identity.producerTaskRunId,
+    identity.datasetVersion,
+    identity.archiveContractVersion
   );
+}
+
+function upsertMonthMeta(db, payload) {
+  return writeMonthMeta(db, payload);
+}
+
+function upsertMonthMetaLegacy(db, payload) {
+  const current = getMonthMeta(db, payload.yearMonth);
+  return writeMonthMeta(db, {
+    ...payload,
+    datasetIdentity: {
+      datasetId: randomUUID(),
+      producerTaskRunId: null,
+      datasetVersion: current ? current.datasetVersion + 1 : 0,
+      archiveContractVersion: 0
+    }
+  });
 }
 
 // 覆盖导入时调用：清空该月的 pending_rows / pending_months
@@ -75,6 +116,16 @@ function upsertMonthMeta(db, { yearMonth, rowCount, sourceFiles, archivePath }) 
 //   用陈旧旧归档给新 missing 行错误标「核对无误 / 核对有差异」——即使用户在导入提示里点「否，跳过」。
 //   语义：用户要核对需重新导入移除归档文件。
 function deleteMonth(db, yearMonth) {
+  const unacknowledged = db.prepare(`
+    SELECT id FROM diff_runs
+    WHERE (upper_month = ? OR lower_month = ?)
+      AND archive_contract_version = 1
+      AND archive_terminal_ack_at IS NULL
+    LIMIT 1
+  `).get(yearMonth, yearMonth);
+  if (unacknowledged) {
+    throw new Error('Pending run Archive terminal 尚未确认，禁止覆盖来源月份');
+  }
   // 1) 先删 pending_removal_matches（依赖 diff_runs.id；必须在删 diff_runs 之前，
   //    否则 run 行删掉后 run_id 子查询取不到 id → 残留孤儿匹配记录）
   db.prepare(`DELETE FROM pending_removal_matches WHERE run_id IN (
@@ -87,6 +138,7 @@ function deleteMonth(db, yearMonth) {
   db.prepare('DELETE FROM diff_runs WHERE upper_month = ? OR lower_month = ?').run(yearMonth, yearMonth);
   // 3) 删该月移除归档行（覆盖导入 = 该月数据重来，旧归档基于旧数据应失效；Codex PR #55 Finding 1）
   db.prepare('DELETE FROM removed_pending_rows WHERE year_month = ?').run(yearMonth);
+  db.prepare('DELETE FROM pending_removed_months WHERE year_month = ?').run(yearMonth);
   // 4) 删该月 pending 行 + 月元数据
   db.prepare('DELETE FROM pending_rows WHERE year_month = ?').run(yearMonth);
   db.prepare('DELETE FROM pending_months WHERE year_month = ?').run(yearMonth);
@@ -113,6 +165,7 @@ module.exports = {
   getMonthMeta,
   listMonths,
   upsertMonthMeta,
+  upsertMonthMetaLegacy,
   deleteMonth,
   createRowInserter
 };

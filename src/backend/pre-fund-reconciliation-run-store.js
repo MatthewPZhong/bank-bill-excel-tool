@@ -240,6 +240,9 @@ function mapRun(row, monthKey) {
     status: row.status,
     summary: parseJson(row.summary_json, {}),
     errorMessage: row.error_message || '',
+    archiveContractVersion: Number(row.archive_contract_version) === 1 ? 1 : 0,
+    archiveTaskRunId: row.archive_task_run_id || null,
+    archiveTerminalAckAt: row.archive_terminal_ack_at || null,
     createdAt: row.created_at,
     finishedAt: row.finished_at
   };
@@ -283,7 +286,6 @@ class PreFundReconciliationRunStore {
 
   open(monthKey) {
     const db = runDataStore.openSideDb(this.userDataDir, MODULE, monthKey);
-    db.exec(PRE_FUND_RUN_DDL);
     const poolColumns = db.prepare('PRAGMA table_info(pre_fund_reconciliation_gateway_pool)').all();
     if (!poolColumns.some((column) => column.name === 'raw_json_hash')) {
       db.exec('ALTER TABLE pre_fund_reconciliation_gateway_pool ADD COLUMN raw_json_hash BLOB;');
@@ -291,11 +293,27 @@ class PreFundReconciliationRunStore {
     return db;
   }
 
-  createRun(db, { scenario, snapshot, bankFiles }) {
+  createRun(db, { scenario, snapshot, bankFiles, archiveReceipt }) {
     const result = db.prepare(`
       INSERT INTO pre_fund_reconciliation_runs
-        (scenario, snapshot_json, bank_files_json, status, summary_json)
-      VALUES (?, ?, ?, 'running', '{}')
+        (scenario, snapshot_json, bank_files_json, status, summary_json,
+         archive_contract_version, archive_task_run_id, archive_terminal_ack_at)
+      VALUES (?, ?, ?, 'running', '{}', 1, ?, NULL)
+    `).run(
+      String(scenario || ''),
+      JSON.stringify(snapshot || {}),
+      JSON.stringify(Array.isArray(bankFiles) ? bankFiles : []),
+      archiveReceipt.archiveTaskRunId
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  createLegacyRun(db, { scenario, snapshot, bankFiles }) {
+    const result = db.prepare(`
+      INSERT INTO pre_fund_reconciliation_runs
+        (scenario, snapshot_json, bank_files_json, status, summary_json,
+         archive_contract_version, archive_task_run_id, archive_terminal_ack_at)
+      VALUES (?, ?, ?, 'running', '{}', 0, NULL, NULL)
     `).run(
       String(scenario || ''),
       JSON.stringify(snapshot || {}),
@@ -509,7 +527,6 @@ class PreFundReconciliationRunStore {
     if (!runDataStore.sideDbExists(this.userDataDir, MODULE, monthKey)) return null;
     const db = runDataStore.openExistingSideDb(filePath);
     try {
-      db.exec(PRE_FUND_RUN_DDL);
       return mapRun(
         db.prepare('SELECT * FROM pre_fund_reconciliation_runs WHERE id = ?').get(runId),
         monthKey
@@ -517,6 +534,93 @@ class PreFundReconciliationRunStore {
     } finally {
       db.close();
     }
+  }
+
+  getRunByArchiveTaskRunId(taskRunId) {
+    for (const file of runDataStore.listSideDbFiles(this.userDataDir, MODULE)) {
+      const db = this.open(file.monthKey);
+      try {
+        const row = db.prepare(`
+          SELECT * FROM pre_fund_reconciliation_runs
+          WHERE archive_contract_version = 1 AND archive_task_run_id = ?
+        `).get(taskRunId);
+        if (row) {
+          return {
+            ...mapRun(row, file.monthKey),
+            sideDbRelPath: runDataStore.sideDbRelPath(MODULE, file.monthKey)
+          };
+        }
+      } finally {
+        db.close();
+      }
+    }
+    return null;
+  }
+
+  listUnacknowledgedArchiveRuns() {
+    const receipts = [];
+    for (const file of runDataStore.listSideDbFiles(this.userDataDir, MODULE)) {
+      const db = this.open(file.monthKey);
+      try {
+        const rows = db.prepare(`
+          SELECT * FROM pre_fund_reconciliation_runs
+          WHERE archive_contract_version = 1
+            AND archive_task_run_id IS NOT NULL AND archive_task_run_id <> ''
+            AND archive_terminal_ack_at IS NULL
+            AND status = 'success'
+          ORDER BY id ASC
+        `).all();
+        receipts.push(...rows.map((row) => ({
+          ...mapRun(row, file.monthKey),
+          sideDbRelPath: runDataStore.sideDbRelPath(MODULE, file.monthKey)
+        })));
+      } finally {
+        db.close();
+      }
+    }
+    return receipts;
+  }
+
+  acknowledgeArchiveTerminal(monthKey, runId, taskRunId) {
+    const db = this.open(monthKey);
+    try {
+      const result = db.prepare(`
+        UPDATE pre_fund_reconciliation_runs
+        SET archive_terminal_ack_at = COALESCE(archive_terminal_ack_at, CURRENT_TIMESTAMP)
+        WHERE id = ? AND archive_contract_version = 1 AND archive_task_run_id = ?
+      `).run(runId, taskRunId);
+      if (result.changes !== 1) {
+        throw new Error(`前置资金 run #${runId} 的 Archive receipt identity 不一致`);
+      }
+      return mapRun(
+        db.prepare('SELECT * FROM pre_fund_reconciliation_runs WHERE id = ?').get(runId),
+        monthKey
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  deleteArchiveRunByTaskRunId(db, taskRunId) {
+    const run = db.prepare(`
+      SELECT id
+      FROM pre_fund_reconciliation_runs
+      WHERE archive_contract_version = 1
+        AND archive_task_run_id = ?
+        AND archive_terminal_ack_at IS NULL
+        AND status = 'success'
+    `).get(taskRunId);
+    if (!run) {
+      throw new Error('前置资金 side run receipt 不存在，无法执行精确补偿');
+    }
+    const deleted = db.prepare(`
+      DELETE FROM pre_fund_reconciliation_runs
+      WHERE id = ? AND archive_task_run_id = ?
+    `).run(run.id, taskRunId);
+    if (Number(deleted.changes) !== 1) {
+      throw new Error('前置资金 side run receipt 精确补偿发生身份冲突');
+    }
+    return { runId: Number(run.id), runsDeleted: 1 };
   }
 
   listChannels(monthKey, runId) {
@@ -791,7 +895,32 @@ class PreFundReconciliationRunStore {
     }
   }
 
+  assertAllRunDataClearable() {
+    const files = runDataStore.listSideDbFiles(this.userDataDir, MODULE);
+    for (const file of files) {
+      const db = this.open(file.monthKey);
+      try {
+        const pending = db.prepare(`
+          SELECT id FROM pre_fund_reconciliation_runs
+          WHERE status = 'success' AND archive_contract_version = 1
+            AND archive_terminal_ack_at IS NULL
+          ORDER BY id ASC LIMIT 1
+        `).get();
+        if (pending) {
+          throw new Error(`前置资金 run #${pending.id} 的 Archive terminal 尚未确认，禁止回收结果侧库`);
+        }
+      } finally {
+        db.close();
+      }
+    }
+  }
+
   clearAllRunData() {
+    this.assertAllRunDataClearable();
+    return this.deleteAllRunDataAfterArchivePreflight();
+  }
+
+  deleteAllRunDataAfterArchivePreflight() {
     let deletedFiles = 0;
     let deletedRuns = 0;
     const files = runDataStore.listSideDbFiles(this.userDataDir, MODULE);

@@ -82,6 +82,13 @@ const MUTATING_BATCH_CONTEXT = Object.freeze({
   parentRunId: 'position-worker-parent',
   operationKey: 'position-worker-operation'
 });
+const MUTATING_OPERATION_CONTEXT = Object.freeze({
+  taskRunId: 'position-maintenance-worker-contract',
+  taskKey: 'position-reconciliation:source:delete',
+  moduleId: 'position-reconciliation',
+  parentRunId: 'position-worker-parent',
+  operationKey: 'position-maintenance-operation'
+});
 const {
   assertPositionImportDiskSpace,
   estimatePositionImportDiskBytes
@@ -738,7 +745,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
     assert.equal(fs.existsSync(jobRoot), false);
   });
 
-  test('五个业务写命令缺 batchContext 时在启动 worker 前拒绝', () => {
+  test('五个业务写命令缺持久 owner 时在启动 worker 前拒绝', () => {
     let forkCount = 0;
     for (const command of [
       POSITION_IMPORT_COMMANDS.BANK_APPLY,
@@ -753,10 +760,36 @@ test.describe('v3.1.3 position streaming preflight', () => {
           command,
           utilityProcess: { fork: () => { forkCount += 1; } }
         }),
-        /worker batchContext 缺失/
+        /缺少持久 owner context/
       );
     }
     assert.equal(forkCount, 0);
+  });
+
+  test('maintenance 写命令以 exact-5 operationContext 启动 worker', async () => {
+    const worker = new EventEmitter();
+    let startMessage = null;
+    worker.postMessage = (message) => {
+      if (message.type !== POSITION_IMPORT_MESSAGE_TYPES.START_JOB) return;
+      startMessage = message;
+      setImmediate(() => worker.emit('message', {
+        type: POSITION_IMPORT_MESSAGE_TYPES.COMPLETE,
+        jobId: message.jobId,
+        result: { status: 'ok' }
+      }));
+    };
+    worker.kill = () => true;
+
+    const job = dispatchPositionImportPreflight({
+      engine: 'streaming',
+      command: POSITION_IMPORT_COMMANDS.DELETE_SOURCE,
+      files: [],
+      operationContext: MUTATING_OPERATION_CONTEXT,
+      utilityProcess: { fork: () => worker }
+    });
+    assert.equal((await job.promise).status, 'ok');
+    assert.deepEqual(startMessage.operationContext, MUTATING_OPERATION_CONTEXT);
+    assert.equal(Object.hasOwn(startMessage, 'batchContext'), false);
   });
 
   test('普通来源 START/PREFLIGHT 不带批次，APPLY_GRANTED 注入父 action batchContext', async () => {
@@ -843,7 +876,7 @@ test.describe('v3.1.3 position streaming preflight', () => {
       utilityProcess: { fork: () => worker },
       authorizeApply: () => ({ preflightOnly: false })
     });
-    await assert.rejects(job.promise, /worker batchContext 缺失/);
+    await assert.rejects(job.promise, /缺少持久 batch owner/);
     assert.equal(sentTypes.includes(POSITION_IMPORT_MESSAGE_TYPES.APPLY_GRANTED), false);
   });
 

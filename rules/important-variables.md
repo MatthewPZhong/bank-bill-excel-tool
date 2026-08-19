@@ -9,9 +9,12 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v35（app v3.1.10 — VCC storage contract v2、精简事实/异常审计、Archive source/hold 血缘与 copy-on-write 原子迁移） |
+| 当前清单版本 | v36（app v3.1.11 — Task Run/File Batch 解耦、非空 FilePlan 原子发号、精确 dataset/run lineage、Archive 十四表与 017/018 定点维护） |
+| v36 本轮 review | 2026-08-19（产品代码基线 `35f11e153962c34cba0e9d4c7084e9df85c9f209`、PR merge base `6f1c09236a6c36f72eb82d61dc14508adfe20eec`；复核 63 file / 59 no-file / 117 exclude、TaskLifecycle/Archive/VCC/Position/Acquiring/Pending/Biz OP/Pre-fund 跨层合同；不 rebase、不覆盖既有改动） |
+| v36 基线数据 | `docs/analysis/var-reference-stats.md`（338 个 git-tracked JS / 4478 个顶层名称；A-share 656 / A-pair 950 / A-local 2705 / B 1606；报告版本 3.1.11） |
+| v35 历史版本 | app v3.1.10 — VCC storage contract v2、精简事实/异常审计、Archive source/hold 血缘与 copy-on-write 原子迁移。 |
 | v35 本轮 review | 2026-08-17（以 annotated `v3.1.9^{commit}`=`3edf0527d6537d29cb19b48bda2a3f91f0ce6e32` 为 release baseline，覆盖 28 个生产文件；升格 VCC storage capability/guard、VCC COW migration/recovery、import source/Archive hold/durable handoff，并把 Archive 元数据合同从九表扩为十表） |
-| v35 基线数据 | `docs/analysis/var-reference-stats.md`（328 个 tracked JS / 4299 个顶层名称；A-share 623 / A-pair 912 / A-local 2598 / B 1535；报告版本 3.1.10） |
+| v35 基线数据 | `docs/analysis/var-reference-stats.md`（当时 328 个 tracked JS / 4299 个顶层名称；A-share 623 / A-pair 912 / A-local 2598 / B 1535；报告版本 3.1.10） |
 | v34 历史版本 | app v3.1.9 — 全局任务生命周期、稳定关联任务身份、exact-seven worker batch context、存档九表审计血缘与真实归档/恢复/迁移。 |
 | v34 本轮 review | 2026-08-11（以 annotated `v3.1.8^{commit}`=`688ae2cb4a85d2fe8d74bdbefb06c6e3056ddcfa` 为 release baseline，覆盖 PR1—PR6 的 75 个生产文件；升格 `freezeWorkerBatchContext`、`TaskLifecycle`、`TaskPolicyRegistry`、`BusinessFlowResolver`，并校正 Archive operation/repository/service 生命周期条目） |
 | v34 基线数据 | `docs/analysis/var-reference-stats.md`（320 个 tracked JS / 4102 个顶层名称；`freezeWorkerBatchContext` 跨 21 个文件、53 次总引用、5 处声明；报告版本 3.1.9） |
@@ -44,6 +47,7 @@
 | v3.0.24 人工资金 review | 待业务负责人使用至少两个真实或脱敏大账号，逐笔确认银行 `MerchantId` 与订单“收款账户（卡号）”一致，尤其复核同金额、币种、日期碰撞及 R3 兜底；自动化 review 不替代人工验收。 |
 | v3.0.26 人工资金 review | 待业务负责人逐笔核对 R5 默认网关来源与调拨对账单来源的正/负/空手续费、回填 ReconciliationId、严格 1:1 去向和多对多异常说明；并人工打开新 21 列前置资金结果确认 FundType 血缘。自动化 review 不替代人工验收。 |
 | v3.1.0 人工资金 review | 待业务负责人使用真实或脱敏银行账单、五类链接原始表逐笔核对十组 FundType、自有/非自有账户别名、币种、方向、日期、signed Extra Fee、严格 1:1、差异和回导确认；Windows Excel/WPS 模板打开及大文件内存也需人工验收。 |
+| v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Biz OP、Pending、Pre-fund 样本复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |
@@ -386,14 +390,15 @@
 
 ### `TaskLifecycle`（v3.1.9 新增 Important-skeleton）
 - 定义：`src/main-process/archive-center/task-lifecycle.js`
-- `TaskPolicyRegistry` / `BusinessFlowResolver` — 分别定义全部业务 channel 的 reserve/exclude/support policy，以及跨任务稳定 `parentRunId` 的解析、绑定与 bind-intent 重放
-- 关联功能：13 个主模块与工具箱任务必须先预留全局日批次，再进入 started/terminal；worker、崩溃恢复、取消和输入输出 artifact 都沿同一 batch context 收口
+- `TaskPolicyRegistry` / `BusinessFlowResolver` — 分别定义 63 个 file、59 个 no-file、117 个 exclude channel 的 literal policy，以及跨任务稳定 `parentRunId` 的解析、绑定与 bind-intent 重放
+- 关联功能：所有受控任务先建立无编号 Task Run；只有具备非空冻结 manifest 的 File Task 才在同一原子事务申请全局日批次号。no-file worker 使用 exact-five operation context，file worker/恢复使用 exact-seven batch context；崩溃、取消、artifact settle 与 dataset/run lineage 均沿原 owner 收口
 - 变更 review 要点：
-  - reserve policy 必须显式声明 `startsNewFlow` 与 terminal classifier；预留/输入证据失败时业务不得开始，terminal 只能是 succeeded/failed/cancelled
+  - policy 必须显式声明 file/no-file/exclude、allocation、`startsNewFlow` 与 terminal classifier；no-file 禁止携带 filePlan、建 batch 或推进 sequence，file reserve 必须是非空 manifest 与 batch/issuance/artifact 单事务
   - policy inventory、main wrapper、裸 IPC exclude 与 renderer/preload 入口必须同步；禁止以未登记直连绕过 lifecycle
   - `BusinessFlowResolver` 只能接受显式 parent 或已持久化的稳定业务身份；禁止月份、文件 hash、renderer/latest state 猜关联任务，bind intent 必须可重放
-  - 活动 batch claim、terminal intent 和恢复要保持幂等；archive 告警不能覆盖已取得的业务结果，也不能把失败任务标成成功
-  - 必跑：task lifecycle/policy/IPC inventory/flow resolver、各 worker recovery 与 archive controller/integration 聚焦测试 + `npm run smoke`
+  - `archive_task_lineage` 只允许 planned→committed/discarded；只有 interrupted Task Run 可原 owner 恢复，failed/cancelled 不得复活；terminal outbox 不猜 lineage
+  - 活动 owner、terminal intent 和恢复要保持幂等；archive 告警不能覆盖已取得的业务结果，也不能把失败任务标成成功
+  - 必跑：task lifecycle/policy/IPC inventory/flow resolver、lineage/related、各 worker recovery 与 archive controller/integration 聚焦测试 + `npm run release-check`
 
 ### `templateRepository`
 - 定义：`src/backend/database.js`（门面）
@@ -782,30 +787,32 @@
   - updater/exit/migration 使用 owner/token lease，只能释放自己的 token；旧库删除必须由用户选择且在首次只读校验后执行
   - 必跑：真实 SQLite COW 故障矩阵、worker ready/ack、recovery 双启动、business-operation-registry、app update/exit、Archive lineage/hold、资金回归与 `npm run smoke`
 
-### `ArchiveRepository` / `ArchiveService` / `archive_*` 十表（v3.0.22 新增、v3.1.9/v3.1.10 扩展 Risk-sensitive ⚠️ 审计血缘）
+### `ArchiveRepository` / `ArchiveService` / `archive_*` 十四表（v3.0.22 新增、v3.1.9～v3.1.11 扩展 Risk-sensitive ⚠️ 审计血缘）
 - 定义：`src/backend/database/archive-repository.js`、`src/main-process/archive-center/archive-service.js`
 - `ArchiveService` — 唯一业务编排入口，串联 repository、存储物化、任务状态、repair/retention、只读副本和存储根迁移
-- 关联功能：`archive_batches` / `archive_batch_sequences` / `archive_daily_sequences` / `archive_operation_issuances` / `archive_artifacts` / `archive_blobs` / `archive_cleanup_jobs` / `archive_flow_anchors` / `archive_flow_bind_intents` / `archive_artifact_holds` 保存轻量索引；Documents 下年/月/日/批次目录与 SHA-256 内容寻址 Blob 保存 13 个主模块及工具箱真实输入/输出
+- 关联功能：原十表加 `archive_task_runs` / `archive_task_flow_bind_intents` / `archive_task_lineage` / `archive_maintenance_audits` 共十四表保存轻量任务、文件、直接血缘、恢复与维护审计；Documents 下年/月/日/批次目录与 SHA-256 内容寻址 Blob 保存 13 个主模块及工具箱真实输入/输出
 - 变更 review 要点：
-  - 十表 schema 必须幂等；主库只存元数据/摘要/任务身份，禁止把银行明细、Excel 字节或个人信息写入 SQLite
-  - 批次号由全局日游标原子递增；删除批次不得回退或复用已展示号码，operation issuance 永久删除后仍须阻止旧 operation key 复活
-  - taskStatus 与 archiveStatus 必须分离；parent/anchor/bind-intent 只能由稳定业务身份推进，terminal/outbox/cleanup 重放必须幂等
+  - 十四表 schema 必须 additive/idempotent；主库只存元数据/摘要/任务身份，禁止把银行明细、Excel 字节或个人信息写入 SQLite
+  - 公共 list/get/stats/latest/related 必须先套统一 visible predicate，公共 DTO 不暴露 TaskRun/dataset/parent/lineage/source path；repository raw 查询只供 recovery、hold、repair 和 migration
+  - 批次号只随非空 manifest 在单事务原子递增；无文件任务、reserve 失败和 deferred 空结果不得推进；删除批次不得回退或复用已展示号码，operation issuance 永久删除后仍须阻止旧 operation key 复活
+  - taskStatus 与 archiveStatus 必须分离；parent 仅保留单次 run→export 兼容关系，复用数据链由 committed direct lineage 表达，禁止递归扩散或 date/month/latest 修补
   - Blob 发布必须先在同文件系统 staging 流式写入并计算 SHA-256，再原子 rename；不得整文件读入内存或仅按文件名/大小去重
   - 删除顺序必须先移除逻辑引用，最后引用才允许删物理 Blob；部分失败要可修复，不能误删仍被其它批次引用的文件
   - `archive_artifact_holds` 是业务引用锁，不等于用户 lock；manual delete、unlock 与 retention 都不得绕过，只有对应有效数据删除或严格 lineage reconcile 才能释放
+  - 017/018 maintenance 只接受显式双批号和完整事故指纹，默认 dry-run、apply 前一致性 backup、删除/重算/audit 同事务；001 永远只读，禁止进入 repair
   - 打开只能暴露只读副本，另存为覆盖失败必须恢复原目标；renderer 不得取得内部相对路径
   - 归档失败不能回滚或改写业务成功状态；日志不得输出源文件绝对路径或表格内容
-  - 必跑：archive repository/service 真实 SQLite + 临时文件测试、全局批次并发、TaskLifecycle/flow anchor、共享引用删除、启动修复、失败重试、storage migration/repair/retention、`npm run smoke`
+  - 必跑：archive repository/service 真实 SQLite + 临时文件测试、全局批次并发、TaskLifecycle/lineage/flow anchor、共享引用删除、启动修复、失败重试、storage migration/repair/retention、`npm run release-check`
   - ⚠️ 人工复核：真实输入/结果与 Blob 的 SHA-256、模块归属和首次结果集合；自动测试不能替代
 
 ### `buildVccImportArchiveHandoffFiles` / `reconcileVccImportArchiveLineage*` / `vcc_fin_op_import_sources`（v3.1.10 新增 Risk-sensitive ⚠️🔴 审计血缘）
 - 定义：`src/main-process/vcc-financial-op-archive-lineage.js`、VCC repository/schema 与 Main/Service startup hook
-- 关联功能：业务开始前输入 path/name/sourceType/ordinal/SHA/size 的 durable handoff；业务终态后 source→artifact 绑定、fallback 清理、business hold 建立；崩溃重启同原 task batch 收口
+- 关联功能：File Task 先按冻结 manifest settle 输入，取得真实 artifactId，再把 exact-seven owner + artifactId/sourceType/ordinal/SHA/size durable handoff 给 worker；业务 source 行直接持久 exact artifactId，崩溃重启按原 TaskRun/batch 补 hold 并收口
 - 变更 review 要点：
-  - worker 首次 hash 后、首笔业务 DML 前必须精确比较 taskRunId、路径、类型、ordinal 顺序、SHA和大小；缺失、重复或 A→B 变化均须零业务写
-  - startup 固定 outbox→owners→post replay→VCC lineage/hold hook→sweep/retention；hook 失败时不得先清理可能被有效数据引用的 artifact
-  - ready artifact 快路径必须匹配本次 expected SHA/size；不得仅凭 path/artifactKey 返回 alreadyArchived
-  - source/artifact/hold/fallback 重放必须幂等，禁止按月份、文件名或 latest 猜身份；SQLite 不存完整 Excel 字节
+  - worker 首笔业务 DML 前必须精确比较 taskRunId、artifactId、类型、ordinal 顺序、SHA和大小；缺失、重复或 A→B 变化均须零业务写
+  - startup 固定 module owner→terminal/file outbox→flow intent→ownerless sweep→raw storage/hold/retention；hook 失败时不得先清理可能被有效数据引用的 artifact
+  - v1 source 只允许按持久 artifactId 直查，并复核 artifact 所属 batch.taskRunId/sourceOperation/SHA/size；不得仅凭 path、metadata、文件名或 ordinal 换绑；只有 null-ID 历史 v0 可走命名 legacy 兼容
+  - source/artifact/hold 重放必须幂等，禁止按月份、文件名或 latest 猜身份；SQLite 不存完整 Excel 字节
   - 必跑：archive-lineage 真实 SQLite+FS、actual worker A→B、crash双启动、hold manual/retention、dataset artifact corruption、TaskLifecycle/outbox 与 `npm run smoke`
 
 ### `ensureBillRawJsonV2Slim`（v2.1.8 N4 新增 Important-skeleton + 🔴 破坏性 + 资金红线）
@@ -922,11 +929,11 @@
 ### `addOneDay`（v2.1.3 业务OP D → D+1 日期加一 helper，**round 4 P1 资金红线 ⚠️ 新增**）
 - 定义：`src/main-process/biz-op-recon-session.js`（**单源**，与 `subOneDay` 双源不同 — addOneDay 仅在业务OP 重导清逻辑使用，无 backend 反向依赖问题）
 - 实现：`new Date(date + 'T00:00:00Z')` + `setUTCDate(getUTCDate() + 1)` + `toISOString().slice(0, 10)`（与 `subOneDay` 对偶；UTC 处理避免本地时区抢跑/滞后导致跨日错位）
-- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync` 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
+- 关联功能：业务OP `(date, BU)` 重导时，`runBizOpImportAsync`/worker 在事务内调用 `clearRunsAndDiffsByDateBu(db, addOneDay(date), BU)` 清下一日作为 T-2 的 run；per-month 编排层还用同一 helper 形成月末 D/D+1 下月 admission（业务OP 某日数据双角色：当天 T-1 + 下一日 T-2，参见 PRD §3.4.1 步 4.2.a）
 - 变更 review 要点：
   - **资金红线**（round 4 P1 新增）：时区错乱直接错日期 → 漏清下一日 (date+1) run（用 setDate 在 UTC+12 滞后到 date）或误清后天 (date+2) run（在 UTC-12 抢跑到 date+2）→ stale 差异表 = 资金事故
   - **必须 UTC 实现**：不能改用 `setDate(getDate() + 1)`（本地时区版）；与 `subOneDay` UTC 实现完全对偶
-  - **单源**：addOneDay 仅在业务OP 重导清逻辑使用（仅 `runBizOpImportAsync` 调用），无 listReadyDates 一类的双源场景；改实现只动 `src/main-process/biz-op-recon-session.js` 一处
+  - **单源**：addOneDay 的实现只在 `src/main-process/biz-op-recon-session.js`；同步导入、worker 与 per-month 编排均引用该单源，无 listReadyDates 一类的第二份实现
   - **维护检查**：改实现后 `grep -n "function addOneDay" src/` 确认仅 1 处命中（如出现 2 处 → 评估是否可合并 / 是否双源同步）
   - **与 `subOneDay` 对照**：subOneDay 双源（session.js + run-repository.js）；addOneDay 单源（仅 session.js）— 业务边界不同
   - round 4 P1 升格 Risk-sensitive（与 `subOneDay` round 2 R2-M4 升格 Risk-sensitive 对齐 — 时区操作类 helper 同级红线）

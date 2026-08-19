@@ -328,7 +328,20 @@ function appendRemovalReconcileSheets(wb, db, run, runId, compareFields) {
 
 // ========== 单月（by runId）==========
 
+function buildPendingExportReadSnapshot(db, build) {
+  db.exec('BEGIN');
+  try {
+    const snapshot = build();
+    db.exec('COMMIT');
+    return snapshot;
+  } catch (error) {
+    try { db.exec('ROLLBACK'); } catch (_rollbackError) { /* preserve original */ }
+    throw error;
+  }
+}
+
 function exportSingleRun(db, runId, savePath) {
+  const built = buildPendingExportReadSnapshot(db, () => {
   const run = diffRepo.getRunById(db, runId);
   if (!run) throw new Error(`run #${runId} 不存在`);
 
@@ -378,8 +391,7 @@ function exportSingleRun(db, runId, savePath) {
   const removalReconcile = appendRemovalReconcileSheets(wb, db, run, runId, compareFields);
 
   applyWatermark(wb);
-  XLSX.writeFile(wb, savePath);
-  return {
+  return { wb, result: {
     status: 'success',
     path: savePath,
     filePath: savePath,
@@ -396,29 +408,24 @@ function exportSingleRun(db, runId, savePath) {
     removalReconcileAppended: removalReconcile.appended,
     missingReconRowCount: removalReconcile.missingReconRowCount,
     removalOnlyRowCount: removalReconcile.removalOnlyRowCount
-  };
+  } };
+  });
+  XLSX.writeFile(built.wb, savePath);
+  return built.result;
 }
 
 // ========== 汇总（每月对取最新 run）==========
 
-function exportAggregate(db, savePath) {
-  const allRuns = diffRepo.listAllRuns(db);
-  if (!allRuns || allRuns.length === 0) {
-    return { status: 'error', message: '暂无运算 record' };
-  }
-
-  // 按 (upper, lower) 取最新 run（listAllRuns 已按 created_at desc）
-  const latestByPair = new Map();
-  for (const r of allRuns) {
-    const key = `${r.upperMonth}||${r.lowerMonth}`;
-    if (!latestByPair.has(key)) latestByPair.set(key, r);
-  }
-
-  // 按 lowerMonth 升序排（最老 → 最新）
-  const sortedLatest = Array.from(latestByPair.values()).sort((a, b) => {
-    if (a.lowerMonth === b.lowerMonth) return a.upperMonth < b.upperMonth ? -1 : 1;
-    return a.lowerMonth < b.lowerMonth ? -1 : 1;
+function exportAggregateRuns(db, runIds, savePath) {
+  const built = buildPendingExportReadSnapshot(db, () => {
+  const sortedLatest = runIds.map((runId) => {
+    const run = diffRepo.getRunById(db, runId);
+    if (!run) throw new Error(`run #${runId} 不存在`);
+    return run;
   });
+  if (sortedLatest.length === 0) {
+    return { wb: null, result: { status: 'error', message: '暂无运算 record' } };
+  }
 
   // compareFields 并集
   const compareUnion = [];
@@ -496,8 +503,7 @@ function exportAggregate(db, savePath) {
   }
 
   applyWatermark(wb);
-  XLSX.writeFile(wb, savePath);
-  return {
+  return { wb, result: {
     status: 'success',
     path: savePath,
     filePath: savePath,
@@ -506,12 +512,24 @@ function exportAggregate(db, savePath) {
     fundTypeDiffRowCount,
     // 聚合导出省略了移除核对 sheet 且确有移除数据 → renderer 据此追加提示
     removalDataOmitted
-  };
+  } };
+  });
+  if (built.wb) XLSX.writeFile(built.wb, savePath);
+  return built.result;
+}
+
+function exportAggregateLegacy(db, savePath) {
+  return exportAggregateRuns(
+    db,
+    diffRepo.listLatestRunsByMonthPair(db).map((run) => run.id),
+    savePath
+  );
 }
 
 module.exports = {
   exportSingleRun,
-  exportAggregate,
+  exportAggregateLegacy,
+  exportAggregateRuns,
   // v2.1.11 T2 移除核对常量（供 integration 校验 sheet 名/状态值文案）
   SHEET_MISSING_REMOVAL_NAME,
   SHEET_REMOVAL_ONLY_NAME,

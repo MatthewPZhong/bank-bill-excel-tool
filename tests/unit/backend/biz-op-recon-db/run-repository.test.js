@@ -9,6 +9,17 @@ const { ensureBizOpReconTablesSupport } = require('../../../../src/backend/biz-o
 
 let db;
 
+const EMPTY_STATS = Object.freeze({
+  t1OpTotal: 0,
+  t2OpTotal: 0,
+  flowTotal: 0,
+  amountDiffCount: 0,
+  multiOpAccountCount: 0,
+  t2AnomalyAccountCount: 0,
+  t1NotT2Count: 0,
+  t2NotT1Count: 0
+});
+
 test.beforeEach(() => {
   db = new DatabaseSync(':memory:');
   ensureBizOpReconTablesSupport(db);
@@ -66,6 +77,62 @@ test.describe('insertRun / getRunById', () => {
 
   test('getRunById 不存在 → null', () => {
     assert.equal(runRepo.getRunById(db, 9999), null);
+  });
+});
+
+test.describe('v1 Archive run receipt', () => {
+  test('按 TaskRun 唯一持久、查询并幂等 ack', () => {
+    const stats = {
+      t1OpTotal: 3,
+      t2OpTotal: 2,
+      flowTotal: 1,
+      amountDiffCount: 1,
+      multiOpAccountCount: 0,
+      t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0,
+      t2NotT1Count: 0
+    };
+    const id = runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats, archiveTaskRunId: 'biz-run-task-1'
+    });
+    const run = runRepo.getRunByArchiveTaskRunId(db, 'biz-run-task-1');
+    assert.equal(run.id, id);
+    assert.equal(run.archive_contract_version, 1);
+    assert.equal(run.archive_terminal_ack_at, null);
+    assert.deepEqual(runRepo.listUnacknowledgedArchiveRuns(db).map((item) => item.id), [id]);
+
+    runRepo.acknowledgeArchiveTerminal(db, id, 'biz-run-task-1', '2026-05-22T10:00:00.000Z');
+    runRepo.acknowledgeArchiveTerminal(db, id, 'biz-run-task-1', '2026-05-22T10:00:01.000Z');
+    assert.equal(runRepo.getRunById(db, id).archive_terminal_ack_at, '2026-05-22T10:00:00.000Z');
+    assert.equal(runRepo.listUnacknowledgedArchiveRuns(db).length, 0);
+  });
+
+  test('同一 TaskRun 不能产生第二条业务 run receipt', () => {
+    const stats = {
+      t1OpTotal: 0, t2OpTotal: 0, flowTotal: 0, amountDiffCount: 0,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0, t1NotT2Count: 0, t2NotT1Count: 0
+    };
+    runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats, archiveTaskRunId: 'same-task'
+    });
+    assert.throws(() => runRepo.insertArchiveRun(db, {
+      date: '2026-05-23', buName: 'BU-A', stats, archiveTaskRunId: 'same-task'
+    }), /UNIQUE/);
+  });
+
+  test('同日同规范化 BU 的未 ACK receipt 阻止新 run admission', () => {
+    const id = runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats: EMPTY_STATS, archiveTaskRunId: 'first-task'
+    });
+    runRepo.insertDiffRows(db, id, '2026-05-22', 'BU-A', [
+      { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+    ]);
+
+    assert.throws(() => runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: '  bu-a  ', stats: EMPTY_STATS, archiveTaskRunId: 'late-task'
+    }), /未 ACK/);
+    assert.deepEqual(runRepo.listRunsByDateBu(db, '2026-05-22', 'BU-A').map((run) => run.id), [id]);
+    assert.equal(runRepo.getDiffRowsByRun(db, id).length, 1);
   });
 });
 
@@ -207,6 +274,28 @@ test.describe('clearRunsAndDiffsByDateBu', () => {
     assert.equal(r.diffRowsDeleted, 0);
     assert.equal(r.runsDeleted, 0);
   });
+
+  test('未 ACK v1 receipt 在首个 DELETE 前拒绝；ACK 后保持原覆盖行为', () => {
+    const runId = runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-A', stats: EMPTY_STATS, archiveTaskRunId: 'pending-op-task'
+    });
+    runRepo.insertDiffRows(db, runId, '2026-05-22', 'BU-A', [
+      { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+    ]);
+
+    assert.throws(
+      () => runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-22', '  bu-a  '),
+      /未 ACK/
+    );
+    assert.ok(runRepo.getRunById(db, runId));
+    assert.equal(runRepo.getDiffRowsByRun(db, runId).length, 1);
+
+    runRepo.acknowledgeArchiveTerminal(db, runId, 'pending-op-task');
+    assert.deepEqual(runRepo.clearRunsAndDiffsByDateBu(db, '2026-05-22', 'bu-a'), {
+      diffRowsDeleted: 1,
+      runsDeleted: 1
+    });
+  });
 });
 
 test.describe('clearRunsAndDiffsByDate（流水重导专用 — 资金红线）', () => {
@@ -218,5 +307,23 @@ test.describe('clearRunsAndDiffsByDate（流水重导专用 — 资金红线）'
     assert.equal(r.runsDeleted, 2);
     // 其它日期不动
     assert.equal(runRepo.listRunsByDateBu(db, '2026-05-21', 'BU-A').length, 1);
+  });
+
+  test('任一 BU 有未 ACK v1 receipt 时在首个 DELETE 前拒绝', () => {
+    const legacyId = runRepo.insertRun(db, { date: '2026-05-22', buName: 'BU-A' });
+    const receiptId = runRepo.insertArchiveRun(db, {
+      date: '2026-05-22', buName: 'BU-B', stats: EMPTY_STATS, archiveTaskRunId: 'pending-flow-task'
+    });
+    runRepo.insertDiffRows(db, legacyId, '2026-05-22', 'BU-A', [
+      { source_table: 'flow', source_row_id: 1, multi_op_flag: 'N' }
+    ]);
+    runRepo.insertDiffRows(db, receiptId, '2026-05-22', 'BU-B', [
+      { source_table: 'flow', source_row_id: 2, multi_op_flag: 'N' }
+    ]);
+
+    assert.throws(() => runRepo.clearRunsAndDiffsByDate(db, '2026-05-22'), /未 ACK/);
+    assert.equal(runRepo.listRunsByDateBu(db, '2026-05-22', 'BU-A').length, 1);
+    assert.equal(runRepo.listRunsByDateBu(db, '2026-05-22', 'BU-B').length, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM biz_op_recon_diff_rows').get().n, 2);
   });
 });

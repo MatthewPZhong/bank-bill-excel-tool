@@ -122,25 +122,26 @@ test.describe('T4 toolbox-large-split-dispatch（桩 worker 协议）', () => {
     assert.ok(fs.existsSync(DEFAULT_WORKER_ENTRY), 'worker entry 文件应真实存在');
   });
 
-  test('A7. 有输出副作用的 worker dispatch 必须携带 exact7 batchContext', () => {
-    assert.throws(
-      () => dispatchLargeSplit({
+  test('A7. 有输出副作用的 exact7 只在 structured-clone receiver 校验', async () => {
+    __test_only_set_worker_script__(null);
+    await assert.rejects(
+      dispatchLargeSplit({
         op: 'exportFilter',
         filePath: '/fake/x.xlsx',
         field: 'A',
         values: ['a'],
         savePath: '/fake/out.xlsx'
-      }),
+      }).promise,
       /batchContext 缺失/
     );
-    assert.throws(
-      () => dispatchLargeSplit({
+    await assert.rejects(
+      dispatchLargeSplit({
         op: 'exportMultiFilters',
         filePath: '/fake/x.xlsx',
         groups: [],
         batchContext: { batchId: 1 }
-      }),
-      /batchNumber.*不能为空/
+      }).promise,
+      /exact-7/
     );
   });
 });

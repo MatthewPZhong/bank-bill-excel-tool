@@ -18,7 +18,6 @@
 'use strict';
 
 const { Worker } = require('node:worker_threads');
-const { freezeWorkerBatchContext } = require('./archive-center/worker-batch-context');
 
 // 工具箱大文件拆分薄 worker 入口（new Worker 拉起 → 内部跑三种拆分作业）。
 //   解析方式与 big-table-import-dispatch.js 一致（require.resolve 相对本文件定位 backend 下 worker entry）。
@@ -59,9 +58,6 @@ function dispatchLargeSplit({
   onProgress,
   onLog
 }) {
-  const frozenBatchContext = freezeWorkerBatchContext(batchContext, {
-    required: op !== 'scanFields'
-  });
   let worker = null;
   let settled = false;
   let jobId = null;
@@ -136,7 +132,7 @@ function dispatchLargeSplit({
       values,
       savePath,
       groups,
-      batchContext: frozenBatchContext
+      batchContext
     });
   });
 

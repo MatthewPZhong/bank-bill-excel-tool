@@ -16,6 +16,7 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
   const main = read('src/main.js');
+  const archiveController = read('src/main-process/archive-center/controller.js');
   const positionOperationLifecycle = read(
     'src/main-process/position-reconciliation/operation-lifecycle.js'
   );
@@ -111,7 +112,7 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     );
     assert.match(
       finalizeFlow,
-      /positionRecoveryCleanupInputPaths\(\s*current,\s*committedFiles,\s*deletedArchiveResult\s*\)/
+      /const cleanupInputPaths = currentBatch[\s\S]*?currentBatch\.metadata\._fileManifest[\s\S]*?\? \[\][\s\S]*?: positionRecoveryCleanupInputPaths\(/
     );
     assert.doesNotMatch(
       recoveryFlow,
@@ -273,6 +274,9 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(renderer, /getArchiveCenterApi\(\)\.changeStorageLocation\(\)/);
     assert.match(renderer, /batch\.requiresBusinessRerun === true/);
     assert.match(renderer, /需要重新运行业务/);
+    assert.match(renderer, /batch\.rerunHint \|\|/);
+    assert.match(archiveController, /请从工具箱重新执行/);
+    assert.match(renderer, /batch\.failureMessage/);
     assert.match(preload, /retryBatch:\s*\(batchId, sourcePaths\)/);
     assert.match(
       main,
@@ -535,13 +539,24 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     const initStart = main.indexOf('async function runBackgroundInitChain');
     const initEnd = main.indexOf('function markAppInitDone', initStart);
     const initFlow = main.slice(initStart, initEnd);
+    const pendingDbIndex = initFlow.indexOf("pendingDb = openPendingDb(app.getPath('userData'))");
     const createIndex = initFlow.indexOf('initializeArchiveCenter()');
     const recoveryIndex = initFlow.indexOf(
       'await archiveCenterInitializationPromise',
       createIndex
     );
     const postSetupIndex = initFlow.indexOf('runStartupPostSetup()', recoveryIndex);
-    assert.ok(createIndex >= 0 && recoveryIndex > createIndex && postSetupIndex > recoveryIndex);
+    assert.ok(
+      pendingDbIndex >= 0
+        && createIndex > pendingDbIndex
+        && recoveryIndex > createIndex
+        && postSetupIndex > recoveryIndex,
+      'Pending DB migrations 必须先于 Archive owner recovery，且启动只保留一个 open 入口'
+    );
+    assert.equal(
+      (initFlow.match(/pendingDb = openPendingDb\(app\.getPath\('userData'\)\)/g) || []).length,
+      1
+    );
     assert.match(main, /setImmediate\(async \(\) => \{[\s\S]*?await runBackgroundInitChain\(\)/);
     assert.match(main, /else \{[\s\S]*?await runBackgroundInitChain\(\);[\s\S]*?markAppInitDone\(\)/);
   });

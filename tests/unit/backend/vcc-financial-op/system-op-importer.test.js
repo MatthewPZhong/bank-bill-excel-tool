@@ -985,7 +985,8 @@ test('系统 OP 多文件第二份最终 SHA/size 不一致时 failImportBatch �
     sourceOrdinal: index + 1,
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
-    taskRunId: 'system-second-sha-mismatch'
+    taskRunId: 'system-second-sha-mismatch',
+    archiveArtifactId: index + 1
   }));
   const originalCreateImportSource = repository.createImportSource;
   repository.createImportSource = function createAndMutateSecondSource(targetDb, recordId, source) {

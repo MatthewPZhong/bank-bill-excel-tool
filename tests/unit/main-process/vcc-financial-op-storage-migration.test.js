@@ -348,17 +348,13 @@ test('worker 在 ack 后崩溃时不进入原子切换，旧库保持并请求�
   assert.equal(registry.isInstallTransitionActive(), true);
 });
 
-test('维护期间所有 VCC Service 入口 fail-closed，partial 导入和存档重放先建业务锁', () => {
-  const getterStart = MAIN_SOURCE.indexOf('function getVccFinancialOpService()');
-  const getterEnd = MAIN_SOURCE.indexOf('\nfunction vccStorageMigrationJournalPath', getterStart);
-  const getter = MAIN_SOURCE.slice(getterStart, getterEnd);
-  assert.match(getter, /vccStorageMigrationCoordinator\.isActive\(\)/);
-  assert.ok(
-    getter.indexOf('vccStorageMigrationCoordinator.isActive()')
-      < getter.indexOf('createVccFinancialOpService'),
-    '维护门禁必须先于 Service 构造和任何恢复写'
-  );
-  assert.match(getter, /error\.code = 'vcc-storage-migration-active'/);
+test('普通 VCC 存储迁移入口移除但启动 journal recovery 保留，partial 导入和存档重放先建业务锁', () => {
+  assert.doesNotMatch(MAIN_SOURCE, /vccFinancialOp:storage:(?:inspect|migrate)/);
+  assert.doesNotMatch(MAIN_SOURCE, /createVccStorageMigrationCoordinator/);
+  const recoveryIndex = MAIN_SOURCE.indexOf('recoverVccStorageMigration({');
+  const databaseOpenIndex = MAIN_SOURCE.indexOf('database = new AppDatabase(dataPath)', recoveryIndex);
+  assert.ok(recoveryIndex >= 0 && databaseOpenIndex > recoveryIndex,
+    '遗留/一次性 journal 必须在主数据库连接打开前恢复');
 
   const importStart = MAIN_SOURCE.indexOf(
     "trackedIpcHandle('vccFinancialOp:import:apply'"

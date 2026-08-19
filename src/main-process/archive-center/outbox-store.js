@@ -4,6 +4,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
+// 磁盘容器格式仍为 v1；TerminalOutboxRecord 的 v2 位于 payload.version，
+// 两者是独立合同，不能用 terminal envelope 版本替换外层完整性容器版本。
 const OUTBOX_VERSION = 1;
 const OUTBOX_ID_PREFIX = 'outbox:';
 
@@ -192,6 +194,48 @@ class ArchiveOutboxStore {
         '同一 operation/batch 的任务终态意图冲突'
       );
     }
+    const incomingOwner = payload.owner;
+    if (incomingOwner !== undefined
+        && (!incomingOwner || typeof incomingOwner !== 'object' || Array.isArray(incomingOwner))) {
+      throw new TypeError('存档 outbox owner 格式非法');
+    }
+    const existingOwner = record.payload.owner;
+    if (existingOwner !== undefined
+        && incomingOwner !== undefined
+        && stableSerialize(existingOwner) !== stableSerialize(incomingOwner)) {
+      throw outboxConflict(
+        'ARCHIVE_OUTBOX_OWNER_CONFLICT',
+        '同一 operation 的存档 outbox owner 冲突'
+      );
+    }
+    const incomingSettleFiles = payload.settleFiles;
+    if (incomingSettleFiles !== undefined && !Array.isArray(incomingSettleFiles)) {
+      throw new TypeError('存档 outbox settleFiles 格式非法');
+    }
+    const existingSettleFiles = record.payload.settleFiles;
+    if (existingSettleFiles !== undefined
+        && incomingSettleFiles !== undefined
+        && stableSerialize(existingSettleFiles) !== stableSerialize(incomingSettleFiles)) {
+      throw outboxConflict(
+        'ARCHIVE_OUTBOX_SETTLE_EVIDENCE_CONFLICT',
+        '同一 operation 的 manifest settle evidence 冲突'
+      );
+    }
+    const incomingPayloadVersion = payload.version === undefined ? null : Number(payload.version);
+    if (incomingPayloadVersion !== null && incomingPayloadVersion !== 2) {
+      throw new TypeError('存档 outbox payload version 非法');
+    }
+    const existingPayloadVersion = record.payload.version === undefined
+      ? null
+      : Number(record.payload.version);
+    if (existingPayloadVersion !== null
+        && incomingPayloadVersion !== null
+        && existingPayloadVersion !== incomingPayloadVersion) {
+      throw outboxConflict(
+        'ARCHIVE_OUTBOX_OWNER_CONFLICT',
+        '同一 operation 的存档 outbox payload version 冲突'
+      );
+    }
 
     const seen = new Set(record.payload.files.map((file) => (
       `${file.direction || ''}\u0000${file.role || ''}\u0000${file.filePath}`
@@ -211,6 +255,15 @@ class ArchiveOutboxStore {
           : {}),
         ...(existingTerminalOutcome === undefined && incomingTerminalOutcome !== undefined
           ? { terminalOutcome: JSON.parse(JSON.stringify(incomingTerminalOutcome)) }
+          : {}),
+        ...(existingOwner === undefined && incomingOwner !== undefined
+          ? { owner: JSON.parse(JSON.stringify(incomingOwner)) }
+          : {}),
+        ...(existingSettleFiles === undefined && incomingSettleFiles !== undefined
+          ? { settleFiles: JSON.parse(JSON.stringify(incomingSettleFiles)) }
+          : {}),
+        ...(existingPayloadVersion === null && incomingPayloadVersion !== null
+          ? { version: incomingPayloadVersion }
           : {}),
         files: [...record.payload.files, ...appended]
       }

@@ -30,15 +30,25 @@
 'use strict';
 
 const fs = require('node:fs');
+const { randomUUID } = require('node:crypto');
 
 const session = require('./biz-op-recon-session');
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
+const datasetHeadRepository = require('../backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../backend/biz-op-recon-db/month-end-copy-intent-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
 const runDataStore = require('../backend/run-data-store');
 const { appendModuleLog } = require('../backend/logger');
+const {
+  BIZ_OP_MODULE_ID,
+  BIZ_OP_RUN_TASK_KEY,
+  bizOpRunLineagePlan,
+  bizOpRunOutputIntent
+} = require('./biz-op-archive-lineage');
 
 const MODULE = runDataStore.MODULE_BIZ_OP;
 const RUNS_TABLE = 'biz_op_recon_runs';
+const BIZ_OP_IMPORT_TASK_KEY = 'bizOpRecon:import:run-biz-op';
 
 // date（YYYY-MM-DD）→ monthKey（YYYY-MM）。
 function monthOf(date) {
@@ -53,10 +63,13 @@ function monthOf(date) {
 // 返回主库镜像行 id —— 🔴 对外（UI / 导出 handler）的 runId 真值（侧库 insertRun 的自增 id 是侧库内部 id，
 //   与主库镜像 id 不同命名空间；UI 从 run 结果拿 runId 再传给 export，必须用主库镜像 id；导出再由镜像
 //   (date,BU) 反查侧库内 run id 查 diff_rows，见 openExportContextByRun）。
-function upsertMainRunMirror(mainDb, { date, buName, relPath, stats, status }) {
+function upsertMainRunMirror(mainDb, {
+  date, buName, relPath, stats, status, archiveTaskRunId = null
+}) {
   let mirrorId;
   mainDb.exec('BEGIN');
   try {
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(mainDb, date, buName);
     // 月级覆盖按 (date,BU)：用 LOWER(TRIM(bu_name)) 与对账 normalizeBu 语义一致（防大小写副本残留）。
     mainDb.prepare(
       `DELETE FROM ${RUNS_TABLE} WHERE data_date = ? AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?))`
@@ -66,8 +79,9 @@ function upsertMainRunMirror(mainDb, { date, buName, relPath, stats, status }) {
         (data_date, bu_name, status,
          t1_op_total, t2_op_total, flow_total,
          amount_diff_count, multi_op_account_count, t2_anomaly_account_count,
-         t1_not_t2_count, t2_not_t1_count, export_path, side_db_rel_path)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         t1_not_t2_count, t2_not_t1_count, export_path, side_db_rel_path,
+         archive_contract_version, archive_task_run_id, archive_terminal_ack_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     `).run(
       date,
       buName,
@@ -81,7 +95,9 @@ function upsertMainRunMirror(mainDb, { date, buName, relPath, stats, status }) {
       stats.t1NotT2Count,
       stats.t2NotT1Count,
       null,
-      relPath
+      relPath,
+      archiveTaskRunId ? 1 : 0,
+      archiveTaskRunId
     );
     mirrorId = Number(r.lastInsertRowid);
     mainDb.exec('COMMIT');
@@ -100,59 +116,144 @@ function upsertMainRunMirror(mainDb, { date, buName, relPath, stats, status }) {
 async function runBizOpImport({ userDataDir, runBizOpImportViaWorker, params }) {
   const { date } = params;
   const monthKey = monthOf(date);
+  const nextDate = session.addOneDay(date);
+  const nextMonth = monthOf(nextDate);
   // 确保该月侧库存在（worker 也会建，但先建保证后续 readback / 补清能 open）。
   const sideDbPath = runDataStore.sideDbPath(userDataDir, MODULE, monthKey);
   ensureSideDbExists(userDataDir, monthKey);
 
   // worker 在 month(date) 侧库内：清 (date,BU)+(D+1,BU) + clearByDateBu(date,BU) + INSERT（同月 D+1 已被清）。
+  // 月末且下月侧库已存在时，worker 在当前月 COMMIT 前按首个 BU 只读复核下月 D/D+1；
+  // 成功后下月复制事务仍会复核一次，覆盖两次检查之间的并发变化。
   //   传侧库 db 句柄作无 dbPath fallback 用（worker 入口优先 dbPath）；getDb 返回侧库连接。
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  let monthEndCopyPlan = null;
+  if (nextMonth !== monthKey) {
+    if (runDataStore.sideDbExists(userDataDir, MODULE, nextMonth)) {
+      const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+      nextSideDb.close();
+    }
+    monthEndCopyPlan = {
+      targetDbPath: runDataStore.sideDbPath(userDataDir, MODULE, nextMonth),
+      targetMonth: nextMonth,
+      dataDate: date,
+      nextDate
+    };
+  }
   let result;
   try {
-    result = await runBizOpImportViaWorker(sideDb, { ...params, dbPath: sideDbPath });
+    result = await runBizOpImportViaWorker(sideDb, {
+      ...params,
+      dbPath: sideDbPath,
+      datasetSeed: {
+        datasetId: randomUUID(),
+        producerTaskRunId: params.batchContext.taskRunId
+      },
+      monthEndCopyPlan
+    });
+  } catch (error) {
+    if (monthEndCopyPlan
+        && monthEndCopyIntents.getByTaskRunId(sideDb, params.batchContext.taskRunId)) {
+      error.preserveArchiveFileTask = true;
+    }
+    throw error;
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
 
   // 仅成功导入才处理跨月（rejected/error 未改任何数据，无需补清/冗余）。
   if (result && result.status === 'success') {
-    const firstBu = result.buName;
-    const nextDate = session.addOneDay(date);
-    const nextMonth = monthOf(nextDate);
-    if (nextMonth !== monthKey) {
-      // 🔴 月末跨月：worker 清不到 D+1 月侧库——编排层补清 + 冗余副本。
-      handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, nextDate, firstBu });
+    if (monthEndCopyPlan) {
+      try {
+        applyMonthEndCopyIntent({
+          userDataDir,
+          sourceMonth: monthKey,
+          sourceTaskRunId: params.batchContext.taskRunId
+        });
+      } catch (error) {
+        error.preserveArchiveFileTask = true;
+        throw error;
+      }
     }
   }
   return result;
 }
 
-// 月末 D 跨月处理：
-//   ① 补清 month(D+1) 侧库的 (D,BU)[旧冗余副本] + (D+1,BU) 旧 runs/diff（重导刷新一致）。
-//   ② 把 month(D) 侧库内刚导入的 (D,BU) imports 行冗余复制进 month(D+1) 侧库（作 D+1 对账 T-2 基线）。
-//   逐表事务：在 month(D+1) 侧库内单事务完成 clear + 冗余 insert（任一失败 ROLLBACK，不留半成品）。
-function handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, nextDate, firstBu }) {
-  // 读 month(D) 侧库内 (D,BU) imports 行（worker 已 bu_name 改写为 firstBu）。
-  const curSideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+function monthEndCopyConflict(message, cause) {
+  const error = new Error(message);
+  error.code = 'BIZ_OP_MONTH_END_COPY_RECOVERY_CONFLICT';
+  error.blocksArchiveStartup = true;
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function assertIntentHead(intent, head, location) {
+  if (!head
+      || head.datasetId !== intent.datasetId
+      || head.datasetVersion !== intent.datasetVersion
+      || head.producerTaskRunId !== intent.producerTaskRunId
+      || head.archiveContractVersion !== 1) {
+    throw monthEndCopyConflict(`Biz OP 月末复制 ${location} dataset identity 不一致`);
+  }
+}
+
+// exact intent 是 source COMMIT 与 target COMMIT 之间的 durable owner。
+// target transaction 可重复执行；intent 只在 Archive File Task terminal 后由 caller 删除。
+function applyMonthEndCopyIntent({ userDataDir, sourceMonth, sourceTaskRunId }) {
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, sourceMonth);
+  let intent;
   let dRows;
+  let sourceHead;
   try {
-    dRows = importsRepository.getRowsByDateBu(curSideDb, date, firstBu);
+    intent = monthEndCopyIntents.getByTaskRunId(sourceDb, sourceTaskRunId);
+    if (!intent) {
+      throw monthEndCopyConflict('Biz OP 月末复制 intent 不存在');
+    }
+    if (monthOf(intent.dataDate) !== sourceMonth
+        || monthOf(session.addOneDay(intent.dataDate)) !== intent.targetMonth) {
+      throw monthEndCopyConflict('Biz OP 月末复制 intent 月份身份不一致');
+    }
+    dRows = importsRepository.getRowsByDateBu(
+      sourceDb,
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    sourceHead = datasetHeadRepository.getHead(
+      sourceDb,
+      'op',
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    assertIntentHead(intent, sourceHead, 'source');
+    if (dRows.length === 0) {
+      throw monthEndCopyConflict('Biz OP 月末复制 source rows 不存在');
+    }
   } finally {
-    try { curSideDb.close(); } catch (_e) { /* swallow */ }
+    try { sourceDb.close(); } catch (_e) { /* swallow */ }
   }
 
-  const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
+  const sourceBu = dRows[0].bu_name;
+  const nextDate = session.addOneDay(intent.dataDate);
+  const nextSideDb = runDataStore.openSideDb(userDataDir, MODULE, intent.targetMonth);
   try {
     nextSideDb.exec('BEGIN');
     try {
-      // ① 清下月旧冗余副本 (D,BU) + 下月 (D+1,BU) 旧 runs/diff（D+1 既是 D+1 当日 T-1 又会被本月 D 当 T-2）。
-      //   先清 runs/diff（FK 顺序），再清 imports。
-      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, date, firstBu);
-      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, nextDate, firstBu);
-      importsRepository.clearByDateBu(nextSideDb, date, firstBu);
-      // ② 冗余复制 (D,BU) 行进下月侧库（imports insertRows 用 _rowIndex，保 row_index 一致）。
+      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, intent.dataDate, sourceBu);
+      runRepository.clearRunsAndDiffsByDateBu(nextSideDb, nextDate, sourceBu);
+      importsRepository.clearByDateBu(nextSideDb, intent.dataDate, sourceBu);
       const copyRows = dRows.map((r) => importRowToReaderShape(r));
-      importsRepository.insertRows(nextSideDb, date, copyRows);
+      importsRepository.insertRows(nextSideDb, intent.dataDate, copyRows);
+      datasetHeadRepository.writeHead(nextSideDb, {
+        kind: 'op',
+        dataDate: intent.dataDate,
+        buName: sourceBu,
+        identity: {
+          datasetId: intent.datasetId,
+          datasetVersion: intent.datasetVersion,
+          producerTaskRunId: intent.producerTaskRunId,
+          archiveContractVersion: 1
+        }
+      });
       nextSideDb.exec('COMMIT');
     } catch (err) {
       try { nextSideDb.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
@@ -164,8 +265,60 @@ function handleMonthEndCrossMonth({ userDataDir, monthKey, nextMonth, date, next
   appendModuleLog({
     level: 'info', source: 'main', domain: 'biz-op-recon',
     message: '[biz-op-recon] 月末跨月冗余副本写入下月侧库（D 作 D+1 对账 T-2 基线）',
-    details: [`date=${date}`, `bu=${firstBu}`, `from=${monthKey}`, `to=${nextMonth}`, `rows=${dRows.length}`]
+    details: [
+      `date=${intent.dataDate}`,
+      `bu=${sourceBu}`,
+      `from=${sourceMonth}`,
+      `to=${intent.targetMonth}`,
+      `taskRunId=${intent.sourceTaskRunId}`,
+      `rows=${dRows.length}`
+    ]
   });
+  return intent;
+}
+
+function acknowledgeMonthEndCopyIntent({ userDataDir, dataDate, sourceTaskRunId }) {
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, monthOf(dataDate));
+  try {
+    return { removed: monthEndCopyIntents.remove(sourceDb, sourceTaskRunId) };
+  } finally {
+    sourceDb.close();
+  }
+}
+
+function assertTargetCopyApplied({ userDataDir, intent }) {
+  if (!runDataStore.sideDbExists(userDataDir, MODULE, intent.targetMonth)) {
+    throw monthEndCopyConflict('Biz OP 月末复制 target side DB 不存在');
+  }
+  const targetDb = runDataStore.openSideDb(userDataDir, MODULE, intent.targetMonth);
+  try {
+    const head = datasetHeadRepository.getHead(
+      targetDb,
+      'op',
+      intent.dataDate,
+      intent.normalizedBu
+    );
+    assertIntentHead(intent, head, 'target');
+  } finally {
+    targetDb.close();
+  }
+}
+
+function assertNoPendingMonthEndCopyForRun({ userDataDir, date, buName }) {
+  const previousDate = session.subOneDay(date);
+  const sourceMonth = monthOf(previousDate);
+  if (sourceMonth === monthOf(date)
+      || !runDataStore.sideDbExists(userDataDir, MODULE, sourceMonth)) return;
+  const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, sourceMonth);
+  try {
+    monthEndCopyIntents.assertNoPending(
+      sourceDb,
+      previousDate,
+      session.normalizeBu(buName)
+    );
+  } finally {
+    sourceDb.close();
+  }
 }
 
 // DB imports 行（含 id/data_date/bu_name/row_index/imported_at 元数据）→ insertRows 可消费的 reader 风格行。
@@ -188,7 +341,17 @@ async function runFlowImport({ userDataDir, runFlowImportViaWorker, params }) {
   ensureSideDbExists(userDataDir, monthKey);
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   try {
-    return await runFlowImportViaWorker(sideDb, { ...params, dbPath: sideDbPath });
+    const previous = datasetHeadRepository.getHead(sideDb, 'flow', date);
+    return await runFlowImportViaWorker(sideDb, {
+      ...params,
+      dbPath: sideDbPath,
+      datasetSeed: {
+        datasetId: randomUUID(),
+        producerTaskRunId: params.batchContext.taskRunId,
+        expectedDatasetId: previous ? previous.datasetId : null,
+        expectedDatasetVersion: previous ? previous.datasetVersion : 0
+      }
+    });
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
@@ -198,7 +361,7 @@ async function runFlowImport({ userDataDir, runFlowImportViaWorker, params }) {
 
 // runViaSideDb：open month(date) 侧库 → runReconciliation → 侧库 insertRun（已含在 runReconciliation 内）
 //   → 主库镜像 upsert。runReconciliation 内部已 insertRun + insertDiffRows（同事务），本层只取 runId + 镜像。
-function runViaSideDb({ userDataDir, mainDb, date, buName }) {
+function runViaSideDb({ userDataDir, mainDb, date, buName, taskRunId, expectedDatasets }) {
   const monthKey = monthOf(date);
   const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
   let out;
@@ -206,19 +369,71 @@ function runViaSideDb({ userDataDir, mainDb, date, buName }) {
     // 🔴 算法零改动：runReconciliation 内读 T-1(date)+T-2(date-1)+flow(date) 全在 month(date) 侧库
     //   （月初 T-2 由月末冗余副本保证在库；见文件头注释 §跨月边界）→ 单库自洽。
     //   runReconciliation 内部已 insertRun(sideDb) + insertDiffRows（同事务）；out.runId 是侧库内部 run id。
-    out = session.runReconciliation(sideDb, { date, buName });
+    out = session.runReconciliation(sideDb, {
+      date,
+      buName,
+      archiveReceipt: { archiveContractVersion: 1, archiveTaskRunId: taskRunId },
+      expectedDatasets
+    });
   } finally {
     try { sideDb.close(); } catch (_e) { /* swallow */ }
   }
   // 主库镜像（summary + side_db_rel_path + status）；返回 mirrorId 作对外 runId（UI/导出用）。
-  const runId = upsertMainRunMirror(mainDb, {
-    date,
-    buName,
-    relPath: runDataStore.sideDbRelPath(MODULE, monthKey),
+  let runId;
+  try {
+    runId = upsertMainRunMirror(mainDb, {
+      date,
+      buName,
+      relPath: runDataStore.sideDbRelPath(MODULE, monthKey),
+      stats: out.stats,
+      status: 'success',
+      archiveTaskRunId: taskRunId
+    });
+  } catch (mirrorError) {
+    try {
+      deleteSideRunReceiptByTaskRunId({ userDataDir, monthKey, taskRunId });
+    } catch (compensationError) {
+      compensationError.code = 'BIZ_OP_MIRROR_COMPENSATION_FAILED';
+      compensationError.preserveArchiveTaskRun = true;
+      compensationError.cause = mirrorError;
+      throw compensationError;
+    }
+    throw mirrorError;
+  }
+  return {
+    runId,
     stats: out.stats,
-    status: 'success'
-  });
-  return { runId, stats: out.stats };
+    runLocator: `biz-op:${runDataStore.sideDbRelPath(MODULE, monthKey)}#${out.runId}`
+  };
+}
+
+function deleteSideRunReceiptByTaskRunId({ userDataDir, monthKey, taskRunId }) {
+  const sideDb = runDataStore.openExistingSideDb(
+    runDataStore.sideDbPath(userDataDir, MODULE, monthKey)
+  );
+  try {
+    sideDb.exec('BEGIN');
+    try {
+      const deleted = runRepository.deleteArchiveRunByTaskRunId(sideDb, taskRunId);
+      sideDb.exec('COMMIT');
+      return deleted;
+    } catch (error) {
+      sideDb.exec('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    sideDb.close();
+  }
+}
+
+function prepareRunLineage({ userDataDir, date, buName }) {
+  assertNoPendingMonthEndCopyForRun({ userDataDir, date, buName });
+  const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthOf(date));
+  try {
+    return bizOpRunLineagePlan(sideDb, { date, buName });
+  } finally {
+    try { sideDb.close(); } catch (_e) { /* swallow */ }
+  }
 }
 
 // ── 双源读路径（B-D2）——遍历侧库 + 主库旧表 ──
@@ -364,6 +579,78 @@ function openExportContextByRun({ userDataDir, mainDb, runId }) {
   return { db: mainDb, sideDb: null, run, exportRunId: runId };
 }
 
+function freezeRunLocator({ userDataDir, mainDb, runId }) {
+  const mirror = runRepository.getRunById(mainDb, runId);
+  if (!mirror) throw new Error(`Biz OP run #${runId} 不存在`);
+  if (!mirror.side_db_rel_path) {
+    return Object.freeze({
+      mirrorRunId: mirror.id,
+      sideDbRelPath: null,
+      sideRunId: mirror.id,
+      date: mirror.data_date,
+      buName: mirror.bu_name,
+      archiveTaskRunId: null
+    });
+  }
+  const sideDb = runDataStore.openExistingSideDb(
+    runDataStore.resolveFromRel(userDataDir, mirror.side_db_rel_path)
+  );
+  try {
+    const sideRun = mirror.archive_contract_version === 1
+      ? runRepository.getRunByArchiveTaskRunId(sideDb, mirror.archive_task_run_id)
+      : runRepository.listRunsByDateBu(sideDb, mirror.data_date, mirror.bu_name)[0];
+    if (!sideRun) throw new Error(`Biz OP run #${runId} 的 side receipt 不存在`);
+    if (sideRun.data_date !== mirror.data_date
+        || session.normalizeBu(sideRun.bu_name) !== session.normalizeBu(mirror.bu_name)) {
+      throw new Error(`Biz OP run #${runId} 的 mirror 与 side receipt 不一致`);
+    }
+    return Object.freeze({
+      mirrorRunId: mirror.id,
+      sideDbRelPath: mirror.side_db_rel_path,
+      sideRunId: sideRun.id,
+      date: sideRun.data_date,
+      buName: sideRun.bu_name,
+      archiveTaskRunId: sideRun.archive_contract_version === 1
+        ? sideRun.archive_task_run_id
+        : null
+    });
+  } finally {
+    try { sideDb.close(); } catch (_e) { /* swallow */ }
+  }
+}
+
+function freezeRangeRunSelection({ userDataDir, mainDb, buName, startDate, endDate }) {
+  const selected = runRepository.listSuccessDatesInRange(mainDb, buName, startDate, endDate)
+    .map(({ runId }) => freezeRunLocator({ userDataDir, mainDb, runId }));
+  return Object.freeze({
+    runLocators: Object.freeze(selected),
+    lineageIntents: Object.freeze(selected.map((locator) => bizOpRunOutputIntent({
+      sideDbRelPath: locator.sideDbRelPath || 'legacy-main',
+      sideRunId: locator.sideRunId,
+      archiveTaskRunId: locator.archiveTaskRunId
+    })))
+  });
+}
+
+function openExportContextByLocator({ userDataDir, mainDb, locator }) {
+  if (!locator.sideDbRelPath) {
+    const run = runRepository.getRunById(mainDb, locator.sideRunId);
+    if (!run) throw new Error(`Biz OP legacy run #${locator.sideRunId} 不存在`);
+    return { db: mainDb, sideDb: null, run, exportRunId: run.id };
+  }
+  const sideDb = runDataStore.openExistingSideDb(
+    runDataStore.resolveFromRel(userDataDir, locator.sideDbRelPath)
+  );
+  const run = runRepository.getRunById(sideDb, locator.sideRunId);
+  if (!run || run.data_date !== locator.date
+      || session.normalizeBu(run.bu_name) !== session.normalizeBu(locator.buName)
+      || (locator.archiveTaskRunId && run.archive_task_run_id !== locator.archiveTaskRunId)) {
+    try { sideDb.close(); } catch (_e) { /* swallow */ }
+    throw new Error('Biz OP frozen run locator 与 side DB 不一致');
+  }
+  return { db: sideDb, sideDb, run, exportRunId: run.id };
+}
+
 // ⚠️ 区间导出（export:date-range）跨多日多月：writer 用单 db 读多个 run 的 diff + imports。
 //   per-month 下区间可能跨多个侧库文件——单 db 句柄读不全。
 //   决策：区间导出构造一个【临时内存合并 db】，把区间内所有 success run 对应的 run + diff_rows + imports
@@ -409,17 +696,73 @@ function buildRangeExportDb({ userDataDir, mainDb, buName, startDate, endDate })
   return memDb;
 }
 
+function buildFrozenRangeExportDb({ userDataDir, mainDb, runLocators }) {
+  const { DatabaseSync } = require('node:sqlite');
+  const memDb = new DatabaseSync(':memory:');
+  memDb.exec(runDataStore.SIDE_DB_DDL_BIZ_OP);
+  const groups = new Map();
+  runLocators.forEach((locator, sourceIndex) => {
+    const sourceKey = locator.sideDbRelPath || '<main>';
+    if (!groups.has(sourceKey)) groups.set(sourceKey, []);
+    groups.get(sourceKey).push({ locator, sourceIndex });
+  });
+  try {
+    for (const [sourceKey, selections] of groups) {
+      const sideDb = sourceKey === '<main>'
+        ? null
+        : runDataStore.openExistingSideDb(
+            runDataStore.resolveFromRel(userDataDir, sourceKey)
+          );
+      const srcDb = sideDb || mainDb;
+      try {
+        srcDb.exec('BEGIN');
+        for (const { locator, sourceIndex } of selections) {
+          copyRunIntoMemDb(srcDb, memDb, locator.date, locator.buName, {
+            runIdOffset: sourceIndex * RANGE_RUN_ID_STRIDE,
+            importIdOffset: sourceIndex * RANGE_IMPORT_ID_STRIDE,
+            sourceRunId: locator.sideRunId,
+            expectedArchiveTaskRunId: locator.archiveTaskRunId
+          });
+        }
+        srcDb.exec('COMMIT');
+      } catch (error) {
+        try { srcDb.exec('ROLLBACK'); } catch (_e) { /* swallow */ }
+        throw error;
+      } finally {
+        if (sideDb) { try { sideDb.close(); } catch (_e) { /* swallow */ } }
+      }
+    }
+    return memDb;
+  } catch (error) {
+    try { memDb.close(); } catch (_e) { /* swallow */ }
+    throw error;
+  }
+}
+
 // 把 srcDb 中某 (date,BU) 的最新 success run + 其 diff_rows + 涉及的 imports 行复制进 memDb，
 //   id 加偏移（run.id += runIdOffset，imports.id += importIdOffset；diff.run_id / diff.source_row_id 同步偏移），
 //   保持 run↔diff 与 diff↔imports 关系不变（writer getDiffRowsByRun + getRowById 自洽）。
-function copyRunIntoMemDb(srcDb, memDb, date, buName, { runIdOffset = 0, importIdOffset = 0 } = {}) {
+function copyRunIntoMemDb(srcDb, memDb, date, buName, {
+  runIdOffset = 0, importIdOffset = 0, sourceRunId = null,
+  expectedArchiveTaskRunId = null
+} = {}) {
   // srcDb 该 (date,BU) 最新 run（listSuccessDates 取 MAX(id)）。
-  const runRow = srcDb.prepare(`
-    SELECT * FROM ${RUNS_TABLE}
-    WHERE data_date = ? AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?)) AND status = 'success'
-    ORDER BY id DESC LIMIT 1
-  `).get(date, buName);
-  if (!runRow) return;
+  const runRow = sourceRunId == null
+    ? srcDb.prepare(`
+      SELECT * FROM ${RUNS_TABLE}
+      WHERE data_date = ? AND LOWER(TRIM(bu_name)) = LOWER(TRIM(?)) AND status = 'success'
+      ORDER BY id DESC LIMIT 1
+    `).get(date, buName)
+    : srcDb.prepare(`SELECT * FROM ${RUNS_TABLE} WHERE id = ? AND status = 'success'`).get(sourceRunId);
+  if (!runRow) {
+    if (sourceRunId != null) throw new Error('Biz OP frozen range run 不存在');
+    return;
+  }
+  if (sourceRunId != null && (runRow.data_date !== date
+      || session.normalizeBu(runRow.bu_name) !== session.normalizeBu(buName)
+      || (expectedArchiveTaskRunId && runRow.archive_task_run_id !== expectedArchiveTaskRunId))) {
+    throw new Error('Biz OP frozen range locator 与 run identity 不一致');
+  }
   const newRunId = runRow.id + runIdOffset;
   memDb.prepare(`
     INSERT OR REPLACE INTO ${RUNS_TABLE}
@@ -458,6 +801,9 @@ function copyRunIntoMemDb(srcDb, memDb, date, buName, { runIdOffset = 0, importI
     const selImp = srcDb.prepare(`SELECT id, ${dataCols.join(', ')} FROM biz_op_recon_imports WHERE id = ?`);
     for (const impId of neededImportIds) {
       const impRow = selImp.get(impId);
+      if (!impRow && sourceRunId != null) {
+        throw new Error(`Biz OP frozen range run 缺少 source row #${impId}`);
+      }
       if (impRow) insImp.run(impRow.id + importIdOffset, ...dataCols.map((c) => impRow[c]));
     }
   }
@@ -471,6 +817,258 @@ function recordExportPath({ mainDb, runId, exportPath }) {
 // 取主库镜像 run（导出 handler 校验用）。
 function getMirrorRun({ mainDb, runId }) {
   return runRepository.getRunById(mainDb, runId);
+}
+
+function statsFromRun(run) {
+  return {
+    t1OpTotal: run.t1_op_total,
+    t2OpTotal: run.t2_op_total,
+    flowTotal: run.flow_total,
+    amountDiffCount: run.amount_diff_count,
+    multiOpAccountCount: run.multi_op_account_count,
+    t2AnomalyAccountCount: run.t2_anomaly_account_count,
+    t1NotT2Count: run.t1_not_t2_count,
+    t2NotT1Count: run.t2_not_t1_count
+  };
+}
+
+function acknowledgeRunByTaskRun({ userDataDir, mainDb, taskRunId }) {
+  const mirror = runRepository.getRunByArchiveTaskRunId(mainDb, taskRunId);
+  if (!mirror || !mirror.side_db_rel_path) {
+    throw new Error('Biz OP TaskRun 对应的主库 run mirror 不存在');
+  }
+  const sideDb = runDataStore.openExistingSideDb(
+    runDataStore.resolveFromRel(userDataDir, mirror.side_db_rel_path)
+  );
+  try {
+    const sideRun = runRepository.getRunByArchiveTaskRunId(sideDb, taskRunId);
+    if (!sideRun) throw new Error('Biz OP TaskRun 对应的 side run receipt 不存在');
+    runRepository.acknowledgeArchiveTerminal(mainDb, mirror.id, taskRunId);
+    runRepository.acknowledgeArchiveTerminal(sideDb, sideRun.id, taskRunId);
+    return { mirror, sideRun };
+  } finally {
+    try { sideDb.close(); } catch (_e) { /* swallow */ }
+  }
+}
+
+function finalizeRunTerminalIntent({
+  route,
+  record,
+  terminalOutcome,
+  terminalResult,
+  userDataDir,
+  mainDb
+}) {
+  if (!route || route.route !== 'biz-op-run') {
+    throw new Error(`不支持的 Biz OP terminal 路由：${route && route.route || '<empty>'}`);
+  }
+  const actualStatus = terminalResult && terminalResult.taskRun
+    ? terminalResult.taskRun.status
+    : terminalOutcome && terminalOutcome.taskStatus;
+  if (actualStatus !== 'succeeded') return null;
+  const owner = record && record.payload && record.payload.owner;
+  const ownerTaskRunId = owner && owner.kind === 'operation'
+    ? owner.operationContext && owner.operationContext.taskRunId
+    : null;
+  if (ownerTaskRunId !== route.taskRunId) {
+    throw new Error('Biz OP terminal outbox owner 与 run receipt 不一致');
+  }
+  return acknowledgeRunByTaskRun({ userDataDir, mainDb, taskRunId: ownerTaskRunId });
+}
+
+function recoveryConflict(message) {
+  const error = new Error(message);
+  error.code = 'ARCHIVE_BIZ_OP_RUN_RECOVERY_CONFLICT';
+  error.blocksArchiveStartup = true;
+  return error;
+}
+
+async function bindRecoveredRunFlow({ archiveService, taskRun, mirrorRunId }) {
+  const identity = {
+    moduleId: BIZ_OP_MODULE_ID,
+    identityType: 'business-run-id',
+    identityValue: String(mirrorRunId),
+    parentRunId: taskRun.parentRunId,
+    sourceTaskRunId: taskRun.taskRunId
+  };
+  const bound = await archiveService.bindFlowAnchor(identity);
+  if (bound && bound.ok !== false) return;
+  const persisted = await archiveService.persistTaskFlowBindIntent(identity);
+  if (!persisted || persisted.ok === false) {
+    throw recoveryConflict(`Biz OP run mirror #${mirrorRunId} 的业务流程身份无法持久接管`);
+  }
+}
+
+async function recoverRunReceipts({ userDataDir, mainDb, archiveService }) {
+  let recovered = 0;
+  for (const file of runDataStore.listSideDbFiles(userDataDir, MODULE)) {
+    const sideDb = runDataStore.openSideDb(userDataDir, MODULE, file.monthKey);
+    try {
+      for (const receipt of runRepository.listUnacknowledgedArchiveRuns(sideDb)) {
+        const taskRun = archiveService.repository.getTaskRun(receipt.archive_task_run_id);
+        if (!taskRun || taskRun.moduleId !== BIZ_OP_MODULE_ID
+            || taskRun.taskKey !== BIZ_OP_RUN_TASK_KEY) {
+          throw recoveryConflict(`Biz OP run #${receipt.id} 的 Archive TaskRun 身份不一致`);
+        }
+        if (!['running', 'interrupted', 'succeeded'].includes(taskRun.status)) {
+          throw recoveryConflict(
+            `Biz OP run #${receipt.id} 的 Archive TaskRun 已由 ${taskRun.status} 终结`
+          );
+        }
+        if (taskRun.status === 'interrupted') {
+          const reopened = await archiveService.beginTaskRunRecovery(taskRun.taskRunId);
+          if (!reopened || reopened.ok === false) {
+            throw recoveryConflict(`Biz OP run #${receipt.id} 的 Archive TaskRun 无法恢复`);
+          }
+        }
+        const expectedRelPath = runDataStore.sideDbRelPath(MODULE, file.monthKey);
+        let mirror = runRepository.getRunByArchiveTaskRunId(mainDb, taskRun.taskRunId);
+        if (mirror && (mirror.data_date !== receipt.data_date
+            || session.normalizeBu(mirror.bu_name) !== session.normalizeBu(receipt.bu_name)
+            || mirror.side_db_rel_path !== expectedRelPath)) {
+          throw recoveryConflict(`Biz OP run #${receipt.id} 的主库 mirror 与 side receipt 不一致`);
+        }
+        if (!mirror && taskRun.status === 'succeeded') {
+          runRepository.acknowledgeArchiveTerminal(sideDb, receipt.id, taskRun.taskRunId);
+          recovered += 1;
+          continue;
+        }
+        if (!mirror) {
+          const mirrorId = upsertMainRunMirror(mainDb, {
+            date: receipt.data_date,
+            buName: receipt.bu_name,
+            relPath: expectedRelPath,
+            stats: statsFromRun(receipt),
+            status: 'success',
+            archiveTaskRunId: taskRun.taskRunId
+          });
+          mirror = runRepository.getRunById(mainDb, mirrorId);
+        }
+        await bindRecoveredRunFlow({
+          archiveService,
+          taskRun,
+          mirrorRunId: mirror.id
+        });
+        if (taskRun.status !== 'succeeded') {
+          const locator = `biz-op:${mirror.side_db_rel_path}#${receipt.id}`;
+          const finished = await archiveService.finishTaskRun(taskRun.taskRunId, {
+            taskStatus: 'succeeded',
+            metadata: { bizOpRunLocator: locator }
+          });
+          if (!finished || finished.ok === false) {
+            throw recoveryConflict(`Biz OP run #${receipt.id} 的 Archive terminal 未完成`);
+          }
+        }
+        runRepository.acknowledgeArchiveTerminal(mainDb, mirror.id, taskRun.taskRunId);
+        runRepository.acknowledgeArchiveTerminal(sideDb, receipt.id, taskRun.taskRunId);
+        recovered += 1;
+      }
+    } finally {
+      try { sideDb.close(); } catch (_e) { /* swallow */ }
+    }
+  }
+  return { recovered };
+}
+
+function fileBatchOwnerForCopyIntent(archiveService, taskRun) {
+  const batch = archiveService.repository.getBatchByOperationKey(
+    taskRun.moduleId,
+    taskRun.operationKey
+  );
+  if (!batch || batch.taskRunId !== taskRun.taskRunId) {
+    throw monthEndCopyConflict('Biz OP 月末复制的 Archive File Batch 身份不一致');
+  }
+  return {
+    batch,
+    batchContext: {
+      batchId: batch.id,
+      batchNumber: batch.batchNumber,
+      taskRunId: batch.taskRunId,
+      taskKey: batch.taskKey,
+      moduleId: batch.moduleId,
+      parentRunId: batch.parentRunId,
+      operationKey: batch.operationKey
+    },
+    manifest: batch.metadata._fileManifest
+  };
+}
+
+async function recoverMonthEndCopyIntents({ userDataDir, archiveService }) {
+  let recovered = 0;
+  for (const file of runDataStore.listSideDbFiles(userDataDir, MODULE)) {
+    const sourceDb = runDataStore.openSideDb(userDataDir, MODULE, file.monthKey);
+    let intents;
+    try {
+      intents = monthEndCopyIntents.list(sourceDb);
+    } finally {
+      sourceDb.close();
+    }
+    for (const intent of intents) {
+      try {
+        const taskRun = archiveService.repository.getTaskRun(intent.sourceTaskRunId);
+        if (!taskRun || taskRun.moduleId !== BIZ_OP_MODULE_ID
+            || taskRun.taskKey !== BIZ_OP_IMPORT_TASK_KEY) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive TaskRun 身份不一致');
+        }
+        if (taskRun.status === 'succeeded') {
+          assertTargetCopyApplied({ userDataDir, intent });
+          acknowledgeMonthEndCopyIntent({
+            userDataDir,
+            dataDate: intent.dataDate,
+            sourceTaskRunId: intent.sourceTaskRunId
+          });
+          recovered += 1;
+          continue;
+        }
+        if (!['running', 'interrupted'].includes(taskRun.status)) {
+          throw monthEndCopyConflict(
+            `Biz OP 月末复制的 Archive TaskRun 已由 ${taskRun.status} 终结`
+          );
+        }
+        const owner = fileBatchOwnerForCopyIntent(archiveService, taskRun);
+        const reopened = await archiveService.beginFileTaskRecovery(owner.batchContext, {
+          manifestIdentity: owner.manifest.identity
+        });
+        if (!reopened || reopened.ok === false) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive File Task 无法恢复');
+        }
+        const settled = await archiveService.settleManifestArtifacts({
+          batchContext: owner.batchContext,
+          files: owner.manifest.artifactKeys
+            .map((artifactKey) => ({ artifactKey }))
+        });
+        if (!settled || settled.durable !== true) {
+          throw monthEndCopyConflict('Biz OP 月末复制的输入 evidence 未形成耐久结果');
+        }
+        applyMonthEndCopyIntent({
+          userDataDir,
+          sourceMonth: file.monthKey,
+          sourceTaskRunId: intent.sourceTaskRunId
+        });
+        const finished = await archiveService.finishFileTask(
+          intent.sourceTaskRunId,
+          owner.batch.id,
+          {
+            taskStatus: 'succeeded',
+            metadata: { bizOpMonthEndCopyRecovered: true }
+          }
+        );
+        if (!finished || finished.ok === false) {
+          throw monthEndCopyConflict('Biz OP 月末复制的 Archive terminal 未完成');
+        }
+        acknowledgeMonthEndCopyIntent({
+          userDataDir,
+          dataDate: intent.dataDate,
+          sourceTaskRunId: intent.sourceTaskRunId
+        });
+        recovered += 1;
+      } catch (error) {
+        if (error && error.blocksArchiveStartup === true) throw error;
+        throw monthEndCopyConflict('Biz OP 月末复制恢复失败', error);
+      }
+    }
+  }
+  return { recovered };
 }
 
 // ── retention / 孤儿双向兜底 ──
@@ -566,6 +1164,9 @@ module.exports = {
   runBizOpImport,
   runFlowImport,
   runViaSideDb,
+  prepareRunLineage,
+  applyMonthEndCopyIntent,
+  acknowledgeMonthEndCopyIntent,
   getStatusDualSource,
   listBuDualSource,
   checkSingleDayDualSource,
@@ -573,9 +1174,17 @@ module.exports = {
   listSuccessDatesDualSource,
   listRunsDualSource,
   openExportContextByRun,
+  openExportContextByLocator,
+  freezeRunLocator,
+  freezeRangeRunSelection,
   buildRangeExportDb,
+  buildFrozenRangeExportDb,
   recordExportPath,
   getMirrorRun,
+  acknowledgeRunByTaskRun,
+  finalizeRunTerminalIntent,
+  recoverRunReceipts,
+  recoverMonthEndCopyIntents,
   deleteMonthSideDb,
   reconcileOrphans,
   upsertMainRunMirror

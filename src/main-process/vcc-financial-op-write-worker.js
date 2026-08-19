@@ -2,8 +2,8 @@
 
 const { parentPort, workerData } = require('node:worker_threads');
 const {
-  freezeWorkerBatchContext
-} = require('./archive-center/worker-batch-context');
+  freezeWorkerOperationContext
+} = require('./archive-center/worker-operation-context');
 const {
   VCC_MUTATION_OPERATIONS
 } = require('../backend/vcc-financial-op/mutation-policy');
@@ -88,7 +88,10 @@ async function run() {
   const rawPayload = workerData && workerData.payload || {};
   const payload = {
     ...rawPayload,
-    batchContext: freezeWorkerBatchContext(rawPayload.batchContext, { required: true })
+    operationContext: freezeWorkerOperationContext(
+      rawPayload.operationContext,
+      { required: true }
+    )
   };
   await enterCriticalSection(action, payload);
   const execute = [

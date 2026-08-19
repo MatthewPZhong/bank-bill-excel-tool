@@ -79,19 +79,22 @@ test('用户取消导入返回 cancelled，其他异常仍返回 failed', () => 
   });
 });
 
-test('worker 接受取消后先把原批次 cancelled 意图写入 pending，供崩溃恢复', async () => {
+test('worker 接受 no-file 取消后把 operation owner cancelled 意图写入 pending，供崩溃恢复', async () => {
+  const operationContext = {
+    taskRunId: 'position-cancel-token',
+    taskKey: 'position-reconciliation:mappings:save',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-parent',
+    operationKey: 'position:position-cancel-token:mappings-save'
+  };
   const pending = {
     operationToken: 'position-cancel-token',
-    channel: 'position-reconciliation:source:apply-import',
+    channel: 'position-reconciliation:mappings:save',
     businessState: 'running',
-    batchContext: {
-      batchId: 91,
-      batchNumber: 'POSITION-20260813-091',
-      taskRunId: 'position-cancel-token',
-      taskKey: 'position-reconciliation:source:apply-import',
-      moduleId: 'position-reconciliation-process',
-      parentRunId: 'position-parent',
-      operationKey: 'position:position-cancel-token:source-apply'
+    owner: {
+      version: 1,
+      kind: 'operation',
+      operationContext
     }
   };
   const cancelled = positionCancellationAcceptedPending(pending);
@@ -101,24 +104,72 @@ test('worker 接受取消后先把原批次 cancelled 意图写入 pending，供
     code: 'POSITION_OPERATION_CANCELLED',
     message: '用户取消平盘对账导入任务'
   });
-  assert.deepEqual(cancelled.batchContext, pending.batchContext);
+  assert.deepEqual(cancelled.owner, pending.owner);
 
   const calls = [];
   const settled = await settlePositionRecoveredTask({
     pending: cancelled,
     archiveService: {
-      async getBatch() {
-        return { ok: true, batch: { ...pending.batchContext, id: 91, taskStatus: 'running' } };
+      repository: {
+        getTaskRun() {
+          return { ...operationContext, status: 'running' };
+        }
       },
-      async cancelTaskBatch(batchId, options) {
-        calls.push({ batchId, options });
-        return { ok: true, batch: { taskStatus: 'cancelled' } };
+      async finishTaskRun(taskRunId, outcome) {
+        calls.push({ taskRunId, outcome });
+        return { ok: true, taskRun: { status: 'cancelled' } };
       }
     }
   });
-  assert.equal(settled.outcome.taskStatus, 'cancelled');
+  assert.equal(settled.taskRun.status, 'cancelled');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].batchId, 91);
+  assert.equal(calls[0].taskRunId, operationContext.taskRunId);
+  assert.equal(calls[0].outcome.taskStatus, 'cancelled');
+});
+
+test('interrupted operation owner 启动恢复先 reopen running 再写终态', async () => {
+  const operationContext = {
+    taskRunId: 'position-interrupted-token',
+    taskKey: 'position-reconciliation:run',
+    moduleId: 'position-reconciliation-process',
+    parentRunId: 'position-interrupted-parent',
+    operationKey: 'position:position-interrupted-token:run'
+  };
+  let status = 'interrupted';
+  const calls = [];
+  const settled = await settlePositionRecoveredTask({
+    pending: {
+      operationToken: operationContext.taskRunId,
+      businessState: 'success',
+      owner: {
+        version: 1,
+        kind: 'operation',
+        operationContext
+      }
+    },
+    archiveService: {
+      repository: {
+        getTaskRun() {
+          return { ...operationContext, status };
+        }
+      },
+      async beginTaskRunRecovery(taskRunId) {
+        calls.push(['reopen', taskRunId]);
+        status = 'running';
+        return { ok: true, taskRun: { ...operationContext, status } };
+      },
+      async finishTaskRun(taskRunId, outcome) {
+        calls.push(['finish', taskRunId, outcome.taskStatus]);
+        status = outcome.taskStatus;
+        return { ok: true, taskRun: { ...operationContext, status } };
+      }
+    }
+  });
+  assert.equal(settled.taskRun.status, 'succeeded');
+  assert.deepEqual(calls, [
+    ['reopen', operationContext.taskRunId],
+    ['finish', operationContext.taskRunId, 'succeeded']
+  ]);
 });
 
 test('暂存保护集合同时包含持久 outbox 与当前主库 pending 输入', () => {
@@ -434,7 +485,12 @@ function recoveredTaskFixture(terminalOutcome) {
       terminalOutcome
     },
     archiveService: {
-      getBatch: async () => ({ ok: true, batch: { ...batch } }),
+      getBatch() {
+        throw new Error('恢复不得经过 public visible batch 查询');
+      },
+      repository: {
+        getBatch: () => ({ ...batch })
+      },
       completeTaskBatch: (_id, payload) => success('succeeded', payload),
       failTaskBatch: (_id, payload) => success('failed', payload),
       cancelTaskBatch: (_id, payload) => success('cancelled', payload)
@@ -473,6 +529,24 @@ test('启动恢复按持久真实异常 outcome 终结原 task 为 failed', asyn
   assert.equal(fixture.calls[0][1].code, 'position-worker-crashed');
 });
 
+test('新 manifest owner 启动恢复只用 finishFileTask 收口原 TaskRun 与批次', async () => {
+  const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
+  const getBatch = fixture.archiveService.repository.getBatch;
+  fixture.archiveService.repository.getBatch = (batchId) => ({
+    ...getBatch(batchId),
+    metadata: { _fileManifest: { version: 1, identity: 'manifest-91' } }
+  });
+  fixture.archiveService.finishFileTask = async (taskRunId, batchId, outcome) => {
+    fixture.calls.push(['file-succeeded', { taskRunId, batchId, outcome }]);
+    return { ok: true, batch: { taskStatus: 'succeeded' } };
+  };
+  const settled = await settlePositionRecoveredTask(fixture);
+  assert.equal(settled.outcome.taskStatus, 'succeeded');
+  assert.deepEqual(fixture.calls.map((call) => call[0]), ['file-succeeded']);
+  assert.equal(fixture.calls[0][1].taskRunId, fixture.pending.batchContext.taskRunId);
+  assert.equal(fixture.calls[0][1].batchId, fixture.pending.batchContext.batchId);
+});
+
 test('启动恢复仅把与目标一致的既有终态视为幂等，冲突终态 fail-closed', async () => {
   const same = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
   same.archiveService.completeTaskBatch = async () => ({
@@ -496,30 +570,23 @@ test('启动恢复仅把与目标一致的既有终态视为幂等，冲突终�
   );
 });
 
-test('启动恢复通过 ArchiveService facade 读不到原批次时失败', async () => {
+test('启动恢复通过 raw repository 读不到原批次时失败', async () => {
   const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
-  fixture.archiveService.getBatch = async () => ({
-    ok: false,
-    code: 'ARCHIVE_BATCH_NOT_FOUND',
-    message: '存档批次不存在'
-  });
+  fixture.archiveService.repository.getBatch = () => null;
   await assert.rejects(
     settlePositionRecoveredTask(fixture),
-    /存档批次不存在/
+    /原任务批次不存在/
   );
   assert.deepEqual(fixture.calls, []);
 });
 
 test('启动恢复拒绝终结与持久 batchContext 身份不一致的批次', async () => {
   const fixture = recoveredTaskFixture({ taskStatus: 'succeeded', code: '', message: '' });
-  const originalGetBatch = fixture.archiveService.getBatch;
-  fixture.archiveService.getBatch = async (batchId) => {
-    const lookup = await originalGetBatch(batchId);
-    return {
-      ...lookup,
-      batch: { ...lookup.batch, operationKey: 'position:another-operation' }
-    };
-  };
+  const originalGetBatch = fixture.archiveService.repository.getBatch;
+  fixture.archiveService.repository.getBatch = (batchId) => ({
+    ...originalGetBatch(batchId),
+    operationKey: 'position:another-operation'
+  });
   await assert.rejects(
     settlePositionRecoveredTask(fixture),
     /batchContext 与原任务批次身份不一致/
@@ -977,32 +1044,22 @@ test('主进程异常报告存档意图保留预检声明的输入依赖', () =>
   );
 });
 
-test('异常报告与筛选结果均在 writer 前登记 output intent，取消 ACK 接原批次 CAS', () => {
+test('atomic Position 在业务前登记 frozen manifest，取消 ACK 接原批次 CAS', () => {
   const mainSource = fs.readFileSync(
     path.resolve(__dirname, '../../../src/main.js'),
     'utf8'
   );
-  const anomalyStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:source:export-anomaly'");
-  const cancelStart = mainSource.indexOf("ipcMain.handle('position-reconciliation:import:cancel'", anomalyStart);
-  const filteredStart = mainSource.indexOf("trackedIpcHandle('position-reconciliation:run:export-filtered'");
-  const importResultOffset = mainSource.slice(filteredStart).search(
-    /trackedIpcHandle\(\r?\n\s*'position-reconciliation:run:import-result'/
+  const wrapperStart = mainSource.indexOf('const executePositionBusiness');
+  const atomicStart = mainSource.indexOf('if (!useLegacyExistingBatchRecovery) {', wrapperStart);
+  const businessStart = mainSource.indexOf('result = await executeBusiness(taskContext)', atomicStart);
+  const intentStart = mainSource.indexOf('recordPositionFilePlanIntent(', atomicStart);
+  assert.ok(atomicStart >= 0 && intentStart > atomicStart && businessStart > intentStart);
+  assert.match(
+    mainSource,
+    /const runFileLifecycle = !useLegacyExistingBatchRecovery[\s\S]*?runFileTask\.bind\(archiveTaskLifecycle\)/
   );
-  const importResultStart = importResultOffset < 0 ? -1 : filteredStart + importResultOffset;
-  assert.ok(anomalyStart >= 0 && cancelStart > anomalyStart);
-  assert.ok(filteredStart >= 0 && importResultStart > filteredStart);
-  const anomaly = mainSource.slice(anomalyStart, cancelStart);
-  const filtered = mainSource.slice(filteredStart, importResultStart);
-  assert.ok(
-    anomaly.indexOf("recordPositionArchiveIntentFiles([prepared.savePath], 'output')")
-      < anomaly.indexOf('exportAnomalyReport('),
-    '异常报告必须先登记 output intent 再发布'
-  );
-  assert.ok(
-    filtered.indexOf("recordPositionArchiveIntentFiles([prepared.savePath], 'output')")
-      < filtered.indexOf('exportRunFilteredSources('),
-    '筛选结果必须先登记 output intent 再发布'
-  );
+  assert.doesNotMatch(mainSource, /recordPositionArchiveIntentFiles\(\[prepared\.savePath\]/);
+  const cancelStart = mainSource.indexOf("ipcMain.handle('position-reconciliation:import:cancel'");
   const cancelEndOffset = mainSource.slice(cancelStart).search(
     /trackedIpcHandle\(\r?\n\s*'position-reconciliation:mappings:save'/
   );
@@ -1063,4 +1120,22 @@ test('普通来源 manifest 与 pending 文件证据不一致时禁止签发 gra
     /文件证据与预检 manifest 不一致/
   );
   assert.equal(pending.archiveManifestHash, undefined);
+});
+
+test('atomic Position wrapper 以完整 frozen manifest 单次 settle，不再调用 legacy result/error settle', () => {
+  const mainSource = fs.readFileSync(
+    path.resolve(__dirname, '../../../src/main.js'),
+    'utf8'
+  );
+  const wrapperStart = mainSource.indexOf('const executePositionBusiness');
+  const start = mainSource.indexOf('if (!useLegacyExistingBatchRecovery) {', wrapperStart);
+  const firstReturn = mainSource.indexOf('return result;', start);
+  const end = mainSource.indexOf('\n          let result;', firstReturn + 1);
+  assert.ok(start >= 0 && end > start);
+  const atomic = mainSource.slice(start, end);
+  assert.match(atomic, /recordPositionFilePlanIntent\(/);
+  assert.match(atomic, /\.\.\.taskContext\.fileEvidence\.filePlan\.inputs/);
+  assert.match(atomic, /\.\.\.taskContext\.fileEvidence\.filePlan\.outputs/);
+  assert.match(atomic, /settled && settled\.durable === true/);
+  assert.doesNotMatch(atomic, /settlePositionArchiveResult|result:\s*result|error:\s*operationError/);
 });

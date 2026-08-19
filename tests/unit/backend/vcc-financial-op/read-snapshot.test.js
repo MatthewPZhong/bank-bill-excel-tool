@@ -312,10 +312,6 @@ test('B-03 token canonical payload 对集合顺序稳定，generation 变化必�
     taskActive: false,
     activeBatchIds: ['batch-b', 'batch-a'],
     importingRecordIds: [9, 3],
-    unresolvedRecords: [
-      { id: 8, sourceType: SOURCE_TYPES.FEE_FX, status: 'failed_validation', resolutionStatus: 'unresolved' },
-      { id: 2, sourceType: SOURCE_TYPES.RECHARGE, status: 'failed_validation', resolutionStatus: 'unresolved' }
-    ],
     laterDependencies: []
   };
   const first = buildOperationTokenV2({
@@ -335,8 +331,7 @@ test('B-03 token canonical payload 对集合顺序稳定，generation 变化必�
     gateEvidence: {
       ...baseGate,
       activeBatchIds: [...baseGate.activeBatchIds].reverse(),
-      importingRecordIds: [...baseGate.importingRecordIds].reverse(),
-      unresolvedRecords: [...baseGate.unresolvedRecords].reverse()
+      importingRecordIds: [...baseGate.importingRecordIds].reverse()
     }
   });
   const nextGeneration = buildOperationTokenV2({
@@ -392,7 +387,7 @@ test('B-04 archive 0/1/100 候选均固定十条 SQL，且不读取禁表', () =
   db.close();
 });
 
-test('B-05 active months 保留 orphan/未决可见性，并使用既有 effective covering index', () => {
+test('B-05 active months 保留 orphan/失败审计可见性，并使用既有 effective covering index', () => {
   const db = createMigratedDb();
   db.prepare(`
     INSERT INTO vcc_fin_op_opening_balances (
@@ -427,10 +422,9 @@ test('B-05 active months 保留 orphan/未决可见性，并使用既有 effecti
   `).run();
   db.prepare(`
     INSERT INTO vcc_fin_op_import_records (
-      batch_id, target_month, source_type, source_files_json, status,
-      resolution_status, started_at
+      batch_id, target_month, source_type, source_files_json, status, started_at
     ) VALUES ('active-batch', '2026-07', ?, '[]', 'failed_validation',
-      'unresolved', '2026-08-01 00:00:00')
+      '2026-08-01 00:00:00')
   `).run(SOURCE_TYPES.FEE_FX);
   const result = listActiveMonthsSnapshot(db, { taskGeneration: 8 });
   assert.deepEqual(result.months, ['2026-07', '2026-06', '2026-05', '2026-04']);

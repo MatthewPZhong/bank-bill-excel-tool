@@ -238,7 +238,7 @@ async function main() {
   console.log('[T12-6] 导出汇总差异 xlsx');
   const aggrOut = path.join(TMP, 'diff-aggregate.xlsx');
   const t_aggr0 = Date.now();
-  const aggrRes = writer.exportAggregate(db, aggrOut);
+  const aggrRes = writer.exportAggregateLegacy(db, aggrOut);
   const aggrDurMs = Date.now() - t_aggr0;
   const aggrSize = fs.existsSync(aggrOut) ? fs.statSync(aggrOut).size : 0;
   console.log(`  耗时: ${formatMs(aggrDurMs)}  文件: ${aggrOut}  大小: ${formatBytes(aggrSize)}`);

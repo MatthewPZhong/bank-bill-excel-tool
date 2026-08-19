@@ -155,3 +155,20 @@
 - [x] 结果确认页勾选区与横线增距；【修改结果】与右侧按钮同轴；九币种/调整值统计表头和单元格全部右对齐。
 - [x] 定向 113/113、扩大 443/443、主页面 Electron 6/6 PASS；默认/150%/最小窗口三张结果 preview 人工通过。
 - [ ] ⚠️ 重启开发应用执行真实 DB 启动迁移，并人工核对 2026-06 解归档月份、逐主体九币种金额与审计。
+
+## 存档中心非空文件批次收口（2026-08-17，待实施）
+
+- [x] 完成只读实库盘点：95 个批次中 34 个零 artifact、8 个 failed-only 文件批次；冻结“有效 pending/ready/failed 文件 artifact 均算内容，零 artifact 才隐藏”的口径。
+- [x] 查明 `2026-08-13-017` / `2026-08-13-018`：工具箱多文件拆分把输出目录误当 input，真实 1 input + 2 output 均 ready，目录伪 artifact 导致 incomplete。
+- [x] 查明 `2026-08-17-001`：合表 `beforeStart` 修改 prepare 原对象，IPC 规范化副本丢失 `inputFiles`，发布前失败；旧批次真实为 2 input + 0 output。
+- [ ] 建立唯一 server-side `visible file batch` predicate，并统一接入列表、公共详情、统计、latest 和 related；内部恢复/审计读取不套该过滤。
+- [ ] 将 action policy 全量盘点为 `file-manifest` / `no-archive-artifact`；纯状态、配置、计算动作不 reserve、不写 issuance，但保留业务 audit/BOR/退出与升级闸门。
+- [ ] 新增原子 `reserve file batch + non-empty artifact manifest` 边界；输入/输出 intent 合法性、事务回滚、并发唯一性和瞬时 UI 可见性先写红测。
+- [ ] 将无文件动作后的 flow identity 绑定改为稳定业务 anchor 或首个文件批次，不使用 hidden/latest batch fallback；related 只返回可见文件批次。
+- [ ] 修复 dialog evidence 角色：`openDirectory/createDirectory` 不进入输入解析；工具箱拆表使用显式 `prepared.inputPaths/inputFiles`，避免目录伪 artifact。
+- [ ] 修复合表证据传递：`beforeStart` 返回结构化 evidence，生命周期显式写入规范化 prepared 并传给 runtime/publication；保留防御性对象复制。
+- [ ] 编写历史零 artifact 前端兼容：隐藏但不删库、不重编号、不复用 issuance；运行次数/latest 改按可见文件批次统计。
+- [ ] 为 `2026-08-13-017` / `2026-08-13-018` 编写精确、幂等、先 dry-run 后执行的历史修复；只清理/隔离两个输出目录伪 artifact并重算 complete。
+- [ ] 保留 `2026-08-17-001` 为 failed、2 input、0 output；不伪造 output/成功/journal，修复后真实重跑生成新批次。
+- [ ] 完成 Test Spec §二十四 NFB-01—NFB-18、相关聚焦测试、`release-check`、`check-vars` 与真实 UI 人工验收。
+- [ ] 更新 CHANGELOG、VERSION_FEATURE_HISTORY、USER_GUIDE；明确不新增状态动作时间线，不改金额/币种/Excel 算法。

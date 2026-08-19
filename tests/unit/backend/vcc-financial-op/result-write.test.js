@@ -204,6 +204,26 @@ function execute(dbPath, action, payload, options = {}) {
   });
 }
 
+function seedLegacyUnresolvedAttempt(dbPath, targetMonth) {
+  const db = new DatabaseSync(dbPath);
+  db.exec('PRAGMA foreign_keys = ON');
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_batches (
+      id, target_month, status, file_count, started_at, finished_at
+    ) VALUES ('legacy-unresolved', ?, 'failed', 1,
+      '2026-08-11 08:00:00', '2026-08-11 08:01:00')
+  `).run(targetMonth);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_records (
+      batch_id, target_month, source_type, source_files_json, status,
+      resolution_status, started_at, finished_at
+    ) VALUES ('legacy-unresolved', ?, 'recharge_refund', '[]',
+      'failed_validation', 'unresolved',
+      '2026-08-11 08:00:00', '2026-08-11 08:01:00')
+  `).run(targetMonth);
+  db.close();
+}
+
 test('adjustment locked plan 精确提交 2 个变化并保留 immutable success evidence', (t) => {
   const dbPath = createTempDb(t);
   const raw = seedCurrentCalculated(dbPath);
@@ -223,10 +243,12 @@ test('adjustment locked plan 精确提交 2 个变化并保留 immutable success
   assert.equal(after.rollbackAudit, before.rollbackAudit);
 });
 
-test('archive locked plan 精确提交 N+7，并保存 A 验证后的 effectiveCalculatedBalance', (t) => {
+test('archive 忽略旧 unresolved 失败审计并按 N+7 提交生效余额', (t) => {
   const dbPath = createTempDb(t);
   const raw = seedCurrentCalculated(dbPath);
+  seedLegacyUnresolvedAttempt(dbPath, raw.targetMonth);
   const evidence = preview(dbPath, raw.runs[0].id);
+  assert.equal(Object.hasOwn(evidence.gateEvidence, 'unresolvedRecords'), false);
   const result = execute(
     dbPath,
     VCC_MUTATION_OPERATIONS.ARCHIVE_RESULT,

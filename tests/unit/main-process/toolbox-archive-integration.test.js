@@ -117,7 +117,7 @@ function buildSplitReadContextHarness() {
 
 function buildToolboxRecoveryBatchIdsReader(fsImpl = fs) {
   const start = mainSource.indexOf('function readToolboxRecoveryBatchIds(userDataDir)');
-  const end = mainSource.indexOf('\nfunction recoverPositionPendingBeforeInterruptedSweep()', start);
+  const end = mainSource.indexOf('\nasync function recoverPositionPendingBeforeInterruptedSweep()', start);
   assert.ok(start >= 0 && end > start, '应定位 Toolbox recovery index 读取实现');
   const source = mainSource.slice(start, end);
   return Function(
@@ -127,6 +127,25 @@ function buildToolboxRecoveryBatchIdsReader(fsImpl = fs) {
     'freezeWorkerBatchContext',
     `${source}\nreturn readToolboxRecoveryBatchIds;`
   )(fsImpl, path, JOURNAL_INDEX_NAME, freezeWorkerBatchContext);
+}
+
+function buildPositionPendingRecoveryOwner({ database, getService, recoveryPromise }) {
+  const start = mainSource.indexOf('async function recoverPositionPendingBeforeInterruptedSweep()');
+  const end = mainSource.indexOf('\nfunction recoverPendingRunsBeforeInterruptedSweep()', start);
+  assert.ok(start >= 0 && end > start, '应定位 Position pending owner recovery');
+  const source = mainSource.slice(start, end);
+  return Function(
+    'database',
+    'POSITION_SIDE_DB_PENDING_SETTING',
+    'getPositionReconciliationService',
+    'positionPendingRecoveryPromise',
+    `${source}\nreturn recoverPositionPendingBeforeInterruptedSweep;`
+  )(
+    database,
+    'position_reconciliation_side_db_pending_v1',
+    getService,
+    recoveryPromise
+  );
 }
 
 test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execute 前完成', () => {
@@ -143,6 +162,13 @@ test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execu
   const exportExecute = exportSource.indexOf('async execute(_event, prepared, taskContext)');
   const mergePrepareSource = mergeSource.slice(0, mergeExecute);
   const exportPrepareSource = exportSource.slice(0, exportExecute);
+  const mergeExecuteSource = mergeSource.slice(mergeExecute);
+  const exportExecuteSource = exportSource.slice(exportExecute);
+  const publicationStart = mainSource.indexOf('async function publishToolboxArtifacts(');
+  const publicationEnd = mainSource.indexOf('\nfunction ', publicationStart + 1);
+  const publicationSource = mainSource.slice(publicationStart, publicationEnd);
+  assert.match(publicationSource, /settled\.durable !== true/);
+  assert.doesNotMatch(publicationSource, /settled\.ok === false/);
 
   assert.ok(!readSource.includes("trackedIpcHandle('toolbox:split:read'"));
   assert.ok(!readSource.includes('batchContext'));
@@ -151,17 +177,25 @@ test('split read 只走裸 preview IPC，merge/export 的全部 dialog 在 execu
   assert.ok(mergePrepareSource.match(/proceed: false/g).length >= 2);
   assert.ok(!mergePrepareSource.includes('toolboxMergeFilesToXlsx'));
   assert.ok(mergePrepareSource.includes('assertToolboxTargetsDoNotAliasSources'));
-  assert.ok(mergePrepareSource.includes('captureToolboxTargetSnapshots'));
-  assert.ok(mergePrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
+  assert.ok(mergePrepareSource.includes('filePlan'));
+  assert.ok(!mergePrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
   assert.ok(mergeSource.indexOf('toolboxMergeFilesToXlsx') > mergeExecute);
   assert.ok(exportPrepareSource.includes("showImportOpenDialog('toolbox-split-export-directory'"));
   assert.ok(exportPrepareSource.includes('showSaveDialog'));
   assert.ok(exportPrepareSource.match(/proceed: false/g).length >= 4);
   assert.ok(!exportPrepareSource.includes('exportToolboxFilter'));
   assert.ok(exportPrepareSource.includes('assertToolboxTargetsDoNotAliasSources'));
-  assert.ok(exportPrepareSource.includes('captureToolboxTargetSnapshots'));
-  assert.ok(exportPrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
+  assert.ok(exportPrepareSource.includes('filePlan'));
+  assert.ok(!exportPrepareSource.includes('assertToolboxTargetSnapshotsFresh'));
   assert.ok(exportSource.indexOf('exportToolboxFilter') > exportExecute);
+  assert.match(mergeExecuteSource, /fileEvidence\.filePlan\.outputs\[0\]\.filePath/);
+  assert.doesNotMatch(mergeExecuteSource, /prepared\.(?:savePath|outputPaths|filePaths|inputPaths)/);
+  assert.match(exportExecuteSource, /fileEvidence\.filePlan\.outputs/);
+  assert.doesNotMatch(
+    exportExecuteSource,
+    /prepared\.(?:savePath|outputPaths|filePaths|inputPaths|outputDirectory)/
+  );
+  assert.doesNotMatch(exportExecuteSource, /targetPlans\[[^\]]+\]\.targetPath/);
 });
 
 test('committed 恢复输出携 exact7 回原批次，output descriptor 显式标记方向', () => {
@@ -200,6 +234,73 @@ test('committed 恢复输出携 exact7 回原批次，output descriptor 显式�
       < startupSource.indexOf('if (toolboxStartupRecoveryError) throw toolboxStartupRecoveryError'),
     'Toolbox owner 失败必须在 ArchiveCenter 保留批次后继续阻断启动放行'
   );
+});
+
+test('Position owner 等待实际异步恢复，失败时保留 pending 并阻止 generic sweep', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'position-owner-recovery-failure-'));
+  const db = new DatabaseSync(path.join(root, 'tool-data.sqlite'));
+  t.after(() => {
+    db.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const pendingRaw = JSON.stringify({ operationToken: 'position-pending-recovery' });
+  const settings = new Map([
+    ['position_reconciliation_side_db_pending_v1', pendingRaw]
+  ]);
+  let rejectRecovery;
+  const recoveryPromise = new Promise((_resolve, reject) => {
+    rejectRecovery = reject;
+  });
+  let serviceCalls = 0;
+  let markOwnerEntered;
+  const ownerEntered = new Promise((resolve) => {
+    markOwnerEntered = resolve;
+  });
+  const recover = buildPositionPendingRecoveryOwner({
+    database: {
+      db,
+      getSetting: (key) => settings.get(key) || ''
+    },
+    getService: () => {
+      serviceCalls += 1;
+      markOwnerEntered();
+      return {};
+    },
+    recoveryPromise
+  });
+  assert.match(
+    mainSource,
+    /positionPendingRecoveryPromise = Promise\.resolve\(recoveryTask\)[\s\S]*?readPositionPendingOperation\(\)/
+  );
+
+  const service = createArchiveService({
+    database: db,
+    rootDir: path.join(root, 'archive')
+  });
+  let sweepCalls = 0;
+  service.markInterruptedTasks = async () => {
+    sweepCalls += 1;
+    return { ok: true, taskCount: 0, batchIds: [] };
+  };
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: (key) => settings.get(key) || null,
+      setSetting: (key, value) => settings.set(key, value),
+      listTemplates: () => []
+    },
+    service,
+    recoverInterruptedTaskOwners: [{ ownerName: 'Position', recover }]
+  });
+  const initializing = controller.initialize();
+  await ownerEntered;
+  assert.equal(serviceCalls, 1);
+  rejectRecovery(new Error('position recovery async failure'));
+  await assert.rejects(
+    initializing,
+    (error) => error && error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+  );
+  assert.equal(sweepCalls, 0);
+  assert.equal(settings.get('position_reconciliation_side_db_pending_v1'), pendingRaw);
 });
 
 test('after-committed 崩溃首次完整启动即归档 ready + task succeeded，第二次启动幂等', async (t) => {
@@ -606,8 +707,7 @@ test('损坏 outbox 不短路 Toolbox owner 且阻断新发布，修复后重启
     assert.deepEqual(error.owners, ['Toolbox']);
     return true;
   });
-  assert.equal(toolboxRecoveryCalls, 1, 'initial outbox 失败后仍必须调用 Toolbox owner');
-  assert.ok(blockedStartup.warnings.some(([message]) => /初始重放失败/.test(message)));
+  assert.equal(toolboxRecoveryCalls, 1, '损坏 outbox 读取前必须先调用 Toolbox owner');
   assert.ok(blockedStartup.warnings.some(([message]) => /Toolbox/.test(message)));
   assert.ok(blockedStartup.warnings.some(([message]) => /模块恢复后的.*重放未全部完成/.test(message)));
 
@@ -882,6 +982,77 @@ test('正常 worker committed 后 receipt 保留 N 个输入与全部输出，�
   secondStartup.db.close();
 });
 
+test('工具箱 publication cancel-wins 后迟到 success 不 ACK committed receipt', async () => {
+  let acknowledgeCalls = 0;
+  let finishCalls = 0;
+  const batchContext = {
+    batchId: 91,
+    batchNumber: '2026-08-18-091',
+    taskRunId: 'toolbox-cancel-wins-run',
+    taskKey: 'toolbox:merge',
+    moduleId: 'toolbox',
+    parentRunId: 'toolbox-cancel-wins-parent',
+    operationKey: 'toolbox:cancel-wins'
+  };
+  const recoverPublications = async (options = {}) => {
+    if (Array.isArray(options.acknowledgedCommittedTaskIds)) {
+      acknowledgeCalls += 1;
+      return { recovered: [], skippedActive: [] };
+    }
+    return {
+      recovered: [{
+        action: 'commit-handoff-pending',
+        taskId: 'toolbox-cancel-wins-publication',
+        batchContext,
+        inputFiles: [],
+        files: []
+      }],
+      skippedActive: []
+    };
+  };
+  const archiveCenter = {
+    persistAppendIntent() {
+      throw new Error('manifest publication 不应走 legacy append');
+    },
+    async flushOutbox() {
+      throw new Error('异终态不应触发 outbox ACK 链');
+    },
+    service: {
+      repository: {
+        getBatch: () => ({ metadata: { _fileManifest: { artifactKeys: [] } } }),
+        getTaskRun: () => ({ taskRunId: batchContext.taskRunId, status: 'running' }),
+        getBatchDetail: () => ({
+          metadata: { _fileManifest: { artifactKeys: [] } },
+          artifacts: []
+        })
+      },
+      async settleManifestArtifacts() {
+        return { ok: true, durable: true };
+      },
+      async finishFileTask() {
+        finishCalls += 1;
+        return {
+          ok: false,
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          taskRun: { taskRunId: batchContext.taskRunId, status: 'cancelled' }
+        };
+      }
+    }
+  };
+  await assert.rejects(
+    recoverToolboxPublicationsIntoArchive({
+      userDataDir: '/tmp/toolbox-cancel-wins',
+      archiveCenter,
+      recoverPublications
+    }),
+    (error) => error
+      && error.blocksArchiveStartup === true
+      && /终态收口失败/.test(error.message)
+  );
+  assert.equal(finishCalls, 1);
+  assert.equal(acknowledgeCalls, 0);
+});
+
 test('恢复索引首读 EIO 时 sweepUnsafe 阻止通用扫尾，二启完成原批次恢复', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'toolbox-index-eio-recovery-'));
   const userDataDir = path.join(root, 'user-data');
@@ -1041,7 +1212,10 @@ test('split export freshness 发现源变化后清除 token，要求重新选择
     fs.appendFileSync(sourcePath, '-changed');
 
     assert.throws(
-      () => harness.assertToolboxSplitSourceFresh(context),
+      () => harness.assertToolboxSplitSourceFresh(context, {
+        filePath: sourcePath,
+        sourceSnapshot: context.snapshot
+      }),
       /读取后已变化/
     );
     assert.throws(

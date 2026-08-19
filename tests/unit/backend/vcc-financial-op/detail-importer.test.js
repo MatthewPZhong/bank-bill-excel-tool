@@ -116,7 +116,7 @@ function fileEntry(filePath, sourceType, subject = '') {
 async function archiveHandoffForFiles(files, taskRunId) {
   const hashed = await hashSourceFiles(files);
   const ordinals = new Map();
-  return hashed.map((file) => {
+  return hashed.map((file, index) => {
     const sourceOrdinal = (ordinals.get(file.sourceType) || 0) + 1;
     ordinals.set(file.sourceType, sourceOrdinal);
     return {
@@ -125,7 +125,8 @@ async function archiveHandoffForFiles(files, taskRunId) {
       sourceOrdinal,
       sha256: file.sha256,
       sizeBytes: file.sizeBytes,
-      taskRunId
+      taskRunId,
+      archiveArtifactId: index + 1
     };
   });
 }
@@ -324,7 +325,8 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
   `).get().n, 2);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 2);
   const sources = db.prepare(`
-    SELECT source_file_name, source_sha256, source_size_bytes, archive_state
+    SELECT source_file_name, source_sha256, source_size_bytes,
+           archive_artifact_id, archive_state
     FROM vcc_fin_op_import_sources
     ORDER BY id
   `).all();
@@ -332,9 +334,10 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
   assert.deepEqual(sources.map((row) => row.source_file_name), ['recharge.xlsx', 'fee.xlsx']);
   assert.ok(sources.every((row) => /^[a-f0-9]{64}$/.test(row.source_sha256)));
   assert.ok(sources.every((row) => Number(row.source_size_bytes) > 0));
-  assert.ok(sources.every((row) => row.archive_state === 'pending'));
+  assert.deepEqual(sources.map((row) => Number(row.archive_artifact_id)), [1, 2]);
+  assert.ok(sources.every((row) => row.archive_state === 'ready'));
   assert.ok(result.records.every((record) => (
-    record.archiveState === 'pending'
+    record.archiveState === 'ready'
       && record.anomalyCount === 0
       && record.sourceFiles.length === 1
   )));
@@ -525,27 +528,11 @@ test('同键异内容阻断整批且不覆盖既有有效行', async (t) => {
   assert.ok(conflict.effective_row_id);
   assert.deepEqual(JSON.parse(conflict.diff_fields_json), ['我方到账金额']);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
-  assert.throws(() => repository.resolveImportRecord(db, result.records[0].recordId, {
-    note: '已核对'
-  }), /必须明确确认保留当前有效数据集/);
-  const resolved = repository.resolveImportRecord(db, result.records[0].recordId, {
-    note: '已核对，保留原有效记录',
-    action: 'keep_current_effective_dataset'
-  });
-  assert.equal(resolved.resolution_action, 'keep_current_effective_dataset');
-  const replayed = repository.resolveImportRecord(db, result.records[0].recordId, {
-    note: '已核对，保留原有效记录',
-    action: 'keep_current_effective_dataset'
-  });
-  assert.equal(replayed.resolved_at, resolved.resolved_at);
-  assert.throws(() => repository.resolveImportRecord(db, result.records[0].recordId, {
-    note: '改写处理结论',
-    action: 'keep_current_effective_dataset'
-  }), /处理结论不可修改/);
-  assert.throws(() => repository.resolveImportRecord(db, result.records[0].recordId, {
-    note: 'a'.repeat(501),
-    action: 'keep_current_effective_dataset'
-  }), /不能超过 500 个字符/);
+  assert.equal(repository.resolveImportRecord, undefined);
+  assert.equal(
+    repository.getImportRecord(db, result.records[0].recordId).resolution_status,
+    'not_applicable'
+  );
 });
 
 test('混合精确重放、冲突和新行时只过滤异常并提升正常行', async (t) => {
@@ -836,7 +823,8 @@ test('业务前 handoff 多文件顺序或路径与 worker 首次 hash 不一致
     sourceOrdinal: index + 1,
     sha256: file.sha256,
     sizeBytes: file.sizeBytes,
-    taskRunId: 'handoff-order-mismatch'
+    taskRunId: 'handoff-order-mismatch',
+    archiveArtifactId: index + 1
   })).reverse();
   const db = createDb();
   t.after(() => db.close());
@@ -1412,7 +1400,7 @@ test('运行期非预期异常立即收口当前批次且不影响其他导入�
   assert.equal(record.status, 'failed_validation');
   assert.equal(record.raw_count, 1);
   assert.equal(record.rolled_back_count, 1);
-  assert.equal(record.resolution_status, 'unresolved');
+  assert.equal(record.resolution_status, 'not_applicable');
   assert.equal(db.prepare(`
     SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors WHERE import_record_id = ?
   `).get(record.id).n, 0);

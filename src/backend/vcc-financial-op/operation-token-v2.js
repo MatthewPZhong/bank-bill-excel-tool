@@ -88,9 +88,6 @@ function canonicalGateEvidence(gateEvidence) {
     taskGeneration: Number(gateEvidence.taskGeneration),
     activeBatchIds: [...gateEvidence.activeBatchIds].map(String).sort(),
     importingRecordIds: [...gateEvidence.importingRecordIds].map(Number).sort((a, b) => a - b),
-    unresolvedRecords: [...gateEvidence.unresolvedRecords].sort((left, right) => (
-      Number(left.id) - Number(right.id)
-    )),
     laterDependencies: [...gateEvidence.laterDependencies].sort((left, right) => (
       compareText(left.targetMonth, right.targetMonth)
     ))
@@ -142,9 +139,6 @@ function canonicalResultMutationGateEvidence(gateEvidence) {
     taskGeneration: Number(gateEvidence.taskGeneration),
     activeBatchIds: [...gateEvidence.activeBatchIds].map(String).sort(),
     importingRecordIds: [...gateEvidence.importingRecordIds].map(Number).sort((a, b) => a - b),
-    unresolvedRecords: [...gateEvidence.unresolvedRecords].sort((left, right) => (
-      Number(left.id) - Number(right.id)
-    )),
     nextOpeningSubjects: [...gateEvidence.nextOpeningSubjects].map(String).sort()
   };
 }

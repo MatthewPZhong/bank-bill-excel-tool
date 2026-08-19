@@ -464,7 +464,11 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     const recoveryFlow = mainProcess.slice(recoveryStart, recoveryEnd);
     assert.match(
       recoveryFlow,
-      /const batchContext = pending\.batchContext;[\s\S]*archiveCenterService\.persistAppendIntent\(\{\s*batchContext,/
+      /const owner = positionPendingOwner\(pending\);[\s\S]*if \(manifestOwned\) \{[\s\S]*archiveCenterService\.persistTaskTerminalIntent\(\{[\s\S]*settleFiles: files\.map\(\(file\) => \(\{[\s\S]*artifactKey: file\.artifactKey/
+    );
+    assert.match(
+      recoveryFlow,
+      /if \(owner\.kind !== 'file-batch'\)[\s\S]*archiveCenterService\.persistAppendIntent\(\{\s*batchContext: owner\.batchContext,/
     );
     assert.match(recoveryFlow, /缺少原任务 batchContext，禁止建立幽灵批次/);
     assert.doesNotMatch(
@@ -478,8 +482,14 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     );
     assert.match(operationLifecycle, /requirePositionPendingArchiveFiles\(persistedPending\);/);
     assert.match(mainProcess, /businessState:\s*'running'/);
-    assert.match(mainProcess, /function markPositionBusinessOutcome\(result\)/);
-    assert.match(mainProcess, /positionBusinessStateForResult\(result, SUCCESS_STATUSES\)/);
+    assert.match(
+      mainProcess,
+      /function markPositionBusinessOutcome\(result, \{ terminalForCurrentTask = false \} = \{\}\)/
+    );
+    assert.match(
+      mainProcess,
+      /positionBusinessStateForResult\(terminalResult, SUCCESS_STATUSES\)/
+    );
     assert.match(operationLifecycle, /result && result\.archiveDeferred === true/);
     assert.match(operationLifecycle, /'awaiting-confirmation'/);
     assert.match(operationLifecycle, /const outputPublished = files\.some/);

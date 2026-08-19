@@ -22,6 +22,10 @@ const {
   blobRelativePath,
   createArchiveService
 } = require('../../../src/main-process/archive-center/archive-service');
+const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
 
 function fixture() {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-layout-'));
@@ -87,6 +91,58 @@ function archivePayload(operationKey, filePath, overrides = {}) {
     role: 'source',
     sourceOperation: 'import',
     ...overrides
+  };
+}
+
+async function archiveInputFileTask(current, operationKey, filePath, options = {}) {
+  const task = (await current.service.beginTaskRun({
+    taskRunId: `task:${operationKey}`,
+    taskKey: 'bank-statement:file:import',
+    moduleId: 'bank-statement',
+    parentRunId: `parent:${operationKey}`,
+    operationKey
+  })).taskRun;
+  const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath,
+      role: 'source',
+      sourceOperation: 'bank-statement:file:import'
+    }],
+    outputs: []
+  }));
+  const reserved = await current.service.reserveFileTaskBatch({
+    taskRun: task,
+    manifest,
+    moduleCode: 'BANK',
+    moduleName: '网银账单',
+    ...(options.retentionDays === undefined ? {} : { retentionDays: options.retentionDays })
+  });
+  const batchContext = {
+    batchId: reserved.batch.id,
+    batchNumber: reserved.batch.batchNumber,
+    taskRunId: task.taskRunId,
+    taskKey: task.taskKey,
+    moduleId: task.moduleId,
+    parentRunId: task.parentRunId,
+    operationKey: task.operationKey
+  };
+  await current.service.startFileTask(task.taskRunId, reserved.batch.id);
+  const settled = await current.service.settleManifestArtifacts({
+    batchContext,
+    files: [{ artifactKey: manifest.inputs[0].artifactKey }]
+  });
+  assert.equal(settled.durable, true);
+  await current.service.finishFileTask(task.taskRunId, reserved.batch.id, {
+    taskStatus: 'succeeded'
+  });
+  return {
+    batch: current.service.repository.getBatch(reserved.batch.id),
+    artifact: current.service.repository.getArtifactByKey(
+      reserved.batch.id,
+      manifest.inputs[0].artifactKey
+    )
   };
 }
 
@@ -267,32 +323,61 @@ test('无 ready artifact 不建业务目录，后续同批输入输出按真实�
   const current = serviceFixture();
   try {
     await current.service.initialize();
-    const empty = await current.service.createBatch({
-      moduleId: 'bank-statement',
-      moduleCode: 'BANK',
-      moduleName: '网银账单',
-      operationKey: 'metadata-only',
-      localDate: '2026-08-11'
-    });
-    assert.equal(empty.ok, true);
-    assert.equal(fs.existsSync(path.join(current.rootDir, '2026')), false);
-
     const inputPath = current.writeSource('same.xlsx', 'input');
     const outputPath = current.writeSource('other.xlsx', 'output');
-    const appended = await current.service.appendFiles({
-      batchId: empty.batch.id,
-      files: [
-        { filePath: inputPath, originalName: '同名.xlsx', direction: 'input', role: 'source' },
-        { filePath: outputPath, originalName: '同名.xlsx', direction: 'output', role: 'result' }
-      ]
+    const task = (await current.service.beginTaskRun({
+      taskRunId: 'layout-pending-task',
+      taskKey: 'bank-statement:file:import',
+      moduleId: 'bank-statement',
+      parentRunId: 'layout-pending-parent',
+      operationKey: 'layout-pending-operation'
+    })).taskRun;
+    const manifest = artifactManifestFromFilePlan(normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [{
+        filePath: inputPath,
+        originalName: '同名.xlsx',
+        role: 'source',
+        sourceOperation: 'bank-statement:file:import'
+      }],
+      outputs: [{
+        filePath: outputPath,
+        originalName: '同名.xlsx',
+        role: 'result',
+        sourceOperation: 'bank-statement:file:import'
+      }]
+    }));
+    const reserved = await current.service.reserveFileTaskBatch({
+      taskRun: task,
+      manifest,
+      moduleCode: 'BANK',
+      moduleName: '网银账单'
     });
-    assert.equal(appended.ok, true);
+    assert.equal(fs.existsSync(path.join(current.rootDir, '2026')), false);
+    await current.service.startFileTask(task.taskRunId, reserved.batch.id);
+    const batchContext = {
+      batchId: reserved.batch.id,
+      batchNumber: reserved.batch.batchNumber,
+      taskRunId: task.taskRunId,
+      taskKey: task.taskKey,
+      moduleId: task.moduleId,
+      parentRunId: task.parentRunId,
+      operationKey: task.operationKey
+    };
+    const settled = await current.service.settleManifestArtifacts({
+      batchContext,
+      files: [...manifest.inputs, ...manifest.outputs].map(
+        (item) => ({ artifactKey: item.artifactKey })
+      )
+    });
+    assert.equal(settled.durable, true);
     const batchDir = path.join(
       current.rootDir,
       '2026',
       '2026-08',
       '2026-08-11',
-      empty.batch.batchNumber
+      reserved.batch.batchNumber
     );
     assert.deepEqual(fs.readdirSync(batchDir).sort(), ['同名 (2).xlsx', '同名.xlsx']);
   } finally {
@@ -475,10 +560,10 @@ test('共享 Blob 仅最后引用回收，manual/retention 清理批次目录与
   try {
     const firstPath = current.writeSource('first.xlsx', 'shared-content');
     const secondPath = current.writeSource('second.xlsx', 'shared-content');
-    const first = await current.service.archiveFile(archivePayload('shared-first', firstPath));
-    const second = await current.service.archiveFile(archivePayload('shared-second', secondPath, {
-      retentionUntil: '2026-08-12'
-    }));
+    const first = await archiveInputFileTask(current, 'shared-first', firstPath);
+    const second = await archiveInputFileTask(current, 'shared-second', secondPath, {
+      retentionDays: 1
+    });
     const firstArtifact = current.service.repository.getArtifact(first.artifact.id);
     const secondArtifact = current.service.repository.getArtifact(second.artifact.id);
     const blobPath = path.join(current.rootDir, ...firstArtifact.blob.relativePath.split('/'));

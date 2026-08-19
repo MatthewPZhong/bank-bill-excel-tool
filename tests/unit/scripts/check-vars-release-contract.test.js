@@ -40,7 +40,7 @@ test('check-vars 为跨 PR baseline diff 配置显式大输出缓冲并禁用 sh
   assert.doesNotMatch(source, /execSync\(`git diff/);
 });
 
-test('v3.1.10 storage contract、迁移与 Archive 血缘已进入 important-vars 清单', () => {
+test('v3.1.11 storage contract、迁移与 Archive 血缘已进入 important-vars 清单', () => {
   const importantVariables = fs.readFileSync(
     path.join(ROOT, 'rules/important-variables.md'),
     'utf8'
@@ -61,5 +61,5 @@ test('v3.1.10 storage contract、迁移与 Archive 血缘已进入 important-var
   ]) {
     assert.match(importantVariables, new RegExp('`' + name + '`'));
   }
-  assert.match(importantVariables, /当前清单版本 \| v35（app v3\.1\.10/);
+  assert.match(importantVariables, /当前清单版本 \| v36（app v3\.1\.11/);
 });

@@ -1,5 +1,12 @@
 'use strict';
 
+const {
+  normalizeFilePlanV1
+} = require('./file-plan');
+
+const EMPTY_FILE_EVIDENCE = Object.freeze({});
+const EMPTY_LINEAGE_INTENTS = Object.freeze([]);
+
 function normalizeIpcTaskHandler(handler) {
   if (typeof handler === 'function') {
     return {
@@ -16,15 +23,34 @@ function normalizeIpcTaskHandler(handler) {
   return { prepare: handler.prepare || null, execute: handler.execute };
 }
 
-function createIpcTaskContext(batchContext, controls = {}) {
-  if (!batchContext || typeof batchContext !== 'object' || Array.isArray(batchContext)) {
-    throw new TypeError('IPC taskContext.batchContext 缺失');
-  }
+function createIpcTaskContext(ownerContext, controls = {}) {
   if (typeof controls.settleArtifacts !== 'function') {
     throw new TypeError('IPC taskContext.settleArtifacts 缺失');
   }
+  const batchContext = ownerContext && Object.prototype.hasOwnProperty.call(ownerContext, 'batchId')
+    ? ownerContext
+    : null;
+  const operationContext = batchContext
+    ? Object.freeze({
+        taskRunId: batchContext.taskRunId,
+        taskKey: batchContext.taskKey,
+        moduleId: batchContext.moduleId,
+        parentRunId: batchContext.parentRunId,
+        operationKey: batchContext.operationKey
+      })
+    : ownerContext;
   return Object.freeze({
+    operationContext,
     batchContext,
+    lineageIntents: controls.lineageIntents || EMPTY_LINEAGE_INTENTS,
+    fileEvidence: controls.fileEvidence !== undefined
+      ? controls.fileEvidence
+      : EMPTY_FILE_EVIDENCE,
+    ensureFileBatch: typeof controls.ensureFileBatch === 'function'
+      ? controls.ensureFileBatch
+      : async () => {
+          throw new TypeError('当前 task 不支持 deferred file batch promotion');
+        },
     settleArtifacts: controls.settleArtifacts
   });
 }
@@ -35,35 +61,6 @@ function executeIpcTaskInvocation(contract, event, prepared, args, taskContext) 
   }
   if (!Array.isArray(args)) throw new TypeError('IPC task execute args 必须是数组');
   return contract.execute(event, prepared, taskContext, ...args);
-}
-
-async function executeIpcTaskWithoutBatch({
-  businessOperationRegistry,
-  meta,
-  markExecuteStarted,
-  execute
-} = {}) {
-  if (!businessOperationRegistry
-      || typeof businessOperationRegistry.begin !== 'function'
-      || typeof businessOperationRegistry.end !== 'function') {
-    throw new TypeError('no-batch task 需要 businessOperationRegistry');
-  }
-  if (typeof markExecuteStarted !== 'function' || typeof execute !== 'function') {
-    throw new TypeError('no-batch task 需要 markExecuteStarted/execute');
-  }
-  const operation = businessOperationRegistry.begin(meta || {});
-  if (!operation.accepted) {
-    return {
-      status: 'busy',
-      message: operation.message || '当前暂时不能开始新的任务'
-    };
-  }
-  try {
-    markExecuteStarted();
-    return await execute(null);
-  } finally {
-    businessOperationRegistry.end(operation.token);
-  }
 }
 
 async function prepareIpcTaskInvocation(contract, event, args) {
@@ -83,8 +80,12 @@ async function prepareIpcTaskInvocation(contract, event, args) {
       result: prepared.result === undefined ? { status: 'cancelled' } : prepared.result
     };
   }
+  const filePlan = prepared.filePlan === undefined
+    ? undefined
+    : normalizeFilePlanV1(prepared.filePlan);
   return {
     ...prepared,
+    ...(filePlan ? { filePlan } : {}),
     proceed: true,
     args: Array.isArray(prepared.args) ? prepared.args : args.slice(),
     inputPaths: Array.isArray(prepared.inputPaths)
@@ -96,7 +97,6 @@ async function prepareIpcTaskInvocation(contract, event, args) {
 
 module.exports = {
   createIpcTaskContext,
-  executeIpcTaskWithoutBatch,
   executeIpcTaskInvocation,
   normalizeIpcTaskHandler,
   prepareIpcTaskInvocation

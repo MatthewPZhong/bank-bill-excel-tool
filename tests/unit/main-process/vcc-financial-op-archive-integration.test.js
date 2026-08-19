@@ -28,8 +28,8 @@ const {
   buildVccImportArchiveHandoffFiles
 } = require('../../../src/main-process/vcc-financial-op-archive-lineage');
 const {
-  WORKER_BATCH_CONTEXT_FIELDS
-} = require('../../../src/main-process/archive-center/worker-batch-context');
+  WORKER_OPERATION_CONTEXT_FIELDS
+} = require('../../../src/main-process/archive-center/worker-operation-context');
 const {
   SOURCE_TYPES,
   SUPPORTED_CURRENCIES,
@@ -53,6 +53,7 @@ class FakeWorker extends EventEmitter {
 }
 
 function createLifecycleHarness({
+  beginTaskRunResult,
   reserveResult,
   appendResult,
   completeError,
@@ -75,6 +76,42 @@ function createLifecycleHarness({
     return { ok: true, batch: { taskStatus: status } };
   };
   const archiveService = {
+    async beginTaskRun(payload) {
+      calls.push(['begin-task-run', payload]);
+      if (beginTaskRunResult) return beginTaskRunResult;
+      return {
+        ok: true,
+        taskRun: {
+          taskRunId: payload.taskRunId,
+          taskKey: payload.taskKey,
+          moduleId: payload.moduleId,
+          parentRunId: payload.parentRunId,
+          operationKey: payload.operationKey
+        }
+      };
+    },
+    async markTaskRunStarted(taskRunId) {
+      calls.push(['started-task-run', taskRunId]);
+      return { ok: true };
+    },
+    async finishTaskRun(taskRunId, outcome) {
+      calls.push(['finished-task-run', taskRunId, outcome]);
+      if (completeError) throw completeError;
+      if (terminalStatus) {
+        return {
+          ok: false,
+          code: 'ARCHIVE_TASK_STATUS_CONFLICT',
+          taskRun: { status: terminalStatus }
+        };
+      }
+      terminalStatus = outcome.taskStatus;
+      return { ok: true, taskRun: { status: terminalStatus } };
+    },
+    async reserveFileTaskBatch() { throw new Error('unexpected file reserve'); },
+    async beginFileTaskRecovery() { throw new Error('unexpected file recovery'); },
+    async startFileTask() { throw new Error('unexpected file start'); },
+    async settleManifestArtifacts() { throw new Error('unexpected file settle'); },
+    async finishFileTask() { throw new Error('unexpected file finish'); },
     async reserveTaskBatch(payload) {
       calls.push(['reserve', payload]);
       if (reserveResult) return reserveResult;
@@ -151,37 +188,71 @@ async function waitUntil(check, timeoutMs = 20000) {
   throw new Error('等待真实 VCC worker 状态超时');
 }
 
-test('main 在业务开始前生成 VCC handoff，并把同一不可变证据送入 import worker', () => {
+test('main 用冻结 FilePlan settle exact artifact 后才把 artifactId handoff 送入 import worker', () => {
   const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
-  const lifecycleStart = mainSource.indexOf('async function runArchiveAwareOperation');
-  const lifecycleEnd = mainSource.indexOf('function runRegisteredBusinessOperation', lifecycleStart);
-  const lifecycleSource = mainSource.slice(lifecycleStart, lifecycleEnd);
-  assert.match(
-    lifecycleSource,
-    /let vccImportArchiveHandoffFiles = null;[\s\S]*?Object\.freeze\(\{ \.\.\.taskContext, vccImportArchiveHandoffFiles \}\)/
-  );
-  assert.match(
-    lifecycleSource,
-    /vccImportArchiveHandoffFiles = meta\.channel === 'vccFinancialOp:import:apply'[\s\S]*?persistVccImportArchiveHandoff\(effectiveArgs, batchContext\)/
-  );
-
   const handlerStart = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:import:apply'");
   const handlerEnd = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:run:calculate'", handlerStart);
   const handlerSource = mainSource.slice(handlerStart, handlerEnd);
   assert.match(
     handlerSource,
-    /service\.importSelectedFiles\([\s\S]*?batchContext, taskContext\.vccImportArchiveHandoffFiles\)/
+    /taskContext\.settleArtifacts\([\s\S]*?archiveArtifactId: settled\.results\[index\]\.artifact\.id[\s\S]*?service\.importSelectedFiles\([\s\S]*?batchContext, workerHandoffFiles\)/
   );
+  assert.ok(handlerSource.indexOf('taskContext.settleArtifacts') < handlerSource.indexOf('service.importSelectedFiles'));
+  assert.match(handlerSource, /filePath: taskContext\.fileEvidence\.filePlan\.inputs\[index\]\.filePath/);
+  assert.doesNotMatch(handlerSource, /prepared\.(?:filePath|filePaths|inputPaths)/);
 });
 
-test('VCC calculate reserve 失败时零 worker，成功时 exact7 贯穿并绑定 run identity', async (t) => {
+test('VCC 四个 file action 统一走 FilePlan authority，三类输出以 receipt 结算全部 keys', () => {
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '../../../src/main.js'), 'utf8');
+  for (const channel of [
+    'vccFinancialOp:import:apply',
+    'vccFinancialOp:data-manager:export',
+    'vccFinancialOp:export:import-audit',
+    'vccFinancialOp:export:result'
+  ]) {
+    const start = mainSource.indexOf(`trackedIpcHandle('${channel}'`);
+    const end = mainSource.indexOf('\n  });', start);
+    const handler = mainSource.slice(start, end);
+    assert.ok(start >= 0 && end > start, channel);
+    assert.match(handler, /filePlan:\s*\{/, channel);
+    assert.match(handler, /taskContext\.fileEvidence\.filePlan/, channel);
+    assert.doesNotMatch(
+      handler.slice(handler.indexOf('execute:')),
+      /prepared\.(?:filePath|filePaths|inputPaths|outputPaths|outputPath|outputDirectory)/,
+      channel
+    );
+  }
+  for (const channel of [
+    'vccFinancialOp:data-manager:export',
+    'vccFinancialOp:export:import-audit',
+    'vccFinancialOp:export:result'
+  ]) {
+    const start = mainSource.indexOf(`trackedIpcHandle('${channel}'`);
+    const end = mainSource.indexOf('\n  });', start);
+    const handler = mainSource.slice(start, end);
+    assert.match(handler, /vccOutputPublicationTaskIds:\s*\[\]/, channel);
+    assert.match(handler, /settleVccOutputPublication\(prepared, taskContext, publication, evidence\)/, channel);
+  }
+  const resultStart = mainSource.indexOf("trackedIpcHandle('vccFinancialOp:export:result'");
+  const resultEnd = mainSource.indexOf('\n  });', resultStart);
+  const resultHandler = mainSource.slice(resultStart, resultEnd);
+  assert.match(resultHandler, /expectedRunId:\s*prepared\.runId/);
+  assert.match(resultHandler, /expectedSubjects:\s*prepared\.subjects/);
+
+  assert.doesNotMatch(mainSource, /atomicFileLifecycleChannels/);
+  assert.match(mainSource, /const useLegacyExistingBatchRecovery = prepared\.legacyExistingBatchRecovery === true/);
+  assert.match(mainSource, /archiveTaskLifecycle\.runDeferredFileTask/);
+  assert.match(mainSource, /archiveTaskLifecycle\.runFileTask/);
+});
+
+test('VCC calculate Task Run 建立失败时零 worker，成功时 exact5 贯穿并绑定 run identity', async (t) => {
   const registry = createTaskPolicyRegistry();
   const policy = registry.require('vccFinancialOp:run:calculate');
   const rejected = createLifecycleHarness({
-    reserveResult: { ok: false, code: 'reserve-failed', message: 'fixture reserve failed' }
+    beginTaskRunResult: { ok: false, code: 'task-run-failed', message: 'fixture task run failed' }
   });
   let rejectedExecuteCount = 0;
-  const rejectedResult = await rejected.lifecycle.run({
+  const rejectedResult = await rejected.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ targetMonth: '2026-08' }],
@@ -192,7 +263,7 @@ test('VCC calculate reserve 失败时零 worker，成功时 exact7 贯穿并绑�
   });
   assert.equal(rejectedResult.status, 'failed');
   assert.equal(rejectedExecuteCount, 0);
-  assert.equal(rejected.calls.some(([name]) => name === 'started'), false);
+  assert.equal(rejected.calls.some(([name]) => name === 'started-task-run'), false);
 
   const db = new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
@@ -217,24 +288,22 @@ test('VCC calculate reserve 失败时零 worker，成功时 exact7 贯穿并绑�
     db.close();
   });
   const accepted = createLifecycleHarness();
-  const result = await accepted.lifecycle.run({
+  const result = await accepted.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ targetMonth: '2026-08' }],
     resultFlowIdentities: (value) => policy.resultFlowIdentities(value),
-    execute: (batchContext) => service.calculate({
+    execute: (operationContext) => service.calculate({
       targetMonth: '2026-08',
       expectedInputFingerprint: 'a'.repeat(64)
-    }, batchContext)
+    }, operationContext)
   });
   assert.equal(result.runId, 73);
   assert.equal(workers.length, 1);
-  const workerContext = workers[0].options.workerData.payload.batchContext;
-  assert.deepEqual(Object.keys(workerContext), WORKER_BATCH_CONTEXT_FIELDS);
+  const workerContext = workers[0].options.workerData.payload.operationContext;
+  assert.deepEqual(Object.keys(workerContext), WORKER_OPERATION_CONTEXT_FIELDS);
   assert.equal(Object.isFrozen(workerContext), true);
   assert.deepEqual(workerContext, {
-    batchId: 41,
-    batchNumber: '2026-08-11-001',
     taskRunId: 'vcc-task-1',
     taskKey: 'vccFinancialOp:run:calculate',
     moduleId: 'vcc-financial-op',
@@ -247,8 +316,11 @@ test('VCC calculate reserve 失败时零 worker，成功时 exact7 贯穿并绑�
     value: '73'
   }]);
   assert.deepEqual(
-    accepted.calls.filter(([name]) => ['bor-begin', 'flow', 'reserve', 'started', 'artifacts', 'bind', 'completed', 'bor-end'].includes(name)).map(([name]) => name),
-    ['bor-begin', 'flow', 'reserve', 'started', 'artifacts', 'bind', 'completed', 'bor-end']
+    accepted.calls.filter(([name]) => [
+      'bor-begin', 'flow', 'begin-task-run', 'started-task-run',
+      'bind', 'finished-task-run', 'bor-end'
+    ].includes(name)).map(([name]) => name),
+    ['bor-begin', 'flow', 'begin-task-run', 'started-task-run', 'bind', 'finished-task-run', 'bor-end']
   );
 });
 
@@ -274,16 +346,16 @@ test('VCC pre-critical cancel 终结原batch，protected等待业务终态，wor
   const policy = createTaskPolicyRegistry().require('vccFinancialOp:run:archive');
 
   const cancellable = createLifecycleHarness();
-  const cancelledRun = cancellable.lifecycle.run({
+  const cancelledRun = cancellable.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ runId: 7 }],
-    execute: (batchContext) => service.archive({
+    execute: (operationContext) => service.archive({
       runId: 7,
       expectedResultRevision: 0,
       expectedPreviewToken: `v2:${'a'.repeat(64)}`,
       taskGeneration: 0
-    }, undefined, batchContext)
+    }, undefined, operationContext)
   });
   await new Promise((resolve) => setImmediate(resolve));
   const firstWorker = workers[0];
@@ -303,16 +375,16 @@ test('VCC pre-critical cancel 终结原batch，protected等待业务终态，wor
   assert.equal(cancellable.terminalStatus(), 'cancelled');
 
   const protectedHarness = createLifecycleHarness();
-  const protectedRun = protectedHarness.lifecycle.run({
+  const protectedRun = protectedHarness.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ runId: 8 }],
-    execute: (batchContext) => service.archive({
+    execute: (operationContext) => service.archive({
       runId: 8,
       expectedResultRevision: 0,
       expectedPreviewToken: `v2:${'b'.repeat(64)}`,
       taskGeneration: 1
-    }, undefined, batchContext)
+    }, undefined, operationContext)
   });
   await new Promise((resolve) => setImmediate(resolve));
   const secondWorker = workers[1];
@@ -339,16 +411,16 @@ test('VCC pre-critical cancel 终结原batch，protected等待业务终态，wor
   assert.equal(protectedHarness.terminalStatus(), 'succeeded');
 
   const crashHarness = createLifecycleHarness();
-  const crashedRun = crashHarness.lifecycle.run({
+  const crashedRun = crashHarness.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ runId: 9 }],
-    execute: (batchContext) => service.archive({
+    execute: (operationContext) => service.archive({
       runId: 9,
       expectedResultRevision: 0,
       expectedPreviewToken: `v2:${'c'.repeat(64)}`,
       taskGeneration: 2
-    }, undefined, batchContext)
+    }, undefined, operationContext)
   });
   await new Promise((resolve) => setImmediate(resolve));
   workers[2].emit('error', new Error('fixture worker crash'));
@@ -356,7 +428,7 @@ test('VCC pre-critical cancel 终结原batch，protected等待业务终态，wor
   assert.equal(crashHarness.terminalStatus(), 'failed');
 });
 
-test('VCC artifact/terminal 持久失败只登记原batch outbox intent且不重复reserve', async () => {
+test('VCC no-file terminal 持久失败只登记原 Task Run owner outbox', async () => {
   const intents = [];
   const terminalError = new Error('fixture terminal unavailable');
   terminalError.code = 'SQLITE_BUSY';
@@ -374,24 +446,32 @@ test('VCC artifact/terminal 持久失败只登记原batch outbox intent且不重
     }
   });
   const policy = createTaskPolicyRegistry().require('vccFinancialOp:run:archive');
-  const result = await harness.lifecycle.run({
+  const result = await harness.lifecycle.runOperationOnly({
     meta: { channel: policy.channel },
     policy,
     args: [{ runId: 15 }],
+    resultMetadataResolver: (value, context, terminal) => policy.resultMetadataResolver(
+      value,
+      context,
+      { ...terminal, invocation: { args: [{ runId: 15 }] } }
+    ),
     execute: async () => ({ status: 'archived', runId: 15, targetMonth: '2026-08' })
   });
   assert.equal(result.status, 'archived');
-  assert.equal(harness.calls.filter(([name]) => name === 'reserve').length, 1);
-  assert.equal(harness.calls.filter(([name]) => name === 'artifacts').length, 1);
+  assert.equal(harness.calls.filter(([name]) => name === 'begin-task-run').length, 1);
+  assert.equal(harness.calls.filter(([name]) => name === 'reserve').length, 0);
+  assert.equal(harness.calls.filter(([name]) => name === 'artifacts').length, 0);
   assert.equal(intents.length, 1);
-  assert.deepEqual(intents[0].batchContext, {
-    batchId: 41,
-    batchNumber: '2026-08-11-001',
-    taskRunId: 'vcc-task-1',
-    taskKey: 'vccFinancialOp:run:archive',
-    moduleId: 'vcc-financial-op',
-    parentRunId: 'vcc-parent-1',
-    operationKey: 'vccFinancialOp:run:archive:vcc-task-1'
+  assert.deepEqual(intents[0].owner, {
+    version: 1,
+    kind: 'operation',
+    operationContext: {
+      taskRunId: 'vcc-task-1',
+      taskKey: 'vccFinancialOp:run:archive',
+      moduleId: 'vcc-financial-op',
+      parentRunId: 'vcc-parent-1',
+      operationKey: 'vccFinancialOp:run:archive:vcc-task-1'
+    }
   });
   assert.deepEqual(intents[0].terminalOutcome, {
     taskStatus: 'succeeded',
@@ -504,7 +584,11 @@ test('真实 worker 强杀后按 taskRunId 恢复 partial records、成功输入
     policy,
     args: [payload],
     beforeStart: async (batchContext) => {
-      archiveHandoffFiles = await buildVccImportArchiveHandoffFiles(payload, batchContext);
+      const preparedHandoffFiles = await buildVccImportArchiveHandoffFiles(payload, batchContext);
+      archiveHandoffFiles = preparedHandoffFiles.map((file, index) => ({
+        ...file,
+        archiveArtifactId: index + 1
+      }));
     },
     resultFlowIdentities: (result) => policy.resultFlowIdentities(result),
     execute: async (batchContext) => {

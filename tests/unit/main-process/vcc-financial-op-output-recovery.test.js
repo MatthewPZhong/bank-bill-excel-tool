@@ -23,6 +23,10 @@ const {
   createArchiveRepository
 } = require('../../../src/backend/database/archive-repository');
 const {
+  artifactManifestFromFilePlan,
+  normalizeFilePlanV1
+} = require('../../../src/main-process/archive-center/file-plan');
+const {
   recoverToolboxPublicationsIntoArchive
 } = require('../../../src/main-process/toolbox-archive-recovery');
 const {
@@ -137,17 +141,34 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
     db.exec('PRAGMA foreign_keys = ON');
     const service = createArchiveService({ database: db, rootDir: archiveRoot });
     await service.initialize();
-    const reserved = await service.reserveTaskBatch({
+    const outputDir = path.join(root, 'output');
+    fs.mkdirSync(outputDir, { recursive: true });
+    const target = path.join(outputDir, `target-${index}.xlsx`);
+    const taskRun = (await service.beginTaskRun({
       moduleId: 'vcc-financial-op',
-      moduleCode: 'VCCFINOP',
-      moduleName: 'VCC财务OP校验',
       operationKey: `${taskKey}:hard-kill-${index}`,
       taskKey,
       taskRunId: `vcc-hard-kill-${index}`,
       parentRunId: `vcc-parent-${index}`
+    })).taskRun;
+    const filePlan = normalizeFilePlanV1({
+      version: 1,
+      allocation: 'eager',
+      inputs: [],
+      outputs: [{
+        filePath: target,
+        role: 'output',
+        sourceOperation: taskKey
+      }]
+    });
+    const reserved = await service.reserveFileTaskBatch({
+      taskRun,
+      manifest: artifactManifestFromFilePlan(filePlan),
+      moduleCode: 'VCCFINOP',
+      moduleName: 'VCC财务OP校验'
     });
     assert.equal(reserved.ok, true);
-    await service.markTaskStarted(reserved.batchId);
+    await service.startFileTask(taskRun.taskRunId, reserved.batchId);
     const batchContext = Object.freeze({
       batchId: reserved.batch.id,
       batchNumber: reserved.batch.batchNumber,
@@ -158,11 +179,8 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
       operationKey: reserved.batch.operationKey
     });
     const generationDir = path.join(root, 'generation');
-    const outputDir = path.join(root, 'output');
     fs.mkdirSync(generationDir, { recursive: true });
-    fs.mkdirSync(outputDir, { recursive: true });
     const generated = path.join(generationDir, `generated-${index}.xlsx`);
-    const target = path.join(outputDir, `target-${index}.xlsx`);
     fs.writeFileSync(generated, `vcc-output-${taskKey}`);
     const crashWorker = path.join(
       __dirname,
@@ -204,17 +222,21 @@ test('result/data/audit 在 actual worker committed 后硬退出均由原 exact7
       },
       service,
       outboxStore,
-      recoverInterruptedTasks: () => recoverToolboxPublicationsIntoArchive({
-        userDataDir,
-        archiveCenter: controller,
-        recoverPublications: recoverToolboxPublicationsAsync
-      }),
+      recoverInterruptedTaskOwners: [{
+        ownerName: 'VCC output publication',
+        recover: () => recoverToolboxPublicationsIntoArchive({
+          userDataDir,
+          archiveCenter: controller,
+          recoverPublications: recoverToolboxPublicationsAsync
+        })
+      }],
       getProtectedInterruptedTaskBatchIds: () => []
     });
     await controller.initialize();
     const detail = createArchiveRepository(db).getBatchDetail(reserved.batchId);
     assert.equal(detail.taskStatus, 'succeeded');
     assert.equal(detail.artifacts.length, 1);
+    assert.equal(detail.artifacts[0].artifactKey, filePlan.outputs[0].artifactKey);
     assert.equal(detail.artifacts[0].role, 'output');
     assert.equal(detail.artifacts[0].sourcePath, target);
     assert.equal(detail.artifacts[0].status, 'ready');

@@ -62,6 +62,29 @@ const WORKER_BATCH_CONTEXT = Object.freeze({
   parentRunId: 'position-worker-parent',
   operationKey: 'position-worker-operation'
 });
+const WORKER_OPERATION_CONTEXT = Object.freeze({
+  taskRunId: 'position-maintenance-worker-contract',
+  taskKey: 'position-reconciliation:source:delete',
+  moduleId: 'position-reconciliation',
+  parentRunId: 'position-maintenance-parent',
+  operationKey: 'position-maintenance-operation'
+});
+
+function applyBankImport(service, token, batchContext) {
+  return service.applyBankImport(
+    token,
+    batchContext,
+    service.bankImportArchiveIntent(token).map((file) => file.filePath)
+  );
+}
+
+function applySourceImport(service, token, batchContext) {
+  return service.applySourceImport(
+    token,
+    batchContext,
+    service.sourceImportArchiveIntent(token).map((file) => file.filePath)
+  );
+}
 
 function writeWorkbook(filePath, sheetName, headers, rows) {
   const workbook = XLSX.utils.book_new();
@@ -468,7 +491,7 @@ test('同业务主键的不同来源记录可分别匹配并独立消费', async
     ]
   );
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(run.summary.changedRows, 2);
@@ -574,7 +597,8 @@ test('流式来源配置收窄时未启用来源明确失败且不得自动回�
   assert.equal(prepared.requiresExecution, true);
   const result = await service.executePreparedSourceImport(
     prepared.plan,
-    WORKER_BATCH_CONTEXT
+    WORKER_BATCH_CONTEXT,
+    { executionInputPaths: prepared.inputPaths, outputs: [] }
   );
   assert.equal(result.successCount, 1);
   assert.equal(result.failedCount, 1);
@@ -804,7 +828,7 @@ test('流式 service 完成银行确认、普通来源自动提交和账户快�
     service.bankImportArchiveIntent(bankPrepared.token)[0].sourceType,
     'position-bank'
   );
-  const bankApplied = await service.applyBankImport(
+  const bankApplied = await applyBankImport(service,
     bankPrepared.token,
     WORKER_BATCH_CONTEXT
   );
@@ -824,7 +848,8 @@ test('流式 service 完成银行确认、普通来源自动提交和账户快�
   assert.equal(service.persistenceCheckpoint().generation, 1, 'lifecycle reserve 前不得授权 ordinary apply');
   const sourcePrepared = await service.executePreparedSourceImport(
     sourcePlan.plan,
-    WORKER_BATCH_CONTEXT
+    WORKER_BATCH_CONTEXT,
+    { executionInputPaths: sourcePlan.inputPaths, outputs: [] }
   );
   assert.equal(sourcePrepared.successCount, 1);
   assert.equal(sourcePrepared.confirmationCount, 1);
@@ -842,7 +867,7 @@ test('流式 service 完成银行确认、普通来源自动提交和账户快�
   );
   assert.equal(service.persistenceCheckpoint().generation, 2);
 
-  const accountApplied = await service.applySourceImport(
+  const accountApplied = await applySourceImport(service,
     accountItem.token,
     WORKER_BATCH_CONTEXT
   );
@@ -892,7 +917,7 @@ test('流式 service 通过 utility worker 删除来源并同步 checkpoint', as
   const result = await service.deleteSource({
     sourceType: SOURCE_TYPES.GATEWAY_INBOUND,
     months: ['2026-07']
-  }, WORKER_BATCH_CONTEXT);
+  }, WORKER_OPERATION_CONTEXT);
   assert.equal(result.status, 'ok');
   assert.equal(result.deletedCount, 1);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0);
@@ -1060,7 +1085,7 @@ test('平盘 service 完成导入、隐藏非FX证据、运行、导出、回导
   });
 
   const bankPrepared = service.prepareBankImport([bankPath]);
-  const bankApplied = service.applyBankImport(bankPrepared.token);
+  const bankApplied = applyBankImport(service, bankPrepared.token);
   assert.equal(bankApplied.rowCount, 1);
   assert.deepEqual(
     service.listCommittedOperationInputs(operationToken).map((item) => item.sourceType),
@@ -1188,7 +1213,7 @@ test('结果文件发布后导出状态落库失败时保留已发布文件', as
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   service.store.markRunExported = () => {
     throw new Error('injected markRunExported failure');
@@ -1229,7 +1254,7 @@ test('差异页隐藏失效和被替换草稿，并保留当前草稿批次', (t
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const firstRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(firstRun.summary.differenceRows, 1);
@@ -1311,7 +1336,7 @@ test('清结算银行账户表只保存状态正常的行，零有效行不覆�
     币种: 'EUR',
     银行账号: 'REPLACED-001'
   }]);
-  const applied = service.applySourceImport(confirmation.token);
+  const applied = applySourceImport(service, confirmation.token);
   assert.equal(service.store.sourceRecords(SOURCE_TYPES.BANK_ACCOUNT).length, 1);
   assert.equal(service.store.sourceRecords(SOURCE_TYPES.BANK_ACCOUNT)[0].row['银行账号'], 'OWN-001');
   assert.equal(applied.originalInputPaths[0], validPath);
@@ -1323,7 +1348,7 @@ test('清结算银行账户表只保存状态正常的行，零有效行不覆�
   assert.ok(cancelled);
   await service.cancelSourceImport(cancelled.token);
   assert.throws(
-    () => service.applySourceImport(cancelled.token),
+    () => applySourceImport(service, cancelled.token),
     (error) => error && error.code === 'position-source-import-token-expired'
   );
 
@@ -1366,7 +1391,11 @@ test('legacy source lifecycle plan 在 reserve 前不 apply，mixed 保留 ordin
   assert.equal(prepared.requiresExecution, true);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 0);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.BANK_ACCOUNT), 0);
-  let result = await service.executePreparedSourceImport(prepared.plan);
+  let result = await service.executePreparedSourceImport(
+    prepared.plan,
+    undefined,
+    { executionInputPaths: prepared.inputPaths, outputs: [] }
+  );
   assert.equal(result.successCount, 1);
   assert.equal(result.confirmationCount, 1);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 1);
@@ -1378,9 +1407,13 @@ test('legacy source lifecycle plan 在 reserve 前不 apply，mixed 保留 ordin
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.BANK_ACCOUNT), 0);
 
   prepared = await service.prepareSourceImportForLifecycle([ordinaryPath, accountPath]);
-  result = await service.executePreparedSourceImport(prepared.plan);
+  result = await service.executePreparedSourceImport(
+    prepared.plan,
+    undefined,
+    { executionInputPaths: prepared.inputPaths, outputs: [] }
+  );
   const confirmation = result.results.find((item) => item.status === 'needs-confirmation');
-  const applied = service.applySourceImport(confirmation.token);
+  const applied = applySourceImport(service, confirmation.token);
   assert.equal(applied.status, 'ok');
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.GATEWAY_INBOUND), 1);
   assert.equal(service.store.countSourceRows(SOURCE_TYPES.BANK_ACCOUNT), 1);
@@ -1595,7 +1628,7 @@ test('持久侧库关键 JSON 损坏时阻断运行，不降级成普通未命�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   service.store.db.prepare(
     "UPDATE position_link_rows SET linked_json = '{' WHERE source_type = ?"
@@ -1619,7 +1652,7 @@ test('持久侧库非法日期标记必须阻断读取', (t) => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   service.store.db.prepare(`
     UPDATE position_bank_rows
     SET working_json = ?
@@ -1661,7 +1694,7 @@ test('持久侧库语法合法但缺字段的 JSON 必须 fail-closed', async (t
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   service.store.db.prepare(
     "UPDATE position_bank_rows SET working_json = '{}' WHERE biz_id = ?"
   ).run('POSITION-BIZ-1');
@@ -1673,7 +1706,7 @@ test('持久侧库语法合法但缺字段的 JSON 必须 fail-closed', async (t
   service.store.db.prepare(
     'DELETE FROM position_bank_rows WHERE biz_id = ?'
   ).run('POSITION-BIZ-1');
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
@@ -1705,7 +1738,7 @@ test('不适用行的空对象血缘也必须 fail-closed', async (t) => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
   service.store.db.prepare(
@@ -1737,7 +1770,7 @@ test('运行结果、血缘、差异集合及当前链接引用被改写时必�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   const stored = service.store.db.prepare(`
@@ -1832,7 +1865,7 @@ test('链接表删除必须明确月份，清空来源后运行会被阻断', (t
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   assert.throws(
     () => service.deleteSource({ sourceType: SOURCE_TYPES.GATEWAY_INBOUND, months: [] }),
@@ -1902,7 +1935,7 @@ test('FundTransfer-in 使用的外部 out 银行数据变化会使草稿失效',
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(run.summary.differenceRows, 0);
@@ -1948,7 +1981,7 @@ test('差异汇总和导出严格限定当前银行渠道、月份和状态', as
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({
     channels: ['DBS', 'MAYBANK'],
@@ -2018,7 +2051,7 @@ test('银行 Excel 日期单元格经过侧库后仍以日期类型导出', asyn
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const stored = service.store.getBankRows()[0];
   assert.equal(stored.originalRow.BillDate instanceof Date, true);
   assert.equal(stored.workingRow.ValueDate instanceof Date, true);
@@ -2087,7 +2120,7 @@ test('结果回导在解析后、写侧库前暂存发生变化时拒绝更新�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
   const checkpointBefore = service.persistenceCheckpoint();
@@ -2123,7 +2156,7 @@ test('结果回导拒绝 BillDate/ValueDate 同日时分秒、跨日和非法文
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
   assert.doesNotThrow(
@@ -2182,7 +2215,7 @@ test('结果回导接受纯日期文本与等价 Excel 日期单元格', async (
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
   const workbook = XLSX.readFile(resultPath, { cellDates: true, raw: true });
@@ -2233,7 +2266,7 @@ test('已确认订单链接记录跨月份及原始表重建后仍禁止重复�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([julyBankPath]).token);
+  applyBankImport(service, service.prepareBankImport([julyBankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const julyRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(julyRun.summary.differenceRows, 0);
@@ -2255,7 +2288,7 @@ test('已确认订单链接记录跨月份及原始表重建后仍禁止重复�
   );
 
   assert.equal(service.prepareSourceImport([refreshedSourcePath]).successCount, 1);
-  service.applyBankImport(service.prepareBankImport([augustBankPath]).token);
+  applyBankImport(service, service.prepareBankImport([augustBankPath]).token);
   const augustRun = service.run({ channels: ['DBS'], months: ['2026-08'] });
   assert.equal(augustRun.summary.changedRows, 0);
   assert.equal(augustRun.summary.differenceRows, 1);
@@ -2286,13 +2319,13 @@ test('同一银行 BizId 重导后可幂等复核同一链接记录', async (t) 
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const firstRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(firstRun.runId, firstResultPath);
   service.confirmRun(firstRun.runId);
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const secondRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(secondRun.summary.changedRows, 1);
   assert.equal(secondRun.summary.differenceRows, 0);
@@ -2323,7 +2356,7 @@ test('已确认来源消费表与运行血缘必须保持双向一致', async (t
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(run.runId, resultPath);
@@ -2374,18 +2407,18 @@ test('来源消费 owner 必须由对应 confirmed 运行血缘证明', async (t
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([unrelatedBankPath]).token);
+  applyBankImport(service, service.prepareBankImport([unrelatedBankPath]).token);
   const unrelatedRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(unrelatedRun.runId, path.join(userDataDir, 'unrelated.xlsx'));
   service.confirmRun(unrelatedRun.runId);
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const ownerRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(ownerRun.runId, path.join(userDataDir, 'owner.xlsx'));
   service.confirmRun(ownerRun.runId);
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   const idempotentRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(idempotentRun.runId, path.join(userDataDir, 'idempotent.xlsx'));
   service.confirmRun(idempotentRun.runId);
@@ -2474,14 +2507,14 @@ test('同一银行 BizId 已确认后禁止改配到另一条链接记录', asyn
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([firstBankPath]).token);
+  applyBankImport(service, service.prepareBankImport([firstBankPath]).token);
   assert.equal(service.prepareSourceImport([firstSourcePath]).successCount, 1);
   const firstRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   await service.exportRun(firstRun.runId, firstResultPath);
   service.confirmRun(firstRun.runId);
 
   assert.equal(service.prepareSourceImport([secondSourcePath]).successCount, 1);
-  service.applyBankImport(service.prepareBankImport([secondBankPath]).token);
+  applyBankImport(service, service.prepareBankImport([secondBankPath]).token);
   const secondRun = service.run({ channels: ['DBS'], months: ['2026-07'] });
   assert.equal(secondRun.summary.changedRows, 0);
   assert.equal(secondRun.summary.differenceRows, 1);
@@ -2508,7 +2541,7 @@ test('银行导出拒绝实际无数据的 Channel 月份组合', async (t) => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   await assert.rejects(
     service.exportBank({ channels: ['DBS'], months: ['2026-08'] }, outputPath),
     (error) => error && error.code === 'position-bank-export-empty'
@@ -2538,10 +2571,10 @@ test('银行导入 BizId 与其他范围冲突时明确拒绝并保留原数据'
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([julyPath]).token);
+  applyBankImport(service, service.prepareBankImport([julyPath]).token);
   const prepared = service.prepareBankImport([augustPath]);
   assert.throws(
-    () => service.applyBankImport(prepared.token),
+    () => applyBankImport(service, prepared.token),
     (error) => (
       error
       && error.code === 'position-bank-existing-bizid-conflict'
@@ -2585,10 +2618,10 @@ test('银行批量同时替换新旧范围时也禁止 BizId 跨范围迁移', (
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([originalPath]).token);
+  applyBankImport(service, service.prepareBankImport([originalPath]).token);
   const prepared = service.prepareBankImport([mixedPath]);
   assert.throws(
-    () => service.applyBankImport(prepared.token),
+    () => applyBankImport(service, prepared.token),
     (error) => (
       error
       && error.code === 'position-bank-existing-bizid-conflict'
@@ -2624,7 +2657,7 @@ test('银行导入确认使用不可变暂存副本，原路径被覆盖不改�
     BizId: 'REPLACED-B',
     Channel: 'MAYBANK'
   })]);
-  const applied = service.applyBankImport(prepared.token);
+  const applied = applyBankImport(service, prepared.token);
   const rows = service.store.getBankRows();
   assert.equal(rows.length, 1);
   assert.equal(rows[0].biz_id, 'STAGED-A');
@@ -2661,14 +2694,14 @@ test('银行 prepare 后暂存字节变化时 apply 拒绝写库并回收失效 
   mutateFileSameLength(archiveFile.filePath);
 
   assert.throws(
-    () => service.applyBankImport(prepared.token),
+    () => applyBankImport(service, prepared.token),
     (error) => error && error.code === 'position-staged-input-changed'
   );
   assert.equal(service.store.getBankRows().length, 0);
   assert.deepEqual(service.persistenceCheckpoint(), checkpointBefore);
   assert.equal(fs.existsSync(archiveFile.filePath), false);
   assert.throws(
-    () => service.applyBankImport(prepared.token),
+    () => applyBankImport(service, prepared.token),
     (error) => error && error.code === 'position-bank-import-token-expired'
   );
 });
@@ -2699,7 +2732,7 @@ test('账户表确认前暂存字节变化时拒绝覆盖旧快照', (t) => {
   mutateFileSameLength(archiveFile.filePath);
 
   assert.throws(
-    () => service.applySourceImport(confirmation.token),
+    () => applySourceImport(service, confirmation.token),
     (error) => error && error.code === 'position-staged-input-changed'
   );
   assert.equal(service.store.sourceRecords(SOURCE_TYPES.BANK_ACCOUNT).length, 0);
@@ -3096,7 +3129,7 @@ test('规则版本变化后持久草稿自动失效并禁止确认', (t) => {
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   const snapshot = service.store.getRun(run.runId).snapshot;
@@ -3799,7 +3832,7 @@ test('checkpoint 父链允许线性追平并阻断新旧 generation 分叉', (t)
     operationTokenProvider: () => 'linear-operation'
   });
   const prepared = currentService.prepareBankImport([bankPath]);
-  currentService.applyBankImport(prepared.token);
+  applyBankImport(currentService, prepared.token);
   const currentCheckpoint = currentService.persistenceCheckpoint();
   assert.ok(currentCheckpoint.generation > initialCheckpoint.generation);
   assert.notEqual(currentCheckpoint.token, initialCheckpoint.token);
@@ -3918,7 +3951,7 @@ test('运行范围、快照和汇总 JSON 语法合法但结构不完整时必�
     fs.rmSync(userDataDir, { recursive: true, force: true });
   });
 
-  service.applyBankImport(service.prepareBankImport([bankPath]).token);
+  applyBankImport(service, service.prepareBankImport([bankPath]).token);
   assert.equal(service.prepareSourceImport([sourcePath]).successCount, 1);
   const run = service.run({ channels: ['DBS'], months: ['2026-07'] });
   const stored = service.store.db.prepare(

@@ -285,6 +285,23 @@ function seedSuccessfulImportRecord(db, targetMonth, sourceType) {
   `).run(batchId, targetMonth, sourceType).lastInsertRowid);
 }
 
+function seedLegacyUnresolvedAttempt(db, targetMonth) {
+  const batchId = `legacy-unresolved-${targetMonth}`;
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_batches (
+      id, target_month, status, file_count, started_at, finished_at
+    ) VALUES (?, ?, 'failed', 1,
+      '2026-08-11 08:00:00', '2026-08-11 08:01:00')
+  `).run(batchId, targetMonth);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_records (
+      batch_id, target_month, source_type, source_files_json, status,
+      resolution_status, started_at, finished_at
+    ) VALUES (?, ?, 'recharge_refund', '[]', 'failed_validation', 'unresolved',
+      '2026-08-11 08:00:00', '2026-08-11 08:01:00')
+  `).run(batchId, targetMonth);
+}
+
 function seedDataset(db, targetMonth, sourceType, revision = 3) {
   db.prepare(`
     INSERT INTO vcc_fin_op_datasets (
@@ -324,9 +341,13 @@ function unarchiveState(dbPath, targetMonth) {
   }
 }
 
-test('current v2 preview 在锁内重算后按 N+7 解归档', (t) => {
+test('current v2 解归档忽略旧 unresolved 失败审计并按 N+7 提交', (t) => {
   const dbPath = createTempDb(t);
   const raw = seedCurrentArchived(dbPath);
+  const setup = new DatabaseSync(dbPath);
+  setup.exec('PRAGMA foreign_keys = ON');
+  seedLegacyUnresolvedAttempt(setup, raw.targetMonth);
+  setup.close();
   const snapshot = preview(dbPath, raw.targetMonth);
   assert.equal(snapshot.archiveContract, 'current-five-dataset');
   assert.equal(snapshot.canUnarchive, true);
@@ -427,6 +448,7 @@ test('opening delete 复用五 child 显式预算并保持 module first_month �
       initialization_note, initialized_at
     ) VALUES ('2026-07', 'PPHK', '{}', 'opening-hash', '人工核对', '2026-08-11 09:00:00')
   `).run();
+  seedLegacyUnresolvedAttempt(db, '2026-07');
   const moduleBefore = db.prepare('SELECT * FROM vcc_fin_op_module_state').get();
   db.close();
   const snapshot = deletePreview(dbPath, '2026-07', DELETE_TARGET_TYPES.OPENING);

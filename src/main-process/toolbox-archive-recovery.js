@@ -143,7 +143,19 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
         throw new Error(`工具箱发布 receipt 未进入待接管状态：${missing.join('、')}`);
       }
     }
+    const manifestPending = [];
+    const legacyPending = [];
     for (const item of pending) {
+      const batch = archiveCenter.service
+        && archiveCenter.service.repository
+        && archiveCenter.service.repository.getBatch(item.batchContext.batchId);
+      if (batch && batch.metadata && batch.metadata._fileManifest) {
+        manifestPending.push(item);
+      } else {
+        legacyPending.push(item);
+      }
+    }
+    for (const item of legacyPending) {
       const sourceOperation = item.batchContext.taskKey;
       const files = [
         ...toolboxRecoveryInputFiles(item.inputFiles, sourceOperation),
@@ -172,13 +184,95 @@ async function recoverToolboxPublicationsIntoArchive(options = {}) {
     // 全局 outbox 可同时包含普通文件重试或终态冲突；它们应留在 UI
     // 里诊断/重试，不得冒充本 committed receipt 的失败。先尽力重放全局
     // outbox，随后只用原 exact7 批次的附件与 terminal 耐久后置来决定 ack。
-    await archiveCenter.flushOutbox();
-    for (const item of pending) {
+    if (legacyPending.length > 0) await archiveCenter.flushOutbox();
+    for (const item of legacyPending) {
       const sourceOperation = item.batchContext.taskKey;
       verifyArchiveHandoff(archiveCenter, item, [
         ...toolboxRecoveryInputFiles(item.inputFiles, sourceOperation),
         ...toolboxRecoveryOutputFiles(item.files, sourceOperation)
       ]);
+    }
+    for (const item of manifestPending) {
+      const context = item.batchContext;
+      const existingTaskRun = archiveCenter.service.repository.getTaskRun(context.taskRunId);
+      const existingTerminalStatus = existingTaskRun
+        && ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(existingTaskRun.status)
+        ? existingTaskRun.status
+        : null;
+      if (existingTerminalStatus && existingTerminalStatus !== 'succeeded') {
+        throw new Error(
+          `工具箱发布 ${item.taskId} 的 File Task 已进入冲突终态 ${existingTerminalStatus}`
+        );
+      }
+      if (!existingTerminalStatus) {
+        const rawDetail = archiveCenter.service.repository.getBatchDetail(context.batchId);
+        const pendingArtifacts = Array.isArray(rawDetail && rawDetail.artifacts)
+          ? rawDetail.artifacts
+          : [];
+        const settleEvidence = [];
+        for (const input of item.inputFiles) {
+          const matches = pendingArtifacts.filter((artifact) => (
+            artifact.direction === 'input'
+            && path.resolve(artifact.sourcePath) === path.resolve(input.filePath)
+          ));
+          if (matches.length !== 1) {
+            throw new Error(`工具箱发布 ${item.taskId} 的 input manifest identity 不唯一`);
+          }
+          settleEvidence.push({ artifactKey: matches[0].artifactKey });
+        }
+        for (const output of item.files) {
+          const matches = pendingArtifacts.filter((artifact) => (
+            artifact.direction === 'output'
+            && path.resolve(artifact.sourcePath) === path.resolve(output.filePath)
+          ));
+          if (matches.length !== 1) {
+            throw new Error(`工具箱发布 ${item.taskId} 的 output manifest identity 不唯一`);
+          }
+          settleEvidence.push({
+            artifactKey: matches[0].artifactKey,
+            expectedSha256: output.sha256,
+            expectedSizeBytes: output.byteSize
+          });
+        }
+        const settled = await archiveCenter.service.settleManifestArtifacts({
+          batchContext: context,
+          files: settleEvidence
+        });
+        if (!settled || settled.ok === false) {
+          throw new Error(`工具箱发布 ${item.taskId} 的 manifest artifact 尚未全部 durable`);
+        }
+        const finished = await archiveCenter.service.finishFileTask(
+          context.taskRunId,
+          context.batchId,
+          {
+            taskStatus: 'succeeded',
+            code: '',
+            message: '',
+            metadata: {
+              recoveredToolboxPublication: true,
+              toolboxPublicationTaskId: item.taskId
+            }
+          }
+        );
+        const benign = finished
+          && finished.ok === false
+          && finished.code === 'ARCHIVE_TASK_STATUS_CONFLICT'
+          && finished.taskRun
+          && finished.taskRun.status === 'succeeded';
+        if ((!finished || finished.ok === false) && !benign) {
+          throw new Error(`工具箱发布 ${item.taskId} 的 File Task 终态收口失败`);
+        }
+      }
+      const detail = archiveCenter.service.repository.getBatchDetail(context.batchId);
+      const manifest = detail && detail.metadata && detail.metadata._fileManifest;
+      const artifactKeys = new Set((detail && detail.artifacts || []).map(
+        (artifact) => artifact.artifactKey
+      ));
+      if (!manifest
+          || manifest.artifactKeys.length !== artifactKeys.size
+          || manifest.artifactKeys.some((key) => !artifactKeys.has(key))) {
+        throw new Error(`工具箱发布 ${item.taskId} 的 manifest identity 校验失败`);
+      }
     }
 
     const acknowledgedTaskIds = pending.map((item) => item.taskId);

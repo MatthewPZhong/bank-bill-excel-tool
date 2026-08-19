@@ -67,12 +67,26 @@ function createImportSource(db, recordId, source) {
   if (!/^[a-f0-9]{64}$/.test(sha256)) throw new TypeError('VCC 来源 SHA-256 非法');
   if (!Number.isSafeInteger(sizeBytes) || sizeBytes < 0) throw new TypeError('VCC 来源大小非法');
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw new TypeError('VCC 来源序号非法');
+  const archiveArtifactId = normalizedPositiveInteger(
+    source.archiveArtifactId,
+    'VCC 来源 artifact ID'
+  );
   const result = db.prepare(`
     INSERT INTO vcc_fin_op_import_sources (
       import_record_id, source_ordinal, source_file_name,
-      source_sha256, source_size_bytes, archive_state
-    ) VALUES (?, ?, ?, ?, ?, 'pending')
-  `).run(recordId, ordinal, String(source.fileName || ''), sha256, sizeBytes);
+      source_sha256, source_size_bytes, archive_artifact_id,
+      archive_state, bound_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now', 'localtime') END)
+  `).run(
+    recordId,
+    ordinal,
+    String(source.fileName || ''),
+    sha256,
+    sizeBytes,
+    archiveArtifactId,
+    archiveArtifactId === null ? 'pending' : 'ready',
+    archiveArtifactId
+  );
   return Number(result.lastInsertRowid);
 }
 
@@ -181,7 +195,7 @@ function finishImportRecord(db, recordId, result) {
         rolled_back_count = ?, anomaly_count = COALESCE(?, (
           SELECT COUNT(*) FROM vcc_fin_op_import_anomalies WHERE import_record_id = ?
         )), error_message = ?,
-        resolution_status = ?, resolved_at = NULL, resolution_note = NULL,
+        resolution_status = 'not_applicable', resolved_at = NULL, resolution_note = NULL,
         resolution_action = NULL,
         finished_at = datetime('now', 'localtime')
     WHERE id = ?
@@ -197,7 +211,6 @@ function finishImportRecord(db, recordId, result) {
     result.anomalyCount === undefined ? null : Number(result.anomalyCount) || 0,
     recordId,
     result.errorMessage || null,
-    String(result.status || '').startsWith('failed') ? 'unresolved' : 'not_applicable',
     recordId
   );
   if (status.startsWith('failed')) {
@@ -358,33 +371,6 @@ function clearImportStagingRows(db, recordId) {
   return Number(db.prepare(`
     DELETE FROM vcc_fin_op_import_staging_rows WHERE import_record_id = ?
   `).run(recordId).changes) || 0;
-}
-
-function resolveImportRecord(db, recordId, { note, action } = {}) {
-  const record = getImportRecord(db, recordId);
-  if (!record) throw new Error(`导入记录不存在：${recordId}`);
-  if (!String(record.status).startsWith('failed')) {
-    throw new Error('仅失败导入记录可以标记为已处理');
-  }
-  const normalizedNote = String(note == null ? '' : note).trim();
-  if (!normalizedNote) throw new Error('处理说明不能为空');
-  if (normalizedNote.length > 500) throw new Error('处理说明不能超过 500 个字符');
-  if (action !== 'keep_current_effective_dataset') {
-    throw new Error('必须明确确认保留当前有效数据集，且本次失败导入不参与计算');
-  }
-  if (record.resolution_status === 'resolved') {
-    if (record.resolution_note === normalizedNote && record.resolution_action === action) {
-      return record;
-    }
-    throw new Error('该失败导入记录已处理，处理结论不可修改');
-  }
-  db.prepare(`
-    UPDATE vcc_fin_op_import_records
-    SET resolution_status = 'resolved', resolution_note = ?, resolution_action = ?,
-        resolved_at = datetime('now', 'localtime')
-    WHERE id = ?
-  `).run(normalizedNote, action, recordId);
-  return getImportRecord(db, recordId);
 }
 
 function addImportError(db, recordId, error) {
@@ -916,7 +902,6 @@ module.exports = {
   countImportRowsByDisposition,
   failImportBatch,
   recoverInterruptedImports,
-  resolveImportRecord,
   refreshImportRecordArchiveState,
   getVccFinancialOpModuleState,
   claimVccFinancialOpFirstMonth

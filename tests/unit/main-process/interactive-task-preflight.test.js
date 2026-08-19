@@ -76,6 +76,50 @@ function createLifecycleHarness() {
       end() { calls.push('bor-end'); }
     },
     archiveService: {
+      async beginTaskRun(payload) {
+        calls.push('task-run-begin');
+        return {
+          ok: true,
+          taskRun: {
+            taskRunId: payload.taskRunId,
+            moduleId: payload.moduleId,
+            taskKey: payload.taskKey,
+            operationKey: payload.operationKey,
+            parentRunId: payload.parentRunId,
+            status: 'prepared'
+          }
+        };
+      },
+      async markTaskRunStarted() { throw new Error('unexpected operation Task Run start'); },
+      async finishTaskRun() { throw new Error('unexpected operation Task Run terminal'); },
+      async reserveFileTaskBatch(payload) {
+        calls.push('reserve-file');
+        return {
+          ok: true,
+          batch: {
+            id: 1,
+            batchNumber: 'batch-1',
+            taskRunId: payload.taskRun.taskRunId,
+            taskKey: payload.taskRun.taskKey,
+            moduleId: payload.taskRun.moduleId,
+            parentRunId: payload.taskRun.parentRunId,
+            operationKey: payload.taskRun.operationKey
+          }
+        };
+      },
+      async beginFileTaskRecovery() { throw new Error('unexpected file recovery'); },
+      async startFileTask() {
+        calls.push('start-file');
+        return { ok: true };
+      },
+      async settleManifestArtifacts() {
+        calls.push('settle-file');
+        return { ok: true, durable: true };
+      },
+      async finishFileTask() {
+        calls.push('finish-file');
+        return { ok: true };
+      },
       async reserveTaskBatch(payload) {
         calls.push('reserve');
         return {
@@ -142,6 +186,19 @@ async function invokePrepared(harness, prepared, execute) {
   });
   const normalized = await prepareIpcTaskInvocation(contract, {}, []);
   if (!normalized.proceed) return normalized.result;
+  if (normalized.filePlan) {
+    return harness.lifecycle.runFileTask({
+      policy: { ...POLICY, taskKind: 'file', allocation: 'eager' },
+      meta: { channel: POLICY.channel },
+      prepared: normalized,
+      filePlanResolver: () => normalized.filePlan,
+      execute: (batchContext, controls) => contract.execute(
+        {},
+        normalized,
+        createIpcTaskContext(batchContext, controls)
+      )
+    });
+  }
   return harness.lifecycle.run({
     policy: POLICY,
     meta: { channel: POLICY.channel },
@@ -340,9 +397,14 @@ test('Pending 无效输入与 need-confirm 均 0 BOR/reserve/worker，取消不�
   assert.equal(workerCount, 0);
 });
 
-test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/worker', async () => {
+test('Pending 确认只用 opaque context，main v1 datasetSeed 经 preflight 原样传到 session', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pending-preflight-file-plan-'));
+  const inputPath = path.join(rootDir, 'a.xlsx');
+  fs.writeFileSync(inputPath, 'pending');
+  t.after(() => fs.rmSync(rootDir, { recursive: true, force: true }));
   let freshnessChecks = 0;
   const first = preparePendingImportSubmission(pendingArgs({
+    payload: { files: [inputPath], yearMonth: '2026-07' },
     createFreshnessGuard: () => () => { freshnessChecks += 1; }
   }));
   const confirmed = preparePendingImportSubmission(pendingArgs({
@@ -350,6 +412,8 @@ test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/wor
     confirmation: first.nextConfirmation
   }));
   assert.equal(confirmed.prepared.proceed, true);
+  assert.equal(Object.hasOwn(confirmed.prepared, 'files'), false);
+  assert.equal(Object.hasOwn(confirmed.prepared, 'inputPaths'), false);
   assert.equal(freshnessChecks, 2, '首调后与人工确认后各重读一次证据');
   const harness = createLifecycleHarness();
   const runImportCalls = [];
@@ -361,27 +425,39 @@ test('Pending 确认只用 opaque context，确认成功恰好一次 reserve/wor
       return { status: 'success' };
     }
   };
+  const datasetSeed = Object.freeze({
+    datasetId: 'pending-dataset-v1',
+    producerTaskRunId: 'task-1',
+    expectedDatasetId: 'pending-dataset-v0',
+    expectedDatasetVersion: 0
+  });
+  assert.match(mainSource, /executePendingImportSubmission\(\{[\s\S]*?datasetSeed:\s*createPendingDatasetSeed\(/);
   const result = await invokePrepared(harness, confirmed.prepared, async (prepared, taskContext) => {
     return executePendingImportSubmission({
       pendingSession: fakePendingSession,
       prepared,
+      filePaths: taskContext.fileEvidence.filePlan.inputs.map((item) => item.filePath),
       batchContext: taskContext.batchContext,
+      datasetSeed,
       onProgress: (event) => progressEvents.push(event)
     });
   });
   assert.equal(result.status, 'success');
   assert.equal(harness.calls.filter((name) => name === 'bor-begin').length, 1);
-  assert.equal(harness.calls.filter((name) => name === 'reserve').length, 1);
-  assert.equal(harness.calls.filter((name) => name === 'started').length, 1);
-  assert.equal(harness.calls.filter((name) => name === 'append').length, 1);
-  assert.equal(harness.calls.filter((name) => name === 'complete').length, 1);
+  assert.equal(harness.calls.filter((name) => name === 'task-run-begin').length, 1);
+  assert.equal(harness.calls.filter((name) => name === 'reserve-file').length, 1);
+  assert.equal(harness.calls.filter((name) => name === 'start-file').length, 1);
+  assert.equal(harness.calls.filter((name) => name === 'settle-file').length, 1);
+  assert.equal(harness.calls.filter((name) => name === 'finish-file').length, 1);
   assert.equal(runImportCalls.length, 1);
   assert.equal(runImportCalls[0].yearMonth, '2026-07');
-  assert.deepEqual(runImportCalls[0].files, ['/input/a.xlsx']);
+  assert.deepEqual(runImportCalls[0].files, [inputPath]);
   assert.equal(runImportCalls[0].overwriteConfirmed, true);
   assert.equal(runImportCalls[0].dbPath, '/data/pending.sqlite');
   assert.equal(runImportCalls[0].batchContext.batchId, 1);
   assert.equal(Object.isFrozen(runImportCalls[0].batchContext), true);
+  assert.equal(runImportCalls[0].datasetSeed, datasetSeed);
+  assert.equal(Object.hasOwn(runImportCalls[0], 'datasetIdentity'), false);
   assert.deepEqual(progressEvents, [{ type: 'progress', rowsProcessed: 1 }]);
 });
 

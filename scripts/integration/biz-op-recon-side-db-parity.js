@@ -27,12 +27,22 @@ const bizOpReconRunData = require('../../src/main-process/biz-op-recon-run-data'
 const importsRepo = require('../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../src/backend/biz-op-recon-db/run-repository');
+const datasetHeadRepo = require('../../src/backend/biz-op-recon-db/dataset-head-repository');
 const session = require('../../src/main-process/biz-op-recon-session');
 const writer = require('../../src/main-process/biz-op-recon-writer');
 const shared = require('./fixtures/biz-op-recon-side-db-parity/_shared');
 
 const GOLDEN_PATH = path.join(__dirname, 'fixtures', 'biz-op-recon-side-db-parity', 'golden.json');
 const MODULE = runDataStore.MODULE_BIZ_OP;
+const BATCH_CONTEXT = Object.freeze({
+  batchId: 319,
+  batchNumber: '2026-08-10-001',
+  taskRunId: 'biz-op-side-db-parity',
+  taskKey: 'bizOpRecon:import:run-biz-op',
+  moduleId: 'biz-op-reconciliation',
+  parentRunId: 'biz-op-side-db-parity-parent',
+  operationKey: 'biz-op-side-db-parity-operation'
+});
 
 let passed = 0;
 let failed = 0;
@@ -69,6 +79,25 @@ function seedSideDirect(userDataDir, monthKey, { date, t2Date, t1, t2, flow }) {
   }
 }
 
+function runLegacyViaSideDb({ userDataDir, mainDb, date, buName }) {
+  const monthKey = bizOpReconRunData.monthOf(date);
+  const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
+  let result;
+  try {
+    result = session.runLegacyReconciliation(sideDb, { date, buName });
+  } finally {
+    sideDb.close();
+  }
+  const runId = bizOpReconRunData.upsertMainRunMirror(mainDb, {
+    date,
+    buName,
+    relPath: runDataStore.sideDbRelPath(MODULE, monthKey),
+    stats: result.stats,
+    status: 'success'
+  });
+  return { runId, stats: result.stats };
+}
+
 async function main() {
   if (!fs.existsSync(GOLDEN_PATH)) {
     console.error(`biz-op-recon-side-db-parity: golden.json 不存在（${GOLDEN_PATH}）— 请先在改造前跑 _collect-golden.js`);
@@ -95,9 +124,9 @@ async function main() {
 
       assertEq(mainBizOpCounts(mainDb), { imports: 0, flow: 0, diff: 0 }, '主库 4 表初始 0 行（imports/flow/diff）');
 
-      // 直插侧库 → runViaSideDb（inline 对账 + 主库镜像）。
+      // 历史 golden parity 明确走 v0 helper，不借 normal v1 API 静默降级。
       seedSideDirect(userDataDir, monthKey, fx);
-      const runRes = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: DATE, buName: BU });
+      const runRes = runLegacyViaSideDb({ userDataDir, mainDb, date: DATE, buName: BU });
 
       // diff_rows + runSummary byte-for-byte（dump 侧库内 run）。
       const sideDb = runDataStore.openSideDb(userDataDir, MODULE, monthKey);
@@ -181,11 +210,37 @@ async function main() {
       // 调编排层月末跨月处理（私有 handleMonthEndCrossMonth 经 runBizOpImport 触发，这里直接验证语义：
       //   手动调用复制逻辑等价——通过 runBizOpImport 的 mock worker 验证）。
       // 用 mock worker（直接返回 success + buName）触发编排层补清/冗余。
-      const mockWorker = async (_db, _params) => ({ status: 'success', buName: BU, validCount: 1 });
+      const mockWorker = async (db, workerParams) => {
+        db.exec('BEGIN');
+        try {
+          session.assertNoPendingMonthEndCopy(db, D, BU);
+          session.assertBizOpMonthEndAdmission(workerParams.monthEndCopyPlan, BU);
+          const identity = datasetHeadRepo.nextDatasetIdentity(
+            datasetHeadRepo.getHead(db, 'op', D, BU),
+            workerParams.datasetSeed.producerTaskRunId,
+            () => workerParams.datasetSeed.datasetId
+          );
+          datasetHeadRepo.writeHead(db, {
+            kind: 'op', dataDate: D, buName: BU, identity
+          });
+          session.recordMonthEndCopyIntent(
+            db,
+            workerParams.monthEndCopyPlan,
+            D,
+            BU,
+            identity
+          );
+          db.exec('COMMIT');
+          return { status: 'success', buName: BU, validCount: 1 };
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+      };
       await bizOpReconRunData.runBizOpImport({
         userDataDir,
         runBizOpImportViaWorker: mockWorker,
-        params: { date: D, filePath: 'x.xlsx' }
+        params: { date: D, filePath: 'x.xlsx', batchContext: BATCH_CONTEXT }
       });
       // 验证下月侧库含 D 的 T-2 冗余副本。
       const nextSide = runDataStore.openSideDb(userDataDir, MODULE, nextMonth);
@@ -193,6 +248,11 @@ async function main() {
       try { copyRows = importsRepo.getRowsByDateBu(nextSide, D, BU); } finally { try { nextSide.close(); } catch (_e) { /* swallow */ } }
       assertEq(copyRows.length, 1, '🔴 C 月末 D 导入后下月侧库含 D 的 T-2 冗余副本（行数）');
       assertEq(copyRows[0] ? copyRows[0].account_no : null, 'ACCX', '🔴 C T-2 冗余副本账户号正确');
+      bizOpReconRunData.acknowledgeMonthEndCopyIntent({
+        userDataDir,
+        dataDate: D,
+        sourceTaskRunId: BATCH_CONTEXT.taskRunId
+      });
       bizOpReconRunData.deleteMonthSideDb({ userDataDir, mainDb, monthKey });
       bizOpReconRunData.deleteMonthSideDb({ userDataDir, mainDb, monthKey: nextMonth });
     }
@@ -217,7 +277,7 @@ async function main() {
         try { sepSide.close(); } catch (_e) { /* swallow */ }
       }
       // 月初对账：单库自洽（T-2 副本在 9 月侧库）→ ACCY 计算 T-1 = 1000+50=1050 = 实际 1050 → 一致（不进 diff）。
-      const runRes = bizOpReconRunData.runViaSideDb({ userDataDir, mainDb, date: monthStart, buName: BU });
+      const runRes = runLegacyViaSideDb({ userDataDir, mainDb, date: monthStart, buName: BU });
       assertEq(runRes.stats.t1OpTotal, 1, '🔴 D 月初对账 T-1 行数（单库自洽读到 T-1）');
       assertEq(runRes.stats.t2OpTotal, 1, '🔴 D 月初对账 T-2 行数（单库读到冗余副本 T-2，跨月边界画清）');
       assertEq(runRes.stats.amountDiffCount, 0, '🔴 D 月初对账金额一致（T-2 副本正确参与计算，无差异）');

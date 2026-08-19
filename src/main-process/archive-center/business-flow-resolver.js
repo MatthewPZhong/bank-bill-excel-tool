@@ -48,7 +48,9 @@ class BusinessFlowResolver {
         || typeof options.archiveService.findFlowAnchor !== 'function'
         || typeof options.archiveService.bindFlowAnchor !== 'function'
         || typeof options.archiveService.persistFlowBindIntent !== 'function'
-        || typeof options.archiveService.replayFlowBindIntents !== 'function') {
+        || typeof options.archiveService.replayFlowBindIntents !== 'function'
+        || typeof options.archiveService.persistTaskFlowBindIntent !== 'function'
+        || typeof options.archiveService.replayTaskFlowBindIntents !== 'function') {
       throw new TypeError('BusinessFlowResolver 需要 flow anchor service');
     }
     if (options.createParentRunId !== undefined
@@ -97,6 +99,19 @@ class BusinessFlowResolver {
       error.code = replayed && replayed.code || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED';
       throw error;
     }
+    const taskReplayed = await this.archiveService.replayTaskFlowBindIntents({
+      moduleId,
+      ...identity
+    });
+    if (!taskReplayed || taskReplayed.ok === false) {
+      const error = new Error(
+        taskReplayed && taskReplayed.message
+          ? taskReplayed.message
+          : 'Task Run 业务身份待绑定记录重放失败'
+      );
+      error.code = taskReplayed && taskReplayed.code || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED';
+      throw error;
+    }
     const found = await this.archiveService.findFlowAnchor({ moduleId, ...identity });
     if (!found || found.ok === false) {
       const error = new Error(found && found.message ? found.message : '业务身份锚点查询失败');
@@ -122,9 +137,13 @@ class BusinessFlowResolver {
   async bind(payload = {}) {
     const moduleId = requiredText(payload.moduleId, 'moduleId');
     const parentRunId = requiredText(payload.parentRunId, 'parentRunId');
-    const sourceBatchId = Number(payload.sourceBatchId);
-    if (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1) {
-      throw new TypeError('sourceBatchId 必须是正安全整数');
+    const sourceTaskRunId = String(payload.sourceTaskRunId || '').trim();
+    const sourceBatchId = payload.sourceBatchId == null ? null : Number(payload.sourceBatchId);
+    if ((sourceBatchId === null) === !sourceTaskRunId) {
+      throw new TypeError('flow bind owner 必须且只能提供 sourceTaskRunId/sourceBatchId 之一');
+    }
+    if (sourceBatchId !== null && (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1)) {
+      throw new TypeError('sourceBatchId 必须是正安全整数或 null');
     }
     const identities = normalizeIdentities(payload.identities);
     const anchors = [];
@@ -133,7 +152,8 @@ class BusinessFlowResolver {
         moduleId,
         ...identity,
         parentRunId,
-        sourceBatchId
+        sourceBatchId,
+        ...(sourceTaskRunId ? { sourceTaskRunId } : {})
       });
       if (!bound || bound.ok === false || !bound.anchor) {
         throw new Error(bound && bound.message ? bound.message : '业务身份锚点绑定失败');
@@ -146,18 +166,25 @@ class BusinessFlowResolver {
   async persistBindIntent(payload = {}) {
     const moduleId = requiredText(payload.moduleId, 'moduleId');
     const parentRunId = requiredText(payload.parentRunId, 'parentRunId');
-    const sourceBatchId = Number(payload.sourceBatchId);
-    if (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1) {
-      throw new TypeError('sourceBatchId 必须是正安全整数');
+    const sourceTaskRunId = String(payload.sourceTaskRunId || '').trim();
+    const sourceBatchId = payload.sourceBatchId == null ? null : Number(payload.sourceBatchId);
+    if ((sourceBatchId === null) === !sourceTaskRunId) {
+      throw new TypeError('flow bind intent owner 必须且只能提供 sourceTaskRunId/sourceBatchId 之一');
+    }
+    if (sourceBatchId !== null && (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1)) {
+      throw new TypeError('sourceBatchId 必须是正安全整数或 null');
     }
     const identities = normalizeIdentities(payload.identities);
     const intents = [];
     for (const identity of identities) {
-      const persisted = await this.archiveService.persistFlowBindIntent({
+      const persist = sourceBatchId === null
+        ? this.archiveService.persistTaskFlowBindIntent
+        : this.archiveService.persistFlowBindIntent;
+      const persisted = await persist.call(this.archiveService, {
         moduleId,
         ...identity,
         parentRunId,
-        sourceBatchId
+        ...(sourceBatchId === null ? { sourceTaskRunId } : { sourceBatchId })
       });
       if (!persisted || persisted.ok === false) {
         const error = new Error(

@@ -20,10 +20,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { DatabaseSync } = require('node:sqlite');
 // v2.1.12-beta β.2-T2：导入 worker 化 spawn 方（纯 Node 测试路径用；Electron 走 utilityProcess）
 const { spawn } = require('node:child_process');
 
 const importsRepository = require('../backend/biz-op-recon-db/imports-repository');
+const datasetHeadRepository = require('../backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../backend/biz-op-recon-db/month-end-copy-intent-repository');
 const flowImportsRepository = require('../backend/biz-op-recon-db/flow-imports-repository');
 const runRepository = require('../backend/biz-op-recon-db/run-repository');
 // v2.1.9 SR-log-1 (T32h)：替换 console.warn → appendModuleLog 双写
@@ -109,6 +112,44 @@ function addOneDay(yyyymmdd) {
   const d = new Date(yyyymmdd + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+function assertNoPendingMonthEndCopy(db, dataDate, buName) {
+  monthEndCopyIntents.assertNoPending(db, dataDate, normalizeBu(buName));
+}
+
+// 月末 OP 当前月事务的提交前门禁。目标库尚不存在时没有历史 receipt 可检查；
+// source transaction 仍会写 durable copy intent，覆盖随后建库/并发/崩溃窗口。
+function assertBizOpMonthEndAdmission(monthEndCopyPlan, buName) {
+  if (!monthEndCopyPlan || !fs.existsSync(monthEndCopyPlan.targetDbPath)) return;
+  const db = new DatabaseSync(monthEndCopyPlan.targetDbPath, { readOnly: true });
+  try {
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
+      db,
+      monthEndCopyPlan.dataDate,
+      buName
+    );
+    runRepository.assertNoUnacknowledgedArchiveRunByDateBu(
+      db,
+      monthEndCopyPlan.nextDate,
+      buName
+    );
+  } finally {
+    db.close();
+  }
+}
+
+function recordMonthEndCopyIntent(db, monthEndCopyPlan, dataDate, buName, identity) {
+  if (!monthEndCopyPlan) return null;
+  return monthEndCopyIntents.create(db, {
+    sourceTaskRunId: identity.producerTaskRunId,
+    dataDate,
+    normalizedBu: normalizeBu(buName),
+    datasetId: identity.datasetId,
+    datasetVersion: identity.datasetVersion,
+    producerTaskRunId: identity.producerTaskRunId,
+    targetMonth: monthEndCopyPlan.targetMonth
+  });
 }
 
 function formatTimestamp(date = new Date()) {
@@ -292,8 +333,21 @@ function countAccountRows(rows, accKey) {
 
 // 跑一次对账：4 步算法 + 落 run + 落 diff_rows
 // 返回：{ runId, stats }
-function runReconciliation(db, { date, buName }) {
+function runReconciliationCore(db, { date, buName, archiveReceipt, expectedDatasets, legacy }) {
   const t2Date = subOneDay(date);
+
+  db.exec('BEGIN');
+  try {
+    if (!legacy) {
+      const t1Head = datasetHeadRepository.getHead(db, 'op', date, buName);
+      const t2Head = datasetHeadRepository.getHead(db, 'op', t2Date, buName);
+      const flowHead = datasetHeadRepository.getHead(db, 'flow', date);
+      if (!t1Head || t1Head.datasetId !== expectedDatasets.t1DatasetId
+          || !t2Head || t2Head.datasetId !== expectedDatasets.t2DatasetId
+          || !flowHead || flowHead.datasetId !== expectedDatasets.flowDatasetId) {
+        throw new Error('Biz OP 对账来源 dataset 已变化，请重新运行');
+      }
+    }
 
   // 1. 取数（SQL 已用 LOWER(TRIM(...)) 过滤 BU，#7 拍板 C）
   const t1OpRows = importsRepository.getRowsByDateBu(db, date, buName);
@@ -380,23 +434,55 @@ function runReconciliation(db, { date, buName }) {
     t2AnomalyAccountCount: t2AnomalyAccounts.size
   };
 
-  db.exec('BEGIN');
   let runId;
-  try {
-    runId = runRepository.insertRun(db, {
+    runId = legacy
+      ? runRepository.insertRun(db, {
+        date,
+        buName,
+        status: 'success',
+        stats: aggregateStats
+      })
+      : runRepository.insertArchiveRun(db, {
       date,
       buName,
-      status: 'success',
-      stats: aggregateStats
+      stats: aggregateStats,
+      archiveTaskRunId: archiveReceipt.archiveTaskRunId
     });
     runRepository.insertDiffRows(db, runId, date, buName, diffRows);
     db.exec('COMMIT');
+    return { runId, stats: aggregateStats };
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
   }
+}
 
-  return { runId, stats: aggregateStats };
+function runReconciliation(db, { date, buName, archiveReceipt, expectedDatasets }) {
+  if (!archiveReceipt || typeof archiveReceipt !== 'object' || Array.isArray(archiveReceipt)
+      || Object.keys(archiveReceipt).length !== 2
+      || archiveReceipt.archiveContractVersion !== 1
+      || typeof archiveReceipt.archiveTaskRunId !== 'string'
+      || !archiveReceipt.archiveTaskRunId.trim()) {
+    throw new TypeError('Biz OP 对账必须携带 exact v1 Archive receipt');
+  }
+  if (!expectedDatasets || typeof expectedDatasets !== 'object' || Array.isArray(expectedDatasets)
+      || Object.keys(expectedDatasets).length !== 3
+      || ['t1DatasetId', 't2DatasetId', 'flowDatasetId'].some(
+        (key) => typeof expectedDatasets[key] !== 'string' || !expectedDatasets[key].trim()
+      )) {
+    throw new TypeError('Biz OP 对账必须携带 exact 三源 dataset identity');
+  }
+  return runReconciliationCore(db, {
+    date,
+    buName,
+    archiveReceipt: Object.freeze({ ...archiveReceipt }),
+    expectedDatasets: Object.freeze({ ...expectedDatasets }),
+    legacy: false
+  });
+}
+
+function runLegacyReconciliation(db, { date, buName }) {
+  return runReconciliationCore(db, { date, buName, legacy: true });
 }
 
 // ---------------- 整批拒绝 + 失败报告流程（spec §5.4，资金红线 ⚠️） ----------------
@@ -413,7 +499,8 @@ async function runBizOpImportAsync(db, params) {
     filePath,
     readBizOpFile,
     writeBizOpErrorReportXlsx,
-    errorReportsDir
+    errorReportsDir,
+    datasetSeed
   } = params;
 
   const { rows } = readBizOpFile(filePath);
@@ -475,10 +562,21 @@ async function runBizOpImportAsync(db, params) {
   //   - 业务OP 跨 BU 隔离（spec §4.2 #7 拍板 C），所以 D+1 也按"同 BU"清，不像流水跨 BU
   db.exec('BEGIN');
   try {
+    const identity = datasetHeadRepository.nextDatasetIdentity(
+      datasetHeadRepository.getHead(db, 'op', date, firstBu),
+      datasetSeed.producerTaskRunId,
+      () => datasetSeed.datasetId
+    );
+    assertNoPendingMonthEndCopy(db, date, firstBu);
     runRepository.clearRunsAndDiffsByDateBu(db, date, firstBu);
     runRepository.clearRunsAndDiffsByDateBu(db, addOneDay(date), firstBu);
     importsRepository.clearByDateBu(db, date, firstBu);
     importsRepository.insertRows(db, date, rows);
+    assertBizOpMonthEndAdmission(params.monthEndCopyPlan, firstBu);
+    datasetHeadRepository.writeHead(db, {
+      kind: 'op', dataDate: date, buName: firstBu, identity
+    });
+    recordMonthEndCopyIntent(db, params.monthEndCopyPlan, date, firstBu, identity);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -501,7 +599,8 @@ async function runFlowImportAsync(db, params) {
     filePaths,
     readFlowFile,
     writeFlowErrorReportXlsx,
-    errorReportsDir
+    errorReportsDir,
+    datasetSeed
   } = params;
 
   // 入参归一：优先 filePaths（多文件）；否则回退单数 filePath（旧 contract / 兜底）。
@@ -561,9 +660,19 @@ async function runFlowImportAsync(db, params) {
   //   绝不循环「clear+insert」（否则后导文件清掉先导文件已插入行）。
   db.exec('BEGIN');
   try {
+    const previous = datasetHeadRepository.getHead(db, 'flow', date);
+    datasetHeadRepository.assertExpectedHead(previous, datasetSeed);
+    const datasetIdentity = datasetHeadRepository.nextDatasetIdentity(
+      previous,
+      datasetSeed.producerTaskRunId,
+      () => datasetSeed.datasetId
+    );
     runRepository.clearRunsAndDiffsByDate(db, date);
     flowImportsRepository.clearByDate(db, date);
     flowImportsRepository.insertRows(db, date, rows);
+    datasetHeadRepository.writeHead(db, {
+      kind: 'flow', dataDate: date, identity: datasetIdentity
+    });
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -698,13 +807,16 @@ function restoreFlowEngineError(err, { writeErrorReport, multiFile = false }) {
 //   成功 → { status:'success', totalCount, validCount }（与旧链路 complete 事件形态一致）。
 //   失败 → 引擎抛 BigTableImportError，restoreFlowEngineError 还原为 rejected/error 形态；report=true 时写失败报告 xlsx。
 //   进度 → 引擎每 1w 行 { sourceFile, importedCount } 适配为现行 onProgress({ type:'progress', dataRows })。
-async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, writeErrorReport, maxRowErrors, batchContext }) {
+async function runFlowImportViaEngine({
+  dbPath, date, filePaths, onProgress, writeErrorReport, maxRowErrors, batchContext,
+  datasetSeed
+}) {
   try {
     const engineResult = await dispatchEngineImport({
       dbPath,
       files: filePaths,
       contractModulePath: BIZOP_FLOW_CONTRACT_PATH,
-      contractOptions: { date },
+      contractOptions: { date, datasetSeed },
       mode: 'overwrite',
       batchContext,
       // monthKey 不传：契约 monthKeyOf=null ⇒ 引擎 baseMonthKey=null 旁路跨月校验（flow 单日由 date 入参）。
@@ -775,9 +887,17 @@ async function runFlowImportViaEngine({ dbPath, date, filePaths, onProgress, wri
 // 统一收敛 worker stdout 事件 + 退出码 → 与旧同步 runBizOpImportAsync/runFlowImportAsync 同形返回值。
 //   kind='bizOp'|'flow'；writeErrorReport({ errorRows }) → Promise<errorReportPath>（report=true 时调用）。
 //   bizOp 传 filePath（单数，不变）；flow 传 filePaths（v3.0.2 需求1b 多文件合并，单进程单事务单次 clear）。
-function spawnImportWorker({ kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors, batchContext }) {
+function spawnImportWorker({
+  kind, dbPath, date, filePath, filePaths, onProgress, writeErrorReport, maxRowErrors,
+  batchContext, datasetSeed, monthEndCopyPlan
+}) {
   return new Promise((resolve) => {
     const jobMeta = { dbPath, kind, date, batchContext };
+    if (kind === 'bizOp') jobMeta.datasetSeed = datasetSeed;
+    if (kind === 'bizOp' && monthEndCopyPlan) {
+      jobMeta.monthEndCopyPlan = monthEndCopyPlan;
+    }
+    if (kind === 'flow') jobMeta.datasetSeed = datasetSeed;
     if (Array.isArray(filePaths) && filePaths.length > 0) {
       jobMeta.filePaths = filePaths;     // flow：多文件数组
     } else if (filePath) {
@@ -911,7 +1031,7 @@ async function runBizOpImportViaWorker(db, params) {
   const {
     date, filePath, dbPath,
     writeBizOpErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors, batchContext
+    onProgress, maxRowErrors, batchContext, datasetSeed, monthEndCopyPlan
   } = params;
 
   if (!dbPath) {
@@ -921,7 +1041,8 @@ async function runBizOpImportViaWorker(db, params) {
 
   return spawnImportWorker({
     kind: 'bizOp',
-    dbPath, date, filePath, onProgress, maxRowErrors, batchContext,
+    dbPath, date, filePath, onProgress, maxRowErrors, batchContext, datasetSeed,
+    monthEndCopyPlan,
     writeErrorReport: async ({ errorRows, firstBu, rowErrorTotal, truncated }) => {
       const saveDir = path.join(errorReportsDir, date);
       const fileName = makeBizOpErrorReportFileName(firstBu, date);
@@ -938,7 +1059,7 @@ async function runFlowImportViaWorker(db, params) {
   const {
     date, filePath, filePaths, dbPath,
     writeFlowErrorReportXlsx, errorReportsDir,
-    onProgress, maxRowErrors, batchContext
+    onProgress, maxRowErrors, batchContext, datasetSeed
   } = params;
 
   // 入参归一：优先 filePaths（多文件）；否则回退单数 filePath。
@@ -963,14 +1084,15 @@ async function runFlowImportViaWorker(db, params) {
   //   BIZOP_FLOW_FORCE_LEGACY_IMPORT=1 → 回退旧 import-worker.js（spawnImportWorker，下方）。
   if (USE_BIG_TABLE_IMPORT_ENGINE_BIZOP_FLOW) {
     return runFlowImportViaEngine({
-      dbPath, date, filePaths: files, onProgress, maxRowErrors, writeErrorReport, batchContext
+      dbPath, date, filePaths: files, onProgress, maxRowErrors, writeErrorReport,
+      batchContext, datasetSeed
     });
   }
 
   // ── 回退旧链路（BIZOP_FLOW_FORCE_LEGACY_IMPORT=1）：utilityProcess/spawn + import-worker.js 全旧路径 ──
   return spawnImportWorker({
     kind: 'flow',
-    dbPath, date, filePaths: files, onProgress, maxRowErrors, batchContext,
+    dbPath, date, filePaths: files, onProgress, maxRowErrors, batchContext, datasetSeed,
     writeErrorReport
   });
 }
@@ -1036,8 +1158,8 @@ function createBizOpReconSession({ getDb, getStorageRoot }) {
     return runRepository.listSuccessDatesInRange(getDb(), buName, startDate, endDate);
   }
 
-  function run({ date, buName }) {
-    return runReconciliation(getDb(), { date, buName });
+  function run(params) {
+    return runReconciliation(getDb(), params);
   }
 
   function getRun(runId) {
@@ -1079,6 +1201,9 @@ module.exports = {
   parseSignedAmount,
   subOneDay,
   addOneDay,
+  assertNoPendingMonthEndCopy,
+  assertBizOpMonthEndAdmission,
+  recordMonthEndCopyIntent,
   formatTimestamp,
   formatDateCompact,
   formatTimeCompact,
@@ -1088,6 +1213,7 @@ module.exports = {
   computeT1Op,
   compareT1OpWithComputed,
   diffT1AndT2Accounts,
+  runLegacyReconciliation,
   runReconciliation,
 
   // 整批拒绝 + 失败报告流程（旧同步路径，作 contract 基线 / 无 dbPath 兜底）

@@ -3,7 +3,49 @@
 //        + removed_pending_rows / pending_removal_matches（v2.1.11 T2 移除核对）
 // 所有 CREATE 都用 IF NOT EXISTS，支持重复运行
 
+const { randomUUID } = require('node:crypto');
 const PENDING_COLUMNS = require('./columns');
+
+function ensureColumn(db, tableName, columnName, definition) {
+  const columns = new Set(
+    db.prepare(`PRAGMA table_info(${tableName})`).all().map((column) => column.name)
+  );
+  if (!columns.has(columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+  }
+}
+
+function backfillLegacyArchiveIdentities(db) {
+  const monthRows = db.prepare(`
+    SELECT year_month FROM pending_months
+    WHERE dataset_id IS NULL OR dataset_id = ''
+    ORDER BY year_month
+  `).all();
+  const updateMonth = db.prepare(`
+    UPDATE pending_months
+    SET dataset_id = ?, producer_task_run_id = NULL,
+        dataset_version = 0, archive_contract_version = 0
+    WHERE year_month = ? AND (dataset_id IS NULL OR dataset_id = '')
+  `);
+  for (const row of monthRows) updateMonth.run(randomUUID(), row.year_month);
+
+  const removedMonths = db.prepare(`
+    SELECT DISTINCT rows.year_month
+    FROM removed_pending_rows rows
+    LEFT JOIN pending_removed_months head ON head.year_month = rows.year_month
+    WHERE head.year_month IS NULL
+    ORDER BY rows.year_month
+  `).all();
+  const insertRemovedHead = db.prepare(`
+    INSERT INTO pending_removed_months (
+      year_month, dataset_id, producer_task_run_id, dataset_version,
+      archive_contract_version, updated_at
+    ) VALUES (?, ?, NULL, 0, 0, ?)
+  `);
+  for (const row of removedMonths) {
+    insertRemovedHead.run(row.year_month, randomUUID(), new Date().toISOString());
+  }
+}
 
 function runMigrations(db) {
   // 规则表：单条全局（id 固定 '__GLOBAL__'）
@@ -23,8 +65,42 @@ function runMigrations(db) {
       imported_at TEXT NOT NULL,
       row_count INTEGER NOT NULL,
       source_files TEXT NOT NULL,
-      archive_path TEXT
+      archive_path TEXT,
+      dataset_id TEXT,
+      producer_task_run_id TEXT,
+      dataset_version INTEGER NOT NULL DEFAULT 0 CHECK (dataset_version >= 0),
+      archive_contract_version INTEGER NOT NULL DEFAULT 0
+        CHECK (archive_contract_version IN (0, 1))
     );
+  `);
+  ensureColumn(db, 'pending_months', 'dataset_id', 'TEXT');
+  ensureColumn(db, 'pending_months', 'producer_task_run_id', 'TEXT');
+  ensureColumn(
+    db,
+    'pending_months',
+    'dataset_version',
+    'INTEGER NOT NULL DEFAULT 0 CHECK (dataset_version >= 0)'
+  );
+  ensureColumn(
+    db,
+    'pending_months',
+    'archive_contract_version',
+    'INTEGER NOT NULL DEFAULT 0 CHECK (archive_contract_version IN (0, 1))'
+  );
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS invalidate_pending_month_v1_on_legacy_update
+    AFTER UPDATE OF imported_at, row_count, source_files, archive_path ON pending_months
+    WHEN OLD.archive_contract_version = 1
+      AND NEW.archive_contract_version = 1
+      AND NEW.dataset_id = OLD.dataset_id
+      AND NEW.producer_task_run_id = OLD.producer_task_run_id
+    BEGIN
+      UPDATE pending_months
+      SET dataset_id = NULL, producer_task_run_id = NULL,
+          dataset_version = OLD.dataset_version + 1,
+          archive_contract_version = 0
+      WHERE year_month = NEW.year_month;
+    END;
   `);
 
   // 行级数据表：31 列具名 TEXT（原中文列名反引号包裹）
@@ -52,10 +128,30 @@ function runMigrations(db) {
       created_at TEXT NOT NULL,
       stat_new INTEGER NOT NULL,
       stat_missing INTEGER NOT NULL,
-      stat_changed INTEGER NOT NULL
+      stat_changed INTEGER NOT NULL,
+      archive_contract_version INTEGER NOT NULL DEFAULT 0
+        CHECK (archive_contract_version IN (0, 1)),
+      archive_task_run_id TEXT,
+      archive_terminal_ack_at TEXT
     );
   `);
+  ensureColumn(
+    db,
+    'diff_runs',
+    'archive_contract_version',
+    'INTEGER NOT NULL DEFAULT 0 CHECK (archive_contract_version IN (0, 1))'
+  );
+  ensureColumn(db, 'diff_runs', 'archive_task_run_id', 'TEXT');
+  ensureColumn(db, 'diff_runs', 'archive_terminal_ack_at', 'TEXT');
   db.exec(`CREATE INDEX IF NOT EXISTS idx_diff_runs_months ON diff_runs(lower_month, upper_month, created_at DESC);`);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS protect_pending_unacked_archive_run
+    BEFORE DELETE ON diff_runs
+    WHEN OLD.archive_contract_version = 1 AND OLD.archive_terminal_ack_at IS NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'Pending run Archive terminal 尚未确认，禁止覆盖来源月份');
+    END;
+  `);
 
   // 差异明细表
   db.exec(`
@@ -95,6 +191,36 @@ function runMigrations(db) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_removed_order ON removed_pending_rows(year_month, order_no);`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_removed_recon ON removed_pending_rows(year_month, recon_id);`);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pending_removed_months (
+      year_month TEXT PRIMARY KEY,
+      dataset_id TEXT NOT NULL UNIQUE,
+      producer_task_run_id TEXT,
+      dataset_version INTEGER NOT NULL CHECK (dataset_version >= 0),
+      archive_contract_version INTEGER NOT NULL DEFAULT 0
+        CHECK (archive_contract_version IN (0, 1)),
+      updated_at TEXT NOT NULL
+    );
+  `);
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS invalidate_pending_removed_head_on_insert
+    AFTER INSERT ON removed_pending_rows
+    BEGIN
+      DELETE FROM pending_removed_months WHERE year_month = NEW.year_month;
+    END;
+    CREATE TRIGGER IF NOT EXISTS invalidate_pending_removed_head_on_update
+    AFTER UPDATE ON removed_pending_rows
+    BEGIN
+      DELETE FROM pending_removed_months
+      WHERE year_month IN (OLD.year_month, NEW.year_month);
+    END;
+    CREATE TRIGGER IF NOT EXISTS invalidate_pending_removed_head_on_delete
+    AFTER DELETE ON removed_pending_rows
+    BEGIN
+      DELETE FROM pending_removed_months WHERE year_month = OLD.year_month;
+    END;
+  `);
+
   // 表 2：pending_removal_matches — 对账后 missing↔移除 匹配结果（D-T2-2 对账后自动）
   //   - run_id：关联 diff_runs.id
   //   - diff_row_id：匹配上的 missing diff_rows.id
@@ -111,6 +237,21 @@ function runMigrations(db) {
     );
   `);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_prm_run ON pending_removal_matches(run_id);`);
+
+  backfillLegacyArchiveIdentities(db);
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pending_months_dataset
+      ON pending_months(dataset_id)
+      WHERE dataset_id IS NOT NULL AND dataset_id <> '';
+    CREATE INDEX IF NOT EXISTS idx_diff_runs_unacked_archive
+      ON diff_runs(archive_terminal_ack_at, id)
+      WHERE archive_contract_version = 1 AND archive_terminal_ack_at IS NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_diff_runs_archive_task
+      ON diff_runs(archive_task_run_id)
+      WHERE archive_contract_version = 1
+        AND archive_task_run_id IS NOT NULL
+        AND archive_task_run_id <> '';
+  `);
 }
 
 module.exports = { runMigrations };

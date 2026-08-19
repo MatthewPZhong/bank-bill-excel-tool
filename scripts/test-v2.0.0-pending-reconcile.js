@@ -30,7 +30,7 @@ function insertRows(db, yearMonth, rows) {
     const rowHash = `testhash-${yearMonth}-${i}`;
     insertRow(yearMonth, rowHash, r);
   });
-  monthRepo.upsertMonthMeta(db, { yearMonth, rowCount: rows.length, sourceFiles: ['test.xlsx'] });
+  monthRepo.upsertMonthMetaLegacy(db, { yearMonth, rowCount: rows.length, sourceFiles: ['test.xlsx'] });
   db.exec('COMMIT');
 }
 
@@ -64,7 +64,7 @@ try {
   console.log('[T1] basic: match=[order_no], compare=[金额, 币种]');
   {
     const rule = { matchFields: ['order_no'], compareFields: ['金额', '币种'] };
-    const result = engine.runReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
+    const result = engine.runLegacyReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
 
     check('statNew = 2', result.statNew === 2, `got ${result.statNew}`);
     check('statMissing = 2', result.statMissing === 2, `got ${result.statMissing}`);
@@ -121,7 +121,7 @@ try {
   console.log('[T2] A1 fallback match=[order_no, 币种]: new=1 / missing=1 / changed=2');
   {
     const rule = { matchFields: ['order_no', '币种'], compareFields: ['金额'] };
-    const result = engine.runReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
+    const result = engine.runLegacyReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
     check('statNew = 1 (A006 未配)', result.statNew === 1, `got ${result.statNew}`);
     check('statMissing = 1 (A004 未配)', result.statMissing === 1, `got ${result.statMissing}`);
     check('statChanged = 2 (A002 + A003↔A005)', result.statChanged === 2, `got ${result.statChanged}`);
@@ -131,7 +131,7 @@ try {
   console.log('[T3] compareFields=[] → changed 恒为 0');
   {
     const rule = { matchFields: ['order_no'], compareFields: [] };
-    const result = engine.runReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
+    const result = engine.runLegacyReconciliation(db, { upperMonth: '2026-09', lowerMonth: '2026-10', rule });
     check('statChanged = 0', result.statChanged === 0);
     check('statNew = 2', result.statNew === 2);
     check('statMissing = 2', result.statMissing === 2);
@@ -171,7 +171,7 @@ try {
   {
     let threw = false;
     try {
-      engine.runReconciliation(db, {
+      engine.runLegacyReconciliation(db, {
         upperMonth: '2026-09',
         lowerMonth: '2026-10',
         rule: { matchFields: ['NOT_A_REAL_COL'], compareFields: [] }

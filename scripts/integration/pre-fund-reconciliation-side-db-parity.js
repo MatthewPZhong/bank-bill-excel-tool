@@ -165,7 +165,7 @@ async function run() {
     }, 1), null, '完整匹配候选只消费一次');
     assertEq(resultStore.gatewayStats(resultDb, 1).unusedCount, 3, '三条要素不符候选保持未消费');
 
-    const auditRunId = resultStore.createRun(resultDb, {
+    const auditRunId = resultStore.createLegacyRun(resultDb, {
       scenario: 'missing-gateway', snapshot: {}, bankFiles: ['bank.xlsx']
     });
     const keptRawBySourceRecordId = new Map();
@@ -306,8 +306,8 @@ async function run() {
       [outboundRow({ reconId: 'O-1' })]
     );
 
-    assertEq((await store.importFile(inboundV1)).status, 'imported', 'INBOUND txt 导入');
-    assertEq((await store.importFile(outbound)).status, 'imported', 'OUTBOUND gz 导入');
+    assertEq((await store.importLegacyFile(inboundV1)).status, 'imported', 'INBOUND txt 导入');
+    assertEq((await store.importLegacyFile(outbound)).status, 'imported', 'OUTBOUND gz 导入');
     assertTrue(runDataStore.sideDbExists(tmpdir, runDataStore.MODULE_PRE_FUND_RECONCILIATION, '2026-07'), '月侧库已创建');
     assertEq(store.listBatches().length, 2, '不同 sourceType+sourceBatch 追加');
     assertEq([...store.iterateRows()].length, 3, '规范行全部持久化');
@@ -319,7 +319,7 @@ async function run() {
     const order1 = [...reopened.iterateRows()].map((row) => row.reconciliationId).join(',');
     const order2 = [...reopened.iterateRows()].map((row) => row.reconciliationId).join(',');
     assertEq(order1, order2, '稳定迭代顺序');
-    assertEq((await reopened.importFile(inboundV1)).status, 'noop', '同文件同 hash no-op');
+    assertEq((await reopened.importLegacyFile(inboundV1)).status, 'noop', '同文件同 hash no-op');
 
     writeFixture(
       tmpdir,
@@ -328,7 +328,7 @@ async function run() {
       [inboundRow({ reconId: 'CONFLICT' })]
     );
     await expectErrorCode(
-      () => reopened.importFile(inboundV1),
+      () => reopened.importLegacyFile(inboundV1),
       'MPT_FILE_IDENTITY_CONFLICT',
       '同文件名不同 hash 拒绝'
     );
@@ -340,7 +340,7 @@ async function run() {
       ['20260708', 'MPT_INBOUND_20260708', '1'],
       [inboundRow({ reconId: 'I-NEW' })]
     );
-    assertEq((await reopened.importFile(inboundV2)).status, 'replaced', '同批次更高序号原子替换');
+    assertEq((await reopened.importLegacyFile(inboundV2)).status, 'replaced', '同批次更高序号原子替换');
     assertTrue(![...reopened.iterateRows()].some((row) => row.reconciliationId === 'I-1'), '替换后旧批次行消失');
     assertTrue([...reopened.iterateRows()].some((row) => row.reconciliationId === 'I-NEW'), '替换后新批次行存在');
 
@@ -351,7 +351,7 @@ async function run() {
       [inboundRow({ reconId: 'STALE' })]
     );
     await expectErrorCode(
-      () => reopened.importFile(stale),
+      () => reopened.importLegacyFile(stale),
       'MPT_BATCH_SEQUENCE_STALE',
       '同批次旧序号拒绝'
     );
@@ -364,7 +364,7 @@ async function run() {
     );
     let brokenError = null;
     try {
-      await reopened.importFile(broken);
+      await reopened.importLegacyFile(broken);
     } catch (error) {
       brokenError = error;
     }
@@ -386,7 +386,7 @@ async function run() {
     assertEq(errorReport.errorRowCount, 1, '错误报告导出全部错误行');
     assertEq(XLSX.readFile(errorReportPath).SheetNames.join(','), 'INBOUND错误数据', '错误报告按来源建立 sheet');
 
-    const repaired = await reopened.importFile(broken, {
+    const repaired = await reopened.importLegacyFile(broken, {
       skipInvalidRows: true,
       expectedContentHash: brokenError.contentHash
     });
@@ -413,7 +413,7 @@ async function run() {
     assertEq(reopened.listBatches().length, 1, '另一 sourceType 批次保留');
     assertEq(reopened.listBatches()[0].sourceType, SOURCE_TYPE_OUTBOUND, 'INBOUND 删除不影响 OUTBOUND');
 
-    assertEq((await reopened.importFile(inboundV2)).status, 'imported', '反向删除前恢复 INBOUND 批次');
+    assertEq((await reopened.importLegacyFile(inboundV2)).status, 'imported', '反向删除前恢复 INBOUND 批次');
     const reverseDeleted = await reopened.deleteByDateRange('2026-07-07', '2026-07-08', {
       sourceType: SOURCE_TYPE_OUTBOUND
     });

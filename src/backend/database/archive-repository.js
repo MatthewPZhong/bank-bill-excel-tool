@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const path = require('node:path');
 
 // 存档中心只在主库保存轻量元数据：
 //   archive_batches   一次业务操作对应的本地日期流水批次；
@@ -38,6 +39,15 @@ const ARTIFACT_STATUSES = Object.freeze({
   FAILED: 'failed'
 });
 
+const TASK_RUN_STATUSES = Object.freeze({
+  PREPARED: 'prepared',
+  RUNNING: 'running',
+  SUCCEEDED: 'succeeded',
+  FAILED: 'failed',
+  CANCELLED: 'cancelled',
+  INTERRUPTED: 'interrupted'
+});
+
 const ARTIFACT_DIRECTIONS = new Set(['input', 'output']);
 const LOCAL_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SHA256_RE = /^[a-f0-9]{64}$/;
@@ -46,6 +56,15 @@ const MODULE_CODE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const ARCHIVE_INSTANCE_ID_SETTING_KEY = 'archive_center_instance_id';
 const ARCHIVE_STORAGE_ROOT_SETTING_KEY = 'archive_center_storage_root';
+const VISIBLE_BATCH_PREDICATE_SQL = `EXISTS (
+  SELECT 1 FROM archive_artifacts visible_artifact
+  WHERE visible_artifact.batch_id = b.id
+)`;
+const SPLIT_DIRECTORY_REPAIR_TYPE = 'split-directory-artifact-v1';
+const SPLIT_DIRECTORY_REPAIR_BATCH_NUMBERS = Object.freeze([
+  '2026-08-13-017',
+  '2026-08-13-018'
+]);
 
 let savepointSequence = 0;
 
@@ -536,8 +555,149 @@ function ensureArchiveMetadataSupport(db) {
       CREATE INDEX IF NOT EXISTS idx_archive_batches_parent_run
         ON archive_batches(parent_run_id, local_date, global_daily_sequence)
         WHERE parent_run_id IS NOT NULL AND parent_run_id <> '';
+      CREATE INDEX IF NOT EXISTS idx_archive_batches_task_run
+        ON archive_batches(task_run_id)
+        WHERE task_run_id IS NOT NULL AND task_run_id <> '';
+
+      CREATE TABLE IF NOT EXISTS archive_task_runs (
+        task_run_id TEXT NOT NULL PRIMARY KEY,
+        module_id TEXT NOT NULL,
+        task_key TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        parent_run_id TEXT NOT NULL,
+        status TEXT NOT NULL
+          CHECK (status IN ('prepared', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
+        failure_code TEXT,
+        failure_message TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE (module_id, operation_key)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_task_runs_parent
+        ON archive_task_runs(parent_run_id, created_at, task_run_id);
+      CREATE INDEX IF NOT EXISTS idx_archive_task_runs_status
+        ON archive_task_runs(status, updated_at);
+
+      CREATE TABLE IF NOT EXISTS archive_task_lineage (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        consumer_task_run_id TEXT NOT NULL,
+        producer_task_run_id TEXT,
+        lineage_kind TEXT NOT NULL
+          CHECK (lineage_kind IN ('dataset-input', 'run-output')),
+        lineage_key TEXT NOT NULL,
+        input_role TEXT NOT NULL,
+        state TEXT NOT NULL
+          CHECK (state IN ('planned', 'committed', 'discarded')),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        committed_at TEXT,
+        discarded_at TEXT,
+        UNIQUE (consumer_task_run_id, lineage_kind, lineage_key, input_role),
+        FOREIGN KEY (consumer_task_run_id)
+          REFERENCES archive_task_runs(task_run_id) ON DELETE RESTRICT,
+        FOREIGN KEY (producer_task_run_id)
+          REFERENCES archive_task_runs(task_run_id) ON DELETE RESTRICT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_task_lineage_consumer
+        ON archive_task_lineage(consumer_task_run_id, state, id);
+      CREATE INDEX IF NOT EXISTS idx_archive_task_lineage_producer
+        ON archive_task_lineage(producer_task_run_id, state, id);
+      CREATE INDEX IF NOT EXISTS idx_archive_task_lineage_key
+        ON archive_task_lineage(lineage_kind, lineage_key, state, id);
+
+      CREATE TABLE IF NOT EXISTS archive_task_flow_bind_intents (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        module_id TEXT NOT NULL,
+        identity_type TEXT NOT NULL,
+        identity_value TEXT NOT NULL,
+        parent_run_id TEXT NOT NULL,
+        source_task_run_id TEXT NOT NULL,
+        attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+        last_error_code TEXT,
+        last_error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (module_id, identity_type, identity_value),
+        FOREIGN KEY (source_task_run_id)
+          REFERENCES archive_task_runs(task_run_id) ON DELETE RESTRICT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_task_flow_bind_owner
+        ON archive_task_flow_bind_intents(source_task_run_id);
+
+      CREATE TABLE IF NOT EXISTS archive_maintenance_audits (
+        repair_key TEXT NOT NULL PRIMARY KEY,
+        repair_type TEXT NOT NULL,
+        batch_id INTEGER NOT NULL,
+        batch_number TEXT NOT NULL,
+        before_json TEXT NOT NULL,
+        after_json TEXT NOT NULL,
+        app_version TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_archive_maintenance_audits_batch
+        ON archive_maintenance_audits(batch_id, created_at);
     `);
   });
+}
+
+function mapTaskRun(row) {
+  if (!row) return null;
+  return {
+    taskRunId: row.task_run_id,
+    moduleId: row.module_id,
+    taskKey: row.task_key,
+    operationKey: row.operation_key,
+    parentRunId: row.parent_run_id,
+    status: row.status,
+    failureCode: row.failure_code || '',
+    failureMessage: row.failure_message || '',
+    metadata: parseObjectJson(row.metadata_json),
+    createdAt: row.created_at,
+    startedAt: row.started_at || null,
+    finishedAt: row.finished_at || null,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapTaskLineage(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    consumerTaskRunId: row.consumer_task_run_id,
+    producerTaskRunId: row.producer_task_run_id || null,
+    kind: row.lineage_kind,
+    lineageKey: row.lineage_key,
+    inputRole: row.input_role,
+    sourceContractVersion: row.producer_task_run_id ? 1 : 0,
+    state: row.state,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    committedAt: row.committed_at || null,
+    discardedAt: row.discarded_at || null
+  };
+}
+
+function taskLineageIdentity(item) {
+  return [
+    item.kind,
+    item.lineageKey,
+    item.inputRole,
+    item.producerTaskRunId || ''
+  ].join('\u0000');
+}
+
+function taskLineageSetsEqual(left, right) {
+  return left.length === right.length
+    && left.every((item, index) => (
+      taskLineageIdentity(item) === taskLineageIdentity(right[index])
+    ));
 }
 
 function mapBatch(row) {
@@ -715,6 +875,23 @@ function mapFlowBindIntent(row) {
   };
 }
 
+function mapTaskFlowBindIntent(row) {
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    moduleId: row.module_id,
+    identityType: row.identity_type,
+    identityValue: row.identity_value,
+    parentRunId: row.parent_run_id,
+    sourceTaskRunId: row.source_task_run_id,
+    attemptCount: Number(row.attempt_count) || 0,
+    lastErrorCode: row.last_error_code || '',
+    lastErrorMessage: row.last_error_message || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
 const BATCH_SELECT = `
   SELECT
     b.*,
@@ -777,6 +954,197 @@ class ArchiveRepository {
 
   ensureSchema() {
     ensureArchiveMetadataSupport(this.db);
+  }
+
+  getTaskRun(taskRunId) {
+    const id = requiredText(taskRunId, 'taskRunId', 256);
+    return mapTaskRun(this.db.prepare(`
+      SELECT * FROM archive_task_runs WHERE task_run_id = ?
+    `).get(id));
+  }
+
+  getTaskRunByOperationKey(moduleId, operationKey) {
+    return mapTaskRun(this.db.prepare(`
+      SELECT * FROM archive_task_runs WHERE module_id = ? AND operation_key = ?
+    `).get(
+      normalizeModuleId(moduleId),
+      requiredText(operationKey, 'operationKey', 256)
+    ));
+  }
+
+  listTaskLineageForConsumer(taskRunId) {
+    return this.db.prepare(`
+      SELECT *
+      FROM archive_task_lineage
+      WHERE consumer_task_run_id = ?
+      ORDER BY id
+    `).all(requiredText(taskRunId, 'taskRunId', 256)).map(mapTaskLineage);
+  }
+
+  _transitionPlannedTaskLineage(taskRunId, taskStatus, timestamp) {
+    const targetState = taskStatus === TASK_RUN_STATUSES.SUCCEEDED
+      ? 'committed'
+      : ['failed', 'cancelled'].includes(taskStatus)
+        ? 'discarded'
+        : null;
+    if (!targetState) return;
+    this.db.prepare(`
+      UPDATE archive_task_lineage
+      SET state = ?, updated_at = ?,
+          committed_at = CASE WHEN ? = 'committed' THEN ? ELSE NULL END,
+          discarded_at = CASE WHEN ? = 'discarded' THEN ? ELSE NULL END
+      WHERE consumer_task_run_id = ? AND state = 'planned'
+    `).run(
+      targetState,
+      timestamp,
+      targetState,
+      timestamp,
+      targetState,
+      timestamp,
+      taskRunId
+    );
+  }
+
+  beginTaskRun(payload = {}) {
+    const taskRunId = requiredText(payload.taskRunId, 'taskRunId', 256);
+    const moduleId = normalizeModuleId(payload.moduleId);
+    const taskKey = requiredText(payload.taskKey, 'taskKey', 128);
+    const operationKey = requiredText(payload.operationKey, 'operationKey', 256);
+    const parentRunId = requiredText(payload.parentRunId, 'parentRunId', 256);
+    const metadataJson = normalizeMetadata(payload.metadata);
+    const lineageIntents = payload.lineageIntents || [];
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const existing = this.getTaskRunByOperationKey(moduleId, operationKey);
+      if (existing) {
+        if (existing.taskRunId !== taskRunId
+            || existing.taskKey !== taskKey
+            || existing.parentRunId !== parentRunId) {
+          const error = new Error('operation key 已绑定到不同 Task Run 身份');
+          error.code = 'ARCHIVE_TASK_IDENTITY_CONFLICT';
+          throw error;
+        }
+        const persistedLineage = this.listTaskLineageForConsumer(existing.taskRunId);
+        if (!taskLineageSetsEqual(persistedLineage, lineageIntents)) {
+          const error = new Error('operation key 已绑定到不同 Task Lineage 集合');
+          error.code = 'ARCHIVE_TASK_LINEAGE_CONFLICT';
+          throw error;
+        }
+        return { created: false, taskRun: existing, lineage: persistedLineage };
+      }
+      this.db.prepare(`
+        INSERT INTO archive_task_runs (
+          task_run_id, module_id, task_key, operation_key, parent_run_id,
+          status, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'prepared', ?, ?, ?)
+      `).run(
+        taskRunId,
+        moduleId,
+        taskKey,
+        operationKey,
+        parentRunId,
+        metadataJson,
+        timestamp,
+        timestamp
+      );
+      const insertLineage = this.db.prepare(`
+        INSERT INTO archive_task_lineage (
+          consumer_task_run_id, producer_task_run_id,
+          lineage_kind, lineage_key, input_role, state,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?)
+      `);
+      for (const intent of lineageIntents) {
+        insertLineage.run(
+          taskRunId,
+          intent.producerTaskRunId,
+          intent.kind,
+          intent.lineageKey,
+          intent.inputRole,
+          timestamp,
+          timestamp
+        );
+      }
+      return {
+        created: true,
+        taskRun: this.getTaskRun(taskRunId),
+        lineage: this.listTaskLineageForConsumer(taskRunId)
+      };
+    });
+  }
+
+  transitionTaskRun(taskRunId, status, options = {}) {
+    const id = requiredText(taskRunId, 'taskRunId', 256);
+    const target = requiredText(status, 'status', 32).toLowerCase();
+    if (!Object.values(TASK_RUN_STATUSES).includes(target)) {
+      throw new TypeError(`Task Run status 非法：${target}`);
+    }
+    const expected = Array.isArray(options.expectedStatuses)
+      ? options.expectedStatuses.map((item) => requiredText(item, 'expectedStatus', 32))
+      : [];
+    if (options.metadata !== undefined
+        && (!options.metadata || typeof options.metadata !== 'object'
+          || Array.isArray(options.metadata))) {
+      throw new TypeError('Task Run transition metadata 必须是对象');
+    }
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const current = this.getTaskRun(id);
+      if (!current) return { status: 'not-found', taskRun: null };
+      if (current.status === target) return { status: 'unchanged', taskRun: current };
+      const normalEdges = {
+        prepared: new Set(['running', 'failed', 'cancelled', 'interrupted']),
+        running: new Set(['succeeded', 'failed', 'cancelled', 'interrupted']),
+        succeeded: new Set(),
+        failed: new Set(),
+        cancelled: new Set(),
+        interrupted: new Set()
+      };
+      const recoveryEdge = options.recovery === true
+        && current.status === 'interrupted'
+        && target === 'running';
+      if (!normalEdges[current.status].has(target) && !recoveryEdge) {
+        return { status: 'conflict', taskRun: current };
+      }
+      if (expected.length && !expected.includes(current.status)) {
+        return { status: 'conflict', taskRun: current };
+      }
+      const terminal = [
+        TASK_RUN_STATUSES.SUCCEEDED,
+        TASK_RUN_STATUSES.FAILED,
+        TASK_RUN_STATUSES.CANCELLED,
+        TASK_RUN_STATUSES.INTERRUPTED
+      ].includes(target);
+      const mergedMetadata = options.metadata === undefined
+        ? null
+        : normalizeMetadata({ ...current.metadata, ...options.metadata });
+      this.db.prepare(`
+        UPDATE archive_task_runs
+        SET status = ?,
+            started_at = CASE WHEN ? = 'running' THEN COALESCE(started_at, ?) ELSE started_at END,
+            finished_at = CASE WHEN ? = 1 THEN ? ELSE NULL END,
+            failure_code = ?, failure_message = ?,
+            metadata_json = COALESCE(?, metadata_json), updated_at = ?
+        WHERE task_run_id = ?
+      `).run(
+        target,
+        target,
+        timestamp,
+        terminal ? 1 : 0,
+        timestamp,
+        terminal && target !== TASK_RUN_STATUSES.SUCCEEDED
+          ? optionalText(options.failureCode, 128) || null
+          : null,
+        terminal && target !== TASK_RUN_STATUSES.SUCCEEDED
+          ? optionalText(options.failureMessage, 1024) || null
+          : null,
+        mergedMetadata,
+        timestamp,
+        id
+      );
+      if (terminal) this._transitionPlannedTaskLineage(id, target, timestamp);
+      return { status: 'updated', taskRun: this.getTaskRun(id) };
+    });
   }
 
   getOrCreateArchiveInstanceId() {
@@ -901,6 +1269,42 @@ class ArchiveRepository {
     return mapBatch(row);
   }
 
+  getBatchByNumber(batchNumber) {
+    const number = requiredText(batchNumber, 'batchNumber', 128);
+    const row = this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE b.batch_number = ?
+      GROUP BY b.id
+    `).get(number);
+    return mapBatch(row);
+  }
+
+  getVisibleBatch(batchId) {
+    const row = this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE b.id = ?
+        AND ${VISIBLE_BATCH_PREDICATE_SQL}
+      GROUP BY b.id
+    `).get(Number(batchId));
+    return mapBatch(row);
+  }
+
+  getVisibleBatchByNumber(batchNumber) {
+    const number = requiredText(batchNumber, 'batchNumber', 128);
+    const row = this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE b.batch_number = ?
+        AND ${VISIBLE_BATCH_PREDICATE_SQL}
+      GROUP BY b.id
+    `).get(number);
+    return mapBatch(row);
+  }
+
+  getVisibleBatchDetail(batchId) {
+    const batch = this.getVisibleBatch(batchId);
+    return batch ? { ...batch, artifacts: this.listArtifacts(batch.id) } : null;
+  }
+
   getBatchByOperationKey(moduleId, operationKey) {
     const normalizedModuleId = normalizeModuleId(moduleId);
     const normalizedOperationKey = requiredText(operationKey, 'operationKey', 256);
@@ -952,6 +1356,17 @@ class ArchiveRepository {
     };
   }
 
+  getLatestVisibleBatch() {
+    const row = this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE ${VISIBLE_BATCH_PREDICATE_SQL}
+      GROUP BY b.id
+      ORDER BY b.local_date DESC, b.global_daily_sequence DESC, b.id DESC
+      LIMIT 1
+    `).get();
+    return mapBatch(row);
+  }
+
   listRelatedBatches(parentRunId) {
     const normalizedParentRunId = requiredText(parentRunId, 'parentRunId', 256);
     return this.db.prepare(`
@@ -960,6 +1375,79 @@ class ArchiveRepository {
       GROUP BY b.id
       ORDER BY b.local_date ASC, b.global_daily_sequence ASC, b.id ASC
     `).all(normalizedParentRunId).map(mapBatch);
+  }
+
+  listVisibleRelatedBatches(parentRunId) {
+    const normalizedParentRunId = requiredText(parentRunId, 'parentRunId', 256);
+    return this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE b.parent_run_id = ?
+        AND ${VISIBLE_BATCH_PREDICATE_SQL}
+      GROUP BY b.id
+      ORDER BY b.local_date ASC, b.global_daily_sequence ASC, b.id ASC
+    `).all(normalizedParentRunId).map(mapBatch);
+  }
+
+  listVisibleRelatedBatchesForBatch(batchId) {
+    return this.db.prepare(`
+      WITH visible_batches AS (
+        SELECT b.id, b.task_run_id, b.parent_run_id
+        FROM archive_batches b
+        WHERE ${VISIBLE_BATCH_PREDICATE_SQL}
+      ),
+      seed AS (
+        SELECT id, task_run_id, parent_run_id
+        FROM visible_batches
+        WHERE id = ?
+      ),
+      pivot_runs(task_run_id) AS (
+        SELECT lineage.consumer_task_run_id
+        FROM archive_task_lineage lineage
+        JOIN seed ON lineage.producer_task_run_id = seed.task_run_id
+        WHERE lineage.lineage_kind = 'dataset-input'
+          AND lineage.state = 'committed'
+        UNION
+        SELECT lineage.producer_task_run_id
+        FROM archive_task_lineage lineage
+        JOIN seed ON lineage.consumer_task_run_id = seed.task_run_id
+        WHERE lineage.lineage_kind = 'run-output'
+          AND lineage.state = 'committed'
+          AND lineage.producer_task_run_id IS NOT NULL
+      ),
+      neighbor_task_runs(task_run_id) AS (
+        SELECT lineage.producer_task_run_id
+        FROM archive_task_lineage lineage
+        WHERE lineage.lineage_kind = 'dataset-input'
+          AND lineage.state = 'committed'
+          AND lineage.consumer_task_run_id IN (SELECT task_run_id FROM pivot_runs)
+          AND lineage.producer_task_run_id IS NOT NULL
+        UNION
+        SELECT lineage.consumer_task_run_id
+        FROM archive_task_lineage lineage
+        WHERE lineage.lineage_kind = 'run-output'
+          AND lineage.state = 'committed'
+          AND lineage.producer_task_run_id IN (SELECT task_run_id FROM pivot_runs)
+      ),
+      related_batch_ids(id) AS (
+        SELECT id FROM seed
+        UNION
+        SELECT visible_batches.id
+        FROM visible_batches
+        JOIN seed ON seed.parent_run_id IS NOT NULL
+          AND seed.parent_run_id <> ''
+          AND visible_batches.parent_run_id = seed.parent_run_id
+        UNION
+        SELECT visible_batches.id
+        FROM visible_batches
+        WHERE visible_batches.task_run_id IN (
+          SELECT task_run_id FROM neighbor_task_runs
+        )
+      )
+      ${BATCH_SELECT}
+      WHERE b.id IN (SELECT id FROM related_batch_ids)
+      GROUP BY b.id
+      ORDER BY b.local_date ASC, b.global_daily_sequence ASC, b.id ASC
+    `).all(Number(batchId)).map(mapBatch);
   }
 
   findFlowAnchor(payload = {}) {
@@ -975,11 +1463,15 @@ class ArchiveRepository {
     const identity = normalizeFlowAnchorIdentity(payload);
     const parentRunId = requiredText(payload.parentRunId, 'parentRunId', 256);
     let sourceBatchId = null;
+    const sourceTaskRunId = optionalText(payload.sourceTaskRunId, 256);
     if (payload.sourceBatchId !== undefined && payload.sourceBatchId !== null) {
       sourceBatchId = Number(payload.sourceBatchId);
       if (!Number.isSafeInteger(sourceBatchId) || sourceBatchId < 1) {
         throw new TypeError('sourceBatchId 必须是正安全整数');
       }
+    }
+    if (sourceBatchId === null && !sourceTaskRunId) {
+      throw new TypeError('flow anchor 必须有 file-batch 或 task-run owner');
     }
     const timestamp = this._timestamp();
 
@@ -992,6 +1484,15 @@ class ArchiveRepository {
         if (sourceBatch.module_id !== identity.moduleId
             || sourceBatch.parent_run_id !== parentRunId) {
           const error = new Error('业务身份锚点与来源批次的归属不一致');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+      }
+      if (sourceBatchId === null && sourceTaskRunId) {
+        const sourceTask = this.getTaskRun(sourceTaskRunId);
+        if (!sourceTask || sourceTask.moduleId !== identity.moduleId
+            || sourceTask.parentRunId !== parentRunId) {
+          const error = new Error('业务身份锚点与来源 Task Run 的归属不一致');
           error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
           throw error;
         }
@@ -1108,6 +1609,25 @@ class ArchiveRepository {
         return { created: false, resolved: false, intent };
       }
 
+      const taskIntent = this.db.prepare(`
+        SELECT * FROM archive_task_flow_bind_intents
+        WHERE module_id = ? AND identity_type = ? AND identity_value = ?
+      `).get(identity.moduleId, identity.identityType, identity.identityValue);
+      if (taskIntent) {
+        const intent = mapTaskFlowBindIntent(taskIntent);
+        if (intent.parentRunId !== parentRunId) {
+          const error = new Error('业务身份已有不同 parent 的 task-owned flow intent');
+          error.code = 'ARCHIVE_FLOW_BIND_INTENT_CONFLICT';
+          throw error;
+        }
+        return {
+          created: false,
+          resolved: false,
+          ownerKind: 'task-run',
+          intent
+        };
+      }
+
       const inserted = this.db.prepare(`
         INSERT INTO archive_flow_bind_intents (
           module_id, identity_type, identity_value, parent_run_id,
@@ -1148,6 +1668,121 @@ class ArchiveRepository {
         ) || 'flow-bind intent 重放失败';
         this.db.prepare(`
           UPDATE archive_flow_bind_intents
+          SET attempt_count = attempt_count + 1,
+              last_error_code = ?, last_error_message = ?, updated_at = ?
+          WHERE id = ?
+        `).run(code, message, this._timestamp(), intent.id);
+        results.push({ ok: false, intent, code, message });
+      }
+    }
+    return {
+      attempted: results.length,
+      replayed: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+      results
+    };
+  }
+
+  listTaskFlowBindIntents(filters = {}) {
+    const where = [];
+    const params = [];
+    if (filters.moduleId) {
+      where.push('module_id = ?');
+      params.push(normalizeModuleId(filters.moduleId));
+    }
+    if (filters.identityType !== undefined || filters.identityValue !== undefined) {
+      const identity = normalizeFlowAnchorIdentity(filters);
+      if (!filters.moduleId) {
+        where.push('module_id = ?');
+        params.push(identity.moduleId);
+      }
+      where.push('identity_type = ?', 'identity_value = ?');
+      params.push(identity.identityType, identity.identityValue);
+    }
+    return this.db.prepare(`
+      SELECT * FROM archive_task_flow_bind_intents
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY id ASC
+    `).all(...params).map(mapTaskFlowBindIntent);
+  }
+
+  persistTaskFlowBindIntent(payload = {}) {
+    const identity = normalizeFlowAnchorIdentity(payload);
+    const parentRunId = requiredText(payload.parentRunId, 'parentRunId', 256);
+    const sourceTaskRunId = requiredText(payload.sourceTaskRunId, 'sourceTaskRunId', 256);
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const taskRun = this.getTaskRun(sourceTaskRunId);
+      if (!taskRun || taskRun.moduleId !== identity.moduleId
+          || taskRun.parentRunId !== parentRunId) {
+        const error = new Error('task-owned flow intent 与 Task Run 归属不一致');
+        error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+        throw error;
+      }
+      const anchor = this.findFlowAnchor(identity);
+      if (anchor) {
+        if (anchor.parentRunId !== parentRunId) {
+          const error = new Error('业务身份已绑定到不同任务流程');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+        return { created: false, resolved: true, anchor, intent: null };
+      }
+      const batchIntent = this.listFlowBindIntents(identity)[0];
+      if (batchIntent) {
+        if (batchIntent.parentRunId !== parentRunId) {
+          const error = new Error('batch-owned flow intent 已绑定到不同任务流程');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+        return {
+          created: false,
+          resolved: false,
+          ownerKind: 'file-batch',
+          intent: batchIntent
+        };
+      }
+      const existing = this.listTaskFlowBindIntents(identity)[0];
+      if (existing) {
+        if (existing.parentRunId !== parentRunId) {
+          const error = new Error('task-owned flow intent 已由不同 owner 持有');
+          error.code = 'ARCHIVE_FLOW_ANCHOR_CONFLICT';
+          throw error;
+        }
+        return { created: false, resolved: false, intent: existing };
+      }
+      const inserted = this.db.prepare(`
+        INSERT INTO archive_task_flow_bind_intents (
+          module_id, identity_type, identity_value, parent_run_id,
+          source_task_run_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        identity.moduleId, identity.identityType, identity.identityValue,
+        parentRunId, sourceTaskRunId, timestamp, timestamp
+      );
+      return {
+        created: true,
+        resolved: false,
+        intent: mapTaskFlowBindIntent(this.db.prepare(`
+          SELECT * FROM archive_task_flow_bind_intents WHERE id = ?
+        `).get(Number(inserted.lastInsertRowid)))
+      };
+    });
+  }
+
+  replayTaskFlowBindIntents(filters = {}) {
+    const intents = this.listTaskFlowBindIntents(filters);
+    const results = [];
+    for (const intent of intents) {
+      try {
+        const bound = this.bindFlowAnchor({ ...intent, sourceBatchId: null });
+        this.db.prepare('DELETE FROM archive_task_flow_bind_intents WHERE id = ?').run(intent.id);
+        results.push({ ok: true, intent, anchor: bound.anchor });
+      } catch (error) {
+        const code = optionalText(error && error.code, 128) || 'ARCHIVE_FLOW_BIND_REPLAY_FAILED';
+        const message = optionalText(error && error.message, 512) || 'task flow-bind intent 重放失败';
+        this.db.prepare(`
+          UPDATE archive_task_flow_bind_intents
           SET attempt_count = attempt_count + 1,
               last_error_code = ?, last_error_message = ?, updated_at = ?
           WHERE id = ?
@@ -1204,6 +1839,46 @@ class ArchiveRepository {
       ORDER BY b.local_date DESC, b.id DESC
       LIMIT ? OFFSET ?
     `).all(...params, limitValue, offsetValue).map(mapBatch);
+  }
+
+  listVisibleBatches(filters = {}) {
+    const where = [VISIBLE_BATCH_PREDICATE_SQL];
+    const params = [];
+    if (filters.localDate != null && filters.localDate !== '') {
+      where.push('b.local_date = ?');
+      params.push(normalizeLocalDate(filters.localDate));
+    }
+    if (filters.moduleId != null && filters.moduleId !== '') {
+      where.push('b.module_id = ?');
+      params.push(normalizeModuleId(filters.moduleId));
+    }
+    if (filters.archiveStatus != null && filters.archiveStatus !== '') {
+      const status = requiredText(filters.archiveStatus, 'archiveStatus', 32);
+      if (!Object.values(BATCH_ARCHIVE_STATUSES).includes(status)) {
+        throw new TypeError(`archiveStatus 非法：${status}`);
+      }
+      where.push('b.archive_status = ?');
+      params.push(status);
+    }
+    if (filters.batchNumberContains != null && filters.batchNumberContains !== '') {
+      where.push('INSTR(UPPER(b.batch_number), ?) > 0');
+      params.push(requiredText(filters.batchNumberContains, 'batchNumberContains', 128).toUpperCase());
+    }
+    const limit = filters.limit === undefined ? 200 : Number(filters.limit);
+    const offset = filters.offset === undefined ? 0 : Number(filters.offset);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) {
+      throw new TypeError('limit 必须为 1 到 1000 的安全整数');
+    }
+    if (!Number.isSafeInteger(offset) || offset < 0) {
+      throw new TypeError('offset 必须是非负安全整数');
+    }
+    return this.db.prepare(`
+      ${BATCH_SELECT}
+      WHERE ${where.join(' AND ')}
+      GROUP BY b.id
+      ORDER BY b.local_date DESC, b.global_daily_sequence DESC, b.id DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset).map(mapBatch);
   }
 
   listArtifacts(batchId) {
@@ -1372,6 +2047,174 @@ class ArchiveRepository {
     const batch = this.getBatch(batchId);
     if (!batch) return null;
     return { ...batch, artifacts: this.listArtifacts(batch.id) };
+  }
+
+  _splitDirectoryRepairSnapshot(batch, artifacts) {
+    return {
+      batch,
+      artifacts: artifacts.map((artifact) => ({
+        ...artifact,
+        holds: this.listArtifactHolds(artifact.id)
+      }))
+    };
+  }
+
+  inspectSplitDirectoryArtifactRepair(batchNumber) {
+    const number = requiredText(batchNumber, 'batchNumber', 128);
+    if (!SPLIT_DIRECTORY_REPAIR_BATCH_NUMBERS.includes(number)) {
+      throw new TypeError('split directory repair 只允许显式批次 2026-08-13-017/018');
+    }
+    const batch = this.getBatchByNumber(number);
+    if (!batch) return { status: 'skipped', batchNumber: number, reason: 'batch-not-found' };
+
+    const existingAudit = this.db.prepare(`
+      SELECT repair_key, batch_id, batch_number, created_at
+      FROM archive_maintenance_audits
+      WHERE repair_type = ? AND batch_id = ?
+      ORDER BY created_at, repair_key
+      LIMIT 1
+    `).get(SPLIT_DIRECTORY_REPAIR_TYPE, batch.id);
+    if (existingAudit) {
+      return {
+        status: 'already-repaired',
+        batchNumber: number,
+        batchId: batch.id,
+        repairKey: existingAudit.repair_key,
+        createdAt: existingAudit.created_at
+      };
+    }
+
+    const artifacts = this.listArtifacts(batch.id);
+    const readyInputs = artifacts.filter(
+      (artifact) => artifact.status === 'ready' && artifact.direction === 'input'
+    );
+    const readyOutputs = artifacts.filter(
+      (artifact) => artifact.status === 'ready' && artifact.direction === 'output'
+    );
+    const failedInputs = artifacts.filter(
+      (artifact) => artifact.status === 'failed' && artifact.direction === 'input'
+    );
+    const pseudoArtifact = failedInputs[0];
+    const realArtifacts = [...readyInputs, ...readyOutputs].sort((left, right) => left.id - right.id);
+    const realArtifactsReadable = realArtifacts.every((artifact) => (
+      Number.isSafeInteger(artifact.id)
+      && artifact.id > 0
+      && artifact.sourceOperation === 'toolbox:split:export'
+      && artifact.blob
+      && Number.isSafeInteger(artifact.blob.id)
+      && artifact.blob.id > 0
+      && SHA256_RE.test(artifact.blob.sha256)
+      && Number.isSafeInteger(artifact.blob.sizeBytes)
+      && artifact.blob.sizeBytes >= 0
+      && artifact.storageLayoutVersion === 2
+      && artifact.storageRelativePath
+      && ['hardlink', 'copy'].includes(artifact.storageMode)
+      && artifact.safeFileName
+      && Number.isSafeInteger(artifact.artifactOrder)
+      && artifact.artifactOrder > 0
+      && !artifact.materializationErrorCode
+      && !artifact.materializationErrorMessage
+      && !artifact.materializationFailedAt
+    ));
+    const outputPaths = readyOutputs.map((artifact) => artifact.sourcePath);
+    const outputParent = outputPaths.length === 2
+      && outputPaths.every((filePath) => path.isAbsolute(filePath))
+      && path.dirname(path.resolve(outputPaths[0])) === path.dirname(path.resolve(outputPaths[1]))
+      ? path.dirname(path.resolve(outputPaths[0]))
+      : '';
+    const pseudoHolds = pseudoArtifact ? this.listArtifactHolds(pseudoArtifact.id) : [];
+    const matches = batch.moduleId === 'toolbox'
+      && batch.taskKey === 'toolbox:split:export'
+      && batch.taskStatus === 'succeeded'
+      && artifacts.length === 4
+      && readyInputs.length === 1
+      && readyOutputs.length === 2
+      && failedInputs.length === 1
+      && pseudoArtifact.lastErrorCode === 'ARCHIVE_SOURCE_NOT_FILE'
+      && pseudoArtifact.sourceOperation === 'toolbox:split:export'
+      && path.isAbsolute(pseudoArtifact.sourcePath)
+      && path.resolve(pseudoArtifact.sourcePath) === outputParent
+      && pseudoArtifact.blobId === null
+      && pseudoHolds.length === 0
+      && realArtifacts.length === 3
+      && realArtifactsReadable;
+    if (!matches) {
+      return {
+        status: 'skipped',
+        batchNumber: number,
+        batchId: batch.id,
+        reason: 'fingerprint-mismatch'
+      };
+    }
+
+    return {
+      status: 'matched',
+      batchNumber: number,
+      batchId: batch.id,
+      pseudoArtifactId: pseudoArtifact.id,
+      realArtifactIds: realArtifacts.map((artifact) => artifact.id),
+      before: this._splitDirectoryRepairSnapshot(batch, artifacts)
+    };
+  }
+
+  repairSplitDirectoryArtifact(batchNumber, options = {}) {
+    const appVersion = requiredText(options.appVersion, 'appVersion', 64);
+    return withWriteTransaction(this.db, () => {
+      const inspection = this.inspectSplitDirectoryArtifactRepair(batchNumber);
+      if (inspection.status !== 'matched') return inspection;
+
+      const beforeFailureCount = inspection.before.batch.failureCount;
+      const deleted = this.db.prepare(`
+        DELETE FROM archive_artifacts
+        WHERE id = ? AND batch_id = ? AND status = 'failed' AND blob_id IS NULL
+      `).run(inspection.pseudoArtifactId, inspection.batchId);
+      if (deleted.changes !== 1) throw new Error('split directory repair 伪 artifact 删除 CAS 失败');
+
+      const timestamp = this._timestamp();
+      this._refreshBatchStatus(inspection.batchId, timestamp);
+      const afterBatch = this.getBatch(inspection.batchId);
+      const afterArtifacts = this.listArtifacts(inspection.batchId);
+      if (afterBatch.archiveStatus !== 'complete'
+          || afterBatch.failureCount !== beforeFailureCount
+          || afterArtifacts.length !== 3
+          || afterArtifacts.some((artifact) => artifact.status !== 'ready')
+          || afterArtifacts.some(
+            (artifact, index) => artifact.id !== inspection.realArtifactIds[index]
+          )) {
+        throw new Error('split directory repair 终态与精确指纹不一致');
+      }
+      const after = this._splitDirectoryRepairSnapshot(afterBatch, afterArtifacts);
+      const repairKey = `${SPLIT_DIRECTORY_REPAIR_TYPE}:${inspection.batchId}:${inspection.pseudoArtifactId}`;
+      this.db.prepare(`
+        INSERT INTO archive_maintenance_audits (
+          repair_key, repair_type, batch_id, batch_number,
+          before_json, after_json, app_version, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        repairKey,
+        SPLIT_DIRECTORY_REPAIR_TYPE,
+        inspection.batchId,
+        inspection.batchNumber,
+        JSON.stringify(inspection.before),
+        JSON.stringify(after),
+        appVersion,
+        timestamp
+      );
+      return {
+        status: 'repaired',
+        batchNumber: inspection.batchNumber,
+        batchId: inspection.batchId,
+        repairKey,
+        pseudoArtifactId: inspection.pseudoArtifactId,
+        realArtifacts: afterArtifacts.map((artifact) => ({
+          id: artifact.id,
+          sha256: artifact.blob.sha256,
+          sizeBytes: artifact.blob.sizeBytes,
+          blobId: artifact.blob.id,
+          holds: this.listArtifactHolds(artifact.id)
+        }))
+      };
+    });
   }
 
   createBatch(payload = {}) {
@@ -1561,6 +2404,289 @@ class ArchiveRepository {
     });
   }
 
+  reserveFileTaskBatch(payload = {}) {
+    const taskRun = payload.taskRun;
+    const manifest = payload.manifest;
+    const items = [...manifest.inputs, ...manifest.outputs];
+    const moduleId = taskRun.moduleId;
+    const operationKey = taskRun.operationKey;
+    const taskRunId = taskRun.taskRunId;
+    const taskKey = taskRun.taskKey;
+    const parentRunId = taskRun.parentRunId;
+    const moduleCode = normalizeModuleCode(payload.moduleCode || moduleId);
+    const moduleName = requiredText(payload.moduleName || moduleId, 'moduleName', 128);
+    const manifestIdentity = manifest.identity;
+    const businessStatus = optionalText(payload.businessStatus, 64);
+    const locked = payload.locked === true ? 1 : 0;
+
+    return withWriteTransaction(this.db, () => {
+      const persistedTask = this.getTaskRun(taskRunId);
+      if (!persistedTask
+          || persistedTask.moduleId !== moduleId
+          || persistedTask.operationKey !== operationKey
+          || persistedTask.taskKey !== taskKey
+          || persistedTask.parentRunId !== parentRunId) {
+        const error = new Error('File Batch 与 Task Run 身份不一致');
+        error.code = 'ARCHIVE_TASK_IDENTITY_CONFLICT';
+        throw error;
+      }
+      if (![TASK_RUN_STATUSES.PREPARED, TASK_RUN_STATUSES.RUNNING].includes(persistedTask.status)) {
+        const error = new Error('Task Run 当前状态不能建立 File Batch');
+        error.code = 'ARCHIVE_TASK_STATUS_CONFLICT';
+        throw error;
+      }
+      const issuance = this.getOperationIssuance(moduleId, operationKey);
+      if (issuance && issuance.deletedAt) {
+        return { created: false, status: 'deleted', batch: null, issuance };
+      }
+      const existing = this.getBatchByOperationKey(moduleId, operationKey);
+      if (existing) {
+        const identity = existing.metadata && existing.metadata._fileManifest
+          && existing.metadata._fileManifest.identity;
+        if (identity !== manifestIdentity) {
+          const error = new Error('同 operation key 的文件 manifest 已变化');
+          error.code = 'ARCHIVE_MANIFEST_IDENTITY_CONFLICT';
+          throw error;
+        }
+        return { created: false, status: 'existing', batch: existing };
+      }
+
+      const reservedAt = this.now();
+      const timestamp = dateToIso(reservedAt);
+      const localDate = localDateOf(reservedAt);
+      const retentionUntil = payload.retentionDays === null || payload.retentionDays === 'permanent'
+        ? null
+        : payload.retentionDays === undefined
+          ? null
+          : addCalendarDays(localDate, Number(payload.retentionDays));
+      this.db.prepare(`
+        INSERT INTO archive_daily_sequences (local_date, last_sequence, updated_at)
+        VALUES (?, 1, ?)
+        ON CONFLICT(local_date) DO UPDATE SET
+          last_sequence = archive_daily_sequences.last_sequence + 1,
+          updated_at = excluded.updated_at
+      `).run(localDate, timestamp);
+      const globalDailySequence = Number(this.db.prepare(`
+        SELECT last_sequence FROM archive_daily_sequences WHERE local_date = ?
+      `).get(localDate).last_sequence);
+      const batchNumber = formatGlobalBatchNumber(localDate, globalDailySequence);
+      const batchTaskStatus = persistedTask.status === TASK_RUN_STATUSES.RUNNING
+        ? 'running'
+        : 'reserved';
+      const batchStartedAt = batchTaskStatus === 'running' ? timestamp : null;
+      const metadata = {
+        ...payload.metadata,
+        _fileManifest: {
+          version: 1,
+          identity: manifestIdentity,
+          artifactKeys: items.map((item) => item.artifactKey).sort()
+        }
+      };
+      const inserted = this.db.prepare(`
+        INSERT INTO archive_batches (
+          batch_number, module_id, module_code, module_name, operation_key,
+          local_date, daily_sequence, business_status, archive_status,
+          locked, retention_until, metadata_json, created_at, updated_at,
+          batch_format_version, global_daily_sequence, task_key, task_run_id,
+          parent_run_id, task_status, reserved_at, started_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staging', ?, ?, ?, ?, ?, 2, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        batchNumber, moduleId, moduleCode, moduleName, operationKey,
+        localDate, globalDailySequence, businessStatus, locked, retentionUntil,
+        normalizeMetadata(metadata), timestamp, timestamp, globalDailySequence,
+        taskKey, taskRunId, parentRunId, batchTaskStatus, timestamp, batchStartedAt
+      );
+      const batchId = Number(inserted.lastInsertRowid);
+      this.db.prepare(`
+        INSERT INTO archive_operation_issuances (
+          module_id, operation_key, batch_id, batch_number, issued_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, NULL)
+      `).run(moduleId, operationKey, batchId, batchNumber, timestamp);
+      const insertArtifact = this.db.prepare(`
+        INSERT INTO archive_artifacts (
+          batch_id, artifact_key, direction, role, source_operation,
+          original_name, source_path, status, metadata_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+      `);
+      for (const item of items) {
+        insertArtifact.run(
+          batchId,
+          item.artifactKey,
+          item.direction,
+          item.role,
+          item.sourceOperation,
+          item.originalName,
+          item.filePath,
+          normalizeMetadata({
+            aliasKey: item.aliasKey,
+            ...(item.direction === 'input'
+              ? { sourceSnapshot: item.sourceSnapshot }
+              : { targetSnapshot: item.targetSnapshot })
+          }),
+          timestamp,
+          timestamp
+        );
+      }
+      this.db.prepare(`
+        UPDATE archive_daily_sequences
+        SET last_issued_batch_id = ?, last_issued_batch_number = ?, last_issued_at = ?
+        WHERE local_date = ?
+      `).run(batchId, batchNumber, timestamp, localDate);
+      return { created: true, status: 'reserved', batch: this.getBatch(batchId) };
+    });
+  }
+
+  startFileTask(taskRunId, batchId) {
+    const taskId = requiredText(taskRunId, 'taskRunId', 256);
+    const id = Number(batchId);
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const taskRun = this.getTaskRun(taskId);
+      const batch = this.getBatch(id);
+      if (!taskRun || !batch) return { status: 'not-found', taskRun, batch };
+      if (batch.taskRunId !== taskId) {
+        const error = new Error('File Batch 不属于指定 Task Run');
+        error.code = 'ARCHIVE_TASK_IDENTITY_CONFLICT';
+        throw error;
+      }
+      if (taskRun.status === 'running' && batch.taskStatus === 'running') {
+        return { status: 'unchanged', taskRun, batch };
+      }
+      if (taskRun.status !== 'prepared' || batch.taskStatus !== 'reserved') {
+        return { status: 'conflict', taskRun, batch };
+      }
+      const taskUpdate = this.db.prepare(`
+        UPDATE archive_task_runs
+        SET status = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+        WHERE task_run_id = ? AND status = 'prepared'
+      `).run(timestamp, timestamp, taskId);
+      const batchUpdate = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = 'running', started_at = COALESCE(started_at, ?), updated_at = ?
+        WHERE id = ? AND task_status = 'reserved'
+      `).run(timestamp, timestamp, id);
+      if (taskUpdate.changes !== 1 || batchUpdate.changes !== 1) {
+        throw new Error('File Task started CAS 未同步更新 Task Run 与 batch');
+      }
+      return {
+        status: 'updated',
+        taskRun: this.getTaskRun(taskId),
+        batch: this.getBatch(id)
+      };
+    });
+  }
+
+  finishFileTask(taskRunId, batchId, outcome = {}) {
+    const taskId = requiredText(taskRunId, 'taskRunId', 256);
+    const id = Number(batchId);
+    const taskStatus = requiredText(outcome.taskStatus, 'taskStatus', 32).toLowerCase();
+    if (!['succeeded', 'failed', 'cancelled', 'interrupted'].includes(taskStatus)) {
+      throw new TypeError(`File Task 终态非法：${taskStatus}`);
+    }
+    if (outcome.metadata !== undefined
+        && (!outcome.metadata || typeof outcome.metadata !== 'object'
+          || Array.isArray(outcome.metadata))) {
+      throw new TypeError('File Task terminal metadata 必须是对象');
+    }
+    const batchStatus = taskStatus === 'interrupted' ? 'failed' : taskStatus;
+    const timestamp = this._timestamp();
+    return withWriteTransaction(this.db, () => {
+      const taskRun = this.getTaskRun(taskId);
+      const batch = this.getBatch(id);
+      if (!taskRun || !batch) return { status: 'not-found', taskRun, batch };
+      if (batch.taskRunId !== taskId) {
+        const error = new Error('File Batch 不属于指定 Task Run');
+        error.code = 'ARCHIVE_TASK_IDENTITY_CONFLICT';
+        throw error;
+      }
+      const terminalStatuses = new Set(['succeeded', 'failed', 'cancelled', 'interrupted']);
+      if (terminalStatuses.has(taskRun.status)) {
+        return taskRun.status === taskStatus
+          ? { status: 'unchanged', taskRun, batch }
+          : { status: 'conflict', taskRun, batch };
+      }
+      if (!['prepared', 'running'].includes(taskRun.status)
+          || !['reserved', 'running'].includes(batch.taskStatus)) {
+        return { status: 'conflict', taskRun, batch };
+      }
+      const failureCode = optionalText(outcome.code, 128);
+      const failureMessage = optionalText(outcome.message, 1024);
+      const pending = this.db.prepare(`
+        SELECT id, direction FROM archive_artifacts
+        WHERE batch_id = ? AND status = 'pending'
+      `).all(id);
+      const failPending = this.db.prepare(`
+        UPDATE archive_artifacts
+        SET status = 'failed', blob_id = NULL,
+            last_error_code = ?, last_error_message = ?, updated_at = ?
+        WHERE id = ? AND status = 'pending'
+      `);
+      for (const artifact of pending) {
+        const code = taskStatus === 'succeeded'
+          ? artifact.direction === 'output'
+            ? 'ARCHIVE_OUTPUT_NOT_PRODUCED'
+            : 'ARCHIVE_INPUT_NOT_ARCHIVED'
+          : failureCode || (taskStatus === 'cancelled'
+              ? 'ARCHIVE_TASK_CANCELLED'
+              : taskStatus === 'interrupted'
+                ? 'ARCHIVE_TASK_INTERRUPTED'
+                : 'ARCHIVE_TASK_FAILED');
+        failPending.run(
+          code,
+          failureMessage || (artifact.direction === 'output'
+            ? '任务终结时预期输出文件未形成可归档内容'
+            : '任务终结时输入文件未完成归档'),
+          timestamp,
+          Number(artifact.id)
+        );
+      }
+      const taskUpdate = this.db.prepare(`
+        UPDATE archive_task_runs
+        SET status = ?, finished_at = ?, failure_code = ?, failure_message = ?,
+            metadata_json = COALESCE(?, metadata_json), updated_at = ?
+        WHERE task_run_id = ? AND status IN ('prepared', 'running')
+      `).run(
+        taskStatus,
+        timestamp,
+        taskStatus === 'succeeded' ? null : failureCode || null,
+        taskStatus === 'succeeded' ? null : failureMessage || null,
+        outcome.metadata
+          ? normalizeMetadata({ ...taskRun.metadata, ...outcome.metadata })
+          : null,
+        timestamp,
+        taskId
+      );
+      const mergedMetadata = outcome.metadata
+        ? normalizeMetadata({ ...(batch.metadata || {}), ...outcome.metadata })
+        : null;
+      const batchUpdate = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = ?, finished_at = ?, failure_code = ?, failure_message = ?,
+            metadata_json = COALESCE(?, metadata_json), updated_at = ?
+        WHERE id = ? AND task_status IN ('reserved', 'running')
+      `).run(
+        batchStatus,
+        timestamp,
+        batchStatus === 'succeeded' ? null : failureCode || null,
+        batchStatus === 'succeeded' ? null : failureMessage || null,
+        mergedMetadata,
+        timestamp,
+        id
+      );
+      if (taskUpdate.changes !== 1 || batchUpdate.changes !== 1) {
+        throw new Error('File Task terminal CAS 未同步更新 Task Run 与 batch');
+      }
+      this._transitionPlannedTaskLineage(taskId, taskStatus, timestamp);
+      this._refreshBatchStatus(id, timestamp);
+      return {
+        status: 'updated',
+        taskRun: this.getTaskRun(taskId),
+        batch: this.getBatch(id),
+        failedPendingCount: pending.length
+      };
+    });
+  }
+
   beginTaskRecovery(batchContext = {}, options = {}) {
     const id = Number(batchContext.batchId);
     if (!Number.isSafeInteger(id) || id < 1) {
@@ -1637,6 +2763,81 @@ class ArchiveRepository {
         return { status: 'conflict', updated: false, batch: this.getBatch(id) };
       }
       return { status: 'reopened', updated: true, batch: this.getBatch(id) };
+    });
+  }
+
+  beginFileTaskRecovery(batchContext = {}, options = {}) {
+    const id = Number(batchContext.batchId);
+    const expectedIdentity = {
+      batchNumber: batchContext.batchNumber,
+      taskRunId: batchContext.taskRunId,
+      taskKey: batchContext.taskKey,
+      moduleId: batchContext.moduleId,
+      parentRunId: batchContext.parentRunId,
+      operationKey: batchContext.operationKey
+    };
+    const manifestIdentity = String(options.manifestIdentity || '');
+    const timestamp = this._timestamp();
+
+    return withWriteTransaction(this.db, () => {
+      const batch = this.getBatch(id);
+      const taskRun = this.getTaskRun(expectedIdentity.taskRunId);
+      if (!batch || !taskRun) {
+        return { status: 'not-found', updated: false, batch, taskRun };
+      }
+      const mismatchedField = Object.entries(expectedIdentity).find(
+        ([field, value]) => String(batch[field] || '') !== String(value)
+      );
+      if (mismatchedField || batch.taskRunId !== taskRun.taskRunId) {
+        return {
+          status: 'identity-conflict',
+          updated: false,
+          mismatchedField: mismatchedField ? mismatchedField[0] : 'taskRunId',
+          batch,
+          taskRun
+        };
+      }
+      const persistedManifestIdentity = batch.metadata
+        && batch.metadata._fileManifest
+        && batch.metadata._fileManifest.identity;
+      if (persistedManifestIdentity !== manifestIdentity) {
+        return { status: 'manifest-conflict', updated: false, batch, taskRun };
+      }
+      if (taskRun.status === 'running' && batch.taskStatus === 'running') {
+        return { status: 'unchanged', updated: false, batch, taskRun };
+      }
+      if (taskRun.status === 'prepared' && batch.taskStatus === 'reserved') {
+        return { status: 'unchanged', updated: false, batch, taskRun };
+      }
+      if (taskRun.status !== 'interrupted'
+          || batch.taskStatus !== 'failed'
+          || batch.failureCode !== 'ARCHIVE_TASK_INTERRUPTED') {
+        return { status: 'status-conflict', updated: false, batch, taskRun };
+      }
+
+      const taskUpdate = this.db.prepare(`
+        UPDATE archive_task_runs
+        SET status = 'running', finished_at = NULL,
+            failure_code = NULL, failure_message = NULL, updated_at = ?
+        WHERE task_run_id = ? AND status = 'interrupted'
+      `).run(timestamp, taskRun.taskRunId);
+      const batchUpdate = this.db.prepare(`
+        UPDATE archive_batches
+        SET task_status = 'running', finished_at = NULL,
+            failure_code = NULL, failure_message = NULL,
+            archive_status = 'staging', completed_at = NULL, updated_at = ?
+        WHERE id = ? AND task_status = 'failed'
+          AND failure_code = 'ARCHIVE_TASK_INTERRUPTED'
+      `).run(timestamp, id);
+      if (taskUpdate.changes !== 1 || batchUpdate.changes !== 1) {
+        throw new Error('File Task recovery CAS 未同步更新 Task Run 与 batch');
+      }
+      return {
+        status: 'reopened',
+        updated: true,
+        batch: this.getBatch(id),
+        taskRun: this.getTaskRun(taskRun.taskRunId)
+      };
     });
   }
 
@@ -2080,6 +3281,17 @@ class ArchiveRepository {
     const sourcePath = options.sourcePath == null
       ? null
       : requiredText(options.sourcePath, 'sourcePath', 4096);
+    const hasExpectedSha256 = options.expectedSha256 !== undefined;
+    const hasExpectedSizeBytes = options.expectedSizeBytes !== undefined;
+    if (hasExpectedSha256 !== hasExpectedSizeBytes) {
+      throw new TypeError('artifact expected evidence 必须同时包含 SHA-256 与大小');
+    }
+    const expectedSha256 = hasExpectedSha256
+      ? normalizeSha256(options.expectedSha256)
+      : null;
+    const expectedSizeBytes = hasExpectedSizeBytes
+      ? normalizeSize(options.expectedSizeBytes)
+      : null;
     const timestamp = this._timestamp();
     return withWriteTransaction(this.db, () => {
       const current = this.db.prepare('SELECT * FROM archive_artifacts WHERE id = ?').get(id);
@@ -2087,14 +3299,29 @@ class ArchiveRepository {
       if (current.status === ARTIFACT_STATUSES.READY) {
         throw new Error(`存档 artifact 已完成，不能重复写入：${id}`);
       }
+      const currentMetadata = parseObjectJson(current.metadata_json);
+      if (expectedSha256 !== null
+          && ((currentMetadata.expectedSha256
+              && currentMetadata.expectedSha256 !== expectedSha256)
+            || (currentMetadata.expectedSizeBytes !== undefined
+              && Number(currentMetadata.expectedSizeBytes) !== expectedSizeBytes))) {
+        throw new TypeError('artifact expected evidence 与已持久证据冲突');
+      }
+      const metadataJson = expectedSha256 === null
+        ? current.metadata_json
+        : normalizeMetadata({
+            ...currentMetadata,
+            expectedSha256,
+            expectedSizeBytes
+          });
       this.db.prepare(`
         UPDATE archive_artifacts
         SET status = 'pending', source_path = COALESCE(?, source_path),
             blob_id = NULL, attempt_count = attempt_count + 1,
             last_error_code = NULL, last_error_message = NULL,
-            archived_at = NULL, updated_at = ?
+            archived_at = NULL, metadata_json = ?, updated_at = ?
         WHERE id = ?
-      `).run(sourcePath, timestamp, id);
+      `).run(sourcePath, metadataJson, timestamp, id);
       this.db.prepare(`
         UPDATE archive_batches
         SET archive_status = 'staging', completed_at = NULL, updated_at = ?
@@ -2482,12 +3709,30 @@ class ArchiveRepository {
         .filter((value) => Number.isSafeInteger(value) && value > 0)
     );
     const rows = this.db.prepare(`
-      SELECT id
-      FROM archive_batches
-      WHERE task_status IN ('reserved', 'running')
-      ORDER BY id
+      SELECT b.id, b.task_run_id, tr.task_run_id AS file_task_run_id
+      FROM archive_batches b
+      LEFT JOIN archive_task_runs tr ON tr.task_run_id = b.task_run_id
+      WHERE b.task_status IN ('reserved', 'running')
+      ORDER BY b.id
     `).all().filter((row) => !excludedBatchIds.has(Number(row.id)));
-    if (rows.length === 0) return { taskCount: 0, batchIds: [] };
+    const excludedTaskRunIds = new Set(
+      (Array.isArray(options.excludeTaskRunIds) ? options.excludeTaskRunIds : [])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    );
+    for (const batchId of excludedBatchIds) {
+      const batch = this.getBatch(batchId);
+      if (batch && batch.taskRunId) excludedTaskRunIds.add(batch.taskRunId);
+    }
+    const taskRows = this.db.prepare(`
+      SELECT task_run_id
+      FROM archive_task_runs
+      WHERE status IN ('prepared', 'running')
+      ORDER BY task_run_id
+    `).all().filter((row) => !excludedTaskRunIds.has(String(row.task_run_id)));
+    if (rows.length === 0 && taskRows.length === 0) {
+      return { taskCount: 0, batchIds: [], taskRunIds: [] };
+    }
     const timestamp = this._timestamp();
     const code = 'ARCHIVE_TASK_INTERRUPTED';
     const message = '应用上次异常退出时任务尚未结束，已安全终结；可从原业务入口重新执行';
@@ -2506,10 +3751,40 @@ class ArchiveRepository {
         const batchId = Number(row.id);
         const changed = update.run(timestamp, code, message, timestamp, batchId);
         if (Number(changed.changes) !== 1) continue;
+        if (row.file_task_run_id) {
+          this.db.prepare(`
+            UPDATE archive_artifacts
+            SET status = 'failed', blob_id = NULL,
+                last_error_code = ?, last_error_message = ?, updated_at = ?
+            WHERE batch_id = ? AND status = 'pending'
+          `).run(code, message, timestamp, batchId);
+        }
         batchIds.push(batchId);
         this._refreshBatchStatus(batchId, timestamp, { emptyIsComplete: true });
       }
-      return { taskCount: batchIds.length, batchIds };
+      const taskRunIds = [];
+      const updateTaskRun = this.db.prepare(`
+        UPDATE archive_task_runs
+        SET status = 'interrupted', finished_at = ?, failure_code = ?,
+            failure_message = ?, updated_at = ?
+        WHERE task_run_id = ? AND status IN ('prepared', 'running')
+      `);
+      for (const row of taskRows) {
+        const taskRunId = String(row.task_run_id);
+        const changed = updateTaskRun.run(timestamp, code, message, timestamp, taskRunId);
+        if (Number(changed.changes) === 1) taskRunIds.push(taskRunId);
+      }
+      const interruptedOwners = new Set(taskRunIds);
+      for (const row of rows) {
+        interruptedOwners.add(row.file_task_run_id
+          ? String(row.file_task_run_id)
+          : `legacy-batch:${Number(row.id)}`);
+      }
+      return {
+        taskCount: interruptedOwners.size,
+        batchIds,
+        taskRunIds
+      };
     });
   }
 
@@ -2738,6 +4013,47 @@ class ArchiveRepository {
       logicalBytes: Number(row.logical_bytes) || 0
     };
   }
+
+  getVisibleStats() {
+    const row = this.db.prepare(`
+      WITH visible_batches AS (
+        SELECT b.id, b.locked
+        FROM archive_batches b
+        WHERE ${VISIBLE_BATCH_PREDICATE_SQL}
+      )
+      SELECT
+        (SELECT COUNT(*) FROM visible_batches) AS batch_count,
+        (SELECT COUNT(*) FROM visible_batches WHERE locked = 1) AS locked_batch_count,
+        (SELECT COUNT(*) FROM archive_artifacts a
+          JOIN visible_batches vb ON vb.id = a.batch_id) AS logical_file_count,
+        (SELECT COUNT(*) FROM archive_artifacts a
+          JOIN visible_batches vb ON vb.id = a.batch_id
+          WHERE a.status = 'failed') AS failed_file_count,
+        (SELECT COUNT(DISTINCT a.blob_id) FROM archive_artifacts a
+          JOIN visible_batches vb ON vb.id = a.batch_id
+          WHERE a.blob_id IS NOT NULL) AS unique_file_count,
+        (SELECT COALESCE(SUM(bl.size_bytes), 0) FROM archive_blobs bl
+          WHERE EXISTS (
+            SELECT 1 FROM archive_artifacts a
+            JOIN visible_batches vb ON vb.id = a.batch_id
+            WHERE a.blob_id = bl.id
+          )) AS unique_bytes,
+        (SELECT COALESCE(SUM(bl.size_bytes), 0)
+          FROM archive_artifacts a
+          JOIN visible_batches vb ON vb.id = a.batch_id
+          JOIN archive_blobs bl ON bl.id = a.blob_id
+          WHERE a.status = 'ready') AS logical_bytes
+    `).get();
+    return {
+      batchCount: Number(row.batch_count) || 0,
+      lockedBatchCount: Number(row.locked_batch_count) || 0,
+      logicalFileCount: Number(row.logical_file_count) || 0,
+      failedFileCount: Number(row.failed_file_count) || 0,
+      uniqueFileCount: Number(row.unique_file_count) || 0,
+      uniqueBytes: Number(row.unique_bytes) || 0,
+      logicalBytes: Number(row.logical_bytes) || 0
+    };
+  }
 }
 
 function createArchiveRepository(db, options = {}) {
@@ -2752,6 +4068,9 @@ module.exports = {
   BATCH_ARCHIVE_STATUSES,
   BATCH_FORMAT_VERSIONS,
   BATCH_TASK_STATUSES,
+  TASK_RUN_STATUSES,
+  SPLIT_DIRECTORY_REPAIR_BATCH_NUMBERS,
+  SPLIT_DIRECTORY_REPAIR_TYPE,
   createArchiveRepository,
   ensureArchiveMetadataSupport,
   formatBatchNumber,

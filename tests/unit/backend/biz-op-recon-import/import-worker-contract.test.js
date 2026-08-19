@@ -30,6 +30,8 @@ const writer = require('../../../../src/main-process/biz-op-recon-writer');
 const importsRepo = require('../../../../src/backend/biz-op-recon-db/imports-repository');
 const flowRepo = require('../../../../src/backend/biz-op-recon-db/flow-imports-repository');
 const runRepo = require('../../../../src/backend/biz-op-recon-db/run-repository');
+const datasetHeadRepo = require('../../../../src/backend/biz-op-recon-db/dataset-head-repository');
+const monthEndCopyIntents = require('../../../../src/backend/biz-op-recon-db/month-end-copy-intent-repository');
 const { BIZ_OP_HEADERS, FLOW_HEADERS } = require('../../../../src/backend/biz-op-recon-db/columns');
 
 const WORKER_BATCH_CONTEXT = Object.freeze({
@@ -41,6 +43,26 @@ const WORKER_BATCH_CONTEXT = Object.freeze({
   parentRunId: 'bizop-legacy-parent',
   operationKey: 'bizop-legacy-operation'
 });
+
+let datasetSequence = 0;
+function nextBizOpDatasetSeed(producerTaskRunId = WORKER_BATCH_CONTEXT.taskRunId) {
+  datasetSequence += 1;
+  return {
+    datasetId: `biz-op-worker-contract-${datasetSequence}`,
+    producerTaskRunId
+  };
+}
+
+function nextFlowDatasetSeed(db, date, producerTaskRunId = WORKER_BATCH_CONTEXT.taskRunId) {
+  datasetSequence += 1;
+  const previous = datasetHeadRepo.getHead(db, 'flow', date);
+  return {
+    datasetId: `biz-flow-worker-contract-${datasetSequence}`,
+    producerTaskRunId,
+    expectedDatasetId: previous ? previous.datasetId : null,
+    expectedDatasetVersion: previous ? previous.datasetVersion : 0
+  };
+}
 
 const tmpDirs = [];
 test.after(() => {
@@ -118,6 +140,18 @@ function dumpFlow(db, date) {
   }));
 }
 
+function dumpBizOpWriteState(db) {
+  return {
+    imports: db.prepare('SELECT * FROM biz_op_recon_imports ORDER BY id').all(),
+    runs: db.prepare('SELECT * FROM biz_op_recon_runs ORDER BY id').all(),
+    diffs: db.prepare('SELECT * FROM biz_op_recon_diff_rows ORDER BY id').all(),
+    heads: db.prepare(`
+      SELECT * FROM biz_op_recon_dataset_heads
+      ORDER BY dataset_kind, data_date, normalized_bu
+    `).all()
+  };
+}
+
 // ---------------- ① 业务OP 成功：worker vs 同步同输出 ----------------
 test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu/落库内容一致', async () => {
   const date = '2026-06-10';
@@ -134,6 +168,7 @@ test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu
   const errDirSync = path.join(sync.dir, 'err');
   const syncRes = await session.runBizOpImportAsync(sync.db, {
     date, filePath: fp, readBizOpFile,
+    datasetSeed: nextBizOpDatasetSeed('biz-op-sync-success'),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: errDirSync
   });
@@ -146,6 +181,7 @@ test('bizOp 成功导入：worker 路径 vs 旧同步路径 入库行数/firstBu
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
     batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: errDirWk
   });
@@ -174,6 +210,8 @@ test('bizOp worker 落库前 bu_name 改写为 firstBu（trim 保大小写，与
   const wk = freshDb();
   const res = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -184,6 +222,127 @@ test('bizOp worker 落库前 bu_name 改写为 firstBu（trim 保大小写，与
   assert.equal(stored.length, 3);
   for (const r of stored) assert.equal(r.bu_name, 'BU-X', '每行 bu_name=BU-X');
   wk.db.close();
+});
+
+test('bizOp 月末 worker 提交前命中下月未 ACK receipt 时两库写集合均零变化', async () => {
+  const date = '2026-06-30';
+  const nextDate = '2026-07-01';
+  const current = freshDb();
+  const next = freshDb();
+  const oldCurrentRow = {
+    _rowIndex: 2,
+    bu_name: 'BU-A',
+    account_no: 'CURRENT-OLD',
+    begin_balance: '0',
+    amount: '1',
+    amount_in: '1',
+    amount_out: '0',
+    end_balance: '1'
+  };
+  importsRepo.insertRows(current.db, date, [oldCurrentRow]);
+  datasetHeadRepo.writeHead(current.db, {
+    kind: 'op', dataDate: date, buName: 'BU-A',
+    identity: {
+      datasetId: 'current-old-dataset', producerTaskRunId: 'current-old-task',
+      datasetVersion: 1, archiveContractVersion: 1
+    }
+  });
+  const currentRunId = runRepo.insertArchiveRun(current.db, {
+    date,
+    buName: 'BU-A',
+    archiveTaskRunId: 'current-acked-run',
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    }
+  });
+  runRepo.insertDiffRows(current.db, currentRunId, date, 'BU-A', [
+    { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+  ]);
+  runRepo.acknowledgeArchiveTerminal(current.db, currentRunId, 'current-acked-run');
+
+  importsRepo.insertRows(next.db, date, [{ ...oldCurrentRow, account_no: 'NEXT-OLD' }]);
+  datasetHeadRepo.writeHead(next.db, {
+    kind: 'op', dataDate: date, buName: 'BU-A',
+    identity: {
+      datasetId: 'next-old-dataset', producerTaskRunId: 'next-old-task',
+      datasetVersion: 1, archiveContractVersion: 1
+    }
+  });
+  const pendingRunId = runRepo.insertArchiveRun(next.db, {
+    date,
+    buName: 'BU-A',
+    archiveTaskRunId: 'next-unack-run',
+    stats: {
+      t1OpTotal: 1, t2OpTotal: 1, flowTotal: 1, amountDiffCount: 1,
+      multiOpAccountCount: 0, t2AnomalyAccountCount: 0,
+      t1NotT2Count: 0, t2NotT1Count: 0
+    }
+  });
+  runRepo.insertDiffRows(next.db, pendingRunId, date, 'BU-A', [
+    { source_table: 'imports', source_row_id: 1, multi_op_flag: 'N' }
+  ]);
+  const beforeCurrent = dumpBizOpWriteState(current.db);
+  const beforeNext = dumpBizOpWriteState(next.db);
+  const filePath = await writeXlsx(BIZ_OP_HEADERS, [
+    bizOpRowArray('BU-A', 'CURRENT-NEW', { begin: 0, amount: 10, end: 10 })
+  ]);
+
+  const result = await session.runBizOpImportViaWorker(current.db, {
+    date,
+    filePath,
+    dbPath: current.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed('month-end-blocked-task'),
+    monthEndCopyPlan: {
+      targetDbPath: next.dbPath,
+      targetMonth: '2026-07',
+      dataDate: date,
+      nextDate
+    },
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(current.dir, 'err')
+  });
+
+  assert.equal(result.status, 'error');
+  assert.match(result.message, /未 ACK/);
+  assert.deepEqual(dumpBizOpWriteState(current.db), beforeCurrent);
+  assert.deepEqual(dumpBizOpWriteState(next.db), beforeNext);
+  current.db.close();
+  next.db.close();
+});
+
+test('bizOp 月末 worker 成功 COMMIT 时同事务持久 exact copy intent', async () => {
+  const date = '2026-08-31';
+  const taskRunId = 'biz-op-worker-month-end-success';
+  const current = freshDb();
+  const filePath = await writeXlsx(BIZ_OP_HEADERS, [
+    bizOpRowArray('BU-MONTH-END', 'ACC-MONTH-END', { begin: 0, amount: 25, end: 25 })
+  ]);
+  const result = await session.runBizOpImportViaWorker(current.db, {
+    date,
+    filePath,
+    dbPath: current.dbPath,
+    batchContext: { ...WORKER_BATCH_CONTEXT, taskRunId },
+    datasetSeed: nextBizOpDatasetSeed(taskRunId),
+    monthEndCopyPlan: {
+      targetDbPath: path.join(current.dir, 'month-2026-09.sqlite'),
+      targetMonth: '2026-09',
+      dataDate: date,
+      nextDate: '2026-09-01'
+    },
+    writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
+    errorReportsDir: path.join(current.dir, 'err')
+  });
+  assert.equal(result.status, 'success');
+  const head = datasetHeadRepo.getHead(current.db, 'op', date, 'BU-MONTH-END');
+  const intent = monthEndCopyIntents.getByTaskRunId(current.db, taskRunId);
+  assert.equal(intent.datasetId, head.datasetId);
+  assert.equal(intent.datasetVersion, head.datasetVersion);
+  assert.equal(intent.producerTaskRunId, taskRunId);
+  assert.equal(intent.targetMonth, '2026-09');
+  current.db.close();
 });
 
 // ---------------- ② 业务OP 校验失败整批拒绝 ----------------
@@ -200,6 +359,7 @@ test('bizOp 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 �
   const sync = freshDb();
   const syncRes = await session.runBizOpImportAsync(sync.db, {
     date, filePath: fp, readBizOpFile,
+    datasetSeed: nextBizOpDatasetSeed('biz-op-sync-rejected'),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(sync.dir, 'err')
   });
@@ -209,6 +369,8 @@ test('bizOp 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 �
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -240,6 +402,7 @@ test('bizOp 首行业务方空：worker vs 同步 rejected + errorReportPath=nul
   const sync = freshDb();
   const syncRes = await session.runBizOpImportAsync(sync.db, {
     date, filePath: fp, readBizOpFile,
+    datasetSeed: nextBizOpDatasetSeed('biz-op-sync-empty-bu'),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(sync.dir, 'err')
   });
@@ -248,6 +411,8 @@ test('bizOp 首行业务方空：worker vs 同步 rejected + errorReportPath=nul
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -270,6 +435,8 @@ test('bizOp 空文件（仅表头）：worker rejected 文件无有效数据行 
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -286,6 +453,7 @@ test('🔴 bizOp worker 重导 D 后清 D+1/同BU 旧 run（D+1 旧 diff 基于�
   const wk = freshDb();
   const common = {
     dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   };
@@ -293,8 +461,12 @@ test('🔴 bizOp worker 重导 D 后清 D+1/同BU 旧 run（D+1 旧 diff 基于�
   // 先导入 D 与 D+1（同 BU），各成功
   const fpD = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 0, amount: 10, end: 10 })]);
   const fpD1 = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 10, amount: 5, end: 15 })]);
-  await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD, filePath: fpD });
-  await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD1, filePath: fpD1 });
+  await session.runBizOpImportViaWorker(wk.db, {
+    ...common, date: dateD, filePath: fpD, datasetSeed: nextBizOpDatasetSeed()
+  });
+  await session.runBizOpImportViaWorker(wk.db, {
+    ...common, date: dateD1, filePath: fpD1, datasetSeed: nextBizOpDatasetSeed()
+  });
 
   // 手动给 D+1/BU-A 插一条 run（模拟用户已对账 D+1，run 基于旧 D 的 T-2）
   wk.db.exec('BEGIN');
@@ -304,7 +476,9 @@ test('🔴 bizOp worker 重导 D 后清 D+1/同BU 旧 run（D+1 旧 diff 基于�
 
   // 重导 D（同 BU）→ 必须同清 D+1/BU-A 的旧 run
   const fpD2 = await writeXlsx(BIZ_OP_HEADERS, [bizOpRowArray('BU-A', 'ACC1', { begin: 0, amount: 99, end: 99 })]);
-  const res = await session.runBizOpImportViaWorker(wk.db, { ...common, date: dateD, filePath: fpD2 });
+  const res = await session.runBizOpImportViaWorker(wk.db, {
+    ...common, date: dateD, filePath: fpD2, datasetSeed: nextBizOpDatasetSeed()
+  });
   assert.equal(res.status, 'success');
 
   const d1RunsAfter = runRepo.listRunsByDateBu(wk.db, dateD1, 'BU-A');
@@ -325,6 +499,7 @@ test('bizOp 表头不匹配：worker status=error（同步抛同 errorCode FileV
   try {
     await session.runBizOpImportAsync(freshDb().db, {
       date, filePath: fp, readBizOpFile,
+      datasetSeed: nextBizOpDatasetSeed('biz-op-sync-header-error'),
       writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
       errorReportsDir: mkTmpDir('e-')
     });
@@ -334,6 +509,8 @@ test('bizOp 表头不匹配：worker status=error（同步抛同 errorCode FileV
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -356,6 +533,7 @@ test('flow 成功导入：worker vs 同步 入库行数一致 + 落库内容一�
   const sync = freshDb();
   const syncRes = await session.runFlowImportAsync(sync.db, {
     date, filePath: fp, readFlowFile,
+    datasetSeed: nextFlowDatasetSeed(sync.db, date, 'biz-flow-sync-success'),
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(sync.dir, 'err')
   });
@@ -365,6 +543,8 @@ test('flow 成功导入：worker vs 同步 入库行数一致 + 落库内容一�
   const wk = freshDb();
   const wkRes = await session.runFlowImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextFlowDatasetSeed(wk.db, date),
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -391,6 +571,7 @@ test('flow 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 �
   const sync = freshDb();
   const syncRes = await session.runFlowImportAsync(sync.db, {
     date, filePath: fp, readFlowFile,
+    datasetSeed: nextFlowDatasetSeed(sync.db, date, 'biz-flow-sync-rejected'),
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(sync.dir, 'err')
   });
@@ -400,6 +581,8 @@ test('flow 校验失败：worker vs 同步 rejected + errorRows 一致 + DB 0 �
   const wk = freshDb();
   const wkRes = await session.runFlowImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextFlowDatasetSeed(wk.db, date),
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -420,12 +603,15 @@ test('🔴 flow worker 重导清该 date 跨所有 BU 旧 runs（旧 run 基于�
   const wk = freshDb();
   const common = {
     dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
     writeFlowErrorReportXlsx: writer.writeFlowErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   };
 
   const fp1 = await writeXlsx(FLOW_HEADERS, [flowRowArray('BU-A', 'ACC1', '入', 100)]);
-  await session.runFlowImportViaWorker(wk.db, { ...common, date, filePath: fp1 });
+  await session.runFlowImportViaWorker(wk.db, {
+    ...common, date, filePath: fp1, datasetSeed: nextFlowDatasetSeed(wk.db, date)
+  });
 
   // 预置：该 date 下 BU-A 和 BU-B 各一个 run（模拟已对账，基于旧流水）
   wk.db.exec('BEGIN');
@@ -437,7 +623,9 @@ test('🔴 flow worker 重导清该 date 跨所有 BU 旧 runs（旧 run 基于�
 
   // 重导流水（该 date）→ 必须清该 date 跨所有 BU 的旧 runs
   const fp2 = await writeXlsx(FLOW_HEADERS, [flowRowArray('BU-A', 'ACC1', '入', 999)]);
-  const res = await session.runFlowImportViaWorker(wk.db, { ...common, date, filePath: fp2 });
+  const res = await session.runFlowImportViaWorker(wk.db, {
+    ...common, date, filePath: fp2, datasetSeed: nextFlowDatasetSeed(wk.db, date)
+  });
   assert.equal(res.status, 'success');
 
   assert.equal(runRepo.listRunsByDateBu(wk.db, date, 'BU-A').length, 0, '🔴 BU-A 旧 run 被清');
@@ -477,6 +665,8 @@ test('I1 流式中途 INSERT 失败：worker fatal（消息非表头/读取失�
 
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
   });
@@ -506,6 +696,8 @@ test('I2 错误超 maxRowErrors：result.truncated=true + rowErrorTotal 全量 +
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err'),
     maxRowErrors: 3
@@ -542,6 +734,8 @@ test('I3 大 rejected 包（800 错误行）：worker 刷盘后 session 仍解�
   const wk = freshDb();
   const wkRes = await session.runBizOpImportViaWorker(wk.db, {
     date, filePath: fp, dbPath: wk.dbPath,
+    batchContext: WORKER_BATCH_CONTEXT,
+    datasetSeed: nextBizOpDatasetSeed(),
     writeBizOpErrorReportXlsx: writer.writeBizOpErrorReportXlsx,
     errorReportsDir: path.join(wk.dir, 'err')
     // 不传 maxRowErrors → 默认 1000，800 全部进 errorRows（大包）
