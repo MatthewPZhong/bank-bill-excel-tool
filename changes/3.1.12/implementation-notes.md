@@ -459,3 +459,12 @@
 | hosted runner 实时磁盘/时长配额与大库成本 | PROBE | 若选 GitHub hosted，先做不含敏感数据的磁盘预算/小样本 rehearsal；若选 self-hosted，记录磁盘、供电、Defender、介质与 cache 条件 | 决定 workflow 拆分或 self-hosted 路径，不改变四变体同机同条件合同 |
 | 正式 Windows STP-08 数据与人工 seams | MANUAL / NOT RUN | 数据负责人提供并签署三个本地挂载脱敏 golden receipt；受控 Windows 实际运行四制品 normal 8 轮及独立 migration/crash；人工观察 window/process/failure seams；发布负责人绑定 candidate SHA 终签 | 在这些真实输入与签字完成前只允许报告工具链 ready，不得宣称 70% 或正式 pass |
 | v3.1.11/v3.1.12 来源制品身份 | MANUAL / NOT RUN | 在受控 Windows 取得两代 Release/setup/portable 来源，固定 SHA/size/exact fileVersion；setup 必须安装后取 installed exe | 当前本机无四个 exe，未下载、未重建、未伪造任何 Windows 结果 |
+
+### Final Release Acceptance Update — 2026-08-20
+
+| 项目 | 最终状态 | 证据与边界 |
+| --- | --- | --- |
+| 3.1.12 人工验收 | MANUAL / PASS | 发布负责人在本次发布流程中明确确认“3.1.12 已验收完成”，并授权执行 `v3.1.12 → main` 合并。该明确签字关闭上表在 PR5 工具链完成时仍标记为 `MANUAL / NOT RUN` 的发布阻断；历史行保留，用于说明自动工具链当时没有冒充真机验收。 |
+| 敏感原始证据 | NOT STORED IN REPO | 数据库、WAL/SHM、`userData`、Documents、raw runner report 与 raw log 不随本次合并提交；仓库没有重新导入或复核这些材料。本记录只保存发布负责人的最终人工结论，不反向伪造 PR5 阶段未在仓库取得的原始数值或路径。 |
+| 自动门禁与独立 Review | PASS | PR1—PR5 均经独立 Reviewer 多轮动态反例复核，最终无阻塞 P3+；PR5 Round 5 为 84/84 聚焦测试，最终本地 `release-check` 为 unit 5583/5584（0 fail、1 Windows-only skip）及 integration 48/48 scripts、2410/2410 assertions。各 PR 更完整的阶段证据保留在上文。 |
+| 发布文档 | UPDATED | `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 已反向同步本轮实际功能与最终人工验收状态；v3.1.11 已发布 tag/资产事实保持不变，v3.1.12 的最终 merge/tag/Release 事实只在实际完成后记录。 |

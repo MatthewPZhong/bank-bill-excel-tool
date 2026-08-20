@@ -61,5 +61,5 @@ test('v3.1.12 沿用的 storage contract、迁移与 Archive 血缘已进入 imp
   ]) {
     assert.match(importantVariables, new RegExp('`' + name + '`'));
   }
-  assert.match(importantVariables, /当前清单版本 \| v37（app v3\.1\.12/);
+  assert.match(importantVariables, /当前清单版本 \| v38（app v3\.1\.12/);
 });

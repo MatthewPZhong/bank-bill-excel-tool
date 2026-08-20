@@ -4,6 +4,8 @@
 
 小型 synthetic fixture 只能做 harness rehearsal；其结果无条件为 `rehearsal/not-evaluated`，不能作为 70% 或发布证据。
 
+> **发布状态（2026-08-20）**：发布负责人已明确确认 3.1.12 验收完成并授权合并。仓库只记录最终人工结论，不复制原始数据库、sidecar、runner report 或日志，也不把此前 rehearsal/自动门禁改写成正式结果。本手册继续作为后续复验与环境变更时的固定合同。
+
 ## 运行前人工准备
 
 1. 在受控 Windows 本地准备四个来源文件：v3.1.11 setup、v3.1.11 portable、v3.1.12 setup、v3.1.12 portable。setup 不是被测 exe；orchestrator 会将两代 setup 实际静默安装到 owner-marked 根，再解析 installed exe。

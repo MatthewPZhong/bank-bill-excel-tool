@@ -24,7 +24,7 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.12 版本号与三份用户文档在打 tag 前保持稳定的随包说明', () => {
+test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状态', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -37,8 +37,8 @@ test('v3.1.12 版本号与三份用户文档在打 tag 前保持稳定的随包�
   assert.equal(packageLock.packages[''].version, '3.1.12');
   assert.ok(packageJson.build.files.includes('docs/USER_GUIDE.md'));
   assert.match(mainSource, /path\.join\(app\.getAppPath\(\), 'docs', 'USER_GUIDE\.md'\)/);
-  assert.match(changelog, /^## 3\.1\.12 - 2026-08-19$/m);
-  assert.match(history, /^## v3\.1\.12（2026-08-19）$/m);
+  assert.match(changelog, /^## 3\.1\.12 - 2026-08-20$/m);
+  assert.match(history, /^## v3\.1\.12（2026-08-20）$/m);
   assert.match(guide, /^版本：`v3\.1\.12`$/m);
 
   const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.11'));
@@ -46,13 +46,18 @@ test('v3.1.12 版本号与三份用户文档在打 tag 前保持稳定的随包�
   const currentGuide = guide.slice(0, guide.indexOf('\n---'));
   for (const currentSection of [currentChangelog, currentHistory, currentGuide]) {
     assert.match(currentSection, /GitHub Releases/);
-    assert.match(currentSection, /打 tag 前|tag 前/);
+    assert.match(currentSection, /验收完成/);
+    assert.match(currentSection, /授权.*合并|授权合并/);
     assert.doesNotMatch(
       currentSection,
       /v3\.1\.12 当前为未发布候选|v3\.1\.12（未发布|## 3\.1\.12 - 未发布/
     );
+    assert.doesNotMatch(currentSection, /业务行为与 v3\.1\.11 相同/);
   }
-  assert.match(guide, /不改变业务功能、数据或输出/);
+  assert.match(changelog, /确认期变化比较/);
+  assert.match(history, /CNY\/CNH/);
+  assert.match(guide, /第一行左侧显示“存档位置”、右侧显示【变更】/);
+  assert.match(guide, /新导入允许用标准大写 CNH/);
 });
 
 test('v3.1.11 三份用户文档保留正式发布证据并记录随包指南缺陷', () => {
@@ -76,7 +81,7 @@ test('v3.1.11 三份用户文档保留正式发布证据并记录随包指南缺
     assert.match(document, /latest stable Release/);
     assert.match(document, /四项公开资产/);
   }
-  for (const document of [changelog, history, guide, runbook]) {
+  for (const document of [changelog, history, runbook]) {
     assert.match(document, /v3\.1\.11[\s\S]{0,160}未发布候选|未发布候选[\s\S]{0,160}v3\.1\.11/);
     assert.match(document, /不替换|不覆盖|不可变发布规则/);
     assert.match(document, /v3\.1\.12|更高补丁版本/);
