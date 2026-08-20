@@ -24,7 +24,9 @@
 
 - **人工验收完成并授权合并**：发布负责人于 2026-08-20 明确确认 v3.1.12 验收完成，并授权将 `v3.1.12` 合并至 `main`。仓库只记录最终验收结论；数据库、WAL/SHM、用户目录或原始日志等敏感材料不随本次合并提交。
 - **自动化与独立 Review 闭合**：网银源文件、VCC 币种、启动治理、存档中心和 Windows 验收工具链均经过独立 Reviewer 的多轮反例复核，最终无阻塞 P3+；各 PR 的完整单元、集成、smoke、lint、`release-check` 和重要变量检查证据保存在 `changes/3.1.12/implementation-notes.md`。
-- **同步安装包用户指南**：保留 v3.1.11 已发布安装包内指南仍含“未发布候选”文字及旧资产不可变的历史事实，不替换旧 tag 或资产；同时将本轮实际业务行为、存档操作和验收状态写入新的 3.1.12 Setup/portable 随包指南。公开 tag、Release 与资产状态仍以 GitHub Releases 为准。
+- **正式发布完成**：PR #157 以 merge commit `a8c632bad119eab6bca27b949dfb5956805cf3ae` 合入 `main`；annotated tag `v3.1.12`（tag object `97462b6062dda9a31d409691b0d2c2dec94f0650`）、Windows Release workflow `32393079026` 和 [latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.12) 均已完成。
+- **四项公开资产完成回读**：Setup、portable、blockmap 与 `latest.yml` 均可匿名下载；`latest.yml` 的版本、Setup 路径、大小及 SHA-512 与公开 Setup 一致。完整文件名、大小和 SHA-256 记录在 `docs/WINDOWS_RELEASE_RUNBOOK.md`。
+- **发布后边界**：v3.1.11 已发布安装包内指南仍含“未发布候选”文字，旧 tag 和资产继续保持不可变；3.1.12 Setup/portable 已随包交付修正后的用户指南，公开下载以 GitHub Releases 为准。当前 macOS 收尾环境不能执行 Windows `production/latest` 在线升级 canary，因此不得把“技术 Release 已发布”表述为“在线升级已验证”；canary 仍按发布 Runbook 由 Windows 人工补做。
 
 ## 3.1.11 - 2026-08-19
 

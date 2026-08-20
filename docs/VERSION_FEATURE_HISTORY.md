@@ -35,7 +35,9 @@ v3.1.12 在保留 v3.1.11 文件批次与 VCC 存储安全合同的基础上，�
 
 - 网银、VCC、启动、存档中心和 Windows 验收工具链分别经过独立 Reviewer 多轮反例复核，最终均无阻塞 P3+；自动门禁和测试数字记录在 `changes/3.1.12/implementation-notes.md`。
 - 发布负责人于 2026-08-20 明确确认 v3.1.12 验收完成并授权合并至 `main`。仓库只保存该最终结论；数据库、WAL/SHM、用户目录及原始日志等敏感材料不随本次合并提交。
-- 同版继续修正 v3.1.11 已发布安装包中仍含“未发布候选”的指南文字；旧 tag 和旧资产不替换，新的公开 tag、Release 与资产状态以 GitHub Releases 为准。
+- v3.1.12 已于 2026-08-20 正式发布。PR #157 以 merge commit `a8c632bad119eab6bca27b949dfb5956805cf3ae` 合入 `main`；annotated tag `v3.1.12`（tag object `97462b6062dda9a31d409691b0d2c2dec94f0650`）触发 Windows workflow `32393079026`，并发布为 GitHub Releases 的 latest stable Release。
+- Setup、portable、blockmap 和 `latest.yml` 四项资产均已公开且可匿名下载；3.1.12 安装包随包交付修正后的用户指南。v3.1.11 已发布安装包中仍含“未发布候选”的旧指南，旧 tag 与资产继续保持不可变。
+- 本次 macOS 收尾没有执行 Windows `production/latest` 在线升级 canary；在 Windows 人工补测完成前，只能声明“3.1.12 正式发布”，不能声明“在线升级已验证”。
 
 ## v3.1.11（2026-08-19）
 
