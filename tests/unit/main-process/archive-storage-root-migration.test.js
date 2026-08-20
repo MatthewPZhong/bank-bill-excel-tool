@@ -310,21 +310,31 @@ test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', 
       const promises = {
         ...fs.promises,
         async open(targetPath, ...args) {
-          const handle = await fs.promises.open(targetPath, ...args);
           const normalized = String(targetPath);
-          if (targetRoot
-              && normalized.includes(`${path.sep}.staging${path.sep}`)
-              && path.basename(normalized).startsWith('blob-')) {
+          const isFileFsyncTarget = Boolean(
+            targetRoot
+            && normalized.includes(`${path.sep}.staging${path.sep}`)
+            && path.basename(normalized).startsWith('blob-')
+          );
+          const targetBlobPrefix = targetRoot
+            ? `${path.resolve(targetRoot)}${path.sep}blobs${path.sep}sha256${path.sep}`
+            : '';
+          const isParentFsyncTarget = Boolean(
+            targetBlobPrefix
+            && normalized.includes(targetBlobPrefix)
+            && path.basename(normalized).length === 2
+          );
+          if (failurePoint === 'parent' && !injected && isParentFsyncTarget) {
+            injected = true;
+            const error = new Error('injected parent directory fsync open failure');
+            error.code = 'EIO';
+            throw error;
+          }
+          const handle = await fs.promises.open(targetPath, ...args);
+          if (isFileFsyncTarget) {
             fileFsyncOpenMode = args[0];
           }
-          const failThisHandle = targetRoot && !injected && (
-            (failurePoint === 'file'
-              && normalized.includes(`${path.sep}.staging${path.sep}`)
-              && path.basename(normalized).startsWith('blob-'))
-            || (failurePoint === 'parent'
-              && normalized.includes(`${path.resolve(targetRoot)}${path.sep}blobs${path.sep}sha256${path.sep}`)
-              && path.basename(normalized).length === 2)
-          );
+          const failThisHandle = failurePoint === 'file' && !injected && isFileFsyncTarget;
           if (!failThisHandle) return handle;
           return new Proxy(handle, {
             get(object, property) {
