@@ -158,7 +158,8 @@ function seedReadyArtifact(
   const ready = archiveRepository.completeArtifact(artifact.id, {
     sha256: SHA_A,
     sizeBytes: 123,
-    relativePath: `blobs/sha256/aa/${SHA_A}`
+    relativePath: `blobs/sha256/aa/${SHA_A}`,
+    fingerprint: { sizeBytes: 123, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   }).artifact;
   archiveRepository.db.prepare(`
     UPDATE archive_batches SET task_status = 'succeeded' WHERE id = ?

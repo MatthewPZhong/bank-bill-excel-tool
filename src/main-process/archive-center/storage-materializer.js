@@ -6,6 +6,10 @@ const path = require('node:path');
 const { pipeline } = require('node:stream/promises');
 
 const { resolveManagedRelative } = require('./storage-layout');
+const {
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
+} = require('./source-snapshot');
 
 class StorageMaterializationError extends Error {
   constructor(code, message, options = {}) {
@@ -28,11 +32,17 @@ async function hashFile(filePath, fsModule = fs) {
 
 async function verifyFile(filePath, expected, fsModule = fs) {
   try {
-    const stat = await fsModule.promises.lstat(filePath);
-    if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== Number(expected.sizeBytes)) {
+    const before = await fsModule.promises.lstat(filePath, { bigint: true });
+    if (!before.isFile() || before.isSymbolicLink()
+        || Number(before.size) !== Number(expected.sizeBytes)) {
       return { valid: false, code: 'ARCHIVE_LAYOUT_SIZE_MISMATCH' };
     }
+    const beforeSnapshot = sourceSnapshotFromStat(before);
     const actual = await hashFile(filePath, fsModule);
+    const stat = await fsModule.promises.lstat(filePath, { bigint: true });
+    if (!beforeSnapshot || !sourceSnapshotMatchesStat(beforeSnapshot, stat)) {
+      return { valid: false, code: 'ARCHIVE_LAYOUT_CHANGED_DURING_READ' };
+    }
     if (actual.sizeBytes !== Number(expected.sizeBytes) || actual.sha256 !== expected.sha256) {
       return { valid: false, code: 'ARCHIVE_LAYOUT_HASH_MISMATCH', actual };
     }
@@ -53,6 +63,25 @@ async function copyStream(sourcePath, targetPath, fsModule) {
   );
 }
 
+async function syncStagedFile(fsModule, filePath) {
+  // Windows 的 FlushFileBuffers 要求可写句柄；这里只接收本任务刚创建且尚未
+  // 发布的 staging 文件，r+ 仅提供句柄权限，不会修改文件内容。
+  const handle = await fsModule.promises.open(filePath, 'r+');
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function syncDirectory(fsModule, directory) {
+  let handle;
+  try {
+    handle = await fsModule.promises.open(directory, 'r');
+    await handle.sync();
+  } catch (error) {
+    if (!error || !['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
+  } finally {
+    if (handle) await handle.close();
+  }
+}
+
 async function removeEmptyParents(fsModule, startDir, stopDir) {
   let current = path.resolve(startDir);
   const root = path.resolve(stopDir);
@@ -68,6 +97,13 @@ async function removeEmptyParents(fsModule, startDir, stopDir) {
 }
 
 async function assertNoSymlinkAncestors(fsModule, rootDir, targetDir) {
+  const rootStat = await fsModule.promises.lstat(rootDir);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new StorageMaterializationError(
+      'ARCHIVE_LAYOUT_PATH_INVALID',
+      '存档根不能是符号链接或目录联接'
+    );
+  }
   const relative = path.relative(rootDir, targetDir);
   let current = rootDir;
   for (const part of relative.split(path.sep).filter(Boolean)) {
@@ -127,11 +163,13 @@ function createStorageMaterializer(options = {}) {
           { cause: staged.error }
         );
       }
+      await syncStagedFile(fsModule, stagedPath);
       await fsModule.promises.chmod(stagedPath, 0o444);
       await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
       await fsModule.promises.mkdir(path.dirname(targetPath), { recursive: true });
       targetParentCreated = true;
       await fsModule.promises.rename(stagedPath, targetPath);
+      await syncDirectory(fsModule, path.dirname(targetPath));
       return { mode: 'copy', targetPath, storageRelativePath: payload.storageRelativePath };
     } catch (error) {
       try { await fsModule.promises.rm(stagedPath, { force: true }); } catch (_cleanupError) {}
@@ -165,7 +203,7 @@ function createStorageMaterializer(options = {}) {
       const targetPath = resolveManagedRelative(rootDir, relativePath);
       await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
       try {
-        const stat = await fsModule.promises.lstat(targetPath);
+        const stat = await fsModule.promises.lstat(targetPath, { bigint: true });
         if (!stat.isFile()
             || stat.isSymbolicLink()
             || Number(stat.size) !== Number(expected.sizeBytes)) {
@@ -189,5 +227,6 @@ module.exports = {
   StorageMaterializationError,
   createStorageMaterializer,
   hashFile,
+  syncStagedFile,
   verifyFile
 };

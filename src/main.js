@@ -4559,6 +4559,9 @@ function registerArchiveCenterHandlers() {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
+  ipcMain.handle('archive-center:start-entry-maintenance', (_event, visitId) => {
+    return callArchiveCenter('startEntryMaintenance', visitId);
+  });
 }
 
 function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
@@ -4803,6 +4806,16 @@ function initializeArchiveCenter() {
     }],
     getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
     onStartupPhase: recordStartupPhase,
+    onEntryMaintenanceEvent: (eventName, payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      const channels = {
+        progress: 'archive-center:entry-maintenance-progress',
+        completed: 'archive-center:entry-maintenance-completed',
+        failed: 'archive-center:entry-maintenance-failed'
+      };
+      const channel = channels[eventName];
+      if (channel) mainWindow.webContents.send(channel, payload);
+    },
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {

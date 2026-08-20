@@ -62,7 +62,13 @@ function createHarness(options = {}) {
     getOperationIssuance: () => null,
     listFailedArtifacts: (batchId) => [...artifacts.values()].filter((artifact) => (
       artifact.batchId === Number(batchId) && artifact.status === 'failed'
-    ))
+    )),
+    getEntryMaintenanceGateState: () => ({
+      activeBatchCount: 0,
+      activeTaskRunCount: 0,
+      pendingArtifactCount: 0,
+      holdCount: 0
+    })
   };
   const service = {
     rootDir: '/tmp/archive-center',
@@ -74,6 +80,11 @@ function createHarness(options = {}) {
     async recoverStartupSafety() { return { ok: true, status: 'complete' }; },
     async reconcileStartup() { return { ok: true, status: 'complete' }; },
     async cleanupExpired() { return { ok: true }; },
+    async runBlobMetadataMaintenance() { return { ok: true, processed: 0, remaining: 0 }; },
+    async runArtifactMetadataMaintenance() { return { ok: true, processed: 0, remaining: 0 }; },
+    async runOwnedOrphanCleanup() { return { ok: true, processed: 0, remaining: 0 }; },
+    async runLayoutMaterializationMaintenance() { return { ok: true, processed: 0, remaining: 0 }; },
+    async runHistoricalHealthScan() { return { ok: true, processed: 0, remaining: 0 }; },
     resumeBackgroundMaterialization() {},
     async createBatch(payload) {
       const batch = {
@@ -203,6 +214,7 @@ function createHarness(options = {}) {
     recoverInterruptedTaskOwners: options.recoverInterruptedTaskOwners,
     postOutboxStartupHooks: options.postOutboxStartupHooks,
     getProtectedInterruptedTaskBatchIds: options.getProtectedInterruptedTaskBatchIds,
+    onEntryMaintenanceEvent: options.onEntryMaintenanceEvent,
     showOpenDialog: options.showOpenDialog,
     showSaveDialog: async () => ({ canceled: false, filePath: '/tmp/saved.xlsx' })
   });
@@ -2294,6 +2306,290 @@ test('无 StorageRootManager 时 defer 初始化后只完成安全恢复并返�
     'historical-health-scan',
     'noncritical-ownership-scan'
   ]);
+});
+
+test('首次 entry maintenance 立即返回、同进程去重并按 version=1 八阶段顺序完成', async () => {
+  const calls = [];
+  const events = [];
+  let releaseBlob;
+  const blobGate = new Promise((resolve) => { releaseBlob = resolve; });
+  const { controller, service } = createHarness({
+    postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({ bound: 0 }) }],
+    onEntryMaintenanceEvent: (name, payload) => events.push({ name, payload })
+  });
+  await controller.initialize();
+  controller.storageRootManager = {
+    async resumeDeferredCleanup() { calls.push('cleanup-journal'); return { ok: true }; },
+    async runNoncriticalOwnershipScan() {
+      calls.push('noncritical-ownership-scan');
+      return { ok: true };
+    }
+  };
+  service.runBlobMetadataMaintenance = async () => {
+    calls.push('blob-metadata');
+    await blobGate;
+    return { ok: true };
+  };
+  service.runArtifactMetadataMaintenance = async () => {
+    calls.push('artifact-metadata'); return { ok: true };
+  };
+  service.runRetentionMaintenance = async () => {
+    calls.push('retention');
+    return { ok: true, deletedBatchIds: [73] };
+  };
+  service.runOwnedOrphanCleanup = async () => {
+    calls.push('owned-orphans'); return { ok: true };
+  };
+  service.runLayoutMaterializationMaintenance = async () => {
+    calls.push('layout-materialization'); return { ok: true };
+  };
+  service.runHistoricalHealthScan = async () => {
+    calls.push('historical-health-scan'); return { ok: true };
+  };
+
+  const started = controller.startEntryMaintenance('visit-1');
+  const running = controller.startEntryMaintenance('visit-1');
+  assert.equal(started.status, 'started');
+  assert.equal(running.status, 'running');
+  assert.equal(running.attemptId, started.attemptId);
+  assert.deepEqual(calls, [], '立即返回时后台阶段尚未阻塞 renderer');
+  releaseBlob();
+  await controller.entryMaintenancePromise;
+
+  assert.deepEqual(calls, [
+    'cleanup-journal',
+    'blob-metadata',
+    'artifact-metadata',
+    'retention',
+    'owned-orphans',
+    'layout-materialization',
+    'historical-health-scan',
+    'noncritical-ownership-scan'
+  ]);
+  assert.equal(events.at(-1).name, 'completed');
+  assert.deepEqual(events.at(-1).payload.deletedBatchIds, [73]);
+  const complete = controller.startEntryMaintenance('visit-2');
+  assert.equal(complete.status, 'complete');
+  assert.equal(complete.attemptId, started.attemptId);
+});
+
+test('entry maintenance 失败仅允许离开后以新 visit 重试', async () => {
+  const events = [];
+  let blobAttempts = 0;
+  const { controller, service } = createHarness({
+    postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({}) }],
+    onEntryMaintenanceEvent: (name, payload) => events.push({ name, payload })
+  });
+  await controller.initialize();
+  service.runBlobMetadataMaintenance = async () => {
+    blobAttempts += 1;
+    return blobAttempts === 1
+      ? { ok: false, code: 'ARCHIVE_BLOB_SCAN_FAILED', message: 'scan failed' }
+      : { ok: true };
+  };
+
+  const first = controller.startEntryMaintenance('visit-failed');
+  await controller.entryMaintenancePromise;
+  assert.equal(events.at(-1).name, 'failed');
+  const sameVisit = controller.startEntryMaintenance('visit-failed');
+  assert.equal(sameVisit.status, 'complete');
+  assert.equal(sameVisit.failed, true);
+  assert.equal(blobAttempts, 1);
+
+  const retry = controller.startEntryMaintenance('visit-reentered');
+  assert.equal(retry.status, 'started');
+  assert.notEqual(retry.attemptId, first.attemptId);
+  await controller.entryMaintenancePromise;
+  assert.equal(blobAttempts, 2);
+  assert.equal(events.at(-1).name, 'completed');
+});
+
+test('公开 entry maintenance 的历史 Blob inventory 每页拒绝被链接替换的 managed ancestor', async (t) => {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-controller-health-link-'));
+  const archiveRoot = path.join(rootDir, 'archive');
+  const externalRoot = path.join(rootDir, 'external-blobs');
+  const heldBlobRoot = path.join(rootDir, 'held-real-blobs');
+  const basePromises = fs.promises;
+  let physicalInventoryReads = 0;
+  let swapAfterPrefixList = false;
+  const observedFs = {
+    ...fs,
+    promises: {
+      ...basePromises,
+      async readdir(targetPath, options) {
+        const resolved = path.resolve(String(targetPath));
+        const entries = await basePromises.readdir(targetPath, options);
+        if (resolved === path.join(archiveRoot, 'blobs', 'sha256')
+            || resolved.startsWith(`${path.join(archiveRoot, 'blobs', 'sha256')}${path.sep}`)) {
+          physicalInventoryReads += 1;
+        }
+        if (swapAfterPrefixList
+            && resolved === path.join(archiveRoot, 'blobs', 'sha256')) {
+          swapAfterPrefixList = false;
+          await basePromises.rename(path.join(archiveRoot, 'blobs'), heldBlobRoot);
+          await basePromises.symlink(
+            externalRoot,
+            path.join(archiveRoot, 'blobs'),
+            process.platform === 'win32' ? 'junction' : 'dir'
+          );
+        }
+        return entries;
+      }
+    }
+  };
+  const db = new DatabaseSync(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  const service = createArchiveService({ database: db, rootDir: archiveRoot, fsImpl: observedFs });
+  const events = [];
+  const controller = createArchiveCenterController({
+    database: {
+      getSetting: () => null,
+      setSetting() {}
+    },
+    service,
+    postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({}) }],
+    onEntryMaintenanceEvent: (name, payload) => events.push({ name, payload })
+  });
+  t.after(() => {
+    db.close();
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+  await controller.initialize();
+
+  const unknownSha = 'a'.repeat(64);
+  const externalPrefix = path.join(externalRoot, 'sha256', 'aa');
+  fs.mkdirSync(externalPrefix, { recursive: true });
+  const externalBlob = path.join(externalPrefix, unknownSha);
+  fs.writeFileSync(externalBlob, 'must-not-inventory');
+  fs.rmSync(path.join(archiveRoot, 'blobs'), { recursive: true });
+  try {
+    fs.symlinkSync(
+      externalRoot,
+      path.join(archiveRoot, 'blobs'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
+  } catch (error) {
+    if (error && ['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) {
+      t.skip(`当前环境不能创建目录链接：${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  physicalInventoryReads = 0;
+
+  const started = controller.startEntryMaintenance('health-link-visit');
+  assert.equal(started.status, 'started');
+  await controller.entryMaintenancePromise;
+
+  assert.equal(controller.entryMaintenance.status, 'failed');
+  assert.equal(events.at(-1).name, 'failed');
+  assert.equal(events.at(-1).payload.errorCode, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+  assert.equal(events.some((event) => event.name === 'completed'), false);
+  assert.equal(physicalInventoryReads, 0);
+  assert.equal(fs.readFileSync(externalBlob, 'utf8'), 'must-not-inventory');
+
+  fs.unlinkSync(path.join(archiveRoot, 'blobs'));
+  const realPrefix = path.join(archiveRoot, 'blobs', 'sha256', 'aa');
+  fs.mkdirSync(realPrefix, { recursive: true });
+  fs.writeFileSync(path.join(realPrefix, unknownSha), 'real-prefix-before-page-switch');
+  events.length = 0;
+  physicalInventoryReads = 0;
+  swapAfterPrefixList = true;
+
+  const retried = controller.startEntryMaintenance('health-link-reentered');
+  assert.equal(retried.status, 'started');
+  await controller.entryMaintenancePromise;
+
+  assert.equal(controller.entryMaintenance.status, 'failed');
+  assert.equal(events.at(-1).name, 'failed');
+  assert.equal(events.at(-1).payload.errorCode, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+  assert.equal(events.some((event) => event.name === 'completed'), false);
+  assert.equal(physicalInventoryReads, 1, '只允许读取切换前的 prefix-list 页');
+  assert.equal(fs.readFileSync(externalBlob, 'utf8'), 'must-not-inventory');
+  assert.equal(
+    fs.readFileSync(path.join(heldBlobRoot, 'sha256', 'aa', unknownSha), 'utf8'),
+    'real-prefix-before-page-switch'
+  );
+});
+
+test('ownership scan 的 failed status 不得误报 completed，新 visit 才可重试', async () => {
+  const events = [];
+  let ownershipAttempts = 0;
+  const { controller } = createHarness({
+    postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({}) }],
+    onEntryMaintenanceEvent: (name, payload) => events.push({ name, payload })
+  });
+  await controller.initialize();
+  controller.storageRootManager = {
+    async resumeDeferredCleanup() { return { ok: true, status: 'complete' }; },
+    async runNoncriticalOwnershipScan() {
+      ownershipAttempts += 1;
+      return ownershipAttempts === 1
+        ? {
+            status: 'failed',
+            lastErrorCode: 'ARCHIVE_STORAGE_SYMLINK_REJECTED',
+            message: 'layout ancestor became a link'
+          }
+        : { ok: true, status: 'complete' };
+    }
+  };
+
+  controller.startEntryMaintenance('ownership-failed-visit');
+  await controller.entryMaintenancePromise;
+  assert.equal(controller.entryMaintenance.status, 'failed');
+  assert.equal(events.at(-1).name, 'failed');
+  assert.equal(events.some((event) => event.name === 'completed'), false);
+  assert.equal(events.at(-1).payload.errorCode, 'ARCHIVE_STORAGE_SYMLINK_REJECTED');
+
+  const sameVisit = controller.startEntryMaintenance('ownership-failed-visit');
+  assert.equal(sameVisit.failed, true);
+  assert.equal(ownershipAttempts, 1);
+
+  const retry = controller.startEntryMaintenance('ownership-reentered-visit');
+  assert.equal(retry.status, 'started');
+  await controller.entryMaintenancePromise;
+  assert.equal(ownershipAttempts, 2);
+  assert.equal(events.at(-1).name, 'completed');
+});
+
+test('retention 轻门禁拒绝缺失 VCC 成功证据、outbox intent 与活动任务且不二次 reconcile', async () => {
+  const scenarios = [
+    {
+      name: 'vcc-gate',
+      configure() {},
+      postOutboxStartupHooks: []
+    },
+    {
+      name: 'outbox',
+      configure(controller) { controller.outboxStore = { list: () => [{ id: 'pending' }] }; },
+      postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({}) }]
+    },
+    {
+      name: 'active-task',
+      configure(_controller, service) {
+        service.repository.getEntryMaintenanceGateState = () => ({
+          activeBatchCount: 1,
+          activeTaskRunCount: 0,
+          pendingArtifactCount: 0,
+          holdCount: 0
+        });
+      },
+      postOutboxStartupHooks: [{ hookName: 'VCC gate', run: async () => ({}) }]
+    }
+  ];
+  for (const scenario of scenarios) {
+    let retentionCalls = 0;
+    const { controller, service } = createHarness({
+      postOutboxStartupHooks: scenario.postOutboxStartupHooks
+    });
+    await controller.initialize();
+    scenario.configure(controller, service);
+    service.cleanupExpired = async () => { retentionCalls += 1; return { ok: true }; };
+    controller.startEntryMaintenance(`visit-${scenario.name}`);
+    await controller.entryMaintenancePromise;
+    assert.equal(retentionCalls, 0, scenario.name);
+    assert.equal(controller.entryMaintenance.status, 'failed', scenario.name);
+  }
 });
 
 test('存档 root unavailable 或 ok:false 均在 outbox/窗口 admission 前 fail-closed', async () => {

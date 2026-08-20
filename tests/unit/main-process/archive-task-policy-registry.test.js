@@ -106,10 +106,10 @@ test('main literal IPC 与 policy/support 精确相等', () => {
   assert.equal(new Set(actual).size, actual.length, 'main 不应重复注册 literal IPC');
   assert.equal(new Set(expected).size, expected.length, 'policy/support 不应重复登记');
   assert.deepEqual(expected, actual);
-  assert.equal(actual.length, 241);
+  assert.equal(actual.length, 242);
   assert.equal(registry.channels('reserve').length, 63);
   assert.equal(registry.channels('no-file').length, 59);
-  assert.equal(registry.channels('exclude').length, 117);
+  assert.equal(registry.channels('exclude').length, 118);
   assert.equal(SUPPORT_ACTION_POLICIES.length, 2);
 });
 
@@ -225,15 +225,15 @@ test('63 file 与 59 no-file mutation 逐项显式分类且精确闭合', () => 
   const excludeChannels = new Set(excludeInventory);
   assert.equal(fileChannels.size, 63);
   assert.equal(noFileChannels.size, 59);
-  assert.equal(excludeInventory.length, 117);
-  assert.equal(excludeChannels.size, 117);
+  assert.equal(excludeInventory.length, 118);
+  assert.equal(excludeChannels.size, 118);
   assert.deepEqual([...fileChannels].filter((channel) => noFileChannels.has(channel)), []);
   assert.deepEqual([...fileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual([...noFileChannels].filter((channel) => excludeChannels.has(channel)), []);
   assert.deepEqual(new Set(registry.channels('reserve')), fileChannels);
   assert.deepEqual(new Set(registry.channels('no-file')), noFileChannels);
-  assert.equal(registry.channels('exclude').length, 117);
-  assert.equal(registry.list().length, 63 + 59 + 117);
+  assert.equal(registry.channels('exclude').length, 118);
+  assert.equal(registry.list().length, 63 + 59 + 118);
 });
 
 test('dialog selection 显式区分 file/directory，正常 file policy 不再消费 selection 路径', () => {

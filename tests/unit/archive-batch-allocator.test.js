@@ -577,13 +577,15 @@ test('task terminal 按 artifact 聚合 archiveStatus，且不把业务终态写
     const readyCompleted = repository.completeArtifact(readyArtifact.id, {
       sha256: 'a'.repeat(64),
       sizeBytes: 1,
-      relativePath: 'blobs/aa/ready'
+      relativePath: 'blobs/aa/ready',
+      fingerprint: { sizeBytes: 1, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     repository.completeMaterialization(readyCompleted.artifact.id, {
       storageMode: 'copy',
       storageRelativePath: `2026/2026-08/2026-08-09/${readyBatch.batchNumber}/ready.xlsx`,
       safeFileName: 'ready.xlsx',
-      artifactOrder: readyCompleted.artifact.artifactOrder
+      artifactOrder: readyCompleted.artifact.artifactOrder,
+      storageFingerprint: { sizeBytes: 1, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     const readyTerminal = repository.transitionTaskStatus(readyBatch.id, 'cancelled', {
       reason: '用户取消后处理'
@@ -622,13 +624,15 @@ test('task terminal 按 artifact 聚合 archiveStatus，且不把业务终态写
     const recoveredComplete = repository.completeArtifact(recoveredArtifact.id, {
       sha256: 'b'.repeat(64),
       sizeBytes: 1,
-      relativePath: 'blobs/bb/recovered'
+      relativePath: 'blobs/bb/recovered',
+      fingerprint: { sizeBytes: 1, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     repository.completeMaterialization(recoveredComplete.artifact.id, {
       storageMode: 'copy',
       storageRelativePath: `2026/2026-08/2026-08-09/${registrationFailedBatch.batchNumber}/recovered.xlsx`,
       safeFileName: 'recovered.xlsx',
-      artifactOrder: recoveredComplete.artifact.artifactOrder
+      artifactOrder: recoveredComplete.artifact.artifactOrder,
+      storageFingerprint: { sizeBytes: 1, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     const recovered = repository.getBatch(registrationFailedBatch.id);
     assert.equal(recovered.failureCount, 1);

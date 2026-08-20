@@ -311,3 +311,73 @@
 | Windows process containment 理论窗口 | MANUAL | PR5 在 installer/portable 真包确认 wrapper→browser seed、无 nonce renderer/utility lineage、CloseMainWindow receipt、late child quiescence 与 fatal cleanup；两次 snapshot 间完全逃逸且 lineage 已丢失的进程无法在无 Job Object/native helper 的合同内证明，需人工观察任务树/DB 锁 |
 | Windows native failure 与窗口时序 | MANUAL | 注入 DB open/optimize/archive root/outbox/loadFile 失败，确认 window=0、dialog=1、exit=1；正常路径确认 ready 后才显示 |
 | PR4 首进维护接线 | FOLLOW-UP | 消费 `deferredMaintenance.version=1`，在首次进入存档中心时分页执行并保留 migration cleanup journal 的恢复语义 |
+
+## PR4 — 存档中心
+
+### Task Brief
+
+- Goal：交付可变更存档位置、首进后台维护、文件指纹快路与严格 durable-owner 删除边界，同时保持列表首屏可用和既有迁移真相语义。
+- Context：PR3 已把非关键物理维护从启动 admission 拆出并发布 `STARTUP_DEFERRED_MAINTENANCE.version=1`；PR4 消费该 DTO，不重新引入启动线性扫描。
+- Constraints：未知文件不打开、不复制、不删除；迁移和打开/另存/发布始终完整 SHA；历史 NULL 指纹不回填；pre-switch 旧根权威、post-switch 新根权威；不新增每日/空闲兜底；不改 Spec/TechDoc 用户流程。
+- Done when：8 阶段维护、migration/entry lease、指纹 schema/事务边界、root/ancestor fail-closed、IPC/preload/renderer/UI 与 packaged runner 精确 schema 白名单均有行为证据，三层门禁通过。
+
+### Unknowns Register
+
+| 未知 | 处理 | 证据/结论 | 合并影响 |
+| --- | --- | --- | --- |
+| transient/孤儿扫描是否存在无 owner 删除链 | PROBE → CLOSED | `_cleanupManagedDirectory`、`_scanOrphanBlobPrefixUnlocked`、migration pause/drain 与 old-root cleanup 均有真实未知文件 fixture；通用扫描只输出 path hash/count，cleanup 只消费 DB/journal 精确路径 | 未知 `.staging/.readonly`、SHA 形状文件与 journal 未发布目标文件一律保留 |
+| canonical 同 SHA 路径是否会被 publish 静默收编 | PROBE → CLOSED | `findBlobByHash=null` 时只 lstat 判冲突，不打开/不删/不建 Blob；移除未知文件后原失败任务可恢复。只有 known Blob 才完整 SHA，并要求 SHA 前后 BigInt stat 稳定 | SHA 形状和同内容都不是 owner；metadata commit 失败留下的无 DB Blob 也不自动收编 |
+| 首进维护与迁移/新 archive admission 能否互斥且仍允许分页间隙 list/open | PROBE → CLOSED | 单一 entry lease 在 8 阶段外层持有；只关闭 admission/migration，不激活阻塞 read 的数据库维护；每页独立进入 root tail 并 `setImmediate` 让出 | migration/新写入无阶段间窗口；列表首屏和页间读取不等待整阶段 |
+| cleanup-pending 能否在 entry lease 内续跑 | PROBE → CLOSED | owner token 允许 `resumeDeferredCleanup` 复用同一 lease，避免 maintenanceRequested 自阻断；精确 owner 可清并完成，未知 transient 则保持 partial/journal | 不嵌套申请 maintenance，不放宽 journal owner |
+| 指纹 final stat 与历史 NULL dedupe 是否能同时满足 | PROBE → CLOSED | 新 Blob insert 以 `inserted.changes` 区分并强制完整 fingerprint；旧 Blob dedupe 允许 NULL 且不补；SHA 前后 BigInt stat 稳定后才提交 final fingerprint | 无历史 backfill；打开/另存/迁移/发布不走指纹快路 |
+| root/ancestor 在运行期被 symlink/junction、离线或部分初始化后替换是否会越根/重建 split root | PROBE → CLOSED | Service 与 RootManager 分别复用逐祖先/root lstat guard；root 自身一经 mkdir+lstat 确认为真实目录即不可回退 bootstrap；source/target/old root、canonical、`.staging/.readonly`、子目录 EIO 后 offline root 动态 fixture 全部 fail-closed | 不扩展到 syscall 级 TOCTOU；Windows junction 仍需实机复验 |
+| historical-health-scan 的物理 Blob 分页是否可能跟随页间替换的祖先链接 | PROBE → CLOSED | prefix-list 页和每个 prefix 页读取前都复用 managed-path ancestor guard；真实 controller entry fixture 覆盖进入前已替换及 prefix-list 后、下一页前替换，均发 failed、不发 completed、不读取外部 prefix | 只修真实 page entry，不扩展到单次 syscall 内 TOCTOU |
+| Windows 文件 fsync 是否允许沿用 POSIX 只读句柄 | PROBE → CLOSED / TEST RECHECK | PR #155 Windows run `32334377167` 首个 Archive layout 即在只读句柄 flush 返回 `EPERM`，随后 99 条 Archive 失败级联；仓库既有 Toolbox Windows 行为合同也要求可写句柄。新增公开 archive 行为 fixture 同时模拟只读句柄 flush=`EPERM` 与只读文件不可用 `r+` 打开，旧实现稳定失败，修复后 publish/materialized 两次均记录 `r+`；#752/#753 均不再出现产品 Archive EPERM 级联，file fsync 故障子例也通过 | 只对任务拥有且尚未发布的 staging 文件使用可写句柄，不吞文件 fsync 错误；剩余 parent 子例仅是测试用 raw/resolved targetRoot 前缀不能覆盖 Windows canonical path 表示，产品目录 fsync allowlist 不变 |
+| maintenance 失败结果是否可能被误报 complete 或在失败页自旋 | PROBE → CLOSED | manager ownership scan 返回显式 `ok:false`；controller 同时拒绝 failed/incomplete/partial/pending/running；服务保留成功页 cursor，失败页不推进且立即停止，新 visit 从失败页重试 | 同 visit 不重试、不发 completed；成功完成后 cursor 清零以保持独立手工调用语义 |
+| 维护刷新时 related batch 不在筛选页是否会被误判删除 | PROBE → CLOSED | retention event 返回精确 `deletedBatchIds`；只有命中该集合才清空并提示，到页外但仍存在的 selected id 保留并经 `getBatch` 刷新 detail | 不以 filtered list 缺失推断删除，不自动 fallback 首项 |
+
+### Decisions / Deviations
+
+| 决定 | 理由 | Spec/TechDoc |
+| --- | --- | --- |
+| renderer 每次从非 Archive tab 进入时生成内部 `visitId` | 精确实现 failed 仅离开/重进可重试；不把内部 visit identity 暴露为用户设置 | 符合建议方案，无偏差 |
+| 8 阶段固定映射为 cleanup-journal → blob-metadata → artifact-metadata → retention → owned-orphans → layout-materialization → historical-health-scan → noncritical-ownership-scan | 精确消费 PR3 version=1 DTO，保留阶段可观测性 | 无偏差 |
+| migration target 的既存文件只由 `journal.targetPublishedPaths` 授权 | source DB evidence 只能证明 source，不能给 fresh/续跑 target 同路径文件授予 owner | 无偏差；恢复仍可精确复用已发布 Blob/layout |
+| publish、materialized copy 与迁移 canonical 统一对 owned staging 使用 `r+`：rename 前强制文件 fsync；materialized copy 随后降为只读；rename 后同步父目录，再允许 setting switch | Windows `FlushFileBuffers` 要求可写句柄，且 materialized 临时文件先降只读会使 `r+` 无法打开；目标内容仍必须 durable 后才能发布/改变唯一权威根 | 无偏差；文件 fsync 失败仍 fatal，只有目录句柄明确不受支持的既有错误可忽略 |
+| packaged migration schema whitelist 增加 Archive 8 个精确 nullable 列 | PR5 旧 schema golden 必须把 PR4 合法 migration 与额外 DDL 区分 | 无偏差；未放宽其他列/约束/index/trigger |
+
+### PR4 Evidence
+
+| 证据 | 结果 | 覆盖 |
+| --- | --- | --- |
+| repository/mapper/事务聚焦 | 新 Blob/新或修复 materialized copy 缺 fingerprint 回滚；旧 NULL dedupe 不补；半指纹 mapper 返回 NULL；inode 为 decimal string | D-20、历史兼容与 8 列 schema |
+| unknown ownership 与迁移故障注入 | source unknown transient、target marker+unknown transient、fresh/续跑 target 非 journal owner、post-switch old-root unknown、pause/drain unknown SHA 均保留；journal/setting 真相符合阶段 | ARC-03/04、D-09～D-15、删除边界 |
+| root/ancestor 动态替换 | Service canonical/open/save/delete/publish、root/`.staging`/`.readonly`、RootManager source/target/old-root 均拒绝链接；initialized root 及 root 已建立但子目录 EIO 两条路径在 rename/offline 后 archive/attach 均不改 DB、不重建目录 | §4.4 与 split-root fail-closed |
+| historical inventory 分页祖先保护 | public entry maintenance 在 Blob ancestor 进入前被替换时零 inventory 读取；prefix-list 完成后、prefix 页前替换时只读首个真实页，下一页 guard 失败；两次均 failed、无 completed、外部文件保持原样 | §4.4、historical-health-scan 物理页边界 |
+| 分页/失败页行为 | list 可在 blob page 间进入；retention page 间释放 tail并返回精确 deleted IDs；三页 fixture 在第二页失败时调用序列 `[0,1]`，新 visit 为 `[1,2]` | D-19、首屏非阻塞、无失败自旋 |
+| entry 状态机 | immediate started/running/complete、attemptId、progress/completed/failed；ownership failed status 不误发 completed，同 visit 去重，新 visit 重试 | ARC-05～08、API-02/03 |
+| target durability | canonical 文件 fsync 或父目录 fsync 故障均保持 setting 未切换；journal 已发布 Blob/layout 的 pre-switch crash 可真正续跑成功 | 目标落盘顺序与 crash resume |
+| renderer/UI 静态合同 | 首次 list 后立即 start（stats 在 start 后异步）；完整可选换行路径；维护明确删除清空选择，页外 related selection 继续 `getBatch`；subscribe/unsubscribe 成对 | ARC-01/02/05/07、TST-03 |
+| migration runner schema | VCC 精确 delta + `archive_blobs` 4 列 + `archive_artifacts` 4 列；额外列仍拒绝 | PR4/PR5 跨 PR schema 合同 |
+| 聚焦整文件回归 | repository/service/storage migration/controller/UI/runner 六文件 233/233 PASS；Service+Controller 109/109 PASS；task-policy inventory 23/23 PASS；所有修改 JS `node --check` 与 `git diff --check` exit 0 | PR4 生产边界、Round 1 两项修复与 IPC 显式分类 |
+| 全量 unit | P1 修复后的 release-check 为 5533/5534；P3 行为测加入后最终 `npm run test:unit` 5534/5535 PASS、0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-124618.log` | 两项 Round 1 修复后的全仓回归，未伪造 PowerShell 实机探针 |
+| 默认规模 integration | 独立运行 48 scripts、2410/2410 PASS、388,973ms；P1 修复后的 release-check 再跑 48 scripts、2410/2410 PASS、304,613ms；两轮均含 300,000 行 50/50 与多 Sheet 31/31 | 跨模块接缝与默认大文件规模；P3 只收紧已有维护页 ancestor guard并另有公共入口聚焦证据 |
+| smoke/lint/release-check | 独立 `npm run smoke` PASS；Round 1 P1 修复后 `npm run release-check` exit 0（lint/smoke、unit 5533/5534、integration 48 scripts/2410 assertions 全部通过，304,613ms）；P3 增量再经聚焦 233/233、最终 unit 5534/5535 与 lint | 项目发布门禁 |
+| 设置页真实 Electron 布局 | `npm run verify:app-settings-layout` 在 1240×860/1080×760、100/125/150% 共 6/6 PASS；verifier 已从旧 ellipsis 断言同步为完整文本、wrap、selectable 与两行布局 | ARC-01 与 Important Variables UI 人工替代证据 |
+| check-vars | exit 2 为预期命中：Important-skeleton `ipcRenderer`、Risk-sensitive `archive_artifact_holds`；main/preload/renderer channel 同步且可 unsubscribe，hold schema/释放口径未改，retention 继续查询并尊重 hold | PR body 需追加关联功能 review；Risk-sensitive 要求的 smoke/release-check 已通过 |
+| blindspot pass | 入口旁路、unknown owner、pre/post switch、失败页 cursor、entry lease、root/ancestor/offline、指纹最终 stat、related selection、IPC inventory 与 runner schema 均逐项复核 | 未发现新增 BLOCK；剩余为下表实机项 |
+| PR4 Review Round 1 | 独立 Reviewer 冻结最终 Dev diff，254/254 聚焦测试通过；确认 1 个 P1（部分初始化后丢失已建立根身份，可形成 split root）与 1 个 P3（historical-health-scan 物理分页未复用祖先门禁） | 两项均有公开入口与动态反例，项目负责侧接受后退回同一 Dev；未扩展到 syscall 级 TOCTOU |
+| PR4 Review Round 2 | 原 P1/P3 的 2/2 动态 probe 与相邻行为共 5/5 PASS；P0/P1/P2/P3 均为 0，未发现新 Finding，Reviewer 明确可合并 | partial-init 后 archive/attach 不重建离线根；historical scan 在进入前和页间替换时均 failed、无 completed |
+| PR4 根侧最终 release-check | 最终 Round 2 代码快照执行 `npm run release-check` exit 0：lint、smoke PASS；unit 5534/5535 PASS（0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-124953.log`）；48 scripts、2410/2410 integration PASS、394,017ms，含 300,000 行 50/50 与多 Sheet 31/31 | 合并前最终快照门禁；自动改写的 integration policy 本机耗时噪声已恢复，`git diff --check` 与全部修改 JS `node --check` exit 0 |
+| PR #155 Windows CI fsync 修复 | Windows run `32334377167` 为 5434/5535 PASS、99 FAIL，首个真实根错为 materialized staging 只读句柄 fsync=`EPERM`；新增测试修改生产前为 1/4 PASS、3 FAIL（含父 suite 汇总），修复后 4/4 PASS；Archive 三整文件 122/122 PASS，最终全量 unit 5535/5536 PASS、0 FAIL、1 既有 Windows-only SKIP，日志 `unit-20260820-133818.log`；smoke/lint、三个生产文件 `node --check`、静态文件/目录 fsync 入口扫描与 `git diff --check` 均通过；本次三份生产改动 `check-vars` exit 0、无重要变量命中 | 单一共享 `syncStagedFile` 覆盖 Blob publish、materialized copy、migration canonical；最终副本仍只读，迁移 file/parent fsync 故障仍保持 setting 未切换；需要 Windows CI rerun 验证真实 NTFS |
+| PR #155 Windows CI #752 | run `32336739691` 为 5531/5536 PASS、3 FAIL、2 SKIP，只有两个独立问题：Archive parent-directory 故障注入未触发，以及无关 position heartbeat 真实 timer 次数抖动。前者改为识别精确 SHA 父目录后在 base `open` 前注入非 allowlisted `EIO`，本地目标 3/3、migration 整文件 45/45 PASS；后者本地隔离 100/100，Windows #748/#751 分别 54.75ms/47.35ms 通过，仅 #752 在 61.309ms 失败 | parent 注入仍证明非 allowlisted 父目录耐久化错误不切 setting，不修改产品 allowlist；heartbeat 归类为全仓满载真实 timer 调度 flake，本轮不改无关测试/生产，若再次复现再另批纯测试确定性方案 |
+| PR #155 Windows CI #753 | run `32338196878` 为 5532/5536 PASS、2 FAIL、2 SKIP；heartbeat 46.9642ms 通过，唯一独立失败仍是 parent 注入未命中，证明 #752 的 heartbeat 裁决成立。测试在 migration operation gate 生效后，把候选路径统一反斜线为 `/`、去尾分隔符，并只匹配模式 `'r'` 且精确后缀 `/blobs/sha256/[0-9a-f]{2}`；不再比较 drive case、realpath 或 extended-path 前缀，失败断言携带有界只读 open 候选 | fixture 建源 Blob 时也会同步源父目录，故 `targetRoot` 只作为“迁移已开始”的布尔 gate，绝不参与路径 identity；Windows drive/extended/UNC/POSIX 表示 1/1、目标 3/3、migration 46/46 PASS，零生产改动，待 Windows CI 复验 |
+
+### PR4 Remaining / Human Review
+
+| 项目 | 状态 | 下一步 |
+| --- | --- | --- |
+| 自动门禁最终数字 | COMPLETE LOCALLY / CI RECHECK | Round 2 根侧 release-check：unit 5534/5535（0 fail/1 Windows-only skip）、integration 48 scripts/2410 assertions；Windows fsync 修复后 unit 5535/5536（0 fail/1 同一 skip）、Archive 聚焦 122/122、smoke/lint/node/static/diff checks 全绿；#753 后缀匹配测试修复为目标 3/3、migration 46/46，当前只待新 CI commit；PR4 原完整 diff 的 IPC/hold review 结论保留 |
+| Windows junction/网络盘掉线与 fsync 行为 | PRODUCT CLOSED / CI TEST RECHECK / MANUAL | #752/#753 已实机证明 owned staging file flush 修复消除 Archive EPERM 级联；parent directory 测试已去除 Windows path representation 依赖，需由新 CI commit 复验。junction、离线重连、网络/同步盘 directory flush 与 cleanup-pending 仍需人工复验 |
+| UI 视觉与长路径 | MANUAL | Windows 缩放/中文长路径下确认两行布局、完整换行和文本可选择 |
+| Spec/TechDoc 偏差 | NONE | 当前实现未改变用户流程、schema 历史兼容、删除 owner 或迁移真相边界；若 Reviewer 发现 BLOCK 必须先反向同步 |

@@ -399,13 +399,15 @@ function readSchemaState(databasePath) {
       ORDER BY type, name, tbl_name, sql
     `).all();
     const systemColumns = db.prepare('PRAGMA table_info(vcc_fin_op_system_snapshots)').all();
+    const archiveBlobColumns = db.prepare('PRAGMA table_info(archive_blobs)').all();
+    const archiveArtifactColumns = db.prepare('PRAGMA table_info(archive_artifacts)').all();
     const importSourceIndex = db.prepare(`
       SELECT sql FROM sqlite_schema
       WHERE type = 'index' AND name = 'idx_vcc_fin_op_system_snapshots_import_source'
     `).get();
     const fingerprint = crypto.createHash('sha256')
       .update(JSON.stringify(schemaRows)).digest('hex');
-    const normalizedSystemColumns = systemColumns.map((column) => ({
+    const normalizeColumns = (columns) => columns.map((column) => ({
       cid: Number(column.cid),
       name: String(column.name || ''),
       type: String(column.type || '').toUpperCase(),
@@ -413,6 +415,7 @@ function readSchemaState(databasePath) {
       defaultValue: column.dflt_value === null ? null : String(column.dflt_value),
       primaryKey: Number(column.pk)
     }));
+    const normalizedSystemColumns = normalizeColumns(systemColumns);
     const normalizeSchemaSql = (sql) => String(sql || '')
       .trim()
       .replace(/\s+/g, ' ')
@@ -439,6 +442,8 @@ function readSchemaState(databasePath) {
       current: hasImportSourceColumn && hasImportSourcePartialIndex,
       hasSystemSnapshotTable: systemColumns.length > 0,
       systemSnapshotColumns: normalizedSystemColumns,
+      archiveBlobColumns: normalizeColumns(archiveBlobColumns),
+      archiveArtifactColumns: normalizeColumns(archiveArtifactColumns),
       importSourceIndexSql: normalizedImportSourceIndexSql,
       expectedImportSourceIndexSql,
       hasImportSourceColumn,
@@ -688,27 +693,51 @@ function scenarioPostconditionOnProbe(options, variant, sampleDatabase, metrics,
     const schemaDelta = beforeSchema ? diffSchemaObjects(beforeSchema, schema)
       : { added: [], removed: [], changed: [] };
     const legacy = variant.label.startsWith('3.1.11-');
-    const beforeColumns = beforeSchema && beforeSchema.systemSnapshotColumns || [];
-    const afterColumns = schema.systemSnapshotColumns || [];
-    const expectedAddedColumn = {
-      cid: beforeColumns.length,
-      name: 'import_source_id',
-      type: 'INTEGER',
-      notNull: 0,
-      defaultValue: null,
-      primaryKey: 0
-    };
-    const columnDeltaValid = afterColumns.length === beforeColumns.length + 1
+    const expectedNullableColumn = (cid, name, type) => ({
+      cid, name, type, notNull: 0, defaultValue: null, primaryKey: 0
+    });
+    const hasExactAppendedColumns = (beforeColumns, afterColumns, definitions) => (
+      afterColumns.length === beforeColumns.length + definitions.length
       && JSON.stringify(afterColumns.slice(0, beforeColumns.length)) === JSON.stringify(beforeColumns)
-      && JSON.stringify(afterColumns.at(-1)) === JSON.stringify(expectedAddedColumn);
+      && JSON.stringify(afterColumns.slice(beforeColumns.length)) === JSON.stringify(
+        definitions.map(([name, type], index) => (
+          expectedNullableColumn(beforeColumns.length + index, name, type)
+        ))
+      )
+    );
+    const columnDeltaValid = hasExactAppendedColumns(
+      beforeSchema && beforeSchema.systemSnapshotColumns || [],
+      schema.systemSnapshotColumns || [],
+      [['import_source_id', 'INTEGER']]
+    ) && hasExactAppendedColumns(
+      beforeSchema && beforeSchema.archiveBlobColumns || [],
+      schema.archiveBlobColumns || [],
+      [
+        ['fingerprint_size_bytes', 'INTEGER'],
+        ['fingerprint_mtime_ms', 'REAL'],
+        ['fingerprint_ctime_ms', 'REAL'],
+        ['fingerprint_ino', 'TEXT']
+      ]
+    ) && hasExactAppendedColumns(
+      beforeSchema && beforeSchema.archiveArtifactColumns || [],
+      schema.archiveArtifactColumns || [],
+      [
+        ['storage_fingerprint_size_bytes', 'INTEGER'],
+        ['storage_fingerprint_mtime_ms', 'REAL'],
+        ['storage_fingerprint_ctime_ms', 'REAL'],
+        ['storage_fingerprint_ino', 'TEXT']
+      ]
+    );
     const indexDefinitionValid = schema.importSourceIndexSql === schema.expectedImportSourceIndexSql;
     const allowed312Delta = schemaDelta.removed.length === 0
       && schemaDelta.added.length === 1
       && schemaDelta.added[0].type === 'index'
       && schemaDelta.added[0].name === 'idx_vcc_fin_op_system_snapshots_import_source'
-      && schemaDelta.changed.length === 1
-      && schemaDelta.changed[0].type === 'table'
-      && schemaDelta.changed[0].name === 'vcc_fin_op_system_snapshots'
+      && schemaDelta.changed.length === 3
+      && schemaDelta.changed.every((item) => item.type === 'table')
+      && JSON.stringify(schemaDelta.changed.map((item) => item.name).sort()) === JSON.stringify([
+        'archive_artifacts', 'archive_blobs', 'vcc_fin_op_system_snapshots'
+      ])
       && columnDeltaValid
       && indexDefinitionValid;
     const schemaValid = legacy

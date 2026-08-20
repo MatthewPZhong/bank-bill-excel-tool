@@ -831,20 +831,23 @@ td .muted { color: var(--muted); }
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
-.archive-center-storage-location-row {
+.archive-center-storage-location-heading {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
+  font-weight: 600;
 }
-.archive-center-storage-location-row .archive-center-settings-note {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.archive-center-storage-path {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  user-select: text;
 }
-.archive-center-storage-location-row .secondary-btn {
+.archive-center-storage-location-heading .secondary-btn {
   flex: 0 0 auto;
 }
 .archive-center-storage-labels,

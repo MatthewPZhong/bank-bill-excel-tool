@@ -13,8 +13,10 @@ const {
 } = require('./archive-service');
 const {
   createStorageMaterializer,
+  syncStagedFile,
   verifyFile
 } = require('./storage-materializer');
+const { sourceSnapshotFromStat } = require('./source-snapshot');
 
 const ROOT_MARKER_FILE = '.archive-root.json';
 const ROOT_MARKER_TYPE = 'bank-bill-excel-tool-archive-root';
@@ -279,6 +281,7 @@ class ArchiveStorageRootManager {
     this.currentService = null;
     this.initialization = null;
     this.migrationPromise = null;
+    this.entryMaintenanceOwnerToken = '';
     this.canonicalBlockedRootsPromise = null;
     this.ownershipGeneration = 0;
     this.ownershipPromise = null;
@@ -337,6 +340,46 @@ class ArchiveStorageRootManager {
     }
   }
 
+  async beginEntryMaintenance(message = '存档后台维护正在进行，请稍后重试新存档') {
+    if (this.migrationPromise || this.isMaintenanceRequested()) {
+      return { acquired: false, reason: 'archive-maintenance-active' };
+    }
+    if (!this.runtimeDelegate.requestMaintenance(message)) {
+      return { acquired: false, reason: 'archive-maintenance-active' };
+    }
+    const sourceService = this.currentService;
+    try {
+      await this.waitForArchiveOperations();
+      if (sourceService && typeof sourceService.pauseBackgroundMaterialization === 'function') {
+        await sourceService.pauseBackgroundMaterialization();
+      }
+      await this.pauseBackgroundOwnershipScan();
+      // entry maintenance 只关闭新 archive admission 与 storage migration；
+      // list/open 继续在每个分页之间进入 root operation tail。
+      this.entryMaintenanceOwnerToken = crypto.randomUUID();
+      return {
+        acquired: true,
+        ownerToken: this.entryMaintenanceOwnerToken,
+        rootDir: sourceService ? sourceService.rootDir : ''
+      };
+    } catch (error) {
+      this.runtimeDelegate.releaseMaintenance();
+      this._resumeBackgroundArchiveChecks();
+      throw error;
+    }
+  }
+
+  async endEntryMaintenance(ownerToken) {
+    if (!this.entryMaintenanceOwnerToken
+        || String(ownerToken || '') !== this.entryMaintenanceOwnerToken) {
+      return { released: false };
+    }
+    this.entryMaintenanceOwnerToken = '';
+    this.runtimeDelegate.releaseMaintenance();
+    this._resumeBackgroundArchiveChecks();
+    return { released: true };
+  }
+
   async endDatabaseMaintenance() {
     this.runtimeDelegate.releaseMaintenance();
     this._resumeBackgroundArchiveChecks();
@@ -381,7 +424,30 @@ class ArchiveStorageRootManager {
     }
   }
 
+  async _assertRootDirectory(rootDir) {
+    let stat;
+    try {
+      stat = await this.fs.promises.lstat(rootDir);
+    } catch (error) {
+      if (error && error.code === 'ENOENT') {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_SOURCE_ROOT_OFFLINE',
+          '存档位置离线或暂时不可见',
+          { retryable: true }
+        );
+      }
+      throw error;
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_SYMLINK_REJECTED',
+        '存档根被替换为符号链接或目录联接'
+      );
+    }
+  }
+
   async _readMarker(rootDir) {
+    await this._assertRootDirectory(rootDir);
     return this._readJson(path.join(rootDir, ROOT_MARKER_FILE), null);
   }
 
@@ -506,9 +572,11 @@ class ArchiveStorageRootManager {
   }
 
   async _walkOwnedRoot(rootDir, evidence, options = {}) {
+    await this._assertRootDirectory(rootDir);
     const allowMissingMarker = options.allowMissingMarker === true;
     const allowUnknownContent = options.allowUnknownContent === true;
     const allowLegacyEmptyBlobShards = options.allowLegacyEmptyBlobShards === true;
+    const rejectInternalTransientContent = options.rejectInternalTransientContent === true;
     const walk = async (directory, relativeDirectory = '') => {
       const entries = await this.fs.promises.readdir(directory, { withFileTypes: true });
       for (const entry of entries) {
@@ -532,7 +600,7 @@ class ArchiveStorageRootManager {
             && /^[0-9a-f]{2}$/.test(entry.name);
           if (!evidence.directories.has(relativePath)
               && !isLegacyEmptyBlobShard
-              && !INTERNAL_TRANSIENT_DIRS.has(top)
+              && !(INTERNAL_TRANSIENT_DIRS.has(top) && !rejectInternalTransientContent)
               && !allowUnknownContent) {
             throw new ArchiveStorageRootError(
               'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
@@ -544,7 +612,7 @@ class ArchiveStorageRootManager {
         }
         if (!entry.isFile()
             || (!evidence.files.has(relativePath)
-              && !INTERNAL_TRANSIENT_DIRS.has(top)
+              && !(INTERNAL_TRANSIENT_DIRS.has(top) && !rejectInternalTransientContent)
               && !(allowMissingMarker && relativePath === ROOT_MARKER_FILE)
               && !allowUnknownContent)) {
           throw new ArchiveStorageRootError(
@@ -558,6 +626,7 @@ class ArchiveStorageRootManager {
   }
 
   async _assertManagedPath(rootDir, relativePath, options = {}) {
+    await this._assertRootDirectory(rootDir);
     const normalized = toRelativePath(relativePath);
     const resolved = path.resolve(rootDir, ...normalized.split('/'));
     const relative = path.relative(rootDir, resolved);
@@ -681,9 +750,10 @@ class ArchiveStorageRootManager {
           await this._drainOwnershipScan({ generation });
         }
       } catch (error) {
+        const code = String(error && error.code || 'ARCHIVE_STORAGE_OWNERSHIP_FAILED');
         this._setOwnershipProgress({
           status: 'failed',
-          lastErrorCode: String(error && error.code || 'ARCHIVE_STORAGE_OWNERSHIP_FAILED')
+          lastErrorCode: code
         });
         if (this.currentService
             && this.ownershipScan
@@ -692,7 +762,12 @@ class ArchiveStorageRootManager {
           this.currentService = null;
           this.runtimeDelegate.clearService(this.ownershipScan.rootDir);
         }
-        return this.getOwnershipProgress();
+        return {
+          ...this.getOwnershipProgress(),
+          ok: false,
+          code,
+          message: String(error && error.message || '存档目录所有权扫描失败')
+        };
       }
       if (generation !== this.ownershipGeneration) {
         return this._setOwnershipProgress({ status: 'paused' });
@@ -707,6 +782,72 @@ class ArchiveStorageRootManager {
 
   resumeBackgroundArchiveChecks() {
     this._resumeBackgroundArchiveChecks();
+  }
+
+  async runNoncriticalOwnershipScan() {
+    if (!this.currentService) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_ROOT_UNAVAILABLE',
+        '当前存档位置不可用'
+      );
+    }
+    const evidence = this._evidence();
+    const paths = this._evidenceOwnershipPaths(evidence);
+    this.ownershipScan = {
+      rootDir: this.currentService.rootDir,
+      paths,
+      cursor: 0,
+      remaining: paths.length,
+      verifiedPaths: new Set()
+    };
+    this._setOwnershipProgress({
+      status: paths.length === 0 ? 'complete' : 'pending',
+      processed: 0,
+      remaining: paths.length,
+      cursor: 0,
+      lastErrorCode: ''
+    });
+    return this.resumeBackgroundOwnershipScan();
+  }
+
+  async resumeDeferredCleanup(options = {}) {
+    const journal = await this._readJournal();
+    if (!journal || journal.phase === 'done') {
+      if (journal && journal.phase === 'done') {
+        await this.fs.promises.rm(this.journalPath, { force: true });
+      }
+      return { ok: true, status: 'complete', processed: 0 };
+    }
+    if (PRE_SWITCH_PHASES.has(journal.phase)) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_MIGRATION_PENDING',
+        '切换前迁移恢复不能作为后台保洁执行'
+      );
+    }
+    const ownedByEntryLease = Boolean(
+      this.entryMaintenanceOwnerToken
+      && String(options.ownerToken || '') === this.entryMaintenanceOwnerToken
+      && this.runtimeDelegate.getMaintenanceState().requested
+      && !this.runtimeDelegate.getMaintenanceState().active
+    );
+    if (ownedByEntryLease) {
+      const result = await this._finishCleanup(journal);
+      return { ...result, processed: result.ok ? 1 : 0 };
+    }
+    if (this.migrationPromise || this.isMaintenanceRequested()) {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_MAINTENANCE', '存档位置正在维护');
+    }
+    if (!this.runtimeDelegate.requestMaintenance('正在清理旧存档位置')) {
+      throw new ArchiveStorageRootError('ARCHIVE_STORAGE_MAINTENANCE', '存档位置正在维护');
+    }
+    try {
+      await this.waitForArchiveOperations();
+      this.runtimeDelegate.activateMaintenance();
+      const result = await this._finishCleanup(journal);
+      return { ...result, processed: result.ok ? 1 : 0 };
+    } finally {
+      this.runtimeDelegate.releaseMaintenance();
+    }
   }
 
   async _assertOwnershipScanComplete(rootDir) {
@@ -776,7 +917,13 @@ class ArchiveStorageRootManager {
   async _existingRoot(rootDir, configured) {
     try {
       const stat = await this.fs.promises.lstat(rootDir);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      if (stat.isSymbolicLink()) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_SYMLINK_REJECTED',
+          '存档根被替换为符号链接或目录联接'
+        );
+      }
+      if (!stat.isDirectory()) {
         throw new ArchiveStorageRootError(
           'ARCHIVE_STORAGE_ROOT_INVALID',
           '存档位置不是可用的真实目录'
@@ -946,6 +1093,12 @@ class ArchiveStorageRootManager {
       if (comparablePath(realTarget) === comparablePath(this.currentService.rootDir)) {
         return { status: 'success', noChange: true, message: '存档位置未变化' };
       }
+      if (pathsOverlap(this.currentService.rootDir, realTarget)) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_ROOT_OVERLAP',
+          '新存档位置不能是当前存档位置本身、其上级或子目录'
+        );
+      }
       targetRoot = realTarget;
     } catch (error) {
       return publicFailure(error);
@@ -985,19 +1138,17 @@ class ArchiveStorageRootManager {
 
   async _assertSourceReady() {
     await this._assertOwnershipScanComplete(this.currentService.rootDir);
-    const consistency = await this.currentService._reconcileStartupUnlocked({ verifyHashes: true });
-    if (consistency.failures.length > 0 || this.repository.listCleanupJobs().length > 0) {
+    const evidence = this._evidence();
+    await this._walkOwnedRoot(this.currentService.rootDir, evidence, {
+      rejectInternalTransientContent: true,
+      allowLegacyEmptyBlobShards: true
+    });
+    await this._verifyEvidenceFiles(this.currentService.rootDir, evidence);
+    if (this.repository.listCleanupJobs().length > 0) {
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_SOURCE_NOT_CLEAN',
         '当前存档根仍有完整性或物理清理问题，请解决后再迁移',
         { retryable: true }
-      );
-    }
-    const stagingEntries = await this.fs.promises.readdir(this.currentService.stagingDir);
-    if (stagingEntries.length > 0) {
-      throw new ArchiveStorageRootError(
-        'ARCHIVE_STORAGE_STAGING_NOT_CLEAN',
-        '存档暂存区尚未恢复到安全状态'
       );
     }
   }
@@ -1057,7 +1208,15 @@ class ArchiveStorageRootManager {
     const entries = await this.fs.promises.readdir(targetRoot);
     if (marker) {
       validateMarker(marker, this.instanceId);
-      await this._walkOwnedRoot(targetRoot, evidence);
+      await this._walkOwnedRoot(targetRoot, {
+        files: new Set([ROOT_MARKER_FILE]),
+        directories: new Set([
+          '.staging', '.readonly', 'blobs', 'blobs/sha256'
+        ])
+      }, {
+        rejectInternalTransientContent: true,
+        allowLegacyEmptyBlobShards: true
+      });
     } else if (entries.length > 0) {
       throw new ArchiveStorageRootError(
         'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
@@ -1090,13 +1249,65 @@ class ArchiveStorageRootManager {
         '目标存储空间不足，无法安全迁移'
       );
     }
-    const targetStaging = path.join(targetRoot, '.staging');
-    await this.fs.promises.rm(targetStaging, { recursive: true, force: true });
-    await this.fs.promises.mkdir(targetStaging, { recursive: true });
-    const targetReadonly = path.join(targetRoot, '.readonly');
-    await this.fs.promises.rm(targetReadonly, { recursive: true, force: true });
-    await this.fs.promises.mkdir(targetReadonly, { recursive: true });
+    for (const name of INTERNAL_TRANSIENT_DIRS) {
+      const directory = path.join(targetRoot, name);
+      if (await pathExists(this.fs, directory)) {
+        const stat = await this.fs.promises.lstat(directory);
+        const entries = stat.isDirectory() && !stat.isSymbolicLink()
+          ? await this.fs.promises.readdir(directory)
+          : [name];
+        if (!stat.isDirectory() || stat.isSymbolicLink() || entries.length > 0) {
+          throw new ArchiveStorageRootError(
+            'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+            '目标存档根的内部临时目录包含未知内容'
+          );
+        }
+      } else {
+        await this.fs.promises.mkdir(directory, { recursive: true });
+      }
+    }
     return { ...probe, requiredBytes, availableBytes };
+  }
+
+  async _validateResumeTarget(journal, evidence) {
+    const files = new Set([ROOT_MARKER_FILE]);
+    const directories = new Set(['.staging', '.readonly', 'blobs', 'blobs/sha256']);
+    for (const relativePath of journal.targetPublishedPaths || []) {
+      const normalized = toRelativePath(relativePath);
+      files.add(normalized);
+      for (const parent of parentRelativePaths(normalized)) directories.add(parent);
+    }
+    validateMarker(await this._readMarker(journal.targetRoot), this.instanceId);
+    await this._walkOwnedRoot(journal.targetRoot, { files, directories }, {
+      rejectInternalTransientContent: true,
+      allowLegacyEmptyBlobShards: true
+    });
+    await this._probeTarget(journal.targetRoot);
+    const missingCanonicalBytes = await this._missingCanonicalBytes(
+      journal.targetRoot,
+      evidence.blobs
+    );
+    const missingArtifactBytes = await this._missingArtifactBytes(
+      journal.targetRoot,
+      evidence.artifacts
+    );
+    let statfs;
+    try {
+      statfs = await this.fs.promises.statfs(journal.targetRoot);
+    } catch (_error) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_CAPACITY_UNAVAILABLE',
+        '无法确认目标存储空间，已拒绝迁移'
+      );
+    }
+    const availableBytes = Number(statfs.bavail) * Number(statfs.bsize);
+    if (!Number.isFinite(availableBytes)
+        || availableBytes < missingCanonicalBytes + missingArtifactBytes) {
+      throw new ArchiveStorageRootError(
+        'ARCHIVE_STORAGE_SPACE_INSUFFICIENT',
+        '目标存储空间不足，无法安全迁移'
+      );
+    }
   }
 
   async _missingCanonicalBytes(rootDir, blobs) {
@@ -1181,6 +1392,14 @@ class ArchiveStorageRootManager {
         );
       }
       const targetPath = await this._assertManagedPath(journal.targetRoot, blob.relativePath);
+      const targetOwnedByJournal = (journal.targetPublishedPaths || [])
+        .includes(toRelativePath(blob.relativePath));
+      if (!targetOwnedByJournal && await pathExists(this.fs, targetPath)) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+          '目标路径存在未由迁移 journal 授权的文件，设置未切换'
+        );
+      }
       const existing = await verifyFile(targetPath, blob, this.fs);
       if (!existing.valid) {
         await this.fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
@@ -1198,7 +1417,9 @@ class ArchiveStorageRootManager {
               'canonical Blob 复制后校验失败，设置未切换'
             );
           }
+          await syncStagedFile(this.fs, tempPath);
           await this.fs.promises.rename(tempPath, targetPath);
+          await syncDirectory(this.fs, path.dirname(targetPath));
         } finally {
           try { await this.fs.promises.rm(tempPath, { force: true }); } catch (_error) {}
         }
@@ -1243,6 +1464,14 @@ class ArchiveStorageRootManager {
         journal.targetRoot,
         artifact.storageRelativePath
       );
+      const targetOwnedByJournal = (journal.targetPublishedPaths || [])
+        .includes(toRelativePath(artifact.storageRelativePath));
+      if (!targetOwnedByJournal && await pathExists(this.fs, targetPath)) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_UNKNOWN_CONTENT',
+          '目标目录化路径存在未由迁移 journal 授权的文件，设置未切换'
+        );
+      }
       const existing = await verifyFile(targetPath, artifact.blob, this.fs);
       let storageMode;
       if (existing.valid) {
@@ -1274,7 +1503,15 @@ class ArchiveStorageRootManager {
         });
         storageMode = result.mode;
       }
-      materializations.push({ artifactId: artifact.id, storageMode });
+      const finalStat = await this.fs.promises.lstat(targetPath, { bigint: true });
+      const storageFingerprint = sourceSnapshotFromStat(finalStat);
+      if (!storageFingerprint || finalStat.isSymbolicLink()) {
+        throw new ArchiveStorageRootError(
+          'ARCHIVE_STORAGE_TARGET_VERIFY_FAILED',
+          '目标目录化文件指纹不可用，设置未切换'
+        );
+      }
+      materializations.push({ artifactId: artifact.id, storageMode, storageFingerprint });
       processed += 1;
       journal.progress.materializedArtifactCount = processed;
       journal.targetPublishedPaths = [...new Set([
@@ -1285,6 +1522,10 @@ class ArchiveStorageRootManager {
       journal = await this._writeJournal(journal, 'materializing-layout', {
         progress: journal.progress,
         targetPublishedPaths: journal.targetPublishedPaths
+      });
+      await this._inject('after-materialize-artifact', {
+        processed,
+        artifactId: artifact.id
       });
     }
     journal = await this._writeJournal(journal, 'materializing-layout', {
@@ -1389,7 +1630,7 @@ class ArchiveStorageRootManager {
             totalArtifactCount: evidence.artifacts.length
           }
         });
-        await this._validateTarget(targetRoot, evidence);
+        await this._validateResumeTarget(journal, evidence);
       }
       this._emitProgress(journal.phase, 0, evidence.blobs.length + evidence.artifacts.length);
       journal = await this._copyBlobs(journal, evidence);
@@ -1476,7 +1717,11 @@ class ArchiveStorageRootManager {
             '旧根内部临时目录被替换为符号链接，已停止清理'
           );
         }
-        await this.fs.promises.rm(internalPath, { recursive: true, force: true });
+        try {
+          await this.fs.promises.rmdir(internalPath);
+        } catch (error) {
+          if (!error || error.code !== 'ENOENT') throw error;
+        }
       }
     }
     for (const relativeDirectory of [...directories].sort((a, b) => b.length - a.length)) {
