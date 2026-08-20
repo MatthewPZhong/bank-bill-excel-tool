@@ -318,6 +318,102 @@ test('metrics 未ready时 root code9 在500ms立即失败，不跑CIM或等满ti
   assert.equal(snapshots, 0);
 });
 
+test('partial phases 已成功但 renderer 缺失直到 timeout 时失败样本保留阶段与缺失 marker', async () => {
+  const root = tempDir('startup-partial-ready-timeout');
+  const userDataDir = path.join(root, 'userData');
+  const documentsDir = path.join(root, 'Documents');
+  fs.mkdirSync(userDataDir);
+  fs.mkdirSync(documentsDir);
+  const databasePath = path.join(userDataDir, 'tool-data.sqlite');
+  createSettingsDatabase(databasePath, [['db_one_time_vacuum_v3_0_5_done', '1']]);
+  const partialMetrics = { phases: [
+    { phase: 'window-ready', outcome: 'success', durationMs: 11 },
+    { phase: 'startup-total', outcome: 'success', durationMs: 22 },
+    { phase: 'archive-outbox', outcome: 'success', counts: { pendingTerminalBatches: 0, pendingTerminalTasks: 0 } },
+    { phase: 'vcc-lineage-gate', outcome: 'success', counts: { bound: 3, failed: 0, pending: 0, released: 0 } }
+  ] };
+  let clock = 0;
+  let forced = 0;
+  await assert.rejects(measureSample({
+    label: '3.1.12-portable', executable: __filename, variantRoot: root,
+    userDataDir, documentsDir, databasePath
+  }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 300, goldenDb: databasePath }, {
+    now: () => clock,
+    readMetrics: () => partialMetrics,
+    adapter: {
+      async launch() {
+        return { processCreatedAt: 0, exitPromise: new Promise(() => {}) };
+      },
+      async delay(milliseconds) { clock += milliseconds; },
+      async forceCleanup() {
+        forced += 1;
+        return { verifiedEmpty: true, stoppedPids: [71], quiescenceSnapshots: [[], [], []] };
+      }
+    }
+  }), (error) => {
+    assert.equal(error.code, 'STARTUP_FULL_READY_TIMEOUT');
+    assert.equal(error.evidence.readyEvidence.status, 'incomplete');
+    assert.equal(error.evidence.lastMetrics, partialMetrics);
+    assert.equal(error.sampleEvidence.readyEvidence.status, 'incomplete');
+    assert.deepEqual(error.sampleEvidence.readyEvidence.missing, ['renderer.durations.totalInitMs']);
+    assert.deepEqual(error.sampleEvidence.phases, partialMetrics.phases);
+    assert.deepEqual(error.sampleEvidence.recoveryCounts['archive-outbox'], {
+      pendingTerminalBatches: 0, pendingTerminalTasks: 0
+    });
+    assert.equal(Object.hasOwn(error.sampleEvidence, 'externalFullReadyMs'), false);
+    return true;
+  });
+  assert.equal(forced, 1);
+  assert.equal(clock, 300, '进程保持存活直到完整 timeout，不能提前形成 ready success');
+});
+
+test('root early-exit 前已有 partial metrics 时仍保留阶段与缺失 marker', async () => {
+  const root = tempDir('startup-partial-ready-early-exit');
+  const userDataDir = path.join(root, 'userData');
+  const documentsDir = path.join(root, 'Documents');
+  fs.mkdirSync(userDataDir);
+  fs.mkdirSync(documentsDir);
+  const databasePath = path.join(userDataDir, 'tool-data.sqlite');
+  createSettingsDatabase(databasePath, [['db_one_time_vacuum_v3_0_5_done', '1']]);
+  const partialMetrics = { phases: [
+    { phase: 'window-ready', outcome: 'success', durationMs: 7 },
+    { phase: 'startup-total', outcome: 'success', durationMs: 13 },
+    { phase: 'archive-outbox', outcome: 'success', counts: { pendingTerminalBatches: 0 } }
+  ] };
+  await assert.rejects(measureSample({
+    label: '3.1.12-portable', executable: __filename, variantRoot: root,
+    userDataDir, documentsDir, databasePath
+  }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 1000, goldenDb: databasePath }, {
+    now: () => 0,
+    readMetrics: () => partialMetrics,
+    adapter: {
+      async launch() {
+        return {
+          processCreatedAt: 0,
+          processTokens: new Map(),
+          exitPromise: Promise.resolve({ code: 9, signal: null })
+        };
+      },
+      async delay() {},
+      async forceCleanup() {
+        return { verifiedEmpty: true, stoppedPids: [], quiescenceSnapshots: [[], [], []] };
+      }
+    }
+  }), (error) => {
+    assert.equal(error.code, 'PROCESS_EXITED_BEFORE_FULL_READY');
+    assert.equal(error.evidence.readyEvidence.status, 'incomplete');
+    assert.equal(error.evidence.lastMetrics, partialMetrics);
+    assert.equal(error.sampleEvidence.readyEvidence.status, 'incomplete');
+    assert.deepEqual(error.sampleEvidence.readyEvidence.missing, ['renderer.durations.totalInitMs']);
+    assert.deepEqual(error.sampleEvidence.phases, partialMetrics.phases);
+    assert.deepEqual(error.sampleEvidence.recoveryCounts['archive-outbox'], {
+      pendingTerminalBatches: 0
+    });
+    assert.equal(Object.hasOwn(error.sampleEvidence, 'externalFullReadyMs'), false);
+    return true;
+  });
+});
+
 test('metrics 与 root exit 同 tick ready 时先固定 ready 证据', async () => {
   const result = await waitForFullReady({
     label: '3.1.12-portable', metricsPath: 'unused', timeoutMs: 10000,

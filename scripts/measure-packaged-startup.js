@@ -337,6 +337,35 @@ function fullReadyEvidence(label, metrics) {
   } : null;
 }
 
+function incompleteReadyEvidence(label, metrics) {
+  if (!metrics || typeof metrics !== 'object' || Array.isArray(metrics)) {
+    return {
+      status: 'incomplete',
+      mode: label.startsWith('3.1.11-') ? 'legacy-renderer-contract' : 'phase-and-renderer-contract',
+      observedMetrics: false,
+      missing: ['metrics']
+    };
+  }
+  const rendererMs = metrics.renderer && metrics.renderer.durations
+    && metrics.renderer.durations.totalInitMs;
+  const missing = [];
+  if (!Number.isFinite(rendererMs)) missing.push('renderer.durations.totalInitMs');
+  const evidence = {
+    status: 'incomplete',
+    mode: label.startsWith('3.1.11-') ? 'legacy-renderer-contract' : 'phase-and-renderer-contract',
+    observedMetrics: true,
+    missing
+  };
+  if (!label.startsWith('3.1.11-')) {
+    const phases = Array.isArray(metrics.phases) ? metrics.phases : [];
+    const windowReady = phases.some((phase) => phase.phase === 'window-ready' && phase.outcome === 'success');
+    const startupTotal = phases.some((phase) => phase.phase === 'startup-total' && phase.outcome === 'success');
+    if (!windowReady) missing.push('phases.window-ready.success');
+    if (!startupTotal) missing.push('phases.startup-total.success');
+  }
+  return evidence;
+}
+
 function validateWalPrecondition(walPath) {
   const bytes = fs.readFileSync(walPath);
   if (bytes.length <= 32) throw codedError('CRASH_WAL_PRECONDITION_EMPTY', 'crash golden WAL 为空或只有 header', { walBytes: bytes.length });
@@ -935,10 +964,16 @@ async function verifyNormalSchemaSteady(options, rootDir, dependencies = {}) {
 async function waitForFullReady({ label, metricsPath, adapter, handle, timeoutMs, readMetrics = readMetricsFile, now = () => Number(process.hrtime.bigint()) / 1e6 }) {
   const startedAt = now();
   const deadline = startedAt + timeoutMs;
+  let lastMetrics = null;
+  let lastReadyEvidence = incompleteReadyEvidence(label, null);
   while (now() < deadline) {
     const metrics = readMetrics(metricsPath);
     const evidence = fullReadyEvidence(label, metrics);
     if (evidence) return { metrics, evidence, fullReadyMs: Number((now() - startedAt).toFixed(3)) };
+    if (metrics && typeof metrics === 'object' && !Array.isArray(metrics)) {
+      lastMetrics = metrics;
+      lastReadyEvidence = incompleteReadyEvidence(label, metrics);
+    }
     if (handle && handle.exitPromise && typeof handle.exitPromise.then === 'function') {
       const outcome = await Promise.race([
         handle.exitPromise.then((exit) => ({ exit })),
@@ -950,14 +985,19 @@ async function waitForFullReady({ label, metricsPath, adapter, handle, timeoutMs
           signal: outcome.exit.signal,
           ownership: handle.processTokens instanceof Map && handle.processTokens.size > 0
             ? 'established'
-            : 'unestablished'
+            : 'unestablished',
+          readyEvidence: lastReadyEvidence,
+          lastMetrics
         });
       }
     } else {
       await adapter.delay(100);
     }
   }
-  throw codedError('STARTUP_FULL_READY_TIMEOUT', `${label} 未在超时内形成完整 ready 证据`);
+  throw codedError('STARTUP_FULL_READY_TIMEOUT', `${label} 未在超时内形成完整 ready 证据`, {
+    readyEvidence: lastReadyEvidence,
+    lastMetrics
+  });
 }
 
 async function measureSample(variant, round, options, dependencies = {}) {
@@ -1111,6 +1151,17 @@ async function measureSample(variant, round, options, dependencies = {}) {
       phases
     };
   } catch (error) {
+    const partialMetrics = error && error.evidence && error.evidence.lastMetrics;
+    const partialReady = error && error.evidence && error.evidence.readyEvidence;
+    if (partialReady && partialReady.status === 'incomplete') {
+      evidence.readyEvidence = partialReady;
+    }
+    if (partialMetrics && Array.isArray(partialMetrics.phases)) {
+      evidence.phases = partialMetrics.phases;
+      evidence.recoveryCounts = Object.fromEntries(evidence.phases.flatMap((phase) => (
+        phase.counts ? [[phase.phase, phase.counts]] : []
+      )));
+    }
     failure = error;
   }
   if (handle && !closed) {
