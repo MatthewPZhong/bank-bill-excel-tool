@@ -17,6 +17,7 @@ const {
   main,
   measureSample,
   parseArgs,
+  prepareVariant,
   prepareSampleDatabase,
   rotatedOrder,
   scenarioPostcondition,
@@ -108,6 +109,168 @@ test('packaged startup 轮换四变体且至少五轮不丢首样本', () => {
   assert.deepEqual(orders[1], REQUIRED_VARIANTS.slice(1).concat(REQUIRED_VARIANTS[0]));
   for (const label of REQUIRED_VARIANTS) {
     assert.equal(orders.flat().filter((value) => value === label).length, 5);
+  }
+});
+
+test('non-normal variant 不预留四份永不使用的 base golden，逐样本副本由 sample root 承担', () => {
+  const root = tempDir('startup-non-normal-variant');
+  const goldenDb = path.join(root, 'golden.sqlite');
+  fs.writeFileSync(goldenDb, 'golden');
+  const variant = prepareVariant({
+    scenario: 'migration-vacuum',
+    goldenDb,
+    goldenWal: '',
+    goldenShm: '',
+    variants: new Map([['3.1.11-installer', __filename]])
+  }, '3.1.11-installer', path.join(root, 'work'), crypto.createHash('sha256').update('golden').digest('hex'));
+  assert.equal(fs.existsSync(variant.databasePath), false);
+  assert.equal(variant.initialSha256, crypto.createHash('sha256').update('golden').digest('hex'));
+});
+
+test('working main/WAL/SHM 从只读 frozen golden 复制后恢复 owner writable 且源仍只读', () => {
+  const root = tempDir('startup-writable-working-bundle');
+  const goldenDb = path.join(root, 'golden.sqlite');
+  const goldenWal = `${goldenDb}-wal`;
+  const goldenShm = `${goldenDb}-shm`;
+  const recoverySentinel = path.join(root, 'recovery-source.json');
+  for (const filePath of [goldenDb, goldenWal, goldenShm, recoverySentinel]) {
+    fs.writeFileSync(filePath, path.basename(filePath));
+    fs.chmodSync(filePath, 0o444);
+  }
+  const variant = {
+    userDataDir: path.join(root, 'unused-userData'),
+    documentsDir: path.join(root, 'unused-Documents'),
+    databasePath: path.join(root, 'unused.sqlite')
+  };
+  const sample = prepareSampleDatabase(variant, {
+    scenario: 'crash-recovery', goldenDb, goldenWal, goldenShm,
+    recoverySentinel: { sourcePath: recoverySentinel, relativePath: 'recovery/journal.json' }
+  }, path.join(root, 'sample'));
+  for (const filePath of [
+    sample.databasePath, `${sample.databasePath}-wal`, `${sample.databasePath}-shm`,
+    path.join(sample.userDataDir, 'recovery', 'journal.json')
+  ]) {
+    assert.doesNotThrow(() => fs.closeSync(fs.openSync(filePath, 'r+')));
+    assert.notEqual(fs.statSync(filePath).mode & 0o200, 0);
+  }
+  for (const filePath of [goldenDb, goldenWal, goldenShm, recoverySentinel]) {
+    assert.equal(fs.statSync(filePath).mode & 0o222, 0);
+  }
+});
+
+test('runner rotation 为每个 non-normal sample 调用 evidence-after cleanup hook', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../../scripts/measure-packaged-startup.js'), 'utf8');
+  assert.match(source, /afterSampleCleanup/);
+  assert.match(source, /options\.scenario\s*!==\s*'normal-clean-shutdown'/);
+});
+
+test('non-normal 缺 cleanup handler 必须在 freeze/copy/launch 前 fail-closed', async () => {
+  const root = tempDir('startup-missing-cleanup-handler');
+  const workRoot = path.join(root, 'work');
+  const goldenDb = path.join(root, 'golden.sqlite');
+  fs.writeFileSync(goldenDb, 'immutable-source-golden');
+  const args = [];
+  let launches = 0;
+  for (const [index, label] of REQUIRED_VARIANTS.entries()) {
+    const executable = path.join(root, `${label}.exe`);
+    fs.writeFileSync(executable, `artifact-${index}`);
+    args.push('--variant', `${label}=${executable}`);
+  }
+  args.push('--golden-db', goldenDb, '--scenario', 'migration-vacuum',
+    '--runs', '5', '--work-root', workRoot);
+
+  await assert.rejects(() => main(args, {
+    silent: true,
+    skipReportWrite: true,
+    skipSchemaProbe: true,
+    measureSample: async () => { launches += 1; throw new Error('must not launch'); }
+  }), /cleanup.*handler|handler.*cleanup|清理/i);
+  assert.equal(launches, 0);
+  assert.equal(fs.existsSync(workRoot), false);
+});
+
+test('真实 runner rotation 动态消费四变体×5 cleanup receipt；throw/false/missing 均中止并保留证据', async () => {
+  const makeRun = async (failure = null) => {
+    const root = tempDir('startup-real-cleanup-hook');
+    const workRoot = path.join(root, 'work');
+    const goldenDb = path.join(root, 'golden.sqlite');
+    fs.writeFileSync(goldenDb, 'immutable-source-golden');
+    const sourceHash = crypto.createHash('sha256').update(fs.readFileSync(goldenDb)).digest('hex');
+    const sourceMode = fs.statSync(goldenDb).mode;
+    const artifactArgs = [];
+    REQUIRED_VARIANTS.forEach((label, index) => {
+      const executable = path.join(root, `${label}.exe`);
+      fs.writeFileSync(executable, `artifact-${index}`);
+      artifactArgs.push('--variant', `${label}=${executable}`);
+    });
+    const calls = [];
+    const dependencies = {
+      silent: true,
+      skipReportWrite: true,
+      skipSchemaProbe: true,
+      readArtifactFileVersion: (_filePath, label) => `${label.slice(0, 6)}.0`,
+      measureSample: async (variant, round) => {
+        const sampleRoot = path.join(variant.variantRoot, 'samples', String(round + 1).padStart(2, '0'));
+        fs.mkdirSync(sampleRoot, { recursive: true });
+        fs.writeFileSync(path.join(sampleRoot, 'copy.sqlite'), 'working-copy');
+        return { round: round + 1, status: 'success', externalFullReadyMs: 1, phases: [] };
+      },
+      afterSampleCleanup: ({ label, round, sampleRoot, cleanupVerified }) => {
+        calls.push({ label, round, sampleRoot, cleanupVerified });
+        if (failure && calls.length === failure.at && failure.mode === 'throw') {
+          throw Object.assign(new Error('cleanup rejected'), { code: 'TEST_CLEANUP_REJECTED' });
+        }
+        assert.equal(sampleRoot, path.join(workRoot, label, 'samples', String(round).padStart(2, '0')));
+        if (failure && calls.length === failure.at && failure.mode === 'false') {
+          return { verifiedAbsent: false, pathRecorded: false };
+        }
+        if (failure && calls.length === failure.at && failure.mode === 'missing') return undefined;
+        fs.rmSync(sampleRoot, { recursive: true });
+        assert.equal(fs.existsSync(sampleRoot), false);
+        return { status: 'success', targetIdentitySha256: 'a'.repeat(64), verifiedAbsent: true, pathRecorded: false };
+      }
+    };
+    const args = [...artifactArgs, '--golden-db', goldenDb, '--scenario', 'migration-vacuum',
+      '--runs', '5', '--work-root', workRoot];
+    let report;
+    let error;
+    try { report = await main(args, dependencies); } catch (caught) { error = caught; report = caught.report; }
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(goldenDb)).digest('hex'), sourceHash);
+    assert.equal(fs.statSync(goldenDb).mode, sourceMode);
+    const frozenDb = path.join(workRoot, 'runner-owned-golden', 'tool-data.sqlite');
+    assert.equal(crypto.createHash('sha256').update(fs.readFileSync(frozenDb)).digest('hex'), sourceHash);
+    assert.equal(fs.statSync(frozenDb).mode & 0o222, 0);
+    return { root, workRoot, calls, report, error, sourceHash };
+  };
+
+  const success = await makeRun();
+  assert.equal(success.calls.length, 20);
+  assert.deepEqual(success.calls.map(({ label, round }) => `${round}:${label}`),
+    Array.from({ length: 5 }, (_unused, round) => rotatedOrder(round).map((label) => `${round + 1}:${label}`)).flat());
+  assert.equal(success.report.run.status, 'completed');
+  assert.equal(REQUIRED_VARIANTS.flatMap((label) => success.report.variants[label].samples)
+    .every((sample) => sample.afterSampleCleanupEvidence.verifiedAbsent === true), true);
+
+  const failed = await makeRun({ at: 3, mode: 'throw' });
+  assert.equal(failed.calls.length, 3);
+  assert.equal(failed.error.code, 'STARTUP_MEASUREMENT_ABORTED');
+  assert.equal(failed.report.run.status, 'aborted');
+  assert.equal(failed.report.run.requiresManualCleanup, true);
+  assert.equal(failed.report.run.abortEvidence.evidenceCode, 'TEST_CLEANUP_REJECTED');
+  assert.equal(failed.report.evaluation.status, 'not-evaluated');
+  assert.equal(fs.existsSync(failed.calls.at(-1).sampleRoot), true);
+
+  for (const mode of ['false', 'missing']) {
+    const residual = await makeRun({ at: 3, mode });
+    assert.equal(residual.calls.length, 3);
+    assert.equal(residual.error.code, 'STARTUP_MEASUREMENT_ABORTED');
+    assert.equal(residual.report.run.abortEvidence.evidenceCode, 'NON_NORMAL_SAMPLE_DELETE_UNVERIFIED');
+    assert.equal(residual.report.run.status, 'aborted');
+    assert.equal(residual.report.evaluation.status, 'not-evaluated');
+    assert.equal(fs.existsSync(residual.calls.at(-1).sampleRoot), true);
+    const failedSample = residual.report.variants[residual.calls.at(-1).label].samples.at(-1);
+    assert.equal(failedSample.afterSampleCleanupEvidence.verifiedAbsent, false);
+    assert.equal(residual.report.golden.sha256, residual.sourceHash);
   }
 });
 

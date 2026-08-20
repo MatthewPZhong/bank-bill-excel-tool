@@ -138,29 +138,61 @@ function rotatedOrder(round) {
   return REQUIRED_VARIANTS.slice(offset).concat(REQUIRED_VARIANTS.slice(0, offset));
 }
 
+function assertWorkingFileWritable(filePath) {
+  fs.chmodSync(filePath, 0o600);
+  let handle;
+  try {
+    handle = fs.openSync(filePath, 'r+');
+  } catch (error) {
+    throw codedError('WORKING_DATABASE_NOT_WRITABLE', 'working database main/WAL/SHM 必须可由 owner 读写', {
+      fileKind: path.basename(filePath).endsWith('-wal') ? 'wal'
+        : path.basename(filePath).endsWith('-shm') ? 'shm' : 'main',
+      causeCode: error && error.code || 'UNKNOWN'
+    });
+  } finally {
+    if (handle !== undefined) fs.closeSync(handle);
+  }
+}
+
 function copyGoldenBundle(options, databasePath, copyFlag = 0) {
   fs.copyFileSync(options.goldenDb, databasePath, copyFlag);
   if (options.goldenWal) fs.copyFileSync(options.goldenWal, `${databasePath}-wal`, copyFlag);
   if (options.goldenShm) fs.copyFileSync(options.goldenShm, `${databasePath}-shm`, copyFlag);
+  let recoverySentinelTarget = null;
   if (options.recoverySentinel) {
-    const target = path.join(path.dirname(databasePath), ...options.recoverySentinel.relativePath.split('/'));
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(options.recoverySentinel.sourcePath, target, copyFlag);
+    recoverySentinelTarget = path.join(path.dirname(databasePath), ...options.recoverySentinel.relativePath.split('/'));
+    fs.mkdirSync(path.dirname(recoverySentinelTarget), { recursive: true });
+    fs.copyFileSync(options.recoverySentinel.sourcePath, recoverySentinelTarget, copyFlag);
   }
+  for (const workingPath of [
+    databasePath,
+    options.goldenWal && `${databasePath}-wal`,
+    options.goldenShm && `${databasePath}-shm`,
+    recoverySentinelTarget
+  ].filter(Boolean)) assertWorkingFileWritable(workingPath);
 }
 
 function prepareVariant(options, label, rootDir, goldenSha256) {
   const variantRoot = path.join(rootDir, label);
   const userDataDir = path.join(variantRoot, 'userData');
   const documentsDir = path.join(variantRoot, 'Documents');
-  fs.mkdirSync(userDataDir, { recursive: true });
-  fs.mkdirSync(documentsDir, { recursive: true });
   const databasePath = path.join(userDataDir, 'tool-data.sqlite');
-  copyGoldenBundle(options, databasePath, fs.constants.COPYFILE_EXCL);
-  const initialSha256 = sha256(databasePath);
+  const steady = options.scenario === 'normal-clean-shutdown';
+  if (steady) {
+    fs.mkdirSync(userDataDir, { recursive: true });
+    fs.mkdirSync(documentsDir, { recursive: true });
+    copyGoldenBundle(options, databasePath, fs.constants.COPYFILE_EXCL);
+  } else {
+    fs.mkdirSync(variantRoot, { recursive: true });
+  }
+  const initialSha256 = steady ? sha256(databasePath) : sha256(options.goldenDb);
   if (initialSha256 !== goldenSha256) throw codedError('GOLDEN_DB_COPY_MISMATCH', `${label} 初始数据库 SHA-256 不一致`);
-  const initialWalSha256 = options.goldenWal ? sha256(`${databasePath}-wal`) : null;
-  const initialShmSha256 = options.goldenShm ? sha256(`${databasePath}-shm`) : null;
+  const initialWalSha256 = options.goldenWal
+    ? sha256(steady ? `${databasePath}-wal` : options.goldenWal)
+    : null;
+  const initialShmSha256 = options.goldenShm
+    ? sha256(steady ? `${databasePath}-shm` : options.goldenShm)
+    : null;
   if (initialWalSha256 && initialWalSha256 !== sha256(options.goldenWal)) throw codedError('GOLDEN_WAL_COPY_MISMATCH', `${label} 初始 WAL SHA-256 不一致`);
   if (initialShmSha256 && initialShmSha256 !== sha256(options.goldenShm)) throw codedError('GOLDEN_SHM_COPY_MISMATCH', `${label} 初始 SHM SHA-256 不一致`);
   return { label, executable: options.variants.get(label), variantRoot, userDataDir, documentsDir, databasePath, initialSha256, initialWalSha256, initialShmSha256, samples: [] };
@@ -1172,6 +1204,19 @@ async function measureSample(variant, round, options, dependencies = {}) {
           ? crypto.createHash('sha256').update(handle.nonce).digest('hex')
           : null
       },
+      processExitEvidence: {
+        rootExit: { code: Number(rootExit.code), signal: rootExit.signal },
+        treeExited: true,
+        verifiedEmpty: exitResult.verifiedEmpty === true,
+        quiescenceSnapshots: Array.isArray(exitResult.quiescenceSnapshots)
+          ? exitResult.quiescenceSnapshots : []
+      },
+      cleanupEvidence: {
+        mode: 'graceful',
+        verifiedEmpty: exitResult.verifiedEmpty === true,
+        quiescenceSnapshots: Array.isArray(exitResult.quiescenceSnapshots)
+          ? exitResult.quiescenceSnapshots : []
+      },
       appReportedReadyToShowMs: ready.metrics.durations && ready.metrics.durations.totalReadyToShowMs,
       before,
       after,
@@ -1259,6 +1304,10 @@ function buildReport(options, goldenSha256, variants, rotation, schemaProbeEvide
       shmSha256: fixedGoldenEvidence ? fixedGoldenEvidence.shm.sha256
         : options.goldenShm ? sha256(options.goldenShm) : null,
       sizeBytes: fixedGoldenEvidence ? fixedGoldenEvidence.database.size : fileSize(options.goldenDb),
+      walSizeBytes: fixedGoldenEvidence ? fixedGoldenEvidence.wal.size
+        : options.goldenWal ? fileSize(options.goldenWal) : 0,
+      shmSizeBytes: fixedGoldenEvidence ? fixedGoldenEvidence.shm.size
+        : options.goldenShm ? fileSize(options.goldenShm) : 0,
       sourcePathRecorded: false,
       runnerOwnedFrozenCopy: true
     },
@@ -1298,6 +1347,13 @@ function buildReport(options, goldenSha256, variants, rotation, schemaProbeEvide
 
 async function main(argv = process.argv.slice(2), dependencies = {}) {
   const options = parseArgs(argv);
+  if (options.scenario !== 'normal-clean-shutdown'
+      && typeof dependencies.afterSampleCleanup !== 'function') {
+    throw codedError(
+      'NON_NORMAL_SAMPLE_CLEANUP_HANDLER_REQUIRED',
+      'non-normal 场景必须在任何 golden freeze/copy/launch 前提供 cleanup handler'
+    );
+  }
   const temporary = !options.workRoot;
   const rootDir = options.workRoot || fs.mkdtempSync(path.join(os.tmpdir(), 'startup-packaged-'));
   fs.mkdirSync(rootDir, { recursive: true });
@@ -1330,17 +1386,21 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
   const byLabel = new Map(variants.map((variant) => [variant.label, variant]));
   const rotation = [];
   let abortEvidence = null;
+  const measureOneSample = dependencies.measureSample || measureSample;
   measurement: for (let round = 0; round < options.runs; round += 1) {
     const order = rotatedOrder(round);
     rotation.push(order);
     for (const label of order) {
+      const variant = byLabel.get(label);
+      let sampleStatus = 'failed';
+      let sampleFailure = null;
       try {
-        byLabel.get(label).samples.push(await measureSample(
-          byLabel.get(label), round, runtimeOptions, runtimeDependencies
-        ));
+        variant.samples.push(await measureOneSample(variant, round, runtimeOptions, runtimeDependencies));
+        sampleStatus = 'success';
       } catch (error) {
+        sampleFailure = error;
         const partial = error && error.sampleEvidence || {};
-        byLabel.get(label).samples.push({
+        variant.samples.push({
           ...partial,
           round: round + 1,
           status: 'failed',
@@ -1354,6 +1414,43 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
             evidenceCode: String(error.code),
             evidence: error.evidence || {},
             requiresManualCleanup: Boolean(error.requiresManualCleanup)
+          };
+          break measurement;
+        }
+      }
+      if (options.scenario !== 'normal-clean-shutdown'
+          && typeof dependencies.afterSampleCleanup === 'function') {
+        try {
+          const cleanupReceipt = await dependencies.afterSampleCleanup({
+            label,
+            round: round + 1,
+            sampleRoot: path.join(variant.variantRoot, 'samples', String(round + 1).padStart(2, '0')),
+            status: sampleStatus,
+            cleanupVerified: sampleStatus === 'success'
+              || Boolean(sampleFailure && sampleFailure.sampleEvidence
+                && sampleFailure.sampleEvidence.cleanupEvidence
+                && sampleFailure.sampleEvidence.cleanupEvidence.verifiedEmpty === true)
+          });
+          const sample = variant.samples[variant.samples.length - 1];
+          sample.afterSampleCleanupEvidence = cleanupReceipt && typeof cleanupReceipt === 'object'
+            ? cleanupReceipt : { verifiedAbsent: false, pathRecorded: false };
+          if (!cleanupReceipt || cleanupReceipt.verifiedAbsent !== true) {
+            throw codedError('NON_NORMAL_SAMPLE_DELETE_UNVERIFIED', 'afterSampleCleanup 必须返回 verifiedAbsent=true receipt', {
+              cleanupReceipt: sample.afterSampleCleanupEvidence
+            });
+          }
+        } catch (error) {
+          const sample = variant.samples[variant.samples.length - 1];
+          if (!sample.afterSampleCleanupEvidence) {
+            sample.afterSampleCleanupEvidence = error && error.evidence && error.evidence.cleanupReceipt
+              || { verifiedAbsent: false, pathRecorded: false };
+          }
+          abortEvidence = {
+            round: round + 1,
+            label,
+            evidenceCode: String(error && error.code || 'NON_NORMAL_SAMPLE_CLEANUP_FAILED'),
+            evidence: error && error.evidence || {},
+            requiresManualCleanup: true
           };
           break measurement;
         }
@@ -1390,9 +1487,13 @@ async function main(argv = process.argv.slice(2), dependencies = {}) {
     } : { status: 'completed', requiresManualCleanup: false }
   });
   const output = options.output || path.join(rootDir, 'startup-comparison.json');
-  fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  process.stdout.write(`packaged startup report: ${output}\n`);
-  if (temporary) process.stdout.write(`work copies retained: ${rootDir}\n`);
+  if (!dependencies.skipReportWrite) {
+    fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  }
+  if (!dependencies.silent) {
+    process.stdout.write(`packaged startup report: ${output}\n`);
+    if (temporary) process.stdout.write(`work copies retained: ${rootDir}\n`);
+  }
   if (abortEvidence) {
     const error = codedError('STARTUP_MEASUREMENT_ABORTED', 'packaged startup measurement 已中止', abortEvidence);
     error.report = report;
@@ -1416,6 +1517,7 @@ module.exports = {
   main,
   measureSample,
   parseArgs,
+  prepareVariant,
   prepareSampleDatabase,
   rotatedOrder,
   scenarioPostcondition,
