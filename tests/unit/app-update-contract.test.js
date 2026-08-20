@@ -104,7 +104,7 @@ test.describe('v3.0.18 在线升级静态契约', () => {
     assert.doesNotMatch(updater, /setInterval\s*\(/);
     assert.match(main, /const APP_UPDATE_RELEASE_URL = 'https:\/\/github\.com\/MatthewPZhong\/bank-bill-excel-tool\/releases';/);
     assert.match(main, /function scheduleAppUpdaterStartupCheck\(\)[\s\S]*?setImmediate\(/);
-    assert.match(main, /markAppInitDone\(\)[\s\S]*?scheduleAppUpdaterStartupCheck\(\);/);
+    assert.match(main, /await createWindow\(\{ instrumentation: 'initial' \}\);[\s\S]*?applicationStartupComplete = true;[\s\S]*?scheduleAppUpdaterStartupCheck\(\);/);
     assert.match(main, /getLastCompletedCheckKind\(\)/, '并发加入检查时下载必须沿用真实触发来源');
   });
 

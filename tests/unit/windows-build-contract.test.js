@@ -15,6 +15,12 @@ test('Windows PR 对任意目标分支跑 release-check、x64 完整构建与 ch
   const smokeJob = workflow.slice(workflow.indexOf('\n  smoke-test:'), workflow.indexOf('\n  build:'));
   assert.match(smokeJob, /uses: actions\/checkout@v6\s*\n\s*with:\s*\n\s*fetch-depth: 0/);
   assert.match(workflow, /Run release checks\s*\n\s*run: npm run release-check/);
+  assert.match(workflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
+  assert.ok(
+    workflow.indexOf('Run release checks')
+      < workflow.indexOf('Verify Windows startup process adapter semantics'),
+    '真实 Windows 进程探针必须在全量 release-check 之后独立串行运行'
+  );
   assert.doesNotMatch(workflow, /if:\s*github\.event_name\s*!=\s*'pull_request'/);
 
   const buildJob = workflow.slice(workflow.indexOf('\n  build:'));
@@ -35,7 +41,22 @@ test('Windows 本地与发布构建全部锁定 x64，避免检查陈旧 win-unp
     assert.match(packageJson.scripts[scriptName], /^npm run prepare:dist &&/);
     assert.match(packageJson.scripts[scriptName], /electron-builder --win(?:\s+(?:nsis|portable))? --x64 --publish never/);
   }
-  assert.match(read('.github/workflows/release-windows.yml'), /electron-builder --win --x64 --publish never/);
+  const releaseWorkflow = read('.github/workflows/release-windows.yml');
+  assert.match(releaseWorkflow, /electron-builder --win --x64 --publish never/);
+  assert.match(releaseWorkflow, /Verify Windows startup process adapter semantics\s*\n\s*env:\s*\n\s*WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'\s*\n\s*run: node --test tests\/unit\/scripts\/startup-process-adapter\.test\.js/);
+  assert.ok(
+    releaseWorkflow.indexOf('Run release checks')
+      < releaseWorkflow.indexOf('Verify Windows startup process adapter semantics'),
+    '发布工作流同样必须先跑全量门禁，再串行执行真实 Windows 进程探针'
+  );
   assert.match(read('scripts/check-dist-size.js'), /断言④包内版本不匹配/);
   assert.match(read('scripts/check-dist-size.js'), /断言⑤包内构建提交不匹配/);
+});
+
+test('真实 Windows 进程探针不与全量单测并发，只由专用工作流环境显式开启', () => {
+  const adapterTest = read('tests/unit/scripts/startup-process-adapter.test.js');
+  assert.match(
+    adapterTest,
+    /process\.env\.WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST !== '1'/
+  );
 });

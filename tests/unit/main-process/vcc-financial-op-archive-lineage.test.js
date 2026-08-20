@@ -28,6 +28,7 @@ const {
 } = require('../../../src/backend/vcc-financial-op-db/migrations');
 const vccRepository = require('../../../src/backend/vcc-financial-op-db/repository');
 const {
+  activeReferenceCounts,
   buildVccImportArchiveHandoffFiles,
   listRecoverableVccImportArchiveBatchIds,
   recoverVccImportArchiveTasks,
@@ -89,6 +90,31 @@ function seedSource(db) {
   return { recordId, sourceId, effectiveId };
 }
 
+function seedSourceWithIdentity(db, { batchId, sourceType, fileName }) {
+  vccRepository.createImportBatch(db, {
+    id: batchId,
+    targetMonth: '2026-07',
+    fileCount: 1
+  });
+  const recordId = vccRepository.createImportRecord(db, {
+    batchId,
+    targetMonth: '2026-07',
+    sourceType,
+    sourceFiles: [fileName]
+  });
+  const sourceId = vccRepository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName,
+    sha256: 'e'.repeat(64),
+    sizeBytes: 456
+  });
+  vccRepository.finishImportRecord(db, recordId, {
+    status: 'success', rawCount: 1, insertedCount: 1
+  });
+  vccRepository.finishImportBatch(db, batchId, 'success');
+  return { recordId, sourceId };
+}
+
 function seedReadyArtifact(
   archiveRepository,
   { recordId, sourceId },
@@ -140,6 +166,44 @@ function seedReadyArtifact(
   return ready;
 }
 
+test('活动引用按表集合聚合，null 忽略且 system-only 来源仍建立 hold 证据', (t) => {
+  const { db } = fixture(t);
+  const first = seedSource(db);
+  const second = seedSourceWithIdentity(db, {
+    batchId: 'task-run-system-only',
+    sourceType: 'system_op',
+    fileName: 'system.xlsx'
+  });
+  db.prepare('DELETE FROM vcc_fin_op_effective_raw_fallback WHERE import_source_id = ?')
+    .run(second.sourceId);
+  db.prepare('DELETE FROM vcc_fin_op_effective_rows WHERE import_source_id = ?')
+    .run(second.sourceId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_system_snapshots (
+      target_month, subject, balances_json, content_hash, source_file,
+      sheet_name, source_row, raw_json, import_record_id, import_source_id
+    ) VALUES ('2026-07', 'SYSTEM', '{}', ?, 'system.xlsx', 'sheet1', 2, '[]', ?, ?)
+  `).run('d'.repeat(64), second.recordId, second.sourceId);
+  db.prepare(`
+    UPDATE vcc_fin_op_effective_rows SET import_source_id = NULL WHERE id = ?
+  `).run(first.effectiveId);
+
+  const sql = [];
+  const traced = {
+    prepare(statement) {
+      sql.push(statement);
+      return db.prepare(statement);
+    }
+  };
+  const counts = activeReferenceCounts(traced);
+  assert.equal(counts.get(first.sourceId), 1, 'fallback reference 仍计数');
+  assert.equal(counts.get(second.sourceId), 1, 'system-only reference 必须计数');
+  const aggregate = sql.filter((statement) => /SUM\(reference_count\)/.test(statement));
+  assert.equal(aggregate.length, 1);
+  assert.doesNotMatch(aggregate[0], /import_source_id\s*=\s*\?/);
+  assert.equal((aggregate[0].match(/GROUP BY import_source_id/g) || []).length, 4);
+});
+
 test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁，删除有效行后自动释放', (t) => {
   const { db, archiveRepository } = fixture(t);
   const source = seedSource(db);
@@ -180,6 +244,27 @@ test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁�
   assert.equal(db.prepare(`
     SELECT archive_state FROM vcc_fin_op_import_records WHERE id = ?
   `).get(source.recordId).archive_state, 'unavailable');
+});
+
+test('fallback-only 来源绑定后使用删除后引用数，不留下 stale hold', (t) => {
+  const { db, archiveRepository } = fixture(t);
+  const source = seedSource(db);
+  db.prepare(`
+    UPDATE vcc_fin_op_effective_rows SET import_source_id = NULL WHERE id = ?
+  `).run(source.effectiveId);
+  const artifact = seedReadyArtifact(archiveRepository, source);
+
+  const result = reconcileVccImportArchiveLineage({ db, archiveRepository });
+  assert.equal(result.bound, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM vcc_fin_op_effective_raw_fallback
+    WHERE import_source_id = ?
+  `).get(source.sourceId).count, 0);
+  assert.equal(archiveRepository.listArtifactHolds(artifact.id).length, 0);
+  assert.equal(
+    archiveRepository.deleteBatch(artifact.batchId, { allowLocked: true }).status,
+    'deleted'
+  );
 });
 
 test('artifact SHA 不符时绑定失败且 fallback 保留', (t) => {

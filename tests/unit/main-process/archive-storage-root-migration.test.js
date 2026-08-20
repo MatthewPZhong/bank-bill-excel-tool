@@ -104,6 +104,7 @@ async function createFixture(options = {}) {
     fsImpl: options.fsImpl,
     faultInjector: options.faultInjector,
     waitForArchiveOperations: options.waitForArchiveOperations,
+    deferStartupRecovery: options.deferStartupRecovery === true,
     showOpenDialog: async () => ({ canceled: false, filePaths: [targetRoot] }),
     onProgress: (value) => progress.push(value),
     createService: (rootDir) => createArchiveService({
@@ -166,6 +167,7 @@ function createManagerForFixture(current, options = {}) {
     fsImpl: options.fsImpl,
     faultInjector: options.faultInjector,
     waitForArchiveOperations: options.waitForArchiveOperations,
+    deferStartupRecovery: options.deferStartupRecovery === true,
     showOpenDialog: options.showOpenDialog || (async () => ({
       canceled: false,
       filePaths: [options.targetRoot || current.targetRoot]
@@ -674,12 +676,8 @@ test('maintenance 先关闭新 admission/第二迁移，再 drain 现有 archive
   }
 });
 
-test('migration 暂停后台物化并等待当前块，随后在完整 SHA 校验后切根', async () => {
+test('启动不跑目录化维护，用户迁移仍在完整 SHA 校验后切根', async () => {
   const current = await createFixture();
-  let releaseChunk;
-  let markChunkEntered;
-  const chunkGate = new Promise((resolve) => { releaseChunk = resolve; });
-  const chunkEntered = new Promise((resolve) => { markChunkEntered = resolve; });
   const events = [];
   try {
     const writer = createArchiveService({
@@ -709,6 +707,7 @@ test('migration 暂停后台物化并等待当前块，随后在完整 SHA 校�
     fs.mkdirSync(current.targetRoot, { recursive: true });
 
     const wrapped = createManagerForFixture(current, {
+      deferStartupRecovery: true,
       createService(rootDir) {
         const service = createArchiveService({
           database: current.database.db,
@@ -717,16 +716,6 @@ test('migration 暂停后台物化并等待当前块，随后在完整 SHA 校�
           startupMaterializationBatchSize: 1
         });
         const isSourceRoot = real(rootDir) === real(current.sourceRoot);
-        const originalMaterialize = service._materializeArtifactUnlocked.bind(service);
-        service._materializeArtifactUnlocked = async (artifactId) => {
-          if (isSourceRoot && artifactId === second.artifact.id) {
-            events.push('background-enter');
-            markChunkEntered();
-            await chunkGate;
-            events.push('background-exit');
-          }
-          return originalMaterialize(artifactId);
-        };
         const originalReconcile = service._reconcileStartupUnlocked.bind(service);
         service._reconcileStartupUnlocked = async (options = {}) => {
           if (isSourceRoot && options.verifyHashes === true) {
@@ -746,45 +735,15 @@ test('migration 暂停后台物化并等待当前块，随后在完整 SHA 校�
 
     const initialized = await wrapped.manager.initialize();
     assert.equal(initialized.available, true, JSON.stringify(initialized));
-    assert.ok(wrapped.runtime.service, '前台首块完成后 runtime delegate 应立即可用');
-    let enterTimeout;
-    const entered = await Promise.race([
-      chunkEntered.then(() => true),
-      new Promise((resolve) => {
-        enterTimeout = setTimeout(() => resolve(false), 2000);
-      })
-    ]);
-    clearTimeout(enterTimeout);
-    assert.equal(
-      entered,
-      true,
-      JSON.stringify({ events, migration: wrapped.manager.getMigrationState() })
-    );
-    assert.equal(
-      wrapped.manager.getMigrationState().materialization.remaining,
-      1
-    );
+    assert.ok(wrapped.runtime.service);
+    assert.deepEqual(events, [], '启动不得执行目录化或历史健康维护');
 
-    let settled = false;
-    const migration = wrapped.manager.changeStorageLocation().then((result) => {
-      settled = true;
-      return result;
-    });
-    while (!events.includes('maintenance-requested')) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    assert.equal(settled, false, '迁移必须等待当前物化块退出');
-    assert.equal(wrapped.runtime.getMaintenanceState().requested, true);
-    releaseChunk();
-
-    const result = await migration;
+    const result = await wrapped.manager.changeStorageLocation();
     assert.equal(result.status, 'success', JSON.stringify(result));
     assert.equal(current.repository.countMaterializationCandidates(), 0);
-    assert.ok(events.indexOf('maintenance-requested') < events.indexOf('background-exit'));
-    assert.ok(events.indexOf('background-exit') < events.indexOf('full-source-verify'));
+    assert.ok(events.indexOf('maintenance-requested') < events.indexOf('full-source-verify'));
     assert.equal(wrapped.runtime.rootDir, real(current.targetRoot));
   } finally {
-    if (releaseChunk) releaseChunk();
     current.close();
   }
 });
@@ -881,17 +840,12 @@ test('marker-present 活跃根仍逐级拒绝内部 symlink，不删外部文件
   }
 });
 
-test('活跃根 ownership 前台扫描固定有界并由后台游标续完', async () => {
+test('有效 marker 的活跃根只验证固定祖先，不读取全库 evidence', async () => {
   const current = await createFixture();
   try {
     assert.equal((await current.manager.initialize()).available, true);
     await current.manager.pauseBackgroundOwnershipScan();
 
-    const directoryCount = 50001;
-    const directories = new Set(['.readonly', '.staging', 'blobs', 'blobs/sha256']);
-    for (let index = 0; index < directoryCount; index += 1) {
-      directories.add(`history/${String(index).padStart(5, '0')}`);
-    }
     const lstatCounts = new Map();
     const syntheticFs = {
       ...fs,
@@ -909,32 +863,19 @@ test('活跃根 ownership 前台扫描固定有界并由后台游标续完', asy
     };
     const wrapped = createManagerForFixture(current, { fsImpl: syntheticFs });
     wrapped.manager.instanceId = current.repository.getOrCreateArchiveInstanceId();
-    wrapped.manager._evidence = () => ({
-      blobs: [],
-      artifacts: [],
-      cleanupJobs: [],
-      files: new Set([ROOT_MARKER_FILE]),
-      directories
-    });
+    wrapped.manager._evidence = () => {
+      throw new Error('marker 稳态启动不得读取全库 evidence');
+    };
 
     await wrapped.manager._prepareActiveRoot(real(current.sourceRoot), { configured: true });
     const foreground = wrapped.manager.getOwnershipProgress();
-    assert.equal(foreground.status, 'pending');
-    assert.equal(foreground.processed, 64);
-    assert.equal(foreground.remaining, directoryCount - 64);
+    assert.equal(foreground.status, 'deferred');
+    assert.equal(foreground.processed, 0);
+    assert.equal(foreground.remaining, 0);
     assert.ok(
-      [...lstatCounts.values()].reduce((sum, count) => sum + count, 0) <= 70,
-      '前台 ownership syscall 不得随 50k evidence 线性增长'
+      [...lstatCounts.values()].reduce((sum, count) => sum + count, 0) <= 6,
+      '固定关键祖先 syscall 不得随历史 evidence 增长'
     );
-
-    await wrapped.manager.resumeBackgroundOwnershipScan();
-    assert.deepEqual(wrapped.manager.getOwnershipProgress(), {
-      status: 'complete',
-      processed: directoryCount,
-      remaining: 0,
-      cursor: directoryCount,
-      lastErrorCode: ''
-    });
   } finally {
     current.close();
   }
@@ -1009,7 +950,7 @@ test('pre-switch 自动续跑的永久目标故障不清空已恢复的 source d
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const restarted = createManagerForFixture(current, { fsImpl: failingFs });
       const initialized = await restarted.manager.initialize();
-      assert.equal(initialized.available, true, JSON.stringify(initialized));
+      assert.equal(initialized.ok, false, JSON.stringify(initialized));
       assert.equal(initialized.migrationRecovery.code, 'ARCHIVE_STORAGE_TARGET_PROBE_FAILED');
       assert.equal(restarted.runtime.rootDir, real(current.sourceRoot));
       assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);

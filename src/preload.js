@@ -94,20 +94,7 @@ contextBridge.exposeInMainWorld('desktopApi', {
     //   单向通道 ipcRenderer.send，不等回包；main 端用 appendActivityLogEntry 双写日志
     //   typical caller：setStatus(msg, 'error')/createAlertDialog wrapper hijack（spec §15.5）
     //   失败 graceful：renderer 内 try-catch 不阻塞 UI（spec §15.10）
-    reportLog: (payload) => ipcRenderer.send('app:report-log', payload),
-    // v3.0.5 PR-5（Part B Phase 3）：启动窗口先行——main init 链完成后广播 app:init-done，
-    //   renderer loading 骨架收到后重新 getInfo 拿全量字段并完成数据填充。返回解绑函数（幂等清理）。
-    onInitDone: (cb) => {
-      const listener = () => { try { cb(); } catch (_e) { /* swallow */ } };
-      ipcRenderer.on('app:init-done', listener);
-      return () => ipcRenderer.removeListener('app:init-done', listener);
-    },
-    // v3.0.5 PR-5（B-D6）：init 链阶段文案（如升级首启 VACUUM「正在优化数据库…」），loading 态显示。
-    onInitProgress: (cb) => {
-      const listener = (_event, payload) => { try { cb(payload); } catch (_e) { /* swallow */ } };
-      ipcRenderer.on('app:init-progress', listener);
-      return () => ipcRenderer.removeListener('app:init-progress', listener);
-    }
+    reportLog: (payload) => ipcRenderer.send('app:report-log', payload)
   },
   appUpdate: {
     getStatus: () => ipcRenderer.invoke('app-update:get-status'),

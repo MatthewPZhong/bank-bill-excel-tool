@@ -375,12 +375,10 @@ test('普通 VCC 存储迁移入口移除但启动 journal recovery 保留，par
   assert.match(retryHandler, /getVccFinancialOpService\(\)\.syncImportArchiveLineage\(\)/);
   assert.doesNotMatch(retryHandler, /&&\s*vccFinancialOpService/);
 
-  const startupStart = MAIN_SOURCE.indexOf('async function runBackgroundInitChain()');
+  const startupStart = MAIN_SOURCE.indexOf('async function initializeApplication()');
   const startupEnd = MAIN_SOURCE.indexOf('\nfunction runStartupPostSetup', startupStart);
   const startup = MAIN_SOURCE.slice(startupStart, startupEnd);
-  assert.ok(
-    startup.indexOf('getVccFinancialOpService().syncImportArchiveLineage()')
-      < startup.indexOf('STARTUP_METRIC_MARKS.databaseReady'),
-    '启动重放得到的 ready artifact 必须在放行业务前绑定 hold'
-  );
+  assert.doesNotMatch(startup, /syncImportArchiveLineage\(/,
+    '主初始化不得在 Archive post-outbox hook 后重复建立 hold');
+  assert.match(MAIN_SOURCE, /postOutboxStartupHooks:\s*\[\{[\s\S]*?reconcileVccImportArchiveBeforeRetentionCleanup/);
 });

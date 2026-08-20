@@ -71,6 +71,7 @@ function createHarness(options = {}) {
     async replayFlowBindIntents() { return { ok: true, replayed: 0, remaining: 0 }; },
     async replayTaskFlowBindIntents() { return { ok: true, replayed: 0, remaining: 0 }; },
     async markInterruptedTasks() { return { ok: true, taskCount: 0, batchIds: [] }; },
+    async recoverStartupSafety() { return { ok: true, status: 'complete' }; },
     async reconcileStartup() { return { ok: true, status: 'complete' }; },
     async cleanupExpired() { return { ok: true }; },
     resumeBackgroundMaterialization() {},
@@ -1486,8 +1487,10 @@ test('outbox 重放在附件元数据登记前失败时保留任务和源文件'
   });
   service.listUnresolvedSourcePaths = () => [];
 
-  const initialized = await controller.initialize();
-  assert.equal(initialized.ok, true);
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error.code === 'ARCHIVE_STARTUP_OUTBOX_PENDING'
+  );
   assert.equal(outboxStore.list().length, 1);
   assert.deepEqual(controller.listUnresolvedSourcePaths(), [inputPath]);
   assert.deepEqual(releasedPaths, []);
@@ -1749,9 +1752,11 @@ test('终态 outbox 按附件、原 task CAS、业务 finalizer、remove 顺序�
   assert.equal(repository.getBatch(cancelled.batchId).taskStatus, 'cancelled');
   assert.equal(outboxStore.list().length, 1, '异终态 intent 必须保留供可见诊断');
 
-  const initializedWithConflict = await controller.initialize();
-  assert.equal(initializedWithConflict.ok, true);
-  assert.equal(outboxStore.list().length, 1, '普通 terminal conflict 不得让应用陷入启动循环');
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error.code === 'ARCHIVE_STARTUP_OUTBOX_PENDING'
+  );
+  assert.equal(outboxStore.list().length, 1, '未解决 terminal conflict 必须 fail-closed 并保留诊断');
 });
 
 test('legacy outbox 无 owner/target 且 files=[] 时拒绝发号并保留诊断记录', async (t) => {
@@ -1967,12 +1972,14 @@ test('启动先重放持久终态，再扫尾无终态任务；未重放终态�
     return { ok: true, taskCount: swept.length, batchIds: swept };
   };
 
-  const initialized = await controller.initialize();
-  assert.equal(initialized.ok, true);
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error.code === 'ARCHIVE_STARTUP_OUTBOX_PENDING'
+  );
 
   assert.equal(service.repository.getBatch(completed.batchId).taskStatus, 'succeeded');
   assert.equal(service.repository.getBatch(pending.batchId).taskStatus, 'running');
-  assert.deepEqual(excluded, [pending.batchId]);
+  assert.deepEqual(excluded, [], 'outbox 未清零时不得进入 interrupted sweep');
   assert.equal(outboxStore.list().length, 1);
   assert.equal(Number(outboxStore.list()[0].payload.targetBatchId), Number(pending.batchId));
 });
@@ -2083,12 +2090,13 @@ test('模块 owner 恢复失败时保留其原批次且仍扫尾其他孤儿任�
     return { ok: true, taskCount: swept.length, batchIds: swept };
   };
 
-  const initialized = await controller.initialize();
-
-  assert.notEqual(initialized && initialized.available, false);
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error && error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+  );
   assert.equal(service.repository.getBatch(recoverable.batchId).taskStatus, 'running');
-  assert.equal(service.repository.getBatch(orphan.batchId).taskStatus, 'failed');
-  assert.deepEqual(excluded, [recoverable.batchId]);
+  assert.equal(service.repository.getBatch(orphan.batchId).taskStatus, 'running');
+  assert.deepEqual(excluded, []);
   assert.equal(warnings.length, 1);
   assert.match(String(warnings[0][0]), /模块任务恢复未完全成功/);
   assert.equal(warnings[0][1].code, 'POSITION_RECOVERY_FAILED');
@@ -2121,7 +2129,12 @@ test('多个模块 owner 逐项 settle，失败互不短路且分别上报', asy
     logWarning: (...args) => warnings.push(args)
   });
 
-  await controller.initialize();
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error
+      && error.code === 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED'
+      && error.owners.join(',') === 'Position,Toolbox'
+  );
 
   assert.deepEqual(calls, ['position', 'toolbox']);
   assert.equal(warnings.length, 2);
@@ -2131,7 +2144,39 @@ test('多个模块 owner 逐项 settle，失败互不短路且分别上报', asy
   assert.equal(warnings[1][1].code, 'TOOLBOX_RECOVERY_FAILED');
 });
 
-test('startup hook 严格位于 owner/outbox/flow/sweep/raw maintenance 后和 retention 前', async () => {
+test('post-owner flush 成功后二次 outbox inventory 读取失败仍阻断 sweep/VCC', async () => {
+  let inventoryCalls = 0;
+  let sweepCalls = 0;
+  let hookCalls = 0;
+  const outboxStore = {
+    list() {
+      inventoryCalls += 1;
+      throw Object.assign(new Error('outbox inventory EIO'), { code: 'EIO' });
+    },
+    listSourcePaths() { return []; }
+  };
+  const { controller, service } = createHarness({
+    outboxStore,
+    postOutboxStartupHooks: [{
+      hookName: 'VCC',
+      run: async () => { hookCalls += 1; }
+    }]
+  });
+  controller.flushOutbox = async () => ({ flushed: 0, discarded: 0, remaining: 0 });
+  service.markInterruptedTasks = async () => {
+    sweepCalls += 1;
+    return { ok: true };
+  };
+  await assert.rejects(
+    controller.initialize(),
+    (error) => error && error.code === 'ARCHIVE_STARTUP_OUTBOX_INVENTORY_FAILED'
+  );
+  assert.equal(inventoryCalls, 1);
+  assert.equal(sweepCalls, 0);
+  assert.equal(hookCalls, 0);
+});
+
+test('startup hook 严格位于 owner/outbox/flow/sweep/interrupted artifact 状态收口后，物理维护不进入启动', async () => {
   const order = [];
   const { controller, service } = createHarness({
     recoverInterruptedTaskOwners: [{
@@ -2164,8 +2209,8 @@ test('startup hook 严格位于 owner/outbox/flow/sweep/raw maintenance 后和 r
     order.push('sweep');
     return { ok: true, taskCount: 0, batchIds: [] };
   };
-  service.reconcileStartup = async () => {
-    order.push('raw-maintenance');
+  service.recoverStartupSafety = async () => {
+    order.push('safety-recovery');
     return { ok: true, status: 'complete' };
   };
   service.cleanupExpired = async () => {
@@ -2183,12 +2228,13 @@ test('startup hook 严格位于 owner/outbox/flow/sweep/raw maintenance 后和 r
     'batch-flow',
     'task-flow',
     'sweep',
-    'raw-maintenance',
+    'safety-recovery',
     'hook'
   ]);
+  assert.doesNotMatch(order.join(','), /cleanup|raw-maintenance|background/);
 });
 
-test('无 StorageRootManager 时 defer 初始化后按固定顺序恢复，最后才启动后台维护', async () => {
+test('无 StorageRootManager 时 defer 初始化后只完成安全恢复并返回 PR4 维护边界', async () => {
   const order = [];
   const { controller, service } = createHarness({
     recoverInterruptedTaskOwners: [{
@@ -2217,8 +2263,8 @@ test('无 StorageRootManager 时 defer 初始化后按固定顺序恢复，最�
     order.push('sweep');
     return { ok: true };
   };
-  service.reconcileStartup = async () => {
-    order.push('raw-maintenance');
+  service.recoverStartupSafety = async () => {
+    order.push('safety-recovery');
     return { ok: true };
   };
   service.cleanupExpired = async () => {
@@ -2227,7 +2273,7 @@ test('无 StorageRootManager 时 defer 初始化后按固定顺序恢复，最�
   };
   service.resumeBackgroundMaterialization = () => { order.push('background'); };
 
-  await controller.initialize();
+  const initialized = await controller.initialize();
   assert.deepEqual(order, [
     'foundation',
     'owner',
@@ -2235,10 +2281,39 @@ test('无 StorageRootManager 时 defer 初始化后按固定顺序恢复，最�
     'batch-flow',
     'task-flow',
     'sweep',
-    'raw-maintenance',
-    'retention',
-    'background'
+    'safety-recovery'
   ]);
+  assert.equal(initialized.deferredMaintenance.trigger, 'archive-center-first-entry');
+  assert.deepEqual(initialized.deferredMaintenance.tasks, [
+    'cleanup-journal',
+    'blob-metadata',
+    'artifact-metadata',
+    'retention',
+    'owned-orphans',
+    'layout-materialization',
+    'historical-health-scan',
+    'noncritical-ownership-scan'
+  ]);
+});
+
+test('存档 root unavailable 或 ok:false 均在 outbox/窗口 admission 前 fail-closed', async () => {
+  for (const rootResult of [
+    { ok: false, available: false, code: 'ARCHIVE_ROOT_OFFLINE' },
+    { ok: false, available: true, code: 'ARCHIVE_ROOT_RECOVERY_INCOMPLETE' }
+  ]) {
+    let outboxCalls = 0;
+    const { controller, service } = createHarness();
+    service.initialize = async () => rootResult;
+    controller.flushOutbox = async () => {
+      outboxCalls += 1;
+      return { remaining: 0 };
+    };
+    await assert.rejects(
+      controller.initialize(),
+      (error) => error.code === rootResult.code
+    );
+    assert.equal(outboxCalls, 0);
+  }
 });
 
 test('恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止启动', async (t) => {
@@ -2279,4 +2354,32 @@ test('恢复批次清单读取失败时跳过通用扫尾并 fail-closed 阻止�
   assert.equal(warnings.length, 1);
   assert.match(String(warnings[0][0]), /跳过本次异常任务扫尾/);
   assert.equal(warnings[0][1].code, 'RECOVERY_EVIDENCE_UNAVAILABLE');
+});
+
+test('outbox remaining 与 interrupted sweep 失败均 fail-closed 且不进入 VCC gate', async () => {
+  for (const scenario of ['outbox-remaining', 'sweep-failed']) {
+    let hookCalls = 0;
+    const { controller, service } = createHarness({
+      postOutboxStartupHooks: [{
+        hookName: 'VCC lineage',
+        run: async () => { hookCalls += 1; }
+      }]
+    });
+    controller.flushOutbox = async () => (
+      scenario === 'outbox-remaining'
+        ? { flushed: 0, discarded: 0, remaining: 1 }
+        : { flushed: 0, discarded: 0, remaining: 0 }
+    );
+    service.markInterruptedTasks = async () => (
+      scenario === 'sweep-failed'
+        ? { ok: false, code: 'SWEEP_FAILED', message: 'sweep failed' }
+        : { ok: true }
+    );
+    await assert.rejects(controller.initialize(), (error) => (
+      scenario === 'outbox-remaining'
+        ? error.code === 'ARCHIVE_STARTUP_OUTBOX_PENDING'
+        : error.code === 'SWEEP_FAILED'
+    ));
+    assert.equal(hookCalls, 0);
+  }
 });

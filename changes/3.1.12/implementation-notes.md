@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 | --- | --- |
-| 日期 | 2026-08-19 |
+| 日期 | 2026-08-20 |
 | 当前阶段 | TechDoc 已确认；实施中 |
 | 基线 | `ccfa71ffc92bb26bbf47c05efa87740d972cf209`（最新 `origin/main`） |
 
@@ -167,3 +167,147 @@
 | --- | --- | --- |
 | 真实资金样本逐入口核对：recharge、fee_fx、CITI、非 CITI 清算/结算、Pending 双侧、system | ⚠️ FUND RED LINE | 人工核对源行数、主体、正负号、分币金额、source/normalized currency、幂等 disposition、raw/check 与最终九币种 Excel；未签字不得发布 |
 | PR2 行为偏差 | NONE | 固定 Spec/TechDoc 合同未改变；历史 hash/记录/读取只做版本感知兼容，不迁移/回填 |
+
+## PR3 — Windows 启动治理
+
+### Task Brief
+
+- Goal：完整初始化成功后才开放 IPC/窗口，以 exact SQLite optimize、单次集合化 VCC 安全 gate 和非关键存档维护移出启动降低 Windows 首窗耗时，同时保持所有安全恢复 fail-closed。
+- Context：旧产品路径先创建 loading 窗口并暴露 `initPending` 双态；主库每启无参数 `ANALYZE`；VCC 在 Archive post-outbox 与 main 显式调用两遍；Archive 启动还承担历史扫描、目录物化与保洁。
+- Constraints：不删除/改写 SQLite/WAL、migration journal、outbox、owner/中断任务或安全恢复；不收缩 VCC gate 为脏来源；不实现 PR4 首进维护主体；不伪造 Windows 70% 结果；不修改 PR1/PR2 合同。
+- Done when：初始化前 window/handlers 均为 0；失败仅一次 native dialog 并退出；exact optimize 且错误上抛；一次全量集合 VCC gate；关键 Archive 恢复 fail-closed；阶段日志闭合；packaged runner 提供四变体、轮换、独立 golden、阶段/WAL/SHM/恢复数据和独立场景。
+
+### PR3 Unknowns Register
+
+| 未知 | 处理 | 证据/结论 | 合并影响 |
+| --- | --- | --- | --- |
+| `activate` / `second-instance` / renderer 自启动 invoke 能否绕过初始化屏障 | PROBE → CLOSED | 产品只有 `createWindow` 能创建业务窗；两事件均加 `applicationStartupComplete`/窗口存在屏障；IPC 在完整 init 后统一注册，renderer 的独立 VCC invoke 无 handler 可提前调用 | 静态合同测试必须同时覆盖注册、建窗、show 时序 |
+| Archive root/outbox/owner/interrupted/物理恢复中哪些可移出启动 | PROBE → CLOSED（Round 1 修正） | root 可用性、owner/outbox、flow intent、interrupted task/artifact 数据库状态与 post-outbox VCC 属启动 admission；`.staging/.readonly`、cleanup journal、dangling reference、released Blob/Artifact 物理删除、retention/layout/orphan/health/ownership 全部交 PR4 | 关键状态恢复任一失败阻断启动；物理维护通过 version=1 DTO 显式列出，未知 transient 无 owner 永不删除 |
+| 迁移已 switch 但旧根 cleanup 是否可在启动静默删除 | BLOCK 候选 → CLOSED | TechDoc 要求保留 migration journal 且 PR4 接管非关键维护；`cleanup-pending` journal 与旧根均保留，首次进入维护可沿既有状态机完成 | 禁止把整个 reconcile 删除；只延迟可恢复 cleanup，不丢恢复证据 |
+| VCC 全量引用集合是否能兼容旧 schema/null/system-only/hold | PROBE → CLOSED | 启动时按实际存在表构造单条 `UNION ALL ... GROUP BY`；null 不入集合；system snapshot 单独形成引用；hold 释放使用同一不可变计数 map；旧表先补列再建 partial index | 禁止按 dirty source 缩窄；每启只查询一次集合 |
+| packaged 对拍如何区分稳态、一次性迁移/VACUUM、崩溃恢复 | PROBE → CLOSED（Round 1 加固） | runner 显式支持三场景；非稳态每轮重置独立 userData/Documents；crash 强制非空合法 WAL 与仅存在 WAL 的 setting sentinel，关闭整树后再从无 sidecar 主库副本验证 checkpoint | PR5/Windows 分场景产生独立报告；缺样本仍为 not-evaluated |
+
+### PR3 Decisions / Deviations
+
+| 项目 | 决定/实际 | 原因与影响 | Spec 同步 |
+| --- | --- | --- | --- |
+| 初始化 admission | `initializeApplication → registerAllIpcHandlers → await createWindow(loadFile + ready-to-show) → applicationStartupComplete` | 初始化失败前 BrowserWindow/IPC 均为 0；load/ready 失败销毁隐藏窗后走统一 native failure | 固定合同，无偏差 |
+| 启动失败兜底 | fallback log path 解析和日志初始化同在 try；空日志路径/写入失败仍 dialog 一次、exit(1) | 避免路径解析本身抛错绕过用户可见失败 | 固定合同，无偏差 |
+| SQLite | 删除产品无参数 `ANALYZE;`，精确执行 `PRAGMA optimize=0x10002;` 且不吞错；不碰 WAL | 有界更新统计；optimize 失败进入统一启动失败 | 固定合同，无偏差 |
+| VCC | post-outbox hook 是唯一入口；各引用表一次 `UNION ALL` 集合聚合并复用；system snapshot 补列后建 partial index | 保留全量 lineage/hold 安全语义并消除逐 source 查询与第二遍 gate | 固定合同，无偏差 |
+| Archive | `recoverStartupSafety` 只收口 interrupted artifact 数据库状态，不扫描/删除目录或 Blob；root/outbox/所有 owner/flow/sweep 任一不完整均阻断；pre-switch 未完成 journal 永不以 source 可用为由放行 | version=1 DTO 按 §6.6 列出 cleanup-journal、blob/artifact metadata（含 dangling repair）、retention、owned-orphans 及其余 PR4 阶段；保留 source delegate/journal 只为下次恢复，不等于本次 admission 成功 | Round 1 修正实现理解，Spec 合同未变 |
+| 阶段日志 | database open/migrations/vacuum/optimize、archive root/outbox/VCC、template、window create/load/ready、startup-total 全部 start/end；failed 只写通用消息与 code | success/failed/skipped 可测且不泄露路径/原始错误文本 | 固定合同，无偏差 |
+| 测量 | 四个固定 label、每变体至少五轮轮换；3.1.11/3.1.12 均以 renderer total-init 为完整 ready，3.1.12 另要求 window-ready+startup-total；adapter 在 spawn 紧前记录 processCreatedAt，ready 证据先于任何 CIM 读取，取时后按 token-matched ownership tree 关闭；VACUUM/恢复场景严格隔离 | baseline/ready 前 CIM、退出耗时和 golden 复制均不进入 external full-ready；CloseMainWindow 必须有受理 receipt，超时/非零退出强制失败；结论恒为 not-evaluated | 同一用户可用终点公平对拍，不在 3.1.12 renderer 尾段前停表 |
+
+### PR3 Review Round 1 裁决与修复
+
+| Finding / 裁决 | 修复与证据 | 边界 |
+| --- | --- | --- |
+| 启动删除未知 transient、cleanup job、dangling/released Blob | `recoverStartupSafety` 仅 `markInterruptedArtifacts`；真实 tmp fixture 证明未知 `.staging/.readonly`、layout、Blob、cleanup job 全保留 | PR4 必须消费完整 version=1 DTO；无 durable owner 的未知 transient 永不自动删除 |
+| pre-switch journal 故障仍放行 source | maintenance request 与 target copy/verify 故障返回 `ok:false`，Controller root phase fail-closed；source delegate/journal 保留供下启恢复 | 不清 journal、不回滚或伪造迁移完成 |
+| owner 异常和 post-flush inventory fail-open | 全部 owner 继续 settle 后统一 AggregateError 阻断；flush 后 `list()` 任一 DB/I/O 异常抛 `ARCHIVE_STARTUP_OUTBOX_INVENTORY_FAILED` | 不再依赖模块自报 `blocksArchiveStartup` |
+| startup-total 覆盖不全、usage 非关键语义被误改 | total 在 whenReady callback 首个启动动作开启并包住 logger/init/handlers/window；usage 保留 warning+default graceful 降级 | usage 尝试耗时纳入 total，但不成为 admission 条件 |
+| 补窗污染首次 metrics | 显式 initial/supplemental instrumentation；仅 initial webContents 首次 renderer payload 可写 snapshot | 不以调用次数推断窗口身份 |
+| load 后 ready 前失败与 show throw 悬挂 | 可执行 readiness seam 覆盖 closed/render-gone/did-fail-load/timeout/listener cleanup；show/send 成功后才 settled/resolve | 任一失败销毁隐藏窗并只走统一 native failure |
+| runner 不兼容未改 3.1.11、计时混入枚举/退出 | legacy renderer-ready 与新 phase-ready 分流；processCreatedAt 由 adapter 在 spawn 前记录；ready 时固定 external 指标，随后关闭 | 不要求旧包 auto-quit/phases；不把 app 内 marks 当验收时钟 |
+| installer/portable 真实树未治理 | Windows adapter 注入 snapshot/spawn/exec/clock；首版以同 basename / 首次 token 前 ParentProcessId fallback 捕获 reparent，Round 2/3 动态证明两者均会误收无关程序后已全部删除，最终仅沿 spawn root 的 current token-matched parent frontier扩展；CloseMainWindow 后等待，失败清理由后续 Round 5 再加固为动作内 token 复验 | Windows 真包路径与窗口行为仍由 PR5 人工/数据验证 |
+| migration/crash 场景证据为空壳 | VACUUM 前 flag 非 1、后 flag=1 且新版 phase success；WAL > header/合法 magic，setting 只在 WAL 可见，graceful close 后无 sidecar DB 副本仍可见 | journal sentinel 若提供则单列消费证据，不拿任意文件删除冒充 WAL 恢复 |
+
+### PR3 Review Round 2 裁决与修复
+
+| Finding / 裁决 | 修复与行为证据 | 边界 |
+| --- | --- | --- |
+| crash preflight 直接打开 timed DB，创建/改写 SHM 并把 WAL recovery 移出计时 | WAL magic 只读输入文件；base/WAL sentinel 均在 disposable golden clone 打开，`finally` 删除 probe；红测逐字节比较 timed main/WAL/SHM 的 size+SHA-256 且 probe 路径消失 | preflight 耗时排除，但绝不预热/恢复 timed sample |
+| 永久 `knownPids` 在 parent PID A→B 复用后误纳入 B 的 child | ancestry 只从本次 CreationDate/path/cmd token 仍匹配的 live frontier 扩展；token mismatch parent 与新 child 均不 close/taskkill | `knownPids` 仅作历史观测，不再授予 ownership |
+| baseline 后任意同 basename seed 会误收用户另启程序 | 完全删除 basename fallback；ExecWait wrapper 存活时沿已取 token 的 root parent 链；Round 3 又证明首次 token 前仅凭 ParentProcessId 仍可误收 baseline/PID-reuse child，最终该分支也删除 | root 在取得权威 token 前退出时以 `PROCESS_OWNERSHIP_UNESTABLISHED` fail-closed，不猜 ownership、不 close/taskkill |
+| ready poll 先跑全系统 CIM，把 runner 400ms+ 开销计入 external 指标 | `waitForFullReady` 每轮先读 metrics，ready 前不 refresh tree；ready 时立刻固定 external 时间，再做进程树/关闭取证 | Windows 真机仍需核对 metrics 文件可见性与杀毒软件影响 |
+| tree 空/进程 code=9 仍记 graceful success | ready 后要求非空 owned live target；PowerShell 仅将 `CloseMainWindow()` 返回 true 的 PID 写 receipt；无 target/无 receipt/非零 root exit/等待超时均失败并 force cleanup | renderer helper 无主窗允许无 receipt，但至少一个 owned 主窗必须接受关闭 |
+| normal 场景可携带 WAL/recovery 或未完成 VACUUM，污染 steady median | CLI 拒绝 WAL/SHM/recovery args；牺牲 golden clone 验 vacuum flag=1 与 archive active/pending/intents=0，timed WAL 必须无 frame；新版 post 要求 vacuum skipped，archive pending 与 VCC failed/pending/released 为 0，legacy 至少 flag 保持 1 | migration-vacuum/crash-recovery 必须分报告运行，不能并入 normal；VCC `bound>0` 是每启稳态安全核验，不能误判为恢复污染 |
+
+### PR3 Review Round 3 裁决与修复
+
+| Finding / 裁决 | 修复与行为证据 | 边界 |
+| --- | --- | --- |
+| root 首次 token 前 ParentProcessId fallback 可误收 baseline stale child 或 root PID 复用后的 child | 删除该 fallback；baseline exact token 永不进入 live frontier；未建立 root token 即退出统一 `PROCESS_OWNERSHIP_UNESTABLISHED`，force cleanup 不触碰未知 PID | portable/installer 必须依赖真实 wrapper 在首次 ownership snapshot 前存活；否则样本失败而非猜测 |
+| tree 空但未消费 root `exitPromise`，code=9 仍被记为 graceful success | tree 退出后有限等待并消费 `exitPromise`；只有 `code===0 && signal===null` 成功，null/timeout/signal/非零均失败；失败样本仍进入 cleanup | CloseMainWindow receipt 只证明请求受理，不能替代进程终态证据 |
+| normal schema-less golden 与 3.1.11/3.1.12 DDL 污染 | normal 强制同一份 exact v3.1.12-current 且向后兼容 golden；计时前分别在 3.1.11/3.1.12 portable disposable clone 启动并比较 `sqlite_schema` SHA-256 fingerprint 不变，显式要求 `vcc_fin_op_system_snapshots.import_source_id` 与 partial index | 禁止按 variant canonicalize；任一版本族产生 DDL 则整个 normal 报告拒绝 |
+| normal post 把 VCC `bound>0` 误当恢复 | 只拒 `archive-outbox.pendingTerminalBatches/tasks` 与 VCC `failed/pending/released` 非零；`bound` 是每启全量安全核验计数，允许非零；vacuum 必须 skipped，两 phase 必须 success | 不以“所有 counts=0”粗暴判定稳态 |
+| migration/crash 双向场景污染 | migration 拒绝 WAL/SHM/recovery/wal-sentinel，使用独立旧 schema golden，base 只允许 vacuum flag 未完成且 recovery steady；3.1.11 后验允许其版本应有 schema 不变，3.1.12 后验只允许 system snapshot 补列/partial index 的白名单 DDL 并达到 current schema。crash base-only clone必须 vacuum=1、current schema、非目标 pending=0，再由 WAL-visible clone只证明指定恢复 | 三场景各自独立报告，禁止把 VACUUM、schema migration 与 crash/journal recovery 混入同一 median；四变体每样本仍从同一字节级旧 golden 起步 |
+| postcondition SQLite 打开 timed DB 会重建 SHM 并污染 report.after | tree/root 正常退出后先冻结 timed main/WAL/SHM 的 existence/size/SHA-256；所有 post SQL 在 disposable main-only clone 读取并清理，报告 after 使用冻结证据 | main-only post 也直接证明 checkpoint；runner 全生命周期不以 SQLite 打开 timed bundle |
+
+### PR3 Review Round 4 裁决与修复
+
+| Finding / 裁决 | 修复与行为证据 | 边界 |
+| --- | --- | --- |
+| normal 第 2～5 轮仍固定检查原 golden，漏掉 working DB 新增 running/pending | 每轮先检查 timed WAL frame，再 raw copy 当前 timed main/WAL/SHM 到 disposable clone，在 clone 上查 current schema、vacuum flag、active task/batch、pending artifact、flow intents；round2 running task 动态反例阻断且 timed main hash 不变 | 原 golden 只用于 exact 初始复制和双版本 schema probe，不替代逐轮 working-state admission |
+| metrics 未 ready 时 root 已 code=9 仍等待完整 300s timeout | 每轮保持 metrics-first；未 ready 时以 delay 与 `exitPromise` race，不跑 CIM；root 早退立即 `PROCESS_EXITED_BEFORE_FULL_READY` 并记录 ownership established/unestablished | metrics 与 exit 同 tick 时先固定 ready，之后由 owned live/receipt/root exit gate 决定样本终态 |
+
+### PR3 Review Round 5 裁决与修复
+
+| Finding / 裁决 | 修复与行为证据 | 边界 |
+| --- | --- | --- |
+| normal 最后一轮产生真实 pending/DDL/WAL 仍可进入 median | 每个样本 tree/root 正常退出后先冻结 bundle；post 在 disposable main-only clone 重查 `prepared/running` task、`reserved/running` batch、pending artifact、flow intents、vacuum flag 与 schema fingerprint，并拒绝有效 WAL frame；legacy 同样执行真实状态 gate | `interrupted` 是 terminal audit，不计 active；VCC `bound` 仍允许非零 |
+| cleanup 吞错并继续 20 样本 | cleanup 必须返回动作 receipt 并以最终 token-aware snapshot 证明零存活；ownership 未建立或 remaining tree 非空时标记 `PROCESS_CLEANUP_FATAL`，报告 `requiresManualCleanup` 并立即中止整次 rotation | 不猜测/强杀未知 PID；schema untimed probe cleanup 同样不再吞错 |
+| snapshot token A 与 Close/kill 动作间 PID 复用 | snapshot/action 统一使用显式 UTC ticks CreationDate；单次 PowerShell 动作携带 exact CreationDate/path/cmd，取得 `System.Diagnostics.Process` 后强制打开并持有 Handle，再以第二次 CIM exact token 复验后才对该对象 CloseMainWindow 或 `Stop-Process -InputObject`；cleanup 叶到根，最终重新 snapshot | 删除 JSON 隐式 DateTime、时间容差与裸 `taskkill PID`；A→B race 无 receipt、零用户进程动作 |
+| CIM/Close/force 外部进程可无限挂起 | Node `execFile` timeout 负责终止真实子进程，Promise hard timeout 也覆盖注入/卡死 adapter；refresh/close/force 各阶段共享剩余 deadline，cleanup 有独立 15 秒上限与稳定 code | ready 前仍 metrics-first，不新增 CIM 污染计时 |
+| non-normal preflight 仍查原 golden，复制无逐样本 SHA | 每个 timed main/WAL/SHM 复制后冻结 existence/size/SHA-256 并与 golden 对比；所有场景 preflight 都 raw-copy 当前 timed bundle 到 disposable clone，launch 前再冻结并证明 preflight 零改写 | runner 从不 SQLite-open timed bundle；post SQL 仍只在 disposable clone |
+| failed sample 丢 before/ready/phases/recovery/close/after | 样本以增量 evidence accumulator 固化每阶段安全证据；未取得字段显式 `unavailable`，post failure 同时保留真实 pending/schema 证据；cleanup receipt/失败证据也进入 sample | 活进程存在时不为补报告打开 DB；证据缺失不可伪装成功 |
+| 四 label 可指向同制品且报告无环境 provenance | 自动记录四制品 SHA-256/size/fileVersion（不落盘 path），拒绝重复 SHA 与 label/version 明显不匹配；记录 OS/release/arch、CPU/逻辑核、RAM、Node 及显式 Defender/介质/cache CLI 字段 | Defender/介质/cache 缺失时 environment=`not-evaluated`；真实 Windows 结论仍由 PR5 形成 |
+
+### PR3 Review Round 6/7 裁决与修复
+
+| Finding / 裁决 | 修复与行为证据 | 边界 |
+| --- | --- | --- |
+| PowerShell 5.1 隐式 DateTime/token 不稳定 | snapshot/action 共用显式 `ToUniversalTime().Ticks.ToString(InvariantCulture)`；nonce scalar 仅做 PowerShell 单引号转义，不经 JSON stringify 引入字面双引号；Windows-only 行为测试以真实 snapshot 取得 token 后执行 held-handle graceful/force action 并要求 force receipt | 本机 macOS 跳过，Windows CI/PR5 必须执行真实 PS5.1 分支 |
+| migration/crash 后验仍可带 pending、unexpected DDL 或有效 WAL | 三场景都在冻结 bundle 的 disposable clone 核对 pending；normal/crash 要求 current schema 且 fingerprint 不变，crash 另要求有效 WAL 已清；migration 以独立旧 schema golden 起步，3.1.12 采集完整 `PRAGMA table_info`，只允许精确 append nullable/no-default/non-PK `import_source_id INTEGER`、既有列不变与规范化 SQL 完全匹配的目标 partial index，3.1.11 接受其版本 schema 不变；其他列/表/index/trigger 一律拒绝 | 不把一次性 schema migration 收窄成仅 VACUUM；同场景四变体从同一份字节级旧 golden 复制 |
+| wrapper/browser nonce 不能保证传播到 Chromium/utility descendants | 每样本强随机 nonce 只作为 expected wrapper/browser image、creation lower bound 与 exact argv 的 ownership seed；后代只从当前 exact-token live parent 扩展，已记录的无 nonce descendant 即使祖先退出仍保留 exact token；父曾 owned 的未记录可疑 child 只触发 manual/fatal，不执行动作 | 不全局按 nonce substring seed，因此 PowerShell 自身 `-Command` 不会被纳入；无法证明归属的进程永不 close/kill |
+| 单次空树可能漏掉 late child | graceful/cleanup 后执行固定多轮 quiescence snapshot；任何已知 exact-token 进程或 parent 曾 owned 的可疑 child 均使 cleanup 失败、落 `requiresManualCleanup` 并中止整轮 | 两次 snapshot 间完全逃逸且失去 lineage 的理论窗口记录为 PR5 Windows 人工盲区；本 PR 不引入 Job Object/native helper/新依赖 |
+| cleanup fatal 仍可能 CLI exit 0 | fatal cleanup 先保留 partial report，再抛 `STARTUP_MEASUREMENT_ABORTED`；CLI catch 设置非零退出，后续样本不再 launch | ownership 未建立时禁止猜测或强杀，并明确要求人工清理 |
+| run 中 source golden/artifact 漂移 | run 开始把 main/WAL/SHM 冻结到 runner-owned bundle，所有 probe/sample 只从冻结副本复制；结束复验原 source。四制品在 run 开始冻结 identity，每次 spawn 前及 run 后重验 SHA/size/fileVersion，漂移立即 abort | installed artifact 可依赖邻接 resources，故不复制单 exe；身份漂移后绝不继续启动 |
+| full-ready 后失败丢 ready/after 证据 | ready 一取得立即固化 ready/phases/recovery/external ms；整树退出后在任何 SQLite open 前冻结 after，即使 root 非零也先保留安全取得的证据再判失败 | 活进程仍在时不为补证据打开 DB；不可取得字段显式 unavailable |
+| graceful close 瞬时空树与 cleanup 后 evidence 不对称 | `waitForExit` 遇 suspicious child 立即 manual/fatal，只有连续三轮 live/suspicious 均为 0 才返回 `verifiedEmpty:true`；runner/schema probe 只接受该 receipt。失败路径 force cleanup 也必须给 verified receipt，随后立即冻结 after；冻结失败保留 cleanup evidence 并写独立 code/unavailable reason | 已记录的无 nonce descendant 在祖先退出后仍被 exact-token 追踪；未知 child 不执行动作 |
+| runner-owned golden 与制品可在 run 中漂移 | golden 创建时固定 main/WAL/SHM size+SHA 并 chmod 只读辅助；每个样本复制前后及 run 结束都与该不可变 evidence 比，报告也只用 fixed SHA。四制品 run 前/后验证，并在所有 scenario preflight 完成后、`adapter.launch` 紧前同步复验四者身份 | frozen 内部漂移或 preflight 替换制品均 fatal abort；系统调用级微小竞态不扩展为 native helper |
+| label 版本前缀误接受 `3.1.110` | fileVersion 使用 strict semver 解析并逐段精确比较 label major/minor/patch | 拒绝版本前缀碰撞；不以字符串 startsWith 判断 |
+
+### PR3 Evidence
+
+| 证据 | 结果 | 覆盖 |
+| --- | --- | --- |
+| 修改前 source/test 审计 | 确认 loading 双态、无参数 ANALYZE、双 VCC gate、Archive 启动历史维护与存储根 evidence 扫描均真实可达 | 红测和最小生产修改边界 |
+| PR3 定向红绿批次 | startup/Archive/VCC/runner 聚焦测试已清零；Archive controller + Toolbox 51/51 PASS；startup/runner 合同批次 13/13 PASS | init 屏障、fail-closed、集合查询/索引、阶段与测量合同 |
+| PR3 最终聚焦回归 | 12 个 startup/Archive/VCC/runner 文件 147/147 PASS；最后 root fail-closed/runner timeout 补测 49/49 PASS；全部修改 JS `node --check` 与 `git diff --check` exit 0 | Reviewer 指定的窗口、fallback、outbox、VCC old schema/null/system-only/hold、phase/runner 合同 |
+| PR3 全量 unit | 首轮 5430/5432 仅两条旧静态正则仍要求 `markAppInitDone`/无参 `database.init()`；反向同步新 admission/phase callback 后最终日志 `unit-20260820-033920.log` 为 5432/5432 PASS | 全仓 unit 回归；不以局部绿测替代整轮证据 |
+| PR3 integration | 48 个脚本 2410/2410 PASS；为避免无输出长压测占住 runner，整套以 `TOOLBOX_LARGE_ROWS=1000 TBX_T7_TIER1_ROWS=10000 TBX_T7_TIER2_ROWS=30000` 完成；另默认 `toolbox-large-file-stream` 300,000 行/文件隔离 50/50 PASS，142.9s、峰值 RSS 619MB | 全集成接缝 + 默认大文件生产规模补充证据；未改自动生成 policy 清单 |
+| PR3 smoke/lint | `npm run smoke` PASS；`npm run lint` exit 0 | 全局业务 smoke 与生产源码静态检查 |
+| PR3 check-vars | 命中 Critical `USE_BIG_TABLE_IMPORT_ENGINE`（仅删除旧启动注释中的引用，收单引擎定义/分支未改）、Important `ipcRenderer`、Runtime `app/elements/setStatus/state`、Risk `DEFERRED_WINDOW_STARTUP`（按 Spec 明确退役） | IPC channel 删除已同步 main/preload/renderer；启动/退出、完整 renderer 初始化与 smoke 已复核；PR body 需附关联功能 review |
+| PR3 blindspot pass | 唯一产品 BrowserWindow/handler 入口、activate/second-instance、load+ready 双条件、root ok/available、outbox/owner/sweep/safety、phase 闭合、VCC 单入口/集合 SQL、runner 超时/缺样本/WAL-SHM 均复核；新增 runner 5min 默认 sample timeout 与 root `ok:false` 红测 | 无新增 BLOCK；剩余均为 Windows/PR4 明确后续 |
+| PR3 Review Round 1 红绿修复 | Archive/service/controller/migration + window/runner/adapter 综合首轮 146/147，唯一失败为旧 `createWindow()` 静态切片；修复后 window/runner 25/25、controller+adapter 44/44；全量首轮 5448/5452 的四项均为三条旧静态签名与一条旧 owner fail-open 预期，隔离反向同步 51/51 | 未用测试降级掩盖生产错误；owner 测试仍证明后续 owner 完成 settle，但 admission 统一拒绝 |
+| PR3 Review Round 1 全量 unit | `npm run test:unit` 最终 5454/5454 PASS；日志 `logs/unit-tests/unit-20260820-043616.log` | 新增真实 tmp 未删除 probe、pre-switch fail-closed、generic owner/list I/O、show throw、metrics 隔离、process adapter fake tree/PID 复用保护、真实 SQLite WAL setting/checkpoint/CLI 强制 sentinel 等行为测试 |
+| PR3 Review Round 1 integration | `TOOLBOX_LARGE_ROWS=1000 TBX_T7_TIER1_ROWS=10000 TBX_T7_TIER2_ROWS=30000 npm run test:integration`：48 脚本、2410/2410 PASS；runner 自动清单的本机耗时噪声已恢复，不纳入 diff | 本轮跨模块接缝；默认 300k toolbox 仍引用上轮隔离 50/50 PASS 证据，不伪装为本轮缩放数据 |
+| PR3 Review Round 1 smoke/lint/check-vars | `npm run smoke` PASS；`npm run lint` exit 0；`npm run check:vars` 按设计 exit 2 并命中 Critical `USE_BIG_TABLE_IMPORT_ENGINE`（仅删旧启动注释）、Important `ipcRenderer`、Runtime `app/elements/setStatus/state`、Risk `DEFERRED_WINDOW_STARTUP` | 引擎定义/回退/契约未改且对应 integration/smoke 全绿；IPC 删除已同步 main/preload/renderer；state/elements/setStatus 仅删除不可达 loading 分支；DEFERRED 按本版固定 Spec 退役 |
+| PR3 Review Round 1 blindspot 复核 | 产品 `new BrowserWindow` 仍唯一；initial/supplemental instrumentation 显式；启动 service 一律 `deferStartupRecovery:true`；物理清理函数只保留在显式 service/PR4 能力；runner 无 auto-quit，持续 poll tree、ready 前取时、退出后验 DB/WAL | 未发现新增可达 bypass；真实 Windows NSIS/portable window/process 行为与性能数据仍为 PR5 RELEASE PROBE |
+| PR3 Review Round 2 红绿与全量 unit | 新增 7 组 runner/adapter 行为红测，初始 13 PASS/7 FAIL；生产修复后聚焦 20/20 PASS；`node --check` 两个 runner 文件通过；全量 `npm run test:unit` 5461/5461 PASS，日志 `logs/unit-tests/unit-20260820-045231.log` | timed bundle 零字节污染、probe 清理、PID token 复用/同名误收、root pre-token child、metrics-first 零 CIM、close receipt/非零退出、normal steady isolation |
+| PR3 Review Round 2 其余本地门禁 | scaled `npm run test:integration` 48 脚本、2410/2410 PASS、72,974ms（自动写入的本机 policy 耗时已恢复）；`npm run smoke` PASS；`npm run lint` exit 0；`npm run check:vars` 仍为预期命中并 exit 2 | Runner/adapter 只影响测量工具；产品跨模块 integration/smoke 无回归；Important Variables 自查结论与 Round 1 相同 |
+| PR3 Review Round 3 红绿与全量 unit | ownership/exit/schema/三场景/post bundle 动态反例均先红；最终 runner/adapter 聚焦 27/27 PASS，两个文件 `node --check` 通过；全量 `npm run test:unit` 5468/5468 PASS，日志 `logs/unit-tests/unit-20260820-050810.log` | baseline stale child、root PID reuse、exitPromise code9、schema-less/DDL、VCC bound、migration↔crash 隔离、WAL 无 SHM 后验零污染 |
+| PR3 Review Round 4 红绿与全量 unit | clean golden + round2 working DB `archive_task_runs.running=1` 旧实现 fail-open；root code9 fake clock 500ms 旧实现等到 timeout；修复后 runner/adapter 聚焦 30/30 PASS；全量 `npm run test:unit` 5471/5471 PASS，日志 `logs/unit-tests/unit-20260820-051138.log` | 当前 bundle admission 与早退快速失败均为动态行为证据，不依赖源码 regex |
+| PR3 Review Round 4 最终本地门禁 | scaled `npm run test:integration` 48 脚本、2410/2410 PASS、73,272ms（policy 耗时噪声已恢复）；`npm run smoke` PASS；`npm run lint` exit 0；`npm run check:vars` 预期 exit 2 且命中项不变；`git diff --check` exit 0 | 最终 runner 改动后的全仓回归；真实 Windows packaged 数据仍保留给 PR5，不据本地门禁宣称 70% |
+| PR3 Review Round 5 红绿与全量 unit | 新增 8 组 runner/adapter 动态反例：旧实现 5 组明确失败且 never-resolving external call 会挂住；修复后聚焦 38/38 PASS，两个 runner 文件 `node --check` 与 `git diff --check` 通过；全量 `npm run test:unit` 5479/5479 PASS，日志 `logs/unit-tests/unit-20260820-053810.log` | post real-state、terminal interrupted、actual timed SHA、fatal cleanup、action-time A→B、hard timeout、partial evidence、环境/artifact provenance 均为行为测试 |
+| PR3 Review Round 5 最终本地门禁 | scaled `npm run test:integration` 48 脚本、2410/2410 PASS、73,064ms（自动 policy 耗时噪声已恢复）；`npm run smoke` PASS；`npm run lint` exit 0；`npm run check:vars` 按设计 exit 2 且命中项不变；`git diff --check` exit 0 | 产品跨模块无回归；真实 Windows process/制品/Defender/介质与 70% 对拍仍为 PR5 人工门禁 |
+| PR3 Review Round 6～8 红绿与全量 unit | PS token/held-handle/nonce scalar、nonce seed/无 nonce descendant、graceful/cleanup quiescence、fatal CLI、cleanup-after、frozen golden/artifact、partial evidence、strict semver、旧 schema 列级 migration 白名单/额外 DDL 与 crash/normal 后验均有动态测试；最终 runner/adapter 聚焦 49/50 PASS、0 FAIL、1 Windows-only SKIP；`node --check` 两文件通过；全量 `npm run test:unit` 5490/5491 PASS、0 FAIL、同一 Windows-only SKIP，日志 `logs/unit-tests/unit-20260820-071147.log` | Reviewer Round 8 对七项原动态反例全部复验转绿，冻结 SHA 稳定，正式结论为“未发现阻塞 P3+”；macOS 未伪造 PS5.1 结果，Windows 真包/PS 行为仍属发布证据 |
+| PR3 Review Round 8 最终本地门禁 | scaled `npm run test:integration` 48 脚本、2410/2410 PASS、78,443ms（自动 policy 耗时噪声已恢复）；`npm run smoke` PASS；`npm run lint` exit 0；`npm run check:vars` 按设计 exit 2 且命中项不变；`git diff --check` exit 0 | 测量 runner 最新改动不伪造 Windows 结果；真实 PS5.1/NSIS/portable/process containment 与 70% 数据仍交 PR5 |
+| PR3 根侧完整发布门禁 | `npm run release-check` exit 0：lint、smoke、全量 unit 5490/5491 PASS（0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-071628.log`）、48 个默认规模 integration 2410/2410 PASS（409,241ms；含 300,000 行大文件 50/50 与多 Sheet 拆分 31/31）；`npm run check:vars` 按设计 exit 2；`git diff --check` exit 0；测试自动写入的本机 policy 耗时已恢复 | GitHub PR/Windows required check 前的根侧门禁满足；唯一 skip 与真实性能结论继续由 Windows CI/PR5 给出，未宣称 70% |
+| PR3 Windows CI 首轮实机分支 | GitHub Actions run `32313358338` 的 Windows 全量 unit 为 5489/5491 PASS、1 FAIL、1 SKIP；唯一失败是真实 PowerShell `Get-CimInstance Win32_Process` 在满载并发下超过 5s 硬上限并返回 `PROCESS_SNAPSHOT_TIMEOUT` | 不将超时判成业务失败，也不删除硬超时；CIM 改为仅投影 5 个必需字段，外部 snapshot/close 统一放宽为有界 15s，Windows 行为测试增加失败后清理；修正后 macOS 聚焦 49/50 PASS、全量 unit 5490/5491 PASS（均 0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-074456.log`）；Windows 重跑通过前状态为 PROBE |
+| PR3 Windows CI 第二轮实机分支 | GitHub Actions run `32318795191` 的 Review Round 9 代码反例均通过；唯一失败仍是真实 PowerShell process snapshot 在 348 个测试文件全量并发、机器满载时达到 15s 硬上限。继续放宽 timeout 会弱化进程所有权与清理失败门禁，不能作为修复 | 普通 `release-check` 通过显式环境开关跳过这一个外部实机探针，随后同一 Windows PR/Release workflow 独立串行运行整个 adapter test 文件并开启真实探针；可注入的 token/lineage/timeout 合同仍留在全量 unit，真实 PowerShell snapshot/action/held-handle receipt 未删除。macOS 定向 17/18 PASS（1 平台 skip）、全量 unit 5492/5493 PASS（0 FAIL、同一 skip，日志 `unit-20260820-090826.log`）；Windows run `32320012473`（#748）全量 release-check、专用 adapter 15/15（0 skip，真实用例 4.23s）、SQLite 回归、界面对齐、installer/portable build/upload 全部成功，实机探针 PROBE 已关闭 |
+| PR3 外部 Review Round 9 红绿修复 | Review 在新的 CIM 修复之后又指出两条真实可达问题：3.1.12 只等 main phase 会比 3.1.11 少算 renderer 初始化尾段；fallback-only 来源绑定后仍使用删除前引用数会留 stale hold。两个最小反例在修改前分别稳定失败（ready 被提前接受、hold 1≠0）；修改后 runner/lineage 两文件 41/41 PASS，全量 unit 5491/5492 PASS（0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-084735.log`），smoke/lint/check-vars/diff-check 全绿 | 两版统一以 renderer total-init 为用户可用终点，3.1.12 另要求 main phases；VCC 绑定事务先删除本来源 fallback，按 `DELETE.changes` 扣减并同步共享 Map，再决定 hold。有效行/system reference 的正向 hold 合同保持不变；Round 8 的通过结论仅代表当时冻结集，以本轮修复后门禁为准 |
+| PR #154 Review Round 9 partial-ready 证据修复 | 新增 timeout 与 root early-exit 两条 `measureSample` 动态反例：3.1.12 已有 window-ready/startup-total 与 recovery counts、但 renderer total-init 缺失时，旧实现聚焦为 35 PASS/2 FAIL；修复后 runner 聚焦 37/37 PASS；Reviewer Round 10 定向复验同为 37/37 PASS并关闭原 P2；根侧最终 `npm run test:unit` 5494/5495 PASS（0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-102317.log`），`npm run smoke`、`npm run lint`、`npm run check:vars`、`node --check`、`git diff --check` 全绿 | `waitForFullReady` 缓存最后一份安全读取的 metrics 与明确 missing marker，timeout/early-exit 仍 fail-closed；失败 sample 只回填已观测 phases/recovery，不产生 external success，cleanup verified 后 freeze-after 合同不变。TechDoc §4.6 合同未变，无需修改 TechDoc；Reviewer 结论未发现阻塞 P3+ |
+| 真实 Windows 性能数据 | NOT RUN / not-evaluated | PR5 必须用真实 3.1.11/3.1.12 installer + portable 各至少五次形成 median 与人工签字；本 PR 不宣称 70% |
+
+### PR3 Remaining / Human Review
+
+| 项目 | 状态 | 下一步 |
+| --- | --- | --- |
+| Windows 四变体稳态对拍 | RELEASE PROBE | PR5 运行 normal-clean-shutdown，保留首样本、轮换顺序、各阶段与 median |
+| 一次性迁移/VACUUM 与 crash recovery | RELEASE PROBE | migration 使用独立旧 schema/vacuum 未完成 golden，核对 3.1.12 白名单 DDL delta 与 3.1.11 schema 不变；crash 使用 current schema/vacuum 已完成 base，并给非空合法 `--golden-wal` 与 `--wal-sentinel settingKey=expectedValue`，核对 WAL-only 可见值、关闭后主库 checkpoint、WAL/SHM 和恢复计数；journal sentinel 若使用则单列 |
+| Windows process containment 理论窗口 | MANUAL | PR5 在 installer/portable 真包确认 wrapper→browser seed、无 nonce renderer/utility lineage、CloseMainWindow receipt、late child quiescence 与 fatal cleanup；两次 snapshot 间完全逃逸且 lineage 已丢失的进程无法在无 Job Object/native helper 的合同内证明，需人工观察任务树/DB 锁 |
+| Windows native failure 与窗口时序 | MANUAL | 注入 DB open/optimize/archive root/outbox/loadFile 失败，确认 window=0、dialog=1、exit=1；正常路径确认 ready 后才显示 |
+| PR4 首进维护接线 | FOLLOW-UP | 消费 `deferredMaintenance.version=1`，在首次进入存档中心时分页执行并保留 migration cleanup journal 的恢复语义 |

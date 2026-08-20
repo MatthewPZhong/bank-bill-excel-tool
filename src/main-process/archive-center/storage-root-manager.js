@@ -803,44 +803,29 @@ class ArchiveStorageRootManager {
   async _prepareActiveRoot(rootDir, options = {}) {
     const resolvedRoot = await this._existingRoot(rootDir, options.configured === true);
     const marker = await this._readMarker(resolvedRoot);
-    const evidence = this._evidence();
     if (marker) {
       validateMarker(marker, this.instanceId);
-      // 已验证 marker 的活跃根可能有旧批次删除后留下的普通残留项；无需递归扫未知文件。
-      // 只验证 DB 权威路径与 .staging/.readonly 的每一级祖先，既阻止 junction/symlink
-      // 越根，也不把启动恢复重新变成按目录全部内容线性扫描。
-      const paths = this._evidenceOwnershipPaths(evidence);
-      const criticalPaths = this._criticalOwnershipPaths(paths);
+      // 有效 marker 的稳态启动只核验固定关键祖先。全 DB evidence 与非关键
+      // ownership 分页由存档中心首次进入维护接管，不能在这里线性扫描历史记录。
+      const criticalPaths = ['.readonly', '.staging', 'blobs', 'blobs/sha256'];
       const verifiedPaths = new Set();
-      await this._assertEvidencePathsOwned(resolvedRoot, evidence, {
+      await this._assertEvidencePathsOwned(resolvedRoot, null, {
         relativePaths: criticalPaths,
         afterIndex: 0,
         limit: criticalPaths.length,
         verifiedPaths
       });
-      const backgroundPaths = paths.filter((relativePath) => !criticalPaths.includes(relativePath));
-      const foreground = await this._assertEvidencePathsOwned(resolvedRoot, evidence, {
-        relativePaths: backgroundPaths,
-        afterIndex: 0,
-        limit: this.startupOwnershipBatchSize,
-        verifiedPaths
-      });
-      this.ownershipScan = {
-        rootDir: resolvedRoot,
-        paths: backgroundPaths,
-        cursor: foreground.cursor,
-        remaining: foreground.remaining,
-        verifiedPaths
-      };
+      this.ownershipScan = null;
       this._setOwnershipProgress({
-        status: foreground.remaining === 0 ? 'complete' : 'pending',
-        processed: foreground.processed,
-        remaining: foreground.remaining,
-        cursor: foreground.cursor,
+        status: 'deferred',
+        processed: 0,
+        remaining: 0,
+        cursor: 0,
         lastErrorCode: ''
       });
       return resolvedRoot;
     }
+    const evidence = this._evidence();
     await this._walkOwnedRoot(resolvedRoot, evidence, {
       allowMissingMarker: true,
       allowLegacyEmptyBlobShards: true
@@ -1353,7 +1338,7 @@ class ArchiveStorageRootManager {
     return journal;
   }
 
-  async _startMigration(targetRoot, existingJournal = null) {
+  async _startMigration(targetRoot, existingJournal = null, options = {}) {
     let journal = existingJournal;
     const expectedStoredRoot = this.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY);
     try {
@@ -1426,7 +1411,9 @@ class ArchiveStorageRootManager {
         this.runtimeDelegate.clearService(journal.targetRoot);
         throw error;
       }
-      return this._finishCleanup(journal);
+      return options.deferCleanup === true
+        ? this._deferCleanup(journal)
+        : this._finishCleanup(journal);
     } catch (error) {
       if (journal && await pathExists(this.fs, this.journalPath)) {
         try {
@@ -1581,6 +1568,19 @@ class ArchiveStorageRootManager {
     };
   }
 
+  async _deferCleanup(journal) {
+    const persisted = journal.phase === 'cleanup-pending'
+      ? journal
+      : await this._writeJournal(journal, 'cleanup-pending', { lastError: null });
+    this._emitProgress('cleanup-pending', 0, 1, 'cleanup-pending');
+    return {
+      status: 'deferred',
+      ok: true,
+      storageRoot: persisted.targetRoot,
+      migrationCleanupPending: true
+    };
+  }
+
   async _recover(journal, storedRoot) {
     const stored = storedRoot ? normalizeRoot(storedRoot) : null;
     const effectiveStored = stored || this.defaultRoot;
@@ -1604,6 +1604,10 @@ class ArchiveStorageRootManager {
           });
         }
         journal = await this._writeJournal(journal, 'switched');
+        if (this.deferStartupRecovery) {
+          await this._deferCleanup(journal);
+          return { ...target.initialized, migrationCleanupPending: true };
+        }
         await this._finishCleanup(journal);
         return target.initialized;
       }
@@ -1627,14 +1631,19 @@ class ArchiveStorageRootManager {
         this._emitProgress(journal.phase, 0, 0, 'failed');
         return {
           ...source.initialized,
-          ok: true,
+          ok: false,
           available: true,
           migrationRecovery: publicFailure(error)
         };
       }
       try {
         this.runtimeDelegate.activateMaintenance();
-        await runArchiveRootOperation(sourceRoot, () => this._startMigration(journal.targetRoot, journal));
+        await runArchiveRootOperation(sourceRoot, async () => {
+          const recovered = await this._startMigration(journal.targetRoot, journal, {
+            deferCleanup: this.deferStartupRecovery
+          });
+          return recovered;
+        });
       } catch (error) {
         const effectiveAfterFailure = this.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY)
           || this.defaultRoot;
@@ -1647,7 +1656,7 @@ class ArchiveStorageRootManager {
         this._emitProgress(journal.phase, 0, 0, 'failed');
         return {
           ...source.initialized,
-          ok: true,
+          ok: false,
           available: true,
           migrationRecovery: publicFailure(error)
         };
@@ -1663,16 +1672,20 @@ class ArchiveStorageRootManager {
       );
     }
     const targetRoot = await this._prepareActiveRoot(journal.targetRoot, { configured: true });
-    await this._verifyEvidenceFiles(targetRoot, this._evidence());
     const target = await this._initializeService(targetRoot);
     this.currentService = target.service;
     this.runtimeDelegate.switchService(target.service);
     if (journal.phase === 'done') {
       await this.fs.promises.rm(this.journalPath, { force: true });
+    } else if (this.deferStartupRecovery) {
+      await this._deferCleanup(journal);
     } else {
       await this._finishCleanup(journal);
     }
-    return target.initialized;
+    return {
+      ...target.initialized,
+      migrationCleanupPending: this.deferStartupRecovery && journal.phase !== 'done'
+    };
   }
 }
 

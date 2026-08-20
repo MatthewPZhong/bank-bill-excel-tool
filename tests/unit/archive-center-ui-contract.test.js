@@ -536,8 +536,8 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
   });
 
   test('启动放行必须等待 storage journal 恢复，失败时 delegate 保持 unavailable', () => {
-    const initStart = main.indexOf('async function runBackgroundInitChain');
-    const initEnd = main.indexOf('function markAppInitDone', initStart);
+    const initStart = main.indexOf('async function initializeApplication');
+    const initEnd = main.indexOf('if (hasSingleInstanceLock) app.whenReady()', initStart);
     const initFlow = main.slice(initStart, initEnd);
     const pendingDbIndex = initFlow.indexOf("pendingDb = openPendingDb(app.getPath('userData'))");
     const createIndex = initFlow.indexOf('initializeArchiveCenter()');
@@ -557,7 +557,8 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
       (initFlow.match(/pendingDb = openPendingDb\(app\.getPath\('userData'\)\)/g) || []).length,
       1
     );
-    assert.match(main, /setImmediate\(async \(\) => \{[\s\S]*?await runBackgroundInitChain\(\)/);
-    assert.match(main, /else \{[\s\S]*?await runBackgroundInitChain\(\);[\s\S]*?markAppInitDone\(\)/);
+    const readyFlow = main.slice(main.indexOf('if (hasSingleInstanceLock) app.whenReady()'));
+    assert.match(readyFlow, /await initializeApplication\(\);[\s\S]*?registerAllIpcHandlers\(\);[\s\S]*?await createWindow\(\{ instrumentation: 'initial' \}\)/);
+    assert.doesNotMatch(main, /DEFERRED_WINDOW_STARTUP|markAppInitDone|app:init-done/);
   });
 });
