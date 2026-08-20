@@ -320,14 +320,21 @@ function readMetricsFile(metricsPath) {
 
 function fullReadyEvidence(label, metrics) {
   if (!metrics || typeof metrics !== 'object') return null;
+  const rendererMs = metrics.renderer && metrics.renderer.durations
+    && metrics.renderer.durations.totalInitMs;
+  if (!Number.isFinite(rendererMs)) return null;
   if (label.startsWith('3.1.11-')) {
-    const rendererMs = metrics.renderer && metrics.renderer.durations && metrics.renderer.durations.totalInitMs;
-    return Number.isFinite(rendererMs) ? { mode: 'legacy-renderer-complete', rendererInitMs: rendererMs } : null;
+    return { mode: 'legacy-renderer-complete', rendererInitMs: rendererMs };
   }
   const phases = Array.isArray(metrics.phases) ? metrics.phases : [];
   const windowReady = phases.find((phase) => phase.phase === 'window-ready' && phase.outcome === 'success');
   const startupTotal = phases.find((phase) => phase.phase === 'startup-total' && phase.outcome === 'success');
-  return windowReady && startupTotal ? { mode: 'phase-contract', windowReadyMs: windowReady.durationMs, startupTotalMs: startupTotal.durationMs } : null;
+  return windowReady && startupTotal ? {
+    mode: 'phase-and-renderer-contract',
+    rendererInitMs: rendererMs,
+    windowReadyMs: windowReady.durationMs,
+    startupTotalMs: startupTotal.durationMs
+  } : null;
 }
 
 function validateWalPrecondition(walPath) {

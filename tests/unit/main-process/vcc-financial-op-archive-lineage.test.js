@@ -246,6 +246,27 @@ test('ready artifact 精确绑定后清 fallback、建立不可绕过业务锁�
   `).get(source.recordId).archive_state, 'unavailable');
 });
 
+test('fallback-only 来源绑定后使用删除后引用数，不留下 stale hold', (t) => {
+  const { db, archiveRepository } = fixture(t);
+  const source = seedSource(db);
+  db.prepare(`
+    UPDATE vcc_fin_op_effective_rows SET import_source_id = NULL WHERE id = ?
+  `).run(source.effectiveId);
+  const artifact = seedReadyArtifact(archiveRepository, source);
+
+  const result = reconcileVccImportArchiveLineage({ db, archiveRepository });
+  assert.equal(result.bound, 1);
+  assert.equal(db.prepare(`
+    SELECT COUNT(*) AS count FROM vcc_fin_op_effective_raw_fallback
+    WHERE import_source_id = ?
+  `).get(source.sourceId).count, 0);
+  assert.equal(archiveRepository.listArtifactHolds(artifact.id).length, 0);
+  assert.equal(
+    archiveRepository.deleteBatch(artifact.batchId, { allowLocked: true }).status,
+    'deleted'
+  );
+});
+
 test('artifact SHA 不符时绑定失败且 fallback 保留', (t) => {
   const { db, archiveRepository } = fixture(t);
   const source = seedSource(db);

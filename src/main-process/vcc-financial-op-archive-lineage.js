@@ -140,11 +140,21 @@ function bindReadyArtifact(db, archiveRepository, source, artifact, options = {}
     return { bound: false, failed: true };
   }
 
-  const references = Number(options.activeReferenceCounts?.get(Number(source.id))) || 0;
+  const referencesBeforeBinding = Number(
+    options.activeReferenceCounts?.get(Number(source.id))
+  ) || 0;
   let released = false;
   db.exec('BEGIN IMMEDIATE');
   try {
-    if (references > 0) {
+    const deletedFallbacks = Number(db.prepare(`
+      DELETE FROM vcc_fin_op_effective_raw_fallback WHERE import_source_id = ?
+    `).run(Number(source.id)).changes) || 0;
+    const remainingReferences = Math.max(0, referencesBeforeBinding - deletedFallbacks);
+    if (options.activeReferenceCounts
+        && typeof options.activeReferenceCounts.set === 'function') {
+      options.activeReferenceCounts.set(Number(source.id), remainingReferences);
+    }
+    if (remainingReferences > 0) {
       archiveRepository.addArtifactHold(Number(artifact.id), {
         ...holdIdentity(source.id, artifact.id),
         reason: `VCC 当前有效数据引用导入来源 ${source.id}`
@@ -160,9 +170,6 @@ function bindReadyArtifact(db, archiveRepository, source, artifact, options = {}
           updated_at = datetime('now', 'localtime')
       WHERE id = ?
     `).run(Number(artifact.id), Number(source.id));
-    db.prepare(`
-      DELETE FROM vcc_fin_op_effective_raw_fallback WHERE import_source_id = ?
-    `).run(Number(source.id));
     vccRepository.refreshImportRecordArchiveState(db, Number(source.import_record_id));
     db.exec('COMMIT');
   } catch (error) {

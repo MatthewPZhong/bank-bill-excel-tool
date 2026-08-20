@@ -109,7 +109,7 @@ test('report 以 external full-ready median 验收且缺样本保持 not-evaluat
   assert.equal(report.evaluation.missingSamples['3.1.11-installer'], 0);
 });
 
-test('3.1.11 等 renderer 完整初始化，3.1.12 等 window-ready 与 startup-total', () => {
+test('3.1.11/3.1.12 都等 renderer 完整初始化，3.1.12 额外要求两个 main phase', () => {
   assert.equal(fullReadyEvidence('3.1.11-portable', { renderer: null }), null);
   assert.equal(fullReadyEvidence('3.1.11-portable', {
     renderer: { durations: { totalInitMs: 321 } }
@@ -123,7 +123,19 @@ test('3.1.11 等 renderer 完整初始化，3.1.12 等 window-ready 与 startup-
       { phase: 'window-ready', outcome: 'success', durationMs: 2 },
       { phase: 'startup-total', outcome: 'success', durationMs: 8 }
     ]
-  }).mode, 'phase-contract');
+  }), null, 'main ready-to-show 不能提前截断 renderer 初始化尾段');
+  assert.deepEqual(fullReadyEvidence('3.1.12-portable', {
+    renderer: { durations: { totalInitMs: 9 } },
+    phases: [
+      { phase: 'window-ready', outcome: 'success', durationMs: 2 },
+      { phase: 'startup-total', outcome: 'success', durationMs: 8 }
+    ]
+  }), {
+    mode: 'phase-and-renderer-contract',
+    rendererInitMs: 9,
+    windowReadyMs: 2,
+    startupTotalMs: 8
+  });
 });
 
 test('sample 以 adapter 的 processCreatedAt 计时，ready 后 graceful close 且不混入退出耗时', async () => {
@@ -155,7 +167,7 @@ test('sample 以 adapter 的 processCreatedAt 计时，ready 后 graceful close 
   }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 10000, goldenDb: databasePath }, {
     adapter,
     now: () => { clock += 10; return clock; },
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success', durationMs: 1 },
       { phase: 'startup-total', outcome: 'success', durationMs: 2 },
       { phase: 'database-vacuum', outcome: 'skipped' },
@@ -229,7 +241,7 @@ test('ready 后失败但 cleanup verified 时立即冻结 after；freeze 失败�
     }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 10000, goldenDb: databasePath }, {
       adapter,
       now: () => ++clock,
-      readMetrics: () => ({ phases: [
+      readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
         { phase: 'window-ready', outcome: 'success', durationMs: 1 },
         { phase: 'startup-total', outcome: 'success', durationMs: 2 }
       ] }),
@@ -267,7 +279,7 @@ test('metrics 已 ready 时先取证且不执行慢 CIM，external 指标不含 
     handle: {},
     timeoutMs: 10000,
     now: () => clock,
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success', durationMs: 1 },
       { phase: 'startup-total', outcome: 'success', durationMs: 2 }
     ] }),
@@ -311,13 +323,13 @@ test('metrics 与 root exit 同 tick ready 时先固定 ready 证据', async () 
     label: '3.1.12-portable', metricsPath: 'unused', timeoutMs: 10000,
     handle: { exitPromise: Promise.resolve({ code: 9, signal: null }), processTokens: new Map() },
     now: () => 100,
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success' },
       { phase: 'startup-total', outcome: 'success' }
     ] }),
     adapter: { async delay() { throw new Error('ready tick 不应等待'); } }
   });
-  assert.equal(result.evidence.mode, 'phase-contract');
+  assert.equal(result.evidence.mode, 'phase-and-renderer-contract');
 });
 
 test('ready 后 owned live target 为空不得伪造 graceful success', async () => {
@@ -344,7 +356,7 @@ test('ready 后 owned live target 为空不得伪造 graceful success', async ()
   }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 10000, goldenDb: databasePath }, {
     adapter,
     now: () => ++clock,
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success' },
       { phase: 'startup-total', outcome: 'success' }
     ] })
@@ -378,7 +390,7 @@ test('receipt 与 tree-empty 不能掩盖 exitPromise code=9', async () => {
   }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 10000, goldenDb: databasePath }, {
     adapter,
     now: () => ++clock,
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success' },
       { phase: 'startup-total', outcome: 'success' },
       { phase: 'database-vacuum', outcome: 'skipped' }
@@ -866,7 +878,7 @@ test('cleanup ownership/receipt 无法证明时整次 run 立即中止，不继�
       },
       async delay() {}
     },
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success' },
       { phase: 'startup-total', outcome: 'success' }
     ] }),
@@ -1091,7 +1103,7 @@ test('postcondition failure 保留已取得的 before/ready/phases/recovery/clos
     userDataDir, documentsDir, databasePath
   }, 0, { scenario: 'normal-clean-shutdown', timeoutMs: 10000, goldenDb: databasePath }, {
     adapter, now: () => ++clock,
-    readMetrics: () => ({ phases: [
+    readMetrics: () => ({ renderer: { durations: { totalInitMs: 1 } }, phases: [
       { phase: 'window-ready', outcome: 'success' },
       { phase: 'startup-total', outcome: 'success' },
       { phase: 'database-vacuum', outcome: 'skipped' },
@@ -1100,7 +1112,7 @@ test('postcondition failure 保留已取得的 before/ready/phases/recovery/clos
     ] })
   }), (error) => Boolean(error.code === 'NORMAL_STARTUP_NOT_STEADY'
     && error.sampleEvidence.before.database.sha256
-    && error.sampleEvidence.readyEvidence.mode === 'phase-contract'
+    && error.sampleEvidence.readyEvidence.mode === 'phase-and-renderer-contract'
     && error.sampleEvidence.phases.length > 0
     && error.sampleEvidence.recoveryCounts['archive-outbox']
     && error.sampleEvidence.gracefulCloseEvidence.acceptedPids[0] === 10

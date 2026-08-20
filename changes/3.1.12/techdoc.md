@@ -434,7 +434,7 @@ WHERE import_source_id IS NOT NULL;
 - 输入 3.1.11 installer 安装后的 exe、3.1.11 portable、3.1.12 installer 安装后的 exe、3.1.12 portable；
 - 以同一只读 golden 数据库生成四份初始字节一致的工作副本，记录初始 SHA-256；
 - 每个变体顺序执行至少 5 个正常关闭样本，不丢弃首个样本；运行顺序轮换，降低 OS cache 和杀毒扫描偏差；
-- 启动指标为进程创建至完整初始化后的 `ready-to-show`；复制数据库的耗时不计入启动；
+- 外部启动指标从进程创建开始，3.1.11 与 3.1.12 均必须等到 renderer `totalInitMs` 完成才停表；3.1.12 还必须同时取得 `window-ready` 与 `startup-total` success，避免在 `getInfo`/模板刷新/事件绑定结束前提前停表；复制数据库的耗时不计入启动；
 - 每个样本记录主库、`-wal`、`-shm` 大小，恢复任务数量和阶段耗时；
 - 一次性 migration/VACUUM 与人为构造的崩溃恢复各自用独立副本、独立表格；
 - 报告 average/median/min/max，但验收只看正常场景 median 与阶段解释。
