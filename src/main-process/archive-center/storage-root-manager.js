@@ -13,6 +13,7 @@ const {
 } = require('./archive-service');
 const {
   createStorageMaterializer,
+  syncStagedFile,
   verifyFile
 } = require('./storage-materializer');
 const { sourceSnapshotFromStat } = require('./source-snapshot');
@@ -1416,8 +1417,7 @@ class ArchiveStorageRootManager {
               'canonical Blob 复制后校验失败，设置未切换'
             );
           }
-          const handle = await this.fs.promises.open(tempPath, 'r');
-          try { await handle.sync(); } finally { await handle.close(); }
+          await syncStagedFile(this.fs, tempPath);
           await this.fs.promises.rename(tempPath, targetPath);
           await syncDirectory(this.fs, path.dirname(targetPath));
         } finally {

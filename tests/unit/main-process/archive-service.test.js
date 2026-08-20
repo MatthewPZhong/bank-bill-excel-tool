@@ -2756,6 +2756,67 @@ test('发布 rename 失败时不 reject、不留下 staging 或半成品 blob', 
   }
 });
 
+test('Windows 语义下 publish 与 materialized copy 以可写句柄 fsync 后再设为只读', async () => {
+  const basePromises = fs.promises;
+  const syncedStageModes = [];
+  const windowsFsyncFs = {
+    ...fs,
+    promises: {
+      ...basePromises,
+      async open(targetPath, flags, ...args) {
+        const handle = await basePromises.open(targetPath, flags, ...args);
+        const normalized = String(targetPath);
+        if (!normalized.includes(`${path.sep}.staging${path.sep}`)
+            || !normalized.endsWith('.part')) {
+          return handle;
+        }
+        return new Proxy(handle, {
+          get(object, property) {
+            if (property === 'sync') {
+              return async () => {
+                syncedStageModes.push(flags);
+                if (flags === 'r') {
+                  const error = new Error('EPERM: Windows requires a writable fsync handle');
+                  error.code = 'EPERM';
+                  throw error;
+                }
+                const stat = await basePromises.lstat(targetPath);
+                if ((stat.mode & 0o222) === 0) {
+                  const error = new Error('EACCES: Windows cannot open a read-only file for write');
+                  error.code = 'EACCES';
+                  throw error;
+                }
+                return object.sync();
+              };
+            }
+            const value = Reflect.get(object, property, object);
+            return typeof value === 'function' ? value.bind(object) : value;
+          }
+        });
+      }
+    }
+  };
+  const fixture = createFixture({ fsImpl: windowsFsyncFs });
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('windows-writable-fsync'),
+      filePath: writeSource(fixture, 'windows-writable-fsync.xlsx', 'windows-fsync'),
+      role: 'output'
+    });
+
+    assert.equal(archived.ok, true, JSON.stringify(archived));
+    assert.deepEqual(syncedStageModes, ['r+', 'r+']);
+    const artifact = fixture.repository.getArtifact(archived.artifact.id);
+    const materializedPath = path.join(
+      fixture.rootDir,
+      ...artifact.storageRelativePath.split('/')
+    );
+    assert.equal(fs.statSync(materializedPath).mode & 0o222, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('blob 已发布但元数据提交失败时不自动收编无 owner 文件，人工移除后可恢复', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-metadata-failure-'));
   const rootDir = path.join(tempDir, 'archive-root');

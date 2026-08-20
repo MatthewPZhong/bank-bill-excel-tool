@@ -63,8 +63,10 @@ async function copyStream(sourcePath, targetPath, fsModule) {
   );
 }
 
-async function syncFile(fsModule, filePath) {
-  const handle = await fsModule.promises.open(filePath, 'r');
+async function syncStagedFile(fsModule, filePath) {
+  // Windows 的 FlushFileBuffers 要求可写句柄；这里只接收本任务刚创建且尚未
+  // 发布的 staging 文件，r+ 仅提供句柄权限，不会修改文件内容。
+  const handle = await fsModule.promises.open(filePath, 'r+');
   try { await handle.sync(); } finally { await handle.close(); }
 }
 
@@ -161,8 +163,8 @@ function createStorageMaterializer(options = {}) {
           { cause: staged.error }
         );
       }
+      await syncStagedFile(fsModule, stagedPath);
       await fsModule.promises.chmod(stagedPath, 0o444);
-      await syncFile(fsModule, stagedPath);
       await assertNoSymlinkAncestors(fsModule, rootDir, path.dirname(targetPath));
       await fsModule.promises.mkdir(path.dirname(targetPath), { recursive: true });
       targetParentCreated = true;
@@ -225,5 +227,6 @@ module.exports = {
   StorageMaterializationError,
   createStorageMaterializer,
   hashFile,
+  syncStagedFile,
   verifyFile
 };

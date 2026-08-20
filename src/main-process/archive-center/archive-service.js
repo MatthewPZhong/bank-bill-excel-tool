@@ -22,6 +22,7 @@ const {
 } = require('./storage-layout');
 const {
   createStorageMaterializer,
+  syncStagedFile,
   verifyFile
 } = require('./storage-materializer');
 const {
@@ -463,8 +464,7 @@ class ArchiveService {
   }
 
   async _syncFile(filePath) {
-    const handle = await this.fs.promises.open(filePath, 'r');
-    try { await handle.sync(); } finally { await handle.close(); }
+    await syncStagedFile(this.fs, filePath);
   }
 
   async _syncDirectory(directory) {

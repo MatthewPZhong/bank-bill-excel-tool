@@ -332,6 +332,7 @@
 | 指纹 final stat 与历史 NULL dedupe 是否能同时满足 | PROBE → CLOSED | 新 Blob insert 以 `inserted.changes` 区分并强制完整 fingerprint；旧 Blob dedupe 允许 NULL 且不补；SHA 前后 BigInt stat 稳定后才提交 final fingerprint | 无历史 backfill；打开/另存/迁移/发布不走指纹快路 |
 | root/ancestor 在运行期被 symlink/junction、离线或部分初始化后替换是否会越根/重建 split root | PROBE → CLOSED | Service 与 RootManager 分别复用逐祖先/root lstat guard；root 自身一经 mkdir+lstat 确认为真实目录即不可回退 bootstrap；source/target/old root、canonical、`.staging/.readonly`、子目录 EIO 后 offline root 动态 fixture 全部 fail-closed | 不扩展到 syscall 级 TOCTOU；Windows junction 仍需实机复验 |
 | historical-health-scan 的物理 Blob 分页是否可能跟随页间替换的祖先链接 | PROBE → CLOSED | prefix-list 页和每个 prefix 页读取前都复用 managed-path ancestor guard；真实 controller entry fixture 覆盖进入前已替换及 prefix-list 后、下一页前替换，均发 failed、不发 completed、不读取外部 prefix | 只修真实 page entry，不扩展到单次 syscall 内 TOCTOU |
+| Windows 文件 fsync 是否允许沿用 POSIX 只读句柄 | PROBE → FIXED / CI RECHECK | PR #155 Windows run `32334377167` 首个 Archive layout 即在只读句柄 flush 返回 `EPERM`，随后 99 条 Archive 失败级联；仓库既有 Toolbox Windows 行为合同也要求可写句柄。新增公开 archive 行为 fixture 同时模拟只读句柄 flush=`EPERM` 与只读文件不可用 `r+` 打开，旧实现稳定失败，修复后 publish/materialized 两次均记录 `r+` | 只对任务拥有且尚未发布的 staging 文件使用可写句柄，不吞文件 fsync 错误；目录 fsync 的原平台 allowlist 不变，真实 Windows rerun 前不宣称关闭 CI |
 | maintenance 失败结果是否可能被误报 complete 或在失败页自旋 | PROBE → CLOSED | manager ownership scan 返回显式 `ok:false`；controller 同时拒绝 failed/incomplete/partial/pending/running；服务保留成功页 cursor，失败页不推进且立即停止，新 visit 从失败页重试 | 同 visit 不重试、不发 completed；成功完成后 cursor 清零以保持独立手工调用语义 |
 | 维护刷新时 related batch 不在筛选页是否会被误判删除 | PROBE → CLOSED | retention event 返回精确 `deletedBatchIds`；只有命中该集合才清空并提示，到页外但仍存在的 selected id 保留并经 `getBatch` 刷新 detail | 不以 filtered list 缺失推断删除，不自动 fallback 首项 |
 
@@ -342,7 +343,7 @@
 | renderer 每次从非 Archive tab 进入时生成内部 `visitId` | 精确实现 failed 仅离开/重进可重试；不把内部 visit identity 暴露为用户设置 | 符合建议方案，无偏差 |
 | 8 阶段固定映射为 cleanup-journal → blob-metadata → artifact-metadata → retention → owned-orphans → layout-materialization → historical-health-scan → noncritical-ownership-scan | 精确消费 PR3 version=1 DTO，保留阶段可观测性 | 无偏差 |
 | migration target 的既存文件只由 `journal.targetPublishedPaths` 授权 | source DB evidence 只能证明 source，不能给 fresh/续跑 target 同路径文件授予 owner | 无偏差；恢复仍可精确复用已发布 Blob/layout |
-| 文件发布与迁移复制在 rename 后同步文件和父目录，再允许 setting switch | 目标内容必须 durable 后才能改变唯一权威根 | 无偏差 |
+| publish、materialized copy 与迁移 canonical 统一对 owned staging 使用 `r+`：rename 前强制文件 fsync；materialized copy 随后降为只读；rename 后同步父目录，再允许 setting switch | Windows `FlushFileBuffers` 要求可写句柄，且 materialized 临时文件先降只读会使 `r+` 无法打开；目标内容仍必须 durable 后才能发布/改变唯一权威根 | 无偏差；文件 fsync 失败仍 fatal，只有目录句柄明确不受支持的既有错误可忽略 |
 | packaged migration schema whitelist 增加 Archive 8 个精确 nullable 列 | PR5 旧 schema golden 必须把 PR4 合法 migration 与额外 DDL 区分 | 无偏差；未放宽其他列/约束/index/trigger |
 
 ### PR4 Evidence
@@ -368,12 +369,13 @@
 | PR4 Review Round 1 | 独立 Reviewer 冻结最终 Dev diff，254/254 聚焦测试通过；确认 1 个 P1（部分初始化后丢失已建立根身份，可形成 split root）与 1 个 P3（historical-health-scan 物理分页未复用祖先门禁） | 两项均有公开入口与动态反例，项目负责侧接受后退回同一 Dev；未扩展到 syscall 级 TOCTOU |
 | PR4 Review Round 2 | 原 P1/P3 的 2/2 动态 probe 与相邻行为共 5/5 PASS；P0/P1/P2/P3 均为 0，未发现新 Finding，Reviewer 明确可合并 | partial-init 后 archive/attach 不重建离线根；historical scan 在进入前和页间替换时均 failed、无 completed |
 | PR4 根侧最终 release-check | 最终 Round 2 代码快照执行 `npm run release-check` exit 0：lint、smoke PASS；unit 5534/5535 PASS（0 FAIL、1 Windows-only SKIP，日志 `unit-20260820-124953.log`）；48 scripts、2410/2410 integration PASS、394,017ms，含 300,000 行 50/50 与多 Sheet 31/31 | 合并前最终快照门禁；自动改写的 integration policy 本机耗时噪声已恢复，`git diff --check` 与全部修改 JS `node --check` exit 0 |
+| PR #155 Windows CI fsync 修复 | Windows run `32334377167` 为 5434/5535 PASS、99 FAIL，首个真实根错为 materialized staging 只读句柄 fsync=`EPERM`；新增测试修改生产前为 1/4 PASS、3 FAIL（含父 suite 汇总），修复后 4/4 PASS；Archive 三整文件 122/122 PASS，最终全量 unit 5535/5536 PASS、0 FAIL、1 既有 Windows-only SKIP，日志 `unit-20260820-133818.log`；smoke/lint、三个生产文件 `node --check`、静态文件/目录 fsync 入口扫描与 `git diff --check` 均通过；本次三份生产改动 `check-vars` exit 0、无重要变量命中 | 单一共享 `syncStagedFile` 覆盖 Blob publish、materialized copy、migration canonical；最终副本仍只读，迁移 file/parent fsync 故障仍保持 setting 未切换；需要 Windows CI rerun 验证真实 NTFS |
 
 ### PR4 Remaining / Human Review
 
 | 项目 | 状态 | 下一步 |
 | --- | --- | --- |
-| 自动门禁最终数字 | COMPLETE | Round 2 通过后根侧最终 release-check：unit 5534/5535（0 fail/1 Windows-only skip）、integration 48 scripts/2410 assertions；smoke、lint、布局 6/6、node/diff check 均通过；check-vars 预期命中已核 |
-| Windows junction/网络盘掉线与 fsync 行为 | MANUAL/CI | 在真实 NTFS/网络或同步盘复验 root/ancestor junction、离线重连、file+directory flush 与 cleanup-pending |
+| 自动门禁最终数字 | COMPLETE LOCALLY / CI RECHECK | Round 2 根侧 release-check：unit 5534/5535（0 fail/1 Windows-only skip）、integration 48 scripts/2410 assertions；本次 Windows fsync 修复后 unit 5535/5536（0 fail/1 同一 skip）、Archive 聚焦 122/122、smoke/lint/node/static/diff checks 全绿；当前修复 `check-vars` 无命中，PR4 原完整 diff 的 IPC/hold review 结论保留 |
+| Windows junction/网络盘掉线与 fsync 行为 | CI RECHECK / MANUAL | PR #155 首轮真实 NTFS 已复现 file flush 句柄差异并完成可写 staging handle 修复，必须重跑 Windows CI；junction、离线重连、网络/同步盘 directory flush 与 cleanup-pending 仍需人工复验 |
 | UI 视觉与长路径 | MANUAL | Windows 缩放/中文长路径下确认两行布局、完整换行和文本可选择 |
 | Spec/TechDoc 偏差 | NONE | 当前实现未改变用户流程、schema 历史兼容、删除 owner 或迁移真相边界；若 Reviewer 发现 BLOCK 必须先反向同步 |

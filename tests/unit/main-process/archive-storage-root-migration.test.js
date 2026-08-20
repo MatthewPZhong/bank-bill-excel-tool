@@ -306,11 +306,17 @@ test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', 
     await t.test(failurePoint, async () => {
       let targetRoot = '';
       let injected = false;
+      let fileFsyncOpenMode = null;
       const promises = {
         ...fs.promises,
         async open(targetPath, ...args) {
           const handle = await fs.promises.open(targetPath, ...args);
           const normalized = String(targetPath);
+          if (targetRoot
+              && normalized.includes(`${path.sep}.staging${path.sep}`)
+              && path.basename(normalized).startsWith('blob-')) {
+            fileFsyncOpenMode = args[0];
+          }
           const failThisHandle = targetRoot && !injected && (
             (failurePoint === 'file'
               && normalized.includes(`${path.sep}.staging${path.sep}`)
@@ -345,6 +351,7 @@ test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', 
         const result = await current.manager.changeStorageLocation();
 
         assert.equal(injected, true);
+        if (failurePoint === 'file') assert.equal(fileFsyncOpenMode, 'r+');
         assert.equal(result.status, 'failed');
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
         assert.equal(current.runtime.rootDir, real(current.sourceRoot));
