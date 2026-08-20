@@ -484,7 +484,8 @@ test('PowerShell CreationDate 使用显式 invariant ticks，action 持有 Handl
 });
 
 test('Windows CI 真实 PowerShell snapshot→token cleanup 语义', {
-  skip: process.platform !== 'win32',
+  skip: process.platform !== 'win32'
+    || process.env.WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST !== '1',
   timeout: 120000
 }, async () => {
   const adapter = createProcessAdapter({ platform: 'win32' });
