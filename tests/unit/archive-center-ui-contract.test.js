@@ -230,6 +230,15 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
       preload,
       /onStorageMigrationProgress:\s*\(listener\)[\s\S]*?ipcRenderer\.on\('archive-center:storage-migration-progress', wrapped\)[\s\S]*?removeListener\('archive-center:storage-migration-progress', wrapped\)/
     );
+    assert.match(preload, /startEntryMaintenance:\s*\(visitId\)[\s\S]*?archive-center:start-entry-maintenance/);
+    for (const event of ['Progress', 'Completed', 'Failed']) {
+      const suffix = event.toLowerCase();
+      assert.match(
+        preload,
+        new RegExp(`onEntryMaintenance${event}:\\s*\\(listener\\)[\\s\\S]*?entry-maintenance-${suffix === 'progress' ? 'progress' : suffix === 'completed' ? 'completed' : 'failed'}[\\s\\S]*?removeListener`)
+      );
+    }
+    assert.match(main, /archive-center:start-entry-maintenance'[\s\S]*?startEntryMaintenance', visitId/);
     assert.doesNotMatch(preload, /listTemplatePolicies|setTemplateExcluded/);
     assert.doesNotMatch(main, /archive-center:(?:list-template-policies|set-template-excluded)/);
   });
@@ -310,6 +319,9 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(renderer, /api\.setRetentionDays\(retentionDaysApiValue\(intent\.value\)\)/);
     assert.match(renderer, /getArchiveCenterApi\(\)\.getStats\(\)/);
     assert.match(renderer, /data-role="archive-storage-path"/);
+    assert.match(renderer, /archive-center-storage-location-heading[\s\S]*?<span>存档位置<\/span>[\s\S]*?>变更<\/button>[\s\S]*?archive-center-storage-path/);
+    assert.match(styles, /\.archive-center-storage-path\s*\{[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;[\s\S]*?user-select:\s*text/);
+    assert.doesNotMatch(styles, /archive-center-storage-path[\s\S]{0,180}text-overflow:\s*ellipsis/);
     assert.match(renderer, /data-role="archive-storage-migration"/);
     assert.match(renderer, /migration\.status === 'running'/);
     assert.match(renderer, /migration\.phase === 'cleanup-pending'/);
@@ -332,6 +344,25 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.doesNotMatch(renderer, /archive-template-policies|setTemplateExcluded|listTemplatePolicies/);
     assert.doesNotMatch(renderer, /网银账单生成模板|不存档/);
     assert.doesNotMatch(renderer, /锁定批次不参与自动清理。默认保留期为 90 天。|默认保留/);
+  });
+
+  test('真实进入先完成 list 再启动后台维护，完成后清空已删除选择并订阅收口事件', () => {
+    const ensureStart = renderer.indexOf('async function ensureArchiveLoaded');
+    const ensureEnd = renderer.indexOf('function setArchiveSettingsOpen', ensureStart);
+    const ensureSource = renderer.slice(ensureStart, ensureEnd);
+    assert.ok(
+      ensureSource.indexOf('await loadArchiveBatches()')
+        < ensureSource.indexOf('startArchiveEntryMaintenance(visitId)'),
+      '首次进入必须先 list 再 start maintenance'
+    );
+    assert.match(renderer, /archiveState\.currentVisitId = `archive-visit-/);
+    assert.match(renderer, /maintenanceDeletedBatchIds[\s\S]*?deletedBatchIds\.has\(String\(priorSelectedBatchId\)\)[\s\S]*?archiveState\.selectedBatchId = selectedRemovedByMaintenance[\s\S]*?\? ''/);
+    assert.match(renderer, /preserveFilteredMaintenanceSelection[\s\S]*?selectedStillVisible \|\| preserveFilteredMaintenanceSelection[\s\S]*?priorSelectedBatchId/);
+    assert.match(renderer, /if \(archiveState\.selectedBatchId\) \{[\s\S]*?await loadArchiveDetail\(archiveState\.selectedBatchId\)/);
+    assert.match(renderer, /当前选中的批次已到期删除/);
+    assert.match(renderer, /onEntryMaintenanceCompleted[\s\S]*?maintenanceDeletedBatchIds: Array\.isArray\(result\?\.deletedBatchIds\)/);
+    assert.match(renderer, /onEntryMaintenanceFailed[\s\S]*?本次存档维护未完成；离开后重新进入可重试/);
+    assert.match(renderer, /unsubscribeEntryMaintenanceProgress/);
   });
 
   test('永久保留值保持为 permanent，加载和即时保存期间禁用返回与关闭入口', () => {

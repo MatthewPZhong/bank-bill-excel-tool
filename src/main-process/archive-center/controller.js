@@ -185,6 +185,9 @@ class ArchiveCenterController {
     this.onTerminalIntentFlushed = typeof options.onTerminalIntentFlushed === 'function'
       ? options.onTerminalIntentFlushed
       : null;
+    this.onEntryMaintenanceEvent = typeof options.onEntryMaintenanceEvent === 'function'
+      ? options.onEntryMaintenanceEvent
+      : null;
     this.getProtectedInterruptedTaskBatchIds =
       typeof options.getProtectedInterruptedTaskBatchIds === 'function'
         ? options.getProtectedInterruptedTaskBatchIds
@@ -222,6 +225,15 @@ class ArchiveCenterController {
         })
       : [];
     this.outboxFlushTail = Promise.resolve();
+    this.startupVccGateSucceeded = false;
+    this.entryMaintenance = {
+      status: 'idle',
+      attemptId: '',
+      visitId: '',
+      startedAt: null,
+      lastErrorCode: ''
+    };
+    this.entryMaintenancePromise = null;
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
     this.sink = Object.freeze({
@@ -454,6 +466,7 @@ class ArchiveCenterController {
         throw error;
       }
     }
+    this.startupVccGateSucceeded = this.postOutboxStartupHooks.length > 0;
     return {
       ...initialized,
       deferredMaintenance: STARTUP_DEFERRED_MAINTENANCE
@@ -1643,6 +1656,183 @@ class ArchiveCenterController {
           : { status: 'idle', phase: '', processed: 0, total: 0 }
       }
     };
+  }
+
+  _emitEntryMaintenance(eventName, payload = {}) {
+    if (!this.onEntryMaintenanceEvent) return;
+    try { this.onEntryMaintenanceEvent(eventName, payload); } catch (_error) {}
+  }
+
+  _assertRetentionGate() {
+    if (!this.startupVccGateSucceeded) {
+      const error = new Error('本进程启动 VCC 安全门禁未完成');
+      error.code = 'ARCHIVE_RETENTION_VCC_GATE_UNAVAILABLE';
+      throw error;
+    }
+    if (this.outboxStore) {
+      const records = this.outboxStore.list();
+      if (records.length > 0) {
+        const error = new Error('存档 outbox owner intent 尚未收口');
+        error.code = 'ARCHIVE_RETENTION_OUTBOX_PENDING';
+        throw error;
+      }
+    }
+    const gate = this.service.repository.getEntryMaintenanceGateState();
+    if (gate.activeBatchCount > 0
+        || gate.activeTaskRunCount > 0
+        || gate.pendingArtifactCount > 0) {
+      const error = new Error('存档任务仍在活动，已停止到期删除');
+      error.code = 'ARCHIVE_RETENTION_ACTIVE_TASK';
+      throw error;
+    }
+    return gate;
+  }
+
+  startEntryMaintenance(visitIdValue) {
+    const visitId = String(visitIdValue || '').trim();
+    if (!visitId) {
+      return publicFailure({
+        code: 'ARCHIVE_ENTRY_VISIT_REQUIRED',
+        message: '存档中心访问标识不可为空'
+      }, '存档维护启动失败');
+    }
+    if (this.entryMaintenance.status === 'running') {
+      return { ok: true, status: 'running', attemptId: this.entryMaintenance.attemptId };
+    }
+    if (this.entryMaintenance.status === 'succeeded') {
+      return { ok: true, status: 'complete', attemptId: this.entryMaintenance.attemptId };
+    }
+    if (this.entryMaintenance.status === 'failed'
+        && this.entryMaintenance.visitId === visitId) {
+      return {
+        ok: true,
+        status: 'complete',
+        attemptId: this.entryMaintenance.attemptId,
+        failed: true
+      };
+    }
+    const attemptId = crypto.randomUUID();
+    this.entryMaintenance = {
+      status: 'running',
+      attemptId,
+      visitId,
+      startedAt: new Date().toISOString(),
+      lastErrorCode: ''
+    };
+    this.entryMaintenancePromise = new Promise((resolve) => setImmediate(resolve))
+      .then(() => this._runEntryMaintenance(attemptId))
+      .finally(() => { this.entryMaintenancePromise = null; });
+    return { ok: true, status: 'started', attemptId };
+  }
+
+  async _runEntryMaintenance(attemptId) {
+    let entryLeaseOwnerToken = '';
+    const progress = (phase, value = {}) => {
+      this._emitEntryMaintenance('progress', {
+        attemptId,
+        phase,
+        processed: Number(value.processed) || 0,
+        remaining: Number(value.remaining) || 0,
+        status: 'running'
+      });
+    };
+    const phaseResults = new Map();
+    const phases = [
+      ['cleanup-journal', async () => {
+        const migration = this.storageRootManager
+          ? await this.storageRootManager.resumeDeferredCleanup({
+              ownerToken: entryLeaseOwnerToken
+            })
+          : { ok: true, status: 'complete', processed: 0 };
+        if (migration && migration.ok === false) throw Object.assign(
+          new Error(migration.message || '迁移清理未完成'),
+          { code: migration.code || 'ARCHIVE_STORAGE_CLEANUP_PENDING' }
+        );
+        return migration;
+      }],
+      ['blob-metadata', () => this.service.runBlobMetadataMaintenance({
+        onProgress: (value) => progress('blob-metadata', value)
+      })],
+      ['artifact-metadata', () => this.service.runArtifactMetadataMaintenance({
+        onProgress: (value) => progress('artifact-metadata', value)
+      })],
+      ['retention', async () => {
+        this._assertRetentionGate();
+        return typeof this.service.runRetentionMaintenance === 'function'
+          ? this.service.runRetentionMaintenance({
+              onProgress: (value) => progress('retention', value)
+            })
+          : this.service.cleanupExpired();
+      }],
+      ['owned-orphans', () => this.service.runOwnedOrphanCleanup()],
+      ['layout-materialization', () => this.service.runLayoutMaterializationMaintenance({
+        onProgress: (value) => progress('layout-materialization', value)
+      })],
+      ['historical-health-scan', () => this.service.runHistoricalHealthScan()],
+      ['noncritical-ownership-scan', () => (
+        this.storageRootManager
+          ? this.storageRootManager.runNoncriticalOwnershipScan()
+          : Promise.resolve({ status: 'complete', processed: 0, remaining: 0 })
+      )]
+    ];
+    let entryLeaseAcquired = false;
+    try {
+      if (this.storageRootManager
+          && typeof this.storageRootManager.beginEntryMaintenance === 'function') {
+        const lease = await this.storageRootManager.beginEntryMaintenance();
+        if (!lease || lease.acquired !== true) {
+          const error = new Error('存档位置或数据库维护正在进行');
+          error.code = 'ARCHIVE_STORAGE_MAINTENANCE';
+          throw error;
+        }
+        entryLeaseAcquired = true;
+        entryLeaseOwnerToken = String(lease.ownerToken || '');
+      }
+      for (const [phase, run] of phases) {
+        progress(phase);
+        const result = await run();
+        const resultStatus = String(result && result.status || '').toLowerCase();
+        const incompleteStatus = [
+          'failed',
+          'incomplete',
+          'partial',
+          'paused',
+          'pending',
+          'running',
+          'cleanup-pending'
+        ].includes(resultStatus);
+        if (result && (result.ok === false || incompleteStatus)) {
+          const error = new Error(result.message || `存档维护阶段失败：${phase}`);
+          error.code = result.code
+            || result.lastErrorCode
+            || 'ARCHIVE_ENTRY_MAINTENANCE_FAILED';
+          throw error;
+        }
+        phaseResults.set(phase, result || {});
+        progress(phase, result || {});
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      this.entryMaintenance = { ...this.entryMaintenance, status: 'succeeded' };
+      this._emitEntryMaintenance('completed', {
+        attemptId,
+        status: 'complete',
+        deletedBatchIds: Array.isArray(phaseResults.get('retention')?.deletedBatchIds)
+          ? phaseResults.get('retention').deletedBatchIds
+          : []
+      });
+      return { ok: true, status: 'complete', attemptId };
+    } catch (error) {
+      const code = String(error && error.code || 'ARCHIVE_ENTRY_MAINTENANCE_FAILED');
+      this.entryMaintenance = { ...this.entryMaintenance, status: 'failed', lastErrorCode: code };
+      this._emitEntryMaintenance('failed', { attemptId, status: 'failed', errorCode: code });
+      return { ok: false, status: 'failed', attemptId, errorCode: code };
+    } finally {
+      if (entryLeaseAcquired
+          && this.storageRootManager
+          && typeof this.storageRootManager.endEntryMaintenance === 'function') {
+        await this.storageRootManager.endEntryMaintenance(entryLeaseOwnerToken);
+      }
+    }
   }
 }
 

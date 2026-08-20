@@ -138,6 +138,45 @@ function normalizeSize(value) {
   return size;
 }
 
+function normalizeFingerprint(value, label = 'fingerprint') {
+  if (value === undefined || value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} 格式非法`);
+  }
+  const sizeBytes = normalizeSize(value.sizeBytes);
+  const mtimeMs = Number(value.mtimeMs);
+  const ctimeMs = Number(value.ctimeMs);
+  if (!Number.isFinite(mtimeMs) || !Number.isFinite(ctimeMs)) {
+    throw new TypeError(`${label} 的 mtimeMs/ctimeMs 必须是有限数`);
+  }
+  let ino = null;
+  if (value.ino !== undefined && value.ino !== null && value.ino !== '') {
+    ino = String(value.ino);
+    if (!/^(?:0|[1-9]\d*)$/.test(ino)) {
+      throw new TypeError(`${label}.ino 必须是十进制字符串`);
+    }
+  }
+  return { sizeBytes, mtimeMs, ctimeMs, ...(ino === null ? {} : { ino }) };
+}
+
+function mapFingerprint(row, prefix = 'fingerprint_') {
+  if (!row) return null;
+  const sizeBytes = Number(row[`${prefix}size_bytes`]);
+  const mtimeMs = Number(row[`${prefix}mtime_ms`]);
+  const ctimeMs = Number(row[`${prefix}ctime_ms`]);
+  if (row[`${prefix}size_bytes`] == null
+      || row[`${prefix}mtime_ms`] == null
+      || row[`${prefix}ctime_ms`] == null
+      || !Number.isSafeInteger(sizeBytes)
+      || sizeBytes < 0
+      || !Number.isFinite(mtimeMs)
+      || !Number.isFinite(ctimeMs)) return null;
+  const inoValue = row[`${prefix}ino`];
+  const ino = inoValue == null || inoValue === '' ? null : String(inoValue);
+  if (ino !== null && !/^(?:0|[1-9]\d*)$/.test(ino)) return null;
+  return { sizeBytes, mtimeMs, ctimeMs, ...(ino === null ? {} : { ino }) };
+}
+
 function normalizeMetadata(value) {
   if (value === undefined || value === null) return '{}';
   if (typeof value !== 'object' || Array.isArray(value)) {
@@ -443,7 +482,18 @@ function ensureArchiveMetadataSupport(db) {
       ['artifact_order', 'artifact_order INTEGER'],
       ['materialization_error_code', 'materialization_error_code TEXT'],
       ['materialization_error_message', 'materialization_error_message TEXT'],
-      ['materialization_failed_at', 'materialization_failed_at TEXT']
+      ['materialization_failed_at', 'materialization_failed_at TEXT'],
+      ['storage_fingerprint_size_bytes', 'storage_fingerprint_size_bytes INTEGER'],
+      ['storage_fingerprint_mtime_ms', 'storage_fingerprint_mtime_ms REAL'],
+      ['storage_fingerprint_ctime_ms', 'storage_fingerprint_ctime_ms REAL'],
+      ['storage_fingerprint_ino', 'storage_fingerprint_ino TEXT']
+    ]);
+
+    addColumnsIfMissing(db, 'archive_blobs', [
+      ['fingerprint_size_bytes', 'fingerprint_size_bytes INTEGER'],
+      ['fingerprint_mtime_ms', 'fingerprint_mtime_ms REAL'],
+      ['fingerprint_ctime_ms', 'fingerprint_ctime_ms REAL'],
+      ['fingerprint_ino', 'fingerprint_ino TEXT']
     ]);
 
     db.exec(`
@@ -757,6 +807,7 @@ function mapBlob(row) {
     relativePath: row.relative_path,
     createdAt: row.created_at,
     lastVerifiedAt: row.last_verified_at,
+    fingerprint: mapFingerprint(row),
     referenceCount: Number(row.reference_count) || 0
   };
 }
@@ -767,7 +818,9 @@ function mapArtifact(row) {
     id: Number(row.blob_row_id),
     sha256: row.blob_sha256,
     sizeBytes: Number(row.blob_size_bytes) || 0,
-    relativePath: row.blob_relative_path
+    relativePath: row.blob_relative_path,
+    lastVerifiedAt: row.blob_last_verified_at || null,
+    fingerprint: mapFingerprint(row, 'blob_fingerprint_')
   };
   const businessHoldCount = Number(row.business_hold_count) || 0;
   return {
@@ -794,6 +847,7 @@ function mapArtifact(row) {
     materializationErrorCode: row.materialization_error_code || '',
     materializationErrorMessage: row.materialization_error_message || '',
     materializationFailedAt: row.materialization_failed_at || null,
+    storageFingerprint: mapFingerprint(row, 'storage_fingerprint_'),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     archivedAt: row.archived_at || null,
@@ -916,6 +970,11 @@ const ARTIFACT_SELECT = `
     bl.sha256 AS blob_sha256,
     bl.size_bytes AS blob_size_bytes,
     bl.relative_path AS blob_relative_path,
+    bl.last_verified_at AS blob_last_verified_at,
+    bl.fingerprint_size_bytes AS blob_fingerprint_size_bytes,
+    bl.fingerprint_mtime_ms AS blob_fingerprint_mtime_ms,
+    bl.fingerprint_ctime_ms AS blob_fingerprint_ctime_ms,
+    bl.fingerprint_ino AS blob_fingerprint_ino,
     (SELECT COUNT(*) FROM archive_artifact_holds h WHERE h.artifact_id = a.id)
       AS business_hold_count
   FROM archive_artifacts a
@@ -1189,8 +1248,15 @@ class ArchiveRepository {
       if (!['hardlink', 'copy'].includes(storageMode)) {
         throw new TypeError(`storageMode 非法：${storageMode}`);
       }
+      const storageFingerprint = normalizeFingerprint(
+        item && item.storageFingerprint,
+        'storageFingerprint'
+      );
+      if (!storageFingerprint) {
+        throw new TypeError('存档根切换必须提供目标目录化文件最终指纹');
+      }
       if (byId.has(artifactId)) throw new TypeError(`artifactId 重复：${artifactId}`);
-      byId.set(artifactId, storageMode);
+      byId.set(artifactId, { storageMode, storageFingerprint });
     }
 
     return withWriteTransaction(this.db, () => {
@@ -1233,14 +1299,22 @@ class ArchiveRepository {
       const timestamp = this._timestamp();
       const updateArtifact = this.db.prepare(`
         UPDATE archive_artifacts
-        SET storage_mode = ?, materialization_error_code = NULL,
+        SET storage_mode = ?,
+            storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
+            storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ?,
+            materialization_error_code = NULL,
             materialization_error_message = NULL, materialization_failed_at = NULL,
             updated_at = ?
         WHERE id = ? AND status = 'ready'
       `);
       for (const artifact of readyArtifacts) {
+        const materialization = byId.get(Number(artifact.id));
         const result = updateArtifact.run(
-          byId.get(Number(artifact.id)),
+          materialization.storageMode,
+          materialization.storageFingerprint.sizeBytes,
+          materialization.storageFingerprint.mtimeMs,
+          materialization.storageFingerprint.ctimeMs,
+          materialization.storageFingerprint.ino || null,
           timestamp,
           Number(artifact.id)
         );
@@ -3053,6 +3127,13 @@ class ArchiveRepository {
     );
     const safeFileName = requiredText(payload.safeFileName, 'safeFileName', 255);
     const artifactOrder = Number(payload.artifactOrder);
+    const storageFingerprint = normalizeFingerprint(
+      payload.storageFingerprint,
+      'storageFingerprint'
+    );
+    if (!storageFingerprint) {
+      throw new TypeError('新建或修复的目录化副本必须提供最终文件指纹');
+    }
     if (!Number.isSafeInteger(artifactOrder) || artifactOrder < 1) {
       throw new TypeError('artifactOrder 必须是正安全整数');
     }
@@ -3072,12 +3153,25 @@ class ArchiveRepository {
         UPDATE archive_artifacts
         SET storage_relative_path = ?, storage_mode = ?, storage_layout_version = 2,
             safe_file_name = ?, artifact_order = ?,
+            storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
+            storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ?,
             materialization_error_code = NULL,
             materialization_error_message = NULL,
             materialization_failed_at = NULL,
             updated_at = ?
         WHERE id = ? AND status = 'ready'
-      `).run(storageRelativePath, mode, safeFileName, artifactOrder, timestamp, id);
+      `).run(
+        storageRelativePath,
+        mode,
+        safeFileName,
+        artifactOrder,
+        storageFingerprint && storageFingerprint.sizeBytes,
+        storageFingerprint && storageFingerprint.mtimeMs,
+        storageFingerprint && storageFingerprint.ctimeMs,
+        storageFingerprint && storageFingerprint.ino || null,
+        timestamp,
+        id
+      );
       this._refreshBatchStatus(Number(artifact.batch_id), timestamp);
       return { artifact: this.getArtifact(id), batch: this.getBatch(Number(artifact.batch_id)) };
     });
@@ -3336,6 +3430,7 @@ class ArchiveRepository {
     const sha256 = normalizeSha256(blobPayload.sha256);
     const sizeBytes = normalizeSize(blobPayload.sizeBytes);
     const relativePath = requiredText(blobPayload.relativePath, 'relativePath', 512);
+    const fingerprint = normalizeFingerprint(blobPayload.fingerprint);
     const timestamp = this._timestamp();
     return withWriteTransaction(this.db, () => {
       const artifact = this.db.prepare('SELECT * FROM archive_artifacts WHERE id = ?').get(id);
@@ -3345,10 +3440,27 @@ class ArchiveRepository {
       }
 
       const inserted = this.db.prepare(`
-        INSERT INTO archive_blobs (sha256, size_bytes, relative_path, created_at, last_verified_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO archive_blobs (
+          sha256, size_bytes, relative_path, created_at, last_verified_at,
+          fingerprint_size_bytes, fingerprint_mtime_ms,
+          fingerprint_ctime_ms, fingerprint_ino
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(sha256) DO NOTHING
-      `).run(sha256, sizeBytes, relativePath, timestamp, timestamp);
+      `).run(
+        sha256,
+        sizeBytes,
+        relativePath,
+        timestamp,
+        timestamp,
+        fingerprint && fingerprint.sizeBytes,
+        fingerprint && fingerprint.mtimeMs,
+        fingerprint && fingerprint.ctimeMs,
+        fingerprint && fingerprint.ino || null
+      );
+      if (inserted.changes === 1 && !fingerprint) {
+        throw new TypeError('新 Blob completion 必须提供最终文件指纹');
+      }
       const blob = this.db.prepare('SELECT * FROM archive_blobs WHERE sha256 = ?').get(sha256);
       if (!blob || Number(blob.size_bytes) !== sizeBytes || blob.relative_path !== relativePath) {
         throw new Error(`SHA-256 ${sha256.slice(0, 12)} 对应的 blob 元数据冲突`);
@@ -3615,6 +3727,60 @@ class ArchiveRepository {
       SELECT COUNT(*) AS count FROM archive_blobs WHERE id > ?
     `).get(cursor);
     return Number(row && row.count) || 0;
+  }
+
+  refreshBlobFingerprint(blobId, value) {
+    const id = Number(blobId);
+    const fingerprint = normalizeFingerprint(value);
+    if (!fingerprint) throw new TypeError('fingerprint 不能为空');
+    const result = this.db.prepare(`
+      UPDATE archive_blobs
+      SET fingerprint_size_bytes = ?, fingerprint_mtime_ms = ?,
+          fingerprint_ctime_ms = ?, fingerprint_ino = ?, last_verified_at = ?
+      WHERE id = ?
+        AND fingerprint_size_bytes IS NOT NULL
+        AND fingerprint_mtime_ms IS NOT NULL
+        AND fingerprint_ctime_ms IS NOT NULL
+    `).run(
+      fingerprint.sizeBytes,
+      fingerprint.mtimeMs,
+      fingerprint.ctimeMs,
+      fingerprint.ino || null,
+      this._timestamp(),
+      id
+    );
+    return result.changes === 1
+      ? mapBlob(this.db.prepare(`
+          SELECT bl.*, COUNT(a.id) AS reference_count
+          FROM archive_blobs bl
+          LEFT JOIN archive_artifacts a ON a.blob_id = bl.id
+          WHERE bl.id = ?
+          GROUP BY bl.id
+        `).get(id))
+      : null;
+  }
+
+  refreshStorageFingerprint(artifactId, value) {
+    const id = Number(artifactId);
+    const fingerprint = normalizeFingerprint(value, 'storageFingerprint');
+    if (!fingerprint) throw new TypeError('storageFingerprint 不能为空');
+    const result = this.db.prepare(`
+      UPDATE archive_artifacts
+      SET storage_fingerprint_size_bytes = ?, storage_fingerprint_mtime_ms = ?,
+          storage_fingerprint_ctime_ms = ?, storage_fingerprint_ino = ?, updated_at = ?
+      WHERE id = ?
+        AND storage_fingerprint_size_bytes IS NOT NULL
+        AND storage_fingerprint_mtime_ms IS NOT NULL
+        AND storage_fingerprint_ctime_ms IS NOT NULL
+    `).run(
+      fingerprint.sizeBytes,
+      fingerprint.mtimeMs,
+      fingerprint.ctimeMs,
+      fingerprint.ino || null,
+      this._timestamp(),
+      id
+    );
+    return result.changes === 1 ? this.getArtifact(id) : null;
   }
 
   deleteBlobIfUnreferenced(blobId) {
@@ -4011,6 +4177,25 @@ class ArchiveRepository {
       uniqueFileCount: Number(row.unique_file_count) || 0,
       uniqueBytes: Number(row.unique_bytes) || 0,
       logicalBytes: Number(row.logical_bytes) || 0
+    };
+  }
+
+  getEntryMaintenanceGateState() {
+    const row = this.db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM archive_batches
+          WHERE task_status IN ('reserved', 'running')) AS active_batches,
+        (SELECT COUNT(*) FROM archive_task_runs
+          WHERE status IN ('prepared', 'running')) AS active_task_runs,
+        (SELECT COUNT(*) FROM archive_artifacts
+          WHERE status = 'pending') AS pending_artifacts,
+        (SELECT COUNT(*) FROM archive_artifact_holds) AS hold_count
+    `).get();
+    return {
+      activeBatchCount: Number(row.active_batches) || 0,
+      activeTaskRunCount: Number(row.active_task_runs) || 0,
+      pendingArtifactCount: Number(row.pending_artifacts) || 0,
+      holdCount: Number(row.hold_count) || 0
     };
   }
 

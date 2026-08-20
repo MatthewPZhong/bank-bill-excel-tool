@@ -151,7 +151,8 @@ function seedExactHistoricalArchive(filePath, recordId, options = {}) {
   repository.completeArtifact(artifact.id, {
     sha256,
     sizeBytes: blobBytes.length,
-    relativePath
+    relativePath,
+    fingerprint: { sizeBytes: blobBytes.length, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   });
   db.close();
   return { artifactId: artifact.id, blobPath, sha256, sizeBytes: blobBytes.length };
@@ -897,7 +898,8 @@ test('历史来源存在同名多候选 artifact 时不猜测绑定且不建立 
   repository.completeArtifact(duplicate.id, {
     sha256: 'd'.repeat(64),
     sizeBytes: 789,
-    relativePath: `blobs/sha256/dd/${'d'.repeat(64)}`
+    relativePath: `blobs/sha256/dd/${'d'.repeat(64)}`,
+    fingerprint: { sizeBytes: 789, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   });
   db.close();
 
@@ -993,7 +995,8 @@ test('显式重建保留升级后未归档 fallback，并为已验证 artifact �
   archiveRepository.completeArtifact(artifact.id, {
     sha256: 'f'.repeat(64),
     sizeBytes: 456,
-    relativePath: `blobs/sha256/ff/${'f'.repeat(64)}`
+    relativePath: `blobs/sha256/ff/${'f'.repeat(64)}`,
+    fingerprint: { sizeBytes: 456, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   });
   const readySource = db.prepare(`
     INSERT INTO vcc_fin_op_import_sources (

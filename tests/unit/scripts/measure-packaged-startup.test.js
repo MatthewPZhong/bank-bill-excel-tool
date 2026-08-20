@@ -40,6 +40,23 @@ function createSettingsDatabase(filePath, entries = []) {
       id INTEGER PRIMARY KEY,
       import_source_id INTEGER
     );
+    CREATE TABLE archive_blobs (
+      id INTEGER PRIMARY KEY,
+      sha256 TEXT NOT NULL,
+      fingerprint_size_bytes INTEGER,
+      fingerprint_mtime_ms REAL,
+      fingerprint_ctime_ms REAL,
+      fingerprint_ino TEXT
+    );
+    CREATE TABLE archive_artifacts (
+      id INTEGER PRIMARY KEY,
+      blob_id INTEGER,
+      status TEXT,
+      storage_fingerprint_size_bytes INTEGER,
+      storage_fingerprint_mtime_ms REAL,
+      storage_fingerprint_ctime_ms REAL,
+      storage_fingerprint_ino TEXT
+    );
     CREATE INDEX idx_vcc_fin_op_system_snapshots_import_source
       ON vcc_fin_op_system_snapshots(import_source_id, id)
       WHERE import_source_id IS NOT NULL;
@@ -54,10 +71,25 @@ function createLegacySettingsDatabase(filePath, entries = []) {
   db.exec(`
     CREATE TABLE app_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT);
     CREATE TABLE vcc_fin_op_system_snapshots (id INTEGER PRIMARY KEY);
+    CREATE TABLE archive_blobs (id INTEGER PRIMARY KEY, sha256 TEXT NOT NULL);
+    CREATE TABLE archive_artifacts (id INTEGER PRIMARY KEY, blob_id INTEGER, status TEXT);
   `);
   const insert = db.prepare('INSERT INTO app_settings(setting_key, setting_value) VALUES (?, ?)');
   for (const [key, value] of entries) insert.run(key, value);
   db.close();
+}
+
+function addArchiveFingerprintColumns(db) {
+  db.exec(`
+    ALTER TABLE archive_blobs ADD COLUMN fingerprint_size_bytes INTEGER;
+    ALTER TABLE archive_blobs ADD COLUMN fingerprint_mtime_ms REAL;
+    ALTER TABLE archive_blobs ADD COLUMN fingerprint_ctime_ms REAL;
+    ALTER TABLE archive_blobs ADD COLUMN fingerprint_ino TEXT;
+    ALTER TABLE archive_artifacts ADD COLUMN storage_fingerprint_size_bytes INTEGER;
+    ALTER TABLE archive_artifacts ADD COLUMN storage_fingerprint_mtime_ms REAL;
+    ALTER TABLE archive_artifacts ADD COLUMN storage_fingerprint_ctime_ms REAL;
+    ALTER TABLE archive_artifacts ADD COLUMN storage_fingerprint_ino TEXT;
+  `);
 }
 
 function fileFingerprint(filePath) {
@@ -512,6 +544,7 @@ test('migration-vacuum 有真实 flag 前后条件且不能 skipped', () => {
       ON vcc_fin_op_system_snapshots(import_source_id, id)
       WHERE import_source_id IS NOT NULL;
   `);
+  addArchiveFingerprintColumns(db);
   db.close();
   assert.throws(() => scenarioPostcondition(options, { label: '3.1.12-portable' }, sample, {
     phases: [{ phase: 'database-vacuum', outcome: 'skipped' }]
@@ -521,7 +554,7 @@ test('migration-vacuum 有真实 flag 前后条件且不能 skipped', () => {
   }, { precondition }).vacuumFlagAfter, '1');
 });
 
-test('migration 只允许精确新增 import_source_id INTEGER 与目标 partial index，额外列仍拒绝', () => {
+test('migration 只允许精确 VCC delta 与 Archive 8 个 nullable 指纹列，额外列仍拒绝', () => {
   const root = tempDir('startup-migration-column-whitelist');
   const databasePath = path.join(root, 'tool-data.sqlite');
   createLegacySettingsDatabase(databasePath);
@@ -538,6 +571,7 @@ test('migration 只允许精确新增 import_source_id INTEGER 与目标 partial
       ON vcc_fin_op_system_snapshots(import_source_id, id)
       WHERE import_source_id IS NOT NULL;
   `);
+  addArchiveFingerprintColumns(db);
   db.close();
   assert.throws(() => scenarioPostcondition(options, { label: '3.1.12-portable' }, sample, {
     phases: [{ phase: 'database-vacuum', outcome: 'success' }]

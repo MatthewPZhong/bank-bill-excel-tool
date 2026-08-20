@@ -127,6 +127,30 @@ contextBridge.exposeInMainWorld('desktopApi', {
       ipcRenderer.on('archive-center:storage-migration-progress', wrapped);
       return () => ipcRenderer.removeListener('archive-center:storage-migration-progress', wrapped);
     },
+    startEntryMaintenance: (visitId) => (
+      ipcRenderer.invoke('archive-center:start-entry-maintenance', visitId)
+    ),
+    onEntryMaintenanceProgress: (listener) => {
+      const wrapped = (_event, progress) => {
+        try { listener(progress); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('archive-center:entry-maintenance-progress', wrapped);
+      return () => ipcRenderer.removeListener('archive-center:entry-maintenance-progress', wrapped);
+    },
+    onEntryMaintenanceCompleted: (listener) => {
+      const wrapped = (_event, result) => {
+        try { listener(result); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('archive-center:entry-maintenance-completed', wrapped);
+      return () => ipcRenderer.removeListener('archive-center:entry-maintenance-completed', wrapped);
+    },
+    onEntryMaintenanceFailed: (listener) => {
+      const wrapped = (_event, failure) => {
+        try { listener(failure); } catch (_error) { /* renderer listener errors are isolated */ }
+      };
+      ipcRenderer.on('archive-center:entry-maintenance-failed', wrapped);
+      return () => ipcRenderer.removeListener('archive-center:entry-maintenance-failed', wrapped);
+    },
     setRetentionDays: (retentionDays) => ipcRenderer.invoke('archive-center:set-retention-days', retentionDays),
     getStats: () => ipcRenderer.invoke('archive-center:get-stats')
   },

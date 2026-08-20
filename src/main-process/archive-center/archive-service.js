@@ -342,6 +342,7 @@ class ArchiveService {
       materializeCopyFile: options.materializeCopyFile
     });
     this.initialized = false;
+    this.rootEstablished = false;
     this.initialization = null;
     this.materializationGeneration = 0;
     this.materializationPromise = null;
@@ -351,6 +352,11 @@ class ArchiveService {
     this.materializationCandidateCursor = 0;
     this.orphanBlobPrefixes = [];
     this.orphanBlobPrefixCursor = 0;
+    this.entryMaintenanceCursors = {
+      blobMetadata: 0,
+      artifactMetadata: 0,
+      layoutMaterialization: 0
+    };
     this.materializationProgress = {
       status: 'idle',
       processed: 0,
@@ -406,7 +412,80 @@ class ArchiveService {
     return resolved;
   }
 
+  async _assertManagedRoot(options = {}) {
+    try {
+      const rootStat = await this.fs.promises.lstat(this.rootDir);
+      if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+        throw new ArchiveOperationError(
+          'ARCHIVE_PATH_SYMLINK_REJECTED',
+          '存档根不能是符号链接或目录联接'
+        );
+      }
+    } catch (error) {
+      if (error && error.code === 'ENOENT' && options.allowMissingRoot === true) {
+        return false;
+      }
+      if (error && error.code === 'ENOENT') {
+        throw new ArchiveOperationError(
+          'ARCHIVE_STORAGE_ROOT_UNAVAILABLE',
+          '存档位置离线或暂时不可用',
+          { retryable: true }
+        );
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  async _assertManagedFilePath(relativePath, options = {}) {
+    const resolved = this._resolveManagedRelative(relativePath);
+    const rootAvailable = await this._assertManagedRoot(options);
+    if (!rootAvailable) return resolved;
+    const parts = String(relativePath).split('/');
+    const stop = options.includeLeaf === false ? parts.length - 1 : parts.length;
+    let current = this.rootDir;
+    for (let index = 0; index < stop; index += 1) {
+      current = path.join(current, parts[index]);
+      try {
+        const stat = await this.fs.promises.lstat(current);
+        if (stat.isSymbolicLink()) {
+          throw new ArchiveOperationError(
+            'ARCHIVE_PATH_SYMLINK_REJECTED',
+            '存档内部路径包含符号链接或目录联接'
+          );
+        }
+      } catch (error) {
+        if (error && error.code === 'ENOENT') break;
+        throw error;
+      }
+    }
+    return resolved;
+  }
+
+  async _syncFile(filePath) {
+    const handle = await this.fs.promises.open(filePath, 'r');
+    try { await handle.sync(); } finally { await handle.close(); }
+  }
+
+  async _syncDirectory(directory) {
+    let handle;
+    try {
+      handle = await this.fs.promises.open(directory, 'r');
+      await handle.sync();
+    } catch (error) {
+      if (!error || !['EINVAL', 'EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) throw error;
+    } finally {
+      if (handle) await handle.close();
+    }
+  }
+
   async _mkdirs() {
+    await this.fs.promises.mkdir(this.rootDir, { recursive: true });
+    await this._assertManagedRoot();
+    this.rootEstablished = true;
+    await this._assertManagedFilePath(`${STAGING_DIR_NAME}/.guard`, { includeLeaf: false });
+    await this._assertManagedFilePath(`${READONLY_DIR_NAME}/.guard`, { includeLeaf: false });
+    await this._assertManagedFilePath(`${BLOB_ROOT_PARTS.join('/')}/.guard`, { includeLeaf: false });
     await this.fs.promises.mkdir(this.stagingDir, { recursive: true });
     await this.fs.promises.mkdir(this.readonlyDir, { recursive: true });
     await this.fs.promises.mkdir(this.blobRoot, { recursive: true });
@@ -486,16 +565,31 @@ class ArchiveService {
         invalidMessage = '存档文件路径元数据不一致，可重试该文件';
       } else {
         try {
-          const filePath = this._resolveManagedRelative(blob.relativePath);
-          const stat = await this.fs.promises.lstat(filePath);
+          const filePath = await this._assertManagedFilePath(blob.relativePath);
+          const stat = await this.fs.promises.lstat(filePath, { bigint: true });
           if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== blob.sizeBytes) {
             invalidCode = 'ARCHIVE_BLOB_INVALID';
             invalidMessage = '存档文件缺失或大小不一致，可重试该文件';
-          } else if (verifyHashes) {
+          } else if (verifyHashes
+              || (blob.fingerprint && !sourceSnapshotMatchesStat(blob.fingerprint, stat))) {
             const actual = await this._hashFile(filePath);
+            const finalStat = await this.fs.promises.lstat(filePath, { bigint: true });
+            const beforeSnapshot = sourceSnapshotFromStat(stat);
+            if (!beforeSnapshot || !sourceSnapshotMatchesStat(beforeSnapshot, finalStat)) {
+              failures.push({
+                code: 'ARCHIVE_BLOB_CHANGED_DURING_READ',
+                blob: blob.sha256.slice(0, 12)
+              });
+              continue;
+            }
             if (actual.sha256 !== blob.sha256 || actual.sizeBytes !== blob.sizeBytes) {
               invalidCode = 'ARCHIVE_BLOB_HASH_MISMATCH';
               invalidMessage = '存档文件哈希校验失败，可重试该文件';
+            } else if (!verifyHashes && blob.fingerprint) {
+              const refreshed = sourceSnapshotFromStat(finalStat);
+              if (refreshed && typeof this.repository.refreshBlobFingerprint === 'function') {
+                this.repository.refreshBlobFingerprint(blob.id, refreshed);
+              }
             }
           }
         } catch (error) {
@@ -532,6 +626,9 @@ class ArchiveService {
 
   async _listPhysicalBlobPrefixes() {
     try {
+      await this._assertManagedFilePath(`${BLOB_ROOT_PARTS.join('/')}/.guard`, {
+        includeLeaf: false
+      });
       const prefixes = await this.fs.promises.readdir(this.blobRoot);
       return prefixes.filter((prefix) => /^[a-f0-9]{2}$/.test(prefix)).sort();
     } catch (error) {
@@ -541,7 +638,9 @@ class ArchiveService {
   }
 
   async _scanOrphanBlobPrefixUnlocked(prefix) {
-    const prefixDir = path.join(this.blobRoot, prefix);
+    const relativePrefix = `${BLOB_ROOT_PARTS.join('/')}/${prefix}`;
+    await this._assertManagedFilePath(`${relativePrefix}/.guard`, { includeLeaf: false });
+    const prefixDir = this._resolveManagedRelative(relativePrefix);
     const stat = await this.fs.promises.lstat(prefixDir);
     if (!stat.isDirectory() || stat.isSymbolicLink()) {
       throw new ArchiveOperationError(
@@ -554,7 +653,8 @@ class ArchiveService {
         .flatMap((job) => job.releasedBlobs.map((blob) => blob.relativePath))
     );
     const names = await this.fs.promises.readdir(prefixDir);
-    let removed = 0;
+    let reported = 0;
+    const pathHashes = [];
     const failures = [];
     for (const name of names) {
       if (!SHA256_RE.test(name) || !name.startsWith(prefix)) continue;
@@ -563,14 +663,12 @@ class ArchiveService {
       if ((known && known.relativePath === relativePath) || pendingCleanupPaths.has(relativePath)) {
         continue;
       }
-      try {
-        await this.fs.promises.rm(path.join(prefixDir, name), { force: true });
-        removed += 1;
-      } catch (error) {
-        failures.push({ code: safeFailure(error, '清理').code, blob: name.slice(0, 12) });
-      }
+      // SHA 形状和所在位置都不是 durable owner。仅记录隐私安全的
+      // relative-path hash，不打开、不复制、不删除未知文件。
+      reported += 1;
+      pathHashes.push(crypto.createHash('sha256').update(relativePath).digest('hex'));
     }
-    return { removed, failures };
+    return { removed: 0, reported, pathHashes, failures };
   }
 
   async _drainOrphanBlobPrefixes() {
@@ -597,12 +695,25 @@ class ArchiveService {
     const attemptedIds = new Set();
     for (const artifact of artifacts) {
       cursor = Math.max(cursor, artifact.id);
-      const layout = await this.materializer[
+      let layout = await this.materializer[
         verifyHashes ? 'verify' : 'verifyMetadata'
       ](artifact.storageRelativePath, {
         sha256: artifact.blob.sha256,
         sizeBytes: artifact.blob.sizeBytes
       });
+      if (!verifyHashes
+          && layout.valid
+          && artifact.storageFingerprint
+          && !sourceSnapshotMatchesStat(artifact.storageFingerprint, layout.stat)) {
+        layout = await this.materializer.verify(artifact.storageRelativePath, {
+          sha256: artifact.blob.sha256,
+          sizeBytes: artifact.blob.sizeBytes
+        });
+        if (layout.valid && typeof this.repository.refreshStorageFingerprint === 'function') {
+          const refreshed = sourceSnapshotFromStat(layout.stat);
+          if (refreshed) this.repository.refreshStorageFingerprint(artifact.id, refreshed);
+        }
+      }
       const requiresIsolation = artifact.storageMode === 'hardlink';
       if (layout.valid && !requiresIsolation) continue;
       if (!layout.valid) {
@@ -932,6 +1043,32 @@ class ArchiveService {
         };
       }
       try {
+        if (this.rootEstablished) {
+          let rootStat;
+          try {
+            rootStat = await this.fs.promises.lstat(this.rootDir);
+          } catch (error) {
+            if (!error || error.code !== 'ENOENT') throw error;
+            throw new ArchiveOperationError(
+              'ARCHIVE_STORAGE_ROOT_UNAVAILABLE',
+              '存档位置离线或暂时不可用',
+              { retryable: true }
+            );
+          }
+          if (rootStat.isSymbolicLink()) {
+            throw new ArchiveOperationError(
+              'ARCHIVE_PATH_SYMLINK_REJECTED',
+              '存档根不能是符号链接或目录联接'
+            );
+          }
+          if (!rootStat.isDirectory()) {
+            throw new ArchiveOperationError(
+              'ARCHIVE_STORAGE_ROOT_UNAVAILABLE',
+              '存档位置离线或暂时不可用',
+              { retryable: true }
+            );
+          }
+        }
         return await operation();
       } catch (error) {
         return {
@@ -1782,7 +1919,12 @@ class ArchiveService {
     });
 
     try {
+      await this._assertManagedFilePath(`${STAGING_DIR_NAME}/${path.basename(stagedPath)}`, {
+        includeLeaf: false,
+        allowMissingRoot: !this.rootEstablished
+      });
       await this.fs.promises.mkdir(this.stagingDir, { recursive: true });
+      this.rootEstablished = true;
       await pipeline(
         this.fs.createReadStream(filePath),
         hashingTransform,
@@ -1827,8 +1969,20 @@ class ArchiveService {
     return { sha256: hash.digest('hex'), sizeBytes };
   }
 
+  async _fileFingerprint(filePath) {
+    const stat = await this.fs.promises.lstat(filePath, { bigint: true });
+    if (!stat.isFile() || stat.isSymbolicLink()) {
+      throw new ArchiveOperationError('ARCHIVE_FILE_INVALID', '存档文件不是普通文件');
+    }
+    const fingerprint = sourceSnapshotFromStat(stat);
+    if (!fingerprint) {
+      throw new ArchiveOperationError('ARCHIVE_FINGERPRINT_INVALID', '无法读取存档文件指纹');
+    }
+    return fingerprint;
+  }
+
   async _assertExistingBlobFile(filePath, sha256, sizeBytes) {
-    const stat = await this.fs.promises.lstat(filePath);
+    const stat = await this.fs.promises.lstat(filePath, { bigint: true });
     if (!stat.isFile() || stat.isSymbolicLink() || Number(stat.size) !== sizeBytes) {
       throw new ArchiveOperationError(
         'ARCHIVE_BLOB_CONFLICT',
@@ -1836,17 +1990,26 @@ class ArchiveService {
       );
     }
     const actual = await this._hashFile(filePath);
+    const finalStat = await this.fs.promises.lstat(filePath, { bigint: true });
+    const sourceSnapshot = sourceSnapshotFromStat(stat);
+    if (!sourceSnapshot || !sourceSnapshotMatchesStat(sourceSnapshot, finalStat)) {
+      throw new ArchiveOperationError(
+        'ARCHIVE_BLOB_CHANGED_DURING_READ',
+        `存档内容 ${sha256.slice(0, 12)} 在校验期间发生变化`
+      );
+    }
     if (actual.sha256 !== sha256 || actual.sizeBytes !== sizeBytes) {
       throw new ArchiveOperationError(
         'ARCHIVE_BLOB_CONFLICT',
         `存档内容 ${sha256.slice(0, 12)} 的既有文件校验失败`
       );
     }
+    return sourceSnapshotFromStat(finalStat);
   }
 
   async _publishStagedBlob(staged) {
     const relativePath = blobRelativePath(staged.sha256);
-    const targetPath = this._resolveManagedRelative(relativePath);
+    const targetPath = await this._assertManagedFilePath(relativePath, { includeLeaf: false });
     const knownBlob = this.repository.findBlobByHash(staged.sha256);
     if (knownBlob
         && (knownBlob.relativePath !== relativePath || knownBlob.sizeBytes !== staged.sizeBytes)) {
@@ -1857,25 +2020,50 @@ class ArchiveService {
     }
     await this.fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
 
-    try {
-      await this._assertExistingBlobFile(targetPath, staged.sha256, staged.sizeBytes);
-      await this.fs.promises.rm(staged.stagedPath, { force: true });
-      return { relativePath, targetPath, reused: true };
-    } catch (error) {
-      if (!(error && error.code === 'ENOENT')) {
-        if (error instanceof ArchiveOperationError) throw error;
-        throw error;
+    if (knownBlob) {
+      try {
+        const fingerprint = await this._assertExistingBlobFile(
+          targetPath,
+          staged.sha256,
+          staged.sizeBytes
+        );
+        await this.fs.promises.rm(staged.stagedPath, { force: true });
+        return { relativePath, targetPath, reused: true, fingerprint };
+      } catch (error) {
+        if (!(error && error.code === 'ENOENT')) throw error;
+      }
+    } else {
+      try {
+        await this.fs.promises.lstat(targetPath);
+        throw new ArchiveOperationError(
+          'ARCHIVE_BLOB_UNKNOWN_CONFLICT',
+          `存档内容 ${staged.sha256.slice(0, 12)} 的目标位置已有未知文件`
+        );
+      } catch (error) {
+        if (!(error && error.code === 'ENOENT')) throw error;
       }
     }
 
     try {
+      await this._syncFile(staged.stagedPath);
       await this.fs.promises.rename(staged.stagedPath, targetPath);
-      return { relativePath, targetPath, reused: false };
+      await this._syncDirectory(path.dirname(targetPath));
+      return {
+        relativePath,
+        targetPath,
+        reused: false,
+        fingerprint: await this._fileFingerprint(targetPath)
+      };
     } catch (error) {
+      if (!knownBlob) throw error;
       try {
-        await this._assertExistingBlobFile(targetPath, staged.sha256, staged.sizeBytes);
+        const fingerprint = await this._assertExistingBlobFile(
+          targetPath,
+          staged.sha256,
+          staged.sizeBytes
+        );
         await this.fs.promises.rm(staged.stagedPath, { force: true });
-        return { relativePath, targetPath, reused: true };
+        return { relativePath, targetPath, reused: true, fingerprint };
       } catch (_existingError) {
         throw error;
       }
@@ -1968,6 +2156,7 @@ class ArchiveService {
       sizeBytes: current.blob.sizeBytes
     };
     const canonicalPath = this._resolveManagedRelative(current.blob.relativePath);
+    await this._assertManagedFilePath(current.blob.relativePath);
     const canonical = await verifyFile(canonicalPath, expected, this.fs);
     if (!canonical.valid) {
       if (!isFileIntegrityFailure(canonical)) {
@@ -2005,7 +2194,8 @@ class ArchiveService {
           await this.fs.promises.chmod(targetPath, 0o444);
           const completed = this.repository.completeMaterialization(current.id, {
             ...prepared.assignment,
-            storageMode: 'copy'
+            storageMode: 'copy',
+            storageFingerprint: await this._fileFingerprint(targetPath)
           });
           return {
             ok: true,
@@ -2035,7 +2225,8 @@ class ArchiveService {
       });
       const completed = this.repository.completeMaterialization(current.id, {
         ...prepared.assignment,
-        storageMode: materialized.mode
+        storageMode: materialized.mode,
+        storageFingerprint: await this._fileFingerprint(materialized.targetPath)
       });
       return {
         ok: true,
@@ -2075,8 +2266,9 @@ class ArchiveService {
       staged = null;
       const completed = this.repository.completeArtifact(artifact.id, {
         sha256: published.relativePath.split('/').pop(),
-        sizeBytes: Number((await this.fs.promises.stat(published.targetPath)).size),
-        relativePath: published.relativePath
+        sizeBytes: published.fingerprint.sizeBytes,
+        relativePath: published.relativePath,
+        fingerprint: published.fingerprint
       });
       await this._releaseSourcePaths([previouslyRegisteredSourcePath, archivedSourcePath]);
       const materialized = await this._materializeArtifactUnlocked(completed.artifact.id);
@@ -2478,7 +2670,7 @@ class ArchiveService {
     for (const blob of blobs) {
       let filePath;
       try {
-        filePath = this._resolveManagedRelative(blob.relativePath);
+        filePath = await this._assertManagedFilePath(blob.relativePath);
         await this.fs.promises.rm(filePath, { force: true });
         deletedBlobFiles += 1;
         releasedBytes += blob.sizeBytes;
@@ -2742,7 +2934,10 @@ class ArchiveService {
               storageRelativePath: artifact.storageRelativePath,
               storageMode: artifact.storageMode,
               safeFileName: artifact.safeFileName,
-              artifactOrder: artifact.artifactOrder
+              artifactOrder: artifact.artifactOrder,
+              storageFingerprint: await this._fileFingerprint(
+                this._resolveManagedRelative(artifact.storageRelativePath)
+              )
             });
             artifact = completed.artifact;
           }
@@ -2763,6 +2958,7 @@ class ArchiveService {
     }
 
     const canonicalPath = this._resolveManagedRelative(artifact.blob.relativePath);
+    await this._assertManagedFilePath(artifact.blob.relativePath);
     const canonical = await verifyFile(canonicalPath, expected, this.fs);
     if (!canonical.valid) {
       if (!isFileIntegrityFailure(canonical)) {
@@ -2825,6 +3021,10 @@ class ArchiveService {
       const targetPath = path.join(copyDir, safeName(ready.artifact.originalName));
       const tempPath = `${targetPath}.tmp`;
       try {
+        await this._assertManagedFilePath(
+          `${READONLY_DIR_NAME}/${path.basename(copyDir)}/${path.basename(targetPath)}`,
+          { includeLeaf: false }
+        );
         await this.fs.promises.mkdir(copyDir, { recursive: true });
         await pipeline(
           this.fs.createReadStream(ready.filePath),
@@ -2972,6 +3172,7 @@ class ArchiveService {
   async _cleanupManagedDirectory(directory, label) {
     let names;
     try {
+      await this._assertManagedFilePath(`${label}/.guard`, { includeLeaf: false });
       names = await this.fs.promises.readdir(directory);
     } catch (error) {
       if (error && error.code === 'ENOENT') return { removed: 0, failures: [] };
@@ -2980,20 +3181,13 @@ class ArchiveService {
         failures: [{ code: safeFailure(error, '扫描').code, item: label }]
       };
     }
-    let removed = 0;
-    const failures = [];
+    const pathHashes = [];
     for (const name of names) {
-      try {
-        await this.fs.promises.rm(path.join(directory, name), { recursive: true, force: true });
-        removed += 1;
-      } catch (error) {
-        failures.push({
-          code: safeFailure(error, '清理').code,
-          item: `${label}/${safeName(name)}`
-        });
-      }
+      pathHashes.push(crypto.createHash('sha256')
+        .update(`${label}/${String(name)}`)
+        .digest('hex'));
     }
-    return { removed, failures };
+    return { removed: 0, reported: names.length, pathHashes, failures: [] };
   }
 
   async _listPhysicalBlobFiles() {
@@ -3140,15 +3334,9 @@ class ArchiveService {
       const physicalFiles = await this._listPhysicalBlobFiles();
       for (const file of physicalFiles) {
         if (referencedPaths.has(file.relativePath)) continue;
-        try {
-          await this.fs.promises.rm(file.filePath, { force: true });
-          removedOrphanBlobFiles += 1;
-        } catch (error) {
-          failures.push({
-            code: safeFailure(error, '清理').code,
-            blob: file.sha256.slice(0, 12)
-          });
-        }
+        // 全量强校验也不能把“文件名像 SHA”升格为所有权证据。
+        // 只报告数量；具体路径不进入返回 DTO/日志。
+        removedOrphanBlobFiles += 0;
       }
       orphanBlobPrefixCursor = orphanBlobPrefixes.length;
     }
@@ -3189,6 +3377,246 @@ class ArchiveService {
         deferredPhysicalRecovery: true
       };
     });
+  }
+
+  async runBlobMetadataMaintenance(options = {}) {
+    let cursor = this.entryMaintenanceCursors.blobMetadata;
+    let processed = 0;
+    let failures = 0;
+    while (true) {
+      const chunkResult = await this._run('runBlobMetadataMaintenancePage', () => (
+        this._verifyBlobChunkUnlocked({
+          afterBlobId: cursor,
+          limit: this.startupMaterializationBatchSize,
+          verifyHashes: false
+        })
+      ));
+      if (!chunkResult || chunkResult.ok === false) return chunkResult;
+      const chunk = chunkResult;
+      if (chunk.failures.length > 0) {
+        return {
+          ok: false,
+          status: 'partial',
+          code: chunk.failures[0].code || 'ARCHIVE_BLOB_METADATA_FAILED',
+          processed,
+          cursor,
+          remaining: this._countBlobsAfter(cursor),
+          failures: chunk.failures
+        };
+      }
+      cursor = chunk.cursor;
+      this.entryMaintenanceCursors.blobMetadata = cursor;
+      processed += chunk.fetched;
+      failures += chunk.failures.length;
+      if (typeof options.onProgress === 'function') {
+        options.onProgress({ processed, remaining: chunk.remaining });
+      }
+      if (chunk.fetched === 0 || chunk.remaining === 0) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    this.entryMaintenanceCursors.blobMetadata = 0;
+    return {
+      ok: failures === 0,
+      status: failures === 0 ? 'complete' : 'partial',
+      processed,
+      cursor,
+      failures
+    };
+  }
+
+  async runArtifactMetadataMaintenance(options = {}) {
+    let cursor = this.entryMaintenanceCursors.artifactMetadata;
+    let processed = 0;
+    let failures = 0;
+    while (true) {
+      const chunkResult = await this._run('runArtifactMetadataMaintenancePage', () => (
+        this._verifyMaterializedArtifactChunkUnlocked({
+          afterArtifactId: cursor,
+          limit: this.startupMaterializationBatchSize,
+          verifyHashes: false,
+          repairInvalid: false
+        })
+      ));
+      if (!chunkResult || chunkResult.ok === false) return chunkResult;
+      const chunk = chunkResult;
+      if (chunk.failures.length > 0) {
+        return {
+          ok: false,
+          status: 'partial',
+          code: chunk.failures[0].code || 'ARCHIVE_ARTIFACT_METADATA_FAILED',
+          processed,
+          cursor,
+          remaining: this._countMaterializedArtifactsAfter(cursor),
+          failures: chunk.failures
+        };
+      }
+      cursor = chunk.cursor;
+      this.entryMaintenanceCursors.artifactMetadata = cursor;
+      processed += chunk.fetched;
+      failures += chunk.failures.length;
+      const remaining = this._countMaterializedArtifactsAfter(cursor);
+      if (typeof options.onProgress === 'function') options.onProgress({ processed, remaining });
+      if (chunk.fetched === 0 || remaining === 0) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    this.entryMaintenanceCursors.artifactMetadata = 0;
+    return { ok: failures === 0, status: failures === 0 ? 'complete' : 'partial', processed, failures };
+  }
+
+  async runLayoutMaterializationMaintenance(options = {}) {
+    let cursor = this.entryMaintenanceCursors.layoutMaterialization;
+    let processed = 0;
+    let succeeded = 0;
+    const failures = [];
+    while (true) {
+      const chunkResult = await this._run('runLayoutMaterializationMaintenancePage', () => (
+        this._materializeCandidateChunkUnlocked(
+          cursor,
+          this.startupMaterializationBatchSize
+        )
+      ));
+      if (!chunkResult || chunkResult.ok === false) return chunkResult;
+      const chunk = chunkResult;
+      if (chunk.failures.length > 0) {
+        return {
+          ok: false,
+          status: 'partial',
+          code: chunk.failures[0].code || 'ARCHIVE_LAYOUT_MATERIALIZATION_FAILED',
+          processed,
+          succeeded,
+          cursor,
+          remaining: this._countMaterializationCandidates(),
+          failures: chunk.failures
+        };
+      }
+      cursor = chunk.cursor;
+      this.entryMaintenanceCursors.layoutMaterialization = cursor;
+      processed += chunk.processed;
+      succeeded += chunk.succeeded;
+      failures.push(...chunk.failures);
+      const remaining = this._countMaterializationCandidates();
+      if (typeof options.onProgress === 'function') options.onProgress({ processed, remaining });
+      if (chunk.fetched === 0 || remaining === 0) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    this.entryMaintenanceCursors.layoutMaterialization = 0;
+    return {
+      ok: failures.length === 0,
+      status: failures.length === 0 ? 'complete' : 'partial',
+      processed,
+      succeeded,
+      failures
+    };
+  }
+
+  async runOwnedOrphanCleanup() {
+    const jobs = this.repository.listCleanupJobs();
+    const results = [];
+    for (const job of jobs) {
+      const result = await this._run('runOwnedOrphanCleanupPage', () => (
+        this._executeCleanupJobUnlocked(job)
+      ));
+      results.push(result);
+      if (!result || result.ok === false) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return {
+      ok: results.every((result) => result && result.ok),
+      status: results.every((result) => result && result.ok) ? 'complete' : 'partial',
+      processed: results.length,
+      results
+    };
+  }
+
+  async runHistoricalHealthScan() {
+    const transient = await this._run('runHistoricalHealthScanTransient', async () => {
+      const staging = await this._cleanupManagedDirectory(this.stagingDir, STAGING_DIR_NAME);
+      const readonly = await this._cleanupManagedDirectory(this.readonlyDir, READONLY_DIR_NAME);
+      return { staging, readonly, prefixes: await this._listPhysicalBlobPrefixes() };
+    });
+    if (!transient || transient.ok === false) return transient;
+    const transientFailures = [
+      ...(transient.staging.failures || []),
+      ...(transient.readonly.failures || [])
+    ];
+    if (transientFailures.length > 0) {
+      return {
+        ok: false,
+        status: 'partial',
+        code: transientFailures[0].code || 'ARCHIVE_TRANSIENT_SCAN_FAILED',
+        processed: 0,
+        failures: transientFailures
+      };
+    }
+    let unknownBlobCount = 0;
+    for (const prefix of transient.prefixes) {
+      const result = await this._run('runHistoricalHealthScanPrefix', () => (
+        this._scanOrphanBlobPrefixUnlocked(prefix)
+      ));
+      if (!result || result.ok === false) return result;
+      if (Array.isArray(result.failures) && result.failures.length > 0) {
+        return {
+          ok: false,
+          status: 'partial',
+          code: result.failures[0].code || 'ARCHIVE_BLOB_PREFIX_SCAN_FAILED',
+          processed: unknownBlobCount,
+          failures: result.failures
+        };
+      }
+      unknownBlobCount += Number(result.reported) || 0;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return {
+      ok: true,
+      status: 'complete',
+      unknownTransientCount: (transient.staging.reported || 0) + (transient.readonly.reported || 0),
+      unknownBlobCount
+    };
+  }
+
+  async runRetentionMaintenance(options = {}) {
+    const asOfLocalDate = options.asOfLocalDate || localDateOf(options.now || this.now());
+    const deletedBatchIds = [];
+    const results = [];
+    while (true) {
+      const page = await this._run('runRetentionMaintenancePage', async () => {
+        const candidates = this.repository.listExpiredBatches(asOfLocalDate)
+          .slice(0, this.startupMaterializationBatchSize);
+        const pageResults = [];
+        for (const batch of candidates) {
+          pageResults.push(await this._deleteBatchUnlocked(batch.id));
+        }
+        return { candidates, pageResults };
+      });
+      if (!page || page.ok === false) return page;
+      results.push(...page.pageResults);
+      deletedBatchIds.push(...page.pageResults
+        .filter((result) => result.metadataDeleted)
+        .map((result) => Number(result.batchId)));
+      const failedPageResult = page.pageResults.find((result) => !result || result.ok === false);
+      if (failedPageResult) {
+        return {
+          ok: false,
+          status: 'partial',
+          code: failedPageResult.code || 'ARCHIVE_RETENTION_FAILED',
+          processed: results.length,
+          deletedBatchIds,
+          results
+        };
+      }
+      if (typeof options.onProgress === 'function') {
+        options.onProgress({ processed: results.length, remaining: page.candidates.length === this.startupMaterializationBatchSize ? 1 : 0 });
+      }
+      if (page.candidates.length < this.startupMaterializationBatchSize) break;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    return {
+      ok: results.every((result) => result.ok),
+      status: results.every((result) => result.ok) ? 'complete' : 'partial',
+      processed: results.length,
+      deletedBatchIds,
+      results
+    };
   }
 
   async reconcileStartup(options = {}) {

@@ -62,7 +62,13 @@ function completeLayout(repository, artifact, overrides = {}) {
     storageRelativePath: overrides.storageRelativePath
       || `${batch.localDate.slice(0, 4)}/${batch.localDate.slice(0, 7)}/${batch.localDate}/${batch.batchNumber}/${safeFileName}`,
     safeFileName,
-    artifactOrder: artifact.artifactOrder
+    artifactOrder: artifact.artifactOrder,
+    storageFingerprint: overrides.storageFingerprint || {
+      sizeBytes: artifact.blob.sizeBytes,
+      mtimeMs: 1,
+      ctimeMs: 1,
+      ino: '1'
+    }
   });
 }
 
@@ -91,7 +97,8 @@ test('archive instance ID conflict-safe get-or-create，root switch 与全部 re
     const completed = repository.completeArtifact(artifact.id, {
       sha256: HASH_A,
       sizeBytes: 5,
-      relativePath: `blobs/sha256/aa/${HASH_A}`
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     const layout = completeLayout(repository, completed.artifact, { storageMode: 'hardlink' });
     repository.recordMaterializationFailure(layout.artifact.id, {
@@ -103,7 +110,11 @@ test('archive instance ID conflict-safe get-or-create，root switch 与全部 re
     const switched = repository.commitStorageRootSwitch({
       storageRoot: '/new/archive',
       expectedStoredRoot: null,
-      materializations: [{ artifactId: artifact.id, storageMode: 'copy' }]
+      materializations: [{
+        artifactId: artifact.id,
+        storageMode: 'copy',
+        storageFingerprint: { sizeBytes: 5, mtimeMs: 2, ctimeMs: 2, ino: '2' }
+      }]
     });
     const after = repository.getArtifact(artifact.id);
     assert.equal(switched.materializedArtifactCount, 1);
@@ -121,7 +132,11 @@ test('archive instance ID conflict-safe get-or-create，root switch 与全部 re
     assert.throws(() => repository.commitStorageRootSwitch({
       storageRoot: '/third/archive',
       expectedStoredRoot: '/stale/archive',
-      materializations: [{ artifactId: artifact.id, storageMode: 'hardlink' }]
+      materializations: [{
+        artifactId: artifact.id,
+        storageMode: 'hardlink',
+        storageFingerprint: { sizeBytes: 5, mtimeMs: 3, ctimeMs: 3, ino: '3' }
+      }]
     }), (error) => error.code === 'ARCHIVE_STORAGE_ROOT_CONFLICT');
     assert.equal(repository.getArtifact(artifact.id).storageMode, 'copy');
   } finally {
@@ -144,7 +159,8 @@ test('目录化候选以 artifact id 游标分页，不受单次 5000 上限截�
       repository.completeArtifact(artifact.id, {
         sha256,
         sizeBytes: index + 1,
-        relativePath: `blobs/sha256/${index}/${sha256}`
+        relativePath: `blobs/sha256/${index}/${sha256}`,
+        fingerprint: { sizeBytes: index + 1, mtimeMs: 1, ctimeMs: 1, ino: '1' }
       });
       ids.push(artifact.id);
     }
@@ -479,6 +495,21 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
     assert.equal(artifactColumns.has('materialization_error_code'), true);
     assert.equal(artifactColumns.has('materialization_error_message'), true);
     assert.equal(artifactColumns.has('materialization_failed_at'), true);
+    for (const name of [
+      'storage_fingerprint_size_bytes',
+      'storage_fingerprint_mtime_ms',
+      'storage_fingerprint_ctime_ms',
+      'storage_fingerprint_ino'
+    ]) assert.equal(artifactColumns.has(name), true, name);
+    const blobColumns = new Set(
+      db.prepare('PRAGMA table_info(archive_blobs)').all().map((row) => row.name)
+    );
+    for (const name of [
+      'fingerprint_size_bytes',
+      'fingerprint_mtime_ms',
+      'fingerprint_ctime_ms',
+      'fingerprint_ino'
+    ]) assert.equal(blobColumns.has(name), true, name);
     assert.equal(artifactColumns.has('materialization_status'), false);
     const taskRunIndex = db.prepare(`
       SELECT sql FROM sqlite_master
@@ -502,6 +533,65 @@ test('建表幂等，批次按模块代码和本地日期生成独立流水号',
   }
 });
 
+test('新 Blob/目录化副本完成事务写指纹，旧 NULL Blob dedupe 不回填，半指纹 mapper 拒绝返回', () => {
+  const { db, repository } = createFixture();
+  try {
+    const fingerprint = {
+      sizeBytes: 5,
+      mtimeMs: 1763597869000.25,
+      ctimeMs: 1763597869001.5,
+      ino: '23362423067021943'
+    };
+    const firstBatch = createBatch(repository, { operationKey: 'fingerprint-new' }).batch;
+    const firstArtifact = addArtifact(repository, firstBatch.id, { artifactKey: 'fingerprint-new' });
+    repository.startArtifactAttempt(firstArtifact.id);
+    assert.throws(() => repository.completeArtifact(firstArtifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`
+    }), /最终文件指纹/);
+    assert.equal(repository.findBlobByHash(HASH_A), null);
+    assert.equal(repository.getArtifact(firstArtifact.id).status, 'pending');
+    const first = repository.completeArtifact(firstArtifact.id, {
+      sha256: HASH_A,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint
+    });
+    assert.deepEqual(first.blob.fingerprint, fingerprint);
+    const materialized = completeLayout(repository, first.artifact, {
+      storageFingerprint: fingerprint
+    });
+    assert.deepEqual(materialized.artifact.storageFingerprint, fingerprint);
+
+    db.prepare(`
+      INSERT INTO archive_blobs(sha256, size_bytes, relative_path, created_at, last_verified_at)
+      VALUES (?, 5, ?, ?, ?)
+    `).run(HASH_B, `blobs/sha256/bb/${HASH_B}`, '2026-07-01', '2026-07-01');
+    const legacyBatch = createBatch(repository, { operationKey: 'fingerprint-legacy' }).batch;
+    const legacyArtifact = addArtifact(repository, legacyBatch.id, { artifactKey: 'fingerprint-legacy' });
+    repository.startArtifactAttempt(legacyArtifact.id);
+    const deduped = repository.completeArtifact(legacyArtifact.id, {
+      sha256: HASH_B,
+      sizeBytes: 5,
+      relativePath: `blobs/sha256/bb/${HASH_B}`,
+      fingerprint
+    });
+    assert.equal(deduped.deduplicated, true);
+    assert.equal(deduped.blob.fingerprint, null);
+
+    db.prepare(`
+      UPDATE archive_blobs
+      SET fingerprint_size_bytes = 5, fingerprint_mtime_ms = 1,
+          fingerprint_ctime_ms = NULL, fingerprint_ino = '9'
+      WHERE id = ?
+    `).run(first.blob.id);
+    assert.equal(repository.findBlobByHash(HASH_A).fingerprint, null);
+  } finally {
+    db.close();
+  }
+});
+
 test('VCC 有效数据 business hold 不可被用户解锁、手工删除或 retention 绕过', () => {
   const { db, repository } = createFixture();
   try {
@@ -520,7 +610,8 @@ test('VCC 有效数据 business hold 不可被用户解锁、手工删除或 ret
     repository.completeArtifact(artifact.id, {
       sha256: HASH_A,
       sizeBytes: 5,
-      relativePath: `blobs/sha256/aa/${HASH_A}`
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     completeLayout(repository, repository.getArtifact(artifact.id));
 
@@ -621,13 +712,15 @@ test('artifact 共享相同 SHA-256 blob，仅最后一个引用删除时释放 
     const firstComplete = repository.completeArtifact(firstArtifact.id, {
       sha256: HASH_A,
       sizeBytes: 5,
-      relativePath: `blobs/sha256/aa/${HASH_A}`
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     repository.startArtifactAttempt(secondArtifact.id);
     const secondComplete = repository.completeArtifact(secondArtifact.id, {
       sha256: HASH_A,
       sizeBytes: 5,
-      relativePath: `blobs/sha256/aa/${HASH_A}`
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     assert.equal(firstComplete.batch.archiveStatus, 'incomplete');
     completeLayout(repository, firstComplete.artifact);
@@ -715,7 +808,8 @@ test('统计大小只累计 ready artifact 引用，failed/pending 即使残留 
       const completed = repository.completeArtifact(artifact.id, {
         sha256: HASH_A,
         sizeBytes: 5,
-        relativePath: `blobs/sha256/aa/${HASH_A}`
+        relativePath: `blobs/sha256/aa/${HASH_A}`,
+        fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
       });
       completeLayout(repository, completed.artifact);
       return completed.artifact;
@@ -765,7 +859,8 @@ test('失败和重试保留累计元数据，最终完成后恢复批次完成�
     const completed = repository.completeArtifact(artifact.id, {
       sha256: HASH_B,
       sizeBytes: 8,
-      relativePath: `blobs/sha256/bb/${HASH_B}`
+      relativePath: `blobs/sha256/bb/${HASH_B}`,
+      fingerprint: { sizeBytes: 8, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
 
     assert.equal(completed.artifact.status, 'ready');
@@ -799,7 +894,8 @@ test('cleanup job 插入与批次/artifact/最后引用 Blob 删除同事务回�
     const completed = repository.completeArtifact(artifact.id, {
       sha256: HASH_A,
       sizeBytes: 5,
-      relativePath: `blobs/sha256/aa/${HASH_A}`
+      relativePath: `blobs/sha256/aa/${HASH_A}`,
+      fingerprint: { sizeBytes: 5, mtimeMs: 1, ctimeMs: 1, ino: '1' }
     });
     completeLayout(repository, completed.artifact);
     db.exec(`
