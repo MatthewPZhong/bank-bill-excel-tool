@@ -32,6 +32,11 @@ jobs:
       - name: Run release checks
         run: npm run release-check
 
+      - name: Verify Windows startup process adapter semantics
+        env:
+          WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'
+        run: node --test tests/unit/scripts/startup-process-adapter.test.js
+
       - name: Run Windows SQLite teardown regression
         run: node --test tests/unit/main-process/position-reconciliation-filtered-source-report.test.js
 

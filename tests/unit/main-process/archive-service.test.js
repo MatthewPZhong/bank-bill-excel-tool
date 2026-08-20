@@ -668,19 +668,37 @@ test('stageFile/archiveFile 流式发布并按内容去重，最后引用删除�
       role: 'source',
       sourceOperation: 'import'
     });
+    assert.equal(first.ok, true);
+    assert.equal(first.created, true);
+    assert.equal(first.batch.archiveStatus, 'complete');
+    const knownBlobPath = path.join(
+      fixture.rootDir,
+      ...blobRelativePath(first.sha256).split('/')
+    );
+    let knownBlobHashCalls = 0;
+    const originalHash = fixture.service._hashFile.bind(fixture.service);
+    fixture.service._hashFile = async (filePath) => {
+      if (path.resolve(filePath) === path.resolve(knownBlobPath)) knownBlobHashCalls += 1;
+      return originalHash(filePath);
+    };
     const second = await fixture.service.archiveFile({
       ...batchPayload('single-archive'),
       filePath: secondPath,
       role: 'source',
       sourceOperation: 'import'
     });
-
-    assert.equal(first.ok, true);
-    assert.equal(first.created, true);
-    assert.equal(first.batch.archiveStatus, 'complete');
     assert.equal(second.ok, true);
     assert.equal(second.deduplicated, true);
     assert.equal(first.sha256, second.sha256);
+    assert.equal(knownBlobHashCalls, 1, 'known Blob dedupe 必须完整读取 SHA');
+    assert.equal(
+      sourceSnapshotMatchesStat(
+        fixture.repository.getArtifact(second.artifact.id).blob.fingerprint,
+        await fs.promises.lstat(knownBlobPath, { bigint: true })
+      ),
+      true,
+      'dedupe completion 必须持久化完整 SHA 后的 final stable stat'
+    );
 
     fs.writeFileSync(firstPath, 'changed-after-archive');
     const replayed = await fixture.service.stageFile({
@@ -725,6 +743,53 @@ test('stageFile/archiveFile 流式发布并按内容去重，最后引用删除�
     assert.equal(secondDelete.ok, true);
     assert.equal(secondDelete.releasedBlobCount, 1);
     assert.equal(fs.existsSync(blobPath), false);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('无 DB owner 的同 SHA canonical 文件阻断发布且不读不删，移除后任务可恢复', async () => {
+  const content = 'unknown-canonical-content';
+  const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+  let unknownPath = '';
+  let unknownReadCount = 0;
+  const guardedFs = {
+    ...fs,
+    createReadStream(filePath, options) {
+      if (unknownPath && path.resolve(filePath) === path.resolve(unknownPath)) {
+        unknownReadCount += 1;
+        throw new Error('unknown canonical must not be opened');
+      }
+      return fs.createReadStream(filePath, options);
+    }
+  };
+  const fixture = createFixture({ fsImpl: guardedFs });
+  try {
+    await fixture.service.initialize();
+    unknownPath = path.join(fixture.rootDir, ...blobRelativePath(sha256).split('/'));
+    fs.mkdirSync(path.dirname(unknownPath), { recursive: true });
+    fs.writeFileSync(unknownPath, content);
+    const sourcePath = writeSource(fixture, 'unknown-canonical.xlsx', content);
+
+    const failed = await fixture.service.archiveFile({
+      ...batchPayload('unknown-canonical-publish'),
+      filePath: sourcePath,
+      role: 'output'
+    });
+
+    assert.equal(failed.ok, false);
+    assert.equal(failed.code, 'ARCHIVE_BLOB_UNKNOWN_CONFLICT');
+    assert.equal(unknownReadCount, 0);
+    assert.equal(fs.readFileSync(unknownPath, 'utf8'), content);
+    assert.equal(fixture.repository.findBlobByHash(sha256), null);
+    assert.equal(fixture.repository.getArtifact(failed.artifact.id).status, 'failed');
+
+    fs.rmSync(unknownPath);
+    unknownPath = '';
+    const retried = await fixture.service.retryBatch(failed.batch.id);
+    assert.equal(retried.ok, true);
+    assert.equal(retried.succeeded, 1);
+    assert.equal(fixture.repository.findBlobByHash(sha256).sha256, sha256);
   } finally {
     fixture.close();
   }
@@ -1916,6 +1981,42 @@ test('有业务 SHA 时仍拒绝存档读取期间发生变化且不留下 part 
   }
 });
 
+test('known Blob dedupe 完整 SHA 读取期间变化时不提交新的 artifact 引用', async () => {
+  const fixture = createFixture();
+  try {
+    const content = 'known-dedupe-stable-content';
+    const first = await fixture.service.archiveFile({
+      ...batchPayload('known-dedupe-first'),
+      filePath: writeSource(fixture, 'known-first.xlsx', content),
+      role: 'output'
+    });
+    assert.equal(first.ok, true);
+    const blobPath = path.join(fixture.rootDir, ...blobRelativePath(first.sha256).split('/'));
+    const originalHash = fixture.service._hashFile.bind(fixture.service);
+    fixture.service._hashFile = async (filePath) => {
+      const result = await originalHash(filePath);
+      if (path.resolve(filePath) === path.resolve(blobPath)) {
+        const changed = new Date(Date.now() + 120_000);
+        fs.utimesSync(filePath, changed, changed);
+      }
+      return result;
+    };
+
+    const second = await fixture.service.archiveFile({
+      ...batchPayload('known-dedupe-second'),
+      filePath: writeSource(fixture, 'known-second.xlsx', content),
+      role: 'output'
+    });
+
+    assert.equal(second.ok, false);
+    assert.equal(second.code, 'ARCHIVE_BLOB_CHANGED_DURING_READ');
+    assert.equal(fixture.repository.findBlobByHash(first.sha256).referenceCount, 1);
+    assert.equal(fixture.repository.getArtifact(second.artifact.id).status, 'failed');
+  } finally {
+    fixture.close();
+  }
+});
+
 test('cleanupExpired 按本地日清理，保留日当天不删且锁定批次跳过', async () => {
   let currentTime = new Date(2026, 6, 1, 12, 0, 0);
   const fixture = createFixture({ now: () => currentTime });
@@ -2008,7 +2109,7 @@ test('业务引用锁在 Service 与公开 DTO 中不可被解锁、强制删除
   }
 });
 
-test('initialize 清理 staging/只读副本和孤儿 blob，并把缺失本体改为可重试失败态', async () => {
+test('后台筛查保留无 durable owner 的 staging/只读副本和 SHA 形状孤儿，仅收口 DB 已知缺失 Blob', async () => {
   const fixture = createFixture();
   try {
     const sourcePath = writeSource(fixture, 'startup.xlsx', 'startup-content');
@@ -2040,20 +2141,277 @@ test('initialize 清理 staging/只读副本和孤儿 blob，并把缺失本体�
       rootDir: fixture.rootDir,
       now: () => new Date(2026, 6, 20, 12, 5, 0)
     });
-    const initialized = await restarted.initialize();
-    await restarted.pauseBackgroundMaterialization();
+    const initialized = await restarted.initialize({ deferStartupRecovery: true });
+    const reconciled = await restarted.reconcileStartup();
 
     assert.equal(initialized.available, true);
-    assert.equal(initialized.consistency.removedStagingEntries, 1);
-    assert.equal(initialized.consistency.removedReadonlyEntries, 1);
-    assert.equal(initialized.consistency.invalidBlobCount, 1);
-    assert.equal(initialized.consistency.removedOrphanBlobFiles, 0);
-    assert.equal(fs.existsSync(orphanPath), false);
+    assert.equal(reconciled.consistency.removedStagingEntries, 0);
+    assert.equal(reconciled.consistency.removedReadonlyEntries, 0);
+    assert.equal(reconciled.consistency.invalidBlobCount, 1);
+    assert.equal(reconciled.consistency.removedOrphanBlobFiles, 0);
+    assert.equal(fs.existsSync(path.join(fixture.rootDir, '.staging', 'stale.part')), true);
+    assert.equal(fs.existsSync(path.join(readonlyStaleDir, 'copy.xlsx')), true);
+    assert.equal(fs.existsSync(orphanPath), true);
 
     const repaired = await restarted.getBatch(archived.batch.id);
     assert.equal(repaired.batch.archiveStatus, 'incomplete');
     assert.equal(repaired.batch.artifacts[0].status, 'failed');
     assert.equal(repaired.batch.artifacts[0].lastErrorCode, 'ARCHIVE_BLOB_MISSING');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('后台指纹快路仅对新指纹候选按变化做 SHA，旧 NULL same-size 不读不回填', async () => {
+  const fixture = createFixture();
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('fingerprint-fast-path'),
+      filePath: writeSource(fixture, 'fingerprint.xlsx', 'fingerprint-content'),
+      role: 'output'
+    });
+    let artifact = fixture.repository.getArtifact(archived.artifact.id);
+    const blobPath = path.join(fixture.rootDir, ...artifact.blob.relativePath.split('/'));
+    const layoutPath = path.join(fixture.rootDir, ...artifact.storageRelativePath.split('/'));
+    let blobHashCalls = 0;
+    const originalHashFile = fixture.service._hashFile.bind(fixture.service);
+    fixture.service._hashFile = async (...args) => {
+      blobHashCalls += 1;
+      return originalHashFile(...args);
+    };
+    let layoutHashCalls = 0;
+    const originalLayoutVerify = fixture.service.materializer.verify.bind(fixture.service.materializer);
+    fixture.service.materializer.verify = async (...args) => {
+      layoutHashCalls += 1;
+      return originalLayoutVerify(...args);
+    };
+
+    await fixture.service.runBlobMetadataMaintenance();
+    await fixture.service.runArtifactMetadataMaintenance();
+    assert.equal(blobHashCalls, 0, '相同 Blob 指纹不得 SHA');
+    assert.equal(layoutHashCalls, 0, '相同 storage 指纹不得 SHA');
+
+    const future = new Date(Date.now() + 60_000);
+    fs.utimesSync(blobPath, future, future);
+    fs.utimesSync(layoutPath, future, future);
+    await fixture.service.runBlobMetadataMaintenance();
+    await fixture.service.runArtifactMetadataMaintenance();
+    assert.equal(blobHashCalls, 1, '变化 Blob 候选只做一次 SHA');
+    assert.equal(layoutHashCalls, 1, '变化 storage 候选只做一次 SHA');
+    artifact = fixture.repository.getArtifact(archived.artifact.id);
+    assert.equal(artifact.blob.fingerprint.mtimeMs, fs.statSync(blobPath).mtimeMs);
+    assert.equal(artifact.storageFingerprint.mtimeMs, fs.statSync(layoutPath).mtimeMs);
+
+    fixture.db.exec(`
+      UPDATE archive_blobs SET
+        fingerprint_size_bytes = NULL,
+        fingerprint_mtime_ms = NULL,
+        fingerprint_ctime_ms = NULL,
+        fingerprint_ino = NULL;
+      UPDATE archive_artifacts SET
+        storage_fingerprint_size_bytes = NULL,
+        storage_fingerprint_mtime_ms = NULL,
+        storage_fingerprint_ctime_ms = NULL,
+        storage_fingerprint_ino = NULL;
+    `);
+    await fixture.service.runBlobMetadataMaintenance();
+    await fixture.service.runArtifactMetadataMaintenance();
+    assert.equal(blobHashCalls, 1, '旧 NULL Blob same-size 不得 SHA');
+    assert.equal(layoutHashCalls, 1, '旧 NULL layout same-size 不得 SHA');
+    artifact = fixture.repository.getArtifact(archived.artifact.id);
+    assert.equal(artifact.blob.fingerprint, null);
+    assert.equal(artifact.storageFingerprint, null);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('分页维护在页间释放 root tail，list 不等待整个 blob 阶段', async () => {
+  const fixture = createFixture({ startupMaterializationBatchSize: 1 });
+  try {
+    await fixture.service.archiveFile({
+      ...batchPayload('paged-maintenance-a'),
+      filePath: writeSource(fixture, 'page-a.xlsx', 'page-a'),
+      role: 'output'
+    });
+    await fixture.service.archiveFile({
+      ...batchPayload('paged-maintenance-b'),
+      filePath: writeSource(fixture, 'page-b.xlsx', 'page-b'),
+      role: 'output'
+    });
+    let firstPageResolved;
+    const firstPage = new Promise((resolve) => { firstPageResolved = resolve; });
+    let releaseSecondPage;
+    const secondPage = new Promise((resolve) => { releaseSecondPage = resolve; });
+    let pageCalls = 0;
+    const originalChunk = fixture.service._verifyBlobChunkUnlocked.bind(fixture.service);
+    fixture.service._verifyBlobChunkUnlocked = async (...args) => {
+      pageCalls += 1;
+      if (pageCalls === 2) await secondPage;
+      const result = await originalChunk(...args);
+      if (pageCalls === 1) firstPageResolved();
+      return result;
+    };
+
+    const maintenance = fixture.service.runBlobMetadataMaintenance();
+    await firstPage;
+    const listed = await fixture.service.listBatches({});
+    assert.equal(listed.ok, true);
+    assert.equal(pageCalls, 1, 'list 应在第二页取得 root tail 前完成');
+    releaseSecondPage();
+    assert.equal((await maintenance).ok, true);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('三页维护的失败页不推进 cursor、不访问后页，新 visit 从失败页重试', async () => {
+  const fixture = createFixture({ startupMaterializationBatchSize: 1 });
+  try {
+    await fixture.service.initialize();
+    const afterCursors = [];
+    let firstAttempt = true;
+    fixture.service._verifyBlobChunkUnlocked = async ({ afterBlobId }) => {
+      afterCursors.push(afterBlobId);
+      if (firstAttempt && afterBlobId === 1) {
+        return {
+          cursor: 2,
+          fetched: 1,
+          failures: [{ code: 'ARCHIVE_PAGE_TWO_FAILED' }],
+          remaining: 1
+        };
+      }
+      const nextCursor = afterBlobId + 1;
+      return {
+        cursor: nextCursor,
+        fetched: 1,
+        failures: [],
+        remaining: nextCursor < 3 ? 1 : 0
+      };
+    };
+    fixture.service._countBlobsAfter = (cursor) => Math.max(0, 3 - cursor);
+
+    const failed = await fixture.service.runBlobMetadataMaintenance();
+    assert.equal(failed.ok, false);
+    assert.equal(failed.code, 'ARCHIVE_PAGE_TWO_FAILED');
+    assert.equal(failed.cursor, 1);
+    assert.deepEqual(afterCursors, [0, 1], '同一 attempt 不得访问第三页或自旋失败页');
+
+    firstAttempt = false;
+    const retried = await fixture.service.runBlobMetadataMaintenance();
+    assert.equal(retried.ok, true);
+    assert.equal(retried.cursor, 3);
+    assert.deepEqual(afterCursors, [0, 1, 1, 2], '新 visit 必须从未推进的失败页开始');
+  } finally {
+    fixture.close();
+  }
+});
+
+test('retention 按页释放 root tail，返回精确 deletedBatchIds', async () => {
+  const fixture = createFixture({ startupMaterializationBatchSize: 1 });
+  try {
+    const archivedIds = [];
+    for (const suffix of ['a', 'b']) {
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload(`paged-retention-${suffix}`, {
+          localDate: '2026-07-01',
+          retentionUntil: '2026-07-02'
+        }),
+        filePath: writeSource(fixture, `retention-${suffix}.xlsx`, `retention-${suffix}`),
+        role: 'output'
+      });
+      archivedIds.push(archived.batch.id);
+      fixture.repository.setRetentionUntil(archived.batch.id, '2026-07-21');
+    }
+    let firstPageResolved;
+    const firstPage = new Promise((resolve) => { firstPageResolved = resolve; });
+    let deleteCalls = 0;
+    const originalDelete = fixture.service._deleteBatchUnlocked.bind(fixture.service);
+    fixture.service._deleteBatchUnlocked = async (...args) => {
+      const result = await originalDelete(...args);
+      deleteCalls += 1;
+      if (deleteCalls === 1) firstPageResolved();
+      return result;
+    };
+
+    const maintenance = fixture.service.runRetentionMaintenance({ asOfLocalDate: '2026-08-20' });
+    await firstPage;
+    const listed = await fixture.service.listBatches({});
+    assert.equal(listed.ok, true);
+    assert.equal(deleteCalls, 1, 'list 应在第二个 retention page 前完成');
+    const result = await maintenance;
+    assert.deepEqual(result.deletedBatchIds.sort((a, b) => a - b), archivedIds.sort((a, b) => a - b));
+  } finally {
+    fixture.close();
+  }
+});
+
+test('候选 SHA 期间文件变化时不持久化 pre-hash 指纹', async () => {
+  const fixture = createFixture();
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('fingerprint-stable-read'),
+      filePath: writeSource(fixture, 'stable-read.xlsx', 'stable-read-content'),
+      role: 'output'
+    });
+    const artifact = fixture.repository.getArtifact(archived.artifact.id);
+    const blobPath = path.join(fixture.rootDir, ...artifact.blob.relativePath.split('/'));
+    const originalFingerprint = artifact.blob.fingerprint;
+    fs.utimesSync(blobPath, new Date(Date.now() + 60_000), new Date(Date.now() + 60_000));
+    const originalHash = fixture.service._hashFile.bind(fixture.service);
+    fixture.service._hashFile = async (filePath) => {
+      const result = await originalHash(filePath);
+      fs.utimesSync(filePath, new Date(Date.now() + 120_000), new Date(Date.now() + 120_000));
+      return result;
+    };
+
+    const maintained = await fixture.service.runBlobMetadataMaintenance();
+
+    assert.equal(maintained.ok, false);
+    const after = fixture.repository.getArtifact(archived.artifact.id).blob.fingerprint;
+    assert.deepEqual(after, originalFingerprint);
+    assert.match(String(after.ino), /^\d+$/);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('recoverStartupSafety 只收口中断状态，不删除未知 staging/readonly、cleanup job 或 Blob', async () => {
+  const fixture = createFixture();
+  try {
+    const initialized = await fixture.service.initialize({ deferStartupRecovery: true });
+    assert.equal(initialized.ok, true);
+    const stagingPath = path.join(fixture.rootDir, '.staging', 'unknown-user-file.part');
+    const readonlyPath = path.join(fixture.rootDir, '.readonly', 'unknown-user-copy.xlsx');
+    const layoutPath = path.join(fixture.rootDir, 'BANK', '2026', '07', '20', 'preserve.xlsx');
+    const blobPath = path.join(fixture.rootDir, 'blobs', 'sha256', 'aa', 'preserve-blob');
+    for (const filePath of [stagingPath, readonlyPath, layoutPath, blobPath]) {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, `preserve:${path.basename(filePath)}`);
+    }
+    fixture.db.prepare(`
+      INSERT INTO archive_cleanup_jobs (
+        batch_id, batch_number, local_date, layout_relative_dir,
+        materialized_paths_json, released_blobs_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      999,
+      'BANK-20260720-999',
+      '2026-07-20',
+      'BANK/2026/07/20/BANK-20260720-999',
+      JSON.stringify(['BANK/2026/07/20/preserve.xlsx']),
+      JSON.stringify([{ relativePath: 'blobs/sha256/aa/preserve-blob' }]),
+      '2026-07-20 12:00:00',
+      '2026-07-20 12:00:00'
+    );
+    const result = await fixture.service.recoverStartupSafety();
+    assert.equal(result.ok, true);
+    assert.equal(result.interruptedArtifactCount, 0);
+    assert.equal(fixture.repository.listCleanupJobs().length, 1);
+    for (const filePath of [stagingPath, readonlyPath, layoutPath, blobPath]) {
+      assert.equal(fs.existsSync(filePath), true, `${filePath} 启动不得删除`);
+    }
   } finally {
     fixture.close();
   }
@@ -2103,6 +2461,32 @@ test('openReadonlyCopy 和 saveAs 只复制存档内容，不暴露或改写 blo
   }
 });
 
+test('打开与另存即使 storage 指纹相同仍执行完整 SHA 校验', async () => {
+  const fixture = createFixture();
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('copy-actions-full-sha'),
+      filePath: writeSource(fixture, 'full-sha.xlsx', 'full-sha-content'),
+      role: 'output'
+    });
+    let verifyCalls = 0;
+    const originalVerify = fixture.service.materializer.verify.bind(fixture.service.materializer);
+    fixture.service.materializer.verify = async (...args) => {
+      verifyCalls += 1;
+      return originalVerify(...args);
+    };
+
+    assert.equal((await fixture.service.openReadonlyCopy(archived.artifact.id)).ok, true);
+    assert.equal((await fixture.service.saveAs(
+      archived.artifact.id,
+      path.join(fixture.tempDir, 'full-sha-saved.xlsx')
+    )).ok, true);
+    assert.equal(verifyCalls, 2);
+  } finally {
+    fixture.close();
+  }
+});
+
 test('另存目标经目录链接指向存档根时仍拒绝写入', async (t) => {
   const fixture = createFixture();
   try {
@@ -2137,6 +2521,198 @@ test('另存目标经目录链接指向存档根时仍拒绝写入', async (t) =
   } finally {
     fixture.close();
   }
+});
+
+test('canonical ancestor 被目录链接替换后 open/save/delete/publish 均 fail-closed', async (t) => {
+  const linkDirectory = (target, linkPath) => {
+    try {
+      fs.symlinkSync(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+      return true;
+    } catch (error) {
+      if (error && ['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) return false;
+      throw error;
+    }
+  };
+
+  await t.test('open/save', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      const content = 'linked-canonical-read';
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload('linked-canonical-read'),
+        filePath: writeSource(fixture, 'linked-read.xlsx', content),
+        role: 'output'
+      });
+      const artifact = fixture.repository.getArtifact(archived.artifact.id);
+      const canonicalPath = path.join(fixture.rootDir, ...artifact.blob.relativePath.split('/'));
+      const prefixDir = path.dirname(canonicalPath);
+      const externalDir = path.join(fixture.tempDir, 'external-read-prefix');
+      fs.mkdirSync(externalDir);
+      fs.copyFileSync(canonicalPath, path.join(externalDir, path.basename(canonicalPath)));
+      fs.rmSync(prefixDir, { recursive: true });
+      if (!linkDirectory(externalDir, prefixDir)) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+      fs.rmSync(path.join(fixture.rootDir, ...artifact.storageRelativePath.split('/')));
+
+      const opened = await fixture.service.openReadonlyCopy(artifact.id);
+      const savedPath = path.join(fixture.tempDir, 'must-not-save.xlsx');
+      const saved = await fixture.service.saveAs(artifact.id, savedPath);
+
+      assert.equal(opened.ok, false);
+      assert.equal(opened.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.equal(saved.ok, false);
+      assert.equal(saved.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.equal(fs.existsSync(savedPath), false);
+      assert.equal(fs.readFileSync(path.join(externalDir, path.basename(canonicalPath)), 'utf8'), content);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  await t.test('delete', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      const content = 'linked-canonical-delete';
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload('linked-canonical-delete'),
+        filePath: writeSource(fixture, 'linked-delete.xlsx', content),
+        role: 'output'
+      });
+      const artifact = fixture.repository.getArtifact(archived.artifact.id);
+      const canonicalPath = path.join(fixture.rootDir, ...artifact.blob.relativePath.split('/'));
+      const prefixDir = path.dirname(canonicalPath);
+      const externalDir = path.join(fixture.tempDir, 'external-delete-prefix');
+      fs.mkdirSync(externalDir);
+      const externalPath = path.join(externalDir, path.basename(canonicalPath));
+      fs.copyFileSync(canonicalPath, externalPath);
+      fs.rmSync(prefixDir, { recursive: true });
+      if (!linkDirectory(externalDir, prefixDir)) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+
+      const deleted = await fixture.service.deleteBatch(archived.batch.id);
+
+      assert.equal(deleted.metadataDeleted, true);
+      assert.equal(deleted.status, 'deleted-cleanup-pending');
+      assert.equal(fs.readFileSync(externalPath, 'utf8'), content);
+      assert.equal(fixture.repository.listCleanupJobs().length, 1);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  await t.test('publish', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      await fixture.service.initialize();
+      const content = 'linked-canonical-publish';
+      const sha256 = crypto.createHash('sha256').update(content).digest('hex');
+      const prefixDir = path.join(fixture.rootDir, 'blobs', 'sha256', sha256.slice(0, 2));
+      const externalDir = path.join(fixture.tempDir, 'external-publish-prefix');
+      fs.mkdirSync(externalDir);
+      if (!linkDirectory(externalDir, prefixDir)) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload('linked-canonical-publish'),
+        filePath: writeSource(fixture, 'linked-publish.xlsx', content),
+        role: 'output'
+      });
+
+      assert.equal(archived.ok, false);
+      assert.equal(archived.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.deepEqual(fs.readdirSync(externalDir), []);
+    } finally {
+      fixture.close();
+    }
+  });
+});
+
+test('root/.staging/.readonly 被目录链接替换时 stage/open 不进入外部目录', async (t) => {
+  const linkDirectory = (target, linkPath) => {
+    try {
+      fs.symlinkSync(target, linkPath, process.platform === 'win32' ? 'junction' : 'dir');
+      return true;
+    } catch (error) {
+      if (error && ['EPERM', 'EACCES', 'ENOTSUP'].includes(error.code)) return false;
+      throw error;
+    }
+  };
+
+  await t.test('root', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      const external = path.join(fixture.tempDir, 'external-root');
+      fs.mkdirSync(external);
+      if (!linkDirectory(external, fixture.rootDir)) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+      const result = await fixture.service.archiveFile({
+        ...batchPayload('linked-root-stage'),
+        filePath: writeSource(fixture, 'linked-root.xlsx', 'linked-root'),
+        role: 'output'
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.deepEqual(fs.readdirSync(external), []);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  await t.test('.staging', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      await fixture.service.initialize();
+      const external = path.join(fixture.tempDir, 'external-staging');
+      fs.mkdirSync(external);
+      fs.rmdirSync(path.join(fixture.rootDir, '.staging'));
+      if (!linkDirectory(external, path.join(fixture.rootDir, '.staging'))) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+      const result = await fixture.service.archiveFile({
+        ...batchPayload('linked-staging-stage'),
+        filePath: writeSource(fixture, 'linked-staging.xlsx', 'linked-staging'),
+        role: 'output'
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.deepEqual(fs.readdirSync(external), []);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  await t.test('.readonly', async (subtest) => {
+    const fixture = createFixture();
+    try {
+      const archived = await fixture.service.archiveFile({
+        ...batchPayload('linked-readonly-open'),
+        filePath: writeSource(fixture, 'linked-readonly.xlsx', 'linked-readonly'),
+        role: 'output'
+      });
+      const external = path.join(fixture.tempDir, 'external-readonly');
+      fs.mkdirSync(external);
+      fs.rmdirSync(path.join(fixture.rootDir, '.readonly'));
+      if (!linkDirectory(external, path.join(fixture.rootDir, '.readonly'))) {
+        subtest.skip('当前环境不能创建目录链接');
+        return;
+      }
+      const result = await fixture.service.openReadonlyCopy(archived.artifact.id);
+      assert.equal(result.ok, false);
+      assert.equal(result.code, 'ARCHIVE_PATH_SYMLINK_REJECTED');
+      assert.deepEqual(fs.readdirSync(external), []);
+    } finally {
+      fixture.close();
+    }
+  });
 });
 
 test('发布 rename 失败时不 reject、不留下 staging 或半成品 blob', async () => {
@@ -2180,7 +2756,68 @@ test('发布 rename 失败时不 reject、不留下 staging 或半成品 blob', 
   }
 });
 
-test('blob 已发布但元数据提交失败时保留可恢复内容，重试后接续完成', async () => {
+test('Windows 语义下 publish 与 materialized copy 以可写句柄 fsync 后再设为只读', async () => {
+  const basePromises = fs.promises;
+  const syncedStageModes = [];
+  const windowsFsyncFs = {
+    ...fs,
+    promises: {
+      ...basePromises,
+      async open(targetPath, flags, ...args) {
+        const handle = await basePromises.open(targetPath, flags, ...args);
+        const normalized = String(targetPath);
+        if (!normalized.includes(`${path.sep}.staging${path.sep}`)
+            || !normalized.endsWith('.part')) {
+          return handle;
+        }
+        return new Proxy(handle, {
+          get(object, property) {
+            if (property === 'sync') {
+              return async () => {
+                syncedStageModes.push(flags);
+                if (flags === 'r') {
+                  const error = new Error('EPERM: Windows requires a writable fsync handle');
+                  error.code = 'EPERM';
+                  throw error;
+                }
+                const stat = await basePromises.lstat(targetPath);
+                if ((stat.mode & 0o222) === 0) {
+                  const error = new Error('EACCES: Windows cannot open a read-only file for write');
+                  error.code = 'EACCES';
+                  throw error;
+                }
+                return object.sync();
+              };
+            }
+            const value = Reflect.get(object, property, object);
+            return typeof value === 'function' ? value.bind(object) : value;
+          }
+        });
+      }
+    }
+  };
+  const fixture = createFixture({ fsImpl: windowsFsyncFs });
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('windows-writable-fsync'),
+      filePath: writeSource(fixture, 'windows-writable-fsync.xlsx', 'windows-fsync'),
+      role: 'output'
+    });
+
+    assert.equal(archived.ok, true, JSON.stringify(archived));
+    assert.deepEqual(syncedStageModes, ['r+', 'r+']);
+    const artifact = fixture.repository.getArtifact(archived.artifact.id);
+    const materializedPath = path.join(
+      fixture.rootDir,
+      ...artifact.storageRelativePath.split('/')
+    );
+    assert.equal(fs.statSync(materializedPath).mode & 0o222, 0);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('blob 已发布但元数据提交失败时不自动收编无 owner 文件，人工移除后可恢复', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'archive-metadata-failure-'));
   const rootDir = path.join(tempDir, 'archive-root');
   const sourcePath = path.join(tempDir, 'source.xlsx');
@@ -2217,10 +2854,17 @@ test('blob 已发布但元数据提交失败时保留可恢复内容，重试后
     assert.equal(fs.readFileSync(publishedPath, 'utf8'), 'published-before-metadata');
     assert.equal((await service.getStats()).stats.uniqueFileCount, 0);
 
+    const blockedRetry = await service.retryBatch(failed.batch.id);
+    assert.equal(blockedRetry.ok, false);
+    assert.equal(blockedRetry.results[0].code, 'ARCHIVE_BLOB_UNKNOWN_CONFLICT');
+    assert.equal(fs.readFileSync(publishedPath, 'utf8'), 'published-before-metadata');
+    assert.equal(repository.findBlobByHash(hash), null);
+
+    fs.rmSync(publishedPath);
     const retried = await service.retryBatch(failed.batch.id);
     assert.equal(retried.ok, true);
     assert.equal(retried.succeeded, 1);
-    assert.equal(retried.results[0].deduplicated, true);
+    assert.equal(retried.results[0].deduplicated, false);
     assert.equal((await service.getStats()).stats.uniqueFileCount, 1);
     assert.deepEqual(fs.readdirSync(path.join(rootDir, '.staging')), []);
   } finally {
@@ -2273,6 +2917,115 @@ test('存档目录暂不可写时仍登记失败批次，目录恢复后可重�
     assert.equal(retried.batch.archiveStatus, 'complete');
   } finally {
     fixture.close();
+  }
+});
+
+test('初始化后的存档根离线时 open/attach fail-closed，不改 DB 或重建 split root', async () => {
+  const fixture = createFixture();
+  try {
+    const archived = await fixture.service.archiveFile({
+      ...batchPayload('offline-root-existing'),
+      filePath: writeSource(fixture, 'offline-existing.xlsx', 'offline-existing'),
+      role: 'output'
+    });
+    const before = {
+      artifact: fixture.repository.getArtifact(archived.artifact.id),
+      batches: fixture.repository.listBatches().length
+    };
+    const offlineRoot = `${fixture.rootDir}-offline`;
+    fs.renameSync(fixture.rootDir, offlineRoot);
+
+    const opened = await fixture.service.openReadonlyCopy(archived.artifact.id);
+    const attached = await fixture.service.attachFile(archived.batch.id, {
+      filePath: writeSource(fixture, 'offline-new.xlsx', 'offline-new'),
+      role: 'output'
+    });
+
+    assert.equal(opened.ok, false);
+    assert.equal(opened.code, 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE');
+    assert.equal(attached.ok, false);
+    assert.equal(attached.code, 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE');
+    assert.equal(fs.existsSync(fixture.rootDir), false);
+    assert.equal(fs.existsSync(offlineRoot), true);
+    assert.deepEqual(fixture.repository.getArtifact(archived.artifact.id), before.artifact);
+    assert.equal(fixture.repository.listBatches().length, before.batches);
+  } finally {
+    fixture.close();
+  }
+});
+
+test('根已建立但初始化子目录 EIO 后，archive/attach 不得把离线根当作首次 bootstrap 重建', async () => {
+  for (const entry of ['archive', 'attach']) {
+    const basePromises = fs.promises;
+    let archiveRoot = '';
+    let failSubdirectoryMkdir = true;
+    const transientFs = {
+      ...fs,
+      promises: {
+        ...basePromises,
+        async mkdir(targetPath, options) {
+          if (failSubdirectoryMkdir
+              && archiveRoot
+              && path.resolve(String(targetPath)) !== archiveRoot
+              && path.resolve(String(targetPath)).startsWith(`${archiveRoot}${path.sep}`)) {
+            const error = new Error('archive child directory I/O failure');
+            error.code = 'EIO';
+            throw error;
+          }
+          return basePromises.mkdir(targetPath, options);
+        }
+      }
+    };
+    const fixture = createFixture({ fsImpl: transientFs });
+    archiveRoot = fixture.rootDir;
+    try {
+      const initialized = await fixture.service.initialize({
+        startBackgroundMaterialization: false
+      });
+      assert.equal(initialized.status, 'ready-with-storage-warning');
+      assert.equal(initialized.code, 'ARCHIVE_EIO');
+      assert.equal(fs.lstatSync(fixture.rootDir).isDirectory(), true);
+
+      const existingBatch = createLegacyEmptyBatch(fixture, `partial-init-${entry}`);
+      const before = {
+        batch: fixture.repository.getBatch(existingBatch.id),
+        batchCount: fixture.repository.listBatches().length,
+        artifactCount: fixture.repository.listArtifacts(existingBatch.id).length
+      };
+      failSubdirectoryMkdir = false;
+      const offlineRoot = `${fixture.rootDir}-offline`;
+      fs.renameSync(fixture.rootDir, offlineRoot);
+      const sourcePath = writeSource(
+        fixture,
+        `partial-init-${entry}.xlsx`,
+        `partial-init-${entry}`
+      );
+
+      const result = entry === 'archive'
+        ? await fixture.service.archiveFile({
+          ...batchPayload('partial-init-new-archive'),
+          filePath: sourcePath,
+          role: 'output'
+        })
+        : await fixture.service.attachFile(existingBatch.id, {
+          filePath: sourcePath,
+          role: 'output'
+        });
+
+      assert.equal(result.ok, false, entry);
+      assert.equal(result.code, 'ARCHIVE_STORAGE_ROOT_UNAVAILABLE', entry);
+      assert.equal(fs.existsSync(fixture.rootDir), false, entry);
+      assert.equal(fs.existsSync(offlineRoot), true, entry);
+      assert.deepEqual(fixture.repository.getBatch(existingBatch.id), before.batch, entry);
+      assert.equal(fixture.repository.listBatches().length, before.batchCount, entry);
+      assert.equal(
+        fixture.repository.listArtifacts(existingBatch.id).length,
+        before.artifactCount,
+        entry
+      );
+    } finally {
+      fixture.close();
+    }
   }
 });
 

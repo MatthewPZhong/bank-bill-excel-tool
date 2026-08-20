@@ -111,7 +111,7 @@ test('仓库提交的 26 张 VCC preview 均为完整 PNG 且尺寸与 capture �
 });
 
 test('zoom 与最小窗口参数只在 APP_CAPTURE_PATH preview 路径改写 BrowserWindow options', () => {
-  const createWindowStart = main.indexOf('function createWindow()');
+  const createWindowStart = main.indexOf('function createWindow(options = {})');
   const createWindowEnd = main.indexOf('function buildTemplateSummary(', createWindowStart);
   assert.ok(createWindowStart >= 0 && createWindowEnd > createWindowStart);
   const createWindowSource = main.slice(createWindowStart, createWindowEnd);
@@ -279,7 +279,7 @@ test('result/import/run/adjustment 生命周期 Promise 不参与 readiness 等�
 
 test('main readiness 对缺注册、悬挂、拒绝和非法结果均在超时内失败', async () => {
   const helperStart = main.indexOf('const VCC_PREVIEW_READINESS_TOKENS = new Set(');
-  const helperEnd = main.indexOf('function createWindow()', helperStart);
+  const helperEnd = main.indexOf('function createWindow(options = {})', helperStart);
   const helperSource = main.slice(helperStart, helperEnd)
     .replace('const VCC_PREVIEW_READINESS_TIMEOUT_MS = 8000;', 'const VCC_PREVIEW_READINESS_TIMEOUT_MS = 30;');
   const waitForReady = Function(

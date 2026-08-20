@@ -15,8 +15,7 @@ const {
 } = require('../../../../src/backend/vcc-financial-op/definitions');
 const {
   mapDetailRow,
-  mappedRowToInsertParams,
-  pendingContentHash
+  mappedRowToInsertParams
 } = require('../../../../src/backend/vcc-financial-op/row-mapper');
 const {
   classifyAndPromote
@@ -46,6 +45,23 @@ function pendingFields(overrides = {}) {
 
 function values(headers, fields) {
   return headers.map((header) => Object.hasOwn(fields, header) ? fields[header] : '');
+}
+
+function frozenPendingV2Hash(rawValues, rawContractVersion) {
+  let canonicalValues;
+  if (Number(rawContractVersion) === 1) {
+    const byHeader = Object.fromEntries(
+      PENDING_V1_HEADERS.map((header, index) => [header, rawValues[index]])
+    );
+    canonicalValues = PENDING_HEADERS.map((header) => byHeader[header]);
+  } else if (Number(rawContractVersion) === 2) {
+    canonicalValues = [...rawValues];
+  } else {
+    throw new Error(`测试不支持的历史 Pending raw contract：${rawContractVersion}`);
+  }
+  return crypto.createHash('sha256')
+    .update(JSON.stringify(canonicalValues), 'utf8')
+    .digest('hex');
 }
 
 function seedRecord(db, batchId = 'legacy-batch') {
@@ -89,7 +105,7 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
     SELECT content_hash, legacy_content_hash, hash_version, raw_contract_version, raw_json
     FROM vcc_fin_op_effective_rows WHERE id = ?
   `).get(effectiveId);
-  const expectedV2Hash = pendingContentHash(values(PENDING_HEADERS, legacyFields), 2);
+  const expectedV2Hash = frozenPendingV2Hash(legacyValues, 1);
   assert.equal(migrated.content_hash, expectedV2Hash);
   assert.equal(migrated.legacy_content_hash, legacyHash);
   assert.equal(migrated.hash_version, 2);
@@ -121,6 +137,7 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
     sourceRow: 2,
     keyCellType: 's'
   });
+  assert.equal(mapped.hashVersion, 3);
   const replayParams = mappedRowToInsertParams(replayRecordId, mapped);
   db.prepare(repository.STAGING_ROW_INSERT_SQL)
     .run(replayParams[0], replaySourceId, ...replayParams.slice(1));
@@ -143,6 +160,95 @@ test('历史 48 列 Pending 保留 raw_json，迁为 v2 hash 后可被 46 列精
     SELECT COUNT(*) AS n FROM vcc_fin_op_import_anomalies
     WHERE import_record_id = ?
   `).get(replayRecordId).n, 0);
+});
+
+test('已有 Pending v2 行再次启动时 hash、版本和 raw audit 保持不变', (t) => {
+  const db = createDb(t);
+  const recordId = seedRecord(db, 'frozen-v2');
+  const rawValues = values(PENDING_HEADERS, pendingFields({ PendingBizId: 'V2-FROZEN' }));
+  const rawJson = JSON.stringify(rawValues);
+  const frozenHash = frozenPendingV2Hash(rawValues, 2);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_effective_rows (
+      source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+      raw_contract_version, target_month, subject, pending_currency, pending_amount,
+      flow_currency, flow_amount, currency_mismatch, source_file, sheet_name, source_row,
+      raw_json, import_record_id
+    ) VALUES (?, 'V2-FROZEN', 'V2-FROZEN', ?, 2, 2, '2026-06',
+      'PPHK', 'USD', '10', 'USD', '-10', 0, 'frozen-v2.xlsx', 'Pending', 2, ?, ?)
+  `).run(SOURCE_TYPES.PENDING, frozenHash, rawJson, recordId);
+  db.prepare(`
+    INSERT INTO vcc_fin_op_import_rows (
+      import_record_id, source_type, target_month, idempotency_key_raw, idempotency_key,
+      content_hash, hash_version, raw_contract_version, subject, source_file, sheet_name,
+      source_row, raw_json, disposition
+    ) VALUES (?, ?, '2026-06', 'V2-FROZEN', 'V2-FROZEN', ?,
+      2, 2, 'PPHK', 'frozen-v2.xlsx', 'Pending', 2, ?, 'accepted')
+  `).run(recordId, SOURCE_TYPES.PENDING, frozenHash, rawJson);
+
+  ensureVccFinancialOpTablesSupport(db);
+  ensureVccFinancialOpTablesSupport(db);
+
+  assert.deepEqual({ ...db.prepare(`
+    SELECT content_hash, hash_version, raw_contract_version, raw_json
+    FROM vcc_fin_op_effective_rows WHERE idempotency_key = 'V2-FROZEN'
+  `).get() }, {
+    content_hash: frozenHash,
+    hash_version: 2,
+    raw_contract_version: 2,
+    raw_json: rawJson
+  });
+  assert.deepEqual({ ...db.prepare(`
+    SELECT content_hash, hash_version, raw_contract_version, raw_json
+    FROM vcc_fin_op_import_rows WHERE idempotency_key = 'V2-FROZEN'
+  `).get() }, {
+    content_hash: frozenHash,
+    hash_version: 2,
+    raw_contract_version: 2,
+    raw_json: rawJson
+  });
+});
+
+test('3.1.12 新导入 Pending CNH 写 hash v3，后续启动不降级或重算', (t) => {
+  const db = createDb(t);
+  const recordId = seedRecord(db, 'new-v3-cnh');
+  const sourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: 'new-v3-cnh.xlsx',
+    sha256: 'c'.repeat(64),
+    sizeBytes: 1
+  });
+  const mapped = mapDetailRow({
+    sourceType: SOURCE_TYPES.PENDING,
+    values: values(PENDING_HEADERS, pendingFields({
+      PendingBizId: 'NEW-V3-CNH',
+      币种: 'CNH',
+      流水_币种: 'CNY'
+    })),
+    targetMonth: '2026-06',
+    sourceFile: 'new-v3-cnh.xlsx',
+    sheetName: 'Pending',
+    sourceRow: 2,
+    keyCellType: 's'
+  });
+  const params = mappedRowToInsertParams(recordId, mapped);
+  db.prepare(repository.STAGING_ROW_INSERT_SQL).run(params[0], sourceId, ...params.slice(1));
+  const imported = classifyAndPromote(db, recordId, '2026-06', SOURCE_TYPES.PENDING);
+  assert.equal(imported.insertedCount, 1);
+  const before = db.prepare(`
+    SELECT content_hash, hash_version, pending_currency, flow_currency, raw_json
+    FROM vcc_fin_op_effective_rows WHERE idempotency_key = 'NEW-V3-CNH'
+  `).get();
+  assert.equal(before.hash_version, 3);
+  assert.deepEqual([before.pending_currency, before.flow_currency], ['CNY', 'CNY']);
+  assert.equal(JSON.parse(before.raw_json)[PENDING_HEADERS.indexOf('币种')], 'CNH');
+
+  ensureVccFinancialOpTablesSupport(db);
+
+  assert.deepEqual({ ...db.prepare(`
+    SELECT content_hash, hash_version, pending_currency, flow_currency, raw_json
+    FROM vcc_fin_op_effective_rows WHERE idempotency_key = 'NEW-V3-CNH'
+  `).get() }, { ...before });
 });
 
 test('未知 Pending raw_json 列数阻断迁移且不修改历史 hash', (t) => {

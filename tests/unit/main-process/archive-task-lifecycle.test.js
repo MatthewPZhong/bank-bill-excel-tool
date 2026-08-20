@@ -25,6 +25,10 @@ const {
   artifactManifestFromFilePlan,
   normalizeFilePlanV1
 } = require('../../../src/main-process/archive-center/file-plan');
+const {
+  sourceSnapshotFromStat,
+  sourceSnapshotMatchesStat
+} = require('../../../src/main-process/archive-center/source-snapshot');
 
 const POLICY = Object.freeze({
   channel: 'pending:reconcile:run',
@@ -323,6 +327,198 @@ test('input-only file task 原子 reserve 后默认 settle 全部 inputs 并原�
     reserve.manifest.inputs.map((file) => file.artifactKey)
   );
   assert.equal(calls.some((call) => call[0] === 'append'), false);
+});
+
+test('网银定制 freshness 失败统一提示、零业务执行并形成一次 failed audit', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-file-lifecycle-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const inputPath = path.join(tempDir, 'statement.xlsx');
+  fs.writeFileSync(inputPath, 'statement');
+  const pickerSnapshot = sourceSnapshotFromStat(fs.lstatSync(inputPath, { bigint: true }));
+  fs.appendFileSync(inputPath, '-changed');
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: pickerSnapshot,
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  });
+  const { calls, lifecycle } = createHarness({
+    reserveFileTask(payload) {
+      return {
+        ok: true,
+        created: true,
+        batch: {
+          id: 32,
+          batchNumber: '2026-08-19-032',
+          taskRunId: payload.taskRun.taskRunId,
+          taskKey: payload.taskRun.taskKey,
+          moduleId: payload.taskRun.moduleId,
+          parentRunId: payload.taskRun.parentRunId,
+          operationKey: payload.taskRun.operationKey
+        }
+      };
+    }
+  });
+  let executeCount = 0;
+  const result = await lifecycle.runFileTask({
+    policy: FILE_POLICY,
+    flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+    filePlanResolver: () => plan,
+    beforeStart: () => {
+      throw new Error('freshness 失败后不应进入 session check');
+    },
+    execute: () => {
+      executeCount += 1;
+      return { status: 'success' };
+    }
+  });
+
+  assert.equal(result.status, 'failed');
+  assert.equal(result.code, 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION');
+  assert.equal(result.message, '网银明细源文件在确认期间已变化，请重新选择');
+  assert.equal(executeCount, 0);
+  assert.equal(calls.filter((call) => call[0] === 'start-file-task').length, 0);
+  assert.equal(calls.filter((call) => call[0] === 'settle-manifest').length, 0);
+  const failedAudits = calls.filter((call) => call[0] === 'finish-file-task');
+  assert.equal(failedAudits.length, 1);
+  assert.equal(failedAudits[0][3].taskStatus, 'failed');
+});
+
+test('网银父目录确认期被整体移动仍由 freshness 形成 failed audit', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-parent-moved-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const sourceParent = path.join(tempDir, 'picked');
+  fs.mkdirSync(sourceParent);
+  const inputPath = path.join(sourceParent, 'statement.xlsx');
+  fs.writeFileSync(inputPath, 'statement');
+  const pickerSnapshot = sourceSnapshotFromStat(fs.lstatSync(inputPath, { bigint: true }));
+  fs.renameSync(sourceParent, path.join(tempDir, 'moved'));
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: pickerSnapshot,
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  });
+  const { calls, lifecycle } = createHarness({
+    reserveFileTask(payload) {
+      return {
+        ok: true,
+        batch: {
+          id: 33,
+          batchNumber: '2026-08-19-033',
+          taskRunId: payload.taskRun.taskRunId,
+          taskKey: payload.taskRun.taskKey,
+          moduleId: payload.taskRun.moduleId,
+          parentRunId: payload.taskRun.parentRunId,
+          operationKey: payload.taskRun.operationKey
+        }
+      };
+    }
+  });
+  const result = await lifecycle.runFileTask({
+    policy: FILE_POLICY,
+    flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+    filePlanResolver: () => plan,
+    execute: () => ({ status: 'success' })
+  });
+  assert.equal(result.code, 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION');
+  assert.equal(calls.filter((call) => call[0] === 'finish-file-task').length, 1);
+  assert.equal(calls.some((call) => call[0] === 'start-file-task'), false);
+});
+
+test('public freshness 后稳定替换在 reader 起点失败，保留统一 failed audit', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'statement-reader-start-replaced-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const inputPath = path.join(tempDir, 'statement.csv');
+  fs.writeFileSync(inputPath, 'Date\n2026-08-19\n');
+  const pickerSnapshot = sourceSnapshotFromStat(fs.lstatSync(inputPath, { bigint: true }));
+  const plan = normalizeFilePlanV1({
+    version: 1,
+    allocation: 'eager',
+    inputs: [{
+      filePath: inputPath,
+      role: 'input',
+      sourceOperation: 'file:import',
+      sourceSnapshot: pickerSnapshot,
+      freshnessFailure: {
+        code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+        message: '网银明细源文件在确认期间已变化，请重新选择'
+      }
+    }],
+    outputs: []
+  });
+  const { calls, lifecycle } = createHarness({
+    reserveFileTask(payload) {
+      return {
+        ok: true,
+        batch: {
+          id: 34,
+          batchNumber: '2026-08-19-034',
+          taskRunId: payload.taskRun.taskRunId,
+          taskKey: payload.taskRun.taskKey,
+          moduleId: payload.taskRun.moduleId,
+          parentRunId: payload.taskRun.parentRunId,
+          operationKey: payload.taskRun.operationKey
+        }
+      };
+    }
+  });
+  let executeEntryCount = 0;
+  let outputCount = 0;
+  let sessionCommitCount = 0;
+  await assert.rejects(lifecycle.runFileTask({
+    policy: FILE_POLICY,
+    flowPlanResolver: () => ({ startsNewFlow: true, flowIdentity: null }),
+    filePlanResolver: () => plan,
+    beforeStart: () => {
+      const replacementPath = path.join(tempDir, 'replacement.csv');
+      fs.writeFileSync(replacementPath, 'Date\n2026-08-20\n');
+      fs.unlinkSync(inputPath);
+      fs.renameSync(replacementPath, inputPath);
+    },
+    execute: () => {
+      executeEntryCount += 1;
+      const stat = fs.lstatSync(inputPath, { bigint: true });
+      if (!sourceSnapshotMatchesStat(plan.inputs[0].sourceSnapshot, stat)) {
+        throw Object.assign(
+          new Error('网银明细源文件在确认期间已变化，请重新选择'),
+          { code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION' }
+        );
+      }
+      outputCount += 1;
+      sessionCommitCount += 1;
+      return { status: 'success' };
+    }
+  }), (error) => error
+    && error.code === 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION'
+    && error.message === '网银明细源文件在确认期间已变化，请重新选择');
+  assert.equal(executeEntryCount, 1);
+  assert.equal(outputCount, 0);
+  assert.equal(sessionCommitCount, 0);
+  assert.equal(calls.filter((call) => call[0] === 'start-file-task').length, 1);
+  const failedAudits = calls.filter((call) => call[0] === 'finish-file-task');
+  assert.equal(failedAudits.length, 1);
+  assert.equal(failedAudits[0][3].taskStatus, 'failed');
+  assert.equal(failedAudits[0][3].code, 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION');
+  assert.equal(failedAudits[0][3].message, '网银明细源文件在确认期间已变化，请重新选择');
 });
 
 test('FilePlan resolver 在 Task Run 建立后失败仍以 operation owner 终结', async () => {

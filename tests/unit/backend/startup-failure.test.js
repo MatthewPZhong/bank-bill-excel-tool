@@ -48,3 +48,19 @@ test('启动失败上报把恢复路径写入日志并在展示后退出', () =>
   assert.match(shown.message, /\/tmp\/target\.xlsx/);
   assert.equal(exitCode, 1);
 });
+
+test('日志写入失败仍只展示一次 native dialog 并退出', () => {
+  let dialogs = 0;
+  let exits = 0;
+  reportStartupFailure({
+    error: new Error('数据库不可用'),
+    appendRecord() { throw new Error('日志目录不可用'); },
+    showErrorBox() { dialogs += 1; },
+    exit(code) {
+      assert.equal(code, 1);
+      exits += 1;
+    }
+  });
+  assert.equal(dialogs, 1);
+  assert.equal(exits, 1);
+});

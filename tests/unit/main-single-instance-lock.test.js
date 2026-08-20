@@ -20,6 +20,6 @@ test.describe('Electron single-instance guard', () => {
   });
 
   test('isolated preview and startup measurement may bypass the production lock', () => {
-    assert.match(mainSource, /requireSingleInstanceLock\s*=\s*!process\.env\.APP_CAPTURE_PATH/);
+    assert.match(mainSource, /requireSingleInstanceLock\s*=\s*!process\.env\.APP_CAPTURE_PATH[\s\S]*?APP_STARTUP_MEASURE_AUTO_QUIT/);
   });
 });

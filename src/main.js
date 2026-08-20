@@ -7,6 +7,13 @@ const XLSX = require('xlsx');
 const { performance } = require('node:perf_hooks');
 const { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } = require('electron');
 const { AppDatabase } = require('./backend/database');
+const { runStartupPhase, startStartupPhase } = require('./backend/startup-phase');
+const {
+  createWindowInstrumentation,
+  showReadyWindow,
+  shouldAcceptInitialRendererMetrics,
+  waitForWindowReady
+} = require('./main-process/startup-window');
 const { openPendingDb, PENDING_DB_FILENAME } = require('./backend/pending-db');
 const PENDING_COLUMNS = require('./backend/pending-db/columns');
 const pendingRuleRepo = require('./backend/pending-db/rule-repository');
@@ -529,14 +536,19 @@ if (process.platform === 'win32') {
 }
 
 let mainWindow = null;
+let applicationStartupComplete = false;
+let mainWindowReady = false;
+let initialStartupWebContentsId = null;
 // 运行结果 side DB 会在启动和新 run 时整库回收，必须阻止两个正式应用实例并发操作同一 userData。
 // preview/startup:measure 使用隔离临时目录，允许并行启动，避免开发工具争抢正式实例锁。
-const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH;
+const requireSingleInstanceLock = !process.env.APP_CAPTURE_PATH
+  && process.env.APP_STARTUP_MEASURE_AUTO_QUIT !== '1';
 const hasSingleInstanceLock = !requireSingleInstanceLock || app.requestSingleInstanceLock();
 if (!hasSingleInstanceLock) {
   app.quit();
 } else if (requireSingleInstanceLock) {
   app.on('second-instance', () => {
+    if (!applicationStartupComplete || !mainWindowReady) return;
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -562,6 +574,7 @@ let archiveTaskLifecycle = null;
 let archiveOperationTail = Promise.resolve();
 const archiveOperationContext = new AsyncLocalStorage();
 const positionReconciliationOperationContext = new AsyncLocalStorage();
+const statementSourceReadContext = new AsyncLocalStorage();
 let positionReconciliationOperationActive = null;
 const businessOperationRegistry = createBusinessOperationRegistry();
 const taskPolicyRegistry = createTaskPolicyRegistry();
@@ -736,6 +749,111 @@ function createPreviewSourceFreshnessGuard(filePaths, label) {
   };
 }
 
+const STATEMENT_SOURCE_FRESHNESS_FAILURE = Object.freeze({
+  code: 'BANK_STATEMENT_SOURCE_CHANGED_DURING_CONFIRMATION',
+  message: '网银明细源文件在确认期间已变化，请重新选择'
+});
+
+function statementSourceFreshnessError() {
+  const error = new Error(STATEMENT_SOURCE_FRESHNESS_FAILURE.message);
+  error.code = STATEMENT_SOURCE_FRESHNESS_FAILURE.code;
+  return error;
+}
+
+function createStatementWorkbookReadGuard(filePath, fsImpl = fs) {
+  const resolvedPath = path.resolve(filePath);
+  const expectedSnapshot = statementSourceReadContext.getStore()?.get(resolvedPath) || null;
+  return Object.freeze({
+    beforeRead() {
+      try {
+        const stat = fsImpl.lstatSync(resolvedPath, { bigint: true });
+        const snapshot = sourceSnapshotFromStat(stat);
+        if (stat.isSymbolicLink()
+            || !snapshot
+            || (expectedSnapshot && !sourceSnapshotMatchesStat(expectedSnapshot, stat))) {
+          throw statementSourceFreshnessError();
+        }
+        return Object.freeze({ ...snapshot });
+      } catch (error) {
+        if (error && error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) throw error;
+        throw statementSourceFreshnessError();
+      }
+    },
+    afterRead(startedSnapshot) {
+      try {
+        const stat = fsImpl.lstatSync(resolvedPath, { bigint: true });
+        if (stat.isSymbolicLink()
+            || !stat.isFile()
+            || !sourceSnapshotMatchesStat(startedSnapshot, stat)) {
+          throw statementSourceFreshnessError();
+        }
+      } catch (error) {
+        if (error && error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) throw error;
+        throw statementSourceFreshnessError();
+      }
+    }
+  });
+}
+
+function runWithStatementConfirmedSourceSnapshots(channel, taskContext, execute) {
+  if (channel !== 'file:import' && channel !== 'file:complete-big-account-selection') {
+    return execute();
+  }
+  const inputs = taskContext && taskContext.fileEvidence && taskContext.fileEvidence.filePlan
+    ? taskContext.fileEvidence.filePlan.inputs
+    : [];
+  const expectedByPath = new Map((Array.isArray(inputs) ? inputs : []).map((input) => [
+    path.resolve(input.filePath),
+    Object.freeze({ ...input.sourceSnapshot })
+  ]));
+  return statementSourceReadContext.run(expectedByPath, execute);
+}
+
+function captureStatementSourceSelections(filePaths) {
+  const selections = normalizeInputFilePaths(filePaths, { dedupe: false }).map((filePath) => {
+    const resolvedPath = path.resolve(filePath);
+    let stat;
+    try {
+      stat = fs.lstatSync(resolvedPath, { bigint: true });
+    } catch (_error) {
+      throw statementSourceFreshnessError();
+    }
+    const sourceSnapshot = sourceSnapshotFromStat(stat);
+    if (stat.isSymbolicLink() || !sourceSnapshot) {
+      throw statementSourceFreshnessError();
+    }
+    return Object.freeze({
+      resolvedPath,
+      sourceSnapshot: Object.freeze({ ...sourceSnapshot })
+    });
+  });
+  return Object.freeze(selections);
+}
+
+function selectStatementSourceSelections(selections, filePaths) {
+  const selectionByPath = new Map(
+    (Array.isArray(selections) ? selections : []).map((selection) => [
+      path.resolve(selection.resolvedPath),
+      selection
+    ])
+  );
+  return Object.freeze(normalizeInputFilePaths(filePaths, { dedupe: false }).map((filePath) => {
+    const selection = selectionByPath.get(path.resolve(filePath));
+    if (!selection) throw new Error('网银明细 picker snapshot 与最终选择不一致');
+    return selection;
+  }));
+}
+
+function buildStatementInputFilePlanItems(selections, sourceOperation) {
+  return Object.freeze((Array.isArray(selections) ? selections : []).map((selection) => ({
+    filePath: selection.resolvedPath,
+    role: 'input',
+    sourceOperation,
+    sourceSnapshot: selection.sourceSnapshot,
+    freshnessFailure: STATEMENT_SOURCE_FRESHNESS_FAILURE
+  })));
+}
+
 function createPendingImportFreshnessGuard({ db, yearMonth, files, evidence }) {
   const expectedEvidence = pendingMonthEvidenceValue(evidence);
   const assertSourceFresh = createPreviewSourceFreshnessGuard(files, 'Pending 导入');
@@ -867,6 +985,7 @@ const STARTUP_METRIC_MARKS = Object.freeze({
 const startupMetrics = {
   startedAt: performance.now(),
   marks: new Map(),
+  phases: [],
   renderer: null
 };
 startupMetrics.marks.set(STARTUP_METRIC_MARKS.processStart, startupMetrics.startedAt);
@@ -936,6 +1055,19 @@ function markStartupMetric(stageName) {
   startupMetrics.marks.set(stageName, performance.now());
 }
 
+function recordStartupPhase(record) {
+  const safeRecord = record && typeof record === 'object' ? { ...record } : null;
+  if (!safeRecord || safeRecord.event !== 'startup-phase') return;
+  if (safeRecord.state === 'end') startupMetrics.phases.push(safeRecord);
+  appendActivityLogEntry({
+    level: safeRecord.outcome === 'failed' ? 'error' : 'info',
+    source: 'main',
+    domain: 'startup',
+    message: 'startup-phase',
+    details: [JSON.stringify(safeRecord)]
+  });
+}
+
 function getStartupMetricValue(stageName) {
   return startupMetrics.marks.get(stageName);
 }
@@ -955,6 +1087,7 @@ function buildStartupMetricsSnapshot() {
 
   return {
     marks,
+    phases: startupMetrics.phases.slice(),
     durations: {
       totalReadyToShowMs: Number(totalReadyToShow.toFixed(3)),
       createWindowToReadyMs: Number(createWindowToReady.toFixed(3)),
@@ -1096,9 +1229,13 @@ function initializeActivityLog() {
 }
 
 function handleStartupFailure(error) {
-  let logPath = getActivityLogFallbackFilePath();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+  mainWindow = null;
+  mainWindowReady = false;
+  let logPath = '';
 
   try {
+    logPath = getActivityLogFallbackFilePath();
     logPath = initializeActivityLog();
   } catch (logError) {
     // v2.1.9 SR-log-1：日志系统初始化失败的最后兜底场景
@@ -1112,7 +1249,7 @@ function handleStartupFailure(error) {
 
   reportStartupFailure({
     error,
-    logFilePath: logPath,
+    logFilePath: logPath || '',
     appendRecord: (filePath, payload) => appendActivityRecord(filePath, payload),
     showErrorBox: (title, message) => dialog.showErrorBox(title, message),
     exit: (exitCode) => app.exit(exitCode)
@@ -1306,6 +1443,7 @@ function rememberPendingBigAccountSelection(context = null) {
         rows: Array.isArray(context.rows)
           ? context.rows.map((row) => ({
               index: Number(row.index || 0),
+              fileBlockOrdinal: Number(row.fileBlockOrdinal),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
               fileName: normalizeCell(row.fileName),
               filePath: row.filePath || ''
@@ -1314,14 +1452,23 @@ function rememberPendingBigAccountSelection(context = null) {
         rowsWithEmptyBlocks: Array.isArray(context.rowsWithEmptyBlocks)
           ? context.rowsWithEmptyBlocks.map((row) => ({
               index: Number(row.index || 0),
+              fileBlockOrdinal: Number(row.fileBlockOrdinal),
               sourceRowNumber: Number(row.sourceRowNumber || 0),
               fileName: normalizeCell(row.fileName),
               filePath: row.filePath || ''
             }))
           : undefined,
-        assertFresh: typeof context.assertFresh === 'function'
-          ? context.assertFresh
-          : null
+        statementSelectionSessionId: normalizeCell(context.statementSelectionSessionId),
+        sourceSelections: Array.isArray(context.sourceSelections)
+          ? Object.freeze(context.sourceSelections.map((selection) => Object.freeze({
+              resolvedPath: path.resolve(selection.resolvedPath),
+              sourceSnapshot: Object.freeze({ ...selection.sourceSnapshot })
+            })))
+          : Object.freeze([]),
+        assertSessionCurrent: typeof context.assertSessionCurrent === 'function'
+          ? context.assertSessionCurrent
+          : null,
+        bigAccountOrderEvidence: context.bigAccountOrderEvidence || null
       }
     : null;
   return contextId;
@@ -1338,11 +1485,27 @@ function requirePendingBigAccountSelection(contextId) {
 }
 
 function createPendingBigAccountSelectionContext(prepared, context) {
-  return {
+  const pendingContext = {
     ...context,
-    assertFresh: prepared && typeof prepared.assertFresh === 'function'
-      ? prepared.assertFresh
+    statementSelectionSessionId: normalizeCell(prepared && prepared.statementSelectionSessionId),
+    sourceSelections: prepared && Array.isArray(prepared.sourceSelections)
+      ? prepared.sourceSelections
+      : Object.freeze([]),
+    assertSessionCurrent: prepared && typeof prepared.assertSessionCurrent === 'function'
+      ? prepared.assertSessionCurrent
       : null
+  };
+  const cachedEvidence = prepared && prepared.bigAccountOrderEvidence;
+  const bigAccountOrderEvidence = cachedEvidence
+    && cachedEvidence.sessionId === pendingContext.statementSelectionSessionId
+    ? cachedEvidence
+    : buildBigAccountOrderEvidence(pendingContext);
+  if (prepared && prepared.previewOnly === true) {
+    prepared.bigAccountOrderEvidence = bigAccountOrderEvidence;
+  }
+  return {
+    ...pendingContext,
+    bigAccountOrderEvidence
   };
 }
 
@@ -1688,6 +1851,7 @@ function identifyAccountBlocks(detailRows, options = {}) {
 
   if (!headerBreaks.length) {
     return [{
+      blockOrdinal: 0,
       startIndex: 0,
       endIndex: Math.max(0, dataRows.length - 1),
       startRowNumber: rowMetas[0]?.sourceRowNumber || 2
@@ -1718,7 +1882,7 @@ function identifyAccountBlocks(detailRows, options = {}) {
   let blockStart = 0;
   let prevBreakRowNumber = null;
 
-  headerBreaks.forEach((breakRowNumber) => {
+  headerBreaks.forEach((breakRowNumber, blockOrdinal) => {
     const splitIndex = rowMetas.findIndex(
       (meta, i) => i >= blockStart && meta.sourceRowNumber >= breakRowNumber
     );
@@ -1728,12 +1892,14 @@ function identifyAccountBlocks(detailRows, options = {}) {
     const trimmed = trimBlock(blockStart, rawEnd);
     if (includeEmptyBlocks) {
       blocks.push({
+        blockOrdinal,
         startIndex: trimmed.startIndex,
         endIndex: trimmed.endIndex,
         startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || prevBreakRowNumber || blockStart + 2
       });
     } else if (trimmed.startIndex <= trimmed.endIndex) {
       blocks.push({
+        blockOrdinal,
         startIndex: trimmed.startIndex,
         endIndex: trimmed.endIndex,
         startRowNumber: rowMetas[trimmed.startIndex]?.sourceRowNumber || prevBreakRowNumber || trimmed.startIndex + 2
@@ -1747,12 +1913,14 @@ function identifyAccountBlocks(detailRows, options = {}) {
   const lastTrimmed = trimBlock(blockStart, dataRows.length - 1);
   if (includeEmptyBlocks) {
     blocks.push({
+      blockOrdinal: headerBreaks.length,
       startIndex: lastTrimmed.startIndex,
       endIndex: lastTrimmed.endIndex,
       startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastBreakRowNumber || blockStart + 2
     });
   } else if (lastTrimmed.startIndex <= lastTrimmed.endIndex) {
     blocks.push({
+      blockOrdinal: headerBreaks.length,
       startIndex: lastTrimmed.startIndex,
       endIndex: lastTrimmed.endIndex,
       startRowNumber: rowMetas[lastTrimmed.startIndex]?.sourceRowNumber || lastBreakRowNumber || lastTrimmed.startIndex + 2
@@ -1765,6 +1933,7 @@ function identifyAccountBlocks(detailRows, options = {}) {
 
   if (!headerBreaks.length) {
     return [{
+      blockOrdinal: 0,
       startIndex: 0,
       endIndex: Math.max(0, dataRows.length - 1),
       startRowNumber: rowMetas[0]?.sourceRowNumber || 2
@@ -1797,59 +1966,191 @@ function findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders) {
   return results;
 }
 
+function buildBigAccountRecognitionBasis({
+  rawRows,
+  expectedSourceHeaders,
+  accountMappingByBankId = {}
+}) {
+  const rows = Array.isArray(rawRows) ? rawRows : [];
+  const headerRowNumbers = findHeaderRowNumbersInRawRows(rows, expectedSourceHeaders);
+  const bridgeMappings = Object.entries(accountMappingByBankId || {})
+    .map(([bankId, mapping]) => ({
+      bankId: normalizeCell(bankId),
+      clearingAccountId: normalizeCell(mapping && mapping.clearingAccountId)
+    }))
+    .filter((mapping) => mapping.bankId && mapping.clearingAccountId);
+  const bridgeCandidatesByBlock = [];
+  const headerWindows = headerRowNumbers.map((headerRowNumber, index) => {
+    const previousBoundary = index === 0 ? 0 : headerRowNumbers[index - 1];
+    const startIndex = Math.max(previousBoundary, headerRowNumber - 10);
+    const endIndex = headerRowNumber - 2;
+    const candidateRowsWithSource = rows
+      .slice(startIndex, Math.max(startIndex, endIndex + 1))
+      .map((row, candidateIndex) => ({
+        sourceRow: startIndex + candidateIndex + 1,
+        cells: (Array.isArray(row) ? row : [])
+          .map((cell) => normalizeCell(cell))
+          .filter((cell) => cell !== '')
+      }));
+    const bridgeCandidates = [];
+    const seenBridgeCandidates = new Set();
+    for (let rowIndex = candidateRowsWithSource.length - 1; rowIndex >= 0; rowIndex -= 1) {
+      const candidateRow = candidateRowsWithSource[rowIndex];
+      for (const cellText of candidateRow.cells) {
+        for (const mapping of bridgeMappings) {
+          if (matchMerchantIds(cellText, mapping.bankId) === 'none') continue;
+          const candidateKey = `${candidateRow.sourceRow}\u0000${mapping.clearingAccountId}`;
+          if (seenBridgeCandidates.has(candidateKey)) continue;
+          seenBridgeCandidates.add(candidateKey);
+          bridgeCandidates.push(Object.freeze({
+            sourceRow: candidateRow.sourceRow,
+            clearingAccountId: mapping.clearingAccountId
+          }));
+        }
+      }
+    }
+    bridgeCandidatesByBlock.push(Object.freeze(bridgeCandidates));
+    return Object.freeze({
+      headerRowNumber,
+      candidateRows: Object.freeze(candidateRowsWithSource.map(
+        (candidateRow) => Object.freeze(candidateRow.cells)
+      ))
+    });
+  });
+  return Object.freeze({
+    version: 1,
+    headerWindows: Object.freeze(headerWindows),
+    bridgeCandidatesByBlock: Object.freeze(bridgeCandidatesByBlock)
+  });
+}
+
+function finalizeBigAccountRecognitionBasis(basis, mappedRows) {
+  const headerWindows = basis && Array.isArray(basis.headerWindows)
+    ? basis.headerWindows
+    : [];
+  const bridgeCandidatesByBlock = basis && Array.isArray(basis.bridgeCandidatesByBlock)
+    ? basis.bridgeCandidatesByBlock
+    : [];
+  const rowMetas = Array.isArray(mappedRows && mappedRows.rowMetas)
+    ? mappedRows.rowMetas
+    : [];
+  const blocks = identifyAccountBlocks(mappedRows || [], { includeEmptyBlocks: true });
+  const blockByOrdinal = new Map(
+    blocks.map((block) => [Number(block.blockOrdinal), block])
+  );
+
+  const bridgeClearingIdsByBlock = headerWindows.map((window, blockOrdinal) => {
+    const currentHeaderRow = Number(window && window.headerRowNumber);
+    if (!Number.isInteger(currentHeaderRow) || currentHeaderRow <= 0) return '';
+
+    let lowerExclusive = 0;
+    if (blockOrdinal > 0) {
+      const previousHeaderRow = Number(headerWindows[blockOrdinal - 1]?.headerRowNumber);
+      const previousBlock = blockByOrdinal.get(blockOrdinal - 1);
+      if (!Number.isInteger(previousHeaderRow) || previousHeaderRow <= 0 || !previousBlock) {
+        return '';
+      }
+      if (previousBlock.startIndex <= previousBlock.endIndex) {
+        const lastTransactionSourceRow = Number(
+          rowMetas[previousBlock.endIndex] && rowMetas[previousBlock.endIndex].sourceRowNumber
+        );
+        if (!Number.isInteger(lastTransactionSourceRow) || lastTransactionSourceRow <= previousHeaderRow) {
+          return '';
+        }
+        lowerExclusive = lastTransactionSourceRow;
+      } else {
+        lowerExclusive = previousHeaderRow;
+      }
+    }
+
+    const candidates = Array.isArray(bridgeCandidatesByBlock[blockOrdinal])
+      ? bridgeCandidatesByBlock[blockOrdinal]
+      : [];
+    const ownedCandidate = candidates.find((candidate) => {
+      const sourceRow = Number(candidate && candidate.sourceRow);
+      return Number.isInteger(sourceRow)
+        && sourceRow > lowerExclusive
+        && sourceRow < currentHeaderRow;
+    });
+    return normalizeCell(ownedCandidate && ownedCandidate.clearingAccountId);
+  });
+
+  return Object.freeze({
+    version: 1,
+    headerWindows,
+    bridgeClearingIdsByBlock: Object.freeze(bridgeClearingIdsByBlock)
+  });
+}
+
+function identifyAccountsFromRecognitionBasis({
+  basis,
+  allMerchantIds,
+  allowSubstringMatch = true
+}) {
+  const headerWindows = basis && Array.isArray(basis.headerWindows)
+    ? basis.headerWindows
+    : [];
+  const matches = headerWindows.map((window) => findBigAccountMatchInRows(
+      window.candidateRows,
+      0,
+      window.candidateRows.length - 1,
+      allMerchantIds,
+      allowSubstringMatch
+    ));
+  return {
+    accounts: matches.filter(Boolean),
+    isSingleAccount: headerWindows.length <= 1,
+    matches
+  };
+}
+
 const BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS = 64;
 
 function readRowsForBigAccountRecognition(filePath) {
   try {
-    return readRows(filePath, { blankrows: true, maxRows: BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS });
-  } catch (_headReadError) {
-    return readRows(filePath, { blankrows: true });
+    return readRows(filePath, {
+      blankrows: true,
+      maxRows: BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS,
+      readGuard: createStatementWorkbookReadGuard(filePath)
+    });
+  } catch (headReadError) {
+    if (headReadError && headReadError.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) {
+      throw headReadError;
+    }
+    return readRows(filePath, {
+      blankrows: true,
+      readGuard: createStatementWorkbookReadGuard(filePath)
+    });
   }
 }
 
-function identifyAccountsFromFile({ filePath, expectedSourceHeaders, allMerchantIds, allowSubstringMatch = true }) {
+function identifyAccountsFromFile({
+  filePath,
+  expectedSourceHeaders,
+  allMerchantIds,
+  allowSubstringMatch = true,
+  recognitionBasis = null
+}) {
+  if (recognitionBasis) {
+    return identifyAccountsFromRecognitionBasis({
+      basis: recognitionBasis,
+      allMerchantIds,
+      allowSubstringMatch
+    });
+  }
   let rawRows = readRowsForBigAccountRecognition(filePath);
   let headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
 
   if (!headerRowNumbers.length && rawRows.length >= BIG_ACCOUNT_RECOGNITION_SCAN_MAX_ROWS) {
-    rawRows = readRows(filePath, { blankrows: true });
+    rawRows = readRows(filePath, {
+      blankrows: true,
+      readGuard: createStatementWorkbookReadGuard(filePath)
+    });
     headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, expectedSourceHeaders);
   }
 
   const isSingleAccount = headerRowNumbers.length <= 1;
   const identified = [];
-
-  function searchCandidateRange(startIdx, endIdx) {
-    let bestMatch = null;
-    let bestMatchType = 'none';
-
-    // 从 header 往回搜（倒序），优先命中最靠近 header 的"查询账号"行，
-    // 避免被更远的交易数据行里的账户号字段污染
-    for (let rowIdx = Math.min(endIdx, rawRows.length - 1); rowIdx >= startIdx; rowIdx -= 1) {
-      const row = rawRows[rowIdx];
-      if (!Array.isArray(row)) continue;
-      for (const cell of row) {
-        const cellStr = normalizeCell(cell);
-        if (!cellStr) continue;
-        for (const mid of allMerchantIds) {
-          const result = matchMerchantIds(cellStr, mid, { allowSubstring: allowSubstringMatch });
-          if (result === 'exact') {
-            bestMatch = mid;
-            bestMatchType = 'exact';
-            break;
-          }
-          if (result === 'fuzzy' && bestMatchType !== 'exact') {
-            bestMatch = mid;
-            bestMatchType = 'fuzzy';
-          }
-        }
-        if (bestMatchType === 'exact') break;
-      }
-      if (bestMatchType === 'exact') break;
-    }
-
-    return bestMatch ? { merchantId: bestMatch, matchType: bestMatchType } : null;
-  }
 
   headerRowNumbers.forEach((headerRowNum, idx) => {
     // 只搜索 header 前面有限行（避免搜到上一个账户的交易数据行里的账户号）
@@ -1857,14 +2158,26 @@ function identifyAccountsFromFile({ filePath, expectedSourceHeaders, allMerchant
     const prevBoundary = idx === 0 ? 0 : headerRowNumbers[idx - 1];
     const narrowStart = Math.max(prevBoundary, headerRowNum - 10);
     const candidateEndIdx = headerRowNum - 2;
-    const match = searchCandidateRange(narrowStart, candidateEndIdx);
+    const match = findBigAccountMatchInRows(
+      rawRows,
+      narrowStart,
+      candidateEndIdx,
+      allMerchantIds,
+      allowSubstringMatch
+    );
     if (match) {
       identified.push(match);
     }
   });
 
   if (headerRowNumbers.length === 0) {
-    const match = searchCandidateRange(0, rawRows.length - 1);
+    const match = findBigAccountMatchInRows(
+      rawRows,
+      0,
+      rawRows.length - 1,
+      allMerchantIds,
+      allowSubstringMatch
+    );
     if (match) {
       identified.push(match);
     }
@@ -1922,7 +2235,8 @@ function resolveDirectBigAccountRecognition({
           filePath: entry.filePath,
           expectedSourceHeaders: entry.matchedHeaders || entryTemplateConfig.template?.headers || [],
           allMerchantIds,
-          allowSubstringMatch: false
+          allowSubstringMatch: false,
+          recognitionBasis: entry.detailRows && entry.detailRows.bigAccountRecognitionBasis
         });
     const identifiedMerchantIds = uniqueNormalizedValues(
       (fileResult.accounts || []).map((account) => account.merchantId)
@@ -2029,6 +2343,7 @@ function buildBigAccountSelectionRows(fileEntries = [], options = {}) {
       rows.push({
         index: rowIndex,
         fileIndex,
+        fileBlockOrdinal: block.blockOrdinal,
         sourceRowNumber: block.startRowNumber,
         fileName: path.basename(entry.filePath),
         filePath: entry.filePath,
@@ -3777,7 +4092,34 @@ async function waitForVccPreviewCaptureReady(webContents) {
   `);
 }
 
-function createWindow() {
+function createWindow(options = {}) {
+  const instrumentation = createWindowInstrumentation({
+    enabled: options.instrumentation === 'initial',
+    mark: markStartupMetric,
+    startPhase: (phase) => startStartupPhase(phase, recordStartupPhase)
+  });
+  mainWindowReady = false;
+  const finishCreatePhase = instrumentation.startPhase('window-create');
+  let finishLoadPhase = null;
+  let finishReadyPhase = null;
+  let settled = false;
+  let resolveReady;
+  let rejectReady;
+  const readyPromise = new Promise((resolve, reject) => {
+    resolveReady = resolve;
+    rejectReady = reject;
+  });
+  const failWindowStartup = (error) => {
+    if (settled) return;
+    settled = true;
+    if (finishLoadPhase) finishLoadPhase('failed', { error });
+    if (finishReadyPhase) finishReadyPhase('failed', { error });
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
+    mainWindow = null;
+    mainWindowReady = false;
+    rejectReady(error);
+  };
+  try {
   const windowIcon = loadBundledIcon();
   const windowOptions = {
     width: 1240,
@@ -3806,22 +4148,34 @@ function createWindow() {
     }
   }
   mainWindow = new BrowserWindow(windowOptions);
-  markStartupMetric(STARTUP_METRIC_MARKS.windowCreated);
+  if (instrumentation.enabled) initialStartupWebContentsId = mainWindow.webContents.id;
+  instrumentation.mark(STARTUP_METRIC_MARKS.windowCreated);
 
   if (windowIcon && process.platform !== 'darwin') {
     mainWindow.setIcon(windowIcon);
   }
 
-  mainWindow.webContents.once('did-finish-load', () => {
-    markStartupMetric(STARTUP_METRIC_MARKS.didFinishLoad);
+  instrumentation.mark(STARTUP_METRIC_MARKS.loadStarted);
+  finishLoadPhase = instrumentation.startPhase('window-load');
+  finishReadyPhase = instrumentation.startPhase('window-ready');
+  const readiness = waitForWindowReady({
+    window: mainWindow,
+    load: () => mainWindow.loadFile(path.join(app.getAppPath(), 'index.html')),
+    timeoutMs: 30000,
+    onLoad: () => {
+      instrumentation.mark(STARTUP_METRIC_MARKS.didFinishLoad);
+      finishLoadPhase('success');
+    }
   });
-  markStartupMetric(STARTUP_METRIC_MARKS.loadStarted);
-  mainWindow.loadFile(path.join(app.getAppPath(), 'index.html'));
-  mainWindow.once('ready-to-show', () => {
-    markStartupMetric(STARTUP_METRIC_MARKS.readyToShow);
-    reportStartupMetrics();
-    mainWindow.show();
-    sendWindowState();
+  finishCreatePhase('success');
+  readiness.then(() => {
+    if (settled) return;
+    instrumentation.mark(STARTUP_METRIC_MARKS.readyToShow);
+    showReadyWindow({ window: mainWindow, sendWindowState });
+    finishReadyPhase('success');
+    mainWindowReady = true;
+    settled = true;
+    resolveReady(mainWindow);
 
     if (process.env.APP_CAPTURE_PATH) {
       setTimeout(async () => {
@@ -3853,7 +4207,7 @@ function createWindow() {
         }
       }, Number(process.env.APP_CAPTURE_DELAY_MS || 1800));
     }
-  });
+  }).catch(failWindowStartup);
   mainWindow.on('close', (event) => {
     if (businessOperationRegistry.isInstallTransitionActive() && !quitPreparationComplete) {
       event.preventDefault();
@@ -3861,6 +4215,11 @@ function createWindow() {
   });
   mainWindow.on('maximize', sendWindowState);
   mainWindow.on('unmaximize', sendWindowState);
+  } catch (error) {
+    finishCreatePhase('failed', { error });
+    failWindowStartup(error);
+  }
+  return readyPromise;
 }
 
 function buildTemplateSummary(template) {
@@ -4200,6 +4559,9 @@ function registerArchiveCenterHandlers() {
     return callArchiveCenter('setRetentionDays', retentionDays);
   });
   ipcMain.handle('archive-center:get-stats', () => callArchiveCenter('getStats'));
+  ipcMain.handle('archive-center:start-entry-maintenance', (_event, visitId) => {
+    return callArchiveCenter('startEntryMaintenance', visitId);
+  });
 }
 
 function archiveCenterMutationIpcHandle(channel, functionKey, handler) {
@@ -4443,6 +4805,17 @@ function initializeArchiveCenter() {
       run: reconcileVccImportArchiveBeforeRetentionCleanup
     }],
     getProtectedInterruptedTaskBatchIds: protectedInterruptedTaskBatchIds,
+    onStartupPhase: recordStartupPhase,
+    onEntryMaintenanceEvent: (eventName, payload) => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      const channels = {
+        progress: 'archive-center:entry-maintenance-progress',
+        completed: 'archive-center:entry-maintenance-completed',
+        failed: 'archive-center:entry-maintenance-failed'
+      };
+      const channel = channels[eventName];
+      if (channel) mainWindow.webContents.send(channel, payload);
+    },
     showOpenDialog: (options) => showImportOpenDialog('archive-center-retry-source', options),
     showSaveDialog: (options) => dialog.showSaveDialog(mainWindow, options),
     logWarning: (message, detail) => {
@@ -4480,15 +4853,8 @@ function initializeArchiveCenter() {
 
 function registerAppHandlers() {
   ipcMain.handle('app:get-info', () => {
-    // v3.0.5 PR-5（Part B Phase 3）：两段式——init 未完（新时序窗口先行，database 尚未 init）→ 返回 loading 骨架。
-    //   renderer 渲染「正在初始化…」状态 + appVersion；收到 app:init-done 后重新 getInfo 拿全量字段。
-    //   ⚠️ 必须用 appInitDone（而非仅判 database 非空）：database init 链中途访问 getCurrentModule 等也可能未就绪。
-    if (!appInitDone || !database || !database.db) {
-      return { initPending: true, version: app.getVersion() };
-    }
     const enumConfig = getEnumConfig();
     return {
-      initPending: false,
       version: app.getVersion(),
       storageRoot: ensureStorageRoot(),
       hasEnum: Boolean(enumConfig),
@@ -6451,7 +6817,12 @@ function registerAppHandlers() {
       };
     }
   });
-  ipcMain.on('app:report-startup-metrics', (_event, payload = {}) => {
+  ipcMain.on('app:report-startup-metrics', (event, payload = {}) => {
+    if (!shouldAcceptInitialRendererMetrics({
+      senderId: event.sender && event.sender.id,
+      initialWebContentsId: initialStartupWebContentsId,
+      hasExistingMetrics: startupMetrics.renderer !== null
+    })) return;
     startupMetrics.renderer = sanitizeRendererStartupMetrics(payload);
 
     const totalInitMs = startupMetrics.renderer?.durations?.totalInitMs;
@@ -9002,7 +9373,8 @@ function buildMappedRowsForFile({
   config,
   inputFilePath
 }) {
-  return buildMappedRows({
+  let provisionalRecognitionBasis = null;
+  const mappedRows = buildMappedRows({
     inputFilePath,
     orderedTargetFields: config.exportTargetFields,
     mappingByField: config.mappingByTargetField,
@@ -9016,8 +9388,29 @@ function buildMappedRowsForFile({
       merchantId: config.selectedMerchantId,
       currency: config.selectedCurrency
     },
-    dateParseOrder: config.dateParseOrder
+    dateParseOrder: config.dateParseOrder,
+    readOptions: {
+      readGuard: createStatementWorkbookReadGuard(inputFilePath),
+      onWorkbookRows(rawRows) {
+        provisionalRecognitionBasis = buildBigAccountRecognitionBasis({
+          rawRows,
+          expectedSourceHeaders: config.template.headers,
+          accountMappingByBankId: config.accountMappingByBankId
+        });
+      }
+    }
   });
+  const recognitionBasis = finalizeBigAccountRecognitionBasis(
+    provisionalRecognitionBasis,
+    mappedRows
+  );
+  Object.defineProperty(mappedRows, 'bigAccountRecognitionBasis', {
+    value: recognitionBasis,
+    enumerable: false,
+    configurable: false,
+    writable: false
+  });
+  return mappedRows;
 }
 
 const statementGenerationHelpers = createStatementGenerationHelpers({
@@ -9444,13 +9837,6 @@ function generateMultiTemplateGroupFiles({
     groupMap.get(tid).push(entry);
   }
 
-  // 清理待替换的旧文件 session entries
-  if (Array.isArray(replacePaths)) {
-    replacePaths.forEach((filePath) => {
-      removeStatementSessionEntriesByFilePath(session, filePath);
-    });
-  }
-
   let lastBatchId = null;
   let lastGenerationTemplateConfig = null;
   const allDetailPaths = [];
@@ -9458,6 +9844,7 @@ function generateMultiTemplateGroupFiles({
   const allFileEntries = [];
   const allBillDates = [];
   const allWarnings = [];
+  const groupPlans = [];
 
   for (const [, groupEntries] of groupMap) {
     const groupTemplateConfig = getEntryTemplateConfig({
@@ -9494,6 +9881,28 @@ function generateMultiTemplateGroupFiles({
       config: groupConfig,
       fileEntries: effectiveEntries
     });
+
+    groupPlans.push({
+      groupTemplateConfig,
+      groupConfig,
+      effectiveEntries,
+      groupPreparedBatch
+    });
+  }
+
+  // 所有组先完成 source-stable 解析，再进入 session/输出副作用。
+  if (Array.isArray(replacePaths)) {
+    replacePaths.forEach((filePath) => {
+      removeStatementSessionEntriesByFilePath(session, filePath);
+    });
+  }
+
+  for (const {
+    groupTemplateConfig,
+    groupConfig,
+    effectiveEntries,
+    groupPreparedBatch
+  } of groupPlans) {
 
     const groupGeneratedFiles = {
       ...generateStatementFiles({ config: groupConfig, preparedBatch: groupPreparedBatch, scope: 'current' }),
@@ -9674,7 +10083,9 @@ function matchFileToTemplate(filePath, candidateTemplates) {
     if (headers.length === 0) continue;
 
     try {
-      readRowsWithMetadata(filePath, headers);
+      readRowsWithMetadata(filePath, headers, {
+        readGuard: createStatementWorkbookReadGuard(filePath)
+      });
       matches.push(template);
     } catch (error) {
       // 区分文件读取错误和表头不匹配：文件本身不可读时向上抛出
@@ -9706,8 +10117,7 @@ function computeFileHash(filePath) {
 async function resolveImportFileSelection({
   templateName,
   session,
-  filePaths,
-  assertFreshAfterConfirmation = null
+  filePaths
 }) {
   const acceptedPaths = [];
   const replacePaths = [];
@@ -9783,10 +10193,6 @@ async function resolveImportFileSelection({
       message: `检测到重复文件（模板：${templateName}）`,
       detail: `${duplicateDetail}\n\n重复原因：${duplicateReason}`
     });
-    if (typeof assertFreshAfterConfirmation === 'function') {
-      assertFreshAfterConfirmation();
-    }
-
     if (result.response === 1) {
       return {
         status: 'cancelled',
@@ -10474,77 +10880,188 @@ function registerBigAccountHandlers() {
   });
 }
 
-function buildBigAccountOrderData(pendingContext, assignments = []) {
-  const data = { assignments };
-  const fileEntries = pendingContext.fileEntries || [];
+function findBigAccountMatchInRows(
+  rawRows,
+  startIndex,
+  endIndex,
+  merchantIds,
+  allowSubstringMatch = true
+) {
+  let bestMatch = null;
+  for (let rowIndex = Math.min(endIndex, rawRows.length - 1); rowIndex >= startIndex; rowIndex -= 1) {
+    const row = rawRows[rowIndex];
+    if (!Array.isArray(row)) continue;
+    for (const cell of row) {
+      const cellText = normalizeCell(cell);
+      if (!cellText) continue;
+      for (const merchantId of merchantIds) {
+        const matchType = matchMerchantIds(cellText, merchantId, {
+          allowSubstring: allowSubstringMatch
+        });
+        if (matchType === 'exact') return { merchantId, matchType };
+        if (matchType === 'fuzzy') bestMatch = { merchantId, matchType };
+      }
+    }
+  }
+  return bestMatch;
+}
+
+function findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockOrdinal) {
+  const clearingIds = recognitionBasis && Array.isArray(recognitionBasis.bridgeClearingIdsByBlock)
+    ? recognitionBasis.bridgeClearingIdsByBlock
+    : [];
+  if (!Number.isInteger(blockOrdinal) || blockOrdinal < 0) return null;
+  const clearingId = normalizeCell(clearingIds[blockOrdinal]);
+  if (!clearingId) return null;
+  const matched = expandedOptions.find(
+    (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
+  );
+  if (matched) {
+    return { merchantId: matched.merchantId, matchType: 'exact', viaBridge: true };
+  }
+  return null;
+}
+
+function identifySelfInputBigAccountBridges(recognitionBasis, expandedOptions) {
+  const clearingIds = recognitionBasis && Array.isArray(recognitionBasis.bridgeClearingIdsByBlock)
+    ? recognitionBasis.bridgeClearingIdsByBlock
+    : [];
+  return clearingIds.map((_clearingId, blockOrdinal) => (
+    findSelfInputBigAccountBridge(recognitionBasis, expandedOptions, blockOrdinal)
+  ));
+}
+
+function buildBigAccountOrderEvidence(pendingContext) {
+  const fileEntries = Array.isArray(pendingContext.fileEntries) ? pendingContext.fileEntries : [];
   const allMerchantIds = (pendingContext.bigAccounts || [])
     .map((ba) => normalizeCell(ba.merchantId))
     .filter((id) => id !== '');
-  const defaultHeaders = pendingContext.template?.headers || [];
   const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
+  const previewRows = Array.isArray(pendingContext.rowsWithEmptyBlocks)
+    ? pendingContext.rowsWithEmptyBlocks
+    : (pendingContext.rows || []);
 
-  data.fileCount = fileEntries.length;
-  data.files = fileEntries.map((entry, fileIndex) => {
-    const entryHeaders = entry.matchedHeaders || defaultHeaders;
-    let fileResult = entry.skipDirectMerchantLookup
-      ? { accounts: [], isSingleAccount: false }
-      : identifyAccountsFromFile({
-          filePath: entry.filePath,
-          detailRows: entry.detailRows,
-          expectedSourceHeaders: entryHeaders,
-          allMerchantIds
-        });
-    // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-    if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-      if (entry.matchedTemplateId) {
-        const rawRowsFull = readRows(entry.filePath, { blankrows: true });
-        const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
-        const bankIdToMerchant = new Map();
-        for (const am of acctMappings) {
-          const bankId = normalizeCell(am.bankAccountId);
-          const clearingId = normalizeCell(am.clearingAccountId);
-          if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-        }
-        if (bankIdToMerchant.size > 0) {
-          const bankIds = [...bankIdToMerchant.keys()];
-          for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
-            const row = rawRowsFull[rowIdx];
-            if (!Array.isArray(row)) continue;
-            for (const cell of row) {
-              const cellStr = normalizeCell(cell);
-              if (!cellStr) continue;
-              for (const bankId of bankIds) {
-                if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                  const clearingId = bankIdToMerchant.get(bankId);
-                  const matched = expandedOptions.find(
-                    (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
-                  );
-                  if (matched) {
-                    fileResult = {
-                      accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }],
-                      isSingleAccount: true
-                    };
-                    break;
-                  }
-                }
-              }
-              if (fileResult.accounts.length > 0) break;
-            }
-          }
-        }
-      }
-    }
-    const accounts = fileResult.accounts.map((identified) => {
-      const matched = expandedOptions.find(
-        (option) => matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
-      );
-      return matched
-        ? { merchantId: matched.merchantId, currency: matched.currency }
-        : { merchantId: identified.merchantId, currency: '' };
+  const files = fileEntries.map((entry, fileOrdinal) => {
+    const resolvedPath = path.resolve(entry.filePath);
+    const fileRows = previewRows.filter(
+      (row) => path.resolve(row.filePath || '') === resolvedPath
+    );
+    const recognitionBasis = entry.detailRows && entry.detailRows.bigAccountRecognitionBasis;
+    const recognition = identifyAccountsFromRecognitionBasis({
+      basis: recognitionBasis,
+      allMerchantIds
     });
-    return { fileIndex, accountCount: accounts.length, accounts };
+    const rows = fileRows.map((previewRow) => {
+      const blockOrdinal = Number(previewRow.fileBlockOrdinal);
+      const sourceRow = Number(previewRow.sourceRowNumber || 0);
+      let identified = !entry.skipDirectMerchantLookup && Number.isInteger(blockOrdinal)
+        ? recognition.matches[blockOrdinal]
+        : null;
+      if (!identified && entry.selfInputMerchant) {
+        identified = findSelfInputBigAccountBridge(
+          recognitionBasis,
+          expandedOptions,
+          blockOrdinal
+        );
+      }
+      const matched = expandedOptions.find(
+        (option) => identified
+          && matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
+      );
+      const merchantId = matched ? matched.merchantId : '';
+      const currency = matched ? matched.currency : '';
+      const ambiguityCode = identified && identified.viaBridge
+        && expandedOptions.filter(
+          (option) => matchMerchantIds(identified.merchantId, option.merchantId) !== 'none'
+        ).length > 1
+        ? 'MULTI_CURRENCY'
+        : null;
+      return Object.freeze({
+        blockOrdinal,
+        sourceRow,
+        merchantId,
+        currency,
+        matchKind: identified ? identified.matchType : '',
+        accountKey: merchantId ? `${merchantId}\u0000${currency}` : '',
+        ambiguityCode
+      });
+    });
+    return Object.freeze({
+      fileOrdinal,
+      resolvedPath,
+      fileName: path.basename(resolvedPath),
+      rows: Object.freeze(rows),
+      orderedAccountKeys: Object.freeze(
+        rows.map((row) => row.accountKey).filter((accountKey) => accountKey !== '')
+      )
+    });
   });
-  return data;
+
+  return Object.freeze({
+    version: 1,
+    sessionId: normalizeCell(pendingContext.statementSelectionSessionId),
+    files: Object.freeze(files)
+  });
+}
+
+function extractBigAccountOrderFromEvidence(pendingContext, mode, rowIndexes) {
+  const selectedRows = selectPendingBigAccountRows(pendingContext, mode, rowIndexes);
+  if (selectedRows.length === 0) {
+    return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
+  }
+  const evidence = pendingContext.bigAccountOrderEvidence;
+  if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
+    return { status: 'error', failedRows: [], message: '大账号选择预览已失效，请重新导入文件' };
+  }
+  const accounts = [];
+  const failedRows = [];
+  const ambiguousCurrencyFiles = [];
+  for (const selectedRow of selectedRows) {
+    const resolvedPath = path.resolve(selectedRow.filePath || '');
+    const fileEvidence = evidence.files.find((file) => file.resolvedPath === resolvedPath);
+    const rowEvidence = fileEvidence && fileEvidence.rows.find(
+      (row) => row.blockOrdinal === Number(selectedRow.fileBlockOrdinal)
+    );
+    if (!rowEvidence || !rowEvidence.accountKey) {
+      failedRows.push({
+        index: Number(selectedRow.index),
+        fileName: normalizeCell(selectedRow.fileName)
+      });
+      continue;
+    }
+    accounts.push({
+      merchantId: rowEvidence.merchantId,
+      currency: rowEvidence.currency,
+      matchType: rowEvidence.matchKind,
+      fileName: fileEvidence.fileName
+    });
+    if (rowEvidence.ambiguityCode === 'MULTI_CURRENCY') {
+      ambiguousCurrencyFiles.push(fileEvidence.fileName);
+    }
+  }
+  if (failedRows.length > 0) return { status: 'error', failedRows };
+  const result = { status: 'ok', accounts };
+  if (ambiguousCurrencyFiles.length > 0) {
+    result.ambiguousCurrencyFiles = Array.from(new Set(ambiguousCurrencyFiles));
+  }
+  return result;
+}
+
+function buildBigAccountOrderData(pendingContext, assignments = []) {
+  const evidence = pendingContext.bigAccountOrderEvidence;
+  if (!evidence || evidence.sessionId !== pendingContext.statementSelectionSessionId) {
+    throw new Error('大账号顺序证据已失效');
+  }
+  return {
+    assignments,
+    fileCount: evidence.files.length,
+    files: evidence.files.map((file) => {
+      const accounts = file.rows
+        .filter((row) => row.accountKey !== '')
+        .map((row) => ({ merchantId: row.merchantId, currency: row.currency }));
+      return { fileIndex: file.fileOrdinal, accountCount: accounts.length, accounts };
+    })
+  };
 }
 
 function persistBigAccountOrderAfterGeneration({
@@ -10617,7 +11134,6 @@ function registerBigAccountOrderHandlers() {
         if (!pendingContext) {
           return { status: 'error', message: '大账号选择预览已失效，请重新导入文件' };
         }
-        if (pendingContext.assertFresh) pendingContext.assertFresh();
         const fileInfoData = buildBigAccountOrderData(pendingContext, data.assignments);
         data.fileCount = fileInfoData.fileCount;
         data.files = fileInfoData.files;
@@ -10665,7 +11181,9 @@ function matchesTemplateHeaders(filePath, template) {
   const headers = Array.isArray(template?.headers) ? template.headers : [];
   if (headers.length === 0) return false;
   try {
-    readRowsWithMetadata(filePath, headers);
+    readRowsWithMetadata(filePath, headers, {
+      readGuard: createStatementWorkbookReadGuard(filePath)
+    });
     return true;
   } catch (error) {
     if (error instanceof FileValidationError && typeof error.message === 'string' && error.message.includes('表头')) {
@@ -11074,6 +11592,16 @@ async function handleFilenameMappingImport(prepared) {
       clearPendingBigAccountSelection();
     }
 
+    if (error && error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) {
+      if (prepared.previewOnly) {
+        return createPreflightErrorResult({
+          message: STATEMENT_SOURCE_FRESHNESS_FAILURE.message,
+          errorCode: STATEMENT_SOURCE_FRESHNESS_FAILURE.code
+        });
+      }
+      throw error;
+    }
+
     if (error instanceof FileValidationError) {
       return createErrorResult({
         step: '导入网银明细文件',
@@ -11127,10 +11655,8 @@ async function prepareStatementImportFiles(templateId, templateName) {
     return { proceed: false, result: { status: 'cancelled' } };
   }
   const inputFilePaths = normalizeInputFilePaths(result.filePaths, { dedupe: false });
-  const assertSelectionFresh = createPreviewSourceFreshnessGuard(
-    inputFilePaths,
-    '网银明细'
-  );
+  const pickerSelections = captureStatementSourceSelections(inputFilePaths);
+  const statementSelectionSessionId = randomUUID();
   const sessionKey = String(templateId || '');
   const existingSession = statementImportSessions.get(sessionKey) || null;
   const previewSession = existingSession || {
@@ -11146,19 +11672,16 @@ async function prepareStatementImportFiles(templateId, templateName) {
   const selectionResult = await resolveImportFileSelection({
     templateName,
     session: previewSession,
-    filePaths: inputFilePaths,
-    assertFreshAfterConfirmation: assertSelectionFresh
+    filePaths: inputFilePaths
   });
-  assertSelectionFresh();
   if (selectionResult.status === 'cancelled' || selectionResult.filePaths.length === 0) {
     return { proceed: false, result: { status: 'cancelled' } };
   }
-  const assertSourceFresh = createPreviewSourceFreshnessGuard(
-    selectionResult.filePaths,
-    '网银明细'
+  const sourceSelections = selectStatementSourceSelections(
+    pickerSelections,
+    selectionResult.filePaths
   );
-  const assertFresh = () => {
-    assertSourceFresh();
+  const assertSessionCurrent = () => {
     const currentSession = statementImportSessions.get(sessionKey) || { fileEntries: [] };
     const currentEvidence = JSON.stringify(currentSession.fileEntries.map((entry) => ({
       id: entry.id,
@@ -11173,18 +11696,16 @@ async function prepareStatementImportFiles(templateId, templateName) {
     filePlan: {
       version: 1,
       allocation: 'eager',
-      inputs: selectionResult.filePaths.map((filePath) => ({
-        filePath,
-        role: 'input',
-        sourceOperation: 'file:import'
-      })),
+      inputs: buildStatementInputFilePlanItems(sourceSelections, 'file:import'),
       outputs: []
     },
     inputFilePaths: selectionResult.filePaths,
     selectionResult,
     previewSession,
-    assertFresh,
-    beforeStart: assertFresh
+    statementSelectionSessionId,
+    sourceSelections,
+    assertSessionCurrent,
+    beforeStart: assertSessionCurrent
   };
 }
 
@@ -11292,20 +11813,6 @@ function registerFileHandlers() {
         null,
         templateId
       );
-      try {
-        previewPrepared.assertFresh();
-      } catch (error) {
-        previewPrepared.previewOnly = false;
-        return {
-          proceed: false,
-          result: createPreflightErrorResult({
-            message: error && error.message
-              ? error.message
-              : '网银明细源文件在预检期间已变化，请重新选择',
-            errorCode: 'STATEMENT_IMPORT_SOURCE_CHANGED'
-          })
-        };
-      }
       previewPrepared.previewOnly = false;
       if (previewResult && previewResult.status === STATEMENT_IMPORT_PREVIEW_READY) {
         return previewPrepared;
@@ -11529,48 +12036,24 @@ function registerFileHandlers() {
                         filePath: entry.filePath,
                         detailRows: entry.detailRows,
                         expectedSourceHeaders: entryHeaders,
-                        allMerchantIds
+                        allMerchantIds,
+                        recognitionBasis: entry.detailRows && entry.detailRows.bigAccountRecognitionBasis
                       });
 
                   // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
                   if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-                    if (entry.matchedTemplateId) {
-                      const rawRowsFull = readRows(entry.filePath, { blankrows: true });
-                      const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
-                      const bankIdToMerchant = new Map();
-                      for (const am of acctMappings) {
-                        const bankId = normalizeCell(am.bankAccountId);
-                        const clearingId = normalizeCell(am.clearingAccountId);
-                        if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-                      }
-                      if (bankIdToMerchant.size > 0) {
-                        const bankIds = [...bankIdToMerchant.keys()];
-                        const bigAccountOpts = expandBigAccountConfigurations(effectiveBigAccounts);
-                        for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
-                          const row = rawRowsFull[rowIdx];
-                          if (!Array.isArray(row)) continue;
-                          for (const cell of row) {
-                            const cellStr = normalizeCell(cell);
-                            if (!cellStr) continue;
-                            for (const bankId of bankIds) {
-                              if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                                const clearingId = bankIdToMerchant.get(bankId);
-                                const matched = bigAccountOpts.find(
-                                  (option) => matchMerchantIds(clearingId, option.merchantId) !== 'none'
-                                );
-                                if (matched) {
-                                  fileResult = {
-                                    accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }],
-                                    isSingleAccount: true
-                                  };
-                                  break;
-                                }
-                              }
-                            }
-                            if (fileResult.accounts.length > 0) break;
-                          }
-                        }
-                      }
+                    const bridgeAccounts = identifySelfInputBigAccountBridges(
+                      entry.detailRows && entry.detailRows.bigAccountRecognitionBasis,
+                      expandBigAccountConfigurations(effectiveBigAccounts)
+                    );
+                    if (bridgeAccounts.length > 0 && bridgeAccounts.every(Boolean)) {
+                      fileResult = {
+                        accounts: bridgeAccounts.map((bridge) => ({
+                          merchantId: bridge.merchantId,
+                          matchType: bridge.matchType
+                        })),
+                        isSingleAccount: bridgeAccounts.length === 1
+                      };
                     }
                   }
 
@@ -12095,6 +12578,16 @@ function registerFileHandlers() {
         clearPendingBigAccountSelection();
       }
 
+      if (error && error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) {
+        if (prepared.previewOnly) {
+          return createPreflightErrorResult({
+            message: STATEMENT_SOURCE_FRESHNESS_FAILURE.message,
+            errorCode: STATEMENT_SOURCE_FRESHNESS_FAILURE.code
+          });
+        }
+        throw error;
+      }
+
       if (error instanceof FileValidationError) {
         return createErrorResult({
           step: '导入网银明细文件',
@@ -12168,7 +12661,6 @@ function registerFileHandlers() {
         };
       }
       try {
-        if (pendingContext.assertFresh) pendingContext.assertFresh();
         const normalized = normalizePendingBigAccountSelection(pendingContext, payload);
         return {
           proceed: true,
@@ -12179,11 +12671,10 @@ function registerFileHandlers() {
           filePlan: {
             version: 1,
             allocation: 'eager',
-            inputs: pendingContext.inputFilePaths.map((filePath) => ({
-              filePath,
-              role: 'input',
-              sourceOperation: 'file:complete-big-account-selection'
-            })),
+            inputs: buildStatementInputFilePlanItems(
+              pendingContext.sourceSelections,
+              'file:complete-big-account-selection'
+            ),
             outputs: []
           },
           rememberOrder: normalized.isFixedMode && typeof payload.rememberOrder === 'boolean'
@@ -12194,7 +12685,7 @@ function registerFileHandlers() {
             if (current !== pendingContext) {
               throw new Error('大账号选择上下文已失效，请重新导入文件');
             }
-            if (pendingContext.assertFresh) pendingContext.assertFresh();
+            if (pendingContext.assertSessionCurrent) pendingContext.assertSessionCurrent();
           }
         };
       } catch (error) {
@@ -12349,6 +12840,10 @@ function registerFileHandlers() {
       clearGeneratedExports();
       clearPendingManualBalancePrompt();
 
+      if (error && error.code === STATEMENT_SOURCE_FRESHNESS_FAILURE.code) {
+        throw error;
+      }
+
       if (error instanceof FileValidationError) {
         return createErrorResult({
           step: '选择大账号',
@@ -12394,291 +12889,14 @@ function registerFileHandlers() {
 
   ipcMain.handle('file:extract-big-account-order', (_event, payload = {}) => {
     const pendingContext = requirePendingBigAccountSelection(payload.contextId);
-    const mode = payload?.mode || 'unfixed';
-    const selectedServerRows = selectPendingBigAccountRows(
-      pendingContext,
-      mode,
-      payload.rowIndexes
-    );
-
     if (!pendingContext) {
       return { status: 'error', failedRows: [], message: '当前没有待处理的大账号选择任务，请重新导入文件' };
     }
-
-    const allMerchantIds = (pendingContext.bigAccounts || []).map((ba) => normalizeCell(ba.merchantId)).filter((id) => id !== '');
-    const defaultExpectedSourceHeaders = pendingContext.template?.headers || [];
-    const expandedOptions = expandBigAccountConfigurations(pendingContext.bigAccounts || []);
-
-    try {
-      if (pendingContext.assertFresh) pendingContext.assertFresh();
-    } catch (error) {
-      return {
-        status: 'error',
-        failedRows: [],
-        message: error && error.message ? error.message : '大账号选择预览已失效，请重新导入文件'
-      };
-    }
-
-    // 构建 filePath → matchedHeaders 映射（用于子模板文件的 header 行检测）
-    const fileHeadersMap = new Map();
-    (pendingContext.fileEntries || []).forEach((entry) => {
-      if (entry.matchedHeaders) {
-        fileHeadersMap.set(entry.filePath, entry.matchedHeaders);
-      }
-    });
-
-    try {
-      const accounts = [];
-      const failedRows = [];
-      const ambiguousCurrencyFiles = [];
-      let globalIndex = 0;
-
-      if (selectedServerRows.length === 0) {
-        return { status: 'error', failedRows: [], message: '请选择需要提取的大账号预览行' };
-      }
-
-      if (mode !== 'fixed') {
-        // 不固定模式：前端只回传 rowIndex；主进程从 pending context 解析出源行信息。
-        const fileEntriesByPath = new Map();
-        (pendingContext.fileEntries || []).forEach((entry) => {
-          fileEntriesByPath.set(entry.filePath, entry);
-        });
-
-        // 预缓存每个文件的原始行和 headerRowNumbers
-        const fileCache = new Map();
-        fileEntriesByPath.forEach((entry, filePath) => {
-          const rawRows = readRows(filePath, { blankrows: true });
-          const fileExpectedHeaders = fileHeadersMap.get(filePath) || defaultExpectedSourceHeaders;
-          const headerRowNumbers = findHeaderRowNumbersInRawRows(rawRows, fileExpectedHeaders);
-          fileCache.set(filePath, { rawRows, headerRowNumbers, entry });
-        });
-
-        selectedServerRows.forEach((fr) => {
-          const serverRowIndex = Number(fr.index);
-          const cached = fileCache.get(fr.filePath || '') || fileCache.get(
-            // fallback: 按 basename 匹配（兼容旧数据）
-            [...fileCache.keys()].find((fp) => path.basename(fp) === fr.fileName) || ''
-          );
-
-          if (!cached) {
-            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
-            return;
-          }
-
-          const { rawRows, headerRowNumbers } = cached;
-          const sourceRow = Number(fr.sourceRowNumber || 0);
-
-          // 找到该行所属的 header（最后一个 <= sourceRow 的 headerRowNumber）
-          let headerIdx = -1;
-          for (let hi = headerRowNumbers.length - 1; hi >= 0; hi -= 1) {
-            if (headerRowNumbers[hi] <= sourceRow) {
-              headerIdx = hi;
-              break;
-            }
-          }
-
-          let bestMatch = null;
-
-          if (headerIdx >= 0 && !cached.entry?.skipDirectMerchantLookup) {
-            // 在该 header 前面的行里搜索账户号（倒序搜索，避免数据行污染）——仅非自定义输入模板
-            const candidateStart = headerIdx === 0 ? 0 : headerRowNumbers[headerIdx - 1];
-            const narrowStart = Math.max(candidateStart, headerRowNumbers[headerIdx] - 10);
-            const candidateEnd = headerRowNumbers[headerIdx] - 2;
-
-            for (let rowIdx = Math.min(candidateEnd, rawRows.length - 1); rowIdx >= narrowStart; rowIdx -= 1) {
-              const row = rawRows[rowIdx];
-              if (!Array.isArray(row)) continue;
-              for (const cell of row) {
-                const cellStr = normalizeCell(cell);
-                if (!cellStr) continue;
-                for (const mid of allMerchantIds) {
-                  const result = matchMerchantIds(cellStr, mid);
-                  if (result === 'exact') { bestMatch = { merchantId: mid, matchType: 'exact' }; break; }
-                  if (result === 'fuzzy' && (!bestMatch || bestMatch.matchType !== 'exact')) {
-                    bestMatch = { merchantId: mid, matchType: 'fuzzy' };
-                  }
-                }
-                if (bestMatch?.matchType === 'exact') break;
-              }
-              if (bestMatch?.matchType === 'exact') break;
-            }
-          }
-
-
-          // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-          if (!bestMatch && cached.entry && cached.entry.selfInputMerchant) {
-            if (cached.entry.matchedTemplateId) {
-              const acctMappings = database.listAccountMappings(cached.entry.matchedTemplateId);
-              const bankIdToMerchant = new Map();
-              for (const am of acctMappings) {
-                const bankId = normalizeCell(am.bankAccountId);
-                const clearingId = normalizeCell(am.clearingAccountId);
-                if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-              }
-              if (bankIdToMerchant.size > 0) {
-                const bankIds = [...bankIdToMerchant.keys()];
-                for (let rowIdx = 0; rowIdx < rawRows.length && !bestMatch; rowIdx += 1) {
-                  const row = rawRows[rowIdx];
-                  if (!Array.isArray(row)) continue;
-                  for (const cell of row) {
-                    const cellStr = normalizeCell(cell);
-                    if (!cellStr) continue;
-                    for (const bankId of bankIds) {
-                      if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                        const clearingId = bankIdToMerchant.get(bankId);
-                        const matched = expandedOptions.find((o) => matchMerchantIds(clearingId, o.merchantId) !== 'none');
-                        if (matched) {
-                          bestMatch = { merchantId: matched.merchantId, matchType: 'exact', viaBridge: true };
-                          break;
-                        }
-                      }
-                    }
-                    if (bestMatch) break;
-                  }
-                }
-              }
-            }
-            // 桥接匹配成功但 merchantId 有多个币种 — 标记币种不确定
-            if (bestMatch && bestMatch.viaBridge) {
-              const currencyCount = expandedOptions.filter((o) => matchMerchantIds(bestMatch.merchantId, o.merchantId) !== 'none').length;
-              if (currencyCount > 1) {
-                ambiguousCurrencyFiles.push(fr.fileName || '');
-              }
-            }
-          }
-
-          if (bestMatch) {
-            const matched = expandedOptions.find((o) => matchMerchantIds(bestMatch.merchantId, o.merchantId) !== 'none');
-            if (matched) {
-              accounts.push({ merchantId: matched.merchantId, currency: matched.currency, matchType: bestMatch.matchType, fileName: fr.fileName });
-            } else {
-              failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
-            }
-          } else if (headerIdx < 0 && !cached.entry?.skipDirectMerchantLookup) {
-
-            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
-          } else {
-
-            failedRows.push({ index: serverRowIndex, fileName: fr.fileName || '' });
-          }
-        });
-      } else {
-        // 固定模式同样只处理 renderer 回传 rowIndex 命中的服务端 rowsWithEmptyBlocks。
-        const requestedRowIndexes = new Set(
-          selectedServerRows.map((row) => Number(row.index))
-        );
-        (pendingContext.fileEntries || []).forEach((entry) => {
-          const fileName = path.basename(entry.filePath);
-          const blockCount = identifyAccountBlocks(
-            entry.detailRows,
-            { includeEmptyBlocks: true }
-          ).length;
-          const firstServerRowIndex = globalIndex;
-          globalIndex += blockCount;
-          const hasRequestedRow = Array.from(
-            { length: blockCount },
-            (_unused, index) => firstServerRowIndex + index
-          ).some((rowIndex) => requestedRowIndexes.has(rowIndex));
-          if (!hasRequestedRow) return;
-          const fileExpectedHeaders = fileHeadersMap.get(entry.filePath) || defaultExpectedSourceHeaders;
-          // selfInputMerchant 的文件跳过标准提取（避免 fuzzy match 误匹配），直接走桥接
-          let fileResult = entry.skipDirectMerchantLookup
-            ? { accounts: [], isSingleAccount: false }
-            : identifyAccountsFromFile({
-                filePath: entry.filePath,
-                detailRows: entry.detailRows,
-                expectedSourceHeaders: fileExpectedHeaders,
-                allMerchantIds
-              });
-
-
-          // 自定义输入 MerchantId：通过账户映射桥接提取（merchantId 不在文件中，跳过全文搜索）
-          let bridgeMatched = false;
-          if (fileResult.accounts.length === 0 && entry.selfInputMerchant) {
-            if (entry.matchedTemplateId) {
-              const rawRowsFull = readRows(entry.filePath, { blankrows: true });
-              const acctMappings = database.listAccountMappings(entry.matchedTemplateId);
-              const bankIdToMerchant = new Map();
-              for (const am of acctMappings) {
-                const bankId = normalizeCell(am.bankAccountId);
-                const clearingId = normalizeCell(am.clearingAccountId);
-                if (bankId && clearingId) bankIdToMerchant.set(bankId, clearingId);
-              }
-              if (bankIdToMerchant.size > 0) {
-                const bankIds = [...bankIdToMerchant.keys()];
-                for (let rowIdx = 0; rowIdx < rawRowsFull.length && fileResult.accounts.length === 0; rowIdx += 1) {
-                  const row = rawRowsFull[rowIdx];
-                  if (!Array.isArray(row)) continue;
-                  for (const cell of row) {
-                    const cellStr = normalizeCell(cell);
-                    if (!cellStr) continue;
-                    for (const bankId of bankIds) {
-                      if (matchMerchantIds(cellStr, bankId) !== 'none') {
-                        const clearingId = bankIdToMerchant.get(bankId);
-                        const matched = expandedOptions.find((o) => matchMerchantIds(clearingId, o.merchantId) !== 'none');
-                        if (matched) {
-                          fileResult = { accounts: [{ merchantId: matched.merchantId, matchType: 'exact' }], isSingleAccount: true };
-                          bridgeMatched = true;
-                          break;
-                        }
-                      }
-                    }
-                    if (fileResult.accounts.length > 0) break;
-                  }
-                }
-              }
-            }
-            // 桥接匹配成功但 merchantId 有多个币种 — 标记币种不确定
-            if (bridgeMatched && fileResult.accounts.length > 0) {
-              const mid = fileResult.accounts[0].merchantId;
-              const currencyCount = expandedOptions.filter((o) => matchMerchantIds(mid, o.merchantId) !== 'none').length;
-              if (currencyCount > 1) {
-                ambiguousCurrencyFiles.push(fileName);
-              }
-            }
-          }
-
-          for (let bi = 0; bi < blockCount; bi += 1) {
-          const serverRowIndex = firstServerRowIndex + bi;
-          if (!requestedRowIndexes.has(serverRowIndex)) continue;
-          const identified = fileResult.accounts[bi];
-          if (!identified) {
-            failedRows.push({ index: serverRowIndex, fileName });
-            continue;
-          }
-
-          const matched = expandedOptions.find((o) => {
-            const result = matchMerchantIds(identified.merchantId, o.merchantId);
-            return result !== 'none';
-          });
-
-          if (matched) {
-            accounts.push({
-              merchantId: matched.merchantId,
-              currency: matched.currency,
-              matchType: identified.matchType,
-              fileName
-            });
-          } else {
-            failedRows.push({ index: serverRowIndex, fileName });
-          }
-          }
-        });
-      }
-
-      if (failedRows.length > 0) {
-        return { status: 'error', failedRows };
-      }
-
-
-      const result = { status: 'ok', accounts };
-      if (ambiguousCurrencyFiles.length > 0) {
-        result.ambiguousCurrencyFiles = ambiguousCurrencyFiles;
-      }
-      return result;
-    } catch (error) {
-      return { status: 'error', failedRows: [], message: '提取大账号信息时出错' };
-    }
+    return extractBigAccountOrderFromEvidence(
+      pendingContext,
+      payload?.mode || 'unfixed',
+      payload.rowIndexes
+    );
   });
 
   businessIpcHandle('file:save-balance-seed', '补录余额并生成账单', {
@@ -20571,12 +20789,16 @@ async function runArchiveAwareOperation(meta, event, args, handler) {
     if (!prepared.proceed) return prepared.result;
 
     const effectiveArgs = prepared.args;
-    const executeBusiness = (taskContext) => executeIpcTaskInvocation(
-      contract,
-      event,
-      prepared,
-      effectiveArgs,
-      taskContext
+    const executeBusiness = (taskContext) => runWithStatementConfirmedSourceSnapshots(
+      meta.channel,
+      taskContext,
+      () => executeIpcTaskInvocation(
+        contract,
+        event,
+        prepared,
+        effectiveArgs,
+        taskContext
+      )
     );
     const policy = taskPolicyRegistry.get(meta.channel);
     if (!policy) {
@@ -20911,60 +21133,7 @@ function flushUsageStats() {
   }
 }
 
-// v3.0.5 PR-5（Part B Phase 3）：启动窗口先行 —— 回退开关 B-D5（仿 USE_BIG_TABLE_IMPORT_ENGINE 范式，一行切回旧时序）。
-//   新时序（默认）：whenReady → 轻量(activity-log/usage-stats) → 立即 createWindow(loading 态) + register*Handlers
-//     → 后台 init 链（database.init / pendingDb / 迁移 / syncTemplateLibrary + 各 setImmediate 后台清理）
-//     → 完成后 mainWindow.webContents.send('app:init-done') 放开功能。
-//   旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register*Handlers → createWindow（v3.0.4 及之前行为）。
-//   ⚠️ 方案①前提（已核实）：register*Handlers 的 handler 体惰性引用 database（闭包 () => database && database.db），
-//     注册时不解引用 → 可在 database.init 前注册；首个 IPC（app:get-info）init 未完返回 {initPending:true,version}。
-//   稳定一版后移除回退分支（与 USE_BIG_TABLE_IMPORT_ENGINE 同退役路径）。
-const DEFERRED_WINDOW_STARTUP = process.env.DEFERRED_WINDOW_STARTUP === '0' ? false : true;
-
-// init 链是否完成（app:get-info 两段式判定：未完返回 loading 骨架；renderer 收 app:init-done 后重 getInfo 拿全量）。
-let appInitDone = false;
-
-// v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 阻塞前，给 loading 窗口发状态文案。
-//   轻量只读 peek 标志位（key 与 database.js ONE_TIME_VACUUM_FLAG_KEY 一致）+ 文件大小判定，决定发哪条文案。
-//   全程 try/swallow——peek 失败一律发通用「正在初始化…」，绝不阻断 init。
-const ONE_TIME_VACUUM_FLAG_KEY_MIRROR = 'db_one_time_vacuum_v3_0_5_done';
-const VACUUM_NOTICE_MIN_DB_BYTES = 500 * 1024 * 1024; // >500MB 才提示「优化数据库（分钟级）」，小库走通用文案
-function sendInitProgress(payload) {
-  try {
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send('app:init-progress', payload);
-    }
-  } catch (_e) { /* swallow */ }
-}
-function maybeSendVacuumLoadingNotice(dbPath) {
-  let vacuumPending = false;
-  try {
-    if (fs.existsSync(dbPath)) {
-      const size = fs.statSync(dbPath).size;
-      if (size >= VACUUM_NOTICE_MIN_DB_BYTES) {
-        // 只读 peek 标志位（throwaway 连接，立即 close；不影响后续 init 的主连接）。
-        const { DatabaseSync } = require('node:sqlite');
-        let peekDb = null;
-        try {
-          peekDb = new DatabaseSync(dbPath, { readOnly: true });
-          const row = peekDb.prepare('SELECT setting_value FROM app_settings WHERE setting_key = ?').get(ONE_TIME_VACUUM_FLAG_KEY_MIRROR);
-          vacuumPending = !(row && row.setting_value === '1');
-        } catch (_e) {
-          vacuumPending = false; // app_settings 不存在（全新库）等 → 无历史膨胀，不发 VACUUM 文案
-        } finally {
-          if (peekDb) { try { peekDb.close(); } catch (_e2) { /* swallow */ } }
-        }
-      }
-    }
-  } catch (_e) { vacuumPending = false; }
-  if (vacuumPending) {
-    sendInitProgress({ phase: 'vacuum', text: '正在优化数据库，首次升级约需几分钟，请勿关闭程序…' });
-  } else {
-    sendInitProgress({ phase: 'init', text: '正在初始化…' });
-  }
-}
-
-// 10 组 IPC handler 注册（提取为函数，新/旧时序都调一次；handler 体惰性引用 database/pendingDb，注册时不解引用）。
+// 完整初始化成功后才注册 IPC 并创建业务窗口。
 function registerAllIpcHandlers() {
   registerWindowHandlers();
   registerAppHandlers();
@@ -20987,22 +21156,14 @@ function registerAllIpcHandlers() {
   markStartupMetric(STARTUP_METRIC_MARKS.handlersReady);
 }
 
-// 后台 init 链 + 所有 post-setup（database/pendingDb/迁移/模板库 + 孤儿清理/备份保留/idle 计时器/failure listener）。
-//   新时序：createWindow 后调用；完成后 markAppInitDone() → send('app:init-done')。
-//   旧时序：register/createWindow 前调用并等待完成。
-//   本函数内所有 setImmediate 后台块 guard `if (!database || !database.db) return`——新时序下 database 已在本函数体内 init，
-//   setImmediate 回调晚于本函数同步体执行，database 已就绪。
-async function runBackgroundInitChain() {
+async function initializeApplication() {
     const dataPath = path.join(app.getPath('userData'), 'tool-data.sqlite');
     // v3.1.10：VCC copy-on-write 迁移恢复必须先于任何数据库连接。
     // setting 真相仍在主库；journal 只负责 prepared/switching/switched 崩溃窗口收口。
     recoverVccStorageMigration({ journalPath: vccStorageMigrationJournalPath() });
-    // v3.0.5 PR-5（B-D6）：升级首启一次性 VACUUM 会同步阻塞主进程（大库分钟级）——新时序下窗口已显示 loading 态，
-    //   故在 database.init()（内含 VACUUM）之前发一次状态文案，让 loading 态显示「正在优化数据库…请勿关闭程序」。
-    //   仅当 VACUUM 待执行（标志位未写）且库文件较大（>500MB，确实膨胀值得多分钟提示）时发；否则发通用「正在初始化…」。
-    maybeSendVacuumLoadingNotice(dataPath);
     database = new AppDatabase(dataPath);
-    database.init();
+    database.init({ onStartupPhase: recordStartupPhase });
+    markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
     initializeAppUpdaterService();
     try {
       pendingDb = openPendingDb(app.getPath('userData'));
@@ -21029,10 +21190,7 @@ async function runBackgroundInitChain() {
     if (toolboxStartupRecoveryError) throw toolboxStartupRecoveryError;
     // Toolbox committed publication 已作为 ArchiveCenter owner recovery 在通用
     // interrupted sweep 前写入“附件 + succeeded”耐久 outbox 并完成重放。
-    // VCC 输入文件的 ready artifact 可能来自上次退出后的 outbox/retry；必须在
-    // app:init-done 前绑定 source 与业务 hold，不能留出可删除窗口。
-    getVccFinancialOpService().syncImportArchiveLineage();
-    markStartupMetric(STARTUP_METRIC_MARKS.databaseReady);
+    // VCC lineage/hold 只由 Archive controller 的 post-outbox hook 执行一次。
     // 结果侧库只服务上一进程的最后一次 run；即使模块默认关闭，也要在本次启动后台立即回收。
     schedulePreFundReconciliationStartupCleanup();
     scheduleDuplicateInboundMatchStartupCleanup();
@@ -21071,71 +21229,58 @@ async function runBackgroundInitChain() {
       }
     }
 
-    syncTemplateLibraryFile();
+    await runStartupPhase('template-sync', async () => syncTemplateLibraryFile(), {
+      onRecord: recordStartupPhase
+    });
     markStartupMetric(STARTUP_METRIC_MARKS.templateLibrarySynced);
 
     runStartupPostSetup();
 }
 
-// init 完成标记 + 通知 renderer 放开功能（loading → 全量）。新时序专用；旧时序窗口建好时 init 已完，渲染层首次 getInfo 即全量。
-function markAppInitDone() {
-  appInitDone = true;
-  try {
-    if (mainWindow && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send('app:init-done');
-    }
-  } catch (_e) { /* swallow — 窗口已销毁等 */ }
-  scheduleAppUpdaterStartupCheck();
-}
-
 if (hasSingleInstanceLock) app.whenReady()
   .then(async () => {
-    markStartupMetric(STARTUP_METRIC_MARKS.appReady);
-    initializeActivityLog();
-
-    // v2.0.0-beta.4：加载 usage-stats + 记录 sessionStart + 启动定时 flush
+    let finishStartupTotal = null;
     try {
-      usageStats = usageStatsModule.loadStats(ensureStorageRoot());
-      usageStatsModule.recordSessionStart(usageStats);
-      usageStatsDirty = true;
-      flushUsageStats();
-      usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
-    } catch (err) {
-      // v2.1.9 SR-log-1：替换 console.warn → 日志上报；usage-stats init 失败 → 默认值兜底
-      appendActivityLogEntry({
-        level: 'warning',
-        source: 'main',
-        domain: 'usage-stats',
-        message: '[usage-stats] init failed',
-        details: [err && err.message ? err.message : String(err)],
-        stack: err && err.stack ? err.stack : undefined
-      });
-      usageStats = usageStatsModule.defaultStats();
-    }
+      finishStartupTotal = startStartupPhase('startup-total', recordStartupPhase);
+      markStartupMetric(STARTUP_METRIC_MARKS.appReady);
+      initializeActivityLog();
 
-    // v3.0.5 PR-5（Part B Phase 3）：启动窗口先行（回退开关 DEFERRED_WINDOW_STARTUP，默认新时序）。
-    if (DEFERRED_WINDOW_STARTUP) {
-      // 新时序：先注册 handler（惰性引用 database） + 立即建窗（loading 态）→ 后台 init 链 → init-done 放开功能。
-      registerAllIpcHandlers();
-      createWindow();
-      // 后台 init 链：放进 setImmediate 让窗口先渲染（loading 骨架），init 完成后 send('app:init-done')。
-      //   database.init 为同步 API；随后等待存档 journal 恢复。放 setImmediate 让 createWindow 的
-      //   loadFile/ready-to-show 事件循环先跑一拍——窗口 loading 态先可见，再开始初始化。
-      setImmediate(async () => {
+      // usage-stats 仍是非关键能力：统计初始化失败保留既有 default 降级，
+      // 但整个尝试位于 startup-total 内，耗时和后续关键启动失败均不会漏记。
+      try {
+        usageStats = usageStatsModule.loadStats(ensureStorageRoot());
+        usageStatsModule.recordSessionStart(usageStats);
+        usageStatsDirty = true;
+        flushUsageStats();
+        usageStatsAutoFlushTimer = setInterval(flushUsageStats, USAGE_STATS_FLUSH_INTERVAL_MS);
+      } catch (err) {
         try {
-          await runBackgroundInitChain();
-        } catch (initErr) {
-          handleStartupFailure(initErr);
-          return;
+          appendActivityLogEntry({
+            level: 'warning',
+            source: 'main',
+            domain: 'usage-stats',
+            message: '[usage-stats] init failed',
+            details: [err && err.message ? err.message : String(err)],
+            stack: err && err.stack ? err.stack : undefined
+          });
+        } catch (_logErr) {
+          // 非关键统计与其 warning 均不得阻断主启动 admission。
         }
-        markAppInitDone();
-      });
-    } else {
-      // 旧时序（DEFERRED_WINDOW_STARTUP=0）：init 链全跑完 → register → createWindow（v3.0.4 及之前行为）。
-      await runBackgroundInitChain();
+        usageStats = usageStatsModule.defaultStats();
+      }
+      await initializeApplication();
       registerAllIpcHandlers();
-      createWindow();
-      markAppInitDone(); // 旧时序窗口建好时 init 已完；置标记保 getInfo 全量（窗口 onInitDone 监听冗余无害）
+      await createWindow({ instrumentation: 'initial' });
+      applicationStartupComplete = true;
+      scheduleAppUpdaterStartupCheck();
+      finishStartupTotal('success');
+      reportStartupMetrics();
+      if (process.env.APP_STARTUP_MEASURE_AUTO_QUIT === '1') {
+        setImmediate(() => app.quit());
+      }
+    } catch (error) {
+      if (finishStartupTotal) finishStartupTotal('failed', { error });
+      throw error;
     }
   })
   .catch((error) => {
@@ -21143,7 +21288,7 @@ if (hasSingleInstanceLock) app.whenReady()
   });
 
 // v3.0.5 PR-5：启动期后台 post-setup（孤儿清理 / 备份保留 / idle 计时器 / failure listener / OneDrive 提示）。
-//   由 runBackgroundInitChain 末尾调用（database 已 init）。所有块 setImmediate 异步，不阻塞窗口。
+//   由 initializeApplication 末尾调用（database 已 init）。所有块 setImmediate 异步，不阻塞窗口。
 function runStartupPostSetup() {
     // v2.1.6 fix10：启动期孤儿数据 cleanup（后台异步，不阻塞窗口 ready）
     // 触发场景：上一次 run 中途 OOM 闪退 / 异常退出 / 用户 force quit，导致 DB 残留 diff_rows + flow/bill imports
@@ -21985,7 +22130,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+  if (applicationStartupComplete && BrowserWindow.getAllWindows().length === 0) {
+    createWindow({ instrumentation: 'supplemental' }).catch(handleStartupFailure);
   }
 });

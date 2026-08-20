@@ -528,3 +528,25 @@ test('contract-v2 连接能力触发器允许新版连接并阻止 v3.1.9 真实
     id: 'new-explicit-worker', targetMonth: '2026-08', fileCount: 0
   }));
 });
+
+test('system snapshot import_source_id 补列后建立部分索引且迁移幂等', (t) => {
+  const db = new DatabaseSync(':memory:');
+  t.after(() => db.close());
+  db.exec(`
+    CREATE TABLE app_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  ensureVccFinancialOpTablesSupport(db);
+  ensureVccFinancialOpTablesSupport(db);
+  const columns = db.prepare('PRAGMA table_info(vcc_fin_op_system_snapshots)').all();
+  assert.ok(columns.some((column) => column.name === 'import_source_id'));
+  const index = db.prepare(`
+    SELECT sql FROM sqlite_master
+    WHERE type = 'index' AND name = 'idx_vcc_fin_op_system_snapshots_import_source'
+  `).get();
+  assert.match(index.sql, /\(import_source_id, id\)/);
+  assert.match(index.sql, /WHERE import_source_id IS NOT NULL/);
+});

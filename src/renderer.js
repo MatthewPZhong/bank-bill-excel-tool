@@ -2627,6 +2627,9 @@ function createAppUpdateSettingsDialog(options = {}) {
     archiveSettingsOpen: false,
     loaded: false,
     loading: false,
+    loadPromise: null,
+    visitCounter: 0,
+    currentVisitId: '',
     listRequestId: 0,
     detailRequestId: 0,
     settingsRequestId: 0,
@@ -2763,10 +2766,11 @@ function createAppUpdateSettingsDialog(options = {}) {
 
             <div class="archive-center-settings-section">
               <h4>存储统计</h4>
-              <div class="archive-center-storage-location-row">
-                <p class="archive-center-settings-note" data-role="archive-storage-path" title="">存档位置：-</p>
+              <div class="archive-center-storage-location-heading">
+                <span>存档位置</span>
                 <button class="secondary-btn small" type="button" data-action="change-archive-storage">变更</button>
               </div>
+              <p class="archive-center-storage-path" data-role="archive-storage-path" title="">-</p>
               <p class="archive-center-settings-note" data-role="archive-storage-migration" aria-live="polite" hidden></p>
               <div class="archive-center-storage-labels">
                 <span>文件总大小 <strong data-role="archive-settings-file-total-size">-</strong></span>
@@ -2822,6 +2826,9 @@ function createAppUpdateSettingsDialog(options = {}) {
   const closeDialogButton = dialog.querySelector('[data-action="close"]');
   const returnButton = dialog.querySelector('[data-role="close-update-dialog"]');
   let unsubscribeStorageMigration = null;
+  let unsubscribeEntryMaintenanceProgress = null;
+  let unsubscribeEntryMaintenanceCompleted = null;
+  let unsubscribeEntryMaintenanceFailed = null;
 
   function getArchiveCenterApi() {
     const api = archiveCenterApi || window.desktopApi?.archiveCenter;
@@ -3046,9 +3053,7 @@ function createAppUpdateSettingsDialog(options = {}) {
     );
     const storageRoot = stats.storagePath || archiveState.settings?.storageRoot || '';
     const storagePath = dialog.querySelector('[data-role="archive-storage-path"]');
-    storagePath.textContent = storageRoot
-      ? `存档位置：${storageRoot}`
-      : '存档位置：-';
+    storagePath.textContent = storageRoot || '-';
     storagePath.title = storageRoot;
     if (stats.migrationStatus && typeof stats.migrationStatus === 'object') {
       archiveState.storageMigration = { ...stats.migrationStatus };
@@ -3166,7 +3171,11 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
   }
 
-  async function loadArchiveBatches({ clearFeedback = true } = {}) {
+  async function loadArchiveBatches({
+    clearFeedback = true,
+    maintenanceRefresh = false,
+    maintenanceDeletedBatchIds = []
+  } = {}) {
     const requestId = ++archiveState.listRequestId;
     const filters = currentArchiveFilters();
     if (clearFeedback) showArchiveFeedback('', 'info');
@@ -3194,18 +3203,34 @@ function createAppUpdateSettingsDialog(options = {}) {
       }
       renderArchiveModuleOptions();
 
+      const priorSelectedBatchId = archiveState.selectedBatchId;
       const selectedStillVisible = batches.some(
         (batch) => archiveCenterBatchId(batch) === archiveState.selectedBatchId
       );
-      archiveState.selectedBatchId = selectedStillVisible
-        ? archiveState.selectedBatchId
-        : archiveCenterBatchId(batches[0]);
+      const deletedBatchIds = new Set(
+        maintenanceDeletedBatchIds.map((batchId) => String(batchId))
+      );
+      const selectedRemovedByMaintenance = maintenanceRefresh
+        && Boolean(priorSelectedBatchId)
+        && deletedBatchIds.has(String(priorSelectedBatchId));
+      const preserveFilteredMaintenanceSelection = maintenanceRefresh
+        && Boolean(priorSelectedBatchId)
+        && !selectedRemovedByMaintenance
+        && !selectedStillVisible;
+      archiveState.selectedBatchId = selectedRemovedByMaintenance
+        ? ''
+        : (selectedStillVisible || preserveFilteredMaintenanceSelection
+            ? priorSelectedBatchId
+            : archiveCenterBatchId(batches[0]));
       archiveState.detail = null;
       renderArchiveBatches();
       if (archiveState.selectedBatchId) {
         await loadArchiveDetail(archiveState.selectedBatchId);
       } else {
         renderArchiveDetail();
+      }
+      if (selectedRemovedByMaintenance) {
+        showArchiveFeedback('存档维护已完成，当前选中的批次已到期删除，请重新选择。', 'info');
       }
       return true;
     } catch (error) {
@@ -3370,14 +3395,40 @@ function createAppUpdateSettingsDialog(options = {}) {
     }
   }
 
-  async function ensureArchiveLoaded() {
-    if (archiveState.loaded || archiveState.loading) return;
-    archiveState.loading = true;
+  async function startArchiveEntryMaintenance(visitId) {
+    if (!visitId || visitId !== archiveState.currentVisitId || archiveState.destroyed) return;
+    const api = getArchiveCenterApi();
+    if (typeof api.startEntryMaintenance !== 'function') return;
     try {
-      const [batchesLoaded] = await Promise.all([loadArchiveBatches(), loadArchiveStats()]);
-      archiveState.loaded = batchesLoaded === true;
-    } finally {
-      archiveState.loading = false;
+      const result = await api.startEntryMaintenance(visitId);
+      if (result?.status === 'started' || result?.status === 'running') {
+        showArchiveFeedback('正在后台维护存档，列表仍可正常使用。', 'info');
+      } else if (result?.failed === true) {
+        showArchiveFeedback('本次存档维护未完成；离开后重新进入可重试。');
+      }
+    } catch (error) {
+      showArchiveFeedback(`存档维护启动失败：${archiveCenterErrorText(error, '未知错误')}`);
+    }
+  }
+
+  async function ensureArchiveLoaded(visitId) {
+    if (!archiveState.loaded && !archiveState.loadPromise) {
+      archiveState.loading = true;
+      archiveState.loadPromise = (async () => {
+        const batchesLoaded = await loadArchiveBatches();
+        archiveState.loaded = batchesLoaded === true;
+        return batchesLoaded;
+      })().finally(() => {
+        archiveState.loading = false;
+        archiveState.loadPromise = null;
+      });
+    }
+    const batchesLoaded = archiveState.loaded
+      ? true
+      : await archiveState.loadPromise;
+    if (batchesLoaded) {
+      await startArchiveEntryMaintenance(visitId);
+      void loadArchiveStats();
     }
   }
 
@@ -3396,6 +3447,7 @@ function createAppUpdateSettingsDialog(options = {}) {
   }
 
   function setSettingsTab(tab) {
+    const wasArchive = archiveState.activeTab === 'archive';
     archiveState.activeTab = tab === 'archive' ? 'archive' : 'update';
     dialog.querySelectorAll('[data-tab]').forEach((button) => {
       const active = button.dataset.tab === archiveState.activeTab;
@@ -3408,7 +3460,11 @@ function createAppUpdateSettingsDialog(options = {}) {
     if (archiveState.activeTab !== 'archive') {
       setArchiveSettingsOpen(false);
     } else {
-      ensureArchiveLoaded();
+      if (!wasArchive) {
+        archiveState.visitCounter += 1;
+        archiveState.currentVisitId = `archive-visit-${Date.now()}-${archiveState.visitCounter}`;
+        ensureArchiveLoaded(archiveState.currentVisitId);
+      }
     }
     refreshOpenAppUpdateDialog();
   }
@@ -3582,6 +3638,16 @@ function createAppUpdateSettingsDialog(options = {}) {
       unsubscribeStorageMigration();
       unsubscribeStorageMigration = null;
     }
+    for (const unsubscribe of [
+      unsubscribeEntryMaintenanceProgress,
+      unsubscribeEntryMaintenanceCompleted,
+      unsubscribeEntryMaintenanceFailed
+    ]) {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    }
+    unsubscribeEntryMaintenanceProgress = null;
+    unsubscribeEntryMaintenanceCompleted = null;
+    unsubscribeEntryMaintenanceFailed = null;
     closeModal();
     return true;
   }
@@ -3701,6 +3767,37 @@ function createAppUpdateSettingsDialog(options = {}) {
         ? { ...progress }
         : { status: 'idle', phase: '', processed: 0, total: 0 };
       renderStorageMigration();
+    });
+  }
+  if (archiveApi && typeof archiveApi.onEntryMaintenanceProgress === 'function') {
+    unsubscribeEntryMaintenanceProgress = archiveApi.onEntryMaintenanceProgress((progress) => {
+      if (!archiveDialogAlive()) return;
+      const phase = String(progress?.phase || '');
+      showArchiveFeedback(phase ? `正在后台维护存档：${phase}` : '正在后台维护存档。', 'info');
+    });
+  }
+  if (archiveApi && typeof archiveApi.onEntryMaintenanceCompleted === 'function') {
+    unsubscribeEntryMaintenanceCompleted = archiveApi.onEntryMaintenanceCompleted(async (result) => {
+      if (!archiveDialogAlive()) return;
+      const selectedBeforeMaintenanceRefresh = archiveState.selectedBatchId;
+      await loadArchiveBatches({
+        clearFeedback: false,
+        maintenanceRefresh: true,
+        maintenanceDeletedBatchIds: Array.isArray(result?.deletedBatchIds)
+          ? result.deletedBatchIds
+          : []
+      });
+      await loadArchiveStats();
+      if (archiveDialogAlive()
+          && (!selectedBeforeMaintenanceRefresh || archiveState.selectedBatchId)) {
+        showArchiveFeedback('存档维护已完成。', 'success');
+      }
+    });
+  }
+  if (archiveApi && typeof archiveApi.onEntryMaintenanceFailed === 'function') {
+    unsubscribeEntryMaintenanceFailed = archiveApi.onEntryMaintenanceFailed(() => {
+      if (!archiveDialogAlive()) return;
+      showArchiveFeedback('本次存档维护未完成；离开后重新进入可重试。');
     });
   }
   requestAnimationFrame(refreshOpenAppUpdateDialog);
@@ -8150,46 +8247,12 @@ async function handleBizOpReconExport() {
   }));
 }
 
-// v3.0.5 PR-5（Part B Phase 3）：启动窗口先行——两段式初始化。
-//   initialize() = 入口：getInfo 若返回 initPending（main init 链未完，窗口已 loading 态显示）→ 渲染轻量骨架
-//     （平台标识/UI 风格默认/版本号/「正在初始化…」状态）+ 订阅 app:init-done → 收到后重新 getInfo 拿全量
-//     → applyFullInfo(info) 完成数据填充。若 getInfo 已全量（旧时序 / init 已完）→ 直接 applyFullInfo。
-//   ⚠️ applyFullInfo 幂等性要求：onInitDone 只触发一次（main 只发一次），且收到时 init 已完 → getInfo 必全量。
 async function initialize() {
   markRendererStartup(RENDERER_STARTUP_MARKS.initializeStart);
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoStart);
   const info = await window.desktopApi.app.getInfo();
   markRendererStartup(RENDERER_STARTUP_MARKS.getInfoDone);
 
-  if (info && info.initPending) {
-    // 轻量骨架（init 前）：平台标识 + UI 风格默认 + 版本号 + loading 状态文案。
-    document.body.dataset.platform = (window.desktopApi && window.desktopApi.platform) || '';
-    applyUiStyle();
-    if (elements.appVersion) elements.appVersion.textContent = info.version || '';
-    setStatus('正在初始化，请稍候…', 'info', { errorReportReady: false });
-    // VACUUM 等阶段文案（B-D6）：升级首启优化数据库时显示「正在优化数据库…」。
-    if (window.desktopApi.app.onInitProgress) {
-      window.desktopApi.app.onInitProgress((payload) => {
-        if (payload && payload.text) setStatus(payload.text, 'info', { errorReportReady: false });
-      });
-    }
-    // init-done 后重新 getInfo 拿全量 → 完成数据填充（解绑一次性监听）。
-    let off = null;
-    const onDone = async () => {
-      if (off) { try { off(); } catch (_e) { /* swallow */ } off = null; }
-      try {
-        const fullInfo = await window.desktopApi.app.getInfo();
-        await applyFullInfo(fullInfo);
-      } catch (err) {
-        setStatus('初始化失败，请重启程序', 'error', { errorReportReady: false });
-        console.error('applyFullInfo after init-done failed:', err);
-      }
-    };
-    off = window.desktopApi.app.onInitDone(onDone);
-    return;
-  }
-
-  // 旧时序 / init 已完：直接全量填充。
   await applyFullInfo(info);
 }
 

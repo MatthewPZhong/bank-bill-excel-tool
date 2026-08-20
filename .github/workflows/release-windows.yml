@@ -55,6 +55,11 @@ jobs:
       - name: Run release checks
         run: npm run release-check
 
+      - name: Verify Windows startup process adapter semantics
+        env:
+          WINDOWS_STARTUP_PROCESS_ADAPTER_REAL_TEST: '1'
+        run: node --test tests/unit/scripts/startup-process-adapter.test.js
+
       - name: Verify main panel alignment
         run: npm run verify:main-panel-alignment
 

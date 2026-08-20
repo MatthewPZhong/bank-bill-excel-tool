@@ -15,6 +15,22 @@ const {
 } = require('./archive-service');
 
 const ARCHIVE_RETENTION_SETTING_KEY = 'archive_center_retention_days';
+const { runStartupPhase, startStartupPhase } = require('../../backend/startup-phase');
+
+const STARTUP_DEFERRED_MAINTENANCE = Object.freeze({
+  version: 1,
+  trigger: 'archive-center-first-entry',
+  tasks: Object.freeze([
+    'cleanup-journal',
+    'blob-metadata',
+    'artifact-metadata',
+    'retention',
+    'owned-orphans',
+    'layout-materialization',
+    'historical-health-scan',
+    'noncritical-ownership-scan'
+  ])
+});
 const ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY = 'archive_center_excluded_template_ids';
 const DEFAULT_RETENTION_DAYS = 60;
 const ALLOWED_RETENTION_DAYS = new Set([30, 60, 90, 180, 365]);
@@ -156,6 +172,9 @@ class ArchiveCenterController {
     this.showOpenDialog = options.showOpenDialog || null;
     this.showSaveDialog = options.showSaveDialog || null;
     this.logWarning = options.logWarning || null;
+    this.onStartupPhase = typeof options.onStartupPhase === 'function'
+      ? options.onStartupPhase
+      : null;
     this.outboxStore = options.outboxStore || null;
     this.onOutboxFlushed = typeof options.onOutboxFlushed === 'function'
       ? options.onOutboxFlushed
@@ -165,6 +184,9 @@ class ArchiveCenterController {
       : null;
     this.onTerminalIntentFlushed = typeof options.onTerminalIntentFlushed === 'function'
       ? options.onTerminalIntentFlushed
+      : null;
+    this.onEntryMaintenanceEvent = typeof options.onEntryMaintenanceEvent === 'function'
+      ? options.onEntryMaintenanceEvent
       : null;
     this.getProtectedInterruptedTaskBatchIds =
       typeof options.getProtectedInterruptedTaskBatchIds === 'function'
@@ -203,6 +225,15 @@ class ArchiveCenterController {
         })
       : [];
     this.outboxFlushTail = Promise.resolve();
+    this.startupVccGateSucceeded = false;
+    this.entryMaintenance = {
+      status: 'idle',
+      attemptId: '',
+      visitId: '',
+      startedAt: null,
+      lastErrorCode: ''
+    };
+    this.entryMaintenancePromise = null;
     this.batchNumberToId = new Map();
     this.database.setSetting(ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY, '[]');
     this.sink = Object.freeze({
@@ -236,16 +267,18 @@ class ArchiveCenterController {
   }
 
   async initialize() {
-    const initialized = this.storageRootManager
-      ? await this.storageRootManager.initialize()
-      : await this.service.initialize({ deferStartupRecovery: true });
-    if (!initialized || initialized.available === false) {
-      this._warn('存档中心初始化失败', initialized && initialized.message);
-      return initialized;
-    }
-    if (initialized.ok === false) {
-      this._warn('存档目录暂不可用，业务成功时仍会登记可重试批次', initialized.message);
-    }
+    const initialized = await runStartupPhase('archive-root-recovery', async () => {
+      const result = await (this.storageRootManager
+        ? this.storageRootManager.initialize()
+        : this.service.initialize({ deferStartupRecovery: true }));
+      if (!result || result.available === false || result.ok === false) {
+        this._warn('存档中心初始化失败', result && result.message);
+        const error = new Error(result && result.message || '存档中心初始化失败');
+        error.code = result && result.code || 'ARCHIVE_STARTUP_ROOT_RECOVERY_FAILED';
+        throw error;
+      }
+      return result;
+    }, { onRecord: this.onStartupPhase });
     const settleOutboxReplay = async (stage, warningMessage) => {
       try {
         const replay = await this.flushOutbox();
@@ -255,15 +288,24 @@ class ArchiveCenterController {
             warningMessage,
             `存档 outbox ${stage} 重放后仍有 ${remaining} 条未完成记录，已保留供存档中心重试`
           );
-          return { completed: false, inventorySafe: true, replay };
+          const error = new Error(`存档 outbox ${stage} 重放后仍有 ${remaining} 条未完成记录`);
+          error.code = 'ARCHIVE_STARTUP_OUTBOX_PENDING';
+          error.remaining = remaining;
+          throw error;
         }
         return { completed: true, inventorySafe: true, replay };
       } catch (error) {
         this._warn(warningMessage, error);
-        return { completed: false, inventorySafe: false, error };
+        if (error && error.code) throw error;
+        const wrapped = new Error(`存档 outbox ${stage} 重放失败`);
+        wrapped.code = 'ARCHIVE_STARTUP_OUTBOX_FAILED';
+        wrapped.cause = error;
+        throw wrapped;
       }
     };
-    const blockingOwnerFailures = [];
+    const finishOutboxPhase = startStartupPhase('archive-outbox', this.onStartupPhase);
+    try {
+    const ownerFailures = [];
     if (this.recoverInterruptedTaskOwners.length > 0) {
       for (const owner of this.recoverInterruptedTaskOwners) {
         try {
@@ -275,9 +317,7 @@ class ArchiveCenterController {
             `模块任务恢复未完全成功（${owner.ownerName}），已保留原批次等待重试`,
             error
           );
-          if (error && error.blocksArchiveStartup === true) {
-            blockingOwnerFailures.push({ ownerName: owner.ownerName, error });
-          }
+          ownerFailures.push({ ownerName: owner.ownerName, error });
         }
       }
     }
@@ -287,13 +327,13 @@ class ArchiveCenterController {
       'post-owner',
       '模块恢复后的存档 outbox 重放未全部完成，已保留供存档中心重试'
     );
-    if (blockingOwnerFailures.length > 0) {
+    if (ownerFailures.length > 0) {
       const error = new AggregateError(
-        blockingOwnerFailures.map((failure) => failure.error),
+        ownerFailures.map((failure) => failure.error),
         '模块恢复尚未完成耐久接管，已阻止业务启动'
       );
       error.code = 'ARCHIVE_STARTUP_OWNER_RECOVERY_FAILED';
-      error.owners = blockingOwnerFailures.map((failure) => failure.ownerName);
+      error.owners = ownerFailures.map((failure) => failure.ownerName);
       throw error;
     }
     const batchFlowReplay = await this.service.replayFlowBindIntents();
@@ -339,10 +379,10 @@ class ArchiveCenterController {
     }
     let pendingTerminalBatchIds = [];
     let pendingTerminalTaskRunIds = [];
-    let outboxInventorySafe = postOwnerOutboxReplay.inventorySafe;
-    if (this.outboxStore && outboxInventorySafe) {
+    if (this.outboxStore && postOwnerOutboxReplay.inventorySafe) {
       try {
-        pendingTerminalBatchIds = this.outboxStore.list().flatMap((record) => {
+        const inventory = this.outboxStore.list();
+        pendingTerminalBatchIds = inventory.flatMap((record) => {
           const payload = record && record.payload;
           const batchId = Number(payload && payload.targetBatchId);
           return payload && payload.terminalOutcome
@@ -350,7 +390,7 @@ class ArchiveCenterController {
             ? [batchId]
             : [];
         });
-        pendingTerminalTaskRunIds = this.outboxStore.list().flatMap((record) => {
+        pendingTerminalTaskRunIds = inventory.flatMap((record) => {
           const owner = record && record.payload && record.payload.owner;
           const taskRunId = owner && owner.kind === 'operation'
             ? String(owner.operationContext && owner.operationContext.taskRunId || '').trim()
@@ -360,11 +400,14 @@ class ArchiveCenterController {
           return taskRunId ? [taskRunId] : [];
         });
       } catch (error) {
-        outboxInventorySafe = false;
-        this._warn('存档 outbox 清单不可读，已跳过本次异常任务与到期清理', error);
+        this._warn('存档 outbox 清单不可读，已阻止业务启动', error);
+        const failure = new Error('存档 outbox 清单不可验证，已阻止业务启动');
+        failure.code = 'ARCHIVE_STARTUP_OUTBOX_INVENTORY_FAILED';
+        failure.cause = error;
+        throw failure;
       }
     }
-    if (interruptedSweepSafe && outboxInventorySafe) {
+    if (interruptedSweepSafe) {
       const interrupted = await this.service.markInterruptedTasks({
         excludeBatchIds: [
           ...new Set([
@@ -378,17 +421,39 @@ class ArchiveCenterController {
       });
       if (interrupted && interrupted.ok === false) {
         this._warn('存档中心异常任务扫尾未完成', interrupted.message || interrupted.code);
+        const error = new Error(interrupted.message || '存档中心异常任务扫尾未完成');
+        error.code = interrupted.code || 'ARCHIVE_STARTUP_INTERRUPTED_SWEEP_FAILED';
+        throw error;
       }
     }
-    if (outboxInventorySafe) {
-      const reconciled = await this.service.reconcileStartup();
-      if (reconciled && reconciled.ok === false) {
-        this._warn('存档原始存储维护未完全成功', reconciled.status || reconciled.code);
+    const safetyRecovery = await this.service.recoverStartupSafety();
+    if (!safetyRecovery || safetyRecovery.ok === false) {
+      const error = new Error('存档中断 artifact 状态收口未完成');
+      error.code = 'ARCHIVE_STARTUP_SAFETY_RECOVERY_FAILED';
+      error.failures = safetyRecovery && safetyRecovery.failures;
+      throw error;
+    }
+    finishOutboxPhase('success', {
+      counts: {
+        pendingTerminalBatches: pendingTerminalBatchIds.length,
+        pendingTerminalTasks: pendingTerminalTaskRunIds.length
       }
+    });
+    } catch (error) {
+      finishOutboxPhase('failed', { error });
+      throw error;
     }
     for (const hook of this.postOutboxStartupHooks) {
       try {
-        await hook.run();
+        await runStartupPhase('vcc-lineage-gate', () => hook.run(), {
+          onRecord: this.onStartupPhase,
+          counts: (result) => ({
+            bound: Number(result && result.bound) || 0,
+            failed: Number(result && result.failed) || 0,
+            pending: Number(result && result.pending) || 0,
+            released: Number(result && result.released) || 0
+          })
+        });
       } catch (cause) {
         this._warn(
           `存档启动校验失败（${hook.hookName}），已阻止到期清理`,
@@ -401,18 +466,11 @@ class ArchiveCenterController {
         throw error;
       }
     }
-    if (outboxInventorySafe) {
-      const cleanup = await this.service.cleanupExpired();
-      if (cleanup && cleanup.ok === false) {
-        this._warn('存档中心到期清理未完全成功', cleanup.message || cleanup.status);
-      }
-    }
-    if (this.storageRootManager) {
-      this.storageRootManager.resumeBackgroundArchiveChecks();
-    } else {
-      this.service.resumeBackgroundMaterialization();
-    }
-    return initialized;
+    this.startupVccGateSucceeded = this.postOutboxStartupHooks.length > 0;
+    return {
+      ...initialized,
+      deferredMaintenance: STARTUP_DEFERRED_MAINTENANCE
+    };
   }
 
   listUnresolvedSourcePaths() {
@@ -1599,6 +1657,183 @@ class ArchiveCenterController {
       }
     };
   }
+
+  _emitEntryMaintenance(eventName, payload = {}) {
+    if (!this.onEntryMaintenanceEvent) return;
+    try { this.onEntryMaintenanceEvent(eventName, payload); } catch (_error) {}
+  }
+
+  _assertRetentionGate() {
+    if (!this.startupVccGateSucceeded) {
+      const error = new Error('本进程启动 VCC 安全门禁未完成');
+      error.code = 'ARCHIVE_RETENTION_VCC_GATE_UNAVAILABLE';
+      throw error;
+    }
+    if (this.outboxStore) {
+      const records = this.outboxStore.list();
+      if (records.length > 0) {
+        const error = new Error('存档 outbox owner intent 尚未收口');
+        error.code = 'ARCHIVE_RETENTION_OUTBOX_PENDING';
+        throw error;
+      }
+    }
+    const gate = this.service.repository.getEntryMaintenanceGateState();
+    if (gate.activeBatchCount > 0
+        || gate.activeTaskRunCount > 0
+        || gate.pendingArtifactCount > 0) {
+      const error = new Error('存档任务仍在活动，已停止到期删除');
+      error.code = 'ARCHIVE_RETENTION_ACTIVE_TASK';
+      throw error;
+    }
+    return gate;
+  }
+
+  startEntryMaintenance(visitIdValue) {
+    const visitId = String(visitIdValue || '').trim();
+    if (!visitId) {
+      return publicFailure({
+        code: 'ARCHIVE_ENTRY_VISIT_REQUIRED',
+        message: '存档中心访问标识不可为空'
+      }, '存档维护启动失败');
+    }
+    if (this.entryMaintenance.status === 'running') {
+      return { ok: true, status: 'running', attemptId: this.entryMaintenance.attemptId };
+    }
+    if (this.entryMaintenance.status === 'succeeded') {
+      return { ok: true, status: 'complete', attemptId: this.entryMaintenance.attemptId };
+    }
+    if (this.entryMaintenance.status === 'failed'
+        && this.entryMaintenance.visitId === visitId) {
+      return {
+        ok: true,
+        status: 'complete',
+        attemptId: this.entryMaintenance.attemptId,
+        failed: true
+      };
+    }
+    const attemptId = crypto.randomUUID();
+    this.entryMaintenance = {
+      status: 'running',
+      attemptId,
+      visitId,
+      startedAt: new Date().toISOString(),
+      lastErrorCode: ''
+    };
+    this.entryMaintenancePromise = new Promise((resolve) => setImmediate(resolve))
+      .then(() => this._runEntryMaintenance(attemptId))
+      .finally(() => { this.entryMaintenancePromise = null; });
+    return { ok: true, status: 'started', attemptId };
+  }
+
+  async _runEntryMaintenance(attemptId) {
+    let entryLeaseOwnerToken = '';
+    const progress = (phase, value = {}) => {
+      this._emitEntryMaintenance('progress', {
+        attemptId,
+        phase,
+        processed: Number(value.processed) || 0,
+        remaining: Number(value.remaining) || 0,
+        status: 'running'
+      });
+    };
+    const phaseResults = new Map();
+    const phases = [
+      ['cleanup-journal', async () => {
+        const migration = this.storageRootManager
+          ? await this.storageRootManager.resumeDeferredCleanup({
+              ownerToken: entryLeaseOwnerToken
+            })
+          : { ok: true, status: 'complete', processed: 0 };
+        if (migration && migration.ok === false) throw Object.assign(
+          new Error(migration.message || '迁移清理未完成'),
+          { code: migration.code || 'ARCHIVE_STORAGE_CLEANUP_PENDING' }
+        );
+        return migration;
+      }],
+      ['blob-metadata', () => this.service.runBlobMetadataMaintenance({
+        onProgress: (value) => progress('blob-metadata', value)
+      })],
+      ['artifact-metadata', () => this.service.runArtifactMetadataMaintenance({
+        onProgress: (value) => progress('artifact-metadata', value)
+      })],
+      ['retention', async () => {
+        this._assertRetentionGate();
+        return typeof this.service.runRetentionMaintenance === 'function'
+          ? this.service.runRetentionMaintenance({
+              onProgress: (value) => progress('retention', value)
+            })
+          : this.service.cleanupExpired();
+      }],
+      ['owned-orphans', () => this.service.runOwnedOrphanCleanup()],
+      ['layout-materialization', () => this.service.runLayoutMaterializationMaintenance({
+        onProgress: (value) => progress('layout-materialization', value)
+      })],
+      ['historical-health-scan', () => this.service.runHistoricalHealthScan()],
+      ['noncritical-ownership-scan', () => (
+        this.storageRootManager
+          ? this.storageRootManager.runNoncriticalOwnershipScan()
+          : Promise.resolve({ status: 'complete', processed: 0, remaining: 0 })
+      )]
+    ];
+    let entryLeaseAcquired = false;
+    try {
+      if (this.storageRootManager
+          && typeof this.storageRootManager.beginEntryMaintenance === 'function') {
+        const lease = await this.storageRootManager.beginEntryMaintenance();
+        if (!lease || lease.acquired !== true) {
+          const error = new Error('存档位置或数据库维护正在进行');
+          error.code = 'ARCHIVE_STORAGE_MAINTENANCE';
+          throw error;
+        }
+        entryLeaseAcquired = true;
+        entryLeaseOwnerToken = String(lease.ownerToken || '');
+      }
+      for (const [phase, run] of phases) {
+        progress(phase);
+        const result = await run();
+        const resultStatus = String(result && result.status || '').toLowerCase();
+        const incompleteStatus = [
+          'failed',
+          'incomplete',
+          'partial',
+          'paused',
+          'pending',
+          'running',
+          'cleanup-pending'
+        ].includes(resultStatus);
+        if (result && (result.ok === false || incompleteStatus)) {
+          const error = new Error(result.message || `存档维护阶段失败：${phase}`);
+          error.code = result.code
+            || result.lastErrorCode
+            || 'ARCHIVE_ENTRY_MAINTENANCE_FAILED';
+          throw error;
+        }
+        phaseResults.set(phase, result || {});
+        progress(phase, result || {});
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      this.entryMaintenance = { ...this.entryMaintenance, status: 'succeeded' };
+      this._emitEntryMaintenance('completed', {
+        attemptId,
+        status: 'complete',
+        deletedBatchIds: Array.isArray(phaseResults.get('retention')?.deletedBatchIds)
+          ? phaseResults.get('retention').deletedBatchIds
+          : []
+      });
+      return { ok: true, status: 'complete', attemptId };
+    } catch (error) {
+      const code = String(error && error.code || 'ARCHIVE_ENTRY_MAINTENANCE_FAILED');
+      this.entryMaintenance = { ...this.entryMaintenance, status: 'failed', lastErrorCode: code };
+      this._emitEntryMaintenance('failed', { attemptId, status: 'failed', errorCode: code });
+      return { ok: false, status: 'failed', attemptId, errorCode: code };
+    } finally {
+      if (entryLeaseAcquired
+          && this.storageRootManager
+          && typeof this.storageRootManager.endEntryMaintenance === 'function') {
+        await this.storageRootManager.endEntryMaintenance(entryLeaseOwnerToken);
+      }
+    }
+  }
 }
 
 function createArchiveCenterController(options) {
@@ -1606,6 +1841,7 @@ function createArchiveCenterController(options) {
 }
 
 module.exports = {
+  STARTUP_DEFERRED_MAINTENANCE,
   ALLOWED_RETENTION_DAYS,
   ARCHIVE_RETENTION_SETTING_KEY,
   ARCHIVE_TEMPLATE_EXCLUSIONS_SETTING_KEY,

@@ -43,13 +43,15 @@ function addReadyArtifact(repository, batchId, payload, index) {
   const completed = repository.completeArtifact(artifact.id, {
     sha256: digest,
     sizeBytes: 100 + index,
-    relativePath: `blobs/sha256/${digest.slice(0, 2)}/${digest}`
+    relativePath: `blobs/sha256/${digest.slice(0, 2)}/${digest}`,
+    fingerprint: { sizeBytes: 100 + index, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   }).artifact;
   return repository.completeMaterialization(completed.id, {
     storageMode: 'copy',
     storageRelativePath: `2026/08/13/${batchId}/${index}-${payload.originalName}`,
     safeFileName: `${index}-${payload.originalName}`,
-    artifactOrder: index
+    artifactOrder: index,
+    storageFingerprint: { sizeBytes: 100 + index, mtimeMs: 1, ctimeMs: 1, ino: '1' }
   }).artifact;
 }
 

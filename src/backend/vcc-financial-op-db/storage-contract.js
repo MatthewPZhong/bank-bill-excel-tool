@@ -340,6 +340,9 @@ function ensureVccStorageSideTables(db) {
       ON vcc_fin_op_effective_rows(
         import_source_id, target_month, source_type, sheet_name, source_row, id
       );
+    CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_system_snapshots_import_source
+      ON vcc_fin_op_system_snapshots(import_source_id, id)
+      WHERE import_source_id IS NOT NULL;
   `);
 
   // v1 数据库不会在普通启动时隐式执行物理重建。历史终态记录没有

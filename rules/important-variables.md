@@ -9,7 +9,10 @@
 
 | 字段 | 值 |
 |---|---|
-| 当前清单版本 | v37（app v3.1.12 — 随包用户指南发布状态纠正；运行时重要变量与 v36 相同） |
+| 当前清单版本 | v38（app v3.1.12 — 网银源文件身份、启动 admission/VCC hold、CNY/CNH 新导入与 Archive 指纹/首次进入维护） |
+| v38 本轮 review | 2026-08-20（以 `origin/main@ccfa71ffc92bb26bbf47c05efa87740d972cf209` 为基线，覆盖 PR1—PR5 的 25 个生产文件；复核 FilePlan/reader 连续身份、启动 fail-closed、一次 VCC lineage/hold、CNH→CNY 新哈希、Archive 迁移/删除 owner 与 entry maintenance；发布负责人已确认人工验收完成并授权合并） |
+| v38 基线数据 | `docs/analysis/var-reference-stats.md`（340 个 git-tracked JS / 4516 个顶层名称；A-share 660 / A-pair 957 / A-local 2726 / B 1617；报告版本 3.1.12） |
+| v37 历史版本 | app v3.1.12 — 随包用户指南发布状态纠正；当时运行时重要变量与 v36 相同。 |
 | v37 本轮 review | 2026-08-19（只修改版本元数据、发布文档、生成统计与发布合同测试；相对 `main@782415ae1f606da2adebe881ba7ab56b1b045137` 无 `src/` diff，不改变运行时变量、schema 或资金/文件血缘） |
 | v37 基线数据 | `docs/analysis/var-reference-stats.md`（338 个 git-tracked JS / 4478 个顶层名称；A-share 656 / A-pair 950 / A-local 2705 / B 1606；报告版本 3.1.12） |
 | v36 历史版本 | app v3.1.11 — Task Run/File Batch 解耦、非空 FilePlan 原子发号、精确 dataset/run lineage、Archive 十四表与 017/018 定点维护。 |
@@ -51,6 +54,7 @@
 | v3.0.26 人工资金 review | 待业务负责人逐笔核对 R5 默认网关来源与调拨对账单来源的正/负/空手续费、回填 ReconciliationId、严格 1:1 去向和多对多异常说明；并人工打开新 21 列前置资金结果确认 FundType 血缘。自动化 review 不替代人工验收。 |
 | v3.1.0 人工资金 review | 待业务负责人使用真实或脱敏银行账单、五类链接原始表逐笔核对十组 FundType、自有/非自有账户别名、币种、方向、日期、signed Extra Fee、严格 1:1、差异和回导确认；Windows Excel/WPS 模板打开及大文件内存也需人工验收。 |
 | v3.1.11 人工资金 review | 待业务负责人使用真实或脱敏 Biz OP、Pending、Pre-fund 样本复核 dataset tag → run receipt → 输出文件的直接血缘、行数和金额/币种守恒；并在真实 Archive 数据库副本复核 017/018、001。自动化 release-check 不替代该发布门禁。 |
+| v3.1.12 人工资金/状态 review | 2026-08-20 发布负责人明确确认已完成网银源文件身份、VCC CNY/CNH 主体/金额/幂等/原始审计/九币种输出、Archive 迁移/未知文件/指纹/首次进入维护以及受控 Windows 启动与恢复验收，并授权 `v3.1.12 → main`；仓库只记录最终结论，不收录敏感数据库、sidecar 或 raw report。 |
 | 基线数据 | `docs/analysis/var-reference-stats.md`（218 个 JS 文件 / 2553 顶层声明；A-share 376 / A-pair 637 / A-local 1396 / B 1013；报告版本 3.1.0） |
 | 下次重扫时机 | 版本号 bump / 合并到 `main` 或 `v1.5.x` 前 |
 | 分层定义 | Critical / Important-skeleton / Runtime-state / Risk-sensitive / Minor |

@@ -187,7 +187,7 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
         status: 'success',
         settings: {
           retentionDays,
-          storageRoot: '/very/long/archive/root/用于验证存档位置省略号和完整title/年份/月/日期/批次号',
+          storageRoot: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
           storageMigration: { status: 'idle', phase: '', processed: 0, total: 0 }
         }
       };
@@ -201,7 +201,7 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
       return {
         status: 'success',
         stats: {
-          storagePath: '/very/long/archive/root/用于验证存档位置省略号和完整title/年份/月/日期/批次号',
+          storagePath: '/very/long/archive/root/用于验证存档位置完整换行和选择/年份/月/日期/批次号',
           fileTotalBytes: 1325400064,
           runCount: 128,
           latestBatchNumber: '2026-08-11-128',
@@ -427,8 +427,24 @@ async function verifyArchiveBrowserLayout(failures) {
     && !document.querySelector('[data-archive-view="settings"]').hasAttribute('aria-busy')
   ));
   const storagePath = document.querySelector('[data-role="archive-storage-path"]');
-  if (!storagePath.title.includes('用于验证存档位置省略号')) failures.push('storage path full title missing');
-  if (getComputedStyle(storagePath).textOverflow !== 'ellipsis') failures.push('storage path ellipsis missing');
+  const storageHeading = document.querySelector('.archive-center-storage-location-heading');
+  const storageChange = document.querySelector('[data-action="change-archive-storage"]');
+  const storageStyle = getComputedStyle(storagePath);
+  const storageRect = storagePath.getBoundingClientRect();
+  const headingRect = storageHeading.getBoundingClientRect();
+  const changeRect = storageChange.getBoundingClientRect();
+  if (!storagePath.title.includes('用于验证存档位置完整换行和选择')) {
+    failures.push('storage path full title missing');
+  }
+  if (storagePath.textContent !== storagePath.title) failures.push('storage path text is not complete');
+  if (storageStyle.textOverflow === 'ellipsis') failures.push('storage path must not use ellipsis');
+  if (storageStyle.whiteSpace !== 'normal' || storageStyle.overflowWrap !== 'anywhere') {
+    failures.push(`storage path wrapping drifted: ${storageStyle.whiteSpace}/${storageStyle.overflowWrap}`);
+  }
+  if (storageStyle.userSelect !== 'text') failures.push(`storage path is not selectable: ${storageStyle.userSelect}`);
+  if (Math.abs(headingRect.top - changeRect.top) > 1 || storageRect.top < headingRect.bottom - 1) {
+    failures.push('storage location heading/button/path are not arranged in two rows');
+  }
   if (document.querySelector('[data-role="archive-stat-runs"]').textContent !== '128') {
     failures.push('run count not rendered');
   }

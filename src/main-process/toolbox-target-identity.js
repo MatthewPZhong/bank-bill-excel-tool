@@ -35,7 +35,15 @@ function realpathSyncWith(fsImpl, filePath) {
 
 function targetPathAliasKey(fsImpl, targetPath, options = {}) {
   const resolvedTarget = path.resolve(String(targetPath));
-  const realParent = realpathSyncWith(fsImpl, path.dirname(resolvedTarget));
+  let realParent;
+  try {
+    realParent = realpathSyncWith(fsImpl, path.dirname(resolvedTarget));
+  } catch (error) {
+    if (!options.allowMissingParentLexicalFallback || !error || error.code !== 'ENOENT') {
+      throw error;
+    }
+    realParent = path.dirname(resolvedTarget);
+  }
   return normalizeTargetAliasKey(
     path.join(realParent, path.basename(resolvedTarget)),
     options

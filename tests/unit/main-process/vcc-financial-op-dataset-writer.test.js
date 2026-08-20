@@ -18,7 +18,11 @@ const {
   SYSTEM_OP_DEFINITION,
   getSourceDefinition
 } = require('../../../src/backend/vcc-financial-op/definitions');
-const { mapDetailRow } = require('../../../src/backend/vcc-financial-op/row-mapper');
+const {
+  mapDetailRow,
+  contentHash,
+  pendingContentHash
+} = require('../../../src/backend/vcc-financial-op/row-mapper');
 const { hashSourceFile } = require('../../../src/backend/vcc-financial-op/source-lineage');
 const {
   readSystemOpSnapshotCandidates,
@@ -173,13 +177,17 @@ async function readSheet(filePath) {
   return { workbook, sheet: workbook.worksheets[0] };
 }
 
-async function writeRechargeWorkbook(filePath, rows) {
-  const definition = getSourceDefinition(SOURCE_TYPES.RECHARGE);
+async function writeDetailWorkbook(filePath, sourceType, rows) {
+  const definition = getSourceDefinition(sourceType);
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet('Sheet1');
   sheet.addRow([...definition.headers]);
-  for (const row of rows) sheet.addRow(sourceValues(SOURCE_TYPES.RECHARGE, row));
+  for (const row of rows) sheet.addRow(sourceValues(sourceType, row));
   await workbook.xlsx.writeFile(filePath);
+}
+
+async function writeRechargeWorkbook(filePath, rows) {
+  return writeDetailWorkbook(filePath, SOURCE_TYPES.RECHARGE, rows);
 }
 
 function writeSystemOpWorkbook(filePath, options = {}) {
@@ -344,6 +352,130 @@ function rechargeRow(key, amount = '10.00') {
     公司主体: 'PPHK',
     我方币种: 'USD',
     我方到账金额: amount
+  };
+}
+
+function legacyCurrencyRow(sourceType, key, currency) {
+  if (sourceType === SOURCE_TYPES.PENDING) {
+    return {
+      PendingBizId: key,
+      平账账期: '2026-06',
+      主体: 'PPHK',
+      对账类型: 'VCC_clearing_credit',
+      channel: 'CITI',
+      金额: '5.00',
+      币种: currency,
+      流水_币种: currency,
+      流水_对账金额: '5.00'
+    };
+  }
+  return { ...rechargeRow(key), 我方币种: currency };
+}
+
+async function openLegacyHashExportFixture(t, { sourceType, currency, lineage }) {
+  const fixture = openFixture(t);
+  const { db, dir } = fixture;
+  const key = `${sourceType}-${currency}-${lineage}`;
+  const fields = legacyCurrencyRow(sourceType, key, currency);
+  const values = sourceValues(sourceType, fields);
+  const mapped = mapDetailRow({
+    sourceType,
+    values,
+    targetMonth: '2026-06',
+    assignedSubject: 'PPHK',
+    sourceFile: `${key}.xlsx`,
+    sheetName: 'Sheet1',
+    sourceRow: 2,
+    keyCellType: 's'
+  });
+  assert.equal(mapped.disposition, null);
+  const legacyHashVersion = sourceType === SOURCE_TYPES.PENDING ? 2 : 1;
+  const legacyHash = sourceType === SOURCE_TYPES.PENDING
+    ? pendingContentHash(mapped.values, mapped.rawContractVersion)
+    : contentHash(sourceType, mapped.rawJson, mapped.subject);
+  const batchId = `legacy-${key}`;
+  repository.createImportBatch(db, { id: batchId, targetMonth: '2026-06', fileCount: 1 });
+  const recordId = repository.createImportRecord(db, {
+    batchId,
+    targetMonth: '2026-06',
+    sourceType,
+    sourceFiles: [`${key}.xlsx`]
+  });
+  const filePath = path.join(dir, `${key}.xlsx`);
+  await writeDetailWorkbook(filePath, sourceType, [fields]);
+  const hashed = await hashSourceFile(filePath);
+  const sourceId = repository.createImportSource(db, recordId, {
+    sourceOrdinal: 1,
+    fileName: path.basename(filePath),
+    sha256: hashed.sha256,
+    sizeBytes: hashed.sizeBytes
+  });
+  if (lineage === 'ready') {
+    db.prepare(`
+      UPDATE vcc_fin_op_import_sources
+      SET archive_state = 'ready', archive_artifact_id = ?
+      WHERE id = ?
+    `).run(9000 + sourceId, sourceId);
+  }
+  const insert = db.prepare(`
+    INSERT INTO vcc_fin_op_effective_rows (
+      source_type, idempotency_key_raw, idempotency_key, content_hash, hash_version,
+      raw_contract_version, target_month, subject, stat_currency, signed_amount,
+      business_department, counterparty_department, business_sub_type,
+      channel_name, mid, recon_type,
+      pending_currency, pending_amount, flow_currency, flow_amount, currency_mismatch,
+      source_file, sheet_name, source_row, raw_json, import_record_id, import_source_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    mapped.sourceType,
+    mapped.idempotencyKeyRaw,
+    mapped.idempotencyKey,
+    legacyHash,
+    legacyHashVersion,
+    mapped.rawContractVersion,
+    mapped.targetMonth,
+    mapped.subject,
+    currency,
+    mapped.signedAmount,
+    mapped.businessDepartment,
+    mapped.counterpartyDepartment,
+    mapped.businessSubType,
+    mapped.channelName,
+    mapped.mid,
+    mapped.reconType,
+    sourceType === SOURCE_TYPES.PENDING ? currency : null,
+    mapped.pendingAmount,
+    sourceType === SOURCE_TYPES.PENDING ? currency : null,
+    mapped.flowAmount,
+    mapped.currencyMismatch,
+    mapped.sourceFile,
+    mapped.sheetName,
+    mapped.sourceRow,
+    mapped.rawJson,
+    recordId,
+    sourceId
+  );
+  const effectiveId = Number(insert.lastInsertRowid);
+  if (lineage === 'fallback') {
+    db.prepare(`
+      INSERT INTO vcc_fin_op_effective_raw_fallback (
+        effective_row_id, import_source_id, raw_contract_version, raw_json
+      ) VALUES (?, ?, ?, ?)
+    `).run(effectiveId, sourceId, mapped.rawContractVersion, mapped.rawJson);
+  }
+  repository.finishImportRecord(db, recordId, {
+    status: 'success', rawCount: 1, insertedCount: 1
+  });
+  repository.finishImportBatch(db, batchId, 'success');
+  return {
+    ...fixture,
+    filePath,
+    sourceType,
+    currency,
+    lineage,
+    archiveSources: lineage === 'ready'
+      ? [{ sourceId, filePath, fileName: path.basename(filePath), ...hashed }]
+      : []
   };
 }
 
@@ -620,6 +752,44 @@ test('v2 校验原表从已核验 artifact 重建当前有效行', async (t) => 
   const { workbook, sheet } = await readSheet(outputPath);
   assert.equal(workbook.worksheets.length, 1);
   assert.equal(sheet.getCell(2, getSourceDefinition(SOURCE_TYPES.RECHARGE).indexes['订单号'] + 1).value, '000123');
+});
+
+test('历史普通 v1 / Pending v2 的 CNY/CNH 均按 stored version 从 ready 与 fallback 强校验导出', async (t) => {
+  for (const sourceType of [SOURCE_TYPES.RECHARGE, SOURCE_TYPES.PENDING]) {
+    for (const currency of ['CNY', 'CNH']) {
+      for (const lineage of ['ready', 'fallback']) {
+        const fixture = await openLegacyHashExportFixture(t, { sourceType, currency, lineage });
+        const outputPath = path.join(
+          fixture.dir,
+          `legacy-${sourceType}-${currency}-${lineage}.xlsx`
+        );
+        const result = await writeDatasetWorkbook({
+          db: fixture.db,
+          targetMonth: '2026-06',
+          sourceType,
+          targetKind: EXPORT_KINDS.RAW,
+          outputPath,
+          archiveSources: fixture.archiveSources
+        });
+
+        assert.equal(result.dataCount, 1, `${sourceType}/${currency}/${lineage}`);
+        assert.equal(result.incomplete, false, `${sourceType}/${currency}/${lineage}`);
+        const { sheet } = await readSheet(outputPath);
+        const currencyHeader = sourceType === SOURCE_TYPES.PENDING ? '币种' : '我方币种';
+        assert.equal(
+          sheet.getCell(2, getSourceDefinition(sourceType).indexes[currencyHeader] + 1).value,
+          currency,
+          `${sourceType}/${currency}/${lineage}`
+        );
+        const stored = fixture.db.prepare(`
+          SELECT content_hash, hash_version, raw_json
+          FROM vcc_fin_op_effective_rows
+        `).get();
+        assert.equal(stored.hash_version, sourceType === SOURCE_TYPES.PENDING ? 2 : 1);
+        assert.equal(JSON.parse(stored.raw_json)[getSourceDefinition(sourceType).indexes[currencyHeader]], currency);
+      }
+    }
+  }
 });
 
 test('v2 历史血缘缺口生成不完整说明；零覆盖只生成说明 sheet', async (t) => {

@@ -388,7 +388,8 @@ const EXCLUDED_CHANNELS_BY_REASON = Object.freeze({
     'archive-center:save-as',
     'archive-center:select-retry-sources',
     'archive-center:set-locked',
-    'archive-center:set-retention-days'
+    'archive-center:set-retention-days',
+    'archive-center:start-entry-maintenance'
   ]),
   'ui-navigation': Object.freeze([
     'app-update:check-now',

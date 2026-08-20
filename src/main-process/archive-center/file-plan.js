@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
+  normalizeSourceSnapshot,
   sourceSnapshotFromStat,
   sourceSnapshotMatchesStat
 } = require('./source-snapshot');
@@ -36,11 +37,22 @@ function absolutePath(value, label) {
 }
 
 function snapshotFromRegularFile(fsImpl, filePath) {
-  const stat = fsImpl.lstatSync(filePath);
+  const stat = fsImpl.lstatSync(filePath, { bigint: true });
   if (stat.isSymbolicLink() || !stat.isFile()) {
     throw planError('ARCHIVE_FILE_PLAN_INVALID', '输入必须是普通文件且不能是符号链接');
   }
   return Object.freeze({ ...sourceSnapshotFromStat(stat) });
+}
+
+function normalizeFreshnessFailure(value) {
+  if (value === undefined) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw planError('ARCHIVE_FILE_PLAN_INVALID', 'freshnessFailure 必须是对象');
+  }
+  return Object.freeze({
+    code: requiredText(value.code, 'freshnessFailure.code'),
+    message: requiredText(value.message, 'freshnessFailure.message')
+  });
 }
 
 function targetSnapshot(fsImpl, filePath) {
@@ -80,7 +92,12 @@ function normalizeItem(raw, direction, options) {
   }
   const fsImpl = options.fsImpl;
   const filePath = absolutePath(raw.filePath, `${direction}.filePath`);
-  const aliasKey = targetPathAliasKey(fsImpl, filePath, { platform: options.platform });
+  const hasProvidedSourceSnapshot = direction === 'input'
+    && Object.hasOwn(raw, 'sourceSnapshot');
+  const aliasKey = targetPathAliasKey(fsImpl, filePath, {
+    platform: options.platform,
+    allowMissingParentLexicalFallback: hasProvidedSourceSnapshot
+  });
   const base = {
     direction,
     filePath,
@@ -89,8 +106,21 @@ function normalizeItem(raw, direction, options) {
     sourceOperation: requiredText(raw.sourceOperation, 'sourceOperation'),
     aliasKey
   };
-  if (direction === 'input') base.sourceSnapshot = snapshotFromRegularFile(fsImpl, filePath);
-  else base.targetSnapshot = targetSnapshot(fsImpl, filePath);
+  if (direction === 'input') {
+    if (hasProvidedSourceSnapshot) {
+      const sourceSnapshot = normalizeSourceSnapshot(raw.sourceSnapshot);
+      if (!sourceSnapshot) {
+        throw planError('ARCHIVE_FILE_PLAN_INVALID', 'input.sourceSnapshot 格式非法');
+      }
+      base.sourceSnapshot = Object.freeze({ ...sourceSnapshot });
+    } else {
+      base.sourceSnapshot = snapshotFromRegularFile(fsImpl, filePath);
+    }
+    const freshnessFailure = normalizeFreshnessFailure(raw.freshnessFailure);
+    if (freshnessFailure) base.freshnessFailure = freshnessFailure;
+  } else {
+    base.targetSnapshot = targetSnapshot(fsImpl, filePath);
+  }
   const derivedArtifactKey = artifactKeyOf(base);
   if (raw.artifactKey !== undefined
       && requiredText(raw.artifactKey, 'artifactKey') !== derivedArtifactKey) {
@@ -115,7 +145,9 @@ function assertNoAliasConflict(inputs, outputs, options) {
       const right = items[rightIndex];
       const crossDirection = left.direction !== right.direction;
       if (pathsAlias(options.fsImpl, left.filePath, right.filePath, {
-        platform: options.platform
+        platform: options.platform,
+        allowMissingParentLexicalFallback: options.providedSourceSnapshotPaths.has(left.filePath)
+          || options.providedSourceSnapshotPaths.has(right.filePath)
       })) {
         throw planError(
           'ARCHIVE_FILE_PLAN_INVALID',
@@ -138,13 +170,21 @@ function normalizeFilePlanV1(value, options = {}) {
   }
   const normalizedOptions = {
     fsImpl: options.fsImpl || fs,
-    platform: options.platform || process.platform
+    platform: options.platform || process.platform,
+    providedSourceSnapshotPaths: new Set()
   };
   if (!Array.isArray(value.inputs) || !Array.isArray(value.outputs)) {
     throw planError('ARCHIVE_FILE_PLAN_INVALID', 'filePlan inputs/outputs 必须是数组');
   }
   const rawInputs = value.inputs;
   const rawOutputs = value.outputs;
+  rawInputs.forEach((item) => {
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'sourceSnapshot')) {
+      normalizedOptions.providedSourceSnapshotPaths.add(
+        absolutePath(item.filePath, 'input.filePath')
+      );
+    }
+  });
   if (allocation !== 'eager') {
     if (rawInputs.length || rawOutputs.length) {
       throw planError('ARCHIVE_FILE_PLAN_INVALID', 'deferred/none filePlan 必须为空');
@@ -168,16 +208,20 @@ function normalizeFilePlanV1(value, options = {}) {
 function assertFilePlanFresh(plan, options = {}) {
   const fsImpl = options.fsImpl || fs;
   for (const input of plan.inputs) {
+    const freshnessFailure = input.freshnessFailure || {
+      code: 'ARCHIVE_INPUT_CHANGED',
+      message: '输入文件在任务确认后已变化'
+    };
     let stat;
     try {
-      stat = fsImpl.lstatSync(input.filePath);
+      stat = fsImpl.lstatSync(input.filePath, { bigint: true });
     } catch (_error) {
-      throw planError('ARCHIVE_INPUT_CHANGED', '输入文件在任务确认后已变化');
+      throw planError(freshnessFailure.code, freshnessFailure.message);
     }
     if (stat.isSymbolicLink()
         || !stat.isFile()
         || !sourceSnapshotMatchesStat(input.sourceSnapshot, stat)) {
-      throw planError('ARCHIVE_INPUT_CHANGED', '输入文件在任务确认后已变化');
+      throw planError(freshnessFailure.code, freshnessFailure.message);
     }
   }
   for (const output of plan.outputs) {
