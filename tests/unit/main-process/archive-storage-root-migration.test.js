@@ -24,6 +24,15 @@ const {
   exactMarker
 } = require('../../../src/main-process/archive-center/storage-root-manager');
 
+function portablePathOf(filePath) {
+  return String(filePath).replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
+function isCanonicalBlobParentOpen(filePath, openMode) {
+  return openMode === 'r'
+    && /\/blobs\/sha256\/[0-9a-f]{2}$/i.test(portablePathOf(filePath));
+}
+
 function createDatabase() {
   const db = new DatabaseSync(':memory:');
   db.exec(`
@@ -301,29 +310,48 @@ test('正常迁移只流式复制 canonical，目标重新 materialize 并原子
   }
 });
 
+test('canonical 父目录 fsync 故障注入兼容 Windows drive/extended/UNC 路径表示', () => {
+  for (const candidate of [
+    'C:\\Temp\\archive-root\\blobs\\sha256\\aF',
+    '\\\\?\\c:\\real-root\\blobs\\sha256\\0b',
+    '\\\\server\\Share\\archive-root\\blobs\\sha256\\FE\\',
+    '/tmp/real-root/blobs/sha256/09'
+  ]) {
+    assert.equal(isCanonicalBlobParentOpen(candidate, 'r'), true, candidate);
+  }
+  assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\af', 'r+'), false);
+  assert.equal(isCanonicalBlobParentOpen('C:\\root\\blobs\\sha256\\gg', 'r'), false);
+  assert.equal(
+    isCanonicalBlobParentOpen(`C:\\root\\blobs\\sha256\\${'a'.repeat(64)}`, 'r'),
+    false
+  );
+});
+
 test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', async (t) => {
   for (const failurePoint of ['file', 'parent']) {
     await t.test(failurePoint, async () => {
       let targetRoot = '';
       let injected = false;
       let fileFsyncOpenMode = null;
+      const readOpenCandidates = [];
       const promises = {
         ...fs.promises,
         async open(targetPath, ...args) {
           const normalized = String(targetPath);
+          const portablePath = portablePathOf(normalized);
+          const openMode = args[0];
+          if (targetRoot && openMode === 'r' && readOpenCandidates.length < 32) {
+            readOpenCandidates.push(portablePath);
+          }
           const isFileFsyncTarget = Boolean(
             targetRoot
             && normalized.includes(`${path.sep}.staging${path.sep}`)
             && path.basename(normalized).startsWith('blob-')
           );
-          const targetBlobPrefix = targetRoot
-            ? `${path.resolve(targetRoot)}${path.sep}blobs${path.sep}sha256${path.sep}`
-            : '';
-          const isParentFsyncTarget = Boolean(
-            targetBlobPrefix
-            && normalized.includes(targetBlobPrefix)
-            && path.basename(normalized).length === 2
-          );
+          // 源 canonical 不会同步父目录；只读打开且以 SHA 分片结尾的目录
+          // 只可能是目标 canonical 发布后的父目录耐久化入口。
+          const isParentFsyncTarget = Boolean(targetRoot)
+            && isCanonicalBlobParentOpen(portablePath, openMode);
           if (failurePoint === 'parent' && !injected && isParentFsyncTarget) {
             injected = true;
             const error = new Error('injected parent directory fsync open failure');
@@ -360,7 +388,13 @@ test('目标 canonical 文件或父目录 fsync 失败时绝不切换 setting', 
 
         const result = await current.manager.changeStorageLocation();
 
-        assert.equal(injected, true);
+        assert.equal(
+          injected,
+          true,
+          failurePoint === 'parent'
+            ? `未命中目标 canonical 父目录 open：${JSON.stringify(readOpenCandidates)}`
+            : '未命中目标 canonical 文件 fsync'
+        );
         if (failurePoint === 'file') assert.equal(fileFsyncOpenMode, 'r+');
         assert.equal(result.status, 'failed');
         assert.equal(current.database.getSetting(ARCHIVE_STORAGE_ROOT_SETTING_KEY), null);
