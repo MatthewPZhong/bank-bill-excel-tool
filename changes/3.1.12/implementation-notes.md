@@ -468,3 +468,15 @@
 | 敏感原始证据 | NOT STORED IN REPO | 数据库、WAL/SHM、`userData`、Documents、raw runner report 与 raw log 不随本次合并提交；仓库没有重新导入或复核这些材料。本记录只保存发布负责人的最终人工结论，不反向伪造 PR5 阶段未在仓库取得的原始数值或路径。 |
 | 自动门禁与独立 Review | PASS | PR1—PR5 均经独立 Reviewer 多轮动态反例复核，最终无阻塞 P3+；PR5 Round 5 为 84/84 聚焦测试，最终本地 `release-check` 为 unit 5583/5584（0 fail、1 Windows-only skip）及 integration 48/48 scripts、2410/2410 assertions。各 PR 更完整的阶段证据保留在上文。 |
 | 发布文档 | UPDATED | `CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 已反向同步本轮实际功能与最终人工验收状态；v3.1.11 已发布 tag/资产事实保持不变，v3.1.12 的最终 merge/tag/Release 事实只在实际完成后记录。 |
+
+### Published Release Evidence — 2026-08-20
+
+| 项目 | 状态 | 证据与边界 |
+| --- | --- | --- |
+| 合并与 Tag | PASS | PR #157 以 merge commit `a8c632bad119eab6bca27b949dfb5956805cf3ae` 合入 `main`；annotated tag `v3.1.12` 的 tag object 为 `97462b6062dda9a31d409691b0d2c2dec94f0650`，peeled commit 与该 merge commit 精确一致。 |
+| 发布前自动门禁 | PASS | 发布 commit 上重新执行 `npm ci`、`npm run scan:vars`、重要变量发布检查及 `npm run release-check`；release-check 为 lint/smoke PASS、unit 5583/5584（0 fail、1 Windows-only skip；日志 `unit-20260820-092733.log`）、integration 48/48 scripts 与 2410/2410 assertions PASS。重要变量命中均由 3.1.10—3.1.12 的实现 Review 与最终人工验收覆盖，未静默忽略。 |
+| Windows Release workflow | PASS | GitHub Actions run [`32393079026`](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32393079026) 于 2026-08-20 完成且全绿；包含 tag/main、release-check、真实 Windows startup adapter、布局、构建、应用检查、staging、元数据、发布与回读。 |
+| GitHub Release | PASS | [v3.1.12](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.12) 已发布为公开、非 draft、非 prerelease 的 latest stable Release。四项资产均可匿名下载；Setup `100369733` bytes / SHA-256 `336d309751e918efa1e4a7eed366fd4a68facbe74724176b0f9b60bdf76b23eb`，portable `99872969` bytes / `dc753d024c9d4734a117871cc248b6a7a40ac4d5e558c78ca962b70599ada4fa`，blockmap `105698` bytes / `60ad36761bd064b68fe4fa48d5935a21afae51e4e991101665fdac041f2e13f4`，`latest.yml` `372` bytes / `feb714764acd0a1a236aa3f4f6fa10e902b61a27761263075d7b77d80093fb76`。 |
+| 更新元数据回读 | PASS | 匿名下载的 `latest.yml` 记录 version `3.1.12`、Setup 文件名与大小，SHA-512 `ZQ38NNiTax5KuwmrveUcjNCVBXQ2L4IDcYKrXaduPTpMMNPrp5uQE/4+K9/VHI7+mT0ki0N77riMPK2sIjAwmA==`；独立下载的 `latest.yml` 与 blockmap SHA-256 和 GitHub digest 一致。 |
+| 发布后证据收口门禁 | PASS | 发布事实文档契约 11/11 PASS；`npm run check:vars` 因 `src/` 无改动正常跳过；最终 `npm run release-check` 为 lint/smoke PASS、unit 5583/5584（0 fail、1 Windows-only skip；日志 `unit-20260820-111349.log`）、integration 48/48 scripts 与 2410/2410 assertions PASS（374,516ms）。集成清单的运行时耗时噪声已恢复，不作为发布证据提交。 |
+| Windows 在线升级 canary | MANUAL / NOT RUN | 当前收尾环境为 macOS，不能执行上一 stable NSIS 经 `production/latest` 升级到 3.1.12。该项不影响已完成的技术 Release，但在 Windows 人工补测通过前不得宣称“在线升级已验证”；不得修改既有 tag 或资产，问题只能通过更高补丁版本处理。 |

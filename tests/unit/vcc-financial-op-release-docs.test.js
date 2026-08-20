@@ -30,6 +30,7 @@ test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
+  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
   const mainSource = read('src/main.js');
 
   assert.equal(packageJson.version, '3.1.12');
@@ -58,6 +59,27 @@ test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状
   assert.match(history, /CNY\/CNH/);
   assert.match(guide, /第一行左侧显示“存档位置”、右侧显示【变更】/);
   assert.match(guide, /新导入允许用标准大写 CNH/);
+
+  for (const document of [changelog, history, guide, runbook]) {
+    assert.match(document, /已于 2026-08-20 正式发布|正式发布完成|v3\.1\.12 发布记录/);
+    assert.match(document, /latest stable Release/);
+    assert.match(document, /Setup/);
+    assert.match(document, /portable/);
+    assert.match(document, /blockmap/);
+    assert.match(document, /latest\.yml/);
+    assert.match(document, /在线升级.*(?:canary|人工)|production\/latest/);
+  }
+  for (const document of [changelog, history, runbook]) {
+    assert.match(document, /PR #157/);
+    assert.match(document, /a8c632bad119eab6bca27b949dfb5956805cf3ae/);
+    assert.match(document, /annotated tag/);
+    assert.match(document, /97462b6062dda9a31d409691b0d2c2dec94f0650/);
+    assert.match(document, /32393079026/);
+  }
+  assert.match(runbook, /336d309751e918efa1e4a7eed366fd4a68facbe74724176b0f9b60bdf76b23eb/);
+  assert.match(runbook, /dc753d024c9d4734a117871cc248b6a7a40ac4d5e558c78ca962b70599ada4fa/);
+  assert.doesNotMatch(runbook, /^## v3\.1\.12 纠正发布准备$/m);
+  assert.doesNotMatch(runbook, /v3\.1\.12 只提升应用版本并修正随包用户指南/);
 });
 
 test('v3.1.11 三份用户文档保留正式发布证据并记录随包指南缺陷', () => {

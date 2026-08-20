@@ -74,8 +74,13 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 - 发布负责人已确认 Windows 10/11 Setup、portable、SmartScreen 和 `3.1.10 -> 3.1.11` 离线覆盖安装全部 PASS，未使用发布前豁免。`production/latest` 在线 canary 必须在公开 Release 存在后另行执行；实际通过前不公告“在线升级已验证”。
 - 已知随包文档问题：tag commit 中的 `docs/USER_GUIDE.md` 仍把 v3.1.11 写成“未发布候选”；发布后证据 PR 无法进入既有安装包。按本 Runbook 的不可变发布规则，不替换 v3.1.11 资产，改由 v3.1.12 更高补丁版本交付修正。
 
-## v3.1.12 纠正发布准备
+## v3.1.12 发布记录
 
-- v3.1.12 只提升应用版本并修正随包用户指南；不修改业务源码、schema、资金口径或文件输出。
-- 随包指南必须在 tag 前使用稳定表述：明确应用版本，但把公开 stable、资产和发布时间交给 GitHub Releases 作为真相源，避免再次把发布后事实补进仓库却无法进入已发布二进制。
-- 只能在 `package.json`、lockfile、三份发布文档和完整门禁随同一 `main` commit 闭合后创建 annotated `v3.1.12`；发布完成后的 workflow、资产摘要与在线 canary 另按“发布后”步骤记录。
+- Release：[v3.1.12](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.12)。PR #157 以 merge commit `a8c632bad119eab6bca27b949dfb5956805cf3ae` 合入 `main`；annotated tag object `97462b6062dda9a31d409691b0d2c2dec94f0650` peeled 后精确指向该 merge commit。
+- Windows workflow [32393079026](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32393079026) 全绿，已完成 tag/main 校验、release-check、真实 Windows startup adapter、面板布局、构建、应用检查、staging、更新元数据、Release 发布与回读。
+- Setup `bank-bill-excel-tool-setup-3.1.12.exe`：`100369733` bytes / SHA-256 `336d309751e918efa1e4a7eed366fd4a68facbe74724176b0f9b60bdf76b23eb`。
+- portable `bank-bill-excel-tool-portable-3.1.12.exe`：`99872969` bytes / SHA-256 `dc753d024c9d4734a117871cc248b6a7a40ac4d5e558c78ca962b70599ada4fa`。
+- blockmap `bank-bill-excel-tool-setup-3.1.12.exe.blockmap`：`105698` bytes / SHA-256 `60ad36761bd064b68fe4fa48d5935a21afae51e4e991101665fdac041f2e13f4`；`latest.yml`：`372` bytes / SHA-256 `feb714764acd0a1a236aa3f4f6fa10e902b61a27761263075d7b77d80093fb76`。
+- `latest.yml` 的 version/path/size 与 Setup 一致，Setup SHA-512 为 `ZQ38NNiTax5KuwmrveUcjNCVBXQ2L4IDcYKrXaduPTpMMNPrp5uQE/4+K9/VHI7+mT0ki0N77riMPK2sIjAwmA==`；Release 为公开、非 draft、非 prerelease 且是 latest stable Release。
+- 四项资产的公开 URL 均以无凭据 HEAD 请求跟随重定向得到 HTTP 200；独立下载的 `latest.yml` 与 blockmap SHA-256 和 GitHub asset digest 一致。发布负责人在 tag 前已确认 3.1.12 人工验收完成并授权发布，未使用发布前豁免。
+- 当前收尾环境为 macOS，不能执行 Windows `3.1.11 -> 3.1.12` 的 `production/latest` 在线 canary。该项保持 `MANUAL / NOT RUN`；实际通过前不得公告“在线升级已验证”，且不得删除、替换或重传 v3.1.12 资产。若发现问题，按不可变发布规则发布更高补丁版本。
