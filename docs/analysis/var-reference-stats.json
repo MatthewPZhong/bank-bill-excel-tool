@@ -1,15 +1,15 @@
 {
   "meta": {
-    "version": "3.1.12",
-    "scannedAt": "2026-08-20T14:43:34.319Z",
+    "version": "3.1.14",
+    "scannedAt": "2026-08-21T15:32:02.064Z",
     "root": "src",
     "sourceSet": "git-tracked-js",
     "totalFiles": 340,
-    "totalTopLevelNames": 4516,
+    "totalTopLevelNames": 4515,
     "buckets": {
       "shared": 660,
       "paired": 957,
-      "local": 2726,
+      "local": 2725,
       "crossFile": 1617
     }
   },
@@ -2628,7 +2628,7 @@
           },
           {
             "file": "src/renderer-position-reconciliation.js",
-            "count": 15
+            "count": 16
           },
           {
             "file": "src/renderer-previews.js",
@@ -2640,10 +2640,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 214
+            "count": 216
           }
         ],
-        "totalHits": 672,
+        "totalHits": 675,
         "fileSpan": 42
       },
       {
@@ -4847,10 +4847,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 13
+            "count": 10
           }
         ],
-        "totalHits": 103,
+        "totalHits": 100,
         "fileSpan": 18
       },
       {
@@ -8487,10 +8487,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 123
+            "count": 120
           }
         ],
-        "totalHits": 615,
+        "totalHits": 612,
         "fileSpan": 7
       },
       {
@@ -9086,10 +9086,10 @@
           },
           {
             "file": "src/renderer.js",
-            "count": 149
+            "count": 153
           }
         ],
-        "totalHits": 255,
+        "totalHits": 259,
         "fileSpan": 6
       },
       {
@@ -12282,7 +12282,7 @@
           },
           {
             "file": "src/renderer-position-reconciliation.js",
-            "count": 18
+            "count": 20
           },
           {
             "file": "src/renderer-previews.js",
@@ -12293,7 +12293,7 @@
             "count": 36
           }
         ],
-        "totalHits": 87,
+        "totalHits": 89,
         "fileSpan": 4
       },
       {
@@ -28561,6 +28561,24 @@
         "fileSpan": 2
       },
       {
+        "name": "reconIdFixSession",
+        "defFiles": [
+          "src/main.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/main.js",
+            "count": 1
+          },
+          {
+            "file": "src/renderer.js",
+            "count": 5
+          }
+        ],
+        "totalHits": 6,
+        "fileSpan": 2
+      },
+      {
         "name": "REFUND_RO_COLUMNS",
         "defFiles": [
           "src/constants/refund-backfill-fields.js"
@@ -30790,7 +30808,7 @@
         "fileSpan": 2
       },
       {
-        "name": "reconIdFixSession",
+        "name": "reconIdFixResult",
         "defFiles": [
           "src/main.js"
         ],
@@ -35352,24 +35370,6 @@
           {
             "file": "src/main-process/recon-id-fix-io.js",
             "count": 2
-          }
-        ],
-        "totalHits": 4,
-        "fileSpan": 2
-      },
-      {
-        "name": "reconIdFixResult",
-        "defFiles": [
-          "src/main.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/main.js",
-            "count": 1
-          },
-          {
-            "file": "src/renderer.js",
-            "count": 3
           }
         ],
         "totalHits": 4,
@@ -41274,20 +41274,6 @@
         "fileSpan": 1
       },
       {
-        "name": "archiveCenterErrorText",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 17
-          }
-        ],
-        "totalHits": 17,
-        "fileSpan": 1
-      },
-      {
         "name": "callCheckpoint",
         "defFiles": [
           "src/main-process/toolbox-output-publication.js"
@@ -41327,6 +41313,20 @@
           }
         ],
         "totalHits": 17,
+        "fileSpan": 1
+      },
+      {
+        "name": "archiveCenterErrorText",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
+            "count": 16
+          }
+        ],
+        "totalHits": 16,
         "fileSpan": 1
       },
       {
@@ -41379,6 +41379,20 @@
         "refFiles": [
           {
             "file": "src/backend/vcc-financial-op/dataset-deletion.js",
+            "count": 16
+          }
+        ],
+        "totalHits": 16,
+        "fileSpan": 1
+      },
+      {
+        "name": "updateStatusBox",
+        "defFiles": [
+          "src/renderer.js"
+        ],
+        "refFiles": [
+          {
+            "file": "src/renderer.js",
             "count": 16
           }
         ],
@@ -41603,20 +41617,6 @@
         "refFiles": [
           {
             "file": "src/main-process/pre-fund-reconciliation/excel-writer.js",
-            "count": 14
-          }
-        ],
-        "totalHits": 14,
-        "fileSpan": 1
-      },
-      {
-        "name": "updateStatusBox",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
             "count": 14
           }
         ],
@@ -65942,20 +65942,6 @@
         "fileSpan": 1
       },
       {
-        "name": "archiveCenterDateInputValue",
-        "defFiles": [
-          "src/renderer.js"
-        ],
-        "refFiles": [
-          {
-            "file": "src/renderer.js",
-            "count": 2
-          }
-        ],
-        "totalHits": 2,
-        "fileSpan": 1
-      },
-      {
         "name": "archiveCenterDirectionText",
         "defFiles": [
           "src/renderer.js"
@@ -81325,7 +81311,7 @@
         },
         {
           "file": "src/renderer-position-reconciliation.js",
-          "count": 15
+          "count": 16
         },
         {
           "file": "src/renderer-previews.js",
@@ -81337,10 +81323,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 214
+          "count": 216
         }
       ],
-      "totalHits": 672,
+      "totalHits": 675,
       "fileSpan": 42
     },
     {
@@ -83544,10 +83530,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 13
+          "count": 10
         }
       ],
-      "totalHits": 103,
+      "totalHits": 100,
       "fileSpan": 18
     },
     {
@@ -87184,10 +87170,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 123
+          "count": 120
         }
       ],
-      "totalHits": 615,
+      "totalHits": 612,
       "fileSpan": 7
     },
     {
@@ -87783,10 +87769,10 @@
         },
         {
           "file": "src/renderer.js",
-          "count": 149
+          "count": 153
         }
       ],
-      "totalHits": 255,
+      "totalHits": 259,
       "fileSpan": 6
     },
     {
@@ -90979,7 +90965,7 @@
         },
         {
           "file": "src/renderer-position-reconciliation.js",
-          "count": 18
+          "count": 20
         },
         {
           "file": "src/renderer-previews.js",
@@ -90990,7 +90976,7 @@
           "count": 36
         }
       ],
-      "totalHits": 87,
+      "totalHits": 89,
       "fileSpan": 4
     },
     {
@@ -107256,6 +107242,24 @@
       "fileSpan": 2
     },
     {
+      "name": "reconIdFixSession",
+      "defFiles": [
+        "src/main.js"
+      ],
+      "refFiles": [
+        {
+          "file": "src/main.js",
+          "count": 1
+        },
+        {
+          "file": "src/renderer.js",
+          "count": 5
+        }
+      ],
+      "totalHits": 6,
+      "fileSpan": 2
+    },
+    {
       "name": "REFUND_RO_COLUMNS",
       "defFiles": [
         "src/constants/refund-backfill-fields.js"
@@ -109485,7 +109489,7 @@
       "fileSpan": 2
     },
     {
-      "name": "reconIdFixSession",
+      "name": "reconIdFixResult",
       "defFiles": [
         "src/main.js"
       ],
@@ -114047,24 +114051,6 @@
         {
           "file": "src/main-process/recon-id-fix-io.js",
           "count": 2
-        }
-      ],
-      "totalHits": 4,
-      "fileSpan": 2
-    },
-    {
-      "name": "reconIdFixResult",
-      "defFiles": [
-        "src/main.js"
-      ],
-      "refFiles": [
-        {
-          "file": "src/main.js",
-          "count": 1
-        },
-        {
-          "file": "src/renderer.js",
-          "count": 3
         }
       ],
       "totalHits": 4,

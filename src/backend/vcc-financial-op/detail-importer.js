@@ -595,6 +595,7 @@ async function importDetailGroup({
           onProgress: (progress) => {
             if (typeof onProgress === 'function') {
               onProgress({
+                phase: 'reading',
                 recordId,
                 sourceType,
                 sourceFile: progress.sourceFile,
@@ -672,6 +673,14 @@ async function importDetailGroup({
     return recordResult(db, recordId);
   }
 
+  if (typeof onProgress === 'function') {
+    onProgress({
+      phase: 'committing',
+      recordId,
+      sourceType,
+      rows: rawCount
+    });
+  }
   return classifyAndPromote(db, recordId, normalizedMonth, sourceType);
 }
 

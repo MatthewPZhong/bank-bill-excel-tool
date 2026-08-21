@@ -24,9 +24,81 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存档中心和状态框迭代', () => {
+test('v3.1.14 正式文档锁定 VCC staging 索引、精确 phase 时点与真实样本证据', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+  const spec = read('changes/3.1.14/spec.md');
+  const techdoc = read('changes/3.1.14/techdoc.md');
+
+  assert.equal(packageJson.version, '3.1.14');
+  assert.equal(packageLock.version, '3.1.14');
+  assert.equal(packageLock.packages[''].version, '3.1.14');
+  assert.match(changelog, /^## 3\.1\.14 - 2026-08-21$/m);
+  assert.match(history, /^## v3\.1\.14（2026-08-21）$/m);
+  assert.match(guide, /^版本：`v3\.1\.14`$/m);
+
+  for (const document of [spec, techdoc]) {
+    assert.match(document, /v3\.1\.14/);
+    assert.match(document, /2026-08-21/);
+    assert.match(document, /147af9a736b7daaf7a1cdd17eff3535fdc62cd98/);
+    assert.match(document, /idx_vcc_fin_op_staging_comparison/);
+    assert.match(document, /WHERE comparison_import_row_id IS NOT NULL/);
+    assert.match(document, /VCC_STORAGE_CONTRACT_VERSION.*(?:保持|继续).*2/s);
+    assert.match(document, /committing/);
+    assert.match(document, /classifyAndPromote/);
+    assert.match(document, /cancelRequested/);
+    assert.match(document, /正在取消导入并回滚本次未完成数据…/);
+    assert.match(document, /120 秒/);
+    assert.match(document, /batchId === batchContext\.taskRunId/);
+    assert.match(document, /代码回滚|应用代码回滚/);
+    assert.match(document, /索引.*保留|保留.*索引/s);
+    assert.doesNotMatch(document, /committing[^\n]{0,80}整批[^\n]{0,30}一次/);
+    assert.doesNotMatch(document, /成功进入分类后/);
+  }
+
+  assert.match(
+    spec,
+    /全部文件完成读取[\s\S]*每个文件在解析后通过 SHA 核对[\s\S]*最终取消\/空表检查通过[\s\S]*最终读取事务 COMMIT 后[\s\S]*调用 `classifyAndPromote\(\)` 前/
+  );
+  assert.match(spec, /充值清退与 Pending 同批正常导入时分别上报，共两次/);
+  assert.match(spec, /系统财务 OP 不参与明细 phase 计数/);
+  assert.match(spec, /分类事务启动或执行失败时[\s\S]*committing 仍然有效/);
+  assert.match(spec, /本章节|AC-14/);
+  assert.equal((spec.match(/\| AC-\d{2} \|/g) || []).length, 14);
+
+  assert.match(
+    techdoc,
+    /每累计 50,000 行：[\s\S]*COMMIT 当前 staging 事务[\s\S]*autocommit UPDATE import_record\.raw_count[\s\S]*BEGIN IMMEDIATE/
+  );
+  assert.match(techdoc, /每个文件解析完成后执行 SHA 二次核对/);
+  assert.match(techdoc, /COMMIT 最终读取事务[\s\S]*committing progress[\s\S]*classifyAndPromote/);
+  assert.match(techdoc, /function buildImportProgressStatus\(progress, cancelRequested\)/);
+  assert.match(techdoc, /if \(cancelRequested\) return null/);
+  assert.match(techdoc, /无 phase 的旧事件返回“正在导入”/);
+  assert.match(techdoc, /组合三份样本只记录整批总耗时，以及 reading\/committing\/结果返回的事件时间点/);
+  assert.match(techdoc, /单独用一个 sourceType 测量该组 committing 回调至该次结果返回/);
+
+  const samples = [
+    ['VCC充值清退明细_2026-07_PPHK.xlsx', 'dc9a7f4f63c9aa5eb5cb80ccc1ebb57aa77fbe1c3856825f9e97a640ba40e529', '8,747,409'],
+    ['移除归档Pending账单.xlsx', 'a669d5b66b98e4ba360330d7624deb3ce5edc4e1353402d6fc6c90606cbaa7b4', '8,045,959'],
+    ['财务OP (3).xlsx', 'b7ae6554ec7db4fb229190eb26d641e0c2d7d1926871762bb42a3317267e08f0', '4,948']
+  ];
+  for (const document of [spec, techdoc]) {
+    for (const [fileName, sha256, sizeBytes] of samples) {
+      assert.ok(document.includes(fileName), fileName);
+      assert.ok(document.includes(sha256), sha256);
+      assert.ok(document.includes(sizeBytes), sizeBytes);
+    }
+    assert.match(document, /主体×币种金额守恒/);
+    assert.match(document, /dataset revision/);
+  }
+});
+
+test('v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存档中心和状态框迭代', () => {
+  const packageJson = JSON.parse(read('package.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
@@ -36,18 +108,16 @@ test('v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存
   const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
   const mainSource = read('src/main.js');
 
-  assert.equal(packageJson.version, '3.1.13');
-  assert.equal(packageLock.version, '3.1.13');
-  assert.equal(packageLock.packages[''].version, '3.1.13');
   assert.ok(packageJson.build.files.includes('docs/USER_GUIDE.md'));
   assert.match(mainSource, /path\.join\(app\.getAppPath\(\), 'docs', 'USER_GUIDE\.md'\)/);
   assert.match(changelog, /^## 3\.1\.13 - 2026-08-20$/m);
   assert.match(history, /^## v3\.1\.13（2026-08-20）$/m);
-  assert.match(guide, /^版本：`v3\.1\.13`$/m);
-
   const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.12'));
   const currentHistory = history.slice(0, history.indexOf('## v3.1.12'));
-  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
+  const currentGuide = guide.slice(
+    guide.indexOf('> **v3.1.13 工具箱'),
+    guide.indexOf('> **v3.1.12 网银源文件')
+  );
   for (const currentSection of [currentChangelog, currentHistory, currentGuide, spec, techdoc]) {
     assert.match(currentSection, /工具箱/);
     assert.match(currentSection, /状态框/);

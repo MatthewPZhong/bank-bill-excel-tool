@@ -292,6 +292,9 @@ function ensureVccStorageSideTables(db) {
       ON vcc_fin_op_import_staging_rows(import_record_id, disposition, id);
     CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_staging_record_key
       ON vcc_fin_op_import_staging_rows(import_record_id, idempotency_key, content_hash, id);
+    CREATE INDEX IF NOT EXISTS idx_vcc_fin_op_staging_comparison
+      ON vcc_fin_op_import_staging_rows(comparison_import_row_id)
+      WHERE comparison_import_row_id IS NOT NULL;
 
     CREATE TABLE IF NOT EXISTS vcc_fin_op_import_anomalies (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

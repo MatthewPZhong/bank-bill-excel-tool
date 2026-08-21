@@ -26,6 +26,7 @@ const {
   SUPPORTED_CURRENCIES,
   SYSTEM_OP_HEADERS
 } = require('../../../../src/backend/vcc-financial-op/definitions');
+const repository = require('../../../../src/backend/vcc-financial-op-db/repository');
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 
@@ -135,6 +136,109 @@ test('v2 side tables 把永久异常、临时 staging、fallback 与输入来源
     assert.equal(stagingColumns.has('disposition'), true);
     const fallbackColumns = columns(db, 'vcc_fin_op_effective_raw_fallback');
     assert.equal(fallbackColumns.has('raw_json'), true);
+  } finally {
+    db.close();
+  }
+});
+
+test('staging 自引用 partial index 对 fresh/既有 v2 幂等安装并支撑外键清理', () => {
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec(`
+      PRAGMA foreign_keys = ON;
+      CREATE TABLE app_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    ensureVccFinancialOpTablesSupport(db);
+    ensureVccStorageSideTables(db);
+
+    const indexSql = () => db.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_vcc_fin_op_staging_comparison'
+    `).get();
+    assert.match(indexSql().sql, /ON vcc_fin_op_import_staging_rows\s*\(comparison_import_row_id\)/i);
+    assert.match(indexSql().sql, /WHERE comparison_import_row_id IS NOT NULL/i);
+
+    setVccStorageContractVersion(db, VCC_STORAGE_CONTRACT_VERSION);
+    db.exec('DROP INDEX idx_vcc_fin_op_staging_comparison');
+    assert.equal(indexSql(), undefined);
+    ensureVccStorageSideTables(db);
+    ensureVccStorageSideTables(db);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_vcc_fin_op_staging_comparison'
+    `).get().count, 1);
+
+    repository.createImportBatch(db, {
+      id: 'comparison-index-batch', targetMonth: '2026-07', fileCount: 2
+    });
+    const recordId = repository.createImportRecord(db, {
+      batchId: 'comparison-index-batch', targetMonth: '2026-07',
+      sourceType: 'recharge_refund', sourceFiles: ['target.xlsx']
+    });
+    const sourceId = repository.createImportSource(db, recordId, {
+      sourceOrdinal: 1,
+      fileName: 'target.xlsx',
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1
+    });
+    const otherRecordId = repository.createImportRecord(db, {
+      batchId: 'comparison-index-batch', targetMonth: '2026-07',
+      sourceType: 'pending_archive_removal', sourceFiles: ['other.xlsx']
+    });
+    const otherSourceId = repository.createImportSource(db, otherRecordId, {
+      sourceOrdinal: 1,
+      fileName: 'other.xlsx',
+      sha256: 'b'.repeat(64),
+      sizeBytes: 1
+    });
+    const insertStaging = db.prepare(`
+      INSERT INTO vcc_fin_op_import_staging_rows (
+        import_record_id, import_source_id, source_type, target_month,
+        idempotency_key, content_hash, source_file, sheet_name, source_row, raw_json,
+        comparison_import_row_id
+      ) VALUES (?, ?, ?, '2026-07', ?, ?, ?, 'Sheet1', ?, '[]', ?)
+    `);
+    const parentId = Number(insertStaging.run(
+      recordId, sourceId, 'recharge_refund', 'same-key', 'a'.repeat(64),
+      'target.xlsx', 2, null
+    ).lastInsertRowid);
+    insertStaging.run(
+      recordId, sourceId, 'recharge_refund', 'same-key', 'b'.repeat(64),
+      'target.xlsx', 3, parentId
+    );
+    insertStaging.run(
+      otherRecordId, otherSourceId, 'pending_archive_removal', 'other-key',
+      'c'.repeat(64), 'other.xlsx', 2, null
+    );
+
+    const plan = db.prepare(`
+      EXPLAIN QUERY PLAN
+      DELETE FROM vcc_fin_op_import_staging_rows WHERE import_record_id = ?
+    `).all(recordId).map((row) => String(row.detail));
+    assert.ok(
+      plan.some((detail) => detail.includes('idx_vcc_fin_op_staging_comparison')),
+      plan.join('\n')
+    );
+    assert.equal(
+      plan.filter((detail) => /SCAN vcc_fin_op_import_staging_rows/i.test(detail)).length,
+      0,
+      plan.join('\n')
+    );
+
+    assert.equal(repository.clearImportStagingRows(db, recordId), 2);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_import_staging_rows
+      WHERE import_record_id = ?
+    `).get(recordId).count, 0);
+    assert.equal(db.prepare(`
+      SELECT COUNT(*) AS count FROM vcc_fin_op_import_staging_rows
+      WHERE import_record_id = ?
+    `).get(otherRecordId).count, 1);
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
   } finally {
     db.close();
   }
