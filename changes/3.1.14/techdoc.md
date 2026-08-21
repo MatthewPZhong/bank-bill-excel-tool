@@ -4,9 +4,10 @@
 | --- | --- |
 | 目标版本 | v3.1.14 |
 | 日期 | 2026-08-21 |
-| 状态 | 正式实施设计 |
+| 状态 | 与已合入实现同步；正式技术发布已授权；Windows 人工边界未验证 |
 | 产品 Spec | `changes/3.1.14/spec.md` |
-| 代码基线 | `147af9a736b7daaf7a1cdd17eff3535fdc62cd98` |
+| 发布代码基线 | PR #162 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` |
+| 设计起始基线 | `147af9a736b7daaf7a1cdd17eff3535fdc62cd98` |
 | 涉及模块 | VCC 财务 OP 校验 |
 
 ## 1. 技术目标与不变量
@@ -257,3 +258,37 @@ git diff --check
 ```
 
 绝对耗时仅作本机证据；行数、来源身份、幂等、revision、金额守恒和执行计划才是合并门禁。
+
+## 11. Tag 前正式发布设计
+
+### 11.1 两阶段仓库收口
+
+1. 从已合入功能的 `main@1cc5999c62e4666d56b542e37e54529f6177e6bc` 创建发布准备分支，仅更新发布文档与文档合同测试。
+2. 发布准备 PR 的定向文档测试、`release-check` 和 Review 通过后合入 `main`。
+3. 再次 fetch 并确认本地 `HEAD === origin/main`、tracked worktree 干净、`package.json.version === 3.1.14`、同名远端 tag/Release 不存在，才创建并推送唯一 annotated tag `v3.1.14`。
+4. tag 触发受控 Windows Release workflow；只有公开、非 draft、非 prerelease、latest stable Release 与 Setup、portable、blockmap、`latest.yml` 四项资产完成独立回读后，技术发布才闭合。
+5. 从发布后的最新 `main` 创建独立证据分支，回写真实发布准备 PR、merge commit、tag object、peeled commit、workflow、Release、资产大小与摘要；不得修改已发布 tag 或资产。
+
+### 11.2 人工边界与授权
+
+发布负责人在已知以下范围尚未执行后明确授权继续正式技术发布：
+
+- Windows packaged VCC 的 reading → committing → 最终摘要切换，以及取消中提示保持；
+- Windows 10/11 Setup 与 portable；
+- SmartScreen 实际提示；
+- `v3.1.13 -> v3.1.14` 离线覆盖安装及用户数据保留；
+- Release 存在后从 `production/latest` 执行的在线升级 canary。
+
+全部范围保持 `MANUAL / NOT RUN`。授权只允许继续生成技术资产，不构成人工 PASS，也不能用于“Windows 已验证”或“在线升级已验证”的公告。
+
+在创建或推送 tag 前，还必须把授权落到稳定的 GitHub PR body 或 Issue 评论：记录实际批准人、上述完整豁免范围、理由，以及发布后逐项补做计划。真实链接只能在 PR/评论创建后写入，不得预写占位；记录缺失或字段不全时不得创建/推送 tag。
+
+### 11.3 不可变身份、回读与失败边界
+
+- annotated tag 名必须与 `package.json.version` 精确一致，peeled commit 必须等于创建 tag 时重新同步并复验的 `origin/main`。
+- 本文档不预写尚不存在的 tag object、workflow ID、Release URL、资产大小、SHA-256 或 Setup SHA-512。真实值只在发布后独立回读并写入证据 PR。
+- 从 tag 前最终同步/复验并准备推送 tag 起，到 Release workflow 的 `Verify tag and main` 成功为止，冻结对 `main` 的 merge/push；窗口外不要求全程冻结 `main`。
+- tag 前发现身份、门禁或 `main` 漂移时停止发布，重新同步并复验门禁、文档和 Review；不得推送已知错误 tag。
+- tag 推送后、`Verify tag and main` 成功前若 `main` 漂移，停止 v3.1.14，保留且不改 tag，并发布更高补丁版本。
+- 仅当 Release 和资产均尚未创建、且有证据证明是基础设施瞬时故障时，才可在不改代码、tag、commit 或打包输入的前提下对同一 tag/commit 受控重跑。
+- 产品、元数据或打包输入问题，或 Release 已创建后的任何失败，均停止公告/推广并发布更高补丁版本。后续人工/canary 失败也执行同一停止规则；不得删除、替换或重传 tag/资产。
