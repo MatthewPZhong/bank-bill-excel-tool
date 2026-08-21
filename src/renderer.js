@@ -796,7 +796,7 @@ function updateStatusBox(box, message, tone = 'info', options = {}) {
     idleTitle = ''
   } = options;
 
-  // v2.0.0-beta.2：只更新 .status-box-text 子节点的文案，保留同级 .status-spark SVG 不被清空
+  // v3.1.13：只更新 .status-box-text 子节点，保持状态框结构与布局不变
   // v2.1.7 round 2 R3：中文「：」（U+FF1A）后强制换行；半角 ':' 不动（避开 URL/timestamp/账号 case）
   //   null/undefined 兜底空串（防 String(null) === 'null' 显示）
   //   配合 CSS .status-box-text { white-space: pre-wrap; } 识别 \n
@@ -1595,7 +1595,6 @@ function setNewAccountExportAvailability(enabled = state.canExportNewAccount) {
 
 function setCurrentModule(moduleId, { persist = true } = {}) {
   const previousModuleId = state.currentModule;
-  const enteringModule = previousModuleId !== moduleId;
   state.currentModule = moduleId;
   const moduleDef = Object.values(MODULES).find((m) => m.id === moduleId) || MODULES.statementGenerator;
 
@@ -1624,7 +1623,8 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   if (elements.positionReconciliationModulePanel) {
     elements.positionReconciliationModulePanel.hidden = moduleId !== MODULES.positionReconciliation.id;
     if (moduleId === MODULES.positionReconciliation.id && positionReconciliationUI) {
-      positionReconciliationUI.refresh({ showSummary: enteringModule }).catch((error) => {
+      // 自动进入只同步真实 state/按钮；成功时保留欢迎或用户动作反馈，失败仍由 refresh 显示。
+      positionReconciliationUI.refresh({ updateStatus: false }).catch((error) => {
         console.warn('refresh position reconciliation status failed:', error);
       });
     }
@@ -1686,11 +1686,12 @@ function setCurrentModule(moduleId, { persist = true } = {}) {
   // v2.1.0-beta.1 PR-A：切到单据对账 ReconID 修复模块时同步 session 状态 + reload 场景下拉
   // round 2 P2-1：reloadReconIdFixScenarios 内部已统一调 refreshReconIdFixStatus，无需重复触发
   // scenariosChanged: false → 模块切换路径不清 reconIdFixExport（用户跨模块切回应保留导出文案）
+  // updateStatus: false → 自动进入成功时不覆盖欢迎或当前用户动作反馈；读取失败仍单独显示。
   if (moduleId === MODULES.reconIdFix.id) {
     if (typeof reloadReconIdFixScenarios === 'function') {
       reloadReconIdFixScenarios({
         scenariosChanged: false,
-        updateStatus: enteringModule
+        updateStatus: false
       }).catch((error) => {
         console.warn('reloadReconIdFixScenarios failed:', error);
       });
@@ -2318,11 +2319,6 @@ function applyAppUpdateStatus(value, { prompt = true } = {}) {
   }
 }
 
-function archiveCenterDateInputValue(date = new Date()) {
-  const pad = (part) => String(part).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
 function archiveCenterBatchId(batch) {
   return String(batch?.internalId ?? batch?.batchId ?? batch?.id ?? '');
 }
@@ -2719,18 +2715,18 @@ function createAppUpdateSettingsDialog(options = {}) {
             <header class="archive-center-header">
               <div class="archive-center-header-copy">
                 <h3 id="archiveCenterHeading" class="app-settings-pane-heading">存档中心</h3>
+                <button class="archive-center-icon-button" type="button" data-action="open-archive-settings" title="存档设置" aria-label="存档设置">⚙</button>
               </div>
               <div class="archive-center-storage-summary" aria-label="存档容量">
                 <span>文件总大小</span>
                 <strong data-role="archive-file-total-size">-</strong>
-                <button class="archive-center-icon-button" type="button" data-action="open-archive-settings" title="存档设置" aria-label="存档设置">⚙</button>
               </div>
             </header>
 
             <div class="archive-center-filters" aria-label="存档筛选">
               <label class="archive-center-field">
                 <span>日期</span>
-                <input type="date" data-filter="date" value="${archiveCenterDateInputValue()}" />
+                <input type="date" data-filter="date" value="" />
               </label>
               <label class="archive-center-field">
                 <span>模块</span>
@@ -2765,20 +2761,12 @@ function createAppUpdateSettingsDialog(options = {}) {
             </header>
 
             <div class="archive-center-settings-section">
-              <h4>存储统计</h4>
               <div class="archive-center-storage-location-heading">
                 <span>存档位置</span>
                 <button class="secondary-btn small" type="button" data-action="change-archive-storage">变更</button>
               </div>
               <p class="archive-center-storage-path" data-role="archive-storage-path" title="">-</p>
               <p class="archive-center-settings-note" data-role="archive-storage-migration" aria-live="polite" hidden></p>
-              <div class="archive-center-storage-labels">
-                <span>文件总大小 <strong data-role="archive-settings-file-total-size">-</strong></span>
-              </div>
-              <div class="archive-center-stat-grid">
-                <span>运行次数 <strong data-role="archive-stat-runs">-</strong></span>
-                <span>最新批次 <strong data-role="archive-stat-latest">-</strong></span>
-              </div>
             </div>
 
             <div class="archive-center-settings-section">
@@ -2826,7 +2814,6 @@ function createAppUpdateSettingsDialog(options = {}) {
   const closeDialogButton = dialog.querySelector('[data-action="close"]');
   const returnButton = dialog.querySelector('[data-role="close-update-dialog"]');
   let unsubscribeStorageMigration = null;
-  let unsubscribeEntryMaintenanceProgress = null;
   let unsubscribeEntryMaintenanceCompleted = null;
   let unsubscribeEntryMaintenanceFailed = null;
 
@@ -3046,11 +3033,6 @@ function createAppUpdateSettingsDialog(options = {}) {
       : {};
     const fileTotalText = formatArchiveCenterBytes(stats.fileTotalBytes);
     dialog.querySelector('[data-role="archive-file-total-size"]').textContent = fileTotalText;
-    dialog.querySelector('[data-role="archive-settings-file-total-size"]').textContent = fileTotalText;
-    dialog.querySelector('[data-role="archive-stat-runs"]').textContent = String(stats.runCount ?? '-');
-    dialog.querySelector('[data-role="archive-stat-latest"]').textContent = String(
-      stats.latestBatchNumber || '-'
-    );
     const storageRoot = stats.storagePath || archiveState.settings?.storageRoot || '';
     const storagePath = dialog.querySelector('[data-role="archive-storage-path"]');
     storagePath.textContent = storageRoot || '-';
@@ -3139,7 +3121,7 @@ function createAppUpdateSettingsDialog(options = {}) {
       renderArchiveStats();
       return true;
     } catch (error) {
-      showArchiveFeedback(`存储统计加载失败：${archiveCenterErrorText(error, '未知错误')}`);
+      showArchiveFeedback(`存档信息加载失败：${archiveCenterErrorText(error, '未知错误')}`);
       return false;
     }
   }
@@ -3228,9 +3210,6 @@ function createAppUpdateSettingsDialog(options = {}) {
         await loadArchiveDetail(archiveState.selectedBatchId);
       } else {
         renderArchiveDetail();
-      }
-      if (selectedRemovedByMaintenance) {
-        showArchiveFeedback('存档维护已完成，当前选中的批次已到期删除，请重新选择。', 'info');
       }
       return true;
     } catch (error) {
@@ -3375,10 +3354,10 @@ function createAppUpdateSettingsDialog(options = {}) {
             { allowDirectObject: true }
           );
         } catch (error) {
-          failures.push(`存储统计：${archiveCenterErrorText(error, '加载失败')}`);
+          failures.push(`存档信息：${archiveCenterErrorText(error, '加载失败')}`);
         }
       } else {
-        failures.push(`存储统计：${archiveCenterErrorText(statsResult.reason, '加载失败')}`);
+        failures.push(`存档信息：${archiveCenterErrorText(statsResult.reason, '加载失败')}`);
       }
 
       renderArchiveSettings();
@@ -3401,13 +3380,11 @@ function createAppUpdateSettingsDialog(options = {}) {
     if (typeof api.startEntryMaintenance !== 'function') return;
     try {
       const result = await api.startEntryMaintenance(visitId);
-      if (result?.status === 'started' || result?.status === 'running') {
-        showArchiveFeedback('正在后台维护存档，列表仍可正常使用。', 'info');
-      } else if (result?.failed === true) {
-        showArchiveFeedback('本次存档维护未完成；离开后重新进入可重试。');
+      if (result?.failed === true) {
+        console.warn('archive entry maintenance did not complete:', result?.errorCode || 'unknown');
       }
     } catch (error) {
-      showArchiveFeedback(`存档维护启动失败：${archiveCenterErrorText(error, '未知错误')}`);
+      console.warn('archive entry maintenance start failed:', error);
     }
   }
 
@@ -3639,13 +3616,11 @@ function createAppUpdateSettingsDialog(options = {}) {
       unsubscribeStorageMigration = null;
     }
     for (const unsubscribe of [
-      unsubscribeEntryMaintenanceProgress,
       unsubscribeEntryMaintenanceCompleted,
       unsubscribeEntryMaintenanceFailed
     ]) {
       if (typeof unsubscribe === 'function') unsubscribe();
     }
-    unsubscribeEntryMaintenanceProgress = null;
     unsubscribeEntryMaintenanceCompleted = null;
     unsubscribeEntryMaintenanceFailed = null;
     closeModal();
@@ -3769,17 +3744,9 @@ function createAppUpdateSettingsDialog(options = {}) {
       renderStorageMigration();
     });
   }
-  if (archiveApi && typeof archiveApi.onEntryMaintenanceProgress === 'function') {
-    unsubscribeEntryMaintenanceProgress = archiveApi.onEntryMaintenanceProgress((progress) => {
-      if (!archiveDialogAlive()) return;
-      const phase = String(progress?.phase || '');
-      showArchiveFeedback(phase ? `正在后台维护存档：${phase}` : '正在后台维护存档。', 'info');
-    });
-  }
   if (archiveApi && typeof archiveApi.onEntryMaintenanceCompleted === 'function') {
     unsubscribeEntryMaintenanceCompleted = archiveApi.onEntryMaintenanceCompleted(async (result) => {
       if (!archiveDialogAlive()) return;
-      const selectedBeforeMaintenanceRefresh = archiveState.selectedBatchId;
       await loadArchiveBatches({
         clearFeedback: false,
         maintenanceRefresh: true,
@@ -3788,16 +3755,12 @@ function createAppUpdateSettingsDialog(options = {}) {
           : []
       });
       await loadArchiveStats();
-      if (archiveDialogAlive()
-          && (!selectedBeforeMaintenanceRefresh || archiveState.selectedBatchId)) {
-        showArchiveFeedback('存档维护已完成。', 'success');
-      }
     });
   }
   if (archiveApi && typeof archiveApi.onEntryMaintenanceFailed === 'function') {
-    unsubscribeEntryMaintenanceFailed = archiveApi.onEntryMaintenanceFailed(() => {
+    unsubscribeEntryMaintenanceFailed = archiveApi.onEntryMaintenanceFailed((result) => {
       if (!archiveDialogAlive()) return;
-      showArchiveFeedback('本次存档维护未完成；离开后重新进入可重试。');
+      console.warn('archive entry maintenance failed:', result?.errorCode || 'unknown');
     });
   }
   requestAnimationFrame(refreshOpenAppUpdateDialog);
@@ -6498,11 +6461,15 @@ function applyPreFundReconciliationPanelPreviewState() {
 // PR-A 仅做骨架：sessionStatus 同步 + 主面板下拉 reload + 4 按钮 binding（导入/运行/导出 PR-B 落地）
 
 async function refreshReconIdFixStatus({ updateStatus = true } = {}) {
+  let readFailed = false;
+  let readFailure = null;
   try {
     const status = await window.desktopApi.reconIdFix.sessionStatus();
     if (!status || status.status !== 'ok') {
       state.reconIdFixSession = null;
       state.reconIdFixResult = null;
+      readFailed = true;
+      readFailure = status;
     } else {
       state.reconIdFixSession = status.hasFile
         ? { fileName: status.fileName, sheetCounts: status.sheetCounts || null }
@@ -6517,8 +6484,27 @@ async function refreshReconIdFixStatus({ updateStatus = true } = {}) {
     }
   } catch (error) {
     console.error('refreshReconIdFixStatus failed:', error);
+    state.reconIdFixSession = null;
+    state.reconIdFixResult = null;
+    readFailed = true;
+    readFailure = error;
+  }
+  if (readFailed) {
+    updateReconIdFixUi({ updateStatus: false });
+    if (elements.reconIdFixStatusBox) {
+      const detail = readFailure && readFailure.message
+        ? String(readFailure.message).trim()
+        : '';
+      updateStatusBox(
+        elements.reconIdFixStatusBox,
+        detail ? `对账单修复状态读取失败：${detail}` : '对账单修复状态读取失败',
+        'error'
+      );
+    }
+    return false;
   }
   updateReconIdFixUi({ updateStatus });
+  return true;
 }
 
 // 主面板"场景"下拉刷新（task A9）
@@ -6539,6 +6525,8 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
   const cat = state.reconIdFixBillCategory;
   const targetCategory = cat === 'gateway' ? 'gateway-recon-id-fix'
     : (cat === 'business' ? 'recon-id-fix' : null);
+  let scenarioReadFailed = false;
+  let scenarioReadFailure = null;
 
   if (!targetCategory) {
     state.reconIdFixScenarios = [];
@@ -6548,6 +6536,8 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
       const result = await window.desktopApi.scenarios.list();
       if (!result || result.status !== 'ok' || !Array.isArray(result.scenarios)) {
         state.reconIdFixScenarios = [];
+        scenarioReadFailed = true;
+        scenarioReadFailure = result;
       } else {
         state.reconIdFixScenarios = result.scenarios.filter((s) => s.category === targetCategory);
       }
@@ -6566,6 +6556,8 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
       console.error('reloadReconIdFixScenarios failed:', error);
       state.reconIdFixScenarios = [];
       state.reconIdFixSelectedScenarioId = null;
+      scenarioReadFailed = true;
+      scenarioReadFailure = error;
     }
   }
   // 仅当调用方明确说"场景变更"时才清 renderer-only 的 reconIdFixExport
@@ -6585,6 +6577,16 @@ async function reloadReconIdFixScenarios(options = { scenariosChanged: true }) {
     }
   } else {
     updateReconIdFixUi({ updateStatus: options?.updateStatus !== false });
+  }
+  if (scenarioReadFailed && elements.reconIdFixStatusBox) {
+    const detail = scenarioReadFailure && scenarioReadFailure.message
+      ? String(scenarioReadFailure.message).trim()
+      : '';
+    updateStatusBox(
+      elements.reconIdFixStatusBox,
+      detail ? `对账单修复场景读取失败：${detail}` : '对账单修复场景读取失败',
+      'error'
+    );
   }
 }
 

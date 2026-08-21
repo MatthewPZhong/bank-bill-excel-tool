@@ -20171,7 +20171,7 @@ function registerToolboxHandlers() {
           if (conflicts.length > 0) {
             const overwriteChoice = await dialog.showMessageBox(mainWindow, {
               type: 'warning',
-              buttons: ['取消', '覆盖全部'],
+              buttons: ['返回', '覆盖全部'],
               defaultId: 0,
               cancelId: 0,
               noLink: true,

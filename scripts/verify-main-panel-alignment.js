@@ -54,8 +54,8 @@ function runParent() {
       const outcome = result.ok ? 'PASS' : 'FAIL';
       console.log(
         `[main-panel-alignment] ${viewport.width}x${viewport.height} @ ${scaleFactor * 100}% ` +
-        `${outcome} (single=${result.metrics.maxSingleDelta.toFixed(4)}px, ` +
-        `multi=${result.metrics.maxMultiDelta.toFixed(4)}px, ` +
+        `${outcome} (single-text=${result.metrics.maxSingleTextDelta.toFixed(4)}px, ` +
+        `multi-text=${result.metrics.maxMultiTextDelta.toFixed(4)}px, ` +
         `control=${result.metrics.maxControlDelta.toFixed(4)}px, ` +
         `vcc-width=${result.metrics.vccButtonWidthDelta.toFixed(4)}px, ` +
         `vcc-symmetry=${result.metrics.vccButtonSymmetryDelta.toFixed(4)}px, ` +
@@ -98,10 +98,16 @@ function measurePage(expectedScaleFactor) {
     'positionReconciliationFunctionSelect'
   ];
   const failures = [];
+  const welcomeStatusIds = new Set([
+    'duplicateInboundMatchStatusBox',
+    'vccFinancialOpStatusBox',
+    'reconIdFixStatusBox',
+    'positionReconciliationStatusBox'
+  ]);
   const metrics = {
     devicePixelRatio: window.devicePixelRatio,
-    maxSingleDelta: 0,
-    maxMultiDelta: 0,
+    maxSingleTextDelta: 0,
+    maxMultiTextDelta: 0,
     maxControlDelta: 0,
     vccButtonWidthDelta: 0,
     vccButtonSymmetryDelta: 0,
@@ -132,36 +138,34 @@ function measurePage(expectedScaleFactor) {
     showPanel(panelId);
     const box = document.getElementById(statusId);
     const content = box && box.querySelector('.status-box-content');
-    const spark = box && box.querySelector('.status-spark');
     const text = box && box.querySelector('.status-box-text');
-    if (!box || !content || !spark || !text) {
+    if (!box || !content || !text) {
       failures.push(`${statusId}: missing status structure`);
       continue;
     }
+    if (box.querySelector('svg')) failures.push(`${statusId}: unexpected status SVG`);
     const initialText = text.textContent.trim();
     if (!initialText) failures.push(`${statusId}: empty initial status text`);
-    if (statusId === 'duplicateInboundMatchStatusBox' && initialText !== '欢迎使用小助手') {
+    if (welcomeStatusIds.has(statusId) && initialText !== '欢迎使用小助手') {
       failures.push(`${statusId}: unexpected initial text ${initialText}`);
     }
 
     text.textContent = 'Alignment status';
-    let sparkRect = spark.getBoundingClientRect();
     let textRect = text.getBoundingClientRect();
     let boxRect = box.getBoundingClientRect();
     let contentRect = content.getBoundingClientRect();
-    const singleDelta = Math.abs(centerY(sparkRect) - centerY(textRect));
-    metrics.maxSingleDelta = Math.max(metrics.maxSingleDelta, singleDelta);
-    if (singleDelta > tolerance) failures.push(`${statusId}: single-line delta ${singleDelta}`);
+    const singleTextDelta = Math.abs(centerY(contentRect) - centerY(textRect));
+    metrics.maxSingleTextDelta = Math.max(metrics.maxSingleTextDelta, singleTextDelta);
+    if (singleTextDelta > tolerance) failures.push(`${statusId}: single-line text delta ${singleTextDelta}`);
     if (!inside(contentRect, boxRect)) failures.push(`${statusId}: single-line content overflow`);
 
     text.textContent = 'First line\nSecond line\nThird line';
-    sparkRect = spark.getBoundingClientRect();
     textRect = text.getBoundingClientRect();
     boxRect = box.getBoundingClientRect();
     contentRect = content.getBoundingClientRect();
-    const multiDelta = Math.abs(centerY(sparkRect) - centerY(textRect));
-    metrics.maxMultiDelta = Math.max(metrics.maxMultiDelta, multiDelta);
-    if (multiDelta > tolerance) failures.push(`${statusId}: multi-line delta ${multiDelta}`);
+    const multiTextDelta = Math.abs(centerY(contentRect) - centerY(textRect));
+    metrics.maxMultiTextDelta = Math.max(metrics.maxMultiTextDelta, multiTextDelta);
+    if (multiTextDelta > tolerance) failures.push(`${statusId}: multi-line text delta ${multiTextDelta}`);
     if (!inside(contentRect, boxRect)) failures.push(`${statusId}: multi-line content overflow`);
   }
 
@@ -270,8 +274,11 @@ function measurePage(expectedScaleFactor) {
   }
 
   const newAccountStatus = document.getElementById('newAccountStatusBox');
-  if (newAccountStatus.querySelector('.status-box-content')) {
+  if (!newAccountStatus || newAccountStatus.querySelector('.status-box-content')) {
     failures.push('new account status: excluded structure changed');
+  }
+  if (newAccountStatus && newAccountStatus.querySelector('svg')) {
+    failures.push('new account status: unexpected status SVG');
   }
   if (document.documentElement.scrollWidth > document.documentElement.clientWidth + tolerance) {
     failures.push('document: horizontal overflow');

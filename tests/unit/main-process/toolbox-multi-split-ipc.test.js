@@ -169,13 +169,25 @@ test.describe('toolbox:split:export 多文件 IPC 接线', () => {
   test('只选择一次目录，冲突统一确认后才创建临时目录', () => {
     const directoryIndex = handlerSource.indexOf("showImportOpenDialog('toolbox-split-export-directory'");
     const invalidTargetIndex = handlerSource.indexOf('const invalidTargets = targetPlans.filter');
-    const conflictIndex = handlerSource.indexOf("buttons: ['取消', '覆盖全部']");
+    const conflictIndex = handlerSource.indexOf("buttons: ['返回', '覆盖全部']");
     const tempIndex = handlerSource.indexOf("fs.mkdtempSync(path.join(outputDirectory, '.toolbox-split-'))");
     assert.ok(directoryIndex >= 0);
     assert.ok(invalidTargetIndex > directoryIndex);
     assert.ok(conflictIndex > directoryIndex);
     assert.ok(tempIndex > conflictIndex && tempIndex > invalidTargetIndex);
     assert.equal(handlerSource.match(/showImportOpenDialog\('toolbox-split-export-directory'/g).length, 1);
+  });
+
+  test('同名冲突确认使用“返回 / 覆盖全部”，返回仍在 FilePlan 与临时目录前整批取消', () => {
+    const conflictIndex = prepareSource.indexOf("buttons: ['返回', '覆盖全部']");
+    const responseGuardIndex = prepareSource.indexOf('overwriteChoice.response !== 1', conflictIndex);
+    const cancelledIndex = prepareSource.indexOf("status: 'cancelled'", responseGuardIndex);
+    const filePlanIndex = prepareSource.indexOf('prepared.filePlan = {', cancelledIndex);
+    assert.ok(conflictIndex >= 0);
+    assert.ok(responseGuardIndex > conflictIndex);
+    assert.ok(cancelledIndex > responseGuardIndex);
+    assert.ok(filePlanIndex > cancelledIndex);
+    assert.ok(!prepareSource.includes("buttons: ['取消', '覆盖全部']"));
   });
 
   test('大文件和普通文件均走统一格式保真 facade，最后统一可恢复发布', () => {

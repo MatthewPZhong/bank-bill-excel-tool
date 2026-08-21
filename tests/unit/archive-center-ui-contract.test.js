@@ -11,7 +11,7 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
 
-test.describe('v3.1.9 设置与存档中心静态契约', () => {
+test.describe('v3.1.13 设置与存档中心静态契约', () => {
   const renderer = read('src/renderer.js');
   const preload = read('src/preload.js');
   const styles = read('src/styles-gemini-extra.css');
@@ -249,15 +249,31 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.ok(filtersStart >= 0 && filtersEnd > filtersStart, '应找到存档筛选区');
     const filters = renderer.slice(filtersStart, filtersEnd);
 
-    assert.match(filters, /data-filter="date"/);
+    assert.match(filters, /data-filter="date" value=""/);
     assert.match(filters, /data-filter="module"/);
     assert.match(filters, /data-filter="batch-id"/);
     assert.doesNotMatch(filters, /data-filter="(?:file-name|filename)"/i);
     assert.doesNotMatch(filters, /搜索文件名|按文件名搜索/);
     assert.match(renderer, /localDate: dateFilter\.value/);
+    assert.doesNotMatch(renderer, /archiveCenterDateInputValue/);
     assert.match(renderer, /batchNumber/);
     assert.match(renderer, /listBatches\(filters\)/);
     assert.match(renderer, /archiveCenterBatchNumber\(batch\)[\s\S]*?includes\(requestedBatchNumber\)/);
+  });
+
+  test('存档设置齿轮紧邻“存档中心”，文件总大小保持独立靠右', () => {
+    const headerStart = renderer.indexOf('class="archive-center-header"');
+    const headerEnd = renderer.indexOf('class="archive-center-filters"', headerStart);
+    assert.ok(headerStart >= 0 && headerEnd > headerStart, '应找到存档中心标题栏');
+    const header = renderer.slice(headerStart, headerEnd);
+    assert.match(
+      header,
+      /archive-center-header-copy[\s\S]*?<h3[^>]*>存档中心<\/h3>[\s\S]*?data-action="open-archive-settings"[\s\S]*?<\/div>[\s\S]*?archive-center-storage-summary/
+    );
+    const summaryStart = header.indexOf('archive-center-storage-summary');
+    assert.doesNotMatch(header.slice(summaryStart), /open-archive-settings/);
+    assert.match(styles, /\.archive-center-header-copy\s*\{[\s\S]*?display:\s*flex;[\s\S]*?align-items:\s*center;[\s\S]*?gap:\s*8px/);
+    assert.match(styles, /\.archive-center-storage-summary\s*\{[\s\S]*?margin-left:\s*auto/);
   });
 
   test('批次、文件、失败重试和全局确认均接入 archiveCenter', () => {
@@ -308,7 +324,7 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.doesNotMatch(renderer, /data-action="(?:save|cancel)-archive-settings"/);
   });
 
-  test('存档设置显示位置、迁移进度、期限与统计，模板不存档完全退役', () => {
+  test('存档设置只显示位置、迁移进度与期限，模板不存档完全退役', () => {
     for (const value of ['30', '60', '90', '180', '365', 'permanent']) {
       assert.match(renderer, new RegExp(`<option value="${value}"(?: selected)?>`), `保留期 ${value} 应存在`);
     }
@@ -320,6 +336,7 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(renderer, /getArchiveCenterApi\(\)\.getStats\(\)/);
     assert.match(renderer, /data-role="archive-storage-path"/);
     assert.match(renderer, /archive-center-storage-location-heading[\s\S]*?<span>存档位置<\/span>[\s\S]*?>变更<\/button>[\s\S]*?archive-center-storage-path/);
+    assert.match(styles, /\.archive-center-storage-location-heading\s*\{[\s\S]*?justify-content:\s*flex-start;[\s\S]*?gap:\s*10px/);
     assert.match(styles, /\.archive-center-storage-path\s*\{[\s\S]*?overflow-wrap:\s*anywhere;[\s\S]*?white-space:\s*normal;[\s\S]*?user-select:\s*text/);
     assert.doesNotMatch(styles, /archive-center-storage-path[\s\S]{0,180}text-overflow:\s*ellipsis/);
     assert.match(renderer, /data-role="archive-storage-migration"/);
@@ -327,17 +344,19 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(renderer, /migration\.phase === 'cleanup-pending'/);
     assert.match(renderer, /`\$\{phaseText\}（\$\{processed\}\/\$\{total\}）`/);
     assert.match(renderer, /running \? '变更中…' : '变更'/);
-    for (const role of [
-      'archive-file-total-size',
-      'archive-settings-file-total-size',
-      'archive-stat-runs',
-      'archive-stat-latest'
-    ]) {
-      assert.match(renderer, new RegExp(`data-role="${role}"`));
-    }
+    assert.match(renderer, /data-role="archive-file-total-size"/);
+    assert.doesNotMatch(renderer, /data-role="archive-settings-file-total-size"/);
     assert.match(renderer, /stats\.fileTotalBytes/);
-    assert.match(renderer, /stats\.runCount/);
-    assert.match(renderer, /stats\.latestBatchNumber \|\| '-'/);
+    const settingsViewStart = renderer.indexOf('class="archive-center-settings-view"');
+    const settingsViewEnd = renderer.indexOf('\n        <footer', settingsViewStart);
+    assert.ok(settingsViewStart >= 0 && settingsViewEnd > settingsViewStart, '应找到存档设置页模板');
+    const settingsView = renderer.slice(settingsViewStart, settingsViewEnd);
+    assert.doesNotMatch(settingsView, />存储统计</);
+    assert.doesNotMatch(settingsView, />文件总大小</);
+    assert.doesNotMatch(renderer, /data-role="archive-stat-(?:runs|latest)"/);
+    assert.doesNotMatch(renderer, /querySelector\('\[data-role="archive-stat-(?:runs|latest)"\]'\)/);
+    assert.doesNotMatch(styles, /archive-center-stat-grid/);
+    assert.doesNotMatch(styles, /archive-center-storage-labels/);
     assert.match(renderer, /storagePath\.title = storageRoot/);
     assert.doesNotMatch(renderer, /archive-(?:unique|logical)|archive-stat-files|archive-storage-meter/);
     assert.doesNotMatch(renderer, />唯一文件<|>逻辑文件<|>文件引用</);
@@ -346,7 +365,7 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.doesNotMatch(renderer, /锁定批次不参与自动清理。默认保留期为 90 天。|默认保留/);
   });
 
-  test('真实进入先完成 list 再启动后台维护，完成后清空已删除选择并订阅收口事件', () => {
+  test('真实进入先完成 list 再启动后台维护，维护刷新保留但顶部提示静默', () => {
     const ensureStart = renderer.indexOf('async function ensureArchiveLoaded');
     const ensureEnd = renderer.indexOf('function setArchiveSettingsOpen', ensureStart);
     const ensureSource = renderer.slice(ensureStart, ensureEnd);
@@ -359,10 +378,35 @@ test.describe('v3.1.9 设置与存档中心静态契约', () => {
     assert.match(renderer, /maintenanceDeletedBatchIds[\s\S]*?deletedBatchIds\.has\(String\(priorSelectedBatchId\)\)[\s\S]*?archiveState\.selectedBatchId = selectedRemovedByMaintenance[\s\S]*?\? ''/);
     assert.match(renderer, /preserveFilteredMaintenanceSelection[\s\S]*?selectedStillVisible \|\| preserveFilteredMaintenanceSelection[\s\S]*?priorSelectedBatchId/);
     assert.match(renderer, /if \(archiveState\.selectedBatchId\) \{[\s\S]*?await loadArchiveDetail\(archiveState\.selectedBatchId\)/);
-    assert.match(renderer, /当前选中的批次已到期删除/);
     assert.match(renderer, /onEntryMaintenanceCompleted[\s\S]*?maintenanceDeletedBatchIds: Array\.isArray\(result\?\.deletedBatchIds\)/);
-    assert.match(renderer, /onEntryMaintenanceFailed[\s\S]*?本次存档维护未完成；离开后重新进入可重试/);
-    assert.match(renderer, /unsubscribeEntryMaintenanceProgress/);
+    const maintenanceStart = renderer.indexOf('async function startArchiveEntryMaintenance');
+    const maintenanceStartEnd = renderer.indexOf('async function ensureArchiveLoaded', maintenanceStart);
+    const maintenanceStartSource = renderer.slice(maintenanceStart, maintenanceStartEnd);
+    assert.doesNotMatch(maintenanceStartSource, /showArchiveFeedback/);
+    assert.match(maintenanceStartSource, /console\.warn\('archive entry maintenance/);
+    const maintenanceCompletedStart = renderer.indexOf(
+      "if (archiveApi && typeof archiveApi.onEntryMaintenanceCompleted === 'function')"
+    );
+    const maintenanceFailedStart = renderer.indexOf(
+      "if (archiveApi && typeof archiveApi.onEntryMaintenanceFailed === 'function')",
+      maintenanceCompletedStart
+    );
+    const maintenanceCompletedSource = renderer.slice(
+      maintenanceCompletedStart,
+      maintenanceFailedStart
+    );
+    assert.match(maintenanceCompletedSource, /await loadArchiveBatches\(\{/);
+    assert.match(maintenanceCompletedSource, /await loadArchiveStats\(\)/);
+    assert.doesNotMatch(maintenanceCompletedSource, /showArchiveFeedback/);
+    assert.doesNotMatch(renderer, /onEntryMaintenanceProgress/);
+    assert.doesNotMatch(renderer, /unsubscribeEntryMaintenanceProgress/);
+    assert.doesNotMatch(
+      renderer,
+      /正在后台维护存档|存档维护已完成|本次存档维护未完成|存档维护启动失败|当前选中的批次已到期删除/
+    );
+    assert.match(renderer, /onEntryMaintenanceFailed[\s\S]*?console\.warn\('archive entry maintenance failed:'/);
+    assert.match(renderer, /批次列表加载失败：/);
+    assert.match(renderer, /保留期限保存失败：/);
   });
 
   test('永久保留值保持为 permanent，加载和即时保存期间禁用返回与关闭入口', () => {

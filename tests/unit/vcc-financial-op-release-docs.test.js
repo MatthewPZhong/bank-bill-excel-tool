@@ -24,28 +24,86 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状态', () => {
+test('v3.1.13 版本号、三份用户文档和设计资料同步工具箱、存档中心与状态框迭代', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
-  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
+  const spec = read('changes/3.1.13/spec.md');
+  const techdoc = read('changes/3.1.13/techdoc.md');
   const mainSource = read('src/main.js');
 
-  assert.equal(packageJson.version, '3.1.12');
-  assert.equal(packageLock.version, '3.1.12');
-  assert.equal(packageLock.packages[''].version, '3.1.12');
+  assert.equal(packageJson.version, '3.1.13');
+  assert.equal(packageLock.version, '3.1.13');
+  assert.equal(packageLock.packages[''].version, '3.1.13');
   assert.ok(packageJson.build.files.includes('docs/USER_GUIDE.md'));
   assert.match(mainSource, /path\.join\(app\.getAppPath\(\), 'docs', 'USER_GUIDE\.md'\)/);
+  assert.match(changelog, /^## 3\.1\.13 - 2026-08-20$/m);
+  assert.match(history, /^## v3\.1\.13（2026-08-20）$/m);
+  assert.match(guide, /^版本：`v3\.1\.13`$/m);
+
+  const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.12'));
+  const currentHistory = history.slice(0, history.indexOf('## v3.1.12'));
+  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
+  for (const currentSection of [currentChangelog, currentHistory, currentGuide, spec, techdoc]) {
+    assert.match(currentSection, /工具箱/);
+    assert.match(currentSection, /状态框/);
+    assert.match(currentSection, /返回/);
+    assert.match(currentSection, /存档中心/);
+    assert.match(currentSection, /平盘对账数据处理/);
+    assert.match(currentSection, /对账单修复/);
+    assert.match(currentSection, /欢迎使用小助手/);
+    assert.match(currentSection, /状态框.*(?:星星|星形).*SVG|(?:星星|星形).*SVG.*状态框/s);
+  }
+  for (const currentSection of [currentChangelog, currentHistory]) {
+    assert.match(currentSection, /关闭按钮.*隐藏|隐藏.*关闭按钮/);
+    assert.match(currentSection, /覆盖全部/);
+    assert.doesNotMatch(currentSection, /正式发布完成|已于 2026-08-20 正式发布为/);
+  }
+  assert.match(currentGuide, /尚未标记为正式发布/);
+  assert.match(currentGuide, /latest stable Release 仍为.*v3\.1\.12/);
+  assert.match(spec, /宽度固定为该宽度的两倍，即 144px/);
+  assert.match(spec, /不修改 Excel 内容、格式保真、筛选、批次、存档、原子发布或恢复合同/);
+  assert.match(techdoc, /S = L \+ L = 144px/);
+  assert.match(techdoc, /running = mergeInFlight \|\| splitImportInFlight \|\| splitExportInFlight/);
+  assert.match(techdoc, /response 0.*FilePlan.*临时目录.*正式目标写入前/s);
+  for (const currentSection of [currentChangelog, currentHistory, spec, techdoc]) {
+    assert.match(currentSection, /日期.*(?:默认|选择框).*空|默认.*空.*日期/s);
+    assert.match(currentSection, /运行次数/);
+    assert.match(currentSection, /最新批次/);
+    assert.match(currentSection, /存储统计/);
+    assert.match(currentSection, /维护.*(?:提示|提示栏)|(?:提示|提示栏).*维护/s);
+    assert.match(currentSection, /静默|不再|不展示/);
+  }
+  assert.match(guide, /v3\.1\.13 起，存档中心日期选择框默认为空/);
+  assert.match(guide, /不再显示“存储统计”、文件总大小、运行次数和最新批次/);
+  assert.match(guide, /顶部提示栏不会显示维护启动、进度、完成、失败/);
+  assert.match(guide, /列表加载、迁移、删除等用户操作的结果和错误仍会正常提示/);
+  assert.match(guide, /首次成功加载时状态框显示“欢迎使用小助手”/);
+  assert.match(guide, /自动切回模块不会覆盖/);
+  assert.match(spec, /自动同步返回失败结果或抛出异常/);
+  assert.match(techdoc, /updateStatus.*成功同步后是否投影摘要/);
+});
+
+test('v3.1.12 三份用户文档保留实际迭代和最终发布验收状态', () => {
+  const changelog = read('CHANGELOG.md');
+  const history = read('docs/VERSION_FEATURE_HISTORY.md');
+  const guide = read('docs/USER_GUIDE.md');
+  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
+
   assert.match(changelog, /^## 3\.1\.12 - 2026-08-20$/m);
   assert.match(history, /^## v3\.1\.12（2026-08-20）$/m);
-  assert.match(guide, /^版本：`v3\.1\.12`$/m);
 
-  const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.11'));
-  const currentHistory = history.slice(0, history.indexOf('## v3.1.11'));
-  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
-  for (const currentSection of [currentChangelog, currentHistory, currentGuide]) {
+  const releaseChangelog = changelog.slice(
+    changelog.indexOf('## 3.1.12'),
+    changelog.indexOf('## 3.1.11')
+  );
+  const releaseHistory = history.slice(
+    history.indexOf('## v3.1.12'),
+    history.indexOf('## v3.1.11')
+  );
+  for (const currentSection of [releaseChangelog, releaseHistory]) {
     assert.match(currentSection, /GitHub Releases/);
     assert.match(currentSection, /验收完成/);
     assert.match(currentSection, /授权.*合并|授权合并/);
@@ -59,8 +117,9 @@ test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状
   assert.match(history, /CNY\/CNH/);
   assert.match(guide, /第一行左侧显示“存档位置”、右侧显示【变更】/);
   assert.match(guide, /新导入允许用标准大写 CNH/);
+  assert.match(guide, /v3\.1\.12[\s\S]{0,500}已于 2026-08-20 正式发布为 latest stable Release/);
 
-  for (const document of [changelog, history, guide, runbook]) {
+  for (const document of [changelog, history, runbook]) {
     assert.match(document, /已于 2026-08-20 正式发布|正式发布完成|v3\.1\.12 发布记录/);
     assert.match(document, /latest stable Release/);
     assert.match(document, /Setup/);
@@ -69,6 +128,8 @@ test('v3.1.12 版本号与三份用户文档同步实际迭代和最终验收状
     assert.match(document, /latest\.yml/);
     assert.match(document, /在线升级.*(?:canary|人工)|production\/latest/);
   }
+  assert.match(guide, /latest stable Release/);
+  assert.match(guide, /四项 Windows 资产已公开/);
   for (const document of [changelog, history, runbook]) {
     assert.match(document, /PR #157/);
     assert.match(document, /a8c632bad119eab6bca27b949dfb5956805cf3ae/);

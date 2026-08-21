@@ -11740,13 +11740,18 @@
           <button class="icon-close" type="button" aria-label="关闭">×</button>
         </div>
         <div class="dialog-body toolbox-body">
-          <div class="toolbox-row">
+          <div class="status-box toolbox-status-box" data-tone="neutral" role="status" aria-live="polite">
+            <span class="status-box-content">
+              <span class="status-box-text">等待操作</span>
+            </span>
+          </div>
+          <div class="toolbox-row toolbox-merge-row">
             <span class="toolbox-row-label">合并表格</span>
             <div class="toolbox-row-actions">
               <button class="primary-btn small" type="button" data-action="merge-import">导入文件</button>
             </div>
           </div>
-          <div class="toolbox-row">
+          <div class="toolbox-row toolbox-split-row">
             <span class="toolbox-row-label">拆分表格</span>
             <div class="toolbox-row-actions">
               <button class="primary-btn small" type="button" data-action="split-import">导入文件</button>
@@ -11757,6 +11762,8 @@
       overlay.appendChild(card);
 
       const closeBtn = card.querySelector('.icon-close');
+      const statusBox = card.querySelector('.toolbox-status-box');
+      const statusText = statusBox.querySelector('.status-box-text');
       const mergeImportBtn = card.querySelector('[data-action="merge-import"]');
       const splitImportBtn = card.querySelector('[data-action="split-import"]');
 
@@ -11764,6 +11771,24 @@
       let mergeInFlight = false;
       let splitImportInFlight = false;
       let splitExportInFlight = false;
+
+      function isToolboxRunning() {
+        return mergeInFlight || splitImportInFlight || splitExportInFlight;
+      }
+
+      function setToolboxStatus(message, tone = 'neutral') {
+        statusText.textContent = String(message || '');
+        statusBox.dataset.tone = tone;
+      }
+
+      function syncToolboxRunningUi() {
+        const running = isToolboxRunning();
+        closeBtn.hidden = running;
+        mergeImportBtn.disabled = running;
+        splitImportBtn.disabled = running;
+        overlay.setAttribute('aria-busy', running ? 'true' : 'false');
+        card.classList.toggle('is-running', running);
+      }
 
       // v3.0.8（用户要求）：工具箱反馈改用应用内弹框 createAlertDialog（有前端页面 + 统一 Clear 风格 + 可预览），
       //   取代原生 window.alert（无前端页面、无法预览、样式不一致）。
@@ -11809,45 +11834,59 @@
         return lines;
       }
 
-      closeBtn.addEventListener('click', () => closeModal());
+      closeBtn.addEventListener('click', () => {
+        if (!isToolboxRunning()) closeModal();
+      });
       overlay.addEventListener('click', (ev) => {
-        if (ev.target === overlay) closeModal();
+        if (ev.target === overlay && !isToolboxRunning()) closeModal();
       });
 
       // 合表：一气呵成。点「导入文件」→ merge()（main 内多选 + 校验 + 合并 + 另存为）→ success 弹保存路径 / failed 弹差异。
       //   detailLines（表头不一致）逐行拼进 alert；cancelled 静默。
       mergeImportBtn.addEventListener('click', async () => {
-        if (mergeInFlight) return;
+        if (isToolboxRunning()) return;
         mergeInFlight = true;
-        mergeImportBtn.disabled = true;
+        setToolboxStatus('正在合并表格');
+        syncToolboxRunningUi();
         try {
           const result = await desktopApi.toolbox.merge();
-          if (!result || result.status === 'cancelled') return;
+          if (!result || result.status === 'cancelled') {
+            setToolboxStatus('已取消合并');
+            return;
+          }
           if (result.status === 'success') {
+            setToolboxStatus('合并完成', 'success');
             showToolboxAlert('合并完成，已保存到：', {
               lines: [result.filePath, ...buildToolboxNoticeLines(result)]
             });
             return;
           }
+          setToolboxStatus('合并失败', 'error');
           showToolboxAlert(result.message || '合并失败', { isError: true, lines: result.detailLines });
         } catch (error) {
+          setToolboxStatus('合并失败', 'error');
           showToolboxAlert(`合并失败：${(error && error.message) || '未知错误'}`, { isError: true });
         } finally {
           mergeInFlight = false;
-          mergeImportBtn.disabled = false;
+          syncToolboxRunningUi();
         }
       });
 
       // 拆表（一气呵成）：点「导入文件」→ splitRead()（main 内单选 + 读表头 + 算各字段去重值）→ 成功弹选字段弹框。
       //   选字段弹框「完成」→ 直接用 {源文件, field, values} 过滤命中行另存为；「取消」回到工具箱主弹框。
       splitImportBtn.addEventListener('click', async () => {
-        if (splitImportInFlight) return;
+        if (isToolboxRunning()) return;
         splitImportInFlight = true;
-        splitImportBtn.disabled = true;
+        setToolboxStatus('正在读取表格');
+        syncToolboxRunningUi();
         try {
           const result = await desktopApi.toolbox.splitRead();
-          if (!result || result.status === 'cancelled') return;
+          if (!result || result.status === 'cancelled') {
+            setToolboxStatus('已取消拆分');
+            return;
+          }
           if (result.status !== 'success') {
+            setToolboxStatus('读取失败', 'error');
             showToolboxAlert(result.message || '读取文件失败', {
               isError: true,
               lines: result.detailLines
@@ -11858,6 +11897,7 @@
           const valuesByField = (result.valuesByField && typeof result.valuesByField === 'object')
             ? result.valuesByField
             : {};
+          setToolboxStatus('等待拆分设置');
           openModal(createSplitFieldPickerDialog({
             headers,
             valuesByField,
@@ -11869,11 +11909,14 @@
               const isMultiple = mode === 'multiple';
               if (!result.sourceFilePath || (!isMultiple && (!field || selectedValues.length === 0))
                 || (isMultiple && multipleGroups.length === 0)) {
+                setToolboxStatus('拆分失败', 'error');
                 showToolboxAlert('请选择拆分字段与至少一个值', { isError: true });
                 return;
               }
-              if (splitExportInFlight) return;
+              if (isToolboxRunning()) return;
               splitExportInFlight = true;
+              setToolboxStatus('正在拆分表格');
+              syncToolboxRunningUi();
               try {
                 const exportResult = await desktopApi.toolbox.splitExport(isMultiple
                   ? {
@@ -11888,8 +11931,12 @@
                     field,
                     values: selectedValues
                   });
-                if (!exportResult || exportResult.status === 'cancelled') return;
+                if (!exportResult || exportResult.status === 'cancelled') {
+                  setToolboxStatus('已取消拆分');
+                  return;
+                }
                 if (exportResult.status === 'success') {
+                  setToolboxStatus('拆分完成', 'success');
                   if (isMultiple) {
                     const files = Array.isArray(exportResult.files) ? exportResult.files : [];
                     showToolboxAlert('拆分完成：', {
@@ -11905,11 +11952,14 @@
                   }
                   return;
                 }
+                setToolboxStatus('拆分失败', 'error');
                 showToolboxAlert(exportResult.message || '拆分失败', { isError: true, lines: exportResult.detailLines });
               } catch (error) {
+                setToolboxStatus('拆分失败', 'error');
                 showToolboxAlert(`拆分失败：${(error && error.message) || '未知错误'}`, { isError: true });
               } finally {
                 splitExportInFlight = false;
+                syncToolboxRunningUi();
               }
             },
             onCancel: () => {
@@ -11918,10 +11968,11 @@
             }
           }));
         } catch (error) {
+          setToolboxStatus('读取失败', 'error');
           showToolboxAlert(`读取文件失败：${(error && error.message) || '未知错误'}`, { isError: true });
         } finally {
           splitImportInFlight = false;
-          splitImportBtn.disabled = false;
+          syncToolboxRunningUi();
         }
       });
 

@@ -298,32 +298,18 @@ button, select { font: inherit; }
   border: 1px solid var(--line-soft);
   background: var(--bg-soft);
   display: flex; align-items: center; justify-content: center;
-  gap: 8px;
   text-align: center; line-height: 1.4;
   color: var(--muted);
   font-size: 13px;
   cursor: default;
   transition: background 160ms ease, border-color 160ms ease;
 }
-.status-spark { display: inline-flex; }
 .status-box-content {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   max-width: 100%;
   min-width: 0;
-}
-.status-box-content .status-spark {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
-  line-height: 0;
-}
-.status-box-content .status-spark svg {
-  display: block;
-  width: 14px;
-  height: 14px;
 }
 .status-box-content .status-box-text { min-width: 0; }
 .status-box.is-clickable { cursor: pointer; }

@@ -282,14 +282,12 @@ button, select { font: inherit; }
   border: 1px solid var(--line-soft);
   background: var(--bg-soft);
   display: flex; align-items: center; justify-content: center;
-  gap: 8px;
   text-align: center; line-height: 1.4;
   color: var(--muted);
   font-size: 13px;
   cursor: default;
   transition: background 160ms ease, border-color 160ms ease;
 }
-.status-spark { display: inline-flex; }
 .status-box.is-clickable { cursor: pointer; }
 .status-box:hover { background: #f2f5fa; }
 .status-box[data-tone="success"] { color: var(--success); border-color: rgba(30,142,62,.3); background: #e6f4ea; }

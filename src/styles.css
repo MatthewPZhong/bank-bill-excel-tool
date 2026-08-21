@@ -380,20 +380,8 @@ select {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   max-width: 100%;
   min-width: 0;
-}
-.status-box-content .status-spark {
-  width: 14px;
-  height: 14px;
-  flex: 0 0 14px;
-  line-height: 0;
-}
-.status-box-content .status-spark svg {
-  display: block;
-  width: 14px;
-  height: 14px;
 }
 .status-box-content .status-box-text { min-width: 0; }
 
@@ -2703,24 +2691,21 @@ select {
   color: inherit;
 }
 
-/* 2. 状态栏闪光 SVG 隐藏（General 状态栏纯文本）*/
-.status-spark { display: none; }
-
-/* 3. 模块切换 caret ▾ 隐藏（General 风格无 caret 设计）*/
+/* 2. 模块切换 caret ▾ 隐藏（General 风格无 caret 设计）*/
 .module-switcher-caret { display: none; }
 
-/* 4. 模块切换 icon：SVG 隐藏 + emoji 通过 ::before 还原 */
+/* 3. 模块切换 icon：SVG 隐藏 + emoji 通过 ::before 还原 */
 .module-switcher-icon svg { display: none; }
 .module-switcher-icon::before { content: "🔁"; font-size: 18px; line-height: 1; }
 
-/* 5. select-shell 外包 div 透明化（让 .cell.center > select 父子规则继续生效）*/
+/* 4. select-shell 外包 div 透明化（让 .cell.center > select 父子规则继续生效）*/
 .select-shell { display: contents; }
 
-/* 6. alert/confirm 弹窗的 alert-body 包装层透明化 + alert-icon 隐藏（General 不要 SVG 装饰）*/
+/* 5. alert/confirm 弹窗的 alert-body 包装层透明化 + alert-icon 隐藏（General 不要 SVG 装饰）*/
 .alert-body { display: contents; }
 .alert-icon { display: none; }
 
-/* 7. Pending 模块（D6.1）：HTML 重构对齐 Clear，给 General 加 control-row + pending-action-pair 布局 */
+/* 6. Pending 模块（D6.1）：HTML 重构对齐 Clear，给 General 加 control-row + pending-action-pair 布局 */
 .pending-board .control-row,
 .bank-statement-board .control-row { grid-template-columns: 1fr 1.4fr; }
 .pending-board .cell.left,

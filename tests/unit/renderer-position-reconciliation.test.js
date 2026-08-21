@@ -49,6 +49,50 @@ function loadRendererModule() {
   return window.__positionReconciliation;
 }
 
+function createPositionStatusHarness(statusProvider) {
+  const statusText = { textContent: '欢迎使用小助手' };
+  const statusBox = {
+    dataset: {},
+    querySelector(selector) {
+      return selector === '.status-box-text' ? statusText : null;
+    }
+  };
+  const makeControl = (value = '') => ({
+    value,
+    disabled: false,
+    addEventListener() {}
+  });
+  const elements = {
+    positionReconciliationFunctionSelect: makeControl('position-fund-nature-check'),
+    positionReconciliationRunBtn: makeControl(),
+    positionReconciliationTableManagerBtn: makeControl(),
+    positionReconciliationLinkedTableManagerBtn: makeControl(),
+    positionReconciliationConfigBtn: makeControl(),
+    positionReconciliationExportBtn: makeControl(),
+    positionReconciliationStatusBox: statusBox
+  };
+  const document = {
+    getElementById(id) {
+      return elements[id] || null;
+    }
+  };
+  const window = {};
+  vm.runInNewContext(positionRenderer, {
+    window,
+    document,
+    console: { error() {} }
+  });
+  const ui = window.__positionReconciliation.createPositionReconciliationUI({
+    api: { status: () => statusProvider() },
+    openModal() {},
+    closeModal() {},
+    createAlertDialog() {},
+    createConfirmDialog() {},
+    modalRoot: null
+  });
+  return { elements, statusBox, statusText, ui };
+}
+
 test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
   test('模块 ID、显示名和面板显隐接线完整', () => {
     assert.match(renderer, /positionReconciliation:\s*\{\s*id:\s*'position-reconciliation-process',\s*name:\s*'平盘对账数据处理'/);
@@ -117,15 +161,69 @@ test.describe('v3.1.0 平盘对账数据处理前端契约', () => {
     }
   });
 
-  test('状态框初始文案和统一内容层完整', () => {
+  test('状态框初始文案和无图标内容层完整', () => {
     assert.ok(panel.includes('id="positionReconciliationStatusBox"'));
     assert.ok(panel.includes('class="status-box-content"'));
-    assert.ok(panel.includes('class="status-spark"'));
+    assert.ok(!panel.includes('class="status-spark"'));
+    assert.ok(!panel.includes('<svg'));
     assert.match(panel, /class="status-box-text">欢迎使用小助手<\/span>/);
-    assert.match(positionRenderer, /async function refresh\(\{ showSummary = true \} = \{\}\)/);
-    assert.match(positionRenderer, /showSummary\s*\?\s*statusSummary\(result\)\s*:\s*'欢迎使用小助手'/);
-    assert.match(positionRenderer, /async function initialize\(\)[\s\S]*await refresh\(\{ showSummary: false \}\)/);
-    assert.match(renderer, /positionReconciliationUI\.refresh\(\{ showSummary: enteringModule \}\)/);
+    assert.match(positionRenderer, /async function refresh\(\{ updateStatus = true \} = \{\}\)/);
+    assert.match(positionRenderer, /if \(updateStatus\) \{[\s\S]*?statusSummary\(result\)/);
+    assert.match(positionRenderer, /async function initialize\(\)[\s\S]*await refresh\(\{ updateStatus: false \}\)[\s\S]*?result\.status === 'ok'[\s\S]*?'欢迎使用小助手'/);
+    assert.match(renderer, /positionReconciliationUI\.refresh\(\{ updateStatus: false \}\)/);
+    assert.doesNotMatch(renderer, /positionReconciliationUI\.refresh\(\{[^}]*enteringModule/);
+    assert.doesNotMatch(positionRenderer, /showSummary/);
+  });
+
+  test('成功初始化同步真实按钮但保持欢迎，自动重进不覆盖用户动作摘要', async () => {
+    const status = {
+      status: 'ok',
+      bank: { rowCount: 128 },
+      pendingRun: null,
+      canRun: true,
+      canExport: false
+    };
+    const harness = createPositionStatusHarness(() => Promise.resolve(status));
+
+    await harness.ui.initialize();
+    assert.equal(harness.statusText.textContent, '欢迎使用小助手');
+    assert.equal(harness.statusBox.dataset.tone, 'info');
+    assert.equal(harness.elements.positionReconciliationRunBtn.disabled, false);
+    assert.equal(harness.elements.positionReconciliationExportBtn.disabled, true);
+
+    await harness.ui.refresh();
+    assert.equal(harness.statusText.textContent, '已导入 128 行平盘银行对账单');
+    await harness.ui.refresh({ updateStatus: false });
+    assert.equal(
+      harness.statusText.textContent,
+      '已导入 128 行平盘银行对账单',
+      '自动模块同步成功不得擦除当前进程内的用户动作反馈'
+    );
+  });
+
+  test('静默同步的失败结果和 Promise reject 都必须覆盖欢迎并进入安全按钮态', async () => {
+    let currentStatus = Promise.resolve({
+      status: 'failed',
+      message: '数据库暂不可用'
+    });
+    const harness = createPositionStatusHarness(() => currentStatus);
+
+    await harness.ui.initialize();
+    assert.equal(harness.statusText.textContent, '数据库暂不可用');
+    assert.equal(harness.statusBox.dataset.tone, 'error');
+    assert.equal(harness.elements.positionReconciliationRunBtn.disabled, true);
+    assert.equal(harness.elements.positionReconciliationExportBtn.disabled, true);
+
+    currentStatus = Promise.resolve(null);
+    await harness.ui.refresh({ updateStatus: false });
+    assert.equal(harness.statusText.textContent, '平盘对账状态读取失败');
+    assert.equal(harness.statusBox.dataset.tone, 'error');
+
+    currentStatus = Promise.reject(new Error('IPC 中断'));
+    await harness.ui.refresh({ updateStatus: false });
+    assert.equal(harness.statusText.textContent, '平盘对账状态读取失败：IPC 中断');
+    assert.equal(harness.statusBox.dataset.tone, 'error');
+    assert.equal(harness.elements.positionReconciliationRunBtn.disabled, true);
   });
 
   test('SQLite UTC 更新时间按本机时区转换后再显示日期', () => {

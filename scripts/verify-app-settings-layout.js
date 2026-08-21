@@ -101,6 +101,7 @@ function createDeferred() {
 
 function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } = {}) {
   window.__retentionSaveCalls = [];
+  window.__archiveListCalls = [];
   const batches = [
     {
       internalId: 101,
@@ -154,7 +155,10 @@ function installDesktopApiStub({ retentionDays = 60, retentionHandler = null } =
     { batchId: 103, batchNumber: '2026-08-11-002', localDate: '2026-08-11', globalDailySequence: 2 }
   ];
   const archiveCenter = {
-    async listBatches() { return { status: 'success', batches }; },
+    async listBatches(filters = {}) {
+      window.__archiveListCalls.push({ ...filters });
+      return { status: 'success', batches };
+    },
     async getBatch(batchId) {
       const batch = batches.find((item) => String(item.internalId) === String(batchId));
       return batch
@@ -325,6 +329,39 @@ async function verifyArchiveBrowserLayout(failures) {
   await waitFor(() => document.querySelectorAll('.archive-center-batch-item').length === 4);
   await waitFor(() => document.querySelectorAll('.archive-center-related-batch').length === 3);
 
+  const dateFilter = document.querySelector('[data-filter="date"]');
+  const initialListFilters = window.__archiveListCalls[0] || null;
+  if (dateFilter.value !== '') failures.push(`archive date default is not empty: ${dateFilter.value}`);
+  if (!initialListFilters
+      || initialListFilters.localDate !== ''
+      || initialListFilters.moduleId !== ''
+      || initialListFilters.batchNumber !== '') {
+    failures.push(`initial archive filters are not empty: ${JSON.stringify(initialListFilters)}`);
+  }
+
+  const headerCopy = document.querySelector('.archive-center-header-copy');
+  const archiveHeading = document.getElementById('archiveCenterHeading');
+  const archiveSettingsButton = document.querySelector('[data-action="open-archive-settings"]');
+  const storageSummary = document.querySelector('.archive-center-storage-summary');
+  if (archiveSettingsButton.parentElement !== headerCopy
+      || archiveSettingsButton.previousElementSibling !== archiveHeading) {
+    failures.push('archive settings button is not immediately after archive center heading');
+  }
+  if (storageSummary.contains(archiveSettingsButton)) {
+    failures.push('archive settings button still belongs to storage summary');
+  }
+  const browserFileTotal = storageSummary.querySelector('[data-role="archive-file-total-size"]');
+  if (!browserFileTotal || browserFileTotal.textContent.trim() === '-') {
+    failures.push('browser file total size is missing');
+  }
+  const archiveHeadingRect = archiveHeading.getBoundingClientRect();
+  const settingsRect = archiveSettingsButton.getBoundingClientRect();
+  const settingsGap = settingsRect.left - archiveHeadingRect.right;
+  if (settingsGap < -1 || settingsGap > 16
+      || Math.abs((archiveHeadingRect.top + archiveHeadingRect.bottom) / 2 - (settingsRect.top + settingsRect.bottom) / 2) > 2) {
+    failures.push(`archive settings button is not adjacent/aligned: gap=${settingsGap}`);
+  }
+
   for (const item of document.querySelectorAll('.archive-center-batch-item')) {
     const rows = item.querySelectorAll(':scope > .archive-center-batch-row');
     if (rows.length !== 2) failures.push(`archive batch direct row count ${rows.length}`);
@@ -428,10 +465,12 @@ async function verifyArchiveBrowserLayout(failures) {
   ));
   const storagePath = document.querySelector('[data-role="archive-storage-path"]');
   const storageHeading = document.querySelector('.archive-center-storage-location-heading');
+  const storageLabel = storageHeading.querySelector('span');
   const storageChange = document.querySelector('[data-action="change-archive-storage"]');
   const storageStyle = getComputedStyle(storagePath);
   const storageRect = storagePath.getBoundingClientRect();
   const headingRect = storageHeading.getBoundingClientRect();
+  const storageLabelRect = storageLabel.getBoundingClientRect();
   const changeRect = storageChange.getBoundingClientRect();
   if (!storagePath.title.includes('用于验证存档位置完整换行和选择')) {
     failures.push('storage path full title missing');
@@ -442,14 +481,25 @@ async function verifyArchiveBrowserLayout(failures) {
     failures.push(`storage path wrapping drifted: ${storageStyle.whiteSpace}/${storageStyle.overflowWrap}`);
   }
   if (storageStyle.userSelect !== 'text') failures.push(`storage path is not selectable: ${storageStyle.userSelect}`);
-  if (Math.abs(headingRect.top - changeRect.top) > 1 || storageRect.top < headingRect.bottom - 1) {
+  const changeGap = changeRect.left - storageLabelRect.right;
+  if (storageChange.previousElementSibling !== storageLabel
+      || changeGap < -1
+      || changeGap > 18
+      || Math.abs((storageLabelRect.top + storageLabelRect.bottom) / 2 - (changeRect.top + changeRect.bottom) / 2) > 2
+      || storageRect.top < headingRect.bottom - 1) {
     failures.push('storage location heading/button/path are not arranged in two rows');
   }
-  if (document.querySelector('[data-role="archive-stat-runs"]').textContent !== '128') {
-    failures.push('run count not rendered');
+  const settingsView = document.querySelector('[data-archive-view="settings"]');
+  if (document.querySelector('[data-role="archive-settings-file-total-size"]')
+      || settingsView.textContent.includes('存储统计')
+      || settingsView.textContent.includes('文件总大小')) {
+    failures.push('removed archive settings storage stats are still rendered');
   }
-  if (document.querySelector('[data-role="archive-stat-latest"]').textContent !== '2026-08-11-128') {
-    failures.push('latest batch not rendered');
+  if (document.querySelector('[data-role="archive-stat-runs"]')
+      || document.querySelector('[data-role="archive-stat-latest"]')
+      || settingsView.textContent.includes('运行次数')
+      || settingsView.textContent.includes('最新批次')) {
+    failures.push('removed archive run/latest stats are still rendered');
   }
   for (const removed of ['唯一文件', '逻辑文件', '文件引用']) {
     if (document.querySelector('.app-update-settings-card').textContent.includes(removed)) {
