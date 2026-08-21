@@ -32,6 +32,8 @@ test('v3.1.13 版本号、三份用户文档和设计资料同步工具箱、存
   const guide = read('docs/USER_GUIDE.md');
   const spec = read('changes/3.1.13/spec.md');
   const techdoc = read('changes/3.1.13/techdoc.md');
+  const implementationNotes = read('changes/3.1.13/implementation-notes.md');
+  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
   const mainSource = read('src/main.js');
 
   assert.equal(packageJson.version, '3.1.13');
@@ -61,8 +63,26 @@ test('v3.1.13 版本号、三份用户文档和设计资料同步工具箱、存
     assert.match(currentSection, /覆盖全部/);
     assert.doesNotMatch(currentSection, /正式发布完成|已于 2026-08-20 正式发布为/);
   }
-  assert.match(currentGuide, /尚未标记为正式发布/);
-  assert.match(currentGuide, /latest stable Release 仍为.*v3\.1\.12/);
+  assert.match(currentGuide, /在打 tag 前定稿/);
+  assert.match(currentGuide, /当前公开稳定版、下载资产和发布时间以.*GitHub Releases.*为准/s);
+  assert.match(currentGuide, /正式技术发布/);
+  assert.doesNotMatch(currentGuide, /尚未标记为正式发布|latest stable Release 仍为.*v3\.1\.12/);
+  for (const currentSection of [currentChangelog, currentHistory, currentGuide, spec, techdoc]) {
+    assert.match(currentSection, /正式技术发布/);
+    assert.match(currentSection, /MANUAL \/ NOT RUN|人工边界.*未验证|不表示.*已验证/s);
+  }
+  for (const releaseDocument of [currentChangelog, currentHistory, implementationNotes, runbook]) {
+    assert.match(releaseDocument, /PR #159/);
+    assert.match(releaseDocument, /9e68c0339427a91c1948f73bfae66f0a76d17b5c/);
+    assert.match(releaseDocument, /32446647451/);
+    assert.match(releaseDocument, /annotated tag/);
+    assert.match(releaseDocument, /发布(?:后)?证据 PR/);
+  }
+  assert.match(runbook, /^## v3\.1\.13 发布准备$/m);
+  assert.match(runbook, /Windows 10\/11 Setup\/portable/);
+  assert.match(runbook, /v3\.1\.12 -> v3\.1\.13/);
+  assert.match(runbook, /production\/latest/);
+  assert.match(runbook, /MANUAL \/ NOT RUN/);
   assert.match(spec, /宽度固定为该宽度的两倍，即 144px/);
   assert.match(spec, /不修改 Excel 内容、格式保真、筛选、批次、存档、原子发布或恢复合同/);
   assert.match(techdoc, /S = L \+ L = 144px/);

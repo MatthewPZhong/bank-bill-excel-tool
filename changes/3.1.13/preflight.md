@@ -210,3 +210,50 @@
 
 - 无 BLOCK；入口、范围与布局语义均可从仓库直接确定。
 - 本增补是纯展示调整，不触及资金/对账数据、IPC、数据库、文件输出或状态机。
+
+## 增补五：正式收尾与发布收尾
+
+### Task Brief
+
+- Goal：把已合入 `main` 的 v3.1.13 从“迭代中”收口为可发布候选，创建唯一 annotated tag，通过受控 Windows workflow 发布 latest stable Release，并在发布后把不可变证据回写仓库。
+- Context：功能 PR #159 已于 2026-08-20 合入 `main`；`package.json.version` 已是 `3.1.13`；当前 latest stable 仍为 v3.1.12，远端不存在 v3.1.13 tag、Release 或开放 PR。
+- Constraints：不修改业务代码、Excel/存档/对账合同或版本号；不运行 `check-vars`；tag 必须精确指向当时 `origin/main` 且必须为 annotated tag；已发布资产不可删除、替换或重传；当前 macOS 环境不能伪造 Windows 原生交互、字体、SmartScreen、离线覆盖安装或 `production/latest` canary 的人工 PASS。
+- Done when：tag 前收尾 PR 合入；annotated `v3.1.13` 触发的 Release workflow 全绿；公开、非 draft、非 prerelease、latest stable Release 及 Setup/portable/blockmap/`latest.yml` 四项资产完成回读；发布证据 PR 合入并让本地 `main` 与 `origin/main` 一致。
+
+### 已确认事实
+
+| 事实 | 证据 | 对方案的约束 |
+| --- | --- | --- |
+| v3.1.13 功能已完整进入 main | PR #159，merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` | 正式收尾只做文档、测试合同、tag 与发布证据，不重开产品实现 |
+| 功能 PR 的 Windows 门禁已通过 | workflow `32446647451`：`smoke-test` 与 `build` PASS | 可作为候选自动化证据，但不冒充 Windows 人工体验验收 |
+| 当前发布基线唯一 | GitHub Release 列表显示 v3.1.12 为 latest；v3.1.13 tag/Release 均不存在 | 允许创建一次不可变 v3.1.13 发布，不允许覆盖同名资产 |
+| workflow 对发布身份 fail-closed | `.github/workflows/release-windows.yml` 校验稳定 semver、tag 名、annotated 类型及 tag commit = 当前 `origin/main` | 必须先合并收尾 PR，再从同步后的 main 创建 tag；tag 后不得先推其它 main commit |
+| workflow 自动发布四项资产 | 同一 workflow 构建、`check:dist`、staging、`latest.yml` SHA-512 校验、`gh release create --latest` 与回读 | 不在本机手工构建或上传 Release 资产 |
+| Windows 人工边界仍未在当前环境执行 | 本 change 的 Remaining Unknowns 与上一轮交付报告 | 只声明技术 Release 与自动门禁；人工项、在线 canary 明确保持 `MANUAL / NOT RUN` |
+| 用户已在获知上述边界后要求正式收尾和发布收尾 | 当前任务指令紧接上一轮“未创建 tag/Release、仍有 Windows 人工边界”的交付报告 | 视为继续技术发布的明确授权；tag 前 PR 稳定记录未验证范围和发布后补测项，不把授权写成验收 PASS |
+
+### Unknowns Register
+
+| 未知 | 类型 | 影响 | 可逆性 | 当前证据 | 处理 | 最便宜验证方式 | 当前决定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 收尾应一次提交还是发布前后两次闭合 | 发布状态时序 | 高 | 一般 | v3.1.12 以 tag 前候选文案进入安装包，发布后另用证据 PR 写实际 workflow/资产 | PROBE | 对照 PR #157、#158 与 tag commit | 采用两阶段：发布准备 PR → tag/Release → 发布证据 PR |
+| 收尾 PR merge 后 tag 是否仍指向最新 main | 并发/身份 | 高 | 困难 | workflow 会拒绝 tag commit 不等于 `origin/main` | PROBE | tag 前 fetch，并比较 `HEAD`、`origin/main` 与 PR merge commit | 三者完全一致且无开放/新合并变更时才打 tag |
+| Windows 原生弹框、长任务手感和系统字体是否已人工通过 | 人工验收 | 中 | 一般 | 当前只有静态、Electron 自动布局与 Windows CI 构建证据 | CLOSED（发布授权，不是 PASS） | tag 前 PR 明列范围、理由和发布后补测；发布后文档继续保留 `MANUAL / NOT RUN` | 允许技术 Release，禁止宣称这些人工项已验证 |
+| 上一 stable 经 `production/latest` 在线升级是否通过 | 发布后 canary | 高 | 困难 | Release 资产必须先存在，当前环境不是 Windows | PROBE | 发布后由 Windows 人工从 v3.1.12 检查、下载并升级到 v3.1.13 | 本次只记录 `MANUAL / NOT RUN`，不阻塞技术资产生成，不公告“在线升级已验证” |
+| Release 资产和更新元数据是否一致 | 分发契约 | 高 | 困难 | workflow 内有检查，但发布证据仍需独立回读 | PROBE | 读取 Release API、匿名 HEAD、下载 `latest.yml`/blockmap 并核对 digest、size、version/path/SHA-512 | 全部一致后才提交发布证据 PR |
+
+### 风险优先计划
+
+| 顺序 | 步骤 | 消除的未知/保护的不变量 | 成功证据 | 失败影响 | 回滚/收缩 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 先写稳定的 tag 前发布候选文案与人工边界 | 安装包不会携带“尚未发布”的过期断言；不伪报人工 PASS | 三份版本资料、Spec/TechDoc、Runbook、实施记录和定向合同一致 | 会重复 v3.1.11 随包指南缺陷 | 不打 tag，继续修文档 PR |
+| 2 | 跑定向与完整门禁，合并 ready 收尾 PR | main 可发布、提交范围只含收尾文件 | 本地门禁 + PR Windows `smoke-test`/`build` PASS，merge state CLEAN | 候选不可发布 | PR 保持开放并修复，不触碰 tag |
+| 3 | tag 前重新锁定 main 身份并创建 annotated tag | tag 唯一、不可变、精确绑定最新 main | `HEAD = origin/main = tag peeled commit`，tag object type 为 `tag` | workflow 必然拒绝或错误版本被公开 | tag 未推送前删除本地重建；推送后绝不改写 |
+| 4 | 等待 Release workflow 并独立回读资产 | 构建、元数据和公开分发一致 | workflow 全绿、Release latest、四资产及摘要/匿名访问一致 | 技术 Release 不完整 | 停止公告；不删除资产，按更高补丁版本修复 |
+| 5 | 发布后证据 PR 反向同步事实 | 仓库不把预期写成事实，也不丢失人工边界 | workflow/tag/资产哈希、canary 状态和 PR 证据均可复现 | 发布历史不可审计 | 保持 Release 不动，仅补文档 PR |
+
+### 当前门禁
+
+- 无代码或发布身份 BLOCK；用户已明确要求在已知人工边界下继续正式技术发布。
+- Windows 原生交互、系统字体、SmartScreen、离线覆盖安装与 `production/latest` canary 不会被标为 PASS；tag 前 PR body 和发布后证据都会保留具体补测范围。
+- 任何 tag/Release workflow 或资产回读失败都会停止发布收尾；不会删除、替换或重传同版本资产。

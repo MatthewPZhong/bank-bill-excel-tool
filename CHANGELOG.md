@@ -17,6 +17,13 @@
 - **移除全部状态框星星装饰**：主页面 13 个静态状态框和工具箱动态状态框不再显示星星 SVG，只保留状态文字。两套主题同步清理图标盒与图文间距，状态框尺寸、位置、换行、滚动、色调、可访问性和状态更新逻辑不变；按钮及其它功能性 SVG 不受影响。
 - **兼容边界**：不修改工具箱 IPC、Excel 输入输出、字段筛选、格式保真、全局批次、存档、恢复或对账业务语义；不改变金额、币种、匹配、回填和按钮判定，v3.1.12 及更早输出无需迁移。
 
+### v3.1.13 · 正式发布准备与人工边界
+
+- **产品代码已合入并通过自动门禁**：功能 PR #159 以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main`；Windows workflow `32446647451` 的 smoke-test 与 build 均通过。自动化覆盖代码、测试与打包输入，不替代 Windows 人工交互。
+- **正式技术发布已授权**：发布负责人在已明确知晓人工边界后，于 2026-08-20 要求执行正式收尾与发布收尾。发布按“tag 前收尾 PR → annotated tag/受控 Windows Release workflow → 发布证据 PR”执行，当前公开稳定版、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。
+- **人工边界保持未验证**：Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装及 `production/latest` 在线 canary 均为 `MANUAL / NOT RUN`。发布授权不等于这些项目 PASS，也不得据此公告“Windows / 在线升级已验证”。
+- **发布资产不可变**：`v3.1.13` 只能由精确指向发布时 `main` 的 annotated tag 创建一次；Release 后不得删除、替换或重传同版本资产。若发现问题，停止公告并发布更高补丁版本；实际 tag、workflow、Release 与资产摘要只在完成回读后写入发布证据 PR。
+
 ## 3.1.12 - 2026-08-20
 
 ### v3.1.12 · 网银源文件与启动治理
