@@ -236,6 +236,44 @@ test.describe('v3.1.6 VCC财务OP校验前端契约', () => {
     assert.match(styles, /\.vcc-fin-op-message\s*\{[\s\S]*white-space:\s*pre-wrap;[\s\S]*overflow-wrap:\s*anywhere;/);
   });
 
+  test('导入进度纯函数区分 reading/committing 并保持取消提示优先', () => {
+    const start = moduleRenderer.indexOf('function buildImportProgressStatus(');
+    const end = moduleRenderer.indexOf('function requireImportCompletionResult(', start);
+    assert.ok(start >= 0 && end > start);
+    const formatter = Function(
+      'SOURCE_LABELS',
+      'formatInteger',
+      `'use strict'; ${moduleRenderer.slice(start, end)}; return buildImportProgressStatus;`
+    )({
+      recharge_refund: 'VCC充值清退明细',
+      pending_archive_removal: 'VCC_移除归档Pending账单'
+    }, (value) => Number(value).toLocaleString('en-US'));
+
+    assert.deepEqual(
+      formatter({ phase: 'reading', sourceType: 'recharge_refund', rows: 38197 }, false),
+      { message: '正在导入 VCC充值清退明细：38,197 行', tone: 'info' }
+    );
+    assert.deepEqual(
+      formatter({ phase: 'committing', sourceType: 'pending_archive_removal', rows: 29159 }, false),
+      { message: '正在校验并写入 VCC_移除归档Pending账单：29,159 行', tone: 'info' }
+    );
+    assert.deepEqual(
+      formatter({ sourceType: 'recharge_refund', rows: 1 }, false),
+      { message: '正在导入 VCC充值清退明细：1 行', tone: 'info' }
+    );
+    for (const phase of ['reading', 'committing']) {
+      assert.equal(formatter({ phase, sourceType: 'recharge_refund', rows: 38197 }, true), null);
+    }
+
+    const handleImportStart = moduleRenderer.indexOf('async function handleImport()');
+    const handleImportEnd = moduleRenderer.indexOf('async function handleCancelImport()', handleImportStart);
+    const handleImportSource = moduleRenderer.slice(handleImportStart, handleImportEnd);
+    assert.match(
+      handleImportSource,
+      /api\.onImportProgress\(\(progress\) => \{\s*const progressStatus = buildImportProgressStatus\(progress, state\.cancelRequested\);\s*if \(progressStatus\) setStatus\(progressStatus\.message, progressStatus\.tone\);\s*\}\)/
+    );
+  });
+
   test('preload 和主进程覆盖导入、取消、计算、归档、管理删除及三类导出通道', () => {
     const channels = [
       'vccFinancialOp:import:pick-files',

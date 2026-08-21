@@ -311,12 +311,14 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
     fileEntry(recharge, SOURCE_TYPES.RECHARGE),
     fileEntry(fee, SOURCE_TYPES.FEE_FX)
   ];
+  const progressEvents = [];
   const result = await importFiles({
     db,
     batchId: 'multi-source-service',
     targetMonth: '2026-06',
     files,
-    archiveHandoffFiles: await archiveHandoffForFiles(files, 'multi-source-service')
+    archiveHandoffFiles: await archiveHandoffForFiles(files, 'multi-source-service'),
+    onProgress: (progress) => progressEvents.push({ ...progress })
   });
 
   assert.equal(result.status, 'success');
@@ -343,6 +345,60 @@ test('统一导入服务预登记多种原表后仍逐类完成有效提升', as
       && record.anomalyCount === 0
       && record.sourceFiles.length === 1
   )));
+
+  const completedSourceTypes = new Set(result.records.map((record) => record.sourceType));
+  const committingSourceTypes = new Set(
+    progressEvents.filter((event) => event.phase === 'committing')
+      .map((event) => event.sourceType)
+  );
+  assert.deepEqual(committingSourceTypes, completedSourceTypes);
+  for (const record of result.records) {
+    const grouped = progressEvents.filter((event) => event.sourceType === record.sourceType);
+    const reading = grouped.filter((event) => event.phase === 'reading');
+    const committing = grouped.filter((event) => event.phase === 'committing');
+    assert.ok(reading.length > 0, record.sourceType);
+    assert.equal(committing.length, 1, record.sourceType);
+    assert.equal(reading.at(-1).rows, record.rawCount, record.sourceType);
+    assert.equal(committing[0].rows, record.rawCount, record.sourceType);
+    assert.ok(grouped.indexOf(committing[0]) > grouped.lastIndexOf(reading.at(-1)), record.sourceType);
+    assert.equal(committing[0].recordId, record.recordId, record.sourceType);
+  }
+});
+
+test('分类阶段拒绝新增时仍保留已完成读取的 committing 事件', async (t) => {
+  const db = createDb();
+  t.after(() => db.close());
+  const dir = tempDir(t);
+  const initial = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'initial.xlsx', [
+    rechargeRow({ 订单号: 'classification-initial' })
+  ]);
+  await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(initial, SOURCE_TYPES.RECHARGE)]
+  });
+  db.prepare(`
+    UPDATE vcc_fin_op_datasets SET data_status = 'archived'
+    WHERE target_month = '2026-06' AND dataset_type = ?
+  `).run(SOURCE_TYPES.RECHARGE);
+
+  const next = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'next.xlsx', [
+    rechargeRow({ 订单号: 'classification-next' })
+  ]);
+  const progressEvents = [];
+  const result = await importDetailBatch({
+    db,
+    targetMonth: '2026-06',
+    files: [fileEntry(next, SOURCE_TYPES.RECHARGE)],
+    onProgress: (progress) => progressEvents.push({ ...progress })
+  });
+
+  assert.equal(result.records[0].status, 'failed_validation');
+  assert.match(result.records[0].errorMessage, /已归档/);
+  assert.equal(
+    progressEvents.filter((event) => event.phase === 'committing').length,
+    1
+  );
 });
 
 test('多原表后组运行异常仍返回已提交组及全部 record 的部分结果血缘', async (t) => {
@@ -876,6 +932,7 @@ test('后续分片损坏时只保留回滚计数和一条文件级失败事件',
   const valid = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'valid.xlsx', [rechargeRow()]);
   const broken = path.join(dir, 'broken.xlsx');
   fs.writeFileSync(broken, 'not-an-xlsx-file');
+  const progressEvents = [];
 
   const result = await importDetailBatch({
     db,
@@ -883,7 +940,8 @@ test('后续分片损坏时只保留回滚计数和一条文件级失败事件',
     files: [
       fileEntry(valid, SOURCE_TYPES.RECHARGE),
       fileEntry(broken, SOURCE_TYPES.RECHARGE)
-    ]
+    ],
+    onProgress: (progress) => progressEvents.push({ ...progress })
   });
   const record = result.records[0];
 
@@ -908,6 +966,7 @@ test('后续分片损坏时只保留回滚计数和一条文件级失败事件',
     WHERE import_record_id = ? AND category = 'file_failure'
   `).get(record.recordId).n, 1);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
+  assert.equal(progressEvents.some((event) => event.phase === 'committing'), false);
 });
 
 test('协作式取消只保留已读取行汇总和一条文件级失败事件', async (t) => {
@@ -920,6 +979,7 @@ test('协作式取消只保留已读取行汇总和一条文件级失败事件',
     rechargeRow({ 订单号: 'cancel-3' })
   ]);
   let checks = 0;
+  const progressEvents = [];
 
   await assert.rejects(
     importDetailBatch({
@@ -929,7 +989,8 @@ test('协作式取消只保留已读取行汇总和一条文件级失败事件',
       shouldCancel: () => {
         checks += 1;
         return checks >= 5;
-      }
+      },
+      onProgress: (progress) => progressEvents.push({ ...progress })
     }),
     (error) => error && error.code === 'vcc-import-cancelled'
   );
@@ -946,6 +1007,7 @@ test('协作式取消只保留已读取行汇总和一条文件级失败事件',
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_import_staging_rows').get().n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
   assert.equal(db.prepare('SELECT status FROM vcc_fin_op_import_batches').get().status, 'failed');
+  assert.equal(progressEvents.some((event) => event.phase === 'committing'), false);
 });
 
 test('导入开始前取消不创建空批次或导入记录', async (t) => {
@@ -1187,6 +1249,7 @@ test('任一选中分片只有表头时整批回滚并标明空分片文件', as
   const dir = tempDir(t);
   const valid = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'valid.xlsx', [rechargeRow()]);
   const empty = writeSourceFile(dir, SOURCE_TYPES.RECHARGE, 'empty.xlsx', []);
+  const progressEvents = [];
 
   const result = await importDetailBatch({
     db,
@@ -1194,7 +1257,8 @@ test('任一选中分片只有表头时整批回滚并标明空分片文件', as
     files: [
       fileEntry(valid, SOURCE_TYPES.RECHARGE),
       fileEntry(empty, SOURCE_TYPES.RECHARGE)
-    ]
+    ],
+    onProgress: (progress) => progressEvents.push({ ...progress })
   });
 
   const record = result.records[0];
@@ -1213,6 +1277,7 @@ test('任一选中分片只有表头时整批回滚并标明空分片文件', as
     SELECT COUNT(*) AS n FROM vcc_fin_op_import_errors WHERE import_record_id = ?
   `).get(record.recordId).n, 0);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM vcc_fin_op_effective_rows').get().n, 0);
+  assert.equal(progressEvents.some((event) => event.phase === 'committing'), false);
 });
 
 test('Excel 数值日期单元格按 1900 日期系统识别账期', async (t) => {

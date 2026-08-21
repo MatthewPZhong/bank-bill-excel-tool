@@ -61,6 +61,18 @@
     return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Number(value) || 0);
   }
 
+  function buildImportProgressStatus(progress, cancelRequested) {
+    if (cancelRequested) return null;
+    const label = SOURCE_LABELS[progress.sourceType] || '原表';
+    const rows = formatInteger(progress.rows);
+    return {
+      message: progress.phase === 'committing'
+        ? `正在校验并写入 ${label}：${rows} 行`
+        : `正在导入 ${label}：${rows} 行`,
+      tone: 'info'
+    };
+  }
+
   function requireImportCompletionResult(result) {
     const status = String(result && result.status || '').trim();
     const detailLines = result && Array.isArray(result.detailLines)
@@ -450,8 +462,8 @@
         return;
       }
       const unsubscribe = api.onImportProgress((progress) => {
-        const label = SOURCE_LABELS[progress.sourceType] || '原表';
-        setStatus(`正在导入 ${label}：${formatInteger(progress.rows)} 行`, 'info');
+        const progressStatus = buildImportProgressStatus(progress, state.cancelRequested);
+        if (progressStatus) setStatus(progressStatus.message, progressStatus.tone);
       });
       let result;
       try {
