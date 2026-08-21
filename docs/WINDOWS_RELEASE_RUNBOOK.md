@@ -107,13 +107,16 @@ workflow 直接创建 published、non-draft、non-prerelease Release。仅当 Re
 - Windows 原生【返回 / 覆盖全部】按钮顺序/焦点、packaged 长任务关闭保护与系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不是这些人工项 PASS。任一补测失败都停止推广并发布更高补丁版本。
 - 仓库维护者已明确要求以后不再运行 `check-vars`，本次发布未执行 `scan:vars` 或 `check:vars`，不将其表述为通过。
 
-## v3.1.14 发布准备
+## v3.1.14 发布记录
 
-- 目标版本为 `3.1.14`。功能 PR #162 已以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入 `main`；完整 `release-check`、`scan:vars` 和真实样本首轮/重导证据已记录在 `changes/3.1.14/implementation-notes.md`。
-- tag 前先合并仅包含发布文档与文档合同测试的准备 PR。合并后重新 fetch，确认 tracked worktree 干净、`package.json.version === 3.1.14`、本地 `HEAD === origin/main`、同名远端 tag/Release 不存在，才创建唯一 annotated tag `v3.1.14`。
-- 发布负责人于 2026-08-21 明确授权在已知人工边界下继续正式技术发布。授权范围为：Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装及 `production/latest` canary 暂不执行。
-- 上述范围统一保持 `MANUAL / NOT RUN`。自动化和本地真实样本不能替代 Windows 人工验证；授权不构成验收 PASS，也不得公告“Windows / 在线升级已验证”。
-- tag 前必须在稳定的 GitHub PR body 或 Issue 评论中记录实际批准人、上述完整豁免范围、理由与发布后逐项补做计划；真实链接只在记录创建后补入，不预写。缺少完整稳定记录不得创建或推送 tag。
-- 从 tag 前最终同步/复验并准备推送 tag 起，到 workflow 的 `Verify tag and main` 成功为止冻结对 `main` 的 merge/push；窗口外不要求全程冻结。tag 前发现漂移须重新同步并复验门禁、文档和 Review；tag 推送后、校验成功前若 `main` 漂移，则停止 v3.1.14，保留且不改 tag，并改发更高补丁版本。
-- tag 触发的受控 workflow 负责生成 Setup、portable、blockmap 和 `latest.yml`。仅当 Release/资产均未创建且可证明是基础设施瞬时故障时，才可在代码、tag、commit 和打包输入不变的前提下受控重跑同一 tag/commit；产品、元数据、打包输入问题或 Release 已创建后的失败均停止公告/推广并改发更高补丁。不得删除、替换或重传 tag/资产。
-- 本准备记录不包含尚未产生的发布准备 PR/merge、tag object、workflow ID、Release URL、资产大小或摘要。技术 Release 完成后独立回读实际身份、公开 latest 状态、四项资产、匿名下载和 `latest.yml`/Setup SHA-512，再以单独发布证据 PR 回写。
+- Release：[v3.1.14](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14)。功能 PR #162 以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入产品代码；发布准备 PR #163 以 merge commit `225d07d17a7c211348ba549734aaf84f602253cb` 合入 `main`。
+- annotated tag object `fee1498311854a69fea666fe275511da89d99836` peeled 后精确指向 `225d07d17a7c211348ba549734aaf84f602253cb`，远端回读一致。
+- Windows workflow [32508170702](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32508170702) 全部 15 步 success；`Verify tag and main` 确认 tag/main 后继续完成 release-check、构建、应用检查、staging、更新元数据、Release 发布与回读。
+- portable `bank-bill-excel-tool-portable-3.1.14.exe`：`99,874,669` bytes / SHA-256 `964944f588bfe4ca38b73bc9e45af3d795a5d05fec48ab1b52d942c541e02781`。
+- Setup `bank-bill-excel-tool-setup-3.1.14.exe`：`100,371,449` bytes / SHA-256 `e71e17aa0525b92ca9d15c508ef48cd783ed24ebdd63ace82cb693a1920503df`。
+- blockmap `bank-bill-excel-tool-setup-3.1.14.exe.blockmap`：`105,515` bytes / SHA-256 `831edeaa11a2e4015f812b81d794c38c9c7fed98fb179f05607bcf635c87ef10`。
+- `latest.yml`：`372` bytes / SHA-256 `9dea317367aa36cde238c672b870151613686538da035a3f4472984a3a491a2c`；version 为 `3.1.14`，path/size 对应 Setup，releaseDate 为 `2026-08-21T17:58:41.566Z`，Setup SHA-512 为 `QmsR5uVGyBSwB1A8w7J70WyiIgqEE7HOLfZVXhxWPh91G3uREMH21u3tWcj+wYnB6T3fBvMydQevH6+fwUll4g==`，独立计算一致。
+- Release publishedAt 为 `2026-08-21T17:58:54Z`，公开、非 draft、非 prerelease；GitHub 默认 latest 回读 `tagName=v3.1.14`。四项资产均以无凭据公开 HTTPS GET 完整下载，实际大小和 SHA-256 与 GitHub asset digest 一致；两个 EXE 均识别为 Windows PE32 GUI / Nullsoft Installer self-extracting archive，认证下载与匿名下载逐字节一致。
+- PR #163 body 已稳定记录实际批准人、完整豁免范围、理由和发布后逐项补做计划；从最终同步/tag 推送到 `Verify tag and main` 成功的最小 `main` 冻结窗口已执行并闭合。workflow 首轮成功，没有触发受控重跑。只有 Release/资产均未创建且可证明为基础设施瞬时故障时，才可在代码、tag、commit、打包输入不变的前提下重跑同一 tag/commit；产品、元数据、打包输入问题或 Release 已创建后的失败仍必须改发更高补丁。
+- GitHub API 当前报告 `isImmutable=false`；仓库流程仍把 tag/资产视为不可变，不得删除、替换或重传。
+- Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装和 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不是这些人工项 PASS。任一补测失败都停止推广并发布更高补丁版本。

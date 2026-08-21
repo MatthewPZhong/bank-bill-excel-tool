@@ -40,37 +40,164 @@ function sectionBetweenMarkers(source, startMarker, endMarker) {
   return source.slice(start, end);
 }
 
-function assertV314CandidateHasNoPublishedEvidence(section, label) {
-  assert.doesNotMatch(
-    section,
-    /(?:正式技术发布|正式发布)(?:已)?(?:完成|成功)(?!后)|(?:已|已经|现已)?正式发布为[^。\n]{0,40}latest stable Release|(?:已|是|成为|现为)[^。\n]{0,40}latest stable Release/,
-    `${label} 不得把 v3.1.14 写成正式发布完成或 latest stable`
-  );
+const V314_MANUAL_ITEMS = [
+  ['Windows packaged VCC', /Windows packaged VCC/],
+  ['Windows 10/11 Setup/portable', /Windows 10\/11 Setup\/portable/],
+  ['SmartScreen', /SmartScreen/],
+  ['v3.1.13 -> v3.1.14', /v3\.1\.13 -> v3\.1\.14/],
+  ['production/latest', /production\/latest/]
+];
 
-  for (const sentence of section.split(/[。\n]/)) {
-    if (!/(?:Windows packaged VCC|Windows 10\/11 Setup\/portable|SmartScreen|v3\.1\.13 -> v3\.1\.14|production\/latest)/.test(sentence)) continue;
-    if (!/\bPASS\b/.test(sentence)) continue;
-    assert.match(
-      sentence,
-      /(?:不是|不构成|不等于|不表示|不得[^；。]*标记为|未[^；。]*PASS|MANUAL \/ NOT RUN)/,
-      `${label} 不得把 Windows 人工项写成 PASS：${sentence.trim()}`
+const V314_ASSETS = [
+  ['bank-bill-excel-tool-portable-3.1.14.exe', '99,874,669', '964944f588bfe4ca38b73bc9e45af3d795a5d05fec48ab1b52d942c541e02781'],
+  ['bank-bill-excel-tool-setup-3.1.14.exe', '100,371,449', 'e71e17aa0525b92ca9d15c508ef48cd783ed24ebdd63ace82cb693a1920503df'],
+  ['bank-bill-excel-tool-setup-3.1.14.exe.blockmap', '105,515', '831edeaa11a2e4015f812b81d794c38c9c7fed98fb179f05607bcf635c87ef10'],
+  ['latest.yml', '372', '9dea317367aa36cde238c672b870151613686538da035a3f4472984a3a491a2c']
+];
+
+const MANUAL_STATUS_PATTERN = /MANUAL\s*\/\s*NOT RUN/;
+const AGGREGATE_MANUAL_STATUS_PATTERN = /(?:全部范围|上述五项人工范围|以上五项人工范围|这些人工项)[^。；\n]{0,40}MANUAL\s*\/\s*NOT RUN/;
+
+function manualBoundaryRecords(section) {
+  const lines = section.split('\n').map((line) => line.trim());
+  const records = lines.filter(Boolean);
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!/^-\s+/.test(lines[index])) continue;
+    const listLines = [];
+    let cursor = index;
+    while (cursor < lines.length && /^-\s+/.test(lines[cursor])) {
+      listLines.push(lines[cursor]);
+      cursor += 1;
+    }
+    while (cursor < lines.length && !lines[cursor]) cursor += 1;
+    if (cursor < lines.length && AGGREGATE_MANUAL_STATUS_PATTERN.test(lines[cursor])) {
+      records.push([...listLines, lines[cursor]].join('\n'));
+    }
+    index = cursor - 1;
+  }
+
+  return records;
+}
+
+function isManualItemBound(record, itemPattern) {
+  const clauses = record.split(/[；;\n]/);
+  if (clauses.some((clause) => itemPattern.test(clause) && MANUAL_STATUS_PATTERN.test(clause))) {
+    return true;
+  }
+  return itemPattern.test(record) && AGGREGATE_MANUAL_STATUS_PATTERN.test(record);
+}
+
+function hasUnnegatedManualPassClaim(record, itemPattern) {
+  const positivePattern = /验收通过|已经通过|已验证|\bPASS\b/g;
+  const manualScopeReferencePattern = /(?:这些人工项|上述五项(?:人工范围|人工项目)?|以上五项(?:人工范围|人工项目)?|五项人工范围|全部人工范围|全部范围)/;
+
+  for (const clause of record.split(/[；。\n]/)) {
+    for (const match of clause.matchAll(positivePattern)) {
+      const prefix = clause.slice(0, match.index);
+      if (!itemPattern.test(prefix) && !manualScopeReferencePattern.test(prefix)) continue;
+      const localPrefix = prefix.split(/(?:但|却|然而|不过)/).pop();
+      const negated = /(?:不是|不构成|不等于|不表示|不代表|不被|不得|不能|不可|尚未|仍未|未|没有)[^；。\n]{0,80}$/.test(localPrefix);
+      if (!negated) return true;
+    }
+  }
+  return false;
+}
+
+function assertV314ManualBoundary(section, label) {
+  const records = manualBoundaryRecords(section);
+  for (const [itemLabel, itemPattern] of V314_MANUAL_ITEMS) {
+    assert.match(section, itemPattern, `${label} 缺少人工边界：${itemLabel}`);
+    for (const record of records.filter((candidate) => itemPattern.test(candidate))) {
+      assert.equal(
+        hasUnnegatedManualPassClaim(record, itemPattern),
+        false,
+        `${label} 不得把 ${itemLabel} 写成 PASS / 已验证 / 已经通过 / 验收通过：${record}`
+      );
+    }
+    assert.ok(
+      records.some((record) => isManualItemBound(record, itemPattern)),
+      `${label} 必须把 ${itemLabel} 在其条目或清单汇总中绑定为 MANUAL / NOT RUN`
+    );
+  }
+}
+
+function v314AssetEvidenceEntries(document) {
+  const assetNamePattern = /bank-bill-excel-tool-setup-3\.1\.14\.exe\.blockmap|bank-bill-excel-tool-setup-3\.1\.14\.exe(?!\.blockmap)|bank-bill-excel-tool-portable-3\.1\.14\.exe|latest\.yml/g;
+  const entries = [];
+
+  for (const line of document.split('\n')) {
+    const matches = [...line.matchAll(assetNamePattern)];
+    for (let index = 0; index < matches.length; index += 1) {
+      const current = matches[index];
+      const next = matches[index + 1];
+      entries.push({
+        fileName: current[0],
+        text: line.slice(current.index, next ? next.index : line.length)
+      });
+    }
+  }
+
+  return entries;
+}
+
+function assertV314AssetEvidence(document, label) {
+  const entries = v314AssetEvidenceEntries(document);
+  for (const [fileName, size, sha256] of V314_ASSETS) {
+    assert.ok(
+      entries.some((entry) => (
+        entry.fileName === fileName
+        && entry.text.includes(size)
+        && entry.text.includes(sha256)
+      )),
+      `${label} 缺少绑定的资产三元组：${fileName} -> ${size} -> ${sha256}`
+    );
+  }
+}
+
+test('v3.1.14 人工边界与资产三元组 helper 拒绝局部旁路', () => {
+  const validManualBoundary = '- Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 与 `production/latest` 均为 `MANUAL / NOT RUN`；技术 Release 完成不表示这些人工项已验证或 PASS。';
+  const validWorkflowPassBoundary = '- Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 与 `production/latest` 均为 `MANUAL / NOT RUN`；Windows Release workflow PASS。';
+  const validWorkflowPassWithManualNegation = '- Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 与 `production/latest` 五项均 `MANUAL / NOT RUN`；Windows Release workflow PASS，但不表示这些人工项已验证。';
+  assert.doesNotThrow(() => assertV314ManualBoundary(validManualBoundary, '合法人工边界反例'));
+  assert.doesNotThrow(() => assertV314ManualBoundary(validWorkflowPassBoundary, '合法 workflow PASS 反例'));
+  assert.doesNotThrow(() => assertV314ManualBoundary(validWorkflowPassWithManualNegation, '合法 workflow PASS 加人工否定控制'));
+  for (const positiveClaim of ['PASS', '已验证', '已经通过', '验收通过']) {
+    const invalidManualBoundary = `- Windows packaged VCC ${positiveClaim}；Windows 10/11 Setup/portable、SmartScreen、\`v3.1.13 -> v3.1.14\` 与 \`production/latest\` 仍为 \`MANUAL / NOT RUN\`。`;
+    assert.throws(
+      () => assertV314ManualBoundary(invalidManualBoundary, `非法人工边界反例：${positiveClaim}`),
+      /Windows packaged VCC.*PASS \/ 已验证 \/ 已经通过 \/ 验收通过/
+    );
+  }
+  const invalidContrastBoundaries = ['但', '却', '然而', '不过'].map(
+    (contrast) => `- Windows packaged VCC 仍未执行，${contrast}已验证；Windows 10/11 Setup/portable、SmartScreen、\`v3.1.13 -> v3.1.14\` 与 \`production/latest\` 仍为 \`MANUAL / NOT RUN\`。`
+  );
+  invalidContrastBoundaries.push('- Windows packaged VCC 尚未执行但已经通过人工验收；Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 与 `production/latest` 仍为 `MANUAL / NOT RUN`。');
+  for (const invalidContrastBoundary of invalidContrastBoundaries) {
+    assert.throws(
+      () => assertV314ManualBoundary(invalidContrastBoundary, '非法转折边界反例'),
+      /Windows packaged VCC.*PASS \/ 已验证 \/ 已经通过 \/ 验收通过/
     );
   }
 
-  assert.doesNotMatch(section, /tag object\s*(?:为|:|：)?\s*`?[0-9a-f]{40}`?/i, `${label} 不得预写 tag object`);
-  assert.doesNotMatch(section, /\[[^\]\n]+\]\(https:\/\/github\.com\/[^)\n]+\/actions\/runs\/\d+\)/i, `${label} 不得预写 workflow Markdown 链接`);
-  assert.doesNotMatch(section, /workflow(?: ID)?[^。\n]{0,20}`?\d{8,}`?/i, `${label} 不得预写 workflow 长 ID`);
-  assert.doesNotMatch(section, /https:\/\/github\.com\/[^\s)]+\/releases\/tag\/v3\.1\.14\b/i, `${label} 不得预写 Release URL`);
-  assert.doesNotMatch(section, /[^\s`()\[\]]*3\.1\.14[^\s`()\[\]]*\.(?:exe|blockmap)\b/i, `${label} 不得预写 v3.1.14 资产文件名`);
-  assert.doesNotMatch(section, /(?:Setup|portable|blockmap|latest\.yml)[^\n]{0,120}\b\d{3,}\s*bytes\b/i, `${label} 不得预写资产 bytes`);
-  assert.doesNotMatch(
-    section,
-    /(?:Setup|portable|blockmap|latest\.yml)[^\n]{0,160}(?:SHA-(?:256|512)|digest)[^。\n]{0,16}`?(?:[0-9a-f]{64}|[A-Za-z0-9+/]{40,}={0,2})`?/i,
-    `${label} 不得预写资产摘要`
-  );
-}
+  const validAssetEvidence = [
+    '- portable `bank-bill-excel-tool-portable-3.1.14.exe`：`99,874,669` bytes / SHA-256 `964944f588bfe4ca38b73bc9e45af3d795a5d05fec48ab1b52d942c541e02781`。',
+    '- Setup `bank-bill-excel-tool-setup-3.1.14.exe`：`100,371,449` bytes / SHA-256 `e71e17aa0525b92ca9d15c508ef48cd783ed24ebdd63ace82cb693a1920503df`；blockmap `bank-bill-excel-tool-setup-3.1.14.exe.blockmap`：`105,515` bytes / SHA-256 `831edeaa11a2e4015f812b81d794c38c9c7fed98fb179f05607bcf635c87ef10`。',
+    '- `latest.yml`：`372` bytes / SHA-256 `9dea317367aa36cde238c672b870151613686538da035a3f4472984a3a491a2c`。'
+  ].join('\n');
+  assert.doesNotThrow(() => assertV314AssetEvidence(validAssetEvidence, '合法资产反例'));
 
-test('v3.1.14 正式文档锁定 VCC 修复、tag 前候选口径与发布人工边界', () => {
+  const swappedExeShaEvidence = validAssetEvidence
+    .replace('964944f588bfe4ca38b73bc9e45af3d795a5d05fec48ab1b52d942c541e02781', '__PORTABLE_SHA__')
+    .replace('e71e17aa0525b92ca9d15c508ef48cd783ed24ebdd63ace82cb693a1920503df', '964944f588bfe4ca38b73bc9e45af3d795a5d05fec48ab1b52d942c541e02781')
+    .replace('__PORTABLE_SHA__', 'e71e17aa0525b92ca9d15c508ef48cd783ed24ebdd63ace82cb693a1920503df');
+  assert.throws(
+    () => assertV314AssetEvidence(swappedExeShaEvidence, '对调资产反例'),
+    /缺少绑定的资产三元组/
+  );
+});
+
+test('v3.1.14 正式文档锁定 VCC 修复、实际发布证据与人工边界', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -97,104 +224,88 @@ test('v3.1.14 正式文档锁定 VCC 修复、tag 前候选口径与发布人工
     '> **v3.1.14 VCC 财务 OP 大批量导入修复**',
     '> **v3.1.13 工具箱、存档中心与状态框调整**'
   );
-  const releasePreparation = markdownSection(runbook, '## v3.1.14 发布准备');
+  const guideReleaseBoundary = sectionBetweenMarkers(
+    guide,
+    '#### v3.1.14 发布与人工验证边界',
+    '### 1.11.9 设置里的存档中心'
+  );
+  const releaseRecord = markdownSection(runbook, '## v3.1.14 发布记录');
 
-  const v314CandidateSections = [
+  const v314CurrentSections = [
     ['CHANGELOG v3.1.14', currentChangelog],
     ['VERSION_FEATURE_HISTORY v3.1.14', currentHistory],
     ['USER_GUIDE 顶部', currentGuide],
     ['USER_GUIDE v3.1.14 详细条目', currentGuideDetail],
+    ['USER_GUIDE v3.1.14 发布边界', guideReleaseBoundary],
     ['preflight', preflight],
     ['spec', spec],
     ['techdoc', techdoc],
     ['implementation notes', implementationNotes],
-    ['Runbook v3.1.14', releasePreparation]
+    ['Runbook v3.1.14', releaseRecord]
   ];
-  for (const [label, section] of v314CandidateSections) {
-    assertV314CandidateHasNoPublishedEvidence(section, label);
+  for (const [label, section] of v314CurrentSections) {
+    assertV314ManualBoundary(section, label);
+    assert.match(section, /正式技术发布|正式发布为.*latest stable Release|技术 Release/s);
   }
 
-  for (const legalCandidate of [
-    'v3.1.14 公开状态以 GitHub Releases 为准；正式技术发布已授权。',
-    '技术 Release 完成后独立回读；Release 成功后再执行 canary。',
-    'Windows packaged VCC 为 MANUAL / NOT RUN，授权不构成人工 PASS。'
-  ]) {
-    assert.doesNotThrow(() => assertV314CandidateHasNoPublishedEvidence(legalCandidate, '合法候选口径'));
-  }
-  for (const invalidCandidate of [
-    '- **正式技术发布完成**：workflow success。',
-    'v3.1.14 正式技术发布已完成。',
-    'v3.1.14 已正式发布为 latest stable Release。',
-    'Windows 10/11 Setup/portable 已确认 PASS。',
-    'annotated tag object `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`。',
-    'Windows workflow [12345678901](https://github.com/example/repo/actions/runs/12345678901) 已运行。',
-    'Release：https://github.com/example/repo/releases/tag/v3.1.14',
-    'Setup `bank-bill-excel-tool-setup-3.1.14.exe`。',
-    'portable 100000000 bytes / SHA-256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa。'
-  ]) {
-    assert.throws(
-      () => assertV314CandidateHasNoPublishedEvidence(invalidCandidate, '内存反例'),
-      /不得/
-    );
-  }
-
-  for (const releaseDocument of [
+  const releaseIdentityDocuments = [
     currentChangelog,
     currentHistory,
     preflight,
     spec,
     techdoc,
     implementationNotes,
-    releasePreparation
-  ]) {
+    releaseRecord
+  ];
+  const releaseRuleDocuments = [currentChangelog, preflight, spec, techdoc, implementationNotes, releaseRecord];
+  for (const releaseDocument of releaseIdentityDocuments) {
     assert.match(releaseDocument, /PR #162/);
     assert.match(releaseDocument, /1cc5999c62e4666d56b542e37e54529f6177e6bc/);
-  }
-  for (const releaseDocument of [
-    currentChangelog,
-    currentHistory,
-    currentGuide,
-    currentGuideDetail,
-    preflight,
-    spec,
-    techdoc,
-    implementationNotes,
-    releasePreparation
-  ]) {
-    assert.match(releaseDocument, /正式技术发布|技术 Release/);
-    assert.match(releaseDocument, /MANUAL \/ NOT RUN|人工边界[^。\n]*未验证|尚未执行|暂不执行|不表示[^。\n]*已验证/);
-    assert.match(releaseDocument, /授权[^。\n]*(?:不是|不构成|不等于|不表示)[^。\n]*(?:PASS|人工验收|已验证)/);
-  }
-  for (const durableDocument of [currentChangelog, currentHistory, currentGuide, spec]) {
-    assert.match(durableDocument, /GitHub Releases/);
-    assert.doesNotMatch(durableDocument, /当前为迭代版本|尚未发布为 stable Release|当前 latest stable Release 仍为 v3\.1\.13/);
-  }
-  for (const releaseDocument of [preflight, spec, techdoc, implementationNotes, releasePreparation]) {
+    assert.match(releaseDocument, /PR #163/);
+    assert.match(releaseDocument, /225d07d17a7c211348ba549734aaf84f602253cb/);
     assert.match(releaseDocument, /annotated tag/);
-    assert.match(releaseDocument, /(?:发布后|Release 完成后).*(?:独立|单独).*证据 PR|发布后独立证据 PR/s);
-    assert.match(releaseDocument, /(?:不|不得|不可)删除、替换或重传/);
+    assert.match(releaseDocument, /fee1498311854a69fea666fe275511da89d99836/);
+    assert.match(releaseDocument, /32508170702/);
+    assert.match(releaseDocument, /https:\/\/github\.com\/MatthewPZhong\/bank-bill-excel-tool\/actions\/runs\/32508170702/);
+    assert.match(releaseDocument, /https:\/\/github\.com\/MatthewPZhong\/bank-bill-excel-tool\/releases\/tag\/v3\.1\.14/);
+    assert.match(releaseDocument, /latest stable Release|默认 latest/);
   }
-  assert.match(releasePreparation, /Windows packaged VCC/);
-  assert.match(releasePreparation, /Windows 10\/11 Setup\/portable/);
-  assert.match(releasePreparation, /SmartScreen/);
-  assert.match(releasePreparation, /v3\.1\.13 -> v3\.1\.14/);
-  assert.match(releasePreparation, /production\/latest/);
-  for (const releaseDocument of [currentChangelog, preflight, spec, techdoc, implementationNotes, releasePreparation]) {
-    assert.match(releaseDocument, /GitHub PR body|GitHub PR\/Issue|GitHub PR 或 Issue|GitHub PR body 或 Issue 评论/);
+
+  for (const releaseDocument of releaseRuleDocuments) {
+    assert.match(releaseDocument, /PR #163 body/);
     assert.match(releaseDocument, /实际批准人/);
     assert.match(releaseDocument, /完整豁免范围/);
     assert.match(releaseDocument, /理由/);
     assert.match(releaseDocument, /发布后逐项补做/);
-    assert.match(releaseDocument, /(?:缺少[^。\n]*(?:稳定记录|记录)|记录缺失|记录[^。\n]*不全)[^。\n]*不得创建(?:或|\/)?推送 tag|(?:缺少[^。\n]*(?:稳定记录|记录)|记录缺失|记录[^。\n]*不全)[^。\n]*不得创建或推送 tag/);
     assert.match(releaseDocument, /Verify tag and main/);
-    assert.match(releaseDocument, /冻结[^。\n]*main[^。\n]*(?:merge\/push|merge.*push)|main[^。\n]*(?:merge\/push|merge.*push)[^。\n]*冻结/);
-    assert.match(releaseDocument, /tag 前[^。\n]*漂移[^。\n]*重新同步[^。\n]*复验/);
-    assert.match(releaseDocument, /tag 推送后[^。\n]*(?:校验成功前|Verify tag and main[^。\n]*成功前)[^。\n]*main[^。\n]*漂移[^。\n]*停止 v3\.1\.14/);
+    assert.match(releaseDocument, /冻结窗口[^。\n]*(?:执行|闭合)|冻结[^。\n]*窗口[^。\n]*(?:执行|闭合)/);
+    assert.match(releaseDocument, /(?:首轮成功|首轮全部 15 步|没有触发受控重跑|未触发重跑|未重跑)/);
     assert.match(releaseDocument, /Release(?:\/资产| 与资产| 和资产)[^。\n]*(?:均|都)[^。\n]*(?:未创建|尚未创建)/);
     assert.match(releaseDocument, /基础设施瞬时故障/);
-    assert.match(releaseDocument, /不改代码、tag、commit (?:和|或)打包输入|代码、tag、commit 和打包输入(?:完全)?不变/);
+    assert.match(releaseDocument, /代码、tag、commit(?:、|和)打包输入[^。\n]*不变/);
     assert.match(releaseDocument, /产品、元数据(?:或|、)打包输入/);
     assert.match(releaseDocument, /Release 已创建后/);
+    assert.match(releaseDocument, /(?:不|不得|不可)删除、替换或重传/);
+  }
+
+  const assetEvidenceDocuments = [techdoc, implementationNotes, releaseRecord];
+  for (const [index, document] of assetEvidenceDocuments.entries()) {
+    assertV314AssetEvidence(document, ['techdoc', 'implementation notes', 'Runbook v3.1.14'][index]);
+    assert.match(document, /2026-08-21T17:58:41\.566Z/);
+    assert.match(document, /QmsR5uVGyBSwB1A8w7J70WyiIgqEE7HOLfZVXhxWPh91G3uREMH21u3tWcj\+wYnB6T3fBvMydQevH6\+fwUll4g==/);
+    assert.match(document, /无凭据公开 HTTPS GET/);
+    assert.match(document, /Windows PE32 GUI \/ Nullsoft Installer/);
+    assert.match(document, /认证下载与匿名下载逐字节一致/);
+    assert.match(document, /isImmutable=false/);
+  }
+  for (const document of [techdoc, implementationNotes, releaseRecord]) {
+    assert.match(document, /2026-08-21T17:58:54Z/);
+    assert.match(document, /公开、非 draft、非 prerelease/);
+    assert.match(document, /tagName=v3\.1\.14/);
+  }
+
+  for (const durableDocument of [currentChangelog, currentHistory, currentGuide, currentGuideDetail, guideReleaseBoundary, spec]) {
+    assert.doesNotMatch(durableDocument, /长期候选口径|当前为迭代版本|尚未发布为 stable Release|当前 latest stable Release 仍为 v3\.1\.13/);
   }
 
   for (const document of [spec, techdoc]) {

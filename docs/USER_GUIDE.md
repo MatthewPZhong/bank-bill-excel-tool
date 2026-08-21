@@ -2,7 +2,7 @@
 
 版本：`v3.1.14`
 
-> 版本说明：本指南随 v3.1.14 应用构建并在打 tag 前定稿。本版修复 VCC 财务 OP 大批量明细读取完成后的数据库收尾卡顿，并在读取结束后显示“正在校验并写入”。当前公开稳定版、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。发布负责人已在已知 Windows 人工边界下授权进入正式技术发布；这不表示 Windows packaged VCC 交互、Windows 10/11 安装、SmartScreen、离线覆盖或在线 canary 已验证。
+> 版本说明：v3.1.14 已于 2026-08-21 完成正式技术发布并成为 latest stable Release。本版修复 VCC 财务 OP 大批量明细读取完成后的数据库收尾卡顿，并在读取结束后显示“正在校验并写入”。公开版本、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14) 为准。Windows packaged VCC 交互、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不表示这些人工项已验证或 PASS。
 
 ---
 
@@ -48,7 +48,7 @@
 
 > **v3.1.10 VCC 存储瘦身正式发布**：v3.1.10 已于 2026-08-17 正式发布。有效数据只保留计算、校验、幂等和最小血缘字段；原始输入由存档 artifact 保存，只有真正异常进入紧凑审计。数据管理改为六列【导出明细】，校验原表按当前有效行从已验证原件重建；历史血缘缺口可明确标记后部分导出，实体损坏则整次停止。【优化存储】通过维护模式 copy-on-write 重建数据库。三项发布门禁已明确确认 PASS，正式 tag、Release 与四项公开资产已完成回读。
 
-> **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。功能 PR #162 已合入 `main`，发布负责人已授权进入正式技术发布；Windows packaged、安装、SmartScreen、离线覆盖与在线 canary 仍为 `MANUAL / NOT RUN`，授权不是人工 PASS。
+> **v3.1.14 VCC 财务 OP 大批量导入修复**：导入 VCC 充值清退、费用换汇、通道或移除归档 Pending 明细时，工作簿读取阶段继续显示“正在导入”；该类明细全部文件读取并校验完成后，状态框会切换为“正在校验并写入”，不再停留在最后一条读取行数。充值清退和 Pending 同批时会分别显示自己的阶段。点击取消后，状态框保持“正在取消导入并回滚本次未完成数据…”，不会被晚到进度覆盖。金额、币种、幂等、异常和最终结果口径均未改变。v3.1.14 已于 2026-08-21 通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 与 `latest.yml` 四项公开资产已独立回读；Windows packaged VCC、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖及 `production/latest` canary 仍为 `MANUAL / NOT RUN`，技术 Release 完成不是人工 PASS。
 
 > **v3.1.13 工具箱、存档中心与状态框调整**：🧰工具箱在“合并表格 / 拆分表格”左侧新增状态框，显示等待、运行、完成、失败或取消；运行期间右上角关闭按钮会隐藏，两枚【导入文件】也会暂时禁用。多文件拆分遇到同名目标文件时，确认框改为【返回 / 覆盖全部】；返回不会创建或覆盖文件。存档中心的日期默认留空并直接展示全部日期的可见批次，设置齿轮移到“存档中心”标题右侧；设置页【变更】紧邻“存档位置”，并移除“存储统计”、文件总大小、运行次数和最新批次。后台维护不再向顶部提示栏显示过程或结果文本。平盘对账数据处理和对账单修复首次成功加载时状态框保持“欢迎使用小助手”，真实 session 与按钮仍会同步，读取失败仍显示错误。所有状态框的星星 SVG 同步移除，只保留状态文字。v3.1.13 已于 2026-08-21 完成正式技术发布并正式发布为 latest stable Release，Setup、portable、blockmap 与 `latest.yml` 四项资产已完成无凭据回读；Windows 原生确认框、packaged 长任务、安装升级和在线 canary 仍未人工验证，不能把技术 Release 表述为这些项目已通过。
 
@@ -3116,9 +3116,9 @@ v3.1.12 调整了 v3.0.5 的“先显示加载页面、后台继续初始化”�
 - **macOS、Linux 和开发环境**：当前不支持在线升级，也不会后台访问更新服务。
 - 3.0.18 暂无代码签名，Windows 可能显示 SmartScreen。请只从项目正式 GitHub Releases 下载，并核对版本和文件名。软件仍会校验更新元数据中的 SHA-512，但完整性校验不能替代发布者代码签名。
 
-#### v3.1.13 发布与人工验证边界
+#### v3.1.14 发布与人工验证边界
 
-v3.1.13 已通过 Windows Release workflow 完成正式技术发布，四项公开资产已独立核验。Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务期间的关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、从 v3.1.12 离线覆盖安装以及 `production/latest` 在线升级 canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不等于这些人工项已经通过。
+v3.1.14 已通过 Windows Release workflow 完成正式技术发布，Setup、portable、blockmap 和 `latest.yml` 四项公开资产已独立核验。Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、从 `v3.1.13 -> v3.1.14` 离线覆盖安装以及 `production/latest` 在线升级 canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不等于这些人工项已经通过。
 
 正式版本、四项 Windows 资产及发布时间只以 GitHub Releases 页面为准。已发布 tag 和资产不可替换；若后续人工验证发现问题，应停止推广并等待更高补丁版本，不要继续使用或传播被发现有问题的安装包。
 
