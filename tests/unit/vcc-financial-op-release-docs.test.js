@@ -24,14 +24,63 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.14 正式文档锁定 VCC staging 索引、精确 phase 时点与真实样本证据', () => {
+function markdownSection(source, heading, level = 2) {
+  const start = source.indexOf(heading);
+  assert.ok(start >= 0, `缺少 section：${heading}`);
+  const nextHeading = `\n${'#'.repeat(level)} `;
+  const end = source.indexOf(nextHeading, start + heading.length);
+  return source.slice(start, end >= 0 ? end : source.length);
+}
+
+function sectionBetweenMarkers(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.ok(start >= 0, `缺少 section 起点：${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.ok(end > start, `缺少 section 终点：${endMarker}`);
+  return source.slice(start, end);
+}
+
+function assertV314CandidateHasNoPublishedEvidence(section, label) {
+  assert.doesNotMatch(
+    section,
+    /(?:正式技术发布|正式发布)(?:已)?(?:完成|成功)(?!后)|(?:已|已经|现已)?正式发布为[^。\n]{0,40}latest stable Release|(?:已|是|成为|现为)[^。\n]{0,40}latest stable Release/,
+    `${label} 不得把 v3.1.14 写成正式发布完成或 latest stable`
+  );
+
+  for (const sentence of section.split(/[。\n]/)) {
+    if (!/(?:Windows packaged VCC|Windows 10\/11 Setup\/portable|SmartScreen|v3\.1\.13 -> v3\.1\.14|production\/latest)/.test(sentence)) continue;
+    if (!/\bPASS\b/.test(sentence)) continue;
+    assert.match(
+      sentence,
+      /(?:不是|不构成|不等于|不表示|不得[^；。]*标记为|未[^；。]*PASS|MANUAL \/ NOT RUN)/,
+      `${label} 不得把 Windows 人工项写成 PASS：${sentence.trim()}`
+    );
+  }
+
+  assert.doesNotMatch(section, /tag object\s*(?:为|:|：)?\s*`?[0-9a-f]{40}`?/i, `${label} 不得预写 tag object`);
+  assert.doesNotMatch(section, /\[[^\]\n]+\]\(https:\/\/github\.com\/[^)\n]+\/actions\/runs\/\d+\)/i, `${label} 不得预写 workflow Markdown 链接`);
+  assert.doesNotMatch(section, /workflow(?: ID)?[^。\n]{0,20}`?\d{8,}`?/i, `${label} 不得预写 workflow 长 ID`);
+  assert.doesNotMatch(section, /https:\/\/github\.com\/[^\s)]+\/releases\/tag\/v3\.1\.14\b/i, `${label} 不得预写 Release URL`);
+  assert.doesNotMatch(section, /[^\s`()\[\]]*3\.1\.14[^\s`()\[\]]*\.(?:exe|blockmap)\b/i, `${label} 不得预写 v3.1.14 资产文件名`);
+  assert.doesNotMatch(section, /(?:Setup|portable|blockmap|latest\.yml)[^\n]{0,120}\b\d{3,}\s*bytes\b/i, `${label} 不得预写资产 bytes`);
+  assert.doesNotMatch(
+    section,
+    /(?:Setup|portable|blockmap|latest\.yml)[^\n]{0,160}(?:SHA-(?:256|512)|digest)[^。\n]{0,16}`?(?:[0-9a-f]{64}|[A-Za-z0-9+/]{40,}={0,2})`?/i,
+    `${label} 不得预写资产摘要`
+  );
+}
+
+test('v3.1.14 正式文档锁定 VCC 修复、tag 前候选口径与发布人工边界', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
   const history = read('docs/VERSION_FEATURE_HISTORY.md');
   const guide = read('docs/USER_GUIDE.md');
+  const preflight = read('changes/3.1.14/preflight.md');
   const spec = read('changes/3.1.14/spec.md');
   const techdoc = read('changes/3.1.14/techdoc.md');
+  const implementationNotes = read('changes/3.1.14/implementation-notes.md');
+  const runbook = read('docs/WINDOWS_RELEASE_RUNBOOK.md');
 
   assert.equal(packageJson.version, '3.1.14');
   assert.equal(packageLock.version, '3.1.14');
@@ -40,10 +89,119 @@ test('v3.1.14 正式文档锁定 VCC staging 索引、精确 phase 时点与真�
   assert.match(history, /^## v3\.1\.14（2026-08-21）$/m);
   assert.match(guide, /^版本：`v3\.1\.14`$/m);
 
+  const currentChangelog = markdownSection(changelog, '## 3.1.14 - 2026-08-21');
+  const currentHistory = markdownSection(history, '## v3.1.14（2026-08-21）');
+  const currentGuide = guide.slice(0, guide.indexOf('\n---'));
+  const currentGuideDetail = sectionBetweenMarkers(
+    guide,
+    '> **v3.1.14 VCC 财务 OP 大批量导入修复**',
+    '> **v3.1.13 工具箱、存档中心与状态框调整**'
+  );
+  const releasePreparation = markdownSection(runbook, '## v3.1.14 发布准备');
+
+  const v314CandidateSections = [
+    ['CHANGELOG v3.1.14', currentChangelog],
+    ['VERSION_FEATURE_HISTORY v3.1.14', currentHistory],
+    ['USER_GUIDE 顶部', currentGuide],
+    ['USER_GUIDE v3.1.14 详细条目', currentGuideDetail],
+    ['preflight', preflight],
+    ['spec', spec],
+    ['techdoc', techdoc],
+    ['implementation notes', implementationNotes],
+    ['Runbook v3.1.14', releasePreparation]
+  ];
+  for (const [label, section] of v314CandidateSections) {
+    assertV314CandidateHasNoPublishedEvidence(section, label);
+  }
+
+  for (const legalCandidate of [
+    'v3.1.14 公开状态以 GitHub Releases 为准；正式技术发布已授权。',
+    '技术 Release 完成后独立回读；Release 成功后再执行 canary。',
+    'Windows packaged VCC 为 MANUAL / NOT RUN，授权不构成人工 PASS。'
+  ]) {
+    assert.doesNotThrow(() => assertV314CandidateHasNoPublishedEvidence(legalCandidate, '合法候选口径'));
+  }
+  for (const invalidCandidate of [
+    '- **正式技术发布完成**：workflow success。',
+    'v3.1.14 正式技术发布已完成。',
+    'v3.1.14 已正式发布为 latest stable Release。',
+    'Windows 10/11 Setup/portable 已确认 PASS。',
+    'annotated tag object `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa`。',
+    'Windows workflow [12345678901](https://github.com/example/repo/actions/runs/12345678901) 已运行。',
+    'Release：https://github.com/example/repo/releases/tag/v3.1.14',
+    'Setup `bank-bill-excel-tool-setup-3.1.14.exe`。',
+    'portable 100000000 bytes / SHA-256 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa。'
+  ]) {
+    assert.throws(
+      () => assertV314CandidateHasNoPublishedEvidence(invalidCandidate, '内存反例'),
+      /不得/
+    );
+  }
+
+  for (const releaseDocument of [
+    currentChangelog,
+    currentHistory,
+    preflight,
+    spec,
+    techdoc,
+    implementationNotes,
+    releasePreparation
+  ]) {
+    assert.match(releaseDocument, /PR #162/);
+    assert.match(releaseDocument, /1cc5999c62e4666d56b542e37e54529f6177e6bc/);
+  }
+  for (const releaseDocument of [
+    currentChangelog,
+    currentHistory,
+    currentGuide,
+    currentGuideDetail,
+    preflight,
+    spec,
+    techdoc,
+    implementationNotes,
+    releasePreparation
+  ]) {
+    assert.match(releaseDocument, /正式技术发布|技术 Release/);
+    assert.match(releaseDocument, /MANUAL \/ NOT RUN|人工边界[^。\n]*未验证|尚未执行|暂不执行|不表示[^。\n]*已验证/);
+    assert.match(releaseDocument, /授权[^。\n]*(?:不是|不构成|不等于|不表示)[^。\n]*(?:PASS|人工验收|已验证)/);
+  }
+  for (const durableDocument of [currentChangelog, currentHistory, currentGuide, spec]) {
+    assert.match(durableDocument, /GitHub Releases/);
+    assert.doesNotMatch(durableDocument, /当前为迭代版本|尚未发布为 stable Release|当前 latest stable Release 仍为 v3\.1\.13/);
+  }
+  for (const releaseDocument of [preflight, spec, techdoc, implementationNotes, releasePreparation]) {
+    assert.match(releaseDocument, /annotated tag/);
+    assert.match(releaseDocument, /(?:发布后|Release 完成后).*(?:独立|单独).*证据 PR|发布后独立证据 PR/s);
+    assert.match(releaseDocument, /(?:不|不得|不可)删除、替换或重传/);
+  }
+  assert.match(releasePreparation, /Windows packaged VCC/);
+  assert.match(releasePreparation, /Windows 10\/11 Setup\/portable/);
+  assert.match(releasePreparation, /SmartScreen/);
+  assert.match(releasePreparation, /v3\.1\.13 -> v3\.1\.14/);
+  assert.match(releasePreparation, /production\/latest/);
+  for (const releaseDocument of [currentChangelog, preflight, spec, techdoc, implementationNotes, releasePreparation]) {
+    assert.match(releaseDocument, /GitHub PR body|GitHub PR\/Issue|GitHub PR 或 Issue|GitHub PR body 或 Issue 评论/);
+    assert.match(releaseDocument, /实际批准人/);
+    assert.match(releaseDocument, /完整豁免范围/);
+    assert.match(releaseDocument, /理由/);
+    assert.match(releaseDocument, /发布后逐项补做/);
+    assert.match(releaseDocument, /(?:缺少[^。\n]*(?:稳定记录|记录)|记录缺失|记录[^。\n]*不全)[^。\n]*不得创建(?:或|\/)?推送 tag|(?:缺少[^。\n]*(?:稳定记录|记录)|记录缺失|记录[^。\n]*不全)[^。\n]*不得创建或推送 tag/);
+    assert.match(releaseDocument, /Verify tag and main/);
+    assert.match(releaseDocument, /冻结[^。\n]*main[^。\n]*(?:merge\/push|merge.*push)|main[^。\n]*(?:merge\/push|merge.*push)[^。\n]*冻结/);
+    assert.match(releaseDocument, /tag 前[^。\n]*漂移[^。\n]*重新同步[^。\n]*复验/);
+    assert.match(releaseDocument, /tag 推送后[^。\n]*(?:校验成功前|Verify tag and main[^。\n]*成功前)[^。\n]*main[^。\n]*漂移[^。\n]*停止 v3\.1\.14/);
+    assert.match(releaseDocument, /Release(?:\/资产| 与资产| 和资产)[^。\n]*(?:均|都)[^。\n]*(?:未创建|尚未创建)/);
+    assert.match(releaseDocument, /基础设施瞬时故障/);
+    assert.match(releaseDocument, /不改代码、tag、commit (?:和|或)打包输入|代码、tag、commit 和打包输入(?:完全)?不变/);
+    assert.match(releaseDocument, /产品、元数据(?:或|、)打包输入/);
+    assert.match(releaseDocument, /Release 已创建后/);
+  }
+
   for (const document of [spec, techdoc]) {
     assert.match(document, /v3\.1\.14/);
     assert.match(document, /2026-08-21/);
     assert.match(document, /147af9a736b7daaf7a1cdd17eff3535fdc62cd98/);
+    assert.match(document, /发布代码基线[\s\S]*PR #162[\s\S]*1cc5999c62e4666d56b542e37e54529f6177e6bc/);
     assert.match(document, /idx_vcc_fin_op_staging_comparison/);
     assert.match(document, /WHERE comparison_import_row_id IS NOT NULL/);
     assert.match(document, /VCC_STORAGE_CONTRACT_VERSION.*(?:保持|继续).*2/s);
@@ -112,8 +270,14 @@ test('v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存
   assert.match(mainSource, /path\.join\(app\.getAppPath\(\), 'docs', 'USER_GUIDE\.md'\)/);
   assert.match(changelog, /^## 3\.1\.13 - 2026-08-20$/m);
   assert.match(history, /^## v3\.1\.13（2026-08-20）$/m);
-  const currentChangelog = changelog.slice(0, changelog.indexOf('## 3.1.12'));
-  const currentHistory = history.slice(0, history.indexOf('## v3.1.12'));
+  const currentChangelog = changelog.slice(
+    changelog.indexOf('## 3.1.13'),
+    changelog.indexOf('## 3.1.12')
+  );
+  const currentHistory = history.slice(
+    history.indexOf('## v3.1.13'),
+    history.indexOf('## v3.1.12')
+  );
   const currentGuide = guide.slice(
     guide.indexOf('> **v3.1.13 工具箱'),
     guide.indexOf('> **v3.1.12 网银源文件')

@@ -23,12 +23,18 @@
 5. v3.0.18 是引导版本：从 v3.0.17 手动覆盖安装验证，不能宣称 v3.0.17 可在线升级。
 
 若发布负责人决定豁免第 3 或第 4 项，必须在打 tag 前留下稳定的 GitHub PR/Issue 评论：
-写明批准人、具体豁免范围、理由和发布后补做项。豁免只允许继续生成技术资产，不得把
+写明实际批准人、完整豁免范围、理由和发布后逐项补做计划。真实链接只在 PR/评论实际创建后记录，
+不得预写占位链接；缺少这份稳定记录不得创建或推送 tag。豁免只允许继续生成技术资产，不得把
 对应项目标记为已验证或用于“人工验收通过”的公告。
 
 ## 创建发布
 
 仅在上述门禁通过后创建一次 tag：
+
+从 tag 前最终同步/复验并准备推送 tag 起，到 Release workflow 的 `Verify tag and main` 成功为止，
+冻结对 `main` 的 merge/push；不要求在此窗口之外全程冻结。tag 前若发现 `main` 漂移，必须重新同步并
+复验门禁、文档和 Review。tag 推送后、校验成功前若 `main` 漂移，停止当前版本，保留且不改 tag，
+并发布更高补丁版本。
 
 ```bash
 git switch main
@@ -46,8 +52,10 @@ workflow 会拒绝以下情况：tag 不等于 `v${package.json.version}`、tag 
 只能上传 staging 产物；GitHub 会自动改写含特殊或非字母数字字符的资产名，不能直接
 用中文构建文件名作为发布后精确校验契约。
 
-workflow 直接创建 published、non-draft、non-prerelease Release。不要手动替换或覆盖
-已发布资产；故障必须发布更高补丁版本。
+workflow 直接创建 published、non-draft、non-prerelease Release。仅当 Release 与资产均尚未创建，
+且可证明失败属于基础设施瞬时故障时，才可在代码、tag、commit 和打包输入完全不变的前提下，
+受控重跑同一 tag/commit。产品、元数据或打包输入问题，或 Release 已创建后的失败，都必须停止
+公告/推广并发布更高补丁版本。不得删除、替换、重传 tag 或资产。
 
 ## 发布后
 
@@ -98,3 +106,14 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 - GitHub API 当前报告 `isImmutable=false`，即平台级 immutable release 标记未启用；仓库发布流程和负责人仍必须把 tag/资产视为不可变，不得删除、替换或重传。若需要平台强制锁定，应另行启用 GitHub immutable releases，不在本次已发布资产上做变更。
 - Windows 原生【返回 / 覆盖全部】按钮顺序/焦点、packaged 长任务关闭保护与系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不是这些人工项 PASS。任一补测失败都停止推广并发布更高补丁版本。
 - 仓库维护者已明确要求以后不再运行 `check-vars`，本次发布未执行 `scan:vars` 或 `check:vars`，不将其表述为通过。
+
+## v3.1.14 发布准备
+
+- 目标版本为 `3.1.14`。功能 PR #162 已以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入 `main`；完整 `release-check`、`scan:vars` 和真实样本首轮/重导证据已记录在 `changes/3.1.14/implementation-notes.md`。
+- tag 前先合并仅包含发布文档与文档合同测试的准备 PR。合并后重新 fetch，确认 tracked worktree 干净、`package.json.version === 3.1.14`、本地 `HEAD === origin/main`、同名远端 tag/Release 不存在，才创建唯一 annotated tag `v3.1.14`。
+- 发布负责人于 2026-08-21 明确授权在已知人工边界下继续正式技术发布。授权范围为：Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装及 `production/latest` canary 暂不执行。
+- 上述范围统一保持 `MANUAL / NOT RUN`。自动化和本地真实样本不能替代 Windows 人工验证；授权不构成验收 PASS，也不得公告“Windows / 在线升级已验证”。
+- tag 前必须在稳定的 GitHub PR body 或 Issue 评论中记录实际批准人、上述完整豁免范围、理由与发布后逐项补做计划；真实链接只在记录创建后补入，不预写。缺少完整稳定记录不得创建或推送 tag。
+- 从 tag 前最终同步/复验并准备推送 tag 起，到 workflow 的 `Verify tag and main` 成功为止冻结对 `main` 的 merge/push；窗口外不要求全程冻结。tag 前发现漂移须重新同步并复验门禁、文档和 Review；tag 推送后、校验成功前若 `main` 漂移，则停止 v3.1.14，保留且不改 tag，并改发更高补丁版本。
+- tag 触发的受控 workflow 负责生成 Setup、portable、blockmap 和 `latest.yml`。仅当 Release/资产均未创建且可证明是基础设施瞬时故障时，才可在代码、tag、commit 和打包输入不变的前提下受控重跑同一 tag/commit；产品、元数据、打包输入问题或 Release 已创建后的失败均停止公告/推广并改发更高补丁。不得删除、替换或重传 tag/资产。
+- 本准备记录不包含尚未产生的发布准备 PR/merge、tag object、workflow ID、Release URL、资产大小或摘要。技术 Release 完成后独立回读实际身份、公开 latest 状态、四项资产、匿名下载和 `latest.yml`/Setup SHA-512，再以单独发布证据 PR 回写。
