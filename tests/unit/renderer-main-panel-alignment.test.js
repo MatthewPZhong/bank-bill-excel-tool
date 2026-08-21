@@ -49,23 +49,40 @@ function elementSourceById(id) {
   return html.slice(start, end);
 }
 
-test.describe('v3.0.20 主页面垂直对齐契约', () => {
-  test('12 个目标状态框共享内容层，新开账户状态框保持原结构', () => {
+test.describe('v3.1.13 主页面状态框与垂直对齐契约', () => {
+  test('13 个静态状态框只保留文字，12 个目标状态框共享内容层', () => {
     assert.equal((html.match(/class="status-box-content"/g) || []).length, TARGET_STATUS_IDS.length);
+    assert.equal((html.match(/class="[^"]*status-box(?:\s[^"]*)?"/g) || []).length, TARGET_STATUS_IDS.length + 1);
+    assert.doesNotMatch(html, /status-spark|gsStatus/);
 
     for (const id of TARGET_STATUS_IDS) {
       const source = elementSourceById(id);
       assert.equal((source.match(/class="status-box-content"/g) || []).length, 1, `#${id} 内容层数量错误`);
-      assert.match(
-        source,
-        /class="status-box-content"[\s\S]*class="status-spark"[\s\S]*<svg[\s\S]*class="status-box-text"/,
-        `#${id} 必须按图标、文字顺序包装`
-      );
+      assert.match(source, /class="status-box-content"[\s\S]*class="status-box-text"/, `#${id} 缺少文字内容层`);
+      assert.doesNotMatch(source, /status-spark|<svg/, `#${id} 不应保留星星 SVG`);
     }
 
     const newAccountSource = elementSourceById('newAccountStatusBox');
     assert.doesNotMatch(newAccountSource, /status-box-content/);
-    assert.match(newAccountSource, /class="status-spark"[\s\S]*class="status-box-text"/);
+    assert.match(newAccountSource, /class="status-box-text">等待生成<\/span>/);
+    assert.doesNotMatch(newAccountSource, /status-spark|<svg/);
+  });
+
+  test('Clear 当前 UI 样板同步移除状态框星星及残余间距', () => {
+    const clearPrototypeDir = path.join(root, 'Clear');
+    for (const name of fs.readdirSync(clearPrototypeDir).filter((entry) => entry.endsWith('.html'))) {
+      const source = fs.readFileSync(path.join(clearPrototypeDir, name), 'utf8');
+      assert.doesNotMatch(source, /status-spark/, `${name} 不应保留状态框星星镜像`);
+      const statusSections = Array.from(source.matchAll(/<div[^>]*class="[^"]*\bstatus-box\b[^"]*"[^>]*>([\s\S]*?)<\/div>/g));
+      for (const [, statusMarkup] of statusSections) {
+        assert.doesNotMatch(statusMarkup, /<svg/, `${name} 的状态框不应包含 SVG`);
+      }
+    }
+    const prototypeStyles = fs.readFileSync(path.join(clearPrototypeDir, 'styles-gemini.css'), 'utf8');
+    const boxRule = /\.status-box\s*\{([\s\S]*?)\}/.exec(prototypeStyles);
+    assert.ok(boxRule, 'Clear 样板缺少状态框规则');
+    assert.doesNotMatch(boxRule[1], /\bgap\s*:/, 'Clear 样板不应保留图文间距');
+    assert.doesNotMatch(prototypeStyles, /status-spark/, 'Clear 样板 CSS 不应保留星星规则');
   });
 
   test('状态更新继续使用后代选择器，不依赖直接子元素', () => {
@@ -85,11 +102,20 @@ test.describe('v3.0.20 主页面垂直对齐契约', () => {
     assert.equal((html.match(/main-panel-select-control/g) || []).length, ALIGNED_CONTROL_IDS.length);
   });
 
-  test('Clear 与 General 均固定状态内容层和 14px 图标盒', () => {
+  test('Clear 与 General 均保留纯文字内容层且无残余星星样式和图文间距', () => {
     for (const [name, styles] of [['Clear', clearBase], ['General', generalStyles]]) {
-      assert.match(styles, /\.status-box-content\s*\{[\s\S]*?display:\s*inline-flex;[\s\S]*?align-items:\s*center;[\s\S]*?justify-content:\s*center;[\s\S]*?gap:\s*8px;[\s\S]*?max-width:\s*100%;[\s\S]*?min-width:\s*0;/, `${name} 内容层规则不完整`);
-      assert.match(styles, /\.status-box-content \.status-spark\s*\{[\s\S]*?width:\s*14px;[\s\S]*?height:\s*14px;[\s\S]*?flex:\s*0 0 14px;[\s\S]*?line-height:\s*0;/, `${name} 图标盒规则不完整`);
-      assert.match(styles, /\.status-box-content \.status-spark svg\s*\{[\s\S]*?display:\s*block;[\s\S]*?width:\s*14px;[\s\S]*?height:\s*14px;/, `${name} SVG 块级规则不完整`);
+      const boxRule = /\.status-box\s*\{([\s\S]*?)\}/.exec(styles);
+      const contentRule = /\.status-box-content\s*\{([\s\S]*?)\}/.exec(styles);
+      assert.ok(boxRule, `${name} 缺少状态框规则`);
+      assert.ok(contentRule, `${name} 缺少状态内容层规则`);
+      assert.match(contentRule[1], /display:\s*inline-flex;/, `${name} 内容层 display 不完整`);
+      assert.match(contentRule[1], /align-items:\s*center;/, `${name} 内容层垂直居中不完整`);
+      assert.match(contentRule[1], /justify-content:\s*center;/, `${name} 内容层水平居中不完整`);
+      assert.match(contentRule[1], /max-width:\s*100%;/, `${name} 内容层最大宽度不完整`);
+      assert.match(contentRule[1], /min-width:\s*0;/, `${name} 内容层最小宽度不完整`);
+      assert.doesNotMatch(boxRule[1], /\bgap\s*:/, `${name} 状态框不应保留图文间距`);
+      assert.doesNotMatch(contentRule[1], /\bgap\s*:/, `${name} 不应保留图文间距`);
+      assert.doesNotMatch(styles, /status-spark/, `${name} 不应保留星星专属样式`);
     }
   });
 
@@ -146,6 +172,9 @@ test.describe('v3.0.20 主页面垂直对齐契约', () => {
     assert.match(geometryVerifier, /Emulation\.setDeviceMetricsOverride/);
     assert.match(geometryVerifier, /device scale factor: expected \$\{expectedScaleFactor\}, got \$\{window\.devicePixelRatio\}/);
     assert.match(geometryVerifier, /statusTargets = \[[\s\S]*duplicateInboundMatchStatusBox[\s\S]*vccFinancialOpStatusBox[\s\S]*acquiringBillCurrencyStatusBox/);
+    assert.match(geometryVerifier, /box\.querySelector\('svg'\)/);
+    assert.match(geometryVerifier, /unexpected status SVG/);
+    assert.doesNotMatch(geometryVerifier, /querySelector\('\.status-spark'\)/);
     assert.match(geometryVerifier, /vccButtonWidthDelta[\s\S]*vccButtonSymmetryDelta/);
     assert.match(geometryVerifier, /Math\.abs\(importRect\.width - 140\) > tolerance/);
     assert.match(geometryVerifier, /importDistance <= 0 \|\| runDistance <= 0 \|\| metrics\.vccButtonSymmetryDelta > tolerance/);

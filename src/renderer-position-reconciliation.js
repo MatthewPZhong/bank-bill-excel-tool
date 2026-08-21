@@ -163,9 +163,23 @@
       if (elements.configBtn) elements.configBtn.disabled = state.inflight;
     }
 
-    async function refresh({ showSummary = true } = {}) {
+    // updateStatus=false 只静默成功摘要；真实读取失败始终写入状态框。
+    async function refresh({ updateStatus = true } = {}) {
       if (!api) return null;
-      const result = await api.status();
+      let result;
+      try {
+        result = await api.status();
+      } catch (error) {
+        console.error('refresh position reconciliation status failed:', error);
+        state.status = null;
+        const detail = error && error.message ? String(error.message).trim() : '';
+        const message = detail
+          ? `平盘对账状态读取失败：${detail}`
+          : '平盘对账状态读取失败';
+        setStatus(message, 'error');
+        updateControls();
+        return { status: 'failed', message };
+      }
       if (!result || result.status !== 'ok') {
         state.status = null;
         setStatus(failureDetailsText(result, '平盘对账状态读取失败'), 'error');
@@ -173,10 +187,12 @@
         return result;
       }
       state.status = result;
-      setStatus(
-        showSummary ? statusSummary(result) : '欢迎使用小助手',
-        showSummary && result.pendingRun && result.pendingRun.stale ? 'warning' : 'info'
-      );
+      if (updateStatus) {
+        setStatus(
+          statusSummary(result),
+          result.pendingRun && result.pendingRun.stale ? 'warning' : 'info'
+        );
+      }
       updateControls();
       return result;
     }
@@ -1521,7 +1537,9 @@
 
     async function initialize() {
       bindEvents();
-      await refresh({ showSummary: false });
+      const result = await refresh({ updateStatus: false });
+      // 仅成功初始化后落欢迎文案，不能用欢迎文案覆盖真实读取失败。
+      if (result && result.status === 'ok') setStatus('欢迎使用小助手', 'info');
     }
 
     function previewDataManager(initialTab = 'unarchived') {

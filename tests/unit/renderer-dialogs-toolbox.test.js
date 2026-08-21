@@ -53,6 +53,37 @@ describe('T1 工具箱弹框工厂存在且导出', () => {
 describe('T2/T3 合表：一气呵成 + 结果分流 + 应用内弹框', () => {
   const fn = sliceFunction(source, 'createToolboxDialog');
 
+  test('主弹框左侧 aria-live 状态框为纯文字，初始为“等待操作”', () => {
+    assert.match(fn, /class="status-box toolbox-status-box"[\s\S]*?role="status"[\s\S]*?aria-live="polite"/);
+    assert.match(fn, /class="status-box-content"[\s\S]*?class="status-box-text">等待操作<\/span>/);
+    assert.match(fn, /class="status-box-text">等待操作<\/span>/);
+    assert.doesNotMatch(fn, /status-spark|gsToolboxStatus/);
+    const statusMarkup = /class="status-box toolbox-status-box"[\s\S]*?<\/div>/.exec(fn);
+    assert.ok(statusMarkup);
+    assert.doesNotMatch(statusMarkup[0], /<svg/);
+    assert.ok(fn.includes('toolbox-merge-row'));
+    assert.ok(fn.includes('toolbox-split-row'));
+  });
+
+  test('三类 Promise 共用 busy 状态：隐藏关闭、禁用双入口并阻止遮罩关闭', () => {
+    assert.match(fn, /function isToolboxRunning\(\)[\s\S]*?mergeInFlight \|\| splitImportInFlight \|\| splitExportInFlight/);
+    assert.match(fn, /closeBtn\.hidden\s*=\s*running/);
+    assert.match(fn, /mergeImportBtn\.disabled\s*=\s*running/);
+    assert.match(fn, /splitImportBtn\.disabled\s*=\s*running/);
+    assert.match(fn, /ev\.target === overlay && !isToolboxRunning\(\)/);
+    assert.equal((fn.match(/syncToolboxRunningUi\(\);/g) || []).length, 6);
+  });
+
+  test('状态生命周期覆盖运行、成功、失败、取消和拆分设置等待', () => {
+    for (const message of [
+      '正在合并表格', '合并完成', '合并失败', '已取消合并',
+      '正在读取表格', '等待拆分设置', '读取失败',
+      '正在拆分表格', '拆分完成', '拆分失败', '已取消拆分'
+    ]) {
+      assert.ok(fn.includes(`setToolboxStatus('${message}'`), `应设置状态：${message}`);
+    }
+  });
+
   test('合并表格行调 desktopApi.toolbox.merge()', () => {
     assert.ok(fn.includes('desktopApi.toolbox.merge('), '合表应调 desktopApi.toolbox.merge()');
   });
@@ -224,6 +255,25 @@ describe('T7 入口按钮与 preview 注册（renderer 侧静态校验）', () =
   test('renderer.js preview dispatch 含 toolbox / toolbox-split-field-picker 两分支', () => {
     assert.ok(rendererSrc.includes("previewModal === 'toolbox'"), '应有 toolbox preview 分支');
     assert.ok(rendererSrc.includes("previewModal === 'toolbox-split-field-picker'"), '应有 toolbox-split-field-picker preview 分支');
+  });
+});
+
+describe('v3.1.13 工具箱状态框布局合同', () => {
+  const STYLES_PATH = path.join(__dirname, '..', '..', 'src', 'styles-gemini-extra.css');
+  const styles = fs.readFileSync(STYLES_PATH, 'utf8');
+
+  test('状态框宽度严格为 2 × 72px 标签宽度，并跨两行', () => {
+    assert.match(styles, /\.toolbox-body\s*\{[\s\S]*?--toolbox-label-width:\s*72px;/);
+    assert.match(
+      styles,
+      /\.toolbox-status-box\s*\{[\s\S]*?grid-row:\s*1 \/ 3;[\s\S]*?width:\s*calc\(var\(--toolbox-label-width\) \+ var\(--toolbox-label-width\)\)/
+    );
+  });
+
+  test('状态框与两枚 36px 导入按钮共享两条 36px grid 行', () => {
+    assert.match(styles, /\.toolbox-body\s*\{[\s\S]*?grid-template-rows:\s*36px 36px;/);
+    assert.match(styles, /\.toolbox-merge-row\s*\{\s*grid-row:\s*1;\s*\}/);
+    assert.match(styles, /\.toolbox-split-row\s*\{\s*grid-row:\s*2;\s*\}/);
   });
 });
 

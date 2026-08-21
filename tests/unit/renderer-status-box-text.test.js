@@ -12,17 +12,111 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
-const source = fs.readFileSync(RENDERER_PATH, 'utf8');
+// GitHub Windows runner 会把 checkout 转为 CRLF；源码截取统一按 LF 处理，避免平台换行影响测试边界。
+const source = fs.readFileSync(RENDERER_PATH, 'utf8').replace(/\r\n?/g, '\n');
+
+function loadReconStatusRefresh({ sessionStatus }) {
+  const start = source.indexOf('async function refreshReconIdFixStatus(');
+  const endMarker = '\n}\n\n// 主面板"场景"下拉刷新';
+  const end = source.indexOf(endMarker, start);
+  assert.ok(start >= 0 && end > start, '应能提取 refreshReconIdFixStatus');
+  const functionSource = source.slice(start, end + 2);
+  const statusWrites = [];
+  const uiUpdates = [];
+  const context = {
+    window: { desktopApi: { reconIdFix: { sessionStatus } } },
+    state: {
+      reconIdFixSession: { fileName: 'old.xlsx' },
+      reconIdFixResult: { fixedRowCount: 9 }
+    },
+    elements: { reconIdFixStatusBox: {} },
+    updateReconIdFixUi(options) {
+      uiUpdates.push(options);
+    },
+    updateStatusBox(_element, message, tone) {
+      statusWrites.push({ message, tone });
+    },
+    console: { error() {} }
+  };
+  require('node:vm').runInNewContext(
+    `${functionSource}\nthis.refreshReconIdFixStatusForTest = refreshReconIdFixStatus;`,
+    context
+  );
+  return {
+    refresh: context.refreshReconIdFixStatusForTest,
+    state: context.state,
+    statusWrites,
+    uiUpdates
+  };
+}
 
 describe('模块初始化状态框保持欢迎文案', () => {
-  test('对账单修复首次同步场景与 session 时不覆盖欢迎文案', () => {
+  test('对账单修复自动同步固定静默成功文案，用户动作仍使用默认更新', () => {
     assert.match(
       source,
-      /reloadReconIdFixScenarios\(\{[\s\S]*?scenariosChanged: false,[\s\S]*?updateStatus: enteringModule[\s\S]*?\}\)/
+      /reloadReconIdFixScenarios\(\{[\s\S]*?scenariosChanged: false,[\s\S]*?updateStatus: false[\s\S]*?\}\)/
     );
     assert.match(source, /async function refreshReconIdFixStatus\(\{ updateStatus = true \} = \{\}\)/);
     assert.match(source, /function updateReconIdFixUi\(\{ updateStatus = true \} = \{\}\)/);
     assert.match(source, /if \(updateStatus\) updateStatusBox\(elements\.reconIdFixStatusBox, text, tone\)/);
+    assert.match(source, /await refreshReconIdFixStatus\(\);/);
+    assert.doesNotMatch(source, /updateStatus: enteringModule/);
+  });
+
+  test('对账单修复静默成功会同步 session 和按钮，但不直接写状态框', async () => {
+    const harness = loadReconStatusRefresh({
+      sessionStatus: async () => ({
+        status: 'ok',
+        hasFile: true,
+        fileName: '账单.xlsx',
+        sheetCounts: { business: 7, opp: 6 },
+        hasResult: false
+      })
+    });
+
+    assert.equal(await harness.refresh({ updateStatus: false }), true);
+    assert.equal(harness.state.reconIdFixSession.fileName, '账单.xlsx');
+    assert.deepEqual(harness.uiUpdates, [{ updateStatus: false }]);
+    assert.deepEqual(harness.statusWrites, []);
+  });
+
+  test('对账单修复失败结果和 Promise reject 均越过静默模式显示错误', async () => {
+    const failed = loadReconStatusRefresh({
+      sessionStatus: async () => ({ status: 'failed', message: '数据库忙' })
+    });
+    assert.equal(await failed.refresh({ updateStatus: false }), false);
+    assert.equal(failed.state.reconIdFixSession, null);
+    assert.equal(failed.state.reconIdFixResult, null);
+    assert.deepEqual(failed.uiUpdates, [{ updateStatus: false }]);
+    assert.deepEqual(failed.statusWrites, [{
+      message: '对账单修复状态读取失败：数据库忙',
+      tone: 'error'
+    }]);
+
+    const empty = loadReconStatusRefresh({
+      sessionStatus: async () => null
+    });
+    assert.equal(await empty.refresh({ updateStatus: false }), false);
+    assert.deepEqual(empty.statusWrites, [{
+      message: '对账单修复状态读取失败',
+      tone: 'error'
+    }]);
+
+    const rejected = loadReconStatusRefresh({
+      sessionStatus: async () => { throw new Error('IPC 中断'); }
+    });
+    assert.equal(await rejected.refresh({ updateStatus: false }), false);
+    assert.deepEqual(rejected.statusWrites, [{
+      message: '对账单修复状态读取失败：IPC 中断',
+      tone: 'error'
+    }]);
+  });
+
+  test('场景读取失败也有独立错误投影，不会被静默 session 同步吞掉', () => {
+    assert.match(source, /let scenarioReadFailed = false;/);
+    assert.match(source, /scenarioReadFailed = true;[\s\S]*?scenarioReadFailure = result;/);
+    assert.match(source, /if \(scenarioReadFailed && elements\.reconIdFixStatusBox\)/);
+    assert.match(source, /对账单修复场景读取失败/);
   });
 });
 
