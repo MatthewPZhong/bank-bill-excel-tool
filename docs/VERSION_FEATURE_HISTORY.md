@@ -11,7 +11,7 @@
 
 ## v3.1.14（2026-08-21）
 
-v3.1.14 修复 VCC 财务 OP 大批量明细在工作簿读取完成后的数据库收尾退化，并增加真实阶段反馈。随包文档采用长期候选口径；公开稳定版、下载资产和发布时间以 GitHub Releases 为准。
+v3.1.14 修复 VCC 财务 OP 大批量明细在工作簿读取完成后的数据库收尾退化，并增加真实阶段反馈。本版已于 2026-08-21 通过受控 Windows Release workflow 正式发布为 latest stable Release。
 
 ### 新增
 
@@ -28,12 +28,14 @@ v3.1.14 修复 VCC 财务 OP 大批量明细在工作簿读取完成后的数据
 - storage contract 继续为 v2；不改变金额、币种、幂等、异常、revision、归档或清理算法。
 - 已创建索引的数据库回滚应用代码后仍保留索引和性能收益；只有未升级数据库或恢复旧备份才可能重新缺索引。
 
-### 正式发布准备与人工边界
+### 正式发布结论与人工边界
 
-- 功能 PR #162 已以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入 `main`；完整自动门禁、重要变量扫描和真实样本首轮/重导已闭合。
-- 发布负责人于 2026-08-21 在已知人工边界后授权继续正式技术发布。发布采用 tag 前准备 PR、annotated tag/受控 Windows workflow、发布后独立证据 PR 的固定顺序；当前不预写尚未产生的发布身份或资产摘要。
-- Windows packaged VCC 阶段/取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖和 `production/latest` canary 均为 `MANUAL / NOT RUN`。授权不是验收 PASS；任一补测失败都停止推广并发布更高补丁版本。
-- 已推送 tag 与已发布资产按不可变规则处理，不删除、替换或重传；实际 tag object、workflow、Release 和四项资产证据只在发布后独立回读并另行合入。
+- 功能 PR #162 以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入产品代码，发布准备 PR #163 以 merge commit `225d07d17a7c211348ba549734aaf84f602253cb` 收口 `main`；annotated tag `v3.1.14` 的 tag object 为 `fee1498311854a69fea666fe275511da89d99836`，peeled 后精确指向该发布准备提交。
+- Windows Release workflow [32508170702](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32508170702) 全部 15 步成功，并创建 [v3.1.14 latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14)。Release 公开、非 draft、非 prerelease；GitHub 默认 latest 回读 `tagName=v3.1.14`。
+- Setup、portable、blockmap 和 `latest.yml` 四项资产已通过无凭据公开 HTTPS GET 与独立摘要回读；实际大小/SHA-256 与 GitHub digest 一致，`latest.yml` 的 version/path/size/releaseDate 与 Setup SHA-512 均一致。两个 EXE 为 Windows PE32 GUI / Nullsoft Installer 自解压文件，认证与匿名下载逐字节一致。
+- PR #163 body 已稳定记录实际批准人、完整豁免范围、理由及发布后逐项补做计划；最小 `main` 冻结窗口在 `Verify tag and main` 成功后闭合。workflow 首轮成功，未触发受控重跑；Release/资产未创建时的基础设施瞬时故障边界继续保留。
+- Windows packaged VCC 阶段/取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖和 `production/latest` canary 均为 `MANUAL / NOT RUN`。技术 Release 完成不是验收 PASS；任一补测失败都停止推广并发布更高补丁版本。
+- GitHub API 当前 `isImmutable=false`；仓库仍把 tag 与资产视为不可变，不删除、替换或重传。
 
 ## v3.1.13（2026-08-20）
 

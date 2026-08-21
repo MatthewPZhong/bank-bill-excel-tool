@@ -4,7 +4,7 @@
 | --- | --- |
 | 目标版本 | v3.1.14 |
 | 日期 | 2026-08-21 |
-| 状态 | 实现、自动验证与真实样本验证完成；正式技术发布已授权；Windows 人工边界未验证 |
+| 状态 | 正式技术发布与公开资产回读完成；Windows 人工边界未验证 |
 | 关联 TechDoc | `changes/3.1.14/techdoc.md` |
 | 发布代码基线 | PR #162 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` |
 | 设计起始基线 | `147af9a736b7daaf7a1cdd17eff3535fdc62cd98` |
@@ -169,11 +169,11 @@ npm run check:vars
 git diff --check
 ```
 
-### Tag 前发布口径
+### 正式发布证据与人工边界
 
-- 随包 `docs/USER_GUIDE.md` 使用长期候选口径：说明指南随 v3.1.14 构建并在 tag 前定稿，公开稳定版、下载资产和发布时间以 GitHub Releases 为准；不保留会在发布瞬间过期的“尚未发布 / 当前 latest 为旧版”快照。
-- 功能 PR #162 已以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入 `main`。发布负责人已在明确知晓 Windows packaged VCC 交互、Windows 10/11、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装和 `production/latest` canary 均为 `MANUAL / NOT RUN` 后，授权继续正式技术发布；授权不构成人工验收 PASS。
-- tag 前必须在稳定的 GitHub PR body 或 Issue 评论中记录实际批准人、完整豁免范围、理由和发布后逐项补做计划；真实链接只在记录创建后写入，不预写占位。缺少完整稳定记录不得创建或推送 tag。
-- 发布固定采用“tag 前发布准备 PR → 精确指向当时 `main` 的 annotated tag → 受控 Windows Release workflow → 发布后独立证据 PR”。实际 tag object、workflow ID、Release 和资产大小/摘要只能在发生并独立回读后写入。
-- 从 tag 前最终同步/复验并准备推送 tag 起，到 workflow 的 `Verify tag and main` 成功为止冻结对 `main` 的 merge/push。tag 前发现漂移必须重新同步并复验门禁、文档和 Review；tag 推送后、校验成功前发现 `main` 漂移则停止 v3.1.14，保留且不改 tag，改发更高补丁版本。窗口外不要求全程冻结 `main`。
-- 仅当 Release/资产均未创建且可证明是基础设施瞬时故障时，可在代码、tag、commit 和打包输入完全不变的前提下受控重跑同一 tag/commit。产品、元数据或打包输入问题，或 Release 已创建后的失败，均停止公告/推广并发布更高补丁版本；已推送 tag 与资产不可删除、替换或重传。
+- 功能 PR #162 / `1cc5999c62e4666d56b542e37e54529f6177e6bc` 与发布准备 PR #163 / `225d07d17a7c211348ba549734aaf84f602253cb` 构成发布提交血缘。annotated tag `v3.1.14` 的 tag object 为 `fee1498311854a69fea666fe275511da89d99836`，peeled 后精确指向发布准备提交，远端回读一致。
+- Windows Release workflow [32508170702](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32508170702) 全部 15 步成功，并创建公开、非 draft、非 prerelease 的 [v3.1.14 latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14)；GitHub 默认 latest 回读 `tagName=v3.1.14`。
+- Setup、portable、blockmap、`latest.yml` 四项资产均通过无凭据 HTTPS GET、大小和 SHA-256/GitHub digest 对比；更新元数据的 version/path/size/releaseDate 与 Setup SHA-512 一致，两个 EXE 类型与认证/匿名下载也完成复核。精确文件名、大小与摘要见 Runbook 和 implementation notes。
+- PR #163 body 已稳定记录实际批准人、完整豁免范围、理由和发布后逐项补做计划；最小 `main` 冻结窗口持续到 `Verify tag and main` 成功并正常闭合。workflow 首轮成功，未触发重跑。
+- Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装和 `production/latest` canary 均保持 `MANUAL / NOT RUN`。技术 Release 完成不构成人工验收 PASS，也不得公告“Windows / 在线升级已验证”。
+- GitHub API `isImmutable=false` 不改变仓库规则；tag 与资产不得删除、替换或重传。只有 Release/资产均未创建且可证明为基础设施瞬时故障时，才允许在代码、tag、commit、打包输入不变下受控重跑同一 tag/commit；产品、元数据、打包输入问题、Release 已创建后的失败或后续人工项失败均停止推广并发布更高补丁。

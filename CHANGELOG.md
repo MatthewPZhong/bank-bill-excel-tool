@@ -2,7 +2,7 @@
 
 ## 3.1.14 - 2026-08-21
 
-> v3.1.14 修复 VCC 财务 OP 大批量明细完成读取后，数据库 staging 自引用外键清理可能长时间无响应的问题，并让状态框区分“正在导入”和“正在校验并写入”。随包文档采用长期候选口径；公开稳定版、下载资产和发布时间以 GitHub Releases 为准。
+> v3.1.14 修复 VCC 财务 OP 大批量明细完成读取后，数据库 staging 自引用外键清理可能长时间无响应的问题，并让状态框区分“正在导入”和“正在校验并写入”。本版已于 2026-08-21 通过受控 Windows Release workflow 正式发布为 latest stable Release。
 
 ### VCC 财务 OP 导入性能与反馈
 
@@ -11,14 +11,13 @@
 - **取消提示保持优先**：用户点击取消后，晚到的读取或提交阶段事件不再覆盖“正在取消导入并回滚本次未完成数据…”。后端取消、120 秒超时、事务回滚和 worker 终止合同不变。
 - **业务与兼容边界**：金额、币种、方向、业务键、幂等、异常、dataset revision、归档血缘和整批清理 SQL均不变。应用代码回滚不会删除已经创建的索引；旧代码可继续使用同一 contract-v2 数据库。
 
-### v3.1.14 · 正式发布准备与人工边界
+### v3.1.14 · 正式发布结论与人工边界
 
-- **功能代码已合入并完成本地门禁**：功能 PR #162 以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入 `main`；完整 `release-check`、重要变量扫描和真实样本首轮/重导均已闭合。自动化与本地样本不替代 Windows packaged、安装和升级人工验证。
-- **正式技术发布已授权**：发布负责人在明确知晓下述人工边界后，于 2026-08-21 授权继续技术发布。发布固定按“tag 前发布准备 PR → 精确指向当时 `main` 的 annotated tag/受控 Windows workflow → 发布后独立证据 PR”执行；实际 tag、workflow、Release 和资产事实只在发生并回读后记录。
-- **人工边界保持未验证**：Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装及 `production/latest` 在线 canary 均为 `MANUAL / NOT RUN`。发布授权不是这些项目 PASS，也不得用于“Windows / 在线升级已验证”的公告。
-- **tag 前稳定授权记录是硬门禁**：必须先在稳定的 GitHub PR body 或 Issue 评论中写明实际批准人、完整豁免范围、理由以及发布后逐项补做计划；真实链接只在该 PR/评论实际创建后记录，不预写占位链接。缺少这份稳定记录不得创建或推送 tag。
-- **最小串行发布窗口**：从 tag 前最终同步/复验并准备推送 tag 起，到 Release workflow 的 `Verify tag and main` 成功为止，冻结对 `main` 的 merge/push。tag 前发现漂移就重新同步并复验门禁、文档和 Review；tag 推送后、校验成功前若 `main` 漂移，则停止 v3.1.14，保留且不改 tag，改发更高补丁版本。窗口外不要求全程冻结 `main`。
-- **不可变与失败边界**：仅当 Release 与资产均尚未创建，且可证明失败是基础设施瞬时故障时，才可在不改代码、tag、commit 和打包输入的前提下受控重跑同一 tag/commit。产品、元数据或打包输入问题，或 Release 已创建后的失败，均停止公告/推广并改发更高补丁版本；不得删除、替换、重传 tag 或资产。
+- **正式技术发布完成**：功能 PR #162 以 merge commit `1cc5999c62e4666d56b542e37e54529f6177e6bc` 合入产品代码，发布准备 PR #163 再以 merge commit `225d07d17a7c211348ba549734aaf84f602253cb` 收口 `main`。annotated tag `v3.1.14`（tag object `fee1498311854a69fea666fe275511da89d99836`）peeled 后精确指向该发布准备提交；Windows Release workflow [32508170702](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32508170702) 全部 15 步成功，并创建 [v3.1.14 latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.14)。
+- **四项公开资产完成独立回读**：Setup、portable、blockmap 与 `latest.yml` 均以无凭据 HTTPS GET 完整下载，实际大小和 SHA-256 与 GitHub digest 一致；`latest.yml` 的 version/path/size、releaseDate 和 Setup SHA-512 与公开 Setup 一致。两个 EXE 均识别为 Windows PE32 GUI / Nullsoft Installer 自解压文件，认证下载与匿名下载逐字节一致；完整文件名、大小和摘要记录在 `docs/WINDOWS_RELEASE_RUNBOOK.md`。
+- **人工边界保持未验证**：Windows packaged VCC 阶段切换与取消体验、Windows 10/11 Setup/portable、SmartScreen、`v3.1.13 -> v3.1.14` 离线覆盖安装及 `production/latest` 在线 canary 均为 `MANUAL / NOT RUN`。技术 Release 完成不等于这些项目 PASS，也不得用于“Windows / 在线升级已验证”的公告。
+- **发布准备规则已执行并继续保留**：PR #163 body 已稳定记录实际批准人、完整豁免范围、理由和发布后逐项补做计划；最小 `main` 冻结窗口已执行，并在 workflow 的 `Verify tag and main` 成功后闭合。workflow 本次首轮成功，未触发瞬时故障重跑；今后仍只允许在 Release/资产均未创建且可证明为基础设施瞬时故障时，在代码、tag、commit、打包输入不变的前提下重跑同一 tag/commit。产品、元数据、打包输入问题或 Release 已创建后的失败必须改发更高补丁。
+- **不可变发布规则继续生效**：Release 为公开、非 draft、非 prerelease，GitHub 默认 latest 回读为 `v3.1.14`；API `isImmutable=false` 不改变仓库规则。已发布 tag 与四项资产不得删除、替换或重传；若后续人工项失败，停止推广并发布更高补丁版本。
 
 ## 3.1.13 - 2026-08-20
 
