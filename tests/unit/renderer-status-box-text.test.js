@@ -12,7 +12,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const RENDERER_PATH = path.join(__dirname, '..', '..', 'src', 'renderer.js');
-const source = fs.readFileSync(RENDERER_PATH, 'utf8');
+// GitHub Windows runner 会把 checkout 转为 CRLF；源码截取统一按 LF 处理，避免平台换行影响测试边界。
+const source = fs.readFileSync(RENDERER_PATH, 'utf8').replace(/\r\n?/g, '\n');
 
 function loadReconStatusRefresh({ sessionStatus }) {
   const start = source.indexOf('async function refreshReconIdFixStatus(');

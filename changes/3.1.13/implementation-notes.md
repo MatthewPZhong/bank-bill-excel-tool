@@ -52,6 +52,7 @@
 | 存档中心首轮增补保留设置页文件总大小和维护提示 | 同版继续移除设置页重复容量投影并静默维护类顶部文案 | 用户追加明确需求 | 只改变 renderer 展示，维护执行与非维护反馈不变 | 是 |
 | v3.1.13 原计划不再改其它主模块 | 同版修复平盘对账数据处理与对账单修复初始化状态 | 用户发现 v3.1.9 已声明行为在真实入口未实现并要求修复 | 新增两个 renderer 状态投影改动、行为测试、主面板预览与文档；不改对账业务 | 是 |
 | 星星移除初始盘点只覆盖 Electron 生产入口 | 盲区复核追加清理 `Clear/` 六个当前 UI 样板及样板 CSS | 全仓非历史检索发现该目录仍复制同款星星，且被版本资料用作当前结构基线 | 不改变运行包；消除样板漂移并把静态回归扩大到镜像路径 | 是 |
+| 初始化状态行为测试按 LF 固定边界截取 renderer 函数 | 读取源码后先把 CRLF/CR 归一为 LF，再执行既有边界截取 | PR #159 首轮 Windows checkout 使用 CRLF，生产行为正常但两个测试无法提取函数 | 仅增强测试跨平台稳定性，不改变生产代码或产品合同 | 不适用（测试基础设施） |
 
 ## Evidence
 
@@ -89,6 +90,7 @@
 | 状态框视觉基线 | 重建 13 个主页面模块代表预览及 `toolbox.png`，共 14 张；人工查看 main/new-account/bank-statement/position/toolbox | 普通、特殊直系文字、跨行、长框与工具箱状态框均无星星且无异常留白；模块切换器等非状态 SVG 保留 |
 | 星星移除最终门禁 | `npm run lint` PASS；unit 5597/5598 PASS（1 skip、0 fail）；`npm run smoke` PASS；`git diff --check` PASS | 350 个 unit 文件、状态更新、对账 smoke、主题与补丁空白；unit 日志 `logs/unit-tests/unit-20260820-205126.log` |
 | 合并前完整 release-check | lint PASS；smoke PASS；unit 5597/5598 PASS（1 skip、0 fail）；48 个 integration 脚本、2410/2410 断言 PASS | 最终工作树完整门禁；unit 日志 `logs/unit-tests/unit-20260820-205852.log`，集成清单由 runner 自动同步 |
+| Windows CRLF 回归修复 | PR #159 首轮 Windows 门禁仅两项源码提取测试失败；换行归一后定向测试 22/22 PASS，模拟 CRLF 后函数边界提取 PASS | 证明失败源为测试平台换行假设，产品代码、状态生命周期及其余 5594 个断言未受影响 |
 
 ## Remaining Unknowns
 
