@@ -3,8 +3,9 @@
 | 项目 | 内容 |
 | --- | --- |
 | 日期 | 2026-08-20 |
-| 当前阶段 | tag 前收尾门禁完成；待发布准备 PR；Windows 人工边界保持未验证 |
-| 发布基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
+| 当前阶段 | 正式技术发布与证据回读完成；待证据 PR；Windows 人工边界保持未验证 |
+| 产品基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
+| 发布 tag 基线 | PR #160 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` |
 
 ## Baseline
 
@@ -38,6 +39,8 @@
 | 已知人工边界下接受正式技术发布授权 | 发布负责人在已明确披露 Windows 原生交互、packaged 体验、安装/升级与 canary 未执行后，要求执行正式收尾和发布收尾 | 把授权当作 Windows PASS，或继续无限等待当前环境无法执行的验证 | 可继续生成技术资产；所有对应项目仍标记 `MANUAL / NOT RUN` |
 | Release 资产只由受控 workflow 一次生成 | Runbook 要求 published stable 资产不可变，同名覆盖会破坏在线更新与审计 | 手工上传、替换、删除或重传同版本资产 | tag/Release 后发现问题时停止公告并发布更高补丁版本 |
 | 本次不执行 check-vars | 仓库维护者已明确要求以后不再运行该检查，本次发布继续遵守 | 忽略维护指令执行 `scan:vars` / `check:vars` | 完整 release-check 与 Windows CI 仍执行；最终交付明确记录此项跳过 |
+| 首次 Release workflow 失败后只重跑同一 tag | 失败为真实 PowerShell CIM snapshot 15 秒超时；PR #160 同探针已通过，且构建/Release 全部未开始 | 移动 tag、提交代码后重跑、手工创建 Release或直接放弃可证明的瞬时故障 | tag/commit/资产身份不变；第二次完整执行成功，首轮失败证据保留 |
+| 明确记录平台级 immutable 未启用 | `gh release list` 返回 v3.1.13 `isImmutable=false` | 把流程层“不可变”误写成 GitHub 平台已强制锁定 | Runbook 继续禁止修改；若需技术强制，另立仓库治理任务 |
 
 ## Assumptions
 
@@ -101,6 +104,13 @@
 | 正式技术发布授权 | 发布负责人在 Windows 原生交互、packaged 体验、安装/升级和在线 canary 边界已明确披露后，要求执行正式收尾与发布收尾 | 授权继续两阶段技术发布；未执行项不转为 PASS |
 | tag 前收尾完整 release-check | lint、smoke PASS；unit 5597/5598 PASS（1 个 Windows 专用 skip）；48 个 integration 脚本、2410/2410 断言 PASS；unit 日志 `logs/unit-tests/unit-20260820-224923.log` | 发布文档、合同测试与完整产品回归闭合；integration 自动耗时噪音未纳入提交 |
 | 本地 packaged-inputs 预检 | 当前共享工作树因本轮尚未提交的 `docs/USER_GUIDE.md` 与既有未追踪 `assets/清结算自有账户表.xlsx` 按设计 FAIL；未移动、删除或纳入该用户文件 | 不能把共享工作区伪装成干净打包快照；收尾 PR 的干净 GitHub checkout 继续执行同一 fail-closed 门禁 |
+| 发布准备 PR | PR #160 的 Windows workflow `32452627917`：smoke-test 36m13s、build 1m50s，全部 PASS；merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` | 干净 checkout 的 packaged inputs、x64 build、startup adapter、SQLite teardown 和布局门禁 |
+| Tag 身份 | annotated object `5d5c9c828869bc82931cd1861f4cff3a099b5f32`，远端 peeled commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` | tag 类型、版本、发布时 main 与远端身份一致 |
+| Release workflow 首次尝试 | run `32455995895` 的 `release-check` PASS；真实 PowerShell snapshot 以 `PROCESS_SNAPSHOT_TIMEOUT` fail closed；Build/Publish 全部 skipped | 没有半成品 Release 或资产；保留可审计失败证据 |
+| Release workflow 受控重跑 | 同 run ID / 同 tag / 同 commit 的第二次 job `96702349609` 全部 15 步 PASS，发布于 `2026-08-21T08:07:16Z` | Windows 探针、打包、metadata、Release 创建与 workflow 回读闭合 |
+| 公开 Release 状态 | v3.1.13 为公开、非 draft、非 prerelease、latest stable；GitHub API `isImmutable=false` | 分发身份闭合；平台强制锁定缺口透明保留 |
+| 四项资产独立回读 | Setup `100371076` / `0316f86d0300f33a034596863c295aec7cd31111de916892389c16117b63b06a`；portable `99874308` / `918f858bffa1611ecce5fb8400c1da33fa62867bafd721b692a997b302be07ef`；blockmap `105417` / `7bb644b372282f8ecff8cea569f1adcedee01783dba7dd85725495e145d9129c`；latest `372` / `12f3cb340aa8bd3b642a505010673bebbe3784d5368a558c8c42fc39d2550ff0` | 无凭据完整 GET、大小和 SHA-256 与 GitHub digest 一致 |
+| 更新元数据独立回读 | `latest.yml` version/path/size 匹配 Setup；独立 Setup SHA-512 `4m7H4Xxq72n2u7Js89A0j/z2yORmKgaFA4P5l9EYWYBe5r8acJgRKb68/9slLPFhN2bBiMS5a7OFlplmDmwpJg==` 一致 | 在线更新元数据与公开 Setup 内容一致 |
 
 ## Remaining Unknowns
 

@@ -2,7 +2,7 @@
 
 版本：`v3.1.13`
 
-> 版本说明：本指南随 v3.1.13 应用构建并在打 tag 前定稿。v3.1.13 新增工具箱状态框与运行期间关闭保护，把多文件拆分的同名覆盖确认按钮改为【返回 / 覆盖全部】，调整存档中心前端，修复平盘对账数据处理和对账单修复成功初始化时没有保持“欢迎使用小助手”的问题，并移除所有状态框的星星 SVG。当前公开稳定版、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。发布负责人已在已知 Windows 人工边界下授权进入正式技术发布；这不表示 Windows 原生确认框、packaged 长任务体验、安装/升级或在线 canary 已验证。
+> 版本说明：v3.1.13 已于 2026-08-21 通过受控 Windows workflow 正式发布为 [latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.13)，Setup、portable、blockmap 与 `latest.yml` 四项资产已完成无凭据回读。本版新增工具箱状态框与运行期间关闭保护，把多文件拆分的同名覆盖确认按钮改为【返回 / 覆盖全部】，调整存档中心前端，修复平盘对账数据处理和对账单修复成功初始化时没有保持“欢迎使用小助手”的问题，并移除所有状态框的星星 SVG。Windows 原生确认框、packaged 长任务体验、安装/升级和在线 canary 仍未人工验证，不能把技术 Release 表述为这些项目已通过。
 
 ---
 
@@ -3116,7 +3116,7 @@ v3.1.12 调整了 v3.0.5 的“先显示加载页面、后台继续初始化”�
 
 #### v3.1.13 发布与人工验证边界
 
-v3.1.13 的功能代码已通过自动化和 Windows CI，发布负责人已授权继续生成正式技术资产。Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务期间的关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、从 v3.1.12 离线覆盖安装以及 `production/latest` 在线升级 canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不等于这些人工项已经通过。
+v3.1.13 已通过 Windows Release workflow 完成正式技术发布，四项公开资产已独立核验。Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务期间的关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、从 v3.1.12 离线覆盖安装以及 `production/latest` 在线升级 canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不等于这些人工项已经通过。
 
 正式版本、四项 Windows 资产及发布时间只以 GitHub Releases 页面为准。已发布 tag 和资产不可替换；若后续人工验证发现问题，应停止推广并等待更高补丁版本，不要继续使用或传播被发现有问题的安装包。
 

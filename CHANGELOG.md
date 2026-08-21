@@ -17,12 +17,13 @@
 - **移除全部状态框星星装饰**：主页面 13 个静态状态框和工具箱动态状态框不再显示星星 SVG，只保留状态文字。两套主题同步清理图标盒与图文间距，状态框尺寸、位置、换行、滚动、色调、可访问性和状态更新逻辑不变；按钮及其它功能性 SVG 不受影响。
 - **兼容边界**：不修改工具箱 IPC、Excel 输入输出、字段筛选、格式保真、全局批次、存档、恢复或对账业务语义；不改变金额、币种、匹配、回填和按钮判定，v3.1.12 及更早输出无需迁移。
 
-### v3.1.13 · 正式发布准备与人工边界
+### v3.1.13 · 正式发布结论与人工边界
 
-- **产品代码已合入并通过自动门禁**：功能 PR #159 以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main`；Windows workflow `32446647451` 的 smoke-test 与 build 均通过。自动化覆盖代码、测试与打包输入，不替代 Windows 人工交互。
-- **正式技术发布已授权**：发布负责人在已明确知晓人工边界后，于 2026-08-20 要求执行正式收尾与发布收尾。发布按“tag 前收尾 PR → annotated tag/受控 Windows Release workflow → 发布证据 PR”执行，当前公开稳定版、下载资产和发布时间以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。
-- **人工边界保持未验证**：Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装及 `production/latest` 在线 canary 均为 `MANUAL / NOT RUN`。发布授权不等于这些项目 PASS，也不得据此公告“Windows / 在线升级已验证”。
-- **发布资产不可变**：`v3.1.13` 只能由精确指向发布时 `main` 的 annotated tag 创建一次；Release 后不得删除、替换或重传同版本资产。若发现问题，停止公告并发布更高补丁版本；实际 tag、workflow、Release 与资产摘要只在完成回读后写入发布证据 PR。
+- **正式技术发布完成**：功能 PR #159 以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入产品代码，发布准备 PR #160 再以 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` 收口 `main`；annotated tag `v3.1.13`（tag object `5d5c9c828869bc82931cd1861f4cff3a099b5f32`）peeled 后精确指向发布准备提交。Windows Release workflow [32455995895](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32455995895) 成功，并创建 [v3.1.13 latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.13)。
+- **瞬时失败没有产生半成品**：workflow 首次尝试在真实 PowerShell process snapshot 的 15 秒硬超时处以 `PROCESS_SNAPSHOT_TIMEOUT` 停止，完整 `release-check` 已通过但构建与 Release 全部跳过；同一 tag、同一 commit 的受控重跑通过全部 15 个步骤。期间没有改写 tag、代码或资产。
+- **四项公开资产完成独立回读**：Setup、portable、blockmap 与 `latest.yml` 均通过无凭据公开下载；独立文件大小和 SHA-256 与 GitHub digest 一致，Setup SHA-512 与 `latest.yml` 一致。完整文件名、大小和摘要记录在 `docs/WINDOWS_RELEASE_RUNBOOK.md`。
+- **人工边界保持未验证**：Windows 原生【返回 / 覆盖全部】按钮顺序与默认焦点、packaged 长任务关闭保护、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装及 `production/latest` 在线 canary 均为 `MANUAL / NOT RUN`。技术 Release 完成不等于这些项目 PASS，也不得据此公告“Windows / 在线升级已验证”。
+- **不可变发布规则继续生效**：已发布 tag 和四项资产不得删除、替换或重传；若后续人工验证发现问题，停止推广并发布更高补丁版本。GitHub API 当前未启用平台级 immutable 标记，仓库仍以流程、审计和发布负责人约束执行不可变策略。
 
 ## 3.1.12 - 2026-08-20
 
