@@ -257,3 +257,11 @@
 - 无代码或发布身份 BLOCK；用户已明确要求在已知人工边界下继续正式技术发布。
 - Windows 原生交互、系统字体、SmartScreen、离线覆盖安装与 `production/latest` canary 不会被标为 PASS；tag 前 PR body 和发布后证据都会保留具体补测范围。
 - 任何 tag/Release workflow 或资产回读失败都会停止发布收尾；不会删除、替换或重传同版本资产。
+
+### 实际发布结果
+
+- 发布准备 PR #160 合入 `main@099f2c9c8078c83785d71c499a68f2a818ab8c7c`；annotated tag object `5d5c9c828869bc82931cd1861f4cff3a099b5f32` peeled 后与该提交一致。
+- Release workflow `32455995895` 首次在完整回归通过后因 PowerShell process snapshot 的 15 秒硬超时 fail closed；构建与 Release 没有开始。相同 tag/commit 的受控重跑通过全部步骤并发布 v3.1.13 latest stable Release。
+- 四项资产经无凭据完整下载，大小、SHA-256、`latest.yml` version/path/size 与 Setup SHA-512 均一致；分发契约 CLOSED。
+- GitHub 平台级 immutable 标记未启用（API `isImmutable=false`）；仓库规则仍禁止修改 tag/资产，该平台治理缺口不通过改动已发布内容处理。
+- Windows 原生/packaged 人工体验、Windows 10/11 安装、SmartScreen、离线覆盖安装和 `production/latest` canary 保持 `MANUAL / NOT RUN`；技术发布完成不改变这些状态。

@@ -85,12 +85,16 @@ workflow 直接创建 published、non-draft、non-prerelease Release。不要手
 - 四项资产的公开 URL 均以无凭据 HEAD 请求跟随重定向得到 HTTP 200；独立下载的 `latest.yml` 与 blockmap SHA-256 和 GitHub asset digest 一致。发布负责人在 tag 前已确认 3.1.12 人工验收完成并授权发布，未使用发布前豁免。
 - 当前收尾环境为 macOS，不能执行 Windows `3.1.11 -> 3.1.12` 的 `production/latest` 在线 canary。该项保持 `MANUAL / NOT RUN`；实际通过前不得公告“在线升级已验证”，且不得删除、替换或重传 v3.1.12 资产。若发现问题，按不可变发布规则发布更高补丁版本。
 
-## v3.1.13 发布准备
+## v3.1.13 发布记录
 
-- 目标版本为 `3.1.13`。功能 PR #159 已以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main`；Windows workflow [32446647451](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32446647451) 的 smoke-test 与 build 均通过。
-- tag 前先合并只包含发布文档与合同测试的收尾 PR。合并后必须重新 fetch，并确认 tracked worktree 干净、`package.json.version === 3.1.13`、本地 HEAD 与 `origin/main` 精确一致、远端不存在同名 tag/Release，才能创建唯一 annotated tag `v3.1.13`。
-- 发布负责人在当前任务中明确要求执行正式收尾和发布收尾，授权在已知人工边界下继续生成技术资产。批准范围为：Windows 原生【返回 / 覆盖全部】按钮顺序/焦点、packaged 长任务关闭保护与系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` 在线 canary 均暂不执行。
-- 豁免理由：当前收尾环境为 macOS；自动化与 Windows CI 可以证明代码、测试和打包门禁，不能代替上述原生交互、安装和升级人工验证。全部范围保持 `MANUAL / NOT RUN`，不得标记为人工验收 PASS，也不得公告“Windows / 在线升级已验证”。
-- 仓库维护者已明确要求以后不再运行 `check-vars`，本次发布不执行 `scan:vars` 或 `check:vars`；该跳过会保留在 PR 与最终交付记录中，不能伪装为通过。完整 `release-check` 与 Windows CI 仍按流程执行。
-- 发布后补做项：由 Windows 负责人依次核对原生确认框、长任务三个阶段、系统字体、Windows 10/11 Setup/portable 与 SmartScreen、离线 `v3.1.12 -> v3.1.13` 数据保留，并在 Release 存在后以旧 stable NSIS 执行 `production/latest` canary；任一失败都停止推广并发布更高补丁版本。
-- Release 只由 tag 触发的受控 workflow 一次创建。成功后独立回读 annotated tag、workflow、公开 latest stable Release、四项资产、匿名下载与 `latest.yml`/Setup SHA-512；再以单独发布证据 PR 回写真实 ID、大小和摘要。不得删除、替换或重传同版本资产。
+- Release：[v3.1.13](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.13)。功能 PR #159 以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入产品代码；发布准备 PR #160 以 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` 合入 `main`。
+- annotated tag object `5d5c9c828869bc82931cd1861f4cff3a099b5f32` peeled 后精确指向发布时 `main@099f2c9c8078c83785d71c499a68f2a818ab8c7c`。
+- Windows workflow [32455995895](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32455995895) 首次尝试在完整 `release-check` 通过后，真实 PowerShell process snapshot 因 15 秒硬超时以 `PROCESS_SNAPSHOT_TIMEOUT` fail closed；构建、资产 staging 和 Release 全部跳过，因此没有半成品 Release。PR #160 上同一探针已通过；同一 tag、同一 commit 的受控重跑随后通过全部 15 个步骤并创建 Release，未修改代码、tag 或资产。
+- Setup `bank-bill-excel-tool-setup-3.1.13.exe`：`100371076` bytes / SHA-256 `0316f86d0300f33a034596863c295aec7cd31111de916892389c16117b63b06a`。
+- portable `bank-bill-excel-tool-portable-3.1.13.exe`：`99874308` bytes / SHA-256 `918f858bffa1611ecce5fb8400c1da33fa62867bafd721b692a997b302be07ef`。
+- blockmap `bank-bill-excel-tool-setup-3.1.13.exe.blockmap`：`105417` bytes / SHA-256 `7bb644b372282f8ecff8cea569f1adcedee01783dba7dd85725495e145d9129c`；`latest.yml`：`372` bytes / SHA-256 `12f3cb340aa8bd3b642a505010673bebbe3784d5368a558c8c42fc39d2550ff0`。
+- `latest.yml` 的 version/path/size 与 Setup 一致，releaseDate 为 `2026-08-21T08:07:03.561Z`，Setup SHA-512 为 `4m7H4Xxq72n2u7Js89A0j/z2yORmKgaFA4P5l9EYWYBe5r8acJgRKb68/9slLPFhN2bBiMS5a7OFlplmDmwpJg==`。
+- Release 为公开、非 draft、非 prerelease 且是 latest stable；四项资产均以无凭据公开 GET 完整下载，实际大小和 SHA-256 与 GitHub asset digest 一致，独立计算的 Setup SHA-512 与 `latest.yml` 一致。两个 EXE 均识别为 Windows PE/NSIS 自解压文件。
+- GitHub API 当前报告 `isImmutable=false`，即平台级 immutable release 标记未启用；仓库发布流程和负责人仍必须把 tag/资产视为不可变，不得删除、替换或重传。若需要平台强制锁定，应另行启用 GitHub immutable releases，不在本次已发布资产上做变更。
+- Windows 原生【返回 / 覆盖全部】按钮顺序/焦点、packaged 长任务关闭保护与系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不是这些人工项 PASS。任一补测失败都停止推广并发布更高补丁版本。
+- 仓库维护者已明确要求以后不再运行 `check-vars`，本次发布未执行 `scan:vars` 或 `check:vars`，不将其表述为通过。

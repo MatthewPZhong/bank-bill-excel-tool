@@ -4,9 +4,10 @@
 | --- | --- |
 | 目标版本 | v3.1.13 |
 | 日期 | 2026-08-20 |
-| 状态 | 实现与自动验证完成；正式技术发布已授权；Windows 人工边界未验证 |
+| 状态 | 正式技术发布完成；Windows 人工边界未验证 |
 | 关联 TechDoc | `changes/3.1.13/techdoc.md` |
 | 产品代码基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
+| 发布 tag 基线 | PR #160 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` |
 
 ## 0. Goal / Context / Constraints / Done when
 
@@ -143,3 +144,10 @@
 - 发布负责人已在明确知晓边界后授权继续生成技术资产。该授权不是 Windows 人工验收 PASS：原生覆盖确认框按钮文案/顺序、packaged 长任务关闭体验、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` 在线 canary 均保持 `MANUAL / NOT RUN`。
 - 发布资产不可变：已推送 tag 或已发布资产不得改写、删除、替换或重传；若发现产品或资产问题，停止公告并发布更高补丁版本。
 - Release 完成后必须独立回读 annotated tag 身份、workflow、公开 Release、四项资产名/大小/摘要与 `latest.yml` 的 version/path/size/SHA-512，再通过单独的发布证据 PR 收口。
+
+## 8. 正式发布结果
+
+- PR #160 以 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` 合入 `main`；annotated tag object `5d5c9c828869bc82931cd1861f4cff3a099b5f32` peeled 后精确指向该提交。
+- Windows Release workflow `32455995895` 首次在 `release-check` 通过后因真实 PowerShell process snapshot 的 15 秒硬超时 fail closed，构建与发布均未开始；同一 tag/commit 的受控重跑通过全部步骤并创建 v3.1.13 latest stable Release。
+- Setup、portable、blockmap 与 `latest.yml` 四项资产均经无凭据完整下载；大小、SHA-256 与 GitHub digest 一致，Setup SHA-512 与 `latest.yml` 一致。
+- Windows 原生交互、系统字体、Windows 10/11 Setup/portable、SmartScreen、离线覆盖安装与 `production/latest` canary 仍为 `MANUAL / NOT RUN`。GitHub API 的平台级 immutable 标记当前为 false，但仓库流程继续禁止删除、替换或重传 tag/资产。

@@ -46,12 +46,13 @@ v3.1.13 调整工具箱主弹框、存档中心前端与模块状态框：工具
 - 工具箱、存档中心及两个对账模块的 preload/IPC 返回契约、输入文件类型、字段匹配、输出命名、格式保真、存档和恢复行为不变；金额、币种、匹配、回填与按钮判定不变。
 - v3.1.12 及更早版本生成的文件和存档无需迁移。
 
-**正式发布准备与人工边界**
+**正式发布结论与人工边界**
 
-- 功能 PR #159 已以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main`，Windows workflow `32446647451` 的 smoke-test 与 build 均通过。
-- 发布负责人在已明确知晓 Windows 人工边界后，于 2026-08-20 授权进入正式技术发布；流程固定为 tag 前收尾 PR、精确指向发布时 `main` 的 annotated tag `v3.1.13`、受控 Windows Release workflow 和发布后证据 PR。当前公开稳定版及资产以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。
-- Windows 原生确认框、packaged 长任务交互、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装与 `production/latest` 在线 canary 均保持 `MANUAL / NOT RUN`；技术发布授权不是人工验收 PASS。
-- tag 与 Release 资产不可变。实际 tag object、workflow、Release 与四项资产证据只在发布完成并独立回读后写入仓库；失败时不改写同版本资产，改发更高补丁版本。
+- 功能 PR #159 已以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入产品代码，发布准备 PR #160 再以 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` 收口 `main`；annotated tag `v3.1.13` 的 tag object 为 `5d5c9c828869bc82931cd1861f4cff3a099b5f32`，peeled 后精确指向发布准备提交。
+- Windows Release workflow [32455995895](https://github.com/MatthewPZhong/bank-bill-excel-tool/actions/runs/32455995895) 首次在真实 PowerShell snapshot 15 秒硬超时处 fail closed，构建和发布未开始；同一 tag/commit 受控重跑后全绿，并创建 [v3.1.13 latest stable Release](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases/tag/v3.1.13)。
+- Setup、portable、blockmap、`latest.yml` 四项资产均可无凭据公开下载；独立下载的大小、SHA-256 与 GitHub digest 一致，Setup SHA-512 与 `latest.yml` 一致。资产细节见 `docs/WINDOWS_RELEASE_RUNBOOK.md`。
+- Windows 原生确认框、packaged 长任务交互、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装与 `production/latest` 在线 canary 仍为 `MANUAL / NOT RUN`；技术 Release 完成不是人工验收 PASS。
+- tag 与资产按仓库不可变规则管理，后续不得删除、替换或重传；GitHub API 当前未启用平台级 immutable 标记，若补测失败仍须停止推广并发布更高补丁版本。
 
 ## v3.1.12（2026-08-20）
 

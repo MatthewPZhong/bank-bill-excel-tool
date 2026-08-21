@@ -24,7 +24,7 @@ function normalizedTextSha256(value) {
     .digest('hex');
 }
 
-test('v3.1.13 版本号、三份用户文档和设计资料同步工具箱、存档中心与状态框迭代', () => {
+test('v3.1.13 版本号、功能资料与正式发布证据同步工具箱、存档中心和状态框迭代', () => {
   const packageJson = JSON.parse(read('package.json'));
   const packageLock = JSON.parse(read('package-lock.json'));
   const changelog = read('CHANGELOG.md');
@@ -61,28 +61,48 @@ test('v3.1.13 版本号、三份用户文档和设计资料同步工具箱、存
   for (const currentSection of [currentChangelog, currentHistory]) {
     assert.match(currentSection, /关闭按钮.*隐藏|隐藏.*关闭按钮/);
     assert.match(currentSection, /覆盖全部/);
-    assert.doesNotMatch(currentSection, /正式发布完成|已于 2026-08-20 正式发布为/);
+    assert.match(currentSection, /正式技术发布完成|正式发布结论/);
+    assert.doesNotMatch(currentSection, /正式发布准备与人工边界/);
   }
-  assert.match(currentGuide, /在打 tag 前定稿/);
-  assert.match(currentGuide, /当前公开稳定版、下载资产和发布时间以.*GitHub Releases.*为准/s);
-  assert.match(currentGuide, /正式技术发布/);
-  assert.doesNotMatch(currentGuide, /尚未标记为正式发布|latest stable Release 仍为.*v3\.1\.12/);
+  assert.match(currentGuide, /v3\.1\.13 已于 2026-08-21.*正式发布为.*latest stable Release/s);
+  assert.match(currentGuide, /Setup、portable、blockmap 与 `latest\.yml` 四项资产.*无凭据回读/s);
+  assert.doesNotMatch(currentGuide, /在打 tag 前定稿|尚未标记为正式发布|latest stable Release 仍为.*v3\.1\.12/);
   for (const currentSection of [currentChangelog, currentHistory, currentGuide, spec, techdoc]) {
-    assert.match(currentSection, /正式技术发布/);
-    assert.match(currentSection, /MANUAL \/ NOT RUN|人工边界.*未验证|不表示.*已验证/s);
+    assert.match(currentSection, /正式技术发布|正式发布为.*latest stable Release|技术 Release/s);
+    assert.match(currentSection, /MANUAL \/ NOT RUN|人工边界.*未验证|仍未人工验证|不能把.*已通过/s);
   }
   for (const releaseDocument of [currentChangelog, currentHistory, implementationNotes, runbook]) {
     assert.match(releaseDocument, /PR #159/);
     assert.match(releaseDocument, /9e68c0339427a91c1948f73bfae66f0a76d17b5c/);
-    assert.match(releaseDocument, /32446647451/);
+    assert.match(releaseDocument, /PR #160/);
+    assert.match(releaseDocument, /099f2c9c8078c83785d71c499a68f2a818ab8c7c/);
     assert.match(releaseDocument, /annotated tag/);
-    assert.match(releaseDocument, /发布(?:后)?证据 PR/);
+    assert.match(releaseDocument, /5d5c9c828869bc82931cd1861f4cff3a099b5f32/);
+    assert.match(releaseDocument, /32455995895/);
   }
-  assert.match(runbook, /^## v3\.1\.13 发布准备$/m);
+  for (const releaseDocument of [currentChangelog, currentHistory, implementationNotes, runbook, techdoc]) {
+    assert.match(releaseDocument, /15 秒.*超时|15 秒硬超时/s);
+    assert.match(releaseDocument, /重跑/);
+  }
+  for (const releaseDocument of [currentChangelog, currentHistory, runbook]) {
+    assert.match(releaseDocument, /latest stable Release/);
+    assert.match(releaseDocument, /Setup/);
+    assert.match(releaseDocument, /portable/);
+    assert.match(releaseDocument, /blockmap/);
+    assert.match(releaseDocument, /latest\.yml/);
+  }
+  for (const releaseEvidence of [implementationNotes, runbook]) {
+    assert.match(releaseEvidence, /0316f86d0300f33a034596863c295aec7cd31111de916892389c16117b63b06a/);
+    assert.match(releaseEvidence, /918f858bffa1611ecce5fb8400c1da33fa62867bafd721b692a997b302be07ef/);
+    assert.match(releaseEvidence, /4m7H4Xxq72n2u7Js89A0j\/z2yORmKgaFA4P5l9EYWYBe5r8acJgRKb68\/9slLPFhN2bBiMS5a7OFlplmDmwpJg==/);
+  }
+  assert.match(runbook, /^## v3\.1\.13 发布记录$/m);
+  assert.doesNotMatch(runbook, /^## v3\.1\.13 发布准备$/m);
   assert.match(runbook, /Windows 10\/11 Setup\/portable/);
   assert.match(runbook, /v3\.1\.12 -> v3\.1\.13/);
   assert.match(runbook, /production\/latest/);
   assert.match(runbook, /MANUAL \/ NOT RUN/);
+  assert.match(runbook, /isImmutable=false/);
   assert.match(spec, /宽度固定为该宽度的两倍，即 144px/);
   assert.match(spec, /不修改 Excel 内容、格式保真、筛选、批次、存档、原子发布或恢复合同/);
   assert.match(techdoc, /S = L \+ L = 144px/);

@@ -4,10 +4,11 @@
 | --- | --- |
 | 目标版本 | v3.1.13 |
 | 日期 | 2026-08-20 |
-| 状态 | 与已合入实现同步；正式技术发布已授权；Windows 人工边界未验证 |
+| 状态 | 正式技术发布与资产回读完成；Windows 人工边界未验证 |
 | 产品 Spec | `changes/3.1.13/spec.md` |
 | 实施记录 | `changes/3.1.13/implementation-notes.md` |
-| 发布代码基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
+| 产品代码基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
+| 发布 tag 基线 | PR #160 merge commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c` |
 
 ## 1. 技术目标与不变量
 
@@ -462,3 +463,11 @@ Release workflow 必须 fail closed：
 - tag 推送后 workflow 失败：保留 tag 和失败证据。仅基础设施瞬时故障可对同一 commit 重跑；产品、元数据或打包输入缺陷使用更高补丁版本修复。
 - Release 已创建后任一回读失败：停止公告，不删除、不替换、不重传同版本资产；记录实际状态并发布更高补丁版本。
 - Windows 人工项或在线 canary 后续失败：同样停止公告/推广，保留不可变发布证据并以更高补丁修复。
+
+### 14.6 实际发布证据
+
+- annotated tag `v3.1.13`：object `5d5c9c828869bc82931cd1861f4cff3a099b5f32`，peeled commit `099f2c9c8078c83785d71c499a68f2a818ab8c7c`，与发布时 `main` 一致。
+- Windows workflow `32455995895`：首次尝试的完整 `release-check` 通过，真实 PowerShell snapshot 在 15 秒硬超时后返回 `PROCESS_SNAPSHOT_TIMEOUT`；Build/Publish 均未开始。PR #160 上同一探针已通过，故在不改变 tag/commit/资产的前提下受控重跑；第二次全部 15 个步骤成功。
+- Release：公开、非 draft、非 prerelease、latest stable。四项资产的独立下载大小与 SHA-256 均匹配 GitHub digest；Setup SHA-512 `4m7H4Xxq72n2u7Js89A0j/z2yORmKgaFA4P5l9EYWYBe5r8acJgRKb68/9slLPFhN2bBiMS5a7OFlplmDmwpJg==` 与 `latest.yml` 一致。
+- GitHub API 返回 `isImmutable=false`，平台级 immutable release 标记未启用。该事实不授权修改资产：仓库 Runbook、workflow 失败策略和发布负责人仍把 tag/资产作为不可变证据；平台强制锁定若需启用应另立治理任务。
+- Windows 人工验证与在线 canary 状态没有因技术 Release 改变，继续为 `MANUAL / NOT RUN`。
