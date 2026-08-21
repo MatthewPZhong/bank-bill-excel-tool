@@ -4,9 +4,9 @@
 | --- | --- |
 | 目标版本 | v3.1.13 |
 | 日期 | 2026-08-20 |
-| 状态 | 实现完成；自动验证通过；待 Windows 人工验收 |
+| 状态 | 实现与自动验证完成；正式技术发布已授权；Windows 人工边界未验证 |
 | 关联 TechDoc | `changes/3.1.13/techdoc.md` |
-| 产品代码基线 | `7221274f01b769c2786b63300f554fec65bf8641` |
+| 产品代码基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
 
 ## 0. Goal / Context / Constraints / Done when
 
@@ -131,9 +131,15 @@
 12. 对账单修复自动进入固定使用静默成功同步；历史 session/已选场景不覆盖欢迎文案，用户动作仍使用默认状态更新。
 13. 两个模块的状态读取失败结果和 Promise reject 均显示错误；平盘行为回归、两个模块静态接线、主面板布局与预览通过。
 14. `index.html` 和工具箱动态模板中的 14 个生产星星 SVG、`Clear/` 当前 UI 样板中的 6 个镜像全部移除；状态框内不存在 `.status-spark` 或 SVG，两套生产主题及样板 CSS 无残余图标盒/gap 合同，状态文字、色调、可访问性和既有几何保持可用。
+15. tag 前收尾文档使用可随安装包长期成立的稳定口径，不残留“当前尚未发布”或把未执行的 Windows 人工项写成 PASS；公开发布状态统一以 GitHub Releases 为准。
+16. `v3.1.13` 只能由精确指向发布时 `main` 的 annotated tag 触发受控 Windows Release workflow；Setup、portable、blockmap 和 `latest.yml` 四项资产齐全、公开可下载且元数据一致后，技术发布才算完成。
+17. Release 完成后以独立证据 PR 回写 tag object、peeled commit、workflow、Release 和资产回读结果；实际未执行的 Windows 10/11、SmartScreen、离线覆盖安装及 `production/latest` canary 继续保持 `MANUAL / NOT RUN`。
 
 ## 7. 发布口径
 
 - `package.json` 与 lockfile 版本更新为 `3.1.13`；`CHANGELOG.md`、`docs/VERSION_FEATURE_HISTORY.md`、`docs/USER_GUIDE.md` 同步更新。
-- 在 tag、Windows 构建与人工验收真正完成前，只能称“v3.1.13 迭代版本”，不得写成已发布或 latest stable。
-- 自动化不能替代 Windows 原生覆盖确认框的按钮文案/顺序，以及长任务期间真实关闭体验的人工检查。
+- tag 前收尾文档可以记录“正式技术发布已授权”，但在 tag、Windows workflow、Release 与公开资产真正完成前，不得写成“正式发布完成”或 latest stable；公开状态统一以 GitHub Releases 为准。
+- 随包 `docs/USER_GUIDE.md` 必须在 tag 前使用长期稳定口径，不写会随发布瞬间过期的“尚未发布 / 当前 latest 为旧版”快照；实际 Release 身份只在发布后证据 PR 中回写。
+- 发布负责人已在明确知晓边界后授权继续生成技术资产。该授权不是 Windows 人工验收 PASS：原生覆盖确认框按钮文案/顺序、packaged 长任务关闭体验、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装和 `production/latest` 在线 canary 均保持 `MANUAL / NOT RUN`。
+- 发布资产不可变：已推送 tag 或已发布资产不得改写、删除、替换或重传；若发现产品或资产问题，停止公告并发布更高补丁版本。
+- Release 完成后必须独立回读 annotated tag 身份、workflow、公开 Release、四项资产名/大小/摘要与 `latest.yml` 的 version/path/size/SHA-512，再通过单独的发布证据 PR 收口。

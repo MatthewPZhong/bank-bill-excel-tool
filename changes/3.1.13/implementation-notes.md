@@ -3,8 +3,8 @@
 | 项目 | 内容 |
 | --- | --- |
 | 日期 | 2026-08-20 |
-| 当前阶段 | 实现与自动门禁完成；待 Windows 人工验收 |
-| 基线 | `7221274f01b769c2786b63300f554fec65bf8641` |
+| 当前阶段 | tag 前收尾门禁完成；待发布准备 PR；Windows 人工边界保持未验证 |
+| 发布基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
 
 ## Baseline
 
@@ -34,6 +34,10 @@
 | 平盘 `initialize()` 仅在 refresh 成功后写欢迎 | 无条件 finally/后置写欢迎会覆盖真实读取失败 | 依赖 HTML 初值且不显式收口 | 初始化成功语义明确；异常不会阻断整个 renderer 初始化 |
 | 对账单修复场景列表失败独立显示 | 模块自动进入同时读取场景与 session，任一失败都属于真实初始化读取失败 | 只显示 session-status 失败 | 场景 IPC 非 ok/reject 不再只留 console，成功 session 同步也不会吞掉该错误 |
 | 删除星星包装而非仅隐藏 SVG | 14 个入口均为纯装饰，General 虽已隐藏但 Clear 仍显示；只隐藏会留下死 DOM、渐变 ID 和图文 gap | 仅加 `display:none` 或保留空 `.status-spark` | 两套主题 DOM 一致，状态更新仍只依赖 `.status-box-text`，不触碰其它 SVG |
+| 发布按“tag 前收尾 PR → annotated tag/Release → 发布证据 PR”两阶段执行 | tag 之前不能预知 workflow、Release 和资产实际身份；v3.1.12 已采用相同模式 | 在 tag 前把预期值写成已发布事实，或发布后改写 tag | 随包指南保持长期有效，实际外部证据由第二个 PR 回写 |
+| 已知人工边界下接受正式技术发布授权 | 发布负责人在已明确披露 Windows 原生交互、packaged 体验、安装/升级与 canary 未执行后，要求执行正式收尾和发布收尾 | 把授权当作 Windows PASS，或继续无限等待当前环境无法执行的验证 | 可继续生成技术资产；所有对应项目仍标记 `MANUAL / NOT RUN` |
+| Release 资产只由受控 workflow 一次生成 | Runbook 要求 published stable 资产不可变，同名覆盖会破坏在线更新与审计 | 手工上传、替换、删除或重传同版本资产 | tag/Release 后发现问题时停止公告并发布更高补丁版本 |
+| 本次不执行 check-vars | 仓库维护者已明确要求以后不再运行该检查，本次发布继续遵守 | 忽略维护指令执行 `scan:vars` / `check:vars` | 完整 release-check 与 Windows CI 仍执行；最终交付明确记录此项跳过 |
 
 ## Assumptions
 
@@ -91,18 +95,50 @@
 | 星星移除最终门禁 | `npm run lint` PASS；unit 5597/5598 PASS（1 skip、0 fail）；`npm run smoke` PASS；`git diff --check` PASS | 350 个 unit 文件、状态更新、对账 smoke、主题与补丁空白；unit 日志 `logs/unit-tests/unit-20260820-205126.log` |
 | 合并前完整 release-check | lint PASS；smoke PASS；unit 5597/5598 PASS（1 skip、0 fail）；48 个 integration 脚本、2410/2410 断言 PASS | 最终工作树完整门禁；unit 日志 `logs/unit-tests/unit-20260820-205852.log`，集成清单由 runner 自动同步 |
 | Windows CRLF 回归修复 | PR #159 首轮 Windows 门禁仅两项源码提取测试失败；换行归一后定向测试 22/22 PASS，模拟 CRLF 后函数边界提取 PASS | 证明失败源为测试平台换行假设，产品代码、状态生命周期及其余 5594 个断言未受影响 |
+| 功能 PR 正式合入 | PR #159 以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main` | 冻结 v3.1.13 技术发布的产品代码基线 |
+| 功能 PR Windows 门禁 | workflow `32446647451`：smoke-test PASS（30m27s）、build PASS（1m45s） | Windows checkout、完整 release-check 与打包输入在 PR 合并前闭合 |
+| 发布前远端审计 | v3.1.12 为公开 latest stable；远端不存在 v3.1.13 tag/Release；Release workflow 要求 annotated tag 与发布时 `origin/main` 精确一致 | 排除同名资产覆盖、lightweight tag 与旧 main 发布 |
+| 正式技术发布授权 | 发布负责人在 Windows 原生交互、packaged 体验、安装/升级和在线 canary 边界已明确披露后，要求执行正式收尾与发布收尾 | 授权继续两阶段技术发布；未执行项不转为 PASS |
+| tag 前收尾完整 release-check | lint、smoke PASS；unit 5597/5598 PASS（1 个 Windows 专用 skip）；48 个 integration 脚本、2410/2410 断言 PASS；unit 日志 `logs/unit-tests/unit-20260820-224923.log` | 发布文档、合同测试与完整产品回归闭合；integration 自动耗时噪音未纳入提交 |
+| 本地 packaged-inputs 预检 | 当前共享工作树因本轮尚未提交的 `docs/USER_GUIDE.md` 与既有未追踪 `assets/清结算自有账户表.xlsx` 按设计 FAIL；未移动、删除或纳入该用户文件 | 不能把共享工作区伪装成干净打包快照；收尾 PR 的干净 GitHub checkout 继续执行同一 fail-closed 门禁 |
 
 ## Remaining Unknowns
 
 | 未知 | 处理 | 负责人/下一步 | 合并影响 |
 | --- | --- | --- | --- |
-| Windows 原生 message box 是否按预期显示【返回】/【覆盖全部】 | PROBE | 发布前 Windows 人工查看 | 不得把 macOS 自动测试表述为 Windows 人工验收 |
-| packaged Windows 长任务期间关闭按钮消失、双入口禁用与遮罩门禁的真实手感 | PROBE | 发布前使用足够大的合并/拆分文件人工查看 | 静态合同与 macOS 自动化不能替代该平台验收 |
+| Windows 原生 message box 是否按预期显示【返回】/【覆盖全部】 | PROBE / MANUAL NOT RUN | 发布后由 Windows 负责人补测 | 技术发布已获授权；不得把 macOS 自动测试表述为 Windows 人工验收 |
+| packaged Windows 长任务期间关闭按钮消失、双入口禁用与遮罩门禁的真实手感 | PROBE / MANUAL NOT RUN | 发布后使用足够大的合并/拆分文件人工查看 | 技术发布已获授权；静态合同与 macOS 自动化不能替代该平台验收 |
 | 最终工具箱布局是否满足四边对齐 | CLOSED | 已生成并检查 `docs/previews/toolbox.png` | preview 与 CSS 几何合同一致 |
-| 存档中心在 packaged Windows 系统字体下的最终相邻间距 | PROBE | 发布前打开 browser/settings 两页人工查看 | 6 组 Electron 布局验证与 150% preview 已过，但不冒充真实 Windows 字体验收 |
+| 存档中心在 packaged Windows 系统字体下的最终相邻间距 | PROBE / MANUAL NOT RUN | 发布后打开 browser/settings 两页人工查看 | 6 组 Electron 布局验证与 150% preview 已过，但不冒充真实 Windows 字体验收 |
+| Windows 10/11 Setup、portable、SmartScreen 与 `v3.1.12 -> v3.1.13` 离线覆盖安装 | PROBE / MANUAL NOT RUN | 发布后由 Windows 负责人按 Runbook 补测 | tag 前豁免只允许生成技术资产，不得公告人工验收通过 |
+| `production/latest` 在线升级 canary | PROBE / MANUAL NOT RUN | Release 存在后由 Windows 负责人补测 | 技术 Release 成功不等于在线升级已验证 |
 | 超过 1000 个可见批次时的分页/无限滚动 | ASSUME | 若真实数据量需要展示更老批次，另立后端游标需求 | 本版沿用既有查询上限，不阻塞当前前端验收 |
 
 ## Blindspot Pass
+
+### [已覆盖] 收尾 PR 合并后 `main` 漂移导致 tag 指向旧提交
+
+- 场景：PR 合并与创建 tag 之间，另一提交进入 `main`；只看本地 HEAD 会让 Release workflow 发布旧基线或直接失败。
+- 影响：tag、package、公开资产与当前 `main` 身份分裂。
+- 处置：tag 前重新 fetch，并逐项验证本地 HEAD、`origin/main`、annotated tag peeled commit 和 package version；任一不一致都停止创建/推送 tag。
+
+### [已覆盖] 在 tag 前文档中预写不存在的 Release 事实
+
+- 场景：把预期 workflow ID、tag object、资产大小或 latest 状态当成已完成证据写入收尾 PR。
+- 影响：workflow 失败或产物变化后，tag 中随包文档成为不可修正的错误事实。
+- 处置：tag 前只写稳定发布流程、授权和人工边界；真实外部身份由 Release 成功后的独立证据 PR 回写。
+
+### [已覆盖] workflow 部分成功后删除或覆盖同版本资产
+
+- 场景：Release 已创建但最终回读失败，尝试删除 Release、移动 tag 或重传同名资产“修好”当前版本。
+- 影响：在线升级元数据、缓存和审计证据不再可复现，已下载用户可能取得不同内容。
+- 处置：tag 与资产一经推送即不可变；基础设施瞬时故障仅在未改变代码/资产的同一 tag 上受控重跑，产品或产物问题一律发更高补丁版本。
+
+### [已覆盖] 技术发布授权被误记为 Windows 人工 PASS
+
+- 场景：用户要求正式发布，但当前 macOS 环境不能验证 Windows 原生/packaged 交互、安装升级和 canary。
+- 影响：公告声称了没有证据支持的平台行为，掩盖真实补测责任。
+- 处置：PR、Runbook、Spec、用户指南和最终交付统一标记 `MANUAL / NOT RUN`，并记录批准来源、范围、理由和发布后补做项；技术 Release 成功不改变这些状态。
 
 ### [已覆盖] 空日期仍可能被其它初始化逻辑改回当天
 

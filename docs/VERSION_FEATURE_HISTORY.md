@@ -46,6 +46,13 @@ v3.1.13 调整工具箱主弹框、存档中心前端与模块状态框：工具
 - 工具箱、存档中心及两个对账模块的 preload/IPC 返回契约、输入文件类型、字段匹配、输出命名、格式保真、存档和恢复行为不变；金额、币种、匹配、回填与按钮判定不变。
 - v3.1.12 及更早版本生成的文件和存档无需迁移。
 
+**正式发布准备与人工边界**
+
+- 功能 PR #159 已以 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` 合入 `main`，Windows workflow `32446647451` 的 smoke-test 与 build 均通过。
+- 发布负责人在已明确知晓 Windows 人工边界后，于 2026-08-20 授权进入正式技术发布；流程固定为 tag 前收尾 PR、精确指向发布时 `main` 的 annotated tag `v3.1.13`、受控 Windows Release workflow 和发布后证据 PR。当前公开稳定版及资产以 [GitHub Releases](https://github.com/MatthewPZhong/bank-bill-excel-tool/releases) 为准。
+- Windows 原生确认框、packaged 长任务交互、系统字体、Windows 10/11 Setup/portable、SmartScreen、`v3.1.12 -> v3.1.13` 离线覆盖安装与 `production/latest` 在线 canary 均保持 `MANUAL / NOT RUN`；技术发布授权不是人工验收 PASS。
+- tag 与 Release 资产不可变。实际 tag object、workflow、Release 与四项资产证据只在发布完成并独立回读后写入仓库；失败时不改写同版本资产，改发更高补丁版本。
+
 ## v3.1.12（2026-08-20）
 
 v3.1.12 在保留 v3.1.11 文件批次与 VCC 存储安全合同的基础上，收口网银源文件确认、Windows 启动性能、VCC CNY/CNH 新导入口径和存档中心迁移/维护。本版仅对新导入建立新的币种与哈希合同，不迁移、不回填历史资金数据。

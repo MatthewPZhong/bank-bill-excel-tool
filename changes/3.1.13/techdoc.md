@@ -4,10 +4,10 @@
 | --- | --- |
 | 目标版本 | v3.1.13 |
 | 日期 | 2026-08-20 |
-| 状态 | 与当前实现同步；自动验证通过；待 Windows 人工验收 |
+| 状态 | 与已合入实现同步；正式技术发布已授权；Windows 人工边界未验证 |
 | 产品 Spec | `changes/3.1.13/spec.md` |
 | 实施记录 | `changes/3.1.13/implementation-notes.md` |
-| 代码基线 | `7221274f01b769c2786b63300f554fec65bf8641` |
+| 发布代码基线 | PR #159 merge commit `9e68c0339427a91c1948f73bfae66f0a76d17b5c` |
 
 ## 1. 技术目标与不变量
 
@@ -241,7 +241,8 @@ idle（等待操作）
 - 数据库无 migration；preload 无变更；不存在新旧 renderer/main IPC 不匹配。
 - 回滚 UI 时可一起回退 renderer、工具箱 CSS 和 preview；输出文件及存档无需处理。
 - 回滚确认文案只需恢复 main 的按钮文本，不影响 publication journal 或历史任务。
-- `package.json`/lockfile bump 到 3.1.13，三份版本资料同步；未完成 Windows 构建/tag/人工门禁前保持“迭代中”表述。
+- `package.json`/lockfile bump 到 3.1.13，三份版本资料同步；tag 前随包指南使用不依赖瞬时 latest 状态的稳定候选口径，实际 Release 身份只在发布后证据 PR 回写。
+- 正式技术发布授权与人工验收分开记录：授权允许继续创建技术资产，不能把未执行的 Windows 项标为 PASS。
 
 ## 10. 已知验证边界
 
@@ -406,3 +407,58 @@ setCurrentModule()
 - 真实几何：`verify-main-panel-alignment.js` 不再要求或测量图标，改为检查文字内容层中线、内容不溢出和所有状态框均无 SVG；特殊的新开账户状态框单独检查无图标且结构未被统一改写。
 - 视觉：重建所有受影响主面板和工具箱预览，检查移除图标后文字仍居中、长状态框与跨行状态框无位移或异常留白。
 - 回归：状态更新测试继续锁定 `.status-box-text` 后代选择器，确保文案、色调、错误态、运行态与点击行为不依赖已删除装饰。
+
+## 14. 正式收尾与发布设计
+
+### 14.1 两阶段仓库收口
+
+发布使用固定顺序，避免把尚未发生的外部事实写入 tag：
+
+1. 从已合入功能的 `main@9e68c0339427a91c1948f73bfae66f0a76d17b5c` 创建 tag 前收尾分支，只更新 Spec、TechDoc、实现记录、三份版本资料、Windows Runbook 与文档合同测试。
+2. 收尾 PR 的完整自动门禁和 Windows PR workflow 通过后，以 merge commit 合入 `main`。
+3. 再次 fetch 并确认本地 `HEAD === origin/main`、tracked worktree 干净、`package.json.version === 3.1.13`、远端不存在同名 tag/Release，随后创建并推送唯一 annotated tag `v3.1.13`。
+4. tag 触发受控 Windows Release workflow。只有 workflow 成功、Release 为公开 stable latest、四项资产完成独立回读后，技术发布才闭合。
+5. 从发布后的最新 `main` 创建独立证据分支，把真实 PR、merge commit、tag object、workflow、Release、资产大小与摘要回写文档并再次经 PR 合入；不得修改已发布 tag 或资产。
+
+### 14.2 Tag 身份与并发门禁
+
+Release workflow 必须 fail closed：
+
+- `refs/tags/v3.1.13` 的对象类型为 `tag`，而不是 lightweight tag。
+- tag 名与 `package.json.version` 精确相等。
+- annotated tag peeled commit 与创建 tag 瞬间的 `origin/main` 精确相等。
+- 同名 GitHub Release 不存在；Setup、portable、blockmap、`latest.yml` 由本次 workflow 一次生成。
+
+收尾 PR 合并后到推 tag 前若 `main` 又发生变化，必须重新 fetch、验证新 HEAD 的门禁和文档状态，不能把旧本地提交当成发布基线。tag 推送后视为不可变；workflow 可在相同 tag 上受控重跑处理基础设施瞬时故障，但不能借重跑替换已经发布的资产或引入 tag 之后的代码。
+
+### 14.3 人工边界与授权记录
+
+当前收尾环境为 macOS，不能执行 Windows 10/11 原生/packaged 人工交互。发布负责人在已知下列范围后明确授权继续技术发布：
+
+- 原生同名覆盖确认框的【返回 / 覆盖全部】文案、顺序、默认焦点与系统字体；
+- packaged 长任务期间关闭按钮隐藏、双入口禁用、遮罩门禁和恢复手感；
+- Windows 10/11 Setup、portable、SmartScreen 实际提示；
+- `v3.1.12 -> v3.1.13` 离线覆盖安装及用户数据保留；
+- Release 存在后从 `production/latest` 执行的在线升级 canary。
+
+这些项目统一记录为 `MANUAL / NOT RUN`。授权仅允许生成技术资产，不构成验收 PASS，也不能用于“Windows 已验证”或“在线升级已验证”的公告。tag 前收尾 PR body 需以稳定 GitHub 记录写明批准来源、范围、理由和发布后补做项。
+
+### 14.4 Release 与资产回读
+
+发布后验证不得只依赖 workflow 的绿色状态，至少独立确认：
+
+- annotated tag object、peeled commit 与发布时 `main`；
+- Release URL、published/non-draft/non-prerelease/latest 状态；
+- 四项资产精确文件名、大小、GitHub digest 和匿名下载 HTTP 状态；
+- 独立下载文件的 SHA-256 与 GitHub digest 一致；
+- `latest.yml` 的 version、Setup path、size、releaseDate 与公开资产一致，其 SHA-512 与独立下载的 Setup 一致。
+
+真实 ID、摘要和大小只在实际回读后写入 `docs/WINDOWS_RELEASE_RUNBOOK.md` 与发布证据 PR；预期值不得冒充实际证据。
+
+### 14.5 失败、回滚与不可变规则
+
+- 收尾 PR 或 tag 前门禁失败：不创建 tag，修复后重新走 PR/门禁。
+- tag 只在本地创建且尚未推送时发现身份错误：停止发布，删除错误的本地 tag 后按已验证 HEAD 重建；不得删除任何远端 tag。
+- tag 推送后 workflow 失败：保留 tag 和失败证据。仅基础设施瞬时故障可对同一 commit 重跑；产品、元数据或打包输入缺陷使用更高补丁版本修复。
+- Release 已创建后任一回读失败：停止公告，不删除、不替换、不重传同版本资产；记录实际状态并发布更高补丁版本。
+- Windows 人工项或在线 canary 后续失败：同样停止公告/推广，保留不可变发布证据并以更高补丁修复。
