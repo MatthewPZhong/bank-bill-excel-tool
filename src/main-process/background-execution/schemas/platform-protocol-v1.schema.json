@@ -1,0 +1,1436 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://bank-bill-excel-tool.local/schemas/background-execution/platform-protocol-v1.schema.json",
+  "title": "Background Execution Protocol v1",
+  "description": "Normative schema for Job Envelope and Service Control Envelope.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/jobEnvelope"
+    },
+    {
+      "$ref": "#/$defs/serviceControlEnvelope"
+    }
+  ],
+  "$defs": {
+    "safeKey": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "actionKey": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$",
+      "minLength": 3,
+      "maxLength": 128
+    },
+    "nullableSafeKey": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/safeKey"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "jobRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actionKey",
+        "operationKey",
+        "jobId",
+        "unitId"
+      ],
+      "properties": {
+        "actionKey": {
+          "$ref": "#/$defs/actionKey"
+        },
+        "operationKey": {
+          "$ref": "#/$defs/operationKey"
+        },
+        "jobId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "unitId": {
+          "$ref": "#/$defs/nullableSafeKey"
+        }
+      }
+    },
+    "context": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "operation"
+            },
+            "value": {
+              "$ref": "#/$defs/operationContext"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "file-batch"
+            },
+            "value": {
+              "$ref": "#/$defs/fileBatchContext"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "none"
+            },
+            "value": {
+              "type": "object",
+              "additionalProperties": false,
+              "maxProperties": 0
+            }
+          }
+        }
+      ]
+    },
+    "jobEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "channel",
+        "direction",
+        "operation",
+        "actionKey",
+        "operationKey",
+        "jobId",
+        "workerInstanceId",
+        "serviceGeneration",
+        "unitId",
+        "seq",
+        "context",
+        "payload"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "channel": {
+          "const": "job"
+        },
+        "direction": {
+          "enum": [
+            "command",
+            "event"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "job:start",
+            "unit:start",
+            "job:cancel",
+            "unit:cancel",
+            "critical:ack",
+            "critical:reject",
+            "job:progress",
+            "unit:progress",
+            "unit:done",
+            "unit:error",
+            "critical:ready",
+            "commit:receipt",
+            "job:done",
+            "job:error",
+            "cancel:ack"
+          ]
+        },
+        "actionKey": {
+          "$ref": "#/$defs/actionKey"
+        },
+        "operationKey": {
+          "$ref": "#/$defs/operationKey"
+        },
+        "jobId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "workerInstanceId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "serviceGeneration": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unitId": {
+          "$ref": "#/$defs/nullableSafeKey"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "context": {
+          "$ref": "#/$defs/context"
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "command"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "job:start",
+                  "unit:start",
+                  "job:cancel",
+                  "unit:cancel",
+                  "critical:ack",
+                  "critical:reject"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "event"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "job:progress",
+                  "unit:progress",
+                  "unit:done",
+                  "unit:error",
+                  "critical:ready",
+                  "commit:receipt",
+                  "job:done",
+                  "job:error",
+                  "cancel:ack"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "unit:start",
+                  "unit:cancel",
+                  "unit:progress",
+                  "unit:done",
+                  "unit:error"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "unitId": {
+                "$ref": "#/$defs/safeKey"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "job:start"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/startPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "unit:start"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/startPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "job:cancel"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/cancelPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "unit:cancel"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/cancelPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "critical:ack"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/criticalPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "critical:reject"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/criticalPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "job:progress"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/progressPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "unit:progress"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/progressPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "unit:done"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resultPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "unit:error"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/errorPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "critical:ready"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/criticalPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "commit:receipt"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/receiptPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "job:done"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resultPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "job:error"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/errorPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "cancel:ack"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/cancellationPayload"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "resourceVector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memoryBytes",
+        "cpuSlots",
+        "ioHeavySlots"
+      ],
+      "properties": {
+        "memoryBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cpuSlots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        },
+        "ioHeavySlots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 128
+        }
+      }
+    },
+    "resourceOwner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ownerKeyHash",
+        "candidateRevision"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "service-state",
+            "interaction-token",
+            "phase"
+          ]
+        },
+        "ownerKeyHash": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "candidateRevision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "resourceRequestPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "requestKind",
+        "requested",
+        "replacesReservationId",
+        "owner"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "requestKind": {
+          "enum": [
+            "persistent-state-replace",
+            "pending-interaction-create",
+            "phase-extension"
+          ]
+        },
+        "requested": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "replacesReservationId": {
+          "$ref": "#/$defs/nullableSafeKey"
+        },
+        "owner": {
+          "$ref": "#/$defs/resourceOwner"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "requestKind": { "const": "persistent-state-replace" } },
+            "required": ["requestKind"]
+          },
+          "then": {
+            "properties": {
+              "owner": {
+                "properties": { "kind": { "const": "service-state" } },
+                "required": ["kind"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "requestKind": { "const": "pending-interaction-create" } },
+            "required": ["requestKind"]
+          },
+          "then": {
+            "properties": {
+              "owner": {
+                "properties": { "kind": { "const": "interaction-token" } },
+                "required": ["kind"]
+              },
+              "replacesReservationId": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "requestKind": { "const": "phase-extension" } },
+            "required": ["requestKind"]
+          },
+          "then": {
+            "properties": {
+              "owner": {
+                "properties": { "kind": { "const": "phase" } },
+                "required": ["kind"]
+              },
+              "replacesReservationId": { "type": "null" }
+            }
+          }
+        }
+      ]
+    },
+    "resourceGrantPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "grantId",
+        "reservationId",
+        "replacesReservationId",
+        "granted",
+        "adoptionDeadlineMs"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "grantId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "replacesReservationId": {
+          "$ref": "#/$defs/nullableSafeKey"
+        },
+        "granted": {
+          "$ref": "#/$defs/resourceVector"
+        },
+        "adoptionDeadlineMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 600000
+        }
+      }
+    },
+    "resourceAdoptedPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "grantId",
+        "reservationId",
+        "owner"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "grantId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "owner": {
+          "$ref": "#/$defs/resourceOwner"
+        }
+      }
+    },
+    "resourceReleasePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId",
+        "reason"
+      ],
+      "properties": {
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reason": {
+          "enum": [
+            "state-replaced",
+            "token-consumed",
+            "token-expired",
+            "phase-complete",
+            "service-close",
+            "service-crash",
+            "job-failed"
+          ]
+        }
+      }
+    },
+    "serviceControlEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "channel",
+        "direction",
+        "operation",
+        "serviceKey",
+        "controlId",
+        "workerInstanceId",
+        "serviceGeneration",
+        "seq",
+        "jobRef",
+        "payload"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "channel": {
+          "const": "service-control"
+        },
+        "direction": {
+          "enum": [
+            "command",
+            "event"
+          ]
+        },
+        "operation": {
+          "enum": [
+            "executor:init",
+            "executor:close",
+            "resource:grant",
+            "resource:reject",
+            "resource:adopt-ack",
+            "resource:revoke",
+            "resource:release-ack",
+            "executor:ready",
+            "executor:error",
+            "executor:close-ack",
+            "resource:request",
+            "resource:adopted",
+            "resource:release"
+          ]
+        },
+        "serviceKey": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "controlId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "workerInstanceId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "serviceGeneration": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "jobRef": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/jobRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "command"
+              }
+            },
+            "required": [
+              "direction"
+            ]
+          },
+          "then": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "executor:init",
+                  "executor:close",
+                  "resource:grant",
+                  "resource:reject",
+                  "resource:adopt-ack",
+                  "resource:revoke",
+                  "resource:release-ack"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "direction": {
+                "const": "event"
+              }
+            },
+            "required": [
+              "direction"
+            ]
+          },
+          "then": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "executor:ready",
+                  "executor:error",
+                  "executor:close-ack",
+                  "resource:request",
+                  "resource:adopted",
+                  "resource:release"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "executor:init",
+                  "executor:ready",
+                  "executor:error",
+                  "executor:close",
+                  "executor:close-ack"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "jobRef": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "enum": [
+                  "resource:request",
+                  "resource:grant",
+                  "resource:reject",
+                  "resource:adopted",
+                  "resource:adopt-ack",
+                  "resource:revoke"
+                ]
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "jobRef": {
+                "$ref": "#/$defs/jobRef"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "executor:init"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/executorInitPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "executor:ready"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/executorReadyPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:request"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceRequestPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:grant"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceGrantPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:reject"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceRejectPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:adopted"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceAdoptedPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:adopt-ack"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceAdoptAckPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:revoke"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceRevokePayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:release"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceReleasePayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "resource:release-ack"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/resourceReleaseAckPayload"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "resourceRejectPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "reasonCode",
+        "retryable"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "safeSummary": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      }
+    },
+    "resourceAdoptAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "grantId",
+        "reservationId"
+      ],
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "grantId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        }
+      }
+    },
+    "resourceRevokePayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "reservationId",
+        "reasonCode"
+      ],
+      "properties": {
+        "grantId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        },
+        "reasonCode": {
+          "$ref": "#/$defs/safeKey"
+        }
+      }
+    },
+    "resourceReleaseAckPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reservationId"
+      ],
+      "properties": {
+        "reservationId": {
+          "$ref": "#/$defs/safeKey"
+        }
+      }
+    },
+    "executorInitPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "policyDigest"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "policyDigest": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "baseLeaseId": {
+          "$ref": "#/$defs/nullableSafeKey"
+        }
+      }
+    },
+    "executorReadyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contractVersion",
+        "capabilities"
+      ],
+      "properties": {
+        "contractVersion": {
+          "const": 1
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safeKey"
+          },
+          "maxItems": 64
+        }
+      }
+    },
+    "operationKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "contextText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^[^\\u0000-\\u001F\\u007F]+$"
+    },
+    "operationContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskRunId",
+        "taskKey",
+        "moduleId",
+        "parentRunId",
+        "operationKey"
+      ],
+      "properties": {
+        "taskRunId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "taskKey": {
+          "$ref": "#/$defs/contextText"
+        },
+        "moduleId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "parentRunId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "operationKey": {
+          "$ref": "#/$defs/operationKey"
+        }
+      }
+    },
+    "fileBatchContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "batchId",
+        "batchNumber",
+        "taskRunId",
+        "taskKey",
+        "moduleId",
+        "parentRunId",
+        "operationKey"
+      ],
+      "properties": {
+        "batchId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "batchNumber": {
+          "$ref": "#/$defs/contextText"
+        },
+        "taskRunId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "taskKey": {
+          "$ref": "#/$defs/contextText"
+        },
+        "moduleId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "parentRunId": {
+          "$ref": "#/$defs/contextText"
+        },
+        "operationKey": {
+          "$ref": "#/$defs/operationKey"
+        }
+      }
+    },
+    "startPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "input"
+      ],
+      "properties": {
+        "input": {
+          "type": "object"
+        }
+      }
+    },
+    "progressPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "progress"
+      ],
+      "properties": {
+        "progress": {
+          "type": "object"
+        }
+      }
+    },
+    "resultPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "result": {
+          "type": "object"
+        }
+      }
+    },
+    "errorPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object"
+        }
+      }
+    },
+    "criticalPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "critical"
+      ],
+      "properties": {
+        "critical": {
+          "type": "object"
+        }
+      }
+    },
+    "receiptPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receipt"
+      ],
+      "properties": {
+        "receipt": {
+          "type": "object"
+        }
+      }
+    },
+    "cancelPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cancel"
+      ],
+      "properties": {
+        "cancel": {
+          "type": "object"
+        }
+      }
+    },
+    "cancellationPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cancellation"
+      ],
+      "properties": {
+        "cancellation": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
